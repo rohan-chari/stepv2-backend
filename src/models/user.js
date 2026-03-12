@@ -21,6 +21,18 @@ const User = {
       data: fields,
     });
   },
+
+  async searchByDisplayName(query, excludeUserId) {
+    return prisma.user.findMany({
+      where: {
+        displayName: { contains: query, mode: "insensitive" },
+        id: { not: excludeUserId },
+        NOT: { displayName: null },
+      },
+      select: { id: true, displayName: true },
+      take: 20,
+    });
+  },
 };
 
 module.exports = { User };

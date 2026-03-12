@@ -10,11 +10,37 @@ model User {
   id        String   @id @default(uuid())
   appleId   String   @unique @map("apple_id")
   email     String?
-  name      String?
+  name        String?
+  displayName String?  @unique @map("display_name")
+  stepGoal    Int?     @map("step_goal")
   createdAt DateTime @default(now()) @map("created_at")
   steps     Step[]
+  sentRequests     Friendship[] @relation("sentRequests")
+  receivedRequests Friendship[] @relation("receivedRequests")
 
   @@map("users")
+}
+
+enum FriendshipStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+}
+
+model Friendship {
+  id          String           @id @default(uuid())
+  requesterId String           @map("requester_id")
+  addresseeId String           @map("addressee_id")
+  status      FriendshipStatus @default(PENDING)
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+  requester   User             @relation("sentRequests", fields: [requesterId], references: [id])
+  addressee   User             @relation("receivedRequests", fields: [addresseeId], references: [id])
+
+  @@unique([requesterId, addresseeId])
+  @@index([addresseeId, status])
+  @@index([requesterId, status])
+  @@map("friendships")
 }
 
 model Step {

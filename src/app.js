@@ -3,6 +3,7 @@ const express = require("express");
 
 const { createAuthRouter } = require("./routes/auth");
 const { createStepsRouter } = require("./routes/steps");
+const { createFriendsRouter } = require("./routes/friends");
 
 function createApp(dependencies = {}) {
   const app = express();
@@ -12,6 +13,7 @@ function createApp(dependencies = {}) {
 
   app.use("/auth", createAuthRouter(dependencies));
   app.use("/steps", createStepsRouter(dependencies));
+  app.use("/friends", createFriendsRouter(dependencies));
 
   app.get("/health", (req, res) => {
     res.json({ status: "ok" });

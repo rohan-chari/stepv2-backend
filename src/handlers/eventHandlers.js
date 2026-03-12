@@ -16,6 +16,26 @@ function registerEventHandlers() {
   eventBus.on("STEPS_UPDATED", (data) => {
     console.log(`[EVENT] Steps updated: ${data.steps} steps on ${data.date} for user ${data.userId}`);
   });
+
+  eventBus.on("STEP_GOAL_SET", (data) => {
+    console.log(`[EVENT] Step goal set: ${data.stepGoal} for user ${data.userId}`);
+  });
+
+  eventBus.on("DISPLAY_NAME_SET", (data) => {
+    console.log(`[EVENT] Display name set: "${data.displayName}" for user ${data.userId}`);
+  });
+
+  eventBus.on("FRIEND_REQUEST_SENT", (data) => {
+    console.log(`[EVENT] Friend request sent from ${data.userId} to ${data.addresseeId}`);
+  });
+
+  eventBus.on("FRIEND_REQUEST_ACCEPTED", (data) => {
+    console.log(`[EVENT] Friend request ${data.friendshipId} accepted by ${data.userId}`);
+  });
+
+  eventBus.on("FRIEND_REQUEST_DECLINED", (data) => {
+    console.log(`[EVENT] Friend request ${data.friendshipId} declined by ${data.userId}`);
+  });
 }
 
 module.exports = { registerEventHandlers };

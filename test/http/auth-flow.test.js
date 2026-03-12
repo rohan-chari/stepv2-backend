@@ -115,13 +115,11 @@ test("GET /auth/me returns the authenticated user", async () => {
     });
 
     assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), {
-      user: {
-        id: "user-1",
-        appleId: "apple-user-123",
-        email: "walker@example.com",
-      },
-    });
+    const body = await response.json();
+    assert.equal(body.user.id, "user-1");
+    assert.equal(body.user.appleId, "apple-user-123");
+    assert.equal(body.user.email, "walker@example.com");
+    assert.equal(typeof body.user.incomingFriendRequests, "number");
   } finally {
     await server.close();
   }
