@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:www.prisma.io)",
+      "WebFetch(domain:www.answeroverflow.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:dev.to)"
+    ]
+  }
+}
