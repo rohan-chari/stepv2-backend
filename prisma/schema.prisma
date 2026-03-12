@@ -1,0 +1,31 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id        String   @id @default(uuid())
+  appleId   String   @unique @map("apple_id")
+  email     String?
+  name      String?
+  createdAt DateTime @default(now()) @map("created_at")
+  steps     Step[]
+
+  @@map("users")
+}
+
+model Step {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  steps     Int
+  date      DateTime @db.Date
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@unique([userId, date])
+  @@index([userId, date])
+  @@map("steps")
+}
