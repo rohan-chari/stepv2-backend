@@ -80,6 +80,12 @@ function createFriendsRouter(dependencies = {}) {
   // POST /friends/request
   router.post("/request", async (req, res) => {
     try {
+      if (!req.user.displayName) {
+        return res
+          .status(403)
+          .json({ error: "You must set a display name before adding friends" });
+      }
+
       const { addresseeId } = req.body;
 
       if (!addresseeId) {

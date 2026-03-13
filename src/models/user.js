@@ -22,6 +22,15 @@ const User = {
     });
   },
 
+  async findByDisplayNameInsensitive(displayName, excludeUserId) {
+    return prisma.user.findFirst({
+      where: {
+        displayName: { equals: displayName, mode: "insensitive" },
+        id: { not: excludeUserId },
+      },
+    });
+  },
+
   async searchByDisplayName(query, excludeUserId) {
     return prisma.user.findMany({
       where: {

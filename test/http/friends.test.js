@@ -42,6 +42,7 @@ function authMocks(overrides = {}) {
         id: "user-1",
         appleId: "apple-user-123",
         email: "walker@example.com",
+        displayName: "Trail Walker",
       };
     },
     ...overrides,
@@ -415,6 +416,78 @@ test("GET /friends/steps does not return non-friends", async () => {
 
     const ids = body.friends.map((f) => f.id);
     assert.ok(!ids.includes("user-5"), "Non-friend should not appear in results");
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /friends/request returns 403 when sender has no display name", async () => {
+  const server = await startServer(
+    authMocks({
+      async ensureAppleUser() {
+        return {
+          id: "user-1",
+          appleId: "apple-user-123",
+          email: "walker@example.com",
+          displayName: null,
+        };
+      },
+    })
+  );
+
+  try {
+    const response = await fetch(`${server.baseUrl}/friends/request`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer apple-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ addresseeId: "user-2" }),
+    });
+
+    assert.equal(response.status, 403);
+    const body = await response.json();
+    assert.match(body.error, /display name/);
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /friends/request returns 409 when addressee has no display name", async () => {
+  const error = new Error(
+    "Cannot send a friend request to a user without a display name"
+  );
+  error.name = "FriendRequestError";
+
+  const server = await startServer(
+    authMocks({
+      async ensureAppleUser() {
+        return {
+          id: "user-1",
+          appleId: "apple-user-123",
+          email: "walker@example.com",
+          displayName: "Trail Walker",
+        };
+      },
+      async sendFriendRequest() {
+        throw error;
+      },
+    })
+  );
+
+  try {
+    const response = await fetch(`${server.baseUrl}/friends/request`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer apple-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ addresseeId: "user-no-name" }),
+    });
+
+    assert.equal(response.status, 409);
+    const body = await response.json();
+    assert.match(body.error, /display name/);
   } finally {
     await server.close();
   }

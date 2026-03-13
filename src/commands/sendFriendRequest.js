@@ -1,4 +1,5 @@
 const { Friendship } = require("../models/friendship");
+const { User } = require("../models/user");
 const { eventBus } = require("../events/eventBus");
 
 class FriendRequestError extends Error {
@@ -11,6 +12,18 @@ class FriendRequestError extends Error {
 async function sendFriendRequest({ userId, addresseeId }) {
   if (userId === addresseeId) {
     throw new FriendRequestError("You cannot send a friend request to yourself");
+  }
+
+  const addressee = await User.findById(addresseeId);
+
+  if (!addressee) {
+    throw new FriendRequestError("User not found");
+  }
+
+  if (!addressee.displayName) {
+    throw new FriendRequestError(
+      "Cannot send a friend request to a user without a display name"
+    );
   }
 
   const existing = await Friendship.findBetweenUsers(userId, addresseeId);
