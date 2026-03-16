@@ -1,51 +1,46 @@
-const { Challenge } = require("../models/challenge");
 const { ChallengeInstance } = require("../models/challengeInstance");
+const {
+  ensureWeeklyChallengeForDate,
+} = require("../services/weeklyChallengeState");
+const { getNextMonday9amNewYork } = require("../utils/week");
 
-function getMondayOfWeek(date = new Date()) {
-  const d = new Date(date);
-  const day = d.getDay();
-  const diff = (day + 6) % 7;
-  d.setDate(d.getDate() - diff);
-  return d.toISOString().slice(0, 10);
-}
+function buildGetCurrentChallenge(dependencies = {}) {
+  const ensureWeeklyChallenge =
+    dependencies.ensureWeeklyChallengeForDate || ensureWeeklyChallengeForDate;
+  const instanceModel = dependencies.ChallengeInstance || ChallengeInstance;
 
-function getNextMonday9amEST() {
-  const now = new Date();
-  const day = now.getDay();
-  const daysUntilMonday = day === 0 ? 1 : 8 - day;
-  const next = new Date(now);
-  next.setDate(next.getDate() + daysUntilMonday);
-  next.setHours(14, 0, 0, 0); // 9 AM EST = 14:00 UTC
-  return next.toISOString();
-}
+  return async function getCurrentChallenge(userId) {
+    const { weeklyChallenge } = await ensureWeeklyChallenge();
 
-async function getCurrentChallenge(userId) {
-  const challenge = await Challenge.findCurrentWeek();
+    if (!weeklyChallenge || weeklyChallenge.resolvedAt) {
+      return {
+        challenge: null,
+        weekOf: null,
+        instances: [],
+        nextDropAt: getNextMonday9amNewYork(),
+      };
+    }
 
-  if (!challenge) {
+    const instances = await instanceModel.findForUser(
+      userId,
+      weeklyChallenge.weekOf
+    );
+
     return {
-      challenge: null,
-      weekOf: null,
-      instances: [],
-      nextDropAt: getNextMonday9amEST(),
+      challenge: {
+        id: weeklyChallenge.challenge.id,
+        title: weeklyChallenge.challenge.title,
+        description: weeklyChallenge.challenge.description,
+        type: weeklyChallenge.challenge.type,
+        resolutionRule: weeklyChallenge.challenge.resolutionRule,
+        thresholdValue: weeklyChallenge.challenge.thresholdValue,
+      },
+      weekOf: weeklyChallenge.weekOf,
+      instances,
     };
-  }
-
-  const weekOf = getMondayOfWeek();
-  const instances = await ChallengeInstance.findForUser(userId, weekOf);
-
-  return {
-    challenge: {
-      id: challenge.id,
-      title: challenge.title,
-      description: challenge.description,
-      type: challenge.type,
-      resolutionRule: challenge.resolutionRule,
-      thresholdValue: challenge.thresholdValue,
-    },
-    weekOf,
-    instances,
   };
 }
 
-module.exports = { getCurrentChallenge };
+const getCurrentChallenge = buildGetCurrentChallenge();
+
+module.exports = { buildGetCurrentChallenge, getCurrentChallenge };

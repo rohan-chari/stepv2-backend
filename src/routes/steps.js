@@ -1,17 +1,17 @@
 const { Router } = require("express");
 const { recordSteps } = require("../commands/recordSteps");
 const { getStepsByDate, getStepsHistory } = require("../queries/getSteps");
-const { buildRequireAppleAuth } = require("../middleware/requireAppleAuth");
+const { buildRequireAuth } = require("../middleware/requireAuth");
 
 function createStepsRouter(dependencies = {}) {
   const router = Router();
-  const requireAppleAuth =
-    dependencies.requireAppleAuth || buildRequireAppleAuth(dependencies);
+  const requireAuth =
+    dependencies.requireAuth || buildRequireAuth(dependencies);
   const saveSteps = dependencies.recordSteps || recordSteps;
   const readStepsByDate = dependencies.getStepsByDate || getStepsByDate;
   const readStepsHistory = dependencies.getStepsHistory || getStepsHistory;
 
-  router.use(requireAppleAuth);
+  router.use(requireAuth);
 
   // POST /steps
   // Body: { steps, date }

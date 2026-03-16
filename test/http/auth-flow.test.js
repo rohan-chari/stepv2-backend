@@ -68,14 +68,16 @@ test("POST /auth/apple provisions the signed-in user", async () => {
     });
 
     assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), {
-      user: {
-        id: "user-1",
-        appleId: "apple-user-123",
-        email: "walker@example.com",
-        name: "Rohan Chari",
-      },
+    const body = await response.json();
+    assert.deepEqual(body.user, {
+      id: "user-1",
+      appleId: "apple-user-123",
+      email: "walker@example.com",
+      name: "Rohan Chari",
+      isAdmin: false,
     });
+    assert.equal(typeof body.sessionToken, "string");
+    assert.ok(body.sessionToken.length > 0);
 
     assert.deepEqual(receivedPayload, {
       appleId: "apple-user-123",
@@ -105,6 +107,9 @@ test("GET /auth/me returns the authenticated user", async () => {
         email: "walker@example.com",
       };
     },
+    isAdminUser() {
+      return true;
+    },
   });
 
   try {
@@ -119,6 +124,7 @@ test("GET /auth/me returns the authenticated user", async () => {
     assert.equal(body.user.id, "user-1");
     assert.equal(body.user.appleId, "apple-user-123");
     assert.equal(body.user.email, "walker@example.com");
+    assert.equal(body.user.isAdmin, true);
     assert.equal(typeof body.user.incomingFriendRequests, "number");
   } finally {
     await server.close();

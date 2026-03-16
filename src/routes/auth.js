@@ -4,21 +4,25 @@ const {
   verifyAppleIdentityToken,
 } = require("../services/appleIdentityToken");
 const { ensureAppleUser } = require("../services/ensureAppleUser");
-const { buildRequireAppleAuth } = require("../middleware/requireAppleAuth");
+const { buildRequireAuth } = require("../middleware/requireAuth");
+const { signSessionToken: defaultSignSessionToken } = require("../services/sessionToken");
 const { setStepGoal: defaultSetStepGoal } = require("../commands/setStepGoal");
 const { setDisplayName: defaultSetDisplayName } = require("../commands/setDisplayName");
 const { getIncomingFriendRequestCount: defaultGetIncomingFriendRequestCount } = require("../queries/getFriends");
+const { isAdminUser, withAdminFlag } = require("../services/adminAccess");
 
 function createAuthRouter(dependencies = {}) {
   const router = Router();
   const verifyIdentityToken =
     dependencies.verifyAppleIdentityToken || verifyAppleIdentityToken;
   const provisionUser = dependencies.ensureAppleUser || ensureAppleUser;
-  const requireAppleAuth =
-    dependencies.requireAppleAuth || buildRequireAppleAuth(dependencies);
+  const requireAuth =
+    dependencies.requireAuth || buildRequireAuth(dependencies);
+  const signToken = dependencies.signSessionToken || defaultSignSessionToken;
   const updateStepGoal = dependencies.setStepGoal || defaultSetStepGoal;
   const updateDisplayName = dependencies.setDisplayName || defaultSetDisplayName;
   const getIncomingRequestCount = dependencies.getIncomingFriendRequestCount || defaultGetIncomingFriendRequestCount;
+  const checkAdmin = dependencies.isAdminUser || isAdminUser;
 
   // POST /auth/apple
   // Body: { identityToken, userIdentifier?, email?, name? }
@@ -43,7 +47,12 @@ function createAuthRouter(dependencies = {}) {
         emitSignInEvent: true,
       });
 
-      res.json({ user });
+      const sessionToken = signToken({
+        userId: user.id,
+        appleId: appleIdentity.sub,
+      });
+
+      res.json({ user: withAdminFlag(user, checkAdmin), sessionToken });
     } catch (error) {
       if (error instanceof AppleIdentityTokenError) {
         return res.status(401).json({ error: error.message });
@@ -54,17 +63,32 @@ function createAuthRouter(dependencies = {}) {
     }
   });
 
-  router.get("/me", requireAppleAuth, async (req, res) => {
+  router.get("/me", requireAuth, async (req, res) => {
     try {
       const incomingFriendRequests = await getIncomingRequestCount(req.user.id);
-      res.json({ user: { ...req.user, incomingFriendRequests } });
+      res.json({
+        user: withAdminFlag(
+          { ...req.user, incomingFriendRequests },
+          checkAdmin
+        ),
+      });
     } catch (error) {
       console.error("Get me error:", error);
       res.json({ user: req.user });
     }
   });
 
-  router.put("/me/step-goal", requireAppleAuth, async (req, res) => {
+  // GET /auth/session — refresh session token
+  router.get("/session", requireAuth, async (req, res) => {
+    const sessionToken = signToken({
+      userId: req.user.id,
+      appleId: req.user.appleId,
+    });
+
+    res.json({ sessionToken, user: withAdminFlag(req.user, checkAdmin) });
+  });
+
+  router.put("/me/step-goal", requireAuth, async (req, res) => {
     const { stepGoal } = req.body;
 
     if (stepGoal === undefined) {
@@ -85,7 +109,7 @@ function createAuthRouter(dependencies = {}) {
     res.json({ user: updatedUser });
   });
 
-  router.put("/me/display-name", requireAppleAuth, async (req, res) => {
+  router.put("/me/display-name", requireAuth, async (req, res) => {
     const { displayName } = req.body;
 
     if (displayName === undefined) {

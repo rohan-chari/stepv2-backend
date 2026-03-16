@@ -1,5 +1,5 @@
 const { Router } = require("express");
-const { buildRequireAppleAuth } = require("../middleware/requireAppleAuth");
+const { buildRequireAuth } = require("../middleware/requireAuth");
 const {
   sendFriendRequest: defaultSendFriendRequest,
 } = require("../commands/sendFriendRequest");
@@ -20,8 +20,8 @@ const {
 
 function createFriendsRouter(dependencies = {}) {
   const router = Router();
-  const requireAppleAuth =
-    dependencies.requireAppleAuth || buildRequireAppleAuth(dependencies);
+  const requireAuth =
+    dependencies.requireAuth || buildRequireAuth(dependencies);
   const searchUsers =
     dependencies.searchUsersByDisplayName || defaultSearchUsersByDisplayName;
   const getFriends = dependencies.getFriendsList || defaultGetFriendsList;
@@ -36,7 +36,7 @@ function createFriendsRouter(dependencies = {}) {
   const updateRelationType =
     dependencies.updateRelationshipType || defaultUpdateRelationshipType;
 
-  router.use(requireAppleAuth);
+  router.use(requireAuth);
 
   // GET /friends/search?q=
   router.get("/search", async (req, res) => {

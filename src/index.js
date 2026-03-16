@@ -4,15 +4,26 @@ const { createApp } = require("./app");
 const { registerEventHandlers } = require("./handlers/eventHandlers");
 const { scheduleCronJobs } = require("./jobs/weeklyChallenge");
 
-const app = createApp();
-const PORT = process.env.PORT || 3000;
+function startServer({
+  app = createApp(),
+  port = Number(process.env.PORT || 3000),
+  host = process.env.HOST || "0.0.0.0",
+  registerEventHandlers: register = registerEventHandlers,
+  scheduleCronJobs: schedule = scheduleCronJobs,
+  logger = console,
+} = {}) {
+  register();
 
-// Register event handlers
-registerEventHandlers();
+  return app.listen(port, host, () => {
+    logger.log(`Steps Tracker API running on ${host}:${port}`);
+    schedule();
+  });
+}
 
-app.listen(PORT, () => {
-  console.log(`Steps Tracker API running on port ${PORT}`);
+if (require.main === module) {
+  startServer();
+}
 
-  // Schedule weekly cron jobs (Monday 9AM EST, Sunday 11:59PM EST)
-  scheduleCronJobs();
-});
+module.exports = {
+  startServer,
+};

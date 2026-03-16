@@ -1,62 +1,17 @@
-const { Challenge } = require("../models/challenge");
-const { ChallengeInstance } = require("../models/challengeInstance");
-const { ChallengeStreak } = require("../models/challengeStreak");
-const { Steps } = require("../models/steps");
 const {
-  selectWeeklyChallenge,
-} = require("../services/challengeScheduler");
-const {
-  resolveChallenge,
-} = require("../services/challengeResolution");
-const {
-  updateStreak,
-} = require("../services/streakTracking");
-const { eventBus } = require("../events/eventBus");
-
-function getMondayOfWeek(date = new Date()) {
-  const d = new Date(date);
-  const day = d.getDay();
-  const diff = (day + 6) % 7;
-  d.setDate(d.getDate() - diff);
-  return d.toISOString().slice(0, 10);
-}
-
-async function getDailyStepsForWeek(userId, weekOf) {
-  const steps = [];
-  for (let i = 0; i < 7; i++) {
-    const date = new Date(weekOf);
-    date.setDate(date.getDate() + i);
-    const dateStr = date.toISOString().slice(0, 10);
-    const record = await Steps.findByUserIdAndDate(userId, dateStr);
-    steps.push({ date: dateStr, steps: record?.steps || 0 });
-  }
-  return steps;
-}
+  ensureWeeklyChallengeForDate,
+  resolveWeeklyChallengeForDate,
+} = require("../services/weeklyChallengeState");
 
 async function runMondayChallengeDrop() {
   console.log("[CRON] Running Monday challenge drop...");
 
   try {
-    const selected = await selectWeeklyChallenge({
-      async findActiveChallenges() {
-        return Challenge.findActive();
-      },
-      async markChallengeUsed(challengeId) {
-        return Challenge.markUsed(challengeId);
-      },
-      now: new Date(),
-    });
-
+    const result = await ensureWeeklyChallengeForDate({ now: new Date() });
     console.log(
-      `[CRON] Selected challenge for this week: "${selected.title}" (${selected.id})`
+      `[CRON] Current week challenge ready: "${result.weeklyChallenge.challenge.title}" (${result.weeklyChallenge.challenge.id})`
     );
-
-    eventBus.emit("CHALLENGE_DROPPED", {
-      challengeId: selected.id,
-      title: selected.title,
-    });
-
-    return selected;
+    return result.weeklyChallenge.challenge;
   } catch (error) {
     console.error("[CRON] Challenge drop failed:", error);
     throw error;
@@ -66,81 +21,10 @@ async function runMondayChallengeDrop() {
 async function runSundayResolution() {
   console.log("[CRON] Running Sunday challenge resolution...");
 
-  const weekOf = getMondayOfWeek();
-  const instances = await ChallengeInstance.findActiveAndPending(weekOf);
-
-  console.log(`[CRON] Found ${instances.length} instances to resolve`);
-
-  for (const instance of instances) {
-    try {
-      if (instance.status === "PENDING_STAKE") {
-        await ChallengeInstance.update(instance.id, {
-          status: "COMPLETED",
-          stakeStatus: "SKIPPED",
-          resolvedAt: new Date(),
-        });
-        console.log(`[CRON] Skipped instance ${instance.id} (no stake agreed)`);
-        continue;
-      }
-
-      const dailyStepsA = await getDailyStepsForWeek(instance.userAId, weekOf);
-      const dailyStepsB = await getDailyStepsForWeek(instance.userBId, weekOf);
-
-      const result = resolveChallenge({
-        challenge: instance.challenge,
-        userAId: instance.userAId,
-        userBId: instance.userBId,
-        dailyStepsA,
-        dailyStepsB,
-      });
-
-      await ChallengeInstance.update(instance.id, {
-        status: "COMPLETED",
-        winnerUserId: result.winnerUserId,
-        userATotalSteps: result.userATotalSteps,
-        userBTotalSteps: result.userBTotalSteps,
-        resolvedAt: new Date(),
-      });
-
-      // Update streak
-      await updateStreak(
-        {
-          participantAId: instance.userAId,
-          participantBId: instance.userBId,
-          winnerUserId: result.winnerUserId,
-        },
-        {
-          async findStreak(userAId, userBId) {
-            return ChallengeStreak.findByPair(userAId, userBId);
-          },
-          async createStreak(data) {
-            return ChallengeStreak.create(data);
-          },
-          async saveStreak(streak) {
-            return ChallengeStreak.save(streak);
-          },
-        }
-      );
-
-      console.log(
-        `[CRON] Resolved instance ${instance.id}: winner=${result.winnerUserId} (A:${result.userATotalSteps} B:${result.userBTotalSteps})`
-      );
-
-      eventBus.emit("CHALLENGE_RESOLVED", {
-        instanceId: instance.id,
-        winnerUserId: result.winnerUserId,
-        userAId: instance.userAId,
-        userBId: instance.userBId,
-      });
-    } catch (error) {
-      console.error(
-        `[CRON] Failed to resolve instance ${instance.id}:`,
-        error
-      );
-    }
-  }
-
-  console.log("[CRON] Sunday resolution complete");
+  const result = await resolveWeeklyChallengeForDate({ now: new Date() });
+  console.log(
+    `[CRON] Sunday resolution complete: ${result.summary.resolvedInstances} resolved, ${result.summary.skippedInstances} skipped`
+  );
 }
 
 function scheduleCronJobs() {

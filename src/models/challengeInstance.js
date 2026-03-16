@@ -60,6 +60,32 @@ const ChallengeInstance = {
     });
   },
 
+  async findByWeek(weekOf) {
+    return prisma.challengeInstance.findMany({
+      where: {
+        weekOf: new Date(weekOf),
+      },
+      include: {
+        challenge: true,
+        stake: true,
+        proposedStake: true,
+        userA: { select: { id: true, displayName: true } },
+        userB: { select: { id: true, displayName: true } },
+      },
+      orderBy: { createdAt: "asc" },
+    });
+  },
+
+  async deleteByWeek(weekOf) {
+    const result = await prisma.challengeInstance.deleteMany({
+      where: {
+        weekOf: new Date(weekOf),
+      },
+    });
+
+    return result.count;
+  },
+
   async findHistoryForUser(userId, { page, limit }) {
     const skip = (page - 1) * limit;
 

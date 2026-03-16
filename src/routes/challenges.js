@@ -1,5 +1,5 @@
 const { Router } = require("express");
-const { buildRequireAppleAuth } = require("../middleware/requireAppleAuth");
+const { buildRequireAuth } = require("../middleware/requireAuth");
 const {
   initiateChallenge: defaultInitiateChallenge,
 } = require("../commands/initiateChallenge");
@@ -25,8 +25,8 @@ const {
 
 function createChallengesRouter(dependencies = {}) {
   const router = Router();
-  const requireAppleAuth =
-    dependencies.requireAppleAuth || buildRequireAppleAuth(dependencies);
+  const requireAuth =
+    dependencies.requireAuth || buildRequireAuth(dependencies);
 
   const initiateChallenge =
     dependencies.initiateChallenge || defaultInitiateChallenge;
@@ -44,7 +44,7 @@ function createChallengesRouter(dependencies = {}) {
     dependencies.getChallengeStreakForFriend ||
     defaultGetChallengeStreakForFriend;
 
-  router.use(requireAppleAuth);
+  router.use(requireAuth);
 
   // GET /challenges/current
   router.get("/current", async (req, res) => {

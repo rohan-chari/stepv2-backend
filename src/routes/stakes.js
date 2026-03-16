@@ -1,18 +1,18 @@
 const { Router } = require("express");
-const { buildRequireAppleAuth } = require("../middleware/requireAppleAuth");
+const { buildRequireAuth } = require("../middleware/requireAuth");
 const {
   getStakeCatalog: defaultGetStakeCatalog,
 } = require("../queries/getStakeCatalog");
 
 function createStakesRouter(dependencies = {}) {
   const router = Router();
-  const requireAppleAuth =
-    dependencies.requireAppleAuth || buildRequireAppleAuth(dependencies);
+  const requireAuth =
+    dependencies.requireAuth || buildRequireAuth(dependencies);
 
   const getStakeCatalog =
     dependencies.getStakeCatalog || defaultGetStakeCatalog;
 
-  router.use(requireAppleAuth);
+  router.use(requireAuth);
 
   // GET /stakes?relationship_type=partner
   router.get("/", async (req, res) => {
