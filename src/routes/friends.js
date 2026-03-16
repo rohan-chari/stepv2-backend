@@ -14,6 +14,9 @@ const {
 const {
   searchUsersByDisplayName: defaultSearchUsersByDisplayName,
 } = require("../queries/searchUsers");
+const {
+  updateRelationshipType: defaultUpdateRelationshipType,
+} = require("../commands/updateRelationshipType");
 
 function createFriendsRouter(dependencies = {}) {
   const router = Router();
@@ -30,6 +33,8 @@ function createFriendsRouter(dependencies = {}) {
     dependencies.respondToFriendRequest || defaultRespondToFriendRequest;
   const getFriendsWithSteps =
     dependencies.getFriendsWithSteps || defaultGetFriendsWithSteps;
+  const updateRelationType =
+    dependencies.updateRelationshipType || defaultUpdateRelationshipType;
 
   router.use(requireAppleAuth);
 
@@ -111,21 +116,57 @@ function createFriendsRouter(dependencies = {}) {
   // PUT /friends/request/:friendshipId
   router.put("/request/:friendshipId", async (req, res) => {
     try {
-      const { accept } = req.body;
+      const { accept, relationshipType } = req.body;
 
-      const friendship = await respondToRequest({
+      const payload = {
         userId: req.user.id,
         friendshipId: req.params.friendshipId,
         accept,
-      });
+        ...(relationshipType !== undefined && { relationshipType }),
+      };
+
+      const friendship = await respondToRequest(payload);
 
       res.json({ friendship });
     } catch (error) {
       if (error.name === "FriendResponseError") {
         return res.status(409).json({ error: error.message });
       }
+      if (error.name === "ValidationError") {
+        return res.status(400).json({ error: error.message });
+      }
 
       console.error("Friend response error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // PUT /friends/:friendshipId/relationship-type
+  router.put("/:friendshipId/relationship-type", async (req, res) => {
+    try {
+      const { relationshipType } = req.body;
+      const validTypes = ["partner", "friend", "family"];
+
+      if (!relationshipType || !validTypes.includes(relationshipType)) {
+        return res.status(400).json({
+          error: "relationshipType must be one of: partner, friend, family",
+        });
+      }
+
+      const friendship = await updateRelationType({
+        userId: req.user.id,
+        friendshipId: req.params.friendshipId,
+        relationshipType,
+      });
+
+      res.json({ friendship });
+    } catch (error) {
+      if (error.name === "RelationshipTypeError") {
+        const status = error.statusCode || 400;
+        return res.status(status).json({ error: error.message });
+      }
+
+      console.error("Relationship type error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });

@@ -18,6 +18,13 @@ model User {
   sentRequests     Friendship[] @relation("sentRequests")
   receivedRequests Friendship[] @relation("receivedRequests")
 
+  challengesAsUserA  ChallengeInstance[] @relation("challengeUserA")
+  challengesAsUserB  ChallengeInstance[] @relation("challengeUserB")
+  challengesWon      ChallengeInstance[] @relation("challengeWinner")
+  challengesProposed ChallengeInstance[] @relation("challengeProposer")
+  streaksAsUserA     ChallengeStreak[]   @relation("streakUserA")
+  streaksAsUserB     ChallengeStreak[]   @relation("streakUserB")
+
   @@map("users")
 }
 
@@ -27,15 +34,22 @@ enum FriendshipStatus {
   DECLINED
 }
 
+enum RelationshipType {
+  PARTNER   @map("partner")
+  FRIEND    @map("friend")
+  FAMILY    @map("family")
+}
+
 model Friendship {
-  id          String           @id @default(uuid())
-  requesterId String           @map("requester_id")
-  addresseeId String           @map("addressee_id")
-  status      FriendshipStatus @default(PENDING)
-  createdAt   DateTime         @default(now()) @map("created_at")
-  updatedAt   DateTime         @updatedAt @map("updated_at")
-  requester   User             @relation("sentRequests", fields: [requesterId], references: [id])
-  addressee   User             @relation("receivedRequests", fields: [addresseeId], references: [id])
+  id               String           @id @default(uuid())
+  requesterId      String           @map("requester_id")
+  addresseeId      String           @map("addressee_id")
+  status           FriendshipStatus @default(PENDING)
+  relationshipType RelationshipType? @map("relationship_type")
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
+  requester        User             @relation("sentRequests", fields: [requesterId], references: [id])
+  addressee        User             @relation("receivedRequests", fields: [addresseeId], references: [id])
 
   @@unique([requesterId, addresseeId])
   @@index([addresseeId, status])
@@ -54,4 +68,112 @@ model Step {
   @@unique([userId, date])
   @@index([userId, date])
   @@map("steps")
+}
+
+enum ChallengeType {
+  HEAD_TO_HEAD  @map("head_to_head")
+  THRESHOLD     @map("threshold")
+  CREATIVE      @map("creative")
+}
+
+model Challenge {
+  id              String        @id @default(uuid())
+  title           String
+  description     String
+  type            ChallengeType
+  resolutionRule  String        @map("resolution_rule")
+  thresholdValue  Int?          @map("threshold_value")
+  active          Boolean       @default(true)
+  lastUsedAt      DateTime?     @map("last_used_at")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  instances       ChallengeInstance[]
+
+  @@map("challenges")
+}
+
+enum StakeStatus {
+  PROPOSING  @map("proposing")
+  AGREED     @map("agreed")
+  SKIPPED    @map("skipped")
+}
+
+enum ChallengeInstanceStatus {
+  PENDING_STAKE  @map("pending_stake")
+  ACTIVE         @map("active")
+  COMPLETED      @map("completed")
+}
+
+model ChallengeInstance {
+  id              String                  @id @default(uuid())
+  challengeId     String                  @map("challenge_id")
+  weekOf          DateTime                @db.Date @map("week_of")
+  userAId         String                  @map("user_a_id")
+  userBId         String                  @map("user_b_id")
+  stakeId         String?                 @map("stake_id")
+  stakeStatus     StakeStatus             @default(PROPOSING) @map("stake_status")
+  proposedById    String?                 @map("proposed_by_id")
+  proposedStakeId String?                 @map("proposed_stake_id")
+  status          ChallengeInstanceStatus @default(PENDING_STAKE)
+  winnerUserId    String?                 @map("winner_user_id")
+  userATotalSteps Int                     @default(0) @map("user_a_total_steps")
+  userBTotalSteps Int                     @default(0) @map("user_b_total_steps")
+  resolvedAt      DateTime?               @map("resolved_at")
+  createdAt       DateTime                @default(now()) @map("created_at")
+  updatedAt       DateTime                @updatedAt @map("updated_at")
+
+  challenge       Challenge               @relation(fields: [challengeId], references: [id])
+  userA           User                    @relation("challengeUserA", fields: [userAId], references: [id])
+  userB           User                    @relation("challengeUserB", fields: [userBId], references: [id])
+  stake           Stake?                  @relation("agreedStake", fields: [stakeId], references: [id])
+  proposedStake   Stake?                  @relation("proposedStake", fields: [proposedStakeId], references: [id])
+  winner          User?                   @relation("challengeWinner", fields: [winnerUserId], references: [id])
+  proposedBy      User?                   @relation("challengeProposer", fields: [proposedById], references: [id])
+
+  @@unique([userAId, userBId, weekOf])
+  @@index([userAId, status])
+  @@index([userBId, status])
+  @@index([weekOf])
+  @@map("challenge_instances")
+}
+
+enum StakeFormat {
+  IN_PERSON  @map("in_person")
+  VIRTUAL    @map("virtual")
+  EITHER     @map("either")
+}
+
+model Stake {
+  id               String      @id @default(uuid())
+  name             String
+  description      String?
+  category         String
+  relationshipTags String[]    @map("relationship_tags")
+  format           StakeFormat
+  sponsorId        String?     @map("sponsor_id")
+  active           Boolean     @default(true)
+  createdAt        DateTime    @default(now()) @map("created_at")
+
+  agreedInstances  ChallengeInstance[] @relation("agreedStake")
+  proposedInstances ChallengeInstance[] @relation("proposedStake")
+
+  @@map("stakes")
+}
+
+model ChallengeStreak {
+  id                   String    @id @default(uuid())
+  userAId              String    @map("user_a_id")
+  userBId              String    @map("user_b_id")
+  currentWinnerUserId  String?   @map("current_winner_user_id")
+  currentStreak        Int       @default(0) @map("current_streak")
+  userALifetimeWins    Int       @default(0) @map("user_a_lifetime_wins")
+  userBLifetimeWins    Int       @default(0) @map("user_b_lifetime_wins")
+  lastResolvedAt       DateTime? @map("last_resolved_at")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+
+  userA                User      @relation("streakUserA", fields: [userAId], references: [id])
+  userB                User      @relation("streakUserB", fields: [userBId], references: [id])
+
+  @@unique([userAId, userBId])
+  @@map("challenge_streaks")
 }

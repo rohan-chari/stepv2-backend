@@ -4,6 +4,8 @@ const express = require("express");
 const { createAuthRouter } = require("./routes/auth");
 const { createStepsRouter } = require("./routes/steps");
 const { createFriendsRouter } = require("./routes/friends");
+const { createChallengesRouter } = require("./routes/challenges");
+const { createStakesRouter } = require("./routes/stakes");
 
 function createApp(dependencies = {}) {
   const app = express();
@@ -14,6 +16,8 @@ function createApp(dependencies = {}) {
   app.use("/auth", createAuthRouter(dependencies));
   app.use("/steps", createStepsRouter(dependencies));
   app.use("/friends", createFriendsRouter(dependencies));
+  app.use("/challenges", createChallengesRouter(dependencies));
+  app.use("/stakes", createStakesRouter(dependencies));
 
   app.get("/health", (req, res) => {
     res.json({ status: "ok" });

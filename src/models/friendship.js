@@ -70,6 +70,14 @@ const Friendship = {
     });
   },
 
+  async updateRelationshipType(id, relationshipType) {
+    const typeMap = { partner: "PARTNER", friend: "FRIEND", family: "FAMILY" };
+    return prisma.friendship.update({
+      where: { id },
+      data: { relationshipType: typeMap[relationshipType] },
+    });
+  },
+
   async findPendingOutgoing(userId) {
     return prisma.friendship.findMany({
       where: { requesterId: userId, status: "PENDING" },

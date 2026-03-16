@@ -36,6 +36,30 @@ function registerEventHandlers() {
   eventBus.on("FRIEND_REQUEST_DECLINED", (data) => {
     console.log(`[EVENT] Friend request ${data.friendshipId} declined by ${data.userId}`);
   });
+
+  eventBus.on("CHALLENGE_DROPPED", (data) => {
+    console.log(`[EVENT] Challenge dropped: "${data.title}" (${data.challengeId})`);
+  });
+
+  eventBus.on("CHALLENGE_INITIATED", (data) => {
+    console.log(`[EVENT] Challenge initiated: ${data.userId} vs ${data.friendUserId} (instance: ${data.instanceId})`);
+  });
+
+  eventBus.on("STAKE_PROPOSED", (data) => {
+    console.log(`[EVENT] Stake proposed on ${data.instanceId} by ${data.proposedById}: ${data.stakeId}`);
+  });
+
+  eventBus.on("STAKE_ACCEPTED", (data) => {
+    console.log(`[EVENT] Stake accepted on ${data.instanceId} by ${data.acceptedById}: ${data.stakeId}`);
+  });
+
+  eventBus.on("STAKE_COUNTERED", (data) => {
+    console.log(`[EVENT] Stake countered on ${data.instanceId} by ${data.counteredById}: ${data.stakeId}`);
+  });
+
+  eventBus.on("CHALLENGE_RESOLVED", (data) => {
+    console.log(`[EVENT] Challenge resolved: ${data.instanceId}, winner: ${data.winnerUserId || "none"}`);
+  });
 }
 
 module.exports = { registerEventHandlers };
