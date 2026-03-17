@@ -44,6 +44,7 @@ test("initiateChallenge creates an instance for the ensured weekly challenge", a
   const instance = await initiateChallenge({
     userId: "user-1",
     friendUserId: "user-2",
+    stakeId: "stake-1",
   });
 
   assert.equal(instance.challengeId, "challenge-1");
@@ -53,6 +54,8 @@ test("initiateChallenge creates an instance for the ensured weekly challenge", a
       weekOf: "2026-03-16",
       userAId: "user-1",
       userBId: "user-2",
+      proposedById: "user-1",
+      proposedStakeId: "stake-1",
     },
   ]);
   assert.deepEqual(events, [

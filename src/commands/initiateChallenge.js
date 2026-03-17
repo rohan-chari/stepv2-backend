@@ -20,7 +20,7 @@ function buildInitiateChallenge(dependencies = {}) {
     dependencies.ensureWeeklyChallengeForDate || ensureWeeklyChallengeForDate;
   const events = dependencies.eventBus || eventBus;
 
-  return async function initiateChallenge({ userId, friendUserId }) {
+  return async function initiateChallenge({ userId, friendUserId, stakeId }) {
     const friendship = await friendshipModel.findBetweenUsers(
       userId,
       friendUserId
@@ -58,6 +58,8 @@ function buildInitiateChallenge(dependencies = {}) {
       weekOf,
       userAId: userId,
       userBId: friendUserId,
+      proposedById: userId,
+      proposedStakeId: stakeId,
     });
 
     events.emit("CHALLENGE_INITIATED", {

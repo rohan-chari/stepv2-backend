@@ -5,7 +5,8 @@
       "WebFetch(domain:www.prisma.io)",
       "WebFetch(domain:www.answeroverflow.com)",
       "WebFetch(domain:github.com)",
-      "WebFetch(domain:dev.to)"
+      "WebFetch(domain:dev.to)",
+      "Bash(flutter pub:*)"
     ]
   }
 }

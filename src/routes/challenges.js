@@ -98,10 +98,16 @@ function createChallengesRouter(dependencies = {}) {
   // POST /challenges/initiate
   router.post("/initiate", async (req, res) => {
     try {
-      const { friendUserId } = req.body;
+      const { friendUserId, stakeId } = req.body;
+
+      if (!stakeId) {
+        return res.status(400).json({ error: "stakeId is required" });
+      }
+
       const instance = await initiateChallenge({
         userId: req.user.id,
         friendUserId,
+        stakeId,
       });
       res.status(201).json({ instance });
     } catch (error) {

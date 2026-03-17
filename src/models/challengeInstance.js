@@ -41,6 +41,13 @@ const ChallengeInstance = {
     return prisma.challengeInstance.update({
       where: { id },
       data: fields,
+      include: {
+        challenge: true,
+        stake: true,
+        proposedStake: true,
+        userA: { select: { id: true, displayName: true } },
+        userB: { select: { id: true, displayName: true } },
+      },
     });
   },
 

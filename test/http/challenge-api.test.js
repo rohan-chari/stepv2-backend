@@ -217,7 +217,7 @@ test("POST /challenges/initiate validates friendship: 403 for non-friend, 201 fo
         authorization: "Bearer apple-token",
         "content-type": "application/json",
       },
-      body: JSON.stringify({ friendUserId: "not-a-friend" }),
+      body: JSON.stringify({ friendUserId: "not-a-friend", stakeId: "stake-1" }),
     });
     assert.equal(badRes.status, 403);
 
@@ -228,12 +228,81 @@ test("POST /challenges/initiate validates friendship: 403 for non-friend, 201 fo
         authorization: "Bearer apple-token",
         "content-type": "application/json",
       },
-      body: JSON.stringify({ friendUserId: "user-2" }),
+      body: JSON.stringify({ friendUserId: "user-2", stakeId: "stake-1" }),
     });
     assert.equal(goodRes.status, 201);
     const goodBody = await goodRes.json();
     assert.equal(goodBody.instance.userBId, "user-2");
     assert.equal(callCount, 2);
+  } finally {
+    await server.close();
+  }
+});
+
+// 6.4b — POST /challenges/initiate requires a stakeId
+test("POST /challenges/initiate returns 400 without stakeId", async () => {
+  const server = await startServer(authMocks());
+
+  try {
+    const response = await fetch(`${server.baseUrl}/challenges/initiate`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer apple-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ friendUserId: "user-2" }),
+    });
+
+    assert.equal(response.status, 400);
+    const body = await response.json();
+    assert.equal(body.error, "stakeId is required");
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /challenges/initiate passes stakeId to initiateChallenge as proposal", async () => {
+  let receivedPayload;
+
+  const server = await startServer(
+    authMocks({
+      async initiateChallenge(payload) {
+        receivedPayload = payload;
+        return {
+          id: "instance-1",
+          challengeId: "challenge-1",
+          weekOf: "2026-03-16",
+          userAId: "user-1",
+          userBId: payload.friendUserId,
+          proposedById: "user-1",
+          proposedStakeId: payload.stakeId,
+          stakeId: null,
+          status: "pending_stake",
+          stakeStatus: "proposing",
+        };
+      },
+    })
+  );
+
+  try {
+    const response = await fetch(`${server.baseUrl}/challenges/initiate`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer apple-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ friendUserId: "user-2", stakeId: "stake-1" }),
+    });
+
+    assert.equal(response.status, 201);
+    const body = await response.json();
+    assert.equal(body.instance.proposedStakeId, "stake-1");
+    assert.equal(body.instance.status, "pending_stake");
+    assert.deepEqual(receivedPayload, {
+      userId: "user-1",
+      friendUserId: "user-2",
+      stakeId: "stake-1",
+    });
   } finally {
     await server.close();
   }

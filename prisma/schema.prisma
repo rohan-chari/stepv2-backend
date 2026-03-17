@@ -24,6 +24,7 @@ model User {
   challengesProposed ChallengeInstance[] @relation("challengeProposer")
   streaksAsUserA     ChallengeStreak[]   @relation("streakUserA")
   streaksAsUserB     ChallengeStreak[]   @relation("streakUserB")
+  deviceTokens       DeviceToken[]
 
   @@map("users")
 }
@@ -192,4 +193,18 @@ model ChallengeStreak {
 
   @@unique([userAId, userBId])
   @@map("challenge_streaks")
+}
+
+model DeviceToken {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  token     String
+  platform  String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@unique([userId, token])
+  @@index([userId])
+  @@map("device_tokens")
 }

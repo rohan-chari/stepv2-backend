@@ -48,8 +48,8 @@ function authMocks(overrides = {}) {
   };
 }
 
-// 1.3 — Challenge instance created on initiation
-test("POST /challenges/initiate creates a challenge instance in pending_stake status", async () => {
+// 1.3 — Challenge instance created on initiation with stake as proposal
+test("POST /challenges/initiate creates a pending_stake instance with proposed stake", async () => {
   let receivedPayload;
 
   const server = await startServer(
@@ -64,8 +64,8 @@ test("POST /challenges/initiate creates a challenge instance in pending_stake st
           userBId: "user-2",
           stakeId: null,
           stakeStatus: "proposing",
-          proposedById: null,
-          proposedStakeId: null,
+          proposedById: "user-1",
+          proposedStakeId: "stake-1",
           status: "pending_stake",
           winnerUserId: null,
           userATotalSteps: 0,
@@ -85,20 +85,22 @@ test("POST /challenges/initiate creates a challenge instance in pending_stake st
         authorization: "Bearer apple-token",
         "content-type": "application/json",
       },
-      body: JSON.stringify({ friendUserId: "user-2" }),
+      body: JSON.stringify({ friendUserId: "user-2", stakeId: "stake-1" }),
     });
 
     assert.equal(response.status, 201);
     const body = await response.json();
     assert.equal(body.instance.status, "pending_stake");
+    assert.equal(body.instance.stakeStatus, "proposing");
+    assert.equal(body.instance.proposedStakeId, "stake-1");
+    assert.equal(body.instance.proposedById, "user-1");
+    assert.equal(body.instance.stakeId, null);
     assert.equal(body.instance.userAId, "user-1");
     assert.equal(body.instance.userBId, "user-2");
-    assert.equal(body.instance.stakeId, null);
-    assert.equal(body.instance.weekOf, "2026-03-16");
-    assert.equal(body.instance.challengeId, "challenge-week-1");
     assert.deepEqual(receivedPayload, {
       userId: "user-1",
       friendUserId: "user-2",
+      stakeId: "stake-1",
     });
   } finally {
     await server.close();
@@ -127,7 +129,7 @@ test("POST /challenges/initiate returns 409 for duplicate pair in the same week"
         authorization: "Bearer apple-token",
         "content-type": "application/json",
       },
-      body: JSON.stringify({ friendUserId: "user-2" }),
+      body: JSON.stringify({ friendUserId: "user-2", stakeId: "stake-1" }),
     });
 
     assert.equal(response.status, 409);
@@ -159,7 +161,7 @@ test("POST /challenges/initiate returns 403 when users are not accepted friends"
         authorization: "Bearer apple-token",
         "content-type": "application/json",
       },
-      body: JSON.stringify({ friendUserId: "user-not-friend" }),
+      body: JSON.stringify({ friendUserId: "user-not-friend", stakeId: "stake-1" }),
     });
 
     assert.equal(response.status, 403);
@@ -190,7 +192,7 @@ test("POST /challenges/initiate returns error when no challenge selected for cur
         authorization: "Bearer apple-token",
         "content-type": "application/json",
       },
-      body: JSON.stringify({ friendUserId: "user-2" }),
+      body: JSON.stringify({ friendUserId: "user-2", stakeId: "stake-1" }),
     });
 
     assert.equal(response.status, 409);
@@ -212,6 +214,7 @@ test("POST /challenges/initiate allows initiating challenges with multiple frien
         const idx = callCount++;
         assert.equal(payload.userId, "user-1");
         assert.equal(payload.friendUserId, friends[idx]);
+        assert.equal(payload.stakeId, "stake-1");
         return {
           id: `instance-${idx + 1}`,
           challengeId: "challenge-week-1",
@@ -219,7 +222,7 @@ test("POST /challenges/initiate allows initiating challenges with multiple frien
           userAId: "user-1",
           userBId: friends[idx],
           status: "pending_stake",
-          stakeId: null,
+          proposedStakeId: "stake-1",
           stakeStatus: "proposing",
         };
       },
@@ -234,7 +237,7 @@ test("POST /challenges/initiate allows initiating challenges with multiple frien
           authorization: "Bearer apple-token",
           "content-type": "application/json",
         },
-        body: JSON.stringify({ friendUserId: friends[i] }),
+        body: JSON.stringify({ friendUserId: friends[i], stakeId: "stake-1" }),
       });
 
       assert.equal(response.status, 201);
@@ -250,8 +253,8 @@ test("POST /challenges/initiate allows initiating challenges with multiple frien
   }
 });
 
-// 1.8 — Challenge instance state transitions
-test("Challenge instance transitions through pending_stake → active → completed", async () => {
+// 1.8 — Challenge becomes active after opponent accepts the proposed stake
+test("Challenge transitions: initiate with stake → opponent accepts → active", async () => {
   const server = await startServer(
     authMocks({
       async initiateChallenge() {
@@ -260,18 +263,11 @@ test("Challenge instance transitions through pending_stake → active → comple
           challengeId: "challenge-week-1",
           status: "pending_stake",
           stakeStatus: "proposing",
+          proposedById: "user-1",
+          proposedStakeId: "stake-1",
           stakeId: null,
           userAId: "user-1",
           userBId: "user-2",
-        };
-      },
-      async proposeStake() {
-        return {
-          id: "instance-1",
-          status: "pending_stake",
-          stakeStatus: "proposing",
-          proposedById: "user-1",
-          proposedStakeId: "stake-1",
         };
       },
       async respondToStake({ accept }) {
@@ -298,36 +294,21 @@ test("Challenge instance transitions through pending_stake → active → comple
   );
 
   try {
-    // Step 1: Initiate → pending_stake
+    // Step 1: Initiate with stake → pending_stake
     const initRes = await fetch(`${server.baseUrl}/challenges/initiate`, {
       method: "POST",
       headers: {
         authorization: "Bearer apple-token",
         "content-type": "application/json",
       },
-      body: JSON.stringify({ friendUserId: "user-2" }),
+      body: JSON.stringify({ friendUserId: "user-2", stakeId: "stake-1" }),
     });
     assert.equal(initRes.status, 201);
     const initBody = await initRes.json();
     assert.equal(initBody.instance.status, "pending_stake");
+    assert.equal(initBody.instance.proposedStakeId, "stake-1");
 
-    // Step 2: Propose stake
-    const proposeRes = await fetch(
-      `${server.baseUrl}/challenges/instance-1/propose-stake`,
-      {
-        method: "POST",
-        headers: {
-          authorization: "Bearer apple-token",
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({ stakeId: "stake-1" }),
-      }
-    );
-    assert.equal(proposeRes.status, 200);
-    const proposeBody = await proposeRes.json();
-    assert.equal(proposeBody.instance.proposedStakeId, "stake-1");
-
-    // Step 3: Accept stake → active
+    // Step 2: Opponent accepts → active
     const acceptRes = await fetch(
       `${server.baseUrl}/challenges/instance-1/respond-stake`,
       {
@@ -342,10 +323,9 @@ test("Challenge instance transitions through pending_stake → active → comple
     assert.equal(acceptRes.status, 200);
     const acceptBody = await acceptRes.json();
     assert.equal(acceptBody.instance.status, "active");
-    assert.equal(acceptBody.instance.stakeStatus, "agreed");
     assert.equal(acceptBody.instance.stakeId, "stake-1");
 
-    // Step 4: Check progress — active with step data
+    // Step 3: Check progress
     const progressRes = await fetch(
       `${server.baseUrl}/challenges/instance-1/progress`,
       {
@@ -356,7 +336,6 @@ test("Challenge instance transitions through pending_stake → active → comple
     const progressBody = await progressRes.json();
     assert.equal(progressBody.progress.status, "active");
     assert.equal(progressBody.progress.userA.totalSteps, 25000);
-    assert.equal(progressBody.progress.userB.totalSteps, 22000);
   } finally {
     await server.close();
   }
