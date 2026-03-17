@@ -174,6 +174,182 @@ test("resolveChallenge: weekend warrior — highest Sat+Sun combined wins", () =
   assert.equal(result.winnerUserId, "user-b");
 });
 
+// --- New resolution rules ---
+
+test("resolveChallenge: streak_days — most days hitting threshold wins", () => {
+  const result = resolveChallenge({
+    challenge: { type: "CREATIVE", resolutionRule: "streak_days", thresholdValue: 10000 },
+    userAId: "user-a",
+    userBId: "user-b",
+    // A hits 10K on 5 days, B hits 10K on 3 days
+    dailyStepsA: weeklySteps([12000, 11000, 10000, 9000, 10000, 15000, 10000]),
+    dailyStepsB: weeklySteps([10000, 8000, 12000, 7000, 6000, 10000, 9000]),
+  });
+  assert.equal(result.winnerUserId, "user-a");
+});
+
+test("resolveChallenge: streak_days — tie returns null", () => {
+  const result = resolveChallenge({
+    challenge: { type: "CREATIVE", resolutionRule: "streak_days", thresholdValue: 10000 },
+    userAId: "user-a",
+    userBId: "user-b",
+    dailyStepsA: weeklySteps([10000, 8000, 10000, 8000, 10000, 8000, 10000]),
+    dailyStepsB: weeklySteps([10000, 10000, 10000, 10000, 8000, 8000, 8000]),
+  });
+  assert.equal(result.winnerUserId, null);
+});
+
+test("resolveChallenge: comeback_king — behind at midweek, ahead by end wins", () => {
+  const result = resolveChallenge({
+    challenge: { type: "CREATIVE", resolutionRule: "comeback_king" },
+    userAId: "user-a",
+    userBId: "user-b",
+    // A: weak Mon-Wed (18K), strong Thu-Sun (52K) = 70K total
+    dailyStepsA: weeklySteps([5000, 6000, 7000, 13000, 13000, 13000, 13000]),
+    // B: strong Mon-Wed (33K), weak Thu-Sun (20K) = 53K total
+    dailyStepsB: weeklySteps([11000, 11000, 11000, 5000, 5000, 5000, 5000]),
+  });
+  // A was behind at midweek (18K < 33K) and won overall (70K > 53K) = comeback
+  assert.equal(result.winnerUserId, "user-a");
+});
+
+test("resolveChallenge: comeback_king — no comeback falls back to higher total", () => {
+  const result = resolveChallenge({
+    challenge: { type: "CREATIVE", resolutionRule: "comeback_king" },
+    userAId: "user-a",
+    userBId: "user-b",
+    // A ahead at midweek AND ahead at end — no comeback happened
+    dailyStepsA: weeklySteps([12000, 12000, 12000, 10000, 10000, 10000, 10000]),
+    dailyStepsB: weeklySteps([5000, 5000, 5000, 8000, 8000, 8000, 8000]),
+  });
+  assert.equal(result.winnerUserId, "user-a");
+});
+
+test("resolveChallenge: close_the_rings — most days hitting personal goal wins", () => {
+  const result = resolveChallenge({
+    challenge: { type: "CREATIVE", resolutionRule: "close_the_rings" },
+    userAId: "user-a",
+    userBId: "user-b",
+    // A has goal of 8000, hits it 6/7 days
+    dailyStepsA: weeklySteps([9000, 8000, 8500, 8000, 9000, 8000, 7000]),
+    // B has goal of 6000, hits it 5/7 days
+    dailyStepsB: weeklySteps([7000, 6500, 6000, 5000, 6000, 5500, 7000]),
+    stepGoalA: 8000,
+    stepGoalB: 6000,
+  });
+  assert.equal(result.winnerUserId, "user-a");
+});
+
+test("resolveChallenge: close_the_rings — defaults to 10K when no goal set", () => {
+  const result = resolveChallenge({
+    challenge: { type: "CREATIVE", resolutionRule: "close_the_rings" },
+    userAId: "user-a",
+    userBId: "user-b",
+    dailyStepsA: weeklySteps([10000, 10000, 10000, 10000, 10000, 10000, 10000]),
+    dailyStepsB: weeklySteps([10000, 10000, 10000, 10000, 10000, 9000, 9000]),
+    stepGoalA: null,
+    stepGoalB: null,
+  });
+  assert.equal(result.winnerUserId, "user-a");
+});
+
+test("resolveChallenge: progressive_target — escalating daily target, most days cleared wins", () => {
+  const result = resolveChallenge({
+    challenge: { type: "CREATIVE", resolutionRule: "progressive_target", thresholdValue: 5000 },
+    userAId: "user-a",
+    userBId: "user-b",
+    // Targets: 5K, 6K, 7K, 8K, 9K, 10K, 11K
+    // A clears: 5K✓ 6K✓ 7K✓ 8K✓ 9K✗ 10K✗ 11K✗ = 4
+    dailyStepsA: weeklySteps([6000, 7000, 8000, 9000, 8000, 8000, 8000]),
+    // B clears: 5K✓ 6K✓ 7K✓ 8K✓ 9K✓ 10K✓ 11K✗ = 6
+    dailyStepsB: weeklySteps([5000, 6000, 7000, 8000, 9000, 10000, 10000]),
+  });
+  assert.equal(result.winnerUserId, "user-b");
+});
+
+test("resolveChallenge: rest_day_penalty — worst day subtracted, highest adjusted wins", () => {
+  const result = resolveChallenge({
+    challenge: { type: "CREATIVE", resolutionRule: "rest_day_penalty" },
+    userAId: "user-a",
+    userBId: "user-b",
+    // A: total 70K, worst day 10K, adjusted = 60K
+    dailyStepsA: weeklySteps([10000, 10000, 10000, 10000, 10000, 10000, 10000]),
+    // B: total 68K, worst day 2K, adjusted = 66K
+    dailyStepsB: weeklySteps([2000, 11000, 11000, 11000, 11000, 11000, 11000]),
+  });
+  // B has higher adjusted total (66K > 60K) despite lower raw total
+  assert.equal(result.winnerUserId, "user-b");
+});
+
+test("resolveChallenge: hot_start — Mon+Tue+Wed total only", () => {
+  const result = resolveChallenge({
+    challenge: { type: "CREATIVE", resolutionRule: "hot_start" },
+    userAId: "user-a",
+    userBId: "user-b",
+    // A: Mon-Wed = 36K, Thu-Sun irrelevant
+    dailyStepsA: weeklySteps([12000, 12000, 12000, 1000, 1000, 1000, 1000]),
+    // B: Mon-Wed = 30K, but strong back half
+    dailyStepsB: weeklySteps([10000, 10000, 10000, 15000, 15000, 15000, 15000]),
+  });
+  assert.equal(result.winnerUserId, "user-a");
+});
+
+test("resolveChallenge: strong_finish — Thu+Fri+Sat+Sun total only", () => {
+  const result = resolveChallenge({
+    challenge: { type: "CREATIVE", resolutionRule: "strong_finish" },
+    userAId: "user-a",
+    userBId: "user-b",
+    // A: Thu-Sun = 4K
+    dailyStepsA: weeklySteps([15000, 15000, 15000, 1000, 1000, 1000, 1000]),
+    // B: Thu-Sun = 60K
+    dailyStepsB: weeklySteps([1000, 1000, 1000, 15000, 15000, 15000, 15000]),
+  });
+  assert.equal(result.winnerUserId, "user-b");
+});
+
+test("resolveChallenge: daily_minimum — under threshold zeroed, adjusted total wins", () => {
+  const result = resolveChallenge({
+    challenge: { type: "CREATIVE", resolutionRule: "daily_minimum", thresholdValue: 5000 },
+    userAId: "user-a",
+    userBId: "user-b",
+    // A: all days above 5K, adjusted = 70K
+    dailyStepsA: weeklySteps([10000, 10000, 10000, 10000, 10000, 10000, 10000]),
+    // B: 2 days below 5K (zeroed), adjusted = 5*12000 = 60K
+    dailyStepsB: weeklySteps([12000, 12000, 12000, 4000, 12000, 3000, 12000]),
+  });
+  assert.equal(result.winnerUserId, "user-a");
+});
+
+test("resolveChallenge: improvement_over_baseline — biggest % improvement wins", () => {
+  const result = resolveChallenge({
+    challenge: { type: "CREATIVE", resolutionRule: "improvement_over_baseline" },
+    userAId: "user-a",
+    userBId: "user-b",
+    // A: baseline 40K, this week 50K = +25%
+    dailyStepsA: weeklySteps([7000, 7000, 7000, 7000, 7000, 8000, 7000]),
+    // B: baseline 60K, this week 70K = +16.7%
+    dailyStepsB: weeklySteps([10000, 10000, 10000, 10000, 10000, 10000, 10000]),
+    baselineA: 40000,
+    baselineB: 60000,
+  });
+  // A improved more (25% > 16.7%)
+  assert.equal(result.winnerUserId, "user-a");
+});
+
+test("resolveChallenge: improvement_over_baseline — no baseline means 0% improvement", () => {
+  const result = resolveChallenge({
+    challenge: { type: "CREATIVE", resolutionRule: "improvement_over_baseline" },
+    userAId: "user-a",
+    userBId: "user-b",
+    dailyStepsA: weeklySteps([10000, 10000, 10000, 10000, 10000, 10000, 10000]),
+    dailyStepsB: weeklySteps([5000, 5000, 5000, 5000, 5000, 5000, 5000]),
+    baselineA: 0, // new user
+    baselineB: 30000,
+  });
+  // A: 0% (no baseline), B: 16.7%
+  assert.equal(result.winnerUserId, "user-b");
+});
+
 // 3.9 — Resolution updates final step totals
 test("resolveWeeklyChallenges updates instance with final totals and resolvedAt", async () => {
   const updatedInstances = [];
