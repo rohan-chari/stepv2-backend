@@ -26,13 +26,15 @@ const ChallengeInstance = {
     });
   },
 
-  async create({ challengeId, weekOf, userAId, userBId }) {
+  async create({ challengeId, weekOf, userAId, userBId, proposedById, proposedStakeId }) {
     return prisma.challengeInstance.create({
       data: {
         challengeId,
         weekOf: new Date(weekOf),
         userAId,
         userBId,
+        ...(proposedById && { proposedById }),
+        ...(proposedStakeId && { proposedStakeId, stakeStatus: "PROPOSING" }),
       },
     });
   },
