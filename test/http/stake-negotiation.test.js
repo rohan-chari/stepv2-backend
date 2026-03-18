@@ -508,7 +508,6 @@ test("Unresolved pending_stake instance is marked as skipped after resolution", 
     updateInstance(id, fields) {
       updatedInstances.push({ id, ...fields });
     },
-    updateStreak() {},
   });
 
   assert.equal(updatedInstances.length, 1);

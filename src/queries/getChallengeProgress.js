@@ -1,13 +1,6 @@
 const { ChallengeInstance } = require("../models/challengeInstance");
 const { Steps } = require("../models/steps");
-
-function getMondayOfWeek(date = new Date()) {
-  const d = new Date(date);
-  const day = d.getDay();
-  const diff = (day + 6) % 7;
-  d.setDate(d.getDate() - diff);
-  return d.toISOString().slice(0, 10);
-}
+const { getMondayOfWeek } = require("../utils/week");
 
 async function getChallengeProgress(userId, instanceId) {
   const instance = await ChallengeInstance.findById(instanceId);
@@ -24,10 +17,11 @@ async function getChallengeProgress(userId, instanceId) {
     throw error;
   }
 
-  // Compute live step totals for the current week
   const weekOf = getMondayOfWeek();
   let userATotalSteps = 0;
   let userBTotalSteps = 0;
+  const dailyStepsA = [];
+  const dailyStepsB = [];
 
   for (let i = 0; i < 7; i++) {
     const date = new Date(weekOf);
@@ -39,8 +33,12 @@ async function getChallengeProgress(userId, instanceId) {
       Steps.findByUserIdAndDate(instance.userBId, dateStr),
     ]);
 
-    userATotalSteps += stepsA?.steps || 0;
-    userBTotalSteps += stepsB?.steps || 0;
+    const a = stepsA?.steps || 0;
+    const b = stepsB?.steps || 0;
+    userATotalSteps += a;
+    userBTotalSteps += b;
+    dailyStepsA.push({ date: dateStr, steps: a });
+    dailyStepsB.push({ date: dateStr, steps: b });
   }
 
   return {
@@ -51,6 +49,7 @@ async function getChallengeProgress(userId, instanceId) {
       title: instance.challenge.title,
       type: instance.challenge.type,
       resolutionRule: instance.challenge.resolutionRule,
+      thresholdValue: instance.challenge.thresholdValue,
     },
     stake: instance.stake
       ? { id: instance.stake.id, name: instance.stake.name }
@@ -59,11 +58,13 @@ async function getChallengeProgress(userId, instanceId) {
       userId: instance.userA.id,
       displayName: instance.userA.displayName,
       totalSteps: userATotalSteps,
+      dailySteps: dailyStepsA,
     },
     userB: {
       userId: instance.userB.id,
       displayName: instance.userB.displayName,
       totalSteps: userBTotalSteps,
+      dailySteps: dailyStepsB,
     },
     weekOf,
   };

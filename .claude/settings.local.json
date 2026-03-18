@@ -6,7 +6,8 @@
       "WebFetch(domain:www.answeroverflow.com)",
       "WebFetch(domain:github.com)",
       "WebFetch(domain:dev.to)",
-      "Bash(flutter pub:*)"
+      "Bash(flutter pub:*)",
+      "Bash(npx prisma:*)"
     ]
   }
 }

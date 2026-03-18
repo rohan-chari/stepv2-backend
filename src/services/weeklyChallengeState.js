@@ -1,49 +1,16 @@
 const { eventBus } = require("../events/eventBus");
 const { Challenge } = require("../models/challenge");
 const { ChallengeInstance } = require("../models/challengeInstance");
-const { ChallengeStreak } = require("../models/challengeStreak");
 const { Steps } = require("../models/steps");
-const { User } = require("../models/user");
 const { WeeklyChallenge } = require("../models/weeklyChallenge");
 const { resolveChallenge } = require("./challengeResolution");
 const { selectWeeklyChallenge } = require("./challengeScheduler");
-const { updateStreak } = require("./streakTracking");
 const { getMondayOfWeek, getNextMonday9amNewYork } = require("../utils/week");
 
 function normalizeStatus(status) {
   return String(status || "").toUpperCase();
 }
 
-// Average weekly step total over the 4 weeks before `weekOf`
-async function getBaselineAverage(userId, weekOf, stepsModel) {
-  let totalSteps = 0;
-  let weeksWithData = 0;
-
-  for (let w = 1; w <= 4; w++) {
-    const monday = new Date(`${weekOf}T00:00:00.000Z`);
-    monday.setUTCDate(monday.getUTCDate() - w * 7);
-    let weekTotal = 0;
-    let hasData = false;
-
-    for (let d = 0; d < 7; d++) {
-      const date = new Date(monday);
-      date.setUTCDate(date.getUTCDate() + d);
-      const dateStr = date.toISOString().slice(0, 10);
-      const record = await stepsModel.findByUserIdAndDate(userId, dateStr);
-      if (record) {
-        weekTotal += record.steps;
-        hasData = true;
-      }
-    }
-
-    if (hasData) {
-      totalSteps += weekTotal;
-      weeksWithData++;
-    }
-  }
-
-  return weeksWithData > 0 ? totalSteps / weeksWithData : 0;
-}
 
 function serializeWeeklyChallenge(weeklyChallenge) {
   if (!weeklyChallenge) return null;
@@ -154,10 +121,7 @@ function buildEnsureWeeklyChallengeForDate(dependencies = {}) {
 function buildResolveWeekInstances(dependencies = {}) {
   const instanceModel = dependencies.ChallengeInstance || ChallengeInstance;
   const stepsModel = dependencies.Steps || Steps;
-  const userModel = dependencies.User || User;
-  const streakModel = dependencies.ChallengeStreak || ChallengeStreak;
   const resolve = dependencies.resolveChallenge || resolveChallenge;
-  const updateChallengeStreak = dependencies.updateStreak || updateStreak;
   const events = dependencies.eventBus || eventBus;
 
   return async function resolveWeekInstances({ weekOf }) {
@@ -187,31 +151,12 @@ function buildResolveWeekInstances(dependencies = {}) {
         stepsModel
       );
 
-      // Fetch extra data for rules that need it
-      const rule = instance.challenge.resolutionRule;
-      let extra = {};
-
-      if (rule === "close_the_rings") {
-        const [userA, userB] = await Promise.all([
-          userModel.findById(instance.userAId),
-          userModel.findById(instance.userBId),
-        ]);
-        extra.stepGoalA = userA?.stepGoal;
-        extra.stepGoalB = userB?.stepGoal;
-      }
-
-      if (rule === "improvement_over_baseline") {
-        extra.baselineA = await getBaselineAverage(instance.userAId, weekOf, stepsModel);
-        extra.baselineB = await getBaselineAverage(instance.userBId, weekOf, stepsModel);
-      }
-
       const result = resolve({
         challenge: instance.challenge,
         userAId: instance.userAId,
         userBId: instance.userBId,
         dailyStepsA,
         dailyStepsB,
-        ...extra,
       });
 
       await instanceModel.update(instance.id, {
@@ -221,25 +166,6 @@ function buildResolveWeekInstances(dependencies = {}) {
         userBTotalSteps: result.userBTotalSteps,
         resolvedAt: new Date(),
       });
-
-      await updateChallengeStreak(
-        {
-          participantAId: instance.userAId,
-          participantBId: instance.userBId,
-          winnerUserId: result.winnerUserId,
-        },
-        {
-          async findStreak(userAId, userBId) {
-            return streakModel.findByPair(userAId, userBId);
-          },
-          async createStreak(data) {
-            return streakModel.create(data);
-          },
-          async saveStreak(streak) {
-            return streakModel.save(streak);
-          },
-        }
-      );
 
       events.emit("CHALLENGE_RESOLVED", {
         instanceId: instance.id,

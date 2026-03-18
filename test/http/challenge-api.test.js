@@ -61,7 +61,6 @@ test("All challenge and stake endpoints return 401 without auth token", async ()
       { method: "PUT", path: "/challenges/test-id/respond-stake" },
       { method: "GET", path: "/challenges/test-id/progress" },
       { method: "GET", path: "/stakes" },
-      { method: "GET", path: "/challenges/streaks" },
     ];
 
     for (const { method, path } of endpoints) {

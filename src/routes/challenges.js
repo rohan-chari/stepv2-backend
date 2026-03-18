@@ -18,10 +18,6 @@ const {
 const {
   getChallengeProgress: defaultGetChallengeProgress,
 } = require("../queries/getChallengeProgress");
-const {
-  getChallengeStreaks: defaultGetChallengeStreaks,
-  getChallengeStreakForFriend: defaultGetChallengeStreakForFriend,
-} = require("../queries/getChallengeStreaks");
 
 function createChallengesRouter(dependencies = {}) {
   const router = Router();
@@ -38,11 +34,6 @@ function createChallengesRouter(dependencies = {}) {
     dependencies.getChallengeHistory || defaultGetChallengeHistory;
   const getChallengeProgress =
     dependencies.getChallengeProgress || defaultGetChallengeProgress;
-  const getChallengeStreaks =
-    dependencies.getChallengeStreaks || defaultGetChallengeStreaks;
-  const getChallengeStreakForFriend =
-    dependencies.getChallengeStreakForFriend ||
-    defaultGetChallengeStreakForFriend;
 
   router.use(requireAuth);
 
@@ -66,31 +57,6 @@ function createChallengesRouter(dependencies = {}) {
       res.json(result);
     } catch (error) {
       console.error("Challenge history error:", error);
-      res.status(500).json({ error: "Internal server error" });
-    }
-  });
-
-  // GET /challenges/streaks
-  router.get("/streaks", async (req, res) => {
-    try {
-      const streaks = await getChallengeStreaks(req.user.id);
-      res.json({ streaks });
-    } catch (error) {
-      console.error("Streaks error:", error);
-      res.status(500).json({ error: "Internal server error" });
-    }
-  });
-
-  // GET /challenges/streaks/:friendUserId
-  router.get("/streaks/:friendUserId", async (req, res) => {
-    try {
-      const streak = await getChallengeStreakForFriend(
-        req.user.id,
-        req.params.friendUserId
-      );
-      res.json({ streak });
-    } catch (error) {
-      console.error("Streak for friend error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });

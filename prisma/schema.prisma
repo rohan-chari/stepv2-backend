@@ -22,8 +22,6 @@ model User {
   challengesAsUserB  ChallengeInstance[] @relation("challengeUserB")
   challengesWon      ChallengeInstance[] @relation("challengeWinner")
   challengesProposed ChallengeInstance[] @relation("challengeProposer")
-  streaksAsUserA     ChallengeStreak[]   @relation("streakUserA")
-  streaksAsUserB     ChallengeStreak[]   @relation("streakUserB")
   deviceTokens       DeviceToken[]
 
   @@map("users")
@@ -174,25 +172,6 @@ model Stake {
   proposedInstances ChallengeInstance[] @relation("proposedStake")
 
   @@map("stakes")
-}
-
-model ChallengeStreak {
-  id                   String    @id @default(uuid())
-  userAId              String    @map("user_a_id")
-  userBId              String    @map("user_b_id")
-  currentWinnerUserId  String?   @map("current_winner_user_id")
-  currentStreak        Int       @default(0) @map("current_streak")
-  userALifetimeWins    Int       @default(0) @map("user_a_lifetime_wins")
-  userBLifetimeWins    Int       @default(0) @map("user_b_lifetime_wins")
-  lastResolvedAt       DateTime? @map("last_resolved_at")
-  createdAt            DateTime  @default(now()) @map("created_at")
-  updatedAt            DateTime  @updatedAt @map("updated_at")
-
-  userA                User      @relation("streakUserA", fields: [userAId], references: [id])
-  userB                User      @relation("streakUserB", fields: [userBId], references: [id])
-
-  @@unique([userAId, userBId])
-  @@map("challenge_streaks")
 }
 
 model DeviceToken {
