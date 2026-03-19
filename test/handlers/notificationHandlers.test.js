@@ -347,6 +347,53 @@ test("FRIEND_REQUEST_ACCEPTED sends push to requester with friends route payload
   });
 });
 
+test("STAKE_ACCEPTED sends push to proposer with challenge detail payload", async () => {
+  const eventBus = createMockEventBus();
+  let sentNotification;
+
+  registerNotificationHandlers({
+    eventBus,
+    User: {
+      async findById(id) {
+        return { id, displayName: "Summit Buddy" };
+      },
+    },
+    DeviceToken: {
+      async findByUserId(userId) {
+        assert.equal(userId, "user-1");
+        return [{ token: "stake-accepted-token-1", platform: "ios" }];
+      },
+      async deleteToken() {},
+    },
+    apnsService: {
+      async sendNotification(args) {
+        sentNotification = args;
+        return { success: true };
+      },
+    },
+    logger: {
+      warn() {},
+      error() {},
+    },
+  });
+
+  await eventBus.emit("STAKE_ACCEPTED", {
+    instanceId: "inst-1",
+    acceptedById: "user-2",
+    proposedById: "user-1",
+    stakeId: "stake-1",
+  });
+
+  assert.equal(sentNotification.deviceToken, "stake-accepted-token-1");
+  assert.equal(sentNotification.title, "Challenge Accepted");
+  assert.equal(sentNotification.body, "Summit Buddy accepted your challenge");
+  assert.deepEqual(sentNotification.payload, {
+    type: "STAKE_ACCEPTED",
+    route: "challenge_detail",
+    params: { instanceId: "inst-1" },
+  });
+});
+
 test("doesn't throw when APNs fails", async () => {
   const eventBus = createMockEventBus();
 

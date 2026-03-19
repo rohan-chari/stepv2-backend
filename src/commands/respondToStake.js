@@ -49,6 +49,7 @@ async function respondToStake({ userId, instanceId, accept, counterStakeId }) {
     eventBus.emit("STAKE_ACCEPTED", {
       instanceId,
       acceptedById: userId,
+      proposedById: instance.proposedById,
       stakeId: instance.proposedStakeId,
     });
 

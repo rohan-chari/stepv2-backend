@@ -145,6 +145,32 @@ function registerNotificationHandlers(dependencies = {}) {
     }
   });
 
+  events.on("STAKE_ACCEPTED", async (data) => {
+    try {
+      const { instanceId, acceptedById, proposedById } = data;
+      if (!proposedById) return;
+
+      await sendNotificationToUser({
+        eventName: "STAKE_ACCEPTED",
+        recipientUserId: proposedById,
+        actorUserId: acceptedById,
+        title: "Challenge Accepted",
+        buildBody: (acceptorName) =>
+          `${acceptorName} accepted your challenge`,
+        payload: {
+          type: "STAKE_ACCEPTED",
+          route: "challenge_detail",
+          params: { instanceId },
+        },
+        logContext: { instanceId, acceptedById, proposedById },
+      });
+    } catch (error) {
+      logger.error("STAKE_ACCEPTED handler failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
   events.on("CHALLENGE_DROPPED", async (data) => {
     try {
       const { challengeId, title } = data;
