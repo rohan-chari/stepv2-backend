@@ -4,6 +4,7 @@ const jwt = require("jsonwebtoken");
 
 function buildApnsService(config = {}) {
   const keyPath = config.keyPath || process.env.APNS_KEY_PATH;
+  const signingKey = config.signingKey || process.env.APNS_SIGNING_KEY;
   const keyId = config.keyId || process.env.APNS_KEY_ID;
   const teamId = config.teamId || process.env.APNS_TEAM_ID;
   const bundleId = config.bundleId || process.env.APNS_BUNDLE_ID;
@@ -11,16 +12,22 @@ function buildApnsService(config = {}) {
     config.production ?? process.env.APNS_PRODUCTION === "true";
   const connect = config.connect || http2.connect;
 
-  const host = production
+  const primaryHost = production
     ? "https://api.push.apple.com"
     : "https://api.sandbox.push.apple.com";
+  const fallbackHost = production
+    ? "https://api.sandbox.push.apple.com"
+    : "https://api.push.apple.com";
 
   let cachedToken = null;
   let cachedTokenTimestamp = 0;
   const TOKEN_TTL_MS = 50 * 60 * 1000; // 50 minutes
 
   function getSigningKey() {
-    if (config.signingKey) return config.signingKey;
+    if (signingKey) return signingKey;
+    if (!keyPath) {
+      throw new Error("APNS_SIGNING_KEY or APNS_KEY_PATH must be configured");
+    }
     return fs.readFileSync(keyPath, "utf8");
   }
 
@@ -40,9 +47,14 @@ function buildApnsService(config = {}) {
     return cachedToken;
   }
 
-  async function sendNotification({ deviceToken, title, body, payload = {} }) {
-    const token = getAuthToken();
-
+  function sendNotificationRequest({
+    host,
+    authToken,
+    deviceToken,
+    title,
+    body,
+    payload = {},
+  }) {
     const apnsPayload = JSON.stringify({
       aps: { alert: { title, body }, sound: "default" },
       ...payload,
@@ -63,7 +75,7 @@ function buildApnsService(config = {}) {
       const req = client.request({
         ":method": "POST",
         ":path": `/3/device/${deviceToken}`,
-        authorization: `bearer ${token}`,
+        authorization: `bearer ${authToken}`,
         "apns-topic": bundleId,
         "apns-push-type": "alert",
         "content-type": "application/json",
@@ -93,8 +105,7 @@ function buildApnsService(config = {}) {
           reason = parsed.reason || reason;
         } catch {}
 
-        const unregistered =
-          statusCode === 410 || reason === "BadDeviceToken";
+        const unregistered = statusCode === 410;
 
         resolve({ success: false, reason, statusCode, unregistered });
       });
@@ -106,6 +117,50 @@ function buildApnsService(config = {}) {
 
       req.end(apnsPayload);
     });
+  }
+
+  async function sendNotification({ deviceToken, title, body, payload = {} }) {
+    let authToken;
+    try {
+      authToken = getAuthToken();
+    } catch (error) {
+      return {
+        success: false,
+        reason: error instanceof Error ? error.message : String(error),
+      };
+    }
+
+    const primaryResult = await sendNotificationRequest({
+      host: primaryHost,
+      authToken,
+      deviceToken,
+      title,
+      body,
+      payload,
+    });
+
+    if (primaryResult.reason !== "BadDeviceToken") {
+      return primaryResult;
+    }
+
+    const retryResult = await sendNotificationRequest({
+      host: fallbackHost,
+      authToken,
+      deviceToken,
+      title,
+      body,
+      payload,
+    });
+
+    if (retryResult.success) {
+      return retryResult;
+    }
+
+    if (retryResult.reason === "BadDeviceToken") {
+      return { ...retryResult, unregistered: false };
+    }
+
+    return retryResult;
   }
 
   return { sendNotification };

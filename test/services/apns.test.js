@@ -29,6 +29,35 @@ function createMockHttp2(statusCode = 200, responseBody = "") {
   };
 }
 
+function createHostAwareMockHttp2(responsesByHost = {}, seenHosts = []) {
+  return function connect(host) {
+    seenHosts.push(host);
+
+    const client = new EventEmitter();
+    client.close = () => {};
+
+    client.request = () => {
+      const req = new EventEmitter();
+      req.end = () => {
+        const response = responsesByHost[host] || {};
+        const statusCode = response.statusCode ?? 200;
+        const responseBody = response.responseBody || "";
+
+        process.nextTick(() => {
+          req.emit("response", { ":status": statusCode });
+          if (responseBody) {
+            req.emit("data", Buffer.from(responseBody));
+          }
+          req.emit("end");
+        });
+      };
+      return req;
+    };
+
+    return client;
+  };
+}
+
 const testKey = `-----BEGIN EC PRIVATE KEY-----
 MHcCAQEEIJxvZaZJry+4tfXLYIaGxCOVyzSwgtkiHVygJzpkesWNoAoGCCqGSM49
 AwEHoUQDQgAEumArrJiV1MGJHKH23upJrGqkaNiQb50NkqjtKv5bhQtPdTGAbnLv
@@ -122,6 +151,84 @@ test("returns unregistered on 410", async () => {
   assert.equal(result.success, false);
   assert.equal(result.unregistered, true);
   assert.equal(result.statusCode, 410);
+});
+
+test("retries against production APNs when sandbox returns BadDeviceToken", async () => {
+  const seenHosts = [];
+  const service = buildTestService({
+    production: false,
+    connect: createHostAwareMockHttp2(
+      {
+        "https://api.sandbox.push.apple.com": {
+          statusCode: 400,
+          responseBody: JSON.stringify({ reason: "BadDeviceToken" }),
+        },
+        "https://api.push.apple.com": {
+          statusCode: 200,
+        },
+      },
+      seenHosts
+    ),
+  });
+
+  const result = await service.sendNotification({
+    deviceToken: "abc123",
+    title: "Test",
+    body: "Test body",
+  });
+
+  assert.deepEqual(seenHosts, [
+    "https://api.sandbox.push.apple.com",
+    "https://api.push.apple.com",
+  ]);
+  assert.deepEqual(result, { success: true });
+});
+
+test("does not mark BadDeviceToken as unregistered when both environments reject it", async () => {
+  const service = buildTestService({
+    production: false,
+    connect: createHostAwareMockHttp2({
+      "https://api.sandbox.push.apple.com": {
+        statusCode: 400,
+        responseBody: JSON.stringify({ reason: "BadDeviceToken" }),
+      },
+      "https://api.push.apple.com": {
+        statusCode: 400,
+        responseBody: JSON.stringify({ reason: "BadDeviceToken" }),
+      },
+    }),
+  });
+
+  const result = await service.sendNotification({
+    deviceToken: "abc123",
+    title: "Test",
+    body: "Test body",
+  });
+
+  assert.equal(result.success, false);
+  assert.equal(result.reason, "BadDeviceToken");
+  assert.equal(result.statusCode, 400);
+  assert.equal(result.unregistered, false);
+});
+
+test("returns failure result when APNs signing key cannot be loaded", async () => {
+  const service = buildApnsService({
+    keyPath: "/tmp/definitely-missing-auth-key.p8",
+    keyId: "KEY123",
+    teamId: "TEAM123",
+    bundleId: "com.test.app",
+    production: false,
+    connect: createMockHttp2(),
+  });
+
+  const result = await service.sendNotification({
+    deviceToken: "abc123",
+    title: "Test",
+    body: "Test body",
+  });
+
+  assert.equal(result.success, false);
+  assert.match(result.reason, /ENOENT|no such file/i);
 });
 
 test("handles connection errors", async () => {

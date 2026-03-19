@@ -210,6 +210,143 @@ test("deletes stale token on unregistered response", async () => {
   });
 });
 
+test("logs push failure details when APNs returns unsuccessful result", async () => {
+  const eventBus = createMockEventBus();
+  const warnings = [];
+
+  registerNotificationHandlers({
+    eventBus,
+    logger: {
+      warn(message, meta) {
+        warnings.push({ message, meta });
+      },
+      error() {},
+    },
+    User: {
+      async findById() {
+        return { displayName: "Walker" };
+      },
+    },
+    DeviceToken: {
+      async findByUserId() {
+        return [{ token: "prod-token-1234", platform: "ios" }];
+      },
+      async deleteToken() {},
+    },
+    apnsService: {
+      async sendNotification() {
+        return {
+          success: false,
+          reason: "APNS signing key missing",
+          statusCode: 500,
+        };
+      },
+    },
+  });
+
+  await eventBus.emit("CHALLENGE_INITIATED", {
+    instanceId: "inst-1",
+    userId: "user-1",
+    friendUserId: "user-2",
+    challengeId: "ch-1",
+  });
+
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0].message, /CHALLENGE_INITIATED/);
+  assert.equal(warnings[0].meta.reason, "APNS signing key missing");
+  assert.equal(warnings[0].meta.statusCode, 500);
+  assert.equal(warnings[0].meta.deviceTokenSuffix, "oken-1234");
+});
+
+test("FRIEND_REQUEST_SENT sends push to addressee with friends route payload", async () => {
+  const eventBus = createMockEventBus();
+  let sentNotification;
+
+  registerNotificationHandlers({
+    eventBus,
+    User: {
+      async findById(id) {
+        return { id, displayName: "Trail Walker" };
+      },
+    },
+    DeviceToken: {
+      async findByUserId(userId) {
+        assert.equal(userId, "user-2");
+        return [{ token: "friend-token-1", platform: "ios" }];
+      },
+      async deleteToken() {},
+    },
+    apnsService: {
+      async sendNotification(args) {
+        sentNotification = args;
+        return { success: true };
+      },
+    },
+    logger: {
+      warn() {},
+      error() {},
+    },
+  });
+
+  await eventBus.emit("FRIEND_REQUEST_SENT", {
+    userId: "user-1",
+    addresseeId: "user-2",
+  });
+
+  assert.equal(sentNotification.deviceToken, "friend-token-1");
+  assert.equal(sentNotification.title, "New Friend Request");
+  assert.equal(sentNotification.body, "Trail Walker sent you a friend request");
+  assert.deepEqual(sentNotification.payload, {
+    type: "FRIEND_REQUEST_SENT",
+    route: "friends",
+  });
+});
+
+test("FRIEND_REQUEST_ACCEPTED sends push to requester with friends route payload", async () => {
+  const eventBus = createMockEventBus();
+  let sentNotification;
+
+  registerNotificationHandlers({
+    eventBus,
+    User: {
+      async findById(id) {
+        return { id, displayName: "Summit Buddy" };
+      },
+    },
+    DeviceToken: {
+      async findByUserId(userId) {
+        assert.equal(userId, "user-1");
+        return [{ token: "accept-token-1", platform: "ios" }];
+      },
+      async deleteToken() {},
+    },
+    apnsService: {
+      async sendNotification(args) {
+        sentNotification = args;
+        return { success: true };
+      },
+    },
+    logger: {
+      warn() {},
+      error() {},
+    },
+  });
+
+  await eventBus.emit("FRIEND_REQUEST_ACCEPTED", {
+    userId: "user-2",
+    requesterId: "user-1",
+    friendshipId: "f-1",
+  });
+
+  assert.equal(sentNotification.deviceToken, "accept-token-1");
+  assert.equal(sentNotification.title, "Friend Request Accepted");
+  assert.equal(sentNotification.body, "Summit Buddy accepted your friend request");
+  assert.deepEqual(sentNotification.payload, {
+    type: "FRIEND_REQUEST_ACCEPTED",
+    route: "friends",
+  });
+});
+
 test("doesn't throw when APNs fails", async () => {
   const eventBus = createMockEventBus();
 
