@@ -9,6 +9,9 @@ const { signSessionToken: defaultSignSessionToken } = require("../services/sessi
 const { setStepGoal: defaultSetStepGoal } = require("../commands/setStepGoal");
 const { setDisplayName: defaultSetDisplayName } = require("../commands/setDisplayName");
 const { getIncomingFriendRequestCount: defaultGetIncomingFriendRequestCount } = require("../queries/getFriends");
+const { User: DefaultUser } = require("../models/user");
+
+const DISPLAY_NAME_MIN_LENGTH = 8;
 const { isAdminUser, withAdminFlag } = require("../services/adminAccess");
 
 function createAuthRouter(dependencies = {}) {
@@ -23,6 +26,7 @@ function createAuthRouter(dependencies = {}) {
   const updateDisplayName = dependencies.setDisplayName || defaultSetDisplayName;
   const getIncomingRequestCount = dependencies.getIncomingFriendRequestCount || defaultGetIncomingFriendRequestCount;
   const checkAdmin = dependencies.isAdminUser || isAdminUser;
+  const UserModel = dependencies.User || DefaultUser;
 
   // POST /auth/apple
   // Body: { identityToken, userIdentifier?, email?, name? }
@@ -130,6 +134,12 @@ function createAuthRouter(dependencies = {}) {
           .json({ error: "displayName must be a non-empty string or null" });
       }
 
+      if (trimmed.length < DISPLAY_NAME_MIN_LENGTH) {
+        return res
+          .status(400)
+          .json({ error: `displayName must be at least ${DISPLAY_NAME_MIN_LENGTH} characters` });
+      }
+
       try {
         const updatedUser = await updateDisplayName({
           userId: req.user.id,
@@ -162,7 +172,24 @@ function createAuthRouter(dependencies = {}) {
     }
   });
 
+  router.get("/check-display-name", requireAuth, async (req, res) => {
+    const { name } = req.query;
+
+    if (!name || typeof name !== "string" || !name.trim()) {
+      return res.status(400).json({ error: "name query parameter is required" });
+    }
+
+    const trimmed = name.trim();
+
+    if (trimmed.length < DISPLAY_NAME_MIN_LENGTH) {
+      return res.json({ available: false, reason: `Must be at least ${DISPLAY_NAME_MIN_LENGTH} characters` });
+    }
+
+    const existing = await UserModel.findByDisplayNameInsensitive(trimmed, req.user.id);
+    res.json({ available: !existing });
+  });
+
   return router;
 }
 
-module.exports = { createAuthRouter };
+module.exports = { createAuthRouter, DISPLAY_NAME_MIN_LENGTH };

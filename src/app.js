@@ -8,6 +8,7 @@ const { createChallengesRouter } = require("./routes/challenges");
 const { createStakesRouter } = require("./routes/stakes");
 const { createAdminRouter } = require("./routes/admin");
 const { createNotificationsRouter } = require("./routes/notifications");
+const { createLeaderboardRouter } = require("./routes/leaderboard");
 
 function createApp(dependencies = {}) {
   const app = express();
@@ -22,6 +23,7 @@ function createApp(dependencies = {}) {
   app.use("/stakes", createStakesRouter(dependencies));
   app.use("/admin", createAdminRouter(dependencies));
   app.use("/notifications", createNotificationsRouter(dependencies));
+  app.use("/leaderboard", createLeaderboardRouter(dependencies));
 
   app.get("/health", (req, res) => {
     res.json({ status: "ok" });
