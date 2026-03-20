@@ -6,45 +6,24 @@ const challenges = [
 ];
 
 const stakes = [
-  // Food & Drink
-  { name: "Buy Ice Cream", description: "Loser treats the winner to ice cream", category: "food", relationshipTags: ["partner", "friend", "family"], format: "IN_PERSON" },
-  { name: "Buy Coffee", description: "Loser buys the winner a coffee", category: "food", relationshipTags: ["partner", "friend", "family"], format: "IN_PERSON" },
-  { name: "Buy Lunch", description: "Loser buys the winner lunch", category: "food", relationshipTags: ["friend", "family"], format: "IN_PERSON" },
-  { name: "Buy Dinner", description: "Loser takes the winner out to dinner", category: "food", relationshipTags: ["partner", "friend"], format: "IN_PERSON" },
-  { name: "Cook a Meal", description: "Loser cooks a meal for the winner", category: "food", relationshipTags: ["partner", "family"], format: "IN_PERSON" },
-  { name: "Bake a Treat", description: "Loser bakes something for the winner", category: "food", relationshipTags: ["partner", "friend", "family"], format: "IN_PERSON" },
-  { name: "Smoothie Run", description: "Loser makes a smoothie run for the winner", category: "food", relationshipTags: ["partner", "friend", "family"], format: "IN_PERSON" },
-  { name: "Breakfast in Bed", description: "Loser serves the winner breakfast in bed", category: "food", relationshipTags: ["partner"], format: "IN_PERSON" },
-
-  // Activity
-  { name: "Movie Tickets", description: "Loser buys movie tickets for the winner", category: "activity", relationshipTags: ["friend", "partner"], format: "IN_PERSON" },
-  { name: "Mini Golf", description: "Loser pays for a round of mini golf", category: "activity", relationshipTags: ["friend", "family", "partner"], format: "IN_PERSON" },
-  { name: "Bowling Night", description: "Loser covers a bowling outing", category: "activity", relationshipTags: ["friend", "family"], format: "IN_PERSON" },
-  { name: "Arcade Trip", description: "Loser funds an arcade trip", category: "activity", relationshipTags: ["friend", "family"], format: "IN_PERSON" },
-
-  // Experience
+  { name: "Coffee Run", description: "Loser makes a coffee run for the winner", category: "food", relationshipTags: ["partner", "friend", "family", "coworker"], format: "IN_PERSON" },
   { name: "Plan a Date Night", description: "Loser plans and pays for a date night", category: "experience", relationshipTags: ["partner"], format: "IN_PERSON" },
-  { name: "Plan a Day Trip", description: "Loser plans a day trip for both", category: "experience", relationshipTags: ["partner", "friend"], format: "IN_PERSON" },
-  { name: "Spa Day", description: "Loser books a spa treatment for the winner", category: "experience", relationshipTags: ["partner"], format: "IN_PERSON" },
-
-  // Act of Service
-  { name: "Do Their Chores", description: "Loser does the winner's chores for a day", category: "act_of_service", relationshipTags: ["partner", "family"], format: "IN_PERSON" },
-  { name: "Wash Their Car", description: "Loser washes the winner's car", category: "act_of_service", relationshipTags: ["partner", "friend", "family"], format: "IN_PERSON" },
-  { name: "Give a Massage", description: "Loser gives the winner a massage", category: "act_of_service", relationshipTags: ["partner"], format: "IN_PERSON" },
-  { name: "Carry Their Bag", description: "Loser carries the winner's bag for a day", category: "act_of_service", relationshipTags: ["friend"], format: "IN_PERSON" },
-  { name: "Make the Bed for a Week", description: "Loser makes the bed every morning for a week", category: "act_of_service", relationshipTags: ["partner", "family"], format: "IN_PERSON" },
-
-  // Digital / Virtual
-  { name: "DoorDash Gift Card", description: "Loser sends a DoorDash gift card", category: "digital", relationshipTags: ["friend", "family"], format: "VIRTUAL" },
-  { name: "Venmo a Treat", description: "Loser Venmos the winner $10 for a treat", category: "digital", relationshipTags: ["friend"], format: "VIRTUAL" },
-  { name: "Pick Their Phone Wallpaper", description: "Winner picks the loser's phone wallpaper for a week", category: "digital", relationshipTags: ["friend", "partner"], format: "VIRTUAL" },
-  { name: "Social Media Shoutout", description: "Loser posts a shoutout praising the winner", category: "digital", relationshipTags: ["friend"], format: "VIRTUAL" },
-  { name: "Spotify Playlist", description: "Loser creates a custom playlist for the winner", category: "digital", relationshipTags: ["partner", "friend"], format: "VIRTUAL" },
-
-  // Fun / Silly
-  { name: "Wear a Silly Hat", description: "Loser wears a silly hat for a day", category: "activity", relationshipTags: ["friend", "family"], format: "IN_PERSON" },
-  { name: "Bad Accent Day", description: "Loser speaks in a bad accent for an hour", category: "activity", relationshipTags: ["friend", "family", "partner"], format: "EITHER" },
-  { name: "Winner's Choice", description: "Winner picks any reasonable dare for the loser", category: "activity", relationshipTags: ["friend", "partner", "family"], format: "EITHER" },
+  { name: "Cook Dinner", description: "Loser cooks the winner's favorite meal", category: "food", relationshipTags: ["partner", "family", "sibling"], format: "IN_PERSON" },
+  { name: "Lunch Treat", description: "Loser buys the winner lunch", category: "food", relationshipTags: ["friend", "coworker"], format: "IN_PERSON" },
+  { name: "Desk Cleanup", description: "Loser tidies the winner's desk for a week", category: "act_of_service", relationshipTags: ["coworker"], format: "IN_PERSON" },
+  { name: "Presentation Duty", description: "Loser presents at the next team standup", category: "act_of_service", relationshipTags: ["coworker"], format: "IN_PERSON" },
+  { name: "Movie Pick", description: "Winner picks the next movie night film", category: "experience", relationshipTags: ["partner", "friend", "family", "sibling"], format: "IN_PERSON" },
+  { name: "Car Wash", description: "Loser washes the winner's car", category: "act_of_service", relationshipTags: ["friend", "family", "sibling", "parent"], format: "IN_PERSON" },
+  { name: "Spotify Playlist", description: "Loser curates a custom playlist for the winner", category: "digital", relationshipTags: ["friend", "partner", "sibling"], format: "REMOTE" },
+  { name: "Social Media Shoutout", description: "Loser posts a shoutout praising the winner", category: "digital", relationshipTags: ["friend", "sibling", "coworker"], format: "REMOTE" },
+  { name: "Lawn Mowing", description: "Loser mows the winner's lawn", category: "act_of_service", relationshipTags: ["family", "sibling", "parent"], format: "IN_PERSON" },
+  { name: "Breakfast in Bed", description: "Loser serves the winner breakfast in bed", category: "food", relationshipTags: ["partner", "parent"], format: "IN_PERSON" },
+  { name: "Arcade Showdown", description: "Loser pays for an arcade session", category: "experience", relationshipTags: ["friend", "sibling"], format: "IN_PERSON" },
+  { name: "Ice Cream Run", description: "Loser treats the winner to ice cream", category: "food", relationshipTags: ["friend", "family", "sibling", "parent"], format: "IN_PERSON" },
+  { name: "Chore Swap", description: "Loser takes over one of the winner's chores for a week", category: "act_of_service", relationshipTags: ["partner", "family", "sibling", "parent"], format: "IN_PERSON" },
+  { name: "Game Night Host", description: "Loser hosts and organizes the next game night", category: "experience", relationshipTags: ["friend", "coworker"], format: "IN_PERSON" },
+  { name: "Dog Walking Duty", description: "Loser walks the winner's dog for a week", category: "act_of_service", relationshipTags: ["partner", "family", "sibling"], format: "IN_PERSON" },
+  { name: "Venmo $5", description: "Loser sends the winner $5", category: "digital", relationshipTags: ["friend", "coworker", "sibling"], format: "REMOTE" },
 ];
 
 async function seed() {
