@@ -17,6 +17,11 @@ const {
 const {
   updateRelationshipType: defaultUpdateRelationshipType,
 } = require("../commands/updateRelationshipType");
+const { stepSyncPushService } = require("../services/stepSyncPush");
+
+function todayDateString() {
+  return new Date().toISOString().slice(0, 10);
+}
 
 function createFriendsRouter(dependencies = {}) {
   const router = Router();
@@ -35,6 +40,10 @@ function createFriendsRouter(dependencies = {}) {
     dependencies.getFriendsWithSteps || defaultGetFriendsWithSteps;
   const updateRelationType =
     dependencies.updateRelationshipType || defaultUpdateRelationshipType;
+  const requestStepSyncForUsers =
+    dependencies.requestStepSyncForUsers ||
+    stepSyncPushService.requestStepSyncForUsers;
+  const logger = dependencies.logger || console;
 
   router.use(requireAuth);
 
@@ -58,8 +67,17 @@ function createFriendsRouter(dependencies = {}) {
   // GET /friends/steps?date=YYYY-MM-DD
   router.get("/steps", async (req, res) => {
     try {
-      const date = req.query.date || new Date().toISOString().slice(0, 10);
+      const date = req.query.date || todayDateString();
       const friends = await getFriendsWithSteps(req.user.id, date);
+
+      if (date === todayDateString() && friends.length > 0) {
+        Promise.resolve()
+          .then(() => requestStepSyncForUsers(friends.map((friend) => friend.id)))
+          .catch((error) => {
+            logger.error("Friends step sync request error:", error);
+          });
+      }
+
       res.json({ friends });
     } catch (error) {
       console.error("Friends steps error:", error);

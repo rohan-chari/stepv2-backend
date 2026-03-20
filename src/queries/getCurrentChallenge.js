@@ -2,12 +2,17 @@ const { ChallengeInstance } = require("../models/challengeInstance");
 const {
   ensureWeeklyChallengeForDate,
 } = require("../services/weeklyChallengeState");
-const { getNextMonday9amNewYork } = require("../utils/week");
+const {
+  getChallengeEndsAtForWeek,
+  getChallengeSyncDaysForWeek,
+  getNextMonday9amNewYork,
+} = require("../utils/week");
 
 function buildGetCurrentChallenge(dependencies = {}) {
   const ensureWeeklyChallenge =
     dependencies.ensureWeeklyChallengeForDate || ensureWeeklyChallengeForDate;
   const instanceModel = dependencies.ChallengeInstance || ChallengeInstance;
+  const now = dependencies.now || (() => new Date());
 
   return async function getCurrentChallenge(userId) {
     const { weeklyChallenge } = await ensureWeeklyChallenge();
@@ -17,6 +22,7 @@ function buildGetCurrentChallenge(dependencies = {}) {
         challenge: null,
         weekOf: null,
         instances: [],
+        syncDays: [],
         nextDropAt: getNextMonday9amNewYork(),
       };
     }
@@ -36,6 +42,8 @@ function buildGetCurrentChallenge(dependencies = {}) {
         thresholdValue: weeklyChallenge.challenge.thresholdValue,
       },
       weekOf: weeklyChallenge.weekOf,
+      endsAt: getChallengeEndsAtForWeek(weeklyChallenge.weekOf),
+      syncDays: getChallengeSyncDaysForWeek(weeklyChallenge.weekOf, now()),
       instances,
     };
   };

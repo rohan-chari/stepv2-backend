@@ -47,20 +47,15 @@ function buildApnsService(config = {}) {
     return cachedToken;
   }
 
-  function sendNotificationRequest({
+  function sendPushRequest({
     host,
     authToken,
     deviceToken,
-    title,
-    body,
-    payload = {},
+    apnsPayload,
+    pushType,
+    priority,
   }) {
-    const apnsPayload = JSON.stringify({
-      aps: { alert: { title, body }, sound: "default" },
-      ...payload,
-    });
-
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       let client;
       try {
         client = connect(host);
@@ -77,7 +72,8 @@ function buildApnsService(config = {}) {
         ":path": `/3/device/${deviceToken}`,
         authorization: `bearer ${authToken}`,
         "apns-topic": bundleId,
-        "apns-push-type": "alert",
+        "apns-push-type": pushType,
+        "apns-priority": priority,
         "content-type": "application/json",
       });
 
@@ -119,7 +115,47 @@ function buildApnsService(config = {}) {
     });
   }
 
-  async function sendNotification({ deviceToken, title, body, payload = {} }) {
+  function sendAlertNotificationRequest({
+    host,
+    authToken,
+    deviceToken,
+    title,
+    body,
+    payload = {},
+  }) {
+    return sendPushRequest({
+      host,
+      authToken,
+      deviceToken,
+      pushType: "alert",
+      priority: "10",
+      apnsPayload: JSON.stringify({
+        aps: { alert: { title, body }, sound: "default" },
+        ...payload,
+      }),
+    });
+  }
+
+  function sendSilentNotificationRequest({
+    host,
+    authToken,
+    deviceToken,
+    payload = {},
+  }) {
+    return sendPushRequest({
+      host,
+      authToken,
+      deviceToken,
+      pushType: "background",
+      priority: "5",
+      apnsPayload: JSON.stringify({
+        aps: { "content-available": 1 },
+        ...payload,
+      }),
+    });
+  }
+
+  async function sendWithBadDeviceTokenFallback({ deviceToken, sendRequest }) {
     let authToken;
     try {
       authToken = getAuthToken();
@@ -130,26 +166,20 @@ function buildApnsService(config = {}) {
       };
     }
 
-    const primaryResult = await sendNotificationRequest({
+    const primaryResult = await sendRequest({
       host: primaryHost,
       authToken,
       deviceToken,
-      title,
-      body,
-      payload,
     });
 
     if (primaryResult.reason !== "BadDeviceToken") {
       return primaryResult;
     }
 
-    const retryResult = await sendNotificationRequest({
+    const retryResult = await sendRequest({
       host: fallbackHost,
       authToken,
       deviceToken,
-      title,
-      body,
-      payload,
     });
 
     if (retryResult.success) {
@@ -163,7 +193,35 @@ function buildApnsService(config = {}) {
     return retryResult;
   }
 
-  return { sendNotification };
+  async function sendNotification({ deviceToken, title, body, payload = {} }) {
+    return sendWithBadDeviceTokenFallback({
+      deviceToken,
+      sendRequest: ({ host, authToken, deviceToken }) =>
+        sendAlertNotificationRequest({
+          host,
+          authToken,
+          deviceToken,
+          title,
+          body,
+          payload,
+        }),
+    });
+  }
+
+  async function sendSilentNotification({ deviceToken, payload = {} }) {
+    return sendWithBadDeviceTokenFallback({
+      deviceToken,
+      sendRequest: ({ host, authToken, deviceToken }) =>
+        sendSilentNotificationRequest({
+          host,
+          authToken,
+          deviceToken,
+          payload,
+        }),
+    });
+  }
+
+  return { sendNotification, sendSilentNotification };
 }
 
 const apnsService = buildApnsService();

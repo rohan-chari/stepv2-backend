@@ -79,6 +79,7 @@ function buildTestService(overrides = {}) {
 test("returns object with sendNotification method", () => {
   const service = buildTestService();
   assert.equal(typeof service.sendNotification, "function");
+  assert.equal(typeof service.sendSilentNotification, "function");
 });
 
 test("constructs correct APNs payload", async () => {
@@ -258,4 +259,45 @@ test("handles connection errors", async () => {
 
   assert.equal(result.success, false);
   assert.equal(result.reason, "connection failed");
+});
+
+test("constructs a silent background APNs payload with background headers", async () => {
+  let capturedHeaders;
+  let capturedPayload;
+
+  const connect = () => {
+    const client = new EventEmitter();
+    client.close = () => {};
+    client.request = (headers) => {
+      capturedHeaders = headers;
+      const req = new EventEmitter();
+      req.end = (payload) => {
+        capturedPayload = JSON.parse(payload);
+        process.nextTick(() => {
+          req.emit("response", { ":status": 200 });
+          req.emit("end");
+        });
+      };
+      return req;
+    };
+    return client;
+  };
+
+  const service = buildTestService({ connect });
+
+  await service.sendSilentNotification({
+    deviceToken: "abc123",
+    payload: { type: "STEP_SYNC_REQUEST" },
+  });
+
+  assert.equal(capturedHeaders[":path"], "/3/device/abc123");
+  assert.equal(capturedHeaders["apns-topic"], "com.test.app");
+  assert.equal(capturedHeaders["apns-push-type"], "background");
+  assert.equal(capturedHeaders["apns-priority"], "5");
+  assert.deepEqual(capturedPayload, {
+    aps: {
+      "content-available": 1,
+    },
+    type: "STEP_SYNC_REQUEST",
+  });
 });

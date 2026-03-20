@@ -105,6 +105,29 @@ test("GET /challenges/current returns the weekly challenge and user's instances"
             thresholdValue: null,
           },
           weekOf: "2026-03-16",
+          endsAt: "2026-03-23T03:59:00.000Z",
+          syncDays: [
+            {
+              date: "2026-03-16",
+              startsAt: "2026-03-16T04:00:00.000Z",
+              endsAt: "2026-03-17T04:00:00.000Z",
+            },
+            {
+              date: "2026-03-17",
+              startsAt: "2026-03-17T04:00:00.000Z",
+              endsAt: "2026-03-18T04:00:00.000Z",
+            },
+            {
+              date: "2026-03-18",
+              startsAt: "2026-03-18T04:00:00.000Z",
+              endsAt: "2026-03-19T04:00:00.000Z",
+            },
+            {
+              date: "2026-03-19",
+              startsAt: "2026-03-19T04:00:00.000Z",
+              endsAt: "2026-03-19T15:30:00.000Z",
+            },
+          ],
           instances: [
             {
               id: "instance-1",
@@ -142,6 +165,18 @@ test("GET /challenges/current returns the weekly challenge and user's instances"
     assert.equal(body.challenge.title, "Beat Your Partner");
     assert.equal(body.challenge.type, "head_to_head");
     assert.equal(body.weekOf, "2026-03-16");
+    assert.equal(body.endsAt, "2026-03-23T03:59:00.000Z");
+    assert.equal(body.syncDays.length, 4);
+    assert.deepEqual(body.syncDays[0], {
+      date: "2026-03-16",
+      startsAt: "2026-03-16T04:00:00.000Z",
+      endsAt: "2026-03-17T04:00:00.000Z",
+    });
+    assert.deepEqual(body.syncDays[3], {
+      date: "2026-03-19",
+      startsAt: "2026-03-19T04:00:00.000Z",
+      endsAt: "2026-03-19T15:30:00.000Z",
+    });
     assert.equal(body.instances.length, 2);
     assert.equal(body.instances[0].status, "active");
     assert.equal(body.instances[1].status, "pending_stake");
@@ -159,6 +194,7 @@ test("GET /challenges/current returns null challenge when no active week", async
           challenge: null,
           weekOf: null,
           instances: [],
+          syncDays: [],
           nextDropAt: "2026-03-23T14:00:00.000Z",
         };
       },
@@ -174,6 +210,7 @@ test("GET /challenges/current returns null challenge when no active week", async
     const body = await response.json();
     assert.equal(body.challenge, null);
     assert.deepEqual(body.instances, []);
+    assert.deepEqual(body.syncDays, []);
     assert.ok(body.nextDropAt, "Should include next scheduled drop time");
   } finally {
     await server.close();

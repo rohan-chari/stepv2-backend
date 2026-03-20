@@ -49,6 +49,32 @@ function getMondayOfWeek(date = new Date(), timeZone = "America/New_York") {
   return localDate.toISOString().slice(0, 10);
 }
 
+function formatDateString(year, month, day) {
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function parseDateString(value) {
+  const [year, month, day] = value.split("-").map(Number);
+
+  if (!year || !month || !day) {
+    return null;
+  }
+
+  return { year, month, day };
+}
+
+function addDaysToDateString(value, days) {
+  const parsed = parseDateString(value);
+
+  if (!parsed) {
+    return null;
+  }
+
+  const date = new Date(Date.UTC(parsed.year, parsed.month - 1, parsed.day));
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
 function parseOffsetMinutes(offset) {
   const match = offset.match(/^GMT([+-])(\d{1,2})(?::?(\d{2}))?$/);
   if (!match) return 0;
@@ -118,7 +144,101 @@ function getNextMonday9amNewYork(
   ).toISOString();
 }
 
+function getChallengeEndsAtForWeek(
+  weekOf,
+  timeZone = "America/New_York"
+) {
+  const challengeEndDate = addDaysToDateString(weekOf, 6);
+
+  if (!challengeEndDate) {
+    return null;
+  }
+
+  const parsed = parseDateString(challengeEndDate);
+
+  return zonedDateTimeToUtc(
+    {
+      year: parsed.year,
+      month: parsed.month,
+      day: parsed.day,
+      hour: 23,
+      minute: 59,
+      second: 0,
+    },
+    timeZone
+  ).toISOString();
+}
+
+function getChallengeSyncDaysForWeek(
+  weekOf,
+  now = new Date(),
+  timeZone = "America/New_York"
+) {
+  const weekStart = parseDateString(weekOf);
+
+  if (!weekStart) {
+    return [];
+  }
+
+  const todayParts = getTimeZoneParts(now, timeZone);
+  const today = formatDateString(
+    todayParts.year,
+    todayParts.month,
+    todayParts.day
+  );
+  const challengeEndDate = addDaysToDateString(weekOf, 6);
+  const syncThrough = today < challengeEndDate ? today : challengeEndDate;
+
+  if (syncThrough < weekOf) {
+    return [];
+  }
+
+  const syncDays = [];
+  let currentDate = weekOf;
+
+  while (currentDate <= syncThrough) {
+    const nextDate = addDaysToDateString(currentDate, 1);
+    const currentParts = parseDateString(currentDate);
+    const nextParts = parseDateString(nextDate);
+
+    syncDays.push({
+      date: currentDate,
+      startsAt: zonedDateTimeToUtc(
+        {
+          year: currentParts.year,
+          month: currentParts.month,
+          day: currentParts.day,
+          hour: 0,
+          minute: 0,
+          second: 0,
+        },
+        timeZone
+      ).toISOString(),
+      endsAt:
+        currentDate === today && syncThrough === today
+          ? now.toISOString()
+          : zonedDateTimeToUtc(
+              {
+                year: nextParts.year,
+                month: nextParts.month,
+                day: nextParts.day,
+                hour: 0,
+                minute: 0,
+                second: 0,
+              },
+              timeZone
+            ).toISOString(),
+    });
+
+    currentDate = nextDate;
+  }
+
+  return syncDays;
+}
+
 module.exports = {
+  getChallengeEndsAtForWeek,
+  getChallengeSyncDaysForWeek,
   getMondayOfWeek,
   getNextMonday9amNewYork,
 };

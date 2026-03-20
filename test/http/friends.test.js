@@ -363,6 +363,61 @@ test("GET /friends/steps returns friends with today's steps and goal", async () 
   }
 });
 
+test("GET /friends/steps requests background sync for today's friend ids", async () => {
+  let receivedUserIds;
+
+  const server = await startServer(
+    authMocks({
+      async getFriendsWithSteps() {
+        return [
+          { id: "user-2", displayName: "Trail Buddy", steps: 8500, stepGoal: 10000 },
+          { id: "user-3", displayName: "Hiker", steps: 0, stepGoal: null },
+        ];
+      },
+      async requestStepSyncForUsers(userIds) {
+        receivedUserIds = userIds;
+      },
+    })
+  );
+
+  try {
+    const response = await fetch(`${server.baseUrl}/friends/steps`, {
+      headers: { authorization: "Bearer apple-token" },
+    });
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(receivedUserIds, ["user-2", "user-3"]);
+  } finally {
+    await server.close();
+  }
+});
+
+test("GET /friends/steps does not request background sync for historical dates", async () => {
+  let syncRequested = false;
+
+  const server = await startServer(
+    authMocks({
+      async getFriendsWithSteps() {
+        return [{ id: "user-2", displayName: "Trail Buddy", steps: 8500, stepGoal: 10000 }];
+      },
+      async requestStepSyncForUsers() {
+        syncRequested = true;
+      },
+    })
+  );
+
+  try {
+    const response = await fetch(`${server.baseUrl}/friends/steps?date=2026-03-12`, {
+      headers: { authorization: "Bearer apple-token" },
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(syncRequested, false);
+  } finally {
+    await server.close();
+  }
+});
+
 test("GET /friends/steps defaults to today when no date param", async () => {
   let receivedDate;
 
