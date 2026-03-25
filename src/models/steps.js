@@ -26,6 +26,25 @@ const Steps = {
       data: fields,
     });
   },
+
+  async sumStepsForUsers(userIds, startDate, endDate) {
+    if (userIds.length === 0) return new Map();
+
+    const results = await prisma.step.groupBy({
+      by: ["userId"],
+      _sum: { steps: true },
+      where: {
+        userId: { in: userIds },
+        date: { gte: new Date(startDate), lte: new Date(endDate) },
+      },
+    });
+
+    const totals = new Map();
+    for (const row of results) {
+      totals.set(row.userId, row._sum.steps || 0);
+    }
+    return totals;
+  },
 };
 
 module.exports = { Steps };

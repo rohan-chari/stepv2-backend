@@ -26,7 +26,12 @@ test("getCurrentChallenge returns the ensured weekly challenge and user instance
     ChallengeInstance: {
       async findForUser(userId, weekOf) {
         queryCalls.push({ userId, weekOf });
-        return [{ id: "instance-1", status: "ACTIVE" }];
+        return [{ id: "instance-1", status: "ACTIVE", userAId: "user-1", userBId: "user-2" }];
+      },
+    },
+    Steps: {
+      async sumStepsForUsers() {
+        return new Map([["user-1", 8000], ["user-2", 5000]]);
       },
     },
     now() {
@@ -61,7 +66,9 @@ test("getCurrentChallenge returns the ensured weekly challenge and user instance
       endsAt: "2026-03-19T15:30:00.000Z",
     },
   ]);
-  assert.deepEqual(result.instances, [{ id: "instance-1", status: "ACTIVE" }]);
+  assert.equal(result.instances[0].id, "instance-1");
+  assert.equal(result.instances[0].status, "ACTIVE");
+  assert.deepEqual(result.instances[0].ranking, { rank: 1, totalParticipants: 2 });
   assert.deepEqual(queryCalls, [{ userId: "user-1", weekOf: "2026-03-16" }]);
 });
 
