@@ -18,6 +18,24 @@ async function getChallengeProgress(userId, instanceId) {
   }
 
   const weekOf = getMondayOfWeek();
+  const sunday = new Date(weekOf);
+  sunday.setDate(sunday.getDate() + 6);
+  const endDate = sunday.toISOString().slice(0, 10);
+
+  // 2 queries instead of 14
+  const [stepsA, stepsB] = await Promise.all([
+    Steps.findByUserIdAndDateRange(instance.userAId, weekOf, endDate),
+    Steps.findByUserIdAndDateRange(instance.userBId, weekOf, endDate),
+  ]);
+
+  // Index by date string for O(1) lookup
+  const stepsAByDate = new Map(
+    stepsA.map((s) => [s.date.toISOString().slice(0, 10), s.steps])
+  );
+  const stepsBByDate = new Map(
+    stepsB.map((s) => [s.date.toISOString().slice(0, 10), s.steps])
+  );
+
   let userATotalSteps = 0;
   let userBTotalSteps = 0;
   const dailyStepsA = [];
@@ -28,13 +46,8 @@ async function getChallengeProgress(userId, instanceId) {
     date.setDate(date.getDate() + i);
     const dateStr = date.toISOString().slice(0, 10);
 
-    const [stepsA, stepsB] = await Promise.all([
-      Steps.findByUserIdAndDate(instance.userAId, dateStr),
-      Steps.findByUserIdAndDate(instance.userBId, dateStr),
-    ]);
-
-    const a = stepsA?.steps || 0;
-    const b = stepsB?.steps || 0;
+    const a = stepsAByDate.get(dateStr) || 0;
+    const b = stepsBByDate.get(dateStr) || 0;
     userATotalSteps += a;
     userBTotalSteps += b;
     dailyStepsA.push({ date: dateStr, steps: a });

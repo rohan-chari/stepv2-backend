@@ -15,6 +15,9 @@ const connectionString = dbUrl.replace(/[?&]sslmode=[^&]*/g, "");
 
 const pool = new pg.Pool({
   connectionString,
+  max: 20,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000,
   ...(isLocalhost ? {} : { ssl: { rejectUnauthorized: false } }),
 });
 

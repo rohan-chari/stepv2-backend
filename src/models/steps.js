@@ -27,6 +27,16 @@ const Steps = {
     });
   },
 
+  async findByUserIdAndDateRange(userId, startDate, endDate) {
+    return prisma.step.findMany({
+      where: {
+        userId,
+        date: { gte: new Date(startDate), lte: new Date(endDate) },
+      },
+      orderBy: { date: "asc" },
+    });
+  },
+
   async sumStepsForUsers(userIds, startDate, endDate) {
     if (userIds.length === 0) return new Map();
 
