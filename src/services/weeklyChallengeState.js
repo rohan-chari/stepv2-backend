@@ -3,6 +3,7 @@ const { Challenge } = require("../models/challenge");
 const { ChallengeInstance } = require("../models/challengeInstance");
 const { Steps } = require("../models/steps");
 const { WeeklyChallenge } = require("../models/weeklyChallenge");
+const { awardCoins: defaultAwardCoins } = require("../commands/awardCoins");
 const { resolveChallenge } = require("./challengeResolution");
 const { selectWeeklyChallenge } = require("./challengeScheduler");
 const { getMondayOfWeek, getNextMonday9amNewYork } = require("../utils/week");
@@ -123,6 +124,7 @@ function buildResolveWeekInstances(dependencies = {}) {
   const stepsModel = dependencies.Steps || Steps;
   const resolve = dependencies.resolveChallenge || resolveChallenge;
   const events = dependencies.eventBus || eventBus;
+  const awardCoinsFn = dependencies.awardCoins || defaultAwardCoins;
 
   return async function resolveWeekInstances({ weekOf }) {
     const instances = await instanceModel.findActiveAndPending(weekOf);
@@ -166,6 +168,21 @@ function buildResolveWeekInstances(dependencies = {}) {
         userBTotalSteps: result.userBTotalSteps,
         resolvedAt: new Date(),
       });
+
+      // Award 100 coins to the winner
+      if (result.winnerUserId) {
+        try {
+          await awardCoinsFn({
+            userId: result.winnerUserId,
+            amount: 100,
+            reason: "challenge_win",
+            refId: instance.id,
+          });
+        } catch (e) {
+          // Don't fail resolution if coin award fails
+          console.error("Failed to award coins for challenge win:", e);
+        }
+      }
 
       events.emit("CHALLENGE_RESOLVED", {
         instanceId: instance.id,

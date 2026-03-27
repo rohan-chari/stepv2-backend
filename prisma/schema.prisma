@@ -15,6 +15,7 @@ model User {
   stepGoal    Int?     @map("step_goal")
   lastStepSyncAt DateTime? @map("last_step_sync_at")
   lastSilentPushSentAt DateTime? @map("last_silent_push_sent_at")
+  coins     Int      @default(0)
   createdAt DateTime @default(now()) @map("created_at")
   steps     Step[]
   sentRequests     Friendship[] @relation("sentRequests")
@@ -25,6 +26,7 @@ model User {
   challengesWon      ChallengeInstance[] @relation("challengeWinner")
   challengesProposed ChallengeInstance[] @relation("challengeProposer")
   deviceTokens       DeviceToken[]
+  coinTransactions   CoinTransaction[]
 
   @@map("users")
 }
@@ -188,4 +190,18 @@ model DeviceToken {
   @@unique([userId, token])
   @@index([userId])
   @@map("device_tokens")
+}
+
+model CoinTransaction {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  amount    Int
+  reason    String
+  refId     String?  @map("ref_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([userId, reason, refId])
+  @@map("coin_transactions")
 }

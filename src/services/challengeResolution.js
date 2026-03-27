@@ -49,6 +49,7 @@ async function resolveWeeklyChallenges({
   getChallenge,
   getDailySteps,
   updateInstance,
+  onChallengeWon,
 }) {
   const instances = await findActiveAndPendingInstances();
 
@@ -83,6 +84,10 @@ async function resolveWeeklyChallenges({
       resolvedAt: new Date().toISOString(),
     });
 
+    // Award coins to the winner
+    if (result.winnerUserId && onChallengeWon) {
+      await onChallengeWon(result.winnerUserId, instance.id);
+    }
   }
 }
 
