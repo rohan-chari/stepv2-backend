@@ -6,7 +6,7 @@ async function getFriendsList(userId) {
 
   return friendships.map((f) => {
     const friend = f.requesterId === userId ? f.addressee : f.requester;
-    return { id: friend.id, displayName: friend.displayName };
+    return { id: friend.id, displayName: friend.displayName, friendshipId: f.id };
   });
 }
 

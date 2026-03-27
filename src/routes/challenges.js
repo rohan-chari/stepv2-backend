@@ -1,6 +1,9 @@
 const { Router } = require("express");
 const { buildRequireAuth } = require("../middleware/requireAuth");
 const {
+  ChallengeInstance: defaultChallengeInstance,
+} = require("../models/challengeInstance");
+const {
   initiateChallenge: defaultInitiateChallenge,
 } = require("../commands/initiateChallenge");
 const {
@@ -34,6 +37,8 @@ function createChallengesRouter(dependencies = {}) {
     dependencies.getChallengeHistory || defaultGetChallengeHistory;
   const getChallengeProgress =
     dependencies.getChallengeProgress || defaultGetChallengeProgress;
+  const challengeInstanceModel =
+    dependencies.ChallengeInstance || defaultChallengeInstance;
 
   router.use(requireAuth);
 
@@ -138,6 +143,29 @@ function createChallengesRouter(dependencies = {}) {
       res.json({ progress });
     } catch (error) {
       console.error("Challenge progress error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // DELETE /challenges/:instanceId
+  router.delete("/:instanceId", async (req, res) => {
+    try {
+      const instance = await challengeInstanceModel.findById(
+        req.params.instanceId
+      );
+
+      if (!instance) {
+        return res.status(404).json({ error: "Challenge not found" });
+      }
+
+      if (instance.userAId !== req.user.id && instance.userBId !== req.user.id) {
+        return res.status(403).json({ error: "Not a participant" });
+      }
+
+      await challengeInstanceModel.deleteById(req.params.instanceId);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Cancel challenge error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });

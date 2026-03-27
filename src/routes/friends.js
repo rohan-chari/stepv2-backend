@@ -17,6 +17,9 @@ const {
 const {
   updateRelationshipType: defaultUpdateRelationshipType,
 } = require("../commands/updateRelationshipType");
+const {
+  removeFriend: defaultRemoveFriend,
+} = require("../commands/removeFriend");
 const { stepSyncPushService } = require("../services/stepSyncPush");
 
 function todayDateString() {
@@ -40,6 +43,7 @@ function createFriendsRouter(dependencies = {}) {
     dependencies.getFriendsWithSteps || defaultGetFriendsWithSteps;
   const updateRelationType =
     dependencies.updateRelationshipType || defaultUpdateRelationshipType;
+  const removeFriend = dependencies.removeFriend || defaultRemoveFriend;
   const requestStepSyncForUsers =
     dependencies.requestStepSyncForUsers ||
     stepSyncPushService.requestStepSyncForUsers;
@@ -185,6 +189,25 @@ function createFriendsRouter(dependencies = {}) {
       }
 
       console.error("Relationship type error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // DELETE /friends/:friendshipId
+  router.delete("/:friendshipId", async (req, res) => {
+    try {
+      const result = await removeFriend({
+        userId: req.user.id,
+        friendshipId: req.params.friendshipId,
+      });
+
+      res.json(result);
+    } catch (error) {
+      if (error.name === "RemoveFriendError") {
+        return res.status(404).json({ error: error.message });
+      }
+
+      console.error("Remove friend error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });

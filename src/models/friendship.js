@@ -78,6 +78,10 @@ const Friendship = {
     });
   },
 
+  async delete(id) {
+    return prisma.friendship.delete({ where: { id } });
+  },
+
   async findPendingOutgoing(userId) {
     return prisma.friendship.findMany({
       where: { requesterId: userId, status: "PENDING" },

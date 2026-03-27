@@ -85,6 +85,12 @@ const ChallengeInstance = {
     });
   },
 
+  async deleteById(id) {
+    return prisma.challengeInstance.delete({
+      where: { id },
+    });
+  },
+
   async deleteByWeek(weekOf) {
     const result = await prisma.challengeInstance.deleteMany({
       where: {
@@ -123,6 +129,18 @@ const ChallengeInstance = {
     ]);
 
     return { instances, total };
+  },
+
+  async deleteBetweenUsers(userId1, userId2) {
+    const result = await prisma.challengeInstance.deleteMany({
+      where: {
+        OR: [
+          { userAId: userId1, userBId: userId2 },
+          { userAId: userId2, userBId: userId1 },
+        ],
+      },
+    });
+    return result.count;
   },
 
   async findActiveAndPending(weekOf) {
