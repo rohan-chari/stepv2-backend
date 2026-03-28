@@ -12,7 +12,7 @@ model User {
   email     String?
   name        String?
   displayName String?  @unique @map("display_name")
-  stepGoal    Int?     @map("step_goal")
+  stepGoal    Int      @default(5000) @map("step_goal")
   lastStepSyncAt DateTime? @map("last_step_sync_at")
   lastSilentPushSentAt DateTime? @map("last_silent_push_sent_at")
   coins     Int      @default(0)

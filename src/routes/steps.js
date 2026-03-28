@@ -61,7 +61,7 @@ function createStepsRouter(dependencies = {}) {
   router.get("/stats", async (req, res) => {
     try {
       const user = await userModel.findById(req.user.id);
-      const stepGoal = user?.stepGoal || 10000;
+      const stepGoal = user?.stepGoal || 5000;
       const allSteps = await readStepsHistory(req.user.id);
 
       const now = new Date();

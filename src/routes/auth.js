@@ -99,10 +99,10 @@ function createAuthRouter(dependencies = {}) {
       return res.status(400).json({ error: "stepGoal is required" });
     }
 
-    if (stepGoal !== null && (!Number.isInteger(stepGoal) || stepGoal <= 0)) {
+    if (!Number.isInteger(stepGoal) || stepGoal < 5000) {
       return res
         .status(400)
-        .json({ error: "stepGoal must be a positive integer or null" });
+        .json({ error: "stepGoal must be at least 5000" });
     }
 
     const updatedUser = await updateStepGoal({

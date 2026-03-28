@@ -83,14 +83,14 @@ test("PUT /auth/me/step-goal sets the goal", async () => {
   }
 });
 
-test("PUT /auth/me/step-goal clears goal with null", async () => {
+test("PUT /auth/me/step-goal accepts the minimum value of 5000", async () => {
   let receivedPayload;
 
   const server = await startServer(
     authMocks({
       async setStepGoal(payload) {
         receivedPayload = payload;
-        return { id: "user-1", stepGoal: null };
+        return { id: "user-1", stepGoal: payload.stepGoal };
       },
     })
   );
@@ -102,14 +102,38 @@ test("PUT /auth/me/step-goal clears goal with null", async () => {
         authorization: "Bearer apple-token",
         "content-type": "application/json",
       },
-      body: JSON.stringify({ stepGoal: null }),
+      body: JSON.stringify({ stepGoal: 5000 }),
     });
 
     assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.user.stepGoal, 5000);
+
     assert.deepEqual(receivedPayload, {
       userId: "user-1",
-      stepGoal: null,
+      stepGoal: 5000,
     });
+  } finally {
+    await server.close();
+  }
+});
+
+test("PUT /auth/me/step-goal rejects null", async () => {
+  const server = await startServer(authMocks());
+
+  try {
+    const response = await fetch(`${server.baseUrl}/auth/me/step-goal`, {
+      method: "PUT",
+      headers: {
+        authorization: "Bearer apple-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ stepGoal: null }),
+    });
+
+    assert.equal(response.status, 400);
+    const body = await response.json();
+    assert.equal(body.error, "stepGoal must be at least 5000");
   } finally {
     await server.close();
   }
@@ -140,7 +164,7 @@ test("PUT /auth/me/step-goal returns 400 for invalid values", async () => {
   const server = await startServer(authMocks());
 
   try {
-    for (const stepGoal of [-5, 0, "abc", 3.5]) {
+    for (const stepGoal of [-5, 0, 1, 100, 4999, "abc", 3.5]) {
       const response = await fetch(`${server.baseUrl}/auth/me/step-goal`, {
         method: "PUT",
         headers: {
@@ -152,7 +176,7 @@ test("PUT /auth/me/step-goal returns 400 for invalid values", async () => {
 
       assert.equal(response.status, 400, `Expected 400 for stepGoal=${JSON.stringify(stepGoal)}`);
       const body = await response.json();
-      assert.equal(body.error, "stepGoal must be a positive integer or null");
+      assert.equal(body.error, "stepGoal must be at least 5000");
     }
   } finally {
     await server.close();
