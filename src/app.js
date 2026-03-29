@@ -9,12 +9,15 @@ const { createStakesRouter } = require("./routes/stakes");
 const { createAdminRouter } = require("./routes/admin");
 const { createNotificationsRouter } = require("./routes/notifications");
 const { createLeaderboardRouter } = require("./routes/leaderboard");
+const { createRacesRouter } = require("./routes/races");
+const { extractTimezone } = require("./middleware/extractTimezone");
 
 function createApp(dependencies = {}) {
   const app = express();
 
   app.use(cors());
   app.use(express.json());
+  app.use(extractTimezone);
 
   app.use("/auth", createAuthRouter(dependencies));
   app.use("/steps", createStepsRouter(dependencies));
@@ -24,6 +27,7 @@ function createApp(dependencies = {}) {
   app.use("/admin", createAdminRouter(dependencies));
   app.use("/notifications", createNotificationsRouter(dependencies));
   app.use("/leaderboard", createLeaderboardRouter(dependencies));
+  app.use("/races", createRacesRouter(dependencies));
 
   app.get("/health", (req, res) => {
     res.json({ status: "ok" });

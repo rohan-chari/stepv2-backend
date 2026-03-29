@@ -4,6 +4,7 @@ const { createApp } = require("./app");
 const { registerEventHandlers } = require("./handlers/eventHandlers");
 const { registerNotificationHandlers } = require("./handlers/notificationHandlers");
 const { scheduleCronJobs } = require("./jobs/weeklyChallenge");
+const { scheduleRaceExpiryCheck } = require("./jobs/raceExpiry");
 
 function startServer({
   app = createApp(),
@@ -20,6 +21,7 @@ function startServer({
   return app.listen(port, host, () => {
     logger.log(`Steps Tracker API running on ${host}:${port}`);
     schedule();
+    scheduleRaceExpiryCheck();
   });
 }
 

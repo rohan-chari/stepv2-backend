@@ -21,7 +21,7 @@ function buildGetCurrentChallenge(dependencies = {}) {
     dependencies.computeRankings || defaultComputeRankings;
   const now = dependencies.now || (() => new Date());
 
-  return async function getCurrentChallenge(userId) {
+  return async function getCurrentChallenge(userId, timeZone) {
     const { weeklyChallenge } = await ensureWeeklyChallenge();
 
     if (!weeklyChallenge || weeklyChallenge.resolvedAt) {
@@ -41,7 +41,8 @@ function buildGetCurrentChallenge(dependencies = {}) {
 
     const syncDays = getChallengeSyncDaysForWeek(
       weeklyChallenge.weekOf,
-      now()
+      now(),
+      timeZone
     );
 
     // Compute rankings for active instances
@@ -90,7 +91,7 @@ function buildGetCurrentChallenge(dependencies = {}) {
         thresholdValue: weeklyChallenge.challenge.thresholdValue,
       },
       weekOf: weeklyChallenge.weekOf,
-      endsAt: getChallengeEndsAtForWeek(weeklyChallenge.weekOf),
+      endsAt: getChallengeEndsAtForWeek(weeklyChallenge.weekOf, timeZone),
       syncDays,
       instances,
     };

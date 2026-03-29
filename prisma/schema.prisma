@@ -28,6 +28,10 @@ model User {
   deviceTokens       DeviceToken[]
   coinTransactions   CoinTransaction[]
 
+  racesCreated       Race[]              @relation("raceCreator")
+  racesWon           Race[]              @relation("raceWinner")
+  raceParticipations RaceParticipant[]
+
   @@map("users")
 }
 
@@ -64,6 +68,7 @@ model Step {
   id        String   @id @default(uuid())
   userId    String   @map("user_id")
   steps     Int
+  stepGoal  Int?     @map("step_goal")
   date      DateTime @db.Date
   createdAt DateTime @default(now()) @map("created_at")
   user      User     @relation(fields: [userId], references: [id])
@@ -204,4 +209,60 @@ model CoinTransaction {
   @@index([userId])
   @@index([userId, reason, refId])
   @@map("coin_transactions")
+}
+
+enum RaceStatus {
+  PENDING    @map("pending")
+  ACTIVE     @map("active")
+  COMPLETED  @map("completed")
+  CANCELLED  @map("cancelled")
+}
+
+enum RaceParticipantStatus {
+  INVITED    @map("invited")
+  ACCEPTED   @map("accepted")
+  DECLINED   @map("declined")
+}
+
+model Race {
+  id              String     @id @default(uuid())
+  creatorId       String     @map("creator_id")
+  name            String
+  targetSteps     Int        @map("target_steps")
+  status          RaceStatus @default(PENDING)
+  maxDurationDays Int        @default(7) @map("max_duration_days")
+  startedAt       DateTime?  @map("started_at")
+  endsAt          DateTime?  @map("ends_at")
+  completedAt     DateTime?  @map("completed_at")
+  winnerUserId    String?    @map("winner_user_id")
+  createdAt       DateTime   @default(now()) @map("created_at")
+  updatedAt       DateTime   @updatedAt @map("updated_at")
+
+  creator      User              @relation("raceCreator", fields: [creatorId], references: [id])
+  winner       User?             @relation("raceWinner", fields: [winnerUserId], references: [id])
+  participants RaceParticipant[]
+
+  @@index([creatorId])
+  @@index([status])
+  @@index([winnerUserId])
+  @@map("races")
+}
+
+model RaceParticipant {
+  id         String                @id @default(uuid())
+  raceId     String                @map("race_id")
+  userId     String                @map("user_id")
+  status        RaceParticipantStatus @default(INVITED)
+  totalSteps    Int                   @default(0) @map("total_steps")
+  baselineSteps Int                   @default(0) @map("baseline_steps")
+  finishedAt DateTime?             @map("finished_at")
+  joinedAt   DateTime              @default(now()) @map("joined_at")
+
+  race Race @relation(fields: [raceId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([raceId, userId])
+  @@index([userId, status])
+  @@index([raceId, status])
+  @@map("race_participants")
 }

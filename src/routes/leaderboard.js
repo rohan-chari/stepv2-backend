@@ -23,7 +23,7 @@ function createLeaderboardRouter(dependencies = {}) {
         });
       }
 
-      const result = await getLeaderboard(period, req.user.id);
+      const result = await getLeaderboard(period, req.user.id, req.timeZone);
       res.json(result);
     } catch (error) {
       console.error("Leaderboard error:", error);

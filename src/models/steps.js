@@ -14,9 +14,9 @@ const Steps = {
     });
   },
 
-  async create({ userId, steps, date }) {
+  async create({ userId, steps, date, stepGoal }) {
     return prisma.step.create({
-      data: { userId, steps, date: new Date(date) },
+      data: { userId, steps, date: new Date(date), stepGoal },
     });
   },
 

@@ -171,6 +171,130 @@ function registerNotificationHandlers(dependencies = {}) {
     }
   });
 
+  events.on("RACE_INVITE_SENT", async (data) => {
+    try {
+      const { raceId, raceName, creatorUserId, inviteeUserId } = data;
+      await sendNotificationToUser({
+        eventName: "RACE_INVITE_SENT",
+        recipientUserId: inviteeUserId,
+        actorUserId: creatorUserId,
+        title: "Race Invite",
+        buildBody: (creatorName) =>
+          `${creatorName} invited you to a race: ${raceName}`,
+        payload: {
+          type: "RACE_INVITE_SENT",
+          route: "race_detail",
+          params: { raceId },
+        },
+        logContext: { raceId, inviteeUserId },
+      });
+    } catch (error) {
+      logger.error("RACE_INVITE_SENT handler failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  events.on("RACE_INVITE_ACCEPTED", async (data) => {
+    try {
+      const { raceId, userId, creatorUserId, raceName } = data;
+      await sendNotificationToUser({
+        eventName: "RACE_INVITE_ACCEPTED",
+        recipientUserId: creatorUserId,
+        actorUserId: userId,
+        title: "Race Update",
+        buildBody: (userName) => `${userName} joined your race: ${raceName}`,
+        payload: {
+          type: "RACE_INVITE_ACCEPTED",
+          route: "race_detail",
+          params: { raceId },
+        },
+        logContext: { raceId, userId },
+      });
+    } catch (error) {
+      logger.error("RACE_INVITE_ACCEPTED handler failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  events.on("RACE_STARTED", async (data) => {
+    try {
+      const { raceId, raceName, creatorUserId, participantUserIds } = data;
+      for (const participantUserId of participantUserIds) {
+        if (participantUserId === creatorUserId) continue;
+        await sendNotificationToUser({
+          eventName: "RACE_STARTED",
+          recipientUserId: participantUserId,
+          actorUserId: creatorUserId,
+          title: "Race Started",
+          buildBody: () => `The race "${raceName}" has started! Go!`,
+          payload: {
+            type: "RACE_STARTED",
+            route: "race_detail",
+            params: { raceId },
+          },
+          logContext: { raceId, participantUserId },
+        });
+      }
+    } catch (error) {
+      logger.error("RACE_STARTED handler failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  events.on("RACE_COMPLETED", async (data) => {
+    try {
+      const { raceId, winnerUserId, participantUserIds } = data;
+      if (!participantUserIds || participantUserIds.length === 0) return;
+
+      for (const participantUserId of participantUserIds) {
+        await sendNotificationToUser({
+          eventName: "RACE_COMPLETED",
+          recipientUserId: participantUserId,
+          actorUserId: winnerUserId,
+          title: "Race Finished",
+          buildBody: (winnerName) => `${winnerName} won the race!`,
+          payload: {
+            type: "RACE_COMPLETED",
+            route: "race_detail",
+            params: { raceId },
+          },
+          logContext: { raceId, participantUserId },
+        });
+      }
+    } catch (error) {
+      logger.error("RACE_COMPLETED handler failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  events.on("RACE_CANCELLED", async (data) => {
+    try {
+      const { raceId, raceName, creatorUserId, participantUserIds } = data;
+      for (const participantUserId of participantUserIds) {
+        await sendNotificationToUser({
+          eventName: "RACE_CANCELLED",
+          recipientUserId: participantUserId,
+          actorUserId: creatorUserId,
+          title: "Race Cancelled",
+          buildBody: () => `The race "${raceName}" was cancelled`,
+          payload: {
+            type: "RACE_CANCELLED",
+            route: "races",
+          },
+          logContext: { raceId, participantUserId },
+        });
+      }
+    } catch (error) {
+      logger.error("RACE_CANCELLED handler failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
   events.on("CHALLENGE_DROPPED", async (data) => {
     try {
       const { challengeId, title } = data;

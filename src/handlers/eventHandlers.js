@@ -60,6 +60,34 @@ function registerEventHandlers() {
   eventBus.on("CHALLENGE_RESOLVED", (data) => {
     console.log(`[EVENT] Challenge resolved: ${data.instanceId}, winner: ${data.winnerUserId || "none"}`);
   });
+
+  eventBus.on("RACE_CREATED", (data) => {
+    console.log(`[EVENT] Race created: ${data.raceId} by ${data.creatorUserId}`);
+  });
+
+  eventBus.on("RACE_INVITE_SENT", (data) => {
+    console.log(`[EVENT] Race invite sent: ${data.raceId} to ${data.inviteeUserId}`);
+  });
+
+  eventBus.on("RACE_INVITE_ACCEPTED", (data) => {
+    console.log(`[EVENT] Race invite accepted: ${data.raceId} by ${data.userId}`);
+  });
+
+  eventBus.on("RACE_INVITE_DECLINED", (data) => {
+    console.log(`[EVENT] Race invite declined: ${data.raceId} by ${data.userId}`);
+  });
+
+  eventBus.on("RACE_STARTED", (data) => {
+    console.log(`[EVENT] Race started: ${data.raceId}`);
+  });
+
+  eventBus.on("RACE_COMPLETED", (data) => {
+    console.log(`[EVENT] Race completed: ${data.raceId}, winner: ${data.winnerUserId || "none"}`);
+  });
+
+  eventBus.on("RACE_CANCELLED", (data) => {
+    console.log(`[EVENT] Race cancelled: ${data.raceId}`);
+  });
 }
 
 module.exports = { registerEventHandlers };

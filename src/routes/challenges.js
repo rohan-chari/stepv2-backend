@@ -45,7 +45,7 @@ function createChallengesRouter(dependencies = {}) {
   // GET /challenges/current
   router.get("/current", async (req, res) => {
     try {
-      const result = await getCurrentChallenge(req.user.id);
+      const result = await getCurrentChallenge(req.user.id, req.timeZone);
       res.json(result);
     } catch (error) {
       console.error("Get current challenge error:", error);
@@ -138,7 +138,8 @@ function createChallengesRouter(dependencies = {}) {
     try {
       const progress = await getChallengeProgress(
         req.user.id,
-        req.params.instanceId
+        req.params.instanceId,
+        req.timeZone
       );
       res.json({ progress });
     } catch (error) {

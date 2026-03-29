@@ -2,7 +2,7 @@ const { ChallengeInstance } = require("../models/challengeInstance");
 const { Steps } = require("../models/steps");
 const { getMondayOfWeek } = require("../utils/week");
 
-async function getChallengeProgress(userId, instanceId) {
+async function getChallengeProgress(userId, instanceId, timeZone) {
   const instance = await ChallengeInstance.findById(instanceId);
 
   if (!instance) {
@@ -17,7 +17,7 @@ async function getChallengeProgress(userId, instanceId) {
     throw error;
   }
 
-  const weekOf = getMondayOfWeek();
+  const weekOf = getMondayOfWeek(new Date(), timeZone);
   const sunday = new Date(weekOf);
   sunday.setDate(sunday.getDate() + 6);
   const endDate = sunday.toISOString().slice(0, 10);

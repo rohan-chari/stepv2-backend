@@ -30,4 +30,9 @@ execSync(
   { stdio: "inherit", maxBuffer: 100 * 1024 * 1024 }
 );
 
+console.log("Clearing device tokens so dev doesn't push to real devices...");
+execSync(`psql "${localUrl}" -c "TRUNCATE device_tokens;"`, {
+  stdio: "inherit",
+});
+
 console.log("Done! Local database synced from prod.");

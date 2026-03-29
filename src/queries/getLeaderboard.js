@@ -1,16 +1,16 @@
 const { prisma } = require("../db");
 const { getMondayOfWeek, getTimeZoneParts } = require("../utils/week");
 
-function getDateBoundary(period) {
+function getDateBoundary(period, timeZone) {
   const now = new Date();
-  const parts = getTimeZoneParts(now);
+  const parts = getTimeZoneParts(now, timeZone);
 
   switch (period) {
     case "today": {
       return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
     }
     case "week": {
-      return getMondayOfWeek(now);
+      return getMondayOfWeek(now, timeZone);
     }
     case "month": {
       return `${parts.year}-${String(parts.month).padStart(2, "0")}-01`;
@@ -24,8 +24,8 @@ function getDateBoundary(period) {
   }
 }
 
-async function getLeaderboard(period, currentUserId) {
-  const dateBoundary = getDateBoundary(period);
+async function getLeaderboard(period, currentUserId, timeZone) {
+  const dateBoundary = getDateBoundary(period, timeZone);
 
   const whereClause = dateBoundary
     ? { date: { gte: new Date(dateBoundary) } }

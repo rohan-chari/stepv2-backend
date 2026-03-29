@@ -14,23 +14,27 @@ function buildRecordSteps(dependencies = {}) {
     const existing = await stepsModel.findByUserIdAndDate(userId, date);
 
     let record;
+    let lockedGoal;
+
     if (existing) {
       record = await stepsModel.update(existing.id, { steps });
       await userModel.update(userId, { lastStepSyncAt: now() });
       events.emit("STEPS_UPDATED", { userId, steps, date });
+      // Use the goal that was locked in when the record was first created
+      lockedGoal = existing.stepGoal;
     } else {
-      record = await stepsModel.create({ userId, steps, date });
+      const user = await userModel.findById(userId);
+      lockedGoal = user?.stepGoal;
+      record = await stepsModel.create({ userId, steps, date, stepGoal: lockedGoal });
       await userModel.update(userId, { lastStepSyncAt: now() });
       events.emit("STEPS_RECORDED", { userId, steps, date });
     }
 
-    // Check daily step goal coin bonus
+    // Check daily step goal coin bonus using the locked-in goal
     try {
-      const user = await userModel.findById(userId);
-      const goal = user?.stepGoal;
-      if (goal && goal > 0) {
+      if (lockedGoal && lockedGoal > 0) {
         // 1x goal: 10 coins
-        if (steps >= goal) {
+        if (steps >= lockedGoal) {
           await awardCoinsFn({
             userId,
             amount: 10,
@@ -39,7 +43,7 @@ function buildRecordSteps(dependencies = {}) {
           });
         }
         // 2x goal: additional 10 coins
-        if (steps >= goal * 2) {
+        if (steps >= lockedGoal * 2) {
           await awardCoinsFn({
             userId,
             amount: 10,

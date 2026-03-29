@@ -23,6 +23,9 @@ test("recordSteps stamps lastStepSyncAt when creating a daily record", async () 
       async update(id, fields) {
         updates.push({ id, fields });
       },
+      async findById() {
+        return { id: "user-1", stepGoal: 5000 };
+      },
     },
     eventBus: {
       emit(event, payload) {
