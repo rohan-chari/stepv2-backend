@@ -241,4 +241,5 @@ module.exports = {
   getChallengeSyncDaysForWeek,
   getMondayOfWeek,
   getNextMonday9amNewYork,
+  getTimeZoneParts,
 };

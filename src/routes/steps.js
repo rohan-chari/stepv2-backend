@@ -4,7 +4,7 @@ const { getStepsByDate, getStepsHistory } = require("../queries/getSteps");
 const { User } = require("../models/user");
 const { ChallengeInstance } = require("../models/challengeInstance");
 const { buildRequireAuth } = require("../middleware/requireAuth");
-const { getMondayOfWeek } = require("../utils/week");
+const { getMondayOfWeek, getTimeZoneParts } = require("../utils/week");
 
 function createStepsRouter(dependencies = {}) {
   const router = Router();
@@ -65,10 +65,11 @@ function createStepsRouter(dependencies = {}) {
       const allSteps = await readStepsHistory(req.user.id);
 
       const now = new Date();
-      const todayStr = now.toISOString().slice(0, 10);
+      const parts = getTimeZoneParts(now);
+      const todayStr = `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
       const weekOf = getMondayOfWeek(now);
-      const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
-      const yearStart = `${now.getFullYear()}-01-01`;
+      const monthStart = `${parts.year}-${String(parts.month).padStart(2, "0")}-01`;
+      const yearStart = `${parts.year}-01-01`;
 
       let thisWeek = 0;
       let thisMonth = 0;
