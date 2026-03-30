@@ -238,6 +238,7 @@ function getChallengeSyncDaysForWeek(
 
 module.exports = {
   addDaysToDateString,
+  formatDateString,
   getChallengeEndsAtForWeek,
   getChallengeSyncDaysForWeek,
   getMondayOfWeek,

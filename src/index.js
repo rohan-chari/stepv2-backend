@@ -13,6 +13,7 @@ function startServer({
   registerEventHandlers: register = registerEventHandlers,
   registerNotificationHandlers: registerNotifications = registerNotificationHandlers,
   scheduleCronJobs: schedule = scheduleCronJobs,
+  scheduleRaceExpiryCheck: scheduleRaceExpiry = scheduleRaceExpiryCheck,
   logger = console,
 } = {}) {
   register();
@@ -21,7 +22,7 @@ function startServer({
   return app.listen(port, host, () => {
     logger.log(`Steps Tracker API running on ${host}:${port}`);
     schedule();
-    scheduleRaceExpiryCheck();
+    scheduleRaceExpiry();
   });
 }
 

@@ -7,6 +7,7 @@ const { RaceActiveEffect } = require("../models/raceActiveEffect");
 const { completeRace } = require("../commands/completeRace");
 const { rollPowerup } = require("../commands/rollPowerup");
 const { expireEffects } = require("../commands/expireEffects");
+const { getTimeZoneParts, formatDateString, addDaysToDateString } = require("../utils/week");
 
 // Snapshot-based fallback for when StepSample data is unavailable
 function computeEffectModifiersFallback(effects, rawTotal) {
@@ -112,7 +113,8 @@ async function getRaceProgress(userId, raceId, timeZone) {
 
   // Expire timed effects before calculating
   const participantStepsMap = {};
-  const today = new Date().toISOString().slice(0, 10);
+  const nowParts = getTimeZoneParts(new Date(), timeZone);
+  const today = formatDateString(nowParts.year, nowParts.month, nowParts.day);
   const acceptedParticipants = race.participants.filter((p) => p.status === "ACCEPTED");
 
   // First pass: calculate raw step totals for expiry snapshots
@@ -122,15 +124,21 @@ async function getRaceProgress(userId, raceId, timeZone) {
       const joinedAt = p.joinedAt || raceStartedAt;
       // Use the later of joinedAt and raceStartedAt (joinedAt could be pre-start for early accepters)
       const effectiveStart = joinedAt > raceStartedAt ? joinedAt : raceStartedAt;
-      const startDate = effectiveStart.toISOString().slice(0, 10);
-      const nextDay = new Date(effectiveStart);
-      nextDay.setUTCDate(nextDay.getUTCDate() + 1);
-      const dayAfterStartDate = nextDay.toISOString().slice(0, 10);
+
+      // StepSample window uses UTC (samples are stored as UTC timestamps)
+      const startDayWindowEnd = new Date(effectiveStart);
+      startDayWindowEnd.setUTCDate(startDayWindowEnd.getUTCDate() + 1);
+      startDayWindowEnd.setUTCHours(0, 0, 0, 0);
+
+      // Daily Steps queries use timezone-aware dates (steps are stored under local dates)
+      const startParts = getTimeZoneParts(effectiveStart, timeZone);
+      const startDate = formatDateString(startParts.year, startParts.month, startParts.day);
+      const dayAfterStartDate = addDaysToDateString(startDate, 1);
 
       // For the start day: try StepSample for precise post-start steps
       let startDaySteps = 0;
       const startDaySamples = await StepSample.sumStepsInWindow(
-        p.userId, effectiveStart, new Date(dayAfterStartDate)
+        p.userId, effectiveStart, startDayWindowEnd
       );
       if (startDaySamples > 0) {
         startDaySteps = startDaySamples;

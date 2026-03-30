@@ -25,6 +25,8 @@ test("startServer listens on 0.0.0.0 by default", () => {
     registerEventHandlers() {
       registerCalls += 1;
     },
+    registerNotificationHandlers() {},
+    scheduleRaceExpiryCheck() {},
     scheduleCronJobs() {
       scheduleCalls += 1;
     },
