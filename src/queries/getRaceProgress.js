@@ -115,31 +115,11 @@ async function getRaceProgress(userId, raceId, timeZone) {
   const today = new Date().toISOString().slice(0, 10);
   const acceptedParticipants = race.participants.filter((p) => p.status === "ACCEPTED");
 
-  // Fetch raw timestamps to avoid Prisma adapter timezone shifting
-  // The race/participant tables use 'timestamp without time zone' but store UTC values.
-  // Prisma's PG adapter misinterprets them, so we read as text and append 'Z'.
-  const { prisma } = require("../db");
-  const rawRace = await prisma.$queryRawUnsafe(
-    `SELECT started_at::text AS started_at_raw FROM races WHERE id = $1`,
-    raceId
-  );
-  const raceStartedAtStr = rawRace[0]?.started_at_raw;
-  const raceStartedAt = raceStartedAtStr ? new Date(raceStartedAtStr + 'Z') : race.startedAt;
-
-  const rawTimestamps = await prisma.$queryRawUnsafe(
-    `SELECT id, joined_at::text AS joined_at_raw FROM race_participants WHERE race_id = $1`,
-    raceId
-  );
-  const rawJoinedAtMap = {};
-  for (const row of rawTimestamps) {
-    rawJoinedAtMap[row.id] = row.joined_at_raw;
-  }
-
   // First pass: calculate raw step totals for expiry snapshots
+  const raceStartedAt = race.startedAt;
   const rawStepTotals = await Promise.all(
     acceptedParticipants.map(async (p) => {
-      const joinedAtStr = rawJoinedAtMap[p.id];
-      const joinedAt = joinedAtStr ? new Date(joinedAtStr + 'Z') : raceStartedAt;
+      const joinedAt = p.joinedAt || raceStartedAt;
       // Use the later of joinedAt and raceStartedAt (joinedAt could be pre-start for early accepters)
       const effectiveStart = joinedAt > raceStartedAt ? joinedAt : raceStartedAt;
       const startDate = effectiveStart.toISOString().slice(0, 10);

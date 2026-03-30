@@ -29,26 +29,10 @@ async function resolveExpiredRaces() {
       let topUserId = null;
       let topSteps = 0;
 
-      // Fetch raw started_at to avoid Prisma timezone shifting
-      const { prisma } = require("../db");
-      const rawRace = await prisma.$queryRawUnsafe(
-        `SELECT started_at::text AS started_at_raw FROM races WHERE id = $1`, race.id
-      );
-      const raceStartedAt = rawRace[0]?.started_at_raw
-        ? new Date(rawRace[0].started_at_raw + 'Z')
-        : race.startedAt;
-
-      const rawTimestamps = await prisma.$queryRawUnsafe(
-        `SELECT id, joined_at::text AS joined_at_raw FROM race_participants WHERE race_id = $1`, race.id
-      );
-      const rawJoinedAtMap = {};
-      for (const row of rawTimestamps) {
-        rawJoinedAtMap[row.id] = row.joined_at_raw;
-      }
+      const raceStartedAt = race.startedAt;
 
       for (const p of acceptedParticipants) {
-        const joinedAtStr = rawJoinedAtMap[p.id];
-        const joinedAt = joinedAtStr ? new Date(joinedAtStr + 'Z') : raceStartedAt;
+        const joinedAt = p.joinedAt || raceStartedAt;
         const effectiveStart = joinedAt > raceStartedAt ? joinedAt : raceStartedAt;
         const startDate = effectiveStart.toISOString().slice(0, 10);
         const nextDay = new Date(effectiveStart);

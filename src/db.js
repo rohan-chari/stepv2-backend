@@ -13,6 +13,12 @@ const isLocalhost = dbUrl.includes("localhost") || dbUrl.includes("127.0.0.1");
 // Strip sslmode from URL to prevent pg from overriding our ssl config
 const connectionString = dbUrl.replace(/[?&]sslmode=[^&]*/g, "");
 
+// Force pg to serialize and parse timestamps as UTC.
+// Without this, JS Date objects get converted to local time on write
+// and misinterpreted on read, causing timezone offset drift.
+pg.types.setTypeParser(1114, (str) => new Date(str + 'Z'));
+pg.defaults.parseInputDatesAsUTC = true;
+
 const pool = new pg.Pool({
   connectionString,
   max: 20,
