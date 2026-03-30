@@ -115,13 +115,60 @@ async function getRaceProgress(userId, raceId, timeZone) {
   const today = new Date().toISOString().slice(0, 10);
   const acceptedParticipants = race.participants.filter((p) => p.status === "ACCEPTED");
 
+  // Fetch raw timestamps to avoid Prisma adapter timezone shifting
+  // The race/participant tables use 'timestamp without time zone' but store UTC values.
+  // Prisma's PG adapter misinterprets them, so we read as text and append 'Z'.
+  const { prisma } = require("../db");
+  const rawRace = await prisma.$queryRawUnsafe(
+    `SELECT started_at::text AS started_at_raw FROM races WHERE id = $1`,
+    raceId
+  );
+  const raceStartedAtStr = rawRace[0]?.started_at_raw;
+  const raceStartedAt = raceStartedAtStr ? new Date(raceStartedAtStr + 'Z') : race.startedAt;
+
+  const rawTimestamps = await prisma.$queryRawUnsafe(
+    `SELECT id, joined_at::text AS joined_at_raw FROM race_participants WHERE race_id = $1`,
+    raceId
+  );
+  const rawJoinedAtMap = {};
+  for (const row of rawTimestamps) {
+    rawJoinedAtMap[row.id] = row.joined_at_raw;
+  }
+
   // First pass: calculate raw step totals for expiry snapshots
   const rawStepTotals = await Promise.all(
     acceptedParticipants.map(async (p) => {
-      const startDate = (p.joinedAt || race.startedAt).toISOString().slice(0, 10);
-      const steps = await Steps.findByUserIdAndDateRange(p.userId, startDate, today);
-      const raw = steps.reduce((sum, s) => sum + s.steps, 0);
-      const baseAdjusted = Math.max(0, raw - (p.baselineSteps || 0));
+      const joinedAtStr = rawJoinedAtMap[p.id];
+      const joinedAt = joinedAtStr ? new Date(joinedAtStr + 'Z') : raceStartedAt;
+      // Use the later of joinedAt and raceStartedAt (joinedAt could be pre-start for early accepters)
+      const effectiveStart = joinedAt > raceStartedAt ? joinedAt : raceStartedAt;
+      const startDate = effectiveStart.toISOString().slice(0, 10);
+      const nextDay = new Date(effectiveStart);
+      nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+      const dayAfterStartDate = nextDay.toISOString().slice(0, 10);
+
+      // For the start day: try StepSample for precise post-start steps
+      let startDaySteps = 0;
+      const startDaySamples = await StepSample.sumStepsInWindow(
+        p.userId, effectiveStart, new Date(dayAfterStartDate)
+      );
+      if (startDaySamples > 0) {
+        startDaySteps = startDaySamples;
+      } else if (p.baselineSteps > 0) {
+        // Have a reliable baseline snapshot - use daily total minus baseline
+        const startDayRecord = await Steps.findByUserIdAndDate(p.userId, startDate);
+        startDaySteps = Math.max(0, (startDayRecord?.steps || 0) - p.baselineSteps);
+      }
+      // No samples AND no baseline = 0 for start day (don't over-count)
+
+      // For days after the start day: count full daily totals
+      let subsequentSteps = 0;
+      if (dayAfterStartDate <= today) {
+        const laterSteps = await Steps.findByUserIdAndDateRange(p.userId, dayAfterStartDate, today);
+        subsequentSteps = laterSteps.reduce((sum, s) => sum + s.steps, 0);
+      }
+
+      const baseAdjusted = Math.max(0, startDaySteps + subsequentSteps);
       participantStepsMap[p.id] = baseAdjusted;
       return { participant: p, baseAdjusted };
     })

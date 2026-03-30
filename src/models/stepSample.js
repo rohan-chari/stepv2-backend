@@ -35,15 +35,19 @@ const StepSample = {
   },
 
   async sumStepsInWindow(userId, windowStart, windowEnd) {
-    const result = await prisma.stepSample.aggregate({
-      _sum: { steps: true },
-      where: {
-        userId,
-        periodStart: { gte: new Date(windowStart) },
-        periodEnd: { lte: new Date(windowEnd) },
-      },
-    });
-    return result._sum.steps || 0;
+    // All timestamps stored as 'timestamp without time zone' representing UTC.
+    // Use raw SQL with plain timestamp comparison -- no ::timestamptz casts.
+    const start = typeof windowStart === 'string' ? windowStart : new Date(windowStart).toISOString();
+    const end = typeof windowEnd === 'string' ? windowEnd : new Date(windowEnd).toISOString();
+    const result = await prisma.$queryRawUnsafe(
+      `SELECT COALESCE(SUM(steps), 0)::int AS total
+       FROM step_samples
+       WHERE user_id = $1
+         AND period_end > $2::timestamp
+         AND period_start < $3::timestamp`,
+      userId, start, end
+    );
+    return result[0]?.total || 0;
   },
 };
 
