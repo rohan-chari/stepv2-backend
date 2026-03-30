@@ -21,7 +21,7 @@ test("rollPowerup returns RARE type when rng favors rare", () => {
   // rng returns 0.99 => last bucket (RARE), then 0.99 => last powerup in tier
   const result = rollPowerup(1, 4, () => 0.99);
   assert.equal(result.rarity, "RARE");
-  assert.equal(result.type, "COMPRESSION_SOCKS");
+  assert.equal(result.type, "FANNY_PACK");
 });
 
 test("leader gets more commons than last place over many rolls", () => {

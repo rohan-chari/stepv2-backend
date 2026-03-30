@@ -236,6 +236,8 @@ enum PowerupType {
   RUNNERS_HIGH      @map("runners_high")
   SECOND_WIND       @map("second_wind")
   STEALTH_MODE      @map("stealth_mode")
+  WRONG_TURN        @map("wrong_turn")
+  FANNY_PACK        @map("fanny_pack")
 }
 
 enum PowerupRarity {
@@ -308,6 +310,8 @@ model RaceParticipant {
   baselineSteps Int                   @default(0) @map("baseline_steps")
   nextBoxAtSteps Int                  @default(0) @map("next_box_at_steps")
   bonusSteps    Int                   @default(0) @map("bonus_steps")
+  powerupSlots  Int                   @default(3) @map("powerup_slots")
+  placement     Int?
   finishedAt    DateTime?             @map("finished_at")
   joinedAt      DateTime              @default(now()) @map("joined_at")
 

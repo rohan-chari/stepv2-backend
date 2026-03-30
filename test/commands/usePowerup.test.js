@@ -61,8 +61,9 @@ function makeDeps(overrides = {}) {
         ...overrides.RaceParticipant,
       },
       RaceActiveEffect: {
-        async findActiveByTypeForParticipant() {
-          return overrides.existingShield || null;
+        async findActiveByTypeForParticipant(participantId, type) {
+          if (type === "COMPRESSION_SOCKS") return overrides.existingShield || null;
+          return null;
         },
         async create(data) {
           const e = { id: "eff-1", ...data };

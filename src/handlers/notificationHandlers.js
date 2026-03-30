@@ -299,12 +299,13 @@ function registerNotificationHandlers(dependencies = {}) {
     LEG_CRAMP: (attackerName) => `${attackerName} used Leg Cramp on you! Your steps are frozen for 2 hours.`,
     RED_CARD: (attackerName) => `${attackerName} used Red Card! You lost steps.`,
     SHORTCUT: (attackerName) => `${attackerName} stole steps from you with Shortcut!`,
+    WRONG_TURN: (attackerName) => `${attackerName} sent you on a Wrong Turn! Your steps are reversed for 1 hour.`,
   };
 
   events.on("POWERUP_USED", async (data) => {
     try {
       const { raceId, userId, powerupType, targetUserId } = data;
-      if (!targetUserId || !["LEG_CRAMP", "RED_CARD", "SHORTCUT"].includes(powerupType)) return;
+      if (!targetUserId || !["LEG_CRAMP", "RED_CARD", "SHORTCUT", "WRONG_TURN"].includes(powerupType)) return;
 
       const buildBody = POWERUP_ATTACK_MESSAGES[powerupType];
       if (!buildBody) return;

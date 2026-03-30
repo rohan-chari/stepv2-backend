@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { buildRollPowerup, MAX_INVENTORY } = require("../../src/commands/rollPowerup");
+const { buildRollPowerup, DEFAULT_POWERUP_SLOTS } = require("../../src/commands/rollPowerup");
 
 // ---------------------------------------------------------------------------
 // General powerup tests — rules that apply to ALL powerup types
@@ -71,8 +71,8 @@ function rollArgs(overrides = {}) {
 // Inventory limit — max 3 HELD powerups
 // ===========================================================================
 
-test("MAX_INVENTORY is 3", () => {
-  assert.equal(MAX_INVENTORY, 3);
+test("DEFAULT_POWERUP_SLOTS is 3", () => {
+  assert.equal(DEFAULT_POWERUP_SLOTS, 3);
 });
 
 test("user with 3 HELD powerups cannot earn another", async () => {

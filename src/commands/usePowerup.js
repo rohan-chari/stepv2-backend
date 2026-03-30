@@ -6,14 +6,15 @@ const { Race } = require("../models/race");
 const { eventBus } = require("../events/eventBus");
 const { POWERUP_NAMES } = require("./rollPowerup");
 
-const OFFENSIVE_TYPES = ["LEG_CRAMP", "RED_CARD", "SHORTCUT"];
-const TARGETED_TYPES = ["LEG_CRAMP", "SHORTCUT"];
-const SELF_ONLY_TYPES = ["COMPRESSION_SOCKS", "PROTEIN_SHAKE", "RUNNERS_HIGH", "SECOND_WIND", "STEALTH_MODE"];
+const OFFENSIVE_TYPES = ["LEG_CRAMP", "RED_CARD", "SHORTCUT", "WRONG_TURN"];
+const TARGETED_TYPES = ["LEG_CRAMP", "SHORTCUT", "WRONG_TURN"];
+const SELF_ONLY_TYPES = ["COMPRESSION_SOCKS", "PROTEIN_SHAKE", "RUNNERS_HIGH", "SECOND_WIND", "STEALTH_MODE", "FANNY_PACK"];
 
 const EFFECT_DURATIONS = {
   LEG_CRAMP: 2 * 60 * 60 * 1000,      // 2 hours
   RUNNERS_HIGH: 3 * 60 * 60 * 1000,    // 3 hours
   STEALTH_MODE: 4 * 60 * 60 * 1000,    // 4 hours
+  WRONG_TURN: 1 * 60 * 60 * 1000,      // 1 hour
 };
 
 const PROTEIN_SHAKE_BONUS = 1500;
@@ -79,13 +80,25 @@ function buildUsePowerup(dependencies = {}) {
       }
     }
 
+    // Self-only powerups reject if a target is provided
+    if (SELF_ONLY_TYPES.includes(type) && targetUserId) {
+      throw new PowerupUseError("This powerup cannot be used on another player", 400);
+    }
+
     // Red Card auto-targets leader
     let resolvedTargetUserId = targetUserId;
     if (type === "RED_CARD") {
-      const sorted = [...acceptedParticipants].sort((a, b) => b.totalSteps - a.totalSteps);
+      if (targetUserId) {
+        throw new PowerupUseError("Red Card auto-targets the leader — you cannot specify a target", 400);
+      }
+      const eligible = acceptedParticipants.filter((p) => !p.finishedAt);
+      const sorted = [...eligible].sort((a, b) => b.totalSteps - a.totalSteps);
       const leader = sorted[0];
       if (leader.userId === userId) {
         throw new PowerupUseError("You cannot use Red Card while you are in the lead", 400);
+      }
+      if (sorted.length > 1 && leader.totalSteps === sorted[1].totalSteps) {
+        throw new PowerupUseError("Leaders are tied — wait until the tie is broken to use Red Card", 400);
       }
       resolvedTargetUserId = leader.userId;
     }
@@ -103,6 +116,68 @@ function buildUsePowerup(dependencies = {}) {
     }
 
     const targetDisplayName = targetParticipant?.user?.displayName || "a runner";
+
+    // Reject stacking Leg Cramp on a target that already has one active
+    if (type === "LEG_CRAMP" && targetParticipant) {
+      const existingCramp = await effectModel.findActiveByTypeForParticipant(
+        targetParticipant.id,
+        "LEG_CRAMP"
+      );
+      if (existingCramp) {
+        throw new PowerupUseError("Target already has an active Leg Cramp", 400);
+      }
+    }
+
+    // Reject stacking Runner's High when user already has one active
+    if (type === "RUNNERS_HIGH") {
+      const existingBuff = await effectModel.findActiveByTypeForParticipant(
+        myParticipant.id,
+        "RUNNERS_HIGH"
+      );
+      if (existingBuff) {
+        throw new PowerupUseError("You already have an active Runner's High", 400);
+      }
+    }
+
+    // Reject stacking Stealth Mode when user already has one active
+    if (type === "STEALTH_MODE") {
+      const existingStealth = await effectModel.findActiveByTypeForParticipant(
+        myParticipant.id,
+        "STEALTH_MODE"
+      );
+      if (existingStealth) {
+        throw new PowerupUseError("You already have an active Stealth Mode", 400);
+      }
+    }
+
+    // Reject stacking Wrong Turn on a target that already has one active
+    if (type === "WRONG_TURN" && targetParticipant) {
+      const existingWT = await effectModel.findActiveByTypeForParticipant(
+        targetParticipant.id,
+        "WRONG_TURN"
+      );
+      if (existingWT) {
+        throw new PowerupUseError("Target already has an active Wrong Turn", 400);
+      }
+    }
+
+    // Reject stacking Compression Socks when user already has an active shield
+    if (type === "COMPRESSION_SOCKS") {
+      const existingShield = await effectModel.findActiveByTypeForParticipant(
+        myParticipant.id,
+        "COMPRESSION_SOCKS"
+      );
+      if (existingShield) {
+        throw new PowerupUseError("You already have an active Compression Socks shield", 400);
+      }
+    }
+
+    // Reject Fanny Pack if user already has expanded slots
+    if (type === "FANNY_PACK") {
+      if (myParticipant.powerupSlots > 3) {
+        throw new PowerupUseError("You already have an active Fanny Pack", 400);
+      }
+    }
 
     // Check Compression Socks shield on target
     if (OFFENSIVE_TYPES.includes(type) && targetParticipant) {
@@ -171,9 +246,8 @@ function buildUsePowerup(dependencies = {}) {
       }
 
       case "RED_CARD": {
-        const sorted = [...acceptedParticipants].sort((a, b) => b.totalSteps - a.totalSteps);
-        const leaderSteps = sorted[0].totalSteps;
-        const penalty = Math.floor(leaderSteps * RED_CARD_PERCENT);
+        const leaderSteps = targetParticipant.totalSteps;
+        const penalty = Math.round(leaderSteps * RED_CARD_PERCENT);
 
         await participantModel.subtractBonusSteps(targetParticipant.id, penalty);
 
@@ -277,10 +351,14 @@ function buildUsePowerup(dependencies = {}) {
       }
 
       case "SECOND_WIND": {
-        const sorted = [...acceptedParticipants].sort((a, b) => b.totalSteps - a.totalSteps);
-        const leaderSteps = sorted[0].totalSteps;
-        const gap = Math.max(0, leaderSteps - myParticipant.totalSteps);
-        const bonus = Math.min(SECOND_WIND_MAX, Math.max(SECOND_WIND_MIN, Math.floor(gap * SECOND_WIND_FACTOR)));
+        const eligible = acceptedParticipants.filter((p) => !p.finishedAt);
+        const sorted = [...eligible].sort((a, b) => b.totalSteps - a.totalSteps);
+        const leader = sorted[0];
+        if (leader.userId === userId || leader.totalSteps === myParticipant.totalSteps) {
+          throw new PowerupUseError("You cannot use Second Wind while you are in the lead", 400);
+        }
+        const gap = Math.max(0, leader.totalSteps - myParticipant.totalSteps);
+        const bonus = Math.min(SECOND_WIND_MAX, Math.max(SECOND_WIND_MIN, Math.round(gap * SECOND_WIND_FACTOR)));
 
         await participantModel.addBonusSteps(myParticipant.id, bonus);
         result.bonus = bonus;
@@ -315,6 +393,54 @@ function buildUsePowerup(dependencies = {}) {
           eventType: "POWERUP_USED",
           powerupType: type,
           description: `${myDisplayName} activated Stealth Mode! Their progress is hidden for 4 hours.`,
+        });
+        break;
+      }
+
+      case "WRONG_TURN": {
+        // Cancel active Leg Cramp on target if present
+        const existingCramp = await effectModel.findActiveByTypeForParticipant(
+          targetParticipant.id,
+          "LEG_CRAMP"
+        );
+        if (existingCramp) {
+          await effectModel.update(existingCramp.id, { status: "EXPIRED" });
+        }
+
+        const effect = await effectModel.create({
+          raceId,
+          targetParticipantId: targetParticipant.id,
+          targetUserId: resolvedTargetUserId,
+          sourceUserId: userId,
+          powerupId,
+          type: "WRONG_TURN",
+          startsAt: currentTime,
+          expiresAt: new Date(currentTime.getTime() + EFFECT_DURATIONS.WRONG_TURN),
+          metadata: { stepsAtStart: targetParticipant.totalSteps },
+        });
+        result.effect = effect;
+
+        await eventModel.create({
+          raceId,
+          actorUserId: userId,
+          eventType: "POWERUP_USED",
+          powerupType: type,
+          targetUserId: resolvedTargetUserId,
+          description: `${myDisplayName} sent ${targetDisplayName} on a Wrong Turn! Their steps are reversed for 1 hour.`,
+          metadata: {},
+        });
+        break;
+      }
+
+      case "FANNY_PACK": {
+        await participantModel.updatePowerupSlots(myParticipant.id, myParticipant.powerupSlots + 1);
+
+        await eventModel.create({
+          raceId,
+          actorUserId: userId,
+          eventType: "POWERUP_USED",
+          powerupType: type,
+          description: `${myDisplayName} equipped a Fanny Pack! Extra powerup slot unlocked.`,
         });
         break;
       }

@@ -336,6 +336,7 @@ test("Protein Shake +1500 bonus pushes total above target — triggers race comp
     RaceParticipant: {
       async updateTotalSteps() {},
       async markFinished(id, time) { finishCalls.push({ id, time }); },
+      async setPlacement() {},
     },
     RaceActiveEffect: {
       async findEffectsForRaceByType() { return []; },
@@ -401,6 +402,7 @@ test("Protein Shake +1500 bonus that doesn't reach target does NOT trigger win",
     RaceParticipant: {
       async updateTotalSteps() {},
       async markFinished(id, time) { finishCalls.push({ id, time }); },
+      async setPlacement() {},
     },
     RaceActiveEffect: {
       async findEffectsForRaceByType() { return []; },
@@ -458,6 +460,7 @@ test("Protein Shake bonus is reflected in the race progress total", async () => 
     RaceParticipant: {
       async updateTotalSteps() {},
       async markFinished() {},
+      async setPlacement() {},
     },
     RaceActiveEffect: {
       async findEffectsForRaceByType() { return []; },

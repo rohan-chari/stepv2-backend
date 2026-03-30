@@ -136,6 +136,7 @@ function makeDeps({ samples, participants, dailyRecords, rangeRecords, now: nowF
       RaceParticipant: {
         async updateTotalSteps(id, totalSteps) { updates.push({ id, totalSteps }); },
         async markFinished() {},
+        async setPlacement() {},
       },
       RaceActiveEffect: {
         async findEffectsForRaceByType() { return []; },

@@ -13,6 +13,7 @@ const { getTimeZoneParts, formatDateString, addDaysToDateString, parseDateString
 function computeEffectModifiersFallback(effects, rawTotal) {
   let frozenSteps = 0;
   let buffedSteps = 0;
+  let reversedSteps = 0;
 
   for (const effect of effects) {
     const meta = effect.metadata || {};
@@ -32,51 +33,121 @@ function computeEffectModifiersFallback(effects, rawTotal) {
         : rawTotal;
       buffedSteps += Math.max(0, end - start);
     }
+
+    if (effect.type === "WRONG_TURN") {
+      const start = meta.stepsAtStart || 0;
+      const end = effect.status === "EXPIRED" && meta.stepsAtExpiry !== undefined
+        ? meta.stepsAtExpiry
+        : rawTotal;
+      reversedSteps += Math.max(0, end - start);
+    }
   }
 
-  return { frozenSteps, buffedSteps };
+  return { frozenSteps, buffedSteps, reversedSteps };
 }
 
 async function computeEffectModifiers(effects, rawTotal, userId, stepSampleModel) {
   let frozenSteps = 0;
   let buffedSteps = 0;
+  let reversedSteps = 0;
 
-  for (const effect of effects) {
+  const legCramps = effects.filter((e) => e.type === "LEG_CRAMP");
+  const runnersHighs = effects.filter((e) => e.type === "RUNNERS_HIGH");
+  const wrongTurns = effects.filter((e) => e.type === "WRONG_TURN");
+
+  for (const effect of legCramps) {
     const windowStart = effect.startsAt;
     const windowEnd = effect.expiresAt || new Date();
 
-    if (effect.type === "LEG_CRAMP") {
-      const sampleSteps = await stepSampleModel.sumStepsInWindow(userId, windowStart, windowEnd);
-      if (sampleSteps > 0) {
-        frozenSteps += sampleSteps;
-      } else {
-        // Fallback to snapshot approximation
-        const meta = effect.metadata || {};
-        const start = meta.stepsAtFreezeStart || 0;
-        const end = effect.status === "EXPIRED" && meta.stepsAtExpiry !== undefined
-          ? meta.stepsAtExpiry
-          : rawTotal;
-        frozenSteps += Math.max(0, end - start);
-      }
+    const sampleSteps = await stepSampleModel.sumStepsInWindow(userId, windowStart, windowEnd);
+    if (sampleSteps > 0) {
+      frozenSteps += sampleSteps;
+    } else {
+      const meta = effect.metadata || {};
+      const start = meta.stepsAtFreezeStart || 0;
+      const end = effect.status === "EXPIRED" && meta.stepsAtExpiry !== undefined
+        ? meta.stepsAtExpiry
+        : rawTotal;
+      frozenSteps += Math.max(0, end - start);
     }
+  }
 
-    if (effect.type === "RUNNERS_HIGH") {
-      const sampleSteps = await stepSampleModel.sumStepsInWindow(userId, windowStart, windowEnd);
-      if (sampleSteps > 0) {
-        buffedSteps += sampleSteps;
-      } else {
-        // Fallback to snapshot approximation
-        const meta = effect.metadata || {};
-        const start = meta.stepsAtBuffStart || 0;
-        const end = effect.status === "EXPIRED" && meta.stepsAtExpiry !== undefined
-          ? meta.stepsAtExpiry
-          : rawTotal;
-        buffedSteps += Math.max(0, end - start);
+  for (const effect of runnersHighs) {
+    const windowStart = effect.startsAt;
+    const windowEnd = effect.expiresAt || new Date();
+
+    const sampleSteps = await stepSampleModel.sumStepsInWindow(userId, windowStart, windowEnd);
+    if (sampleSteps > 0) {
+      buffedSteps += sampleSteps;
+    } else {
+      const meta = effect.metadata || {};
+      const start = meta.stepsAtBuffStart || 0;
+      const end = effect.status === "EXPIRED" && meta.stepsAtExpiry !== undefined
+        ? meta.stepsAtExpiry
+        : rawTotal;
+      buffedSteps += Math.max(0, end - start);
+    }
+  }
+
+  // Subtract overlap: steps during both a freeze and a buff should be frozen, not buffed
+  for (const cramp of legCramps) {
+    const crampStart = cramp.startsAt.getTime();
+    const crampEnd = (cramp.expiresAt || new Date()).getTime();
+
+    for (const buff of runnersHighs) {
+      const buffStart = buff.startsAt.getTime();
+      const buffEnd = (buff.expiresAt || new Date()).getTime();
+
+      const overlapStart = Math.max(crampStart, buffStart);
+      const overlapEnd = Math.min(crampEnd, buffEnd);
+
+      if (overlapStart < overlapEnd) {
+        const overlapSteps = await stepSampleModel.sumStepsInWindow(
+          userId, new Date(overlapStart), new Date(overlapEnd)
+        );
+        if (overlapSteps > 0) {
+          buffedSteps -= overlapSteps;
+        }
       }
     }
   }
 
-  return { frozenSteps, buffedSteps };
+  // Wrong Turn: steps during the effect are reversed (subtracted twice — once to undo, once to negate)
+  for (const effect of wrongTurns) {
+    const windowStart = effect.startsAt;
+    const windowEnd = effect.expiresAt || new Date();
+
+    const sampleSteps = await stepSampleModel.sumStepsInWindow(userId, windowStart, windowEnd);
+    if (sampleSteps > 0) {
+      reversedSteps += sampleSteps;
+    }
+  }
+
+  // Wrong Turn + Runner's High overlap: steps are doubled AND negated
+  for (const wt of wrongTurns) {
+    const wtStart = wt.startsAt.getTime();
+    const wtEnd = (wt.expiresAt || new Date()).getTime();
+
+    for (const buff of runnersHighs) {
+      const buffStart = buff.startsAt.getTime();
+      const buffEnd = (buff.expiresAt || new Date()).getTime();
+
+      const overlapStart = Math.max(wtStart, buffStart);
+      const overlapEnd = Math.min(wtEnd, buffEnd);
+
+      if (overlapStart < overlapEnd) {
+        const overlapSteps = await stepSampleModel.sumStepsInWindow(
+          userId, new Date(overlapStart), new Date(overlapEnd)
+        );
+        if (overlapSteps > 0) {
+          // Remove buff credit and negate for doubled reversal
+          buffedSteps -= 2 * overlapSteps;
+        }
+      }
+    }
+  }
+
+  return { frozenSteps, buffedSteps, reversedSteps };
 }
 
 function buildGetRaceProgress(deps = {}) {
@@ -191,42 +262,65 @@ function buildGetRaceProgress(deps = {}) {
         let total = baseAdjusted;
 
         if (race.powerupsEnabled) {
-          // Fetch all Leg Cramp and Runner's High effects (active + expired) for this participant
+          // Fetch all Leg Cramp, Runner's High, and Wrong Turn effects (active + expired) for this participant
           const legCramps = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "LEG_CRAMP");
           const runnersHighs = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "RUNNERS_HIGH");
+          const wrongTurns = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "WRONG_TURN");
 
-          const allEffects = [...legCramps, ...runnersHighs];
-          const { frozenSteps, buffedSteps } = await computeEffectModifiers(allEffects, baseAdjusted, participant.userId, stepSampleModel);
+          const allEffects = [...legCramps, ...runnersHighs, ...wrongTurns];
+          const { frozenSteps, buffedSteps, reversedSteps } = await computeEffectModifiers(allEffects, baseAdjusted, participant.userId, stepSampleModel);
 
-          total = Math.max(0, baseAdjusted - frozenSteps + buffedSteps + (participant.bonusSteps || 0));
+          total = Math.max(0, baseAdjusted - frozenSteps + buffedSteps - 2 * reversedSteps + (participant.bonusSteps || 0));
         }
 
         return { participant, totalSteps: total };
       })
     );
 
-    // Check for powerup thresholds and first finisher
-    let firstFinisher = null;
-
     // Sort by steps to determine positions for powerup rolls
     const sorted = [...stepTotals].sort((a, b) => b.totalSteps - a.totalSteps);
 
+    // Count previously finished participants
+    const previouslyFinished = acceptedParticipants.filter((p) => p.finishedAt).length;
+
+    // Find new finishers this tick
+    const newFinishers = [];
     for (const { participant, totalSteps } of stepTotals) {
       await participantModel.updateTotalSteps(participant.id, totalSteps);
 
       if (totalSteps >= race.targetSteps && !participant.finishedAt) {
         await participantModel.markFinished(participant.id, now());
-        if (!firstFinisher || totalSteps > firstFinisher.totalSteps) {
-          firstFinisher = { userId: participant.userId, totalSteps };
-        }
+        newFinishers.push({ participant, totalSteps });
       }
     }
 
-    if (firstFinisher) {
+    // Assign placements — sort new finishers by steps descending for tiebreaking
+    newFinishers.sort((a, b) => b.totalSteps - a.totalSteps);
+    for (let i = 0; i < newFinishers.length; i++) {
+      const placement = previouslyFinished + i + 1;
+      await participantModel.setPlacement(newFinishers[i].participant.id, placement);
+    }
+
+    // Determine if race should complete: need top 3 finished, or 1st if <3 participants
+    const totalFinished = previouslyFinished + newFinishers.length;
+    const finishThreshold = acceptedParticipants.length < 3 ? 1 : 3;
+
+    if (newFinishers.length > 0 && totalFinished >= finishThreshold && previouslyFinished < finishThreshold) {
+      // Winner is the participant with placement 1
+      // Could be from a prior tick or the top new finisher
+      let winnerUserId;
+      const priorWinner = acceptedParticipants.find((p) => p.placement === 1);
+      if (priorWinner) {
+        winnerUserId = priorWinner.userId;
+      } else {
+        // First finisher(s) this tick — highest steps among new finishers is placement 1
+        winnerUserId = newFinishers[0].participant.userId;
+      }
+
       const allUserIds = acceptedParticipants.map((p) => p.userId);
       await completeRaceFn({
         raceId,
-        winnerUserId: firstFinisher.userId,
+        winnerUserId,
         participantUserIds: allUserIds,
       });
     }
@@ -251,6 +345,7 @@ function buildGetRaceProgress(deps = {}) {
           totalParticipants: sorted.length,
           powerupStepInterval: race.powerupStepInterval,
           displayName: myP.user.displayName,
+          powerupSlots: myP.powerupSlots,
         });
 
         const newBoxes = rollResults.filter((r) => r.powerup);
@@ -267,6 +362,8 @@ function buildGetRaceProgress(deps = {}) {
       if (!powerupData) {
         powerupData = { enabled: true, newBoxesEarned: [], inventoryFull: false };
       }
+
+      powerupData.powerupSlots = myParticipant.powerupSlots || 3;
 
       const inventory = await racePowerupModel.findHeldByParticipant(myParticipant.id);
       powerupData.inventory = inventory.map((p) => ({
@@ -300,7 +397,9 @@ function buildGetRaceProgress(deps = {}) {
 
     const leaderboard = stepTotals
       .map(({ participant, totalSteps }) => {
-        const isStealthed = stealthedUserIds.has(participant.userId) && participant.userId !== userId;
+        const isStealthed = stealthedUserIds.has(participant.userId)
+          && participant.userId !== userId
+          && !participant.finishedAt;
         return {
           userId: participant.userId,
           displayName: isStealthed ? "???" : participant.user.displayName,
@@ -311,7 +410,9 @@ function buildGetRaceProgress(deps = {}) {
         };
       })
       .sort((a, b) => {
-        // Sort stealthed players to an arbitrary position (treat null as 0 for sorting)
+        // Stealthed users always appear at the top
+        if (a.stealthed && !b.stealthed) return -1;
+        if (!a.stealthed && b.stealthed) return 1;
         const aSteps = a.totalSteps ?? 0;
         const bSteps = b.totalSteps ?? 0;
         return bSteps - aSteps;
