@@ -94,7 +94,7 @@ function registerEventHandlers() {
   });
 
   eventBus.on("POWERUP_USED", (data) => {
-    console.log(`[EVENT] Powerup used: ${data.type} by ${data.userId}${data.targetUserId ? ` on ${data.targetUserId}` : ""} in race ${data.raceId}`);
+    console.log(`[EVENT] Powerup used: ${data.powerupType} by ${data.userId}${data.targetUserId ? ` on ${data.targetUserId}` : ""} in race ${data.raceId}`);
   });
 
   eventBus.on("POWERUP_BLOCKED", (data) => {

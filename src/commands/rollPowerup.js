@@ -9,7 +9,7 @@ const MAX_INVENTORY = 3;
 const POWERUP_NAMES = {
   LEG_CRAMP: "Leg Cramp",
   RED_CARD: "Red Card",
-  BANANA_PEEL: "Banana Peel",
+  SHORTCUT: "Shortcut",
   COMPRESSION_SOCKS: "Compression Socks",
   PROTEIN_SHAKE: "Protein Shake",
   RUNNERS_HIGH: "Runner's High",
@@ -32,7 +32,7 @@ function buildRollPowerup(dependencies = {}) {
       const heldCount = await powerupModel.countHeldByParticipant(participantId);
 
       if (heldCount >= MAX_INVENTORY) {
-        results.push({ inventoryFull: true, threshold: currentThreshold });
+        results.push({ inventoryFull: true, powerup: null, threshold: currentThreshold });
         currentThreshold += powerupStepInterval;
         await participantModel.updateNextBoxAtSteps(participantId, currentThreshold);
         break;

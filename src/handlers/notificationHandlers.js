@@ -298,15 +298,15 @@ function registerNotificationHandlers(dependencies = {}) {
   const POWERUP_ATTACK_MESSAGES = {
     LEG_CRAMP: (attackerName) => `${attackerName} used Leg Cramp on you! Your steps are frozen for 2 hours.`,
     RED_CARD: (attackerName) => `${attackerName} used Red Card! You lost steps.`,
-    BANANA_PEEL: (attackerName) => `${attackerName} stole steps from you with Banana Peel!`,
+    SHORTCUT: (attackerName) => `${attackerName} stole steps from you with Shortcut!`,
   };
 
   events.on("POWERUP_USED", async (data) => {
     try {
-      const { raceId, userId, type, targetUserId } = data;
-      if (!targetUserId || !["LEG_CRAMP", "RED_CARD", "BANANA_PEEL"].includes(type)) return;
+      const { raceId, userId, powerupType, targetUserId } = data;
+      if (!targetUserId || !["LEG_CRAMP", "RED_CARD", "SHORTCUT"].includes(powerupType)) return;
 
-      const buildBody = POWERUP_ATTACK_MESSAGES[type];
+      const buildBody = POWERUP_ATTACK_MESSAGES[powerupType];
       if (!buildBody) return;
 
       await sendNotificationToUser({
@@ -320,7 +320,7 @@ function registerNotificationHandlers(dependencies = {}) {
           route: "race_detail",
           params: { raceId },
         },
-        logContext: { raceId, targetUserId, powerupType: type },
+        logContext: { raceId, targetUserId, powerupType },
       });
     } catch (error) {
       logger.error("POWERUP_USED handler failed", {

@@ -230,7 +230,7 @@ model CoinTransaction {
 enum PowerupType {
   LEG_CRAMP         @map("leg_cramp")
   RED_CARD          @map("red_card")
-  BANANA_PEEL       @map("banana_peel")
+  SHORTCUT          @map("shortcut")
   COMPRESSION_SOCKS @map("compression_socks")
   PROTEIN_SHAKE     @map("protein_shake")
   RUNNERS_HIGH      @map("runners_high")

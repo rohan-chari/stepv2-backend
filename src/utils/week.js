@@ -244,4 +244,6 @@ module.exports = {
   getMondayOfWeek,
   getNextMonday9amNewYork,
   getTimeZoneParts,
+  parseDateString,
+  zonedDateTimeToUtc,
 };

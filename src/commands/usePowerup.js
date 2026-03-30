@@ -6,8 +6,8 @@ const { Race } = require("../models/race");
 const { eventBus } = require("../events/eventBus");
 const { POWERUP_NAMES } = require("./rollPowerup");
 
-const OFFENSIVE_TYPES = ["LEG_CRAMP", "RED_CARD", "BANANA_PEEL"];
-const TARGETED_TYPES = ["LEG_CRAMP", "BANANA_PEEL"];
+const OFFENSIVE_TYPES = ["LEG_CRAMP", "RED_CARD", "SHORTCUT"];
+const TARGETED_TYPES = ["LEG_CRAMP", "SHORTCUT"];
 const SELF_ONLY_TYPES = ["COMPRESSION_SOCKS", "PROTEIN_SHAKE", "RUNNERS_HIGH", "SECOND_WIND", "STEALTH_MODE"];
 
 const EFFECT_DURATIONS = {
@@ -17,7 +17,7 @@ const EFFECT_DURATIONS = {
 };
 
 const PROTEIN_SHAKE_BONUS = 1500;
-const BANANA_PEEL_STEAL = 1000;
+const SHORTCUT_STEAL = 1000;
 const RED_CARD_PERCENT = 0.10;
 const SECOND_WIND_MIN = 500;
 const SECOND_WIND_MAX = 5000;
@@ -61,6 +61,9 @@ function buildUsePowerup(dependencies = {}) {
     if (!myParticipant) {
       throw new PowerupUseError("You are not an active participant", 403);
     }
+    if (myParticipant.finishedAt) {
+      throw new PowerupUseError("You have already finished the race", 400);
+    }
 
     const acceptedParticipants = race.participants.filter((p) => p.status === "ACCEPTED");
     const myDisplayName = myParticipant.user.displayName || "A runner";
@@ -93,6 +96,9 @@ function buildUsePowerup(dependencies = {}) {
       targetParticipant = acceptedParticipants.find((p) => p.userId === resolvedTargetUserId);
       if (!targetParticipant) {
         throw new PowerupUseError("Target is not an active participant in this race", 400);
+      }
+      if (targetParticipant.finishedAt) {
+        throw new PowerupUseError("Target has already finished the race", 400);
       }
     }
 
@@ -185,9 +191,9 @@ function buildUsePowerup(dependencies = {}) {
         break;
       }
 
-      case "BANANA_PEEL": {
+      case "SHORTCUT": {
         const targetEffective = Math.max(0, targetParticipant.totalSteps);
-        const stolen = Math.min(BANANA_PEEL_STEAL, targetEffective);
+        const stolen = Math.min(SHORTCUT_STEAL, targetEffective);
 
         if (stolen > 0) {
           await participantModel.subtractBonusSteps(targetParticipant.id, stolen);
@@ -202,7 +208,7 @@ function buildUsePowerup(dependencies = {}) {
           eventType: "POWERUP_USED",
           powerupType: type,
           targetUserId: resolvedTargetUserId,
-          description: `${myDisplayName} stole ${stolen.toLocaleString()} steps from ${targetDisplayName} with Banana Peel!`,
+          description: `${myDisplayName} stole ${stolen.toLocaleString()} steps from ${targetDisplayName} with Shortcut!`,
           metadata: { stolen },
         });
         break;
@@ -324,7 +330,7 @@ function buildUsePowerup(dependencies = {}) {
     events.emit("POWERUP_USED", {
       raceId,
       userId,
-      type,
+      powerupType: type,
       targetUserId: resolvedTargetUserId,
     });
 

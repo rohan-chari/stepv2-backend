@@ -159,8 +159,8 @@ test("usePowerup applies Leg Cramp to target", async () => {
   assert.equal(ctx.effectsCreated[0].metadata.stepsAtFreezeStart, 10000);
 });
 
-test("usePowerup applies Banana Peel and transfers steps", async () => {
-  const ctx = makeDeps({ powerupType: "BANANA_PEEL" });
+test("usePowerup applies Shortcut and transfers steps", async () => {
+  const ctx = makeDeps({ powerupType: "SHORTCUT" });
   const use = buildUsePowerup(ctx.deps);
 
   const result = await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", targetUserId: "user-2" });
@@ -262,7 +262,7 @@ test("usePowerup rejects targeting self", async () => {
 });
 
 test("usePowerup rejects targeted powerup without target", async () => {
-  const ctx = makeDeps({ powerupType: "BANANA_PEEL" });
+  const ctx = makeDeps({ powerupType: "SHORTCUT" });
   const use = buildUsePowerup(ctx.deps);
 
   await assert.rejects(
@@ -287,6 +287,142 @@ test("usePowerup rejects if powerup is not HELD", async () => {
       return true;
     }
   );
+});
+
+// ===========================================================================
+// Finished participants — powerups should not affect finished users
+// ===========================================================================
+
+test("usePowerup rejects if attacker has finished the race (self powerup)", async () => {
+  const ctx = makeDeps({
+    powerupType: "PROTEIN_SHAKE",
+    user1: { finishedAt: new Date("2026-03-29T10:00:00Z") },
+  });
+  const use = buildUsePowerup(ctx.deps);
+
+  await assert.rejects(
+    () => use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1" }),
+    (err) => {
+      assert.ok(err instanceof PowerupUseError);
+      return true;
+    }
+  );
+});
+
+test("usePowerup rejects if attacker has finished the race (offensive powerup)", async () => {
+  const ctx = makeDeps({
+    powerupType: "LEG_CRAMP",
+    user1: { finishedAt: new Date("2026-03-29T10:00:00Z") },
+  });
+  const use = buildUsePowerup(ctx.deps);
+
+  await assert.rejects(
+    () => use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", targetUserId: "user-2" }),
+    (err) => {
+      assert.ok(err instanceof PowerupUseError);
+      return true;
+    }
+  );
+});
+
+test("usePowerup rejects targeting a finished participant (Leg Cramp)", async () => {
+  const ctx = makeDeps({
+    powerupType: "LEG_CRAMP",
+    user2: { finishedAt: new Date("2026-03-29T10:00:00Z") },
+  });
+  const use = buildUsePowerup(ctx.deps);
+
+  await assert.rejects(
+    () => use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", targetUserId: "user-2" }),
+    (err) => {
+      assert.ok(err instanceof PowerupUseError);
+      return true;
+    }
+  );
+});
+
+test("usePowerup rejects targeting a finished participant (Shortcut)", async () => {
+  const ctx = makeDeps({
+    powerupType: "SHORTCUT",
+    user2: { finishedAt: new Date("2026-03-29T10:00:00Z") },
+  });
+  const use = buildUsePowerup(ctx.deps);
+
+  await assert.rejects(
+    () => use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", targetUserId: "user-2" }),
+    (err) => {
+      assert.ok(err instanceof PowerupUseError);
+      return true;
+    }
+  );
+});
+
+test("Finished user's steps are not modified by Red Card", async () => {
+  // user-2 is leader but finished — Red Card should not target them
+  const ctx = makeDeps({
+    powerupType: "RED_CARD",
+    user2: { totalSteps: 20000, finishedAt: new Date("2026-03-29T10:00:00Z") },
+  });
+  const use = buildUsePowerup(ctx.deps);
+
+  await assert.rejects(
+    () => use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1" }),
+    (err) => {
+      assert.ok(err instanceof PowerupUseError);
+      return true;
+    }
+  );
+  assert.equal(ctx.bonusChanges.length, 0);
+});
+
+// ===========================================================================
+// Steps cannot go negative
+// ===========================================================================
+
+test("Red Card on a user with very few steps does not make them negative", async () => {
+  // user-2 is leader with 100 steps, 10% = 10
+  const ctx = makeDeps({
+    powerupType: "RED_CARD",
+    user1: { totalSteps: 50 },
+    user2: { totalSteps: 100 },
+    user3: { totalSteps: 30 },
+  });
+  const use = buildUsePowerup(ctx.deps);
+
+  const result = await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1" });
+
+  // Penalty should be 10 (10% of 100), which keeps them at 90 — not negative
+  assert.equal(result.penalty, 10);
+  assert.ok(result.penalty <= 100, "penalty should not exceed the leader's total steps");
+});
+
+test("Shortcut on target with 0 steps does not produce negative balance", async () => {
+  const ctx = makeDeps({
+    powerupType: "SHORTCUT",
+    user2: { totalSteps: 0 },
+  });
+  const use = buildUsePowerup(ctx.deps);
+
+  const result = await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", targetUserId: "user-2" });
+
+  assert.equal(result.stolen, 0);
+  // No subtract should happen at all
+  const subtracts = ctx.bonusChanges.filter((c) => c.type === "subtract");
+  assert.equal(subtracts.length, 0);
+});
+
+test("Leg Cramp on a user with 0 steps does not put them negative after freeze", async () => {
+  const ctx = makeDeps({
+    powerupType: "LEG_CRAMP",
+    user2: { totalSteps: 0 },
+  });
+  const use = buildUsePowerup(ctx.deps);
+
+  const result = await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", targetUserId: "user-2" });
+
+  // Should succeed but freeze at 0
+  assert.equal(result.blocked, false);
+  assert.ok(ctx.effectsCreated[0].metadata.stepsAtFreezeStart === 0);
 });
 
 test("usePowerup rejects if race is not ACTIVE", async () => {
