@@ -15,7 +15,7 @@ function buildCreateRace(dependencies = {}) {
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
   const events = dependencies.eventBus || eventBus;
 
-  return async function createRace({ userId, name, targetSteps, maxDurationDays = 7 }) {
+  return async function createRace({ userId, name, targetSteps, maxDurationDays = 7, powerupsEnabled = false, powerupStepInterval }) {
     if (!name || typeof name !== "string" || name.trim().length === 0) {
       throw new RaceCreationError("Race name is required", 400);
     }
@@ -31,12 +31,19 @@ function buildCreateRace(dependencies = {}) {
     if (maxDurationDays < 1 || maxDurationDays > 30) {
       throw new RaceCreationError("Duration must be between 1 and 30 days", 400);
     }
+    if (powerupsEnabled) {
+      if (!powerupStepInterval || powerupStepInterval < 1000 || powerupStepInterval > 50000) {
+        throw new RaceCreationError("Powerup step interval must be between 1,000 and 50,000", 400);
+      }
+    }
 
     const race = await raceModel.create({
       creatorId: userId,
       name: name.trim(),
       targetSteps,
       maxDurationDays,
+      powerupsEnabled: !!powerupsEnabled,
+      powerupStepInterval: powerupsEnabled ? powerupStepInterval : null,
     });
 
     await participantModel.create({

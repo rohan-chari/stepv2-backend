@@ -1,7 +1,10 @@
 const { Race } = require("../models/race");
 const { RaceParticipant } = require("../models/raceParticipant");
+const { RaceActiveEffect } = require("../models/raceActiveEffect");
+const { StepSample } = require("../models/stepSample");
 const { Steps } = require("../models/steps");
 const { completeRace } = require("../commands/completeRace");
+const { computeEffectModifiers } = require("../queries/getRaceProgress");
 
 async function resolveExpiredRaces() {
   console.log("[CRON] Checking for expired races...");
@@ -35,7 +38,18 @@ async function resolveExpiredRaces() {
           startDate,
           today
         );
-        const total = Math.max(0, steps.reduce((sum, s) => sum + s.steps, 0) - (p.baselineSteps || 0));
+        const raw = steps.reduce((sum, s) => sum + s.steps, 0);
+        let total = Math.max(0, raw - (p.baselineSteps || 0));
+
+        // Apply powerup modifiers if enabled
+        if (race.powerupsEnabled) {
+          const legCramps = await RaceActiveEffect.findEffectsForRaceByType(race.id, p.id, "LEG_CRAMP");
+          const runnersHighs = await RaceActiveEffect.findEffectsForRaceByType(race.id, p.id, "RUNNERS_HIGH");
+          const allEffects = [...legCramps, ...runnersHighs];
+          const baseAdjusted = Math.max(0, raw - (p.baselineSteps || 0));
+          const { frozenSteps, buffedSteps } = await computeEffectModifiers(allEffects, baseAdjusted, p.userId, StepSample);
+          total = Math.max(0, baseAdjusted - frozenSteps + buffedSteps + (p.bonusSteps || 0));
+        }
 
         await RaceParticipant.updateTotalSteps(p.id, total);
 

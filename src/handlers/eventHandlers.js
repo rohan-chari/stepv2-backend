@@ -88,6 +88,26 @@ function registerEventHandlers() {
   eventBus.on("RACE_CANCELLED", (data) => {
     console.log(`[EVENT] Race cancelled: ${data.raceId}`);
   });
+
+  eventBus.on("POWERUP_EARNED", (data) => {
+    console.log(`[EVENT] Powerup earned: ${data.type} (${data.rarity}) by ${data.userId} in race ${data.raceId}`);
+  });
+
+  eventBus.on("POWERUP_USED", (data) => {
+    console.log(`[EVENT] Powerup used: ${data.type} by ${data.userId}${data.targetUserId ? ` on ${data.targetUserId}` : ""} in race ${data.raceId}`);
+  });
+
+  eventBus.on("POWERUP_BLOCKED", (data) => {
+    console.log(`[EVENT] Powerup blocked: ${data.blockedType} from ${data.attackerUserId} blocked by ${data.defenderUserId} in race ${data.raceId}`);
+  });
+
+  eventBus.on("POWERUP_DISCARDED", (data) => {
+    console.log(`[EVENT] Powerup discarded: ${data.type} by ${data.userId} in race ${data.raceId}`);
+  });
+
+  eventBus.on("EFFECT_EXPIRED", (data) => {
+    console.log(`[EVENT] Effect expired: ${data.type} on ${data.targetUserId} in race ${data.raceId}`);
+  });
 }
 
 module.exports = { registerEventHandlers };

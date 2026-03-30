@@ -50,10 +50,15 @@ function buildStartRace(dependencies = {}) {
     const today = startedAt.toISOString().slice(0, 10);
     for (const p of acceptedParticipants) {
       const todaySteps = await stepsModel.findByUserIdAndDate(p.userId, today);
-      await participantModel.update(p.id, {
+      const updateFields = {
         baselineSteps: todaySteps?.steps ?? 0,
         joinedAt: startedAt,
-      });
+      };
+      // Initialize powerup thresholds if powerups are enabled
+      if (race.powerupsEnabled && race.powerupStepInterval) {
+        updateFields.nextBoxAtSteps = race.powerupStepInterval;
+      }
+      await participantModel.update(p.id, updateFields);
     }
 
     const participantUserIds = acceptedParticipants.map((p) => p.userId);

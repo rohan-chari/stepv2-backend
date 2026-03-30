@@ -9,6 +9,12 @@ const {
 } = require("../commands/respondToRaceInvite");
 const { startRace: defaultStartRace } = require("../commands/startRace");
 const { cancelRace: defaultCancelRace } = require("../commands/cancelRace");
+const {
+  usePowerup: defaultUsePowerup,
+} = require("../commands/usePowerup");
+const {
+  discardPowerup: defaultDiscardPowerup,
+} = require("../commands/discardPowerup");
 const { getRaces: defaultGetRaces } = require("../queries/getRaces");
 const {
   getRaceDetails: defaultGetRaceDetails,
@@ -16,6 +22,12 @@ const {
 const {
   getRaceProgress: defaultGetRaceProgress,
 } = require("../queries/getRaceProgress");
+const {
+  getRaceInventory: defaultGetRaceInventory,
+} = require("../queries/getRaceInventory");
+const {
+  getRaceFeed: defaultGetRaceFeed,
+} = require("../queries/getRaceFeed");
 
 function createRacesRouter(dependencies = {}) {
   const router = Router();
@@ -32,18 +44,25 @@ function createRacesRouter(dependencies = {}) {
   const getRaceDetails = dependencies.getRaceDetails || defaultGetRaceDetails;
   const getRaceProgress =
     dependencies.getRaceProgress || defaultGetRaceProgress;
+  const usePowerup = dependencies.usePowerup || defaultUsePowerup;
+  const discardPowerup = dependencies.discardPowerup || defaultDiscardPowerup;
+  const getRaceInventory =
+    dependencies.getRaceInventory || defaultGetRaceInventory;
+  const getRaceFeed = dependencies.getRaceFeed || defaultGetRaceFeed;
 
   router.use(requireAuth);
 
   // POST /races
   router.post("/", async (req, res) => {
     try {
-      const { name, targetSteps, maxDurationDays } = req.body;
+      const { name, targetSteps, maxDurationDays, powerupsEnabled, powerupStepInterval } = req.body;
       const race = await createRace({
         userId: req.user.id,
         name,
         targetSteps,
         maxDurationDays,
+        powerupsEnabled,
+        powerupStepInterval,
       });
       res.status(201).json({ race });
     } catch (error) {
@@ -153,6 +172,79 @@ function createRacesRouter(dependencies = {}) {
         return res.status(error.statusCode).json({ error: error.message });
       }
       console.error("Race progress error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // POST /races/:raceId/powerups/:powerupId/use
+  router.post("/:raceId/powerups/:powerupId/use", async (req, res) => {
+    try {
+      const { targetUserId } = req.body;
+      const result = await usePowerup({
+        userId: req.user.id,
+        raceId: req.params.raceId,
+        powerupId: req.params.powerupId,
+        targetUserId,
+      });
+      res.json({ result });
+    } catch (error) {
+      if (error.name === "PowerupUseError") {
+        const status = error.statusCode || 400;
+        return res.status(status).json({ error: error.message });
+      }
+      console.error("Use powerup error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // POST /races/:raceId/powerups/:powerupId/discard
+  router.post("/:raceId/powerups/:powerupId/discard", async (req, res) => {
+    try {
+      const result = await discardPowerup({
+        userId: req.user.id,
+        raceId: req.params.raceId,
+        powerupId: req.params.powerupId,
+        displayName: req.user.displayName,
+      });
+      res.json(result);
+    } catch (error) {
+      if (error.name === "PowerupDiscardError") {
+        const status = error.statusCode || 400;
+        return res.status(status).json({ error: error.message });
+      }
+      console.error("Discard powerup error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // GET /races/:raceId/inventory
+  router.get("/:raceId/inventory", async (req, res) => {
+    try {
+      const result = await getRaceInventory(req.user.id, req.params.raceId);
+      res.json(result);
+    } catch (error) {
+      if (error.statusCode) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
+      console.error("Get race inventory error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // GET /races/:raceId/feed
+  router.get("/:raceId/feed", async (req, res) => {
+    try {
+      const { cursor, limit } = req.query;
+      const result = await getRaceFeed(req.user.id, req.params.raceId, {
+        cursor,
+        limit: limit ? parseInt(limit, 10) : undefined,
+      });
+      res.json(result);
+    } catch (error) {
+      if (error.statusCode) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
+      console.error("Get race feed error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });

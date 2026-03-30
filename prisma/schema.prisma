@@ -31,6 +31,7 @@ model User {
   racesCreated       Race[]              @relation("raceCreator")
   racesWon           Race[]              @relation("raceWinner")
   raceParticipations RaceParticipant[]
+  stepSamples        StepSample[]
 
   @@map("users")
 }
@@ -76,6 +77,21 @@ model Step {
   @@unique([userId, date])
   @@index([userId, date])
   @@map("steps")
+}
+
+model StepSample {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  periodStart DateTime @map("period_start")
+  periodEnd   DateTime @map("period_end")
+  steps       Int
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([userId, periodStart])
+  @@index([userId, periodStart, periodEnd])
+  @@map("step_samples")
 }
 
 enum ChallengeType {
@@ -211,6 +227,36 @@ model CoinTransaction {
   @@map("coin_transactions")
 }
 
+enum PowerupType {
+  LEG_CRAMP         @map("leg_cramp")
+  RED_CARD          @map("red_card")
+  BANANA_PEEL       @map("banana_peel")
+  COMPRESSION_SOCKS @map("compression_socks")
+  PROTEIN_SHAKE     @map("protein_shake")
+  RUNNERS_HIGH      @map("runners_high")
+  SECOND_WIND       @map("second_wind")
+  STEALTH_MODE      @map("stealth_mode")
+}
+
+enum PowerupRarity {
+  COMMON    @map("common")
+  UNCOMMON  @map("uncommon")
+  RARE      @map("rare")
+}
+
+enum PowerupStatus {
+  HELD      @map("held")
+  USED      @map("used")
+  DISCARDED @map("discarded")
+  EXPIRED   @map("expired")
+}
+
+enum ActiveEffectStatus {
+  ACTIVE   @map("active_effect")
+  EXPIRED  @map("expired_effect")
+  BLOCKED  @map("blocked")
+}
+
 enum RaceStatus {
   PENDING    @map("pending")
   ACTIVE     @map("active")
@@ -234,13 +280,18 @@ model Race {
   startedAt       DateTime?  @map("started_at")
   endsAt          DateTime?  @map("ends_at")
   completedAt     DateTime?  @map("completed_at")
-  winnerUserId    String?    @map("winner_user_id")
-  createdAt       DateTime   @default(now()) @map("created_at")
-  updatedAt       DateTime   @updatedAt @map("updated_at")
+  winnerUserId         String?    @map("winner_user_id")
+  powerupsEnabled      Boolean    @default(false) @map("powerups_enabled")
+  powerupStepInterval  Int?       @map("powerup_step_interval")
+  createdAt            DateTime   @default(now()) @map("created_at")
+  updatedAt            DateTime   @updatedAt @map("updated_at")
 
   creator      User              @relation("raceCreator", fields: [creatorId], references: [id])
   winner       User?             @relation("raceWinner", fields: [winnerUserId], references: [id])
   participants RaceParticipant[]
+  powerups     RacePowerup[]
+  activeEffects RaceActiveEffect[]
+  powerupEvents RacePowerupEvent[]
 
   @@index([creatorId])
   @@index([status])
@@ -249,20 +300,89 @@ model Race {
 }
 
 model RaceParticipant {
-  id         String                @id @default(uuid())
-  raceId     String                @map("race_id")
-  userId     String                @map("user_id")
+  id            String                @id @default(uuid())
+  raceId        String                @map("race_id")
+  userId        String                @map("user_id")
   status        RaceParticipantStatus @default(INVITED)
   totalSteps    Int                   @default(0) @map("total_steps")
   baselineSteps Int                   @default(0) @map("baseline_steps")
-  finishedAt DateTime?             @map("finished_at")
-  joinedAt   DateTime              @default(now()) @map("joined_at")
+  nextBoxAtSteps Int                  @default(0) @map("next_box_at_steps")
+  bonusSteps    Int                   @default(0) @map("bonus_steps")
+  finishedAt    DateTime?             @map("finished_at")
+  joinedAt      DateTime              @default(now()) @map("joined_at")
 
-  race Race @relation(fields: [raceId], references: [id], onDelete: Cascade)
-  user User @relation(fields: [userId], references: [id])
+  race          Race @relation(fields: [raceId], references: [id], onDelete: Cascade)
+  user          User @relation(fields: [userId], references: [id])
+  powerups      RacePowerup[]
+  activeEffectsReceived RaceActiveEffect[]
 
   @@unique([raceId, userId])
   @@index([userId, status])
   @@index([raceId, status])
   @@map("race_participants")
+}
+
+model RacePowerup {
+  id            String        @id @default(uuid())
+  raceId        String        @map("race_id")
+  participantId String        @map("participant_id")
+  userId        String        @map("user_id")
+  type          PowerupType
+  rarity        PowerupRarity
+  status        PowerupStatus @default(HELD)
+  earnedAtSteps Int           @map("earned_at_steps")
+  usedAt        DateTime?     @map("used_at")
+  targetUserId  String?       @map("target_user_id")
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+
+  race        Race            @relation(fields: [raceId], references: [id], onDelete: Cascade)
+  participant RaceParticipant @relation(fields: [participantId], references: [id], onDelete: Cascade)
+  activeEffect RaceActiveEffect?
+
+  @@unique([participantId, earnedAtSteps])
+  @@index([participantId, status])
+  @@index([raceId, userId])
+  @@map("race_powerups")
+}
+
+model RaceActiveEffect {
+  id                  String             @id @default(uuid())
+  raceId              String             @map("race_id")
+  targetParticipantId String             @map("target_participant_id")
+  targetUserId        String             @map("target_user_id")
+  sourceUserId        String             @map("source_user_id")
+  powerupId           String             @unique @map("powerup_id")
+  type                PowerupType
+  status              ActiveEffectStatus @default(ACTIVE)
+  startsAt            DateTime           @map("starts_at")
+  expiresAt           DateTime?          @map("expires_at")
+  metadata            Json?
+  createdAt           DateTime           @default(now()) @map("created_at")
+  updatedAt           DateTime           @updatedAt @map("updated_at")
+
+  race              Race            @relation(fields: [raceId], references: [id], onDelete: Cascade)
+  targetParticipant RaceParticipant @relation(fields: [targetParticipantId], references: [id], onDelete: Cascade)
+  powerup           RacePowerup     @relation(fields: [powerupId], references: [id], onDelete: Cascade)
+
+  @@index([targetParticipantId, status])
+  @@index([raceId, status])
+  @@map("race_active_effects")
+}
+
+model RacePowerupEvent {
+  id           String       @id @default(uuid())
+  raceId       String       @map("race_id")
+  actorUserId  String       @map("actor_user_id")
+  eventType    String       @map("event_type")
+  powerupType  PowerupType?  @map("powerup_type")
+  targetUserId String?      @map("target_user_id")
+  description  String
+  metadata     Json?
+  createdAt    DateTime     @default(now()) @map("created_at")
+
+  race Race @relation(fields: [raceId], references: [id], onDelete: Cascade)
+
+  @@index([raceId, createdAt])
+  @@map("race_powerup_events")
 }

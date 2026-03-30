@@ -1,10 +1,12 @@
 const { Router } = require("express");
 const { recordSteps } = require("../commands/recordSteps");
+const { recordStepSamples: defaultRecordStepSamples } = require("../commands/recordStepSamples");
 const { getStepsByDate, getStepsHistory } = require("../queries/getSteps");
 const { User } = require("../models/user");
 const { ChallengeInstance } = require("../models/challengeInstance");
 const { buildRequireAuth } = require("../middleware/requireAuth");
-const { getMondayOfWeek, getTimeZoneParts, addDaysToDateString } = require("../utils/week");
+const { getMondayOfWeek, getTimeZoneParts } = require("../utils/week");
+const { calculateStreak } = require("../utils/streak");
 
 function createStepsRouter(dependencies = {}) {
   const router = Router();
@@ -13,6 +15,7 @@ function createStepsRouter(dependencies = {}) {
   const saveSteps = dependencies.recordSteps || recordSteps;
   const readStepsByDate = dependencies.getStepsByDate || getStepsByDate;
   const readStepsHistory = dependencies.getStepsHistory || getStepsHistory;
+  const recordSamples = dependencies.recordStepSamples || defaultRecordStepSamples;
   const userModel = dependencies.User || User;
 
   router.use(requireAuth);
@@ -35,6 +38,27 @@ function createStepsRouter(dependencies = {}) {
       res.json({ record });
     } catch (error) {
       console.error("Steps error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // POST /steps/samples
+  // Body: { samples: [{ periodStart, periodEnd, steps }] }
+  router.post("/samples", async (req, res) => {
+    try {
+      const { samples } = req.body;
+
+      const result = await recordSamples({
+        userId: req.user.id,
+        samples,
+      });
+      res.json(result);
+    } catch (error) {
+      if (error.name === "StepSampleError") {
+        const status = error.statusCode || 400;
+        return res.status(status).json({ error: error.message });
+      }
+      console.error("Step samples error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });
@@ -88,24 +112,10 @@ function createStepsRouter(dependencies = {}) {
         if (dateStr >= monthStart) thisMonth += steps;
         if (dateStr >= weekOf) thisWeek += steps;
 
-        dateMap.set(dateStr, steps);
+        dateMap.set(dateStr, { steps, stepGoal: record.stepGoal });
       }
 
-      // Streak: consecutive days hitting step goal.
-      // Start from yesterday so today being incomplete doesn't reset the streak.
-      // Add today to the streak if it also qualifies.
-      let streak = 0;
-      const todaySteps = dateMap.get(todayStr) || 0;
-      const todayHit = todaySteps >= stepGoal;
-
-      for (let i = 1; ; i++) {
-        const dStr = addDaysToDateString(todayStr, -i);
-        const daySteps = dateMap.get(dStr);
-        if (daySteps === undefined || daySteps < stepGoal) break;
-        streak++;
-      }
-
-      if (todayHit) streak++;
+      const streak = calculateStreak(todayStr, dateMap, stepGoal);
 
       // Challenge W/L record
       const { prisma } = require("../db");

@@ -72,6 +72,27 @@ const RaceParticipant = {
       data: { finishedAt, status: "ACCEPTED" },
     });
   },
+
+  async addBonusSteps(id, amount) {
+    return prisma.raceParticipant.update({
+      where: { id },
+      data: { bonusSteps: { increment: amount } },
+    });
+  },
+
+  async subtractBonusSteps(id, amount) {
+    return prisma.raceParticipant.update({
+      where: { id },
+      data: { bonusSteps: { decrement: amount } },
+    });
+  },
+
+  async updateNextBoxAtSteps(id, nextBoxAtSteps) {
+    return prisma.raceParticipant.update({
+      where: { id },
+      data: { nextBoxAtSteps },
+    });
+  },
 };
 
 module.exports = { RaceParticipant };

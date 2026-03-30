@@ -21,9 +21,9 @@ const Race = {
     });
   },
 
-  async create({ creatorId, name, targetSteps, maxDurationDays }) {
+  async create({ creatorId, name, targetSteps, maxDurationDays, powerupsEnabled = false, powerupStepInterval = null }) {
     return prisma.race.create({
-      data: { creatorId, name, targetSteps, maxDurationDays },
+      data: { creatorId, name, targetSteps, maxDurationDays, powerupsEnabled, powerupStepInterval },
       include: {
         creator: { select: { id: true, displayName: true } },
         ...participantInclude,
