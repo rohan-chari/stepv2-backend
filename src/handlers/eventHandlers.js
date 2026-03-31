@@ -101,9 +101,7 @@ function registerEventHandlers() {
     console.log(`[EVENT] Powerup blocked: ${data.blockedType} from ${data.attackerUserId} blocked by ${data.defenderUserId} in race ${data.raceId}`);
   });
 
-  eventBus.on("POWERUP_DISCARDED", (data) => {
-    console.log(`[EVENT] Powerup discarded: ${data.type} by ${data.userId} in race ${data.raceId}`);
-  });
+  eventBus.on("POWERUP_DISCARDED", () => {});
 
   eventBus.on("EFFECT_EXPIRED", (data) => {
     console.log(`[EVENT] Effect expired: ${data.type} on ${data.targetUserId} in race ${data.raceId}`);

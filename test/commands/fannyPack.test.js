@@ -412,13 +412,9 @@ function makeRollDeps(overrides = {}) {
   };
 }
 
-test("Fanny Pack auto-activates when inventory is full on roll", async () => {
-  // Inventory has 3/3 — full. Rolls Fanny Pack → auto-activate, expand to 4
+test("rollPowerup creates mystery box without type (type determined at open time)", async () => {
   const ctx = makeRollDeps({
     heldCount: 3,
-    rollSequence: [
-      { type: "FANNY_PACK", rarity: "RARE" },
-    ],
   });
   const roll = buildRollPowerup(ctx.deps);
 
@@ -428,161 +424,15 @@ test("Fanny Pack auto-activates when inventory is full on roll", async () => {
     userId: "user-1",
     currentSteps: 1500,
     nextBoxAtSteps: 1000,
-    position: 2,
-    totalParticipants: 3,
     powerupStepInterval: 1000,
     displayName: "Alice",
   });
 
-  // Should auto-activate: expand slots
-  assert.equal(ctx.slotUpdates.length, 1);
-  assert.equal(ctx.slotUpdates[0].slots, 4);
-});
-
-test("Fanny Pack sits in inventory when there are open slots", async () => {
-  // Inventory has 1/3 — room available. Rolls Fanny Pack → goes to inventory
-  const ctx = makeRollDeps({
-    heldCount: 1,
-    rollSequence: [
-      { type: "FANNY_PACK", rarity: "RARE" },
-    ],
-  });
-  const roll = buildRollPowerup(ctx.deps);
-
-  const results = await roll({
-    raceId: "race-1",
-    participantId: "rp-1",
-    userId: "user-1",
-    currentSteps: 1500,
-    nextBoxAtSteps: 1000,
-    position: 2,
-    totalParticipants: 3,
-    powerupStepInterval: 1000,
-    displayName: "Alice",
-  });
-
-  // Should go to inventory, not auto-activate
-  assert.equal(ctx.slotUpdates.length, 0);
-  assert.equal(ctx.createdPowerups.length, 1);
-  assert.equal(ctx.createdPowerups[0].type, "FANNY_PACK");
-});
-
-test("Fanny Pack re-rolls when user already has expanded slots", async () => {
-  // User already has 4 slots (Fanny Pack active). Rolls Fanny Pack → re-roll to something else.
-  const ctx = makeRollDeps({
-    heldCount: 1,
-    rollSequence: [
-      { type: "FANNY_PACK", rarity: "RARE" },    // first roll — re-roll
-      { type: "PROTEIN_SHAKE", rarity: "COMMON" }, // second roll — accepted
-    ],
-  });
-  // Override to indicate participant already has 4 slots
-  ctx.deps.RaceParticipant.getParticipantSlots = async () => 4;
-
-  const roll = buildRollPowerup(ctx.deps);
-
-  const results = await roll({
-    raceId: "race-1",
-    participantId: "rp-1",
-    userId: "user-1",
-    currentSteps: 1500,
-    nextBoxAtSteps: 1000,
-    position: 2,
-    totalParticipants: 3,
-    powerupStepInterval: 1000,
-    displayName: "Alice",
-    powerupSlots: 4,
-  });
-
-  // Should have re-rolled: created powerup should be Protein Shake, not Fanny Pack
-  assert.equal(ctx.createdPowerups.length, 1);
-  assert.equal(ctx.createdPowerups[0].type, "PROTEIN_SHAKE");
-  assert.equal(ctx.rollCount, 2); // rolled twice
-});
-
-test("Fanny Pack re-roll is invisible to user", async () => {
-  const ctx = makeRollDeps({
-    heldCount: 1,
-    rollSequence: [
-      { type: "FANNY_PACK", rarity: "RARE" },
-      { type: "SHORTCUT", rarity: "COMMON" },
-    ],
-  });
-
-  const roll = buildRollPowerup(ctx.deps);
-
-  const results = await roll({
-    raceId: "race-1",
-    participantId: "rp-1",
-    userId: "user-1",
-    currentSteps: 1500,
-    nextBoxAtSteps: 1000,
-    position: 2,
-    totalParticipants: 3,
-    powerupStepInterval: 1000,
-    displayName: "Alice",
-    powerupSlots: 4,
-  });
-
-  // Only one result returned to user — the re-rolled one
   assert.equal(results.length, 1);
   assert.ok(results[0].mysteryBox);
-});
-
-// ===========================================================================
-// Inventory capacity uses powerupSlots from participant
-// ===========================================================================
-
-test("With Fanny Pack active (4 slots), mystery box created with 3 held", async () => {
-  // User has 4 slots and 3 held — mystery box always created
-  const ctx = makeRollDeps({
-    heldCount: 3,
-    rollSequence: [
-      { type: "PROTEIN_SHAKE", rarity: "COMMON" },
-    ],
-  });
-  const roll = buildRollPowerup(ctx.deps);
-
-  const results = await roll({
-    raceId: "race-1",
-    participantId: "rp-1",
-    userId: "user-1",
-    currentSteps: 1500,
-    nextBoxAtSteps: 1000,
-    position: 2,
-    totalParticipants: 3,
-    powerupStepInterval: 1000,
-    displayName: "Alice",
-    powerupSlots: 4,
-  });
-
-  assert.ok(results[0].mysteryBox);
   assert.equal(ctx.createdPowerups.length, 1);
-});
-
-test("With Fanny Pack active (4 slots), mystery box created even at 4 held", async () => {
-  // User has 4 slots and 4 held — mystery box still created (inventory enforced at open)
-  const ctx = makeRollDeps({
-    heldCount: 4,
-    rollSequence: [
-      { type: "PROTEIN_SHAKE", rarity: "COMMON" },
-    ],
-  });
-  const roll = buildRollPowerup(ctx.deps);
-
-  const results = await roll({
-    raceId: "race-1",
-    participantId: "rp-1",
-    userId: "user-1",
-    currentSteps: 1500,
-    nextBoxAtSteps: 1000,
-    position: 2,
-    totalParticipants: 3,
-    powerupStepInterval: 1000,
-    displayName: "Alice",
-    powerupSlots: 4,
-  });
-
-  assert.ok(results[0].mysteryBox);
-  assert.equal(ctx.createdPowerups.length, 1);
+  assert.equal(ctx.createdPowerups[0].status, "MYSTERY_BOX");
+  // Type is null — determined at open time, not earn time
+  assert.equal(ctx.createdPowerups[0].type, undefined);
+  assert.equal(ctx.createdPowerups[0].rarity, undefined);
 });

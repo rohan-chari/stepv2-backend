@@ -13,8 +13,8 @@ function makeDeps(overrides = {}) {
     raceId: "race-1",
     participantId: "rp-1",
     userId: "user-1",
-    type: "PROTEIN_SHAKE",
-    rarity: "COMMON",
+    type: null,
+    rarity: null,
     status: "MYSTERY_BOX",
     ...overrides.powerup,
   };
@@ -43,9 +43,15 @@ function makeDeps(overrides = {}) {
       RaceParticipant: {
         async findByRaceAndUser(raceId, userId) {
           if (raceId === "race-1" && userId === "user-1") {
-            return { id: "rp-1", powerupSlots: overrides.powerupSlots || 3 };
+            return { id: "rp-1", userId: "user-1", totalSteps: 5000, powerupSlots: overrides.powerupSlots || 3 };
           }
           return null;
+        },
+        async findAcceptedByRace() {
+          return overrides.participants || [
+            { id: "rp-1", userId: "user-1", totalSteps: 5000 },
+            { id: "rp-2", userId: "user-2", totalSteps: 3000 },
+          ];
         },
         async update(id, fields) {
           participantUpdates.push({ id, fields });
@@ -72,11 +78,12 @@ function makeDeps(overrides = {}) {
           events.push({ event, payload });
         },
       },
+      rollPowerupOdds: overrides.rollPowerupOdds || (() => ({ type: "PROTEIN_SHAKE", rarity: "COMMON" })),
     },
   };
 }
 
-test("opens a mystery box and transitions to HELD", async () => {
+test("opens a mystery box — rolls type at open time and transitions to HELD", async () => {
   const ctx = makeDeps();
   const open = buildOpenMysteryBox(ctx.deps);
 
@@ -91,13 +98,15 @@ test("opens a mystery box and transitions to HELD", async () => {
   assert.equal(result.type, "PROTEIN_SHAKE");
   assert.equal(result.rarity, "COMMON");
   assert.equal(result.autoActivated, false);
-  // Should update status to HELD
+  // Should update with rolled type, rarity, and status HELD
   assert.equal(ctx.updates.length, 1);
   assert.equal(ctx.updates[0].fields.status, "HELD");
+  assert.equal(ctx.updates[0].fields.type, "PROTEIN_SHAKE");
+  assert.equal(ctx.updates[0].fields.rarity, "COMMON");
 });
 
 test("rejects if powerup is not a mystery box", async () => {
-  const ctx = makeDeps({ powerup: { status: "HELD" } });
+  const ctx = makeDeps({ powerup: { status: "HELD", type: "PROTEIN_SHAKE", rarity: "COMMON" } });
   const open = buildOpenMysteryBox(ctx.deps);
 
   await assert.rejects(
@@ -169,7 +178,7 @@ test("rejects if powerup not found", async () => {
 test("auto-activates Fanny Pack when inventory is full", async () => {
   const ctx = makeDeps({
     heldCount: 3,
-    powerup: { type: "FANNY_PACK", rarity: "RARE", status: "MYSTERY_BOX" },
+    rollPowerupOdds: () => ({ type: "FANNY_PACK", rarity: "RARE" }),
   });
   const open = buildOpenMysteryBox(ctx.deps);
 
@@ -182,8 +191,10 @@ test("auto-activates Fanny Pack when inventory is full", async () => {
 
   assert.equal(result.type, "FANNY_PACK");
   assert.equal(result.autoActivated, true);
-  // Should update powerup to USED
+  // Should update powerup with type and USED status
   assert.equal(ctx.updates[0].fields.status, "USED");
+  assert.equal(ctx.updates[0].fields.type, "FANNY_PACK");
+  assert.equal(ctx.updates[0].fields.rarity, "RARE");
   // Should expand slots
   assert.equal(ctx.participantUpdates.length, 1);
   assert.equal(ctx.participantUpdates[0].fields.powerupSlots, 4);
@@ -206,7 +217,7 @@ test("allows opening with 2 HELD powerups", async () => {
   assert.equal(ctx.updates[0].fields.status, "HELD");
 });
 
-test("emits MYSTERY_BOX_OPENED event", async () => {
+test("emits MYSTERY_BOX_OPENED event with rolled type", async () => {
   const ctx = makeDeps();
   const open = buildOpenMysteryBox(ctx.deps);
 
@@ -220,4 +231,29 @@ test("emits MYSTERY_BOX_OPENED event", async () => {
   assert.equal(ctx.events[0].event, "MYSTERY_BOX_OPENED");
   assert.equal(ctx.events[0].payload.type, "PROTEIN_SHAKE");
   assert.equal(ctx.events[0].payload.autoActivated, false);
+});
+
+test("uses current position for odds calculation", async () => {
+  // User is in last place (position 2 of 2)
+  let calledWithPosition = null;
+  const ctx = makeDeps({
+    participants: [
+      { id: "rp-2", userId: "user-2", totalSteps: 10000 },
+      { id: "rp-1", userId: "user-1", totalSteps: 3000 },
+    ],
+    rollPowerupOdds: (position, total) => {
+      calledWithPosition = { position, total };
+      return { type: "PROTEIN_SHAKE", rarity: "COMMON" };
+    },
+  });
+  const open = buildOpenMysteryBox(ctx.deps);
+
+  await open({
+    userId: "user-1",
+    raceId: "race-1",
+    powerupId: "pw-1",
+  });
+
+  assert.equal(calledWithPosition.position, 2);
+  assert.equal(calledWithPosition.total, 2);
 });

@@ -333,19 +333,14 @@ function buildGetRaceProgress(deps = {}) {
       const myP = myStepEntry?.participant;
 
       if (myP && myP.nextBoxAtSteps > 0 && myStepEntry.totalSteps >= myP.nextBoxAtSteps) {
-        const position = sorted.findIndex((s) => s.participant.userId === userId) + 1;
-
         const rollResults = await rollPowerupFn({
           raceId,
           participantId: myP.id,
           userId,
           currentSteps: myStepEntry.totalSteps,
           nextBoxAtSteps: myP.nextBoxAtSteps,
-          position,
-          totalParticipants: sorted.length,
           powerupStepInterval: race.powerupStepInterval,
           displayName: myP.user.displayName,
-          powerupSlots: myP.powerupSlots,
         });
 
         const newBoxes = rollResults.filter((r) => r.mysteryBox);

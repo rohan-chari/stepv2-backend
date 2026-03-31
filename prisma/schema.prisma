@@ -333,8 +333,8 @@ model RacePowerup {
   raceId        String        @map("race_id")
   participantId String        @map("participant_id")
   userId        String        @map("user_id")
-  type          PowerupType
-  rarity        PowerupRarity
+  type          PowerupType?
+  rarity        PowerupRarity?
   status        PowerupStatus @default(HELD)
   earnedAtSteps Int           @map("earned_at_steps")
   usedAt        DateTime?     @map("used_at")
