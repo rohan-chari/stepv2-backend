@@ -75,6 +75,8 @@ function makeDeps(overrides = {}) {
       },
       RacePowerup: {
         async findHeldByParticipant() { return []; },
+        async countMysteryBoxesByParticipant() { return 0; },
+        async findMysteryBoxesByParticipant() { return []; },
       },
       expireEffects: async () => {},
       completeRace: async (data) => { completeCalls.push(data); },

@@ -526,15 +526,15 @@ test("Fanny Pack re-roll is invisible to user", async () => {
 
   // Only one result returned to user — the re-rolled one
   assert.equal(results.length, 1);
-  assert.equal(results[0].powerup.type, "SHORTCUT");
+  assert.ok(results[0].mysteryBox);
 });
 
 // ===========================================================================
 // Inventory capacity uses powerupSlots from participant
 // ===========================================================================
 
-test("With Fanny Pack active (4 slots), inventory full at 4 not 3", async () => {
-  // User has 4 slots and 3 held — still room for 1 more
+test("With Fanny Pack active (4 slots), mystery box created with 3 held", async () => {
+  // User has 4 slots and 3 held — mystery box always created
   const ctx = makeRollDeps({
     heldCount: 3,
     rollSequence: [
@@ -556,13 +556,12 @@ test("With Fanny Pack active (4 slots), inventory full at 4 not 3", async () => 
     powerupSlots: 4,
   });
 
-  // Should NOT be inventory full — 3 held, 4 slots
-  assert.equal(results[0].inventoryFull, false);
-  assert.ok(results[0].powerup);
+  assert.ok(results[0].mysteryBox);
+  assert.equal(ctx.createdPowerups.length, 1);
 });
 
-test("With Fanny Pack active (4 slots), inventory full at 4 held", async () => {
-  // User has 4 slots and 4 held — full
+test("With Fanny Pack active (4 slots), mystery box created even at 4 held", async () => {
+  // User has 4 slots and 4 held — mystery box still created (inventory enforced at open)
   const ctx = makeRollDeps({
     heldCount: 4,
     rollSequence: [
@@ -584,7 +583,6 @@ test("With Fanny Pack active (4 slots), inventory full at 4 held", async () => {
     powerupSlots: 4,
   });
 
-  // Should be inventory full
-  assert.equal(results[0].inventoryFull, true);
-  assert.equal(results[0].powerup, null);
+  assert.ok(results[0].mysteryBox);
+  assert.equal(ctx.createdPowerups.length, 1);
 });

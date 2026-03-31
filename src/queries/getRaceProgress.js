@@ -348,20 +348,22 @@ function buildGetRaceProgress(deps = {}) {
           powerupSlots: myP.powerupSlots,
         });
 
-        const newBoxes = rollResults.filter((r) => r.powerup);
-        const inventoryFull = rollResults.some((r) => r.inventoryFull);
+        const newBoxes = rollResults.filter((r) => r.mysteryBox);
 
         powerupData = {
           enabled: true,
-          newBoxesEarned: newBoxes.map((r) => r.powerup),
-          inventoryFull,
+          newMysteryBoxes: newBoxes.map((r) => r.mysteryBox),
         };
       }
 
       // Always include inventory and active effects
       if (!powerupData) {
-        powerupData = { enabled: true, newBoxesEarned: [], inventoryFull: false };
+        powerupData = { enabled: true, newMysteryBoxes: [] };
       }
+
+      const allMysteryBoxes = await racePowerupModel.findMysteryBoxesByParticipant(myParticipant.id);
+      powerupData.mysteryBoxCount = allMysteryBoxes.length;
+      powerupData.mysteryBoxIds = allMysteryBoxes.map((p) => p.id);
 
       powerupData.powerupSlots = myParticipant.powerupSlots || 3;
 

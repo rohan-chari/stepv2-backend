@@ -24,18 +24,21 @@ function buildDiscardPowerup(dependencies = {}) {
     if (powerup.userId !== userId || powerup.raceId !== raceId) {
       throw new PowerupDiscardError("This powerup does not belong to you", 403);
     }
-    if (powerup.status !== "HELD") {
+    if (!["HELD", "MYSTERY_BOX"].includes(powerup.status)) {
       throw new PowerupDiscardError("This powerup cannot be discarded", 400);
     }
 
     await powerupModel.update(powerupId, { status: "DISCARDED" });
 
+    const isMysteryBox = powerup.status === "MYSTERY_BOX";
     await eventModel.create({
       raceId,
       actorUserId: userId,
       eventType: "POWERUP_DISCARDED",
-      powerupType: powerup.type,
-      description: `${displayName || "A runner"} discarded a ${POWERUP_NAMES[powerup.type]}.`,
+      powerupType: isMysteryBox ? null : powerup.type,
+      description: isMysteryBox
+        ? `${displayName || "A runner"} discarded a mystery box.`
+        : `${displayName || "A runner"} discarded a ${POWERUP_NAMES[powerup.type]}.`,
     });
 
     events.emit("POWERUP_DISCARDED", {

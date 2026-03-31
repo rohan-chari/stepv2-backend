@@ -345,6 +345,8 @@ test("Protein Shake +1500 bonus pushes total above target — triggers race comp
     },
     RacePowerup: {
       async findHeldByParticipant() { return []; },
+      async countMysteryBoxesByParticipant() { return 0; },
+      async findMysteryBoxesByParticipant() { return []; },
     },
     expireEffects: async () => {},
     completeRace: async (data) => { completeCalls.push(data); },
@@ -411,6 +413,8 @@ test("Protein Shake +1500 bonus that doesn't reach target does NOT trigger win",
     },
     RacePowerup: {
       async findHeldByParticipant() { return []; },
+      async countMysteryBoxesByParticipant() { return 0; },
+      async findMysteryBoxesByParticipant() { return []; },
     },
     expireEffects: async () => {},
     completeRace: async (data) => { completeCalls.push(data); },
@@ -469,6 +473,8 @@ test("Protein Shake bonus is reflected in the race progress total", async () => 
     },
     RacePowerup: {
       async findHeldByParticipant() { return []; },
+      async countMysteryBoxesByParticipant() { return 0; },
+      async findMysteryBoxesByParticipant() { return []; },
     },
     expireEffects: async () => {},
     completeRace: async () => {},

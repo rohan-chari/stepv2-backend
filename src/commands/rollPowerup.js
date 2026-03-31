@@ -72,20 +72,13 @@ function buildRollPowerup(dependencies = {}) {
         continue;
       }
 
-      // Inventory full for non-Fanny-Pack powerups
-      if (heldCount >= maxSlots) {
-        results.push({ inventoryFull: true, powerup: null, threshold: currentThreshold });
-        currentThreshold += powerupStepInterval;
-        await participantModel.updateNextBoxAtSteps(participantId, currentThreshold);
-        break;
-      }
-
       const powerup = await powerupModel.create({
         raceId,
         participantId,
         userId,
         type: rolled.type,
         rarity: rolled.rarity,
+        status: "MYSTERY_BOX",
         earnedAtSteps: currentThreshold,
       });
 
@@ -93,21 +86,18 @@ function buildRollPowerup(dependencies = {}) {
         raceId,
         actorUserId: userId,
         eventType: "POWERUP_EARNED",
-        powerupType: rolled.type,
-        description: `${displayName || "A runner"} earned a ${POWERUP_NAMES[rolled.type]}!`,
+        powerupType: null,
+        description: `${displayName || "A runner"} earned a mystery box!`,
       });
 
       events.emit("POWERUP_EARNED", {
         raceId,
         userId,
         powerupId: powerup.id,
-        type: rolled.type,
-        rarity: rolled.rarity,
       });
 
       results.push({
-        inventoryFull: false,
-        powerup: { id: powerup.id, type: rolled.type, rarity: rolled.rarity },
+        mysteryBox: { id: powerup.id },
         threshold: currentThreshold,
       });
 

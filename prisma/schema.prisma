@@ -247,10 +247,11 @@ enum PowerupRarity {
 }
 
 enum PowerupStatus {
-  HELD      @map("held")
-  USED      @map("used")
-  DISCARDED @map("discarded")
-  EXPIRED   @map("expired")
+  MYSTERY_BOX @map("mystery_box")
+  HELD        @map("held")
+  USED        @map("used")
+  DISCARDED   @map("discarded")
+  EXPIRED     @map("expired")
 }
 
 enum ActiveEffectStatus {

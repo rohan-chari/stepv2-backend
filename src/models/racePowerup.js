@@ -31,9 +31,22 @@ const RacePowerup = {
     });
   },
 
+  async findMysteryBoxesByParticipant(participantId) {
+    return prisma.racePowerup.findMany({
+      where: { participantId, status: "MYSTERY_BOX" },
+      orderBy: { createdAt: "asc" },
+    });
+  },
+
+  async countMysteryBoxesByParticipant(participantId) {
+    return prisma.racePowerup.count({
+      where: { participantId, status: "MYSTERY_BOX" },
+    });
+  },
+
   async expireAllForRace(raceId) {
     return prisma.racePowerup.updateMany({
-      where: { raceId, status: "HELD" },
+      where: { raceId, status: { in: ["HELD", "MYSTERY_BOX"] } },
       data: { status: "EXPIRED" },
     });
   },

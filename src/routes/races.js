@@ -15,6 +15,9 @@ const {
 const {
   discardPowerup: defaultDiscardPowerup,
 } = require("../commands/discardPowerup");
+const {
+  openMysteryBox: defaultOpenMysteryBox,
+} = require("../commands/openMysteryBox");
 const { getRaces: defaultGetRaces } = require("../queries/getRaces");
 const {
   getRaceDetails: defaultGetRaceDetails,
@@ -46,6 +49,7 @@ function createRacesRouter(dependencies = {}) {
     dependencies.getRaceProgress || defaultGetRaceProgress;
   const usePowerup = dependencies.usePowerup || defaultUsePowerup;
   const discardPowerup = dependencies.discardPowerup || defaultDiscardPowerup;
+  const openMysteryBox = dependencies.openMysteryBox || defaultOpenMysteryBox;
   const getRaceInventory =
     dependencies.getRaceInventory || defaultGetRaceInventory;
   const getRaceFeed = dependencies.getRaceFeed || defaultGetRaceFeed;
@@ -213,6 +217,26 @@ function createRacesRouter(dependencies = {}) {
         return res.status(status).json({ error: error.message });
       }
       console.error("Discard powerup error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // POST /races/:raceId/powerups/:powerupId/open
+  router.post("/:raceId/powerups/:powerupId/open", async (req, res) => {
+    try {
+      const result = await openMysteryBox({
+        userId: req.user.id,
+        raceId: req.params.raceId,
+        powerupId: req.params.powerupId,
+        displayName: req.user.displayName,
+      });
+      res.json({ result });
+    } catch (error) {
+      if (error.name === "MysteryBoxOpenError") {
+        const status = error.statusCode || 400;
+        return res.status(status).json({ error: error.message });
+      }
+      console.error("Open mystery box error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });

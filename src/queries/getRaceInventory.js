@@ -17,6 +17,7 @@ async function getRaceInventory(userId, raceId) {
   }
 
   const held = await RacePowerup.findHeldByParticipant(myParticipant.id);
+  const mysteryBoxes = await RacePowerup.findMysteryBoxesByParticipant(myParticipant.id);
 
   return {
     inventory: held.map((p) => ({
@@ -25,6 +26,9 @@ async function getRaceInventory(userId, raceId) {
       rarity: p.rarity,
       earnedAtSteps: p.earnedAtSteps,
       createdAt: p.createdAt,
+    })),
+    mysteryBoxes: mysteryBoxes.map((p) => ({
+      id: p.id,
     })),
   };
 }
