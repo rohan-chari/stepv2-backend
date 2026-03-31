@@ -143,7 +143,7 @@ test("rollPowerup hides type in feed event and result", async () => {
 
   assert.ok(ctx.feedEvents[0].description.includes("Jordan"));
   assert.ok(ctx.feedEvents[0].description.includes("mystery box"));
-  // Type should not be in feed event
+  // Feed event should show MYSTERY_BOX as the powerup type
   assert.equal(ctx.feedEvents[0].powerupType, "MYSTERY_BOX");
   // Result should not contain type or rarity
   assert.equal(ctx.events[0].payload.type, undefined);

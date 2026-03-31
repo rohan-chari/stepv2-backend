@@ -86,7 +86,7 @@ function buildRollPowerup(dependencies = {}) {
         raceId,
         actorUserId: userId,
         eventType: "POWERUP_EARNED",
-        powerupType: null,
+        powerupType: "MYSTERY_BOX",
         description: `${displayName || "A runner"} earned a mystery box!`,
       });
 

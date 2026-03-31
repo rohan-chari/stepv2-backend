@@ -238,6 +238,7 @@ enum PowerupType {
   STEALTH_MODE      @map("stealth_mode")
   WRONG_TURN        @map("wrong_turn")
   FANNY_PACK        @map("fanny_pack")
+  MYSTERY_BOX       @map("mystery_box")
 }
 
 enum PowerupRarity {

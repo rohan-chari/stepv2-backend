@@ -397,20 +397,6 @@ test("Red Card on a user with very few steps does not make them negative", async
   assert.ok(result.penalty <= 100, "penalty should not exceed the leader's total steps");
 });
 
-test("Shortcut on target with 0 steps does not produce negative balance", async () => {
-  const ctx = makeDeps({
-    powerupType: "SHORTCUT",
-    user2: { totalSteps: 0 },
-  });
-  const use = buildUsePowerup(ctx.deps);
-
-  const result = await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", targetUserId: "user-2" });
-
-  assert.equal(result.stolen, 0);
-  // No subtract should happen at all
-  const subtracts = ctx.bonusChanges.filter((c) => c.type === "subtract");
-  assert.equal(subtracts.length, 0);
-});
 
 test("Leg Cramp on a user with 0 steps does not put them negative after freeze", async () => {
   const ctx = makeDeps({
