@@ -21,6 +21,7 @@ function makeDeps(overrides = {}) {
           powerups.push(p);
           return p;
         },
+        async countOccupiedSlots() { return 0; },
         ...overrides.RacePowerup,
       },
       RaceParticipant: {

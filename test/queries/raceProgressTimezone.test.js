@@ -143,7 +143,7 @@ function makeDeps({ samples, participants, dailyRecords, rangeRecords, now: nowF
         async findActiveForParticipant() { return []; },
         async findActiveForRace() { return []; },
       },
-      RacePowerup: { async findHeldByParticipant() { return []; }, async countMysteryBoxesByParticipant() { return 0; }, async findMysteryBoxesByParticipant() { return []; } },
+      RacePowerup: { async findHeldByParticipant() { return []; }, async countMysteryBoxesByParticipant() { return 0; }, async findMysteryBoxesByParticipant() { return []; }, async countOccupiedSlots() { return 0; }, async findSlotPowerups() { return []; }, async countQueuedByParticipant() { return 0; }, async findQueuedByParticipant() { return []; }, async update() {} },
       expireEffects: async () => {},
       completeRace: async () => {},
       rollPowerup: async () => [],

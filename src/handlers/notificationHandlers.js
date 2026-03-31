@@ -330,46 +330,6 @@ function registerNotificationHandlers(dependencies = {}) {
     }
   });
 
-  events.on("POWERUP_BLOCKED", async (data) => {
-    try {
-      const { raceId, attackerUserId, defenderUserId, blockedType } = data;
-
-      // Notify attacker their powerup was blocked
-      await sendNotificationToUser({
-        eventName: "POWERUP_BLOCKED",
-        recipientUserId: attackerUserId,
-        actorUserId: defenderUserId,
-        title: "Powerup Blocked!",
-        buildBody: (defenderName) => `${defenderName}'s Compression Socks blocked your attack!`,
-        payload: {
-          type: "POWERUP_BLOCKED",
-          route: "race_detail",
-          params: { raceId },
-        },
-        logContext: { raceId, attackerUserId, blockedType },
-      });
-
-      // Notify defender their shield worked
-      await sendNotificationToUser({
-        eventName: "POWERUP_BLOCKED",
-        recipientUserId: defenderUserId,
-        actorUserId: attackerUserId,
-        title: "Shield Activated!",
-        buildBody: (attackerName) => `Your Compression Socks blocked ${attackerName}'s attack!`,
-        payload: {
-          type: "POWERUP_BLOCKED",
-          route: "race_detail",
-          params: { raceId },
-        },
-        logContext: { raceId, defenderUserId, blockedType },
-      });
-    } catch (error) {
-      logger.error("POWERUP_BLOCKED handler failed", {
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  });
-
   events.on("CHALLENGE_DROPPED", async (data) => {
     try {
       const { challengeId, title } = data;

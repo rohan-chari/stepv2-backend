@@ -24,6 +24,7 @@ function makeDeps() {
           powerups.push(p);
           return p;
         },
+        async countOccupiedSlots() { return 0; },
       },
       RaceParticipant: {
         async updateNextBoxAtSteps(id, value) {

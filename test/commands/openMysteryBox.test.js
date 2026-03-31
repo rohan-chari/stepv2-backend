@@ -38,6 +38,9 @@ function makeDeps(overrides = {}) {
         async countHeldByParticipant() {
           return overrides.heldCount !== undefined ? overrides.heldCount : 0;
         },
+        async countOccupiedSlots() {
+          return overrides.heldCount !== undefined ? overrides.heldCount : 0;
+        },
         ...overrides.RacePowerup,
       },
       RaceParticipant: {
@@ -114,20 +117,6 @@ test("rejects if powerup is not a mystery box", async () => {
     (err) => {
       assert.equal(err.name, "MysteryBoxOpenError");
       assert.equal(err.statusCode, 400);
-      return true;
-    },
-  );
-});
-
-test("rejects if inventory is full", async () => {
-  const ctx = makeDeps({ heldCount: 3 });
-  const open = buildOpenMysteryBox(ctx.deps);
-
-  await assert.rejects(
-    () => open({ userId: "user-1", raceId: "race-1", powerupId: "pw-1" }),
-    (err) => {
-      assert.equal(err.name, "MysteryBoxOpenError");
-      assert.ok(err.message.includes("Inventory full"));
       return true;
     },
   );

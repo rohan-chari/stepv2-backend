@@ -44,9 +44,35 @@ const RacePowerup = {
     });
   },
 
+  async countOccupiedSlots(participantId) {
+    return prisma.racePowerup.count({
+      where: { participantId, status: { in: ["HELD", "MYSTERY_BOX"] } },
+    });
+  },
+
+  async findSlotPowerups(participantId) {
+    return prisma.racePowerup.findMany({
+      where: { participantId, status: { in: ["HELD", "MYSTERY_BOX"] } },
+      orderBy: { createdAt: "asc" },
+    });
+  },
+
+  async countQueuedByParticipant(participantId) {
+    return prisma.racePowerup.count({
+      where: { participantId, status: "QUEUED" },
+    });
+  },
+
+  async findQueuedByParticipant(participantId) {
+    return prisma.racePowerup.findMany({
+      where: { participantId, status: "QUEUED" },
+      orderBy: { createdAt: "asc" },
+    });
+  },
+
   async expireAllForRace(raceId) {
     return prisma.racePowerup.updateMany({
-      where: { raceId, status: { in: ["HELD", "MYSTERY_BOX"] } },
+      where: { raceId, status: { in: ["HELD", "MYSTERY_BOX", "QUEUED"] } },
       data: { status: "EXPIRED" },
     });
   },

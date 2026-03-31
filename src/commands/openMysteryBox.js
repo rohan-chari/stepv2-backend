@@ -45,7 +45,7 @@ function buildOpenMysteryBox(dependencies = {}) {
     }
 
     const maxSlots = participant.powerupSlots || DEFAULT_POWERUP_SLOTS;
-    const heldCount = await powerupModel.countHeldByParticipant(participant.id);
+    const occupiedCount = await powerupModel.countOccupiedSlots(participant.id);
 
     // Calculate current position for odds
     const allParticipants = await participantModel.findAcceptedByRace(raceId);
@@ -61,7 +61,7 @@ function buildOpenMysteryBox(dependencies = {}) {
     }
 
     // Fanny Pack auto-activates when inventory is full
-    if (rolled.type === "FANNY_PACK" && heldCount >= maxSlots) {
+    if (rolled.type === "FANNY_PACK" && occupiedCount >= maxSlots) {
       await participantModel.update(participant.id, { powerupSlots: maxSlots + 1 });
       await powerupModel.update(powerupId, { type: rolled.type, rarity: rolled.rarity, status: "USED", usedAt: new Date() });
 
@@ -83,10 +83,6 @@ function buildOpenMysteryBox(dependencies = {}) {
       });
 
       return { id: powerup.id, type: rolled.type, rarity: rolled.rarity, autoActivated: true };
-    }
-
-    if (heldCount >= maxSlots) {
-      throw new MysteryBoxOpenError("Inventory full — discard or use a powerup first", 400);
     }
 
     await powerupModel.update(powerupId, { type: rolled.type, rarity: rolled.rarity, status: "HELD" });

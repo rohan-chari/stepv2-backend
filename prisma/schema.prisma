@@ -249,6 +249,7 @@ enum PowerupRarity {
 
 enum PowerupStatus {
   MYSTERY_BOX @map("mystery_box")
+  QUEUED      @map("queued")
   HELD        @map("held")
   USED        @map("used")
   DISCARDED   @map("discarded")

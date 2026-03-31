@@ -1,5 +1,6 @@
 const { Race } = require("../models/race");
 const { RaceParticipant } = require("../models/raceParticipant");
+const { RacePowerupEvent } = require("../models/racePowerupEvent");
 const { Steps } = require("../models/steps");
 const { eventBus } = require("../events/eventBus");
 
@@ -15,6 +16,7 @@ function buildStartRace(dependencies = {}) {
   const raceModel = dependencies.Race || Race;
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
   const stepsModel = dependencies.Steps || Steps;
+  const eventModel = dependencies.RacePowerupEvent || RacePowerupEvent;
   const events = dependencies.eventBus || eventBus;
   const now = dependencies.now || (() => new Date());
 
@@ -62,6 +64,13 @@ function buildStartRace(dependencies = {}) {
     }
 
     const participantUserIds = acceptedParticipants.map((p) => p.userId);
+
+    await eventModel.create({
+      raceId,
+      actorUserId: userId,
+      eventType: "RACE_STARTED",
+      description: "Race started!",
+    });
 
     events.emit("RACE_STARTED", {
       raceId,

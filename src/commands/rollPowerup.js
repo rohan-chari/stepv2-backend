@@ -24,16 +24,20 @@ function buildRollPowerup(dependencies = {}) {
   const eventModel = dependencies.RacePowerupEvent || RacePowerupEvent;
   const events = dependencies.eventBus || eventBus;
 
-  return async function rollPowerup({ raceId, participantId, userId, currentSteps, nextBoxAtSteps, powerupStepInterval, displayName }) {
+  return async function rollPowerup({ raceId, participantId, userId, currentSteps, nextBoxAtSteps, powerupStepInterval, displayName, powerupSlots }) {
+    const maxSlots = powerupSlots || DEFAULT_POWERUP_SLOTS;
     const results = [];
     let currentThreshold = nextBoxAtSteps;
 
     while (currentSteps >= currentThreshold && currentThreshold > 0) {
+      const occupied = await powerupModel.countOccupiedSlots(participantId);
+      const queued = occupied >= maxSlots;
+
       const powerup = await powerupModel.create({
         raceId,
         participantId,
         userId,
-        status: "MYSTERY_BOX",
+        status: queued ? "QUEUED" : "MYSTERY_BOX",
         earnedAtSteps: currentThreshold,
       });
 
@@ -42,7 +46,9 @@ function buildRollPowerup(dependencies = {}) {
         actorUserId: userId,
         eventType: "POWERUP_EARNED",
         powerupType: "MYSTERY_BOX",
-        description: `${displayName || "A runner"} earned a mystery box!`,
+        description: queued
+          ? `${displayName || "A runner"} earned a mystery box! (queued — inventory full)`
+          : `${displayName || "A runner"} earned a mystery box!`,
       });
 
       events.emit("POWERUP_EARNED", {
@@ -54,6 +60,7 @@ function buildRollPowerup(dependencies = {}) {
       results.push({
         mysteryBox: { id: powerup.id },
         threshold: currentThreshold,
+        queued,
       });
 
       currentThreshold += powerupStepInterval;

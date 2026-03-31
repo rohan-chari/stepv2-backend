@@ -339,6 +339,8 @@ function buildGetRaceProgress(deps = {}) {
       const myStepEntry = stepTotals.find((s) => s.participant.userId === userId);
       const myP = myStepEntry?.participant;
 
+      const mySlots = myP?.powerupSlots || 3;
+
       if (myP && myP.nextBoxAtSteps > 0 && myStepEntry.totalSteps >= myP.nextBoxAtSteps) {
         const rollResults = await rollPowerupFn({
           raceId,
@@ -348,33 +350,49 @@ function buildGetRaceProgress(deps = {}) {
           nextBoxAtSteps: myP.nextBoxAtSteps,
           powerupStepInterval: race.powerupStepInterval,
           displayName: myP.user.displayName,
+          powerupSlots: mySlots,
         });
 
-        const newBoxes = rollResults.filter((r) => r.mysteryBox);
+        const newBoxes = rollResults.filter((r) => r.mysteryBox && !r.queued);
+        const queuedBoxes = rollResults.filter((r) => r.queued);
 
         powerupData = {
           enabled: true,
           newMysteryBoxes: newBoxes.map((r) => r.mysteryBox),
+          newQueuedBoxes: queuedBoxes.length,
         };
       }
 
       // Always include inventory and active effects
       if (!powerupData) {
-        powerupData = { enabled: true, newMysteryBoxes: [] };
+        powerupData = { enabled: true, newMysteryBoxes: [], newQueuedBoxes: 0 };
       }
 
-      const allMysteryBoxes = await racePowerupModel.findMysteryBoxesByParticipant(myParticipant.id);
-      powerupData.mysteryBoxCount = allMysteryBoxes.length;
-      powerupData.mysteryBoxIds = allMysteryBoxes.map((p) => p.id);
+      // Auto-fill queued boxes into open slots
+      const occupiedCount = await racePowerupModel.countOccupiedSlots(myParticipant.id);
+      const openSlots = mySlots - occupiedCount;
+      if (openSlots > 0) {
+        const queuedBoxes = await racePowerupModel.findQueuedByParticipant(myParticipant.id);
+        const toPromote = queuedBoxes.slice(0, openSlots);
+        for (const box of toPromote) {
+          await racePowerupModel.update(box.id, { status: "MYSTERY_BOX" });
+        }
+      }
 
-      powerupData.powerupSlots = myParticipant.powerupSlots || 3;
+      powerupData.powerupSlots = mySlots;
 
-      const inventory = await racePowerupModel.findHeldByParticipant(myParticipant.id);
-      powerupData.inventory = inventory.map((p) => ({
+      // Unified inventory: both HELD and MYSTERY_BOX powerups in slots
+      const slotPowerups = await racePowerupModel.findSlotPowerups(myParticipant.id);
+      powerupData.inventory = slotPowerups.map((p) => ({
         id: p.id,
         type: p.type,
         rarity: p.rarity,
+        status: p.status,
       }));
+
+      // Queued box count for frontend indicator
+      const queuedCount = await racePowerupModel.countQueuedByParticipant(myParticipant.id);
+      powerupData.queuedBoxCount = queuedCount;
 
       const myActiveEffects = await raceActiveEffectModel.findActiveForParticipant(myParticipant.id);
       const raceActiveEffects = await raceActiveEffectModel.findActiveForRace(raceId);

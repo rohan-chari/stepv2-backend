@@ -379,6 +379,7 @@ function makeRollDeps(overrides = {}) {
     deps: {
       RacePowerup: {
         async countHeldByParticipant() { return heldCount; },
+        async countOccupiedSlots() { return heldCount; },
         async create(data) {
           const p = { id: `pw-${createdPowerups.length + 1}`, ...data };
           createdPowerups.push(p);
@@ -412,27 +413,3 @@ function makeRollDeps(overrides = {}) {
   };
 }
 
-test("rollPowerup creates mystery box without type (type determined at open time)", async () => {
-  const ctx = makeRollDeps({
-    heldCount: 3,
-  });
-  const roll = buildRollPowerup(ctx.deps);
-
-  const results = await roll({
-    raceId: "race-1",
-    participantId: "rp-1",
-    userId: "user-1",
-    currentSteps: 1500,
-    nextBoxAtSteps: 1000,
-    powerupStepInterval: 1000,
-    displayName: "Alice",
-  });
-
-  assert.equal(results.length, 1);
-  assert.ok(results[0].mysteryBox);
-  assert.equal(ctx.createdPowerups.length, 1);
-  assert.equal(ctx.createdPowerups[0].status, "MYSTERY_BOX");
-  // Type is null — determined at open time, not earn time
-  assert.equal(ctx.createdPowerups[0].type, undefined);
-  assert.equal(ctx.createdPowerups[0].rarity, undefined);
-});
