@@ -86,7 +86,7 @@ function buildOpenMysteryBox(dependencies = {}) {
     }
 
     if (heldCount >= maxSlots) {
-      throw new MysteryBoxOpenError("Inventory full — discard a powerup first", 400);
+      throw new MysteryBoxOpenError("Inventory full — discard or use a powerup first", 400);
     }
 
     await powerupModel.update(powerupId, { type: rolled.type, rarity: rolled.rarity, status: "HELD" });
