@@ -241,11 +241,18 @@ function buildGetRaceProgress(deps = {}) {
         }
         // No samples AND no baseline = 0 for start day (don't over-count)
 
-        // For days after the start day: count full daily totals
+        // For days after the start day: prefer StepSamples, fall back to daily records
         let subsequentSteps = 0;
         if (dayAfterStartDate <= today) {
-          const laterSteps = await stepsModel.findByUserIdAndDateRange(p.userId, dayAfterStartDate, today);
-          subsequentSteps = laterSteps.reduce((sum, s) => sum + s.steps, 0);
+          const subsequentSamples = await stepSampleModel.sumStepsInWindow(
+            p.userId, startDayWindowEnd, now()
+          );
+          if (subsequentSamples > 0) {
+            subsequentSteps = subsequentSamples;
+          } else {
+            const laterSteps = await stepsModel.findByUserIdAndDateRange(p.userId, dayAfterStartDate, today);
+            subsequentSteps = laterSteps.reduce((sum, s) => sum + s.steps, 0);
+          }
         }
 
         const baseAdjusted = Math.max(0, startDaySteps + subsequentSteps);

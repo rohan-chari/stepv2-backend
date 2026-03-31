@@ -405,7 +405,9 @@ function makeProgressDeps(overrides = {}) {
         },
       },
       StepSample: {
-        async sumStepsInWindow(userId) {
+        async sumStepsInWindow(userId, start) {
+          // Only return steps for windows that overlap with the start day
+          if (new Date(start).getTime() >= new Date("2026-03-29T00:00:00Z").getTime()) return 0;
           const p = participants.find((p) => p.userId === userId);
           return p?._rawSteps || 0;
         },

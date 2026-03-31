@@ -55,6 +55,9 @@ function makeDeps(overrides = {}) {
           if (overrides.sumStepsInWindow) {
             return overrides.sumStepsInWindow(userId, start, end);
           }
+          // Only return steps for windows that overlap with the start day
+          const windowStart = new Date(start).getTime();
+          if (windowStart >= new Date("2026-03-29T00:00:00Z").getTime()) return 0;
           const p = participants.find((p) => p.userId === userId);
           return p?._rawSteps || 0;
         },
