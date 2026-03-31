@@ -2,6 +2,7 @@ const { Router } = require("express");
 const { recordSteps } = require("../commands/recordSteps");
 const { recordStepSamples: defaultRecordStepSamples } = require("../commands/recordStepSamples");
 const { getStepsByDate, getStepsHistory } = require("../queries/getSteps");
+const { getStepCalendar: defaultGetStepCalendar } = require("../queries/getStepCalendar");
 const { User } = require("../models/user");
 const { ChallengeInstance } = require("../models/challengeInstance");
 const { buildRequireAuth } = require("../middleware/requireAuth");
@@ -17,6 +18,7 @@ function createStepsRouter(dependencies = {}) {
   const readStepsHistory = dependencies.getStepsHistory || getStepsHistory;
   const recordSamples = dependencies.recordStepSamples || defaultRecordStepSamples;
   const userModel = dependencies.User || User;
+  const getCalendar = dependencies.getStepCalendar || defaultGetStepCalendar;
 
   router.use(requireAuth);
 
@@ -150,6 +152,23 @@ function createStepsRouter(dependencies = {}) {
       });
     } catch (error) {
       console.error("Stats error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // GET /steps/calendar?month=YYYY-MM
+  router.get("/calendar", async (req, res) => {
+    try {
+      const { month } = req.query;
+
+      if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+        return res.status(400).json({ error: "month query parameter required in YYYY-MM format" });
+      }
+
+      const result = await getCalendar(req.user.id, month, req.timeZone);
+      res.json(result);
+    } catch (error) {
+      console.error("Calendar error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });

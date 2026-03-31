@@ -8,6 +8,32 @@ class StepSampleError extends Error {
   }
 }
 
+// Remove overlapping samples: if sample A fully contains sample B,
+// keep the shorter (more granular) one and discard the broader one.
+function removeOverlaps(samples) {
+  if (samples.length <= 1) return samples;
+
+  const parsed = samples.map((s) => ({
+    ...s,
+    _start: new Date(s.periodStart).getTime(),
+    _end: new Date(s.periodEnd).getTime(),
+  }));
+
+  return parsed
+    .filter((sample) => {
+      // Drop this sample if any other shorter sample is fully contained within it
+      const containsShorter = parsed.some(
+        (other) =>
+          other !== sample &&
+          other._start >= sample._start &&
+          other._end <= sample._end &&
+          (other._end - other._start) < (sample._end - sample._start)
+      );
+      return !containsShorter;
+    })
+    .map(({ _start, _end, ...rest }) => rest);
+}
+
 function buildRecordStepSamples(dependencies = {}) {
   const stepSampleModel = dependencies.StepSample || StepSample;
 
@@ -16,20 +42,16 @@ function buildRecordStepSamples(dependencies = {}) {
       throw new StepSampleError("samples must be a non-empty array", 400);
     }
 
-    if (samples.length > 168) {
-      // Max 7 days * 24 hours = 168 hourly buckets
-      throw new StepSampleError("Too many samples (max 168)", 400);
-    }
-
     for (const s of samples) {
       if (!s.periodStart || !s.periodEnd || s.steps == null) {
         throw new StepSampleError("Each sample requires periodStart, periodEnd, and steps", 400);
       }
     }
 
-    await stepSampleModel.upsertBatch(userId, samples);
+    const cleaned = removeOverlaps(samples);
+    await stepSampleModel.upsertBatch(userId, cleaned);
 
-    return { count: samples.length };
+    return { count: cleaned.length };
   };
 }
 

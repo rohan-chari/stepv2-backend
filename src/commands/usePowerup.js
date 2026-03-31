@@ -117,6 +117,11 @@ function buildUsePowerup(dependencies = {}) {
 
     const targetDisplayName = targetParticipant?.user?.displayName || "a runner";
 
+    // Reject Shortcut on a target with 0 steps — nothing to steal
+    if (type === "SHORTCUT" && targetParticipant && Math.max(0, targetParticipant.totalSteps) === 0) {
+      throw new PowerupUseError("Target has 0 steps — nothing to steal", 400);
+    }
+
     // Reject stacking Leg Cramp on a target that already has one active
     if (type === "LEG_CRAMP" && targetParticipant) {
       const existingCramp = await effectModel.findActiveByTypeForParticipant(

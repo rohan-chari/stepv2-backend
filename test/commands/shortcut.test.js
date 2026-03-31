@@ -149,14 +149,20 @@ test("Shortcut on a target behind you pushes them further back", async () => {
 // Edge cases — target step counts
 // ===========================================================================
 
-test("Shortcut on target with 0 steps steals nothing", async () => {
+test("Shortcut rejects targeting a player with 0 steps", async () => {
   const ctx = makeDeps({ user2: { totalSteps: 0 } });
   const use = buildUsePowerup(ctx.deps);
 
-  const result = await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", targetUserId: "user-2" });
-
-  assert.equal(result.stolen, 0);
-  // No bonus changes should occur when there's nothing to steal
+  await assert.rejects(
+    () => use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", targetUserId: "user-2" }),
+    (err) => {
+      assert.ok(err instanceof PowerupUseError);
+      assert.ok(err.message.includes("0 steps"));
+      return true;
+    }
+  );
+  // Powerup should not be consumed
+  assert.equal(ctx.updatedPowerup, null);
   assert.equal(ctx.bonusChanges.length, 0);
 });
 
