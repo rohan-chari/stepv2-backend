@@ -87,6 +87,13 @@ const RaceParticipant = {
     });
   },
 
+  async updatePowerupSlots(id, powerupSlots) {
+    return prisma.raceParticipant.update({
+      where: { id },
+      data: { powerupSlots },
+    });
+  },
+
   async updateNextBoxAtSteps(id, nextBoxAtSteps) {
     return prisma.raceParticipant.update({
       where: { id },
