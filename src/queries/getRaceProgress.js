@@ -46,7 +46,7 @@ function computeEffectModifiersFallback(effects, rawTotal) {
   return { frozenSteps, buffedSteps, reversedSteps };
 }
 
-async function computeEffectModifiers(effects, rawTotal, userId, stepSampleModel) {
+async function computeEffectModifiers(effects, rawTotal, userId, stepSampleModel, hasSampleData = false) {
   let frozenSteps = 0;
   let buffedSteps = 0;
   let reversedSteps = 0;
@@ -62,7 +62,8 @@ async function computeEffectModifiers(effects, rawTotal, userId, stepSampleModel
     const sampleSteps = await stepSampleModel.sumStepsInWindow(userId, windowStart, windowEnd);
     if (sampleSteps > 0) {
       frozenSteps += sampleSteps;
-    } else {
+    } else if (!hasSampleData) {
+      // Only use snapshot fallback when user has no step sample data at all
       const meta = effect.metadata || {};
       const start = meta.stepsAtFreezeStart || 0;
       const end = effect.status === "EXPIRED" && meta.stepsAtExpiry !== undefined
@@ -79,7 +80,8 @@ async function computeEffectModifiers(effects, rawTotal, userId, stepSampleModel
     const sampleSteps = await stepSampleModel.sumStepsInWindow(userId, windowStart, windowEnd);
     if (sampleSteps > 0) {
       buffedSteps += sampleSteps;
-    } else {
+    } else if (!hasSampleData) {
+      // Only use snapshot fallback when user has no step sample data at all
       const meta = effect.metadata || {};
       const start = meta.stepsAtBuffStart || 0;
       const end = effect.status === "EXPIRED" && meta.stepsAtExpiry !== undefined
@@ -256,8 +258,9 @@ function buildGetRaceProgress(deps = {}) {
         }
 
         const baseAdjusted = Math.max(0, startDaySteps + subsequentSteps);
+        const hasSampleData = startDaySamples > 0;
         participantStepsMap[p.id] = baseAdjusted;
-        return { participant: p, baseAdjusted };
+        return { participant: p, baseAdjusted, hasSampleData };
       })
     );
 
@@ -265,7 +268,7 @@ function buildGetRaceProgress(deps = {}) {
 
     // Second pass: calculate powerup-adjusted totals
     const stepTotals = await Promise.all(
-      rawStepTotals.map(async ({ participant, baseAdjusted }) => {
+      rawStepTotals.map(async ({ participant, baseAdjusted, hasSampleData }) => {
         let total = baseAdjusted;
 
         if (race.powerupsEnabled) {
@@ -275,7 +278,7 @@ function buildGetRaceProgress(deps = {}) {
           const wrongTurns = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "WRONG_TURN");
 
           const allEffects = [...legCramps, ...runnersHighs, ...wrongTurns];
-          const { frozenSteps, buffedSteps, reversedSteps } = await computeEffectModifiers(allEffects, baseAdjusted, participant.userId, stepSampleModel);
+          const { frozenSteps, buffedSteps, reversedSteps } = await computeEffectModifiers(allEffects, baseAdjusted, participant.userId, stepSampleModel, hasSampleData);
 
           total = Math.max(0, baseAdjusted - frozenSteps + buffedSteps - 2 * reversedSteps + (participant.bonusSteps || 0));
         }

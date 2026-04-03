@@ -8,7 +8,7 @@ const { POWERUP_NAMES } = require("./rollPowerup");
 
 const OFFENSIVE_TYPES = ["LEG_CRAMP", "RED_CARD", "SHORTCUT", "WRONG_TURN"];
 const TARGETED_TYPES = ["LEG_CRAMP", "SHORTCUT", "WRONG_TURN"];
-const SELF_ONLY_TYPES = ["COMPRESSION_SOCKS", "PROTEIN_SHAKE", "RUNNERS_HIGH", "SECOND_WIND", "STEALTH_MODE", "FANNY_PACK"];
+const SELF_ONLY_TYPES = ["COMPRESSION_SOCKS", "PROTEIN_SHAKE", "RUNNERS_HIGH", "SECOND_WIND", "STEALTH_MODE", "FANNY_PACK", "TRAIL_MIX"];
 
 const EFFECT_DURATIONS = {
   LEG_CRAMP: 2 * 60 * 60 * 1000,      // 2 hours
@@ -23,6 +23,7 @@ const RED_CARD_PERCENT = 0.10;
 const SECOND_WIND_MIN = 500;
 const SECOND_WIND_MAX = 5000;
 const SECOND_WIND_FACTOR = 0.25;
+const TRAIL_MIX_PER_TYPE = 500;
 
 class PowerupUseError extends Error {
   constructor(message, statusCode) {
@@ -446,6 +447,25 @@ function buildUsePowerup(dependencies = {}) {
           eventType: "POWERUP_USED",
           powerupType: type,
           description: `${myDisplayName} equipped a Fanny Pack! Extra powerup slot unlocked.`,
+        });
+        break;
+      }
+
+      case "TRAIL_MIX": {
+        const usedTypes = new Set(await powerupModel.findUsedTypesByParticipant(myParticipant.id));
+        usedTypes.add("TRAIL_MIX"); // will be marked USED after switch
+        const bonus = usedTypes.size * TRAIL_MIX_PER_TYPE;
+
+        await participantModel.addBonusSteps(myParticipant.id, bonus);
+        result.bonus = bonus;
+
+        await eventModel.create({
+          raceId,
+          actorUserId: userId,
+          eventType: "POWERUP_USED",
+          powerupType: type,
+          description: `${myDisplayName} used Trail Mix! +${bonus.toLocaleString()} steps (${usedTypes.size} unique powerups).`,
+          metadata: { bonus, uniqueTypes: usedTypes.size },
         });
         break;
       }

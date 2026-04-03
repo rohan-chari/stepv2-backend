@@ -70,6 +70,15 @@ const RacePowerup = {
     });
   },
 
+  async findUsedTypesByParticipant(participantId) {
+    const results = await prisma.racePowerup.findMany({
+      where: { participantId, status: "USED", type: { not: null } },
+      select: { type: true },
+      distinct: ["type"],
+    });
+    return results.map((r) => r.type);
+  },
+
   async expireAllForRace(raceId) {
     return prisma.racePowerup.updateMany({
       where: { raceId, status: { in: ["HELD", "MYSTERY_BOX", "QUEUED"] } },

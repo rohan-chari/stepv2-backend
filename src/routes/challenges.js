@@ -143,6 +143,9 @@ function createChallengesRouter(dependencies = {}) {
       );
       res.json({ progress });
     } catch (error) {
+      if (error.statusCode) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
       console.error("Challenge progress error:", error);
       res.status(500).json({ error: "Internal server error" });
     }

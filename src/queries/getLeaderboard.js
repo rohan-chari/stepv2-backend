@@ -50,12 +50,20 @@ async function getLeaderboard(period, currentUserId, timeZone) {
 
   const userMap = new Map(users.map((u) => [u.id, u.displayName]));
 
-  const top10 = top10Groups.map((g, i) => ({
-    rank: i + 1,
-    userId: g.userId,
-    displayName: userMap.get(g.userId) || "Anonymous",
-    totalSteps: g._sum.steps || 0,
-  }));
+  let prevRank = 0;
+  let prevSteps = null;
+  const top10 = top10Groups.map((g, i) => {
+    const totalSteps = g._sum.steps || 0;
+    const rank = totalSteps === prevSteps ? prevRank : i + 1;
+    prevRank = rank;
+    prevSteps = totalSteps;
+    return {
+      rank,
+      userId: g.userId,
+      displayName: userMap.get(g.userId) || "Anonymous",
+      totalSteps,
+    };
+  });
 
   // Current user info
   const currentUserInTop10 = top10.find((e) => e.userId === currentUserId);

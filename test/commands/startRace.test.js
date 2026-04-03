@@ -51,6 +51,9 @@ function makeDeps(overrides = {}) {
         },
         ...overrides.Steps,
       },
+      RacePowerupEvent: {
+        async create() { return {}; },
+      },
       eventBus: {
         emit(event, payload) {
           events.push({ event, payload });
@@ -148,6 +151,7 @@ test("startRace only counts steps after race start (baseline subtracts pre-race 
         return null;
       },
     },
+    RacePowerupEvent: { async create() { return {}; } },
     eventBus: { emit() {} },
     now: () => new Date("2026-03-28T14:00:00.000Z"),
   };
@@ -202,6 +206,7 @@ test("startRace with no prior sync sets baseline 0 - progress should use StepSam
     Steps: {
       async findByUserIdAndDate() { return null; },
     },
+    RacePowerupEvent: { async create() { return {}; } },
     eventBus: { emit() {} },
     now: () => new Date("2026-03-28T14:00:00.000Z"),
   };

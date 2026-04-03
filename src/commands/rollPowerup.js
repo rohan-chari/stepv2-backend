@@ -16,6 +16,7 @@ const POWERUP_NAMES = {
   STEALTH_MODE: "Stealth Mode",
   WRONG_TURN: "Wrong Turn",
   FANNY_PACK: "Fanny Pack",
+  TRAIL_MIX: "Trail Mix",
 };
 
 function buildRollPowerup(dependencies = {}) {
