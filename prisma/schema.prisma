@@ -239,6 +239,8 @@ enum PowerupType {
   WRONG_TURN        @map("wrong_turn")
   FANNY_PACK        @map("fanny_pack")
   TRAIL_MIX         @map("trail_mix")
+  DETOUR_SIGN       @map("detour_sign")
+  SWITCHEROO        @map("switcheroo")
   MYSTERY_BOX       @map("mystery_box")
 }
 

@@ -409,19 +409,34 @@ function buildGetRaceProgress(deps = {}) {
       }));
     }
 
-    // Build leaderboard with stealth mode applied
+    // Build leaderboard with stealth mode and detour sign applied
     const stealthedUserIds = new Set();
+    let viewerIsDetoured = false;
     if (race.powerupsEnabled) {
       const activeEffects = await raceActiveEffectModel.findActiveForRace(raceId);
       for (const e of activeEffects) {
         if (e.type === "STEALTH_MODE") {
           stealthedUserIds.add(e.targetUserId);
         }
+        if (e.type === "DETOUR_SIGN" && e.targetUserId === userId) {
+          viewerIsDetoured = true;
+        }
       }
     }
 
     const leaderboard = stepTotals
       .map(({ participant, totalSteps }) => {
+        // Detour Sign: viewer sees ALL participants as ???
+        if (viewerIsDetoured) {
+          return {
+            userId: participant.userId,
+            displayName: "???",
+            totalSteps: null,
+            progress: null,
+            finishedAt: participant.finishedAt,
+            stealthed: false,
+          };
+        }
         const isStealthed = stealthedUserIds.has(participant.userId)
           && participant.userId !== userId
           && !participant.finishedAt;

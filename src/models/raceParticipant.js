@@ -73,6 +73,13 @@ const RaceParticipant = {
     });
   },
 
+  async setPlacement(id, placement) {
+    return prisma.raceParticipant.update({
+      where: { id },
+      data: { placement },
+    });
+  },
+
   async addBonusSteps(id, amount) {
     return prisma.raceParticipant.update({
       where: { id },

@@ -6,8 +6,8 @@ const { Race } = require("../models/race");
 const { eventBus } = require("../events/eventBus");
 const { POWERUP_NAMES } = require("./rollPowerup");
 
-const OFFENSIVE_TYPES = ["LEG_CRAMP", "RED_CARD", "SHORTCUT", "WRONG_TURN"];
-const TARGETED_TYPES = ["LEG_CRAMP", "SHORTCUT", "WRONG_TURN"];
+const OFFENSIVE_TYPES = ["LEG_CRAMP", "RED_CARD", "SHORTCUT", "WRONG_TURN", "DETOUR_SIGN", "SWITCHEROO"];
+const TARGETED_TYPES = ["LEG_CRAMP", "SHORTCUT", "WRONG_TURN", "DETOUR_SIGN", "SWITCHEROO"];
 const SELF_ONLY_TYPES = ["COMPRESSION_SOCKS", "PROTEIN_SHAKE", "RUNNERS_HIGH", "SECOND_WIND", "STEALTH_MODE", "FANNY_PACK", "TRAIL_MIX"];
 
 const EFFECT_DURATIONS = {
@@ -15,6 +15,7 @@ const EFFECT_DURATIONS = {
   RUNNERS_HIGH: 3 * 60 * 60 * 1000,    // 3 hours
   STEALTH_MODE: 4 * 60 * 60 * 1000,    // 4 hours
   WRONG_TURN: 1 * 60 * 60 * 1000,      // 1 hour
+  DETOUR_SIGN: 3 * 60 * 60 * 1000,    // 3 hours
 };
 
 const PROTEIN_SHAKE_BONUS = 1500;
@@ -123,6 +124,13 @@ function buildUsePowerup(dependencies = {}) {
       throw new PowerupUseError("Target has 0 steps — nothing to steal", 400);
     }
 
+    // Reject Switcheroo if target has fewer or equal steps (can only swap up)
+    if (type === "SWITCHEROO" && targetParticipant) {
+      if (targetParticipant.totalSteps <= myParticipant.totalSteps) {
+        throw new PowerupUseError("You can only swap with someone who has more steps than you", 400);
+      }
+    }
+
     // Reject stacking Leg Cramp on a target that already has one active
     if (type === "LEG_CRAMP" && targetParticipant) {
       const existingCramp = await effectModel.findActiveByTypeForParticipant(
@@ -164,6 +172,17 @@ function buildUsePowerup(dependencies = {}) {
       );
       if (existingWT) {
         throw new PowerupUseError("Target already has an active Wrong Turn", 400);
+      }
+    }
+
+    // Reject stacking Detour Sign on target
+    if (type === "DETOUR_SIGN" && targetParticipant) {
+      const existingDetour = await effectModel.findActiveByTypeForParticipant(
+        targetParticipant.id,
+        "DETOUR_SIGN"
+      );
+      if (existingDetour) {
+        throw new PowerupUseError("Target already has an active Detour Sign", 400);
       }
     }
 
@@ -466,6 +485,50 @@ function buildUsePowerup(dependencies = {}) {
           powerupType: type,
           description: `${myDisplayName} used Trail Mix! +${bonus.toLocaleString()} steps (${usedTypes.size} unique powerups).`,
           metadata: { bonus, uniqueTypes: usedTypes.size },
+        });
+        break;
+      }
+
+      case "DETOUR_SIGN": {
+        const effect = await effectModel.create({
+          raceId,
+          targetParticipantId: targetParticipant.id,
+          targetUserId: resolvedTargetUserId,
+          sourceUserId: userId,
+          powerupId,
+          type: "DETOUR_SIGN",
+          startsAt: currentTime,
+          expiresAt: new Date(currentTime.getTime() + EFFECT_DURATIONS.DETOUR_SIGN),
+        });
+        result.effect = effect;
+
+        await eventModel.create({
+          raceId,
+          actorUserId: userId,
+          eventType: "POWERUP_USED",
+          powerupType: type,
+          targetUserId: resolvedTargetUserId,
+          description: `${myDisplayName} sent ${targetDisplayName} on a Detour! Their leaderboard is hidden for 3 hours.`,
+        });
+        break;
+      }
+
+      case "SWITCHEROO": {
+        const diff = targetParticipant.totalSteps - myParticipant.totalSteps;
+
+        await participantModel.addBonusSteps(myParticipant.id, diff);
+        await participantModel.subtractBonusSteps(targetParticipant.id, diff);
+
+        result.swapped = { userGained: diff, targetLost: diff };
+
+        await eventModel.create({
+          raceId,
+          actorUserId: userId,
+          eventType: "POWERUP_USED",
+          powerupType: type,
+          targetUserId: resolvedTargetUserId,
+          description: `${myDisplayName} used Switcheroo on ${targetDisplayName}! Their step totals have been swapped.`,
+          metadata: { diff },
         });
         break;
       }
