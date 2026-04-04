@@ -161,6 +161,7 @@ function makeDeps({ raceStart, samples, participants, dailyRecords, rangeRecords
       StepSample: createStepSampleStore(samples || SAMPLES_A),
       Steps: createStepsStore(dailyRecords || {}, rangeRecords || {}),
       RaceParticipant: {
+        async findById(id) { return { id, powerupSlots: 3 }; },
         async updateTotalSteps(id, totalSteps) { updates.push({ id, totalSteps }); },
         async markFinished() {},
         async setPlacement() {},

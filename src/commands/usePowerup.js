@@ -16,6 +16,8 @@ const EFFECT_DURATIONS = {
   STEALTH_MODE: 4 * 60 * 60 * 1000,    // 4 hours
   WRONG_TURN: 1 * 60 * 60 * 1000,      // 1 hour
   DETOUR_SIGN: 3 * 60 * 60 * 1000,    // 3 hours
+  COMPRESSION_SOCKS: 24 * 60 * 60 * 1000, // 24 hours
+  FANNY_PACK: 24 * 60 * 60 * 1000,        // 24 hours
 };
 
 const PROTEIN_SHAKE_BONUS = 1500;
@@ -322,7 +324,7 @@ function buildUsePowerup(dependencies = {}) {
           powerupId,
           type: "COMPRESSION_SOCKS",
           startsAt: currentTime,
-          expiresAt: null,
+          expiresAt: new Date(currentTime.getTime() + EFFECT_DURATIONS.COMPRESSION_SOCKS),
         });
         result.effect = effect;
 
@@ -460,12 +462,23 @@ function buildUsePowerup(dependencies = {}) {
       case "FANNY_PACK": {
         await participantModel.updatePowerupSlots(myParticipant.id, myParticipant.powerupSlots + 1);
 
+        await effectModel.create({
+          raceId,
+          targetParticipantId: myParticipant.id,
+          targetUserId: userId,
+          sourceUserId: userId,
+          powerupId,
+          type: "FANNY_PACK",
+          startsAt: currentTime,
+          expiresAt: new Date(currentTime.getTime() + EFFECT_DURATIONS.FANNY_PACK),
+        });
+
         await eventModel.create({
           raceId,
           actorUserId: userId,
           eventType: "POWERUP_USED",
           powerupType: type,
-          description: `${myDisplayName} equipped a Fanny Pack! Extra powerup slot unlocked.`,
+          description: `${myDisplayName} equipped a Fanny Pack! Extra powerup slot unlocked for 24 hours.`,
         });
         break;
       }

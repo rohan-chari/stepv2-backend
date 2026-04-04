@@ -252,6 +252,7 @@ function makeProgressDeps(overrides = {}) {
         async update(id, data) { stepWrites.push({ id, ...data }); },
       },
       RaceParticipant: {
+        async findById(id) { return { id, powerupSlots: 3 }; },
         async updateTotalSteps(id, totalSteps) { totalStepsUpdates.push({ id, totalSteps }); },
         async markFinished() {},
         async setPlacement() {},

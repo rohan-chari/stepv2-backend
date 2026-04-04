@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const { buildUsePowerup, PowerupUseError } = require("../../src/commands/usePowerup");
+const { buildExpireEffects } = require("../../src/commands/expireEffects");
 
 // ---------------------------------------------------------------------------
 // Compression Socks — self-only, shield that blocks the next offensive powerup
@@ -130,14 +131,7 @@ test("Compression Socks creates a shield effect on self", async () => {
   assert.equal(ctx.effectsCreated[0].sourceUserId, "user-1");
 });
 
-test("Compression Socks shield has no expiry", async () => {
-  const ctx = makeDeps();
-  const use = buildUsePowerup(ctx.deps);
 
-  await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1" });
-
-  assert.equal(ctx.effectsCreated[0].expiresAt, null);
-});
 
 test("Compression Socks does not modify any step counts", async () => {
   const ctx = makeDeps();
@@ -515,4 +509,64 @@ test("Compression Socks rejects if used by someone who doesn't own it", async ()
       return true;
     }
   );
+});
+
+// ===========================================================================
+// 24-hour expiry
+// ===========================================================================
+
+test("Compression Socks shield has 24-hour expiry", async () => {
+  const ctx = makeDeps();
+  const use = buildUsePowerup(ctx.deps);
+
+  await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1" });
+
+  assert.equal(ctx.effectsCreated.length, 1);
+  const effect = ctx.effectsCreated[0];
+  assert.ok(effect.expiresAt, "should have an expiresAt timestamp");
+
+  const startsAt = effect.startsAt.getTime();
+  const expiresAt = effect.expiresAt.getTime();
+  assert.equal(expiresAt - startsAt, 24 * 60 * 60 * 1000);
+});
+
+test("Compression Socks expires naturally after 24 hours if not consumed", async () => {
+  const expired = [];
+  const feedEvents = [];
+
+  const expire = buildExpireEffects({
+    RaceActiveEffect: {
+      async findExpired() {
+        return [{
+          id: "eff-cs",
+          raceId: "race-1",
+          targetParticipantId: "rp-1",
+          targetUserId: "user-1",
+          type: "COMPRESSION_SOCKS",
+          status: "ACTIVE",
+          expiresAt: new Date("2026-03-29T12:00:00Z"),
+          metadata: {},
+        }];
+      },
+      async update(id, fields) {
+        expired.push({ id, ...fields });
+        return { id, ...fields };
+      },
+    },
+    RacePowerupEvent: {
+      async create(data) {
+        feedEvents.push(data);
+        return { id: "fe-1", ...data };
+      },
+    },
+    eventBus: { emit() {} },
+    now: () => new Date("2026-03-30T12:00:00Z"),
+  });
+
+  await expire({ raceId: "race-1" });
+
+  assert.equal(expired.length, 1);
+  assert.equal(expired[0].status, "EXPIRED");
+  assert.equal(feedEvents.length, 1);
+  assert.ok(feedEvents[0].description.includes("Compression Socks"));
 });

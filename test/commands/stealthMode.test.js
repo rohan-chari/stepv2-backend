@@ -417,6 +417,7 @@ function makeProgressDeps(overrides = {}) {
         async findByUserIdAndDateRange() { return []; },
       },
       RaceParticipant: {
+        async findById(id) { return { id, powerupSlots: 3 }; },
         async updateTotalSteps() {},
         async markFinished(id, time) { finishCalls.push({ id, time }); },
         async setPlacement() {},

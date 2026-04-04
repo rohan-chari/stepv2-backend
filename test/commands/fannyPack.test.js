@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const { buildUsePowerup, PowerupUseError } = require("../../src/commands/usePowerup");
 const { buildRollPowerup } = require("../../src/commands/rollPowerup");
+const { buildExpireEffects } = require("../../src/commands/expireEffects");
 
 // ---------------------------------------------------------------------------
 // Fanny Pack — self-only, instant, adds 1 extra powerup slot (3 → 4)
@@ -137,15 +138,7 @@ test("Fanny Pack does not modify step counts", async () => {
   assert.equal(ctx.bonusChanges.length, 0);
 });
 
-test("Fanny Pack does not create an active effect", async () => {
-  const ctx = makePowerupDeps();
-  const use = buildUsePowerup(ctx.deps);
 
-  const result = await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1" });
-
-  assert.equal(result.effect, undefined);
-  assert.equal(ctx.effectsCreated.length, 0);
-});
 
 test("Fanny Pack marks powerup as USED after use", async () => {
   const ctx = makePowerupDeps();
@@ -412,4 +405,115 @@ function makeRollDeps(overrides = {}) {
     },
   };
 }
+
+// ===========================================================================
+// Fanny Pack 24-hour expiry
+// ===========================================================================
+
+test("Fanny Pack creates an active effect with 24-hour expiry", async () => {
+  const ctx = makePowerupDeps();
+  const use = buildUsePowerup(ctx.deps);
+
+  const result = await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1" });
+
+  assert.equal(ctx.effectsCreated.length, 1);
+  assert.equal(ctx.effectsCreated[0].type, "FANNY_PACK");
+  assert.equal(ctx.effectsCreated[0].targetUserId, "user-1");
+
+  const startsAt = ctx.effectsCreated[0].startsAt.getTime();
+  const expiresAt = ctx.effectsCreated[0].expiresAt.getTime();
+  assert.equal(expiresAt - startsAt, 24 * 60 * 60 * 1000);
+});
+
+test("Fanny Pack expiry reverts powerup slots", async () => {
+  const slotReverts = [];
+  const ctx = {
+    deps: {
+      RaceActiveEffect: {
+        async findExpired() {
+          return [{
+            id: "eff-fp",
+            raceId: "race-1",
+            targetParticipantId: "rp-1",
+            targetUserId: "user-1",
+            type: "FANNY_PACK",
+            status: "ACTIVE",
+            expiresAt: new Date("2026-03-29T12:00:00Z"),
+            metadata: {},
+          }];
+        },
+        async update(id, fields) { return { id, ...fields }; },
+      },
+      RacePowerupEvent: {
+        async create() { return { id: "fe-1" }; },
+      },
+      RaceParticipant: {
+        async findById(id) { return { id, powerupSlots: 4 }; },
+        async updatePowerupSlots(id, slots) { slotReverts.push({ id, slots }); },
+      },
+      RacePowerup: {
+        async countOccupiedSlots() { return 0; },
+        async findSlotPowerups() { return []; },
+        async update(id, fields) { return { id, ...fields }; },
+      },
+      eventBus: { emit() {} },
+      now: () => new Date("2026-03-30T12:00:00Z"),
+    },
+  };
+
+  const expire = buildExpireEffects(ctx.deps);
+  await expire({ raceId: "race-1" });
+
+  assert.equal(slotReverts.length, 1);
+  assert.equal(slotReverts[0].id, "rp-1");
+  assert.equal(slotReverts[0].slots, 3); // reverted from 4 to 3
+});
+
+test("Fanny Pack expiry does not queue or discard overflow items", async () => {
+  const slotReverts = [];
+  const queuedItems = [];
+  const ctx = {
+    deps: {
+      RaceActiveEffect: {
+        async findExpired() {
+          return [{
+            id: "eff-fp",
+            raceId: "race-1",
+            targetParticipantId: "rp-1",
+            targetUserId: "user-1",
+            type: "FANNY_PACK",
+            status: "ACTIVE",
+            expiresAt: new Date("2026-03-29T12:00:00Z"),
+            metadata: {},
+          }];
+        },
+        async update(id, fields) { return { id, ...fields }; },
+      },
+      RacePowerupEvent: {
+        async create() { return { id: "fe-1" }; },
+      },
+      RaceParticipant: {
+        async findById(id) { return { id, powerupSlots: 4 }; },
+        async updatePowerupSlots(id, slots) { slotReverts.push({ id, slots }); },
+      },
+      RacePowerup: {
+        async countOccupiedSlots() { return 3; },
+        async findSlotPowerups() { return []; },
+        async update(id, fields) { queuedItems.push({ id, ...fields }); },
+      },
+      eventBus: { emit() {} },
+      now: () => new Date("2026-03-30T12:00:00Z"),
+    },
+  };
+
+  const expire = buildExpireEffects(ctx.deps);
+  await expire({ raceId: "race-1" });
+
+  // Slots reverted
+  assert.equal(slotReverts.length, 1);
+  assert.equal(slotReverts[0].slots, 3);
+
+  // No items queued or discarded
+  assert.equal(queuedItems.length, 0);
+});
 

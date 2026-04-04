@@ -120,24 +120,7 @@ describe("compression socks", () => {
   // === CORE MECHANIC ===
 
   describe("core mechanic", () => {
-    it("activating creates an active effect with no expiry", async () => {
-      const alice = await createUser("AliceSocksAA");
-      const bob = await createUser("BobSocksAAAA");
-      await makeFriends(alice, bob);
-      const raceId = await createActiveRace(alice, bob);
 
-      const shield = await giveHeldPowerup(raceId, alice.userId, "COMPRESSION_SOCKS", 99901);
-      const res = await usePowerup(alice.token, raceId, shield.id);
-      assert.equal(res.status, 200);
-
-      // Verify effect exists in DB with no expiry
-      const effect = await prisma.raceActiveEffect.findFirst({
-        where: { raceId, type: "COMPRESSION_SOCKS", targetUserId: alice.userId },
-      });
-      assert.ok(effect);
-      assert.equal(effect.status, "ACTIVE");
-      assert.equal(effect.expiresAt, null);
-    });
 
     it("shield persists across multiple progress fetches (no time expiry)", async () => {
       const alice = await createUser("AliceSocksBB");
@@ -331,6 +314,94 @@ describe("compression socks", () => {
       // Next offensive attack should still be blocked
       await giveBonusSteps(raceId, alice.userId, 5000);
       const attack = await giveHeldPowerup(raceId, bob.userId, "SHORTCUT", 99903);
+      const res = await usePowerup(bob.token, raceId, attack.id, alice.userId);
+      assert.equal((await res.json()).result.blocked, true);
+    });
+  });
+
+  // === 24-HOUR EXPIRY ===
+
+  describe("24-hour expiry", () => {
+    it("shield expires after 24 hours if not consumed", async () => {
+      const alice = await createUser("AliceExpAAAA");
+      const bob = await createUser("BobExpAAAAAA");
+      await makeFriends(alice, bob);
+      const raceId = await createActiveRace(alice, bob);
+
+      const shield = await giveHeldPowerup(raceId, alice.userId, "COMPRESSION_SOCKS", 99901);
+      await usePowerup(alice.token, raceId, shield.id);
+
+      // Force expiry by setting expiresAt to the past
+      const effect = await prisma.raceActiveEffect.findFirst({
+        where: { raceId, type: "COMPRESSION_SOCKS" },
+      });
+      await prisma.raceActiveEffect.update({
+        where: { id: effect.id },
+        data: { expiresAt: new Date(Date.now() - 60000) },
+      });
+
+      // Trigger expiry via progress fetch
+      await getProgress(alice.token, raceId);
+
+      // Shield should be expired
+      const updated = await prisma.raceActiveEffect.findFirst({
+        where: { id: effect.id },
+      });
+      assert.equal(updated.status, "EXPIRED");
+
+      // Next attack should go through (no shield)
+      await giveBonusSteps(raceId, alice.userId, 5000);
+      const attack = await giveHeldPowerup(raceId, bob.userId, "SHORTCUT", 99902);
+      const attackRes = await usePowerup(bob.token, raceId, attack.id, alice.userId);
+      assert.ok(!(await attackRes.json()).result.blocked, "attack should not be blocked after shield expired");
+    });
+
+    it("shield effect has expiresAt set on creation", async () => {
+      const alice = await createUser("AliceExpBBBB");
+      const bob = await createUser("BobExpBBBBBB");
+      await makeFriends(alice, bob);
+      const raceId = await createActiveRace(alice, bob);
+
+      const shield = await giveHeldPowerup(raceId, alice.userId, "COMPRESSION_SOCKS", 99901);
+      await usePowerup(alice.token, raceId, shield.id);
+
+      const effect = await prisma.raceActiveEffect.findFirst({
+        where: { raceId, type: "COMPRESSION_SOCKS" },
+      });
+      assert.ok(effect.expiresAt, "should have expiresAt set");
+
+      const diffHours = (effect.expiresAt.getTime() - effect.startsAt.getTime()) / (60 * 60 * 1000);
+      assert.equal(diffHours, 24);
+    });
+
+    it("existing shields without expiresAt still work (backwards compat)", async () => {
+      const alice = await createUser("AliceExpCCCC");
+      const bob = await createUser("BobExpCCCCCC");
+      await makeFriends(alice, bob);
+      const raceId = await createActiveRace(alice, bob);
+
+      await giveBonusSteps(raceId, alice.userId, 5000);
+
+      // Manually create a shield with null expiresAt (old data)
+      const aliceP = await prisma.raceParticipant.findFirst({ where: { raceId, userId: alice.userId } });
+      const powerup = await giveHeldPowerup(raceId, alice.userId, "COMPRESSION_SOCKS", 99901);
+      await prisma.racePowerup.update({ where: { id: powerup.id }, data: { status: "USED" } });
+      await prisma.raceActiveEffect.create({
+        data: {
+          raceId,
+          targetParticipantId: aliceP.id,
+          targetUserId: alice.userId,
+          sourceUserId: alice.userId,
+          powerupId: powerup.id,
+          type: "COMPRESSION_SOCKS",
+          status: "ACTIVE",
+          startsAt: new Date(),
+          expiresAt: null, // old-style, no expiry
+        },
+      });
+
+      // Attack should still be blocked
+      const attack = await giveHeldPowerup(raceId, bob.userId, "SHORTCUT", 99902);
       const res = await usePowerup(bob.token, raceId, attack.id, alice.userId);
       assert.equal((await res.json()).result.blocked, true);
     });

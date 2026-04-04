@@ -1,6 +1,10 @@
 const { prisma } = require("../db");
 
 const RaceParticipant = {
+  async findById(id) {
+    return prisma.raceParticipant.findUnique({ where: { id } });
+  },
+
   async findByRaceAndUser(raceId, userId) {
     return prisma.raceParticipant.findUnique({
       where: { raceId_userId: { raceId, userId } },

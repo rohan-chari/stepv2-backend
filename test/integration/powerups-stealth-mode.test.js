@@ -293,7 +293,7 @@ describe("stealth mode", () => {
       const progress = await getProgress(bob.token, raceId);
       const aliceEntry = findUser(progress, alice.userId);
       assert.equal(aliceEntry.displayName, "AliceUnmskBB");
-      assert.equal(aliceEntry.stealthed, false);
+      assert.ok(!aliceEntry.stealthed, "finished user should not be stealthed");
       assert.ok(aliceEntry.finishedAt);
     });
   });

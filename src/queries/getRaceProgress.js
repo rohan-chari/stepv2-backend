@@ -342,8 +342,6 @@ function buildGetRaceProgress(deps = {}) {
       const myStepEntry = stepTotals.find((s) => s.participant.userId === userId);
       const myP = myStepEntry?.participant;
 
-      const mySlots = myP?.powerupSlots || 3;
-
       if (myP && myP.nextBoxAtSteps > 0 && myStepEntry.totalSteps >= myP.nextBoxAtSteps) {
         const rollResults = await rollPowerupFn({
           raceId,
@@ -353,7 +351,7 @@ function buildGetRaceProgress(deps = {}) {
           nextBoxAtSteps: myP.nextBoxAtSteps,
           powerupStepInterval: race.powerupStepInterval,
           displayName: myP.user.displayName,
-          powerupSlots: mySlots,
+          powerupSlots: myP.powerupSlots || 3,
         });
 
         const newBoxes = rollResults.filter((r) => r.mysteryBox && !r.queued);
@@ -370,6 +368,10 @@ function buildGetRaceProgress(deps = {}) {
       if (!powerupData) {
         powerupData = { enabled: true, newMysteryBoxes: [], newQueuedBoxes: 0 };
       }
+
+      // Re-read participant to get current powerupSlots (may have changed via Fanny Pack expiry)
+      const freshParticipant = await participantModel.findById(myParticipant.id);
+      const mySlots = freshParticipant?.powerupSlots || 3;
 
       // Auto-fill queued boxes into open slots
       const occupiedCount = await racePowerupModel.countOccupiedSlots(myParticipant.id);

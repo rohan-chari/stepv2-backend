@@ -159,20 +159,7 @@ describe("fanny pack", () => {
       assert.equal(updated.powerupSlots, 4);
     });
 
-    it("no active effect is created (instant permanent change)", async () => {
-      const alice = await createUser("AlicePackBBB");
-      const bob = await createUser("BobPackBBBBB");
-      await makeFriends(alice, bob);
-      const raceId = await createActiveRace(alice, bob);
 
-      const fp = await giveHeldPowerup(raceId, alice.userId, "FANNY_PACK", 99901);
-      await usePowerup(alice.token, raceId, fp.id);
-
-      const effects = await prisma.raceActiveEffect.findMany({
-        where: { raceId, targetUserId: alice.userId, type: "FANNY_PACK" },
-      });
-      assert.equal(effects.length, 0);
-    });
 
     it("extra slot persists across progress fetches", async () => {
       const alice = await createUser("AlicePackCCC");
@@ -383,6 +370,124 @@ describe("fanny pack", () => {
       assert.ok(event, "feed should contain fanny pack usage event");
       assert.ok(event.description.includes("Fanny Pack"));
       assert.ok(event.description.includes("slot"));
+    });
+  });
+
+  // === 24-HOUR EXPIRY ===
+
+  describe("24-hour expiry", () => {
+    it("fanny pack creates an active effect with 24-hour expiry", async () => {
+      const alice = await createUser("AliceExpAAAA");
+      const bob = await createUser("BobExpAAAAAA");
+      await makeFriends(alice, bob);
+      const raceId = await createActiveRace(alice, bob);
+
+      const fp = await giveHeldPowerup(raceId, alice.userId, "FANNY_PACK", 99901);
+      await usePowerup(alice.token, raceId, fp.id);
+
+      const effect = await prisma.raceActiveEffect.findFirst({
+        where: { raceId, type: "FANNY_PACK" },
+      });
+      assert.ok(effect, "should create an active effect");
+      assert.ok(effect.expiresAt, "should have expiresAt");
+
+      const diffHours = (effect.expiresAt.getTime() - effect.startsAt.getTime()) / (60 * 60 * 1000);
+      assert.equal(diffHours, 24);
+    });
+
+    it("slots revert from 4 to 3 after fanny pack expires", async () => {
+      const alice = await createUser("AliceExpBBBB");
+      const bob = await createUser("BobExpBBBBBB");
+      await makeFriends(alice, bob);
+      const raceId = await createActiveRace(alice, bob);
+
+      const fp = await giveHeldPowerup(raceId, alice.userId, "FANNY_PACK", 99901);
+      await usePowerup(alice.token, raceId, fp.id);
+
+      // Verify 4 slots
+      let participant = await prisma.raceParticipant.findFirst({ where: { raceId, userId: alice.userId } });
+      assert.equal(participant.powerupSlots, 4);
+
+      // Force expiry
+      const effect = await prisma.raceActiveEffect.findFirst({ where: { raceId, type: "FANNY_PACK" } });
+      await prisma.raceActiveEffect.update({
+        where: { id: effect.id },
+        data: { expiresAt: new Date(Date.now() - 60000) },
+      });
+
+      // Trigger expiry via progress
+      await getProgress(alice.token, raceId);
+
+      // Verify reverted to 3
+      participant = await prisma.raceParticipant.findFirst({ where: { raceId, userId: alice.userId } });
+      assert.equal(participant.powerupSlots, 3);
+    });
+
+    it("items stay when fanny pack expires with full inventory — slot disappears on next use", async () => {
+      const alice = await createUser("AliceExpCCCC");
+      const bob = await createUser("BobExpCCCCCC");
+      await makeFriends(alice, bob);
+      const raceId = await createActiveRace(alice, bob);
+
+      // Use fanny pack to get 4 slots
+      const fp = await giveHeldPowerup(raceId, alice.userId, "FANNY_PACK", 99901);
+      await usePowerup(alice.token, raceId, fp.id);
+
+      // Fill all 4 slots
+      const s1 = await giveHeldPowerup(raceId, alice.userId, "PROTEIN_SHAKE", 99902);
+      await giveHeldPowerup(raceId, alice.userId, "PROTEIN_SHAKE", 99903);
+      await giveHeldPowerup(raceId, alice.userId, "PROTEIN_SHAKE", 99904);
+      await giveHeldPowerup(raceId, alice.userId, "SHORTCUT", 99905);
+
+      // Force fanny pack expiry
+      const effect = await prisma.raceActiveEffect.findFirst({ where: { raceId, type: "FANNY_PACK" } });
+      await prisma.raceActiveEffect.update({
+        where: { id: effect.id },
+        data: { expiresAt: new Date(Date.now() - 60000) },
+      });
+
+      // Trigger expiry
+      await getProgress(alice.token, raceId);
+
+      // Slots reverted to 3 in DB
+      const participant = await prisma.raceParticipant.findFirst({ where: { raceId, userId: alice.userId } });
+      assert.equal(participant.powerupSlots, 3);
+
+      // But all 4 items still accessible (nothing queued or discarded)
+      const progressData = await getProgress(alice.token, raceId);
+      const inv = progressData.powerupData;
+      assert.equal(inv.inventory.length, 4);
+      assert.equal(inv.queuedBoxCount, 0);
+
+      // Use one — now should drop to 3 items, no new slot opens for queued
+      await usePowerup(alice.token, raceId, s1.id);
+      const afterUse = await getProgress(alice.token, raceId);
+      assert.equal(afterUse.powerupData.inventory.length, 3);
+    });
+
+    it("feed shows fanny pack expiry event", async () => {
+      const alice = await createUser("AliceExpDDDD");
+      const bob = await createUser("BobExpDDDDDD");
+      await makeFriends(alice, bob);
+      const raceId = await createActiveRace(alice, bob);
+
+      const fp = await giveHeldPowerup(raceId, alice.userId, "FANNY_PACK", 99901);
+      await usePowerup(alice.token, raceId, fp.id);
+
+      // Force expiry
+      const effect = await prisma.raceActiveEffect.findFirst({ where: { raceId, type: "FANNY_PACK" } });
+      await prisma.raceActiveEffect.update({
+        where: { id: effect.id },
+        data: { expiresAt: new Date(Date.now() - 60000) },
+      });
+      await getProgress(alice.token, raceId);
+
+      const feedRes = await request(server.baseUrl, "GET", `/races/${raceId}/feed`, { token: alice.token });
+      const feedBody = await feedRes.json();
+      const expiryEvent = feedBody.events.find(
+        (e) => e.eventType === "EFFECT_EXPIRED" && e.powerupType === "FANNY_PACK"
+      );
+      assert.ok(expiryEvent, "feed should show fanny pack expiry");
     });
   });
 });

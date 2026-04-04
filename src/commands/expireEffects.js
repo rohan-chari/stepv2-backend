@@ -1,10 +1,14 @@
 const { RaceActiveEffect } = require("../models/raceActiveEffect");
+const { RaceParticipant } = require("../models/raceParticipant");
+const { RacePowerup } = require("../models/racePowerup");
 const { RacePowerupEvent } = require("../models/racePowerupEvent");
 const { eventBus } = require("../events/eventBus");
 const { POWERUP_NAMES } = require("./rollPowerup");
 
 function buildExpireEffects(dependencies = {}) {
   const effectModel = dependencies.RaceActiveEffect || RaceActiveEffect;
+  const participantModel = dependencies.RaceParticipant || RaceParticipant;
+  const powerupModel = dependencies.RacePowerup || RacePowerup;
   const eventModel = dependencies.RacePowerupEvent || RacePowerupEvent;
   const events = dependencies.eventBus || eventBus;
   const nowFn = dependencies.now || (() => new Date());
@@ -24,6 +28,18 @@ function buildExpireEffects(dependencies = {}) {
         const currentStepsForTarget = participantSteps?.[effect.targetParticipantId];
         if (currentStepsForTarget !== undefined) {
           metadata.stepsAtExpiry = currentStepsForTarget;
+        }
+      }
+
+      // Revert Fanny Pack slot expansion (items stay — extra slot just won't refill)
+      if (effect.type === "FANNY_PACK") {
+        try {
+          const participant = await participantModel.findById(effect.targetParticipantId);
+          if (participant && participant.powerupSlots > 3) {
+            await participantModel.updatePowerupSlots(participant.id, participant.powerupSlots - 1);
+          }
+        } catch (e) {
+          console.error("Failed to revert Fanny Pack slots:", e);
         }
       }
 

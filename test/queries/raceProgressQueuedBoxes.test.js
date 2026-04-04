@@ -78,6 +78,7 @@ function makeDeps(overrides = {}) {
         async findByUserIdAndDateRange() { return []; },
       },
       RaceParticipant: {
+        async findById(id) { return { id, powerupSlots: 3 }; },
         async updateTotalSteps(id, totalSteps) { updates.push({ id, totalSteps }); },
         async markFinished() {},
         async setPlacement() {},

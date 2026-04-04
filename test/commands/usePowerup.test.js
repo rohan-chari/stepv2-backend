@@ -145,7 +145,7 @@ test("usePowerup applies Compression Socks shield", async () => {
   const result = await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1" });
 
   assert.equal(ctx.effectsCreated[0].type, "COMPRESSION_SOCKS");
-  assert.equal(ctx.effectsCreated[0].expiresAt, null);
+  assert.ok(ctx.effectsCreated[0].expiresAt, "should have expiresAt set");
 });
 
 test("usePowerup applies Leg Cramp to target", async () => {
