@@ -1,6 +1,7 @@
--- Delete any existing switcheroo powerups and effects
+-- Delete any existing switcheroo powerups, effects, and feed events
 DELETE FROM race_active_effects WHERE type = 'switcheroo';
 DELETE FROM race_powerups WHERE type = 'switcheroo';
+DELETE FROM race_powerup_events WHERE powerup_type = 'switcheroo';
 
 -- Remove switcheroo from PowerupType enum
 ALTER TYPE "PowerupType" RENAME TO "PowerupType_old";
