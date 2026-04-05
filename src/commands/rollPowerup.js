@@ -18,7 +18,6 @@ const POWERUP_NAMES = {
   FANNY_PACK: "Fanny Pack",
   TRAIL_MIX: "Trail Mix",
   DETOUR_SIGN: "Detour Sign",
-  SWITCHEROO: "Switcheroo",
 };
 
 function buildRollPowerup(dependencies = {}) {

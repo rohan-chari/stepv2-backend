@@ -662,6 +662,70 @@ describe("races", () => {
       assert.ok(charlieP);
       assert.equal(charlieP.status, "ACCEPTED");
     });
+
+    it("late joiner to powerup-enabled race gets nextBoxAtSteps initialized", async () => {
+      const alice = await createUser("AliceLatePow");
+      const bob = await createUser("BobbyLatePow");
+      const charlie = await createUser("CharlieLateP");
+      await makeFriends(alice, bob);
+      await makeFriends(alice, charlie);
+
+      // Create powerup-enabled race with bob, start it
+      const createRes = await request(server.baseUrl, "POST", "/races", {
+        body: {
+          name: "Late Join Powerup Test",
+          targetSteps: 200000,
+          maxDurationDays: 7,
+          powerupsEnabled: true,
+          powerupStepInterval: 2500,
+        },
+        token: alice.token,
+      });
+      const raceId = (await createRes.json()).race.id;
+      await request(server.baseUrl, "POST", `/races/${raceId}/invite`, {
+        body: { inviteeIds: [bob.userId] },
+        token: alice.token,
+      });
+      await request(server.baseUrl, "PUT", `/races/${raceId}/respond`, {
+        body: { accept: true },
+        token: bob.token,
+      });
+      await request(server.baseUrl, "POST", `/races/${raceId}/start`, { token: alice.token });
+
+      // Invite charlie late
+      await request(server.baseUrl, "POST", `/races/${raceId}/invite`, {
+        body: { inviteeIds: [charlie.userId] },
+        token: alice.token,
+      });
+      await request(server.baseUrl, "PUT", `/races/${raceId}/respond`, {
+        body: { accept: true },
+        token: charlie.token,
+      });
+
+      // Charlie's nextBoxAtSteps should be initialized
+      const charlieP = await prisma.raceParticipant.findFirst({
+        where: { raceId, userId: charlie.userId },
+      });
+      assert.equal(charlieP.nextBoxAtSteps, 2500, "late joiner should have nextBoxAtSteps initialized to powerupStepInterval");
+
+      // Charlie records steps and should earn a box
+      const now = new Date();
+      const defaultStart = new Date(Date.now() - 2 * 60 * 60 * 1000);
+      await prisma.race.update({ where: { id: raceId }, data: { startedAt: defaultStart } });
+      await prisma.raceParticipant.updateMany({ where: { raceId }, data: { joinedAt: defaultStart } });
+
+      await request(server.baseUrl, "POST", "/steps/samples", {
+        body: {
+          samples: [{ periodStart: new Date(now.getTime() - 3600000).toISOString(), periodEnd: now.toISOString(), steps: 3000 }],
+        },
+        token: charlie.token,
+      });
+
+      const progressRes = await request(server.baseUrl, "GET", `/races/${raceId}/progress`, { token: charlie.token });
+      const progress = (await progressRes.json()).progress;
+      assert.ok(progress.powerupData);
+      assert.ok(progress.powerupData.inventory.length > 0, "late joiner should earn mystery boxes");
+    });
   });
 
   // === RACE PROGRESS ===

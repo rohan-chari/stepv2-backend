@@ -43,6 +43,11 @@ function buildRespondToRaceInvite(dependencies = {}) {
       const todaySteps = await stepsModel.findByUserIdAndDate(userId, today);
       updateFields.baselineSteps = todaySteps?.steps ?? 0;
       updateFields.joinedAt = new Date();
+
+      // Initialize powerup thresholds for late joiners
+      if (race.powerupsEnabled && race.powerupStepInterval) {
+        updateFields.nextBoxAtSteps = race.powerupStepInterval;
+      }
     }
 
     const updated = await participantModel.update(participant.id, updateFields);

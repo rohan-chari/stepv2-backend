@@ -6,8 +6,8 @@ const { Race } = require("../models/race");
 const { eventBus } = require("../events/eventBus");
 const { POWERUP_NAMES } = require("./rollPowerup");
 
-const OFFENSIVE_TYPES = ["LEG_CRAMP", "RED_CARD", "SHORTCUT", "WRONG_TURN", "DETOUR_SIGN", "SWITCHEROO"];
-const TARGETED_TYPES = ["LEG_CRAMP", "SHORTCUT", "WRONG_TURN", "DETOUR_SIGN", "SWITCHEROO"];
+const OFFENSIVE_TYPES = ["LEG_CRAMP", "RED_CARD", "SHORTCUT", "WRONG_TURN", "DETOUR_SIGN"];
+const TARGETED_TYPES = ["LEG_CRAMP", "SHORTCUT", "WRONG_TURN", "DETOUR_SIGN"];
 const SELF_ONLY_TYPES = ["COMPRESSION_SOCKS", "PROTEIN_SHAKE", "RUNNERS_HIGH", "SECOND_WIND", "STEALTH_MODE", "FANNY_PACK", "TRAIL_MIX"];
 
 const EFFECT_DURATIONS = {
@@ -124,13 +124,6 @@ function buildUsePowerup(dependencies = {}) {
     // Reject Shortcut on a target with 0 steps — nothing to steal
     if (type === "SHORTCUT" && targetParticipant && Math.max(0, targetParticipant.totalSteps) === 0) {
       throw new PowerupUseError("Target has 0 steps — nothing to steal", 400);
-    }
-
-    // Reject Switcheroo if target has fewer or equal steps (can only swap up)
-    if (type === "SWITCHEROO" && targetParticipant) {
-      if (targetParticipant.totalSteps <= myParticipant.totalSteps) {
-        throw new PowerupUseError("You can only swap with someone who has more steps than you", 400);
-      }
     }
 
     // Reject stacking Leg Cramp on a target that already has one active
@@ -526,25 +519,6 @@ function buildUsePowerup(dependencies = {}) {
         break;
       }
 
-      case "SWITCHEROO": {
-        const diff = targetParticipant.totalSteps - myParticipant.totalSteps;
-
-        await participantModel.addBonusSteps(myParticipant.id, diff);
-        await participantModel.subtractBonusSteps(targetParticipant.id, diff);
-
-        result.swapped = { userGained: diff, targetLost: diff };
-
-        await eventModel.create({
-          raceId,
-          actorUserId: userId,
-          eventType: "POWERUP_USED",
-          powerupType: type,
-          targetUserId: resolvedTargetUserId,
-          description: `${myDisplayName} used Switcheroo on ${targetDisplayName}! Their step totals have been swapped.`,
-          metadata: { diff },
-        });
-        break;
-      }
     }
 
     // Mark powerup as used
