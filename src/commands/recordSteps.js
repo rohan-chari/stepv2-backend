@@ -2,15 +2,25 @@ const { Steps } = require("../models/steps");
 const { User } = require("../models/user");
 const { eventBus } = require("../events/eventBus");
 const { awardCoins: defaultAwardCoins } = require("./awardCoins");
+const { resolveRaceState: defaultResolveRaceState } = require("../services/raceStateResolution");
 
 function buildRecordSteps(dependencies = {}) {
+  const hasInjectedDeps = Object.keys(dependencies).length > 0;
   const stepsModel = dependencies.Steps || Steps;
   const userModel = dependencies.User || User;
   const events = dependencies.eventBus || eventBus;
   const awardCoinsFn = dependencies.awardCoins || defaultAwardCoins;
+  const resolveRaceState = Object.prototype.hasOwnProperty.call(
+    dependencies,
+    "resolveRaceState"
+  )
+    ? dependencies.resolveRaceState
+    : hasInjectedDeps
+      ? async () => {}
+      : defaultResolveRaceState;
   const now = dependencies.now || (() => new Date());
 
-  return async function recordSteps({ userId, steps, date }) {
+  return async function recordSteps({ userId, steps, date, timeZone }) {
     const existing = await stepsModel.findByUserIdAndDate(userId, date);
 
     let record;
@@ -56,6 +66,8 @@ function buildRecordSteps(dependencies = {}) {
       // Don't fail step recording if coin award fails
       console.error("Failed to award daily goal coins:", e);
     }
+
+    await resolveRaceState({ userId, timeZone });
 
     return record;
   };

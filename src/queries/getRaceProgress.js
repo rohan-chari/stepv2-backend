@@ -269,6 +269,13 @@ function buildGetRaceProgress(deps = {}) {
     // Second pass: calculate powerup-adjusted totals
     const stepTotals = await Promise.all(
       rawStepTotals.map(async ({ participant, baseAdjusted, hasSampleData }) => {
+        if (participant.finishedAt) {
+          return {
+            participant,
+            totalSteps: participant.finishTotalSteps ?? participant.totalSteps,
+          };
+        }
+
         let total = baseAdjusted;
 
         if (race.powerupsEnabled) {
@@ -296,10 +303,12 @@ function buildGetRaceProgress(deps = {}) {
     // Find new finishers this tick
     const newFinishers = [];
     for (const { participant, totalSteps } of stepTotals) {
-      await participantModel.updateTotalSteps(participant.id, totalSteps);
+      if (!participant.finishedAt) {
+        await participantModel.updateTotalSteps(participant.id, totalSteps);
+      }
 
       if (totalSteps >= race.targetSteps && !participant.finishedAt) {
-        await participantModel.markFinished(participant.id, now());
+        await participantModel.markFinished(participant.id, now(), totalSteps);
         newFinishers.push({ participant, totalSteps });
       }
     }
@@ -311,9 +320,9 @@ function buildGetRaceProgress(deps = {}) {
       await participantModel.setPlacement(newFinishers[i].participant.id, placement);
     }
 
-    // Determine if race should complete: need top 3 finished, or 1st if <3 participants
+    // Determine if race should complete: need top 3 finished, or 1st if 3 or fewer participants
     const totalFinished = previouslyFinished + newFinishers.length;
-    const finishThreshold = acceptedParticipants.length < 3 ? 1 : 3;
+    const finishThreshold = acceptedParticipants.length <= 3 ? 1 : 3;
 
     if (newFinishers.length > 0 && totalFinished >= finishThreshold && previouslyFinished < finishThreshold) {
       // Winner is the participant with placement 1

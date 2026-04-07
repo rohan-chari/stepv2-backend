@@ -18,6 +18,13 @@ const RacePowerupEvent = {
       take: limit,
     });
   },
+
+  async findByRaceAsc(raceId) {
+    return prisma.racePowerupEvent.findMany({
+      where: { raceId },
+      orderBy: { createdAt: "asc" },
+    });
+  },
 };
 
 module.exports = { RacePowerupEvent };

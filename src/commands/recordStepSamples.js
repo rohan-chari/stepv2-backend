@@ -1,4 +1,7 @@
 const { StepSample } = require("../models/stepSample");
+const {
+  resolveRaceState: defaultResolveRaceState,
+} = require("../services/raceStateResolution");
 
 class StepSampleError extends Error {
   constructor(message, statusCode) {
@@ -35,9 +38,18 @@ function removeOverlaps(samples) {
 }
 
 function buildRecordStepSamples(dependencies = {}) {
+  const hasInjectedDeps = Object.keys(dependencies).length > 0;
   const stepSampleModel = dependencies.StepSample || StepSample;
+  const resolveRaceState = Object.prototype.hasOwnProperty.call(
+    dependencies,
+    "resolveRaceState"
+  )
+    ? dependencies.resolveRaceState
+    : hasInjectedDeps
+      ? async () => {}
+      : defaultResolveRaceState;
 
-  return async function recordStepSamples({ userId, samples }) {
+  return async function recordStepSamples({ userId, samples, timeZone }) {
     if (!Array.isArray(samples) || samples.length === 0) {
       throw new StepSampleError("samples must be a non-empty array", 400);
     }
@@ -50,6 +62,7 @@ function buildRecordStepSamples(dependencies = {}) {
 
     const cleaned = removeOverlaps(samples);
     await stepSampleModel.upsertBatch(userId, cleaned);
+    await resolveRaceState({ userId, timeZone });
 
     return { count: cleaned.length };
   };

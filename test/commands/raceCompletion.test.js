@@ -132,10 +132,10 @@ test("2-person race: does NOT wait for 2nd place", async () => {
 });
 
 // ===========================================================================
-// 3-person race — completes after all 3 finish (since exactly 3 participants)
+// 3-person race — completes after 1st place finishes
 // ===========================================================================
 
-test("3-person race: does NOT complete when only 1st finishes", async () => {
+test("3-person race: completes when 1st finishes", async () => {
   const ctx = makeDeps({
     targetSteps: 10000,
     participants: [
@@ -150,11 +150,12 @@ test("3-person race: does NOT complete when only 1st finishes", async () => {
   // user-1 should be marked finished
   assert.equal(ctx.finishCalls.length, 1);
   assert.equal(ctx.finishCalls[0].id, "rp-1");
-  // But race should NOT complete yet
-  assert.equal(ctx.completeCalls.length, 0);
+  // Race should complete immediately
+  assert.equal(ctx.completeCalls.length, 1);
+  assert.equal(ctx.completeCalls[0].winnerUserId, "user-1");
 });
 
-test("3-person race: does NOT complete when only 2 have finished", async () => {
+test("3-person race: 2nd finisher does NOT trigger a second completion", async () => {
   const ctx = makeDeps({
     targetSteps: 10000,
     participants: [
@@ -172,11 +173,11 @@ test("3-person race: does NOT complete when only 2 have finished", async () => {
   // user-2 should be marked finished
   assert.equal(ctx.finishCalls.length, 1);
   assert.equal(ctx.finishCalls[0].id, "rp-2");
-  // Race still should NOT complete — waiting for 3rd
+  // Race should not complete a second time
   assert.equal(ctx.completeCalls.length, 0);
 });
 
-test("3-person race: completes when 3rd finishes", async () => {
+test("3-person race: 3rd finisher does NOT trigger a second completion", async () => {
   const ctx = makeDeps({
     targetSteps: 10000,
     participants: [
@@ -197,10 +198,8 @@ test("3-person race: completes when 3rd finishes", async () => {
   // user-3 should be marked finished
   assert.equal(ctx.finishCalls.length, 1);
   assert.equal(ctx.finishCalls[0].id, "rp-3");
-  // NOW the race completes
-  assert.equal(ctx.completeCalls.length, 1);
-  // Winner is still user-1 (first to cross)
-  assert.equal(ctx.completeCalls[0].winnerUserId, "user-1");
+  // Race should not complete a second time
+  assert.equal(ctx.completeCalls.length, 0);
 });
 
 // ===========================================================================
@@ -467,6 +466,7 @@ test("Winner is the first to cross even if a later finisher has more steps", asy
         finishedAt: new Date("2026-03-29T14:00:00Z"), placement: 2,
       }),
       makeParticipant("rp-3", "user-3", "Carol", { _rawSteps: 11000, joinedAt: RACE_START, baselineSteps: 0, nextBoxAtSteps: 0 }),
+      makeParticipant("rp-4", "user-4", "Dave", { _rawSteps: 4000, joinedAt: RACE_START, baselineSteps: 0, nextBoxAtSteps: 0 }),
     ],
   });
 

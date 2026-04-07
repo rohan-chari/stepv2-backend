@@ -281,17 +281,18 @@ describe("red card", () => {
       const alice = await createUser("AliceValDDDD");
       const bob = await createUser("BobValDDDDDD");
       const charlie = await createUser("CharlieValDD");
+      const dave = await createUser("DaveValDDDDD");
       await makeFriends(alice, bob);
       await makeFriends(alice, charlie);
+      await makeFriends(alice, dave);
       await makeFriends(bob, charlie);
-      const raceId = await createActiveRaceWith([alice, bob, charlie], { targetSteps: 5000 });
+      const raceId = await createActiveRaceWith([alice, bob, charlie, dave], { targetSteps: 5000 });
 
       // Charlie finishes the race
       await giveBonusSteps(raceId, charlie.userId, 8000);
       await recordSamples(charlie.token, [
         { periodStart: minutesAgo(30).toISOString(), periodEnd: new Date().toISOString(), steps: 8000 },
       ]);
-      await getProgress(charlie.token, raceId); // trigger finish
 
       // Bob is leader among active participants
       await giveBonusSteps(raceId, bob.userId, 3000);

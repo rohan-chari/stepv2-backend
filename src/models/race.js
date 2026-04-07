@@ -64,6 +64,21 @@ const Race = {
     });
   },
 
+  async findActiveForUser(userId) {
+    return prisma.race.findMany({
+      where: {
+        status: "ACTIVE",
+        participants: { some: { userId, status: "ACCEPTED" } },
+      },
+      include: {
+        creator: { select: { id: true, displayName: true } },
+        winner: { select: { id: true, displayName: true } },
+        ...participantInclude,
+      },
+      orderBy: { updatedAt: "desc" },
+    });
+  },
+
   async findActiveExpired(now) {
     return prisma.race.findMany({
       where: {

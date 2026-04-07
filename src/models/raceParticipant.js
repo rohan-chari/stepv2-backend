@@ -70,10 +70,10 @@ const RaceParticipant = {
     });
   },
 
-  async markFinished(id, finishedAt) {
+  async markFinished(id, finishedAt, finishTotalSteps) {
     return prisma.raceParticipant.update({
       where: { id },
-      data: { finishedAt, status: "ACCEPTED" },
+      data: { finishedAt, finishTotalSteps, totalSteps: finishTotalSteps, status: "ACCEPTED" },
     });
   },
 

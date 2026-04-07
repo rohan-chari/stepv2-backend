@@ -189,6 +189,7 @@ function createRacesRouter(dependencies = {}) {
         raceId: req.params.raceId,
         powerupId: req.params.powerupId,
         targetUserId,
+        timeZone: req.timeZone,
       });
       res.json({ result });
     } catch (error) {

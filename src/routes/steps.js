@@ -36,6 +36,7 @@ function createStepsRouter(dependencies = {}) {
         userId: req.user.id,
         steps,
         date,
+        timeZone: req.timeZone,
       });
       res.json({ record });
     } catch (error) {
@@ -53,6 +54,7 @@ function createStepsRouter(dependencies = {}) {
       const result = await recordSamples({
         userId: req.user.id,
         samples,
+        timeZone: req.timeZone,
       });
       res.json(result);
     } catch (error) {

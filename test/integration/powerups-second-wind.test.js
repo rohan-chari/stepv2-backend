@@ -309,17 +309,18 @@ describe("second wind", () => {
       const alice = await createUser("AliceEdgeBBB");
       const bob = await createUser("BobEdgeBBBBB");
       const charlie = await createUser("CharlieEdgeB");
+      const dave = await createUser("DaveEdgeBBBB");
       await makeFriends(alice, bob);
       await makeFriends(alice, charlie);
+      await makeFriends(alice, dave);
       await makeFriends(bob, charlie);
-      const raceId = await createActiveRaceWith([alice, bob, charlie], { targetSteps: 5000 });
+      const raceId = await createActiveRaceWith([alice, bob, charlie, dave], { targetSteps: 5000 });
 
       // Charlie finishes
       await giveBonusSteps(raceId, charlie.userId, 8000);
       await recordSamples(charlie.token, [
         { periodStart: minutesAgo(30).toISOString(), periodEnd: new Date().toISOString(), steps: 8000 },
       ]);
-      await getProgress(charlie.token, raceId);
 
       // Bob is leader among active, alice is behind
       await giveBonusSteps(raceId, bob.userId, 4000);

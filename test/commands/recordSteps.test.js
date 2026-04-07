@@ -32,6 +32,8 @@ test("recordSteps stamps lastStepSyncAt when creating a daily record", async () 
         events.push({ event, payload });
       },
     },
+    awardCoins: async () => {},
+    resolveRaceState: async () => {},
     now: () => now,
   });
 
@@ -82,6 +84,8 @@ test("recordSteps stamps lastStepSyncAt when updating an existing daily record",
         events.push({ event, payload });
       },
     },
+    awardCoins: async () => {},
+    resolveRaceState: async () => {},
     now: () => now,
   });
 
@@ -104,4 +108,38 @@ test("recordSteps stamps lastStepSyncAt when updating an existing daily record",
       payload: { userId: "user-1", steps: 9000, date: "2026-03-19" },
     },
   ]);
+});
+
+test("recordSteps resolves active race state after writing steps", async () => {
+  let resolved = null;
+
+  const recordSteps = buildRecordSteps({
+    Steps: {
+      async findByUserIdAndDate() {
+        return null;
+      },
+      async create(payload) {
+        return { id: "step-1", ...payload };
+      },
+    },
+    User: {
+      async update() {},
+      async findById() {
+        return { id: "user-1", stepGoal: 5000 };
+      },
+    },
+    eventBus: { emit() {} },
+    awardCoins: async () => {},
+    resolveRaceState: async (payload) => {
+      resolved = payload;
+    },
+  });
+
+  await recordSteps({
+    userId: "user-1",
+    steps: 8765,
+    date: "2026-03-19",
+  });
+
+  assert.deepEqual(resolved, { userId: "user-1", timeZone: undefined });
 });

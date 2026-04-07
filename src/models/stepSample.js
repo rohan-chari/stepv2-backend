@@ -27,8 +27,8 @@ const StepSample = {
     return prisma.stepSample.findMany({
       where: {
         userId,
-        periodStart: { gte: new Date(startTime) },
-        periodEnd: { lte: new Date(endTime) },
+        periodEnd: { gt: new Date(startTime) },
+        periodStart: { lt: new Date(endTime) },
       },
       orderBy: { periodStart: "asc" },
     });

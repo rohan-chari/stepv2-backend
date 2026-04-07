@@ -14,6 +14,7 @@ function makeDeps() {
           saved.push(...samples.map((s) => ({ userId, ...s })));
         },
       },
+      resolveRaceState: async () => {},
     },
   };
 }
@@ -134,4 +135,28 @@ test("rejects sample missing periodStart", async () => {
       return true;
     }
   );
+});
+
+test("resolves active race state after saving samples", async () => {
+  const ctx = makeDeps();
+  let resolved = null;
+  const record = buildRecordStepSamples({
+    ...ctx.deps,
+    resolveRaceState: async (payload) => {
+      resolved = payload;
+    },
+  });
+
+  await record({
+    userId: "user-1",
+    samples: [
+      {
+        periodStart: "2026-03-30T08:15:00Z",
+        periodEnd: "2026-03-30T08:30:00Z",
+        steps: 22,
+      },
+    ],
+  });
+
+  assert.deepEqual(resolved, { userId: "user-1", timeZone: undefined });
 });

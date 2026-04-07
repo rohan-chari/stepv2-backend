@@ -5,6 +5,9 @@ const { RacePowerupEvent } = require("../models/racePowerupEvent");
 const { Race } = require("../models/race");
 const { eventBus } = require("../events/eventBus");
 const { POWERUP_NAMES } = require("./rollPowerup");
+const {
+  resolveRaceState: defaultResolveRaceState,
+} = require("../services/raceStateResolution");
 
 const OFFENSIVE_TYPES = ["LEG_CRAMP", "RED_CARD", "SHORTCUT", "WRONG_TURN", "DETOUR_SIGN"];
 const TARGETED_TYPES = ["LEG_CRAMP", "SHORTCUT", "WRONG_TURN", "DETOUR_SIGN"];
@@ -37,15 +40,30 @@ class PowerupUseError extends Error {
 }
 
 function buildUsePowerup(dependencies = {}) {
+  const hasInjectedDeps = Object.keys(dependencies).length > 0;
   const powerupModel = dependencies.RacePowerup || RacePowerup;
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
   const effectModel = dependencies.RaceActiveEffect || RaceActiveEffect;
   const eventModel = dependencies.RacePowerupEvent || RacePowerupEvent;
   const raceModel = dependencies.Race || Race;
   const events = dependencies.eventBus || eventBus;
+  const resolveRaceState = Object.prototype.hasOwnProperty.call(
+    dependencies,
+    "resolveRaceState"
+  )
+    ? dependencies.resolveRaceState
+    : hasInjectedDeps
+      ? async () => {}
+      : defaultResolveRaceState;
   const now = dependencies.now || (() => new Date());
 
-  return async function usePowerup({ userId, raceId, powerupId, targetUserId }) {
+  return async function usePowerup({
+    userId,
+    raceId,
+    powerupId,
+    targetUserId,
+    timeZone,
+  }) {
     const powerup = await powerupModel.findById(powerupId);
     if (!powerup) {
       throw new PowerupUseError("Powerup not found", 404);
@@ -534,6 +552,8 @@ function buildUsePowerup(dependencies = {}) {
       powerupType: type,
       targetUserId: resolvedTargetUserId,
     });
+
+    await resolveRaceState({ raceId, timeZone });
 
     return result;
   };

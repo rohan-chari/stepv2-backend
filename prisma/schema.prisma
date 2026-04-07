@@ -318,6 +318,7 @@ model RaceParticipant {
   powerupSlots  Int                   @default(3) @map("powerup_slots")
   placement     Int?
   finishedAt    DateTime?             @map("finished_at")
+  finishTotalSteps Int?               @map("finish_total_steps")
   joinedAt      DateTime              @default(now()) @map("joined_at")
 
   race          Race @relation(fields: [raceId], references: [id], onDelete: Cascade)
