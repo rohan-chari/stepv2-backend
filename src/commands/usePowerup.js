@@ -29,7 +29,7 @@ const RED_CARD_PERCENT = 0.10;
 const SECOND_WIND_MIN = 500;
 const SECOND_WIND_MAX = 5000;
 const SECOND_WIND_FACTOR = 0.25;
-const TRAIL_MIX_PER_TYPE = 500;
+const TRAIL_MIX_PER_TYPE = 100;
 
 class PowerupUseError extends Error {
   constructor(message, statusCode) {

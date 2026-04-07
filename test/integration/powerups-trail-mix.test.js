@@ -106,7 +106,7 @@ describe("trail mix", () => {
   // === CORE MECHANIC ===
 
   describe("core mechanic", () => {
-    it("first powerup used is trail mix → 1 unique type × 500 = 500 bonus", async () => {
+    it("first powerup used is trail mix → 1 unique type × 100 = 100 bonus", async () => {
       const alice = await createUser("AliceMixAAAA");
       const bob = await createUser("BobMixAAAAAA");
       await makeFriends(alice, bob);
@@ -117,14 +117,14 @@ describe("trail mix", () => {
       assert.equal(res.status, 200);
 
       const body = await res.json();
-      assert.equal(body.result.bonus, 500);
+      assert.equal(body.result.bonus, 100);
 
       const progress = await getProgress(alice.token, raceId);
       const aliceP = findUser(progress, alice.userId);
-      assert.equal(aliceP.totalSteps, 500);
+      assert.equal(aliceP.totalSteps, 100);
     });
 
-    it("used 2 other types before trail mix → 3 × 500 = 1500 bonus", async () => {
+    it("used 2 other types before trail mix → 3 × 100 = 300 bonus", async () => {
       const alice = await createUser("AliceMixBBBB");
       const bob = await createUser("BobMixBBBBBB");
       await makeFriends(alice, bob);
@@ -146,8 +146,8 @@ describe("trail mix", () => {
       assert.equal(res.status, 200);
 
       const body = await res.json();
-      // PROTEIN_SHAKE + SHORTCUT + TRAIL_MIX = 3 unique × 500 = 1500
-      assert.equal(body.result.bonus, 1500);
+      // PROTEIN_SHAKE + SHORTCUT + TRAIL_MIX = 3 unique × 100 = 300
+      assert.equal(body.result.bonus, 300);
     });
 
     it("using same type twice doesn't double count", async () => {
@@ -166,8 +166,8 @@ describe("trail mix", () => {
       const tm = await giveHeldPowerup(raceId, alice.userId, "TRAIL_MIX", 99903);
       const res = await usePowerup(alice.token, raceId, tm.id);
       const body = await res.json();
-      // PROTEIN_SHAKE (1 unique, not 2) + TRAIL_MIX = 2 × 500 = 1000
-      assert.equal(body.result.bonus, 1000);
+      // PROTEIN_SHAKE (1 unique, not 2) + TRAIL_MIX = 2 × 100 = 200
+      assert.equal(body.result.bonus, 200);
     });
 
     it("multiple trail mixes recalculate with updated unique count", async () => {
@@ -176,10 +176,10 @@ describe("trail mix", () => {
       await makeFriends(alice, bob);
       const raceId = await createActiveRace(alice, bob);
 
-      // First trail mix: only itself = 500
+      // First trail mix: only itself = 100
       const tm1 = await giveHeldPowerup(raceId, alice.userId, "TRAIL_MIX", 99901);
       const res1 = await usePowerup(alice.token, raceId, tm1.id);
-      assert.equal((await res1.json()).result.bonus, 500);
+      assert.equal((await res1.json()).result.bonus, 100);
 
       // Use a protein shake
       const shake = await giveHeldPowerup(raceId, alice.userId, "PROTEIN_SHAKE", 99902);
@@ -189,8 +189,8 @@ describe("trail mix", () => {
       // (TRAIL_MIX is already counted from first use)
       const tm2 = await giveHeldPowerup(raceId, alice.userId, "TRAIL_MIX", 99903);
       const res2 = await usePowerup(alice.token, raceId, tm2.id);
-      // TRAIL_MIX + PROTEIN_SHAKE = 2 unique × 500 = 1000
-      assert.equal((await res2.json()).result.bonus, 1000);
+      // TRAIL_MIX + PROTEIN_SHAKE = 2 unique × 100 = 200
+      assert.equal((await res2.json()).result.bonus, 200);
     });
   });
 
@@ -246,7 +246,7 @@ describe("trail mix", () => {
       // Trail mix should only count itself (no USED types yet)
       const tm = await giveHeldPowerup(raceId, alice.userId, "TRAIL_MIX", 99903);
       const res = await usePowerup(alice.token, raceId, tm.id);
-      assert.equal((await res.json()).result.bonus, 500);
+      assert.equal((await res.json()).result.bonus, 100);
     });
 
     it("only counts powerups from this race, not other races", async () => {
@@ -265,8 +265,8 @@ describe("trail mix", () => {
       const raceB = await createActiveRace(alice, charlie);
       const tm = await giveHeldPowerup(raceB, alice.userId, "TRAIL_MIX", 99902);
       const res = await usePowerup(alice.token, raceB, tm.id);
-      // Only trail mix itself = 500
-      assert.equal((await res.json()).result.bonus, 500);
+      // Only trail mix itself = 100
+      assert.equal((await res.json()).result.bonus, 100);
     });
 
     it("bonus persists in progress", async () => {
@@ -280,12 +280,12 @@ describe("trail mix", () => {
 
       const progress = await getProgress(alice.token, raceId);
       const aliceP = findUser(progress, alice.userId);
-      assert.equal(aliceP.totalSteps, 500);
+      assert.equal(aliceP.totalSteps, 100);
 
       // Fetch again
       const progress2 = await getProgress(alice.token, raceId);
       const aliceP2 = findUser(progress2, alice.userId);
-      assert.equal(aliceP2.totalSteps, 500);
+      assert.equal(aliceP2.totalSteps, 100);
     });
   });
 

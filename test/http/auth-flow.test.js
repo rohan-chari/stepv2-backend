@@ -177,6 +177,7 @@ test("POST /steps records steps for the authenticated user instead of trusting c
         userId: "user-1",
         steps: 8765,
         date: "2026-03-11",
+        timeZone: "America/New_York",
       },
     });
 
@@ -184,6 +185,7 @@ test("POST /steps records steps for the authenticated user instead of trusting c
       userId: "user-1",
       steps: 8765,
       date: "2026-03-11",
+      timeZone: "America/New_York",
     });
   } finally {
     await server.close();

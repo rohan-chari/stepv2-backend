@@ -3,7 +3,7 @@ const test = require("node:test");
 const { buildUsePowerup, PowerupUseError } = require("../../src/commands/usePowerup");
 
 // ---------------------------------------------------------------------------
-// Trail Mix — self-only, instant, +500 per unique powerup type used in race
+// Trail Mix — self-only, instant, +100 per unique powerup type used in race
 // ---------------------------------------------------------------------------
 
 function makeParticipant(id, userId, displayName, overrides = {}) {
@@ -100,35 +100,35 @@ function makeDeps(overrides = {}) {
 // Basic usage — bonus calculation
 // ===========================================================================
 
-test("Trail Mix with 0 prior types gives 500 bonus (counts itself)", async () => {
+test("Trail Mix with 0 prior types gives 100 bonus (counts itself)", async () => {
   const ctx = makeDeps({ usedTypes: [] });
   const use = buildUsePowerup(ctx.deps);
 
   const result = await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1" });
 
-  // Only trail mix itself = 1 unique type × 500 = 500
-  assert.equal(result.bonus, 500);
-  assert.equal(ctx.bonusChanges[0].amount, 500);
+  // Only trail mix itself = 1 unique type × 100 = 100
+  assert.equal(result.bonus, 100);
+  assert.equal(ctx.bonusChanges[0].amount, 100);
 });
 
-test("Trail Mix with 2 prior types gives 1500 bonus", async () => {
+test("Trail Mix with 2 prior types gives 300 bonus", async () => {
   const ctx = makeDeps({ usedTypes: ["PROTEIN_SHAKE", "LEG_CRAMP"] });
   const use = buildUsePowerup(ctx.deps);
 
   const result = await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1" });
 
-  // 2 prior + trail mix = 3 × 500 = 1500
-  assert.equal(result.bonus, 1500);
+  // 2 prior + trail mix = 3 × 100 = 300
+  assert.equal(result.bonus, 300);
 });
 
-test("Trail Mix with 5 prior types gives 3000 bonus", async () => {
+test("Trail Mix with 5 prior types gives 600 bonus", async () => {
   const ctx = makeDeps({ usedTypes: ["PROTEIN_SHAKE", "LEG_CRAMP", "SHORTCUT", "RED_CARD", "RUNNERS_HIGH"] });
   const use = buildUsePowerup(ctx.deps);
 
   const result = await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1" });
 
-  // 5 prior + trail mix = 6 × 500 = 3000
-  assert.equal(result.bonus, 3000);
+  // 5 prior + trail mix = 6 × 100 = 600
+  assert.equal(result.bonus, 600);
 });
 
 test("Trail Mix counts itself (marked USED before counting)", async () => {
@@ -139,8 +139,8 @@ test("Trail Mix counts itself (marked USED before counting)", async () => {
 
   // Powerup should be marked USED before counting
   assert.equal(ctx.updatedPowerup.status, "USED");
-  // Bonus should be 500 (trail mix is the only unique type)
-  assert.equal(ctx.bonusChanges[0].amount, 500);
+  // Bonus should be 100 (trail mix is the only unique type)
+  assert.equal(ctx.bonusChanges[0].amount, 100);
 });
 
 test("Trail Mix does not double-count duplicate types", async () => {
@@ -150,8 +150,8 @@ test("Trail Mix does not double-count duplicate types", async () => {
 
   const result = await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1" });
 
-  // 1 unique prior + trail mix = 2 × 500 = 1000
-  assert.equal(result.bonus, 1000);
+  // 1 unique prior + trail mix = 2 × 100 = 200
+  assert.equal(result.bonus, 200);
 });
 
 // ===========================================================================
@@ -185,7 +185,7 @@ test("Trail Mix creates feed event with bonus and unique count", async () => {
   assert.equal(ctx.feedEvents[0].eventType, "POWERUP_USED");
   assert.equal(ctx.feedEvents[0].powerupType, "TRAIL_MIX");
   assert.ok(ctx.feedEvents[0].description.includes("Trail Mix"));
-  assert.ok(ctx.feedEvents[0].metadata.bonus === 1500);
+  assert.ok(ctx.feedEvents[0].metadata.bonus === 300);
   assert.ok(ctx.feedEvents[0].metadata.uniqueTypes === 3);
 });
 

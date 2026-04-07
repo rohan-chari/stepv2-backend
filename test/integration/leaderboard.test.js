@@ -50,6 +50,110 @@ function yesterdayStr() {
   return d.toISOString().slice(0, 10);
 }
 
+async function seedChallenge() {
+  return prisma.challenge.create({
+    data: {
+      title: "Step Showdown",
+      description: "Most steps wins",
+      type: "HEAD_TO_HEAD",
+      resolutionRule: "higher_total",
+      active: true,
+    },
+  });
+}
+
+async function createCompletedChallengeInstance({
+  challengeId,
+  weekOf,
+  userAId,
+  userBId,
+  winnerUserId,
+  userATotalSteps = winnerUserId === userAId ? 12000 : 8000,
+  userBTotalSteps = winnerUserId === userBId ? 12000 : 8000,
+}) {
+  return prisma.challengeInstance.create({
+    data: {
+      challengeId,
+      weekOf: new Date(weekOf),
+      userAId,
+      userBId,
+      status: "COMPLETED",
+      stakeStatus: "SKIPPED",
+      winnerUserId,
+      userATotalSteps,
+      userBTotalSteps,
+      resolvedAt: new Date(`${weekOf}T12:00:00.000Z`),
+    },
+  });
+}
+
+async function createChallengeRecord({
+  challengeId,
+  user,
+  wins,
+  losses,
+  label,
+}) {
+  for (let i = 0; i < wins; i++) {
+    const opponent = await createUser(`${label}WinOpp${i}`);
+    await createCompletedChallengeInstance({
+      challengeId,
+      weekOf: `2026-01-${String(i + 1).padStart(2, "0")}`,
+      userAId: user.userId,
+      userBId: opponent.userId,
+      winnerUserId: user.userId,
+    });
+  }
+
+  for (let i = 0; i < losses; i++) {
+    const opponent = await createUser(`${label}LossOpp${i}`);
+    await createCompletedChallengeInstance({
+      challengeId,
+      weekOf: `2026-02-${String(i + 1).padStart(2, "0")}`,
+      userAId: user.userId,
+      userBId: opponent.userId,
+      winnerUserId: opponent.userId,
+    });
+  }
+}
+
+async function createCompletedRace({
+  name,
+  winnerUserId,
+  participants,
+}) {
+  const race = await prisma.race.create({
+    data: {
+      creatorId: participants[0].userId,
+      name,
+      targetSteps: 100000,
+      status: "COMPLETED",
+      startedAt: new Date("2026-03-01T00:00:00.000Z"),
+      endsAt: new Date("2026-03-08T00:00:00.000Z"),
+      completedAt: new Date("2026-03-02T12:00:00.000Z"),
+      winnerUserId,
+    },
+  });
+
+  await prisma.raceParticipant.createMany({
+    data: participants.map((participant) => ({
+      raceId: race.id,
+      userId: participant.userId,
+      status: "ACCEPTED",
+      totalSteps: participant.totalSteps ?? 100000,
+      baselineSteps: participant.baselineSteps ?? 0,
+      nextBoxAtSteps: participant.nextBoxAtSteps ?? 0,
+      bonusSteps: participant.bonusSteps ?? 0,
+      powerupSlots: participant.powerupSlots ?? 3,
+      placement: participant.placement ?? null,
+      finishedAt: participant.finishedAt ?? new Date("2026-03-02T12:00:00.000Z"),
+      finishTotalSteps: participant.finishTotalSteps ?? participant.totalSteps ?? 100000,
+    })),
+  });
+
+  return race;
+}
+
 describe("leaderboard", () => {
   before(async () => {
     server = await getSharedServer();
@@ -168,6 +272,16 @@ describe("leaderboard", () => {
       const res = await request(server.baseUrl, "GET", "/leaderboard?period=yesterday", {
         token: alice.token,
       });
+      assert.equal(res.status, 400);
+    });
+
+    it("invalid type returns 400", async () => {
+      const alice = await createUser("AliceWalker");
+
+      const res = await request(server.baseUrl, "GET", "/leaderboard?type=bananas", {
+        token: alice.token,
+      });
+
       assert.equal(res.status, 400);
     });
   });
@@ -470,6 +584,315 @@ describe("leaderboard", () => {
 
       // Should be sum of both days
       assert.ok(body.currentUser.totalSteps >= 7000);
+    });
+  });
+
+  describe("challenge record leaderboard", () => {
+    it("ranks qualified users by win percentage and excludes users under 5 completed challenges", async () => {
+      const challenge = await seedChallenge();
+      const ace = await createUser("AceWinner");
+      const blaze = await createUser("BlazeRun");
+      const cedar = await createUser("CedarJog");
+
+      await createChallengeRecord({
+        challengeId: challenge.id,
+        user: ace,
+        wins: 5,
+        losses: 0,
+        label: "ace",
+      });
+      await createChallengeRecord({
+        challengeId: challenge.id,
+        user: blaze,
+        wins: 4,
+        losses: 1,
+        label: "blaze",
+      });
+      await createChallengeRecord({
+        challengeId: challenge.id,
+        user: cedar,
+        wins: 4,
+        losses: 0,
+        label: "cedar",
+      });
+
+      const res = await request(server.baseUrl, "GET", "/leaderboard?type=challenges", {
+        token: ace.token,
+      });
+      assert.equal(res.status, 200);
+
+      const body = await res.json();
+      assert.equal(body.top10.length, 2);
+      assert.deepEqual(
+        body.top10.map((entry) => ({
+          displayName: entry.displayName,
+          rank: entry.rank,
+          wins: entry.wins,
+          losses: entry.losses,
+        })),
+        [
+          { displayName: "AceWinner", rank: 1, wins: 5, losses: 0 },
+          { displayName: "BlazeRun", rank: 2, wins: 4, losses: 1 },
+        ]
+      );
+      assert.equal(body.top10.some((entry) => entry.displayName === "CedarJog"), false);
+      assert.equal(body.currentUser.displayName, "AceWinner");
+      assert.equal(body.currentUser.rank, 1);
+      assert.equal(body.currentUser.inTop10, true);
+      assert.equal(body.currentUser.qualified, true);
+    });
+
+    it("returns current user as unranked when they are below the qualification minimum", async () => {
+      const challenge = await seedChallenge();
+      const ace = await createUser("AceWinner");
+      const cedar = await createUser("CedarJog");
+
+      await createChallengeRecord({
+        challengeId: challenge.id,
+        user: ace,
+        wins: 5,
+        losses: 0,
+        label: "ace",
+      });
+      await createChallengeRecord({
+        challengeId: challenge.id,
+        user: cedar,
+        wins: 4,
+        losses: 0,
+        label: "cedar",
+      });
+
+      const res = await request(server.baseUrl, "GET", "/leaderboard?type=challenges", {
+        token: cedar.token,
+      });
+      assert.equal(res.status, 200);
+
+      const body = await res.json();
+      assert.equal(body.top10.some((entry) => entry.displayName === "CedarJog"), false);
+      assert.deepEqual(body.currentUser, {
+        rank: null,
+        displayName: "CedarJog",
+        wins: 4,
+        losses: 0,
+        completedCount: 4,
+        winPercentage: 1,
+        inTop10: false,
+        qualified: false,
+      });
+    });
+
+    it("breaks challenge leaderboard ties by more completed challenges then more wins", async () => {
+      const challenge = await seedChallenge();
+      const atlas = await createUser("AtlasRun");
+      const bolt = await createUser("BoltStep");
+      const cinder = await createUser("CinderGo");
+
+      await createChallengeRecord({
+        challengeId: challenge.id,
+        user: atlas,
+        wins: 8,
+        losses: 2,
+        label: "atlas",
+      });
+      await createChallengeRecord({
+        challengeId: challenge.id,
+        user: bolt,
+        wins: 4,
+        losses: 1,
+        label: "bolt",
+      });
+      await createChallengeRecord({
+        challengeId: challenge.id,
+        user: cinder,
+        wins: 8,
+        losses: 2,
+        label: "cinder",
+      });
+
+      const res = await request(server.baseUrl, "GET", "/leaderboard?type=challenges", {
+        token: atlas.token,
+      });
+      assert.equal(res.status, 200);
+
+      const body = await res.json();
+      assert.deepEqual(
+        body.top10.map((entry) => ({
+          displayName: entry.displayName,
+          rank: entry.rank,
+          wins: entry.wins,
+          losses: entry.losses,
+          completedCount: entry.completedCount,
+        })),
+        [
+          { displayName: "AtlasRun", rank: 1, wins: 8, losses: 2, completedCount: 10 },
+          { displayName: "CinderGo", rank: 1, wins: 8, losses: 2, completedCount: 10 },
+          { displayName: "BoltStep", rank: 3, wins: 4, losses: 1, completedCount: 5 },
+        ]
+      );
+    });
+  });
+
+  describe("race record leaderboard", () => {
+    it("ranks users by hidden race points from completed races only", async () => {
+      const atlas = await createUser("AtlasRun");
+      const blaze = await createUser("BlazeRun");
+      const cinder = await createUser("CinderGo");
+      const drift = await createUser("DriftRun");
+
+      await createCompletedRace({
+        name: "race-1",
+        winnerUserId: blaze.userId,
+        participants: [
+          { userId: blaze.userId, placement: 1, totalSteps: 110000 },
+          { userId: atlas.userId, placement: 2, totalSteps: 105000 },
+          { userId: cinder.userId, placement: 3, totalSteps: 101000 },
+          { userId: drift.userId, placement: 4, totalSteps: 98000, finishedAt: null, finishTotalSteps: null },
+        ],
+      });
+
+      await createCompletedRace({
+        name: "race-2",
+        winnerUserId: atlas.userId,
+        participants: [
+          { userId: atlas.userId, placement: 1, totalSteps: 120000 },
+          { userId: cinder.userId, placement: 2, totalSteps: 115000 },
+          { userId: drift.userId, placement: 3, totalSteps: 111000 },
+          { userId: blaze.userId, placement: 4, totalSteps: 107000, finishedAt: null, finishTotalSteps: null },
+        ],
+      });
+
+      await prisma.race.create({
+        data: {
+          creatorId: drift.userId,
+          name: "ignored-active-race",
+          targetSteps: 100000,
+          status: "ACTIVE",
+          startedAt: new Date("2026-03-10T00:00:00.000Z"),
+          endsAt: new Date("2026-03-17T00:00:00.000Z"),
+          participants: {
+            create: [
+              { userId: atlas.userId, status: "ACCEPTED" },
+              { userId: drift.userId, status: "ACCEPTED" },
+            ],
+          },
+        },
+      });
+
+      const res = await request(server.baseUrl, "GET", "/leaderboard?type=races", {
+        token: atlas.token,
+      });
+      assert.equal(res.status, 200);
+
+      const body = await res.json();
+      assert.deepEqual(
+        body.top10.map((entry) => ({
+          displayName: entry.displayName,
+          rank: entry.rank,
+          firsts: entry.firsts,
+          seconds: entry.seconds,
+          thirds: entry.thirds,
+        })),
+        [
+          { displayName: "AtlasRun", rank: 1, firsts: 1, seconds: 1, thirds: 0 },
+          { displayName: "BlazeRun", rank: 2, firsts: 1, seconds: 0, thirds: 0 },
+          { displayName: "CinderGo", rank: 3, firsts: 0, seconds: 1, thirds: 1 },
+          { displayName: "DriftRun", rank: 4, firsts: 0, seconds: 0, thirds: 1 },
+        ]
+      );
+      assert.equal(body.currentUser.displayName, "AtlasRun");
+      assert.equal(body.currentUser.rank, 1);
+      assert.equal(body.currentUser.inTop10, true);
+    });
+
+    it("breaks race leaderboard ties by firsts then seconds then thirds", async () => {
+      const atlas = await createUser("AtlasRun");
+      const blaze = await createUser("BlazeRun");
+      const cinder = await createUser("CinderGo");
+      const drift = await createUser("DriftRun");
+      const ember = await createUser("EmberRun");
+
+      await createCompletedRace({
+        name: "atlas-win",
+        winnerUserId: atlas.userId,
+        participants: [
+          { userId: atlas.userId, placement: 1 },
+          { userId: drift.userId, placement: 2 },
+          { userId: ember.userId, placement: 3 },
+        ],
+      });
+
+      await createCompletedRace({
+        name: "blaze-second-a",
+        winnerUserId: drift.userId,
+        participants: [
+          { userId: drift.userId, placement: 1 },
+          { userId: blaze.userId, placement: 2 },
+          { userId: ember.userId, placement: 3 },
+        ],
+      });
+
+      await createCompletedRace({
+        name: "blaze-second-b",
+        winnerUserId: ember.userId,
+        participants: [
+          { userId: ember.userId, placement: 1 },
+          { userId: blaze.userId, placement: 2 },
+          { userId: drift.userId, placement: 3 },
+        ],
+      });
+
+      await createCompletedRace({
+        name: "cinder-third-a",
+        winnerUserId: drift.userId,
+        participants: [
+          { userId: drift.userId, placement: 1 },
+          { userId: ember.userId, placement: 2 },
+          { userId: cinder.userId, placement: 3 },
+        ],
+      });
+
+      await createCompletedRace({
+        name: "cinder-third-b",
+        winnerUserId: drift.userId,
+        participants: [
+          { userId: drift.userId, placement: 1 },
+          { userId: ember.userId, placement: 2 },
+          { userId: cinder.userId, placement: 3 },
+        ],
+      });
+
+      await createCompletedRace({
+        name: "cinder-third-c",
+        winnerUserId: drift.userId,
+        participants: [
+          { userId: drift.userId, placement: 1 },
+          { userId: ember.userId, placement: 2 },
+          { userId: cinder.userId, placement: 3 },
+        ],
+      });
+
+      const res = await request(server.baseUrl, "GET", "/leaderboard?type=races", {
+        token: atlas.token,
+      });
+      assert.equal(res.status, 200);
+
+      const body = await res.json();
+      assert.deepEqual(
+        body.top10.map((entry) => ({
+          displayName: entry.displayName,
+          rank: entry.rank,
+          firsts: entry.firsts,
+          seconds: entry.seconds,
+          thirds: entry.thirds,
+        })),
+        [
+          { displayName: "DriftRun", rank: 1, firsts: 4, seconds: 1, thirds: 1 },
+          { displayName: "EmberRun", rank: 2, firsts: 1, seconds: 3, thirds: 2 },
+          { displayName: "AtlasRun", rank: 3, firsts: 1, seconds: 0, thirds: 0 },
+          { displayName: "BlazeRun", rank: 4, firsts: 0, seconds: 2, thirds: 0 },
+          { displayName: "CinderGo", rank: 5, firsts: 0, seconds: 0, thirds: 3 },
+        ]
+      );
     });
   });
 });
