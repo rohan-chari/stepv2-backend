@@ -36,8 +36,8 @@ const Friendship = {
         OR: [{ requesterId: userId }, { addresseeId: userId }],
       },
       include: {
-        requester: { select: { id: true, displayName: true } },
-        addressee: { select: { id: true, displayName: true } },
+        requester: { select: { id: true, displayName: true, profilePhotoUrl: true } },
+        addressee: { select: { id: true, displayName: true, profilePhotoUrl: true } },
       },
     });
   },
@@ -49,8 +49,8 @@ const Friendship = {
         OR: [{ requesterId: userId }, { addresseeId: userId }],
       },
       include: {
-        requester: { select: { id: true, displayName: true, stepGoal: true } },
-        addressee: { select: { id: true, displayName: true, stepGoal: true } },
+        requester: { select: { id: true, displayName: true, profilePhotoUrl: true, stepGoal: true } },
+        addressee: { select: { id: true, displayName: true, profilePhotoUrl: true, stepGoal: true } },
       },
     });
   },
@@ -59,7 +59,7 @@ const Friendship = {
     return prisma.friendship.findMany({
       where: { addresseeId: userId, status: "PENDING" },
       include: {
-        requester: { select: { id: true, displayName: true } },
+        requester: { select: { id: true, displayName: true, profilePhotoUrl: true } },
       },
     });
   },
@@ -86,7 +86,7 @@ const Friendship = {
     return prisma.friendship.findMany({
       where: { requesterId: userId, status: "PENDING" },
       include: {
-        addressee: { select: { id: true, displayName: true } },
+        addressee: { select: { id: true, displayName: true, profilePhotoUrl: true } },
       },
     });
   },

@@ -6,7 +6,12 @@ async function getFriendsList(userId) {
 
   return friendships.map((f) => {
     const friend = f.requesterId === userId ? f.addressee : f.requester;
-    return { id: friend.id, displayName: friend.displayName, friendshipId: f.id };
+    return {
+      id: friend.id,
+      displayName: friend.displayName,
+      profilePhotoUrl: friend.profilePhotoUrl,
+      friendshipId: f.id,
+    };
   });
 }
 
@@ -19,11 +24,19 @@ async function getPendingRequests(userId) {
   return {
     incoming: incoming.map((f) => ({
       friendshipId: f.id,
-      user: { id: f.requester.id, displayName: f.requester.displayName },
+      user: {
+        id: f.requester.id,
+        displayName: f.requester.displayName,
+        profilePhotoUrl: f.requester.profilePhotoUrl,
+      },
     })),
     outgoing: outgoing.map((f) => ({
       friendshipId: f.id,
-      user: { id: f.addressee.id, displayName: f.addressee.displayName },
+      user: {
+        id: f.addressee.id,
+        displayName: f.addressee.displayName,
+        profilePhotoUrl: f.addressee.profilePhotoUrl,
+      },
     })),
   };
 }
@@ -37,7 +50,12 @@ async function getFriendsWithSteps(userId, date) {
 
   const friends = friendships.map((f) => {
     const friend = f.requesterId === userId ? f.addressee : f.requester;
-    return { id: friend.id, displayName: friend.displayName, stepGoal: friend.stepGoal };
+    return {
+      id: friend.id,
+      displayName: friend.displayName,
+      profilePhotoUrl: friend.profilePhotoUrl,
+      stepGoal: friend.stepGoal,
+    };
   });
 
   const stepsResults = await Promise.all(

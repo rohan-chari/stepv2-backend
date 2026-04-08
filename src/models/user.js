@@ -52,7 +52,7 @@ const User = {
         id: { not: excludeUserId },
         NOT: { displayName: null },
       },
-      select: { id: true, displayName: true },
+      select: { id: true, displayName: true, profilePhotoUrl: true },
       take: 20,
     });
   },

@@ -189,6 +189,7 @@ function buildGetRaceProgress(deps = {}) {
         participants: acceptedParticipants.map((p) => ({
           userId: p.userId,
           displayName: p.user.displayName,
+          profilePhotoUrl: p.user.profilePhotoUrl,
           totalSteps: p.totalSteps,
           progress: Math.min(p.totalSteps / race.targetSteps, 1),
           finishedAt: p.finishedAt,
@@ -442,6 +443,7 @@ function buildGetRaceProgress(deps = {}) {
           return {
             userId: participant.userId,
             displayName: "???",
+            profilePhotoUrl: null,
             totalSteps: null,
             progress: null,
             finishedAt: participant.finishedAt,
@@ -454,6 +456,7 @@ function buildGetRaceProgress(deps = {}) {
         return {
           userId: participant.userId,
           displayName: isStealthed ? "???" : participant.user.displayName,
+          profilePhotoUrl: isStealthed ? null : participant.user.profilePhotoUrl,
           totalSteps: isStealthed ? null : totalSteps,
           progress: isStealthed ? null : Math.min(totalSteps / race.targetSteps, 1),
           finishedAt: participant.finishedAt,

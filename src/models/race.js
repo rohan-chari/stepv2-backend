@@ -3,7 +3,7 @@ const { prisma } = require("../db");
 const participantInclude = {
   participants: {
     include: {
-      user: { select: { id: true, displayName: true } },
+      user: { select: { id: true, displayName: true, profilePhotoUrl: true } },
     },
     orderBy: { joinedAt: "asc" },
   },
@@ -14,8 +14,8 @@ const Race = {
     return prisma.race.findUnique({
       where: { id },
       include: {
-        creator: { select: { id: true, displayName: true } },
-        winner: { select: { id: true, displayName: true } },
+        creator: { select: { id: true, displayName: true, profilePhotoUrl: true } },
+        winner: { select: { id: true, displayName: true, profilePhotoUrl: true } },
         ...participantInclude,
       },
     });
@@ -45,7 +45,7 @@ const Race = {
         potCoins,
       },
       include: {
-        creator: { select: { id: true, displayName: true } },
+        creator: { select: { id: true, displayName: true, profilePhotoUrl: true } },
         ...participantInclude,
       },
     });
@@ -56,8 +56,8 @@ const Race = {
       where: { id },
       data: fields,
       include: {
-        creator: { select: { id: true, displayName: true } },
-        winner: { select: { id: true, displayName: true } },
+        creator: { select: { id: true, displayName: true, profilePhotoUrl: true } },
+        winner: { select: { id: true, displayName: true, profilePhotoUrl: true } },
         ...participantInclude,
       },
     });
@@ -68,8 +68,8 @@ const Race = {
       where: { id },
       data: { potCoins: { increment: amount } },
       include: {
-        creator: { select: { id: true, displayName: true } },
-        winner: { select: { id: true, displayName: true } },
+        creator: { select: { id: true, displayName: true, profilePhotoUrl: true } },
+        winner: { select: { id: true, displayName: true, profilePhotoUrl: true } },
         ...participantInclude,
       },
     });
@@ -88,8 +88,8 @@ const Race = {
         participants: { some: { userId } },
       },
       include: {
-        creator: { select: { id: true, displayName: true } },
-        winner: { select: { id: true, displayName: true } },
+        creator: { select: { id: true, displayName: true, profilePhotoUrl: true } },
+        winner: { select: { id: true, displayName: true, profilePhotoUrl: true } },
         ...participantInclude,
       },
       orderBy: { updatedAt: "desc" },
@@ -103,8 +103,8 @@ const Race = {
         participants: { some: { userId, status: "ACCEPTED" } },
       },
       include: {
-        creator: { select: { id: true, displayName: true } },
-        winner: { select: { id: true, displayName: true } },
+        creator: { select: { id: true, displayName: true, profilePhotoUrl: true } },
+        winner: { select: { id: true, displayName: true, profilePhotoUrl: true } },
         ...participantInclude,
       },
       orderBy: { updatedAt: "desc" },

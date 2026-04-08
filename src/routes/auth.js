@@ -8,8 +8,18 @@ const { buildRequireAuth } = require("../middleware/requireAuth");
 const { signSessionToken: defaultSignSessionToken } = require("../services/sessionToken");
 const { setStepGoal: defaultSetStepGoal } = require("../commands/setStepGoal");
 const { setDisplayName: defaultSetDisplayName } = require("../commands/setDisplayName");
+const {
+  InvalidProfilePhotoError,
+  buildCreateProfilePhotoUpload,
+  buildSetProfilePhoto,
+  buildRemoveProfilePhoto,
+  buildDismissProfilePhotoPrompt,
+} = require("../commands/profilePhoto");
 const { getIncomingFriendRequestCount: defaultGetIncomingFriendRequestCount } = require("../queries/getFriends");
 const { User: DefaultUser } = require("../models/user");
+const {
+  ALLOWED_PROFILE_PHOTO_CONTENT_TYPES,
+} = require("../services/profilePhotoStorage");
 
 const DISPLAY_NAME_MIN_LENGTH = 8;
 const { isAdminUser, withAdminFlag } = require("../services/adminAccess");
@@ -24,6 +34,16 @@ function createAuthRouter(dependencies = {}) {
   const signToken = dependencies.signSessionToken || defaultSignSessionToken;
   const updateStepGoal = dependencies.setStepGoal || defaultSetStepGoal;
   const updateDisplayName = dependencies.setDisplayName || defaultSetDisplayName;
+  const createProfilePhotoUpload =
+    dependencies.createProfilePhotoUpload ||
+    buildCreateProfilePhotoUpload(dependencies);
+  const setProfilePhoto =
+    dependencies.setProfilePhoto || buildSetProfilePhoto(dependencies);
+  const removeProfilePhoto =
+    dependencies.removeProfilePhoto || buildRemoveProfilePhoto(dependencies);
+  const dismissProfilePhotoPrompt =
+    dependencies.dismissProfilePhotoPrompt ||
+    buildDismissProfilePhotoPrompt(dependencies);
   const getIncomingRequestCount = dependencies.getIncomingFriendRequestCount || defaultGetIncomingFriendRequestCount;
   const checkAdmin = dependencies.isAdminUser || isAdminUser;
   const UserModel = dependencies.User || DefaultUser;
@@ -186,6 +206,95 @@ function createAuthRouter(dependencies = {}) {
         return res.status(409).json({ error: error.message });
       }
       console.error("Display name error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  router.post("/me/profile-photo/upload-url", requireAuth, async (req, res) => {
+    const { contentType } = req.body;
+
+    if (contentType === undefined) {
+      return res.status(400).json({ error: "contentType is required" });
+    }
+
+    if (
+      typeof contentType !== "string" ||
+      !ALLOWED_PROFILE_PHOTO_CONTENT_TYPES.includes(contentType)
+    ) {
+      return res.status(400).json({
+        error:
+          "contentType must be one of image/jpeg, image/png, image/heic, image/heif",
+      });
+    }
+
+    try {
+      const upload = await createProfilePhotoUpload({
+        userId: req.user.id,
+        contentType,
+      });
+      res.json({ upload });
+    } catch (error) {
+      console.error("Profile photo upload target error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  router.put("/me/profile-photo", requireAuth, async (req, res) => {
+    const { key, url } = req.body;
+
+    if (key === undefined) {
+      return res.status(400).json({ error: "key is required" });
+    }
+
+    if (url === undefined) {
+      return res.status(400).json({ error: "url is required" });
+    }
+
+    if (typeof key !== "string" || key.trim().length === 0) {
+      return res.status(400).json({ error: "key is required" });
+    }
+
+    if (typeof url !== "string" || url.trim().length === 0) {
+      return res.status(400).json({ error: "url is required" });
+    }
+
+    try {
+      const user = await setProfilePhoto({
+        userId: req.user.id,
+        key: key.trim(),
+        url: url.trim(),
+      });
+      res.json({ user });
+    } catch (error) {
+      if (error instanceof InvalidProfilePhotoError) {
+        return res.status(400).json({ error: error.message });
+      }
+
+      console.error("Profile photo save error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  router.delete("/me/profile-photo", requireAuth, async (req, res) => {
+    try {
+      const user = await removeProfilePhoto({
+        userId: req.user.id,
+      });
+      res.json({ user });
+    } catch (error) {
+      console.error("Profile photo delete error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  router.post("/me/profile-photo/prompt-dismiss", requireAuth, async (req, res) => {
+    try {
+      const user = await dismissProfilePhotoPrompt({
+        userId: req.user.id,
+      });
+      res.json({ user });
+    } catch (error) {
+      console.error("Profile photo prompt dismiss error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });

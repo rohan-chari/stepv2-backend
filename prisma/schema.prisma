@@ -12,6 +12,9 @@ model User {
   email     String?
   name        String?
   displayName String?  @unique @map("display_name")
+  profilePhotoUrl String? @map("profile_photo_url")
+  profilePhotoKey String? @map("profile_photo_key")
+  profilePhotoPromptDismissedAt DateTime? @map("profile_photo_prompt_dismissed_at")
   stepGoal    Int      @default(5000) @map("step_goal")
   lastStepSyncAt DateTime? @map("last_step_sync_at")
   lastSilentPushSentAt DateTime? @map("last_silent_push_sent_at")

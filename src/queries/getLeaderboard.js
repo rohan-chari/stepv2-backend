@@ -29,26 +29,37 @@ function getDateBoundary(period, timeZone) {
   }
 }
 
-async function getUserDisplayNames(userIds) {
+async function getUserProfiles(userIds) {
   if (userIds.length === 0) {
     return new Map();
   }
 
   const users = await prisma.user.findMany({
     where: { id: { in: userIds } },
-    select: { id: true, displayName: true },
+    select: { id: true, displayName: true, profilePhotoUrl: true },
   });
 
-  return new Map(users.map((user) => [user.id, user.displayName || "Anonymous"]));
+  return new Map(
+    users.map((user) => [
+      user.id,
+      {
+        displayName: user.displayName || "Anonymous",
+        profilePhotoUrl: user.profilePhotoUrl || null,
+      },
+    ])
+  );
 }
 
-async function getCurrentUserDisplayName(currentUserId) {
+async function getCurrentUserProfile(currentUserId) {
   const currentUserData = await prisma.user.findUnique({
     where: { id: currentUserId },
-    select: { displayName: true },
+    select: { displayName: true, profilePhotoUrl: true },
   });
 
-  return currentUserData?.displayName || "Anonymous";
+  return {
+    displayName: currentUserData?.displayName || "Anonymous",
+    profilePhotoUrl: currentUserData?.profilePhotoUrl || null,
+  };
 }
 
 async function getStepLeaderboard(period, currentUserId, timeZone) {
@@ -65,7 +76,7 @@ async function getStepLeaderboard(period, currentUserId, timeZone) {
     take: 10,
   });
 
-  const userMap = await getUserDisplayNames(top10Groups.map((group) => group.userId));
+  const userMap = await getUserProfiles(top10Groups.map((group) => group.userId));
 
   let prevRank = 0;
   let prevSteps = null;
@@ -78,7 +89,8 @@ async function getStepLeaderboard(period, currentUserId, timeZone) {
     return {
       rank,
       userId: group.userId,
-      displayName: userMap.get(group.userId) || "Anonymous",
+      displayName: userMap.get(group.userId)?.displayName || "Anonymous",
+      profilePhotoUrl: userMap.get(group.userId)?.profilePhotoUrl || null,
       totalSteps,
     };
   });
@@ -109,13 +121,14 @@ async function getStepLeaderboard(period, currentUserId, timeZone) {
     having: { steps: { _sum: { gt: currentUserSteps } } },
   });
 
-  const currentUserDisplayName = await getCurrentUserDisplayName(currentUserId);
+  const currentUserProfile = await getCurrentUserProfile(currentUserId);
 
   return {
     top10,
     currentUser: {
       rank: usersAbove.length + 1,
-      displayName: currentUserDisplayName,
+      displayName: currentUserProfile.displayName,
+      profilePhotoUrl: currentUserProfile.profilePhotoUrl,
       totalSteps: currentUserSteps,
       inTop10: false,
     },
@@ -158,12 +171,14 @@ async function getChallengeLeaderboard(currentUserId) {
   }
 
   const userIds = [...statsByUserId.keys(), currentUserId];
-  const userMap = await getUserDisplayNames(userIds);
-  const currentUserDisplayName = userMap.get(currentUserId) || "Anonymous";
+  const userMap = await getUserProfiles(userIds);
+  const currentUserDisplayName =
+    userMap.get(currentUserId)?.displayName || "Anonymous";
 
   const entries = [...statsByUserId.entries()].map(([userId, record]) => ({
     userId,
-    displayName: userMap.get(userId) || "Anonymous",
+    displayName: userMap.get(userId)?.displayName || "Anonymous",
+    profilePhotoUrl: userMap.get(userId)?.profilePhotoUrl || null,
     wins: record.wins,
     losses: record.losses,
   }));
@@ -207,12 +222,14 @@ async function getRaceLeaderboard(currentUserId) {
   }
 
   const userIds = [...statsByUserId.keys(), currentUserId];
-  const userMap = await getUserDisplayNames(userIds);
-  const currentUserDisplayName = userMap.get(currentUserId) || "Anonymous";
+  const userMap = await getUserProfiles(userIds);
+  const currentUserDisplayName =
+    userMap.get(currentUserId)?.displayName || "Anonymous";
 
   const entries = [...statsByUserId.entries()].map(([userId, record]) => ({
     userId,
-    displayName: userMap.get(userId) || "Anonymous",
+    displayName: userMap.get(userId)?.displayName || "Anonymous",
+    profilePhotoUrl: userMap.get(userId)?.profilePhotoUrl || null,
     firsts: record.firsts,
     seconds: record.seconds,
     thirds: record.thirds,

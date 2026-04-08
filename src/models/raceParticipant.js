@@ -15,7 +15,7 @@ const RaceParticipant = {
     return prisma.raceParticipant.create({
       data: { raceId, userId, status, buyInAmount, buyInStatus },
       include: {
-        user: { select: { id: true, displayName: true } },
+        user: { select: { id: true, displayName: true, profilePhotoUrl: true } },
       },
     });
   },
@@ -32,7 +32,7 @@ const RaceParticipant = {
       where: { id },
       data: fields,
       include: {
-        user: { select: { id: true, displayName: true } },
+        user: { select: { id: true, displayName: true, profilePhotoUrl: true } },
       },
     });
   },
@@ -41,7 +41,7 @@ const RaceParticipant = {
     return prisma.raceParticipant.findMany({
       where: { raceId },
       include: {
-        user: { select: { id: true, displayName: true } },
+        user: { select: { id: true, displayName: true, profilePhotoUrl: true } },
       },
       orderBy: { joinedAt: "asc" },
     });
@@ -51,7 +51,7 @@ const RaceParticipant = {
     return prisma.raceParticipant.findMany({
       where: { raceId, status: "ACCEPTED" },
       include: {
-        user: { select: { id: true, displayName: true } },
+        user: { select: { id: true, displayName: true, profilePhotoUrl: true } },
       },
       orderBy: { joinedAt: "asc" },
     });
@@ -65,7 +65,7 @@ const RaceParticipant = {
         buyInStatus: { in: ["HELD", "COMMITTED"] },
       },
       include: {
-        user: { select: { id: true, displayName: true } },
+        user: { select: { id: true, displayName: true, profilePhotoUrl: true } },
       },
       orderBy: { joinedAt: "asc" },
     });

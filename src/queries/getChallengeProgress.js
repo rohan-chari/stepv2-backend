@@ -70,12 +70,14 @@ async function getChallengeProgress(userId, instanceId, timeZone) {
     userA: {
       userId: instance.userA.id,
       displayName: instance.userA.displayName,
+      profilePhotoUrl: instance.userA.profilePhotoUrl,
       totalSteps: userATotalSteps,
       dailySteps: dailyStepsA,
     },
     userB: {
       userId: instance.userB.id,
       displayName: instance.userB.displayName,
+      profilePhotoUrl: instance.userB.profilePhotoUrl,
       totalSteps: userBTotalSteps,
       dailySteps: dailyStepsB,
     },

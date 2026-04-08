@@ -55,6 +55,7 @@ async function getRaceDetails(userId, raceId) {
       id: p.id,
       userId: p.userId,
       displayName: p.user.displayName,
+      profilePhotoUrl: p.user.profilePhotoUrl,
       status: p.status,
       totalSteps: p.totalSteps,
       finishedAt: p.finishedAt,
