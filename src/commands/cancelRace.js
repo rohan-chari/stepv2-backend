@@ -1,6 +1,8 @@
 const { Race } = require("../models/race");
 const { RaceParticipant } = require("../models/raceParticipant");
+const { awardCoins } = require("./awardCoins");
 const { eventBus } = require("../events/eventBus");
+const { refundRaceBuyIn } = require("../services/raceBuyIns");
 
 class RaceCancelError extends Error {
   constructor(message, statusCode) {
@@ -13,6 +15,7 @@ class RaceCancelError extends Error {
 function buildCancelRace(dependencies = {}) {
   const raceModel = dependencies.Race || Race;
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
+  const awardCoinsFn = dependencies.awardCoins || awardCoins;
   const events = dependencies.eventBus || eventBus;
 
   return async function cancelRace({ userId, raceId }) {
@@ -30,7 +33,23 @@ function buildCancelRace(dependencies = {}) {
       throw new RaceCancelError("Race is already cancelled", 400);
     }
 
-    const updated = await raceModel.update(raceId, { status: "CANCELLED" });
+    const chargedParticipants = await participantModel.findChargedByRace(raceId);
+    for (const participant of chargedParticipants) {
+      await refundRaceBuyIn({
+        awardCoinsFn,
+        userId: participant.userId,
+        raceId,
+        amount: participant.buyInAmount || 0,
+      });
+      await participantModel.update(participant.id, {
+        buyInStatus: "REFUNDED",
+      });
+    }
+
+    const updated = await raceModel.update(raceId, {
+      status: "CANCELLED",
+      potCoins: 0,
+    });
 
     const acceptedParticipants = await participantModel.findAcceptedByRace(raceId);
     const participantUserIds = acceptedParticipants

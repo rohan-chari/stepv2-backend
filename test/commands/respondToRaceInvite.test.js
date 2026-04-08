@@ -9,14 +9,30 @@ const {
 function makeDeps(overrides = {}) {
   const updates = [];
   const events = [];
+  const awards = [];
+  const raceUpdates = [];
 
   return {
     updates,
     events,
+    awards,
+    raceUpdates,
     deps: {
       Race: {
         async findById(id) {
-          return { id, creatorId: "creator-1", status: "PENDING", name: "Test Race" };
+          return {
+            id,
+            creatorId: "creator-1",
+            status: "PENDING",
+            name: "Test Race",
+            buyInAmount: 0,
+            payoutPreset: "WINNER_TAKES_ALL",
+            participants: [],
+          };
+        },
+        async update(id, fields) {
+          raceUpdates.push({ id, fields });
+          return { id, ...fields };
         },
         ...overrides.Race,
       },
@@ -29,6 +45,16 @@ function makeDeps(overrides = {}) {
           return { id, ...fields };
         },
         ...overrides.RaceParticipant,
+      },
+      User: {
+        async findById(id) {
+          return { id, coins: 500 };
+        },
+        ...overrides.User,
+      },
+      awardCoins: async (payload) => {
+        awards.push(payload);
+        return { awarded: true, coins: 0 };
       },
       Steps: {
         async findByUserIdAndDate() {
@@ -109,6 +135,99 @@ test("declining does not set baseline steps regardless of race status", async ()
   assert.equal(updates.length, 1);
   assert.equal(updates[0].fields.status, "DECLINED");
   assert.equal(updates[0].fields.baselineSteps, undefined);
+});
+
+test("accepting a paid PENDING race reserves the buy-in as held coins", async () => {
+  const { deps, updates, awards } = makeDeps({
+    Race: {
+      async findById(id) {
+        return {
+          id,
+          creatorId: "creator-1",
+          status: "PENDING",
+          name: "Paid Race",
+          buyInAmount: 100,
+          payoutPreset: "WINNER_TAKES_ALL",
+          participants: [],
+        };
+      },
+    },
+  });
+  const respond = buildRespondToRaceInvite(deps);
+
+  await respond({ userId: "friend-1", raceId: "race-1", accept: true });
+
+  assert.equal(updates[0].fields.buyInAmount, 100);
+  assert.equal(updates[0].fields.buyInStatus, "HELD");
+  assert.deepEqual(awards[0], {
+    userId: "friend-1",
+    amount: -100,
+    reason: "race_buy_in_hold",
+    refId: "race-1:friend-1",
+  });
+});
+
+test("accepting a paid race rejects users who cannot afford the buy-in", async () => {
+  const { deps } = makeDeps({
+    Race: {
+      async findById(id) {
+        return {
+          id,
+          creatorId: "creator-1",
+          status: "PENDING",
+          name: "Paid Race",
+          buyInAmount: 100,
+          payoutPreset: "WINNER_TAKES_ALL",
+          participants: [],
+        };
+      },
+    },
+    User: {
+      async findById(id) {
+        return { id, coins: 40 };
+      },
+    },
+  });
+  const respond = buildRespondToRaceInvite(deps);
+
+  await assert.rejects(
+    () => respond({ userId: "friend-1", raceId: "race-1", accept: true }),
+    (err) => {
+      assert.ok(err instanceof RaceInviteResponseError);
+      assert.equal(err.statusCode, 400);
+      assert.equal(err.message, "You do not have enough coins for this buy-in");
+      return true;
+    }
+  );
+});
+
+test("late join to a paid active race is rejected after someone has finished", async () => {
+  const { deps } = makeDeps({
+    Race: {
+      async findById(id) {
+        return {
+          id,
+          creatorId: "creator-1",
+          status: "ACTIVE",
+          name: "Paid Race",
+          buyInAmount: 100,
+          payoutPreset: "WINNER_TAKES_ALL",
+          participants: [{ userId: "creator-1", finishedAt: new Date("2026-04-07T10:00:00.000Z") }],
+        };
+      },
+    },
+  });
+  const respond = buildRespondToRaceInvite(deps);
+
+  await assert.rejects(
+    () => respond({ userId: "friend-1", raceId: "race-1", accept: true }),
+    (err) => {
+      assert.ok(err instanceof RaceInviteResponseError);
+      assert.equal(err.statusCode, 400);
+      assert.equal(err.message, "You cannot join a paid race after someone has finished");
+      return true;
+    }
+  );
 });
 
 test("emits RACE_INVITE_ACCEPTED on accept", async () => {

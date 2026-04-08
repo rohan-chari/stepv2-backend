@@ -188,3 +188,33 @@ test("buildRaceRecordLeaderboard gives equal rank when race records are identica
     ]
   );
 });
+
+test("buildRaceRecordLeaderboard excludes users without a top-3 finish", () => {
+  const result = buildRaceRecordLeaderboard(
+    [
+      { userId: "u1", displayName: "Atlas", firsts: 1, seconds: 0, thirds: 0 },
+      { userId: "u2", displayName: "Blaze", firsts: 0, seconds: 0, thirds: 0 },
+    ],
+    "u2"
+  );
+
+  assert.deepEqual(result.top10, [
+    {
+      rank: 1,
+      userId: "u1",
+      displayName: "Atlas",
+      firsts: 1,
+      seconds: 0,
+      thirds: 0,
+    },
+  ]);
+
+  assert.deepEqual(result.currentUser, {
+    rank: null,
+    displayName: "Blaze",
+    firsts: 0,
+    seconds: 0,
+    thirds: 0,
+    inTop10: false,
+  });
+});

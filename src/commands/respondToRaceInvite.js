@@ -1,7 +1,13 @@
 const { Race } = require("../models/race");
 const { RaceParticipant } = require("../models/raceParticipant");
 const { Steps } = require("../models/steps");
+const { User } = require("../models/user");
+const { awardCoins } = require("./awardCoins");
 const { eventBus } = require("../events/eventBus");
+const {
+  ensureUserCanAfford,
+  reserveRaceBuyIn,
+} = require("../services/raceBuyIns");
 
 class RaceInviteResponseError extends Error {
   constructor(message, statusCode) {
@@ -15,6 +21,8 @@ function buildRespondToRaceInvite(dependencies = {}) {
   const raceModel = dependencies.Race || Race;
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
   const stepsModel = dependencies.Steps || Steps;
+  const userModel = dependencies.User || User;
+  const awardCoinsFn = dependencies.awardCoins || awardCoins;
   const events = dependencies.eventBus || eventBus;
 
   return async function respondToRaceInvite({ userId, raceId, accept }) {
@@ -36,9 +44,20 @@ function buildRespondToRaceInvite(dependencies = {}) {
 
     const newStatus = accept ? "ACCEPTED" : "DECLINED";
     const updateFields = { status: newStatus };
+    const buyInAmount = race.buyInAmount || 0;
 
     // Late joiner: snapshot current steps so only post-join steps count
     if (accept && race.status === "ACTIVE") {
+      if (
+        buyInAmount > 0 &&
+        race.participants.some((existingParticipant) => existingParticipant.finishedAt)
+      ) {
+        throw new RaceInviteResponseError(
+          "You cannot join a paid race after someone has finished",
+          400
+        );
+      }
+
       const today = new Date().toISOString().slice(0, 10);
       const todaySteps = await stepsModel.findByUserIdAndDate(userId, today);
       updateFields.baselineSteps = todaySteps?.steps ?? 0;
@@ -50,7 +69,33 @@ function buildRespondToRaceInvite(dependencies = {}) {
       }
     }
 
+    if (accept && buyInAmount > 0) {
+      await ensureUserCanAfford({
+        userModel,
+        userId,
+        amount: buyInAmount,
+        ErrorClass: RaceInviteResponseError,
+      });
+      updateFields.buyInAmount = buyInAmount;
+      updateFields.buyInStatus = race.status === "ACTIVE" ? "COMMITTED" : "HELD";
+    }
+
     const updated = await participantModel.update(participant.id, updateFields);
+
+    if (accept && buyInAmount > 0) {
+      await reserveRaceBuyIn({
+        awardCoinsFn,
+        userId,
+        raceId,
+        amount: buyInAmount,
+      });
+
+      if (race.status === "ACTIVE") {
+        await raceModel.update(raceId, {
+          potCoins: (race.potCoins || 0) + buyInAmount,
+        });
+      }
+    }
 
     if (accept) {
       events.emit("RACE_INVITE_ACCEPTED", {

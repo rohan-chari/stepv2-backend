@@ -64,6 +64,10 @@ function buildRaceEntry(entry) {
   };
 }
 
+function hasPodiumFinish(entry) {
+  return (entry.firsts || 0) > 0 || (entry.seconds || 0) > 0 || (entry.thirds || 0) > 0;
+}
+
 function challengeComparator(a, b) {
   return (
     b.winPercentage - a.winPercentage ||
@@ -114,7 +118,10 @@ function rankChallengeRecordEntries(entries) {
 
 function rankRaceRecordEntries(entries) {
   return assignCompetitionRanks(
-    entries.map(buildRaceEntry).sort(raceComparator),
+    entries
+      .map(buildRaceEntry)
+      .filter(hasPodiumFinish)
+      .sort(raceComparator),
     raceTie
   );
 }

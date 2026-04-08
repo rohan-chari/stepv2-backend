@@ -21,9 +21,29 @@ const Race = {
     });
   },
 
-  async create({ creatorId, name, targetSteps, maxDurationDays, powerupsEnabled = false, powerupStepInterval = null }) {
+  async create({
+    creatorId,
+    name,
+    targetSteps,
+    maxDurationDays,
+    powerupsEnabled = false,
+    powerupStepInterval = null,
+    buyInAmount = 0,
+    payoutPreset = "WINNER_TAKES_ALL",
+    potCoins = 0,
+  }) {
     return prisma.race.create({
-      data: { creatorId, name, targetSteps, maxDurationDays, powerupsEnabled, powerupStepInterval },
+      data: {
+        creatorId,
+        name,
+        targetSteps,
+        maxDurationDays,
+        powerupsEnabled,
+        powerupStepInterval,
+        buyInAmount,
+        payoutPreset,
+        potCoins,
+      },
       include: {
         creator: { select: { id: true, displayName: true } },
         ...participantInclude,
@@ -35,6 +55,18 @@ const Race = {
     return prisma.race.update({
       where: { id },
       data: fields,
+      include: {
+        creator: { select: { id: true, displayName: true } },
+        winner: { select: { id: true, displayName: true } },
+        ...participantInclude,
+      },
+    });
+  },
+
+  async addToPot(id, amount) {
+    return prisma.race.update({
+      where: { id },
+      data: { potCoins: { increment: amount } },
       include: {
         creator: { select: { id: true, displayName: true } },
         winner: { select: { id: true, displayName: true } },

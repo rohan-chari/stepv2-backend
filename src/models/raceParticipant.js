@@ -11,9 +11,9 @@ const RaceParticipant = {
     });
   },
 
-  async create({ raceId, userId, status }) {
+  async create({ raceId, userId, status, buyInAmount = 0, buyInStatus = "NONE" }) {
     return prisma.raceParticipant.create({
-      data: { raceId, userId, status },
+      data: { raceId, userId, status, buyInAmount, buyInStatus },
       include: {
         user: { select: { id: true, displayName: true } },
       },
@@ -50,6 +50,20 @@ const RaceParticipant = {
   async findAcceptedByRace(raceId) {
     return prisma.raceParticipant.findMany({
       where: { raceId, status: "ACCEPTED" },
+      include: {
+        user: { select: { id: true, displayName: true } },
+      },
+      orderBy: { joinedAt: "asc" },
+    });
+  },
+
+  async findChargedByRace(raceId) {
+    return prisma.raceParticipant.findMany({
+      where: {
+        raceId,
+        buyInAmount: { gt: 0 },
+        buyInStatus: { in: ["HELD", "COMMITTED"] },
+      },
       include: {
         user: { select: { id: true, displayName: true } },
       },
@@ -109,6 +123,13 @@ const RaceParticipant = {
     return prisma.raceParticipant.update({
       where: { id },
       data: { nextBoxAtSteps },
+    });
+  },
+
+  async incrementPayoutCoins(id, amount) {
+    return prisma.raceParticipant.update({
+      where: { id },
+      data: { payoutCoins: { increment: amount } },
     });
   },
 };

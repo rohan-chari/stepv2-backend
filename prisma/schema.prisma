@@ -277,6 +277,19 @@ enum RaceParticipantStatus {
   DECLINED   @map("declined")
 }
 
+enum RacePayoutPreset {
+  WINNER_TAKES_ALL  @map("winner_takes_all")
+  TOP3_70_20_10     @map("top3_70_20_10")
+  TOP3_80_15_5      @map("top3_80_15_5")
+}
+
+enum RaceBuyInStatus {
+  NONE        @map("none")
+  HELD        @map("held")
+  COMMITTED   @map("committed")
+  REFUNDED    @map("refunded")
+}
+
 model Race {
   id              String     @id @default(uuid())
   creatorId       String     @map("creator_id")
@@ -284,6 +297,9 @@ model Race {
   targetSteps     Int        @map("target_steps")
   status          RaceStatus @default(PENDING)
   maxDurationDays Int        @default(7) @map("max_duration_days")
+  buyInAmount     Int        @default(0) @map("buy_in_amount")
+  payoutPreset    RacePayoutPreset @default(WINNER_TAKES_ALL) @map("payout_preset")
+  potCoins        Int        @default(0) @map("pot_coins")
   startedAt       DateTime?  @map("started_at")
   endsAt          DateTime?  @map("ends_at")
   completedAt     DateTime?  @map("completed_at")
@@ -316,6 +332,9 @@ model RaceParticipant {
   nextBoxAtSteps Int                  @default(0) @map("next_box_at_steps")
   bonusSteps    Int                   @default(0) @map("bonus_steps")
   powerupSlots  Int                   @default(3) @map("powerup_slots")
+  buyInAmount   Int                   @default(0) @map("buy_in_amount")
+  buyInStatus   RaceBuyInStatus       @default(NONE) @map("buy_in_status")
+  payoutCoins   Int                   @default(0) @map("payout_coins")
   placement     Int?
   finishedAt    DateTime?             @map("finished_at")
   finishTotalSteps Int?               @map("finish_total_steps")

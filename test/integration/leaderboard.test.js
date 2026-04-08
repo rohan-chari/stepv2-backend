@@ -4,6 +4,7 @@ const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
 
 let server;
 let nextAppleId = 0;
+const DEFAULT_TIME_ZONE = "America/New_York";
 
 function authOverrides() {
   return {
@@ -40,14 +41,26 @@ async function recordSteps(token, steps, date) {
   });
 }
 
+function getDateStringInTimeZone(offsetDays = 0, timeZone = DEFAULT_TIME_ZONE) {
+  const date = new Date();
+  date.setUTCDate(date.getUTCDate() + offsetDays);
+
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+
+  return formatter.format(date);
+}
+
 function todayStr() {
-  return new Date().toISOString().slice(0, 10);
+  return getDateStringInTimeZone(0);
 }
 
 function yesterdayStr() {
-  const d = new Date();
-  d.setDate(d.getDate() - 1);
-  return d.toISOString().slice(0, 10);
+  return getDateStringInTimeZone(-1);
 }
 
 async function seedChallenge() {
@@ -802,6 +815,53 @@ describe("leaderboard", () => {
       assert.equal(body.currentUser.displayName, "AtlasRun");
       assert.equal(body.currentUser.rank, 1);
       assert.equal(body.currentUser.inTop10, true);
+    });
+
+    it("excludes completed-race participants without a top-3 finish", async () => {
+      const atlas = await createUser("AtlasRun");
+      const blaze = await createUser("BlazeRun");
+      const cinder = await createUser("CinderGo");
+      const drift = await createUser("DriftRun");
+
+      await createCompletedRace({
+        name: "race-with-non-podium-finisher",
+        winnerUserId: atlas.userId,
+        participants: [
+          { userId: atlas.userId, placement: 1, totalSteps: 120000 },
+          { userId: blaze.userId, placement: 2, totalSteps: 115000 },
+          { userId: cinder.userId, placement: 3, totalSteps: 110000 },
+          { userId: drift.userId, placement: null, totalSteps: 105000, finishedAt: null, finishTotalSteps: null },
+        ],
+      });
+
+      const res = await request(server.baseUrl, "GET", "/leaderboard?type=races", {
+        token: drift.token,
+      });
+      assert.equal(res.status, 200);
+
+      const body = await res.json();
+      assert.deepEqual(
+        body.top10.map((entry) => ({
+          displayName: entry.displayName,
+          rank: entry.rank,
+          firsts: entry.firsts,
+          seconds: entry.seconds,
+          thirds: entry.thirds,
+        })),
+        [
+          { displayName: "AtlasRun", rank: 1, firsts: 1, seconds: 0, thirds: 0 },
+          { displayName: "BlazeRun", rank: 2, firsts: 0, seconds: 1, thirds: 0 },
+          { displayName: "CinderGo", rank: 3, firsts: 0, seconds: 0, thirds: 1 },
+        ]
+      );
+      assert.deepEqual(body.currentUser, {
+        rank: null,
+        displayName: "DriftRun",
+        firsts: 0,
+        seconds: 0,
+        thirds: 0,
+        inTop10: false,
+      });
     });
 
     it("breaks race leaderboard ties by firsts then seconds then thirds", async () => {

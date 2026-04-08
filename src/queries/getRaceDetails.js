@@ -1,4 +1,5 @@
 const { Race } = require("../models/race");
+const { computeRacePayouts } = require("../utils/racePayoutPresets");
 
 async function getRaceDetails(userId, raceId) {
   const race = await Race.findById(raceId);
@@ -15,12 +16,34 @@ async function getRaceDetails(userId, raceId) {
     throw error;
   }
 
+  const heldPotCoins = race.participants.reduce((sum, participant) => {
+    if (participant.buyInStatus === "HELD") {
+      return sum + (participant.buyInAmount || 0);
+    }
+    return sum;
+  }, 0);
+  const projectedPotCoins = (race.potCoins || 0) + heldPotCoins;
+  const payouts = computeRacePayouts({
+    preset: race.payoutPreset,
+    potCoins: projectedPotCoins,
+  });
+
   return {
     id: race.id,
     name: race.name,
     targetSteps: race.targetSteps,
     status: race.status,
     maxDurationDays: race.maxDurationDays,
+    buyInAmount: race.buyInAmount,
+    payoutPreset: race.payoutPreset,
+    potCoins: race.potCoins || 0,
+    heldPotCoins,
+    projectedPotCoins,
+    payouts: {
+      first: payouts[0],
+      second: payouts[1],
+      third: payouts[2],
+    },
     startedAt: race.startedAt,
     endsAt: race.endsAt,
     completedAt: race.completedAt,
@@ -36,6 +59,9 @@ async function getRaceDetails(userId, raceId) {
       totalSteps: p.totalSteps,
       finishedAt: p.finishedAt,
       joinedAt: p.joinedAt,
+      buyInAmount: p.buyInAmount,
+      buyInStatus: p.buyInStatus,
+      payoutCoins: p.payoutCoins,
     })),
     createdAt: race.createdAt,
   };

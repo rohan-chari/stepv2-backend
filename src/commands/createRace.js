@@ -1,6 +1,13 @@
 const { Race } = require("../models/race");
 const { RaceParticipant } = require("../models/raceParticipant");
+const { User } = require("../models/user");
+const { awardCoins } = require("./awardCoins");
 const { eventBus } = require("../events/eventBus");
+const {
+  ensureUserCanAfford,
+  reserveRaceBuyIn,
+  validateRaceBuyInConfig,
+} = require("../services/raceBuyIns");
 
 class RaceCreationError extends Error {
   constructor(message, statusCode) {
@@ -13,9 +20,20 @@ class RaceCreationError extends Error {
 function buildCreateRace(dependencies = {}) {
   const raceModel = dependencies.Race || Race;
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
+  const userModel = dependencies.User || User;
+  const awardCoinsFn = dependencies.awardCoins || awardCoins;
   const events = dependencies.eventBus || eventBus;
 
-  return async function createRace({ userId, name, targetSteps, maxDurationDays = 7, powerupsEnabled = false, powerupStepInterval }) {
+  return async function createRace({
+    userId,
+    name,
+    targetSteps,
+    maxDurationDays = 7,
+    powerupsEnabled = false,
+    powerupStepInterval,
+    buyInAmount = 0,
+    payoutPreset,
+  }) {
     if (!name || typeof name !== "string" || name.trim().length === 0) {
       throw new RaceCreationError("Race name is required", 400);
     }
@@ -37,6 +55,19 @@ function buildCreateRace(dependencies = {}) {
       }
     }
 
+    const buyInConfig = validateRaceBuyInConfig({
+      buyInAmount,
+      payoutPreset,
+      ErrorClass: RaceCreationError,
+    });
+
+    await ensureUserCanAfford({
+      userModel,
+      userId,
+      amount: buyInConfig.buyInAmount,
+      ErrorClass: RaceCreationError,
+    });
+
     const race = await raceModel.create({
       creatorId: userId,
       name: name.trim(),
@@ -44,12 +75,23 @@ function buildCreateRace(dependencies = {}) {
       maxDurationDays,
       powerupsEnabled: !!powerupsEnabled,
       powerupStepInterval: powerupsEnabled ? powerupStepInterval : null,
+      buyInAmount: buyInConfig.buyInAmount,
+      payoutPreset: buyInConfig.payoutPreset,
     });
 
     await participantModel.create({
       raceId: race.id,
       userId,
       status: "ACCEPTED",
+      buyInAmount: buyInConfig.buyInAmount,
+      buyInStatus: buyInConfig.buyInAmount > 0 ? "HELD" : "NONE",
+    });
+
+    await reserveRaceBuyIn({
+      awardCoinsFn,
+      userId,
+      raceId: race.id,
+      amount: buyInConfig.buyInAmount,
     });
 
     const fullRace = await raceModel.findById(race.id);

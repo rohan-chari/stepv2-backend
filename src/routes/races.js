@@ -59,7 +59,15 @@ function createRacesRouter(dependencies = {}) {
   // POST /races
   router.post("/", async (req, res) => {
     try {
-      const { name, targetSteps, maxDurationDays, powerupsEnabled, powerupStepInterval } = req.body;
+      const {
+        name,
+        targetSteps,
+        maxDurationDays,
+        powerupsEnabled,
+        powerupStepInterval,
+        buyInAmount,
+        payoutPreset,
+      } = req.body;
       const race = await createRace({
         userId: req.user.id,
         name,
@@ -67,6 +75,8 @@ function createRacesRouter(dependencies = {}) {
         maxDurationDays,
         powerupsEnabled,
         powerupStepInterval,
+        buyInAmount,
+        payoutPreset,
       });
       res.status(201).json({ race });
     } catch (error) {

@@ -1,10 +1,15 @@
 const { Race } = require("../models/race");
 const { RaceParticipant } = require("../models/raceParticipant");
 const { RaceActiveEffect } = require("../models/raceActiveEffect");
+const { RacePowerupEvent } = require("../models/racePowerupEvent");
 const { StepSample } = require("../models/stepSample");
 const { Steps } = require("../models/steps");
 const { completeRace } = require("../commands/completeRace");
-const { computeEffectModifiers } = require("../queries/getRaceProgress");
+const {
+  calculateBaseAdjusted,
+  calculateCurrentTotal,
+  determineFinishSnapshot,
+} = require("../services/raceStateResolution");
 
 async function resolveExpiredRaces() {
   console.log("[CRON] Checking for expired races...");
@@ -24,61 +29,84 @@ async function resolveExpiredRaces() {
       const acceptedParticipants = race.participants.filter(
         (p) => p.status === "ACCEPTED"
       );
-      const today = now.toISOString().slice(0, 10);
+      const settlementTime = race.endsAt || now;
+      const standings = [];
 
-      let topUserId = null;
-      let topSteps = 0;
+      for (const participant of acceptedParticipants) {
+        if (participant.finishedAt) {
+          standings.push({
+            participant,
+            totalSteps:
+              participant.finishTotalSteps ??
+              participant.totalSteps ??
+              race.targetSteps,
+            reachedAt: new Date(participant.finishedAt),
+          });
+          continue;
+        }
 
-      const raceStartedAt = race.startedAt;
+        const { baseAdjusted, hasSampleData, effectiveStart } =
+          await calculateBaseAdjusted({
+            participant,
+            raceStartedAt: race.startedAt,
+            timeZone: "UTC",
+            stepsModel: Steps,
+            stepSampleModel: StepSample,
+            now: settlementTime,
+          });
 
-      for (const p of acceptedParticipants) {
-        const joinedAt = p.joinedAt || raceStartedAt;
-        const effectiveStart = joinedAt > raceStartedAt ? joinedAt : raceStartedAt;
-        const startDate = effectiveStart.toISOString().slice(0, 10);
-        const nextDay = new Date(effectiveStart);
-        nextDay.setUTCDate(nextDay.getUTCDate() + 1);
-        const dayAfterStartDate = nextDay.toISOString().slice(0, 10);
+        const { total, legCramps, runnersHighs, wrongTurns } =
+          await calculateCurrentTotal({
+            raceId: race.id,
+            racePowerupsEnabled: race.powerupsEnabled,
+            participant,
+            baseAdjusted,
+            hasSampleData,
+            raceActiveEffectModel: RaceActiveEffect,
+            stepSampleModel: StepSample,
+          });
 
-        // Start day: use StepSample for precision, fallback to baseline
-        let startDaySteps = 0;
-        const startDaySamples = await StepSample.sumStepsInWindow(
-          p.userId, effectiveStart, new Date(dayAfterStartDate)
+        await RaceParticipant.updateTotalSteps(participant.id, total);
+        const reachedSnapshot = await determineFinishSnapshot({
+          participant,
+          currentTotal: total,
+          targetSteps: total,
+          effectiveStart,
+          effectGroups: { legCramps, runnersHighs, wrongTurns },
+          stepSampleModel: StepSample,
+          powerupEventModel: RacePowerupEvent,
+          raceId: race.id,
+          now: settlementTime,
+        });
+
+        standings.push({
+          participant,
+          totalSteps: total,
+          reachedAt: reachedSnapshot?.finishedAt || settlementTime,
+        });
+      }
+
+      standings.sort((a, b) => {
+        const totalDiff = b.totalSteps - a.totalSteps;
+        if (totalDiff !== 0) return totalDiff;
+
+        const reachedDiff =
+          new Date(a.reachedAt).getTime() - new Date(b.reachedAt).getTime();
+        if (reachedDiff !== 0) return reachedDiff;
+
+        return (a.participant.userId || "").localeCompare(b.participant.userId || "");
+      });
+
+      for (let index = 0; index < standings.length; index++) {
+        await RaceParticipant.setPlacement(
+          standings[index].participant.id,
+          index + 1
         );
-        if (startDaySamples > 0) {
-          startDaySteps = startDaySamples;
-        } else if (p.baselineSteps > 0) {
-          const startDayRecord = await Steps.findByUserIdAndDate(p.userId, startDate);
-          startDaySteps = Math.max(0, (startDayRecord?.steps || 0) - p.baselineSteps);
-        }
-
-        // Subsequent days: full daily totals
-        let subsequentSteps = 0;
-        if (dayAfterStartDate <= today) {
-          const laterSteps = await Steps.findByUserIdAndDateRange(p.userId, dayAfterStartDate, today);
-          subsequentSteps = laterSteps.reduce((sum, s) => sum + s.steps, 0);
-        }
-
-        let total = Math.max(0, startDaySteps + subsequentSteps);
-
-        // Apply powerup modifiers if enabled
-        if (race.powerupsEnabled) {
-          const legCramps = await RaceActiveEffect.findEffectsForRaceByType(race.id, p.id, "LEG_CRAMP");
-          const runnersHighs = await RaceActiveEffect.findEffectsForRaceByType(race.id, p.id, "RUNNERS_HIGH");
-          const allEffects = [...legCramps, ...runnersHighs];
-          const baseAdjusted = total;
-          const { frozenSteps, buffedSteps } = await computeEffectModifiers(allEffects, baseAdjusted, p.userId, StepSample);
-          total = Math.max(0, baseAdjusted - frozenSteps + buffedSteps + (p.bonusSteps || 0));
-        }
-
-        await RaceParticipant.updateTotalSteps(p.id, total);
-
-        if (total > topSteps) {
-          topSteps = total;
-          topUserId = p.userId;
-        }
       }
 
       const participantUserIds = acceptedParticipants.map((p) => p.userId);
+      const topUserId = standings[0]?.participant.userId || null;
+      const topSteps = standings[0]?.totalSteps || 0;
 
       await completeRace({
         raceId: race.id,

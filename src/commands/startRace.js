@@ -3,6 +3,7 @@ const { RaceParticipant } = require("../models/raceParticipant");
 const { RacePowerupEvent } = require("../models/racePowerupEvent");
 const { Steps } = require("../models/steps");
 const { eventBus } = require("../events/eventBus");
+const { isRacePayoutPresetCompatible } = require("../utils/racePayoutPresets");
 
 class RaceStartError extends Error {
   constructor(message, statusCode) {
@@ -37,16 +38,34 @@ function buildStartRace(dependencies = {}) {
       throw new RaceStartError("At least 2 accepted participants are required to start", 400);
     }
 
+    if (
+      !isRacePayoutPresetCompatible({
+        preset: race.payoutPreset || "WINNER_TAKES_ALL",
+        acceptedCount,
+      })
+    ) {
+      throw new RaceStartError(
+        "This payout mode only supports races with at least 4 accepted participants",
+        400
+      );
+    }
+
     const startedAt = now();
     const endsAt = new Date(startedAt.getTime() + race.maxDurationDays * 24 * 60 * 60 * 1000);
+    const acceptedParticipants = await participantModel.findAcceptedByRace(raceId);
+    const heldPot = acceptedParticipants.reduce((sum, participant) => {
+      if ((participant.buyInStatus || "NONE") === "HELD") {
+        return sum + (participant.buyInAmount || 0);
+      }
+      return sum;
+    }, 0);
 
     const updated = await raceModel.update(raceId, {
       status: "ACTIVE",
       startedAt,
       endsAt,
+      potCoins: (race.potCoins || 0) + heldPot,
     });
-
-    const acceptedParticipants = await participantModel.findAcceptedByRace(raceId);
 
     // Snapshot each participant's current steps so only post-race steps count
     const today = startedAt.toISOString().slice(0, 10);
@@ -59,6 +78,9 @@ function buildStartRace(dependencies = {}) {
       // Initialize powerup thresholds if powerups are enabled
       if (race.powerupsEnabled && race.powerupStepInterval) {
         updateFields.nextBoxAtSteps = race.powerupStepInterval;
+      }
+      if ((p.buyInAmount || 0) > 0 && p.buyInStatus === "HELD") {
+        updateFields.buyInStatus = "COMMITTED";
       }
       await participantModel.update(p.id, updateFields);
     }

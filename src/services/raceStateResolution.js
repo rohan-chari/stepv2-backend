@@ -498,6 +498,9 @@ function buildResolveRaceState(dependencies = {}) {
 const resolveRaceState = buildResolveRaceState();
 
 module.exports = {
+  calculateBaseAdjusted,
+  calculateCurrentTotal,
   buildResolveRaceState,
+  determineFinishSnapshot,
   resolveRaceState,
 };

@@ -28,6 +28,19 @@ function createAuthRouter(dependencies = {}) {
   const checkAdmin = dependencies.isAdminUser || isAdminUser;
   const UserModel = dependencies.User || DefaultUser;
 
+  async function getHeldCoinsSafe(userId) {
+    if (!UserModel.getHeldCoins) {
+      return 0;
+    }
+
+    try {
+      return await UserModel.getHeldCoins(userId);
+    } catch (error) {
+      console.warn("Held coin lookup failed:", error.message || error);
+      return 0;
+    }
+  }
+
   // POST /auth/apple
   // Body: { identityToken, userIdentifier?, email?, name? }
   router.post("/apple", async (req, res) => {
@@ -70,9 +83,10 @@ function createAuthRouter(dependencies = {}) {
   router.get("/me", requireAuth, async (req, res) => {
     try {
       const incomingFriendRequests = await getIncomingRequestCount(req.user.id);
+      const heldCoins = await getHeldCoinsSafe(req.user.id);
       res.json({
         user: withAdminFlag(
-          { ...req.user, incomingFriendRequests },
+          { ...req.user, incomingFriendRequests, heldCoins },
           checkAdmin
         ),
       });
@@ -89,7 +103,11 @@ function createAuthRouter(dependencies = {}) {
       appleId: req.user.appleId,
     });
 
-    res.json({ sessionToken, user: withAdminFlag(req.user, checkAdmin) });
+    const heldCoins = await getHeldCoinsSafe(req.user.id);
+    res.json({
+      sessionToken,
+      user: withAdminFlag({ ...req.user, heldCoins }, checkAdmin),
+    });
   });
 
   router.put("/me/step-goal", requireAuth, async (req, res) => {

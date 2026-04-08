@@ -22,6 +22,20 @@ const User = {
     });
   },
 
+  async getHeldCoins(userId) {
+    const result = await prisma.raceParticipant.aggregate({
+      where: {
+        userId,
+        buyInStatus: "HELD",
+      },
+      _sum: {
+        buyInAmount: true,
+      },
+    });
+
+    return result._sum.buyInAmount || 0;
+  },
+
   async findByDisplayNameInsensitive(displayName, excludeUserId) {
     return prisma.user.findFirst({
       where: {

@@ -7,10 +7,12 @@ function makeDeps(overrides = {}) {
   const updates = [];
   const events = [];
   const startedAt = new Date("2026-03-28T14:00:00.000Z");
+  const raceUpdates = [];
 
   return {
     updates,
     events,
+    raceUpdates,
     startedAt,
     deps: {
       Race: {
@@ -20,9 +22,12 @@ function makeDeps(overrides = {}) {
             creatorId: "creator-1",
             status: "PENDING",
             maxDurationDays: 7,
+            buyInAmount: 0,
+            payoutPreset: "WINNER_TAKES_ALL",
           };
         },
         async update(id, fields) {
+          raceUpdates.push({ id, fields });
           return { id, ...fields };
         },
         ...overrides.Race,
@@ -276,5 +281,91 @@ test("startRace rejects when race is not PENDING", async () => {
       assert.equal(err.statusCode, 400);
       return true;
     }
+  );
+});
+
+test("startRace rejects top-3 payout presets when fewer than 4 runners are accepted", async () => {
+  const { deps } = makeDeps({
+    Race: {
+      async findById(id) {
+        return {
+          id,
+          creatorId: "creator-1",
+          status: "PENDING",
+          maxDurationDays: 7,
+          buyInAmount: 100,
+          payoutPreset: "TOP3_70_20_10",
+        };
+      },
+    },
+    RaceParticipant: {
+      async countAccepted() {
+        return 3;
+      },
+      async findAcceptedByRace() {
+        return [
+          { id: "rp-1", userId: "creator-1" },
+          { id: "rp-2", userId: "friend-1" },
+          { id: "rp-3", userId: "friend-2" },
+        ];
+      },
+      async update() {},
+    },
+  });
+  const startRace = buildStartRace(deps);
+
+  await assert.rejects(
+    () => startRace({ userId: "creator-1", raceId: "race-1" }),
+    (err) => {
+      assert.ok(err instanceof RaceStartError);
+      assert.equal(err.statusCode, 400);
+      assert.equal(err.message, "This payout mode only supports races with at least 4 accepted participants");
+      return true;
+    }
+  );
+});
+
+test("startRace commits held buy-ins into the live pot", async () => {
+  const { deps, raceUpdates, updates } = makeDeps({
+    Race: {
+      async findById(id) {
+        return {
+          id,
+          creatorId: "creator-1",
+          status: "PENDING",
+          maxDurationDays: 7,
+          buyInAmount: 100,
+          payoutPreset: "WINNER_TAKES_ALL",
+          potCoins: 0,
+        };
+      },
+    },
+    RaceParticipant: {
+      async countAccepted() {
+        return 2;
+      },
+      async findAcceptedByRace() {
+        return [
+          { id: "rp-1", userId: "creator-1", buyInAmount: 100, buyInStatus: "HELD" },
+          { id: "rp-2", userId: "friend-1", buyInAmount: 100, buyInStatus: "HELD" },
+        ];
+      },
+      async update(id, fields) {
+        updates.push({ id, fields });
+        return { id, ...fields };
+      },
+    },
+  });
+  const startRace = buildStartRace(deps);
+
+  await startRace({ userId: "creator-1", raceId: "race-1" });
+
+  assert.ok(
+    raceUpdates.some((entry) => entry.fields.potCoins === 200),
+    "expected startRace to seed the pot with committed holds"
+  );
+  assert.ok(
+    updates.some((entry) => entry.fields.buyInStatus === "COMMITTED"),
+    "expected held buy-ins to be marked committed"
   );
 });
