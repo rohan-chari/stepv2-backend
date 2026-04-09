@@ -83,12 +83,18 @@ model Step {
 }
 
 model StepSample {
-  id          String   @id @default(uuid())
-  userId      String   @map("user_id")
-  periodStart DateTime @map("period_start")
-  periodEnd   DateTime @map("period_end")
-  steps       Int
-  createdAt   DateTime @default(now()) @map("created_at")
+  id              String   @id @default(uuid())
+  userId          String   @map("user_id")
+  periodStart     DateTime @map("period_start")
+  periodEnd       DateTime @map("period_end")
+  steps           Int
+  sourceName      String?  @map("source_name")
+  sourceId        String?  @map("source_id")
+  sourceDeviceId  String?  @map("source_device_id")
+  deviceModel     String?  @map("device_model")
+  recordingMethod String?  @map("recording_method")
+  metadata        Json?
+  createdAt       DateTime @default(now()) @map("created_at")
 
   user User @relation(fields: [userId], references: [id])
 

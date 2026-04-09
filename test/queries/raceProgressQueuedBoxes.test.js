@@ -82,6 +82,7 @@ function makeDeps(overrides = {}) {
         async updateTotalSteps(id, totalSteps) { updates.push({ id, totalSteps }); },
         async markFinished() {},
         async setPlacement() {},
+        ...(overrides.participantModel || {}),
       },
       RaceActiveEffect: {
         async findEffectsForRaceByType() { return []; },
@@ -113,6 +114,9 @@ function makeDeps(overrides = {}) {
       expireEffects: async () => {},
       completeRace: async () => {},
       rollPowerup: async () => [],
+      ...(overrides.syncRacePowerupState
+        ? { syncRacePowerupState: overrides.syncRacePowerupState }
+        : {}),
       now: () => NOW,
     },
   };
@@ -208,4 +212,50 @@ test("response does not include legacy mysteryBoxCount or mysteryBoxIds fields",
 
   assert.equal(result.powerupData.mysteryBoxCount, undefined);
   assert.equal(result.powerupData.mysteryBoxIds, undefined);
+});
+
+test("powerupData includes interval metadata and remaining steps until the next powerup", async () => {
+  const { deps } = makeDeps({
+    participant: {
+      nextBoxAtSteps: 5000,
+    },
+    participantModel: {
+      findById: async (id) => ({
+        id,
+        powerupSlots: 3,
+        nextBoxAtSteps: 5000,
+      }),
+    },
+  });
+
+  const result = await buildGetRaceProgress(deps)("user-1", "race-1", TZ);
+
+  assert.equal(result.powerupData.powerupStepInterval, 5000);
+  assert.equal(result.powerupData.stepsUntilNextPowerup, 3500);
+});
+
+test("powerupData remaining steps uses the refreshed threshold after a new box is earned", async () => {
+  const { deps } = makeDeps({
+    participant: {
+      nextBoxAtSteps: 500,
+    },
+    participantModel: {
+      findById: async (id) => ({
+        id,
+        powerupSlots: 3,
+        nextBoxAtSteps: 5000,
+      }),
+    },
+    syncRacePowerupState: async () => ({
+      enabled: true,
+      newMysteryBoxes: [{ id: "pw-new" }],
+      newQueuedBoxes: 0,
+      queuedBoxCount: 0,
+    }),
+  });
+
+  const result = await buildGetRaceProgress(deps)("user-1", "race-1", TZ);
+
+  assert.equal(result.powerupData.powerupStepInterval, 5000);
+  assert.equal(result.powerupData.stepsUntilNextPowerup, 3500);
 });

@@ -8,6 +8,9 @@ const { POWERUP_NAMES } = require("./rollPowerup");
 const {
   resolveRaceState: defaultResolveRaceState,
 } = require("../services/raceStateResolution");
+const {
+  syncRacePowerupState: defaultSyncRacePowerupState,
+} = require("../services/racePowerupStateSync");
 
 const OFFENSIVE_TYPES = ["LEG_CRAMP", "RED_CARD", "SHORTCUT", "WRONG_TURN", "DETOUR_SIGN"];
 const TARGETED_TYPES = ["LEG_CRAMP", "SHORTCUT", "WRONG_TURN", "DETOUR_SIGN"];
@@ -55,6 +58,14 @@ function buildUsePowerup(dependencies = {}) {
     : hasInjectedDeps
       ? async () => {}
       : defaultResolveRaceState;
+  const syncRacePowerupState = Object.prototype.hasOwnProperty.call(
+    dependencies,
+    "syncRacePowerupState"
+  )
+    ? dependencies.syncRacePowerupState
+    : hasInjectedDeps
+      ? async () => {}
+      : defaultSyncRacePowerupState;
   const now = dependencies.now || (() => new Date());
 
   return async function usePowerup({
@@ -554,6 +565,7 @@ function buildUsePowerup(dependencies = {}) {
     });
 
     await resolveRaceState({ raceId, timeZone });
+    await syncRacePowerupState({ raceId, userId });
 
     return result;
   };

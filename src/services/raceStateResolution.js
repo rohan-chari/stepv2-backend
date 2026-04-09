@@ -59,15 +59,6 @@ async function calculateBaseAdjusted({
 
   if (startDaySamples > 0) {
     startDaySteps = startDaySamples;
-  } else if (participant.baselineSteps > 0) {
-    const startDayRecord = await stepsModel.findByUserIdAndDate(
-      participant.userId,
-      startDate
-    );
-    startDaySteps = Math.max(
-      0,
-      (startDayRecord?.steps || 0) - participant.baselineSteps
-    );
   }
 
   let subsequentSteps = 0;

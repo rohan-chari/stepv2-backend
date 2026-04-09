@@ -2,6 +2,9 @@ const { StepSample } = require("../models/stepSample");
 const {
   resolveRaceState: defaultResolveRaceState,
 } = require("../services/raceStateResolution");
+const {
+  syncRacePowerupState: defaultSyncRacePowerupState,
+} = require("../services/racePowerupStateSync");
 
 class StepSampleError extends Error {
   constructor(message, statusCode) {
@@ -10,6 +13,13 @@ class StepSampleError extends Error {
     if (statusCode) this.statusCode = statusCode;
   }
 }
+
+const VALID_RECORDING_METHODS = new Set([
+  "unknown",
+  "active",
+  "automatic",
+  "manual",
+]);
 
 // Remove overlapping samples: if sample A fully contains sample B,
 // keep the shorter (more granular) one and discard the broader one.
@@ -48,21 +58,52 @@ function buildRecordStepSamples(dependencies = {}) {
     : hasInjectedDeps
       ? async () => {}
       : defaultResolveRaceState;
+  const syncRacePowerupState = Object.prototype.hasOwnProperty.call(
+    dependencies,
+    "syncRacePowerupState"
+  )
+    ? dependencies.syncRacePowerupState
+    : hasInjectedDeps
+      ? async () => {}
+      : defaultSyncRacePowerupState;
 
   return async function recordStepSamples({ userId, samples, timeZone }) {
     if (!Array.isArray(samples) || samples.length === 0) {
       throw new StepSampleError("samples must be a non-empty array", 400);
     }
 
-    for (const s of samples) {
+    const normalizedSamples = samples.map((sample) => {
+      const normalized = { ...sample };
+
+      if (typeof normalized.recordingMethod === "string") {
+        normalized.recordingMethod = normalized.recordingMethod.trim().toLowerCase();
+
+        if (!VALID_RECORDING_METHODS.has(normalized.recordingMethod)) {
+          throw new StepSampleError("recordingMethod must be one of unknown, active, automatic, or manual", 400);
+        }
+
+        if (normalized.recordingMethod === "manual") {
+          throw new StepSampleError("manual step samples are not allowed", 400);
+        }
+      }
+
+      return normalized;
+    });
+
+    for (const s of normalizedSamples) {
       if (!s.periodStart || !s.periodEnd || s.steps == null) {
         throw new StepSampleError("Each sample requires periodStart, periodEnd, and steps", 400);
       }
     }
 
-    const cleaned = removeOverlaps(samples);
+    const cleaned = removeOverlaps(normalizedSamples);
     await stepSampleModel.upsertBatch(userId, cleaned);
-    await resolveRaceState({ userId, timeZone });
+    const raceResults = await resolveRaceState({ userId, timeZone });
+    if (Array.isArray(raceResults)) {
+      for (const result of raceResults) {
+        await syncRacePowerupState({ raceId: result.raceId, userId });
+      }
+    }
 
     return { count: cleaned.length };
   };

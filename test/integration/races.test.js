@@ -775,6 +775,54 @@ describe("races", () => {
       assert.ok(aliceEntry.totalSteps > 0);
     });
 
+    it("same-day step total delta does not count without post-start samples", async () => {
+      const alice = await createUser("AliceWalker");
+      const bob = await createUser("BobbyRunner");
+      await makeFriends(alice, bob);
+
+      const today = new Date().toISOString().slice(0, 10);
+
+      await request(server.baseUrl, "POST", "/steps", {
+        body: { steps: 1000, date: today },
+        token: alice.token,
+        headers: { "x-timezone": "UTC" },
+      });
+
+      const raceId = (await (await createRace(alice.token, { targetSteps: 100000 })).json()).race.id;
+      await request(server.baseUrl, "POST", `/races/${raceId}/invite`, {
+        body: { inviteeIds: [bob.userId] },
+        token: alice.token,
+      });
+      await request(server.baseUrl, "PUT", `/races/${raceId}/respond`, {
+        body: { accept: true },
+        token: bob.token,
+      });
+      await request(server.baseUrl, "POST", `/races/${raceId}/start`, { token: alice.token });
+
+      await request(server.baseUrl, "POST", "/steps", {
+        body: { steps: 1600, date: today },
+        token: alice.token,
+        headers: { "x-timezone": "UTC" },
+      });
+
+      const participant = await prisma.raceParticipant.findUnique({
+        where: { raceId_userId: { raceId, userId: alice.userId } },
+      });
+      assert.equal(participant.baselineSteps, 1000);
+      assert.equal(participant.totalSteps, 0);
+
+      const res = await request(server.baseUrl, "GET", `/races/${raceId}/progress`, {
+        token: alice.token,
+        headers: { "x-timezone": "UTC" },
+      });
+      assert.equal(res.status, 200);
+
+      const body = await res.json();
+      const aliceEntry = body.progress.participants.find((entry) => entry.userId === alice.userId);
+      assert.ok(aliceEntry);
+      assert.equal(aliceEntry.totalSteps, 0);
+    });
+
     it("non-participant cannot view progress", async () => {
       const alice = await createUser("AliceWalker");
       const bob = await createUser("BobbyRunner");

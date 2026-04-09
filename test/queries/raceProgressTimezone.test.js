@@ -323,10 +323,10 @@ test("boundary: sample starting 1ms after race start is included", async () => {
 });
 
 // ===========================================================================
-// Baseline fallback (when step samples are unavailable)
+// Start day requires post-start step samples
 // ===========================================================================
 
-test("baseline fallback: ET user without samples uses daily total minus baseline", async () => {
+test("start day: ET user without post-start samples counts 0 even when daily total exceeds baseline", async () => {
   const { deps } = makeDeps({
     samples: [], // no samples
     dailyRecords: { "user-est:2026-03-30": { steps: 3500 } },
@@ -336,11 +336,10 @@ test("baseline fallback: ET user without samples uses daily total minus baseline
 
   const result = await getRaceProgress("user-est", "race-1", TZ_ET);
 
-  // 3500 today - 1500 at race start = 2000 post-race
-  assert.equal(stepsFor(result, "user-est"), 2000);
+  assert.equal(stepsFor(result, "user-est"), 0);
 });
 
-test("baseline fallback: LA user without samples uses daily total minus baseline", async () => {
+test("start day: LA user without post-start samples counts 0 even when daily total exceeds baseline", async () => {
   const { deps } = makeDeps({
     samples: [],
     dailyRecords: { "user-la:2026-03-30": { steps: 2000 } },
@@ -350,8 +349,7 @@ test("baseline fallback: LA user without samples uses daily total minus baseline
 
   const result = await getRaceProgress("user-la", "race-1", TZ_LA);
 
-  // 2000 - 450 = 1550
-  assert.equal(stepsFor(result, "user-la"), 1550);
+  assert.equal(stepsFor(result, "user-la"), 0);
 });
 
 test("no samples and no baseline: start day steps are 0 to avoid over-counting", async () => {
@@ -368,7 +366,7 @@ test("no samples and no baseline: start day steps are 0 to avoid over-counting",
   assert.equal(stepsFor(result, "user-est"), 0);
 });
 
-test("baseline fallback: daily total less than baseline floors to 0", async () => {
+test("start day: daily total below baseline still counts 0 without post-start samples", async () => {
   const { deps } = makeDeps({
     samples: [],
     dailyRecords: { "user-est:2026-03-30": { steps: 1000 } },
@@ -378,7 +376,6 @@ test("baseline fallback: daily total less than baseline floors to 0", async () =
 
   const result = await getRaceProgress("user-est", "race-1", TZ_ET);
 
-  // Math.max(0, 1000 - 1500) = 0, not -500
   assert.equal(stepsFor(result, "user-est"), 0);
 });
 

@@ -3,6 +3,9 @@ const { User } = require("../models/user");
 const { eventBus } = require("../events/eventBus");
 const { awardCoins: defaultAwardCoins } = require("./awardCoins");
 const { resolveRaceState: defaultResolveRaceState } = require("../services/raceStateResolution");
+const {
+  syncRacePowerupState: defaultSyncRacePowerupState,
+} = require("../services/racePowerupStateSync");
 
 function buildRecordSteps(dependencies = {}) {
   const hasInjectedDeps = Object.keys(dependencies).length > 0;
@@ -18,6 +21,14 @@ function buildRecordSteps(dependencies = {}) {
     : hasInjectedDeps
       ? async () => {}
       : defaultResolveRaceState;
+  const syncRacePowerupState = Object.prototype.hasOwnProperty.call(
+    dependencies,
+    "syncRacePowerupState"
+  )
+    ? dependencies.syncRacePowerupState
+    : hasInjectedDeps
+      ? async () => {}
+      : defaultSyncRacePowerupState;
   const now = dependencies.now || (() => new Date());
 
   return async function recordSteps({ userId, steps, date, timeZone }) {
@@ -67,7 +78,12 @@ function buildRecordSteps(dependencies = {}) {
       console.error("Failed to award daily goal coins:", e);
     }
 
-    await resolveRaceState({ userId, timeZone });
+    const raceResults = await resolveRaceState({ userId, timeZone });
+    if (Array.isArray(raceResults)) {
+      for (const result of raceResults) {
+        await syncRacePowerupState({ raceId: result.raceId, userId });
+      }
+    }
 
     return record;
   };

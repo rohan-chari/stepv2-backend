@@ -5,8 +5,11 @@ const { StepSample } = require("../models/stepSample");
 const { RacePowerup } = require("../models/racePowerup");
 const { RaceActiveEffect } = require("../models/raceActiveEffect");
 const { completeRace } = require("../commands/completeRace");
-const { rollPowerup } = require("../commands/rollPowerup");
 const { expireEffects } = require("../commands/expireEffects");
+const {
+  buildSyncRacePowerupState,
+  syncRacePowerupState: defaultSyncRacePowerupState,
+} = require("../services/racePowerupStateSync");
 const { getTimeZoneParts, formatDateString, addDaysToDateString, parseDateString, zonedDateTimeToUtc } = require("../utils/week");
 
 // Snapshot-based fallback for when StepSample data is unavailable
@@ -160,8 +163,16 @@ function buildGetRaceProgress(deps = {}) {
   const racePowerupModel = deps.RacePowerup || RacePowerup;
   const raceActiveEffectModel = deps.RaceActiveEffect || RaceActiveEffect;
   const completeRaceFn = deps.completeRace || completeRace;
-  const rollPowerupFn = deps.rollPowerup || rollPowerup;
   const expireEffectsFn = deps.expireEffects || expireEffects;
+  const syncRacePowerupState =
+    deps.syncRacePowerupState ||
+    (Object.keys(deps).length > 0
+      ? buildSyncRacePowerupState({
+          Race: raceModel,
+          RacePowerup: racePowerupModel,
+          rollPowerup: deps.rollPowerup,
+        })
+      : defaultSyncRacePowerupState);
   const now = deps.now || (() => new Date());
 
   return async function getRaceProgress(userId, raceId, timeZone) {
@@ -237,12 +248,10 @@ function buildGetRaceProgress(deps = {}) {
         );
         if (startDaySamples > 0) {
           startDaySteps = startDaySamples;
-        } else if (p.baselineSteps > 0) {
-          // Have a reliable baseline snapshot - use daily total minus baseline
-          const startDayRecord = await stepsModel.findByUserIdAndDate(p.userId, startDate);
-          startDaySteps = Math.max(0, (startDayRecord?.steps || 0) - p.baselineSteps);
         }
-        // No samples AND no baseline = 0 for start day (don't over-count)
+        // The start day is a partial day, so only post-start samples are safe.
+        // A later daily total sync can include pre-race steps that were not present
+        // in the baseline snapshot at race start.
 
         // For days after the start day: prefer StepSamples, fall back to daily records
         let subsequentSteps = 0;
@@ -349,52 +358,35 @@ function buildGetRaceProgress(deps = {}) {
     let powerupData = null;
 
     if (race.powerupsEnabled && race.powerupStepInterval) {
-      const myStepEntry = stepTotals.find((s) => s.participant.userId === userId);
-      const myP = myStepEntry?.participant;
-
-      if (myP && myP.nextBoxAtSteps > 0 && myStepEntry.totalSteps >= myP.nextBoxAtSteps) {
-        const rollResults = await rollPowerupFn({
-          raceId,
-          participantId: myP.id,
-          userId,
-          currentSteps: myStepEntry.totalSteps,
-          nextBoxAtSteps: myP.nextBoxAtSteps,
-          powerupStepInterval: race.powerupStepInterval,
-          displayName: myP.user.displayName,
-          powerupSlots: myP.powerupSlots || 3,
-        });
-
-        const newBoxes = rollResults.filter((r) => r.mysteryBox && !r.queued);
-        const queuedBoxes = rollResults.filter((r) => r.queued);
-
-        powerupData = {
-          enabled: true,
-          newMysteryBoxes: newBoxes.map((r) => r.mysteryBox),
-          newQueuedBoxes: queuedBoxes.length,
-        };
-      }
-
-      // Always include inventory and active effects
-      if (!powerupData) {
-        powerupData = { enabled: true, newMysteryBoxes: [], newQueuedBoxes: 0 };
-      }
+      const myStepTotalEntry = stepTotals.find(
+        ({ participant }) => participant.id === myParticipant.id
+      );
+      const myCurrentSteps =
+        myStepTotalEntry?.totalSteps ??
+        myParticipant.finishTotalSteps ??
+        myParticipant.totalSteps ??
+        0;
+      const syncResult = await syncRacePowerupState({ raceId, userId });
+      powerupData = {
+        enabled: true,
+        newMysteryBoxes: syncResult.newMysteryBoxes || [],
+        newQueuedBoxes: syncResult.newQueuedBoxes || 0,
+        powerupStepInterval: race.powerupStepInterval,
+      };
 
       // Re-read participant to get current powerupSlots (may have changed via Fanny Pack expiry)
       const freshParticipant = await participantModel.findById(myParticipant.id);
       const mySlots = freshParticipant?.powerupSlots || 3;
-
-      // Auto-fill queued boxes into open slots
-      const occupiedCount = await racePowerupModel.countOccupiedSlots(myParticipant.id);
-      const openSlots = mySlots - occupiedCount;
-      if (openSlots > 0) {
-        const queuedBoxes = await racePowerupModel.findQueuedByParticipant(myParticipant.id);
-        const toPromote = queuedBoxes.slice(0, openSlots);
-        for (const box of toPromote) {
-          await racePowerupModel.update(box.id, { status: "MYSTERY_BOX" });
-        }
-      }
+      const nextBoxAtSteps =
+        freshParticipant?.nextBoxAtSteps ?? myParticipant.nextBoxAtSteps ?? 0;
 
       powerupData.powerupSlots = mySlots;
+      if (nextBoxAtSteps > 0) {
+        powerupData.stepsUntilNextPowerup = Math.max(
+          nextBoxAtSteps - myCurrentSteps,
+          0
+        );
+      }
 
       // Unified inventory: both HELD and MYSTERY_BOX powerups in slots
       const slotPowerups = await racePowerupModel.findSlotPowerups(myParticipant.id);
@@ -406,7 +398,9 @@ function buildGetRaceProgress(deps = {}) {
       }));
 
       // Queued box count for frontend indicator
-      const queuedCount = await racePowerupModel.countQueuedByParticipant(myParticipant.id);
+      const queuedCount =
+        syncResult.queuedBoxCount ??
+        await racePowerupModel.countQueuedByParticipant(myParticipant.id);
       powerupData.queuedBoxCount = queuedCount;
 
       const myActiveEffects = await raceActiveEffectModel.findActiveForParticipant(myParticipant.id);

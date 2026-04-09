@@ -1,5 +1,46 @@
 const { prisma } = require("../db");
 
+function buildWriteData(sample, { includePeriodStart = false, includeUserId = false, userId } = {}) {
+  const data = {
+    steps: sample.steps,
+    periodEnd: new Date(sample.periodEnd),
+  };
+
+  if (includeUserId) {
+    data.userId = userId;
+  }
+
+  if (includePeriodStart) {
+    data.periodStart = new Date(sample.periodStart);
+  }
+
+  if (typeof sample.sourceName === "string") {
+    data.sourceName = sample.sourceName;
+  }
+
+  if (typeof sample.sourceId === "string") {
+    data.sourceId = sample.sourceId;
+  }
+
+  if (typeof sample.sourceDeviceId === "string") {
+    data.sourceDeviceId = sample.sourceDeviceId;
+  }
+
+  if (typeof sample.deviceModel === "string") {
+    data.deviceModel = sample.deviceModel;
+  }
+
+  if (typeof sample.recordingMethod === "string") {
+    data.recordingMethod = sample.recordingMethod;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(sample, "metadata")) {
+    data.metadata = sample.metadata ?? null;
+  }
+
+  return data;
+}
+
 const StepSample = {
   async upsertBatch(userId, samples) {
     return prisma.$transaction(
@@ -11,13 +52,8 @@ const StepSample = {
               periodStart: new Date(s.periodStart),
             },
           },
-          update: { steps: s.steps, periodEnd: new Date(s.periodEnd) },
-          create: {
-            userId,
-            periodStart: new Date(s.periodStart),
-            periodEnd: new Date(s.periodEnd),
-            steps: s.steps,
-          },
+          update: buildWriteData(s),
+          create: buildWriteData(s, { includePeriodStart: true, includeUserId: true, userId }),
         })
       )
     );

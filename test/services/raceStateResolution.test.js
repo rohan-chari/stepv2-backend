@@ -249,3 +249,33 @@ test("resolveRaceState uses powerup bonus event time for instant finish", async 
   assert.equal(ctx.finishCalls[0].finishTotalSteps, 10500);
   assert.equal(ctx.finishCalls[0].finishedAt.toISOString(), powerupTime.toISOString());
 });
+
+test("resolveRaceState ignores same-day steps row delta when no post-start samples exist", async () => {
+  const raceStart = new Date("2026-04-07T10:00:00Z");
+  const alice = makeParticipant("rp-1", "user-1", "Alice", {
+    baselineSteps: 1200,
+    joinedAt: raceStart,
+  });
+  const bob = makeParticipant("rp-2", "user-2", "Bob", {
+    joinedAt: raceStart,
+  });
+
+  const ctx = makeContext({
+    participants: [alice, bob],
+    startedAt: raceStart,
+    now: new Date("2026-04-07T10:30:00Z"),
+    stepsByUserAndDate: new Map([
+      ["user-1:2026-04-07", { steps: 1800 }],
+    ]),
+    samplesByUser: new Map(),
+  });
+
+  const resolveRaceState = buildResolveRaceState(ctx.deps);
+  await resolveRaceState({ raceId: "race-1", timeZone: "UTC" });
+
+  assert.deepEqual(ctx.participantUpdates, [
+    { id: "rp-1", totalSteps: 0 },
+    { id: "rp-2", totalSteps: 0 },
+  ]);
+  assert.equal(ctx.finishCalls.length, 0);
+});

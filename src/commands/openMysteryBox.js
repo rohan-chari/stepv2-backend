@@ -5,6 +5,9 @@ const { Race } = require("../models/race");
 const { eventBus } = require("../events/eventBus");
 const { rollPowerup: rollPowerupOdds } = require("../utils/powerupOdds");
 const { POWERUP_NAMES, DEFAULT_POWERUP_SLOTS } = require("./rollPowerup");
+const {
+  syncRacePowerupState: defaultSyncRacePowerupState,
+} = require("../services/racePowerupStateSync");
 
 class MysteryBoxOpenError extends Error {
   constructor(message, statusCode) {
@@ -15,12 +18,21 @@ class MysteryBoxOpenError extends Error {
 }
 
 function buildOpenMysteryBox(dependencies = {}) {
+  const hasInjectedDeps = Object.keys(dependencies).length > 0;
   const powerupModel = dependencies.RacePowerup || RacePowerup;
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
   const eventModel = dependencies.RacePowerupEvent || RacePowerupEvent;
   const raceModel = dependencies.Race || Race;
   const events = dependencies.eventBus || eventBus;
   const rollFn = dependencies.rollPowerupOdds || rollPowerupOdds;
+  const syncRacePowerupState = Object.prototype.hasOwnProperty.call(
+    dependencies,
+    "syncRacePowerupState"
+  )
+    ? dependencies.syncRacePowerupState
+    : hasInjectedDeps
+      ? async () => {}
+      : defaultSyncRacePowerupState;
 
   return async function openMysteryBox({ userId, raceId, powerupId, displayName }) {
     const powerup = await powerupModel.findById(powerupId);
@@ -82,6 +94,8 @@ function buildOpenMysteryBox(dependencies = {}) {
         autoActivated: true,
       });
 
+      await syncRacePowerupState({ raceId, userId });
+
       return { id: powerup.id, type: rolled.type, rarity: rolled.rarity, autoActivated: true };
     }
 
@@ -95,6 +109,8 @@ function buildOpenMysteryBox(dependencies = {}) {
       rarity: rolled.rarity,
       autoActivated: false,
     });
+
+    await syncRacePowerupState({ raceId, userId });
 
     return { id: powerup.id, type: rolled.type, rarity: rolled.rarity, autoActivated: false };
   };
