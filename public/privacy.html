@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bara — Privacy Policy</title>
+  <meta name="description" content="Bara's privacy policy. How we handle your health data, account information, and notifications.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Russo+One&family=Chakra+Petch:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --parchment: #F5E6C8;
+      --parchment-light: #FAF0DC;
+      --parchment-dark: #E0D0B0;
+      --parchment-border: #C0A878;
+      --wood-shadow: #4A2F17;
+      --wood-darker: #6B4423;
+      --wood-dark: #8B5E34;
+      --wood-grain: #A07040;
+      --wood-light: #D4A574;
+      --wood-highlight: #E8C49A;
+      --sky-top: #97CCE8;
+      --sky-bottom: #C0E4F4;
+      --grass: #3DA83D;
+      --grass-dark: #2D8830;
+      --text-dark: #3B2816;
+      --text-mid: #6B5030;
+      --shadow: rgba(74, 47, 23, 0.28);
+      --pill-gold: #E2C66F;
+      --pill-gold-dark: #C39A43;
+      --pill-gold-shadow: #8A672B;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Chakra Petch', sans-serif;
+      color: var(--text-dark);
+      overflow-x: hidden;
+      min-height: 100vh;
+    }
+
+    .sky {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: linear-gradient(180deg, var(--sky-top) 0%, var(--sky-bottom) 60%, #E8F0E0 80%, var(--grass) 95%, var(--grass-dark) 100%);
+      z-index: -2;
+    }
+    .clouds { position: fixed; inset: 0; z-index: -1; overflow: hidden; }
+    .cloud {
+      position: absolute;
+      background: rgba(240, 244, 248, 0.65);
+      border-radius: 50%;
+      filter: blur(20px);
+    }
+    .cloud:nth-child(1) { width: 300px; height: 80px; top: 8%; left: 10%; animation: drift 60s linear infinite; }
+    .cloud:nth-child(2) { width: 250px; height: 60px; top: 15%; left: 55%; animation: drift 80s linear infinite reverse; }
+    .cloud:nth-child(3) { width: 200px; height: 50px; top: 5%; left: 75%; animation: drift 70s linear infinite; }
+    @keyframes drift {
+      from { transform: translateX(-100px); }
+      to { transform: translateX(100px); }
+    }
+
+    .content {
+      position: relative;
+      z-index: 1;
+      max-width: 680px;
+      margin: 0 auto;
+      padding: 56px 20px 64px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 22px;
+    }
+
+    .trail-sign { text-align: center; }
+    .trail-sign .board-sign {
+      background: linear-gradient(180deg, var(--wood-light), var(--wood-dark));
+      padding: 16px 36px;
+      border-radius: 8px;
+      box-shadow: 3px 4px 10px var(--shadow), inset 0 1px 0 rgba(255,255,255,0.25);
+      border: 2px solid var(--wood-darker);
+      position: relative;
+    }
+    .trail-sign .board-sign::before,
+    .trail-sign .board-sign::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 10px; height: 10px;
+      background: var(--wood-darker);
+      border-radius: 50%;
+      box-shadow: inset 0 1px 2px rgba(0,0,0,0.4);
+    }
+    .trail-sign .board-sign::before { left: 10px; }
+    .trail-sign .board-sign::after { right: 10px; }
+    .trail-sign h1 {
+      font-family: 'Russo One', sans-serif;
+      font-size: 1.5rem;
+      color: var(--parchment);
+      text-shadow: 2px 2px 0 var(--wood-shadow);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+    .trail-sign .post {
+      width: 16px;
+      height: 52px;
+      background: linear-gradient(90deg, var(--wood-dark), var(--wood-light), var(--wood-dark));
+      margin: 0 auto;
+      border-radius: 2px;
+      box-shadow: 2px 2px 6px var(--shadow);
+    }
+
+    .effective-date {
+      font-size: 0.9rem;
+      color: var(--text-mid);
+      font-style: italic;
+      text-align: center;
+    }
+
+    .board {
+      width: 100%;
+      background: linear-gradient(180deg, var(--wood-light) 0%, var(--wood-dark) 100%);
+      border: 2px solid var(--wood-shadow);
+      border-radius: 12px;
+      padding: 6px;
+      box-shadow:
+        0 4px 14px var(--shadow),
+        inset 0 1px 0 rgba(255, 255, 255, 0.18);
+      position: relative;
+    }
+    .board::before {
+      content: '';
+      position: absolute;
+      inset: 2px;
+      border-radius: 10px;
+      background-image: repeating-linear-gradient(
+        to bottom,
+        transparent 0 4px,
+        rgba(160, 112, 64, 0.18) 4px 5px
+      );
+      pointer-events: none;
+    }
+    .board-inner {
+      position: relative;
+      background: var(--parchment);
+      background-image:
+        radial-gradient(ellipse at 20% 50%, rgba(200, 170, 110, 0.18) 0%, transparent 70%),
+        radial-gradient(ellipse at 80% 30%, rgba(180, 150, 90, 0.12) 0%, transparent 60%);
+      border: 1px solid var(--parchment-border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .board-inner::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 10px; right: 10px;
+      height: 1px;
+      background: rgba(255, 255, 255, 0.3);
+    }
+
+    .section {
+      padding: 14px 16px 10px;
+      font-family: 'Russo One', sans-serif;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      font-size: 0.95rem;
+      color: var(--wood-darker);
+      text-align: center;
+      border-bottom: 1px solid rgba(139, 94, 52, 0.18);
+      background: rgba(139, 94, 52, 0.05);
+    }
+
+    .row,
+    .row-lv,
+    .row-qa {
+      padding: 14px 18px;
+      font-size: 0.98rem;
+      line-height: 1.7;
+      color: var(--text-mid);
+      border-bottom: 1px solid rgba(139, 94, 52, 0.08);
+    }
+    .row:last-child,
+    .row-lv:last-child,
+    .row-qa:last-child { border-bottom: none; }
+    .alt { background: rgba(224, 208, 176, 0.35); }
+    .row p { margin-bottom: 10px; }
+    .row p:last-child { margin-bottom: 0; }
+    .row strong { color: var(--wood-darker); }
+    .row a {
+      color: var(--wood-darker);
+      font-weight: 600;
+      text-decoration: none;
+    }
+    .row a:hover { text-decoration: underline; }
+
+    /* Highlight emphasis row */
+    .row-emphasis {
+      background: rgba(139, 94, 52, 0.1);
+      font-family: 'Chakra Petch', sans-serif;
+      font-weight: 600;
+      color: var(--wood-darker);
+      border-left: 3px solid var(--wood-darker);
+    }
+
+    .row-lv {
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+    }
+    .row-lv .lv-label {
+      flex: 0 0 40%;
+      font-family: 'Chakra Petch', sans-serif;
+      font-weight: 700;
+      color: var(--wood-darker);
+      font-size: 0.95rem;
+    }
+    .row-lv .lv-value {
+      flex: 1;
+      color: var(--text-mid);
+      font-size: 0.93rem;
+      line-height: 1.6;
+    }
+
+    /* Top nav — yellow pill buttons, matches PillButtonVariant.secondary */
+    .top-nav {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    .pill-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Russo One', sans-serif;
+      font-size: 0.82rem;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--text-dark);
+      text-decoration: none;
+      padding: 10px 22px;
+      border-radius: 16px;
+      background: linear-gradient(180deg, var(--pill-gold) 0%, var(--pill-gold-dark) 100%);
+      box-shadow: 0 4px 0 var(--pill-gold-shadow);
+      transition: transform 0.08s ease, box-shadow 0.08s ease, filter 0.08s ease;
+      border: none;
+    }
+    .pill-btn:hover { filter: brightness(1.04); }
+    .pill-btn:active {
+      transform: translateY(4px);
+      box-shadow: 0 0 0 var(--pill-gold-shadow);
+    }
+
+    @media (max-width: 500px) {
+      .trail-sign h1 { font-size: 1.25rem; }
+      .trail-sign .board-sign { padding: 14px 26px; }
+      .content { padding: 40px 14px 56px; }
+      .row, .row-lv, .row-qa { padding: 12px 14px; }
+      .row-lv { flex-direction: column; gap: 4px; }
+      .row-lv .lv-label { flex: none; }
+    }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .content > * { animation: fadeUp 0.5s ease both; }
+    .content > *:nth-child(1) { animation-delay: 0.05s; }
+    .content > *:nth-child(2) { animation-delay: 0.10s; }
+    .content > *:nth-child(3) { animation-delay: 0.15s; }
+    .content > *:nth-child(4) { animation-delay: 0.20s; }
+  </style>
+</head>
+<body>
+  <div class="sky"></div>
+  <div class="clouds">
+    <div class="cloud"></div>
+    <div class="cloud"></div>
+    <div class="cloud"></div>
+  </div>
+
+  <div class="content">
+    <div class="trail-sign">
+      <div class="board-sign"><h1>Privacy Policy</h1></div>
+      <div class="post"></div>
+    </div>
+
+    <p class="effective-date">Effective: April 16, 2026</p>
+
+    <div class="top-nav">
+      <a class="pill-btn" href="/">Home</a>
+      <a class="pill-btn" href="/support">Support</a>
+    </div>
+
+    <div class="board">
+      <div class="board-inner">
+        <div class="section">Overview</div>
+        <div class="row">
+          Bara ("we," "our," or "the app") is a step-tracking challenge app for iOS. This policy explains what data we collect, how we use it, and your rights. We believe in collecting only what's necessary to make the app work.
+        </div>
+
+        <div class="section">Health Data</div>
+        <div class="row">
+          Bara reads your <strong>daily step count</strong> from Apple HealthKit with your explicit permission. We request read-only access — we do not write to or modify your Health data in any way. Your step count is synced to our server solely to display your daily progress and power head-to-head weekly challenges.
+        </div>
+        <div class="row row-emphasis">
+          Your HealthKit data is never used for advertising, is never sold to third parties, and is never shared with third parties for marketing or data-brokering purposes.
+        </div>
+        <div class="row alt">
+          You can revoke Health access at any time in iOS Settings → Privacy &amp; Security → Health → Bara. If you revoke access, the app will no longer read your step count and background sync will stop.
+        </div>
+
+        <div class="section">Information We Collect</div>
+        <div class="row-lv">
+          <div class="lv-label">Apple ID identifier</div>
+          <div class="lv-value">Account creation and sign-in via Sign in with Apple. We receive only the opaque user identifier Apple provides — we do not access your Apple ID password.</div>
+        </div>
+        <div class="row-lv alt">
+          <div class="lv-label">Display name</div>
+          <div class="lv-value">A name you choose so friends can find and challenge you. Visible to other Bara users.</div>
+        </div>
+        <div class="row-lv">
+          <div class="lv-label">Daily step count</div>
+          <div class="lv-value">Read from HealthKit to show progress and calculate challenge results. Stored on our server with a date stamp.</div>
+        </div>
+        <div class="row-lv alt">
+          <div class="lv-label">Step goal</div>
+          <div class="lv-value">An optional daily goal you set to track personal progress.</div>
+        </div>
+        <div class="row-lv">
+          <div class="lv-label">Friends list &amp; requests</div>
+          <div class="lv-value">To enable friend discovery, challenge matchups, and showing friends' step progress.</div>
+        </div>
+        <div class="row-lv alt">
+          <div class="lv-label">Challenge &amp; stake data</div>
+          <div class="lv-value">Records of your weekly challenges, matchups, and negotiated stakes with friends.</div>
+        </div>
+        <div class="row-lv">
+          <div class="lv-label">APNs device token</div>
+          <div class="lv-value">Registered with our server to deliver push notifications about challenge updates. Stored only while notifications are enabled.</div>
+        </div>
+
+        <div class="section">Sign in with Apple</div>
+        <div class="row">
+          Bara uses Sign in with Apple as its only authentication method. When you sign in, Apple provides us with an opaque user identifier and, if you choose to share it, an email address. If you choose "Hide My Email," we receive only Apple's relay address — we never see your real email. We do not access your Apple ID password.
+        </div>
+
+        <div class="section">How We Use Your Data</div>
+        <div class="row">
+          All data we collect is used exclusively to operate the app: to show your daily step count and goal progress, to run weekly challenges and display head-to-head results, to let friends find and challenge you, and to send you notifications about challenge activity when you've opted in. We do not use your data for advertising, analytics profiling, or any purpose unrelated to the app's core functionality.
+        </div>
+
+        <div class="section">Data Sharing</div>
+        <div class="row">
+          Your step count and display name are visible to friends you've accepted in the app. This is necessary for the challenge feature — if you're in a head-to-head challenge, your opponent can see your step progress for that week. We do not sell, rent, or share your personal data with any third parties for their own use. We do not use third-party analytics SDKs or advertising frameworks.
+        </div>
+
+        <div class="section">Storage &amp; Security</div>
+        <div class="row">
+          Your data is stored on our server infrastructure. We use HTTPS for all data in transit. Session tokens are used for authentication and are refreshed regularly. Locally on your device, the app caches session credentials, health-authorization state, notification preferences, and your display name and step goal using iOS local storage.
+        </div>
+
+        <div class="section">Data Deletion</div>
+        <div class="row">
+          You can sign out at any time from the Settings tab, which clears your local session data and unregisters your device from push notifications. To request complete deletion of your account and all data from our servers, email <a href="mailto:support@steptracker-api.org">support@steptracker-api.org</a>. We will process deletion requests within 30 days.
+        </div>
+
+        <div class="section">Children's Privacy</div>
+        <div class="row">
+          Bara is not directed at children under 13. We do not knowingly collect personal information from children under 13. If you believe a child under 13 has provided us with personal information, please contact us and we will delete it.
+        </div>
+
+        <div class="section">Changes &amp; Contact</div>
+        <div class="row">
+          If we make material changes to this policy, we will update this page with a new effective date. Continued use of Bara after changes take effect constitutes acceptance of the updated policy. Questions or concerns? Reach us at <a href="mailto:support@steptracker-api.org">support@steptracker-api.org</a>.
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

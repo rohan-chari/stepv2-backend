@@ -1,3 +1,4 @@
+const path = require("path");
 const cors = require("cors");
 const express = require("express");
 
@@ -32,6 +33,11 @@ function createApp(dependencies = {}) {
   app.get("/health", (req, res) => {
     res.json({ status: "ok" });
   });
+
+  const publicDir = path.join(__dirname, "..", "public");
+  app.get("/", (req, res) => res.sendFile(path.join(publicDir, "index.html")));
+  app.get("/support", (req, res) => res.sendFile(path.join(publicDir, "support.html")));
+  app.get("/privacy", (req, res) => res.sendFile(path.join(publicDir, "privacy.html")));
 
   return app;
 }

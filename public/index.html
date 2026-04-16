@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bara — Step Challenges with Friends</title>
+  <meta name="description" content="Bara turns your daily steps into weekly hiking challenges with friends. Compete, set stakes, and conquer the trail together.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Russo+One&family=Chakra+Petch:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --parchment: #F5E6C8;
+      --parchment-light: #FAF0DC;
+      --parchment-dark: #E0D0B0;
+      --parchment-border: #C0A878;
+      --wood-shadow: #4A2F17;
+      --wood-darker: #6B4423;
+      --wood-dark: #8B5E34;
+      --wood-grain: #A07040;
+      --wood-light: #D4A574;
+      --wood-highlight: #E8C49A;
+      --sky-top: #97CCE8;
+      --sky-bottom: #C0E4F4;
+      --grass: #3DA83D;
+      --grass-dark: #2D8830;
+      --text-dark: #3B2816;
+      --text-mid: #6B5030;
+      --shadow: rgba(74, 47, 23, 0.28);
+      --pill-gold: #E2C66F;
+      --pill-gold-dark: #C39A43;
+      --pill-gold-shadow: #8A672B;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Chakra Petch', sans-serif;
+      color: var(--text-dark);
+      overflow-x: hidden;
+      min-height: 100vh;
+    }
+
+    .sky {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: linear-gradient(180deg, var(--sky-top) 0%, var(--sky-bottom) 60%, #E8F0E0 80%, var(--grass) 95%, var(--grass-dark) 100%);
+      z-index: -2;
+    }
+    .clouds { position: fixed; inset: 0; z-index: -1; overflow: hidden; }
+    .cloud {
+      position: absolute;
+      background: rgba(240, 244, 248, 0.65);
+      border-radius: 50%;
+      filter: blur(20px);
+    }
+    .cloud:nth-child(1) { width: 300px; height: 80px; top: 8%; left: 10%; animation: drift 60s linear infinite; }
+    .cloud:nth-child(2) { width: 250px; height: 60px; top: 15%; left: 55%; animation: drift 80s linear infinite reverse; }
+    .cloud:nth-child(3) { width: 200px; height: 50px; top: 5%; left: 75%; animation: drift 70s linear infinite; }
+    @keyframes drift {
+      from { transform: translateX(-100px); }
+      to { transform: translateX(100px); }
+    }
+
+    .content {
+      position: relative;
+      z-index: 1;
+      max-width: 620px;
+      margin: 0 auto;
+      padding: 56px 20px 64px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 24px;
+    }
+
+    /* Trail sign */
+    .trail-sign { text-align: center; }
+    .trail-sign .board-sign {
+      background: linear-gradient(180deg, var(--wood-light), var(--wood-dark));
+      padding: 18px 44px;
+      border-radius: 8px;
+      box-shadow: 3px 4px 10px var(--shadow), inset 0 1px 0 rgba(255,255,255,0.25);
+      border: 2px solid var(--wood-darker);
+      position: relative;
+    }
+    .trail-sign .board-sign::before,
+    .trail-sign .board-sign::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 10px; height: 10px;
+      background: var(--wood-darker);
+      border-radius: 50%;
+      box-shadow: inset 0 1px 2px rgba(0,0,0,0.4);
+    }
+    .trail-sign .board-sign::before { left: 12px; }
+    .trail-sign .board-sign::after { right: 12px; }
+    .trail-sign h1 {
+      font-family: 'Russo One', sans-serif;
+      font-size: 2.6rem;
+      color: var(--parchment);
+      text-shadow: 2px 2px 0 var(--wood-shadow);
+      letter-spacing: 4px;
+      text-transform: uppercase;
+    }
+    .trail-sign .post {
+      width: 16px;
+      height: 64px;
+      background: linear-gradient(90deg, var(--wood-dark), var(--wood-light), var(--wood-dark));
+      margin: 0 auto;
+      border-radius: 2px;
+      box-shadow: 2px 2px 6px var(--shadow);
+    }
+
+    .tagline {
+      font-family: 'Chakra Petch', sans-serif;
+      font-weight: 500;
+      font-size: 1.1rem;
+      color: var(--text-mid);
+      text-align: center;
+      max-width: 420px;
+      line-height: 1.5;
+    }
+
+    /* Bulletin board: outer wood frame + inner parchment */
+    .board {
+      width: 100%;
+      background: linear-gradient(180deg, var(--wood-light) 0%, var(--wood-dark) 100%);
+      border: 2px solid var(--wood-shadow);
+      border-radius: 12px;
+      padding: 6px;
+      box-shadow:
+        0 4px 14px var(--shadow),
+        inset 0 1px 0 rgba(255, 255, 255, 0.18);
+      position: relative;
+    }
+    /* Subtle wood grain lines on the frame */
+    .board::before {
+      content: '';
+      position: absolute;
+      inset: 2px;
+      border-radius: 10px;
+      background-image: repeating-linear-gradient(
+        to bottom,
+        transparent 0 4px,
+        rgba(160, 112, 64, 0.18) 4px 5px
+      );
+      pointer-events: none;
+    }
+    .board-inner {
+      position: relative;
+      background: var(--parchment);
+      background-image:
+        radial-gradient(ellipse at 20% 50%, rgba(200, 170, 110, 0.18) 0%, transparent 70%),
+        radial-gradient(ellipse at 80% 30%, rgba(180, 150, 90, 0.12) 0%, transparent 60%);
+      border: 1px solid var(--parchment-border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .board-inner::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 10px; right: 10px;
+      height: 1px;
+      background: rgba(255, 255, 255, 0.3);
+    }
+
+    /* Section header row */
+    .section {
+      padding: 14px 16px 10px;
+      font-family: 'Russo One', sans-serif;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      font-size: 0.95rem;
+      color: var(--wood-darker);
+      text-align: center;
+      border-bottom: 1px solid rgba(139, 94, 52, 0.18);
+      background: rgba(139, 94, 52, 0.05);
+    }
+    .section + .row,
+    .section + .row-lv,
+    .section + .row-qa {
+      border-top: none;
+    }
+
+    /* Generic row */
+    .row,
+    .row-lv,
+    .row-qa {
+      padding: 14px 18px;
+      font-size: 1rem;
+      line-height: 1.65;
+      color: var(--text-mid);
+      border-bottom: 1px solid rgba(139, 94, 52, 0.08);
+    }
+    .row:last-child,
+    .row-lv:last-child,
+    .row-qa:last-child { border-bottom: none; }
+    .alt { background: rgba(224, 208, 176, 0.35); }
+
+    /* Label-value row */
+    .row-lv {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .row-lv .lv-label {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-family: 'Chakra Petch', sans-serif;
+      font-weight: 700;
+      color: var(--wood-darker);
+      font-size: 1rem;
+    }
+    .row-lv .lv-value {
+      color: var(--text-mid);
+      font-size: 0.92rem;
+      text-align: right;
+    }
+    .row-icon {
+      font-size: 1.3rem;
+      width: 26px;
+      text-align: center;
+      flex-shrink: 0;
+    }
+
+    /* Top nav — yellow pill buttons, matches PillButtonVariant.secondary */
+    .top-nav {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    .pill-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Russo One', sans-serif;
+      font-size: 0.82rem;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--text-dark);
+      text-decoration: none;
+      padding: 10px 22px;
+      border-radius: 16px;
+      background: linear-gradient(180deg, var(--pill-gold) 0%, var(--pill-gold-dark) 100%);
+      box-shadow: 0 4px 0 var(--pill-gold-shadow);
+      transition: transform 0.08s ease, box-shadow 0.08s ease, filter 0.08s ease;
+      border: none;
+    }
+    .pill-btn:hover { filter: brightness(1.04); }
+    .pill-btn:active {
+      transform: translateY(4px);
+      box-shadow: 0 0 0 var(--pill-gold-shadow);
+    }
+
+    @media (max-width: 500px) {
+      .trail-sign h1 { font-size: 2rem; }
+      .trail-sign .board-sign { padding: 14px 30px; }
+      .content { padding: 40px 14px 56px; }
+      .row, .row-lv, .row-qa { padding: 12px 14px; }
+      .row-lv { gap: 10px; }
+      .row-lv .lv-value { font-size: 0.88rem; }
+    }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .content > * { animation: fadeUp 0.5s ease both; }
+    .content > *:nth-child(1) { animation-delay: 0.05s; }
+    .content > *:nth-child(2) { animation-delay: 0.15s; }
+    .content > *:nth-child(3) { animation-delay: 0.25s; }
+    .content > *:nth-child(4) { animation-delay: 0.35s; }
+  </style>
+</head>
+<body>
+  <div class="sky"></div>
+  <div class="clouds">
+    <div class="cloud"></div>
+    <div class="cloud"></div>
+    <div class="cloud"></div>
+  </div>
+
+  <div class="content">
+    <div class="trail-sign">
+      <div class="board-sign"><h1>Bara</h1></div>
+      <div class="post"></div>
+    </div>
+
+    <p class="tagline">Turn your daily steps into weekly hiking challenges with friends.</p>
+
+    <div class="top-nav">
+      <a class="pill-btn" href="/support">Support</a>
+      <a class="pill-btn" href="/privacy">Privacy Policy</a>
+    </div>
+
+    <div class="board">
+      <div class="board-inner">
+        <div class="section">The Adventure</div>
+        <div class="row">
+          Bara syncs your daily steps from Apple Health and puts them head-to-head against your friends in weekly challenges. Set stakes, track progress, and see who conquers the trail.
+        </div>
+
+        <div class="section">Features</div>
+        <div class="row-lv">
+          <div class="lv-label">Daily Steps</div>
+          <div class="lv-value">From Apple Health</div>
+        </div>
+        <div class="row-lv alt">
+          <div class="lv-label">Weekly Challenges</div>
+          <div class="lv-value">Head-to-head</div>
+        </div>
+        <div class="row-lv">
+          <div class="lv-label">Friend Matchups</div>
+          <div class="lv-value">Add via display name</div>
+        </div>
+        <div class="row-lv alt">
+          <div class="lv-label">Stakes &amp; Rewards</div>
+          <div class="lv-value">Compete for coins</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
