@@ -371,6 +371,7 @@ model RacePowerup {
   earnedAtSteps Int           @map("earned_at_steps")
   usedAt        DateTime?     @map("used_at")
   targetUserId  String?       @map("target_user_id")
+  upgradeLevel  Int           @default(0) @map("upgrade_level")
   createdAt     DateTime      @default(now()) @map("created_at")
   updatedAt     DateTime      @updatedAt @map("updated_at")
 
@@ -382,6 +383,23 @@ model RacePowerup {
   @@index([participantId, status])
   @@index([raceId, userId])
   @@map("race_powerups")
+}
+
+model PowerupUpgradeEvent {
+  id           String      @id @default(uuid())
+  raceId       String      @map("race_id")
+  userId       String      @map("user_id")
+  powerupId    String      @map("powerup_id")
+  powerupType  PowerupType @map("powerup_type")
+  tier         Int
+  costCoins    Int         @map("cost_coins")
+  status       String
+  targetUserId String?     @map("target_user_id")
+  createdAt    DateTime    @default(now()) @map("created_at")
+
+  @@index([userId, createdAt])
+  @@index([raceId, createdAt])
+  @@map("powerup_upgrade_events")
 }
 
 model RaceActiveEffect {

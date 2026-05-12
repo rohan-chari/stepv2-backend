@@ -193,13 +193,14 @@ function createRacesRouter(dependencies = {}) {
   // POST /races/:raceId/powerups/:powerupId/use
   router.post("/:raceId/powerups/:powerupId/use", async (req, res) => {
     try {
-      const { targetUserId } = req.body;
+      const { targetUserId, upgradeLevel } = req.body;
       const result = await usePowerup({
         userId: req.user.id,
         raceId: req.params.raceId,
         powerupId: req.params.powerupId,
         targetUserId,
         timeZone: req.timeZone,
+        upgradeLevel: upgradeLevel != null ? upgradeLevel : 0,
       });
       res.json({ result });
     } catch (error) {

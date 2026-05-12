@@ -3,6 +3,8 @@ const { RaceParticipant } = require("../models/raceParticipant");
 const { RaceActiveEffect } = require("../models/raceActiveEffect");
 const { RacePowerupEvent } = require("../models/racePowerupEvent");
 const { Race } = require("../models/race");
+const { User } = require("../models/user");
+const { PowerupUpgradeEvent } = require("../models/powerupUpgradeEvent");
 const { eventBus } = require("../events/eventBus");
 const { POWERUP_NAMES } = require("./rollPowerup");
 const {
@@ -11,28 +13,28 @@ const {
 const {
   syncRacePowerupState: defaultSyncRacePowerupState,
 } = require("../services/racePowerupStateSync");
+const {
+  isUpgradeable,
+  isValidLevel,
+  upgradeCost,
+  upgradedDuration,
+  upgradedMagnitude,
+} = require("../utils/powerupUpgrades");
+const {
+  deductCoinsAtomic: defaultDeductCoinsAtomic,
+  InsufficientCoinsError,
+} = require("./deductCoinsAtomic");
 
 const OFFENSIVE_TYPES = ["LEG_CRAMP", "RED_CARD", "SHORTCUT", "WRONG_TURN", "DETOUR_SIGN"];
 const TARGETED_TYPES = ["LEG_CRAMP", "SHORTCUT", "WRONG_TURN", "DETOUR_SIGN"];
 const SELF_ONLY_TYPES = ["COMPRESSION_SOCKS", "PROTEIN_SHAKE", "RUNNERS_HIGH", "SECOND_WIND", "STEALTH_MODE", "FANNY_PACK", "TRAIL_MIX"];
 
-const EFFECT_DURATIONS = {
-  LEG_CRAMP: 2 * 60 * 60 * 1000,      // 2 hours
-  RUNNERS_HIGH: 3 * 60 * 60 * 1000,    // 3 hours
-  STEALTH_MODE: 4 * 60 * 60 * 1000,    // 4 hours
-  WRONG_TURN: 1 * 60 * 60 * 1000,      // 1 hour
-  DETOUR_SIGN: 3 * 60 * 60 * 1000,    // 3 hours
-  COMPRESSION_SOCKS: 24 * 60 * 60 * 1000, // 24 hours
-  FANNY_PACK: 24 * 60 * 60 * 1000,        // 24 hours
-};
+const FANNY_PACK_DURATION_MS = 24 * 60 * 60 * 1000;
 
-const PROTEIN_SHAKE_BONUS = 1500;
-const SHORTCUT_STEAL = 1000;
 const RED_CARD_PERCENT = 0.10;
 const SECOND_WIND_MIN = 500;
 const SECOND_WIND_MAX = 5000;
 const SECOND_WIND_FACTOR = 0.25;
-const TRAIL_MIX_PER_TYPE = 100;
 
 class PowerupUseError extends Error {
   constructor(message, statusCode) {
@@ -42,6 +44,15 @@ class PowerupUseError extends Error {
   }
 }
 
+function levelPrefix(upgradeLevel) {
+  return upgradeLevel > 0 ? `Lvl ${upgradeLevel} ` : "";
+}
+
+function hoursText(type, upgradeLevel) {
+  const hours = upgradedDuration(type, upgradeLevel) / (60 * 60 * 1000);
+  return hours === 1 ? "1 hour" : `${hours} hours`;
+}
+
 function buildUsePowerup(dependencies = {}) {
   const hasInjectedDeps = Object.keys(dependencies).length > 0;
   const powerupModel = dependencies.RacePowerup || RacePowerup;
@@ -49,6 +60,9 @@ function buildUsePowerup(dependencies = {}) {
   const effectModel = dependencies.RaceActiveEffect || RaceActiveEffect;
   const eventModel = dependencies.RacePowerupEvent || RacePowerupEvent;
   const raceModel = dependencies.Race || Race;
+  const userModel = dependencies.User || User;
+  const upgradeEventModel = dependencies.PowerupUpgradeEvent || PowerupUpgradeEvent;
+  const deductCoinsAtomic = dependencies.deductCoinsAtomic || defaultDeductCoinsAtomic;
   const events = dependencies.eventBus || eventBus;
   const resolveRaceState = Object.prototype.hasOwnProperty.call(
     dependencies,
@@ -74,6 +88,7 @@ function buildUsePowerup(dependencies = {}) {
     powerupId,
     targetUserId,
     timeZone,
+    upgradeLevel = 0,
   }) {
     const powerup = await powerupModel.findById(powerupId);
     if (!powerup) {
@@ -102,6 +117,15 @@ function buildUsePowerup(dependencies = {}) {
     const acceptedParticipants = race.participants.filter((p) => p.status === "ACCEPTED");
     const myDisplayName = myParticipant.user.displayName || "A runner";
     const type = powerup.type;
+
+    // Validate upgrade level (cheap, no DB writes)
+    if (!isValidLevel(upgradeLevel)) {
+      throw new PowerupUseError(`Invalid upgrade level: ${upgradeLevel}`, 400);
+    }
+    if (upgradeLevel > 0 && !isUpgradeable(type)) {
+      throw new PowerupUseError(`${POWERUP_NAMES[type] || type} is not upgradeable`, 400);
+    }
+    const costCoins = upgradeLevel > 0 ? upgradeCost(type, upgradeLevel) : 0;
 
     // Validate targeting
     if (TARGETED_TYPES.includes(type)) {
@@ -228,6 +252,26 @@ function buildUsePowerup(dependencies = {}) {
       }
     }
 
+    // All validation has passed. Deduct coins atomically (first DB write).
+    // This must happen AFTER all rejection paths above, so that no coins are
+    // lost on validation failure. The deduct is also atomic: concurrent calls
+    // that would overdraw will fail here.
+    if (costCoins > 0) {
+      try {
+        await deductCoinsAtomic({
+          userId,
+          amount: costCoins,
+          reason: "powerup_upgrade",
+          refId: powerupId,
+        });
+      } catch (err) {
+        if (err instanceof InsufficientCoinsError) {
+          throw new PowerupUseError("Not enough coins for this upgrade", 400);
+        }
+        throw err;
+      }
+    }
+
     // Check Compression Socks shield on target
     if (OFFENSIVE_TYPES.includes(type) && targetParticipant) {
       const shield = await effectModel.findActiveByTypeForParticipant(
@@ -236,12 +280,14 @@ function buildUsePowerup(dependencies = {}) {
       );
 
       if (shield) {
-        // Shield blocks the attack
+        // Shield blocks the attack. Coins (if any) are already deducted —
+        // per design, upgrade cost is forfeit on a blocked attack.
         await effectModel.update(shield.id, { status: "BLOCKED" });
         await powerupModel.update(powerupId, {
           status: "USED",
           usedAt: now(),
           targetUserId: resolvedTargetUserId,
+          upgradeLevel,
         });
 
         await eventModel.create({
@@ -250,23 +296,37 @@ function buildUsePowerup(dependencies = {}) {
           eventType: "POWERUP_BLOCKED",
           powerupType: type,
           targetUserId: userId,
-          description: `${targetDisplayName}'s Compression Socks blocked ${myDisplayName}'s ${POWERUP_NAMES[type]}!`,
+          description: `${targetDisplayName}'s Compression Socks blocked ${myDisplayName}'s ${levelPrefix(upgradeLevel)}${POWERUP_NAMES[type]}!`,
         });
+
+        if (upgradeLevel > 0) {
+          await upgradeEventModel.create({
+            raceId,
+            userId,
+            powerupId,
+            powerupType: type,
+            tier: upgradeLevel,
+            costCoins,
+            status: "BLOCKED",
+            targetUserId: resolvedTargetUserId,
+          });
+        }
 
         events.emit("POWERUP_BLOCKED", {
           raceId,
           attackerUserId: userId,
           defenderUserId: resolvedTargetUserId,
           blockedType: type,
+          upgradeLevel,
         });
 
-        return { blocked: true, blockedBy: "COMPRESSION_SOCKS" };
+        return { blocked: true, blockedBy: "COMPRESSION_SOCKS", upgradeLevel, coinsSpent: costCoins };
       }
     }
 
     // Apply the powerup effect
     const currentTime = now();
-    let result = { blocked: false };
+    let result = { blocked: false, upgradeLevel, coinsSpent: costCoins };
 
     switch (type) {
       case "LEG_CRAMP": {
@@ -278,7 +338,7 @@ function buildUsePowerup(dependencies = {}) {
           powerupId,
           type: "LEG_CRAMP",
           startsAt: currentTime,
-          expiresAt: new Date(currentTime.getTime() + EFFECT_DURATIONS.LEG_CRAMP),
+          expiresAt: new Date(currentTime.getTime() + upgradedDuration("LEG_CRAMP", upgradeLevel)),
           metadata: { stepsAtFreezeStart: targetParticipant.totalSteps },
         });
         result.effect = effect;
@@ -289,7 +349,7 @@ function buildUsePowerup(dependencies = {}) {
           eventType: "POWERUP_USED",
           powerupType: type,
           targetUserId: resolvedTargetUserId,
-          description: `${myDisplayName} used Leg Cramp on ${targetDisplayName}! Their steps are frozen for 2 hours.`,
+          description: `${myDisplayName} used ${levelPrefix(upgradeLevel)}Leg Cramp on ${targetDisplayName}! Their steps are frozen for ${hoursText("LEG_CRAMP", upgradeLevel)}.`,
         });
         break;
       }
@@ -316,7 +376,8 @@ function buildUsePowerup(dependencies = {}) {
 
       case "SHORTCUT": {
         const targetEffective = Math.max(0, targetParticipant.totalSteps);
-        const stolen = Math.min(SHORTCUT_STEAL, targetEffective);
+        const stealCap = upgradedMagnitude("SHORTCUT", upgradeLevel);
+        const stolen = Math.min(stealCap, targetEffective);
 
         if (stolen > 0) {
           await participantModel.subtractBonusSteps(targetParticipant.id, stolen);
@@ -331,7 +392,7 @@ function buildUsePowerup(dependencies = {}) {
           eventType: "POWERUP_USED",
           powerupType: type,
           targetUserId: resolvedTargetUserId,
-          description: `${myDisplayName} stole ${stolen.toLocaleString()} steps from ${targetDisplayName} with Shortcut!`,
+          description: `${myDisplayName} stole ${stolen.toLocaleString()} steps from ${targetDisplayName} with ${levelPrefix(upgradeLevel)}Shortcut!`,
           metadata: { stolen },
         });
         break;
@@ -346,7 +407,7 @@ function buildUsePowerup(dependencies = {}) {
           powerupId,
           type: "COMPRESSION_SOCKS",
           startsAt: currentTime,
-          expiresAt: new Date(currentTime.getTime() + EFFECT_DURATIONS.COMPRESSION_SOCKS),
+          expiresAt: new Date(currentTime.getTime() + upgradedDuration("COMPRESSION_SOCKS", upgradeLevel)),
         });
         result.effect = effect;
 
@@ -355,22 +416,23 @@ function buildUsePowerup(dependencies = {}) {
           actorUserId: userId,
           eventType: "POWERUP_USED",
           powerupType: type,
-          description: `${myDisplayName} activated Compression Socks! They're shielded from the next attack.`,
+          description: `${myDisplayName} activated ${levelPrefix(upgradeLevel)}Compression Socks! They're shielded from the next attack.`,
         });
         break;
       }
 
       case "PROTEIN_SHAKE": {
-        await participantModel.addBonusSteps(myParticipant.id, PROTEIN_SHAKE_BONUS);
-        result.bonus = PROTEIN_SHAKE_BONUS;
+        const bonus = upgradedMagnitude("PROTEIN_SHAKE", upgradeLevel);
+        await participantModel.addBonusSteps(myParticipant.id, bonus);
+        result.bonus = bonus;
 
         await eventModel.create({
           raceId,
           actorUserId: userId,
           eventType: "POWERUP_USED",
           powerupType: type,
-          description: `${myDisplayName} used a Protein Shake! +${PROTEIN_SHAKE_BONUS.toLocaleString()} steps.`,
-          metadata: { bonus: PROTEIN_SHAKE_BONUS },
+          description: `${myDisplayName} used a ${levelPrefix(upgradeLevel)}Protein Shake! +${bonus.toLocaleString()} steps.`,
+          metadata: { bonus },
         });
         break;
       }
@@ -384,7 +446,7 @@ function buildUsePowerup(dependencies = {}) {
           powerupId,
           type: "RUNNERS_HIGH",
           startsAt: currentTime,
-          expiresAt: new Date(currentTime.getTime() + EFFECT_DURATIONS.RUNNERS_HIGH),
+          expiresAt: new Date(currentTime.getTime() + upgradedDuration("RUNNERS_HIGH", upgradeLevel)),
           metadata: { stepsAtBuffStart: myParticipant.totalSteps },
         });
         result.effect = effect;
@@ -394,7 +456,7 @@ function buildUsePowerup(dependencies = {}) {
           actorUserId: userId,
           eventType: "POWERUP_USED",
           powerupType: type,
-          description: `${myDisplayName} activated Runner's High! 2x steps for 3 hours.`,
+          description: `${myDisplayName} activated ${levelPrefix(upgradeLevel)}Runner's High! 2x steps for ${hoursText("RUNNERS_HIGH", upgradeLevel)}.`,
         });
         break;
       }
@@ -432,7 +494,7 @@ function buildUsePowerup(dependencies = {}) {
           powerupId,
           type: "STEALTH_MODE",
           startsAt: currentTime,
-          expiresAt: new Date(currentTime.getTime() + EFFECT_DURATIONS.STEALTH_MODE),
+          expiresAt: new Date(currentTime.getTime() + upgradedDuration("STEALTH_MODE", upgradeLevel)),
         });
         result.effect = effect;
 
@@ -441,7 +503,7 @@ function buildUsePowerup(dependencies = {}) {
           actorUserId: userId,
           eventType: "POWERUP_USED",
           powerupType: type,
-          description: `${myDisplayName} activated Stealth Mode! Their progress is hidden for 4 hours.`,
+          description: `${myDisplayName} activated ${levelPrefix(upgradeLevel)}Stealth Mode! Their progress is hidden for ${hoursText("STEALTH_MODE", upgradeLevel)}.`,
         });
         break;
       }
@@ -464,7 +526,7 @@ function buildUsePowerup(dependencies = {}) {
           powerupId,
           type: "WRONG_TURN",
           startsAt: currentTime,
-          expiresAt: new Date(currentTime.getTime() + EFFECT_DURATIONS.WRONG_TURN),
+          expiresAt: new Date(currentTime.getTime() + upgradedDuration("WRONG_TURN", upgradeLevel)),
           metadata: { stepsAtStart: targetParticipant.totalSteps },
         });
         result.effect = effect;
@@ -475,7 +537,7 @@ function buildUsePowerup(dependencies = {}) {
           eventType: "POWERUP_USED",
           powerupType: type,
           targetUserId: resolvedTargetUserId,
-          description: `${myDisplayName} sent ${targetDisplayName} on a Wrong Turn! Their steps are reversed for 1 hour.`,
+          description: `${myDisplayName} sent ${targetDisplayName} on a ${levelPrefix(upgradeLevel)}Wrong Turn! Their steps are reversed for ${hoursText("WRONG_TURN", upgradeLevel)}.`,
           metadata: {},
         });
         break;
@@ -492,7 +554,7 @@ function buildUsePowerup(dependencies = {}) {
           powerupId,
           type: "FANNY_PACK",
           startsAt: currentTime,
-          expiresAt: new Date(currentTime.getTime() + EFFECT_DURATIONS.FANNY_PACK),
+          expiresAt: new Date(currentTime.getTime() + FANNY_PACK_DURATION_MS),
         });
 
         await eventModel.create({
@@ -508,7 +570,8 @@ function buildUsePowerup(dependencies = {}) {
       case "TRAIL_MIX": {
         const usedTypes = new Set(await powerupModel.findUsedTypesByParticipant(myParticipant.id));
         usedTypes.add("TRAIL_MIX"); // will be marked USED after switch
-        const bonus = usedTypes.size * TRAIL_MIX_PER_TYPE;
+        const perType = upgradedMagnitude("TRAIL_MIX", upgradeLevel);
+        const bonus = usedTypes.size * perType;
 
         await participantModel.addBonusSteps(myParticipant.id, bonus);
         result.bonus = bonus;
@@ -518,8 +581,8 @@ function buildUsePowerup(dependencies = {}) {
           actorUserId: userId,
           eventType: "POWERUP_USED",
           powerupType: type,
-          description: `${myDisplayName} used Trail Mix! +${bonus.toLocaleString()} steps (${usedTypes.size} unique powerups).`,
-          metadata: { bonus, uniqueTypes: usedTypes.size },
+          description: `${myDisplayName} used ${levelPrefix(upgradeLevel)}Trail Mix! +${bonus.toLocaleString()} steps (${usedTypes.size} unique powerups).`,
+          metadata: { bonus, uniqueTypes: usedTypes.size, perType },
         });
         break;
       }
@@ -533,7 +596,7 @@ function buildUsePowerup(dependencies = {}) {
           powerupId,
           type: "DETOUR_SIGN",
           startsAt: currentTime,
-          expiresAt: new Date(currentTime.getTime() + EFFECT_DURATIONS.DETOUR_SIGN),
+          expiresAt: new Date(currentTime.getTime() + upgradedDuration("DETOUR_SIGN", upgradeLevel)),
         });
         result.effect = effect;
 
@@ -543,7 +606,7 @@ function buildUsePowerup(dependencies = {}) {
           eventType: "POWERUP_USED",
           powerupType: type,
           targetUserId: resolvedTargetUserId,
-          description: `${myDisplayName} sent ${targetDisplayName} on a Detour! Their leaderboard is hidden for 3 hours.`,
+          description: `${myDisplayName} sent ${targetDisplayName} on a ${levelPrefix(upgradeLevel)}Detour! Their leaderboard is hidden for ${hoursText("DETOUR_SIGN", upgradeLevel)}.`,
         });
         break;
       }
@@ -555,13 +618,28 @@ function buildUsePowerup(dependencies = {}) {
       status: "USED",
       usedAt: currentTime,
       targetUserId: resolvedTargetUserId || null,
+      upgradeLevel,
     });
+
+    if (upgradeLevel > 0) {
+      await upgradeEventModel.create({
+        raceId,
+        userId,
+        powerupId,
+        powerupType: type,
+        tier: upgradeLevel,
+        costCoins,
+        status: "APPLIED",
+        targetUserId: resolvedTargetUserId || null,
+      });
+    }
 
     events.emit("POWERUP_USED", {
       raceId,
       userId,
       powerupType: type,
       targetUserId: resolvedTargetUserId,
+      upgradeLevel,
     });
 
     await resolveRaceState({ raceId, timeZone });
