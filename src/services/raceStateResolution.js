@@ -114,8 +114,13 @@ async function calculateCurrentTotal({
       participant.id,
       "WRONG_TURN"
     );
+    const campfires = await raceActiveEffectModel.findEffectsForRaceByType(
+      raceId,
+      participant.id,
+      "CAMPFIRE_REST"
+    );
 
-    const allEffects = [...legCramps, ...runnersHighs, ...wrongTurns];
+    const allEffects = [...legCramps, ...runnersHighs, ...wrongTurns, ...campfires];
     const { frozenSteps, buffedSteps, reversedSteps } =
       await computeEffectModifiers(
         allEffects,
@@ -134,7 +139,7 @@ async function calculateCurrentTotal({
         (participant.bonusSteps || 0)
     );
 
-    return { total, legCramps, runnersHighs, wrongTurns };
+    return { total, legCramps, runnersHighs, wrongTurns, campfires };
   }
 
   return {
@@ -142,6 +147,7 @@ async function calculateCurrentTotal({
     legCramps: [],
     runnersHighs: [],
     wrongTurns: [],
+    campfires: [],
   };
 }
 
@@ -181,6 +187,14 @@ function buildBonusTimeline(events, participantUserId, effectiveStart, now) {
       }
     }
 
+    if (
+      ["PINECONE_TOSS", "TRAIL_MINE"].includes(event.powerupType) &&
+      typeof metadata.penalty === "number" &&
+      event.targetUserId === participantUserId
+    ) {
+      delta -= metadata.penalty;
+    }
+
     if (delta !== 0) {
       bonuses.push({ time: eventTime, delta });
     }
@@ -190,7 +204,12 @@ function buildBonusTimeline(events, participantUserId, effectiveStart, now) {
   return bonuses;
 }
 
-function multiplierForTime(timeMs, { legCramps, runnersHighs, wrongTurns }) {
+function multiplierForTime(timeMs, {
+  legCramps,
+  runnersHighs,
+  wrongTurns,
+  campfires = [],
+}) {
   const isActive = (effect) => {
     const startMs = new Date(effect.startsAt).getTime();
     const endMs = effect.expiresAt ? new Date(effect.expiresAt).getTime() : Infinity;
@@ -201,11 +220,26 @@ function multiplierForTime(timeMs, { legCramps, runnersHighs, wrongTurns }) {
   if (frozen) return 0;
 
   const buffed = runnersHighs.some(isActive);
-  const reversed = wrongTurns.some(isActive);
+  const campfire = campfires.find((effect) => {
+    const startMs = new Date(effect.startsAt).getTime();
+    const freezeMs = (effect.metadata || {}).freezeMs || 0;
+    const endMs = effect.expiresAt ? new Date(effect.expiresAt).getTime() : Infinity;
+    return startMs <= timeMs && timeMs < endMs && timeMs >= startMs + freezeMs;
+  });
+  const campfireFrozen = campfires.some((effect) => {
+    const startMs = new Date(effect.startsAt).getTime();
+    const freezeMs = (effect.metadata || {}).freezeMs || 0;
+    return startMs <= timeMs && timeMs < startMs + freezeMs;
+  });
+  if (campfireFrozen) return 0;
 
-  if (reversed && buffed) return -2;
+  const reversed = wrongTurns.some(isActive);
+  const campfireMultiplier = campfire ? ((campfire.metadata || {}).multiplier || 1) : 1;
+  const positiveMultiplier = Math.max(buffed ? 2 : 1, campfireMultiplier);
+
+  if (reversed && positiveMultiplier > 1) return -positiveMultiplier;
   if (reversed) return -1;
-  if (buffed) return 2;
+  if (positiveMultiplier > 1) return positiveMultiplier;
   return 1;
 }
 
@@ -263,6 +297,7 @@ async function determineFinishSnapshot({
     ...effectGroups.legCramps,
     ...effectGroups.runnersHighs,
     ...effectGroups.wrongTurns,
+    ...(effectGroups.campfires || []),
   ]) {
     const startMs = Math.max(
       effectiveStart.getTime(),
@@ -338,6 +373,75 @@ async function determineFinishSnapshot({
   return { finishedAt: now, finishTotalSteps: currentTotal };
 }
 
+async function triggerTrailMines({
+  raceId,
+  stepTotals,
+  raceActiveEffectModel,
+  participantModel,
+  powerupEventModel,
+}) {
+  if (typeof raceActiveEffectModel.findActiveForRace !== "function") {
+    return;
+  }
+  const mines = (await raceActiveEffectModel.findActiveForRace(raceId)).filter(
+    (effect) => effect.type === "TRAIL_MINE"
+  );
+
+  for (const mine of mines) {
+    const metadata = mine.metadata || {};
+    const ownerParticipantId = metadata.ownerParticipantId || mine.targetParticipantId;
+    const positionSteps = metadata.positionSteps;
+    const penaltyPercent = metadata.penaltyPercent;
+
+    if (typeof positionSteps !== "number" || typeof penaltyPercent !== "number") {
+      continue;
+    }
+
+    const candidates = stepTotals
+      .filter(({ participant, totalSteps }) => {
+        if (participant.id === ownerParticipantId) return false;
+        const previousTotal = participant.totalSteps || 0;
+        return previousTotal < positionSteps && totalSteps >= positionSteps;
+      })
+      .sort((a, b) => a.totalSteps - b.totalSteps);
+
+    const victim = candidates[0];
+    if (!victim) continue;
+
+    const shield = await raceActiveEffectModel.findActiveByTypeForParticipant(
+      victim.participant.id,
+      "COMPRESSION_SOCKS"
+    );
+    const penalty = Math.round(victim.totalSteps * penaltyPercent);
+
+    if (shield) {
+      await raceActiveEffectModel.update(shield.id, { status: "BLOCKED" });
+    } else if (penalty > 0) {
+      await participantModel.subtractBonusSteps(victim.participant.id, penalty);
+      victim.totalSteps = Math.max(0, victim.totalSteps - penalty);
+    }
+
+    await raceActiveEffectModel.update(mine.id, { status: "EXPIRED" });
+    await powerupEventModel.create({
+      raceId,
+      actorUserId: mine.sourceUserId,
+      eventType: shield ? "POWERUP_BLOCKED" : "POWERUP_USED",
+      powerupType: "TRAIL_MINE",
+      targetUserId: victim.participant.userId,
+      description: shield
+        ? `${victim.participant.user?.displayName || "A runner"} blocked a Trail Mine with Compression Socks!`
+        : `${victim.participant.user?.displayName || "A runner"} triggered a Trail Mine and lost ${penalty.toLocaleString()} steps.`,
+      metadata: {
+        mineId: mine.id,
+        penalty,
+        penaltyPercent,
+        positionSteps,
+        blocked: Boolean(shield),
+      },
+    });
+  }
+}
+
 function buildResolveRaceState(dependencies = {}) {
   const raceModel = dependencies.Race || Race;
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
@@ -399,7 +503,7 @@ function buildResolveRaceState(dependencies = {}) {
             now: currentTime,
           });
 
-        const { total, legCramps, runnersHighs, wrongTurns } =
+        const { total, legCramps, runnersHighs, wrongTurns, campfires } =
           await calculateCurrentTotal({
             raceId: race.id,
             racePowerupsEnabled: race.powerupsEnabled,
@@ -419,7 +523,7 @@ function buildResolveRaceState(dependencies = {}) {
             currentTotal: total,
             targetSteps: race.targetSteps,
             effectiveStart,
-            effectGroups: { legCramps, runnersHighs, wrongTurns },
+            effectGroups: { legCramps, runnersHighs, wrongTurns, campfires },
             stepSampleModel,
             powerupEventModel,
             raceId: race.id,
@@ -442,6 +546,16 @@ function buildResolveRaceState(dependencies = {}) {
             finishedAt,
           });
         }
+      }
+
+      if (race.powerupsEnabled) {
+        await triggerTrailMines({
+          raceId: race.id,
+          stepTotals,
+          raceActiveEffectModel,
+          participantModel,
+          powerupEventModel,
+        });
       }
 
       newFinishers.sort((a, b) => {
@@ -491,6 +605,7 @@ const resolveRaceState = buildResolveRaceState();
 module.exports = {
   calculateBaseAdjusted,
   calculateCurrentTotal,
+  triggerTrailMines,
   buildResolveRaceState,
   determineFinishSnapshot,
   resolveRaceState,

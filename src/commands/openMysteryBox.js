@@ -2,8 +2,9 @@ const { RacePowerup } = require("../models/racePowerup");
 const { RaceParticipant } = require("../models/raceParticipant");
 const { RacePowerupEvent } = require("../models/racePowerupEvent");
 const { Race } = require("../models/race");
+const { RaceActiveEffect } = require("../models/raceActiveEffect");
 const { eventBus } = require("../events/eventBus");
-const { rollPowerup: rollPowerupOdds } = require("../utils/powerupOdds");
+const { rollPowerup: rollPowerupOdds, RARITY_TIERS, RARITY_ORDER } = require("../utils/powerupOdds");
 const { POWERUP_NAMES, DEFAULT_POWERUP_SLOTS } = require("./rollPowerup");
 const {
   syncRacePowerupState: defaultSyncRacePowerupState,
@@ -23,6 +24,12 @@ function buildOpenMysteryBox(dependencies = {}) {
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
   const eventModel = dependencies.RacePowerupEvent || RacePowerupEvent;
   const raceModel = dependencies.Race || Race;
+  const effectModel = dependencies.RaceActiveEffect || (hasInjectedDeps
+    ? {
+        async findActiveByTypeForParticipant() { return null; },
+        async update() {},
+      }
+    : RaceActiveEffect);
   const events = dependencies.eventBus || eventBus;
   const rollFn = dependencies.rollPowerupOdds || rollPowerupOdds;
   const syncRacePowerupState = Object.prototype.hasOwnProperty.call(
@@ -65,11 +72,31 @@ function buildOpenMysteryBox(dependencies = {}) {
     const position = sorted.findIndex((p) => p.userId === userId) + 1;
     const totalParticipants = sorted.length;
 
+    const luckyEffect = await effectModel.findActiveByTypeForParticipant?.(
+      participant.id,
+      "LUCKY_HORSESHOE"
+    );
+    const minRarity = luckyEffect?.metadata?.minRarity;
+
     // Roll the powerup type now
-    let rolled = rollFn(position, totalParticipants);
+    let rolled = rollFn(position, totalParticipants, Math.random, { minRarity });
+    if (minRarity) {
+      const rolledIndex = RARITY_ORDER.indexOf(rolled.rarity);
+      const minIndex = RARITY_ORDER.indexOf(minRarity);
+      if (rolledIndex !== -1 && minIndex !== -1 && rolledIndex < minIndex) {
+        rolled = {
+          type: RARITY_TIERS[minRarity][0],
+          rarity: minRarity,
+        };
+      }
+    }
     // Re-roll Fanny Pack if user already has expanded slots
     while (rolled.type === "FANNY_PACK" && maxSlots > DEFAULT_POWERUP_SLOTS) {
-      rolled = rollFn(position, totalParticipants);
+      rolled = rollFn(position, totalParticipants, Math.random, { minRarity });
+    }
+
+    if (luckyEffect) {
+      await effectModel.update(luckyEffect.id, { status: "EXPIRED" });
     }
 
     // Fanny Pack auto-activates when inventory is full

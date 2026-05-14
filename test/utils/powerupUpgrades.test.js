@@ -16,7 +16,7 @@ const HOUR = 60 * 60 * 1000;
 // isUpgradeable
 // ---------------------------------------------------------------------------
 
-test("isUpgradeable: returns true for the 9 designed types", () => {
+test("isUpgradeable: returns true for the designed upgradeable types", () => {
   for (const type of [
     "PROTEIN_SHAKE",
     "SHORTCUT",
@@ -27,13 +27,19 @@ test("isUpgradeable: returns true for the 9 designed types", () => {
     "STEALTH_MODE",
     "WRONG_TURN",
     "COMPRESSION_SOCKS",
+    "LUCKY_HORSESHOE",
+    "CAMPFIRE_REST",
+    "TRAIL_MAGNET",
+    "POCKET_WATCH",
+    "TRAIL_MINE",
+    "PINECONE_TOSS",
   ]) {
     assert.equal(isUpgradeable(type), true, `${type} should be upgradeable`);
   }
 });
 
-test("isUpgradeable: returns false for the 3 non-upgradeable types", () => {
-  for (const type of ["RED_CARD", "SECOND_WIND", "FANNY_PACK"]) {
+test("isUpgradeable: returns false for non-upgradeable types", () => {
+  for (const type of ["RED_CARD", "SECOND_WIND", "FANNY_PACK", "SNEAKY_SWAP"]) {
     assert.equal(isUpgradeable(type), false, `${type} must NOT be upgradeable`);
   }
 });
@@ -45,11 +51,13 @@ test("isUpgradeable: returns false for MYSTERY_BOX and unknown types", () => {
   assert.equal(isUpgradeable(undefined), false);
 });
 
-test("UPGRADEABLE_TYPES exported as the 9-item set", () => {
-  assert.equal(UPGRADEABLE_TYPES.size, 9);
+test("UPGRADEABLE_TYPES exported with the designed upgradeable set", () => {
+  assert.equal(UPGRADEABLE_TYPES.size, 15);
   assert.ok(UPGRADEABLE_TYPES.has("PROTEIN_SHAKE"));
   assert.ok(UPGRADEABLE_TYPES.has("TRAIL_MIX"));
+  assert.ok(UPGRADEABLE_TYPES.has("PINECONE_TOSS"));
   assert.ok(!UPGRADEABLE_TYPES.has("RED_CARD"));
+  assert.ok(!UPGRADEABLE_TYPES.has("SNEAKY_SWAP"));
 });
 
 test("MAX_UPGRADE_LEVEL is 3", () => {

@@ -31,6 +31,11 @@ const {
 const {
   getRaceFeed: defaultGetRaceFeed,
 } = require("../queries/getRaceFeed");
+const { Race: defaultRaceModel } = require("../models/race");
+const { RacePowerup: defaultPowerupModel } = require("../models/racePowerup");
+const {
+  RaceActiveEffect: defaultEffectModel,
+} = require("../models/raceActiveEffect");
 
 function createRacesRouter(dependencies = {}) {
   const router = Router();
@@ -53,6 +58,9 @@ function createRacesRouter(dependencies = {}) {
   const getRaceInventory =
     dependencies.getRaceInventory || defaultGetRaceInventory;
   const getRaceFeed = dependencies.getRaceFeed || defaultGetRaceFeed;
+  const raceModel = dependencies.Race || defaultRaceModel;
+  const powerupModel = dependencies.RacePowerup || defaultPowerupModel;
+  const effectModel = dependencies.RaceActiveEffect || defaultEffectModel;
 
   router.use(requireAuth);
 
@@ -193,12 +201,21 @@ function createRacesRouter(dependencies = {}) {
   // POST /races/:raceId/powerups/:powerupId/use
   router.post("/:raceId/powerups/:powerupId/use", async (req, res) => {
     try {
-      const { targetUserId, upgradeLevel } = req.body;
+      const {
+        targetUserId,
+        targetDirection,
+        swapOfferedPowerupId,
+        swapRequestedPowerupId,
+        upgradeLevel,
+      } = req.body;
       const result = await usePowerup({
         userId: req.user.id,
         raceId: req.params.raceId,
         powerupId: req.params.powerupId,
         targetUserId,
+        targetDirection,
+        swapOfferedPowerupId,
+        swapRequestedPowerupId,
         timeZone: req.timeZone,
         upgradeLevel: upgradeLevel != null ? upgradeLevel : 0,
       });
@@ -281,6 +298,53 @@ function createRacesRouter(dependencies = {}) {
         return res.status(error.statusCode).json({ error: error.message });
       }
       console.error("Get race feed error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  router.get("/:raceId/powerups/sneaky-swap-options/:targetUserId", async (req, res) => {
+    try {
+      const race = await raceModel.findById(req.params.raceId);
+      if (!race || race.status !== "ACTIVE") {
+        return res.status(400).json({ error: "Race is not active" });
+      }
+      if (req.params.targetUserId === req.user.id) {
+        return res.status(400).json({ error: "You cannot target yourself" });
+      }
+
+      const mine = race.participants.find(
+        (p) => p.userId === req.user.id && p.status === "ACCEPTED"
+      );
+      const target = race.participants.find(
+        (p) => p.userId === req.params.targetUserId && p.status === "ACCEPTED"
+      );
+      if (!mine || !target || target.finishedAt) {
+        return res.status(400).json({ error: "Target is not an active participant in this race" });
+      }
+
+      const targetStealth = await effectModel.findActiveByTypeForParticipant(
+        target.id,
+        "STEALTH_MODE"
+      );
+      if (targetStealth) {
+        return res.status(400).json({ error: "You cannot target a stealthed player" });
+      }
+
+      const [ownPowerups, targetPowerups] = await Promise.all([
+        powerupModel.findHeldByParticipant(mine.id),
+        powerupModel.findHeldByParticipant(target.id),
+      ]);
+      const sneakySwap = ownPowerups.find((p) => p.type === "SNEAKY_SWAP");
+      if (!sneakySwap) {
+        return res.status(400).json({ error: "Sneaky Swap is required" });
+      }
+
+      res.json({
+        ownPowerups: ownPowerups.filter((p) => p.type !== "SNEAKY_SWAP"),
+        targetPowerups,
+      });
+    } catch (error) {
+      console.error("Sneaky swap options error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });

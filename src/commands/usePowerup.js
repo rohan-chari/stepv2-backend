@@ -25,11 +25,26 @@ const {
   InsufficientCoinsError,
 } = require("./deductCoinsAtomic");
 
-const OFFENSIVE_TYPES = ["LEG_CRAMP", "RED_CARD", "SHORTCUT", "WRONG_TURN", "DETOUR_SIGN"];
-const TARGETED_TYPES = ["LEG_CRAMP", "SHORTCUT", "WRONG_TURN", "DETOUR_SIGN"];
-const SELF_ONLY_TYPES = ["COMPRESSION_SOCKS", "PROTEIN_SHAKE", "RUNNERS_HIGH", "SECOND_WIND", "STEALTH_MODE", "FANNY_PACK", "TRAIL_MIX"];
+const OFFENSIVE_TYPES = ["LEG_CRAMP", "RED_CARD", "SHORTCUT", "WRONG_TURN", "DETOUR_SIGN", "PINECONE_TOSS", "SNEAKY_SWAP"];
+const TARGETED_TYPES = ["LEG_CRAMP", "SHORTCUT", "WRONG_TURN", "DETOUR_SIGN", "SNEAKY_SWAP"];
+const SELF_ONLY_TYPES = [
+  "COMPRESSION_SOCKS",
+  "PROTEIN_SHAKE",
+  "RUNNERS_HIGH",
+  "SECOND_WIND",
+  "STEALTH_MODE",
+  "FANNY_PACK",
+  "TRAIL_MIX",
+  "LUCKY_HORSESHOE",
+  "CAMPFIRE_REST",
+  "TRAIL_MAGNET",
+  "POCKET_WATCH",
+  "TRAIL_MINE",
+];
 
 const FANNY_PACK_DURATION_MS = 24 * 60 * 60 * 1000;
+const CAMPFIRE_FREEZE_MS = 30 * 60 * 1000;
+const CAMPFIRE_BOOST_MS = 60 * 60 * 1000;
 
 const RED_CARD_PERCENT = 0.10;
 const SECOND_WIND_MIN = 500;
@@ -51,6 +66,29 @@ function levelPrefix(upgradeLevel) {
 function hoursText(type, upgradeLevel) {
   const hours = upgradedDuration(type, upgradeLevel) / (60 * 60 * 1000);
   return hours === 1 ? "1 hour" : `${hours} hours`;
+}
+
+function sortedActiveParticipants(participants) {
+  return participants
+    .filter((p) => !p.finishedAt)
+    .sort((a, b) => b.totalSteps - a.totalSteps);
+}
+
+function participantRank(participants, participant) {
+  return sortedActiveParticipants(participants).findIndex((p) => p.id === participant.id);
+}
+
+function adjacentParticipant(participants, participant, direction) {
+  const sorted = sortedActiveParticipants(participants);
+  const index = sorted.findIndex((p) => p.id === participant.id);
+  if (index === -1) return null;
+  if (direction === "FRONT") return sorted[index - 1] || null;
+  if (direction === "BEHIND") return sorted[index + 1] || null;
+  return null;
+}
+
+function luckyMinRarity(upgradeLevel) {
+  return upgradeLevel >= 3 ? "RARE" : "UNCOMMON";
 }
 
 function buildUsePowerup(dependencies = {}) {
@@ -87,6 +125,9 @@ function buildUsePowerup(dependencies = {}) {
     raceId,
     powerupId,
     targetUserId,
+    targetDirection,
+    swapOfferedPowerupId,
+    swapRequestedPowerupId,
     timeZone,
     upgradeLevel = 0,
   }) {
@@ -160,6 +201,20 @@ function buildUsePowerup(dependencies = {}) {
       resolvedTargetUserId = leader.userId;
     }
 
+    if (type === "PINECONE_TOSS") {
+      if (targetUserId) {
+        throw new PowerupUseError("Pinecone Toss targets by direction — choose front or behind", 400);
+      }
+      if (!["FRONT", "BEHIND"].includes(targetDirection)) {
+        throw new PowerupUseError("Pinecone Toss requires FRONT or BEHIND", 400);
+      }
+      const target = adjacentParticipant(acceptedParticipants, myParticipant, targetDirection);
+      if (!target) {
+        throw new PowerupUseError(`No runner ${targetDirection === "FRONT" ? "ahead" : "behind"} of you`, 400);
+      }
+      resolvedTargetUserId = target.userId;
+    }
+
     // Find target participant if offensive
     let targetParticipant = null;
     if (OFFENSIVE_TYPES.includes(type)) {
@@ -231,6 +286,64 @@ function buildUsePowerup(dependencies = {}) {
       );
       if (existingDetour) {
         throw new PowerupUseError("Target already has an active Detour Sign", 400);
+      }
+    }
+
+    if (type === "LUCKY_HORSESHOE") {
+      const existingLucky = await effectModel.findActiveByTypeForParticipant(
+        myParticipant.id,
+        "LUCKY_HORSESHOE"
+      );
+      if (existingLucky) {
+        throw new PowerupUseError("You already have an active Lucky Horseshoe", 400);
+      }
+    }
+
+    if (type === "CAMPFIRE_REST") {
+      const existingCampfire = await effectModel.findActiveByTypeForParticipant(
+        myParticipant.id,
+        "CAMPFIRE_REST"
+      );
+      if (existingCampfire) {
+        throw new PowerupUseError("You already have an active Campfire Rest", 400);
+      }
+    }
+
+    if (type === "POCKET_WATCH") {
+      const activeTimedEffects = (await effectModel.findActiveForParticipant(myParticipant.id))
+        .filter((effect) => effect.expiresAt && effect.type !== "POCKET_WATCH");
+      if (activeTimedEffects.length === 0) {
+        throw new PowerupUseError("Pocket Watch requires an active timed buff", 400);
+      }
+    }
+
+    if (type === "TRAIL_MINE") {
+      const rank = participantRank(acceptedParticipants, myParticipant);
+      if (rank === acceptedParticipants.filter((p) => !p.finishedAt).length - 1) {
+        throw new PowerupUseError("You cannot use Trail Mine while you are in last place", 400);
+      }
+    }
+
+    if (type === "SNEAKY_SWAP" && targetParticipant) {
+      const targetStealth = await effectModel.findActiveByTypeForParticipant(
+        targetParticipant.id,
+        "STEALTH_MODE"
+      );
+      if (targetStealth) {
+        throw new PowerupUseError("You cannot target a stealthed player", 400);
+      }
+      if (!swapOfferedPowerupId || !swapRequestedPowerupId) {
+        throw new PowerupUseError("Sneaky Swap requires both powerups to swap", 400);
+      }
+      if (swapOfferedPowerupId === powerupId || swapRequestedPowerupId === powerupId) {
+        throw new PowerupUseError("Sneaky Swap cannot swap itself", 400);
+      }
+      const myHeld = await powerupModel.findHeldByParticipant(myParticipant.id);
+      const targetHeld = await powerupModel.findHeldByParticipant(targetParticipant.id);
+      const offered = myHeld.find((p) => p.id === swapOfferedPowerupId);
+      const requested = targetHeld.find((p) => p.id === swapRequestedPowerupId);
+      if (!offered || !requested) {
+        throw new PowerupUseError("Sneaky Swap cannot swap empty slots", 400);
       }
     }
 
@@ -607,6 +720,169 @@ function buildUsePowerup(dependencies = {}) {
           powerupType: type,
           targetUserId: resolvedTargetUserId,
           description: `${myDisplayName} sent ${targetDisplayName} on a ${levelPrefix(upgradeLevel)}Detour! Their leaderboard is hidden for ${hoursText("DETOUR_SIGN", upgradeLevel)}.`,
+        });
+        break;
+      }
+
+      case "LUCKY_HORSESHOE": {
+        const minRarity = luckyMinRarity(upgradeLevel);
+        const effect = await effectModel.create({
+          raceId,
+          targetParticipantId: myParticipant.id,
+          targetUserId: userId,
+          sourceUserId: userId,
+          powerupId,
+          type: "LUCKY_HORSESHOE",
+          startsAt: currentTime,
+          expiresAt: null,
+          metadata: { minRarity, consumedOnNextBox: true },
+        });
+        result.effect = effect;
+
+        await eventModel.create({
+          raceId,
+          actorUserId: userId,
+          eventType: "POWERUP_USED",
+          powerupType: type,
+          description: `${myDisplayName} used ${levelPrefix(upgradeLevel)}Lucky Horseshoe! Their next mystery box is guaranteed ${minRarity.toLowerCase()} or better.`,
+        });
+        break;
+      }
+
+      case "CAMPFIRE_REST": {
+        const multiplier = upgradedMagnitude("CAMPFIRE_REST", upgradeLevel);
+        const effect = await effectModel.create({
+          raceId,
+          targetParticipantId: myParticipant.id,
+          targetUserId: userId,
+          sourceUserId: userId,
+          powerupId,
+          type: "CAMPFIRE_REST",
+          startsAt: currentTime,
+          expiresAt: new Date(currentTime.getTime() + CAMPFIRE_FREEZE_MS + upgradedDuration("CAMPFIRE_REST", upgradeLevel)),
+          metadata: {
+            freezeMs: CAMPFIRE_FREEZE_MS,
+            multiplier,
+            boostMs: CAMPFIRE_BOOST_MS,
+            stepsAtRestStart: myParticipant.totalSteps,
+          },
+        });
+        result.effect = effect;
+
+        await eventModel.create({
+          raceId,
+          actorUserId: userId,
+          eventType: "POWERUP_USED",
+          powerupType: type,
+          description: `${myDisplayName} settled into a ${levelPrefix(upgradeLevel)}Campfire Rest! They'll pause briefly, then get a ${multiplier}x boost.`,
+        });
+        break;
+      }
+
+      case "TRAIL_MAGNET": {
+        const reduction = upgradedMagnitude("TRAIL_MAGNET", upgradeLevel);
+        const currentThreshold = myParticipant.nextBoxAtSteps || 0;
+        const nextBoxAtSteps = Math.max(0, currentThreshold - reduction);
+        await participantModel.updateNextBoxAtSteps(myParticipant.id, nextBoxAtSteps);
+        result.reduction = reduction;
+        result.nextBoxAtSteps = nextBoxAtSteps;
+        result.grantedBox = myParticipant.totalSteps >= nextBoxAtSteps;
+
+        await eventModel.create({
+          raceId,
+          actorUserId: userId,
+          eventType: "POWERUP_USED",
+          powerupType: type,
+          description: `${myDisplayName} used ${levelPrefix(upgradeLevel)}Trail Magnet! Their next mystery box moved ${reduction.toLocaleString()} steps closer.`,
+          metadata: { reduction, nextBoxAtSteps },
+        });
+        break;
+      }
+
+      case "POCKET_WATCH": {
+        const extensionMs = upgradedDuration("POCKET_WATCH", upgradeLevel);
+        const activeTimedEffects = (await effectModel.findActiveForParticipant(myParticipant.id))
+          .filter((effect) => effect.expiresAt && effect.type !== "POCKET_WATCH");
+        for (const effect of activeTimedEffects) {
+          await effectModel.update(effect.id, {
+            expiresAt: new Date(new Date(effect.expiresAt).getTime() + extensionMs),
+          });
+        }
+        result.extendedEffects = activeTimedEffects.length;
+        result.extensionMs = extensionMs;
+
+        await eventModel.create({
+          raceId,
+          actorUserId: userId,
+          eventType: "POWERUP_USED",
+          powerupType: type,
+          description: `${myDisplayName} used ${levelPrefix(upgradeLevel)}Pocket Watch! ${activeTimedEffects.length} active buff${activeTimedEffects.length === 1 ? "" : "s"} extended.`,
+          metadata: { extendedEffects: activeTimedEffects.length, extensionMs },
+        });
+        break;
+      }
+
+      case "TRAIL_MINE": {
+        const penaltyPercent = upgradedMagnitude("TRAIL_MINE", upgradeLevel);
+        const effect = await effectModel.create({
+          raceId,
+          targetParticipantId: myParticipant.id,
+          targetUserId: userId,
+          sourceUserId: userId,
+          powerupId,
+          type: "TRAIL_MINE",
+          startsAt: currentTime,
+          expiresAt: null,
+          metadata: {
+            ownerParticipantId: myParticipant.id,
+            positionSteps: myParticipant.totalSteps,
+            penaltyPercent,
+          },
+        });
+        result.effect = effect;
+
+        await eventModel.create({
+          raceId,
+          actorUserId: userId,
+          eventType: "POWERUP_USED",
+          powerupType: type,
+          description: `${myDisplayName} planted a ${levelPrefix(upgradeLevel)}Trail Mine at ${myParticipant.totalSteps.toLocaleString()} steps.`,
+          metadata: effect.metadata,
+        });
+        break;
+      }
+
+      case "PINECONE_TOSS": {
+        const penalty = upgradedMagnitude("PINECONE_TOSS", upgradeLevel);
+        await participantModel.subtractBonusSteps(targetParticipant.id, penalty);
+        result.penalty = penalty;
+
+        await eventModel.create({
+          raceId,
+          actorUserId: userId,
+          eventType: "POWERUP_USED",
+          powerupType: type,
+          targetUserId: resolvedTargetUserId,
+          description: `${myDisplayName} hit ${targetDisplayName} with a ${levelPrefix(upgradeLevel)}Pinecone Toss! They lost ${penalty.toLocaleString()} steps.`,
+          metadata: { penalty, direction: targetDirection },
+        });
+        break;
+      }
+
+      case "SNEAKY_SWAP": {
+        await powerupModel.swapHeldPowerups(swapOfferedPowerupId, swapRequestedPowerupId);
+        result.swapped = true;
+        result.offeredPowerupId = swapOfferedPowerupId;
+        result.requestedPowerupId = swapRequestedPowerupId;
+
+        await eventModel.create({
+          raceId,
+          actorUserId: userId,
+          eventType: "POWERUP_USED",
+          powerupType: type,
+          targetUserId: resolvedTargetUserId,
+          description: `${myDisplayName} used Sneaky Swap on ${targetDisplayName}!`,
+          metadata: { offeredPowerupId: swapOfferedPowerupId, requestedPowerupId: swapRequestedPowerupId },
         });
         break;
       }

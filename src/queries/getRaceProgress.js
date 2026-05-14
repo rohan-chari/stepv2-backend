@@ -58,6 +58,7 @@ async function computeEffectModifiers(effects, rawTotal, userId, stepSampleModel
   const legCramps = effects.filter((e) => e.type === "LEG_CRAMP");
   const runnersHighs = effects.filter((e) => e.type === "RUNNERS_HIGH");
   const wrongTurns = effects.filter((e) => e.type === "WRONG_TURN");
+  const campfires = effects.filter((e) => e.type === "CAMPFIRE_REST");
 
   for (const effect of legCramps) {
     const windowStart = effect.startsAt;
@@ -92,6 +93,32 @@ async function computeEffectModifiers(effects, rawTotal, userId, stepSampleModel
         ? meta.stepsAtExpiry
         : rawTotal;
       buffedSteps += Math.max(0, end - start);
+    }
+  }
+
+  for (const effect of campfires) {
+    const meta = effect.metadata || {};
+    const freezeMs = meta.freezeMs || 0;
+    const multiplier = meta.multiplier || 1;
+    const freezeStart = effect.startsAt;
+    const freezeEnd = new Date(new Date(effect.startsAt).getTime() + freezeMs);
+    const boostStart = freezeEnd;
+    const boostEnd = effect.expiresAt || new Date();
+
+    const frozenSampleSteps = await stepSampleModel.sumStepsInWindow(userId, freezeStart, freezeEnd);
+    if (frozenSampleSteps > 0) {
+      frozenSteps += frozenSampleSteps;
+    } else if (!hasSampleData) {
+      const start = meta.stepsAtRestStart || 0;
+      const end = effect.status === "EXPIRED" && meta.stepsAtExpiry !== undefined
+        ? meta.stepsAtExpiry
+        : rawTotal;
+      frozenSteps += Math.max(0, end - start);
+    }
+
+    const boostedSampleSteps = await stepSampleModel.sumStepsInWindow(userId, boostStart, boostEnd);
+    if (boostedSampleSteps > 0) {
+      buffedSteps += boostedSampleSteps * Math.max(0, multiplier - 1);
     }
   }
 
@@ -295,8 +322,9 @@ function buildGetRaceProgress(deps = {}) {
           const legCramps = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "LEG_CRAMP");
           const runnersHighs = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "RUNNERS_HIGH");
           const wrongTurns = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "WRONG_TURN");
+          const campfires = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "CAMPFIRE_REST");
 
-          const allEffects = [...legCramps, ...runnersHighs, ...wrongTurns];
+          const allEffects = [...legCramps, ...runnersHighs, ...wrongTurns, ...campfires];
           const { frozenSteps, buffedSteps, reversedSteps } = await computeEffectModifiers(allEffects, baseAdjusted, participant.userId, stepSampleModel, hasSampleData);
 
           total = Math.max(0, baseAdjusted - frozenSteps + buffedSteps - 2 * reversedSteps + (participant.bonusSteps || 0));

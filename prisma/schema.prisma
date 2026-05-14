@@ -327,6 +327,13 @@ enum PowerupType {
   FANNY_PACK        @map("fanny_pack")
   TRAIL_MIX         @map("trail_mix")
   DETOUR_SIGN       @map("detour_sign")
+  LUCKY_HORSESHOE   @map("lucky_horseshoe")
+  CAMPFIRE_REST     @map("campfire_rest")
+  TRAIL_MAGNET      @map("trail_magnet")
+  POCKET_WATCH      @map("pocket_watch")
+  TRAIL_MINE        @map("trail_mine")
+  PINECONE_TOSS     @map("pinecone_toss")
+  SNEAKY_SWAP       @map("sneaky_swap")
   MYSTERY_BOX       @map("mystery_box")
 }
 

@@ -79,6 +79,39 @@ const RacePowerup = {
     return results.map((r) => r.type);
   },
 
+  async swapHeldPowerups(sourcePowerupId, targetPowerupId) {
+    return prisma.$transaction(async (tx) => {
+      const [source, target] = await Promise.all([
+        tx.racePowerup.findUnique({ where: { id: sourcePowerupId } }),
+        tx.racePowerup.findUnique({ where: { id: targetPowerupId } }),
+      ]);
+
+      if (!source || !target) {
+        throw new Error("Powerup not found");
+      }
+
+      const sourcePatch = {
+        participantId: target.participantId,
+        userId: target.userId,
+      };
+      const targetPatch = {
+        participantId: source.participantId,
+        userId: source.userId,
+      };
+
+      const updatedSource = await tx.racePowerup.update({
+        where: { id: sourcePowerupId },
+        data: sourcePatch,
+      });
+      const updatedTarget = await tx.racePowerup.update({
+        where: { id: targetPowerupId },
+        data: targetPatch,
+      });
+
+      return { source: updatedSource, target: updatedTarget };
+    });
+  },
+
   async expireAllForRace(raceId) {
     return prisma.racePowerup.updateMany({
       where: { raceId, status: { in: ["HELD", "MYSTERY_BOX", "QUEUED"] } },

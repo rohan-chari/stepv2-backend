@@ -1,8 +1,18 @@
 const RARITY_TIERS = {
-  COMMON: ["PROTEIN_SHAKE", "SHORTCUT", "TRAIL_MIX", "DETOUR_SIGN"],
-  UNCOMMON: ["RUNNERS_HIGH", "LEG_CRAMP", "STEALTH_MODE", "WRONG_TURN"],
-  RARE: ["RED_CARD", "SECOND_WIND", "COMPRESSION_SOCKS", "FANNY_PACK"],
+  COMMON: ["PROTEIN_SHAKE", "SHORTCUT", "TRAIL_MIX", "DETOUR_SIGN", "TRAIL_MAGNET"],
+  UNCOMMON: ["RUNNERS_HIGH", "LEG_CRAMP", "STEALTH_MODE", "WRONG_TURN", "CAMPFIRE_REST", "PINECONE_TOSS"],
+  RARE: ["RED_CARD", "SECOND_WIND", "COMPRESSION_SOCKS", "FANNY_PACK", "LUCKY_HORSESHOE", "POCKET_WATCH", "TRAIL_MINE", "SNEAKY_SWAP"],
 };
+
+const RARITY_ORDER = ["COMMON", "UNCOMMON", "RARE"];
+
+function coerceMinRarity(rarity, minRarity) {
+  if (!minRarity) return rarity;
+  const rarityIndex = RARITY_ORDER.indexOf(rarity);
+  const minIndex = RARITY_ORDER.indexOf(minRarity);
+  if (rarityIndex === -1 || minIndex === -1) return rarity;
+  return RARITY_ORDER[Math.max(rarityIndex, minIndex)];
+}
 
 // Position-based odds: [COMMON%, UNCOMMON%, RARE%]
 // Row 0 = leader (1st place), Row 1 = last place
@@ -21,7 +31,7 @@ function interpolateOdds(normalizedPosition) {
   ];
 }
 
-function rollPowerup(position, totalParticipants, rng = Math.random) {
+function rollPowerup(position, totalParticipants, rng = Math.random, options = {}) {
   // position is 1-based rank (1 = leader)
   const normalizedPosition = totalParticipants <= 1
     ? 0.5
@@ -39,6 +49,8 @@ function rollPowerup(position, totalParticipants, rng = Math.random) {
     rarity = "RARE";
   }
 
+  rarity = coerceMinRarity(rarity, options.minRarity);
+
   const tierPowerups = RARITY_TIERS[rarity];
   const typeIndex = Math.floor(rng() * tierPowerups.length);
   const type = tierPowerups[typeIndex];
@@ -46,4 +58,4 @@ function rollPowerup(position, totalParticipants, rng = Math.random) {
   return { type, rarity };
 }
 
-module.exports = { rollPowerup, interpolateOdds, RARITY_TIERS, ODDS_TABLE };
+module.exports = { rollPowerup, interpolateOdds, RARITY_TIERS, ODDS_TABLE, RARITY_ORDER };

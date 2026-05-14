@@ -23,8 +23,8 @@ function buildExpireEffects(dependencies = {}) {
       if (raceId && effect.raceId !== raceId) continue;
 
       const metadata = effect.metadata || {};
-      // Store current steps at expiry for Leg Cramp and Runner's High
-      if (effect.type === "LEG_CRAMP" || effect.type === "RUNNERS_HIGH") {
+      // Store current steps at expiry for snapshot-based timed modifiers.
+      if (["LEG_CRAMP", "RUNNERS_HIGH", "CAMPFIRE_REST"].includes(effect.type)) {
         const currentStepsForTarget = participantSteps?.[effect.targetParticipantId];
         if (currentStepsForTarget !== undefined) {
           metadata.stepsAtExpiry = currentStepsForTarget;
