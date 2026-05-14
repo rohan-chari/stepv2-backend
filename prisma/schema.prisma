@@ -35,6 +35,9 @@ model User {
   racesWon           Race[]              @relation("raceWinner")
   raceParticipations RaceParticipant[]
   stepSamples        StepSample[]
+  shopItems          UserShopItem[]
+  equippedAccessories UserEquippedAccessory[]
+  shopPurchaseRequests ShopPurchaseRequest[]
 
   @@map("users")
 }
@@ -234,6 +237,81 @@ model CoinTransaction {
   @@index([userId])
   @@index([userId, reason, refId])
   @@map("coin_transactions")
+}
+
+enum AccessorySlot {
+  HEAD
+  FACE
+  NECK
+  BACK
+}
+
+model ShopItem {
+  id          String        @id @default(uuid())
+  sku         String        @unique
+  name        String
+  description String?
+  slot        AccessorySlot
+  priceCoins  Int           @map("price_coins")
+  assetKey    String        @map("asset_key")
+  active      Boolean       @default(true)
+  sortOrder   Int           @default(0) @map("sort_order")
+  createdAt   DateTime      @default(now()) @map("created_at")
+
+  purchases UserShopItem[]
+  equipped  UserEquippedAccessory[]
+  purchaseRequests ShopPurchaseRequest[]
+
+  @@index([active, sortOrder])
+  @@map("shop_items")
+}
+
+model UserShopItem {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  shopItemId  String   @map("shop_item_id")
+  purchasedAt DateTime @default(now()) @map("purchased_at")
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shopItem ShopItem @relation(fields: [shopItemId], references: [id])
+
+  @@unique([userId, shopItemId])
+  @@index([shopItemId])
+  @@map("user_shop_items")
+}
+
+model UserEquippedAccessory {
+  id         String        @id @default(uuid())
+  userId     String        @map("user_id")
+  slot       AccessorySlot
+  shopItemId String        @map("shop_item_id")
+  updatedAt  DateTime      @updatedAt @map("updated_at")
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shopItem ShopItem @relation(fields: [shopItemId], references: [id])
+
+  @@unique([userId, slot])
+  @@index([shopItemId])
+  @@map("user_equipped_accessories")
+}
+
+model ShopPurchaseRequest {
+  id             String   @id @default(uuid())
+  userId         String   @map("user_id")
+  idempotencyKey String   @map("idempotency_key")
+  shopItemId     String   @map("shop_item_id")
+  status         String
+  coinsSpent     Int      @default(0) @map("coins_spent")
+  resultJson     Json?    @map("result_json")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shopItem ShopItem @relation(fields: [shopItemId], references: [id])
+
+  @@unique([userId, idempotencyKey])
+  @@index([shopItemId])
+  @@map("shop_purchase_requests")
 }
 
 enum PowerupType {

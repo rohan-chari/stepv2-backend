@@ -1,5 +1,24 @@
 const { prisma } = require("../db");
 
+const userDisplaySelect = {
+  id: true,
+  displayName: true,
+  profilePhotoUrl: true,
+  equippedAccessories: {
+    include: {
+      shopItem: {
+        select: {
+          id: true,
+          sku: true,
+          name: true,
+          slot: true,
+          assetKey: true,
+        },
+      },
+    },
+  },
+};
+
 const Friendship = {
   async findById(id) {
     return prisma.friendship.findUnique({ where: { id } });
@@ -36,8 +55,8 @@ const Friendship = {
         OR: [{ requesterId: userId }, { addresseeId: userId }],
       },
       include: {
-        requester: { select: { id: true, displayName: true, profilePhotoUrl: true } },
-        addressee: { select: { id: true, displayName: true, profilePhotoUrl: true } },
+        requester: { select: userDisplaySelect },
+        addressee: { select: userDisplaySelect },
       },
     });
   },
@@ -49,8 +68,8 @@ const Friendship = {
         OR: [{ requesterId: userId }, { addresseeId: userId }],
       },
       include: {
-        requester: { select: { id: true, displayName: true, profilePhotoUrl: true, stepGoal: true } },
-        addressee: { select: { id: true, displayName: true, profilePhotoUrl: true, stepGoal: true } },
+        requester: { select: { ...userDisplaySelect, stepGoal: true } },
+        addressee: { select: { ...userDisplaySelect, stepGoal: true } },
       },
     });
   },

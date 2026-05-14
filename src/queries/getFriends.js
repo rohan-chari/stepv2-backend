@@ -1,5 +1,6 @@
 const { Friendship } = require("../models/friendship");
 const { Steps } = require("../models/steps");
+const { buildAccessoriesList } = require("../utils/shopCosmetics");
 
 async function getFriendsList(userId) {
   const friendships = await Friendship.findFriends(userId);
@@ -10,6 +11,7 @@ async function getFriendsList(userId) {
       id: friend.id,
       displayName: friend.displayName,
       profilePhotoUrl: friend.profilePhotoUrl,
+      accessories: buildAccessoriesList(friend),
       friendshipId: f.id,
     };
   });
@@ -54,6 +56,7 @@ async function getFriendsWithSteps(userId, date) {
       id: friend.id,
       displayName: friend.displayName,
       profilePhotoUrl: friend.profilePhotoUrl,
+      accessories: buildAccessoriesList(friend),
       stepGoal: friend.stepGoal,
     };
   });

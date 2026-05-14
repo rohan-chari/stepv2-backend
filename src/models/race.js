@@ -3,7 +3,26 @@ const { prisma } = require("../db");
 const participantInclude = {
   participants: {
     include: {
-      user: { select: { id: true, displayName: true, profilePhotoUrl: true } },
+      user: {
+        select: {
+          id: true,
+          displayName: true,
+          profilePhotoUrl: true,
+          equippedAccessories: {
+            include: {
+              shopItem: {
+                select: {
+                  id: true,
+                  sku: true,
+                  name: true,
+                  slot: true,
+                  assetKey: true,
+                },
+              },
+            },
+          },
+        },
+      },
     },
     orderBy: { joinedAt: "asc" },
   },

@@ -6,6 +6,7 @@ const { RacePowerup } = require("../models/racePowerup");
 const { RaceActiveEffect } = require("../models/raceActiveEffect");
 const { completeRace } = require("../commands/completeRace");
 const { expireEffects } = require("../commands/expireEffects");
+const { buildAccessoriesList } = require("../utils/shopCosmetics");
 const {
   buildSyncRacePowerupState,
   syncRacePowerupState: defaultSyncRacePowerupState,
@@ -201,6 +202,7 @@ function buildGetRaceProgress(deps = {}) {
           userId: p.userId,
           displayName: p.user.displayName,
           profilePhotoUrl: p.user.profilePhotoUrl,
+          accessories: buildAccessoriesList(p.user),
           totalSteps: p.totalSteps,
           progress: Math.min(p.totalSteps / race.targetSteps, 1),
           finishedAt: p.finishedAt,
@@ -438,6 +440,7 @@ function buildGetRaceProgress(deps = {}) {
             userId: participant.userId,
             displayName: "???",
             profilePhotoUrl: null,
+            accessories: [],
             totalSteps: null,
             progress: null,
             finishedAt: participant.finishedAt,
@@ -451,6 +454,7 @@ function buildGetRaceProgress(deps = {}) {
           userId: participant.userId,
           displayName: isStealthed ? "???" : participant.user.displayName,
           profilePhotoUrl: isStealthed ? null : participant.user.profilePhotoUrl,
+          accessories: isStealthed ? [] : buildAccessoriesList(participant.user),
           totalSteps: isStealthed ? null : totalSteps,
           progress: isStealthed ? null : Math.min(totalSteps / race.targetSteps, 1),
           finishedAt: participant.finishedAt,

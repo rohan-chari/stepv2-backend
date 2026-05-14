@@ -1,5 +1,6 @@
 const { Race } = require("../models/race");
 const { computeRacePayouts } = require("../utils/racePayoutPresets");
+const { buildAccessoriesList } = require("../utils/shopCosmetics");
 
 async function getRaceDetails(userId, raceId) {
   const race = await Race.findById(raceId);
@@ -56,6 +57,7 @@ async function getRaceDetails(userId, raceId) {
       userId: p.userId,
       displayName: p.user.displayName,
       profilePhotoUrl: p.user.profilePhotoUrl,
+      accessories: buildAccessoriesList(p.user),
       status: p.status,
       totalSteps: p.totalSteps,
       finishedAt: p.finishedAt,
