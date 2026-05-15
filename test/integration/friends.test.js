@@ -49,6 +49,57 @@ describe("friend request flow", () => {
     nextAppleId = 0;
   });
 
+  it("includes accessory render metadata in friend lists", async () => {
+    const alice = await createUser("AliceWalker");
+    const bob = await createUser("BobRunner");
+    await request(server.baseUrl, "POST", "/friends/request", {
+      body: { addresseeId: bob.userId },
+      token: alice.token,
+    });
+    const incoming = await request(server.baseUrl, "GET", "/friends", {
+      token: bob.token,
+    });
+    const incomingBody = await incoming.json();
+    const friendshipId = incomingBody.pending.incoming[0].friendshipId;
+    await request(server.baseUrl, "PUT", `/friends/request/${friendshipId}`, {
+      body: { accept: true },
+      token: bob.token,
+    });
+
+    const item = await prisma.shopItem.create({
+      data: {
+        sku: "test_friend_hat",
+        name: "Test Friend Hat",
+        description: "Testing metadata propagation.",
+        slot: "HEAD",
+        priceCoins: 0,
+        assetKey: "cowboy_hat",
+        renderMetadata: {
+          offsetX: -0.015,
+          offsetY: 0.03,
+          rotation: -0.14,
+        },
+      },
+    });
+    await prisma.userShopItem.create({
+      data: { userId: bob.userId, shopItemId: item.id },
+    });
+    await prisma.userEquippedAccessory.create({
+      data: { userId: bob.userId, slot: "HEAD", shopItemId: item.id },
+    });
+
+    const friendsRes = await request(server.baseUrl, "GET", "/friends", {
+      token: alice.token,
+    });
+    assert.equal(friendsRes.status, 200);
+    const friendsBody = await friendsRes.json();
+    assert.deepEqual(friendsBody.friends[0].accessories[0].renderMetadata, {
+      offsetX: -0.015,
+      offsetY: 0.03,
+      rotation: -0.14,
+    });
+  });
+
   // === SEARCH ===
 
   it("search finds user by display name", async () => {

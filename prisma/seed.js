@@ -1,5 +1,6 @@
 require("dotenv").config();
 const { prisma } = require("../src/db");
+const { applyCosmetics } = require("../scripts/cosmetics-apply");
 
 const challenges = [
   { title: "Sole Survivor", description: "Only one sole survives. Most steps wins.", type: "HEAD_TO_HEAD", resolutionRule: "higher_total" },
@@ -77,6 +78,8 @@ async function seed() {
     }
   }
   console.log(`Created ${stakesCreated} stakes (${stakes.length - stakesCreated} already existed)`);
+
+  await applyCosmetics();
 
   console.log("Seed complete!");
 }

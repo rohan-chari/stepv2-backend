@@ -17,6 +17,7 @@ const participantInclude = {
                   name: true,
                   slot: true,
                   assetKey: true,
+                  renderMetadata: true,
                 },
               },
             },

@@ -39,6 +39,7 @@ async function createShopItem(overrides = {}) {
       slot: overrides.slot || "HEAD",
       priceCoins: overrides.priceCoins ?? 75,
       assetKey: overrides.assetKey || "straw_hat",
+      renderMetadata: overrides.renderMetadata ?? null,
       active: overrides.active ?? true,
       sortOrder: overrides.sortOrder ?? 10,
     },
@@ -55,9 +56,11 @@ describe("shop", () => {
     nextAppleId = 0;
   });
 
-  it("returns catalog items with ownership, equipment, and coins", async () => {
+  it("returns catalog items with ownership, equipment, metadata, and coins", async () => {
     const user = await createUser("ShopViewer", 125);
-    const item = await createShopItem();
+    const item = await createShopItem({
+      renderMetadata: { offsetX: -0.015, offsetY: 0.03, rotation: -0.14 },
+    });
     await prisma.userShopItem.create({
       data: { userId: user.userId, shopItemId: item.id },
     });
@@ -74,6 +77,11 @@ describe("shop", () => {
     assert.equal(body.coins, 125);
     assert.deepEqual(body.ownedItemIds, [item.id]);
     assert.equal(body.equipped.HEAD.id, item.id);
+    assert.deepEqual(body.equipped.HEAD.renderMetadata, {
+      offsetX: -0.015,
+      offsetY: 0.03,
+      rotation: -0.14,
+    });
     assert.deepEqual(body.items, [
       {
         id: item.id,
@@ -83,6 +91,7 @@ describe("shop", () => {
         slot: "HEAD",
         priceCoins: 75,
         assetKey: "straw_hat",
+        renderMetadata: { offsetX: -0.015, offsetY: 0.03, rotation: -0.14 },
         owned: true,
         equipped: true,
       },
@@ -91,7 +100,9 @@ describe("shop", () => {
 
   it("requires an idempotency key for purchases", async () => {
     const user = await createUser("NoKeyBuyer", 125);
-    const item = await createShopItem();
+    const item = await createShopItem({
+      renderMetadata: { offsetX: -0.015, offsetY: 0.03, rotation: -0.14 },
+    });
 
     const res = await request(
       server.baseUrl,
@@ -166,6 +177,7 @@ describe("shop", () => {
       name: "Cowboy Hat",
       priceCoins: 0,
       assetKey: "cowboy_hat",
+      renderMetadata: { offsetX: -0.015, offsetY: 0.03, rotation: -0.14 },
     });
 
     const res = await request(
@@ -182,6 +194,11 @@ describe("shop", () => {
     const body = await res.json();
     assert.equal(body.coins, 0);
     assert.equal(body.purchase.coinsSpent, 0);
+    assert.deepEqual(body.item.renderMetadata, {
+      offsetX: -0.015,
+      offsetY: 0.03,
+      rotation: -0.14,
+    });
 
     const transactions = await prisma.coinTransaction.findMany({
       where: { userId: user.userId, reason: "shop_purchase" },
@@ -278,7 +295,9 @@ describe("shop", () => {
 
   it("equips an owned accessory and clears the slot", async () => {
     const user = await createUser("EquipBuyer", 125);
-    const item = await createShopItem();
+    const item = await createShopItem({
+      renderMetadata: { offsetX: -0.015, offsetY: 0.03, rotation: -0.14 },
+    });
     await prisma.userShopItem.create({
       data: { userId: user.userId, shopItemId: item.id },
     });
@@ -291,6 +310,11 @@ describe("shop", () => {
     assert.equal(equip.status, 200);
     let body = await equip.json();
     assert.equal(body.equipped.HEAD.id, item.id);
+    assert.deepEqual(body.equipped.HEAD.renderMetadata, {
+      offsetX: -0.015,
+      offsetY: 0.03,
+      rotation: -0.14,
+    });
 
     const clear = await request(
       server.baseUrl,

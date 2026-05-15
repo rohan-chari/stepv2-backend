@@ -13,6 +13,7 @@ const userDisplaySelect = {
           name: true,
           slot: true,
           assetKey: true,
+          renderMetadata: true,
         },
       },
     },

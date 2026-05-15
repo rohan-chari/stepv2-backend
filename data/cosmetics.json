@@ -1,0 +1,36 @@
+{
+  "items": [
+    {
+      "sku": "cowboy_hat",
+      "name": "Cowboy Hat",
+      "description": "A trail-ready hat for race day.",
+      "slot": "HEAD",
+      "priceCoins": 250,
+      "assetKey": "cowboy_hat",
+      "active": true,
+      "sortOrder": 10,
+      "renderMetadata": {
+        "offsetX": -0.015,
+        "offsetY": 0.03,
+        "rotation": -0.14,
+        "scale": 1
+      }
+    },
+    {
+      "sku": "baseball_cap",
+      "name": "Baseball Cap",
+      "description": "A clean cap for race day.",
+      "slot": "HEAD",
+      "priceCoins": 250,
+      "assetKey": "baseball_cap",
+      "active": true,
+      "sortOrder": 20,
+      "renderMetadata": {
+        "offsetX": -0.0010822510822514064,
+        "offsetY": 0.0501948051948048,
+        "rotation": -0.45865800865800915,
+        "scale": 1.2136363636363614
+      }
+    }
+  ]
+}

@@ -9,6 +9,7 @@ function serializeShopItem(item, extras = {}) {
     slot: item.slot,
     priceCoins: item.priceCoins,
     assetKey: item.assetKey,
+    renderMetadata: item.renderMetadata,
     ...extras,
   };
 }
@@ -21,6 +22,7 @@ function serializeEquippedAccessory(equippedAccessory) {
     name: item.name,
     slot: item.slot,
     assetKey: item.assetKey,
+    renderMetadata: item.renderMetadata,
   };
 }
 

@@ -28,6 +28,23 @@ function startServer({
 
 if (require.main === module) {
   startServer();
+
+  if (process.env.NODE_ENV !== "production") {
+    let pulling = false;
+    process.on("SIGINT", async () => {
+      if (pulling) return;
+      pulling = true;
+      try {
+        const { pullCosmetics } = require("../scripts/cosmetics-pull");
+        console.log("\nPulling cosmetics to data/cosmetics.json before exit...");
+        await pullCosmetics();
+      } catch (err) {
+        console.error("cosmetics pull on shutdown failed:", err);
+      } finally {
+        process.exit(0);
+      }
+    });
+  }
 }
 
 module.exports = {

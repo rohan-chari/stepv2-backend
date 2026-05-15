@@ -10,7 +10,13 @@
     "test:unit": "node --test 'test/commands/**/*.test.js' 'test/handlers/**/*.test.js' 'test/http/**/*.test.js' 'test/queries/**/*.test.js' 'test/services/**/*.test.js' 'test/startup/**/*.test.js' 'test/utils/**/*.test.js'",
     "test:integration": "DATABASE_URL=postgresql://rohan@localhost:5432/steps-tracker-integration sh -c 'createdb steps-tracker-integration 2>/dev/null; npx prisma migrate deploy && node --test --test-concurrency=1 --test-force-exit test/integration/**/*.test.js'",
     "migrate": "npx prisma migrate dev",
-    "generate": "npx prisma generate"
+    "generate": "npx prisma generate",
+    "cosmetics:pull": "node scripts/cosmetics-pull.js",
+    "cosmetics:apply": "node scripts/cosmetics-apply.js",
+    "seed": "node prisma/seed.js"
+  },
+  "prisma": {
+    "seed": "node prisma/seed.js"
   },
   "keywords": [],
   "author": "",

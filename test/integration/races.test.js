@@ -68,6 +68,56 @@ describe("races", () => {
     nextAppleId = 0;
   });
 
+  it("includes accessory render metadata in race details", async () => {
+    const alice = await createUser("AliceWalker");
+    const bob = await createUser("BobbyRunner");
+    await makeFriends(alice, bob);
+
+    const item = await prisma.shopItem.create({
+      data: {
+        sku: "test_race_hat",
+        name: "Test Race Hat",
+        description: "Testing metadata propagation.",
+        slot: "HEAD",
+        priceCoins: 0,
+        assetKey: "cowboy_hat",
+        renderMetadata: {
+          offsetX: -0.015,
+          offsetY: 0.03,
+          rotation: -0.14,
+        },
+      },
+    });
+    await prisma.userShopItem.create({
+      data: { userId: bob.userId, shopItemId: item.id },
+    });
+    await prisma.userEquippedAccessory.create({
+      data: { userId: bob.userId, slot: "HEAD", shopItemId: item.id },
+    });
+
+    const raceId = (await (await createRace(alice.token)).json()).race.id;
+    await request(server.baseUrl, "POST", `/races/${raceId}/invite`, {
+      body: { inviteeIds: [bob.userId] },
+      token: alice.token,
+    });
+    await request(server.baseUrl, "PUT", `/races/${raceId}/respond`, {
+      body: { accept: true },
+      token: bob.token,
+    });
+
+    const detailRes = await request(server.baseUrl, "GET", `/races/${raceId}`, {
+      token: alice.token,
+    });
+    assert.equal(detailRes.status, 200);
+    const detail = await detailRes.json();
+    const bobParticipant = detail.participants.find((p) => p.userId === bob.userId);
+    assert.deepEqual(bobParticipant.accessories[0].renderMetadata, {
+      offsetX: -0.015,
+      offsetY: 0.03,
+      rotation: -0.14,
+    });
+  });
+
   // === RACE CREATION ===
 
   describe("race creation", () => {
