@@ -19,8 +19,11 @@ model User {
   lastStepSyncAt DateTime? @map("last_step_sync_at")
   lastSilentPushSentAt DateTime? @map("last_silent_push_sent_at")
   coins     Int      @default(0)
+  lastDailyClaimDate String? @map("last_daily_claim_date")
+  dailyStreakDay     Int     @default(0) @map("daily_streak_day")
   createdAt DateTime @default(now()) @map("created_at")
   steps     Step[]
+  dailyRewardClaims  DailyRewardClaim[]
   sentRequests     Friendship[] @relation("sentRequests")
   receivedRequests Friendship[] @relation("receivedRequests")
 
@@ -52,6 +55,23 @@ enum RelationshipType {
   PARTNER   @map("partner")
   FRIEND    @map("friend")
   FAMILY    @map("family")
+}
+
+model DailyRewardClaim {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  claimedDate String   @map("claimed_date")
+  cycleDay    Int      @map("cycle_day")
+  rewardType  String   @map("reward_type")
+  coinAmount  Int?     @map("coin_amount")
+  shopItemId  String?  @map("shop_item_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, claimedDate])
+  @@index([userId, createdAt])
+  @@map("daily_reward_claims")
 }
 
 model Friendship {
