@@ -1,0 +1,1 @@
+ALTER TYPE "AccessorySlot" ADD VALUE 'FEET';

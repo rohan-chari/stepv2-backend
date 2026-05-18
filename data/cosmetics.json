@@ -27,9 +27,41 @@
       "sortOrder": 20,
       "renderMetadata": {
         "offsetX": -0.0010822510822514064,
-        "offsetY": 0.0501948051948048,
+        "offsetY": 0.040194805194804804,
         "rotation": -0.45865800865800915,
         "scale": 1.2136363636363614
+      }
+    },
+    {
+      "sku": "sunglasses",
+      "name": "Sunglasses",
+      "description": "Shades for sunny step streaks.",
+      "slot": "FACE",
+      "priceCoins": 250,
+      "assetKey": "sunglasses",
+      "active": true,
+      "sortOrder": 30,
+      "renderMetadata": {
+        "offsetX": -0.09463276836158163,
+        "offsetY": -0.02,
+        "rotation": -0.2800000000000001,
+        "scale": 1.3999999999999997
+      }
+    },
+    {
+      "sku": "shoes",
+      "name": "Trail Shoes",
+      "description": "High-top kicks for extra trail style.",
+      "slot": "FEET",
+      "priceCoins": 500,
+      "assetKey": "shoes",
+      "active": true,
+      "sortOrder": 40,
+      "renderMetadata": {
+        "offsetX": 0.019999999999999993,
+        "offsetY": 0.009999999999999998,
+        "rotation": -0.060000000000000005,
+        "scale": 1.5000000000000004
       }
     }
   ]

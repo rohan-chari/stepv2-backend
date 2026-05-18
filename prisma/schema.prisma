@@ -264,6 +264,7 @@ enum AccessorySlot {
   FACE
   NECK
   BACK
+  FEET
 }
 
 model ShopItem {

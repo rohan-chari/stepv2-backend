@@ -1,4 +1,4 @@
-const ACCESSORY_SLOTS = ["HEAD", "FACE", "NECK", "BACK"];
+const ACCESSORY_SLOTS = ["HEAD", "FACE", "NECK", "BACK", "FEET"];
 
 function serializeShopItem(item, extras = {}) {
   return {
