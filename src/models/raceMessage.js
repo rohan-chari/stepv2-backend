@@ -4,6 +4,31 @@ const senderInclude = {
   sender: { select: { id: true, displayName: true, profilePhotoUrl: true } },
 };
 
+function applyCursor(where, cursor) {
+  if (!cursor) return;
+
+  if (typeof cursor === "object" && cursor.createdAt) {
+    const createdAt = new Date(cursor.createdAt);
+    if (Number.isNaN(createdAt.getTime())) return;
+
+    if (cursor.kind === "USER" && cursor.id) {
+      where.OR = [
+        { createdAt: { lt: createdAt } },
+        { createdAt, id: { lt: cursor.id } },
+      ];
+      return;
+    }
+
+    where.createdAt = { lt: createdAt };
+    return;
+  }
+
+  const createdAt = new Date(cursor);
+  if (!Number.isNaN(createdAt.getTime())) {
+    where.createdAt = { lt: createdAt };
+  }
+}
+
 const RaceMessage = {
   async create({ raceId, senderId, body, kind = "USER" }) {
     return prisma.raceMessage.create({
@@ -21,13 +46,11 @@ const RaceMessage = {
 
   async findByRace(raceId, { cursor, limit = 50 } = {}) {
     const where = { raceId, deletedAt: null };
-    if (cursor) {
-      where.createdAt = { lt: new Date(cursor) };
-    }
+    applyCursor(where, cursor);
     return prisma.raceMessage.findMany({
       where,
       include: senderInclude,
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: limit,
     });
   },

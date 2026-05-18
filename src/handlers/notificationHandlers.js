@@ -11,6 +11,7 @@ function registerNotificationHandlers(dependencies = {}) {
   const userModel = dependencies.User || User;
   const deviceTokenModel = dependencies.DeviceToken || DeviceToken;
   const apns = dependencies.apnsService || apnsService;
+  const raceParticipantModel = dependencies.RaceParticipant || prisma.raceParticipant;
   const logger = dependencies.logger || console;
 
   function deviceTokenSuffix(token) {
@@ -336,7 +337,7 @@ function registerNotificationHandlers(dependencies = {}) {
   events.on("RACE_MESSAGE_SENT", async (data) => {
     try {
       const { raceId, messageId, senderId, body, senderName, raceName } = data;
-      const recipients = await prisma.raceParticipant.findMany({
+      const recipients = await raceParticipantModel.findMany({
         where: {
           raceId,
           status: "ACCEPTED",
@@ -412,7 +413,7 @@ function registerNotificationHandlers(dependencies = {}) {
 
         if (!onCooldown) {
           try {
-            await prisma.raceParticipant.update({
+            await raceParticipantModel.update({
               where: { id: recipient.id },
               data: { lastChatPushAt: now },
             });

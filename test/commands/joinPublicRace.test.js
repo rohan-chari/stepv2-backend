@@ -21,10 +21,17 @@ function makeRace(overrides = {}) {
   };
 }
 
-function makeDeps({ race, userCoins = 5000, raceUpdate } = {}) {
+function makeDeps({
+  race,
+  userCoins = 5000,
+  raceUpdate,
+  acceptedCount,
+  awardCoins,
+} = {}) {
   const events = [];
   const awards = [];
   const participants = [];
+  const locks = [];
   let raceState = race;
 
   return {
@@ -45,6 +52,9 @@ function makeDeps({ race, userCoins = 5000, raceUpdate } = {}) {
         async findByRaceAndUser(_raceId, userId) {
           return raceState.participants.find((p) => p.userId === userId) || null;
         },
+        async countAccepted() {
+          return acceptedCount ?? raceState.participants.filter((p) => p.status === "ACCEPTED").length;
+        },
         async create(payload) {
           const p = { id: `rp-${participants.length + 1}`, ...payload };
           participants.push(p);
@@ -56,11 +66,17 @@ function makeDeps({ race, userCoins = 5000, raceUpdate } = {}) {
         async findById(id) { return { id, coins: userCoins }; },
       },
       awardCoins: async (payload) => {
+        if (awardCoins) return awardCoins(payload);
         awards.push(payload);
         return { awarded: true };
       },
       eventBus: { emit(e, p) { events.push({ event: e, payload: p }); } },
+      withRaceJoinLock: async (lockedRaceId, callback) => {
+        locks.push(lockedRaceId);
+        return callback();
+      },
     },
+    locks,
   };
 }
 
@@ -70,6 +86,7 @@ test("joinPublicRace adds user as ACCEPTED participant", async () => {
 
   await join({ userId: "user-2", raceId: "race-1" });
 
+  assert.deepEqual(ctx.locks, ["race-1"]);
   assert.equal(ctx.participants.length, 1);
   assert.equal(ctx.participants[0].userId, "user-2");
   assert.equal(ctx.participants[0].status, "ACCEPTED");
@@ -123,6 +140,25 @@ test("joinPublicRace rejects when full", async () => {
   );
 });
 
+test("joinPublicRace re-checks accepted count before creating participant", async () => {
+  const race = makeRace({
+    maxParticipants: 2,
+    participants: [{ userId: "creator-1", status: "ACCEPTED" }],
+  });
+  const ctx = makeDeps({ race, acceptedCount: 2 });
+  const join = buildJoinPublicRace(ctx.deps);
+
+  await assert.rejects(
+    () => join({ userId: "user-2", raceId: "race-1" }),
+    (err) => {
+      assert.equal(err.statusCode, 400);
+      return true;
+    }
+  );
+
+  assert.equal(ctx.participants.length, 0);
+});
+
 test("joinPublicRace rejects when already a participant", async () => {
   const race = makeRace({
     participants: [
@@ -158,6 +194,24 @@ test("joinPublicRace reserves buy-in when race has one", async () => {
     reason: "race_buy_in_hold",
     refId: "race-1:user-2",
   });
+});
+
+test("joinPublicRace does not create participant when buy-in reservation fails", async () => {
+  const ctx = makeDeps({
+    race: makeRace({ buyInAmount: 100 }),
+    awardCoins: async () => {
+      throw new Error("wallet unavailable");
+    },
+  });
+  const join = buildJoinPublicRace(ctx.deps);
+
+  await assert.rejects(
+    () => join({ userId: "user-2", raceId: "race-1" }),
+    /wallet unavailable/
+  );
+
+  assert.equal(ctx.participants.length, 0);
+  assert.equal(ctx.events.length, 0);
 });
 
 test("joinPublicRace rejects when user cannot afford buy-in", async () => {

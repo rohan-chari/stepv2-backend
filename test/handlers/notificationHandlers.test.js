@@ -394,6 +394,74 @@ test("STAKE_ACCEPTED sends push to proposer with challenge detail payload", asyn
   });
 });
 
+test("RACE_MESSAGE_SENT notifies accepted unmuted participants and updates cooldown", async () => {
+  const eventBus = createMockEventBus();
+  const sentNotifications = [];
+  const updates = [];
+
+  registerNotificationHandlers({
+    eventBus,
+    RaceParticipant: {
+      async findMany() {
+        return [
+          {
+            id: "rp-2",
+            raceId: "race-1",
+            userId: "user-2",
+            status: "ACCEPTED",
+            chatMuted: false,
+            lastChatPushAt: null,
+          },
+        ];
+      },
+      async update(args) {
+        updates.push(args);
+      },
+    },
+    DeviceToken: {
+      async findByUserId(userId) {
+        assert.equal(userId, "user-2");
+        return [{ token: "race-chat-token", platform: "ios" }];
+      },
+      async deleteToken() {},
+    },
+    apnsService: {
+      async sendNotification(args) {
+        sentNotifications.push(args);
+        return { success: true };
+      },
+    },
+    logger: {
+      warn() {},
+      error() {},
+    },
+  });
+
+  await eventBus.emit("RACE_MESSAGE_SENT", {
+    raceId: "race-1",
+    messageId: "msg-1",
+    senderId: "user-1",
+    body: "See you at the finish",
+    senderName: "Trail Walker",
+    raceName: "Evening Sprint",
+  });
+
+  assert.equal(sentNotifications.length, 1);
+  assert.equal(sentNotifications[0].deviceToken, "race-chat-token");
+  assert.equal(sentNotifications[0].title, "Evening Sprint");
+  assert.equal(sentNotifications[0].body, "Trail Walker: See you at the finish");
+  assert.deepEqual(sentNotifications[0].payload, {
+    type: "race_message",
+    route: "race_detail",
+    params: { raceId: "race-1" },
+    raceId: "race-1",
+    messageId: "msg-1",
+  });
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0].where.id, "rp-2");
+  assert.ok(updates[0].data.lastChatPushAt instanceof Date);
+});
+
 test("doesn't throw when APNs fails", async () => {
   const eventBus = createMockEventBus();
 

@@ -3,94 +3,183 @@ const { RaceMessage } = require("../models/raceMessage");
 const { RaceActiveEffect } = require("../models/raceActiveEffect");
 const { RacePowerupEvent } = require("../models/racePowerupEvent");
 
-async function getRaceMessages(userId, raceId, { cursor, limit = 50 } = {}) {
-  const race = await Race.findById(raceId);
-  if (!race) {
-    const error = new Error("Race not found");
-    error.statusCode = 404;
-    throw error;
-  }
+const CURSOR_VERSION = 1;
+const KIND_RANK = { USER: 1, SYSTEM: 0 };
 
-  const myParticipant = race.participants.find((p) => p.userId === userId);
-  if (!myParticipant) {
-    const error = new Error("You are not a participant in this race");
-    error.statusCode = 403;
-    throw error;
-  }
-
-  // Stealth: same redaction logic as feed
-  const stealthedUserIds = new Set();
-  if (race.powerupsEnabled) {
-    const activeEffects = await RaceActiveEffect.findActiveForRace(raceId);
-    for (const e of activeEffects) {
-      if (e.type === "STEALTH_MODE" && e.targetUserId !== userId) {
-        stealthedUserIds.add(e.targetUserId);
-      }
-    }
-  }
-
-  const stealthedNames = new Map();
-  if (stealthedUserIds.size > 0) {
-    for (const p of race.participants) {
-      if (stealthedUserIds.has(p.userId) && p.user?.displayName) {
-        stealthedNames.set(p.userId, p.user.displayName);
-      }
-    }
-  }
-
-  const fetchLimit = Math.max(limit, 50);
-  const [userMessages, powerupEvents] = await Promise.all([
-    RaceMessage.findByRace(raceId, { cursor, limit: fetchLimit }),
-    RacePowerupEvent.findByRace(raceId, { cursor, limit: fetchLimit }),
-  ]);
-
-  const userItems = userMessages.map((m) => ({
-    id: m.id,
-    kind: "USER",
-    body: m.body,
-    senderId: m.senderId,
-    senderName: m.sender?.displayName ?? null,
-    senderPhotoUrl: m.sender?.profilePhotoUrl ?? null,
-    createdAt: m.createdAt,
-  }));
-
-  const systemItems = powerupEvents.map((e) => {
-    let description = e.description;
-    if (stealthedUserIds.has(e.actorUserId)) {
-      const realName = stealthedNames.get(e.actorUserId);
-      if (realName && description.includes(realName)) {
-        description = description.replaceAll(realName, "???");
-      }
-    }
-    if (e.targetUserId && stealthedUserIds.has(e.targetUserId)) {
-      const realName = stealthedNames.get(e.targetUserId);
-      if (realName && description.includes(realName)) {
-        description = description.replaceAll(realName, "???");
-      }
-    }
-    return {
-      id: `evt_${e.id}`,
-      kind: "SYSTEM",
-      body: description,
-      eventType: e.eventType,
-      powerupType: e.powerupType,
-      actorUserId: e.actorUserId,
-      targetUserId: e.targetUserId,
-      createdAt: e.createdAt,
-    };
-  });
-
-  const merged = [...userItems, ...systemItems].sort(
-    (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
-  );
-
-  const trimmed = merged.slice(0, limit);
-  const nextCursor =
-    trimmed.length === limit
-      ? new Date(trimmed[trimmed.length - 1].createdAt).toISOString()
-      : null;
-
-  return { messages: trimmed, nextCursor };
+function normalizeLimit(limit) {
+  const parsed = Number(limit);
+  if (!Number.isFinite(parsed)) return 50;
+  return Math.min(Math.max(Math.trunc(parsed), 1), 100);
 }
 
-module.exports = { getRaceMessages };
+function parseCursor(cursor) {
+  if (!cursor || typeof cursor !== "string") return null;
+
+  try {
+    const decoded = JSON.parse(
+      Buffer.from(cursor, "base64url").toString("utf8")
+    );
+    if (
+      decoded &&
+      decoded.v === CURSOR_VERSION &&
+      decoded.at &&
+      decoded.kind &&
+      decoded.id
+    ) {
+      return {
+        createdAt: decoded.at,
+        kind: decoded.kind,
+        id: decoded.id,
+      };
+    }
+  } catch {}
+
+  const legacyDate = new Date(cursor);
+  if (Number.isNaN(legacyDate.getTime())) return null;
+  return { createdAt: legacyDate.toISOString(), kind: null, id: null };
+}
+
+function formatCursor(item) {
+  return Buffer.from(
+    JSON.stringify({
+      v: CURSOR_VERSION,
+      at: new Date(item.createdAt).toISOString(),
+      kind: item._cursorKind,
+      id: item._cursorId,
+    })
+  ).toString("base64url");
+}
+
+function compareMessages(a, b) {
+  const timeDiff = new Date(b.createdAt) - new Date(a.createdAt);
+  if (timeDiff !== 0) return timeDiff;
+
+  const rankDiff =
+    (KIND_RANK[b._cursorKind] ?? 0) - (KIND_RANK[a._cursorKind] ?? 0);
+  if (rankDiff !== 0) return rankDiff;
+
+  return String(b._cursorId).localeCompare(String(a._cursorId));
+}
+
+function stripCursorFields(item) {
+  const { _cursorKind, _cursorId, ...message } = item;
+  return message;
+}
+
+function buildGetRaceMessages(dependencies = {}) {
+  const raceModel = dependencies.Race || Race;
+  const raceMessageModel = dependencies.RaceMessage || RaceMessage;
+  const raceActiveEffectModel =
+    dependencies.RaceActiveEffect || RaceActiveEffect;
+  const racePowerupEventModel =
+    dependencies.RacePowerupEvent || RacePowerupEvent;
+
+  return async function getRaceMessages(
+    userId,
+    raceId,
+    { cursor, limit = 50 } = {}
+  ) {
+    const pageLimit = normalizeLimit(limit);
+    const parsedCursor = parseCursor(cursor);
+    const race = await raceModel.findById(raceId);
+    if (!race) {
+      const error = new Error("Race not found");
+      error.statusCode = 404;
+      throw error;
+    }
+
+    const myParticipant = race.participants.find((p) => p.userId === userId);
+    if (!myParticipant) {
+      const error = new Error("You are not a participant in this race");
+      error.statusCode = 403;
+      throw error;
+    }
+
+    // Stealth: same redaction logic as feed
+    const stealthedUserIds = new Set();
+    if (race.powerupsEnabled) {
+      const activeEffects = await raceActiveEffectModel.findActiveForRace(
+        raceId
+      );
+      for (const e of activeEffects) {
+        if (e.type === "STEALTH_MODE" && e.targetUserId !== userId) {
+          stealthedUserIds.add(e.targetUserId);
+        }
+      }
+    }
+
+    const stealthedNames = new Map();
+    if (stealthedUserIds.size > 0) {
+      for (const p of race.participants) {
+        if (stealthedUserIds.has(p.userId) && p.user?.displayName) {
+          stealthedNames.set(p.userId, p.user.displayName);
+        }
+      }
+    }
+
+    const fetchLimit = pageLimit + 1;
+    const [userMessages, powerupEvents] = await Promise.all([
+      raceMessageModel.findByRace(raceId, {
+        cursor: parsedCursor,
+        limit: fetchLimit,
+      }),
+      racePowerupEventModel.findByRace(raceId, {
+        cursor: parsedCursor,
+        limit: fetchLimit,
+      }),
+    ]);
+
+    const userItems = userMessages.map((m) => ({
+      id: m.id,
+      kind: "USER",
+      body: m.body,
+      senderId: m.senderId,
+      senderName: m.sender?.displayName ?? null,
+      senderPhotoUrl: m.sender?.profilePhotoUrl ?? null,
+      createdAt: m.createdAt,
+      _cursorKind: "USER",
+      _cursorId: m.id,
+    }));
+
+    const systemItems = powerupEvents.map((e) => {
+      let description = e.description;
+      if (stealthedUserIds.has(e.actorUserId)) {
+        const realName = stealthedNames.get(e.actorUserId);
+        if (realName && description.includes(realName)) {
+          description = description.replaceAll(realName, "???");
+        }
+      }
+      if (e.targetUserId && stealthedUserIds.has(e.targetUserId)) {
+        const realName = stealthedNames.get(e.targetUserId);
+        if (realName && description.includes(realName)) {
+          description = description.replaceAll(realName, "???");
+        }
+      }
+      return {
+        id: `evt_${e.id}`,
+        kind: "SYSTEM",
+        body: description,
+        eventType: e.eventType,
+        powerupType: e.powerupType,
+        actorUserId: e.actorUserId,
+        targetUserId: e.targetUserId,
+        createdAt: e.createdAt,
+        _cursorKind: "SYSTEM",
+        _cursorId: e.id,
+      };
+    });
+
+    const merged = [...userItems, ...systemItems].sort(compareMessages);
+    const trimmed = merged.slice(0, pageLimit);
+    const nextCursor =
+      merged.length > pageLimit
+        ? formatCursor(trimmed[trimmed.length - 1])
+        : null;
+
+    return { messages: trimmed.map(stripCursorFields), nextCursor };
+  };
+}
+
+const getRaceMessages = buildGetRaceMessages();
+
+module.exports = { buildGetRaceMessages, getRaceMessages };

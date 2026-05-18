@@ -15,62 +15,72 @@ class RaceMessageError extends Error {
   }
 }
 
-async function sendRaceMessage({ userId, raceId, body }) {
-  if (typeof body !== "string") {
-    throw new RaceMessageError("Message body is required");
-  }
-  const trimmed = body.trim();
-  if (trimmed.length === 0) {
-    throw new RaceMessageError("Message cannot be empty");
-  }
-  if (trimmed.length > MAX_BODY_LENGTH) {
-    throw new RaceMessageError(`Message too long (max ${MAX_BODY_LENGTH})`);
-  }
+function buildSendRaceMessage(dependencies = {}) {
+  const raceModel = dependencies.Race || Race;
+  const raceMessageModel = dependencies.RaceMessage || RaceMessage;
+  const censorFn = dependencies.censor || censor;
+  const events = dependencies.eventBus || eventBus;
+  const now = dependencies.now || Date.now;
 
-  const race = await Race.findById(raceId);
-  if (!race) throw new RaceMessageError("Race not found", 404);
+  return async function sendRaceMessage({ userId, raceId, body }) {
+    if (typeof body !== "string") {
+      throw new RaceMessageError("Message body is required");
+    }
+    const trimmed = body.trim();
+    if (trimmed.length === 0) {
+      throw new RaceMessageError("Message cannot be empty");
+    }
+    if (trimmed.length > MAX_BODY_LENGTH) {
+      throw new RaceMessageError(`Message too long (max ${MAX_BODY_LENGTH})`);
+    }
 
-  if (race.status === "COMPLETED" || race.status === "CANCELLED") {
-    throw new RaceMessageError("Chat is closed for this race", 403);
-  }
+    const race = await raceModel.findById(raceId);
+    if (!race) throw new RaceMessageError("Race not found", 404);
 
-  const participant = race.participants.find((p) => p.userId === userId);
-  if (!participant) {
-    throw new RaceMessageError("You are not a participant in this race", 403);
-  }
-  if (participant.status !== "ACCEPTED") {
-    throw new RaceMessageError("Only accepted participants can post", 403);
-  }
+    if (race.status === "COMPLETED" || race.status === "CANCELLED") {
+      throw new RaceMessageError("Chat is closed for this race", 403);
+    }
 
-  const since = new Date(Date.now() - RATE_LIMIT_WINDOW_MS);
-  const recentCount = await RaceMessage.countSentBySenderSince(
-    userId,
-    raceId,
-    since
-  );
-  if (recentCount >= RATE_LIMIT_MAX) {
-    throw new RaceMessageError("Slow down — too many messages", 429);
-  }
+    const participant = race.participants.find((p) => p.userId === userId);
+    if (!participant) {
+      throw new RaceMessageError("You are not a participant in this race", 403);
+    }
+    if (participant.status !== "ACCEPTED") {
+      throw new RaceMessageError("Only accepted participants can post", 403);
+    }
 
-  const cleaned = censor(trimmed);
+    const since = new Date(now() - RATE_LIMIT_WINDOW_MS);
+    const recentCount = await raceMessageModel.countSentBySenderSince(
+      userId,
+      raceId,
+      since
+    );
+    if (recentCount >= RATE_LIMIT_MAX) {
+      throw new RaceMessageError("Slow down — too many messages", 429);
+    }
 
-  const message = await RaceMessage.create({
-    raceId,
-    senderId: userId,
-    body: cleaned,
-    kind: "USER",
-  });
+    const cleaned = censorFn(trimmed);
 
-  eventBus.emit("RACE_MESSAGE_SENT", {
-    raceId,
-    messageId: message.id,
-    senderId: userId,
-    body: cleaned,
-    senderName: message.sender?.displayName ?? null,
-    raceName: race.name,
-  });
+    const message = await raceMessageModel.create({
+      raceId,
+      senderId: userId,
+      body: cleaned,
+      kind: "USER",
+    });
 
-  return message;
+    events.emit("RACE_MESSAGE_SENT", {
+      raceId,
+      messageId: message.id,
+      senderId: userId,
+      body: cleaned,
+      senderName: message.sender?.displayName ?? null,
+      raceName: race.name,
+    });
+
+    return message;
+  };
 }
 
-module.exports = { sendRaceMessage, RaceMessageError };
+const sendRaceMessage = buildSendRaceMessage();
+
+module.exports = { buildSendRaceMessage, sendRaceMessage, RaceMessageError };
