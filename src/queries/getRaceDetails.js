@@ -51,7 +51,13 @@ async function getRaceDetails(userId, raceId) {
     creator: race.creator,
     winner: race.winner,
     isCreator: race.creatorId === userId,
+    isPublic: race.isPublic || false,
+    maxParticipants: race.maxParticipants || 10,
+    powerupsEnabled: race.powerupsEnabled || false,
+    powerupStepInterval: race.powerupStepInterval,
     myStatus: myParticipant.status,
+    myChatMuted: myParticipant.chatMuted || false,
+    myLastReadRaceChatAt: myParticipant.lastReadRaceChatAt,
     participants: race.participants.map((p) => ({
       id: p.id,
       userId: p.userId,

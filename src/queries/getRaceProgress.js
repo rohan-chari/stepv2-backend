@@ -198,6 +198,7 @@ function buildGetRaceProgress(deps = {}) {
       ? buildSyncRacePowerupState({
           Race: raceModel,
           RacePowerup: racePowerupModel,
+          RaceParticipant: participantModel,
           rollPowerup: deps.rollPowerup,
         })
       : defaultSyncRacePowerupState);
@@ -412,8 +413,14 @@ function buildGetRaceProgress(deps = {}) {
 
       powerupData.powerupSlots = mySlots;
       if (nextBoxAtSteps > 0) {
+        // Use high-water mark of bonusSteps so pushbacks (Banana Peel/Red Card)
+        // don't push the countdown back. Leg Cramp (frozenSteps) still does.
+        const bonusNow = freshParticipant?.bonusSteps || 0;
+        const maxBonus = freshParticipant?.maxBonusSteps || 0;
+        const effectiveSteps =
+          myCurrentSteps + Math.max(0, maxBonus - bonusNow);
         powerupData.stepsUntilNextPowerup = Math.max(
-          nextBoxAtSteps - myCurrentSteps,
+          nextBoxAtSteps - effectiveSteps,
           0
         );
       }

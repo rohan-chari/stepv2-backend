@@ -54,6 +54,7 @@ function buildApnsService(config = {}) {
     apnsPayload,
     pushType,
     priority,
+    collapseId,
   }) {
     return new Promise((resolve) => {
       let client;
@@ -67,7 +68,7 @@ function buildApnsService(config = {}) {
         resolve({ success: false, reason: err.message });
       });
 
-      const req = client.request({
+      const headers = {
         ":method": "POST",
         ":path": `/3/device/${deviceToken}`,
         authorization: `bearer ${authToken}`,
@@ -75,7 +76,11 @@ function buildApnsService(config = {}) {
         "apns-push-type": pushType,
         "apns-priority": priority,
         "content-type": "application/json",
-      });
+      };
+      if (collapseId) {
+        headers["apns-collapse-id"] = collapseId;
+      }
+      const req = client.request(headers);
 
       let responseData = "";
       let statusCode;
@@ -122,15 +127,20 @@ function buildApnsService(config = {}) {
     title,
     body,
     payload = {},
+    collapseId,
+    threadId,
   }) {
+    const aps = { alert: { title, body }, sound: "default" };
+    if (threadId) aps["thread-id"] = threadId;
     return sendPushRequest({
       host,
       authToken,
       deviceToken,
       pushType: "alert",
       priority: "10",
+      collapseId,
       apnsPayload: JSON.stringify({
-        aps: { alert: { title, body }, sound: "default" },
+        aps,
         ...payload,
       }),
     });
@@ -193,7 +203,14 @@ function buildApnsService(config = {}) {
     return retryResult;
   }
 
-  async function sendNotification({ deviceToken, title, body, payload = {} }) {
+  async function sendNotification({
+    deviceToken,
+    title,
+    body,
+    payload = {},
+    collapseId,
+    threadId,
+  }) {
     return sendWithBadDeviceTokenFallback({
       deviceToken,
       sendRequest: ({ host, authToken, deviceToken }) =>
@@ -204,6 +221,8 @@ function buildApnsService(config = {}) {
           title,
           body,
           payload,
+          collapseId,
+          threadId,
         }),
     });
   }

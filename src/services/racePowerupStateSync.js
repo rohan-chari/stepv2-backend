@@ -1,5 +1,6 @@
 const { Race } = require("../models/race");
 const { RacePowerup } = require("../models/racePowerup");
+const { RaceParticipant } = require("../models/raceParticipant");
 const { rollPowerup: defaultRollPowerup } = require("../commands/rollPowerup");
 
 function getCurrentSteps(participant) {
@@ -10,9 +11,21 @@ function getCurrentSteps(participant) {
   return participant.totalSteps ?? 0;
 }
 
+function getEffectiveBoxSteps(participant) {
+  const currentSteps = getCurrentSteps(participant);
+  const bonus = participant?.bonusSteps || 0;
+  const maxBonus = participant?.maxBonusSteps || 0;
+  // If bonusSteps was reduced below its peak (e.g., Banana Peel), keep box
+  // progress anchored to the high-water mark so the player does not need to
+  // re-walk the lost distance.
+  const bonusAnchor = Math.max(bonus, maxBonus);
+  return currentSteps + Math.max(0, bonusAnchor - bonus);
+}
+
 function buildSyncRacePowerupState(dependencies = {}) {
   const raceModel = dependencies.Race || Race;
   const powerupModel = dependencies.RacePowerup || RacePowerup;
+  const participantModel = dependencies.RaceParticipant || RaceParticipant;
   const rollPowerup = dependencies.rollPowerup || defaultRollPowerup;
 
   return async function syncRacePowerupState({ raceId, userId }) {
@@ -43,15 +56,24 @@ function buildSyncRacePowerupState(dependencies = {}) {
 
     let rollResults = [];
     const currentSteps = getCurrentSteps(participant);
+    const effectiveSteps = getEffectiveBoxSteps(participant);
+
+    const bonus = participant.bonusSteps || 0;
+    const maxBonus = participant.maxBonusSteps || 0;
+    if (bonus > maxBonus && typeof participantModel.updateMaxBonusSteps === "function") {
+      await participantModel.updateMaxBonusSteps(participant.id, bonus);
+    }
+
     if (
       participant.nextBoxAtSteps > 0 &&
-      currentSteps >= participant.nextBoxAtSteps
+      effectiveSteps >= participant.nextBoxAtSteps
     ) {
       rollResults = await rollPowerup({
         raceId: race.id,
         participantId: participant.id,
         userId: participant.userId,
         currentSteps,
+        effectiveSteps,
         nextBoxAtSteps: participant.nextBoxAtSteps,
         powerupStepInterval: race.powerupStepInterval,
         displayName: participant.user?.displayName,

@@ -51,6 +51,8 @@ const Race = {
     buyInAmount = 0,
     payoutPreset = "WINNER_TAKES_ALL",
     potCoins = 0,
+    isPublic = false,
+    maxParticipants = 10,
   }) {
     return prisma.race.create({
       data: {
@@ -63,6 +65,8 @@ const Race = {
         buyInAmount,
         payoutPreset,
         potCoins,
+        isPublic,
+        maxParticipants,
       },
       include: {
         creator: { select: { id: true, displayName: true, profilePhotoUrl: true } },
@@ -128,6 +132,17 @@ const Race = {
         ...participantInclude,
       },
       orderBy: { updatedAt: "desc" },
+    });
+  },
+
+  async findPublicPending() {
+    return prisma.race.findMany({
+      where: { isPublic: true, status: "PENDING" },
+      include: {
+        creator: { select: { id: true, displayName: true, profilePhotoUrl: true } },
+        ...participantInclude,
+      },
+      orderBy: { createdAt: "desc" },
     });
   },
 

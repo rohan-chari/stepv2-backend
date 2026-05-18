@@ -126,6 +126,17 @@ const RaceParticipant = {
     });
   },
 
+  async updateMaxBonusSteps(id, maxBonusSteps) {
+    return prisma.raceParticipant.update({
+      where: { id },
+      data: { maxBonusSteps },
+    });
+  },
+
+  async delete(id) {
+    return prisma.raceParticipant.delete({ where: { id } });
+  },
+
   async incrementPayoutCoins(id, amount) {
     return prisma.raceParticipant.update({
       where: { id },

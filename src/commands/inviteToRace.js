@@ -34,8 +34,12 @@ function buildInviteToRace(dependencies = {}) {
 
     const currentParticipants = await participantModel.findByRace(raceId);
     const currentCount = currentParticipants.length;
-    if (currentCount + inviteeIds.length > 10) {
-      throw new RaceInviteError("A race can have at most 10 participants", 400);
+    const maxParticipants = race.maxParticipants || 10;
+    if (currentCount + inviteeIds.length > maxParticipants) {
+      throw new RaceInviteError(
+        `A race can have at most ${maxParticipants} participants`,
+        400
+      );
     }
 
     const existingUserIds = new Set(currentParticipants.map((p) => p.userId));

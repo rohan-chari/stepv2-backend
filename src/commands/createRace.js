@@ -33,6 +33,8 @@ function buildCreateRace(dependencies = {}) {
     powerupStepInterval,
     buyInAmount = 0,
     payoutPreset,
+    isPublic = false,
+    maxParticipants = 10,
   }) {
     if (!name || typeof name !== "string" || name.trim().length === 0) {
       throw new RaceCreationError("Race name is required", 400);
@@ -53,6 +55,9 @@ function buildCreateRace(dependencies = {}) {
       if (!powerupStepInterval || powerupStepInterval < 1000 || powerupStepInterval > 50000) {
         throw new RaceCreationError("Powerup step interval must be between 1,000 and 50,000", 400);
       }
+    }
+    if (!Number.isInteger(maxParticipants) || maxParticipants < 2 || maxParticipants > 100) {
+      throw new RaceCreationError("Max participants must be between 2 and 100", 400);
     }
 
     const buyInConfig = validateRaceBuyInConfig({
@@ -77,6 +82,8 @@ function buildCreateRace(dependencies = {}) {
       powerupStepInterval: powerupsEnabled ? powerupStepInterval : null,
       buyInAmount: buyInConfig.buyInAmount,
       payoutPreset: buyInConfig.payoutPreset,
+      isPublic: !!isPublic,
+      maxParticipants,
     });
 
     await participantModel.create({

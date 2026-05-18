@@ -33,12 +33,13 @@ function buildRollPowerup(dependencies = {}) {
   const eventModel = dependencies.RacePowerupEvent || RacePowerupEvent;
   const events = dependencies.eventBus || eventBus;
 
-  return async function rollPowerup({ raceId, participantId, userId, currentSteps, nextBoxAtSteps, powerupStepInterval, displayName, powerupSlots }) {
+  return async function rollPowerup({ raceId, participantId, userId, currentSteps, effectiveSteps, nextBoxAtSteps, powerupStepInterval, displayName, powerupSlots }) {
     const maxSlots = powerupSlots || DEFAULT_POWERUP_SLOTS;
+    const stepsForThreshold = effectiveSteps != null ? effectiveSteps : currentSteps;
     const results = [];
     let currentThreshold = nextBoxAtSteps;
 
-    while (currentSteps >= currentThreshold && currentThreshold > 0) {
+    while (stepsForThreshold >= currentThreshold && currentThreshold > 0) {
       const occupied = await powerupModel.countOccupiedSlots(participantId);
       const queued = occupied >= maxSlots;
 

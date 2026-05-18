@@ -37,6 +37,7 @@ model User {
   racesCreated       Race[]              @relation("raceCreator")
   racesWon           Race[]              @relation("raceWinner")
   raceParticipations RaceParticipant[]
+  raceMessages       RaceMessage[]
   stepSamples        StepSample[]
   shopItems          UserShopItem[]
   equippedAccessories UserEquippedAccessory[]
@@ -422,6 +423,8 @@ model Race {
   winnerUserId         String?    @map("winner_user_id")
   powerupsEnabled      Boolean    @default(false) @map("powerups_enabled")
   powerupStepInterval  Int?       @map("powerup_step_interval")
+  isPublic             Boolean    @default(false) @map("is_public")
+  maxParticipants      Int        @default(10) @map("max_participants")
   createdAt            DateTime   @default(now()) @map("created_at")
   updatedAt            DateTime   @updatedAt @map("updated_at")
 
@@ -431,10 +434,12 @@ model Race {
   powerups     RacePowerup[]
   activeEffects RaceActiveEffect[]
   powerupEvents RacePowerupEvent[]
+  messages     RaceMessage[]
 
   @@index([creatorId])
   @@index([status])
   @@index([winnerUserId])
+  @@index([isPublic, status])
   @@map("races")
 }
 
@@ -447,6 +452,7 @@ model RaceParticipant {
   baselineSteps Int                   @default(0) @map("baseline_steps")
   nextBoxAtSteps Int                  @default(0) @map("next_box_at_steps")
   bonusSteps    Int                   @default(0) @map("bonus_steps")
+  maxBonusSteps Int                   @default(0) @map("max_bonus_steps")
   powerupSlots  Int                   @default(3) @map("powerup_slots")
   buyInAmount   Int                   @default(0) @map("buy_in_amount")
   buyInStatus   RaceBuyInStatus       @default(NONE) @map("buy_in_status")
@@ -455,6 +461,9 @@ model RaceParticipant {
   finishedAt    DateTime?             @map("finished_at")
   finishTotalSteps Int?               @map("finish_total_steps")
   joinedAt      DateTime              @default(now()) @map("joined_at")
+  lastReadRaceChatAt DateTime?        @map("last_read_race_chat_at")
+  lastChatPushAt     DateTime?        @map("last_chat_push_at")
+  chatMuted          Boolean          @default(false) @map("chat_muted")
 
   race          Race @relation(fields: [raceId], references: [id], onDelete: Cascade)
   user          User @relation(fields: [userId], references: [id])
@@ -548,4 +557,25 @@ model RacePowerupEvent {
 
   @@index([raceId, createdAt])
   @@map("race_powerup_events")
+}
+
+enum RaceMessageKind {
+  USER   @map("user")
+  SYSTEM @map("system")
+}
+
+model RaceMessage {
+  id        String          @id @default(uuid())
+  raceId    String          @map("race_id")
+  senderId  String?         @map("sender_id")
+  kind      RaceMessageKind @default(USER)
+  body      String          @db.VarChar(500)
+  createdAt DateTime        @default(now()) @map("created_at")
+  deletedAt DateTime?       @map("deleted_at")
+
+  race   Race  @relation(fields: [raceId], references: [id], onDelete: Cascade)
+  sender User? @relation(fields: [senderId], references: [id])
+
+  @@index([raceId, createdAt])
+  @@map("race_messages")
 }

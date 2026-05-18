@@ -7,6 +7,15 @@ const {
 const {
   respondToRaceInvite: defaultRespondToRaceInvite,
 } = require("../commands/respondToRaceInvite");
+const {
+  joinPublicRace: defaultJoinPublicRace,
+} = require("../commands/joinPublicRace");
+const {
+  kickRaceParticipant: defaultKickRaceParticipant,
+} = require("../commands/kickRaceParticipant");
+const {
+  getPublicRaces: defaultGetPublicRaces,
+} = require("../queries/getPublicRaces");
 const { startRace: defaultStartRace } = require("../commands/startRace");
 const { cancelRace: defaultCancelRace } = require("../commands/cancelRace");
 const {
@@ -31,6 +40,19 @@ const {
 const {
   getRaceFeed: defaultGetRaceFeed,
 } = require("../queries/getRaceFeed");
+const {
+  getRaceMessages: defaultGetRaceMessages,
+} = require("../queries/getRaceMessages");
+const {
+  sendRaceMessage: defaultSendRaceMessage,
+} = require("../commands/sendRaceMessage");
+const {
+  deleteRaceMessage: defaultDeleteRaceMessage,
+} = require("../commands/deleteRaceMessage");
+const {
+  setRaceChatMute: defaultSetRaceChatMute,
+  markRaceChatRead: defaultMarkRaceChatRead,
+} = require("../commands/setRaceChatMute");
 const { Race: defaultRaceModel } = require("../models/race");
 const { RacePowerup: defaultPowerupModel } = require("../models/racePowerup");
 const {
@@ -46,6 +68,12 @@ function createRacesRouter(dependencies = {}) {
   const inviteToRace = dependencies.inviteToRace || defaultInviteToRace;
   const respondToRaceInvite =
     dependencies.respondToRaceInvite || defaultRespondToRaceInvite;
+  const joinPublicRace =
+    dependencies.joinPublicRace || defaultJoinPublicRace;
+  const kickRaceParticipant =
+    dependencies.kickRaceParticipant || defaultKickRaceParticipant;
+  const getPublicRaces =
+    dependencies.getPublicRaces || defaultGetPublicRaces;
   const startRace = dependencies.startRace || defaultStartRace;
   const cancelRace = dependencies.cancelRace || defaultCancelRace;
   const getRaces = dependencies.getRaces || defaultGetRaces;
@@ -58,6 +86,16 @@ function createRacesRouter(dependencies = {}) {
   const getRaceInventory =
     dependencies.getRaceInventory || defaultGetRaceInventory;
   const getRaceFeed = dependencies.getRaceFeed || defaultGetRaceFeed;
+  const getRaceMessages =
+    dependencies.getRaceMessages || defaultGetRaceMessages;
+  const sendRaceMessage =
+    dependencies.sendRaceMessage || defaultSendRaceMessage;
+  const deleteRaceMessage =
+    dependencies.deleteRaceMessage || defaultDeleteRaceMessage;
+  const setRaceChatMute =
+    dependencies.setRaceChatMute || defaultSetRaceChatMute;
+  const markRaceChatRead =
+    dependencies.markRaceChatRead || defaultMarkRaceChatRead;
   const raceModel = dependencies.Race || defaultRaceModel;
   const powerupModel = dependencies.RacePowerup || defaultPowerupModel;
   const effectModel = dependencies.RaceActiveEffect || defaultEffectModel;
@@ -75,6 +113,8 @@ function createRacesRouter(dependencies = {}) {
         powerupStepInterval,
         buyInAmount,
         payoutPreset,
+        isPublic,
+        maxParticipants,
       } = req.body;
       const race = await createRace({
         userId: req.user.id,
@@ -85,6 +125,8 @@ function createRacesRouter(dependencies = {}) {
         powerupStepInterval,
         buyInAmount,
         payoutPreset,
+        isPublic,
+        maxParticipants,
       });
       res.status(201).json({ race });
     } catch (error) {
@@ -104,6 +146,54 @@ function createRacesRouter(dependencies = {}) {
       res.json(result);
     } catch (error) {
       console.error("Get races error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // GET /races/public
+  router.get("/public", async (req, res) => {
+    try {
+      const races = await getPublicRaces({ userId: req.user.id });
+      res.json({ races });
+    } catch (error) {
+      console.error("Get public races error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // POST /races/:raceId/join
+  router.post("/:raceId/join", async (req, res) => {
+    try {
+      const participant = await joinPublicRace({
+        userId: req.user.id,
+        raceId: req.params.raceId,
+      });
+      res.status(201).json({ participant });
+    } catch (error) {
+      if (error.name === "RaceJoinError") {
+        const status = error.statusCode || 400;
+        return res.status(status).json({ error: error.message });
+      }
+      console.error("Join public race error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // DELETE /races/:raceId/participants/:userId
+  router.delete("/:raceId/participants/:userId", async (req, res) => {
+    try {
+      await kickRaceParticipant({
+        userId: req.user.id,
+        raceId: req.params.raceId,
+        targetUserId: req.params.userId,
+      });
+      res.json({ success: true });
+    } catch (error) {
+      if (error.name === "RaceKickError") {
+        const status = error.statusCode || 400;
+        return res.status(status).json({ error: error.message });
+      }
+      console.error("Kick participant error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });
@@ -345,6 +435,106 @@ function createRacesRouter(dependencies = {}) {
       });
     } catch (error) {
       console.error("Sneaky swap options error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // GET /races/:raceId/messages
+  router.get("/:raceId/messages", async (req, res) => {
+    try {
+      const { cursor, limit } = req.query;
+      const parsedLimit = limit ? Math.min(Number(limit) || 50, 100) : 50;
+      const result = await getRaceMessages(req.user.id, req.params.raceId, {
+        cursor,
+        limit: parsedLimit,
+      });
+      res.json(result);
+    } catch (error) {
+      if (error.statusCode) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
+      console.error("Get race messages error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // POST /races/:raceId/messages
+  router.post("/:raceId/messages", async (req, res) => {
+    try {
+      const { body } = req.body;
+      const message = await sendRaceMessage({
+        userId: req.user.id,
+        raceId: req.params.raceId,
+        body,
+      });
+      res.status(201).json({ message });
+    } catch (error) {
+      if (error.name === "RaceMessageError") {
+        return res
+          .status(error.statusCode || 400)
+          .json({ error: error.message });
+      }
+      console.error("Send race message error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // DELETE /races/:raceId/messages/:messageId
+  router.delete("/:raceId/messages/:messageId", async (req, res) => {
+    try {
+      await deleteRaceMessage({
+        userId: req.user.id,
+        raceId: req.params.raceId,
+        messageId: req.params.messageId,
+      });
+      res.json({ success: true });
+    } catch (error) {
+      if (error.name === "DeleteRaceMessageError") {
+        return res
+          .status(error.statusCode || 400)
+          .json({ error: error.message });
+      }
+      console.error("Delete race message error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // PUT /races/:raceId/chat/mute
+  router.put("/:raceId/chat/mute", async (req, res) => {
+    try {
+      const { muted } = req.body;
+      await setRaceChatMute({
+        userId: req.user.id,
+        raceId: req.params.raceId,
+        muted: !!muted,
+      });
+      res.json({ success: true, muted: !!muted });
+    } catch (error) {
+      if (error.name === "SetRaceChatMuteError") {
+        return res
+          .status(error.statusCode || 400)
+          .json({ error: error.message });
+      }
+      console.error("Set race chat mute error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // POST /races/:raceId/chat/read
+  router.post("/:raceId/chat/read", async (req, res) => {
+    try {
+      await markRaceChatRead({
+        userId: req.user.id,
+        raceId: req.params.raceId,
+      });
+      res.json({ success: true });
+    } catch (error) {
+      if (error.name === "SetRaceChatMuteError") {
+        return res
+          .status(error.statusCode || 400)
+          .json({ error: error.message });
+      }
+      console.error("Mark race chat read error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });

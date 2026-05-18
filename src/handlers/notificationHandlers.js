@@ -2,6 +2,9 @@ const { eventBus } = require("../events/eventBus");
 const { User } = require("../models/user");
 const { DeviceToken } = require("../models/deviceToken");
 const { apnsService } = require("../services/apns");
+const { prisma } = require("../db");
+
+const CHAT_PUSH_COOLDOWN_MS = 60_000;
 
 function registerNotificationHandlers(dependencies = {}) {
   const events = dependencies.eventBus || eventBus;
@@ -325,6 +328,105 @@ function registerNotificationHandlers(dependencies = {}) {
       });
     } catch (error) {
       logger.error("POWERUP_USED handler failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  events.on("RACE_MESSAGE_SENT", async (data) => {
+    try {
+      const { raceId, messageId, senderId, body, senderName, raceName } = data;
+      const recipients = await prisma.raceParticipant.findMany({
+        where: {
+          raceId,
+          status: "ACCEPTED",
+          userId: { not: senderId },
+          chatMuted: false,
+        },
+      });
+      if (recipients.length === 0) return;
+
+      const now = new Date();
+      const collapseId = `race_chat_${raceId}`;
+      const senderLabel = senderName || "Someone";
+      const previewBody = body && body.length > 120 ? `${body.slice(0, 117)}…` : body;
+      const alertBody = `${senderLabel}: ${previewBody}`;
+
+      for (const recipient of recipients) {
+        const lastPush = recipient.lastChatPushAt;
+        const onCooldown =
+          lastPush &&
+          now.getTime() - new Date(lastPush).getTime() < CHAT_PUSH_COOLDOWN_MS;
+
+        const tokens = await deviceTokenModel.findByUserId(recipient.userId);
+        if (!tokens || tokens.length === 0) continue;
+
+        const payload = {
+          type: "race_message",
+          route: "race_detail",
+          params: { raceId },
+          raceId,
+          messageId,
+        };
+
+        for (const tokenRecord of tokens) {
+          try {
+            const result = onCooldown
+              ? await apns.sendSilentNotification({
+                  deviceToken: tokenRecord.token,
+                  payload,
+                })
+              : await apns.sendNotification({
+                  deviceToken: tokenRecord.token,
+                  title: raceName || "Race chat",
+                  body: alertBody,
+                  payload,
+                  collapseId,
+                  threadId: collapseId,
+                });
+
+            if (!result.success && !result.unregistered) {
+              logger.warn("RACE_MESSAGE_SENT push failed", {
+                raceId,
+                recipientUserId: recipient.userId,
+                deviceTokenSuffix: deviceTokenSuffix(tokenRecord.token),
+                statusCode: result.statusCode,
+                reason: result.reason,
+              });
+            }
+            if (result.unregistered) {
+              await deviceTokenModel.deleteToken({
+                userId: recipient.userId,
+                token: tokenRecord.token,
+              });
+            }
+          } catch (error) {
+            logger.error("RACE_MESSAGE_SENT push threw", {
+              raceId,
+              recipientUserId: recipient.userId,
+              deviceTokenSuffix: deviceTokenSuffix(tokenRecord.token),
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+
+        if (!onCooldown) {
+          try {
+            await prisma.raceParticipant.update({
+              where: { id: recipient.id },
+              data: { lastChatPushAt: now },
+            });
+          } catch (error) {
+            logger.error("RACE_MESSAGE_SENT lastChatPushAt update failed", {
+              raceId,
+              recipientUserId: recipient.userId,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+      }
+    } catch (error) {
+      logger.error("RACE_MESSAGE_SENT handler failed", {
         error: error instanceof Error ? error.message : String(error),
       });
     }

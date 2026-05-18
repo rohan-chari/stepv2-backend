@@ -105,6 +105,8 @@ async function getRaces(userId) {
       myPayoutCoins: myParticipant?.payoutCoins || 0,
       queuedBoxCount,
       isCreator: race.creatorId === userId,
+      isPublic: race.isPublic || false,
+      maxParticipants: race.maxParticipants || 10,
       createdAt: race.createdAt,
     };
 
