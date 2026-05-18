@@ -13,6 +13,7 @@
     "generate": "npx prisma generate",
     "cosmetics:pull": "node scripts/cosmetics-pull.js",
     "cosmetics:apply": "node scripts/cosmetics-apply.js",
+    "seed:app-review-demo": "node scripts/seed-app-review-demo.js",
     "seed": "node prisma/seed.js"
   },
   "prisma": {
