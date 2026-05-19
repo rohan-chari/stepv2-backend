@@ -15,6 +15,10 @@ const {
   buildRemoveProfilePhoto,
   buildDismissProfilePhotoPrompt,
 } = require("../commands/profilePhoto");
+const {
+  deleteUserAccount: defaultDeleteUserAccount,
+  DeleteUserAccountError,
+} = require("../commands/deleteUserAccount");
 const { getIncomingFriendRequestCount: defaultGetIncomingFriendRequestCount } = require("../queries/getFriends");
 const { User: DefaultUser } = require("../models/user");
 const {
@@ -45,6 +49,8 @@ function createAuthRouter(dependencies = {}) {
     dependencies.dismissProfilePhotoPrompt ||
     buildDismissProfilePhotoPrompt(dependencies);
   const getIncomingRequestCount = dependencies.getIncomingFriendRequestCount || defaultGetIncomingFriendRequestCount;
+  const deleteUserAccount =
+    dependencies.deleteUserAccount || defaultDeleteUserAccount;
   const checkAdmin = dependencies.isAdminUser || isAdminUser;
   const UserModel = dependencies.User || DefaultUser;
 
@@ -296,6 +302,21 @@ function createAuthRouter(dependencies = {}) {
     } catch (error) {
       console.error("Profile photo prompt dismiss error:", error);
       res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  router.delete("/account", requireAuth, async (req, res) => {
+    try {
+      await deleteUserAccount({ userId: req.user.id });
+      return res.status(204).send();
+    } catch (error) {
+      if (error instanceof DeleteUserAccountError) {
+        return res
+          .status(error.statusCode || 500)
+          .json({ error: error.message });
+      }
+      console.error("Delete account error:", error);
+      return res.status(500).json({ error: "Internal server error" });
     }
   });
 

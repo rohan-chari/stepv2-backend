@@ -28,6 +28,10 @@ function validateRaceBuyInConfig({ buyInAmount, payoutPreset, ErrorClass }) {
     throw new ErrorClass("Buy-in amount must be at least 10 coins", 400);
   }
 
+  if (normalizedBuyInAmount > 200) {
+    throw new ErrorClass("Buy-in amount cannot exceed 200 coins", 400);
+  }
+
   if (!isRacePayoutPreset(normalizedPayoutPreset)) {
     throw new ErrorClass("Invalid payout preset", 400);
   }
