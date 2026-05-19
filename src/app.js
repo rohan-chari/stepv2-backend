@@ -41,7 +41,9 @@ function createApp(dependencies = {}) {
   const publicDir = path.join(__dirname, "..", "public");
   app.get("/", (req, res) => res.sendFile(path.join(publicDir, "index.html")));
   app.get("/support", (req, res) => res.sendFile(path.join(publicDir, "support.html")));
+  app.get("/support.html", (req, res) => res.sendFile(path.join(publicDir, "support.html")));
   app.get("/privacy", (req, res) => res.sendFile(path.join(publicDir, "privacy.html")));
+  app.get("/privacy.html", (req, res) => res.sendFile(path.join(publicDir, "privacy.html")));
 
   return app;
 }
