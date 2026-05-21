@@ -1,5 +1,4 @@
 const { Friendship } = require("../models/friendship");
-const { ChallengeInstance } = require("../models/challengeInstance");
 const { eventBus } = require("../events/eventBus");
 
 class RemoveFriendError extends Error {
@@ -27,23 +26,15 @@ async function removeFriend({ userId, friendshipId }) {
       ? friendship.addresseeId
       : friendship.requesterId;
 
-  // Cascade: delete all challenge instances between the two users
-  const deletedCount = await ChallengeInstance.deleteBetweenUsers(
-    userId,
-    otherUserId
-  );
-
-  // Delete the friendship
   await Friendship.delete(friendshipId);
 
   eventBus.emit("FRIENDSHIP_REMOVED", {
     userId,
     otherUserId,
     friendshipId,
-    deletedChallengeInstances: deletedCount,
   });
 
-  return { deletedChallengeInstances: deletedCount };
+  return {};
 }
 
 module.exports = { removeFriend, RemoveFriendError };

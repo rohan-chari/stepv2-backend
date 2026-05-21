@@ -1,7 +1,5 @@
 const { prisma } = require("../db");
 const {
-  CHALLENGE_RECORD_MINIMUM_COMPLETED,
-  buildChallengeRecordLeaderboard,
   buildRaceRecordLeaderboard,
 } = require("../utils/recordLeaderboardRankings");
 const { getMondayOfWeek, getTimeZoneParts } = require("../utils/week");
@@ -135,60 +133,6 @@ async function getStepLeaderboard(period, currentUserId, timeZone) {
   };
 }
 
-async function getChallengeLeaderboard(currentUserId) {
-  const completedInstances = await prisma.challengeInstance.findMany({
-    where: {
-      status: "COMPLETED",
-      winnerUserId: { not: null },
-    },
-    select: {
-      userAId: true,
-      userBId: true,
-      winnerUserId: true,
-    },
-  });
-
-  const statsByUserId = new Map();
-
-  function ensureRecord(userId) {
-    if (!statsByUserId.has(userId)) {
-      statsByUserId.set(userId, { wins: 0, losses: 0 });
-    }
-    return statsByUserId.get(userId);
-  }
-
-  for (const instance of completedInstances) {
-    const userA = ensureRecord(instance.userAId);
-    const userB = ensureRecord(instance.userBId);
-
-    if (instance.winnerUserId === instance.userAId) {
-      userA.wins += 1;
-      userB.losses += 1;
-    } else if (instance.winnerUserId === instance.userBId) {
-      userB.wins += 1;
-      userA.losses += 1;
-    }
-  }
-
-  const userIds = [...statsByUserId.keys(), currentUserId];
-  const userMap = await getUserProfiles(userIds);
-  const currentUserDisplayName =
-    userMap.get(currentUserId)?.displayName || "Anonymous";
-
-  const entries = [...statsByUserId.entries()].map(([userId, record]) => ({
-    userId,
-    displayName: userMap.get(userId)?.displayName || "Anonymous",
-    profilePhotoUrl: userMap.get(userId)?.profilePhotoUrl || null,
-    wins: record.wins,
-    losses: record.losses,
-  }));
-
-  return {
-    minimumCompletedChallenges: CHALLENGE_RECORD_MINIMUM_COMPLETED,
-    ...buildChallengeRecordLeaderboard(entries, currentUserId, currentUserDisplayName),
-  };
-}
-
 async function getRaceLeaderboard(currentUserId) {
   const completedParticipants = await prisma.raceParticipant.findMany({
     where: {
@@ -239,10 +183,6 @@ async function getRaceLeaderboard(currentUserId) {
 }
 
 async function getLeaderboard({ type = "steps", period = "today", currentUserId, timeZone }) {
-  if (type === "challenges") {
-    return getChallengeLeaderboard(currentUserId);
-  }
-
   if (type === "races") {
     return getRaceLeaderboard(currentUserId);
   }

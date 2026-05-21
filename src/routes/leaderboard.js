@@ -6,7 +6,7 @@ const {
 } = require("../queries/getLeaderboardHighlights");
 
 const VALID_PERIODS = ["today", "week", "month", "allTime"];
-const VALID_TYPES = ["steps", "challenges", "races"];
+const VALID_TYPES = ["steps", "races"];
 
 function createLeaderboardRouter(dependencies = {}) {
   const router = Router();

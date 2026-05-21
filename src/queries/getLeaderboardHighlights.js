@@ -1,6 +1,6 @@
 const { prisma } = require("../db");
-const { buildLeaderboardHighlightCards, getChallengeWinsNeededToAdvance, getRacePodiumTargetToAdvance } = require("../utils/leaderboardHighlights");
-const { CHALLENGE_RECORD_MINIMUM_COMPLETED, rankChallengeRecordEntries, rankRaceRecordEntries } = require("../utils/recordLeaderboardRankings");
+const { buildLeaderboardHighlightCards, getRacePodiumTargetToAdvance } = require("../utils/leaderboardHighlights");
+const { rankRaceRecordEntries } = require("../utils/recordLeaderboardRankings");
 const { getMondayOfWeek, getTimeZoneParts } = require("../utils/week");
 
 function getDateBoundary(period, timeZone) {
@@ -88,76 +88,6 @@ async function getStepCandidates(currentUserId, timeZone) {
   return candidates;
 }
 
-async function getChallengeCandidate(currentUserId) {
-  const completedInstances = await prisma.challengeInstance.findMany({
-    where: {
-      status: "COMPLETED",
-      winnerUserId: { not: null },
-    },
-    select: {
-      userAId: true,
-      userBId: true,
-      winnerUserId: true,
-    },
-  });
-
-  const statsByUserId = new Map();
-  function ensureRecord(userId) {
-    if (!statsByUserId.has(userId)) {
-      statsByUserId.set(userId, { wins: 0, losses: 0 });
-    }
-    return statsByUserId.get(userId);
-  }
-
-  for (const instance of completedInstances) {
-    const userA = ensureRecord(instance.userAId);
-    const userB = ensureRecord(instance.userBId);
-
-    if (instance.winnerUserId === instance.userAId) {
-      userA.wins += 1;
-      userB.losses += 1;
-    } else if (instance.winnerUserId === instance.userBId) {
-      userB.wins += 1;
-      userA.losses += 1;
-    }
-  }
-
-  const userIds = [...statsByUserId.keys()];
-  if (!userIds.includes(currentUserId)) {
-    return null;
-  }
-
-  const users = await prisma.user.findMany({
-    where: { id: { in: userIds } },
-    select: { id: true, displayName: true },
-  });
-  const userMap = new Map(users.map((user) => [user.id, user.displayName || "Anonymous"]));
-
-  const ranked = rankChallengeRecordEntries(
-    [...statsByUserId.entries()].map(([userId, record]) => ({
-      userId,
-      displayName: userMap.get(userId) || "Anonymous",
-      wins: record.wins,
-      losses: record.losses,
-    }))
-  );
-
-  const { current, nextBetter } = findCurrentAndNextBetter(ranked, currentUserId);
-  if (!current || current.completedCount < CHALLENGE_RECORD_MINIMUM_COMPLETED) {
-    return null;
-  }
-
-  return {
-    rank: current.rank,
-    winsNeededToAdvance: nextBetter
-      ? getChallengeWinsNeededToAdvance(
-          { wins: current.wins, losses: current.losses },
-          { wins: nextBetter.wins, losses: nextBetter.losses }
-        )
-      : null,
-  };
-}
-
 async function getRaceCandidate(currentUserId) {
   const completedParticipants = await prisma.raceParticipant.findMany({
     where: {
@@ -235,16 +165,14 @@ async function getRaceCandidate(currentUserId) {
 }
 
 async function getLeaderboardHighlights(currentUserId, timeZone) {
-  const [steps, challenges, races] = await Promise.all([
+  const [steps, races] = await Promise.all([
     getStepCandidates(currentUserId, timeZone),
-    getChallengeCandidate(currentUserId),
     getRaceCandidate(currentUserId),
   ]);
 
   return {
     cards: buildLeaderboardHighlightCards({
       steps,
-      challenges,
       races,
     }),
   };

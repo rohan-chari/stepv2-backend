@@ -4,7 +4,6 @@ const { recordStepSamples: defaultRecordStepSamples } = require("../commands/rec
 const { getStepsByDate, getStepsHistory } = require("../queries/getSteps");
 const { getStepCalendar: defaultGetStepCalendar } = require("../queries/getStepCalendar");
 const { User } = require("../models/user");
-const { ChallengeInstance } = require("../models/challengeInstance");
 const { buildRequireAuth } = require("../middleware/requireAuth");
 const { getMondayOfWeek, getTimeZoneParts } = require("../utils/week");
 const { calculateStreak } = require("../utils/streak");
@@ -121,27 +120,6 @@ function createStepsRouter(dependencies = {}) {
 
       const streak = calculateStreak(todayStr, dateMap, stepGoal);
 
-      // Challenge W/L record
-      const { prisma } = require("../db");
-      const completed = await prisma.challengeInstance.findMany({
-        where: {
-          status: "COMPLETED",
-          OR: [{ userAId: req.user.id }, { userBId: req.user.id }],
-          winnerUserId: { not: null },
-        },
-        select: { winnerUserId: true },
-      });
-
-      let wins = 0;
-      let losses = 0;
-      for (const inst of completed) {
-        if (inst.winnerUserId === req.user.id) {
-          wins++;
-        } else {
-          losses++;
-        }
-      }
-
       res.json({
         thisWeek,
         thisMonth,
@@ -149,8 +127,6 @@ function createStepsRouter(dependencies = {}) {
         allTime,
         streak,
         stepGoal,
-        wins,
-        losses,
       });
     } catch (error) {
       console.error("Stats error:", error);
