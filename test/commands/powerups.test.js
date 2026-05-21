@@ -11,32 +11,55 @@ function makeDeps() {
   const feedEvents = [];
   const events = [];
   let lastNextBoxAtSteps = null;
+  let participantNextBoxAtSteps = 5000;
+
+  const tx = {
+    async $queryRaw() { return []; },
+    racePowerup: {
+      async create({ data }) {
+        const p = { id: `pw-${powerups.length + 1}`, ...data };
+        powerups.push(p);
+        return p;
+      },
+      async count() { return 0; },
+    },
+    raceParticipant: {
+      async findUnique() {
+        return { nextBoxAtSteps: participantNextBoxAtSteps };
+      },
+      async update({ data }) {
+        if (data && typeof data.nextBoxAtSteps === "number") {
+          participantNextBoxAtSteps = data.nextBoxAtSteps;
+          lastNextBoxAtSteps = data.nextBoxAtSteps;
+        }
+        return { id: "rp-1", ...data };
+      },
+    },
+    racePowerupEvent: {
+      async create({ data }) {
+        feedEvents.push(data);
+        return { id: `fe-${feedEvents.length}`, ...data };
+      },
+    },
+  };
+
+  const prisma = {
+    async $transaction(cb) { return cb(tx); },
+    async $queryRaw() { return []; },
+  };
+
+  function setInitialNextBoxAtSteps(value) {
+    participantNextBoxAtSteps = value;
+  }
 
   return {
     powerups,
     feedEvents,
     events,
+    setInitialNextBoxAtSteps,
     get lastNextBoxAtSteps() { return lastNextBoxAtSteps; },
     deps: {
-      RacePowerup: {
-        async create(data) {
-          const p = { id: `pw-${powerups.length + 1}`, ...data };
-          powerups.push(p);
-          return p;
-        },
-        async countOccupiedSlots() { return 0; },
-      },
-      RaceParticipant: {
-        async updateNextBoxAtSteps(id, value) {
-          lastNextBoxAtSteps = value;
-        },
-      },
-      RacePowerupEvent: {
-        async create(data) {
-          feedEvents.push(data);
-          return { id: "fe-1", ...data };
-        },
-      },
+      prisma,
       eventBus: {
         emit(event, payload) {
           events.push({ event, payload });
@@ -77,8 +100,8 @@ test("mystery box is created with null type and rarity", async () => {
   assert.equal(results.length, 1);
   assert.ok(results[0].mysteryBox);
   assert.equal(ctx.powerups[0].status, "MYSTERY_BOX");
-  assert.equal(ctx.powerups[0].type, undefined);
-  assert.equal(ctx.powerups[0].rarity, undefined);
+  assert.equal(ctx.powerups[0].type, null);
+  assert.equal(ctx.powerups[0].rarity, null);
 });
 
 test("multiple mystery boxes created crossing multiple thresholds", async () => {
