@@ -8,38 +8,76 @@ function makeDeps(overrides = {}) {
   const feedEvents = [];
   const powerups = [];
   let lastNextBoxAtSteps = null;
+  let participantNextBoxAtSteps =
+    overrides.initialNextBoxAtSteps != null
+      ? overrides.initialNextBoxAtSteps
+      : 5000;
   let occupiedSlots = overrides.occupiedSlots || 0;
+  let queuedSlots = overrides.queuedSlots || 0;
+
+  const tx = {
+    async $queryRaw() {
+      return [];
+    },
+    racePowerup: {
+      async create({ data }) {
+        const p = { id: `pw-${powerups.length + 1}`, ...data };
+        powerups.push(p);
+        if (data.status === "MYSTERY_BOX" || data.status === "HELD") {
+          occupiedSlots++;
+        } else if (data.status === "QUEUED") {
+          queuedSlots++;
+        }
+        return p;
+      },
+      async count({ where }) {
+        if (where && where.status && where.status.in) {
+          return occupiedSlots;
+        }
+        if (where && where.status === "QUEUED") {
+          return queuedSlots;
+        }
+        return 0;
+      },
+    },
+    raceParticipant: {
+      async findUnique() {
+        return { nextBoxAtSteps: participantNextBoxAtSteps };
+      },
+      async update({ data }) {
+        if (data && typeof data.nextBoxAtSteps === "number") {
+          participantNextBoxAtSteps = data.nextBoxAtSteps;
+          lastNextBoxAtSteps = data.nextBoxAtSteps;
+        }
+        return { id: "rp-1", ...data };
+      },
+    },
+    racePowerupEvent: {
+      async create({ data }) {
+        feedEvents.push(data);
+        return { id: `fe-${feedEvents.length}`, ...data };
+      },
+    },
+  };
+
+  const prisma = {
+    async $transaction(cb) {
+      return cb(tx);
+    },
+    async $queryRaw() {
+      return [];
+    },
+  };
 
   return {
     events,
     feedEvents,
     powerups,
-    get lastNextBoxAtSteps() { return lastNextBoxAtSteps; },
+    get lastNextBoxAtSteps() {
+      return lastNextBoxAtSteps;
+    },
     deps: {
-      RacePowerup: {
-        async create(data) {
-          const p = { id: `pw-${powerups.length + 1}`, ...data };
-          powerups.push(p);
-          // MYSTERY_BOX occupies a slot, QUEUED does not
-          if (data.status === "MYSTERY_BOX") occupiedSlots++;
-          return p;
-        },
-        async countOccupiedSlots() {
-          return occupiedSlots;
-        },
-        ...overrides.RacePowerup,
-      },
-      RaceParticipant: {
-        async updateNextBoxAtSteps(id, value) {
-          lastNextBoxAtSteps = value;
-        },
-      },
-      RacePowerupEvent: {
-        async create(data) {
-          feedEvents.push(data);
-          return { id: "fe-1", ...data };
-        },
-      },
+      prisma,
       eventBus: {
         emit(event, payload) {
           events.push({ event, payload });
@@ -54,7 +92,7 @@ function makeDeps(overrides = {}) {
 // ---------------------------------------------------------------------------
 
 test("box fills slot when slots are available", async () => {
-  const ctx = makeDeps({ occupiedSlots: 1 });
+  const ctx = makeDeps({ initialNextBoxAtSteps: 5000, occupiedSlots: 1 });
   const roll = buildRollPowerup(ctx.deps);
 
   const results = await roll({
@@ -74,7 +112,7 @@ test("box fills slot when slots are available", async () => {
 });
 
 test("box is queued when all slots are full", async () => {
-  const ctx = makeDeps({ occupiedSlots: 3 });
+  const ctx = makeDeps({ initialNextBoxAtSteps: 5000, occupiedSlots: 3 });
   const roll = buildRollPowerup(ctx.deps);
 
   const results = await roll({
@@ -94,7 +132,7 @@ test("box is queued when all slots are full", async () => {
 });
 
 test("threshold advances even when box is queued", async () => {
-  const ctx = makeDeps({ occupiedSlots: 3 });
+  const ctx = makeDeps({ initialNextBoxAtSteps: 5000, occupiedSlots: 3 });
   const roll = buildRollPowerup(ctx.deps);
 
   await roll({
@@ -111,9 +149,10 @@ test("threshold advances even when box is queued", async () => {
   assert.equal(ctx.lastNextBoxAtSteps, 10000);
 });
 
-test("multi-threshold crossing: some fill slots, rest queued", async () => {
-  // 1 slot open, crossing 3 thresholds → 1 fills slot, 2 queued
-  const ctx = makeDeps({ occupiedSlots: 2 });
+test("multi-threshold crossing: some fill slots, rest queued (with forfeit at MAX_QUEUED)", async () => {
+  // 1 slot open, crossing 3 thresholds → 1 fills slot, 1 queued, 1 forfeited
+  // (MAX_QUEUED_BOXES=1, so once queued is full, additional boxes forfeit).
+  const ctx = makeDeps({ initialNextBoxAtSteps: 5000, occupiedSlots: 2 });
   const roll = buildRollPowerup(ctx.deps);
 
   const results = await roll({
@@ -133,17 +172,18 @@ test("multi-threshold crossing: some fill slots, rest queued", async () => {
   assert.equal(results[0].queued, false);
   assert.equal(ctx.powerups[0].status, "MYSTERY_BOX");
 
-  // Remaining boxes are queued (slots now full)
+  // Second box is queued (slots now full, queue empty)
   assert.equal(results[1].queued, true);
   assert.equal(ctx.powerups[1].status, "QUEUED");
-  assert.equal(results[2].queued, true);
-  assert.equal(ctx.powerups[2].status, "QUEUED");
+
+  // Third box is forfeited (slots full AND queue full at MAX_QUEUED_BOXES=1)
+  assert.equal(results[2].forfeited, true);
 
   assert.equal(ctx.lastNextBoxAtSteps, 20000);
 });
 
 test("queued box emits POWERUP_EARNED event and feed entry", async () => {
-  const ctx = makeDeps({ occupiedSlots: 3 });
+  const ctx = makeDeps({ initialNextBoxAtSteps: 5000, occupiedSlots: 3 });
   const roll = buildRollPowerup(ctx.deps);
 
   await roll({
@@ -164,7 +204,7 @@ test("queued box emits POWERUP_EARNED event and feed entry", async () => {
 });
 
 test("all slots open — all boxes fill slots", async () => {
-  const ctx = makeDeps({ occupiedSlots: 0 });
+  const ctx = makeDeps({ initialNextBoxAtSteps: 5000, occupiedSlots: 0 });
   const roll = buildRollPowerup(ctx.deps);
 
   const results = await roll({

@@ -1,6 +1,5 @@
-const { RacePowerup } = require("../models/racePowerup");
-const { RaceParticipant } = require("../models/raceParticipant");
-const { RacePowerupEvent } = require("../models/racePowerupEvent");
+const { Prisma } = require("@prisma/client");
+const { prisma: defaultPrisma } = require("../db");
 const { eventBus } = require("../events/eventBus");
 
 const DEFAULT_POWERUP_SLOTS = 3;
@@ -29,72 +28,130 @@ const POWERUP_NAMES = {
 };
 
 function buildRollPowerup(dependencies = {}) {
-  const powerupModel = dependencies.RacePowerup || RacePowerup;
-  const participantModel = dependencies.RaceParticipant || RaceParticipant;
-  const eventModel = dependencies.RacePowerupEvent || RacePowerupEvent;
   const events = dependencies.eventBus || eventBus;
+  const db = dependencies.prisma || defaultPrisma;
 
-  return async function rollPowerup({ raceId, participantId, userId, currentSteps, effectiveSteps, nextBoxAtSteps, powerupStepInterval, displayName, powerupSlots }) {
+  return async function rollPowerup({
+    raceId,
+    participantId,
+    userId,
+    currentSteps,
+    effectiveSteps,
+    nextBoxAtSteps, // kept for signature compatibility; re-read inside lock
+    powerupStepInterval,
+    displayName,
+    powerupSlots,
+  }) {
     const maxSlots = powerupSlots || DEFAULT_POWERUP_SLOTS;
     const stepsForThreshold = effectiveSteps != null ? effectiveSteps : currentSteps;
     const results = [];
-    let currentThreshold = nextBoxAtSteps;
+    const pendingEvents = [];
 
-    while (stepsForThreshold >= currentThreshold && currentThreshold > 0) {
-      const occupied = await powerupModel.countOccupiedSlots(participantId);
-      const queued = occupied >= maxSlots;
-      const queuedCount = queued
-        ? await powerupModel.countQueuedByParticipant(participantId)
-        : 0;
-      const forfeit = queued && queuedCount >= MAX_QUEUED_BOXES;
+    await db.$transaction(async (tx) => {
+      // Serialize concurrent rolls for the same participant. Released at COMMIT/ROLLBACK.
+      // Doesn't block other participants or other writers of race_participants.
+      await tx.$queryRaw(
+        Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${participantId})::bigint)`
+      );
 
-      if (forfeit) {
-        await eventModel.create({
-          raceId,
-          actorUserId: userId,
-          eventType: "POWERUP_FORFEITED",
-          powerupType: "MYSTERY_BOX",
-          description: `${displayName || "A runner"} forfeited a mystery box — open your queued box first!`,
+      // Re-read threshold inside the lock — caller's value is stale under contention.
+      const fresh = await tx.raceParticipant.findUnique({
+        where: { id: participantId },
+        select: { nextBoxAtSteps: true },
+      });
+      if (!fresh) return;
+
+      let currentThreshold = fresh.nextBoxAtSteps;
+
+      while (stepsForThreshold >= currentThreshold && currentThreshold > 0) {
+        const occupied = await tx.racePowerup.count({
+          where: { participantId, status: { in: ["HELD", "MYSTERY_BOX"] } },
         });
+        const queued = occupied >= maxSlots;
+        const queuedCount = queued
+          ? await tx.racePowerup.count({
+              where: { participantId, status: "QUEUED" },
+            })
+          : 0;
+        const forfeit = queued && queuedCount >= MAX_QUEUED_BOXES;
 
-        results.push({
-          forfeited: true,
-          threshold: currentThreshold,
-        });
-      } else {
-        const powerup = await powerupModel.create({
-          raceId,
-          participantId,
-          userId,
-          status: queued ? "QUEUED" : "MYSTERY_BOX",
-          earnedAtSteps: currentThreshold,
-        });
+        if (forfeit) {
+          await tx.racePowerupEvent.create({
+            data: {
+              raceId,
+              actorUserId: userId,
+              eventType: "POWERUP_FORFEITED",
+              powerupType: "MYSTERY_BOX",
+              description: `${displayName || "A runner"} forfeited a mystery box — open your queued box first!`,
+            },
+          });
 
-        await eventModel.create({
-          raceId,
-          actorUserId: userId,
-          eventType: "POWERUP_EARNED",
-          powerupType: "MYSTERY_BOX",
-          description: queued
-            ? `${displayName || "A runner"} earned a mystery box! (queued — inventory full)`
-            : `${displayName || "A runner"} earned a mystery box!`,
-        });
+          results.push({
+            forfeited: true,
+            threshold: currentThreshold,
+          });
+        } else {
+          let powerup;
+          try {
+            powerup = await tx.racePowerup.create({
+              data: {
+                raceId,
+                participantId,
+                userId,
+                type: null,
+                rarity: null,
+                status: queued ? "QUEUED" : "MYSTERY_BOX",
+                earnedAtSteps: currentThreshold,
+              },
+            });
+          } catch (e) {
+            // Belt-and-suspenders: if a pre-existing orphan row exists for
+            // (participantId, earnedAtSteps), advance the threshold instead of
+            // wedging the loop. With the advisory lock above this shouldn't
+            // happen for new contention, but guards against legacy bad rows.
+            if (e && e.code === "P2002") {
+              currentThreshold += powerupStepInterval;
+              await tx.raceParticipant.update({
+                where: { id: participantId },
+                data: { nextBoxAtSteps: currentThreshold },
+              });
+              continue;
+            }
+            throw e;
+          }
 
-        events.emit("POWERUP_EARNED", {
-          raceId,
-          userId,
-          powerupId: powerup.id,
-        });
+          await tx.racePowerupEvent.create({
+            data: {
+              raceId,
+              actorUserId: userId,
+              eventType: "POWERUP_EARNED",
+              powerupType: "MYSTERY_BOX",
+              description: queued
+                ? `${displayName || "A runner"} earned a mystery box! (queued — inventory full)`
+                : `${displayName || "A runner"} earned a mystery box!`,
+            },
+          });
 
-        results.push({
-          mysteryBox: { id: powerup.id },
-          threshold: currentThreshold,
-          queued,
+          // Defer emit until after commit so subscribers see settled DB state.
+          pendingEvents.push({ raceId, userId, powerupId: powerup.id });
+
+          results.push({
+            mysteryBox: { id: powerup.id },
+            threshold: currentThreshold,
+            queued,
+          });
+        }
+
+        currentThreshold += powerupStepInterval;
+        await tx.raceParticipant.update({
+          where: { id: participantId },
+          data: { nextBoxAtSteps: currentThreshold },
         });
       }
+    });
 
-      currentThreshold += powerupStepInterval;
-      await participantModel.updateNextBoxAtSteps(participantId, currentThreshold);
+    for (const payload of pendingEvents) {
+      events.emit("POWERUP_EARNED", payload);
     }
 
     return results;
