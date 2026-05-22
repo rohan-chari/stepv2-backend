@@ -50,7 +50,7 @@ git pull origin 1.1.5
 npm install
 npx prisma migrate deploy
 npx prisma generate
-pm2 restart step-tracker-staging
+pm2 restart steps-tracker-staging
 ```
 
 Confirm it came up:
