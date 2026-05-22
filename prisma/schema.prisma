@@ -409,7 +409,8 @@ enum RaceBuyInStatus {
 
 model Race {
   id              String     @id @default(uuid())
-  creatorId       String     @map("creator_id")
+  creatorId       String?    @map("creator_id")
+  seedId          String?    @map("seed_id")
   name            String
   targetSteps     Int        @map("target_steps")
   status          RaceStatus @default(PENDING)
@@ -428,7 +429,8 @@ model Race {
   createdAt            DateTime   @default(now()) @map("created_at")
   updatedAt            DateTime   @updatedAt @map("updated_at")
 
-  creator      User              @relation("raceCreator", fields: [creatorId], references: [id])
+  creator      User?             @relation("raceCreator", fields: [creatorId], references: [id])
+  seed         RaceSeed?         @relation(fields: [seedId], references: [id])
   winner       User?             @relation("raceWinner", fields: [winnerUserId], references: [id])
   participants RaceParticipant[]
   powerups     RacePowerup[]
@@ -440,7 +442,30 @@ model Race {
   @@index([status])
   @@index([winnerUserId])
   @@index([isPublic, status])
+  @@index([seedId, status])
   @@map("races")
+}
+
+enum RaceSeedCadence {
+  DAILY   @map("daily")
+  WEEKLY  @map("weekly")
+}
+
+model RaceSeed {
+  id              String          @id
+  kind            String          @unique
+  name            String
+  targetSteps     Int             @map("target_steps")
+  durationHours   Int             @map("duration_hours")
+  cadence         RaceSeedCadence
+  maxParticipants Int             @default(100) @map("max_participants")
+  active          Boolean         @default(true)
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+
+  races Race[]
+
+  @@map("race_seeds")
 }
 
 model RaceParticipant {

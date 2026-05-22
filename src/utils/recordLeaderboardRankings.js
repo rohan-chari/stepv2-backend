@@ -140,7 +140,7 @@ function buildChallengeRecordLeaderboard(entries, currentUserId, currentUserDisp
 
   const ranked = rankChallengeRecordEntries(entries);
 
-  const top10 = ranked.slice(0, 10).map(({ rank, userId, displayName, wins, losses, completedCount, winPercentage }) => ({
+  const top100 = ranked.slice(0, 100).map(({ rank, userId, displayName, wins, losses, completedCount, winPercentage }) => ({
     rank,
     userId,
     displayName,
@@ -153,7 +153,7 @@ function buildChallengeRecordLeaderboard(entries, currentUserId, currentUserDisp
   const rankedCurrentUser = ranked.find((entry) => entry.userId === currentUserId);
   if (rankedCurrentUser) {
     return {
-      top10,
+      top100,
       currentUser: {
         rank: rankedCurrentUser.rank,
         displayName: rankedCurrentUser.displayName,
@@ -161,14 +161,14 @@ function buildChallengeRecordLeaderboard(entries, currentUserId, currentUserDisp
         losses: rankedCurrentUser.losses,
         completedCount: rankedCurrentUser.completedCount,
         winPercentage: rankedCurrentUser.winPercentage,
-        inTop10: top10.some((entry) => entry.userId === currentUserId),
+        inTop100: top100.some((entry) => entry.userId === currentUserId),
         qualified: true,
       },
     };
   }
 
   return {
-    top10,
+    top100,
     currentUser: {
       rank: null,
       displayName: currentUserEntry.displayName,
@@ -176,7 +176,7 @@ function buildChallengeRecordLeaderboard(entries, currentUserId, currentUserDisp
       losses: currentUserEntry.losses,
       completedCount: currentUserEntry.completedCount,
       winPercentage: currentUserEntry.winPercentage,
-      inTop10: false,
+      inTop100: false,
       qualified: false,
     },
   };
@@ -195,7 +195,7 @@ function buildRaceRecordLeaderboard(entries, currentUserId, currentUserDisplayNa
     };
 
   const ranked = rankRaceRecordEntries(entries);
-  const top10 = ranked.slice(0, 10).map(({ rank, userId, displayName, firsts, seconds, thirds }) => ({
+  const top100 = ranked.slice(0, 100).map(({ rank, userId, displayName, firsts, seconds, thirds }) => ({
     rank,
     userId,
     displayName,
@@ -207,27 +207,27 @@ function buildRaceRecordLeaderboard(entries, currentUserId, currentUserDisplayNa
   const rankedCurrentUser = ranked.find((entry) => entry.userId === currentUserId);
   if (rankedCurrentUser) {
     return {
-      top10,
+      top100,
       currentUser: {
         rank: rankedCurrentUser.rank,
         displayName: rankedCurrentUser.displayName,
         firsts: rankedCurrentUser.firsts,
         seconds: rankedCurrentUser.seconds,
         thirds: rankedCurrentUser.thirds,
-        inTop10: top10.some((entry) => entry.userId === currentUserId),
+        inTop100: top100.some((entry) => entry.userId === currentUserId),
       },
     };
   }
 
   return {
-    top10,
+    top100,
     currentUser: {
       rank: null,
       displayName: currentUserEntry.displayName,
       firsts: currentUserEntry.firsts,
       seconds: currentUserEntry.seconds,
       thirds: currentUserEntry.thirds,
-      inTop10: false,
+      inTop100: false,
     },
   };
 }

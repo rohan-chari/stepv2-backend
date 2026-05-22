@@ -183,7 +183,7 @@ describe("leaderboard", () => {
   // === BASIC LEADERBOARD ===
 
   describe("basic ranking", () => {
-    it("returns top 10 sorted by steps descending with correct ranks", async () => {
+    it("returns top 100 sorted by steps descending with correct ranks", async () => {
       const users = [];
       for (let i = 1; i <= 12; i++) {
         const u = await createUser(`User${String(i).padStart(2, "0")}Leaderboard`);
@@ -197,23 +197,24 @@ describe("leaderboard", () => {
       assert.equal(res.status, 200);
 
       const body = await res.json();
-      assert.equal(body.top10.length, 10);
+      // Under-cap: only 12 users exist, all should be returned.
+      assert.equal(body.top100.length, 12);
 
       // Rank 1 should be user with most steps (user 12 = 12000 steps)
-      assert.equal(body.top10[0].rank, 1);
-      assert.equal(body.top10[0].totalSteps, 12000);
+      assert.equal(body.top100[0].rank, 1);
+      assert.equal(body.top100[0].totalSteps, 12000);
 
-      // Rank 10 should be user with 3000 steps (user 3)
-      assert.equal(body.top10[9].rank, 10);
-      assert.equal(body.top10[9].totalSteps, 3000);
+      // Rank 12 (last) should be user 1 with 1000 steps
+      assert.equal(body.top100[11].rank, 12);
+      assert.equal(body.top100[11].totalSteps, 1000);
 
       // Should be in descending order
-      for (let i = 1; i < body.top10.length; i++) {
-        assert.ok(body.top10[i - 1].totalSteps >= body.top10[i].totalSteps);
+      for (let i = 1; i < body.top100.length; i++) {
+        assert.ok(body.top100[i - 1].totalSteps >= body.top100[i].totalSteps);
       }
     });
 
-    it("current user in top 10 has inTop10: true", async () => {
+    it("current user in top 100 has inTop100: true", async () => {
       const alice = await createUser("AliceWalker");
       await recordSteps(alice.token, 9999, todayStr());
 
@@ -222,17 +223,18 @@ describe("leaderboard", () => {
       });
       const body = await res.json();
 
-      assert.equal(body.currentUser.inTop10, true);
+      assert.equal(body.currentUser.inTop100, true);
       assert.equal(body.currentUser.totalSteps, 9999);
       assert.equal(body.currentUser.rank, 1);
     });
 
-    it("current user outside top 10 has inTop10: false with correct rank", async () => {
-      // Create 11 users with more steps
+    it("current user outside top 100 has inTop100: false with correct rank", async () => {
+      // Create 101 users above lastPlace so lastPlace is rank 102 (outside top 100).
       const users = [];
-      for (let i = 1; i <= 11; i++) {
-        const u = await createUser(`Ranker${String(i).padStart(2, "0")}Boards`);
-        await recordSteps(u.token, (12 - i) * 1000, todayStr());
+      for (let i = 1; i <= 101; i++) {
+        const u = await createUser(`Ranker${String(i).padStart(3, "0")}Boards`);
+        // Distinct step counts descending; lastPlace gets even fewer.
+        await recordSteps(u.token, 200 + i, todayStr());
         users.push(u);
       }
 
@@ -245,8 +247,9 @@ describe("leaderboard", () => {
       });
       const body = await res.json();
 
-      assert.equal(body.currentUser.inTop10, false);
-      assert.equal(body.currentUser.rank, 12);
+      assert.equal(body.top100.length, 100);
+      assert.equal(body.currentUser.inTop100, false);
+      assert.equal(body.currentUser.rank, 102);
       assert.equal(body.currentUser.totalSteps, 100);
     });
 
@@ -275,7 +278,7 @@ describe("leaderboard", () => {
       });
       const body = await res.json();
 
-      const noNameEntry = body.top10.find((e) => e.userId === noName.userId);
+      const noNameEntry = body.top100.find((e) => e.userId === noName.userId);
       assert.equal(noNameEntry.displayName, "Anonymous");
     });
 
@@ -529,12 +532,12 @@ describe("leaderboard", () => {
       const body = await res.json();
 
       // Alice and Bob should share rank 1
-      const aliceEntry = body.top10.find((e) => e.userId === alice.userId);
-      const bobEntry = body.top10.find((e) => e.userId === bob.userId);
+      const aliceEntry = body.top100.find((e) => e.userId === alice.userId);
+      const bobEntry = body.top100.find((e) => e.userId === bob.userId);
       assert.equal(aliceEntry.rank, bobEntry.rank);
 
       // Charlie should be rank 3 (not 2, since two people share rank 1)
-      const charlieEntry = body.top10.find((e) => e.userId === charlie.userId);
+      const charlieEntry = body.top100.find((e) => e.userId === charlie.userId);
       assert.equal(charlieEntry.rank, 3);
     });
 
@@ -560,9 +563,9 @@ describe("leaderboard", () => {
       });
       const body = await res.json();
 
-      assert.equal(body.top10.length, 1);
-      assert.equal(body.top10[0].rank, 1);
-      assert.equal(body.currentUser.inTop10, true);
+      assert.equal(body.top100.length, 1);
+      assert.equal(body.top100[0].rank, 1);
+      assert.equal(body.currentUser.inTop100, true);
       assert.equal(body.currentUser.rank, 1);
     });
 
@@ -575,7 +578,7 @@ describe("leaderboard", () => {
       assert.equal(res.status, 200);
 
       const body = await res.json();
-      assert.equal(body.top10.length, 0);
+      assert.equal(body.top100.length, 0);
       assert.equal(body.currentUser.totalSteps, 0);
     });
 
@@ -635,9 +638,9 @@ describe("leaderboard", () => {
       assert.equal(res.status, 200);
 
       const body = await res.json();
-      assert.equal(body.top10.length, 2);
+      assert.equal(body.top100.length, 2);
       assert.deepEqual(
-        body.top10.map((entry) => ({
+        body.top100.map((entry) => ({
           displayName: entry.displayName,
           rank: entry.rank,
           wins: entry.wins,
@@ -648,10 +651,10 @@ describe("leaderboard", () => {
           { displayName: "BlazeRun", rank: 2, wins: 4, losses: 1 },
         ]
       );
-      assert.equal(body.top10.some((entry) => entry.displayName === "CedarJog"), false);
+      assert.equal(body.top100.some((entry) => entry.displayName === "CedarJog"), false);
       assert.equal(body.currentUser.displayName, "AceWinner");
       assert.equal(body.currentUser.rank, 1);
-      assert.equal(body.currentUser.inTop10, true);
+      assert.equal(body.currentUser.inTop100, true);
       assert.equal(body.currentUser.qualified, true);
     });
 
@@ -681,7 +684,7 @@ describe("leaderboard", () => {
       assert.equal(res.status, 200);
 
       const body = await res.json();
-      assert.equal(body.top10.some((entry) => entry.displayName === "CedarJog"), false);
+      assert.equal(body.top100.some((entry) => entry.displayName === "CedarJog"), false);
       assert.deepEqual(body.currentUser, {
         rank: null,
         displayName: "CedarJog",
@@ -689,7 +692,7 @@ describe("leaderboard", () => {
         losses: 0,
         completedCount: 4,
         winPercentage: 1,
-        inTop10: false,
+        inTop100: false,
         qualified: false,
       });
     });
@@ -729,7 +732,7 @@ describe("leaderboard", () => {
 
       const body = await res.json();
       assert.deepEqual(
-        body.top10.map((entry) => ({
+        body.top100.map((entry) => ({
           displayName: entry.displayName,
           rank: entry.rank,
           wins: entry.wins,
@@ -798,7 +801,7 @@ describe("leaderboard", () => {
 
       const body = await res.json();
       assert.deepEqual(
-        body.top10.map((entry) => ({
+        body.top100.map((entry) => ({
           displayName: entry.displayName,
           rank: entry.rank,
           firsts: entry.firsts,
@@ -814,7 +817,7 @@ describe("leaderboard", () => {
       );
       assert.equal(body.currentUser.displayName, "AtlasRun");
       assert.equal(body.currentUser.rank, 1);
-      assert.equal(body.currentUser.inTop10, true);
+      assert.equal(body.currentUser.inTop100, true);
     });
 
     it("excludes completed-race participants without a top-3 finish", async () => {
@@ -841,7 +844,7 @@ describe("leaderboard", () => {
 
       const body = await res.json();
       assert.deepEqual(
-        body.top10.map((entry) => ({
+        body.top100.map((entry) => ({
           displayName: entry.displayName,
           rank: entry.rank,
           firsts: entry.firsts,
@@ -860,7 +863,7 @@ describe("leaderboard", () => {
         firsts: 0,
         seconds: 0,
         thirds: 0,
-        inTop10: false,
+        inTop100: false,
       });
     });
 
@@ -938,7 +941,7 @@ describe("leaderboard", () => {
 
       const body = await res.json();
       assert.deepEqual(
-        body.top10.map((entry) => ({
+        body.top100.map((entry) => ({
           displayName: entry.displayName,
           rank: entry.rank,
           firsts: entry.firsts,

@@ -11,6 +11,7 @@ const { createLeaderboardRouter } = require("./routes/leaderboard");
 const { createRacesRouter } = require("./routes/races");
 const { createShopRouter } = require("./routes/shop");
 const { createDailyRewardRouter } = require("./routes/dailyReward");
+const { createHomeRouter } = require("./routes/home");
 const { extractTimezone } = require("./middleware/extractTimezone");
 
 function createApp(dependencies = {}) {
@@ -29,6 +30,7 @@ function createApp(dependencies = {}) {
   app.use("/races", createRacesRouter(dependencies));
   app.use("/shop", createShopRouter(dependencies));
   app.use("/daily-reward", createDailyRewardRouter(dependencies));
+  app.use("/home", createHomeRouter(dependencies));
 
   app.get("/health", (req, res) => {
     res.json({ status: "ok" });
