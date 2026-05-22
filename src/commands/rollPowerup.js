@@ -50,7 +50,9 @@ function buildRollPowerup(dependencies = {}) {
     await db.$transaction(async (tx) => {
       // Serialize concurrent rolls for the same participant. Released at COMMIT/ROLLBACK.
       // Doesn't block other participants or other writers of race_participants.
-      await tx.$queryRaw(
+      // Use $executeRaw — pg_advisory_xact_lock returns Postgres `void` and the
+      // pg driver adapter can't deserialize that via $queryRaw (P2010).
+      await tx.$executeRaw(
         Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${participantId})::bigint)`
       );
 

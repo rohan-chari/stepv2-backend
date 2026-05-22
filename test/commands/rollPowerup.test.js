@@ -16,7 +16,7 @@ function makeDeps(overrides = {}) {
   const queuedSlots = overrides.queuedSlots || 0;
 
   const tx = {
-    async $queryRaw() {
+    async $executeRaw() {
       return [];
     },
     racePowerup: {
@@ -59,7 +59,7 @@ function makeDeps(overrides = {}) {
     async $transaction(cb) {
       return cb(tx);
     },
-    async $queryRaw() {
+    async $executeRaw() {
       return [];
     },
   };

@@ -14,7 +14,7 @@ function makeDeps() {
   let participantNextBoxAtSteps = 5000;
 
   const tx = {
-    async $queryRaw() { return []; },
+    async $executeRaw() { return []; },
     racePowerup: {
       async create({ data }) {
         const p = { id: `pw-${powerups.length + 1}`, ...data };
@@ -45,7 +45,7 @@ function makeDeps() {
 
   const prisma = {
     async $transaction(cb) { return cb(tx); },
-    async $queryRaw() { return []; },
+    async $executeRaw() { return []; },
   };
 
   function setInitialNextBoxAtSteps(value) {
