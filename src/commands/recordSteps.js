@@ -31,7 +31,7 @@ function buildRecordSteps(dependencies = {}) {
       : defaultSyncRacePowerupState;
   const now = dependencies.now || (() => new Date());
 
-  return async function recordSteps({ userId, steps, date, timeZone }) {
+  return async function recordSteps({ userId, steps, date, timeZone, skipRaceResolution = false }) {
     const existing = await stepsModel.findByUserIdAndDate(userId, date);
 
     let record;
@@ -78,10 +78,22 @@ function buildRecordSteps(dependencies = {}) {
       console.error("Failed to award daily goal coins:", e);
     }
 
-    const raceResults = await resolveRaceState({ userId, timeZone });
-    if (Array.isArray(raceResults)) {
-      for (const result of raceResults) {
-        await syncRacePowerupState({ raceId: result.raceId, userId });
+    // When the client is going to immediately POST /steps/samples after this
+    // call, race resolution will run again there with fresher sample data —
+    // doing it here is duplicate work. The client opts in via
+    // skipRaceResolution. Old clients keep the original behavior.
+    if (!skipRaceResolution) {
+      const raceResults = await resolveRaceState({ userId, timeZone });
+      if (Array.isArray(raceResults)) {
+        await Promise.all(
+          raceResults.map((result) =>
+            syncRacePowerupState({
+              raceId: result.raceId,
+              userId,
+              race: result.race,
+            })
+          )
+        );
       }
     }
 

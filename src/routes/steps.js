@@ -22,10 +22,10 @@ function createStepsRouter(dependencies = {}) {
   router.use(requireAuth);
 
   // POST /steps
-  // Body: { steps, date }
+  // Body: { steps, date, skipRaceResolution? }
   router.post("/", async (req, res) => {
     try {
-      const { steps, date } = req.body;
+      const { steps, date, skipRaceResolution } = req.body;
 
       if (steps == null || !date) {
         return res.status(400).json({ error: "steps and date are required" });
@@ -36,6 +36,7 @@ function createStepsRouter(dependencies = {}) {
         steps,
         date,
         timeZone: req.timeZone,
+        skipRaceResolution: skipRaceResolution === true,
       });
       res.json({ record });
     } catch (error) {

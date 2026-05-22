@@ -100,9 +100,15 @@ function buildRecordStepSamples(dependencies = {}) {
     await stepSampleModel.upsertBatch(userId, cleaned);
     const raceResults = await resolveRaceState({ userId, timeZone });
     if (Array.isArray(raceResults)) {
-      for (const result of raceResults) {
-        await syncRacePowerupState({ raceId: result.raceId, userId });
-      }
+      await Promise.all(
+        raceResults.map((result) =>
+          syncRacePowerupState({
+            raceId: result.raceId,
+            userId,
+            race: result.race,
+          })
+        )
+      );
     }
 
     return { count: cleaned.length };
