@@ -61,13 +61,15 @@ test("returns EMPTY when nothing matches any state", async () => {
 });
 
 test("returns PENDING_INVITE when user has a pending invite", async () => {
+  const expiresAt = new Date("2026-05-21T20:00:00Z");
   const prisma = makePrisma({
     invites: [
       {
         id: "rp-1",
         userId: ME_ID,
         status: "INVITED",
-        createdAt: new Date("2026-05-21T16:00:00Z"),
+        joinedAt: new Date("2026-05-21T16:00:00Z"),
+        inviteExpiresAt: expiresAt,
         race: {
           id: "race-pending",
           name: "Friend invite",
@@ -88,6 +90,7 @@ test("returns PENDING_INVITE when user has a pending invite", async () => {
   assert.equal(res.data.inviter.displayName, "Rohit");
   assert.equal(res.data.durationHours, 72);
   assert.equal(res.data.participantCount, 2);
+  assert.equal(res.data.expiresAt.toISOString(), expiresAt.toISOString());
 });
 
 test("returns ACTIVE_RACE when user is in an active race", async () => {

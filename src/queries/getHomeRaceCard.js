@@ -40,12 +40,16 @@ async function getAcceptedFriendIds(prisma, userId) {
   return [...ids];
 }
 
-async function checkPendingInvite(prisma, userId) {
+async function checkPendingInvite(prisma, userId, now) {
   const invites = await prisma.raceParticipant.findMany({
     where: {
       userId,
       status: "INVITED",
       race: { status: "PENDING" },
+      OR: [
+        { inviteExpiresAt: null },
+        { inviteExpiresAt: { gt: now } },
+      ],
     },
     include: {
       race: {
@@ -57,13 +61,12 @@ async function checkPendingInvite(prisma, userId) {
         },
       },
     },
-    orderBy: { createdAt: "asc" },
+    // Nulls last so explicitly-expiring invites surface before legacy ones.
+    orderBy: [{ inviteExpiresAt: "asc" }, { joinedAt: "asc" }],
   });
 
   if (invites.length === 0) return null;
 
-  // Soonest-expiring first. There's no expiry column today, so order by oldest
-  // (the longer it's been pending, the closer to "stale"). Future: add expiresAt.
   const primary = invites[0];
   const race = primary.race;
 
@@ -77,7 +80,7 @@ async function checkPendingInvite(prisma, userId) {
       durationHours: race.maxDurationDays * 24,
       participantCount: race.participants.length,
       inviter: serializeUser(race.creator),
-      expiresAt: null, // wired once schema supports invite expiry
+      expiresAt: primary.inviteExpiresAt,
     },
   };
 }
@@ -288,7 +291,7 @@ function buildGetHomeRaceCard(dependencies = {}) {
   return async function getHomeRaceCard({ userId }) {
     const now = nowFn();
 
-    const pending = await checkPendingInvite(prisma, userId);
+    const pending = await checkPendingInvite(prisma, userId, now);
     if (pending) return pending;
 
     const active = await checkActiveRace(prisma, userId);

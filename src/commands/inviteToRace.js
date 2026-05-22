@@ -3,6 +3,8 @@ const { RaceParticipant } = require("../models/raceParticipant");
 const { Friendship } = require("../models/friendship");
 const { eventBus } = require("../events/eventBus");
 
+const INVITE_TTL_HOURS = 24;
+
 class RaceInviteError extends Error {
   constructor(message, statusCode) {
     super(message);
@@ -58,10 +60,14 @@ function buildInviteToRace(dependencies = {}) {
       }
     }
 
+    const expiresAt = new Date(
+      Date.now() + INVITE_TTL_HOURS * 60 * 60 * 1000
+    );
     const records = inviteeIds.map((inviteeId) => ({
       raceId,
       userId: inviteeId,
       status: "INVITED",
+      inviteExpiresAt: expiresAt,
     }));
     await participantModel.createMany(records);
 

@@ -489,6 +489,7 @@ model RaceParticipant {
   lastReadRaceChatAt DateTime?        @map("last_read_race_chat_at")
   lastChatPushAt     DateTime?        @map("last_chat_push_at")
   chatMuted          Boolean          @default(false) @map("chat_muted")
+  inviteExpiresAt    DateTime?        @map("invite_expires_at")
 
   race          Race @relation(fields: [raceId], references: [id], onDelete: Cascade)
   user          User @relation(fields: [userId], references: [id])
@@ -498,6 +499,7 @@ model RaceParticipant {
   @@unique([raceId, userId])
   @@index([userId, status])
   @@index([raceId, status])
+  @@index([userId, status, inviteExpiresAt])
   @@map("race_participants")
 }
 
