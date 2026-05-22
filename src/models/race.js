@@ -121,15 +121,42 @@ const Race = {
   },
 
   async findActiveForUser(userId) {
+    // Lean fetch used only by resolveRaceState + syncRacePowerupState. These
+    // services only read race id/status/startedAt/targetSteps/powerupsEnabled/
+    // powerupStepInterval and participant id/userId/status/totalSteps/
+    // finishedAt/finishTotalSteps/bonusSteps/maxBonusSteps/nextBoxAtSteps/
+    // powerupSlots/placement + participant.user.displayName. Pulling the full
+    // deep participantInclude (equipped accessories, shop items, render
+    // metadata) was the dominant cost of POST /steps.
     return prisma.race.findMany({
       where: {
         status: "ACTIVE",
         participants: { some: { userId, status: "ACCEPTED" } },
       },
-      include: {
-        creator: { select: { id: true, displayName: true, profilePhotoUrl: true } },
-        winner: { select: { id: true, displayName: true, profilePhotoUrl: true } },
-        ...participantInclude,
+      select: {
+        id: true,
+        status: true,
+        startedAt: true,
+        targetSteps: true,
+        powerupsEnabled: true,
+        powerupStepInterval: true,
+        participants: {
+          select: {
+            id: true,
+            userId: true,
+            status: true,
+            totalSteps: true,
+            bonusSteps: true,
+            maxBonusSteps: true,
+            nextBoxAtSteps: true,
+            powerupSlots: true,
+            placement: true,
+            finishedAt: true,
+            finishTotalSteps: true,
+            user: { select: { displayName: true } },
+          },
+          orderBy: { joinedAt: "asc" },
+        },
       },
       orderBy: { updatedAt: "desc" },
     });

@@ -28,8 +28,13 @@ function buildSyncRacePowerupState(dependencies = {}) {
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
   const rollPowerup = dependencies.rollPowerup || defaultRollPowerup;
 
-  return async function syncRacePowerupState({ raceId, userId }) {
-    const race = await raceModel.findById(raceId);
+  return async function syncRacePowerupState({ raceId, userId, race: providedRace }) {
+    // Callers that already have a hydrated race (e.g. recordSteps after
+    // resolveRaceState) can pass it in to avoid a duplicate findById round
+    // trip. The lean Race.findActiveForUser shape happens to satisfy every
+    // field this function reads (id/status/powerupsEnabled/
+    // powerupStepInterval + participants.[fields]+user.displayName).
+    const race = providedRace || (await raceModel.findById(raceId));
     if (
       !race ||
       race.status !== "ACTIVE" ||

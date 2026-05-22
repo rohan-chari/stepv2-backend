@@ -468,85 +468,96 @@ function buildResolveRaceState(dependencies = {}) {
       races = await raceModel.findActiveForUser(userId);
     }
 
-    const results = [];
-
-    for (const race of races) {
+    async function processRace(race) {
       if (race.status !== "ACTIVE" || !race.startedAt) {
-        continue;
+        return null;
       }
 
       const acceptedParticipants = race.participants.filter(
         (p) => p.status === "ACCEPTED"
       );
       const currentTime = now();
-      const stepTotals = [];
-      const newFinishers = [];
+
+      // Per-participant compute+write phase. Each iteration reads only this
+      // participant's step_samples/race_active_effects and writes only this
+      // participant's row, so we can fan them out in parallel safely. Ordering
+      // dependents (trailMines, placement, completeRace) run after.
+      const stepTotals = new Array(acceptedParticipants.length);
+      const finisherCandidates = new Array(acceptedParticipants.length);
       let previouslyFinished = 0;
 
-      for (const participant of acceptedParticipants) {
-        if (participant.finishedAt) {
-          previouslyFinished += 1;
-          stepTotals.push({
-            participant,
-            totalSteps: participant.finishTotalSteps ?? participant.totalSteps,
-          });
-          continue;
-        }
+      await Promise.all(
+        acceptedParticipants.map(async (participant, index) => {
+          if (participant.finishedAt) {
+            // Read-only — increment outside Promise.all is unsafe, count later.
+            stepTotals[index] = {
+              participant,
+              totalSteps:
+                participant.finishTotalSteps ?? participant.totalSteps,
+            };
+            finisherCandidates[index] = null;
+            return;
+          }
 
-        const { baseAdjusted, hasSampleData, effectiveStart } =
-          await calculateBaseAdjusted({
-            participant,
-            raceStartedAt: race.startedAt,
-            timeZone,
-            stepsModel,
-            stepSampleModel,
-            now: currentTime,
-          });
+          const { baseAdjusted, hasSampleData, effectiveStart } =
+            await calculateBaseAdjusted({
+              participant,
+              raceStartedAt: race.startedAt,
+              timeZone,
+              stepsModel,
+              stepSampleModel,
+              now: currentTime,
+            });
 
-        const { total, legCramps, runnersHighs, wrongTurns, campfires } =
-          await calculateCurrentTotal({
-            raceId: race.id,
-            racePowerupsEnabled: race.powerupsEnabled,
-            participant,
-            baseAdjusted,
-            hasSampleData,
-            raceActiveEffectModel,
-            stepSampleModel,
-          });
+          const { total, legCramps, runnersHighs, wrongTurns, campfires } =
+            await calculateCurrentTotal({
+              raceId: race.id,
+              racePowerupsEnabled: race.powerupsEnabled,
+              participant,
+              baseAdjusted,
+              hasSampleData,
+              raceActiveEffectModel,
+              stepSampleModel,
+            });
 
-        await participantModel.updateTotalSteps(participant.id, total);
-        stepTotals.push({ participant, totalSteps: total });
+          await participantModel.updateTotalSteps(participant.id, total);
+          stepTotals[index] = { participant, totalSteps: total };
 
-        if (total >= race.targetSteps) {
-          const snapshot = await determineFinishSnapshot({
-            participant,
-            currentTotal: total,
-            targetSteps: race.targetSteps,
-            effectiveStart,
-            effectGroups: { legCramps, runnersHighs, wrongTurns, campfires },
-            stepSampleModel,
-            powerupEventModel,
-            raceId: race.id,
-            now: currentTime,
-          });
+          if (total >= race.targetSteps) {
+            const snapshot = await determineFinishSnapshot({
+              participant,
+              currentTotal: total,
+              targetSteps: race.targetSteps,
+              effectiveStart,
+              effectGroups: { legCramps, runnersHighs, wrongTurns, campfires },
+              stepSampleModel,
+              powerupEventModel,
+              raceId: race.id,
+              now: currentTime,
+            });
 
-          const finishTotalSteps =
-            snapshot?.finishTotalSteps ?? total;
-          const finishedAt = snapshot?.finishedAt ?? currentTime;
+            const finishTotalSteps = snapshot?.finishTotalSteps ?? total;
+            const finishedAt = snapshot?.finishedAt ?? currentTime;
 
-          await participantModel.markFinished(
-            participant.id,
-            finishedAt,
-            finishTotalSteps
-          );
+            await participantModel.markFinished(
+              participant.id,
+              finishedAt,
+              finishTotalSteps
+            );
 
-          newFinishers.push({
-            participant,
-            totalSteps: finishTotalSteps,
-            finishedAt,
-          });
-        }
-      }
+            finisherCandidates[index] = {
+              participant,
+              totalSteps: finishTotalSteps,
+              finishedAt,
+            };
+          } else {
+            finisherCandidates[index] = null;
+          }
+        })
+      );
+
+      previouslyFinished = acceptedParticipants.filter((p) => p.finishedAt).length;
+      const newFinishers = finisherCandidates.filter(Boolean);
 
       if (race.powerupsEnabled) {
         await triggerTrailMines({
@@ -566,7 +577,10 @@ function buildResolveRaceState(dependencies = {}) {
 
       for (let i = 0; i < newFinishers.length; i++) {
         const placement = previouslyFinished + i + 1;
-        await participantModel.setPlacement(newFinishers[i].participant.id, placement);
+        await participantModel.setPlacement(
+          newFinishers[i].participant.id,
+          placement
+        );
       }
 
       const totalFinished = previouslyFinished + newFinishers.length;
@@ -589,14 +603,18 @@ function buildResolveRaceState(dependencies = {}) {
         });
       }
 
-      results.push({
+      return {
         raceId: race.id,
+        race, // expose so callers can hand it to syncRacePowerupState (avoids a duplicate findById)
         updatedParticipants: stepTotals.length,
         newFinishers: newFinishers.length,
-      });
+      };
     }
 
-    return results;
+    // Races are independent (no shared rows across race_participants), so we
+    // process them in parallel as well.
+    const processed = await Promise.all(races.map(processRace));
+    return processed.filter(Boolean);
   };
 }
 
