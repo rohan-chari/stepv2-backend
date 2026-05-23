@@ -52,8 +52,8 @@ function buildCreateRace(dependencies = {}) {
       throw new RaceCreationError("Duration must be between 1 and 30 days", 400);
     }
     if (powerupsEnabled) {
-      if (!powerupStepInterval || powerupStepInterval < 1000 || powerupStepInterval > 50000) {
-        throw new RaceCreationError("Powerup step interval must be between 1,000 and 50,000", 400);
+      if (!powerupStepInterval || powerupStepInterval < 2000 || powerupStepInterval > 50000) {
+        throw new RaceCreationError("Powerup step interval must be between 2,000 and 50,000", 400);
       }
     }
     if (!Number.isInteger(maxParticipants) || maxParticipants < 2 || maxParticipants > 100) {
