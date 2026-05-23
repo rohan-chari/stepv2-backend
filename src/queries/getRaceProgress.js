@@ -145,6 +145,37 @@ async function computeEffectModifiers(effects, rawTotal, userId, stepSampleModel
     }
   }
 
+  // Campfire Rest overlap with Runner's High:
+  //   * Freeze phase: steps stay frozen — strip the RH buff for the overlap so
+  //     RH cannot rescue frozen steps.
+  //   * Boost phase: take the larger of the two multipliers, not both. Campfire
+  //     contributes (multiplier - 1) and RH contributes 1; assuming campfire
+  //     multiplier >= 2 (current upgrade range is 2.25–3.0), the RH +1 is the
+  //     redundant one — strip it.
+  // Matches raceStateResolution.js:238's max-not-sum semantics.
+  for (const campfire of campfires) {
+    const cfStart = campfire.startsAt.getTime();
+    const cfFreezeMs = (campfire.metadata || {}).freezeMs || 0;
+    const cfFreezeEnd = cfStart + cfFreezeMs;
+    const cfBoostEnd = (campfire.expiresAt || new Date()).getTime();
+
+    for (const buff of runnersHighs) {
+      const buffStart = buff.startsAt.getTime();
+      const buffEnd = (buff.expiresAt || new Date()).getTime();
+
+      const overlapStart = Math.max(cfStart, buffStart);
+      const overlapEnd = Math.min(cfBoostEnd, buffEnd);
+      if (overlapStart >= overlapEnd) continue;
+
+      const overlapSteps = await stepSampleModel.sumStepsInWindow(
+        userId, new Date(overlapStart), new Date(overlapEnd)
+      );
+      if (overlapSteps > 0) {
+        buffedSteps -= overlapSteps;
+      }
+    }
+  }
+
   // Wrong Turn: steps during the effect are reversed (subtracted twice — once to undo, once to negate)
   for (const effect of wrongTurns) {
     const windowStart = effect.startsAt;
