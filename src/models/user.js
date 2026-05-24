@@ -9,6 +9,10 @@ const User = {
     return prisma.user.findUnique({ where: { appleId } });
   },
 
+  async findByEmail(email) {
+    return prisma.user.findFirst({ where: { email } });
+  },
+
   async create({ appleId, email, name }) {
     return prisma.user.create({
       data: { appleId, email, name },
@@ -51,6 +55,8 @@ const User = {
         displayName: { contains: query, mode: "insensitive" },
         id: { not: excludeUserId },
         NOT: { displayName: null },
+        // Hide review/demo accounts from real users' friend search.
+        isReviewAccount: false,
       },
       select: { id: true, displayName: true, profilePhotoUrl: true },
       take: 20,

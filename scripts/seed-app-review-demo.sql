@@ -1,6 +1,9 @@
--- App Review demo seed for local dev.
+-- App Review demo seed.
 -- Idempotent: re-running refreshes the same demo rows instead of duplicating them.
--- Target account: display_name = 'Sugaroro2'
+-- Target account: apple_id = 'review-account-v1' (provisioned by the wrapper script
+-- using APP_REVIEW_EMAIL). The reviewer is an UNFLAGGED real user; only the
+-- seeded supporting cast (Alex/Maya/Jordan) carries is_review_account = true,
+-- so they stay invisible to real users in search, leaderboards, public races.
 
 BEGIN;
 
@@ -17,10 +20,10 @@ DECLARE
 BEGIN
   SELECT id INTO demo_user_id
   FROM users
-  WHERE display_name = 'Sugaroro2';
+  WHERE apple_id = 'review-account-v1';
 
   IF demo_user_id IS NULL THEN
-    RAISE EXCEPTION 'No user with display_name Sugaroro2 found';
+    RAISE EXCEPTION 'No reviewer user with apple_id review-account-v1 found. Run the wrapper script to provision it first.';
   END IF;
 
   UPDATE users
@@ -40,6 +43,7 @@ BEGIN
     coins,
     step_goal,
     last_step_sync_at,
+    is_review_account,
     created_at
   )
   VALUES
@@ -52,6 +56,7 @@ BEGIN
       1250,
       9000,
       now(),
+      true,
       now() - interval '12 days'
     ),
     (
@@ -63,6 +68,7 @@ BEGIN
       1800,
       10000,
       now(),
+      true,
       now() - interval '10 days'
     ),
     (
@@ -74,6 +80,7 @@ BEGIN
       2200,
       7500,
       now(),
+      true,
       now() - interval '8 days'
     )
   ON CONFLICT (apple_id) DO UPDATE
@@ -83,7 +90,8 @@ BEGIN
     display_name = excluded.display_name,
     coins = excluded.coins,
     step_goal = excluded.step_goal,
-    last_step_sync_at = now();
+    last_step_sync_at = now(),
+    is_review_account = true;
 
   SELECT id INTO alex_id FROM users WHERE apple_id = 'demo-review-alex';
   SELECT id INTO maya_id FROM users WHERE apple_id = 'demo-review-maya';
@@ -1183,9 +1191,9 @@ END $$;
 
 COMMIT;
 
-SELECT 'demo_user|' || id || '|' || display_name || '|coins=' || coins
+SELECT 'demo_user|' || id || '|' || coalesce(display_name, '<no display name>') || '|coins=' || coins
 FROM users
-WHERE display_name = 'Sugaroro2';
+WHERE apple_id = 'review-account-v1';
 
 SELECT 'demo_races|' || status || '|' || count(*)
 FROM races

@@ -21,6 +21,7 @@ model User {
   coins     Int      @default(0)
   lastDailyClaimDate String? @map("last_daily_claim_date")
   dailyStreakDay     Int     @default(0) @map("daily_streak_day")
+  isReviewAccount    Boolean @default(false) @map("is_review_account")
   createdAt DateTime @default(now()) @map("created_at")
   steps     Step[]
   dailyRewardClaims  DailyRewardClaim[]

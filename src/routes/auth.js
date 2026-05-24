@@ -106,6 +106,47 @@ function createAuthRouter(dependencies = {}) {
     }
   });
 
+  // POST /auth/review
+  // Body: { email, password }
+  // Bypass for App Store reviewers. Validates against APP_REVIEW_EMAIL /
+  // APP_REVIEW_PASSWORD env vars and issues a session for the dedicated
+  // reviewer user row. The reviewer account is otherwise a normal user;
+  // there is no special flag on it (only seeded supporting cast is flagged).
+  router.post("/review", async (req, res) => {
+    try {
+      const expectedEmail = process.env.APP_REVIEW_EMAIL;
+      const expectedPassword = process.env.APP_REVIEW_PASSWORD;
+      if (!expectedEmail || !expectedPassword) {
+        return res.status(503).json({ error: "Review login is not configured" });
+      }
+
+      const { email, password } = req.body || {};
+      if (typeof email !== "string" || typeof password !== "string") {
+        return res.status(400).json({ error: "email and password are required" });
+      }
+      if (email !== expectedEmail || password !== expectedPassword) {
+        return res.status(401).json({ error: "Invalid credentials" });
+      }
+
+      const user = await UserModel.findByEmail(expectedEmail);
+      if (!user) {
+        return res
+          .status(500)
+          .json({ error: "Review account is not provisioned" });
+      }
+
+      const sessionToken = signToken({
+        userId: user.id,
+        appleId: user.appleId,
+      });
+
+      res.json({ user: withAdminFlag(user, checkAdmin), sessionToken });
+    } catch (error) {
+      console.error("Review auth error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   router.get("/me", requireAuth, async (req, res) => {
     try {
       const incomingFriendRequests = await getIncomingRequestCount(req.user.id);

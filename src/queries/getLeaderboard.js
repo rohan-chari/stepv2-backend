@@ -62,9 +62,11 @@ async function getCurrentUserProfile(currentUserId) {
 
 async function getStepLeaderboard(period, currentUserId, timeZone) {
   const dateBoundary = getDateBoundary(period, timeZone);
-  const whereClause = dateBoundary
+  const dateClause = dateBoundary
     ? { date: { gte: new Date(dateBoundary) } }
     : {};
+  // Hide review/demo accounts from real users' public leaderboards.
+  const whereClause = { ...dateClause, user: { isReviewAccount: false } };
 
   const top100Groups = await prisma.step.groupBy({
     by: ["userId"],
@@ -108,7 +110,7 @@ async function getStepLeaderboard(period, currentUserId, timeZone) {
 
   const currentUserAgg = await prisma.step.aggregate({
     _sum: { steps: true },
-    where: { userId: currentUserId, ...whereClause },
+    where: { userId: currentUserId, ...dateClause },
   });
   const currentUserSteps = currentUserAgg._sum.steps || 0;
 
@@ -138,6 +140,8 @@ async function getRaceLeaderboard(currentUserId) {
     where: {
       status: "ACCEPTED",
       race: { status: "COMPLETED" },
+      // Hide review/demo accounts from real users' public records board.
+      user: { isReviewAccount: false },
     },
     select: {
       userId: true,

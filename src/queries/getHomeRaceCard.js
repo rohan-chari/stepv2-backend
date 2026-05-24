@@ -156,9 +156,12 @@ async function checkFriendRacing(prisma, userId, friendIds) {
     where: {
       userId: { in: friendIds },
       status: "ACCEPTED",
+      // Hide friend-racing cards driven by review/demo accounts.
+      user: { isReviewAccount: false },
       race: {
         status: "ACTIVE",
         isPublic: true,
+        creator: { isReviewAccount: false },
         participants: { none: { userId, status: { in: ["ACCEPTED", "INVITED"] } } },
       },
     },
@@ -244,6 +247,8 @@ async function checkPublicRace(prisma, userId) {
     where: {
       status: "ACTIVE",
       isPublic: true,
+      // Hide demo-seeded races from real users' home suggestions.
+      creator: { isReviewAccount: false },
       participants: { none: { userId, status: { in: ["ACCEPTED", "INVITED"] } } },
     },
     include: {
