@@ -33,7 +33,9 @@ if (!reviewerEmail) {
 }
 
 async function provisionReviewerUser() {
-  const prisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
+  // PrismaClient reads DATABASE_URL from env by default; the script's
+  // `require("dotenv").config()` above has already loaded the .env.
+  const prisma = new PrismaClient();
   try {
     const existing = await prisma.user.findUnique({
       where: { appleId: REVIEWER_APPLE_ID },
