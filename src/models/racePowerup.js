@@ -90,13 +90,22 @@ const RacePowerup = {
         throw new Error("Powerup not found");
       }
 
+      // Clear earned_at_steps on both swapped powerups so they don't collide
+      // with the receiving participant's existing milestone-bound powerup at
+      // the same step count. Postgres treats NULL as distinct in the
+      // (participant_id, earned_at_steps) unique index, so multiple swapped
+      // powerups can coexist on a participant's shelf without conflict.
+      // rollPowerup still mints fresh milestone-bound rows with a concrete
+      // earned_at_steps, which keeps that path's dedup intact.
       const sourcePatch = {
         participantId: target.participantId,
         userId: target.userId,
+        earnedAtSteps: null,
       };
       const targetPatch = {
         participantId: source.participantId,
         userId: source.userId,
+        earnedAtSteps: null,
       };
 
       const updatedSource = await tx.racePowerup.update({
