@@ -95,14 +95,21 @@ async function getStepLeaderboard(period, currentUserId, timeZone) {
     };
   });
 
+  // Backward-compat: ship both top10/inTop10 (consumed by 1.1.4 FE) and
+  // top100/inTop100 (1.1.5 FE) so prod backend can be deployed before the
+  // new FE rolls out. Drop the aliases once 1.1.4 is out of the wild.
+  const top10 = top100.slice(0, 10);
   const currentUserInTop100 = top100.find((entry) => entry.userId === currentUserId);
+  const currentUserInTop10 = top10.find((entry) => entry.userId === currentUserId);
   if (currentUserInTop100) {
     return {
+      top10,
       top100,
       currentUser: {
         rank: currentUserInTop100.rank,
         displayName: currentUserInTop100.displayName,
         totalSteps: currentUserInTop100.totalSteps,
+        inTop10: Boolean(currentUserInTop10),
         inTop100: true,
       },
     };
@@ -124,12 +131,14 @@ async function getStepLeaderboard(period, currentUserId, timeZone) {
   const currentUserProfile = await getCurrentUserProfile(currentUserId);
 
   return {
+    top10,
     top100,
     currentUser: {
       rank: usersAbove.length + 1,
       displayName: currentUserProfile.displayName,
       profilePhotoUrl: currentUserProfile.profilePhotoUrl,
       totalSteps: currentUserSteps,
+      inTop10: false,
       inTop100: false,
     },
   };
