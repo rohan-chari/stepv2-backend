@@ -16,7 +16,10 @@ const { spawnSync } = require("node:child_process");
 const path = require("node:path");
 require("dotenv").config();
 
-const { PrismaClient } = require("@prisma/client");
+// Reuse the configured Prisma client from src/db.js so we get the same
+// pg-pool + adapter setup the app uses (Prisma 7 requires the adapter,
+// and constructing a bare PrismaClient here would skip that).
+const { prisma } = require("../src/db");
 
 const REVIEWER_APPLE_ID = "review-account-v1";
 const REVIEWER_DISPLAY_NAME = "App Reviewer";
@@ -33,38 +36,35 @@ if (!reviewerEmail) {
 }
 
 async function provisionReviewerUser() {
-  // PrismaClient reads DATABASE_URL from env by default; the script's
-  // `require("dotenv").config()` above has already loaded the .env.
-  const prisma = new PrismaClient();
-  try {
-    const existing = await prisma.user.findUnique({
+  const existing = await prisma.user.findUnique({
+    where: { appleId: REVIEWER_APPLE_ID },
+  });
+  if (existing) {
+    await prisma.user.update({
       where: { appleId: REVIEWER_APPLE_ID },
+      data: { email: reviewerEmail, isReviewAccount: false },
     });
-    if (existing) {
-      await prisma.user.update({
-        where: { appleId: REVIEWER_APPLE_ID },
-        data: { email: reviewerEmail, isReviewAccount: false },
-      });
-      console.log(`Reviewer user already exists (id=${existing.id}); email refreshed.`);
-      return;
-    }
-    const created = await prisma.user.create({
-      data: {
-        appleId: REVIEWER_APPLE_ID,
-        email: reviewerEmail,
-        name: REVIEWER_DISPLAY_NAME,
-        displayName: REVIEWER_DISPLAY_NAME,
-        isReviewAccount: false,
-      },
-    });
-    console.log(`Provisioned reviewer user (id=${created.id}).`);
-  } finally {
-    await prisma.$disconnect();
+    console.log(`Reviewer user already exists (id=${existing.id}); email refreshed.`);
+    return;
   }
+  const created = await prisma.user.create({
+    data: {
+      appleId: REVIEWER_APPLE_ID,
+      email: reviewerEmail,
+      name: REVIEWER_DISPLAY_NAME,
+      displayName: REVIEWER_DISPLAY_NAME,
+      isReviewAccount: false,
+    },
+  });
+  console.log(`Provisioned reviewer user (id=${created.id}).`);
 }
 
 async function main() {
-  await provisionReviewerUser();
+  try {
+    await provisionReviewerUser();
+  } finally {
+    await prisma.$disconnect();
+  }
 
   const sqlPath = path.join(__dirname, "seed-app-review-demo.sql");
   const result = spawnSync(
