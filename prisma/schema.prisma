@@ -15,7 +15,10 @@ model User {
   profilePhotoUrl String? @map("profile_photo_url")
   profilePhotoKey String? @map("profile_photo_key")
   profilePhotoPromptDismissedAt DateTime? @map("profile_photo_prompt_dismissed_at")
-  stepGoal    Int      @default(5000) @map("step_goal")
+  // Deprecated: step goals are no longer part of the product. Kept
+  // nullable for back-compat with existing rows. New code must not read
+  // or write this field.
+  stepGoal    Int?     @map("step_goal")
   lastStepSyncAt DateTime? @map("last_step_sync_at")
   lastSilentPushSentAt DateTime? @map("last_silent_push_sent_at")
   coins     Int      @default(0)
@@ -24,7 +27,8 @@ model User {
   isReviewAccount    Boolean @default(false) @map("is_review_account")
   createdAt DateTime @default(now()) @map("created_at")
   steps     Step[]
-  dailyRewardClaims  DailyRewardClaim[]
+  dailyRewardClaims    DailyRewardClaim[]
+  stepMilestoneClaims  StepMilestoneClaim[]
   sentRequests     Friendship[] @relation("sentRequests")
   receivedRequests Friendship[] @relation("receivedRequests")
 
@@ -57,6 +61,21 @@ enum RelationshipType {
   PARTNER   @map("partner")
   FRIEND    @map("friend")
   FAMILY    @map("family")
+}
+
+model StepMilestoneClaim {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  claimedDate String   @map("claimed_date")
+  threshold   Int
+  coins       Int
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, claimedDate, threshold])
+  @@index([userId, claimedDate])
+  @@map("step_milestone_claims")
 }
 
 model DailyRewardClaim {

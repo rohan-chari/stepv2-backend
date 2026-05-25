@@ -17,10 +17,6 @@ function registerEventHandlers() {
     console.log(`[EVENT] Steps updated: ${data.steps} steps on ${data.date} for user ${data.userId}`);
   });
 
-  eventBus.on("STEP_GOAL_SET", (data) => {
-    console.log(`[EVENT] Step goal set: ${data.stepGoal} for user ${data.userId}`);
-  });
-
   eventBus.on("DISPLAY_NAME_SET", (data) => {
     console.log(`[EVENT] Display name set: "${data.displayName}" for user ${data.userId}`);
   });

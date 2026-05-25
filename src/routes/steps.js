@@ -3,7 +3,6 @@ const { recordSteps } = require("../commands/recordSteps");
 const { recordStepSamples: defaultRecordStepSamples } = require("../commands/recordStepSamples");
 const { getStepsByDate, getStepsHistory } = require("../queries/getSteps");
 const { getStepCalendar: defaultGetStepCalendar } = require("../queries/getStepCalendar");
-const { User } = require("../models/user");
 const { buildRequireAuth } = require("../middleware/requireAuth");
 const { getMondayOfWeek, getTimeZoneParts } = require("../utils/week");
 const { calculateStreak } = require("../utils/streak");
@@ -16,7 +15,6 @@ function createStepsRouter(dependencies = {}) {
   const readStepsByDate = dependencies.getStepsByDate || getStepsByDate;
   const readStepsHistory = dependencies.getStepsHistory || getStepsHistory;
   const recordSamples = dependencies.recordStepSamples || defaultRecordStepSamples;
-  const userModel = dependencies.User || User;
   const getCalendar = dependencies.getStepCalendar || defaultGetStepCalendar;
 
   router.use(requireAuth);
@@ -88,8 +86,6 @@ function createStepsRouter(dependencies = {}) {
   // GET /steps/stats
   router.get("/stats", async (req, res) => {
     try {
-      const user = await userModel.findById(req.user.id);
-      const stepGoal = user?.stepGoal || 5000;
       const allSteps = await readStepsHistory(req.user.id);
 
       const now = new Date();
@@ -116,10 +112,10 @@ function createStepsRouter(dependencies = {}) {
         if (dateStr >= monthStart) thisMonth += steps;
         if (dateStr >= weekOf) thisWeek += steps;
 
-        dateMap.set(dateStr, { steps, stepGoal: record.stepGoal });
+        dateMap.set(dateStr, { steps });
       }
 
-      const streak = calculateStreak(todayStr, dateMap, stepGoal);
+      const streak = calculateStreak(todayStr, dateMap);
 
       res.json({
         thisWeek,
@@ -127,7 +123,6 @@ function createStepsRouter(dependencies = {}) {
         thisYear,
         allTime,
         streak,
-        stepGoal,
       });
     } catch (error) {
       console.error("Stats error:", error);

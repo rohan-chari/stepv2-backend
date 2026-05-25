@@ -6,8 +6,14 @@ const { eventBus } = require("../events/eventBus");
 const {
   ensureUserCanAfford,
   reserveRaceBuyIn,
-  validateRaceBuyInConfig,
 } = require("../services/raceBuyIns");
+const {
+  validateRaceName,
+  validateTargetSteps,
+  validatePowerupConfig,
+  validateMaxParticipants,
+  validateRaceBuyInConfig,
+} = require("../services/validateRaceConfig");
 
 class RaceCreationError extends Error {
   constructor(message, statusCode) {
@@ -35,26 +41,14 @@ function buildCreateRace(dependencies = {}) {
     isPublic = false,
     maxParticipants = 10,
   }) {
-    if (!name || typeof name !== "string" || name.trim().length === 0) {
-      throw new RaceCreationError("Race name is required", 400);
-    }
-    if (name.trim().length > 50) {
-      throw new RaceCreationError("Race name must be 50 characters or less", 400);
-    }
-    if (!targetSteps || targetSteps < 1000) {
-      throw new RaceCreationError("Target steps must be at least 1,000", 400);
-    }
-    if (targetSteps > 1000000) {
-      throw new RaceCreationError("Target steps must be 1,000,000 or less", 400);
-    }
-    if (powerupsEnabled) {
-      if (!powerupStepInterval || powerupStepInterval < 2000 || powerupStepInterval > 50000) {
-        throw new RaceCreationError("Powerup step interval must be between 2,000 and 50,000", 400);
-      }
-    }
-    if (!Number.isInteger(maxParticipants) || maxParticipants < 2 || maxParticipants > 100) {
-      throw new RaceCreationError("Max participants must be between 2 and 100", 400);
-    }
+    validateRaceName(name, RaceCreationError);
+    validateTargetSteps(targetSteps, RaceCreationError);
+    validatePowerupConfig({
+      powerupsEnabled,
+      powerupStepInterval,
+      ErrorClass: RaceCreationError,
+    });
+    validateMaxParticipants(maxParticipants, RaceCreationError);
 
     const buyInConfig = validateRaceBuyInConfig({
       buyInAmount,

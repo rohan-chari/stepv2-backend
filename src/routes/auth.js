@@ -6,7 +6,6 @@ const {
 const { ensureAppleUser } = require("../services/ensureAppleUser");
 const { buildRequireAuth } = require("../middleware/requireAuth");
 const { signSessionToken: defaultSignSessionToken } = require("../services/sessionToken");
-const { setStepGoal: defaultSetStepGoal } = require("../commands/setStepGoal");
 const { setDisplayName: defaultSetDisplayName } = require("../commands/setDisplayName");
 const {
   InvalidProfilePhotoError,
@@ -43,7 +42,6 @@ function createAuthRouter(dependencies = {}) {
   const requireAuth =
     dependencies.requireAuth || buildRequireAuth(dependencies);
   const signToken = dependencies.signSessionToken || defaultSignSessionToken;
-  const updateStepGoal = dependencies.setStepGoal || defaultSetStepGoal;
   const updateDisplayName = dependencies.setDisplayName || defaultSetDisplayName;
   const createProfilePhotoUpload =
     dependencies.createProfilePhotoUpload ||
@@ -189,27 +187,6 @@ function createAuthRouter(dependencies = {}) {
       sessionToken,
       user: withAdminFlag({ ...req.user, heldCoins }, checkAdmin),
     });
-  });
-
-  router.put("/me/step-goal", requireAuth, async (req, res) => {
-    const { stepGoal } = req.body;
-
-    if (stepGoal === undefined) {
-      return res.status(400).json({ error: "stepGoal is required" });
-    }
-
-    if (!Number.isInteger(stepGoal) || stepGoal < 5000) {
-      return res
-        .status(400)
-        .json({ error: "stepGoal must be at least 5000" });
-    }
-
-    const updatedUser = await updateStepGoal({
-      userId: req.user.id,
-      stepGoal,
-    });
-
-    res.json({ user: updatedUser });
   });
 
   router.put("/me/display-name", requireAuth, async (req, res) => {

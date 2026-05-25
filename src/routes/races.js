@@ -18,6 +18,7 @@ const {
 } = require("../queries/getPublicRaces");
 const { startRace: defaultStartRace } = require("../commands/startRace");
 const { cancelRace: defaultCancelRace } = require("../commands/cancelRace");
+const { editRace: defaultEditRace } = require("../commands/editRace");
 const {
   usePowerup: defaultUsePowerup,
 } = require("../commands/usePowerup");
@@ -76,6 +77,7 @@ function createRacesRouter(dependencies = {}) {
     dependencies.getPublicRaces || defaultGetPublicRaces;
   const startRace = dependencies.startRace || defaultStartRace;
   const cancelRace = dependencies.cancelRace || defaultCancelRace;
+  const editRace = dependencies.editRace || defaultEditRace;
   const getRaces = dependencies.getRaces || defaultGetRaces;
   const getRaceDetails = dependencies.getRaceDetails || defaultGetRaceDetails;
   const getRaceProgress =
@@ -533,6 +535,46 @@ function createRacesRouter(dependencies = {}) {
           .json({ error: error.message });
       }
       console.error("Mark race chat read error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // PATCH /races/:raceId
+  router.patch("/:raceId", async (req, res) => {
+    try {
+      const {
+        name,
+        targetSteps,
+        isPublic,
+        powerupsEnabled,
+        powerupStepInterval,
+        buyInAmount,
+        payoutPreset,
+        maxParticipants,
+      } = req.body || {};
+
+      const updates = {};
+      if (name !== undefined) updates.name = name;
+      if (targetSteps !== undefined) updates.targetSteps = targetSteps;
+      if (isPublic !== undefined) updates.isPublic = isPublic;
+      if (powerupsEnabled !== undefined) updates.powerupsEnabled = powerupsEnabled;
+      if (powerupStepInterval !== undefined) updates.powerupStepInterval = powerupStepInterval;
+      if (buyInAmount !== undefined) updates.buyInAmount = buyInAmount;
+      if (payoutPreset !== undefined) updates.payoutPreset = payoutPreset;
+      if (maxParticipants !== undefined) updates.maxParticipants = maxParticipants;
+
+      const race = await editRace({
+        userId: req.user.id,
+        raceId: req.params.raceId,
+        updates,
+      });
+      res.json({ race });
+    } catch (error) {
+      if (error.name === "RaceEditError") {
+        const status = error.statusCode || 400;
+        return res.status(status).json({ error: error.message });
+      }
+      console.error("Edit race error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });

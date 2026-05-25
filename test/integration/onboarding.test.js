@@ -28,7 +28,7 @@ describe("user onboarding flow", () => {
     await cleanDatabase();
   });
 
-  it("complete onboarding: sign in → set display name → set step goal", async () => {
+  it("complete onboarding: sign in → set display name", async () => {
     // Step 1: POST /auth/apple — user taps "GET STARTED"
     const signInRes = await request(server.baseUrl, "POST", "/auth/apple", {
       body: { identityToken: "fake-token", email: EMAIL, name: "Test User" },
@@ -47,7 +47,6 @@ describe("user onboarding flow", () => {
     assert.equal(dbUser.email, EMAIL);
     assert.equal(dbUser.name, "Test User");
     assert.equal(dbUser.displayName, null);
-    assert.equal(dbUser.stepGoal, 5000);
     assert.equal(dbUser.coins, 0);
 
     // Step 2: GET /auth/check-display-name — real-time validation
@@ -73,25 +72,12 @@ describe("user onboarding flow", () => {
     const afterName = await prisma.user.findUnique({ where: { id: userId } });
     assert.equal(afterName.displayName, "TestRunner");
 
-    // Step 4: PUT /auth/me/step-goal — user taps "CONTINUE"
-    const goalRes = await request(
-      server.baseUrl,
-      "PUT",
-      "/auth/me/step-goal",
-      { body: { stepGoal: 8000 }, token },
-    );
-    assert.equal(goalRes.status, 200);
-
-    const afterGoal = await prisma.user.findUnique({ where: { id: userId } });
-    assert.equal(afterGoal.stepGoal, 8000);
-
-    // Step 5: GET /auth/me — frontend loads main shell
+    // Step 4: GET /auth/me — frontend loads main shell
     const meRes = await request(server.baseUrl, "GET", "/auth/me", { token });
     assert.equal(meRes.status, 200);
 
     const meBody = await meRes.json();
     assert.equal(meBody.user.displayName, "TestRunner");
-    assert.equal(meBody.user.stepGoal, 8000);
   });
 
   it("returning user sign-in finds existing user and updates email", async () => {
@@ -162,30 +148,6 @@ describe("user onboarding flow", () => {
     assert.equal(res.status, 200);
     const body = await res.json();
     assert.equal(body.available, false);
-  });
-
-  it("rejects step goal below 5000", async () => {
-    const { token } = await signIn();
-
-    const res = await request(
-      server.baseUrl,
-      "PUT",
-      "/auth/me/step-goal",
-      { body: { stepGoal: 3000 }, token },
-    );
-    assert.equal(res.status, 400);
-  });
-
-  it("rejects non-integer step goal", async () => {
-    const { token } = await signIn();
-
-    const res = await request(
-      server.baseUrl,
-      "PUT",
-      "/auth/me/step-goal",
-      { body: { stepGoal: 7500.5 }, token },
-    );
-    assert.equal(res.status, 400);
   });
 
   async function signIn() {

@@ -62,15 +62,15 @@ const Friendship = {
     });
   },
 
-  async findFriendsWithStepGoals(userId) {
+  async findAcceptedFriendsWithDisplay(userId) {
     return prisma.friendship.findMany({
       where: {
         status: "ACCEPTED",
         OR: [{ requesterId: userId }, { addresseeId: userId }],
       },
       include: {
-        requester: { select: { ...userDisplaySelect, stepGoal: true } },
-        addressee: { select: { ...userDisplaySelect, stepGoal: true } },
+        requester: { select: userDisplaySelect },
+        addressee: { select: userDisplaySelect },
       },
     });
   },

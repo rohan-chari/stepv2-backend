@@ -1,7 +1,6 @@
 const { Steps } = require("../models/steps");
 const { User } = require("../models/user");
 const { eventBus } = require("../events/eventBus");
-const { awardCoins: defaultAwardCoins } = require("./awardCoins");
 const { resolveRaceState: defaultResolveRaceState } = require("../services/raceStateResolution");
 const {
   syncRacePowerupState: defaultSyncRacePowerupState,
@@ -12,7 +11,6 @@ function buildRecordSteps(dependencies = {}) {
   const stepsModel = dependencies.Steps || Steps;
   const userModel = dependencies.User || User;
   const events = dependencies.eventBus || eventBus;
-  const awardCoinsFn = dependencies.awardCoins || defaultAwardCoins;
   const resolveRaceState = Object.prototype.hasOwnProperty.call(
     dependencies,
     "resolveRaceState"
@@ -35,48 +33,19 @@ function buildRecordSteps(dependencies = {}) {
     const existing = await stepsModel.findByUserIdAndDate(userId, date);
 
     let record;
-    let lockedGoal;
 
     if (existing) {
       record = await stepsModel.update(existing.id, { steps });
       await userModel.update(userId, { lastStepSyncAt: now() });
       events.emit("STEPS_UPDATED", { userId, steps, date });
-      // Use the goal that was locked in when the record was first created
-      lockedGoal = existing.stepGoal;
     } else {
-      const user = await userModel.findById(userId);
-      lockedGoal = user?.stepGoal;
-      record = await stepsModel.create({ userId, steps, date, stepGoal: lockedGoal });
+      record = await stepsModel.create({ userId, steps, date, stepGoal: null });
       await userModel.update(userId, { lastStepSyncAt: now() });
       events.emit("STEPS_RECORDED", { userId, steps, date });
     }
 
-    // Check daily step goal coin bonus using the locked-in goal
-    try {
-      if (lockedGoal && lockedGoal > 0) {
-        // 1x goal: 10 coins
-        if (steps >= lockedGoal) {
-          await awardCoinsFn({
-            userId,
-            amount: 10,
-            reason: "daily_goal_1x",
-            refId: date,
-          });
-        }
-        // 2x goal: additional 10 coins
-        if (steps >= lockedGoal * 2) {
-          await awardCoinsFn({
-            userId,
-            amount: 10,
-            reason: "daily_goal_2x",
-            refId: date,
-          });
-        }
-      }
-    } catch (e) {
-      // Don't fail step recording if coin award fails
-      console.error("Failed to award daily goal coins:", e);
-    }
+    // Step-goal coin bonuses (daily_goal_1x / daily_goal_2x) are intentionally
+    // gone — replaced by the tap-to-claim StepMilestone rewards on home.
 
     // When the client is going to immediately POST /steps/samples after this
     // call, race resolution will run again there with fresher sample data —
