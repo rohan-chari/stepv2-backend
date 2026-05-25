@@ -51,6 +51,10 @@ function buildStartRace(dependencies = {}) {
     }
 
     const startedAt = now();
+    const durationDays = race.maxDurationDays || 7;
+    const endsAt = new Date(
+      startedAt.getTime() + durationDays * 24 * 60 * 60 * 1000
+    );
     const acceptedParticipants = await participantModel.findAcceptedByRace(raceId);
     const heldPot = acceptedParticipants.reduce((sum, participant) => {
       if ((participant.buyInStatus || "NONE") === "HELD") {
@@ -62,6 +66,7 @@ function buildStartRace(dependencies = {}) {
     const updated = await raceModel.update(raceId, {
       status: "ACTIVE",
       startedAt,
+      endsAt,
       potCoins: (race.potCoins || 0) + heldPot,
     });
 

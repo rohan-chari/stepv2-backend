@@ -45,6 +45,7 @@ const Race = {
     creatorId,
     name,
     targetSteps,
+    maxDurationDays,
     powerupsEnabled = false,
     powerupStepInterval = null,
     buyInAmount = 0,
@@ -58,6 +59,7 @@ const Race = {
         creatorId,
         name,
         targetSteps,
+        maxDurationDays,
         powerupsEnabled,
         powerupStepInterval,
         buyInAmount,
@@ -173,6 +175,18 @@ const Race = {
         ...participantInclude,
       },
       orderBy: { createdAt: "desc" },
+    });
+  },
+
+  async findActiveExpired(now) {
+    return prisma.race.findMany({
+      where: {
+        status: "ACTIVE",
+        endsAt: { lte: now },
+      },
+      include: {
+        ...participantInclude,
+      },
     });
   },
 

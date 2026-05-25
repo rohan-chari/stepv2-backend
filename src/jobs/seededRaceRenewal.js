@@ -27,6 +27,10 @@ function buildRenewSeededRaces(dependencies = {}) {
       if (liveRace) continue;
 
       const startedAt = now();
+      const durationHours = seed.durationHours || 24;
+      const endsAt = new Date(
+        startedAt.getTime() + durationHours * 60 * 60 * 1000
+      );
 
       try {
         const race = await prisma.race.create({
@@ -39,12 +43,14 @@ function buildRenewSeededRaces(dependencies = {}) {
             isPublic: true,
             maxParticipants: seed.maxParticipants,
             startedAt,
+            endsAt,
+            maxDurationDays: Math.max(1, Math.ceil(durationHours / 24)),
           },
-          select: { id: true, name: true },
+          select: { id: true, name: true, endsAt: true },
         });
         created.push({ seedKind: seed.kind, race });
         logger.log(
-          `[CRON] Seeded race created for ${seed.kind}: ${race.id} ("${race.name}")`
+          `[CRON] Seeded race created for ${seed.kind}: ${race.id} ("${race.name}") ends ${race.endsAt.toISOString()}`
         );
       } catch (error) {
         logger.error(

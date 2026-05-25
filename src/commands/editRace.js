@@ -3,7 +3,7 @@ const { RaceParticipant } = require("../models/raceParticipant");
 const { eventBus } = require("../events/eventBus");
 const {
   validateRaceName,
-  validateTargetSteps,
+  validateDuration,
   validatePowerupConfig,
   validateMaxParticipants,
   validateRaceBuyInConfig,
@@ -47,9 +47,9 @@ function buildEditRace(dependencies = {}) {
       fields.name = validateRaceName(updates.name, RaceEditError);
     }
 
-    if (hasField(updates, "targetSteps")) {
-      fields.targetSteps = validateTargetSteps(
-        updates.targetSteps,
+    if (hasField(updates, "maxDurationDays")) {
+      fields.maxDurationDays = validateDuration(
+        updates.maxDurationDays,
         RaceEditError
       );
     }

@@ -24,7 +24,7 @@ function makeDeps(overrides = {}) {
           return { id: "race-1", ...payload };
         },
         async findById(id) {
-          return { id, creatorId: "user-1", name: "Test", targetSteps: 50000, participants: [] };
+          return { id, creatorId: "user-1", name: "Test", participants: [] };
         },
         ...overrides.Race,
       },
@@ -54,25 +54,29 @@ function makeDeps(overrides = {}) {
   };
 }
 
-test("createRace does not set endsAt or maxDurationDays on new races (step-goal-only)", async () => {
+test("createRace persists maxDurationDays on new races (time-based)", async () => {
   const ctx = makeDeps();
   const createRace = buildCreateRace(ctx.deps);
 
-  await createRace({ userId: "user-1", name: "Step-Goal Race", targetSteps: 50000 });
+  await createRace({ userId: "user-1", name: "Weekend Warriors", maxDurationDays: 5 });
 
-  assert.equal(ctx.createdRace.endsAt, undefined, "new races should not set endsAt");
-  assert.equal(
-    ctx.createdRace.maxDurationDays,
-    undefined,
-    "new races should not pass maxDurationDays to the DB layer"
-  );
+  assert.equal(ctx.createdRace.maxDurationDays, 5);
+});
+
+test("createRace defaults maxDurationDays to 7 when not provided", async () => {
+  const ctx = makeDeps();
+  const createRace = buildCreateRace(ctx.deps);
+
+  await createRace({ userId: "user-1", name: "Default Duration" });
+
+  assert.equal(ctx.createdRace.maxDurationDays, 7);
 });
 
 test("createRace creates race and adds creator as ACCEPTED participant", async () => {
   const ctx = makeDeps();
   const createRace = buildCreateRace(ctx.deps);
 
-  await createRace({ userId: "user-1", name: "Test Race", targetSteps: 50000 });
+  await createRace({ userId: "user-1", name: "Test Race" });
 
   assert.equal(ctx.createdParticipant.userId, "user-1");
   assert.equal(ctx.createdParticipant.status, "ACCEPTED");
@@ -84,7 +88,7 @@ test("createRace rejects empty name", async () => {
   const createRace = buildCreateRace(deps);
 
   await assert.rejects(
-    () => createRace({ userId: "user-1", name: "", targetSteps: 50000 }),
+    () => createRace({ userId: "user-1", name: "" }),
     (err) => {
       assert.ok(err instanceof RaceCreationError);
       assert.equal(err.statusCode, 400);
@@ -93,26 +97,21 @@ test("createRace rejects empty name", async () => {
   );
 });
 
-test("createRace rejects target steps below 1000", async () => {
+test("createRace rejects duration outside 1-30 range", async () => {
   const { deps } = makeDeps();
   const createRace = buildCreateRace(deps);
 
   await assert.rejects(
-    () => createRace({ userId: "user-1", name: "Test", targetSteps: 500 }),
+    () => createRace({ userId: "user-1", name: "Test", maxDurationDays: 0 }),
     (err) => {
       assert.ok(err instanceof RaceCreationError);
       assert.equal(err.statusCode, 400);
       return true;
     }
   );
-});
-
-test("createRace rejects target steps above 1000000", async () => {
-  const { deps } = makeDeps();
-  const createRace = buildCreateRace(deps);
 
   await assert.rejects(
-    () => createRace({ userId: "user-1", name: "Test", targetSteps: 2000000 }),
+    () => createRace({ userId: "user-1", name: "Test", maxDurationDays: 31 }),
     (err) => {
       assert.ok(err instanceof RaceCreationError);
       assert.equal(err.statusCode, 400);
@@ -136,7 +135,7 @@ test("createRace trims the name", async () => {
   });
   const createRace = buildCreateRace(deps);
 
-  await createRace({ userId: "user-1", name: "  Trimmed  ", targetSteps: 50000 });
+  await createRace({ userId: "user-1", name: "  Trimmed  " });
 
   assert.equal(capturedName, "Trimmed");
 });
@@ -148,7 +147,6 @@ test("createRace reserves the creator buy-in immediately", async () => {
   await createRace({
     userId: "user-1",
     name: "Paid Race",
-    targetSteps: 50000,
     buyInAmount: 100,
     payoutPreset: "WINNER_TAKES_ALL",
   });
@@ -179,7 +177,6 @@ test("createRace rejects when the creator cannot afford the buy-in", async () =>
     () => createRace({
       userId: "user-1",
       name: "Paid Race",
-      targetSteps: 50000,
       buyInAmount: 100,
       payoutPreset: "WINNER_TAKES_ALL",
     }),

@@ -3,6 +3,7 @@ require("dotenv").config();
 const { createApp } = require("./app");
 const { registerEventHandlers } = require("./handlers/eventHandlers");
 const { registerNotificationHandlers } = require("./handlers/notificationHandlers");
+const { scheduleRaceExpiryCheck } = require("./jobs/raceExpiry");
 const { scheduleSeededRaceRenewal } = require("./jobs/seededRaceRenewal");
 
 function startServer({
@@ -11,6 +12,7 @@ function startServer({
   host = process.env.HOST || "0.0.0.0",
   registerEventHandlers: register = registerEventHandlers,
   registerNotificationHandlers: registerNotifications = registerNotificationHandlers,
+  scheduleRaceExpiryCheck: scheduleRaceExpiry = scheduleRaceExpiryCheck,
   scheduleSeededRaceRenewal: scheduleSeededRenewal = scheduleSeededRaceRenewal,
   logger = console,
 } = {}) {
@@ -19,6 +21,7 @@ function startServer({
 
   return app.listen(port, host, () => {
     logger.log(`Steps Tracker API running on ${host}:${port}`);
+    scheduleRaceExpiry();
     scheduleSeededRenewal();
   });
 }

@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const { describe, it, before, beforeEach } = require("node:test");
 
 const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
+const { resolveExpiredRaces } = require("../../src/jobs/raceExpiry");
 
 let server;
 let nextAppleId = 0;
@@ -342,4 +343,170 @@ describe("race buy-ins", () => {
     assert.equal(winnerParticipant.payoutCoins, 200);
   });
 
+  it("settles expired paid races from final standings and pays the configured top-3 split", async () => {
+    const alice = await createUser("AliceExpiry", 500);
+    const bob = await createUser("BobbyExpiry", 500);
+    const charlie = await createUser("CharlieExpr", 500);
+    const dana = await createUser("DanaExpiry", 500);
+    await makeFriends(alice, bob);
+    await makeFriends(alice, charlie);
+    await makeFriends(alice, dana);
+
+    const createRes = await createRace(alice.token, {
+      buyInAmount: 100,
+      payoutPreset: "TOP3_70_20_10",
+    });
+    const raceId = (await createRes.json()).race.id;
+
+    await request(server.baseUrl, "POST", `/races/${raceId}/invite`, {
+      body: { inviteeIds: [bob.userId, charlie.userId, dana.userId] },
+      token: alice.token,
+    });
+    await request(server.baseUrl, "PUT", `/races/${raceId}/respond`, {
+      body: { accept: true },
+      token: bob.token,
+    });
+    await request(server.baseUrl, "PUT", `/races/${raceId}/respond`, {
+      body: { accept: true },
+      token: charlie.token,
+    });
+    await request(server.baseUrl, "PUT", `/races/${raceId}/respond`, {
+      body: { accept: true },
+      token: dana.token,
+    });
+    await request(server.baseUrl, "POST", `/races/${raceId}/start`, {
+      token: alice.token,
+    });
+
+    const startedAt = new Date(Date.now() - 4 * 60 * 60 * 1000);
+    const endsAt = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    await prisma.race.update({
+      where: { id: raceId },
+      data: { startedAt, endsAt },
+    });
+    await prisma.raceParticipant.updateMany({
+      where: { raceId },
+      data: { joinedAt: startedAt },
+    });
+
+    await recordSamples(alice.token, [
+      {
+        periodStart: new Date(Date.now() - 3.5 * 60 * 60 * 1000).toISOString(),
+        periodEnd: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
+        steps: 80000,
+      },
+    ]);
+    await recordSamples(bob.token, [
+      {
+        periodStart: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
+        periodEnd: new Date(Date.now() - 2.5 * 60 * 60 * 1000).toISOString(),
+        steps: 70000,
+      },
+    ]);
+    await recordSamples(charlie.token, [
+      {
+        periodStart: new Date(Date.now() - 2.75 * 60 * 60 * 1000).toISOString(),
+        periodEnd: new Date(Date.now() - 2.25 * 60 * 60 * 1000).toISOString(),
+        steps: 60000,
+      },
+    ]);
+    await recordSamples(dana.token, [
+      {
+        periodStart: new Date(Date.now() - 2.5 * 60 * 60 * 1000).toISOString(),
+        periodEnd: new Date(Date.now() - 2.1 * 60 * 60 * 1000).toISOString(),
+        steps: 50000,
+      },
+    ]);
+
+    await resolveExpiredRaces();
+
+    const race = await prisma.race.findUnique({ where: { id: raceId } });
+    assert.equal(race.status, "COMPLETED");
+    assert.equal(race.winnerUserId, alice.userId);
+
+    const placements = await prisma.raceParticipant.findMany({
+      where: { raceId },
+      orderBy: { placement: "asc" },
+    });
+    assert.deepEqual(
+      placements.map((participant) => ({ userId: participant.userId, placement: participant.placement })),
+      [
+        { userId: alice.userId, placement: 1 },
+        { userId: bob.userId, placement: 2 },
+        { userId: charlie.userId, placement: 3 },
+        { userId: dana.userId, placement: 4 },
+      ]
+    );
+
+    const aliceMe = await fetchMe(alice.token);
+    const bobMe = await fetchMe(bob.token);
+    const charlieMe = await fetchMe(charlie.token);
+    const danaMe = await fetchMe(dana.token);
+    assert.equal(aliceMe.user.coins, 680);
+    assert.equal(bobMe.user.coins, 480);
+    assert.equal(charlieMe.user.coins, 440);
+    assert.equal(danaMe.user.coins, 400);
+  });
+
+  it("breaks expiry ties by who reached the tied total first", async () => {
+    const alice = await createUser("AliceTieExp", 500);
+    const bob = await createUser("BobbyTieExp", 500);
+    await makeFriends(alice, bob);
+
+    const createRes = await createRace(alice.token, {
+      buyInAmount: 100,
+      payoutPreset: "WINNER_TAKES_ALL",
+    });
+    const raceId = (await createRes.json()).race.id;
+
+    await request(server.baseUrl, "POST", `/races/${raceId}/invite`, {
+      body: { inviteeIds: [bob.userId] },
+      token: alice.token,
+    });
+    await request(server.baseUrl, "PUT", `/races/${raceId}/respond`, {
+      body: { accept: true },
+      token: bob.token,
+    });
+    await request(server.baseUrl, "POST", `/races/${raceId}/start`, {
+      token: alice.token,
+    });
+
+    const startedAt = new Date(Date.now() - 4 * 60 * 60 * 1000);
+    const endsAt = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    await prisma.race.update({
+      where: { id: raceId },
+      data: { startedAt, endsAt },
+    });
+    await prisma.raceParticipant.updateMany({
+      where: { raceId },
+      data: { joinedAt: startedAt },
+    });
+
+    await recordSamples(alice.token, [
+      {
+        periodStart: new Date(Date.now() - 3.5 * 60 * 60 * 1000).toISOString(),
+        periodEnd: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
+        steps: 70000,
+      },
+    ]);
+    await recordSamples(bob.token, [
+      {
+        periodStart: new Date(Date.now() - 2.5 * 60 * 60 * 1000).toISOString(),
+        periodEnd: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+        steps: 70000,
+      },
+    ]);
+
+    await resolveExpiredRaces();
+
+    const race = await prisma.race.findUnique({ where: { id: raceId } });
+    assert.equal(race.winnerUserId, alice.userId);
+
+    const placements = await prisma.raceParticipant.findMany({
+      where: { raceId },
+      orderBy: { placement: "asc" },
+    });
+    assert.equal(placements[0].userId, alice.userId);
+    assert.equal(placements[1].userId, bob.userId);
+  });
 });

@@ -9,7 +9,7 @@ const {
 } = require("../services/raceBuyIns");
 const {
   validateRaceName,
-  validateTargetSteps,
+  validateDuration,
   validatePowerupConfig,
   validateMaxParticipants,
   validateRaceBuyInConfig,
@@ -33,7 +33,7 @@ function buildCreateRace(dependencies = {}) {
   return async function createRace({
     userId,
     name,
-    targetSteps,
+    maxDurationDays = 7,
     powerupsEnabled = false,
     powerupStepInterval,
     buyInAmount = 0,
@@ -42,7 +42,7 @@ function buildCreateRace(dependencies = {}) {
     maxParticipants = 10,
   }) {
     validateRaceName(name, RaceCreationError);
-    validateTargetSteps(targetSteps, RaceCreationError);
+    validateDuration(maxDurationDays, RaceCreationError);
     validatePowerupConfig({
       powerupsEnabled,
       powerupStepInterval,
@@ -66,7 +66,11 @@ function buildCreateRace(dependencies = {}) {
     const race = await raceModel.create({
       creatorId: userId,
       name: name.trim(),
-      targetSteps,
+      // targetSteps stays in the schema for back-compat with existing rows but
+      // is no longer set on new races. Pass 0 so the non-null DB column is
+      // satisfied; completion is purely time-based via the raceExpiry cron.
+      targetSteps: 0,
+      maxDurationDays,
       powerupsEnabled: !!powerupsEnabled,
       powerupStepInterval: powerupsEnabled ? powerupStepInterval : null,
       buyInAmount: buyInConfig.buyInAmount,

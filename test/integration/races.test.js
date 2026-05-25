@@ -124,12 +124,12 @@ describe("races", () => {
     it("creates race with valid fields → PENDING status", async () => {
       const alice = await createUser("AliceWalker");
 
-      const res = await createRace(alice.token, { name: "Weekend Warriors", targetSteps: 25000 });
+      const res = await createRace(alice.token, { name: "Weekend Warriors", maxDurationDays: 5 });
       assert.equal(res.status, 201);
 
       const body = await res.json();
       assert.equal(body.race.name, "Weekend Warriors");
-      assert.equal(body.race.targetSteps, 25000);
+      assert.equal(body.race.maxDurationDays, 5);
       assert.equal(body.race.status, "PENDING");
     });
 
@@ -159,10 +159,14 @@ describe("races", () => {
       assert.equal(res.status, 400);
     });
 
-    it("rejects targetSteps below 1000", async () => {
+    it("rejects maxDurationDays outside 1-30", async () => {
       const alice = await createUser("AliceWalker");
-      const res = await createRace(alice.token, { targetSteps: 500 });
-      assert.equal(res.status, 400);
+
+      const res0 = await createRace(alice.token, { maxDurationDays: 0 });
+      assert.equal(res0.status, 400);
+
+      const res31 = await createRace(alice.token, { maxDurationDays: 31 });
+      assert.equal(res31.status, 400);
     });
 
   });
@@ -438,7 +442,7 @@ describe("races", () => {
       return { alice, bob, raceId };
     }
 
-    it("creator starts with 2+ accepted → ACTIVE with startedAt", async () => {
+    it("creator starts with 2+ accepted → ACTIVE with startedAt and endsAt", async () => {
       const { alice, raceId } = await setupPendingRace();
 
       const res = await request(server.baseUrl, "POST", `/races/${raceId}/start`, { token: alice.token });
@@ -448,6 +452,7 @@ describe("races", () => {
       const detail = await detailRes.json();
       assert.equal(detail.status, "ACTIVE");
       assert.ok(detail.startedAt);
+      assert.ok(detail.endsAt);
     });
 
     it("non-creator cannot start", async () => {

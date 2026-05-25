@@ -10,7 +10,7 @@ const DEFAULT_RACE = {
   id: "race-1",
   creatorId: "user-1",
   name: "Existing Race",
-  targetSteps: 50000,
+  maxDurationDays: 7,
   powerupsEnabled: false,
   powerupStepInterval: null,
   buyInAmount: 0,
@@ -171,53 +171,83 @@ test("editRace rejects name > 50 chars", async () => {
   );
 });
 
-test("editRace rejects targetSteps below 1000", async () => {
-  const { deps } = makeDeps();
-  const editRace = buildEditRace(deps);
-
-  await assert.rejects(
-    () =>
-      editRace({
-        userId: "user-1",
-        raceId: "race-1",
-        updates: { targetSteps: 500 },
-      }),
-    (err) => err instanceof RaceEditError && err.statusCode === 400
-  );
-});
-
-test("editRace rejects targetSteps above 1,000,000", async () => {
-  const { deps } = makeDeps();
-  const editRace = buildEditRace(deps);
-
-  await assert.rejects(
-    () =>
-      editRace({
-        userId: "user-1",
-        raceId: "race-1",
-        updates: { targetSteps: 2000000 },
-      }),
-    (err) => err instanceof RaceEditError && err.statusCode === 400
-  );
-});
-
-test("editRace allows targetSteps boundary values", async () => {
+test("editRace updates maxDurationDays", async () => {
   const ctx = makeDeps();
   const editRace = buildEditRace(ctx.deps);
 
   await editRace({
     userId: "user-1",
     raceId: "race-1",
-    updates: { targetSteps: 1000 },
+    updates: { maxDurationDays: 5 },
   });
-  assert.equal(ctx.updateCall.fields.targetSteps, 1000);
+
+  assert.equal(ctx.updateCall.fields.maxDurationDays, 5);
+  assert.equal(ctx.events[0].event, "RACE_EDITED");
+  assert.deepEqual(ctx.events[0].payload.updatedFields, ["maxDurationDays"]);
+});
+
+test("editRace rejects maxDurationDays below 1", async () => {
+  const { deps } = makeDeps();
+  const editRace = buildEditRace(deps);
+
+  await assert.rejects(
+    () =>
+      editRace({
+        userId: "user-1",
+        raceId: "race-1",
+        updates: { maxDurationDays: 0 },
+      }),
+    (err) => err instanceof RaceEditError && err.statusCode === 400
+  );
+});
+
+test("editRace rejects maxDurationDays above 30", async () => {
+  const { deps } = makeDeps();
+  const editRace = buildEditRace(deps);
+
+  await assert.rejects(
+    () =>
+      editRace({
+        userId: "user-1",
+        raceId: "race-1",
+        updates: { maxDurationDays: 31 },
+      }),
+    (err) => err instanceof RaceEditError && err.statusCode === 400
+  );
+});
+
+test("editRace rejects non-integer maxDurationDays", async () => {
+  const { deps } = makeDeps();
+  const editRace = buildEditRace(deps);
+
+  await assert.rejects(
+    () =>
+      editRace({
+        userId: "user-1",
+        raceId: "race-1",
+        updates: { maxDurationDays: 3.5 },
+      }),
+    (err) => err instanceof RaceEditError && err.statusCode === 400
+  );
+});
+
+test("editRace allows maxDurationDays boundary values", async () => {
+  const ctx = makeDeps();
+  const editRace = buildEditRace(ctx.deps);
 
   await editRace({
     userId: "user-1",
     raceId: "race-1",
-    updates: { targetSteps: 1000000 },
+    updates: { maxDurationDays: 1 },
   });
-  assert.equal(ctx.updateCall.fields.targetSteps, 1000000);
+  assert.equal(ctx.updateCall.fields.maxDurationDays, 1);
+
+  await editRace({
+    userId: "user-1",
+    raceId: "race-1",
+    updates: { maxDurationDays: 30 },
+  });
+  assert.equal(ctx.updateCall.fields.maxDurationDays, 30);
 });
 
 test("editRace enables powerups with valid interval", async () => {
@@ -515,7 +545,7 @@ test("editRace emits RACE_EDITED with updated field list", async () => {
   await editRace({
     userId: "user-1",
     raceId: "race-1",
-    updates: { name: "New Name", targetSteps: 60000 },
+    updates: { name: "New Name", maxDurationDays: 5 },
   });
 
   assert.equal(ctx.events.length, 1);
@@ -524,7 +554,7 @@ test("editRace emits RACE_EDITED with updated field list", async () => {
   assert.equal(ctx.events[0].payload.creatorUserId, "user-1");
   assert.deepEqual(
     ctx.events[0].payload.updatedFields.sort(),
-    ["name", "targetSteps"].sort()
+    ["name", "maxDurationDays"].sort()
   );
 });
 

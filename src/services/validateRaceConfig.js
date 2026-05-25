@@ -16,14 +16,15 @@ function validateRaceName(name, ErrorClass) {
   return name.trim();
 }
 
-function validateTargetSteps(targetSteps, ErrorClass) {
-  if (!targetSteps || targetSteps < 1000) {
-    throw new ErrorClass("Target steps must be at least 1,000", 400);
+function validateDuration(maxDurationDays, ErrorClass) {
+  if (
+    !Number.isInteger(maxDurationDays) ||
+    maxDurationDays < 1 ||
+    maxDurationDays > 30
+  ) {
+    throw new ErrorClass("Duration must be between 1 and 30 days", 400);
   }
-  if (targetSteps > 1000000) {
-    throw new ErrorClass("Target steps must be 1,000,000 or less", 400);
-  }
-  return targetSteps;
+  return maxDurationDays;
 }
 
 function validatePowerupConfig({ powerupsEnabled, powerupStepInterval, ErrorClass }) {
@@ -54,7 +55,7 @@ function validateMaxParticipants(maxParticipants, ErrorClass) {
 
 module.exports = {
   validateRaceName,
-  validateTargetSteps,
+  validateDuration,
   validatePowerupConfig,
   validateMaxParticipants,
   validateRaceBuyInConfig,

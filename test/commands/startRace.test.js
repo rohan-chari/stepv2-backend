@@ -69,19 +69,21 @@ function makeDeps(overrides = {}) {
   };
 }
 
-test("startRace does not set endsAt on the race (step-goal-only)", async () => {
-  const { deps, raceUpdates } = makeDeps();
+test("startRace sets endsAt to startedAt + maxDurationDays on the race", async () => {
+  const { deps, raceUpdates, startedAt } = makeDeps();
   const startRace = buildStartRace(deps);
 
   await startRace({ userId: "creator-1", raceId: "race-1" });
 
-  for (const update of raceUpdates) {
-    assert.equal(
-      "endsAt" in update.fields,
-      false,
-      "startRace must not include endsAt in race update payload"
-    );
-  }
+  const statusUpdate = raceUpdates.find((u) => u.fields.status === "ACTIVE");
+  assert.ok(statusUpdate, "expected status update");
+  const expectedEndsAt = new Date(
+    startedAt.getTime() + 7 * 24 * 60 * 60 * 1000
+  );
+  assert.equal(
+    statusUpdate.fields.endsAt.toISOString(),
+    expectedEndsAt.toISOString()
+  );
 });
 
 test("startRace snapshots baseline steps for each accepted participant", async () => {

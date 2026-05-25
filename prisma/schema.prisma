@@ -434,8 +434,8 @@ model Race {
   name            String
   targetSteps     Int        @map("target_steps")
   status          RaceStatus @default(PENDING)
-  // maxDurationDays is deprecated (step-goal-only races); kept nullable for
-  // backward compat with existing rows. Never set for new races.
+  // maxDurationDays is set on all new races; kept nullable for backward compat
+  // with existing rows from the step-goal-only window which have NULL.
   maxDurationDays Int?       @map("max_duration_days")
   buyInAmount     Int        @default(0) @map("buy_in_amount")
   payoutPreset    RacePayoutPreset @default(WINNER_TAKES_ALL) @map("payout_preset")
@@ -478,8 +478,8 @@ model RaceSeed {
   kind            String          @unique
   name            String
   targetSteps     Int             @map("target_steps")
-  // durationHours is deprecated (step-goal-only races); kept nullable for
-  // backward compat with existing rows. Never read for new seeded races.
+  // durationHours is read for new seeded races to compute endsAt; kept
+  // nullable in the schema for backward compat with existing rows.
   durationHours   Int?            @map("duration_hours")
   cadence         RaceSeedCadence
   maxParticipants Int             @default(100) @map("max_participants")

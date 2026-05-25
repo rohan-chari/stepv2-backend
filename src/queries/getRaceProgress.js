@@ -255,15 +255,14 @@ function buildGetRaceProgress(deps = {}) {
       return {
         raceId: race.id,
         status: race.status,
-        targetSteps: race.targetSteps,
         endsAt: race.endsAt,
+        maxDurationDays: race.maxDurationDays,
         participants: acceptedParticipants.map((p) => ({
           userId: p.userId,
           displayName: p.user.displayName,
           profilePhotoUrl: p.user.profilePhotoUrl,
           accessories: buildAccessoriesList(p.user),
           totalSteps: p.totalSteps,
-          progress: Math.min(p.totalSteps / race.targetSteps, 1),
           finishedAt: p.finishedAt,
         })),
       };
@@ -366,54 +365,12 @@ function buildGetRaceProgress(deps = {}) {
       })
     );
 
-    // Sort by steps to determine positions for powerup rolls
-    const sorted = [...stepTotals].sort((a, b) => b.totalSteps - a.totalSteps);
-
-    // Count previously finished participants
-    const previouslyFinished = acceptedParticipants.filter((p) => p.finishedAt).length;
-
-    // Find new finishers this tick
-    const newFinishers = [];
+    // Update total steps for each active participant. Race completion is now
+    // strictly time-based (handled by raceExpiry cron); no step-goal finish.
     for (const { participant, totalSteps } of stepTotals) {
       if (!participant.finishedAt) {
         await participantModel.updateTotalSteps(participant.id, totalSteps);
       }
-
-      if (totalSteps >= race.targetSteps && !participant.finishedAt) {
-        await participantModel.markFinished(participant.id, now(), totalSteps);
-        newFinishers.push({ participant, totalSteps });
-      }
-    }
-
-    // Assign placements — sort new finishers by steps descending for tiebreaking
-    newFinishers.sort((a, b) => b.totalSteps - a.totalSteps);
-    for (let i = 0; i < newFinishers.length; i++) {
-      const placement = previouslyFinished + i + 1;
-      await participantModel.setPlacement(newFinishers[i].participant.id, placement);
-    }
-
-    // Determine if race should complete: need top 3 finished, or 1st if 3 or fewer participants
-    const totalFinished = previouslyFinished + newFinishers.length;
-    const finishThreshold = acceptedParticipants.length <= 3 ? 1 : 3;
-
-    if (newFinishers.length > 0 && totalFinished >= finishThreshold && previouslyFinished < finishThreshold) {
-      // Winner is the participant with placement 1
-      // Could be from a prior tick or the top new finisher
-      let winnerUserId;
-      const priorWinner = acceptedParticipants.find((p) => p.placement === 1);
-      if (priorWinner) {
-        winnerUserId = priorWinner.userId;
-      } else {
-        // First finisher(s) this tick — highest steps among new finishers is placement 1
-        winnerUserId = newFinishers[0].participant.userId;
-      }
-
-      const allUserIds = acceptedParticipants.map((p) => p.userId);
-      await completeRaceFn({
-        raceId,
-        winnerUserId,
-        participantUserIds: allUserIds,
-      });
     }
 
     // Roll powerups for the requesting user if they crossed a threshold
@@ -508,7 +465,6 @@ function buildGetRaceProgress(deps = {}) {
             profilePhotoUrl: null,
             accessories: [],
             totalSteps: null,
-            progress: null,
             finishedAt: participant.finishedAt,
             stealthed: false,
           };
@@ -522,7 +478,6 @@ function buildGetRaceProgress(deps = {}) {
           profilePhotoUrl: isStealthed ? null : participant.user.profilePhotoUrl,
           accessories: isStealthed ? [] : buildAccessoriesList(participant.user),
           totalSteps: isStealthed ? null : totalSteps,
-          progress: isStealthed ? null : Math.min(totalSteps / race.targetSteps, 1),
           finishedAt: participant.finishedAt,
           stealthed: isStealthed,
         };
@@ -541,8 +496,8 @@ function buildGetRaceProgress(deps = {}) {
     const result = {
       raceId: race.id,
       status: updatedRace.status,
-      targetSteps: race.targetSteps,
       endsAt: race.endsAt,
+      maxDurationDays: race.maxDurationDays,
       participants: leaderboard,
     };
 

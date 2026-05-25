@@ -88,6 +88,7 @@ test("returns PENDING_INVITE when user has a pending invite", async () => {
   assert.equal(res.pendingInviteCount, 1);
   assert.equal(res.data.raceId, "race-pending");
   assert.equal(res.data.inviter.displayName, "Rohit");
+  assert.equal(res.data.durationHours, 72);
   assert.equal(res.data.participantCount, 2);
   assert.equal(res.data.expiresAt.toISOString(), expiresAt.toISOString());
 });

@@ -109,7 +109,7 @@ function createRacesRouter(dependencies = {}) {
     try {
       const {
         name,
-        targetSteps,
+        maxDurationDays,
         powerupsEnabled,
         powerupStepInterval,
         buyInAmount,
@@ -120,7 +120,7 @@ function createRacesRouter(dependencies = {}) {
       const race = await createRace({
         userId: req.user.id,
         name,
-        targetSteps,
+        maxDurationDays,
         powerupsEnabled,
         powerupStepInterval,
         buyInAmount,
@@ -544,7 +544,7 @@ function createRacesRouter(dependencies = {}) {
     try {
       const {
         name,
-        targetSteps,
+        maxDurationDays,
         isPublic,
         powerupsEnabled,
         powerupStepInterval,
@@ -555,7 +555,7 @@ function createRacesRouter(dependencies = {}) {
 
       const updates = {};
       if (name !== undefined) updates.name = name;
-      if (targetSteps !== undefined) updates.targetSteps = targetSteps;
+      if (maxDurationDays !== undefined) updates.maxDurationDays = maxDurationDays;
       if (isPublic !== undefined) updates.isPublic = isPublic;
       if (powerupsEnabled !== undefined) updates.powerupsEnabled = powerupsEnabled;
       if (powerupStepInterval !== undefined) updates.powerupStepInterval = powerupStepInterval;

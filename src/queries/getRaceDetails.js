@@ -32,8 +32,8 @@ async function getRaceDetails(userId, raceId) {
   return {
     id: race.id,
     name: race.name,
-    targetSteps: race.targetSteps,
     status: race.status,
+    maxDurationDays: race.maxDurationDays,
     buyInAmount: race.buyInAmount,
     payoutPreset: race.payoutPreset,
     potCoins: race.potCoins || 0,
@@ -45,6 +45,7 @@ async function getRaceDetails(userId, raceId) {
       third: payouts[2],
     },
     startedAt: race.startedAt,
+    endsAt: race.endsAt,
     completedAt: race.completedAt,
     creator: race.creator,
     winner: race.winner,
