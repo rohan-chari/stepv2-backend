@@ -77,7 +77,6 @@ async function checkPendingInvite(prisma, userId, now) {
       raceId: race.id,
       name: race.name,
       targetSteps: race.targetSteps,
-      durationHours: race.maxDurationDays * 24,
       participantCount: race.participants.length,
       inviter: serializeUser(race.creator),
       expiresAt: primary.inviteExpiresAt,
@@ -141,7 +140,6 @@ async function checkActiveRace(prisma, userId) {
     data: {
       raceId: race.id,
       name: race.name,
-      endsAt: race.endsAt,
       me: me ? buildEntry(me) : null,
       leader: leader ? buildEntry(leader) : null,
       others: others.map(buildEntry),
@@ -195,7 +193,6 @@ async function checkFriendRacing(prisma, userId, friendIds) {
     data: {
       raceId: race.id,
       name: race.name,
-      endsAt: race.endsAt,
       isPublicJoinable: true,
       friend: serializeUser(choice.user),
       participants: race.participants.map((p, idx) => ({
@@ -282,7 +279,6 @@ async function checkPublicRace(prisma, userId) {
       raceId: race.id,
       name: race.name,
       targetSteps: race.targetSteps,
-      endsAt: race.endsAt,
       participantCount: race._count.participants,
       seedKind: race.seed?.kind || null,
     },

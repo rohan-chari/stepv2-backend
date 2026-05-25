@@ -69,6 +69,21 @@ function makeDeps(overrides = {}) {
   };
 }
 
+test("startRace does not set endsAt on the race (step-goal-only)", async () => {
+  const { deps, raceUpdates } = makeDeps();
+  const startRace = buildStartRace(deps);
+
+  await startRace({ userId: "creator-1", raceId: "race-1" });
+
+  for (const update of raceUpdates) {
+    assert.equal(
+      "endsAt" in update.fields,
+      false,
+      "startRace must not include endsAt in race update payload"
+    );
+  }
+});
+
 test("startRace snapshots baseline steps for each accepted participant", async () => {
   const { deps, updates } = makeDeps();
   const startRace = buildStartRace(deps);

@@ -54,6 +54,20 @@ function makeDeps(overrides = {}) {
   };
 }
 
+test("createRace does not set endsAt or maxDurationDays on new races (step-goal-only)", async () => {
+  const ctx = makeDeps();
+  const createRace = buildCreateRace(ctx.deps);
+
+  await createRace({ userId: "user-1", name: "Step-Goal Race", targetSteps: 50000 });
+
+  assert.equal(ctx.createdRace.endsAt, undefined, "new races should not set endsAt");
+  assert.equal(
+    ctx.createdRace.maxDurationDays,
+    undefined,
+    "new races should not pass maxDurationDays to the DB layer"
+  );
+});
+
 test("createRace creates race and adds creator as ACCEPTED participant", async () => {
   const ctx = makeDeps();
   const createRace = buildCreateRace(ctx.deps);
@@ -102,27 +116,6 @@ test("createRace rejects target steps above 1000000", async () => {
     (err) => {
       assert.ok(err instanceof RaceCreationError);
       assert.equal(err.statusCode, 400);
-      return true;
-    }
-  );
-});
-
-test("createRace rejects duration outside 1-30 range", async () => {
-  const { deps } = makeDeps();
-  const createRace = buildCreateRace(deps);
-
-  await assert.rejects(
-    () => createRace({ userId: "user-1", name: "Test", targetSteps: 50000, maxDurationDays: 0 }),
-    (err) => {
-      assert.ok(err instanceof RaceCreationError);
-      return true;
-    }
-  );
-
-  await assert.rejects(
-    () => createRace({ userId: "user-1", name: "Test", targetSteps: 50000, maxDurationDays: 31 }),
-    (err) => {
-      assert.ok(err instanceof RaceCreationError);
       return true;
     }
   );

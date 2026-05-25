@@ -108,7 +108,6 @@ function createRacesRouter(dependencies = {}) {
       const {
         name,
         targetSteps,
-        maxDurationDays,
         powerupsEnabled,
         powerupStepInterval,
         buyInAmount,
@@ -120,7 +119,6 @@ function createRacesRouter(dependencies = {}) {
         userId: req.user.id,
         name,
         targetSteps,
-        maxDurationDays,
         powerupsEnabled,
         powerupStepInterval,
         buyInAmount,

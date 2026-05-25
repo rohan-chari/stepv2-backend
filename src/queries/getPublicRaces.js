@@ -36,7 +36,6 @@ function buildGetPublicRaces(dependencies = {}) {
         name: race.name,
         targetSteps: race.targetSteps,
         status: race.status,
-        maxDurationDays: race.maxDurationDays,
         buyInAmount: race.buyInAmount,
         payoutPreset: race.payoutPreset,
         powerupsEnabled: race.powerupsEnabled,

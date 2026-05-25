@@ -28,7 +28,6 @@ function buildCreateRace(dependencies = {}) {
     userId,
     name,
     targetSteps,
-    maxDurationDays = 7,
     powerupsEnabled = false,
     powerupStepInterval,
     buyInAmount = 0,
@@ -47,9 +46,6 @@ function buildCreateRace(dependencies = {}) {
     }
     if (targetSteps > 1000000) {
       throw new RaceCreationError("Target steps must be 1,000,000 or less", 400);
-    }
-    if (maxDurationDays < 1 || maxDurationDays > 30) {
-      throw new RaceCreationError("Duration must be between 1 and 30 days", 400);
     }
     if (powerupsEnabled) {
       if (!powerupStepInterval || powerupStepInterval < 2000 || powerupStepInterval > 50000) {
@@ -77,7 +73,6 @@ function buildCreateRace(dependencies = {}) {
       creatorId: userId,
       name: name.trim(),
       targetSteps,
-      maxDurationDays,
       powerupsEnabled: !!powerupsEnabled,
       powerupStepInterval: powerupsEnabled ? powerupStepInterval : null,
       buyInAmount: buyInConfig.buyInAmount,

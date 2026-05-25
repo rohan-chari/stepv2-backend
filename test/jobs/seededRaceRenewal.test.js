@@ -20,7 +20,7 @@ function makePrisma({ seeds = [], liveRacesBySeed = {} } = {}) {
         async create({ data }) {
           const race = { id: `race-${created.length + 1}`, ...data };
           created.push(race);
-          return { id: race.id, name: data.name, endsAt: data.endsAt };
+          return { id: race.id, name: data.name };
         },
       },
     },
@@ -61,11 +61,8 @@ test("renewSeededRaces creates a race when no live race exists for a seed", asyn
   assert.equal(ctx.created[0].isPublic, true);
   assert.equal(ctx.created[0].status, "ACTIVE");
   assert.equal(ctx.created[0].targetSteps, 10000);
-  // 24 hours later
-  assert.equal(
-    ctx.created[0].endsAt.toISOString(),
-    new Date(FIXED_NOW.getTime() + 24 * 60 * 60 * 1000).toISOString()
-  );
+  // Step-goal-only races: no endsAt is set
+  assert.equal(ctx.created[0].endsAt, undefined);
 });
 
 test("renewSeededRaces skips seeds that already have a live race", async () => {
