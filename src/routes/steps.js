@@ -70,13 +70,21 @@ function createStepsRouter(dependencies = {}) {
     try {
       const { date } = req.query;
 
+      // 1.1.4 compat: clients pre-step-goal-removal expect stepGoal on each
+      // record. Backfill with the legacy default so old UI renders cleanly.
+      const COMPAT_STEP_GOAL = 5000;
+
       if (date) {
         const record = await readStepsByDate(req.user.id, date);
-        return res.json({ record });
+        return res.json({
+          record: record ? { ...record, stepGoal: record.stepGoal ?? COMPAT_STEP_GOAL } : record,
+        });
       }
 
       const records = await readStepsHistory(req.user.id);
-      res.json({ records });
+      res.json({
+        records: records.map((r) => ({ ...r, stepGoal: r.stepGoal ?? COMPAT_STEP_GOAL })),
+      });
     } catch (error) {
       console.error("Steps query error:", error);
       res.status(500).json({ error: "Internal server error" });
@@ -123,6 +131,8 @@ function createStepsRouter(dependencies = {}) {
         thisYear,
         allTime,
         streak,
+        // 1.1.4 compat — legacy clients expect stepGoal on the stats payload.
+        stepGoal: req.user.stepGoal ?? 5000,
       });
     } catch (error) {
       console.error("Stats error:", error);

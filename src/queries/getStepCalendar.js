@@ -50,10 +50,13 @@ function buildGetStepCalendar(deps = {}) {
         steps,
         future: isFuture,
         isToday,
+        // 1.1.4 compat: legacy clients render a per-day goal bar.
+        stepGoal: record?.stepGoal ?? 5000,
+        goalMet: steps >= (record?.stepGoal ?? 5000),
       });
     }
 
-    return { days };
+    return { days, stepGoal: 5000 };
   };
 }
 

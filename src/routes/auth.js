@@ -165,7 +165,13 @@ function createAuthRouter(dependencies = {}) {
       const heldCoins = await getHeldCoinsSafe(req.user.id);
       res.json({
         user: withAdminFlag(
-          { ...req.user, incomingFriendRequests, heldCoins },
+          {
+            ...req.user,
+            // 1.1.4 compat: clients pre-step-goal-removal expect a non-null int.
+            stepGoal: req.user.stepGoal ?? 5000,
+            incomingFriendRequests,
+            heldCoins,
+          },
           checkAdmin
         ),
       });
@@ -173,6 +179,17 @@ function createAuthRouter(dependencies = {}) {
       console.error("Get me error:", error);
       res.json({ user: req.user });
     }
+  });
+
+  // 1.1.4 compat: step-goal endpoint was removed in 1.1.5. Old clients still
+  // call this when the user opens profile. Accept and no-op so they don't 404.
+  router.put("/me/step-goal", requireAuth, async (req, res) => {
+    res.json({
+      user: withAdminFlag(
+        { ...req.user, stepGoal: req.user.stepGoal ?? 5000 },
+        checkAdmin
+      ),
+    });
   });
 
   // GET /auth/session — refresh session token

@@ -40,6 +40,11 @@ function buildCreateRace(dependencies = {}) {
     payoutPreset,
     isPublic = false,
     maxParticipants = 10,
+    // 1.1.4 compat: legacy clients still send targetSteps on createRace. New
+    // clients don't, in which case it stays 0. The value isn't used by the
+    // backend for completion logic (time-based only) — kept solely so the
+    // legacy UI can render the target it picked.
+    targetSteps = 0,
   }) {
     validateRaceName(name, RaceCreationError);
     validateDuration(maxDurationDays, RaceCreationError);
@@ -66,10 +71,9 @@ function buildCreateRace(dependencies = {}) {
     const race = await raceModel.create({
       creatorId: userId,
       name: name.trim(),
-      // targetSteps stays in the schema for back-compat with existing rows but
-      // is no longer set on new races. Pass 0 so the non-null DB column is
-      // satisfied; completion is purely time-based via the raceExpiry cron.
-      targetSteps: 0,
+      // 1.1.4 compat: persist whatever targetSteps the legacy client sent so it
+      // can render its own UI. Not used for completion (time-based only).
+      targetSteps: Number.isFinite(targetSteps) && targetSteps > 0 ? targetSteps : 0,
       maxDurationDays,
       powerupsEnabled: !!powerupsEnabled,
       powerupStepInterval: powerupsEnabled ? powerupStepInterval : null,

@@ -116,6 +116,7 @@ function createRacesRouter(dependencies = {}) {
         payoutPreset,
         isPublic,
         maxParticipants,
+        targetSteps,
       } = req.body;
       const race = await createRace({
         userId: req.user.id,
@@ -127,6 +128,7 @@ function createRacesRouter(dependencies = {}) {
         payoutPreset,
         isPublic,
         maxParticipants,
+        targetSteps,
       });
       res.status(201).json({ race });
     } catch (error) {

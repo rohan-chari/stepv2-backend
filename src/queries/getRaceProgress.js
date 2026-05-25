@@ -257,6 +257,7 @@ function buildGetRaceProgress(deps = {}) {
         status: race.status,
         endsAt: race.endsAt,
         maxDurationDays: race.maxDurationDays,
+        targetSteps: race.targetSteps, // 1.1.4 compat
         participants: acceptedParticipants.map((p) => ({
           userId: p.userId,
           displayName: p.user.displayName,
@@ -498,6 +499,7 @@ function buildGetRaceProgress(deps = {}) {
       status: updatedRace.status,
       endsAt: race.endsAt,
       maxDurationDays: race.maxDurationDays,
+      targetSteps: race.targetSteps, // 1.1.4 compat
       participants: leaderboard,
     };
 

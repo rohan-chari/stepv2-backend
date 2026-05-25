@@ -34,6 +34,7 @@ async function getRaceDetails(userId, raceId) {
     name: race.name,
     status: race.status,
     maxDurationDays: race.maxDurationDays,
+    targetSteps: race.targetSteps, // 1.1.4 compat
     buyInAmount: race.buyInAmount,
     payoutPreset: race.payoutPreset,
     potCoins: race.potCoins || 0,

@@ -67,6 +67,8 @@ async function getFriendsWithSteps(userId, date) {
   return friends.map((f, i) => ({
     ...f,
     steps: stepsResults[i]?.steps ?? 0,
+    // 1.1.4 compat — pre-step-goal-removal clients render this on friend cards.
+    stepGoal: 5000,
   }));
 }
 
