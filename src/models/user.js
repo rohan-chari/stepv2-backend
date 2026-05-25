@@ -9,10 +9,16 @@ const User = {
     return prisma.user.findUnique({ where: { appleId } });
   },
 
-  async create({ appleId, email, name }) {
-    return prisma.user.create({
-      data: { appleId, email, name },
-    });
+  async findByEmail(email) {
+    return prisma.user.findFirst({ where: { email } });
+  },
+
+  async create({ appleId, email, name, displayName }) {
+    const data = { appleId, email, name };
+    if (displayName !== undefined) {
+      data.displayName = displayName;
+    }
+    return prisma.user.create({ data });
   },
 
   async update(id, fields) {
@@ -51,6 +57,8 @@ const User = {
         displayName: { contains: query, mode: "insensitive" },
         id: { not: excludeUserId },
         NOT: { displayName: null },
+        // Hide review/demo accounts from real users' friend search.
+        isReviewAccount: false,
       },
       select: { id: true, displayName: true, profilePhotoUrl: true },
       take: 20,

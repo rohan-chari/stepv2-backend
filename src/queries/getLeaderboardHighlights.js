@@ -64,10 +64,12 @@ async function getStepCandidates(currentUserId, timeZone) {
 
   for (const period of periods) {
     const dateBoundary = getDateBoundary(period, timeZone);
+    const dateWhere = dateBoundary ? { date: { gte: new Date(dateBoundary) } } : {};
     const groups = await prisma.step.groupBy({
       by: ["userId"],
       _sum: { steps: true },
-      where: dateBoundary ? { date: { gte: new Date(dateBoundary) } } : undefined,
+      // Exclude review/demo accounts from "next user to beat" suggestions.
+      where: { ...dateWhere, user: { isReviewAccount: false } },
       orderBy: { _sum: { steps: "desc" } },
     });
 
@@ -93,6 +95,8 @@ async function getRaceCandidate(currentUserId) {
     where: {
       status: "ACCEPTED",
       race: { status: "COMPLETED" },
+      // Exclude review/demo accounts from race-record highlights.
+      user: { isReviewAccount: false },
     },
     select: {
       userId: true,

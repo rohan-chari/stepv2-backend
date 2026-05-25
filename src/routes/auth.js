@@ -6,7 +6,6 @@ const {
 const { ensureAppleUser } = require("../services/ensureAppleUser");
 const { buildRequireAuth } = require("../middleware/requireAuth");
 const { signSessionToken: defaultSignSessionToken } = require("../services/sessionToken");
-const { setStepGoal: defaultSetStepGoal } = require("../commands/setStepGoal");
 const { setDisplayName: defaultSetDisplayName } = require("../commands/setDisplayName");
 const {
   InvalidProfilePhotoError,
@@ -28,6 +27,13 @@ const {
 const DISPLAY_NAME_MIN_LENGTH = 8;
 const { isAdminUser, withAdminFlag } = require("../services/adminAccess");
 
+// Reviewer account constants — kept in sync with scripts/seed-app-review-demo.js.
+// The /auth/review endpoint auto-reprovisions the row if it's missing (e.g.
+// reviewer deleted the account during a 5.1.1 compliance check), so we never
+// lock the reviewer out and never block the in-app delete flow.
+const REVIEWER_APPLE_ID = "review-account-v1";
+const REVIEWER_DISPLAY_NAME = "App Reviewer";
+
 function createAuthRouter(dependencies = {}) {
   const router = Router();
   const verifyIdentityToken =
@@ -36,7 +42,6 @@ function createAuthRouter(dependencies = {}) {
   const requireAuth =
     dependencies.requireAuth || buildRequireAuth(dependencies);
   const signToken = dependencies.signSessionToken || defaultSignSessionToken;
-  const updateStepGoal = dependencies.setStepGoal || defaultSetStepGoal;
   const updateDisplayName = dependencies.setDisplayName || defaultSetDisplayName;
   const createProfilePhotoUpload =
     dependencies.createProfilePhotoUpload ||
@@ -106,13 +111,67 @@ function createAuthRouter(dependencies = {}) {
     }
   });
 
+  // POST /auth/review
+  // Body: { email, password }
+  // Bypass for App Store reviewers. Validates against APP_REVIEW_EMAIL /
+  // APP_REVIEW_PASSWORD env vars and issues a session for the dedicated
+  // reviewer user row. The reviewer account is otherwise a normal user;
+  // there is no special flag on it (only seeded supporting cast is flagged).
+  router.post("/review", async (req, res) => {
+    try {
+      const expectedEmail = process.env.APP_REVIEW_EMAIL;
+      const expectedPassword = process.env.APP_REVIEW_PASSWORD;
+      if (!expectedEmail || !expectedPassword) {
+        return res.status(503).json({ error: "Review login is not configured" });
+      }
+
+      const { email, password } = req.body || {};
+      if (typeof email !== "string" || typeof password !== "string") {
+        return res.status(400).json({ error: "email and password are required" });
+      }
+      if (email !== expectedEmail || password !== expectedPassword) {
+        return res.status(401).json({ error: "Invalid credentials" });
+      }
+
+      let user = await UserModel.findByEmail(expectedEmail);
+      if (!user) {
+        // Auto-reprovision after deletion (or first-time deploy without the
+        // seed having run): create a bare reviewer user. They land in an
+        // empty new-account state — supporting-cast / demo races are gone
+        // until the seed is re-run, but the flow still works.
+        user = await UserModel.create({
+          appleId: REVIEWER_APPLE_ID,
+          email: expectedEmail,
+          name: REVIEWER_DISPLAY_NAME,
+          displayName: REVIEWER_DISPLAY_NAME,
+        });
+      }
+
+      const sessionToken = signToken({
+        userId: user.id,
+        appleId: user.appleId,
+      });
+
+      res.json({ user: withAdminFlag(user, checkAdmin), sessionToken });
+    } catch (error) {
+      console.error("Review auth error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   router.get("/me", requireAuth, async (req, res) => {
     try {
       const incomingFriendRequests = await getIncomingRequestCount(req.user.id);
       const heldCoins = await getHeldCoinsSafe(req.user.id);
       res.json({
         user: withAdminFlag(
-          { ...req.user, incomingFriendRequests, heldCoins },
+          {
+            ...req.user,
+            // 1.1.4 compat: clients pre-step-goal-removal expect a non-null int.
+            stepGoal: req.user.stepGoal ?? 5000,
+            incomingFriendRequests,
+            heldCoins,
+          },
           checkAdmin
         ),
       });
@@ -120,6 +179,17 @@ function createAuthRouter(dependencies = {}) {
       console.error("Get me error:", error);
       res.json({ user: req.user });
     }
+  });
+
+  // 1.1.4 compat: step-goal endpoint was removed in 1.1.5. Old clients still
+  // call this when the user opens profile. Accept and no-op so they don't 404.
+  router.put("/me/step-goal", requireAuth, async (req, res) => {
+    res.json({
+      user: withAdminFlag(
+        { ...req.user, stepGoal: req.user.stepGoal ?? 5000 },
+        checkAdmin
+      ),
+    });
   });
 
   // GET /auth/session — refresh session token
@@ -134,27 +204,6 @@ function createAuthRouter(dependencies = {}) {
       sessionToken,
       user: withAdminFlag({ ...req.user, heldCoins }, checkAdmin),
     });
-  });
-
-  router.put("/me/step-goal", requireAuth, async (req, res) => {
-    const { stepGoal } = req.body;
-
-    if (stepGoal === undefined) {
-      return res.status(400).json({ error: "stepGoal is required" });
-    }
-
-    if (!Number.isInteger(stepGoal) || stepGoal < 5000) {
-      return res
-        .status(400)
-        .json({ error: "stepGoal must be at least 5000" });
-    }
-
-    const updatedUser = await updateStepGoal({
-      userId: req.user.id,
-      stepGoal,
-    });
-
-    res.json({ user: updatedUser });
   });
 
   router.put("/me/display-name", requireAuth, async (req, res) => {

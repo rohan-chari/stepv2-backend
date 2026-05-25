@@ -62,23 +62,25 @@ async function getCurrentUserProfile(currentUserId) {
 
 async function getStepLeaderboard(period, currentUserId, timeZone) {
   const dateBoundary = getDateBoundary(period, timeZone);
-  const whereClause = dateBoundary
+  const dateClause = dateBoundary
     ? { date: { gte: new Date(dateBoundary) } }
     : {};
+  // Hide review/demo accounts from real users' public leaderboards.
+  const whereClause = { ...dateClause, user: { isReviewAccount: false } };
 
-  const top10Groups = await prisma.step.groupBy({
+  const top100Groups = await prisma.step.groupBy({
     by: ["userId"],
     _sum: { steps: true },
     where: whereClause,
     orderBy: { _sum: { steps: "desc" } },
-    take: 10,
+    take: 100,
   });
 
-  const userMap = await getUserProfiles(top10Groups.map((group) => group.userId));
+  const userMap = await getUserProfiles(top100Groups.map((group) => group.userId));
 
   let prevRank = 0;
   let prevSteps = null;
-  const top10 = top10Groups.map((group, index) => {
+  const top100 = top100Groups.map((group, index) => {
     const totalSteps = group._sum.steps || 0;
     const rank = totalSteps === prevSteps ? prevRank : index + 1;
     prevRank = rank;
@@ -93,22 +95,29 @@ async function getStepLeaderboard(period, currentUserId, timeZone) {
     };
   });
 
+  // Backward-compat: ship both top10/inTop10 (consumed by 1.1.4 FE) and
+  // top100/inTop100 (1.1.5 FE) so prod backend can be deployed before the
+  // new FE rolls out. Drop the aliases once 1.1.4 is out of the wild.
+  const top10 = top100.slice(0, 10);
+  const currentUserInTop100 = top100.find((entry) => entry.userId === currentUserId);
   const currentUserInTop10 = top10.find((entry) => entry.userId === currentUserId);
-  if (currentUserInTop10) {
+  if (currentUserInTop100) {
     return {
       top10,
+      top100,
       currentUser: {
-        rank: currentUserInTop10.rank,
-        displayName: currentUserInTop10.displayName,
-        totalSteps: currentUserInTop10.totalSteps,
-        inTop10: true,
+        rank: currentUserInTop100.rank,
+        displayName: currentUserInTop100.displayName,
+        totalSteps: currentUserInTop100.totalSteps,
+        inTop10: Boolean(currentUserInTop10),
+        inTop100: true,
       },
     };
   }
 
   const currentUserAgg = await prisma.step.aggregate({
     _sum: { steps: true },
-    where: { userId: currentUserId, ...whereClause },
+    where: { userId: currentUserId, ...dateClause },
   });
   const currentUserSteps = currentUserAgg._sum.steps || 0;
 
@@ -123,12 +132,14 @@ async function getStepLeaderboard(period, currentUserId, timeZone) {
 
   return {
     top10,
+    top100,
     currentUser: {
       rank: usersAbove.length + 1,
       displayName: currentUserProfile.displayName,
       profilePhotoUrl: currentUserProfile.profilePhotoUrl,
       totalSteps: currentUserSteps,
       inTop10: false,
+      inTop100: false,
     },
   };
 }
@@ -138,6 +149,8 @@ async function getRaceLeaderboard(currentUserId) {
     where: {
       status: "ACCEPTED",
       race: { status: "COMPLETED" },
+      // Hide review/demo accounts from real users' public records board.
+      user: { isReviewAccount: false },
     },
     select: {
       userId: true,

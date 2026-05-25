@@ -16,7 +16,7 @@ test("buildChallengeRecordLeaderboard ranks by win percentage and excludes users
     "u1"
   );
 
-  assert.deepEqual(result.top10, [
+  assert.deepEqual(result.top100, [
     {
       rank: 1,
       userId: "u1",
@@ -44,7 +44,7 @@ test("buildChallengeRecordLeaderboard ranks by win percentage and excludes users
     losses: 0,
     completedCount: 5,
     winPercentage: 1,
-    inTop10: true,
+    inTop100: true,
     qualified: true,
   });
 });
@@ -58,7 +58,7 @@ test("buildChallengeRecordLeaderboard returns current user as unranked when belo
     "u2"
   );
 
-  assert.deepEqual(result.top10, [
+  assert.deepEqual(result.top100, [
     {
       rank: 1,
       userId: "u1",
@@ -77,7 +77,7 @@ test("buildChallengeRecordLeaderboard returns current user as unranked when belo
     losses: 0,
     completedCount: 4,
     winPercentage: 1,
-    inTop10: false,
+    inTop100: false,
     qualified: false,
   });
 });
@@ -94,7 +94,7 @@ test("buildChallengeRecordLeaderboard breaks ties by completed count then wins",
   );
 
   assert.deepEqual(
-    result.top10.map((entry) => ({
+    result.top100.map((entry) => ({
       displayName: entry.displayName,
       rank: entry.rank,
       wins: entry.wins,
@@ -121,7 +121,7 @@ test("buildRaceRecordLeaderboard ranks by points then firsts then seconds then t
     "u1"
   );
 
-  assert.deepEqual(result.top10, [
+  assert.deepEqual(result.top100, [
     {
       rank: 1,
       userId: "u1",
@@ -162,7 +162,7 @@ test("buildRaceRecordLeaderboard ranks by points then firsts then seconds then t
     firsts: 1,
     seconds: 1,
     thirds: 0,
-    inTop10: true,
+    inTop100: true,
   });
 });
 
@@ -177,7 +177,7 @@ test("buildRaceRecordLeaderboard gives equal rank when race records are identica
   );
 
   assert.deepEqual(
-    result.top10.map((entry) => ({
+    result.top100.map((entry) => ({
       displayName: entry.displayName,
       rank: entry.rank,
     })),
@@ -198,7 +198,7 @@ test("buildRaceRecordLeaderboard excludes users without a top-3 finish", () => {
     "u2"
   );
 
-  assert.deepEqual(result.top10, [
+  assert.deepEqual(result.top100, [
     {
       rank: 1,
       userId: "u1",
@@ -215,6 +215,6 @@ test("buildRaceRecordLeaderboard excludes users without a top-3 finish", () => {
     firsts: 0,
     seconds: 0,
     thirds: 0,
-    inTop10: false,
+    inTop100: false,
   });
 });

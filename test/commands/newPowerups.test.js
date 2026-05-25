@@ -585,3 +585,83 @@ test("Trail Mine triggers when the next runner crosses its step position", async
   assert.equal(feedEvents[0].powerupType, "TRAIL_MINE");
   assert.equal(feedEvents[0].targetUserId, "user-bob");
 });
+
+test("Pocket Watch does not extend an opponent-applied debuff (WRONG_TURN)", async () => {
+  const ctx = makeUseDeps({
+    powerupType: "POCKET_WATCH",
+    activeEffects: [
+      {
+        id: "eff-rh",
+        type: "RUNNERS_HIGH",
+        status: "ACTIVE",
+        targetParticipantId: "rp-alice",
+        targetUserId: "user-alice",
+        sourceUserId: "user-alice",
+        expiresAt: new Date("2026-05-14T13:00:00Z"),
+      },
+      {
+        id: "eff-wt",
+        type: "WRONG_TURN",
+        status: "ACTIVE",
+        targetParticipantId: "rp-alice",
+        targetUserId: "user-alice",
+        sourceUserId: "user-bob",
+        expiresAt: new Date("2026-05-14T13:30:00Z"),
+      },
+    ],
+  });
+  const use = buildUsePowerup(ctx.deps);
+
+  await use({
+    userId: "user-alice",
+    raceId: "race-1",
+    powerupId: "pw-watch",
+    upgradeLevel: 0,
+  });
+
+  // Only the Runner's High should be extended; the opponent-applied
+  // Wrong Turn debuff must be left alone.
+  assert.equal(ctx.effectsUpdated.length, 1);
+  assert.equal(ctx.effectsUpdated[0].id, "eff-rh");
+  assert.equal(
+    ctx.effectsUpdated[0].fields.expiresAt.toISOString(),
+    "2026-05-14T14:00:00.000Z",
+  );
+});
+
+test("Pocket Watch rejects when only opponent-applied debuffs are active", async () => {
+  const ctx = makeUseDeps({
+    powerupType: "POCKET_WATCH",
+    activeEffects: [
+      {
+        id: "eff-wt",
+        type: "WRONG_TURN",
+        status: "ACTIVE",
+        targetParticipantId: "rp-alice",
+        targetUserId: "user-alice",
+        sourceUserId: "user-bob",
+        expiresAt: new Date("2026-05-14T13:30:00Z"),
+      },
+      {
+        id: "eff-cramp",
+        type: "LEG_CRAMP",
+        status: "ACTIVE",
+        targetParticipantId: "rp-alice",
+        targetUserId: "user-alice",
+        sourceUserId: "user-bob",
+        expiresAt: new Date("2026-05-14T14:00:00Z"),
+      },
+    ],
+  });
+  const use = buildUsePowerup(ctx.deps);
+
+  await assert.rejects(
+    () => use({ userId: "user-alice", raceId: "race-1", powerupId: "pw-watch" }),
+    (err) => {
+      assert.ok(err instanceof PowerupUseError);
+      assert.equal(err.statusCode, 400);
+      return err.message.includes("active timed buff");
+    },
+  );
+});
+

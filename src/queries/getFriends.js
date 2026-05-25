@@ -48,7 +48,7 @@ async function getIncomingFriendRequestCount(userId) {
 }
 
 async function getFriendsWithSteps(userId, date) {
-  const friendships = await Friendship.findFriendsWithStepGoals(userId);
+  const friendships = await Friendship.findAcceptedFriendsWithDisplay(userId);
 
   const friends = friendships.map((f) => {
     const friend = f.requesterId === userId ? f.addressee : f.requester;
@@ -57,7 +57,6 @@ async function getFriendsWithSteps(userId, date) {
       displayName: friend.displayName,
       profilePhotoUrl: friend.profilePhotoUrl,
       accessories: buildAccessoriesList(friend),
-      stepGoal: friend.stepGoal,
     };
   });
 
@@ -68,6 +67,8 @@ async function getFriendsWithSteps(userId, date) {
   return friends.map((f, i) => ({
     ...f,
     steps: stepsResults[i]?.steps ?? 0,
+    // 1.1.4 compat — pre-step-goal-removal clients render this on friend cards.
+    stepGoal: 5000,
   }));
 }
 

@@ -15,15 +15,20 @@ model User {
   profilePhotoUrl String? @map("profile_photo_url")
   profilePhotoKey String? @map("profile_photo_key")
   profilePhotoPromptDismissedAt DateTime? @map("profile_photo_prompt_dismissed_at")
-  stepGoal    Int      @default(5000) @map("step_goal")
+  // Deprecated: step goals are no longer part of the product. Kept
+  // nullable for back-compat with existing rows. New code must not read
+  // or write this field.
+  stepGoal    Int?     @map("step_goal")
   lastStepSyncAt DateTime? @map("last_step_sync_at")
   lastSilentPushSentAt DateTime? @map("last_silent_push_sent_at")
   coins     Int      @default(0)
   lastDailyClaimDate String? @map("last_daily_claim_date")
   dailyStreakDay     Int     @default(0) @map("daily_streak_day")
+  isReviewAccount    Boolean @default(false) @map("is_review_account")
   createdAt DateTime @default(now()) @map("created_at")
   steps     Step[]
-  dailyRewardClaims  DailyRewardClaim[]
+  dailyRewardClaims    DailyRewardClaim[]
+  stepMilestoneClaims  StepMilestoneClaim[]
   sentRequests     Friendship[] @relation("sentRequests")
   receivedRequests Friendship[] @relation("receivedRequests")
 
@@ -56,6 +61,21 @@ enum RelationshipType {
   PARTNER   @map("partner")
   FRIEND    @map("friend")
   FAMILY    @map("family")
+}
+
+model StepMilestoneClaim {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  claimedDate String   @map("claimed_date")
+  threshold   Int
+  coins       Int
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, claimedDate, threshold])
+  @@index([userId, claimedDate])
+  @@map("step_milestone_claims")
 }
 
 model DailyRewardClaim {
@@ -409,11 +429,14 @@ enum RaceBuyInStatus {
 
 model Race {
   id              String     @id @default(uuid())
-  creatorId       String     @map("creator_id")
+  creatorId       String?    @map("creator_id")
+  seedId          String?    @map("seed_id")
   name            String
   targetSteps     Int        @map("target_steps")
   status          RaceStatus @default(PENDING)
-  maxDurationDays Int        @default(7) @map("max_duration_days")
+  // maxDurationDays is set on all new races; kept nullable for backward compat
+  // with existing rows from the step-goal-only window which have NULL.
+  maxDurationDays Int?       @map("max_duration_days")
   buyInAmount     Int        @default(0) @map("buy_in_amount")
   payoutPreset    RacePayoutPreset @default(WINNER_TAKES_ALL) @map("payout_preset")
   potCoins        Int        @default(0) @map("pot_coins")
@@ -428,7 +451,8 @@ model Race {
   createdAt            DateTime   @default(now()) @map("created_at")
   updatedAt            DateTime   @updatedAt @map("updated_at")
 
-  creator      User              @relation("raceCreator", fields: [creatorId], references: [id])
+  creator      User?             @relation("raceCreator", fields: [creatorId], references: [id])
+  seed         RaceSeed?         @relation(fields: [seedId], references: [id])
   winner       User?             @relation("raceWinner", fields: [winnerUserId], references: [id])
   participants RaceParticipant[]
   powerups     RacePowerup[]
@@ -440,7 +464,32 @@ model Race {
   @@index([status])
   @@index([winnerUserId])
   @@index([isPublic, status])
+  @@index([seedId, status])
   @@map("races")
+}
+
+enum RaceSeedCadence {
+  DAILY   @map("daily")
+  WEEKLY  @map("weekly")
+}
+
+model RaceSeed {
+  id              String          @id
+  kind            String          @unique
+  name            String
+  targetSteps     Int             @map("target_steps")
+  // durationHours is read for new seeded races to compute endsAt; kept
+  // nullable in the schema for backward compat with existing rows.
+  durationHours   Int?            @map("duration_hours")
+  cadence         RaceSeedCadence
+  maxParticipants Int             @default(100) @map("max_participants")
+  active          Boolean         @default(true)
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+
+  races Race[]
+
+  @@map("race_seeds")
 }
 
 model RaceParticipant {
@@ -464,6 +513,7 @@ model RaceParticipant {
   lastReadRaceChatAt DateTime?        @map("last_read_race_chat_at")
   lastChatPushAt     DateTime?        @map("last_chat_push_at")
   chatMuted          Boolean          @default(false) @map("chat_muted")
+  inviteExpiresAt    DateTime?        @map("invite_expires_at")
 
   race          Race @relation(fields: [raceId], references: [id], onDelete: Cascade)
   user          User @relation(fields: [userId], references: [id])
@@ -473,6 +523,7 @@ model RaceParticipant {
   @@unique([raceId, userId])
   @@index([userId, status])
   @@index([raceId, status])
+  @@index([userId, status, inviteExpiresAt])
   @@map("race_participants")
 }
 
@@ -484,7 +535,7 @@ model RacePowerup {
   type          PowerupType?
   rarity        PowerupRarity?
   status        PowerupStatus @default(HELD)
-  earnedAtSteps Int           @map("earned_at_steps")
+  earnedAtSteps Int?          @map("earned_at_steps")
   usedAt        DateTime?     @map("used_at")
   targetUserId  String?       @map("target_user_id")
   upgradeLevel  Int           @default(0) @map("upgrade_level")

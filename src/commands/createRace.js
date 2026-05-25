@@ -6,8 +6,14 @@ const { eventBus } = require("../events/eventBus");
 const {
   ensureUserCanAfford,
   reserveRaceBuyIn,
-  validateRaceBuyInConfig,
 } = require("../services/raceBuyIns");
+const {
+  validateRaceName,
+  validateDuration,
+  validatePowerupConfig,
+  validateMaxParticipants,
+  validateRaceBuyInConfig,
+} = require("../services/validateRaceConfig");
 
 class RaceCreationError extends Error {
   constructor(message, statusCode) {
@@ -27,7 +33,6 @@ function buildCreateRace(dependencies = {}) {
   return async function createRace({
     userId,
     name,
-    targetSteps,
     maxDurationDays = 7,
     powerupsEnabled = false,
     powerupStepInterval,
@@ -35,30 +40,20 @@ function buildCreateRace(dependencies = {}) {
     payoutPreset,
     isPublic = false,
     maxParticipants = 10,
+    // 1.1.4 compat: legacy clients still send targetSteps on createRace. New
+    // clients don't, in which case it stays 0. The value isn't used by the
+    // backend for completion logic (time-based only) — kept solely so the
+    // legacy UI can render the target it picked.
+    targetSteps = 0,
   }) {
-    if (!name || typeof name !== "string" || name.trim().length === 0) {
-      throw new RaceCreationError("Race name is required", 400);
-    }
-    if (name.trim().length > 50) {
-      throw new RaceCreationError("Race name must be 50 characters or less", 400);
-    }
-    if (!targetSteps || targetSteps < 1000) {
-      throw new RaceCreationError("Target steps must be at least 1,000", 400);
-    }
-    if (targetSteps > 1000000) {
-      throw new RaceCreationError("Target steps must be 1,000,000 or less", 400);
-    }
-    if (maxDurationDays < 1 || maxDurationDays > 30) {
-      throw new RaceCreationError("Duration must be between 1 and 30 days", 400);
-    }
-    if (powerupsEnabled) {
-      if (!powerupStepInterval || powerupStepInterval < 1000 || powerupStepInterval > 50000) {
-        throw new RaceCreationError("Powerup step interval must be between 1,000 and 50,000", 400);
-      }
-    }
-    if (!Number.isInteger(maxParticipants) || maxParticipants < 2 || maxParticipants > 100) {
-      throw new RaceCreationError("Max participants must be between 2 and 100", 400);
-    }
+    validateRaceName(name, RaceCreationError);
+    validateDuration(maxDurationDays, RaceCreationError);
+    validatePowerupConfig({
+      powerupsEnabled,
+      powerupStepInterval,
+      ErrorClass: RaceCreationError,
+    });
+    validateMaxParticipants(maxParticipants, RaceCreationError);
 
     const buyInConfig = validateRaceBuyInConfig({
       buyInAmount,
@@ -76,7 +71,9 @@ function buildCreateRace(dependencies = {}) {
     const race = await raceModel.create({
       creatorId: userId,
       name: name.trim(),
-      targetSteps,
+      // 1.1.4 compat: persist whatever targetSteps the legacy client sent so it
+      // can render its own UI. Not used for completion (time-based only).
+      targetSteps: Number.isFinite(targetSteps) && targetSteps > 0 ? targetSteps : 0,
       maxDurationDays,
       powerupsEnabled: !!powerupsEnabled,
       powerupStepInterval: powerupsEnabled ? powerupStepInterval : null,

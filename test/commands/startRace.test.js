@@ -69,6 +69,23 @@ function makeDeps(overrides = {}) {
   };
 }
 
+test("startRace sets endsAt to startedAt + maxDurationDays on the race", async () => {
+  const { deps, raceUpdates, startedAt } = makeDeps();
+  const startRace = buildStartRace(deps);
+
+  await startRace({ userId: "creator-1", raceId: "race-1" });
+
+  const statusUpdate = raceUpdates.find((u) => u.fields.status === "ACTIVE");
+  assert.ok(statusUpdate, "expected status update");
+  const expectedEndsAt = new Date(
+    startedAt.getTime() + 7 * 24 * 60 * 60 * 1000
+  );
+  assert.equal(
+    statusUpdate.fields.endsAt.toISOString(),
+    expectedEndsAt.toISOString()
+  );
+});
+
 test("startRace snapshots baseline steps for each accepted participant", async () => {
   const { deps, updates } = makeDeps();
   const startRace = buildStartRace(deps);

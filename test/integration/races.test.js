@@ -124,12 +124,11 @@ describe("races", () => {
     it("creates race with valid fields → PENDING status", async () => {
       const alice = await createUser("AliceWalker");
 
-      const res = await createRace(alice.token, { name: "Weekend Warriors", targetSteps: 25000, maxDurationDays: 5 });
+      const res = await createRace(alice.token, { name: "Weekend Warriors", maxDurationDays: 5 });
       assert.equal(res.status, 201);
 
       const body = await res.json();
       assert.equal(body.race.name, "Weekend Warriors");
-      assert.equal(body.race.targetSteps, 25000);
       assert.equal(body.race.maxDurationDays, 5);
       assert.equal(body.race.status, "PENDING");
     });
@@ -160,12 +159,6 @@ describe("races", () => {
       assert.equal(res.status, 400);
     });
 
-    it("rejects targetSteps below 1000", async () => {
-      const alice = await createUser("AliceWalker");
-      const res = await createRace(alice.token, { targetSteps: 500 });
-      assert.equal(res.status, 400);
-    });
-
     it("rejects maxDurationDays outside 1-30", async () => {
       const alice = await createUser("AliceWalker");
 
@@ -175,6 +168,7 @@ describe("races", () => {
       const res31 = await createRace(alice.token, { maxDurationDays: 31 });
       assert.equal(res31.status, 400);
     });
+
   });
 
   // === INVITING FRIENDS ===

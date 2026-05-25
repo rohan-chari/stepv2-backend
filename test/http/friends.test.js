@@ -338,8 +338,8 @@ test("GET /friends/steps returns friends with today's steps and goal", async () 
         assert.equal(userId, "user-1");
         assert.equal(date, "2026-03-12");
         return [
-          { id: "user-2", displayName: "Trail Buddy", steps: 8500, stepGoal: 10000 },
-          { id: "user-3", displayName: "Hiker", steps: 0, stepGoal: null },
+          { id: "user-2", displayName: "Trail Buddy", steps: 8500 },
+          { id: "user-3", displayName: "Hiker", steps: 0 },
         ];
       },
     })
@@ -355,9 +355,7 @@ test("GET /friends/steps returns friends with today's steps and goal", async () 
     assert.equal(body.friends.length, 2);
     assert.equal(body.friends[0].displayName, "Trail Buddy");
     assert.equal(body.friends[0].steps, 8500);
-    assert.equal(body.friends[0].stepGoal, 10000);
     assert.equal(body.friends[1].steps, 0);
-    assert.equal(body.friends[1].stepGoal, null);
   } finally {
     await server.close();
   }
@@ -370,8 +368,8 @@ test("GET /friends/steps requests background sync for today's friend ids", async
     authMocks({
       async getFriendsWithSteps() {
         return [
-          { id: "user-2", displayName: "Trail Buddy", steps: 8500, stepGoal: 10000 },
-          { id: "user-3", displayName: "Hiker", steps: 0, stepGoal: null },
+          { id: "user-2", displayName: "Trail Buddy", steps: 8500 },
+          { id: "user-3", displayName: "Hiker", steps: 0 },
         ];
       },
       async requestStepSyncForUsers(userIds) {
@@ -398,7 +396,7 @@ test("GET /friends/steps does not request background sync for historical dates",
   const server = await startServer(
     authMocks({
       async getFriendsWithSteps() {
-        return [{ id: "user-2", displayName: "Trail Buddy", steps: 8500, stepGoal: 10000 }];
+        return [{ id: "user-2", displayName: "Trail Buddy", steps: 8500 }];
       },
       async requestStepSyncForUsers() {
         syncRequested = true;
@@ -454,7 +452,7 @@ test("GET /friends/steps does not return non-friends", async () => {
         assert.equal(userId, "user-1");
         // Only accepted friends are returned — user-5 is not a friend
         return [
-          { id: "user-2", displayName: "Trail Buddy", steps: 5000, stepGoal: 10000 },
+          { id: "user-2", displayName: "Trail Buddy", steps: 5000 },
         ];
       },
     })

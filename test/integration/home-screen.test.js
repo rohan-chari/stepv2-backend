@@ -52,10 +52,6 @@ describe("home screen data fetch", () => {
       body: { displayName: "HomeScreenUser" },
       token,
     });
-    await request(server.baseUrl, "PUT", "/auth/me/step-goal", {
-      body: { stepGoal: 10000 },
-      token,
-    });
   });
 
   it("GET /auth/session returns refreshed token and user", async () => {
@@ -73,7 +69,6 @@ describe("home screen data fetch", () => {
 
     const body = await res.json();
     assert.equal(body.user.displayName, "HomeScreenUser");
-    assert.equal(body.user.stepGoal, 10000);
     assert.equal(body.user.coins, 0);
     assert.equal(body.user.incomingFriendRequests, 0);
   });

@@ -1,10 +1,8 @@
 const { Steps } = require("../models/steps");
-const { User } = require("../models/user");
 const { getTimeZoneParts } = require("../utils/week");
 
 function buildGetStepCalendar(deps = {}) {
   const stepsModel = deps.Steps || Steps;
-  const userModel = deps.User || User;
   const now = deps.now || (() => new Date());
 
   return async function getStepCalendar(userId, month, timeZone) {
@@ -19,13 +17,11 @@ function buildGetStepCalendar(deps = {}) {
     const startDate = `${year}-${String(monthNum).padStart(2, "0")}-01`;
     const endDate = `${year}-${String(monthNum).padStart(2, "0")}-${String(daysInMonth).padStart(2, "0")}`;
 
-    // Fetch step records and user
-    const [records, user] = await Promise.all([
-      stepsModel.findByUserIdAndDateRange(userId, startDate, endDate),
-      userModel.findById(userId),
-    ]);
-
-    const defaultGoal = user?.stepGoal || 5000;
+    const records = await stepsModel.findByUserIdAndDateRange(
+      userId,
+      startDate,
+      endDate
+    );
 
     // Build a map of date → record
     const recordMap = new Map();
@@ -46,22 +42,21 @@ function buildGetStepCalendar(deps = {}) {
       const record = recordMap.get(dateStr);
 
       const steps = record?.steps || 0;
-      const stepGoal = record?.stepGoal ?? defaultGoal;
-      const goalMet = steps >= stepGoal;
       const isFuture = dateStr > todayStr;
       const isToday = dateStr === todayStr;
 
       days.push({
         date: dateStr,
         steps,
-        stepGoal,
-        goalMet,
         future: isFuture,
         isToday,
+        // 1.1.4 compat: legacy clients render a per-day goal bar.
+        stepGoal: record?.stepGoal ?? 5000,
+        goalMet: steps >= (record?.stepGoal ?? 5000),
       });
     }
 
-    return { days };
+    return { days, stepGoal: 5000 };
   };
 }
 

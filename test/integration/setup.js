@@ -11,6 +11,8 @@ const TABLES_IN_ORDER = [
   "race_participants",
   "races",
   "shop_purchase_requests",
+  "step_milestone_claims",
+  "daily_reward_claims",
   "user_equipped_accessories",
   "user_shop_items",
   "shop_items",
@@ -58,7 +60,6 @@ async function createTestUser(overrides = {}) {
       appleId: overrides.appleId || `apple-${Date.now()}-${Math.random().toString(36).slice(2)}`,
       email: overrides.email || `test-${Date.now()}@example.com`,
       displayName: overrides.displayName || null,
-      stepGoal: overrides.stepGoal || 10000,
       ...overrides,
     },
   });

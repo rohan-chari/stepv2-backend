@@ -4,6 +4,7 @@ const { createApp } = require("./app");
 const { registerEventHandlers } = require("./handlers/eventHandlers");
 const { registerNotificationHandlers } = require("./handlers/notificationHandlers");
 const { scheduleRaceExpiryCheck } = require("./jobs/raceExpiry");
+const { scheduleSeededRaceRenewal } = require("./jobs/seededRaceRenewal");
 
 function startServer({
   app = createApp(),
@@ -12,6 +13,7 @@ function startServer({
   registerEventHandlers: register = registerEventHandlers,
   registerNotificationHandlers: registerNotifications = registerNotificationHandlers,
   scheduleRaceExpiryCheck: scheduleRaceExpiry = scheduleRaceExpiryCheck,
+  scheduleSeededRaceRenewal: scheduleSeededRenewal = scheduleSeededRaceRenewal,
   logger = console,
 } = {}) {
   register();
@@ -20,6 +22,7 @@ function startServer({
   return app.listen(port, host, () => {
     logger.log(`Steps Tracker API running on ${host}:${port}`);
     scheduleRaceExpiry();
+    scheduleSeededRenewal();
   });
 }
 

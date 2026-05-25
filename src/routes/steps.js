@@ -3,7 +3,6 @@ const { recordSteps } = require("../commands/recordSteps");
 const { recordStepSamples: defaultRecordStepSamples } = require("../commands/recordStepSamples");
 const { getStepsByDate, getStepsHistory } = require("../queries/getSteps");
 const { getStepCalendar: defaultGetStepCalendar } = require("../queries/getStepCalendar");
-const { User } = require("../models/user");
 const { buildRequireAuth } = require("../middleware/requireAuth");
 const { getMondayOfWeek, getTimeZoneParts } = require("../utils/week");
 const { calculateStreak } = require("../utils/streak");
@@ -16,7 +15,6 @@ function createStepsRouter(dependencies = {}) {
   const readStepsByDate = dependencies.getStepsByDate || getStepsByDate;
   const readStepsHistory = dependencies.getStepsHistory || getStepsHistory;
   const recordSamples = dependencies.recordStepSamples || defaultRecordStepSamples;
-  const userModel = dependencies.User || User;
   const getCalendar = dependencies.getStepCalendar || defaultGetStepCalendar;
 
   router.use(requireAuth);
@@ -72,13 +70,21 @@ function createStepsRouter(dependencies = {}) {
     try {
       const { date } = req.query;
 
+      // 1.1.4 compat: clients pre-step-goal-removal expect stepGoal on each
+      // record. Backfill with the legacy default so old UI renders cleanly.
+      const COMPAT_STEP_GOAL = 5000;
+
       if (date) {
         const record = await readStepsByDate(req.user.id, date);
-        return res.json({ record });
+        return res.json({
+          record: record ? { ...record, stepGoal: record.stepGoal ?? COMPAT_STEP_GOAL } : record,
+        });
       }
 
       const records = await readStepsHistory(req.user.id);
-      res.json({ records });
+      res.json({
+        records: records.map((r) => ({ ...r, stepGoal: r.stepGoal ?? COMPAT_STEP_GOAL })),
+      });
     } catch (error) {
       console.error("Steps query error:", error);
       res.status(500).json({ error: "Internal server error" });
@@ -88,8 +94,6 @@ function createStepsRouter(dependencies = {}) {
   // GET /steps/stats
   router.get("/stats", async (req, res) => {
     try {
-      const user = await userModel.findById(req.user.id);
-      const stepGoal = user?.stepGoal || 5000;
       const allSteps = await readStepsHistory(req.user.id);
 
       const now = new Date();
@@ -116,10 +120,10 @@ function createStepsRouter(dependencies = {}) {
         if (dateStr >= monthStart) thisMonth += steps;
         if (dateStr >= weekOf) thisWeek += steps;
 
-        dateMap.set(dateStr, { steps, stepGoal: record.stepGoal });
+        dateMap.set(dateStr, { steps });
       }
 
-      const streak = calculateStreak(todayStr, dateMap, stepGoal);
+      const streak = calculateStreak(todayStr, dateMap);
 
       res.json({
         thisWeek,
@@ -127,7 +131,8 @@ function createStepsRouter(dependencies = {}) {
         thisYear,
         allTime,
         streak,
-        stepGoal,
+        // 1.1.4 compat — legacy clients expect stepGoal on the stats payload.
+        stepGoal: req.user.stepGoal ?? 5000,
       });
     } catch (error) {
       console.error("Stats error:", error);

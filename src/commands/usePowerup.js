@@ -46,6 +46,19 @@ const FANNY_PACK_DURATION_MS = 24 * 60 * 60 * 1000;
 const CAMPFIRE_FREEZE_MS = 30 * 60 * 1000;
 const CAMPFIRE_BOOST_MS = 60 * 60 * 1000;
 
+// Pocket Watch extends only the user's own active timed buffs — not debuffs
+// (LEG_CRAMP, WRONG_TURN, DETOUR_SIGN) inflicted by opponents, and never
+// itself. Self-applied effects have sourceUserId === targetUserId; in
+// production both fields are always populated on raceActiveEffect rows.
+function isPocketWatchExtendable(effect) {
+  if (!effect.expiresAt) return false;
+  if (effect.type === "POCKET_WATCH") return false;
+  if (effect.sourceUserId && effect.targetUserId) {
+    return effect.sourceUserId === effect.targetUserId;
+  }
+  return true;
+}
+
 const RED_CARD_PERCENT = 0.10;
 const SECOND_WIND_MIN = 500;
 const SECOND_WIND_MAX = 5000;
@@ -311,7 +324,7 @@ function buildUsePowerup(dependencies = {}) {
 
     if (type === "POCKET_WATCH") {
       const activeTimedEffects = (await effectModel.findActiveForParticipant(myParticipant.id))
-        .filter((effect) => effect.expiresAt && effect.type !== "POCKET_WATCH");
+        .filter(isPocketWatchExtendable);
       if (activeTimedEffects.length === 0) {
         throw new PowerupUseError("Pocket Watch requires an active timed buff", 400);
       }
@@ -802,7 +815,7 @@ function buildUsePowerup(dependencies = {}) {
       case "POCKET_WATCH": {
         const extensionMs = upgradedDuration("POCKET_WATCH", upgradeLevel);
         const activeTimedEffects = (await effectModel.findActiveForParticipant(myParticipant.id))
-          .filter((effect) => effect.expiresAt && effect.type !== "POCKET_WATCH");
+          .filter(isPocketWatchExtendable);
         for (const effect of activeTimedEffects) {
           await effectModel.update(effect.id, {
             expiresAt: new Date(new Date(effect.expiresAt).getTime() + extensionMs),

@@ -182,4 +182,59 @@ describe("new powerups — integration", () => {
     assert.equal(blockedRes.status, 400);
     assert.match((await blockedRes.json()).error, /stealthed/i);
   });
+
+  // Regression: prod was hitting P2002 (unique on participant_id + earned_at_steps)
+  // any time the offered and requested powerups landed on milestones the receiving
+  // participant had already earned at. Fix: clear earned_at_steps on swap.
+  it("Sneaky Swap succeeds when both participants share earned_at_steps milestones", async () => {
+    const { alice, bob, raceId } = await createActiveRace();
+
+    const sneaky = await giveHeldPowerup(raceId, alice.userId, "SNEAKY_SWAP", 1000, "RARE");
+    // Alice's offered and Bob's requested share earnedAtSteps=5000.
+    // Pre-fix: writing Alice's offered into (bob, 5000) collides with Bob's
+    // own powerup already at (bob, 5000). The swap throws P2002.
+    const aliceOffered = await giveHeldPowerup(
+      raceId,
+      alice.userId,
+      "PROTEIN_SHAKE",
+      5000,
+      "COMMON"
+    );
+    const bobRequested = await giveHeldPowerup(
+      raceId,
+      bob.userId,
+      "TRAIL_MIX",
+      5000,
+      "COMMON"
+    );
+
+    const res = await usePowerup(alice.token, raceId, sneaky.id, {
+      targetUserId: bob.userId,
+      swapOfferedPowerupId: aliceOffered.id,
+      swapRequestedPowerupId: bobRequested.id,
+    });
+
+    assert.equal(res.status, 200);
+
+    const aliceParticipant = await participant(raceId, alice.userId);
+    const bobParticipant = await participant(raceId, bob.userId);
+
+    const movedOffered = await prisma.racePowerup.findUnique({
+      where: { id: aliceOffered.id },
+    });
+    const movedRequested = await prisma.racePowerup.findUnique({
+      where: { id: bobRequested.id },
+    });
+
+    // Ownership swapped.
+    assert.equal(movedOffered.participantId, bobParticipant.id);
+    assert.equal(movedOffered.userId, bob.userId);
+    assert.equal(movedRequested.participantId, aliceParticipant.id);
+    assert.equal(movedRequested.userId, alice.userId);
+
+    // earned_at_steps cleared on both so the swap can't collide with the
+    // receiver's existing milestone-bound row.
+    assert.equal(movedOffered.earnedAtSteps, null);
+    assert.equal(movedRequested.earnedAtSteps, null);
+  });
 });

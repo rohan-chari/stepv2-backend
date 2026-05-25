@@ -164,7 +164,12 @@ const Race = {
 
   async findPublicPending() {
     return prisma.race.findMany({
-      where: { isPublic: true, status: "PENDING" },
+      where: {
+        isPublic: true,
+        status: "PENDING",
+        // Hide review/demo-creator races from real users' public browser.
+        creator: { isReviewAccount: false },
+      },
       include: {
         creator: { select: { id: true, displayName: true, profilePhotoUrl: true } },
         ...participantInclude,
@@ -184,6 +189,7 @@ const Race = {
       },
     });
   },
+
 };
 
 module.exports = { Race };

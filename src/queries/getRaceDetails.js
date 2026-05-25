@@ -32,9 +32,9 @@ async function getRaceDetails(userId, raceId) {
   return {
     id: race.id,
     name: race.name,
-    targetSteps: race.targetSteps,
     status: race.status,
     maxDurationDays: race.maxDurationDays,
+    targetSteps: race.targetSteps, // 1.1.4 compat
     buyInAmount: race.buyInAmount,
     payoutPreset: race.payoutPreset,
     potCoins: race.potCoins || 0,
