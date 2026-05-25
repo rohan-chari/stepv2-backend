@@ -13,10 +13,12 @@ const User = {
     return prisma.user.findFirst({ where: { email } });
   },
 
-  async create({ appleId, email, name }) {
-    return prisma.user.create({
-      data: { appleId, email, name },
-    });
+  async create({ appleId, email, name, displayName }) {
+    const data = { appleId, email, name };
+    if (displayName !== undefined) {
+      data.displayName = displayName;
+    }
+    return prisma.user.create({ data });
   },
 
   async update(id, fields) {

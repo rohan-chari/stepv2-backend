@@ -28,6 +28,13 @@ const {
 const DISPLAY_NAME_MIN_LENGTH = 8;
 const { isAdminUser, withAdminFlag } = require("../services/adminAccess");
 
+// Reviewer account constants — kept in sync with scripts/seed-app-review-demo.js.
+// The /auth/review endpoint auto-reprovisions the row if it's missing (e.g.
+// reviewer deleted the account during a 5.1.1 compliance check), so we never
+// lock the reviewer out and never block the in-app delete flow.
+const REVIEWER_APPLE_ID = "review-account-v1";
+const REVIEWER_DISPLAY_NAME = "App Reviewer";
+
 function createAuthRouter(dependencies = {}) {
   const router = Router();
   const verifyIdentityToken =
@@ -128,11 +135,18 @@ function createAuthRouter(dependencies = {}) {
         return res.status(401).json({ error: "Invalid credentials" });
       }
 
-      const user = await UserModel.findByEmail(expectedEmail);
+      let user = await UserModel.findByEmail(expectedEmail);
       if (!user) {
-        return res
-          .status(500)
-          .json({ error: "Review account is not provisioned" });
+        // Auto-reprovision after deletion (or first-time deploy without the
+        // seed having run): create a bare reviewer user. They land in an
+        // empty new-account state — supporting-cast / demo races are gone
+        // until the seed is re-run, but the flow still works.
+        user = await UserModel.create({
+          appleId: REVIEWER_APPLE_ID,
+          email: expectedEmail,
+          name: REVIEWER_DISPLAY_NAME,
+          displayName: REVIEWER_DISPLAY_NAME,
+        });
       }
 
       const sessionToken = signToken({
