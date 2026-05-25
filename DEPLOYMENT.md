@@ -4,11 +4,14 @@ Two pm2 processes running on the same DigitalOcean droplet, each from its own gi
 
 | Env     | Checkout path                            | pm2 name                | Port | Database               | Branch       | APNS host  |
 | ------- | ---------------------------------------- | ----------------------- | ---- | ---------------------- | ------------ | ---------- |
-| prod    | `/var/www/step-tracker-backend`          | `3` (id)                | 3000 | `step-tracker`         | `main`       | production |
-| staging | `/var/www/step-tracker-backend-staging`  | `step-tracker-staging`  | 3003 | `step-tracker-staging` | release branch (`1.1.5`, `1.1.6`, …) | sandbox |
+| prod    | `/var/www/step-tracker-backend`          | `steps-tracker` (id `3`) | 3002 | `step-tracker`         | `main`       | production |
+| staging | `/var/www/step-tracker-backend-staging`  | `steps-tracker-staging` (id `4`) | 3003 | `step-tracker-staging` | release branch (`1.1.5`, `1.1.6`, …) | sandbox |
 
-Staging is fronted by nginx + Let's Encrypt at `https://staging.steptracker-api.org`.
-Prod is at the production API URL.
+nginx + Let's Encrypt front both:
+- prod:    `https://steptracker-api.org`         → `localhost:3002`
+- staging: `https://staging.steptracker-api.org` → `localhost:3003`
+
+(Note: there is no `api.` subdomain — `api.steptracker-api.org` does not resolve.)
 
 ---
 
@@ -56,7 +59,7 @@ pm2 restart steps-tracker-staging
 Confirm it came up:
 
 ```bash
-pm2 logs step-tracker-staging --lines 30
+pm2 logs steps-tracker-staging --lines 30
 ```
 
 ### 4. Test against staging
@@ -106,7 +109,7 @@ pm2 restart 3
 
 ```bash
 pm2 logs 3 --lines 50
-curl https://api.steptracker-api.org/health    # or your prod URL
+curl https://steptracker-api.org/health    # prod (also: localhost:3002/health)
 ```
 
 Hit the app on your phone, check sign-in / home / races / leaderboard.
@@ -155,9 +158,9 @@ Migrations are the one thing that's hard to undo. Rules:
 From your laptop, not the droplet. Requires `STAGING_DATABASE_URL` in your local `.env`.
 
 ```bash
-ssh <droplet> 'pm2 stop step-tracker-staging'
+ssh <droplet> 'pm2 stop steps-tracker-staging'
 node scripts/sync-prod-to-local.js --target=staging
-ssh <droplet> 'pm2 start step-tracker-staging'
+ssh <droplet> 'pm2 start steps-tracker-staging'
 ```
 
 The script:
