@@ -3,4 +3,5 @@
 -- so the raceExpiry cron can settle them.
 UPDATE "races"
 SET "ends_at" = "started_at" + INTERVAL '7 days', "max_duration_days" = 7
-WHERE status = 'ACTIVE' AND "started_at" IS NOT NULL AND "ends_at" IS NULL;
+-- RaceStatus enum is @map-ed to lowercase in the DB (pending/active/completed).
+WHERE status = 'active' AND "started_at" IS NOT NULL AND "ends_at" IS NULL;
