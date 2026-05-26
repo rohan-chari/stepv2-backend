@@ -106,8 +106,17 @@ test("joinPublicRace rejects non-public races", async () => {
   );
 });
 
-test("joinPublicRace rejects when race has started", async () => {
+test("joinPublicRace allows joining an ACTIVE race (time-based, join anytime)", async () => {
   const ctx = makeDeps({ race: makeRace({ status: "ACTIVE" }) });
+  const join = buildJoinPublicRace(ctx.deps);
+
+  const participant = await join({ userId: "user-2", raceId: "race-1" });
+  assert.equal(participant.status, "ACCEPTED");
+  assert.equal(ctx.participants.length, 1);
+});
+
+test("joinPublicRace rejects a COMPLETED race", async () => {
+  const ctx = makeDeps({ race: makeRace({ status: "COMPLETED" }) });
   const join = buildJoinPublicRace(ctx.deps);
 
   await assert.rejects(

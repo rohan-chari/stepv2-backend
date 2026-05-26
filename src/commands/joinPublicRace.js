@@ -35,7 +35,10 @@ function buildJoinPublicRace(dependencies = {}) {
       if (!race.isPublic) {
         throw new RaceJoinError("This race is not public", 403);
       }
-      if (race.status !== "PENDING") {
+      // Public races are joinable while PENDING or ACTIVE — seeded public
+      // races are created ACTIVE, and joining a time-based race mid-flight is
+      // valid (you just start accumulating steps). Only COMPLETED is closed.
+      if (race.status !== "PENDING" && race.status !== "ACTIVE") {
         throw new RaceJoinError(
           "This race is no longer accepting new participants",
           400
