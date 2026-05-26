@@ -13,10 +13,13 @@ const User = {
     return prisma.user.findFirst({ where: { email } });
   },
 
-  async create({ appleId, email, name, displayName }) {
+  async create({ appleId, email, name, displayName, isReviewAccount }) {
     const data = { appleId, email, name };
     if (displayName !== undefined) {
       data.displayName = displayName;
+    }
+    if (isReviewAccount !== undefined) {
+      data.isReviewAccount = isReviewAccount;
     }
     return prisma.user.create({ data });
   },

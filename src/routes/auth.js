@@ -35,7 +35,7 @@ const { isAdminUser, withAdminFlag } = require("../services/adminAccess");
 // reviewer deleted the account during a 5.1.1 compliance check), so we never
 // lock the reviewer out and never block the in-app delete flow.
 const REVIEWER_APPLE_ID = "review-account-v1";
-const REVIEWER_DISPLAY_NAME = "App Reviewer";
+const REVIEWER_DISPLAY_NAME = "AppReviewer";
 
 function createAuthRouter(dependencies = {}) {
   const router = Router();
@@ -147,6 +147,9 @@ function createAuthRouter(dependencies = {}) {
           email: expectedEmail,
           name: REVIEWER_DISPLAY_NAME,
           displayName: REVIEWER_DISPLAY_NAME,
+          // Hidden from real users (leaderboards, search, public races); the
+          // reviewer still sees their own data via self-aware queries.
+          isReviewAccount: true,
         });
       }
 

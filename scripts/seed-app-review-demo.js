@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 //
 // Seed the App Review demo state: provision the dedicated reviewer user
-// (unflagged, real user) + supporting cast (Alex/Maya/Jordan, flagged with
-// is_review_account = true so they're hidden from real users in search,
-// leaderboards, public race browsing). Idempotent — safe to re-run.
+// + supporting cast (Alex/Maya/Jordan). All of them (reviewer included) are
+// flagged is_review_account = true so they're hidden from real users in
+// search, leaderboards, and public race browsing — the reviewer still sees
+// their own rank/data via self-aware queries. Idempotent — safe to re-run.
 //
 // Usage:
 //   node scripts/seed-app-review-demo.js
@@ -22,7 +23,7 @@ require("dotenv").config();
 const { prisma } = require("../src/db");
 
 const REVIEWER_APPLE_ID = "review-account-v1";
-const REVIEWER_DISPLAY_NAME = "App Reviewer";
+const REVIEWER_DISPLAY_NAME = "AppReviewer";
 
 const databaseUrl =
   process.env.DATABASE_URL || "postgresql://rohan@localhost:5432/steps_tracker";
@@ -42,7 +43,7 @@ async function provisionReviewerUser() {
   if (existing) {
     await prisma.user.update({
       where: { appleId: REVIEWER_APPLE_ID },
-      data: { email: reviewerEmail, isReviewAccount: false },
+      data: { email: reviewerEmail, isReviewAccount: true },
     });
     console.log(`Reviewer user already exists (id=${existing.id}); email refreshed.`);
     return;
@@ -53,7 +54,7 @@ async function provisionReviewerUser() {
       email: reviewerEmail,
       name: REVIEWER_DISPLAY_NAME,
       displayName: REVIEWER_DISPLAY_NAME,
-      isReviewAccount: false,
+      isReviewAccount: true,
     },
   });
   console.log(`Provisioned reviewer user (id=${created.id}).`);
