@@ -2,7 +2,10 @@ const crypto = require("node:crypto");
 
 const { eventBus } = require("../events/eventBus");
 const { User } = require("../models/user");
-const { validateDisplayName } = require("../lib/displayNameValidator");
+const {
+  validateDisplayName,
+  normalizeToCharset,
+} = require("../lib/displayNameValidator");
 
 const DISPLAY_NAME_MIN_LENGTH = 4;
 const FUN_PREFIXES = [
@@ -22,9 +25,10 @@ function randomHex(len) {
 
 function sanitize(name) {
   if (typeof name !== "string") return "";
-  // Display names can no longer contain whitespace, so collapse all internal
-  // whitespace away rather than down to a single space.
-  return name.replace(/\s+/g, "").trim();
+  // Display names must match the allowed charset (letters, numbers, underscore).
+  // Transliterate accents and drop any other character (incl. whitespace) so a
+  // derived Apple name like "José García" becomes "JoseGarcia".
+  return normalizeToCharset(name).trim();
 }
 
 function baseFromAppleName(name) {

@@ -1,21 +1,29 @@
-// One-time migration: strip internal whitespace from existing display names.
+// One-time migration: normalize existing display names to the allowed charset.
 //
-// The display-name rules now reject any name containing whitespace. Existing
-// users may have names with spaces (e.g. "John Smith") from before the rule.
-// This script removes internal whitespace ("JohnSmith") and, when the stripped
-// name collides case-insensitively with another user, appends a numeric suffix
+// The display-name rules now reject any name containing characters outside
+// [A-Za-z0-9_]. Existing users may have names with spaces ("John Smith"),
+// accents ("José"), hyphens ("Mary-Jane"), periods, emoji, etc. from before the
+// rule. This script transliterates accents and strips disallowed characters
+// ("JohnSmith", "Jose", "MaryJane") and, when the normalized name collides
+// case-insensitively with another user, appends a numeric suffix
 // ("JohnSmith2", "JohnSmith3", ...).
 //
-// Grandfathering: we ONLY touch names that contain whitespace. Names that are
-// too short or profane (but space-free) are left untouched on purpose.
+// Grandfathering: we ONLY touch names that do NOT match ^[A-Za-z0-9_]+$. Names
+// whose normalized result would be shorter than the 4-char minimum are left
+// untouched on purpose (don't break them). Profane-but-charset-valid names are
+// also left alone.
 //
 // Run once on deploy (NOT a prisma schema migration):
 //   node scripts/migrate-display-names.js
 //
-// It is idempotent: a second run finds no whitespace names and changes nothing.
+// It is idempotent + safe to re-run: a second run finds no out-of-charset names
+// and changes nothing. (An earlier run already handled whitespace-only names.)
 require("dotenv").config();
 const { prisma } = require("../src/db");
-const { stripInternalSpaces } = require("../src/lib/displayNameValidator");
+const {
+  normalizeToCharset,
+  DISPLAY_NAME_MIN_LENGTH,
+} = require("../src/lib/displayNameValidator");
 
 // Build a set of all existing display names (lowercased) so we can detect
 // collisions without hammering the DB per candidate.
@@ -54,32 +62,33 @@ async function migrate() {
   });
 
   const taken = buildTakenSet(users);
-  const whitespace = /\s/;
+  const charset = /^[A-Za-z0-9_]+$/;
 
   let changed = 0;
   let unchanged = 0;
 
   for (const user of users) {
     const current = user.displayName;
-    if (typeof current !== "string" || !whitespace.test(current)) {
+    if (typeof current !== "string" || charset.test(current)) {
       unchanged += 1;
       continue;
     }
 
     const selfLower = current.toLowerCase();
-    const stripped = stripInternalSpaces(current);
+    const normalized = normalizeToCharset(current);
 
-    // Edge case: a name that was nothing but whitespace strips to empty.
-    // Leave it as-is rather than write an invalid empty name.
-    if (stripped.length === 0) {
+    // Grandfather names that normalize to fewer than the minimum chars
+    // (incl. names that were entirely disallowed characters, e.g. emoji-only
+    // or whitespace-only). Don't break them by writing a too-short/empty name.
+    if (normalized.length < DISPLAY_NAME_MIN_LENGTH) {
       console.warn(
-        `[skip] user ${user.id}: "${current}" strips to empty; leaving unchanged`
+        `[skip] user ${user.id}: "${current}" normalizes to "${normalized}" (<${DISPLAY_NAME_MIN_LENGTH} chars); leaving unchanged`
       );
       unchanged += 1;
       continue;
     }
 
-    const resolved = resolveUnique(stripped, taken, selfLower);
+    const resolved = resolveUnique(normalized, taken, selfLower);
 
     await prisma.user.update({
       where: { id: user.id },

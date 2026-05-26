@@ -123,6 +123,52 @@ test("retries on displayName collision to ensure uniqueness", async () => {
   assert.ok(user.displayName.length >= 4);
 });
 
+test("derives a charset-valid displayName from an accented Apple name", async () => {
+  const ctx = makeUserModel();
+  const ensureAppleUser = buildEnsureAppleUser({
+    User: ctx.model,
+    eventBus: silentEvents(),
+  });
+
+  const user = await ensureAppleUser({
+    appleId: "apple-5",
+    email: null,
+    name: "José García",
+  });
+
+  assert.ok(user.displayName, "displayName should be populated");
+  assert.match(
+    user.displayName,
+    /^[A-Za-z0-9_]+$/,
+    `auto-generated displayName "${user.displayName}" must be charset-valid`
+  );
+  assert.ok(user.displayName.length >= 4);
+  // Transliterated + punctuation/space-stripped base.
+  assert.match(user.displayName, /^JoseGarcia/);
+});
+
+test("falls back to a charset-valid generated name for a hyphen/period-only Apple name", async () => {
+  const ctx = makeUserModel();
+  const ensureAppleUser = buildEnsureAppleUser({
+    User: ctx.model,
+    eventBus: silentEvents(),
+  });
+
+  const user = await ensureAppleUser({
+    appleId: "apple-6",
+    email: null,
+    name: "J.-.",
+  });
+
+  assert.ok(user.displayName);
+  assert.match(
+    user.displayName,
+    /^[A-Za-z0-9_]+$/,
+    `displayName "${user.displayName}" must be charset-valid`
+  );
+  assert.ok(user.displayName.length >= 4);
+});
+
 test("does not regenerate displayName for existing users that already have one", async () => {
   const updates = [];
   const ensureAppleUser = buildEnsureAppleUser({
