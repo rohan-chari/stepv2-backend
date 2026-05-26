@@ -162,13 +162,20 @@ const Race = {
     });
   },
 
+  // Public races shown in the browse list. Includes both PENDING (user-created,
+  // not yet started) and ACTIVE races so seeded public races — which are created
+  // ACTIVE with no creator — are joinable from the browser, not just the home
+  // card. Allow null-creator (seeded) races through while still hiding races
+  // created by review/demo accounts.
   async findPublicPending() {
     return prisma.race.findMany({
       where: {
         isPublic: true,
-        status: "PENDING",
-        // Hide review/demo-creator races from real users' public browser.
-        creator: { isReviewAccount: false },
+        status: { in: ["PENDING", "ACTIVE"] },
+        OR: [
+          { creatorId: null },
+          { creator: { isReviewAccount: false } },
+        ],
       },
       include: {
         creator: { select: { id: true, displayName: true, profilePhotoUrl: true } },
