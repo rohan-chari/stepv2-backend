@@ -103,14 +103,14 @@ describe("user onboarding flow", () => {
     assert.equal(user.email, EMAIL);
   });
 
-  it("rejects display name shorter than 8 characters", async () => {
+  it("rejects display name shorter than 4 characters", async () => {
     const { token } = await signIn();
 
     const res = await request(
       server.baseUrl,
       "PUT",
       "/auth/me/display-name",
-      { body: { displayName: "short" }, token },
+      { body: { displayName: "ab" }, token },
     );
     assert.equal(res.status, 400);
   });

@@ -67,16 +67,16 @@ test("PUT /auth/me/display-name sets the display name", async () => {
         authorization: "Bearer apple-token",
         "content-type": "application/json",
       },
-      body: JSON.stringify({ displayName: "Trail Walker" }),
+      body: JSON.stringify({ displayName: "TrailWalker" }),
     });
 
     assert.equal(response.status, 200);
     const body = await response.json();
-    assert.equal(body.user.displayName, "Trail Walker");
+    assert.equal(body.user.displayName, "TrailWalker");
 
     assert.deepEqual(receivedPayload, {
       userId: "user-1",
-      displayName: "Trail Walker",
+      displayName: "TrailWalker",
     });
   } finally {
     await server.close();
@@ -152,7 +152,7 @@ test("PUT /auth/me/display-name returns 400 for invalid values", async () => {
 
       assert.equal(response.status, 400, `Expected 400 for displayName=${JSON.stringify(displayName)}`);
       const body = await response.json();
-      assert.equal(body.error, "displayName must be a non-empty string or null");
+      assert.equal(body.error, "Display name must be a non-empty string or null");
     }
   } finally {
     await server.close();
@@ -169,12 +169,12 @@ test("PUT /auth/me/display-name returns 400 when too short", async () => {
         authorization: "Bearer apple-token",
         "content-type": "application/json",
       },
-      body: JSON.stringify({ displayName: "Short" }),
+      body: JSON.stringify({ displayName: "ab" }),
     });
 
     assert.equal(response.status, 400);
     const body = await response.json();
-    assert.match(body.error, /at least 8 characters/);
+    assert.match(body.error, /at least 4 characters/);
   } finally {
     await server.close();
   }
@@ -282,7 +282,7 @@ test("PUT /auth/me/display-name returns 409 when display name is already taken",
         authorization: "Bearer apple-token",
         "content-type": "application/json",
       },
-      body: JSON.stringify({ displayName: "Trail Walker" }),
+      body: JSON.stringify({ displayName: "TrailWalker" }),
     });
 
     assert.equal(response.status, 409);
@@ -352,7 +352,7 @@ test("GET /auth/check-display-name returns unavailable for short names", async (
 
   try {
     const response = await fetch(
-      `${server.baseUrl}/auth/check-display-name?name=Short`,
+      `${server.baseUrl}/auth/check-display-name?name=ab`,
       {
         headers: { authorization: "Bearer apple-token" },
       }
@@ -361,7 +361,7 @@ test("GET /auth/check-display-name returns unavailable for short names", async (
     assert.equal(response.status, 200);
     const body = await response.json();
     assert.equal(body.available, false);
-    assert.match(body.reason, /at least 8 characters/);
+    assert.match(body.reason, /at least 4 characters/);
   } finally {
     await server.close();
   }
@@ -403,11 +403,11 @@ test("PUT /auth/me/display-name trims whitespace", async () => {
         authorization: "Bearer apple-token",
         "content-type": "application/json",
       },
-      body: JSON.stringify({ displayName: "  Trail Walker  " }),
+      body: JSON.stringify({ displayName: "  TrailWalker  " }),
     });
 
     assert.equal(response.status, 200);
-    assert.equal(receivedPayload.displayName, "Trail Walker");
+    assert.equal(receivedPayload.displayName, "TrailWalker");
   } finally {
     await server.close();
   }

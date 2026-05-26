@@ -1,0 +1,109 @@
+// One-time migration: strip internal whitespace from existing display names.
+//
+// The display-name rules now reject any name containing whitespace. Existing
+// users may have names with spaces (e.g. "John Smith") from before the rule.
+// This script removes internal whitespace ("JohnSmith") and, when the stripped
+// name collides case-insensitively with another user, appends a numeric suffix
+// ("JohnSmith2", "JohnSmith3", ...).
+//
+// Grandfathering: we ONLY touch names that contain whitespace. Names that are
+// too short or profane (but space-free) are left untouched on purpose.
+//
+// Run once on deploy (NOT a prisma schema migration):
+//   node scripts/migrate-display-names.js
+//
+// It is idempotent: a second run finds no whitespace names and changes nothing.
+require("dotenv").config();
+const { prisma } = require("../src/db");
+const { stripInternalSpaces } = require("../src/lib/displayNameValidator");
+
+// Build a set of all existing display names (lowercased) so we can detect
+// collisions without hammering the DB per candidate.
+function buildTakenSet(users) {
+  const taken = new Set();
+  for (const u of users) {
+    if (typeof u.displayName === "string" && u.displayName.length > 0) {
+      taken.add(u.displayName.toLowerCase());
+    }
+  }
+  return taken;
+}
+
+// Given a stripped base, find a name that doesn't collide with `taken`.
+// `selfLower` is the user's own current name so they don't collide with self.
+function resolveUnique(base, taken, selfLower) {
+  const baseLower = base.toLowerCase();
+  if (baseLower === selfLower || !taken.has(baseLower)) {
+    return base;
+  }
+  let suffix = 2;
+  // JohnSmith -> JohnSmith2 -> JohnSmith3 ...
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const candidate = `${base}${suffix}`;
+    if (!taken.has(candidate.toLowerCase())) {
+      return candidate;
+    }
+    suffix += 1;
+  }
+}
+
+async function migrate() {
+  const users = await prisma.user.findMany({
+    select: { id: true, displayName: true },
+  });
+
+  const taken = buildTakenSet(users);
+  const whitespace = /\s/;
+
+  let changed = 0;
+  let unchanged = 0;
+
+  for (const user of users) {
+    const current = user.displayName;
+    if (typeof current !== "string" || !whitespace.test(current)) {
+      unchanged += 1;
+      continue;
+    }
+
+    const selfLower = current.toLowerCase();
+    const stripped = stripInternalSpaces(current);
+
+    // Edge case: a name that was nothing but whitespace strips to empty.
+    // Leave it as-is rather than write an invalid empty name.
+    if (stripped.length === 0) {
+      console.warn(
+        `[skip] user ${user.id}: "${current}" strips to empty; leaving unchanged`
+      );
+      unchanged += 1;
+      continue;
+    }
+
+    const resolved = resolveUnique(stripped, taken, selfLower);
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { displayName: resolved },
+    });
+
+    // Keep the taken-set in sync so later users in this run avoid the new name.
+    taken.delete(selfLower);
+    taken.add(resolved.toLowerCase());
+
+    console.log(`[update] user ${user.id}: "${current}" -> "${resolved}"`);
+    changed += 1;
+  }
+
+  console.log(
+    `\nDone. ${changed} display name(s) updated, ${unchanged} unchanged.`
+  );
+}
+
+migrate()
+  .catch((error) => {
+    console.error("Migration failed:", error);
+    process.exitCode = 1;
+  })
+  .finally(async () => {
+    await prisma.$disconnect();
+  });

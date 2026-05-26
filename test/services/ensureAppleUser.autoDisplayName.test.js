@@ -54,8 +54,13 @@ test("auto-generates displayName from Apple fullName for a new user", async () =
 
   assert.ok(user.displayName, "displayName should be populated");
   assert.ok(
-    user.displayName.length >= 8,
-    `displayName "${user.displayName}" should be at least 8 chars`
+    user.displayName.length >= 4,
+    `displayName "${user.displayName}" should be at least 4 chars`
+  );
+  assert.doesNotMatch(
+    user.displayName,
+    /\s/,
+    "auto-generated displayName must not contain whitespace"
   );
   assert.match(
     user.displayName,
@@ -64,7 +69,7 @@ test("auto-generates displayName from Apple fullName for a new user", async () =
   );
 });
 
-test("pads short Apple names to meet 8-char minimum", async () => {
+test("pads short Apple names to meet the minimum length", async () => {
   const ctx = makeUserModel();
   const ensureAppleUser = buildEnsureAppleUser({
     User: ctx.model,
@@ -77,7 +82,7 @@ test("pads short Apple names to meet 8-char minimum", async () => {
     name: "Ada",
   });
 
-  assert.ok(user.displayName.length >= 8);
+  assert.ok(user.displayName.length >= 4);
   assert.match(user.displayName, /^Ada/);
 });
 
@@ -95,12 +100,12 @@ test("falls back to a fun generated name when Apple shares no name", async () =>
   });
 
   assert.ok(user.displayName);
-  assert.ok(user.displayName.length >= 8);
+  assert.ok(user.displayName.length >= 4);
 });
 
 test("retries on displayName collision to ensure uniqueness", async () => {
   const ctx = makeUserModel({
-    existingByDisplayName: new Set(["walker capybara"]),
+    existingByDisplayName: new Set(["walkercapybara"]),
   });
   const ensureAppleUser = buildEnsureAppleUser({
     User: ctx.model,
@@ -114,8 +119,8 @@ test("retries on displayName collision to ensure uniqueness", async () => {
   });
 
   assert.ok(user.displayName);
-  assert.notEqual(user.displayName.toLowerCase(), "walker capybara");
-  assert.ok(user.displayName.length >= 8);
+  assert.notEqual(user.displayName.toLowerCase(), "walkercapybara");
+  assert.ok(user.displayName.length >= 4);
 });
 
 test("does not regenerate displayName for existing users that already have one", async () => {

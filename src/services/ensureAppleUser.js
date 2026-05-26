@@ -2,8 +2,9 @@ const crypto = require("node:crypto");
 
 const { eventBus } = require("../events/eventBus");
 const { User } = require("../models/user");
+const { validateDisplayName } = require("../lib/displayNameValidator");
 
-const DISPLAY_NAME_MIN_LENGTH = 8;
+const DISPLAY_NAME_MIN_LENGTH = 4;
 const FUN_PREFIXES = [
   "Walker",
   "Trekker",
@@ -21,7 +22,9 @@ function randomHex(len) {
 
 function sanitize(name) {
   if (typeof name !== "string") return "";
-  return name.replace(/\s+/g, " ").trim();
+  // Display names can no longer contain whitespace, so collapse all internal
+  // whitespace away rather than down to a single space.
+  return name.replace(/\s+/g, "").trim();
 }
 
 function baseFromAppleName(name) {
@@ -41,9 +44,15 @@ async function pickUniqueDisplayName({ userModel, base }) {
   for (let i = 0; i < 5; i++) {
     candidates.push(`${base}${randomHex(2 + i)}`);
   }
+  // Always end with guaranteed-valid generated fallbacks so onboarding never
+  // fails even if the Apple-derived base is profane or otherwise invalid.
   candidates.push(randomFunName());
+  candidates.push(`${randomFunName()}${randomHex(4)}`);
 
   for (const candidate of candidates) {
+    // A derived candidate could fail the stricter rules (e.g. profane Apple
+    // name). Skip invalid candidates; the generated fallbacks always pass.
+    if (!validateDisplayName(candidate).isValid) continue;
     const taken = await userModel.findByDisplayNameInsensitive(candidate);
     if (!taken) return candidate;
   }

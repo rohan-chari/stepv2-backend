@@ -24,7 +24,10 @@ const {
   ALLOWED_PROFILE_PHOTO_CONTENT_TYPES,
 } = require("../services/profilePhotoStorage");
 
-const DISPLAY_NAME_MIN_LENGTH = 8;
+const {
+  validateDisplayName,
+  DISPLAY_NAME_MIN_LENGTH,
+} = require("../lib/displayNameValidator");
 const { isAdminUser, withAdminFlag } = require("../services/adminAccess");
 
 // Reviewer account constants — kept in sync with scripts/seed-app-review-demo.js.
@@ -214,29 +217,15 @@ function createAuthRouter(dependencies = {}) {
     }
 
     if (displayName !== null) {
-      if (typeof displayName !== "string") {
-        return res
-          .status(400)
-          .json({ error: "displayName must be a non-empty string or null" });
-      }
-
-      const trimmed = displayName.trim();
-      if (trimmed.length === 0) {
-        return res
-          .status(400)
-          .json({ error: "displayName must be a non-empty string or null" });
-      }
-
-      if (trimmed.length < DISPLAY_NAME_MIN_LENGTH) {
-        return res
-          .status(400)
-          .json({ error: `displayName must be at least ${DISPLAY_NAME_MIN_LENGTH} characters` });
+      const validation = validateDisplayName(displayName);
+      if (!validation.isValid) {
+        return res.status(400).json({ error: validation.error });
       }
 
       try {
         const updatedUser = await updateDisplayName({
           userId: req.user.id,
-          displayName: trimmed,
+          displayName: validation.normalized,
         });
 
         return res.json({ user: updatedUser });
@@ -376,13 +365,15 @@ function createAuthRouter(dependencies = {}) {
       return res.status(400).json({ error: "name query parameter is required" });
     }
 
-    const trimmed = name.trim();
-
-    if (trimmed.length < DISPLAY_NAME_MIN_LENGTH) {
-      return res.json({ available: false, reason: `Must be at least ${DISPLAY_NAME_MIN_LENGTH} characters` });
+    const validation = validateDisplayName(name);
+    if (!validation.isValid) {
+      return res.json({ available: false, reason: validation.error });
     }
 
-    const existing = await UserModel.findByDisplayNameInsensitive(trimmed, req.user.id);
+    const existing = await UserModel.findByDisplayNameInsensitive(
+      validation.normalized,
+      req.user.id
+    );
     res.json({ available: !existing });
   });
 
