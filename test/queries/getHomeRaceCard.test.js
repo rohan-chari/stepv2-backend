@@ -181,3 +181,218 @@ test("returns PUBLIC_RACE skipping full races", async () => {
   assert.equal(res.state, "PUBLIC_RACE");
   assert.equal(res.data.raceId, "race-ok");
 });
+
+// ---------------------------------------------------------------------------
+// Opt-in ACTIVE_RACES state (new app builds only). The legacy tests above must
+// keep passing untouched: they never pass homeActiveRaces, so they use the
+// existing single-state path.
+// ---------------------------------------------------------------------------
+
+const STEALTH_NOW = FIXED_NOW;
+
+// Prisma mock for the opt-in active-races path. activeParticipations is the
+// list returned by raceParticipant.findMany for status ACCEPTED + ACTIVE race.
+function makeActivePrisma({ activeParticipations = [], activeEffects = {} } = {}) {
+  return {
+    raceParticipant: {
+      async findMany({ where }) {
+        if (where.status === "INVITED") return [];
+        if (where.placement) return [];
+        if (
+          where.userId === ME_ID &&
+          where.status === "ACCEPTED" &&
+          where.race &&
+          where.race.status === "ACTIVE"
+        ) {
+          return activeParticipations;
+        }
+        if (Array.isArray(where.userId?.in)) return [];
+        return [];
+      },
+      async findFirst() {
+        return null;
+      },
+    },
+    friendship: {
+      async findMany() {
+        return [];
+      },
+    },
+    race: {
+      async findMany() {
+        return [];
+      },
+    },
+    // Used indirectly via RaceActiveEffect model -> prisma.raceActiveEffect.
+    raceActiveEffect: {
+      async findMany({ where }) {
+        return activeEffects[where.raceId] || [];
+      },
+    },
+  };
+}
+
+// Patch the shared RaceActiveEffect model to read from our mock prisma. The
+// model imports its own prisma, so we stub findActiveForRace per-test instead.
+const raceActiveEffectModule = require("../../src/models/raceActiveEffect");
+
+function withStealthedRace(raceId, stealthedUserIds) {
+  const original = raceActiveEffectModule.RaceActiveEffect.findActiveForRace;
+  raceActiveEffectModule.RaceActiveEffect.findActiveForRace = async (id) => {
+    if (id === raceId) {
+      return stealthedUserIds.map((uid) => ({
+        type: "STEALTH_MODE",
+        targetUserId: uid,
+        status: "ACTIVE",
+      }));
+    }
+    return [];
+  };
+  return () => {
+    raceActiveEffectModule.RaceActiveEffect.findActiveForRace = original;
+  };
+}
+
+test("opt-in: returns ACTIVE_RACES with top-3 and userPlacement", async () => {
+  const me = user(ME_ID, "Sugaroro");
+  const a = user("u-a", "Alice");
+  const b = user("u-b", "Bob");
+  const c = user("u-c", "Cara");
+  const prisma = makeActivePrisma({
+    activeParticipations: [
+      {
+        id: "rp-mine",
+        userId: ME_ID,
+        status: "ACCEPTED",
+        race: {
+          id: "race-1",
+          name: "Morning Walk",
+          status: "ACTIVE",
+          powerupsEnabled: false,
+          endsAt: new Date("2026-05-22T18:00:00Z"),
+          participants: [
+            { userId: "u-a", totalSteps: 12000, user: a },
+            { userId: "u-b", totalSteps: 9000, user: b },
+            { userId: "u-c", totalSteps: 7000, user: c },
+            { userId: ME_ID, totalSteps: 5000, user: me },
+          ],
+        },
+      },
+    ],
+  });
+  const get = buildGetHomeRaceCard({ prisma, now: () => STEALTH_NOW });
+  const res = await get({ userId: ME_ID, homeActiveRaces: true });
+  assert.equal(res.state, "ACTIVE_RACES");
+  assert.equal(res.data.races.length, 1);
+  const race = res.data.races[0];
+  assert.equal(race.raceId, "race-1");
+  assert.equal(race.name, "Morning Walk");
+  assert.equal(race.top3.length, 3);
+  assert.deepEqual(
+    race.top3.map((t) => t.rank),
+    [1, 2, 3]
+  );
+  assert.equal(race.top3[0].displayName, "Alice");
+  assert.equal(race.top3[0].totalSteps, 12000);
+  assert.ok(Array.isArray(race.top3[0].equippedAccessories));
+  assert.equal(race.userPlacement, 4);
+});
+
+test("opt-in: stealthed top-3 racer is redacted (??? / no cosmetics / null steps)", async () => {
+  const me = user(ME_ID, "Sugaroro");
+  const a = user("u-a", "Alice");
+  const b = user("u-b", "Bob");
+  const prisma = makeActivePrisma({
+    activeParticipations: [
+      {
+        id: "rp-mine",
+        userId: ME_ID,
+        status: "ACCEPTED",
+        race: {
+          id: "race-stealth",
+          name: "Stealth Race",
+          status: "ACTIVE",
+          powerupsEnabled: true,
+          endsAt: new Date("2026-05-22T18:00:00Z"),
+          participants: [
+            { userId: "u-a", totalSteps: 12000, user: a },
+            { userId: ME_ID, totalSteps: 8000, user: me },
+            { userId: "u-b", totalSteps: 7000, user: b },
+          ],
+        },
+      },
+    ],
+  });
+  const restore = withStealthedRace("race-stealth", ["u-a", ME_ID]);
+  try {
+    const get = buildGetHomeRaceCard({ prisma, now: () => STEALTH_NOW });
+    const res = await get({ userId: ME_ID, homeActiveRaces: true });
+    const race = res.data.races[0];
+    // u-a is stealthed -> redacted
+    const alice = race.top3.find((t) => t.rank === 1);
+    assert.equal(alice.displayName, "???");
+    assert.equal(alice.totalSteps, null);
+    assert.deepEqual(alice.equippedAccessories, []);
+    assert.equal(alice.isStealthed, true);
+    // self is never stealthed even if targeted
+    const self = race.top3.find((t) => t.userId === ME_ID);
+    assert.equal(self.displayName, "Sugaroro");
+    assert.equal(self.isStealthed, false);
+    assert.equal(self.totalSteps, 8000);
+  } finally {
+    restore();
+  }
+});
+
+test("opt-in: handles fewer than 3 participants", async () => {
+  const me = user(ME_ID, "Sugaroro");
+  const a = user("u-a", "Alice");
+  const prisma = makeActivePrisma({
+    activeParticipations: [
+      {
+        id: "rp-mine",
+        userId: ME_ID,
+        status: "ACCEPTED",
+        race: {
+          id: "race-small",
+          name: "Duo",
+          status: "ACTIVE",
+          powerupsEnabled: false,
+          endsAt: new Date("2026-05-22T18:00:00Z"),
+          participants: [
+            { userId: "u-a", totalSteps: 4000, user: a },
+            { userId: ME_ID, totalSteps: 3000, user: me },
+          ],
+        },
+      },
+    ],
+  });
+  const get = buildGetHomeRaceCard({ prisma, now: () => STEALTH_NOW });
+  const res = await get({ userId: ME_ID, homeActiveRaces: true });
+  const race = res.data.races[0];
+  assert.equal(race.top3.length, 2);
+  assert.equal(race.userPlacement, 2);
+});
+
+test("opt-in with NO active races falls through to legacy single-state logic", async () => {
+  const prisma = makeActivePrisma({
+    activeParticipations: [],
+  });
+  // Make public race available so fallthrough has something to return.
+  prisma.race.findMany = async () => [
+    {
+      id: "race-daily",
+      name: "Daily 10K Sprint",
+      targetSteps: 10000,
+      maxParticipants: 100,
+      endsAt: new Date("2026-05-22T00:00:00Z"),
+      seed: { kind: "DAILY_10K" },
+      _count: { participants: 8 },
+    },
+  ];
+  const get = buildGetHomeRaceCard({ prisma, now: () => STEALTH_NOW });
+  const res = await get({ userId: ME_ID, homeActiveRaces: true });
+  // Falls through; not ACTIVE_RACES.
+  assert.equal(res.state, "PUBLIC_RACE");
+  assert.equal(res.data.seedKind, "DAILY_10K");
+});

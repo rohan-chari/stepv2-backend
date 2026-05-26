@@ -15,7 +15,14 @@ function createHomeRouter(dependencies = {}) {
 
   router.get("/race-card", async (req, res) => {
     try {
-      const result = await getHomeRaceCard({ userId: req.user.id });
+      // Opt-in flag set only by new app builds. Without it, response is the
+      // legacy single-state shape so older clients are unaffected.
+      const homeActiveRaces =
+        req.query.homeActiveRaces === "1" || req.query.homeActiveRaces === "true";
+      const result = await getHomeRaceCard({
+        userId: req.user.id,
+        homeActiveRaces,
+      });
       res.json(result);
     } catch (error) {
       console.error("Home race-card error:", error);

@@ -1,5 +1,9 @@
 const { prisma: defaultPrisma } = require("../db");
 const { buildAccessoriesList } = require("../utils/shopCosmetics");
+const { RaceActiveEffect } = require("../models/raceActiveEffect");
+
+// Max number of active races returned in the new ACTIVE_RACES (opt-in) state.
+const MAX_ACTIVE_RACES = 5;
 
 const USER_SELECT = {
   id: true,
@@ -8,7 +12,10 @@ const USER_SELECT = {
   equippedAccessories: {
     select: {
       slot: true,
-      shopItem: { select: { id: true, sku: true, slot: true, renderMetadata: true } },
+      // assetKey is what the client uses to resolve the cosmetic PNG; including
+      // it lets capybara renders show real equipped cosmetics. Additive only —
+      // existing fields are unchanged, so older clients are unaffected.
+      shopItem: { select: { id: true, sku: true, slot: true, assetKey: true, renderMetadata: true } },
     },
   },
 };
@@ -146,6 +153,113 @@ async function checkActiveRace(prisma, userId) {
       others: others.map(buildEntry),
     },
   };
+}
+
+// Deterministic placement order, mirrors compareParticipantsForPlacement in
+// getRaces.js: finished first (by placement/finish time), then by steps desc,
+// then earliest join, then userId. Kept local so this query stays self-contained.
+function compareParticipantsForPlacement(left, right) {
+  if (left.finishedAt && right.finishedAt) {
+    const leftPlacement = left.placement ?? Number.MAX_SAFE_INTEGER;
+    const rightPlacement = right.placement ?? Number.MAX_SAFE_INTEGER;
+    if (leftPlacement !== rightPlacement) return leftPlacement - rightPlacement;
+    const lf = new Date(left.finishedAt).getTime();
+    const rf = new Date(right.finishedAt).getTime();
+    if (lf !== rf) return lf - rf;
+  }
+  if (left.finishedAt) return -1;
+  if (right.finishedAt) return 1;
+  const stepDiff = (right.totalSteps || 0) - (left.totalSteps || 0);
+  if (stepDiff !== 0) return stepDiff;
+  const lj = left.joinedAt ? new Date(left.joinedAt).getTime() : 0;
+  const rj = right.joinedAt ? new Date(right.joinedAt).getTime() : 0;
+  if (lj !== rj) return lj - rj;
+  return String(left.userId || "").localeCompare(String(right.userId || ""));
+}
+
+// Opt-in (new app builds) only: return ALL of the user's active races as a list
+// so the home page can render a horizontally-scrollable row of cards. Each race
+// carries its top-3 participants (with equipped cosmetics) and the viewer's own
+// placement. Stealth redaction matches getRaceProgress.js: a stealthed racer
+// (not self, not finished) is shown as "???" with no cosmetics and null steps.
+//
+// BACKWARD COMPAT: this path is ONLY reached when the client opts in via the
+// `homeActiveRaces` flag. Old app builds never send it, so they keep receiving
+// the legacy single-state response (see buildGetHomeRaceCard). When an opted-in
+// user has zero active races this returns null and we fall through to the
+// existing single-state logic (invites / public / friend prompts).
+async function checkActiveRaces(prisma, userId) {
+  const myActive = await prisma.raceParticipant.findMany({
+    where: {
+      userId,
+      status: "ACCEPTED",
+      race: { status: "ACTIVE" },
+    },
+    include: {
+      race: {
+        include: {
+          participants: {
+            where: { status: "ACCEPTED" },
+            include: { user: { select: USER_SELECT } },
+            orderBy: { totalSteps: "desc" },
+          },
+        },
+      },
+    },
+    orderBy: { race: { startedAt: "desc" } },
+    take: MAX_ACTIVE_RACES,
+  });
+
+  if (!myActive || myActive.length === 0) return null;
+
+  const races = [];
+  for (const participation of myActive) {
+    const race = participation.race;
+    if (!race) continue;
+
+    // Sort participants for placement (deterministic, matches getRaces).
+    const ranked = [...race.participants].sort(compareParticipantsForPlacement);
+
+    // Determine stealthed user ids for this race (only when powerups enabled).
+    const stealthedUserIds = new Set();
+    if (race.powerupsEnabled) {
+      const activeEffects = await RaceActiveEffect.findActiveForRace(race.id);
+      for (const e of activeEffects) {
+        if (e.type === "STEALTH_MODE") stealthedUserIds.add(e.targetUserId);
+      }
+    }
+
+    const top3 = ranked.slice(0, 3).map((p, idx) => {
+      // Never stealth self or finished racers (mirrors getRaceProgress).
+      const isStealthed =
+        stealthedUserIds.has(p.userId) &&
+        p.userId !== userId &&
+        !p.finishedAt;
+      return {
+        rank: idx + 1,
+        userId: p.userId,
+        displayName: isStealthed ? "???" : (p.user?.displayName || "Anonymous"),
+        equippedAccessories: isStealthed ? [] : buildAccessoriesList(p.user),
+        totalSteps: isStealthed ? null : p.totalSteps,
+        isStealthed,
+      };
+    });
+
+    const myIndex = ranked.findIndex((p) => p.userId === userId);
+    const userPlacement = myIndex >= 0 ? myIndex + 1 : null;
+
+    races.push({
+      raceId: race.id,
+      name: race.name,
+      endsAt: race.endsAt,
+      top3,
+      userPlacement,
+    });
+  }
+
+  if (races.length === 0) return null;
+
+  return { state: "ACTIVE_RACES", data: { races } };
 }
 
 async function checkFriendRacing(prisma, userId, friendIds) {
@@ -291,14 +405,25 @@ function buildGetHomeRaceCard(dependencies = {}) {
   const prisma = dependencies.prisma || defaultPrisma;
   const nowFn = dependencies.now || (() => new Date());
 
-  return async function getHomeRaceCard({ userId }) {
+  return async function getHomeRaceCard({ userId, homeActiveRaces = false }) {
     const now = nowFn();
 
     const pending = await checkPendingInvite(prisma, userId, now);
     if (pending) return pending;
 
-    const active = await checkActiveRace(prisma, userId);
-    if (active) return active;
+    // Opt-in path (new app builds): when the client requests homeActiveRaces and
+    // the user has >=1 active race, return the new ACTIVE_RACES list state. When
+    // the opted-in user has NO active races, checkActiveRaces returns null and we
+    // fall through to the legacy single-state logic below. Old clients never set
+    // this flag, so they always get the legacy ACTIVE_RACE single-card response
+    // (byte-for-byte unchanged).
+    if (homeActiveRaces) {
+      const activeRaces = await checkActiveRaces(prisma, userId);
+      if (activeRaces) return activeRaces;
+    } else {
+      const active = await checkActiveRace(prisma, userId);
+      if (active) return active;
+    }
 
     const friendIds = await getAcceptedFriendIds(prisma, userId);
 
