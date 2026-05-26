@@ -77,10 +77,15 @@ function buildGetRaceMessages(dependencies = {}) {
   return async function getRaceMessages(
     userId,
     raceId,
-    { cursor, limit = 50 } = {}
+    { cursor, limit = 50, kind } = {}
   ) {
     const pageLimit = normalizeLimit(limit);
     const parsedCursor = parseCursor(cursor);
+    // Backward compatible: omitted/invalid kind => merged feed (USER + SYSTEM).
+    const normalizedKind =
+      kind === "USER" || kind === "SYSTEM" ? kind : null;
+    const includeUser = normalizedKind !== "SYSTEM";
+    const includeSystem = normalizedKind !== "USER";
     const race = await raceModel.findById(raceId);
     if (!race) {
       const error = new Error("Race not found");
@@ -95,9 +100,10 @@ function buildGetRaceMessages(dependencies = {}) {
       throw error;
     }
 
-    // Stealth: same redaction logic as feed
+    // Stealth: same redaction logic as feed (only relevant when SYSTEM items
+    // are included, since redaction is applied to event descriptions).
     const stealthedUserIds = new Set();
-    if (race.powerupsEnabled) {
+    if (includeSystem && race.powerupsEnabled) {
       const activeEffects = await raceActiveEffectModel.findActiveForRace(
         raceId
       );
@@ -119,14 +125,18 @@ function buildGetRaceMessages(dependencies = {}) {
 
     const fetchLimit = pageLimit + 1;
     const [userMessages, powerupEvents] = await Promise.all([
-      raceMessageModel.findByRace(raceId, {
-        cursor: parsedCursor,
-        limit: fetchLimit,
-      }),
-      racePowerupEventModel.findByRace(raceId, {
-        cursor: parsedCursor,
-        limit: fetchLimit,
-      }),
+      includeUser
+        ? raceMessageModel.findByRace(raceId, {
+            cursor: parsedCursor,
+            limit: fetchLimit,
+          })
+        : Promise.resolve([]),
+      includeSystem
+        ? racePowerupEventModel.findByRace(raceId, {
+            cursor: parsedCursor,
+            limit: fetchLimit,
+          })
+        : Promise.resolve([]),
     ]);
 
     const userItems = userMessages.map((m) => ({

@@ -444,11 +444,14 @@ function createRacesRouter(dependencies = {}) {
   // GET /races/:raceId/messages
   router.get("/:raceId/messages", async (req, res) => {
     try {
-      const { cursor, limit } = req.query;
+      const { cursor, limit, kind } = req.query;
       const parsedLimit = limit ? Math.min(Number(limit) || 50, 100) : 50;
+      // Backward compatible: omit kind => merged feed (legacy clients).
+      const parsedKind = kind === "USER" || kind === "SYSTEM" ? kind : undefined;
       const result = await getRaceMessages(req.user.id, req.params.raceId, {
         cursor,
         limit: parsedLimit,
+        kind: parsedKind,
       });
       res.json(result);
     } catch (error) {
