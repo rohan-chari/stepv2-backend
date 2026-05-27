@@ -1,5 +1,20 @@
 # CLAUDE.md — steps-tracker backend
 
+## Always ask before deploying to prod
+
+**Never deploy to production without explicit, in-the-moment confirmation.**
+"Build it" / "yes" / "do it" authorizes writing and committing the change — it
+does **not** authorize a prod deploy (git pull + restart, `prisma migrate
+deploy`, or any DB write against the prod database). Prod serves real users;
+deploys and prod data changes are the high-risk, hard-to-reverse step.
+
+- Make the change, commit/push, run tests — then **stop and ask** before
+  touching prod ("Ready to deploy to prod? It will run migration X + restart").
+- Earlier approval to deploy does **not** roll forward to later changes — ask
+  each time.
+- Staging is fine to deploy to without asking; **prod is not**.
+- This also covers one-off prod DB scripts/`UPDATE`s and running seeds on prod.
+
 ## Core principle: never break users on older app versions
 
 This backend serves the **live iOS app**, whose binary is frozen per release.
