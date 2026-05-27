@@ -3,12 +3,18 @@ const { RaceParticipant } = require("../models/raceParticipant");
 const { User } = require("../models/user");
 const { awardCoins } = require("./awardCoins");
 const { eventBus } = require("../events/eventBus");
+const { prisma: defaultPrisma } = require("../db");
+const { hashAppleSub } = require("../utils/appleSubHash");
 const {
   ensureUserCanAfford,
   refundRaceBuyIn,
   reserveRaceBuyIn,
 } = require("../services/raceBuyIns");
 const { withRaceJoinLock } = require("../services/raceJoinLock");
+
+// How many bonus mystery boxes the "join your first race" onboarding grants.
+const ONBOARDING_BONUS_BOXES = 3;
+const DEFAULT_POWERUP_SLOTS = 3;
 
 class RaceJoinError extends Error {
   constructor(message, statusCode) {
@@ -25,8 +31,102 @@ function buildJoinPublicRace(dependencies = {}) {
   const awardCoinsFn = dependencies.awardCoins || awardCoins;
   const events = dependencies.eventBus || eventBus;
   const withLock = dependencies.withRaceJoinLock || withRaceJoinLock;
+  const db = dependencies.prisma || defaultPrisma;
+  const hashSub = dependencies.hashAppleSub || hashAppleSub;
 
-  return async function joinPublicRace({ userId, raceId }) {
+  // Best-effort, server-enforced one-time grant of bonus mystery boxes for the
+  // "join your first race" onboarding. Eligibility is re-checked here (never
+  // trusts the client flag): the race must have powerups enabled, and the
+  // joining user's Apple sub must not already appear in the OnboardingBoxGrant
+  // ledger. The ledger key (a hash of the Apple sub) is stable across
+  // delete-account + reinstall + re-sign-in, so the bonus cannot be farmed.
+  //
+  // Failures here never break the join: the participant already exists; we only
+  // log and move on. Mirrors rollPowerup's MYSTERY_BOX creation (a RacePowerup
+  // row with type/rarity null, status MYSTERY_BOX, plus a matching
+  // POWERUP_EARNED racePowerupEvent — see src/commands/rollPowerup.js).
+  async function maybeGrantOnboardingBoxes({ participant, race, joiningUserId }) {
+    // Events to emit AFTER the grant transaction commits, so subscribers see
+    // settled DB state (mirrors rollPowerup's deferred-emit pattern).
+    const earnedEvents = [];
+    try {
+      if (!race || race.powerupsEnabled !== true) {
+        return earnedEvents; // Boxes are useless on a non-powerup race.
+      }
+
+      const user = await userModel.findById(joiningUserId);
+      const appleSubHash = hashSub(user && user.appleId);
+      if (!appleSubHash) {
+        return earnedEvents; // No stable identity to gate on — skip.
+      }
+
+      const slots =
+        (participant && participant.powerupSlots) || DEFAULT_POWERUP_SLOTS;
+      const boxesToGrant = Math.min(ONBOARDING_BONUS_BOXES, slots);
+      if (boxesToGrant <= 0) {
+        return earnedEvents;
+      }
+
+      await db.$transaction(async (tx) => {
+        // Insert the ledger row first. The PK is the appleSubHash, so a
+        // concurrent/duplicate attempt (incl. a prior grant from a deleted
+        // account that reused this Apple sub) collides on the unique key and
+        // aborts the whole transaction — no boxes, exactly-once forever.
+        await tx.onboardingBoxGrant.create({ data: { appleSubHash } });
+
+        for (let i = 0; i < boxesToGrant; i++) {
+          const powerup = await tx.racePowerup.create({
+            data: {
+              raceId: race.id,
+              participantId: participant.id,
+              userId: joiningUserId,
+              type: null,
+              rarity: null,
+              status: "MYSTERY_BOX",
+              // Distinct values satisfy the @@unique([participantId,
+              // earnedAtSteps]) constraint for a brand-new participant.
+              earnedAtSteps: i,
+            },
+          });
+
+          await tx.racePowerupEvent.create({
+            data: {
+              raceId: race.id,
+              actorUserId: joiningUserId,
+              eventType: "POWERUP_EARNED",
+              powerupType: "MYSTERY_BOX",
+              description: "Welcome gift — a mystery box!",
+            },
+          });
+
+          earnedEvents.push({
+            raceId: race.id,
+            userId: joiningUserId,
+            powerupId: powerup.id,
+          });
+        }
+
+        await tx.user.update({
+          where: { id: joiningUserId },
+          data: { firstRaceOnboardingSeen: true },
+        });
+      });
+    } catch (error) {
+      // P2002 = unique violation on the ledger PK: already granted, ever. Any
+      // other error is swallowed so the (already-created) join still succeeds.
+      if (!error || error.code !== "P2002") {
+        console.warn(
+          `Onboarding box grant skipped: ${error && error.message ? error.message : error}`
+        );
+      }
+      // If the grant transaction rolled back, no rows were created, so do not
+      // emit any deferred POWERUP_EARNED events.
+      return [];
+    }
+    return earnedEvents;
+  }
+
+  return async function joinPublicRace({ userId, raceId, onboarding }) {
     return withLock(raceId, async () => {
       const race = await raceModel.findById(raceId);
       if (!race) {
@@ -108,6 +208,20 @@ function buildJoinPublicRace(dependencies = {}) {
         creatorUserId: race.creatorId,
         raceName: race.name,
       });
+
+      // Onboarding first-race bonus boxes. Eligibility is enforced inside the
+      // helper regardless of the flag; falsy `onboarding` => no bonus (current
+      // behavior preserved for old clients that omit it).
+      if (onboarding === true) {
+        const grantedEvents = await maybeGrantOnboardingBoxes({
+          participant,
+          race,
+          joiningUserId: userId,
+        });
+        for (const payload of grantedEvents) {
+          events.emit("POWERUP_EARNED", payload);
+        }
+      }
 
       return participant;
     });

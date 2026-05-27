@@ -55,6 +55,7 @@ const {
   markRaceChatRead: defaultMarkRaceChatRead,
 } = require("../commands/setRaceChatMute");
 const { Race: defaultRaceModel } = require("../models/race");
+const { User: defaultUserModel } = require("../models/user");
 const { RacePowerup: defaultPowerupModel } = require("../models/racePowerup");
 const {
   RaceActiveEffect: defaultEffectModel,
@@ -99,6 +100,7 @@ function createRacesRouter(dependencies = {}) {
   const markRaceChatRead =
     dependencies.markRaceChatRead || defaultMarkRaceChatRead;
   const raceModel = dependencies.Race || defaultRaceModel;
+  const userModel = dependencies.User || defaultUserModel;
   const powerupModel = dependencies.RacePowerup || defaultPowerupModel;
   const effectModel = dependencies.RaceActiveEffect || defaultEffectModel;
 
@@ -164,11 +166,15 @@ function createRacesRouter(dependencies = {}) {
   });
 
   // POST /races/:raceId/join
+  // Optional body { onboarding: boolean } — when true (and server-side
+  // eligibility passes) grants the one-time "join your first race" bonus boxes.
+  // Old clients omit it (defaults false), preserving current behavior.
   router.post("/:raceId/join", async (req, res) => {
     try {
       const participant = await joinPublicRace({
         userId: req.user.id,
         raceId: req.params.raceId,
+        onboarding: req.body && req.body.onboarding === true,
       });
       res.status(201).json({ participant });
     } catch (error) {
@@ -177,6 +183,20 @@ function createRacesRouter(dependencies = {}) {
         return res.status(status).json({ error: error.message });
       }
       console.error("Join public race error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // POST /races/onboarding/first-race-seen
+  // Marks the authed user as having seen the first-race onboarding step (the
+  // SKIP path). Idempotent — safe to call repeatedly. Static path is declared
+  // before /:raceId routes that take an action suffix, so there's no collision.
+  router.post("/onboarding/first-race-seen", async (req, res) => {
+    try {
+      await userModel.update(req.user.id, { firstRaceOnboardingSeen: true });
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Mark first-race onboarding seen error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });

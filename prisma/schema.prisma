@@ -25,6 +25,10 @@ model User {
   lastDailyClaimDate String? @map("last_daily_claim_date")
   dailyStreakDay     Int     @default(0) @map("daily_streak_day")
   isReviewAccount    Boolean @default(false) @map("is_review_account")
+  // True once the user has either joined their first race via the onboarding
+  // step or explicitly skipped it. Additive/back-compat: defaults false so
+  // existing rows and old clients (which ignore the field) are unaffected.
+  firstRaceOnboardingSeen Boolean @default(false) @map("first_race_onboarding_seen")
   createdAt DateTime @default(now()) @map("created_at")
   steps     Step[]
   dailyRewardClaims    DailyRewardClaim[]
@@ -632,4 +636,16 @@ model RaceMessage {
 
   @@index([raceId, createdAt])
   @@map("race_messages")
+}
+
+// One-time ledger of the "join your first race" bonus mystery-box grant.
+// Keyed on a SHA-256 hash of the Apple `sub` (stored, never the raw sub) so the
+// gate survives account deletion + reinstall + re-sign-in (which mints a new
+// User row but reuses the same Apple sub). Rows are intentionally NEVER deleted
+// on account deletion — that is what makes the grant abuse-proof.
+model OnboardingBoxGrant {
+  appleSubHash String   @id @map("apple_sub_hash")
+  grantedAt    DateTime @default(now()) @map("granted_at")
+
+  @@map("onboarding_box_grant")
 }
