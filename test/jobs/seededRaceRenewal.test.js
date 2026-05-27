@@ -135,6 +135,62 @@ test("renewSeededRaces handles multiple seeds independently", async () => {
   assert.equal(ctx.created[0].targetSteps, 50000);
 });
 
+test("renewSeededRaces propagates the seed's powerup config to the race", async () => {
+  const ctx = makePrisma({
+    seeds: [
+      {
+        id: "seed-weekly-50k",
+        kind: "WEEKLY_50K",
+        name: "Weekly 50K Challenge",
+        targetSteps: 50000,
+        durationHours: 168,
+        cadence: "WEEKLY",
+        maxParticipants: 100,
+        active: true,
+        powerupsEnabled: true,
+        powerupStepInterval: 2500,
+      },
+    ],
+  });
+
+  const renew = buildRenewSeededRaces({
+    prisma: ctx.prisma,
+    now: () => FIXED_NOW,
+    logger: { log() {}, error() {} },
+  });
+
+  await renew();
+  assert.equal(ctx.created[0].powerupsEnabled, true);
+  assert.equal(ctx.created[0].powerupStepInterval, 2500);
+});
+
+test("renewSeededRaces defaults powerups off when the seed omits config", async () => {
+  const ctx = makePrisma({
+    seeds: [
+      {
+        id: "seed-daily-10k",
+        kind: "DAILY_10K",
+        name: "Daily 10K Sprint",
+        targetSteps: 10000,
+        durationHours: 24,
+        cadence: "DAILY",
+        maxParticipants: 100,
+        active: true,
+      },
+    ],
+  });
+
+  const renew = buildRenewSeededRaces({
+    prisma: ctx.prisma,
+    now: () => FIXED_NOW,
+    logger: { log() {}, error() {} },
+  });
+
+  await renew();
+  assert.equal(ctx.created[0].powerupsEnabled, false);
+  assert.equal(ctx.created[0].powerupStepInterval, null);
+});
+
 test("renewSeededRaces is a no-op when no active seeds exist", async () => {
   const ctx = makePrisma({ seeds: [] });
 

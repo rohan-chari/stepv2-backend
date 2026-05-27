@@ -483,6 +483,9 @@ model RaceSeed {
   durationHours   Int?            @map("duration_hours")
   cadence         RaceSeedCadence
   maxParticipants Int             @default(100) @map("max_participants")
+  // Per-seed powerup config applied to each seeded race created from this seed.
+  powerupsEnabled     Boolean     @default(false) @map("powerups_enabled")
+  powerupStepInterval Int?        @map("powerup_step_interval")
   active          Boolean         @default(true)
   createdAt       DateTime        @default(now()) @map("created_at")
   updatedAt       DateTime        @updatedAt @map("updated_at")
