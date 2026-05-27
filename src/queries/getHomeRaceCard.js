@@ -1,6 +1,12 @@
 const { prisma: defaultPrisma } = require("../db");
 const { buildAccessoriesList } = require("../utils/shopCosmetics");
 const { RaceActiveEffect } = require("../models/raceActiveEffect");
+const { Steps } = require("../models/steps");
+const { StepSample } = require("../models/stepSample");
+const {
+  calculateBaseAdjusted,
+  calculateCurrentTotal,
+} = require("../services/raceStateResolution");
 
 // Max number of active races returned in the new ACTIVE_RACES (opt-in) state.
 const MAX_ACTIVE_RACES = 5;
@@ -188,7 +194,15 @@ function compareParticipantsForPlacement(left, right) {
 // the legacy single-state response (see buildGetHomeRaceCard). When an opted-in
 // user has zero active races this returns null and we fall through to the
 // existing single-state logic (invites / public / friend prompts).
-async function checkActiveRaces(prisma, userId) {
+async function checkActiveRaces(prisma, userId, options = {}) {
+  const {
+    timeZone = "UTC",
+    now = new Date(),
+    stepsModel = Steps,
+    stepSampleModel = StepSample,
+    raceActiveEffectModel = RaceActiveEffect,
+  } = options;
+
   const myActive = await prisma.raceParticipant.findMany({
     where: {
       userId,
@@ -217,13 +231,71 @@ async function checkActiveRaces(prisma, userId) {
     const race = participation.race;
     if (!race) continue;
 
-    // Sort participants for placement (deterministic, matches getRaces).
-    const ranked = [...race.participants].sort(compareParticipantsForPlacement);
+    // Compute each ACCEPTED participant's LIVE race-relative total using the
+    // same side-effect-free helpers the race-detail screen relies on
+    // (calculateBaseAdjusted + calculateCurrentTotal from raceStateResolution).
+    // This is a READ-ONLY path: we never write total_steps, mark finishers,
+    // complete races, emit events, or trigger trail mines. We only compute
+    // totals for display so home and detail can't diverge.
+    //
+    // Finished racers are NOT recomputed — we use their frozen finishTotalSteps
+    // (falling back to the live total) exactly as getRaceProgress /
+    // raceStateResolution treat finishers.
+    const liveTotals = new Map(); // participant.id -> live total
+    if (race.startedAt) {
+      await Promise.all(
+        race.participants.map(async (p) => {
+          if (p.finishedAt) {
+            liveTotals.set(p.id, p.finishTotalSteps ?? p.totalSteps ?? 0);
+            return;
+          }
+          const { baseAdjusted, hasSampleData } = await calculateBaseAdjusted({
+            participant: p,
+            raceStartedAt: race.startedAt,
+            timeZone,
+            stepsModel,
+            stepSampleModel,
+            now,
+          });
+          const { total } = await calculateCurrentTotal({
+            raceId: race.id,
+            racePowerupsEnabled: race.powerupsEnabled,
+            participant: p,
+            baseAdjusted,
+            hasSampleData,
+            raceActiveEffectModel,
+            stepSampleModel,
+          });
+          liveTotals.set(p.id, total);
+        })
+      );
+    } else {
+      // No startedAt: cannot window steps; fall back to cached totals so we
+      // still render a card rather than crash (defensive).
+      for (const p of race.participants) {
+        liveTotals.set(
+          p.id,
+          p.finishedAt ? p.finishTotalSteps ?? p.totalSteps ?? 0 : p.totalSteps ?? 0
+        );
+      }
+    }
+
+    // Project the live totals onto each participant so placement ranking and
+    // top-3 step display both read from the same live source. finishedAt is
+    // preserved so finishers still sort ahead of unfinished racers.
+    const liveParticipants = race.participants.map((p) => ({
+      ...p,
+      totalSteps: liveTotals.get(p.id) ?? 0,
+    }));
+
+    // Sort participants for placement (deterministic, matches getRaces) using
+    // the LIVE totals.
+    const ranked = [...liveParticipants].sort(compareParticipantsForPlacement);
 
     // Determine stealthed user ids for this race (only when powerups enabled).
     const stealthedUserIds = new Set();
     if (race.powerupsEnabled) {
-      const activeEffects = await RaceActiveEffect.findActiveForRace(race.id);
+      const activeEffects = await raceActiveEffectModel.findActiveForRace(race.id);
       for (const e of activeEffects) {
         if (e.type === "STEALTH_MODE") stealthedUserIds.add(e.targetUserId);
       }
@@ -404,8 +476,17 @@ async function checkPublicRace(prisma, userId) {
 function buildGetHomeRaceCard(dependencies = {}) {
   const prisma = dependencies.prisma || defaultPrisma;
   const nowFn = dependencies.now || (() => new Date());
+  // Step-source models for the live-computation path in checkActiveRaces.
+  // Injectable for tests; default to the shared singletons in prod.
+  const stepsModel = dependencies.Steps || Steps;
+  const stepSampleModel = dependencies.StepSample || StepSample;
+  const raceActiveEffectModel = dependencies.RaceActiveEffect || RaceActiveEffect;
 
-  return async function getHomeRaceCard({ userId, homeActiveRaces = false }) {
+  return async function getHomeRaceCard({
+    userId,
+    homeActiveRaces = false,
+    timeZone = "UTC",
+  }) {
     const now = nowFn();
 
     const pending = await checkPendingInvite(prisma, userId, now);
@@ -418,7 +499,13 @@ function buildGetHomeRaceCard(dependencies = {}) {
     // this flag, so they always get the legacy ACTIVE_RACE single-card response
     // (byte-for-byte unchanged).
     if (homeActiveRaces) {
-      const activeRaces = await checkActiveRaces(prisma, userId);
+      const activeRaces = await checkActiveRaces(prisma, userId, {
+        timeZone,
+        now,
+        stepsModel,
+        stepSampleModel,
+        raceActiveEffectModel,
+      });
       if (activeRaces) return activeRaces;
     } else {
       const active = await checkActiveRace(prisma, userId);

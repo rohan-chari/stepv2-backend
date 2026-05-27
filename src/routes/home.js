@@ -22,6 +22,10 @@ function createHomeRouter(dependencies = {}) {
       const result = await getHomeRaceCard({
         userId: req.user.id,
         homeActiveRaces,
+        // Match getRaceProgress: window race steps in the caller's timezone
+        // (set globally by the extractTimezone middleware) so the home card and
+        // the race-detail screen compute identical race-relative totals.
+        timeZone: req.timeZone,
       });
       res.json(result);
     } catch (error) {
