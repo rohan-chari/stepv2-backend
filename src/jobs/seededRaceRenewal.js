@@ -44,6 +44,7 @@ function buildRenewSeededRaces(dependencies = {}) {
             maxParticipants: seed.maxParticipants,
             powerupsEnabled: seed.powerupsEnabled ?? false,
             powerupStepInterval: seed.powerupStepInterval ?? null,
+            timeBased: seed.timeBased ?? false,
             startedAt,
             endsAt,
             maxDurationDays: Math.max(1, Math.ceil(durationHours / 24)),

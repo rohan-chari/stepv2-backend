@@ -523,7 +523,18 @@ function buildResolveRaceState(dependencies = {}) {
           await participantModel.updateTotalSteps(participant.id, total);
           stepTotals[index] = { participant, totalSteps: total };
 
-          if (total >= race.targetSteps) {
+          // Target-based early finish only applies to goal races (targetSteps > 0).
+          // Time-based races create with targetSteps = 0; since `0 >= 0`, an
+          // unguarded check would mark every participant finished the instant the
+          // race starts (and complete the race immediately). Time-based races must
+          // finish ONLY when ends_at passes, via src/jobs/raceExpiry.js.
+          //
+          // The explicit `!race.timeBased` guard also covers seeded races that
+          // KEEP a positive targetSteps as a display-only goal (e.g. Daily 10K /
+          // Weekly 50K): when time_based = true they never finish on target,
+          // regardless of targetSteps. Legacy target races (time_based = false,
+          // the default) are unaffected and still finish on reaching the target.
+          if (!race.timeBased && race.targetSteps > 0 && total >= race.targetSteps) {
             const snapshot = await determineFinishSnapshot({
               participant,
               currentTotal: total,

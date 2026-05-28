@@ -452,6 +452,11 @@ model Race {
   powerupStepInterval  Int?       @map("powerup_step_interval")
   isPublic             Boolean    @default(false) @map("is_public")
   maxParticipants      Int        @default(10) @map("max_participants")
+  // When true, the race never finishes on reaching targetSteps; targetSteps is
+  // a display-only goal and the winner is decided by step count when ends_at
+  // passes (raceExpiry.js). Additive/backward-compatible: defaults false so
+  // legacy target races created by older app versions keep finishing on target.
+  timeBased            Boolean    @default(false) @map("time_based")
   createdAt            DateTime   @default(now()) @map("created_at")
   updatedAt            DateTime   @updatedAt @map("updated_at")
 
@@ -490,6 +495,9 @@ model RaceSeed {
   // Per-seed powerup config applied to each seeded race created from this seed.
   powerupsEnabled     Boolean     @default(false) @map("powerups_enabled")
   powerupStepInterval Int?        @map("powerup_step_interval")
+  // Seeded races created from this seed inherit this flag. Defaults false for
+  // backward compat; set true on DAILY_10K/WEEKLY_50K to make them time-based.
+  timeBased           Boolean     @default(false) @map("time_based")
   active          Boolean         @default(true)
   createdAt       DateTime        @default(now()) @map("created_at")
   updatedAt       DateTime        @updatedAt @map("updated_at")
