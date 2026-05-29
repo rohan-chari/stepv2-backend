@@ -42,9 +42,36 @@ function isRacePayoutPresetCompatible({ preset, acceptedCount }) {
   return (acceptedCount || 0) >= 4;
 }
 
+// Split a fixed reward pool across `count` ranked finishers using descending
+// linear weights (rank 1 gets weight `count`, the last rank gets weight 1), so
+// higher placers always earn at least as much as lower ones and the total never
+// exceeds the pool. The rounding remainder goes to 1st place — same convention
+// as computeRacePayouts. Used for the seeded daily/weekly finish rewards, which
+// are minted rather than funded by a buy-in pot.
+function computeGradedPayouts({ pool, count }) {
+  const safePool = Math.max(0, Math.floor(pool || 0));
+  const slots = Math.max(0, Math.floor(count || 0));
+  if (safePool === 0 || slots === 0) {
+    return [];
+  }
+
+  const totalWeight = (slots * (slots + 1)) / 2;
+  const amounts = [];
+  let distributed = 0;
+  for (let rank = 1; rank <= slots; rank++) {
+    const weight = slots - rank + 1;
+    const amount = Math.floor((safePool * weight) / totalWeight);
+    amounts.push(amount);
+    distributed += amount;
+  }
+  amounts[0] += safePool - distributed;
+  return amounts;
+}
+
 module.exports = {
   RACE_PAYOUT_PRESETS,
   computeRacePayouts,
+  computeGradedPayouts,
   getRacePayoutPercentages,
   isRacePayoutPreset,
   isRacePayoutPresetCompatible,

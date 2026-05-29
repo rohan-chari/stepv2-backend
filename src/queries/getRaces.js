@@ -1,6 +1,10 @@
 const { Race } = require("../models/race");
 const { RacePowerup } = require("../models/racePowerup");
 const { computeRacePayouts } = require("../utils/racePayoutPresets");
+const {
+  getFinishRewardPool,
+  FINISH_REWARD_TOP_FRACTION,
+} = require("../constants/raceFinishReward");
 
 function compareParticipantsForPlacement(left, right) {
   if (left.finishedAt && right.finishedAt) {
@@ -66,6 +70,7 @@ async function getRaces(userId) {
       preset: race.payoutPreset,
       potCoins: projectedPotCoins,
     });
+    const finishRewardPool = getFinishRewardPool(race.seedId);
     const myPlacement =
       race.status === "COMPLETED"
         ? myParticipant?.placement ?? null
@@ -93,6 +98,10 @@ async function getRaces(userId) {
         second: payouts[1],
         third: payouts[2],
       },
+      finishReward:
+        finishRewardPool > 0
+          ? { pool: finishRewardPool, topFraction: FINISH_REWARD_TOP_FRACTION }
+          : null,
       startedAt: race.startedAt,
       endsAt: race.endsAt,
       completedAt: race.completedAt,

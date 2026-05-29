@@ -4,8 +4,15 @@ const { RacePowerup } = require("../models/racePowerup");
 const { RaceActiveEffect } = require("../models/raceActiveEffect");
 const { awardCoins } = require("./awardCoins");
 const { eventBus } = require("../events/eventBus");
-const { computeRacePayouts } = require("../utils/racePayoutPresets");
+const {
+  computeRacePayouts,
+  computeGradedPayouts,
+} = require("../utils/racePayoutPresets");
 const { payoutRaceCoins } = require("../services/raceBuyIns");
+const {
+  getFinishRewardPool,
+  FINISH_REWARD_TOP_FRACTION,
+} = require("../constants/raceFinishReward");
 
 function buildCompleteRace(dependencies = {}) {
   const raceModel = dependencies.Race || Race;
@@ -58,6 +65,47 @@ function buildCompleteRace(dependencies = {}) {
           raceId,
           placement,
           amount,
+        });
+        await participantModel.incrementPayoutCoins(recipient.id, amount);
+      }
+    }
+
+    // System-funded graded reward for seeded races (the daily/weekly
+    // challenges, which have no buy-in pot). The top FINISH_REWARD_TOP_FRACTION
+    // of finishers split a fixed minted pool, higher placers earning more. This
+    // is independent of the buy-in pot path above — a race could in principle
+    // have both — and uses its own reason/refId so the two never collide. It
+    // runs at most once per race: completeRace early-returns above once the race
+    // is COMPLETED, and awardCoins dedups on (reason, refId) for retries.
+    const finishRewardPool = getFinishRewardPool(race?.seedId);
+    if (finishRewardPool > 0 && Array.isArray(race?.participants)) {
+      // Only people who actually walked are eligible; rank by the placement set
+      // at race resolution (raceExpiry assigns 1..N before completing).
+      const eligible = race.participants
+        .filter(
+          (participant) =>
+            participant.status === "ACCEPTED" &&
+            participant.placement != null &&
+            (participant.totalSteps || 0) > 0
+        )
+        .sort((a, b) => a.placement - b.placement);
+
+      const rewardSlots = Math.ceil(eligible.length * FINISH_REWARD_TOP_FRACTION);
+      const rewards = computeGradedPayouts({
+        pool: finishRewardPool,
+        count: rewardSlots,
+      });
+
+      for (let index = 0; index < rewardSlots; index++) {
+        const recipient = eligible[index];
+        const amount = rewards[index] || 0;
+        if (!recipient || amount <= 0) continue;
+
+        await awardCoinsFn({
+          userId: recipient.userId,
+          amount,
+          reason: "race_finish_reward",
+          refId: `${raceId}:rank:${recipient.placement}`,
         });
         await participantModel.incrementPayoutCoins(recipient.id, amount);
       }

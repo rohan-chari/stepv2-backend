@@ -1,6 +1,10 @@
 const { Race } = require("../models/race");
 const { computeRacePayouts } = require("../utils/racePayoutPresets");
 const { buildAccessoriesList } = require("../utils/shopCosmetics");
+const {
+  getFinishRewardPool,
+  FINISH_REWARD_TOP_FRACTION,
+} = require("../constants/raceFinishReward");
 
 async function getRaceDetails(userId, raceId) {
   const race = await Race.findById(raceId);
@@ -28,6 +32,7 @@ async function getRaceDetails(userId, raceId) {
     preset: race.payoutPreset,
     potCoins: projectedPotCoins,
   });
+  const finishRewardPool = getFinishRewardPool(race.seedId);
 
   return {
     id: race.id,
@@ -45,6 +50,12 @@ async function getRaceDetails(userId, raceId) {
       second: payouts[1],
       third: payouts[2],
     },
+    // Minted reward for seeded races (no buy-in). null when the race pays no
+    // finish reward. Additive: older clients ignore the field.
+    finishReward:
+      finishRewardPool > 0
+        ? { pool: finishRewardPool, topFraction: FINISH_REWARD_TOP_FRACTION }
+        : null,
     startedAt: race.startedAt,
     endsAt: race.endsAt,
     completedAt: race.completedAt,
