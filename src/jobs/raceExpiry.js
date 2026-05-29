@@ -124,7 +124,11 @@ async function resolveExpiredRaces() {
 }
 
 function scheduleRaceExpiryCheck() {
-  const INTERVAL = 60 * 60 * 1000; // every hour
+  // Every 5 minutes — matches the seeded-race renewal cadence so a finished
+  // daily/weekly race is settled promptly and the next one spins up within
+  // minutes (keeps the Featured section from showing a long "starting soon"
+  // gap). The check is idempotent (completeRace early-returns on non-ACTIVE).
+  const INTERVAL = 5 * 60 * 1000; // every 5 minutes
 
   async function run() {
     try {

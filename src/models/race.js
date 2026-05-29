@@ -197,6 +197,23 @@ const Race = {
     });
   },
 
+  // Live (PENDING/ACTIVE) seeded races — the recurring daily/weekly challenges.
+  // Used by the Featured Races section. Includes the seed kind and full
+  // participants so the caller can compute counts and the viewer's join status.
+  async findLiveSeeded() {
+    return prisma.race.findMany({
+      where: {
+        seedId: { not: null },
+        status: { in: ["PENDING", "ACTIVE"] },
+      },
+      include: {
+        seed: { select: { kind: true } },
+        ...participantInclude,
+      },
+      orderBy: { startedAt: "desc" },
+    });
+  },
+
 };
 
 module.exports = { Race };

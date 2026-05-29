@@ -16,6 +16,9 @@ const {
 const {
   getPublicRaces: defaultGetPublicRaces,
 } = require("../queries/getPublicRaces");
+const {
+  getFeaturedRaces: defaultGetFeaturedRaces,
+} = require("../queries/getFeaturedRaces");
 const { startRace: defaultStartRace } = require("../commands/startRace");
 const { cancelRace: defaultCancelRace } = require("../commands/cancelRace");
 const { editRace: defaultEditRace } = require("../commands/editRace");
@@ -76,6 +79,8 @@ function createRacesRouter(dependencies = {}) {
     dependencies.kickRaceParticipant || defaultKickRaceParticipant;
   const getPublicRaces =
     dependencies.getPublicRaces || defaultGetPublicRaces;
+  const getFeaturedRaces =
+    dependencies.getFeaturedRaces || defaultGetFeaturedRaces;
   const startRace = dependencies.startRace || defaultStartRace;
   const cancelRace = dependencies.cancelRace || defaultCancelRace;
   const editRace = dependencies.editRace || defaultEditRace;
@@ -161,6 +166,20 @@ function createRacesRouter(dependencies = {}) {
       res.json({ races });
     } catch (error) {
       console.error("Get public races error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // GET /races/featured
+  // The live seeded daily/weekly races, pinned for the Featured section. Static
+  // path declared before any GET /:raceId so it isn't captured as a race id.
+  // New endpoint — old clients never call it.
+  router.get("/featured", async (req, res) => {
+    try {
+      const races = await getFeaturedRaces({ userId: req.user.id });
+      res.json({ races });
+    } catch (error) {
+      console.error("Get featured races error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });
