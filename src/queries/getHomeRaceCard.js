@@ -326,6 +326,7 @@ async function checkActiveRaces(prisma, userId, options = {}) {
       endsAt: race.endsAt,
       top3,
       userPlacement,
+      participantCount: ranked.length,
     });
   }
 

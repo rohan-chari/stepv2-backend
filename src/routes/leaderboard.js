@@ -1,9 +1,6 @@
 const { Router } = require("express");
 const { buildRequireAuth } = require("../middleware/requireAuth");
 const { getLeaderboard: defaultGetLeaderboard } = require("../queries/getLeaderboard");
-const {
-  getLeaderboardHighlights: defaultGetLeaderboardHighlights,
-} = require("../queries/getLeaderboardHighlights");
 
 const VALID_PERIODS = ["today", "week", "month", "allTime"];
 const VALID_TYPES = ["steps", "races"];
@@ -13,19 +10,16 @@ function createLeaderboardRouter(dependencies = {}) {
   const requireAuth =
     dependencies.requireAuth || buildRequireAuth(dependencies);
   const getLeaderboard = dependencies.getLeaderboard || defaultGetLeaderboard;
-  const getLeaderboardHighlights =
-    dependencies.getLeaderboardHighlights || defaultGetLeaderboardHighlights;
 
   router.use(requireAuth);
 
-  router.get("/highlights", async (req, res) => {
-    try {
-      const result = await getLeaderboardHighlights(req.user.id, req.timeZone);
-      res.json(result);
-    } catch (error) {
-      console.error("Leaderboard highlights error:", error);
-      res.status(500).json({ error: "Internal server error" });
-    }
+  // Compat shim: the "Climbing the boards" home section (and its
+  // getLeaderboardHighlights query) were removed. Shipped app versions still
+  // GET /leaderboard/highlights on home load, so this responds with an empty
+  // card list rather than 404ing them. New clients don't call it. Safe to drop
+  // once those old app versions have aged out.
+  router.get("/highlights", (req, res) => {
+    res.json({ cards: [] });
   });
 
   // GET /leaderboard?period=today|week|month|allTime
