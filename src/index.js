@@ -5,6 +5,7 @@ const { registerEventHandlers } = require("./handlers/eventHandlers");
 const { registerNotificationHandlers } = require("./handlers/notificationHandlers");
 const { scheduleRaceExpiryCheck } = require("./jobs/raceExpiry");
 const { scheduleSeededRaceRenewal } = require("./jobs/seededRaceRenewal");
+const { scheduleComputeRanks } = require("./jobs/computeRanks");
 
 function startServer({
   app = createApp(),
@@ -14,6 +15,7 @@ function startServer({
   registerNotificationHandlers: registerNotifications = registerNotificationHandlers,
   scheduleRaceExpiryCheck: scheduleRaceExpiry = scheduleRaceExpiryCheck,
   scheduleSeededRaceRenewal: scheduleSeededRenewal = scheduleSeededRaceRenewal,
+  scheduleComputeRanks: scheduleRanks = scheduleComputeRanks,
   logger = console,
 } = {}) {
   register();
@@ -23,6 +25,7 @@ function startServer({
     logger.log(`Steps Tracker API running on ${host}:${port}`);
     scheduleRaceExpiry();
     scheduleSeededRenewal();
+    scheduleRanks();
   });
 }
 

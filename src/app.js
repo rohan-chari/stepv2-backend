@@ -8,6 +8,7 @@ const { createFriendsRouter } = require("./routes/friends");
 const { createAdminRouter } = require("./routes/admin");
 const { createNotificationsRouter } = require("./routes/notifications");
 const { createLeaderboardRouter } = require("./routes/leaderboard");
+const { createRankedRouter } = require("./routes/ranked");
 const { createRacesRouter } = require("./routes/races");
 const { createShopRouter } = require("./routes/shop");
 const { createDailyRewardRouter } = require("./routes/dailyReward");
@@ -28,6 +29,7 @@ function createApp(dependencies = {}) {
   app.use("/admin", createAdminRouter(dependencies));
   app.use("/notifications", createNotificationsRouter(dependencies));
   app.use("/leaderboard", createLeaderboardRouter(dependencies));
+  app.use("/ranked", createRankedRouter(dependencies));
   app.use("/races", createRacesRouter(dependencies));
   app.use("/shop", createShopRouter(dependencies));
   app.use("/daily-reward", createDailyRewardRouter(dependencies));

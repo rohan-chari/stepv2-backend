@@ -37,6 +37,20 @@ const Steps = {
     });
   },
 
+  // All per-day step rows in the half-open date range [startDate, endExclusive),
+  // across users, for ranked scoring. The end is exclusive so a season boundary
+  // day counts toward exactly one season (no double-count on rollover). Excludes
+  // review/demo accounts by default so they never appear on the ladder.
+  async findRowsInRange(startDate, endExclusive, { excludeReviewAccounts = true } = {}) {
+    return prisma.step.findMany({
+      where: {
+        date: { gte: new Date(startDate), lt: new Date(endExclusive) },
+        ...(excludeReviewAccounts ? { user: { isReviewAccount: false } } : {}),
+      },
+      select: { userId: true, date: true, steps: true },
+    });
+  },
+
   async sumStepsForUsers(userIds, startDate, endDate) {
     if (userIds.length === 0) return new Map();
 

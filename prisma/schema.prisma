@@ -29,6 +29,11 @@ model User {
   // step or explicitly skipped it. Additive/back-compat: defaults false so
   // existing rows and old clients (which ignore the field) are unaffected.
   firstRaceOnboardingSeen Boolean @default(false) @map("first_race_onboarding_seen")
+  // Ranked: denormalized final tier from the most recently settled season, for
+  // cheap cross-surface badges (races, leaderboard, profile). Additive/nullable
+  // — null means unranked. Set by season settlement; never read by old clients.
+  currentTier     String? @map("current_tier")
+  currentDivision Int?    @map("current_division")
   createdAt DateTime @default(now()) @map("created_at")
   steps     Step[]
   dailyRewardClaims    DailyRewardClaim[]
@@ -51,6 +56,7 @@ model User {
   shopItems          UserShopItem[]
   equippedAccessories UserEquippedAccessory[]
   shopPurchaseRequests ShopPurchaseRequest[]
+  seasonScores       SeasonScore[]
 
   @@map("users")
 }
@@ -656,4 +662,60 @@ model OnboardingBoxGrant {
   grantedAt    DateTime @default(now()) @map("granted_at")
 
   @@map("onboarding_box_grant")
+}
+
+// ── Ranked ─────────────────────────────────────────────────────────────────
+// A competitive ladder driven by walking. Each ~monthly Season accrues Ranked
+// Points (RP) per user (derived from existing Step rows — see RANKED.md), and a
+// background job settles the season: ranks everyone, assigns tiers, mints
+// rewards, then opens the next season. All additive — old app versions never
+// touch any of this.
+
+enum SeasonStatus {
+  ACTIVE   @map("active")
+  SETTLING @map("settling")
+  CLOSED   @map("closed")
+}
+
+model Season {
+  id        String       @id @default(uuid())
+  index     Int          @unique
+  startsAt  DateTime     @map("starts_at")
+  endsAt    DateTime     @map("ends_at")
+  status    SeasonStatus @default(ACTIVE)
+  settledAt DateTime?    @map("settled_at")
+  createdAt DateTime     @default(now()) @map("created_at")
+
+  scores SeasonScore[]
+
+  @@index([status])
+  @@map("seasons")
+}
+
+model SeasonScore {
+  id       String @id @default(uuid())
+  userId   String @map("user_id")
+  seasonId String @map("season_id")
+  // points = carryOverSeed (soft-reset head start) + earnedPoints (RP from this
+  // season's activity). Tiering and the ladder rank on `points`.
+  points        Int @default(0)
+  carryOverSeed Int @default(0) @map("carry_over_seed")
+  earnedPoints  Int @default(0) @map("earned_points")
+  // Provisional standings, refreshed each job tick while the season is live.
+  provisionalRank     Int?    @map("provisional_rank")
+  provisionalTier     String? @map("provisional_tier")
+  provisionalDivision Int?    @map("provisional_division")
+  // Final standings, locked at settlement.
+  rank     Int?
+  tier     String?
+  division Int?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  season Season @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, seasonId])
+  @@index([seasonId, points])
+  @@map("season_scores")
 }
