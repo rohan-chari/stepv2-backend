@@ -67,6 +67,27 @@ const SeasonScore = {
     });
   },
 
+  // The user's live (provisional) standing in the current ACTIVE season, for
+  // showing their tier on other surfaces (profile, etc.). Null if no active
+  // season or the user has no score yet.
+  async getActiveForUser(userId) {
+    const season = await prisma.season.findFirst({
+      where: { status: "ACTIVE" },
+      orderBy: { index: "desc" },
+      select: { id: true },
+    });
+    if (!season) return null;
+    return prisma.seasonScore.findUnique({
+      where: { userId_seasonId: { userId, seasonId: season.id } },
+      select: {
+        provisionalTier: true,
+        provisionalDivision: true,
+        provisionalRank: true,
+        points: true,
+      },
+    });
+  },
+
   // Upsert the live (provisional) standing for a user. Always (re)writes points,
   // earned, and carry-over so the row reflects the latest computation.
   async writeProvisional({

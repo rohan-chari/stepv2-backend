@@ -6,6 +6,7 @@ const { getStepCalendar: defaultGetStepCalendar } = require("../queries/getStepC
 const { buildRequireAuth } = require("../middleware/requireAuth");
 const { getMondayOfWeek, getTimeZoneParts } = require("../utils/week");
 const { calculateStreak } = require("../utils/streak");
+const { SeasonScore } = require("../models/season");
 
 function createStepsRouter(dependencies = {}) {
   const router = Router();
@@ -125,12 +126,21 @@ function createStepsRouter(dependencies = {}) {
 
       const streak = calculateStreak(todayStr, dateMap);
 
+      // Live ranked tier for the profile badge. Defensive: never let a ranked
+      // lookup failure break the core stats response (older clients ignore
+      // these fields anyway).
+      const ranked = await SeasonScore.getActiveForUser(req.user.id).catch(
+        () => null
+      );
+
       res.json({
         thisWeek,
         thisMonth,
         thisYear,
         allTime,
         streak,
+        rankedTier: ranked ? ranked.provisionalTier : null,
+        rankedDivision: ranked ? ranked.provisionalDivision : null,
         // 1.1.4 compat — legacy clients expect stepGoal on the stats payload.
         stepGoal: req.user.stepGoal ?? 5000,
       });

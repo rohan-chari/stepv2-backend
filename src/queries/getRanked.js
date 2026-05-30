@@ -1,7 +1,17 @@
 const { prisma } = require("../db");
 const { Season, SeasonScore } = require("../models/season");
+const { TIERS, TIER_REWARDS } = require("../constants/rankedTiers");
 
 const LADDER_LIMIT = 100;
+
+// Static tier ladder + per-tier reward, surfaced so the client can show "Finish
+// Gold → 600 coins" without hardcoding (and never drifting from) the thresholds.
+const TIER_SUMMARY = TIERS.map((t) => ({
+  key: t.key,
+  label: t.label,
+  floor: t.floor,
+  reward: TIER_REWARDS[t.key] ? TIER_REWARDS[t.key].coins : 0,
+}));
 
 async function getUserProfiles(userIds) {
   if (userIds.length === 0) return new Map();
@@ -27,7 +37,7 @@ async function getUserProfiles(userIds) {
 async function getRanked({ currentUserId, seasonModel = Season, seasonScoreModel = SeasonScore } = {}) {
   const season = await seasonModel.getActive();
   if (!season) {
-    return { season: null, currentUser: null, ladder: [] };
+    return { season: null, currentUser: null, ladder: [], tiers: TIER_SUMMARY };
   }
 
   const scores = await seasonScoreModel.listForSeason(season.id);
@@ -58,6 +68,7 @@ async function getRanked({ currentUserId, seasonModel = Season, seasonScoreModel
     season: { index: season.index, endsAt: season.endsAt, status: season.status },
     currentUser,
     ladder,
+    tiers: TIER_SUMMARY,
   };
 }
 
