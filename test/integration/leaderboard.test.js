@@ -41,6 +41,25 @@ async function recordSteps(token, steps, date) {
   });
 }
 
+async function equipHeadAccessory(userId) {
+  const item = await prisma.shopItem.create({
+    data: {
+      sku: `leaderboard-head-${userId}`,
+      name: "Leaderboard Hat",
+      slot: "HEAD",
+      priceCoins: 25,
+      assetKey: "cowboy_hat",
+      renderMetadata: { offsetX: 1, offsetY: 2 },
+    },
+  });
+
+  await prisma.userEquippedAccessory.create({
+    data: { userId, slot: "HEAD", shopItemId: item.id },
+  });
+
+  return item;
+}
+
 function getDateStringInTimeZone(offsetDays = 0, timeZone = DEFAULT_TIME_ZONE) {
   const date = new Date();
   date.setUTCDate(date.getUTCDate() + offsetDays);
@@ -226,6 +245,28 @@ describe("leaderboard", () => {
       assert.equal(body.currentUser.inTop100, true);
       assert.equal(body.currentUser.totalSteps, 9999);
       assert.equal(body.currentUser.rank, 1);
+    });
+
+    it("includes equipped accessories for leaderboard podium rows", async () => {
+      const alice = await createUser("AliceWalker");
+      await recordSteps(alice.token, 9999, todayStr());
+      const item = await equipHeadAccessory(alice.userId);
+
+      const res = await request(server.baseUrl, "GET", "/leaderboard?period=today", {
+        token: alice.token,
+      });
+      const body = await res.json();
+
+      assert.deepEqual(body.top100[0].equippedAccessories, [
+        {
+          id: item.id,
+          sku: item.sku,
+          name: item.name,
+          slot: item.slot,
+          assetKey: item.assetKey,
+          renderMetadata: { offsetX: 1, offsetY: 2 },
+        },
+      ]);
     });
 
     it("current user outside top 100 has inTop100: false with correct rank", async () => {

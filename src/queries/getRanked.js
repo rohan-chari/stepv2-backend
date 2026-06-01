@@ -1,6 +1,28 @@
 const { prisma } = require("../db");
 const { Season, SeasonScore } = require("../models/season");
 const { TIERS, TIER_REWARDS } = require("../constants/rankedTiers");
+const { buildAccessoriesList } = require("../utils/shopCosmetics");
+
+// User fields needed to render a ladder row: identity + equipped capybara gear.
+const ladderUserSelect = {
+  id: true,
+  displayName: true,
+  profilePhotoUrl: true,
+  equippedAccessories: {
+    include: {
+      shopItem: {
+        select: {
+          id: true,
+          sku: true,
+          name: true,
+          slot: true,
+          assetKey: true,
+          renderMetadata: true,
+        },
+      },
+    },
+  },
+};
 
 const LADDER_LIMIT = 100;
 
@@ -17,7 +39,7 @@ async function getUserProfiles(userIds) {
   if (userIds.length === 0) return new Map();
   const users = await prisma.user.findMany({
     where: { id: { in: userIds } },
-    select: { id: true, displayName: true, profilePhotoUrl: true },
+    select: ladderUserSelect,
   });
   return new Map(
     users.map((u) => [
@@ -25,6 +47,7 @@ async function getUserProfiles(userIds) {
       {
         displayName: u.displayName || "Anonymous",
         profilePhotoUrl: u.profilePhotoUrl || null,
+        equippedAccessories: buildAccessoriesList(u),
       },
     ])
   );
@@ -48,6 +71,7 @@ async function getRanked({ currentUserId, seasonModel = Season, seasonScoreModel
     userId: s.userId,
     displayName: profiles.get(s.userId)?.displayName || "Anonymous",
     profilePhotoUrl: profiles.get(s.userId)?.profilePhotoUrl || null,
+    equippedAccessories: profiles.get(s.userId)?.equippedAccessories || [],
     points: s.points,
     tier: s.provisionalTier,
     division: s.provisionalDivision,

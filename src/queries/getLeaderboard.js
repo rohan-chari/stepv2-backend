@@ -3,6 +3,28 @@ const {
   buildRaceRecordLeaderboard,
 } = require("../utils/recordLeaderboardRankings");
 const { getMondayOfWeek, getTimeZoneParts } = require("../utils/week");
+const { buildAccessoriesList } = require("../utils/shopCosmetics");
+
+// Identity + equipped capybara gear for rendering a leaderboard row.
+const leaderboardUserSelect = {
+  id: true,
+  displayName: true,
+  profilePhotoUrl: true,
+  equippedAccessories: {
+    include: {
+      shopItem: {
+        select: {
+          id: true,
+          sku: true,
+          name: true,
+          slot: true,
+          assetKey: true,
+          renderMetadata: true,
+        },
+      },
+    },
+  },
+};
 
 function getDateBoundary(period, timeZone) {
   const now = new Date();
@@ -34,7 +56,7 @@ async function getUserProfiles(userIds) {
 
   const users = await prisma.user.findMany({
     where: { id: { in: userIds } },
-    select: { id: true, displayName: true, profilePhotoUrl: true },
+    select: leaderboardUserSelect,
   });
 
   return new Map(
@@ -43,6 +65,7 @@ async function getUserProfiles(userIds) {
       {
         displayName: user.displayName || "Anonymous",
         profilePhotoUrl: user.profilePhotoUrl || null,
+        equippedAccessories: buildAccessoriesList(user),
       },
     ])
   );
@@ -91,6 +114,7 @@ async function getStepLeaderboard(period, currentUserId, timeZone) {
       userId: group.userId,
       displayName: userMap.get(group.userId)?.displayName || "Anonymous",
       profilePhotoUrl: userMap.get(group.userId)?.profilePhotoUrl || null,
+      equippedAccessories: userMap.get(group.userId)?.equippedAccessories || [],
       totalSteps,
     };
   });
