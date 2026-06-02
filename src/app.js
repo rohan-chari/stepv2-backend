@@ -11,6 +11,7 @@ const { createLeaderboardRouter } = require("./routes/leaderboard");
 const { createRankedRouter } = require("./routes/ranked");
 const { createRacesRouter } = require("./routes/races");
 const { createShopRouter } = require("./routes/shop");
+const { createPowerupsRouter } = require("./routes/powerups");
 const { createDailyRewardRouter } = require("./routes/dailyReward");
 const { createStepMilestonesRouter } = require("./routes/stepMilestones");
 const { createHomeRouter } = require("./routes/home");
@@ -32,6 +33,7 @@ function createApp(dependencies = {}) {
   app.use("/ranked", createRankedRouter(dependencies));
   app.use("/races", createRacesRouter(dependencies));
   app.use("/shop", createShopRouter(dependencies));
+  app.use("/powerups", createPowerupsRouter(dependencies));
   app.use("/daily-reward", createDailyRewardRouter(dependencies));
   app.use(
     "/users/me/step-milestones",

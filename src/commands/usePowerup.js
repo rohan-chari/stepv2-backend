@@ -26,9 +26,16 @@ const {
 } = require("./deductCoinsAtomic");
 
 const OFFENSIVE_TYPES = ["LEG_CRAMP", "RED_CARD", "SHORTCUT", "WRONG_TURN", "DETOUR_SIGN", "PINECONE_TOSS", "SNEAKY_SWAP"];
-const TARGETED_TYPES = ["LEG_CRAMP", "SHORTCUT", "WRONG_TURN", "DETOUR_SIGN", "SNEAKY_SWAP"];
+// IMPOSTER is TARGETED (it needs a rival to swap leaderboard display with) but
+// it is deliberately NOT in OFFENSIVE_TYPES: it never touches the target's
+// participant/steps, applies onSelf (target stored in metadata), and is purely
+// cosmetic — so it is not subject to Compression Socks / Mirror interception.
+const TARGETED_TYPES = ["LEG_CRAMP", "SHORTCUT", "WRONG_TURN", "DETOUR_SIGN", "SNEAKY_SWAP", "IMPOSTER"];
+const IMPOSTER_DURATION_MS = 60 * 60 * 1000;
 const SELF_ONLY_TYPES = [
   "COMPRESSION_SOCKS",
+  "MIRROR",
+  "CLEANSE",
   "PROTEIN_SHAKE",
   "RUNNERS_HIGH",
   "SECOND_WIND",
@@ -43,6 +50,11 @@ const SELF_ONLY_TYPES = [
 ];
 
 const FANNY_PACK_DURATION_MS = 24 * 60 * 60 * 1000;
+// Mirror is a held buff modeled on Compression Socks: same activation style,
+// same SELF_ONLY behavior, and the SAME active-shield duration as the base
+// Compression Socks shield (24h). Mirror is non-upgradeable, so we use a fixed
+// constant rather than the upgrade duration ladder.
+const MIRROR_DURATION_MS = 24 * 60 * 60 * 1000;
 const CAMPFIRE_FREEZE_MS = 30 * 60 * 1000;
 const CAMPFIRE_BOOST_MS = 60 * 60 * 1000;
 
@@ -57,6 +69,19 @@ function isPocketWatchExtendable(effect) {
     return effect.sourceUserId === effect.targetUserId;
   }
   return true;
+}
+
+// Cleanse selector: an effect is "opponent-inflicted" (and therefore eligible
+// to be cleared by Cleanse) only when it was applied to THIS user by SOMEONE
+// ELSE — i.e. sourceUserId !== targetUserId. Self-buffs have
+// sourceUserId === targetUserId and must NEVER be cleared. We require both
+// fields to be present and the effect to target this user; if either is
+// missing/null (a defensive guard against legacy rows), we treat it as a
+// self-buff and leave it alone so we never clear the user's own buffs.
+function isOpponentInflicted(effect, userId) {
+  if (!effect.sourceUserId || !effect.targetUserId) return false;
+  if (effect.targetUserId !== userId) return false;
+  return effect.sourceUserId !== effect.targetUserId;
 }
 
 const RED_CARD_PERCENT = 0.10;
@@ -160,7 +185,9 @@ function buildUsePowerup(dependencies = {}) {
       throw new PowerupUseError("Race is not active", 400);
     }
 
-    const myParticipant = race.participants.find((p) => p.userId === userId && p.status === "ACCEPTED");
+    // `let` (not const): on a Mirror reflect these are swapped so the offensive
+    // switch below applies the effect to the original attacker instead.
+    let myParticipant = race.participants.find((p) => p.userId === userId && p.status === "ACCEPTED");
     if (!myParticipant) {
       throw new PowerupUseError("You are not an active participant", 403);
     }
@@ -169,7 +196,10 @@ function buildUsePowerup(dependencies = {}) {
     }
 
     const acceptedParticipants = race.participants.filter((p) => p.status === "ACCEPTED");
-    const myDisplayName = myParticipant.user.displayName || "A runner";
+    let myDisplayName = myParticipant.user.displayName || "A runner";
+    // The user credited as the *source* of an effect. Same as userId normally;
+    // on a Mirror reflect it becomes the original target (who reflects it).
+    let actingUserId = userId;
     const type = powerup.type;
 
     // Validate upgrade level (cheap, no DB writes)
@@ -240,7 +270,25 @@ function buildUsePowerup(dependencies = {}) {
       }
     }
 
-    const targetDisplayName = targetParticipant?.user?.displayName || "a runner";
+    // IMPOSTER: targeted but not offensive. Validate the chosen rival is a real
+    // active participant (the display swap stores their userId in metadata).
+    let imposterTargetParticipant = null;
+    if (type === "IMPOSTER") {
+      imposterTargetParticipant = acceptedParticipants.find(
+        (p) => p.userId === resolvedTargetUserId
+      );
+      if (!imposterTargetParticipant) {
+        throw new PowerupUseError("Target is not an active participant in this race", 400);
+      }
+      if (imposterTargetParticipant.finishedAt) {
+        throw new PowerupUseError("Target has already finished the race", 400);
+      }
+    }
+
+    let targetDisplayName =
+      targetParticipant?.user?.displayName ||
+      imposterTargetParticipant?.user?.displayName ||
+      "a runner";
 
     // Reject Shortcut on a target with 0 steps — nothing to steal
     if (type === "SHORTCUT" && targetParticipant && Math.max(0, targetParticipant.totalSteps) === 0) {
@@ -371,6 +419,17 @@ function buildUsePowerup(dependencies = {}) {
       }
     }
 
+    // Reject stacking Mirror when user already has an active mirror
+    if (type === "MIRROR") {
+      const existingMirror = await effectModel.findActiveByTypeForParticipant(
+        myParticipant.id,
+        "MIRROR"
+      );
+      if (existingMirror) {
+        throw new PowerupUseError("You already have an active Mirror", 400);
+      }
+    }
+
     // Reject Fanny Pack if user already has expanded slots
     if (type === "FANNY_PACK") {
       if (myParticipant.powerupSlots > 3) {
@@ -446,13 +505,81 @@ function buildUsePowerup(dependencies = {}) {
           upgradeLevel,
         });
 
-        return { blocked: true, blockedBy: "COMPRESSION_SOCKS", upgradeLevel, coinsSpent: costCoins };
+        // `outcome` is an additive discriminator for clients (a later feature
+        // builds a reveal modal off it). Old clients keep reading `blocked`.
+        return {
+          blocked: true,
+          blockedBy: "COMPRESSION_SOCKS",
+          outcome: "BLOCKED",
+          upgradeLevel,
+          coinsSpent: costCoins,
+        };
+      }
+    }
+
+    // Mirror reflect pre-check. Precedence: Compression Socks (above) wins even
+    // if the target also holds a Mirror — and in that case the Mirror is NOT
+    // consumed (the socks-block path above returned already). If we reach here
+    // and the target holds an active Mirror, the offensive powerup is REFLECTED
+    // back onto the attacker: we swap roles so the effect lands on the original
+    // attacker, consume the Mirror, and write/emit a POWERUP_REFLECTED event.
+    let reflected = false;
+    if (OFFENSIVE_TYPES.includes(type) && targetParticipant) {
+      const mirror = await effectModel.findActiveByTypeForParticipant(
+        targetParticipant.id,
+        "MIRROR"
+      );
+      if (mirror) {
+        reflected = true;
+        // Consume/expire the Mirror.
+        await effectModel.update(mirror.id, { status: "EXPIRED" });
+
+        const originalAttacker = myParticipant;
+        const originalTarget = targetParticipant;
+        const originalAttackerUserId = userId;
+        const originalTargetUserId = resolvedTargetUserId;
+        const originalAttackerName = myDisplayName;
+        const originalTargetName = targetDisplayName;
+
+        // Swap roles: the effect now applies to the original attacker, sourced
+        // by the original target. Re-bind the variables the switch reads below.
+        myParticipant = originalTarget;
+        targetParticipant = originalAttacker;
+        resolvedTargetUserId = originalAttackerUserId;
+        myDisplayName = originalTargetName;
+        targetDisplayName = originalAttackerName;
+        // The acting user (for source attribution) becomes the original target.
+        actingUserId = originalTargetUserId;
+
+        await eventModel.create({
+          raceId,
+          actorUserId: originalTargetUserId,
+          eventType: "POWERUP_REFLECTED",
+          powerupType: type,
+          targetUserId: originalAttackerUserId,
+          description: `${originalTargetName}'s Mirror reflected ${originalAttackerName}'s ${levelPrefix(upgradeLevel)}${POWERUP_NAMES[type]} back at them!`,
+        });
+
+        events.emit("POWERUP_REFLECTED", {
+          raceId,
+          attackerUserId: originalAttackerUserId,
+          defenderUserId: originalTargetUserId,
+          reflectedType: type,
+          upgradeLevel,
+        });
       }
     }
 
     // Apply the powerup effect
     const currentTime = now();
     let result = { blocked: false, upgradeLevel, coinsSpent: costCoins };
+    if (reflected) {
+      result.reflected = true;
+      result.reflectedBy = "MIRROR";
+      result.outcome = "REFLECTED";
+    } else {
+      result.outcome = "APPLIED";
+    }
 
     switch (type) {
       case "LEG_CRAMP": {
@@ -460,7 +587,7 @@ function buildUsePowerup(dependencies = {}) {
           raceId,
           targetParticipantId: targetParticipant.id,
           targetUserId: resolvedTargetUserId,
-          sourceUserId: userId,
+          sourceUserId: actingUserId,
           powerupId,
           type: "LEG_CRAMP",
           startsAt: currentTime,
@@ -471,7 +598,7 @@ function buildUsePowerup(dependencies = {}) {
 
         await eventModel.create({
           raceId,
-          actorUserId: userId,
+          actorUserId: actingUserId,
           eventType: "POWERUP_USED",
           powerupType: type,
           targetUserId: resolvedTargetUserId,
@@ -490,7 +617,7 @@ function buildUsePowerup(dependencies = {}) {
 
         await eventModel.create({
           raceId,
-          actorUserId: userId,
+          actorUserId: actingUserId,
           eventType: "POWERUP_USED",
           powerupType: type,
           targetUserId: resolvedTargetUserId,
@@ -514,7 +641,7 @@ function buildUsePowerup(dependencies = {}) {
 
         await eventModel.create({
           raceId,
-          actorUserId: userId,
+          actorUserId: actingUserId,
           eventType: "POWERUP_USED",
           powerupType: type,
           targetUserId: resolvedTargetUserId,
@@ -543,6 +670,95 @@ function buildUsePowerup(dependencies = {}) {
           eventType: "POWERUP_USED",
           powerupType: type,
           description: `${myDisplayName} activated ${levelPrefix(upgradeLevel)}Compression Socks! They're shielded from the next attack.`,
+        });
+        break;
+      }
+
+      case "MIRROR": {
+        // Modeled on Compression Socks: a self-applied, held shield-like buff
+        // with the same active-shield duration (24h). When active, the reflect
+        // pre-check above bounces an incoming offensive powerup back at the
+        // attacker. Non-upgradeable, so duration is a fixed constant.
+        const effect = await effectModel.create({
+          raceId,
+          targetParticipantId: myParticipant.id,
+          targetUserId: userId,
+          sourceUserId: userId,
+          powerupId,
+          type: "MIRROR",
+          startsAt: currentTime,
+          expiresAt: new Date(currentTime.getTime() + MIRROR_DURATION_MS),
+        });
+        result.effect = effect;
+
+        await eventModel.create({
+          raceId,
+          actorUserId: userId,
+          eventType: "POWERUP_USED",
+          powerupType: type,
+          description: `${myDisplayName} activated Mirror! The next attack against them will be reflected back.`,
+        });
+        break;
+      }
+
+      case "CLEANSE": {
+        // Self-only: clear ALL opponent-inflicted debuffs currently active on
+        // the user. An opponent-inflicted debuff is an ACTIVE effect on the
+        // user's participant whose sourceUserId !== targetUserId (someone else
+        // applied it) — this covers timed debuffs (LEG_CRAMP, WRONG_TURN,
+        // DETOUR_SIGN) and a TRAIL_MINE penalty placed on the user. The user's
+        // OWN self-buffs (sourceUserId === targetUserId, e.g. COMPRESSION_SOCKS,
+        // RUNNERS_HIGH, STEALTH_MODE, MIRROR) are NEVER touched.
+        const activeEffects = await effectModel.findActiveForParticipant(myParticipant.id);
+        const opponentDebuffs = activeEffects.filter(
+          (e) => isOpponentInflicted(e, userId)
+        );
+        for (const debuff of opponentDebuffs) {
+          await effectModel.update(debuff.id, { status: "EXPIRED" });
+        }
+        result.cleared = opponentDebuffs.length;
+
+        await eventModel.create({
+          raceId,
+          actorUserId: userId,
+          eventType: "POWERUP_CLEANSE",
+          powerupType: type,
+          description: opponentDebuffs.length > 0
+            ? `${myDisplayName} used Cleanse! Cleared ${opponentDebuffs.length} debuff${opponentDebuffs.length === 1 ? "" : "s"}.`
+            : `${myDisplayName} used Cleanse! No debuffs to clear.`,
+          metadata: { cleared: opponentDebuffs.length },
+        });
+        break;
+      }
+
+      case "IMPOSTER": {
+        // Purely COSMETIC: create a self-applied (onSelf) effect on the acting
+        // user's participant that records, in metadata.swapWithUserId, the rival
+        // whose leaderboard DISPLAY slot they swap with for 1 hour. No steps
+        // change. The swap is applied ONLY in the getRaceProgress display path
+        // (NOT in settlement), and reverts when this effect expires.
+        const effect = await effectModel.create({
+          raceId,
+          targetParticipantId: myParticipant.id,
+          targetUserId: userId,
+          sourceUserId: userId,
+          powerupId,
+          type: "IMPOSTER",
+          startsAt: currentTime,
+          expiresAt: new Date(currentTime.getTime() + IMPOSTER_DURATION_MS),
+          metadata: { swapWithUserId: resolvedTargetUserId },
+        });
+        result.effect = effect;
+        result.swapWithUserId = resolvedTargetUserId;
+
+        await eventModel.create({
+          raceId,
+          actorUserId: userId,
+          eventType: "POWERUP_IMPOSTER",
+          powerupType: type,
+          targetUserId: resolvedTargetUserId,
+          description: `${myDisplayName} pulled an Imposter on ${targetDisplayName}! Their leaderboard positions are swapped for 1 hour.`,
+          metadata: { swapWithUserId: resolvedTargetUserId },
         });
         break;
       }
@@ -648,7 +864,7 @@ function buildUsePowerup(dependencies = {}) {
           raceId,
           targetParticipantId: targetParticipant.id,
           targetUserId: resolvedTargetUserId,
-          sourceUserId: userId,
+          sourceUserId: actingUserId,
           powerupId,
           type: "WRONG_TURN",
           startsAt: currentTime,
@@ -659,7 +875,7 @@ function buildUsePowerup(dependencies = {}) {
 
         await eventModel.create({
           raceId,
-          actorUserId: userId,
+          actorUserId: actingUserId,
           eventType: "POWERUP_USED",
           powerupType: type,
           targetUserId: resolvedTargetUserId,
@@ -718,7 +934,7 @@ function buildUsePowerup(dependencies = {}) {
           raceId,
           targetParticipantId: targetParticipant.id,
           targetUserId: resolvedTargetUserId,
-          sourceUserId: userId,
+          sourceUserId: actingUserId,
           powerupId,
           type: "DETOUR_SIGN",
           startsAt: currentTime,
@@ -728,7 +944,7 @@ function buildUsePowerup(dependencies = {}) {
 
         await eventModel.create({
           raceId,
-          actorUserId: userId,
+          actorUserId: actingUserId,
           eventType: "POWERUP_USED",
           powerupType: type,
           targetUserId: resolvedTargetUserId,
@@ -872,7 +1088,7 @@ function buildUsePowerup(dependencies = {}) {
 
         await eventModel.create({
           raceId,
-          actorUserId: userId,
+          actorUserId: actingUserId,
           eventType: "POWERUP_USED",
           powerupType: type,
           targetUserId: resolvedTargetUserId,
@@ -890,7 +1106,7 @@ function buildUsePowerup(dependencies = {}) {
 
         await eventModel.create({
           raceId,
-          actorUserId: userId,
+          actorUserId: actingUserId,
           eventType: "POWERUP_USED",
           powerupType: type,
           targetUserId: resolvedTargetUserId,

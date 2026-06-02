@@ -12,6 +12,22 @@ const {
   syncRacePowerupState: defaultSyncRacePowerupState,
 } = require("../services/racePowerupStateSync");
 const { getTimeZoneParts, formatDateString, addDaysToDateString, parseDateString, zonedDateTimeToUtc } = require("../utils/week");
+const { GlobalStepEvent } = require("../models/globalStepEvent");
+const { computeGlobalEventBoost } = require("../utils/globalStepEvent");
+
+// Effect TYPES that are concealed self-advantages: visible ONLY to their owner,
+// never to other racers. Filtered out of the activeEffects array server-side so
+// that even older app binaries stop leaking these icons to opponents.
+// NOTE: STEALTH_MODE and DETOUR_SIGN have their OWN separate hiding (leaderboard
+// masking below) and are intentionally NOT in this set.
+const HIDDEN_FROM_OPPONENTS = new Set([
+  "COMPRESSION_SOCKS",
+  "MIRROR",
+  "LUCKY_HORSESHOE",
+  "POCKET_WATCH",
+  "FANNY_PACK",
+  "TRAIL_MINE",
+]);
 
 // Snapshot-based fallback for when StepSample data is unavailable
 function computeEffectModifiersFallback(effects, rawTotal) {
@@ -50,7 +66,11 @@ function computeEffectModifiersFallback(effects, rawTotal) {
   return { frozenSteps, buffedSteps, reversedSteps };
 }
 
-async function computeEffectModifiers(effects, rawTotal, userId, stepSampleModel, hasSampleData = false) {
+// `globalContext` (optional, additive): { globalEvents: [...], now: Date }. When
+// present, the EXTRA steps from any active GlobalStepEvent windows are returned
+// as `globalBoostedSteps`, stacking multiplicatively with the per-participant
+// timed multipliers below. Absent => globalBoostedSteps is 0 (legacy behavior).
+async function computeEffectModifiers(effects, rawTotal, userId, stepSampleModel, hasSampleData = false, globalContext = null) {
   let frozenSteps = 0;
   let buffedSteps = 0;
   let reversedSteps = 0;
@@ -211,7 +231,21 @@ async function computeEffectModifiers(effects, rawTotal, userId, stepSampleModel
     }
   }
 
-  return { frozenSteps, buffedSteps, reversedSteps };
+  // Global step-multiplier event boost (additive, stacks multiplicatively with
+  // the per-participant multipliers above). Computed over the SAME effect groups
+  // so display and settlement agree exactly.
+  let globalBoostedSteps = 0;
+  if (globalContext && globalContext.globalEvents && globalContext.globalEvents.length > 0) {
+    globalBoostedSteps = await computeGlobalEventBoost({
+      globalEvents: globalContext.globalEvents,
+      effectGroups: { legCramps, runnersHighs, wrongTurns, campfires },
+      userId,
+      stepSampleModel,
+      now: globalContext.now,
+    });
+  }
+
+  return { frozenSteps, buffedSteps, reversedSteps, globalBoostedSteps };
 }
 
 function buildGetRaceProgress(deps = {}) {
@@ -221,6 +255,7 @@ function buildGetRaceProgress(deps = {}) {
   const stepSampleModel = deps.StepSample || StepSample;
   const racePowerupModel = deps.RacePowerup || RacePowerup;
   const raceActiveEffectModel = deps.RaceActiveEffect || RaceActiveEffect;
+  const globalStepEventModel = deps.GlobalStepEvent || GlobalStepEvent;
   const completeRaceFn = deps.completeRace || completeRace;
   const expireEffectsFn = deps.expireEffects || expireEffects;
   const syncRacePowerupState =
@@ -337,6 +372,20 @@ function buildGetRaceProgress(deps = {}) {
 
     await expireEffectsFn({ raceId, participantSteps: participantStepsMap });
 
+    // Fetch GlobalStepEvents that overlap [raceStartedAt, now]. These are the
+    // BeReal-style 2x windows that boost steps for ALL participants. Read
+    // defensively: a missing/empty model just yields no boost. Passed into the
+    // SHARED computeEffectModifiers so display matches settlement exactly.
+    let globalEvents = [];
+    try {
+      globalEvents =
+        (await globalStepEventModel.findActiveInRange(raceStartedAt, now())) ||
+        [];
+    } catch {
+      globalEvents = [];
+    }
+    const globalContext = { globalEvents, now: now() };
+
     // Second pass: calculate powerup-adjusted totals
     const stepTotals = await Promise.all(
       rawStepTotals.map(async ({ participant, baseAdjusted, hasSampleData }) => {
@@ -348,19 +397,23 @@ function buildGetRaceProgress(deps = {}) {
         }
 
         let total = baseAdjusted;
+        let legCramps = [];
+        let runnersHighs = [];
+        let wrongTurns = [];
+        let campfires = [];
 
         if (race.powerupsEnabled) {
           // Fetch all Leg Cramp, Runner's High, and Wrong Turn effects (active + expired) for this participant
-          const legCramps = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "LEG_CRAMP");
-          const runnersHighs = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "RUNNERS_HIGH");
-          const wrongTurns = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "WRONG_TURN");
-          const campfires = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "CAMPFIRE_REST");
-
-          const allEffects = [...legCramps, ...runnersHighs, ...wrongTurns, ...campfires];
-          const { frozenSteps, buffedSteps, reversedSteps } = await computeEffectModifiers(allEffects, baseAdjusted, participant.userId, stepSampleModel, hasSampleData);
-
-          total = Math.max(0, baseAdjusted - frozenSteps + buffedSteps - 2 * reversedSteps + (participant.bonusSteps || 0));
+          legCramps = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "LEG_CRAMP");
+          runnersHighs = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "RUNNERS_HIGH");
+          wrongTurns = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "WRONG_TURN");
+          campfires = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "CAMPFIRE_REST");
         }
+
+        const allEffects = [...legCramps, ...runnersHighs, ...wrongTurns, ...campfires];
+        const { frozenSteps, buffedSteps, reversedSteps, globalBoostedSteps } = await computeEffectModifiers(allEffects, baseAdjusted, participant.userId, stepSampleModel, hasSampleData, globalContext);
+
+        total = Math.max(0, baseAdjusted - frozenSteps + buffedSteps - 2 * reversedSteps + (globalBoostedSteps || 0) + (race.powerupsEnabled ? (participant.bonusSteps || 0) : 0));
 
         return { participant, totalSteps: total };
       })
@@ -432,18 +485,32 @@ function buildGetRaceProgress(deps = {}) {
       const myActiveEffects = await raceActiveEffectModel.findActiveForParticipant(myParticipant.id);
       const raceActiveEffects = await raceActiveEffectModel.findActiveForRace(raceId);
 
-      powerupData.activeEffects = raceActiveEffects.map((e) => ({
-        type: e.type,
-        expiresAt: e.expiresAt,
-        onSelf: e.targetUserId === userId,
-        targetUserId: e.targetUserId,
-        sourceUserId: e.sourceUserId,
-      }));
+      powerupData.activeEffects = raceActiveEffects
+        // Keep an effect IF the viewer owns it (it's targeting them) OR its type
+        // is not a concealed self-advantage. Otherwise drop opponents' hidden
+        // buffs so they never leak to other racers, while the owner's own
+        // ACTIVE EFFECTS panel (keyed on onSelf/targetUserId===me) keeps working.
+        .filter(
+          (e) =>
+            e.targetUserId === userId || !HIDDEN_FROM_OPPONENTS.has(e.type)
+        )
+        .map((e) => ({
+          type: e.type,
+          expiresAt: e.expiresAt,
+          onSelf: e.targetUserId === userId,
+          targetUserId: e.targetUserId,
+          sourceUserId: e.sourceUserId,
+        }));
     }
 
     // Build leaderboard with stealth mode and detour sign applied
     const stealthedUserIds = new Set();
     let viewerIsDetoured = false;
+    // IMPOSTER display swaps: each entry swaps the DISPLAYED leaderboard slot of
+    // two users (owner <-> metadata.swapWithUserId) for ALL viewers. Cosmetic
+    // only — never read by the settlement path.
+    const imposterSwaps = [];
+    const nowTime = now();
     if (race.powerupsEnabled) {
       const activeEffects = await raceActiveEffectModel.findActiveForRace(raceId);
       for (const e of activeEffects) {
@@ -452,6 +519,16 @@ function buildGetRaceProgress(deps = {}) {
         }
         if (e.type === "DETOUR_SIGN" && e.targetUserId === userId) {
           viewerIsDetoured = true;
+        }
+        if (e.type === "IMPOSTER") {
+          // Defensive: skip effects already past expiry (findActiveForRace
+          // should only return ACTIVE rows, but expiry-by-time may lag a tick).
+          const notExpired =
+            !e.expiresAt || new Date(e.expiresAt).getTime() > nowTime.getTime();
+          const swapWithUserId = (e.metadata || {}).swapWithUserId;
+          if (notExpired && e.targetUserId && swapWithUserId) {
+            imposterSwaps.push({ a: e.targetUserId, b: swapWithUserId });
+          }
         }
       }
     }
@@ -492,6 +569,25 @@ function buildGetRaceProgress(deps = {}) {
         return bSteps - aSteps;
       });
 
+    // Apply IMPOSTER display swaps: swap the two users' DISPLAYED leaderboard
+    // SLOTS (array positions) while each row keeps its own name/steps. Applied
+    // deterministically; a user already involved in an earlier swap, or a target
+    // not present in the leaderboard, is skipped so swaps never throw or corrupt
+    // the order. This is the ONLY place the swap is applied (display path only).
+    if (imposterSwaps.length > 0) {
+      const swappedUserIds = new Set();
+      for (const { a, b } of imposterSwaps) {
+        if (a === b) continue;
+        if (swappedUserIds.has(a) || swappedUserIds.has(b)) continue;
+        const ia = leaderboard.findIndex((p) => p.userId === a);
+        const ib = leaderboard.findIndex((p) => p.userId === b);
+        if (ia === -1 || ib === -1) continue;
+        [leaderboard[ia], leaderboard[ib]] = [leaderboard[ib], leaderboard[ia]];
+        swappedUserIds.add(a);
+        swappedUserIds.add(b);
+      }
+    }
+
     const updatedRace = await raceModel.findById(raceId);
 
     const result = {
@@ -505,6 +601,23 @@ function buildGetRaceProgress(deps = {}) {
 
     if (powerupData) {
       result.powerupData = powerupData;
+    }
+
+    // Additive: surface the currently-active global step event (if any) so the
+    // new app can show a "2x STEPS — ends in mm:ss" banner. Old apps ignore the
+    // unknown field. Pick the event whose [startsAt, endsAt) contains `now`.
+    const nowMsForEvent = now().getTime();
+    const activeEvent = globalEvents.find((ev) => {
+      const startMs = new Date(ev.startsAt).getTime();
+      const endMs = new Date(ev.endsAt).getTime();
+      return startMs <= nowMsForEvent && nowMsForEvent < endMs;
+    });
+    if (activeEvent) {
+      result.globalEvent = {
+        active: true,
+        multiplier: Number(activeEvent.multiplier),
+        endsAt: activeEvent.endsAt,
+      };
     }
 
     return result;

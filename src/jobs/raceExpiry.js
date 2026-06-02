@@ -4,6 +4,7 @@ const { RaceActiveEffect } = require("../models/raceActiveEffect");
 const { RacePowerupEvent } = require("../models/racePowerupEvent");
 const { StepSample } = require("../models/stepSample");
 const { Steps } = require("../models/steps");
+const { GlobalStepEvent } = require("../models/globalStepEvent");
 const { completeRace } = require("../commands/completeRace");
 const {
   calculateBaseAdjusted,
@@ -30,6 +31,20 @@ async function resolveExpiredRaces() {
         (p) => p.status === "ACCEPTED"
       );
       const settlementTime = race.endsAt || now;
+
+      // GlobalStepEvents overlapping the race window. Passed into the SHARED
+      // resolution so the settled standings match what getRaceProgress showed.
+      let globalEvents = [];
+      try {
+        globalEvents =
+          (await GlobalStepEvent.findActiveInRange(
+            race.startedAt,
+            settlementTime
+          )) || [];
+      } catch {
+        globalEvents = [];
+      }
+
       const standings = [];
 
       for (const participant of acceptedParticipants) {
@@ -64,6 +79,8 @@ async function resolveExpiredRaces() {
             hasSampleData,
             raceActiveEffectModel: RaceActiveEffect,
             stepSampleModel: StepSample,
+            globalEvents,
+            now: settlementTime,
           });
 
         await RaceParticipant.updateTotalSteps(participant.id, total);

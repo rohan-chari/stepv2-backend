@@ -81,6 +81,40 @@ async function seed() {
 
   await applyCosmetics();
 
+  // Powerup store catalog (coin-purchasable powerups). Additive + idempotent:
+  // upserts by sku so re-seeding never duplicates or disturbs cosmetics. Old app
+  // versions never read this table.
+  console.log("Seeding powerup shop items...");
+  const powerupShopItems = [
+    {
+      sku: "POWERUP_IMPOSTER",
+      name: "Imposter",
+      description:
+        "Swap your leaderboard position with a rival's for 1 hour. Purely cosmetic — real standings and payouts are unaffected.",
+      priceCoins: 500,
+      powerupType: "IMPOSTER",
+      active: true,
+      sortOrder: 0,
+    },
+  ];
+  let powerupItemsUpserted = 0;
+  for (const p of powerupShopItems) {
+    await prisma.powerupShopItem.upsert({
+      where: { sku: p.sku },
+      update: {
+        name: p.name,
+        description: p.description,
+        priceCoins: p.priceCoins,
+        powerupType: p.powerupType,
+        active: p.active,
+        sortOrder: p.sortOrder,
+      },
+      create: p,
+    });
+    powerupItemsUpserted++;
+  }
+  console.log(`Upserted ${powerupItemsUpserted} powerup shop item(s)`);
+
   console.log("Seed complete!");
 }
 

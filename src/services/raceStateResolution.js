@@ -4,6 +4,7 @@ const { Steps } = require("../models/steps");
 const { StepSample } = require("../models/stepSample");
 const { RaceActiveEffect } = require("../models/raceActiveEffect");
 const { RacePowerupEvent } = require("../models/racePowerupEvent");
+const { GlobalStepEvent } = require("../models/globalStepEvent");
 const { completeRace } = require("../commands/completeRace");
 const { computeEffectModifiers } = require("../queries/getRaceProgress");
 const {
@@ -95,60 +96,63 @@ async function calculateCurrentTotal({
   hasSampleData,
   raceActiveEffectModel,
   stepSampleModel,
+  globalEvents = [],
+  now = null,
 }) {
-  let total = baseAdjusted;
+  let legCramps = [];
+  let runnersHighs = [];
+  let wrongTurns = [];
+  let campfires = [];
 
   if (racePowerupsEnabled) {
-    const legCramps = await raceActiveEffectModel.findEffectsForRaceByType(
+    legCramps = await raceActiveEffectModel.findEffectsForRaceByType(
       raceId,
       participant.id,
       "LEG_CRAMP"
     );
-    const runnersHighs = await raceActiveEffectModel.findEffectsForRaceByType(
+    runnersHighs = await raceActiveEffectModel.findEffectsForRaceByType(
       raceId,
       participant.id,
       "RUNNERS_HIGH"
     );
-    const wrongTurns = await raceActiveEffectModel.findEffectsForRaceByType(
+    wrongTurns = await raceActiveEffectModel.findEffectsForRaceByType(
       raceId,
       participant.id,
       "WRONG_TURN"
     );
-    const campfires = await raceActiveEffectModel.findEffectsForRaceByType(
+    campfires = await raceActiveEffectModel.findEffectsForRaceByType(
       raceId,
       participant.id,
       "CAMPFIRE_REST"
     );
-
-    const allEffects = [...legCramps, ...runnersHighs, ...wrongTurns, ...campfires];
-    const { frozenSteps, buffedSteps, reversedSteps } =
-      await computeEffectModifiers(
-        allEffects,
-        baseAdjusted,
-        participant.userId,
-        stepSampleModel,
-        hasSampleData
-      );
-
-    total = Math.max(
-      0,
-      baseAdjusted -
-        frozenSteps +
-        buffedSteps -
-        2 * reversedSteps +
-        (participant.bonusSteps || 0)
-    );
-
-    return { total, legCramps, runnersHighs, wrongTurns, campfires };
   }
 
-  return {
-    total,
-    legCramps: [],
-    runnersHighs: [],
-    wrongTurns: [],
-    campfires: [],
-  };
+  // Use the SAME computeEffectModifiers the display path uses, including the
+  // additive global-event boost, so settlement totals match display exactly.
+  const allEffects = [...legCramps, ...runnersHighs, ...wrongTurns, ...campfires];
+  const globalContext =
+    globalEvents && globalEvents.length > 0 ? { globalEvents, now } : null;
+  const { frozenSteps, buffedSteps, reversedSteps, globalBoostedSteps } =
+    await computeEffectModifiers(
+      allEffects,
+      baseAdjusted,
+      participant.userId,
+      stepSampleModel,
+      hasSampleData,
+      globalContext
+    );
+
+  const total = Math.max(
+    0,
+    baseAdjusted -
+      frozenSteps +
+      buffedSteps -
+      2 * reversedSteps +
+      (globalBoostedSteps || 0) +
+      (racePowerupsEnabled ? participant.bonusSteps || 0 : 0)
+  );
+
+  return { total, legCramps, runnersHighs, wrongTurns, campfires };
 }
 
 function buildBonusTimeline(events, participantUserId, effectiveStart, now) {
@@ -451,6 +455,8 @@ function buildResolveRaceState(dependencies = {}) {
     dependencies.RaceActiveEffect || RaceActiveEffect;
   const powerupEventModel =
     dependencies.RacePowerupEvent || RacePowerupEvent;
+  const globalStepEventModel =
+    dependencies.GlobalStepEvent || GlobalStepEvent;
   const completeRaceFn = dependencies.completeRace || completeRace;
   const now = dependencies.now || (() => new Date());
 
@@ -477,6 +483,20 @@ function buildResolveRaceState(dependencies = {}) {
         (p) => p.status === "ACCEPTED"
       );
       const currentTime = now();
+
+      // Fetch GlobalStepEvents overlapping [race start, now] once per race and
+      // hand them to the SHARED math so this path matches getRaceProgress.
+      // Read defensively: any failure or missing model => no boost.
+      let globalEvents = [];
+      try {
+        globalEvents =
+          (await globalStepEventModel.findActiveInRange(
+            race.startedAt,
+            currentTime
+          )) || [];
+      } catch {
+        globalEvents = [];
+      }
 
       // Per-participant compute+write phase. Each iteration reads only this
       // participant's step_samples/race_active_effects and writes only this
@@ -518,6 +538,8 @@ function buildResolveRaceState(dependencies = {}) {
               hasSampleData,
               raceActiveEffectModel,
               stepSampleModel,
+              globalEvents,
+              now: currentTime,
             });
 
           await participantModel.updateTotalSteps(participant.id, total);

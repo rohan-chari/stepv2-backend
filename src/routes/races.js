@@ -31,6 +31,9 @@ const {
 const {
   openMysteryBox: defaultOpenMysteryBox,
 } = require("../commands/openMysteryBox");
+const {
+  redeemPowerupToRace: defaultRedeemPowerupToRace,
+} = require("../commands/redeemPowerupToRace");
 const { getRaces: defaultGetRaces } = require("../queries/getRaces");
 const {
   getRaceDetails: defaultGetRaceDetails,
@@ -64,6 +67,16 @@ const {
   RaceActiveEffect: defaultEffectModel,
 } = require("../models/raceActiveEffect");
 
+// A powerup is STEALABLE via Sneaky Swap only if it is currently HELD and its
+// type is neither SNEAKY_SWAP (not stealable in either direction) nor
+// MYSTERY_BOX (an unopened box isn't stealable). Callers that pass already-held
+// rows can rely on type alone; we still guard on status defensively.
+function isStealable(powerup) {
+  if (!powerup) return false;
+  if (powerup.status && powerup.status !== "HELD") return false;
+  return powerup.type !== "SNEAKY_SWAP" && powerup.type !== "MYSTERY_BOX";
+}
+
 function createRacesRouter(dependencies = {}) {
   const router = Router();
   const requireAuth =
@@ -91,6 +104,8 @@ function createRacesRouter(dependencies = {}) {
   const usePowerup = dependencies.usePowerup || defaultUsePowerup;
   const discardPowerup = dependencies.discardPowerup || defaultDiscardPowerup;
   const openMysteryBox = dependencies.openMysteryBox || defaultOpenMysteryBox;
+  const redeemPowerupToRace =
+    dependencies.redeemPowerupToRace || defaultRedeemPowerupToRace;
   const getRaceInventory =
     dependencies.getRaceInventory || defaultGetRaceInventory;
   const getRaceFeed = dependencies.getRaceFeed || defaultGetRaceFeed;
@@ -123,6 +138,7 @@ function createRacesRouter(dependencies = {}) {
         payoutPreset,
         isPublic,
         maxParticipants,
+        scheduledStartAt,
         targetSteps,
       } = req.body;
       const race = await createRace({
@@ -135,6 +151,7 @@ function createRacesRouter(dependencies = {}) {
         payoutPreset,
         isPublic,
         maxParticipants,
+        scheduledStartAt,
         targetSteps,
       });
       res.status(201).json({ race });
@@ -330,6 +347,27 @@ function createRacesRouter(dependencies = {}) {
   });
 
   // POST /races/:raceId/powerups/:powerupId/use
+  // POST /races/:raceId/powerups/redeem — spend ONE global-inventory powerup
+  // (e.g. IMPOSTER) into this active race, creating a HELD RacePowerup in the
+  // in-race tray. Additive; only the new app calls this.
+  router.post("/:raceId/powerups/redeem", async (req, res) => {
+    try {
+      const result = await redeemPowerupToRace({
+        userId: req.user.id,
+        raceId: req.params.raceId,
+        powerupType: req.body.powerupType,
+      });
+      res.json({ result });
+    } catch (error) {
+      if (error.name === "RedeemPowerupError") {
+        const status = error.statusCode || 400;
+        return res.status(status).json({ error: error.message });
+      }
+      console.error("Redeem powerup error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   router.post("/:raceId/powerups/:powerupId/use", async (req, res) => {
     try {
       const {
@@ -472,10 +510,56 @@ function createRacesRouter(dependencies = {}) {
 
       res.json({
         ownPowerups: ownPowerups.filter((p) => p.type !== "SNEAKY_SWAP"),
-        targetPowerups,
+        // A held powerup is only stealable if it is NOT a SNEAKY_SWAP and NOT a
+        // MYSTERY_BOX (an unopened box isn't stealable). Filtering here keeps the
+        // second stage from ever offering a sneaky swap to steal. Existing
+        // 400/validation behavior and overall response shape are unchanged.
+        targetPowerups: targetPowerups.filter((p) => isStealable(p)),
       });
     } catch (error) {
       console.error("Sneaky swap options error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // GET /races/:raceId/powerups/sneaky-swap-targets
+  // Additive endpoint (new app only): returns the participants the requesting
+  // user could sneaky-swap with right now — i.e. participants who are NOT the
+  // requester, NOT stealthed, NOT finished, and who hold >=1 STEALABLE powerup
+  // (HELD, type not SNEAKY_SWAP and not MYSTERY_BOX). Old apps never call this
+  // and keep using the per-target options endpoint.
+  router.get("/:raceId/powerups/sneaky-swap-targets", async (req, res) => {
+    try {
+      const race = await raceModel.findById(req.params.raceId);
+      if (!race || race.status !== "ACTIVE") {
+        return res.status(400).json({ error: "Race is not active" });
+      }
+
+      const candidates = race.participants.filter(
+        (p) =>
+          p.userId !== req.user.id &&
+          p.status === "ACCEPTED" &&
+          !p.finishedAt
+      );
+
+      const evaluated = await Promise.all(
+        candidates.map(async (p) => {
+          const [stealth, held] = await Promise.all([
+            effectModel.findActiveByTypeForParticipant(p.id, "STEALTH_MODE"),
+            powerupModel.findHeldByParticipant(p.id),
+          ]);
+          if (stealth) return null;
+          if (!held.some((pw) => isStealable(pw))) return null;
+          return {
+            userId: p.userId,
+            displayName: p.user ? p.user.displayName : null,
+          };
+        })
+      );
+
+      res.json({ targets: evaluated.filter(Boolean) });
+    } catch (error) {
+      console.error("Sneaky swap targets error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });

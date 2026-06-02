@@ -25,6 +25,11 @@ const POWERUP_NAMES = {
   TRAIL_MINE: "Trail Mine",
   PINECONE_TOSS: "Pinecone Toss",
   SNEAKY_SWAP: "Sneaky Swap",
+  MIRROR: "Mirror",
+  CLEANSE: "Cleanse",
+  // IMPOSTER is purchase-only (coin store), never rolled from a mystery box, so
+  // it is intentionally absent from RARITY_TIERS. Named here for feed/display.
+  IMPOSTER: "Imposter",
 };
 
 function buildRollPowerup(dependencies = {}) {

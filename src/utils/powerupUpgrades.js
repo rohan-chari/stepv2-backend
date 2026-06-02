@@ -48,6 +48,16 @@ const RARITY_BY_TYPE = {
   TRAIL_MINE:        "RARE",
   PINECONE_TOSS:     "UNCOMMON",
   SNEAKY_SWAP:       "RARE",
+  // MIRROR is RARE and, like SNEAKY_SWAP, is NOT in UPGRADEABLE_TYPES (no
+  // upgrade ladder). Listed here only so rarity lookups resolve consistently.
+  MIRROR:            "RARE",
+  // CLEANSE is UNCOMMON and non-upgradeable (not in UPGRADEABLE_TYPES). Listed
+  // here only so rarity lookups resolve consistently.
+  CLEANSE:           "UNCOMMON",
+  // IMPOSTER is purchase-only and non-upgradeable (not in UPGRADEABLE_TYPES).
+  // It never rolls from a box, but a rarity is listed so display lookups
+  // resolve consistently. Treated as RARE for badge styling.
+  IMPOSTER:          "RARE",
 };
 
 // Duration in ms for timed effects, indexed by level.

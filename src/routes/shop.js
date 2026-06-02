@@ -9,6 +9,12 @@ const {
 const {
   equipAccessory: defaultEquipAccessory,
 } = require("../commands/equipAccessory");
+const {
+  getPowerupShopCatalog: defaultGetPowerupShopCatalog,
+} = require("../queries/getPowerupShopCatalog");
+const {
+  purchasePowerupItem: defaultPurchasePowerupItem,
+} = require("../commands/purchasePowerupItem");
 
 function createShopRouter(dependencies = {}) {
   const router = Router();
@@ -18,8 +24,45 @@ function createShopRouter(dependencies = {}) {
   const purchaseShopItem =
     dependencies.purchaseShopItem || defaultPurchaseShopItem;
   const equipAccessory = dependencies.equipAccessory || defaultEquipAccessory;
+  const getPowerupShopCatalog =
+    dependencies.getPowerupShopCatalog || defaultGetPowerupShopCatalog;
+  const purchasePowerupItem =
+    dependencies.purchasePowerupItem || defaultPurchasePowerupItem;
 
   router.use(requireAuth);
+
+  // ── Powerup store (additive; only the new app calls these) ──────────────
+  // GET /shop/powerups — active coin-purchasable powerups + balance + owned qty.
+  router.get("/powerups", async (req, res) => {
+    try {
+      const result = await getPowerupShopCatalog(req.user.id);
+      res.json(result);
+    } catch (error) {
+      console.error("Get powerup shop catalog error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // POST /shop/powerups/purchase — buy a powerup (idempotent via Idempotency-Key).
+  router.post("/powerups/purchase", async (req, res) => {
+    try {
+      const result = await purchasePowerupItem({
+        userId: req.user.id,
+        sku: req.body.sku,
+        powerupType: req.body.powerupType,
+        idempotencyKey: req.get("Idempotency-Key") || req.body.idempotencyKey,
+      });
+      res.json(result);
+    } catch (error) {
+      if (error.name === "PowerupPurchaseError") {
+        return res
+          .status(error.statusCode || 400)
+          .json({ error: error.message });
+      }
+      console.error("Powerup purchase error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
 
   router.get("/catalog", async (req, res) => {
     try {

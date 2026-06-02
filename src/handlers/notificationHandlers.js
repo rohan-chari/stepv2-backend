@@ -250,6 +250,34 @@ function registerNotificationHandlers(dependencies = {}) {
     }
   });
 
+  events.on("GLOBAL_EVENT_STARTED", async (data) => {
+    try {
+      const { multiplier, participantUserIds } = data || {};
+      if (!participantUserIds || participantUserIds.length === 0) return;
+
+      const mult = Number(multiplier) || 2;
+      for (const recipientUserId of participantUserIds) {
+        await sendNotificationToUser({
+          eventName: "GLOBAL_EVENT_STARTED",
+          recipientUserId,
+          actorUserId: null,
+          title: `${mult}x STEPS EVENT`,
+          buildBody: () =>
+            `Double steps are LIVE for 30 minutes — every step counts ${mult}x in your races! Go!`,
+          payload: {
+            type: "GLOBAL_EVENT_STARTED",
+            route: "home",
+          },
+          logContext: { multiplier: mult, recipientUserId },
+        });
+      }
+    } catch (error) {
+      logger.error("GLOBAL_EVENT_STARTED handler failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
   const POWERUP_ATTACK_MESSAGES = {
     LEG_CRAMP: (attackerName) => `${attackerName} used Leg Cramp on you! Your steps are frozen for 2 hours.`,
     RED_CARD: (attackerName) => `${attackerName} used Red Card! You lost steps.`,

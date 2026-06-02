@@ -31,6 +31,14 @@ const User = {
     });
   },
 
+  async findCoins(id) {
+    const user = await prisma.user.findUnique({
+      where: { id },
+      select: { coins: true },
+    });
+    return user?.coins ?? 0;
+  },
+
   async getHeldCoins(userId) {
     const result = await prisma.raceParticipant.aggregate({
       where: {

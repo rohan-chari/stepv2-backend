@@ -53,6 +53,7 @@ const Race = {
     potCoins = 0,
     isPublic = false,
     maxParticipants = 10,
+    scheduledStartAt = null,
   }) {
     return prisma.race.create({
       data: {
@@ -67,6 +68,7 @@ const Race = {
         potCoins,
         isPublic,
         maxParticipants,
+        scheduledStartAt,
       },
       include: {
         creator: { select: { id: true, displayName: true, profilePhotoUrl: true } },
@@ -185,6 +187,17 @@ const Race = {
     });
   },
 
+  // Distinct userIds of ACCEPTED participants in currently-ACTIVE races. Used
+  // by the global-step-event scheduler to fan out the "2x event started" push.
+  async findActiveParticipantUserIds() {
+    const rows = await prisma.raceParticipant.findMany({
+      where: { status: "ACCEPTED", race: { status: "ACTIVE" } },
+      select: { userId: true },
+      distinct: ["userId"],
+    });
+    return rows.map((r) => r.userId);
+  },
+
   async findActiveExpired(now) {
     return prisma.race.findMany({
       where: {
@@ -193,6 +206,28 @@ const Race = {
       },
       include: {
         ...participantInclude,
+      },
+    });
+  },
+
+  // PENDING, user-created (non-seeded) races whose scheduledStartAt has arrived.
+  // Used by the autoStartScheduledRaces cron job (1.1.7). Seeded races
+  // (seedId != null) are excluded — they have their own auto-start/renewal in
+  // seededRaceRenewal.js. A lean select is fine; the job only needs the race id
+  // and creatorId to call startRace, plus the scheduledStartAt for anchoring.
+  async findScheduledDue(now) {
+    return prisma.race.findMany({
+      where: {
+        status: "PENDING",
+        seedId: null,
+        scheduledStartAt: { not: null, lte: now },
+      },
+      select: {
+        id: true,
+        creatorId: true,
+        seedId: true,
+        status: true,
+        scheduledStartAt: true,
       },
     });
   },

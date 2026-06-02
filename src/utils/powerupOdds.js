@@ -1,7 +1,10 @@
+// NOTE: CAMPFIRE_REST is intentionally NOT generated anymore (1.1.7). Its enum
+// value and effect-resolution code are kept (old apps + in-flight effects still
+// resolve it), but it is no longer rolled into new mystery boxes.
 const RARITY_TIERS = {
   COMMON: ["PROTEIN_SHAKE", "SHORTCUT", "TRAIL_MIX", "DETOUR_SIGN"],
-  UNCOMMON: ["RUNNERS_HIGH", "LEG_CRAMP", "STEALTH_MODE", "WRONG_TURN", "CAMPFIRE_REST", "PINECONE_TOSS"],
-  RARE: ["RED_CARD", "SECOND_WIND", "COMPRESSION_SOCKS", "FANNY_PACK", "LUCKY_HORSESHOE", "POCKET_WATCH", "TRAIL_MINE", "SNEAKY_SWAP"],
+  UNCOMMON: ["RUNNERS_HIGH", "LEG_CRAMP", "STEALTH_MODE", "WRONG_TURN", "PINECONE_TOSS", "CLEANSE"],
+  RARE: ["RED_CARD", "SECOND_WIND", "COMPRESSION_SOCKS", "FANNY_PACK", "LUCKY_HORSESHOE", "POCKET_WATCH", "TRAIL_MINE", "SNEAKY_SWAP", "MIRROR"],
 };
 
 const RARITY_ORDER = ["COMMON", "UNCOMMON", "RARE"];

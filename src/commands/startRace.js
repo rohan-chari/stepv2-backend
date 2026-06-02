@@ -21,7 +21,11 @@ function buildStartRace(dependencies = {}) {
   const events = dependencies.eventBus || eventBus;
   const now = dependencies.now || (() => new Date());
 
-  return async function startRace({ userId, raceId }) {
+  // 1.1.7: `bypassSchedule` lets the autoStartScheduledRaces cron job start a
+  // scheduled race at the scheduled moment (it pins `now` to scheduledStartAt so
+  // endsAt anchors there). `now` is also injectable for that anchoring + tests.
+  return async function startRace({ userId, raceId, bypassSchedule = false, now: nowOverride }) {
+    const startNow = typeof nowOverride === "function" ? nowOverride : now;
     const race = await raceModel.findById(raceId);
     if (!race) {
       throw new RaceStartError("Race not found", 404);
@@ -31,6 +35,23 @@ function buildStartRace(dependencies = {}) {
     }
     if (race.status !== "PENDING") {
       throw new RaceStartError("Race has already been started or is no longer active", 400);
+    }
+
+    // 1.1.7: block early manual start of a scheduled race. Applies to ALL
+    // clients — old apps that still render a Start button on a scheduled PENDING
+    // race get a clean rejection instead of starting it early. The cron job
+    // passes bypassSchedule (the schedule is already satisfied by then).
+    if (!bypassSchedule && race.scheduledStartAt) {
+      const scheduled = new Date(race.scheduledStartAt);
+      if (
+        !Number.isNaN(scheduled.getTime()) &&
+        scheduled.getTime() > startNow().getTime()
+      ) {
+        throw new RaceStartError(
+          "This race is scheduled to start later and can't be started early",
+          400
+        );
+      }
     }
 
     const acceptedCount = await participantModel.countAccepted(raceId);
@@ -50,7 +71,7 @@ function buildStartRace(dependencies = {}) {
       );
     }
 
-    const startedAt = now();
+    const startedAt = startNow();
     const durationDays = race.maxDurationDays || 7;
     const endsAt = new Date(
       startedAt.getTime() + durationDays * 24 * 60 * 60 * 1000

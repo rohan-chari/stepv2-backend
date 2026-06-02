@@ -57,6 +57,8 @@ model User {
   equippedAccessories UserEquippedAccessory[]
   shopPurchaseRequests ShopPurchaseRequest[]
   seasonScores       SeasonScore[]
+  powerupItems         UserPowerupItem[]
+  powerupPurchaseRequests PowerupPurchaseRequest[]
 
   @@map("users")
 }
@@ -367,6 +369,65 @@ model ShopPurchaseRequest {
   @@map("shop_purchase_requests")
 }
 
+// ── Powerup store (coin-purchasable powerups) ───────────────────────────────
+// A SEPARATE catalog from the cosmetic ShopItem table so that the cosmetic
+// catalog (GET /shop/catalog) stays byte-compatible for old app versions. Only
+// the new app reads these tables via the new /shop/powerups endpoints.
+
+// Catalog of coin-purchasable powerups (re-buyable, stack in global inventory).
+model PowerupShopItem {
+  id          String      @id @default(uuid())
+  sku         String      @unique
+  name        String
+  description String?
+  priceCoins  Int         @map("price_coins")
+  powerupType PowerupType @map("powerup_type")
+  active      Boolean     @default(true)
+  sortOrder   Int         @default(0) @map("sort_order")
+  createdAt   DateTime    @default(now()) @map("created_at")
+
+  @@index([active, sortOrder])
+  @@map("powerup_shop_items")
+}
+
+// A user's GLOBAL powerup inventory: how many of each powerup type they own,
+// spendable into any active race they're in. One row per (user, type).
+model UserPowerupItem {
+  id          String      @id @default(uuid())
+  userId      String      @map("user_id")
+  powerupType PowerupType @map("powerup_type")
+  quantity    Int         @default(0)
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, powerupType])
+  @@index([userId])
+  @@map("user_powerup_items")
+}
+
+// Idempotency ledger for powerup-store purchases — analogous to
+// ShopPurchaseRequest but for the powerup catalog (keeps the cosmetic ledger
+// untouched). Keyed on (userId, idempotencyKey).
+model PowerupPurchaseRequest {
+  id                String   @id @default(uuid())
+  userId            String   @map("user_id")
+  idempotencyKey    String   @map("idempotency_key")
+  powerupShopItemId String   @map("powerup_shop_item_id")
+  status            String
+  coinsSpent        Int      @default(0) @map("coins_spent")
+  resultJson        Json?    @map("result_json")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, idempotencyKey])
+  @@index([powerupShopItemId])
+  @@map("powerup_purchase_requests")
+}
+
 enum PowerupType {
   LEG_CRAMP         @map("leg_cramp")
   RED_CARD          @map("red_card")
@@ -387,6 +448,12 @@ enum PowerupType {
   TRAIL_MINE        @map("trail_mine")
   PINECONE_TOSS     @map("pinecone_toss")
   SNEAKY_SWAP       @map("sneaky_swap")
+  MIRROR            @map("mirror")
+  CLEANSE           @map("cleanse")
+  // IMPOSTER is PURCHASE-ONLY (from the coin store). It is intentionally NOT in
+  // any mystery-box rarity tier, so it can never roll from a box. Additive enum
+  // value; placed before mystery_box to match the schema's declared ordering.
+  IMPOSTER          @map("imposter")
   MYSTERY_BOX       @map("mystery_box")
 }
 
@@ -452,6 +519,12 @@ model Race {
   potCoins        Int        @default(0) @map("pot_coins")
   startedAt       DateTime?  @map("started_at")
   endsAt          DateTime?  @map("ends_at")
+  // Optional future auto-start time (1.1.7). When set and in the future, the
+  // race stays PENDING and the autoStartScheduledRaces cron job starts it once
+  // this time passes; manual start is blocked until then. Nullable/additive:
+  // legacy races and older app clients (which never send it) behave exactly as
+  // before — manual instant start.
+  scheduledStartAt DateTime? @map("scheduled_start_at")
   completedAt     DateTime?  @map("completed_at")
   winnerUserId         String?    @map("winner_user_id")
   powerupsEnabled      Boolean    @default(false) @map("powerups_enabled")
@@ -718,4 +791,23 @@ model SeasonScore {
   @@unique([userId, seasonId])
   @@index([seasonId, points])
   @@map("season_scores")
+}
+
+// BeReal-style global step-multiplier event. During [startsAt, endsAt) steps
+// taken by ALL participants in ALL active races are multiplied by `multiplier`
+// (stacking multiplicatively with per-participant powerup multipliers). Created
+// ~3x/day by the scheduler (src/jobs/globalStepEventScheduler.js); read by the
+// SHARED resolution so display (getRaceProgress) and settlement (raceExpiry)
+// agree. Additive, never read by old app binaries (which simply see a higher,
+// correct step total during a window).
+model GlobalStepEvent {
+  id         String   @id @default(uuid())
+  startsAt   DateTime @map("starts_at")
+  endsAt     DateTime @map("ends_at")
+  multiplier Float    @default(2)
+  label      String?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([startsAt, endsAt])
+  @@map("global_step_events")
 }
