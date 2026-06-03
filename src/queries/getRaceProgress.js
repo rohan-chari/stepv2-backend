@@ -75,6 +75,11 @@ async function computeEffectModifiers(effects, rawTotal, userId, stepSampleModel
   let frozenSteps = 0;
   let buffedSteps = 0;
   let reversedSteps = 0;
+  // Leg Cramp's contribution to frozenSteps, tracked separately from the
+  // Campfire Rest freeze that also feeds frozenSteps. The mystery-box countdown
+  // neutralizes ONLY Leg Cramp (+ Wrong Turn), never Campfire Rest, so it needs
+  // the Leg-Cramp-only slice. See boxDebuffOffsetSteps on RaceParticipant.
+  let legCrampFrozenSteps = 0;
 
   const legCramps = effects.filter((e) => e.type === "LEG_CRAMP");
   const runnersHighs = effects.filter((e) => e.type === "RUNNERS_HIGH");
@@ -88,6 +93,7 @@ async function computeEffectModifiers(effects, rawTotal, userId, stepSampleModel
     const sampleSteps = await stepSampleModel.sumStepsInWindow(userId, windowStart, windowEnd);
     if (sampleSteps > 0) {
       frozenSteps += sampleSteps;
+      legCrampFrozenSteps += sampleSteps;
     } else if (!hasSampleData) {
       // Only use snapshot fallback when user has no step sample data at all
       const meta = effect.metadata || {};
@@ -95,7 +101,9 @@ async function computeEffectModifiers(effects, rawTotal, userId, stepSampleModel
       const end = effect.status === "EXPIRED" && meta.stepsAtExpiry !== undefined
         ? meta.stepsAtExpiry
         : rawTotal;
-      frozenSteps += Math.max(0, end - start);
+      const frozen = Math.max(0, end - start);
+      frozenSteps += frozen;
+      legCrampFrozenSteps += frozen;
     }
   }
 
@@ -246,7 +254,16 @@ async function computeEffectModifiers(effects, rawTotal, userId, stepSampleModel
     });
   }
 
-  return { frozenSteps, buffedSteps, reversedSteps, globalBoostedSteps };
+  return { frozenSteps, buffedSteps, reversedSteps, globalBoostedSteps, legCrampFrozenSteps };
+}
+
+// The amount Leg Cramp + Wrong Turn shaved off totalSteps, so callers can ADD it
+// back for mystery-box progress. Leg Cramp removes `legCrampFrozenSteps`; Wrong
+// Turn swings by `2 * reversedSteps` (once to undo the steps, once to negate).
+// Box progress must ignore BOTH so neither debuff pushes the "steps to next box"
+// countdown backward — the bonusSteps high-water separately shields bonus-steal.
+function computeBoxDebuffOffset({ legCrampFrozenSteps = 0, reversedSteps = 0 } = {}) {
+  return Math.max(0, legCrampFrozenSteps) + 2 * Math.max(0, reversedSteps);
 }
 
 function buildGetRaceProgress(deps = {}) {
@@ -413,19 +430,31 @@ function buildGetRaceProgress(deps = {}) {
         }
 
         const allEffects = [...legCramps, ...runnersHighs, ...wrongTurns, ...campfires];
-        const { frozenSteps, buffedSteps, reversedSteps, globalBoostedSteps } = await computeEffectModifiers(allEffects, baseAdjusted, participant.userId, stepSampleModel, hasSampleData, globalContext);
+        const { frozenSteps, buffedSteps, reversedSteps, globalBoostedSteps, legCrampFrozenSteps } = await computeEffectModifiers(allEffects, baseAdjusted, participant.userId, stepSampleModel, hasSampleData, globalContext);
 
         total = Math.max(0, baseAdjusted - frozenSteps + buffedSteps - 2 * reversedSteps + (globalBoostedSteps || 0) + (race.powerupsEnabled ? (participant.bonusSteps || 0) : 0));
 
-        return { participant, totalSteps: total };
+        // Steps Leg Cramp/Wrong Turn shaved off `total` — persisted so the roll
+        // gate (racePowerupStateSync) and the countdown below can add them back
+        // for mystery-box progress. Recomputed from the SAME effect math the
+        // total uses, so display and the gate stay in lockstep.
+        const boxDebuffOffset = computeBoxDebuffOffset({ legCrampFrozenSteps, reversedSteps });
+
+        return { participant, totalSteps: total, boxDebuffOffset };
       })
     );
 
     // Update total steps for each active participant. Race completion is now
     // strictly time-based (handled by raceExpiry cron); no step-goal finish.
-    for (const { participant, totalSteps } of stepTotals) {
+    for (const { participant, totalSteps, boxDebuffOffset } of stepTotals) {
       if (!participant.finishedAt) {
         await participantModel.updateTotalSteps(participant.id, totalSteps);
+        if (typeof participantModel.updateBoxDebuffOffsetSteps === "function") {
+          await participantModel.updateBoxDebuffOffsetSteps(
+            participant.id,
+            boxDebuffOffset || 0
+          );
+        }
       }
     }
 
@@ -441,6 +470,7 @@ function buildGetRaceProgress(deps = {}) {
         myParticipant.finishTotalSteps ??
         myParticipant.totalSteps ??
         0;
+      const myBoxDebuffOffset = myStepTotalEntry?.boxDebuffOffset || 0;
       const syncResult = await syncRacePowerupState({ raceId, userId });
       powerupData = {
         enabled: true,
@@ -457,16 +487,19 @@ function buildGetRaceProgress(deps = {}) {
 
       powerupData.powerupSlots = mySlots;
       if (nextBoxAtSteps > 0) {
-        // Use the bonusSteps high-water (maxBonus - bonusNow) so bonus-stealing
-        // pushbacks (Banana Peel/Red Card/Shortcut/Pinecone) don't push the
-        // countdown back. Leg Cramp (frozenSteps) and Wrong Turn (reversedSteps)
-        // are DEBUFF-SENSITIVE by design: they reduce myCurrentSteps so the
-        // countdown honestly reflects the steps still needed (it ticks up after a
-        // fresh freeze/reverse, down as the player walks). The maxBoxProgressSteps
-        // anchor is deprecated and intentionally not read here.
+        // Box progress ignores the three debuffs that push step counts backward:
+        //  - bonus-steal (Red Card/Shortcut/Pinecone/Trail Mine): the bonusSteps
+        //    high-water (maxBonus - bonusNow) re-credits the lost bonus.
+        //  - Leg Cramp (freeze) + Wrong Turn (reverse): myBoxDebuffOffset
+        //    (legCrampFrozenSteps + 2*reversedSteps) adds back exactly what those
+        //    two shaved off totalSteps, so neither pushes the countdown backward.
+        // Campfire Rest's freeze is intentionally NOT neutralized (not in the
+        // offset). The roll gate (racePowerupStateSync) adds the same offset, so
+        // the displayed countdown and the actual box drop stay in lockstep.
         const bonusNow = freshParticipant?.bonusSteps || 0;
         const maxBonus = freshParticipant?.maxBonusSteps || 0;
-        const effectiveSteps = myCurrentSteps + Math.max(0, maxBonus - bonusNow);
+        const effectiveSteps =
+          myCurrentSteps + Math.max(0, maxBonus - bonusNow) + myBoxDebuffOffset;
         powerupData.stepsUntilNextPowerup = Math.max(
           nextBoxAtSteps - effectiveSteps,
           0
@@ -632,4 +665,4 @@ function buildGetRaceProgress(deps = {}) {
 
 const getRaceProgress = buildGetRaceProgress();
 
-module.exports = { getRaceProgress, buildGetRaceProgress, computeEffectModifiers };
+module.exports = { getRaceProgress, buildGetRaceProgress, computeEffectModifiers, computeBoxDebuffOffset };

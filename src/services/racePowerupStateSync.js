@@ -19,7 +19,14 @@ function getEffectiveBoxSteps(participant) {
   // progress anchored to the high-water mark so the player does not need to
   // re-walk the lost distance.
   const bonusAnchor = Math.max(bonus, maxBonus);
-  return currentSteps + Math.max(0, bonusAnchor - bonus);
+  // boxDebuffOffsetSteps re-credits the steps Leg Cramp (freeze) and Wrong Turn
+  // (reverse) shaved off totalSteps, so neither debuff pushes box progress
+  // backward. It is recomputed every settlement (getRaceProgress /
+  // raceStateResolution) from the same effect math the display uses, so the
+  // gate here matches the displayed countdown. NULL/absent -> 0 -> the old
+  // debuff-sensitive behavior, so older rows and lean reads are safe.
+  const boxDebuffOffset = participant?.boxDebuffOffsetSteps || 0;
+  return currentSteps + Math.max(0, bonusAnchor - bonus) + boxDebuffOffset;
 }
 
 function buildSyncRacePowerupState(dependencies = {}) {
@@ -69,14 +76,12 @@ function buildSyncRacePowerupState(dependencies = {}) {
       await participantModel.updateMaxBonusSteps(participant.id, bonus);
     }
 
-    // Box progress is DEBUFF-SENSITIVE by design: getEffectiveBoxSteps protects
-    // only bonusSteps pushbacks (Banana Peel/Red Card/Shortcut/Pinecone/Trail
-    // Mine) via the maxBonusSteps high-water. Leg Cramp (frozenSteps) and Wrong
-    // Turn (reversedSteps) DO slow box earning — they reduce effectiveSteps, so
-    // the counter ticks up and the player must walk back. The maxBoxProgressSteps
-    // anchor that previously masked this is deprecated (it froze the countdown
-    // while a player sat below their pre-debuff peak); the column is retained but
-    // intentionally no longer read here.
+    // getEffectiveBoxSteps shields box progress from EVERY backward-pushing
+    // debuff: bonusSteps pushbacks (Red Card/Shortcut/Pinecone/Trail Mine) via
+    // the maxBonusSteps high-water, plus Leg Cramp (freeze) and Wrong Turn
+    // (reverse) via boxDebuffOffsetSteps. The countdown the client shows uses the
+    // same offset, so the displayed "steps to next box" and the actual roll fire
+    // together.
     if (
       participant.nextBoxAtSteps > 0 &&
       effectiveSteps >= participant.nextBoxAtSteps

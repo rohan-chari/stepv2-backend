@@ -596,13 +596,18 @@ model RaceParticipant {
   nextBoxAtSteps Int                  @default(0) @map("next_box_at_steps")
   bonusSteps    Int                   @default(0) @map("bonus_steps")
   maxBonusSteps Int                   @default(0) @map("max_bonus_steps")
-  // DEPRECATED / UNUSED. Was a box-progress high-water anchor meant to make box
-  // progress immune to Leg Cramp/Wrong Turn, but it froze the countdown while a
-  // player sat below their pre-debuff peak. Product decision: box progress is
-  // debuff-sensitive (the bonusSteps high-water still protects bonus-steal). No
-  // code reads this column anymore; it is retained (not dropped) to avoid a
-  // destructive migration. Safe to remove in a future schema-cleanup release.
+  // DEPRECATED / UNUSED. Was a box-progress high-water anchor; superseded by
+  // boxDebuffOffsetSteps below. Retained (not dropped) to avoid a destructive
+  // migration. Safe to remove in a future schema-cleanup release.
   maxBoxProgressSteps Int?            @map("max_box_progress_steps")
+  // Steps that Leg Cramp (freeze) and Wrong Turn (reverse) shaved off totalSteps,
+  // recomputed every settlement = legCrampFrozenSteps + 2*reversedSteps. ADDED
+  // BACK for mystery-box progress so neither debuff pushes the "steps to next
+  // box" countdown backward (the bonusSteps high-water separately shields
+  // bonus-steal; Campfire Rest's freeze is intentionally NOT offset). Additive &
+  // nullable for back-compat: NULL -> 0 -> the old debuff-sensitive behavior, so
+  // old rows during the deploy window and old app clients are unaffected.
+  boxDebuffOffsetSteps Int?           @map("box_debuff_offset_steps")
   powerupSlots  Int                   @default(3) @map("powerup_slots")
   buyInAmount   Int                   @default(0) @map("buy_in_amount")
   buyInStatus   RaceBuyInStatus       @default(NONE) @map("buy_in_status")

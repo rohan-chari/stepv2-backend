@@ -133,6 +133,13 @@ const RaceParticipant = {
     });
   },
 
+  async updateBoxDebuffOffsetSteps(id, boxDebuffOffsetSteps) {
+    return prisma.raceParticipant.update({
+      where: { id },
+      data: { boxDebuffOffsetSteps },
+    });
+  },
+
   async delete(id) {
     return prisma.raceParticipant.delete({ where: { id } });
   },

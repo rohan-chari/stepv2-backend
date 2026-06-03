@@ -6,7 +6,7 @@ const { RaceActiveEffect } = require("../models/raceActiveEffect");
 const { RacePowerupEvent } = require("../models/racePowerupEvent");
 const { GlobalStepEvent } = require("../models/globalStepEvent");
 const { completeRace } = require("../commands/completeRace");
-const { computeEffectModifiers } = require("../queries/getRaceProgress");
+const { computeEffectModifiers, computeBoxDebuffOffset } = require("../queries/getRaceProgress");
 const {
   getTimeZoneParts,
   formatDateString,
@@ -124,7 +124,7 @@ async function calculateCurrentTotal({
   const allEffects = [...legCramps, ...runnersHighs, ...wrongTurns, ...campfires];
   const globalContext =
     globalEvents && globalEvents.length > 0 ? { globalEvents, now } : null;
-  const { frozenSteps, buffedSteps, reversedSteps, globalBoostedSteps } =
+  const { frozenSteps, buffedSteps, reversedSteps, globalBoostedSteps, legCrampFrozenSteps } =
     await computeEffectModifiers(
       allEffects,
       baseAdjusted,
@@ -144,7 +144,11 @@ async function calculateCurrentTotal({
       (racePowerupsEnabled ? participant.bonusSteps || 0 : 0)
   );
 
-  return { total, legCramps, runnersHighs, wrongTurns, campfires };
+  // Steps Leg Cramp/Wrong Turn shaved off `total`; persisted by the caller so
+  // the roll gate re-credits them for box progress (matches the display path).
+  const boxDebuffOffset = computeBoxDebuffOffset({ legCrampFrozenSteps, reversedSteps });
+
+  return { total, boxDebuffOffset, legCramps, runnersHighs, wrongTurns, campfires };
 }
 
 function buildBonusTimeline(events, participantUserId, effectiveStart, now) {
@@ -521,7 +525,7 @@ function buildResolveRaceState(dependencies = {}) {
               now: currentTime,
             });
 
-          const { total, legCramps, runnersHighs, wrongTurns, campfires } =
+          const { total, boxDebuffOffset, legCramps, runnersHighs, wrongTurns, campfires } =
             await calculateCurrentTotal({
               raceId: race.id,
               racePowerupsEnabled: race.powerupsEnabled,
@@ -535,6 +539,12 @@ function buildResolveRaceState(dependencies = {}) {
             });
 
           await participantModel.updateTotalSteps(participant.id, total);
+          if (typeof participantModel.updateBoxDebuffOffsetSteps === "function") {
+            await participantModel.updateBoxDebuffOffsetSteps(
+              participant.id,
+              boxDebuffOffset || 0
+            );
+          }
           stepTotals[index] = { participant, totalSteps: total };
 
           // Target-based early finish only applies to goal races (targetSteps > 0).
