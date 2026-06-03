@@ -133,6 +133,13 @@ const RaceParticipant = {
     });
   },
 
+  async updateMaxBoxProgressSteps(id, maxBoxProgressSteps) {
+    return prisma.raceParticipant.update({
+      where: { id },
+      data: { maxBoxProgressSteps },
+    });
+  },
+
   async delete(id) {
     return prisma.raceParticipant.delete({ where: { id } });
   },

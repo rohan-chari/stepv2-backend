@@ -69,16 +69,32 @@ function buildSyncRacePowerupState(dependencies = {}) {
       await participantModel.updateMaxBonusSteps(participant.id, bonus);
     }
 
+    // Box-progress high-water mark. getEffectiveBoxSteps only protects box
+    // progress against bonusSteps pushbacks (Banana Peel/Red Card/Shortcut/
+    // Pinecone/Trail Mine). It does NOT protect against frozenSteps (Leg Cramp)
+    // or reversedSteps (Wrong Turn), which reduce totalSteps directly. Anchor
+    // box progress to its peak so NO debuff can push it backward and force the
+    // victim to re-walk the lost distance for their next box. Existing rows have
+    // maxBoxProgressSteps = NULL -> 0 -> highWater == effectiveSteps == exactly
+    // the prior behavior; the anchor just starts accumulating on the next sync.
+    const highWater = Math.max(effectiveSteps, participant.maxBoxProgressSteps || 0);
+    if (
+      highWater > (participant.maxBoxProgressSteps || 0) &&
+      typeof participantModel.updateMaxBoxProgressSteps === "function"
+    ) {
+      await participantModel.updateMaxBoxProgressSteps(participant.id, highWater);
+    }
+
     if (
       participant.nextBoxAtSteps > 0 &&
-      effectiveSteps >= participant.nextBoxAtSteps
+      highWater >= participant.nextBoxAtSteps
     ) {
       rollResults = await rollPowerup({
         raceId: race.id,
         participantId: participant.id,
         userId: participant.userId,
         currentSteps,
-        effectiveSteps,
+        effectiveSteps: highWater,
         nextBoxAtSteps: participant.nextBoxAtSteps,
         powerupStepInterval: race.powerupStepInterval,
         displayName: participant.user?.displayName,

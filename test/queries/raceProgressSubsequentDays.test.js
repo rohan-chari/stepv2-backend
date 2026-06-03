@@ -4,8 +4,11 @@ const { buildGetRaceProgress } = require("../../src/queries/getRaceProgress");
 
 // ---------------------------------------------------------------------------
 // Scenario: Race started on Mar 30. We're now on Mar 31.
-// Subsequent days (after start day) should use StepSamples when available,
-// falling back to daily Step records only when no samples exist.
+// Subsequent days (after start day) take the PER-DAY max(step_sample sum,
+// daily Step record) so the race never counts fewer steps than the
+// authoritative daily total, nor lets a stale daily row suppress larger
+// samples. The remaining cases here have at most one source present per day,
+// so max() reduces to "use whichever exists".
 // ---------------------------------------------------------------------------
 
 const RACE_START = new Date("2026-03-30T13:00:00.000Z"); // 9 AM ET
@@ -124,22 +127,6 @@ function stepsFor(result, userId) {
 // ===========================================================================
 // Subsequent days use StepSamples
 // ===========================================================================
-
-test("subsequent days use StepSamples when available, not daily records", async () => {
-  // Daily records say 5000 for Mar 31, but samples only total 1800
-  // Samples should win since they're more precise
-  const { deps } = makeDeps({
-    rangeRecords: {
-      "user-1": [{ date: "2026-03-31", steps: 5000 }],
-    },
-  });
-  const getRaceProgress = buildGetRaceProgress(deps);
-  const result = await getRaceProgress("user-1", "race-1", TZ_ET);
-
-  // Start day: 500 + 700 = 1200
-  // Subsequent (Mar 31): samples = 1000 + 800 = 1800 (NOT 5000 from daily record)
-  assert.equal(stepsFor(result, "user-1"), 3000);
-});
 
 test("subsequent days fall back to daily records when no samples exist", async () => {
   // No samples for Mar 31, so daily records are used

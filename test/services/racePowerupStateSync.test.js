@@ -71,6 +71,14 @@ function makeContext(overrides = {}) {
         return queuedPowerups.length;
       },
     },
+    // syncRacePowerupState persists high-water marks on the participant model
+    // (maxBonusSteps, and maxBoxProgressSteps as of the box-progress anchor fix).
+    // Inject no-op fakes so the suite exercises the real syncRacePowerupState
+    // logic without reaching the Prisma client / a database.
+    RaceParticipant: {
+      async updateMaxBonusSteps() {},
+      async updateMaxBoxProgressSteps() {},
+    },
     rollPowerup: async ({
       raceId,
       participantId,

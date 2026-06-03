@@ -12,6 +12,7 @@ const {
   syncRacePowerupState: defaultSyncRacePowerupState,
 } = require("../services/racePowerupStateSync");
 const { getTimeZoneParts, formatDateString, addDaysToDateString, parseDateString, zonedDateTimeToUtc } = require("../utils/week");
+const { calculateSubsequentSteps } = require("../utils/raceSteps");
 const { GlobalStepEvent } = require("../models/globalStepEvent");
 const { computeGlobalEventBoost } = require("../utils/globalStepEvent");
 
@@ -349,19 +350,20 @@ function buildGetRaceProgress(deps = {}) {
         // A later daily total sync can include pre-race steps that were not present
         // in the baseline snapshot at race start.
 
-        // For days after the start day: prefer StepSamples, fall back to daily records
-        let subsequentSteps = 0;
-        if (dayAfterStartDate <= today) {
-          const subsequentSamples = await stepSampleModel.sumStepsInWindow(
-            p.userId, startDayWindowEnd, now()
-          );
-          if (subsequentSamples > 0) {
-            subsequentSteps = subsequentSamples;
-          } else {
-            const laterSteps = await stepsModel.findByUserIdAndDateRange(p.userId, dayAfterStartDate, today);
-            subsequentSteps = laterSteps.reduce((sum, s) => sum + s.steps, 0);
-          }
-        }
+        // For days after the start day: per-day max(samples, daily). The race
+        // must never count fewer steps than the authoritative daily total for
+        // the covered period, and a stale daily row must never suppress larger
+        // samples. SHARED with the settlement path (raceStateResolution.js) via
+        // calculateSubsequentSteps so display and settlement stay identical.
+        const subsequentSteps = await calculateSubsequentSteps({
+          userId: p.userId,
+          dayAfterStartDate,
+          today,
+          timeZone,
+          stepsModel,
+          stepSampleModel,
+          now: now(),
+        });
 
         const baseAdjusted = Math.max(0, startDaySteps + subsequentSteps);
         const hasSampleData = startDaySamples > 0;
@@ -455,12 +457,18 @@ function buildGetRaceProgress(deps = {}) {
 
       powerupData.powerupSlots = mySlots;
       if (nextBoxAtSteps > 0) {
-        // Use high-water mark of bonusSteps so pushbacks (Banana Peel/Red Card)
-        // don't push the countdown back. Leg Cramp (frozenSteps) still does.
+        // Use the box-progress high-water so NO debuff pushes the countdown
+        // back. The bonusSteps high-water (maxBonus - bonusNow) covers
+        // bonus-stealing pushbacks (Banana Peel/Red Card); maxBoxProgressSteps
+        // additionally covers frozenSteps (Leg Cramp) and reversedSteps (Wrong
+        // Turn), which reduce myCurrentSteps directly. Read defensively:
+        // NULL/absent -> 0 -> matches the prior bonus-only behavior exactly.
         const bonusNow = freshParticipant?.bonusSteps || 0;
         const maxBonus = freshParticipant?.maxBonusSteps || 0;
-        const effectiveSteps =
-          myCurrentSteps + Math.max(0, maxBonus - bonusNow);
+        const effectiveSteps = Math.max(
+          myCurrentSteps + Math.max(0, maxBonus - bonusNow),
+          freshParticipant?.maxBoxProgressSteps || 0
+        );
         powerupData.stepsUntilNextPowerup = Math.max(
           nextBoxAtSteps - effectiveSteps,
           0

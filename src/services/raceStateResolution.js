@@ -14,6 +14,7 @@ const {
   parseDateString,
   zonedDateTimeToUtc,
 } = require("../utils/week");
+const { calculateSubsequentSteps } = require("../utils/raceSteps");
 
 function getEffectiveStart(participant, raceStartedAt) {
   const joinedAt = participant.joinedAt || raceStartedAt;
@@ -62,24 +63,15 @@ async function calculateBaseAdjusted({
     startDaySteps = startDaySamples;
   }
 
-  let subsequentSteps = 0;
-  if (dayAfterStartDate <= today) {
-    const subsequentSamples = await stepSampleModel.sumStepsInWindow(
-      participant.userId,
-      startDayWindowEnd,
-      now
-    );
-    if (subsequentSamples > 0) {
-      subsequentSteps = subsequentSamples;
-    } else {
-      const laterSteps = await stepsModel.findByUserIdAndDateRange(
-        participant.userId,
-        dayAfterStartDate,
-        today
-      );
-      subsequentSteps = laterSteps.reduce((sum, s) => sum + s.steps, 0);
-    }
-  }
+  const subsequentSteps = await calculateSubsequentSteps({
+    userId: participant.userId,
+    dayAfterStartDate,
+    today,
+    timeZone,
+    stepsModel,
+    stepSampleModel,
+    now,
+  });
 
   return {
     baseAdjusted: Math.max(0, startDaySteps + subsequentSteps),
@@ -655,6 +647,7 @@ const resolveRaceState = buildResolveRaceState();
 
 module.exports = {
   calculateBaseAdjusted,
+  calculateSubsequentSteps,
   calculateCurrentTotal,
   triggerTrailMines,
   buildResolveRaceState,
