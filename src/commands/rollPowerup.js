@@ -98,6 +98,38 @@ function buildRollPowerup(dependencies = {}) {
             threshold: currentThreshold,
           });
         } else {
+          // Pre-check for an existing box at this threshold BEFORE inserting. A
+          // duplicate insert raises a unique-constraint (P2002) error which, in
+          // Postgres, ABORTS the surrounding transaction — after that every
+          // further statement fails with "current transaction is aborted", so
+          // the catch-and-continue below cannot recover and the whole request
+          // 500s. This happens whenever nextBoxAtSteps sits at/below an
+          // already-earned threshold (e.g. a remediated/reset nextBox, or a
+          // legacy orphan row). The advisory lock above serializes rolls for
+          // this participant, so this read has no race with a concurrent insert.
+          // Skipping here advances past already-claimed thresholds WITHOUT
+          // re-granting a box (no double-grant) and without crashing.
+          const existing =
+            typeof tx.racePowerup.findUnique === "function"
+              ? await tx.racePowerup.findUnique({
+                  where: {
+                    participantId_earnedAtSteps: {
+                      participantId,
+                      earnedAtSteps: currentThreshold,
+                    },
+                  },
+                  select: { id: true },
+                })
+              : null;
+          if (existing) {
+            currentThreshold += powerupStepInterval;
+            await tx.raceParticipant.update({
+              where: { id: participantId },
+              data: { nextBoxAtSteps: currentThreshold },
+            });
+            continue;
+          }
+
           let powerup;
           try {
             powerup = await tx.racePowerup.create({
@@ -112,18 +144,10 @@ function buildRollPowerup(dependencies = {}) {
               },
             });
           } catch (e) {
-            // Belt-and-suspenders: if a pre-existing orphan row exists for
-            // (participantId, earnedAtSteps), advance the threshold instead of
-            // wedging the loop. With the advisory lock above this shouldn't
-            // happen for new contention, but guards against legacy bad rows.
-            if (e && e.code === "P2002") {
-              currentThreshold += powerupStepInterval;
-              await tx.raceParticipant.update({
-                where: { id: participantId },
-                data: { nextBoxAtSteps: currentThreshold },
-              });
-              continue;
-            }
+            // Belt-and-suspenders: the pre-check above should prevent this, but
+            // if a duplicate still slips through, do NOT keep using the aborted
+            // transaction (that throws 25P02). Re-throw so the whole roll rolls
+            // back cleanly rather than 500-ing on a poisoned transaction.
             throw e;
           }
 
