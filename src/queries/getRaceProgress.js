@@ -457,18 +457,16 @@ function buildGetRaceProgress(deps = {}) {
 
       powerupData.powerupSlots = mySlots;
       if (nextBoxAtSteps > 0) {
-        // Use the box-progress high-water so NO debuff pushes the countdown
-        // back. The bonusSteps high-water (maxBonus - bonusNow) covers
-        // bonus-stealing pushbacks (Banana Peel/Red Card); maxBoxProgressSteps
-        // additionally covers frozenSteps (Leg Cramp) and reversedSteps (Wrong
-        // Turn), which reduce myCurrentSteps directly. Read defensively:
-        // NULL/absent -> 0 -> matches the prior bonus-only behavior exactly.
+        // Use the bonusSteps high-water (maxBonus - bonusNow) so bonus-stealing
+        // pushbacks (Banana Peel/Red Card/Shortcut/Pinecone) don't push the
+        // countdown back. Leg Cramp (frozenSteps) and Wrong Turn (reversedSteps)
+        // are DEBUFF-SENSITIVE by design: they reduce myCurrentSteps so the
+        // countdown honestly reflects the steps still needed (it ticks up after a
+        // fresh freeze/reverse, down as the player walks). The maxBoxProgressSteps
+        // anchor is deprecated and intentionally not read here.
         const bonusNow = freshParticipant?.bonusSteps || 0;
         const maxBonus = freshParticipant?.maxBonusSteps || 0;
-        const effectiveSteps = Math.max(
-          myCurrentSteps + Math.max(0, maxBonus - bonusNow),
-          freshParticipant?.maxBoxProgressSteps || 0
-        );
+        const effectiveSteps = myCurrentSteps + Math.max(0, maxBonus - bonusNow);
         powerupData.stepsUntilNextPowerup = Math.max(
           nextBoxAtSteps - effectiveSteps,
           0

@@ -69,32 +69,24 @@ function buildSyncRacePowerupState(dependencies = {}) {
       await participantModel.updateMaxBonusSteps(participant.id, bonus);
     }
 
-    // Box-progress high-water mark. getEffectiveBoxSteps only protects box
-    // progress against bonusSteps pushbacks (Banana Peel/Red Card/Shortcut/
-    // Pinecone/Trail Mine). It does NOT protect against frozenSteps (Leg Cramp)
-    // or reversedSteps (Wrong Turn), which reduce totalSteps directly. Anchor
-    // box progress to its peak so NO debuff can push it backward and force the
-    // victim to re-walk the lost distance for their next box. Existing rows have
-    // maxBoxProgressSteps = NULL -> 0 -> highWater == effectiveSteps == exactly
-    // the prior behavior; the anchor just starts accumulating on the next sync.
-    const highWater = Math.max(effectiveSteps, participant.maxBoxProgressSteps || 0);
-    if (
-      highWater > (participant.maxBoxProgressSteps || 0) &&
-      typeof participantModel.updateMaxBoxProgressSteps === "function"
-    ) {
-      await participantModel.updateMaxBoxProgressSteps(participant.id, highWater);
-    }
-
+    // Box progress is DEBUFF-SENSITIVE by design: getEffectiveBoxSteps protects
+    // only bonusSteps pushbacks (Banana Peel/Red Card/Shortcut/Pinecone/Trail
+    // Mine) via the maxBonusSteps high-water. Leg Cramp (frozenSteps) and Wrong
+    // Turn (reversedSteps) DO slow box earning — they reduce effectiveSteps, so
+    // the counter ticks up and the player must walk back. The maxBoxProgressSteps
+    // anchor that previously masked this is deprecated (it froze the countdown
+    // while a player sat below their pre-debuff peak); the column is retained but
+    // intentionally no longer read here.
     if (
       participant.nextBoxAtSteps > 0 &&
-      highWater >= participant.nextBoxAtSteps
+      effectiveSteps >= participant.nextBoxAtSteps
     ) {
       rollResults = await rollPowerup({
         raceId: race.id,
         participantId: participant.id,
         userId: participant.userId,
         currentSteps,
-        effectiveSteps: highWater,
+        effectiveSteps,
         nextBoxAtSteps: participant.nextBoxAtSteps,
         powerupStepInterval: race.powerupStepInterval,
         displayName: participant.user?.displayName,

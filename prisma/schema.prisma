@@ -596,12 +596,12 @@ model RaceParticipant {
   nextBoxAtSteps Int                  @default(0) @map("next_box_at_steps")
   bonusSteps    Int                   @default(0) @map("bonus_steps")
   maxBonusSteps Int                   @default(0) @map("max_bonus_steps")
-  // High-water mark of box-progress steps. Box progress must be MONOTONIC: no
-  // debuff (Leg Cramp freeze / Wrong Turn reversal / bonus-stealing pushbacks)
-  // may push it backward, so the victim never re-walks lost distance for their
-  // next mystery box. Nullable for back-compat: existing rows are NULL (treated
-  // as 0), so the anchor simply starts accumulating on the next sync — old app
-  // clients never read it.
+  // DEPRECATED / UNUSED. Was a box-progress high-water anchor meant to make box
+  // progress immune to Leg Cramp/Wrong Turn, but it froze the countdown while a
+  // player sat below their pre-debuff peak. Product decision: box progress is
+  // debuff-sensitive (the bonusSteps high-water still protects bonus-steal). No
+  // code reads this column anymore; it is retained (not dropped) to avoid a
+  // destructive migration. Safe to remove in a future schema-cleanup release.
   maxBoxProgressSteps Int?            @map("max_box_progress_steps")
   powerupSlots  Int                   @default(3) @map("powerup_slots")
   buyInAmount   Int                   @default(0) @map("buy_in_amount")

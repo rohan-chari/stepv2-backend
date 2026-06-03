@@ -1,4 +1,3 @@
-const { Prisma } = require("@prisma/client");
 const { prisma } = require("../db");
 
 const RaceParticipant = {
@@ -132,19 +131,6 @@ const RaceParticipant = {
       where: { id },
       data: { maxBonusSteps },
     });
-  },
-
-  async updateMaxBoxProgressSteps(id, maxBoxProgressSteps) {
-    // Monotonic high-water write: never lower the anchor. Guards against any
-    // caller passing a lean/stale participant whose maxBoxProgressSteps wasn't
-    // selected (which would compute a too-low high-water and clobber the stored
-    // value). GREATEST makes the write idempotent and order-independent. Raw SQL
-    // via Prisma.sql + $executeRaw (same adapter-pg-safe pattern as rollPowerup).
-    return prisma.$executeRaw(
-      Prisma.sql`UPDATE race_participants
-                 SET max_box_progress_steps = GREATEST(COALESCE(max_box_progress_steps, 0), ${maxBoxProgressSteps})
-                 WHERE id = ${id}`
-    );
   },
 
   async delete(id) {
