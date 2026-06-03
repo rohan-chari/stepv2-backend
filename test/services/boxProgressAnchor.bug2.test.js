@@ -253,3 +253,69 @@ test("guards when participant model lacks updateMaxBoxProgressSteps (older deplo
   assert.equal(ctx.rollCalls.length, 1);
   assert.equal(ctx.rollCalls[0].effectiveSteps, 9000);
 });
+
+test("monotonic write preserves the anchor when sync gets a lean participant missing maxBoxProgressSteps", async () => {
+  // REGRESSION (prod bug): Race.findActiveForUser's lean select omitted
+  // maxBoxProgressSteps, so the participant handed to syncRacePowerupState had it
+  // undefined -> 0. The sync then computed highWater = current effectiveSteps and
+  // wrote THAT, clobbering the real stored high-water down on every step sync.
+  // Defense-in-depth fix: the model write is monotonic (GREATEST), so even a lean
+  // participant + a too-low write can NEVER lower the stored anchor.
+  let dbAnchor = 76000; // true stored high-water in the DB
+  const writes = [];
+  const participant = {
+    id: "rp-1",
+    userId: "user-1",
+    status: "ACCEPTED",
+    totalSteps: 70753, // dropped below the peak by a debuff
+    bonusSteps: 0,
+    maxBonusSteps: 0,
+    nextBoxAtSteps: 78000,
+    // maxBoxProgressSteps INTENTIONALLY ABSENT — simulates the lean select
+    finishedAt: null,
+    finishTotalSteps: null,
+    user: { id: "user-1", displayName: "Maize" },
+  };
+  const deps = {
+    Race: {
+      async findById() {
+        return {
+          id: "race-1",
+          status: "ACTIVE",
+          powerupsEnabled: true,
+          powerupStepInterval: 2000,
+          participants: [{ ...participant, user: { ...participant.user } }],
+        };
+      },
+    },
+    RaceParticipant: {
+      async updateMaxBoxProgressSteps(id, value) {
+        // Mirrors the real model's monotonic GREATEST SQL.
+        writes.push(value);
+        dbAnchor = Math.max(dbAnchor, value);
+        return dbAnchor;
+      },
+    },
+    RacePowerup: {
+      async countOccupiedSlots() {
+        return 3;
+      },
+      async findQueuedByParticipant() {
+        return [];
+      },
+      async update() {},
+      async countQueuedByParticipant() {
+        return 0;
+      },
+    },
+    rollPowerup: async () => [],
+  };
+
+  const sync = buildSyncRacePowerupState(deps);
+  await sync({ raceId: "race-1", userId: "user-1" });
+
+  // The sync wrote the too-low current value (70753) because the participant
+  // lacked the field, but GREATEST kept the real stored 76000.
+  assert.deepEqual(writes, [70753]);
+  assert.equal(dbAnchor, 76000, "monotonic write must not lower the stored anchor");
+});

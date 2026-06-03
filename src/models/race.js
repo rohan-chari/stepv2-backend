@@ -127,9 +127,12 @@ const Race = {
     // services only read race id/status/startedAt/targetSteps/powerupsEnabled/
     // powerupStepInterval and participant id/userId/status/totalSteps/
     // finishedAt/finishTotalSteps/bonusSteps/maxBonusSteps/nextBoxAtSteps/
-    // powerupSlots/placement + participant.user.displayName. Pulling the full
-    // deep participantInclude (equipped accessories, shop items, render
-    // metadata) was the dominant cost of POST /steps.
+    // maxBoxProgressSteps/powerupSlots/placement + participant.user.displayName.
+    // Pulling the full deep participantInclude (equipped accessories, shop items,
+    // render metadata) was the dominant cost of POST /steps.
+    // NOTE: maxBoxProgressSteps MUST be selected — syncRacePowerupState reads it
+    // as the box-progress high-water mark; if omitted it reads undefined->0 and
+    // clobbers the stored anchor down to current steps on every sync.
     return prisma.race.findMany({
       where: {
         status: "ACTIVE",
@@ -151,6 +154,7 @@ const Race = {
             bonusSteps: true,
             maxBonusSteps: true,
             nextBoxAtSteps: true,
+            maxBoxProgressSteps: true,
             powerupSlots: true,
             placement: true,
             finishedAt: true,
