@@ -28,7 +28,7 @@ function buildSyncRacePowerupState(dependencies = {}) {
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
   const rollPowerup = dependencies.rollPowerup || defaultRollPowerup;
 
-  return async function syncRacePowerupState({ raceId, userId, race: providedRace }) {
+  return async function syncRacePowerupState({ raceId, userId, race: providedRace, boxEffectiveSteps }) {
     // Callers that already have a hydrated race (e.g. recordSteps after
     // resolveRaceState) can pass it in to avoid a duplicate findById round
     // trip. The lean Race.findActiveForUser shape happens to satisfy every
@@ -61,7 +61,16 @@ function buildSyncRacePowerupState(dependencies = {}) {
 
     let rollResults = [];
     const currentSteps = getCurrentSteps(participant);
-    const effectiveSteps = getEffectiveBoxSteps(participant);
+    // Box progress is IMMUNE to Leg Cramp + Wrong Turn. The step paths
+    // (getRaceProgress, recordSteps, recordStepSamples) compute that debuff-immune
+    // total and pass it as boxEffectiveSteps. Inventory-action callers (open/use/
+    // discard) don't — they fall back to the debuff-sensitive value, which is safe
+    // because they never follow a step increase, so the fallback can only
+    // under-roll (never spuriously mint); the next step sync corrects any lag.
+    const effectiveSteps =
+      typeof boxEffectiveSteps === "number"
+        ? boxEffectiveSteps
+        : getEffectiveBoxSteps(participant);
 
     const bonus = participant.bonusSteps || 0;
     const maxBonus = participant.maxBonusSteps || 0;

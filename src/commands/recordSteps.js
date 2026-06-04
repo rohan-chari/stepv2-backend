@@ -60,6 +60,9 @@ function buildRecordSteps(dependencies = {}) {
               raceId: result.raceId,
               userId,
               race: result.race,
+              // Leg Cramp + Wrong Turn immune box-progress total (computed in
+              // resolveRaceState) so the roll gate ignores those debuffs.
+              boxEffectiveSteps: result.boxEffectiveSteps,
             })
           )
         );

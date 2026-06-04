@@ -15,6 +15,7 @@ const {
   zonedDateTimeToUtc,
 } = require("../utils/week");
 const { calculateSubsequentSteps } = require("../utils/raceSteps");
+const { computeBoxEffectiveSteps } = require("../utils/boxSteps");
 
 function getEffectiveStart(participant, raceStartedAt) {
   const joinedAt = participant.joinedAt || raceStartedAt;
@@ -124,7 +125,7 @@ async function calculateCurrentTotal({
   const allEffects = [...legCramps, ...runnersHighs, ...wrongTurns, ...campfires];
   const globalContext =
     globalEvents && globalEvents.length > 0 ? { globalEvents, now } : null;
-  const { frozenSteps, buffedSteps, reversedSteps, globalBoostedSteps } =
+  const { frozenSteps, buffedSteps, reversedSteps, globalBoostedSteps, legCrampFrozenSteps } =
     await computeEffectModifiers(
       allEffects,
       baseAdjusted,
@@ -144,7 +145,17 @@ async function calculateCurrentTotal({
       (racePowerupsEnabled ? participant.bonusSteps || 0 : 0)
   );
 
-  return { total, legCramps, runnersHighs, wrongTurns, campfires };
+  // legCrampFrozenSteps + reversedSteps are returned so the caller can compute
+  // the Leg-Cramp/Wrong-Turn-immune box-progress total (utils/boxSteps.js).
+  return {
+    total,
+    legCramps,
+    runnersHighs,
+    wrongTurns,
+    campfires,
+    legCrampFrozenSteps: legCrampFrozenSteps || 0,
+    reversedSteps: reversedSteps || 0,
+  };
 }
 
 function buildBonusTimeline(events, participantUserId, effectiveStart, now) {
@@ -497,6 +508,11 @@ function buildResolveRaceState(dependencies = {}) {
       const stepTotals = new Array(acceptedParticipants.length);
       const finisherCandidates = new Array(acceptedParticipants.length);
       let previouslyFinished = 0;
+      // Box-progress total for the requesting user (Leg Cramp + Wrong Turn
+      // immune). Threaded to syncRacePowerupState so the roll gate ignores those
+      // debuffs. Only the userId participant's value is needed (the caller syncs
+      // for that user); stays null when resolveRaceState is called without userId.
+      let userBoxEffectiveSteps = null;
 
       await Promise.all(
         acceptedParticipants.map(async (participant, index) => {
@@ -521,8 +537,15 @@ function buildResolveRaceState(dependencies = {}) {
               now: currentTime,
             });
 
-          const { total, legCramps, runnersHighs, wrongTurns, campfires } =
-            await calculateCurrentTotal({
+          const {
+            total,
+            legCramps,
+            runnersHighs,
+            wrongTurns,
+            campfires,
+            legCrampFrozenSteps,
+            reversedSteps,
+          } = await calculateCurrentTotal({
               raceId: race.id,
               racePowerupsEnabled: race.powerupsEnabled,
               participant,
@@ -536,6 +559,17 @@ function buildResolveRaceState(dependencies = {}) {
 
           await participantModel.updateTotalSteps(participant.id, total);
           stepTotals[index] = { participant, totalSteps: total };
+
+          // Capture the requesting user's box-immune total for the gate.
+          if (userId && participant.userId === userId) {
+            userBoxEffectiveSteps = computeBoxEffectiveSteps({
+              total,
+              legCrampFrozenSteps,
+              reversedSteps,
+              bonusSteps: participant.bonusSteps || 0,
+              maxBonusSteps: participant.maxBonusSteps || 0,
+            });
+          }
 
           // Target-based early finish only applies to goal races (targetSteps > 0).
           // Time-based races create with targetSteps = 0; since `0 >= 0`, an
@@ -631,6 +665,7 @@ function buildResolveRaceState(dependencies = {}) {
       return {
         raceId: race.id,
         race, // expose so callers can hand it to syncRacePowerupState (avoids a duplicate findById)
+        boxEffectiveSteps: userBoxEffectiveSteps, // Leg Cramp + Wrong Turn immune; null if no userId
         updatedParticipants: stepTotals.length,
         newFinishers: newFinishers.length,
       };
