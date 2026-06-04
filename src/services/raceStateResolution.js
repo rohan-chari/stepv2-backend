@@ -545,9 +545,20 @@ function buildResolveRaceState(dependencies = {}) {
 
           // Capture the requesting user's RAW-walked-steps box total for the gate
           // (immune to every buff/debuff multiplier; never strands next_box).
+          // Computed with a FIXED reference timezone (UTC) — NOT the caller's tz —
+          // so box progress is timezone-stable and matches the display path; a
+          // tz-dependent basis left the countdown clamped flat for non-UTC users.
           if (userId && participant.userId === userId) {
+            const { baseAdjusted: boxBaseAdjusted } = await calculateBaseAdjusted({
+              participant,
+              raceStartedAt: race.startedAt,
+              timeZone: "UTC",
+              stepsModel,
+              stepSampleModel,
+              now: currentTime,
+            });
             userBoxEffectiveSteps = computeBoxEffectiveSteps({
-              baseAdjusted,
+              baseAdjusted: boxBaseAdjusted,
               bonusSteps: participant.bonusSteps || 0,
               maxBonusSteps: participant.maxBonusSteps || 0,
             });

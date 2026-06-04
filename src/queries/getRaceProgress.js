@@ -418,9 +418,7 @@ function buildGetRaceProgress(deps = {}) {
 
         total = Math.max(0, baseAdjusted - frozenSteps + buffedSteps - 2 * reversedSteps + (globalBoostedSteps || 0) + (race.powerupsEnabled ? (participant.bonusSteps || 0) : 0));
 
-        // Carry baseAdjusted (raw walked steps) so the box gate + countdown can
-        // track real walking only — immune to every buff/debuff step multiplier.
-        return { participant, totalSteps: total, baseAdjusted };
+        return { participant, totalSteps: total };
       })
     );
 
@@ -444,11 +442,24 @@ function buildGetRaceProgress(deps = {}) {
         myParticipant.finishTotalSteps ??
         myParticipant.totalSteps ??
         0;
-      const myBaseAdjusted = myStepTotalEntry?.baseAdjusted ?? myCurrentSteps;
-      // Box progress tracks RAW walked steps only — immune to every buff/debuff
-      // step multiplier (the leaderboard total stays fully effect-sensitive).
+      // Box progress tracks RAW walked steps — immune to every buff/debuff
+      // multiplier (the leaderboard total stays effect-sensitive). It is computed
+      // with a FIXED reference timezone (UTC) so it is identical regardless of the
+      // caller's device timezone; using the request tz made baseAdjusted (and thus
+      // next_box's pace) tz-dependent, which left the countdown clamped flat at one
+      // interval for non-UTC users. Lazy require breaks the getRaceProgress <->
+      // raceStateResolution import cycle. (Steps lazily required for the same reason.)
+      const { calculateBaseAdjusted } = require("../services/raceStateResolution");
+      const { baseAdjusted: myBoxBaseAdjusted } = await calculateBaseAdjusted({
+        participant: myParticipant,
+        raceStartedAt: race.startedAt,
+        timeZone: "UTC",
+        stepsModel,
+        stepSampleModel,
+        now: now(),
+      });
       const myBoxEffectiveSteps = computeBoxEffectiveSteps({
-        baseAdjusted: myBaseAdjusted,
+        baseAdjusted: myBoxBaseAdjusted,
         bonusSteps: myParticipant.bonusSteps || 0,
         maxBonusSteps: myParticipant.maxBonusSteps || 0,
       });
@@ -480,7 +491,7 @@ function buildGetRaceProgress(deps = {}) {
         const bonusNow = freshParticipant?.bonusSteps || 0;
         const maxBonus = freshParticipant?.maxBonusSteps || 0;
         const effectiveSteps = computeBoxEffectiveSteps({
-          baseAdjusted: myBaseAdjusted,
+          baseAdjusted: myBoxBaseAdjusted,
           bonusSteps: bonusNow,
           maxBonusSteps: maxBonus,
         });
