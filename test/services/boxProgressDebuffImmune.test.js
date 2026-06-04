@@ -5,11 +5,11 @@ const {
   buildSyncRacePowerupState,
 } = require("../../src/services/racePowerupStateSync");
 
-// Box progress is IMMUNE to Leg Cramp + Wrong Turn. The step paths compute a
-// debuff-immune box total and pass it to the gate as `boxEffectiveSteps`; the
-// gate rolls on THAT, not the debuff-suppressed leaderboard totalSteps. Callers
-// that pass no override fall back to the debuff-sensitive value (safe: they
-// never follow a step increase, so the fallback can only under-roll).
+// Box progress tracks RAW walked steps (immune to every buff/debuff multiplier).
+// The step paths compute that raw box total and pass it to the gate as
+// `boxEffectiveSteps`; the gate rolls on THAT value. Callers that pass no override
+// (inventory actions: open/use/discard) add no steps, so the gate must NOT roll
+// for them — preventing a buffed leaderboard total from advancing next_box.
 
 function makeDeps(participant) {
   const rollCalls = [];
@@ -45,24 +45,23 @@ function makeDeps(participant) {
   return { rollCalls, syncRacePowerupState: buildSyncRacePowerupState(deps) };
 }
 
-const FROZEN_PARTICIPANT = {
+const PARTICIPANT = {
   id: "rp-1",
   userId: "user-1",
   status: "ACCEPTED",
-  totalSteps: 5000, // suppressed by a Leg Cramp; leaderboard value
+  totalSteps: 12000, // buff-inflated leaderboard total — must NOT drive box rolls
   bonusSteps: 0,
   maxBonusSteps: 0,
   nextBoxAtSteps: 6000,
   powerupSlots: 3,
   finishedAt: null,
   finishTotalSteps: null,
-  user: { displayName: "Frozen" },
+  user: { displayName: "Runner" },
 };
 
-test("gate rolls on the boxEffectiveSteps override even though totalSteps is debuff-suppressed", async () => {
-  // Real forward progress (Leg Cramp added back) is 7000 >= next box 6000 -> roll,
-  // even though the debuff-sensitive totalSteps (5000) is below the threshold.
-  const ctx = makeDeps(FROZEN_PARTICIPANT);
+test("gate rolls on the raw boxEffectiveSteps override (not the buffed total)", async () => {
+  // Raw walked steps = 7000 >= next box 6000 -> roll, regardless of the 12000 total.
+  const ctx = makeDeps(PARTICIPANT);
 
   await ctx.syncRacePowerupState({
     raceId: "race-1",
@@ -70,29 +69,26 @@ test("gate rolls on the boxEffectiveSteps override even though totalSteps is deb
     boxEffectiveSteps: 7000,
   });
 
-  assert.equal(ctx.rollCalls.length, 1, "rolls on the immune box total");
-  assert.equal(ctx.rollCalls[0].effectiveSteps, 7000, "passes the immune total to rollPowerup");
+  assert.equal(ctx.rollCalls.length, 1, "rolls on the raw box total");
+  assert.equal(ctx.rollCalls[0].effectiveSteps, 7000, "passes the raw total to rollPowerup");
 });
 
-test("without an override, the gate falls back to debuff-sensitive steps (no spurious mint)", async () => {
-  // No boxEffectiveSteps passed (e.g. an inventory-action sync). effective falls
-  // back to totalSteps 5000 < next box 6000 -> no roll.
-  const ctx = makeDeps(FROZEN_PARTICIPANT);
+test("without an override (inventory-action sync) the gate does NOT roll", async () => {
+  // No boxEffectiveSteps -> must not roll, even though totalSteps 12000 >= next box.
+  // This is what stops an open/use/discard during a buff from advancing next_box.
+  const ctx = makeDeps(PARTICIPANT);
 
   await ctx.syncRacePowerupState({ raceId: "race-1", userId: "user-1" });
 
-  assert.equal(ctx.rollCalls.length, 0, "fallback can only under-roll, never mint");
+  assert.equal(ctx.rollCalls.length, 0, "no override => no roll");
 });
 
-test("a zero override is honored (not treated as missing)", async () => {
-  // boxEffectiveSteps: 0 is a real value, not absence -> 0 < next box -> no roll.
-  const ctx = makeDeps({ ...FROZEN_PARTICIPANT, totalSteps: 9000 });
+test("a raw override below the threshold does not roll, and 0 is honored (not 'missing')", async () => {
+  const below = makeDeps(PARTICIPANT);
+  await below.syncRacePowerupState({ raceId: "race-1", userId: "user-1", boxEffectiveSteps: 5000 });
+  assert.equal(below.rollCalls.length, 0, "5000 < next box 6000 -> no roll");
 
-  await ctx.syncRacePowerupState({
-    raceId: "race-1",
-    userId: "user-1",
-    boxEffectiveSteps: 0,
-  });
-
-  assert.equal(ctx.rollCalls.length, 0, "explicit 0 override gates, not the 9000 totalSteps");
+  const zero = makeDeps(PARTICIPANT);
+  await zero.syncRacePowerupState({ raceId: "race-1", userId: "user-1", boxEffectiveSteps: 0 });
+  assert.equal(zero.rollCalls.length, 0, "explicit 0 gates on 0, not on totalSteps");
 });

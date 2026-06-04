@@ -61,16 +61,15 @@ function buildSyncRacePowerupState(dependencies = {}) {
 
     let rollResults = [];
     const currentSteps = getCurrentSteps(participant);
-    // Box progress is IMMUNE to Leg Cramp + Wrong Turn. The step paths
-    // (getRaceProgress, recordSteps, recordStepSamples) compute that debuff-immune
-    // total and pass it as boxEffectiveSteps. Inventory-action callers (open/use/
-    // discard) don't — they fall back to the debuff-sensitive value, which is safe
-    // because they never follow a step increase, so the fallback can only
-    // under-roll (never spuriously mint); the next step sync corrects any lag.
-    const effectiveSteps =
-      typeof boxEffectiveSteps === "number"
-        ? boxEffectiveSteps
-        : getEffectiveBoxSteps(participant);
+    // Box progress tracks RAW walked steps (immune to every buff/debuff
+    // multiplier). The step paths (getRaceProgress, recordSteps,
+    // recordStepSamples) compute that raw box total and pass it as
+    // boxEffectiveSteps; the gate rolls ONLY when it is provided. Inventory-action
+    // callers (open/use/discard) add no steps and pass nothing, so they must NOT
+    // roll — rolling off the effect-sensitive total would advance next_box on
+    // buffed steps and strand it once the buff expires. Any newly-due box rolls on
+    // the next step sync / race view, which always passes the raw override.
+    const canRoll = typeof boxEffectiveSteps === "number";
 
     const bonus = participant.bonusSteps || 0;
     const maxBonus = participant.maxBonusSteps || 0;
@@ -87,15 +86,16 @@ function buildSyncRacePowerupState(dependencies = {}) {
     // while a player sat below their pre-debuff peak); the column is retained but
     // intentionally no longer read here.
     if (
+      canRoll &&
       participant.nextBoxAtSteps > 0 &&
-      effectiveSteps >= participant.nextBoxAtSteps
+      boxEffectiveSteps >= participant.nextBoxAtSteps
     ) {
       rollResults = await rollPowerup({
         raceId: race.id,
         participantId: participant.id,
         userId: participant.userId,
         currentSteps,
-        effectiveSteps,
+        effectiveSteps: boxEffectiveSteps,
         nextBoxAtSteps: participant.nextBoxAtSteps,
         powerupStepInterval: race.powerupStepInterval,
         displayName: participant.user?.displayName,

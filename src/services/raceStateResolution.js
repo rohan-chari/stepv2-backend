@@ -125,7 +125,7 @@ async function calculateCurrentTotal({
   const allEffects = [...legCramps, ...runnersHighs, ...wrongTurns, ...campfires];
   const globalContext =
     globalEvents && globalEvents.length > 0 ? { globalEvents, now } : null;
-  const { frozenSteps, buffedSteps, reversedSteps, globalBoostedSteps, legCrampFrozenSteps } =
+  const { frozenSteps, buffedSteps, reversedSteps, globalBoostedSteps } =
     await computeEffectModifiers(
       allEffects,
       baseAdjusted,
@@ -145,17 +145,7 @@ async function calculateCurrentTotal({
       (racePowerupsEnabled ? participant.bonusSteps || 0 : 0)
   );
 
-  // legCrampFrozenSteps + reversedSteps are returned so the caller can compute
-  // the Leg-Cramp/Wrong-Turn-immune box-progress total (utils/boxSteps.js).
-  return {
-    total,
-    legCramps,
-    runnersHighs,
-    wrongTurns,
-    campfires,
-    legCrampFrozenSteps: legCrampFrozenSteps || 0,
-    reversedSteps: reversedSteps || 0,
-  };
+  return { total, legCramps, runnersHighs, wrongTurns, campfires };
 }
 
 function buildBonusTimeline(events, participantUserId, effectiveStart, now) {
@@ -537,15 +527,8 @@ function buildResolveRaceState(dependencies = {}) {
               now: currentTime,
             });
 
-          const {
-            total,
-            legCramps,
-            runnersHighs,
-            wrongTurns,
-            campfires,
-            legCrampFrozenSteps,
-            reversedSteps,
-          } = await calculateCurrentTotal({
+          const { total, legCramps, runnersHighs, wrongTurns, campfires } =
+            await calculateCurrentTotal({
               raceId: race.id,
               racePowerupsEnabled: race.powerupsEnabled,
               participant,
@@ -560,12 +543,11 @@ function buildResolveRaceState(dependencies = {}) {
           await participantModel.updateTotalSteps(participant.id, total);
           stepTotals[index] = { participant, totalSteps: total };
 
-          // Capture the requesting user's box-immune total for the gate.
+          // Capture the requesting user's RAW-walked-steps box total for the gate
+          // (immune to every buff/debuff multiplier; never strands next_box).
           if (userId && participant.userId === userId) {
             userBoxEffectiveSteps = computeBoxEffectiveSteps({
-              total,
-              legCrampFrozenSteps,
-              reversedSteps,
+              baseAdjusted,
               bonusSteps: participant.bonusSteps || 0,
               maxBonusSteps: participant.maxBonusSteps || 0,
             });

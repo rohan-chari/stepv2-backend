@@ -3,47 +3,39 @@ const test = require("node:test");
 
 const { computeBoxEffectiveSteps } = require("../../src/utils/boxSteps");
 
-// Box progress is IMMUNE to Leg Cramp (frozen) and Wrong Turn (reversed): both
-// penalties are added back on top of the leaderboard total. Bonus-steal stays
-// protected via the maxBonus high-water.
+// Box progress = RAW walked steps (baseAdjusted) + the bonus high-water. It takes
+// NO effect-multiplier inputs at all, so it is inherently immune to every buff
+// (Runner's High, Campfire, 2x global event) and debuff (Leg Cramp, Wrong Turn) —
+// those only move the leaderboard total, never box progress.
 
-test("adds back Leg Cramp frozen + 2x Wrong Turn reversed", () => {
-  // total already had -frozen and -2*reversed baked in; add the Leg-Cramp slice
-  // (300) and 2x the reversal (2*100) back.
+test("box steps = baseAdjusted + bonus high-water", () => {
   assert.equal(
-    computeBoxEffectiveSteps({
-      total: 5000,
-      legCrampFrozenSteps: 300,
-      reversedSteps: 100,
-      bonusSteps: 0,
-      maxBonusSteps: 0,
-    }),
-    5000 + 300 + 200
+    computeBoxEffectiveSteps({ baseAdjusted: 6000, bonusSteps: 1000, maxBonusSteps: 1000 }),
+    7000
   );
 });
 
-test("Campfire freeze is NOT added back (only the Leg-Cramp slice is passed)", () => {
-  // Caller passes legCrampFrozenSteps = Leg-Cramp portion only; Campfire freeze
-  // stays subtracted in `total`, so it is not restored here.
+test("bonus-steal pushback is protected by the high-water (uses max(bonus, maxBonus))", () => {
+  // bonus stolen down to 200 but peaked at 1500 -> box keeps crediting 1500.
   assert.equal(
-    computeBoxEffectiveSteps({ total: 4000, legCrampFrozenSteps: 0, reversedSteps: 0 }),
-    4000
+    computeBoxEffectiveSteps({ baseAdjusted: 6000, bonusSteps: 200, maxBonusSteps: 1500 }),
+    7500
   );
 });
 
-test("bonus-steal pushback stays protected via the maxBonus high-water", () => {
-  // bonus dropped to -500 but peaked at 0 => protection adds 500 back.
+test("a higher current bonus than the recorded high-water still counts", () => {
   assert.equal(
-    computeBoxEffectiveSteps({ total: 5000, bonusSteps: -500, maxBonusSteps: 0 }),
-    5500
+    computeBoxEffectiveSteps({ baseAdjusted: 6000, bonusSteps: 1800, maxBonusSteps: 1500 }),
+    7800
   );
 });
 
-test("clamps to >= 0", () => {
-  assert.equal(computeBoxEffectiveSteps({ total: -100 }), 0);
+test("only baseAdjusted matters when there is no bonus (buffs/debuffs are not inputs)", () => {
+  // A buffed leaderboard total would be much higher; box progress ignores it.
+  assert.equal(computeBoxEffectiveSteps({ baseAdjusted: 4200 }), 4200);
 });
 
-test("no args / no effects => total only (safe defaults)", () => {
-  assert.equal(computeBoxEffectiveSteps({ total: 4200 }), 4200);
+test("clamps to >= 0 and has safe defaults", () => {
+  assert.equal(computeBoxEffectiveSteps({ baseAdjusted: -100 }), 0);
   assert.equal(computeBoxEffectiveSteps(), 0);
 });

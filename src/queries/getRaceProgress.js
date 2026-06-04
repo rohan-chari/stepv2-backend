@@ -76,10 +76,6 @@ async function computeEffectModifiers(effects, rawTotal, userId, stepSampleModel
   let frozenSteps = 0;
   let buffedSteps = 0;
   let reversedSteps = 0;
-  // Leg-Cramp-only portion of frozenSteps (frozenSteps also includes Campfire
-  // self-freeze). Used to make box progress immune to Leg Cramp while the
-  // leaderboard total still subtracts all frozen steps. See utils/boxSteps.js.
-  let legCrampFrozenSteps = 0;
 
   const legCramps = effects.filter((e) => e.type === "LEG_CRAMP");
   const runnersHighs = effects.filter((e) => e.type === "RUNNERS_HIGH");
@@ -93,7 +89,6 @@ async function computeEffectModifiers(effects, rawTotal, userId, stepSampleModel
     const sampleSteps = await stepSampleModel.sumStepsInWindow(userId, windowStart, windowEnd);
     if (sampleSteps > 0) {
       frozenSteps += sampleSteps;
-      legCrampFrozenSteps += sampleSteps;
     } else if (!hasSampleData) {
       // Only use snapshot fallback when user has no step sample data at all
       const meta = effect.metadata || {};
@@ -101,9 +96,7 @@ async function computeEffectModifiers(effects, rawTotal, userId, stepSampleModel
       const end = effect.status === "EXPIRED" && meta.stepsAtExpiry !== undefined
         ? meta.stepsAtExpiry
         : rawTotal;
-      const add = Math.max(0, end - start);
-      frozenSteps += add;
-      legCrampFrozenSteps += add;
+      frozenSteps += Math.max(0, end - start);
     }
   }
 
@@ -254,7 +247,7 @@ async function computeEffectModifiers(effects, rawTotal, userId, stepSampleModel
     });
   }
 
-  return { frozenSteps, buffedSteps, reversedSteps, globalBoostedSteps, legCrampFrozenSteps };
+  return { frozenSteps, buffedSteps, reversedSteps, globalBoostedSteps };
 }
 
 function buildGetRaceProgress(deps = {}) {
@@ -421,13 +414,13 @@ function buildGetRaceProgress(deps = {}) {
         }
 
         const allEffects = [...legCramps, ...runnersHighs, ...wrongTurns, ...campfires];
-        const { frozenSteps, buffedSteps, reversedSteps, globalBoostedSteps, legCrampFrozenSteps } = await computeEffectModifiers(allEffects, baseAdjusted, participant.userId, stepSampleModel, hasSampleData, globalContext);
+        const { frozenSteps, buffedSteps, reversedSteps, globalBoostedSteps } = await computeEffectModifiers(allEffects, baseAdjusted, participant.userId, stepSampleModel, hasSampleData, globalContext);
 
         total = Math.max(0, baseAdjusted - frozenSteps + buffedSteps - 2 * reversedSteps + (globalBoostedSteps || 0) + (race.powerupsEnabled ? (participant.bonusSteps || 0) : 0));
 
-        // Carry the Leg-Cramp freeze + Wrong-Turn reversal so the box gate +
-        // countdown can add them back (box progress is immune to those debuffs).
-        return { participant, totalSteps: total, legCrampFrozenSteps: legCrampFrozenSteps || 0, reversedSteps: reversedSteps || 0 };
+        // Carry baseAdjusted (raw walked steps) so the box gate + countdown can
+        // track real walking only — immune to every buff/debuff step multiplier.
+        return { participant, totalSteps: total, baseAdjusted };
       })
     );
 
@@ -451,14 +444,11 @@ function buildGetRaceProgress(deps = {}) {
         myParticipant.finishTotalSteps ??
         myParticipant.totalSteps ??
         0;
-      const myLegCrampFrozenSteps = myStepTotalEntry?.legCrampFrozenSteps || 0;
-      const myReversedSteps = myStepTotalEntry?.reversedSteps || 0;
-      // Box progress is IMMUNE to Leg Cramp + Wrong Turn: add their penalties
-      // back for the roll gate (the leaderboard total still subtracts them).
+      const myBaseAdjusted = myStepTotalEntry?.baseAdjusted ?? myCurrentSteps;
+      // Box progress tracks RAW walked steps only — immune to every buff/debuff
+      // step multiplier (the leaderboard total stays fully effect-sensitive).
       const myBoxEffectiveSteps = computeBoxEffectiveSteps({
-        total: myCurrentSteps,
-        legCrampFrozenSteps: myLegCrampFrozenSteps,
-        reversedSteps: myReversedSteps,
+        baseAdjusted: myBaseAdjusted,
         bonusSteps: myParticipant.bonusSteps || 0,
         maxBonusSteps: myParticipant.maxBonusSteps || 0,
       });
@@ -482,19 +472,15 @@ function buildGetRaceProgress(deps = {}) {
 
       powerupData.powerupSlots = mySlots;
       if (nextBoxAtSteps > 0) {
-        // Box progress is IMMUNE to Leg Cramp (frozenSteps) and Wrong Turn
-        // (reversedSteps): they're added back so the countdown ignores them, while
-        // the leaderboard total still subtracts them. Bonus-stealing pushbacks
-        // (Banana Peel/Red Card/Shortcut/Pinecone) stay protected via the bonus
-        // high-water (maxBonus - bonusNow). Same basis as the roll gate above so
-        // the displayed countdown and actual earning agree. The maxBoxProgressSteps
-        // anchor is deprecated and intentionally not read here.
+        // Box countdown uses RAW walked steps (baseAdjusted) + the bonus
+        // high-water — immune to every buff/debuff multiplier so it tracks real
+        // walking only and matches the roll gate above exactly. Bonus-stealing
+        // pushbacks stay protected via the high-water (max(bonus, maxBonus)). The
+        // maxBoxProgressSteps anchor is deprecated and intentionally not read here.
         const bonusNow = freshParticipant?.bonusSteps || 0;
         const maxBonus = freshParticipant?.maxBonusSteps || 0;
         const effectiveSteps = computeBoxEffectiveSteps({
-          total: myCurrentSteps,
-          legCrampFrozenSteps: myLegCrampFrozenSteps,
-          reversedSteps: myReversedSteps,
+          baseAdjusted: myBaseAdjusted,
           bonusSteps: bonusNow,
           maxBonusSteps: maxBonus,
         });

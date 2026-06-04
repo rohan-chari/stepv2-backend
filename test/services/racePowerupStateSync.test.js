@@ -127,12 +127,15 @@ function makeContext(overrides = {}) {
   };
 }
 
-test("syncRacePowerupState earns mystery boxes from stored total steps", async () => {
+test("syncRacePowerupState earns mystery boxes from the raw box-steps override", async () => {
   const ctx = makeContext();
 
   const result = await ctx.syncRacePowerupState({
     raceId: "race-1",
     userId: "user-1",
+    // Raw walked box steps (what the step paths pass). The gate rolls only when
+    // this override is provided; here it's >= nextBoxAtSteps so boxes roll.
+    boxEffectiveSteps: 9000,
   });
 
   assert.equal(ctx.rollCalls.length, 1);
