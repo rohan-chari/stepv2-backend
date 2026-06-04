@@ -5,6 +5,18 @@ const { eventBus } = require("../events/eventBus");
 const DEFAULT_POWERUP_SLOTS = 3;
 const MAX_QUEUED_BOXES = 1;
 
+// Cap how many box thresholds a SINGLE rollPowerup call may cross. nextBoxAtSteps
+// ratchets up by powerupStepInterval per crossing; a transient step-spike (later
+// corrected) could otherwise mint a pile of free boxes and rocket nextBoxAtSteps
+// far above the player's real steps in one sync. 50 is deliberately generous for
+// a legitimate sparse-sync walk — at the common 2000-step interval that is
+// 100,000 steps crossed in one sync (e.g. opening the app after a multi-day gap),
+// which comfortably covers any real walker — while still bounding a runaway spike:
+// nothing legitimate crosses >50 intervals between two syncs. When the cap is hit
+// we break, leaving the remaining thresholds (and nextBoxAtSteps advancement) for
+// subsequent syncs, so no progress is lost and idempotency is preserved.
+const MAX_BOXES_PER_ROLL = 50;
+
 const POWERUP_NAMES = {
   LEG_CRAMP: "Leg Cramp",
   RED_CARD: "Red Card",
@@ -70,7 +82,19 @@ function buildRollPowerup(dependencies = {}) {
 
       let currentThreshold = fresh.nextBoxAtSteps;
 
+      // Per-sync cap: count thresholds crossed in THIS call. Each loop iteration
+      // advances currentThreshold (and thus nextBoxAtSteps) by one interval —
+      // whether it grants, forfeits, or skips an already-earned box — so counting
+      // iterations bounds exactly how far nextBoxAtSteps can move in one sync.
+      let crossedThisRoll = 0;
+
       while (stepsForThreshold >= currentThreshold && currentThreshold > 0) {
+        if (crossedThisRoll >= MAX_BOXES_PER_ROLL) {
+          // Cap reached: leave the remaining thresholds (and further nextBoxAtSteps
+          // advancement) for subsequent syncs. Do NOT advance nextBoxAtSteps here.
+          break;
+        }
+        crossedThisRoll += 1;
         const occupied = await tx.racePowerup.count({
           where: { participantId, status: { in: ["HELD", "MYSTERY_BOX"] } },
         });
@@ -191,4 +215,4 @@ function buildRollPowerup(dependencies = {}) {
 
 const rollPowerup = buildRollPowerup();
 
-module.exports = { buildRollPowerup, rollPowerup, POWERUP_NAMES, DEFAULT_POWERUP_SLOTS, MAX_QUEUED_BOXES };
+module.exports = { buildRollPowerup, rollPowerup, POWERUP_NAMES, DEFAULT_POWERUP_SLOTS, MAX_QUEUED_BOXES, MAX_BOXES_PER_ROLL };

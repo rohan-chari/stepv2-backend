@@ -467,9 +467,15 @@ function buildGetRaceProgress(deps = {}) {
         const bonusNow = freshParticipant?.bonusSteps || 0;
         const maxBonus = freshParticipant?.maxBonusSteps || 0;
         const effectiveSteps = myCurrentSteps + Math.max(0, maxBonus - bonusNow);
+        // Clamp the countdown to at most one interval. nextBoxAtSteps ratchets up
+        // off effective steps and a transient step-spike (later corrected) can
+        // push it far above the player's real steps, which would otherwise show a
+        // wildly-inflated "steps to next box" (e.g. ~12000 when the interval is
+        // 2000). The countdown can never legitimately exceed one interval, so cap
+        // it there regardless of how far nextBoxAtSteps has drifted.
         powerupData.stepsUntilNextPowerup = Math.max(
-          nextBoxAtSteps - effectiveSteps,
-          0
+          0,
+          Math.min(nextBoxAtSteps - effectiveSteps, race.powerupStepInterval)
         );
       }
 
