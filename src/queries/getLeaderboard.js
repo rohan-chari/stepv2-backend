@@ -4,6 +4,17 @@ const {
 } = require("../utils/recordLeaderboardRankings");
 const { getMondayOfWeek, getTimeZoneParts } = require("../utils/week");
 const { buildAccessoriesList } = require("../utils/shopCosmetics");
+const { Friendship } = require("../models/friendship");
+
+// Resolve the userId filter for a "friends"-scoped leaderboard: the viewer's
+// accepted friends PLUS the viewer themself (so they always see their own rank).
+// Returns null for the default "global" scope so callers skip the id filter and
+// behave byte-for-byte as before the scope param existed.
+async function resolveFriendsIdSet(scope, currentUserId) {
+  if (scope !== "friends") return null;
+  const friendIds = await Friendship.findAcceptedFriendIds(prisma, currentUserId);
+  return [...new Set([...friendIds, currentUserId])];
+}
 
 // Identity + equipped capybara gear for rendering a leaderboard row.
 const leaderboardUserSelect = {
@@ -83,13 +94,21 @@ async function getCurrentUserProfile(currentUserId) {
   };
 }
 
-async function getStepLeaderboard(period, currentUserId, timeZone) {
+async function getStepLeaderboard(period, currentUserId, timeZone, scope = "global") {
   const dateBoundary = getDateBoundary(period, timeZone);
   const dateClause = dateBoundary
     ? { date: { gte: new Date(dateBoundary) } }
     : {};
+  // friends scope: restrict to the viewer + accepted friends. global (default)
+  // leaves this null so the query is unfiltered, exactly as before.
+  const friendsIdSet = await resolveFriendsIdSet(scope, currentUserId);
+  const friendClause = friendsIdSet ? { userId: { in: friendsIdSet } } : {};
   // Hide review/demo accounts from real users' public leaderboards.
-  const whereClause = { ...dateClause, user: { isReviewAccount: false } };
+  const whereClause = {
+    ...dateClause,
+    ...friendClause,
+    user: { isReviewAccount: false },
+  };
 
   const top100Groups = await prisma.step.groupBy({
     by: ["userId"],
@@ -168,9 +187,15 @@ async function getStepLeaderboard(period, currentUserId, timeZone) {
   };
 }
 
-async function getRaceLeaderboard(currentUserId) {
+async function getRaceLeaderboard(currentUserId, scope = "global") {
+  // friends scope: restrict to the viewer + accepted friends. global (default)
+  // leaves this null so the query is unfiltered, exactly as before.
+  const friendsIdSet = await resolveFriendsIdSet(scope, currentUserId);
+  const friendClause = friendsIdSet ? { userId: { in: friendsIdSet } } : {};
+
   const completedParticipants = await prisma.raceParticipant.findMany({
     where: {
+      ...friendClause,
       status: "ACCEPTED",
       race: { status: "COMPLETED" },
       // Hide review/demo accounts from real users' public records board.
@@ -219,12 +244,12 @@ async function getRaceLeaderboard(currentUserId) {
   return buildRaceRecordLeaderboard(entries, currentUserId, currentUserDisplayName);
 }
 
-async function getLeaderboard({ type = "steps", period = "today", currentUserId, timeZone }) {
+async function getLeaderboard({ type = "steps", period = "today", scope = "global", currentUserId, timeZone }) {
   if (type === "races") {
-    return getRaceLeaderboard(currentUserId);
+    return getRaceLeaderboard(currentUserId, scope);
   }
 
-  return getStepLeaderboard(period, currentUserId, timeZone);
+  return getStepLeaderboard(period, currentUserId, timeZone, scope);
 }
 
 module.exports = { getLeaderboard };

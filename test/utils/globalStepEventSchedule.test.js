@@ -29,9 +29,10 @@ function at(h, m) {
   return new Date(Date.UTC(2026, 5, 2, h, m, 0, 0));
 }
 
-test("exposes named tuning constants (3 anchors/day, 30 min, 2x)", () => {
+test("exposes named tuning constants (1 anchor/day, 30 min, 2x)", () => {
   assert.ok(Array.isArray(GLOBAL_EVENT_ANCHORS_UTC_MIN));
-  assert.equal(GLOBAL_EVENT_ANCHORS_UTC_MIN.length, 3, "~3 events per day");
+  assert.equal(GLOBAL_EVENT_ANCHORS_UTC_MIN.length, 1, "~1 event per day");
+  assert.equal(GLOBAL_EVENT_ANCHORS_UTC_MIN[0], 22 * 60, "anchor at 22:00 UTC");
   assert.equal(GLOBAL_EVENT_DURATION_MS, 30 * 60 * 1000, "30-minute window");
   assert.equal(GLOBAL_EVENT_MULTIPLIER, 2, "2x multiplier");
 });
@@ -111,20 +112,26 @@ test("idempotent: does not re-create for an anchor already started today (across
   assert.equal(decision, null, "no duplicate event for an already-started anchor");
 });
 
-test("a different anchor later in the day still fires even after an earlier one ran", () => {
+test("single daily anchor sits near 22:00 UTC; ticks near 09:00/15:00 don't fire", () => {
   const anchors = computeAnchorTimesForDay(at(0, 0));
-  const todaysEvents = [
-    {
-      startsAt: new Date(anchors[0].getTime()),
-      endsAt: new Date(anchors[0].getTime() + GLOBAL_EVENT_DURATION_MS),
-      multiplier: GLOBAL_EVENT_MULTIPLIER,
-    },
-  ];
+  assert.equal(anchors.length, 1, "exactly one anchor per day");
 
-  const decision = shouldStartGlobalEvent({
-    now: new Date(anchors[1].getTime()),
-    todaysEvents,
-  });
-  assert.ok(decision, "second anchor should still start");
-  assert.equal(decision.anchorAt.getTime(), anchors[1].getTime());
+  // The lone anchor is 22:00 UTC plus/minus the deterministic jitter.
+  const anchorMin = (anchors[0].getTime() - at(0, 0).getTime()) / (60 * 1000);
+  assert.ok(
+    Math.abs(anchorMin - 22 * 60) <= 7,
+    "single anchor is within jitter of 22:00 UTC"
+  );
+
+  // Old anchor times (09:00, 15:00) no longer fire an event.
+  assert.equal(
+    shouldStartGlobalEvent({ now: at(9, 0), todaysEvents: [] }),
+    null,
+    "no event near the old 09:00 anchor"
+  );
+  assert.equal(
+    shouldStartGlobalEvent({ now: at(15, 0), todaysEvents: [] }),
+    null,
+    "no event near the old 15:00 anchor"
+  );
 });

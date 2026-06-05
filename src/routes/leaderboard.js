@@ -4,6 +4,7 @@ const { getLeaderboard: defaultGetLeaderboard } = require("../queries/getLeaderb
 
 const VALID_PERIODS = ["today", "week", "month", "allTime"];
 const VALID_TYPES = ["steps", "races"];
+const VALID_SCOPES = ["global", "friends"];
 
 function createLeaderboardRouter(dependencies = {}) {
   const router = Router();
@@ -22,11 +23,14 @@ function createLeaderboardRouter(dependencies = {}) {
     res.json({ cards: [] });
   });
 
-  // GET /leaderboard?period=today|week|month|allTime
+  // GET /leaderboard?period=today|week|month|allTime&scope=global|friends
   router.get("/", async (req, res) => {
     try {
       const type = req.query.type || "steps";
       const period = req.query.period || "today";
+      // Compat: old apps never send scope; absence defaults to "global", which
+      // behaves byte-for-byte as before this param existed.
+      const scope = req.query.scope || "global";
 
       if (!VALID_TYPES.includes(type)) {
         return res.status(400).json({
@@ -40,9 +44,16 @@ function createLeaderboardRouter(dependencies = {}) {
         });
       }
 
+      if (!VALID_SCOPES.includes(scope)) {
+        return res.status(400).json({
+          error: `Invalid scope. Must be one of: ${VALID_SCOPES.join(", ")}`,
+        });
+      }
+
       const result = await getLeaderboard({
         type,
         period,
+        scope,
         currentUserId: req.user.id,
         timeZone: req.timeZone,
       });

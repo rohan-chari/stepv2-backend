@@ -8,25 +8,25 @@ const { computeBoxEffectiveSteps } = require("../../src/utils/boxSteps");
 // (Runner's High, Campfire, 2x global event) and debuff (Leg Cramp, Wrong Turn) —
 // those only move the leaderboard total, never box progress.
 
-test("box steps = baseAdjusted + bonus high-water", () => {
+test("box steps = baseAdjusted only (bonus is excluded)", () => {
   assert.equal(
     computeBoxEffectiveSteps({ baseAdjusted: 6000, bonusSteps: 1000, maxBonusSteps: 1000 }),
-    7000
+    6000
   );
 });
 
-test("bonus-steal pushback is protected by the high-water (uses max(bonus, maxBonus))", () => {
-  // bonus stolen down to 200 but peaked at 1500 -> box keeps crediting 1500.
+test("bonus-steal pushback does not affect box progress (bonus is excluded)", () => {
+  // bonus stolen down to 200 but peaked at 1500 -> box still credits raw steps only.
   assert.equal(
     computeBoxEffectiveSteps({ baseAdjusted: 6000, bonusSteps: 200, maxBonusSteps: 1500 }),
-    7500
+    6000
   );
 });
 
-test("a higher current bonus than the recorded high-water still counts", () => {
+test("a higher current bonus than the recorded high-water still does not count", () => {
   assert.equal(
     computeBoxEffectiveSteps({ baseAdjusted: 6000, bonusSteps: 1800, maxBonusSteps: 1500 }),
-    7800
+    6000
   );
 });
 

@@ -17,12 +17,10 @@
 // Tuning constants — change these to tune frequency/shape of events.
 // ---------------------------------------------------------------------------
 
-// ~3 events per day. Each value is "minutes after UTC midnight" for the
-// nominal (pre-jitter) anchor. Spread across the day.
+// 1 event per day. Each value is "minutes after UTC midnight" for the
+// nominal (pre-jitter) anchor.
 const GLOBAL_EVENT_ANCHORS_UTC_MIN = [
-  9 * 60, // 09:00 UTC
-  15 * 60, // 15:00 UTC
-  21 * 60, // 21:00 UTC
+  22 * 60, // 22:00 UTC (6 PM ET)
 ];
 
 // Each event lasts 30 minutes.

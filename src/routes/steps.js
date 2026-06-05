@@ -109,6 +109,12 @@ function createStepsRouter(dependencies = {}) {
       let thisYear = 0;
       let allTime = 0;
 
+      // Days-with-data denominators for per-day averages. One row per day
+      // (unique (userId,date)), so each in-period row counts as one day.
+      let weekDaysWithData = 0;
+      let monthDaysWithData = 0;
+      let yearDaysWithData = 0;
+
       // Build a date→steps map for streak calculation
       const dateMap = new Map();
 
@@ -117,12 +123,29 @@ function createStepsRouter(dependencies = {}) {
         const steps = record.steps || 0;
 
         allTime += steps;
-        if (dateStr >= yearStart) thisYear += steps;
-        if (dateStr >= monthStart) thisMonth += steps;
-        if (dateStr >= weekOf) thisWeek += steps;
+        if (dateStr >= yearStart) {
+          thisYear += steps;
+          yearDaysWithData += 1;
+        }
+        if (dateStr >= monthStart) {
+          thisMonth += steps;
+          monthDaysWithData += 1;
+        }
+        if (dateStr >= weekOf) {
+          thisWeek += steps;
+          weekDaysWithData += 1;
+        }
 
         dateMap.set(dateStr, { steps });
       }
+
+      // Per-day averages over days with recorded data. Guard divide-by-zero → 0.
+      const avgPerDayWeek =
+        weekDaysWithData > 0 ? Math.round(thisWeek / weekDaysWithData) : 0;
+      const avgPerDayMonth =
+        monthDaysWithData > 0 ? Math.round(thisMonth / monthDaysWithData) : 0;
+      const avgPerDayYear =
+        yearDaysWithData > 0 ? Math.round(thisYear / yearDaysWithData) : 0;
 
       const streak = calculateStreak(todayStr, dateMap);
 
@@ -138,6 +161,11 @@ function createStepsRouter(dependencies = {}) {
         thisMonth,
         thisYear,
         allTime,
+        // Per-day averages over days with recorded data (totals above are
+        // unchanged; additive fields are ignored by older clients).
+        avgPerDayWeek,
+        avgPerDayMonth,
+        avgPerDayYear,
         streak,
         rankedTier: ranked ? ranked.provisionalTier : null,
         rankedDivision: ranked ? ranked.provisionalDivision : null,

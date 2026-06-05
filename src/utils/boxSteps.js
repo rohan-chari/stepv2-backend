@@ -10,24 +10,21 @@
 // total stays fully effect-sensitive; only the box gate + "steps to next box"
 // countdown use this raw value.
 //
-//   boxEffective = baseAdjusted + max(bonusSteps, maxBonusSteps)
+//   boxEffective = max(0, baseAdjusted)
 //
 // baseAdjusted = the player's actual walked steps for the race window (from
-// samples/daily totals, before any powerup effect). The bonus high-water
-// (max(bonus, maxBonus)) keeps additive powerup bonuses (Protein Shake / Trail
-// Mix) counting toward boxes while protecting against bonus-steal pushbacks
-// (Banana Peel/Red Card/Shortcut/Pinecone/Trail Mine). Because baseAdjusted only
-// grows as you walk and the bonus high-water never decreases, box progress is
-// effectively monotonic and next_box can never be stranded by an expiring effect.
+// samples/daily totals, before any powerup effect). Additive consumable bonuses
+// (Protein Shake / Trail Mix / Second Wind) are EXCLUDED — they help the
+// leaderboard total but must never bring a player closer to the next box. bonusSteps
+// and maxBonusSteps are accepted for signature compatibility but ignored. Because
+// baseAdjusted only grows as you walk, box progress is monotonic and next_box can
+// never be stranded by an expiring effect or a bonus-steal pushback.
 function computeBoxEffectiveSteps({
   baseAdjusted = 0,
   bonusSteps = 0,
   maxBonusSteps = 0,
 } = {}) {
-  return Math.max(
-    0,
-    (baseAdjusted || 0) + Math.max(bonusSteps || 0, maxBonusSteps || 0)
-  );
+  return Math.max(0, baseAdjusted || 0);
 }
 
 module.exports = { computeBoxEffectiveSteps };

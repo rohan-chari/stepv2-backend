@@ -33,7 +33,7 @@ cd /var/www/step-tracker-backend-staging && \
   npm install && \
   npx prisma migrate deploy && \
   npx prisma generate && \
-  pm2 restart step-tracker-staging
+  pm2 restart steps-tracker-staging
 ```
 
 Note: no `prisma/seed.js` on staging — seeding is for prod only.

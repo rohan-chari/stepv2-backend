@@ -49,6 +49,21 @@ const Friendship = {
     });
   },
 
+  async findAcceptedFriendIds(prisma, userId) {
+    const friendships = await prisma.friendship.findMany({
+      where: {
+        status: "ACCEPTED",
+        OR: [{ requesterId: userId }, { addresseeId: userId }],
+      },
+      select: { requesterId: true, addresseeId: true },
+    });
+    const ids = new Set();
+    for (const f of friendships) {
+      ids.add(f.requesterId === userId ? f.addresseeId : f.requesterId);
+    }
+    return [...ids];
+  },
+
   async findFriends(userId) {
     return prisma.friendship.findMany({
       where: {

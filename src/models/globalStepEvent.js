@@ -20,6 +20,20 @@ const GlobalStepEvent = {
     });
   },
 
+  // The single event currently active at `now` (startsAt <= now < endsAt), or
+  // null. Used by the home card to surface a "2x STEPS" banner. Akin to
+  // findActiveInRange but returns just the one in-progress row.
+  async findActiveAt(now) {
+    const at = new Date(now);
+    return prisma.globalStepEvent.findFirst({
+      where: {
+        startsAt: { lte: at },
+        endsAt: { gt: at },
+      },
+      orderBy: { startsAt: "desc" },
+    });
+  },
+
   // Events created today (UTC). Used by the scheduler for idempotency: it must
   // not re-create an event for an anchor that already fired today.
   async findCreatedOnUtcDay(date) {
