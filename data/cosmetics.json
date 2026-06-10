@@ -8,6 +8,8 @@
       "priceCoins": 250,
       "assetKey": "cowboy_hat",
       "active": true,
+      "testOnly": false,
+      "earnOnly": false,
       "sortOrder": 10,
       "renderMetadata": {
         "offsetX": -0.015,
@@ -24,6 +26,8 @@
       "priceCoins": 250,
       "assetKey": "baseball_cap",
       "active": true,
+      "testOnly": false,
+      "earnOnly": false,
       "sortOrder": 20,
       "renderMetadata": {
         "offsetX": -0.0010822510822514064,
@@ -40,6 +44,8 @@
       "priceCoins": 250,
       "assetKey": "sunglasses",
       "active": true,
+      "testOnly": false,
+      "earnOnly": false,
       "sortOrder": 30,
       "renderMetadata": {
         "offsetX": -0.09463276836158163,
@@ -56,6 +62,8 @@
       "priceCoins": 250,
       "assetKey": "sunglasses_style_1",
       "active": false,
+      "testOnly": false,
+      "earnOnly": false,
       "sortOrder": 35,
       "renderMetadata": {
         "offsetX": -0.09463276836158163,
@@ -72,12 +80,86 @@
       "priceCoins": 500,
       "assetKey": "shoes",
       "active": true,
+      "testOnly": false,
+      "earnOnly": false,
       "sortOrder": 40,
       "renderMetadata": {
         "offsetX": 0.019999999999999993,
         "offsetY": 0.009999999999999998,
         "rotation": -0.060000000000000005,
         "scale": 1.5000000000000004
+      }
+    },
+    {
+      "sku": "birthday_hat",
+      "name": "Birthday Hat",
+      "description": "A party cone for milestone days.",
+      "slot": "HEAD",
+      "priceCoins": 250,
+      "assetKey": "birthday_hat",
+      "active": true,
+      "testOnly": true,
+      "earnOnly": false,
+      "sortOrder": 50,
+      "renderMetadata": {
+        "offsetX": 0.035310734463277704,
+        "offsetY": 0.14016949152542346,
+        "rotation": 0.14813559322034048,
+        "scale": 1.995762711864405
+      }
+    },
+    {
+      "sku": "clown_nose",
+      "name": "Clown Nose",
+      "description": "Honk honk. Big red energy.",
+      "slot": "FACE",
+      "priceCoins": 250,
+      "assetKey": "clown_nose",
+      "active": true,
+      "testOnly": true,
+      "earnOnly": false,
+      "sortOrder": 60,
+      "renderMetadata": {
+        "offsetX": 0.09008474576271018,
+        "offsetY": -0.021751412429377687,
+        "rotation": -0.15,
+        "scale": 1.9372881355932157
+      }
+    },
+    {
+      "sku": "gold_chain",
+      "name": "Gold Chain",
+      "description": "Step count up, drip up.",
+      "slot": "NECK",
+      "priceCoins": 500,
+      "assetKey": "gold_chain",
+      "active": true,
+      "testOnly": true,
+      "earnOnly": false,
+      "sortOrder": 70,
+      "renderMetadata": {
+        "offsetX": -0.045,
+        "offsetY": -0.06432203389830515,
+        "rotation": -0.24000000000000007,
+        "scale": 2.5
+      }
+    },
+    {
+      "sku": "beard",
+      "name": "Beard",
+      "description": "Distinguished trail whiskers.",
+      "slot": "FACE",
+      "priceCoins": 500,
+      "assetKey": "beard",
+      "active": true,
+      "testOnly": true,
+      "earnOnly": false,
+      "sortOrder": 80,
+      "renderMetadata": {
+        "offsetX": -0.0395480225988708,
+        "offsetY": 0.1133050847457645,
+        "rotation": -0.39372881355932177,
+        "scale": 2.5
       }
     },
     {
