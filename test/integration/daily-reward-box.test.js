@@ -68,6 +68,31 @@ describe("daily reward box (v2)", () => {
     assert.ok(body.box.streakCap >= 1);
     const { COMMON, UNCOMMON, RARE } = body.box.odds;
     assert.ok(Math.abs(COMMON + UNCOMMON + RARE - 1) < 1e-9);
+    // Reel preview data.
+    assert.ok(Array.isArray(body.box.accessoryPool));
+    assert.equal(body.box.coinRanges.COMMON.length, 2);
+    assert.equal(body.box.coinRanges.UNCOMMON.length, 2);
+  });
+
+  it("status accessoryPool lists only unowned accessories", async () => {
+    const user = await createUser();
+    const owned = await seedAccessory("drb-pool-owned", 100);
+    const unowned = await seedAccessory("drb-pool-unowned", 500);
+    await prisma.userShopItem.create({
+      data: { userId: user.userId, shopItemId: owned.id },
+    });
+
+    const res = await request(
+      server.baseUrl,
+      "GET",
+      `/daily-reward/status?localDate=${todayLocal()}`,
+      { token: user.token }
+    );
+    const body = await res.json();
+    const poolIds = body.box.accessoryPool.map((item) => item.id);
+    assert.ok(poolIds.includes(unowned.id));
+    assert.ok(!poolIds.includes(owned.id));
+    assert.ok(body.box.accessoryPool[0].assetKey);
   });
 
   it("claim-box awards coins and records rarity", async () => {

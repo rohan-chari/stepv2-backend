@@ -5,8 +5,10 @@ const {
   DailyRewardError,
   isValidLocalDate,
   withinOneDayOfServer,
-  getUnownedAccessoryPool,
 } = require("./claimDailyReward");
+const {
+  getUnownedAccessoryPool,
+} = require("../queries/getUnownedAccessoryPool");
 const {
   computeNextCycleDay,
   computeNextLoginStreak,

@@ -11,6 +11,9 @@ const {
   computeNextLoginStreak,
 } = require("../queries/getDailyRewardStatus");
 const { serializeShopItem } = require("../utils/shopCosmetics");
+const {
+  getUnownedAccessoryPool,
+} = require("../queries/getUnownedAccessoryPool");
 
 class DailyRewardError extends Error {
   constructor(message, statusCode) {
@@ -37,21 +40,6 @@ function withinOneDayOfServer(localDate) {
     Math.abs(new Date(localDate) - new Date(serverToday)) /
     (1000 * 60 * 60 * 24);
   return diffDays <= 1.5;
-}
-
-async function getUnownedAccessoryPool(userId) {
-  const [activeItems, owned] = await Promise.all([
-    prisma.shopItem.findMany({
-      where: { active: true },
-      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-    }),
-    prisma.userShopItem.findMany({
-      where: { userId },
-      select: { shopItemId: true },
-    }),
-  ]);
-  const ownedIds = new Set(owned.map((r) => r.shopItemId));
-  return activeItems.filter((item) => !ownedIds.has(item.id));
 }
 
 async function rollAccessory(userId) {
@@ -173,5 +161,4 @@ module.exports = {
   DailyRewardError,
   isValidLocalDate,
   withinOneDayOfServer,
-  getUnownedAccessoryPool,
 };

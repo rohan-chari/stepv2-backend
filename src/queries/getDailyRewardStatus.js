@@ -6,7 +6,15 @@ const {
 const {
   interpolateDailyBoxOdds,
   DAILY_BOX_STREAK_CAP,
+  DAILY_BOX_COIN_RANGES,
 } = require("../utils/dailyBoxOdds");
+const {
+  getUnownedAccessoryPool,
+} = require("./getUnownedAccessoryPool");
+const { serializeShopItem } = require("../utils/shopCosmetics");
+
+// How many unowned accessories the status preview ships for the reel.
+const ACCESSORY_POOL_PREVIEW_LIMIT = 10;
 
 function previousDateString(dateStr) {
   const [y, m, d] = dateStr.split("-").map((n) => parseInt(n, 10));
@@ -79,6 +87,9 @@ async function getDailyRewardStatus({ userId, localDate }) {
     localDate
   );
   const [common, uncommon, rare] = interpolateDailyBoxOdds(projectedStreak);
+  // Same pool the RARE roll draws from, so the reel previews real winnable
+  // accessories (capped — it's display-only).
+  const accessoryPool = await getUnownedAccessoryPool(userId);
 
   return {
     cycleLength: CYCLE_LENGTH,
@@ -89,6 +100,13 @@ async function getDailyRewardStatus({ userId, localDate }) {
       streak: projectedStreak,
       streakCap: DAILY_BOX_STREAK_CAP,
       odds: { COMMON: common, UNCOMMON: uncommon, RARE: rare },
+      coinRanges: {
+        COMMON: DAILY_BOX_COIN_RANGES.COMMON,
+        UNCOMMON: DAILY_BOX_COIN_RANGES.UNCOMMON,
+      },
+      accessoryPool: accessoryPool
+        .slice(0, ACCESSORY_POOL_PREVIEW_LIMIT)
+        .map((item) => serializeShopItem(item)),
     },
   };
 }
