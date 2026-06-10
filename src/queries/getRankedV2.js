@@ -1,0 +1,196 @@
+// GET /ranked/v2 — the weekly-cohort ladder. Returns the caller's cohort (the
+// ~30 people at their level this week), live placement with promotion/demotion
+// zones, the full per-rank reward table for that cohort (server-driven so the
+// client never hardcodes thresholds — the 1.2.0 checkpoint table taught us
+// that), the 6-tier reference, and last week's settled result for the
+// "you got promoted" moment.
+
+const { prisma } = require("../db");
+const {
+  RankedWeek: defaultRankedWeek,
+  RankedCohortMember: defaultRankedCohortMember,
+} = require("../models/rankedWeek");
+const { buildAccessoriesList } = require("../utils/shopCosmetics");
+const {
+  V2_TIERS,
+  DEFAULT_TIER,
+  SETTLE_GRACE_HOURS,
+  zoneSizes,
+  placementReward,
+} = require("../constants/rankedCohorts");
+const { normalizeTier } = require("../services/rankedCohorts");
+
+const TIER_SUMMARY = V2_TIERS.map((t) => ({
+  key: t.key,
+  label: t.label,
+  promotionBonus: t.promotionBonus,
+}));
+
+const memberUserSelect = {
+  id: true,
+  displayName: true,
+  profilePhotoUrl: true,
+  equippedAccessories: {
+    include: {
+      shopItem: {
+        select: {
+          id: true,
+          sku: true,
+          name: true,
+          slot: true,
+          assetKey: true,
+          renderMetadata: true,
+          testOnly: true,
+        },
+      },
+    },
+  },
+};
+
+function settlesAt(week) {
+  return new Date(
+    new Date(week.endsOn).getTime() + SETTLE_GRACE_HOURS * 60 * 60 * 1000
+  );
+}
+
+function zoneForRank(rank, size, tier) {
+  if (!rank) return null;
+  const { promote, demote } = zoneSizes(size, tier);
+  if (rank <= promote) return "PROMOTION";
+  if (rank > size - demote) return "DEMOTION";
+  return "HOLD";
+}
+
+async function getUserProfiles(userIds) {
+  if (userIds.length === 0) return new Map();
+  const users = await prisma.user.findMany({
+    where: { id: { in: userIds } },
+    select: memberUserSelect,
+  });
+  return new Map(
+    users.map((u) => [
+      u.id,
+      {
+        displayName: u.displayName || "Anonymous",
+        profilePhotoUrl: u.profilePhotoUrl || null,
+        equippedAccessories: buildAccessoriesList(u),
+      },
+    ])
+  );
+}
+
+// The caller's most recently settled week, for the post-settlement banner.
+async function getLastSettledResult(userId) {
+  const last = await prisma.rankedCohortMember.findFirst({
+    where: { userId, outcome: { not: null }, week: { status: "CLOSED" } },
+    orderBy: { week: { index: "desc" } },
+    include: { week: { select: { index: true } } },
+  });
+  if (!last) return null;
+  return {
+    weekIndex: last.week.index,
+    finalRank: last.finalRank,
+    tier: last.tier,
+    resultTier: last.resultTier,
+    outcome: last.outcome,
+    rewardCoins: last.rewardCoins || 0,
+    promotionCoins: last.promotionCoins || 0,
+  };
+}
+
+async function getRankedV2({
+  currentUserId,
+  weekModel = defaultRankedWeek,
+  memberModel = defaultRankedCohortMember,
+  now = () => new Date(),
+} = {}) {
+  const week = await weekModel.getCurrent(now());
+  const lastWeek = await getLastSettledResult(currentUserId);
+
+  const user = await prisma.user.findUnique({
+    where: { id: currentUserId },
+    select: { rankedTierV2: true },
+  });
+  const homeTier = normalizeTier(user?.rankedTierV2 || DEFAULT_TIER);
+
+  if (!week) {
+    return {
+      week: null,
+      currentUser: { ranked: false, tier: homeTier, rank: null, weeklySteps: 0, zone: null },
+      cohort: null,
+      tiers: TIER_SUMMARY,
+      lastWeek,
+    };
+  }
+
+  const me = await memberModel.getForUser(week.id, currentUserId);
+  const weekPayload = {
+    index: week.index,
+    startsOn: week.startsOn,
+    endsOn: week.endsOn,
+    settlesAt: settlesAt(week),
+    status: week.status,
+  };
+
+  if (!me) {
+    // Active week but the caller hasn't synced any steps yet — they'll be
+    // placed by the next standings tick after their first sync.
+    return {
+      week: weekPayload,
+      currentUser: { ranked: false, tier: homeTier, rank: null, weeklySteps: 0, zone: null },
+      cohort: null,
+      tiers: TIER_SUMMARY,
+      lastWeek,
+    };
+  }
+
+  const cohortMembers = await memberModel.listForCohort(me.cohortId);
+  const size = cohortMembers.length;
+  const tier = me.tier;
+  const { promote, demote } = zoneSizes(size, tier);
+  const profiles = await getUserProfiles(cohortMembers.map((m) => m.userId));
+
+  const members = cohortMembers.map((m, index) => {
+    const rank = m.provisionalRank ?? index + 1;
+    return {
+      rank,
+      userId: m.userId,
+      displayName: profiles.get(m.userId)?.displayName || "Anonymous",
+      profilePhotoUrl: profiles.get(m.userId)?.profilePhotoUrl || null,
+      equippedAccessories: profiles.get(m.userId)?.equippedAccessories || [],
+      weeklySteps: m.weeklySteps,
+      zone: zoneForRank(rank, size, tier),
+    };
+  });
+
+  const myRank = me.provisionalRank;
+  const rewards = Array.from({ length: size }, (_, i) => ({
+    rank: i + 1,
+    coins: placementReward(i + 1, size, tier),
+  }));
+
+  return {
+    week: weekPayload,
+    currentUser: {
+      ranked: true,
+      tier,
+      rank: myRank,
+      weeklySteps: me.weeklySteps,
+      zone: zoneForRank(myRank, size, tier),
+      projectedCoins: myRank ? placementReward(myRank, size, tier) : 0,
+    },
+    cohort: {
+      id: me.cohortId,
+      tier,
+      size,
+      promoteCount: promote,
+      demoteCount: demote,
+      members,
+      rewards,
+    },
+    tiers: TIER_SUMMARY,
+    lastWeek,
+  };
+}
+
+module.exports = { getRankedV2 };

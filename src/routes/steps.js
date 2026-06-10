@@ -169,6 +169,10 @@ function createStepsRouter(dependencies = {}) {
         streak,
         rankedTier: ranked ? ranked.provisionalTier : null,
         rankedDivision: ranked ? ranked.provisionalDivision : null,
+        // Ranked v2 home tier (weekly cohorts, app >= 1.3.0). Additive; old
+        // clients keep reading rankedTier/rankedDivision above. Null until the
+        // user's first settled week.
+        rankedTierV2: req.user.rankedTierV2 ?? null,
         // 1.1.4 compat — legacy clients expect stepGoal on the stats payload.
         stepGoal: req.user.stepGoal ?? 5000,
       });

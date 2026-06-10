@@ -79,6 +79,24 @@
         "rotation": -0.060000000000000005,
         "scale": 1.5000000000000004
       }
+    },
+    {
+      "sku": "ranked_legend_crown",
+      "name": "Legend Crown",
+      "description": "Earned, never bought. Reach Legend in Ranked.",
+      "slot": "HEAD",
+      "priceCoins": 0,
+      "assetKey": "legend_crown",
+      "active": true,
+      "testOnly": false,
+      "earnOnly": true,
+      "sortOrder": 1000,
+      "renderMetadata": {
+        "offsetX": 0,
+        "offsetY": 0.03,
+        "rotation": 0,
+        "scale": 1
+      }
     }
   ]
 }

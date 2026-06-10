@@ -51,6 +51,7 @@ async function applyCosmetics() {
       renderMetadata: sanitizeRenderMetadata(item.renderMetadata),
       active: item.active !== false,
       testOnly: item.testOnly === true,
+      earnOnly: item.earnOnly === true,
       sortOrder: Number(item.sortOrder ?? 0),
     };
     const existing = await prisma.shopItem.findUnique({

@@ -34,6 +34,12 @@ model User {
   // — null means unranked. Set by season settlement; never read by old clients.
   currentTier     String? @map("current_tier")
   currentDivision Int?    @map("current_division")
+  // Ranked v2 (weekly cohorts): the user's persistent home tier on the 6-tier
+  // ladder (BRONZE..LEGEND). Null = never placed (treated as BRONZE). Additive;
+  // old clients never see this column — they keep reading currentTier, which v2
+  // settlement writes with a legacy-mapped value (PLATINUM/LEGEND -> DIAMOND).
+  rankedTierV2      String?   @map("ranked_tier_v2")
+  rankedTierV2Since DateTime? @map("ranked_tier_v2_since")
   createdAt DateTime @default(now()) @map("created_at")
   steps     Step[]
   dailyRewardClaims    DailyRewardClaim[]
@@ -57,6 +63,7 @@ model User {
   equippedAccessories UserEquippedAccessory[]
   shopPurchaseRequests ShopPurchaseRequest[]
   seasonScores       SeasonScore[]
+  rankedCohortMemberships RankedCohortMember[]
   powerupItems         UserPowerupItem[]
   powerupPurchaseRequests PowerupPurchaseRequest[]
 
@@ -316,6 +323,12 @@ model ShopItem {
   // so existing items and old app binaries are unaffected. NOT serialized into
   // the public catalog response (keeps the JSON shape byte-compatible).
   testOnly    Boolean       @default(false) @map("test_only")
+  // When true, the item can never be bought or listed in the catalog — it is
+  // granted directly (e.g. the Legend ranked cosmetic). Owners can still equip
+  // it and it renders on all social surfaces. Server-side filter only, so the
+  // catalog JSON shape is unchanged for old clients. Default false = every
+  // existing item keeps working.
+  earnOnly    Boolean       @default(false) @map("earn_only")
   sortOrder   Int           @default(0) @map("sort_order")
   createdAt   DateTime      @default(now()) @map("created_at")
 
@@ -806,6 +819,82 @@ model SeasonScore {
   @@unique([userId, seasonId])
   @@index([seasonId, points])
   @@map("season_scores")
+}
+
+// ── Ranked v2: weekly cohorts ────────────────────────────────────────────────
+// Persistent-tier, weekly-cohort ladder (see RANKED_V2.md). Every Monday (date
+// axis, matching Step.date semantics) a RankedWeek opens and players are
+// grouped into ~30-person same-tier cohorts. Score = raw weekly step total.
+// Settlement promotes the top zone, demotes the bottom zone, mints coins, and
+// updates User.rankedTierV2 (+ the legacy-mapped User.currentTier for old
+// clients). All additive — the legacy Season tables above stay untouched and
+// keep serving GET /ranked for shipped app versions.
+
+enum RankedWeekStatus {
+  ACTIVE   @map("active")
+  SETTLING @map("settling")
+  CLOSED   @map("closed")
+}
+
+model RankedWeek {
+  id        String           @id @default(uuid())
+  index     Int              @unique
+  // Half-open [startsOn, endsOn) on the UTC-midnight date axis (Mon..next Mon).
+  startsOn  DateTime         @map("starts_on")
+  endsOn    DateTime         @map("ends_on")
+  status    RankedWeekStatus @default(ACTIVE)
+  settledAt DateTime?        @map("settled_at")
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  cohorts RankedCohort[]
+  members RankedCohortMember[]
+
+  @@index([status])
+  @@map("ranked_weeks")
+}
+
+model RankedCohort {
+  id        String   @id @default(uuid())
+  weekId    String   @map("week_id")
+  tier      String // BRONZE | SILVER | GOLD | PLATINUM | DIAMOND | LEGEND
+  createdAt DateTime @default(now()) @map("created_at")
+
+  week    RankedWeek           @relation(fields: [weekId], references: [id], onDelete: Cascade)
+  members RankedCohortMember[]
+
+  @@index([weekId, tier])
+  @@map("ranked_cohorts")
+}
+
+model RankedCohortMember {
+  id       String @id @default(uuid())
+  // weekId is denormalized from the cohort so (weekId, userId) can be unique:
+  // one cohort per user per week.
+  weekId   String @map("week_id")
+  cohortId String @map("cohort_id")
+  userId   String @map("user_id")
+  // Home tier at assignment (the cohort's tier; kept per-member so history
+  // survives cohort deletion/rebalance).
+  tier     String
+  // Live score: raw step total for the week, refreshed each job tick.
+  weeklySteps     Int  @default(0) @map("weekly_steps")
+  provisionalRank Int? @map("provisional_rank")
+  // Settlement results, locked once the week closes.
+  finalRank      Int?    @map("final_rank")
+  outcome        String? // PROMOTE | HOLD | DEMOTE
+  resultTier     String? @map("result_tier") // home tier after settlement
+  rewardCoins    Int?    @map("reward_coins")
+  promotionCoins Int?    @map("promotion_coins")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  user   User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cohort RankedCohort @relation(fields: [cohortId], references: [id], onDelete: Cascade)
+  week   RankedWeek   @relation(fields: [weekId], references: [id], onDelete: Cascade)
+
+  @@unique([weekId, userId])
+  @@index([cohortId, weeklySteps])
+  @@map("ranked_cohort_members")
 }
 
 // BeReal-style global step-multiplier event. During [startsAt, endsAt) steps

@@ -62,7 +62,7 @@ async function purchaseShopItem({ userId, itemId, idempotencyKey, channel = "pro
   try {
     return await prisma.$transaction(async (tx) => {
       const item = await tx.shopItem.findFirst({
-        where: { id: itemId, active: true, ...testOnlyFilter(channel) },
+        where: { id: itemId, active: true, earnOnly: false, ...testOnlyFilter(channel) },
       });
       if (!item) {
         throw new ShopPurchaseError("Shop item not found", 404);

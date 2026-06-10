@@ -31,6 +31,8 @@ async function pullCosmetics() {
     priceCoins: row.priceCoins,
     assetKey: row.assetKey,
     active: row.active,
+    testOnly: row.testOnly,
+    earnOnly: row.earnOnly,
     sortOrder: row.sortOrder,
     renderMetadata: normalizeRenderMetadata(row.renderMetadata),
   }));

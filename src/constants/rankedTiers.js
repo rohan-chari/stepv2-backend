@@ -74,12 +74,17 @@ const SEASON_DURATION_DAYS = 30;
 // A user is eligible for the ladder once they have >= 1 active day in the season.
 const ELIGIBILITY_MIN_ACTIVE_DAYS = 1;
 
-// ── Rewards (placeholder amounts, tunable; cosmetics arrive in Phase 3) ───────
+// ── Rewards ──────────────────────────────────────────────────────────────────
+// Zeroed at the Ranked v2 (weekly cohorts) cutover: coins now mint weekly via
+// settleRankedWeek, and paying both systems would double-reward every player.
+// The legacy ladder keeps running so shipped binaries still see a live ranked
+// tab; their UI hides reward lines when the amount is 0, and settlement skips
+// 0-coin mints. Do NOT raise these again without turning the v2 payouts off.
 const TIER_REWARDS = {
-  BRONZE: { coins: 100 },
-  SILVER: { coins: 250 },
-  GOLD: { coins: 600 },
-  DIAMOND: { coins: 1500 },
+  BRONZE: { coins: 0 },
+  SILVER: { coins: 0 },
+  GOLD: { coins: 0 },
+  DIAMOND: { coins: 0 },
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

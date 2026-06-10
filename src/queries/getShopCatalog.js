@@ -12,7 +12,7 @@ async function getShopCatalog(userId, { channel = "prod" } = {}) {
       select: { coins: true },
     }),
     prisma.shopItem.findMany({
-      where: { active: true, ...testOnlyFilter(channel) },
+      where: { active: true, earnOnly: false, ...testOnlyFilter(channel) },
       orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
     }),
     prisma.userShopItem.findMany({
