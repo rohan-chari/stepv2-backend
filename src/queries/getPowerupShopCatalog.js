@@ -11,10 +11,10 @@ function buildGetPowerupShopCatalog(deps = {}) {
   const powerupShopItemModel = deps.PowerupShopItem || PowerupShopItem;
   const userPowerupItemModel = deps.UserPowerupItem || UserPowerupItem;
 
-  return async function getPowerupShopCatalog(userId) {
+  return async function getPowerupShopCatalog(userId, { channel = "prod" } = {}) {
     const [coins, items, inventory] = await Promise.all([
       userModel.findCoins(userId),
-      powerupShopItemModel.findActive(),
+      powerupShopItemModel.findActive({ channel }),
       userPowerupItemModel.findManyByUser(userId),
     ]);
 

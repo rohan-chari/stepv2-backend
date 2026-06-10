@@ -310,6 +310,12 @@ model ShopItem {
   assetKey    String        @map("asset_key")
   renderMetadata Json?      @map("render_metadata")
   active      Boolean       @default(true)
+  // When true, the item is hidden from prod-channel clients (only requests that
+  // identify as a TestFlight build see it). Flip to false to launch it to ALL
+  // app versions instantly — no app release needed. Default false = prod-visible,
+  // so existing items and old app binaries are unaffected. NOT serialized into
+  // the public catalog response (keeps the JSON shape byte-compatible).
+  testOnly    Boolean       @default(false) @map("test_only")
   sortOrder   Int           @default(0) @map("sort_order")
   createdAt   DateTime      @default(now()) @map("created_at")
 
@@ -383,6 +389,8 @@ model PowerupShopItem {
   priceCoins  Int         @map("price_coins")
   powerupType PowerupType @map("powerup_type")
   active      Boolean     @default(true)
+  // See ShopItem.testOnly — same prod/TestFlight gate for the powerup catalog.
+  testOnly    Boolean     @default(false) @map("test_only")
   sortOrder   Int         @default(0) @map("sort_order")
   createdAt   DateTime    @default(now()) @map("created_at")
 

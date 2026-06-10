@@ -33,8 +33,19 @@ function buildEquipmentMap(equippedAccessories = []) {
   }, {});
 }
 
+// Accessories shown on OTHER users' avatars across social/competitive surfaces
+// (races, leaderboard, ranked, friends, home race card). Test-only items are
+// always stripped here so a prod client never receives — and never tries to
+// render — a cosmetic it doesn't bundle, no matter who equipped it. The
+// viewer's OWN equipped preview goes through buildEquipmentMap in
+// getShopCatalog, which is channel-gated separately so testers still see their
+// test items on their own capybara. Requires `testOnly` in the shopItem select
+// on every feeding query (else it reads undefined and never filters).
 function buildAccessoriesList(user) {
-  return Object.values(buildEquipmentMap(user?.equippedAccessories || []));
+  const equipped = (user?.equippedAccessories || []).filter(
+    (accessory) => !accessory.shopItem?.testOnly
+  );
+  return Object.values(buildEquipmentMap(equipped));
 }
 
 module.exports = {

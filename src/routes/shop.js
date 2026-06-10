@@ -1,5 +1,6 @@
 const { Router } = require("express");
 const { buildRequireAuth } = require("../middleware/requireAuth");
+const { extractReleaseChannel } = require("../utils/releaseChannel");
 const {
   getShopCatalog: defaultGetShopCatalog,
 } = require("../queries/getShopCatalog");
@@ -30,12 +31,15 @@ function createShopRouter(dependencies = {}) {
     dependencies.purchasePowerupItem || defaultPurchasePowerupItem;
 
   router.use(requireAuth);
+  router.use(extractReleaseChannel);
 
   // ── Powerup store (additive; only the new app calls these) ──────────────
   // GET /shop/powerups — active coin-purchasable powerups + balance + owned qty.
   router.get("/powerups", async (req, res) => {
     try {
-      const result = await getPowerupShopCatalog(req.user.id);
+      const result = await getPowerupShopCatalog(req.user.id, {
+        channel: req.releaseChannel,
+      });
       res.json(result);
     } catch (error) {
       console.error("Get powerup shop catalog error:", error);
@@ -51,6 +55,7 @@ function createShopRouter(dependencies = {}) {
         sku: req.body.sku,
         powerupType: req.body.powerupType,
         idempotencyKey: req.get("Idempotency-Key") || req.body.idempotencyKey,
+        channel: req.releaseChannel,
       });
       res.json(result);
     } catch (error) {
@@ -66,7 +71,9 @@ function createShopRouter(dependencies = {}) {
 
   router.get("/catalog", async (req, res) => {
     try {
-      const result = await getShopCatalog(req.user.id);
+      const result = await getShopCatalog(req.user.id, {
+        channel: req.releaseChannel,
+      });
       res.json(result);
     } catch (error) {
       console.error("Get shop catalog error:", error);
@@ -80,6 +87,7 @@ function createShopRouter(dependencies = {}) {
         userId: req.user.id,
         itemId: req.params.itemId,
         idempotencyKey: req.get("Idempotency-Key"),
+        channel: req.releaseChannel,
       });
       res.json(result);
     } catch (error) {
@@ -99,6 +107,7 @@ function createShopRouter(dependencies = {}) {
         userId: req.user.id,
         slot: req.params.slot,
         itemId: req.body.itemId,
+        channel: req.releaseChannel,
       });
       res.json(result);
     } catch (error) {

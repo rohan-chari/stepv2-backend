@@ -31,6 +31,7 @@ const leaderboardUserSelect = {
           slot: true,
           assetKey: true,
           renderMetadata: true,
+          testOnly: true,
         },
       },
     },

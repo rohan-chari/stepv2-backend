@@ -1,6 +1,7 @@
 const { Prisma } = require("@prisma/client");
 const { prisma } = require("../db");
 const { serializeShopItem } = require("../utils/shopCosmetics");
+const { testOnlyFilter } = require("../utils/releaseChannel");
 
 class ShopPurchaseError extends Error {
   constructor(message, statusCode = 400) {
@@ -41,7 +42,7 @@ async function findExistingRequest({ userId, idempotencyKey, itemId }) {
   return idempotentResultFromRequest(request);
 }
 
-async function purchaseShopItem({ userId, itemId, idempotencyKey }) {
+async function purchaseShopItem({ userId, itemId, idempotencyKey, channel = "prod" }) {
   if (!idempotencyKey || typeof idempotencyKey !== "string") {
     throw new ShopPurchaseError("Idempotency-Key header is required", 400);
   }
@@ -61,7 +62,7 @@ async function purchaseShopItem({ userId, itemId, idempotencyKey }) {
   try {
     return await prisma.$transaction(async (tx) => {
       const item = await tx.shopItem.findFirst({
-        where: { id: itemId, active: true },
+        where: { id: itemId, active: true, ...testOnlyFilter(channel) },
       });
       if (!item) {
         throw new ShopPurchaseError("Shop item not found", 404);

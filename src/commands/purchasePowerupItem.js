@@ -1,5 +1,6 @@
 const { Prisma } = require("@prisma/client");
 const { prisma } = require("../db");
+const { testOnlyFilter } = require("../utils/releaseChannel");
 
 class PowerupPurchaseError extends Error {
   constructor(message, statusCode = 400) {
@@ -43,7 +44,7 @@ function buildPurchasePowerupItem(dependencies = {}) {
         where: { userId_idempotencyKey: { userId, idempotencyKey } },
       }));
 
-  return async function purchasePowerupItem({ userId, sku, powerupType, idempotencyKey }) {
+  return async function purchasePowerupItem({ userId, sku, powerupType, idempotencyKey, channel = "prod" }) {
     if (!idempotencyKey || typeof idempotencyKey !== "string") {
       throw new PowerupPurchaseError("Idempotency-Key is required", 400);
     }
@@ -64,10 +65,12 @@ function buildPurchasePowerupItem(dependencies = {}) {
         });
         if (existing) return idempotentResultFromRequest(existing);
 
-        // Find the active catalog item (by sku, else by powerupType).
+        // Find the active catalog item (by sku, else by powerupType). The
+        // testOnly filter blocks a prod-channel client from buying a hidden
+        // powerup even if it somehow learned the sku/type.
         const where = sku
-          ? { sku, active: true }
-          : { powerupType, active: true };
+          ? { sku, active: true, ...testOnlyFilter(channel) }
+          : { powerupType, active: true, ...testOnlyFilter(channel) };
         const item = await tx.powerupShopItem.findFirst({ where });
         if (!item) {
           throw new PowerupPurchaseError("Powerup not found", 404);

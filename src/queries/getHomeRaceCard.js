@@ -21,7 +21,7 @@ const USER_SELECT = {
       // assetKey is what the client uses to resolve the cosmetic PNG; including
       // it lets capybara renders show real equipped cosmetics. Additive only —
       // existing fields are unchanged, so older clients are unaffected.
-      shopItem: { select: { id: true, sku: true, slot: true, assetKey: true, renderMetadata: true } },
+      shopItem: { select: { id: true, sku: true, slot: true, assetKey: true, renderMetadata: true, testOnly: true } },
     },
   },
 };

@@ -17,7 +17,7 @@ async function getEquipment(userId, tx = prisma) {
   return buildEquipmentMap(equippedAccessories);
 }
 
-async function equipAccessory({ userId, slot, itemId }) {
+async function equipAccessory({ userId, slot, itemId, channel = "prod" }) {
   if (!ACCESSORY_SLOTS.includes(slot)) {
     throw new AccessoryEquipError("Accessory slot is invalid", 400);
   }
@@ -44,6 +44,12 @@ async function equipAccessory({ userId, slot, itemId }) {
     }
 
     if (!ownership.shopItem.active) {
+      throw new AccessoryEquipError("Shop item is no longer available", 400);
+    }
+
+    // A prod-channel session can't equip a still-hidden (test-only) item, even
+    // one the user bought from a TestFlight build — keeps it off prod avatars.
+    if (channel !== "testflight" && ownership.shopItem.testOnly) {
       throw new AccessoryEquipError("Shop item is no longer available", 400);
     }
 

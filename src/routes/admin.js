@@ -3,6 +3,7 @@ const { buildRequireAuth } = require("../middleware/requireAuth");
 const { buildRequireAdmin } = require("../middleware/requireAdmin");
 const { prisma } = require("../db");
 const { serializeShopItem } = require("../utils/shopCosmetics");
+const { mirrorShopItemToPeer } = require("../utils/mirrorShopItem");
 
 const RENDER_METADATA_KEYS = ["offsetX", "offsetY", "rotation", "scale"];
 
@@ -44,6 +45,7 @@ function createAdminRouter(dependencies = {}) {
         items: items.map((item) => ({
           ...serializeShopItem(item),
           active: item.active,
+          testOnly: item.testOnly,
         })),
       });
     } catch (error) {
@@ -74,6 +76,12 @@ function createAdminRouter(dependencies = {}) {
         }
         data.priceCoins = price;
       }
+      if (body.testOnly !== undefined) {
+        if (typeof body.testOnly !== "boolean") {
+          return res.status(400).json({ error: "testOnly must be a boolean" });
+        }
+        data.testOnly = body.testOnly;
+      }
       if (Object.keys(data).length === 0) {
         return res.status(400).json({ error: "No updatable fields supplied" });
       }
@@ -81,7 +89,17 @@ function createAdminRouter(dependencies = {}) {
         where: { id: req.params.itemId },
         data,
       });
-      res.json({ item: { ...serializeShopItem(updated), active: updated.active } });
+      // Keep prod and staging in lockstep: mirror the full item state to the
+      // peer DB (matched by sku). No-ops safely if PEER_DATABASE_URL is unset.
+      const mirror = await mirrorShopItemToPeer(updated);
+      res.json({
+        item: {
+          ...serializeShopItem(updated),
+          active: updated.active,
+          testOnly: updated.testOnly,
+        },
+        mirror,
+      });
     } catch (error) {
       if (error.statusCode) {
         return res.status(error.statusCode).json({ error: error.message });
