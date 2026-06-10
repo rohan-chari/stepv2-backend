@@ -77,6 +77,35 @@ function buildSyncRacePowerupState(dependencies = {}) {
       await participantModel.updateMaxBonusSteps(participant.id, bonus);
     }
 
+    // Self-heal an UN-ARMED box gate. startRace and respondToRaceInvite
+    // initialize nextBoxAtSteps at their entry points, but the public/featured
+    // join path (joinPublicRace) historically did not — so every seeded
+    // daily/weekly-challenge joiner was stranded at the schema default (0) and
+    // the gate below (nextBoxAtSteps > 0) could never fire: no in-race mystery
+    // boxes ever rolled for them, no matter how far they walked.
+    //
+    // Arm it lazily here, anchored to the NEXT interval boundary STRICTLY ABOVE
+    // the player's current raw box-effective steps. Because the new threshold is
+    // above where they already are, arming mints ZERO boxes right now (the roll
+    // condition boxEffectiveSteps >= nextBoxAtSteps stays false this sync);
+    // boxes are earned only by walking forward, exactly like a normally
+    // initialized participant. This both fixes new joiners and repairs any
+    // already-stranded participant on their next sync — with no retroactive
+    // minting (the hazard the box-progress design exists to avoid).
+    if (canRoll && !(participant.nextBoxAtSteps > 0)) {
+      const interval = race.powerupStepInterval; // > 0 (guarded above)
+      const armedThreshold =
+        (Math.floor(boxEffectiveSteps / interval) + 1) * interval;
+      // Invariant: strictly above current box-effective => 0 immediate mint.
+      if (armedThreshold > boxEffectiveSteps) {
+        await participantModel.updateNextBoxAtSteps(
+          participant.id,
+          armedThreshold
+        );
+        participant.nextBoxAtSteps = armedThreshold;
+      }
+    }
+
     // Box progress is DEBUFF-SENSITIVE by design: getEffectiveBoxSteps protects
     // only bonusSteps pushbacks (Banana Peel/Red Card/Shortcut/Pinecone/Trail
     // Mine) via the maxBonusSteps high-water. Leg Cramp (frozenSteps) and Wrong
