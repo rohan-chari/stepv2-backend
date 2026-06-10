@@ -8,6 +8,7 @@ const {
 } = require("../constants/dailyReward");
 const {
   computeNextCycleDay,
+  computeNextLoginStreak,
 } = require("../queries/getDailyRewardStatus");
 const { serializeShopItem } = require("../utils/shopCosmetics");
 
@@ -38,7 +39,7 @@ function withinOneDayOfServer(localDate) {
   return diffDays <= 1.5;
 }
 
-async function rollAccessory(userId) {
+async function getUnownedAccessoryPool(userId) {
   const [activeItems, owned] = await Promise.all([
     prisma.shopItem.findMany({
       where: { active: true },
@@ -50,7 +51,11 @@ async function rollAccessory(userId) {
     }),
   ]);
   const ownedIds = new Set(owned.map((r) => r.shopItemId));
-  const pool = activeItems.filter((item) => !ownedIds.has(item.id));
+  return activeItems.filter((item) => !ownedIds.has(item.id));
+}
+
+async function rollAccessory(userId) {
+  const pool = await getUnownedAccessoryPool(userId);
   if (pool.length === 0) return null;
   return pool[Math.floor(Math.random() * pool.length)];
 }
@@ -65,7 +70,11 @@ async function claimDailyReward({ userId, localDate }) {
 
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { lastDailyClaimDate: true, dailyStreakDay: true },
+    select: {
+      lastDailyClaimDate: true,
+      dailyStreakDay: true,
+      dailyLoginStreak: true,
+    },
   });
   if (!user) throw new DailyRewardError("User not found", 404);
 
@@ -75,6 +84,14 @@ async function claimDailyReward({ userId, localDate }) {
 
   const cycleDay = computeNextCycleDay(
     user.lastDailyClaimDate,
+    user.dailyStreakDay,
+    localDate
+  );
+  // Keep the v2 login streak in sync even on the legacy claim path, so a user
+  // who updates the app later doesn't lose the run they built on an old build.
+  const loginStreak = computeNextLoginStreak(
+    user.lastDailyClaimDate,
+    user.dailyLoginStreak,
     user.dailyStreakDay,
     localDate
   );
@@ -124,7 +141,11 @@ async function claimDailyReward({ userId, localDate }) {
   await prisma.$transaction([
     prisma.user.update({
       where: { id: userId },
-      data: { lastDailyClaimDate: localDate, dailyStreakDay: cycleDay },
+      data: {
+        lastDailyClaimDate: localDate,
+        dailyStreakDay: cycleDay,
+        dailyLoginStreak: loginStreak,
+      },
     }),
     prisma.dailyRewardClaim.create({
       data: {
@@ -147,4 +168,10 @@ async function claimDailyReward({ userId, localDate }) {
   };
 }
 
-module.exports = { claimDailyReward, DailyRewardError };
+module.exports = {
+  claimDailyReward,
+  DailyRewardError,
+  isValidLocalDate,
+  withinOneDayOfServer,
+  getUnownedAccessoryPool,
+};

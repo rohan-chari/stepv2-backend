@@ -24,6 +24,10 @@ model User {
   coins     Int      @default(0)
   lastDailyClaimDate String? @map("last_daily_claim_date")
   dailyStreakDay     Int     @default(0) @map("daily_streak_day")
+  // Consecutive-day login streak (unbounded) driving daily-box rarity odds.
+  // Additive: dailyStreakDay keeps the legacy 6-day cycle for old app builds;
+  // both claim paths maintain both counters.
+  dailyLoginStreak   Int     @default(0) @map("daily_login_streak")
   isReviewAccount    Boolean @default(false) @map("is_review_account")
   // True once the user has either joined their first race via the onboarding
   // step or explicitly skipped it. Additive/back-compat: defaults false so
@@ -103,6 +107,9 @@ model DailyRewardClaim {
   claimedDate String   @map("claimed_date")
   cycleDay    Int      @map("cycle_day")
   rewardType  String   @map("reward_type")
+  // Rarity of the daily-box roll (COMMON/UNCOMMON/RARE). Null for legacy
+  // ladder claims from old app builds.
+  rarity      String?
   coinAmount  Int?     @map("coin_amount")
   shopItemId  String?  @map("shop_item_id")
   createdAt   DateTime @default(now()) @map("created_at")

@@ -3,6 +3,10 @@ const {
   CYCLE_LENGTH,
   getRewardPreviewForDay,
 } = require("../constants/dailyReward");
+const {
+  interpolateDailyBoxOdds,
+  DAILY_BOX_STREAK_CAP,
+} = require("../utils/dailyBoxOdds");
 
 function previousDateString(dateStr) {
   const [y, m, d] = dateStr.split("-").map((n) => parseInt(n, 10));
@@ -20,10 +24,24 @@ function computeNextCycleDay(prevDate, prevStreakDay, today) {
   return 1;
 }
 
+// Unbounded consecutive-day login streak (daily box odds). Seeds from the
+// legacy cycle day so users who already had a run going when daily_login_streak
+// shipped (column defaults to 0) don't restart at 1.
+function computeNextLoginStreak(prevDate, prevLoginStreak, legacyCycleDay, today) {
+  const basis = Math.max(prevLoginStreak || 0, legacyCycleDay || 0);
+  if (prevDate === today) return Math.max(1, basis); // already claimed today
+  if (prevDate === previousDateString(today)) return basis + 1;
+  return 1; // missed a day (or first ever claim)
+}
+
 async function getDailyRewardStatus({ userId, localDate }) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { lastDailyClaimDate: true, dailyStreakDay: true },
+    select: {
+      lastDailyClaimDate: true,
+      dailyStreakDay: true,
+      dailyLoginStreak: true,
+    },
   });
   if (!user) {
     const err = new Error("User not found");
@@ -50,12 +68,34 @@ async function getDailyRewardStatus({ userId, localDate }) {
     });
   }
 
+  // Daily box (v2): the streak today's claim would roll with, plus the rarity
+  // odds for that streak. Additive field — old app builds ignore it and keep
+  // rendering the ladder above; new app builds switch to the box UI only when
+  // this field is present.
+  const projectedStreak = computeNextLoginStreak(
+    user.lastDailyClaimDate,
+    user.dailyLoginStreak,
+    user.dailyStreakDay,
+    localDate
+  );
+  const [common, uncommon, rare] = interpolateDailyBoxOdds(projectedStreak);
+
   return {
     cycleLength: CYCLE_LENGTH,
     currentDay: projectedDay,
     claimedToday,
     ladder,
+    box: {
+      streak: projectedStreak,
+      streakCap: DAILY_BOX_STREAK_CAP,
+      odds: { COMMON: common, UNCOMMON: uncommon, RARE: rare },
+    },
   };
 }
 
-module.exports = { getDailyRewardStatus, computeNextCycleDay, previousDateString };
+module.exports = {
+  getDailyRewardStatus,
+  computeNextCycleDay,
+  computeNextLoginStreak,
+  previousDateString,
+};

@@ -7,6 +7,9 @@ const {
   claimDailyReward: defaultClaimDailyReward,
   DailyRewardError,
 } = require("../commands/claimDailyReward");
+const {
+  claimDailyRewardBox: defaultClaimDailyRewardBox,
+} = require("../commands/claimDailyRewardBox");
 
 function createDailyRewardRouter(dependencies = {}) {
   const router = Router();
@@ -16,6 +19,8 @@ function createDailyRewardRouter(dependencies = {}) {
     dependencies.getDailyRewardStatus || defaultGetDailyRewardStatus;
   const claimDailyReward =
     dependencies.claimDailyReward || defaultClaimDailyReward;
+  const claimDailyRewardBox =
+    dependencies.claimDailyRewardBox || defaultClaimDailyRewardBox;
 
   router.use(requireAuth);
 
@@ -56,6 +61,27 @@ function createDailyRewardRouter(dependencies = {}) {
           .json({ error: error.message });
       }
       console.error("Daily reward claim error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Daily reward v2 (mystery-box roll). New endpoint so old app builds keep
+  // hitting /claim with the legacy ladder behavior untouched.
+  router.post("/claim-box", async (req, res) => {
+    try {
+      const localDate = req.body?.localDate;
+      const result = await claimDailyRewardBox({
+        userId: req.user.id,
+        localDate,
+      });
+      res.json(result);
+    } catch (error) {
+      if (error instanceof DailyRewardError) {
+        return res
+          .status(error.statusCode || 400)
+          .json({ error: error.message });
+      }
+      console.error("Daily reward box claim error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });
