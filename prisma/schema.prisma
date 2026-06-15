@@ -8,7 +8,12 @@ datasource db {
 
 model User {
   id        String   @id @default(uuid())
-  appleId   String   @unique @map("apple_id")
+  // Auth identity is single-provider per user: Apple (iOS) OR Google (Android).
+  // Both are nullable+unique so a pure-Google user has no appleId and vice versa.
+  // Postgres unique indexes allow multiple NULLs, so many users can share a null
+  // on either column. Existing Apple rows are untouched. See ANDROID.md §G1.
+  appleId   String?  @unique @map("apple_id")
+  googleSub String?  @unique @map("google_sub")
   email     String?
   name        String?
   displayName String?  @unique @map("display_name")

@@ -4,6 +4,11 @@ const {
   verifyAppleIdentityToken,
 } = require("../services/appleIdentityToken");
 const { ensureAppleUser } = require("../services/ensureAppleUser");
+const {
+  GoogleIdentityTokenError,
+  verifyGoogleIdentityToken,
+} = require("../services/googleIdentityToken");
+const { ensureGoogleUser } = require("../services/ensureGoogleUser");
 const { buildRequireAuth } = require("../middleware/requireAuth");
 const { signSessionToken: defaultSignSessionToken } = require("../services/sessionToken");
 const { setDisplayName: defaultSetDisplayName } = require("../commands/setDisplayName");
@@ -42,6 +47,9 @@ function createAuthRouter(dependencies = {}) {
   const verifyIdentityToken =
     dependencies.verifyAppleIdentityToken || verifyAppleIdentityToken;
   const provisionUser = dependencies.ensureAppleUser || ensureAppleUser;
+  const verifyGoogleToken =
+    dependencies.verifyGoogleIdentityToken || verifyGoogleIdentityToken;
+  const provisionGoogleUser = dependencies.ensureGoogleUser || ensureGoogleUser;
   const requireAuth =
     dependencies.requireAuth || buildRequireAuth(dependencies);
   const signToken = dependencies.signSessionToken || defaultSignSessionToken;
@@ -110,6 +118,45 @@ function createAuthRouter(dependencies = {}) {
       }
 
       console.error("Auth error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // POST /auth/google
+  // Body: { idToken, email?, name? }
+  // Android sign-in. Verifies the Google ID token, keys the account on the
+  // verified Google `sub` (User.googleSub), and returns the same
+  // { user, sessionToken } envelope as /auth/apple. Independent of Apple
+  // accounts — never linked by email. See ANDROID.md §G1.
+  router.post("/google", async (req, res) => {
+    try {
+      const { idToken, email, name } = req.body;
+
+      if (!idToken) {
+        return res.status(400).json({ error: "idToken is required" });
+      }
+
+      const googleIdentity = await verifyGoogleToken(idToken);
+
+      const user = await provisionGoogleUser({
+        googleSub: googleIdentity.sub,
+        email: email || googleIdentity.email,
+        name,
+        emitSignInEvent: true,
+      });
+
+      const sessionToken = signToken({
+        userId: user.id,
+        appleId: user.appleId,
+      });
+
+      res.json({ user: withAdminFlag(user, checkAdmin), sessionToken });
+    } catch (error) {
+      if (error instanceof GoogleIdentityTokenError) {
+        return res.status(401).json({ error: error.message });
+      }
+
+      console.error("Google auth error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });

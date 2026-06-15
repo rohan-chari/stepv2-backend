@@ -55,7 +55,15 @@ function buildJoinPublicRace(dependencies = {}) {
       }
 
       const user = await userModel.findById(joiningUserId);
-      const appleSubHash = hashSub(user && user.appleId);
+      // Provider-neutral stable identity: Apple users have appleId, Google
+      // (Android) users have googleSub — each user has exactly one. Hashing
+      // whichever is present keeps the one-time grant abuse-proof for BOTH
+      // providers. Without this, a Google user (null appleId) hashes to null
+      // and is silently skipped, getting no welcome boxes. The ledger is never
+      // backfilled — rows are only minted through the insert-first transaction
+      // below — so existing Apple users are never re-granted. See ANDROID.md §G1.
+      const providerSub = (user && (user.appleId || user.googleSub)) || null;
+      const appleSubHash = hashSub(providerSub);
       if (!appleSubHash) {
         return earnedEvents; // No stable identity to gate on — skip.
       }

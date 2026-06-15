@@ -9,12 +9,24 @@ const User = {
     return prisma.user.findUnique({ where: { appleId } });
   },
 
+  async findByGoogleSub(googleSub) {
+    return prisma.user.findUnique({ where: { googleSub } });
+  },
+
   async findByEmail(email) {
     return prisma.user.findFirst({ where: { email } });
   },
 
-  async create({ appleId, email, name, displayName, isReviewAccount }) {
-    const data = { appleId, email, name };
+  async create({ appleId, googleSub, email, name, displayName, isReviewAccount }) {
+    // A user is keyed on exactly one provider id (appleId for iOS, googleSub for
+    // Android). Only set the one that was supplied so the other stays null.
+    const data = { email, name };
+    if (appleId !== undefined) {
+      data.appleId = appleId;
+    }
+    if (googleSub !== undefined) {
+      data.googleSub = googleSub;
+    }
     if (displayName !== undefined) {
       data.displayName = displayName;
     }
