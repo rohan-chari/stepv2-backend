@@ -152,7 +152,12 @@ test("Cleanse is self-only — rejects when a targetUserId is given", async () =
 });
 
 test("Cleanse consumes the powerup (marks it USED) with no target", async () => {
-  const ctx = makeDeps({ powerupType: "CLEANSE" });
+  const ctx = makeDeps({
+    powerupType: "CLEANSE",
+    effectsByParticipant: {
+      "rp-1": [effect("eff-cramp", "LEG_CRAMP", "user-2")],
+    },
+  });
   const use = buildUsePowerup(ctx.deps);
 
   await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1" });
@@ -163,7 +168,12 @@ test("Cleanse consumes the powerup (marks it USED) with no target", async () => 
 });
 
 test("Cleanse writes a POWERUP_CLEANSE feed event", async () => {
-  const ctx = makeDeps({ powerupType: "CLEANSE" });
+  const ctx = makeDeps({
+    powerupType: "CLEANSE",
+    effectsByParticipant: {
+      "rp-1": [effect("eff-cramp", "LEG_CRAMP", "user-2")],
+    },
+  });
   const use = buildUsePowerup(ctx.deps);
 
   await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1" });
@@ -232,6 +242,32 @@ test("Cleanse returns how many debuffs were cleared", async () => {
   assert.equal(result.cleared, 2);
 });
 
+test("Cleanse truncates expiresAt to now so the freeze window ends immediately", async () => {
+  // Step resolution computes a timed debuff's freeze window from
+  // [startsAt, expiresAt] and reads EXPIRED rows too — so flipping status alone
+  // (leaving the future expiresAt) would keep freezing steps for the cramp's
+  // full original duration. Cleanse must also pull expiresAt back to now.
+  const ctx = makeDeps({
+    powerupType: "CLEANSE",
+    effectsByParticipant: {
+      // expiresAt is 2h in the future relative to the mocked now (12:00Z).
+      "rp-1": [effect("eff-cramp", "LEG_CRAMP", "user-2")],
+    },
+  });
+  const use = buildUsePowerup(ctx.deps);
+
+  await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1" });
+
+  const upd = ctx.effectUpdates.find((u) => u.id === "eff-cramp");
+  assert.ok(upd, "the cramp should be updated");
+  assert.equal(upd.status, "EXPIRED");
+  assert.equal(
+    new Date(upd.expiresAt).getTime(),
+    new Date("2026-06-02T12:00:00Z").getTime(),
+    "expiresAt must be truncated to the cleanse moment (now)"
+  );
+});
+
 // ===========================================================================
 // Does NOT clear the user's OWN self-buffs
 // ===========================================================================
@@ -266,7 +302,9 @@ test("Cleanse does NOT clear the user's own self-buffs", async () => {
   assert.equal(cramp.status, "EXPIRED");
 });
 
-test("Cleanse with no debuffs clears nothing and still consumes the powerup", async () => {
+test("Cleanse with no opponent debuffs is rejected and does NOT consume the powerup", async () => {
+  // Only a self-buff is active — there is nothing for Cleanse to clear, so the
+  // use must be rejected and the powerup left HELD (not wasted).
   const ctx = makeDeps({
     powerupType: "CLEANSE",
     effectsByParticipant: {
@@ -275,9 +313,14 @@ test("Cleanse with no debuffs clears nothing and still consumes the powerup", as
   });
   const use = buildUsePowerup(ctx.deps);
 
-  const result = await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1" });
+  await assert.rejects(
+    () => use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1" }),
+    (err) => {
+      assert.ok(err instanceof PowerupUseError);
+      return true;
+    }
+  );
 
   assert.equal(ctx.effectUpdates.length, 0, "no effects should be expired");
-  assert.equal(result.cleared, 0);
-  assert.equal(ctx.updatedPowerup.status, "USED");
+  assert.equal(ctx.updatedPowerup, null, "powerup must not be consumed");
 });

@@ -378,6 +378,14 @@ function buildUsePowerup(dependencies = {}) {
       }
     }
 
+    if (type === "CLEANSE") {
+      const activeEffects = await effectModel.findActiveForParticipant(myParticipant.id);
+      const hasOpponentDebuff = activeEffects.some((e) => isOpponentInflicted(e, userId));
+      if (!hasOpponentDebuff) {
+        throw new PowerupUseError("No debuffs to cleanse", 400);
+      }
+    }
+
     if (type === "TRAIL_MINE") {
       const rank = participantRank(acceptedParticipants, myParticipant);
       if (rank === acceptedParticipants.filter((p) => !p.finishedAt).length - 1) {
@@ -714,7 +722,16 @@ function buildUsePowerup(dependencies = {}) {
           (e) => isOpponentInflicted(e, userId)
         );
         for (const debuff of opponentDebuffs) {
-          await effectModel.update(debuff.id, { status: "EXPIRED" });
+          // Truncate expiresAt to NOW as well as flipping status. Step
+          // resolution computes a timed debuff's freeze window from
+          // [startsAt, expiresAt] and reads EXPIRED rows too, so leaving the
+          // original (future) expiresAt would keep freezing/reversing steps for
+          // the full original duration even after Cleanse. Ending the window
+          // here stops the effect at the cleanse moment.
+          await effectModel.update(debuff.id, {
+            status: "EXPIRED",
+            expiresAt: currentTime,
+          });
         }
         result.cleared = opponentDebuffs.length;
 
