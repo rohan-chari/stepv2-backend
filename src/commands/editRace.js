@@ -88,12 +88,16 @@ function buildEditRace(dependencies = {}) {
         updates.maxParticipants,
         RaceEditError
       );
-      const acceptedCount = await participantModel.countAccepted(raceId);
-      if (newMax < acceptedCount) {
-        throw new RaceEditError(
-          `Cannot reduce max participants to ${newMax}; already ${acceptedCount} accepted`,
-          400
-        );
+      // newMax === null => unlimited; the "already N accepted" floor only
+      // applies to a finite cap.
+      if (newMax !== null) {
+        const acceptedCount = await participantModel.countAccepted(raceId);
+        if (newMax < acceptedCount) {
+          throw new RaceEditError(
+            `Cannot reduce max participants to ${newMax}; already ${acceptedCount} accepted`,
+            400
+          );
+        }
       }
       fields.maxParticipants = newMax;
     }

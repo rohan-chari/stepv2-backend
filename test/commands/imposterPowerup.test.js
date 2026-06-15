@@ -8,8 +8,9 @@ const { buildUsePowerup, PowerupUseError } = require("../../src/commands/usePowe
 // an active race it creates a self-applied (onSelf) RaceActiveEffect of type
 // IMPOSTER on the ACTING user's participant, with metadata.swapWithUserId = the
 // chosen target, expiring 1 HOUR later. The acting user's IMPOSTER RacePowerup
-// is consumed (USED). A POWERUP_IMPOSTER feed event is written. It is purely a
-// DISPLAY swap and must NOT change any step counts.
+// is consumed (USED). IMPOSTER is STEALTHY: it must NOT write any feed event, so
+// other participants are never notified of the swap. It is purely a DISPLAY swap
+// and must NOT change any step counts.
 //
 // Written from the spec + the cleanse/mirror usePowerup mock patterns, NOT by
 // mirroring implementation.
@@ -181,7 +182,7 @@ test("IMPOSTER consumes the powerup (marks it USED)", async () => {
   assert.equal(ctx.updatedPowerup.status, "USED");
 });
 
-test("IMPOSTER writes a POWERUP_IMPOSTER feed event", async () => {
+test("IMPOSTER is stealthy: writes NO feed event", async () => {
   const ctx = makeDeps();
   const use = buildUsePowerup(ctx.deps);
 
@@ -193,8 +194,7 @@ test("IMPOSTER writes a POWERUP_IMPOSTER feed event", async () => {
   });
 
   const feed = ctx.feedEvents.find((e) => e.eventType === "POWERUP_IMPOSTER");
-  assert.ok(feed, "should write a POWERUP_IMPOSTER feed event");
-  assert.equal(feed.powerupType, "IMPOSTER");
+  assert.equal(feed, undefined, "should NOT write a POWERUP_IMPOSTER feed event");
 });
 
 test("IMPOSTER does not modify any step counts (purely cosmetic)", async () => {

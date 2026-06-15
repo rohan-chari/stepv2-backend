@@ -43,6 +43,10 @@ function validatePowerupConfig({ powerupsEnabled, powerupStepInterval, ErrorClas
 }
 
 function validateMaxParticipants(maxParticipants, ErrorClass) {
+  // null/undefined => unlimited (no participant cap). Stored as NULL.
+  if (maxParticipants === null || maxParticipants === undefined) {
+    return null;
+  }
   if (
     !Number.isInteger(maxParticipants) ||
     maxParticipants < 2 ||

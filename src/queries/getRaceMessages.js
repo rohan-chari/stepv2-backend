@@ -151,7 +151,11 @@ function buildGetRaceMessages(dependencies = {}) {
       _cursorId: m.id,
     }));
 
-    const systemItems = powerupEvents.map((e) => {
+    const systemItems = powerupEvents
+      // Imposter is stealthy — never surface it in the feed, including any
+      // events created before this suppression shipped (in-flight races).
+      .filter((e) => e.eventType !== "POWERUP_IMPOSTER")
+      .map((e) => {
       let description = e.description;
       if (stealthedUserIds.has(e.actorUserId)) {
         const realName = stealthedNames.get(e.actorUserId);

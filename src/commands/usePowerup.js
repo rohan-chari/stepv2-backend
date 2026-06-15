@@ -751,15 +751,10 @@ function buildUsePowerup(dependencies = {}) {
         result.effect = effect;
         result.swapWithUserId = resolvedTargetUserId;
 
-        await eventModel.create({
-          raceId,
-          actorUserId: userId,
-          eventType: "POWERUP_IMPOSTER",
-          powerupType: type,
-          targetUserId: resolvedTargetUserId,
-          description: `${myDisplayName} pulled an Imposter on ${targetDisplayName}! Their leaderboard positions are swapped for 1 hour.`,
-          metadata: { swapWithUserId: resolvedTargetUserId },
-        });
+        // Imposter is intentionally STEALTHY: do NOT write an activity-log event,
+        // so other participants are not notified that a position swap happened.
+        // The swap itself lives on the RacePowerupEffect row above (applied only
+        // in the getRaceProgress display path), so omitting the event is safe.
         break;
       }
 

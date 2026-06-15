@@ -371,7 +371,9 @@ async function checkFriendRacing(prisma, userId, friendIds) {
 
   // Pick the first valid one whose race still has room.
   const choice = friendParticipations.find(
-    (fp) => fp.race.participants.length < fp.race.maxParticipants
+    (fp) =>
+      fp.race.maxParticipants == null ||
+      fp.race.participants.length < fp.race.maxParticipants
   );
   if (!choice) return null;
 
@@ -449,7 +451,7 @@ async function checkPublicRace(prisma, userId) {
 
   // Filter out full races, then rank by seed preference.
   const joinable = candidates.filter(
-    (r) => r._count.participants < r.maxParticipants
+    (r) => r.maxParticipants == null || r._count.participants < r.maxParticipants
   );
   if (joinable.length === 0) return null;
 

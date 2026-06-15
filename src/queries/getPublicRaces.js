@@ -20,8 +20,9 @@ function buildGetPublicRaces(dependencies = {}) {
       const acceptedCount = participants.filter(
         (p) => p.status === "ACCEPTED"
       ).length;
-      const maxParticipants = race.maxParticipants || 10;
-      if (acceptedCount >= maxParticipants) continue;
+      // null => unlimited; a full race is skipped, but unlimited is never full.
+      const maxParticipants = race.maxParticipants ?? null;
+      if (maxParticipants != null && acceptedCount >= maxParticipants) continue;
 
       const heldPotCoins = participants.reduce((sum, p) => {
         if (p.buyInStatus === "HELD") {

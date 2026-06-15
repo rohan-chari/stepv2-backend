@@ -75,7 +75,12 @@ function buildCreateRace(dependencies = {}) {
       powerupStepInterval,
       ErrorClass: RaceCreationError,
     });
-    validateMaxParticipants(maxParticipants, RaceCreationError);
+    // null => unlimited (no cap). Older clients omit the field; the destructure
+    // default of 10 keeps their behaviour. New clients may send explicit null.
+    const normalizedMaxParticipants = validateMaxParticipants(
+      maxParticipants,
+      RaceCreationError
+    );
 
     const buyInConfig = validateRaceBuyInConfig({
       buyInAmount,
@@ -102,7 +107,7 @@ function buildCreateRace(dependencies = {}) {
       buyInAmount: buyInConfig.buyInAmount,
       payoutPreset: buyInConfig.payoutPreset,
       isPublic: !!isPublic,
-      maxParticipants,
+      maxParticipants: normalizedMaxParticipants,
       scheduledStartAt: normalizedScheduledStartAt,
     });
 

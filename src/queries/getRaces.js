@@ -112,10 +112,13 @@ async function getRaces(userId) {
       myPlacement,
       myBuyInStatus: myParticipant?.buyInStatus || "NONE",
       myPayoutCoins: myParticipant?.payoutCoins || 0,
+      myResultsSeen: (myParticipant?.resultsSeenAt != null),
       queuedBoxCount,
       isCreator: race.creatorId === userId,
       isPublic: race.isPublic || false,
-      maxParticipants: race.maxParticipants || 10,
+      // null => unlimited (no cap). Serialized as null; older app clients read
+      // this defensively (int? ?? 10) so they show a finite figure but never crash.
+      maxParticipants: race.maxParticipants ?? null,
       createdAt: race.createdAt,
     };
 

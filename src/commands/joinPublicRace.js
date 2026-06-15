@@ -157,8 +157,9 @@ function buildJoinPublicRace(dependencies = {}) {
         typeof participantModel.countAccepted === "function"
           ? await participantModel.countAccepted(raceId)
           : race.participants.filter((p) => p.status === "ACCEPTED").length;
-      const maxParticipants = race.maxParticipants || 10;
-      if (acceptedCount >= maxParticipants) {
+      // null => unlimited; only a finite cap can make a race "full".
+      const maxParticipants = race.maxParticipants;
+      if (maxParticipants != null && acceptedCount >= maxParticipants) {
         throw new RaceJoinError("This race is full", 400);
       }
 

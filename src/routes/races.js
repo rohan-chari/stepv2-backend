@@ -60,6 +60,9 @@ const {
   setRaceChatMute: defaultSetRaceChatMute,
   markRaceChatRead: defaultMarkRaceChatRead,
 } = require("../commands/setRaceChatMute");
+const {
+  markRaceResultsSeen: defaultMarkRaceResultsSeen,
+} = require("../commands/markRaceResultsSeen");
 const { Race: defaultRaceModel } = require("../models/race");
 const { User: defaultUserModel } = require("../models/user");
 const { RacePowerup: defaultPowerupModel } = require("../models/racePowerup");
@@ -119,6 +122,8 @@ function createRacesRouter(dependencies = {}) {
     dependencies.setRaceChatMute || defaultSetRaceChatMute;
   const markRaceChatRead =
     dependencies.markRaceChatRead || defaultMarkRaceChatRead;
+  const markRaceResultsSeen =
+    dependencies.markRaceResultsSeen || defaultMarkRaceResultsSeen;
   const raceModel = dependencies.Race || defaultRaceModel;
   const userModel = dependencies.User || defaultUserModel;
   const powerupModel = dependencies.RacePowerup || defaultPowerupModel;
@@ -663,6 +668,39 @@ function createRacesRouter(dependencies = {}) {
           .json({ error: error.message });
       }
       console.error("Mark race chat read error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // POST /races/results/seen
+  // Body: { raceIds: [...] }. Marks the calling user's race-results popup as
+  // seen for the given races. Additive + display-only; old app builds never
+  // call this. Validates raceIds is a non-empty array of strings; unknown ids
+  // are ignored gracefully by the underlying updateMany.
+  router.post("/results/seen", async (req, res) => {
+    try {
+      const { raceIds } = req.body || {};
+      if (
+        !Array.isArray(raceIds) ||
+        raceIds.length === 0 ||
+        !raceIds.every((id) => typeof id === "string" && id.length > 0)
+      ) {
+        return res
+          .status(400)
+          .json({ error: "raceIds must be a non-empty array of strings" });
+      }
+      await markRaceResultsSeen({
+        userId: req.user.id,
+        raceIds,
+      });
+      res.json({ success: true });
+    } catch (error) {
+      if (error.name === "MarkRaceResultsSeenError") {
+        return res
+          .status(error.statusCode || 400)
+          .json({ error: error.message });
+      }
+      console.error("Mark race results seen error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });

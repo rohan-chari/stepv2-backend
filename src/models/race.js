@@ -2,6 +2,10 @@ const { prisma } = require("../db");
 
 const participantInclude = {
   participants: {
+    // Uses `include` (not `select`), so all RaceParticipant scalar fields —
+    // including resultsSeenAt (race results "seen" ack, read by getRaces) — are
+    // returned automatically. The lean findActiveForUser select does NOT need
+    // resultsSeenAt; race resolution never reads it.
     include: {
       user: {
         select: {

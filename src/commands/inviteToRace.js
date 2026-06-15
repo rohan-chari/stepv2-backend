@@ -36,8 +36,12 @@ function buildInviteToRace(dependencies = {}) {
 
     const currentParticipants = await participantModel.findByRace(raceId);
     const currentCount = currentParticipants.length;
-    const maxParticipants = race.maxParticipants || 10;
-    if (currentCount + inviteeIds.length > maxParticipants) {
+    // null => unlimited; only a finite cap limits how many can be invited.
+    const maxParticipants = race.maxParticipants;
+    if (
+      maxParticipants != null &&
+      currentCount + inviteeIds.length > maxParticipants
+    ) {
       throw new RaceInviteError(
         `A race can have at most ${maxParticipants} participants`,
         400

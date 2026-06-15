@@ -63,7 +63,9 @@ async function getRaceDetails(userId, raceId) {
     winner: race.winner,
     isCreator: race.creatorId === userId,
     isPublic: race.isPublic || false,
-    maxParticipants: race.maxParticipants || 10,
+    // null => unlimited (no cap). Older app clients read this defensively
+    // (int? ?? 10) so they show a finite figure but never crash.
+    maxParticipants: race.maxParticipants ?? null,
     powerupsEnabled: race.powerupsEnabled || false,
     powerupStepInterval: race.powerupStepInterval,
     myStatus: myParticipant.status,

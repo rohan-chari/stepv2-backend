@@ -558,7 +558,10 @@ model Race {
   powerupsEnabled      Boolean    @default(false) @map("powerups_enabled")
   powerupStepInterval  Int?       @map("powerup_step_interval")
   isPublic             Boolean    @default(false) @map("is_public")
-  maxParticipants      Int        @default(10) @map("max_participants")
+  // Nullable: NULL means "no participant limit" (unlimited). Older app clients
+  // always send an integer, and the @default(10) keeps legacy creates that omit
+  // the field unchanged. Additive/backward-compatible — relaxing NOT NULL only.
+  maxParticipants      Int?       @default(10) @map("max_participants")
   // When true, the race never finishes on reaching targetSteps; targetSteps is
   // a display-only goal and the winner is decided by step count when ends_at
   // passes (raceExpiry.js). Additive/backward-compatible: defaults false so
@@ -643,6 +646,7 @@ model RaceParticipant {
   lastChatPushAt     DateTime?        @map("last_chat_push_at")
   chatMuted          Boolean          @default(false) @map("chat_muted")
   inviteExpiresAt    DateTime?        @map("invite_expires_at")
+  resultsSeenAt      DateTime?        @map("results_seen_at")
 
   race          Race @relation(fields: [raceId], references: [id], onDelete: Cascade)
   user          User @relation(fields: [userId], references: [id])
