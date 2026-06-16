@@ -288,7 +288,7 @@
       <div class="post"></div>
     </div>
 
-    <p class="effective-date">Effective: April 16, 2026</p>
+    <p class="effective-date">Effective: June 16, 2026</p>
 
     <div class="top-nav">
       <a class="pill-btn" href="/">Home</a>
@@ -299,24 +299,24 @@
       <div class="board-inner">
         <div class="section">Overview</div>
         <div class="row">
-          Bara ("we," "our," or "the app") is a step-tracking challenge app for iOS. This policy explains what data we collect, how we use it, and your rights. We believe in collecting only what's necessary to make the app work.
+          Bara ("we," "our," or "the app") is a step-tracking challenge app for iOS and Android. This policy explains what data we collect, how we use it, and your rights. We believe in collecting only what's necessary to make the app work.
         </div>
 
         <div class="section">Health Data</div>
         <div class="row">
-          Bara reads your <strong>daily step count</strong> from Apple HealthKit with your explicit permission. We request read-only access — we do not write to or modify your Health data in any way. Your step count is synced to our server solely to display your daily progress and power head-to-head weekly challenges.
+          Bara reads your <strong>daily step count</strong> with your explicit permission — from <strong>Apple HealthKit</strong> on iOS and from <strong>Android Health Connect</strong> on Android. We request read-only access — we do not write to or modify your health data in any way. Your step count is synced to our server solely to display your daily progress and power step races and head-to-head challenges.
         </div>
         <div class="row row-emphasis">
-          Your HealthKit data is never used for advertising, is never sold to third parties, and is never shared with third parties for marketing or data-brokering purposes.
+          Your health data (from HealthKit or Health Connect) is never used for advertising, is never sold to third parties, and is never shared with third parties for marketing or data-brokering purposes.
         </div>
         <div class="row alt">
-          You can revoke Health access at any time in iOS Settings → Privacy &amp; Security → Health → Bara. If you revoke access, the app will no longer read your step count and background sync will stop.
+          You can revoke health access at any time: on <strong>iOS</strong> in Settings → Privacy &amp; Security → Health → Bara; on <strong>Android</strong> in the Health Connect app (or Settings → Security &amp; privacy → Health Connect) under app permissions → Bara. If you revoke access, the app will no longer read your step count.
         </div>
 
         <div class="section">Information We Collect</div>
         <div class="row-lv">
-          <div class="lv-label">Apple ID identifier</div>
-          <div class="lv-value">Account creation and sign-in via Sign in with Apple. We receive only the opaque user identifier Apple provides — we do not access your Apple ID password.</div>
+          <div class="lv-label">Account identifier (Apple / Google)</div>
+          <div class="lv-value">Account creation and sign-in — via Sign in with Apple on iOS, and Google Sign-In on Android. We receive only the opaque user identifier the provider supplies — we do not access your Apple ID or Google password.</div>
         </div>
         <div class="row-lv alt">
           <div class="lv-label">Display name</div>
@@ -324,7 +324,7 @@
         </div>
         <div class="row-lv">
           <div class="lv-label">Daily step count</div>
-          <div class="lv-value">Read from HealthKit to show progress and calculate challenge results. Stored on our server with a date stamp.</div>
+          <div class="lv-value">Read from HealthKit (iOS) or Health Connect (Android) to show progress and calculate challenge results. Stored on our server with a date stamp.</div>
         </div>
         <div class="row-lv alt">
           <div class="lv-label">Step goal</div>
@@ -339,13 +339,13 @@
           <div class="lv-value">Records of your weekly challenges, matchups, and negotiated stakes with friends.</div>
         </div>
         <div class="row-lv">
-          <div class="lv-label">APNs device token</div>
-          <div class="lv-value">Registered with our server to deliver push notifications about challenge updates. Stored only while notifications are enabled.</div>
+          <div class="lv-label">Push notification token (APNs / FCM)</div>
+          <div class="lv-value">Registered with our server to deliver push notifications about race and challenge updates — Apple Push Notification service on iOS, Firebase Cloud Messaging on Android. Stored only while notifications are enabled.</div>
         </div>
 
-        <div class="section">Sign in with Apple</div>
+        <div class="section">Sign in with Apple / Google</div>
         <div class="row">
-          Bara uses Sign in with Apple as its only authentication method. When you sign in, Apple provides us with an opaque user identifier and, if you choose to share it, an email address. If you choose "Hide My Email," we receive only Apple's relay address — we never see your real email. We do not access your Apple ID password.
+          Authentication is via Sign in with Apple on iOS and Google Sign-In on Android. When you sign in, the provider gives us an opaque user identifier and, if you choose to share it, an email address. With Apple's "Hide My Email," we receive only Apple's relay address — we never see your real email. We do not access your Apple ID or Google password. The two providers are independent identities; an Apple (iOS) account and a Google (Android) account are not automatically linked.
         </div>
 
         <div class="section">How We Use Your Data</div>
@@ -360,7 +360,7 @@
 
         <div class="section">Storage &amp; Security</div>
         <div class="row">
-          Your data is stored on our server infrastructure. We use HTTPS for all data in transit. Session tokens are used for authentication and are refreshed regularly. Locally on your device, the app caches session credentials, health-authorization state, notification preferences, and your display name and step goal using iOS local storage.
+          Your data is stored on our server infrastructure. We use HTTPS for all data in transit. Session tokens are used for authentication and are refreshed regularly. Locally on your device, the app caches session credentials, health-authorization state, notification preferences, and your display name and step goal using the device's local storage (iOS and Android).
         </div>
 
         <div class="section">Data Deletion</div>
