@@ -14,19 +14,29 @@ function buildFcmService(config = {}) {
   let initialized = Boolean(config.messaging);
   let initError = null;
 
-  function loadCredential(admin) {
+  // firebase-admin v14 is modular-only: the legacy `require("firebase-admin")`
+  // namespace (admin.credential / admin.messaging()) no longer exists. Pull the
+  // pieces from the subpath modules. Tests can inject `config.firebase`.
+  function loadFirebase() {
+    if (config.firebase) return config.firebase;
+    const { initializeApp, cert, applicationDefault, getApps } = require("firebase-admin/app");
+    const { getMessaging } = require("firebase-admin/messaging");
+    return { initializeApp, cert, applicationDefault, getApps, getMessaging };
+  }
+
+  function loadCredential(fb) {
     const inline = config.serviceAccount || process.env.FCM_SERVICE_ACCOUNT;
     if (inline) {
       const json = typeof inline === "string" ? JSON.parse(inline) : inline;
-      return admin.credential.cert(json);
+      return fb.cert(json);
     }
     const path =
       config.serviceAccountPath || process.env.FCM_SERVICE_ACCOUNT_PATH;
     if (path) {
-      return admin.credential.cert(require(path));
+      return fb.cert(require(path));
     }
     // Falls back to GOOGLE_APPLICATION_CREDENTIALS if that is configured.
-    return admin.credential.applicationDefault();
+    return fb.applicationDefault();
   }
 
   function getMessaging() {
@@ -34,11 +44,13 @@ function buildFcmService(config = {}) {
     if (initialized) return null; // already tried and failed
     initialized = true;
     try {
-      const admin = config.admin || require("firebase-admin");
-      if (!admin.apps || admin.apps.length === 0) {
-        admin.initializeApp({ credential: loadCredential(admin) });
-      }
-      messaging = admin.messaging();
+      const fb = loadFirebase();
+      const existing = fb.getApps ? fb.getApps() : [];
+      const app =
+        existing.length > 0
+          ? existing[0]
+          : fb.initializeApp({ credential: loadCredential(fb) });
+      messaging = fb.getMessaging(app);
       return messaging;
     } catch (error) {
       initError = error instanceof Error ? error.message : String(error);

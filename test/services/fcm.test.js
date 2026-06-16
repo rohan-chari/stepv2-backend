@@ -102,12 +102,14 @@ test("generic send errors are not treated as unregistered", async () => {
 
 test("fail-soft: never throws when firebase-admin init fails", async () => {
   const fcm = buildFcmService({
-    admin: {
-      apps: [],
+    firebase: {
+      getApps: () => [],
       initializeApp() {
         throw new Error("missing service-account credential");
       },
-      credential: { applicationDefault() {} },
+      cert() {},
+      applicationDefault() {},
+      getMessaging() {},
     },
   });
 
