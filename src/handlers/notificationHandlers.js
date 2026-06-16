@@ -2,6 +2,7 @@ const { eventBus } = require("../events/eventBus");
 const { User } = require("../models/user");
 const { DeviceToken } = require("../models/deviceToken");
 const { apnsService } = require("../services/apns");
+const { fcmService } = require("../services/fcm");
 const { prisma } = require("../db");
 
 const CHAT_PUSH_COOLDOWN_MS = 60_000;
@@ -11,12 +12,22 @@ function registerNotificationHandlers(dependencies = {}) {
   const userModel = dependencies.User || User;
   const deviceTokenModel = dependencies.DeviceToken || DeviceToken;
   const apns = dependencies.apnsService || apnsService;
+  const fcm = dependencies.fcmService || fcmService;
   const raceParticipantModel = dependencies.RaceParticipant || prisma.raceParticipant;
   const logger = dependencies.logger || console;
 
   function deviceTokenSuffix(token) {
     if (!token || typeof token !== "string") return "";
     return token.slice(-9);
+  }
+
+  // Route by the device token's platform: Android -> FCM, everything else
+  // (iOS) -> APNs. This is what keeps Android tokens off APNs (and the 410
+  // churn that caused). Both senders share the same result shape, so the
+  // unregistered -> deleteToken cleanup below works for either. See ANDROID.md
+  // §G2; precedent: stepSyncPush.js's `.filter(platform === "ios")`.
+  function pushServiceFor(tokenRecord) {
+    return tokenRecord && tokenRecord.platform === "android" ? fcm : apns;
   }
 
   async function findActorName(userId) {
@@ -47,7 +58,7 @@ function registerNotificationHandlers(dependencies = {}) {
 
     for (const tokenRecord of tokens) {
       try {
-        const result = await apns.sendNotification({
+        const result = await pushServiceFor(tokenRecord).sendNotification({
           deviceToken: tokenRecord.token,
           title,
           body: buildBody(actorName),
@@ -351,12 +362,13 @@ function registerNotificationHandlers(dependencies = {}) {
 
         for (const tokenRecord of tokens) {
           try {
+            const push = pushServiceFor(tokenRecord);
             const result = onCooldown
-              ? await apns.sendSilentNotification({
+              ? await push.sendSilentNotification({
                   deviceToken: tokenRecord.token,
                   payload,
                 })
-              : await apns.sendNotification({
+              : await push.sendNotification({
                   deviceToken: tokenRecord.token,
                   title: raceName || "Race chat",
                   body: alertBody,
