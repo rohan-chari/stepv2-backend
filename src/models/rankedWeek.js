@@ -29,6 +29,17 @@ const RankedWeek = {
     });
   },
 
+  // The newest week that hasn't closed yet (ACTIVE or mid-settlement SETTLING).
+  // During the Monday grace window the next week is intentionally not open yet
+  // (see computeRankedWeeks), so getCurrent() returns null; callers that need
+  // something to show — getRankedV2 — fall back to this still-settling week.
+  async getLatestUnclosed() {
+    return prisma.rankedWeek.findFirst({
+      where: { status: { in: ["ACTIVE", "SETTLING"] } },
+      orderBy: { index: "desc" },
+    });
+  },
+
   async getById(id) {
     return prisma.rankedWeek.findUnique({ where: { id } });
   },

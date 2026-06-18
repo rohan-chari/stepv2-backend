@@ -87,8 +87,9 @@ test("reuses the existing current week without re-enrolling", async () => {
   assert.deepEqual(ctx.recomputed, ["week-5"]);
 });
 
-test("keeps refreshing a boundary-passed week during the grace window instead of settling", async () => {
-  // Monday 02:00 UTC — last week ended 2h ago, inside the 18h grace.
+test("during the grace window, refreshes the prior week but does NOT open the next one", async () => {
+  // Monday 02:00 UTC — last week ended 2h ago, inside the 18h grace. The next
+  // week must wait until that week settles so enrollment reads the new tiers.
   const monday = new Date("2026-06-15T02:00:00Z");
   const lastWeek = {
     id: "week-5",
@@ -100,11 +101,14 @@ test("keeps refreshing a boundary-passed week during the grace window instead of
   await ctx.job();
 
   assert.equal(ctx.settledIds.length, 0);
-  // Both the freshly-opened current week and the grace-window week refreshed.
-  assert.deepEqual(ctx.recomputed.sort(), ["week-5", "week-new"]);
+  // The next week is held back: nothing created or enrolled during grace.
+  assert.equal(ctx.created.length, 0);
+  assert.equal(ctx.enrolled.length, 0);
+  // Only the grace-window week is refreshed.
+  assert.deepEqual(ctx.recomputed, ["week-5"]);
 });
 
-test("settles a week once the grace period elapses", async () => {
+test("settles the prior week, then opens the next one in the same tick", async () => {
   // Monday 19:00 UTC — 19h past the boundary, grace is 18h.
   const monday = new Date("2026-06-15T19:00:00Z");
   const lastWeek = {
@@ -116,7 +120,12 @@ test("settles a week once the grace period elapses", async () => {
   const ctx = makeCtx({ now: monday, unsettled: [lastWeek] });
   await ctx.job();
 
+  // Settlement applies the new tiers...
   assert.deepEqual(ctx.settledIds, ["week-5"]);
+  // ...and only then is the next week opened + enrolled (same tick, no gap).
+  assert.equal(ctx.created.length, 1);
+  assert.equal(ctx.created[0].index, 5);
+  assert.equal(ctx.enrolled.length, 1);
   assert.deepEqual(ctx.recomputed, ["week-new"]);
 });
 

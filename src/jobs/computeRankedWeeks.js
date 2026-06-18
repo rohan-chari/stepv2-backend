@@ -34,9 +34,31 @@ function buildComputeRankedWeeks(dependencies = {}) {
   return async function computeRankedWeeks() {
     const at = now();
 
-    // 1. Ensure the current week exists (Monday rollover / first run).
+    // 1. Settle (or, within the grace window, just refresh) every past-boundary
+    //    week BEFORE opening the next one. Enrollment tiers each player from
+    //    User.rankedTierV2, so the previous week's promotions/demotions must be
+    //    applied first — otherwise everyone promoted at settlement gets enrolled
+    //    into their *old* tier's cohort for the entire new week. A week still
+    //    inside its grace window blocks the next open (handled in step 2).
+    const unsettled = await weekModel.findUnsettled(at);
+    let graceBlocking = false;
+    for (const past of unsettled) {
+      if (new Date(past.endsOn).getTime() + graceMs <= at.getTime()) {
+        await settleRankedWeek({ weekId: past.id });
+      } else {
+        await recompute({ week: past });
+        graceBlocking = true;
+      }
+    }
+
+    // 2. Open the current week — but only once every past week has settled.
+    //    During the prior week's grace window we deliberately hold off, so the
+    //    new week starts up to SETTLE_GRACE_HOURS late and enrollment reads the
+    //    settled tiers. Settlement and this open land in the same tick, so there
+    //    is no closed-and-no-open gap; getRankedV2 surfaces the still-settling
+    //    prior week meanwhile (getLatestUnclosed), keeping the ranked tab live.
     let week = await weekModel.getCurrent(at);
-    if (!week) {
+    if (!week && !graceBlocking) {
       const startsOn = mondayOnOrBefore(at);
       const endsOn = addDaysUtc(startsOn, 7);
       const latestIndex = await weekModel.getLatestIndex();
@@ -54,21 +76,13 @@ function buildComputeRankedWeeks(dependencies = {}) {
       );
     }
 
-    // 2. Live standings for the current week.
-    const standings = await recompute({ week });
-
-    // 3. Past-boundary weeks: refresh during grace, settle after it.
-    const unsettled = await weekModel.findUnsettled(at);
-    for (const past of unsettled) {
-      if (past.id === week.id) continue;
-      if (new Date(past.endsOn).getTime() + graceMs <= at.getTime()) {
-        await settleRankedWeek({ weekId: past.id });
-      } else {
-        await recompute({ week: past });
-      }
+    // 3. Live standings for the open week (none exists during the grace gap).
+    let standings = { members: 0 };
+    if (week) {
+      standings = await recompute({ week });
     }
 
-    return { weekIndex: week.index, members: standings.members };
+    return { weekIndex: week ? week.index : null, members: standings.members };
   };
 }
 

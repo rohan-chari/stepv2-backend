@@ -37,6 +37,10 @@ async function getRaceDetails(userId, raceId) {
   return {
     id: race.id,
     name: race.name,
+    // Seed kind for the auto-generated daily/weekly public challenges (null for
+    // user-created races). Additive: older clients ignore the field; newer ones
+    // use it to show a clean "Daily/Weekly Challenge" label in the header.
+    seedKind: race.seed?.kind || null,
     status: race.status,
     maxDurationDays: race.maxDurationDays,
     targetSteps: race.targetSteps, // 1.1.4 compat

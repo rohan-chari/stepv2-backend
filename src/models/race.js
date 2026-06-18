@@ -41,6 +41,7 @@ const Race = {
       include: {
         creator: { select: { id: true, displayName: true, profilePhotoUrl: true } },
         winner: { select: { id: true, displayName: true, profilePhotoUrl: true } },
+        seed: { select: { kind: true } },
         ...participantInclude,
       },
     });

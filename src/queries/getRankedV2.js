@@ -104,7 +104,12 @@ async function getRankedV2({
   memberModel = defaultRankedCohortMember,
   now = () => new Date(),
 } = {}) {
-  const week = await weekModel.getCurrent(now());
+  // During the Monday grace window the next week hasn't opened yet (it waits
+  // for the prior week to settle — see computeRankedWeeks). getCurrent() is null
+  // then, so fall back to the still-settling prior week to keep the tab live.
+  const week =
+    (await weekModel.getCurrent(now())) ||
+    (await weekModel.getLatestUnclosed());
   const lastWeek = await getLastSettledResult(currentUserId);
 
   const user = await prisma.user.findUnique({

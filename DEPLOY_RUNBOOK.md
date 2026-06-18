@@ -35,6 +35,23 @@ git fetch origin
 git log -1 origin/main --oneline   # should be the merge/release commit you expect
 ```
 
+**Check prod's migration state _before_ running `migrate deploy`.** This tells
+you whether any prior migration is half-applied, which would otherwise block the
+deploy mid-run:
+
+```bash
+node scripts/check-prod-migrations.js
+```
+
+- **`VERDICT: prod is fully migrated`** → `migrate deploy` is a no-op; proceed.
+- **`VERDICT: prod is MISSING migrations`** → read the `unfinished/rolledback`
+  list. A migration in a *failed* state makes `migrate deploy` refuse (P3018)
+  until resolved — see Troubleshooting below.
+  - Known re-apply case: `20260615102652_race_results_seen`. A prior deploy
+    added its column before the backfill failed, so if it shows as unfinished,
+    `migrate resolve --rolled-back` it and re-run — its `ADD COLUMN IF NOT
+    EXISTS` + idempotent backfill make re-apply safe.
+
 ---
 
 ## 2. Free DB connections before migrating (important)
@@ -66,6 +83,16 @@ cd /var/www/step-tracker-backend \
 
 `seed.js` upserts cosmetics from `data/cosmetics.json` (items with
 `active: false` stay hidden from the shop).
+
+> **Forward-compat note — unlimited races (`maxParticipants: null`).** The
+> backend now returns `maxParticipants: null` for unlimited races and accepts
+> `null` on race creation. No currently-shipped app sends `null` (old clients
+> always send an integer), so deploying this backend alone creates no unlimited
+> races and old clients keep receiving integers — **safe to deploy on its own.**
+> This becomes a client concern only when you ship an app build that can create
+> unlimited races: confirm the **shipped** binary parses `maxParticipants`
+> null-tolerantly before releasing that client, or older clients viewing those
+> races may choke.
 
 ---
 
