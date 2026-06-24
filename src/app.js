@@ -84,6 +84,7 @@ function createApp(dependencies = {}) {
       appDeepLink: sharing.buildAppDeepLink(req.params.token),
       appStoreUrl: sharing.APP_STORE_URL,
       playStoreUrl: sharing.PLAY_STORE_URL,
+      ogImageUrl: sharing.OG_IMAGE_URL,
     };
     try {
       const preview = await getSharedRacePreview({ token: req.params.token });
@@ -105,6 +106,11 @@ function createApp(dependencies = {}) {
   app.get("/support.html", (req, res) => res.sendFile(path.join(publicDir, "support.html")));
   app.get("/privacy", (req, res) => res.sendFile(path.join(publicDir, "privacy.html")));
   app.get("/privacy.html", (req, res) => res.sendFile(path.join(publicDir, "privacy.html")));
+  // Bundled share-card image for link previews (point OG_IMAGE_URL at this).
+  // 404s harmlessly until a public/share-card.png is added.
+  app.get("/share-card.png", (req, res) =>
+    res.sendFile(path.join(publicDir, "share-card.png"))
+  );
 
   return app;
 }

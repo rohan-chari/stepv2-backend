@@ -35,6 +35,12 @@ const PLAY_STORE_URL =
   process.env.PLAY_STORE_URL ||
   `https://play.google.com/store/apps/details?id=${ANDROID_PACKAGE}`;
 
+// Open Graph share-card image for the link preview (the picture iMessage/social
+// show). Optional: empty by default so no broken image is advertised. Point it
+// at a 1200x630 PNG once one exists — e.g. OG_IMAGE_URL or the bundled
+// /share-card.png served from public/. Must be an absolute URL.
+const OG_IMAGE_URL = process.env.OG_IMAGE_URL || "";
+
 // Custom URL scheme — the reliable "Open in app" re-tap from the landing page
 // after install (custom schemes always launch the app if installed, even when
 // the universal-link association is still propagating).
@@ -60,6 +66,7 @@ module.exports = {
   APP_STORE_URL,
   PLAY_STORE_URL,
   APP_URL_SCHEME,
+  OG_IMAGE_URL,
   buildShareUrl,
   buildAppDeepLink,
 };

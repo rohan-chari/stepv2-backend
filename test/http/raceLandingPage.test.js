@@ -38,6 +38,24 @@ test("landing page sets Open Graph tags for a rich iMessage preview", () => {
   assert.match(html, /<meta property="og:description"/);
 });
 
+test("landing page emits og:image and a large card when an image is configured", () => {
+  const html = renderRaceLandingPage(makePreview(), {
+    ...links,
+    ogImageUrl: "https://steptracker-api.org/share-card.png",
+  });
+  assert.match(
+    html,
+    /<meta property="og:image" content="https:\/\/steptracker-api\.org\/share-card\.png"/
+  );
+  assert.match(html, /<meta name="twitter:card" content="summary_large_image"/);
+});
+
+test("landing page omits og:image (text-only summary) when no image is configured", () => {
+  const html = renderRaceLandingPage(makePreview(), links);
+  assert.doesNotMatch(html, /og:image/);
+  assert.match(html, /<meta name="twitter:card" content="summary"/);
+});
+
 test("landing page links to both stores and the custom-scheme deep link", () => {
   const html = renderRaceLandingPage(makePreview(), links);
   assert.match(html, /https:\/\/apps\.apple\.com\/app\/bara/);

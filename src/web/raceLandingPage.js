@@ -23,6 +23,17 @@ function escapeHtml(value) {
 function shell({ title, description, body, links }) {
   const safeTitle = escapeHtml(title);
   const safeDescription = escapeHtml(description);
+  // og:image is optional — emitted only when a share-card URL is configured, so
+  // we never advertise an image that 404s. When present, upgrade the Twitter
+  // card to the large (image) format; otherwise stay on the text-only summary.
+  const ogImage = links && links.ogImageUrl ? escapeHtml(links.ogImageUrl) : "";
+  const imageMeta = ogImage
+    ? `<meta property="og:image" content="${ogImage}" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="twitter:image" content="${ogImage}" />
+  `
+    : "";
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -32,7 +43,7 @@ function shell({ title, description, body, links }) {
   <meta property="og:title" content="${safeTitle}" />
   <meta property="og:description" content="${safeDescription}" />
   <meta property="og:type" content="website" />
-  <meta name="twitter:card" content="summary" />
+  ${imageMeta}<meta name="twitter:card" content="${ogImage ? "summary_large_image" : "summary"}" />
   <style>
     :root { color-scheme: light dark; }
     body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
