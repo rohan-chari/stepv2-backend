@@ -173,6 +173,72 @@ The script:
 
 ---
 
+## Shareable race links & deep links
+
+### Domain split: API on steptracker-api.org, user-facing links on barastep.com
+
+The **API stays on `steptracker-api.org`** (and `staging.steptracker-api.org`) —
+that's `BACKEND_BASE_URL`, baked into every shipped binary, and it never changes,
+so installed apps keep working with zero risk. Only the **user-facing web surface**
+moves to **`barastep.com`**: share links (`/r/:token`), the static pages
+(`/`, `/support`, `/privacy`), the deep-link verification files, and `share-card.png`.
+The win: links sent in iMessage show `barastep.com` (branded, not "suspicious")
+instead of the API hostname.
+
+This works because it's **one backend + one DB** behind nginx — `barastep.com` is
+just a second `server_name` pointing at the same app. The share token is minted
+into the same DB regardless of which host is advertised; the app extracts the
+token (the Dart parser is host-agnostic) and calls its own API base
+(`steptracker-api.org`) to join. iMessage sees barastep, the API stays on steptracker.
+
+Server setup (additive, ~zero downtime):
+- DNS (Cloudflare, records DNS-only / grey-cloud so the proxy can't break
+  Let's Encrypt or the `.well-known` files): `A barastep.com → <droplet IP>`
+  (+ `www`, + `staging.barastep.com` if mirroring staging).
+- TLS: `sudo certbot --nginx -d steptracker-api.org -d barastep.com --expand`.
+- nginx: add `barastep.com` to the prod block's `server_name` (same `proxy_pass`),
+  `staging.barastep.com` to staging. `nginx -t && systemctl reload nginx`.
+- Static-page redirects on the OLD host are fine (browser GETs, not the API):
+  `301 /privacy`,`/support` on steptracker-api.org → barastep.com.
+- Email: Cloudflare Email Routing forwards `support@barastep.com` → your inbox
+  (the static pages now use that address). Set this up BEFORE deploying the pages
+  or the mail bounces.
+
+| Env var | staging | prod | What it controls |
+|---|---|---|---|
+| `PUBLIC_BASE_URL` | `https://staging.barastep.com` | `https://barastep.com` | Host used to mint share links + the universal-link domain. Set explicitly in BOTH environments (the code default is still steptracker for safety — do not rely on it). **Set only after barastep.com serves the app**, or minted links will point at a domain that doesn't resolve. |
+| `OG_IMAGE_URL` | `https://staging.barastep.com/share-card.png` | `https://barastep.com/share-card.png` | Optional link-preview image. **Only set it once `public/share-card.png` (1200×630) actually exists** — otherwise the page advertises an `og:image` that 404s. Leave empty for a clean text-only card. |
+| `IOS_APP_ID` | `TEAMID.com.rohanchari.steptracker` | same | Apple Team ID + bundle id baked into the AASA file. |
+| `ANDROID_PACKAGE` / `ANDROID_SHA256_FINGERPRINTS` | from Play Console | same | Android App Links verification (`assetlinks.json`). Until the real signing fingerprints are set, Android links won't auto-open the app. |
+
+**`PUBLIC_BASE_URL` must match the app build's `applinks:` associated-domain.**
+A universal link only opens the app if the host in the link equals a domain the
+installed binary claims. The build now claims **`barastep.com`** (and keeps
+`steptracker-api.org`), so share links must be minted on barastep.com; otherwise
+links fall through to the browser landing page (the `bara://` "Open in app" button
+still works). The deep-link files' *content* is host-agnostic, so the same app
+serves valid `/.well-known/*` on both hosts automatically.
+
+### Before shipping an app version that uses share links — prod must be ready first
+
+These are server-side and reach **all** app versions at once, so deploy them to
+prod **before** the app build hits users:
+
+1. The `/r/:token` route + `/.well-known/apple-app-site-association` +
+   `/.well-known/assetlinks.json` are deployed and return 200.
+2. The env vars above are set (especially `PUBLIC_BASE_URL`, `IOS_APP_ID`,
+   `ANDROID_SHA256_FINGERPRINTS`).
+3. If using a preview image, `public/share-card.png` exists and
+   `GET /share-card.png` returns 200.
+
+> **`pm2 restart` ≠ deploy.** Restart only re-runs the code already checked out
+> on the droplet. New code (routes, the landing page, og:image support) must be
+> committed, pushed, and `git pull`ed onto the droplet's checkout first, then
+> restarted. Verify with `curl https://<host>/r/anytoken` (expect the
+> "Race not found — Bara" page, not a bare `Error` 404).
+
+---
+
 ## Deploying shop accessories (cosmetics)
 
 An accessory is two halves that deploy on different tracks:
