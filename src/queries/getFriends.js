@@ -64,12 +64,22 @@ async function getFriendsWithSteps(userId, date) {
     friends.map((f) => Steps.findByUserIdAndDate(f.id, date))
   );
 
-  return friends.map((f, i) => ({
-    ...f,
-    steps: stepsResults[i]?.steps ?? 0,
-    // 1.1.4 compat — pre-step-goal-removal clients render this on friend cards.
-    stepGoal: 5000,
-  }));
+  return friends
+    .map((f, i) => ({
+      ...f,
+      steps: stepsResults[i]?.steps ?? 0,
+      // 1.1.4 compat — pre-step-goal-removal clients render this on friend cards.
+      stepGoal: 5000,
+    }))
+    // Alphabetical by name so the invite-friends list is easy to scan. The
+    // friend's displayName lives on the related user (requester/addressee
+    // depending on direction), so there's no single column to ORDER BY in the
+    // Prisma query — sort here after mapping. Case-insensitive; null-safe.
+    .sort((a, b) =>
+      (a.displayName ?? "").localeCompare(b.displayName ?? "", undefined, {
+        sensitivity: "base",
+      })
+    );
 }
 
 module.exports = { getFriendsList, getPendingRequests, getIncomingFriendRequestCount, getFriendsWithSteps };

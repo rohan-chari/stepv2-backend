@@ -47,12 +47,16 @@ function rollDailyBoxRarity(streak, rng = Math.random) {
 }
 
 // Coin amount within a tier scales with streak progress so a longer streak
-// pays more even when the rarity roll comes up the same.
+// pays more even when the rarity roll comes up the same. Snapped to the
+// nearest multiple of 5 so payouts read as round numbers (10, 15, 20, …)
+// instead of 11/17 — range bounds are already multiples of 5, so the min/max
+// endpoints stay exact and rounding never escapes the range.
 function coinAmountForTier(rangeKey, streak) {
   const range = DAILY_BOX_COIN_RANGES[rangeKey];
   if (!range) return 0;
   const t = streakProgress(streak);
-  return range[0] + Math.round(t * (range[1] - range[0]));
+  const raw = range[0] + t * (range[1] - range[0]);
+  return Math.round(raw / 5) * 5;
 }
 
 // Weighted pick of an unowned accessory: weight grows with priceCoins, and a

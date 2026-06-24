@@ -47,6 +47,22 @@ const Race = {
     });
   },
 
+  // Resolve a race by its opaque share token (see utils/shareToken). Mirrors
+  // findById's include so the share preview + share-token join see the same
+  // creator/participant shape. Returns null for an unknown/revoked token.
+  async findByShareToken(shareToken) {
+    if (!shareToken) return null;
+    return prisma.race.findUnique({
+      where: { shareToken },
+      include: {
+        creator: { select: { id: true, displayName: true, profilePhotoUrl: true } },
+        winner: { select: { id: true, displayName: true, profilePhotoUrl: true } },
+        seed: { select: { kind: true } },
+        ...participantInclude,
+      },
+    });
+  },
+
   async create({
     creatorId,
     name,

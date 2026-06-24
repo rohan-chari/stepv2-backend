@@ -38,6 +38,12 @@ model User {
   // step or explicitly skipped it. Additive/back-compat: defaults false so
   // existing rows and old clients (which ignore the field) are unaffected.
   firstRaceOnboardingSeen Boolean @default(false) @map("first_race_onboarding_seen")
+  // True once the user has either completed or explicitly skipped the tutorial
+  // step in onboarding. Gates only the onboarding step UI — the one-time 100-coin
+  // tutorial reward is protected independently by the CoinTransaction ledger (see
+  // awardCoins reason="tutorial_complete"). Additive/back-compat: defaults false;
+  // a data migration backfills existing rows to true so they aren't re-onboarded.
+  tutorialOnboardingSeen Boolean @default(false) @map("tutorial_onboarding_seen")
   // Ranked: denormalized final tier from the most recently settled season, for
   // cheap cross-surface badges (races, leaderboard, profile). Additive/nullable
   // — null means unranked. Set by season settlement; never read by old clients.
@@ -572,6 +578,12 @@ model Race {
   // passes (raceExpiry.js). Additive/backward-compatible: defaults false so
   // legacy target races created by older app versions keep finishing on target.
   timeBased            Boolean    @default(false) @map("time_based")
+  // Opaque, unguessable token backing shareable race links (https://<host>/r/
+  // <token>). Nullable: minted lazily the first time a participant shares the
+  // race, so legacy races stay NULL until shared. Additive/backward-compatible —
+  // older app clients never read or send it. Unique so a token resolves to at
+  // most one race; @unique also creates the lookup index used by findByShareToken.
+  shareToken           String?    @unique @map("share_token")
   createdAt            DateTime   @default(now()) @map("created_at")
   updatedAt            DateTime   @updatedAt @map("updated_at")
 
@@ -901,6 +913,9 @@ model RankedCohortMember {
   resultTier     String? @map("result_tier") // home tier after settlement
   rewardCoins    Int?    @map("reward_coins")
   promotionCoins Int?    @map("promotion_coins")
+  // Display-only ack: set when the user has seen the post-settlement summary
+  // popup for this week. NULL = unseen. Additive; old app builds never read it.
+  resultsSeenAt  DateTime? @map("results_seen_at")
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
 

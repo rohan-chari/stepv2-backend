@@ -78,6 +78,15 @@ test("coinAmountForTier scales from range min to range max with streak", () => {
   assert.ok(mid < DAILY_BOX_COIN_RANGES.COMMON[1]);
 });
 
+test("coinAmountForTier always pays a multiple of 5", () => {
+  for (const tier of ["COMMON", "UNCOMMON", "RARE_FALLBACK"]) {
+    for (let streak = 1; streak <= DAILY_BOX_STREAK_CAP; streak++) {
+      const amount = coinAmountForTier(tier, streak);
+      assert.equal(amount % 5, 0, `${tier} @ streak ${streak} = ${amount}`);
+    }
+  }
+});
+
 test("coinAmountForTier returns 0 for unknown tier", () => {
   assert.equal(coinAmountForTier("NOPE", 5), 0);
 });

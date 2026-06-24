@@ -87,6 +87,10 @@ async function getLastSettledResult(userId) {
     include: { week: { select: { index: true } } },
   });
   if (!last) return null;
+  // Cohort size so the client can render "Nth of M" without a second request.
+  const cohortSize = await prisma.rankedCohortMember.count({
+    where: { cohortId: last.cohortId },
+  });
   return {
     weekIndex: last.week.index,
     finalRank: last.finalRank,
@@ -95,6 +99,11 @@ async function getLastSettledResult(userId) {
     outcome: last.outcome,
     rewardCoins: last.rewardCoins || 0,
     promotionCoins: last.promotionCoins || 0,
+    cohortSize,
+    // Drives the post-settlement summary popup (app >= 1.3.7). NULL ack column
+    // (old data / never acked) reads as unseen here; the backfill marked all
+    // pre-existing settled weeks seen so only fresh settlements pop.
+    resultsSeen: last.resultsSeenAt != null,
   };
 }
 

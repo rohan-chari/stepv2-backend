@@ -11,6 +11,16 @@ const {
   joinPublicRace: defaultJoinPublicRace,
 } = require("../commands/joinPublicRace");
 const {
+  joinRaceByShareToken: defaultJoinRaceByShareToken,
+} = require("../commands/joinRaceByShareToken");
+const {
+  createRaceShareLink: defaultCreateRaceShareLink,
+} = require("../commands/createRaceShareLink");
+const {
+  getSharedRacePreview: defaultGetSharedRacePreview,
+} = require("../queries/getSharedRacePreview");
+const { buildShareUrl } = require("../config/sharing");
+const {
   kickRaceParticipant: defaultKickRaceParticipant,
 } = require("../commands/kickRaceParticipant");
 const {
@@ -91,6 +101,12 @@ function createRacesRouter(dependencies = {}) {
     dependencies.respondToRaceInvite || defaultRespondToRaceInvite;
   const joinPublicRace =
     dependencies.joinPublicRace || defaultJoinPublicRace;
+  const joinRaceByShareToken =
+    dependencies.joinRaceByShareToken || defaultJoinRaceByShareToken;
+  const createRaceShareLink =
+    dependencies.createRaceShareLink || defaultCreateRaceShareLink;
+  const getSharedRacePreview =
+    dependencies.getSharedRacePreview || defaultGetSharedRacePreview;
   const kickRaceParticipant =
     dependencies.kickRaceParticipant || defaultKickRaceParticipant;
   const getPublicRaces =
@@ -128,6 +144,24 @@ function createRacesRouter(dependencies = {}) {
   const userModel = dependencies.User || defaultUserModel;
   const powerupModel = dependencies.RacePowerup || defaultPowerupModel;
   const effectModel = dependencies.RaceActiveEffect || defaultEffectModel;
+
+  // GET /races/share/:token  — PUBLIC, declared BEFORE requireAuth so the
+  // landing page and the app's pre-join screen can read a shared race without a
+  // session. Returns only display-safe fields (see getSharedRacePreview); 404
+  // for an unknown/revoked token. Declared ahead of the authed GET /:raceId so
+  // "share" is never mistaken for a race id.
+  router.get("/share/:token", async (req, res) => {
+    try {
+      const preview = await getSharedRacePreview({ token: req.params.token });
+      if (!preview) {
+        return res.status(404).json({ error: "Race not found" });
+      }
+      res.json({ race: preview });
+    } catch (error) {
+      console.error("Get shared race preview error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
 
   router.use(requireAuth);
 
@@ -224,6 +258,51 @@ function createRacesRouter(dependencies = {}) {
         return res.status(status).json({ error: error.message });
       }
       console.error("Join public race error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // POST /races/:raceId/share-link
+  // Mints (or returns the existing) shareable link for a race the caller
+  // participates in. Idempotent. Returns { shareToken, url }.
+  router.post("/:raceId/share-link", async (req, res) => {
+    try {
+      const { shareToken } = await createRaceShareLink({
+        userId: req.user.id,
+        raceId: req.params.raceId,
+      });
+      res.status(201).json({ shareToken, url: buildShareUrl(shareToken) });
+    } catch (error) {
+      if (error.name === "RaceShareLinkError") {
+        const status = error.statusCode || 400;
+        return res.status(status).json({ error: error.message });
+      }
+      console.error("Create race share link error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // POST /races/share/:token/join
+  // Joins the race behind a shared link. Bypasses the isPublic gate (possession
+  // of the token IS the invite). Optional body { onboarding } mirrors
+  // POST /:raceId/join. Distinct segment count from /:raceId/join — no collision.
+  router.post("/share/:token/join", async (req, res) => {
+    try {
+      const participant = await joinRaceByShareToken({
+        userId: req.user.id,
+        token: req.params.token,
+        onboarding: req.body && req.body.onboarding === true,
+      });
+      res.status(201).json({ participant, raceId: participant.raceId });
+    } catch (error) {
+      if (
+        error.name === "RaceShareJoinError" ||
+        error.name === "RaceJoinError"
+      ) {
+        const status = error.statusCode || 400;
+        return res.status(status).json({ error: error.message });
+      }
+      console.error("Join race by share token error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });
