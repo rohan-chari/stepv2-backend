@@ -21,6 +21,9 @@ async function getRaceDetails(userId, raceId) {
     throw error;
   }
 
+  const acceptedCount = race.participants.filter(
+    (p) => p.status === "ACCEPTED"
+  ).length;
   const heldPotCoins = race.participants.reduce((sum, participant) => {
     if (participant.buyInStatus === "HELD") {
       return sum + (participant.buyInAmount || 0);
@@ -31,6 +34,7 @@ async function getRaceDetails(userId, raceId) {
   const payouts = computeRacePayouts({
     preset: race.payoutPreset,
     potCoins: projectedPotCoins,
+    participantCount: acceptedCount,
   });
   const finishRewardPool = getFinishRewardPool(race.seedId);
 
@@ -49,11 +53,20 @@ async function getRaceDetails(userId, raceId) {
     potCoins: race.potCoins || 0,
     heldPotCoins,
     projectedPotCoins,
+    // Legacy three-place shape, kept for app builds that predate payoutTiers.
+    // They read first/second/third and only ever show the podium, which degrades
+    // gracefully for the field-scaled presets (they just don't see places 4+).
     payouts: {
-      first: payouts[0],
-      second: payouts[1],
-      third: payouts[2],
+      first: payouts[0] || 0,
+      second: payouts[1] || 0,
+      third: payouts[2] || 0,
     },
+    // Full payout breakdown, one entry per paid place (placement 1..N). Newer app
+    // builds render this; older ones ignore it and fall back to `payouts` above.
+    payoutTiers: payouts.map((amount, index) => ({
+      placement: index + 1,
+      amount,
+    })),
     // Minted reward for seeded races (no buy-in). null when the race pays no
     // finish reward. Additive: older clients ignore the field.
     finishReward:

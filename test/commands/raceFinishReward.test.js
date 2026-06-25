@@ -222,6 +222,46 @@ test("buy-in pot payouts still work and do not trigger a finish reward", async (
   assert.equal(finishRewardCalls(ctx.awardCalls).length, 0);
 });
 
+test("field-scaled buy-in payout pays every place but last, descending", async () => {
+  // 5-runner buy-in race, everyone ranked at the deadline → 4 paid, last gets 0.
+  const participants = [];
+  for (let i = 1; i <= 5; i++) {
+    participants.push(makeParticipant(`rp-${i}`, `user-${i}`, i, 6000 - i * 500));
+  }
+  const ctx = makeDeps({
+    race: {
+      id: "race-abl",
+      seedId: null,
+      potCoins: 500,
+      payoutPreset: "ALL_BUT_LAST",
+      participants,
+    },
+  });
+  const complete = buildCompleteRace(ctx.deps);
+
+  await complete({ raceId: "race-abl", winnerUserId: "user-1", participantUserIds: [] });
+
+  const potCalls = ctx.awardCalls.filter((c) => c.reason === "race_buy_in_payout");
+  // 5 runners → all but last → 4 paid places (last place, user-5, gets nothing).
+  assert.equal(potCalls.length, 4);
+  assert.deepEqual(
+    potCalls.map((c) => c.userId),
+    ["user-1", "user-2", "user-3", "user-4"]
+  );
+  // descending, distinct refId per placement, and the whole pot is handed out
+  for (let i = 1; i < potCalls.length; i++) {
+    assert.ok(potCalls[i - 1].amount >= potCalls[i].amount);
+  }
+  assert.deepEqual(
+    potCalls.map((c) => c.refId),
+    ["race-abl:1", "race-abl:2", "race-abl:3", "race-abl:4"]
+  );
+  assert.equal(
+    potCalls.reduce((sum, c) => sum + c.amount, 0),
+    500
+  );
+});
+
 test("an already-completed race pays nothing (single-fire guard)", async () => {
   const ctx = makeDeps({
     updateCount: 0, // updateIfActive matched no ACTIVE row → already completed

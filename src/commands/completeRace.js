@@ -40,19 +40,29 @@ function buildCompleteRace(dependencies = {}) {
 
     const race = await raceModel.findById(raceId);
     if (race?.potCoins > 0) {
+      // Pay the buy-in pot out by finishing place. The number of paid places is
+      // fixed for winner-takes-all/top-3 but scales with the field for the
+      // field-scaled presets (top half, everyone but last), so drive the loop off
+      // the computed payout array (index 0 = 1st) rather than a hard-coded
+      // [1,2,3]. `participantCount` is the ranked field size — for the deadline
+      // settlement path the whole accepted field is ranked, which is exactly what
+      // those presets need.
+      const rankedParticipants = race.participants
+        .filter((participant) => participant.placement != null)
+        .sort((a, b) => a.placement - b.placement);
       const payouts = computeRacePayouts({
         preset: race.payoutPreset || "WINNER_TAKES_ALL",
         potCoins: race.potCoins,
+        participantCount: rankedParticipants.length,
       });
-      const placements = [1, 2, 3];
 
-      for (let index = 0; index < placements.length; index++) {
-        const placement = placements[index];
+      for (let index = 0; index < payouts.length; index++) {
+        const placement = index + 1;
         const amount = payouts[index] || 0;
         if (amount <= 0) continue;
 
         const recipient =
-          race.participants.find((participant) => participant.placement === placement) ||
+          rankedParticipants[index] ||
           (placement === 1
             ? race.participants.find((participant) => participant.userId === winnerUserId)
             : null);

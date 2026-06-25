@@ -69,6 +69,7 @@ async function getRaces(userId) {
     const payouts = computeRacePayouts({
       preset: race.payoutPreset,
       potCoins: projectedPotCoins,
+      participantCount: acceptedCount,
     });
     const finishRewardPool = getFinishRewardPool(race.seedId);
     const myPlacement =
@@ -93,11 +94,18 @@ async function getRaces(userId) {
       potCoins: race.potCoins || 0,
       heldPotCoins,
       projectedPotCoins,
+      // Legacy three-place shape for app builds that predate payoutTiers; they
+      // show only the podium, which degrades gracefully for field-scaled presets.
       payouts: {
-        first: payouts[0],
-        second: payouts[1],
-        third: payouts[2],
+        first: payouts[0] || 0,
+        second: payouts[1] || 0,
+        third: payouts[2] || 0,
       },
+      // Full breakdown (placement 1..N); newer builds render it, older ignore it.
+      payoutTiers: payouts.map((amount, index) => ({
+        placement: index + 1,
+        amount,
+      })),
       finishReward:
         finishRewardPool > 0
           ? { pool: finishRewardPool, topFraction: FINISH_REWARD_TOP_FRACTION }

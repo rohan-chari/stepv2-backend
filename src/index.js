@@ -11,6 +11,7 @@ const { scheduleGlobalStepEvents } = require("./jobs/globalStepEventScheduler");
 const {
   scheduleAutoStartScheduledRaces,
 } = require("./jobs/autoStartScheduledRaces");
+const { scheduleRecomputePlacements } = require("./jobs/placementRecompute");
 
 function startServer({
   app = createApp(),
@@ -25,6 +26,7 @@ function startServer({
   scheduleGlobalStepEvents: scheduleGlobalEvents = scheduleGlobalStepEvents,
   scheduleAutoStartScheduledRaces:
     scheduleAutoStartRaces = scheduleAutoStartScheduledRaces,
+  scheduleRecomputePlacements: scheduleLivePlacements = scheduleRecomputePlacements,
   logger = console,
 } = {}) {
   register();
@@ -38,6 +40,13 @@ function startServer({
     scheduleRankedWeeks();
     scheduleGlobalEvents();
     scheduleAutoStartRaces();
+    // Live placement broadcast (Phase 0). Runs by default like the other jobs. The
+    // env var is an emergency kill switch ONLY (set LIVE_PLACEMENT_DISABLED=true to
+    // stop the per-placement push fan-out without a code deploy) — kept because this
+    // is the one job that can push to the whole user base on a 5-minute cadence.
+    if (process.env.LIVE_PLACEMENT_DISABLED !== "true") {
+      scheduleLivePlacements();
+    }
   });
 }
 

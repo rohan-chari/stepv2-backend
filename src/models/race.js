@@ -232,6 +232,22 @@ const Race = {
     });
   },
 
+  // ACTIVE races that have NOT yet expired — the complement of findActiveExpired,
+  // used by the live placement-recompute job (Phase 0). Excludes endsAt <= now so
+  // the live job never collides with raceExpiry's settlement; includes endsAt:null
+  // (open-ended target races, which raceExpiry never settles) so they still get
+  // live updates. Lean select: the job only needs id (to call resolveRaceState)
+  // and name (for the placement-change push body).
+  async findActiveInProgress(now) {
+    return prisma.race.findMany({
+      where: {
+        status: "ACTIVE",
+        OR: [{ endsAt: { gt: now } }, { endsAt: null }],
+      },
+      select: { id: true, name: true },
+    });
+  },
+
   // PENDING, user-created (non-seeded) races whose scheduledStartAt has arrived.
   // Used by the autoStartScheduledRaces cron job (1.1.7). Seeded races
   // (seedId != null) are excluded — they have their own auto-start/renewal in

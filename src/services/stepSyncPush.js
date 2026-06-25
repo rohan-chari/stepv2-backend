@@ -1,6 +1,7 @@
 const { User } = require("../models/user");
 const { DeviceToken } = require("../models/deviceToken");
 const { apnsService } = require("./apns");
+const { fcmService } = require("./fcm");
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
 
@@ -13,6 +14,7 @@ function buildStepSyncPushService(dependencies = {}) {
   const userModel = dependencies.User || User;
   const deviceTokenModel = dependencies.DeviceToken || DeviceToken;
   const apns = dependencies.apnsService || apnsService;
+  const fcm = dependencies.fcmService || fcmService;
   const logger = dependencies.logger || console;
   const now = dependencies.now || (() => new Date());
 
@@ -36,14 +38,18 @@ function buildStepSyncPushService(dependencies = {}) {
     }
 
     const tokens = await deviceTokenModel.findByUserId(userId);
-    const iosTokens = (tokens || []).filter((token) => token.platform === "ios");
-    if (iosTokens.length === 0) return;
+    if (!tokens || tokens.length === 0) return;
 
     let hadSuccessfulSend = false;
 
-    for (const tokenRecord of iosTokens) {
+    // Phase 3: route by platform — Android -> FCM (silent data message that wakes a
+    // WorkManager expedited sync), everything else (iOS) -> APNs silent push (which
+    // triggers the native performSync). Both senders share the result contract, so the
+    // success / unregistered / cooldown handling below is identical.
+    for (const tokenRecord of tokens) {
+      const push = tokenRecord.platform === "android" ? fcm : apns;
       try {
-        const result = await apns.sendSilentNotification({
+        const result = await push.sendSilentNotification({
           deviceToken: tokenRecord.token,
           payload: { type: "STEP_SYNC_REQUEST" },
         });

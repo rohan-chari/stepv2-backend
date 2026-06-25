@@ -534,6 +534,11 @@ enum RacePayoutPreset {
   WINNER_TAKES_ALL  @map("winner_takes_all")
   TOP3_70_20_10     @map("top3_70_20_10")
   TOP3_80_15_5      @map("top3_80_15_5")
+  // Field-scaled presets (added later): the number of paid places grows with the
+  // field. Only emitted by newer app builds; older clients keep sending the
+  // three above. See src/utils/racePayoutPresets.js.
+  TOP_HALF          @map("top_half")
+  ALL_BUT_LAST      @map("all_but_last")
 }
 
 enum RaceBuyInStatus {
@@ -656,6 +661,11 @@ model RaceParticipant {
   buyInStatus   RaceBuyInStatus       @default(NONE) @map("buy_in_status")
   payoutCoins   Int                   @default(0) @map("payout_coins")
   placement     Int?
+  // Live placement broadcast (Phase 0): last live rank we pushed to this
+  // participant, for idempotent change detection in placementRecompute. NULL =
+  // baseline not yet seeded. Additive + nullable; never returned by any API
+  // response, so already-shipped app versions are unaffected.
+  lastNotifiedPlacement Int?           @map("last_notified_placement")
   finishedAt    DateTime?             @map("finished_at")
   finishTotalSteps Int?               @map("finish_total_steps")
   joinedAt      DateTime              @default(now()) @map("joined_at")

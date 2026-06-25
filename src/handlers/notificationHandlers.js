@@ -424,6 +424,103 @@ function registerNotificationHandlers(dependencies = {}) {
     }
   });
 
+  // Live placement broadcast (Phase 0). The placementRecompute job emits this when
+  // a participant's live rank changes. Send a SILENT push on every change (so an
+  // updated client can refresh quietly), and upgrade to a visible ALERT only on a
+  // meaningful move — being overtaken (rank got worse) or taking 1st — throttled
+  // per (race,user) so a user in many races isn't spammed. The cooldown is in
+  // memory (single pm2 instance per env; move to a shared store if scaled out).
+  // Old app versions don't know the PLACEMENT_CHANGED route: the alert still shows,
+  // and tap routing is a harmless no-op (their _routeFromType returns null).
+  const PLACEMENT_ALERT_COOLDOWN_MS = 10 * 60 * 1000;
+  const lastPlacementAlertAt = new Map(); // `${raceId}:${userId}` -> epoch ms
+
+  function ordinal(n) {
+    const s = ["th", "st", "nd", "rd"];
+    const v = n % 100;
+    return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`;
+  }
+
+  events.on("PLACEMENT_CHANGED", async (data) => {
+    try {
+      const { raceId, raceName, userId, previousPlacement, placement } = data || {};
+      if (!userId || placement == null) return;
+
+      const tokens = await deviceTokenModel.findByUserId(userId);
+      if (!tokens || tokens.length === 0) return;
+
+      const dropped =
+        typeof previousPlacement === "number" && placement > previousPlacement;
+      const tookFirst = placement === 1 && previousPlacement !== 1;
+      const meaningful = dropped || tookFirst;
+
+      const cooldownKey = `${raceId}:${userId}`;
+      const nowMs = Date.now();
+      const withinCooldown =
+        nowMs - (lastPlacementAlertAt.get(cooldownKey) || 0) <
+        PLACEMENT_ALERT_COOLDOWN_MS;
+      const sendAlert = meaningful && !withinCooldown;
+      if (sendAlert) lastPlacementAlertAt.set(cooldownKey, nowMs);
+
+      const label = raceName || "your race";
+      const title = tookFirst ? "You're in the lead!" : "You've been passed";
+      const body = tookFirst
+        ? `You took 1st in ${label}.`
+        : `You dropped to ${ordinal(placement)} in ${label}.`;
+      const payload = {
+        type: "PLACEMENT_CHANGED",
+        route: "race_detail",
+        params: { raceId },
+        placement,
+      };
+
+      for (const tokenRecord of tokens) {
+        try {
+          const push = pushServiceFor(tokenRecord);
+          const result = sendAlert
+            ? await push.sendNotification({
+                deviceToken: tokenRecord.token,
+                title,
+                body,
+                payload,
+                collapseId: `placement_${raceId}`,
+              })
+            : await push.sendSilentNotification({
+                deviceToken: tokenRecord.token,
+                payload,
+              });
+
+          if (!result.success && !result.unregistered) {
+            logger.warn("PLACEMENT_CHANGED push failed", {
+              raceId,
+              recipientUserId: userId,
+              deviceTokenSuffix: deviceTokenSuffix(tokenRecord.token),
+              statusCode: result.statusCode,
+              reason: result.reason,
+            });
+          }
+          if (result.unregistered) {
+            await deviceTokenModel.deleteToken({
+              userId,
+              token: tokenRecord.token,
+            });
+          }
+        } catch (error) {
+          logger.error("PLACEMENT_CHANGED push threw", {
+            raceId,
+            recipientUserId: userId,
+            deviceTokenSuffix: deviceTokenSuffix(tokenRecord.token),
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+    } catch (error) {
+      logger.error("PLACEMENT_CHANGED handler failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
 }
 
 module.exports = { registerNotificationHandlers };
