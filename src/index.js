@@ -12,6 +12,8 @@ const {
   scheduleAutoStartScheduledRaces,
 } = require("./jobs/autoStartScheduledRaces");
 const { scheduleRecomputePlacements } = require("./jobs/placementRecompute");
+const { scheduleNotificationCleanup } = require("./jobs/notificationCleanup");
+const { scheduleDailyMover } = require("./jobs/dailyMover");
 
 function startServer({
   app = createApp(),
@@ -27,6 +29,8 @@ function startServer({
   scheduleAutoStartScheduledRaces:
     scheduleAutoStartRaces = scheduleAutoStartScheduledRaces,
   scheduleRecomputePlacements: scheduleLivePlacements = scheduleRecomputePlacements,
+  scheduleNotificationCleanup: scheduleNotifCleanup = scheduleNotificationCleanup,
+  scheduleDailyMover: scheduleDaily = scheduleDailyMover,
   logger = console,
 } = {}) {
   register();
@@ -46,6 +50,17 @@ function startServer({
     // is the one job that can push to the whole user base on a 5-minute cadence.
     if (process.env.LIVE_PLACEMENT_DISABLED !== "true") {
       scheduleLivePlacements();
+    }
+    // Nightly prune of the notifications audit log (1am ET). Kill switch:
+    // NOTIFICATION_CLEANUP_DISABLED=true.
+    if (process.env.NOTIFICATION_CLEANUP_DISABLED !== "true") {
+      scheduleNotifCleanup();
+    }
+    // Daily biggest-mover digest (4pm ET) — like live placement, this can push to
+    // the whole active-racer base, so it gets its own kill switch:
+    // DAILY_MOVER_DISABLED=true.
+    if (process.env.DAILY_MOVER_DISABLED !== "true") {
+      scheduleDaily();
     }
   });
 }

@@ -3,6 +3,7 @@ const { User } = require("../models/user");
 const { DeviceToken } = require("../models/deviceToken");
 const { apnsService } = require("../services/apns");
 const { fcmService } = require("../services/fcm");
+const { Notification } = require("../models/notification");
 const { prisma } = require("../db");
 
 const CHAT_PUSH_COOLDOWN_MS = 60_000;
@@ -14,7 +15,30 @@ function registerNotificationHandlers(dependencies = {}) {
   const apns = dependencies.apnsService || apnsService;
   const fcm = dependencies.fcmService || fcmService;
   const raceParticipantModel = dependencies.RaceParticipant || prisma.raceParticipant;
+  const notificationModel = dependencies.Notification || Notification;
   const logger = dependencies.logger || console;
+
+  // Persist one row per user-facing (visible) notification we send, for audit /
+  // debugging (a nightly job prunes rows older than a week). Best-effort: a
+  // logging failure must never break the actual push, so it's swallowed.
+  async function recordNotification({ userId, type, title, body, raceId }) {
+    if (!userId || !type) return;
+    try {
+      await notificationModel.create({
+        userId,
+        type,
+        title: title ?? null,
+        body: body ?? null,
+        raceId: raceId ?? null,
+      });
+    } catch (error) {
+      logger.error("recordNotification failed", {
+        userId,
+        type,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
 
   function deviceTokenSuffix(token) {
     if (!token || typeof token !== "string") return "";
@@ -56,12 +80,14 @@ function registerNotificationHandlers(dependencies = {}) {
     const tokens = await deviceTokenModel.findByUserId(recipientUserId);
     if (!tokens || tokens.length === 0) return;
 
+    const body = buildBody(actorName);
+
     for (const tokenRecord of tokens) {
       try {
         const result = await pushServiceFor(tokenRecord).sendNotification({
           deviceToken: tokenRecord.token,
           title,
-          body: buildBody(actorName),
+          body,
           payload,
         });
 
@@ -88,6 +114,18 @@ function registerNotificationHandlers(dependencies = {}) {
         });
       }
     }
+
+    // One audit row per recipient (the user had tokens, so we dispatched).
+    await recordNotification({
+      userId: recipientUserId,
+      type: (payload && payload.type) || eventName,
+      title,
+      body,
+      raceId:
+        (payload && payload.params && payload.params.raceId) ||
+        (payload && payload.raceId) ||
+        null,
+    });
   }
 
   events.on("FRIEND_REQUEST_SENT", async (data) => {
@@ -415,6 +453,15 @@ function registerNotificationHandlers(dependencies = {}) {
               error: error instanceof Error ? error.message : String(error),
             });
           }
+
+          // Only the visible alert (not the cooldown silent push) is recorded.
+          await recordNotification({
+            userId: recipient.userId,
+            type: "race_message",
+            title: raceName || "Race chat",
+            body: alertBody,
+            raceId,
+          });
         }
       }
     } catch (error) {
@@ -537,8 +584,91 @@ function registerNotificationHandlers(dependencies = {}) {
           });
         }
       }
+
+      // Record only the visible alert; the silent refresh push is not user-facing.
+      if (sendAlert) {
+        await recordNotification({
+          userId,
+          type: "PLACEMENT_CHANGED",
+          title,
+          body,
+          raceId,
+        });
+      }
     } catch (error) {
       logger.error("PLACEMENT_CHANGED handler failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // Daily biggest-mover digest (dailyMover job @4pm ET). One visible push for the
+  // race a user moved the most in over the last 24h; copy adapts to up vs down.
+  events.on("DAILY_MOVER", async (data) => {
+    try {
+      const { userId, raceId, raceName, movement, placement } = data || {};
+      if (!userId || !movement || placement == null) return;
+
+      const tokens = await deviceTokenModel.findByUserId(userId);
+      if (!tokens || tokens.length === 0) return;
+
+      const label = raceName || "your race";
+      const spots = Math.abs(movement);
+      const climbed = movement > 0;
+      const title = climbed ? "You're climbing! 📈" : "You slipped 📉";
+      const body = climbed
+        ? `You moved up ${spots} ${spots === 1 ? "spot" : "spots"} in ${label} today — now ${ordinal(placement)}.`
+        : `You dropped ${spots} ${spots === 1 ? "spot" : "spots"} in ${label} today — now ${ordinal(placement)}.`;
+
+      const payload = {
+        type: "DAILY_MOVER",
+        route: "race_detail",
+        params: { raceId },
+        placement,
+      };
+
+      for (const tokenRecord of tokens) {
+        try {
+          const push = pushServiceFor(tokenRecord);
+          const result = await push.sendNotification({
+            deviceToken: tokenRecord.token,
+            title,
+            body,
+            payload,
+            collapseId: `daily_mover_${raceId}`,
+          });
+
+          if (!result.success && !result.unregistered) {
+            logger.warn("DAILY_MOVER push failed", {
+              raceId,
+              recipientUserId: userId,
+              deviceTokenSuffix: deviceTokenSuffix(tokenRecord.token),
+              statusCode: result.statusCode,
+              reason: result.reason,
+            });
+          }
+          if (result.unregistered) {
+            await deviceTokenModel.deleteToken({ userId, token: tokenRecord.token });
+          }
+        } catch (error) {
+          logger.error("DAILY_MOVER push threw", {
+            raceId,
+            recipientUserId: userId,
+            deviceTokenSuffix: deviceTokenSuffix(tokenRecord.token),
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
+      await recordNotification({
+        userId,
+        type: "DAILY_MOVER",
+        title,
+        body,
+        raceId,
+      });
+    } catch (error) {
+      logger.error("DAILY_MOVER handler failed", {
         error: error instanceof Error ? error.message : String(error),
       });
     }

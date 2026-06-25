@@ -82,6 +82,13 @@ async function getRaces(userId) {
       race.status === "ACTIVE" && race.powerupsEnabled && myParticipant
         ? await RacePowerup.countQueuedByParticipant(myParticipant.id)
         : 0;
+    // Held/openable mystery boxes (0..powerupSlots) so the races list can show
+    // how many boxes the user has waiting without opening the race. Additive
+    // field: older app builds ignore it.
+    const mysteryBoxCount =
+      race.status === "ACTIVE" && race.powerupsEnabled && myParticipant
+        ? await RacePowerup.countMysteryBoxesByParticipant(myParticipant.id)
+        : 0;
 
     const summary = {
       id: race.id,
@@ -122,6 +129,7 @@ async function getRaces(userId) {
       myPayoutCoins: myParticipant?.payoutCoins || 0,
       myResultsSeen: (myParticipant?.resultsSeenAt != null),
       queuedBoxCount,
+      mysteryBoxCount,
       isCreator: race.creatorId === userId,
       isPublic: race.isPublic || false,
       // null => unlimited (no cap). Serialized as null; older app clients read
