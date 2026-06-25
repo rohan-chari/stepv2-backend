@@ -46,3 +46,24 @@ in-the-wild app version do when it hits this?"*
 
 See `DEPLOYMENT.md` and `DEPLOY_RUNBOOK.md` for the deploy procedure and
 incident playbook.
+
+## Connecting to the droplet (SSH)
+
+The droplet host, user, and credentials are deliberately **not** in this repo
+(see `DEPLOY_RUNBOOK.md`). But everything needed to connect already lives on
+the developer's machine, so don't ask for it — recover it locally:
+
+1. **Key:** the SSH private key is in the standard `~/.ssh/` location (an
+   `id_*` file whose matching `~/.ssh/*.pub` exists). It's the default
+   identity, so plain `ssh` picks it up with no `-i` flag needed.
+2. **Host:** the repo keeps no host IP. Recover the droplet's address from the
+   developer's `~/.ssh/known_hosts` — for this single-server setup it's the one
+   host that appears there (the same box runs prod + staging). The SSH user is
+   `root` (per the runbook examples).
+3. **Verify before deploying:** open with a **read-only** command first
+   (`ssh -o BatchMode=yes <user>@<host> 'pm2 list'`) to confirm key auth works
+   and you're on the right box (prod = pm2 id `3`, staging = id `4`) before
+   running anything that mutates prod.
+
+Never write the recovered host/credentials into a file, commit, or chat — read
+them inline each session and keep them out of the repo.
