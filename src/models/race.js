@@ -22,6 +22,7 @@ const participantInclude = {
                   slot: true,
                   assetKey: true,
                   renderMetadata: true,
+                  bobble: true,
                   testOnly: true,
                 },
               },
@@ -200,6 +201,12 @@ const Race = {
           { creatorId: null },
           { creator: { isReviewAccount: false } },
         ],
+        // Seeded races are joinable from the browse list only when ACTIVE. Their
+        // pre-created PENDING "next" race is surfaced ONLY via
+        // getFeaturedRaces.upcoming, so old app builds — which would mis-render a
+        // not-yet-started race here with an "ends in" countdown — never see it.
+        // User-created (seedId null) PENDING races still appear as before.
+        NOT: { status: "PENDING", seedId: { not: null } },
       },
       include: {
         creator: { select: { id: true, displayName: true, profilePhotoUrl: true } },

@@ -144,6 +144,72 @@ function getNextMonday9amNewYork(
   ).toISOString();
 }
 
+// 00:00 (midnight) of `date`'s LOCAL calendar day in `timeZone`, as a UTC Date.
+// Used to anchor seeded daily races to midnight ET. DST-correct: zonedDateTimeToUtc
+// applies the offset in effect for that local midnight (EST vs EDT).
+function startOfDayNewYork(date = new Date(), timeZone = "America/New_York") {
+  const parts = getTimeZoneParts(date, timeZone);
+  return zonedDateTimeToUtc(
+    {
+      year: parts.year,
+      month: parts.month,
+      day: parts.day,
+      hour: 0,
+      minute: 0,
+      second: 0,
+    },
+    timeZone
+  );
+}
+
+// 00:00 of the LOCAL day AFTER `date`'s local day in `timeZone`, as a UTC Date.
+// This is the exact end boundary of a midnight-aligned daily race. DST-aware: a
+// daily race is one CALENDAR day (23h on spring-forward, 25h on fall-back), not a
+// fixed 24h offset, because both midnights are resolved through the tz.
+function nextMidnightNewYork(date = new Date(), timeZone = "America/New_York") {
+  const parts = getTimeZoneParts(date, timeZone);
+  // Increment the local calendar day via a UTC anchor (handles month/year
+  // rollover); zonedDateTimeToUtc then applies the correct offset for that day.
+  const localDayAfter = new Date(
+    Date.UTC(parts.year, parts.month - 1, parts.day)
+  );
+  localDayAfter.setUTCDate(localDayAfter.getUTCDate() + 1);
+  return zonedDateTimeToUtc(
+    {
+      year: localDayAfter.getUTCFullYear(),
+      month: localDayAfter.getUTCMonth() + 1,
+      day: localDayAfter.getUTCDate(),
+      hour: 0,
+      minute: 0,
+      second: 0,
+    },
+    timeZone
+  );
+}
+
+// 00:00 Monday of `date`'s LOCAL week in `timeZone`, as a UTC Date. The start
+// boundary of a midnight-aligned weekly race.
+function startOfWeekNewYork(date = new Date(), timeZone = "America/New_York") {
+  const monday = getMondayOfWeek(date, timeZone); // "YYYY-MM-DD"
+  const { year, month, day } = parseDateString(monday);
+  return zonedDateTimeToUtc(
+    { year, month, day, hour: 0, minute: 0, second: 0 },
+    timeZone
+  );
+}
+
+// 00:00 of the NEXT Monday after `date`'s local week, as a UTC Date. The end
+// boundary of the current weekly race / start boundary of the next one.
+function nextWeekStartNewYork(date = new Date(), timeZone = "America/New_York") {
+  const monday = getMondayOfWeek(date, timeZone);
+  const nextMonday = addDaysToDateString(monday, 7);
+  const { year, month, day } = parseDateString(nextMonday);
+  return zonedDateTimeToUtc(
+    { year, month, day, hour: 0, minute: 0, second: 0 },
+    timeZone
+  );
+}
+
 module.exports = {
   addDaysToDateString,
   formatDateString,
@@ -152,4 +218,8 @@ module.exports = {
   getTimeZoneParts,
   parseDateString,
   zonedDateTimeToUtc,
+  startOfDayNewYork,
+  nextMidnightNewYork,
+  startOfWeekNewYork,
+  nextWeekStartNewYork,
 };

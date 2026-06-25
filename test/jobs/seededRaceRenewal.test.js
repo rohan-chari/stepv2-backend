@@ -3,203 +3,293 @@ const test = require("node:test");
 
 const { buildRenewSeededRaces } = require("../../src/jobs/seededRaceRenewal");
 
-function makePrisma({ seeds = [], liveRacesBySeed = {} } = {}) {
-  const created = [];
-  return {
-    created,
-    prisma: {
-      raceSeed: {
-        async findMany() {
-          return seeds;
-        },
+// ET 14:00 EDT on 2026-06-25 (Thursday). Daily window [06-25T04Z, 06-26T04Z];
+// weekly window Mon 06-22T04Z .. Mon 06-29T04Z (EDT, UTC-4).
+const NOW = new Date("2026-06-25T18:00:00Z");
+const silent = { log() {}, error() {} };
+
+const dailySeed = {
+  id: "seed-daily-10k",
+  kind: "DAILY_10K",
+  name: "Daily 10K Sprint",
+  targetSteps: 10000,
+  durationHours: 24,
+  cadence: "DAILY",
+  maxParticipants: 500,
+  active: true,
+};
+
+const weeklySeed = {
+  id: "seed-weekly-50k",
+  kind: "WEEKLY_50K",
+  name: "Weekly 50K Challenge",
+  targetSteps: 50000,
+  durationHours: 168,
+  cadence: "WEEKLY",
+  maxParticipants: 500,
+  active: true,
+};
+
+function makeCtx({ seeds = [], races = [], participantsByRace = {} } = {}) {
+  let idSeq = races.length;
+  const emitted = [];
+  const prisma = {
+    raceSeed: {
+      async findMany() {
+        return seeds;
       },
-      race: {
-        async findFirst({ where }) {
-          return liveRacesBySeed[where.seedId] || null;
-        },
-        async create({ data }) {
-          const race = { id: `race-${created.length + 1}`, ...data };
-          created.push(race);
-          return { id: race.id, name: data.name, endsAt: data.endsAt };
-        },
+    },
+    race: {
+      async findFirst({ where, orderBy }) {
+        let rows = races.filter(
+          (r) => r.seedId === where.seedId && r.status === where.status
+        );
+        if (orderBy) {
+          const key = Object.keys(orderBy)[0];
+          const dir = orderBy[key];
+          rows = rows.slice().sort((a, b) => {
+            const av = a[key] ? new Date(a[key]).getTime() : 0;
+            const bv = b[key] ? new Date(b[key]).getTime() : 0;
+            return dir === "asc" ? av - bv : bv - av;
+          });
+        }
+        return rows[0] || null;
+      },
+      async create({ data }) {
+        const race = { id: `race-${++idSeq}`, ...data };
+        races.push(race);
+        return race;
+      },
+      async update({ where, data }) {
+        const race = races.find((r) => r.id === where.id);
+        Object.assign(race, data);
+        return race;
+      },
+    },
+    raceParticipant: {
+      async findMany({ where }) {
+        const list = participantsByRace[where.raceId] || [];
+        return list.filter((p) => p.status === where.status);
+      },
+      async update({ where, data }) {
+        for (const list of Object.values(participantsByRace)) {
+          const p = list.find((x) => x.id === where.id);
+          if (p) Object.assign(p, data);
+        }
+        return null;
       },
     },
   };
+  return {
+    prisma,
+    races,
+    participantsByRace,
+    emitted,
+    eventBus: { emit: (name, payload) => emitted.push({ name, payload }) },
+  };
 }
 
-const FIXED_NOW = new Date("2026-05-21T18:00:00Z");
-
-test("renewSeededRaces creates a race when no live race exists for a seed", async () => {
-  const ctx = makePrisma({
-    seeds: [
-      {
-        id: "seed-daily-10k",
-        kind: "DAILY_10K",
-        name: "Daily 10K Sprint",
-        targetSteps: 10000,
-        durationHours: 24,
-        cadence: "DAILY",
-        maxParticipants: 100,
-        active: true,
-      },
-    ],
-    liveRacesBySeed: {},
-  });
-
-  const renew = buildRenewSeededRaces({
+function buildRenew(ctx) {
+  return buildRenewSeededRaces({
     prisma: ctx.prisma,
-    now: () => FIXED_NOW,
-    logger: { log() {}, error() {} },
+    now: () => NOW,
+    logger: silent,
+    eventBus: ctx.eventBus,
   });
+}
 
-  const created = await renew();
+const iso = (d) => new Date(d).toISOString();
 
-  assert.equal(created.length, 1);
-  assert.equal(ctx.created.length, 1);
-  assert.equal(ctx.created[0].seedId, "seed-daily-10k");
-  assert.equal(ctx.created[0].creatorId, null);
-  assert.equal(ctx.created[0].isPublic, true);
-  assert.equal(ctx.created[0].status, "ACTIVE");
-  assert.equal(ctx.created[0].targetSteps, 10000);
-  // 24 hours later
-  assert.equal(
-    ctx.created[0].endsAt.toISOString(),
-    new Date(FIXED_NOW.getTime() + 24 * 60 * 60 * 1000).toISOString()
+test("fresh start: creates current ACTIVE + next PENDING on ET-midnight boundaries (daily)", async () => {
+  const ctx = makeCtx({ seeds: [dailySeed] });
+  const results = await buildRenew(ctx)();
+
+  assert.equal(ctx.races.length, 2);
+  const active = ctx.races.find((r) => r.status === "ACTIVE");
+  const pending = ctx.races.find((r) => r.status === "PENDING");
+
+  assert.equal(iso(active.startedAt), "2026-06-25T04:00:00.000Z");
+  assert.equal(iso(active.endsAt), "2026-06-26T04:00:00.000Z");
+  assert.equal(active.timezone, "America/New_York");
+  assert.equal(active.isPublic, true);
+  assert.equal(active.maxParticipants, 500);
+
+  // The next race stays PENDING with startedAt NULL until promotion.
+  assert.equal(pending.startedAt, null);
+  assert.equal(iso(pending.scheduledStartAt), "2026-06-26T04:00:00.000Z");
+  assert.equal(iso(pending.endsAt), "2026-06-27T04:00:00.000Z");
+
+  assert.deepEqual(
+    results.map((r) => r.action).sort(),
+    ["created-active", "created-upcoming"]
   );
 });
 
-test("renewSeededRaces skips seeds that already have a live race", async () => {
-  const ctx = makePrisma({
-    seeds: [
-      {
-        id: "seed-daily-10k",
-        kind: "DAILY_10K",
-        name: "Daily 10K Sprint",
-        targetSteps: 10000,
-        durationHours: 24,
-        cadence: "DAILY",
-        maxParticipants: 100,
-        active: true,
-      },
-    ],
-    liveRacesBySeed: { "seed-daily-10k": { id: "existing-race" } },
-  });
+test("fresh start: weekly seed aligns to Monday 00:00 ET", async () => {
+  const ctx = makeCtx({ seeds: [weeklySeed] });
+  await buildRenew(ctx)();
 
-  const renew = buildRenewSeededRaces({
-    prisma: ctx.prisma,
-    now: () => FIXED_NOW,
-    logger: { log() {}, error() {} },
-  });
-
-  const created = await renew();
-  assert.equal(created.length, 0);
-  assert.equal(ctx.created.length, 0);
+  const active = ctx.races.find((r) => r.status === "ACTIVE");
+  const pending = ctx.races.find((r) => r.status === "PENDING");
+  assert.equal(iso(active.startedAt), "2026-06-22T04:00:00.000Z"); // Mon
+  assert.equal(iso(active.endsAt), "2026-06-29T04:00:00.000Z"); // next Mon
+  assert.equal(iso(pending.scheduledStartAt), "2026-06-29T04:00:00.000Z");
+  assert.equal(iso(pending.endsAt), "2026-07-06T04:00:00.000Z");
 });
 
-test("renewSeededRaces handles multiple seeds independently", async () => {
-  const ctx = makePrisma({
-    seeds: [
+test("steady state (one ACTIVE covering now + one future PENDING) is a no-op", async () => {
+  const ctx = makeCtx({
+    seeds: [dailySeed],
+    races: [
       {
-        id: "seed-daily-10k",
-        kind: "DAILY_10K",
-        name: "Daily 10K Sprint",
-        targetSteps: 10000,
-        durationHours: 24,
-        cadence: "DAILY",
-        maxParticipants: 100,
-        active: true,
+        id: "active-1",
+        seedId: dailySeed.id,
+        status: "ACTIVE",
+        startedAt: new Date("2026-06-25T04:00:00Z"),
+        endsAt: new Date("2026-06-26T04:00:00Z"),
       },
       {
-        id: "seed-weekly-50k",
-        kind: "WEEKLY_50K",
-        name: "Weekly 50K Challenge",
-        targetSteps: 50000,
-        durationHours: 168,
-        cadence: "WEEKLY",
-        maxParticipants: 100,
-        active: true,
+        id: "pending-1",
+        seedId: dailySeed.id,
+        status: "PENDING",
+        startedAt: null,
+        scheduledStartAt: new Date("2026-06-26T04:00:00Z"),
+        endsAt: new Date("2026-06-27T04:00:00Z"),
       },
     ],
-    liveRacesBySeed: { "seed-daily-10k": { id: "existing-daily" } },
   });
-
-  const renew = buildRenewSeededRaces({
-    prisma: ctx.prisma,
-    now: () => FIXED_NOW,
-    logger: { log() {}, error() {} },
-  });
-
-  const created = await renew();
-  assert.equal(created.length, 1);
-  assert.equal(created[0].seedKind, "WEEKLY_50K");
-  assert.equal(ctx.created[0].targetSteps, 50000);
+  const results = await buildRenew(ctx)();
+  assert.equal(results.length, 0);
+  assert.equal(ctx.races.length, 2);
+  assert.equal(ctx.emitted.length, 0);
 });
 
-test("renewSeededRaces propagates the seed's powerup config to the race", async () => {
-  const ctx = makePrisma({
-    seeds: [
+test("idempotent: a second run in steady state changes nothing", async () => {
+  const ctx = makeCtx({ seeds: [dailySeed] });
+  const renew = buildRenew(ctx);
+  await renew(); // creates 2
+  const after1 = ctx.races.length;
+  const results2 = await renew(); // should be a no-op now
+  assert.equal(after1, 2);
+  assert.equal(results2.length, 0);
+  assert.equal(ctx.races.length, 2);
+});
+
+test("promotes a due PENDING to ACTIVE, emits RACE_STARTED, and creates the next PENDING", async () => {
+  const ctx = makeCtx({
+    seeds: [dailySeed],
+    races: [
       {
-        id: "seed-weekly-50k",
-        kind: "WEEKLY_50K",
-        name: "Weekly 50K Challenge",
-        targetSteps: 50000,
-        durationHours: 168,
-        cadence: "WEEKLY",
-        maxParticipants: 100,
-        active: true,
+        id: "pending-due",
+        seedId: dailySeed.id,
+        status: "PENDING",
+        name: "Daily 10K Sprint",
+        startedAt: null,
+        scheduledStartAt: new Date("2026-06-25T04:00:00Z"), // already passed vs NOW
+        endsAt: new Date("2026-06-26T04:00:00Z"),
+        powerupsEnabled: false,
+        powerupStepInterval: null,
+      },
+    ],
+    participantsByRace: {
+      "pending-due": [
+        { id: "p1", userId: "u1", status: "ACCEPTED", nextBoxAtSteps: 0 },
+        { id: "p2", userId: "u2", status: "ACCEPTED", nextBoxAtSteps: 0 },
+      ],
+    },
+  });
+
+  const results = await buildRenew(ctx)();
+
+  const promoted = ctx.races.find((r) => r.id === "pending-due");
+  assert.equal(promoted.status, "ACTIVE");
+  assert.equal(iso(promoted.startedAt), "2026-06-25T04:00:00.000Z"); // = scheduled
+  assert.equal(iso(promoted.endsAt), "2026-06-26T04:00:00.000Z"); // unchanged
+
+  const ev = ctx.emitted.find((e) => e.name === "RACE_STARTED");
+  assert.ok(ev, "RACE_STARTED should be emitted");
+  assert.equal(ev.payload.raceId, "pending-due");
+  assert.equal(ev.payload.creatorUserId, null); // -> handler notifies everyone
+  assert.deepEqual(ev.payload.participantUserIds.sort(), ["u1", "u2"]);
+
+  // A fresh PENDING for the following day was created.
+  const newPending = ctx.races.find((r) => r.status === "PENDING");
+  assert.ok(newPending);
+  assert.equal(iso(newPending.scheduledStartAt), "2026-06-26T04:00:00.000Z");
+  assert.equal(iso(newPending.endsAt), "2026-06-27T04:00:00.000Z");
+
+  assert.deepEqual(
+    results.map((r) => r.action).sort(),
+    ["created-upcoming", "promoted"]
+  );
+});
+
+test("promotion initializes nextBoxAtSteps for opt-ins when powerups are enabled", async () => {
+  const ctx = makeCtx({
+    seeds: [{ ...dailySeed, powerupsEnabled: true, powerupStepInterval: 2000 }],
+    races: [
+      {
+        id: "pending-due",
+        seedId: dailySeed.id,
+        status: "PENDING",
+        name: "Daily 10K Sprint",
+        startedAt: null,
+        scheduledStartAt: new Date("2026-06-25T04:00:00Z"),
+        endsAt: new Date("2026-06-26T04:00:00Z"),
         powerupsEnabled: true,
-        powerupStepInterval: 2500,
+        powerupStepInterval: 2000,
       },
     ],
+    participantsByRace: {
+      "pending-due": [
+        { id: "p1", userId: "u1", status: "ACCEPTED", nextBoxAtSteps: 0 },
+      ],
+    },
   });
 
-  const renew = buildRenewSeededRaces({
-    prisma: ctx.prisma,
-    now: () => FIXED_NOW,
-    logger: { log() {}, error() {} },
-  });
+  await buildRenew(ctx)();
 
-  await renew();
-  assert.equal(ctx.created[0].powerupsEnabled, true);
-  assert.equal(ctx.created[0].powerupStepInterval, 2500);
+  assert.equal(ctx.participantsByRace["pending-due"][0].nextBoxAtSteps, 2000);
 });
 
-test("renewSeededRaces defaults powerups off when the seed omits config", async () => {
-  const ctx = makePrisma({
-    seeds: [
+test("cold-start gap mid-day: ACTIVE anchors to today's ET midnight, not now", async () => {
+  // Only a stale (already-ended) ACTIVE race exists, plus no pending.
+  const ctx = makeCtx({
+    seeds: [dailySeed],
+    races: [
       {
-        id: "seed-daily-10k",
-        kind: "DAILY_10K",
-        name: "Daily 10K Sprint",
-        targetSteps: 10000,
-        durationHours: 24,
-        cadence: "DAILY",
-        maxParticipants: 100,
-        active: true,
+        id: "stale",
+        seedId: dailySeed.id,
+        status: "ACTIVE",
+        startedAt: new Date("2026-06-24T04:00:00Z"),
+        endsAt: new Date("2026-06-25T04:00:00Z"), // ended before NOW
       },
     ],
   });
+  const results = await buildRenew(ctx)();
 
-  const renew = buildRenewSeededRaces({
-    prisma: ctx.prisma,
-    now: () => FIXED_NOW,
-    logger: { log() {}, error() {} },
-  });
-
-  await renew();
-  assert.equal(ctx.created[0].powerupsEnabled, false);
-  assert.equal(ctx.created[0].powerupStepInterval, null);
+  const fresh = ctx.races.find(
+    (r) => r.status === "ACTIVE" && r.id !== "stale"
+  );
+  assert.ok(fresh, "a current ACTIVE race should be created");
+  assert.equal(iso(fresh.startedAt), "2026-06-25T04:00:00.000Z"); // today midnight ET
+  assert.equal(iso(fresh.endsAt), "2026-06-26T04:00:00.000Z");
+  assert.ok(results.some((r) => r.action === "created-active"));
+  assert.ok(results.some((r) => r.action === "created-upcoming"));
 });
 
-test("renewSeededRaces is a no-op when no active seeds exist", async () => {
-  const ctx = makePrisma({ seeds: [] });
+test("multiple seeds reconcile independently", async () => {
+  const ctx = makeCtx({ seeds: [dailySeed, weeklySeed] });
+  await buildRenew(ctx)();
+  const daily = ctx.races.filter((r) => r.seedId === dailySeed.id);
+  const weekly = ctx.races.filter((r) => r.seedId === weeklySeed.id);
+  assert.equal(daily.length, 2);
+  assert.equal(weekly.length, 2);
+});
 
-  const renew = buildRenewSeededRaces({
-    prisma: ctx.prisma,
-    now: () => FIXED_NOW,
-    logger: { log() {}, error() {} },
-  });
-
-  const created = await renew();
-  assert.equal(created.length, 0);
+test("no active seeds: no-op", async () => {
+  const ctx = makeCtx({ seeds: [] });
+  const results = await buildRenew(ctx)();
+  assert.equal(results.length, 0);
+  assert.equal(ctx.races.length, 0);
 });

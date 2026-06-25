@@ -16,6 +16,7 @@ const { calculateSubsequentSteps } = require("../utils/raceSteps");
 const { GlobalStepEvent } = require("../models/globalStepEvent");
 const { computeGlobalEventBoost } = require("../utils/globalStepEvent");
 const { computeBoxEffectiveSteps } = require("../utils/boxSteps");
+const { raceTimeZone } = require("../utils/raceTimeZone");
 
 // Effect TYPES that are concealed self-advantages: visible ONLY to their owner,
 // never to other racers. Filtered out of the activeEffects array server-side so
@@ -308,7 +309,12 @@ function buildGetRaceProgress(deps = {}) {
 
     // Expire timed effects before calculating
     const participantStepsMap = {};
-    const nowParts = getTimeZoneParts(now(), timeZone);
+    // Seeded races bucket steps in their canonical tz (e.g. America/New_York) so
+    // every participant's "midnight" is the same instant AND this live path agrees
+    // with settlement (raceExpiry). User-created races (timezone NULL) keep using
+    // the requester's header tz — legacy behavior.
+    const scoringTimeZone = raceTimeZone(race, timeZone);
+    const nowParts = getTimeZoneParts(now(), scoringTimeZone);
     const today = formatDateString(nowParts.year, nowParts.month, nowParts.day);
     const acceptedParticipants = race.participants.filter((p) => p.status === "ACCEPTED");
 
@@ -321,7 +327,7 @@ function buildGetRaceProgress(deps = {}) {
         const effectiveStart = joinedAt > raceStartedAt ? joinedAt : raceStartedAt;
 
         // Daily Steps queries use timezone-aware dates (steps are stored under local dates)
-        const startParts = getTimeZoneParts(effectiveStart, timeZone);
+        const startParts = getTimeZoneParts(effectiveStart, scoringTimeZone);
         const startDate = formatDateString(startParts.year, startParts.month, startParts.day);
         const dayAfterStartDate = addDaysToDateString(startDate, 1);
 
@@ -337,19 +343,40 @@ function buildGetRaceProgress(deps = {}) {
           hour: 0,
           minute: 0,
           second: 0,
-        }, timeZone);
+        }, scoringTimeZone);
+
+        // Start-of-local-day instant in the scoring tz. When the race begins
+        // EXACTLY at local midnight (a midnight-aligned seeded race, for on-time /
+        // pre-registered entrants), the start day is a FULL day: pre-race steps
+        // that day are impossible, so the authoritative daily total is safe to use
+        // as a fallback when hourly samples haven't synced yet.
+        const startOfStartDay = zonedDateTimeToUtc({
+          year: startParts.year,
+          month: startParts.month,
+          day: startParts.day,
+          hour: 0,
+          minute: 0,
+          second: 0,
+        }, scoringTimeZone);
+        const startsAtLocalMidnight =
+          effectiveStart.getTime() === startOfStartDay.getTime();
 
         // For the start day: try StepSample for precise post-start steps
         let startDaySteps = 0;
         const startDaySamples = await stepSampleModel.sumStepsInWindow(
           p.userId, effectiveStart, startDayWindowEnd
         );
-        if (startDaySamples > 0) {
+        if (startsAtLocalMidnight) {
+          // Full start day: max(daily total, samples) — same rule as later days,
+          // so a daily-only sync still counts and doesn't strand the user at 0.
+          const startDayRow = await stepsModel.findByUserIdAndDate(p.userId, startDate);
+          startDaySteps = Math.max(startDaySamples, startDayRow?.steps ?? 0);
+        } else if (startDaySamples > 0) {
+          // Partial start day (mid-day / late joiner): only post-start samples are
+          // safe — a later daily-total sync can include pre-join steps that were
+          // not present at the join instant.
           startDaySteps = startDaySamples;
         }
-        // The start day is a partial day, so only post-start samples are safe.
-        // A later daily total sync can include pre-race steps that were not present
-        // in the baseline snapshot at race start.
 
         // For days after the start day: per-day max(samples, daily). The race
         // must never count fewer steps than the authoritative daily total for
@@ -360,7 +387,7 @@ function buildGetRaceProgress(deps = {}) {
           userId: p.userId,
           dayAfterStartDate,
           today,
-          timeZone,
+          timeZone: scoringTimeZone,
           stepsModel,
           stepSampleModel,
           now: now(),

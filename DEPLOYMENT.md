@@ -296,6 +296,11 @@ flipping unless the placeholder UX is acceptable.
 overwrites the tuning. Always run `cosmetics-pull.js` (step 6) after a tuning
 session, before the next `cosmetics-apply.js`.
 
+Note: `cosmetics-apply.js` is **manual only** — it is no longer run on deploy
+(`prisma/seed.js` stopped calling it for exactly this reason), so a normal deploy
+won't clobber tuned values. The footgun is now scoped to *you* re-running apply,
+not to the deploy pipeline.
+
 ---
 
 ## Why staging is safe from prod data

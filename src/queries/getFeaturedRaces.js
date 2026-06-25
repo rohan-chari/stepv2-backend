@@ -20,31 +20,75 @@ function buildGetFeaturedRaces(dependencies = {}) {
     const races = await raceModel.findLiveSeeded();
     const currentTime = now();
 
-    // Renewal guarantees ~one live race per seed, but during the window between
-    // a race's endsAt passing and the hourly/periodic expiry completing it, an
-    // expired-but-still-ACTIVE race can linger. Skip those (not meaningfully
-    // joinable) and, defensively, keep only the most recently started race per
-    // seed so an old instance never shadows the fresh one.
-    const bySeed = new Map();
+    // Partition the live seeded races by status:
+    //   * ACTIVE  → the featured cards (the array shape old clients consume).
+    //   * PENDING → the pre-created "next" race a user can opt into BEFORE it
+    //     starts. It is surfaced ONLY via the additive `upcoming` field on the
+    //     matching live card — never as its own array entry — so old app builds
+    //     (which would mis-render a not-yet-started race with an "ends in"
+    //     countdown and let users "join" before it begins) never see it.
+    //
+    // For ACTIVE races: renewal guarantees ~one per seed, but between a race's
+    // endsAt passing and expiry completing it an expired-but-still-ACTIVE race
+    // can linger — skip those, and defensively keep only the most recently
+    // started race per seed so an old instance never shadows the fresh one.
+    const activeBySeed = new Map();
+    const upcomingBySeed = new Map();
     for (const race of races) {
-      const ended = race.endsAt && new Date(race.endsAt) <= currentTime;
-      if (ended) continue;
-      const existing = bySeed.get(race.seedId);
-      if (
-        !existing ||
-        new Date(race.startedAt) > new Date(existing.startedAt)
-      ) {
-        bySeed.set(race.seedId, race);
+      if (race.status === "ACTIVE") {
+        const ended = race.endsAt && new Date(race.endsAt) <= currentTime;
+        if (ended) continue;
+        const existing = activeBySeed.get(race.seedId);
+        if (
+          !existing ||
+          new Date(race.startedAt) > new Date(existing.startedAt)
+        ) {
+          activeBySeed.set(race.seedId, race);
+        }
+      } else if (race.status === "PENDING") {
+        // Keep the soonest-starting upcoming race per seed.
+        const existing = upcomingBySeed.get(race.seedId);
+        const t = race.scheduledStartAt
+          ? new Date(race.scheduledStartAt).getTime()
+          : Infinity;
+        const et =
+          existing && existing.scheduledStartAt
+            ? new Date(existing.scheduledStartAt).getTime()
+            : Infinity;
+        if (!existing || t < et) {
+          upcomingBySeed.set(race.seedId, race);
+        }
       }
     }
 
-    const featured = [...bySeed.values()].map((race) => {
+    // Compact summary of the pre-registerable next race (null when none exists).
+    function summarizeUpcoming(race) {
+      if (!race) return null;
       const participants = race.participants || [];
       const acceptedCount = participants.filter(
         (p) => p.status === "ACCEPTED"
       ).length;
       const myParticipant = participants.find((p) => p.userId === userId);
-      const maxParticipants = race.maxParticipants || 100;
+      const max = race.maxParticipants ?? null; // null = unlimited
+      return {
+        raceId: race.id,
+        scheduledStartAt: race.scheduledStartAt,
+        endsAt: race.endsAt,
+        participantCount: acceptedCount,
+        maxParticipants: max,
+        isFull: max != null && acceptedCount >= max,
+        // null → render "Opt in"; "ACCEPTED" → render "You're in".
+        myStatus: myParticipant ? myParticipant.status : null,
+      };
+    }
+
+    const featured = [...activeBySeed.values()].map((race) => {
+      const participants = race.participants || [];
+      const acceptedCount = participants.filter(
+        (p) => p.status === "ACCEPTED"
+      ).length;
+      const myParticipant = participants.find((p) => p.userId === userId);
+      const max = race.maxParticipants ?? null; // null = unlimited
       const finishRewardPool = getFinishRewardPool(race.seedId);
 
       return {
@@ -53,8 +97,9 @@ function buildGetFeaturedRaces(dependencies = {}) {
         name: race.name,
         endsAt: race.endsAt,
         participantCount: acceptedCount,
-        maxParticipants,
-        isFull: acceptedCount >= maxParticipants,
+        // Legacy int field for old clients; unlimited surfaces as 100 (as before).
+        maxParticipants: max ?? 100,
+        isFull: max != null && acceptedCount >= max,
         powerupsEnabled: race.powerupsEnabled || false,
         finishReward:
           finishRewardPool > 0
@@ -63,6 +108,10 @@ function buildGetFeaturedRaces(dependencies = {}) {
         // null = not joined → render JOIN; otherwise the participant status
         // (ACCEPTED) → render VIEW.
         myStatus: myParticipant ? myParticipant.status : null,
+        // Additive: the pre-registerable next race for this seed (null if none).
+        // Old app builds ignore the unknown field; new builds render an opt-in
+        // affordance with a starts-in countdown.
+        upcoming: summarizeUpcoming(upcomingBySeed.get(race.seedId)),
       };
     });
 

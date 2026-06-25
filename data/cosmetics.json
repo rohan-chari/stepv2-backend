@@ -10,6 +10,7 @@
       "active": true,
       "testOnly": false,
       "earnOnly": false,
+      "bobble": true,
       "sortOrder": 10,
       "renderMetadata": {
         "offsetX": -0.015,
@@ -28,6 +29,7 @@
       "active": true,
       "testOnly": false,
       "earnOnly": false,
+      "bobble": true,
       "sortOrder": 20,
       "renderMetadata": {
         "offsetX": -0.0010822510822514064,
@@ -46,6 +48,7 @@
       "active": true,
       "testOnly": false,
       "earnOnly": false,
+      "bobble": true,
       "sortOrder": 30,
       "renderMetadata": {
         "offsetX": -0.09463276836158163,
@@ -64,6 +67,7 @@
       "active": false,
       "testOnly": false,
       "earnOnly": false,
+      "bobble": true,
       "sortOrder": 35,
       "renderMetadata": {
         "offsetX": -0.09463276836158163,
@@ -82,6 +86,7 @@
       "active": true,
       "testOnly": false,
       "earnOnly": false,
+      "bobble": false,
       "sortOrder": 40,
       "renderMetadata": {
         "offsetX": 0.019999999999999993,
@@ -100,6 +105,7 @@
       "active": true,
       "testOnly": true,
       "earnOnly": false,
+      "bobble": true,
       "sortOrder": 50,
       "renderMetadata": {
         "offsetX": 0.035310734463277704,
@@ -118,6 +124,7 @@
       "active": true,
       "testOnly": true,
       "earnOnly": false,
+      "bobble": true,
       "sortOrder": 60,
       "renderMetadata": {
         "offsetX": 0.09008474576271018,
@@ -136,6 +143,7 @@
       "active": true,
       "testOnly": true,
       "earnOnly": false,
+      "bobble": true,
       "sortOrder": 70,
       "renderMetadata": {
         "offsetX": -0.045,
@@ -154,12 +162,32 @@
       "active": true,
       "testOnly": true,
       "earnOnly": false,
+      "bobble": true,
       "sortOrder": 80,
       "renderMetadata": {
         "offsetX": -0.0395480225988708,
         "offsetY": 0.1133050847457645,
         "rotation": -0.39372881355932177,
         "scale": 2.5
+      }
+    },
+    {
+      "sku": "backpack",
+      "name": "Backpack",
+      "description": "Gear up for the long haul.",
+      "slot": "BACK",
+      "priceCoins": 1000,
+      "assetKey": "backpack",
+      "active": true,
+      "testOnly": true,
+      "earnOnly": false,
+      "bobble": false,
+      "sortOrder": 90,
+      "renderMetadata": {
+        "offsetX": 0,
+        "offsetY": 0,
+        "rotation": 0,
+        "scale": 1
       }
     },
     {
@@ -172,6 +200,7 @@
       "active": true,
       "testOnly": false,
       "earnOnly": true,
+      "bobble": true,
       "sortOrder": 1000,
       "renderMetadata": {
         "offsetX": 0,

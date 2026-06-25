@@ -67,3 +67,13 @@ the developer's machine, so don't ask for it — recover it locally:
 
 Never write the recovered host/credentials into a file, commit, or chat — read
 them inline each session and keep them out of the repo.
+
+## Manual PROD database backup
+
+When asked to **"make a dated prod backup"** / **"back up prod"** / **"take a
+prod DB snapshot"**, follow `BACKUP.md` end-to-end. Key gotcha: prod is the
+managed DigitalOcean Postgres (PG 18), and the droplet's bundled `pg_dump` is
+pg16, which **refuses** to dump an 18 server — so dump from the laptop's pg18
+client (`/opt/homebrew/opt/postgresql@18/bin/pg_dump`) using `PROD_DATABASE_URL`
+from the local `.env`, then `scp` the dated `-Fc` dump into `/root/backups/` on
+the droplet and verify checksums match.

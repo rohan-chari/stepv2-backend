@@ -69,6 +69,12 @@ async function calculateSubsequentSteps({
       },
       timeZone
     );
+    // A day whose local midnight is at or after `now` contributes no steps. This
+    // matters at settlement of a midnight-aligned race, where `now` (= endsAt)
+    // lands exactly on the day boundary: without this guard, `today` resolves to
+    // the day AFTER the race and its full daily total would leak into the score.
+    // Days are ascending, so once one starts at/after `now`, all later ones do.
+    if (dayStart.getTime() >= nowMs) break;
     const nextDate = addDaysToDateString(date, 1);
     const nextParsed = parseDateString(nextDate);
     let dayEnd = zonedDateTimeToUtc(

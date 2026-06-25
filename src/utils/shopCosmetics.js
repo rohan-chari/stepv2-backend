@@ -1,5 +1,14 @@
 const ACCESSORY_SLOTS = ["HEAD", "FACE", "NECK", "BACK", "FEET"];
 
+// Include `bobble` in the payload ONLY when the row actually carries it (i.e. the
+// feeding query selected the column). If a query forgot to select it, we omit the
+// key entirely rather than send `false` — that lets the client fall back to its
+// historical slot-based bob (HEAD/FACE/NECK), avoiding a silent regression where a
+// hat stops bobbing just because one query wasn't updated.
+function bobbleField(item) {
+  return typeof item.bobble === "boolean" ? { bobble: item.bobble } : {};
+}
+
 function serializeShopItem(item, extras = {}) {
   return {
     id: item.id,
@@ -10,6 +19,7 @@ function serializeShopItem(item, extras = {}) {
     priceCoins: item.priceCoins,
     assetKey: item.assetKey,
     renderMetadata: item.renderMetadata,
+    ...bobbleField(item),
     ...extras,
   };
 }
@@ -23,6 +33,7 @@ function serializeEquippedAccessory(equippedAccessory) {
     slot: item.slot,
     assetKey: item.assetKey,
     renderMetadata: item.renderMetadata,
+    ...bobbleField(item),
   };
 }
 

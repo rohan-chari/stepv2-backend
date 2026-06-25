@@ -52,6 +52,10 @@ async function applyCosmetics() {
       active: item.active !== false,
       testOnly: item.testOnly === true,
       earnOnly: item.earnOnly === true,
+      // Whether the accessory rides the head-bob. cosmetics.json is the source of
+      // truth, so be explicit per item (HEAD/FACE/NECK historically bobbed). An
+      // item with no `bobble` key defaults to false to match the DB column default.
+      bobble: item.bobble === true,
       sortOrder: Number(item.sortOrder ?? 0),
     };
     const existing = await prisma.shopItem.findUnique({

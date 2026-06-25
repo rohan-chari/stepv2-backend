@@ -132,3 +132,85 @@ test("getFeaturedRaces counts only ACCEPTED participants", async () => {
 
   assert.equal(result[0].participantCount, 1);
 });
+
+// --- pre-registration (upcoming) ---
+
+function makePending(overrides) {
+  return makeRace({
+    id: "pending-daily",
+    status: "PENDING",
+    startedAt: null,
+    scheduledStartAt: new Date("2026-05-30T04:00:00Z"),
+    endsAt: new Date("2026-05-31T04:00:00Z"),
+    participants: [],
+    ...overrides,
+  });
+}
+
+test("getFeaturedRaces never emits a PENDING seeded race as its own card (old-client safety)", async () => {
+  const active = makeRace({ id: "active-daily" });
+  const pending = makePending();
+  // Even if the PENDING race has a later startedAt-equivalent, it must not shadow
+  // or join the array.
+  const getFeaturedRaces = buildGetFeaturedRaces(makeDeps([pending, active]));
+
+  const result = await getFeaturedRaces({ userId: "viewer" });
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0].raceId, "active-daily");
+  assert.equal(result[0].status, undefined); // no status field leaks the pending one
+});
+
+test("getFeaturedRaces surfaces the PENDING race via the additive `upcoming` field", async () => {
+  const active = makeRace({ id: "active-daily" });
+  const pending = makePending({
+    participants: [
+      { userId: "viewer", status: "ACCEPTED" },
+      { userId: "x", status: "ACCEPTED" },
+    ],
+  });
+  const getFeaturedRaces = buildGetFeaturedRaces(makeDeps([active, pending]));
+
+  const [card] = await getFeaturedRaces({ userId: "viewer" });
+
+  assert.ok(card.upcoming, "expected an upcoming object");
+  assert.equal(card.upcoming.raceId, "pending-daily");
+  assert.equal(card.upcoming.participantCount, 2);
+  assert.equal(card.upcoming.myStatus, "ACCEPTED"); // viewer opted in -> "You're in"
+  assert.deepEqual(
+    new Date(card.upcoming.scheduledStartAt),
+    new Date("2026-05-30T04:00:00Z")
+  );
+});
+
+test("getFeaturedRaces upcoming is null when no PENDING race exists for the seed", async () => {
+  const getFeaturedRaces = buildGetFeaturedRaces(makeDeps([makeRace({})]));
+  const [card] = await getFeaturedRaces({ userId: "viewer" });
+  assert.equal(card.upcoming, null);
+});
+
+test("getFeaturedRaces upcoming.myStatus is null when the viewer has not opted in", async () => {
+  const active = makeRace({ id: "active-daily" });
+  const pending = makePending({
+    participants: [{ userId: "someone-else", status: "ACCEPTED" }],
+  });
+  const getFeaturedRaces = buildGetFeaturedRaces(makeDeps([active, pending]));
+  const [card] = await getFeaturedRaces({ userId: "viewer" });
+  assert.equal(card.upcoming.myStatus, null); // -> render "Opt in"
+});
+
+test("getFeaturedRaces treats null maxParticipants as unlimited (isFull false)", async () => {
+  const race = makeRace({
+    maxParticipants: null,
+    participants: [
+      { userId: "a", status: "ACCEPTED" },
+      { userId: "b", status: "ACCEPTED" },
+    ],
+  });
+  const getFeaturedRaces = buildGetFeaturedRaces(makeDeps([race]));
+
+  const [card] = await getFeaturedRaces({ userId: "viewer" });
+
+  assert.equal(card.isFull, false);
+  assert.equal(card.maxParticipants, 100); // legacy int surface for old clients
+});

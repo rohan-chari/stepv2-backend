@@ -347,6 +347,13 @@ model ShopItem {
   // catalog JSON shape is unchanged for old clients. Default false = every
   // existing item keeps working.
   earnOnly    Boolean       @default(false) @map("earn_only")
+  // When true, the accessory rides the capybara's head-bob animation. Historically
+  // this was derived purely from slot (HEAD/FACE/NECK bobbed, BACK/FEET did not),
+  // so the migration backfills exactly that: existing HEAD/FACE/NECK items -> true,
+  // everything else -> false. Now an admin can toggle it per-item (e.g. make the
+  // BACK backpack bob). Serialized into the catalog; old app binaries simply ignore
+  // the extra field and keep using their slot-based fallback, so they're unaffected.
+  bobble      Boolean       @default(false)
   sortOrder   Int           @default(0) @map("sort_order")
   createdAt   DateTime      @default(now()) @map("created_at")
 
@@ -569,6 +576,14 @@ model Race {
   // legacy races and older app clients (which never send it) behave exactly as
   // before — manual instant start.
   scheduledStartAt DateTime? @map("scheduled_start_at")
+  // Canonical IANA timezone whose calendar-day boundaries define this race's
+  // step buckets (e.g. "America/New_York" for seeded daily/weekly challenges).
+  // NULL for user-created races, which keep the legacy behavior: live display
+  // buckets in the requester's tz, settlement in UTC. When set, BOTH live and
+  // settlement bucket in this tz, so "midnight" means the same instant for every
+  // participant and live totals match settled totals. Nullable/additive: old app
+  // clients never read it; old rows stay NULL and behave exactly as before.
+  timezone        String?    @map("timezone")
   completedAt     DateTime?  @map("completed_at")
   winnerUserId         String?    @map("winner_user_id")
   powerupsEnabled      Boolean    @default(false) @map("powerups_enabled")

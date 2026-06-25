@@ -16,6 +16,7 @@ const {
 } = require("../utils/week");
 const { calculateSubsequentSteps } = require("../utils/raceSteps");
 const { computeBoxEffectiveSteps } = require("../utils/boxSteps");
+const { raceTimeZone } = require("../utils/raceTimeZone");
 
 function getEffectiveStart(participant, raceStartedAt) {
   const joinedAt = participant.joinedAt || raceStartedAt;
@@ -53,6 +54,24 @@ async function calculateBaseAdjusted({
     timeZone
   );
 
+  // When the race begins EXACTLY at local midnight (midnight-aligned seeded
+  // race, on-time / pre-registered entrant), the start day is a FULL day: pre-race
+  // steps that day are impossible, so the daily total is safe to use as a fallback
+  // when hourly samples haven't synced. Mid-day / late joiners stay sample-only.
+  const startOfStartDay = zonedDateTimeToUtc(
+    {
+      year: startParts.year,
+      month: startParts.month,
+      day: startParts.day,
+      hour: 0,
+      minute: 0,
+      second: 0,
+    },
+    timeZone
+  );
+  const startsAtLocalMidnight =
+    effectiveStart.getTime() === startOfStartDay.getTime();
+
   let startDaySteps = 0;
   const startDaySamples = await stepSampleModel.sumStepsInWindow(
     participant.userId,
@@ -60,7 +79,13 @@ async function calculateBaseAdjusted({
     startDayWindowEnd
   );
 
-  if (startDaySamples > 0) {
+  if (startsAtLocalMidnight) {
+    const startDayRow = await stepsModel.findByUserIdAndDate(
+      participant.userId,
+      startDate
+    );
+    startDaySteps = Math.max(startDaySamples, startDayRow?.steps ?? 0);
+  } else if (startDaySamples > 0) {
     startDaySteps = startDaySamples;
   }
 
@@ -521,7 +546,10 @@ function buildResolveRaceState(dependencies = {}) {
             await calculateBaseAdjusted({
               participant,
               raceStartedAt: race.startedAt,
-              timeZone,
+              // Seeded races score in their canonical tz so live placement
+              // recompute agrees with getRaceProgress and settlement; user races
+              // use the resolve caller's tz (legacy, default UTC).
+              timeZone: raceTimeZone(race, timeZone),
               stepsModel,
               stepSampleModel,
               now: currentTime,

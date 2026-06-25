@@ -14,6 +14,7 @@ const userDisplaySelect = {
           slot: true,
           assetKey: true,
           renderMetadata: true,
+          bobble: true,
           testOnly: true,
         },
       },

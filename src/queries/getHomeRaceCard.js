@@ -7,6 +7,7 @@ const {
   calculateBaseAdjusted,
   calculateCurrentTotal,
 } = require("../services/raceStateResolution");
+const { raceTimeZone } = require("../utils/raceTimeZone");
 
 // Max number of active races returned in the new ACTIVE_RACES (opt-in) state.
 const MAX_ACTIVE_RACES = 5;
@@ -21,7 +22,7 @@ const USER_SELECT = {
       // assetKey is what the client uses to resolve the cosmetic PNG; including
       // it lets capybara renders show real equipped cosmetics. Additive only —
       // existing fields are unchanged, so older clients are unaffected.
-      shopItem: { select: { id: true, sku: true, slot: true, assetKey: true, renderMetadata: true, testOnly: true } },
+      shopItem: { select: { id: true, sku: true, slot: true, assetKey: true, renderMetadata: true, bobble: true, testOnly: true } },
     },
   },
 };
@@ -252,7 +253,10 @@ async function checkActiveRaces(prisma, userId, options = {}) {
           const { baseAdjusted, hasSampleData } = await calculateBaseAdjusted({
             participant: p,
             raceStartedAt: race.startedAt,
-            timeZone,
+            // Seeded races bucket in their canonical tz so the home card agrees
+            // with the race-detail screen and settlement; user races use the
+            // requester's header tz (legacy).
+            timeZone: raceTimeZone(race, timeZone),
             stepsModel,
             stepSampleModel,
             now,

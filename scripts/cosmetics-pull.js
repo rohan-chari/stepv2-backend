@@ -33,6 +33,7 @@ async function pullCosmetics() {
     active: row.active,
     testOnly: row.testOnly,
     earnOnly: row.earnOnly,
+    bobble: row.bobble ?? false,
     sortOrder: row.sortOrder,
     renderMetadata: normalizeRenderMetadata(row.renderMetadata),
   }));

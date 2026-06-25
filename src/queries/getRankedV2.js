@@ -40,6 +40,7 @@ const memberUserSelect = {
           slot: true,
           assetKey: true,
           renderMetadata: true,
+          bobble: true,
           testOnly: true,
         },
       },

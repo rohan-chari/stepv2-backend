@@ -82,6 +82,12 @@ function createAdminRouter(dependencies = {}) {
         }
         data.testOnly = body.testOnly;
       }
+      if (body.bobble !== undefined) {
+        if (typeof body.bobble !== "boolean") {
+          return res.status(400).json({ error: "bobble must be a boolean" });
+        }
+        data.bobble = body.bobble;
+      }
       if (Object.keys(data).length === 0) {
         return res.status(400).json({ error: "No updatable fields supplied" });
       }

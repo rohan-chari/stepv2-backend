@@ -11,6 +11,7 @@ const {
   calculateCurrentTotal,
   determineFinishSnapshot,
 } = require("../services/raceStateResolution");
+const { raceTimeZone } = require("../utils/raceTimeZone");
 
 async function resolveExpiredRaces() {
   console.log("[CRON] Checking for expired races...");
@@ -64,7 +65,9 @@ async function resolveExpiredRaces() {
           await calculateBaseAdjusted({
             participant,
             raceStartedAt: race.startedAt,
-            timeZone: "UTC",
+            // Seeded races settle in their canonical tz so settled totals match
+            // what getRaceProgress showed live; user races keep UTC (legacy).
+            timeZone: raceTimeZone(race, "UTC"),
             stepsModel: Steps,
             stepSampleModel: StepSample,
             now: settlementTime,

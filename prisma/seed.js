@@ -1,6 +1,5 @@
 require("dotenv").config();
 const { prisma } = require("../src/db");
-const { applyCosmetics } = require("../scripts/cosmetics-apply");
 
 const challenges = [
   { title: "Sole Survivor", description: "Only one sole survives. Most steps wins.", type: "HEAD_TO_HEAD", resolutionRule: "higher_total" },
@@ -79,7 +78,13 @@ async function seed() {
   }
   console.log(`Created ${stakesCreated} stakes (${stakes.length - stakesCreated} already existed)`);
 
-  await applyCosmetics();
+  // NOTE: cosmetics are intentionally NOT applied on deploy. The DBs are kept
+  // in sync by the admin editor's peer mirror (mirrorShopItemToPeer), so a
+  // deploy-time applyCosmetics() would clobber live/mirrored tuned values from
+  // data/cosmetics.json. cosmetics.json remains the git source of truth and the
+  // create/seed path — apply it MANUALLY via `npm run cosmetics:apply` when
+  // adding a new item or seeding a fresh DB, and `npm run cosmetics:pull` after
+  // tuning to persist DB values back to git.
 
   // Powerup store catalog (coin-purchasable powerups). Additive + idempotent:
   // upserts by sku so re-seeding never duplicates or disturbs cosmetics. Old app
