@@ -425,11 +425,12 @@ function registerNotificationHandlers(dependencies = {}) {
   });
 
   // Live placement broadcast (Phase 0). The placementRecompute job emits this when
-  // a participant's live rank changes. Send a SILENT push on every change (so an
-  // updated client can refresh quietly), and upgrade to a visible ALERT only on a
-  // meaningful move — being overtaken (rank got worse) or taking 1st — throttled
-  // per (race,user) so a user in many races isn't spammed. The cooldown is in
-  // memory (single pm2 instance per env; move to a shared store if scaled out).
+  // a participant's live rank changes (muted participants are filtered out at the
+  // job, so nothing arrives here for them). Send a SILENT push on every change (so
+  // an updated client can refresh quietly), and upgrade to a visible ALERT only on
+  // a meaningful threshold crossing — taking or losing 1st, or dropping out of the
+  // paid places — throttled per (race,user) so a user in many races isn't spammed.
+  // The cooldown is in memory (single pm2 instance per env; shared store if scaled).
   // Old app versions don't know the PLACEMENT_CHANGED route: the alert still shows,
   // and tap routing is a harmless no-op (their _routeFromType returns null).
   const PLACEMENT_ALERT_COOLDOWN_MS = 10 * 60 * 1000;
@@ -443,16 +444,29 @@ function registerNotificationHandlers(dependencies = {}) {
 
   events.on("PLACEMENT_CHANGED", async (data) => {
     try {
-      const { raceId, raceName, userId, previousPlacement, placement } = data || {};
+      const { raceId, raceName, userId, previousPlacement, placement, paidPlaces } =
+        data || {};
       if (!userId || placement == null) return;
 
       const tokens = await deviceTokenModel.findByUserId(userId);
       if (!tokens || tokens.length === 0) return;
 
-      const dropped =
-        typeof previousPlacement === "number" && placement > previousPlacement;
+      // A visible alert fires only on a MEANINGFUL threshold crossing, not on
+      // every one-spot slip (which, at a 5-min recompute cadence over a multi-day
+      // race, was the source of the notification flood). The silent refresh below
+      // still fires on every change for updated clients.
       const tookFirst = placement === 1 && previousPlacement !== 1;
-      const meaningful = dropped || tookFirst;
+      const lostFirst =
+        typeof previousPlacement === "number" &&
+        previousPlacement === 1 &&
+        placement > 1;
+      const droppedOutOfPaid =
+        typeof previousPlacement === "number" &&
+        typeof paidPlaces === "number" &&
+        paidPlaces > 0 &&
+        previousPlacement <= paidPlaces &&
+        placement > paidPlaces;
+      const meaningful = tookFirst || lostFirst || droppedOutOfPaid;
 
       const cooldownKey = `${raceId}:${userId}`;
       const nowMs = Date.now();
@@ -463,10 +477,19 @@ function registerNotificationHandlers(dependencies = {}) {
       if (sendAlert) lastPlacementAlertAt.set(cooldownKey, nowMs);
 
       const label = raceName || "your race";
-      const title = tookFirst ? "You're in the lead!" : "You've been passed";
-      const body = tookFirst
-        ? `You took 1st in ${label}.`
-        : `You dropped to ${ordinal(placement)} in ${label}.`;
+      let title;
+      let body;
+      if (tookFirst) {
+        title = "You're in the lead!";
+        body = `You took 1st in ${label}.`;
+      } else if (droppedOutOfPaid) {
+        title = "Out of the payout";
+        body = `You dropped to ${ordinal(placement)} in ${label} — out of the prize places.`;
+      } else {
+        // lostFirst
+        title = "You lost the lead";
+        body = `You slipped to ${ordinal(placement)} in ${label}.`;
+      }
       const payload = {
         type: "PLACEMENT_CHANGED",
         route: "race_detail",

@@ -3,6 +3,7 @@ const { RaceParticipant } = require("../models/raceParticipant");
 const { eventBus } = require("../events/eventBus");
 const { resolveRaceState } = require("../services/raceStateResolution");
 const { stepSyncPushService } = require("../services/stepSyncPush");
+const { computeRacePayouts } = require("../utils/racePayoutPresets");
 
 const RECOMPUTE_INTERVAL_MS = 5 * 60 * 1000; // every 5 minutes
 
@@ -60,6 +61,19 @@ function buildRecomputePlacements(dependencies = {}) {
           (a, b) => (b.totalSteps ?? 0) - (a.totalSteps ?? 0)
         );
 
+        // How many places are "in the money" for this race, so the handler can
+        // alert only on a meaningful threshold crossing (dropping out of the
+        // payout) instead of every one-spot slip. 0 when there's no pot — a free
+        // race has no paid places, so only lead changes are meaningful.
+        const paidPlaces =
+          (race.potCoins || 0) > 0
+            ? computeRacePayouts({
+                preset: race.payoutPreset,
+                potCoins: race.potCoins,
+                participantCount: ranked.length,
+              }).length
+            : 0;
+
         for (let i = 0; i < ranked.length; i++) {
           const participant = ranked[i];
           const liveRank = i + 1;
@@ -76,6 +90,18 @@ function buildRecomputePlacements(dependencies = {}) {
             continue;
           }
 
+          // Per-race opt-out: keep the baseline in sync (so unmuting doesn't
+          // replay a backlog of missed moves) but emit nothing — no visible
+          // alert and no silent refresh — for a muted participant.
+          if (participant.placementAlertsMuted) {
+            if (participant.lastNotifiedPlacement !== liveRank) {
+              await participantModel.update(participant.id, {
+                lastNotifiedPlacement: liveRank,
+              });
+            }
+            continue;
+          }
+
           if (participant.lastNotifiedPlacement === liveRank) continue; // no change
 
           const change = {
@@ -85,6 +111,7 @@ function buildRecomputePlacements(dependencies = {}) {
             previousPlacement: participant.lastNotifiedPlacement,
             placement: liveRank,
             totalParticipants: ranked.length,
+            paidPlaces,
           };
           events.emit("PLACEMENT_CHANGED", change);
           emitted.push(change);

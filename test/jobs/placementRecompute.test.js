@@ -95,6 +95,39 @@ test("first observation (null lastNotifiedPlacement) seeds baseline silently", a
   assert.deepEqual(updates, [{ id: "p1", fields: { lastNotifiedPlacement: 1 } }]);
 });
 
+test("muted participant: rank change updates baseline but emits nothing", async () => {
+  const { deps, emitted, updates } = makeDeps({
+    races: [{ id: "r1", name: "Race 1" }],
+    participantsByRace: {
+      r1: [
+        P({ id: "p1", userId: "u1", totalSteps: 9000, lastNotifiedPlacement: 1, placementAlertsMuted: true }), // now 2nd
+        P({ id: "p2", userId: "u2", totalSteps: 10000, lastNotifiedPlacement: 2 }), // now 1st
+      ],
+    },
+  });
+  await buildRecomputePlacements(deps)();
+  // u1 is muted -> no event for them; u2 (unmuted) still notified.
+  assert.equal(emitted.length, 1);
+  assert.equal(emitted[0].data.userId, "u2");
+  // u1's baseline is still advanced so unmuting later won't replay this move.
+  assert.ok(updates.some((u) => u.id === "p1" && u.fields.lastNotifiedPlacement === 2));
+});
+
+test("emitted change carries paidPlaces derived from the race payout", async () => {
+  const { deps, emitted } = makeDeps({
+    races: [{ id: "r1", name: "Race 1", payoutPreset: "TOP3_70_20_10", potCoins: 300 }],
+    participantsByRace: {
+      r1: [
+        P({ id: "p1", userId: "u1", totalSteps: 9000, lastNotifiedPlacement: 1 }), // now 2nd
+        P({ id: "p2", userId: "u2", totalSteps: 10000, lastNotifiedPlacement: 2 }), // now 1st
+      ],
+    },
+  });
+  await buildRecomputePlacements(deps)();
+  assert.ok(emitted.length >= 1);
+  assert.equal(emitted[0].data.paidPlaces, 3); // top-3 preset pays 3 places
+});
+
 test("finished participants are never notified but still occupy a rank", async () => {
   const { deps, emitted } = makeDeps({
     races: [{ id: "r1", name: "Race 1" }],

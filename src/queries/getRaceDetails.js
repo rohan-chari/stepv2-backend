@@ -87,6 +87,9 @@ async function getRaceDetails(userId, raceId) {
     powerupStepInterval: race.powerupStepInterval,
     myStatus: myParticipant.status,
     myChatMuted: myParticipant.chatMuted || false,
+    // Per-race placement-alert opt-out. Defaulted false so old app builds that
+    // don't read this key are unaffected; the new build renders the mute toggle.
+    myPlacementAlertsMuted: myParticipant.placementAlertsMuted || false,
     myLastReadRaceChatAt: myParticipant.lastReadRaceChatAt,
     participants: race.participants.map((p) => ({
       id: p.id,

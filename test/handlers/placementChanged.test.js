@@ -77,6 +77,40 @@ test("taking 1st sends an ALERT push", async () => {
   assert.match(apnsCalls.alert[0].body, /1st/);
 });
 
+test("a mid-pack drop NOT crossing a payout cutoff is SILENT (no alert)", async () => {
+  const { eventBus, apnsCalls } = setup();
+  // 5th -> 6th in a race paying the top 3: not a lead change, still out of the
+  // money on both sides -> no meaningful threshold crossed.
+  await eventBus.emit(
+    "PLACEMENT_CHANGED",
+    CHANGE({ previousPlacement: 5, placement: 6, paidPlaces: 3 })
+  );
+  assert.equal(apnsCalls.alert.length, 0);
+  assert.equal(apnsCalls.silent.length, 1);
+});
+
+test("dropping out of the paid places sends an ALERT push", async () => {
+  const { eventBus, apnsCalls } = setup();
+  // 3rd -> 4th in a race paying the top 3: crosses the payout cutoff.
+  await eventBus.emit(
+    "PLACEMENT_CHANGED",
+    CHANGE({ previousPlacement: 3, placement: 4, paidPlaces: 3 })
+  );
+  assert.equal(apnsCalls.alert.length, 1);
+  assert.match(apnsCalls.alert[0].body, /payout|prize/i);
+});
+
+test("dropping WITHIN the paid places (1st -> 2nd of top 3) alerts as a lost lead", async () => {
+  const { eventBus, apnsCalls } = setup();
+  await eventBus.emit(
+    "PLACEMENT_CHANGED",
+    CHANGE({ previousPlacement: 1, placement: 2, paidPlaces: 3 })
+  );
+  // Still paid, but losing 1st is meaningful on its own.
+  assert.equal(apnsCalls.alert.length, 1);
+  assert.match(apnsCalls.alert[0].body, /2nd/);
+});
+
 test("non-meaningful improvement (3rd -> 2nd) sends a SILENT push only", async () => {
   const { eventBus, apnsCalls } = setup();
   await eventBus.emit("PLACEMENT_CHANGED", CHANGE({ previousPlacement: 3, placement: 2 }));

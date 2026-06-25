@@ -71,6 +71,9 @@ const {
   markRaceChatRead: defaultMarkRaceChatRead,
 } = require("../commands/setRaceChatMute");
 const {
+  setRacePlacementMute: defaultSetRacePlacementMute,
+} = require("../commands/setRacePlacementMute");
+const {
   markRaceResultsSeen: defaultMarkRaceResultsSeen,
 } = require("../commands/markRaceResultsSeen");
 const { Race: defaultRaceModel } = require("../models/race");
@@ -138,6 +141,8 @@ function createRacesRouter(dependencies = {}) {
     dependencies.setRaceChatMute || defaultSetRaceChatMute;
   const markRaceChatRead =
     dependencies.markRaceChatRead || defaultMarkRaceChatRead;
+  const setRacePlacementMute =
+    dependencies.setRacePlacementMute || defaultSetRacePlacementMute;
   const markRaceResultsSeen =
     dependencies.markRaceResultsSeen || defaultMarkRaceResultsSeen;
   const raceModel = dependencies.Race || defaultRaceModel;
@@ -728,6 +733,29 @@ function createRacesRouter(dependencies = {}) {
           .json({ error: error.message });
       }
       console.error("Set race chat mute error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // PUT /races/:raceId/placement/mute
+  // Per-race opt-out for live placement-change pushes. Additive endpoint; old app
+  // builds never call it. Mirrors the chat/mute route shape.
+  router.put("/:raceId/placement/mute", async (req, res) => {
+    try {
+      const { muted } = req.body;
+      await setRacePlacementMute({
+        userId: req.user.id,
+        raceId: req.params.raceId,
+        muted: !!muted,
+      });
+      res.json({ success: true, muted: !!muted });
+    } catch (error) {
+      if (error.name === "SetRacePlacementMuteError") {
+        return res
+          .status(error.statusCode || 400)
+          .json({ error: error.message });
+      }
+      console.error("Set race placement mute error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });

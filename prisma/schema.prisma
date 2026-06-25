@@ -672,6 +672,12 @@ model RaceParticipant {
   lastReadRaceChatAt DateTime?        @map("last_read_race_chat_at")
   lastChatPushAt     DateTime?        @map("last_chat_push_at")
   chatMuted          Boolean          @default(false) @map("chat_muted")
+  // Per-race opt-out for live placement-change pushes (Phase 0). When true, the
+  // placementRecompute job keeps this participant's lastNotifiedPlacement baseline
+  // in sync but emits no PLACEMENT_CHANGED event, so they get neither the visible
+  // alert nor the silent refresh for this race. Additive + default-false: old app
+  // versions never set it and behave exactly as before.
+  placementAlertsMuted Boolean        @default(false) @map("placement_alerts_muted")
   inviteExpiresAt    DateTime?        @map("invite_expires_at")
   resultsSeenAt      DateTime?        @map("results_seen_at")
 

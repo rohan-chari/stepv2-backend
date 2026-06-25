@@ -236,15 +236,17 @@ const Race = {
   // used by the live placement-recompute job (Phase 0). Excludes endsAt <= now so
   // the live job never collides with raceExpiry's settlement; includes endsAt:null
   // (open-ended target races, which raceExpiry never settles) so they still get
-  // live updates. Lean select: the job only needs id (to call resolveRaceState)
-  // and name (for the placement-change push body).
+  // live updates. Lean select: the job needs id (to call resolveRaceState), name
+  // (for the placement-change push body), and payoutPreset/potCoins so it can
+  // derive how many places are "in the money" — the threshold a meaningful
+  // placement alert is gated on.
   async findActiveInProgress(now) {
     return prisma.race.findMany({
       where: {
         status: "ACTIVE",
         OR: [{ endsAt: { gt: now } }, { endsAt: null }],
       },
-      select: { id: true, name: true },
+      select: { id: true, name: true, payoutPreset: true, potCoins: true },
     });
   },
 
