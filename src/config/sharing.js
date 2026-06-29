@@ -10,19 +10,31 @@ const PUBLIC_BASE_URL =
 // association file can only associate once the real Apple Team ID is set here
 // (via the IOS_APP_ID env var on the server). The bundle id matches the iOS
 // app's PRODUCT_BUNDLE_IDENTIFIER.
+// Default is the real prod value (Apple Team ID 4NRKZL9H5J, from the Xcode
+// project's DEVELOPMENT_TEAM + the iOS bundle id). Env-overridable for other
+// environments. This is what makes the AASA file verify for Universal Links.
 const IOS_APP_ID =
-  process.env.IOS_APP_ID || "TEAMID.com.rohanchari.steptracker";
+  process.env.IOS_APP_ID || "4NRKZL9H5J.com.rohanchari.steptracker";
 
 // Android App Links: the package name + the signing cert SHA-256 fingerprint(s).
-// ANDROID_SHA256_FINGERPRINTS is a comma-separated list (Play App Signing
-// usually means BOTH the upload key and Google's re-signing key must appear).
-// Obtain via `keytool -list -v -keystore <ks>` or the Play Console. Until set,
-// assetlinks.json publishes an empty fingerprint list (verification will not
-// pass, but the endpoint is structurally valid).
+// Play App Signing means BOTH keys must be listed for App Links to verify across
+// every channel:
+//   * UPLOAD key  — set below (extracted from android/key.properties' keystore).
+//     Used by internal-test / sideloaded builds you sign yourself.
+//   * Play APP-SIGNING key — Google re-signs Play Store installs with ITS key,
+//     so its SHA-256 MUST also be present or Play Store installs won't verify.
+//     ⚠️ STILL TO ADD: get it from Play Console → App integrity → App signing →
+//     "App signing key certificate" SHA-256, and append it (comma-separated) to
+//     the default below or via the ANDROID_SHA256_FINGERPRINTS env var.
 const ANDROID_PACKAGE =
   process.env.ANDROID_PACKAGE || "com.rohanchari.steptracker";
+const DEFAULT_ANDROID_FINGERPRINTS = [
+  // Upload key (android/key.properties → bara-upload-key.jks, alias "upload").
+  "CF:06:4C:DD:CA:14:CB:6B:27:91:BC:86:77:39:EF:14:EC:0E:AE:13:3C:68:E2:71:30:E5:0D:0F:8B:EE:14:3A",
+  // TODO: append the Play app-signing key SHA-256 from Play Console.
+].join(",");
 const ANDROID_SHA256_FINGERPRINTS = (
-  process.env.ANDROID_SHA256_FINGERPRINTS || ""
+  process.env.ANDROID_SHA256_FINGERPRINTS || DEFAULT_ANDROID_FINGERPRINTS
 )
   .split(",")
   .map((s) => s.trim())
