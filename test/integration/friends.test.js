@@ -158,33 +158,11 @@ describe("friend request flow", () => {
     assert.equal(bobBody.friends.length, 0);
   });
 
-  it("cannot send request without a display name", async () => {
-    const noName = await createUser(null);
-    const bob = await createUser("BobRunner");
-
-    const res = await request(server.baseUrl, "POST", "/friends/request", {
-      body: { addresseeId: bob.userId },
-      token: noName.token,
-    });
-    assert.equal(res.status, 403);
-  });
-
   it("cannot send request to yourself", async () => {
     const alice = await createUser("AliceWalker");
 
     const res = await request(server.baseUrl, "POST", "/friends/request", {
       body: { addresseeId: alice.userId },
-      token: alice.token,
-    });
-    assert.equal(res.status, 409);
-  });
-
-  it("cannot send request to user without display name", async () => {
-    const alice = await createUser("AliceWalker");
-    const noName = await createUser(null);
-
-    const res = await request(server.baseUrl, "POST", "/friends/request", {
-      body: { addresseeId: noName.userId },
       token: alice.token,
     });
     assert.equal(res.status, 409);

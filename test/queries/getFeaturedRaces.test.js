@@ -56,8 +56,11 @@ test("getFeaturedRaces returns both seeds ordered daily then weekly, with reward
   assert.equal(result.length, 2);
   assert.equal(result[0].seedKind, "DAILY_10K");
   assert.equal(result[1].seedKind, "WEEKLY_50K");
-  assert.deepEqual(result[0].finishReward, { pool: 100, topFraction: 0.5 });
-  assert.deepEqual(result[1].finishReward, { pool: 500, topFraction: 0.5 });
+  // Pool + paid-place projection scales with the current field. Daily has 2
+  // ACCEPTED (pool floors at 100, places cap to the field = 2); weekly has 1
+  // (pool floors at 500, places cap to the field = 1).
+  assert.deepEqual(result[0].finishReward, { pool: 100, paidPlaces: 2 });
+  assert.deepEqual(result[1].finishReward, { pool: 500, paidPlaces: 1 });
   assert.equal(result[0].participantCount, 2);
   assert.equal(result[0].raceId, "race-daily");
   assert.equal(result[0].myStatus, null);

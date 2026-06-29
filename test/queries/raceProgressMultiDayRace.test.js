@@ -215,7 +215,10 @@ function makeParticipant(id, userId, displayName, overrides = {}) {
     baselineSteps: 0,
     finishedAt: null,
     bonusSteps: overrides.bonusSteps || 0,
-    nextBoxAtSteps: 0,
+    // Box gate armed well above any total reachable in this race (max ~15100),
+    // mirroring stealthMode.test.js. This keeps the box system inert (no
+    // self-heal, no rolls) so the step-progression/placement assertions stand.
+    nextBoxAtSteps: 50000,
     powerupSlots: 3,
     user: { displayName },
   };
@@ -420,8 +423,9 @@ test("Stealth Mode — stealthed Bob shows ??? to others, normal to self", async
   const bobFromAlice = aliceView.participants.find((p) => p.userId === BOB);
 
   assert.equal(bobFromAlice.displayName, "???");
+  // Steps are hidden by nulling totalSteps; the response shape carries no
+  // separate `progress` field for leaderboard entries.
   assert.equal(bobFromAlice.totalSteps, null);
-  assert.equal(bobFromAlice.progress, null);
   assert.equal(bobFromAlice.stealthed, true);
 
   // Viewing as Bob — sees own steps normally

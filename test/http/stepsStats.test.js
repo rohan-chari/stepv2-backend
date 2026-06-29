@@ -5,6 +5,7 @@ const express = require("express");
 
 const { createStepsRouter } = require("../../src/routes/steps");
 const { SeasonScore } = require("../../src/models/season");
+const { getMondayOfWeek } = require("../../src/utils/week");
 
 // Mounts the steps router with injected dependencies so GET /steps/stats can be
 // exercised without a database: auth is faked, step history is supplied, and the
@@ -41,30 +42,42 @@ async function withStatsServer(stepsHistory, run) {
   }
 }
 
-// "now" inside the handler comes from new Date(); these tests pick dates that are
-// safely inside the current week/month/year regardless of when they run.
+// "now" inside the handler comes from new Date(); it buckets steps with
+// lower-bound checks only (date >= this-week's-Monday / month-start / year-start,
+// no upper bound — see src/routes/steps.js:134-144). So we anchor fixture dates
+// at the LATER of this week's Monday and the first of the current month (itself
+// always >= Jan 1). Every fixture day is then guaranteed inside this week, month,
+// and year on ANY day of the week — including Mondays, when getMondayOfWeek makes
+// the week start *today* and naive today/yesterday/day-before fixtures spill into
+// the previous week. (Mirrors the leaderboard week de-flake.)
 function recentDates() {
   const now = new Date();
   const iso = (d) => d.toISOString().slice(0, 10);
-  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  const minusDays = (n) => {
-    const d = new Date(today);
-    d.setUTCDate(d.getUTCDate() - n);
+  const monday = new Date(`${getMondayOfWeek(now, "UTC")}T00:00:00.000Z`);
+  const monthStart = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)
+  );
+  const anchor = monday > monthStart ? monday : monthStart;
+  // Day `n` of the current week's safe window (n=0 is the anchor). Distinct,
+  // consecutive days that always satisfy all three "this period" lower bounds.
+  const dayOfWeek = (n) => {
+    const d = new Date(anchor);
+    d.setUTCDate(d.getUTCDate() + n);
     return iso(d);
   };
-  return { today: iso(today), minusDays };
+  return { today: dayOfWeek(0), dayOfWeek };
 }
 
 test("GET /steps/stats returns per-day averages = total / days-with-data", async () => {
-  const { today, minusDays } = recentDates();
+  const { dayOfWeek } = recentDates();
 
   // Three days this week with recorded data: 1000 + 2000 + 3000 = 6000 steps.
-  // The Monday-of-week boundary means up to 3 distinct recent days are always
-  // within the same week (today, yesterday, day-before).
+  // Anchored to the current week's safe window so all three land inside this
+  // week/month/year on any day (including Mondays).
   const history = [
-    { date: `${today}T12:00:00.000Z`, steps: 3000 },
-    { date: `${minusDays(1)}T12:00:00.000Z`, steps: 2000 },
-    { date: `${minusDays(2)}T12:00:00.000Z`, steps: 1000 },
+    { date: `${dayOfWeek(0)}T12:00:00.000Z`, steps: 3000 },
+    { date: `${dayOfWeek(1)}T12:00:00.000Z`, steps: 2000 },
+    { date: `${dayOfWeek(2)}T12:00:00.000Z`, steps: 1000 },
   ];
 
   await withStatsServer(history, ({ status, body }) => {
@@ -84,12 +97,12 @@ test("GET /steps/stats returns per-day averages = total / days-with-data", async
 });
 
 test("GET /steps/stats rounds per-day averages", async () => {
-  const { today, minusDays } = recentDates();
+  const { dayOfWeek } = recentDates();
 
   // 1000 + 1001 = 2001 over 2 days -> 1000.5 -> Math.round -> 1001.
   const history = [
-    { date: `${today}T12:00:00.000Z`, steps: 1001 },
-    { date: `${minusDays(1)}T12:00:00.000Z`, steps: 1000 },
+    { date: `${dayOfWeek(0)}T12:00:00.000Z`, steps: 1001 },
+    { date: `${dayOfWeek(1)}T12:00:00.000Z`, steps: 1000 },
   ];
 
   await withStatsServer(history, ({ body }) => {

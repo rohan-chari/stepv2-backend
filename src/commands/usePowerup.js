@@ -465,8 +465,68 @@ function buildUsePowerup(dependencies = {}) {
       }
     }
 
-    // Check Compression Socks shield on target
+    // Mirror reflect pre-check. Precedence: MIRROR wins even when the target
+    // also holds Compression Socks. The Mirror is checked FIRST and, if present,
+    // reflects the attack — the socks block below is then skipped, so the socks
+    // shield is NOT consumed and stays banked for a later attack (a dual-shield
+    // holder gets two saves: reflect now, block next time). When the target
+    // holds an active Mirror, the offensive powerup is REFLECTED back onto the
+    // attacker: we swap roles so the effect lands on the original attacker,
+    // consume the Mirror, and write/emit a POWERUP_REFLECTED event.
+    let reflected = false;
     if (OFFENSIVE_TYPES.includes(type) && targetParticipant) {
+      const mirror = await effectModel.findActiveByTypeForParticipant(
+        targetParticipant.id,
+        "MIRROR"
+      );
+      if (mirror) {
+        reflected = true;
+        // Consume/expire the Mirror.
+        await effectModel.update(mirror.id, { status: "EXPIRED" });
+
+        const originalAttacker = myParticipant;
+        const originalTarget = targetParticipant;
+        const originalAttackerUserId = userId;
+        const originalTargetUserId = resolvedTargetUserId;
+        const originalAttackerName = myDisplayName;
+        const originalTargetName = targetDisplayName;
+
+        // Swap roles: the effect now applies to the original attacker, sourced
+        // by the original target. Re-bind the variables the switch reads below.
+        myParticipant = originalTarget;
+        targetParticipant = originalAttacker;
+        resolvedTargetUserId = originalAttackerUserId;
+        myDisplayName = originalTargetName;
+        targetDisplayName = originalAttackerName;
+        // The acting user (for source attribution) becomes the original target.
+        actingUserId = originalTargetUserId;
+
+        await eventModel.create({
+          raceId,
+          actorUserId: originalTargetUserId,
+          eventType: "POWERUP_REFLECTED",
+          powerupType: type,
+          targetUserId: originalAttackerUserId,
+          description: `${originalTargetName}'s Mirror reflected ${originalAttackerName}'s ${levelPrefix(upgradeLevel)}${POWERUP_NAMES[type]} back at them!`,
+        });
+
+        events.emit("POWERUP_REFLECTED", {
+          raceId,
+          attackerUserId: originalAttackerUserId,
+          defenderUserId: originalTargetUserId,
+          reflectedType: type,
+          upgradeLevel,
+        });
+      }
+    }
+
+    // Compression Socks shield on target. Only consulted when the attack was NOT
+    // already reflected by a Mirror (Mirror takes precedence, above): a target
+    // holding both reflects this hit and keeps the socks for next time. After a
+    // reflect, targetParticipant has been swapped to the original attacker, so
+    // the `!reflected` guard is also what keeps us from checking the attacker's
+    // own shields here.
+    if (!reflected && OFFENSIVE_TYPES.includes(type) && targetParticipant) {
       const shield = await effectModel.findActiveByTypeForParticipant(
         targetParticipant.id,
         "COMPRESSION_SOCKS"
@@ -522,59 +582,6 @@ function buildUsePowerup(dependencies = {}) {
           upgradeLevel,
           coinsSpent: costCoins,
         };
-      }
-    }
-
-    // Mirror reflect pre-check. Precedence: Compression Socks (above) wins even
-    // if the target also holds a Mirror — and in that case the Mirror is NOT
-    // consumed (the socks-block path above returned already). If we reach here
-    // and the target holds an active Mirror, the offensive powerup is REFLECTED
-    // back onto the attacker: we swap roles so the effect lands on the original
-    // attacker, consume the Mirror, and write/emit a POWERUP_REFLECTED event.
-    let reflected = false;
-    if (OFFENSIVE_TYPES.includes(type) && targetParticipant) {
-      const mirror = await effectModel.findActiveByTypeForParticipant(
-        targetParticipant.id,
-        "MIRROR"
-      );
-      if (mirror) {
-        reflected = true;
-        // Consume/expire the Mirror.
-        await effectModel.update(mirror.id, { status: "EXPIRED" });
-
-        const originalAttacker = myParticipant;
-        const originalTarget = targetParticipant;
-        const originalAttackerUserId = userId;
-        const originalTargetUserId = resolvedTargetUserId;
-        const originalAttackerName = myDisplayName;
-        const originalTargetName = targetDisplayName;
-
-        // Swap roles: the effect now applies to the original attacker, sourced
-        // by the original target. Re-bind the variables the switch reads below.
-        myParticipant = originalTarget;
-        targetParticipant = originalAttacker;
-        resolvedTargetUserId = originalAttackerUserId;
-        myDisplayName = originalTargetName;
-        targetDisplayName = originalAttackerName;
-        // The acting user (for source attribution) becomes the original target.
-        actingUserId = originalTargetUserId;
-
-        await eventModel.create({
-          raceId,
-          actorUserId: originalTargetUserId,
-          eventType: "POWERUP_REFLECTED",
-          powerupType: type,
-          targetUserId: originalAttackerUserId,
-          description: `${originalTargetName}'s Mirror reflected ${originalAttackerName}'s ${levelPrefix(upgradeLevel)}${POWERUP_NAMES[type]} back at them!`,
-        });
-
-        events.emit("POWERUP_REFLECTED", {
-          raceId,
-          attackerUserId: originalAttackerUserId,
-          defenderUserId: originalTargetUserId,
-          reflectedType: type,
-          upgradeLevel,
-        });
       }
     }
 

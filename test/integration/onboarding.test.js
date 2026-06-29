@@ -37,7 +37,7 @@ describe("user onboarding flow", () => {
 
     const signInBody = await signInRes.json();
     assert.ok(signInBody.sessionToken);
-    assert.equal(signInBody.user.displayName, null);
+    assert.equal(signInBody.user.displayName, "TestUser");
     const token = signInBody.sessionToken;
     const userId = signInBody.user.id;
 
@@ -46,7 +46,7 @@ describe("user onboarding flow", () => {
     assert.equal(dbUser.appleId, APPLE_ID);
     assert.equal(dbUser.email, EMAIL);
     assert.equal(dbUser.name, "Test User");
-    assert.equal(dbUser.displayName, null);
+    assert.equal(dbUser.displayName, "TestUser");
     assert.equal(dbUser.coins, 0);
 
     // Step 2: GET /auth/check-display-name — real-time validation

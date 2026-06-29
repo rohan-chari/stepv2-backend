@@ -20,12 +20,6 @@ async function sendFriendRequest({ userId, addresseeId }) {
     throw new FriendRequestError("User not found");
   }
 
-  if (!addressee.displayName) {
-    throw new FriendRequestError(
-      "Cannot send a friend request to a user without a display name"
-    );
-  }
-
   const existing = await Friendship.findBetweenUsers(userId, addresseeId);
 
   if (existing) {

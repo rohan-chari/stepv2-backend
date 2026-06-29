@@ -100,6 +100,7 @@ test("API calls work with session token", async () => {
       id: "step-1",
       steps: 5000,
       date: "2026-03-16",
+      stepGoal: 5000,
     });
   } finally {
     await server.close();

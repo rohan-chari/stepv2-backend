@@ -21,12 +21,15 @@ test("cosmetics catalog includes sunglasses as an active face accessory", () => 
     priceCoins: 250,
     assetKey: "sunglasses",
     active: true,
+    testOnly: false,
+    earnOnly: false,
+    bobble: true,
     sortOrder: 30,
     renderMetadata: {
-      offsetX: 0.025,
-      offsetY: -0.04,
-      rotation: -0.08,
-      scale: 1.65,
+      offsetX: -0.09463276836158163,
+      offsetY: -0.02,
+      rotation: -0.2800000000000001,
+      scale: 1.3999999999999997,
     },
   });
 });
@@ -40,15 +43,18 @@ test("cosmetics catalog includes shoes as an active feet accessory", () => {
     name: "Trail Shoes",
     description: "High-top kicks for extra trail style.",
     slot: "FEET",
-    priceCoins: 250,
+    priceCoins: 500,
     assetKey: "shoes",
     active: true,
+    testOnly: false,
+    earnOnly: false,
+    bobble: false,
     sortOrder: 40,
     renderMetadata: {
-      offsetX: 0.03,
-      offsetY: 0.02,
-      rotation: -0.03,
-      scale: 1.1,
+      offsetX: 0.019999999999999993,
+      offsetY: 0.009999999999999998,
+      rotation: -0.060000000000000005,
+      scale: 1.5000000000000004,
     },
   });
 });

@@ -151,7 +151,6 @@ describe("stealth mode", () => {
       const aliceP = findUser(progress, alice.userId);
       assert.equal(aliceP.displayName, "???");
       assert.equal(aliceP.totalSteps, null);
-      assert.equal(aliceP.progress, null);
       assert.equal(aliceP.stealthed, true);
     });
 

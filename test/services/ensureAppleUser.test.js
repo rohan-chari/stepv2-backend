@@ -7,6 +7,8 @@ test("creates a new user and emits registration events when the Apple user is mi
   const events = [];
   const storedUsers = [];
 
+  let createdUser;
+
   const ensureAppleUser = buildEnsureAppleUser({
     User: {
       async findByAppleId() {
@@ -15,10 +17,19 @@ test("creates a new user and emits registration events when the Apple user is mi
       async create(payload) {
         storedUsers.push(payload);
 
-        return {
+        createdUser = {
           id: "user-1",
           ...payload,
         };
+        return createdUser;
+      },
+      // New users have no displayName yet, so ensureAppleUser auto-generates
+      // one and persists it via update. No name is taken in this fresh-DB test.
+      async findByDisplayNameInsensitive() {
+        return null;
+      },
+      async update(id, data) {
+        return { ...createdUser, ...data };
       },
     },
     eventBus: {
@@ -35,11 +46,14 @@ test("creates a new user and emits registration events when the Apple user is mi
     emitSignInEvent: true,
   });
 
+  // Display name is derived from the Apple name with the allowed charset
+  // (whitespace dropped): "Rohan Chari" -> "RohanChari".
   assert.deepEqual(user, {
     id: "user-1",
     appleId: "apple-user-123",
     email: "walker@example.com",
     name: "Rohan Chari",
+    displayName: "RohanChari",
   });
   assert.deepEqual(storedUsers, [
     {

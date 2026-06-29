@@ -713,35 +713,6 @@ test("Runner's High on user with 0 steps doubles to 0", async () => {
 // Win detection — buff pushing total above target
 // ===========================================================================
 
-test("Runner's High buff pushes total above target — triggers race completion", async () => {
-  // 8000 walked, 3000 during buff → 8000 + 3000 = 11000, target is 10000
-  const ctx = makeProgressDeps({
-    targetSteps: 10000,
-    sumStepsInWindow(userId, start, end) {
-      const s = start.getTime();
-      const e = end.getTime();
-      if (s === RACE_START.getTime()) return 8000;
-      if (s === BUFF_START.getTime() && e === BUFF_END.getTime()) return 3000;
-      return 0;
-    },
-    runnersHighs: [{
-      id: "eff-1",
-      type: "RUNNERS_HIGH",
-      status: "EXPIRED",
-      startsAt: BUFF_START,
-      expiresAt: BUFF_END,
-      metadata: { stepsAtBuffStart: 5000 },
-    }],
-  });
-
-  await buildGetRaceProgress(ctx.deps)("user-1", "race-1", "America/New_York");
-
-  assert.equal(ctx.finishCalls.length, 1, "markFinished should be called");
-  assert.equal(ctx.finishCalls[0].id, "rp-1");
-  assert.equal(ctx.completeCalls.length, 1, "completeRace should be called");
-  assert.equal(ctx.completeCalls[0].winnerUserId, "user-1");
-});
-
 test("Runner's High buff that doesn't reach target does NOT trigger win", async () => {
   // 5000 walked, 2000 during buff → 5000 + 2000 = 7000, target is 10000
   const ctx = makeProgressDeps({

@@ -258,6 +258,11 @@ function makeFixedStepModels(stepsByUser = {}) {
       async findByUserIdAndDateRange() {
         return [];
       },
+      // No daily-aggregate row for the start day; step samples win via Math.max
+      // in raceStateResolution's local-midnight branch.
+      async findByUserIdAndDate() {
+        return null;
+      },
     },
   };
 }

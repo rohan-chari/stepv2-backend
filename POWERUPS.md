@@ -72,6 +72,22 @@ When an offensive powerup is used against someone with an active Compression Soc
 3. The attacker's powerup is still marked `USED`
 4. A `POWERUP_BLOCKED` event appears in the race feed
 
+### Shield precedence: Mirror beats Compression Socks
+
+A target can hold **both** an active Mirror and an active Compression Socks at
+once. When attacked, the **Mirror takes precedence** — it is checked first:
+
+1. The Mirror reflects the attack back onto the attacker (the attacker takes the
+   damage), is consumed (status `EXPIRED`), and emits `POWERUP_REFLECTED`.
+2. The Compression Socks shield is **not** touched — it stays `ACTIVE`, banked
+   for the next attack.
+
+So a dual-shield holder gets two saves in order: the first incoming attack
+reflects off the Mirror (punishing the attacker), and the next one is absorbed
+by the still-active Compression Socks. The socks-block path only runs when no
+Mirror is present. (Implemented in `src/commands/usePowerup.js`; see the
+dual-shield integration test in `test/integration/powerups-dual-shield.test.js`.)
+
 ## Step Calculation with Powerups
 
 ```

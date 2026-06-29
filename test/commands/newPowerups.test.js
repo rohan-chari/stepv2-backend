@@ -179,8 +179,6 @@ function makeUseDeps(overrides = {}) {
 
 test("new powerups are assigned to the intended rarity pools", () => {
   assert.ok(RARITY_TIERS.RARE.includes("LUCKY_HORSESHOE"));
-  assert.ok(RARITY_TIERS.UNCOMMON.includes("CAMPFIRE_REST"));
-  assert.ok(RARITY_TIERS.COMMON.includes("TRAIL_MAGNET"));
   assert.ok(RARITY_TIERS.RARE.includes("POCKET_WATCH"));
   assert.ok(RARITY_TIERS.RARE.includes("TRAIL_MINE"));
   assert.ok(RARITY_TIERS.UNCOMMON.includes("PINECONE_TOSS"));

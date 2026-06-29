@@ -13,8 +13,8 @@ const {
 } = require("../utils/racePayoutPresets");
 const { payoutRaceCoins } = require("../services/raceBuyIns");
 const {
-  getFinishRewardPool,
-  FINISH_REWARD_TOP_FRACTION,
+  computeFinishRewardPool,
+  computeFinishRewardPlaces,
 } = require("../constants/raceFinishReward");
 
 function buildCompleteRace(dependencies = {}) {
@@ -86,14 +86,16 @@ function buildCompleteRace(dependencies = {}) {
     }
 
     // System-funded graded reward for seeded races (the daily/weekly
-    // challenges, which have no buy-in pot). The top FINISH_REWARD_TOP_FRACTION
-    // of finishers split a fixed minted pool, higher placers earning more. This
-    // is independent of the buy-in pot path above — a race could in principle
-    // have both — and uses its own reason/refId so the two never collide. It
-    // runs at most once per race: completeRace early-returns above once the race
-    // is COMPLETED, and awardCoins dedups on (reason, refId) for retries.
-    const finishRewardPool = getFinishRewardPool(race?.seedId);
-    if (finishRewardPool > 0 && Array.isArray(race?.participants)) {
+    // challenges, which have no buy-in pot). A minted pool is split across a
+    // concentrated set of top finishers, higher placers earning more. Both the
+    // pool size and the number of paid places scale with the field (see
+    // src/constants/raceFinishReward.js) so a big challenge mints a bigger prize
+    // and still pays only a handful of meaningful places. This is independent of
+    // the buy-in pot path above — a race could in principle have both — and uses
+    // its own reason/refId so the two never collide. It runs at most once per
+    // race: completeRace early-returns above once the race is COMPLETED, and
+    // awardCoins dedups on (reason, refId) for retries.
+    if (Array.isArray(race?.participants)) {
       // Only people who actually walked are eligible; rank by the placement set
       // at race resolution (raceExpiry assigns 1..N before completing).
       const eligible = race.participants
@@ -105,7 +107,16 @@ function buildCompleteRace(dependencies = {}) {
         )
         .sort((a, b) => a.placement - b.placement);
 
-      const rewardSlots = Math.ceil(eligible.length * FINISH_REWARD_TOP_FRACTION);
+      // Pool + paid places are derived from the actual finisher count, not the
+      // accepted count — no-shows neither mint coins nor claim a place.
+      const finishRewardPool = computeFinishRewardPool(
+        race?.seedId,
+        eligible.length
+      );
+      const rewardSlots = computeFinishRewardPlaces(
+        race?.seedId,
+        eligible.length
+      );
       const rewards = computeGradedPayouts({
         pool: finishRewardPool,
         count: rewardSlots,

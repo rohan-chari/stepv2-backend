@@ -82,73 +82,6 @@ function yesterdayStr() {
   return getDateStringInTimeZone(-1);
 }
 
-async function seedChallenge() {
-  return prisma.challenge.create({
-    data: {
-      title: "Step Showdown",
-      description: "Most steps wins",
-      type: "HEAD_TO_HEAD",
-      resolutionRule: "higher_total",
-      active: true,
-    },
-  });
-}
-
-async function createCompletedChallengeInstance({
-  challengeId,
-  weekOf,
-  userAId,
-  userBId,
-  winnerUserId,
-  userATotalSteps = winnerUserId === userAId ? 12000 : 8000,
-  userBTotalSteps = winnerUserId === userBId ? 12000 : 8000,
-}) {
-  return prisma.challengeInstance.create({
-    data: {
-      challengeId,
-      weekOf: new Date(weekOf),
-      userAId,
-      userBId,
-      status: "COMPLETED",
-      stakeStatus: "SKIPPED",
-      winnerUserId,
-      userATotalSteps,
-      userBTotalSteps,
-      resolvedAt: new Date(`${weekOf}T12:00:00.000Z`),
-    },
-  });
-}
-
-async function createChallengeRecord({
-  challengeId,
-  user,
-  wins,
-  losses,
-  label,
-}) {
-  for (let i = 0; i < wins; i++) {
-    const opponent = await createUser(`${label}WinOpp${i}`);
-    await createCompletedChallengeInstance({
-      challengeId,
-      weekOf: `2026-01-${String(i + 1).padStart(2, "0")}`,
-      userAId: user.userId,
-      userBId: opponent.userId,
-      winnerUserId: user.userId,
-    });
-  }
-
-  for (let i = 0; i < losses; i++) {
-    const opponent = await createUser(`${label}LossOpp${i}`);
-    await createCompletedChallengeInstance({
-      challengeId,
-      weekOf: `2026-02-${String(i + 1).padStart(2, "0")}`,
-      userAId: user.userId,
-      userBId: opponent.userId,
-      winnerUserId: opponent.userId,
-    });
-  }
-}
-
 async function createCompletedRace({
   name,
   winnerUserId,
@@ -265,6 +198,7 @@ describe("leaderboard", () => {
           slot: item.slot,
           assetKey: item.assetKey,
           renderMetadata: { offsetX: 1, offsetY: 2 },
+          bobble: false,
         },
       ]);
     });
@@ -307,20 +241,6 @@ describe("leaderboard", () => {
 
       assert.ok(body.currentUser.rank >= 1);
       assert.equal(body.currentUser.totalSteps, 0);
-    });
-
-    it("users without display names show as Anonymous", async () => {
-      const noName = await createUser(null);
-      await recordSteps(noName.token, 8000, todayStr());
-
-      const viewer = await createUser("ViewerPerson");
-      const res = await request(server.baseUrl, "GET", "/leaderboard?period=today", {
-        token: viewer.token,
-      });
-      const body = await res.json();
-
-      const noNameEntry = body.top100.find((e) => e.userId === noName.userId);
-      assert.equal(noNameEntry.displayName, "Anonymous");
     });
 
     it("invalid period returns 400", async () => {
@@ -373,8 +293,11 @@ describe("leaderboard", () => {
       // Steps on Monday
       await recordSteps(alice.token, 5000, mondayStr);
 
-      // Steps on today
-      await recordSteps(alice.token, 3000, todayStr());
+      // Steps on today — skip when today *is* Monday, since steps are stored
+      // one row per (userId, date) and a second write would overwrite the 5000.
+      if (todayStr() !== mondayStr) {
+        await recordSteps(alice.token, 3000, todayStr());
+      }
 
       const res = await request(server.baseUrl, "GET", "/leaderboard?period=week", {
         token: alice.token,
@@ -641,151 +564,6 @@ describe("leaderboard", () => {
 
       // Should be sum of both days
       assert.ok(body.currentUser.totalSteps >= 7000);
-    });
-  });
-
-  describe("challenge record leaderboard", () => {
-    it("ranks qualified users by win percentage and excludes users under 5 completed challenges", async () => {
-      const challenge = await seedChallenge();
-      const ace = await createUser("AceWinner");
-      const blaze = await createUser("BlazeRun");
-      const cedar = await createUser("CedarJog");
-
-      await createChallengeRecord({
-        challengeId: challenge.id,
-        user: ace,
-        wins: 5,
-        losses: 0,
-        label: "ace",
-      });
-      await createChallengeRecord({
-        challengeId: challenge.id,
-        user: blaze,
-        wins: 4,
-        losses: 1,
-        label: "blaze",
-      });
-      await createChallengeRecord({
-        challengeId: challenge.id,
-        user: cedar,
-        wins: 4,
-        losses: 0,
-        label: "cedar",
-      });
-
-      const res = await request(server.baseUrl, "GET", "/leaderboard?type=challenges", {
-        token: ace.token,
-      });
-      assert.equal(res.status, 200);
-
-      const body = await res.json();
-      assert.equal(body.top100.length, 2);
-      assert.deepEqual(
-        body.top100.map((entry) => ({
-          displayName: entry.displayName,
-          rank: entry.rank,
-          wins: entry.wins,
-          losses: entry.losses,
-        })),
-        [
-          { displayName: "AceWinner", rank: 1, wins: 5, losses: 0 },
-          { displayName: "BlazeRun", rank: 2, wins: 4, losses: 1 },
-        ]
-      );
-      assert.equal(body.top100.some((entry) => entry.displayName === "CedarJog"), false);
-      assert.equal(body.currentUser.displayName, "AceWinner");
-      assert.equal(body.currentUser.rank, 1);
-      assert.equal(body.currentUser.inTop100, true);
-      assert.equal(body.currentUser.qualified, true);
-    });
-
-    it("returns current user as unranked when they are below the qualification minimum", async () => {
-      const challenge = await seedChallenge();
-      const ace = await createUser("AceWinner");
-      const cedar = await createUser("CedarJog");
-
-      await createChallengeRecord({
-        challengeId: challenge.id,
-        user: ace,
-        wins: 5,
-        losses: 0,
-        label: "ace",
-      });
-      await createChallengeRecord({
-        challengeId: challenge.id,
-        user: cedar,
-        wins: 4,
-        losses: 0,
-        label: "cedar",
-      });
-
-      const res = await request(server.baseUrl, "GET", "/leaderboard?type=challenges", {
-        token: cedar.token,
-      });
-      assert.equal(res.status, 200);
-
-      const body = await res.json();
-      assert.equal(body.top100.some((entry) => entry.displayName === "CedarJog"), false);
-      assert.deepEqual(body.currentUser, {
-        rank: null,
-        displayName: "CedarJog",
-        wins: 4,
-        losses: 0,
-        completedCount: 4,
-        winPercentage: 1,
-        inTop100: false,
-        qualified: false,
-      });
-    });
-
-    it("breaks challenge leaderboard ties by more completed challenges then more wins", async () => {
-      const challenge = await seedChallenge();
-      const atlas = await createUser("AtlasRun");
-      const bolt = await createUser("BoltStep");
-      const cinder = await createUser("CinderGo");
-
-      await createChallengeRecord({
-        challengeId: challenge.id,
-        user: atlas,
-        wins: 8,
-        losses: 2,
-        label: "atlas",
-      });
-      await createChallengeRecord({
-        challengeId: challenge.id,
-        user: bolt,
-        wins: 4,
-        losses: 1,
-        label: "bolt",
-      });
-      await createChallengeRecord({
-        challengeId: challenge.id,
-        user: cinder,
-        wins: 8,
-        losses: 2,
-        label: "cinder",
-      });
-
-      const res = await request(server.baseUrl, "GET", "/leaderboard?type=challenges", {
-        token: atlas.token,
-      });
-      assert.equal(res.status, 200);
-
-      const body = await res.json();
-      assert.deepEqual(
-        body.top100.map((entry) => ({
-          displayName: entry.displayName,
-          rank: entry.rank,
-          wins: entry.wins,
-          losses: entry.losses,
-          completedCount: entry.completedCount,
-        })),
-        [
-          { displayName: "AtlasRun", rank: 1, wins: 8, losses: 2, completedCount: 10 },
-          { displayName: "CinderGo", rank: 1, wins: 8, losses: 2, completedCount: 10 },
-          { displayName: "BoltStep", rank: 3, wins: 4, losses: 1, completedCount: 5 },
-        ]
-      );
     });
   });
 

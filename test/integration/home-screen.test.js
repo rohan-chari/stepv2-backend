@@ -29,17 +29,6 @@ describe("home screen data fetch", () => {
   beforeEach(async () => {
     await cleanDatabase();
 
-    // Seed a challenge so GET /challenges/current doesn't blow up
-    await prisma.challenge.create({
-      data: {
-        title: "Step Showdown",
-        description: "Walk more than your opponent",
-        type: "HEAD_TO_HEAD",
-        resolutionRule: "most_steps",
-        active: true,
-      },
-    });
-
     // Sign in and complete onboarding
     const signInRes = await request(server.baseUrl, "POST", "/auth/apple", {
       body: { identityToken: "fake-token", email: EMAIL },
@@ -132,19 +121,6 @@ describe("home screen data fetch", () => {
 
     const body = await res.json();
     assert.deepEqual(body.friends, []);
-  });
-
-  it("GET /challenges/current returns empty for user with no challenge", async () => {
-    const res = await request(
-      server.baseUrl,
-      "GET",
-      "/challenges/current",
-      { token },
-    );
-    assert.equal(res.status, 200);
-
-    const body = await res.json();
-    assert.deepEqual(body.instances, []);
   });
 
   it("GET /races returns empty for user with no races", async () => {

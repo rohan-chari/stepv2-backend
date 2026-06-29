@@ -82,13 +82,10 @@ test("settleRankedSeason writes finals, mints tier rewards, sets badges, rolls n
   // finals written for both
   assert.equal(ctx.finals.length, 2);
 
-  // rewards minted with the ranked reason + stable, per-user refId
-  assert.equal(ctx.awards.length, 2);
-  const diamondAward = ctx.awards.find((a) => a.userId === "u_diamond");
-  assert.equal(diamondAward.amount, 1500);
-  assert.equal(diamondAward.reason, "ranked_season_reward");
-  assert.equal(diamondAward.refId, "season:s5:user:u_diamond");
-  assert.equal(ctx.awards.find((a) => a.userId === "u_bronze").amount, 100);
+  // TIER_REWARDS were all zeroed at the Ranked-v2 cutover (coins now mint weekly
+  // via settleRankedWeek), and settlement skips 0-coin mints, so season-end
+  // settlement makes no coin awards.
+  assert.equal(ctx.awards.length, 0);
 
   // denormalized badges
   assert.deepEqual(
@@ -96,8 +93,10 @@ test("settleRankedSeason writes finals, mints tier rewards, sets badges, rolls n
     { userId: "u_diamond", tier: "DIAMOND", division: null }
   );
 
-  // events emitted, season closed, next season opened at index + 1
-  assert.equal(ctx.events.filter((e) => e.name === "SEASON_REWARD_GRANTED").length, 2);
+  // events emitted with zero coins, season closed, next season opened at index + 1
+  const rewardEvents = ctx.events.filter((e) => e.name === "SEASON_REWARD_GRANTED");
+  assert.equal(rewardEvents.length, 2);
+  assert.ok(rewardEvents.every((e) => e.payload.coins === 0));
   assert.equal(ctx.closed.id, "s5");
   assert.equal(ctx.created[0].index, 6);
   assert.equal(result.settledIndex, 5);

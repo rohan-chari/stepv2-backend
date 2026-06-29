@@ -150,7 +150,6 @@ describe("detour sign", () => {
       for (const p of progress.participants) {
         assert.equal(p.displayName, "???");
         assert.equal(p.totalSteps, null);
-        assert.equal(p.progress, null);
       }
     });
 

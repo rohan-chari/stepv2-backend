@@ -307,10 +307,10 @@ test("Reflected Red Card penalizes the attacker, not the target", async () => {
 });
 
 // ===========================================================================
-// PRECEDENCE — Compression Socks wins over Mirror
+// PRECEDENCE — Mirror wins over Compression Socks
 // ===========================================================================
 
-test("Compression Socks wins when the target has BOTH socks and Mirror", async () => {
+test("Mirror wins when the target has BOTH socks and Mirror", async () => {
   const ctx = makeDeps({
     powerupType: "LEG_CRAMP",
     powerupOwner: "user-2",
@@ -325,16 +325,18 @@ test("Compression Socks wins when the target has BOTH socks and Mirror", async (
 
   const result = await use({ userId: "user-2", raceId: "race-1", powerupId: "pw-1", targetUserId: "user-1" });
 
-  // Blocked, not reflected
-  assert.equal(result.blocked, true);
-  assert.equal(result.blockedBy, "COMPRESSION_SOCKS");
-  assert.equal(result.outcome, "BLOCKED");
+  // Reflected, not blocked.
+  assert.equal(result.outcome, "REFLECTED");
+  assert.equal(result.reflectedBy, "MIRROR");
+  assert.ok(!result.blocked);
 
-  // No Leg Cramp effect should be created at all.
-  assert.equal(ctx.effectsCreated.filter((e) => e.type === "LEG_CRAMP").length, 0);
+  // The Leg Cramp effect lands — on the original attacker (rp-2), via reflect.
+  const legCramp = ctx.effectsCreated.find((e) => e.type === "LEG_CRAMP");
+  assert.ok(legCramp, "the reflected Leg Cramp should be applied");
+  assert.equal(legCramp.targetParticipantId, "rp-2", "reflected effect hits the attacker");
 });
 
-test("Mirror is NOT consumed when Compression Socks blocks", async () => {
+test("Compression Socks is NOT consumed when Mirror reflects", async () => {
   const ctx = makeDeps({
     powerupType: "LEG_CRAMP",
     powerupOwner: "user-2",
@@ -349,12 +351,14 @@ test("Mirror is NOT consumed when Compression Socks blocks", async () => {
 
   await use({ userId: "user-2", raceId: "race-1", powerupId: "pw-1", targetUserId: "user-1" });
 
+  // The Mirror is consumed...
   const mirrorUpdate = ctx.effectUpdates.find((u) => u.id === "eff-mirror");
-  assert.equal(mirrorUpdate, undefined, "Mirror must not be touched when socks blocks");
+  assert.ok(mirrorUpdate, "the Mirror should be consumed on reflect");
+  assert.equal(mirrorUpdate.status, "EXPIRED");
 
+  // ...but the socks shield is left untouched — banked for a later attack.
   const socksUpdate = ctx.effectUpdates.find((u) => u.id === "eff-socks");
-  assert.ok(socksUpdate, "the socks shield should be consumed");
-  assert.equal(socksUpdate.status, "BLOCKED");
+  assert.equal(socksUpdate, undefined, "socks must not be touched when the Mirror reflects");
 });
 
 // ===========================================================================

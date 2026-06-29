@@ -99,6 +99,7 @@ describe("ranked", () => {
         slot: item.slot,
         assetKey: item.assetKey,
         renderMetadata: { offsetX: 1, offsetY: 2 },
+        bobble: false,
       },
     ]);
   });

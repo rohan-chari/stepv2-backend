@@ -468,7 +468,6 @@ test("Stealthed user appears as '???' with null steps to other participants", as
 
   assert.equal(p1.displayName, "???");
   assert.equal(p1.totalSteps, null);
-  assert.equal(p1.progress, null);
   assert.equal(p1.stealthed, true);
 });
 
@@ -691,5 +690,4 @@ test("Stealthed user's progress is null to other viewers", async () => {
   const p1 = result.participants.find((p) => p.userId === "user-1");
 
   assert.equal(p1.totalSteps, null);
-  assert.equal(p1.progress, null);
 });

@@ -41,7 +41,10 @@ function makeParticipant(overrides = {}) {
     baselineSteps: 0,
     finishedAt: null,
     bonusSteps: 0,
-    nextBoxAtSteps: 0,
+    // Box gate armed at the first interval boundary (1500 steps walked, 5000
+    // interval), above current steps so the self-heal branch never fires and no
+    // box rolls this sync. Tests that exercise thresholds override this.
+    nextBoxAtSteps: 5000,
     powerupSlots: overrides.powerupSlots || 3,
     user: { displayName: "TestUser" },
     ...overrides,

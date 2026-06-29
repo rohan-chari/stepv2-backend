@@ -83,6 +83,7 @@ test("POST /auth/apple provisions the signed-in user", async () => {
       appleId: "apple-user-123",
       email: "walker@example.com",
       name: "Rohan Chari",
+      referralCode: undefined,
       emitSignInEvent: true,
     });
   } finally {
@@ -178,6 +179,7 @@ test("POST /steps records steps for the authenticated user instead of trusting c
         steps: 8765,
         date: "2026-03-11",
         timeZone: "America/New_York",
+        skipRaceResolution: false,
       },
     });
 
@@ -186,6 +188,7 @@ test("POST /steps records steps for the authenticated user instead of trusting c
       steps: 8765,
       date: "2026-03-11",
       timeZone: "America/New_York",
+      skipRaceResolution: false,
     });
   } finally {
     await server.close();

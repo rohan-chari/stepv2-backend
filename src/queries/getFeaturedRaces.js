@@ -1,7 +1,7 @@
 const { Race } = require("../models/race");
 const {
-  getFinishRewardPool,
-  FINISH_REWARD_TOP_FRACTION,
+  computeFinishRewardPool,
+  computeFinishRewardPlaces,
 } = require("../constants/raceFinishReward");
 
 // Ordering for the featured strip: daily first, then weekly, then anything else.
@@ -89,7 +89,16 @@ function buildGetFeaturedRaces(dependencies = {}) {
       ).length;
       const myParticipant = participants.find((p) => p.userId === userId);
       const max = race.maxParticipants ?? null; // null = unlimited
-      const finishRewardPool = getFinishRewardPool(race.seedId);
+      // Projected from the current field; the final pool/places are recomputed
+      // from actual finishers at settlement (completeRace).
+      const finishRewardPool = computeFinishRewardPool(
+        race.seedId,
+        acceptedCount
+      );
+      const finishRewardPlaces = computeFinishRewardPlaces(
+        race.seedId,
+        acceptedCount
+      );
 
       return {
         raceId: race.id,
@@ -101,9 +110,12 @@ function buildGetFeaturedRaces(dependencies = {}) {
         maxParticipants: max ?? 100,
         isFull: max != null && acceptedCount >= max,
         powerupsEnabled: race.powerupsEnabled || false,
+        // Minted reward projection for seeded races. `paidPlaces` replaces the
+        // old fixed `topFraction`: newer clients render "Top N split <pool>";
+        // older clients read only `pool` (and show their hardcoded copy).
         finishReward:
           finishRewardPool > 0
-            ? { pool: finishRewardPool, topFraction: FINISH_REWARD_TOP_FRACTION }
+            ? { pool: finishRewardPool, paidPlaces: finishRewardPlaces }
             : null,
         // null = not joined → render JOIN; otherwise the participant status
         // (ACCEPTED) → render VIEW.

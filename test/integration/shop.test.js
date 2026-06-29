@@ -92,6 +92,7 @@ describe("shop", () => {
         priceCoins: 75,
         assetKey: "straw_hat",
         renderMetadata: { offsetX: -0.015, offsetY: 0.03, rotation: -0.14 },
+        bobble: false,
         owned: true,
         equipped: true,
       },

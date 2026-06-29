@@ -1,8 +1,8 @@
 const { Race } = require("../models/race");
 const { computeRacePayouts } = require("../utils/racePayoutPresets");
 const {
-  getFinishRewardPool,
-  FINISH_REWARD_TOP_FRACTION,
+  computeFinishRewardPool,
+  computeFinishRewardPlaces,
 } = require("../constants/raceFinishReward");
 
 function buildGetPublicRaces(dependencies = {}) {
@@ -36,7 +36,14 @@ function buildGetPublicRaces(dependencies = {}) {
         potCoins: projectedPotCoins,
         participantCount: acceptedCount,
       });
-      const finishRewardPool = getFinishRewardPool(race.seedId);
+      const finishRewardPool = computeFinishRewardPool(
+        race.seedId,
+        acceptedCount
+      );
+      const finishRewardPlaces = computeFinishRewardPlaces(
+        race.seedId,
+        acceptedCount
+      );
 
       results.push({
         id: race.id,
@@ -67,7 +74,7 @@ function buildGetPublicRaces(dependencies = {}) {
         })),
         finishReward:
           finishRewardPool > 0
-            ? { pool: finishRewardPool, topFraction: FINISH_REWARD_TOP_FRACTION }
+            ? { pool: finishRewardPool, paidPlaces: finishRewardPlaces }
             : null,
         creator: race.creator,
         createdAt: race.createdAt,
