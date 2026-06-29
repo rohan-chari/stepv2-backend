@@ -275,6 +275,37 @@ function registerNotificationHandlers(dependencies = {}) {
     }
   });
 
+  // Referral payout (M2): tell the REFERRER their friend finished a first race
+  // and they earned coins. The referee isn't pushed — they're actively in-app
+  // (they just finished a race) and see their own +coins on the results screen.
+  // The `type` is brand-new: already-shipped binaries show the alert but won't
+  // deep-link it (their _routeFromType returns null for unknown types — the
+  // PLACEMENT_CHANGED precedent); only updated apps that add the case navigate.
+  events.on("REFERRAL_REWARDED", async (data) => {
+    try {
+      const { referrerId, refereeId, coins } = data || {};
+      if (!referrerId) return;
+
+      await sendNotificationToUser({
+        eventName: "REFERRAL_REWARDED",
+        recipientUserId: referrerId,
+        actorUserId: refereeId,
+        title: "You earned coins!",
+        buildBody: (friendName) =>
+          `${friendName} completed their first race — you earned ${coins} coins!`,
+        payload: {
+          type: "REFERRAL_REWARDED",
+          route: "home",
+        },
+        logContext: { referrerId, refereeId, coins },
+      });
+    } catch (error) {
+      logger.error("REFERRAL_REWARDED handler failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
   events.on("RACE_CANCELLED", async (data) => {
     try {
       const { raceId, raceName, creatorUserId, participantUserIds } = data;

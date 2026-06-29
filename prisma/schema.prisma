@@ -55,6 +55,13 @@ model User {
   // settlement writes with a legacy-mapped value (PLATINUM/LEGEND -> DIAMOND).
   rankedTierV2                  String?              @map("ranked_tier_v2")
   rankedTierV2Since             DateTime?            @map("ranked_tier_v2_since")
+  // ── Referral attribution (all nullable/additive) ─────────────────────────
+  // This user's own shareable invite code (BARA-XXXX), minted lazily on first
+  // /referrals/link call. The Referral table is the single source of truth for
+  // who referred whom; referredByCode is audit-only and never the dedup key.
+  // Old clients never read either column. See REFERRAL_FEATURE_RESEARCH.md §4A.
+  referralCode                  String?              @unique @map("referral_code")
+  referredByCode                String?              @map("referred_by_code")
   createdAt                     DateTime             @default(now()) @map("created_at")
   steps                         Step[]
   dailyRewardClaims             DailyRewardClaim[]
@@ -82,6 +89,11 @@ model User {
   powerupItems            UserPowerupItem[]
   powerupPurchaseRequests PowerupPurchaseRequest[]
   notifications           Notification[]
+
+  // Referral back-relations. Referral is the single source of truth for who→whom.
+  referralsMade        Referral[]            @relation("ReferralsMade")
+  referralReceived     Referral?             @relation("ReferralReceived")
+  referralRewardGrants ReferralRewardGrant[]
 
   @@map("users")
 }
@@ -830,6 +842,63 @@ model OnboardingBoxGrant {
   grantedAt    DateTime @default(now()) @map("granted_at")
 
   @@map("onboarding_box_grant")
+}
+
+// ── Friend referrals ───────────────────────────────────────────────────────
+// Attribution ledger: who referred whom. One row per referred human, written
+// once in the new-user create branch at signup (M1). The ENFORCED dedup is on
+// the referee's provider-sub hash (stable across delete+reinstall), NOT on the
+// reinstallable referee id — so a delete-account+reinstall human can't be
+// re-attributed. referrerId is nullable + onDelete:SetNull so a referrer
+// deleting their account never destroys the attribution row or the referee's
+// pending reward (the grant code tolerates a null referrer). See §4B.
+model Referral {
+  id             String   @id @default(uuid())
+  referrerId     String?  @map("referrer_id") // nullable: SetNull on referrer delete
+  refereeId      String   @unique @map("referee_id")
+  refereeSubHash String   @unique @map("referee_sub_hash") // hashAppleSub(referee appleId||googleSub)
+  code           String? // code used at signup, if any
+  status         String   @default("PENDING") // PENDING -> QUALIFIED -> REWARDED -> EXPIRED
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  referrer     User?                 @relation("ReferralsMade", fields: [referrerId], references: [id], onDelete: SetNull)
+  referee      User                  @relation("ReferralReceived", fields: [refereeId], references: [id], onDelete: Cascade)
+  rewardGrants ReferralRewardGrant[]
+
+  @@index([referrerId])
+  @@map("referrals")
+}
+
+// Payout ledger: which side was paid. Minted at the referee's first qualifying
+// race completion (M2). Inserting this row FIRST inside the grant $transaction
+// makes the payout exactly-once per human per role across delete+reinstall —
+// the @@unique([refereeSubHash, role]) collides before any coin mints. Mirrors
+// OnboardingBoxGrant's insert-first idempotency.
+//
+// userId is nullable + onDelete:SetNull (NOT Cascade) on purpose: the abuse
+// ledger MUST outlive the account, exactly like OnboardingBoxGrant (which has no
+// user FK at all). If a referee's REFEREE-role row were cascade-deleted on
+// account deletion, a delete+reinstall referee would get a fresh refereeSubHash
+// slot and could re-farm their own reward (§8.2). SetNull keeps only the hash +
+// role (privacy-safe — no PII), preserving the exactly-once guard forever.
+// referralId is likewise nullable so a SetNull'd/Cascade-deleted referral keeps
+// this audit row. See §4C.
+model ReferralRewardGrant {
+  id             String   @id @default(uuid())
+  referralId     String?  @map("referral_id")
+  userId         String?  @map("user_id") // who received the reward (null after that account is deleted)
+  role           String // "REFERRER" | "REFEREE"
+  refereeSubHash String   @map("referee_sub_hash") // abuse key: provider-sub hash of the REFEREE
+  coins          Int?
+  grantedAt      DateTime @default(now()) @map("granted_at")
+
+  referral Referral? @relation(fields: [referralId], references: [id], onDelete: SetNull)
+  user     User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@unique([refereeSubHash, role]) // EXACTLY-ONCE PER HUMAN PER ROLE — primary anti-farming guard
+  @@index([refereeSubHash])
+  @@index([userId])
+  @@map("referral_reward_grants")
 }
 
 // ── Ranked ─────────────────────────────────────────────────────────────────

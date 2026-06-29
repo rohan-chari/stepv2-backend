@@ -10,6 +10,7 @@ const { createNotificationsRouter } = require("./routes/notifications");
 const { createLeaderboardRouter } = require("./routes/leaderboard");
 const { createRankedRouter } = require("./routes/ranked");
 const { createRacesRouter } = require("./routes/races");
+const { createReferralsRouter } = require("./routes/referrals");
 const { createShopRouter } = require("./routes/shop");
 const { createPowerupsRouter } = require("./routes/powerups");
 const { createDailyRewardRouter } = require("./routes/dailyReward");
@@ -28,8 +29,19 @@ const {
   renderRaceNotFoundPage,
 } = require("./web/raceLandingPage");
 const {
+  renderReferralLandingPage,
+  renderReferralNotFoundPage,
+} = require("./web/referralLandingPage");
+const {
   getSharedRacePreview: defaultGetSharedRacePreview,
 } = require("./queries/getSharedRacePreview");
+const {
+  getReferralPreview: defaultGetReferralPreview,
+} = require("./queries/getReferralPreview");
+const {
+  looksLikeReferralCode,
+  normalizeReferralCode,
+} = require("./lib/referralCode");
 
 function createApp(dependencies = {}) {
   const app = express();
@@ -46,6 +58,7 @@ function createApp(dependencies = {}) {
   app.use("/leaderboard", createLeaderboardRouter(dependencies));
   app.use("/ranked", createRankedRouter(dependencies));
   app.use("/races", createRacesRouter(dependencies));
+  app.use("/referrals", createReferralsRouter(dependencies));
   app.use("/shop", createShopRouter(dependencies));
   app.use("/powerups", createPowerupsRouter(dependencies));
   app.use("/daily-reward", createDailyRewardRouter(dependencies));
@@ -64,6 +77,8 @@ function createApp(dependencies = {}) {
   // ---- Shareable race links (deep-link verification + web landing page) ----
   const getSharedRacePreview =
     dependencies.getSharedRacePreview || defaultGetSharedRacePreview;
+  const getReferralPreview =
+    dependencies.getReferralPreview || defaultGetReferralPreview;
 
   // iOS Universal Link verification. Must be served at this exact path as
   // application/json with NO file extension. Static (no per-request data).
@@ -79,9 +94,54 @@ function createApp(dependencies = {}) {
   // Public web landing page for a shared race. Opened only when the app is NOT
   // installed (otherwise the OS routes the universal/app link into the app).
   app.get("/r/:token", async (req, res) => {
+    const token = req.params.token;
+
+    // Referral codes share the /r/* namespace with race share tokens; the
+    // reserved BARA- prefix disambiguates (race tokens are hyphen-free, so they
+    // never match). A prefixed-but-malformed token still renders the referral
+    // not-found page rather than being mistaken for a race.
+    if (looksLikeReferralCode(token)) {
+      const code = normalizeReferralCode(token);
+      const refLinks = {
+        inviteUrl: sharing.buildShareUrl(code || token),
+        appDeepLink: sharing.buildAppDeepLink(code || token),
+        appStoreUrl: sharing.APP_STORE_URL,
+        // Bake the code into the Play URL so Play Install Referrer attributes
+        // Android installs deterministically (no clipboard needed).
+        playStoreUrl: code
+          ? `${sharing.PLAY_STORE_URL}&referrer=${encodeURIComponent(code)}`
+          : sharing.PLAY_STORE_URL,
+        ogImageUrl: sharing.OG_IMAGE_URL,
+      };
+      if (!code) {
+        return res
+          .status(404)
+          .type("html")
+          .send(renderReferralNotFoundPage(refLinks));
+      }
+      try {
+        const preview = await getReferralPreview({ code });
+        if (!preview) {
+          return res
+            .status(404)
+            .type("html")
+            .send(renderReferralNotFoundPage(refLinks));
+        }
+        return res
+          .type("html")
+          .send(renderReferralLandingPage(preview, refLinks));
+      } catch (error) {
+        console.error("Referral landing page error:", error);
+        return res
+          .status(200)
+          .type("html")
+          .send(renderReferralNotFoundPage(refLinks));
+      }
+    }
+
     const links = {
-      shareUrl: sharing.buildShareUrl(req.params.token),
-      appDeepLink: sharing.buildAppDeepLink(req.params.token),
+      shareUrl: sharing.buildShareUrl(token),
+      appDeepLink: sharing.buildAppDeepLink(token),
       appStoreUrl: sharing.APP_STORE_URL,
       playStoreUrl: sharing.PLAY_STORE_URL,
       ogImageUrl: sharing.OG_IMAGE_URL,

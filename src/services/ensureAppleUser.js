@@ -2,6 +2,7 @@ const crypto = require("node:crypto");
 
 const { eventBus } = require("../events/eventBus");
 const { User } = require("../models/user");
+const { recordReferral } = require("../commands/recordReferral");
 const {
   validateDisplayName,
   normalizeToCharset,
@@ -66,11 +67,13 @@ async function pickUniqueDisplayName({ userModel, base }) {
 function buildEnsureAppleUser(dependencies = {}) {
   const userModel = dependencies.User || User;
   const events = dependencies.eventBus || eventBus;
+  const recordReferralFn = dependencies.recordReferral || recordReferral;
 
   return async function ensureAppleUser({
     appleId,
     email,
     name,
+    referralCode,
     emitSignInEvent = false,
   }) {
     let user = await userModel.findByAppleId(appleId);
@@ -87,6 +90,11 @@ function buildEnsureAppleUser(dependencies = {}) {
         const displayName = await pickUniqueDisplayName({ userModel, base });
         user = await userModel.update(user.id, { displayName });
       }
+
+      // Referral attribution (M1) — create branch ONLY, best-effort/never-throws.
+      // A code present here came in the provision body (captured pre-sign-in);
+      // codes resolved after sign-in attach via POST /referrals/redeem instead.
+      await recordReferralFn({ newUser: user, referralCode });
 
       events.emit("USER_REGISTERED", {
         userId: user.id,

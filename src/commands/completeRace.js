@@ -3,6 +3,9 @@ const { RaceParticipant } = require("../models/raceParticipant");
 const { RacePowerup } = require("../models/racePowerup");
 const { RaceActiveEffect } = require("../models/raceActiveEffect");
 const { awardCoins } = require("./awardCoins");
+const {
+  grantReferralRewardsForRace,
+} = require("./grantReferralReward");
 const { eventBus } = require("../events/eventBus");
 const {
   computeRacePayouts,
@@ -20,6 +23,8 @@ function buildCompleteRace(dependencies = {}) {
   const powerupModel = dependencies.RacePowerup || RacePowerup;
   const effectModel = dependencies.RaceActiveEffect || RaceActiveEffect;
   const awardCoinsFn = dependencies.awardCoins || awardCoins;
+  const grantReferralRewards =
+    dependencies.grantReferralRewardsForRace || grantReferralRewardsForRace;
   const events = dependencies.eventBus || eventBus;
   const now = dependencies.now || (() => new Date());
 
@@ -121,11 +126,23 @@ function buildCompleteRace(dependencies = {}) {
       }
     }
 
+    // Referral rewards (M2): when a referred user finishes their FIRST
+    // *qualifying* race, pay the referrer and (double-sided) the referee. The
+    // service is best-effort and never throws — it runs AFTER the buy-in/finish
+    // payouts so a referral hiccup can't block settlement coins. It returns the
+    // REFERRAL_REWARDED payloads to emit once the grant has committed (mirrors
+    // joinRaceCore's deferred-emit-after-commit).
+    const referralEvents = await grantReferralRewards({ race });
+
     events.emit("RACE_COMPLETED", {
       raceId,
       winnerUserId,
       participantUserIds,
     });
+
+    for (const payload of referralEvents) {
+      events.emit("REFERRAL_REWARDED", payload);
+    }
 
     return race;
   };

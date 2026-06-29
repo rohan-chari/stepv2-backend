@@ -2,6 +2,7 @@ const crypto = require("node:crypto");
 
 const { eventBus } = require("../events/eventBus");
 const { User } = require("../models/user");
+const { recordReferral } = require("../commands/recordReferral");
 const {
   validateDisplayName,
   normalizeToCharset,
@@ -67,11 +68,13 @@ async function pickUniqueDisplayName({ userModel, base }) {
 function buildEnsureGoogleUser(dependencies = {}) {
   const userModel = dependencies.User || User;
   const events = dependencies.eventBus || eventBus;
+  const recordReferralFn = dependencies.recordReferral || recordReferral;
 
   return async function ensureGoogleUser({
     googleSub,
     email,
     name,
+    referralCode,
     emitSignInEvent = false,
   }) {
     let user = await userModel.findByGoogleSub(googleSub);
@@ -88,6 +91,11 @@ function buildEnsureGoogleUser(dependencies = {}) {
         const displayName = await pickUniqueDisplayName({ userModel, base });
         user = await userModel.update(user.id, { displayName });
       }
+
+      // Referral attribution (M1) — create branch ONLY, best-effort/never-throws.
+      // Mirrors ensureAppleUser; hashes googleSub so Android referees attribute
+      // correctly (the appleId||googleSub provider-sub parity).
+      await recordReferralFn({ newUser: user, referralCode });
 
       events.emit("USER_REGISTERED", {
         userId: user.id,

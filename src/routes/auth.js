@@ -84,10 +84,13 @@ function createAuthRouter(dependencies = {}) {
   }
 
   // POST /auth/apple
-  // Body: { identityToken, userIdentifier?, email?, name? }
+  // Body: { identityToken, userIdentifier?, email?, name?, referralCode? }
+  // referralCode is additive/optional — older app binaries never send it and
+  // older backends ignored it, so it's safe both ways (CLAUDE.md old-client rule).
   router.post("/apple", async (req, res) => {
     try {
-      const { identityToken, userIdentifier, email, name } = req.body;
+      const { identityToken, userIdentifier, email, name, referralCode } =
+        req.body;
 
       if (!identityToken) {
         return res.status(400).json({ error: "identityToken is required" });
@@ -103,6 +106,7 @@ function createAuthRouter(dependencies = {}) {
         appleId: appleIdentity.sub,
         email: email || appleIdentity.email,
         name,
+        referralCode,
         emitSignInEvent: true,
       });
 
@@ -123,14 +127,15 @@ function createAuthRouter(dependencies = {}) {
   });
 
   // POST /auth/google
-  // Body: { idToken, email?, name? }
+  // Body: { idToken, email?, name?, referralCode? }
   // Android sign-in. Verifies the Google ID token, keys the account on the
   // verified Google `sub` (User.googleSub), and returns the same
   // { user, sessionToken } envelope as /auth/apple. Independent of Apple
-  // accounts — never linked by email. See ANDROID.md §G1.
+  // accounts — never linked by email. See ANDROID.md §G1. referralCode is
+  // additive/optional (old clients omit it; old backends ignored it).
   router.post("/google", async (req, res) => {
     try {
-      const { idToken, email, name } = req.body;
+      const { idToken, email, name, referralCode } = req.body;
 
       if (!idToken) {
         return res.status(400).json({ error: "idToken is required" });
@@ -142,6 +147,7 @@ function createAuthRouter(dependencies = {}) {
         googleSub: googleIdentity.sub,
         email: email || googleIdentity.email,
         name,
+        referralCode,
         emitSignInEvent: true,
       });
 
