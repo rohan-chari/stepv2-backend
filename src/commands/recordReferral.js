@@ -32,6 +32,12 @@ function buildRecordReferral(dependencies = {}) {
       if (!referrer) return; // unknown code → skip silently
       if (referrer.id === newUser.id) return; // self-referral guard
 
+      // Review/demo-account exclusion (§8.10): never attribute when either side
+      // is a review account, so they stay out of counts and payouts entirely.
+      if (referrer.isReviewAccount === true || newUser.isReviewAccount === true) {
+        return;
+      }
+
       // Provider-neutral stable identity: Apple users have appleId, Google
       // (Android) users have googleSub — hashing whichever is present keeps the
       // one-time attribution abuse-proof for BOTH providers (the exact bug that

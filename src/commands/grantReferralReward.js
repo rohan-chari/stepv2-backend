@@ -4,7 +4,11 @@ const {
   REFERRER_REWARD_COINS,
   REFEREE_REWARD_COINS,
   QUALIFY_WINDOW_DAYS,
+  REFERRAL_DAILY_CAP,
+  REFERRAL_MONTHLY_CAP,
 } = require("../config/referralRewards");
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 // Referral reward fire (M2). Called once per race from completeRace.js AFTER
 // settlement, for the referee's FIRST *qualifying* completed race. Pays the
@@ -42,13 +46,48 @@ function buildGrantReferralRewardsForRace(dependencies = {}) {
     return true;
   }
 
+  async function isReviewAccount(userId) {
+    if (!userId) return false;
+    const user = await db.user.findUnique({
+      where: { id: userId },
+      select: { isReviewAccount: true },
+    });
+    return user?.isReviewAccount === true;
+  }
+
+  // Velocity cap (§8.7): true when this referrer has already been paid as many
+  // REFERRER rewards as the daily/monthly cap allows within the trailing window.
+  // Counts committed REFERRER grants (grantedAt), so the (cap+1)th referral is
+  // the one that gets held. A burst past the cap is the signature of a ring.
+  async function referrerOverVelocityCap(referrerId) {
+    const dayStart = new Date(now().getTime() - DAY_MS);
+    const monthStart = new Date(now().getTime() - 30 * DAY_MS);
+    const [dayCount, monthCount] = await Promise.all([
+      db.referralRewardGrant.count({
+        where: {
+          userId: referrerId,
+          role: "REFERRER",
+          grantedAt: { gte: dayStart },
+        },
+      }),
+      db.referralRewardGrant.count({
+        where: {
+          userId: referrerId,
+          role: "REFERRER",
+          grantedAt: { gte: monthStart },
+        },
+      }),
+    ]);
+    return dayCount >= REFERRAL_DAILY_CAP || monthCount >= REFERRAL_MONTHLY_CAP;
+  }
+
   // Process one PENDING attribution. Returns REFERRAL_REWARDED payloads to emit.
   async function grantForReferral(referral) {
     const events = [];
 
     // Attribution-window check: a stale PENDING attribution never pays out.
     const ageMs = now().getTime() - new Date(referral.createdAt).getTime();
-    if (ageMs > QUALIFY_WINDOW_DAYS * 24 * 60 * 60 * 1000) {
+    if (ageMs > QUALIFY_WINDOW_DAYS * DAY_MS) {
       await db.referral.update({
         where: { id: referral.id },
         data: { status: "EXPIRED" },
@@ -56,11 +95,44 @@ function buildGrantReferralRewardsForRace(dependencies = {}) {
       return events;
     }
 
+    // Review/demo-account exclusion (§8.10): a review-account referee never
+    // triggers a payout. Mark EXCLUDED (terminal) so it doesn't re-process on
+    // every later race.
+    if (await isReviewAccount(referral.refereeId)) {
+      await db.referral.update({
+        where: { id: referral.id },
+        data: { status: "EXCLUDED" },
+      });
+      return events;
+    }
+
     const { refereeSubHash } = referral;
 
-    // Referrer side — skip if they deleted their account (referrerId SetNull'd);
-    // the referee is still paid below.
-    if (referral.referrerId) {
+    // The referrer earns only if they still exist (referrerId not SetNull'd by
+    // account deletion) AND are not a review/demo account.
+    const referrerEligible =
+      referral.referrerId != null &&
+      !(await isReviewAccount(referral.referrerId));
+
+    // Velocity cap: hold the WHOLE referral (both sides) for manual review when
+    // the referrer is over the cap. Holding the referee too is intentional — a
+    // burst past the cap looks like a ring, so nothing auto-pays until a human
+    // clears it (flips FLAGGED -> PENDING or grants manually). Skipped when the
+    // referrer is ineligible (deleted/review) — there's no one to rate-limit.
+    if (referrerEligible && (await referrerOverVelocityCap(referral.referrerId))) {
+      await db.referral.update({
+        where: { id: referral.id },
+        data: { status: "FLAGGED" },
+      });
+      console.warn(
+        `Referral ${referral.id} held for review: referrer ${referral.referrerId} over velocity cap`
+      );
+      return events;
+    }
+
+    // Referrer side — skip if ineligible (deleted/review); the referee is still
+    // paid below.
+    if (referrerEligible) {
       const paid = await grantRole({
         referralId: referral.id,
         userId: referral.referrerId,
