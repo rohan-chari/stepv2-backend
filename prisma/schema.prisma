@@ -325,8 +325,8 @@ model CoinTransaction {
   createdAt DateTime @default(now()) @map("created_at")
   user      User     @relation(fields: [userId], references: [id])
 
+  @@unique([userId, reason, refId])
   @@index([userId])
-  @@index([userId, reason, refId])
   @@map("coin_transactions")
 }
 
