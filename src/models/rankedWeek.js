@@ -133,6 +133,14 @@ const RankedCohortMember = {
     });
   },
 
+  // Move an existing member to a different cohort (early-week rebalance only).
+  async reassignCohort({ id, cohortId }) {
+    return prisma.rankedCohortMember.update({
+      where: { id },
+      data: { cohortId },
+    });
+  },
+
   async writeProvisional({ id, weeklySteps, provisionalRank }) {
     return prisma.rankedCohortMember.update({
       where: { id },

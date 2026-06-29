@@ -33,6 +33,14 @@ const COHORT_TARGET_SIZE = 30;
 // Soft ceiling for mid-week joins; beyond this a fresh cohort opens instead.
 const COHORT_MAX_SIZE = 35;
 
+// How long after a week opens we still rebalance a tier when newcomers arrive,
+// rather than just backfilling. Early in the week nobody has a meaningful
+// standing yet, so re-chunking a tier into even, step-matched cohorts is fair
+// game and prevents the lopsided "fill one cohort to 35, spill 2 into a new
+// one" split. Past this window we only place newcomers and never move members
+// already competing in a cohort.
+const COHORT_REBALANCE_WINDOW_MS = 48 * 60 * 60 * 1000; // 48h
+
 // Promotion/demotion zone as a fraction of cohort size (7 of 30).
 const ZONE_FRACTION = 7 / 30;
 
@@ -124,6 +132,7 @@ module.exports = {
   DEFAULT_TIER,
   COHORT_TARGET_SIZE,
   COHORT_MAX_SIZE,
+  COHORT_REBALANCE_WINDOW_MS,
   ZONE_FRACTION,
   ACTIVE_DAY_FLOOR,
   MIN_ACTIVE_DAYS_FOR_REWARD,

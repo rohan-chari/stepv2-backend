@@ -6,6 +6,7 @@ const {
   rankCohortMembers,
   chunkIntoCohorts,
   normalizeTier,
+  placeNewParticipants,
 } = require("../../src/services/rankedCohorts");
 const {
   zoneSizes,
@@ -14,6 +15,159 @@ const {
   nextTierDown,
   COHORT_TARGET_SIZE,
 } = require("../../src/constants/rankedCohorts");
+
+// In-memory fakes for the cohort models, enough to exercise placeNewParticipants.
+function makeFakeModels({ cohorts = [], members = [] } = {}) {
+  let cSeq = cohorts.length;
+  let mSeq = members.length;
+  const cohortStore = cohorts.map((c) => ({ ...c }));
+  const memberStore = members.map((m) => ({ ...m }));
+
+  const RankedCohort = {
+    async create({ weekId, tier }) {
+      const c = { id: `c${++cSeq}`, weekId, tier };
+      cohortStore.push(c);
+      return c;
+    },
+    async listForWeek(weekId, { tier } = {}) {
+      return cohortStore
+        .filter((c) => c.weekId === weekId && (!tier || c.tier === tier))
+        .map((c) => ({
+          ...c,
+          _count: { members: memberStore.filter((m) => m.cohortId === c.id).length },
+        }));
+    },
+  };
+
+  const RankedCohortMember = {
+    async createMany(rows) {
+      for (const r of rows) {
+        memberStore.push({ id: `m${++mSeq}`, provisionalRank: null, weeklySteps: 0, ...r });
+      }
+      return { count: rows.length };
+    },
+    async reassignCohort({ id, cohortId }) {
+      const m = memberStore.find((x) => x.id === id);
+      if (m) m.cohortId = cohortId;
+      return m;
+    },
+    async listForWeek(weekId) {
+      return memberStore.filter((m) => m.weekId === weekId);
+    },
+  };
+
+  // Helper: sizes per tier, sorted ascending.
+  function sizesByTier(tier) {
+    return cohortStore
+      .filter((c) => c.tier === tier)
+      .map((c) => memberStore.filter((m) => m.cohortId === c.id).length)
+      .filter((n) => n > 0)
+      .sort((a, b) => a - b);
+  }
+
+  return { RankedCohort, RankedCohortMember, cohortStore, memberStore, sizesByTier };
+}
+
+function seedTier({ weekId, cohortId, tier, count, startIndex = 0, baseSteps = 1000 }) {
+  const members = [];
+  for (let i = 0; i < count; i++) {
+    const n = startIndex + i;
+    members.push({
+      id: `m-${tier}-${n}`,
+      weekId,
+      cohortId,
+      userId: `u${String(n).padStart(2, "0")}`,
+      tier,
+      weeklySteps: baseSteps + n, // distinct, deterministic
+      provisionalRank: null,
+    });
+  }
+  return members;
+}
+
+// ── placeNewParticipants: early-week tier rebalance ──────────────────────────
+
+test("placeNewParticipants rebalances a lopsided tier within the early-week window (37 -> 19/18)", async () => {
+  const weekId = "wk1";
+  const startsOn = new Date("2026-06-08T00:00:00Z");
+  // One seeded Bronze cohort of 30 (the rollover seed).
+  const seeded = seedTier({ weekId, cohortId: "c1", tier: "BRONZE", count: 30 });
+  const { RankedCohort, RankedCohortMember, sizesByTier } = makeFakeModels({
+    cohorts: [{ id: "c1", weekId, tier: "BRONZE" }],
+    members: seeded,
+  });
+
+  // 7 mid-rollover newcomers, all Bronze, all active this week.
+  const totalsByUser = new Map();
+  for (const m of seeded) totalsByUser.set(m.userId, { weeklySteps: m.weeklySteps, activeDays: 5 });
+  for (let i = 30; i < 37; i++) totalsByUser.set(`u${i}`, { weeklySteps: 2000 + i, activeDays: 5 });
+
+  const placed = await placeNewParticipants({
+    week: { id: weekId, startsOn },
+    totalsByUser,
+    existingMembers: seeded,
+    RankedCohort,
+    RankedCohortMember,
+    getUserTiers: async (ids) => new Map(ids.map((id) => [id, "BRONZE"])),
+    now: new Date("2026-06-08T06:00:00Z"), // 6h into the week — within rebalance window
+  });
+
+  assert.equal(placed.length, 7, "all 7 newcomers are placed");
+  const sizes = sizesByTier("BRONZE");
+  assert.deepEqual(sizes, [18, 19], "37 Bronze players balance into 18 + 19, not 35 + 2");
+});
+
+test("placeNewParticipants does NOT reshuffle existing members outside the rebalance window", async () => {
+  const weekId = "wk2";
+  const startsOn = new Date("2026-06-08T00:00:00Z");
+  const seeded = seedTier({ weekId, cohortId: "c1", tier: "BRONZE", count: 30 });
+  const { RankedCohort, RankedCohortMember, memberStore } = makeFakeModels({
+    cohorts: [{ id: "c1", weekId, tier: "BRONZE" }],
+    members: seeded,
+  });
+
+  const totalsByUser = new Map();
+  for (const m of seeded) totalsByUser.set(m.userId, { weeklySteps: m.weeklySteps, activeDays: 5 });
+  for (let i = 30; i < 37; i++) totalsByUser.set(`u${i}`, { weeklySteps: 2000 + i, activeDays: 5 });
+
+  const placed = await placeNewParticipants({
+    week: { id: weekId, startsOn },
+    totalsByUser,
+    existingMembers: seeded,
+    RankedCohort,
+    RankedCohortMember,
+    getUserTiers: async (ids) => new Map(ids.map((id) => [id, "BRONZE"])),
+    now: new Date("2026-06-11T00:00:00Z"), // 3 days in — past the rebalance window
+  });
+
+  assert.equal(placed.length, 7, "newcomers still get placed late-week");
+  // None of the original 30 were moved out of c1.
+  const movedOriginals = seeded.filter((s) => {
+    const cur = memberStore.find((m) => m.id === s.id);
+    return cur.cohortId !== "c1";
+  });
+  assert.equal(movedOriginals.length, 0, "existing members keep their cohort late-week");
+});
+
+test("placeNewParticipants opens a cohort for a tier that has none yet", async () => {
+  const weekId = "wk3";
+  const startsOn = new Date("2026-06-08T00:00:00Z");
+  const { RankedCohort, RankedCohortMember, sizesByTier } = makeFakeModels();
+
+  const totalsByUser = new Map([["uA", { weeklySteps: 5000, activeDays: 5 }]]);
+  const placed = await placeNewParticipants({
+    week: { id: weekId, startsOn },
+    totalsByUser,
+    existingMembers: [],
+    RankedCohort,
+    RankedCohortMember,
+    getUserTiers: async () => new Map([["uA", "SILVER"]]),
+    now: new Date("2026-06-08T03:00:00Z"),
+  });
+
+  assert.equal(placed.length, 1);
+  assert.deepEqual(sizesByTier("SILVER"), [1]);
+});
 
 // ── summarizeWeekRows ────────────────────────────────────────────────────────
 

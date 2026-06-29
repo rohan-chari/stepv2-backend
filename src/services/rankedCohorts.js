@@ -14,6 +14,7 @@ const {
   DEFAULT_TIER,
   COHORT_TARGET_SIZE,
   COHORT_MAX_SIZE,
+  COHORT_REBALANCE_WINDOW_MS,
   ACTIVE_DAY_FLOOR,
   V2_TIER_KEYS,
 } = require("../constants/rankedCohorts");
@@ -142,9 +143,12 @@ async function enrollWeek({
 
 // ── Mid-week joins ───────────────────────────────────────────────────────────
 
-// Anyone with step activity this week who isn't in a cohort yet gets placed
-// into their tier's emptiest cohort with headroom, or a fresh one. Don't make
-// someone sit out six days to start.
+// Anyone with step activity this week who isn't in a cohort yet gets placed.
+// Early in the week (within COHORT_REBALANCE_WINDOW_MS of the start) we re-chunk
+// each affected tier — existing members + newcomers — into even, step-matched
+// cohorts, so a wave of newcomers can't leave a lopsided 35/2 split. Past that
+// window we only place the newcomers into their tier's emptiest cohort with
+// headroom (or a fresh one) and never move someone already competing.
 async function placeNewParticipants({
   week,
   totalsByUser,
@@ -152,12 +156,126 @@ async function placeNewParticipants({
   RankedCohort = defaultRankedCohort,
   RankedCohortMember = defaultRankedCohortMember,
   getUserTiers = defaultGetUserTiersV2,
+  now = new Date(),
 }) {
   const memberIds = new Set(existingMembers.map((m) => m.userId));
   const newcomers = [...totalsByUser.keys()].filter((id) => !memberIds.has(id));
   if (newcomers.length === 0) return [];
 
   const tierByUser = await getUserTiers(newcomers);
+
+  const elapsed = now.getTime() - new Date(week.startsOn).getTime();
+  if (elapsed <= COHORT_REBALANCE_WINDOW_MS) {
+    return rebalanceTiersForNewcomers({
+      week,
+      newcomers,
+      tierByUser,
+      existingMembers,
+      totalsByUser,
+      RankedCohort,
+      RankedCohortMember,
+    });
+  }
+  return appendNewcomers({
+    week,
+    newcomers,
+    tierByUser,
+    RankedCohort,
+    RankedCohortMember,
+  });
+}
+
+// Early-week path: for each tier that gained newcomers, re-chunk its full
+// membership into balanced, step-matched cohorts. Existing cohort rows are
+// reused (and members reassigned in place); new cohorts are created only when
+// the tier genuinely needs more. Tiers with no newcomers are left untouched.
+async function rebalanceTiersForNewcomers({
+  week,
+  newcomers,
+  tierByUser,
+  existingMembers,
+  totalsByUser,
+  RankedCohort,
+  RankedCohortMember,
+}) {
+  const stepsOf = (userId) => (totalsByUser.get(userId) || {}).weeklySteps || 0;
+
+  const newcomersByTier = new Map();
+  for (const userId of newcomers) {
+    const tier = tierByUser.get(userId) || DEFAULT_TIER;
+    if (!newcomersByTier.has(tier)) newcomersByTier.set(tier, []);
+    newcomersByTier.get(tier).push(userId);
+  }
+
+  const existingByTier = new Map();
+  for (const m of existingMembers) {
+    if (!existingByTier.has(m.tier)) existingByTier.set(m.tier, []);
+    existingByTier.get(m.tier).push(m);
+  }
+
+  const cohortsByTier = new Map();
+  for (const c of await RankedCohort.listForWeek(week.id)) {
+    if (!cohortsByTier.has(c.tier)) cohortsByTier.set(c.tier, []);
+    cohortsByTier.get(c.tier).push(c);
+  }
+
+  const placed = [];
+  for (const [tier, tierNewcomers] of newcomersByTier) {
+    // Combined, step-matched roster (existing members carry their cohort so we
+    // can skip no-op moves; newcomers have no row yet).
+    const roster = [
+      ...(existingByTier.get(tier) || []).map((m) => ({
+        userId: m.userId,
+        steps: m.weeklySteps || 0,
+        memberId: m.id,
+        currentCohortId: m.cohortId,
+      })),
+      ...tierNewcomers.map((userId) => ({
+        userId,
+        steps: stepsOf(userId),
+        memberId: null,
+        currentCohortId: null,
+      })),
+    ].sort((a, b) => b.steps - a.steps || a.userId.localeCompare(b.userId));
+
+    const chunks = chunkIntoCohorts(roster);
+
+    // Reuse existing cohort rows (deterministic order); open more if needed.
+    const cohorts = (cohortsByTier.get(tier) || [])
+      .slice()
+      .sort((a, b) => a.id.localeCompare(b.id));
+    while (cohorts.length < chunks.length) {
+      cohorts.push(await RankedCohort.create({ weekId: week.id, tier }));
+    }
+
+    for (let i = 0; i < chunks.length; i++) {
+      const cohortId = cohorts[i].id;
+      for (const entry of chunks[i]) {
+        if (entry.memberId) {
+          if (entry.currentCohortId !== cohortId) {
+            await RankedCohortMember.reassignCohort({ id: entry.memberId, cohortId });
+          }
+        } else {
+          await RankedCohortMember.createMany([
+            { weekId: week.id, cohortId, userId: entry.userId, tier },
+          ]);
+          placed.push({ userId: entry.userId, cohortId, tier });
+        }
+      }
+    }
+  }
+  return placed;
+}
+
+// Late-week path: place each newcomer into their tier's emptiest cohort with
+// headroom (under the hard max), or a fresh one. Never moves existing members.
+async function appendNewcomers({
+  week,
+  newcomers,
+  tierByUser,
+  RankedCohort,
+  RankedCohortMember,
+}) {
   const cohorts = await RankedCohort.listForWeek(week.id);
   const countByCohort = new Map(cohorts.map((c) => [c.id, c._count.members]));
   const cohortsByTier = new Map();
@@ -202,6 +320,7 @@ async function recomputeWeekStandings({
   RankedCohort = defaultRankedCohort,
   RankedCohortMember = defaultRankedCohortMember,
   getUserTiers = defaultGetUserTiersV2,
+  now = new Date(),
 }) {
   const rows = await Steps.findRowsInRange(week.startsOn, week.endsOn);
   const totalsByUser = summarizeWeekRows(rows);
@@ -214,6 +333,7 @@ async function recomputeWeekStandings({
     RankedCohort,
     RankedCohortMember,
     getUserTiers,
+    now,
   });
   if (placed.length > 0) {
     members = await RankedCohortMember.listForWeek(week.id);
