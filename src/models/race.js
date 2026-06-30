@@ -135,6 +135,18 @@ const Race = {
     });
   },
 
+  // Conditional PENDING -> (ACTIVE/...) transition. Returns { count } so a caller
+  // can act ONLY when it actually flipped the row — two concurrent starters
+  // (manual Start racing the auto-start cron, or two server instances) both read
+  // PENDING, but only one updateMany matches; the loser sees count === 0 and must
+  // not re-emit RACE_STARTED. Mirrors updateIfActive used by completeRace.
+  async updateIfPending(id, fields) {
+    return prisma.race.updateMany({
+      where: { id, status: "PENDING" },
+      data: fields,
+    });
+  },
+
   async findForUser(userId) {
     return prisma.race.findMany({
       where: {

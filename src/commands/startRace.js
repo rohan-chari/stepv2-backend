@@ -84,12 +84,21 @@ function buildStartRace(dependencies = {}) {
       return sum;
     }, 0);
 
-    const updated = await raceModel.update(raceId, {
+    // Conditional flip: claim the PENDING -> ACTIVE transition. The status check
+    // at line 36 is a read (TOCTOU) — two concurrent starters (manual Start vs the
+    // auto-start cron, or two server instances) can both pass it. Only the runner
+    // whose updateMany matches a still-PENDING row (count === 1) proceeds to
+    // snapshot participants and emit RACE_STARTED; the loser returns the now-ACTIVE
+    // race without double-notifying.
+    const flip = await raceModel.updateIfPending(raceId, {
       status: "ACTIVE",
       startedAt,
       endsAt,
       potCoins: (race.potCoins || 0) + heldPot,
     });
+    if (flip.count === 0) {
+      return raceModel.findById(raceId);
+    }
 
     // Snapshot each participant's current steps so only post-race steps count
     const today = startedAt.toISOString().slice(0, 10);
@@ -125,7 +134,7 @@ function buildStartRace(dependencies = {}) {
       participantUserIds,
     });
 
-    return updated;
+    return raceModel.findById(raceId);
   };
 }
 

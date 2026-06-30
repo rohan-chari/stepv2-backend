@@ -182,6 +182,43 @@ test("multi-threshold crossing: some fill slots, rest queued (with forfeit at MA
   assert.equal(ctx.lastNextBoxAtSteps, 20000);
 });
 
+test("multi-threshold forfeit burst is coalesced into a single feed event", async () => {
+  // Slots full (3) AND queue full (1). A single big sync crosses 6 thresholds,
+  // all of which forfeit. The feed must get ONE coalesced POWERUP_FORFEITED
+  // event (with the count) — not 6 identical "forfeited a mystery box" rows.
+  const ctx = makeDeps({
+    initialNextBoxAtSteps: 3000,
+    occupiedSlots: 3,
+    queuedSlots: 1,
+  });
+  const roll = buildRollPowerup(ctx.deps);
+
+  const results = await roll({
+    raceId: "race-1",
+    participantId: "rp-1",
+    userId: "user-1",
+    currentSteps: 18000, // crosses 3k,6k,9k,12k,15k,18k = 6 thresholds
+    nextBoxAtSteps: 3000,
+    powerupStepInterval: 3000,
+    displayName: "Rohitrohit",
+    powerupSlots: 3,
+  });
+
+  // All six crossings still forfeit (behavior unchanged) and the threshold
+  // advances past all of them.
+  assert.equal(results.length, 6);
+  assert.ok(results.every((r) => r.forfeited === true));
+  assert.equal(ctx.lastNextBoxAtSteps, 21000);
+
+  // But only ONE feed event is written, and it reflects the count.
+  const forfeitEvents = ctx.feedEvents.filter(
+    (f) => f.eventType === "POWERUP_FORFEITED"
+  );
+  assert.equal(forfeitEvents.length, 1, "forfeits must be coalesced into one feed event");
+  assert.match(forfeitEvents[0].description, /6/);
+  assert.match(forfeitEvents[0].description, /Rohitrohit/);
+});
+
 test("queued box emits POWERUP_EARNED event and feed entry", async () => {
   const ctx = makeDeps({ initialNextBoxAtSteps: 5000, occupiedSlots: 3 });
   const roll = buildRollPowerup(ctx.deps);

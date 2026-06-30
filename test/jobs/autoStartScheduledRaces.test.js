@@ -104,8 +104,10 @@ function makeCtx({ dueRaces = [], startThrows = {} } = {}) {
   };
 }
 
-test("job starts each due race via startRace, bypassing the schedule guard at the scheduled moment", async () => {
-  const scheduled = past(HOUR);
+test("job starts an on-time race anchored to its scheduled moment (within grace)", async () => {
+  // Cron fires up to one interval after the scheduled minute — within grace, so
+  // the start still anchors to scheduledStartAt for a clean endsAt.
+  const scheduled = past(60 * 1000); // 1 min late
   const ctx = makeCtx({
     dueRaces: [
       {
@@ -126,12 +128,37 @@ test("job starts each due race via startRace, bypassing the schedule guard at th
   assert.equal(call.raceId, "race-1");
   assert.equal(call.userId, "creator-1");
   assert.equal(call.bypassSchedule, true);
-  // endsAt must anchor to the scheduled start moment, so the job pins now() to
-  // scheduledStartAt for that start.
   assert.equal(
     new Date(call.now()).toISOString(),
     new Date(scheduled).toISOString()
   );
+});
+
+test("job anchors a LATE start to now, not to the stale scheduledStartAt", async () => {
+  // A race that sat PENDING for an hour past its schedule (e.g. waiting for a 2nd
+  // accepted participant) must NOT be backdated — anchor to now so no pre-race
+  // steps are back-scored.
+  const scheduled = past(HOUR);
+  const ctx = makeCtx({
+    dueRaces: [
+      {
+        id: "race-late",
+        status: "PENDING",
+        scheduledStartAt: scheduled,
+        seedId: null,
+        creatorId: "creator-1",
+      },
+    ],
+  });
+
+  const run = buildAutoStartScheduledRaces(ctx.deps);
+  await run();
+
+  assert.equal(ctx.startCalls.length, 1);
+  const call = ctx.startCalls[0];
+  assert.equal(call.bypassSchedule, true);
+  // Anchored to NOW (the job's current time), not the hour-old scheduledStartAt.
+  assert.equal(new Date(call.now()).toISOString(), NOW.toISOString());
 });
 
 test("job does nothing when there are no due races", async () => {

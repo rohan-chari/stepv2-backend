@@ -45,6 +45,10 @@ function makeDeps({ scheduledStartAt = null, startedAt } = {}, overrides = {}) {
           raceUpdates.push({ id, fields });
           return { id, ...fields };
         },
+        async updateIfPending(id, fields) {
+          raceUpdates.push({ id, fields });
+          return { count: 1 };
+        },
         ...overrides.Race,
       },
       RaceParticipant: {

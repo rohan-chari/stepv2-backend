@@ -9,6 +9,17 @@ const { startRace: defaultStartRace } = require("../commands/startRace");
 // does the DB read + the per-race start.
 const SCHEDULER_INTERVAL_MS = 5 * 60 * 1000; // every 5 minutes
 
+// How far past scheduledStartAt we still anchor the start TO scheduledStartAt.
+// The cron fires up to one interval after the scheduled minute, so within this
+// window we keep the clean scheduled-minute anchor (so endsAt lands tidily).
+// BEYOND it the race is starting genuinely late — e.g. it sat PENDING for days
+// waiting for a 2nd accepted participant — and anchoring to the stale
+// scheduledStartAt would backdate startedAt, instantly back-scoring every step
+// since then (the "44k steps the moment it started" bug). So past the grace
+// window we anchor to NOW: a late race starts fresh, counting only steps from
+// the actual start.
+const LATE_START_GRACE_MS = SCHEDULER_INTERVAL_MS;
+
 // Pure selection. Given a batch of candidate races and the current time, return
 // only those that should auto-start now:
 //   - status PENDING (idempotent: ACTIVE/COMPLETED races are never re-started)
@@ -43,16 +54,21 @@ function buildAutoStartScheduledRaces(dependencies = {}) {
     const started = [];
     for (const race of due) {
       try {
-        // Anchor the start to the scheduled moment: pin now() to
-        // scheduledStartAt so startRace sets endsAt = scheduledStart +
-        // maxDurationDays. bypassSchedule skips the manual-start guard (the
-        // schedule is satisfied by definition here).
+        // Anchor the start to the scheduled moment when on time, but clamp to
+        // NOW when starting late: pin now() to scheduledStartAt only if we're
+        // within the grace window, otherwise to currentTime so a long-delayed
+        // start doesn't backdate startedAt (and back-score days of pre-race
+        // steps). bypassSchedule skips the manual-start guard (the schedule is
+        // satisfied by definition here).
         const scheduledStart = new Date(race.scheduledStartAt);
+        const startedLate =
+          currentTime.getTime() - scheduledStart.getTime() > LATE_START_GRACE_MS;
+        const anchor = startedLate ? currentTime : scheduledStart;
         await startRace({
           userId: race.creatorId,
           raceId: race.id,
           bypassSchedule: true,
-          now: () => scheduledStart,
+          now: () => anchor,
         });
         started.push(race.id);
         logger.log(

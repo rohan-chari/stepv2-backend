@@ -30,6 +30,10 @@ function makeDeps(overrides = {}) {
           raceUpdates.push({ id, fields });
           return { id, ...fields };
         },
+        async updateIfPending(id, fields) {
+          raceUpdates.push({ id, fields });
+          return { count: 1 };
+        },
         ...overrides.Race,
       },
       RaceParticipant: {
@@ -151,6 +155,7 @@ test("startRace only counts steps after race start (baseline subtracts pre-race 
         return { id, creatorId: "creator-1", status: "PENDING", maxDurationDays: 7 };
       },
       async update(id, fields) { return { id, ...fields }; },
+      async updateIfPending() { return { count: 1 }; },
     },
     RaceParticipant: {
       async countAccepted() { return 2; },
@@ -211,6 +216,7 @@ test("startRace with no prior sync sets baseline 0 - progress should use StepSam
         return { id, creatorId: "creator-1", status: "PENDING", maxDurationDays: 7 };
       },
       async update(id, fields) { return { id, ...fields }; },
+      async updateIfPending() { return { count: 1 }; },
     },
     RaceParticipant: {
       async countAccepted() { return 2; },

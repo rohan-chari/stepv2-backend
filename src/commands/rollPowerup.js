@@ -87,6 +87,12 @@ function buildRollPowerup(dependencies = {}) {
       // whether it grants, forfeits, or skips an already-earned box — so counting
       // iterations bounds exactly how far nextBoxAtSteps can move in one sync.
       let crossedThisRoll = 0;
+      // Coalesce forfeits: a single big sync can cross many thresholds while the
+      // inventory + queue stay full (nothing frees a slot mid-loop), which used to
+      // write one identical "forfeited a mystery box" feed row per crossing —
+      // flooding the activity feed. Count them here and emit ONE summary row after
+      // the loop instead.
+      let forfeitedCount = 0;
 
       while (stepsForThreshold >= currentThreshold && currentThreshold > 0) {
         if (crossedThisRoll >= MAX_BOXES_PER_ROLL) {
@@ -107,16 +113,7 @@ function buildRollPowerup(dependencies = {}) {
         const forfeit = queued && queuedCount >= MAX_QUEUED_BOXES;
 
         if (forfeit) {
-          await tx.racePowerupEvent.create({
-            data: {
-              raceId,
-              actorUserId: userId,
-              eventType: "POWERUP_FORFEITED",
-              powerupType: "MYSTERY_BOX",
-              description: `${displayName || "A runner"} forfeited a mystery box — open your queued box first!`,
-            },
-          });
-
+          forfeitedCount += 1;
           results.push({
             forfeited: true,
             threshold: currentThreshold,
@@ -201,6 +198,20 @@ function buildRollPowerup(dependencies = {}) {
         await tx.raceParticipant.update({
           where: { id: participantId },
           data: { nextBoxAtSteps: currentThreshold },
+        });
+      }
+
+      // One summary feed row for all boxes forfeited this sync (see forfeitedCount).
+      if (forfeitedCount > 0) {
+        const boxWord = forfeitedCount === 1 ? "mystery box" : "mystery boxes";
+        await tx.racePowerupEvent.create({
+          data: {
+            raceId,
+            actorUserId: userId,
+            eventType: "POWERUP_FORFEITED",
+            powerupType: "MYSTERY_BOX",
+            description: `${displayName || "A runner"} forfeited ${forfeitedCount} ${boxWord} — open your queued box first!`,
+          },
         });
       }
     });
