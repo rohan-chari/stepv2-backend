@@ -86,13 +86,27 @@ async function getRaces(userId) {
       race.status === "ACTIVE" && race.powerupsEnabled && myParticipant
         ? await RacePowerup.countQueuedByParticipant(myParticipant.id)
         : 0;
+    // Slot inventory (HELD powerups + unopened MYSTERY_BOX) so the races list
+    // can render each occupied slot precisely — a powerup sprite for HELD, a
+    // crate for MYSTERY_BOX — without opening the race. Same item shape as the
+    // race-detail `inventory`. Additive field: older app builds ignore
+    // `slotItems` and fall back to `mysteryBoxCount`.
+    const slotPowerups =
+      race.status === "ACTIVE" && race.powerupsEnabled && myParticipant
+        ? await RacePowerup.findSlotPowerups(myParticipant.id)
+        : [];
+    const slotItems = slotPowerups.map((p) => ({
+      id: p.id,
+      type: p.type,
+      rarity: p.rarity,
+      status: p.status,
+    }));
     // Held/openable mystery boxes (0..powerupSlots) so the races list can show
     // how many boxes the user has waiting without opening the race. Additive
     // field: older app builds ignore it.
-    const mysteryBoxCount =
-      race.status === "ACTIVE" && race.powerupsEnabled && myParticipant
-        ? await RacePowerup.countMysteryBoxesByParticipant(myParticipant.id)
-        : 0;
+    const mysteryBoxCount = slotItems.filter(
+      (p) => p.status === "MYSTERY_BOX",
+    ).length;
 
     const summary = {
       id: race.id,
@@ -134,6 +148,7 @@ async function getRaces(userId) {
       myResultsSeen: (myParticipant?.resultsSeenAt != null),
       queuedBoxCount,
       mysteryBoxCount,
+      slotItems,
       isCreator: race.creatorId === userId,
       isPublic: race.isPublic || false,
       // null => unlimited (no cap). Serialized as null; older app clients read

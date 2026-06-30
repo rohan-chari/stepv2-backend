@@ -15,6 +15,16 @@ deploys and prod data changes are the high-risk, hard-to-reverse step.
 - Staging is fine to deploy to without asking; **prod is not**.
 - This also covers one-off prod DB scripts/`UPDATE`s and running seeds on prod.
 
+## Never run integration tests against the prod database
+
+Integration/e2e tests create, mutate, and delete rows (users, races, coin
+transactions, referrals). **Never point them at the prod DB.** They must run
+only against a dedicated local/test Postgres (a `*_test` database or a
+disposable container) — confirm `DATABASE_URL` is the test DB before running,
+and never set it to the prod connection string for a test run. The prod DB is
+the live source of truth for real users' coins and races; a stray test write or
+teardown there is unrecoverable.
+
 ## Core principle: never break users on older app versions
 
 This backend serves the **live iOS app**, whose binary is frozen per release.

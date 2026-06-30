@@ -1,14 +1,13 @@
-// Coin rewards + timing for the referral program. Calibrated against the
-// existing reason taxonomy: the one-time tutorial grant is 100 coins, so the
-// referrer (rarer, higher-effort, yields a retained racer) earns ~3x and the
-// referee gets a tutorial-sized welcome. BOTH are gated on a first *qualifying*
-// race (never install/signup) per Apple 3.2.2. These are plain, env-overridable
-// constants — tune freely without a migration. Final numbers are a product call
+// Coin rewards + timing for the referral program. The referrer (rarer, higher-
+// effort, yields a retained racer) earns 2x the referee, who gets a sizable
+// welcome. BOTH are gated on a first *qualifying* race (never install/signup)
+// per Apple 3.2.2. These are plain, env-overridable constants — tune freely
+// without a migration. Final numbers are a product call
 // (REFERRAL_FEATURE_RESEARCH.md §9 / open question 11.2).
 const REFERRER_REWARD_COINS = Number(
-  process.env.REFERRAL_REFERRER_COINS || 300
+  process.env.REFERRAL_REFERRER_COINS || 1000
 );
-const REFEREE_REWARD_COINS = Number(process.env.REFERRAL_REFEREE_COINS || 100);
+const REFEREE_REWARD_COINS = Number(process.env.REFERRAL_REFEREE_COINS || 500);
 
 // Signup → first-qualifying-race window. A still-PENDING attribution older than
 // this is marked EXPIRED and never pays out, so stale links don't credit
