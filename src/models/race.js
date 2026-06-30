@@ -77,6 +77,9 @@ const Race = {
     isPublic = false,
     maxParticipants = 10,
     scheduledStartAt = null,
+    // Canonical IANA tz that buckets this race's steps. NULL keeps the legacy
+    // (caller-tz live, UTC settlement) behavior for callers that don't supply one.
+    timezone = null,
   }) {
     return prisma.race.create({
       data: {
@@ -92,6 +95,7 @@ const Race = {
         isPublic,
         maxParticipants,
         scheduledStartAt,
+        timezone,
       },
       include: {
         creator: { select: { id: true, displayName: true, profilePhotoUrl: true } },

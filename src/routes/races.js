@@ -197,6 +197,9 @@ function createRacesRouter(dependencies = {}) {
         maxParticipants,
         scheduledStartAt,
         targetSteps,
+        // Creator's device tz -> race's canonical scoring tz, so live standings
+        // and placement pushes match what every participant sees on-screen.
+        timeZone: req.timeZone,
       });
       res.status(201).json({ race });
     } catch (error) {

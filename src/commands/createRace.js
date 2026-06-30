@@ -38,6 +38,22 @@ function validateScheduledStartAt(value, ErrorClass, nowFn = () => new Date()) {
   return parsed;
 }
 
+// Canonical tz for a user-created race: the creator's device tz, validated as a
+// real IANA zone. Persisting it makes the live cron, the display path, and
+// settlement bucket steps by the SAME calendar days (raceTimeZone reads it),
+// closing the "you slipped to 2nd, but I'm still 1st" divergence. Returns null
+// for a missing/unparseable tz so legacy behavior (caller-tz live, UTC settle)
+// is preserved rather than persisting garbage.
+function normalizeRaceTimeZone(value) {
+  if (!value || typeof value !== "string") return null;
+  try {
+    Intl.DateTimeFormat("en-US", { timeZone: value });
+    return value;
+  } catch {
+    return null;
+  }
+}
+
 function buildCreateRace(dependencies = {}) {
   const raceModel = dependencies.Race || Race;
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
@@ -63,6 +79,10 @@ function buildCreateRace(dependencies = {}) {
     // backend for completion logic (time-based only) — kept solely so the
     // legacy UI can render the target it picked.
     targetSteps = 0,
+    // The creator's device tz (req.timeZone). Stored as the race's canonical tz
+    // so live standings and notifications agree for every viewer. Older callers
+    // that omit it leave timezone NULL — unchanged legacy behavior.
+    timeZone = null,
   }) {
     validateRaceName(name, RaceCreationError);
     validateDuration(maxDurationDays, RaceCreationError);
@@ -109,6 +129,7 @@ function buildCreateRace(dependencies = {}) {
       isPublic: !!isPublic,
       maxParticipants: normalizedMaxParticipants,
       scheduledStartAt: normalizedScheduledStartAt,
+      timezone: normalizeRaceTimeZone(timeZone),
     });
 
     await participantModel.create({
