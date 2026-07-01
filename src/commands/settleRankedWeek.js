@@ -25,6 +25,9 @@ const {
   MIN_ACTIVE_DAYS_FOR_REWARD,
 } = require("../constants/rankedCohorts");
 const { grantLegendCosmetic: defaultGrantLegend } = require("./grantLegendCosmetic");
+const {
+  RANKED_NOTIFICATIONS_ENABLED,
+} = require("../constants/rankedNotifications");
 
 // Outcome for one ranked member. Promotion (and any payout) requires at least
 // one active day in the week — an idle account can hold or sink, never climb
@@ -77,6 +80,10 @@ function buildSettleRankedWeek(dependencies = {}) {
     });
   const now = dependencies.now || (() => new Date());
   const logger = dependencies.logger || console;
+  // Ranked notifications are paused (see constants/rankedNotifications.js).
+  // Injectable so tests can exercise the enabled path; defaults to the flag.
+  const rankedNotificationsEnabled =
+    dependencies.rankedNotificationsEnabled ?? RANKED_NOTIFICATIONS_ENABLED;
 
   return async function settleRankedWeek({ weekId }) {
     const claimed = await weekModel.claimForSettlement(weekId);
@@ -147,18 +154,22 @@ function buildSettleRankedWeek(dependencies = {}) {
           await grantLegendCosmetic({ userId: m.userId });
         }
 
-        events.emit("RANKED_WEEK_SETTLED_FOR_USER", {
-          userId: m.userId,
-          weekId,
-          weekIndex: week.index,
-          cohortId: m.cohortId,
-          finalRank: m.rank,
-          outcome: result.outcome,
-          tier: m.tier,
-          resultTier: result.resultTier,
-          rewardCoins: result.rewardCoins,
-          promotionCoins: result.promotionCoins,
-        });
+        // Gated by the ranked-notifications pause. Settlement, coin awards, and
+        // tier writes above always run; only this (unconsumed) emit is paused.
+        if (rankedNotificationsEnabled) {
+          events.emit("RANKED_WEEK_SETTLED_FOR_USER", {
+            userId: m.userId,
+            weekId,
+            weekIndex: week.index,
+            cohortId: m.cohortId,
+            finalRank: m.rank,
+            outcome: result.outcome,
+            tier: m.tier,
+            resultTier: result.resultTier,
+            rewardCoins: result.rewardCoins,
+            promotionCoins: result.promotionCoins,
+          });
+        }
         settled += 1;
       }
     }

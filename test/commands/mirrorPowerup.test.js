@@ -142,6 +142,25 @@ test("Mirror creates a shield-like effect on self", async () => {
   assert.equal(ctx.effectsCreated[0].sourceUserId, "user-1");
 });
 
+test("Mirror activation is silent — writes NO POWERUP_USED/MIRROR feed event", async () => {
+  // Like Imposter, Mirror activation should not post an activity-log event:
+  // announcing it tips off attackers that a reflect is armed. The RacePowerupEffect
+  // (the actual shield) is still created.
+  const ctx = makeDeps({ powerupType: "MIRROR" });
+  const use = buildUsePowerup(ctx.deps);
+
+  await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1" });
+
+  const mirrorFeed = ctx.feedEvents.find(
+    (e) => e.eventType === "POWERUP_USED" && e.powerupType === "MIRROR"
+  );
+  assert.equal(mirrorFeed, undefined, "no POWERUP_USED/MIRROR feed event on activation");
+
+  // The MIRROR effect (shield) is still created.
+  const mirrorEffect = ctx.effectsCreated.find((e) => e.type === "MIRROR");
+  assert.ok(mirrorEffect, "the MIRROR effect should still be created");
+});
+
 test("Mirror is self-only — rejects when a targetUserId is given", async () => {
   const ctx = makeDeps({ powerupType: "MIRROR" });
   const use = buildUsePowerup(ctx.deps);

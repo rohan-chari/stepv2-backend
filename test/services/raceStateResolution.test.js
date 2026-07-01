@@ -41,7 +41,10 @@ function makeContext(overrides = {}) {
     targetSteps: overrides.targetSteps ?? 10000,
     timeBased: overrides.timeBased ?? false,
     startedAt: overrides.startedAt || RACE_START,
-    endsAt: new Date("2026-04-13T12:00:00Z"),
+    endsAt:
+      overrides.endsAt !== undefined
+        ? overrides.endsAt
+        : new Date("2026-04-13T12:00:00Z"),
     powerupsEnabled: overrides.powerupsEnabled || false,
     powerupStepInterval: null,
     participants,
@@ -304,6 +307,73 @@ test("resolveRaceState with targetSteps=0 does not finish even when total is zer
   assert.equal(ctx.finishCalls.length, 0);
   assert.equal(ctx.placementCalls.length, 0);
   assert.equal(ctx.completeCalls.length, 0);
+});
+
+test("resolveRaceState short-circuits a past-endsAt race (awaiting raceExpiry settlement)", async () => {
+  // T9 defense-in-depth: once now >= endsAt the race is in the gap before the
+  // raceExpiry cron settles it. resolveRaceState must NOT keep live-resolving it
+  // (marking finishers, minting boxes, completing) — settlement owns that.
+  const alice = makeParticipant("rp-1", "user-1", "Alice");
+  const bob = makeParticipant("rp-2", "user-2", "Bob");
+  const carol = makeParticipant("rp-3", "user-3", "Carol");
+
+  const ctx = makeContext({
+    participants: [alice, bob, carol],
+    targetSteps: 10000,
+    endsAt: new Date("2026-04-07T11:00:00Z"), // ended before NOW (12:00)
+    samplesByUser: new Map([
+      [
+        "user-1",
+        [
+          {
+            periodStart: "2026-04-07T10:00:00Z",
+            periodEnd: "2026-04-07T11:00:00Z",
+            steps: 12000, // would have finished the target if still resolving
+          },
+        ],
+      ],
+    ]),
+  });
+
+  const resolveRaceState = buildResolveRaceState(ctx.deps);
+  const result = await resolveRaceState({ raceId: "race-1" });
+
+  assert.deepEqual(result, []);
+  assert.equal(ctx.participantUpdates.length, 0);
+  assert.equal(ctx.finishCalls.length, 0);
+  assert.equal(ctx.placementCalls.length, 0);
+  assert.equal(ctx.completeCalls.length, 0);
+});
+
+test("resolveRaceState still resolves an open-ended (endsAt null) race normally", async () => {
+  // Open-ended target races have no endsAt and must be unaffected by the T9 gate.
+  const alice = makeParticipant("rp-1", "user-1", "Alice");
+  const bob = makeParticipant("rp-2", "user-2", "Bob");
+  const carol = makeParticipant("rp-3", "user-3", "Carol");
+
+  const ctx = makeContext({
+    participants: [alice, bob, carol],
+    targetSteps: 10000,
+    endsAt: null,
+    samplesByUser: new Map([
+      [
+        "user-1",
+        [
+          {
+            periodStart: "2026-04-07T10:00:00Z",
+            periodEnd: "2026-04-07T11:00:00Z",
+            steps: 12000,
+          },
+        ],
+      ],
+    ]),
+  });
+
+  const resolveRaceState = buildResolveRaceState(ctx.deps);
+  await resolveRaceState({ raceId: "race-1" });
+
+  assert.equal(ctx.finishCalls.length, 1);
+  assert.equal(ctx.completeCalls.length, 1);
 });
 
 test("resolveRaceState still finishes a participant on reaching targetSteps > 0 (preserved)", async () => {

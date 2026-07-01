@@ -110,6 +110,91 @@ test("FRIEND_REQUEST_ACCEPTED sends push to requester with friends route payload
   });
 });
 
+test("POWERUP_USED pushes an attack alert while the race is live (ACTIVE, before endsAt)", async () => {
+  const eventBus = createMockEventBus();
+  let sentNotification;
+
+  registerNotificationHandlers({
+    eventBus,
+    Race: {
+      async findUnique() {
+        return { status: "ACTIVE", endsAt: new Date(Date.now() + 3_600_000) };
+      },
+    },
+    User: {
+      async findById(id) {
+        return { id, displayName: "Nathan" };
+      },
+    },
+    DeviceToken: {
+      async findByUserId(userId) {
+        assert.equal(userId, "victim-1");
+        return [{ token: "victim-token", platform: "ios" }];
+      },
+      async deleteToken() {},
+    },
+    apnsService: {
+      async sendNotification(args) {
+        sentNotification = args;
+        return { success: true };
+      },
+    },
+    logger: { warn() {}, error() {} },
+  });
+
+  await eventBus.emit("POWERUP_USED", {
+    raceId: "race-1",
+    userId: "attacker-1",
+    powerupType: "LEG_CRAMP",
+    targetUserId: "victim-1",
+  });
+
+  assert.ok(sentNotification, "a push should be sent for a live race");
+  assert.equal(sentNotification.title, "Powerup Attack!");
+});
+
+test("POWERUP_USED does NOT push for an expired-but-unsettled race (past endsAt, still ACTIVE)", async () => {
+  const eventBus = createMockEventBus();
+  let pushed = false;
+
+  registerNotificationHandlers({
+    eventBus,
+    Race: {
+      async findUnique() {
+        // raceExpiry hasn't flipped status yet, but endsAt is in the past.
+        return { status: "ACTIVE", endsAt: new Date(0) };
+      },
+    },
+    User: {
+      async findById(id) {
+        return { id, displayName: "Nathan" };
+      },
+    },
+    DeviceToken: {
+      async findByUserId() {
+        return [{ token: "victim-token", platform: "ios" }];
+      },
+      async deleteToken() {},
+    },
+    apnsService: {
+      async sendNotification() {
+        pushed = true;
+        return { success: true };
+      },
+    },
+    logger: { warn() {}, error() {} },
+  });
+
+  await eventBus.emit("POWERUP_USED", {
+    raceId: "race-1",
+    userId: "attacker-1",
+    powerupType: "SHORTCUT",
+    targetUserId: "victim-1",
+  });
+
+  assert.equal(pushed, false, "no attack push for a race that already ended");
+});
+
 test("RACE_MESSAGE_SENT notifies accepted unmuted participants and updates cooldown", async () => {
   const eventBus = createMockEventBus();
   const sentNotifications = [];

@@ -194,6 +194,12 @@ const Race = {
             placement: true,
             finishedAt: true,
             finishTotalSteps: true,
+            // joinedAt is REQUIRED here: resolveRaceState -> calculateBaseAdjusted
+            // -> getEffectiveStart clamps the box/step window to the real join.
+            // Omitting it makes getEffectiveStart fall back to race start, which
+            // sums a mid-race joiner's PRE-join steps and mints a burst of
+            // milestone mystery boxes (the public-race over-grant incident).
+            joinedAt: true,
             user: { select: { displayName: true } },
           },
           orderBy: { joinedAt: "asc" },

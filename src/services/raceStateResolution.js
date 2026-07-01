@@ -497,6 +497,15 @@ function buildResolveRaceState(dependencies = {}) {
         return null;
       }
 
+      // T9 defense-in-depth: once a race is past its endsAt it is awaiting the
+      // raceExpiry cron to settle it (status is still ACTIVE in that gap). Stop
+      // live-resolving it here — don't mark finishers, mint boxes, or complete
+      // it; settlement (src/jobs/raceExpiry.js) owns the final standings. endsAt
+      // null (open-ended target races) is unaffected.
+      if (race.endsAt && now() >= new Date(race.endsAt)) {
+        return null;
+      }
+
       const acceptedParticipants = race.participants.filter(
         (p) => p.status === "ACCEPTED"
       );

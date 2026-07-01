@@ -228,6 +228,10 @@ function createAuthRouter(dependencies = {}) {
             ...req.user,
             // 1.1.4 compat: clients pre-step-goal-removal expect a non-null int.
             stepGoal: req.user.stepGoal ?? 5000,
+            // T8: surface the global-leaderboard opt-out so clients can render
+            // the toggle. Default false when the column is absent (older row /
+            // backend version) — defensive read, never null.
+            hiddenFromLeaderboard: req.user.hiddenFromLeaderboard ?? false,
             incomingFriendRequests,
             heldCoins,
           },
@@ -307,6 +311,29 @@ function createAuthRouter(dependencies = {}) {
       }
       console.error("Display name error:", error);
       res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // T8: global-leaderboard opt-out. Body { hidden: <bool> }. Additive endpoint;
+  // older clients never call it. Persists hiddenFromLeaderboard and echoes the
+  // updated user. The user is still visible to friends and still sees their own
+  // global rank (see getLeaderboard) — this only hides them from strangers'
+  // global board.
+  router.put("/me/leaderboard-visibility", requireAuth, async (req, res) => {
+    const { hidden } = req.body || {};
+
+    if (typeof hidden !== "boolean") {
+      return res.status(400).json({ error: "hidden must be a boolean" });
+    }
+
+    try {
+      const user = await UserModel.update(req.user.id, {
+        hiddenFromLeaderboard: hidden,
+      });
+      return res.json({ user });
+    } catch (error) {
+      console.error("Leaderboard visibility error:", error);
+      return res.status(500).json({ error: "Internal server error" });
     }
   });
 

@@ -5,6 +5,9 @@ const { awardCoins } = require("./awardCoins");
 const { eventBus } = require("../events/eventBus");
 const { recomputeStandings } = require("../services/rankedStandings");
 const { TIER_REWARDS, SEASON_DURATION_DAYS } = require("../constants/rankedTiers");
+const {
+  RANKED_NOTIFICATIONS_ENABLED,
+} = require("../constants/rankedNotifications");
 
 function addDays(date, days) {
   return new Date(new Date(date).getTime() + days * 24 * 60 * 60 * 1000);
@@ -28,6 +31,10 @@ function buildSettleRankedSeason(dependencies = {}) {
   const seasonDurationDays =
     dependencies.seasonDurationDays || SEASON_DURATION_DAYS;
   const logger = dependencies.logger || console;
+  // Ranked notifications are paused (see constants/rankedNotifications.js).
+  // Injectable so tests can exercise the enabled path; defaults to the flag.
+  const rankedNotificationsEnabled =
+    dependencies.rankedNotificationsEnabled ?? RANKED_NOTIFICATIONS_ENABLED;
 
   return async function settleRankedSeason({ seasonId }) {
     // At-most-once: advisory lock + ACTIVE -> SETTLING compare-and-swap.
@@ -70,14 +77,18 @@ function buildSettleRankedSeason(dependencies = {}) {
       // Denormalize the final tier onto the user for cross-surface badges.
       await setUserTier(entry.userId, entry.tier, entry.division);
 
-      events.emit("SEASON_REWARD_GRANTED", {
-        userId: entry.userId,
-        seasonId,
-        tier: entry.tier,
-        division: entry.division,
-        rank: entry.rank,
-        coins: reward ? reward.coins : 0,
-      });
+      // Gated by the ranked-notifications pause. Final writes, coin mints, and
+      // tier badges above always run; only this (unconsumed) emit is paused.
+      if (rankedNotificationsEnabled) {
+        events.emit("SEASON_REWARD_GRANTED", {
+          userId: entry.userId,
+          seasonId,
+          tier: entry.tier,
+          division: entry.division,
+          rank: entry.rank,
+          coins: reward ? reward.coins : 0,
+        });
+      }
     }
 
     await seasonModel.markClosed(seasonId, now());

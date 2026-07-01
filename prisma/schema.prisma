@@ -34,6 +34,12 @@ model User {
   // both claim paths maintain both counters.
   dailyLoginStreak              Int                  @default(0) @map("daily_login_streak")
   isReviewAccount               Boolean              @default(false) @map("is_review_account")
+  // Global-leaderboard opt-out. When true the user is hidden from OTHER users'
+  // global step leaderboard (top list + rank count); they still appear to
+  // friends and still see their own global rank. Additive/back-compat: defaults
+  // false so existing rows and old clients (which ignore the field) are
+  // unaffected. Mirrors isReviewAccount's column style.
+  hiddenFromLeaderboard         Boolean              @default(false) @map("hidden_from_leaderboard")
   // True once the user has either joined their first race via the onboarding
   // step or explicitly skipped it. Additive/back-compat: defaults false so
   // existing rows and old clients (which ignore the field) are unaffected.

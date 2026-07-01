@@ -15,6 +15,7 @@ function registerNotificationHandlers(dependencies = {}) {
   const apns = dependencies.apnsService || apnsService;
   const fcm = dependencies.fcmService || fcmService;
   const raceParticipantModel = dependencies.RaceParticipant || prisma.raceParticipant;
+  const raceModel = dependencies.Race || prisma.race;
   const notificationModel = dependencies.Notification || Notification;
   const logger = dependencies.logger || console;
 
@@ -369,6 +370,23 @@ function registerNotificationHandlers(dependencies = {}) {
     try {
       const { raceId, userId, powerupType, targetUserId } = data;
       if (!targetUserId || !["LEG_CRAMP", "RED_CARD", "SHORTCUT", "WRONG_TURN"].includes(powerupType)) return;
+
+      // T9 safety net: suppress the attack push if the race is no longer live —
+      // not ACTIVE, or already past endsAt (the expired-but-unsettled gap, where
+      // status is still ACTIVE until raceExpiry settles it). usePowerup also gates
+      // this at the source; this is best-effort, so on any lookup error we proceed
+      // rather than drop a legitimate push.
+      try {
+        const race = await raceModel.findUnique({
+          where: { id: raceId },
+          select: { status: true, endsAt: true },
+        });
+        if (race) {
+          const ended =
+            race.endsAt && Date.now() >= new Date(race.endsAt).getTime();
+          if (race.status !== "ACTIVE" || ended) return;
+        }
+      } catch {}
 
       const buildBody = POWERUP_ATTACK_MESSAGES[powerupType];
       if (!buildBody) return;

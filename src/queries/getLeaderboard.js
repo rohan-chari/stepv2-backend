@@ -105,11 +105,19 @@ async function getStepLeaderboard(period, currentUserId, timeZone, scope = "glob
   // leaves this null so the query is unfiltered, exactly as before.
   const friendsIdSet = await resolveFriendsIdSet(scope, currentUserId);
   const friendClause = friendsIdSet ? { userId: { in: friendsIdSet } } : {};
-  // Hide review/demo accounts from real users' public leaderboards.
+  // friendsIdSet is null only for the default GLOBAL scope.
+  const isGlobalScope = friendsIdSet === null;
+  // Hide review/demo accounts from real users' public leaderboards. On the
+  // GLOBAL board additionally hide users who opted out via
+  // hiddenFromLeaderboard. The FRIENDS board intentionally keeps hidden users
+  // visible ("hidden only from strangers"), and the self-rank fallback below is
+  // left unfiltered so a hidden user still sees their OWN global rank.
   const whereClause = {
     ...dateClause,
     ...friendClause,
-    user: { isReviewAccount: false },
+    user: isGlobalScope
+      ? { isReviewAccount: false, hiddenFromLeaderboard: false }
+      : { isReviewAccount: false },
   };
 
   const top100Groups = await prisma.step.groupBy({

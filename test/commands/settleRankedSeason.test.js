@@ -6,7 +6,7 @@ const { buildSettleRankedSeason } = require("../../src/commands/settleRankedSeas
 const FIXED_NOW = new Date("2026-06-15T12:00:00Z");
 const SILENT = { log() {}, error() {} };
 
-function makeCtx({ claimCount = 1, season, standings = [] } = {}) {
+function makeCtx({ claimCount = 1, season, standings = [], rankedNotificationsEnabled } = {}) {
   const finals = [];
   const awards = [];
   const tierWrites = [];
@@ -53,6 +53,9 @@ function makeCtx({ claimCount = 1, season, standings = [] } = {}) {
     now: () => FIXED_NOW,
     seasonDurationDays: 30,
     logger: SILENT,
+    ...(rankedNotificationsEnabled === undefined
+      ? {}
+      : { rankedNotificationsEnabled }),
   });
 
   return { settle, finals, awards, tierWrites, events, created, get closed() { return closed; } };
@@ -70,6 +73,9 @@ test("settleRankedSeason is a no-op when the claim is lost (already settling)", 
 test("settleRankedSeason writes finals, mints tier rewards, sets badges, rolls next season", async () => {
   const ctx = makeCtx({
     claimCount: 1,
+    // Ranked notifications are paused by default; this test validates the
+    // SEASON_REWARD_GRANTED payload, so it opts the emit back on via the flag.
+    rankedNotificationsEnabled: true,
     season: { id: "s5", index: 5, endsAt: new Date("2026-06-15T00:00:00Z") },
     standings: [
       { userId: "u_diamond", points: 2000, earnedPoints: 2000, carryOverSeed: 0, rank: 1, tier: "DIAMOND", division: null },
@@ -101,4 +107,28 @@ test("settleRankedSeason writes finals, mints tier rewards, sets badges, rolls n
   assert.equal(ctx.created[0].index, 6);
   assert.equal(result.settledIndex, 5);
   assert.equal(result.ranked, 2);
+});
+
+test("settleRankedSeason does NOT emit SEASON_REWARD_GRANTED while paused (default), but still writes finals/tiers and rolls the season", async () => {
+  const ctx = makeCtx({
+    claimCount: 1,
+    season: { id: "s5", index: 5, endsAt: new Date("2026-06-15T00:00:00Z") },
+    standings: [
+      { userId: "u_diamond", points: 2000, earnedPoints: 2000, carryOverSeed: 0, rank: 1, tier: "DIAMOND", division: null },
+      { userId: "u_bronze", points: 120, earnedPoints: 120, carryOverSeed: 0, rank: 2, tier: "BRONZE", division: 3 },
+    ],
+  });
+
+  const result = await ctx.settle({ seasonId: "s5" });
+
+  // The ranked event is suppressed...
+  const rewardEvents = ctx.events.filter((e) => e.name === "SEASON_REWARD_GRANTED");
+  assert.equal(rewardEvents.length, 0);
+
+  // ...but settlement still runs end-to-end: finals, tier badges, next season.
+  assert.equal(ctx.finals.length, 2);
+  assert.equal(ctx.tierWrites.length, 2);
+  assert.equal(ctx.closed.id, "s5");
+  assert.equal(ctx.created[0].index, 6);
+  assert.equal(result.settledIndex, 5);
 });

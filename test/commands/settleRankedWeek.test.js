@@ -68,6 +68,7 @@ function makeCtx({
   },
   members = [],
   stepRows = [],
+  rankedNotificationsEnabled,
 } = {}) {
   const finals = [];
   const awards = [];
@@ -118,6 +119,9 @@ function makeCtx({
     eventBus: { emit: (name, payload) => events.push({ name, payload }) },
     now: () => FIXED_NOW,
     logger: SILENT,
+    ...(rankedNotificationsEnabled === undefined
+      ? {}
+      : { rankedNotificationsEnabled }),
   });
 
   return {
@@ -209,6 +213,36 @@ test("settleRankedWeek grants the Legend cosmetic to members ending in LEGEND", 
   const promo = ctx.awards.find((x) => x.reason === "ranked_promotion_bonus");
   assert.equal(promo.amount, 1000);
   assert.equal(promo.refId, "tier:LEGEND:user:a");
+});
+
+test("settleRankedWeek does NOT emit RANKED_WEEK_SETTLED_FOR_USER while ranked notifications are paused (default), but still pays + tiers", async () => {
+  const ctx = makeCtx({
+    members: [member("a", "c1", "SILVER"), member("b", "c1", "SILVER"), member("c", "c1", "SILVER")],
+    stepRows: [day("a", 0, 9000), day("b", 0, 20000), day("c", 0, 6000)],
+  });
+  await ctx.settle({ weekId: "week-1" });
+
+  // The ranked event is suppressed (paused)...
+  const ranked = ctx.events.filter((e) => e.name === "RANKED_WEEK_SETTLED_FOR_USER");
+  assert.equal(ranked.length, 0);
+
+  // ...while settlement still runs: coins minted, finals written, tiers set.
+  assert.ok(ctx.awards.length > 0, "placement/promotion coins still awarded");
+  assert.equal(ctx.finals.length, 3);
+  assert.equal(ctx.tierWrites.length, 3);
+  assert.deepEqual(ctx.closed, { id: "week-1", settledAt: FIXED_NOW });
+});
+
+test("settleRankedWeek re-emits RANKED_WEEK_SETTLED_FOR_USER when the flag is enabled", async () => {
+  const ctx = makeCtx({
+    rankedNotificationsEnabled: true,
+    members: [member("a", "c1", "SILVER"), member("b", "c1", "SILVER"), member("c", "c1", "SILVER")],
+    stepRows: [day("a", 0, 9000), day("b", 0, 20000), day("c", 0, 6000)],
+  });
+  await ctx.settle({ weekId: "week-1" });
+
+  const ranked = ctx.events.filter((e) => e.name === "RANKED_WEEK_SETTLED_FOR_USER");
+  assert.equal(ranked.length, 3);
 });
 
 test("settleRankedWeek settles cohorts independently", async () => {

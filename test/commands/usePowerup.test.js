@@ -87,6 +87,9 @@ function makeDeps(overrides = {}) {
             id: "race-1",
             status: overrides.raceStatus || "ACTIVE",
             targetSteps: 50000,
+            // endsAt defaults to undefined (open-ended target race) so existing
+            // tests are unaffected; T9 sets it to exercise the end-time guard.
+            endsAt: overrides.raceEndsAt,
             participants,
           };
         },
@@ -97,7 +100,7 @@ function makeDeps(overrides = {}) {
           events.push({ event, payload });
         },
       },
-      now: () => new Date("2026-01-15T12:00:00Z"),
+      now: overrides.now || (() => new Date("2026-01-15T12:00:00Z")),
     },
   };
 }
@@ -424,4 +427,67 @@ test("usePowerup rejects if race is not ACTIVE", async () => {
       return true;
     }
   );
+});
+
+// ===========================================================================
+// T9 — Guard powerups against an expired-but-unsettled race (Nathan bug).
+// Between a race's endsAt and the raceExpiry cron settling it, status is still
+// ACTIVE. Without an end-time gate an opponent can fire an offensive powerup
+// (and trigger an attack push) on a race that already ended.
+// ===========================================================================
+
+test("usePowerup rejects when the race ended (now >= endsAt) even though status is ACTIVE", async () => {
+  const ctx = makeDeps({
+    powerupType: "SHORTCUT",
+    raceStatus: "ACTIVE",
+    raceEndsAt: new Date("2026-01-15T11:00:00Z"), // ended an hour before now
+    now: () => new Date("2026-01-15T12:00:00Z"),
+  });
+  const use = buildUsePowerup(ctx.deps);
+
+  await assert.rejects(
+    () => use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", targetUserId: "user-2" }),
+    (err) => {
+      assert.ok(err instanceof PowerupUseError);
+      assert.ok(err.message.toLowerCase().includes("ended"));
+      assert.equal(err.statusCode, 400);
+      return true;
+    }
+  );
+
+  // No attack effect, no step changes, and crucially NO POWERUP_USED emit (which
+  // is what would have fired the attack push for an already-ended race).
+  assert.equal(ctx.effectsCreated.length, 0);
+  assert.equal(ctx.bonusChanges.length, 0);
+  assert.equal(ctx.events.some((e) => e.event === "POWERUP_USED"), false);
+});
+
+test("usePowerup still applies and emits when ACTIVE and now < endsAt (no regression)", async () => {
+  const ctx = makeDeps({
+    powerupType: "SHORTCUT",
+    raceStatus: "ACTIVE",
+    raceEndsAt: new Date("2026-01-15T18:00:00Z"), // ends in the future
+    now: () => new Date("2026-01-15T12:00:00Z"),
+  });
+  const use = buildUsePowerup(ctx.deps);
+
+  const result = await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", targetUserId: "user-2" });
+
+  assert.equal(result.stolen, 1000);
+  assert.equal(ctx.events.some((e) => e.event === "POWERUP_USED"), true);
+});
+
+test("usePowerup behavior is unchanged for an open-ended race (endsAt null)", async () => {
+  const ctx = makeDeps({
+    powerupType: "SHORTCUT",
+    raceStatus: "ACTIVE",
+    raceEndsAt: null, // target race with no end time
+    now: () => new Date("2026-01-15T12:00:00Z"),
+  });
+  const use = buildUsePowerup(ctx.deps);
+
+  const result = await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", targetUserId: "user-2" });
+
+  assert.equal(result.stolen, 1000);
+  assert.equal(ctx.events.some((e) => e.event === "POWERUP_USED"), true);
 });

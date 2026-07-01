@@ -184,6 +184,14 @@ function buildUsePowerup(dependencies = {}) {
     if (!race || race.status !== "ACTIVE") {
       throw new PowerupUseError("Race is not active", 400);
     }
+    // End-time gate: between a race's endsAt and the raceExpiry cron settling it
+    // (flipping status to COMPLETED), status is still ACTIVE. Without this guard
+    // an opponent could fire an offensive powerup — and trigger an attack push —
+    // on a race that has already ended. endsAt is null for open-ended target
+    // races, which are unaffected.
+    if (race.endsAt && now() >= new Date(race.endsAt)) {
+      throw new PowerupUseError("Race has ended", 400);
+    }
 
     // `let` (not const): on a Mirror reflect these are swapped so the offensive
     // switch below applies the effect to the original attacker instead.
@@ -706,13 +714,12 @@ function buildUsePowerup(dependencies = {}) {
         });
         result.effect = effect;
 
-        await eventModel.create({
-          raceId,
-          actorUserId: userId,
-          eventType: "POWERUP_USED",
-          powerupType: type,
-          description: `${myDisplayName} activated Mirror! The next attack against them will be reflected back.`,
-        });
+        // Mirror activation is intentionally SILENT (mirrors the IMPOSTER case):
+        // no POWERUP_USED feed event is written, so other participants aren't
+        // tipped off that a reflect is armed. The shield lives entirely on the
+        // RacePowerupEffect row above; the separate POWERUP_REFLECTED event
+        // (written when an attack is actually bounced) is unaffected. No push is
+        // sent for Mirror, so notificationHandlers needs no change.
         break;
       }
 
