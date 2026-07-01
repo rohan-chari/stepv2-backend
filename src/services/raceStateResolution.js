@@ -581,19 +581,29 @@ function buildResolveRaceState(dependencies = {}) {
           stepTotals[index] = { participant, totalSteps: total };
 
           // Capture the requesting user's RAW-walked-steps box total for the gate
-          // (immune to every buff/debuff multiplier; never strands next_box).
-          // Computed with a FIXED reference timezone (UTC) — NOT the caller's tz —
-          // so box progress is timezone-stable and matches the display path; a
-          // tz-dependent basis left the countdown clamped flat for non-UTC users.
+          // (immune to every buff/debuff multiplier; never strands next_box). Box
+          // progress buckets days in boxTz = raceTimeZone(race, "UTC") — the race's
+          // canonical persisted tz if set, else the constant "UTC" (NEVER the
+          // caller's tz, so it stays device-independent and can't clamp flat for
+          // non-UTC users). This is the SAME rule the display path uses. For a
+          // race with a canonical tz the leaderboard `baseAdjusted` just computed
+          // above is already bucketed in boxTz, so reuse it — box == leaderboard by
+          // construction; only a null-tz race recomputes in the fixed boxTz.
           if (userId && participant.userId === userId) {
-            const { baseAdjusted: boxBaseAdjusted } = await calculateBaseAdjusted({
-              participant,
-              raceStartedAt: race.startedAt,
-              timeZone: "UTC",
-              stepsModel,
-              stepSampleModel,
-              now: currentTime,
-            });
+            const boxTz = raceTimeZone(race, "UTC");
+            let boxBaseAdjusted;
+            if (raceTimeZone(race, timeZone) === boxTz) {
+              boxBaseAdjusted = baseAdjusted;
+            } else {
+              ({ baseAdjusted: boxBaseAdjusted } = await calculateBaseAdjusted({
+                participant,
+                raceStartedAt: race.startedAt,
+                timeZone: boxTz,
+                stepsModel,
+                stepSampleModel,
+                now: currentTime,
+              }));
+            }
             userBoxEffectiveSteps = computeBoxEffectiveSteps({
               baseAdjusted: boxBaseAdjusted,
               bonusSteps: participant.bonusSteps || 0,

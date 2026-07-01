@@ -470,21 +470,35 @@ function buildGetRaceProgress(deps = {}) {
         myParticipant.totalSteps ??
         0;
       // Box progress tracks RAW walked steps — immune to every buff/debuff
-      // multiplier (the leaderboard total stays effect-sensitive). It is computed
-      // with a FIXED reference timezone (UTC) so it is identical regardless of the
-      // caller's device timezone; using the request tz made baseAdjusted (and thus
-      // next_box's pace) tz-dependent, which left the countdown clamped flat at one
-      // interval for non-UTC users. Lazy require breaks the getRaceProgress <->
-      // raceStateResolution import cycle. (Steps lazily required for the same reason.)
-      const { calculateBaseAdjusted } = require("../services/raceStateResolution");
-      const { baseAdjusted: myBoxBaseAdjusted } = await calculateBaseAdjusted({
-        participant: myParticipant,
-        raceStartedAt: race.startedAt,
-        timeZone: "UTC",
-        stepsModel,
-        stepSampleModel,
-        now: now(),
-      });
+      // multiplier (the leaderboard total stays effect-sensitive). It buckets
+      // calendar days in the SAME tz the leaderboard uses — boxTz =
+      // raceTimeZone(race, "UTC"): the race's canonical persisted tz if set, else
+      // the literal constant "UTC". Critically the fallback is a CONSTANT, never
+      // the request `timeZone`, so box progress is identical regardless of the
+      // caller's device tz (a request-tz basis once left the countdown clamped
+      // flat at one interval for non-UTC users). For a race with a canonical tz
+      // (all seeded + creator-tz user races) boxTz === scoringTimeZone, so we
+      // REUSE the leaderboard baseAdjusted already computed above — box and
+      // leaderboard then agree by construction (no inline-vs-shared drift). A
+      // non-ACCEPTED requester has no map entry, and a null-tz race is not
+      // reusable; both fall through to a recompute in the fixed boxTz. Lazy
+      // require breaks the getRaceProgress <-> raceStateResolution import cycle.
+      const boxTz = raceTimeZone(race, "UTC");
+      const reusedLeaderboardBase = participantStepsMap[myParticipant.id];
+      let myBoxBaseAdjusted;
+      if (scoringTimeZone === boxTz && reusedLeaderboardBase != null) {
+        myBoxBaseAdjusted = reusedLeaderboardBase;
+      } else {
+        const { calculateBaseAdjusted } = require("../services/raceStateResolution");
+        ({ baseAdjusted: myBoxBaseAdjusted } = await calculateBaseAdjusted({
+          participant: myParticipant,
+          raceStartedAt: race.startedAt,
+          timeZone: boxTz,
+          stepsModel,
+          stepSampleModel,
+          now: now(),
+        }));
+      }
       const myBoxEffectiveSteps = computeBoxEffectiveSteps({
         baseAdjusted: myBoxBaseAdjusted,
         bonusSteps: myParticipant.bonusSteps || 0,
