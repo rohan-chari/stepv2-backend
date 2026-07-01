@@ -42,7 +42,8 @@ const ANDROID_SHA256_FINGERPRINTS = (
 
 // Store URLs for the landing-page CTA when the app isn't installed.
 const APP_STORE_URL =
-  process.env.APP_STORE_URL || "https://apps.apple.com/app/bara";
+  process.env.APP_STORE_URL ||
+  "https://apps.apple.com/us/app/bara-step-challenges/id6760504694";
 const PLAY_STORE_URL =
   process.env.PLAY_STORE_URL ||
   `https://play.google.com/store/apps/details?id=${ANDROID_PACKAGE}`;
