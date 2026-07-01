@@ -97,6 +97,32 @@ test("createRace rejects empty name", async () => {
   );
 });
 
+// Uses the REAL bad-words filter (like displayNameValidator.test.js) so this
+// guards the actual censor wiring, not a mock.
+test("createRace rejects a profane name", async () => {
+  const { deps } = makeDeps();
+  const createRace = buildCreateRace(deps);
+
+  await assert.rejects(
+    () => createRace({ userId: "user-1", name: "total shit race" }),
+    (err) => {
+      assert.ok(err instanceof RaceCreationError);
+      assert.equal(err.statusCode, 400);
+      assert.match(err.message, /inappropriate/i);
+      return true;
+    }
+  );
+});
+
+test("createRace still accepts a clean name", async () => {
+  const ctx = makeDeps();
+  const createRace = buildCreateRace(ctx.deps);
+
+  await createRace({ userId: "user-1", name: "Weekend Warriors" });
+
+  assert.equal(ctx.createdRace.name, "Weekend Warriors");
+});
+
 test("createRace rejects duration outside 1-30 range", async () => {
   const { deps } = makeDeps();
   const createRace = buildCreateRace(deps);

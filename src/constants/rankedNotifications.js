@@ -5,8 +5,9 @@
 //
 // This single flag gates BOTH ranked emits so the pause is explicit and
 // revertible: flip it to true to re-enable ranked notifications everywhere.
-// Settlement, coin awards, and tier/badge updates are NOT gated by this flag —
-// they always run.
+// Settlement, coin awards, and tier/badge updates are gated separately by
+// RANKED_SETTLEMENT_ENABLED (constants/rankedSettlement.js), which is also
+// off — as of 2026-07-01 the whole ranked pipeline is stopped, not just quiet.
 //
 // TODO(ranked): DO NOT set this to true yet. Ranked is intentionally paused
 // (product decision 2026-06-30). Turning it on before ranked push handlers AND

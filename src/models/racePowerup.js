@@ -79,45 +79,64 @@ const RacePowerup = {
     return results.map((r) => r.type);
   },
 
-  async swapHeldPowerups(sourcePowerupId, targetPowerupId) {
+  // Sneaky Swap steal: move ONE random stealable HELD powerup from
+  // `fromParticipantId` to `toParticipantId`/`toUserId`. Returns the updated
+  // row, or null when the victim holds nothing stealable (validated by the
+  // caller, but re-checked here — the shelf can change between the read and
+  // this call).
+  //
+  // Concurrency: the row is claimed with a conditional updateMany that
+  // re-asserts (id, HELD, still owned by the victim) — a concurrent steal
+  // that already moved the row makes the claim match 0 rows, and we fall back
+  // to another candidate instead of double-stealing.
+  //
+  // earned_at_steps is cleared on the stolen row so it can't collide with the
+  // recipient's milestone-bound powerup at the same step count (Postgres
+  // treats NULL as distinct in the (participant_id, earned_at_steps) unique
+  // index). rollPowerup still mints fresh milestone-bound rows with a concrete
+  // earned_at_steps, which keeps that path's dedup intact.
+  async stealRandomHeldPowerup({
+    fromParticipantId,
+    toParticipantId,
+    toUserId,
+    excludeTypes = [],
+    random = Math.random,
+  }) {
     return prisma.$transaction(async (tx) => {
-      const [source, target] = await Promise.all([
-        tx.racePowerup.findUnique({ where: { id: sourcePowerupId } }),
-        tx.racePowerup.findUnique({ where: { id: targetPowerupId } }),
-      ]);
+      const candidates = await tx.racePowerup.findMany({
+        where: {
+          participantId: fromParticipantId,
+          status: "HELD",
+          ...(excludeTypes.length ? { type: { notIn: excludeTypes } } : {}),
+        },
+        orderBy: { createdAt: "asc" },
+      });
 
-      if (!source || !target) {
-        throw new Error("Powerup not found");
+      while (candidates.length > 0) {
+        const index = Math.min(
+          Math.floor(random() * candidates.length),
+          candidates.length - 1
+        );
+        const [chosen] = candidates.splice(index, 1);
+
+        const claimed = await tx.racePowerup.updateMany({
+          where: {
+            id: chosen.id,
+            participantId: fromParticipantId,
+            status: "HELD",
+          },
+          data: {
+            participantId: toParticipantId,
+            userId: toUserId,
+            earnedAtSteps: null,
+          },
+        });
+        if (claimed.count === 1) {
+          return tx.racePowerup.findUnique({ where: { id: chosen.id } });
+        }
       }
 
-      // Clear earned_at_steps on both swapped powerups so they don't collide
-      // with the receiving participant's existing milestone-bound powerup at
-      // the same step count. Postgres treats NULL as distinct in the
-      // (participant_id, earned_at_steps) unique index, so multiple swapped
-      // powerups can coexist on a participant's shelf without conflict.
-      // rollPowerup still mints fresh milestone-bound rows with a concrete
-      // earned_at_steps, which keeps that path's dedup intact.
-      const sourcePatch = {
-        participantId: target.participantId,
-        userId: target.userId,
-        earnedAtSteps: null,
-      };
-      const targetPatch = {
-        participantId: source.participantId,
-        userId: source.userId,
-        earnedAtSteps: null,
-      };
-
-      const updatedSource = await tx.racePowerup.update({
-        where: { id: sourcePowerupId },
-        data: sourcePatch,
-      });
-      const updatedTarget = await tx.racePowerup.update({
-        where: { id: targetPowerupId },
-        data: targetPatch,
-      });
-
-      return { source: updatedSource, target: updatedTarget };
+      return null;
     });
   },
 

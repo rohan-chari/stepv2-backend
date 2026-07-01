@@ -3,6 +3,7 @@ const { Steps } = require("../models/steps");
 const { settleRankedSeason: defaultSettle, addDays } = require("../commands/settleRankedSeason");
 const { recomputeStandings } = require("../services/rankedStandings");
 const { SEASON_DURATION_DAYS } = require("../constants/rankedTiers");
+const { RANKED_SETTLEMENT_ENABLED } = require("../constants/rankedSettlement");
 
 const COMPUTE_INTERVAL_MS = 5 * 60 * 1000; // every 5 minutes (matches race jobs)
 
@@ -16,8 +17,16 @@ function buildComputeRanks(dependencies = {}) {
   const logger = dependencies.logger || console;
   const seasonDurationDays =
     dependencies.seasonDurationDays || SEASON_DURATION_DAYS;
+  const settlementEnabled =
+    dependencies.rankedSettlementEnabled ?? RANKED_SETTLEMENT_ENABLED;
 
   return async function computeRanks() {
+    // Ranked is paused: skip seasons/standings/settlement entirely so no
+    // ranked coins are minted. See constants/rankedSettlement.js.
+    if (!settlementEnabled) {
+      return { disabled: true, seasonIndex: null, ranked: 0 };
+    }
+
     // Ensure there is a live season. Only the very first run has none — the
     // settlement command always opens the next season as it closes one.
     let season = await seasonModel.getActive();
@@ -66,6 +75,15 @@ function scheduleComputeRanks(dependencies = {}) {
   const interval = dependencies.intervalMs || COMPUTE_INTERVAL_MS;
   const logger = dependencies.logger || console;
   const computeFn = dependencies.computeRanks || computeRanks;
+  const settlementEnabled =
+    dependencies.rankedSettlementEnabled ?? RANKED_SETTLEMENT_ENABLED;
+
+  if (!settlementEnabled) {
+    logger.log(
+      "[CRON] Ranked computation DISABLED (RANKED_SETTLEMENT_ENABLED=false)"
+    );
+    return;
+  }
 
   async function run() {
     try {

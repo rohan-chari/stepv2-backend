@@ -8,7 +8,12 @@ const SILENT = { log() {}, error() {} };
 // Tuesday 2026-06-09 15:00 UTC — current week is Mon 06-08 .. Mon 06-15.
 const TUESDAY = new Date("2026-06-09T15:00:00Z");
 
-function makeCtx({ now = TUESDAY, currentWeek = null, unsettled = [] } = {}) {
+function makeCtx({
+  now = TUESDAY,
+  currentWeek = null,
+  unsettled = [],
+  rankedSettlementEnabled = true,
+} = {}) {
   const created = [];
   const enrolled = [];
   const recomputed = [];
@@ -16,6 +21,7 @@ function makeCtx({ now = TUESDAY, currentWeek = null, unsettled = [] } = {}) {
   let week = currentWeek;
 
   const job = buildComputeRankedWeeks({
+    rankedSettlementEnabled,
     RankedWeek: {
       async getCurrent() {
         return week;
@@ -134,4 +140,48 @@ test("monday boundary: a run exactly at Monday midnight opens the new week", asy
   const ctx = makeCtx({ now: mondayMidnight });
   await ctx.job();
   assert.equal(ctx.created[0].startsOn.toISOString(), "2026-06-15T00:00:00.000Z");
+});
+
+// Ranked is paused (product decision 2026-07-01): with the kill switch off —
+// the shipped default — the tick must be a complete no-op. No week is opened,
+// nobody is enrolled, no standings are refreshed, and above all nothing
+// settles, because settlement is what mints ranked coins.
+test("kill switch (default): the tick does nothing — no open, no enroll, no settle", async () => {
+  const ctx = makeCtx({ rankedSettlementEnabled: false });
+  const result = await ctx.job();
+
+  assert.equal(ctx.created.length, 0);
+  assert.equal(ctx.enrolled.length, 0);
+  assert.deepEqual(ctx.recomputed, []);
+  assert.deepEqual(ctx.settledIds, []);
+  assert.deepEqual(result, { disabled: true, weekIndex: null, members: 0 });
+});
+
+test("kill switch: a past-boundary unsettled week is NOT settled (no coins minted)", async () => {
+  // Monday 19:00 UTC — 19h past the boundary, well beyond the 18h grace, so an
+  // enabled run would settle-and-pay. Disabled must leave the week untouched.
+  const monday = new Date("2026-06-15T19:00:00Z");
+  const lastWeek = {
+    id: "week-5",
+    index: 5,
+    startsOn: new Date("2026-06-08T00:00:00Z"),
+    endsOn: new Date("2026-06-15T00:00:00Z"),
+  };
+  const ctx = makeCtx({
+    now: monday,
+    unsettled: [lastWeek],
+    rankedSettlementEnabled: false,
+  });
+  await ctx.job();
+
+  assert.deepEqual(ctx.settledIds, []);
+  assert.equal(ctx.created.length, 0);
+  assert.equal(ctx.enrolled.length, 0);
+});
+
+test("the shipped default for the kill switch is OFF", () => {
+  const {
+    RANKED_SETTLEMENT_ENABLED,
+  } = require("../../src/constants/rankedSettlement");
+  assert.equal(RANKED_SETTLEMENT_ENABLED, false);
 });

@@ -5,35 +5,44 @@
 //      participant earns because their samples overlapped an active event
 //      window), stacking MULTIPLICATIVELY with the per-participant timed
 //      multipliers the resolution already understands.
-//   2. shouldStartGlobalEvent / computeAnchorTimesForDay — the scheduler
-//      decision (whether a 5-minute tick should create a new event now),
-//      with UTC-anchored, deterministically-jittered anchors and idempotency.
+//   2. shouldStartGlobalEvent / chooseEventStartForEtDay — the scheduler
+//      decision (whether a 5-minute tick should create a new event now):
+//      one event per ET day at a deterministically-random wall-clock time
+//      drawn from a day-of-week window, plus idempotency.
 //
 // Everything is dependency-injected (no DB calls inside the math) so both
 // getRaceProgress (display) and raceExpiry (settlement) can compute identical
 // totals by passing in the same active events.
 
+const { getTimeZoneParts, zonedDateTimeToUtc } = require("./week");
+const { etDayKey, ET } = require("./etSchedule");
+
 // ---------------------------------------------------------------------------
 // Tuning constants — change these to tune frequency/shape of events.
 // ---------------------------------------------------------------------------
 
-// 1 event per day. Each value is "minutes after UTC midnight" for the
-// nominal (pre-jitter) anchor.
-const GLOBAL_EVENT_ANCHORS_UTC_MIN = [
-  22 * 60, // 22:00 UTC (6 PM ET)
+// One event per ET day, at a random wall-clock minute drawn from these windows
+// (minutes after ET midnight, [start, end) half-open). ET-anchored — the same
+// instant globally (fair), and DST-safe because conversion goes through
+// zonedDateTimeToUtc, unlike the old fixed 22:00-UTC anchor which silently
+// drifted from 6PM ET (EDT) to 5PM ET (EST) every winter.
+//
+// Mon–Thu: off-work hours only — mornings 8-10AM and evenings 4-9PM ET.
+const GLOBAL_EVENT_WEEKDAY_WINDOWS_ET_MIN = [
+  [8 * 60, 10 * 60],
+  [16 * 60, 21 * 60],
 ];
+// Fri/Sat/Sun: any time 8AM-10PM ET.
+const GLOBAL_EVENT_WEEKEND_WINDOWS_ET_MIN = [[8 * 60, 22 * 60]];
+
+// ET weekdays that use the wide weekend windows.
+const GLOBAL_EVENT_WEEKEND_DAYS = new Set(["Fri", "Sat", "Sun"]);
 
 // Each event lasts 30 minutes.
 const GLOBAL_EVENT_DURATION_MS = 30 * 60 * 1000;
 
 // 2x steps during the window.
 const GLOBAL_EVENT_MULTIPLIER = 2;
-
-// Jitter: each anchor is nudged by up to ±JITTER minutes, deterministically
-// derived from the UTC date + anchor index so EVERY race worldwide sees the
-// event at the exact same instant (fair) and the value is stable across the
-// many 5-minute ticks within a day (so idempotency works).
-const GLOBAL_EVENT_JITTER_MIN = 7;
 
 // Catch window: the scheduler runs every 5 minutes, so a tick may land a few
 // minutes after the anchor. Start the event if `now` is within this many ms
@@ -183,8 +192,9 @@ async function computeGlobalEventBoost({
 // Scheduler decision
 // ---------------------------------------------------------------------------
 
-// Deterministic small integer in [0, mod) from a string seed (FNV-1a). Used to
-// derive a stable per-day jitter so anchors don't move between ticks.
+// Deterministic small integer in [0, mod) from a string seed (FNV-1a). Seeds
+// the per-day time draw so every tick (and restart) in a day agrees on the
+// chosen start time without persisting anything.
 function hashToInt(seed, mod) {
   let h = 0x811c9dc5;
   for (let i = 0; i < seed.length; i++) {
@@ -194,60 +204,68 @@ function hashToInt(seed, mod) {
   return Math.abs(h) % mod;
 }
 
-function utcDayKey(date) {
-  const d = new Date(date);
-  return `${d.getUTCFullYear()}-${d.getUTCMonth() + 1}-${d.getUTCDate()}`;
-}
+// The event start instant (UTC Date) for the ET calendar day that `date` falls
+// in: a wall-clock ET minute drawn uniformly from the day-of-week windows,
+// deterministic per ET day. `pickInt(seed, mod)` is injectable so tests can
+// force exact draws; production uses the FNV-1a hash.
+function chooseEventStartForEtDay(date, pickInt = hashToInt) {
+  const parts = getTimeZoneParts(date, ET);
+  const windows = GLOBAL_EVENT_WEEKEND_DAYS.has(parts.weekday)
+    ? GLOBAL_EVENT_WEEKEND_WINDOWS_ET_MIN
+    : GLOBAL_EVENT_WEEKDAY_WINDOWS_ET_MIN;
 
-// The jittered anchor Date objects for the UTC day that `date` falls in. Stable
-// for a given UTC day (jitter seeded by the date + anchor index, not random()).
-function computeAnchorTimesForDay(date) {
-  const d = new Date(date);
-  const dayStart = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
-  const dayKey = utcDayKey(date);
-  const jitterSpan = GLOBAL_EVENT_JITTER_MIN * 2 + 1; // [-J, +J]
+  const totalMin = windows.reduce((sum, [a, b]) => sum + (b - a), 0);
+  let offset = pickInt(`${etDayKey(date)}:start`, totalMin);
 
-  return GLOBAL_EVENT_ANCHORS_UTC_MIN.map((anchorMin, index) => {
-    const jitter =
-      hashToInt(`${dayKey}:${index}`, jitterSpan) - GLOBAL_EVENT_JITTER_MIN;
-    const minutes = anchorMin + jitter;
-    return new Date(dayStart + minutes * 60 * 1000);
-  });
+  for (const [a, b] of windows) {
+    const len = b - a;
+    if (offset < len) {
+      const minutes = a + offset;
+      return zonedDateTimeToUtc(
+        {
+          year: parts.year,
+          month: parts.month,
+          day: parts.day,
+          hour: Math.floor(minutes / 60),
+          minute: minutes % 60,
+        },
+        ET
+      );
+    }
+    offset -= len;
+  }
+  // Unreachable: offset < totalMin by construction.
+  throw new Error("global event window draw out of range");
 }
 
 // Decide whether a scheduler tick at `now` should start a new event. Returns a
 // descriptor { anchorAt, startsAt, endsAt, multiplier } when it should, else
-// null. Idempotent: if `todaysEvents` already contains an event whose startsAt
-// matches the current anchor (within the catch window), returns null so the
-// same anchor never double-creates across ticks.
-function shouldStartGlobalEvent({ now, todaysEvents = [] }) {
+// null. Fires only within the catch window after the day's chosen time (a tick
+// that misses the whole window skips the day — never a surprise late event).
+// Idempotent: if `todaysEvents` already contains an event whose startsAt
+// matches the chosen time (within the catch window), returns null so the same
+// day never double-creates across ticks.
+function shouldStartGlobalEvent({ now, todaysEvents = [], pickInt }) {
   const nowMs = new Date(now).getTime();
-  const anchors = computeAnchorTimesForDay(now);
+  const start = chooseEventStartForEtDay(now, pickInt);
+  const startMs = start.getTime();
 
-  for (const anchor of anchors) {
-    const anchorMs = anchor.getTime();
-    // Fire only AT/AFTER the anchor, within the catch window.
-    if (nowMs < anchorMs) continue;
-    if (nowMs - anchorMs > GLOBAL_EVENT_CATCH_WINDOW_MS) continue;
+  // Fire only AT/AFTER the chosen time, within the catch window.
+  if (nowMs < startMs) return null;
+  if (nowMs - startMs > GLOBAL_EVENT_CATCH_WINDOW_MS) return null;
 
-    // Idempotency: skip if an event for this anchor already exists today. We
-    // match on startsAt being within the catch window of the anchor.
-    const alreadyStarted = (todaysEvents || []).some((ev) => {
-      const startMs = new Date(ev.startsAt).getTime();
-      return Math.abs(startMs - anchorMs) <= GLOBAL_EVENT_CATCH_WINDOW_MS;
-    });
-    if (alreadyStarted) continue;
+  const alreadyStarted = (todaysEvents || []).some((ev) => {
+    const evStartMs = new Date(ev.startsAt).getTime();
+    return Math.abs(evStartMs - startMs) <= GLOBAL_EVENT_CATCH_WINDOW_MS;
+  });
+  if (alreadyStarted) return null;
 
-    const startsAt = new Date(anchorMs);
-    return {
-      anchorAt: new Date(anchorMs),
-      startsAt,
-      endsAt: new Date(anchorMs + GLOBAL_EVENT_DURATION_MS),
-      multiplier: GLOBAL_EVENT_MULTIPLIER,
-    };
-  }
-
-  return null;
+  return {
+    anchorAt: new Date(startMs),
+    startsAt: new Date(startMs),
+    endsAt: new Date(startMs + GLOBAL_EVENT_DURATION_MS),
+    multiplier: GLOBAL_EVENT_MULTIPLIER,
+  };
 }
 
 module.exports = {
@@ -256,11 +274,11 @@ module.exports = {
   positiveMultiplierForTime,
   // scheduler
   shouldStartGlobalEvent,
-  computeAnchorTimesForDay,
+  chooseEventStartForEtDay,
   // constants
-  GLOBAL_EVENT_ANCHORS_UTC_MIN,
+  GLOBAL_EVENT_WEEKDAY_WINDOWS_ET_MIN,
+  GLOBAL_EVENT_WEEKEND_WINDOWS_ET_MIN,
   GLOBAL_EVENT_DURATION_MS,
   GLOBAL_EVENT_MULTIPLIER,
-  GLOBAL_EVENT_JITTER_MIN,
   GLOBAL_EVENT_CATCH_WINDOW_MS,
 };

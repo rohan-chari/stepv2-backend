@@ -126,6 +126,26 @@ test("editRace returns 404 when race not found", async () => {
   );
 });
 
+test("editRace rejects a profane name", async () => {
+  const ctx = makeDeps();
+  const editRace = buildEditRace(ctx.deps);
+
+  await assert.rejects(
+    () =>
+      editRace({
+        userId: "user-1",
+        raceId: "race-1",
+        updates: { name: "total shit race" },
+      }),
+    (err) => {
+      assert.ok(err instanceof RaceEditError);
+      assert.equal(err.statusCode, 400);
+      assert.match(err.message, /inappropriate/i);
+      return true;
+    }
+  );
+});
+
 test("editRace updates name and trims it", async () => {
   const ctx = makeDeps();
   const editRace = buildEditRace(ctx.deps);

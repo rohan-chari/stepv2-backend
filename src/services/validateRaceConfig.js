@@ -1,4 +1,5 @@
 const { validateRaceBuyInConfig } = require("./raceBuyIns");
+const { censor } = require("../lib/profanity");
 
 /**
  * Shared validators for race configuration fields. Each helper throws via the
@@ -13,7 +14,14 @@ function validateRaceName(name, ErrorClass) {
   if (name.trim().length > 50) {
     throw new ErrorClass("Race name must be 50 characters or less", 400);
   }
-  return name.trim();
+  const trimmed = name.trim();
+  // Reject-on-write like display names (displayNameValidator.js) — race names
+  // are surfaced everywhere (lists, invites, chat payloads), so don't store
+  // profanity and rely on display-time masking.
+  if (censor(trimmed) !== trimmed) {
+    throw new ErrorClass("Race name contains inappropriate language", 400);
+  }
+  return trimmed;
 }
 
 function validateDuration(maxDurationDays, ErrorClass) {

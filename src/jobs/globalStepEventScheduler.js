@@ -22,9 +22,12 @@ function buildMaybeStartGlobalEvent(dependencies = {}) {
   return async function maybeStartGlobalEvent() {
     const currentTime = now();
 
-    // Idempotency input: events already created today (UTC).
+    // Idempotency input: events started in the last 24h (rolling window — see
+    // findStartedSince for why this isn't a UTC calendar-day bucket).
     const todaysEvents =
-      (await globalStepEventModel.findCreatedOnUtcDay(currentTime)) || [];
+      (await globalStepEventModel.findStartedSince(
+        new Date(currentTime.getTime() - 24 * 60 * 60 * 1000)
+      )) || [];
 
     const decision = shouldStartGlobalEvent({
       now: currentTime,

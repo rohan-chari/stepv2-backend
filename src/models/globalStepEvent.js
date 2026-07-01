@@ -34,16 +34,13 @@ const GlobalStepEvent = {
     });
   },
 
-  // Events created today (UTC). Used by the scheduler for idempotency: it must
-  // not re-create an event for an anchor that already fired today.
-  async findCreatedOnUtcDay(date) {
-    const d = new Date(date);
-    const dayStart = new Date(
-      Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())
-    );
-    const nextDay = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+  // Events started at/after `since`. Used by the scheduler for idempotency: it
+  // must not re-create an event for a chosen time that already fired. A rolling
+  // lookback (not calendar-day bucketing) because the ET-anchored start and the
+  // next tick can straddle UTC midnight, which UTC-day buckets would split.
+  async findStartedSince(since) {
     return prisma.globalStepEvent.findMany({
-      where: { startsAt: { gte: dayStart, lt: nextDay } },
+      where: { startsAt: { gte: new Date(since) } },
       orderBy: { startsAt: "asc" },
     });
   },

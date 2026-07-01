@@ -18,6 +18,7 @@ const {
 } = require("../services/rankedCohorts");
 const { settleRankedWeek: defaultSettle } = require("../commands/settleRankedWeek");
 const { SETTLE_GRACE_HOURS } = require("../constants/rankedCohorts");
+const { RANKED_SETTLEMENT_ENABLED } = require("../constants/rankedSettlement");
 
 const COMPUTE_INTERVAL_MS = 5 * 60 * 1000;
 
@@ -30,8 +31,16 @@ function buildComputeRankedWeeks(dependencies = {}) {
   const logger = dependencies.logger || console;
   const graceMs =
     (dependencies.settleGraceHours ?? SETTLE_GRACE_HOURS) * 60 * 60 * 1000;
+  const settlementEnabled =
+    dependencies.rankedSettlementEnabled ?? RANKED_SETTLEMENT_ENABLED;
 
   return async function computeRankedWeeks() {
+    // Ranked is paused: skip the whole pipeline (open/enroll/standings/settle)
+    // so no ranked coins are minted. See constants/rankedSettlement.js.
+    if (!settlementEnabled) {
+      return { disabled: true, weekIndex: null, members: 0 };
+    }
+
     const at = now();
 
     // 1. Settle (or, within the grace window, just refresh) every past-boundary
@@ -92,6 +101,15 @@ function scheduleComputeRankedWeeks(dependencies = {}) {
   const interval = dependencies.intervalMs || COMPUTE_INTERVAL_MS;
   const logger = dependencies.logger || console;
   const computeFn = dependencies.computeRankedWeeks || computeRankedWeeks;
+  const settlementEnabled =
+    dependencies.rankedSettlementEnabled ?? RANKED_SETTLEMENT_ENABLED;
+
+  if (!settlementEnabled) {
+    logger.log(
+      "[CRON] Ranked weekly computation DISABLED (RANKED_SETTLEMENT_ENABLED=false)"
+    );
+    return;
+  }
 
   async function run() {
     try {

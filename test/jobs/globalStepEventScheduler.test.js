@@ -5,29 +5,35 @@ const {
   buildMaybeStartGlobalEvent,
 } = require("../../src/jobs/globalStepEventScheduler");
 const {
-  computeAnchorTimesForDay,
+  chooseEventStartForEtDay,
   GLOBAL_EVENT_DURATION_MS,
   GLOBAL_EVENT_MULTIPLIER,
 } = require("../../src/utils/globalStepEvent");
+const { zonedDateTimeToUtc } = require("../../src/utils/week");
 
 // ---------------------------------------------------------------------------
 // Scheduler job (DB read/write + push fan-out). The PURE decision is tested in
 // test/utils/globalStepEventSchedule.test.js; here we verify the job wires the
 // decision to model.create + an event-bus fan-out, and is idempotent.
 //
-// Built with DI mocks (no DB), mirroring the seededRaceRenewal test style.
+// Idempotency now reads events STARTED IN THE LAST 24H (findStartedSince), not
+// "created on this UTC day" — an ET-evening event and the next tick can land on
+// different UTC calendar days, which would defeat UTC-day bucketing.
 // ---------------------------------------------------------------------------
 
-function makeCtx({ todaysEvents = [], participantUserIds = [] } = {}) {
+function makeCtx({ recentEvents = [], participantUserIds = [] } = {}) {
   const created = [];
   const emitted = [];
+  const sinceCalls = [];
   return {
     created,
     emitted,
+    sinceCalls,
     deps: {
       GlobalStepEvent: {
-        async findCreatedOnUtcDay() {
-          return todaysEvents;
+        async findStartedSince(since) {
+          sinceCalls.push(since);
+          return recentEvents;
         },
         async create(data) {
           const event = { id: `gse-${created.length + 1}`, ...data };
@@ -50,16 +56,19 @@ function makeCtx({ todaysEvents = [], participantUserIds = [] } = {}) {
   };
 }
 
-// A `now` exactly at the first anchor of the day.
-function anchorNow() {
-  const anchors = computeAnchorTimesForDay(new Date(Date.UTC(2026, 5, 2)));
-  return new Date(anchors[0].getTime());
+// The chosen start instant for Mon 2026-06-08 (ET).
+function chosenNow() {
+  const day = zonedDateTimeToUtc(
+    { year: 2026, month: 6, day: 8, hour: 12, minute: 0 },
+    "America/New_York"
+  );
+  return chooseEventStartForEtDay(day);
 }
 
-test("creates an event and fans out to active-race participants at an anchor", async () => {
-  const now = anchorNow();
+test("creates an event and fans out to active-race participants at the chosen time", async () => {
+  const now = chosenNow();
   const ctx = makeCtx({
-    todaysEvents: [],
+    recentEvents: [],
     participantUserIds: ["user-1", "user-2", "user-3"],
   });
 
@@ -74,6 +83,13 @@ test("creates an event and fans out to active-race participants at an anchor", a
     now.getTime() + GLOBAL_EVENT_DURATION_MS
   );
 
+  // Idempotency lookback covers a full day (survives the UTC-midnight straddle).
+  assert.equal(ctx.sinceCalls.length, 1);
+  assert.equal(
+    now.getTime() - ctx.sinceCalls[0].getTime(),
+    24 * 60 * 60 * 1000
+  );
+
   assert.equal(ctx.emitted.length, 1);
   assert.equal(ctx.emitted[0].name, "GLOBAL_EVENT_STARTED");
   assert.deepEqual(ctx.emitted[0].payload.participantUserIds, [
@@ -84,10 +100,10 @@ test("creates an event and fans out to active-race participants at an anchor", a
   assert.equal(ctx.emitted[0].payload.multiplier, GLOBAL_EVENT_MULTIPLIER);
 });
 
-test("idempotent: does not create a second event when one already exists for the anchor", async () => {
-  const now = anchorNow();
+test("idempotent: does not create a second event when one already exists for the chosen time", async () => {
+  const now = chosenNow();
   const ctx = makeCtx({
-    todaysEvents: [
+    recentEvents: [
       {
         startsAt: new Date(now.getTime()),
         endsAt: new Date(now.getTime() + GLOBAL_EVENT_DURATION_MS),
@@ -105,10 +121,8 @@ test("idempotent: does not create a second event when one already exists for the
   assert.equal(ctx.emitted.length, 0, "no fan-out when nothing started");
 });
 
-test("does nothing when now is not near any anchor", async () => {
-  const anchors = computeAnchorTimesForDay(new Date(Date.UTC(2026, 5, 2)));
-  // 1 minute before the first anchor — outside the (after-anchor) catch window.
-  const now = new Date(anchors[0].getTime() - 60 * 1000);
+test("does nothing when now is before the chosen time", async () => {
+  const now = new Date(chosenNow().getTime() - 60 * 1000);
   const ctx = makeCtx({ participantUserIds: ["user-1"] });
 
   const run = buildMaybeStartGlobalEvent({ ...ctx.deps, now: () => now });

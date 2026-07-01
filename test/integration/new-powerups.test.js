@@ -183,24 +183,25 @@ describe("new powerups — integration", () => {
     assert.match((await blockedRes.json()).error, /stealthed/i);
   });
 
-  // Regression: prod was hitting P2002 (unique on participant_id + earned_at_steps)
-  // any time the offered and requested powerups landed on milestones the receiving
-  // participant had already earned at. Fix: clear earned_at_steps on swap.
-  it("Sneaky Swap succeeds when both participants share earned_at_steps milestones", async () => {
+  // Sneaky Swap redesign (2026-07): one-way STEAL. The attacker takes one
+  // random stealable powerup from the target and gives up NOTHING — even when
+  // an old app version still sends the retired mutual-swap ids.
+  it("Sneaky Swap steals one target powerup and never gives up the attacker's own (legacy ids ignored)", async () => {
     const { alice, bob, raceId } = await createActiveRace();
 
     const sneaky = await giveHeldPowerup(raceId, alice.userId, "SNEAKY_SWAP", 1000, "RARE");
-    // Alice's offered and Bob's requested share earnedAtSteps=5000.
-    // Pre-fix: writing Alice's offered into (bob, 5000) collides with Bob's
-    // own powerup already at (bob, 5000). The swap throws P2002.
-    const aliceOffered = await giveHeldPowerup(
+    // Alice already holds a powerup at earnedAtSteps=5000; the stolen row also
+    // sits at 5000 on Bob's shelf. Pre-clear of earned_at_steps is what keeps
+    // this from colliding with the (participant_id, earned_at_steps) unique
+    // index (the old P2002 regression, same trap for steals).
+    const aliceOwn = await giveHeldPowerup(
       raceId,
       alice.userId,
       "PROTEIN_SHAKE",
       5000,
       "COMMON"
     );
-    const bobRequested = await giveHeldPowerup(
+    const bobOnly = await giveHeldPowerup(
       raceId,
       bob.userId,
       "TRAIL_MIX",
@@ -208,33 +209,162 @@ describe("new powerups — integration", () => {
       "COMMON"
     );
 
+    // Old-client request shape: still sends both swap ids. Both are ignored.
     const res = await usePowerup(alice.token, raceId, sneaky.id, {
       targetUserId: bob.userId,
-      swapOfferedPowerupId: aliceOffered.id,
-      swapRequestedPowerupId: bobRequested.id,
+      swapOfferedPowerupId: aliceOwn.id,
+      swapRequestedPowerupId: bobOnly.id,
     });
 
     assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.result.swapped, true, "legacy success flag kept");
+    // Bob's only stealable powerup is the deterministic pick.
+    assert.equal(body.result.stolenPowerup.id, bobOnly.id);
+    assert.equal(body.result.stolenPowerup.type, "TRAIL_MIX");
 
     const aliceParticipant = await participant(raceId, alice.userId);
     const bobParticipant = await participant(raceId, bob.userId);
 
-    const movedOffered = await prisma.racePowerup.findUnique({
-      where: { id: aliceOffered.id },
+    // Stolen row moved to Alice with earned_at_steps cleared (no P2002).
+    const stolen = await prisma.racePowerup.findUnique({ where: { id: bobOnly.id } });
+    assert.equal(stolen.participantId, aliceParticipant.id);
+    assert.equal(stolen.userId, alice.userId);
+    assert.equal(stolen.earnedAtSteps, null);
+
+    // Alice's own powerup did NOT move (the legacy offered id is ignored).
+    const kept = await prisma.racePowerup.findUnique({ where: { id: aliceOwn.id } });
+    assert.equal(kept.participantId, aliceParticipant.id);
+    assert.equal(kept.userId, alice.userId);
+    assert.equal(kept.earnedAtSteps, 5000);
+
+    // The sneaky swap is consumed — net slots: Alice holds own + stolen.
+    const usedSneaky = await prisma.racePowerup.findUnique({ where: { id: sneaky.id } });
+    assert.equal(usedSneaky.status, "USED");
+    const aliceHeld = await prisma.racePowerup.count({
+      where: { participantId: aliceParticipant.id, status: "HELD" },
     });
-    const movedRequested = await prisma.racePowerup.findUnique({
-      where: { id: bobRequested.id },
+    const bobHeld = await prisma.racePowerup.count({
+      where: { participantId: bobParticipant.id, status: "HELD" },
+    });
+    assert.equal(aliceHeld, 2, "own + stolen");
+    assert.equal(bobHeld, 0, "target lost exactly one");
+  });
+
+  it("Sneaky Swap 400s (and is preserved) when the target holds only non-stealable powerups", async () => {
+    const { alice, bob, raceId } = await createActiveRace();
+
+    const sneaky = await giveHeldPowerup(raceId, alice.userId, "SNEAKY_SWAP", 1000, "RARE");
+    // Bob holds only a Sneaky Swap and a boxed Mystery Box — neither stealable.
+    const bobSwap = await giveHeldPowerup(raceId, bob.userId, "SNEAKY_SWAP", 1000, "RARE");
+    const bobBox = await giveHeldPowerup(raceId, bob.userId, "MYSTERY_BOX", 2000, "COMMON");
+
+    const res = await usePowerup(alice.token, raceId, sneaky.id, {
+      targetUserId: bob.userId,
     });
 
-    // Ownership swapped.
-    assert.equal(movedOffered.participantId, bobParticipant.id);
-    assert.equal(movedOffered.userId, bob.userId);
-    assert.equal(movedRequested.participantId, aliceParticipant.id);
-    assert.equal(movedRequested.userId, alice.userId);
+    assert.equal(res.status, 400);
+    assert.match((await res.json()).error, /steal/i);
 
-    // earned_at_steps cleared on both so the swap can't collide with the
-    // receiver's existing milestone-bound row.
-    assert.equal(movedOffered.earnedAtSteps, null);
-    assert.equal(movedRequested.earnedAtSteps, null);
+    // Nothing was consumed or moved.
+    const sneakyRow = await prisma.racePowerup.findUnique({ where: { id: sneaky.id } });
+    assert.equal(sneakyRow.status, "HELD", "sneaky swap not consumed on rejection");
+    const bobParticipant = await participant(raceId, bob.userId);
+    for (const id of [bobSwap.id, bobBox.id]) {
+      const row = await prisma.racePowerup.findUnique({ where: { id } });
+      assert.equal(row.participantId, bobParticipant.id);
+    }
+  });
+
+  it("Compression Socks blocks the steal: shield + sneaky swap consumed, nothing changes hands", async () => {
+    const { alice, bob, raceId } = await createActiveRace();
+    const bobParticipant = await participant(raceId, bob.userId);
+
+    const sneaky = await giveHeldPowerup(raceId, alice.userId, "SNEAKY_SWAP", 1000, "RARE");
+    const bobLoot = await giveHeldPowerup(raceId, bob.userId, "TRAIL_MIX", 2000, "COMMON");
+    const socks = await giveHeldPowerup(raceId, bob.userId, "COMPRESSION_SOCKS", 3000, "UNCOMMON");
+    const shield = await prisma.raceActiveEffect.create({
+      data: {
+        raceId,
+        targetParticipantId: bobParticipant.id,
+        targetUserId: bob.userId,
+        sourceUserId: bob.userId,
+        powerupId: socks.id,
+        type: "COMPRESSION_SOCKS",
+        startsAt: new Date(),
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      },
+    });
+
+    const res = await usePowerup(alice.token, raceId, sneaky.id, {
+      targetUserId: bob.userId,
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.result.blocked, true);
+    assert.equal(body.result.outcome, "BLOCKED");
+
+    // Product decision 2026-07-01: the sneaky swap IS lost to a shield.
+    const usedSneaky = await prisma.racePowerup.findUnique({ where: { id: sneaky.id } });
+    assert.equal(usedSneaky.status, "USED");
+    // Shield consumed; Bob keeps his powerup.
+    const shieldRow = await prisma.raceActiveEffect.findUnique({ where: { id: shield.id } });
+    assert.equal(shieldRow.status, "BLOCKED");
+    const loot = await prisma.racePowerup.findUnique({ where: { id: bobLoot.id } });
+    assert.equal(loot.participantId, bobParticipant.id);
+    assert.equal(loot.userId, bob.userId);
+  });
+
+  it("Mirror reflects the steal: the attacker loses a random powerup to the target", async () => {
+    const { alice, bob, raceId } = await createActiveRace();
+    const aliceParticipant = await participant(raceId, alice.userId);
+    const bobParticipant = await participant(raceId, bob.userId);
+
+    const sneaky = await giveHeldPowerup(raceId, alice.userId, "SNEAKY_SWAP", 1000, "RARE");
+    const aliceLoot = await giveHeldPowerup(raceId, alice.userId, "TRAIL_MAGNET", 2000, "COMMON");
+    // Bob needs a stealable powerup for the attack to validate pre-reflect.
+    const bobLoot = await giveHeldPowerup(raceId, bob.userId, "TRAIL_MIX", 2000, "COMMON");
+    const mirrorPw = await giveHeldPowerup(raceId, bob.userId, "MIRROR", 3000, "RARE");
+    const mirror = await prisma.raceActiveEffect.create({
+      data: {
+        raceId,
+        targetParticipantId: bobParticipant.id,
+        targetUserId: bob.userId,
+        sourceUserId: bob.userId,
+        powerupId: mirrorPw.id,
+        type: "MIRROR",
+        startsAt: new Date(),
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      },
+    });
+
+    const res = await usePowerup(alice.token, raceId, sneaky.id, {
+      targetUserId: bob.userId,
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.result.reflected, true);
+    assert.equal(body.result.outcome, "REFLECTED");
+
+    // Alice's only stealable powerup is now Bob's (SNEAKY_SWAP excluded by type).
+    const stolen = await prisma.racePowerup.findUnique({ where: { id: aliceLoot.id } });
+    assert.equal(stolen.participantId, bobParticipant.id);
+    assert.equal(stolen.userId, bob.userId);
+    assert.equal(stolen.earnedAtSteps, null);
+
+    // Bob keeps his own powerup; the mirror is consumed; the sneaky swap is used.
+    const bobRow = await prisma.racePowerup.findUnique({ where: { id: bobLoot.id } });
+    assert.equal(bobRow.participantId, bobParticipant.id);
+    const mirrorRow = await prisma.raceActiveEffect.findUnique({ where: { id: mirror.id } });
+    assert.equal(mirrorRow.status, "EXPIRED");
+    const usedSneaky = await prisma.racePowerup.findUnique({ where: { id: sneaky.id } });
+    assert.equal(usedSneaky.status, "USED");
+    // And Alice did not receive anything back.
+    const aliceHeld = await prisma.racePowerup.count({
+      where: { participantId: aliceParticipant.id, status: "HELD" },
+    });
+    assert.equal(aliceHeld, 0);
   });
 });

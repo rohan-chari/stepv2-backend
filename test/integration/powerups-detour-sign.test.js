@@ -354,4 +354,51 @@ describe("detour sign", () => {
       assert.notEqual(charlieP.displayName, "???");
     });
   });
+
+  // === RACE LIST (GET /races) ===
+
+  describe("race list placement hiding", () => {
+    it("detoured viewer gets myPlacement=null + myPlacementHidden=true; attacker unaffected", async () => {
+      const alice = await createUser("AliceListDS1");
+      const bob = await createUser("BobListDSAA1");
+      await makeFriends(alice, bob);
+
+      const raceId = await createActiveRace(alice, bob);
+      const detour = await giveHeldPowerup(raceId, alice.userId, "DETOUR_SIGN", 99901);
+      await usePowerup(alice.token, raceId, detour.id, bob.userId);
+
+      // Bob (the detoured target): placement hidden on the race list.
+      const bobRes = await request(server.baseUrl, "GET", "/races", { token: bob.token });
+      const bobRace = (await bobRes.json()).active.find((r) => r.id === raceId);
+      assert.equal(bobRace.myPlacement, null, "old clients render no chip");
+      assert.equal(bobRace.myPlacementHidden, true, "new clients render ???");
+
+      // Alice (the attacker): sees her placement normally, no hidden flag.
+      const aliceRes = await request(server.baseUrl, "GET", "/races", { token: alice.token });
+      const aliceRace = (await aliceRes.json()).active.find((r) => r.id === raceId);
+      assert.equal(typeof aliceRace.myPlacement, "number");
+      assert.equal(aliceRace.myPlacementHidden, false);
+    });
+
+    it("placement reappears after the detour effect expires", async () => {
+      const alice = await createUser("AliceListDS2");
+      const bob = await createUser("BobListDSAA2");
+      await makeFriends(alice, bob);
+
+      const raceId = await createActiveRace(alice, bob);
+      const detour = await giveHeldPowerup(raceId, alice.userId, "DETOUR_SIGN", 99901);
+      await usePowerup(alice.token, raceId, detour.id, bob.userId);
+
+      // Simulate the expiry cron flipping the effect off.
+      await prisma.raceActiveEffect.updateMany({
+        where: { raceId, type: "DETOUR_SIGN" },
+        data: { status: "EXPIRED" },
+      });
+
+      const bobRes = await request(server.baseUrl, "GET", "/races", { token: bob.token });
+      const bobRace = (await bobRes.json()).active.find((r) => r.id === raceId);
+      assert.equal(typeof bobRace.myPlacement, "number");
+      assert.equal(bobRace.myPlacementHidden, false);
+    });
+  });
 });

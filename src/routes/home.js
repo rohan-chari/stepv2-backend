@@ -6,6 +6,9 @@ const {
 const {
   GlobalStepEvent: defaultGlobalStepEvent,
 } = require("../models/globalStepEvent");
+const {
+  getStepMilestonesToday: defaultGetStepMilestonesToday,
+} = require("../queries/getStepMilestonesToday");
 
 function createHomeRouter(dependencies = {}) {
   const router = Router();
@@ -15,6 +18,8 @@ function createHomeRouter(dependencies = {}) {
     dependencies.getHomeRaceCard || defaultGetHomeRaceCard;
   const globalStepEventModel =
     dependencies.GlobalStepEvent || defaultGlobalStepEvent;
+  const getStepMilestonesToday =
+    dependencies.getStepMilestonesToday || defaultGetStepMilestonesToday;
 
   router.use(requireAuth);
 
@@ -49,6 +54,25 @@ function createHomeRouter(dependencies = {}) {
         }
       } catch (eventError) {
         console.error("Home race-card globalEvent lookup error:", eventError);
+      }
+
+      // Additive: when the client sends its local date (new app builds only),
+      // embed the step-milestones card data — the EXACT shape of
+      // GET /users/me/step-milestones/today — so the claim-rewards card loads
+      // in the same response as the rest of the home page instead of racing a
+      // 7th request on slow connections. Old builds don't send localDate and
+      // keep using the standalone endpoint. A failure just omits the field;
+      // the app falls back to the standalone fetch.
+      const localDate = req.query.localDate;
+      if (localDate) {
+        try {
+          result.stepMilestones = await getStepMilestonesToday({
+            userId: req.user.id,
+            localDate,
+          });
+        } catch (milestoneError) {
+          console.error("Home race-card stepMilestones lookup error:", milestoneError);
+        }
       }
 
       res.json(result);

@@ -31,6 +31,9 @@ const OFFENSIVE_TYPES = ["LEG_CRAMP", "RED_CARD", "SHORTCUT", "WRONG_TURN", "DET
 // participant/steps, applies onSelf (target stored in metadata), and is purely
 // cosmetic — so it is not subject to Compression Socks / Mirror interception.
 const TARGETED_TYPES = ["LEG_CRAMP", "SHORTCUT", "WRONG_TURN", "DETOUR_SIGN", "SNEAKY_SWAP", "IMPOSTER"];
+// Types Sneaky Swap can never steal: another Sneaky Swap (no steal chains) and
+// unopened Mystery Boxes. Mirrors the isStealable helper in routes/races.js.
+const UNSTEALABLE_TYPES = ["SNEAKY_SWAP", "MYSTERY_BOX"];
 const IMPOSTER_DURATION_MS = 60 * 60 * 1000;
 const SELF_ONLY_TYPES = [
   "COMPRESSION_SOCKS",
@@ -157,6 +160,7 @@ function buildUsePowerup(dependencies = {}) {
       ? async () => {}
       : defaultSyncRacePowerupState;
   const now = dependencies.now || (() => new Date());
+  const random = dependencies.random || Math.random;
 
   return async function usePowerup({
     userId,
@@ -409,18 +413,15 @@ function buildUsePowerup(dependencies = {}) {
       if (targetStealth) {
         throw new PowerupUseError("You cannot target a stealthed player", 400);
       }
-      if (!swapOfferedPowerupId || !swapRequestedPowerupId) {
-        throw new PowerupUseError("Sneaky Swap requires both powerups to swap", 400);
-      }
-      if (swapOfferedPowerupId === powerupId || swapRequestedPowerupId === powerupId) {
-        throw new PowerupUseError("Sneaky Swap cannot swap itself", 400);
-      }
-      const myHeld = await powerupModel.findHeldByParticipant(myParticipant.id);
+      // Steal semantics: take one RANDOM stealable powerup from the target;
+      // the attacker gives up nothing. Old app versions still send
+      // swapOfferedPowerupId/swapRequestedPowerupId from the retired
+      // mutual-swap flow — both are deliberately ignored, so a legacy client
+      // can never lose its own powerup here.
       const targetHeld = await powerupModel.findHeldByParticipant(targetParticipant.id);
-      const offered = myHeld.find((p) => p.id === swapOfferedPowerupId);
-      const requested = targetHeld.find((p) => p.id === swapRequestedPowerupId);
-      if (!offered || !requested) {
-        throw new PowerupUseError("Sneaky Swap cannot swap empty slots", 400);
+      const stealable = targetHeld.filter((p) => !UNSTEALABLE_TYPES.includes(p.type));
+      if (stealable.length === 0) {
+        throw new PowerupUseError("Target has no powerup to steal", 400);
       }
     }
 
@@ -1125,10 +1126,23 @@ function buildUsePowerup(dependencies = {}) {
       }
 
       case "SNEAKY_SWAP": {
-        await powerupModel.swapHeldPowerups(swapOfferedPowerupId, swapRequestedPowerupId);
-        result.swapped = true;
-        result.offeredPowerupId = swapOfferedPowerupId;
-        result.requestedPowerupId = swapRequestedPowerupId;
+        // On a Mirror reflect the roles were swapped above, so this steals
+        // FROM the original attacker TO the reflecting target. The candidate
+        // set is re-read (and the row conditionally claimed) inside the
+        // model's transaction, so concurrent steals can't double-take a row.
+        // A reflected steal can come up empty (the original attacker may hold
+        // nothing stealable) — the sneaky swap is still consumed.
+        const stolen = await powerupModel.stealRandomHeldPowerup({
+          fromParticipantId: targetParticipant.id,
+          toParticipantId: myParticipant.id,
+          toUserId: myParticipant.userId,
+          excludeTypes: UNSTEALABLE_TYPES,
+          random,
+        });
+        result.swapped = true; // legacy field — old clients key success off it
+        result.stolenPowerup = stolen
+          ? { id: stolen.id, type: stolen.type, rarity: stolen.rarity }
+          : null;
 
         await eventModel.create({
           raceId,
@@ -1136,8 +1150,12 @@ function buildUsePowerup(dependencies = {}) {
           eventType: "POWERUP_USED",
           powerupType: type,
           targetUserId: resolvedTargetUserId,
-          description: `${myDisplayName} used Sneaky Swap on ${targetDisplayName}!`,
-          metadata: { offeredPowerupId: swapOfferedPowerupId, requestedPowerupId: swapRequestedPowerupId },
+          description: stolen
+            ? `${myDisplayName} used Sneaky Swap on ${targetDisplayName} and stole a ${POWERUP_NAMES[stolen.type] || stolen.type}!`
+            : `${myDisplayName} used Sneaky Swap on ${targetDisplayName}, but found nothing to steal!`,
+          metadata: stolen
+            ? { stolenPowerupId: stolen.id, stolenType: stolen.type }
+            : {},
         });
         break;
       }

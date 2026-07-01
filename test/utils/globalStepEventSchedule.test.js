@@ -4,134 +4,232 @@ const test = require("node:test");
 // ---------------------------------------------------------------------------
 // Global step-multiplier event — PURE scheduler decision.
 //
-// `shouldStartGlobalEvent({ now, todaysEvents })` decides whether the 5-minute
-// scheduler tick should kick off a new event NOW. Events fire ~3x/day at
-// UTC-anchored (jittered) wall-clock times, and the decision is idempotent: if
-// an event for the *current anchor* was already created today, it returns
-// null (no duplicate), even across many ticks inside the catch window.
+// The daily event fires at a randomized ET wall-clock time drawn from a
+// day-of-week window:
+//   * Mon–Thu: off-work hours only — [08:00–10:00) ∪ [16:00–21:00) ET
+//   * Fri/Sat/Sun: [08:00–22:00) ET
+// The pick is deterministic per ET day (hash-seeded, like the old jitter) so
+// it is stable across 5-minute ticks and process restarts without persistence,
+// and `shouldStartGlobalEvent` stays idempotent via todaysEvents.
 //
-// Returns the matched anchor descriptor when it SHOULD start, else null.
-//
-// Written from the spec + the seededRaceRenewal pure-function test pattern,
-// NOT by mirroring implementation.
+// Written from the spec, not by mirroring implementation.
 // ---------------------------------------------------------------------------
 
 const {
   shouldStartGlobalEvent,
-  GLOBAL_EVENT_ANCHORS_UTC_MIN,
+  chooseEventStartForEtDay,
   GLOBAL_EVENT_DURATION_MS,
   GLOBAL_EVENT_MULTIPLIER,
-  computeAnchorTimesForDay,
+  GLOBAL_EVENT_CATCH_WINDOW_MS,
+  GLOBAL_EVENT_WEEKDAY_WINDOWS_ET_MIN,
+  GLOBAL_EVENT_WEEKEND_WINDOWS_ET_MIN,
 } = require("../../src/utils/globalStepEvent");
+const { getTimeZoneParts, zonedDateTimeToUtc } = require("../../src/utils/week");
 
-// Helper: build a UTC Date for 2026-06-02 at h:m.
-function at(h, m) {
-  return new Date(Date.UTC(2026, 5, 2, h, m, 0, 0));
+const ET = "America/New_York";
+
+// Minutes-after-ET-midnight of `date`'s ET wall-clock time.
+function etMinutes(date) {
+  const parts = getTimeZoneParts(date, ET);
+  return parts.hour * 60 + parts.minute;
 }
 
-test("exposes named tuning constants (1 anchor/day, 30 min, 2x)", () => {
-  assert.ok(Array.isArray(GLOBAL_EVENT_ANCHORS_UTC_MIN));
-  assert.equal(GLOBAL_EVENT_ANCHORS_UTC_MIN.length, 1, "~1 event per day");
-  assert.equal(GLOBAL_EVENT_ANCHORS_UTC_MIN[0], 22 * 60, "anchor at 22:00 UTC");
+function inWindows(min, windows) {
+  return windows.some(([a, b]) => min >= a && min < b);
+}
+
+// An instant inside a specific ET calendar day (noon ET, DST-safe).
+function etNoonOf(year, month, day) {
+  return zonedDateTimeToUtc({ year, month, day, hour: 12, minute: 0 }, ET);
+}
+
+const WEEKDAY_TOTAL_MIN = GLOBAL_EVENT_WEEKDAY_WINDOWS_ET_MIN.reduce(
+  (sum, [a, b]) => sum + (b - a),
+  0
+);
+const WEEKEND_TOTAL_MIN = GLOBAL_EVENT_WEEKEND_WINDOWS_ET_MIN.reduce(
+  (sum, [a, b]) => sum + (b - a),
+  0
+);
+
+test("tuning constants: 30-min window, 2x, and the agreed ET windows", () => {
   assert.equal(GLOBAL_EVENT_DURATION_MS, 30 * 60 * 1000, "30-minute window");
   assert.equal(GLOBAL_EVENT_MULTIPLIER, 2, "2x multiplier");
+  // Mon–Thu: 8–10AM and 4–9PM ET.
+  assert.deepEqual(GLOBAL_EVENT_WEEKDAY_WINDOWS_ET_MIN, [
+    [8 * 60, 10 * 60],
+    [16 * 60, 21 * 60],
+  ]);
+  // Fri/Sat/Sun: 8AM–10PM ET.
+  assert.deepEqual(GLOBAL_EVENT_WEEKEND_WINDOWS_ET_MIN, [[8 * 60, 22 * 60]]);
 });
 
-test("computeAnchorTimesForDay returns one jittered Date per anchor on the given UTC day", () => {
-  const day = at(0, 0);
-  const anchors = computeAnchorTimesForDay(day);
-  assert.equal(anchors.length, GLOBAL_EVENT_ANCHORS_UTC_MIN.length);
-  for (const a of anchors) {
-    assert.ok(a instanceof Date);
-    assert.equal(a.getUTCFullYear(), 2026);
-    assert.equal(a.getUTCMonth(), 5);
-    assert.equal(a.getUTCDate(), 2);
+test("weekday picks stay in off-work windows for EVERY possible draw", () => {
+  const monday = etNoonOf(2026, 6, 8); // Mon 2026-06-08
+  for (let draw = 0; draw < WEEKDAY_TOTAL_MIN; draw++) {
+    const start = chooseEventStartForEtDay(monday, () => draw);
+    const min = etMinutes(start);
+    assert.ok(
+      inWindows(min, GLOBAL_EVENT_WEEKDAY_WINDOWS_ET_MIN),
+      `draw ${draw} landed at ET minute ${min} — outside 8-10AM/4-9PM`
+    );
   }
-  // Deterministic for a given day (jitter is seeded by the date, not random()).
-  const again = computeAnchorTimesForDay(at(12, 0));
-  assert.deepEqual(
-    anchors.map((d) => d.getTime()),
-    again.map((d) => d.getTime()),
-    "anchor times must be stable across calls within the same UTC day"
-  );
 });
 
-test("returns an anchor to start when now is within the catch window of that anchor", () => {
-  const anchors = computeAnchorTimesForDay(at(0, 0));
-  // Tick exactly at the first anchor time.
-  const decision = shouldStartGlobalEvent({
-    now: new Date(anchors[0].getTime()),
-    todaysEvents: [],
-  });
-  assert.ok(decision, "should start at the anchor instant");
-  assert.equal(decision.anchorAt.getTime(), anchors[0].getTime());
-  assert.equal(decision.startsAt.getTime(), new Date(anchors[0]).getTime());
+test("weekday window boundaries are exact (no work-hours leakage)", () => {
+  const tuesday = etNoonOf(2026, 6, 9); // Tue 2026-06-09
+  // First draw of the day => 08:00 ET sharp.
+  assert.equal(etMinutes(chooseEventStartForEtDay(tuesday, () => 0)), 8 * 60);
+  // The first draw past the morning window jumps the 10AM-4PM gap to 16:00 ET.
   assert.equal(
-    decision.endsAt.getTime(),
-    anchors[0].getTime() + GLOBAL_EVENT_DURATION_MS
+    etMinutes(chooseEventStartForEtDay(tuesday, () => 120)),
+    16 * 60,
+    "draw after the 2h morning window must map to 4PM, not 10AM-4PM"
   );
-  assert.equal(decision.multiplier, GLOBAL_EVENT_MULTIPLIER);
+  // The last draw stays strictly before 9PM ET.
+  assert.equal(
+    etMinutes(chooseEventStartForEtDay(tuesday, () => WEEKDAY_TOTAL_MIN - 1)),
+    21 * 60 - 1
+  );
 });
 
-test("returns null when now is far from every anchor", () => {
-  const anchors = computeAnchorTimesForDay(at(0, 0));
-  // Pick a time guaranteed to be > catch window away from all anchors: anchor+3h.
-  const decision = shouldStartGlobalEvent({
-    now: new Date(anchors[0].getTime() + 3 * 60 * 60 * 1000 + 11 * 60 * 1000),
-    todaysEvents: [],
-  });
-  // Only assert null if that instant isn't itself near another anchor; choose a
-  // value far from all by testing each candidate. Use a robustly-empty instant:
-  // 1 minute before the day's first anchor (anchors are well after 00:01).
-  const before = shouldStartGlobalEvent({
-    now: new Date(anchors[0].getTime() - 11 * 60 * 1000),
-    todaysEvents: [],
-  });
-  assert.equal(before, null, "no anchor just before the first anchor");
-  void decision;
+test("Friday and the weekend use the wide 8AM-10PM window and CAN land midday", () => {
+  for (const [y, m, d] of [
+    [2026, 6, 5], // Fri
+    [2026, 6, 6], // Sat
+    [2026, 6, 7], // Sun
+  ]) {
+    const day = etNoonOf(y, m, d);
+    // Midday draw (13:00 ET = offset 300) is allowed on Fri-Sun — this is what
+    // distinguishes the weekend from the weekday work-hours exclusion.
+    const midday = chooseEventStartForEtDay(day, () => 300);
+    assert.equal(etMinutes(midday), 13 * 60, `${y}-${m}-${d} midday draw`);
+    // Bounds.
+    assert.equal(etMinutes(chooseEventStartForEtDay(day, () => 0)), 8 * 60);
+    assert.equal(
+      etMinutes(chooseEventStartForEtDay(day, () => WEEKEND_TOTAL_MIN - 1)),
+      22 * 60 - 1
+    );
+  }
 });
 
-test("idempotent: does not re-create for an anchor already started today (across ticks)", () => {
-  const anchors = computeAnchorTimesForDay(at(0, 0));
-  const anchor = anchors[0];
+test("real hash: 120 consecutive days all land inside their day-of-week windows", () => {
+  const WEEKEND_DAYS = new Set(["Fri", "Sat", "Sun"]);
+  for (let i = 0; i < 120; i++) {
+    const day = new Date(etNoonOf(2026, 1, 1).getTime() + i * 24 * 60 * 60 * 1000);
+    const start = chooseEventStartForEtDay(day);
+    const windows = WEEKEND_DAYS.has(getTimeZoneParts(start, ET).weekday)
+      ? GLOBAL_EVENT_WEEKEND_WINDOWS_ET_MIN
+      : GLOBAL_EVENT_WEEKDAY_WINDOWS_ET_MIN;
+    const min = etMinutes(start);
+    assert.ok(
+      inWindows(min, windows),
+      `${start.toISOString()} (ET minute ${min}) outside its windows`
+    );
+    // The chosen start is on the same ET day it was derived from.
+    assert.equal(
+      getTimeZoneParts(start, ET).day,
+      getTimeZoneParts(day, ET).day
+    );
+  }
+});
 
-  // Simulate the event row already created for this anchor.
+test("day-of-week is computed in ET, not UTC", () => {
+  // Fri 2026-06-05 02:00 UTC is still Thursday 22:00 ET — the THURSDAY
+  // (weekday) windows must apply, anchored to the Thursday ET date.
+  const lateThursdayEt = new Date("2026-06-05T02:00:00Z");
+  const start = chooseEventStartForEtDay(lateThursdayEt, () => 0);
+  const parts = getTimeZoneParts(start, ET);
+  assert.equal(parts.weekday, "Thu");
+  assert.equal(parts.day, 4, "anchored to Thu 2026-06-04 ET");
+  assert.equal(parts.hour, 8);
+});
+
+test("DST correctness: the same ET wall-clock pick maps to different UTC instants in EST vs EDT", () => {
+  // Draw 120 => 16:00 ET on a weekday (first minute of the evening window).
+  const edtDay = etNoonOf(2026, 6, 9); // Tue in June (EDT, UTC-4)
+  const estDay = etNoonOf(2026, 1, 15); // Thu in January (EST, UTC-5)
+
+  const edtStart = chooseEventStartForEtDay(edtDay, () => 120);
+  const estStart = chooseEventStartForEtDay(estDay, () => 120);
+
+  // Round-trips to 4PM ET on both sides of DST...
+  assert.equal(getTimeZoneParts(edtStart, ET).hour, 16);
+  assert.equal(getTimeZoneParts(estStart, ET).hour, 16);
+  // ...which means DIFFERENT UTC hours (this is the old 22:00-UTC drift bug).
+  assert.equal(edtStart.getUTCHours(), 20, "4PM EDT = 20:00 UTC");
+  assert.equal(estStart.getUTCHours(), 21, "4PM EST = 21:00 UTC");
+});
+
+test("deterministic per ET day: every tick of the day agrees on the start time", () => {
+  const day = etNoonOf(2026, 6, 8);
+  const first = chooseEventStartForEtDay(day);
+  for (const offsetH of [-11, -6, 0, 5, 11]) {
+    const tick = new Date(day.getTime() + offsetH * 60 * 60 * 1000);
+    // Stay within the same ET day (noon ± 11h) — every tick must agree.
+    assert.equal(
+      chooseEventStartForEtDay(tick).getTime(),
+      first.getTime(),
+      `tick at noon${offsetH >= 0 ? "+" : ""}${offsetH}h disagreed`
+    );
+  }
+});
+
+test("fires at the chosen time, self-heals within the catch window, and skips after it", () => {
+  const day = etNoonOf(2026, 6, 8);
+  const start = chooseEventStartForEtDay(day);
+
+  // Exactly at the chosen instant.
+  const atStart = shouldStartGlobalEvent({ now: start, todaysEvents: [] });
+  assert.ok(atStart, "fires at the chosen instant");
+  assert.equal(atStart.startsAt.getTime(), start.getTime());
+  assert.equal(
+    atStart.endsAt.getTime(),
+    start.getTime() + GLOBAL_EVENT_DURATION_MS
+  );
+  assert.equal(atStart.multiplier, GLOBAL_EVENT_MULTIPLIER);
+
+  // 8 minutes late (restart / missed boundary) — still inside the catch window.
+  const late = shouldStartGlobalEvent({
+    now: new Date(start.getTime() + 8 * 60 * 1000),
+    todaysEvents: [],
+  });
+  assert.ok(late, "self-heals within the catch window");
+
+  // Before the chosen time: nothing.
+  assert.equal(
+    shouldStartGlobalEvent({
+      now: new Date(start.getTime() - 60 * 1000),
+      todaysEvents: [],
+    }),
+    null
+  );
+
+  // Way past the catch window: the day's event is SKIPPED, not fired late.
+  assert.equal(
+    shouldStartGlobalEvent({
+      now: new Date(start.getTime() + GLOBAL_EVENT_CATCH_WINDOW_MS + 60 * 1000),
+      todaysEvents: [],
+    }),
+    null,
+    "a missed catch window skips the day (no surprise late-night event)"
+  );
+});
+
+test("idempotent: an event already created for the chosen time blocks re-creation across ticks", () => {
+  const day = etNoonOf(2026, 6, 8);
+  const start = chooseEventStartForEtDay(day);
   const todaysEvents = [
     {
-      startsAt: new Date(anchor.getTime()),
-      endsAt: new Date(anchor.getTime() + GLOBAL_EVENT_DURATION_MS),
+      startsAt: new Date(start.getTime()),
+      endsAt: new Date(start.getTime() + GLOBAL_EVENT_DURATION_MS),
       multiplier: GLOBAL_EVENT_MULTIPLIER,
     },
   ];
 
-  // A later tick still inside the catch window must NOT create a duplicate.
   const decision = shouldStartGlobalEvent({
-    now: new Date(anchor.getTime() + 4 * 60 * 1000),
+    now: new Date(start.getTime() + 4 * 60 * 1000),
     todaysEvents,
   });
-  assert.equal(decision, null, "no duplicate event for an already-started anchor");
-});
-
-test("single daily anchor sits near 22:00 UTC; ticks near 09:00/15:00 don't fire", () => {
-  const anchors = computeAnchorTimesForDay(at(0, 0));
-  assert.equal(anchors.length, 1, "exactly one anchor per day");
-
-  // The lone anchor is 22:00 UTC plus/minus the deterministic jitter.
-  const anchorMin = (anchors[0].getTime() - at(0, 0).getTime()) / (60 * 1000);
-  assert.ok(
-    Math.abs(anchorMin - 22 * 60) <= 7,
-    "single anchor is within jitter of 22:00 UTC"
-  );
-
-  // Old anchor times (09:00, 15:00) no longer fire an event.
-  assert.equal(
-    shouldStartGlobalEvent({ now: at(9, 0), todaysEvents: [] }),
-    null,
-    "no event near the old 09:00 anchor"
-  );
-  assert.equal(
-    shouldStartGlobalEvent({ now: at(15, 0), todaysEvents: [] }),
-    null,
-    "no event near the old 15:00 anchor"
-  );
+  assert.equal(decision, null, "no duplicate for an already-started day");
 });

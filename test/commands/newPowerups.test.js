@@ -37,7 +37,7 @@ function makeUseDeps(overrides = {}) {
   const bonusChanges = [];
   const emittedEvents = [];
   const upgradeEvents = [];
-  const swappedPowerups = [];
+  const stealCalls = [];
 
   const alice = makeParticipant("rp-alice", "user-alice", "Alice", {
     totalSteps: 9000,
@@ -66,7 +66,7 @@ function makeUseDeps(overrides = {}) {
     bonusChanges,
     emittedEvents,
     upgradeEvents,
-    swappedPowerups,
+    stealCalls,
     deps: {
       RacePowerup: {
         async findById(id) {
@@ -90,12 +90,16 @@ function makeUseDeps(overrides = {}) {
             (p) => p.participantId === participantId,
           );
         },
-        async swapHeldPowerups(sourcePowerupId, targetPowerupId) {
-          swappedPowerups.push({ sourcePowerupId, targetPowerupId });
-          return {
-            source: { id: sourcePowerupId, participantId: "rp-bob" },
-            target: { id: targetPowerupId, participantId: "rp-alice" },
-          };
+        async stealRandomHeldPowerup(args) {
+          stealCalls.push(args);
+          if (overrides.stealResult !== undefined) return overrides.stealResult;
+          const candidates = (overrides.heldPowerups || []).filter(
+            (p) =>
+              p.participantId === args.fromParticipantId &&
+              p.status === "HELD" &&
+              !(args.excludeTypes || []).includes(p.type),
+          );
+          return candidates[0] || null;
         },
         async findUsedTypesByParticipant() {
           return [];
@@ -436,7 +440,55 @@ test("Pinecone Toss hits the adjacent runner in the chosen direction", async () 
   assert.equal(ctx.powerupUpdates[0].fields.targetUserId, "user-bob");
 });
 
-test("Sneaky Swap swaps one held powerup with a non-stealthed target", async () => {
+// Sneaky Swap is a one-way STEAL (2026-07 redesign): pick an opponent, take
+// one RANDOM stealable powerup from them, give up nothing of your own. The
+// stolen powerup occupies the slot the consumed Sneaky Swap frees.
+test("Sneaky Swap steals one random powerup from the target without giving one up", async () => {
+  const ctx = makeUseDeps({
+    powerupType: "SNEAKY_SWAP",
+    heldPowerups: [
+      { id: "pw-own", participantId: "rp-alice", userId: "user-alice", status: "HELD", type: "TRAIL_MIX" },
+      { id: "pw-target", participantId: "rp-bob", userId: "user-bob", status: "HELD", type: "RED_CARD", rarity: "UNCOMMON" },
+    ],
+  });
+  const use = buildUsePowerup(ctx.deps);
+
+  const result = await use({
+    userId: "user-alice",
+    raceId: "race-1",
+    powerupId: "pw-swap",
+    targetUserId: "user-bob",
+  });
+
+  // One steal, from the target's shelf to the attacker's, excluding
+  // non-stealable types.
+  assert.equal(ctx.stealCalls.length, 1);
+  const call = ctx.stealCalls[0];
+  assert.equal(call.fromParticipantId, "rp-bob");
+  assert.equal(call.toParticipantId, "rp-alice");
+  assert.equal(call.toUserId, "user-alice");
+  assert.ok(call.excludeTypes.includes("SNEAKY_SWAP"));
+  assert.ok(call.excludeTypes.includes("MYSTERY_BOX"));
+
+  assert.equal(result.swapped, true, "legacy flag kept for old clients");
+  assert.deepEqual(result.stolenPowerup, {
+    id: "pw-target",
+    type: "RED_CARD",
+    rarity: "UNCOMMON",
+  });
+
+  // The sneaky swap itself is consumed; nothing else of the attacker's is
+  // touched.
+  assert.equal(ctx.powerupUpdates.length, 1);
+  assert.equal(ctx.powerupUpdates[0].id, "pw-swap");
+  assert.equal(ctx.powerupUpdates[0].fields.status, "USED");
+
+  // Feed event names the theft.
+  const feed = ctx.feedEvents.find((e) => e.powerupType === "SNEAKY_SWAP");
+  assert.ok(feed.description.includes("stole"));
+});
+
+test("Sneaky Swap ignores legacy swap ids — the attacker's own powerup is never transferred", async () => {
   const ctx = makeUseDeps({
     powerupType: "SNEAKY_SWAP",
     heldPowerups: [
@@ -446,6 +498,7 @@ test("Sneaky Swap swaps one held powerup with a non-stealthed target", async () 
   });
   const use = buildUsePowerup(ctx.deps);
 
+  // An old app version still sends the mutual-swap ids.
   const result = await use({
     userId: "user-alice",
     raceId: "race-1",
@@ -456,9 +509,40 @@ test("Sneaky Swap swaps one held powerup with a non-stealthed target", async () 
   });
 
   assert.equal(result.swapped, true);
-  assert.deepEqual(ctx.swappedPowerups, [
-    { sourcePowerupId: "pw-own", targetPowerupId: "pw-target" },
-  ]);
+  // Steal executed with steal semantics; the offered id plays no part.
+  assert.equal(ctx.stealCalls.length, 1);
+  assert.equal(ctx.stealCalls[0].fromParticipantId, "rp-bob");
+  assert.equal(ctx.stealCalls[0].toParticipantId, "rp-alice");
+  // Only the sneaky swap row itself was updated — pw-own stays with Alice.
+  assert.deepEqual(
+    ctx.powerupUpdates.map((u) => u.id),
+    ["pw-swap"],
+  );
+});
+
+test("Sneaky Swap rejects (and is not consumed) when the target has nothing stealable", async () => {
+  const ctx = makeUseDeps({
+    powerupType: "SNEAKY_SWAP",
+    heldPowerups: [
+      // Target holds only non-stealable types.
+      { id: "pw-their-swap", participantId: "rp-bob", userId: "user-bob", status: "HELD", type: "SNEAKY_SWAP" },
+      { id: "pw-their-box", participantId: "rp-bob", userId: "user-bob", status: "HELD", type: "MYSTERY_BOX" },
+    ],
+  });
+  const use = buildUsePowerup(ctx.deps);
+
+  await assert.rejects(
+    () =>
+      use({
+        userId: "user-alice",
+        raceId: "race-1",
+        powerupId: "pw-swap",
+        targetUserId: "user-bob",
+      }),
+    (err) => err instanceof PowerupUseError && err.message.includes("steal"),
+  );
+  assert.equal(ctx.stealCalls.length, 0);
+  assert.equal(ctx.powerupUpdates.length, 0, "sneaky swap not consumed");
 });
 
 test("Sneaky Swap cannot target stealthed players", async () => {
@@ -483,11 +567,83 @@ test("Sneaky Swap cannot target stealthed players", async () => {
         raceId: "race-1",
         powerupId: "pw-swap",
         targetUserId: "user-bob",
-        swapOfferedPowerupId: "pw-own",
-        swapRequestedPowerupId: "pw-target",
       }),
     (err) => err instanceof PowerupUseError && err.message.includes("stealthed"),
   );
+});
+
+test("Sneaky Swap reflected by Mirror steals from the attacker instead", async () => {
+  const ctx = makeUseDeps({
+    powerupType: "SNEAKY_SWAP",
+    activeEffects: [
+      {
+        id: "eff-mirror",
+        type: "MIRROR",
+        status: "ACTIVE",
+        targetParticipantId: "rp-bob",
+        expiresAt: new Date("2026-05-14T14:00:00Z"),
+      },
+    ],
+    heldPowerups: [
+      { id: "pw-own", participantId: "rp-alice", userId: "user-alice", status: "HELD", type: "TRAIL_MIX" },
+      { id: "pw-target", participantId: "rp-bob", userId: "user-bob", status: "HELD", type: "RED_CARD" },
+    ],
+  });
+  const use = buildUsePowerup(ctx.deps);
+
+  const result = await use({
+    userId: "user-alice",
+    raceId: "race-1",
+    powerupId: "pw-swap",
+    targetUserId: "user-bob",
+  });
+
+  assert.equal(result.reflected, true);
+  assert.equal(result.outcome, "REFLECTED");
+  // Roles swapped: Bob steals from Alice.
+  assert.equal(ctx.stealCalls.length, 1);
+  assert.equal(ctx.stealCalls[0].fromParticipantId, "rp-alice");
+  assert.equal(ctx.stealCalls[0].toParticipantId, "rp-bob");
+  assert.equal(ctx.stealCalls[0].toUserId, "user-bob");
+  // Mirror consumed + reflect feed event written.
+  assert.ok(ctx.effectsUpdated.some((u) => u.fields.status === "EXPIRED"));
+  assert.ok(ctx.feedEvents.some((e) => e.eventType === "POWERUP_REFLECTED"));
+});
+
+test("Sneaky Swap blocked by Compression Socks is still consumed and steals nothing", async () => {
+  const ctx = makeUseDeps({
+    powerupType: "SNEAKY_SWAP",
+    activeEffects: [
+      {
+        id: "eff-socks",
+        type: "COMPRESSION_SOCKS",
+        status: "ACTIVE",
+        targetParticipantId: "rp-bob",
+        expiresAt: new Date("2026-05-14T14:00:00Z"),
+      },
+    ],
+    heldPowerups: [
+      { id: "pw-target", participantId: "rp-bob", userId: "user-bob", status: "HELD", type: "RED_CARD" },
+    ],
+  });
+  const use = buildUsePowerup(ctx.deps);
+
+  const result = await use({
+    userId: "user-alice",
+    raceId: "race-1",
+    powerupId: "pw-swap",
+    targetUserId: "user-bob",
+  });
+
+  assert.equal(result.blocked, true);
+  assert.equal(result.outcome, "BLOCKED");
+  assert.equal(ctx.stealCalls.length, 0, "no powerup changes hands");
+  // The sneaky swap is consumed on a block (product decision 2026-07-01).
+  assert.ok(
+    ctx.powerupUpdates.some((u) => u.id === "pw-swap" && u.fields.status === "USED"),
+  );
+  // Shield consumed.
+  assert.ok(ctx.effectsUpdated.some((u) => u.fields.status === "BLOCKED"));
 });
 
 test("Trail Mine triggers when the next runner crosses its step position", async () => {

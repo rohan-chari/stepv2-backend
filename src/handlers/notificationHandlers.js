@@ -664,7 +664,7 @@ function registerNotificationHandlers(dependencies = {}) {
       const label = raceName || "your race";
       const spots = Math.abs(movement);
       const climbed = movement > 0;
-      const title = climbed ? "You're climbing! 📈" : "You slipped 📉";
+      const title = climbed ? "You're climbing!" : "You slipped";
       const body = climbed
         ? `You moved up ${spots} ${spots === 1 ? "spot" : "spots"} in ${label} today — now ${ordinal(placement)}.`
         : `You dropped ${spots} ${spots === 1 ? "spot" : "spots"} in ${label} today — now ${ordinal(placement)}.`;

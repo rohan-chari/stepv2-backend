@@ -1,5 +1,6 @@
 const { Race } = require("../models/race");
 const { RacePowerup } = require("../models/racePowerup");
+const { RaceActiveEffect } = require("../models/raceActiveEffect");
 const { computeRacePayouts } = require("../utils/racePayoutPresets");
 const {
   computeFinishRewardPool,
@@ -76,12 +77,28 @@ async function getRaces(userId) {
       race.seedId,
       acceptedCount
     );
-    const myPlacement =
+    let myPlacement =
       race.status === "COMPLETED"
         ? myParticipant?.placement ?? null
         : race.status === "ACTIVE"
           ? getActivePlacement(race.participants, userId)
           : null;
+    // Detour Sign hides the viewer's live placement on the race list, matching
+    // the race-detail masking in getRaceProgress (status-ACTIVE effect rows,
+    // same as there). Compat: old app builds only null-check myPlacement, so
+    // they simply render no chip; new builds read the additive
+    // myPlacementHidden flag and render "???".
+    let myPlacementHidden = false;
+    if (race.status === "ACTIVE" && race.powerupsEnabled && myParticipant) {
+      const detour = await RaceActiveEffect.findActiveByTypeForParticipant(
+        myParticipant.id,
+        "DETOUR_SIGN"
+      );
+      if (detour) {
+        myPlacement = null;
+        myPlacementHidden = true;
+      }
+    }
     const queuedBoxCount =
       race.status === "ACTIVE" && race.powerupsEnabled && myParticipant
         ? await RacePowerup.countQueuedByParticipant(myParticipant.id)
@@ -143,6 +160,7 @@ async function getRaces(userId) {
       participantCount: acceptedCount,
       myStatus: myParticipant?.status || null,
       myPlacement,
+      myPlacementHidden,
       myBuyInStatus: myParticipant?.buyInStatus || "NONE",
       myPayoutCoins: myParticipant?.payoutCoins || 0,
       myResultsSeen: (myParticipant?.resultsSeenAt != null),

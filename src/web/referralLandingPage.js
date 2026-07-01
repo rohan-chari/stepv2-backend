@@ -199,7 +199,7 @@ function renderReferralLandingPage(preview, links) {
     <div class="invite-body">
       ${avatar}
       <div class="invite-name">${escapeHtml(inviterName)} invited you to Bara</div>
-      <div class="invite-sub">Finish your first race — you both earn coins. 🏃</div>
+      <div class="invite-sub">Finish your first race — you both earn coins.</div>
     </div>
   `;
 
