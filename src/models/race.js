@@ -181,6 +181,18 @@ const Race = {
         targetSteps: true,
         powerupsEnabled: true,
         powerupStepInterval: true,
+        // timezone is REQUIRED here: resolveRaceState buckets box progress in
+        // raceTimeZone(race, "UTC"). Omitting it silently falls back to UTC
+        // while the display path (findById) uses the race tz — evening-local
+        // steps get double-counted (daily row + next-UTC-day samples), boxes
+        // mint off the inflated basis, and the "steps to next box" countdown
+        // clamps flat at one full interval (the summer-solstice incident).
+        timezone: true,
+        // endsAt/timeBased are read by resolveRaceState's guards: stop
+        // live-resolving past endsAt (settlement owns it), and never
+        // target-finish a time-based race from a step sync.
+        endsAt: true,
+        timeBased: true,
         participants: {
           select: {
             id: true,
