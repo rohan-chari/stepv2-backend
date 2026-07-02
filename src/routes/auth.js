@@ -24,6 +24,9 @@ const {
   DeleteUserAccountError,
 } = require("../commands/deleteUserAccount");
 const { getIncomingFriendRequestCount: defaultGetIncomingFriendRequestCount } = require("../queries/getFriends");
+const {
+  optUserIntoPendingSeededRaces: defaultOptUserIntoPendingSeededRaces,
+} = require("../commands/autoJoinFeaturedRaces");
 const { User: DefaultUser } = require("../models/user");
 const {
   ALLOWED_PROFILE_PHOTO_CONTENT_TYPES,
@@ -69,6 +72,9 @@ function createAuthRouter(dependencies = {}) {
     dependencies.deleteUserAccount || defaultDeleteUserAccount;
   const checkAdmin = dependencies.isAdminUser || isAdminUser;
   const UserModel = dependencies.User || DefaultUser;
+  const optUserIntoPendingSeededRaces =
+    dependencies.optUserIntoPendingSeededRaces ||
+    defaultOptUserIntoPendingSeededRaces;
 
   async function getHeldCoinsSafe(userId) {
     if (!UserModel.getHeldCoins) {
@@ -232,6 +238,9 @@ function createAuthRouter(dependencies = {}) {
             // the toggle. Default false when the column is absent (older row /
             // backend version) — defensive read, never null.
             hiddenFromLeaderboard: req.user.hiddenFromLeaderboard ?? false,
+            // Auto-join daily/weekly featured challenges toggle. Same
+            // defensive-default story as hiddenFromLeaderboard.
+            autoJoinFeaturedRaces: req.user.autoJoinFeaturedRaces ?? false,
             incomingFriendRequests,
             heldCoins,
           },
@@ -333,6 +342,37 @@ function createAuthRouter(dependencies = {}) {
       return res.json({ user });
     } catch (error) {
       console.error("Leaderboard visibility error:", error);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Auto-join daily/weekly featured challenges. Body { enabled: <bool> }.
+  // Additive endpoint; older clients never call it. Persists
+  // autoJoinFeaturedRaces and echoes the updated user. Enabling also opts the
+  // user into the already-created PENDING "next" seeded race(s) right away —
+  // best-effort, so a race hiccup never fails the settings write — while the
+  // renewal cron handles every future race (src/jobs/seededRaceRenewal.js).
+  router.put("/me/featured-auto-join", requireAuth, async (req, res) => {
+    const { enabled } = req.body || {};
+
+    if (typeof enabled !== "boolean") {
+      return res.status(400).json({ error: "enabled must be a boolean" });
+    }
+
+    try {
+      const user = await UserModel.update(req.user.id, {
+        autoJoinFeaturedRaces: enabled,
+      });
+      if (enabled) {
+        try {
+          await optUserIntoPendingSeededRaces(req.user.id);
+        } catch (error) {
+          console.error("Featured auto-join opt-in error:", error);
+        }
+      }
+      return res.json({ user });
+    } catch (error) {
+      console.error("Featured auto-join error:", error);
       return res.status(500).json({ error: "Internal server error" });
     }
   });

@@ -1,5 +1,6 @@
 const { prisma: defaultPrisma } = require("../db");
 const { eventBus } = require("../events/eventBus");
+const { buildAutoJoinFeaturedRaces } = require("../commands/autoJoinFeaturedRaces");
 const {
   startOfDayNewYork,
   nextMidnightNewYork,
@@ -21,6 +22,7 @@ function buildRenewSeededRaces(dependencies = {}) {
   const now = dependencies.now || (() => new Date());
   const logger = dependencies.logger || console;
   const events = dependencies.eventBus || eventBus;
+  const { enrollAutoJoinUsers } = buildAutoJoinFeaturedRaces({ prisma });
 
   // The [start, end) UTC instants of the calendar period containing `fromDate`
   // in the seed's cadence: a single ET day (daily) or Mon 00:00 -> Mon 00:00 ET
@@ -73,6 +75,26 @@ function buildRenewSeededRaces(dependencies = {}) {
         powerupStepInterval: true,
       },
     });
+  }
+
+  // Enroll every opted-in user (users.auto_join_featured_races) into a race
+  // this tick just created. Best-effort: a failure must never break race
+  // creation, or Featured would show no challenge at all. The created-race
+  // select omits maxParticipants, so the cap comes from the seed.
+  async function autoEnroll(seed, race) {
+    try {
+      const joined = await enrollAutoJoinUsers({
+        id: race.id,
+        maxParticipants: seed.maxParticipants,
+      });
+      if (joined > 0) {
+        logger.log(
+          `[CRON] Auto-joined ${joined} user(s) into seeded race ${race.id} (${seed.kind})`
+        );
+      }
+    } catch (error) {
+      logger.error(`[CRON] Auto-join enrollment failed for ${seed.kind}:`, error);
+    }
   }
 
   // Flip a due PENDING seeded race to ACTIVE. Deliberately NOT startRace: that
@@ -160,6 +182,7 @@ function buildRenewSeededRaces(dependencies = {}) {
         endsAt: current.endsAt,
         scheduledStartAt: null,
       });
+      await autoEnroll(seed, race);
       results.push({ action: "created-active", seedKind: seed.kind, race });
     }
 
@@ -176,6 +199,7 @@ function buildRenewSeededRaces(dependencies = {}) {
         scheduledStartAt: next.startedAt,
         endsAt: next.endsAt,
       });
+      await autoEnroll(seed, race);
       results.push({ action: "created-upcoming", seedKind: seed.kind, race });
     }
   }

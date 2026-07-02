@@ -40,6 +40,11 @@ model User {
   // false so existing rows and old clients (which ignore the field) are
   // unaffected. Mirrors isReviewAccount's column style.
   hiddenFromLeaderboard         Boolean              @default(false) @map("hidden_from_leaderboard")
+  // Auto-join the seeded daily/weekly featured challenges: the renewal cron
+  // enrolls opted-in users into each newly created seeded race, and enabling
+  // the toggle opts them into the already-pending next race. Additive/back-
+  // compat: defaults false. See src/commands/autoJoinFeaturedRaces.js.
+  autoJoinFeaturedRaces         Boolean              @default(false) @map("auto_join_featured_races")
   // True once the user has either joined their first race via the onboarding
   // step or explicitly skipped it. Additive/back-compat: defaults false so
   // existing rows and old clients (which ignore the field) are unaffected.

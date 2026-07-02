@@ -5,16 +5,26 @@ const { buildAccessoriesList } = require("../utils/shopCosmetics");
 async function getFriendsList(userId) {
   const friendships = await Friendship.findFriends(userId);
 
-  return friendships.map((f) => {
-    const friend = f.requesterId === userId ? f.addressee : f.requester;
-    return {
-      id: friend.id,
-      displayName: friend.displayName,
-      profilePhotoUrl: friend.profilePhotoUrl,
-      accessories: buildAccessoriesList(friend),
-      friendshipId: f.id,
-    };
-  });
+  return friendships
+    .map((f) => {
+      const friend = f.requesterId === userId ? f.addressee : f.requester;
+      return {
+        id: friend.id,
+        displayName: friend.displayName,
+        profilePhotoUrl: friend.profilePhotoUrl,
+        accessories: buildAccessoriesList(friend),
+        friendshipId: f.id,
+      };
+    })
+    // Alphabetical, mirroring getFriendsWithSteps below: the friend's
+    // displayName lives on the related user (requester/addressee depending on
+    // direction), so there's no single column to ORDER BY in the Prisma
+    // query — sort here after mapping. Case-insensitive; null-safe.
+    .sort((a, b) =>
+      (a.displayName ?? "").localeCompare(b.displayName ?? "", undefined, {
+        sensitivity: "base",
+      })
+    );
 }
 
 async function getPendingRequests(userId) {

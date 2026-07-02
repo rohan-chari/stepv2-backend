@@ -73,6 +73,14 @@ function createHomeRouter(dependencies = {}) {
         } catch (milestoneError) {
           console.error("Home race-card stepMilestones lookup error:", milestoneError);
         }
+        // Additive: daily-reward CLAIM/CLAIMED button state, derived from the
+        // user row requireAuth already loaded (zero extra queries). Same
+        // fallback story as stepMilestones: when the field is absent (old
+        // backend) the app's StreakChip falls back to its standalone fetch.
+        result.dailyReward = {
+          claimedToday: req.user.lastDailyClaimDate === localDate,
+          localDate,
+        };
       }
 
       res.json(result);
