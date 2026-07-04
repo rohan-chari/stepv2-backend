@@ -212,6 +212,22 @@
       }
     },
     {
+      "sku": "corgi_puppy",
+      "name": "Corgi Puppy",
+      "description": "Trade your capybara for a stubby-legged speedster.",
+      "slot": "CHARACTER",
+      "priceCoins": 5000,
+      "assetKey": "corgi_puppy",
+      "active": true,
+      "testOnly": true,
+      "earnOnly": false,
+      "bobble": false,
+      "sortOrder": 200,
+      "renderMetadata": {
+        "animationFrames": 6
+      }
+    },
+    {
       "sku": "ranked_legend_crown",
       "name": "Legend Crown",
       "description": "Earned, never bought. Reach Legend in Ranked.",

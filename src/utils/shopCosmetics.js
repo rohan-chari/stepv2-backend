@@ -1,4 +1,13 @@
-const ACCESSORY_SLOTS = ["HEAD", "FACE", "NECK", "BACK", "FEET"];
+const ACCESSORY_SLOTS = ["HEAD", "FACE", "NECK", "BACK", "FEET", "CHARACTER"];
+
+// Base body slot. Items in this slot must NEVER appear in the accessories /
+// equippedAccessories arrays or in a catalog/equipped payload for a client
+// that hasn't declared `characters` support: old app binaries render every
+// array entry as an accessory anchored to the capybara (unknown slots fall
+// back to HEAD), so a leaked CHARACTER item shows up as a floating corgi hat.
+// Character state travels only via the separate `animal` field, which old
+// clients ignore entirely (they just show the default capybara).
+const CHARACTER_SLOT = "CHARACTER";
 
 // Include `bobble` in the payload ONLY when the row actually carries it (i.e. the
 // feeding query selected the column). If a query forgot to select it, we omit the
@@ -54,15 +63,33 @@ function buildEquipmentMap(equippedAccessories = []) {
 // on every feeding query (else it reads undefined and never filters).
 function buildAccessoriesList(user) {
   const equipped = (user?.equippedAccessories || []).filter(
-    (accessory) => !accessory.shopItem?.testOnly
+    (accessory) =>
+      !accessory.shopItem?.testOnly &&
+      accessory.shopItem?.slot !== CHARACTER_SLOT
   );
   return Object.values(buildEquipmentMap(equipped));
 }
 
+// The user's equipped base animal for OTHER-user surfaces, e.g. "corgi_puppy",
+// or null for the default capybara. Emitted as a sibling `animal` field next
+// to the accessories array; old clients ignore the extra key. Test-only
+// characters are stripped for the same reason as test-only accessories above
+// (prod clients don't bundle the asset).
+function equippedAnimal(user) {
+  const character = (user?.equippedAccessories || []).find(
+    (accessory) =>
+      accessory.shopItem?.slot === CHARACTER_SLOT &&
+      !accessory.shopItem?.testOnly
+  );
+  return character ? character.shopItem.assetKey : null;
+}
+
 module.exports = {
   ACCESSORY_SLOTS,
+  CHARACTER_SLOT,
   serializeShopItem,
   serializeEquippedAccessory,
   buildEquipmentMap,
   buildAccessoriesList,
+  equippedAnimal,
 };

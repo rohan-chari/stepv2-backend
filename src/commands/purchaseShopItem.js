@@ -1,6 +1,6 @@
 const { Prisma } = require("@prisma/client");
 const { prisma } = require("../db");
-const { serializeShopItem } = require("../utils/shopCosmetics");
+const { serializeShopItem, CHARACTER_SLOT } = require("../utils/shopCosmetics");
 const { testOnlyFilter } = require("../utils/releaseChannel");
 
 class ShopPurchaseError extends Error {
@@ -42,7 +42,13 @@ async function findExistingRequest({ userId, idempotencyKey, itemId }) {
   return idempotentResultFromRequest(request);
 }
 
-async function purchaseShopItem({ userId, itemId, idempotencyKey, channel = "prod" }) {
+async function purchaseShopItem({
+  userId,
+  itemId,
+  idempotencyKey,
+  channel = "prod",
+  supportsCharacters = false,
+}) {
   if (!idempotencyKey || typeof idempotencyKey !== "string") {
     throw new ShopPurchaseError("Idempotency-Key header is required", 400);
   }
@@ -62,7 +68,15 @@ async function purchaseShopItem({ userId, itemId, idempotencyKey, channel = "pro
   try {
     return await prisma.$transaction(async (tx) => {
       const item = await tx.shopItem.findFirst({
-        where: { id: itemId, active: true, earnOnly: false, ...testOnlyFilter(channel) },
+        where: {
+          id: itemId,
+          active: true,
+          earnOnly: false,
+          ...testOnlyFilter(channel),
+          // Mirror of the catalog filter: a build without the `characters`
+          // capability can't render an animal, so it may not buy one either.
+          ...(supportsCharacters ? {} : { slot: { not: CHARACTER_SLOT } }),
+        },
       });
       if (!item) {
         throw new ShopPurchaseError("Shop item not found", 404);

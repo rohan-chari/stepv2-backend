@@ -347,6 +347,12 @@ enum AccessorySlot {
   NECK
   BACK
   FEET
+  // Base body/character (e.g. the corgi). Never serialized into the
+  // accessories/equippedAccessories arrays old clients render — character items
+  // surface via the separate `animal` field and are hidden from the catalog
+  // unless the client declares `characters` support, so old binaries never see
+  // the unknown slot value and simply show the default capybara.
+  CHARACTER
 }
 
 model ShopItem {

@@ -1,5 +1,5 @@
 const { prisma: defaultPrisma } = require("../db");
-const { buildAccessoriesList } = require("../utils/shopCosmetics");
+const { buildAccessoriesList, equippedAnimal } = require("../utils/shopCosmetics");
 const { RaceActiveEffect } = require("../models/raceActiveEffect");
 const { Steps } = require("../models/steps");
 const { StepSample } = require("../models/stepSample");
@@ -36,6 +36,7 @@ function serializeUser(user) {
     displayName: user.displayName || "Anonymous",
     profilePhotoUrl: user.profilePhotoUrl || null,
     accessories: buildAccessoriesList(user),
+    animal: equippedAnimal(user),
   };
 }
 
@@ -316,6 +317,7 @@ async function checkActiveRaces(prisma, userId, options = {}) {
         userId: p.userId,
         displayName: isStealthed ? "???" : (p.user?.displayName || "Anonymous"),
         equippedAccessories: isStealthed ? [] : buildAccessoriesList(p.user),
+        animal: isStealthed ? null : equippedAnimal(p.user),
         totalSteps: isStealthed ? null : p.totalSteps,
         isStealthed,
       };

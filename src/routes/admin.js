@@ -44,6 +44,40 @@ function sanitizeRenderMetadata(input) {
     }
     out.renderLayer = layer;
   }
+  // Per-animal placement overrides: { perAnimal: { corgi_puppy: { offsetX, … } } }.
+  // Each override block allows only the four numeric tuner keys; the base keys
+  // remain the capybara placement.
+  if (input.perAnimal !== undefined && input.perAnimal !== null) {
+    if (typeof input.perAnimal !== "object" || Array.isArray(input.perAnimal)) {
+      const err = new Error("renderMetadata.perAnimal must be an object");
+      err.statusCode = 400;
+      throw err;
+    }
+    const perAnimal = {};
+    for (const [animal, override] of Object.entries(input.perAnimal)) {
+      if (override == null) continue;
+      if (typeof override !== "object" || Array.isArray(override)) {
+        const err = new Error(`renderMetadata.perAnimal.${animal} must be an object`);
+        err.statusCode = 400;
+        throw err;
+      }
+      const block = {};
+      for (const key of RENDER_METADATA_NUMBER_KEYS) {
+        if (override[key] === undefined || override[key] === null) continue;
+        const num = Number(override[key]);
+        if (!Number.isFinite(num)) {
+          const err = new Error(
+            `renderMetadata.perAnimal.${animal}.${key} must be a finite number`
+          );
+          err.statusCode = 400;
+          throw err;
+        }
+        block[key] = num;
+      }
+      if (Object.keys(block).length > 0) perAnimal[animal] = block;
+    }
+    if (Object.keys(perAnimal).length > 0) out.perAnimal = perAnimal;
+  }
   return out;
 }
 
@@ -55,6 +89,12 @@ function persistentRenderMetadata(raw) {
   }
   if (RENDER_METADATA_RENDER_LAYERS.has(raw.renderLayer)) {
     out.renderLayer = raw.renderLayer;
+  }
+  // Preserve per-animal overrides when a save omits them (e.g. tuning the
+  // capybara sliders must not wipe the corgi placement, and vice versa the
+  // incoming payload spreads over this so an explicit perAnimal wins).
+  if (raw.perAnimal && typeof raw.perAnimal === "object" && !Array.isArray(raw.perAnimal)) {
+    out.perAnimal = raw.perAnimal;
   }
   return out;
 }

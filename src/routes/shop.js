@@ -1,6 +1,7 @@
 const { Router } = require("express");
 const { buildRequireAuth } = require("../middleware/requireAuth");
 const { extractReleaseChannel } = require("../utils/releaseChannel");
+const { extractClientFeatures } = require("../utils/clientFeatures");
 const {
   getShopCatalog: defaultGetShopCatalog,
 } = require("../queries/getShopCatalog");
@@ -32,6 +33,7 @@ function createShopRouter(dependencies = {}) {
 
   router.use(requireAuth);
   router.use(extractReleaseChannel);
+  router.use(extractClientFeatures);
 
   // ── Powerup store (additive; only the new app calls these) ──────────────
   // GET /shop/powerups — active coin-purchasable powerups + balance + owned qty.
@@ -73,6 +75,7 @@ function createShopRouter(dependencies = {}) {
     try {
       const result = await getShopCatalog(req.user.id, {
         channel: req.releaseChannel,
+        supportsCharacters: req.clientFeatures.has("characters"),
       });
       res.json(result);
     } catch (error) {
@@ -88,6 +91,7 @@ function createShopRouter(dependencies = {}) {
         itemId: req.params.itemId,
         idempotencyKey: req.get("Idempotency-Key"),
         channel: req.releaseChannel,
+        supportsCharacters: req.clientFeatures.has("characters"),
       });
       res.json(result);
     } catch (error) {
@@ -108,6 +112,7 @@ function createShopRouter(dependencies = {}) {
         slot: req.params.slot,
         itemId: req.body.itemId,
         channel: req.releaseChannel,
+        supportsCharacters: req.clientFeatures.has("characters"),
       });
       res.json(result);
     } catch (error) {

@@ -1,5 +1,9 @@
 const { prisma } = require("../db");
-const { ACCESSORY_SLOTS, buildEquipmentMap } = require("../utils/shopCosmetics");
+const {
+  ACCESSORY_SLOTS,
+  CHARACTER_SLOT,
+  buildEquipmentMap,
+} = require("../utils/shopCosmetics");
 
 class AccessoryEquipError extends Error {
   constructor(message, statusCode = 400) {
@@ -9,16 +13,34 @@ class AccessoryEquipError extends Error {
   }
 }
 
-async function getEquipment(userId, tx = prisma) {
+async function getEquipment(userId, tx = prisma, { supportsCharacters = false } = {}) {
   const equippedAccessories = await tx.userEquippedAccessory.findMany({
     where: { userId },
     include: { shopItem: true },
   });
-  return buildEquipmentMap(equippedAccessories);
+  // Old binaries (no `characters` capability) render every entry of this map
+  // as an accessory on the capybara, so an equipped CHARACTER row must be
+  // withheld from them.
+  const visible = supportsCharacters
+    ? equippedAccessories
+    : equippedAccessories.filter((entry) => entry.shopItem?.slot !== CHARACTER_SLOT);
+  return buildEquipmentMap(visible);
 }
 
-async function equipAccessory({ userId, slot, itemId, channel = "prod" }) {
+async function equipAccessory({
+  userId,
+  slot,
+  itemId,
+  channel = "prod",
+  supportsCharacters = false,
+}) {
   if (!ACCESSORY_SLOTS.includes(slot)) {
+    throw new AccessoryEquipError("Accessory slot is invalid", 400);
+  }
+
+  // A client that can't render characters has no business equipping one; only
+  // builds that send the `characters` capability may touch this slot.
+  if (slot === CHARACTER_SLOT && !supportsCharacters) {
     throw new AccessoryEquipError("Accessory slot is invalid", 400);
   }
 
@@ -26,7 +48,7 @@ async function equipAccessory({ userId, slot, itemId, channel = "prod" }) {
     await prisma.userEquippedAccessory.deleteMany({
       where: { userId, slot },
     });
-    return { equipped: await getEquipment(userId) };
+    return { equipped: await getEquipment(userId, prisma, { supportsCharacters }) };
   }
 
   if (typeof itemId !== "string" || itemId.trim().length === 0) {
@@ -63,7 +85,7 @@ async function equipAccessory({ userId, slot, itemId, channel = "prod" }) {
       create: { userId, slot, shopItemId: ownership.shopItemId },
     });
 
-    return { equipped: await getEquipment(userId, tx) };
+    return { equipped: await getEquipment(userId, tx, { supportsCharacters }) };
   });
 }
 

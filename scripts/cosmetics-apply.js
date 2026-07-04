@@ -37,6 +37,33 @@ function sanitizeRenderMetadata(raw) {
     }
     out.renderLayer = layer;
   }
+  // Per-animal placement overrides (see routes/admin.js): only the four
+  // numeric tuner keys are allowed inside each animal block.
+  if (raw.perAnimal !== undefined && raw.perAnimal !== null) {
+    if (typeof raw.perAnimal !== "object" || Array.isArray(raw.perAnimal)) {
+      throw new Error("renderMetadata.perAnimal must be an object");
+    }
+    const perAnimal = {};
+    for (const [animal, override] of Object.entries(raw.perAnimal)) {
+      if (override == null) continue;
+      if (typeof override !== "object" || Array.isArray(override)) {
+        throw new Error(`renderMetadata.perAnimal.${animal} must be an object`);
+      }
+      const block = {};
+      for (const key of RENDER_METADATA_NUMBER_KEYS) {
+        if (override[key] === undefined || override[key] === null) continue;
+        const num = Number(override[key]);
+        if (!Number.isFinite(num)) {
+          throw new Error(
+            `renderMetadata.perAnimal.${animal}.${key} must be a finite number`
+          );
+        }
+        block[key] = num;
+      }
+      if (Object.keys(block).length > 0) perAnimal[animal] = block;
+    }
+    if (Object.keys(perAnimal).length > 0) out.perAnimal = perAnimal;
+  }
   return out;
 }
 

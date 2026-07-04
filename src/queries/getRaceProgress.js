@@ -6,7 +6,7 @@ const { RacePowerup } = require("../models/racePowerup");
 const { RaceActiveEffect } = require("../models/raceActiveEffect");
 const { completeRace } = require("../commands/completeRace");
 const { expireEffects } = require("../commands/expireEffects");
-const { buildAccessoriesList } = require("../utils/shopCosmetics");
+const { buildAccessoriesList, equippedAnimal } = require("../utils/shopCosmetics");
 const {
   buildSyncRacePowerupState,
   syncRacePowerupState: defaultSyncRacePowerupState,
@@ -388,6 +388,7 @@ function buildGetRaceProgress(deps = {}) {
           displayName: p.user.displayName,
           profilePhotoUrl: p.user.profilePhotoUrl,
           accessories: buildAccessoriesList(p.user),
+          animal: equippedAnimal(p.user),
           totalSteps: p.totalSteps,
           finishedAt: p.finishedAt,
         })),
@@ -725,6 +726,7 @@ function buildGetRaceProgress(deps = {}) {
           displayName: isStealthed ? "???" : participant.user.displayName,
           profilePhotoUrl: isStealthed ? null : participant.user.profilePhotoUrl,
           accessories: isStealthed ? [] : buildAccessoriesList(participant.user),
+          animal: isStealthed ? null : equippedAnimal(participant.user),
           totalSteps: isStealthed ? null : totalSteps,
           finishedAt: participant.finishedAt,
           stealthed: isStealthed,

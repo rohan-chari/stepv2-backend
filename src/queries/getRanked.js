@@ -1,7 +1,7 @@
 const { prisma } = require("../db");
 const { Season, SeasonScore } = require("../models/season");
 const { TIERS, TIER_REWARDS } = require("../constants/rankedTiers");
-const { buildAccessoriesList } = require("../utils/shopCosmetics");
+const { buildAccessoriesList, equippedAnimal } = require("../utils/shopCosmetics");
 
 // User fields needed to render a ladder row: identity + equipped capybara gear.
 const ladderUserSelect = {
@@ -50,6 +50,7 @@ async function getUserProfiles(userIds) {
         displayName: u.displayName || "Anonymous",
         profilePhotoUrl: u.profilePhotoUrl || null,
         equippedAccessories: buildAccessoriesList(u),
+        animal: equippedAnimal(u),
       },
     ])
   );

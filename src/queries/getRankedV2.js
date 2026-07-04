@@ -10,7 +10,7 @@ const {
   RankedWeek: defaultRankedWeek,
   RankedCohortMember: defaultRankedCohortMember,
 } = require("../models/rankedWeek");
-const { buildAccessoriesList } = require("../utils/shopCosmetics");
+const { buildAccessoriesList, equippedAnimal } = require("../utils/shopCosmetics");
 const {
   V2_TIERS,
   DEFAULT_TIER,
@@ -75,6 +75,7 @@ async function getUserProfiles(userIds) {
         displayName: u.displayName || "Anonymous",
         profilePhotoUrl: u.profilePhotoUrl || null,
         equippedAccessories: buildAccessoriesList(u),
+        animal: equippedAnimal(u),
       },
     ])
   );

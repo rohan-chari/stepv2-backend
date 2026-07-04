@@ -3,7 +3,7 @@ const {
   buildRaceRecordLeaderboard,
 } = require("../utils/recordLeaderboardRankings");
 const { getMondayOfWeek, getTimeZoneParts } = require("../utils/week");
-const { buildAccessoriesList } = require("../utils/shopCosmetics");
+const { buildAccessoriesList, equippedAnimal } = require("../utils/shopCosmetics");
 const { Friendship } = require("../models/friendship");
 
 // Resolve the userId filter for a "friends"-scoped leaderboard: the viewer's
@@ -79,6 +79,7 @@ async function getUserProfiles(userIds) {
         displayName: user.displayName || "Anonymous",
         profilePhotoUrl: user.profilePhotoUrl || null,
         equippedAccessories: buildAccessoriesList(user),
+        animal: equippedAnimal(user),
       },
     ])
   );
