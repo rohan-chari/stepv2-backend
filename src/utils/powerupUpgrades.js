@@ -58,6 +58,10 @@ const RARITY_BY_TYPE = {
   // It never rolls from a box, but a rarity is listed so display lookups
   // resolve consistently. Treated as RARE for badge styling.
   IMPOSTER:          "RARE",
+  // RAINSTORM is purchase-only and non-upgradeable (not in UPGRADEABLE_TYPES).
+  // It never rolls from a box, but a rarity is listed so display lookups
+  // resolve consistently. Treated as RARE for badge styling.
+  RAINSTORM:         "RARE",
 };
 
 // Duration in ms for timed effects, indexed by level.

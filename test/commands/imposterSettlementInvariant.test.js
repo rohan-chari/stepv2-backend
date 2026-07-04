@@ -76,7 +76,7 @@ test("settlement total ignores an active IMPOSTER (computed from real steps)", a
   // It only queries the step-affecting effect types.
   assert.deepEqual(
     [...new Set(effectModel.queriedTypes)].sort(),
-    ["CAMPFIRE_REST", "LEG_CRAMP", "RUNNERS_HIGH", "WRONG_TURN"]
+    ["CAMPFIRE_REST", "LEG_CRAMP", "RAINSTORM", "RUNNERS_HIGH", "WRONG_TURN"]
   );
 });
 

@@ -56,10 +56,12 @@ test("landing page omits og:image (text-only summary) when no image is configure
   assert.match(html, /<meta name="twitter:card" content="summary"/);
 });
 
-test("landing page links to both stores and the custom-scheme deep link", () => {
+test("landing page links the App Store and deep link; Play button is disabled", () => {
   const html = renderRaceLandingPage(makePreview(), links);
   assert.match(html, /https:\/\/apps\.apple\.com\/app\/bara/);
-  assert.match(html, /play\.google\.com/);
+  // Google Play isn't live yet: a disabled button, no store link.
+  assert.doesNotMatch(html, /play\.google\.com/);
+  assert.match(html, /store-btn-disabled/);
   assert.match(html, /bara:\/\/join\/tok-abc/);
 });
 

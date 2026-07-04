@@ -5,7 +5,8 @@ const { prisma } = require("../db");
 const { serializeShopItem } = require("../utils/shopCosmetics");
 const { mirrorShopItemToPeer } = require("../utils/mirrorShopItem");
 
-const RENDER_METADATA_KEYS = ["offsetX", "offsetY", "rotation", "scale"];
+const RENDER_METADATA_NUMBER_KEYS = ["offsetX", "offsetY", "rotation", "scale"];
+const RENDER_METADATA_RENDER_LAYERS = new Set(["front", "behind"]);
 
 function sanitizeRenderMetadata(input) {
   if (input == null) return null;
@@ -15,7 +16,7 @@ function sanitizeRenderMetadata(input) {
     throw err;
   }
   const out = {};
-  for (const key of RENDER_METADATA_KEYS) {
+  for (const key of RENDER_METADATA_NUMBER_KEYS) {
     if (input[key] === undefined || input[key] === null) continue;
     const num = Number(input[key]);
     if (!Number.isFinite(num)) {
@@ -24,6 +25,36 @@ function sanitizeRenderMetadata(input) {
       throw err;
     }
     out[key] = num;
+  }
+  if (input.animationFrames !== undefined && input.animationFrames !== null) {
+    const frames = Number(input.animationFrames);
+    if (!Number.isInteger(frames) || frames < 1) {
+      const err = new Error("renderMetadata.animationFrames must be a positive integer");
+      err.statusCode = 400;
+      throw err;
+    }
+    out.animationFrames = frames;
+  }
+  if (input.renderLayer !== undefined && input.renderLayer !== null) {
+    const layer = String(input.renderLayer);
+    if (!RENDER_METADATA_RENDER_LAYERS.has(layer)) {
+      const err = new Error("renderMetadata.renderLayer must be 'front' or 'behind'");
+      err.statusCode = 400;
+      throw err;
+    }
+    out.renderLayer = layer;
+  }
+  return out;
+}
+
+function persistentRenderMetadata(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out = {};
+  if (Number.isInteger(raw.animationFrames) && raw.animationFrames > 0) {
+    out.animationFrames = raw.animationFrames;
+  }
+  if (RENDER_METADATA_RENDER_LAYERS.has(raw.renderLayer)) {
+    out.renderLayer = raw.renderLayer;
   }
   return out;
 }
@@ -59,7 +90,21 @@ function createAdminRouter(dependencies = {}) {
       const body = req.body || {};
       const data = {};
       if (body.renderMetadata !== undefined) {
-        data.renderMetadata = sanitizeRenderMetadata(body.renderMetadata);
+        if (body.renderMetadata === null) {
+          data.renderMetadata = null;
+        } else {
+          const current = await prisma.shopItem.findUnique({
+            where: { id: req.params.itemId },
+            select: { renderMetadata: true },
+          });
+          if (!current) {
+            return res.status(404).json({ error: "Shop item not found" });
+          }
+          data.renderMetadata = {
+            ...persistentRenderMetadata(current.renderMetadata),
+            ...sanitizeRenderMetadata(body.renderMetadata),
+          };
+        }
       }
       if (body.active !== undefined) {
         if (typeof body.active !== "boolean") {

@@ -28,9 +28,9 @@ test("rollPowerup can roll CLEANSE when the UNCOMMON tier is selected", () => {
 
   // Force UNCOMMON (rng in the uncommon band) then land the type index on
   // CLEANSE. For a mid-pack runner (position 2 of 4) the COMMON band ends
-  // around 0.53 and the UNCOMMON band runs to ~0.82, so rng 0.7 lands UNCOMMON.
+  // around 0.39 and the UNCOMMON band runs to ~0.67, so rng 0.5 lands UNCOMMON.
   const typeRng = (cleanseIndex + 0.5) / uncommonTier.length;
-  const seq = [0.7, typeRng];
+  const seq = [0.5, typeRng];
   let i = 0;
   const rng = () => seq[i++ % seq.length];
 

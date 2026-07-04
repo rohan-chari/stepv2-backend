@@ -101,6 +101,16 @@ async function seed() {
       active: true,
       sortOrder: 0,
     },
+    {
+      sku: "POWERUP_RAINSTORM",
+      name: "Rainstorm",
+      description:
+        "Summon a downpour: every other racer's steps count for half for 1 hour. Shields and Mirrors protect against it.",
+      priceCoins: 500,
+      powerupType: "RAINSTORM",
+      active: true,
+      sortOrder: 1,
+    },
   ];
   let powerupItemsUpserted = 0;
   for (const p of powerupShopItems) {

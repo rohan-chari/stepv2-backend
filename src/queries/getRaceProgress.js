@@ -64,9 +64,30 @@ function computeEffectModifiersFallback(effects, rawTotal) {
         : rawTotal;
       reversedSteps += Math.max(0, end - start);
     }
+
+    if (effect.type === "RAINSTORM") {
+      const start = meta.stepsAtStart || 0;
+      const end = effect.status === "EXPIRED" && meta.stepsAtExpiry !== undefined
+        ? meta.stepsAtExpiry
+        : rawTotal;
+      frozenSteps += Math.round(
+        Math.max(0, end - start) * rainstormLostFraction(effect)
+      );
+    }
   }
 
   return { frozenSteps, buffedSteps, reversedSteps };
+}
+
+// Fraction of steps LOST to a rainstorm (multiplier 0.5 => 0.5 lost). Read from
+// metadata defensively so a missing/malformed multiplier degrades to the
+// canonical 0.5x rather than crashing or zeroing steps.
+function rainstormLostFraction(effect) {
+  const multiplier = Number((effect.metadata || {}).multiplier);
+  const m = Number.isFinite(multiplier) && multiplier >= 0 && multiplier <= 1
+    ? multiplier
+    : 0.5;
+  return 1 - m;
 }
 
 // `globalContext` (optional, additive): { globalEvents: [...], now: Date }. When
@@ -82,6 +103,7 @@ async function computeEffectModifiers(effects, rawTotal, userId, stepSampleModel
   const runnersHighs = effects.filter((e) => e.type === "RUNNERS_HIGH");
   const wrongTurns = effects.filter((e) => e.type === "WRONG_TURN");
   const campfires = effects.filter((e) => e.type === "CAMPFIRE_REST");
+  const rainstorms = effects.filter((e) => e.type === "RAINSTORM");
 
   for (const effect of legCramps) {
     const windowStart = effect.startsAt;
@@ -230,6 +252,71 @@ async function computeEffectModifiers(effects, rawTotal, userId, stepSampleModel
           // Remove buff credit and negate for doubled reversal
           buffedSteps -= 2 * overlapSteps;
         }
+      }
+    }
+  }
+
+  // Rainstorm: an ADDITIVE -0.5x on step accrual during the storm window,
+  // folded into frozenSteps (both are plain subtractions from the total).
+  // Interactions:
+  //   * Runner's High / Campfire boost overlap stays additive: 2x - 0.5x = 1.5x.
+  //   * While steps are already FROZEN (Leg Cramp, Campfire freeze phase) or
+  //     REVERSED (Wrong Turn), the rain penalty is SUSPENDED — those windows
+  //     already contribute 0x / -1x, and stacking the rain penalty on top would
+  //     over-punish (e.g. frozen steps going NEGATIVE). The overlap loop below
+  //     subtracts the rain penalty back out for those windows.
+  // multiplierForTime in raceStateResolution.js mirrors exactly this model so
+  // finish-time interpolation agrees with these totals.
+  for (const effect of rainstorms) {
+    const windowStart = effect.startsAt;
+    const windowEnd = effect.expiresAt || new Date();
+    const lostFraction = rainstormLostFraction(effect);
+
+    const sampleSteps = await stepSampleModel.sumStepsInWindow(userId, windowStart, windowEnd);
+    if (sampleSteps > 0) {
+      frozenSteps += Math.round(sampleSteps * lostFraction);
+    } else if (!hasSampleData) {
+      // Only use snapshot fallback when user has no step sample data at all
+      const meta = effect.metadata || {};
+      const start = meta.stepsAtStart || 0;
+      const end = effect.status === "EXPIRED" && meta.stepsAtExpiry !== undefined
+        ? meta.stepsAtExpiry
+        : rawTotal;
+      frozenSteps += Math.round(Math.max(0, end - start) * lostFraction);
+    }
+  }
+
+  // Suspend the rain penalty during frozen/reversed windows (see note above).
+  for (const storm of rainstorms) {
+    const stormStart = storm.startsAt.getTime();
+    const stormEnd = (storm.expiresAt || new Date()).getTime();
+    const lostFraction = rainstormLostFraction(storm);
+
+    const suspendedWindows = [
+      ...legCramps.map((e) => ({
+        start: e.startsAt.getTime(),
+        end: (e.expiresAt || new Date()).getTime(),
+      })),
+      ...wrongTurns.map((e) => ({
+        start: e.startsAt.getTime(),
+        end: (e.expiresAt || new Date()).getTime(),
+      })),
+      ...campfires.map((e) => ({
+        start: e.startsAt.getTime(),
+        end: e.startsAt.getTime() + ((e.metadata || {}).freezeMs || 0),
+      })),
+    ];
+
+    for (const window of suspendedWindows) {
+      const overlapStart = Math.max(stormStart, window.start);
+      const overlapEnd = Math.min(stormEnd, window.end);
+      if (overlapStart >= overlapEnd) continue;
+
+      const overlapSteps = await stepSampleModel.sumStepsInWindow(
+        userId, new Date(overlapStart), new Date(overlapEnd)
+      );
+      if (overlapSteps > 0) {
+        frozenSteps -= Math.round(overlapSteps * lostFraction);
       }
     }
   }
@@ -431,6 +518,7 @@ function buildGetRaceProgress(deps = {}) {
         let runnersHighs = [];
         let wrongTurns = [];
         let campfires = [];
+        let rainstorms = [];
 
         if (race.powerupsEnabled) {
           // Fetch all Leg Cramp, Runner's High, and Wrong Turn effects (active + expired) for this participant
@@ -438,9 +526,10 @@ function buildGetRaceProgress(deps = {}) {
           runnersHighs = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "RUNNERS_HIGH");
           wrongTurns = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "WRONG_TURN");
           campfires = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "CAMPFIRE_REST");
+          rainstorms = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "RAINSTORM");
         }
 
-        const allEffects = [...legCramps, ...runnersHighs, ...wrongTurns, ...campfires];
+        const allEffects = [...legCramps, ...runnersHighs, ...wrongTurns, ...campfires, ...rainstorms];
         const { frozenSteps, buffedSteps, reversedSteps, globalBoostedSteps } = await computeEffectModifiers(allEffects, baseAdjusted, participant.userId, stepSampleModel, hasSampleData, globalContext);
 
         total = Math.max(0, baseAdjusted - frozenSteps + buffedSteps - 2 * reversedSteps + (globalBoostedSteps || 0) + (race.powerupsEnabled ? (participant.bonusSteps || 0) : 0));

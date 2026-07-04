@@ -5,7 +5,8 @@ const { prisma } = require("../src/db");
 
 const COSMETICS_FILE = path.join(__dirname, "..", "data", "cosmetics.json");
 
-const RENDER_METADATA_KEYS = ["offsetX", "offsetY", "rotation", "scale"];
+const RENDER_METADATA_NUMBER_KEYS = ["offsetX", "offsetY", "rotation", "scale"];
+const RENDER_METADATA_RENDER_LAYERS = new Set(["front", "behind"]);
 
 function sanitizeRenderMetadata(raw) {
   if (raw == null) return null;
@@ -13,7 +14,7 @@ function sanitizeRenderMetadata(raw) {
     throw new Error("renderMetadata must be an object");
   }
   const out = {};
-  for (const key of RENDER_METADATA_KEYS) {
+  for (const key of RENDER_METADATA_NUMBER_KEYS) {
     const value = raw[key];
     if (value === undefined || value === null) continue;
     const num = Number(value);
@@ -21,6 +22,20 @@ function sanitizeRenderMetadata(raw) {
       throw new Error(`renderMetadata.${key} must be a finite number`);
     }
     out[key] = num;
+  }
+  if (raw.animationFrames !== undefined && raw.animationFrames !== null) {
+    const frames = Number(raw.animationFrames);
+    if (!Number.isInteger(frames) || frames < 1) {
+      throw new Error("renderMetadata.animationFrames must be a positive integer");
+    }
+    out.animationFrames = frames;
+  }
+  if (raw.renderLayer !== undefined && raw.renderLayer !== null) {
+    const layer = String(raw.renderLayer);
+    if (!RENDER_METADATA_RENDER_LAYERS.has(layer)) {
+      throw new Error("renderMetadata.renderLayer must be 'front' or 'behind'");
+    }
+    out.renderLayer = layer;
   }
   return out;
 }

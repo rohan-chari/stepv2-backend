@@ -56,9 +56,9 @@ test("last place gets more rares than leader over many rolls", () => {
 
 test("interpolateOdds for leader position", () => {
   const odds = interpolateOdds(0);
-  assert.equal(odds[0], 0.70);
+  assert.equal(odds[0], 0.48);
   assert.equal(odds[1], 0.25);
-  assert.equal(odds[2], 0.05);
+  assert.equal(odds[2], 0.27);
 });
 
 test("interpolateOdds for last position", () => {
@@ -73,7 +73,7 @@ test("2-player race: leader gets first-place odds, trailing gets last-place odds
   const leaderOdds = interpolateOdds((1 - 1) / (2 - 1)); // position 1 => 0
   const trailingOdds = interpolateOdds((2 - 1) / (2 - 1)); // position 2 => 1
 
-  assert.equal(leaderOdds[0], 0.70);
+  assert.equal(leaderOdds[0], 0.48);
   assert.ok(Math.abs(trailingOdds[0] - 0.20) < 0.001);
 });
 

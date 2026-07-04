@@ -24,7 +24,7 @@ function buildExpireEffects(dependencies = {}) {
 
       const metadata = effect.metadata || {};
       // Store current steps at expiry for snapshot-based timed modifiers.
-      if (["LEG_CRAMP", "RUNNERS_HIGH", "CAMPFIRE_REST"].includes(effect.type)) {
+      if (["LEG_CRAMP", "RUNNERS_HIGH", "CAMPFIRE_REST", "RAINSTORM"].includes(effect.type)) {
         const currentStepsForTarget = participantSteps?.[effect.targetParticipantId];
         if (currentStepsForTarget !== undefined) {
           metadata.stepsAtExpiry = currentStepsForTarget;

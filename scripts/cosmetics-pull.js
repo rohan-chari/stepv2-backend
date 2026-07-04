@@ -4,16 +4,26 @@ const path = require("path");
 const { prisma } = require("../src/db");
 
 const COSMETICS_FILE = path.join(__dirname, "..", "data", "cosmetics.json");
-const RENDER_METADATA_KEYS = ["offsetX", "offsetY", "rotation", "scale"];
+const RENDER_METADATA_NUMBER_KEYS = ["offsetX", "offsetY", "rotation", "scale"];
+const RENDER_METADATA_RENDER_LAYERS = new Set(["front", "behind"]);
 
 function normalizeRenderMetadata(raw) {
   if (!raw || typeof raw !== "object") return null;
   const out = {};
-  for (const key of RENDER_METADATA_KEYS) {
+  for (const key of RENDER_METADATA_NUMBER_KEYS) {
     const value = raw[key];
     if (typeof value === "number" && Number.isFinite(value)) {
       out[key] = value;
     }
+  }
+  if (
+    Number.isInteger(raw.animationFrames) &&
+    raw.animationFrames > 0
+  ) {
+    out.animationFrames = raw.animationFrames;
+  }
+  if (RENDER_METADATA_RENDER_LAYERS.has(raw.renderLayer)) {
+    out.renderLayer = raw.renderLayer;
   }
   return Object.keys(out).length > 0 ? out : null;
 }

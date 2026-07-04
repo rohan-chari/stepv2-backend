@@ -76,7 +76,7 @@ function buildPurchasePowerupItem(dependencies = {}) {
           throw new PowerupPurchaseError("Powerup not found", 404);
         }
 
-        await tx.powerupPurchaseRequest.create({
+        const request = await tx.powerupPurchaseRequest.create({
           data: {
             userId,
             idempotencyKey: trimmedKey,
@@ -111,8 +111,10 @@ function buildPurchasePowerupItem(dependencies = {}) {
             data: {
               userId,
               amount: -item.priceCoins,
+              // refId must be unique per purchase (unique on user_id+reason+ref_id),
+              // so use the per-purchase request id, not the catalog item id.
               reason: "powerup_purchase",
-              refId: item.id,
+              refId: request.id,
             },
           });
         }

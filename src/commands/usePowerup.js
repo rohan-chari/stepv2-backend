@@ -35,6 +35,12 @@ const TARGETED_TYPES = ["LEG_CRAMP", "SHORTCUT", "WRONG_TURN", "DETOUR_SIGN", "S
 // unopened Mystery Boxes. Mirrors the isStealable helper in routes/races.js.
 const UNSTEALABLE_TYPES = ["SNEAKY_SWAP", "MYSTERY_BOX"];
 const IMPOSTER_DURATION_MS = 60 * 60 * 1000;
+// RAINSTORM is purchase-only and UNTARGETED AoE: it debuffs every OTHER active
+// participant (never the caster) at once, so it is NOT in OFFENSIVE_TYPES /
+// TARGETED_TYPES (those drive the single-target Mirror/Socks pre-checks) —
+// per-victim shield and mirror resolution happens inside its own case below.
+const RAINSTORM_DURATION_MS = 60 * 60 * 1000;
+const RAINSTORM_MULTIPLIER = 0.5;
 const SELF_ONLY_TYPES = [
   "COMPRESSION_SOCKS",
   "MIRROR",
@@ -236,6 +242,25 @@ function buildUsePowerup(dependencies = {}) {
     // Self-only powerups reject if a target is provided
     if (SELF_ONLY_TYPES.includes(type) && targetUserId) {
       throw new PowerupUseError("This powerup cannot be used on another player", 400);
+    }
+
+    // Rainstorm is untargeted (hits every other racer) and never stacks: while
+    // any rainstorm is active in the race, another cannot be started.
+    if (type === "RAINSTORM") {
+      if (targetUserId) {
+        throw new PowerupUseError("Rainstorm hits every racer — you cannot specify a target", 400);
+      }
+      const raceEffects = await effectModel.findActiveForRace(raceId);
+      const activeStorm = raceEffects.find((e) => e.type === "RAINSTORM");
+      if (activeStorm) {
+        throw new PowerupUseError("A Rainstorm is already active in this race", 400);
+      }
+      const otherRunners = acceptedParticipants.filter(
+        (p) => p.userId !== userId && !p.finishedAt
+      );
+      if (otherRunners.length === 0) {
+        throw new PowerupUseError("No other active runners to rain on", 400);
+      }
     }
 
     // Red Card auto-targets leader
@@ -787,6 +812,131 @@ function buildUsePowerup(dependencies = {}) {
         // so other participants are not notified that a position swap happened.
         // The swap itself lives on the RacePowerupEffect row above (applied only
         // in the getRaceProgress display path), so omitting the event is safe.
+        break;
+      }
+
+      case "RAINSTORM": {
+        // Untargeted AoE debuff: every OTHER active (unfinished) participant's
+        // step accrual counts for RAINSTORM_MULTIPLIER (0.5x) for 1 hour. The
+        // caster is never affected by their own storm. Defenses resolve
+        // PER-VICTIM, mirroring the single-target precedence rules:
+        //   * MIRROR (checked first): consumed; that victim is protected and the
+        //     storm is bounced onto the CASTER — the caster gets the 0.5x debuff
+        //     (at most once, no matter how many mirrors reflect).
+        //   * COMPRESSION_SOCKS: consumed (BLOCKED); that victim is protected.
+        // Coins/upgrades don't apply (purchase-only, non-upgradeable).
+        const stormEnd = new Date(currentTime.getTime() + RAINSTORM_DURATION_MS);
+        const victims = acceptedParticipants.filter(
+          (p) => p.userId !== userId && !p.finishedAt
+        );
+        const affected = [];
+        const blockedNames = [];
+        let reflectedBy = null;
+
+        for (const victim of victims) {
+          const victimName = victim.user?.displayName || "A runner";
+
+          const victimMirror = await effectModel.findActiveByTypeForParticipant(
+            victim.id,
+            "MIRROR"
+          );
+          if (victimMirror) {
+            await effectModel.update(victimMirror.id, { status: "EXPIRED" });
+            if (!reflectedBy) reflectedBy = { userId: victim.userId, name: victimName };
+            await eventModel.create({
+              raceId,
+              actorUserId: victim.userId,
+              eventType: "POWERUP_REFLECTED",
+              powerupType: type,
+              targetUserId: userId,
+              description: `${victimName}'s Mirror deflected ${myDisplayName}'s Rainstorm back at them!`,
+            });
+            events.emit("POWERUP_REFLECTED", {
+              raceId,
+              attackerUserId: userId,
+              defenderUserId: victim.userId,
+              reflectedType: type,
+              upgradeLevel,
+            });
+            continue;
+          }
+
+          const victimShield = await effectModel.findActiveByTypeForParticipant(
+            victim.id,
+            "COMPRESSION_SOCKS"
+          );
+          if (victimShield) {
+            await effectModel.update(victimShield.id, { status: "BLOCKED" });
+            blockedNames.push(victimName);
+            await eventModel.create({
+              raceId,
+              actorUserId: victim.userId,
+              eventType: "POWERUP_BLOCKED",
+              powerupType: type,
+              targetUserId: userId,
+              description: `${victimName}'s Compression Socks kept them dry through ${myDisplayName}'s Rainstorm!`,
+            });
+            events.emit("POWERUP_BLOCKED", {
+              raceId,
+              attackerUserId: userId,
+              defenderUserId: victim.userId,
+              blockedType: type,
+              upgradeLevel,
+            });
+            continue;
+          }
+
+          await effectModel.create({
+            raceId,
+            targetParticipantId: victim.id,
+            targetUserId: victim.userId,
+            sourceUserId: userId,
+            powerupId,
+            type: "RAINSTORM",
+            startsAt: currentTime,
+            expiresAt: stormEnd,
+            metadata: {
+              multiplier: RAINSTORM_MULTIPLIER,
+              stepsAtStart: victim.totalSteps,
+            },
+          });
+          affected.push(victim.userId);
+        }
+
+        // A Mirror bounce soaks the caster too (once).
+        if (reflectedBy) {
+          await effectModel.create({
+            raceId,
+            targetParticipantId: myParticipant.id,
+            targetUserId: userId,
+            sourceUserId: reflectedBy.userId,
+            powerupId,
+            type: "RAINSTORM",
+            startsAt: currentTime,
+            expiresAt: stormEnd,
+            metadata: {
+              multiplier: RAINSTORM_MULTIPLIER,
+              stepsAtStart: myParticipant.totalSteps,
+            },
+          });
+        }
+
+        result.affected = affected.length;
+        result.blockedCount = blockedNames.length;
+        result.reflectedOntoCaster = Boolean(reflectedBy);
+
+        await eventModel.create({
+          raceId,
+          actorUserId: userId,
+          eventType: "POWERUP_USED",
+          powerupType: type,
+          description: `${myDisplayName} summoned a Rainstorm! Everyone else's steps count for half for 1 hour.`,
+          metadata: {
+            affectedCount: affected.length,
+            blockedCount: blockedNames.length,
+            reflectedOntoCaster: Boolean(reflectedBy),
+          },
+        });
         break;
       }
 

@@ -20,7 +20,7 @@ function coerceMinRarity(rarity, minRarity) {
 // Position-based odds: [COMMON%, UNCOMMON%, RARE%]
 // Row 0 = leader (1st place), Row 1 = last place
 const ODDS_TABLE = {
-  first: [0.70, 0.25, 0.05],
+  first: [0.48, 0.25, 0.27],
   last:  [0.20, 0.35, 0.45],
 };
 

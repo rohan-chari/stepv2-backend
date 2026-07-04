@@ -42,6 +42,9 @@ const POWERUP_NAMES = {
   // IMPOSTER is purchase-only (coin store), never rolled from a mystery box, so
   // it is intentionally absent from RARITY_TIERS. Named here for feed/display.
   IMPOSTER: "Imposter",
+  // RAINSTORM is purchase-only (coin store), never rolled from a mystery box,
+  // so it is intentionally absent from RARITY_TIERS. Named here for feed/display.
+  RAINSTORM: "Rainstorm",
 };
 
 function buildRollPowerup(dependencies = {}) {

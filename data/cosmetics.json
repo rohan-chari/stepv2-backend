@@ -191,6 +191,27 @@
       }
     },
     {
+      "sku": "beaver_tail",
+      "name": "Beaver Tail",
+      "description": "A paddle tail that sways with each step.",
+      "slot": "BACK",
+      "priceCoins": 1000,
+      "assetKey": "beaver_tail",
+      "active": true,
+      "testOnly": true,
+      "earnOnly": false,
+      "bobble": false,
+      "sortOrder": 95,
+      "renderMetadata": {
+        "offsetX": -0.18881355932203348,
+        "offsetY": -0.15536723163841776,
+        "rotation": -0.19999999999999998,
+        "scale": 0.9012711864406793,
+        "animationFrames": 6,
+        "renderLayer": "behind"
+      }
+    },
+    {
       "sku": "ranked_legend_crown",
       "name": "Legend Crown",
       "description": "Earned, never bought. Reach Legend in Ranked.",

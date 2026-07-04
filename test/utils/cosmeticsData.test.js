@@ -58,3 +58,30 @@ test("cosmetics catalog includes shoes as an active feet accessory", () => {
     },
   });
 });
+
+test("cosmetics catalog includes beaver tail as a test-only back accessory", () => {
+  const catalog = loadCosmetics();
+  const beaverTail = catalog.items.find((item) => item.sku === "beaver_tail");
+
+  assert.deepEqual(beaverTail, {
+    sku: "beaver_tail",
+    name: "Beaver Tail",
+    description: "A paddle tail that sways with each step.",
+    slot: "BACK",
+    priceCoins: 1000,
+    assetKey: "beaver_tail",
+    active: true,
+    testOnly: true,
+    earnOnly: false,
+    bobble: false,
+    sortOrder: 95,
+    renderMetadata: {
+      offsetX: -0.18881355932203348,
+      offsetY: -0.15536723163841776,
+      rotation: -0.19999999999999998,
+      scale: 0.9012711864406793,
+      animationFrames: 6,
+      renderLayer: "behind",
+    },
+  });
+});

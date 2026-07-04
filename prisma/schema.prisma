@@ -524,6 +524,10 @@ enum PowerupType {
   // any mystery-box rarity tier, so it can never roll from a box. Additive enum
   // value; placed before mystery_box to match the schema's declared ordering.
   IMPOSTER          @map("imposter")
+  // RAINSTORM is PURCHASE-ONLY (coin store, like IMPOSTER) and never rolls from
+  // a mystery box. Untargeted AoE: halves every OTHER participant's steps for
+  // 1 hour. Additive enum value, placed before mystery_box to match ordering.
+  RAINSTORM         @map("rainstorm")
   MYSTERY_BOX       @map("mystery_box")
 }
 

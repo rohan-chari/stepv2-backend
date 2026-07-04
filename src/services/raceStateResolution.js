@@ -121,6 +121,7 @@ async function calculateCurrentTotal({
   let runnersHighs = [];
   let wrongTurns = [];
   let campfires = [];
+  let rainstorms = [];
 
   if (racePowerupsEnabled) {
     legCramps = await raceActiveEffectModel.findEffectsForRaceByType(
@@ -143,11 +144,16 @@ async function calculateCurrentTotal({
       participant.id,
       "CAMPFIRE_REST"
     );
+    rainstorms = await raceActiveEffectModel.findEffectsForRaceByType(
+      raceId,
+      participant.id,
+      "RAINSTORM"
+    );
   }
 
   // Use the SAME computeEffectModifiers the display path uses, including the
   // additive global-event boost, so settlement totals match display exactly.
-  const allEffects = [...legCramps, ...runnersHighs, ...wrongTurns, ...campfires];
+  const allEffects = [...legCramps, ...runnersHighs, ...wrongTurns, ...campfires, ...rainstorms];
   const globalContext =
     globalEvents && globalEvents.length > 0 ? { globalEvents, now } : null;
   const { frozenSteps, buffedSteps, reversedSteps, globalBoostedSteps } =
@@ -170,7 +176,7 @@ async function calculateCurrentTotal({
       (racePowerupsEnabled ? participant.bonusSteps || 0 : 0)
   );
 
-  return { total, legCramps, runnersHighs, wrongTurns, campfires };
+  return { total, legCramps, runnersHighs, wrongTurns, campfires, rainstorms };
 }
 
 function buildBonusTimeline(events, participantUserId, effectiveStart, now) {
@@ -231,6 +237,7 @@ function multiplierForTime(timeMs, {
   runnersHighs,
   wrongTurns,
   campfires = [],
+  rainstorms = [],
 }) {
   const isActive = (effect) => {
     const startMs = new Date(effect.startsAt).getTime();
@@ -257,11 +264,23 @@ function multiplierForTime(timeMs, {
 
   const reversed = wrongTurns.some(isActive);
   const campfireMultiplier = campfire ? ((campfire.metadata || {}).multiplier || 1) : 1;
-  const positiveMultiplier = Math.max(buffed ? 2 : 1, campfireMultiplier);
+  let positiveMultiplier = Math.max(buffed ? 2 : 1, campfireMultiplier);
 
   if (reversed && positiveMultiplier > 1) return -positiveMultiplier;
   if (reversed) return -1;
-  if (positiveMultiplier > 1) return positiveMultiplier;
+
+  // Rainstorm: ADDITIVE -0.5x on positive accrual, matching the additive model
+  // in computeEffectModifiers (1x → 0.5x, Runner's High 2x → 1.5x). Suspended
+  // while frozen or reversed — both returned above before reaching here.
+  const raining = rainstorms.some(isActive);
+  if (raining) {
+    const rainMeta = Number((rainstorms.find(isActive).metadata || {}).multiplier);
+    const rainMultiplier =
+      Number.isFinite(rainMeta) && rainMeta >= 0 && rainMeta <= 1 ? rainMeta : 0.5;
+    positiveMultiplier = Math.max(0, positiveMultiplier - (1 - rainMultiplier));
+  }
+
+  if (positiveMultiplier !== 1) return positiveMultiplier;
   return 1;
 }
 
@@ -320,6 +339,7 @@ async function determineFinishSnapshot({
     ...effectGroups.runnersHighs,
     ...effectGroups.wrongTurns,
     ...(effectGroups.campfires || []),
+    ...(effectGroups.rainstorms || []),
   ]) {
     const startMs = Math.max(
       effectiveStart.getTime(),
@@ -564,7 +584,7 @@ function buildResolveRaceState(dependencies = {}) {
               now: currentTime,
             });
 
-          const { total, legCramps, runnersHighs, wrongTurns, campfires } =
+          const { total, legCramps, runnersHighs, wrongTurns, campfires, rainstorms } =
             await calculateCurrentTotal({
               raceId: race.id,
               racePowerupsEnabled: race.powerupsEnabled,
@@ -628,7 +648,7 @@ function buildResolveRaceState(dependencies = {}) {
               currentTotal: total,
               targetSteps: race.targetSteps,
               effectiveStart,
-              effectGroups: { legCramps, runnersHighs, wrongTurns, campfires },
+              effectGroups: { legCramps, runnersHighs, wrongTurns, campfires, rainstorms },
               stepSampleModel,
               powerupEventModel,
               raceId: race.id,
