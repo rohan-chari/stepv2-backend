@@ -9,6 +9,10 @@ const {
 const {
   getStepMilestonesToday: defaultGetStepMilestonesToday,
 } = require("../queries/getStepMilestonesToday");
+const {
+  getAdExtraSpinStatus: defaultGetAdExtraSpinStatus,
+} = require("../queries/getAdExtraSpinStatus");
+const defaultAdRewardsConfig = require("../config/adRewards");
 
 function createHomeRouter(dependencies = {}) {
   const router = Router();
@@ -20,6 +24,9 @@ function createHomeRouter(dependencies = {}) {
     dependencies.GlobalStepEvent || defaultGlobalStepEvent;
   const getStepMilestonesToday =
     dependencies.getStepMilestonesToday || defaultGetStepMilestonesToday;
+  const getAdExtraSpinStatus =
+    dependencies.getAdExtraSpinStatus || defaultGetAdExtraSpinStatus;
+  const adRewardsConfig = dependencies.adRewardsConfig || defaultAdRewardsConfig;
 
   router.use(requireAuth);
 
@@ -82,6 +89,24 @@ function createHomeRouter(dependencies = {}) {
           claimedToday: req.user.lastDailyClaimDate === localDate,
           localDate,
         };
+        // Additive: rewarded-ad extra-spin state for the home button, only
+        // for ads-capable clients and only once today's box is claimed (the
+        // extra spin can't exist before the free one). Failure omits the
+        // field; the chip just shows the plain CLAIMED state.
+        if (
+          result.dailyReward.claimedToday &&
+          adRewardsConfig.ADS_EXTRA_SPIN_ENABLED &&
+          req.clientFeatures?.has("ads")
+        ) {
+          try {
+            result.dailyReward.adExtraSpin = await getAdExtraSpinStatus({
+              userId: req.user.id,
+              localDate,
+            });
+          } catch (adError) {
+            console.error("Home race-card adExtraSpin lookup error:", adError);
+          }
+        }
       }
 
       res.json(result);
