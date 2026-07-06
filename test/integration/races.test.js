@@ -377,6 +377,105 @@ describe("races", () => {
       assert.equal(body.participant.status, "DECLINED");
     });
 
+    it("declined race disappears from the decliner's GET /races lists", async () => {
+      const alice = await createUser("AliceWalker");
+      const bob = await createUser("BobbyRunner");
+      await makeFriends(alice, bob);
+
+      const raceId = (await (await createRace(alice.token)).json()).race.id;
+      await request(server.baseUrl, "POST", `/races/${raceId}/invite`, {
+        body: { inviteeIds: [bob.userId] },
+        token: alice.token,
+      });
+      await request(server.baseUrl, "PUT", `/races/${raceId}/respond`, {
+        body: { accept: false },
+        token: bob.token,
+      });
+
+      const res = await request(server.baseUrl, "GET", "/races", { token: bob.token });
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      const allIds = [...body.active, ...body.pending, ...body.completed].map(
+        (r) => r.id
+      );
+      assert.ok(
+        !allIds.includes(raceId),
+        "declined race must not appear in any of the decliner's lists"
+      );
+
+      // The creator still sees their pending race.
+      const aliceRes = await request(server.baseUrl, "GET", "/races", { token: alice.token });
+      const aliceBody = await aliceRes.json();
+      assert.ok(aliceBody.pending.some((r) => r.id === raceId));
+    });
+
+    it("declined race stays hidden from the decliner after the race starts", async () => {
+      const alice = await createUser("AliceWalker");
+      const bob = await createUser("BobbyRunner");
+      const charlie = await createUser("CharlieJoggs");
+      await makeFriends(alice, bob);
+      await makeFriends(alice, charlie);
+
+      const raceId = (await (await createRace(alice.token)).json()).race.id;
+      await request(server.baseUrl, "POST", `/races/${raceId}/invite`, {
+        body: { inviteeIds: [bob.userId, charlie.userId] },
+        token: alice.token,
+      });
+      await request(server.baseUrl, "PUT", `/races/${raceId}/respond`, {
+        body: { accept: false },
+        token: bob.token,
+      });
+      await request(server.baseUrl, "PUT", `/races/${raceId}/respond`, {
+        body: { accept: true },
+        token: charlie.token,
+      });
+      await request(server.baseUrl, "POST", `/races/${raceId}/start`, { token: alice.token });
+
+      const res = await request(server.baseUrl, "GET", "/races", { token: bob.token });
+      const body = await res.json();
+      const allIds = [...body.active, ...body.pending, ...body.completed].map(
+        (r) => r.id
+      );
+      assert.ok(
+        !allIds.includes(raceId),
+        "a started race the user declined must not appear in their lists"
+      );
+
+      // Accepted participants still see it as active.
+      const charlieRes = await request(server.baseUrl, "GET", "/races", { token: charlie.token });
+      const charlieBody = await charlieRes.json();
+      assert.ok(charlieBody.active.some((r) => r.id === raceId));
+    });
+
+    it("decliner cannot view race details or progress (403)", async () => {
+      const alice = await createUser("AliceWalker");
+      const bob = await createUser("BobbyRunner");
+      await makeFriends(alice, bob);
+
+      const raceId = (await (await createRace(alice.token)).json()).race.id;
+      await request(server.baseUrl, "POST", `/races/${raceId}/invite`, {
+        body: { inviteeIds: [bob.userId] },
+        token: alice.token,
+      });
+      await request(server.baseUrl, "PUT", `/races/${raceId}/respond`, {
+        body: { accept: false },
+        token: bob.token,
+      });
+
+      const detailsRes = await request(server.baseUrl, "GET", `/races/${raceId}`, { token: bob.token });
+      assert.equal(detailsRes.status, 403, "declined user must not view race details");
+
+      const progressRes = await request(server.baseUrl, "GET", `/races/${raceId}/progress`, { token: bob.token });
+      assert.equal(progressRes.status, 403, "declined user must not view race progress");
+
+      // The creator's view still works and still lists the decliner's status.
+      const aliceRes = await request(server.baseUrl, "GET", `/races/${raceId}`, { token: alice.token });
+      assert.equal(aliceRes.status, 200);
+      const aliceBody = await aliceRes.json();
+      const bobRow = aliceBody.participants.find((p) => p.userId === bob.userId);
+      assert.equal(bobRow.status, "DECLINED");
+    });
+
     it("non-invited user cannot respond", async () => {
       const alice = await createUser("AliceWalker");
       const bob = await createUser("BobbyRunner");

@@ -19,6 +19,7 @@ const { createTutorialRouter } = require("./routes/tutorial");
 const { createHomeRouter } = require("./routes/home");
 const { createAppVersionRouter } = require("./routes/appVersion");
 const { extractTimezone } = require("./middleware/extractTimezone");
+const { extractClientFeatures } = require("./utils/clientFeatures");
 const sharing = require("./config/sharing");
 const {
   buildAppleAppSiteAssociation,
@@ -49,6 +50,10 @@ function createApp(dependencies = {}) {
   app.use(cors());
   app.use(express.json());
   app.use(extractTimezone);
+  // Capability gating (X-Client-Features) is read app-wide: social surfaces
+  // (races, friends, leaderboard, ranked, home) tailor character data to what
+  // the client can render, not just the shop.
+  app.use(extractClientFeatures);
 
   app.use("/auth", createAuthRouter(dependencies));
   app.use("/steps", createStepsRouter(dependencies));

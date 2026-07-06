@@ -27,16 +27,9 @@ const { etDayKey, ET } = require("./etSchedule");
 // zonedDateTimeToUtc, unlike the old fixed 22:00-UTC anchor which silently
 // drifted from 6PM ET (EDT) to 5PM ET (EST) every winter.
 //
-// Mon–Thu: off-work hours only — mornings 8-10AM and evenings 4-9PM ET.
-const GLOBAL_EVENT_WEEKDAY_WINDOWS_ET_MIN = [
-  [8 * 60, 10 * 60],
-  [16 * 60, 21 * 60],
-];
-// Fri/Sat/Sun: any time 8AM-10PM ET.
-const GLOBAL_EVENT_WEEKEND_WINDOWS_ET_MIN = [[8 * 60, 22 * 60]];
-
-// ET weekdays that use the wide weekend windows.
-const GLOBAL_EVENT_WEEKEND_DAYS = new Set(["Fri", "Sat", "Sun"]);
+// Every day of the week: any time 8AM-10PM ET (the old weekday/weekend split
+// is gone).
+const GLOBAL_EVENT_WINDOWS_ET_MIN = [[8 * 60, 22 * 60]];
 
 // Each event lasts 30 minutes.
 const GLOBAL_EVENT_DURATION_MS = 30 * 60 * 1000;
@@ -205,14 +198,12 @@ function hashToInt(seed, mod) {
 }
 
 // The event start instant (UTC Date) for the ET calendar day that `date` falls
-// in: a wall-clock ET minute drawn uniformly from the day-of-week windows,
+// in: a wall-clock ET minute drawn uniformly from the daily windows,
 // deterministic per ET day. `pickInt(seed, mod)` is injectable so tests can
 // force exact draws; production uses the FNV-1a hash.
 function chooseEventStartForEtDay(date, pickInt = hashToInt) {
   const parts = getTimeZoneParts(date, ET);
-  const windows = GLOBAL_EVENT_WEEKEND_DAYS.has(parts.weekday)
-    ? GLOBAL_EVENT_WEEKEND_WINDOWS_ET_MIN
-    : GLOBAL_EVENT_WEEKDAY_WINDOWS_ET_MIN;
+  const windows = GLOBAL_EVENT_WINDOWS_ET_MIN;
 
   const totalMin = windows.reduce((sum, [a, b]) => sum + (b - a), 0);
   let offset = pickInt(`${etDayKey(date)}:start`, totalMin);
@@ -276,8 +267,7 @@ module.exports = {
   shouldStartGlobalEvent,
   chooseEventStartForEtDay,
   // constants
-  GLOBAL_EVENT_WEEKDAY_WINDOWS_ET_MIN,
-  GLOBAL_EVENT_WEEKEND_WINDOWS_ET_MIN,
+  GLOBAL_EVENT_WINDOWS_ET_MIN,
   GLOBAL_EVENT_DURATION_MS,
   GLOBAL_EVENT_MULTIPLIER,
   GLOBAL_EVENT_CATCH_WINDOW_MS,

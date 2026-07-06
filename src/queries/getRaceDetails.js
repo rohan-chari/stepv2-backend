@@ -1,12 +1,12 @@
 const { Race } = require("../models/race");
 const { computeRacePayouts } = require("../utils/racePayoutPresets");
-const { buildAccessoriesList, equippedAnimal } = require("../utils/shopCosmetics");
+const { characterPresentation } = require("../utils/shopCosmetics");
 const {
   computeFinishRewardPool,
   computeFinishRewardPlaces,
 } = require("../constants/raceFinishReward");
 
-async function getRaceDetails(userId, raceId) {
+async function getRaceDetails(userId, raceId, supportsCharacters = false) {
   const race = await Race.findById(raceId);
   if (!race) {
     const error = new Error("Race not found");
@@ -15,7 +15,9 @@ async function getRaceDetails(userId, raceId) {
   }
 
   const myParticipant = race.participants.find((p) => p.userId === userId);
-  if (!myParticipant) {
+  // Declining revokes access: the decliner is treated like a non-participant
+  // instead of getting a read-only ghost view of the race.
+  if (!myParticipant || myParticipant.status === "DECLINED") {
     const error = new Error("You are not a participant in this race");
     error.statusCode = 403;
     throw error;
@@ -102,8 +104,8 @@ async function getRaceDetails(userId, raceId) {
       userId: p.userId,
       displayName: p.user.displayName,
       profilePhotoUrl: p.user.profilePhotoUrl,
-      accessories: buildAccessoriesList(p.user),
-      animal: equippedAnimal(p.user),
+      // {animal, accessories} — naked capy for viewers without `characters`.
+      ...characterPresentation(p.user, supportsCharacters),
       status: p.status,
       totalSteps: p.totalSteps,
       finishedAt: p.finishedAt,

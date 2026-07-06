@@ -36,6 +36,7 @@ function createHomeRouter(dependencies = {}) {
         // (set globally by the extractTimezone middleware) so the home card and
         // the race-detail screen compute identical race-relative totals.
         timeZone: req.timeZone,
+        supportsCharacters: req.clientFeatures?.has("characters") ?? false,
       });
 
       // Additive: surface the currently-active global step event (if any) as a

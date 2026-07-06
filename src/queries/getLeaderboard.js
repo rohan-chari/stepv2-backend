@@ -3,7 +3,7 @@ const {
   buildRaceRecordLeaderboard,
 } = require("../utils/recordLeaderboardRankings");
 const { getMondayOfWeek, getTimeZoneParts } = require("../utils/week");
-const { buildAccessoriesList, equippedAnimal } = require("../utils/shopCosmetics");
+const { characterPresentation } = require("../utils/shopCosmetics");
 const { Friendship } = require("../models/friendship");
 
 // Resolve the userId filter for a "friends"-scoped leaderboard: the viewer's
@@ -62,7 +62,7 @@ function getDateBoundary(period, timeZone) {
   }
 }
 
-async function getUserProfiles(userIds) {
+async function getUserProfiles(userIds, supportsCharacters = false) {
   if (userIds.length === 0) {
     return new Map();
   }
@@ -75,12 +75,19 @@ async function getUserProfiles(userIds) {
   return new Map(
     users.map((user) => [
       user.id,
-      {
-        displayName: user.displayName || "Anonymous",
-        profilePhotoUrl: user.profilePhotoUrl || null,
-        equippedAccessories: buildAccessoriesList(user),
-        animal: equippedAnimal(user),
-      },
+      (() => {
+        // {animal, accessories} — naked capy for viewers without `characters`.
+        const { animal, accessories } = characterPresentation(
+          user,
+          supportsCharacters
+        );
+        return {
+          displayName: user.displayName || "Anonymous",
+          profilePhotoUrl: user.profilePhotoUrl || null,
+          equippedAccessories: accessories,
+          animal,
+        };
+      })(),
     ])
   );
 }
@@ -97,7 +104,7 @@ async function getCurrentUserProfile(currentUserId) {
   };
 }
 
-async function getStepLeaderboard(period, currentUserId, timeZone, scope = "global") {
+async function getStepLeaderboard(period, currentUserId, timeZone, scope = "global", supportsCharacters = false) {
   const dateBoundary = getDateBoundary(period, timeZone);
   const dateClause = dateBoundary
     ? { date: { gte: new Date(dateBoundary) } }
@@ -129,7 +136,10 @@ async function getStepLeaderboard(period, currentUserId, timeZone, scope = "glob
     take: 100,
   });
 
-  const userMap = await getUserProfiles(top100Groups.map((group) => group.userId));
+  const userMap = await getUserProfiles(
+    top100Groups.map((group) => group.userId),
+    supportsCharacters
+  );
 
   let prevRank = 0;
   let prevSteps = null;
@@ -198,7 +208,7 @@ async function getStepLeaderboard(period, currentUserId, timeZone, scope = "glob
   };
 }
 
-async function getRaceLeaderboard(currentUserId, scope = "global") {
+async function getRaceLeaderboard(currentUserId, scope = "global", supportsCharacters = false) {
   // friends scope: restrict to the viewer + accepted friends. global (default)
   // leaves this null so the query is unfiltered, exactly as before.
   const friendsIdSet = await resolveFriendsIdSet(scope, currentUserId);
@@ -239,7 +249,7 @@ async function getRaceLeaderboard(currentUserId, scope = "global") {
   }
 
   const userIds = [...statsByUserId.keys(), currentUserId];
-  const userMap = await getUserProfiles(userIds);
+  const userMap = await getUserProfiles(userIds, supportsCharacters);
   const currentUserDisplayName =
     userMap.get(currentUserId)?.displayName || "Anonymous";
 
@@ -255,12 +265,12 @@ async function getRaceLeaderboard(currentUserId, scope = "global") {
   return buildRaceRecordLeaderboard(entries, currentUserId, currentUserDisplayName);
 }
 
-async function getLeaderboard({ type = "steps", period = "today", scope = "global", currentUserId, timeZone }) {
+async function getLeaderboard({ type = "steps", period = "today", scope = "global", currentUserId, timeZone, supportsCharacters = false }) {
   if (type === "races") {
-    return getRaceLeaderboard(currentUserId, scope);
+    return getRaceLeaderboard(currentUserId, scope, supportsCharacters);
   }
 
-  return getStepLeaderboard(period, currentUserId, timeZone, scope);
+  return getStepLeaderboard(period, currentUserId, timeZone, scope, supportsCharacters);
 }
 
 module.exports = { getLeaderboard };

@@ -1,7 +1,7 @@
 const { prisma } = require("../db");
 const { Season, SeasonScore } = require("../models/season");
 const { TIERS, TIER_REWARDS } = require("../constants/rankedTiers");
-const { buildAccessoriesList, equippedAnimal } = require("../utils/shopCosmetics");
+const { characterPresentation } = require("../utils/shopCosmetics");
 
 // User fields needed to render a ladder row: identity + equipped capybara gear.
 const ladderUserSelect = {
@@ -37,7 +37,7 @@ const TIER_SUMMARY = TIERS.map((t) => ({
   reward: TIER_REWARDS[t.key] ? TIER_REWARDS[t.key].coins : 0,
 }));
 
-async function getUserProfiles(userIds) {
+async function getUserProfiles(userIds, supportsCharacters = false) {
   if (userIds.length === 0) return new Map();
   const users = await prisma.user.findMany({
     where: { id: { in: userIds } },
@@ -46,12 +46,19 @@ async function getUserProfiles(userIds) {
   return new Map(
     users.map((u) => [
       u.id,
-      {
-        displayName: u.displayName || "Anonymous",
-        profilePhotoUrl: u.profilePhotoUrl || null,
-        equippedAccessories: buildAccessoriesList(u),
-        animal: equippedAnimal(u),
-      },
+      (() => {
+        // {animal, accessories} — naked capy for viewers without `characters`.
+        const { animal, accessories } = characterPresentation(
+          u,
+          supportsCharacters
+        );
+        return {
+          displayName: u.displayName || "Anonymous",
+          profilePhotoUrl: u.profilePhotoUrl || null,
+          equippedAccessories: accessories,
+          animal,
+        };
+      })(),
     ])
   );
 }
@@ -60,14 +67,17 @@ async function getUserProfiles(userIds) {
 // user's own standing (pinned even when outside the visible window). Returns a
 // clear unranked state when there is no active season or the user has no score
 // yet, so the client never has to invent a fake number.
-async function getRanked({ currentUserId, seasonModel = Season, seasonScoreModel = SeasonScore } = {}) {
+async function getRanked({ currentUserId, seasonModel = Season, seasonScoreModel = SeasonScore, supportsCharacters = false } = {}) {
   const season = await seasonModel.getActive();
   if (!season) {
     return { season: null, currentUser: null, ladder: [], tiers: TIER_SUMMARY };
   }
 
   const scores = await seasonScoreModel.listForSeason(season.id);
-  const profiles = await getUserProfiles(scores.map((s) => s.userId));
+  const profiles = await getUserProfiles(
+    scores.map((s) => s.userId),
+    supportsCharacters
+  );
 
   const ladder = scores.slice(0, LADDER_LIMIT).map((s, index) => ({
     rank: s.provisionalRank ?? index + 1,

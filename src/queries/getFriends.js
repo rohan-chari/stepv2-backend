@@ -1,8 +1,8 @@
 const { Friendship } = require("../models/friendship");
 const { Steps } = require("../models/steps");
-const { buildAccessoriesList, equippedAnimal } = require("../utils/shopCosmetics");
+const { characterPresentation } = require("../utils/shopCosmetics");
 
-async function getFriendsList(userId) {
+async function getFriendsList(userId, supportsCharacters = false) {
   const friendships = await Friendship.findFriends(userId);
 
   return friendships
@@ -12,8 +12,7 @@ async function getFriendsList(userId) {
         id: friend.id,
         displayName: friend.displayName,
         profilePhotoUrl: friend.profilePhotoUrl,
-        accessories: buildAccessoriesList(friend),
-        animal: equippedAnimal(friend),
+        ...characterPresentation(friend, supportsCharacters),
         friendshipId: f.id,
       };
     })
@@ -58,7 +57,7 @@ async function getIncomingFriendRequestCount(userId) {
   return Friendship.countPendingIncoming(userId);
 }
 
-async function getFriendsWithSteps(userId, date) {
+async function getFriendsWithSteps(userId, date, supportsCharacters = false) {
   const friendships = await Friendship.findAcceptedFriendsWithDisplay(userId);
 
   const friends = friendships.map((f) => {
@@ -67,8 +66,7 @@ async function getFriendsWithSteps(userId, date) {
       id: friend.id,
       displayName: friend.displayName,
       profilePhotoUrl: friend.profilePhotoUrl,
-      accessories: buildAccessoriesList(friend),
-      animal: equippedAnimal(friend),
+      ...characterPresentation(friend, supportsCharacters),
     };
   });
 

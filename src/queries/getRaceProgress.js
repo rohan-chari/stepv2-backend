@@ -6,7 +6,7 @@ const { RacePowerup } = require("../models/racePowerup");
 const { RaceActiveEffect } = require("../models/raceActiveEffect");
 const { completeRace } = require("../commands/completeRace");
 const { expireEffects } = require("../commands/expireEffects");
-const { buildAccessoriesList, equippedAnimal } = require("../utils/shopCosmetics");
+const { characterPresentation } = require("../utils/shopCosmetics");
 const {
   buildSyncRacePowerupState,
   syncRacePowerupState: defaultSyncRacePowerupState,
@@ -360,7 +360,12 @@ function buildGetRaceProgress(deps = {}) {
       : defaultSyncRacePowerupState);
   const now = deps.now || (() => new Date());
 
-  return async function getRaceProgress(userId, raceId, timeZone) {
+  return async function getRaceProgress(
+    userId,
+    raceId,
+    timeZone,
+    supportsCharacters = false
+  ) {
     const race = await raceModel.findById(raceId);
     if (!race) {
       const error = new Error("Race not found");
@@ -369,7 +374,8 @@ function buildGetRaceProgress(deps = {}) {
     }
 
     const myParticipant = race.participants.find((p) => p.userId === userId);
-    if (!myParticipant) {
+    // Mirrors getRaceDetails: declining revokes access to the race.
+    if (!myParticipant || myParticipant.status === "DECLINED") {
       const error = new Error("You are not a participant in this race");
       error.statusCode = 403;
       throw error;
@@ -387,8 +393,7 @@ function buildGetRaceProgress(deps = {}) {
           userId: p.userId,
           displayName: p.user.displayName,
           profilePhotoUrl: p.user.profilePhotoUrl,
-          accessories: buildAccessoriesList(p.user),
-          animal: equippedAnimal(p.user),
+          ...characterPresentation(p.user, supportsCharacters),
           totalSteps: p.totalSteps,
           finishedAt: p.finishedAt,
         })),
@@ -725,8 +730,9 @@ function buildGetRaceProgress(deps = {}) {
           userId: participant.userId,
           displayName: isStealthed ? "???" : participant.user.displayName,
           profilePhotoUrl: isStealthed ? null : participant.user.profilePhotoUrl,
-          accessories: isStealthed ? [] : buildAccessoriesList(participant.user),
-          animal: isStealthed ? null : equippedAnimal(participant.user),
+          ...(isStealthed
+            ? { accessories: [], animal: null }
+            : characterPresentation(participant.user, supportsCharacters)),
           totalSteps: isStealthed ? null : totalSteps,
           finishedAt: participant.finishedAt,
           stealthed: isStealthed,

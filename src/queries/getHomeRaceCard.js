@@ -1,5 +1,5 @@
 const { prisma: defaultPrisma } = require("../db");
-const { buildAccessoriesList, equippedAnimal } = require("../utils/shopCosmetics");
+const { characterPresentation } = require("../utils/shopCosmetics");
 const { RaceActiveEffect } = require("../models/raceActiveEffect");
 const { Steps } = require("../models/steps");
 const { StepSample } = require("../models/stepSample");
@@ -29,14 +29,14 @@ const USER_SELECT = {
 
 const FRIEND_FINISHED_WINDOW_MS = 2 * 60 * 60 * 1000; // 2 hours
 
-function serializeUser(user) {
+function serializeUser(user, supportsCharacters = false) {
   if (!user) return null;
   return {
     userId: user.id,
     displayName: user.displayName || "Anonymous",
     profilePhotoUrl: user.profilePhotoUrl || null,
-    accessories: buildAccessoriesList(user),
-    animal: equippedAnimal(user),
+    // {animal, accessories} — naked capy for viewers without `characters`.
+    ...characterPresentation(user, supportsCharacters),
   };
 }
 
@@ -55,7 +55,7 @@ async function getAcceptedFriendIds(prisma, userId) {
   return [...ids];
 }
 
-async function checkPendingInvite(prisma, userId, now) {
+async function checkPendingInvite(prisma, userId, now, supportsCharacters = false) {
   const invites = await prisma.raceParticipant.findMany({
     where: {
       userId,
@@ -93,13 +93,13 @@ async function checkPendingInvite(prisma, userId, now) {
       name: race.name,
       durationHours: race.maxDurationDays ? race.maxDurationDays * 24 : null,
       participantCount: race.participants.length,
-      inviter: serializeUser(race.creator),
+      inviter: serializeUser(race.creator, supportsCharacters),
       expiresAt: primary.inviteExpiresAt,
     },
   };
 }
 
-async function checkActiveRace(prisma, userId) {
+async function checkActiveRace(prisma, userId, supportsCharacters = false) {
   const myActive = await prisma.raceParticipant.findFirst({
     where: {
       userId,
@@ -146,7 +146,7 @@ async function checkActiveRace(prisma, userId) {
     return {
       rank: sorted.indexOf(p) + 1,
       totalSteps: p.totalSteps,
-      ...serializeUser(p.user),
+      ...serializeUser(p.user, supportsCharacters),
     };
   }
 
@@ -203,6 +203,7 @@ async function checkActiveRaces(prisma, userId, options = {}) {
     stepsModel = Steps,
     stepSampleModel = StepSample,
     raceActiveEffectModel = RaceActiveEffect,
+    supportsCharacters = false,
   } = options;
 
   const myActive = await prisma.raceParticipant.findMany({
@@ -316,8 +317,15 @@ async function checkActiveRaces(prisma, userId, options = {}) {
         rank: idx + 1,
         userId: p.userId,
         displayName: isStealthed ? "???" : (p.user?.displayName || "Anonymous"),
-        equippedAccessories: isStealthed ? [] : buildAccessoriesList(p.user),
-        animal: isStealthed ? null : equippedAnimal(p.user),
+        ...(isStealthed
+          ? { equippedAccessories: [], animal: null }
+          : (() => {
+              const { animal, accessories } = characterPresentation(
+                p.user,
+                supportsCharacters
+              );
+              return { equippedAccessories: accessories, animal };
+            })()),
         totalSteps: isStealthed ? null : p.totalSteps,
         isStealthed,
       };
@@ -341,7 +349,7 @@ async function checkActiveRaces(prisma, userId, options = {}) {
   return { state: "ACTIVE_RACES", data: { races } };
 }
 
-async function checkFriendRacing(prisma, userId, friendIds) {
+async function checkFriendRacing(prisma, userId, friendIds, supportsCharacters = false) {
   if (friendIds.length === 0) return null;
 
   const friendParticipations = await prisma.raceParticipant.findMany({
@@ -391,17 +399,17 @@ async function checkFriendRacing(prisma, userId, friendIds) {
       name: race.name,
       endsAt: race.endsAt,
       isPublicJoinable: true,
-      friend: serializeUser(choice.user),
+      friend: serializeUser(choice.user, supportsCharacters),
       participants: race.participants.map((p, idx) => ({
         rank: idx + 1,
         totalSteps: p.totalSteps,
-        ...serializeUser(p.user),
+        ...serializeUser(p.user, supportsCharacters),
       })),
     },
   };
 }
 
-async function checkFriendFinished(prisma, userId, friendIds, now) {
+async function checkFriendFinished(prisma, userId, friendIds, now, supportsCharacters = false) {
   if (friendIds.length === 0) return null;
 
   const cutoff = new Date(now.getTime() - FRIEND_FINISHED_WINDOW_MS);
@@ -427,7 +435,7 @@ async function checkFriendFinished(prisma, userId, friendIds, now) {
   return {
     state: "FRIEND_FINISHED",
     data: {
-      friend: serializeUser(finisher.user),
+      friend: serializeUser(finisher.user, supportsCharacters),
       raceName: finisher.race.name,
       placement: finisher.placement,
       finishedAt: finisher.race.completedAt,
@@ -495,10 +503,11 @@ function buildGetHomeRaceCard(dependencies = {}) {
     userId,
     homeActiveRaces = false,
     timeZone = "UTC",
+    supportsCharacters = false,
   }) {
     const now = nowFn();
 
-    const pending = await checkPendingInvite(prisma, userId, now);
+    const pending = await checkPendingInvite(prisma, userId, now, supportsCharacters);
     if (pending) return pending;
 
     // Opt-in path (new app builds): when the client requests homeActiveRaces and
@@ -514,19 +523,20 @@ function buildGetHomeRaceCard(dependencies = {}) {
         stepsModel,
         stepSampleModel,
         raceActiveEffectModel,
+        supportsCharacters,
       });
       if (activeRaces) return activeRaces;
     } else {
-      const active = await checkActiveRace(prisma, userId);
+      const active = await checkActiveRace(prisma, userId, supportsCharacters);
       if (active) return active;
     }
 
     const friendIds = await getAcceptedFriendIds(prisma, userId);
 
-    const friendRacing = await checkFriendRacing(prisma, userId, friendIds);
+    const friendRacing = await checkFriendRacing(prisma, userId, friendIds, supportsCharacters);
     if (friendRacing) return friendRacing;
 
-    const friendFinished = await checkFriendFinished(prisma, userId, friendIds, now);
+    const friendFinished = await checkFriendFinished(prisma, userId, friendIds, now, supportsCharacters);
     if (friendFinished) return friendFinished;
 
     const publicRace = await checkPublicRace(prisma, userId);

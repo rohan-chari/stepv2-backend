@@ -20,7 +20,10 @@ function createRankedRouter(dependencies = {}) {
   // below keeps serving shipped binaries unchanged.
   router.get("/v2", async (req, res) => {
     try {
-      const result = await getRankedV2({ currentUserId: req.user.id });
+      const result = await getRankedV2({
+        currentUserId: req.user.id,
+        supportsCharacters: req.clientFeatures?.has("characters") ?? false,
+      });
       res.json(result);
     } catch (error) {
       console.error("Ranked v2 error:", error);
@@ -56,6 +59,7 @@ function createRankedRouter(dependencies = {}) {
       const result = await getRanked({
         currentUserId: req.user.id,
         timeZone: req.timeZone,
+        supportsCharacters: req.clientFeatures?.has("characters") ?? false,
       });
       res.json(result);
     } catch (error) {

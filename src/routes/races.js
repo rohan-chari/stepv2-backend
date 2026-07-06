@@ -351,7 +351,11 @@ function createRacesRouter(dependencies = {}) {
   // GET /races/:raceId
   router.get("/:raceId", async (req, res) => {
     try {
-      const result = await getRaceDetails(req.user.id, req.params.raceId);
+      const result = await getRaceDetails(
+        req.user.id,
+        req.params.raceId,
+        req.clientFeatures?.has("characters") ?? false
+      );
       res.json(result);
     } catch (error) {
       if (error.statusCode) {
@@ -426,7 +430,8 @@ function createRacesRouter(dependencies = {}) {
       const progress = await getRaceProgress(
         req.user.id,
         req.params.raceId,
-        req.timeZone
+        req.timeZone,
+        req.clientFeatures?.has("characters") ?? false
       );
       res.json({ progress });
     } catch (error) {

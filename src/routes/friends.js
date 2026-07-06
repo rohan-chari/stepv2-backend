@@ -72,7 +72,11 @@ function createFriendsRouter(dependencies = {}) {
   router.get("/steps", async (req, res) => {
     try {
       const date = req.query.date || todayDateString();
-      const friends = await getFriendsWithSteps(req.user.id, date);
+      const friends = await getFriendsWithSteps(
+        req.user.id,
+        date,
+        req.clientFeatures?.has("characters") ?? false
+      );
 
       if (date === todayDateString() && friends.length > 0) {
         Promise.resolve()
@@ -93,7 +97,7 @@ function createFriendsRouter(dependencies = {}) {
   router.get("/", async (req, res) => {
     try {
       const [friends, pending] = await Promise.all([
-        getFriends(req.user.id),
+        getFriends(req.user.id, req.clientFeatures?.has("characters") ?? false),
         getPending(req.user.id),
       ]);
 

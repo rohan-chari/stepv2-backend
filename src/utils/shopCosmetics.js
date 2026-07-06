@@ -84,6 +84,21 @@ function equippedAnimal(user) {
   return character ? character.shopItem.assetKey : null;
 }
 
+// Full character-aware presentation of a user for OTHER-user surfaces.
+// Clients declare `X-Client-Features: characters` when they can draw
+// purchasable base characters. A viewer WITHOUT that capability must see a
+// character-equipped user as a NAKED default capybara — no `animal` (their
+// binary either ignores it or lacks the asset) and no accessories (gear is
+// tuned per-animal; drawn on the wrong body it misrepresents the user).
+// Users with no character equipped are presented identically to everyone.
+function characterPresentation(user, supportsCharacters = false) {
+  const animal = equippedAnimal(user);
+  if (animal && !supportsCharacters) {
+    return { animal: null, accessories: [] };
+  }
+  return { animal, accessories: buildAccessoriesList(user) };
+}
+
 module.exports = {
   ACCESSORY_SLOTS,
   CHARACTER_SLOT,
@@ -92,4 +107,5 @@ module.exports = {
   buildEquipmentMap,
   buildAccessoriesList,
   equippedAnimal,
+  characterPresentation,
 };

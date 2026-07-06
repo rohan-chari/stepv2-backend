@@ -10,7 +10,7 @@ const {
   RankedWeek: defaultRankedWeek,
   RankedCohortMember: defaultRankedCohortMember,
 } = require("../models/rankedWeek");
-const { buildAccessoriesList, equippedAnimal } = require("../utils/shopCosmetics");
+const { characterPresentation } = require("../utils/shopCosmetics");
 const {
   V2_TIERS,
   DEFAULT_TIER,
@@ -62,7 +62,7 @@ function zoneForRank(rank, size, tier) {
   return "HOLD";
 }
 
-async function getUserProfiles(userIds) {
+async function getUserProfiles(userIds, supportsCharacters = false) {
   if (userIds.length === 0) return new Map();
   const users = await prisma.user.findMany({
     where: { id: { in: userIds } },
@@ -71,12 +71,19 @@ async function getUserProfiles(userIds) {
   return new Map(
     users.map((u) => [
       u.id,
-      {
-        displayName: u.displayName || "Anonymous",
-        profilePhotoUrl: u.profilePhotoUrl || null,
-        equippedAccessories: buildAccessoriesList(u),
-        animal: equippedAnimal(u),
-      },
+      (() => {
+        // {animal, accessories} — naked capy for viewers without `characters`.
+        const { animal, accessories } = characterPresentation(
+          u,
+          supportsCharacters
+        );
+        return {
+          displayName: u.displayName || "Anonymous",
+          profilePhotoUrl: u.profilePhotoUrl || null,
+          equippedAccessories: accessories,
+          animal,
+        };
+      })(),
     ])
   );
 }
@@ -114,6 +121,7 @@ async function getRankedV2({
   weekModel = defaultRankedWeek,
   memberModel = defaultRankedCohortMember,
   now = () => new Date(),
+  supportsCharacters = false,
 } = {}) {
   // During the Monday grace window the next week hasn't opened yet (it waits
   // for the prior week to settle — see computeRankedWeeks). getCurrent() is null
@@ -164,7 +172,10 @@ async function getRankedV2({
   const size = cohortMembers.length;
   const tier = me.tier;
   const { promote, demote } = zoneSizes(size, tier);
-  const profiles = await getUserProfiles(cohortMembers.map((m) => m.userId));
+  const profiles = await getUserProfiles(
+    cohortMembers.map((m) => m.userId),
+    supportsCharacters
+  );
 
   const members = cohortMembers.map((m, index) => {
     const rank = m.provisionalRank ?? index + 1;

@@ -150,7 +150,9 @@ const Race = {
   async findForUser(userId) {
     return prisma.race.findMany({
       where: {
-        participants: { some: { userId } },
+        // A declined invite removes the race from the user's world — it must
+        // not surface in any of their active/pending/completed lists.
+        participants: { some: { userId, status: { not: "DECLINED" } } },
       },
       include: {
         creator: { select: { id: true, displayName: true, profilePhotoUrl: true } },

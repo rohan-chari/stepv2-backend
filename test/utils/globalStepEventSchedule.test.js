@@ -4,10 +4,8 @@ const test = require("node:test");
 // ---------------------------------------------------------------------------
 // Global step-multiplier event — PURE scheduler decision.
 //
-// The daily event fires at a randomized ET wall-clock time drawn from a
-// day-of-week window:
-//   * Mon–Thu: off-work hours only — [08:00–10:00) ∪ [16:00–21:00) ET
-//   * Fri/Sat/Sun: [08:00–22:00) ET
+// The daily event fires at a randomized ET wall-clock time drawn from ONE
+// window used every day of the week: [08:00–22:00) ET.
 // The pick is deterministic per ET day (hash-seeded, like the old jitter) so
 // it is stable across 5-minute ticks and process restarts without persistence,
 // and `shouldStartGlobalEvent` stays idempotent via todaysEvents.
@@ -21,8 +19,7 @@ const {
   GLOBAL_EVENT_DURATION_MS,
   GLOBAL_EVENT_MULTIPLIER,
   GLOBAL_EVENT_CATCH_WINDOW_MS,
-  GLOBAL_EVENT_WEEKDAY_WINDOWS_ET_MIN,
-  GLOBAL_EVENT_WEEKEND_WINDOWS_ET_MIN,
+  GLOBAL_EVENT_WINDOWS_ET_MIN,
 } = require("../../src/utils/globalStepEvent");
 const { getTimeZoneParts, zonedDateTimeToUtc } = require("../../src/utils/week");
 
@@ -43,88 +40,66 @@ function etNoonOf(year, month, day) {
   return zonedDateTimeToUtc({ year, month, day, hour: 12, minute: 0 }, ET);
 }
 
-const WEEKDAY_TOTAL_MIN = GLOBAL_EVENT_WEEKDAY_WINDOWS_ET_MIN.reduce(
-  (sum, [a, b]) => sum + (b - a),
-  0
-);
-const WEEKEND_TOTAL_MIN = GLOBAL_EVENT_WEEKEND_WINDOWS_ET_MIN.reduce(
+const TOTAL_MIN = GLOBAL_EVENT_WINDOWS_ET_MIN.reduce(
   (sum, [a, b]) => sum + (b - a),
   0
 );
 
-test("tuning constants: 30-min window, 2x, and the agreed ET windows", () => {
+test("tuning constants: 30-min window, 2x, and 8AM-10PM ET every day", () => {
   assert.equal(GLOBAL_EVENT_DURATION_MS, 30 * 60 * 1000, "30-minute window");
   assert.equal(GLOBAL_EVENT_MULTIPLIER, 2, "2x multiplier");
-  // Mon–Thu: 8–10AM and 4–9PM ET.
-  assert.deepEqual(GLOBAL_EVENT_WEEKDAY_WINDOWS_ET_MIN, [
-    [8 * 60, 10 * 60],
-    [16 * 60, 21 * 60],
-  ]);
-  // Fri/Sat/Sun: 8AM–10PM ET.
-  assert.deepEqual(GLOBAL_EVENT_WEEKEND_WINDOWS_ET_MIN, [[8 * 60, 22 * 60]]);
+  // Every day of the week: 8AM–10PM ET, one window, no weekday/weekend split.
+  assert.deepEqual(GLOBAL_EVENT_WINDOWS_ET_MIN, [[8 * 60, 22 * 60]]);
 });
 
-test("weekday picks stay in off-work windows for EVERY possible draw", () => {
+test("every day of the week uses the same 8AM-10PM window for EVERY possible draw", () => {
+  // Mon 2026-06-08 .. Sun 2026-06-14 — one full week.
+  for (let d = 8; d <= 14; d++) {
+    const day = etNoonOf(2026, 6, d);
+    const weekday = getTimeZoneParts(day, ET).weekday;
+    // Bounds: first draw = 08:00 sharp, last draw = 21:59.
+    assert.equal(
+      etMinutes(chooseEventStartForEtDay(day, () => 0)),
+      8 * 60,
+      `${weekday}: first draw must be 8AM ET`
+    );
+    assert.equal(
+      etMinutes(chooseEventStartForEtDay(day, () => TOTAL_MIN - 1)),
+      22 * 60 - 1,
+      `${weekday}: last draw must be 9:59PM ET`
+    );
+    // Midday draw (13:00 ET = offset 300) is allowed EVERY day — weekdays no
+    // longer exclude work hours.
+    assert.equal(
+      etMinutes(chooseEventStartForEtDay(day, () => 300)),
+      13 * 60,
+      `${weekday}: midday draw must be allowed`
+    );
+  }
+});
+
+test("weekday draws sweep the full 8AM-10PM range contiguously (no gaps)", () => {
   const monday = etNoonOf(2026, 6, 8); // Mon 2026-06-08
-  for (let draw = 0; draw < WEEKDAY_TOTAL_MIN; draw++) {
+  for (let draw = 0; draw < TOTAL_MIN; draw++) {
     const start = chooseEventStartForEtDay(monday, () => draw);
     const min = etMinutes(start);
-    assert.ok(
-      inWindows(min, GLOBAL_EVENT_WEEKDAY_WINDOWS_ET_MIN),
-      `draw ${draw} landed at ET minute ${min} — outside 8-10AM/4-9PM`
-    );
-  }
-});
-
-test("weekday window boundaries are exact (no work-hours leakage)", () => {
-  const tuesday = etNoonOf(2026, 6, 9); // Tue 2026-06-09
-  // First draw of the day => 08:00 ET sharp.
-  assert.equal(etMinutes(chooseEventStartForEtDay(tuesday, () => 0)), 8 * 60);
-  // The first draw past the morning window jumps the 10AM-4PM gap to 16:00 ET.
-  assert.equal(
-    etMinutes(chooseEventStartForEtDay(tuesday, () => 120)),
-    16 * 60,
-    "draw after the 2h morning window must map to 4PM, not 10AM-4PM"
-  );
-  // The last draw stays strictly before 9PM ET.
-  assert.equal(
-    etMinutes(chooseEventStartForEtDay(tuesday, () => WEEKDAY_TOTAL_MIN - 1)),
-    21 * 60 - 1
-  );
-});
-
-test("Friday and the weekend use the wide 8AM-10PM window and CAN land midday", () => {
-  for (const [y, m, d] of [
-    [2026, 6, 5], // Fri
-    [2026, 6, 6], // Sat
-    [2026, 6, 7], // Sun
-  ]) {
-    const day = etNoonOf(y, m, d);
-    // Midday draw (13:00 ET = offset 300) is allowed on Fri-Sun — this is what
-    // distinguishes the weekend from the weekday work-hours exclusion.
-    const midday = chooseEventStartForEtDay(day, () => 300);
-    assert.equal(etMinutes(midday), 13 * 60, `${y}-${m}-${d} midday draw`);
-    // Bounds.
-    assert.equal(etMinutes(chooseEventStartForEtDay(day, () => 0)), 8 * 60);
     assert.equal(
-      etMinutes(chooseEventStartForEtDay(day, () => WEEKEND_TOTAL_MIN - 1)),
-      22 * 60 - 1
+      min,
+      8 * 60 + draw,
+      `draw ${draw} must map to ET minute ${8 * 60 + draw} (contiguous window)`
     );
+    assert.ok(inWindows(min, GLOBAL_EVENT_WINDOWS_ET_MIN));
   }
 });
 
-test("real hash: 120 consecutive days all land inside their day-of-week windows", () => {
-  const WEEKEND_DAYS = new Set(["Fri", "Sat", "Sun"]);
+test("real hash: 120 consecutive days all land inside 8AM-10PM ET", () => {
   for (let i = 0; i < 120; i++) {
     const day = new Date(etNoonOf(2026, 1, 1).getTime() + i * 24 * 60 * 60 * 1000);
     const start = chooseEventStartForEtDay(day);
-    const windows = WEEKEND_DAYS.has(getTimeZoneParts(start, ET).weekday)
-      ? GLOBAL_EVENT_WEEKEND_WINDOWS_ET_MIN
-      : GLOBAL_EVENT_WEEKDAY_WINDOWS_ET_MIN;
     const min = etMinutes(start);
     assert.ok(
-      inWindows(min, windows),
-      `${start.toISOString()} (ET minute ${min}) outside its windows`
+      inWindows(min, GLOBAL_EVENT_WINDOWS_ET_MIN),
+      `${start.toISOString()} (ET minute ${min}) outside 8AM-10PM ET`
     );
     // The chosen start is on the same ET day it was derived from.
     assert.equal(
@@ -134,9 +109,9 @@ test("real hash: 120 consecutive days all land inside their day-of-week windows"
   }
 });
 
-test("day-of-week is computed in ET, not UTC", () => {
-  // Fri 2026-06-05 02:00 UTC is still Thursday 22:00 ET — the THURSDAY
-  // (weekday) windows must apply, anchored to the Thursday ET date.
+test("day anchoring is computed in ET, not UTC", () => {
+  // Fri 2026-06-05 02:00 UTC is still Thursday 22:00 ET — the pick must be
+  // anchored to the Thursday ET date.
   const lateThursdayEt = new Date("2026-06-05T02:00:00Z");
   const start = chooseEventStartForEtDay(lateThursdayEt, () => 0);
   const parts = getTimeZoneParts(start, ET);
@@ -146,12 +121,12 @@ test("day-of-week is computed in ET, not UTC", () => {
 });
 
 test("DST correctness: the same ET wall-clock pick maps to different UTC instants in EST vs EDT", () => {
-  // Draw 120 => 16:00 ET on a weekday (first minute of the evening window).
+  // Draw 480 => 16:00 ET (8h past the 8AM window start).
   const edtDay = etNoonOf(2026, 6, 9); // Tue in June (EDT, UTC-4)
   const estDay = etNoonOf(2026, 1, 15); // Thu in January (EST, UTC-5)
 
-  const edtStart = chooseEventStartForEtDay(edtDay, () => 120);
-  const estStart = chooseEventStartForEtDay(estDay, () => 120);
+  const edtStart = chooseEventStartForEtDay(edtDay, () => 480);
+  const estStart = chooseEventStartForEtDay(estDay, () => 480);
 
   // Round-trips to 4PM ET on both sides of DST...
   assert.equal(getTimeZoneParts(edtStart, ET).hour, 16);
