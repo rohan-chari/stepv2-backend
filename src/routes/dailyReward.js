@@ -10,6 +10,13 @@ const {
 const {
   claimDailyRewardBox: defaultClaimDailyRewardBox,
 } = require("../commands/claimDailyRewardBox");
+const {
+  claimExtraDailyRewardBox: defaultClaimExtraDailyRewardBox,
+} = require("../commands/claimExtraDailyRewardBox");
+const {
+  getAdExtraSpinStatus: defaultGetAdExtraSpinStatus,
+} = require("../queries/getAdExtraSpinStatus");
+const defaultAdRewardsConfig = require("../config/adRewards");
 
 function createDailyRewardRouter(dependencies = {}) {
   const router = Router();
@@ -21,6 +28,11 @@ function createDailyRewardRouter(dependencies = {}) {
     dependencies.claimDailyReward || defaultClaimDailyReward;
   const claimDailyRewardBox =
     dependencies.claimDailyRewardBox || defaultClaimDailyRewardBox;
+  const claimExtraDailyRewardBox =
+    dependencies.claimExtraDailyRewardBox || defaultClaimExtraDailyRewardBox;
+  const getAdExtraSpinStatus =
+    dependencies.getAdExtraSpinStatus || defaultGetAdExtraSpinStatus;
+  const adRewardsConfig = dependencies.adRewardsConfig || defaultAdRewardsConfig;
 
   router.use(requireAuth);
 
@@ -36,6 +48,18 @@ function createDailyRewardRouter(dependencies = {}) {
         userId: req.user.id,
         localDate,
       });
+      // Rewarded-ad extra spin: additive, and only for clients that declared
+      // the `ads` capability — old binaries never see the field (and the env
+      // kill switch hides it from everyone without an app release).
+      if (
+        adRewardsConfig.ADS_EXTRA_SPIN_ENABLED &&
+        req.clientFeatures?.has("ads")
+      ) {
+        status.adExtraSpin = await getAdExtraSpinStatus({
+          userId: req.user.id,
+          localDate,
+        });
+      }
       res.json(status);
     } catch (error) {
       if (error.statusCode) {
@@ -82,6 +106,33 @@ function createDailyRewardRouter(dependencies = {}) {
           .json({ error: error.message });
       }
       console.error("Daily reward box claim error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Extra box spin paid by a verified rewarded-ad watch (AdRewardGrant minted
+  // by /ads/ssv). New endpoint: old binaries never call it, and the free
+  // /claim + /claim-box guards are untouched.
+  router.post("/claim-extra-box", async (req, res) => {
+    if (!adRewardsConfig.ADS_EXTRA_SPIN_ENABLED) {
+      return res.status(503).json({ error: "Extra spin is disabled" });
+    }
+    try {
+      const localDate = req.body?.localDate;
+      const result = await claimExtraDailyRewardBox({
+        userId: req.user.id,
+        localDate,
+      });
+      res.json(result);
+    } catch (error) {
+      if (error instanceof DailyRewardError) {
+        // `code` (e.g. AD_NOT_VERIFIED) lets the client distinguish "SSV
+        // hasn't landed yet, retry" from terminal 409s.
+        return res
+          .status(error.statusCode || 400)
+          .json({ error: error.message, code: error.code });
+      }
+      console.error("Daily reward extra box claim error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });

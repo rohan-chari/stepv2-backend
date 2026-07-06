@@ -18,6 +18,7 @@ const { createStepMilestonesRouter } = require("./routes/stepMilestones");
 const { createTutorialRouter } = require("./routes/tutorial");
 const { createHomeRouter } = require("./routes/home");
 const { createAppVersionRouter } = require("./routes/appVersion");
+const { createAdsRouter } = require("./routes/ads");
 const { extractTimezone } = require("./middleware/extractTimezone");
 const { extractClientFeatures } = require("./utils/clientFeatures");
 const sharing = require("./config/sharing");
@@ -74,6 +75,9 @@ function createApp(dependencies = {}) {
   app.use("/tutorial", createTutorialRouter(dependencies));
   app.use("/home", createHomeRouter(dependencies));
   app.use("/app-version", createAppVersionRouter(dependencies));
+  // Unauthenticated by design: Google's AdMob SSV callback, trusted via its
+  // ECDSA signature (see routes/ads.js).
+  app.use("/ads", createAdsRouter(dependencies));
 
   app.get("/health", (req, res) => {
     res.json({ status: "ok" });

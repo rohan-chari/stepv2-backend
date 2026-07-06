@@ -105,6 +105,7 @@ model User {
   referralsMade        Referral[]            @relation("ReferralsMade")
   referralReceived     Referral?             @relation("ReferralReceived")
   referralRewardGrants ReferralRewardGrant[]
+  adRewardGrants       AdRewardGrant[]
 
   @@map("users")
 }
@@ -154,6 +155,36 @@ model DailyRewardClaim {
   @@unique([userId, claimedDate])
   @@index([userId, createdAt])
   @@map("daily_reward_claims")
+}
+
+// Verified rewarded-ad watches (AdMob server-side verification). One row per
+// SSV callback, idempotent on transactionId — the row is minted by Google's
+// signed callback, never by the client, so it's the trust anchor for ad
+// rewards. consumedAt is set when the reward is redeemed (extra daily box
+// spin); the roll's result is denormalized onto the row instead of creating a
+// second DailyRewardClaim, whose @@unique([userId, claimedDate]) is
+// load-bearing for the free daily spin. See AD_REWARD_DESIGN.md (frontend repo).
+model AdRewardGrant {
+  id            String    @id @default(uuid())
+  userId        String    @map("user_id")
+  adUnit        String?   @map("ad_unit")
+  transactionId String    @unique @map("transaction_id")
+  rewardKind    String    @default("extra_daily_spin") @map("reward_kind")
+  // User-local YYYY-MM-DD the ad was watched (SSV custom_data; server UTC
+  // date fallback). The extra-spin claim consumes a grant for its localDate.
+  grantedDate   String    @map("granted_date")
+  consumedAt    DateTime? @map("consumed_at")
+  // Roll result, written at consumption (mirrors DailyRewardClaim columns).
+  rewardType    String?   @map("reward_type")
+  rarity        String?
+  coinAmount    Int?      @map("coin_amount")
+  shopItemId    String?   @map("shop_item_id")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, grantedDate])
+  @@map("ad_reward_grants")
 }
 
 model Friendship {
