@@ -180,6 +180,12 @@ function createApp(dependencies = {}) {
   app.get("/share-card.png", (req, res) =>
     res.sendFile(path.join(publicDir, "share-card.png"))
   );
+  // AdMob app-ads.txt verification. Crawled by Google at the domain listed as
+  // the app's developer website on the store listings; must be text/plain at
+  // exactly this path. One file covers every app on this domain.
+  app.get("/app-ads.txt", (req, res) =>
+    res.type("text/plain").sendFile(path.join(publicDir, "app-ads.txt"))
+  );
 
   return app;
 }
