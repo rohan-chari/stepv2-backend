@@ -29,8 +29,11 @@ function createAdsRouter(dependencies = {}) {
       const rawQuery = (req.originalUrl.split("?")[1] || "").toString();
       const params = parseSsvQuery(rawQuery);
 
+      // AdMob's console "verify callback URL" step pings the bare URL (no
+      // params, no signature) and requires a 200. Nothing mints without a
+      // verified transaction_id/user_id, so acknowledging is harmless.
       if (!params.transaction_id || !params.user_id) {
-        return res.status(400).json({ error: "Missing SSV parameters" });
+        return res.json({ ok: false, reason: "missing_params" });
       }
 
       if (!config.ADMOB_SSV_SKIP_VERIFY && !(await verifySsv(rawQuery))) {

@@ -90,14 +90,23 @@ test("GET /ads/ssv returns 200 on duplicate grants (Google retries)", async () =
   }
 });
 
-test("GET /ads/ssv without transaction_id/user_id is a 400", async () => {
+// AdMob's console "verify callback URL" step pings the bare URL and needs a
+// 200; a paramless ping must acknowledge without minting anything.
+test("GET /ads/ssv without transaction_id/user_id acks 200 and mints nothing", async () => {
+  const grants = [];
   const server = await startServer({
     verifySsv: async () => true,
-    grantAdReward: async () => ({ granted: true }),
+    grantAdReward: async (args) => {
+      grants.push(args);
+      return { granted: true };
+    },
   });
   try {
     const res = await fetch(`${server.baseUrl}/ads/ssv?foo=bar`);
-    assert.equal(res.status, 400);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.ok, false);
+    assert.equal(grants.length, 0);
   } finally {
     await server.close();
   }
