@@ -4,7 +4,7 @@ const {
   getRewardPreviewForDay,
 } = require("../constants/dailyReward");
 const {
-  interpolateDailyBoxOdds,
+  dailyBoxOddsForPool,
   DAILY_BOX_STREAK_CAP,
   DAILY_BOX_COIN_RANGES,
 } = require("../utils/dailyBoxOdds");
@@ -86,10 +86,15 @@ async function getDailyRewardStatus({ userId, localDate }) {
     user.dailyStreakDay,
     localDate
   );
-  const [common, uncommon, rare] = interpolateDailyBoxOdds(projectedStreak);
   // Same pool the RARE roll draws from, so the reel previews real winnable
   // accessories (capped — it's display-only).
   const accessoryPool = await getUnownedAccessoryPool(userId);
+  // Empty pool → RARE folded to 0 so shipped clients never draw the "???"
+  // mystery-accessory tile (see dailyBoxOddsForPool).
+  const [common, uncommon, rare] = dailyBoxOddsForPool(
+    projectedStreak,
+    accessoryPool.length
+  );
 
   return {
     cycleLength: CYCLE_LENGTH,

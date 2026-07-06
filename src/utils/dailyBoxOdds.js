@@ -38,8 +38,22 @@ function interpolateDailyBoxOdds(streak) {
   ];
 }
 
-function rollDailyBoxRarity(streak, rng = Math.random) {
-  const [commonOdds, uncommonOdds] = interpolateDailyBoxOdds(streak);
+// Odds actually served/rolled, given how many accessories the user can still
+// win. With an empty pool, RARE can't pay what it advertises ("new accessory"),
+// so fold its share into UNCOMMON and send RARE: 0. Shipped app builds render
+// the reel and the odds dialog straight from these numbers, so this is the
+// only way to keep an all-accessories-owned user from seeing the "???"
+// mystery-accessory placeholder tile on binaries already in the field.
+// UNCOMMON is computed as 1 - COMMON (not uncommon + rare) so the two tiers
+// sum to exactly 1 and the client's cumulative roll can never fall past them.
+function dailyBoxOddsForPool(streak, poolSize) {
+  const [common, uncommon, rare] = interpolateDailyBoxOdds(streak);
+  if (poolSize > 0) return [common, uncommon, rare];
+  return [common, 1 - common, 0];
+}
+
+function rollDailyBoxRarity(streak, rng = Math.random, poolSize = Infinity) {
+  const [commonOdds, uncommonOdds] = dailyBoxOddsForPool(streak, poolSize);
   const roll = rng();
   if (roll < commonOdds) return "COMMON";
   if (roll < commonOdds + uncommonOdds) return "UNCOMMON";
@@ -84,6 +98,7 @@ module.exports = {
   DAILY_BOX_COIN_RANGES,
   streakProgress,
   interpolateDailyBoxOdds,
+  dailyBoxOddsForPool,
   rollDailyBoxRarity,
   coinAmountForTier,
   pickAccessory,

@@ -7,6 +7,7 @@ const {
   DAILY_BOX_COIN_RANGES,
   streakProgress,
   interpolateDailyBoxOdds,
+  dailyBoxOddsForPool,
   rollDailyBoxRarity,
   coinAmountForTier,
   pickAccessory,
@@ -38,6 +39,41 @@ test("odds always sum to 1", () => {
     const sum = odds[0] + odds[1] + odds[2];
     assert.ok(Math.abs(sum - 1) < 1e-9, `streak ${streak} sums to ${sum}`);
   }
+});
+
+test("dailyBoxOddsForPool passes interpolated odds through for a non-empty pool", () => {
+  for (const streak of [1, 10, DAILY_BOX_STREAK_CAP]) {
+    assert.deepEqual(
+      dailyBoxOddsForPool(streak, 3),
+      interpolateDailyBoxOdds(streak)
+    );
+  }
+});
+
+test("dailyBoxOddsForPool folds RARE into UNCOMMON on an empty pool", () => {
+  for (const streak of [1, 10, DAILY_BOX_STREAK_CAP, 60]) {
+    const [common, uncommon, rare] = dailyBoxOddsForPool(streak, 0);
+    assert.equal(rare, 0, `streak ${streak} should serve RARE 0`);
+    // Exact sum (not just within epsilon): the shipped client draws a reel
+    // tile whenever its cumulative roll passes COMMON + UNCOMMON, so any
+    // float sliver below 1 would still let the "???" mystery tile through.
+    assert.equal(common + uncommon, 1, `streak ${streak} must sum to exactly 1`);
+  }
+});
+
+test("rollDailyBoxRarity never rolls RARE on an empty pool", () => {
+  for (const streak of [1, DAILY_BOX_STREAK_CAP]) {
+    for (const roll of [0, 0.5, 0.95, 0.999999, 1 - Number.EPSILON]) {
+      const rarity = rollDailyBoxRarity(streak, () => roll, 0);
+      assert.notEqual(rarity, "RARE", `streak ${streak} roll ${roll}`);
+    }
+  }
+});
+
+test("rollDailyBoxRarity keeps RARE reachable when the pool has items", () => {
+  assert.equal(rollDailyBoxRarity(1, () => 0.96, 5), "RARE");
+  // Omitted poolSize (legacy callers/tests) behaves as a non-empty pool.
+  assert.equal(rollDailyBoxRarity(1, () => 0.96), "RARE");
 });
 
 test("rollDailyBoxRarity respects rng buckets at day 1", () => {

@@ -22,8 +22,9 @@ const { serializeShopItem } = require("../utils/shopCosmetics");
 
 // Daily reward v2: one mystery-box roll per day. Rarity odds and payout size
 // scale with the user's consecutive-day login streak (see utils/dailyBoxOdds).
-// COMMON/UNCOMMON pay coins; RARE pays an unowned accessory (coins fallback
-// when the user owns everything). The legacy /claim path stays untouched for
+// COMMON/UNCOMMON pay coins; RARE pays an unowned accessory. When the user
+// owns every winnable accessory, RARE odds fold to 0 (see dailyBoxOddsForPool)
+// so the tier is never rolled. The legacy /claim path stays untouched for
 // old app builds; both paths share the once-per-day guard via
 // lastDailyClaimDate, so a user can never claim both in one day.
 async function claimDailyRewardBox({ userId, localDate, rng = Math.random }) {
@@ -62,7 +63,12 @@ async function claimDailyRewardBox({ userId, localDate, rng = Math.random }) {
     localDate
   );
 
-  const rarity = rollDailyBoxRarity(loginStreak, rng);
+  // Pool fetched before the roll: an empty pool folds RARE odds to 0 (matching
+  // what getDailyRewardStatus displayed), so we never mint a RARE whose reward
+  // can't be an accessory. The coins-fallback branch below stays as a safety
+  // net only.
+  const pool = await getUnownedAccessoryPool(userId);
+  const rarity = rollDailyBoxRarity(loginStreak, rng, pool.length);
 
   let rewardType;
   let coinAmount = null;
@@ -70,7 +76,6 @@ async function claimDailyRewardBox({ userId, localDate, rng = Math.random }) {
   let coinsAfter = null;
 
   if (rarity === "RARE") {
-    const pool = await getUnownedAccessoryPool(userId);
     const rolled = pickAccessory(pool, loginStreak, rng);
     if (rolled) {
       shopItem = rolled;

@@ -258,13 +258,27 @@ describe("daily reward box (v2)", () => {
     assert.equal(ownership.length, 2);
   });
 
-  it("rare roll falls back to coins when every accessory is owned", async () => {
+  it("owns-everything user: status serves RARE 0 and a max roll pays UNCOMMON coins", async () => {
     const user = await createUser();
     const item = await seedAccessory("drb-only-hat", 100);
     await prisma.userShopItem.create({
       data: { userId: user.userId, shopItemId: item.id },
     });
 
+    // Status folds RARE into UNCOMMON so shipped clients never draw the "???"
+    // mystery-accessory reel tile (COMMON + UNCOMMON must sum to exactly 1).
+    const status = await request(
+      server.baseUrl,
+      "GET",
+      `/daily-reward/status?localDate=${todayLocal()}`,
+      { token: user.token }
+    );
+    const statusBody = await status.json();
+    assert.equal(statusBody.box.accessoryPool.length, 0);
+    assert.equal(statusBody.box.odds.RARE, 0);
+    assert.equal(statusBody.box.odds.COMMON + statusBody.box.odds.UNCOMMON, 1);
+
+    // The claim roll uses the same folded odds: even a max roll can't land RARE.
     const {
       claimDailyRewardBox,
     } = require("../../src/commands/claimDailyRewardBox");
@@ -273,8 +287,8 @@ describe("daily reward box (v2)", () => {
       localDate: todayLocal(),
       rng: () => 0.999,
     });
-    assert.equal(result.rarity, "RARE");
-    assert.equal(result.rewardType, "COINS_FALLBACK");
-    assert.ok(result.coinAmount >= 100);
+    assert.equal(result.rarity, "UNCOMMON");
+    assert.equal(result.rewardType, "COINS");
+    assert.ok(result.coinAmount > 0);
   });
 });
