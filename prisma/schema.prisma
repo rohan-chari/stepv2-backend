@@ -797,7 +797,7 @@ model RacePowerup {
 
   race         Race              @relation(fields: [raceId], references: [id], onDelete: Cascade)
   participant  RaceParticipant   @relation(fields: [participantId], references: [id], onDelete: Cascade)
-  activeEffect RaceActiveEffect?
+  activeEffects RaceActiveEffect[]
 
   @@unique([participantId, earnedAtSteps])
   @@index([participantId, status])
@@ -828,7 +828,7 @@ model RaceActiveEffect {
   targetParticipantId String             @map("target_participant_id")
   targetUserId        String             @map("target_user_id")
   sourceUserId        String             @map("source_user_id")
-  powerupId           String             @unique @map("powerup_id")
+  powerupId           String             @map("powerup_id")
   type                PowerupType
   status              ActiveEffectStatus @default(ACTIVE)
   startsAt            DateTime           @map("starts_at")
@@ -841,6 +841,10 @@ model RaceActiveEffect {
   targetParticipant RaceParticipant @relation(fields: [targetParticipantId], references: [id], onDelete: Cascade)
   powerup           RacePowerup     @relation(fields: [powerupId], references: [id], onDelete: Cascade)
 
+  // One effect per (powerup, victim). AoE powerups (Rainstorm) fan one powerup
+  // out to N victims, so powerupId alone can't be unique — but the same storm
+  // must not double-apply to the same participant.
+  @@unique([powerupId, targetParticipantId])
   @@index([targetParticipantId, status])
   @@index([raceId, status])
   @@map("race_active_effects")
