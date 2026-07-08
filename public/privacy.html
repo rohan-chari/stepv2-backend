@@ -288,7 +288,7 @@
       <div class="post"></div>
     </div>
 
-    <p class="effective-date">Effective: June 16, 2026</p>
+    <p class="effective-date">Effective: July 8, 2026</p>
 
     <div class="top-nav">
       <a class="pill-btn" href="/">Home</a>
@@ -309,6 +309,9 @@
         <div class="row row-emphasis">
           Your health data (from HealthKit or Health Connect) is never used for advertising, is never sold to third parties, and is never shared with third parties for marketing or data-brokering purposes.
         </div>
+        <div class="row">
+          To keep your races current even when the app is closed, Bara may also read your step count <strong>in the background</strong>: on iOS via periodic background app refresh, and on Android via Health Connect's background-read permission, which you grant separately and can revoke at any time. Background reads collect the same single data type — your daily step count — and nothing else.
+        </div>
         <div class="row alt">
           You can revoke health access at any time: on <strong>iOS</strong> in Settings → Privacy &amp; Security → Health → Bara; on <strong>Android</strong> in the Health Connect app (or Settings → Security &amp; privacy → Health Connect) under app permissions → Bara. If you revoke access, the app will no longer read your step count.
         </div>
@@ -316,7 +319,7 @@
         <div class="section">Information We Collect</div>
         <div class="row-lv">
           <div class="lv-label">Account identifier (Apple / Google)</div>
-          <div class="lv-value">Account creation and sign-in — via Sign in with Apple on iOS, and Google Sign-In on Android. We receive only the opaque user identifier the provider supplies — we do not access your Apple ID or Google password.</div>
+          <div class="lv-value">Account creation and sign-in — via Sign in with Apple or Google Sign-In on iOS, and Google Sign-In on Android. We receive only the opaque user identifier the provider supplies — we do not access your Apple ID or Google password.</div>
         </div>
         <div class="row-lv alt">
           <div class="lv-label">Display name</div>
@@ -345,7 +348,7 @@
 
         <div class="section">Sign in with Apple / Google</div>
         <div class="row">
-          Authentication is via Sign in with Apple on iOS and Google Sign-In on Android. When you sign in, the provider gives us an opaque user identifier and, if you choose to share it, an email address. With Apple's "Hide My Email," we receive only Apple's relay address — we never see your real email. We do not access your Apple ID or Google password. The two providers are independent identities; an Apple (iOS) account and a Google (Android) account are not automatically linked.
+          Authentication is via Sign in with Apple or Google Sign-In on iOS, and Google Sign-In on Android. When you sign in, the provider gives us an opaque user identifier and, if you choose to share it, an email address. With Apple's "Hide My Email," we receive only Apple's relay address — we never see your real email. We do not access your Apple ID or Google password. The two providers are independent identities; an Apple account and a Google account are not automatically linked, even if they use the same email address.
         </div>
 
         <div class="section">How We Use Your Data</div>
@@ -355,7 +358,15 @@
 
         <div class="section">Data Sharing</div>
         <div class="row">
-          Your step count and display name are visible to friends you've accepted in the app. This is necessary for the challenge feature — if you're in a head-to-head challenge, your opponent can see your step progress for that week. We do not sell, rent, or share your personal data with any third parties for their own use. We do not use third-party analytics SDKs or advertising frameworks.
+          Your step count and display name are visible to friends you've accepted in the app. This is necessary for the challenge feature — if you're in a head-to-head challenge, your opponent can see your step progress for that week. We do not sell, rent, or share your personal data with any third parties for their own use. We do not use third-party analytics SDKs.
+        </div>
+
+        <div class="section">Advertising</div>
+        <div class="row">
+          The iOS app shows <strong>optional, clearly labeled ads</strong> (small banners and opt-in "watch an ad for a reward" offers) served by <strong>Google AdMob</strong>. On iOS we ask for App Tracking Transparency permission first; if you decline, ads are non-personalized and every reward flow works exactly the same. AdMob may collect its own device identifiers (such as the advertising identifier) to serve and measure ads, as described in <a href="https://policies.google.com/technologies/ads">Google's advertising policy</a>. The Android app currently shows no ads.
+        </div>
+        <div class="row row-emphasis">
+          Your health data, step counts, friends, and race activity are never shared with AdMob or any other advertising partner.
         </div>
 
         <div class="section">Storage &amp; Security</div>

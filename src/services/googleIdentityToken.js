@@ -1,9 +1,12 @@
 const crypto = require("node:crypto");
 
-// Google ID-token verifier — the Android counterpart of appleIdentityToken.js.
+// Google ID-token verifier — the Google counterpart of appleIdentityToken.js.
 // The Android app signs in with google_sign_in configured with our WEB OAuth
-// client id as serverClientId, so the returned ID token's `aud` is that web
-// client id (NOT the Android client id). Verify against GOOGLE_AUTH_CLIENT_ID.
+// client id as serverClientId, so its ID token's `aud` is that web client id
+// (NOT the Android client id). On iOS, the Google SDK instead issues ID tokens
+// with `aud` = the iOS OAuth client id. GOOGLE_AUTH_CLIENT_ID therefore accepts
+// a comma-separated allowlist (web client id + iOS client ids); a single value
+// keeps working unchanged.
 const GOOGLE_ISSUERS = ["accounts.google.com", "https://accounts.google.com"];
 const GOOGLE_KEYS_URL = "https://www.googleapis.com/oauth2/v3/certs";
 // Fallback TTL if the certs response has no usable Cache-Control max-age.
@@ -74,18 +77,22 @@ async function fetchGoogleSigningKeys() {
   return cachedGoogleKeys;
 }
 
-function getConfiguredAudience() {
-  const audience = process.env.GOOGLE_AUTH_CLIENT_ID;
-  if (!audience) {
+function getConfiguredAudiences() {
+  const raw = process.env.GOOGLE_AUTH_CLIENT_ID;
+  const audiences = (raw || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
+  if (audiences.length === 0) {
     throw new GoogleIdentityTokenError(
       "GOOGLE_AUTH_CLIENT_ID environment variable is required"
     );
   }
-  return audience;
+  return audiences;
 }
 
 function validatePayloadClaims(payload) {
-  const expectedAudience = getConfiguredAudience();
+  const expectedAudiences = getConfiguredAudiences();
   const nowInSeconds = Math.floor(Date.now() / 1000);
   const audience = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
 
@@ -93,7 +100,7 @@ function validatePayloadClaims(payload) {
     throw new GoogleIdentityTokenError("Google identity token issuer is invalid");
   }
 
-  if (!audience.includes(expectedAudience)) {
+  if (!audience.some((aud) => expectedAudiences.includes(aud))) {
     throw new GoogleIdentityTokenError("Google identity token audience is invalid");
   }
 
