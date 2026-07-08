@@ -71,10 +71,34 @@ const StepSample = {
   },
 
   async sumStepsInWindow(userId, windowStart, windowEnd) {
+    const sums = await this.sumStepsInWindows(userId, [
+      { start: windowStart, end: windowEnd },
+    ]);
+    return sums[0];
+  },
+
+  // Batched variant of sumStepsInWindow: ONE fetch spanning all windows, then
+  // the same per-window proration. Returns an array of sums parallel to
+  // `windows` ({start, end} each). Exists so per-day loops (see
+  // calculateSubsequentSteps) cost one query instead of one per day; results
+  // are identical to calling sumStepsInWindow per window because the overlap
+  // check discards any fetched sample that falls between windows.
+  async sumStepsInWindows(userId, windows) {
+    if (!windows || windows.length === 0) return [];
+
     // All timestamps stored as 'timestamp without time zone' representing UTC.
     // Use raw SQL with plain timestamp comparison -- no ::timestamptz casts.
-    const start = typeof windowStart === 'string' ? windowStart : new Date(windowStart).toISOString();
-    const end = typeof windowEnd === 'string' ? windowEnd : new Date(windowEnd).toISOString();
+    const parsed = windows.map((w) => ({
+      start: typeof w.start === "string" ? w.start : new Date(w.start).toISOString(),
+      end: typeof w.end === "string" ? w.end : new Date(w.end).toISOString(),
+    }));
+
+    const fetchStart = parsed
+      .map((w) => w.start)
+      .reduce((a, b) => (new Date(a) <= new Date(b) ? a : b));
+    const fetchEnd = parsed
+      .map((w) => w.end)
+      .reduce((a, b) => (new Date(a) >= new Date(b) ? a : b));
 
     const samples = await prisma.$queryRawUnsafe(
       `SELECT period_start AS "start", period_end AS "end", steps
@@ -82,35 +106,45 @@ const StepSample = {
        WHERE user_id = $1
          AND period_end > $2::timestamp
          AND period_start < $3::timestamp`,
-      userId, start, end
+      userId, fetchStart, fetchEnd
     );
 
-    const windowStartMs = new Date(start).getTime();
-    const windowEndMs = new Date(end).getTime();
-
-    let total = 0;
-    for (const sample of samples) {
-      const sampleStart = sample.start.getTime();
-      const sampleEnd = sample.end.getTime();
-      const sampleDuration = sampleEnd - sampleStart;
-
-      if (sampleDuration <= 0) continue;
-
-      const overlapStart = Math.max(sampleStart, windowStartMs);
-      const overlapEnd = Math.min(sampleEnd, windowEndMs);
-      const overlapDuration = overlapEnd - overlapStart;
-
-      if (overlapDuration <= 0) continue;
-
-      if (overlapDuration >= sampleDuration) {
-        total += sample.steps;
-      } else {
-        total += Math.round(sample.steps * (overlapDuration / sampleDuration));
-      }
-    }
-
-    return total;
+    return parsed.map((w) =>
+      prorateSamplesIntoWindow(
+        samples,
+        new Date(w.start).getTime(),
+        new Date(w.end).getTime()
+      )
+    );
   },
 };
 
-module.exports = { StepSample };
+// A sample overlapping the window contributes its steps, prorated linearly by
+// the overlapped fraction of its duration. Shared by the single- and batched-
+// window sums so the two can never diverge.
+function prorateSamplesIntoWindow(samples, windowStartMs, windowEndMs) {
+  let total = 0;
+  for (const sample of samples) {
+    const sampleStart = sample.start.getTime();
+    const sampleEnd = sample.end.getTime();
+    const sampleDuration = sampleEnd - sampleStart;
+
+    if (sampleDuration <= 0) continue;
+
+    const overlapStart = Math.max(sampleStart, windowStartMs);
+    const overlapEnd = Math.min(sampleEnd, windowEndMs);
+    const overlapDuration = overlapEnd - overlapStart;
+
+    if (overlapDuration <= 0) continue;
+
+    if (overlapDuration >= sampleDuration) {
+      total += sample.steps;
+    } else {
+      total += Math.round(sample.steps * (overlapDuration / sampleDuration));
+    }
+  }
+
+  return total;
+}
+
+module.exports = { StepSample, prorateSamplesIntoWindow };

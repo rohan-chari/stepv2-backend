@@ -124,31 +124,39 @@ async function calculateCurrentTotal({
   let rainstorms = [];
 
   if (racePowerupsEnabled) {
-    legCramps = await raceActiveEffectModel.findEffectsForRaceByType(
-      raceId,
-      participant.id,
-      "LEG_CRAMP"
-    );
-    runnersHighs = await raceActiveEffectModel.findEffectsForRaceByType(
-      raceId,
-      participant.id,
-      "RUNNERS_HIGH"
-    );
-    wrongTurns = await raceActiveEffectModel.findEffectsForRaceByType(
-      raceId,
-      participant.id,
-      "WRONG_TURN"
-    );
-    campfires = await raceActiveEffectModel.findEffectsForRaceByType(
-      raceId,
-      participant.id,
-      "CAMPFIRE_REST"
-    );
-    rainstorms = await raceActiveEffectModel.findEffectsForRaceByType(
-      raceId,
-      participant.id,
-      "RAINSTORM"
-    );
+    const EFFECT_TYPES = [
+      "LEG_CRAMP",
+      "RUNNERS_HIGH",
+      "WRONG_TURN",
+      "CAMPFIRE_REST",
+      "RAINSTORM",
+    ];
+    // One query for all five types when the model supports it; fall back to
+    // per-type queries for injected fakes. Same rows, same per-type order.
+    let byType;
+    if (typeof raceActiveEffectModel.findEffectsForRaceByTypes === "function") {
+      byType = await raceActiveEffectModel.findEffectsForRaceByTypes(
+        raceId,
+        participant.id,
+        EFFECT_TYPES
+      );
+    } else {
+      const lists = await Promise.all(
+        EFFECT_TYPES.map((type) =>
+          raceActiveEffectModel.findEffectsForRaceByType(
+            raceId,
+            participant.id,
+            type
+          )
+        )
+      );
+      byType = Object.fromEntries(EFFECT_TYPES.map((t, i) => [t, lists[i]]));
+    }
+    legCramps = byType.LEG_CRAMP;
+    runnersHighs = byType.RUNNERS_HIGH;
+    wrongTurns = byType.WRONG_TURN;
+    campfires = byType.CAMPFIRE_REST;
+    rainstorms = byType.RAINSTORM;
   }
 
   // Use the SAME computeEffectModifiers the display path uses, including the

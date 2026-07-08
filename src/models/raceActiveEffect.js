@@ -43,6 +43,28 @@ const RaceActiveEffect = {
     });
   },
 
+  // Batched variant of findEffectsForRaceByType: one query for several types,
+  // returned as { [type]: effects[] } with each list in the same createdAt-asc
+  // order the per-type query produces. Types with no effects map to [].
+  async findEffectsForRaceByTypes(raceId, targetParticipantId, types) {
+    const effects = await prisma.raceActiveEffect.findMany({
+      where: {
+        raceId,
+        targetParticipantId,
+        type: { in: types },
+        status: { in: ["ACTIVE", "EXPIRED"] },
+      },
+      orderBy: { createdAt: "asc" },
+    });
+
+    const byType = {};
+    for (const type of types) byType[type] = [];
+    for (const effect of effects) {
+      (byType[effect.type] ||= []).push(effect);
+    }
+    return byType;
+  },
+
   async update(id, fields) {
     return prisma.raceActiveEffect.update({
       where: { id },

@@ -50,7 +50,11 @@ async function calculateSubsequentSteps({
   }
 
   const nowMs = new Date(now).getTime();
-  let total = 0;
+
+  // First pass: compute each day's window (identical boundaries and guards to
+  // the original one-query-per-day loop), THEN sum all windows in one batched
+  // query. Per-day results are unchanged; only the number of round-trips is.
+  const dayWindows = [];
 
   for (
     let date = dayAfterStartDate;
@@ -93,13 +97,25 @@ async function calculateSubsequentSteps({
       dayEnd = new Date(nowMs);
     }
 
-    const daySamples = await stepSampleModel.sumStepsInWindow(
-      userId,
-      dayStart,
-      dayEnd
-    );
-    const dailySteps = dailyByDate.get(date) || 0;
-    total += Math.max(daySamples, dailySteps);
+    dayWindows.push({ date, start: dayStart, end: dayEnd });
+  }
+
+  // Batched path when the model supports it (the real StepSample does); fall
+  // back to per-window sums for injected fakes that only implement
+  // sumStepsInWindow. Both paths produce identical numbers.
+  const daySampleSums =
+    typeof stepSampleModel.sumStepsInWindows === "function"
+      ? await stepSampleModel.sumStepsInWindows(userId, dayWindows)
+      : await Promise.all(
+          dayWindows.map((w) =>
+            stepSampleModel.sumStepsInWindow(userId, w.start, w.end)
+          )
+        );
+
+  let total = 0;
+  for (let i = 0; i < dayWindows.length; i++) {
+    const dailySteps = dailyByDate.get(dayWindows[i].date) || 0;
+    total += Math.max(daySampleSums[i] || 0, dailySteps);
   }
 
   return total;
