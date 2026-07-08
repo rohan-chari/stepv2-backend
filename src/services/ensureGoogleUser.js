@@ -3,10 +3,7 @@ const crypto = require("node:crypto");
 const { eventBus } = require("../events/eventBus");
 const { User } = require("../models/user");
 const { recordReferral } = require("../commands/recordReferral");
-const {
-  validateDisplayName,
-  normalizeToCharset,
-} = require("../lib/displayNameValidator");
+const { validateDisplayName } = require("../lib/displayNameValidator");
 
 // Google (Android) account provisioning — the counterpart of ensureAppleUser.js,
 // keyed on the verified Google `sub` stored in user.googleSub. Kept as a separate
@@ -16,8 +13,32 @@ const {
 // nullable/non-unique and unreliable across providers (Apple private relay, etc.),
 // so each Google sign-in is an independent identity. See ANDROID.md §G1.
 
-const DISPLAY_NAME_MIN_LENGTH = 4;
-const FUN_PREFIXES = [
+// Display names are never derived from the Apple/Google real name (privacy —
+// the provider name stays in user.name only). New users always start with a
+// generated fun name and can rename later via PUT /auth/me/display-name.
+const FUN_ADJECTIVES = [
+  "Swift",
+  "Brisk",
+  "Zippy",
+  "Peppy",
+  "Sunny",
+  "Breezy",
+  "Nimble",
+  "Mighty",
+  "Dashing",
+  "Bouncy",
+  "Zesty",
+  "Snappy",
+  "Chipper",
+  "Merry",
+  "Plucky",
+  "Spry",
+  "Rapid",
+  "Lively",
+  "Turbo",
+  "Cosmic",
+];
+const FUN_NOUNS = [
   "Walker",
   "Trekker",
   "Strider",
@@ -26,27 +47,30 @@ const FUN_PREFIXES = [
   "Pacer",
   "Hiker",
   "Capybara",
+  "Corgi",
+  "Gazelle",
+  "Cheetah",
+  "Roadrunner",
+  "Penguin",
+  "Otter",
+  "Wombat",
+  "Koala",
+  "Falcon",
+  "Ibex",
+  "Puma",
+  "Yeti",
 ];
 
 function randomHex(len) {
   return crypto.randomBytes(Math.ceil(len / 2)).toString("hex").slice(0, len);
 }
 
-function sanitize(name) {
-  if (typeof name !== "string") return "";
-  return normalizeToCharset(name).trim();
-}
-
-function baseFromProviderName(name) {
-  const clean = sanitize(name);
-  if (!clean) return null;
-  if (clean.length >= DISPLAY_NAME_MIN_LENGTH) return clean;
-  return clean + randomHex(DISPLAY_NAME_MIN_LENGTH - clean.length);
-}
-
 function randomFunName() {
-  const prefix = FUN_PREFIXES[Math.floor(Math.random() * FUN_PREFIXES.length)];
-  return `${prefix}${randomHex(4)}`;
+  const adjective =
+    FUN_ADJECTIVES[Math.floor(Math.random() * FUN_ADJECTIVES.length)];
+  const noun = FUN_NOUNS[Math.floor(Math.random() * FUN_NOUNS.length)];
+  const digits = String(Math.floor(Math.random() * 100)).padStart(2, "0");
+  return `${adjective}${noun}${digits}`;
 }
 
 async function pickUniqueDisplayName({ userModel, base }) {
@@ -58,6 +82,7 @@ async function pickUniqueDisplayName({ userModel, base }) {
   candidates.push(`${randomFunName()}${randomHex(4)}`);
 
   for (const candidate of candidates) {
+    // Safety net: skip anything the validator rejects so onboarding never fails.
     if (!validateDisplayName(candidate).isValid) continue;
     const taken = await userModel.findByDisplayNameInsensitive(candidate);
     if (!taken) return candidate;
@@ -87,8 +112,10 @@ function buildEnsureGoogleUser(dependencies = {}) {
       });
 
       if (!user.displayName) {
-        const base = baseFromProviderName(name) || randomFunName();
-        const displayName = await pickUniqueDisplayName({ userModel, base });
+        const displayName = await pickUniqueDisplayName({
+          userModel,
+          base: randomFunName(),
+        });
         user = await userModel.update(user.id, { displayName });
       }
 

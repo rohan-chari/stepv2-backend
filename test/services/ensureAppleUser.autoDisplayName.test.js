@@ -3,14 +3,16 @@ const test = require("node:test");
 
 const { buildEnsureAppleUser } = require("../../src/services/ensureAppleUser");
 
-function makeUserModel({ existingByDisplayName = new Set() } = {}) {
+function makeUserModel({ takenOnFirstLookup = false } = {}) {
   let nextId = 1;
+  let lookups = 0;
   const created = [];
   const updates = [];
 
   return {
     created,
     updates,
+    firstLookupName: () => null,
     model: {
       async findByAppleId() {
         return null;
@@ -26,7 +28,8 @@ function makeUserModel({ existingByDisplayName = new Set() } = {}) {
         return { ...created0, ...fields };
       },
       async findByDisplayNameInsensitive(displayName) {
-        if (existingByDisplayName.has(displayName.toLowerCase())) {
+        lookups += 1;
+        if (takenOnFirstLookup && lookups === 1) {
           return { id: "someone-else", displayName };
         }
         return null;
@@ -39,7 +42,7 @@ function silentEvents() {
   return { emit() {} };
 }
 
-test("auto-generates displayName from Apple fullName for a new user", async () => {
+test("assigns a generated displayName that ignores the Apple real name", async () => {
   const ctx = makeUserModel();
   const ensureAppleUser = buildEnsureAppleUser({
     User: ctx.model,
@@ -49,7 +52,7 @@ test("auto-generates displayName from Apple fullName for a new user", async () =
   const user = await ensureAppleUser({
     appleId: "apple-1",
     email: null,
-    name: "Walker Capybara",
+    name: "Rohan Chari",
   });
 
   assert.ok(user.displayName, "displayName should be populated");
@@ -57,19 +60,19 @@ test("auto-generates displayName from Apple fullName for a new user", async () =
     user.displayName.length >= 4,
     `displayName "${user.displayName}" should be at least 4 chars`
   );
-  assert.doesNotMatch(
-    user.displayName,
-    /\s/,
-    "auto-generated displayName must not contain whitespace"
-  );
   assert.match(
     user.displayName,
-    /walker|capybara/i,
-    "displayName should be derived from Apple fullName"
+    /^[A-Za-z0-9_]+$/,
+    `displayName "${user.displayName}" must be charset-valid`
+  );
+  assert.doesNotMatch(
+    user.displayName,
+    /rohan|chari/i,
+    "displayName must not be derived from the Apple real name"
   );
 });
 
-test("pads short Apple names to meet the minimum length", async () => {
+test("generates a fun name when Apple shares no name", async () => {
   const ctx = makeUserModel();
   const ensureAppleUser = buildEnsureAppleUser({
     User: ctx.model,
@@ -79,15 +82,16 @@ test("pads short Apple names to meet the minimum length", async () => {
   const user = await ensureAppleUser({
     appleId: "apple-2",
     email: null,
-    name: "Ada",
+    name: null,
   });
 
+  assert.ok(user.displayName);
   assert.ok(user.displayName.length >= 4);
-  assert.match(user.displayName, /^Ada/);
+  assert.match(user.displayName, /^[A-Za-z0-9_]+$/);
 });
 
-test("falls back to a fun generated name when Apple shares no name", async () => {
-  const ctx = makeUserModel();
+test("retries on displayName collision to ensure uniqueness", async () => {
+  const ctx = makeUserModel({ takenOnFirstLookup: true });
   const ensureAppleUser = buildEnsureAppleUser({
     User: ctx.model,
     eventBus: silentEvents(),
@@ -101,12 +105,11 @@ test("falls back to a fun generated name when Apple shares no name", async () =>
 
   assert.ok(user.displayName);
   assert.ok(user.displayName.length >= 4);
+  assert.match(user.displayName, /^[A-Za-z0-9_]+$/);
 });
 
-test("retries on displayName collision to ensure uniqueness", async () => {
-  const ctx = makeUserModel({
-    existingByDisplayName: new Set(["walkercapybara"]),
-  });
+test("stays charset-valid even when Apple shares an accented name", async () => {
+  const ctx = makeUserModel();
   const ensureAppleUser = buildEnsureAppleUser({
     User: ctx.model,
     eventBus: silentEvents(),
@@ -115,24 +118,6 @@ test("retries on displayName collision to ensure uniqueness", async () => {
   const user = await ensureAppleUser({
     appleId: "apple-4",
     email: null,
-    name: "Walker Capybara",
-  });
-
-  assert.ok(user.displayName);
-  assert.notEqual(user.displayName.toLowerCase(), "walkercapybara");
-  assert.ok(user.displayName.length >= 4);
-});
-
-test("derives a charset-valid displayName from an accented Apple name", async () => {
-  const ctx = makeUserModel();
-  const ensureAppleUser = buildEnsureAppleUser({
-    User: ctx.model,
-    eventBus: silentEvents(),
-  });
-
-  const user = await ensureAppleUser({
-    appleId: "apple-5",
-    email: null,
     name: "José García",
   });
 
@@ -140,33 +125,29 @@ test("derives a charset-valid displayName from an accented Apple name", async ()
   assert.match(
     user.displayName,
     /^[A-Za-z0-9_]+$/,
-    `auto-generated displayName "${user.displayName}" must be charset-valid`
+    `displayName "${user.displayName}" must be charset-valid`
   );
-  assert.ok(user.displayName.length >= 4);
-  // Transliterated + punctuation/space-stripped base.
-  assert.match(user.displayName, /^JoseGarcia/);
+  assert.doesNotMatch(
+    user.displayName,
+    /jose|garcia/i,
+    "displayName must not be derived from the Apple real name"
+  );
 });
 
-test("falls back to a charset-valid generated name for a hyphen/period-only Apple name", async () => {
+test("still stores the raw Apple name on the user record", async () => {
   const ctx = makeUserModel();
   const ensureAppleUser = buildEnsureAppleUser({
     User: ctx.model,
     eventBus: silentEvents(),
   });
 
-  const user = await ensureAppleUser({
-    appleId: "apple-6",
+  await ensureAppleUser({
+    appleId: "apple-5",
     email: null,
-    name: "J.-.",
+    name: "Rohan Chari",
   });
 
-  assert.ok(user.displayName);
-  assert.match(
-    user.displayName,
-    /^[A-Za-z0-9_]+$/,
-    `displayName "${user.displayName}" must be charset-valid`
-  );
-  assert.ok(user.displayName.length >= 4);
+  assert.equal(ctx.created[0].name, "Rohan Chari");
 });
 
 test("does not regenerate displayName for existing users that already have one", async () => {

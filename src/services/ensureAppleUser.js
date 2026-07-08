@@ -3,13 +3,34 @@ const crypto = require("node:crypto");
 const { eventBus } = require("../events/eventBus");
 const { User } = require("../models/user");
 const { recordReferral } = require("../commands/recordReferral");
-const {
-  validateDisplayName,
-  normalizeToCharset,
-} = require("../lib/displayNameValidator");
+const { validateDisplayName } = require("../lib/displayNameValidator");
 
-const DISPLAY_NAME_MIN_LENGTH = 4;
-const FUN_PREFIXES = [
+// Display names are never derived from the Apple/Google real name (privacy —
+// the provider name stays in user.name only). New users always start with a
+// generated fun name and can rename later via PUT /auth/me/display-name.
+const FUN_ADJECTIVES = [
+  "Swift",
+  "Brisk",
+  "Zippy",
+  "Peppy",
+  "Sunny",
+  "Breezy",
+  "Nimble",
+  "Mighty",
+  "Dashing",
+  "Bouncy",
+  "Zesty",
+  "Snappy",
+  "Chipper",
+  "Merry",
+  "Plucky",
+  "Spry",
+  "Rapid",
+  "Lively",
+  "Turbo",
+  "Cosmic",
+];
+const FUN_NOUNS = [
   "Walker",
   "Trekker",
   "Strider",
@@ -18,30 +39,30 @@ const FUN_PREFIXES = [
   "Pacer",
   "Hiker",
   "Capybara",
+  "Corgi",
+  "Gazelle",
+  "Cheetah",
+  "Roadrunner",
+  "Penguin",
+  "Otter",
+  "Wombat",
+  "Koala",
+  "Falcon",
+  "Ibex",
+  "Puma",
+  "Yeti",
 ];
 
 function randomHex(len) {
   return crypto.randomBytes(Math.ceil(len / 2)).toString("hex").slice(0, len);
 }
 
-function sanitize(name) {
-  if (typeof name !== "string") return "";
-  // Display names must match the allowed charset (letters, numbers, underscore).
-  // Transliterate accents and drop any other character (incl. whitespace) so a
-  // derived Apple name like "José García" becomes "JoseGarcia".
-  return normalizeToCharset(name).trim();
-}
-
-function baseFromAppleName(name) {
-  const clean = sanitize(name);
-  if (!clean) return null;
-  if (clean.length >= DISPLAY_NAME_MIN_LENGTH) return clean;
-  return clean + randomHex(DISPLAY_NAME_MIN_LENGTH - clean.length);
-}
-
 function randomFunName() {
-  const prefix = FUN_PREFIXES[Math.floor(Math.random() * FUN_PREFIXES.length)];
-  return `${prefix}${randomHex(4)}`;
+  const adjective =
+    FUN_ADJECTIVES[Math.floor(Math.random() * FUN_ADJECTIVES.length)];
+  const noun = FUN_NOUNS[Math.floor(Math.random() * FUN_NOUNS.length)];
+  const digits = String(Math.floor(Math.random() * 100)).padStart(2, "0");
+  return `${adjective}${noun}${digits}`;
 }
 
 async function pickUniqueDisplayName({ userModel, base }) {
@@ -49,14 +70,11 @@ async function pickUniqueDisplayName({ userModel, base }) {
   for (let i = 0; i < 5; i++) {
     candidates.push(`${base}${randomHex(2 + i)}`);
   }
-  // Always end with guaranteed-valid generated fallbacks so onboarding never
-  // fails even if the Apple-derived base is profane or otherwise invalid.
   candidates.push(randomFunName());
   candidates.push(`${randomFunName()}${randomHex(4)}`);
 
   for (const candidate of candidates) {
-    // A derived candidate could fail the stricter rules (e.g. profane Apple
-    // name). Skip invalid candidates; the generated fallbacks always pass.
+    // Safety net: skip anything the validator rejects so onboarding never fails.
     if (!validateDisplayName(candidate).isValid) continue;
     const taken = await userModel.findByDisplayNameInsensitive(candidate);
     if (!taken) return candidate;
@@ -86,8 +104,10 @@ function buildEnsureAppleUser(dependencies = {}) {
       });
 
       if (!user.displayName) {
-        const base = baseFromAppleName(name) || randomFunName();
-        const displayName = await pickUniqueDisplayName({ userModel, base });
+        const displayName = await pickUniqueDisplayName({
+          userModel,
+          base: randomFunName(),
+        });
         user = await userModel.update(user.id, { displayName });
       }
 

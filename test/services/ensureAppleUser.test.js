@@ -46,15 +46,14 @@ test("creates a new user and emits registration events when the Apple user is mi
     emitSignInEvent: true,
   });
 
-  // Display name is derived from the Apple name with the allowed charset
-  // (whitespace dropped): "Rohan Chari" -> "RohanChari".
-  assert.deepEqual(user, {
-    id: "user-1",
-    appleId: "apple-user-123",
-    email: "walker@example.com",
-    name: "Rohan Chari",
-    displayName: "RohanChari",
-  });
+  // Display name is generated (never derived from the Apple real name); the
+  // raw name is kept on user.name only.
+  assert.equal(user.id, "user-1");
+  assert.equal(user.appleId, "apple-user-123");
+  assert.equal(user.email, "walker@example.com");
+  assert.equal(user.name, "Rohan Chari");
+  assert.match(user.displayName, /^[A-Za-z0-9_]+$/);
+  assert.doesNotMatch(user.displayName, /rohan|chari/i);
   assert.deepEqual(storedUsers, [
     {
       appleId: "apple-user-123",
