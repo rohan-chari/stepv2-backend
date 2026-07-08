@@ -65,6 +65,32 @@ const RaceActiveEffect = {
     return byType;
   },
 
+  // Bulk variant of findEffectsForRaceByTypes across many races' participants
+  // (cross-participant prefetch in getHomeRaceCard). One query, returned as
+  // { [participantId]: { [type]: effects[] } } with each list in the same
+  // createdAt-asc order the per-participant query produces. Participant ids
+  // are globally unique, so keying by participant alone is unambiguous.
+  async findEffectsForRaceParticipantsByTypes(raceIds, participantIds, types) {
+    const byParticipant = {};
+    if (!participantIds || participantIds.length === 0) return byParticipant;
+
+    const effects = await prisma.raceActiveEffect.findMany({
+      where: {
+        raceId: { in: raceIds },
+        targetParticipantId: { in: participantIds },
+        type: { in: types },
+        status: { in: ["ACTIVE", "EXPIRED"] },
+      },
+      orderBy: { createdAt: "asc" },
+    });
+
+    for (const effect of effects) {
+      const forParticipant = (byParticipant[effect.targetParticipantId] ||= {});
+      (forParticipant[effect.type] ||= []).push(effect);
+    }
+    return byParticipant;
+  },
+
   async update(id, fields) {
     return prisma.raceActiveEffect.update({
       where: { id },

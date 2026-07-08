@@ -4,9 +4,11 @@ const { RaceActiveEffect } = require("../models/raceActiveEffect");
 const { Steps } = require("../models/steps");
 const { StepSample } = require("../models/stepSample");
 const {
+  POWERUP_EFFECT_TYPES,
   calculateBaseAdjusted,
   calculateCurrentTotal,
 } = require("../services/raceStateResolution");
+const { prorateSamplesIntoWindow } = require("../models/stepSample");
 const { raceTimeZone } = require("../utils/raceTimeZone");
 
 // Max number of active races returned in the new ACTIVE_RACES (opt-in) state.
@@ -185,6 +187,165 @@ function compareParticipantsForPlacement(left, right) {
   return String(left.userId || "").localeCompare(String(right.userId || ""));
 }
 
+// Cross-participant prefetch: pull step samples, daily rows, and powerup
+// effects for ALL participants of ALL the user's active races in three bulk
+// queries, then hand the per-participant math (calculateBaseAdjusted /
+// calculateCurrentTotal) scoped in-memory models with the SAME interface. The
+// helpers run unchanged — same windows, same proration, same rounding — so
+// results are identical to the per-participant queries; only the number of
+// round-trips changes (~4/person to 3/request). One shared prefetch also
+// dedupes users who appear in several of the viewer's races. Any request
+// outside the prefetched range (defensive; not expected) falls through to the
+// real models, trading speed for correctness.
+async function prefetchScopedModels({
+  races,
+  now,
+  stepsModel,
+  stepSampleModel,
+  raceActiveEffectModel,
+}) {
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const started = races.filter((r) => r.startedAt);
+  if (started.length === 0) return null;
+
+  // Samples: every window the helpers ask for starts at/after its race's
+  // start (effectiveStart >= startedAt; effect windows live inside the race),
+  // so the earliest startedAt covers every race. The forward margin
+  // generously covers "today"-capped and active-effect windows.
+  const earliestStartMs = Math.min(...started.map((r) => r.startedAt.getTime()));
+  const sampleRangeStart = new Date(earliestStartMs);
+  const sampleRangeEnd = new Date(now.getTime() + 7 * DAY_MS);
+  // Daily rows are keyed by LOCAL date (stored as UTC-midnight of the date
+  // string), so pad backwards: a race's local start date can precede the UTC
+  // date of startedAt in western time zones.
+  const dailyRangeStart = new Date(earliestStartMs - 3 * DAY_MS);
+  const dailyRangeEnd = new Date(now.getTime() + 3 * DAY_MS);
+
+  const userIds = [
+    ...new Set(started.flatMap((r) => r.participants.map((p) => p.userId))),
+  ];
+  // Participant ids are globally unique, so effects keyed by participant id
+  // alone serve every race from one map.
+  const powerupRaces = started.filter((r) => r.powerupsEnabled);
+  const participantIds = powerupRaces.flatMap((r) =>
+    r.participants.map((p) => p.id)
+  );
+
+  const [sampleRows, dailyRows, effectsByParticipant] = await Promise.all([
+    stepSampleModel.findRowsForUsersInRange(userIds, sampleRangeStart, sampleRangeEnd),
+    stepsModel.findByUserIdsAndDateRange(userIds, dailyRangeStart, dailyRangeEnd),
+    participantIds.length > 0
+      ? raceActiveEffectModel.findEffectsForRaceParticipantsByTypes(
+          powerupRaces.map((r) => r.id),
+          participantIds,
+          POWERUP_EFFECT_TYPES
+        )
+      : Promise.resolve({}),
+  ]);
+
+  const samplesByUser = new Map();
+  for (const row of sampleRows) {
+    let list = samplesByUser.get(row.userId);
+    if (!list) samplesByUser.set(row.userId, (list = []));
+    list.push(row);
+  }
+  const dailyByUser = new Map();
+  for (const row of dailyRows) {
+    let list = dailyByUser.get(row.userId);
+    if (!list) dailyByUser.set(row.userId, (list = []));
+    list.push(row);
+  }
+
+  const sampleStartMs = new Date(sampleRangeStart).getTime();
+  const sampleEndMs = sampleRangeEnd.getTime();
+  const dailyStartMs = dailyRangeStart.getTime();
+  const dailyEndMs = dailyRangeEnd.getTime();
+  const prefetchedTypes = new Set(POWERUP_EFFECT_TYPES);
+
+  const scopedStepSamples = {
+    async sumStepsInWindows(userId, windows) {
+      if (!windows || windows.length === 0) return [];
+      const covered = windows.every((w) => {
+        const ws = new Date(w.start).getTime();
+        const we = new Date(w.end).getTime();
+        return ws >= sampleStartMs && we <= sampleEndMs;
+      });
+      if (!covered) return stepSampleModel.sumStepsInWindows(userId, windows);
+      const rows = samplesByUser.get(userId) || [];
+      return windows.map((w) =>
+        prorateSamplesIntoWindow(
+          rows,
+          new Date(w.start).getTime(),
+          new Date(w.end).getTime()
+        )
+      );
+    },
+    async sumStepsInWindow(userId, windowStart, windowEnd) {
+      const sums = await this.sumStepsInWindows(userId, [
+        { start: windowStart, end: windowEnd },
+      ]);
+      return sums[0];
+    },
+  };
+
+  const scopedSteps = {
+    async findByUserIdAndDate(userId, date) {
+      const keyMs = new Date(date).getTime();
+      if (keyMs < dailyStartMs || keyMs > dailyEndMs) {
+        return stepsModel.findByUserIdAndDate(userId, date);
+      }
+      const rows = dailyByUser.get(userId) || [];
+      return rows.find((r) => new Date(r.date).getTime() === keyMs) ?? null;
+    },
+    async findByUserIdAndDateRange(userId, startDate, endDate) {
+      const startMs = new Date(startDate).getTime();
+      const endMs = new Date(endDate).getTime();
+      if (startMs < dailyStartMs || endMs > dailyEndMs) {
+        return stepsModel.findByUserIdAndDateRange(userId, startDate, endDate);
+      }
+      const rows = dailyByUser.get(userId) || [];
+      return rows.filter((r) => {
+        const ms = new Date(r.date).getTime();
+        return ms >= startMs && ms <= endMs;
+      });
+    },
+  };
+
+  const scopedEffects = {
+    async findEffectsForRaceByTypes(raceId, targetParticipantId, types) {
+      if (!types.every((t) => prefetchedTypes.has(t))) {
+        return raceActiveEffectModel.findEffectsForRaceByTypes(
+          raceId,
+          targetParticipantId,
+          types
+        );
+      }
+      const forParticipant = effectsByParticipant[targetParticipantId] || {};
+      const byType = {};
+      for (const type of types) byType[type] = forParticipant[type] || [];
+      return byType;
+    },
+    async findEffectsForRaceByType(raceId, targetParticipantId, type) {
+      if (!prefetchedTypes.has(type)) {
+        return raceActiveEffectModel.findEffectsForRaceByType(
+          raceId,
+          targetParticipantId,
+          type
+        );
+      }
+      return (effectsByParticipant[targetParticipantId] || {})[type] || [];
+    },
+    // Race-level lookups aren't per-participant hot paths; pass through.
+    findActiveForRace: (raceId) => raceActiveEffectModel.findActiveForRace(raceId),
+  };
+
+  return {
+    stepsModel: scopedSteps,
+    stepSampleModel: scopedStepSamples,
+    raceActiveEffectModel: scopedEffects,
+  };
+}
+
 // Opt-in (new app builds) only: return ALL of the user's active races as a list
 // so the home page can render a horizontally-scrollable row of cards. Each race
 // carries its top-3 participants (with equipped cosmetics) and the viewer's own
@@ -229,10 +390,34 @@ async function checkActiveRaces(prisma, userId, options = {}) {
 
   if (!myActive || myActive.length === 0) return null;
 
-  const races = [];
-  for (const participation of myActive) {
+  // Prefetch is only possible against the real models (or fakes that opt in);
+  // tests inject minimal fakes without the bulk methods and keep the legacy
+  // per-participant query path, which is behaviorally identical.
+  const canPrefetch =
+    typeof stepSampleModel.findRowsForUsersInRange === "function" &&
+    typeof stepsModel.findByUserIdsAndDateRange === "function" &&
+    typeof raceActiveEffectModel.findEffectsForRaceParticipantsByTypes ===
+      "function";
+
+  // One shared prefetch for every race (null when the injected models are
+  // minimal test fakes, or no race has started — the legacy per-participant
+  // query path then runs unchanged).
+  const scoped = canPrefetch
+    ? await prefetchScopedModels({
+        races: myActive.map((pt) => pt.race).filter(Boolean),
+        now,
+        stepsModel,
+        stepSampleModel,
+        raceActiveEffectModel,
+      })
+    : null;
+  const raceStepsModel = scoped ? scoped.stepsModel : stepsModel;
+  const raceStepSampleModel = scoped ? scoped.stepSampleModel : stepSampleModel;
+  const raceEffectModel = scoped ? scoped.raceActiveEffectModel : raceActiveEffectModel;
+
+  async function buildRaceEntry(participation) {
     const race = participation.race;
-    if (!race) continue;
+    if (!race) return null;
 
     // Compute each ACCEPTED participant's LIVE race-relative total using the
     // same side-effect-free helpers the race-detail screen relies on
@@ -259,8 +444,8 @@ async function checkActiveRaces(prisma, userId, options = {}) {
             // with the race-detail screen and settlement; user races use the
             // requester's header tz (legacy).
             timeZone: raceTimeZone(race, timeZone),
-            stepsModel,
-            stepSampleModel,
+            stepsModel: raceStepsModel,
+            stepSampleModel: raceStepSampleModel,
             now,
           });
           const { total } = await calculateCurrentTotal({
@@ -269,8 +454,8 @@ async function checkActiveRaces(prisma, userId, options = {}) {
             participant: p,
             baseAdjusted,
             hasSampleData,
-            raceActiveEffectModel,
-            stepSampleModel,
+            raceActiveEffectModel: raceEffectModel,
+            stepSampleModel: raceStepSampleModel,
           });
           liveTotals.set(p.id, total);
         })
@@ -301,7 +486,7 @@ async function checkActiveRaces(prisma, userId, options = {}) {
     // Determine stealthed user ids for this race (only when powerups enabled).
     const stealthedUserIds = new Set();
     if (race.powerupsEnabled) {
-      const activeEffects = await raceActiveEffectModel.findActiveForRace(race.id);
+      const activeEffects = await raceEffectModel.findActiveForRace(race.id);
       for (const e of activeEffects) {
         if (e.type === "STEALTH_MODE") stealthedUserIds.add(e.targetUserId);
       }
@@ -334,15 +519,22 @@ async function checkActiveRaces(prisma, userId, options = {}) {
     const myIndex = ranked.findIndex((p) => p.userId === userId);
     const userPlacement = myIndex >= 0 ? myIndex + 1 : null;
 
-    races.push({
+    return {
       raceId: race.id,
       name: race.name,
       endsAt: race.endsAt,
       top3,
       userPlacement,
       participantCount: ranked.length,
-    });
+    };
   }
+
+  // Races are independent read-only computations; run them concurrently.
+  // Promise.all preserves myActive's order (startedAt desc), matching the
+  // sequential loop this replaces.
+  const races = (await Promise.all(myActive.map(buildRaceEntry))).filter(
+    Boolean
+  );
 
   if (races.length === 0) return null;
 

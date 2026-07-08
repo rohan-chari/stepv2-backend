@@ -77,6 +77,27 @@ const StepSample = {
     return sums[0];
   },
 
+  // Bulk fetch for cross-participant batching (see getHomeRaceCard): all of
+  // several users' samples overlapping [rangeStart, rangeEnd), with the same
+  // overlap predicate sumStepsInWindows uses, so prorating these rows against
+  // any window inside the range gives identical results to a per-user query.
+  async findRowsForUsersInRange(userIds, rangeStart, rangeEnd) {
+    if (!userIds || userIds.length === 0) return [];
+    const start =
+      typeof rangeStart === "string" ? rangeStart : new Date(rangeStart).toISOString();
+    const end =
+      typeof rangeEnd === "string" ? rangeEnd : new Date(rangeEnd).toISOString();
+
+    return prisma.$queryRawUnsafe(
+      `SELECT user_id AS "userId", period_start AS "start", period_end AS "end", steps
+       FROM step_samples
+       WHERE user_id = ANY($1::text[])
+         AND period_end > $2::timestamp
+         AND period_start < $3::timestamp`,
+      userIds, start, end
+    );
+  },
+
   // Batched variant of sumStepsInWindow: ONE fetch spanning all windows, then
   // the same per-window proration. Returns an array of sums parallel to
   // `windows` ({start, end} each). Exists so per-day loops (see

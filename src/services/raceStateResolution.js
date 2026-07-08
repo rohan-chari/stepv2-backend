@@ -18,6 +18,17 @@ const { calculateSubsequentSteps } = require("../utils/raceSteps");
 const { computeBoxEffectiveSteps } = require("../utils/boxSteps");
 const { raceTimeZone } = require("../utils/raceTimeZone");
 
+// Every effect type that calculateCurrentTotal folds into a participant's
+// live total. Shared with prefetch paths (getHomeRaceCard) so a bulk effect
+// fetch covers exactly the types the math will ask for.
+const POWERUP_EFFECT_TYPES = [
+  "LEG_CRAMP",
+  "RUNNERS_HIGH",
+  "WRONG_TURN",
+  "CAMPFIRE_REST",
+  "RAINSTORM",
+];
+
 function getEffectiveStart(participant, raceStartedAt) {
   const joinedAt = participant.joinedAt || raceStartedAt;
   return joinedAt > raceStartedAt ? joinedAt : raceStartedAt;
@@ -124,13 +135,7 @@ async function calculateCurrentTotal({
   let rainstorms = [];
 
   if (racePowerupsEnabled) {
-    const EFFECT_TYPES = [
-      "LEG_CRAMP",
-      "RUNNERS_HIGH",
-      "WRONG_TURN",
-      "CAMPFIRE_REST",
-      "RAINSTORM",
-    ];
+    const EFFECT_TYPES = POWERUP_EFFECT_TYPES;
     // One query for all five types when the model supports it; fall back to
     // per-type queries for injected fakes. Same rows, same per-type order.
     let byType;
@@ -749,6 +754,7 @@ function buildResolveRaceState(dependencies = {}) {
 const resolveRaceState = buildResolveRaceState();
 
 module.exports = {
+  POWERUP_EFFECT_TYPES,
   calculateBaseAdjusted,
   calculateSubsequentSteps,
   calculateCurrentTotal,

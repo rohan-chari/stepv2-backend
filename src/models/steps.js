@@ -37,6 +37,21 @@ const Steps = {
     });
   },
 
+  // Bulk variant of findByUserIdAndDateRange across users, for the
+  // cross-participant prefetch in getHomeRaceCard. Same inclusive date
+  // bounds; callers slice per user, so filtering these rows by one userId
+  // matches that user's per-user query exactly.
+  async findByUserIdsAndDateRange(userIds, startDate, endDate) {
+    if (!userIds || userIds.length === 0) return [];
+    return prisma.step.findMany({
+      where: {
+        userId: { in: userIds },
+        date: { gte: new Date(startDate), lte: new Date(endDate) },
+      },
+      orderBy: { date: "asc" },
+    });
+  },
+
   // All per-day step rows in the half-open date range [startDate, endExclusive),
   // across users, for ranked scoring. The end is exclusive so a season boundary
   // day counts toward exactly one season (no double-count on rollover). Excludes
