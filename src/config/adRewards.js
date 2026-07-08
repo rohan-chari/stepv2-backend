@@ -13,8 +13,23 @@ const ADMOB_SSV_SKIP_VERIFY = process.env.ADMOB_SSV_SKIP_VERIFY === "true";
 // rewardKind stamped on grants minted by the extra-daily-spin ad unit.
 const EXTRA_SPIN_REWARD_KIND = "extra_daily_spin";
 
+// Watch-ad-for-coins (Get Coins hub). Same kill-switch semantics as the extra
+// spin: per-request `ads` client-feature gate plus this env switch.
+const ADS_COIN_REWARD_ENABLED = process.env.ADS_COIN_REWARD_ENABLED !== "false";
+
+// rewardKind for coin-reward grants (SSV custom_data "coins:<YYYY-MM-DD>").
+const COIN_REWARD_KIND = "coin_reward";
+
+// Flat coins per verified watch, and max redeemed watches per local day.
+const AD_COIN_REWARD_AMOUNT = 25;
+const AD_COIN_REWARD_DAILY_CAP = 3;
+
 module.exports = {
   ADS_EXTRA_SPIN_ENABLED,
   ADMOB_SSV_SKIP_VERIFY,
   EXTRA_SPIN_REWARD_KIND,
+  ADS_COIN_REWARD_ENABLED,
+  COIN_REWARD_KIND,
+  AD_COIN_REWARD_AMOUNT,
+  AD_COIN_REWARD_DAILY_CAP,
 };

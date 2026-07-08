@@ -14,6 +14,7 @@ const { createReferralsRouter } = require("./routes/referrals");
 const { createShopRouter } = require("./routes/shop");
 const { createPowerupsRouter } = require("./routes/powerups");
 const { createDailyRewardRouter } = require("./routes/dailyReward");
+const { createCoinsRouter } = require("./routes/coins");
 const { createStepMilestonesRouter } = require("./routes/stepMilestones");
 const { createTutorialRouter } = require("./routes/tutorial");
 const { createHomeRouter } = require("./routes/home");
@@ -68,6 +69,7 @@ function createApp(dependencies = {}) {
   app.use("/shop", createShopRouter(dependencies));
   app.use("/powerups", createPowerupsRouter(dependencies));
   app.use("/daily-reward", createDailyRewardRouter(dependencies));
+  app.use("/coins", createCoinsRouter(dependencies));
   app.use(
     "/users/me/step-milestones",
     createStepMilestonesRouter(dependencies)

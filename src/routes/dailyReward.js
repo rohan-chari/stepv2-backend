@@ -16,6 +16,9 @@ const {
 const {
   getAdExtraSpinStatus: defaultGetAdExtraSpinStatus,
 } = require("../queries/getAdExtraSpinStatus");
+const {
+  getAdCoinRewardStatus: defaultGetAdCoinRewardStatus,
+} = require("../queries/getAdCoinRewardStatus");
 const defaultAdRewardsConfig = require("../config/adRewards");
 
 function createDailyRewardRouter(dependencies = {}) {
@@ -32,6 +35,8 @@ function createDailyRewardRouter(dependencies = {}) {
     dependencies.claimExtraDailyRewardBox || defaultClaimExtraDailyRewardBox;
   const getAdExtraSpinStatus =
     dependencies.getAdExtraSpinStatus || defaultGetAdExtraSpinStatus;
+  const getAdCoinRewardStatus =
+    dependencies.getAdCoinRewardStatus || defaultGetAdCoinRewardStatus;
   const adRewardsConfig = dependencies.adRewardsConfig || defaultAdRewardsConfig;
 
   router.use(requireAuth);
@@ -56,6 +61,17 @@ function createDailyRewardRouter(dependencies = {}) {
         req.clientFeatures?.has("ads")
       ) {
         status.adExtraSpin = await getAdExtraSpinStatus({
+          userId: req.user.id,
+          localDate,
+        });
+      }
+      // Watch-ad-for-coins (Get Coins hub): same additive gating, separate
+      // kill switch.
+      if (
+        adRewardsConfig.ADS_COIN_REWARD_ENABLED &&
+        req.clientFeatures?.has("ads")
+      ) {
+        status.adCoinReward = await getAdCoinRewardStatus({
           userId: req.user.id,
           localDate,
         });

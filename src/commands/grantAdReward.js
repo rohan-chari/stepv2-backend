@@ -1,7 +1,13 @@
 const { prisma } = require("../db");
-const { EXTRA_SPIN_REWARD_KIND } = require("../config/adRewards");
+const {
+  EXTRA_SPIN_REWARD_KIND,
+  COIN_REWARD_KIND,
+} = require("../config/adRewards");
 
 const LOCAL_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+// custom_data for coin-reward watches: "coins:<local date>". Bare dates are
+// the shipped extra-spin format and must keep minting extra_daily_spin.
+const COIN_CUSTOM_DATA_RE = /^coins:(\d{4}-\d{2}-\d{2})$/;
 
 // Mint an AdRewardGrant from a *verified* AdMob SSV callback (the route owns
 // signature verification; this command owns the ledger). Idempotent on
@@ -30,15 +36,23 @@ function buildGrantAdReward(dependencies = {}) {
     if (!user) return { granted: false, reason: "unknown_user" };
 
     // custom_data carries the watcher's local date (matches the localDate the
-    // claim will send). Anything else falls back to the server's date.
-    const grantedDate =
-      typeof customData === "string" && LOCAL_DATE_RE.test(customData)
+    // claim will send) and, for coin-reward watches, a "coins:" prefix that
+    // selects the reward kind. Anything unrecognized falls back to the
+    // default kind and the server's date.
+    const coinMatch =
+      typeof customData === "string"
+        ? customData.match(COIN_CUSTOM_DATA_RE)
+        : null;
+    const grantedDate = coinMatch
+      ? coinMatch[1]
+      : typeof customData === "string" && LOCAL_DATE_RE.test(customData)
         ? customData
         : serverDate;
+    const kind = coinMatch ? COIN_REWARD_KIND : rewardKind;
 
     try {
       await db.adRewardGrant.create({
-        data: { userId, transactionId, adUnit, rewardKind, grantedDate },
+        data: { userId, transactionId, adUnit, rewardKind: kind, grantedDate },
       });
     } catch (error) {
       if (error && error.code === "P2002") {

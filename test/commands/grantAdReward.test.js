@@ -95,3 +95,34 @@ test("grantAdReward: missing userId or transactionId is invalid", async () => {
   );
   assert.equal(db.created.length, 0);
 });
+
+test("grantAdReward: coins:<date> custom_data mints a coin_reward grant", async () => {
+  const db = mockDb();
+  const grantAdReward = buildGrantAdReward({ prisma: db });
+
+  const result = await grantAdReward({
+    userId: "user-1",
+    transactionId: "txn-coins-1",
+    customData: "coins:2026-07-06",
+    serverDate: "2026-07-07",
+  });
+
+  assert.equal(result.granted, true);
+  assert.equal(db.created[0].rewardKind, "coin_reward");
+  assert.equal(db.created[0].grantedDate, "2026-07-06");
+});
+
+test("grantAdReward: malformed coins: custom_data falls back to the default kind", async () => {
+  const db = mockDb();
+  const grantAdReward = buildGrantAdReward({ prisma: db });
+
+  await grantAdReward({
+    userId: "user-1",
+    transactionId: "txn-coins-2",
+    customData: "coins:not-a-date",
+    serverDate: "2026-07-07",
+  });
+
+  assert.equal(db.created[0].rewardKind, "extra_daily_spin");
+  assert.equal(db.created[0].grantedDate, "2026-07-07");
+});
