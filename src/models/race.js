@@ -148,19 +148,41 @@ const Race = {
   },
 
   async findForUser(userId) {
-    return prisma.race.findMany({
-      where: {
-        // A declined invite removes the race from the user's world — it must
-        // not surface in any of their active/pending/completed lists.
-        participants: { some: { userId, status: { not: "DECLINED" } } },
-      },
-      include: {
-        creator: { select: { id: true, displayName: true, profilePhotoUrl: true } },
-        winner: { select: { id: true, displayName: true, profilePhotoUrl: true } },
-        ...participantInclude,
-      },
-      orderBy: { updatedAt: "desc" },
-    });
+    // A declined invite removes the race from the user's world — it must
+    // not surface in any of their active/pending/completed lists.
+    const participantFilter = {
+      participants: { some: { userId, status: { not: "DECLINED" } } },
+    };
+    const include = {
+      creator: { select: { id: true, displayName: true, profilePhotoUrl: true } },
+      winner: { select: { id: true, displayName: true, profilePhotoUrl: true } },
+      ...participantInclude,
+    };
+
+    // Completed races are capped to the most recent few: the races tab shows
+    // them in a collapsed-by-default history section, and long-time users
+    // accumulate dozens — shipping them all (with full participant data) made
+    // /races the app's largest payload. Response shape is unchanged, so older
+    // app builds simply see a shorter history.
+    const [current, completed] = await Promise.all([
+      prisma.race.findMany({
+        where: { ...participantFilter, status: { not: "COMPLETED" } },
+        include,
+        orderBy: { updatedAt: "desc" },
+      }),
+      prisma.race.findMany({
+        where: { ...participantFilter, status: "COMPLETED" },
+        include,
+        orderBy: { completedAt: "desc" },
+        take: 10,
+      }),
+    ]);
+
+    // Preserve the historical single-query ordering (updatedAt desc across
+    // the combined list); getRaces buckets by status either way.
+    return [...current, ...completed].sort(
+      (a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)
+    );
   },
 
   async findActiveForUser(userId) {
