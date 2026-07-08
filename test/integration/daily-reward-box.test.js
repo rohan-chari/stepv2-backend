@@ -95,6 +95,36 @@ describe("daily reward box (v2)", () => {
     assert.ok(body.box.accessoryPool[0].assetKey);
   });
 
+  it("accessoryPool never includes CHARACTER-slot items, even live ones", async () => {
+    const user = await createUser();
+    const hat = await seedAccessory("drb-pool-hat", 100);
+    const corgi = await prisma.shopItem.create({
+      data: {
+        sku: "drb-pool-corgi",
+        name: "drb-pool-corgi",
+        slot: "CHARACTER",
+        priceCoins: 5000,
+        assetKey: "corgi_puppy",
+        active: true,
+        testOnly: false,
+      },
+    });
+
+    const res = await request(
+      server.baseUrl,
+      "GET",
+      `/daily-reward/status?localDate=${todayLocal()}`,
+      { token: user.token }
+    );
+    const body = await res.json();
+    const poolIds = body.box.accessoryPool.map((item) => item.id);
+    assert.ok(poolIds.includes(hat.id));
+    assert.ok(
+      !poolIds.includes(corgi.id),
+      "characters are purchase-only — never winnable from the daily box"
+    );
+  });
+
   it("claim-box awards coins and records rarity", async () => {
     const user = await createUser();
     const res = await request(server.baseUrl, "POST", "/daily-reward/claim-box", {
