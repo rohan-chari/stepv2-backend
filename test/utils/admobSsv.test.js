@@ -95,3 +95,34 @@ test("buildKeyFetcher: throws on a non-OK response", async () => {
   });
   await assert.rejects(() => fetchKeys());
 });
+
+// Google signs the URL-DECODED parameter string, but sends reserved chars
+// percent-encoded on the wire. Bare-date custom_data never hit this (raw ==
+// decoded); "coins:<date>" arrives as coins%3A<date> and must still verify.
+test("verifySsvSignature: verifies the decoded message when the wire query is percent-encoded", () => {
+  const decodedMessage = MESSAGE.replace(
+    "custom_data=2026-07-06",
+    "custom_data=coins:2026-07-07"
+  );
+  const sig = sign("sha256", Buffer.from(decodedMessage, "utf8"), privateKey);
+  const wireQuery =
+    decodedMessage.replace("coins:2026-07-07", "coins%3A2026-07-07") +
+    `&signature=${sig.toString("base64url")}&key_id=${KEY_ID}`;
+
+  assert.equal(verifySsvSignature({ rawQuery: wireQuery, keys: KEYS }), true);
+});
+
+test("verifySsvSignature: still rejects tampering on a percent-encoded query", () => {
+  const decodedMessage = MESSAGE.replace(
+    "custom_data=2026-07-06",
+    "custom_data=coins:2026-07-07"
+  );
+  const sig = sign("sha256", Buffer.from(decodedMessage, "utf8"), privateKey);
+  const wireQuery =
+    decodedMessage
+      .replace("coins:2026-07-07", "coins%3A2026-07-07")
+      .replace("user_id=user-1", "user_id=user-2") +
+    `&signature=${sig.toString("base64url")}&key_id=${KEY_ID}`;
+
+  assert.equal(verifySsvSignature({ rawQuery: wireQuery, keys: KEYS }), false);
+});

@@ -25,7 +25,7 @@ function verifySsvSignature({ rawQuery, keys }) {
 
   const markerIndex = rawQuery.indexOf(SIGNATURE_MARKER);
   if (markerIndex <= 0) return false;
-  const message = rawQuery.slice(0, markerIndex);
+  const rawMessage = rawQuery.slice(0, markerIndex);
 
   const params = parseSsvQuery(rawQuery);
   if (!params.signature || !params.key_id) return false;
@@ -33,16 +33,33 @@ function verifySsvSignature({ rawQuery, keys }) {
   const key = keys.find((k) => String(k.keyId) === String(params.key_id));
   if (!key || !key.pem) return false;
 
+  // Google signs the URL-DECODED parameter string but sends reserved chars
+  // percent-encoded on the wire (custom_data "coins:<date>" arrives as
+  // coins%3A<date>). Accept either form: for values with no reserved chars
+  // they're identical, and a signature can only ever match the exact bytes
+  // Google signed, so trying both loosens nothing.
+  const candidates = [rawMessage];
   try {
-    return crypto.verify(
-      "sha256",
-      Buffer.from(message, "utf8"),
-      key.pem,
-      Buffer.from(params.signature, "base64url")
-    );
+    const decoded = decodeURIComponent(rawMessage);
+    if (decoded !== rawMessage) candidates.push(decoded);
   } catch {
-    return false;
+    // Malformed percent-encoding: raw-only.
   }
+
+  for (const message of candidates) {
+    try {
+      const ok = crypto.verify(
+        "sha256",
+        Buffer.from(message, "utf8"),
+        key.pem,
+        Buffer.from(params.signature, "base64url")
+      );
+      if (ok) return true;
+    } catch {
+      // Try the next candidate; fall through to false.
+    }
+  }
+  return false;
 }
 
 // Cached fetcher for Google's rotating public key set. Google rotates keys
