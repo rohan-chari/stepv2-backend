@@ -4,6 +4,10 @@ const { buildRequireAdmin } = require("../middleware/requireAdmin");
 const { prisma } = require("../db");
 const { serializeShopItem } = require("../utils/shopCosmetics");
 const { mirrorShopItemToPeer } = require("../utils/mirrorShopItem");
+const { appSettings: defaultAppSettings } = require("../services/appSettings");
+const {
+  getAdminStats: defaultGetAdminStats,
+} = require("../queries/getAdminStats");
 
 const RENDER_METADATA_NUMBER_KEYS = ["offsetX", "offsetY", "rotation", "scale"];
 const RENDER_METADATA_RENDER_LAYERS = new Set(["front", "behind"]);
@@ -106,6 +110,55 @@ function createAdminRouter(dependencies = {}) {
   const requireAdmin = buildRequireAdmin(dependencies);
 
   router.use(requireAuth, requireAdmin);
+
+  const settings = dependencies.appSettings || defaultAppSettings;
+  const getAdminStats = dependencies.getAdminStats || defaultGetAdminStats;
+
+  // Runtime feature flags (DB-backed, no deploy needed). Per-environment on
+  // purpose: prod and staging flip independently, no peer-DB mirroring.
+  router.get("/settings", async (req, res) => {
+    try {
+      res.json({ settings: await settings.getAllFlags() });
+    } catch (error) {
+      console.error("Admin settings read error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Body: any subset of the known flags, e.g. { bannerAdsEnabled: false }.
+  // Unknown keys 400 so a typo never silently writes a dead setting.
+  router.patch("/settings", async (req, res) => {
+    try {
+      const body = req.body || {};
+      const entries = Object.entries(body);
+      if (entries.length === 0) {
+        return res.status(400).json({ error: "No settings supplied" });
+      }
+      for (const [key, value] of entries) {
+        if (typeof value !== "boolean") {
+          return res.status(400).json({ error: `${key} must be a boolean` });
+        }
+        await settings.setFlag(key, value);
+      }
+      res.json({ settings: await settings.getAllFlags() });
+    } catch (error) {
+      if (error.statusCode) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
+      console.error("Admin settings write error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Product-health snapshot for the admin Statistics card (read-only SQL).
+  router.get("/stats", async (req, res) => {
+    try {
+      res.json({ stats: await getAdminStats() });
+    } catch (error) {
+      console.error("Admin stats error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
 
   router.get("/shop/items", async (req, res) => {
     try {

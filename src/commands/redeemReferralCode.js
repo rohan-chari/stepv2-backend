@@ -63,6 +63,42 @@ function buildRedeemReferralCode(dependencies = {}) {
           data: { referredByCode: code },
         });
       });
+
+      // Auto-friend the pair, mirroring recordReferral. Unlike the signup
+      // path the referee account may already have friendship rows, so upgrade
+      // an existing row (either direction) instead of blindly creating.
+      // Best-effort AFTER the attribution tx — a hiccup never unwinds it.
+      try {
+        const existing = await db.friendship.findFirst({
+          where: {
+            OR: [
+              { requesterId: referrer.id, addresseeId: user.id },
+              { requesterId: user.id, addresseeId: referrer.id },
+            ],
+          },
+        });
+        if (!existing) {
+          await db.friendship.create({
+            data: {
+              requesterId: referrer.id,
+              addresseeId: user.id,
+              status: "ACCEPTED",
+            },
+          });
+        } else if (existing.status === "PENDING") {
+          await db.friendship.update({
+            where: { id: existing.id },
+            data: { status: "ACCEPTED" },
+          });
+        }
+      } catch (friendError) {
+        console.warn(
+          `Referral auto-friend skipped: ${
+            friendError && friendError.message ? friendError.message : friendError
+          }`
+        );
+      }
+
       return { attributed: true };
     } catch (error) {
       // Lost a race to a concurrent attribution (refereeSubHash/refereeId unique).

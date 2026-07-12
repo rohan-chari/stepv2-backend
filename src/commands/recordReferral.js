@@ -63,6 +63,32 @@ function buildRecordReferral(dependencies = {}) {
           data: { referredByCode: code },
         });
       });
+
+      // Auto-friend the pair (product decision 2026-07-12): accepting the
+      // invite IS the friend request — the invitee should not have to find and
+      // add the inviter manually. Separate best-effort write AFTER the
+      // attribution tx so a friendship hiccup never rolls back attribution.
+      // The referee is a brand-new account, so no reverse row can exist; the
+      // @@unique([requesterId, addresseeId]) makes a retry a no-op (P2002).
+      try {
+        await db.friendship.create({
+          data: {
+            requesterId: referrer.id,
+            addresseeId: newUser.id,
+            status: "ACCEPTED",
+          },
+        });
+      } catch (friendError) {
+        if (!friendError || friendError.code !== "P2002") {
+          console.warn(
+            `Referral auto-friend skipped: ${
+              friendError && friendError.message
+                ? friendError.message
+                : friendError
+            }`
+          );
+        }
+      }
     } catch (error) {
       // P2002 = this human was already attributed under a prior account: exactly
       // the reinstall case we want to no-op. Any other error is swallowed so the

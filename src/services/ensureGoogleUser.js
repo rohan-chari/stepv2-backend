@@ -3,6 +3,7 @@ const crypto = require("node:crypto");
 const { eventBus } = require("../events/eventBus");
 const { User } = require("../models/user");
 const { recordReferral } = require("../commands/recordReferral");
+const { autoEnrollNewUser } = require("../commands/autoEnrollNewUser");
 const { validateDisplayName } = require("../lib/displayNameValidator");
 
 // Google (Android) account provisioning — the counterpart of ensureAppleUser.js,
@@ -94,6 +95,8 @@ function buildEnsureGoogleUser(dependencies = {}) {
   const userModel = dependencies.User || User;
   const events = dependencies.eventBus || eventBus;
   const recordReferralFn = dependencies.recordReferral || recordReferral;
+  const autoEnrollNewUserFn =
+    dependencies.autoEnrollNewUser || autoEnrollNewUser;
 
   return async function ensureGoogleUser({
     googleSub,
@@ -123,6 +126,10 @@ function buildEnsureGoogleUser(dependencies = {}) {
       // Mirrors ensureAppleUser; hashes googleSub so Android referees attribute
       // correctly (the appleId||googleSub provider-sub parity).
       await recordReferralFn({ newUser: user, referralCode });
+
+      // Starter-race enrollment — best-effort/never-throws: every new account
+      // starts inside the current seeded challenge (see autoEnrollNewUser.js).
+      await autoEnrollNewUserFn({ user });
 
       events.emit("USER_REGISTERED", {
         userId: user.id,

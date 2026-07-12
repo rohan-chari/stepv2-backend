@@ -3,6 +3,7 @@ const crypto = require("node:crypto");
 const { eventBus } = require("../events/eventBus");
 const { User } = require("../models/user");
 const { recordReferral } = require("../commands/recordReferral");
+const { autoEnrollNewUser } = require("../commands/autoEnrollNewUser");
 const { validateDisplayName } = require("../lib/displayNameValidator");
 
 // Display names are never derived from the Apple/Google real name (privacy —
@@ -86,6 +87,8 @@ function buildEnsureAppleUser(dependencies = {}) {
   const userModel = dependencies.User || User;
   const events = dependencies.eventBus || eventBus;
   const recordReferralFn = dependencies.recordReferral || recordReferral;
+  const autoEnrollNewUserFn =
+    dependencies.autoEnrollNewUser || autoEnrollNewUser;
 
   return async function ensureAppleUser({
     appleId,
@@ -115,6 +118,10 @@ function buildEnsureAppleUser(dependencies = {}) {
       // A code present here came in the provision body (captured pre-sign-in);
       // codes resolved after sign-in attach via POST /referrals/redeem instead.
       await recordReferralFn({ newUser: user, referralCode });
+
+      // Starter-race enrollment — best-effort/never-throws: every new account
+      // starts inside the current seeded challenge (see autoEnrollNewUser.js).
+      await autoEnrollNewUserFn({ user });
 
       events.emit("USER_REGISTERED", {
         userId: user.id,

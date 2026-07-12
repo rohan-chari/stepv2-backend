@@ -45,6 +45,7 @@ const {
   looksLikeReferralCode,
   normalizeReferralCode,
 } = require("./lib/referralCode");
+const { prisma: defaultPrisma } = require("./db");
 
 function createApp(dependencies = {}) {
   const app = express();
@@ -104,6 +105,15 @@ function createApp(dependencies = {}) {
 
   // Public web landing page for a shared race. Opened only when the app is NOT
   // installed (otherwise the OS routes the universal/app link into the app).
+  const linkOpenDb = dependencies.prisma || defaultPrisma;
+  // Top-of-funnel tap logging: one link_opens row per landing-page view.
+  // Fire-and-forget — a logging failure must never affect the page render.
+  function logLinkOpen(kind, code) {
+    linkOpenDb.linkOpen
+      .create({ data: { kind, code: code || null } })
+      .catch(() => {});
+  }
+
   app.get("/r/:token", async (req, res) => {
     const token = req.params.token;
 
@@ -130,6 +140,7 @@ function createApp(dependencies = {}) {
           .type("html")
           .send(renderReferralNotFoundPage(refLinks));
       }
+      logLinkOpen("referral", code);
       try {
         const preview = await getReferralPreview({ code });
         if (!preview) {
@@ -157,6 +168,7 @@ function createApp(dependencies = {}) {
       playStoreUrl: sharing.PLAY_STORE_URL,
       ogImageUrl: sharing.OG_IMAGE_URL,
     };
+    logLinkOpen("race_share", token);
     try {
       const preview = await getSharedRacePreview({ token: req.params.token });
       if (!preview) {

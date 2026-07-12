@@ -1146,3 +1146,29 @@ model JobRun {
 
   @@map("job_runs")
 }
+
+// Runtime feature flags / app settings, toggleable from the admin screen
+// without a deploy. One row per key; value is free-form JSON so new flags
+// don't need a migration. Read through src/services/appSettings.js (cached).
+// Per-environment by design (prod and staging flip independently — unlike
+// shop items, settings are NOT mirrored to the peer DB).
+model AppSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("app_settings")
+}
+
+// Top-of-funnel tap log for /r/<token> landing-page opens (referral codes and
+// race share links). One row per page view; feeds the invite-funnel numbers in
+// GET /admin/stats. Append-only, no user linkage (the viewer is anonymous).
+model LinkOpen {
+  id        String   @id @default(uuid())
+  kind      String // "referral" | "race_share"
+  code      String? // normalized referral code, or the race share token
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([kind, createdAt])
+  @@map("link_opens")
+}

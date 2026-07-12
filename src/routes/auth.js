@@ -37,6 +37,7 @@ const {
   DISPLAY_NAME_MIN_LENGTH,
 } = require("../lib/displayNameValidator");
 const { isAdminUser, withAdminFlag } = require("../services/adminAccess");
+const { appSettings: defaultAppSettings } = require("../services/appSettings");
 
 // Reviewer account constants — kept in sync with scripts/seed-app-review-demo.js.
 // The /auth/review endpoint auto-reprovisions the row if it's missing (e.g.
@@ -75,6 +76,7 @@ function createAuthRouter(dependencies = {}) {
   const optUserIntoPendingSeededRaces =
     dependencies.optUserIntoPendingSeededRaces ||
     defaultOptUserIntoPendingSeededRaces;
+  const appSettings = dependencies.appSettings || defaultAppSettings;
 
   async function getHeldCoinsSafe(userId) {
     if (!UserModel.getHeldCoins) {
@@ -228,6 +230,12 @@ function createAuthRouter(dependencies = {}) {
     try {
       const incomingFriendRequests = await getIncomingRequestCount(req.user.id);
       const heldCoins = await getHeldCoinsSafe(req.user.id);
+      // Remote feature flags ride the /auth/me user payload (fetched at launch
+      // and on resume). Additive: old clients ignore the key; getFlag never
+      // throws (degrades to the flag's declared default).
+      const featureFlags = {
+        bannerAdsEnabled: await appSettings.getFlag("bannerAdsEnabled"),
+      };
       res.json({
         user: withAdminFlag(
           {
@@ -243,6 +251,7 @@ function createAuthRouter(dependencies = {}) {
             autoJoinFeaturedRaces: req.user.autoJoinFeaturedRaces ?? false,
             incomingFriendRequests,
             heldCoins,
+            featureFlags,
           },
           checkAdmin
         ),
