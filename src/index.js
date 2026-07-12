@@ -82,7 +82,21 @@ function startServer({
 }
 
 if (require.main === module) {
-  startServer();
+  const server = startServer();
+
+  // Graceful shutdown for pm2 cluster reloads: stop accepting new connections,
+  // let in-flight requests finish, then exit — so a reload drops zero requests.
+  // The 5s hard-exit backstop stays under pm2's kill window escalation and
+  // covers a hung keep-alive connection.
+  if (process.env.NODE_ENV === "production") {
+    let shuttingDown = false;
+    process.on("SIGINT", () => {
+      if (shuttingDown) return;
+      shuttingDown = true;
+      server.close(() => process.exit(0));
+      setTimeout(() => process.exit(0), 5000).unref();
+    });
+  }
 
   if (process.env.NODE_ENV !== "production") {
     let pulling = false;
