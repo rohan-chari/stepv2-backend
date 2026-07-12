@@ -32,35 +32,51 @@ function startServer({
   scheduleNotificationCleanup: scheduleNotifCleanup = scheduleNotificationCleanup,
   scheduleDailyMover: scheduleDaily = scheduleDailyMover,
   logger = console,
+  // Delay before the cron jobs start ticking. Every scheduler fires an
+  // immediate first tick, and under pm2 cluster `reload` the OLD process keeps
+  // its intervals running for a few seconds after the NEW one starts serving —
+  // an immediate tick in the new process would overlap it (the in-process
+  // overlap guards don't reach across processes; e.g. seededRaceRenewal could
+  // double-create a PENDING race, which has no DB unique to stop it). 15s is
+  // far beyond pm2's kill window for the old process. 0 in tests.
+  cronStartDelayMs = Number(process.env.CRON_START_DELAY_MS ?? 15_000),
 } = {}) {
   register();
   registerNotifications();
 
   return app.listen(port, host, () => {
     logger.log(`Steps Tracker API running on ${host}:${port}`);
-    scheduleRaceExpiry();
-    scheduleSeededRenewal();
-    scheduleRanks();
-    scheduleRankedWeeks();
-    scheduleGlobalEvents();
-    scheduleAutoStartRaces();
-    // Live placement broadcast (Phase 0). Runs by default like the other jobs. The
-    // env var is an emergency kill switch ONLY (set LIVE_PLACEMENT_DISABLED=true to
-    // stop the per-placement push fan-out without a code deploy) — kept because this
-    // is the one job that can push to the whole user base on a 5-minute cadence.
-    if (process.env.LIVE_PLACEMENT_DISABLED !== "true") {
-      scheduleLivePlacements();
-    }
-    // Nightly prune of the notifications audit log (1am ET). Kill switch:
-    // NOTIFICATION_CLEANUP_DISABLED=true.
-    if (process.env.NOTIFICATION_CLEANUP_DISABLED !== "true") {
-      scheduleNotifCleanup();
-    }
-    // Daily biggest-mover digest (4pm ET) — like live placement, this can push to
-    // the whole active-racer base, so it gets its own kill switch:
-    // DAILY_MOVER_DISABLED=true.
-    if (process.env.DAILY_MOVER_DISABLED !== "true") {
-      scheduleDaily();
+    const startCrons = () => {
+      scheduleRaceExpiry();
+      scheduleSeededRenewal();
+      scheduleRanks();
+      scheduleRankedWeeks();
+      scheduleGlobalEvents();
+      scheduleAutoStartRaces();
+      // Live placement broadcast (Phase 0). Runs by default like the other jobs. The
+      // env var is an emergency kill switch ONLY (set LIVE_PLACEMENT_DISABLED=true to
+      // stop the per-placement push fan-out without a code deploy) — kept because this
+      // is the one job that can push to the whole user base on a 5-minute cadence.
+      if (process.env.LIVE_PLACEMENT_DISABLED !== "true") {
+        scheduleLivePlacements();
+      }
+      // Nightly prune of the notifications audit log (1am ET). Kill switch:
+      // NOTIFICATION_CLEANUP_DISABLED=true.
+      if (process.env.NOTIFICATION_CLEANUP_DISABLED !== "true") {
+        scheduleNotifCleanup();
+      }
+      // Daily biggest-mover digest (4pm ET) — like live placement, this can push to
+      // the whole active-racer base, so it gets its own kill switch:
+      // DAILY_MOVER_DISABLED=true.
+      if (process.env.DAILY_MOVER_DISABLED !== "true") {
+        scheduleDaily();
+      }
+    };
+    if (cronStartDelayMs > 0) {
+      logger.log(`[CRON] Job scheduling starts in ${cronStartDelayMs / 1000}s`);
+      setTimeout(startCrons, cronStartDelayMs);
+    } else {
+      startCrons();
     }
   });
 }
