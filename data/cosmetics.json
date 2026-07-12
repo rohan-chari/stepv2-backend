@@ -70,10 +70,10 @@
       "bobble": true,
       "sortOrder": 35,
       "renderMetadata": {
-        "offsetX": -0.09463276836158163,
-        "offsetY": -0.02,
-        "rotation": -0.2800000000000001,
-        "scale": 1.3999999999999997
+        "offsetX": -0.12963276836158166,
+        "offsetY": -0.009999999999999998,
+        "rotation": -0.4400000000000002,
+        "scale": 1.75
       }
     },
     {
@@ -108,9 +108,9 @@
       "bobble": true,
       "sortOrder": 50,
       "renderMetadata": {
-        "offsetX": 0.035310734463277704,
-        "offsetY": 0.14016949152542346,
-        "rotation": 0.14813559322034048,
+        "offsetX": -0.019689265536722303,
+        "offsetY": 0.12516949152542345,
+        "rotation": -0.17186440677965953,
         "scale": 1.995762711864405
       }
     },
@@ -128,8 +128,8 @@
       "sortOrder": 60,
       "renderMetadata": {
         "offsetX": 0.09008474576271018,
-        "offsetY": -0.021751412429377687,
-        "rotation": -0.15,
+        "offsetY": -0.006751412429377685,
+        "rotation": -0.30254237288133856,
         "scale": 1.9372881355932157
       }
     },
@@ -141,7 +141,7 @@
       "priceCoins": 500,
       "assetKey": "gold_chain",
       "active": true,
-      "testOnly": true,
+      "testOnly": false,
       "earnOnly": false,
       "bobble": true,
       "sortOrder": 70,
@@ -165,10 +165,10 @@
       "bobble": true,
       "sortOrder": 80,
       "renderMetadata": {
-        "offsetX": -0.0395480225988708,
-        "offsetY": 0.1133050847457645,
+        "offsetX": 0.0104519774011292,
+        "offsetY": 0.08330508474576448,
         "rotation": -0.39372881355932177,
-        "scale": 2.5
+        "scale": 2.3500000000000005
       }
     },
     {
@@ -181,13 +181,13 @@
       "active": true,
       "testOnly": true,
       "earnOnly": false,
-      "bobble": false,
+      "bobble": true,
       "sortOrder": 90,
       "renderMetadata": {
-        "offsetX": 0,
-        "offsetY": 0,
-        "rotation": 0,
-        "scale": 1
+        "offsetX": 0.10692090395480525,
+        "offsetY": 0.05999999999999999,
+        "rotation": 1.0767796610169396,
+        "scale": 1.385593220338982
       }
     },
     {
@@ -216,7 +216,7 @@
       "name": "Corgi Puppy",
       "description": "Trade your capybara for a stubby-legged speedster.",
       "slot": "CHARACTER",
-      "priceCoins": 5000,
+      "priceCoins": 1000,
       "assetKey": "corgi_puppy",
       "active": true,
       "testOnly": true,
@@ -224,6 +224,10 @@
       "bobble": false,
       "sortOrder": 200,
       "renderMetadata": {
+        "offsetX": 0,
+        "offsetY": 0,
+        "rotation": 0,
+        "scale": 1.26906779661017,
         "animationFrames": 6
       }
     },
