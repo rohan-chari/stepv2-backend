@@ -126,6 +126,17 @@ describe("powerup upgrades — integration", () => {
     const progress = await getProgress(alice.token, raceId);
     const aliceP = progress.participants.find((p) => p.userId === alice.userId);
     assert.equal(aliceP.totalSteps, 1500, "base 1500 bonus applied");
+
+    // Progress advertises the authoritative upgrade price ladders so clients
+    // can display exactly what the server will charge (no stale bundled table).
+    assert.deepEqual(progress.powerupData.upgradeCosts, {
+      byRarity: {
+        COMMON: [0, 5, 15, 45],
+        UNCOMMON: [0, 10, 30, 90],
+        RARE: [0, 15, 45, 135],
+      },
+      byType: {},
+    });
   });
 
   // ---------------------------------------------------------------------

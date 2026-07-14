@@ -12,6 +12,7 @@ const {
   syncRacePowerupState: defaultSyncRacePowerupState,
 } = require("../services/racePowerupStateSync");
 const { getTimeZoneParts, formatDateString, addDaysToDateString, parseDateString, zonedDateTimeToUtc } = require("../utils/week");
+const { COSTS_BY_RARITY, COSTS_BY_TYPE } = require("../utils/powerupUpgrades");
 const { calculateSubsequentSteps } = require("../utils/raceSteps");
 const { GlobalStepEvent } = require("../models/globalStepEvent");
 const { computeGlobalEventBoost } = require("../utils/globalStepEvent");
@@ -609,6 +610,13 @@ function buildGetRaceProgress(deps = {}) {
         newMysteryBoxes: syncResult.newMysteryBoxes || [],
         newQueuedBoxes: syncResult.newQueuedBoxes || 0,
         powerupStepInterval: race.powerupStepInterval,
+        // Authoritative upgrade price ladders so clients display what the
+        // server will actually charge. Additive: old clients ignore this and
+        // fall back to their bundled (possibly stale) tables.
+        upgradeCosts: {
+          byRarity: COSTS_BY_RARITY,
+          byType: COSTS_BY_TYPE,
+        },
       };
 
       // Re-read participant to get current powerupSlots (may have changed via Fanny Pack expiry)
