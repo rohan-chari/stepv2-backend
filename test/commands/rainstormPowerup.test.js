@@ -6,12 +6,12 @@ const { buildUsePowerup, PowerupUseError } = require("../../src/commands/usePowe
 // ---------------------------------------------------------------------------
 // RAINSTORM — purchase-only, UNTARGETED AoE debuff. When used inside an active
 // race it creates a RAINSTORM RaceActiveEffect (multiplier 0.5, 1 HOUR) on
-// every OTHER active (unfinished) participant — never on the caster. Defenses
-// resolve per-victim: MIRROR (precedence) consumes and bounces the storm onto
-// the CASTER (at most one caster debuff regardless of mirror count);
-// COMPRESSION_SOCKS consumes (BLOCKED) and protects that victim. Never stacks:
-// while any RAINSTORM is active in the race a second use is rejected. Writes
-// one POWERUP_USED feed event.
+// every OTHER active (unfinished) participant — never on the caster. As a
+// shop-only powerup it can NEVER be reflected by a Mirror: a victim's Mirror
+// does not protect them and is not consumed. The only per-victim defense is
+// COMPRESSION_SOCKS, which consumes (BLOCKED) and protects that victim. Never
+// stacks: while any RAINSTORM is active in the race a second use is rejected.
+// Writes one POWERUP_USED feed event.
 //
 // Written from the spec + the imposter/cleanse usePowerup mock patterns, NOT
 // by mirroring implementation.
@@ -226,7 +226,7 @@ test("COMPRESSION_SOCKS blocks the rain for that victim only (shield consumed)",
   assert.ok(blockedEvent, "writes a POWERUP_BLOCKED feed event");
 });
 
-test("MIRROR protects the victim and bounces the rain onto the caster (once)", async () => {
+test("MIRROR does NOT protect victims and does NOT bounce the rain — victims soaked, mirrors intact", async () => {
   const ctx = makeDeps({
     existingEffects: {
       "rp-2": [{ id: "mirror-1", type: "MIRROR" }],
@@ -237,17 +237,21 @@ test("MIRROR protects the victim and bounces the rain onto the caster (once)", a
 
   const result = await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1" });
 
-  // Both rivals protected; the ONLY debuff lands on the caster, exactly once.
-  assert.equal(ctx.effectsCreated.length, 1);
-  const casterEffect = ctx.effectsCreated[0];
-  assert.equal(casterEffect.targetUserId, "user-1");
-  assert.equal(casterEffect.targetParticipantId, "rp-1");
-  assert.equal(casterEffect.type, "RAINSTORM");
-  assert.equal(result.affected, 0);
-  assert.equal(result.reflectedOntoCaster, true);
-  // Both mirrors are consumed.
-  assert.ok(ctx.effectUpdates.find((u) => u.id === "mirror-1" && u.status === "EXPIRED"));
-  assert.ok(ctx.effectUpdates.find((u) => u.id === "mirror-2" && u.status === "EXPIRED"));
+  // Both rivals are soaked (Mirror is Rainstorm-proof); the caster is never hit.
+  assert.equal(ctx.effectsCreated.length, 2, "both rivals get the 0.5x debuff");
+  const targets = ctx.effectsCreated.map((e) => e.targetUserId).sort();
+  assert.deepEqual(targets, ["user-2", "user-3"]);
+  for (const eff of ctx.effectsCreated) {
+    assert.equal(eff.type, "RAINSTORM");
+    assert.notEqual(eff.targetUserId, "user-1", "caster is never soaked");
+  }
+  assert.equal(result.affected, 2);
+  assert.equal(result.blockedCount, 0);
+  assert.equal(result.reflectedOntoCaster, false);
+  // Neither mirror is consumed, and no reflect event is emitted.
+  assert.equal(ctx.effectUpdates.length, 0, "mirrors are not touched");
+  assert.ok(!ctx.feedEvents.find((e) => e.eventType === "POWERUP_REFLECTED"));
+  assert.ok(!ctx.events.find((e) => e.event === "POWERUP_REFLECTED"));
 });
 
 test("RAINSTORM consumes the powerup and writes one POWERUP_USED feed event", async () => {

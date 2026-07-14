@@ -10,11 +10,18 @@ const {
   getUnownedAccessoryPool,
 } = require("../queries/getUnownedAccessoryPool");
 const {
+  getEligiblePowerupPool,
+} = require("../queries/getEligiblePowerupPool");
+const {
   rollDailyBoxRarity,
+  rollRarePrizeKind,
   coinAmountForTier,
   pickAccessory,
+  pickPowerup,
 } = require("../utils/dailyBoxOdds");
 const { serializeShopItem } = require("../utils/shopCosmetics");
+const { serializePowerupShopItem } = require("../models/powerupShopItem");
+const { grantPowerupToUser } = require("./grantPowerupToUser");
 const { EXTRA_SPIN_REWARD_KIND } = require("../config/adRewards");
 
 // Extra daily box spin, paid for by a verified rewarded-ad watch. Consumes an
@@ -30,11 +37,20 @@ function buildClaimExtraDailyRewardBox(dependencies = {}) {
   const awardCoinsFn = dependencies.awardCoins || awardCoins;
   const getPool =
     dependencies.getUnownedAccessoryPool || getUnownedAccessoryPool;
+  const getPowerupPool =
+    dependencies.getEligiblePowerupPool || getEligiblePowerupPool;
+  const grantPowerup =
+    dependencies.grantPowerupToUser || grantPowerupToUser;
 
   return async function claimExtraDailyRewardBox({
     userId,
     localDate,
     rng = Math.random,
+    // Same feature/channel gating as the free /claim-box (see there). Defaults
+    // keep the legacy coins/accessory-only roll for old clients.
+    supportsSpinPowerups = false,
+    supportsJammer = false,
+    channel = "prod",
   }) {
     if (!isValidLocalDate(localDate)) {
       throw new DailyRewardError("Invalid localDate (expected YYYY-MM-DD)", 400);
@@ -112,20 +128,43 @@ function buildClaimExtraDailyRewardBox(dependencies = {}) {
     );
 
     const pool = await getPool(userId);
-    const rarity = rollDailyBoxRarity(streak, rng, pool.length);
+    const powerupPool = supportsSpinPowerups
+      ? await getPowerupPool({ channel, supportsJammer })
+      : [];
+    const rarity = rollDailyBoxRarity(
+      streak,
+      rng,
+      pool.length,
+      powerupPool.length
+    );
 
     let rewardType;
     let coinAmount = null;
     let shopItem = null;
+    let powerup = null;
     let coinsAfter = null;
 
     if (rarity === "RARE") {
-      const rolled = pickAccessory(pool, streak, rng);
-      if (rolled) {
-        shopItem = rolled;
+      const prizeKind = rollRarePrizeKind(pool.length, powerupPool.length, rng);
+      if (prizeKind === "POWERUP") {
+        powerup = pickPowerup(powerupPool, streak, rng);
+      }
+      const rolledAccessory =
+        prizeKind === "ACCESSORY" ? pickAccessory(pool, streak, rng) : null;
+
+      if (powerup) {
+        rewardType = REWARD_TYPE.POWERUP;
+        await grantPowerup(userId, powerup.powerupType, { db });
+        const userRow = await db.user.findUnique({
+          where: { id: userId },
+          select: { coins: true },
+        });
+        coinsAfter = userRow?.coins ?? 0;
+      } else if (rolledAccessory) {
+        shopItem = rolledAccessory;
         rewardType = REWARD_TYPE.ACCESSORY;
         await db.userShopItem.create({
-          data: { userId, shopItemId: rolled.id },
+          data: { userId, shopItemId: rolledAccessory.id },
         });
         const userRow = await db.user.findUnique({
           where: { id: userId },
@@ -164,6 +203,7 @@ function buildClaimExtraDailyRewardBox(dependencies = {}) {
         rarity,
         coinAmount,
         shopItemId: shopItem ? shopItem.id : null,
+        powerupType: powerup ? powerup.powerupType : null,
       },
     });
 
@@ -172,6 +212,7 @@ function buildClaimExtraDailyRewardBox(dependencies = {}) {
       rewardType,
       coinAmount,
       shopItem: shopItem ? serializeShopItem(shopItem) : null,
+      powerup: powerup ? serializePowerupShopItem(powerup) : null,
       coins: coinsAfter,
       streak,
       extra: true,

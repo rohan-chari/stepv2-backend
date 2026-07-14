@@ -97,7 +97,8 @@ function buildGetFeaturedRaces(dependencies = {}) {
       );
       const finishRewardPlaces = computeFinishRewardPlaces(
         race.seedId,
-        acceptedCount
+        acceptedCount,
+        finishRewardPool
       );
 
       return {

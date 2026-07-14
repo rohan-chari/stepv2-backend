@@ -16,4 +16,18 @@ const PowerupShopItem = {
   },
 };
 
-module.exports = { PowerupShopItem };
+// Shape sent to the client for a powerup won from (or previewed in) the daily
+// box. `powerupType` drives the reel/reveal icon (PowerupIcon maps type →
+// asset); name/sku/description are for display. Kept small and additive so old
+// clients that never read it are unaffected.
+function serializePowerupShopItem(item) {
+  return {
+    sku: item.sku,
+    name: item.name,
+    description: item.description ?? null,
+    priceCoins: item.priceCoins,
+    powerupType: item.powerupType,
+  };
+}
+
+module.exports = { PowerupShopItem, serializePowerupShopItem };

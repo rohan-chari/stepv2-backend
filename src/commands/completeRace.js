@@ -115,7 +115,8 @@ function buildCompleteRace(dependencies = {}) {
       );
       const rewardSlots = computeFinishRewardPlaces(
         race?.seedId,
-        eligible.length
+        eligible.length,
+        finishRewardPool
       );
       const rewards = computeGradedPayouts({
         pool: finishRewardPool,

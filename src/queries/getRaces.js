@@ -75,7 +75,8 @@ async function getRaces(userId) {
     const finishRewardPool = computeFinishRewardPool(race.seedId, acceptedCount);
     const finishRewardPlaces = computeFinishRewardPlaces(
       race.seedId,
-      acceptedCount
+      acceptedCount,
+      finishRewardPool
     );
     let myPlacement =
       race.status === "COMPLETED"

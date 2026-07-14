@@ -82,3 +82,33 @@ test("single participant gets middle odds", () => {
   assert.ok(result.type);
   assert.ok(result.rarity);
 });
+
+// ---------------------------------------------------------------------------
+// Rarity-tier rebalance: RUNNERS_HIGH and PINECONE_TOSS drop to COMMON, and
+// SHORTCUT is promoted to RARE. Written from the spec, asserting only tier
+// membership (not array order).
+// ---------------------------------------------------------------------------
+
+test("RUNNERS_HIGH is COMMON (not UNCOMMON or RARE)", () => {
+  assert.ok(RARITY_TIERS.COMMON.includes("RUNNERS_HIGH"));
+  assert.ok(!RARITY_TIERS.UNCOMMON.includes("RUNNERS_HIGH"));
+  assert.ok(!RARITY_TIERS.RARE.includes("RUNNERS_HIGH"));
+});
+
+test("PINECONE_TOSS is COMMON (not UNCOMMON or RARE)", () => {
+  assert.ok(RARITY_TIERS.COMMON.includes("PINECONE_TOSS"));
+  assert.ok(!RARITY_TIERS.UNCOMMON.includes("PINECONE_TOSS"));
+  assert.ok(!RARITY_TIERS.RARE.includes("PINECONE_TOSS"));
+});
+
+test("SHORTCUT is RARE (not COMMON or UNCOMMON)", () => {
+  assert.ok(RARITY_TIERS.RARE.includes("SHORTCUT"));
+  assert.ok(!RARITY_TIERS.COMMON.includes("SHORTCUT"));
+  assert.ok(!RARITY_TIERS.UNCOMMON.includes("SHORTCUT"));
+});
+
+test("each powerup appears in exactly one tier", () => {
+  const all = [...RARITY_TIERS.COMMON, ...RARITY_TIERS.UNCOMMON, ...RARITY_TIERS.RARE];
+  const unique = new Set(all);
+  assert.equal(all.length, unique.size, "no powerup should appear in two tiers");
+});

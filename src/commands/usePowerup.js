@@ -27,14 +27,27 @@ const {
 
 // SIGNAL_JAMMER is a single-target attack (store-only): it is OFFENSIVE +
 // TARGETED so the shared targeting validation, finished-target rejection, and
-// the MIRROR-reflect / COMPRESSION_SOCKS-block pre-checks apply to it exactly
-// like LEG_CRAMP. Its own effect case just parks a 1h "can't use powerups"
+// the COMPRESSION_SOCKS-block pre-check apply to it exactly like LEG_CRAMP. It
+// is, however, listed in SHOP_POWERUP_TYPES below, which EXCLUDES it from the
+// MIRROR-reflect pre-check — a shop-bought attack can be blocked by socks but
+// never reflected. Its own effect case just parks a 1h "can't use powerups"
 // debuff on the target; the enforcement lives in the jam guard below.
 const OFFENSIVE_TYPES = ["LEG_CRAMP", "RED_CARD", "SHORTCUT", "WRONG_TURN", "DETOUR_SIGN", "PINECONE_TOSS", "SNEAKY_SWAP", "SIGNAL_JAMMER"];
+// The three coin-shop-only powerups (they exist ONLY via the powerup shop:
+// IMPOSTER, RAINSTORM, SIGNAL_JAMMER). Product rule: none of them can EVER be
+// reflected by a Mirror, but ALL of them can be blocked by Compression Socks.
+// So they are excluded from the Mirror pre-check (single-target) and from the
+// per-victim Mirror branch (Rainstorm AoE), while the Socks block still applies:
+//   * SIGNAL_JAMMER stays in OFFENSIVE_TYPES → gets the single-target Socks block.
+//   * IMPOSTER gets a dedicated Socks block near its targeting validation.
+//   * RAINSTORM keeps its per-victim Socks branch (Mirror branch removed).
+const SHOP_POWERUP_TYPES = ["IMPOSTER", "RAINSTORM", "SIGNAL_JAMMER"];
 // IMPOSTER is TARGETED (it needs a rival to swap leaderboard display with) but
 // it is deliberately NOT in OFFENSIVE_TYPES: it never touches the target's
-// participant/steps, applies onSelf (target stored in metadata), and is purely
-// cosmetic — so it is not subject to Compression Socks / Mirror interception.
+// participant/steps and applies onSelf (target stored in metadata). As a shop
+// powerup it can NEVER be reflected by a Mirror, but Compression Socks DOES
+// block it (a dedicated block near its targeting validation), so it is not
+// subject to the generic OFFENSIVE_TYPES Mirror pre-check.
 const TARGETED_TYPES = ["LEG_CRAMP", "SHORTCUT", "WRONG_TURN", "DETOUR_SIGN", "SNEAKY_SWAP", "IMPOSTER", "SIGNAL_JAMMER"];
 // Types Sneaky Swap can never steal: another Sneaky Swap (no steal chains) and
 // unopened Mystery Boxes. Mirrors the isStealable helper in routes/races.js.
@@ -43,7 +56,8 @@ const IMPOSTER_DURATION_MS = 60 * 60 * 1000;
 // RAINSTORM is purchase-only and UNTARGETED AoE: it debuffs every OTHER active
 // participant (never the caster) at once, so it is NOT in OFFENSIVE_TYPES /
 // TARGETED_TYPES (those drive the single-target Mirror/Socks pre-checks) —
-// per-victim shield and mirror resolution happens inside its own case below.
+// per-victim Compression Socks resolution happens inside its own case below. As
+// a shop powerup it can never be reflected by a Mirror (SHOP_POWERUP_TYPES).
 const RAINSTORM_DURATION_MS = 60 * 60 * 1000;
 const RAINSTORM_MULTIPLIER = 0.5;
 // SIGNAL_JAMMER is store-only and non-upgradeable, so its jam lasts a fixed 1h.
@@ -548,8 +562,10 @@ function buildUsePowerup(dependencies = {}) {
     // holds an active Mirror, the offensive powerup is REFLECTED back onto the
     // attacker: we swap roles so the effect lands on the original attacker,
     // consume the Mirror, and write/emit a POWERUP_REFLECTED event.
+    // Shop-bought powerups (SHOP_POWERUP_TYPES) are NEVER reflectable, so they
+    // skip this pre-check entirely and fall through to the Socks block below.
     let reflected = false;
-    if (OFFENSIVE_TYPES.includes(type) && targetParticipant) {
+    if (OFFENSIVE_TYPES.includes(type) && !SHOP_POWERUP_TYPES.includes(type) && targetParticipant) {
       const mirror = await effectModel.findActiveByTypeForParticipant(
         targetParticipant.id,
         "MIRROR"
@@ -650,6 +666,55 @@ function buildUsePowerup(dependencies = {}) {
 
         // `outcome` is an additive discriminator for clients (a later feature
         // builds a reveal modal off it). Old clients keep reading `blocked`.
+        return {
+          blocked: true,
+          blockedBy: "COMPRESSION_SOCKS",
+          outcome: "BLOCKED",
+          upgradeLevel,
+          coinsSpent: costCoins,
+        };
+      }
+    }
+
+    // IMPOSTER Compression Socks block. Imposter is not in OFFENSIVE_TYPES (it
+    // never touches the target's steps and applies onSelf), so it bypasses the
+    // block above — but the product rule is that Compression Socks DOES defend
+    // against it: swapping leaderboard slots with a shielded rival is refused.
+    // Imposter is never reflectable (it is in SHOP_POWERUP_TYPES and not
+    // offensive), so there is no Mirror interaction here. Imposter is
+    // non-upgradeable, so upgradeLevel is 0 and no coins were spent — nothing to
+    // forfeit and no upgrade event to write.
+    if (type === "IMPOSTER" && imposterTargetParticipant) {
+      const shield = await effectModel.findActiveByTypeForParticipant(
+        imposterTargetParticipant.id,
+        "COMPRESSION_SOCKS"
+      );
+      if (shield) {
+        await effectModel.update(shield.id, { status: "BLOCKED" });
+        await powerupModel.update(powerupId, {
+          status: "USED",
+          usedAt: now(),
+          targetUserId: resolvedTargetUserId,
+          upgradeLevel,
+        });
+
+        await eventModel.create({
+          raceId,
+          actorUserId: resolvedTargetUserId,
+          eventType: "POWERUP_BLOCKED",
+          powerupType: type,
+          targetUserId: userId,
+          description: `${targetDisplayName}'s Compression Socks blocked ${myDisplayName}'s ${POWERUP_NAMES[type]}!`,
+        });
+
+        events.emit("POWERUP_BLOCKED", {
+          raceId,
+          attackerUserId: userId,
+          defenderUserId: resolvedTargetUserId,
+          blockedType: type,
+          upgradeLevel,
+        });
+
         return {
           blocked: true,
           blockedBy: "COMPRESSION_SOCKS",
@@ -887,11 +952,10 @@ function buildUsePowerup(dependencies = {}) {
       case "RAINSTORM": {
         // Untargeted AoE debuff: every OTHER active (unfinished) participant's
         // step accrual counts for RAINSTORM_MULTIPLIER (0.5x) for 1 hour. The
-        // caster is never affected by their own storm. Defenses resolve
-        // PER-VICTIM, mirroring the single-target precedence rules:
-        //   * MIRROR (checked first): consumed; that victim is protected and the
-        //     storm is bounced onto the CASTER — the caster gets the 0.5x debuff
-        //     (at most once, no matter how many mirrors reflect).
+        // caster is never affected by their own storm. Rainstorm is a shop-only
+        // powerup, so per the shop-powerup rule it can NEVER be reflected by a
+        // Mirror — a victim's Mirror does not protect them from the rain and is
+        // NOT consumed. The only per-victim defense is:
         //   * COMPRESSION_SOCKS: consumed (BLOCKED); that victim is protected.
         // Coins/upgrades don't apply (purchase-only, non-upgradeable).
         const stormEnd = new Date(currentTime.getTime() + RAINSTORM_DURATION_MS);
@@ -900,35 +964,9 @@ function buildUsePowerup(dependencies = {}) {
         );
         const affected = [];
         const blockedNames = [];
-        let reflectedBy = null;
 
         for (const victim of victims) {
           const victimName = victim.user?.displayName || "A runner";
-
-          const victimMirror = await effectModel.findActiveByTypeForParticipant(
-            victim.id,
-            "MIRROR"
-          );
-          if (victimMirror) {
-            await effectModel.update(victimMirror.id, { status: "EXPIRED" });
-            if (!reflectedBy) reflectedBy = { userId: victim.userId, name: victimName };
-            await eventModel.create({
-              raceId,
-              actorUserId: victim.userId,
-              eventType: "POWERUP_REFLECTED",
-              powerupType: type,
-              targetUserId: userId,
-              description: `${victimName}'s Mirror deflected ${myDisplayName}'s Rainstorm back at them!`,
-            });
-            events.emit("POWERUP_REFLECTED", {
-              raceId,
-              attackerUserId: userId,
-              defenderUserId: victim.userId,
-              reflectedType: type,
-              upgradeLevel,
-            });
-            continue;
-          }
 
           const victimShield = await effectModel.findActiveByTypeForParticipant(
             victim.id,
@@ -972,27 +1010,11 @@ function buildUsePowerup(dependencies = {}) {
           affected.push(victim.userId);
         }
 
-        // A Mirror bounce soaks the caster too (once).
-        if (reflectedBy) {
-          await effectModel.create({
-            raceId,
-            targetParticipantId: myParticipant.id,
-            targetUserId: userId,
-            sourceUserId: reflectedBy.userId,
-            powerupId,
-            type: "RAINSTORM",
-            startsAt: currentTime,
-            expiresAt: stormEnd,
-            metadata: {
-              multiplier: RAINSTORM_MULTIPLIER,
-              stepsAtStart: myParticipant.totalSteps,
-            },
-          });
-        }
-
         result.affected = affected.length;
         result.blockedCount = blockedNames.length;
-        result.reflectedOntoCaster = Boolean(reflectedBy);
+        // Kept for wire-shape compatibility with clients that read this field;
+        // Rainstorm can no longer be reflected, so it is always false now.
+        result.reflectedOntoCaster = false;
 
         await eventModel.create({
           raceId,
@@ -1003,7 +1025,7 @@ function buildUsePowerup(dependencies = {}) {
           metadata: {
             affectedCount: affected.length,
             blockedCount: blockedNames.length,
-            reflectedOntoCaster: Boolean(reflectedBy),
+            reflectedOntoCaster: false,
           },
         });
         break;

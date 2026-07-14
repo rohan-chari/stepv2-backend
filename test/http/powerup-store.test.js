@@ -88,6 +88,35 @@ test("GET /shop/powerups returns the catalog with coins + owned quantities", asy
   }
 });
 
+test("GET /shop/powerups includes Cleanse (POWERUP_CLEANSE, 150 coins)", async () => {
+  const server = await startServer(
+    depsWithStubAuth({
+      getPowerupShopCatalog: async () => ({
+        coins: 500,
+        items: [
+          {
+            sku: "POWERUP_CLEANSE",
+            name: "Cleanse",
+            description: "Wash away every debuff a rival stuck on you",
+            priceCoins: 150,
+            powerupType: "CLEANSE",
+            ownedQuantity: 0,
+          },
+        ],
+      }),
+    })
+  );
+  try {
+    const { status, body } = await getJson(server.baseUrl, "/shop/powerups");
+    assert.equal(status, 200);
+    assert.equal(body.items[0].sku, "POWERUP_CLEANSE");
+    assert.equal(body.items[0].powerupType, "CLEANSE");
+    assert.equal(body.items[0].priceCoins, 150);
+  } finally {
+    await server.close();
+  }
+});
+
 test("POST /shop/powerups/purchase buys a powerup and returns balance + inventory", async () => {
   const server = await startServer(
     depsWithStubAuth({

@@ -9,8 +9,10 @@ const {
   interpolateDailyBoxOdds,
   dailyBoxOddsForPool,
   rollDailyBoxRarity,
+  rollRarePrizeKind,
   coinAmountForTier,
   pickAccessory,
+  pickPowerup,
 } = require("../../src/utils/dailyBoxOdds");
 
 test("streakProgress clamps to [0,1] across the cap", () => {
@@ -67,6 +69,68 @@ test("rollDailyBoxRarity never rolls RARE on an empty pool", () => {
       const rarity = rollDailyBoxRarity(streak, () => roll, 0);
       assert.notEqual(rarity, "RARE", `streak ${streak} roll ${roll}`);
     }
+  }
+});
+
+// ── Powerup prize sub-roll (spinPowerups feature) ──────────────────────────
+
+test("dailyBoxOddsForPool: powerup pool keeps RARE alive when accessories are empty", () => {
+  for (const streak of [1, 10, DAILY_BOX_STREAK_CAP]) {
+    // Old-client shape (no powerup arg) still folds RARE to 0 on an empty
+    // accessory pool — byte-for-byte the historical behavior.
+    const [, , legacyRare] = dailyBoxOddsForPool(streak, 0);
+    assert.equal(legacyRare, 0, `legacy streak ${streak} folds RARE to 0`);
+
+    // With powerups available, RARE stays at its interpolated value.
+    const withPowerups = dailyBoxOddsForPool(streak, 0, 3);
+    assert.deepEqual(withPowerups, interpolateDailyBoxOdds(streak));
+  }
+});
+
+test("dailyBoxOddsForPool: both pools empty still folds RARE to 0", () => {
+  const [common, uncommon, rare] = dailyBoxOddsForPool(15, 0, 0);
+  assert.equal(rare, 0);
+  assert.equal(common + uncommon, 1);
+});
+
+test("rollDailyBoxRarity: RARE reachable via powerups when accessory pool empty", () => {
+  assert.equal(rollDailyBoxRarity(1, () => 0.96, 0, 3), "RARE");
+  // Without a powerup pool the same roll can't be RARE (folded).
+  assert.notEqual(rollDailyBoxRarity(1, () => 0.96, 0, 0), "RARE");
+});
+
+test("rollRarePrizeKind: 50/50 when both pools are stocked", () => {
+  assert.equal(rollRarePrizeKind(3, 3, () => 0.0), "ACCESSORY");
+  assert.equal(rollRarePrizeKind(3, 3, () => 0.49), "ACCESSORY");
+  assert.equal(rollRarePrizeKind(3, 3, () => 0.5), "POWERUP");
+  assert.equal(rollRarePrizeKind(3, 3, () => 0.99), "POWERUP");
+});
+
+test("rollRarePrizeKind: 100% one kind when only one pool is stocked", () => {
+  // Accessory pool empty → always powerup (fixes dead-RARE for owns-everything).
+  for (const roll of [0, 0.5, 0.99]) {
+    assert.equal(rollRarePrizeKind(0, 5, () => roll), "POWERUP");
+  }
+  // Powerup pool empty → always accessory (legacy behavior preserved).
+  for (const roll of [0, 0.5, 0.99]) {
+    assert.equal(rollRarePrizeKind(5, 0, () => roll), "ACCESSORY");
+  }
+});
+
+test("rollRarePrizeKind: null when neither pool has stock", () => {
+  assert.equal(rollRarePrizeKind(0, 0, () => 0.5), null);
+});
+
+test("pickPowerup returns null on empty pool, else an item from the pool", () => {
+  assert.equal(pickPowerup([], 5), null);
+  assert.equal(pickPowerup(null, 5), null);
+  const pool = [
+    { powerupType: "IMPOSTER", priceCoins: 75 },
+    { powerupType: "RAINSTORM", priceCoins: 75 },
+    { powerupType: "SIGNAL_JAMMER", priceCoins: 75 },
+  ];
+  for (let i = 0; i < 200; i++) {
+    assert.ok(pool.includes(pickPowerup(pool, 10)));
   }
 });
 

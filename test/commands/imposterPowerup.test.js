@@ -37,6 +37,7 @@ function makeDeps(overrides = {}) {
   const events = [];
   const feedEvents = [];
   const effectsCreated = [];
+  const effectUpdates = [];
   const bonusChanges = [];
   let updatedPowerup = null;
 
@@ -45,10 +46,15 @@ function makeDeps(overrides = {}) {
   const user3 = makeParticipant("rp-3", "user-3", "Carol", { totalSteps: 8000, ...overrides.user3 });
   const participants = [user1, user2, user3];
 
+  // Pre-existing ACTIVE effects, keyed by participant id, e.g.
+  // { "rp-2": [{ id: "shield-1", type: "COMPRESSION_SOCKS" }] }
+  const existingEffects = overrides.existingEffects || {};
+
   return {
     events,
     feedEvents,
     effectsCreated,
+    effectUpdates,
     bonusChanges,
     get updatedPowerup() { return updatedPowerup; },
     deps: {
@@ -78,14 +84,19 @@ function makeDeps(overrides = {}) {
         async findById(id) { return participants.find((p) => p.id === id); },
       },
       RaceActiveEffect: {
-        async findActiveByTypeForParticipant() { return null; },
-        async findActiveForParticipant() { return []; },
+        async findActiveByTypeForParticipant(participantId, type) {
+          const list = existingEffects[participantId] || [];
+          return list.find((e) => e.type === type) || null;
+        },
+        async findActiveForParticipant(participantId) {
+          return existingEffects[participantId] || [];
+        },
         async create(data) {
           const e = { id: `eff-${effectsCreated.length + 1}`, ...data };
           effectsCreated.push(e);
           return e;
         },
-        async update() {},
+        async update(id, fields) { effectUpdates.push({ id, ...fields }); },
       },
       RacePowerupEvent: {
         async create(data) {
@@ -226,4 +237,90 @@ test("IMPOSTER rejects targeting a non-participant", async () => {
     (err) => err instanceof PowerupUseError
   );
   assert.equal(ctx.effectsCreated.length, 0);
+});
+
+// ---------------------------------------------------------------------------
+// Shop-powerup defense rules: IMPOSTER can be BLOCKED by the target's
+// Compression Socks (new behavior), but is NEVER reflected by a Mirror.
+// ---------------------------------------------------------------------------
+
+test("IMPOSTER is blocked by the target's Compression Socks (shield consumed, no swap)", async () => {
+  const ctx = makeDeps({
+    existingEffects: {
+      "rp-2": [{ id: "shield-1", type: "COMPRESSION_SOCKS" }],
+    },
+  });
+  const use = buildUsePowerup(ctx.deps);
+
+  const result = await use({
+    userId: "user-1",
+    raceId: "race-1",
+    powerupId: "pw-1",
+    targetUserId: "user-2",
+  });
+
+  // Blocked outcome, socks consumed, no imposter effect created.
+  assert.equal(result.blocked, true);
+  assert.equal(result.blockedBy, "COMPRESSION_SOCKS");
+  assert.equal(result.outcome, "BLOCKED");
+  assert.equal(ctx.effectsCreated.length, 0, "no display-swap effect created");
+  const blockedUpdate = ctx.effectUpdates.find((u) => u.id === "shield-1");
+  assert.equal(blockedUpdate.status, "BLOCKED", "shield is consumed");
+  // Powerup is still marked USED.
+  assert.ok(ctx.updatedPowerup);
+  assert.equal(ctx.updatedPowerup.status, "USED");
+  // Emits + writes a POWERUP_BLOCKED event.
+  const blockedEvent = ctx.feedEvents.find((e) => e.eventType === "POWERUP_BLOCKED");
+  assert.ok(blockedEvent, "writes a POWERUP_BLOCKED feed event");
+  assert.match(blockedEvent.description, /Compression Socks/);
+  assert.ok(ctx.events.find((e) => e.event === "POWERUP_BLOCKED"));
+});
+
+test("IMPOSTER is NOT blocked when a DIFFERENT rival holds Compression Socks", async () => {
+  // Socks on Carol (rp-3), but Alice targets Bob (rp-2) — the swap applies.
+  const ctx = makeDeps({
+    existingEffects: {
+      "rp-3": [{ id: "shield-1", type: "COMPRESSION_SOCKS" }],
+    },
+  });
+  const use = buildUsePowerup(ctx.deps);
+
+  const result = await use({
+    userId: "user-1",
+    raceId: "race-1",
+    powerupId: "pw-1",
+    targetUserId: "user-2",
+  });
+
+  assert.notEqual(result.blocked, true);
+  assert.equal(ctx.effectsCreated.length, 1);
+  assert.equal(ctx.effectsCreated[0].type, "IMPOSTER");
+  assert.equal(ctx.effectUpdates.length, 0, "unrelated shield untouched");
+});
+
+test("IMPOSTER is NOT reflected by the target's Mirror (swap applies, mirror intact)", async () => {
+  const ctx = makeDeps({
+    existingEffects: {
+      "rp-2": [{ id: "mirror-1", type: "MIRROR" }],
+    },
+  });
+  const use = buildUsePowerup(ctx.deps);
+
+  const result = await use({
+    userId: "user-1",
+    raceId: "race-1",
+    powerupId: "pw-1",
+    targetUserId: "user-2",
+  });
+
+  // Applies normally onto the caster; mirror is NOT consumed.
+  assert.notEqual(result.blocked, true);
+  assert.notEqual(result.reflected, true);
+  assert.equal(ctx.effectsCreated.length, 1);
+  const eff = ctx.effectsCreated[0];
+  assert.equal(eff.type, "IMPOSTER");
+  assert.equal(eff.targetParticipantId, "rp-1", "self-applied on the caster");
+  assert.equal(eff.metadata.swapWithUserId, "user-2");
+  assert.equal(ctx.effectUpdates.length, 0, "mirror is not consumed");
+  assert.ok(!ctx.feedEvents.find((e) => e.eventType === "POWERUP_REFLECTED"));
 });

@@ -148,6 +148,10 @@ model DailyRewardClaim {
   rarity      String?
   coinAmount  Int?     @map("coin_amount")
   shopItemId  String?  @map("shop_item_id")
+  // Powerup type won when rewardType = POWERUP (daily-box shop-powerup prize).
+  // Null for every other reward type and for legacy claims. Plain string (not
+  // the PowerupType enum) to match rarity/shopItemId — this is an audit column.
+  powerupType String?  @map("powerup_type")
   createdAt   DateTime @default(now()) @map("created_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -179,6 +183,8 @@ model AdRewardGrant {
   rarity        String?
   coinAmount    Int?      @map("coin_amount")
   shopItemId    String?   @map("shop_item_id")
+  // Powerup type won when rewardType = POWERUP (extra-spin shop-powerup prize).
+  powerupType   String?   @map("powerup_type")
   createdAt     DateTime  @default(now()) @map("created_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)

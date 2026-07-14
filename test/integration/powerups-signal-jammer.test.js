@@ -468,16 +468,17 @@ describe("signal jammer — integration", () => {
 
   // ── 9. Defenses ────────────────────────────────────────────────────────
   describe("defenses", () => {
-    it("MIRROR reflects the jam back onto the attacker", async () => {
+    it("MIRROR does NOT reflect the jam — target is jammed and the Mirror stays intact", async () => {
       await seedStoreCatalog();
       const alice = await createUser("JamAttacker6", 200);
       const bob = await createUser("JamMirror6");
       await makeFriends(alice, bob);
       const raceId = await createActiveRace(alice, [bob]);
 
-      // Bob has an active Mirror.
+      // Bob has an active Mirror — but the jammer is a shop powerup and can't
+      // be reflected, so it must NOT protect him.
       const mirrorPw = await giveHeldPowerup(raceId, bob.userId, "MIRROR", 3000, "RARE");
-      await giveActiveEffect(
+      const mirrorEffect = await giveActiveEffect(
         raceId, bob.userId, bob.userId, "MIRROR", mirrorPw.id,
         new Date(Date.now() + 60 * 60 * 1000)
       );
@@ -488,24 +489,29 @@ describe("signal jammer — integration", () => {
       const res = await usePowerup(alice.token, raceId, jammerId, { targetUserId: bob.userId });
       assert.equal(res.status, 200);
       const body = await res.json();
-      assert.equal(body.result.reflected, true);
-      assert.equal(body.result.outcome, "REFLECTED");
+      assert.notEqual(body.result.reflected, true);
+      assert.notEqual(body.result.blocked, true);
+      assert.equal(body.result.outcome, "APPLIED");
 
-      // The jam landed on the ATTACKER (alice), not bob.
+      // The jam landed on the TARGET (bob), not the attacker.
       const aliceP = await participant(raceId, alice.userId);
       const bobP = await participant(raceId, bob.userId);
-      const onAlice = await prisma.raceActiveEffect.findFirst({
-        where: { raceId, type: "SIGNAL_JAMMER", targetParticipantId: aliceP.id, status: "ACTIVE" },
-      });
-      assert.ok(onAlice, "attacker is now jammed");
       const onBob = await prisma.raceActiveEffect.findFirst({
         where: { raceId, type: "SIGNAL_JAMMER", targetParticipantId: bobP.id, status: "ACTIVE" },
       });
-      assert.equal(onBob, null, "target is not jammed");
+      assert.ok(onBob, "target is jammed");
+      const onAlice = await prisma.raceActiveEffect.findFirst({
+        where: { raceId, type: "SIGNAL_JAMMER", targetParticipantId: aliceP.id, status: "ACTIVE" },
+      });
+      assert.equal(onAlice, null, "attacker is not jammed");
 
-      // And the reflected jam actually jams alice: she can't use a powerup.
-      const shake = await giveHeldPowerup(raceId, alice.userId, "PROTEIN_SHAKE", 7000, "COMMON");
-      const blocked = await usePowerup(alice.token, raceId, shake.id);
+      // The Mirror is NOT consumed — still ACTIVE, banked for a reflectable hit.
+      const mirrorNow = await prisma.raceActiveEffect.findUnique({ where: { id: mirrorEffect.id } });
+      assert.equal(mirrorNow.status, "ACTIVE", "mirror is not consumed by the jam");
+
+      // And the jam actually jams bob: he can't use a powerup.
+      const shake = await giveHeldPowerup(raceId, bob.userId, "PROTEIN_SHAKE", 7000, "COMMON");
+      const blocked = await usePowerup(bob.token, raceId, shake.id);
       assert.equal(blocked.status, 409);
     });
 

@@ -9,6 +9,12 @@ const REWARD_TYPE = {
   COINS: "COINS",
   ACCESSORY: "ACCESSORY",
   COINS_FALLBACK: "COINS_FALLBACK",
+  // A shop powerup (IMPOSTER/RAINSTORM/SIGNAL_JAMMER/…) won from the daily box.
+  // Only ever rolled/returned for clients that advertise the `spinpowerups`
+  // capability — old binaries can't render this reward type and would show it
+  // as "+0 coins", so the backend keeps them on the legacy coins/accessory-only
+  // behavior (see routes/dailyReward.js gating).
+  POWERUP: "POWERUP",
 };
 
 function getRewardPreviewForDay(cycleDay) {

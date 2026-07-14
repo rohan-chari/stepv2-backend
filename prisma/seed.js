@@ -95,7 +95,7 @@ async function seed() {
       sku: "POWERUP_IMPOSTER",
       name: "Imposter",
       description:
-        "Swap your leaderboard position with a rival's for 1 hour. Purely cosmetic — real standings and payouts are unaffected.",
+        "Swap your leaderboard position with a rival's for 1 hour. Purely cosmetic — real standings and payouts are unaffected. Mirrors can't reflect it, but Compression Socks block it.",
       priceCoins: 75,
       powerupType: "IMPOSTER",
       active: true,
@@ -105,7 +105,7 @@ async function seed() {
       sku: "POWERUP_RAINSTORM",
       name: "Rainstorm",
       description:
-        "Summon a downpour: every other racer's steps count for half for 1 hour. Shields and Mirrors protect against it.",
+        "Summon a downpour: every other racer's steps count for half for 1 hour. Mirrors can't reflect it, but Compression Socks keep a racer dry.",
       priceCoins: 75,
       powerupType: "RAINSTORM",
       active: true,
@@ -117,11 +117,22 @@ async function seed() {
       sku: "POWERUP_SIGNAL_JAMMER",
       name: "Signal Jammer",
       description:
-        "Jam a rival's signal — they can't use any powerups for 1 hour. They can still buy and stash powerups; they just can't fire them. Shields and Mirrors protect against it.",
+        "Jam a rival's signal — they can't use any powerups for 1 hour. They can still buy and stash powerups; they just can't fire them. Mirrors can't reflect it, but Compression Socks block it.",
       priceCoins: 75,
       powerupType: "SIGNAL_JAMMER",
       active: true,
       sortOrder: 2,
+    },
+    {
+      sku: "POWERUP_CLEANSE",
+      name: "Cleanse",
+      description:
+        "Wash away every debuff a rival has stuck on you — frozen steps, wrong turns, detours, and more. Your own buffs stay put.",
+      priceCoins: 150,
+      powerupType: "CLEANSE",
+      active: true,
+      testOnly: false,
+      sortOrder: 3,
     },
   ];
   let powerupItemsUpserted = 0;

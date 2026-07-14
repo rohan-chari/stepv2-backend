@@ -29,11 +29,11 @@ function makeDeps(overrides = {}) {
       ? null
       : {
           id: "psi-1",
-          sku: "POWERUP_IMPOSTER",
-          name: "Imposter",
-          description: "Swap positions",
+          sku: overrides.sku ?? "POWERUP_IMPOSTER",
+          name: overrides.name ?? "Imposter",
+          description: overrides.description ?? "Swap positions",
           priceCoins: overrides.priceCoins ?? 500,
-          powerupType: "IMPOSTER",
+          powerupType: overrides.powerupType ?? "IMPOSTER",
           active: overrides.itemActive ?? true,
         },
     // existing inventory quantity for the purchased type
@@ -207,6 +207,32 @@ test("idempotent: replaying the same key returns the prior result and does not d
   assert.equal(deps.calls.coinDebits.length, 1, "debit happened exactly once");
   assert.equal(second.coins, first.coins);
   assert.equal(second.purchase.idempotent, true, "marked idempotent replay");
+});
+
+test("Cleanse (POWERUP_CLEANSE, 150 coins) purchases like any other shop powerup", async () => {
+  const deps = makeDeps({
+    coins: 400,
+    sku: "POWERUP_CLEANSE",
+    name: "Cleanse",
+    powerupType: "CLEANSE",
+    priceCoins: 150,
+    inventoryQty: 0,
+  });
+  const purchase = buildPurchasePowerupItem(deps);
+
+  const result = await purchase({
+    userId: "user-1",
+    sku: "POWERUP_CLEANSE",
+    idempotencyKey: "cleanse-buy-1",
+  });
+
+  assert.equal(deps.state.user.coins, 250, "coins debited by 150");
+  assert.equal(deps.calls.coinDebits[0], 150);
+  assert.equal(result.coins, 250);
+  assert.equal(result.inventory.powerupType, "CLEANSE");
+  assert.equal(result.inventory.quantity, 1);
+  assert.equal(result.item.powerupType, "CLEANSE");
+  assert.equal(result.item.priceCoins, 150);
 });
 
 test("missing idempotency key is rejected", async () => {

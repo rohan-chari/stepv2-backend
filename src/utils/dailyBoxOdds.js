@@ -38,26 +38,62 @@ function interpolateDailyBoxOdds(streak) {
   ];
 }
 
-// Odds actually served/rolled, given how many accessories the user can still
-// win. With an empty pool, RARE can't pay what it advertises ("new accessory"),
-// so fold its share into UNCOMMON and send RARE: 0. Shipped app builds render
-// the reel and the odds dialog straight from these numbers, so this is the
-// only way to keep an all-accessories-owned user from seeing the "???"
-// mystery-accessory placeholder tile on binaries already in the field.
+// Odds actually served/rolled, given what RARE can still pay out. RARE pays a
+// prize (an unowned accessory or — for spinpowerups-capable clients — a shop
+// powerup); when NEITHER pool has anything to give, RARE can't pay what it
+// advertises, so fold its share into UNCOMMON and send RARE: 0. Shipped app
+// builds render the reel and the odds dialog straight from these numbers, so
+// this is the only way to keep an all-accessories-owned user from seeing the
+// "???" mystery-accessory placeholder tile on binaries already in the field.
 // UNCOMMON is computed as 1 - COMMON (not uncommon + rare) so the two tiers
 // sum to exactly 1 and the client's cumulative roll can never fall past them.
-function dailyBoxOddsForPool(streak, poolSize) {
+//
+// `powerupPoolSize` defaults to 0 so legacy callers passing only
+// (streak, accessoryPoolSize) get the exact historical behavior: RARE folds to
+// 0 the moment the accessory pool empties. Spinpowerups-capable callers pass a
+// non-zero powerup pool, which keeps RARE alive (paying a powerup) even when
+// the user owns every accessory — fixing the dead-RARE UX for those clients.
+function dailyBoxOddsForPool(streak, accessoryPoolSize, powerupPoolSize = 0) {
   const [common, uncommon, rare] = interpolateDailyBoxOdds(streak);
-  if (poolSize > 0) return [common, uncommon, rare];
+  if (accessoryPoolSize > 0 || powerupPoolSize > 0) {
+    return [common, uncommon, rare];
+  }
   return [common, 1 - common, 0];
 }
 
-function rollDailyBoxRarity(streak, rng = Math.random, poolSize = Infinity) {
-  const [commonOdds, uncommonOdds] = dailyBoxOddsForPool(streak, poolSize);
+function rollDailyBoxRarity(
+  streak,
+  rng = Math.random,
+  accessoryPoolSize = Infinity,
+  powerupPoolSize = 0
+) {
+  const [commonOdds, uncommonOdds] = dailyBoxOddsForPool(
+    streak,
+    accessoryPoolSize,
+    powerupPoolSize
+  );
   const roll = rng();
   if (roll < commonOdds) return "COMMON";
   if (roll < commonOdds + uncommonOdds) return "UNCOMMON";
   return "RARE";
+}
+
+// Sub-roll for a RARE hit: does it pay an ACCESSORY or a POWERUP? 50/50 when
+// both pools are stocked; whichever single pool is non-empty when only one is;
+// null when both are empty (the caller then falls back to bonus coins). The
+// powerup pool is essentially never empty for a spinpowerups-capable client, so
+// in practice a RARE always has a prize once powerups are in play.
+function rollRarePrizeKind(
+  accessoryPoolSize,
+  powerupPoolSize,
+  rng = Math.random
+) {
+  const hasAccessory = accessoryPoolSize > 0;
+  const hasPowerup = powerupPoolSize > 0;
+  if (hasAccessory && hasPowerup) return rng() < 0.5 ? "ACCESSORY" : "POWERUP";
+  if (hasPowerup) return "POWERUP";
+  if (hasAccessory) return "ACCESSORY";
+  return null;
 }
 
 // Coin amount within a tier scales with streak progress so a longer streak
@@ -73,9 +109,9 @@ function coinAmountForTier(rangeKey, streak) {
   return Math.round(raw / 5) * 5;
 }
 
-// Weighted pick of an unowned accessory: weight grows with priceCoins, and a
-// longer streak sharpens the bias toward pricier (better) items.
-function pickAccessory(pool, streak, rng = Math.random) {
+// Weighted pick from a priced pool: weight grows with priceCoins, and a longer
+// streak sharpens the bias toward pricier (better) items.
+function pickWeightedByPrice(pool, streak, rng = Math.random) {
   if (!pool || pool.length === 0) return null;
   const t = streakProgress(streak);
   const exponent = 1 + t;
@@ -91,6 +127,19 @@ function pickAccessory(pool, streak, rng = Math.random) {
   return pool[pool.length - 1];
 }
 
+// Weighted pick of an unowned accessory (see pickWeightedByPrice).
+function pickAccessory(pool, streak, rng = Math.random) {
+  return pickWeightedByPrice(pool, streak, rng);
+}
+
+// Weighted pick of a shop powerup — same price-weighted logic as accessories,
+// so pricier powerups are (slightly) rarer and a longer streak biases toward
+// them. Powerups are all one price today, so this is effectively uniform now
+// but stays sensible if prices ever diverge.
+function pickPowerup(pool, streak, rng = Math.random) {
+  return pickWeightedByPrice(pool, streak, rng);
+}
+
 module.exports = {
   RARITY_ORDER,
   DAILY_BOX_STREAK_CAP,
@@ -100,6 +149,9 @@ module.exports = {
   interpolateDailyBoxOdds,
   dailyBoxOddsForPool,
   rollDailyBoxRarity,
+  rollRarePrizeKind,
   coinAmountForTier,
+  pickWeightedByPrice,
   pickAccessory,
+  pickPowerup,
 };

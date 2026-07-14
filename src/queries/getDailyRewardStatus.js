@@ -11,7 +11,11 @@ const {
 const {
   getUnownedAccessoryPool,
 } = require("./getUnownedAccessoryPool");
+const {
+  getEligiblePowerupPool,
+} = require("./getEligiblePowerupPool");
 const { serializeShopItem } = require("../utils/shopCosmetics");
+const { serializePowerupShopItem } = require("../models/powerupShopItem");
 
 // How many unowned accessories the status preview ships for the reel.
 const ACCESSORY_POOL_PREVIEW_LIMIT = 10;
@@ -42,7 +46,16 @@ function computeNextLoginStreak(prevDate, prevLoginStreak, legacyCycleDay, today
   return 1; // missed a day (or first ever claim)
 }
 
-async function getDailyRewardStatus({ userId, localDate }) {
+async function getDailyRewardStatus({
+  userId,
+  localDate,
+  // Feature/channel gating for the daily-box powerup prizes. Defaults keep the
+  // legacy coins/accessory-only behavior for old clients (no `spinpowerups`
+  // token): the powerup pool stays empty and RARE folds to 0 exactly as before.
+  supportsSpinPowerups = false,
+  supportsJammer = false,
+  channel = "prod",
+}) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: {
@@ -89,30 +102,61 @@ async function getDailyRewardStatus({ userId, localDate }) {
   // Same pool the RARE roll draws from, so the reel previews real winnable
   // accessories (capped — it's display-only).
   const accessoryPool = await getUnownedAccessoryPool(userId);
-  // Empty pool → RARE folded to 0 so shipped clients never draw the "???"
-  // mystery-accessory tile (see dailyBoxOddsForPool).
+  // Shop powerups are only rolled/previewed for spinpowerups-capable clients —
+  // old binaries can't render a POWERUP tile/result. Non-flagged clients get an
+  // empty pool, so their odds and payload are byte-identical to today.
+  const powerupPool = supportsSpinPowerups
+    ? await getEligiblePowerupPool({ channel, supportsJammer })
+    : [];
+  // Empty pools → RARE folded to 0 so shipped clients never draw the "???"
+  // mystery-accessory tile (see dailyBoxOddsForPool). With powerups in play,
+  // RARE stays alive even when every accessory is owned.
   const [common, uncommon, rare] = dailyBoxOddsForPool(
     projectedStreak,
-    accessoryPool.length
+    accessoryPool.length,
+    powerupPool.length
   );
+
+  const box = {
+    streak: projectedStreak,
+    streakCap: DAILY_BOX_STREAK_CAP,
+    odds: { COMMON: common, UNCOMMON: uncommon, RARE: rare },
+    coinRanges: {
+      COMMON: DAILY_BOX_COIN_RANGES.COMMON,
+      UNCOMMON: DAILY_BOX_COIN_RANGES.UNCOMMON,
+    },
+    accessoryPool: accessoryPool
+      .slice(0, ACCESSORY_POOL_PREVIEW_LIMIT)
+      .map((item) => serializeShopItem(item)),
+  };
+
+  // Additive: only spinpowerups-capable clients get these fields. `rarePrizeMix`
+  // lets the client explain the RARE tier honestly in its odds sheet (what
+  // share of a RARE is an accessory vs a powerup) without re-deriving the
+  // 50/50-or-fold-to-one rule the command uses.
+  if (supportsSpinPowerups) {
+    box.powerupPool = powerupPool.map((item) => serializePowerupShopItem(item));
+    const hasAccessory = accessoryPool.length > 0;
+    const hasPowerup = powerupPool.length > 0;
+    let accessoryShare = 0;
+    let powerupShare = 0;
+    if (hasAccessory && hasPowerup) {
+      accessoryShare = 0.5;
+      powerupShare = 0.5;
+    } else if (hasPowerup) {
+      powerupShare = 1;
+    } else if (hasAccessory) {
+      accessoryShare = 1;
+    }
+    box.rarePrizeMix = { ACCESSORY: accessoryShare, POWERUP: powerupShare };
+  }
 
   return {
     cycleLength: CYCLE_LENGTH,
     currentDay: projectedDay,
     claimedToday,
     ladder,
-    box: {
-      streak: projectedStreak,
-      streakCap: DAILY_BOX_STREAK_CAP,
-      odds: { COMMON: common, UNCOMMON: uncommon, RARE: rare },
-      coinRanges: {
-        COMMON: DAILY_BOX_COIN_RANGES.COMMON,
-        UNCOMMON: DAILY_BOX_COIN_RANGES.UNCOMMON,
-      },
-      accessoryPool: accessoryPool
-        .slice(0, ACCESSORY_POOL_PREVIEW_LIMIT)
-        .map((item) => serializeShopItem(item)),
-    },
+    box,
   };
 }
 

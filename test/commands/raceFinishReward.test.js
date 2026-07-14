@@ -160,25 +160,25 @@ test("a large daily field mints a bigger pool and concentrates the paid places",
   await complete({ raceId: "race-big", winnerUserId: "user-1", participantUserIds: [] });
 
   const rewards = finishRewardCalls(ctx.awardCalls);
-  // 100 finishers → pool 1200 (cap), 10 paid places (cap), NOT 50.
-  assert.equal(rewards.length, 10);
+  // 100 finishers → pool 1500 (cap), 15 paid places (cap), NOT 50.
+  assert.equal(rewards.length, 15);
   assert.deepEqual(
     rewards.map((c) => c.userId),
-    Array.from({ length: 10 }, (_, i) => `user-${i + 1}`)
+    Array.from({ length: 15 }, (_, i) => `user-${i + 1}`)
   );
   // The whole minted pool is handed out, nothing minted beyond it.
   assert.equal(
     rewards.reduce((sum, c) => sum + c.amount, 0),
-    1200
+    1500
   );
   // Descending, and crucially every paid place clears a meaningful amount —
-  // no 0-coin "winners" in the tail.
+  // the minTailPayout floor keeps the last place >= 10, no 0-coin "winners".
   for (let i = 1; i < rewards.length; i++) {
     assert.ok(rewards[i - 1].amount >= rewards[i].amount);
   }
-  assert.ok(rewards[rewards.length - 1].amount > 0);
+  assert.ok(rewards[rewards.length - 1].amount >= 10);
   // 1st place winning a 100-person daily is worth real coins, not ~10.
-  assert.ok(rewards[0].amount >= 200);
+  assert.ok(rewards[0].amount >= 150);
 });
 
 test("only people who actually walked are eligible (zero-step entries excluded)", async () => {

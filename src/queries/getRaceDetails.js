@@ -43,7 +43,8 @@ async function getRaceDetails(userId, raceId, supportsCharacters = false) {
   const finishRewardPool = computeFinishRewardPool(race.seedId, acceptedCount);
   const finishRewardPlaces = computeFinishRewardPlaces(
     race.seedId,
-    acceptedCount
+    acceptedCount,
+    finishRewardPool
   );
 
   return {

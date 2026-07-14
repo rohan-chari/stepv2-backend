@@ -1,5 +1,6 @@
 const { Router } = require("express");
 const { buildRequireAuth } = require("../middleware/requireAuth");
+const { extractReleaseChannel } = require("../utils/releaseChannel");
 const {
   getDailyRewardStatus: defaultGetDailyRewardStatus,
 } = require("../queries/getDailyRewardStatus");
@@ -40,6 +41,22 @@ function createDailyRewardRouter(dependencies = {}) {
   const adRewardsConfig = dependencies.adRewardsConfig || defaultAdRewardsConfig;
 
   router.use(requireAuth);
+  // Release channel (testOnly gating for powerup prizes). X-Client-Features is
+  // already stamped app-wide in app.js.
+  router.use(extractReleaseChannel);
+
+  // Daily-box powerup prizes are gated behind the `spinpowerups` client feature:
+  // old binaries have no rewardType switch for POWERUP and would render it as
+  // "+0 coins", so they must never be offered one (see claimDailyRewardBox).
+  // The X-Client-Features header is lowercased when parsed, so the token
+  // resolves to "spinpowerups" regardless of how the client cases it.
+  function spinPowerupFlags(req) {
+    return {
+      supportsSpinPowerups: req.clientFeatures?.has("spinpowerups") ?? false,
+      supportsJammer: req.clientFeatures?.has("jammer") ?? false,
+      channel: req.releaseChannel,
+    };
+  }
 
   router.get("/status", async (req, res) => {
     try {
@@ -52,6 +69,7 @@ function createDailyRewardRouter(dependencies = {}) {
       const status = await getDailyRewardStatus({
         userId: req.user.id,
         localDate,
+        ...spinPowerupFlags(req),
       });
       // Rewarded-ad extra spin: additive, and only for clients that declared
       // the `ads` capability — old binaries never see the field (and the env
@@ -113,6 +131,7 @@ function createDailyRewardRouter(dependencies = {}) {
       const result = await claimDailyRewardBox({
         userId: req.user.id,
         localDate,
+        ...spinPowerupFlags(req),
       });
       res.json(result);
     } catch (error) {
@@ -138,6 +157,7 @@ function createDailyRewardRouter(dependencies = {}) {
       const result = await claimExtraDailyRewardBox({
         userId: req.user.id,
         localDate,
+        ...spinPowerupFlags(req),
       });
       res.json(result);
     } catch (error) {

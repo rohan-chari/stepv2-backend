@@ -6,20 +6,29 @@ Races can optionally enable powerups. When enabled, participants earn powerup bo
 
 ## Powerup Types
 
+Rarity tiers are the generation pool used when a mystery box is opened
+(`RARITY_TIERS` in `src/utils/powerupOdds.js`). The three shop-only powerups
+(Imposter, Rainstorm, Signal Jammer) are NOT in any tier — they are bought with
+coins, never rolled.
+
 ### Common
 
 | Powerup | Target | Duration | Effect |
 |---|---|---|---|
 | **Protein Shake** | Self | Instant | +1,500 bonus steps |
-| **Banana Peel** | Opponent | Instant | Steal up to 1,000 steps from target (added to your total, subtracted from theirs) |
+| **Trail Mix** | Self | Instant | +steps per unique powerup type you've used this race |
+| **Detour Sign** | Opponent | 3 hours | Hides the entire leaderboard from the target |
+| **Runner's High** | Self | 3 hours | 2x step multiplier. Steps walked during the window are counted twice (base + buff) |
+| **Pinecone Toss** | Opponent (adjacent) | Instant | Knock steps off the runner directly ahead of or behind you |
 
 ### Uncommon
 
 | Powerup | Target | Duration | Effect |
 |---|---|---|---|
 | **Leg Cramp** | Opponent | 2 hours | Freezes target's step progression. All steps they walk during the window are subtracted from their race total |
-| **Runner's High** | Self | 3 hours | 2x step multiplier. Steps walked during the window are counted twice (base + buff) |
 | **Stealth Mode** | Self | 4 hours | Hides your progress on the leaderboard. Opponents see "???" for your name and no step count. You can still see your own progress |
+| **Wrong Turn** | Opponent | 1 hour | Reverses the target's steps during the window |
+| **Cleanse** | Self | Instant | Clears every opponent-inflicted debuff on you (your own buffs are untouched) |
 
 ### Rare
 
@@ -27,7 +36,14 @@ Races can optionally enable powerups. When enabled, participants earn powerup bo
 |---|---|---|---|
 | **Red Card** | Auto (leader) | Instant | Deducts 10% of the current leader's steps from their total. Cannot be used while you are in the lead |
 | **Second Wind** | Self | Instant | Bonus steps based on your gap to the leader: 25% of the gap, clamped to 500-5,000 |
-| **Compression Socks** | Self | Until consumed | Shield that blocks the next offensive powerup (Leg Cramp, Red Card, or Banana Peel) used against you. Lasts indefinitely until triggered |
+| **Compression Socks** | Self | Until consumed | Shield that blocks the next offensive powerup used against you. Lasts indefinitely until triggered |
+| **Fanny Pack** | Self | 24 hours | Unlocks an extra powerup slot |
+| **Lucky Horseshoe** | Self | Until consumed | Guarantees your next mystery box is a minimum rarity |
+| **Pocket Watch** | Self | Instant | Extends all of your active timed buffs |
+| **Trail Mine** | Self (trap) | Until triggered | Drops a hidden trap at your current step position |
+| **Sneaky Swap** | Opponent | Instant | Steals a random held powerup from the target |
+| **Shortcut** | Opponent | Instant | Steal up to 1,000 steps from target (added to your total, subtracted from theirs) |
+| **Mirror** | Self | Until consumed | Reflects the next (reflectable) offensive powerup back onto the attacker |
 
 ## Earning Powerups
 
@@ -53,7 +69,7 @@ Rarity odds depend on your position in the race. Trailing players get better dro
 
 Middle positions are interpolated linearly between these extremes.
 
-Within a rarity tier, each powerup has equal odds (e.g. Common = 50% Protein Shake, 50% Banana Peel).
+Within a rarity tier, each powerup has equal odds (e.g. a 5-powerup Common tier gives each a 1-in-5 chance).
 
 ## Usage Rules
 
@@ -87,6 +103,28 @@ reflects off the Mirror (punishing the attacker), and the next one is absorbed
 by the still-active Compression Socks. The socks-block path only runs when no
 Mirror is present. (Implemented in `src/commands/usePowerup.js`; see the
 dual-shield integration test in `test/integration/powerups-dual-shield.test.js`.)
+
+### Shop-only powerups: Mirror-proof, Socks-blockable
+
+The three coin-shop-only powerups — **Imposter**, **Rainstorm**, and **Signal
+Jammer** (`SHOP_POWERUP_TYPES` in `usePowerup.js`) — follow a different defense
+rule than earned offensive powerups:
+
+- **Mirror can NEVER reflect them.** A target holding an active Mirror is *not*
+  protected and their Mirror is *not* consumed — the shop powerup lands as if no
+  Mirror were present. (Signal Jammer skips the Mirror pre-check via
+  `SHOP_POWERUP_TYPES`; Rainstorm has no per-victim Mirror branch; Imposter is
+  not offensive and is never reflectable.)
+- **Compression Socks DO block all three.** The socks are consumed
+  (status `BLOCKED`), a `POWERUP_BLOCKED` event is written/emitted, and the
+  attacker's powerup is marked `USED`:
+  - *Signal Jammer* — single-target socks block (it stays in `OFFENSIVE_TYPES`).
+  - *Imposter* — a dedicated socks block near its targeting validation. Since
+    Imposter targets a single rival, only that rival's socks matter; swapping
+    slots with a shielded rival is refused.
+  - *Rainstorm* — per-victim socks block. Each other racer with an active shield
+    stays dry (their socks are consumed); everyone else gets the 0.5x debuff. A
+    victim's Mirror no longer protects them from the rain.
 
 ## Step Calculation with Powerups
 

@@ -153,17 +153,17 @@ describe("seeded race graded finish reward", () => {
     );
   });
 
-  it("A2: a mid daily field mints exactly perHead*N (12*10=120)", async () => {
+  it("A2: a mid daily field mints exactly perHead*N (15*10=150)", async () => {
     const steps = Array.from({ length: 10 }, (_, i) => 1000 - i * 10);
     const { raceId } = await settleDirect(DAILY, steps);
     const minted = (
       await prisma.coinTransaction.findMany({ where: { reason: REASON, refId: { startsWith: `${raceId}:` } } })
     ).reduce((s, t) => s + t.amount, 0);
-    assert.equal(computeFinishRewardPool(DAILY, 10), 120);
-    assert.equal(minted, 120);
+    assert.equal(computeFinishRewardPool(DAILY, 10), 150);
+    assert.equal(minted, 150);
   });
 
-  it("A3+B5cap: a huge daily field caps pool at 1200 and places at 10", async () => {
+  it("A3+B5cap: a huge daily field caps pool at 1500 and places at 15", async () => {
     const n = 101;
     const race = await seededActiveRace(DAILY);
     await prisma.user.createMany({
@@ -191,13 +191,13 @@ describe("seeded race graded finish reward", () => {
       participantUserIds: users.map((u) => u.id),
     });
 
-    assert.equal(computeFinishRewardPool(DAILY, n), 1200);
-    assert.equal(computeFinishRewardPlaces(DAILY, n), 10);
+    assert.equal(computeFinishRewardPool(DAILY, n), 1500);
+    assert.equal(computeFinishRewardPlaces(DAILY, n), 15);
     const txns = await prisma.coinTransaction.findMany({
       where: { reason: REASON, refId: { startsWith: `${race.id}:` } },
     });
-    assert.equal(txns.length, 10);
-    assert.equal(txns.reduce((s, t) => s + t.amount, 0), 1200);
+    assert.equal(txns.length, 15);
+    assert.equal(txns.reduce((s, t) => s + t.amount, 0), 1500);
   });
 
   it("A4: the weekly seed uses its own knobs (perHead 40, places scale)", async () => {
@@ -229,13 +229,65 @@ describe("seeded race graded finish reward", () => {
   });
 
   it("B7: finishers below the paid-places cutoff get zero coins and no ledger row", async () => {
-    // 10-person daily pays 3 places (clamped to min); ranks 4..10 get nothing.
+    // 10-person daily pays 5 places (pool 150, tail floor keeps last at 10);
+    // ranks 6..10 get nothing.
     const steps = Array.from({ length: 10 }, (_, i) => 1000 - i * 10);
     const { ranked } = await settleDirect(DAILY, steps);
-    for (let i = 3; i < ranked.length; i++) {
+    assert.equal(computeFinishRewardPlaces(DAILY, 10), 5);
+    for (let i = 5; i < ranked.length; i++) {
       assert.equal(await coinsOf(ranked[i].userId), 0);
       assert.equal((await rewardTxns(ranked[i].userId)).length, 0);
     }
+  });
+
+  it("B8: minTailPayout shrinks the paid places so the last place clears 10 coins (20-field daily)", async () => {
+    // 20 finishers: pool 300, paidFraction 0.5 would pay 10 places, but the
+    // minTailPayout=10 floor pulls it back to 7 so the tail clears 10 coins.
+    // Exact descending-linear split of 300 over 7: 78/64/53/42/32/21/10.
+    const steps = Array.from({ length: 20 }, (_, i) => 5000 - i * 10);
+    const { raceId, ranked } = await settleDirect(DAILY, steps);
+
+    assert.equal(computeFinishRewardPool(DAILY, 20), 300);
+    assert.equal(computeFinishRewardPlaces(DAILY, 20), 7);
+
+    const expected = [78, 64, 53, 42, 32, 21, 10];
+    // top 7 paid exactly the graded split, in placement order
+    for (let i = 0; i < expected.length; i++) {
+      assert.equal(await coinsOf(ranked[i].userId), expected[i], `rank ${i + 1}`);
+    }
+    // last paid place clears the 10-coin floor
+    assert.ok(expected[expected.length - 1] >= 10);
+    // ranks 8..20 unrewarded
+    for (let i = 7; i < ranked.length; i++) {
+      assert.equal(await coinsOf(ranked[i].userId), 0, `rank ${i + 1} unrewarded`);
+    }
+    // minted total equals the pool
+    const minted = (
+      await prisma.coinTransaction.findMany({ where: { reason: REASON, refId: { startsWith: `${raceId}:` } } })
+    ).reduce((s, t) => s + t.amount, 0);
+    assert.equal(minted, 300);
+  });
+
+  it("B9: the pre-race projection's finishReward matches what settlement pays for the same field", async () => {
+    // Build a 20-accepted ACTIVE daily and read the client-facing projection;
+    // its {pool, paidPlaces} must equal the tail-floored settlement values (300/7).
+    const race = await seededActiveRace(DAILY);
+    const viewer = await makeUser();
+    await addParticipant(race.id, viewer.userId);
+    for (let i = 0; i < 19; i++) {
+      const u = await makeUser();
+      await addParticipant(race.id, u.userId);
+    }
+
+    const res = await request(server.baseUrl, "GET", `/races/${race.id}`, {
+      token: viewer.token,
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.deepEqual(body.finishReward, { pool: 300, paidPlaces: 7 });
+    // and that matches the settlement helpers directly
+    assert.equal(computeFinishRewardPool(DAILY, 20), 300);
+    assert.equal(computeFinishRewardPlaces(DAILY, 20, 300), 7);
   });
 
   // ---- C. eligibility & field count ----

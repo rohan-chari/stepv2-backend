@@ -229,7 +229,7 @@
         "rotation": 0,
         "scale": 1.9,
         "animationFrames": 6,
-        "renderLayer": "behind"
+        "renderLayer": "front"
       }
     },
     {
