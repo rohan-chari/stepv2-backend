@@ -132,7 +132,7 @@ describe("powerup upgrades — integration", () => {
   // Lvl 2 Protein Shake
   // ---------------------------------------------------------------------
 
-  it("Lvl 2 Protein Shake: 75 coins deducted, +3000 steps, feed shows 'Lvl 2'", async () => {
+  it("Lvl 2 Protein Shake: 15 coins deducted, +3000 steps, feed shows 'Lvl 2'", async () => {
     const alice = await createUser("AliceUpBB");
     const bob = await createUser("BobUpBBBB");
     await makeFriends(alice, bob);
@@ -145,9 +145,9 @@ describe("powerup upgrades — integration", () => {
 
     const body = await res.json();
     assert.equal(body.result.upgradeLevel, 2);
-    assert.equal(body.result.coinsSpent, 75);
+    assert.equal(body.result.coinsSpent, 15);
 
-    assert.equal(await getUserCoins(alice.userId), 425);
+    assert.equal(await getUserCoins(alice.userId), 485);
 
     const progress = await getProgress(alice.token, raceId);
     const aliceP = progress.participants.find((p) => p.userId === alice.userId);
@@ -158,7 +158,7 @@ describe("powerup upgrades — integration", () => {
       where: { userId: alice.userId, reason: "powerup_upgrade" },
     });
     assert.equal(txs.length, 1);
-    assert.equal(txs[0].amount, -75);
+    assert.equal(txs[0].amount, -15);
     assert.equal(txs[0].refId, powerup.id);
 
     // PowerupUpgradeEvent row exists
@@ -167,7 +167,7 @@ describe("powerup upgrades — integration", () => {
     });
     assert.equal(ues.length, 1);
     assert.equal(ues[0].tier, 2);
-    assert.equal(ues[0].costCoins, 75);
+    assert.equal(ues[0].costCoins, 15);
     assert.equal(ues[0].status, "APPLIED");
     assert.equal(ues[0].powerupType, "PROTEIN_SHAKE");
 
@@ -187,7 +187,7 @@ describe("powerup upgrades — integration", () => {
   // Lvl 3 Leg Cramp on bob — duration becomes 6 hours
   // ---------------------------------------------------------------------
 
-  it("Lvl 3 Leg Cramp: 400 coins, freezes target for 6h, feed shows 'Lvl 3'", async () => {
+  it("Lvl 3 Leg Cramp: 90 coins, freezes target for 6h, feed shows 'Lvl 3'", async () => {
     const alice = await createUser("AliceUpCC");
     const bob = await createUser("BobUpCCCC");
     await makeFriends(alice, bob);
@@ -202,7 +202,7 @@ describe("powerup upgrades — integration", () => {
     });
     assert.equal(res.status, 200);
 
-    assert.equal(await getUserCoins(alice.userId), 100);
+    assert.equal(await getUserCoins(alice.userId), 410);
 
     const effect = await prisma.raceActiveEffect.findFirst({
       where: { powerupId: powerup.id },
@@ -286,7 +286,7 @@ describe("powerup upgrades — integration", () => {
   // Block by Compression Socks: coins ARE deducted (Wave 2 rule)
   // ---------------------------------------------------------------------
 
-  it("Lvl 2 Shortcut blocked by shield: coins deducted (75), no steps stolen, upgrade event = BLOCKED", async () => {
+  it("Lvl 2 Shortcut blocked by shield: coins deducted (15), no steps stolen, upgrade event = BLOCKED", async () => {
     const alice = await createUser("AliceUpGG");
     const bob = await createUser("BobUpGGGG");
     await makeFriends(alice, bob);
@@ -317,14 +317,14 @@ describe("powerup upgrades — integration", () => {
     assert.equal(body.result.blocked, true);
 
     // Coins ARE deducted on block
-    assert.equal(await getUserCoins(alice.userId), 425);
+    assert.equal(await getUserCoins(alice.userId), 485);
 
     // PowerupUpgradeEvent recorded with status BLOCKED
     const ues = await prisma.powerupUpgradeEvent.findMany({ where: { powerupId: sc.id } });
     assert.equal(ues.length, 1);
     assert.equal(ues[0].status, "BLOCKED");
     assert.equal(ues[0].tier, 2);
-    assert.equal(ues[0].costCoins, 75);
+    assert.equal(ues[0].costCoins, 15);
   });
 
   // ---------------------------------------------------------------------
@@ -363,7 +363,7 @@ describe("powerup upgrades — integration", () => {
     const bob = await createUser("BobUpIIII");
     await makeFriends(alice, bob);
     const raceId = await createActiveRace(alice, bob);
-    await setUserCoins(alice.userId, 225); // exactly enough for ONE Lvl 3
+    await setUserCoins(alice.userId, 45); // exactly enough for ONE Lvl 3
 
     const p1 = await giveHeldPowerup(raceId, alice.userId, "PROTEIN_SHAKE", 99901);
     const p2 = await giveHeldPowerup(raceId, alice.userId, "PROTEIN_SHAKE", 99902);

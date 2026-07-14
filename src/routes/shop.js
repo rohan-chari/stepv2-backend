@@ -41,6 +41,7 @@ function createShopRouter(dependencies = {}) {
     try {
       const result = await getPowerupShopCatalog(req.user.id, {
         channel: req.releaseChannel,
+        supportsJammer: req.clientFeatures.has("jammer"),
       });
       res.json(result);
     } catch (error) {

@@ -1,0 +1,17 @@
+-- SIGNAL_JAMMER powerup. ADDITIVE ONLY.
+--
+-- Store-only powerup (coin store, like IMPOSTER / RAINSTORM): never rolls from
+-- a mystery box, so no rarity-tier data changes. Targeted single-target attack
+-- — the target cannot USE any powerup in that race for 1 hour (buying/redeeming
+-- still allowed). Mirror reflects it, Compression Socks blocks it.
+--
+-- Back-compat: single additive enum value; no column/table/constraint is
+-- dropped or renamed. Old app versions render unknown powerup types with a
+-- fallback icon and read names/descriptions from the API, so they keep working.
+-- The store catalog hides this item from clients that don't advertise the
+-- `jammer` X-Client-Features token, so old binaries never see it.
+--
+-- NOTE: `ALTER TYPE ... ADD VALUE` cannot run in the same transaction as
+-- statements that USE the new value. This is an isolated statement, so it is
+-- safe. If applied by hand and Postgres complains, run it on its own first.
+ALTER TYPE "PowerupType" ADD VALUE IF NOT EXISTS 'signal_jammer' BEFORE 'mystery_box';

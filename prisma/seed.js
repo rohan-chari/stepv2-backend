@@ -96,7 +96,7 @@ async function seed() {
       name: "Imposter",
       description:
         "Swap your leaderboard position with a rival's for 1 hour. Purely cosmetic — real standings and payouts are unaffected.",
-      priceCoins: 500,
+      priceCoins: 75,
       powerupType: "IMPOSTER",
       active: true,
       sortOrder: 0,
@@ -106,10 +106,22 @@ async function seed() {
       name: "Rainstorm",
       description:
         "Summon a downpour: every other racer's steps count for half for 1 hour. Shields and Mirrors protect against it.",
-      priceCoins: 500,
+      priceCoins: 75,
       powerupType: "RAINSTORM",
       active: true,
       sortOrder: 1,
+    },
+    {
+      // Store-only, gated from old clients via the `jammer` X-Client-Features
+      // token (catalog filter in getPowerupShopCatalog). Targeted attack.
+      sku: "POWERUP_SIGNAL_JAMMER",
+      name: "Signal Jammer",
+      description:
+        "Jam a rival's signal — they can't use any powerups for 1 hour. They can still buy and stash powerups; they just can't fire them. Shields and Mirrors protect against it.",
+      priceCoins: 75,
+      powerupType: "SIGNAL_JAMMER",
+      active: true,
+      sortOrder: 2,
     },
   ];
   let powerupItemsUpserted = 0;

@@ -22,14 +22,14 @@ const UPGRADEABLE_TYPES = new Set([
 
 // Cost by [rarity][level], where index 0 is base (free).
 const COSTS_BY_RARITY = {
-  COMMON:   [0, 25,  75, 225],
-  UNCOMMON: [0, 45, 135, 400],
-  RARE:     [0, 50, 150, 450],
+  COMMON:   [0,  5, 15,  45],
+  UNCOMMON: [0, 10, 30,  90],
+  RARE:     [0, 15, 45, 135],
 };
 
-const COSTS_BY_TYPE = {
-  LUCKY_HORSESHOE: [0, 250, 600, 1200],
-};
+// Per-type overrides of the rarity ladder. Currently empty (LUCKY_HORSESHOE's
+// premium ladder was retired 2026-07-14 — it now prices as plain RARE).
+const COSTS_BY_TYPE = {};
 
 const RARITY_BY_TYPE = {
   PROTEIN_SHAKE:     "COMMON",
@@ -62,6 +62,10 @@ const RARITY_BY_TYPE = {
   // It never rolls from a box, but a rarity is listed so display lookups
   // resolve consistently. Treated as RARE for badge styling.
   RAINSTORM:         "RARE",
+  // SIGNAL_JAMMER is store-only and non-upgradeable (not in UPGRADEABLE_TYPES,
+  // DURATIONS_MS, or MAGNITUDES — its 1h duration is a fixed constant in
+  // usePowerup). Rarity listed only so display lookups resolve consistently.
+  SIGNAL_JAMMER:     "RARE",
 };
 
 // Duration in ms for timed effects, indexed by level.

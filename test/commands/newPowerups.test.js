@@ -198,7 +198,8 @@ test("new upgrade policy matches the product spec", () => {
   assert.equal(isUpgradeable("PINECONE_TOSS"), true);
   assert.equal(isUpgradeable("SNEAKY_SWAP"), false);
 
-  assert.equal(upgradeCost("LUCKY_HORSESHOE", 3) >= 1000, true);
+  // Horseshoe's premium ladder was retired: it now prices as plain RARE.
+  assert.equal(upgradeCost("LUCKY_HORSESHOE", 3), 135);
   assert.deepEqual(
     [0, 1, 2, 3].map((level) => upgradedMagnitude("TRAIL_MAGNET", level)),
     [1000, 1500, 2000, 3000],

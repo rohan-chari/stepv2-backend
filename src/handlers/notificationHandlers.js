@@ -364,12 +364,13 @@ function registerNotificationHandlers(dependencies = {}) {
     RED_CARD: (attackerName) => `${attackerName} used Red Card! You lost steps.`,
     SHORTCUT: (attackerName) => `${attackerName} stole steps from you with Shortcut!`,
     WRONG_TURN: (attackerName) => `${attackerName} sent you on a Wrong Turn! Your steps are reversed for 1 hour.`,
+    SIGNAL_JAMMER: (attackerName) => `${attackerName} jammed your powerups for 1 hour! 📵`,
   };
 
   events.on("POWERUP_USED", async (data) => {
     try {
       const { raceId, userId, powerupType, targetUserId } = data;
-      if (!targetUserId || !["LEG_CRAMP", "RED_CARD", "SHORTCUT", "WRONG_TURN"].includes(powerupType)) return;
+      if (!targetUserId || !["LEG_CRAMP", "RED_CARD", "SHORTCUT", "WRONG_TURN", "SIGNAL_JAMMER"].includes(powerupType)) return;
 
       // T9 safety net: suppress the attack push if the race is no longer live —
       // not ACTIVE, or already past endsAt (the expired-but-unsettled gap, where

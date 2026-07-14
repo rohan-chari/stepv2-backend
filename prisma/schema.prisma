@@ -565,6 +565,11 @@ enum PowerupType {
   // a mystery box. Untargeted AoE: halves every OTHER participant's steps for
   // 1 hour. Additive enum value, placed before mystery_box to match ordering.
   RAINSTORM         @map("rainstorm")
+  // SIGNAL_JAMMER is STORE-ONLY (coin store, like IMPOSTER / RAINSTORM) and
+  // never rolls from a mystery box. Targeted single-target attack: the target
+  // cannot USE any powerup in the race for 1 hour. Additive enum value, placed
+  // before mystery_box to match the schema's declared ordering.
+  SIGNAL_JAMMER     @map("signal_jammer")
   MYSTERY_BOX       @map("mystery_box")
 }
 

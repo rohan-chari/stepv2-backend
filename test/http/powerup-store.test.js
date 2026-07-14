@@ -67,7 +67,7 @@ test("GET /shop/powerups returns the catalog with coins + owned quantities", asy
               sku: "POWERUP_IMPOSTER",
               name: "Imposter",
               description: "Swap positions",
-              priceCoins: 500,
+              priceCoins: 75,
               powerupType: "IMPOSTER",
               ownedQuantity: 2,
             },
@@ -81,7 +81,7 @@ test("GET /shop/powerups returns the catalog with coins + owned quantities", asy
     assert.equal(status, 200);
     assert.equal(body.coins, 750);
     assert.equal(body.items[0].sku, "POWERUP_IMPOSTER");
-    assert.equal(body.items[0].priceCoins, 500);
+    assert.equal(body.items[0].priceCoins, 75);
     assert.equal(body.items[0].ownedQuantity, 2);
   } finally {
     await server.close();
@@ -98,7 +98,7 @@ test("POST /shop/powerups/purchase buys a powerup and returns balance + inventor
         return {
           coins: 250,
           inventory: { powerupType: "IMPOSTER", quantity: 1 },
-          purchase: { idempotent: false, coinsSpent: 500 },
+          purchase: { idempotent: false, coinsSpent: 75 },
         };
       },
     })

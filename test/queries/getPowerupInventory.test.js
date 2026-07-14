@@ -96,7 +96,7 @@ test("powerup catalog lists active items with price + coin balance + owned qty",
         sku: "POWERUP_IMPOSTER",
         name: "Imposter",
         description: "Swap positions",
-        priceCoins: 500,
+        priceCoins: 75,
         powerupType: "IMPOSTER",
       },
     ],
@@ -111,7 +111,7 @@ test("powerup catalog lists active items with price + coin balance + owned qty",
   const item = result.items[0];
   assert.equal(item.sku, "POWERUP_IMPOSTER");
   assert.equal(item.name, "Imposter");
-  assert.equal(item.priceCoins, 500);
+  assert.equal(item.priceCoins, 75);
   assert.equal(item.powerupType, "IMPOSTER");
   assert.equal(item.ownedQuantity, 2, "shows how many the user owns");
 });
@@ -124,7 +124,7 @@ test("powerup catalog reports ownedQuantity 0 for unowned types", async () => {
         id: "psi-1",
         sku: "POWERUP_IMPOSTER",
         name: "Imposter",
-        priceCoins: 500,
+        priceCoins: 75,
         powerupType: "IMPOSTER",
       },
     ],

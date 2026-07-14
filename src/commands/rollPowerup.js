@@ -45,6 +45,9 @@ const POWERUP_NAMES = {
   // RAINSTORM is purchase-only (coin store), never rolled from a mystery box,
   // so it is intentionally absent from RARITY_TIERS. Named here for feed/display.
   RAINSTORM: "Rainstorm",
+  // SIGNAL_JAMMER is store-only (coin store), never rolled from a mystery box.
+  // Named here so the EFFECT_EXPIRED feed text reads "Signal Jammer wore off."
+  SIGNAL_JAMMER: "Signal Jammer",
 };
 
 function buildRollPowerup(dependencies = {}) {

@@ -65,70 +65,70 @@ test("MAX_UPGRADE_LEVEL is 3", () => {
 });
 
 // ---------------------------------------------------------------------------
-// upgradeCost — Common rarity (Protein Shake, Shortcut, Detour Sign): 25/75/225
+// upgradeCost — Common rarity (Protein Shake, Shortcut, Detour Sign): 5/15/45
 // ---------------------------------------------------------------------------
 
-test("upgradeCost: Common rarity (Protein Shake) — 25/75/225", () => {
+test("upgradeCost: Common rarity (Protein Shake) — 5/15/45", () => {
   assert.equal(upgradeCost("PROTEIN_SHAKE", 0), 0);
-  assert.equal(upgradeCost("PROTEIN_SHAKE", 1), 25);
-  assert.equal(upgradeCost("PROTEIN_SHAKE", 2), 75);
-  assert.equal(upgradeCost("PROTEIN_SHAKE", 3), 225);
+  assert.equal(upgradeCost("PROTEIN_SHAKE", 1), 5);
+  assert.equal(upgradeCost("PROTEIN_SHAKE", 2), 15);
+  assert.equal(upgradeCost("PROTEIN_SHAKE", 3), 45);
 });
 
-test("upgradeCost: Common rarity (Shortcut) — 25/75/225", () => {
-  assert.equal(upgradeCost("SHORTCUT", 1), 25);
-  assert.equal(upgradeCost("SHORTCUT", 2), 75);
-  assert.equal(upgradeCost("SHORTCUT", 3), 225);
+test("upgradeCost: Common rarity (Shortcut) — 5/15/45", () => {
+  assert.equal(upgradeCost("SHORTCUT", 1), 5);
+  assert.equal(upgradeCost("SHORTCUT", 2), 15);
+  assert.equal(upgradeCost("SHORTCUT", 3), 45);
 });
 
-test("upgradeCost: Common rarity (Detour Sign) — 25/75/225", () => {
-  assert.equal(upgradeCost("DETOUR_SIGN", 1), 25);
-  assert.equal(upgradeCost("DETOUR_SIGN", 2), 75);
-  assert.equal(upgradeCost("DETOUR_SIGN", 3), 225);
+test("upgradeCost: Common rarity (Detour Sign) — 5/15/45", () => {
+  assert.equal(upgradeCost("DETOUR_SIGN", 1), 5);
+  assert.equal(upgradeCost("DETOUR_SIGN", 2), 15);
+  assert.equal(upgradeCost("DETOUR_SIGN", 3), 45);
 });
 
-test("upgradeCost: Common rarity (Trail Mix) — 25/75/225", () => {
-  assert.equal(upgradeCost("TRAIL_MIX", 1), 25);
-  assert.equal(upgradeCost("TRAIL_MIX", 2), 75);
-  assert.equal(upgradeCost("TRAIL_MIX", 3), 225);
-});
-
-// ---------------------------------------------------------------------------
-// upgradeCost — Uncommon rarity: 45/135/400
-// ---------------------------------------------------------------------------
-
-test("upgradeCost: Uncommon rarity (Runner's High) — 45/135/400", () => {
-  assert.equal(upgradeCost("RUNNERS_HIGH", 1), 45);
-  assert.equal(upgradeCost("RUNNERS_HIGH", 2), 135);
-  assert.equal(upgradeCost("RUNNERS_HIGH", 3), 400);
-});
-
-test("upgradeCost: Uncommon rarity (Leg Cramp) — 45/135/400", () => {
-  assert.equal(upgradeCost("LEG_CRAMP", 1), 45);
-  assert.equal(upgradeCost("LEG_CRAMP", 2), 135);
-  assert.equal(upgradeCost("LEG_CRAMP", 3), 400);
-});
-
-test("upgradeCost: Uncommon rarity (Stealth Mode) — 45/135/400", () => {
-  assert.equal(upgradeCost("STEALTH_MODE", 1), 45);
-  assert.equal(upgradeCost("STEALTH_MODE", 2), 135);
-  assert.equal(upgradeCost("STEALTH_MODE", 3), 400);
-});
-
-test("upgradeCost: Uncommon rarity (Wrong Turn) — 45/135/400", () => {
-  assert.equal(upgradeCost("WRONG_TURN", 1), 45);
-  assert.equal(upgradeCost("WRONG_TURN", 2), 135);
-  assert.equal(upgradeCost("WRONG_TURN", 3), 400);
+test("upgradeCost: Common rarity (Trail Mix) — 5/15/45", () => {
+  assert.equal(upgradeCost("TRAIL_MIX", 1), 5);
+  assert.equal(upgradeCost("TRAIL_MIX", 2), 15);
+  assert.equal(upgradeCost("TRAIL_MIX", 3), 45);
 });
 
 // ---------------------------------------------------------------------------
-// upgradeCost — Rare rarity (Compression Socks): 50/150/450
+// upgradeCost — Uncommon rarity: 10/30/90
 // ---------------------------------------------------------------------------
 
-test("upgradeCost: Rare rarity (Compression Socks) — 50/150/450", () => {
-  assert.equal(upgradeCost("COMPRESSION_SOCKS", 1), 50);
-  assert.equal(upgradeCost("COMPRESSION_SOCKS", 2), 150);
-  assert.equal(upgradeCost("COMPRESSION_SOCKS", 3), 450);
+test("upgradeCost: Uncommon rarity (Runner's High) — 10/30/90", () => {
+  assert.equal(upgradeCost("RUNNERS_HIGH", 1), 10);
+  assert.equal(upgradeCost("RUNNERS_HIGH", 2), 30);
+  assert.equal(upgradeCost("RUNNERS_HIGH", 3), 90);
+});
+
+test("upgradeCost: Uncommon rarity (Leg Cramp) — 10/30/90", () => {
+  assert.equal(upgradeCost("LEG_CRAMP", 1), 10);
+  assert.equal(upgradeCost("LEG_CRAMP", 2), 30);
+  assert.equal(upgradeCost("LEG_CRAMP", 3), 90);
+});
+
+test("upgradeCost: Uncommon rarity (Stealth Mode) — 10/30/90", () => {
+  assert.equal(upgradeCost("STEALTH_MODE", 1), 10);
+  assert.equal(upgradeCost("STEALTH_MODE", 2), 30);
+  assert.equal(upgradeCost("STEALTH_MODE", 3), 90);
+});
+
+test("upgradeCost: Uncommon rarity (Wrong Turn) — 10/30/90", () => {
+  assert.equal(upgradeCost("WRONG_TURN", 1), 10);
+  assert.equal(upgradeCost("WRONG_TURN", 2), 30);
+  assert.equal(upgradeCost("WRONG_TURN", 3), 90);
+});
+
+// ---------------------------------------------------------------------------
+// upgradeCost — Rare rarity (Compression Socks): 15/45/135
+// ---------------------------------------------------------------------------
+
+test("upgradeCost: Rare rarity (Compression Socks) — 15/45/135", () => {
+  assert.equal(upgradeCost("COMPRESSION_SOCKS", 1), 15);
+  assert.equal(upgradeCost("COMPRESSION_SOCKS", 2), 45);
+  assert.equal(upgradeCost("COMPRESSION_SOCKS", 3), 135);
 });
 
 // ---------------------------------------------------------------------------

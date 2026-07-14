@@ -173,7 +173,7 @@ test("upgradeLevel omitted defaults to 0 (back-compat with existing API callers)
 // Magnitude upgrades — Protein Shake & Shortcut
 // ===========================================================================
 
-test("Lvl 1 Protein Shake: +2250 bonus, 25 coins deducted", async () => {
+test("Lvl 1 Protein Shake: +2250 bonus, 5 coins deducted", async () => {
   const ctx = makeDeps({ powerupType: "PROTEIN_SHAKE" });
   const use = buildUsePowerup(ctx.deps);
 
@@ -184,12 +184,12 @@ test("Lvl 1 Protein Shake: +2250 bonus, 25 coins deducted", async () => {
   assert.equal(result.bonus, 2250);
   assert.equal(ctx.bonusChanges[0].amount, 2250);
   assert.equal(ctx.coinDeductions.length, 1);
-  assert.equal(ctx.coinDeductions[0].amount, 25);
+  assert.equal(ctx.coinDeductions[0].amount, 5);
   assert.equal(ctx.coinDeductions[0].reason, "powerup_upgrade");
   assert.equal(ctx.coinDeductions[0].refId, "pw-1");
 });
 
-test("Lvl 2 Protein Shake: +3000 bonus, 75 coins deducted", async () => {
+test("Lvl 2 Protein Shake: +3000 bonus, 15 coins deducted", async () => {
   const ctx = makeDeps({ powerupType: "PROTEIN_SHAKE" });
   const use = buildUsePowerup(ctx.deps);
 
@@ -198,10 +198,10 @@ test("Lvl 2 Protein Shake: +3000 bonus, 75 coins deducted", async () => {
   });
 
   assert.equal(result.bonus, 3000);
-  assert.equal(ctx.coinDeductions[0].amount, 75);
+  assert.equal(ctx.coinDeductions[0].amount, 15);
 });
 
-test("Lvl 3 Protein Shake: +4500 bonus, 225 coins deducted", async () => {
+test("Lvl 3 Protein Shake: +4500 bonus, 25 coins deducted", async () => {
   const ctx = makeDeps({ powerupType: "PROTEIN_SHAKE" });
   const use = buildUsePowerup(ctx.deps);
 
@@ -210,7 +210,7 @@ test("Lvl 3 Protein Shake: +4500 bonus, 225 coins deducted", async () => {
   });
 
   assert.equal(result.bonus, 4500);
-  assert.equal(ctx.coinDeductions[0].amount, 225);
+  assert.equal(ctx.coinDeductions[0].amount, 45);
 });
 
 test("Lvl 3 Shortcut steals up to 3000 (capped at target's steps)", async () => {
@@ -227,7 +227,7 @@ test("Lvl 3 Shortcut steals up to 3000 (capped at target's steps)", async () => 
   assert.equal(result.stolen, 3000);
   assert.equal(ctx.bonusChanges[0].amount, 3000);  // subtract from target
   assert.equal(ctx.bonusChanges[1].amount, 3000);  // add to attacker
-  assert.equal(ctx.coinDeductions[0].amount, 225);
+  assert.equal(ctx.coinDeductions[0].amount, 45);
 });
 
 test("Lvl 3 Shortcut against low-step target — capped to target's actual steps", async () => {
@@ -257,7 +257,7 @@ function durationAssert(effect, expectedHours) {
   );
 }
 
-test("Lvl 3 Leg Cramp: 6h freeze duration, 400 coins deducted", async () => {
+test("Lvl 3 Leg Cramp: 6h freeze duration, 90 coins deducted", async () => {
   const ctx = makeDeps({ powerupType: "LEG_CRAMP" });
   const use = buildUsePowerup(ctx.deps);
 
@@ -266,26 +266,26 @@ test("Lvl 3 Leg Cramp: 6h freeze duration, 400 coins deducted", async () => {
   });
 
   durationAssert(ctx.effectsCreated[0], 6);
-  assert.equal(ctx.coinDeductions[0].amount, 400);
+  assert.equal(ctx.coinDeductions[0].amount, 90);
 });
 
-test("Lvl 1 Leg Cramp: 3h freeze, 45 coins", async () => {
+test("Lvl 1 Leg Cramp: 3h freeze, 10 coins", async () => {
   const ctx = makeDeps({ powerupType: "LEG_CRAMP" });
   const use = buildUsePowerup(ctx.deps);
   await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", targetUserId: "user-2", upgradeLevel: 1 });
   durationAssert(ctx.effectsCreated[0], 3);
-  assert.equal(ctx.coinDeductions[0].amount, 45);
+  assert.equal(ctx.coinDeductions[0].amount, 10);
 });
 
-test("Lvl 3 Runner's High: 7h duration, 400 coins deducted", async () => {
+test("Lvl 3 Runner's High: 7h duration, 90 coins deducted", async () => {
   const ctx = makeDeps({ powerupType: "RUNNERS_HIGH" });
   const use = buildUsePowerup(ctx.deps);
   await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", upgradeLevel: 3 });
   durationAssert(ctx.effectsCreated[0], 7);
-  assert.equal(ctx.coinDeductions[0].amount, 400);
+  assert.equal(ctx.coinDeductions[0].amount, 90);
 });
 
-test("Lvl 3 Stealth Mode: 8h duration, 400 coins deducted", async () => {
+test("Lvl 3 Stealth Mode: 8h duration, 90 coins deducted", async () => {
   const ctx = makeDeps({ powerupType: "STEALTH_MODE" });
   const use = buildUsePowerup(ctx.deps);
   await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", upgradeLevel: 3 });
@@ -299,27 +299,27 @@ test("Lvl 2 Stealth Mode: 6.5h duration", async () => {
   durationAssert(ctx.effectsCreated[0], 6.5);
 });
 
-test("Lvl 3 Wrong Turn: 3h duration, 400 coins deducted", async () => {
+test("Lvl 3 Wrong Turn: 3h duration, 90 coins deducted", async () => {
   const ctx = makeDeps({ powerupType: "WRONG_TURN" });
   const use = buildUsePowerup(ctx.deps);
   await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", targetUserId: "user-2", upgradeLevel: 3 });
   durationAssert(ctx.effectsCreated[0], 3);
 });
 
-test("Lvl 3 Detour Sign: 7h duration, 225 coins deducted (Common rarity)", async () => {
+test("Lvl 3 Detour Sign: 7h duration, 25 coins deducted (Common rarity)", async () => {
   const ctx = makeDeps({ powerupType: "DETOUR_SIGN" });
   const use = buildUsePowerup(ctx.deps);
   await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", targetUserId: "user-2", upgradeLevel: 3 });
   durationAssert(ctx.effectsCreated[0], 7);
-  assert.equal(ctx.coinDeductions[0].amount, 225);
+  assert.equal(ctx.coinDeductions[0].amount, 45);
 });
 
-test("Lvl 3 Compression Socks: 48h duration, 450 coins deducted (Rare rarity)", async () => {
+test("Lvl 3 Compression Socks: 48h duration, 135 coins deducted (Rare rarity)", async () => {
   const ctx = makeDeps({ powerupType: "COMPRESSION_SOCKS" });
   const use = buildUsePowerup(ctx.deps);
   await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", upgradeLevel: 3 });
   durationAssert(ctx.effectsCreated[0], 48);
-  assert.equal(ctx.coinDeductions[0].amount, 450);
+  assert.equal(ctx.coinDeductions[0].amount, 135);
 });
 
 // ===========================================================================
@@ -334,20 +334,20 @@ test("Lvl 0 Trail Mix with 0 prior unique types: 100 × 1 = 100 bonus, no coins"
   assert.equal(ctx.coinDeductions.length, 0);
 });
 
-test("Lvl 1 Trail Mix with 0 prior unique types: 150 × 1 = 150 bonus, 25 coins (Common L1)", async () => {
+test("Lvl 1 Trail Mix with 0 prior unique types: 150 × 1 = 150 bonus, 5 coins (Common L1)", async () => {
   const ctx = makeDeps({ powerupType: "TRAIL_MIX" });
   const use = buildUsePowerup(ctx.deps);
   const result = await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", upgradeLevel: 1 });
   assert.equal(result.bonus, 150);
-  assert.equal(ctx.coinDeductions[0].amount, 25);
+  assert.equal(ctx.coinDeductions[0].amount, 5);
 });
 
-test("Lvl 3 Trail Mix with 0 prior unique types: 300 × 1 = 300 bonus, 225 coins (Common L3)", async () => {
+test("Lvl 3 Trail Mix with 0 prior unique types: 300 × 1 = 300 bonus, 45 coins (Common L3)", async () => {
   const ctx = makeDeps({ powerupType: "TRAIL_MIX" });
   const use = buildUsePowerup(ctx.deps);
   const result = await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", upgradeLevel: 3 });
   assert.equal(result.bonus, 300);
-  assert.equal(ctx.coinDeductions[0].amount, 225);
+  assert.equal(ctx.coinDeductions[0].amount, 45);
 });
 
 test("Lvl 3 Trail Mix with 5 prior unique types: 300 × 6 = 1,800 bonus", async () => {
@@ -480,7 +480,7 @@ test("Lvl 3 Shortcut blocked by shield: coins ARE deducted, shield consumed", as
   assert.equal(ctx.bonusChanges.length, 0);
   // BUT coins are still spent (per design Wave 2)
   assert.equal(ctx.coinDeductions.length, 1);
-  assert.equal(ctx.coinDeductions[0].amount, 225);
+  assert.equal(ctx.coinDeductions[0].amount, 45);
   // Upgrade event must record BLOCKED status
   assert.equal(ctx.upgradeEvents.length, 1);
   assert.equal(ctx.upgradeEvents[0].status, "BLOCKED");
@@ -499,7 +499,7 @@ test("Lvl 3 Leg Cramp blocked by shield: coins deducted, no effect created", asy
 
   assert.equal(result.blocked, true);
   assert.equal(ctx.effectsCreated.length, 0);
-  assert.equal(ctx.coinDeductions[0].amount, 400);
+  assert.equal(ctx.coinDeductions[0].amount, 90);
   assert.equal(ctx.upgradeEvents[0].status, "BLOCKED");
 });
 
@@ -557,7 +557,7 @@ test("PowerupUpgradeEvent created on Lvl 2 success", async () => {
   assert.equal(ev.powerupId, "pw-1");
   assert.equal(ev.powerupType, "PROTEIN_SHAKE");
   assert.equal(ev.tier, 2);
-  assert.equal(ev.costCoins, 75);
+  assert.equal(ev.costCoins, 15);
   assert.equal(ev.status, "APPLIED");
   assert.equal(ev.targetUserId, null);
 });

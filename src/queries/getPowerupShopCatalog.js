@@ -11,7 +11,10 @@ function buildGetPowerupShopCatalog(deps = {}) {
   const powerupShopItemModel = deps.PowerupShopItem || PowerupShopItem;
   const userPowerupItemModel = deps.UserPowerupItem || UserPowerupItem;
 
-  return async function getPowerupShopCatalog(userId, { channel = "prod" } = {}) {
+  return async function getPowerupShopCatalog(
+    userId,
+    { channel = "prod", supportsJammer = false } = {}
+  ) {
     const [coins, items, inventory] = await Promise.all([
       userModel.findCoins(userId),
       powerupShopItemModel.findActive({ channel }),
@@ -23,9 +26,17 @@ function buildGetPowerupShopCatalog(deps = {}) {
       ownedByType[row.powerupType] = row.quantity ?? 0;
     }
 
+    // Gate the Signal Jammer behind the `jammer` client-feature: old app
+    // binaries that don't advertise it never see the item in their catalog (they
+    // can't render/target it correctly). Additive — every other powerup is
+    // returned to all clients.
+    const visibleItems = supportsJammer
+      ? items
+      : items.filter((item) => item.powerupType !== "SIGNAL_JAMMER");
+
     return {
       coins: coins ?? 0,
-      items: items.map((item) => ({
+      items: visibleItems.map((item) => ({
         sku: item.sku,
         name: item.name,
         description: item.description,

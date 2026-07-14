@@ -25,12 +25,17 @@ const {
   InsufficientCoinsError,
 } = require("./deductCoinsAtomic");
 
-const OFFENSIVE_TYPES = ["LEG_CRAMP", "RED_CARD", "SHORTCUT", "WRONG_TURN", "DETOUR_SIGN", "PINECONE_TOSS", "SNEAKY_SWAP"];
+// SIGNAL_JAMMER is a single-target attack (store-only): it is OFFENSIVE +
+// TARGETED so the shared targeting validation, finished-target rejection, and
+// the MIRROR-reflect / COMPRESSION_SOCKS-block pre-checks apply to it exactly
+// like LEG_CRAMP. Its own effect case just parks a 1h "can't use powerups"
+// debuff on the target; the enforcement lives in the jam guard below.
+const OFFENSIVE_TYPES = ["LEG_CRAMP", "RED_CARD", "SHORTCUT", "WRONG_TURN", "DETOUR_SIGN", "PINECONE_TOSS", "SNEAKY_SWAP", "SIGNAL_JAMMER"];
 // IMPOSTER is TARGETED (it needs a rival to swap leaderboard display with) but
 // it is deliberately NOT in OFFENSIVE_TYPES: it never touches the target's
 // participant/steps, applies onSelf (target stored in metadata), and is purely
 // cosmetic — so it is not subject to Compression Socks / Mirror interception.
-const TARGETED_TYPES = ["LEG_CRAMP", "SHORTCUT", "WRONG_TURN", "DETOUR_SIGN", "SNEAKY_SWAP", "IMPOSTER"];
+const TARGETED_TYPES = ["LEG_CRAMP", "SHORTCUT", "WRONG_TURN", "DETOUR_SIGN", "SNEAKY_SWAP", "IMPOSTER", "SIGNAL_JAMMER"];
 // Types Sneaky Swap can never steal: another Sneaky Swap (no steal chains) and
 // unopened Mystery Boxes. Mirrors the isStealable helper in routes/races.js.
 const UNSTEALABLE_TYPES = ["SNEAKY_SWAP", "MYSTERY_BOX"];
@@ -41,6 +46,8 @@ const IMPOSTER_DURATION_MS = 60 * 60 * 1000;
 // per-victim shield and mirror resolution happens inside its own case below.
 const RAINSTORM_DURATION_MS = 60 * 60 * 1000;
 const RAINSTORM_MULTIPLIER = 0.5;
+// SIGNAL_JAMMER is store-only and non-upgradeable, so its jam lasts a fixed 1h.
+const SIGNAL_JAMMER_DURATION_MS = 60 * 60 * 1000;
 const SELF_ONLY_TYPES = [
   "COMPRESSION_SOCKS",
   "MIRROR",
@@ -213,6 +220,27 @@ function buildUsePowerup(dependencies = {}) {
       throw new PowerupUseError("You have already finished the race", 400);
     }
 
+    // Signal Jammer JAM GUARD (the feature's single choke point). If this
+    // participant is currently jammed, they cannot USE any powerup — earned,
+    // store-redeemed, or upgraded, INCLUDING another Signal Jammer (a jammed
+    // player can't jam). This runs BEFORE any targeting/coin/defense/effect
+    // logic and before the powerup is marked USED, so nothing is consumed on
+    // rejection. Buying and redeeming go through separate commands and are
+    // deliberately NOT gated here. A jam whose expiresAt has already passed (but
+    // whose row is still ACTIVE because lazy expiry hasn't run) does not block.
+    const activeJam = await effectModel.findActiveByTypeForParticipant(
+      myParticipant.id,
+      "SIGNAL_JAMMER"
+    );
+    if (activeJam && activeJam.expiresAt && new Date(activeJam.expiresAt) > now()) {
+      const remainingMs = new Date(activeJam.expiresAt).getTime() - now().getTime();
+      const remainingMin = Math.max(1, Math.ceil(remainingMs / (60 * 1000)));
+      throw new PowerupUseError(
+        `Your powerups are jammed for another ${remainingMin}m!`,
+        409
+      );
+    }
+
     const acceptedParticipants = race.participants.filter((p) => p.status === "ACCEPTED");
     let myDisplayName = myParticipant.user.displayName || "A runner";
     // The user credited as the *source* of an effect. Same as userId normally;
@@ -340,6 +368,19 @@ function buildUsePowerup(dependencies = {}) {
       );
       if (existingCramp) {
         throw new PowerupUseError("Target already has an active Leg Cramp", 400);
+      }
+    }
+
+    // Reject stacking Signal Jammer on a target that already has one active. This
+    // runs BEFORE coin deduction, the Mirror/Socks pre-checks, and the mark-USED
+    // step, so a rejected attacker keeps their jammer HELD (not consumed).
+    if (type === "SIGNAL_JAMMER" && targetParticipant) {
+      const existingJam = await effectModel.findActiveByTypeForParticipant(
+        targetParticipant.id,
+        "SIGNAL_JAMMER"
+      );
+      if (existingJam && existingJam.expiresAt && new Date(existingJam.expiresAt) > now()) {
+        throw new PowerupUseError("That player is already jammed", 409);
       }
     }
 
@@ -652,6 +693,34 @@ function buildUsePowerup(dependencies = {}) {
           powerupType: type,
           targetUserId: resolvedTargetUserId,
           description: `${myDisplayName} used ${levelPrefix(upgradeLevel)}Leg Cramp on ${targetDisplayName}! Their steps are frozen for ${hoursText("LEG_CRAMP", upgradeLevel)}.`,
+        });
+        break;
+      }
+
+      case "SIGNAL_JAMMER": {
+        // Park a 1h "can't use powerups" debuff on the target. On a Mirror
+        // reflect, targetParticipant/resolvedTargetUserId/actingUserId were
+        // swapped above, so the jam lands on the original attacker instead. The
+        // jam guard at the top of usePowerup is what actually enforces it.
+        const effect = await effectModel.create({
+          raceId,
+          targetParticipantId: targetParticipant.id,
+          targetUserId: resolvedTargetUserId,
+          sourceUserId: actingUserId,
+          powerupId,
+          type: "SIGNAL_JAMMER",
+          startsAt: currentTime,
+          expiresAt: new Date(currentTime.getTime() + SIGNAL_JAMMER_DURATION_MS),
+        });
+        result.effect = effect;
+
+        await eventModel.create({
+          raceId,
+          actorUserId: actingUserId,
+          eventType: "POWERUP_USED",
+          powerupType: type,
+          targetUserId: resolvedTargetUserId,
+          description: `${myDisplayName} jammed ${targetDisplayName}'s signal! They can't use powerups for 1 hour.`,
         });
         break;
       }

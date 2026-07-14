@@ -153,6 +153,50 @@ test("POWERUP_USED pushes an attack alert while the race is live (ACTIVE, before
   assert.equal(sentNotification.title, "Powerup Attack!");
 });
 
+test("POWERUP_USED pushes an attack alert for SIGNAL_JAMMER (jam is push-worthy)", async () => {
+  const eventBus = createMockEventBus();
+  let sentNotification;
+
+  registerNotificationHandlers({
+    eventBus,
+    Race: {
+      async findUnique() {
+        return { status: "ACTIVE", endsAt: new Date(Date.now() + 3_600_000) };
+      },
+    },
+    User: {
+      async findById(id) {
+        return { id, displayName: "Nathan" };
+      },
+    },
+    DeviceToken: {
+      async findByUserId(userId) {
+        assert.equal(userId, "victim-1");
+        return [{ token: "victim-token", platform: "ios" }];
+      },
+      async deleteToken() {},
+    },
+    apnsService: {
+      async sendNotification(args) {
+        sentNotification = args;
+        return { success: true };
+      },
+    },
+    logger: { warn() {}, error() {} },
+  });
+
+  await eventBus.emit("POWERUP_USED", {
+    raceId: "race-1",
+    userId: "attacker-1",
+    powerupType: "SIGNAL_JAMMER",
+    targetUserId: "victim-1",
+  });
+
+  assert.ok(sentNotification, "a jam should push the target");
+  assert.equal(sentNotification.title, "Powerup Attack!");
+  assert.match(sentNotification.body, /jammed your powerups/i);
+});
+
 test("POWERUP_USED does NOT push for an expired-but-unsettled race (past endsAt, still ACTIVE)", async () => {
   const eventBus = createMockEventBus();
   let pushed = false;
