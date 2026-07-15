@@ -211,6 +211,16 @@ function buildUsePowerup(dependencies = {}) {
       throw new PowerupUseError("This powerup has already been used or discarded", 400);
     }
 
+    // Trail Mine plants at the owner's CURRENT step total, but stored totals go
+    // stale between syncs. Resolve race state BEFORE reading them so the mine
+    // lands at the owner's real position — off a stale total it lands behind
+    // them, and the trailing resolveRaceState below could detonate it instantly
+    // on a runner far behind the owner. Resolving first also freshens the
+    // last-place rank check. (No-op for other powerup types.)
+    if (powerup.type === "TRAIL_MINE") {
+      await resolveRaceState({ raceId, timeZone });
+    }
+
     const race = await raceModel.findById(raceId);
     if (!race || race.status !== "ACTIVE") {
       throw new PowerupUseError("Race is not active", 400);
