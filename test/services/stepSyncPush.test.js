@@ -180,3 +180,114 @@ test("requestStepSyncForUsers deletes stale tokens and does not stamp cooldown w
   ]);
   assert.equal(updated, false);
 });
+
+// Helper: a service whose only observable output is whether a send happened, for
+// the throttle-window tests below.
+function buildProbeService({ now, lastStepSyncAt, lastSilentPushSentAt }) {
+  const state = { sendCalled: false };
+  const service = buildStepSyncPushService({
+    now: () => now,
+    User: {
+      async findById() {
+        return { id: "user-1", lastStepSyncAt, lastSilentPushSentAt };
+      },
+      async update() {},
+    },
+    DeviceToken: {
+      async findByUserId() {
+        return [{ token: "ios-token-1", platform: "ios" }];
+      },
+      async deleteToken() {},
+    },
+    apnsService: {
+      async sendSilentNotification() {
+        state.sendCalled = true;
+        return { success: true };
+      },
+    },
+    logger: { warn() {}, error() {} },
+  });
+  return { service, state };
+}
+
+test("custom minIntervalMs (30min): pushed 40min ago -> sends", async () => {
+  const { service, state } = buildProbeService({
+    now: new Date("2026-03-19T12:00:00.000Z"),
+    lastStepSyncAt: null,
+    lastSilentPushSentAt: new Date("2026-03-19T11:20:00.000Z"), // 40 min ago
+  });
+
+  await service.requestStepSyncForUser("user-1", { minIntervalMs: 30 * 60 * 1000 });
+
+  assert.equal(state.sendCalled, true);
+});
+
+test("custom minIntervalMs (30min): pushed 20min ago -> skips", async () => {
+  const { service, state } = buildProbeService({
+    now: new Date("2026-03-19T12:00:00.000Z"),
+    lastStepSyncAt: null,
+    lastSilentPushSentAt: new Date("2026-03-19T11:40:00.000Z"), // 20 min ago
+  });
+
+  await service.requestStepSyncForUser("user-1", { minIntervalMs: 30 * 60 * 1000 });
+
+  assert.equal(state.sendCalled, false);
+});
+
+test("custom minIntervalMs applies to lastStepSyncAt too (synced 20min ago + 30min -> skips)", async () => {
+  const { service, state } = buildProbeService({
+    now: new Date("2026-03-19T12:00:00.000Z"),
+    lastStepSyncAt: new Date("2026-03-19T11:40:00.000Z"), // 20 min ago
+    lastSilentPushSentAt: null,
+  });
+
+  await service.requestStepSyncForUser("user-1", { minIntervalMs: 30 * 60 * 1000 });
+
+  assert.equal(state.sendCalled, false);
+});
+
+test("default (no options) still uses the 1-hour window: pushed 40min ago -> skips", async () => {
+  const { service, state } = buildProbeService({
+    now: new Date("2026-03-19T12:00:00.000Z"),
+    lastStepSyncAt: null,
+    lastSilentPushSentAt: new Date("2026-03-19T11:20:00.000Z"), // 40 min ago
+  });
+
+  await service.requestStepSyncForUser("user-1");
+
+  assert.equal(state.sendCalled, false);
+});
+
+test("minIntervalMs is clamped to a 15-minute floor (10min request behaves as 15min)", async () => {
+  // Pushed 12 min ago: below the 15-min floor, so a clamped service must still skip
+  // even though the caller asked for a 10-min window.
+  const skip = buildProbeService({
+    now: new Date("2026-03-19T12:00:00.000Z"),
+    lastStepSyncAt: null,
+    lastSilentPushSentAt: new Date("2026-03-19T11:48:00.000Z"), // 12 min ago
+  });
+  await skip.service.requestStepSyncForUser("user-1", { minIntervalMs: 10 * 60 * 1000 });
+  assert.equal(skip.state.sendCalled, false);
+
+  // Pushed 18 min ago: outside the 15-min floor -> sends.
+  const send = buildProbeService({
+    now: new Date("2026-03-19T12:00:00.000Z"),
+    lastStepSyncAt: null,
+    lastSilentPushSentAt: new Date("2026-03-19T11:42:00.000Z"), // 18 min ago
+  });
+  await send.service.requestStepSyncForUser("user-1", { minIntervalMs: 10 * 60 * 1000 });
+  assert.equal(send.state.sendCalled, true);
+});
+
+test("requestStepSyncForUsers passes minIntervalMs through to each user", async () => {
+  const { service, state } = buildProbeService({
+    now: new Date("2026-03-19T12:00:00.000Z"),
+    lastStepSyncAt: null,
+    lastSilentPushSentAt: new Date("2026-03-19T11:20:00.000Z"), // 40 min ago
+  });
+
+  // Default window (1h) would skip; the 30-min override should send.
+  await service.requestStepSyncForUsers(["user-1"], { minIntervalMs: 30 * 60 * 1000 });
+
+  assert.equal(state.sendCalled, true);
+});

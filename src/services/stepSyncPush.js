@@ -5,9 +5,15 @@ const { fcmService } = require("./fcm");
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
 
-function isWithinLastHour(timestamp, now) {
+// Hard floor on the throttle window: no caller may push a given user more often
+// than once per 15 minutes. iOS silently drops over-budget background pushes, so
+// a tighter interval would just burn budget without waking the device — the clamp
+// keeps any future caller from turning the "final stretch" nudge into a firehose.
+const MIN_INTERVAL_FLOOR_MS = 15 * 60 * 1000;
+
+function isWithinInterval(timestamp, now, intervalMs) {
   if (!timestamp) return false;
-  return now.getTime() - new Date(timestamp).getTime() < ONE_HOUR_MS;
+  return now.getTime() - new Date(timestamp).getTime() < intervalMs;
 }
 
 function buildStepSyncPushService(dependencies = {}) {
@@ -23,17 +29,25 @@ function buildStepSyncPushService(dependencies = {}) {
     return token.slice(-9);
   }
 
-  async function requestStepSyncForUser(userId) {
+  async function requestStepSyncForUser(userId, options = {}) {
     const user = await userModel.findById(userId);
     if (!user) return;
 
     const currentTime = now();
 
-    if (isWithinLastHour(user.lastStepSyncAt, currentTime)) {
+    // Throttle window: defaults to the historical 1-hour cooldown, but a caller
+    // (e.g. the placement job's "final stretch") may tighten it. Clamped to the
+    // 15-min floor so it can only ever be tighter than an hour, never a firehose.
+    const minIntervalMs = Math.max(
+      MIN_INTERVAL_FLOOR_MS,
+      options.minIntervalMs ?? ONE_HOUR_MS
+    );
+
+    if (isWithinInterval(user.lastStepSyncAt, currentTime, minIntervalMs)) {
       return;
     }
 
-    if (isWithinLastHour(user.lastSilentPushSentAt, currentTime)) {
+    if (isWithinInterval(user.lastSilentPushSentAt, currentTime, minIntervalMs)) {
       return;
     }
 
@@ -89,12 +103,12 @@ function buildStepSyncPushService(dependencies = {}) {
     }
   }
 
-  async function requestStepSyncForUsers(userIds = []) {
+  async function requestStepSyncForUsers(userIds = [], options = {}) {
     const uniqueUserIds = [...new Set(userIds.filter(Boolean))];
 
     for (const userId of uniqueUserIds) {
       try {
-        await requestStepSyncForUser(userId);
+        await requestStepSyncForUser(userId, options);
       } catch (error) {
         logger.error("STEP_SYNC_REQUEST scheduling failed", {
           userId,

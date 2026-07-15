@@ -1,10 +1,13 @@
 const { StepSample } = require("../models/stepSample");
+const { RaceParticipant } = require("../models/raceParticipant");
 const {
   resolveRaceState: defaultResolveRaceState,
 } = require("../services/raceStateResolution");
 const {
   syncRacePowerupState: defaultSyncRacePowerupState,
 } = require("../services/racePowerupStateSync");
+const { stepSyncPushService } = require("../services/stepSyncPush");
+const { nudgeOvertakenRivals } = require("./recordSteps");
 
 class StepSampleError extends Error {
   constructor(message, statusCode) {
@@ -66,6 +69,10 @@ function buildRecordStepSamples(dependencies = {}) {
     : hasInjectedDeps
       ? async () => {}
       : defaultSyncRacePowerupState;
+  const participantModel = dependencies.RaceParticipant || RaceParticipant;
+  const requestStepSyncForUsers =
+    dependencies.requestStepSyncForUsers ||
+    stepSyncPushService.requestStepSyncForUsers;
 
   return async function recordStepSamples({ userId, samples, timeZone }) {
     if (!Array.isArray(samples) || samples.length === 0) {
@@ -112,6 +119,22 @@ function buildRecordStepSamples(dependencies = {}) {
           })
         )
       );
+
+      // Parity with recordSteps: modern clients opt into skipRaceResolution on
+      // /steps and resolve race state HERE instead, so this is where an overtake
+      // materializes for them. Fire-and-forget; never blocks or fails the sync.
+      Promise.resolve()
+        .then(() =>
+          nudgeOvertakenRivals({
+            raceResults,
+            userId,
+            participantModel,
+            requestStepSyncForUsers,
+          })
+        )
+        .catch((error) => {
+          console.error("Overtake step-sync nudge error:", error);
+        });
     }
 
     return { count: cleaned.length };

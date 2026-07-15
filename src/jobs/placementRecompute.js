@@ -7,6 +7,12 @@ const { computeRacePayouts } = require("../utils/racePayoutPresets");
 
 const RECOMPUTE_INTERVAL_MS = 5 * 60 * 1000; // every 5 minutes
 
+// Races ending within this window are the "final stretch": we want their
+// participants' steps to be as fresh as possible for the last few recomputes, so
+// they get a tighter push throttle (below) than the default hourly cooldown.
+const FINAL_STRETCH_WINDOW_MS = 60 * 60 * 1000; // ends within the next hour
+const FINAL_STRETCH_MIN_INTERVAL_MS = 30 * 60 * 1000; // push at most every 30 min
+
 // Live placement broadcast (Phase 0). Recomputes standings for every ACTIVE,
 // not-yet-expired race and emits PLACEMENT_CHANGED when a participant's live rank
 // changes, so users see standings update without opening the race. Backend-only:
@@ -32,7 +38,11 @@ function buildRecomputePlacements(dependencies = {}) {
   return async function recomputePlacements() {
     const currentTime = now();
     const emitted = [];
-    const participantUserIds = new Set();
+    // Split for the step-sync "pull" below: participants of at least one race
+    // ending within the next hour ("final stretch") get a tighter push throttle;
+    // everyone else keeps the default hourly cooldown.
+    const finalStretchUserIds = new Set();
+    const normalUserIds = new Set();
 
     let races;
     try {
@@ -54,8 +64,14 @@ function buildRecomputePlacements(dependencies = {}) {
         const participants = await participantModel.findAcceptedByRace(race.id);
         if (!participants || participants.length === 0) continue;
 
-        // Collect for the step-sync "pull" below.
-        for (const p of participants) participantUserIds.add(p.userId);
+        // Collect for the step-sync "pull" below. A time-based race ending within
+        // the hour is "final stretch"; step-target races (endsAt null) never are.
+        const raceEnd = race.endsAt ? new Date(race.endsAt) : null;
+        const isFinalStretch =
+          raceEnd != null &&
+          raceEnd.getTime() - currentTime.getTime() <= FINAL_STRETCH_WINDOW_MS;
+        const bucket = isFinalStretch ? finalStretchUserIds : normalUserIds;
+        for (const p of participants) bucket.add(p.userId);
 
         const ranked = [...participants].sort(
           (a, b) => (b.totalSteps ?? 0) - (a.totalSteps ?? 0)
@@ -129,11 +145,30 @@ function buildRecomputePlacements(dependencies = {}) {
     // Phase 3 — on-demand "pull": nudge active-race participants to upload fresh
     // steps so the NEXT recompute reflects them (devices take seconds-to-minutes to
     // wake, upload, and POST, so this improves the following tick, not this one).
-    // requestStepSyncForUsers self-throttles — it skips any user synced or pushed
-    // within the last hour — so this won't spam even at a 5-minute cadence.
-    if (participantUserIds.size > 0) {
+    // requestStepSync self-throttles per user — it skips anyone synced or pushed
+    // within its throttle window — so this won't spam even at a 5-minute cadence.
+    //
+    // Final-stretch participants get a tighter (30-min) window; everyone else keeps
+    // the default hourly cooldown. A user in both kinds of race belongs to the
+    // final-stretch set only, so we never nudge them twice in one tick.
+    for (const userId of finalStretchUserIds) normalUserIds.delete(userId);
+
+    if (finalStretchUserIds.size > 0) {
       try {
-        await requestStepSync([...participantUserIds]);
+        await requestStepSync([...finalStretchUserIds], {
+          minIntervalMs: FINAL_STRETCH_MIN_INTERVAL_MS,
+        });
+      } catch (error) {
+        logger.error(
+          "[CRON] placementRecompute: final-stretch step-sync pull failed:",
+          error
+        );
+      }
+    }
+
+    if (normalUserIds.size > 0) {
+      try {
+        await requestStepSync([...normalUserIds], {});
       } catch (error) {
         logger.error("[CRON] placementRecompute: step-sync pull failed:", error);
       }

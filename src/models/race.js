@@ -304,14 +304,22 @@ const Race = {
   // live updates. Lean select: the job needs id (to call resolveRaceState), name
   // (for the placement-change push body), and payoutPreset/potCoins so it can
   // derive how many places are "in the money" — the threshold a meaningful
-  // placement alert is gated on.
+  // placement alert is gated on — plus endsAt so it can pick out the "final
+  // stretch" races (ending within the hour) for a tighter step-sync nudge.
+  // endsAt is null for open-ended step-target races (those are never final-stretch).
   async findActiveInProgress(now) {
     return prisma.race.findMany({
       where: {
         status: "ACTIVE",
         OR: [{ endsAt: { gt: now } }, { endsAt: null }],
       },
-      select: { id: true, name: true, payoutPreset: true, potCoins: true },
+      select: {
+        id: true,
+        name: true,
+        payoutPreset: true,
+        potCoins: true,
+        endsAt: true,
+      },
     });
   },
 

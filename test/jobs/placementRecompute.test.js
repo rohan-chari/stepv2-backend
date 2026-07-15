@@ -18,8 +18,8 @@ function makeDeps({ races = [], participantsByRace = {}, resolveThrowsFor = [] }
         emitted.push({ event, data });
       },
     },
-    requestStepSyncForUsers: async (userIds) => {
-      pullCalls.push(userIds);
+    requestStepSyncForUsers: async (userIds, options = {}) => {
+      pullCalls.push({ userIds, options });
     },
     resolveRaceState: async ({ raceId }) => {
       resolvedRaceIds.push(raceId);
@@ -188,8 +188,10 @@ test("nudges all active-race participants to sync once (deduped step-sync pull)"
     },
   });
   await buildRecomputePlacements(deps)();
+  // No race has an end time -> everyone is "normal" -> a single default-option pull.
   assert.equal(pullCalls.length, 1);
-  assert.deepEqual([...pullCalls[0]].sort(), ["u1", "u2", "u3"]);
+  assert.deepEqual([...pullCalls[0].userIds].sort(), ["u1", "u2", "u3"]);
+  assert.deepEqual(pullCalls[0].options, {});
 });
 
 test("no participants -> no step-sync pull", async () => {
@@ -214,4 +216,96 @@ test("step-sync pull failure does not break the job", async () => {
   const result = await buildRecomputePlacements(deps)();
   assert.equal(emitted.length, 2); // recompute/emit still happened
   assert.equal(result.length, 2);
+});
+
+// --- Final-stretch tighter-throttle set (races ending within the next hour) ---
+
+const THIRTY_MIN_MS = 30 * 60 * 1000;
+
+// endsAt helpers relative to FIXED_NOW.
+const inMinutes = (m) => new Date(FIXED_NOW.getTime() + m * 60 * 1000);
+
+test("a race ending in <60min -> its participants get the tighter 30-min option", async () => {
+  const { deps, pullCalls } = makeDeps({
+    races: [{ id: "r1", name: "Ending Soon", endsAt: inMinutes(45) }],
+    participantsByRace: {
+      r1: [
+        P({ id: "p1", userId: "u1", totalSteps: 100, lastNotifiedPlacement: 1 }),
+        P({ id: "p2", userId: "u2", totalSteps: 90, lastNotifiedPlacement: 2 }),
+      ],
+    },
+  });
+  await buildRecomputePlacements(deps)();
+  // Only the final-stretch pull should fire (no normal users).
+  assert.equal(pullCalls.length, 1);
+  assert.deepEqual([...pullCalls[0].userIds].sort(), ["u1", "u2"]);
+  assert.deepEqual(pullCalls[0].options, { minIntervalMs: THIRTY_MIN_MS });
+});
+
+test("a race ending in >60min -> default options (not final-stretch)", async () => {
+  const { deps, pullCalls } = makeDeps({
+    races: [{ id: "r1", name: "Later", endsAt: inMinutes(90) }],
+    participantsByRace: {
+      r1: [P({ id: "p1", userId: "u1", totalSteps: 100, lastNotifiedPlacement: 1 })],
+    },
+  });
+  await buildRecomputePlacements(deps)();
+  assert.equal(pullCalls.length, 1);
+  assert.deepEqual([...pullCalls[0].userIds].sort(), ["u1"]);
+  assert.deepEqual(pullCalls[0].options, {});
+});
+
+test("a race with no end time (endsAt null) -> default options (not final-stretch)", async () => {
+  const { deps, pullCalls } = makeDeps({
+    races: [{ id: "r1", name: "Open Ended", endsAt: null }],
+    participantsByRace: {
+      r1: [P({ id: "p1", userId: "u1", totalSteps: 100, lastNotifiedPlacement: 1 })],
+    },
+  });
+  await buildRecomputePlacements(deps)();
+  assert.equal(pullCalls.length, 1);
+  assert.deepEqual(pullCalls[0].options, {});
+});
+
+test("a user in both a final-stretch and a normal race is nudged once, tighter-only", async () => {
+  const { deps, pullCalls } = makeDeps({
+    races: [
+      { id: "soon", name: "Ending Soon", endsAt: inMinutes(30) },
+      { id: "later", name: "Later", endsAt: inMinutes(120) },
+    ],
+    participantsByRace: {
+      // u1 is in both races; u2 only in the ending-soon race; u3 only in the later race.
+      soon: [
+        P({ id: "p1", userId: "u1", totalSteps: 100, lastNotifiedPlacement: 1 }),
+        P({ id: "p2", userId: "u2", totalSteps: 90, lastNotifiedPlacement: 2 }),
+      ],
+      later: [
+        P({ id: "p3", userId: "u1", totalSteps: 100, lastNotifiedPlacement: 1 }),
+        P({ id: "p4", userId: "u3", totalSteps: 90, lastNotifiedPlacement: 2 }),
+      ],
+    },
+  });
+  await buildRecomputePlacements(deps)();
+  assert.equal(pullCalls.length, 2);
+
+  const finalCall = pullCalls.find((c) => c.options.minIntervalMs === THIRTY_MIN_MS);
+  const normalCall = pullCalls.find((c) => Object.keys(c.options).length === 0);
+  assert.ok(finalCall, "expected a final-stretch pull");
+  assert.ok(normalCall, "expected a normal pull");
+
+  // u1 goes to the final-stretch set only (tighter wins), NOT the normal set.
+  assert.deepEqual([...finalCall.userIds].sort(), ["u1", "u2"]);
+  assert.deepEqual([...normalCall.userIds].sort(), ["u3"]);
+});
+
+test("final-stretch only (no normal users) -> a single tighter pull, no empty normal call", async () => {
+  const { deps, pullCalls } = makeDeps({
+    races: [{ id: "soon", name: "Ending Soon", endsAt: inMinutes(10) }],
+    participantsByRace: {
+      soon: [P({ id: "p1", userId: "u1", totalSteps: 100, lastNotifiedPlacement: 1 })],
+    },
+  });
+  await buildRecomputePlacements(deps)();
+  assert.equal(pullCalls.length, 1);
+  assert.deepEqual(pullCalls[0].options, { minIntervalMs: THIRTY_MIN_MS });
 });

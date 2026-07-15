@@ -82,6 +82,7 @@ const { RacePowerup: defaultPowerupModel } = require("../models/racePowerup");
 const {
   RaceActiveEffect: defaultEffectModel,
 } = require("../models/raceActiveEffect");
+const { stepSyncPushService } = require("../services/stepSyncPush");
 
 // A powerup is STEALABLE via Sneaky Swap only if it is currently HELD and its
 // type is neither SNEAKY_SWAP (not stealable in either direction) nor
@@ -149,6 +150,10 @@ function createRacesRouter(dependencies = {}) {
   const userModel = dependencies.User || defaultUserModel;
   const powerupModel = dependencies.RacePowerup || defaultPowerupModel;
   const effectModel = dependencies.RaceActiveEffect || defaultEffectModel;
+  const requestStepSyncForUsers =
+    dependencies.requestStepSyncForUsers ||
+    stepSyncPushService.requestStepSyncForUsers;
+  const logger = dependencies.logger || console;
 
   // GET /races/share/:token  — PUBLIC, declared BEFORE requireAuth so the
   // landing page and the app's pre-join screen can read a shared race without a
@@ -357,6 +362,32 @@ function createRacesRouter(dependencies = {}) {
         req.clientFeatures?.has("characters") ?? false
       );
       res.json(result);
+
+      // Opening a live race nudges its OTHER accepted participants to upload
+      // fresh steps, so the viewer's leaderboard reflects rivals' latest counts.
+      // Fire-and-forget AFTER res.json so it never blocks/fails the response;
+      // the push service self-throttles (skips anyone synced/pushed in the last
+      // hour). Only for a race actively in progress — ACTIVE, not yet completed,
+      // and not past endsAt (settlement owns it then; see resolveRaceState's
+      // endsAt guard). Reuses the participant list already in the details
+      // payload rather than issuing another query.
+      const isInProgress =
+        result &&
+        result.status === "ACTIVE" &&
+        !result.completedAt &&
+        (!result.endsAt || new Date(result.endsAt).getTime() > Date.now());
+      if (isInProgress) {
+        const rivalIds = (result.participants || [])
+          .filter((p) => p.status === "ACCEPTED" && p.userId !== req.user.id)
+          .map((p) => p.userId);
+        if (rivalIds.length > 0) {
+          Promise.resolve()
+            .then(() => requestStepSyncForUsers(rivalIds))
+            .catch((error) => {
+              logger.error("Race detail step sync request error:", error);
+            });
+        }
+      }
     } catch (error) {
       if (error.statusCode) {
         return res.status(error.statusCode).json({ error: error.message });
