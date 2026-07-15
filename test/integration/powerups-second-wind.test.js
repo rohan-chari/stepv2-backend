@@ -305,37 +305,6 @@ describe("second wind", () => {
       assert.equal(aliceP.totalSteps, 2000 + 4500 + 3375); // 9875
     });
 
-    it("finished participants excluded from leader calculation", async () => {
-      const alice = await createUser("AliceEdgeBBB");
-      const bob = await createUser("BobEdgeBBBBB");
-      const charlie = await createUser("CharlieEdgeB");
-      const dave = await createUser("DaveEdgeBBBB");
-      await makeFriends(alice, bob);
-      await makeFriends(alice, charlie);
-      await makeFriends(alice, dave);
-      await makeFriends(bob, charlie);
-      const raceId = await createActiveRaceWith([alice, bob, charlie, dave], { targetSteps: 5000 });
-
-      // Charlie finishes
-      await giveBonusSteps(raceId, charlie.userId, 8000);
-      await recordSamples(charlie.token, [
-        { periodStart: minutesAgo(30).toISOString(), periodEnd: new Date().toISOString(), steps: 8000 },
-      ]);
-
-      // Bob is leader among active, alice is behind
-      await giveBonusSteps(raceId, bob.userId, 4000);
-      await giveBonusSteps(raceId, alice.userId, 1000);
-
-      // Gap should be to bob (4000 - 1000 = 3000), not charlie
-      const sw = await giveHeldPowerup(raceId, alice.userId, "SECOND_WIND", 99901);
-      const res = await usePowerup(alice.token, raceId, sw.id);
-      assert.equal(res.status, 200);
-
-      const body = await res.json();
-      // gap = 3000, 25% = 750
-      assert.equal(body.result.bonus, 750);
-    });
-
     it("not blocked by compression socks", async () => {
       const alice = await createUser("AliceEdgeCCC");
       const bob = await createUser("BobEdgeCCCCC");

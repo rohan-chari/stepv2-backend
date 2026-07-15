@@ -235,6 +235,11 @@ function createAuthRouter(dependencies = {}) {
       // throws (degrades to the flag's declared default).
       const featureFlags = {
         bannerAdsEnabled: await appSettings.getFlag("bannerAdsEnabled"),
+        // Team Race Mode creation kill switch (TR-107). When false, new
+        // clients hide the create-flow "Team race" toggle; the server also
+        // rejects team-race creation (403 FEATURE_DISABLED). Existing team
+        // races are unaffected. Additive — old clients ignore the key.
+        teamRacesEnabled: await appSettings.getFlag("teamRacesEnabled"),
       };
       res.json({
         user: withAdminFlag(

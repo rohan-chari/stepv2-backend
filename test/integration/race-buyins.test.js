@@ -300,28 +300,34 @@ describe("race buy-ins", () => {
       token: alice.token,
     });
 
+    // TR-902 rebase: races are time-based, so the pot is paid out when endsAt
+    // passes (raceExpiry), not on reaching a target. Backdate the window and
+    // settle it the way prod does. The payout assertions below are unchanged.
     const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
     await prisma.race.update({
       where: { id: raceId },
-      data: { startedAt: twoHoursAgo },
+      data: { startedAt: twoHoursAgo, endsAt: new Date(Date.now() - 60 * 1000) },
     });
     await prisma.raceParticipant.updateMany({
       where: { raceId },
       data: { joinedAt: twoHoursAgo },
     });
 
+    // Alice out-walks Bob, so she wins the head-to-head on final standings.
     await request(server.baseUrl, "POST", "/steps/samples", {
       body: {
         samples: [
           {
-            periodStart: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
-            periodEnd: new Date().toISOString(),
+            periodStart: new Date(Date.now() - 90 * 60 * 1000).toISOString(),
+            periodEnd: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
             steps: 120000,
           },
         ],
       },
       token: alice.token,
     });
+
+    await resolveExpiredRaces();
 
     const race = await prisma.race.findUnique({ where: { id: raceId } });
     assert.equal(race.status, "COMPLETED");

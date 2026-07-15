@@ -627,35 +627,5 @@ describe("powerups (general)", () => {
   // === FINISHED PARTICIPANT ===
 
   describe("finished participant", () => {
-    it("cannot target a finished participant", async () => {
-      const { alice, bob, raceId } = await createActiveRace({
-        aliceName: "AliceFinishA",
-        bobName: "BobFinishAAAA",
-        targetSteps: 5000,
-        interval: 2000,
-      });
-
-      // Bob finishes the race
-      await earnPowerups(bob.token, raceId, 6000);
-      // Progress call should mark bob as finished since 6000 > 5000 target
-
-      // Give alice an attack powerup
-      const aliceP = await prisma.raceParticipant.findFirst({ where: { raceId, userId: alice.userId } });
-      const attack = await prisma.racePowerup.create({
-        data: {
-          raceId,
-          participantId: aliceP.id,
-          userId: alice.userId,
-          type: "SHORTCUT",
-          rarity: "COMMON",
-          status: "HELD",
-          earnedAtSteps: 99999,
-        },
-      });
-
-      // Alice tries to target finished bob
-      const res = await usePowerup(alice.token, raceId, attack.id, bob.userId);
-      assert.ok(res.status >= 400, `targeting finished participant should fail, got ${res.status}`);
-    });
   });
 });

@@ -276,17 +276,29 @@ describe("stealth mode", () => {
       const alice = await createUser("AliceUnmskBB");
       const bob = await createUser("BobUnmaskBBB");
       await makeFriends(alice, bob);
-      const raceId = await createActiveRace(alice, bob, { targetSteps: 3000 });
+      const raceId = await createActiveRace(alice, bob);
 
       // Alice goes stealth
       const stealth = await giveHeldPowerup(raceId, alice.userId, "STEALTH_MODE", 99901);
       await usePowerup(alice.token, raceId, stealth.id);
 
-      // Alice finishes the race while stealthed
-      await recordSamples(alice.token, [
-        { periodStart: minutesAgo(10).toISOString(), periodEnd: new Date().toISOString(), steps: 5000 },
-      ]);
-      await getProgress(alice.token, raceId); // trigger finish detection
+      // TR-902 rebase: races are time-based, so nobody target-finishes mid-race
+      // any more. This test's SUBJECT is the display guard in getRaceProgress
+      // ("finished overrides stealth"), which is still live for legacy rows that
+      // carry finishedAt — so manufacture that state directly instead of walking
+      // past a target. The assertions below are unchanged.
+      const aliceParticipant = await prisma.raceParticipant.findFirst({
+        where: { raceId, userId: alice.userId },
+      });
+      await prisma.raceParticipant.update({
+        where: { id: aliceParticipant.id },
+        data: {
+          finishedAt: minutesAgo(5),
+          finishTotalSteps: 5000,
+          totalSteps: 5000,
+          placement: 1,
+        },
+      });
 
       // Bob should now see alice (finished overrides stealth)
       const progress = await getProgress(bob.token, raceId);

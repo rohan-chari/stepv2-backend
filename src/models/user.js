@@ -48,6 +48,17 @@ const User = {
     });
   },
 
+  // TR-706: persist the user's X-Client-Features tokens (STICKY union — the
+  // middleware passes the merged set and calls this ONLY when a new token
+  // appeared, so this is never a hot write path). Stamps clientFeaturesAt for
+  // observability/debugging.
+  async updateClientFeatures(id, features) {
+    return prisma.user.update({
+      where: { id },
+      data: { clientFeatures: features, clientFeaturesAt: new Date() },
+    });
+  },
+
   async findCoins(id) {
     const user = await prisma.user.findUnique({
       where: { id },

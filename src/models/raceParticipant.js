@@ -11,9 +11,10 @@ const RaceParticipant = {
     });
   },
 
-  async create({ raceId, userId, status, buyInAmount = 0, buyInStatus = "NONE" }) {
+  // `team` (RaceTeam TEAM_A|TEAM_B) is only set on team races; null otherwise.
+  async create({ raceId, userId, status, buyInAmount = 0, buyInStatus = "NONE", team = null }) {
     return prisma.raceParticipant.create({
-      data: { raceId, userId, status, buyInAmount, buyInStatus },
+      data: { raceId, userId, status, buyInAmount, buyInStatus, team },
       include: {
         user: { select: { id: true, displayName: true, profilePhotoUrl: true } },
       },

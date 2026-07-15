@@ -360,36 +360,6 @@ test("Wrong Turn rejects targeting a user not in the race", async () => {
 // Finished participants
 // ===========================================================================
 
-test("Wrong Turn rejects targeting a finished participant", async () => {
-  const ctx = makePowerupDeps({
-    user2: { finishedAt: new Date("2026-03-29T10:00:00Z") },
-  });
-  const use = buildUsePowerup(ctx.deps);
-
-  await assert.rejects(
-    () => use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", targetUserId: "user-2" }),
-    (err) => {
-      assert.ok(err instanceof PowerupUseError);
-      return true;
-    }
-  );
-});
-
-test("Wrong Turn rejects if attacker has already finished", async () => {
-  const ctx = makePowerupDeps({
-    user1: { finishedAt: new Date("2026-03-29T10:00:00Z") },
-  });
-  const use = buildUsePowerup(ctx.deps);
-
-  await assert.rejects(
-    () => use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", targetUserId: "user-2" }),
-    (err) => {
-      assert.ok(err instanceof PowerupUseError);
-      return true;
-    }
-  );
-});
-
 // ===========================================================================
 // Participant status validation
 // ===========================================================================

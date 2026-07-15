@@ -18,6 +18,9 @@ const { GlobalStepEvent } = require("../models/globalStepEvent");
 const { computeGlobalEventBoost } = require("../utils/globalStepEvent");
 const { computeBoxEffectiveSteps } = require("../utils/boxSteps");
 const { raceTimeZone } = require("../utils/raceTimeZone");
+// Canonical team H2H block — shared with the list/browser/home surfaces so all
+// of them emit an identical shape (TR-401/806/809).
+const { buildTeamsBlock } = require("../utils/teamRaces");
 
 // Effect TYPES that are concealed self-advantages: visible ONLY to their owner,
 // never to other racers. Filtered out of the activeEffects array server-side so
@@ -384,7 +387,7 @@ function buildGetRaceProgress(deps = {}) {
 
     if (race.status !== "ACTIVE") {
       const acceptedParticipants = race.participants.filter((p) => p.status === "ACCEPTED");
-      return {
+      const nonActiveResult = {
         raceId: race.id,
         status: race.status,
         endsAt: race.endsAt,
@@ -397,8 +400,23 @@ function buildGetRaceProgress(deps = {}) {
           ...characterPresentation(p.user, supportsCharacters),
           totalSteps: p.totalSteps,
           finishedAt: p.finishedAt,
+          // Team races (additive; null on individual races).
+          team: p.team ?? null,
+          forfeitedAt: p.forfeitedAt ?? null,
         })),
       };
+      // Team block for the lobby (PENDING sides) and results (COMPLETED
+      // totals + winnerTeam). Additive — old clients ignore it.
+      if (race.isTeamRace) {
+        nonActiveResult.teams = buildTeamsBlock(race, acceptedParticipants.map((p) => ({
+          participant: p,
+          totalSteps: p.totalSteps || 0,
+        })));
+        nonActiveResult.winnerTeam = race.winnerTeam ?? null;
+        nonActiveResult.isTeamRace = true;
+        nonActiveResult.teamSize = race.teamSize ?? null;
+      }
+      return nonActiveResult;
     }
 
     // Expire timed effects before calculating
@@ -513,6 +531,14 @@ function buildGetRaceProgress(deps = {}) {
     // Second pass: calculate powerup-adjusted totals
     const stepTotals = await Promise.all(
       rawStepTotals.map(async ({ participant, baseAdjusted, hasSampleData }) => {
+        // TR-601: forfeited team-race members stay FROZEN at the forfeit
+        // snapshot — never recomputed on the display path either.
+        if (participant.forfeitedAt) {
+          return {
+            participant,
+            totalSteps: participant.totalSteps || 0,
+          };
+        }
         if (participant.finishedAt) {
           return {
             participant,
@@ -548,7 +574,7 @@ function buildGetRaceProgress(deps = {}) {
     // Update total steps for each active participant. Race completion is now
     // strictly time-based (handled by raceExpiry cron); no step-goal finish.
     for (const { participant, totalSteps } of stepTotals) {
-      if (!participant.finishedAt) {
+      if (!participant.finishedAt && !participant.forfeitedAt) {
         await participantModel.updateTotalSteps(participant.id, totalSteps);
       }
     }
@@ -729,6 +755,9 @@ function buildGetRaceProgress(deps = {}) {
             totalSteps: null,
             finishedAt: participant.finishedAt,
             stealthed: false,
+            // Team identity is structural (column grouping), never masked.
+            team: participant.team ?? null,
+            forfeitedAt: participant.forfeitedAt ?? null,
           };
         }
         const isStealthed = stealthedUserIds.has(participant.userId)
@@ -744,6 +773,10 @@ function buildGetRaceProgress(deps = {}) {
           totalSteps: isStealthed ? null : totalSteps,
           finishedAt: participant.finishedAt,
           stealthed: isStealthed,
+          // Team races (TR-656): stealth masks the individual plank only; the
+          // side (and the honest team totals below) stay visible.
+          team: participant.team ?? null,
+          forfeitedAt: participant.forfeitedAt ?? null,
         };
       })
       .sort((a, b) => {
@@ -784,6 +817,15 @@ function buildGetRaceProgress(deps = {}) {
       targetSteps: race.targetSteps, // 1.1.4 compat
       participants: leaderboard,
     };
+
+    // Team H2H block (TR-401), computed from TRUE totals before any display
+    // illusion — always honest (TR-658). Additive; old clients ignore it.
+    if (race.isTeamRace) {
+      result.teams = buildTeamsBlock(race, stepTotals);
+      result.winnerTeam = updatedRace.winnerTeam ?? null;
+      result.isTeamRace = true;
+      result.teamSize = race.teamSize ?? null;
+    }
 
     if (powerupData) {
       result.powerupData = powerupData;

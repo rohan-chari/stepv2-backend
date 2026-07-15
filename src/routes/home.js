@@ -44,6 +44,8 @@ function createHomeRouter(dependencies = {}) {
         // the race-detail screen compute identical race-relative totals.
         timeZone: req.timeZone,
         supportsCharacters: req.clientFeatures?.has("characters") ?? false,
+        // TR-702/809: old clients never get a team race on the Home card.
+        supportsTeamRaces: req.clientFeatures?.has("team_races") ?? false,
       });
 
       // Additive: surface the currently-active global step event (if any) as a

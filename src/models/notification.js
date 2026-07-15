@@ -10,6 +10,15 @@ const Notification = {
     });
   },
 
+  // First recorded notification of `type` sent to `userId` about `raceId`, or
+  // null. Used as a send-once dedup key (e.g. the TR-304 "teams are uneven"
+  // scheduled-start push fires only on the first failed attempt).
+  async findFirstByUserTypeRace(userId, type, raceId) {
+    return prisma.notification.findFirst({
+      where: { userId, type, raceId },
+    });
+  },
+
   // Nightly-cleanup primitive: delete everything older than `cutoff`. Returns the
   // Prisma batch-payload ({ count }). Idempotent — re-running deletes nothing more.
   async deleteOlderThan(cutoff) {

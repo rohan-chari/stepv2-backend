@@ -114,8 +114,21 @@ async function getRaceDetails(userId, raceId, supportsCharacters = false) {
       buyInAmount: p.buyInAmount,
       buyInStatus: p.buyInStatus,
       payoutCoins: p.payoutCoins,
+      // Team races (additive; null on individual races). The lobby renders the
+      // two-column face-off from `team`; forfeitedAt marks frozen members.
+      team: p.team ?? null,
+      forfeitedAt: p.forfeitedAt ?? null,
     })),
     createdAt: race.createdAt,
+    // ── Team races (TR-101/402; additive — old clients ignore these and never
+    // receive a team race in their lists anyway).
+    isTeamRace: race.isTeamRace === true,
+    teamSize: race.teamSize ?? null,
+    teamAName: race.teamAName ?? null,
+    teamBName: race.teamBName ?? null,
+    winnerTeam: race.winnerTeam ?? null,
+    myTeam: myParticipant.team ?? null,
+    myForfeitedAt: myParticipant.forfeitedAt ?? null,
   };
 }
 

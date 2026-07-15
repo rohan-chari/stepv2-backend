@@ -37,6 +37,42 @@ function buildRequireAuth(dependencies = {}) {
   const verifySession = dependencies.verifySessionToken || verifySessionToken;
   const userModel = dependencies.User || User;
 
+  // TR-706: persist the user's client capability tokens (stamped on
+  // req.clientFeatures by extractClientFeatures, which runs before every
+  // router).
+  //
+  // STICKY / UNION (product ruling 2026-07-15): once a token has been seen for
+  // a user it is NEVER dropped — we only ever add. A single authed request that
+  // happens to omit the header (an internal caller, a retry, a surface that
+  // forgot it) must not flicker that user to "needs app update" across every
+  // friend's picker (TR-708) or block their invites (TR-707) — a common,
+  // user-visible failure. The opposite risk (a genuine app DOWNGRADE never
+  // registering, so a stale-eligible user gets invited) is rare and is already
+  // backstopped at accept time by TR-703's 400 UPDATE_REQUIRED.
+  //
+  // Writes only when the header carries a token we haven't recorded yet, so the
+  // steady state (and every header-less request) is zero extra writes.
+  // Best-effort: any failure is swallowed — feature bookkeeping must never
+  // break an authenticated request.
+  async function recordClientFeatures(req, user) {
+    try {
+      if (!user || !(req.clientFeatures instanceof Set)) return;
+      if (typeof userModel.updateClientFeatures !== "function") return;
+      const stored = Array.isArray(user.clientFeatures)
+        ? user.clientFeatures
+        : [];
+      const storedSet = new Set(stored);
+      const hasNewToken = [...req.clientFeatures].some(
+        (token) => !storedSet.has(token)
+      );
+      if (!hasNewToken) return; // union already covered — nothing to write
+      const union = [...new Set([...stored, ...req.clientFeatures])].sort();
+      await userModel.updateClientFeatures(user.id, union);
+    } catch {
+      // Never let feature bookkeeping fail the request.
+    }
+  }
+
   return async function requireAuth(req, res, next) {
     try {
       const token = extractBearerToken(req.headers.authorization);
@@ -51,6 +87,7 @@ function buildRequireAuth(dependencies = {}) {
         }
 
         req.user = user;
+        await recordClientFeatures(req, user);
         return next();
       } catch (error) {
         if (error instanceof SessionTokenError) {
@@ -81,6 +118,7 @@ function buildRequireAuth(dependencies = {}) {
 
       req.appleIdentity = appleIdentity;
       req.user = user;
+      await recordClientFeatures(req, user);
 
       next();
     } catch (error) {

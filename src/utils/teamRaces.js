@@ -1,0 +1,87 @@
+// Small shared helpers for Team Race Mode (TR-200s+). Pure functions over the
+// race row + participants array that every join/accept/switch/start path uses,
+// so the "who counts toward a side" rule lives in exactly one place:
+// ACCEPTED participants only (INVITED rows never occupy a slot — TR-202/303).
+
+function acceptedTeamCounts(participants = []) {
+  const counts = { TEAM_A: 0, TEAM_B: 0 };
+  for (const p of participants) {
+    if (p.status !== "ACCEPTED") continue;
+    if (p.team === "TEAM_A") counts.TEAM_A += 1;
+    else if (p.team === "TEAM_B") counts.TEAM_B += 1;
+  }
+  return counts;
+}
+
+// True when `team` is at the race's per-side cap. `excludeUserId` lets a side
+// switch not count the mover's own current slot.
+function isTeamSideFull(race, team, { excludeUserId = null } = {}) {
+  const cap = race.teamSize;
+  if (!Number.isInteger(cap)) return false;
+  const members = (race.participants || []).filter(
+    (p) =>
+      p.status === "ACCEPTED" &&
+      p.team === team &&
+      (excludeUserId === null || p.userId !== excludeUserId)
+  );
+  return members.length >= cap;
+}
+
+// Resolve the caller's client feature tokens into a Set, accepting either the
+// middleware's Set or a plain array (unit tests / internal callers).
+function toFeatureSet(clientFeatures) {
+  if (clientFeatures instanceof Set) return clientFeatures;
+  return new Set(clientFeatures || []);
+}
+
+const TEAM_RACES_FEATURE = "team_races";
+
+function clientSupportsTeamRaces(clientFeatures) {
+  return toFeatureSet(clientFeatures).has(TEAM_RACES_FEATURE);
+}
+
+// The canonical team-race H2H block (TR-401), shared by every surface that
+// shows a team scoreline: race detail progress, the races list (TR-806), the
+// public browser (TR-206) and the Home race card (TR-809). One builder = one
+// shape everywhere, so the client parses it identically wherever it appears.
+//
+// `entries` is [{ participant, totalSteps }] for the ACCEPTED members only.
+// Totals are the sum of member effective steps and are ALWAYS honest — callers
+// must pass TRUE resolved totals, computed BEFORE any display illusion
+// (Stealth "???", Imposter slot swaps) is applied to individual rows
+// (TR-656/658). Forfeited members' frozen totals are included (TR-601).
+function buildTeamsBlock(race, entries) {
+  const sides = {
+    TEAM_A: { name: race.teamAName ?? null, totalSteps: 0, memberCount: 0 },
+    TEAM_B: { name: race.teamBName ?? null, totalSteps: 0, memberCount: 0 },
+  };
+  for (const { participant, totalSteps } of entries) {
+    const side = sides[participant.team];
+    if (!side) continue;
+    side.totalSteps += totalSteps || 0;
+    side.memberCount += 1;
+  }
+  return { teamA: sides.TEAM_A, teamB: sides.TEAM_B };
+}
+
+// Convenience wrapper for callers holding a plain participant array whose
+// stored `totalSteps` is already the value to sum (list/browser/home surfaces
+// read the persisted totals rather than recomputing).
+function buildTeamsBlockFromParticipants(race, participants = []) {
+  return buildTeamsBlock(
+    race,
+    participants
+      .filter((p) => p.status === "ACCEPTED")
+      .map((participant) => ({ participant, totalSteps: participant.totalSteps || 0 }))
+  );
+}
+
+module.exports = {
+  acceptedTeamCounts,
+  isTeamSideFull,
+  toFeatureSet,
+  TEAM_RACES_FEATURE,
+  clientSupportsTeamRaces,
+  buildTeamsBlock,
+  buildTeamsBlockFromParticipants,
+};

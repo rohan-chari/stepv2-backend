@@ -66,11 +66,28 @@ function buildOpenMysteryBox(dependencies = {}) {
     const maxSlots = participant.powerupSlots || DEFAULT_POWERUP_SLOTS;
     const occupiedCount = await powerupModel.countOccupiedSlots(participant.id);
 
-    // Calculate current position for odds
+    // Calculate current position for odds. Team races (TR-655) roll on TEAM
+    // position instead of individual rank: the trailing team's members get the
+    // existing catch-up odds tier (rank 2 of 2), the leading team rolls
+    // standard (rank 1 of 2), and a tie counts both teams as leading.
     const allParticipants = await participantModel.findAcceptedByRace(raceId);
-    const sorted = [...allParticipants].sort((a, b) => b.totalSteps - a.totalSteps);
-    const position = sorted.findIndex((p) => p.userId === userId) + 1;
-    const totalParticipants = sorted.length;
+    let position;
+    let totalParticipants;
+    if (race.isTeamRace) {
+      const teamTotals = { TEAM_A: 0, TEAM_B: 0 };
+      for (const p of allParticipants) {
+        if (p.team === "TEAM_A") teamTotals.TEAM_A += p.totalSteps || 0;
+        else if (p.team === "TEAM_B") teamTotals.TEAM_B += p.totalSteps || 0;
+      }
+      const myTeam = participant.team;
+      const otherTeam = myTeam === "TEAM_A" ? "TEAM_B" : "TEAM_A";
+      position = teamTotals[myTeam] < teamTotals[otherTeam] ? 2 : 1;
+      totalParticipants = 2;
+    } else {
+      const sorted = [...allParticipants].sort((a, b) => b.totalSteps - a.totalSteps);
+      position = sorted.findIndex((p) => p.userId === userId) + 1;
+      totalParticipants = sorted.length;
+    }
 
     const luckyEffect = await effectModel.findActiveByTypeForParticipant?.(
       participant.id,

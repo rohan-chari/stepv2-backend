@@ -23,7 +23,15 @@ function buildJoinRaceByShareToken(dependencies = {}) {
   const withLock = dependencies.withRaceJoinLock || withRaceJoinLock;
   const joinRaceCore = buildJoinRaceCore(dependencies);
 
-  return async function joinRaceByShareToken({ userId, token, onboarding }) {
+  // `team` + `clientFeatures` thread through to the shared core for team races
+  // (TR-201/202/204/703); both are ignored on individual races.
+  return async function joinRaceByShareToken({
+    userId,
+    token,
+    onboarding,
+    team = null,
+    clientFeatures = null,
+  }) {
     // Resolve the token -> race OUTSIDE the lock (the lock is keyed by race id,
     // which we don't have until the token is resolved). An unknown token never
     // acquires a lock.
@@ -40,7 +48,7 @@ function buildJoinRaceByShareToken(dependencies = {}) {
         throw new RaceShareJoinError("Race not found", 404);
       }
 
-      return joinRaceCore({ race, userId, onboarding });
+      return joinRaceCore({ race, userId, onboarding, team, clientFeatures });
     });
   };
 }

@@ -341,36 +341,6 @@ test("Shortcut rejects targeting a user not in the race", async () => {
 // Finished participants
 // ===========================================================================
 
-test("Shortcut rejects targeting a participant who has finished the race", async () => {
-  const ctx = makeDeps({
-    user2: { finishedAt: new Date("2026-03-29T10:00:00Z") },
-  });
-  const use = buildUsePowerup(ctx.deps);
-
-  await assert.rejects(
-    () => use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", targetUserId: "user-2" }),
-    (err) => {
-      assert.ok(err instanceof PowerupUseError);
-      return true;
-    }
-  );
-});
-
-test("Shortcut rejects if the attacker has already finished the race", async () => {
-  const ctx = makeDeps({
-    user1: { finishedAt: new Date("2026-03-29T10:00:00Z") },
-  });
-  const use = buildUsePowerup(ctx.deps);
-
-  await assert.rejects(
-    () => use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", targetUserId: "user-2" }),
-    (err) => {
-      assert.ok(err instanceof PowerupUseError);
-      return true;
-    }
-  );
-});
-
 // ===========================================================================
 // Participant status validation
 // ===========================================================================

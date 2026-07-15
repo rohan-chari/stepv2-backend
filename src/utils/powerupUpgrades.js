@@ -51,9 +51,9 @@ const RARITY_BY_TYPE = {
   // MIRROR is RARE and, like SNEAKY_SWAP, is NOT in UPGRADEABLE_TYPES (no
   // upgrade ladder). Listed here only so rarity lookups resolve consistently.
   MIRROR:            "RARE",
-  // CLEANSE is UNCOMMON and non-upgradeable (not in UPGRADEABLE_TYPES). Listed
+  // CLEANSE is RARE and non-upgradeable (not in UPGRADEABLE_TYPES). Listed
   // here only so rarity lookups resolve consistently.
-  CLEANSE:           "UNCOMMON",
+  CLEANSE:           "RARE",
   // IMPOSTER is purchase-only and non-upgradeable (not in UPGRADEABLE_TYPES).
   // It never rolls from a box, but a rarity is listed so display lookups
   // resolve consistently. Treated as RARE for badge styling.

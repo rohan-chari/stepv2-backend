@@ -1,9 +1,17 @@
 const { Race } = require("../models/race");
 const { RaceParticipant } = require("../models/raceParticipant");
+const { Notification } = require("../models/notification");
 const { eventBus } = require("../events/eventBus");
 const { resolveRaceState } = require("../services/raceStateResolution");
 const { stepSyncPushService } = require("../services/stepSyncPush");
 const { computeRacePayouts } = require("../utils/racePayoutPresets");
+
+// Team-race slacker nudge (TR-683): gentle, fires only inside the final 12h,
+// to a member contributing < 25% of their team's per-member average (average
+// over NON-FORFEITED members only), at most once per race per member.
+const SLACKER_WINDOW_MS = 12 * 60 * 60 * 1000;
+const SLACKER_FRACTION = 0.25;
+const SLACKER_PUSH_TYPE = "TEAM_SLACKER_NUDGE";
 
 const RECOMPUTE_INTERVAL_MS = 5 * 60 * 1000; // every 5 minutes
 
@@ -29,11 +37,141 @@ function buildRecomputePlacements(dependencies = {}) {
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
   const events = dependencies.eventBus || eventBus;
   const resolve = dependencies.resolveRaceState || resolveRaceState;
+  const notificationModel = dependencies.Notification || Notification;
   const requestStepSync =
     dependencies.requestStepSyncForUsers ||
     stepSyncPushService.requestStepSyncForUsers;
   const now = dependencies.now || (() => new Date());
   const logger = dependencies.logger || console;
+
+  // ── Team-race evaluation (TR-681/682/683/685) ────────────────────────────
+  // Inside a team race, individual placement/overtake pushes are SUPPRESSED
+  // (TR-685) — team pushes are the only standings notifications. The
+  // lastNotifiedPlacement column doubles as the member's last-seen TEAM rank
+  // (1 = leading side, 2 = trailing side); it is never returned by any API and
+  // individual placement events never fire for team races, so the reuse is
+  // invisible outside this job.
+  async function evaluateTeamRace({ race, participants, currentTime }) {
+    const totals = { TEAM_A: 0, TEAM_B: 0 };
+    const members = participants.filter(
+      (p) => p.team === "TEAM_A" || p.team === "TEAM_B"
+    );
+    for (const p of members) {
+      totals[p.team] += p.totalSteps || 0;
+    }
+
+    const tie = totals.TEAM_A === totals.TEAM_B;
+    const leadingTeam = tie
+      ? null
+      : totals.TEAM_A > totals.TEAM_B
+        ? "TEAM_A"
+        : "TEAM_B";
+
+    // TR-681 lead-change: compare each member's stored team rank to the fresh
+    // one. First observation seeds silently; flips push only once ARMED (both
+    // teams > 0 — kills the day-one "first to sync leads over 0" false
+    // positive). While unarmed, baselines still advance silently so the armed
+    // flip fires exactly once when it becomes real.
+    if (!tie && leadingTeam) {
+      const rankFor = (p) => (p.team === leadingTeam ? 1 : 2);
+      const storedRanks = members
+        .map((p) => p.lastNotifiedPlacement)
+        .filter((r) => r != null);
+      const hadBaseline = storedRanks.length > 0;
+      const previousLeader = hadBaseline
+        ? members.find((p) => p.lastNotifiedPlacement === 1)?.team ?? null
+        : null;
+      const armed = totals.TEAM_A > 0 && totals.TEAM_B > 0;
+      const flipped =
+        hadBaseline && previousLeader != null && previousLeader !== leadingTeam;
+
+      for (const p of members) {
+        const rank = rankFor(p);
+        if (p.lastNotifiedPlacement !== rank) {
+          await participantModel.update(p.id, { lastNotifiedPlacement: rank });
+        }
+      }
+
+      if (flipped && armed) {
+        const trailingTeam = leadingTeam === "TEAM_A" ? "TEAM_B" : "TEAM_A";
+        events.emit("TEAM_LEAD_CHANGED", {
+          raceId: race.id,
+          raceName: race.name,
+          leadingTeam,
+          leadingTeamName:
+            leadingTeam === "TEAM_A" ? race.teamAName : race.teamBName,
+          trailingTeamName:
+            trailingTeam === "TEAM_A" ? race.teamAName : race.teamBName,
+          leadingTotal: totals[leadingTeam],
+          trailingTotal: totals[trailingTeam],
+          memberUserIds: members.map((p) => p.userId),
+          memberTeams: Object.fromEntries(
+            members.map((p) => [p.userId, p.team])
+          ),
+        });
+      }
+    }
+
+    const raceEnd = race.endsAt ? new Date(race.endsAt) : null;
+    const msLeft = raceEnd ? raceEnd.getTime() - currentTime.getTime() : null;
+
+    // TR-682 final-stretch push with team framing, on the existing final-
+    // stretch timing; the notification handler applies the 30-min throttle.
+    if (msLeft != null && msLeft > 0 && msLeft <= FINAL_STRETCH_WINDOW_MS) {
+      const activeMembers = members.filter((p) => !p.forfeitedAt);
+      if (activeMembers.length > 0) {
+        events.emit("TEAM_FINAL_STRETCH", {
+          raceId: race.id,
+          raceName: race.name,
+          teamAName: race.teamAName,
+          teamBName: race.teamBName,
+          teamATotal: totals.TEAM_A,
+          teamBTotal: totals.TEAM_B,
+          endsAt: race.endsAt,
+          memberUserIds: activeMembers.map((p) => p.userId),
+          memberTeams: Object.fromEntries(
+            activeMembers.map((p) => [p.userId, p.team])
+          ),
+        });
+      }
+    }
+
+    // TR-683 slacker nudge: final 12h only, never in (configured or effective)
+    // 1v1, average over non-forfeited members, once per race per member (the
+    // Notification audit row is the durable dedup key).
+    if (
+      msLeft != null &&
+      msLeft > 0 &&
+      msLeft <= SLACKER_WINDOW_MS &&
+      (race.teamSize ?? 0) > 1
+    ) {
+      for (const team of ["TEAM_A", "TEAM_B"]) {
+        const active = members.filter((p) => p.team === team && !p.forfeitedAt);
+        if (active.length <= 1) continue; // sole active member is never shamed
+        const average =
+          active.reduce((sum, p) => sum + (p.totalSteps || 0), 0) /
+          active.length;
+        if (average <= 0) continue;
+        for (const p of active) {
+          if ((p.totalSteps || 0) >= average * SLACKER_FRACTION) continue;
+          const alreadySent = await notificationModel.findFirstByUserTypeRace(
+            p.userId,
+            SLACKER_PUSH_TYPE,
+            race.id
+          );
+          if (alreadySent) continue;
+          events.emit("TEAM_SLACKER_NUDGE", {
+            raceId: race.id,
+            raceName: race.name,
+            userId: p.userId,
+            teamName: team === "TEAM_A" ? race.teamAName : race.teamBName,
+            totalSteps: p.totalSteps || 0,
+            teamAverage: Math.round(average),
+          });
+        }
+      }
+    }
+  }
 
   return async function recomputePlacements() {
     const currentTime = now();
@@ -72,6 +210,13 @@ function buildRecomputePlacements(dependencies = {}) {
           raceEnd.getTime() - currentTime.getTime() <= FINAL_STRETCH_WINDOW_MS;
         const bucket = isFinalStretch ? finalStretchUserIds : normalUserIds;
         for (const p of participants) bucket.add(p.userId);
+
+        // Team races: individual placement events are suppressed (TR-685);
+        // evaluate the team pushes instead and skip the individual loop.
+        if (race.isTeamRace) {
+          await evaluateTeamRace({ race, participants, currentTime });
+          continue;
+        }
 
         const ranked = [...participants].sort(
           (a, b) => (b.totalSteps ?? 0) - (a.totalSteps ?? 0)

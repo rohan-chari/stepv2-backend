@@ -4,6 +4,10 @@ const userDisplaySelect = {
   id: true,
   displayName: true,
   profilePhotoUrl: true,
+  // TR-708: last-seen client feature tokens, so the friends list can compute
+  // the per-friend teamRaceEligible flag. Never serialized raw — the queries
+  // map it into the boolean before responding.
+  clientFeatures: true,
   equippedAccessories: {
     include: {
       shopItem: {

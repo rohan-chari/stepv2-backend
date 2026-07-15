@@ -298,24 +298,6 @@ describe("wrong turn", () => {
       assert.equal(res.status, 400);
     });
 
-    it("cannot target finished participant", async () => {
-      const alice = await createUser("AliceValDDDD");
-      const bob = await createUser("BobValDDDDDD");
-      await makeFriends(alice, bob);
-      const raceId = await createActiveRace(alice, bob);
-
-      // Give alice the powerup before bob finishes
-      const wt = await giveHeldPowerup(raceId, alice.userId, "WRONG_TURN", 99901);
-
-      // Bob finishes
-      await recordSamples(bob.token, [
-        { periodStart: minutesAgo(30).toISOString(), periodEnd: new Date().toISOString(), steps: 250000 },
-      ]);
-      await getProgress(bob.token, raceId);
-
-      const res = await usePowerup(alice.token, raceId, wt.id, bob.userId);
-      assert.ok(res.status >= 400);
-    });
   });
 
   // === PRORATING ===

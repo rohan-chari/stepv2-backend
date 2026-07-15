@@ -72,6 +72,9 @@ ask before deploying to prod" — a restore is a destructive prod write).
 
 - The dump contains the **full users table** (PII). A copy lands on your laptop
   and on the droplet. Delete the local copy if you don't want it lingering.
+- The procedure above writes `$OUT` to the **repo root**, so `*.dump` is
+  gitignored — without that, a routine `git add -A` would commit user PII into
+  history. Keep the ignore rule, or dump outside the repo.
 - The droplet copy lives in the **same DO account/region** as the DB, so it
   doesn't protect against an account-level loss. For real DR, also push a copy
   **off-DO** (object storage elsewhere). The local laptop copy partially covers

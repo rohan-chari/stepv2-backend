@@ -111,6 +111,17 @@ function buildGetAdminStats(dependencies = {}) {
         (SELECT COUNT(*) FROM referrals WHERE status IN ('QUALIFIED', 'REWARDED'))::bigint                           AS referees_finished_race,
         (SELECT COUNT(*) FROM referrals WHERE status = 'REWARDED')::bigint                                           AS referrals_rewarded`;
 
+    // Team-race adoption counters (Team Race Mode ships with an organic cold
+    // start — no seeded lobbies, no campaign — so these are how we watch it).
+    const [teamRows] = await prisma.$queryRaw`
+      SELECT
+        (SELECT COUNT(*) FROM races WHERE is_team_race)::bigint                                                            AS team_created_total,
+        (SELECT COUNT(*) FROM races WHERE is_team_race AND created_at >= now() - interval '7 days')::bigint                AS team_created_7d,
+        (SELECT COUNT(*) FROM races WHERE is_team_race AND status = 'completed')::bigint                                   AS team_completed_total,
+        (SELECT COUNT(*) FROM races WHERE is_team_race AND status = 'completed'
+           AND completed_at >= now() - interval '7 days')::bigint                                                          AS team_completed_7d,
+        (SELECT COUNT(*) FROM races WHERE is_team_race AND status = 'active')::bigint                                      AS team_active_now`;
+
     const distribution = { "0": 0, "1": 0, "2": 0, "3-5": 0, "6+": 0 };
     for (const row of friendsDist) distribution[row.bucket] = n(row.users);
 
@@ -143,6 +154,13 @@ function buildGetAdminStats(dependencies = {}) {
       },
       friends: { distribution },
       retention: ret,
+      teamRaces: {
+        createdTotal: n(teamRows?.team_created_total),
+        createdLast7Days: n(teamRows?.team_created_7d),
+        completedTotal: n(teamRows?.team_completed_total),
+        completedLast7Days: n(teamRows?.team_completed_7d),
+        activeNow: n(teamRows?.team_active_now),
+      },
       referralFunnel: {
         linkOpensTotal: n(funnelRows?.link_opens_total),
         linkOpensLast7Days: n(funnelRows?.link_opens_7d),

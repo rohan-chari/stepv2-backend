@@ -591,26 +591,6 @@ describe("signal jammer — integration", () => {
       assert.match((await res.json()).error, /not upgradeable/i);
     });
 
-    it("cannot target a finished participant", async () => {
-      const { alice, bob, raceId, jammerId } = await setup();
-      // Bob finishes (targetSteps 1000).
-      await request(server.baseUrl, "POST", "/steps/samples", {
-        body: {
-          samples: [
-            {
-              periodStart: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
-              periodEnd: new Date().toISOString(),
-              steps: 2000,
-            },
-          ],
-        },
-        token: bob.token,
-      });
-      await getProgress(bob.token, raceId); // trigger finish detection
-      const res = await usePowerup(alice.token, raceId, jammerId, { targetUserId: bob.userId });
-      assert.ok(res.status >= 400);
-    });
-
     it("rejects use when the race is not ACTIVE", async () => {
       const { alice, bob, raceId, jammerId } = await setup();
       await prisma.race.update({ where: { id: raceId }, data: { status: "COMPLETED" } });

@@ -277,35 +277,6 @@ describe("red card", () => {
       assert.equal(res.status, 400);
     });
 
-    it("skips finished participants when finding leader", async () => {
-      const alice = await createUser("AliceValDDDD");
-      const bob = await createUser("BobValDDDDDD");
-      const charlie = await createUser("CharlieValDD");
-      const dave = await createUser("DaveValDDDDD");
-      await makeFriends(alice, bob);
-      await makeFriends(alice, charlie);
-      await makeFriends(alice, dave);
-      await makeFriends(bob, charlie);
-      const raceId = await createActiveRaceWith([alice, bob, charlie, dave], { targetSteps: 5000 });
-
-      // Charlie finishes the race
-      await giveBonusSteps(raceId, charlie.userId, 8000);
-      await recordSamples(charlie.token, [
-        { periodStart: minutesAgo(30).toISOString(), periodEnd: new Date().toISOString(), steps: 8000 },
-      ]);
-
-      // Bob is leader among active participants
-      await giveBonusSteps(raceId, bob.userId, 3000);
-      await giveBonusSteps(raceId, alice.userId, 1000);
-
-      const card = await giveHeldPowerup(raceId, alice.userId, "RED_CARD", 99901);
-      const res = await usePowerup(alice.token, raceId, card.id);
-      assert.equal(res.status, 200);
-
-      // Should target bob (active leader), not charlie (finished)
-      const body = await res.json();
-      assert.equal(body.result.penalty, 300); // 10% of 3000
-    });
   });
 
   // === SHIELD INTERACTION ===

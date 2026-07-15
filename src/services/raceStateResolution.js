@@ -5,7 +5,6 @@ const { StepSample } = require("../models/stepSample");
 const { RaceActiveEffect } = require("../models/raceActiveEffect");
 const { RacePowerupEvent } = require("../models/racePowerupEvent");
 const { GlobalStepEvent } = require("../models/globalStepEvent");
-const { completeRace } = require("../commands/completeRace");
 const { computeEffectModifiers } = require("../queries/getRaceProgress");
 const {
   getTimeZoneParts,
@@ -430,6 +429,7 @@ async function determineFinishSnapshot({
 
 async function triggerTrailMines({
   raceId,
+  race = null,
   stepTotals,
   raceActiveEffectModel,
   participantModel,
@@ -442,6 +442,8 @@ async function triggerTrailMines({
     (effect) => effect.type === "TRAIL_MINE"
   );
 
+  const isTeamRace = race ? race.isTeamRace === true : false;
+
   for (const mine of mines) {
     const metadata = mine.metadata || {};
     const ownerParticipantId = metadata.ownerParticipantId || mine.targetParticipantId;
@@ -452,9 +454,21 @@ async function triggerTrailMines({
       continue;
     }
 
+    // Team races (TR-653): a mine trips only for ENEMY-team members. Resolve
+    // the owner's side from the resolved totals (the owner is always in them).
+    const ownerTeam = isTeamRace
+      ? stepTotals.find(({ participant }) => participant.id === ownerParticipantId)
+          ?.participant?.team ?? null
+      : null;
+
     const candidates = stepTotals
       .filter(({ participant, totalSteps }) => {
         if (participant.id === ownerParticipantId) return false;
+        // TR-657: forfeited members are frozen and never trip mines.
+        if (participant.forfeitedAt) return false;
+        if (isTeamRace && ownerTeam && participant.team === ownerTeam) {
+          return false;
+        }
         const previousTotal = participant.totalSteps || 0;
         return previousTotal < positionSteps && totalSteps >= positionSteps;
       })
@@ -508,7 +522,6 @@ function buildResolveRaceState(dependencies = {}) {
     dependencies.RacePowerupEvent || RacePowerupEvent;
   const globalStepEventModel =
     dependencies.GlobalStepEvent || GlobalStepEvent;
-  const completeRaceFn = dependencies.completeRace || completeRace;
   const now = dependencies.now || (() => new Date());
 
   return async function resolveRaceState({
@@ -560,11 +573,9 @@ function buildResolveRaceState(dependencies = {}) {
 
       // Per-participant compute+write phase. Each iteration reads only this
       // participant's step_samples/race_active_effects and writes only this
-      // participant's row, so we can fan them out in parallel safely. Ordering
-      // dependents (trailMines, placement, completeRace) run after.
+      // participant's row, so we can fan them out in parallel safely. The one
+      // ordering dependent (trailMines) runs after.
       const stepTotals = new Array(acceptedParticipants.length);
-      const finisherCandidates = new Array(acceptedParticipants.length);
-      let previouslyFinished = 0;
       // Box-progress total for the requesting user (Leg Cramp + Wrong Turn
       // immune). Threaded to syncRacePowerupState so the roll gate ignores those
       // debuffs. Only the userId participant's value is needed (the caller syncs
@@ -573,6 +584,17 @@ function buildResolveRaceState(dependencies = {}) {
 
       await Promise.all(
         acceptedParticipants.map(async (participant, index) => {
+          // TR-601: forfeited team-race members are FROZEN at the total the
+          // forfeit command snapshotted — never recomputed here (their timed
+          // effects expire naturally but the frozen number stands).
+          if (participant.forfeitedAt) {
+            stepTotals[index] = {
+              participant,
+              totalSteps: participant.totalSteps || 0,
+            };
+            return;
+          }
+
           if (participant.finishedAt) {
             // Read-only — increment outside Promise.all is unsafe, count later.
             stepTotals[index] = {
@@ -580,7 +602,6 @@ function buildResolveRaceState(dependencies = {}) {
               totalSteps:
                 participant.finishTotalSteps ?? participant.totalSteps,
             };
-            finisherCandidates[index] = null;
             return;
           }
 
@@ -644,94 +665,23 @@ function buildResolveRaceState(dependencies = {}) {
             });
           }
 
-          // Target-based early finish only applies to goal races (targetSteps > 0).
-          // Time-based races create with targetSteps = 0; since `0 >= 0`, an
-          // unguarded check would mark every participant finished the instant the
-          // race starts (and complete the race immediately). Time-based races must
-          // finish ONLY when ends_at passes, via src/jobs/raceExpiry.js.
-          //
-          // The explicit `!race.timeBased` guard also covers seeded races that
-          // KEEP a positive targetSteps as a display-only goal (e.g. Daily 10K /
-          // Weekly 50K): when time_based = true they never finish on target,
-          // regardless of targetSteps. Legacy target races (time_based = false,
-          // the default) are unaffected and still finish on reaching the target.
-          if (!race.timeBased && race.targetSteps > 0 && total >= race.targetSteps) {
-            const snapshot = await determineFinishSnapshot({
-              participant,
-              currentTotal: total,
-              targetSteps: race.targetSteps,
-              effectiveStart,
-              effectGroups: { legCramps, runnersHighs, wrongTurns, campfires, rainstorms },
-              stepSampleModel,
-              powerupEventModel,
-              raceId: race.id,
-              now: currentTime,
-            });
-
-            const finishTotalSteps = snapshot?.finishTotalSteps ?? total;
-            const finishedAt = snapshot?.finishedAt ?? currentTime;
-
-            await participantModel.markFinished(
-              participant.id,
-              finishedAt,
-              finishTotalSteps
-            );
-
-            finisherCandidates[index] = {
-              participant,
-              totalSteps: finishTotalSteps,
-              finishedAt,
-            };
-          } else {
-            finisherCandidates[index] = null;
-          }
+          // TR-902: races are TIME-BASED only — there is no target-based early
+          // finish. A race is decided when ends_at passes (src/jobs/raceExpiry.js)
+          // or, for a team race, by collapse (commands/forfeitRace.js).
+          // `targetSteps` survives as a DISPLAY goal (legacy client UI, seeded
+          // Daily 10K / Weekly 50K) and completes nothing. Legacy rows that
+          // already carry finishedAt keep their frozen totals (handled above).
         })
       );
-
-      previouslyFinished = acceptedParticipants.filter((p) => p.finishedAt).length;
-      const newFinishers = finisherCandidates.filter(Boolean);
 
       if (race.powerupsEnabled) {
         await triggerTrailMines({
           raceId: race.id,
+          race,
           stepTotals,
           raceActiveEffectModel,
           participantModel,
           powerupEventModel,
-        });
-      }
-
-      newFinishers.sort((a, b) => {
-        const timeDiff = a.finishedAt - b.finishedAt;
-        if (timeDiff !== 0) return timeDiff;
-        return b.totalSteps - a.totalSteps;
-      });
-
-      for (let i = 0; i < newFinishers.length; i++) {
-        const placement = previouslyFinished + i + 1;
-        await participantModel.setPlacement(
-          newFinishers[i].participant.id,
-          placement
-        );
-      }
-
-      const totalFinished = previouslyFinished + newFinishers.length;
-      const finishThreshold = acceptedParticipants.length <= 3 ? 1 : 3;
-
-      if (
-        newFinishers.length > 0 &&
-        totalFinished >= finishThreshold &&
-        previouslyFinished < finishThreshold
-      ) {
-        const priorWinner = acceptedParticipants.find((p) => p.placement === 1);
-        const winnerUserId = priorWinner
-          ? priorWinner.userId
-          : newFinishers[0].participant.userId;
-
-        await completeRaceFn({
-          raceId: race.id,
-          winnerUserId,
-          participantUserIds: acceptedParticipants.map((p) => p.userId),
         });
       }
 
@@ -740,7 +690,8 @@ function buildResolveRaceState(dependencies = {}) {
         race, // expose so callers can hand it to syncRacePowerupState (avoids a duplicate findById)
         boxEffectiveSteps: userBoxEffectiveSteps, // Leg Cramp + Wrong Turn immune; null if no userId
         updatedParticipants: stepTotals.length,
-        newFinishers: newFinishers.length,
+        // Retained (always 0) so existing callers reading this keep working.
+        newFinishers: 0,
       };
     }
 

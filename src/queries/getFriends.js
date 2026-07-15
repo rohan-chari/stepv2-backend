@@ -1,6 +1,17 @@
 const { Friendship } = require("../models/friendship");
 const { Steps } = require("../models/steps");
 const { characterPresentation } = require("../utils/shopCosmetics");
+const { TEAM_RACES_FEATURE } = require("../utils/teamRaces");
+
+// TR-708: a friend is team-race-eligible once any client of theirs has declared
+// the team_races token (TR-706 records these stickily, so this never flickers
+// back to false). No recorded tokens => ineligible (pessimistic default —
+// dormant accounts show "needs app update" until they next connect).
+function isTeamRaceEligible(friend) {
+  return Array.isArray(friend?.clientFeatures)
+    ? friend.clientFeatures.includes(TEAM_RACES_FEATURE)
+    : false;
+}
 
 async function getFriendsList(userId, supportsCharacters = false) {
   const friendships = await Friendship.findFriends(userId);
@@ -14,6 +25,9 @@ async function getFriendsList(userId, supportsCharacters = false) {
         profilePhotoUrl: friend.profilePhotoUrl,
         ...characterPresentation(friend, supportsCharacters),
         friendshipId: f.id,
+        // TR-708: always present, context-free. The friend picker grays out
+        // ineligible friends instead of failing at invite time.
+        teamRaceEligible: isTeamRaceEligible(friend),
       };
     })
     // Alphabetical, mirroring getFriendsWithSteps below: the friend's
@@ -67,6 +81,8 @@ async function getFriendsWithSteps(userId, date, supportsCharacters = false) {
       displayName: friend.displayName,
       profilePhotoUrl: friend.profilePhotoUrl,
       ...characterPresentation(friend, supportsCharacters),
+      // TR-708: same flag on the with-steps list (invite picker source).
+      teamRaceEligible: isTeamRaceEligible(friend),
     };
   });
 

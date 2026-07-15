@@ -27,6 +27,10 @@ build/
 # APNs certificates
 certs/
 
+# Prod DB dumps (BACKUP.md writes these to the repo root). They contain the
+# full users table — PII must never enter git history.
+*.dump
+
 # Firebase service-account key (SECRET — local backend push testing only).
 # Never commit; prod reads its own copy from outside the repo on the droplet.
 bara-fcm-service-account.json

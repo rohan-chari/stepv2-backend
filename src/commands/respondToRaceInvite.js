@@ -9,11 +9,19 @@ const {
   reserveRaceBuyIn,
 } = require("../services/raceBuyIns");
 
+const {
+  isTeamSideFull,
+  clientSupportsTeamRaces,
+} = require("../utils/teamRaces");
+
 class RaceInviteResponseError extends Error {
-  constructor(message, statusCode) {
+  constructor(message, statusCode, code) {
     super(message);
     this.name = "RaceInviteResponseError";
     if (statusCode) this.statusCode = statusCode;
+    // Optional machine-readable code (TEAM_FULL, RACE_ALREADY_STARTED,
+    // UPDATE_REQUIRED). Additive — routes serialize it alongside `error`.
+    if (code) this.code = code;
   }
 }
 
@@ -25,7 +33,17 @@ function buildRespondToRaceInvite(dependencies = {}) {
   const awardCoinsFn = dependencies.awardCoins || awardCoins;
   const events = dependencies.eventBus || eventBus;
 
-  return async function respondToRaceInvite({ userId, raceId, accept }) {
+  // Team races (TR-200s): accepting requires a `team` side, only while the race
+  // is still PENDING, and only from a client declaring team_races support.
+  // Declining needs none of that (an old client never sees the invite anyway —
+  // TR-703 list filtering — but declining is always safe).
+  return async function respondToRaceInvite({
+    userId,
+    raceId,
+    accept,
+    team = null,
+    clientFeatures = null,
+  }) {
     const race = await raceModel.findById(raceId);
     if (!race) {
       throw new RaceInviteResponseError("Race not found", 404);
@@ -42,8 +60,48 @@ function buildRespondToRaceInvite(dependencies = {}) {
       throw new RaceInviteResponseError("You have already responded to this invite", 400);
     }
 
+    let acceptTeam = null;
+    if (accept && race.isTeamRace) {
+      // TR-703: defense-in-depth against old clients.
+      if (!clientSupportsTeamRaces(clientFeatures)) {
+        throw new RaceInviteResponseError(
+          "Update the app to join team races",
+          400,
+          "UPDATE_REQUIRED"
+        );
+      }
+      // TR-204: no joining once ACTIVE, on any channel.
+      if (race.status !== "PENDING") {
+        throw new RaceInviteResponseError(
+          "This race has already started",
+          409,
+          "RACE_ALREADY_STARTED"
+        );
+      }
+      if (team !== "TEAM_A" && team !== "TEAM_B") {
+        throw new RaceInviteResponseError(
+          "Pick a team (TEAM_A or TEAM_B) to accept this invite",
+          400
+        );
+      }
+      // TR-202/207: chosen side at cap -> TEAM_FULL; the invite row stays
+      // INVITED (we throw before any update), so it becomes acceptable again
+      // if a slot frees up.
+      if (isTeamSideFull(race, team)) {
+        throw new RaceInviteResponseError(
+          "That team is full",
+          409,
+          "TEAM_FULL"
+        );
+      }
+      acceptTeam = team;
+    }
+
     const newStatus = accept ? "ACCEPTED" : "DECLINED";
     const updateFields = { status: newStatus };
+    if (acceptTeam) {
+      updateFields.team = acceptTeam;
+    }
     const buyInAmount = race.buyInAmount || 0;
 
     // Late joiner: snapshot current steps so only post-join steps count

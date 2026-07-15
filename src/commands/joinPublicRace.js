@@ -12,7 +12,15 @@ function buildJoinPublicRace(dependencies = {}) {
   const withLock = dependencies.withRaceJoinLock || withRaceJoinLock;
   const joinRaceCore = buildJoinRaceCore(dependencies);
 
-  return async function joinPublicRace({ userId, raceId, onboarding }) {
+  // `team` + `clientFeatures` thread through to the shared core for team races
+  // (TR-201/202/204/703); both are ignored on individual races.
+  return async function joinPublicRace({
+    userId,
+    raceId,
+    onboarding,
+    team = null,
+    clientFeatures = null,
+  }) {
     return withLock(raceId, async () => {
       const race = await raceModel.findById(raceId);
       if (!race) {
@@ -22,7 +30,7 @@ function buildJoinPublicRace(dependencies = {}) {
         throw new RaceJoinError("This race is not public", 403);
       }
 
-      return joinRaceCore({ race, userId, onboarding });
+      return joinRaceCore({ race, userId, onboarding, team, clientFeatures });
     });
   };
 }

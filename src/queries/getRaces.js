@@ -6,6 +6,7 @@ const {
   computeFinishRewardPool,
   computeFinishRewardPlaces,
 } = require("../constants/raceFinishReward");
+const { buildTeamsBlockFromParticipants } = require("../utils/teamRaces");
 
 function compareParticipantsForPlacement(left, right) {
   if (left.finishedAt && right.finishedAt) {
@@ -50,7 +51,11 @@ function getActivePlacement(participants, userId) {
   return index >= 0 ? index + 1 : null;
 }
 
-async function getRaces(userId) {
+// `supportsTeamRaces` (TR-702): whether the requesting client sent the
+// `team_races` X-Client-Features token. Old clients (false/omitted) never see a
+// team race in any bucket — filtered here BEFORE any counts are derived, so an
+// old client's list is simply shorter, never inconsistent.
+async function getRaces(userId, supportsTeamRaces = false) {
   const races = await Race.findForUser(userId);
 
   const active = [];
@@ -58,6 +63,7 @@ async function getRaces(userId) {
   const completed = [];
 
   for (const race of races) {
+    if (race.isTeamRace && !supportsTeamRaces) continue;
     const myParticipant = race.participants.find((p) => p.userId === userId);
     const acceptedCount = race.participants.filter((p) => p.status === "ACCEPTED").length;
     const heldPotCoins = race.participants.reduce((sum, participant) => {
@@ -174,6 +180,37 @@ async function getRaces(userId) {
       // this defensively (int? ?? 10) so they show a finite figure but never crash.
       maxParticipants: race.maxParticipants ?? null,
       createdAt: race.createdAt,
+      // ── Team races (TR-806/807) — additive; old clients ignore them and
+      // never receive a team race anyway (filtered above).
+      isTeamRace: race.isTeamRace === true,
+      teamSize: race.teamSize ?? null,
+      teamAName: race.teamAName ?? null,
+      teamBName: race.teamBName ?? null,
+      winnerTeam: race.winnerTeam ?? null,
+      // The viewer's own side + forfeit state. Required by the results modal
+      // (TR-807): placements alone are 1-vs-2 for whole teams, so without
+      // myTeam a win is indistinguishable from a loss, and the review prompt
+      // must exclude forfeiters and ties (strictly winnerTeam === myTeam).
+      myTeam: myParticipant?.team ?? null,
+      myForfeited: myParticipant?.forfeitedAt != null,
+      // Canonical H2H block (same shape as GET /races/:raceId/progress) so the
+      // list row can draw the mini scoreline without an N+1 fetch. Null on
+      // individual races.
+      teams: race.isTeamRace
+        ? buildTeamsBlockFromParticipants(race, race.participants)
+        : null,
+      // Flat convenience totals, kept alongside `teams` for older new-clients
+      // that shipped reading these first.
+      teamATotalSteps: race.isTeamRace
+        ? race.participants
+            .filter((p) => p.status === "ACCEPTED" && p.team === "TEAM_A")
+            .reduce((sum, p) => sum + (p.totalSteps || 0), 0)
+        : null,
+      teamBTotalSteps: race.isTeamRace
+        ? race.participants
+            .filter((p) => p.status === "ACCEPTED" && p.team === "TEAM_B")
+            .reduce((sum, p) => sum + (p.totalSteps || 0), 0)
+        : null,
     };
 
     if (race.status === "ACTIVE") {

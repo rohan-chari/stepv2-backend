@@ -80,6 +80,14 @@ const Race = {
     // Canonical IANA tz that buckets this race's steps. NULL keeps the legacy
     // (caller-tz live, UTC settlement) behavior for callers that don't supply one.
     timezone = null,
+    // TR-902: createRace passes true for all new races; the schema default
+    // (false) is kept for legacy callers/rows.
+    timeBased = false,
+    // Team races (TR-100s). All default to individual-race values.
+    isTeamRace = false,
+    teamSize = null,
+    teamAName = null,
+    teamBName = null,
   }) {
     return prisma.race.create({
       data: {
@@ -96,6 +104,11 @@ const Race = {
         maxParticipants,
         scheduledStartAt,
         timezone,
+        timeBased,
+        isTeamRace,
+        teamSize,
+        teamAName,
+        teamBName,
       },
       include: {
         creator: { select: { id: true, displayName: true, profilePhotoUrl: true } },
@@ -217,6 +230,11 @@ const Race = {
         // target-finish a time-based race from a step sync.
         endsAt: true,
         timeBased: true,
+        // Team races: resolveRaceState freezes forfeited members and the
+        // powerup-odds path ranks by TEAM totals, so the lean select must
+        // carry the team fields too.
+        isTeamRace: true,
+        teamSize: true,
         participants: {
           select: {
             id: true,
@@ -230,6 +248,9 @@ const Race = {
             placement: true,
             finishedAt: true,
             finishTotalSteps: true,
+            // Team races: side + forfeit freeze marker (TR-601/655).
+            team: true,
+            forfeitedAt: true,
             // joinedAt is REQUIRED here: resolveRaceState -> calculateBaseAdjusted
             // -> getEffectiveStart clamps the box/step window to the real join.
             // Omitting it makes getEffectiveStart fall back to race start, which
@@ -319,6 +340,13 @@ const Race = {
         payoutPreset: true,
         potCoins: true,
         endsAt: true,
+        // Team races: the recompute job suppresses individual placement events
+        // and evaluates team lead-change / final-stretch / slacker pushes
+        // instead (TR-681/682/683/685).
+        isTeamRace: true,
+        teamSize: true,
+        teamAName: true,
+        teamBName: true,
       },
     });
   },

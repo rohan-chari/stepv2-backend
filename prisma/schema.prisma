@@ -73,6 +73,19 @@ model User {
   // Old clients never read either column. See REFERRAL_FEATURE_RESEARCH.md §4A.
   referralCode                  String?              @unique @map("referral_code")
   referredByCode                String?              @map("referred_by_code")
+  // ── Team races: per-user client capabilities (TR-706) ─────────────────────
+  // The union of every `X-Client-Features` token (e.g. ["team_races"]) ever
+  // seen on one of this user's authenticated requests. STICKY: tokens are only
+  // ever ADDED — a request that omits the header never clears them, so a stray
+  // header-less call can't flicker the user to "needs app update" in friends'
+  // pickers (TR-708) or block their invites (TR-707). Written only when a new
+  // token appears (no hot write path). Empty array = never recorded any tokens
+  // → INELIGIBLE for team races (pessimistic default covering accounts dormant
+  // since before this deploy). clientFeaturesAt stamps the last write.
+  // Additive/nullable — old app builds neither send nor read these; existing
+  // rows default to an empty array.
+  clientFeatures                String[]             @default([]) @map("client_features")
+  clientFeaturesAt              DateTime?            @map("client_features_at")
   createdAt                     DateTime             @default(now()) @map("created_at")
   steps                         Step[]
   dailyRewardClaims             DailyRewardClaim[]
@@ -631,6 +644,14 @@ enum RaceBuyInStatus {
   REFUNDED  @map("refunded")
 }
 
+// Team-race sides (TR-900 Team Race Mode). A team race has exactly two teams;
+// every ACCEPTED participant belongs to one. Null on individual races and on
+// pre-team-era rows. Additive enum — old app builds never see the column.
+enum RaceTeam {
+  TEAM_A @map("team_a")
+  TEAM_B @map("team_b")
+}
+
 model Race {
   id                  String           @id @default(uuid())
   creatorId           String?          @map("creator_id")
@@ -680,6 +701,19 @@ model Race {
   // older app clients never read or send it. Unique so a token resolves to at
   // most one race; @unique also creates the lookup index used by findByShareToken.
   shareToken          String?          @unique @map("share_token")
+  // ── Team races (TR-100/§12) ────────────────────────────────────────────────
+  // isTeamRace flips a race into two-team mode: exactly two sides, team size
+  // 1–5, combined team totals, winnerTeam decides. teamSize is the per-side cap
+  // (maxParticipants = 2 × teamSize). teamAName/teamBName are the two playful
+  // side names (auto-generated at creation, creator-overridable). winnerTeam is
+  // the settled result (TEAM_A|TEAM_B|null); winnerUserId stays null for team
+  // races. All additive/nullable — old app builds never send or read them, and a
+  // race with isTeamRace=false renders exactly as an individual race.
+  isTeamRace          Boolean          @default(false) @map("is_team_race")
+  teamSize            Int?             @map("team_size")
+  teamAName           String?          @map("team_a_name")
+  teamBName           String?          @map("team_b_name")
+  winnerTeam          RaceTeam?        @map("winner_team")
   createdAt           DateTime         @default(now()) @map("created_at")
   updatedAt           DateTime         @updatedAt @map("updated_at")
 
@@ -778,6 +812,16 @@ model RaceParticipant {
   dayStartPlacement     Int?                  @map("day_start_placement")
   inviteExpiresAt       DateTime?             @map("invite_expires_at")
   resultsSeenAt         DateTime?             @map("results_seen_at")
+  // Team-race side (TR-201). Null on individual races and on pre-team-era rows.
+  // Set at join/accept for team races; freely switchable while PENDING, locked
+  // at start. Additive/nullable — old app builds never read it.
+  team                  RaceTeam?
+  // Mid-race forfeit moment (TR-601, team races only). When set, the member's
+  // effective total is FROZEN as-is into totalSteps (active debuffs bite
+  // permanently — no re-derivation), they stop accruing, can't use or be
+  // targeted by powerups, and get no payout cut even on the winning team.
+  // Null = never forfeited. Additive/nullable — old app builds never read it.
+  forfeitedAt           DateTime?             @map("forfeited_at")
 
   race                  Race               @relation(fields: [raceId], references: [id], onDelete: Cascade)
   user                  User               @relation(fields: [userId], references: [id])

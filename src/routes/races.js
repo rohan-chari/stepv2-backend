@@ -33,6 +33,14 @@ const { startRace: defaultStartRace } = require("../commands/startRace");
 const { cancelRace: defaultCancelRace } = require("../commands/cancelRace");
 const { editRace: defaultEditRace } = require("../commands/editRace");
 const {
+  switchRaceTeam: defaultSwitchRaceTeam,
+} = require("../commands/switchRaceTeam");
+const { leaveRace: defaultLeaveRace } = require("../commands/leaveRace");
+const { forfeitRace: defaultForfeitRace } = require("../commands/forfeitRace");
+const {
+  generateTeamNamePair: defaultGenerateTeamNamePair,
+} = require("../constants/teamNames");
+const {
   usePowerup: defaultUsePowerup,
 } = require("../commands/usePowerup");
 const {
@@ -120,6 +128,11 @@ function createRacesRouter(dependencies = {}) {
   const startRace = dependencies.startRace || defaultStartRace;
   const cancelRace = dependencies.cancelRace || defaultCancelRace;
   const editRace = dependencies.editRace || defaultEditRace;
+  const switchRaceTeam = dependencies.switchRaceTeam || defaultSwitchRaceTeam;
+  const leaveRace = dependencies.leaveRace || defaultLeaveRace;
+  const forfeitRace = dependencies.forfeitRace || defaultForfeitRace;
+  const generateTeamNamePair =
+    dependencies.generateTeamNamePair || defaultGenerateTeamNamePair;
   const getRaces = dependencies.getRaces || defaultGetRaces;
   const getRaceDetails = dependencies.getRaceDetails || defaultGetRaceDetails;
   const getRaceProgress =
@@ -189,6 +202,12 @@ function createRacesRouter(dependencies = {}) {
         maxParticipants,
         scheduledStartAt,
         targetSteps,
+        // Team races (TR-100s). Old clients never send these.
+        isTeamRace,
+        teamSize,
+        teamAName,
+        teamBName,
+        team,
       } = req.body;
       const race = await createRace({
         userId: req.user.id,
@@ -205,12 +224,22 @@ function createRacesRouter(dependencies = {}) {
         // Creator's device tz -> race's canonical scoring tz, so live standings
         // and placement pushes match what every participant sees on-screen.
         timeZone: req.timeZone,
+        isTeamRace,
+        teamSize,
+        teamAName,
+        teamBName,
+        team,
+        clientFeatures: req.clientFeatures,
       });
       res.status(201).json({ race });
     } catch (error) {
       if (error.name === "RaceCreationError") {
         const status = error.statusCode || 400;
-        return res.status(status).json({ error: error.message });
+        // `code` is additive — old clients only read `error`; new clients
+        // branch on machine-readable codes (TEAM_NAMES_IDENTICAL, …).
+        return res
+          .status(status)
+          .json({ error: error.message, ...(error.code ? { code: error.code } : {}) });
       }
       console.error("Create race error:", error);
       res.status(500).json({ error: "Internal server error" });
@@ -220,7 +249,11 @@ function createRacesRouter(dependencies = {}) {
   // GET /races
   router.get("/", async (req, res) => {
     try {
-      const result = await getRaces(req.user.id);
+      // TR-702: old clients (no team_races token) never receive team races.
+      const result = await getRaces(
+        req.user.id,
+        req.clientFeatures?.has("team_races") ?? false
+      );
       res.json(result);
     } catch (error) {
       console.error("Get races error:", error);
@@ -231,7 +264,11 @@ function createRacesRouter(dependencies = {}) {
   // GET /races/public
   router.get("/public", async (req, res) => {
     try {
-      const races = await getPublicRaces({ userId: req.user.id });
+      const races = await getPublicRaces({
+        userId: req.user.id,
+        // TR-702: old clients never see team races in the public browser.
+        supportsTeamRaces: req.clientFeatures?.has("team_races") ?? false,
+      });
       res.json({ races });
     } catch (error) {
       console.error("Get public races error:", error);
@@ -253,6 +290,22 @@ function createRacesRouter(dependencies = {}) {
     }
   });
 
+  // GET /races/team-names/suggest — a fresh pair of DISTINCT playful team
+  // names from the backend pool (TR-103), for the create screen's name plaques
+  // + dice-reroll before the race exists (TR-801). Read-only and cheap (no DB);
+  // creation re-generates server-side anyway, so this is purely a preview.
+  // Static path declared BEFORE any GET /:raceId so it isn't read as a race id.
+  // New endpoint — old clients never call it.
+  router.get("/team-names/suggest", async (_req, res) => {
+    try {
+      const [teamAName, teamBName] = generateTeamNamePair();
+      res.json({ teamAName, teamBName });
+    } catch (error) {
+      console.error("Team name suggest error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   // POST /races/:raceId/join
   // Optional body { onboarding: boolean } — when true (and server-side
   // eligibility passes) grants the one-time "join your first race" bonus boxes.
@@ -263,12 +316,17 @@ function createRacesRouter(dependencies = {}) {
         userId: req.user.id,
         raceId: req.params.raceId,
         onboarding: req.body && req.body.onboarding === true,
+        // Team races (TR-201): required side pick; ignored on individual races.
+        team: (req.body && req.body.team) || null,
+        clientFeatures: req.clientFeatures,
       });
       res.status(201).json({ participant });
     } catch (error) {
       if (error.name === "RaceJoinError") {
         const status = error.statusCode || 400;
-        return res.status(status).json({ error: error.message });
+        return res
+          .status(status)
+          .json({ error: error.message, ...(error.code ? { code: error.code } : {}) });
       }
       console.error("Join public race error:", error);
       res.status(500).json({ error: "Internal server error" });
@@ -288,7 +346,9 @@ function createRacesRouter(dependencies = {}) {
     } catch (error) {
       if (error.name === "RaceShareLinkError") {
         const status = error.statusCode || 400;
-        return res.status(status).json({ error: error.message });
+        return res
+          .status(status)
+          .json({ error: error.message, ...(error.code ? { code: error.code } : {}) });
       }
       console.error("Create race share link error:", error);
       res.status(500).json({ error: "Internal server error" });
@@ -305,6 +365,9 @@ function createRacesRouter(dependencies = {}) {
         userId: req.user.id,
         token: req.params.token,
         onboarding: req.body && req.body.onboarding === true,
+        // Team races (TR-201): required side pick; ignored on individual races.
+        team: (req.body && req.body.team) || null,
+        clientFeatures: req.clientFeatures,
       });
       res.status(201).json({ participant, raceId: participant.raceId });
     } catch (error) {
@@ -313,7 +376,9 @@ function createRacesRouter(dependencies = {}) {
         error.name === "RaceJoinError"
       ) {
         const status = error.statusCode || 400;
-        return res.status(status).json({ error: error.message });
+        return res
+          .status(status)
+          .json({ error: error.message, ...(error.code ? { code: error.code } : {}) });
       }
       console.error("Join race by share token error:", error);
       res.status(500).json({ error: "Internal server error" });
@@ -346,7 +411,9 @@ function createRacesRouter(dependencies = {}) {
     } catch (error) {
       if (error.name === "RaceKickError") {
         const status = error.statusCode || 400;
-        return res.status(status).json({ error: error.message });
+        return res
+          .status(status)
+          .json({ error: error.message, ...(error.code ? { code: error.code } : {}) });
       }
       console.error("Kick participant error:", error);
       res.status(500).json({ error: "Internal server error" });
@@ -410,7 +477,9 @@ function createRacesRouter(dependencies = {}) {
     } catch (error) {
       if (error.name === "RaceInviteError") {
         const status = error.statusCode || 400;
-        return res.status(status).json({ error: error.message });
+        return res
+          .status(status)
+          .json({ error: error.message, ...(error.code ? { code: error.code } : {}) });
       }
       console.error("Invite to race error:", error);
       res.status(500).json({ error: "Internal server error" });
@@ -420,19 +489,90 @@ function createRacesRouter(dependencies = {}) {
   // PUT /races/:raceId/respond
   router.put("/:raceId/respond", async (req, res) => {
     try {
-      const { accept } = req.body;
+      const { accept, team } = req.body;
       const participant = await respondToRaceInvite({
         userId: req.user.id,
         raceId: req.params.raceId,
         accept,
+        // Team races (TR-201): side is required when accepting; ignored otherwise.
+        team: team || null,
+        clientFeatures: req.clientFeatures,
       });
       res.json({ participant });
     } catch (error) {
       if (error.name === "RaceInviteResponseError") {
         const status = error.statusCode || 400;
-        return res.status(status).json({ error: error.message });
+        return res
+          .status(status)
+          .json({ error: error.message, ...(error.code ? { code: error.code } : {}) });
       }
       console.error("Respond to race invite error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // PUT /races/:raceId/team — switch sides in a PENDING team race (TR-203).
+  // Body: { team: "TEAM_A" | "TEAM_B" }. New endpoint; old clients never call it.
+  router.put("/:raceId/team", async (req, res) => {
+    try {
+      const participant = await switchRaceTeam({
+        userId: req.user.id,
+        raceId: req.params.raceId,
+        team: req.body && req.body.team,
+      });
+      res.json({ participant });
+    } catch (error) {
+      if (error.name === "RaceTeamSwitchError") {
+        const status = error.statusCode || 400;
+        return res
+          .status(status)
+          .json({ error: error.message, ...(error.code ? { code: error.code } : {}) });
+      }
+      console.error("Switch race team error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // POST /races/:raceId/leave — leave a PENDING team race lobby (TR-205).
+  // Releases a HELD buy-in and frees the slot; re-joining later is a fresh
+  // join. New endpoint; old clients never call it.
+  router.post("/:raceId/leave", async (req, res) => {
+    try {
+      await leaveRace({
+        userId: req.user.id,
+        raceId: req.params.raceId,
+      });
+      res.json({ success: true });
+    } catch (error) {
+      if (error.name === "RaceLeaveError") {
+        const status = error.statusCode || 400;
+        return res
+          .status(status)
+          .json({ error: error.message, ...(error.code ? { code: error.code } : {}) });
+      }
+      console.error("Leave race error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // POST /races/:raceId/forfeit — mid-race forfeit in an ACTIVE team race
+  // (TR-601). Freezes the caller's total as-is; may complete the race on team
+  // collapse (TR-603). New endpoint; old clients never call it.
+  router.post("/:raceId/forfeit", async (req, res) => {
+    try {
+      const result = await forfeitRace({
+        userId: req.user.id,
+        raceId: req.params.raceId,
+      });
+      res.json(result);
+    } catch (error) {
+      if (error.name === "RaceForfeitError") {
+        const status = error.statusCode || 400;
+        return res
+          .status(status)
+          .json({ error: error.message, ...(error.code ? { code: error.code } : {}) });
+      }
+      console.error("Forfeit race error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });
@@ -448,7 +588,9 @@ function createRacesRouter(dependencies = {}) {
     } catch (error) {
       if (error.name === "RaceStartError") {
         const status = error.statusCode || 400;
-        return res.status(status).json({ error: error.message });
+        return res
+          .status(status)
+          .json({ error: error.message, ...(error.code ? { code: error.code } : {}) });
       }
       console.error("Start race error:", error);
       res.status(500).json({ error: "Internal server error" });
@@ -489,7 +631,9 @@ function createRacesRouter(dependencies = {}) {
     } catch (error) {
       if (error.name === "RedeemPowerupError") {
         const status = error.statusCode || 400;
-        return res.status(status).json({ error: error.message });
+        return res
+          .status(status)
+          .json({ error: error.message, ...(error.code ? { code: error.code } : {}) });
       }
       console.error("Redeem powerup error:", error);
       res.status(500).json({ error: "Internal server error" });
@@ -520,7 +664,9 @@ function createRacesRouter(dependencies = {}) {
     } catch (error) {
       if (error.name === "PowerupUseError") {
         const status = error.statusCode || 400;
-        return res.status(status).json({ error: error.message });
+        return res
+          .status(status)
+          .json({ error: error.message, ...(error.code ? { code: error.code } : {}) });
       }
       console.error("Use powerup error:", error);
       res.status(500).json({ error: "Internal server error" });
@@ -540,7 +686,9 @@ function createRacesRouter(dependencies = {}) {
     } catch (error) {
       if (error.name === "PowerupDiscardError") {
         const status = error.statusCode || 400;
-        return res.status(status).json({ error: error.message });
+        return res
+          .status(status)
+          .json({ error: error.message, ...(error.code ? { code: error.code } : {}) });
       }
       console.error("Discard powerup error:", error);
       res.status(500).json({ error: "Internal server error" });
@@ -560,7 +708,9 @@ function createRacesRouter(dependencies = {}) {
     } catch (error) {
       if (error.name === "MysteryBoxOpenError") {
         const status = error.statusCode || 400;
-        return res.status(status).json({ error: error.message });
+        return res
+          .status(status)
+          .json({ error: error.message, ...(error.code ? { code: error.code } : {}) });
       }
       console.error("Open mystery box error:", error);
       res.status(500).json({ error: "Internal server error" });
@@ -663,11 +813,18 @@ function createRacesRouter(dependencies = {}) {
         return res.status(400).json({ error: "Race is not active" });
       }
 
+      // Team races (TR-651/657): Sneaky Swap is enemy-only, and forfeited
+      // members drop out of the target pool entirely.
+      const me = race.participants.find(
+        (p) => p.userId === req.user.id && p.status === "ACCEPTED"
+      );
       const candidates = race.participants.filter(
         (p) =>
           p.userId !== req.user.id &&
           p.status === "ACCEPTED" &&
-          !p.finishedAt
+          !p.finishedAt &&
+          !p.forfeitedAt &&
+          (!race.isTeamRace || (me && p.team != null && p.team !== me.team))
       );
 
       const evaluated = await Promise.all(
@@ -863,6 +1020,12 @@ function createRacesRouter(dependencies = {}) {
         buyInAmount,
         payoutPreset,
         maxParticipants,
+        // Team races (TR-105). isTeamRace is accepted only so editRace can
+        // reject a conversion attempt with IMMUTABLE_FIELD.
+        isTeamRace,
+        teamAName,
+        teamBName,
+        teamSize,
       } = req.body || {};
 
       const updates = {};
@@ -874,6 +1037,10 @@ function createRacesRouter(dependencies = {}) {
       if (buyInAmount !== undefined) updates.buyInAmount = buyInAmount;
       if (payoutPreset !== undefined) updates.payoutPreset = payoutPreset;
       if (maxParticipants !== undefined) updates.maxParticipants = maxParticipants;
+      if (isTeamRace !== undefined) updates.isTeamRace = isTeamRace;
+      if (teamAName !== undefined) updates.teamAName = teamAName;
+      if (teamBName !== undefined) updates.teamBName = teamBName;
+      if (teamSize !== undefined) updates.teamSize = teamSize;
 
       const race = await editRace({
         userId: req.user.id,
@@ -884,7 +1051,9 @@ function createRacesRouter(dependencies = {}) {
     } catch (error) {
       if (error.name === "RaceEditError") {
         const status = error.statusCode || 400;
-        return res.status(status).json({ error: error.message });
+        return res
+          .status(status)
+          .json({ error: error.message, ...(error.code ? { code: error.code } : {}) });
       }
       console.error("Edit race error:", error);
       res.status(500).json({ error: "Internal server error" });
@@ -902,7 +1071,9 @@ function createRacesRouter(dependencies = {}) {
     } catch (error) {
       if (error.name === "RaceCancelError") {
         const status = error.statusCode || 400;
-        return res.status(status).json({ error: error.message });
+        return res
+          .status(status)
+          .json({ error: error.message, ...(error.code ? { code: error.code } : {}) });
       }
       console.error("Cancel race error:", error);
       res.status(500).json({ error: "Internal server error" });

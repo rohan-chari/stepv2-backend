@@ -373,22 +373,6 @@ describe("leg cramp", () => {
       assert.equal(res.status, 400);
     });
 
-    it("cannot target finished participant", async () => {
-      const alice = await createUser("AliceValDDDD");
-      const bob = await createUser("BobValDDDDDD");
-      await makeFriends(alice, bob);
-      const raceId = await createActiveRace(alice, bob, { targetSteps: 1000 });
-
-      // Bob finishes
-      await recordSamples(bob.token, [
-        { periodStart: hoursAgo(1).toISOString(), periodEnd: new Date().toISOString(), steps: 2000 },
-      ]);
-      await getProgress(bob.token, raceId); // trigger finish detection
-
-      const cramp = await giveHeldPowerup(raceId, alice.userId, "LEG_CRAMP", 99901);
-      const res = await usePowerup(alice.token, raceId, cramp.id, bob.userId);
-      assert.ok(res.status >= 400);
-    });
   });
 
   // === SHIELD INTERACTION ===

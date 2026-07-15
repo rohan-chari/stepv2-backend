@@ -1,5 +1,11 @@
 const { Race } = require("../models/race");
 const { startRace: defaultStartRace } = require("../commands/startRace");
+const { Notification } = require("../models/notification");
+const { eventBus } = require("../events/eventBus");
+
+// Push type for the TR-304 "teams are uneven" creator nudge. The Notification
+// audit row of this type doubles as the send-once dedup key.
+const TEAMS_UNEVEN_PUSH_TYPE = "TEAM_RACE_SCHEDULED_UNEVEN";
 
 // Auto-start scheduled races (1.1.7). Runs on the same 5-minute cadence as the
 // other cron jobs in src/index.js. Finds PENDING user-created races whose
@@ -43,6 +49,8 @@ function buildAutoStartScheduledRaces(dependencies = {}) {
   const startRace = dependencies.startRace || defaultStartRace;
   const now = dependencies.now || (() => new Date());
   const logger = dependencies.logger || console;
+  const notificationModel = dependencies.Notification || Notification;
+  const events = dependencies.eventBus || eventBus;
 
   // Returns the list of race ids that were started this tick.
   return async function autoStartScheduledRaces() {
@@ -84,6 +92,32 @@ function buildAutoStartScheduledRaces(dependencies = {}) {
           `[CRON] Failed to auto-start scheduled race ${race.id}:`,
           error?.message || error
         );
+
+        // TR-304: an uneven scheduled team race is skipped (stays PENDING,
+        // retried every tick) and the CREATOR gets a "teams are uneven" push
+        // exactly once — the Notification audit row of this type is the dedup
+        // key, so process restarts never re-send.
+        if (error && error.code === "TEAMS_UNEVEN" && race.creatorId) {
+          try {
+            const alreadySent = await notificationModel.findFirstByUserTypeRace(
+              race.creatorId,
+              TEAMS_UNEVEN_PUSH_TYPE,
+              race.id
+            );
+            if (!alreadySent) {
+              events.emit("RACE_SCHEDULED_TEAMS_UNEVEN", {
+                raceId: race.id,
+                creatorUserId: race.creatorId,
+                message: error.message,
+              });
+            }
+          } catch (notifyError) {
+            logger.error(
+              `[CRON] Teams-uneven notify check failed for race ${race.id}:`,
+              notifyError?.message || notifyError
+            );
+          }
+        }
       }
     }
 
@@ -120,4 +154,5 @@ module.exports = {
   autoStartScheduledRaces,
   scheduleAutoStartScheduledRaces,
   SCHEDULER_INTERVAL_MS,
+  TEAMS_UNEVEN_PUSH_TYPE,
 };

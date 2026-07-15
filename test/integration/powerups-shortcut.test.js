@@ -267,28 +267,6 @@ describe("shortcut (banana peel)", () => {
       assert.equal(res.status, 400);
     });
 
-    it("cannot target a finished participant", async () => {
-      const alice = await createUser("AliceValDDDD");
-      const bob = await createUser("BobValDDDDDD");
-      await makeFriends(alice, bob);
-      const raceId = await createActiveRace(alice, bob);
-
-      // Give alice the shortcut BEFORE bob finishes (in case race auto-completes)
-      const shortcut = await giveHeldPowerup(raceId, alice.userId, "SHORTCUT", 99901);
-
-      // Bob finishes by recording enough step samples
-      const now = new Date();
-      const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
-      await request(server.baseUrl, "POST", "/steps/samples", {
-        body: { samples: [{ periodStart: oneHourAgo.toISOString(), periodEnd: now.toISOString(), steps: 250000 }] },
-        token: bob.token,
-      });
-      // Fetch progress to trigger finish detection
-      await getProgress(bob.token, raceId);
-
-      const res = await usePowerup(alice.token, raceId, shortcut.id, bob.userId);
-      assert.ok(res.status >= 400, `targeting finished participant should fail, got ${res.status}`);
-    });
   });
 
   // === SHIELD INTERACTION ===

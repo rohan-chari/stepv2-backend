@@ -5,11 +5,15 @@ const { Steps } = require("../models/steps");
 const { eventBus } = require("../events/eventBus");
 const { isRacePayoutPresetCompatible } = require("../utils/racePayoutPresets");
 
+const { acceptedTeamCounts } = require("../utils/teamRaces");
+
 class RaceStartError extends Error {
-  constructor(message, statusCode) {
+  constructor(message, statusCode, code) {
     super(message);
     this.name = "RaceStartError";
     if (statusCode) this.statusCode = statusCode;
+    // Optional machine-readable code (TEAMS_UNEVEN). Additive.
+    if (code) this.code = code;
   }
 }
 
@@ -57,6 +61,25 @@ function buildStartRace(dependencies = {}) {
     const acceptedCount = await participantModel.countAccepted(raceId);
     if (acceptedCount < 2) {
       throw new RaceStartError("At least 2 accepted participants are required to start", 400);
+    }
+
+    // Team races (TR-301/302/303): both sides must be EQUAL and >= 1 among
+    // ACCEPTED participants. The configured teamSize is a cap, not a minimum —
+    // a 3v3-configured race may start 2v2. INVITED rows never count (they are
+    // dropped at start exactly as in individual races).
+    if (race.isTeamRace) {
+      const counts = acceptedTeamCounts(race.participants || []);
+      if (
+        counts.TEAM_A < 1 ||
+        counts.TEAM_B < 1 ||
+        counts.TEAM_A !== counts.TEAM_B
+      ) {
+        throw new RaceStartError(
+          `Teams must be even to start — currently ${counts.TEAM_A}v${counts.TEAM_B}`,
+          409,
+          "TEAMS_UNEVEN"
+        );
+      }
     }
 
     if (
@@ -132,6 +155,10 @@ function buildStartRace(dependencies = {}) {
       raceName: race.name,
       creatorUserId: userId,
       participantUserIds,
+      // TR-684: the push handler frames team races as "A vs B".
+      isTeamRace: race.isTeamRace === true,
+      teamAName: race.teamAName ?? null,
+      teamBName: race.teamBName ?? null,
     });
 
     return raceModel.findById(raceId);

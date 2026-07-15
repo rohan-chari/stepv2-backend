@@ -3,6 +3,7 @@ const test = require("node:test");
 
 const {
   buildResolveRaceState,
+  determineFinishSnapshot,
 } = require("../../src/services/raceStateResolution");
 
 const RACE_START = new Date("2026-04-06T12:00:00Z");
@@ -140,42 +141,6 @@ function makeContext(overrides = {}) {
   };
 }
 
-test("resolveRaceState marks finish from step samples before progress is read", async () => {
-  const alice = makeParticipant("rp-1", "user-1", "Alice");
-  const bob = makeParticipant("rp-2", "user-2", "Bob");
-  const carol = makeParticipant("rp-3", "user-3", "Carol");
-
-  const ctx = makeContext({
-    participants: [alice, bob, carol],
-    samplesByUser: new Map([
-      [
-        "user-1",
-        [
-          {
-            periodStart: "2026-04-07T10:00:00Z",
-            periodEnd: "2026-04-07T11:00:00Z",
-            steps: 12000,
-          },
-        ],
-      ],
-    ]),
-  });
-
-  const resolveRaceState = buildResolveRaceState(ctx.deps);
-  await resolveRaceState({ raceId: "race-1" });
-
-  assert.equal(ctx.finishCalls.length, 1);
-  assert.equal(ctx.finishCalls[0].id, "rp-1");
-  assert.equal(ctx.finishCalls[0].finishTotalSteps, 10000);
-  assert.equal(
-    ctx.finishCalls[0].finishedAt.toISOString(),
-    "2026-04-07T10:50:00.000Z"
-  );
-  assert.deepEqual(ctx.placementCalls, [{ id: "rp-1", placement: 1 }]);
-  assert.equal(ctx.completeCalls.length, 1);
-  assert.equal(ctx.completeCalls[0].winnerUserId, "user-1");
-});
-
 test("resolveRaceState freezes finished participant totals on later syncs", async () => {
   const alice = makeParticipant("rp-1", "user-1", "Alice", {
     totalSteps: 10000,
@@ -207,51 +172,6 @@ test("resolveRaceState freezes finished participant totals on later syncs", asyn
 
   assert.equal(ctx.finishCalls.length, 0);
   assert.equal(ctx.participantUpdates.some((u) => u.id === "rp-1"), false);
-});
-
-test("resolveRaceState uses powerup bonus event time for instant finish", async () => {
-  const alice = makeParticipant("rp-1", "user-1", "Alice", {
-    bonusSteps: 1000,
-  });
-  const bob = makeParticipant("rp-2", "user-2", "Bob");
-  const carol = makeParticipant("rp-3", "user-3", "Carol");
-
-  const powerupTime = new Date("2026-04-07T11:15:00Z");
-  const ctx = makeContext({
-    participants: [alice, bob, carol],
-    now: new Date("2026-04-07T11:20:00Z"),
-    powerupsEnabled: true,
-    powerupEventsByRace: [
-      {
-        raceId: "race-1",
-        actorUserId: "user-1",
-        targetUserId: null,
-        powerupType: "PROTEIN_SHAKE",
-        metadata: { bonus: 1000 },
-        createdAt: powerupTime,
-      },
-    ],
-    samplesByUser: new Map([
-      [
-        "user-1",
-        [
-          {
-            periodStart: "2026-04-07T10:00:00Z",
-            periodEnd: "2026-04-07T11:00:00Z",
-            steps: 9500,
-          },
-        ],
-      ],
-    ]),
-  });
-
-  const resolveRaceState = buildResolveRaceState(ctx.deps);
-  await resolveRaceState({ raceId: "race-1" });
-
-  assert.equal(ctx.finishCalls.length, 1);
-  assert.equal(ctx.finishCalls[0].id, "rp-1");
-  assert.equal(ctx.finishCalls[0].finishTotalSteps, 10500);
-  assert.equal(ctx.finishCalls[0].finishedAt.toISOString(), powerupTime.toISOString());
 });
 
 test("resolveRaceState never finishes or completes a targetSteps=0 (time-based) race", async () => {
@@ -370,43 +290,16 @@ test("resolveRaceState still resolves an open-ended (endsAt null) race normally"
   });
 
   const resolveRaceState = buildResolveRaceState(ctx.deps);
-  await resolveRaceState({ raceId: "race-1" });
+  const result = await resolveRaceState({ raceId: "race-1" });
 
-  assert.equal(ctx.finishCalls.length, 1);
-  assert.equal(ctx.completeCalls.length, 1);
-});
-
-test("resolveRaceState still finishes a participant on reaching targetSteps > 0 (preserved)", async () => {
-  const alice = makeParticipant("rp-1", "user-1", "Alice");
-  const bob = makeParticipant("rp-2", "user-2", "Bob");
-  const carol = makeParticipant("rp-3", "user-3", "Carol");
-
-  const ctx = makeContext({
-    participants: [alice, bob, carol],
-    targetSteps: 10000,
-    samplesByUser: new Map([
-      [
-        "user-1",
-        [
-          {
-            periodStart: "2026-04-07T10:00:00Z",
-            periodEnd: "2026-04-07T11:00:00Z",
-            steps: 12000,
-          },
-        ],
-      ],
-    ]),
-  });
-
-  const resolveRaceState = buildResolveRaceState(ctx.deps);
-  await resolveRaceState({ raceId: "race-1" });
-
-  assert.equal(ctx.finishCalls.length, 1);
-  assert.equal(ctx.finishCalls[0].id, "rp-1");
-  assert.equal(ctx.finishCalls[0].finishTotalSteps, 10000);
-  assert.deepEqual(ctx.placementCalls, [{ id: "rp-1", placement: 1 }]);
-  assert.equal(ctx.completeCalls.length, 1);
-  assert.equal(ctx.completeCalls[0].winnerUserId, "user-1");
+  // TR-902 rebase: nothing target-finishes any more, so "resolution ran" is
+  // observed through the participant totals it wrote (the exact inverse of the
+  // past-endsAt short-circuit test above, which asserts zero updates). The
+  // subject — the T9 endsAt gate must not skip an endsAt:null race — is
+  // unchanged and still live.
+  assert.equal(result.length, 1);
+  assert.equal(result[0].raceId, "race-1");
+  assert.ok(ctx.participantUpdates.length > 0, "resolution ran and wrote totals");
 });
 
 test("resolveRaceState ignores same-day steps row delta when no post-start samples exist", async () => {
@@ -477,38 +370,88 @@ test("resolveRaceState never finishes a timeBased race even past a positive targ
   assert.equal(ctx.completeCalls.length, 0);
 });
 
-test("resolveRaceState still finishes a non-timeBased race on reaching targetSteps (sanity)", async () => {
-  // Legacy target race (timeBased=false default): reaching the target still
-  // finishes the participant and completes the race — unchanged behavior.
-  const alice = makeParticipant("rp-1", "user-1", "Alice");
-  const bob = makeParticipant("rp-2", "user-2", "Bob");
-  const carol = makeParticipant("rp-3", "user-3", "Carol");
+// ── determineFinishSnapshot (TR-902 rebase) ────────────────────────────────
+// These two were previously asserted THROUGH resolveRaceState's target-finish
+// trigger. That trigger is gone (races are time-based), but the function is
+// NOT: raceExpiry.js calls it to compute each participant's `reachedAt`, the
+// tie-break for settling a tied race. The scaffolding changed; the math being
+// asserted is identical, so the coverage is preserved by calling it directly.
+function snapshotDeps({ samples = [], events = [] } = {}) {
+  return {
+    stepSampleModel: {
+      async findByUserIdAndTimeRange() {
+        return samples;
+      },
+    },
+    powerupEventModel: {
+      async findByRaceAsc() {
+        return events;
+      },
+    },
+  };
+}
 
-  const ctx = makeContext({
-    participants: [alice, bob, carol],
-    timeBased: false,
-    targetSteps: 50000,
-    samplesByUser: new Map([
-      [
-        "user-1",
-        [
-          {
-            periodStart: "2026-04-07T10:00:00Z",
-            periodEnd: "2026-04-07T11:00:00Z",
-            steps: 60000,
-          },
-        ],
+test("determineFinishSnapshot interpolates the crossing time from step samples", async () => {
+  // 12,000 steps walked evenly over 10:00-11:00 crosses a 10,000 target at
+  // 10:50 — the same assertion the old trigger test made via resolveRaceState.
+  const participant = makeParticipant("rp-1", "user-1", "Alice");
+  const snapshot = await determineFinishSnapshot({
+    participant,
+    currentTotal: 12000,
+    targetSteps: 10000,
+    effectiveStart: new Date("2026-04-07T10:00:00Z"),
+    effectGroups: { legCramps: [], runnersHighs: [], wrongTurns: [], campfires: [], rainstorms: [] },
+    ...snapshotDeps({
+      samples: [
+        {
+          periodStart: "2026-04-07T10:00:00Z",
+          periodEnd: "2026-04-07T11:00:00Z",
+          steps: 12000,
+        },
       ],
-    ]),
+    }),
+    raceId: "race-1",
+    now: new Date("2026-04-07T11:00:00Z"),
   });
 
-  const resolveRaceState = buildResolveRaceState(ctx.deps);
-  await resolveRaceState({ raceId: "race-1" });
+  assert.equal(snapshot.finishTotalSteps, 10000);
+  assert.equal(snapshot.finishedAt.toISOString(), "2026-04-07T10:50:00.000Z");
+});
 
-  assert.equal(ctx.finishCalls.length, 1);
-  assert.equal(ctx.finishCalls[0].id, "rp-1");
-  assert.equal(ctx.finishCalls[0].finishTotalSteps, 50000);
-  assert.deepEqual(ctx.placementCalls, [{ id: "rp-1", placement: 1 }]);
-  assert.equal(ctx.completeCalls.length, 1);
-  assert.equal(ctx.completeCalls[0].winnerUserId, "user-1");
+test("determineFinishSnapshot uses a powerup bonus event's time for an instant crossing", async () => {
+  // 9,500 walked steps + a 1,000-step Protein Shake at 11:15 crosses 10,000 AT
+  // the bonus instant, not by walking. This is the ONLY coverage of
+  // buildBonusTimeline (race-buyins' tie-break test uses no powerups).
+  const participant = makeParticipant("rp-1", "user-1", "Alice", { bonusSteps: 1000 });
+  const powerupTime = new Date("2026-04-07T11:15:00Z");
+  const snapshot = await determineFinishSnapshot({
+    participant,
+    currentTotal: 10500,
+    targetSteps: 10000,
+    effectiveStart: new Date("2026-04-07T10:00:00Z"),
+    effectGroups: { legCramps: [], runnersHighs: [], wrongTurns: [], campfires: [], rainstorms: [] },
+    ...snapshotDeps({
+      samples: [
+        {
+          periodStart: "2026-04-07T10:00:00Z",
+          periodEnd: "2026-04-07T11:00:00Z",
+          steps: 9500,
+        },
+      ],
+      events: [
+        {
+          raceId: "race-1",
+          actorUserId: "user-1",
+          targetUserId: null,
+          powerupType: "PROTEIN_SHAKE",
+          metadata: { bonus: 1000 },
+          createdAt: powerupTime,
+        },
+      ],
+    }),
+    raceId: "race-1",
+    now: new Date("2026-04-07T11:20:00Z"),
+  });
+
+  assert.equal(snapshot.finishedAt.toISOString(), powerupTime.toISOString());
 });

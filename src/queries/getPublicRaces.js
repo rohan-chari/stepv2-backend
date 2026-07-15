@@ -4,15 +4,21 @@ const {
   computeFinishRewardPool,
   computeFinishRewardPlaces,
 } = require("../constants/raceFinishReward");
+const { buildTeamsBlockFromParticipants } = require("../utils/teamRaces");
 
 function buildGetPublicRaces(dependencies = {}) {
   const raceModel = dependencies.Race || Race;
 
-  return async function getPublicRaces({ userId }) {
+  // `supportsTeamRaces` (TR-702): old clients never see team races in the
+  // browser. TR-204: team races are browsable only while PENDING — once ACTIVE
+  // they lock, unlike individual public races which stay joinable mid-flight.
+  return async function getPublicRaces({ userId, supportsTeamRaces = false }) {
     const races = await raceModel.findPublicPending();
 
     const results = [];
     for (const race of races) {
+      if (race.isTeamRace && !supportsTeamRaces) continue;
+      if (race.isTeamRace && race.status !== "PENDING") continue;
       const participants = race.participants || [];
       const userInRace = participants.some((p) => p.userId === userId);
       if (userInRace) continue;
@@ -79,6 +85,37 @@ function buildGetPublicRaces(dependencies = {}) {
             : null,
         creator: race.creator,
         createdAt: race.createdAt,
+        // ── Team races (TR-206) — additive; only sent to token clients (the
+        // filter above drops team races for everyone else). Open-slot counts
+        // let the card render "2v2 · 1 slot left on Blue".
+        isTeamRace: race.isTeamRace === true,
+        teamSize: race.teamSize ?? null,
+        teamAName: race.teamAName ?? null,
+        teamBName: race.teamBName ?? null,
+        // Canonical H2H block (same shape as progress/list) — carries the
+        // per-side memberCount the slots line reads. Totals are 0 on a PENDING
+        // lobby, which is exactly right for a not-yet-started race.
+        teams: race.isTeamRace
+          ? buildTeamsBlockFromParticipants(race, participants)
+          : null,
+        teamAOpenSlots: race.isTeamRace
+          ? Math.max(
+              0,
+              (race.teamSize || 0) -
+                participants.filter(
+                  (p) => p.status === "ACCEPTED" && p.team === "TEAM_A"
+                ).length
+            )
+          : null,
+        teamBOpenSlots: race.isTeamRace
+          ? Math.max(
+              0,
+              (race.teamSize || 0) -
+                participants.filter(
+                  (p) => p.status === "ACCEPTED" && p.team === "TEAM_B"
+                ).length
+            )
+          : null,
       });
     }
     return results;

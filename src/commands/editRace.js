@@ -7,13 +7,19 @@ const {
   validatePowerupConfig,
   validateMaxParticipants,
   validateRaceBuyInConfig,
+  validateTeamName,
+  validateTeamSize,
+  assertTeamNamesDiffer,
 } = require("../services/validateRaceConfig");
 
 class RaceEditError extends Error {
-  constructor(message, statusCode) {
+  constructor(message, statusCode, code) {
     super(message);
     this.name = "RaceEditError";
     if (statusCode) this.statusCode = statusCode;
+    // Optional machine-readable code (TEAM_NAMES_IDENTICAL, TEAM_SIZE_TOO_SMALL,
+    // IMMUTABLE_FIELD). Additive — routes serialize it alongside `error`.
+    if (code) this.code = code;
   }
 }
 
@@ -42,6 +48,67 @@ function buildEditRace(dependencies = {}) {
     }
 
     const fields = {};
+
+    // ── Team races (TR-105) ──────────────────────────────────────────────────
+    // isTeamRace is immutable after creation: a PATCH may echo the stored value
+    // (harmless no-op) but can never convert individual <-> team.
+    if (
+      hasField(updates, "isTeamRace") &&
+      !!updates.isTeamRace !== !!race.isTeamRace
+    ) {
+      throw new RaceEditError(
+        "A race cannot be converted between team and individual after creation",
+        400,
+        "IMMUTABLE_FIELD"
+      );
+    }
+
+    const touchesTeamFields =
+      hasField(updates, "teamAName") ||
+      hasField(updates, "teamBName") ||
+      hasField(updates, "teamSize");
+    if (touchesTeamFields && !race.isTeamRace) {
+      throw new RaceEditError(
+        "Team settings can only be edited on a team race",
+        400
+      );
+    }
+
+    if (race.isTeamRace) {
+      // Team names: same sanitization as creation, and the pair must stay
+      // distinct (case-insensitive) after applying the edit.
+      const nextTeamAName = hasField(updates, "teamAName")
+        ? validateTeamName(updates.teamAName, RaceEditError, "Team A name")
+        : race.teamAName;
+      const nextTeamBName = hasField(updates, "teamBName")
+        ? validateTeamName(updates.teamBName, RaceEditError, "Team B name")
+        : race.teamBName;
+      assertTeamNamesDiffer(nextTeamAName, nextTeamBName, RaceEditError);
+      if (hasField(updates, "teamAName")) fields.teamAName = nextTeamAName;
+      if (hasField(updates, "teamBName")) fields.teamBName = nextTeamBName;
+
+      if (hasField(updates, "teamSize")) {
+        const newSize = validateTeamSize(updates.teamSize, RaceEditError);
+        const accepted = (race.participants || []).filter(
+          (p) => p.status === "ACCEPTED"
+        );
+        const sideCounts = {
+          TEAM_A: accepted.filter((p) => p.team === "TEAM_A").length,
+          TEAM_B: accepted.filter((p) => p.team === "TEAM_B").length,
+        };
+        const largestSide = Math.max(sideCounts.TEAM_A, sideCounts.TEAM_B);
+        if (newSize < largestSide) {
+          throw new RaceEditError(
+            `Cannot shrink team size to ${newSize}; a team already has ${largestSide} members`,
+            400,
+            "TEAM_SIZE_TOO_SMALL"
+          );
+        }
+        fields.teamSize = newSize;
+        // The field cap is derived: always 2 × teamSize (TR-101/105).
+        fields.maxParticipants = newSize * 2;
+      }
+    }
 
     if (hasField(updates, "name")) {
       fields.name = validateRaceName(updates.name, RaceEditError);
@@ -83,7 +150,7 @@ function buildEditRace(dependencies = {}) {
       fields.isPublic = !!updates.isPublic;
     }
 
-    if (hasField(updates, "maxParticipants")) {
+    if (hasField(updates, "maxParticipants") && !race.isTeamRace) {
       const newMax = validateMaxParticipants(
         updates.maxParticipants,
         RaceEditError

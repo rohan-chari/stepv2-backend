@@ -448,22 +448,6 @@ test("Second Wind does not create an active effect", async () => {
 // Finished attacker
 // ===========================================================================
 
-test("Second Wind rejects if the user has already finished", async () => {
-  const ctx = makeDeps({
-    user1: { totalSteps: 5000, finishedAt: new Date("2026-03-29T10:00:00Z") },
-    user2: { totalSteps: 20000 },
-  });
-  const use = buildUsePowerup(ctx.deps);
-
-  await assert.rejects(
-    () => use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1" }),
-    (err) => {
-      assert.ok(err instanceof PowerupUseError);
-      return true;
-    }
-  );
-});
-
 // ===========================================================================
 // Powerup status validation
 // ===========================================================================

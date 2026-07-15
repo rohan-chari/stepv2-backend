@@ -10,6 +10,10 @@ const {
   refundRaceBuyIn,
   reserveRaceBuyIn,
 } = require("../services/raceBuyIns");
+const {
+  isTeamSideFull,
+  clientSupportsTeamRaces,
+} = require("../utils/teamRaces");
 
 // How many bonus mystery boxes the "join your first race" onboarding grants.
 const ONBOARDING_BONUS_BOXES = 3;
@@ -19,10 +23,13 @@ const DEFAULT_POWERUP_SLOTS = 3;
 // can't afford the buy-in). Carries an HTTP statusCode the route layer maps
 // straight onto the response.
 class RaceJoinError extends Error {
-  constructor(message, statusCode) {
+  constructor(message, statusCode, code) {
     super(message);
     this.name = "RaceJoinError";
     if (statusCode) this.statusCode = statusCode;
+    // Optional machine-readable code (TEAM_FULL, RACE_ALREADY_STARTED,
+    // UPDATE_REQUIRED). Additive — routes serialize it alongside `error`.
+    if (code) this.code = code;
   }
 }
 
@@ -151,7 +158,18 @@ function buildJoinRaceCore(dependencies = {}) {
 
   // Runs the join against an already-resolved, fresh `race`. Must be invoked
   // inside the caller's per-race join lock.
-  return async function joinRaceCore({ race, userId, onboarding }) {
+  //
+  // Team races (TR-200s): `team` (TEAM_A|TEAM_B) is REQUIRED, the caller's
+  // client must declare the team_races feature (TR-703), joining is only
+  // possible while PENDING (TR-204), and the chosen side must have a free slot
+  // (TR-202). Individual races ignore `team` entirely.
+  return async function joinRaceCore({
+    race,
+    userId,
+    onboarding,
+    team = null,
+    clientFeatures = null,
+  }) {
     const raceId = race.id;
 
     // Public races are joinable while PENDING or ACTIVE — seeded public races
@@ -162,6 +180,38 @@ function buildJoinRaceCore(dependencies = {}) {
         "This race is no longer accepting new participants",
         400
       );
+    }
+
+    let joinTeam = null;
+    if (race.isTeamRace) {
+      // TR-703: defense-in-depth — an old client can never enter a team race.
+      if (!clientSupportsTeamRaces(clientFeatures)) {
+        throw new RaceJoinError(
+          "Update the app to join team races",
+          400,
+          "UPDATE_REQUIRED"
+        );
+      }
+      // TR-204: team races lock at start, on every join channel.
+      if (race.status !== "PENDING") {
+        throw new RaceJoinError(
+          "This race has already started",
+          409,
+          "RACE_ALREADY_STARTED"
+        );
+      }
+      if (team !== "TEAM_A" && team !== "TEAM_B") {
+        throw new RaceJoinError(
+          "Pick a team (TEAM_A or TEAM_B) to join this race",
+          400
+        );
+      }
+      // TR-202: a side at its cap rejects joins to that side; the joiner may
+      // still pick the other side.
+      if (isTeamSideFull(race, team)) {
+        throw new RaceJoinError("That team is full", 409, "TEAM_FULL");
+      }
+      joinTeam = team;
     }
 
     const existing = await participantModel.findByRaceAndUser(raceId, userId);
@@ -204,6 +254,7 @@ function buildJoinRaceCore(dependencies = {}) {
         status: "ACCEPTED",
         buyInAmount,
         buyInStatus: buyInAmount > 0 ? "HELD" : "NONE",
+        team: joinTeam,
       });
     } catch (error) {
       if (buyInAmount > 0) {

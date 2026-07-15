@@ -223,9 +223,50 @@ function registerNotificationHandlers(dependencies = {}) {
     }
   });
 
+  // TR-304: scheduled team race couldn't auto-start because teams were uneven.
+  // The auto-start job pre-checks the Notification audit table and emits this at
+  // most once per (creator, race); the audit row recordNotification writes below
+  // is what makes the dedup stick.
+  events.on("RACE_SCHEDULED_TEAMS_UNEVEN", async (data) => {
+    try {
+      const { raceId, creatorUserId } = data;
+      await sendNotificationToUser({
+        eventName: "RACE_SCHEDULED_TEAMS_UNEVEN",
+        recipientUserId: creatorUserId,
+        actorUserId: creatorUserId,
+        title: "Teams are uneven",
+        buildBody: () =>
+          "Your race couldn't start — teams are uneven. Even them up and it'll start on the next check!",
+        payload: {
+          type: "TEAM_RACE_SCHEDULED_UNEVEN",
+          route: "race_detail",
+          params: { raceId },
+        },
+        logContext: { raceId, creatorUserId },
+      });
+    } catch (error) {
+      logger.error("RACE_SCHEDULED_TEAMS_UNEVEN handler failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
   events.on("RACE_STARTED", async (data) => {
     try {
-      const { raceId, raceName, creatorUserId, participantUserIds } = data;
+      const {
+        raceId,
+        raceName,
+        creatorUserId,
+        participantUserIds,
+        isTeamRace,
+        teamAName,
+        teamBName,
+      } = data;
+      // TR-684: team races get team-framed start copy.
+      const startBody =
+        isTeamRace && teamAName && teamBName
+          ? `The team race "${raceName}" has started — ${teamAName} vs ${teamBName}. Go!`
+          : `The race "${raceName}" has started! Go!`;
       for (const participantUserId of participantUserIds) {
         if (participantUserId === creatorUserId) continue;
         await sendNotificationToUser({
@@ -233,7 +274,7 @@ function registerNotificationHandlers(dependencies = {}) {
           recipientUserId: participantUserId,
           actorUserId: creatorUserId,
           title: "Race Started",
-          buildBody: () => `The race "${raceName}" has started! Go!`,
+          buildBody: () => startBody,
           payload: {
             type: "RACE_STARTED",
             route: "race_detail",
@@ -251,16 +292,43 @@ function registerNotificationHandlers(dependencies = {}) {
 
   events.on("RACE_COMPLETED", async (data) => {
     try {
-      const { raceId, winnerUserId, participantUserIds } = data;
+      const {
+        raceId,
+        winnerUserId,
+        participantUserIds,
+        winnerTeam,
+        tie,
+        winnerTeamName,
+        loserTeamName,
+        memberTeams,
+      } = data;
       if (!participantUserIds || participantUserIds.length === 0) return;
 
+      // TR-684/404: team races frame the result by team name; ties get the
+      // dedicated refund copy. Individual races keep the existing copy.
+      const isTeamResult = tie === true || (winnerTeam != null);
       for (const participantUserId of participantUserIds) {
+        let buildBody;
+        if (isTeamResult) {
+          if (tie === true) {
+            buildBody = () => `It's a tie — buy-ins refunded.`;
+          } else {
+            const recipientTeam = (memberTeams || {})[participantUserId] || null;
+            const won = recipientTeam != null && recipientTeam === winnerTeam;
+            buildBody = won
+              ? () => `${winnerTeamName || "Your team"} win! Great racing.`
+              : () =>
+                  `${winnerTeamName || "The other team"} took it — better luck next time, ${loserTeamName || "team"}.`;
+          }
+        } else {
+          buildBody = (winnerName) => `${winnerName} won the race!`;
+        }
         await sendNotificationToUser({
           eventName: "RACE_COMPLETED",
           recipientUserId: participantUserId,
           actorUserId: winnerUserId,
           title: "Race Finished",
-          buildBody: (winnerName) => `${winnerName} won the race!`,
+          buildBody,
           payload: {
             type: "RACE_COMPLETED",
             route: "race_detail",
@@ -271,6 +339,162 @@ function registerNotificationHandlers(dependencies = {}) {
       }
     } catch (error) {
       logger.error("RACE_COMPLETED handler failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // ── Team-race pushes (TR-681/682/683) ─────────────────────────────────────
+
+  // TR-681: team lead flip — one push per member of BOTH teams, throttled per
+  // race with the same window as the individual placement alert (the
+  // "overtake nudge" cooldown), so churny back-and-forth flips don't spam.
+  const TEAM_LEAD_COOLDOWN_MS = 10 * 60 * 1000;
+  const lastTeamLeadAlertAt = new Map(); // raceId -> epoch ms
+
+  events.on("TEAM_LEAD_CHANGED", async (data) => {
+    try {
+      const {
+        raceId,
+        raceName,
+        leadingTeamName,
+        trailingTeamName,
+        memberUserIds,
+      } = data || {};
+      if (!raceId || !memberUserIds || memberUserIds.length === 0) return;
+
+      const nowMs = Date.now();
+      if (nowMs - (lastTeamLeadAlertAt.get(raceId) || 0) < TEAM_LEAD_COOLDOWN_MS) {
+        return;
+      }
+      lastTeamLeadAlertAt.set(raceId, nowMs);
+
+      const body = `${leadingTeamName || "A team"} just took the lead over ${trailingTeamName || "the other team"} in ${raceName || "your race"}!`;
+      for (const recipientUserId of memberUserIds) {
+        await sendNotificationToUser({
+          eventName: "TEAM_LEAD_CHANGED",
+          recipientUserId,
+          actorUserId: recipientUserId,
+          title: "Team lead change!",
+          buildBody: () => body,
+          payload: {
+            type: "TEAM_LEAD_CHANGED",
+            route: "race_detail",
+            params: { raceId },
+          },
+          logContext: { raceId, recipientUserId },
+        });
+      }
+    } catch (error) {
+      logger.error("TEAM_LEAD_CHANGED handler failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // TR-682: final-stretch team push. Copy has a leading and a trailing
+  // variant; throttled 30 minutes per (race, member) — the same throttle the
+  // final-stretch step-sync machinery uses.
+  const TEAM_FINAL_STRETCH_MIN_INTERVAL_MS = 30 * 60 * 1000;
+  const lastTeamStretchAt = new Map(); // `${raceId}:${userId}` -> epoch ms
+
+  function formatTimeLeft(endsAt) {
+    const msLeft = new Date(endsAt).getTime() - Date.now();
+    if (!Number.isFinite(msLeft) || msLeft <= 0) return "Almost no time";
+    const hours = Math.floor(msLeft / (60 * 60 * 1000));
+    if (hours >= 1) return `${hours}h`;
+    const minutes = Math.max(1, Math.round(msLeft / (60 * 1000)));
+    return `${minutes}m`;
+  }
+
+  events.on("TEAM_FINAL_STRETCH", async (data) => {
+    try {
+      const {
+        raceId,
+        raceName,
+        teamATotal,
+        teamBTotal,
+        endsAt,
+        memberUserIds,
+        memberTeams,
+      } = data || {};
+      if (!raceId || !memberUserIds || memberUserIds.length === 0) return;
+
+      const diff = Math.abs((teamATotal || 0) - (teamBTotal || 0));
+      const leading =
+        (teamATotal || 0) === (teamBTotal || 0)
+          ? null
+          : (teamATotal || 0) > (teamBTotal || 0)
+            ? "TEAM_A"
+            : "TEAM_B";
+      const timeLeft = formatTimeLeft(endsAt);
+      const nowMs = Date.now();
+
+      for (const recipientUserId of memberUserIds) {
+        const throttleKey = `${raceId}:${recipientUserId}`;
+        if (
+          nowMs - (lastTeamStretchAt.get(throttleKey) || 0) <
+          TEAM_FINAL_STRETCH_MIN_INTERVAL_MS
+        ) {
+          continue;
+        }
+        lastTeamStretchAt.set(throttleKey, nowMs);
+
+        const recipientTeam = (memberTeams || {})[recipientUserId] || null;
+        let body;
+        if (leading == null) {
+          body = `${timeLeft} left in ${raceName || "your race"} — it's dead even. Every step counts!`;
+        } else if (recipientTeam === leading) {
+          body = `${timeLeft} left — you're up ${diff.toLocaleString()}, hold the lead!`;
+        } else {
+          body = `${timeLeft} left — your team is down ${diff.toLocaleString()} steps. Rally!`;
+        }
+
+        await sendNotificationToUser({
+          eventName: "TEAM_FINAL_STRETCH",
+          recipientUserId,
+          actorUserId: recipientUserId,
+          title: "Final stretch!",
+          buildBody: () => body,
+          payload: {
+            type: "TEAM_FINAL_STRETCH",
+            route: "race_detail",
+            params: { raceId },
+          },
+          logContext: { raceId, recipientUserId },
+        });
+      }
+    } catch (error) {
+      logger.error("TEAM_FINAL_STRETCH handler failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // TR-683: gentle slacker nudge. The placementRecompute job enforces the
+  // final-12h window and once-per-race dedup (via the Notification audit row
+  // this handler records) — this handler just delivers playful, never-shaming
+  // copy.
+  events.on("TEAM_SLACKER_NUDGE", async (data) => {
+    try {
+      const { raceId, raceName, userId, teamName } = data || {};
+      if (!raceId || !userId) return;
+      await sendNotificationToUser({
+        eventName: "TEAM_SLACKER_NUDGE",
+        recipientUserId: userId,
+        actorUserId: userId,
+        title: "Your team believes in you!",
+        buildBody: () =>
+          `${teamName || "Your team"} could use a few more steps in ${raceName || "your race"} — even a quick stroll helps. You've got this!`,
+        payload: {
+          type: "TEAM_SLACKER_NUDGE",
+          route: "race_detail",
+          params: { raceId },
+        },
+        logContext: { raceId, userId },
+      });
+    } catch (error) {
+      logger.error("TEAM_SLACKER_NUDGE handler failed", {
         error: error instanceof Error ? error.message : String(error),
       });
     }

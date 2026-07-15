@@ -1,15 +1,19 @@
 const { Race } = require("../models/race");
 const { RaceParticipant } = require("../models/raceParticipant");
 const { Friendship } = require("../models/friendship");
+const { User } = require("../models/user");
 const { eventBus } = require("../events/eventBus");
+const { TEAM_RACES_FEATURE } = require("../utils/teamRaces");
 
 const INVITE_TTL_HOURS = 24;
 
 class RaceInviteError extends Error {
-  constructor(message, statusCode) {
+  constructor(message, statusCode, code) {
     super(message);
     this.name = "RaceInviteError";
     if (statusCode) this.statusCode = statusCode;
+    // Optional machine-readable code (INVITEE_NEEDS_UPDATE). Additive.
+    if (code) this.code = code;
   }
 }
 
@@ -17,6 +21,7 @@ function buildInviteToRace(dependencies = {}) {
   const raceModel = dependencies.Race || Race;
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
   const friendshipModel = dependencies.Friendship || Friendship;
+  const userModel = dependencies.User || User;
   const events = dependencies.eventBus || eventBus;
 
   return async function inviteToRace({ userId, raceId, inviteeIds }) {
@@ -37,8 +42,12 @@ function buildInviteToRace(dependencies = {}) {
     const currentParticipants = await participantModel.findByRace(raceId);
     const currentCount = currentParticipants.length;
     // null => unlimited; only a finite cap limits how many can be invited.
+    // Team races (TR-207): over-inviting is ALLOWED — invite 6 friends to a
+    // 2v2; the per-side cap is enforced at accept time (TEAM_FULL), and
+    // unaccepted invites are dropped at start.
     const maxParticipants = race.maxParticipants;
     if (
+      !race.isTeamRace &&
       maxParticipants != null &&
       currentCount + inviteeIds.length > maxParticipants
     ) {
@@ -61,6 +70,24 @@ function buildInviteToRace(dependencies = {}) {
       const friendship = await friendshipModel.findBetweenUsers(userId, inviteeId);
       if (!friendship || friendship.status !== "ACCEPTED") {
         throw new RaceInviteError("You can only invite accepted friends", 403);
+      }
+
+      // TR-706/707: invite-time block — a friend whose LAST-SEEN client never
+      // declared team_races can't accept a team-race invite, so fail fast with
+      // a message that names them. No recorded features (dormant account) =>
+      // ineligible (pessimistic default). Individual races skip this entirely.
+      if (race.isTeamRace) {
+        const invitee = await userModel.findById(inviteeId);
+        const features = (invitee && invitee.clientFeatures) || [];
+        if (!features.includes(TEAM_RACES_FEATURE)) {
+          const friendName =
+            (invitee && invitee.displayName) || "That friend";
+          throw new RaceInviteError(
+            `${friendName} needs to update the app to join team races`,
+            400,
+            "INVITEE_NEEDS_UPDATE"
+          );
+        }
       }
     }
 

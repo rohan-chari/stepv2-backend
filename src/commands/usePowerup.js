@@ -120,10 +120,12 @@ const SECOND_WIND_MAX = 5000;
 const SECOND_WIND_FACTOR = 0.25;
 
 class PowerupUseError extends Error {
-  constructor(message, statusCode) {
+  constructor(message, statusCode, code) {
     super(message);
     this.name = "PowerupUseError";
     if (statusCode) this.statusCode = statusCode;
+    // Optional machine-readable code (INVALID_TARGET). Additive.
+    if (code) this.code = code;
   }
 }
 
@@ -136,10 +138,10 @@ function hoursText(type, upgradeLevel) {
   return hours === 1 ? "1 hour" : `${hours} hours`;
 }
 
+// TR-902: races are time-based, so nobody finishes mid-race — there is no
+// finished/active split left to make. Ranking is purely by steps desc.
 function sortedActiveParticipants(participants) {
-  return participants
-    .filter((p) => !p.finishedAt)
-    .sort((a, b) => b.totalSteps - a.totalSteps);
+  return [...participants].sort((a, b) => b.totalSteps - a.totalSteps);
 }
 
 function participantRank(participants, participant) {
@@ -240,8 +242,9 @@ function buildUsePowerup(dependencies = {}) {
     if (!myParticipant) {
       throw new PowerupUseError("You are not an active participant", 403);
     }
-    if (myParticipant.finishedAt) {
-      throw new PowerupUseError("You have already finished the race", 400);
+    // TR-602: a forfeited team-race member can no longer use powerups.
+    if (myParticipant.forfeitedAt) {
+      throw new PowerupUseError("You have forfeited this race", 400);
     }
 
     // Signal Jammer JAM GUARD (the feature's single choke point). If this
@@ -296,8 +299,16 @@ function buildUsePowerup(dependencies = {}) {
       throw new PowerupUseError("This powerup cannot be used on another player", 400);
     }
 
+    // Team races (TR-651/652/653/657): offensive/AoE/auto-target powerups only
+    // ever hit the ENEMY team, and forfeited members drop out of every pool.
+    const isTeamRace = race.isTeamRace === true;
+    const isEnemy = (p) =>
+      !isTeamRace || (p.team != null && p.team !== myParticipant.team);
+    const isAliveTarget = (p) => !p.finishedAt && !p.forfeitedAt;
+
     // Rainstorm is untargeted (hits every other racer) and never stacks: while
-    // any rainstorm is active in the race, another cannot be started.
+    // any rainstorm is active in the race, another cannot be started. In a team
+    // race the fan-out is ENEMY-ONLY (teammates stay dry — TR-652).
     if (type === "RAINSTORM") {
       if (targetUserId) {
         throw new PowerupUseError("Rainstorm hits every racer — you cannot specify a target", 400);
@@ -308,20 +319,26 @@ function buildUsePowerup(dependencies = {}) {
         throw new PowerupUseError("A Rainstorm is already active in this race", 400);
       }
       const otherRunners = acceptedParticipants.filter(
-        (p) => p.userId !== userId && !p.finishedAt
+        (p) => p.userId !== userId && isAliveTarget(p) && isEnemy(p)
       );
       if (otherRunners.length === 0) {
         throw new PowerupUseError("No other active runners to rain on", 400);
       }
     }
 
-    // Red Card auto-targets leader
+    // Red Card auto-targets the leader — in a team race, the ENEMY team's top
+    // stepper (TR-652), skipping forfeited members (TR-657).
     let resolvedTargetUserId = targetUserId;
     if (type === "RED_CARD") {
       if (targetUserId) {
         throw new PowerupUseError("Red Card auto-targets the leader — you cannot specify a target", 400);
       }
-      const eligible = acceptedParticipants.filter((p) => !p.finishedAt);
+      const eligible = acceptedParticipants.filter(
+        (p) => isAliveTarget(p) && isEnemy(p)
+      );
+      if (eligible.length === 0) {
+        throw new PowerupUseError("No eligible runner to red-card", 400);
+      }
       const sorted = [...eligible].sort((a, b) => b.totalSteps - a.totalSteps);
       const leader = sorted[0];
       if (leader.userId === userId) {
@@ -340,7 +357,15 @@ function buildUsePowerup(dependencies = {}) {
       if (!["FRONT", "BEHIND"].includes(targetDirection)) {
         throw new PowerupUseError("Pinecone Toss requires FRONT or BEHIND", 400);
       }
-      const target = adjacentParticipant(acceptedParticipants, myParticipant, targetDirection);
+      // Team races: adjacency is evaluated among ENEMY members ranked by
+      // individual steps (TR-653) — the tosser is kept in the pool purely as
+      // the reference position; teammates are skipped over.
+      const adjacencyPool = isTeamRace
+        ? acceptedParticipants.filter(
+            (p) => p.userId === userId || (isEnemy(p) && isAliveTarget(p))
+          )
+        : acceptedParticipants;
+      const target = adjacentParticipant(adjacencyPool, myParticipant, targetDirection);
       if (!target) {
         throw new PowerupUseError(`No runner ${targetDirection === "FRONT" ? "ahead" : "behind"} of you`, 400);
       }
@@ -354,8 +379,13 @@ function buildUsePowerup(dependencies = {}) {
       if (!targetParticipant) {
         throw new PowerupUseError("Target is not an active participant in this race", 400);
       }
-      if (targetParticipant.finishedAt) {
-        throw new PowerupUseError("Target has already finished the race", 400);
+      // TR-602/657: forfeited members can no longer be targeted.
+      if (targetParticipant.forfeitedAt) {
+        throw new PowerupUseError("Target has forfeited the race", 400);
+      }
+      // TR-651: no friendly fire — offensive powerups only hit the enemy team.
+      if (isTeamRace && !isEnemy(targetParticipant)) {
+        throw new PowerupUseError("You can't target a teammate", 400, "INVALID_TARGET");
       }
     }
 
@@ -369,8 +399,13 @@ function buildUsePowerup(dependencies = {}) {
       if (!imposterTargetParticipant) {
         throw new PowerupUseError("Target is not an active participant in this race", 400);
       }
-      if (imposterTargetParticipant.finishedAt) {
-        throw new PowerupUseError("Target has already finished the race", 400);
+      // TR-602/657: forfeited members can no longer be targeted.
+      if (imposterTargetParticipant.forfeitedAt) {
+        throw new PowerupUseError("Target has forfeited the race", 400);
+      }
+      // TR-651: Imposter counts as an enemy-only targeted powerup too.
+      if (isTeamRace && !isEnemy(imposterTargetParticipant)) {
+        throw new PowerupUseError("You can't target a teammate", 400, "INVALID_TARGET");
       }
     }
 
@@ -969,8 +1004,10 @@ function buildUsePowerup(dependencies = {}) {
         //   * COMPRESSION_SOCKS: consumed (BLOCKED); that victim is protected.
         // Coins/upgrades don't apply (purchase-only, non-upgradeable).
         const stormEnd = new Date(currentTime.getTime() + RAINSTORM_DURATION_MS);
+        // Team races: rain falls on the ENEMY team only (TR-652); forfeited
+        // members stay out of the fan-out (TR-657).
         const victims = acceptedParticipants.filter(
-          (p) => p.userId !== userId && !p.finishedAt
+          (p) => p.userId !== userId && isAliveTarget(p) && isEnemy(p)
         );
         const affected = [];
         const blockedNames = [];

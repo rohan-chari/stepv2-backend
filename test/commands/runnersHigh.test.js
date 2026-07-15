@@ -263,21 +263,6 @@ test("Runner's High powerup stays HELD when rejected due to existing active buff
 // Finished participant
 // ===========================================================================
 
-test("Runner's High rejects if user has already finished the race", async () => {
-  const ctx = makePowerupDeps({
-    user1: { finishedAt: new Date("2026-03-29T10:00:00Z") },
-  });
-  const use = buildUsePowerup(ctx.deps);
-
-  await assert.rejects(
-    () => use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1" }),
-    (err) => {
-      assert.ok(err instanceof PowerupUseError);
-      return true;
-    }
-  );
-});
-
 // ===========================================================================
 // Powerup status validation
 // ===========================================================================

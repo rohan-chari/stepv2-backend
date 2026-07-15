@@ -49,6 +49,19 @@ async function resolveExpiredRaces() {
       const standings = [];
 
       for (const participant of acceptedParticipants) {
+        // TR-601: a forfeited team-race member's total is FROZEN at the value
+        // snapshotted by the forfeit command — never recomputed (an active
+        // debuff at forfeit time bites permanently). It still counts toward
+        // the team total below.
+        if (participant.forfeitedAt) {
+          standings.push({
+            participant,
+            totalSteps: participant.totalSteps || 0,
+            reachedAt: new Date(participant.forfeitedAt),
+          });
+          continue;
+        }
+
         if (participant.finishedAt) {
           standings.push({
             participant,
@@ -104,6 +117,45 @@ async function resolveExpiredRaces() {
           totalSteps: total,
           reachedAt: reachedSnapshot?.finishedAt || settlementTime,
         });
+      }
+
+      // ── Team settlement (TR-401/402/404) ─────────────────────────────────
+      // Team total = sum of member effective totals (forfeited members' frozen
+      // totals included). Higher total wins; equal totals are a TIE — no
+      // sudden death, completeRace refunds every buy-in. Placements (1 for the
+      // whole winning team, 2 for the losers, all 1 on tie) are set INSIDE
+      // completeRace so the deadline path and the collapse path share it.
+      if (race.isTeamRace) {
+        const teamTotals = { TEAM_A: 0, TEAM_B: 0 };
+        for (const standing of standings) {
+          const team = standing.participant.team;
+          if (team === "TEAM_A" || team === "TEAM_B") {
+            teamTotals[team] += standing.totalSteps || 0;
+          }
+        }
+
+        const isTie = teamTotals.TEAM_A === teamTotals.TEAM_B;
+        const winnerTeam = isTie
+          ? null
+          : teamTotals.TEAM_A > teamTotals.TEAM_B
+            ? "TEAM_A"
+            : "TEAM_B";
+
+        await completeRace({
+          raceId: race.id,
+          winnerUserId: null,
+          winnerTeam,
+          tie: isTie,
+          participantUserIds: acceptedParticipants.map((p) => p.userId),
+        });
+
+        console.log(
+          `[CRON] Team race ${race.id} ("${race.name}") expired. ` +
+            (isTie
+              ? `Tie at ${teamTotals.TEAM_A} steps — buy-ins refunded`
+              : `Winner: ${winnerTeam} (${teamTotals.TEAM_A} vs ${teamTotals.TEAM_B})`)
+        );
+        continue;
       }
 
       standings.sort((a, b) => {

@@ -11,7 +11,7 @@ const {
   computeRacePayouts,
   computeGradedPayouts,
 } = require("../utils/racePayoutPresets");
-const { payoutRaceCoins } = require("../services/raceBuyIns");
+const { payoutRaceCoins, refundRaceBuyIn } = require("../services/raceBuyIns");
 const {
   computeFinishRewardPool,
   computeFinishRewardPlaces,
@@ -28,11 +28,22 @@ function buildCompleteRace(dependencies = {}) {
   const events = dependencies.eventBus || eventBus;
   const now = dependencies.now || (() => new Date());
 
-  return async function completeRace({ raceId, winnerUserId, participantUserIds }) {
+  // Team races (TR-400s/500s): callers pass `winnerTeam` (TEAM_A|TEAM_B) or
+  // `tie: true` instead of winnerUserId — winnerUserId stays NULL for team
+  // races (TR-402). Individual races are untouched: they never pass either.
+  return async function completeRace({
+    raceId,
+    winnerUserId,
+    participantUserIds,
+    winnerTeam = null,
+    tie = false,
+  }) {
+    const isTeamSettlement = Boolean(winnerTeam) || tie === true;
     const result = await raceModel.updateIfActive(raceId, {
       status: "COMPLETED",
       completedAt: now(),
-      winnerUserId,
+      winnerUserId: isTeamSettlement ? null : winnerUserId,
+      ...(isTeamSettlement ? { winnerTeam: winnerTeam || null } : {}),
     });
 
     if (result.count === 0) {
@@ -44,6 +55,119 @@ function buildCompleteRace(dependencies = {}) {
     await powerupModel.expireAllForRace(raceId);
 
     const race = await raceModel.findById(raceId);
+
+    if (race?.isTeamRace) {
+      // ── Team settlement (one code path for deadline expiry, collapse, tie) ──
+      const accepted = (race.participants || []).filter(
+        (p) => p.status === "ACCEPTED"
+      );
+
+      // TR-403/404: placements are BY TEAM — every winner 1, every loser 2
+      // (forfeiters keep their team's placement for history); a tie makes
+      // everyone 1.
+      for (const participant of accepted) {
+        const placement = tie
+          ? 1
+          : participant.team === winnerTeam
+            ? 1
+            : 2;
+        await participantModel.setPlacement(participant.id, placement);
+      }
+
+      if (tie) {
+        // TR-404: every PAID buy-in is refunded in full, forfeiters included,
+        // via the existing REFUNDED status. No payouts, pot zeroed.
+        for (const participant of accepted) {
+          const paid =
+            (participant.buyInAmount || 0) > 0 &&
+            ["HELD", "COMMITTED"].includes(participant.buyInStatus);
+          if (!paid) continue;
+          await refundRaceBuyIn({
+            awardCoinsFn,
+            userId: participant.userId,
+            raceId,
+            amount: participant.buyInAmount,
+          });
+          await participantModel.update(participant.id, {
+            buyInStatus: "REFUNDED",
+          });
+        }
+        if (race.potCoins > 0) {
+          await raceModel.update(raceId, { potCoins: 0 });
+        }
+      } else if (race.potCoins > 0) {
+        // TR-502/503/504: the winning team's NON-FORFEITED members split the
+        // entire pot evenly — floor(pot / winners) each, remainder to the
+        // team's top stepper (tiebreak: earliest joinedAt). Forfeiters stay in
+        // placement history but get payoutCoins 0; their buy-in stays in the
+        // pot. Deterministic: same inputs, same payout rows. TR-507 guarantees
+        // winners >= 1 (a full-team forfeit collapses in the OTHER team's
+        // favor before any settlement can crown this one).
+        const winners = accepted
+          .filter((p) => p.team === winnerTeam && !p.forfeitedAt)
+          .sort((a, b) => {
+            const stepDiff = (b.totalSteps || 0) - (a.totalSteps || 0);
+            if (stepDiff !== 0) return stepDiff;
+            const joinDiff =
+              new Date(a.joinedAt).getTime() - new Date(b.joinedAt).getTime();
+            if (joinDiff !== 0) return joinDiff;
+            return (a.userId || "").localeCompare(b.userId || "");
+          });
+
+        if (winners.length > 0) {
+          const share = Math.floor(race.potCoins / winners.length);
+          const remainder = race.potCoins - share * winners.length;
+          for (let index = 0; index < winners.length; index++) {
+            const amount = share + (index === 0 ? remainder : 0);
+            if (amount <= 0) continue;
+            await payoutRaceCoins({
+              awardCoinsFn,
+              userId: winners[index].userId,
+              raceId,
+              placement: 1,
+              amount,
+            });
+            await participantModel.incrementPayoutCoins(
+              winners[index].id,
+              amount
+            );
+          }
+        }
+      }
+
+      // Referral rewards behave exactly as for individual races.
+      const teamReferralEvents = await grantReferralRewards({ race });
+
+      events.emit("RACE_COMPLETED", {
+        raceId,
+        winnerUserId: null,
+        winnerTeam: winnerTeam || null,
+        tie: tie === true,
+        participantUserIds,
+        // TR-684: team-framed completion copy needs names + each recipient's
+        // side (win vs loss framing).
+        winnerTeamName: tie
+          ? null
+          : winnerTeam === "TEAM_A"
+            ? race.teamAName
+            : race.teamBName,
+        loserTeamName: tie
+          ? null
+          : winnerTeam === "TEAM_A"
+            ? race.teamBName
+            : race.teamAName,
+        memberTeams: Object.fromEntries(
+          accepted.map((p) => [p.userId, p.team])
+        ),
+      });
+
+      for (const payload of teamReferralEvents) {
+        events.emit("REFERRAL_REWARDED", payload);
+      }
+
+      return race;
+    }
+
     if (race?.potCoins > 0) {
       // Pay the buy-in pot out by finishing place. The number of paid places is
       // fixed for winner-takes-all/top-3 but scales with the field for the

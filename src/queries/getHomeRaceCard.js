@@ -10,6 +10,7 @@ const {
 } = require("../services/raceStateResolution");
 const { prorateSamplesIntoWindow } = require("../models/stepSample");
 const { raceTimeZone } = require("../utils/raceTimeZone");
+const { buildTeamsBlockFromParticipants } = require("../utils/teamRaces");
 
 // Max number of active races returned in the new ACTIVE_RACES (opt-in) state.
 const MAX_ACTIVE_RACES = 5;
@@ -101,12 +102,24 @@ async function checkPendingInvite(prisma, userId, now, supportsCharacters = fals
   };
 }
 
-async function checkActiveRace(prisma, userId, supportsCharacters = false) {
+async function checkActiveRace(
+  prisma,
+  userId,
+  supportsCharacters = false,
+  supportsTeamRaces = false
+) {
   const myActive = await prisma.raceParticipant.findFirst({
     where: {
       userId,
       status: "ACCEPTED",
-      race: { status: "ACTIVE" },
+      race: {
+        status: "ACTIVE",
+        // TR-702: an old binary can't render a team race — it would draw one as
+        // a broken individual race. Skip team races for those clients (they
+        // fall through to the next home state). In practice unreachable: an old
+        // client can neither create (TR-106) nor join (TR-703) a team race.
+        ...(supportsTeamRaces ? {} : { isTeamRace: false }),
+      },
     },
     include: {
       race: {
@@ -125,6 +138,10 @@ async function checkActiveRace(prisma, userId, supportsCharacters = false) {
   if (!myActive) return null;
 
   const race = myActive.race;
+  // TR-702 belt-and-braces: the query above already filters team races out for
+  // tokenless clients; never serialize one even if that filter is bypassed.
+  if (race.isTeamRace && !supportsTeamRaces) return null;
+
   const sorted = race.participants;
   const me = sorted.find((p) => p.userId === userId);
   const leader = sorted[0];
@@ -161,6 +178,19 @@ async function checkActiveRace(prisma, userId, supportsCharacters = false) {
       me: me ? buildEntry(me) : null,
       leader: leader ? buildEntry(leader) : null,
       others: others.map(buildEntry),
+      // ── Team races (TR-809) — additive. The Home rail draws a compact
+      // rope-knot scoreline ("Swift Capys 12,340 — 11,900 Turbo Beavers") from
+      // the same canonical `teams` block the list + progress surfaces use.
+      // Only ever present for token clients (gated above); individual races
+      // keep the byte-identical legacy shape.
+      ...(race.isTeamRace
+        ? {
+            isTeamRace: true,
+            teamSize: race.teamSize ?? null,
+            myTeam: me?.team ?? null,
+            teams: buildTeamsBlockFromParticipants(race, sorted),
+          }
+        : {}),
     },
   };
 }
@@ -696,6 +726,9 @@ function buildGetHomeRaceCard(dependencies = {}) {
     homeActiveRaces = false,
     timeZone = "UTC",
     supportsCharacters = false,
+    // TR-702/809: whether the caller declared the `team_races` token. Old
+    // clients never see a team race on the Home card.
+    supportsTeamRaces = false,
   }) {
     const now = nowFn();
 
@@ -719,7 +752,12 @@ function buildGetHomeRaceCard(dependencies = {}) {
       });
       if (activeRaces) return activeRaces;
     } else {
-      const active = await checkActiveRace(prisma, userId, supportsCharacters);
+      const active = await checkActiveRace(
+        prisma,
+        userId,
+        supportsCharacters,
+        supportsTeamRaces
+      );
       if (active) return active;
     }
 
