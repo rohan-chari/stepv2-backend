@@ -56,7 +56,18 @@ function rollPowerup(position, totalParticipants, rng = Math.random, options = {
 
   const tierPowerups = RARITY_TIERS[rarity];
   const typeIndex = Math.floor(rng() * tierPowerups.length);
-  const type = tierPowerups[typeIndex];
+  let type = tierPowerups[typeIndex];
+
+  // Red Card nerf: RED_CARD is now HALF as likely as a uniform rare pick. When
+  // the uniform pick lands on RED_CARD, re-roll to a DIFFERENT rare 50% of the
+  // time. This halves red card exactly (1/11 -> 1/22 within the RARE tier) while
+  // keeping the position curve and the RARE tier's total probability intact; the
+  // freed mass spreads evenly across the other rares. RED_CARD only exists in the
+  // RARE tier, so the type check alone is sufficient.
+  if (type === "RED_CARD" && rng() < 0.5) {
+    const others = tierPowerups.filter((t) => t !== "RED_CARD");
+    type = others[Math.floor(rng() * others.length)];
+  }
 
   return { type, rarity };
 }

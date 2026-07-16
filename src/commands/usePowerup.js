@@ -114,7 +114,9 @@ function isOpponentInflicted(effect, userId) {
   return effect.sourceUserId !== effect.targetUserId;
 }
 
-const RED_CARD_PERCENT = 0.10;
+// Red Card removes 5% of the leader's steps (nerfed from 10% — heavy-player
+// complaints). Server-side effect, so old clients apply the new value too.
+const RED_CARD_PERCENT = 0.05;
 const SECOND_WIND_MIN = 500;
 const SECOND_WIND_MAX = 5000;
 const SECOND_WIND_FACTOR = 0.25;

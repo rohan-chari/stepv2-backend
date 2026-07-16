@@ -11,7 +11,7 @@ const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
 //
 // Red Card resolves the leader by TRUE server-side steps (usePowerup.js:236),
 // while Stealth Mode only masks the leaderboard/feed VIEW at read time. So:
-//   * the Red Card still lands on the stealthed leader (10% of their steps),
+//   * the Red Card still lands on the stealthed leader (5% of their steps),
 //   * Stealth Mode is NOT consumed (it is a timed buff, not a shield),
 //   * the leader stays hidden on the leaderboard afterward, and
 //   * the feed event hides the leader's name (??? to the attacker, real name to
@@ -180,10 +180,10 @@ describe("stealth mode + red card", () => {
     assert.equal(res.status, 200);
     assert.equal(body.result.outcome, "APPLIED");
     assert.ok(!body.result.blocked);
-    assert.equal(body.result.penalty, 800, "10% of the stealthed leader's 8000 steps");
+    assert.equal(body.result.penalty, 400, "5% of the stealthed leader's 8000 steps");
 
     // The penalty hits the stealthed leader's true total.
-    assert.equal(bobSelf.totalSteps, 7200, "leader loses 800 despite being stealthed");
+    assert.equal(bobSelf.totalSteps, 7600, "leader loses 400 despite being stealthed");
 
     // Stealth Mode is untouched — it is a timed buff, not a shield.
     assert.equal(await stealthStatus(raceId, bob.userId), "ACTIVE");

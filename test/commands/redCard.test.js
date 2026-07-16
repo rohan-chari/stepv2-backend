@@ -3,7 +3,7 @@ const test = require("node:test");
 const { buildUsePowerup, PowerupUseError } = require("../../src/commands/usePowerup");
 
 // ---------------------------------------------------------------------------
-// Red Card — offensive, auto-targets leader, removes 10% of leader's steps
+// Red Card — offensive, auto-targets leader, removes 5% of leader's steps
 // ---------------------------------------------------------------------------
 
 function makeParticipant(id, userId, displayName, overrides = {}) {
@@ -106,10 +106,10 @@ function makeDeps(overrides = {}) {
 }
 
 // ===========================================================================
-// Basic usage — auto-targets leader, removes 10%
+// Basic usage — auto-targets leader, removes 5%
 // ===========================================================================
 
-test("Red Card removes 10% of the leader's steps", async () => {
+test("Red Card removes 5% of the leader's steps", async () => {
   // user-2 is leader with 20000
   const ctx = makeDeps({
     user1: { totalSteps: 5000 },
@@ -120,11 +120,11 @@ test("Red Card removes 10% of the leader's steps", async () => {
 
   const result = await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1" });
 
-  assert.equal(result.penalty, 2000); // 10% of 20000
+  assert.equal(result.penalty, 1000); // 5% of 20000
   assert.equal(ctx.bonusChanges.length, 1);
   assert.equal(ctx.bonusChanges[0].id, "rp-2");
   assert.equal(ctx.bonusChanges[0].type, "subtract");
-  assert.equal(ctx.bonusChanges[0].amount, 2000);
+  assert.equal(ctx.bonusChanges[0].amount, 1000);
 });
 
 test("Red Card auto-targets the participant with the most steps", async () => {
@@ -138,7 +138,7 @@ test("Red Card auto-targets the participant with the most steps", async () => {
 
   const result = await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1" });
 
-  assert.equal(result.penalty, 2500); // 10% of 25000
+  assert.equal(result.penalty, 1250); // 5% of 25000
   assert.equal(ctx.bonusChanges[0].id, "rp-3");
 });
 
@@ -157,11 +157,11 @@ test("Red Card does NOT transfer steps to the attacker", async () => {
 });
 
 // ===========================================================================
-// Rounding — 10% rounds to nearest whole number
+// Rounding — 5% rounds to nearest whole number
 // ===========================================================================
 
 test("Red Card rounds penalty to nearest whole number (rounds down)", async () => {
-  // 10% of 10001 = 1000.1 → rounds to 1000
+  // 5% of 10001 = 500.05 → rounds to 500
   const ctx = makeDeps({
     user1: { totalSteps: 5000 },
     user2: { totalSteps: 10001 },
@@ -171,21 +171,21 @@ test("Red Card rounds penalty to nearest whole number (rounds down)", async () =
 
   const result = await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1" });
 
-  assert.equal(result.penalty, 1000);
+  assert.equal(result.penalty, 500);
 });
 
 test("Red Card rounds penalty to nearest whole number (rounds up)", async () => {
-  // 10% of 10005 = 1000.5 → rounds to 1001
+  // 5% of 10010 = 500.5 → rounds to 501
   const ctx = makeDeps({
     user1: { totalSteps: 5000 },
-    user2: { totalSteps: 10005 },
+    user2: { totalSteps: 10010 },
     user3: { totalSteps: 3000 },
   });
   const use = buildUsePowerup(ctx.deps);
 
   const result = await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1" });
 
-  assert.equal(result.penalty, 1001);
+  assert.equal(result.penalty, 501);
 });
 
 // ===========================================================================
@@ -211,7 +211,7 @@ test("Red Card on leader with 0 steps results in 0 penalty", async () => {
 });
 
 test("Red Card penalty can push leader below the attacker's steps", async () => {
-  // Leader at 1100, attacker at 1050. 10% = 110. Leader drops to 990.
+  // Leader at 1100, attacker at 1050. 5% = 55. Leader drops to 1045 (< 1050).
   const ctx = makeDeps({
     user1: { totalSteps: 1050 },
     user2: { totalSteps: 1100 },
@@ -221,12 +221,12 @@ test("Red Card penalty can push leader below the attacker's steps", async () => 
 
   const result = await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1" });
 
-  assert.equal(result.penalty, 110);
-  assert.equal(ctx.bonusChanges[0].amount, 110);
+  assert.equal(result.penalty, 55);
+  assert.equal(ctx.bonusChanges[0].amount, 55);
 });
 
 test("Red Card on leader with very few steps does not make them negative", async () => {
-  // Leader has 5 steps, 10% = 0.5 → rounds to 1
+  // Leader has 5 steps, 5% = 0.25 → rounds to 0
   const ctx = makeDeps({
     user1: { totalSteps: 1 },
     user2: { totalSteps: 5 },
@@ -352,7 +352,7 @@ test("Red Card skips a finished leader and targets the next highest", async () =
   const result = await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1" });
 
   // Should target user-3 (next highest non-finished), not user-2
-  assert.equal(result.penalty, 1500); // 10% of 15000
+  assert.equal(result.penalty, 750); // 5% of 15000
   assert.equal(ctx.bonusChanges[0].id, "rp-3");
 });
 
@@ -390,7 +390,7 @@ test("Red Card targets a stealthed leader", async () => {
   const result = await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1" });
 
   // Should target user-2 regardless of stealth
-  assert.equal(result.penalty, 2000);
+  assert.equal(result.penalty, 1000);
   assert.equal(ctx.bonusChanges[0].id, "rp-2");
 });
 
@@ -428,7 +428,7 @@ test("Red Card can be used back-to-back with no cooldown", async () => {
   });
   const use1 = buildUsePowerup(ctx1.deps);
   const result1 = await use1({ userId: "user-1", raceId: "race-1", powerupId: "pw-1" });
-  assert.equal(result1.penalty, 2000);
+  assert.equal(result1.penalty, 1000);
 
   // Second use (different powerup, same user)
   const ctx2 = makeDeps({
@@ -438,7 +438,7 @@ test("Red Card can be used back-to-back with no cooldown", async () => {
   });
   const use2 = buildUsePowerup(ctx2.deps);
   const result2 = await use2({ userId: "user-1", raceId: "race-1", powerupId: "pw-2" });
-  assert.equal(result2.penalty, 1800); // 10% of 18000
+  assert.equal(result2.penalty, 900); // 5% of 18000
 });
 
 // ===========================================================================
@@ -491,7 +491,7 @@ test("Red Card creates a feed event with penalty amount", async () => {
   assert.equal(ctx.feedEvents.length, 1);
   assert.equal(ctx.feedEvents[0].eventType, "POWERUP_USED");
   assert.equal(ctx.feedEvents[0].powerupType, "RED_CARD");
-  assert.ok(ctx.feedEvents[0].description.includes("2,000") || ctx.feedEvents[0].description.includes("2000"),
+  assert.ok(ctx.feedEvents[0].description.includes("1,000") || ctx.feedEvents[0].description.includes("1000"),
     "feed event should mention the penalty amount");
 });
 

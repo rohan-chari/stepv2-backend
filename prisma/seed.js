@@ -130,7 +130,13 @@ async function seed() {
         "Wash away every debuff a rival has stuck on you — frozen steps, wrong turns, detours, and more. Your own buffs stay put.",
       priceCoins: 150,
       powerupType: "CLEANSE",
-      active: true,
+      // Retired from the store AND the daily reward box (the box pool is drawn
+      // from ACTIVE store powerups via getEligiblePowerupPool). Owners keep and
+      // can still USE their existing copies, and CLEANSE stays droppable in-race
+      // (powerupOdds RARE tier is unchanged). NOTE: re-seeding only flips this on
+      // a fresh row — an already-seeded prod/staging row needs an explicit UPDATE
+      // (see the deploy note).
+      active: false,
       testOnly: false,
       sortOrder: 3,
     },

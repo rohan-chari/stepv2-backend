@@ -207,9 +207,9 @@ describe("dual shield (compression socks + mirror) under attack", () => {
     // Mirror wins: the Red Card reflects back onto the attacker.
     assert.equal(summary.result.outcome, "REFLECTED");
     assert.equal(summary.result.reflectedBy, "MIRROR");
-    // Penalty is 10% of the (post-reflect) target = the attacker's own 5000 steps.
-    assert.equal(summary.result.penalty, 500);
-    assert.equal(summary.attackerSteps_after, 4500, "attacker eats the 500-step Red Card penalty");
+    // Penalty is 5% of the (post-reflect) target = the attacker's own 5000 steps.
+    assert.equal(summary.result.penalty, 250);
+    assert.equal(summary.attackerSteps_after, 4750, "attacker eats the 250-step Red Card penalty");
     assert.equal(summary.defenderSteps_after, 8000, "mirror holder is untouched");
     // Mirror is spent; the socks shield is untouched and banked for next time.
     assert.equal(summary.mirror_status_after, "EXPIRED", "mirror is consumed on reflect");
