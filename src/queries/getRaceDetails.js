@@ -2,6 +2,7 @@ const { Race } = require("../models/race");
 const { computeRacePayouts } = require("../utils/racePayoutPresets");
 const { characterPresentation } = require("../utils/shopCosmetics");
 const { roundLabel } = require("../constants/tournaments");
+const { isTournamentParticipant } = require("../services/tournamentAccess");
 const {
   computeFinishRewardPool,
   computeFinishRewardPlaces,
@@ -19,9 +20,17 @@ async function getRaceDetails(userId, raceId, supportsCharacters = false) {
   // Declining revokes access: the decliner is treated like a non-participant
   // instead of getting a read-only ghost view of the race.
   if (!myParticipant || myParticipant.status === "DECLINED") {
-    const error = new Error("You are not a participant in this race");
-    error.statusCode = 403;
-    throw error;
+    // Tournament spectating: any ACCEPTED bracket player (including eliminated)
+    // may READ a matchup race they aren't in. Read-only — no write path is
+    // relaxed here. Non-tournament races and non-participants still 403.
+    const canSpectate =
+      race.tournamentId != null &&
+      (await isTournamentParticipant(race.tournamentId, userId));
+    if (!canSpectate) {
+      const error = new Error("You are not a participant in this race");
+      error.statusCode = 403;
+      throw error;
+    }
   }
 
   const acceptedCount = race.participants.filter(
@@ -95,12 +104,15 @@ async function getRaceDetails(userId, raceId, supportsCharacters = false) {
     maxParticipants: race.maxParticipants ?? null,
     powerupsEnabled: race.powerupsEnabled || false,
     powerupStepInterval: race.powerupStepInterval,
-    myStatus: myParticipant.status,
-    myChatMuted: myParticipant.chatMuted || false,
+    // myParticipant is undefined for a tournament spectator (viewer isn't in
+    // this matchup) — every "my*" field degrades safely, which is how the client
+    // detects read-only spectate mode.
+    myStatus: myParticipant?.status ?? null,
+    myChatMuted: myParticipant?.chatMuted || false,
     // Per-race placement-alert opt-out. Defaulted false so old app builds that
     // don't read this key are unaffected; the new build renders the mute toggle.
-    myPlacementAlertsMuted: myParticipant.placementAlertsMuted || false,
-    myLastReadRaceChatAt: myParticipant.lastReadRaceChatAt,
+    myPlacementAlertsMuted: myParticipant?.placementAlertsMuted || false,
+    myLastReadRaceChatAt: myParticipant?.lastReadRaceChatAt ?? null,
     participants: race.participants.map((p) => ({
       id: p.id,
       userId: p.userId,
@@ -128,8 +140,8 @@ async function getRaceDetails(userId, raceId, supportsCharacters = false) {
     teamAName: race.teamAName ?? null,
     teamBName: race.teamBName ?? null,
     winnerTeam: race.winnerTeam ?? null,
-    myTeam: myParticipant.team ?? null,
-    myForfeitedAt: myParticipant.forfeitedAt ?? null,
+    myTeam: myParticipant?.team ?? null,
+    myForfeitedAt: myParticipant?.forfeitedAt ?? null,
     // ── Tournament matchup context (additive; null on ordinary races). The
     // frontend reads these defensively to show the "🏆 {round} — {name}" banner.
     tournamentId: race.tournamentId ?? null,

@@ -537,4 +537,94 @@ describe("tournaments — integration", () => {
     });
     assert.equal(pendings, 0);
   });
+
+  it("spectate: a tournament participant can read a matchup they're not in; randoms + non-tournament races still 403", async () => {
+    const { users, tournamentId } = await fillFourBracket();
+    const tokenByUser = {
+      [users.a.userId]: users.a.token,
+      [users.b.userId]: users.b.token,
+      [users.c.userId]: users.c.token,
+      [users.d.userId]: users.d.token,
+    };
+    const round1 = await prisma.race.findMany({
+      where: { tournamentId, tournamentRound: 1 },
+      include: { participants: true },
+      orderBy: { tournamentMatchIndex: "asc" },
+    });
+    const matchA = round1[0];
+    const matchB = round1[1];
+    const matchAplayers = matchA.participants
+      .filter((p) => p.status === "ACCEPTED")
+      .map((p) => p.userId);
+    const matchBplayers = matchB.participants
+      .filter((p) => p.status === "ACCEPTED")
+      .map((p) => p.userId);
+    // A player in match A spectates match B (a matchup they're not in).
+    const spectatorId = matchAplayers[0];
+    const spectatorToken = tokenByUser[spectatorId];
+
+    const detailsRes = await authReq("GET", `/races/${matchB.id}`, {
+      token: spectatorToken,
+    });
+    assert.equal(detailsRes.status, 200);
+    const details = await detailsRes.json();
+    // Spectate mode: the viewer isn't among the matchup participants.
+    assert.equal(details.participants.some((p) => p.userId === spectatorId), false);
+    assert.equal(details.tournamentId, tournamentId);
+
+    const progRes = await authReq("GET", `/races/${matchB.id}/progress`, {
+      token: spectatorToken,
+    });
+    assert.equal(progRes.status, 200);
+
+    // A random user not in the tournament still gets 403.
+    const outsider = await createUser("Outsider");
+    const outDetails = await authReq("GET", `/races/${matchB.id}`, {
+      token: outsider.token,
+    });
+    assert.equal(outDetails.status, 403);
+    const outProg = await authReq("GET", `/races/${matchB.id}/progress`, {
+      token: outsider.token,
+    });
+    assert.equal(outProg.status, 403);
+
+    // Spectator writes stay rejected (chat post is participant-only).
+    const chat = await authReq("POST", `/races/${matchB.id}/messages`, {
+      token: spectatorToken,
+      body: { body: "spectator chat" },
+    });
+    assert.ok(chat.status >= 400, "spectator chat post must be rejected");
+
+    // An ELIMINATED participant can still spectate the final. Settle round 1.
+    for (const r of round1) {
+      const [p0, p1] = r.participants.filter((p) => p.status === "ACCEPTED");
+      await settleMatchup(r.id, { [p0.userId]: 5000, [p1.userId]: 100 });
+    }
+    // matchB's second player is eliminated (lost with 100).
+    const eliminatedId = matchBplayers[1];
+    const finalRace = await prisma.race.findFirst({
+      where: { tournamentId, tournamentRound: 2 },
+    });
+    const finalView = await authReq("GET", `/races/${finalRace.id}`, {
+      token: tokenByUser[eliminatedId],
+    });
+    assert.equal(finalView.status, 200);
+  });
+
+  it("spectate: a non-tournament race still 403s for a non-participant", async () => {
+    const host = await createUser("NHost");
+    const rival = await createUser("NRival");
+    const stranger = await createUser("NStranger");
+    // Ordinary public race between host + rival.
+    const createRes = await authReq("POST", "/races", {
+      token: host.token,
+      body: { name: "Plain Race", maxDurationDays: 3, isPublic: true },
+    });
+    const { race } = await createRes.json();
+    await authReq("POST", `/races/${race.id}/join`, { token: rival.token });
+
+    // A stranger (not a participant, not a tournament) is still blocked.
+    const res = await authReq("GET", `/races/${race.id}`, { token: stranger.token });
+    assert.equal(res.status, 403);
+  });
 });

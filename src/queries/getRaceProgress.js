@@ -23,6 +23,7 @@ const { raceTimeZone } = require("../utils/raceTimeZone");
 const { buildTeamsBlock } = require("../utils/teamRaces");
 const { collectRaceIllusions } = require("../services/raceIllusions");
 const { roundLabel } = require("../constants/tournaments");
+const { isTournamentParticipant } = require("../services/tournamentAccess");
 
 // Additive tournament-matchup context for a matchup race's progress payload
 // (null on ordinary races). The frontend banner reads these defensively.
@@ -386,6 +387,8 @@ function buildGetRaceProgress(deps = {}) {
         })
       : defaultSyncRacePowerupState);
   const now = deps.now || (() => new Date());
+  const isTournamentParticipantFn =
+    deps.isTournamentParticipant || isTournamentParticipant;
 
   return async function getRaceProgress(
     userId,
@@ -403,9 +406,18 @@ function buildGetRaceProgress(deps = {}) {
     const myParticipant = race.participants.find((p) => p.userId === userId);
     // Mirrors getRaceDetails: declining revokes access to the race.
     if (!myParticipant || myParticipant.status === "DECLINED") {
-      const error = new Error("You are not a participant in this race");
-      error.statusCode = 403;
-      throw error;
+      // Tournament spectating: an ACCEPTED bracket player (incl. eliminated) may
+      // READ a matchup race they aren't in. Read-only — the powerup-earn block
+      // below is skipped for a spectator (no myParticipant), and no write path
+      // is relaxed here. Non-tournament races and non-participants still 403.
+      const canSpectate =
+        race.tournamentId != null &&
+        (await isTournamentParticipantFn(race.tournamentId, userId));
+      if (!canSpectate) {
+        const error = new Error("You are not a participant in this race");
+        error.statusCode = 403;
+        throw error;
+      }
     }
 
     if (race.status !== "ACTIVE") {
@@ -606,7 +618,8 @@ function buildGetRaceProgress(deps = {}) {
     // Roll powerups for the requesting user if they crossed a threshold
     let powerupData = null;
 
-    if (race.powerupsEnabled && race.powerupStepInterval) {
+    // Spectators (no myParticipant) never earn powerups — skip the whole block.
+    if (myParticipant && race.powerupsEnabled && race.powerupStepInterval) {
       const myStepTotalEntry = stepTotals.find(
         ({ participant }) => participant.id === myParticipant.id
       );
