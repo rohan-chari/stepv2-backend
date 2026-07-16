@@ -20,9 +20,31 @@ const ADS_COIN_REWARD_ENABLED = process.env.ADS_COIN_REWARD_ENABLED !== "false";
 // rewardKind for coin-reward grants (SSV custom_data "coins:<YYYY-MM-DD>").
 const COIN_REWARD_KIND = "coin_reward";
 
-// Flat coins per verified watch, and max redeemed watches per local day.
-const AD_COIN_REWARD_AMOUNT = 25;
-const AD_COIN_REWARD_DAILY_CAP = 3;
+// Flat coins per verified watch, and max redeemed watches per local day. Both
+// are env-overridable so the coin economy can be tuned without an App Store
+// cycle — the client renders whatever the status block reports rather than its
+// own constants (see queries/getAdCoinRewardStatus).
+//
+// Leave the cap at 3 until app 1.6.1 has rolled out: builds before it hardcode
+// "of 3 left today" in the Get Coins hub while reading remainingToday from the
+// server, so a raise makes those frozen binaries render "10 of 3 left today".
+//
+// A malformed override must never read as "no cap" (Number("x") is NaN, and
+// `consumed >= NaN` is false — the cap would silently stop applying), so fall
+// back to the default unless the value parses as a positive integer.
+function positiveIntEnv(raw, fallback) {
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+const AD_COIN_REWARD_AMOUNT = positiveIntEnv(
+  process.env.AD_COIN_REWARD_AMOUNT,
+  25
+);
+const AD_COIN_REWARD_DAILY_CAP = positiveIntEnv(
+  process.env.AD_COIN_REWARD_DAILY_CAP,
+  3
+);
 
 module.exports = {
   ADS_EXTRA_SPIN_ENABLED,

@@ -12,6 +12,9 @@ const {
 //                    client can claim directly without showing another ad.
 //   remainingToday — watches left before the daily cap.
 //   coinAmount     — coins per watch (client renders, server enforces).
+//   dailyCap       — watches allowed per local day, so the hub's "N of CAP left
+//                    today" copy tracks a retuned cap instead of hardcoding it.
+//                    Additive: builds before 1.6.1 ignore it and print 3.
 function buildGetAdCoinRewardStatus(dependencies = {}) {
   const db = dependencies.prisma || prisma;
 
@@ -32,6 +35,7 @@ function buildGetAdCoinRewardStatus(dependencies = {}) {
         remainingToday > 0 && grants.some((g) => g.consumedAt == null),
       remainingToday,
       coinAmount: AD_COIN_REWARD_AMOUNT,
+      dailyCap: AD_COIN_REWARD_DAILY_CAP,
     };
   };
 }
