@@ -936,7 +936,7 @@ function registerNotificationHandlers(dependencies = {}) {
         actorUserId: creatorUserId,
         title: "Tournament invite",
         buildBody: (creatorName) =>
-          `🏆 ${creatorName} invited you to ${tournamentName} — ${bracketSize} racers, ${prize}`,
+          `${creatorName} invited you to ${tournamentName} — ${bracketSize} racers, ${prize}`,
         payload: {
           type: "TOURNAMENT_INVITE_SENT",
           route: "tournament_detail",
@@ -1061,7 +1061,7 @@ function registerNotificationHandlers(dependencies = {}) {
         eventName: "TOURNAMENT_CHAMPION",
         recipientUserId: userId,
         actorUserId: null,
-        title: "🏆 CHAMPION!",
+        title: "CHAMPION!",
         buildBody: () => `You swept ${tournamentName} ${tail}`,
         payload: {
           type: "TOURNAMENT_CHAMPION",
