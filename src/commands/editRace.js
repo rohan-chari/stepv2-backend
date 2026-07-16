@@ -1,6 +1,10 @@
 const { Race } = require("../models/race");
 const { RaceParticipant } = require("../models/raceParticipant");
+const { User } = require("../models/user");
 const { eventBus } = require("../events/eventBus");
+const { awardCoins } = require("./awardCoins");
+const { appSettings } = require("../services/appSettings");
+const { withRaceJoinLock } = require("../services/raceJoinLock");
 const {
   validateRaceName,
   validateDuration,
@@ -30,6 +34,10 @@ function hasField(updates, key) {
 function buildEditRace(dependencies = {}) {
   const raceModel = dependencies.Race || Race;
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
+  const userModel = dependencies.User || User;
+  const awardCoinsFn = dependencies.awardCoins || awardCoins;
+  const settings = dependencies.appSettings || appSettings;
+  const withRaceLock = dependencies.withRaceLock || withRaceJoinLock;
   const events = dependencies.eventBus || eventBus;
 
   return async function editRace({ userId, raceId, updates = {} }) {
@@ -169,10 +177,26 @@ function buildEditRace(dependencies = {}) {
       fields.maxParticipants = newMax;
     }
 
-    if (hasField(updates, "buyInAmount") || hasField(updates, "payoutPreset")) {
-      const proposedBuyIn = hasField(updates, "buyInAmount")
-        ? updates.buyInAmount
-        : race.buyInAmount;
+    // ── Buy-in (Issue 4) ─────────────────────────────────────────────────────
+    // `buyInEnabled:false` (or an amount of 0) toggles the race to FREE;
+    // `buyInEnabled:true` + `buyInAmount:N` (or a bare `buyInAmount`) sets the
+    // paid amount. Changing the effective amount on a PENDING race reconciles
+    // every ACCEPTED participant's coin hold (charge the delta on a raise /
+    // free->paid, refund it on a lower / paid->free).
+    let buyInNotify = null;
+    if (
+      hasField(updates, "buyInAmount") ||
+      hasField(updates, "buyInEnabled") ||
+      hasField(updates, "payoutPreset")
+    ) {
+      let proposedBuyIn;
+      if (hasField(updates, "buyInEnabled") && !updates.buyInEnabled) {
+        proposedBuyIn = 0; // explicit toggle to free
+      } else if (hasField(updates, "buyInAmount")) {
+        proposedBuyIn = updates.buyInAmount;
+      } else {
+        proposedBuyIn = race.buyInAmount;
+      }
       const proposedPreset = hasField(updates, "payoutPreset")
         ? updates.payoutPreset
         : race.payoutPreset;
@@ -183,24 +207,124 @@ function buildEditRace(dependencies = {}) {
         ErrorClass: RaceEditError,
       });
 
-      if (
-        hasField(updates, "buyInAmount") &&
-        buyInConfig.buyInAmount !== race.buyInAmount
-      ) {
-        const chargedParticipants = await participantModel.findChargedByRace(
-          raceId
-        );
-        if (chargedParticipants.length > 0) {
-          throw new RaceEditError(
-            "Cannot edit buy-in after a participant has accepted and paid in",
-            400
-          );
-        }
-        fields.buyInAmount = buyInConfig.buyInAmount;
-      }
-
       if (hasField(updates, "payoutPreset")) {
         fields.payoutPreset = buyInConfig.payoutPreset;
+      }
+
+      const newBuyIn = buyInConfig.buyInAmount;
+      const buyInChanged =
+        (hasField(updates, "buyInAmount") || hasField(updates, "buyInEnabled")) &&
+        newBuyIn !== race.buyInAmount;
+
+      if (buyInChanged) {
+        // How much each ACCEPTED participant's hold moves: HELD/COMMITTED
+        // participants hold their `buyInAmount`; everyone else (NONE/REFUNDED)
+        // holds 0. `delta` > 0 charges, < 0 refunds.
+        const oldHeldAmount = (p) =>
+          p.buyInStatus === "HELD" || p.buyInStatus === "COMMITTED"
+            ? p.buyInAmount || 0
+            : 0;
+
+        // Peek the accepted set to decide whether any money actually moves. When
+        // nobody is affected (e.g. an empty lobby, or the amount is unchanged for
+        // everyone) the change is trivially applied, exactly like the pre-Issue-4
+        // "no charged participants" path — no lock, no flag read.
+        const peek =
+          typeof participantModel.findAcceptedByRace === "function"
+            ? await participantModel.findAcceptedByRace(raceId)
+            : [];
+        const anyoneAffected = peek.some((p) => newBuyIn - oldHeldAmount(p) !== 0);
+
+        if (!anyoneAffected) {
+          fields.buyInAmount = newBuyIn;
+          if (peek.length > 0) {
+            fields.potCoins = newBuyIn === 0 ? 0 : peek.length * newBuyIn;
+          }
+        } else {
+          // Kill switch: when disabled, keep the old hard block.
+          const enabled = await settings.getFlag("buyInEditEnabled");
+          if (!enabled) {
+            throw new RaceEditError(
+              "Cannot edit buy-in after a participant has accepted and paid in",
+              400,
+              "IMMUTABLE_FIELD"
+            );
+          }
+
+          const reconcile = await withRaceLock(raceId, async () => {
+            // Re-read the accepted set inside the lock so a concurrent join is
+            // fully seen (the join core holds the same per-race lock).
+            const accepted = await participantModel.findAcceptedByRace(raceId);
+
+            // Affordability precheck: any participant who must PAY a positive
+            // delta they can't cover blocks the whole edit. Mutate nothing.
+            const unaffordable = [];
+            for (const p of accepted) {
+              const delta = newBuyIn - oldHeldAmount(p);
+              if (delta <= 0) continue;
+              const u = await userModel.findById(p.userId);
+              const coins = u && typeof u.coins === "number" ? u.coins : 0;
+              if (coins < delta) {
+                unaffordable.push(
+                  (p.user && p.user.displayName) ||
+                    (u && u.displayName) ||
+                    "A player"
+                );
+              }
+            }
+            if (unaffordable.length > 0) {
+              const names = unaffordable.join(", ");
+              const verb = unaffordable.length === 1 ? "doesn't" : "don't";
+              throw new RaceEditError(
+                `${names} ${verb} have enough coins for the new buy-in.`,
+                400,
+                "BUYIN_UNAFFORDABLE"
+              );
+            }
+
+            // Apply. Each movement is idempotent on (userId, reason, refId); the
+            // versioned refId guarantees a fresh key per edit so a re-charge after
+            // a refund is never silently skipped.
+            const affectedUserIds = [];
+            for (const p of accepted) {
+              const delta = newBuyIn - oldHeldAmount(p);
+              if (delta === 0) continue;
+              const newVersion = (p.buyInVersion || 0) + 1;
+              await awardCoinsFn({
+                userId: p.userId,
+                amount: -delta, // negative charges, positive refunds
+                reason: "race_buy_in_adjust",
+                refId: `${raceId}:${p.userId}:v${newVersion}`,
+              });
+              const newStatus =
+                newBuyIn === 0
+                  ? "REFUNDED"
+                  : p.buyInStatus === "NONE" || p.buyInStatus === "REFUNDED"
+                    ? "HELD"
+                    : p.buyInStatus;
+              await participantModel.update(p.id, {
+                buyInAmount: newBuyIn,
+                buyInStatus: newStatus,
+                buyInVersion: newVersion,
+              });
+              if (p.userId !== race.creatorId) affectedUserIds.push(p.userId);
+            }
+
+            // Every ACCEPTED participant ends HELD when paid (each was charged up
+            // to newBuyIn), or REFUNDED when free.
+            const potCoins = newBuyIn === 0 ? 0 : accepted.length * newBuyIn;
+            return { potCoins, affectedUserIds };
+          });
+
+          fields.buyInAmount = newBuyIn;
+          fields.potCoins = reconcile.potCoins;
+          if (reconcile.affectedUserIds.length > 0) {
+            buyInNotify = {
+              affectedUserIds: reconcile.affectedUserIds,
+              newBuyIn,
+            };
+          }
+        }
       }
     }
 
@@ -217,6 +341,18 @@ function buildEditRace(dependencies = {}) {
       creatorUserId: userId,
       updatedFields: Object.keys(fields),
     });
+
+    // Best-effort push to charged non-owner participants whose buy-in moved
+    // (Issue 4). A push failure must never fail the edit — the handler is
+    // fire-and-forget with its own try/catch.
+    if (buyInNotify) {
+      events.emit("RACE_BUYIN_CHANGED", {
+        raceId,
+        raceName: updated.name,
+        newBuyIn: buyInNotify.newBuyIn,
+        affectedUserIds: buyInNotify.affectedUserIds,
+      });
+    }
 
     return updated;
   };

@@ -223,6 +223,40 @@ function registerNotificationHandlers(dependencies = {}) {
     }
   });
 
+  // Issue 4: the owner changed a PENDING race's buy-in and coins were
+  // re-charged/refunded. Notify each charged non-owner participant. Best-effort:
+  // a failure here never affects the edit (the edit already committed).
+  events.on("RACE_BUYIN_CHANGED", async (data) => {
+    try {
+      const { raceId, raceName, newBuyIn, affectedUserIds } = data;
+      if (!Array.isArray(affectedUserIds) || affectedUserIds.length === 0) return;
+      const label = raceName ? `${raceName}'s` : "The race's";
+      const body =
+        newBuyIn && newBuyIn > 0
+          ? `${label} buy-in is now ${newBuyIn} coins.`
+          : `${label} buy-in is now free.`;
+      for (const recipientUserId of affectedUserIds) {
+        await sendNotificationToUser({
+          eventName: "RACE_BUYIN_CHANGED",
+          recipientUserId,
+          actorUserId: null,
+          title: "Buy-in updated",
+          buildBody: () => body,
+          payload: {
+            type: "RACE_BUYIN_CHANGED",
+            route: "race_detail",
+            params: { raceId },
+          },
+          logContext: { raceId, recipientUserId },
+        });
+      }
+    } catch (error) {
+      logger.error("RACE_BUYIN_CHANGED handler failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
   // TR-304: scheduled team race couldn't auto-start because teams were uneven.
   // The auto-start job pre-checks the Notification audit table and emits this at
   // most once per (creator, race); the audit row recordNotification writes below

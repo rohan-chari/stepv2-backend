@@ -27,6 +27,23 @@ function isTeamSideFull(race, team, { excludeUserId = null } = {}) {
   return members.length >= cap;
 }
 
+// Auto-assign a team-less join/accept to a side (Issue 3a). Picks the side with
+// FEWER accepted members; ties go to TEAM_A. If the picked side is at cap it
+// falls back to the other; if BOTH sides are full it returns null (caller then
+// throws TEAM_FULL). Used so a frozen old client that accepts/joins a team race
+// without a `team` succeeds instead of hitting the removed "Pick a team" 400.
+function pickAutoAssignTeam(race) {
+  const counts = acceptedTeamCounts(race.participants || []);
+  const cap = race.teamSize;
+  const isFull = (side) =>
+    Number.isInteger(cap) && counts[side] >= cap;
+  if (isFull("TEAM_A") && isFull("TEAM_B")) return null;
+  // Smaller side, tie -> TEAM_A.
+  let target = counts.TEAM_A <= counts.TEAM_B ? "TEAM_A" : "TEAM_B";
+  if (isFull(target)) target = target === "TEAM_A" ? "TEAM_B" : "TEAM_A";
+  return target;
+}
+
 // Resolve the caller's client feature tokens into a Set, accepting either the
 // middleware's Set or a plain array (unit tests / internal callers).
 function toFeatureSet(clientFeatures) {
@@ -79,6 +96,7 @@ function buildTeamsBlockFromParticipants(race, participants = []) {
 module.exports = {
   acceptedTeamCounts,
   isTeamSideFull,
+  pickAutoAssignTeam,
   toFeatureSet,
   TEAM_RACES_FEATURE,
   clientSupportsTeamRaces,

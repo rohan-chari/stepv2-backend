@@ -784,6 +784,12 @@ model RaceParticipant {
   powerupSlots          Int                   @default(3) @map("powerup_slots")
   buyInAmount           Int                   @default(0) @map("buy_in_amount")
   buyInStatus           RaceBuyInStatus       @default(NONE) @map("buy_in_status")
+  // Monotonic per-participant edit counter (Issue 4). Bumped each time the owner
+  // reconciles the buy-in on a PENDING race; the versioned value forms a unique
+  // coin-ledger refId (`<raceId>:<userId>:v<n>`) so a re-charge after a refund is
+  // never silently skipped by awardCoins idempotency. Additive, default 0 — old
+  // rows and old app versions are unaffected (nothing reads it client-side).
+  buyInVersion          Int                   @default(0) @map("buy_in_version")
   payoutCoins           Int                   @default(0) @map("payout_coins")
   placement             Int?
   // Live placement broadcast (Phase 0): last live rank we pushed to this

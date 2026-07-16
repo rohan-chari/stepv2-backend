@@ -20,6 +20,12 @@ const KNOWN_FLAGS = {
   // toggle via remote config; existing team races are unaffected (they run,
   // complete, and pay out normally). Default ON.
   teamRacesEnabled: true,
+  // Buy-in edit unlock (Issue 4). When true, the race owner may raise/lower or
+  // toggle paid<->free the buy-in on a PENDING race even after participants have
+  // paid, and editRace reconciles the coin holds. When false, editRace keeps the
+  // old hard block (cannot edit buy-in after a participant has paid). Default ON;
+  // a remote kill switch to disable the reconcile without a redeploy.
+  buyInEditEnabled: true,
 };
 
 function buildAppSettings(dependencies = {}) {

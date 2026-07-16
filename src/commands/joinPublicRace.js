@@ -24,7 +24,7 @@ function buildJoinPublicRace(dependencies = {}) {
     return withLock(raceId, async () => {
       const race = await raceModel.findById(raceId);
       if (!race) {
-        throw new RaceJoinError("Race not found", 404);
+        throw new RaceJoinError("Race not found", 404, "RACE_NOT_FOUND");
       }
       if (!race.isPublic) {
         throw new RaceJoinError("This race is not public", 403);

@@ -11,6 +11,7 @@ const {
 
 const {
   isTeamSideFull,
+  pickAutoAssignTeam,
   clientSupportsTeamRaces,
 } = require("../utils/teamRaces");
 
@@ -46,18 +47,30 @@ function buildRespondToRaceInvite(dependencies = {}) {
   }) {
     const race = await raceModel.findById(raceId);
     if (!race) {
-      throw new RaceInviteResponseError("Race not found", 404);
+      throw new RaceInviteResponseError("Race not found", 404, "RACE_NOT_FOUND");
     }
     if (race.status !== "PENDING" && race.status !== "ACTIVE") {
-      throw new RaceInviteResponseError("This race is no longer accepting responses", 400);
+      throw new RaceInviteResponseError(
+        "This race is no longer accepting responses",
+        400,
+        "RACE_NOT_ACCEPTING"
+      );
     }
 
     const participant = await participantModel.findByRaceAndUser(raceId, userId);
     if (!participant) {
-      throw new RaceInviteResponseError("You are not invited to this race", 403);
+      throw new RaceInviteResponseError(
+        "You are not invited to this race",
+        403,
+        "NOT_INVITED"
+      );
     }
     if (participant.status !== "INVITED") {
-      throw new RaceInviteResponseError("You have already responded to this invite", 400);
+      throw new RaceInviteResponseError(
+        "You have already responded to this invite",
+        400,
+        "ALREADY_RESPONDED"
+      );
     }
 
     let acceptTeam = null;
@@ -79,22 +92,23 @@ function buildRespondToRaceInvite(dependencies = {}) {
         );
       }
       if (team !== "TEAM_A" && team !== "TEAM_B") {
-        throw new RaceInviteResponseError(
-          "Pick a team (TEAM_A or TEAM_B) to accept this invite",
-          400
-        );
+        // Issue 3a: no explicit side (old homepage ACCEPT sends none) ->
+        // auto-assign the smaller side (tie -> TEAM_A). Both sides full ->
+        // TEAM_FULL, the invite row stays INVITED (we throw before any update).
+        const auto = pickAutoAssignTeam(race);
+        if (!auto) {
+          throw new RaceInviteResponseError("That team is full", 409, "TEAM_FULL");
+        }
+        acceptTeam = auto;
+      } else {
+        // TR-202/207: chosen side at cap -> TEAM_FULL; the invite row stays
+        // INVITED (we throw before any update), so it becomes acceptable again
+        // if a slot frees up.
+        if (isTeamSideFull(race, team)) {
+          throw new RaceInviteResponseError("That team is full", 409, "TEAM_FULL");
+        }
+        acceptTeam = team;
       }
-      // TR-202/207: chosen side at cap -> TEAM_FULL; the invite row stays
-      // INVITED (we throw before any update), so it becomes acceptable again
-      // if a slot frees up.
-      if (isTeamSideFull(race, team)) {
-        throw new RaceInviteResponseError(
-          "That team is full",
-          409,
-          "TEAM_FULL"
-        );
-      }
-      acceptTeam = team;
     }
 
     const newStatus = accept ? "ACCEPTED" : "DECLINED";
@@ -112,7 +126,8 @@ function buildRespondToRaceInvite(dependencies = {}) {
       ) {
         throw new RaceInviteResponseError(
           "You cannot join a paid race after someone has finished",
-          400
+          400,
+          "PAID_RACE_LOCKED"
         );
       }
 
@@ -133,6 +148,7 @@ function buildRespondToRaceInvite(dependencies = {}) {
         userId,
         amount: buyInAmount,
         ErrorClass: RaceInviteResponseError,
+        code: "INSUFFICIENT_COINS",
       });
       updateFields.buyInAmount = buyInAmount;
       updateFields.buyInStatus = race.status === "ACTIVE" ? "COMMITTED" : "HELD";

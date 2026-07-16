@@ -71,19 +71,48 @@ function makeJoinDeps({ existing = null } = {}) {
   };
 }
 
-// ── TR-201: join requires a side on team races ──────────────────────────────
-test("TR-201 public join on a team race requires a team param", async () => {
-  const ctx = makeJoinDeps();
-  const joinRaceCore = buildJoinRaceCore(ctx.deps);
+// ── Issue 3a: a team-less join auto-assigns instead of erroring ─────────────
+test("3a team-less public join auto-assigns to the smaller side; both full -> TEAM_FULL", async () => {
+  // Creator already on TEAM_A -> smaller side is TEAM_B.
+  const ctx1 = makeJoinDeps();
+  const join1 = buildJoinRaceCore(ctx1.deps);
+  const p1 = await join1({
+    race: makeTeamRace({ participants: [participant("creator", "TEAM_A")] }),
+    userId: "user-9",
+    clientFeatures: teamClient,
+  });
+  assert.equal(p1.team, "TEAM_B");
+  assert.equal(ctx1.created[0].team, "TEAM_B");
+
+  // Empty lobby -> tie -> TEAM_A.
+  const ctx2 = makeJoinDeps();
+  const join2 = buildJoinRaceCore(ctx2.deps);
+  const p2 = await join2({
+    race: makeTeamRace(),
+    userId: "user-9",
+    clientFeatures: teamClient,
+  });
+  assert.equal(p2.team, "TEAM_A");
+
+  // Both sides full -> 409 TEAM_FULL.
+  const ctx3 = makeJoinDeps();
+  const join3 = buildJoinRaceCore(ctx3.deps);
   await assert.rejects(
     () =>
-      joinRaceCore({
-        race: makeTeamRace(),
+      join3({
+        race: makeTeamRace({
+          teamSize: 1,
+          participants: [
+            participant("creator", "TEAM_A"),
+            participant("u2", "TEAM_B"),
+          ],
+        }),
         userId: "user-9",
         clientFeatures: teamClient,
       }),
     (err) => {
-      assert.equal(err.statusCode, 400);
+      assert.equal(err.statusCode, 409);
+      assert.equal(err.code, "TEAM_FULL");
       return true;
     }
   );
@@ -250,30 +279,16 @@ function makeRespondDeps({ race, invited }) {
   };
 }
 
-test("TR-201 invite accept on a team race requires and stores the chosen side", async () => {
+test("TR-201/3a invite accept stores an explicit side; team-less accept auto-assigns", async () => {
   const race = makeTeamRace({
     participants: [participant("creator", "TEAM_A")],
   });
   const invited = participant("user-9", null, "INVITED");
+
+  // An explicit side is honored and stored (TR-201, unchanged).
   const ctx = makeRespondDeps({ race, invited });
   const respond = buildRespondToRaceInvite(ctx.deps);
-
-  await assert.rejects(
-    () =>
-      respond({
-        userId: "user-9",
-        raceId: "race-1",
-        accept: true,
-        clientFeatures: teamClient,
-      }),
-    (err) => {
-      assert.equal(err.statusCode, 400);
-      return true;
-    },
-    "missing team on accept must 400"
-  );
-
-  const updated = await respond({
+  await respond({
     userId: "user-9",
     raceId: "race-1",
     accept: true,
@@ -282,6 +297,19 @@ test("TR-201 invite accept on a team race requires and stores the chosen side", 
   });
   assert.equal(ctx.state.updated.team, "TEAM_B");
   assert.equal(ctx.state.updated.status, "ACCEPTED");
+
+  // Issue 3a: a team-less accept auto-assigns to the smaller side (creator on
+  // TEAM_A -> the invitee lands on TEAM_B) instead of erroring.
+  const ctx2 = makeRespondDeps({ race, invited });
+  const respond2 = buildRespondToRaceInvite(ctx2.deps);
+  await respond2({
+    userId: "user-9",
+    raceId: "race-1",
+    accept: true,
+    clientFeatures: teamClient,
+  });
+  assert.equal(ctx2.state.updated.team, "TEAM_B");
+  assert.equal(ctx2.state.updated.status, "ACCEPTED");
 });
 
 test("TR-207 accepting when the chosen side is at cap -> 409 TEAM_FULL and stays INVITED", async () => {

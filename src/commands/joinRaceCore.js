@@ -12,6 +12,7 @@ const {
 } = require("../services/raceBuyIns");
 const {
   isTeamSideFull,
+  pickAutoAssignTeam,
   clientSupportsTeamRaces,
 } = require("../utils/teamRaces");
 
@@ -178,7 +179,8 @@ function buildJoinRaceCore(dependencies = {}) {
     if (race.status !== "PENDING" && race.status !== "ACTIVE") {
       throw new RaceJoinError(
         "This race is no longer accepting new participants",
-        400
+        400,
+        "RACE_NOT_ACCEPTING"
       );
     }
 
@@ -201,22 +203,31 @@ function buildJoinRaceCore(dependencies = {}) {
         );
       }
       if (team !== "TEAM_A" && team !== "TEAM_B") {
-        throw new RaceJoinError(
-          "Pick a team (TEAM_A or TEAM_B) to join this race",
-          400
-        );
+        // Issue 3a: no explicit side (old homepage join sends none) ->
+        // auto-assign the smaller side (tie -> TEAM_A); both sides full ->
+        // TEAM_FULL.
+        const auto = pickAutoAssignTeam(race);
+        if (!auto) {
+          throw new RaceJoinError("That team is full", 409, "TEAM_FULL");
+        }
+        joinTeam = auto;
+      } else {
+        // TR-202: a side at its cap rejects joins to that side; the joiner may
+        // still pick the other side.
+        if (isTeamSideFull(race, team)) {
+          throw new RaceJoinError("That team is full", 409, "TEAM_FULL");
+        }
+        joinTeam = team;
       }
-      // TR-202: a side at its cap rejects joins to that side; the joiner may
-      // still pick the other side.
-      if (isTeamSideFull(race, team)) {
-        throw new RaceJoinError("That team is full", 409, "TEAM_FULL");
-      }
-      joinTeam = team;
     }
 
     const existing = await participantModel.findByRaceAndUser(raceId, userId);
     if (existing) {
-      throw new RaceJoinError("You are already in this race", 400);
+      throw new RaceJoinError(
+        "You are already in this race",
+        400,
+        "ALREADY_RESPONDED"
+      );
     }
 
     const acceptedCount =
@@ -236,6 +247,7 @@ function buildJoinRaceCore(dependencies = {}) {
         userId,
         amount: buyInAmount,
         ErrorClass: RaceJoinError,
+        code: "INSUFFICIENT_COINS",
       });
 
       await reserveRaceBuyIn({

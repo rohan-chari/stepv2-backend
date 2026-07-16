@@ -42,12 +42,24 @@ function validateRaceBuyInConfig({ buyInAmount, payoutPreset, ErrorClass }) {
   };
 }
 
-async function ensureUserCanAfford({ userModel, userId, amount, ErrorClass }) {
+async function ensureUserCanAfford({
+  userModel,
+  userId,
+  amount,
+  ErrorClass,
+  // Optional machine-readable code (INSUFFICIENT_COINS). Additive: existing
+  // callers that omit it get the same code-less error as before.
+  code,
+}) {
   if (!amount) return;
 
   const user = await userModel.findById(userId);
   if (!user || user.coins < amount) {
-    throw new ErrorClass("You do not have enough coins for this buy-in", 400);
+    throw new ErrorClass(
+      "You do not have enough coins for this buy-in",
+      400,
+      code
+    );
   }
 }
 

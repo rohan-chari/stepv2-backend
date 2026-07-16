@@ -1018,6 +1018,10 @@ function createRacesRouter(dependencies = {}) {
         powerupsEnabled,
         powerupStepInterval,
         buyInAmount,
+        // Issue 4: `buyInEnabled:false` toggles a PENDING race to free (and
+        // refunds everyone). Old clients never send it. editRace ignores it on
+        // non-team/non-buy-in edits.
+        buyInEnabled,
         payoutPreset,
         maxParticipants,
         // Team races (TR-105). isTeamRace is accepted only so editRace can
@@ -1035,6 +1039,7 @@ function createRacesRouter(dependencies = {}) {
       if (powerupsEnabled !== undefined) updates.powerupsEnabled = powerupsEnabled;
       if (powerupStepInterval !== undefined) updates.powerupStepInterval = powerupStepInterval;
       if (buyInAmount !== undefined) updates.buyInAmount = buyInAmount;
+      if (buyInEnabled !== undefined) updates.buyInEnabled = buyInEnabled;
       if (payoutPreset !== undefined) updates.payoutPreset = payoutPreset;
       if (maxParticipants !== undefined) updates.maxParticipants = maxParticipants;
       if (isTeamRace !== undefined) updates.isTeamRace = isTeamRace;
