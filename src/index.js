@@ -5,6 +5,9 @@ const { registerEventHandlers } = require("./handlers/eventHandlers");
 const { registerNotificationHandlers } = require("./handlers/notificationHandlers");
 const { scheduleRaceExpiryCheck } = require("./jobs/raceExpiry");
 const { scheduleSeededRaceRenewal } = require("./jobs/seededRaceRenewal");
+const {
+  scheduleTournamentSeedRenewal,
+} = require("./jobs/tournamentSeedRenewal");
 const { scheduleComputeRanks } = require("./jobs/computeRanks");
 const { scheduleComputeRankedWeeks } = require("./jobs/computeRankedWeeks");
 const { scheduleGlobalStepEvents } = require("./jobs/globalStepEventScheduler");
@@ -23,6 +26,8 @@ function startServer({
   registerNotificationHandlers: registerNotifications = registerNotificationHandlers,
   scheduleRaceExpiryCheck: scheduleRaceExpiry = scheduleRaceExpiryCheck,
   scheduleSeededRaceRenewal: scheduleSeededRenewal = scheduleSeededRaceRenewal,
+  scheduleTournamentSeedRenewal:
+    scheduleTournamentRenewal = scheduleTournamentSeedRenewal,
   scheduleComputeRanks: scheduleRanks = scheduleComputeRanks,
   scheduleComputeRankedWeeks: scheduleRankedWeeks = scheduleComputeRankedWeeks,
   scheduleGlobalStepEvents: scheduleGlobalEvents = scheduleGlobalStepEvents,
@@ -49,6 +54,7 @@ function startServer({
     const startCrons = () => {
       scheduleRaceExpiry();
       scheduleSeededRenewal();
+      scheduleTournamentRenewal();
       scheduleRanks();
       scheduleRankedWeeks();
       scheduleGlobalEvents();

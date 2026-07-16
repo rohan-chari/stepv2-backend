@@ -10,6 +10,7 @@ const { createNotificationsRouter } = require("./routes/notifications");
 const { createLeaderboardRouter } = require("./routes/leaderboard");
 const { createRankedRouter } = require("./routes/ranked");
 const { createRacesRouter } = require("./routes/races");
+const { createTournamentsRouter } = require("./routes/tournaments");
 const { createReferralsRouter } = require("./routes/referrals");
 const { createShopRouter } = require("./routes/shop");
 const { createPowerupsRouter } = require("./routes/powerups");
@@ -66,6 +67,7 @@ function createApp(dependencies = {}) {
   app.use("/leaderboard", createLeaderboardRouter(dependencies));
   app.use("/ranked", createRankedRouter(dependencies));
   app.use("/races", createRacesRouter(dependencies));
+  app.use("/tournaments", createTournamentsRouter(dependencies));
   app.use("/referrals", createReferralsRouter(dependencies));
   app.use("/shop", createShopRouter(dependencies));
   app.use("/powerups", createPowerupsRouter(dependencies));
@@ -179,6 +181,40 @@ function createApp(dependencies = {}) {
       console.error("Race landing page error:", error);
       // Degrade to the generic install page rather than a 500 — the link should
       // still get a non-installer to the store.
+      res.status(200).type("html").send(renderRaceNotFoundPage(links));
+    }
+  });
+
+  // Public web landing page for a shared tournament (mirrors /r/*). Uses the
+  // race landing renderer with a compatible preview shape.
+  const getSharedTournamentPreview =
+    dependencies.getSharedTournamentPreview ||
+    require("./queries/getSharedTournamentPreview").getSharedTournamentPreview;
+  app.get("/t/:token", async (req, res) => {
+    const token = req.params.token;
+    const links = {
+      shareUrl: sharing.buildTournamentShareUrl(token),
+      appDeepLink: sharing.buildTournamentAppDeepLink(token),
+      appStoreUrl: sharing.APP_STORE_URL,
+      playStoreUrl: sharing.PLAY_STORE_URL,
+      ogImageUrl: sharing.OG_IMAGE_URL,
+    };
+    logLinkOpen("tournament_share", token);
+    try {
+      const preview = await getSharedTournamentPreview({ token });
+      if (!preview) {
+        return res.status(404).type("html").send(renderRaceNotFoundPage(links));
+      }
+      // Shape the tournament preview into the fields the race renderer reads.
+      const shaped = {
+        name: preview.name,
+        host: preview.host,
+        participantCount: preview.participantCount,
+        maxParticipants: preview.bracketSize,
+      };
+      res.type("html").send(renderRaceLandingPage(shaped, links));
+    } catch (error) {
+      console.error("Tournament landing page error:", error);
       res.status(200).type("html").send(renderRaceNotFoundPage(links));
     }
   });

@@ -71,6 +71,14 @@ function buildAppDeepLink(shareToken) {
   return `${APP_URL_SCHEME}://join/${shareToken}`;
 }
 
+// Tournament share link + custom-scheme deep link (mirrors /r/* for races).
+function buildTournamentShareUrl(shareToken) {
+  return `${PUBLIC_BASE_URL}/t/${shareToken}`;
+}
+function buildTournamentAppDeepLink(shareToken) {
+  return `${APP_URL_SCHEME}://tournament/${shareToken}`;
+}
+
 module.exports = {
   PUBLIC_BASE_URL,
   IOS_APP_ID,
@@ -82,4 +90,6 @@ module.exports = {
   OG_IMAGE_URL,
   buildShareUrl,
   buildAppDeepLink,
+  buildTournamentShareUrl,
+  buildTournamentAppDeepLink,
 };

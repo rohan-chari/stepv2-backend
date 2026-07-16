@@ -26,6 +26,12 @@ const KNOWN_FLAGS = {
   // old hard block (cannot edit buy-in after a participant has paid). Default ON;
   // a remote kill switch to disable the reconcile without a redeploy.
   buyInEditEnabled: true,
+  // Tournament (bracket) mode kill switch. Checked at create and every
+  // join/accept path (403 FEATURE_DISABLED) and in the featured seed reconciler
+  // (mints no new lobbies while off). Start and round advancement are NOT gated,
+  // so flipping this off stops new entries while already-filled brackets finish
+  // and pay their champion. Default ON.
+  tournamentsEnabled: true,
 };
 
 function buildAppSettings(dependencies = {}) {

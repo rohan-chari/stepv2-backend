@@ -49,6 +49,13 @@ function buildRespondToRaceInvite(dependencies = {}) {
     if (!race) {
       throw new RaceInviteResponseError("Race not found", 404, "RACE_NOT_FOUND");
     }
+    if (race.tournamentId) {
+      throw new RaceInviteResponseError(
+        "This race is managed by its tournament",
+        400,
+        "TOURNAMENT_RACE_LOCKED"
+      );
+    }
     if (race.status !== "PENDING" && race.status !== "ACTIVE") {
       throw new RaceInviteResponseError(
         "This race is no longer accepting responses",

@@ -5,10 +5,11 @@ const { eventBus } = require("../events/eventBus");
 const { refundRaceBuyIn } = require("../services/raceBuyIns");
 
 class RaceCancelError extends Error {
-  constructor(message, statusCode) {
+  constructor(message, statusCode, code) {
     super(message);
     this.name = "RaceCancelError";
     if (statusCode) this.statusCode = statusCode;
+    if (code) this.code = code;
   }
 }
 
@@ -22,6 +23,13 @@ function buildCancelRace(dependencies = {}) {
     const race = await raceModel.findById(raceId);
     if (!race) {
       throw new RaceCancelError("Race not found", 404);
+    }
+    if (race.tournamentId) {
+      throw new RaceCancelError(
+        "This race is managed by its tournament",
+        400,
+        "TOURNAMENT_RACE_LOCKED"
+      );
     }
     if (race.creatorId !== userId) {
       throw new RaceCancelError("Only the race creator can cancel the race", 403);

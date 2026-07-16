@@ -6,6 +6,7 @@ const { eventBus } = require("../events/eventBus");
 const { isRacePayoutPresetCompatible } = require("../utils/racePayoutPresets");
 
 const { acceptedTeamCounts } = require("../utils/teamRaces");
+const { snapshotBaselineFields } = require("../services/raceBaseline");
 
 class RaceStartError extends Error {
   constructor(message, statusCode, code) {
@@ -123,18 +124,15 @@ function buildStartRace(dependencies = {}) {
       return raceModel.findById(raceId);
     }
 
-    // Snapshot each participant's current steps so only post-race steps count
-    const today = startedAt.toISOString().slice(0, 10);
+    // Snapshot each participant's current steps so only post-race steps count.
+    // Shared with the tournament engine's round creation via snapshotBaselineFields.
     for (const p of acceptedParticipants) {
-      const todaySteps = await stepsModel.findByUserIdAndDate(p.userId, today);
-      const updateFields = {
-        baselineSteps: todaySteps?.steps ?? 0,
-        joinedAt: startedAt,
-      };
-      // Initialize powerup thresholds if powerups are enabled
-      if (race.powerupsEnabled && race.powerupStepInterval) {
-        updateFields.nextBoxAtSteps = race.powerupStepInterval;
-      }
+      const updateFields = await snapshotBaselineFields({
+        participant: p,
+        race,
+        startedAt,
+        stepsModel,
+      });
       if ((p.buyInAmount || 0) > 0 && p.buyInStatus === "HELD") {
         updateFields.buyInStatus = "COMMITTED";
       }

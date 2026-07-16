@@ -120,6 +120,12 @@ model User {
   referralRewardGrants ReferralRewardGrant[]
   adRewardGrants       AdRewardGrant[]
 
+  // ── Tournaments (bracket mode) — all additive back-relations. Old app builds
+  // never see these; existing rows are unaffected (no columns added to users).
+  tournamentsCreated Tournament[]            @relation("TournamentCreator")
+  tournamentsWon     Tournament[]            @relation("TournamentChampion")
+  tournamentEntries  TournamentParticipant[]
+
   @@map("users")
 }
 
@@ -714,23 +720,38 @@ model Race {
   teamAName           String?          @map("team_a_name")
   teamBName           String?          @map("team_b_name")
   winnerTeam          RaceTeam?        @map("winner_team")
+  // ── Tournaments (bracket mode) ──────────────────────────────────────────────
+  // A matchup race is an ordinary time-based WINNER_TAKES_ALL race that belongs
+  // to one tournament round. tournamentId != null flags it as a matchup: it is
+  // filtered out of every existing race listing for ALL clients and is managed
+  // only by the tournament engine (every race-level mutation returns
+  // TOURNAMENT_RACE_LOCKED). tournamentRound is 1-based; tournamentMatchIndex is
+  // 0-based within the round. The @@unique makes double-advancement a hard DB
+  // error (advancement idempotency backstop). All additive/nullable — old app
+  // builds never send or read them and old rows stay NULL.
+  tournamentId         String?         @map("tournament_id")
+  tournamentRound      Int?            @map("tournament_round")
+  tournamentMatchIndex Int?            @map("tournament_match_index")
   createdAt           DateTime         @default(now()) @map("created_at")
   updatedAt           DateTime         @updatedAt @map("updated_at")
 
   creator       User?              @relation("raceCreator", fields: [creatorId], references: [id])
   seed          RaceSeed?          @relation(fields: [seedId], references: [id])
   winner        User?              @relation("raceWinner", fields: [winnerUserId], references: [id])
+  tournament    Tournament?        @relation(fields: [tournamentId], references: [id])
   participants  RaceParticipant[]
   powerups      RacePowerup[]
   activeEffects RaceActiveEffect[]
   powerupEvents RacePowerupEvent[]
   messages      RaceMessage[]
 
+  @@unique([tournamentId, tournamentRound, tournamentMatchIndex])
   @@index([creatorId])
   @@index([status])
   @@index([winnerUserId])
   @@index([isPublic, status])
   @@index([seedId, status])
+  @@index([tournamentId, status])
   @@map("races")
 }
 
@@ -762,6 +783,101 @@ model RaceSeed {
   races Race[]
 
   @@map("race_seeds")
+}
+
+// ── Tournaments (single-elimination bracket mode) ─────────────────────────────
+// A Tournament is a bracket of 1v1 winner-take-all step matchups (4/8/16
+// players). Each matchup is an ordinary Race (see Race.tournamentId); the
+// Tournament layer owns seeding, round advancement, and the coin pot. All new
+// tables/columns are additive — old app builds never touch them.
+enum TournamentStatus {
+  PENDING   @map("pending")
+  ACTIVE    @map("active")
+  COMPLETED @map("completed")
+  CANCELLED @map("cancelled")
+}
+
+model Tournament {
+  id                  String           @id @default(uuid())
+  // null = seeded/featured (system-minted), mirrors Race.creatorId.
+  creatorId           String?          @map("creator_id")
+  // Links to the TournamentSeed for featured brackets; null for user-created.
+  seedId              String?          @map("seed_id")
+  name                String
+  status              TournamentStatus @default(PENDING)
+  bracketSize         Int              @map("bracket_size")           // 4 | 8 | 16
+  matchupDurationDays Int              @map("matchup_duration_days")  // 1 | 2 | 3
+  // 0 (free), or 10..TOURNAMENT_BUYIN_MAX[bracketSize] = 100/100/62 (D4 ladder).
+  buyInAmount         Int              @default(0) @map("buy_in_amount")
+  potCoins            Int              @default(0) @map("pot_coins")
+  powerupsEnabled     Boolean          @default(false) @map("powerups_enabled")
+  powerupStepInterval Int?             @map("powerup_step_interval")
+  isPublic            Boolean          @default(false) @map("is_public")
+  shareToken          String?          @unique @map("share_token")
+  // Creator's IANA zone at creation; "America/New_York" for seeded. Matchup
+  // races inherit it as their canonical scoring tz.
+  timezone            String?          @map("timezone")
+  currentRound        Int              @default(0) @map("current_round")   // 0 = not started
+  totalRounds         Int              @map("total_rounds")                // log2(bracketSize)
+  championUserId      String?          @map("champion_user_id")
+  createdAt           DateTime         @default(now()) @map("created_at")
+  startedAt           DateTime?        @map("started_at")
+  completedAt         DateTime?        @map("completed_at")
+
+  creator      User?                   @relation("TournamentCreator", fields: [creatorId], references: [id])
+  champion     User?                   @relation("TournamentChampion", fields: [championUserId], references: [id])
+  seed         TournamentSeed?         @relation(fields: [seedId], references: [id])
+  participants TournamentParticipant[]
+  races        Race[]
+
+  @@index([isPublic, status])
+  @@index([creatorId, status])
+  @@index([seedId, status])
+  @@map("tournaments")
+}
+
+model TournamentSeed {
+  id                  String   @id            // stable key, e.g. "seed-tournament-daily-dash"
+  kind                String   @unique @map("kind") // e.g. "DAILY_DASH"
+  name                String                  // copied verbatim to each minted tournament
+  bracketSize         Int      @map("bracket_size")
+  matchupDurationDays Int      @map("matchup_duration_days")
+  powerupsEnabled     Boolean  @default(false) @map("powerups_enabled")
+  powerupStepInterval Int?     @map("powerup_step_interval")
+  championPrizeCoins  Int      @map("champion_prize_coins") // minted prize (featured are always free); <= 1000
+  active              Boolean  @default(true)               // reconciler only reconciles active seeds
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  tournaments Tournament[]
+
+  @@map("tournament_seeds")
+}
+
+model TournamentParticipant {
+  id                String                @id @default(uuid())
+  tournamentId      String                @map("tournament_id")
+  userId            String                @map("user_id")
+  // Reuse the race participant status enum (INVITED/ACCEPTED/DECLINED).
+  status            RaceParticipantStatus @default(INVITED)
+  seed              Int?                                        // bracket slot 0..bracketSize-1, assigned at start
+  eliminatedInRound Int?                  @map("eliminated_in_round") // null = still alive (or champion)
+  buyInAmount       Int                   @default(0) @map("buy_in_amount")
+  // Reuse the race buy-in status enum (NONE/HELD/COMMITTED/REFUNDED).
+  buyInStatus       RaceBuyInStatus       @default(NONE) @map("buy_in_status")
+  // Increments on every refund; suffixes ledger refIds so a re-hold after
+  // leave->rejoin can never silently no-op against an old ledger row (§7).
+  buyInVersion      Int                   @default(0) @map("buy_in_version")
+  // ACCEPT time (updated on re-accept); the D3 exact-tie tiebreak key.
+  joinedAt          DateTime              @default(now()) @map("joined_at")
+  createdAt         DateTime              @default(now()) @map("created_at")
+
+  tournament Tournament @relation(fields: [tournamentId], references: [id])
+  user       User       @relation(fields: [userId], references: [id])
+
+  @@unique([tournamentId, userId])
+  @@index([userId, status])
+  @@map("tournament_participants")
 }
 
 model RaceParticipant {

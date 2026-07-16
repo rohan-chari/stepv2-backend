@@ -99,6 +99,13 @@ function buildForfeitRace(dependencies = {}) {
     if (!race) {
       throw new RaceForfeitError("Race not found", 404);
     }
+    if (race.tournamentId) {
+      throw new RaceForfeitError(
+        "This race is managed by its tournament",
+        400,
+        "TOURNAMENT_RACE_LOCKED"
+      );
+    }
     if (!race.isTeamRace) {
       throw new RaceForfeitError(
         "Only team races support forfeiting",

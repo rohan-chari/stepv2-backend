@@ -1,6 +1,7 @@
 const { Race } = require("../models/race");
 const { computeRacePayouts } = require("../utils/racePayoutPresets");
 const { characterPresentation } = require("../utils/shopCosmetics");
+const { roundLabel } = require("../constants/tournaments");
 const {
   computeFinishRewardPool,
   computeFinishRewardPlaces,
@@ -129,6 +130,15 @@ async function getRaceDetails(userId, raceId, supportsCharacters = false) {
     winnerTeam: race.winnerTeam ?? null,
     myTeam: myParticipant.team ?? null,
     myForfeitedAt: myParticipant.forfeitedAt ?? null,
+    // ── Tournament matchup context (additive; null on ordinary races). The
+    // frontend reads these defensively to show the "🏆 {round} — {name}" banner.
+    tournamentId: race.tournamentId ?? null,
+    tournamentRound: race.tournamentRound ?? null,
+    tournamentRoundLabel:
+      race.tournamentId && race.tournament
+        ? roundLabel(race.tournament.bracketSize, race.tournamentRound)
+        : null,
+    tournamentName: race.tournament?.name ?? null,
   };
 }
 

@@ -16,6 +16,11 @@ const {
   computeFinishRewardPool,
   computeFinishRewardPlaces,
 } = require("../constants/raceFinishReward");
+const { prisma: defaultPrisma } = require("../db");
+const { resolveMatchupWinner } = require("../constants/tournaments");
+const {
+  advanceTournament: defaultAdvanceTournament,
+} = require("./advanceTournament");
 
 function buildCompleteRace(dependencies = {}) {
   const raceModel = dependencies.Race || Race;
@@ -27,6 +32,9 @@ function buildCompleteRace(dependencies = {}) {
     dependencies.grantReferralRewardsForRace || grantReferralRewardsForRace;
   const events = dependencies.eventBus || eventBus;
   const now = dependencies.now || (() => new Date());
+  const db = dependencies.prisma || defaultPrisma;
+  const advanceTournamentFn =
+    dependencies.advanceTournament || defaultAdvanceTournament;
 
   // Team races (TR-400s/500s): callers pass `winnerTeam` (TEAM_A|TEAM_B) or
   // `tie: true` instead of winnerUserId — winnerUserId stays NULL for team
@@ -55,6 +63,73 @@ function buildCompleteRace(dependencies = {}) {
     await powerupModel.expireAllForRace(raceId);
 
     const race = await raceModel.findById(raceId);
+
+    // ── Tournament matchup settlement ────────────────────────────────────────
+    // A matchup race is an ordinary WINNER_TAKES_ALL race but the tournament
+    // owns the money and advancement. Decide the winner with the D3 tiebreak
+    // (earlier TournamentParticipant.joinedAt on an exact tie — NOT the generic
+    // userId sort), stamp the loser's eliminatedInRound immediately (D12) so the
+    // featured-join guard frees them the moment their matchup settles, and skip
+    // the pot payout, minted finish reward, referral rewards, and RACE_COMPLETED
+    // push (the tournament pushes replace it). Then drive advancement.
+    if (race?.tournamentId) {
+      const accepted = (race.participants || []).filter(
+        (p) => p.status === "ACCEPTED"
+      );
+      const tps = await db.tournamentParticipant.findMany({
+        where: {
+          tournamentId: race.tournamentId,
+          userId: { in: accepted.map((p) => p.userId) },
+        },
+        select: { id: true, userId: true, joinedAt: true, eliminatedInRound: true },
+      });
+      const tpByUser = new Map(tps.map((t) => [t.userId, t]));
+
+      const players = accepted.map((p) => ({
+        userId: p.userId,
+        totalSteps: p.totalSteps || 0,
+        forfeited: p.forfeitedAt != null,
+        tournamentJoinedAt: tpByUser.get(p.userId)?.joinedAt || p.joinedAt,
+      }));
+
+      let winnerUserId = null;
+      let loserUserId = null;
+      if (players.length === 2) {
+        ({ winnerUserId, loserUserId } = resolveMatchupWinner(
+          players[0],
+          players[1]
+        ));
+      } else if (players.length === 1) {
+        winnerUserId = players[0].userId;
+      }
+
+      // The flip set winnerUserId to the caller's provisional guess; correct it
+      // to the tournament-tiebreak result.
+      if (winnerUserId && race.winnerUserId !== winnerUserId) {
+        await raceModel.update(raceId, { winnerUserId });
+      }
+      for (const p of accepted) {
+        await participantModel.setPlacement(
+          p.id,
+          p.userId === winnerUserId ? 1 : 2
+        );
+      }
+
+      // D12: free the loser immediately (only if not already eliminated).
+      if (loserUserId) {
+        const loserTp = tpByUser.get(loserUserId);
+        if (loserTp && loserTp.eliminatedInRound == null) {
+          await db.tournamentParticipant.update({
+            where: { id: loserTp.id },
+            data: { eliminatedInRound: race.tournamentRound },
+          });
+        }
+      }
+
+      // No pot/finish/referral, no RACE_COMPLETED emit. Drive advancement.
+      await advanceTournamentFn({ tournamentId: race.tournamentId });
+      return race;
+    }
 
     if (race?.isTeamRace) {
       // ── Team settlement (one code path for deadline expiry, collapse, tie) ──

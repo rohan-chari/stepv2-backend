@@ -21,6 +21,29 @@ const { raceTimeZone } = require("../utils/raceTimeZone");
 // Canonical team H2H block — shared with the list/browser/home surfaces so all
 // of them emit an identical shape (TR-401/806/809).
 const { buildTeamsBlock } = require("../utils/teamRaces");
+const { collectRaceIllusions } = require("../services/raceIllusions");
+const { roundLabel } = require("../constants/tournaments");
+
+// Additive tournament-matchup context for a matchup race's progress payload
+// (null on ordinary races). The frontend banner reads these defensively.
+function tournamentFields(race) {
+  if (!race || !race.tournamentId) {
+    return {
+      tournamentId: null,
+      tournamentRound: null,
+      tournamentRoundLabel: null,
+      tournamentName: null,
+    };
+  }
+  return {
+    tournamentId: race.tournamentId,
+    tournamentRound: race.tournamentRound ?? null,
+    tournamentRoundLabel: race.tournament
+      ? roundLabel(race.tournament.bracketSize, race.tournamentRound)
+      : null,
+    tournamentName: race.tournament?.name ?? null,
+  };
+}
 
 // Effect TYPES that are concealed self-advantages: visible ONLY to their owner,
 // never to other racers. Filtered out of the activeEffects array server-side so
@@ -404,6 +427,7 @@ function buildGetRaceProgress(deps = {}) {
           team: p.team ?? null,
           forfeitedAt: p.forfeitedAt ?? null,
         })),
+        ...tournamentFields(race),
       };
       // Team block for the lobby (PENDING sides) and results (COMPLETED
       // totals + winnerTeam). Additive — old clients ignore it.
@@ -713,34 +737,19 @@ function buildGetRaceProgress(deps = {}) {
         }));
     }
 
-    // Build leaderboard with stealth mode and detour sign applied
-    const stealthedUserIds = new Set();
+    // Build leaderboard with stealth mode and detour sign applied. The
+    // collection is shared with the tournament bracket payload via
+    // collectRaceIllusions so the two surfaces mask identically.
+    // IMPOSTER display swaps swap the DISPLAYED leaderboard slot of two users
+    // for ALL viewers. Cosmetic only — never read by the settlement path.
+    let stealthedUserIds = new Set();
     let viewerIsDetoured = false;
-    // IMPOSTER display swaps: each entry swaps the DISPLAYED leaderboard slot of
-    // two users (owner <-> metadata.swapWithUserId) for ALL viewers. Cosmetic
-    // only — never read by the settlement path.
-    const imposterSwaps = [];
+    let imposterSwaps = [];
     const nowTime = now();
     if (race.powerupsEnabled) {
       const activeEffects = await raceActiveEffectModel.findActiveForRace(raceId);
-      for (const e of activeEffects) {
-        if (e.type === "STEALTH_MODE") {
-          stealthedUserIds.add(e.targetUserId);
-        }
-        if (e.type === "DETOUR_SIGN" && e.targetUserId === userId) {
-          viewerIsDetoured = true;
-        }
-        if (e.type === "IMPOSTER") {
-          // Defensive: skip effects already past expiry (findActiveForRace
-          // should only return ACTIVE rows, but expiry-by-time may lag a tick).
-          const notExpired =
-            !e.expiresAt || new Date(e.expiresAt).getTime() > nowTime.getTime();
-          const swapWithUserId = (e.metadata || {}).swapWithUserId;
-          if (notExpired && e.targetUserId && swapWithUserId) {
-            imposterSwaps.push({ a: e.targetUserId, b: swapWithUserId });
-          }
-        }
-      }
+      ({ stealthedUserIds, viewerIsDetoured, imposterSwaps } =
+        collectRaceIllusions(activeEffects, userId, nowTime.getTime()));
     }
 
     const leaderboard = stepTotals
@@ -816,6 +825,7 @@ function buildGetRaceProgress(deps = {}) {
       maxDurationDays: race.maxDurationDays,
       targetSteps: race.targetSteps, // 1.1.4 compat
       participants: leaderboard,
+      ...tournamentFields(race),
     };
 
     // Team H2H block (TR-401), computed from TRUE totals before any display

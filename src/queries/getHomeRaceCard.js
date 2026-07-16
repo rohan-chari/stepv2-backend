@@ -114,6 +114,9 @@ async function checkActiveRace(
       status: "ACCEPTED",
       race: {
         status: "ACTIVE",
+        // Matchup races are never shown on the home card — only via the
+        // tournament screen (§4).
+        tournamentId: null,
         // TR-702: an old binary can't render a team race — it would draw one as
         // a broken individual race. Skip team races for those clients (they
         // fall through to the next home state). In practice unreachable: an old
@@ -401,7 +404,8 @@ async function checkActiveRaces(prisma, userId, options = {}) {
     where: {
       userId,
       status: "ACCEPTED",
-      race: { status: "ACTIVE" },
+      // Matchup races are surfaced only via the tournament screen (§4).
+      race: { status: "ACTIVE", tournamentId: null },
     },
     include: {
       race: {

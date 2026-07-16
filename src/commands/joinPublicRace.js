@@ -26,6 +26,13 @@ function buildJoinPublicRace(dependencies = {}) {
       if (!race) {
         throw new RaceJoinError("Race not found", 404, "RACE_NOT_FOUND");
       }
+      if (race.tournamentId) {
+        throw new RaceJoinError(
+          "This race is managed by its tournament",
+          400,
+          "TOURNAMENT_RACE_LOCKED"
+        );
+      }
       if (!race.isPublic) {
         throw new RaceJoinError("This race is not public", 403);
       }

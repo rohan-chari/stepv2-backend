@@ -287,6 +287,10 @@ function registerNotificationHandlers(dependencies = {}) {
 
   events.on("RACE_STARTED", async (data) => {
     try {
+      // Suppress for tournament matchup races — the TOURNAMENT_* pushes replace
+      // the generic race start/finish alerts (§6.5). (Matchups don't emit this
+      // event today; this is a defensive backstop.)
+      if (data && data.tournamentId) return;
       const {
         raceId,
         raceName,
@@ -326,6 +330,8 @@ function registerNotificationHandlers(dependencies = {}) {
 
   events.on("RACE_COMPLETED", async (data) => {
     try {
+      // Suppress for tournament matchup races (see RACE_STARTED note).
+      if (data && data.tournamentId) return;
       const {
         raceId,
         winnerUserId,
@@ -905,6 +911,219 @@ function registerNotificationHandlers(dependencies = {}) {
       }
     } catch (error) {
       logger.error("PLACEMENT_CHANGED handler failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // ── Tournament (bracket) pushes (§8) ──────────────────────────────────────
+  // All additive TOURNAMENT_* types. Old apps show the alert and no-op the deep
+  // link (their route resolver returns null for unknown types). Each event is
+  // already per-recipient (carries `userId`), so the handler sends to one user.
+
+  events.on("TOURNAMENT_INVITE_SENT", async (data) => {
+    try {
+      const { tournamentId, tournamentName, creatorUserId, userId, bracketSize, potCoins } =
+        data || {};
+      if (!userId) return;
+      const prize =
+        potCoins && potCoins > 0
+          ? `winner takes ${potCoins}!`
+          : "winner takes the crown!";
+      await sendNotificationToUser({
+        eventName: "TOURNAMENT_INVITE_SENT",
+        recipientUserId: userId,
+        actorUserId: creatorUserId,
+        title: "Tournament invite",
+        buildBody: (creatorName) =>
+          `🏆 ${creatorName} invited you to ${tournamentName} — ${bracketSize} racers, ${prize}`,
+        payload: {
+          type: "TOURNAMENT_INVITE_SENT",
+          route: "tournament_detail",
+          params: { tournamentId },
+        },
+        logContext: { tournamentId, userId },
+      });
+    } catch (error) {
+      logger.error("TOURNAMENT_INVITE_SENT handler failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  events.on("TOURNAMENT_STARTED", async (data) => {
+    try {
+      const { tournamentId, userId, raceId, opponentName, days } = data || {};
+      if (!userId) return;
+      await sendNotificationToUser({
+        eventName: "TOURNAMENT_STARTED",
+        recipientUserId: userId,
+        actorUserId: null,
+        title: "The bracket is set!",
+        buildBody: () =>
+          `Round 1: you vs ${opponentName}. ${days}d — go!`,
+        payload: {
+          type: "TOURNAMENT_STARTED",
+          route: "race_detail",
+          params: { raceId, tournamentId },
+        },
+        logContext: { tournamentId, userId, raceId },
+      });
+    } catch (error) {
+      logger.error("TOURNAMENT_STARTED handler failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  events.on("TOURNAMENT_ROUND_STARTED", async (data) => {
+    try {
+      const { tournamentId, userId, raceId, label, opponentName, days } = data || {};
+      if (!userId) return;
+      await sendNotificationToUser({
+        eventName: "TOURNAMENT_ROUND_STARTED",
+        recipientUserId: userId,
+        actorUserId: null,
+        title: `${label}!`,
+        buildBody: () => `You drew ${opponentName}. ${days}d on the clock.`,
+        payload: {
+          type: "TOURNAMENT_ROUND_STARTED",
+          route: "race_detail",
+          params: { raceId, tournamentId },
+        },
+        logContext: { tournamentId, userId, raceId },
+      });
+    } catch (error) {
+      logger.error("TOURNAMENT_ROUND_STARTED handler failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  events.on("TOURNAMENT_MATCHUP_WON", async (data) => {
+    try {
+      const { tournamentId, userId, nextLabel } = data || {};
+      if (!userId) return;
+      await sendNotificationToUser({
+        eventName: "TOURNAMENT_MATCHUP_WON",
+        recipientUserId: userId,
+        actorUserId: null,
+        title: "You won your matchup!",
+        buildBody: () => `${nextLabel} is next.`,
+        payload: {
+          type: "TOURNAMENT_MATCHUP_WON",
+          route: "tournament_detail",
+          params: { tournamentId },
+        },
+        logContext: { tournamentId, userId },
+      });
+    } catch (error) {
+      logger.error("TOURNAMENT_MATCHUP_WON handler failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  events.on("TOURNAMENT_ELIMINATED", async (data) => {
+    try {
+      const { tournamentId, userId, label, opponentName } = data || {};
+      if (!userId) return;
+      await sendNotificationToUser({
+        eventName: "TOURNAMENT_ELIMINATED",
+        recipientUserId: userId,
+        actorUserId: null,
+        title: "Knocked out",
+        buildBody: () =>
+          `Knocked out in the ${label} by ${opponentName}. Follow the bracket to the end!`,
+        payload: {
+          type: "TOURNAMENT_ELIMINATED",
+          route: "tournament_detail",
+          params: { tournamentId },
+        },
+        logContext: { tournamentId, userId },
+      });
+    } catch (error) {
+      logger.error("TOURNAMENT_ELIMINATED handler failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  events.on("TOURNAMENT_CHAMPION", async (data) => {
+    try {
+      const { tournamentId, tournamentName, userId, prizeCoins } = data || {};
+      if (!userId) return;
+      const tail =
+        prizeCoins && prizeCoins > 0
+          ? `and won ${prizeCoins} coins!`
+          : "and took the crown!";
+      await sendNotificationToUser({
+        eventName: "TOURNAMENT_CHAMPION",
+        recipientUserId: userId,
+        actorUserId: null,
+        title: "🏆 CHAMPION!",
+        buildBody: () => `You swept ${tournamentName} ${tail}`,
+        payload: {
+          type: "TOURNAMENT_CHAMPION",
+          route: "tournament_detail",
+          params: { tournamentId },
+        },
+        logContext: { tournamentId, userId },
+      });
+    } catch (error) {
+      logger.error("TOURNAMENT_CHAMPION handler failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  events.on("TOURNAMENT_COMPLETED", async (data) => {
+    try {
+      const { tournamentId, tournamentName, userId, championName } = data || {};
+      if (!userId) return;
+      await sendNotificationToUser({
+        eventName: "TOURNAMENT_COMPLETED",
+        recipientUserId: userId,
+        actorUserId: null,
+        title: "Tournament over",
+        buildBody: () => `${championName} took the crown in ${tournamentName}.`,
+        payload: {
+          type: "TOURNAMENT_COMPLETED",
+          route: "tournament_detail",
+          params: { tournamentId },
+        },
+        logContext: { tournamentId, userId },
+      });
+    } catch (error) {
+      logger.error("TOURNAMENT_COMPLETED handler failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  events.on("TOURNAMENT_CANCELLED", async (data) => {
+    try {
+      const { tournamentId, tournamentName, userId, buyInAmount } = data || {};
+      if (!userId) return;
+      const body =
+        buyInAmount && buyInAmount > 0
+          ? `${tournamentName} was called off — your ${buyInAmount} coins are back.`
+          : `${tournamentName} was called off.`;
+      await sendNotificationToUser({
+        eventName: "TOURNAMENT_CANCELLED",
+        recipientUserId: userId,
+        actorUserId: null,
+        title: "Tournament cancelled",
+        buildBody: () => body,
+        payload: {
+          type: "TOURNAMENT_CANCELLED",
+          route: "tournament_detail",
+          params: { tournamentId },
+        },
+        logContext: { tournamentId, userId },
+      });
+    } catch (error) {
+      logger.error("TOURNAMENT_CANCELLED handler failed", {
         error: error instanceof Error ? error.message : String(error),
       });
     }

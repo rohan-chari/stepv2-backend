@@ -17,6 +17,8 @@ function buildGetPublicRaces(dependencies = {}) {
 
     const results = [];
     for (const race of races) {
+      // Matchup races are never browsable — managed only via the tournament UI.
+      if (race.tournamentId) continue;
       if (race.isTeamRace && !supportsTeamRaces) continue;
       if (race.isTeamRace && race.status !== "PENDING") continue;
       const participants = race.participants || [];

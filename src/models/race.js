@@ -43,6 +43,9 @@ const Race = {
         creator: { select: { id: true, displayName: true, profilePhotoUrl: true } },
         winner: { select: { id: true, displayName: true, profilePhotoUrl: true } },
         seed: { select: { kind: true } },
+        // Tournament context for a matchup race's banner (additive; null on
+        // ordinary races).
+        tournament: { select: { id: true, name: true, bracketSize: true } },
         ...participantInclude,
       },
     });

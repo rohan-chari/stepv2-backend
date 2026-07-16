@@ -54,6 +54,9 @@ const {
 } = require("../commands/redeemPowerupToRace");
 const { getRaces: defaultGetRaces } = require("../queries/getRaces");
 const {
+  getTournamentsForUser: defaultGetTournamentsForUser,
+} = require("../queries/getTournamentsForUser");
+const {
   getRaceDetails: defaultGetRaceDetails,
 } = require("../queries/getRaceDetails");
 const {
@@ -134,6 +137,8 @@ function createRacesRouter(dependencies = {}) {
   const generateTeamNamePair =
     dependencies.generateTeamNamePair || defaultGenerateTeamNamePair;
   const getRaces = dependencies.getRaces || defaultGetRaces;
+  const getTournamentsForUser =
+    dependencies.getTournamentsForUser || defaultGetTournamentsForUser;
   const getRaceDetails = dependencies.getRaceDetails || defaultGetRaceDetails;
   const getRaceProgress =
     dependencies.getRaceProgress || defaultGetRaceProgress;
@@ -254,6 +259,11 @@ function createRacesRouter(dependencies = {}) {
         req.user.id,
         req.clientFeatures?.has("team_races") ?? false
       );
+      // Additive `tournaments` array for token clients ONLY — old clients' JSON
+      // stays byte-identical (§4/§6.3).
+      if (req.clientFeatures?.has("tournaments")) {
+        result.tournaments = await getTournamentsForUser(req.user.id);
+      }
       res.json(result);
     } catch (error) {
       console.error("Get races error:", error);

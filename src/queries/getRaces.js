@@ -63,6 +63,9 @@ async function getRaces(userId, supportsTeamRaces = false) {
   const completed = [];
 
   for (const race of races) {
+    // Matchup races (tournamentId != null) are managed only through the
+    // tournament screen; they never appear in any race listing for ANY client.
+    if (race.tournamentId) continue;
     if (race.isTeamRace && !supportsTeamRaces) continue;
     const myParticipant = race.participants.find((p) => p.userId === userId);
     const acceptedCount = race.participants.filter((p) => p.status === "ACCEPTED").length;

@@ -2,10 +2,11 @@ const { Race } = require("../models/race");
 const { generateShareToken } = require("../utils/shareToken");
 
 class RaceShareLinkError extends Error {
-  constructor(message, statusCode) {
+  constructor(message, statusCode, code) {
     super(message);
     this.name = "RaceShareLinkError";
     if (statusCode) this.statusCode = statusCode;
+    if (code) this.code = code;
   }
 }
 
@@ -25,6 +26,13 @@ function buildCreateRaceShareLink(dependencies = {}) {
     const race = await raceModel.findById(raceId);
     if (!race) {
       throw new RaceShareLinkError("Race not found", 404);
+    }
+    if (race.tournamentId) {
+      throw new RaceShareLinkError(
+        "This race is managed by its tournament",
+        400,
+        "TOURNAMENT_RACE_LOCKED"
+      );
     }
 
     const isAcceptedMember =

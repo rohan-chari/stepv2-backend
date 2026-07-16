@@ -6,6 +6,8 @@ const { StepSample } = require("../models/stepSample");
 const { Steps } = require("../models/steps");
 const { GlobalStepEvent } = require("../models/globalStepEvent");
 const { completeRace } = require("../commands/completeRace");
+const { advanceTournament } = require("../commands/advanceTournament");
+const { prisma } = require("../db");
 const {
   calculateBaseAdjusted,
   calculateCurrentTotal,
@@ -192,6 +194,27 @@ async function resolveExpiredRaces() {
     } catch (error) {
       console.error(`[CRON] Failed to resolve expired race ${race.id}:`, error);
     }
+  }
+
+  // Belt-and-braces tournament advancement sweep: settling a matchup already
+  // drives advanceTournament via completeRace, but a crash between settling the
+  // last matchup and advancing would strand a bracket. advanceTournament is a
+  // cheap no-op when the current round isn't fully settled, so call it for every
+  // ACTIVE tournament each sweep.
+  try {
+    const activeTournaments = await prisma.tournament.findMany({
+      where: { status: "ACTIVE" },
+      select: { id: true },
+    });
+    for (const t of activeTournaments) {
+      try {
+        await advanceTournament({ tournamentId: t.id });
+      } catch (error) {
+        console.error(`[CRON] Tournament advance sweep failed for ${t.id}:`, error);
+      }
+    }
+  } catch (error) {
+    console.error("[CRON] Tournament advance sweep query failed:", error);
   }
 }
 

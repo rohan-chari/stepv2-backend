@@ -16,6 +16,10 @@ function buildAppleAppSiteAssociation({ iosAppId = sharing.IOS_APP_ID } = {}) {
               "/": "/r/*",
               comment: "Shared race invite links",
             },
+            {
+              "/": "/t/*",
+              comment: "Shared tournament invite links",
+            },
           ],
         },
       ],

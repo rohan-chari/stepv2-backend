@@ -30,6 +30,13 @@ function buildLeaveRace(dependencies = {}) {
     if (!race) {
       throw new RaceLeaveError("Race not found", 404);
     }
+    if (race.tournamentId) {
+      throw new RaceLeaveError(
+        "This race is managed by its tournament",
+        400,
+        "TOURNAMENT_RACE_LOCKED"
+      );
+    }
     if (!race.isTeamRace) {
       throw new RaceLeaveError("This race does not support leaving", 400);
     }

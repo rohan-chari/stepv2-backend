@@ -45,6 +45,13 @@ function buildEditRace(dependencies = {}) {
     if (!race) {
       throw new RaceEditError("Race not found", 404);
     }
+    if (race.tournamentId) {
+      throw new RaceEditError(
+        "This race is managed by its tournament",
+        400,
+        "TOURNAMENT_RACE_LOCKED"
+      );
+    }
     if (race.creatorId !== userId) {
       throw new RaceEditError("Only the race creator can edit the race", 403);
     }
