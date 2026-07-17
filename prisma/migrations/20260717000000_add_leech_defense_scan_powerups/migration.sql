@@ -1,0 +1,23 @@
+-- LEECH + DEFENSE_SCAN (X-Ray) powerups. ADDITIVE ONLY.
+--
+-- Both are store-only powerups (coin store, like IMPOSTER / RAINSTORM /
+-- SIGNAL_JAMMER): neither ever rolls from a mystery box, so no rarity-tier data
+-- changes.
+--   * LEECH  — targeted, leecher-driven debuff. For 30 minutes every step the
+--     leecher takes removes one step from the chosen rival (capped at 3000 per
+--     leech, max 2 leechers per victim). Compression Socks block it; a Mirror
+--     never reflects it. NOT stealthy — the victim sees the badge + gets a push.
+--   * DEFENSE_SCAN — instantaneous intel read (shipped as "X-Ray"). Creates NO
+--     effect; using it returns a snapshot of every opponent's active defenses.
+--
+-- Back-compat: two additive enum values; no column/table/constraint is dropped
+-- or renamed. Old app versions render unknown powerup types with a fallback icon
+-- and read names/descriptions from the API, so they keep working. The store
+-- catalog hides both items from clients that don't advertise the `powerups2`
+-- X-Client-Features token, so old binaries never see them.
+--
+-- NOTE: `ALTER TYPE ... ADD VALUE` cannot run in the same transaction as
+-- statements that USE the new value. These are isolated statements, so they are
+-- safe. If applied by hand and Postgres complains, run each on its own first.
+ALTER TYPE "PowerupType" ADD VALUE IF NOT EXISTS 'leech' BEFORE 'mystery_box';
+ALTER TYPE "PowerupType" ADD VALUE IF NOT EXISTS 'defense_scan' BEFORE 'mystery_box';

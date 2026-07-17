@@ -37,6 +37,10 @@ const {
   renderReferralNotFoundPage,
 } = require("./web/referralLandingPage");
 const {
+  renderTournamentLandingPage,
+  renderTournamentNotFoundPage,
+} = require("./web/tournamentLandingPage");
+const {
   getSharedRacePreview: defaultGetSharedRacePreview,
 } = require("./queries/getSharedRacePreview");
 const {
@@ -185,8 +189,9 @@ function createApp(dependencies = {}) {
     }
   });
 
-  // Public web landing page for a shared tournament (mirrors /r/*). Uses the
-  // race landing renderer with a compatible preview shape.
+  // Public web landing page for a shared tournament (Item 4). Uses a DEDICATED
+  // tournament renderer (not the race one) so the fallback shows bracket copy +
+  // the tournament custom-scheme deep link (bara://tournament/<token>).
   const getSharedTournamentPreview =
     dependencies.getSharedTournamentPreview ||
     require("./queries/getSharedTournamentPreview").getSharedTournamentPreview;
@@ -203,19 +208,18 @@ function createApp(dependencies = {}) {
     try {
       const preview = await getSharedTournamentPreview({ token });
       if (!preview) {
-        return res.status(404).type("html").send(renderRaceNotFoundPage(links));
+        return res
+          .status(404)
+          .type("html")
+          .send(renderTournamentNotFoundPage(links));
       }
-      // Shape the tournament preview into the fields the race renderer reads.
-      const shaped = {
-        name: preview.name,
-        host: preview.host,
-        participantCount: preview.participantCount,
-        maxParticipants: preview.bracketSize,
-      };
-      res.type("html").send(renderRaceLandingPage(shaped, links));
+      res.type("html").send(renderTournamentLandingPage(preview, links));
     } catch (error) {
       console.error("Tournament landing page error:", error);
-      res.status(200).type("html").send(renderRaceNotFoundPage(links));
+      res
+        .status(200)
+        .type("html")
+        .send(renderTournamentNotFoundPage(links));
     }
   });
 

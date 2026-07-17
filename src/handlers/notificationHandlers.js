@@ -629,12 +629,15 @@ function registerNotificationHandlers(dependencies = {}) {
     SHORTCUT: (attackerName) => `${attackerName} stole steps from you with Shortcut!`,
     WRONG_TURN: (attackerName) => `${attackerName} sent you on a Wrong Turn! Your steps are reversed for 1 hour.`,
     SIGNAL_JAMMER: (attackerName) => `${attackerName} jammed your powerups for 1 hour! 📵`,
+    // Leech is deliberately NOT stealthy — the victim is told who's draining them
+    // so their steps dropping never becomes a "why?" mystery (Item 2).
+    LEECH: (attackerName) => `🩸 ${attackerName} is leeching your steps! Keep moving for the next 30 minutes.`,
   };
 
   events.on("POWERUP_USED", async (data) => {
     try {
       const { raceId, userId, powerupType, targetUserId } = data;
-      if (!targetUserId || !["LEG_CRAMP", "RED_CARD", "SHORTCUT", "WRONG_TURN", "SIGNAL_JAMMER"].includes(powerupType)) return;
+      if (!targetUserId || !["LEG_CRAMP", "RED_CARD", "SHORTCUT", "WRONG_TURN", "SIGNAL_JAMMER", "LEECH"].includes(powerupType)) return;
 
       // T9 safety net: suppress the attack push if the race is no longer live —
       // not ACTIVE, or already past endsAt (the expired-but-unsettled gap, where

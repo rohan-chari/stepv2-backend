@@ -212,4 +212,13 @@ function renderRaceNotFoundPage(links) {
   });
 }
 
-module.exports = { renderRaceLandingPage, renderRaceNotFoundPage, escapeHtml };
+// `shell` + `pageScript` are exported so the tournament landing page
+// (web/tournamentLandingPage.js) reuses the exact same Bara-trail chrome, store
+// buttons, and Play-alert script — only the inner copy differs.
+module.exports = {
+  renderRaceLandingPage,
+  renderRaceNotFoundPage,
+  escapeHtml,
+  shell,
+  pageScript,
+};

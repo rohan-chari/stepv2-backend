@@ -595,6 +595,17 @@ enum PowerupType {
   // cannot USE any powerup in the race for 1 hour. Additive enum value, placed
   // before mystery_box to match the schema's declared ordering.
   SIGNAL_JAMMER     @map("signal_jammer")
+  // LEECH is STORE-ONLY (coin store, like IMPOSTER / RAINSTORM / SIGNAL_JAMMER)
+  // and never rolls from a mystery box. Targeted, leecher-driven debuff: for 30
+  // minutes every step the leecher takes removes one step from the chosen rival
+  // (capped at 3000, max 2 leechers per victim). Blocked by Compression Socks,
+  // never reflected by a Mirror. Additive enum value, placed before mystery_box.
+  LEECH             @map("leech")
+  // DEFENSE_SCAN (shipped as "X-Ray") is STORE-ONLY and instantaneous — it grants
+  // no timed effect. Using it returns a snapshot of every opponent's active
+  // defenses (Compression Socks / Mirror) in the use response. Additive enum
+  // value, placed before mystery_box to match the schema's declared ordering.
+  DEFENSE_SCAN      @map("defense_scan")
   MYSTERY_BOX       @map("mystery_box")
 }
 

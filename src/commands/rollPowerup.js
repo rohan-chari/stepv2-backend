@@ -48,6 +48,11 @@ const POWERUP_NAMES = {
   // SIGNAL_JAMMER is store-only (coin store), never rolled from a mystery box.
   // Named here so the EFFECT_EXPIRED feed text reads "Signal Jammer wore off."
   SIGNAL_JAMMER: "Signal Jammer",
+  // LEECH + DEFENSE_SCAN (X-Ray) are store-only (coin store), never rolled from
+  // a mystery box. Named here for feed/display (e.g. a Compression-Socks block
+  // message on a Leech, or an EFFECT_EXPIRED "Leech wore off").
+  LEECH: "Leech",
+  DEFENSE_SCAN: "X-Ray",
 };
 
 function buildRollPowerup(dependencies = {}) {

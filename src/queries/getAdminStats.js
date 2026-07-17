@@ -122,6 +122,21 @@ function buildGetAdminStats(dependencies = {}) {
            AND completed_at >= now() - interval '7 days')::bigint                                                          AS team_completed_7d,
         (SELECT COUNT(*) FROM races WHERE is_team_race AND status = 'active')::bigint                                      AS team_active_now`;
 
+    // Item 9: average number of DISTINCT users who open an in-race mystery box
+    // per ET day, over the days we have data (MYSTERY_BOX_OPENED events are
+    // written from the box-open deploy forward — no history before that). ET-day
+    // anchored like every other metric here. Days with zero opens don't appear
+    // (no rows), so the average is over active days only.
+    const [boxOpenerRows] = await prisma.$queryRaw`
+      SELECT AVG(daily_users)::float AS avg_box_openers
+      FROM (
+        SELECT (created_at AT TIME ZONE 'America/New_York')::date AS d,
+               COUNT(DISTINCT actor_user_id) AS daily_users
+        FROM race_powerup_events
+        WHERE event_type = 'MYSTERY_BOX_OPENED'
+        GROUP BY d
+      ) t`;
+
     const distribution = { "0": 0, "1": 0, "2": 0, "3-5": 0, "6+": 0 };
     for (const row of friendsDist) distribution[row.bucket] = n(row.users);
 
@@ -151,6 +166,12 @@ function buildGetAdminStats(dependencies = {}) {
         dauToday: dau,
         dauInActiveRace,
         pctDauInActiveRace: dau > 0 ? Math.round((dauInActiveRace / dau) * 100) : 0,
+        // Additive (Item 9). Null when there is no box-open data yet (e.g. right
+        // after deploy) so the admin UI can render an em dash. Rounded to 1 dp.
+        avgUniqueBoxOpenersPerDay:
+          boxOpenerRows?.avg_box_openers == null
+            ? null
+            : Math.round(Number(boxOpenerRows.avg_box_openers) * 10) / 10,
       },
       friends: { distribution },
       retention: ret,

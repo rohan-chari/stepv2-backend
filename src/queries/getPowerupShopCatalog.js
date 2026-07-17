@@ -1,6 +1,10 @@
 const { User } = require("../models/user");
 const { PowerupShopItem } = require("../models/powerupShopItem");
 const { UserPowerupItem } = require("../models/userPowerupItem");
+const {
+  POWERUPS2_GATED_TYPES,
+  isImposterDisabledForCatalog,
+} = require("../constants/powerupGating");
 
 // GET /shop/powerups — active coin-purchasable powerups, the user's coin
 // balance, and how many of each type the user already owns. Powerups are
@@ -13,7 +17,7 @@ function buildGetPowerupShopCatalog(deps = {}) {
 
   return async function getPowerupShopCatalog(
     userId,
-    { channel = "prod", supportsJammer = false } = {}
+    { channel = "prod", supportsJammer = false, supportsPowerups2 = false } = {}
   ) {
     const [coins, items, inventory] = await Promise.all([
       userModel.findCoins(userId),
@@ -26,13 +30,23 @@ function buildGetPowerupShopCatalog(deps = {}) {
       ownedByType[row.powerupType] = row.quantity ?? 0;
     }
 
-    // Gate the Signal Jammer behind the `jammer` client-feature: old app
-    // binaries that don't advertise it never see the item in their catalog (they
-    // can't render/target it correctly). Additive — every other powerup is
-    // returned to all clients.
-    const visibleItems = supportsJammer
-      ? items
-      : items.filter((item) => item.powerupType !== "SIGNAL_JAMMER");
+    // Layered gating (all additive — every other powerup is returned to all
+    // clients):
+    //   * IMPOSTER is DISABLED going forward: filtered out unconditionally so no
+    //     app version — old or new — is offered it anymore (Item 3). Held/owned
+    //     copies are untouched; re-enable is a single env flip (IMPOSTER_ENABLED).
+    //   * Signal Jammer is gated behind the `jammer` client-feature: old binaries
+    //     that don't advertise it never see it (they can't render/target it).
+    //   * Leech + X-Ray (DEFENSE_SCAN) are gated behind the `powerups2` feature:
+    //     old binaries never see them until the carrying app build rolls out.
+    const visibleItems = items.filter((item) => {
+      if (isImposterDisabledForCatalog(item.powerupType)) return false;
+      if (!supportsJammer && item.powerupType === "SIGNAL_JAMMER") return false;
+      if (!supportsPowerups2 && POWERUPS2_GATED_TYPES.includes(item.powerupType)) {
+        return false;
+      }
+      return true;
+    });
 
     return {
       coins: coins ?? 0,

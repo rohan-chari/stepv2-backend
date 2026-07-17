@@ -111,6 +111,11 @@ function buildRounds(t, viewerUserId, nowMs) {
           userId: p.userId,
           totalSteps: masked ? null : p.totalSteps || 0,
           forfeited: p.forfeitedAt != null,
+          // Item 11: emit the masked flag (parallel to the race leaderboard's
+          // `stealthed`) so the bracket renders "???" instead of a blank/0 for a
+          // detoured/stealthed player. Additive — old clients ignore it, and a
+          // new client can also infer masking from totalSteps === null.
+          stealthed: masked,
         };
       });
 

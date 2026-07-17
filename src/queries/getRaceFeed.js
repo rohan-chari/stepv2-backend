@@ -38,7 +38,13 @@ async function getRaceFeed(userId, raceId, { cursor, limit = 50 } = {}) {
     }
   }
 
-  const events = await RacePowerupEvent.findByRace(raceId, { cursor, limit });
+  const rawEvents = await RacePowerupEvent.findByRace(raceId, { cursor, limit });
+
+  // MYSTERY_BOX_OPENED rows are persisted only for the admin box-opener metric
+  // (Item 9). They are audit-only — hide them from the visible feed so the
+  // frequent box opens don't bury the powerup-use activity. Filtered post-query
+  // so paging cursors (createdAt of the last raw row) stay stable.
+  const events = rawEvents.filter((e) => e.eventType !== "MYSTERY_BOX_OPENED");
 
   return {
     events: events.map((e) => {
@@ -71,7 +77,12 @@ async function getRaceFeed(userId, raceId, { cursor, limit = 50 } = {}) {
         createdAt: e.createdAt,
       };
     }),
-    nextCursor: events.length === limit ? events[events.length - 1].createdAt.toISOString() : null,
+    // Paging is driven by the RAW page size (before the audit-row filter) so a
+    // page that was full at the DB still advances the cursor correctly.
+    nextCursor:
+      rawEvents.length === limit
+        ? rawEvents[rawEvents.length - 1].createdAt.toISOString()
+        : null,
   };
 }
 

@@ -140,6 +140,33 @@ async function seed() {
       testOnly: false,
       sortOrder: 3,
     },
+    {
+      // Store-only, gated from old clients via the `powerups2` X-Client-Features
+      // token (catalog filter in getPowerupShopCatalog). Targeted, leecher-driven
+      // debuff — see the PowerupType enum note. Never a mystery-box / daily-box
+      // prize (excluded from getEligiblePowerupPool).
+      sku: "POWERUP_LEECH",
+      name: "Leech",
+      description:
+        "Latch onto a rival for 30 minutes — every step YOU take drains one from them (up to 3,000). You keep your own steps; you just don't pocket theirs. Compression Socks block it, and Mirrors can't reflect it.",
+      priceCoins: 300,
+      powerupType: "LEECH",
+      active: true,
+      sortOrder: 4,
+    },
+    {
+      // Store-only, `powerups2`-gated. Instantaneous intel read (shipped as
+      // "X-Ray"): reveals every opponent's active defenses in one use. Creates no
+      // effect. Never a mystery-box / daily-box prize.
+      sku: "POWERUP_XRAY",
+      name: "X-Ray",
+      description:
+        "Instantly scan every opponent and see who has a defense up — Compression Socks or a Mirror — and when it expires. Pure recon: it reveals nothing to anyone else.",
+      priceCoins: 150,
+      powerupType: "DEFENSE_SCAN",
+      active: true,
+      sortOrder: 5,
+    },
   ];
   let powerupItemsUpserted = 0;
   for (const p of powerupShopItems) {

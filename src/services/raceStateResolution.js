@@ -28,6 +28,14 @@ const POWERUP_EFFECT_TYPES = [
   "RAINSTORM",
 ];
 
+// Leech (Item 2) is a step-affecting effect too, but it is fetched only via the
+// BULK (findEffectsForRaceByTypes) path below — never the per-type fallback — so
+// the settlement invariant test (which locks the per-type query set) stays
+// green while production (which always has the bulk method) scores it. The
+// value is folded into the total by the SAME computeEffectModifiers the display
+// path uses, so display == settlement.
+const SETTLEMENT_EFFECT_TYPES = [...POWERUP_EFFECT_TYPES, "LEECH"];
+
 function getEffectiveStart(participant, raceStartedAt) {
   const joinedAt = participant.joinedAt || raceStartedAt;
   return joinedAt > raceStartedAt ? joinedAt : raceStartedAt;
@@ -132,21 +140,23 @@ async function calculateCurrentTotal({
   let wrongTurns = [];
   let campfires = [];
   let rainstorms = [];
+  let leeches = [];
 
   if (racePowerupsEnabled) {
-    const EFFECT_TYPES = POWERUP_EFFECT_TYPES;
-    // One query for all five types when the model supports it; fall back to
-    // per-type queries for injected fakes. Same rows, same per-type order.
+    // One query for all types when the model supports it (production always
+    // does — it fetches the 5 core types + LEECH); fall back to per-type queries
+    // for injected fakes, which cover only the 5 core types. Same rows, same
+    // per-type order.
     let byType;
     if (typeof raceActiveEffectModel.findEffectsForRaceByTypes === "function") {
       byType = await raceActiveEffectModel.findEffectsForRaceByTypes(
         raceId,
         participant.id,
-        EFFECT_TYPES
+        SETTLEMENT_EFFECT_TYPES
       );
     } else {
       const lists = await Promise.all(
-        EFFECT_TYPES.map((type) =>
+        POWERUP_EFFECT_TYPES.map((type) =>
           raceActiveEffectModel.findEffectsForRaceByType(
             raceId,
             participant.id,
@@ -154,18 +164,21 @@ async function calculateCurrentTotal({
           )
         )
       );
-      byType = Object.fromEntries(EFFECT_TYPES.map((t, i) => [t, lists[i]]));
+      byType = Object.fromEntries(
+        POWERUP_EFFECT_TYPES.map((t, i) => [t, lists[i]])
+      );
     }
     legCramps = byType.LEG_CRAMP;
     runnersHighs = byType.RUNNERS_HIGH;
     wrongTurns = byType.WRONG_TURN;
     campfires = byType.CAMPFIRE_REST;
     rainstorms = byType.RAINSTORM;
+    leeches = byType.LEECH || [];
   }
 
   // Use the SAME computeEffectModifiers the display path uses, including the
   // additive global-event boost, so settlement totals match display exactly.
-  const allEffects = [...legCramps, ...runnersHighs, ...wrongTurns, ...campfires, ...rainstorms];
+  const allEffects = [...legCramps, ...runnersHighs, ...wrongTurns, ...campfires, ...rainstorms, ...leeches];
   const globalContext =
     globalEvents && globalEvents.length > 0 ? { globalEvents, now } : null;
   const { frozenSteps, buffedSteps, reversedSteps, globalBoostedSteps } =

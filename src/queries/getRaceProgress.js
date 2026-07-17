@@ -22,6 +22,9 @@ const { raceTimeZone } = require("../utils/raceTimeZone");
 // of them emit an identical shape (TR-401/806/809).
 const { buildTeamsBlock } = require("../utils/teamRaces");
 const { collectRaceIllusions } = require("../services/raceIllusions");
+const {
+  imposterEnabled: defaultImposterEnabled,
+} = require("../constants/powerupGating");
 const { roundLabel } = require("../constants/tournaments");
 const { isTournamentParticipant } = require("../services/tournamentAccess");
 
@@ -59,6 +62,10 @@ const HIDDEN_FROM_OPPONENTS = new Set([
   "FANNY_PACK",
   "TRAIL_MINE",
 ]);
+
+// Per-leech hard cap on steps removed from a victim (Item 2). Mirrors the value
+// echoed into the LEECH effect metadata by usePowerup.
+const LEECH_STEP_CAP = 3000;
 
 // Snapshot-based fallback for when StepSample data is unavailable
 function computeEffectModifiersFallback(effects, rawTotal) {
@@ -132,6 +139,7 @@ async function computeEffectModifiers(effects, rawTotal, userId, stepSampleModel
   const wrongTurns = effects.filter((e) => e.type === "WRONG_TURN");
   const campfires = effects.filter((e) => e.type === "CAMPFIRE_REST");
   const rainstorms = effects.filter((e) => e.type === "RAINSTORM");
+  const leeches = effects.filter((e) => e.type === "LEECH");
 
   for (const effect of legCramps) {
     const windowStart = effect.startsAt;
@@ -349,6 +357,29 @@ async function computeEffectModifiers(effects, rawTotal, userId, stepSampleModel
     }
   }
 
+  // Leech (Item 2): a leecher-driven flat debuff. Each LEECH on THIS victim
+  // removes one step per step the LEECHER (sourceUserId) accrued during the
+  // leech window [startsAt, expiresAt], capped at LEECH_STEP_CAP. Unlike
+  // rainstorm (victim-driven), it keys off the SOURCE user's step history — a
+  // leecher who doesn't walk drains nothing — so there is no victim-step overlap
+  // to suspend. The flat count is folded into frozenSteps (a plain subtraction);
+  // the total floors at 0 upstream, so stacked leeches can never go negative.
+  // The use-time stacking guard keeps at most 2 leeches per victim (worst case
+  // -2 * cap). Applied in the SHARED modifier fn, so display == settlement.
+  for (const effect of leeches) {
+    if (!effect.sourceUserId) continue;
+    const windowStart = effect.startsAt;
+    const windowEnd = effect.expiresAt || new Date();
+    const leecherSteps = await stepSampleModel.sumStepsInWindow(
+      effect.sourceUserId,
+      windowStart,
+      windowEnd
+    );
+    if (leecherSteps > 0) {
+      frozenSteps += Math.min(LEECH_STEP_CAP, leecherSteps);
+    }
+  }
+
   // Global step-multiplier event boost (additive, stacks multiplicatively with
   // the per-participant multipliers above). Computed over the SAME effect groups
   // so display and settlement agree exactly.
@@ -389,6 +420,10 @@ function buildGetRaceProgress(deps = {}) {
   const now = deps.now || (() => new Date());
   const isTournamentParticipantFn =
     deps.isTournamentParticipant || isTournamentParticipant;
+  // Imposter kill switch (Item 3): when disabled, existing held/active Imposters
+  // stop swapping leaderboard rows for everyone at once, regardless of app
+  // version. Injectable for tests; defaults to the env reader.
+  const imposterEnabledFn = deps.imposterEnabled || defaultImposterEnabled;
 
   return async function getRaceProgress(
     userId,
@@ -588,6 +623,7 @@ function buildGetRaceProgress(deps = {}) {
         let wrongTurns = [];
         let campfires = [];
         let rainstorms = [];
+        let leeches = [];
 
         if (race.powerupsEnabled) {
           // Fetch all Leg Cramp, Runner's High, and Wrong Turn effects (active + expired) for this participant
@@ -596,9 +632,12 @@ function buildGetRaceProgress(deps = {}) {
           wrongTurns = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "WRONG_TURN");
           campfires = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "CAMPFIRE_REST");
           rainstorms = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "RAINSTORM");
+          // Leech effects targeting this participant (Item 2). Their debuff is
+          // scored from the leecher's step history inside computeEffectModifiers.
+          leeches = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "LEECH");
         }
 
-        const allEffects = [...legCramps, ...runnersHighs, ...wrongTurns, ...campfires, ...rainstorms];
+        const allEffects = [...legCramps, ...runnersHighs, ...wrongTurns, ...campfires, ...rainstorms, ...leeches];
         const { frozenSteps, buffedSteps, reversedSteps, globalBoostedSteps } = await computeEffectModifiers(allEffects, baseAdjusted, participant.userId, stepSampleModel, hasSampleData, globalContext);
 
         total = Math.max(0, baseAdjusted - frozenSteps + buffedSteps - 2 * reversedSteps + (globalBoostedSteps || 0) + (race.powerupsEnabled ? (participant.bonusSteps || 0) : 0));
@@ -815,7 +854,7 @@ function buildGetRaceProgress(deps = {}) {
     // deterministically; a user already involved in an earlier swap, or a target
     // not present in the leaderboard, is skipped so swaps never throw or corrupt
     // the order. This is the ONLY place the swap is applied (display path only).
-    if (imposterSwaps.length > 0) {
+    if (imposterEnabledFn() && imposterSwaps.length > 0) {
       const swappedUserIds = new Set();
       for (const { a, b } of imposterSwaps) {
         if (a === b) continue;

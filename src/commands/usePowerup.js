@@ -24,6 +24,9 @@ const {
   deductCoinsAtomic: defaultDeductCoinsAtomic,
   InsufficientCoinsError,
 } = require("./deductCoinsAtomic");
+const {
+  imposterEnabled: defaultImposterEnabled,
+} = require("../constants/powerupGating");
 
 // SIGNAL_JAMMER is a single-target attack (store-only): it is OFFENSIVE +
 // TARGETED so the shared targeting validation, finished-target rejection, and
@@ -32,7 +35,13 @@ const {
 // MIRROR-reflect pre-check — a shop-bought attack can be blocked by socks but
 // never reflected. Its own effect case just parks a 1h "can't use powerups"
 // debuff on the target; the enforcement lives in the jam guard below.
-const OFFENSIVE_TYPES = ["LEG_CRAMP", "RED_CARD", "SHORTCUT", "WRONG_TURN", "DETOUR_SIGN", "PINECONE_TOSS", "SNEAKY_SWAP", "SIGNAL_JAMMER"];
+// LEECH is a store-bought TARGETED debuff. It rides the OFFENSIVE_TYPES path
+// for target resolution, enemy-only (team) validation, and the Compression
+// Socks block, and is listed in SHOP_POWERUP_TYPES so a Mirror NEVER reflects
+// it (parity with SIGNAL_JAMMER). Its effect is leecher-driven and scored in
+// getRaceProgress (each of the leecher's in-window steps removes one from the
+// victim, capped); the switch case here just parks the 30-min effect.
+const OFFENSIVE_TYPES = ["LEG_CRAMP", "RED_CARD", "SHORTCUT", "WRONG_TURN", "DETOUR_SIGN", "PINECONE_TOSS", "SNEAKY_SWAP", "SIGNAL_JAMMER", "LEECH"];
 // The three coin-shop-only powerups (they exist ONLY via the powerup shop:
 // IMPOSTER, RAINSTORM, SIGNAL_JAMMER). Product rule: none of them can EVER be
 // reflected by a Mirror, but ALL of them can be blocked by Compression Socks.
@@ -41,14 +50,14 @@ const OFFENSIVE_TYPES = ["LEG_CRAMP", "RED_CARD", "SHORTCUT", "WRONG_TURN", "DET
 //   * SIGNAL_JAMMER stays in OFFENSIVE_TYPES → gets the single-target Socks block.
 //   * IMPOSTER gets a dedicated Socks block near its targeting validation.
 //   * RAINSTORM keeps its per-victim Socks branch (Mirror branch removed).
-const SHOP_POWERUP_TYPES = ["IMPOSTER", "RAINSTORM", "SIGNAL_JAMMER"];
+const SHOP_POWERUP_TYPES = ["IMPOSTER", "RAINSTORM", "SIGNAL_JAMMER", "LEECH"];
 // IMPOSTER is TARGETED (it needs a rival to swap leaderboard display with) but
 // it is deliberately NOT in OFFENSIVE_TYPES: it never touches the target's
 // participant/steps and applies onSelf (target stored in metadata). As a shop
 // powerup it can NEVER be reflected by a Mirror, but Compression Socks DOES
 // block it (a dedicated block near its targeting validation), so it is not
 // subject to the generic OFFENSIVE_TYPES Mirror pre-check.
-const TARGETED_TYPES = ["LEG_CRAMP", "SHORTCUT", "WRONG_TURN", "DETOUR_SIGN", "SNEAKY_SWAP", "IMPOSTER", "SIGNAL_JAMMER"];
+const TARGETED_TYPES = ["LEG_CRAMP", "SHORTCUT", "WRONG_TURN", "DETOUR_SIGN", "SNEAKY_SWAP", "IMPOSTER", "SIGNAL_JAMMER", "LEECH"];
 // Types Sneaky Swap can never steal: another Sneaky Swap (no steal chains) and
 // unopened Mystery Boxes. Mirrors the isStealable helper in routes/races.js.
 const UNSTEALABLE_TYPES = ["SNEAKY_SWAP", "MYSTERY_BOX"];
@@ -62,6 +71,13 @@ const RAINSTORM_DURATION_MS = 60 * 60 * 1000;
 const RAINSTORM_MULTIPLIER = 0.5;
 // SIGNAL_JAMMER is store-only and non-upgradeable, so its jam lasts a fixed 1h.
 const SIGNAL_JAMMER_DURATION_MS = 60 * 60 * 1000;
+// LEECH is store-only, non-upgradeable: a fixed 30-minute leech window. The
+// per-leech step cap (3000) lives in the scorer (getRaceProgress); it is echoed
+// into the effect metadata for legibility. A victim can be leeched by at most
+// LEECH_MAX_PER_VICTIM sources at once (gang-stall guard).
+const LEECH_DURATION_MS = 30 * 60 * 1000;
+const LEECH_STEP_CAP = 3000;
+const LEECH_MAX_PER_VICTIM = 2;
 const SELF_ONLY_TYPES = [
   "COMPRESSION_SOCKS",
   "MIRROR",
@@ -192,6 +208,9 @@ function buildUsePowerup(dependencies = {}) {
       : defaultSyncRacePowerupState;
   const now = dependencies.now || (() => new Date());
   const random = dependencies.random || Math.random;
+  // Imposter kill switch (Item 3). Injectable for tests; defaults to the env
+  // reader (enabled unless IMPOSTER_ENABLED="false").
+  const imposterEnabled = dependencies.imposterEnabled || defaultImposterEnabled;
 
   return async function usePowerup({
     userId,
@@ -276,6 +295,15 @@ function buildUsePowerup(dependencies = {}) {
     // on a Mirror reflect it becomes the original target (who reflects it).
     let actingUserId = userId;
     const type = powerup.type;
+
+    // Imposter is DISABLED for now (Item 3). Reject the use with a friendly
+    // message and — crucially — do NOT consume the item (this runs before coin
+    // deduction and the mark-USED step, so the powerup stays HELD). Old clients
+    // may still render a "use" affordance; this keeps them safe. Re-enabling is a
+    // single env flip (IMPOSTER_ENABLED).
+    if (type === "IMPOSTER" && !imposterEnabled()) {
+      throw new PowerupUseError("Imposter is temporarily unavailable", 400);
+    }
 
     // Validate upgrade level (cheap, no DB writes)
     if (!isValidLevel(upgradeLevel)) {
@@ -442,6 +470,26 @@ function buildUsePowerup(dependencies = {}) {
       );
       if (existingJam && existingJam.expiresAt && new Date(existingJam.expiresAt) > now()) {
         throw new PowerupUseError("That player is already jammed", 409);
+      }
+    }
+
+    // LEECH stacking rules (run before coin deduction / mark-USED so a rejected
+    // leecher keeps the powerup HELD):
+    //   * at most ONE active leech per (leecher -> victim) pair, and
+    //   * at most LEECH_MAX_PER_VICTIM concurrent leechers on any one victim
+    //     (gang-stall guard — worst case is -2 * LEECH_STEP_CAP).
+    if (type === "LEECH" && targetParticipant) {
+      const activeOnVictim = (
+        await effectModel.findActiveForParticipant(targetParticipant.id)
+      ).filter((e) => e.type === "LEECH");
+      if (activeOnVictim.some((e) => e.sourceUserId === userId)) {
+        throw new PowerupUseError("You're already leeching this rival", 400);
+      }
+      if (activeOnVictim.length >= LEECH_MAX_PER_VICTIM) {
+        throw new PowerupUseError(
+          "This rival is already being leeched by two others",
+          400
+        );
       }
     }
 
@@ -834,6 +882,68 @@ function buildUsePowerup(dependencies = {}) {
           targetUserId: resolvedTargetUserId,
           description: `${myDisplayName} jammed ${targetDisplayName}'s signal! They can't use powerups for 1 hour.`,
         });
+        break;
+      }
+
+      case "LEECH": {
+        // Store-bought, leecher-driven debuff. Park a 30-min LEECH effect on the
+        // victim, sourced by the leecher. The actual step drain is computed in
+        // getRaceProgress from the LEECHER's (sourceUserId) in-window steps,
+        // capped at LEECH_STEP_CAP — NOT here. As a shop powerup it can never be
+        // reflected (SHOP_POWERUP_TYPES), and the OFFENSIVE Compression Socks
+        // block above already protected a shielded victim (no effect created).
+        // NOT stealthy: the effect targets the victim (renders on their row) and
+        // the POWERUP_USED event below drives the victim's push notification.
+        const effect = await effectModel.create({
+          raceId,
+          targetParticipantId: targetParticipant.id,
+          targetUserId: resolvedTargetUserId,
+          sourceUserId: actingUserId,
+          powerupId,
+          type: "LEECH",
+          startsAt: currentTime,
+          expiresAt: new Date(currentTime.getTime() + LEECH_DURATION_MS),
+          metadata: { cap: LEECH_STEP_CAP },
+        });
+        result.effect = effect;
+
+        await eventModel.create({
+          raceId,
+          actorUserId: actingUserId,
+          eventType: "POWERUP_USED",
+          powerupType: type,
+          targetUserId: resolvedTargetUserId,
+          description: `${myDisplayName} is leeching ${targetDisplayName}! Every step ${myDisplayName} takes drains one from ${targetDisplayName} for 30 minutes.`,
+        });
+        break;
+      }
+
+      case "DEFENSE_SCAN": {
+        // X-Ray: an instantaneous intel read. Creates NO effect and writes NO
+        // feed event (silent recon). It consumes one scanner (marked USED below)
+        // and returns a snapshot of every opponent's active defenses in the
+        // response. In team races "opponents" means the enemy team only.
+        const scanTargets = acceptedParticipants.filter(
+          (p) => p.userId !== userId && isEnemy(p)
+        );
+        const opponents = [];
+        for (const opp of scanTargets) {
+          const oppEffects = await effectModel.findActiveForParticipant(opp.id);
+          const defenses = oppEffects
+            .filter(
+              (e) => e.type === "COMPRESSION_SOCKS" || e.type === "MIRROR"
+            )
+            .map((e) => ({ type: e.type, expiresAt: e.expiresAt }));
+          opponents.push({
+            userId: opp.userId,
+            displayName: opp.user?.displayName || "A runner",
+            defenses,
+          });
+        }
+        result.scan = {
+          expiresAtSnapshot: currentTime.toISOString(),
+          opponents,
+        };
         break;
       }
 

@@ -50,6 +50,9 @@ const {
   openMysteryBox: defaultOpenMysteryBox,
 } = require("../commands/openMysteryBox");
 const {
+  openMysteryBoxBatch: defaultOpenMysteryBoxBatch,
+} = require("../commands/openMysteryBoxBatch");
+const {
   redeemPowerupToRace: defaultRedeemPowerupToRace,
 } = require("../commands/redeemPowerupToRace");
 const { getRaces: defaultGetRaces } = require("../queries/getRaces");
@@ -145,6 +148,8 @@ function createRacesRouter(dependencies = {}) {
   const usePowerup = dependencies.usePowerup || defaultUsePowerup;
   const discardPowerup = dependencies.discardPowerup || defaultDiscardPowerup;
   const openMysteryBox = dependencies.openMysteryBox || defaultOpenMysteryBox;
+  const openMysteryBoxBatch =
+    dependencies.openMysteryBoxBatch || defaultOpenMysteryBoxBatch;
   const redeemPowerupToRace =
     dependencies.redeemPowerupToRace || defaultRedeemPowerupToRace;
   const getRaceInventory =
@@ -670,6 +675,12 @@ function createRacesRouter(dependencies = {}) {
         timeZone: req.timeZone,
         upgradeLevel: upgradeLevel != null ? upgradeLevel : 0,
       });
+      // X-Ray (DEFENSE_SCAN) is an instantaneous intel read: surface the scan at
+      // the TOP LEVEL per the contract ({ ok, scan }). `result` is kept alongside
+      // for back-compat with clients that read the standard use-result envelope.
+      if (result && result.scan) {
+        return res.json({ ok: true, scan: result.scan, result });
+      }
       res.json({ result });
     } catch (error) {
       if (error.name === "PowerupUseError") {
@@ -723,6 +734,33 @@ function createRacesRouter(dependencies = {}) {
           .json({ error: error.message, ...(error.code ? { code: error.code } : {}) });
       }
       console.error("Open mystery box error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // POST /races/:raceId/powerups/open-batch — "Open All Boxes" (Item 1).
+  // Additive; only the new app calls it. Old clients keep using single .../open.
+  router.post("/:raceId/powerups/open-batch", async (req, res) => {
+    try {
+      const { powerupIds, includeQueued, maxCount } = req.body || {};
+      const result = await openMysteryBoxBatch({
+        userId: req.user.id,
+        raceId: req.params.raceId,
+        powerupIds: Array.isArray(powerupIds) ? powerupIds : [],
+        includeQueued: includeQueued === true,
+        maxCount: typeof maxCount === "number" ? maxCount : undefined,
+        displayName: req.user.displayName,
+      });
+      res.json(result);
+    } catch (error) {
+      if (
+        error.name === "MysteryBoxBatchError" ||
+        error.name === "MysteryBoxOpenError"
+      ) {
+        const status = error.statusCode || 400;
+        return res.status(status).json({ error: error.message });
+      }
+      console.error("Open mystery box batch error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });

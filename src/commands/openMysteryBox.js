@@ -145,6 +145,20 @@ function buildOpenMysteryBox(dependencies = {}) {
 
     await powerupModel.update(powerupId, { type: rolled.type, rarity: rolled.rarity, status: "HELD" });
 
+    // Item 9: persist a MYSTERY_BOX_OPENED event so the admin "avg unique box
+    // openers / day" metric has data (no history before this deploy). This is the
+    // ONLY place a normal open is recorded — the Fanny-Pack auto-activate branch
+    // above already writes its own POWERUP_EARNED row. The row is audit-only:
+    // getRaceFeed filters MYSTERY_BOX_OPENED out of the visible feed so the
+    // frequent box opens don't flood it.
+    await eventModel.create({
+      raceId,
+      actorUserId: userId,
+      eventType: "MYSTERY_BOX_OPENED",
+      powerupType: rolled.type,
+      description: `${displayName || "A runner"} opened a mystery box — ${POWERUP_NAMES[rolled.type] || rolled.type}!`,
+    });
+
     events.emit("MYSTERY_BOX_OPENED", {
       raceId,
       userId,

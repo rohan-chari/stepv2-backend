@@ -78,20 +78,42 @@ function rollDailyBoxRarity(
   return "RARE";
 }
 
-// Sub-roll for a RARE hit: does it pay an ACCESSORY or a POWERUP? 50/50 when
-// both pools are stocked; whichever single pool is non-empty when only one is;
-// null when both are empty (the caller then falls back to bonus coins). The
-// powerup pool is essentially never empty for a spinpowerups-capable client, so
-// in practice a RARE always has a prize once powerups are in play.
+// Env-tunable share of RARE hits that pay coins instead of a powerup (Item 10).
+// Default 0 keeps the exact legacy behavior (no coins slice) — set
+// DAILY_SPIN_RARE_COINS_SHARE (e.g. 0.35–0.40) in the env to revive coin flow
+// for high-streak / all-accessory users without a deploy. Clamped to [0,1].
+function rareCoinsShare() {
+  const raw = parseFloat(process.env.DAILY_SPIN_RARE_COINS_SHARE);
+  if (!Number.isFinite(raw)) return 0;
+  return Math.max(0, Math.min(1, raw));
+}
+
+// Sub-roll for a RARE hit: does it pay an ACCESSORY, a POWERUP, or COINS? The
+// coins slice (Item 10) DISPLACES only the powerup portion so accessory rewards
+// are never capped away:
+//   * both pools stocked   -> ~50% ACCESSORY, then the powerup half splits into
+//                             COINS (with prob = coinsShare) vs POWERUP,
+//   * powerup pool only     -> COINS (coinsShare) vs POWERUP,
+//   * accessory pool only   -> always ACCESSORY (unchanged),
+//   * neither pool          -> null (the caller then falls back to bonus coins).
+// With coinsShare = 0 (the default) this is byte-for-byte the historical
+// accessory/powerup 50-50 roll. `coinsShare` may be injected for tests; it
+// defaults to the env-tunable share.
 function rollRarePrizeKind(
   accessoryPoolSize,
   powerupPoolSize,
-  rng = Math.random
+  rng = Math.random,
+  { coinsShare } = {}
 ) {
+  const share =
+    coinsShare != null ? Math.max(0, Math.min(1, coinsShare)) : rareCoinsShare();
   const hasAccessory = accessoryPoolSize > 0;
   const hasPowerup = powerupPoolSize > 0;
-  if (hasAccessory && hasPowerup) return rng() < 0.5 ? "ACCESSORY" : "POWERUP";
-  if (hasPowerup) return "POWERUP";
+  if (hasAccessory && hasPowerup) {
+    if (rng() < 0.5) return "ACCESSORY";
+    return rng() < share ? "COINS" : "POWERUP";
+  }
+  if (hasPowerup) return rng() < share ? "COINS" : "POWERUP";
   if (hasAccessory) return "ACCESSORY";
   return null;
 }
@@ -150,6 +172,7 @@ module.exports = {
   dailyBoxOddsForPool,
   rollDailyBoxRarity,
   rollRarePrizeKind,
+  rareCoinsShare,
   coinAmountForTier,
   pickWeightedByPrice,
   pickAccessory,
