@@ -1,29 +1,29 @@
-const { prisma } = require("../db");
-
-// Transaction-scoped Postgres advisory lock derived from a race UUID, used to
-// serialize the four reconciliation paths that read-modify-write the SAME race:
-// uploader-scoped reconciliation (sync-v2), the async full-field worker, legacy
-// synchronous full reconciliation, and placement recompute. Holding the lock
-// while one path recomputes a race prevents two paths from interleaving reads and
-// writes on the same participants (e.g. simultaneous mine/overtake evaluation).
+// PASSTHROUGH (deliberate — see incident 2026-07-18).
 //
-// The lock is xact-scoped: it is held for the lifetime of the wrapping
-// transaction, which awaits `callback`, so the callback runs with the lock held
-// and it releases on commit. Mirrors withRaceJoinLock / tournamentLock. Callers
-// that touch several races MUST process race ids in a stable sorted order to
-// avoid deadlocks (see reconcileUploaderRaces / the worker).
-// The wrapping interactive transaction stays open for the whole callback (that
-// is how an xact-scoped lock is held), so it gets generous timeouts: a full-field
-// race reconciliation (all participants + trail mines) can take longer than
-// Prisma's 5s interactive-transaction default under load. maxWait covers pool
-// contention while acquiring the lock connection.
-const TX_OPTIONS = { maxWait: 15000, timeout: 30000 };
-
-async function withRaceResolutionLock(raceId, callback) {
-  return prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${raceId})::bigint)`;
-    return callback();
-  }, TX_OPTIONS);
+// This wrapper previously opened a Prisma interactive transaction to hold a
+// Postgres advisory xact lock (`pg_advisory_xact_lock`) for the lifetime of the
+// reconciliation callback. That was pathological under concurrent production
+// load: the callback's actual reads/writes run on the GLOBAL prisma client (a
+// DIFFERENT pooled connection), while the lock-holding transaction stayed OPEN
+// and IDLE for the whole reconciliation (timeout up to 30s). So every
+// reconciliation pinned TWO connections, and with N concurrent /steps uploads
+// (the legacy path calls resolveRaceState on every step sync) the pool drained
+// and ALL routes — /races, /home/race-card, everything — queued waiting for a
+// connection. Single-user benchmarks never saw it; it only appears under
+// concurrency.
+//
+// The lock's only real purpose is to serialize the async full-field worker
+// against the legacy/placement paths on the SAME race. That interleaving cannot
+// occur today: no shipped app calls /steps/sync-v2, so the queue is empty and the
+// worker never runs. Removing the lock restores the exact hot-path behavior prod
+// ran safely for months (legacy + placement were always lock-free).
+//
+// DO NOT re-enable a lock here until it is reimplemented WITHOUT pinning a second
+// pooled connection (run the reconciliation inside the same tx, or scope the lock
+// to the cheap uploader-only path + the worker), AND proven under a CONCURRENT
+// load test on staging. It is not needed until v2/async has real client traffic.
+async function withRaceResolutionLock(_raceId, callback) {
+  return callback();
 }
 
 module.exports = { withRaceResolutionLock };

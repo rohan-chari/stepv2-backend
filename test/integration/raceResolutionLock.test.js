@@ -140,7 +140,14 @@ async function seedCrossingScenario() {
 // race is timing-dependent (node may schedule the two chains sequentially), so we
 // prove the mechanism directly: same-race callbacks are mutually exclusive;
 // different-race callbacks overlap.
-describe("Phase C4 — withRaceResolutionLock mutual exclusion (the shared primitive)", () => {
+// SKIPPED 2026-07-18 incident: withRaceResolutionLock was reverted to a
+// passthrough because the interactive-transaction advisory lock exhausted the
+// prod connection pool under concurrent /steps load (see the file header in
+// src/services/withRaceResolutionLock.js). These tests assert the serialization
+// the lock provided; they must be un-skipped only when a pool-safe lock is
+// reimplemented and load-tested. Kept in place (not deleted) as the spec for that
+// future reimplementation.
+describe.skip("Phase C4 — withRaceResolutionLock mutual exclusion (the shared primitive)", () => {
   before(async () => {
     server = await getSharedServer();
   });
@@ -181,7 +188,8 @@ describe("Phase C4 — withRaceResolutionLock mutual exclusion (the shared primi
   });
 });
 
-describe("Phase C4 — per-race advisory lock serializes concurrent full reconciliation", () => {
+// SKIPPED 2026-07-18 incident — see note above; lock reverted to passthrough.
+describe.skip("Phase C4 — per-race advisory lock serializes concurrent full reconciliation", () => {
   before(async () => {
     server = await getSharedServer();
   });
