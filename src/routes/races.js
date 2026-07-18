@@ -60,6 +60,9 @@ const {
   getTournamentsForUser: defaultGetTournamentsForUser,
 } = require("../queries/getTournamentsForUser");
 const {
+  getRaceDiscoverySummary: defaultGetRaceDiscoverySummary,
+} = require("../queries/getRaceDiscoverySummary");
+const {
   getRaceDetails: defaultGetRaceDetails,
 } = require("../queries/getRaceDetails");
 const {
@@ -142,6 +145,8 @@ function createRacesRouter(dependencies = {}) {
   const getRaces = dependencies.getRaces || defaultGetRaces;
   const getTournamentsForUser =
     dependencies.getTournamentsForUser || defaultGetTournamentsForUser;
+  const getRaceDiscoverySummary =
+    dependencies.getRaceDiscoverySummary || defaultGetRaceDiscoverySummary;
   const getRaceDetails = dependencies.getRaceDetails || defaultGetRaceDetails;
   const getRaceProgress =
     dependencies.getRaceProgress || defaultGetRaceProgress;
@@ -260,18 +265,43 @@ function createRacesRouter(dependencies = {}) {
   router.get("/", async (req, res) => {
     try {
       // TR-702: old clients (no team_races token) never receive team races.
-      const result = await getRaces(
-        req.user.id,
-        req.clientFeatures?.has("team_races") ?? false
-      );
-      // Additive `tournaments` array for token clients ONLY — old clients' JSON
-      // stays byte-identical (§4/§6.3).
-      if (req.clientFeatures?.has("tournaments")) {
-        result.tournaments = await getTournamentsForUser(req.user.id);
+      const supportsTeamRaces = req.clientFeatures?.has("team_races") ?? false;
+      const supportsTournaments = req.clientFeatures?.has("tournaments") ?? false;
+      // Start the core race list and (for token clients) the tournament list
+      // concurrently — they read disjoint rows, so there's no reason to await
+      // them serially (Phase B4). Old clients pass null and get byte-identical
+      // JSON (§4/§6.3).
+      const [result, tournaments] = await Promise.all([
+        getRaces(req.user.id, supportsTeamRaces),
+        supportsTournaments
+          ? getTournamentsForUser(req.user.id)
+          : Promise.resolve(null),
+      ]);
+      if (tournaments) {
+        result.tournaments = tournaments;
       }
       res.json(result);
     } catch (error) {
       console.error("Get races error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // GET /races/discovery-summary — one compact request replacing the Races
+  // screen's public-count + featured-races + featured-tournaments background
+  // calls (§6.2). Additive; old clients never call it (they keep the three
+  // separate endpoints). Static path declared BEFORE any GET /:raceId so it is
+  // never read as a race id.
+  router.get("/discovery-summary", async (req, res) => {
+    try {
+      const summary = await getRaceDiscoverySummary({
+        userId: req.user.id,
+        supportsTeamRaces: req.clientFeatures?.has("team_races") ?? false,
+        supportsTournaments: req.clientFeatures?.has("tournaments") ?? false,
+      });
+      res.json(summary);
+    } catch (error) {
+      console.error("Get race discovery summary error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });

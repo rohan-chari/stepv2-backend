@@ -1,6 +1,7 @@
 const path = require("path");
 const cors = require("cors");
 const express = require("express");
+const compression = require("compression");
 
 const { createAuthRouter } = require("./routes/auth");
 const { createStepsRouter } = require("./routes/steps");
@@ -56,6 +57,28 @@ function createApp(dependencies = {}) {
   const app = express();
 
   app.use(cors());
+  // Phase B7 gzip-only contract: newer `compression` will negotiate Brotli when a
+  // client offers `br`, but the spec pins the client contract to gzip only. Strip
+  // any `br` token from Accept-Encoding before compression negotiates, so it never
+  // selects Brotli (falls back to gzip, or identity if the client offered br
+  // alone). Deflate is left intact but gzip wins for every real client.
+  app.use((req, _res, next) => {
+    const ae = req.headers["accept-encoding"];
+    if (typeof ae === "string" && /\bbr\b/i.test(ae)) {
+      const kept = ae
+        .split(",")
+        .map((t) => t.trim())
+        .filter((t) => t && !/^br\s*(;|$)/i.test(t));
+      req.headers["accept-encoding"] = kept.length ? kept.join(", ") : "identity";
+    }
+    next();
+  });
+  // gzip compression for compressible responses above 1 KiB. The `compression`
+  // middleware preserves the decoded body/status byte-for-byte and sets
+  // `Vary: Accept-Encoding` so caches key on it. Old and new apps decode
+  // transparently (Dart HttpClient autoUncompress; undici/URLSession likewise).
+  // Placed early so it wraps every downstream JSON response.
+  app.use(compression({ threshold: 1024 }));
   app.use(express.json());
   app.use(extractTimezone);
   // Capability gating (X-Client-Features) is read app-wide: social surfaces
@@ -221,6 +244,25 @@ function createApp(dependencies = {}) {
         .type("html")
         .send(renderTournamentNotFoundPage(links));
     }
+  });
+
+  // JSON body-parser error handler (§6.4 / Phase A5). An oversized body makes
+  // express.json throw `entity.too.large`; without this, Express answers with its
+  // default HTML 413. Return the JSON 413 contract instead so clients (notably
+  // POST /steps/sync-v2) get a consistent machine-readable response. Only
+  // entity.too.large is handled here; every other error passes through unchanged,
+  // so normal-size JSON routes are byte-for-byte identical.
+  app.use((err, req, res, next) => {
+    if (
+      err &&
+      (err.type === "entity.too.large" || err.statusCode === 413 || err.status === 413)
+    ) {
+      return res.status(413).json({
+        error: "Step sync request too large",
+        code: "STEP_SYNC_TOO_LARGE",
+      });
+    }
+    return next(err);
   });
 
   const publicDir = path.join(__dirname, "..", "public");

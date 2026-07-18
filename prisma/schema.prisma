@@ -126,6 +126,10 @@ model User {
   tournamentsWon     Tournament[]            @relation("TournamentChampion")
   tournamentEntries  TournamentParticipant[]
 
+  // ── Async step sync (Home/Races Refresh Performance) — additive back-relations.
+  stepSyncRequests   StepSyncRequest[]
+  raceResolutionJob  RaceResolutionJob?
+
   @@map("users")
 }
 
@@ -1359,4 +1363,85 @@ model LinkOpen {
 
   @@index([kind, createdAt])
   @@map("link_opens")
+}
+
+// ── Async step sync (Home/Races Refresh Performance) ─────────────────────────
+// Two ADDITIVE tables backing POST /steps/sync-v2 and the durable race-
+// resolution worker. Old backend code ignores them; old app builds never call
+// the v2 endpoint (they keep POST /steps + POST /steps/samples). Nothing here
+// removes or changes an existing column, so a mixed-version deploy is safe.
+
+// Server-side idempotency reservation for one sync-v2 attempt group. Keyed by
+// (userId, idempotencyKey): the first valid request persists data and stores its
+// canonical response; a same-hash replay reads the stored response; a different-
+// hash reuse of the key is a 409 conflict. `requestHash` is the SHA-256 hex of
+// the canonical request. `resolutionTimeZone` persists the validated request tz
+// so recovery/finalization never has to re-derive it. Rows retain ~7 days.
+enum StepSyncRequestState {
+  PROCESSING @map("processing")
+  COMPLETE   @map("complete")
+}
+
+model StepSyncRequest {
+  id                 String               @id @default(uuid())
+  userId             String               @map("user_id")
+  idempotencyKey     String               @map("idempotency_key") @db.VarChar(36)
+  requestHash        String               @map("request_hash") @db.Char(64)
+  resolutionTimeZone String               @map("resolution_time_zone") @db.VarChar(255)
+  state              StepSyncRequestState  @default(PROCESSING)
+  responseJson       Json?                @map("response_json")
+  // Non-null while an owner is performing the uploader reconciliation between
+  // Transaction A and B; an expired lease is reclaimable for idempotent recovery.
+  leaseExpiresAt     DateTime?            @map("lease_expires_at")
+  // Set exactly once, under a conditional `eventsEmittedAt IS NULL` claim, so a
+  // replay/recovery can never re-emit STEPS_RECORDED/STEPS_UPDATED.
+  eventsEmittedAt    DateTime?            @map("events_emitted_at")
+  createdAt          DateTime             @default(now()) @map("created_at")
+  updatedAt          DateTime             @updatedAt @map("updated_at")
+  expiresAt          DateTime             @map("expires_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, idempotencyKey])
+  @@index([expiresAt])
+  @@map("step_sync_requests")
+}
+
+// One durable full-field race-resolution job PER USER (unique userId). Enqueue
+// is an upsert that bumps `generation` and sets QUEUED; the worker claims rows
+// with FOR UPDATE SKIP LOCKED, snapshots the generation + tz into
+// processingGeneration/processingTimeZone, and only records success when the
+// claimed generation still matches. A newer generation supersedes an older
+// polled one. `resolutionTimeZone`/`processingTimeZone` are the validated IANA
+// request tz — the worker NEVER infers tz from server locale/UTC.
+enum RaceResolutionJobState {
+  QUEUED    @map("queued")
+  RUNNING   @map("running")
+  SUCCEEDED @map("succeeded")
+  FAILED    @map("failed")
+}
+
+model RaceResolutionJob {
+  id                    String                 @id @default(uuid())
+  userId                String                 @unique @map("user_id")
+  generation            Int                    @default(1)
+  processingGeneration  Int?                   @map("processing_generation")
+  resolutionTimeZone    String                 @map("resolution_time_zone") @db.VarChar(255)
+  processingTimeZone    String?                @map("processing_time_zone") @db.VarChar(255)
+  state                 RaceResolutionJobState @default(QUEUED)
+  attempts              Int                    @default(0)
+  requestedAt           DateTime               @map("requested_at")
+  startedAt             DateTime?              @map("started_at")
+  completedAt           DateTime?              @map("completed_at")
+  retryAt               DateTime?              @map("retry_at")
+  leaseExpiresAt        DateTime?              @map("lease_expires_at")
+  lastErrorCode         String?                @map("last_error_code")
+  createdAt             DateTime               @default(now()) @map("created_at")
+  updatedAt             DateTime               @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([state, retryAt])
+  @@index([leaseExpiresAt])
+  @@map("race_resolution_jobs")
 }

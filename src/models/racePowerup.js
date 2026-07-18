@@ -57,6 +57,20 @@ const RacePowerup = {
     });
   },
 
+  // Bulk variant of findSlotPowerups / countQueuedByParticipant across many
+  // participants (Phase B2): one query returning every powerup for a set of
+  // participant ids whose status is in `statuses`, ordered createdAt asc so a
+  // per-participant grouping preserves the same order the single-participant
+  // queries produce. Used by the GET /races inventory prefetch. Participant ids
+  // are globally unique, so no race scoping is needed.
+  async findInventoryForParticipants(participantIds, statuses) {
+    if (!participantIds || participantIds.length === 0) return [];
+    return prisma.racePowerup.findMany({
+      where: { participantId: { in: participantIds }, status: { in: statuses } },
+      orderBy: { createdAt: "asc" },
+    });
+  },
+
   async countQueuedByParticipant(participantId) {
     return prisma.racePowerup.count({
       where: { participantId, status: "QUEUED" },

@@ -36,9 +36,15 @@ function createHomeRouter(dependencies = {}) {
       // legacy single-state shape so older clients are unaffected.
       const homeActiveRaces =
         req.query.homeActiveRaces === "1" || req.query.homeActiveRaces === "true";
+      // §6.3 opt-in: only meaningful together with homeActiveRaces. Old clients
+      // never send it and keep the live-computation path.
+      const homePersistedTotals =
+        req.query.homePersistedTotals === "1" ||
+        req.query.homePersistedTotals === "true";
       const result = await getHomeRaceCard({
         userId: req.user.id,
         homeActiveRaces,
+        homePersistedTotals,
         // Match getRaceProgress: window race steps in the caller's timezone
         // (set globally by the extractTimezone middleware) so the home card and
         // the race-detail screen compute identical race-relative totals.

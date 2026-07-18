@@ -59,6 +59,26 @@ const StepSample = {
     );
   },
 
+  // Same write shape as upsertBatch, but run against a caller-provided
+  // transaction client (Prisma tx or the base client) so sync-v2's Transaction A
+  // can upsert steps, samples, and the idempotency reservation atomically. Runs
+  // the upserts sequentially on the given client (interactive-tx safe).
+  async upsertBatchOn(client, userId, samples) {
+    const results = [];
+    for (const s of samples) {
+      results.push(
+        await client.stepSample.upsert({
+          where: {
+            userId_periodStart: { userId, periodStart: new Date(s.periodStart) },
+          },
+          update: buildWriteData(s),
+          create: buildWriteData(s, { includePeriodStart: true, includeUserId: true, userId }),
+        })
+      );
+    }
+    return results;
+  },
+
   async findByUserIdAndTimeRange(userId, startTime, endTime) {
     return prisma.stepSample.findMany({
       where: {
