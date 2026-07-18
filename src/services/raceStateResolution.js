@@ -535,6 +535,17 @@ function buildResolveRaceState(dependencies = {}) {
     dependencies.RacePowerupEvent || RacePowerupEvent;
   const globalStepEventModel =
     dependencies.GlobalStepEvent || GlobalStepEvent;
+  // Phase C4: every full-field reconciliation of a race runs under the shared
+  // per-race advisory lock, so the four full-field paths (legacy /steps sync via
+  // recordSteps/recordStepSamples, placementRecompute, usePowerup, and the durable
+  // worker — all of which call resolveRaceState) are mutually exclusive on the
+  // same race and never double-fire trail mines / lose participant updates.
+  // Default is a PASSTHROUGH (no lock) so unit tests with injected fakes stay pure
+  // and DB-free; the production singleton is built with the real Postgres advisory
+  // lock. The worker therefore no longer wraps resolveRaceState itself (that would
+  // nest the same xact lock across two transactions and self-deadlock).
+  const withRaceResolutionLock =
+    dependencies.withRaceResolutionLock || ((_raceId, callback) => callback());
   const now = dependencies.now || (() => new Date());
 
   return async function resolveRaceState({
@@ -708,14 +719,32 @@ function buildResolveRaceState(dependencies = {}) {
       };
     }
 
-    // Races are independent (no shared rows across race_participants), so we
-    // process them in parallel as well.
-    const processed = await Promise.all(races.map(processRace));
-    return processed.filter(Boolean);
+    // Process races sequentially in stable sorted (by id) order, each under its
+    // own per-race advisory lock. Sequential + one-lock-at-a-time keeps the
+    // Postgres connection pool bounded (one lock-holding transaction at a time)
+    // and is deadlock-free regardless of order because no actor ever holds two
+    // race locks simultaneously. Races are independent, so serializing them does
+    // not change any per-race result; only cross-actor interleaving is prevented.
+    const orderedRaces = [...races].sort((a, b) =>
+      String(a.id).localeCompare(String(b.id))
+    );
+    const processed = [];
+    for (const race of orderedRaces) {
+      const result = await withRaceResolutionLock(race.id, () => processRace(race));
+      if (result) processed.push(result);
+    }
+    return processed;
   };
 }
 
-const resolveRaceState = buildResolveRaceState();
+const {
+  withRaceResolutionLock: realWithRaceResolutionLock,
+} = require("./withRaceResolutionLock");
+
+// Production singleton locks each race with the real Postgres advisory lock.
+const resolveRaceState = buildResolveRaceState({
+  withRaceResolutionLock: realWithRaceResolutionLock,
+});
 
 module.exports = {
   POWERUP_EFFECT_TYPES,

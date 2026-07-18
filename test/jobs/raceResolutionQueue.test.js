@@ -12,7 +12,6 @@ function makeDeps(over = {}) {
     sync: [],
     recordSuccess: [],
     recordFailure: [],
-    locked: [],
   };
   const deps = {
     logger: silentLogger,
@@ -21,10 +20,9 @@ function makeDeps(over = {}) {
       findActiveForUser: async () => [{ id: "race-b" }, { id: "race-a" }],
     },
     RaceParticipant: {},
-    withRaceResolutionLock: async (raceId, cb) => {
-      calls.locked.push(raceId);
-      return cb();
-    },
+    // resolveRaceState now acquires the per-race advisory lock internally
+    // (Phase C4); the worker no longer wraps it, so there is no explicit lock
+    // dependency to inject here.
     resolveRaceState: async (args) => {
       calls.resolve.push(args);
       return [{ raceId: args.raceId, race: { id: args.raceId }, boxEffectiveSteps: 100 }];
@@ -65,11 +63,10 @@ test("processOne resolves each active race under its lock, in sorted order, with
   const job = await worker.processOne();
 
   assert.equal(job.id, "job-1");
-  // Locked in stable sorted race-id order (race-a before race-b).
-  assert.deepEqual(calls.locked, ["race-a", "race-b"]);
-  // Full-field resolver called per race with the job's PROCESSING timezone —
-  // never UTC/server locale (the tz-divergence guardrail).
+  // Full-field resolver called per race in stable sorted id order with the job's
+  // PROCESSING timezone — never UTC/server locale (the tz-divergence guardrail).
   assert.equal(calls.resolve.length, 2);
+  assert.deepEqual(calls.resolve.map((r) => r.raceId), ["race-a", "race-b"]);
   for (const r of calls.resolve) {
     assert.equal(r.timeZone, "America/New_York");
     assert.equal(r.userId, "user-1");

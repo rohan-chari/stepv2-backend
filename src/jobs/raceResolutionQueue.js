@@ -12,9 +12,6 @@ const {
 const {
   syncRacePowerupState: defaultSyncRacePowerupState,
 } = require("../services/racePowerupStateSync");
-const {
-  withRaceResolutionLock: defaultWithRaceResolutionLock,
-} = require("../services/withRaceResolutionLock");
 const { nudgeOvertakenRivals } = require("../commands/recordSteps");
 const { stepSyncPushService } = require("../services/stepSyncPush");
 
@@ -40,8 +37,6 @@ function buildRaceResolutionWorker(dependencies = {}) {
   const resolveRaceState = dependencies.resolveRaceState || defaultResolveRaceState;
   const syncRacePowerupState =
     dependencies.syncRacePowerupState || defaultSyncRacePowerupState;
-  const withRaceResolutionLock =
-    dependencies.withRaceResolutionLock || defaultWithRaceResolutionLock;
   const requestStepSyncForUsers =
     dependencies.requestStepSyncForUsers ||
     stepSyncPushService.requestStepSyncForUsers;
@@ -49,9 +44,13 @@ function buildRaceResolutionWorker(dependencies = {}) {
   const logger = dependencies.logger || console;
   const now = dependencies.now || (() => new Date());
 
-  // Full-field reconciliation for one claimed job. Resolves each of the user's
-  // active races under its advisory lock (sorted order), then syncs the
-  // uploader's powerup state and nudges overtaken rivals.
+  // Full-field reconciliation for one claimed job. resolveRaceState now acquires
+  // the per-race advisory lock INTERNALLY (Phase C4), so the worker resolves the
+  // user's active races directly — wrapping resolveRaceState in the lock again
+  // here would nest the same xact lock across two transactions and self-deadlock.
+  // After each race's locked resolve it syncs the uploader's powerup state (single
+  // participant, unlocked — same as the legacy synchronous path), then nudges
+  // overtaken rivals once across all races.
   async function reconcileFull({ userId, timeZone }) {
     const races = await raceModel.findActiveForUser(userId);
     const orderedIds = races
@@ -60,19 +59,17 @@ function buildRaceResolutionWorker(dependencies = {}) {
 
     const raceResults = [];
     for (const raceId of orderedIds) {
-      await withRaceResolutionLock(raceId, async () => {
-        const processed = await resolveRaceState({ raceId, userId, timeZone });
-        const result = Array.isArray(processed) ? processed[0] : null;
-        if (result) {
-          await syncRacePowerupState({
-            raceId: result.raceId,
-            userId,
-            race: result.race,
-            boxEffectiveSteps: result.boxEffectiveSteps,
-          });
-          raceResults.push(result);
-        }
-      });
+      const processed = await resolveRaceState({ raceId, userId, timeZone });
+      const result = Array.isArray(processed) ? processed[0] : null;
+      if (result) {
+        await syncRacePowerupState({
+          raceId: result.raceId,
+          userId,
+          race: result.race,
+          boxEffectiveSteps: result.boxEffectiveSteps,
+        });
+        raceResults.push(result);
+      }
     }
 
     // Same overtake nudge the synchronous recordSteps path fires (best-effort).

@@ -16,7 +16,9 @@
     "cosmetics:create-missing": "node scripts/cosmetics-create-missing.js",
     "seed:app-review-demo": "node scripts/seed-app-review-demo.js",
     "reset-review": "node scripts/reset-app-review.js",
-    "seed": "node prisma/seed.js"
+    "seed": "node prisma/seed.js",
+    "perf:fixtures": "node scripts/perf/generateFixtures.js",
+    "perf:benchmark": "node scripts/perf/benchmark.js"
   },
   "prisma": {
     "seed": "node prisma/seed.js"
@@ -29,6 +31,7 @@
     "@prisma/adapter-pg": "^7.5.0",
     "@prisma/client": "^7.5.0",
     "bad-words": "^3.0.4",
+    "compression": "^1.8.1",
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
