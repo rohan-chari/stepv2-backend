@@ -1,12 +1,23 @@
 const { Router } = require("express");
 const { recordSteps } = require("../commands/recordSteps");
 const { recordStepSamples: defaultRecordStepSamples } = require("../commands/recordStepSamples");
+const {
+  recordStepSyncV2: defaultRecordStepSyncV2,
+} = require("../commands/recordStepSyncV2");
+const {
+  RaceResolutionJob: defaultRaceResolutionJobModel,
+  serializeRaceResolutionStatus,
+} = require("../models/raceResolutionJob");
 const { getStepsByDate, getStepsHistory } = require("../queries/getSteps");
 const { getStepCalendar: defaultGetStepCalendar } = require("../queries/getStepCalendar");
 const { buildRequireAuth } = require("../middleware/requireAuth");
 const { getMondayOfWeek, getTimeZoneParts } = require("../utils/week");
 const { calculateStreak } = require("../utils/streak");
 const { SeasonScore } = require("../models/season");
+
+// 64 KiB cap on the encoded sync-v2 body (§6.4). The app-wide express.json outer
+// limit is unchanged; this is the tighter v2-specific bound.
+const SYNC_V2_MAX_BYTES = 64 * 1024;
 
 function createStepsRouter(dependencies = {}) {
   const router = Router();
@@ -16,6 +27,10 @@ function createStepsRouter(dependencies = {}) {
   const readStepsByDate = dependencies.getStepsByDate || getStepsByDate;
   const readStepsHistory = dependencies.getStepsHistory || getStepsHistory;
   const recordSamples = dependencies.recordStepSamples || defaultRecordStepSamples;
+  const recordStepSyncV2 =
+    dependencies.recordStepSyncV2 || defaultRecordStepSyncV2;
+  const raceResolutionJobModel =
+    dependencies.RaceResolutionJob || defaultRaceResolutionJobModel;
   const getCalendar = dependencies.getStepCalendar || defaultGetStepCalendar;
 
   router.use(requireAuth);
@@ -62,6 +77,88 @@ function createStepsRouter(dependencies = {}) {
         return res.status(status).json({ error: error.message });
       }
       console.error("Step samples error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // POST /steps/sync-v2 (§6.4)
+  // Persist the daily total + optional hourly samples in one request,
+  // synchronously reconcile the UPLOADER's own race totals/box state, then
+  // enqueue durable full-field reconciliation. Async-capable NEW clients only;
+  // old clients keep POST /steps + POST /steps/samples. Declared before the
+  // parameterless GET "/" so it never collides. Static path.
+  router.post("/sync-v2", async (req, res) => {
+    // Kill switch: return 503 BEFORE any step/sample/idempotency/queue write so
+    // the client can safely run legacy sync without duplicating a v2 persist.
+    if (process.env.ASYNC_RACE_RESOLUTION_DISABLED === "true") {
+      return res.status(503).json({
+        error: "Step sync temporarily unavailable",
+        code: "ASYNC_DISABLED",
+      });
+    }
+
+    // 64 KiB body cap (§6.4). Reject oversized encoded requests with the 413
+    // contract before doing any work.
+    const contentLength = Number(req.headers["content-length"]);
+    if (Number.isFinite(contentLength) && contentLength > SYNC_V2_MAX_BYTES) {
+      return res.status(413).json({
+        error: "Step sync request too large",
+        code: "STEP_SYNC_TOO_LARGE",
+      });
+    }
+
+    try {
+      const response = await recordStepSyncV2({
+        userId: req.user.id,
+        body: req.body,
+        idempotencyKey: req.headers["idempotency-key"],
+        timeZone: req.timeZone,
+      });
+      res.status(202).json(response);
+    } catch (error) {
+      // Validation (bad shape) and manual-sample rejection both → 400.
+      if (
+        error.code === "INVALID_STEP_SYNC" ||
+        error.name === "StepSyncValidationError" ||
+        error.name === "StepSampleError"
+      ) {
+        return res
+          .status(400)
+          .json({ error: error.message, code: "INVALID_STEP_SYNC" });
+      }
+      if (
+        error.code === "IDEMPOTENCY_CONFLICT" ||
+        error.name === "StepSyncConflictError"
+      ) {
+        return res.status(409).json({
+          error: "Idempotency key already used",
+          code: "IDEMPOTENCY_CONFLICT",
+        });
+      }
+      console.error("Step sync v2 error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // GET /steps/race-resolution/:jobId?generation=<int> (§6.5)
+  // Owner-only foreground status poll for the durable resolution job. The Home
+  // indicator never waits on this. Additive; old clients never call it.
+  router.get("/race-resolution/:jobId", async (req, res) => {
+    try {
+      const generation = Number(req.query.generation);
+      if (!Number.isInteger(generation) || generation < 1) {
+        return res
+          .status(400)
+          .json({ error: "Valid generation is required", code: "INVALID_GENERATION" });
+      }
+      const job = await raceResolutionJobModel.findById(req.params.jobId);
+      // Unknown OR not owned by the caller → 404, to avoid leaking identifiers.
+      if (!job || job.userId !== req.user.id) {
+        return res.status(404).json({ error: "Race resolution job not found" });
+      }
+      res.json({ raceResolution: serializeRaceResolutionStatus(job, generation) });
+    } catch (error) {
+      console.error("Race resolution status error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });

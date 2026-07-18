@@ -24,6 +24,43 @@ const VALID_RECORDING_METHODS = new Set([
   "manual",
 ]);
 
+// Normalize + validate a raw samples array against the /steps/samples rules:
+// trims/lowercases recordingMethod, rejects unknown methods and `manual`
+// samples, and requires periodStart/periodEnd/steps on each. Throws
+// StepSampleError (400). Shared with POST /steps/sync-v2 so both paths reject
+// the same inputs. Returns the normalized (not yet overlap-cleaned) samples.
+function normalizeSamples(samples) {
+  if (!Array.isArray(samples)) {
+    throw new StepSampleError("samples must be an array", 400);
+  }
+
+  const normalizedSamples = samples.map((sample) => {
+    const normalized = { ...sample };
+
+    if (typeof normalized.recordingMethod === "string") {
+      normalized.recordingMethod = normalized.recordingMethod.trim().toLowerCase();
+
+      if (!VALID_RECORDING_METHODS.has(normalized.recordingMethod)) {
+        throw new StepSampleError("recordingMethod must be one of unknown, active, automatic, or manual", 400);
+      }
+
+      if (normalized.recordingMethod === "manual") {
+        throw new StepSampleError("manual step samples are not allowed", 400);
+      }
+    }
+
+    return normalized;
+  });
+
+  for (const s of normalizedSamples) {
+    if (!s.periodStart || !s.periodEnd || s.steps == null) {
+      throw new StepSampleError("Each sample requires periodStart, periodEnd, and steps", 400);
+    }
+  }
+
+  return normalizedSamples;
+}
+
 // Remove overlapping samples: if sample A fully contains sample B,
 // keep the shorter (more granular) one and discard the broader one.
 function removeOverlaps(samples) {
@@ -79,30 +116,7 @@ function buildRecordStepSamples(dependencies = {}) {
       throw new StepSampleError("samples must be a non-empty array", 400);
     }
 
-    const normalizedSamples = samples.map((sample) => {
-      const normalized = { ...sample };
-
-      if (typeof normalized.recordingMethod === "string") {
-        normalized.recordingMethod = normalized.recordingMethod.trim().toLowerCase();
-
-        if (!VALID_RECORDING_METHODS.has(normalized.recordingMethod)) {
-          throw new StepSampleError("recordingMethod must be one of unknown, active, automatic, or manual", 400);
-        }
-
-        if (normalized.recordingMethod === "manual") {
-          throw new StepSampleError("manual step samples are not allowed", 400);
-        }
-      }
-
-      return normalized;
-    });
-
-    for (const s of normalizedSamples) {
-      if (!s.periodStart || !s.periodEnd || s.steps == null) {
-        throw new StepSampleError("Each sample requires periodStart, periodEnd, and steps", 400);
-      }
-    }
-
+    const normalizedSamples = normalizeSamples(samples);
     const cleaned = removeOverlaps(normalizedSamples);
     await stepSampleModel.upsertBatch(userId, cleaned);
     const raceResults = await resolveRaceState({ userId, timeZone });
@@ -143,4 +157,10 @@ function buildRecordStepSamples(dependencies = {}) {
 
 const recordStepSamples = buildRecordStepSamples();
 
-module.exports = { buildRecordStepSamples, recordStepSamples, StepSampleError };
+module.exports = {
+  buildRecordStepSamples,
+  recordStepSamples,
+  StepSampleError,
+  normalizeSamples,
+  removeOverlaps,
+};

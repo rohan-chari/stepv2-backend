@@ -398,6 +398,11 @@ async function checkActiveRaces(prisma, userId, options = {}) {
     stepSampleModel = StepSample,
     raceActiveEffectModel = RaceActiveEffect,
     supportsCharacters = false,
+    // §6.3: when true (new client sent homePersistedTotals=1 after a CURRENT
+    // sync-v2), build entries from persisted RaceParticipant.totalSteps instead
+    // of recomputing live health windows for every participant. Masking,
+    // ordering, top-three, placement, and team blocks are unchanged.
+    usePersistedTotals = false,
   } = options;
 
   const myActive = await prisma.raceParticipant.findMany({
@@ -428,6 +433,7 @@ async function checkActiveRaces(prisma, userId, options = {}) {
   // tests inject minimal fakes without the bulk methods and keep the legacy
   // per-participant query path, which is behaviorally identical.
   const canPrefetch =
+    !usePersistedTotals &&
     typeof stepSampleModel.findRowsForUsersInRange === "function" &&
     typeof stepsModel.findByUserIdsAndDateRange === "function" &&
     typeof raceActiveEffectModel.findEffectsForRaceParticipantsByTypes ===
@@ -463,8 +469,20 @@ async function checkActiveRaces(prisma, userId, options = {}) {
     // Finished racers are NOT recomputed — we use their frozen finishTotalSteps
     // (falling back to the live total) exactly as getRaceProgress /
     // raceStateResolution treat finishers.
-    const liveTotals = new Map(); // participant.id -> live total
-    if (race.startedAt) {
+    const liveTotals = new Map(); // participant.id -> total (live or persisted)
+    if (usePersistedTotals) {
+      // §6.3 opt-in: use persisted RaceParticipant.totalSteps directly. The
+      // uploader's own row was just made current in-band by sync-v2's uploader
+      // pass; rival rows may be briefly stale until the durable job's job-success
+      // refresh (the accepted, bounded new-client tradeoff, D14). Reads never
+      // write totals. Finishers keep their frozen finishTotalSteps.
+      for (const p of race.participants) {
+        liveTotals.set(
+          p.id,
+          p.finishedAt ? p.finishTotalSteps ?? p.totalSteps ?? 0 : p.totalSteps ?? 0
+        );
+      }
+    } else if (race.startedAt) {
       await Promise.all(
         race.participants.map(async (p) => {
           if (p.finishedAt) {
@@ -728,6 +746,9 @@ function buildGetHomeRaceCard(dependencies = {}) {
   return async function getHomeRaceCard({
     userId,
     homeActiveRaces = false,
+    // §6.3: opt-in to persisted-total ACTIVE_RACES cards. Only honored together
+    // with homeActiveRaces; ignored otherwise. Old clients never send it.
+    homePersistedTotals = false,
     timeZone = "UTC",
     supportsCharacters = false,
     // TR-702/809: whether the caller declared the `team_races` token. Old
@@ -753,6 +774,7 @@ function buildGetHomeRaceCard(dependencies = {}) {
         stepSampleModel,
         raceActiveEffectModel,
         supportsCharacters,
+        usePersistedTotals: homePersistedTotals,
       });
       if (activeRaces) return activeRaces;
     } else {

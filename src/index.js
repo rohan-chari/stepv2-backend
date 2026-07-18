@@ -17,6 +17,9 @@ const {
 const { scheduleRecomputePlacements } = require("./jobs/placementRecompute");
 const { scheduleNotificationCleanup } = require("./jobs/notificationCleanup");
 const { scheduleDailyMover } = require("./jobs/dailyMover");
+const {
+  scheduleRaceResolutionWorker,
+} = require("./jobs/raceResolutionQueue");
 
 function startServer({
   app = createApp(),
@@ -36,6 +39,7 @@ function startServer({
   scheduleRecomputePlacements: scheduleLivePlacements = scheduleRecomputePlacements,
   scheduleNotificationCleanup: scheduleNotifCleanup = scheduleNotificationCleanup,
   scheduleDailyMover: scheduleDaily = scheduleDailyMover,
+  scheduleRaceResolutionWorker: scheduleRaceResolution = scheduleRaceResolutionWorker,
   logger = console,
   // Delay before the cron jobs start ticking. Every scheduler fires an
   // immediate first tick, and under pm2 cluster `reload` the OLD process keeps
@@ -77,6 +81,15 @@ function startServer({
       if (process.env.DAILY_MOVER_DISABLED !== "true") {
         scheduleDaily();
       }
+      // Durable async race-resolution worker (Home/Races Refresh Performance).
+      // Registered after the cron start delay like the other jobs. Two kill
+      // switches: ASYNC_RACE_RESOLUTION_DISABLED stops new v2 intake at the
+      // route (normal rollback — clients get a definite legacy fallback);
+      // ASYNC_RACE_RESOLUTION_WORKER_DISABLED stops this worker draining the
+      // queue (emergency DB-load control while queued rows are preserved).
+      // Uses its own console (like scheduleTournamentSeedRenewal) rather than the
+      // injected startup logger.
+      scheduleRaceResolution();
     };
     if (cronStartDelayMs > 0) {
       logger.log(`[CRON] Job scheduling starts in ${cronStartDelayMs / 1000}s`);

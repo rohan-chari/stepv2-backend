@@ -6,6 +6,25 @@ const {
 } = require("../constants/raceFinishReward");
 const { buildTeamsBlockFromParticipants } = require("../utils/teamRaces");
 
+// Shared visibility predicate for a browsable public race, applied over the
+// rows findPublicPending returns. Reused by getPublicRaceCount so the count and
+// the full list can never diverge in membership/capacity/seed/team rules. Reads
+// only tournamentId, isTeamRace, status, participants[].userId/status, and
+// maxParticipants, so it works on both the full and lean participant shapes.
+function isVisiblePublicRace(race, userId, supportsTeamRaces) {
+  // Matchup races are never browsable — managed only via the tournament UI.
+  if (race.tournamentId) return false;
+  if (race.isTeamRace && !supportsTeamRaces) return false;
+  if (race.isTeamRace && race.status !== "PENDING") return false;
+  const participants = race.participants || [];
+  if (participants.some((p) => p.userId === userId)) return false;
+  const acceptedCount = participants.filter((p) => p.status === "ACCEPTED").length;
+  // null => unlimited; a full race is skipped, but unlimited is never full.
+  const maxParticipants = race.maxParticipants ?? null;
+  if (maxParticipants != null && acceptedCount >= maxParticipants) return false;
+  return true;
+}
+
 function buildGetPublicRaces(dependencies = {}) {
   const raceModel = dependencies.Race || Race;
 
@@ -17,20 +36,13 @@ function buildGetPublicRaces(dependencies = {}) {
 
     const results = [];
     for (const race of races) {
-      // Matchup races are never browsable — managed only via the tournament UI.
-      if (race.tournamentId) continue;
-      if (race.isTeamRace && !supportsTeamRaces) continue;
-      if (race.isTeamRace && race.status !== "PENDING") continue;
+      if (!isVisiblePublicRace(race, userId, supportsTeamRaces)) continue;
       const participants = race.participants || [];
-      const userInRace = participants.some((p) => p.userId === userId);
-      if (userInRace) continue;
-
       const acceptedCount = participants.filter(
         (p) => p.status === "ACCEPTED"
       ).length;
       // null => unlimited; a full race is skipped, but unlimited is never full.
       const maxParticipants = race.maxParticipants ?? null;
-      if (maxParticipants != null && acceptedCount >= maxParticipants) continue;
 
       const heldPotCoins = participants.reduce((sum, p) => {
         if (p.buyInStatus === "HELD") {
@@ -126,4 +138,4 @@ function buildGetPublicRaces(dependencies = {}) {
 
 const getPublicRaces = buildGetPublicRaces();
 
-module.exports = { buildGetPublicRaces, getPublicRaces };
+module.exports = { buildGetPublicRaces, getPublicRaces, isVisiblePublicRace };

@@ -20,6 +20,22 @@ const RaceActiveEffect = {
     });
   },
 
+  // Bulk variant of findActiveByTypeForParticipant across many participants
+  // (Phase B2): one query for a single effect type over a set of participant ids,
+  // for the GET /races Detour-masking prefetch. Returns the matching ACTIVE
+  // effect rows; the caller groups by targetParticipantId. Participant ids are
+  // globally unique so no race scoping is needed.
+  async findActiveByTypeForParticipants(participantIds, type) {
+    if (!participantIds || participantIds.length === 0) return [];
+    return prisma.raceActiveEffect.findMany({
+      where: {
+        targetParticipantId: { in: participantIds },
+        type,
+        status: "ACTIVE",
+      },
+    });
+  },
+
   async findActiveForRace(raceId) {
     return prisma.raceActiveEffect.findMany({
       where: { raceId, status: "ACTIVE" },

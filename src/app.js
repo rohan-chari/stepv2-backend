@@ -223,6 +223,25 @@ function createApp(dependencies = {}) {
     }
   });
 
+  // JSON body-parser error handler (§6.4 / Phase A5). An oversized body makes
+  // express.json throw `entity.too.large`; without this, Express answers with its
+  // default HTML 413. Return the JSON 413 contract instead so clients (notably
+  // POST /steps/sync-v2) get a consistent machine-readable response. Only
+  // entity.too.large is handled here; every other error passes through unchanged,
+  // so normal-size JSON routes are byte-for-byte identical.
+  app.use((err, req, res, next) => {
+    if (
+      err &&
+      (err.type === "entity.too.large" || err.statusCode === 413 || err.status === 413)
+    ) {
+      return res.status(413).json({
+        error: "Step sync request too large",
+        code: "STEP_SYNC_TOO_LARGE",
+      });
+    }
+    return next(err);
+  });
+
   const publicDir = path.join(__dirname, "..", "public");
   app.get("/", (req, res) => res.sendFile(path.join(publicDir, "index.html")));
   app.get("/support", (req, res) => res.sendFile(path.join(publicDir, "support.html")));

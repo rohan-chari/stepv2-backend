@@ -201,6 +201,61 @@ const Race = {
     );
   },
 
+  // Lean variant of findForUser for the GET /races list summaries (Phase B1).
+  // Same where clauses, ordering, and completed-cap as findForUser, but the
+  // participant select drops the deep user/equipped-accessory/shop-item relations
+  // — getRaces never reads them (it renders row summaries, not capybaras). Keeps
+  // creator/winner (used for the summary's creator/winner blocks). findForUser is
+  // left unchanged for other callers.
+  async findSummariesForUser(userId) {
+    const participantFilter = {
+      participants: { some: { userId, status: { not: "DECLINED" } } },
+    };
+    const leanParticipants = {
+      participants: {
+        select: {
+          id: true,
+          userId: true,
+          status: true,
+          totalSteps: true,
+          placement: true,
+          finishedAt: true,
+          joinedAt: true,
+          buyInStatus: true,
+          buyInAmount: true,
+          payoutCoins: true,
+          resultsSeenAt: true,
+          team: true,
+          forfeitedAt: true,
+        },
+        orderBy: { joinedAt: "asc" },
+      },
+    };
+    const include = {
+      creator: { select: { id: true, displayName: true, profilePhotoUrl: true } },
+      winner: { select: { id: true, displayName: true, profilePhotoUrl: true } },
+      ...leanParticipants,
+    };
+
+    const [current, completed] = await Promise.all([
+      prisma.race.findMany({
+        where: { ...participantFilter, status: { not: "COMPLETED" } },
+        include,
+        orderBy: { updatedAt: "desc" },
+      }),
+      prisma.race.findMany({
+        where: { ...participantFilter, status: "COMPLETED" },
+        include,
+        orderBy: { completedAt: "desc" },
+        take: 10,
+      }),
+    ]);
+
+    return [...current, ...completed].sort(
+      (a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)
+    );
+  },
+
   async findActiveForUser(userId) {
     // Lean fetch used only by resolveRaceState + syncRacePowerupState. These
     // services only read race id/status/startedAt/targetSteps/powerupsEnabled/
@@ -293,6 +348,32 @@ const Race = {
       include: {
         creator: { select: { id: true, displayName: true, profilePhotoUrl: true } },
         ...participantInclude,
+      },
+      orderBy: { createdAt: "desc" },
+    });
+  },
+
+  // Lean variant of findPublicPending: the SAME where clause, but selecting only
+  // the fields the public-race visibility predicate needs (id, tournamentId,
+  // isTeamRace, status, maxParticipants, participants.userId/status). Used by
+  // getPublicRaceCount so the Races tab can show a public-race count without
+  // transferring full public race cards. Membership/capacity/seed/team rules
+  // stay identical because the where clause and predicate are shared.
+  async findPublicPendingLean() {
+    return prisma.race.findMany({
+      where: {
+        isPublic: true,
+        status: { in: ["PENDING", "ACTIVE"] },
+        OR: [{ creatorId: null }, { creator: { isReviewAccount: false } }],
+        NOT: { status: "PENDING", seedId: { not: null } },
+      },
+      select: {
+        id: true,
+        tournamentId: true,
+        isTeamRace: true,
+        status: true,
+        maxParticipants: true,
+        participants: { select: { userId: true, status: true } },
       },
       orderBy: { createdAt: "desc" },
     });
