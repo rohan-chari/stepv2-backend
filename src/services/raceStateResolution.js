@@ -16,6 +16,7 @@ const {
 const { calculateSubsequentSteps } = require("../utils/raceSteps");
 const { computeBoxEffectiveSteps } = require("../utils/boxSteps");
 const { raceTimeZone } = require("../utils/raceTimeZone");
+const { applyLeechTransfers } = require("../utils/leechTransfers");
 
 // Every effect type that calculateCurrentTotal folds into a participant's
 // live total. Shared with prefetch paths (getHomeRaceCard) so a bulk effect
@@ -181,16 +182,24 @@ async function calculateCurrentTotal({
   const allEffects = [...legCramps, ...runnersHighs, ...wrongTurns, ...campfires, ...rainstorms, ...leeches];
   const globalContext =
     globalEvents && globalEvents.length > 0 ? { globalEvents, now } : null;
-  const { frozenSteps, buffedSteps, reversedSteps, globalBoostedSteps } =
+  const { frozenSteps, buffedSteps, reversedSteps, globalBoostedSteps, leechTransfers } =
     await computeEffectModifiers(
       allEffects,
       baseAdjusted,
       participant.userId,
       stepSampleModel,
       hasSampleData,
-      globalContext
+      globalContext,
+      now
     );
 
+  // `total` here is the PRE-LEECH total (all other modifiers + bonus, floored at
+  // 0). Leech is a cross-participant zero-sum TRANSFER, so the victim drain and
+  // the attacker credit are resolved by the CALLER via applyLeechTransfers once
+  // every participant's pre-leech total is known. `leechTransfers` lists the
+  // leeches TARGETING this participant. A single-participant caller (sync-v2
+  // reconcile) gets drain-only for that participant, which is the desired
+  // uploader-only behavior.
   const total = Math.max(
     0,
     baseAdjusted -
@@ -201,7 +210,7 @@ async function calculateCurrentTotal({
       (racePowerupsEnabled ? participant.bonusSteps || 0 : 0)
   );
 
-  return { total, legCramps, runnersHighs, wrongTurns, campfires, rainstorms };
+  return { total, leechTransfers, legCramps, runnersHighs, wrongTurns, campfires, rainstorms };
 }
 
 function buildBonusTimeline(events, participantUserId, effectiveStart, now) {
@@ -606,14 +615,21 @@ function buildResolveRaceState(dependencies = {}) {
       // for that user); stays null when resolveRaceState is called without userId.
       let userBoxEffectiveSteps = null;
 
+      // Phase A: compute each participant's PRE-LEECH total + the leeches
+      // targeting them, WITHOUT writing yet — leech is a cross-participant zero-sum
+      // transfer resolved race-wide in phase B (applyLeechTransfers) so display,
+      // settlement, and this path agree. `preLeech[index]` holds either a frozen
+      // total or {preLeechTotal, leechTransfers}. Writes are deferred to phase B.
+      const preLeech = new Array(acceptedParticipants.length);
       await Promise.all(
         acceptedParticipants.map(async (participant, index) => {
           // TR-601: forfeited team-race members are FROZEN at the total the
           // forfeit command snapshotted — never recomputed here (their timed
           // effects expire naturally but the frozen number stands).
           if (participant.forfeitedAt) {
-            stepTotals[index] = {
+            preLeech[index] = {
               participant,
+              frozen: true,
               totalSteps: participant.totalSteps || 0,
             };
             return;
@@ -621,8 +637,9 @@ function buildResolveRaceState(dependencies = {}) {
 
           if (participant.finishedAt) {
             // Read-only — increment outside Promise.all is unsafe, count later.
-            stepTotals[index] = {
+            preLeech[index] = {
               participant,
+              frozen: true,
               totalSteps:
                 participant.finishTotalSteps ?? participant.totalSteps,
             };
@@ -642,7 +659,7 @@ function buildResolveRaceState(dependencies = {}) {
               now: currentTime,
             });
 
-          const { total, legCramps, runnersHighs, wrongTurns, campfires, rainstorms } =
+          const { total, leechTransfers } =
             await calculateCurrentTotal({
               raceId: race.id,
               racePowerupsEnabled: race.powerupsEnabled,
@@ -655,8 +672,12 @@ function buildResolveRaceState(dependencies = {}) {
               now: currentTime,
             });
 
-          await participantModel.updateTotalSteps(participant.id, total);
-          stepTotals[index] = { participant, totalSteps: total };
+          preLeech[index] = {
+            participant,
+            frozen: false,
+            preLeechTotal: total,
+            leechTransfers,
+          };
 
           // Capture the requesting user's RAW-walked-steps box total for the gate
           // (immune to every buff/debuff multiplier; never strands next_box). Box
@@ -697,6 +718,31 @@ function buildResolveRaceState(dependencies = {}) {
           // already carry finishedAt keep their frozen totals (handled above).
         })
       );
+
+      // Phase B: resolve all leeches race-wide against real victim availability
+      // (zero-sum, deterministic), then persist each active participant's FINAL
+      // total. Frozen participants keep their stored total and are never written.
+      const leechFinals = applyLeechTransfers(
+        preLeech
+          .filter((e) => e && !e.frozen)
+          .map((e) => ({
+            participantId: e.participant.id,
+            userId: e.participant.userId,
+            preLeechTotal: e.preLeechTotal,
+            leechTransfers: e.leechTransfers,
+          }))
+      );
+
+      for (let index = 0; index < preLeech.length; index++) {
+        const e = preLeech[index];
+        if (e.frozen) {
+          stepTotals[index] = { participant: e.participant, totalSteps: e.totalSteps };
+          continue;
+        }
+        const finalTotal = leechFinals.get(e.participant.id) ?? e.preLeechTotal;
+        await participantModel.updateTotalSteps(e.participant.id, finalTotal);
+        stepTotals[index] = { participant: e.participant, totalSteps: finalTotal };
+      }
 
       if (race.powerupsEnabled) {
         await triggerTrailMines({

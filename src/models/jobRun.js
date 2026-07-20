@@ -19,6 +19,32 @@ const JobRun = {
       update: { lastRanFor: dayKey },
     });
   },
+
+  // ATOMIC compare-and-set claim (§7). Unlike markRan (a plain read-then-upsert
+  // where two cluster workers can both observe "not ran yet" and both proceed),
+  // this claims the (jobName, dayKey) tick for exactly ONE caller across all
+  // processes. Returns true iff THIS call won the claim.
+  //
+  // updateMany flips the row from any other day-key to dayKey atomically: only
+  // one worker's UPDATE matches `lastRanFor != dayKey` and gets count 1. A count
+  // of 0 means either the row already holds dayKey (already claimed today) or it
+  // doesn't exist yet — the create handles first-ever runs, with the unique PK
+  // making concurrent creates safe (the loser gets P2002 -> false).
+  async claimRun(jobName, dayKey) {
+    const res = await prisma.jobRun.updateMany({
+      where: { jobName, lastRanFor: { not: dayKey } },
+      data: { lastRanFor: dayKey },
+    });
+    if (res.count === 1) return true;
+    if (res.count > 1) return true; // defensive; PK guarantees at most one row
+    try {
+      await prisma.jobRun.create({ data: { jobName, lastRanFor: dayKey } });
+      return true; // first-ever run for this job key
+    } catch (error) {
+      if (error && error.code === "P2002") return false; // row already at dayKey
+      throw error;
+    }
+  },
 };
 
 module.exports = { JobRun };

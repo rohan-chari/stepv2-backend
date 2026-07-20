@@ -4,9 +4,9 @@ const Notification = {
   // Record one user-facing notification we sent. One row per recipient user per
   // notification (not per device token). `type` is the push payload type string
   // (e.g. RACE_STARTED, race_message, PLACEMENT_CHANGED, DAILY_MOVER).
-  async create({ userId, type, title = null, body = null, raceId = null }) {
+  async create({ userId, type, title = null, body = null, raceId = null, deliveryKey = null }) {
     return prisma.notification.create({
-      data: { userId, type, title, body, raceId },
+      data: { userId, type, title, body, raceId, deliveryKey },
     });
   },
 

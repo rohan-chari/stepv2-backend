@@ -13,6 +13,7 @@ const {
   calculateCurrentTotal,
 } = require("../services/raceStateResolution");
 const { raceTimeZone } = require("../utils/raceTimeZone");
+const { applyLeechTransfers } = require("../utils/leechTransfers");
 
 // Mid-race forfeit for TEAM races (TR-601..604).
 //
@@ -79,7 +80,7 @@ function buildForfeitRace(dependencies = {}) {
         now: at,
       });
 
-      const { total } = await calculateCurrentTotal({
+      const { total, leechTransfers } = await calculateCurrentTotal({
         raceId: race.id,
         racePowerupsEnabled: race.powerupsEnabled,
         participant,
@@ -91,7 +92,18 @@ function buildForfeitRace(dependencies = {}) {
         now: at,
       });
 
-      return total;
+      // §5: freeze the forfeiter's total INCLUDING any leech drain against them
+      // (the old debuff-folded behavior). Single-participant -> drain-only (no
+      // attacker credit computed here), matching the sync-v2 reconcile path.
+      const leechFinals = applyLeechTransfers([
+        {
+          participantId: participant.id,
+          userId: participant.userId,
+          preLeechTotal: total,
+          leechTransfers,
+        },
+      ]);
+      return leechFinals.get(participant.id) ?? total;
     });
 
   return async function forfeitRace({ userId, raceId }) {

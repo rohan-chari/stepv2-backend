@@ -71,12 +71,17 @@ const RAINSTORM_DURATION_MS = 60 * 60 * 1000;
 const RAINSTORM_MULTIPLIER = 0.5;
 // SIGNAL_JAMMER is store-only and non-upgradeable, so its jam lasts a fixed 1h.
 const SIGNAL_JAMMER_DURATION_MS = 60 * 60 * 1000;
-// LEECH is store-only, non-upgradeable: a fixed 30-minute leech window. The
-// per-leech step cap (3000) lives in the scorer (getRaceProgress); it is echoed
-// into the effect metadata for legibility. A victim can be leeched by at most
+// LEECH is store-only, non-upgradeable: a fixed 30-minute leech window. Scoring
+// is a 2:1 UNCAPPED transfer (§5) — every 2 steps the leecher walks in the window
+// mints 1 step drained from the victim and credited to the leecher, bounded only
+// by the victim's available balance. There is NO per-use cap. The conversion
+// ratio is echoed into the effect metadata (`{ ratio, scoringVersion }`) and the
+// scorer (getRaceProgress) reads `ratio`, defaulting absent metadata to 2 — so a
+// future ratio change is data-only. A victim can be leeched by at most
 // LEECH_MAX_PER_VICTIM sources at once (gang-stall guard).
 const LEECH_DURATION_MS = 30 * 60 * 1000;
-const LEECH_STEP_CAP = 3000;
+const LEECH_RATIO = 2;
+const LEECH_SCORING_VERSION = 2;
 const LEECH_MAX_PER_VICTIM = 2;
 const SELF_ONLY_TYPES = [
   "COMPRESSION_SOCKS",
@@ -477,7 +482,9 @@ function buildUsePowerup(dependencies = {}) {
     // leecher keeps the powerup HELD):
     //   * at most ONE active leech per (leecher -> victim) pair, and
     //   * at most LEECH_MAX_PER_VICTIM concurrent leechers on any one victim
-    //     (gang-stall guard — worst case is -2 * LEECH_STEP_CAP).
+    //     (gang-stall guard). With the cap removed the worst case is no longer
+    //     -2 * cap: it is the victim's window steps drained to zero, split
+    //     deterministically between at most two leechers (zero-sum).
     if (type === "LEECH" && targetParticipant) {
       const activeOnVictim = (
         await effectModel.findActiveForParticipant(targetParticipant.id)
@@ -886,14 +893,17 @@ function buildUsePowerup(dependencies = {}) {
       }
 
       case "LEECH": {
-        // Store-bought, leecher-driven debuff. Park a 30-min LEECH effect on the
-        // victim, sourced by the leecher. The actual step drain is computed in
-        // getRaceProgress from the LEECHER's (sourceUserId) in-window steps,
-        // capped at LEECH_STEP_CAP — NOT here. As a shop powerup it can never be
-        // reflected (SHOP_POWERUP_TYPES), and the OFFENSIVE Compression Socks
-        // block above already protected a shielded victim (no effect created).
-        // NOT stealthy: the effect targets the victim (renders on their row) and
-        // the POWERUP_USED event below drives the victim's push notification.
+        // Store-bought, leecher-driven ZERO-SUM transfer. Park a 30-min LEECH
+        // effect on the victim, sourced by the leecher. The actual transfer is
+        // computed in getRaceProgress from the LEECHER's (sourceUserId) in-window
+        // steps as floor(steps / ratio), UNCAPPED (bounded only by the victim's
+        // balance) — NOT here. Metadata carries `{ ratio, scoringVersion }`; the
+        // scorer reads `ratio`, defaulting absent metadata to 2, so old rows adopt
+        // the new rule immediately. As a shop powerup it can never be reflected
+        // (SHOP_POWERUP_TYPES), and the OFFENSIVE Compression Socks block above
+        // already protected a shielded victim (no effect created). NOT stealthy:
+        // the effect targets the victim (renders on their row) and the POWERUP_USED
+        // event below drives the victim's push notification.
         const effect = await effectModel.create({
           raceId,
           targetParticipantId: targetParticipant.id,
@@ -903,7 +913,7 @@ function buildUsePowerup(dependencies = {}) {
           type: "LEECH",
           startsAt: currentTime,
           expiresAt: new Date(currentTime.getTime() + LEECH_DURATION_MS),
-          metadata: { cap: LEECH_STEP_CAP },
+          metadata: { ratio: LEECH_RATIO, scoringVersion: LEECH_SCORING_VERSION },
         });
         result.effect = effect;
 
@@ -913,7 +923,7 @@ function buildUsePowerup(dependencies = {}) {
           eventType: "POWERUP_USED",
           powerupType: type,
           targetUserId: resolvedTargetUserId,
-          description: `${myDisplayName} is leeching ${targetDisplayName}! Every step ${myDisplayName} takes drains one from ${targetDisplayName} for 30 minutes.`,
+          description: `${myDisplayName} is leeching ${targetDisplayName}! Every 2 steps ${myDisplayName} takes steals 1 from ${targetDisplayName} for 30 minutes.`,
         });
         break;
       }

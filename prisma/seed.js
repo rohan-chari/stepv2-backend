@@ -148,8 +148,8 @@ async function seed() {
       sku: "POWERUP_LEECH",
       name: "Leech",
       description:
-        "Latch onto a rival for 30 minutes — every step YOU take drains one from them (up to 3,000). You keep your own steps; you just don't pocket theirs. Compression Socks block it, and Mirrors can't reflect it.",
-      priceCoins: 300,
+        "For 30 min, every 2 steps you take steals 1 step from a chosen rival and adds it to your score.",
+      priceCoins: 150,
       powerupType: "LEECH",
       active: true,
       sortOrder: 4,

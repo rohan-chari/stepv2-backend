@@ -27,6 +27,10 @@ const {
 } = require("../constants/powerupGating");
 const { roundLabel } = require("../constants/tournaments");
 const { isTournamentParticipant } = require("../services/tournamentAccess");
+const {
+  computeLeechEarnedTransfer,
+  applyLeechTransfers,
+} = require("../utils/leechTransfers");
 
 // Additive tournament-matchup context for a matchup race's progress payload
 // (null on ordinary races). The frontend banner reads these defensively.
@@ -63,11 +67,11 @@ const HIDDEN_FROM_OPPONENTS = new Set([
   "TRAIL_MINE",
 ]);
 
-// Per-leech hard cap on steps removed from a victim (Item 2). Mirrors the value
-// echoed into the LEECH effect metadata by usePowerup.
-const LEECH_STEP_CAP = 3000;
-
-// Snapshot-based fallback for when StepSample data is unavailable
+// Snapshot-based fallback for when StepSample data is unavailable. NOTE: this
+// helper is currently unreferenced (dead code) — the second pass always uses the
+// sample-driven computeEffectModifiers below. Leech is a cross-participant
+// transfer that cannot be expressed from a single participant's snapshot, so it
+// returns no leech transfers here; the real scorer handles it.
 function computeEffectModifiersFallback(effects, rawTotal) {
   let frozenSteps = 0;
   let buffedSteps = 0;
@@ -111,7 +115,7 @@ function computeEffectModifiersFallback(effects, rawTotal) {
     }
   }
 
-  return { frozenSteps, buffedSteps, reversedSteps };
+  return { frozenSteps, buffedSteps, reversedSteps, leechTransfers: [] };
 }
 
 // Fraction of steps LOST to a rainstorm (multiplier 0.5 => 0.5 lost). Read from
@@ -129,7 +133,8 @@ function rainstormLostFraction(effect) {
 // present, the EXTRA steps from any active GlobalStepEvent windows are returned
 // as `globalBoostedSteps`, stacking multiplicatively with the per-participant
 // timed multipliers below. Absent => globalBoostedSteps is 0 (legacy behavior).
-async function computeEffectModifiers(effects, rawTotal, userId, stepSampleModel, hasSampleData = false, globalContext = null) {
+async function computeEffectModifiers(effects, rawTotal, userId, stepSampleModel, hasSampleData = false, globalContext = null, now = null) {
+  const nowDate = now || (globalContext && globalContext.now) || new Date();
   let frozenSteps = 0;
   let buffedSteps = 0;
   let reversedSteps = 0;
@@ -357,26 +362,30 @@ async function computeEffectModifiers(effects, rawTotal, userId, stepSampleModel
     }
   }
 
-  // Leech (Item 2): a leecher-driven flat debuff. Each LEECH on THIS victim
-  // removes one step per step the LEECHER (sourceUserId) accrued during the
-  // leech window [startsAt, expiresAt], capped at LEECH_STEP_CAP. Unlike
-  // rainstorm (victim-driven), it keys off the SOURCE user's step history — a
-  // leecher who doesn't walk drains nothing — so there is no victim-step overlap
-  // to suspend. The flat count is folded into frozenSteps (a plain subtraction);
-  // the total floors at 0 upstream, so stacked leeches can never go negative.
-  // The use-time stacking guard keeps at most 2 leeches per victim (worst case
-  // -2 * cap). Applied in the SHARED modifier fn, so display == settlement.
+  // Leech (§5): a leecher-driven, uncapped, ZERO-SUM step TRANSFER. Each LEECH on
+  // THIS victim mints floor(leecherWindowSteps / ratio) candidate steps from the
+  // LEECHER's (sourceUserId) in-window steps (the in-progress hour excluded for
+  // monotonicity). Unlike the old debuff this is NOT folded into frozenSteps — it
+  // is returned as per-leech `earnedTransfer` values so the caller can drain the
+  // victim AND credit the attacker against the victim's actual available balance
+  // (resolved deterministically across the whole race in applyLeechTransfers).
+  // A leecher who doesn't walk drains nothing. There is no per-use cap; the
+  // victim's floored balance is the only ceiling.
+  const leechTransfers = [];
   for (const effect of leeches) {
     if (!effect.sourceUserId) continue;
-    const windowStart = effect.startsAt;
-    const windowEnd = effect.expiresAt || new Date();
-    const leecherSteps = await stepSampleModel.sumStepsInWindow(
-      effect.sourceUserId,
-      windowStart,
-      windowEnd
+    const earnedTransfer = await computeLeechEarnedTransfer(
+      effect,
+      stepSampleModel,
+      nowDate
     );
-    if (leecherSteps > 0) {
-      frozenSteps += Math.min(LEECH_STEP_CAP, leecherSteps);
+    if (earnedTransfer > 0) {
+      leechTransfers.push({
+        effectId: effect.id,
+        startsAt: effect.startsAt,
+        sourceUserId: effect.sourceUserId,
+        earnedTransfer,
+      });
     }
   }
 
@@ -394,7 +403,7 @@ async function computeEffectModifiers(effects, rawTotal, userId, stepSampleModel
     });
   }
 
-  return { frozenSteps, buffedSteps, reversedSteps, globalBoostedSteps };
+  return { frozenSteps, buffedSteps, reversedSteps, globalBoostedSteps, leechTransfers };
 }
 
 function buildGetRaceProgress(deps = {}) {
@@ -599,25 +608,31 @@ function buildGetRaceProgress(deps = {}) {
     }
     const globalContext = { globalEvents, now: now() };
 
-    // Second pass: calculate powerup-adjusted totals
-    const stepTotals = await Promise.all(
+    // Second pass, phase A: per-participant PRE-LEECH total + the leeches
+    // targeting each participant. Leech is a cross-participant zero-sum transfer,
+    // so it can't be folded per-participant here — it is resolved race-wide in
+    // phase B (applyLeechTransfers) against real victim availability. Frozen
+    // (finished/forfeited) participants keep their stored totals and take no part
+    // in the transfer.
+    const preLeech = await Promise.all(
       rawStepTotals.map(async ({ participant, baseAdjusted, hasSampleData }) => {
         // TR-601: forfeited team-race members stay FROZEN at the forfeit
         // snapshot — never recomputed on the display path either.
         if (participant.forfeitedAt) {
           return {
             participant,
+            frozen: true,
             totalSteps: participant.totalSteps || 0,
           };
         }
         if (participant.finishedAt) {
           return {
             participant,
+            frozen: true,
             totalSteps: participant.finishTotalSteps ?? participant.totalSteps,
           };
         }
 
-        let total = baseAdjusted;
         let legCramps = [];
         let runnersHighs = [];
         let wrongTurns = [];
@@ -632,19 +647,43 @@ function buildGetRaceProgress(deps = {}) {
           wrongTurns = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "WRONG_TURN");
           campfires = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "CAMPFIRE_REST");
           rainstorms = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "RAINSTORM");
-          // Leech effects targeting this participant (Item 2). Their debuff is
-          // scored from the leecher's step history inside computeEffectModifiers.
+          // Leech effects targeting this participant (§5). Scored from the
+          // leecher's step history inside computeEffectModifiers as a transfer.
           leeches = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "LEECH");
         }
 
         const allEffects = [...legCramps, ...runnersHighs, ...wrongTurns, ...campfires, ...rainstorms, ...leeches];
-        const { frozenSteps, buffedSteps, reversedSteps, globalBoostedSteps } = await computeEffectModifiers(allEffects, baseAdjusted, participant.userId, stepSampleModel, hasSampleData, globalContext);
+        const { frozenSteps, buffedSteps, reversedSteps, globalBoostedSteps, leechTransfers } = await computeEffectModifiers(allEffects, baseAdjusted, participant.userId, stepSampleModel, hasSampleData, globalContext, now());
 
-        total = Math.max(0, baseAdjusted - frozenSteps + buffedSteps - 2 * reversedSteps + (globalBoostedSteps || 0) + (race.powerupsEnabled ? (participant.bonusSteps || 0) : 0));
+        // Pre-leech total: everything EXCEPT the leech transfer, floored at 0.
+        const preLeechTotal = Math.max(0, baseAdjusted - frozenSteps + buffedSteps - 2 * reversedSteps + (globalBoostedSteps || 0) + (race.powerupsEnabled ? (participant.bonusSteps || 0) : 0));
 
-        return { participant, totalSteps: total };
+        return { participant, frozen: false, preLeechTotal, leechTransfers };
       })
     );
+
+    // Phase B: resolve every leech across the race against actual availability,
+    // draining victims and crediting attackers (zero-sum, deterministic order).
+    const leechFinals = applyLeechTransfers(
+      preLeech
+        .filter((e) => !e.frozen)
+        .map((e) => ({
+          participantId: e.participant.id,
+          userId: e.participant.userId,
+          preLeechTotal: e.preLeechTotal,
+          leechTransfers: e.leechTransfers,
+        }))
+    );
+
+    const stepTotals = preLeech.map((e) => {
+      if (e.frozen) {
+        return { participant: e.participant, totalSteps: e.totalSteps };
+      }
+      return {
+        participant: e.participant,
+        totalSteps: leechFinals.get(e.participant.id) ?? e.preLeechTotal,
+      };
+    });
 
     // Update total steps for each active participant. Race completion is now
     // strictly time-based (handled by raceExpiry cron); no step-goal finish.

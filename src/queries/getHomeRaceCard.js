@@ -11,6 +11,14 @@ const {
 const { prorateSamplesIntoWindow } = require("../models/stepSample");
 const { raceTimeZone } = require("../utils/raceTimeZone");
 const { buildTeamsBlockFromParticipants } = require("../utils/teamRaces");
+const { applyLeechTransfers } = require("../utils/leechTransfers");
+
+// The effect types the home card must prefetch. LEECH is included (§5): once
+// leech MINTS steps to the attacker, omitting it here made the home-card total
+// disagree with race detail (the scoped effect model would either miss it or fall
+// back to an N+1 per-participant query). Prefetching LEECH keeps the live home
+// total identical to getRaceProgress.
+const HOME_EFFECT_TYPES = [...POWERUP_EFFECT_TYPES, "LEECH"];
 
 // Max number of active races returned in the new ACTIVE_RACES (opt-in) state.
 const MAX_ACTIVE_RACES = 5;
@@ -271,7 +279,7 @@ async function prefetchScopedModels({
       ? raceActiveEffectModel.findEffectsForRaceParticipantsByTypes(
           powerupRaces.map((r) => r.id),
           participantIds,
-          POWERUP_EFFECT_TYPES
+          HOME_EFFECT_TYPES
         )
       : Promise.resolve({}),
   ]);
@@ -293,7 +301,7 @@ async function prefetchScopedModels({
   const sampleEndMs = sampleRangeEnd.getTime();
   const dailyStartMs = dailyRangeStart.getTime();
   const dailyEndMs = dailyRangeEnd.getTime();
-  const prefetchedTypes = new Set(POWERUP_EFFECT_TYPES);
+  const prefetchedTypes = new Set(HOME_EFFECT_TYPES);
 
   const scopedStepSamples = {
     async sumStepsInWindows(userId, windows) {
@@ -483,11 +491,12 @@ async function checkActiveRaces(prisma, userId, options = {}) {
         );
       }
     } else if (race.startedAt) {
-      await Promise.all(
+      // Phase A: per-participant PRE-LEECH total + the leeches targeting them.
+      // Finished racers keep their frozen total and take no part in the transfer.
+      const preLeech = await Promise.all(
         race.participants.map(async (p) => {
           if (p.finishedAt) {
-            liveTotals.set(p.id, p.finishTotalSteps ?? p.totalSteps ?? 0);
-            return;
+            return { participant: p, frozen: true, total: p.finishTotalSteps ?? p.totalSteps ?? 0 };
           }
           const { baseAdjusted, hasSampleData } = await calculateBaseAdjusted({
             participant: p,
@@ -500,7 +509,7 @@ async function checkActiveRaces(prisma, userId, options = {}) {
             stepSampleModel: raceStepSampleModel,
             now,
           });
-          const { total } = await calculateCurrentTotal({
+          const { total, leechTransfers } = await calculateCurrentTotal({
             raceId: race.id,
             racePowerupsEnabled: race.powerupsEnabled,
             participant: p,
@@ -508,10 +517,30 @@ async function checkActiveRaces(prisma, userId, options = {}) {
             hasSampleData,
             raceActiveEffectModel: raceEffectModel,
             stepSampleModel: raceStepSampleModel,
+            now,
           });
-          liveTotals.set(p.id, total);
+          return { participant: p, frozen: false, preLeechTotal: total, leechTransfers };
         })
       );
+
+      // Phase B: resolve leech race-wide (zero-sum, deterministic) so the home
+      // card's totals match race detail — including the attacker's minted credit.
+      const leechFinals = applyLeechTransfers(
+        preLeech
+          .filter((e) => !e.frozen)
+          .map((e) => ({
+            participantId: e.participant.id,
+            userId: e.participant.userId,
+            preLeechTotal: e.preLeechTotal,
+            leechTransfers: e.leechTransfers,
+          }))
+      );
+      for (const e of preLeech) {
+        liveTotals.set(
+          e.participant.id,
+          e.frozen ? e.total : leechFinals.get(e.participant.id) ?? e.preLeechTotal
+        );
+      }
     } else {
       // No startedAt: cannot window steps; fall back to cached totals so we
       // still render a card rather than crash (defensive).

@@ -86,6 +86,17 @@ model User {
   // rows default to an empty array.
   clientFeatures                String[]             @default([]) @map("client_features")
   clientFeaturesAt              DateTime?            @map("client_features_at")
+  // ── Notification reminders (all additive) ─────────────────────────────────
+  // The user's last-known IANA timezone, sticky-written from the request-scoped
+  // X-Timezone header using the SAME never-on-every-request pattern as
+  // clientFeatures/clientFeaturesAt (only written when it changed). Backfilled
+  // null; the daily-reward reminder scheduler falls back to America/New_York for
+  // a null timezone. First indexed column on this table (@@index below).
+  timezone                      String?              @map("timezone")
+  // Opt-out for the evening daily-reward reminder pushes (§9.1). Absent/never-set
+  // reads as true (the default). Old clients never call the preference endpoints
+  // and keep the default. Additive/back-compat.
+  dailyRewardRemindersEnabled   Boolean              @default(true) @map("daily_reward_reminders_enabled")
   createdAt                     DateTime             @default(now()) @map("created_at")
   steps                         Step[]
   dailyRewardClaims             DailyRewardClaim[]
@@ -130,6 +141,9 @@ model User {
   stepSyncRequests   StepSyncRequest[]
   raceResolutionJob  RaceResolutionJob?
 
+  // First index on this table. Backs the daily-reward reminder scheduler, which
+  // selects users by IANA zone: findMany({ where: { timezone: { in: zonesAtSlot } } }).
+  @@index([timezone])
   @@map("users")
 }
 
@@ -1317,6 +1331,15 @@ model Notification {
   title     String?
   body      String?
   raceId    String?  @map("race_id")
+  // Cross-process atomic-claim key for the daily-reward reminder scheduler
+  // (§7). The job INSERTs a deterministic key (daily-reward:<userId>:<localDate>:<slot>)
+  // BEFORE sending and only sends on a successful insert, so two cluster workers
+  // can never double-send. Null for EVERY other writer. The unique index is
+  // PARTIAL (WHERE delivery_key IS NOT NULL) — see the migration SQL; the
+  // @unique here is what keeps Prisma's index name stable, the migration adds the
+  // predicate. Postgres treats nulls as distinct, so existing null writers never
+  // collide regardless.
+  deliveryKey String? @unique @map("delivery_key")
   createdAt DateTime @default(now()) @map("created_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)

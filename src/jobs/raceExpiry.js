@@ -14,6 +14,7 @@ const {
   determineFinishSnapshot,
 } = require("../services/raceStateResolution");
 const { raceTimeZone } = require("../utils/raceTimeZone");
+const { applyLeechTransfers } = require("../utils/leechTransfers");
 
 async function resolveExpiredRaces() {
   console.log("[CRON] Checking for expired races...");
@@ -50,6 +51,12 @@ async function resolveExpiredRaces() {
 
       const standings = [];
 
+      // Phase A: per-participant PRE-LEECH totals + the leeches targeting each.
+      // Leech is a cross-participant zero-sum transfer, resolved race-wide in
+      // phase B so settled totals match what getRaceProgress showed live. Frozen
+      // (finished/forfeited) participants keep their stored totals and take no
+      // part in the transfer, but still count toward the team total below.
+      const preLeech = [];
       for (const participant of acceptedParticipants) {
         // TR-601: a forfeited team-race member's total is FROZEN at the value
         // snapshotted by the forfeit command — never recomputed (an active
@@ -88,7 +95,7 @@ async function resolveExpiredRaces() {
             now: settlementTime,
           });
 
-        const { total, legCramps, runnersHighs, wrongTurns } =
+        const { total, leechTransfers, legCramps, runnersHighs, wrongTurns } =
           await calculateCurrentTotal({
             raceId: race.id,
             racePowerupsEnabled: race.powerupsEnabled,
@@ -101,13 +108,36 @@ async function resolveExpiredRaces() {
             now: settlementTime,
           });
 
-        await RaceParticipant.updateTotalSteps(participant.id, total);
-        const reachedSnapshot = await determineFinishSnapshot({
+        preLeech.push({
           participant,
-          currentTotal: total,
-          targetSteps: total,
+          preLeechTotal: total,
+          leechTransfers,
           effectiveStart,
           effectGroups: { legCramps, runnersHighs, wrongTurns },
+        });
+      }
+
+      // Phase B: resolve every leech race-wide (zero-sum, deterministic).
+      const leechFinals = applyLeechTransfers(
+        preLeech.map((e) => ({
+          participantId: e.participant.id,
+          userId: e.participant.userId,
+          preLeechTotal: e.preLeechTotal,
+          leechTransfers: e.leechTransfers,
+        }))
+      );
+
+      // Phase C: persist each active participant's FINAL total, compute its
+      // reached-at snapshot for tie-breaking, and add it to the standings.
+      for (const e of preLeech) {
+        const total = leechFinals.get(e.participant.id) ?? e.preLeechTotal;
+        await RaceParticipant.updateTotalSteps(e.participant.id, total);
+        const reachedSnapshot = await determineFinishSnapshot({
+          participant: e.participant,
+          currentTotal: total,
+          targetSteps: total,
+          effectiveStart: e.effectiveStart,
+          effectGroups: e.effectGroups,
           stepSampleModel: StepSample,
           powerupEventModel: RacePowerupEvent,
           raceId: race.id,
@@ -115,7 +145,7 @@ async function resolveExpiredRaces() {
         });
 
         standings.push({
-          participant,
+          participant: e.participant,
           totalSteps: total,
           reachedAt: reachedSnapshot?.finishedAt || settlementTime,
         });

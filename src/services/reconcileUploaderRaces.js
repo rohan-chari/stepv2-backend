@@ -16,6 +16,7 @@ const {
 } = require("./withRaceResolutionLock");
 const { computeBoxEffectiveSteps } = require("../utils/boxSteps");
 const { raceTimeZone } = require("../utils/raceTimeZone");
+const { applyLeechTransfers } = require("../utils/leechTransfers");
 
 // Narrowly-scoped uploader reconciliation for POST /steps/sync-v2 (§6.4 / Phase
 // C2). For each of the uploader's ACTIVE races it computes and persists ONLY the
@@ -90,7 +91,7 @@ function buildReconcileUploaderRaces(dependencies = {}) {
           now: currentTime,
         });
 
-        const { total } = await calculateCurrentTotal({
+        const { total, leechTransfers } = await calculateCurrentTotal({
           raceId: race.id,
           racePowerupsEnabled: race.powerupsEnabled,
           participant,
@@ -102,7 +103,26 @@ function buildReconcileUploaderRaces(dependencies = {}) {
           now: currentTime,
         });
 
-        await participantModel.updateTotalSteps(participant.id, total);
+        // §5: apply DRAIN-ONLY leech for the uploader. This narrow path persists
+        // only the uploader's own row, so we resolve the leeches TARGETING the
+        // uploader (draining their pre-leech total, floored at 0) but do NOT
+        // compute the uploader's attacker credit for leeches THEY cast on rivals —
+        // that requires the victims' availability and is applied by the durable
+        // full-field worker (resolveRaceState) shortly after, matching the same
+        // rival-staleness tradeoff sync-v2 already accepts (D14). Passing a single
+        // entry yields drain-only by construction: with no attacker participant
+        // present, applyLeechTransfers credits nobody.
+        const leechFinals = applyLeechTransfers([
+          {
+            participantId: participant.id,
+            userId: participant.userId,
+            preLeechTotal: total,
+            leechTransfers,
+          },
+        ]);
+        const finalTotal = leechFinals.get(participant.id) ?? total;
+
+        await participantModel.updateTotalSteps(participant.id, finalTotal);
 
         // Box progress uses the RAW-walked box total in boxTz = raceTimeZone(
         // race, "UTC") — device-independent, immune to buff/debuff multipliers —

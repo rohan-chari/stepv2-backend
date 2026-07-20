@@ -18,6 +18,9 @@ const { scheduleRecomputePlacements } = require("./jobs/placementRecompute");
 const { scheduleNotificationCleanup } = require("./jobs/notificationCleanup");
 const { scheduleDailyMover } = require("./jobs/dailyMover");
 const {
+  scheduleDailyRewardReminder,
+} = require("./jobs/dailyRewardReminder");
+const {
   scheduleRaceResolutionWorker,
 } = require("./jobs/raceResolutionQueue");
 
@@ -39,6 +42,8 @@ function startServer({
   scheduleRecomputePlacements: scheduleLivePlacements = scheduleRecomputePlacements,
   scheduleNotificationCleanup: scheduleNotifCleanup = scheduleNotificationCleanup,
   scheduleDailyMover: scheduleDaily = scheduleDailyMover,
+  scheduleDailyRewardReminder:
+    scheduleDailyReminder = scheduleDailyRewardReminder,
   scheduleRaceResolutionWorker: scheduleRaceResolution = scheduleRaceResolutionWorker,
   logger = console,
   // Delay before the cron jobs start ticking. Every scheduler fires an
@@ -80,6 +85,20 @@ function startServer({
       // DAILY_MOVER_DISABLED=true.
       if (process.env.DAILY_MOVER_DISABLED !== "true") {
         scheduleDaily();
+      }
+      // Daily-reward reminder (5pm & 9pm local per user timezone). Like the other
+      // whole-base push jobs it gets a kill switch: DAILY_REWARD_REMINDERS_DISABLED=true.
+      // ROLLOUT (§10): this MUST be set to "true" on the initial prod deploy —
+      // enable it only AFTER users' timezones have populated for several days and
+      // the app release carrying the daily_reward route has rolled out.
+      //
+      // WARNING: the env var is the ONLY thing holding this back. Do NOT assume
+      // a null-timezone user base makes the job inert — dailyRewardReminder
+      // unconditionally adds the DEFAULT_ZONE candidate and queries it with
+      // includeNull:true, which matches EVERY user whose timezone is still null.
+      // Unset, this pushes to the entire base at 5pm/9pm ET on day one.
+      if (process.env.DAILY_REWARD_REMINDERS_DISABLED !== "true") {
+        scheduleDailyReminder();
       }
       // Durable async race-resolution worker (Home/Races Refresh Performance).
       // Registered after the cron start delay like the other jobs. Two kill

@@ -73,6 +73,30 @@ function buildRequireAuth(dependencies = {}) {
     }
   }
 
+  // §7: sticky-write the user's IANA timezone from the request-scoped X-Timezone
+  // header, mirroring recordClientFeatures. extractTimezone squashes an absent or
+  // invalid header to the "America/New_York" default, so we ONLY write when the
+  // raw header was itself a valid zone (raw === req.timeZone) AND it differs from
+  // what's stored. That keeps a header-less internal/retry request from clobbering
+  // a real zone with the default (the same flicker guard TR-706 uses), and makes
+  // the steady state — and every header-less request — zero extra writes. Never
+  // on every request (commit 3e6c827's pool-exhaustion revert). Best-effort: any
+  // failure is swallowed so bookkeeping can't break an authenticated request.
+  async function recordTimezone(req, user) {
+    try {
+      if (!user || typeof userModel.updateTimezone !== "function") return;
+      const rawTz = req.headers && req.headers["x-timezone"];
+      // A valid header is exactly the case where extractTimezone accepted it, so
+      // req.timeZone === rawTz. Absent/invalid => req.timeZone is the default and
+      // rawTz !== req.timeZone => skip.
+      if (!rawTz || rawTz !== req.timeZone) return;
+      if (user.timezone === req.timeZone) return; // unchanged — nothing to write
+      await userModel.updateTimezone(user.id, req.timeZone);
+    } catch {
+      // Never let timezone bookkeeping fail the request.
+    }
+  }
+
   return async function requireAuth(req, res, next) {
     try {
       const token = extractBearerToken(req.headers.authorization);
@@ -88,6 +112,7 @@ function buildRequireAuth(dependencies = {}) {
 
         req.user = user;
         await recordClientFeatures(req, user);
+        await recordTimezone(req, user);
         return next();
       } catch (error) {
         if (error instanceof SessionTokenError) {
@@ -119,6 +144,7 @@ function buildRequireAuth(dependencies = {}) {
       req.appleIdentity = appleIdentity;
       req.user = user;
       await recordClientFeatures(req, user);
+      await recordTimezone(req, user);
 
       next();
     } catch (error) {

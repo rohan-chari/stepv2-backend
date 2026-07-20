@@ -76,6 +76,10 @@ function registerNotificationHandlers(dependencies = {}) {
     buildBody,
     payload,
     logContext = {},
+    // §7: when the caller already wrote the audit row (e.g. the daily-reward
+    // scheduler's INSERT-FIRST deliveryKey claim IS the audit row), skip the
+    // second recordNotification so there's exactly one row.
+    skipAudit = false,
   }) {
     const actorName = await findActorName(actorUserId);
     const tokens = await deviceTokenModel.findByUserId(recipientUserId);
@@ -116,17 +120,20 @@ function registerNotificationHandlers(dependencies = {}) {
       }
     }
 
-    // One audit row per recipient (the user had tokens, so we dispatched).
-    await recordNotification({
-      userId: recipientUserId,
-      type: (payload && payload.type) || eventName,
-      title,
-      body,
-      raceId:
-        (payload && payload.params && payload.params.raceId) ||
-        (payload && payload.raceId) ||
-        null,
-    });
+    // One audit row per recipient (the user had tokens, so we dispatched) —
+    // unless the caller already recorded it (skipAudit).
+    if (!skipAudit) {
+      await recordNotification({
+        userId: recipientUserId,
+        type: (payload && payload.type) || eventName,
+        title,
+        body,
+        raceId:
+          (payload && payload.params && payload.params.raceId) ||
+          (payload && payload.raceId) ||
+          null,
+      });
+    }
   }
 
   events.on("FRIEND_REQUEST_SENT", async (data) => {
@@ -323,6 +330,72 @@ function registerNotificationHandlers(dependencies = {}) {
       }
     } catch (error) {
       logger.error("RACE_STARTED handler failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // §8: race-ending-soon reminder. The placementRecompute job emits ONE event
+  // per eligible participant (it does the durable send-once dedup via the audit
+  // row before emitting), so this handler just delivers the push to that user.
+  // `formatTimeLeft` is defined below in the team-push block; declared with a
+  // function statement so it's hoisted and usable here.
+  events.on("RACE_ENDING_SOON", async (data) => {
+    try {
+      const { raceId, raceName, endsAt, userId } = data || {};
+      if (!raceId || !userId) return;
+      const label = raceName || "Your race";
+      // "about N hours" — round to the nearest hour so a fire at ~1h55m left
+      // reads "2 hours" (floor-based formatTimeLeft would say "1h"). The reminder
+      // fires on the first tick within 2h of the end, so this is ~2 in practice.
+      const msLeft = new Date(endsAt).getTime() - Date.now();
+      const hoursLeft = Math.max(1, Math.round(msLeft / (60 * 60 * 1000)));
+      const hoursText = hoursLeft === 1 ? "1 hour" : `${hoursLeft} hours`;
+      await sendNotificationToUser({
+        eventName: "RACE_ENDING_SOON",
+        recipientUserId: userId,
+        actorUserId: null,
+        title: "Race ending soon",
+        buildBody: () =>
+          `${label} ends in about ${hoursText} — time for a final push.`,
+        payload: {
+          type: "RACE_ENDING_SOON",
+          route: "race_detail",
+          params: { raceId },
+        },
+        logContext: { raceId, userId },
+      });
+    } catch (error) {
+      logger.error("RACE_ENDING_SOON handler failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // §7: daily-reward reminder. The dailyRewardReminder job emits ONE event per
+  // user it has ALREADY claimed (INSERT-FIRST deliveryKey) and audited, so this
+  // handler only delivers the push — skipAudit:true avoids a duplicate row. The
+  // payload deep-links to the daily-reward screen and carries no extra-spin CTA.
+  events.on("DAILY_REWARD_REMINDER", async (data) => {
+    try {
+      const { userId, slot, title, body } = data || {};
+      if (!userId || (slot !== 17 && slot !== 21)) return;
+      await sendNotificationToUser({
+        eventName: `DAILY_REWARD_REMINDER_${slot}`,
+        recipientUserId: userId,
+        actorUserId: null,
+        title: title || "Your daily box is waiting",
+        buildBody: () => body || "Your mystery box has been sitting here all day. Awkward.",
+        payload: {
+          type: `DAILY_REWARD_REMINDER_${slot}`,
+          route: "daily_reward",
+          params: {},
+        },
+        logContext: { userId, slot },
+        skipAudit: true,
+      });
+    } catch (error) {
+      logger.error("DAILY_REWARD_REMINDER handler failed", {
         error: error instanceof Error ? error.message : String(error),
       });
     }

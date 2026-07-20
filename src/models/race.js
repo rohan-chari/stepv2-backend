@@ -423,6 +423,10 @@ const Race = {
         name: true,
         payoutPreset: true,
         potCoins: true,
+        // startedAt (additive): the race-ending-soon reminder needs the total
+        // scheduled duration (endsAt - startedAt) to skip sub-2h seeded races
+        // that start already inside the 2h window (§8 short-race guard).
+        startedAt: true,
         endsAt: true,
         // Team races: the recompute job suppresses individual placement events
         // and evaluates team lead-change / final-stretch / slacker pushes

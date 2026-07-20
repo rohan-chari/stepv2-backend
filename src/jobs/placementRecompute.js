@@ -15,6 +15,13 @@ const SLACKER_PUSH_TYPE = "TEAM_SLACKER_NUDGE";
 
 const RECOMPUTE_INTERVAL_MS = 5 * 60 * 1000; // every 5 minutes
 
+// Race-ending-soon reminder (§8): one push per active participant of a TIMED
+// race, ~2h before it ends. Fired on the FIRST tick where msLeft <= 2h (and > 0),
+// then made send-once by the durable Notification audit row (findFirstByUserTypeRace) —
+// NOT an in-memory throttle, so it survives restarts and multiple cluster workers.
+const RACE_ENDING_SOON_WINDOW_MS = 2 * 60 * 60 * 1000; // fire when <= 2h remain
+const RACE_ENDING_SOON_PUSH_TYPE = "RACE_ENDING_SOON";
+
 // Races ending within this window are the "final stretch": we want their
 // participants' steps to be as fresh as possible for the last few recomputes, so
 // they get a tighter push throttle (below) than the default hourly cooldown.
@@ -43,6 +50,49 @@ function buildRecomputePlacements(dependencies = {}) {
     stepSyncPushService.requestStepSyncForUsers;
   const now = dependencies.now || (() => new Date());
   const logger = dependencies.logger || console;
+  // §8 kill switch: RACE_ENDING_REMINDER_DISABLED=true stops the race-ending-soon
+  // reminder without stopping placement pushes. Injectable for tests.
+  const isRaceEndingReminderDisabled =
+    dependencies.isRaceEndingReminderDisabled ||
+    (() => process.env.RACE_ENDING_REMINDER_DISABLED === "true");
+
+  // §8: emit a one-shot RACE_ENDING_SOON per eligible participant of a timed race
+  // ~2h before it ends. Applies to BOTH individual and team races (any race with a
+  // definite end instant). Excludes finished/forfeited participants. Send-once via
+  // the durable audit-row guard, so repeated ticks and restarts never re-send.
+  async function evaluateRaceEndingSoon({ race, participants, currentTime }) {
+    if (isRaceEndingReminderDisabled()) return;
+    // Qualify on a definite end instant only (endsAt != null). Open-ended
+    // step-target races have no fixed end and are excluded.
+    if (!race.endsAt) return;
+    const endMs = new Date(race.endsAt).getTime();
+    const msLeft = endMs - currentTime.getTime();
+    if (!(msLeft > 0) || msLeft > RACE_ENDING_SOON_WINDOW_MS) return;
+    // Short-race guard: a seeded race whose TOTAL scheduled duration is <= 2h
+    // starts already inside the window, so a "~2h left" nudge at launch is
+    // nonsensical. Only fire when endsAt - startedAt > 2h. If startedAt is absent
+    // (defensive — findActiveInProgress now selects it), skip rather than misfire.
+    if (!race.startedAt) return;
+    const totalDurationMs = endMs - new Date(race.startedAt).getTime();
+    if (totalDurationMs <= RACE_ENDING_SOON_WINDOW_MS) return;
+
+    for (const p of participants) {
+      // Exclude finished (frozen standings) and forfeited participants.
+      if (p.finishedAt || p.forfeitedAt) continue;
+      const alreadySent = await notificationModel.findFirstByUserTypeRace(
+        p.userId,
+        RACE_ENDING_SOON_PUSH_TYPE,
+        race.id
+      );
+      if (alreadySent) continue;
+      events.emit("RACE_ENDING_SOON", {
+        raceId: race.id,
+        raceName: race.name,
+        endsAt: race.endsAt,
+        userId: p.userId,
+      });
+    }
+  }
 
   // ── Team-race evaluation (TR-681/682/683/685) ────────────────────────────
   // Inside a team race, individual placement/overtake pushes are SUPPRESSED
@@ -210,6 +260,10 @@ function buildRecomputePlacements(dependencies = {}) {
           raceEnd.getTime() - currentTime.getTime() <= FINAL_STRETCH_WINDOW_MS;
         const bucket = isFinalStretch ? finalStretchUserIds : normalUserIds;
         for (const p of participants) bucket.add(p.userId);
+
+        // §8: race-ending-soon reminder — applies to every timed race (individual
+        // or team), independent of the placement/team-push logic below.
+        await evaluateRaceEndingSoon({ race, participants, currentTime });
 
         // Team races: individual placement events are suppressed (TR-685);
         // evaluate the team pushes instead and skip the individual loop.
