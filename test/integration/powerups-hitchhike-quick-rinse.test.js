@@ -126,6 +126,9 @@ async function giveHourlySamples(userId, hoursAgoStart, hourCount, stepsPerHour)
   }
 }
 
+// Target's own steps after race-end truncation: 9 of 10 hourly samples.
+const TARGET_TRUNCATED_TOTAL = 27000;
+
 function windowStartFor(hoursAgo) {
   return new Date(
     Math.floor((Date.now() - hoursAgo * HOUR_MS) / HOUR_MS) * HOUR_MS
@@ -392,6 +395,36 @@ describe("hitchhike / quick rinse — integration", () => {
     }
   });
 
+  // CONTROL: identical setup, but NO hitchhike is ever cast. Whatever Bob scores
+  // here is purely race-end truncation of his OWN steps. If this equals what Bob
+  // scores in the hitchhike test below, then hitchhike is not taking anything
+  // from him and the "target keeps all their own steps" expectation is wrong.
+  it("CONTROL: target total with no hitchhike at all", async () => {
+    const alice = await createUser("Ctrl");
+    const bob = await createUser("CtrlBob");
+    await makeFriends(alice, bob);
+    const raceId = await createActiveRace(alice, [bob]);
+    await giveHourlySamples(bob.userId, 11, 10, 3000);
+
+    const start = windowStartFor(4);
+    await prisma.race.update({
+      where: { id: raceId },
+      data: { endsAt: new Date(start.getTime() + HOUR_MS) },
+    });
+
+    await resolveExpiredRaces();
+    const settled = await progressFor(raceId, alice);
+    // 10 hourly samples of 3000 were written at hours-ago 11..2, but the race
+    // ends ~3h ago, so the latest sample lies entirely outside the race window
+    // and is correctly not counted. This 27000 is the baseline the hitchhike
+    // case below must match EXACTLY.
+    assert.equal(
+      totalFor(settled, bob.userId),
+      TARGET_TRUNCATED_TOTAL,
+      "baseline: race-end truncation alone costs the target one hourly sample"
+    );
+  });
+
   it("race end truncates the scoring window, as seen in the settled result", async () => {
     const alice = await createUser("Alice");
     const bob = await createUser("Bob");
@@ -425,10 +458,16 @@ describe("hitchhike / quick rinse — integration", () => {
       3000,
       "only the hour BEFORE race end is copied, not the full 2-hour window"
     );
+    // Hitchhike is a 1:1 COPY — the target loses nothing to it. This asserts the
+    // target's total is byte-identical to the no-hitchhike CONTROL above, which
+    // is the actual property worth pinning. It previously asserted 30000 (the
+    // raw sample sum), which conflated "hitchhike took nothing" with "the race
+    // window took nothing" and failed for a reason that had nothing to do with
+    // hitchhike: one of the target's own samples falls after the race ended.
     assert.equal(
       totalFor(settled, bob.userId),
-      30000,
-      "the target keeps all their own steps through settlement"
+      TARGET_TRUNCATED_TOTAL,
+      "the target loses nothing TO THE COPY (same total as with no hitchhike)"
     );
   });
 
