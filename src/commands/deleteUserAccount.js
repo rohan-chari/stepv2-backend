@@ -110,6 +110,53 @@ function buildDeleteUserAccount(dependencies = {}) {
         }
       }
 
+      // 1b) Tournament participations: same lifecycle split as races above.
+      //     tournament_participants FKs the user with RESTRICT, so an
+      //     unhandled row here blocks the whole delete.
+      const tournamentEntries = await tx.tournamentParticipant.findMany({
+        where: { userId },
+        include: { tournament: { select: { id: true, status: true } } },
+      });
+
+      for (const entry of tournamentEntries) {
+        if (entry.buyInStatus === "HELD" && entry.buyInAmount > 0) {
+          await tx.tournament.update({
+            where: { id: entry.tournamentId },
+            data: { potCoins: { increment: entry.buyInAmount } },
+          });
+        }
+
+        const tournamentStatus = entry.tournament?.status;
+        const isLive =
+          tournamentStatus === "PENDING" || tournamentStatus === "ACTIVE";
+
+        if (isLive) {
+          await tx.tournamentParticipant.delete({ where: { id: entry.id } });
+        } else {
+          // Finished/cancelled — preserve the bracket by reassigning to the
+          // sentinel, unless it already holds a slot in this tournament
+          // (the (tournamentId, userId) unique would collide).
+          const sentinelAlreadyIn =
+            await tx.tournamentParticipant.findUnique({
+              where: {
+                tournamentId_userId: {
+                  tournamentId: entry.tournamentId,
+                  userId: sentinelId,
+                },
+              },
+            });
+
+          if (sentinelAlreadyIn) {
+            await tx.tournamentParticipant.delete({ where: { id: entry.id } });
+          } else {
+            await tx.tournamentParticipant.update({
+              where: { id: entry.id },
+              data: { userId: sentinelId },
+            });
+          }
+        }
+      }
+
       // 2) Anonymize Race creator/winner references so other users keep history.
       await tx.race.updateMany({
         where: { creatorId: userId },
@@ -118,6 +165,19 @@ function buildDeleteUserAccount(dependencies = {}) {
       await tx.race.updateMany({
         where: { winnerUserId: userId },
         data: { winnerUserId: sentinelId },
+      });
+
+      // 2b) Same for Tournament creator/champion. The FK is SET NULL, so this
+      //     is not required to unblock the delete — it keeps a deleted user's
+      //     brackets showing "Deleted User" instead of silently losing the
+      //     creator, matching the Race behaviour above.
+      await tx.tournament.updateMany({
+        where: { creatorId: userId },
+        data: { creatorId: sentinelId },
+      });
+      await tx.tournament.updateMany({
+        where: { championUserId: userId },
+        data: { championUserId: sentinelId },
       });
 
       // 3) Anonymize ChallengeInstance references.
