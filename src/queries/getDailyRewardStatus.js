@@ -5,9 +5,12 @@ const {
 } = require("../constants/dailyReward");
 const {
   dailyBoxOddsForPool,
+  rarePrizeMix,
+  pickProbabilities,
   DAILY_BOX_STREAK_CAP,
   DAILY_BOX_COIN_RANGES,
 } = require("../utils/dailyBoxOdds");
+const { balanceConfig } = require("../services/balanceConfig");
 const {
   getUnownedAccessoryPool,
 } = require("./getUnownedAccessoryPool");
@@ -101,12 +104,19 @@ async function getDailyRewardStatus({
   );
   // Same pool the RARE roll draws from, so the reel previews real winnable
   // accessories (capped — it's display-only).
+  // Read the balance config FIRST so every downstream consumer in this request
+  // uses the same version. getEligiblePowerupPool otherwise falls back to the
+  // synchronous cache, which can still hold the previous config for up to the
+  // TTL — the pool would then be built from an older version than the odds
+  // reported alongside it.
+  const { version: configVersion, config } = await balanceConfig.getSnapshot();
+
   const accessoryPool = await getUnownedAccessoryPool(userId);
   // Shop powerups are only rolled/previewed for spinpowerups-capable clients —
   // old binaries can't render a POWERUP tile/result. Non-flagged clients get an
   // empty pool, so their odds and payload are byte-identical to today.
   const powerupPool = supportsSpinPowerups
-    ? await getEligiblePowerupPool({ channel, supportsJammer })
+    ? await getEligiblePowerupPool({ channel, supportsJammer, config })
     : [];
   // Empty pools → RARE folded to 0 so shipped clients never draw the "???"
   // mystery-accessory tile (see dailyBoxOddsForPool). With powerups in play,
@@ -114,7 +124,8 @@ async function getDailyRewardStatus({
   const [common, uncommon, rare] = dailyBoxOddsForPool(
     projectedStreak,
     accessoryPool.length,
-    powerupPool.length
+    powerupPool.length,
+    config
   );
 
   const box = {
@@ -148,8 +159,43 @@ async function getDailyRewardStatus({
     } else if (hasAccessory) {
       accessoryShare = 1;
     }
+    // UNCHANGED and still sent: frozen clients read this exact shape. It omits
+    // the COINS slice and is therefore wrong whenever rareCoinsShare > 0 — the
+    // additive `itemOdds.rareMix` below is the corrected version. Do not "fix"
+    // this field; old binaries depend on its current meaning.
     box.rarePrizeMix = { ACCESSORY: accessoryShare, POWERUP: powerupShare };
   }
+
+  // §5.3 — additive `itemOdds`: the exact odds a player is up against, derived
+  // from the same helpers the roll uses. Absent fields (rather than nulls) let a
+  // client presence-check, and a client that does not understand this key simply
+  // ignores it.
+  const accessoryProbabilities = pickProbabilities(
+    accessoryPool,
+    projectedStreak,
+    config
+  );
+  const powerupProbabilities = pickProbabilities(
+    powerupPool,
+    projectedStreak,
+    config
+  );
+  const accessories = accessoryPool
+    .map((item, i) => ({ sku: item.sku, p: accessoryProbabilities[i] }))
+    .slice(0, ACCESSORY_POOL_PREVIEW_LIMIT);
+  const powerups = powerupPool.map((item, i) => ({
+    type: item.powerupType,
+    p: powerupProbabilities[i],
+  }));
+
+  box.itemOdds = {
+    configVersion,
+    rarity: { COMMON: common, UNCOMMON: uncommon, RARE: rare },
+    // Unlike rarePrizeMix, this INCLUDES the COINS slice and always sums to 1.
+    rareMix: rarePrizeMix(accessoryPool.length, powerupPool.length, config),
+    ...(accessories.length > 0 ? { accessories } : {}),
+    ...(powerups.length > 0 ? { powerups } : {}),
+  };
 
   return {
     cycleLength: CYCLE_LENGTH,

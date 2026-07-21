@@ -109,6 +109,17 @@ async function seed() {
       priceCoins: 75,
       powerupType: "RAINSTORM",
       active: true,
+      // Owner decision (§9.2.1). NOTE the blast radius: testOnly is NOT
+      // "store-only". getEligiblePowerupPool derives its pool from
+      // PowerupShopItem.findActive({ channel }), which applies the testOnly
+      // release-channel filter — so this ALSO removes Rainstorm from daily
+      // reward box drops and the spin reel on the prod channel, not just the
+      // store. That is the intended outcome; do not work around it.
+      //
+      // Seed only. The existing PROD row is unaffected by re-seeding (the upsert
+      // `update` block below deliberately omits testOnly) and needs a separate
+      // owner-executed UPDATE.
+      testOnly: true,
       sortOrder: 1,
     },
     {
@@ -147,11 +158,32 @@ async function seed() {
       // prize (excluded from getEligiblePowerupPool).
       sku: "POWERUP_LEECH",
       name: "Leech",
+      // DEPRECATED copy columns (§9.5.2): getPowerupShopCatalog now serves
+      // name/description from the PowerupCopy catalog. Kept in sync here only so
+      // a half-seeded environment still renders something sane. The 60-minute
+      // wording is the authoritative one — a request advertising `powerups3`
+      // creates a 60-minute effect; a legacy request still gets 30 (§7.5).
       description:
-        "For 30 min, every 2 steps you take steals 1 step from a chosen rival and adds it to your score.",
-      priceCoins: 150,
+        "For 60 min, every 2 steps you take steals 1 step from a chosen rival and adds it to your score. Compression Socks block it; Mirrors can't reflect it",
+      // 300 is the INTENDED live price (owner decision), and it is what the prod
+      // row already holds. Source said 150 while prod said 300 — and because the
+      // upsert `update` block DOES include priceCoins (unlike testOnly), every
+      // deploy's seed run was one step away from silently reverting the live
+      // price to 150. Do not "restore" this to 150.
+      priceCoins: 300,
       powerupType: "LEECH",
+      // Left ACTIVE deliberately. `active:false` RETIRES an item (the Cleanse
+      // precedent at sortOrder 3); `testOnly:true` merely gates it to the
+      // TestFlight release channel. Leech is being gated, not retired.
       active: true,
+      // Was omitted, so it inherited the schema default of FALSE
+      // (schema.prisma:535) — the mismatch that made an earlier spec draft
+      // wrongly claim Leech was already testOnly. Set explicitly so fresh and
+      // staging databases match the intended production state. Stays true
+      // through this deploy and the carrying binary's rollout; the owner flips
+      // it manually afterwards. Note the existing PROD row is NOT changed by
+      // re-seeding (the upsert `update` block omits testOnly).
+      testOnly: true,
       sortOrder: 4,
     },
     {
@@ -167,17 +199,55 @@ async function seed() {
       active: true,
       sortOrder: 5,
     },
+    {
+      // Store-only, `powerups3`-gated. Targeted 60-minute 1:1 raw-step COPY —
+      // the caster gains, the target loses nothing. Never a mystery-box /
+      // daily-box prize (excluded from getEligiblePowerupPool).
+      //
+      // testOnly:true is DELIBERATE and must stay true until the carrying iOS +
+      // Android build has completed phased rollout. Flipping it is a separately
+      // approved, OWNER-EXECUTED production change — never an agent's.
+      sku: "POWERUP_HITCHHIKE",
+      name: "Hitchhike",
+      description:
+        "For 60 min, every step a chosen rival takes is copied into your score — they lose nothing. Compression Socks block it; Mirrors can't reflect it",
+      priceCoins: 150,
+      powerupType: "HITCHHIKE",
+      active: true,
+      testOnly: true,
+      sortOrder: 6,
+    },
+    {
+      // Store-only, `powerups3`-gated. Self-only, instantaneous: halves the
+      // remaining duration of every active timed opponent effect on you. Blocked
+      // while jammed, exactly like Cleanse. See the testOnly note above.
+      sku: "POWERUP_QUICK_RINSE",
+      name: "Quick Rinse",
+      description:
+        "Cut the remaining time on every opponent effect currently on you in half. Your own buffs stay put",
+      priceCoins: 75,
+      powerupType: "QUICK_RINSE",
+      active: true,
+      testOnly: true,
+      sortOrder: 7,
+    },
   ];
   let powerupItemsUpserted = 0;
   for (const p of powerupShopItems) {
     await prisma.powerupShopItem.upsert({
       where: { sku: p.sku },
+      // NOTE (balance-config §6.1.1): `priceCoins` and `active` are DELIBERATELY
+      // absent from this update block. They are LIVE-TUNED through the admin
+      // powerup-shop editor (PATCH /admin/powerup-shop/items/:id), so re-seeding
+      // on deploy must never reassert the values baked into this file — that is
+      // exactly how the Leech price silently reverted 300 -> 150 (audit §2.1).
+      // Same reasoning as cosmetics, which are not applied on deploy at all
+      // (see the comment above the powerup catalog). They stay in `create` so a
+      // fresh DB still gets a sane starting price/active flag.
       update: {
         name: p.name,
         description: p.description,
-        priceCoins: p.priceCoins,
         powerupType: p.powerupType,
-        active: p.active,
         sortOrder: p.sortOrder,
       },
       create: p,
@@ -185,6 +255,50 @@ async function seed() {
     powerupItemsUpserted++;
   }
   console.log(`Upserted ${powerupItemsUpserted} powerup shop item(s)`);
+
+  // Powerup COPY catalog (§9.5) — the single source of truth for every
+  // user-renderable powerup's name/description/short description/tier labels.
+  // Idempotent: keyed by powerupType, so re-running only refreshes strings and
+  // never duplicates or deletes. MYSTERY_BOX is intentionally absent.
+  const {
+    POWERUP_COPY_SEED,
+  } = require("../src/constants/powerupCopySeed");
+  let powerupCopyUpserted = 0;
+  for (const row of POWERUP_COPY_SEED) {
+    await prisma.powerupCopy.upsert({
+      where: { powerupType: row.powerupType },
+      update: {
+        name: row.name,
+        description: row.description,
+        shortDescription: row.shortDescription,
+        upgradeTierLabels: row.upgradeTierLabels,
+      },
+      create: {
+        powerupType: row.powerupType,
+        name: row.name,
+        description: row.description,
+        shortDescription: row.shortDescription,
+        upgradeTierLabels: row.upgradeTierLabels,
+      },
+    });
+    powerupCopyUpserted++;
+  }
+  console.log(`Upserted ${powerupCopyUpserted} powerup copy row(s)`);
+
+  // Balance config version 1 (§4.4). Idempotent and NON-DESTRUCTIVE: it inserts
+  // the code defaults only when the table is completely empty, and never
+  // touches an existing row. Once an admin has tuned balance through the
+  // editor, re-running the seed must not reach it — exactly the mistake that
+  // reverted the Leech price, applied to a much bigger surface.
+  const {
+    balanceConfig: balanceConfigService,
+  } = require("../src/services/balanceConfig");
+  const seededConfig = await balanceConfigService.ensureSeeded();
+  console.log(
+    seededConfig
+      ? `Balance config active at v${seededConfig.version} (untouched if it already existed)`
+      : "Balance config: nothing to seed"
+  );
 
   console.log("Seed complete!");
 }

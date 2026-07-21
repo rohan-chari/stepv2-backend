@@ -15,6 +15,43 @@ deploys and prod data changes are the high-risk, hard-to-reverse step.
 - Staging is fine to deploy to without asking; **prod is not**.
 - This also covers one-off prod DB scripts/`UPDATE`s and running seeds on prod.
 
+## Integration tests over unit tests — always
+
+**If a behavior is worth testing, test it end-to-end.** Default to
+`test/integration/`. Reach for a unit test only when an integration test
+*structurally cannot* express the property.
+
+I do not care about unit-test counts. I care about proof that the feature works
+through the real path a client takes. A green unit suite over injected fakes
+proves the pieces agree with your fakes — it does not prove the feature works.
+
+### What this means in practice
+- Real HTTP request, real DB, real handler chain. Assert on the **API response a
+  client would actually receive**, not on a helper's return value.
+- **Don't `require()` an internal utility inside an integration test to shortcut
+  the public path.** If the assertion is worth making, make it through the
+  endpoint. Reaching past the boundary silently converts an integration test into
+  a unit test wearing the wrong filename.
+- **"It's covered by the unit parity suite" is not sufficient** when the risk is
+  that two code paths diverge. Unit tests prove a function is deterministic given
+  identical inputs; only an end-to-end test proves both paths actually *call* it
+  the same way, with the same arguments, models, and clock. Scoring that must
+  agree between live display and settlement is exactly this case — prove it by
+  running a race to settlement, not by asserting a shared helper twice.
+- Old-client compatibility claims must be proven by an integration test that
+  sends the old `X-Client-Features` header and asserts the old response shape.
+
+### When a unit test is the right tool
+- Pure algorithmic/date/tz math with many cases, where an integration test would
+  need dozens of fixtures for the same ground.
+- Structural guards over source (e.g. asserting every scoring-assembly site
+  inserts a required term).
+- A property genuinely unreachable through the public path.
+
+Even then: if there is *any* doubt, write the integration test.
+
+Use `npm run test:unit` / `npm run test:integration` — never bare `npm test`.
+
 ## Never run integration tests against the prod database
 
 Integration/e2e tests create, mutate, and delete rows (users, races, coin
@@ -72,8 +109,12 @@ the developer's machine, so don't ask for it — recover it locally:
    `root` (per the runbook examples).
 3. **Verify before deploying:** open with a **read-only** command first
    (`ssh -o BatchMode=yes <user>@<host> 'pm2 list'`) to confirm key auth works
-   and you're on the right box (prod = pm2 id `3`, staging = id `4`) before
-   running anything that mutates prod.
+   and you're on the right box before running anything that mutates prod.
+   **Identify processes by NAME, never by pm2 id:** prod is `steps-tracker` and
+   staging is `steps-tracker-staging`. Ids are not stable — they have already
+   drifted once (this doc previously said prod = `3` / staging = `4`; as of
+   2026-07-20 they were `6` and `5`), so anything keyed to an id silently
+   targets the wrong process after a restart or a cluster-mode change.
 
 Never write the recovered host/credentials into a file, commit, or chat — read
 them inline each session and keep them out of the repo.
@@ -87,3 +128,10 @@ pg16, which **refuses** to dump an 18 server — so dump from the laptop's pg18
 client (`/opt/homebrew/opt/postgresql@18/bin/pg_dump`) using `PROD_DATABASE_URL`
 from the local `.env`, then `scp` the dated `-Fc` dump into `/root/backups/` on
 the droplet and verify checksums match.
+
+**Then delete the local copy — always, same session.** A prod dump contains the
+full users table (PII) and must never be left on the laptop. It transits there
+only because the droplet's pg16 client cannot dump an 18 server. Verify the
+checksums match first (that is what makes deletion safe), then `rm` it. The
+droplet copy is the retained one. The `*.dump` gitignore rule is a backstop
+against committing it, not a substitute for deleting it.

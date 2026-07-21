@@ -50,7 +50,19 @@ ssh "$DROPLET" 'mkdir -p /root/backups'
 scp "$OUT" "$DROPLET":/root/backups/
 shasum -a 256 "$OUT"
 ssh "$DROPLET" "sha256sum /root/backups/$OUT"   # must match the line above
+
+# 4. MANDATORY: delete the local copy. Only after the checksums above match.
+rm -f "$OUT"
+ls *.dump 2>/dev/null && echo "STILL PRESENT — remove it" || echo "no local dumps"
 ```
+
+> **Step 4 is not optional.** No prod dump may be left on the laptop. The dump
+> contains the full users table (PII), and the laptop is the least-protected
+> place it can sit. Verify the checksums match *first* — that is what makes the
+> deletion safe — then remove it in the same session, not "later".
+>
+> The `*.dump` gitignore rule stays as a second line of defence, but it only
+> prevents committing the file; it does nothing about the file existing.
 
 A dump is ~5 MB (DB is ~64 MB; custom format compresses well). The droplet has
 tens of GB free, so retention is a non-issue — keep many.
@@ -70,8 +82,10 @@ ask before deploying to prod" — a restore is a destructive prod write).
 
 ## Caveats / honest limits
 
-- The dump contains the **full users table** (PII). A copy lands on your laptop
-  and on the droplet. Delete the local copy if you don't want it lingering.
+- The dump contains the **full users table** (PII). It transits the laptop by
+  necessity (the droplet's pg16 client can't dump an 18 server), but **must not
+  remain there** — step 4 deletes it, and that step is mandatory, not advisory.
+  The only retained copy is the droplet's.
 - The procedure above writes `$OUT` to the **repo root**, so `*.dump` is
   gitignored — without that, a routine `git add -A` would commit user PII into
   history. Keep the ignore rule, or dump outside the repo.

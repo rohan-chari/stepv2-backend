@@ -297,7 +297,8 @@ describe("powerup upgrades — integration", () => {
   // Block by Compression Socks: coins ARE deducted (Wave 2 rule)
   // ---------------------------------------------------------------------
 
-  it("Lvl 2 Shortcut blocked by shield: coins deducted (15), no steps stolen, upgrade event = BLOCKED", async () => {
+  // Shortcut is RARE now (was pricing off the COMMON ladder): tier 2 = 45, not 15.
+  it("Lvl 2 Shortcut blocked by shield: coins deducted (45), no steps stolen, upgrade event = BLOCKED", async () => {
     const alice = await createUser("AliceUpGG");
     const bob = await createUser("BobUpGGGG");
     await makeFriends(alice, bob);
@@ -328,14 +329,14 @@ describe("powerup upgrades — integration", () => {
     assert.equal(body.result.blocked, true);
 
     // Coins ARE deducted on block
-    assert.equal(await getUserCoins(alice.userId), 485);
+    assert.equal(await getUserCoins(alice.userId), 455);
 
     // PowerupUpgradeEvent recorded with status BLOCKED
     const ues = await prisma.powerupUpgradeEvent.findMany({ where: { powerupId: sc.id } });
     assert.equal(ues.length, 1);
     assert.equal(ues[0].status, "BLOCKED");
     assert.equal(ues[0].tier, 2);
-    assert.equal(ues[0].costCoins, 15);
+    assert.equal(ues[0].costCoins, 45);
   });
 
   // ---------------------------------------------------------------------

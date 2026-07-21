@@ -8,6 +8,10 @@ const { appSettings: defaultAppSettings } = require("../services/appSettings");
 const {
   getAdminStats: defaultGetAdminStats,
 } = require("../queries/getAdminStats");
+const {
+  balanceConfig: defaultBalanceConfig,
+} = require("../services/balanceConfig");
+const { serializeBounds } = require("../services/balanceConfig.defaults");
 
 const RENDER_METADATA_NUMBER_KEYS = ["offsetX", "offsetY", "rotation", "scale"];
 const RENDER_METADATA_RENDER_LAYERS = new Set(["front", "behind"]);
@@ -113,6 +117,7 @@ function createAdminRouter(dependencies = {}) {
 
   const settings = dependencies.appSettings || defaultAppSettings;
   const getAdminStats = dependencies.getAdminStats || defaultGetAdminStats;
+  const balance = dependencies.balanceConfig || defaultBalanceConfig;
 
   // Runtime feature flags (DB-backed, no deploy needed). Per-environment on
   // purpose: prod and staging flip independently, no peer-DB mirroring.
@@ -252,6 +257,209 @@ function createAdminRouter(dependencies = {}) {
         return res.status(404).json({ error: "Shop item not found" });
       }
       console.error("Admin update shop item error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // === POWERUP SHOP CATALOG (§5.1) ===
+  //
+  // The admin surface for coin-purchasable powerup prices/flags. This exists so
+  // prices are tuned HERE and only here — `prisma/seed.js` deliberately no
+  // longer reasserts priceCoins/active on deploy, which is what silently
+  // reverted the Leech price 300 -> 150.
+  //
+  // `name` / `description` are intentionally NOT editable: the PowerupCopy table
+  // owns user-facing copy, and two writable sources of a string is the same
+  // class of bug this build removes.
+  router.get("/powerup-shop/items", async (req, res) => {
+    try {
+      const items = await prisma.powerupShopItem.findMany({
+        orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+      });
+      res.json({
+        items: items.map((item) => ({
+          id: item.id,
+          sku: item.sku,
+          name: item.name,
+          powerupType: item.powerupType,
+          priceCoins: item.priceCoins,
+          active: item.active,
+          testOnly: item.testOnly,
+          sortOrder: item.sortOrder,
+        })),
+      });
+    } catch (error) {
+      console.error("Admin powerup shop list error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  router.patch("/powerup-shop/items/:itemId", async (req, res) => {
+    try {
+      const body = req.body || {};
+      const data = {};
+
+      if (body.priceCoins !== undefined) {
+        if (!Number.isInteger(body.priceCoins) || body.priceCoins < 0) {
+          return res
+            .status(400)
+            .json({ error: "priceCoins must be a non-negative integer" });
+        }
+        data.priceCoins = body.priceCoins;
+      }
+      for (const key of ["active", "testOnly"]) {
+        if (body[key] === undefined) continue;
+        if (typeof body[key] !== "boolean") {
+          return res.status(400).json({ error: `${key} must be a boolean` });
+        }
+        data[key] = body[key];
+      }
+      if (body.sortOrder !== undefined) {
+        if (!Number.isInteger(body.sortOrder)) {
+          return res.status(400).json({ error: "sortOrder must be an integer" });
+        }
+        data.sortOrder = body.sortOrder;
+      }
+      if (Object.keys(data).length === 0) {
+        return res.status(400).json({ error: "No updatable fields supplied" });
+      }
+
+      const updated = await prisma.powerupShopItem.update({
+        where: { id: req.params.itemId },
+        data,
+      });
+      res.json({
+        item: {
+          id: updated.id,
+          sku: updated.sku,
+          name: updated.name,
+          powerupType: updated.powerupType,
+          priceCoins: updated.priceCoins,
+          active: updated.active,
+          testOnly: updated.testOnly,
+          sortOrder: updated.sortOrder,
+        },
+      });
+    } catch (error) {
+      if (error.code === "P2025") {
+        return res.status(404).json({ error: "Powerup shop item not found" });
+      }
+      console.error("Admin update powerup shop item error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // === BALANCE CONFIG (§5.2) ===
+
+  router.get("/balance-config", async (req, res) => {
+    try {
+      const row = await balance.getActiveRow();
+      // No row yet (fresh env / pre-seed) still answers with the code defaults
+      // rather than 404, so the editor opens on something coherent. version:null
+      // tells the client "nothing saved yet".
+      const config = row
+        ? balance.mergeOverDefaults(row.config)
+        : balance.mergeOverDefaults(null);
+      res.json({
+        version: row ? row.version : null,
+        config,
+        note: row ? row.note : null,
+        createdBy: row ? row.createdBy : null,
+        boundOverride: row ? row.boundOverride : false,
+        createdAt: row ? row.createdAt : null,
+        // Served so the UI can warn as the admin types, before it submits.
+        bounds: serializeBounds(),
+      });
+    } catch (error) {
+      console.error("Admin balance config read error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  router.get("/balance-config/versions", async (req, res) => {
+    try {
+      const limit = Number.parseInt(req.query.limit, 10);
+      const versions = await balance.listVersions(
+        Number.isInteger(limit) ? limit : 50
+      );
+      res.json({ versions });
+    } catch (error) {
+      console.error("Admin balance config versions error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  router.put("/balance-config", async (req, res) => {
+    const body = req.body || {};
+    if (body.config === undefined) {
+      return res.status(400).json({ error: "config is required" });
+    }
+    if (body.expectedVersion !== undefined && body.expectedVersion !== null) {
+      if (!Number.isInteger(body.expectedVersion)) {
+        return res
+          .status(400)
+          .json({ error: "expectedVersion must be an integer or null" });
+      }
+    }
+    try {
+      const saved = await balance.saveConfig({
+        config: body.config,
+        note: typeof body.note === "string" ? body.note : null,
+        createdBy: req.user?.id ?? null,
+        // `null` is meaningful (== "I expect no config to exist yet"), so only
+        // an absent key skips the optimistic-concurrency check.
+        expectedVersion:
+          body.expectedVersion === undefined ? undefined : body.expectedVersion,
+        acknowledgeBoundWarnings: body.acknowledgeBoundWarnings === true,
+      });
+      res.status(201).json({
+        version: saved.version,
+        config: balance.mergeOverDefaults(saved.config),
+        warnings: [],
+      });
+    } catch (error) {
+      if (error.statusCode) {
+        const { statusCode, ...payload } = error;
+        return res.status(statusCode).json({
+          error: payload.error || error.message,
+          ...(payload.errors ? { errors: payload.errors } : {}),
+          ...(payload.warnings ? { warnings: payload.warnings } : {}),
+          ...(payload.currentVersion !== undefined
+            ? { currentVersion: payload.currentVersion }
+            : {}),
+          ...(payload.config !== undefined ? { config: payload.config } : {}),
+        });
+      }
+      console.error("Admin balance config write error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  router.post("/balance-config/rollback", async (req, res) => {
+    const body = req.body || {};
+    if (!Number.isInteger(body.version)) {
+      return res.status(400).json({ error: "version must be an integer" });
+    }
+    try {
+      const saved = await balance.rollbackTo({
+        version: body.version,
+        expectedVersion:
+          body.expectedVersion === undefined ? undefined : body.expectedVersion,
+        createdBy: req.user?.id ?? null,
+      });
+      res.json({ version: saved.version });
+    } catch (error) {
+      if (error.statusCode) {
+        const { statusCode, ...payload } = error;
+        return res.status(statusCode).json({
+          error: payload.error || error.message,
+          ...(payload.currentVersion !== undefined
+            ? { currentVersion: payload.currentVersion }
+            : {}),
+          ...(payload.config !== undefined ? { config: payload.config } : {}),
+        });
+      }
+      console.error("Admin balance config rollback error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });

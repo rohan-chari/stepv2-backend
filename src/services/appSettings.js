@@ -10,6 +10,9 @@ const { prisma: defaultPrisma } = require("../db");
 // add a query per request; an admin PATCH busts the cache immediately in the
 // process that served it, and other processes converge within CACHE_TTL_MS.
 const KNOWN_FLAGS = {
+  // New-user Daily-race activation flow. Default OFF so deploying this backend
+  // cannot change behavior for either the current binary or a phased rollout.
+  onboardingV2Enabled: false,
   // iOS banner ads (AdBannerSlot / AdInlineCard). The app also needs the
   // ADMOB_BANNER_AD_UNIT_ID dart-define baked into the build; this flag is the
   // remote kill switch layered on top. Default OFF (product decision 2026-07-12:

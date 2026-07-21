@@ -58,19 +58,80 @@ coins, never rolled.
 - If your inventory is full when you cross a threshold, no powerup is earned (the threshold still advances)
 - You can discard powerups to free space
 
+<!-- BEGIN GENERATED: balance (npm run powerups:docs) -->
+
 ## Odds (Rubber Banding)
 
 Rarity odds depend on your position in the race. Trailing players get better drops.
 
 | Position | Common | Uncommon | Rare |
 |---|---|---|---|
-| 1st (leader) | 70% | 25% | 5% |
-| Last place | 20% | 35% | 45% |
+| 1st (leader) | 48.0% | 25.0% | 27.0% |
+| Last place | 20.0% | 35.0% | 45.0% |
 
 Middle positions are interpolated linearly between these extremes.
 
-Within a rarity tier, each powerup has equal odds (e.g. a 5-powerup Common tier gives each a 1-in-5 chance).
+Within a rarity tier each powerup has equal odds, except for these weighted types (1.0 = a normal share):
 
+| Powerup | Weight |
+|---|---|
+| **Red Card** | 0.5 |
+
+## Drop Pool
+
+What a mystery box can actually roll. A powerup having a rarity does not make it droppable — it must be listed here.
+
+- **Common** — Protein Shake, Trail Mix, Detour Sign, Runners High, Pinecone Toss
+- **Uncommon** — Leg Cramp, Stealth Mode, Wrong Turn
+- **Rare** — Red Card, Second Wind, Compression Socks, Fanny Pack, Lucky Horseshoe, Pocket Watch, Trail Mine, Sneaky Swap, Shortcut, Cleanse, Mirror
+
+Store-only (bought with coins, never rolled from a mystery box): Imposter, Rainstorm, Signal Jammer, Leech, Defense Scan, Hitchhike, Quick Rinse.
+
+Of those, barred from the **daily reward box** too: Defense Scan, Leech, Hitchhike, Quick Rinse. The rest remain winnable as a daily-box RARE prize.
+
+## Upgrade Costs
+
+Coin cost by rarity and level. Level 0 is the base form and is free.
+
+| Rarity | Lvl 1 | Lvl 2 | Lvl 3 |
+|---|---|---|---|
+| Common | 5 | 15 | 45 |
+| Uncommon | 10 | 30 | 90 |
+| Rare | 15 | 45 | 135 |
+
+Upgradeable: Protein Shake, Shortcut, Detour Sign, Trail Mix, Runners High, Leg Cramp, Stealth Mode, Wrong Turn, Compression Socks, Lucky Horseshoe, Campfire Rest, Trail Magnet, Pocket Watch, Trail Mine, Pinecone Toss.
+
+## Lucky Horseshoe
+
+Chance that the next mystery box is forced to RARE, by upgrade level. On a miss the floor is UNCOMMON. The rarity is rolled when the Horseshoe is USED and stored on the effect, so an upgrade never changes a Horseshoe already in flight.
+
+| Level | Chance of RARE |
+|---|---|
+| 0 | 0.0% |
+| 1 | 20.0% |
+| 2 | 45.0% |
+| 3 | 100.0% |
+
+## Daily Reward Box
+
+Odds interpolate on your consecutive-day login streak, capped at **30 days**.
+
+| Streak | Common | Uncommon | Rare |
+|---|---|---|---|
+| 1 day | 70.0% | 25.0% | 5.0% |
+| 30+ days | 20.0% | 35.0% | 45.0% |
+
+Coin payouts per tier, interpolated by streak progress:
+
+| Tier | Min | Max |
+|---|---|---|
+| COMMON | 10 | 30 |
+| UNCOMMON | 40 | 80 |
+| RARE_FALLBACK | 100 | 200 |
+
+A RARE hit pays coins instead of a prize 0.0% of the time (displacing the powerup slice only). Accessory weighting mode: `inverse`.
+
+<!-- END GENERATED: balance -->
 ## Usage Rules
 
 - Powerup must be in `HELD` status and belong to you

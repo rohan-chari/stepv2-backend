@@ -102,8 +102,16 @@ npm install
 npx prisma migrate deploy
 npx prisma generate
 node prisma/seed.js
+npm run balance:drift      # reports (never blocks) balance config drift vs git
 pm2 restart 3
 ```
+
+`balance:drift` compares the live `balance_config` row against the committed
+`data/balance-config.json` and prints a warning per differing path. It exits 0
+even on drift — a value tuned in the admin editor and not yet pulled back to git
+is normal and must never stop a deploy. If it reports drift you did not expect,
+that is the audit trail the Leech price revert never had; run
+`npm run balance:pull` and commit to record the live values.
 
 ### 4. Smoke test
 

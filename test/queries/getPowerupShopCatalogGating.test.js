@@ -52,10 +52,34 @@ test("Leech + X-Ray are hidden without the powerups2 feature", async () => {
   assert.ok(types.includes("RAINSTORM"));
 });
 
-test("Leech + X-Ray are visible with the powerups2 feature", async () => {
+// LEECH MOVED from the powerups2 gate to the powerups3 gate (§7.5/§9.2): its
+// duration is now capability-versioned (30 min for a legacy request, 60 min for
+// a powerups3 one), so only a build that advertises powerups3 should be able to
+// BUY one. Catalog visibility only — an existing owner of a banked Leech can
+// still use it, and an old build's use still creates the 30-minute effect its own
+// bundled copy describes.
+test("X-Ray is still visible with the powerups2 feature", async () => {
   const types = await typesFor({ supportsJammer: true, supportsPowerups2: true });
+  assert.ok(types.includes("DEFENSE_SCAN"), "X-Ray remains a powerups2 item");
+});
+
+test("Leech is NOT visible with powerups2 alone (it moved to the powerups3 gate)", async () => {
+  const types = await typesFor({
+    supportsJammer: true,
+    supportsPowerups2: true,
+    supportsPowerups3: false,
+  });
+  assert.ok(!types.includes("LEECH"));
+});
+
+test("Leech IS visible with the powerups3 feature", async () => {
+  const types = await typesFor({
+    supportsJammer: true,
+    supportsPowerups2: true,
+    supportsPowerups3: true,
+  });
   assert.ok(types.includes("LEECH"));
-  assert.ok(types.includes("DEFENSE_SCAN"));
+  assert.ok(types.includes("DEFENSE_SCAN"), "the powerups2 item is unaffected");
 });
 
 test("Signal Jammer stays gated behind the jammer feature", async () => {

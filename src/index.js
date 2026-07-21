@@ -16,6 +16,9 @@ const {
 } = require("./jobs/autoStartScheduledRaces");
 const { scheduleRecomputePlacements } = require("./jobs/placementRecompute");
 const { scheduleNotificationCleanup } = require("./jobs/notificationCleanup");
+const {
+  scheduleActivationEventCleanup,
+} = require("./jobs/activationEventCleanup");
 const { scheduleDailyMover } = require("./jobs/dailyMover");
 const {
   scheduleDailyRewardReminder,
@@ -41,6 +44,8 @@ function startServer({
     scheduleAutoStartRaces = scheduleAutoStartScheduledRaces,
   scheduleRecomputePlacements: scheduleLivePlacements = scheduleRecomputePlacements,
   scheduleNotificationCleanup: scheduleNotifCleanup = scheduleNotificationCleanup,
+  scheduleActivationEventCleanup:
+    scheduleActivationCleanup = scheduleActivationEventCleanup,
   scheduleDailyMover: scheduleDaily = scheduleDailyMover,
   scheduleDailyRewardReminder:
     scheduleDailyReminder = scheduleDailyRewardReminder,
@@ -79,6 +84,9 @@ function startServer({
       // NOTIFICATION_CLEANUP_DISABLED=true.
       if (process.env.NOTIFICATION_CLEANUP_DISABLED !== "true") {
         scheduleNotifCleanup();
+      }
+      if (process.env.ACTIVATION_EVENT_CLEANUP_DISABLED !== "true") {
+        scheduleActivationCleanup();
       }
       // Daily biggest-mover digest (4pm ET) — like live placement, this can push to
       // the whole active-racer base, so it gets its own kill switch:

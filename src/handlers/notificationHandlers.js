@@ -704,13 +704,21 @@ function registerNotificationHandlers(dependencies = {}) {
     SIGNAL_JAMMER: (attackerName) => `${attackerName} jammed your powerups for 1 hour! 📵`,
     // Leech is deliberately NOT stealthy — the victim is told who's draining them
     // so their steps dropping never becomes a "why?" mystery (Item 2).
-    LEECH: (attackerName) => `🩸 ${attackerName} is leeching your steps! Keep moving for the next 30 minutes.`,
+    LEECH: (attackerName) => `🩸 ${attackerName} is leeching your steps! Keep moving.`,
+    // §9.3 — GENERIC copy for EVERY recipient build. Device tokens don't carry
+    // per-build capabilities and User.clientFeatures is a sticky union across all
+    // of a user's devices, so the server cannot safely pick version-specific
+    // wording per token. The powerup's NAME is therefore never interpolated: a
+    // frozen binary can't render the type, and naming it would be the one thing
+    // that turns an unexplained score change into an incomprehensible one.
+    HITCHHIKE: (attackerName) =>
+      `🎒 ${attackerName} linked to your steps! Whatever you walk, they copy — you keep every step.`,
   };
 
   events.on("POWERUP_USED", async (data) => {
     try {
       const { raceId, userId, powerupType, targetUserId } = data;
-      if (!targetUserId || !["LEG_CRAMP", "RED_CARD", "SHORTCUT", "WRONG_TURN", "SIGNAL_JAMMER", "LEECH"].includes(powerupType)) return;
+      if (!targetUserId || !["LEG_CRAMP", "RED_CARD", "SHORTCUT", "WRONG_TURN", "SIGNAL_JAMMER", "LEECH", "HITCHHIKE"].includes(powerupType)) return;
 
       // T9 safety net: suppress the attack push if the race is no longer live —
       // not ACTIVE, or already past endsAt (the expired-but-unsettled gap, where

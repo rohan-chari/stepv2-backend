@@ -23,6 +23,7 @@ const {
   pickAccessory,
   pickPowerup,
 } = require("../utils/dailyBoxOdds");
+const { balanceConfig } = require("../services/balanceConfig");
 const { serializeShopItem } = require("../utils/shopCosmetics");
 const { serializePowerupShopItem } = require("../models/powerupShopItem");
 const { grantPowerupToUser } = require("./grantPowerupToUser");
@@ -88,15 +89,22 @@ async function claimDailyRewardBox({
   // displayed. When BOTH are empty, RARE folds to 0 and can't be rolled; the
   // coins-fallback branch below stays as a safety net only. The powerup pool is
   // empty for non-spinpowerups clients, so their roll is unchanged.
+  // Read the balance config ONCE and thread it through every step of the roll,
+  // so the pool, the rarity odds and the payout ranges are guaranteed to come
+  // from a single version. Relying on the synchronous cache here would let the
+  // pool be built from one config and the odds from another.
+  const { config: balance } = await balanceConfig.getSnapshot();
+
   const pool = await getUnownedAccessoryPool(userId);
   const powerupPool = supportsSpinPowerups
-    ? await getEligiblePowerupPool({ channel, supportsJammer })
+    ? await getEligiblePowerupPool({ channel, supportsJammer, config: balance })
     : [];
   const rarity = rollDailyBoxRarity(
     loginStreak,
     rng,
     pool.length,
-    powerupPool.length
+    powerupPool.length,
+    balance
   );
 
   let rewardType;
@@ -107,12 +115,12 @@ async function claimDailyRewardBox({
 
   if (rarity === "RARE") {
     // Sub-roll the RARE prize: accessory vs shop powerup (see rollRarePrizeKind).
-    const prizeKind = rollRarePrizeKind(pool.length, powerupPool.length, rng);
+    const prizeKind = rollRarePrizeKind(pool.length, powerupPool.length, rng, { config: balance });
     if (prizeKind === "POWERUP") {
-      powerup = pickPowerup(powerupPool, loginStreak, rng);
+      powerup = pickPowerup(powerupPool, loginStreak, rng, balance);
     }
     const rolledAccessory =
-      prizeKind === "ACCESSORY" ? pickAccessory(pool, loginStreak, rng) : null;
+      prizeKind === "ACCESSORY" ? pickAccessory(pool, loginStreak, rng, balance) : null;
 
     if (powerup) {
       rewardType = REWARD_TYPE.POWERUP;
@@ -134,7 +142,7 @@ async function claimDailyRewardBox({
       });
       coinsAfter = userRow?.coins ?? 0;
     } else {
-      coinAmount = coinAmountForTier("RARE_FALLBACK", loginStreak);
+      coinAmount = coinAmountForTier("RARE_FALLBACK", loginStreak, balance);
       const result = await awardCoins({
         userId,
         amount: coinAmount,
@@ -145,7 +153,7 @@ async function claimDailyRewardBox({
       coinsAfter = result.coins;
     }
   } else {
-    coinAmount = coinAmountForTier(rarity, loginStreak);
+    coinAmount = coinAmountForTier(rarity, loginStreak, balance);
     const result = await awardCoins({
       userId,
       amount: coinAmount,

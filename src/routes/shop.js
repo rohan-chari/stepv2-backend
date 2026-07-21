@@ -43,6 +43,7 @@ function createShopRouter(dependencies = {}) {
         channel: req.releaseChannel,
         supportsJammer: req.clientFeatures.has("jammer"),
         supportsPowerups2: req.clientFeatures.has("powerups2"),
+        supportsPowerups3: req.clientFeatures.has("powerups3"),
       });
       res.json(result);
     } catch (error) {

@@ -75,6 +75,11 @@ test("POST /auth/apple provisions the signed-in user", async () => {
       email: "walker@example.com",
       name: "Rohan Chari",
       isAdmin: false,
+      featureFlags: {
+        bannerAdsEnabled: false,
+        teamRacesEnabled: true,
+        onboardingV2Enabled: false,
+      },
     });
     assert.equal(typeof body.sessionToken, "string");
     assert.ok(body.sessionToken.length > 0);

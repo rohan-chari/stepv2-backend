@@ -1,5 +1,5 @@
 const { PowerupShopItem } = require("../models/powerupShopItem");
-const { POWERUPS2_GATED_TYPES } = require("../constants/powerupGating");
+const { balanceConfig } = require("../services/balanceConfig");
 
 // Active shop powerups a daily-box RARE roll may award, and the preview shown
 // on the reel for spinpowerups-capable clients. Mirrors getUnownedAccessoryPool
@@ -16,15 +16,27 @@ async function getEligiblePowerupPool({
   channel = "prod",
   supportsJammer = false,
   powerupShopItemModel = PowerupShopItem,
+  config = null,
 } = {}) {
   const items = await powerupShopItemModel.findActive({ channel });
+  // D13: the balance config is now the SINGLE authority on daily-box exclusion.
+  // This used to consult the hardcoded POWERUPS2/3_GATED_TYPES lists in
+  // constants/powerupGating.js — a second authority kept in step by hand, which
+  // is the exact class of bug this build removes. Those lists still exist and
+  // are still correct, but ONLY for client-feature gating (which binaries may
+  // SEE a type in the shop); that is a frozen-client compatibility concern and
+  // must not become admin-editable.
+  //
+  // Note this reads `dailyBoxExcludedTypes`, NOT `storeOnlyTypes`. The latter
+  // governs in-race MYSTERY box drops (enforced structurally by dropPool) and
+  // is a strictly larger set: Imposter, Rainstorm and Signal Jammer never roll
+  // from a mystery box but ARE winnable daily-box prizes. See the defaults file.
+  const excluded =
+    (config || balanceConfig.getConfigSync()).dailyBoxExcludedTypes || [];
   return items.filter((item) => {
     // Signal Jammer stays gated behind the `jammer` client-feature.
     if (!supportsJammer && item.powerupType === "SIGNAL_JAMMER") return false;
-    // Leech + X-Ray are store-only utility/attack powerups: never awarded from
-    // the daily box (and always excluded so a spinpowerups-but-not-powerups2
-    // client can't win a type it can't render/use).
-    if (POWERUPS2_GATED_TYPES.includes(item.powerupType)) return false;
+    if (excluded.includes(item.powerupType)) return false;
     return true;
   });
 }

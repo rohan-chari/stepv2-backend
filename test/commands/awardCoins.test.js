@@ -138,3 +138,37 @@ test("awardCoins: no refId skips idempotency check", async () => {
     delete require.cache[require.resolve("../../src/commands/awardCoins")];
   }
 });
+
+test("awardCoins: concurrent unique-ledger loser returns the winning balance", async () => {
+  const uniqueError = Object.assign(new Error("unique"), { code: "P2002" });
+  const mockPrisma = {
+    coinTransaction: {
+      findFirst: async () => null,
+      create: () => ({ operation: "create" }),
+    },
+    user: {
+      update: () => ({ operation: "update" }),
+      findUnique: async () => ({ id: "user-1", coins: 100 }),
+    },
+    $transaction: async () => { throw uniqueError; },
+  };
+  const originalModule = require("../../src/db");
+  const originalPrisma = originalModule.prisma;
+  Object.assign(originalModule, { prisma: mockPrisma });
+  try {
+    delete require.cache[require.resolve("../../src/commands/awardCoins")];
+    const { awardCoins } = require("../../src/commands/awardCoins");
+    assert.deepEqual(
+      await awardCoins({
+        userId: "user-1",
+        amount: 100,
+        reason: "tutorial_complete",
+        refId: "user-1",
+      }),
+      { awarded: false, coins: 100 }
+    );
+  } finally {
+    Object.assign(originalModule, { prisma: originalPrisma });
+    delete require.cache[require.resolve("../../src/commands/awardCoins")];
+  }
+});

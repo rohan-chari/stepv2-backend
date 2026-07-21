@@ -227,7 +227,8 @@ test("Lvl 3 Shortcut steals up to 3000 (capped at target's steps)", async () => 
   assert.equal(result.stolen, 3000);
   assert.equal(ctx.bonusChanges[0].amount, 3000);  // subtract from target
   assert.equal(ctx.bonusChanges[1].amount, 3000);  // add to attacker
-  assert.equal(ctx.coinDeductions[0].amount, 45);
+  // Shortcut is RARE now (was pricing off the COMMON ladder): 15/45/135.
+  assert.equal(ctx.coinDeductions[0].amount, 135);
 });
 
 test("Lvl 3 Shortcut against low-step target — capped to target's actual steps", async () => {
@@ -277,12 +278,13 @@ test("Lvl 1 Leg Cramp: 3h freeze, 10 coins", async () => {
   assert.equal(ctx.coinDeductions[0].amount, 10);
 });
 
-test("Lvl 3 Runner's High: 7h duration, 90 coins deducted", async () => {
+test("Lvl 3 Runner's High: 7h duration, 45 coins deducted", async () => {
   const ctx = makeDeps({ powerupType: "RUNNERS_HIGH" });
   const use = buildUsePowerup(ctx.deps);
   await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", upgradeLevel: 3 });
   durationAssert(ctx.effectsCreated[0], 7);
-  assert.equal(ctx.coinDeductions[0].amount, 90);
+  // Runner's High is COMMON now (was UNCOMMON): 5/15/45.
+  assert.equal(ctx.coinDeductions[0].amount, 45);
 });
 
 test("Lvl 3 Stealth Mode: 8h duration, 90 coins deducted", async () => {
@@ -480,7 +482,7 @@ test("Lvl 3 Shortcut blocked by shield: coins ARE deducted, shield consumed", as
   assert.equal(ctx.bonusChanges.length, 0);
   // BUT coins are still spent (per design Wave 2)
   assert.equal(ctx.coinDeductions.length, 1);
-  assert.equal(ctx.coinDeductions[0].amount, 45);
+  assert.equal(ctx.coinDeductions[0].amount, 135);
   // Upgrade event must record BLOCKED status
   assert.equal(ctx.upgradeEvents.length, 1);
   assert.equal(ctx.upgradeEvents[0].status, "BLOCKED");

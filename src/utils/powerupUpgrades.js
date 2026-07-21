@@ -1,72 +1,28 @@
+const { balanceConfig } = require("../services/balanceConfig");
+
 const HOUR = 60 * 60 * 1000;
 
 const MAX_UPGRADE_LEVEL = 3;
 
-const UPGRADEABLE_TYPES = new Set([
-  "PROTEIN_SHAKE",
-  "SHORTCUT",
-  "DETOUR_SIGN",
-  "TRAIL_MIX",
-  "RUNNERS_HIGH",
-  "LEG_CRAMP",
-  "STEALTH_MODE",
-  "WRONG_TURN",
-  "COMPRESSION_SOCKS",
-  "LUCKY_HORSESHOE",
-  "CAMPFIRE_REST",
-  "TRAIL_MAGNET",
-  "POCKET_WATCH",
-  "TRAIL_MINE",
-  "PINECONE_TOSS",
-]);
+// Rarity, the upgradeable set, and the cost ladders all live in the balance
+// config now — they used to be duplicated here AND in powerupOdds.js, and the
+// two disagreed (SHORTCUT was COMMON here and RARE there, so a Shortcut dropped
+// as a rare but upgraded at common prices). Conflicts resolved toward the drop
+// table. Do not reintroduce a table in this file; a structural guard test fails
+// if you do.
+//
+// DURATIONS_MS and MAGNITUDES below are NOT balance config in this build: they
+// are per-type effect mechanics rather than the rarity/price/odds surface the
+// admin editor exposes. They stay here deliberately, and are explicitly allowed
+// by the structural guard.
 
-// Cost by [rarity][level], where index 0 is base (free).
-const COSTS_BY_RARITY = {
-  COMMON:   [0,  5, 15,  45],
-  UNCOMMON: [0, 10, 30,  90],
-  RARE:     [0, 15, 45, 135],
-};
+function config() {
+  return balanceConfig.getConfigSync();
+}
 
-// Per-type overrides of the rarity ladder. Currently empty (LUCKY_HORSESHOE's
-// premium ladder was retired 2026-07-14 — it now prices as plain RARE).
-const COSTS_BY_TYPE = {};
-
-const RARITY_BY_TYPE = {
-  PROTEIN_SHAKE:     "COMMON",
-  SHORTCUT:          "COMMON",
-  DETOUR_SIGN:       "COMMON",
-  TRAIL_MIX:         "COMMON",
-  RUNNERS_HIGH:      "UNCOMMON",
-  LEG_CRAMP:         "UNCOMMON",
-  STEALTH_MODE:      "UNCOMMON",
-  WRONG_TURN:        "UNCOMMON",
-  COMPRESSION_SOCKS: "RARE",
-  LUCKY_HORSESHOE:   "RARE",
-  CAMPFIRE_REST:     "UNCOMMON",
-  TRAIL_MAGNET:      "COMMON",
-  POCKET_WATCH:      "RARE",
-  TRAIL_MINE:        "RARE",
-  PINECONE_TOSS:     "UNCOMMON",
-  SNEAKY_SWAP:       "RARE",
-  // MIRROR is RARE and, like SNEAKY_SWAP, is NOT in UPGRADEABLE_TYPES (no
-  // upgrade ladder). Listed here only so rarity lookups resolve consistently.
-  MIRROR:            "RARE",
-  // CLEANSE is RARE and non-upgradeable (not in UPGRADEABLE_TYPES). Listed
-  // here only so rarity lookups resolve consistently.
-  CLEANSE:           "RARE",
-  // IMPOSTER is purchase-only and non-upgradeable (not in UPGRADEABLE_TYPES).
-  // It never rolls from a box, but a rarity is listed so display lookups
-  // resolve consistently. Treated as RARE for badge styling.
-  IMPOSTER:          "RARE",
-  // RAINSTORM is purchase-only and non-upgradeable (not in UPGRADEABLE_TYPES).
-  // It never rolls from a box, but a rarity is listed so display lookups
-  // resolve consistently. Treated as RARE for badge styling.
-  RAINSTORM:         "RARE",
-  // SIGNAL_JAMMER is store-only and non-upgradeable (not in UPGRADEABLE_TYPES,
-  // DURATIONS_MS, or MAGNITUDES — its 1h duration is a fixed constant in
-  // usePowerup). Rarity listed only so display lookups resolve consistently.
-  SIGNAL_JAMMER:     "RARE",
-};
+function rarityForType(type) {
+  return config().rarityByType[type];
+}
 
 // Duration in ms for timed effects, indexed by level.
 const DURATIONS_MS = {
@@ -93,7 +49,7 @@ const MAGNITUDES = {
 };
 
 function isUpgradeable(type) {
-  return UPGRADEABLE_TYPES.has(type);
+  return upgradeableTypes().has(type);
 }
 
 function isValidLevel(level) {
@@ -108,9 +64,10 @@ function upgradeCost(type, level) {
   if (!isUpgradeable(type)) {
     throw new Error(`${type} is not upgradeable`);
   }
-  if (COSTS_BY_TYPE[type]) return COSTS_BY_TYPE[type][level];
-  const rarity = RARITY_BY_TYPE[type];
-  return COSTS_BY_RARITY[rarity][level];
+  const { byRarity, byType } = config().upgradeCosts;
+  if (byType && byType[type]) return byType[type][level];
+  const rarity = rarityForType(type);
+  return byRarity[rarity][level];
 }
 
 function upgradedDuration(type, level) {
@@ -133,12 +90,28 @@ function upgradedMagnitude(type, level) {
   return MAGNITUDES[type][level];
 }
 
+// Live views onto the active config, kept under their historical names so
+// existing callers and tests keep working. Reading one is equivalent to reading
+// getConfigSync().
+function upgradeableTypes() {
+  return new Set(config().upgradeableTypes);
+}
+
 module.exports = {
   MAX_UPGRADE_LEVEL,
-  UPGRADEABLE_TYPES,
-  COSTS_BY_RARITY,
-  COSTS_BY_TYPE,
-  RARITY_BY_TYPE,
+  get UPGRADEABLE_TYPES() {
+    return upgradeableTypes();
+  },
+  get COSTS_BY_RARITY() {
+    return config().upgradeCosts.byRarity;
+  },
+  get COSTS_BY_TYPE() {
+    return config().upgradeCosts.byType;
+  },
+  get RARITY_BY_TYPE() {
+    return config().rarityByType;
+  },
+  rarityForType,
   DURATIONS_MS,
   MAGNITUDES,
   isUpgradeable,

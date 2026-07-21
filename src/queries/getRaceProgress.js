@@ -12,7 +12,12 @@ const {
   syncRacePowerupState: defaultSyncRacePowerupState,
 } = require("../services/racePowerupStateSync");
 const { getTimeZoneParts, formatDateString, addDaysToDateString, parseDateString, zonedDateTimeToUtc } = require("../utils/week");
-const { COSTS_BY_RARITY, COSTS_BY_TYPE } = require("../utils/powerupUpgrades");
+const { balanceConfig } = require("../services/balanceConfig");
+const {
+  rarityOddsForPosition,
+  typeOddsForPosition,
+  RARITY_ORDER,
+} = require("../utils/powerupOdds");
 const { calculateSubsequentSteps } = require("../utils/raceSteps");
 const { GlobalStepEvent } = require("../models/globalStepEvent");
 const { computeGlobalEventBoost } = require("../utils/globalStepEvent");
@@ -31,6 +36,10 @@ const {
   computeLeechEarnedTransfer,
   applyLeechTransfers,
 } = require("../utils/leechTransfers");
+const {
+  collectRaceHitchhikeCopies,
+  applyHitchhikeCopies,
+} = require("../utils/hitchhikeCopies");
 
 // Additive tournament-matchup context for a matchup race's progress payload
 // (null on ordinary races). The frontend banner reads these defensively.
@@ -406,6 +415,55 @@ async function computeEffectModifiers(effects, rawTotal, userId, stepSampleModel
   return { frozenSteps, buffedSteps, reversedSteps, globalBoostedSteps, leechTransfers };
 }
 
+// §5.3 `powerupData.dropOdds`. Mirrors openMysteryBox's ranking rules exactly:
+// individual races rank on true total steps; team races collapse to a 2-slot
+// race where the trailing team gets the catch-up tier and a tie counts both
+// teams as leading. Returns null if the viewer's slot can't be determined, in
+// which case the field is omitted entirely (clients presence-check it).
+function buildDropOdds({ race, userId, stepTotals, myParticipant, snapshot }) {
+  const { version, config } = snapshot;
+  let position;
+  let totalParticipants;
+
+  if (race.isTeamRace) {
+    const teamTotals = { TEAM_A: 0, TEAM_B: 0 };
+    for (const { participant, totalSteps } of stepTotals) {
+      if (participant.team === "TEAM_A") teamTotals.TEAM_A += totalSteps || 0;
+      else if (participant.team === "TEAM_B") teamTotals.TEAM_B += totalSteps || 0;
+    }
+    const myTeam = myParticipant.team;
+    if (myTeam !== "TEAM_A" && myTeam !== "TEAM_B") return null;
+    const otherTeam = myTeam === "TEAM_A" ? "TEAM_B" : "TEAM_A";
+    position = teamTotals[myTeam] < teamTotals[otherTeam] ? 2 : 1;
+    totalParticipants = 2;
+  } else {
+    const sorted = [...stepTotals].sort((a, b) => b.totalSteps - a.totalSteps);
+    const index = sorted.findIndex(
+      ({ participant }) => participant.userId === userId
+    );
+    if (index === -1) return null;
+    position = index + 1;
+    totalParticipants = sorted.length;
+  }
+
+  const rarityRow = rarityOddsForPosition(position, totalParticipants, config);
+  const rarity = {};
+  RARITY_ORDER.forEach((name, i) => {
+    rarity[name] = rarityRow[i];
+  });
+
+  const byType = typeOddsForPosition(position, totalParticipants, config);
+
+  return {
+    configVersion: version,
+    position,
+    totalParticipants,
+    rarity,
+    // Omitted entirely (not null) when empty, so clients can presence-check.
+    ...(Object.keys(byType).length > 0 ? { byType } : {}),
+  };
+}
+
 function buildGetRaceProgress(deps = {}) {
   const raceModel = deps.Race || Race;
   const participantModel = deps.RaceParticipant || RaceParticipant;
@@ -438,7 +496,12 @@ function buildGetRaceProgress(deps = {}) {
     userId,
     raceId,
     timeZone,
-    supportsCharacters = false
+    supportsCharacters = false,
+    // §9.3 — whether the requesting client advertises `powerups3`. Additive and
+    // defaulted false, so every existing caller keeps its exact behavior. Only
+    // gates what is RENDERED (the Hitchhike effect entry); the authoritative
+    // score is never gated.
+    supportsPowerups3 = false
   ) {
     const race = await raceModel.findById(raceId);
     if (!race) {
@@ -662,17 +725,42 @@ function buildGetRaceProgress(deps = {}) {
       })
     );
 
+    // Phase A2 — HITCHHIKE (§7.3). ONE bulk query for every link in the race,
+    // scored from each TARGET's raw in-window steps and folded into the CASTER's
+    // pre-leech total. This MUST run BEFORE applyLeechTransfers: copied steps are
+    // ordinary steps for every downstream purpose, so a Leech on the caster can
+    // drain them (§7.1). It is added at the ASSEMBLY, never into baseAdjusted —
+    // that is what structurally keeps Hitchhike out of mystery-box progress
+    // (computeBoxEffectiveSteps is max(0, baseAdjusted)).
+    //
+    // The SAME two lines appear in raceStateResolution.processRace and
+    // raceExpiry. All three assembly sites must stay in lockstep; the parity
+    // guard in test/queries/hitchhikeScoring.test.js fails if one drifts.
+    const hitchhikeCopies = race.powerupsEnabled
+      ? await collectRaceHitchhikeCopies({
+          raceId,
+          raceEndsAt: race.endsAt,
+          participants: race.participants,
+          raceActiveEffectModel,
+          stepSampleModel,
+          now: now(),
+        })
+      : [];
+
     // Phase B: resolve every leech across the race against actual availability,
     // draining victims and crediting attackers (zero-sum, deterministic order).
     const leechFinals = applyLeechTransfers(
-      preLeech
-        .filter((e) => !e.frozen)
-        .map((e) => ({
-          participantId: e.participant.id,
-          userId: e.participant.userId,
-          preLeechTotal: e.preLeechTotal,
-          leechTransfers: e.leechTransfers,
-        }))
+      applyHitchhikeCopies(
+        preLeech
+          .filter((e) => !e.frozen)
+          .map((e) => ({
+            participantId: e.participant.id,
+            userId: e.participant.userId,
+            preLeechTotal: e.preLeechTotal,
+            leechTransfers: e.leechTransfers,
+          })),
+        hitchhikeCopies
+      )
     );
 
     const stepTotals = preLeech.map((e) => {
@@ -695,6 +783,7 @@ function buildGetRaceProgress(deps = {}) {
 
     // Roll powerups for the requesting user if they crossed a threshold
     let powerupData = null;
+    let balanceConfigSnapshot = null;
 
     // Spectators (no myParticipant) never earn powerups — skip the whole block.
     if (myParticipant && race.powerupsEnabled && race.powerupStepInterval) {
@@ -746,6 +835,10 @@ function buildGetRaceProgress(deps = {}) {
         userId,
         boxEffectiveSteps: myBoxEffectiveSteps,
       });
+      // One config read per request; the same snapshot feeds the upgrade
+      // ladders below and the dropOdds block further down, so a client can
+      // never be shown two different versions' numbers in one payload.
+      balanceConfigSnapshot = await balanceConfig.getSnapshot();
       powerupData = {
         enabled: true,
         newMysteryBoxes: syncResult.newMysteryBoxes || [],
@@ -754,9 +847,26 @@ function buildGetRaceProgress(deps = {}) {
         // Authoritative upgrade price ladders so clients display what the
         // server will actually charge. Additive: old clients ignore this and
         // fall back to their bundled (possibly stale) tables.
+        // Unchanged SHAPE, now sourced from the balance config instead of a
+        // hardcoded table. Frozen clients read this exactly as before.
         upgradeCosts: {
-          byRarity: COSTS_BY_RARITY,
-          byType: COSTS_BY_TYPE,
+          byRarity: balanceConfigSnapshot.config.upgradeCosts.byRarity,
+          byType: balanceConfigSnapshot.config.upgradeCosts.byType,
+        },
+        // Canonical rarity per powerup, served verbatim from config. Additive:
+        // a frozen client ignores it and keeps using its bundled map (which
+        // labels SHORTCUT COMMON). A client that reads it gets the server's
+        // answer, which is what makes the SHORTCUT mislabel self-heal on update
+        // rather than persist forever. Covers the full enum, so nothing silently
+        // falls back to COMMON.
+        rarityByType: balanceConfigSnapshot.config.rarityByType,
+        // §6.2 — additive capability flags. A NEW client must not offer targeted
+        // Pocket Watch unless it sees pocketWatchTargetEffect === true: an OLDER
+        // backend simply ignores an unknown `targetEffectId` and runs the legacy
+        // self-buff path, which would silently extend the wrong effects. Missing,
+        // null, or malformed capability data means legacy mode only.
+        capabilities: {
+          pocketWatchTargetEffect: true,
         },
       };
 
@@ -819,7 +929,16 @@ function buildGetRaceProgress(deps = {}) {
           (e) =>
             e.targetUserId === userId || !HIDDEN_FROM_OPPONENTS.has(e.type)
         )
+        // §9.3: withhold HITCHHIKE entries from clients that don't advertise
+        // `powerups3` — they cannot render the type, and sending an unknown type
+        // to a binary that can't draw it risks a worse failure than the accepted
+        // artifact (the target sees the caster's total climb with no icon). The
+        // SCORE is never gated: the backend stays authoritative either way.
+        .filter((e) => supportsPowerups3 || e.type !== "HITCHHIKE")
         .map((e) => ({
+          // Additive: the targeted Pocket Watch sheet needs a stable identifier
+          // for the one effect the user is paying to extend.
+          id: e.id,
           type: e.type,
           expiresAt: e.expiresAt,
           onSelf: e.targetUserId === userId,
@@ -926,6 +1045,25 @@ function buildGetRaceProgress(deps = {}) {
       result.winnerTeam = updatedRace.winnerTeam ?? null;
       result.isTeamRace = true;
       result.teamSize = race.teamSize ?? null;
+    }
+
+    // §5.3 — additive `dropOdds` so a player can see the exact odds they are
+    // playing against. Derived from the SAME helpers the roll uses, and from the
+    // SAME true step totals openMysteryBox ranks on (never the illusion-masked
+    // leaderboard), so what is displayed matches what will actually be rolled.
+    //
+    // `configVersion` is included so a displayed number can be reconciled with a
+    // roll after the fact — under pm2 cluster mode a roll seconds later may
+    // legitimately use a newer config (§3.1: auditability, not prevention).
+    if (powerupData && balanceConfigSnapshot) {
+      const dropOdds = buildDropOdds({
+        race,
+        userId,
+        stepTotals,
+        myParticipant,
+        snapshot: balanceConfigSnapshot,
+      });
+      if (dropOdds) powerupData.dropOdds = dropOdds;
     }
 
     if (powerupData) {

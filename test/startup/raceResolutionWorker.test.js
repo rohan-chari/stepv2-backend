@@ -12,6 +12,7 @@ const noopSchedulers = {
   scheduleAutoStartScheduledRaces() {},
   scheduleRecomputePlacements() {},
   scheduleNotificationCleanup() {},
+  scheduleActivationEventCleanup() {},
   scheduleDailyMover() {},
 };
 

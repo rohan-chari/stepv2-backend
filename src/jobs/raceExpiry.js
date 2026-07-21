@@ -15,6 +15,10 @@ const {
 } = require("../services/raceStateResolution");
 const { raceTimeZone } = require("../utils/raceTimeZone");
 const { applyLeechTransfers } = require("../utils/leechTransfers");
+const {
+  collectRaceHitchhikeCopies,
+  applyHitchhikeCopies,
+} = require("../utils/hitchhikeCopies");
 
 async function resolveExpiredRaces() {
   console.log("[CRON] Checking for expired races...");
@@ -117,14 +121,35 @@ async function resolveExpiredRaces() {
         });
       }
 
+      // Phase A2 — HITCHHIKE (§7.3). The SAME insertion as the live display path
+      // (getRaceProgress) and the background resolver (raceStateResolution): the
+      // copy is folded into the CASTER's pre-leech total BEFORE the leech
+      // resolution. This is the site that decides the FINAL settled standings, so
+      // omitting it here is exactly the "score changes at race end" divergence the
+      // spec's parity requirement exists to prevent. Each link's window is clamped
+      // to race end here, so a settled copy can never include post-race walking.
+      const hitchhikeCopies = race.powerupsEnabled
+        ? await collectRaceHitchhikeCopies({
+            raceId: race.id,
+            raceEndsAt: settlementTime,
+            participants: race.participants,
+            raceActiveEffectModel: RaceActiveEffect,
+            stepSampleModel: StepSample,
+            now: settlementTime,
+          })
+        : [];
+
       // Phase B: resolve every leech race-wide (zero-sum, deterministic).
       const leechFinals = applyLeechTransfers(
-        preLeech.map((e) => ({
-          participantId: e.participant.id,
-          userId: e.participant.userId,
-          preLeechTotal: e.preLeechTotal,
-          leechTransfers: e.leechTransfers,
-        }))
+        applyHitchhikeCopies(
+          preLeech.map((e) => ({
+            participantId: e.participant.id,
+            userId: e.participant.userId,
+            preLeechTotal: e.preLeechTotal,
+            leechTransfers: e.leechTransfers,
+          })),
+          hitchhikeCopies
+        )
       );
 
       // Phase C: persist each active participant's FINAL total, compute its

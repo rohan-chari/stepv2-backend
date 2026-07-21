@@ -1,0 +1,292 @@
+// Canonical seed copy for the PowerupCopy catalog (§9.5).
+//
+// One entry per USER-RENDERABLE PowerupType. `MYSTERY_BOX` is deliberately
+// absent: it is an unopened-container inventory state, not a usable powerup with
+// use-sheet or effect-rail copy.
+//
+// Provenance: transcribed verbatim from the frontend maps this migration
+// replaces (`_powerupNames`, `_powerupDescriptions`,
+// `_powerupShortDescriptions`, and the upgrade tier labels), so day-one behavior
+// is identical apart from two intentional changes:
+//   * LEECH's description now states 60 min (§7.5.1). The backend is the
+//     authoritative source for a powerups3 client; the app's BUNDLED emergency
+//     copy stays duration-neutral because a new binary can also talk to an OLD
+//     backend that still applies 30 minutes.
+//   * HITCHHIKE and QUICK_RINSE are new.
+//
+// `shortDescription` is null wherever no short form existed before — the client
+// then omits the effect-rail subtitle entirely rather than substituting a
+// truncated description, which would introduce copy that never previously
+// existed.
+//
+// `upgradeTierLabels` has exactly 4 entries for every upgradeable type (see
+// UPGRADEABLE_TYPES in src/utils/powerupUpgrades.js) and is empty otherwise.
+// Upgrade COSTS are already backend-driven; putting the labels here makes tiers
+// fully data-driven, since they encode durations and magnitudes that drift for
+// exactly the reason the Leech copy did.
+
+const POWERUP_COPY_SEED = [
+  {
+    powerupType: "LEG_CRAMP",
+    name: "Leg Cramp",
+    description: "Freeze a rival's steps for 2 hours",
+    shortDescription: "Steps frozen",
+    upgradeTierLabels: ["Freeze 2h", "Freeze 3h", "Freeze 4h", "Freeze 6h"],
+  },
+  {
+    powerupType: "RED_CARD",
+    name: "Red Card",
+    description: "Remove 5% of the leader's steps",
+    shortDescription: null,
+    upgradeTierLabels: [],
+  },
+  {
+    powerupType: "SHORTCUT",
+    name: "Shortcut",
+    description: "Steal 1,000 steps from a rival",
+    shortDescription: null,
+    upgradeTierLabels: [
+      "Steal up to 1,000 steps",
+      "Steal up to 1,500 steps",
+      "Steal up to 2,000 steps",
+      "Steal up to 3,000 steps",
+    ],
+  },
+  {
+    powerupType: "COMPRESSION_SOCKS",
+    name: "Compression Socks",
+    description: "Shield against the next attack",
+    shortDescription: "Shielded from next attack",
+    upgradeTierLabels: ["Shield 24h", "Shield 30h", "Shield 36h", "Shield 48h"],
+  },
+  {
+    powerupType: "PROTEIN_SHAKE",
+    name: "Protein Shake",
+    description: "+1,500 bonus steps instantly",
+    shortDescription: null,
+    upgradeTierLabels: [
+      "+1,500 steps",
+      "+2,250 steps",
+      "+3,000 steps",
+      "+4,500 steps",
+    ],
+  },
+  {
+    powerupType: "RUNNERS_HIGH",
+    name: "Runner's High",
+    description: "2x steps for 3 hours",
+    shortDescription: "2x steps",
+    upgradeTierLabels: ["2x for 3h", "2x for 4h", "2x for 5h", "2x for 7h"],
+  },
+  {
+    powerupType: "SECOND_WIND",
+    name: "Second Wind",
+    description: "Bonus steps based on how far behind you are",
+    shortDescription: null,
+    upgradeTierLabels: [],
+  },
+  {
+    powerupType: "STEALTH_MODE",
+    name: "Stealth Mode",
+    description:
+      "Hide your name, steps, and position on the track for 4 hours",
+    shortDescription: "Progress hidden",
+    upgradeTierLabels: ["Hide 4h", "Hide 5h", "Hide 6.5h", "Hide 8h"],
+  },
+  {
+    powerupType: "WRONG_TURN",
+    name: "Wrong Turn",
+    description: "Reverse a rival's steps for 1 hour",
+    shortDescription: "Steps reversed",
+    upgradeTierLabels: [
+      "Reverse 1h",
+      "Reverse 1.5h",
+      "Reverse 2h",
+      "Reverse 3h",
+    ],
+  },
+  {
+    powerupType: "FANNY_PACK",
+    name: "Fanny Pack",
+    description: "Unlock an extra powerup slot",
+    shortDescription: "Extra powerup slot",
+    upgradeTierLabels: [],
+  },
+  {
+    powerupType: "TRAIL_MIX",
+    name: "Trail Mix",
+    description: "+100 steps per unique powerup type used",
+    shortDescription: null,
+    upgradeTierLabels: [
+      "+100 steps per unique type",
+      "+150 steps per unique type",
+      "+200 steps per unique type",
+      "+300 steps per unique type",
+    ],
+  },
+  {
+    powerupType: "DETOUR_SIGN",
+    name: "Detour Sign",
+    description: "Hide the entire leaderboard from a rival for 3 hours",
+    shortDescription: "Leaderboard hidden",
+    upgradeTierLabels: [
+      "Hide leaderboard 3h",
+      "Hide leaderboard 4h",
+      "Hide leaderboard 5h",
+      "Hide leaderboard 7h",
+    ],
+  },
+  {
+    powerupType: "LUCKY_HORSESHOE",
+    name: "Lucky Horseshoe",
+    description: "Guarantee a better next mystery box",
+    shortDescription: "Next box boosted",
+    upgradeTierLabels: [
+      "Next box uncommon+",
+      "Better rare odds",
+      "Strong rare odds",
+      "Next box rare",
+    ],
+  },
+  {
+    powerupType: "CAMPFIRE_REST",
+    name: "Campfire Rest",
+    description: "Freeze for 30 min, then multiply steps for up to 90 min",
+    shortDescription: "Frozen, then boosted",
+    upgradeTierLabels: [
+      "2.25x boost",
+      "2.5x boost",
+      "2.75x boost",
+      "3x boost",
+    ],
+  },
+  {
+    powerupType: "TRAIL_MAGNET",
+    name: "Trail Magnet",
+    description: "Pull your next mystery box 1,000 steps closer",
+    shortDescription: null,
+    upgradeTierLabels: [
+      "Box 1,000 steps closer",
+      "Box 1,500 steps closer",
+      "Box 2,000 steps closer",
+      "Box 3,000 steps closer",
+    ],
+  },
+  {
+    powerupType: "POCKET_WATCH",
+    name: "Pocket Watch",
+    description: "Extend all active timed buffs",
+    shortDescription: "Buffs extended",
+    upgradeTierLabels: ["Extend 1h", "Extend 1.5h", "Extend 2h", "Extend 3h"],
+  },
+  {
+    powerupType: "TRAIL_MINE",
+    name: "Trail Mine",
+    description: "Drop a hidden trap at your current step position",
+    shortDescription: "Mine planted",
+    upgradeTierLabels: [
+      "3% penalty",
+      "5% penalty",
+      "8% penalty",
+      "12% penalty",
+    ],
+  },
+  {
+    powerupType: "PINECONE_TOSS",
+    name: "Pinecone Toss",
+    description: "Hit the runner directly ahead or behind you",
+    shortDescription: null,
+    upgradeTierLabels: [
+      "-750 steps",
+      "-1,000 steps",
+      "-1,500 steps",
+      "-2,250 steps",
+    ],
+  },
+  {
+    powerupType: "SNEAKY_SWAP",
+    name: "Sneaky Swap",
+    description: "Steal a random powerup from a rival",
+    shortDescription: null,
+    upgradeTierLabels: [],
+  },
+  {
+    powerupType: "MIRROR",
+    name: "Mirror",
+    description: "Reflect the next attack back at the attacker",
+    shortDescription: "Reflects next attack",
+    upgradeTierLabels: [],
+  },
+  {
+    powerupType: "CLEANSE",
+    name: "Cleanse",
+    description: "Remove all debuffs an opponent placed on you",
+    shortDescription: null,
+    upgradeTierLabels: [],
+  },
+  {
+    powerupType: "IMPOSTER",
+    name: "Imposter",
+    description:
+      "Swap leaderboard positions with a rival for 1 hour (cosmetic). Mirrors can't reflect it; Compression Socks block it",
+    shortDescription: null,
+    upgradeTierLabels: [],
+  },
+  {
+    powerupType: "RAINSTORM",
+    name: "Rainstorm",
+    description:
+      "Everyone else's steps count for half for 1 hour. Mirrors can't reflect it; Compression Socks keep a racer dry",
+    shortDescription: "Steps halved by rain",
+    upgradeTierLabels: [],
+  },
+  {
+    powerupType: "SIGNAL_JAMMER",
+    name: "Signal Jammer",
+    description:
+      "Jam a rival's signal — they can't use any powerups for 1 hour. Mirrors can't reflect it; Compression Socks block it",
+    shortDescription: "Powerups jammed",
+    upgradeTierLabels: [],
+  },
+  {
+    // §7.5.1 — the ONE intentional copy change to a pre-existing type. The
+    // backend is authoritative and always describes the 60-minute product it
+    // creates for a powerups3 request. A frozen binary never reads this row; it
+    // renders its own bundled 30-minute string and receives a 30-minute effect.
+    powerupType: "LEECH",
+    name: "Leech",
+    description:
+      "For 60 min, every 2 steps you take steals 1 step from a chosen rival and adds it to your score. Compression Socks block it; Mirrors can't reflect it",
+    shortDescription: "Steps being stolen",
+    upgradeTierLabels: [],
+  },
+  {
+    powerupType: "DEFENSE_SCAN",
+    name: "X-Ray",
+    description:
+      "Instantly reveal every opponent's active defenses (shields and mirrors)",
+    shortDescription: null,
+    upgradeTierLabels: [],
+  },
+  {
+    powerupType: "HITCHHIKE",
+    name: "Hitchhike",
+    description:
+      "For 60 min, every step a chosen rival takes is copied into your score — they lose nothing. Compression Socks block it; Mirrors can't reflect it",
+    shortDescription: "Steps being copied",
+    upgradeTierLabels: [],
+  },
+  {
+    powerupType: "QUICK_RINSE",
+    name: "Quick Rinse",
+    description:
+      "Cut the remaining time on every opponent effect currently on you in half. Your own buffs stay put",
+    shortDescription: null,
+    upgradeTierLabels: [],
+  },
+];
+
+// Every user-renderable type, in catalog order. MYSTERY_BOX is excluded.
+const POWERUP_COPY_TYPES = POWERUP_COPY_SEED.map((row) => row.powerupType);
+
+module.exports = { POWERUP_COPY_SEED, POWERUP_COPY_TYPES };

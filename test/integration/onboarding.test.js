@@ -37,7 +37,11 @@ describe("user onboarding flow", () => {
 
     const signInBody = await signInRes.json();
     assert.ok(signInBody.sessionToken);
-    assert.equal(signInBody.user.displayName, "TestUser");
+    // Sign-in assigns a generated public racer tag; the user is never blocked
+    // on converting Apple-provided name data into an account name.
+    assert.equal(typeof signInBody.user.displayName, "string");
+    assert.ok(signInBody.user.displayName.length >= 4);
+    const generatedRacerTag = signInBody.user.displayName;
     const token = signInBody.sessionToken;
     const userId = signInBody.user.id;
 
@@ -46,7 +50,7 @@ describe("user onboarding flow", () => {
     assert.equal(dbUser.appleId, APPLE_ID);
     assert.equal(dbUser.email, EMAIL);
     assert.equal(dbUser.name, "Test User");
-    assert.equal(dbUser.displayName, "TestUser");
+    assert.equal(dbUser.displayName, generatedRacerTag);
     assert.equal(dbUser.coins, 0);
 
     // Step 2: GET /auth/check-display-name — real-time validation

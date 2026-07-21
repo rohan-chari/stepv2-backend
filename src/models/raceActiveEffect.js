@@ -107,6 +107,23 @@ const RaceActiveEffect = {
     return byParticipant;
   },
 
+  // Every effect row of one TYPE across a whole race, in one query. Used by the
+  // Hitchhike scorer (§7.3), which — unlike the per-participant helpers above —
+  // must also see links whose TARGET has finished or forfeited: their window is
+  // clamped at the exit instant, but the copy accrued before it still belongs to
+  // the caster. Bounded by (raceId, type), so query count stays independent of
+  // participant count.
+  async findRaceEffectsByType(raceId, type) {
+    return prisma.raceActiveEffect.findMany({
+      where: { raceId, type, status: { in: ["ACTIVE", "EXPIRED"] } },
+      orderBy: { createdAt: "asc" },
+    });
+  },
+
+  async findById(id) {
+    return prisma.raceActiveEffect.findUnique({ where: { id } });
+  },
+
   async update(id, fields) {
     return prisma.raceActiveEffect.update({
       where: { id },

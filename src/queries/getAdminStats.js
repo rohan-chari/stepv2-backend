@@ -137,6 +137,19 @@ function buildGetAdminStats(dependencies = {}) {
         GROUP BY d
       ) t`;
 
+    // Privacy-safe activation funnel: only allowlisted event names plus the
+    // bounded appVersion/platform dimensions stored by the ingestion endpoint.
+    // One grouped query supplies all rollout windows.
+    const activationRows = await prisma.$queryRaw`
+      SELECT app_version, platform, name,
+        COUNT(*) FILTER (WHERE created_at >= now() - interval '7 days')::bigint AS count_7d,
+        COUNT(*) FILTER (WHERE created_at >= now() - interval '30 days')::bigint AS count_30d,
+        COUNT(*)::bigint AS count_90d
+      FROM activation_events
+      WHERE created_at >= now() - interval '90 days'
+      GROUP BY app_version, platform, name
+      ORDER BY app_version, platform, name`;
+
     const distribution = { "0": 0, "1": 0, "2": 0, "3-5": 0, "6+": 0 };
     for (const row of friendsDist) distribution[row.bucket] = n(row.users);
 
@@ -154,6 +167,27 @@ function buildGetAdminStats(dependencies = {}) {
 
     const dau = n(dauRows?.dau);
     const dauInActiveRace = n(dauRows?.dau_in_active_race);
+
+    function activationWindow(countKey) {
+      const groups = new Map();
+      for (const row of activationRows || []) {
+        const key = `${row.app_version}\u0000${row.platform}`;
+        let group = groups.get(key);
+        if (!group) {
+          group = {
+            appVersion: row.app_version,
+            platform: row.platform,
+            total: 0,
+            events: {},
+          };
+          groups.set(key, group);
+        }
+        const count = n(row[countKey]);
+        group.events[row.name] = count;
+        group.total += count;
+      }
+      return [...groups.values()];
+    }
 
     return {
       generatedAt: new Date().toISOString(),
@@ -190,6 +224,11 @@ function buildGetAdminStats(dependencies = {}) {
         joinedRace: n(funnelRows?.referees_joined_race),
         finishedRace: n(funnelRows?.referees_finished_race),
         rewarded: n(funnelRows?.referrals_rewarded),
+      },
+      activationFunnel: {
+        last7Days: activationWindow("count_7d"),
+        last30Days: activationWindow("count_30d"),
+        last90Days: activationWindow("count_90d"),
       },
     };
   };
