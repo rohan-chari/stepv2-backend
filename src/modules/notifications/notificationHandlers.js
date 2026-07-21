@@ -718,7 +718,13 @@ function registerNotificationHandlers(dependencies = {}) {
   events.on("POWERUP_USED", async (data) => {
     try {
       const { raceId, userId, powerupType, targetUserId } = data;
-      if (!targetUserId || !["LEG_CRAMP", "RED_CARD", "SHORTCUT", "WRONG_TURN", "SIGNAL_JAMMER", "LEECH", "HITCHHIKE"].includes(powerupType)) return;
+      // B2: after a Mirror reflect, usePowerup emits POWERUP_USED with
+      // targetUserId === userId (both the original attacker). Suppress the
+      // self-push here — one guard that covers every reflectable offensive type
+      // and any future emit site. The in-race POWERUP_REFLECTED feed event
+      // already tells both players what happened.
+      if (!targetUserId || targetUserId === userId) return;
+      if (!["LEG_CRAMP", "RED_CARD", "SHORTCUT", "WRONG_TURN", "SIGNAL_JAMMER", "LEECH", "HITCHHIKE"].includes(powerupType)) return;
 
       // T9 safety net: suppress the attack push if the race is no longer live —
       // not ACTIVE, or already past endsAt (the expired-but-unsettled gap, where

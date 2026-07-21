@@ -176,9 +176,13 @@ test("RAINSTORM skips finished participants", async () => {
   assert.equal(ctx.effectsCreated[0].targetUserId, "user-2");
 });
 
-test("RAINSTORM rejects when a storm is already active in the race (no stacking)", async () => {
+// Bug batch 2026-07-21 (B4): the storm limit is per-caster — another user's
+// active storm no longer blocks yours; only your own does.
+test("RAINSTORM rejects when the caster already has an active storm", async () => {
   const ctx = makeDeps({
-    raceEffects: [{ id: "eff-old", type: "RAINSTORM", status: "ACTIVE" }],
+    raceEffects: [
+      { id: "eff-old", type: "RAINSTORM", status: "ACTIVE", sourceUserId: "user-1" },
+    ],
   });
   const use = buildUsePowerup(ctx.deps);
 
@@ -186,11 +190,25 @@ test("RAINSTORM rejects when a storm is already active in the race (no stacking)
     () => use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1" }),
     (err) => {
       assert.ok(err instanceof PowerupUseError);
-      assert.match(err.message, /already active/i);
+      assert.match(err.message, /your rainstorm is already active/i);
       return true;
     }
   );
   assert.equal(ctx.effectsCreated.length, 0);
+});
+
+test("RAINSTORM allows a caster to storm while another user's storm is active", async () => {
+  const ctx = makeDeps({
+    raceEffects: [
+      { id: "eff-old", type: "RAINSTORM", status: "ACTIVE", sourceUserId: "user-2" },
+    ],
+  });
+  const use = buildUsePowerup(ctx.deps);
+
+  const result = await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1" });
+
+  assert.ok(result.affected >= 1, "storm lands despite the rival's active storm");
+  assert.ok(ctx.effectsCreated.length >= 1);
 });
 
 test("RAINSTORM rejects when there is no other active runner", async () => {

@@ -331,9 +331,12 @@ describe("signal jammer — integration", () => {
     });
   });
 
-  // ── 5. Jam does NOT block shopping ─────────────────────────────────────
-  describe("jam does not block buying / redeeming", () => {
-    it("a jammed target can still purchase and redeem powerups", async () => {
+  // ── 5. Jam blocks redeeming but not buying ─────────────────────────────
+  // Bug batch 2026-07-21 (B3, owner-confirmed): redeeming while jammed is now
+  // rejected BEFORE inventory is spent, so the item stays in the global stash
+  // and remains usable in other races. Buying is still allowed.
+  describe("jam blocks redeeming but not buying", () => {
+    it("a jammed target can purchase but not redeem powerups", async () => {
       await seedStoreCatalog();
       const alice = await createUser("Jammer2", 200);
       const bob = await createUser("Jammed2", 200);
@@ -345,15 +348,24 @@ describe("signal jammer — integration", () => {
       const jammerId = (await r.json()).result.powerup.id;
       await usePowerup(alice.token, raceId, jammerId, { targetUserId: bob.userId });
 
-      // Bob (jammed) buys and redeems — both succeed.
+      // Bob (jammed) buys — succeeds.
       const buyRes = await purchase(bob.token, "POWERUP_RAINSTORM", "bob-buy-while-jammed");
       assert.equal(buyRes.status, 200);
+
+      // Bob (jammed) redeems — rejected pre-flight; stash untouched, no tray row.
       const redeemRes = await redeem(bob.token, raceId, "RAINSTORM");
-      assert.equal(redeemRes.status, 200);
+      assert.equal(redeemRes.status, 409);
+      const redeemBody = await redeemRes.json();
+      assert.equal(redeemBody.code, "SIGNAL_JAMMED");
+      assert.match(redeemBody.error, /jam/i);
       const held = await prisma.racePowerup.findFirst({
         where: { raceId, userId: bob.userId, type: "RAINSTORM", status: "HELD" },
       });
-      assert.ok(held, "redeemed powerup landed in the tray");
+      assert.equal(held, null, "no race-scoped row minted while jammed");
+      const stash = await prisma.userPowerupItem.findUnique({
+        where: { userId_powerupType: { userId: bob.userId, powerupType: "RAINSTORM" } },
+      });
+      assert.equal(stash?.quantity, 1, "inventory not spent");
     });
   });
 

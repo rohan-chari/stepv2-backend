@@ -129,10 +129,14 @@ function buildOpenMysteryBox(dependencies = {}) {
       await participantModel.update(participant.id, { powerupSlots: maxSlots + 1 });
       await powerupModel.update(powerupId, { type: rolled.type, rarity: rolled.rarity, status: "USED", usedAt: new Date(), configVersion });
 
+      // B1: use MYSTERY_BOX_OPENED (not POWERUP_EARNED) so this reveal is hidden
+      // from the activity feed by the same filter as normal opens, AND so the
+      // admin "unique box openers" metric — which counts by eventType — includes
+      // full-inventory auto-activate opens (previously undercounted).
       await eventModel.create({
         raceId,
         actorUserId: userId,
-        eventType: "POWERUP_EARNED",
+        eventType: "MYSTERY_BOX_OPENED",
         powerupType: rolled.type,
         description: `${displayName || "A runner"} opened a mystery box — ${POWERUP_NAMES[rolled.type]}! Auto-activated — extra slot unlocked.`,
       });

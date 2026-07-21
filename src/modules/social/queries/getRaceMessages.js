@@ -6,6 +6,14 @@ const { RacePowerupEvent } = require("../../powerups/models/racePowerupEvent");
 const CURSOR_VERSION = 1;
 const KIND_RANK = { USER: 1, SYSTEM: 0 };
 
+// SYSTEM powerup-event types that must never appear in the activity feed.
+// Excluded at the DB-query level (Prisma notIn) so hidden rows don't consume
+// page slots — the JS filter below is a belt-and-suspenders no-op.
+//   * POWERUP_IMPOSTER — stealthy; never surfaced.
+//   * MYSTERY_BOX_OPENED — box-content reveals + the fanny-pack auto-activate
+//     audit rows (B1); audit-only, kept for the admin box-opener metric.
+const HIDDEN_SYSTEM_EVENT_TYPES = ["POWERUP_IMPOSTER", "MYSTERY_BOX_OPENED"];
+
 function normalizeLimit(limit) {
   const parsed = Number(limit);
   if (!Number.isFinite(parsed)) return 50;
@@ -135,6 +143,12 @@ function buildGetRaceMessages(dependencies = {}) {
         ? racePowerupEventModel.findByRace(raceId, {
             cursor: parsedCursor,
             limit: fetchLimit,
+            // Hidden SYSTEM event types are excluded at the DB level so they
+            // never occupy a page slot (keeps pagination full — see model).
+            // POWERUP_IMPOSTER: stealthy. MYSTERY_BOX_OPENED: box-reveal +
+            // fanny-pack auto-activate audit rows (B1) — audit-only, must never
+            // surface what a box contained.
+            excludeEventTypes: HIDDEN_SYSTEM_EVENT_TYPES,
           })
         : Promise.resolve([]),
     ]);
@@ -152,9 +166,10 @@ function buildGetRaceMessages(dependencies = {}) {
     }));
 
     const systemItems = powerupEvents
-      // Imposter is stealthy — never surface it in the feed, including any
-      // events created before this suppression shipped (in-flight races).
-      .filter((e) => e.eventType !== "POWERUP_IMPOSTER")
+      // Belt-and-suspenders: these are already excluded at the DB level
+      // (excludeEventTypes -> notIn); the JS filter is a redundant no-op that
+      // keeps the feed safe even if the model call is ever changed.
+      .filter((e) => !HIDDEN_SYSTEM_EVENT_TYPES.includes(e.eventType))
       .map((e) => {
       let description = e.description;
       if (stealthedUserIds.has(e.actorUserId)) {

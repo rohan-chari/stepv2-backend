@@ -138,6 +138,49 @@ function rainstormLostFraction(effect) {
   return 1 - m;
 }
 
+// B4: with the PER-CASTER rainstorm limit, a single victim can be under two (or
+// more) simultaneous storms — one RaceActiveEffect row per caster. The penalty
+// must clamp at a SINGLE 0.5x, never stack to 0.25x/0x. We collapse all storm
+// windows into their non-overlapping UNION and apply the penalty once per merged
+// interval. lostFraction is the max across the merged storms (all are 0.5, so
+// the result is the canonical single 0.5x). startEffect/endEffect carry the
+// snapshots used only on the no-sample-data fallback path.
+function mergeRainstormWindows(rainstorms) {
+  if (!rainstorms || rainstorms.length === 0) return [];
+  const items = rainstorms
+    .map((e) => ({
+      start: new Date(e.startsAt).getTime(),
+      end: (e.expiresAt ? new Date(e.expiresAt) : new Date()).getTime(),
+      effect: e,
+    }))
+    .filter((i) => Number.isFinite(i.start) && Number.isFinite(i.end))
+    .sort((a, b) => a.start - b.start);
+
+  const merged = [];
+  for (const item of items) {
+    const last = merged[merged.length - 1];
+    if (last && item.start <= last.end) {
+      last.lostFraction = Math.max(
+        last.lostFraction,
+        rainstormLostFraction(item.effect)
+      );
+      if (item.end > last.end) {
+        last.end = item.end;
+        last.endEffect = item.effect;
+      }
+    } else {
+      merged.push({
+        start: item.start,
+        end: item.end,
+        startEffect: item.effect,
+        endEffect: item.effect,
+        lostFraction: rainstormLostFraction(item.effect),
+      });
+    }
+  }
+  return merged;
+}
+
 // `globalContext` (optional, additive): { globalEvents: [...], now: Date }. When
 // present, the EXTRA steps from any active GlobalStepEvent windows are returned
 // as `globalBoostedSteps`, stacking multiplicatively with the per-participant
@@ -317,30 +360,38 @@ async function computeEffectModifiers(effects, rawTotal, userId, stepSampleModel
   //     subtracts the rain penalty back out for those windows.
   // multiplierForTime in raceStateResolution.js mirrors exactly this model so
   // finish-time interpolation agrees with these totals.
-  for (const effect of rainstorms) {
-    const windowStart = effect.startsAt;
-    const windowEnd = effect.expiresAt || new Date();
-    const lostFraction = rainstormLostFraction(effect);
+  // B4: apply the storm penalty ONCE over the UNION of all storm windows on
+  // this victim, so two overlapping storms clamp at a single 0.5x (not 0.25x).
+  const rainWindows = mergeRainstormWindows(rainstorms);
+  for (const window of rainWindows) {
+    const windowStart = new Date(window.start);
+    const windowEnd = new Date(window.end);
+    const lostFraction = window.lostFraction;
 
     const sampleSteps = await stepSampleModel.sumStepsInWindow(userId, windowStart, windowEnd);
     if (sampleSteps > 0) {
       frozenSteps += Math.round(sampleSteps * lostFraction);
     } else if (!hasSampleData) {
-      // Only use snapshot fallback when user has no step sample data at all
-      const meta = effect.metadata || {};
+      // Only use snapshot fallback when user has no step sample data at all.
+      // Union approximation: earliest storm's start snapshot to the latest
+      // storm's end snapshot, penalized once.
+      const meta = window.startEffect.metadata || {};
       const start = meta.stepsAtStart || 0;
-      const end = effect.status === "EXPIRED" && meta.stepsAtExpiry !== undefined
-        ? meta.stepsAtExpiry
+      const endMeta = window.endEffect.metadata || {};
+      const end = window.endEffect.status === "EXPIRED" && endMeta.stepsAtExpiry !== undefined
+        ? endMeta.stepsAtExpiry
         : rawTotal;
       frozenSteps += Math.round(Math.max(0, end - start) * lostFraction);
     }
   }
 
   // Suspend the rain penalty during frozen/reversed windows (see note above).
-  for (const storm of rainstorms) {
-    const stormStart = storm.startsAt.getTime();
-    const stormEnd = (storm.expiresAt || new Date()).getTime();
-    const lostFraction = rainstormLostFraction(storm);
+  // Iterate the same merged storm windows so the suspend subtraction matches
+  // the single-0.5x penalty applied above.
+  for (const storm of rainWindows) {
+    const stormStart = storm.start;
+    const stormEnd = storm.end;
+    const lostFraction = storm.lostFraction;
 
     const suspendedWindows = [
       ...legCramps.map((e) => ({

@@ -37,9 +37,16 @@ const RacePowerupEvent = {
     });
   },
 
-  async findByRace(raceId, { cursor, limit = 50 } = {}) {
+  async findByRace(raceId, { cursor, limit = 50, excludeEventTypes } = {}) {
     const where = { raceId };
     applyCursor(where, cursor);
+    // DB-level exclusion (Prisma notIn) so filtered rows don't consume page
+    // slots. This is what keeps pagination full when the feed is dense with
+    // hidden events (e.g. MYSTERY_BOX_OPENED); a post-fetch JS filter would
+    // under-fill a page and prematurely null the cursor.
+    if (Array.isArray(excludeEventTypes) && excludeEventTypes.length > 0) {
+      where.eventType = { notIn: excludeEventTypes };
+    }
     return prisma.racePowerupEvent.findMany({
       where,
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],

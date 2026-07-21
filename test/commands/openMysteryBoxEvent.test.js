@@ -45,12 +45,13 @@ test("normal open persists a MYSTERY_BOX_OPENED event with actor + rolled type",
   assert.equal(opened.powerupType, "PROTEIN_SHAKE");
 });
 
-test("Fanny-Pack auto-activate open does NOT add a second MYSTERY_BOX_OPENED event", async () => {
+test("Fanny-Pack auto-activate open writes a single MYSTERY_BOX_OPENED event (feed-hidden, metric-counted)", async () => {
   const ctx = makeDeps({ heldCount: 3, rollPowerupOdds: () => ({ type: "FANNY_PACK", rarity: "RARE" }) });
   const open = buildOpenMysteryBox(ctx.deps);
   await open({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", displayName: "Alice" });
 
-  assert.equal(ctx.feedEvents.filter((e) => e.eventType === "MYSTERY_BOX_OPENED").length, 0);
-  // The auto-activate path still writes its single POWERUP_EARNED row.
-  assert.equal(ctx.feedEvents.filter((e) => e.eventType === "POWERUP_EARNED").length, 1);
+  // Bug batch 2026-07-21 (B1): the auto-activate row is MYSTERY_BOX_OPENED so it
+  // is excluded from the visible feed and included in the box-opener metric.
+  assert.equal(ctx.feedEvents.filter((e) => e.eventType === "MYSTERY_BOX_OPENED").length, 1);
+  assert.equal(ctx.feedEvents.filter((e) => e.eventType === "POWERUP_EARNED").length, 0);
 });

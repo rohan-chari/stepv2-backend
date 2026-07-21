@@ -443,10 +443,16 @@ function buildUsePowerup(dependencies = {}) {
       if (targetUserId) {
         throw new PowerupUseError("Rainstorm hits every racer — you cannot specify a target", 400);
       }
+      // B4: PER-CASTER limit. Each user may have one active storm at a time;
+      // different users' storms may overlap (a victim under two storms is
+      // clamped at a single 0.5x in scoring). A caster's own storm does not
+      // exempt them from being a normal victim of someone else's storm.
       const raceEffects = await effectModel.findActiveForRace(raceId);
-      const activeStorm = raceEffects.find((e) => e.type === "RAINSTORM");
+      const activeStorm = raceEffects.find(
+        (e) => e.type === "RAINSTORM" && e.sourceUserId === userId
+      );
       if (activeStorm) {
-        throw new PowerupUseError("A Rainstorm is already active in this race", 400);
+        throw new PowerupUseError("Your Rainstorm is already active in this race", 400);
       }
       const otherRunners = acceptedParticipants.filter(
         (p) => p.userId !== userId && isAliveTarget(p) && isEnemy(p)
