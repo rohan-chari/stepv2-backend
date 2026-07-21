@@ -10,8 +10,8 @@
 // is explicitly set. NEVER point this at prod. Generated data is not committed.
 require("dotenv").config();
 const { prisma } = require("../../src/db");
-const { RacePowerup } = require("../../src/models/racePowerup");
-const { signSessionToken } = require("../../src/services/sessionToken");
+const { RacePowerup } = require("../../src/modules/powerups/models/racePowerup");
+const { signSessionToken } = require("../../src/modules/users/services/sessionToken");
 
 function assertSafeDatabase() {
   const url = process.env.DATABASE_URL || "";

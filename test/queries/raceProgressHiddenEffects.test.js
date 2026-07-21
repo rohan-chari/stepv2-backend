@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { buildGetRaceProgress } = require("../../src/queries/getRaceProgress");
+const { buildGetRaceProgress } = require("../../src/modules/races/queries/getRaceProgress");
 
 // ---------------------------------------------------------------------------
 // PART A: Certain ACTIVE self-buffs are hidden from OTHER racers (server-side)

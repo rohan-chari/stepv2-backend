@@ -3,7 +3,7 @@ const test = require("node:test");
 
 const {
   serializeTournamentPayload,
-} = require("../../src/queries/serializeTournament");
+} = require("../../src/modules/tournaments/queries/serializeTournament");
 
 // Item 11: a masked (stealthed/detoured) player on a LIVE matchup serializes
 // with stealthed:true AND totalSteps:null — parallel to the race leaderboard —

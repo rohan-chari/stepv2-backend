@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const {
   buildGetRaceDiscoverySummary,
-} = require("../../src/queries/getRaceDiscoverySummary");
+} = require("../../src/modules/races/queries/getRaceDiscoverySummary");
 
 const silentLogger = { error() {} };
 

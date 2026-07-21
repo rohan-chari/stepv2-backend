@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildUsePowerup, PowerupUseError } = require("../../src/commands/usePowerup");
+const { buildUsePowerup, PowerupUseError } = require("../../src/modules/powerups/commands/usePowerup");
 
 // ---------------------------------------------------------------------------
 // MIRROR — RARE, self-applied shield-like buff. While active on a target, an

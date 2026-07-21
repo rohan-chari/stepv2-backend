@@ -3,7 +3,7 @@ const test = require("node:test");
 
 const {
   buildGetPowerupShopCatalog,
-} = require("../../src/queries/getPowerupShopCatalog");
+} = require("../../src/modules/powerups/queries/getPowerupShopCatalog");
 
 // ---------------------------------------------------------------------------
 // GET /shop/powerups gating (Items 2 + 3):

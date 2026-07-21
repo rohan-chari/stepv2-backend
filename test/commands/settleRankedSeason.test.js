@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildSettleRankedSeason } = require("../../src/commands/settleRankedSeason");
+const { buildSettleRankedSeason } = require("../../src/modules/ranked/commands/settleRankedSeason");
 
 const FIXED_NOW = new Date("2026-06-15T12:00:00Z");
 const SILENT = { log() {}, error() {} };

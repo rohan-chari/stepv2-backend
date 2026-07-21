@@ -4,7 +4,7 @@ const test = require("node:test");
 const {
   buildClaimStepMilestone,
   StepMilestoneError,
-} = require("../../src/commands/claimStepMilestone");
+} = require("../../src/modules/steps/commands/claimStepMilestone");
 
 function todayLocalDate() {
   return new Date().toISOString().slice(0, 10);

@@ -1,7 +1,7 @@
 const { Router } = require("express");
 const { buildRequireAuth } = require("../middleware/requireAuth");
-const { awardCoins: defaultAwardCoins } = require("../commands/awardCoins");
-const { User: defaultUserModel } = require("../models/user");
+const { awardCoins: defaultAwardCoins } = require("../shared/economy/awardCoins");
+const { User: defaultUserModel } = require("../modules/users");
 
 // One-time coin reward for finishing the in-app tutorial.
 const TUTORIAL_REWARD_COINS = 100;

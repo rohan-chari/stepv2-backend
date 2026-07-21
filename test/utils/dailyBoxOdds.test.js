@@ -13,7 +13,7 @@ const {
   coinAmountForTier,
   pickAccessory,
   pickPowerup,
-} = require("../../src/utils/dailyBoxOdds");
+} = require("../../src/modules/economy/dailyBoxOdds");
 
 test("streakProgress clamps to [0,1] across the cap", () => {
   assert.equal(streakProgress(1), 0);

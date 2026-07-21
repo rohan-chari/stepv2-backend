@@ -4,9 +4,9 @@ const test = require("node:test");
 const {
   TEAM_NAME_POOL,
   generateTeamNamePair,
-} = require("../../src/constants/teamNames");
-const { censor } = require("../../src/lib/profanity");
-const { TEAM_NAME_MAX_LENGTH } = require("../../src/services/validateRaceConfig");
+} = require("../../src/modules/races/constants/teamNames");
+const { censor } = require("../../src/shared/lib/profanity");
+const { TEAM_NAME_MAX_LENGTH } = require("../../src/modules/races/services/validateRaceConfig");
 
 // TR-103 REGRESSION GUARD — the highest-value test in this file. Team names are
 // auto-assigned to every team race, so a single cheeky pool entry would ship

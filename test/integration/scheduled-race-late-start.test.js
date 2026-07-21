@@ -9,7 +9,7 @@ const {
 } = require("./setup");
 const {
   autoStartScheduledRaces,
-} = require("../../src/jobs/autoStartScheduledRaces");
+} = require("../../src/modules/races/jobs/autoStartScheduledRaces");
 
 // Regression for the "@rohitrohit / Fam Steps" bug (2026-06-30): a user-created
 // scheduled race sat PENDING for days because it lacked 2 accepted participants

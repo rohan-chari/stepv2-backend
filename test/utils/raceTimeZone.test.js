@@ -1,6 +1,6 @@
 const { test } = require("node:test");
 const assert = require("node:assert");
-const { raceTimeZone } = require("../../src/utils/raceTimeZone");
+const { raceTimeZone } = require("../../src/modules/races/raceTimeZone");
 
 test("returns the race's canonical timezone when set", () => {
   assert.strictEqual(

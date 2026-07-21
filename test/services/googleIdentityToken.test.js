@@ -5,7 +5,7 @@ const crypto = require("node:crypto");
 const {
   verifyGoogleIdentityToken,
   GoogleIdentityTokenError,
-} = require("../../src/services/googleIdentityToken");
+} = require("../../src/modules/users/services/googleIdentityToken");
 
 const WEB_CLIENT_ID = "web-client.apps.googleusercontent.com";
 const IOS_CLIENT_ID = "ios-client.apps.googleusercontent.com";

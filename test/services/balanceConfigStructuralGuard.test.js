@@ -18,8 +18,8 @@ const path = require("node:path");
 const SRC = path.join(__dirname, "..", "..", "src");
 
 const ALLOWED_FILES = new Set([
-  path.join(SRC, "services", "balanceConfig.js"),
-  path.join(SRC, "services", "balanceConfig.defaults.js"),
+  path.join(SRC, "modules", "economy", "balanceConfig.js"),
+  path.join(SRC, "modules", "economy", "balanceConfig.defaults.js"),
 ]);
 
 // Mechanics that are deliberately NOT balance config in this build. Effect

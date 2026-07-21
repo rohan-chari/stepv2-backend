@@ -15,10 +15,10 @@ const test = require("node:test");
 
 const {
   computeEffectModifiers,
-} = require("../../src/queries/getRaceProgress");
+} = require("../../src/modules/races/queries/getRaceProgress");
 const {
   calculateCurrentTotal,
-} = require("../../src/services/raceStateResolution");
+} = require("../../src/modules/races/services/raceStateResolution");
 
 const WINDOW_START = "2026-06-02T12:00:00Z";
 const WINDOW_END = "2026-06-02T13:00:00Z";

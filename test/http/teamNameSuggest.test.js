@@ -2,9 +2,9 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const http = require("node:http");
 
-const { createRacesRouter } = require("../../src/routes/races");
-const { TEAM_NAME_POOL } = require("../../src/constants/teamNames");
-const { censor } = require("../../src/lib/profanity");
+const { createRacesRouter } = require("../../src/modules/races/routes");
+const { TEAM_NAME_POOL } = require("../../src/modules/races/constants/teamNames");
+const { censor } = require("../../src/shared/lib/profanity");
 
 // FRONTEND QUESTION 1 (TR-103 + TR-801): the create screen shows the two team
 // name plaques with a dice-reroll BEFORE the race exists, so it needs the real

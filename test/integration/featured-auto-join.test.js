@@ -9,7 +9,7 @@ const {
   createTestUser,
 } = require("./setup");
 
-const { buildRenewSeededRaces } = require("../../src/jobs/seededRaceRenewal");
+const { buildRenewSeededRaces } = require("../../src/modules/races/jobs/seededRaceRenewal");
 
 // End-to-end coverage for the auto-join-featured-races preference:
 //   * PUT /auth/me/featured-auto-join persists the flag and (on enable)

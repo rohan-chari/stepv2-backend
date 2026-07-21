@@ -11,7 +11,7 @@ const {
   getBaseUrl,
 } = require("./setup");
 
-const { SENTINEL_APPLE_ID } = require("../../src/commands/deleteUserAccount");
+const { SENTINEL_APPLE_ID } = require("../../src/modules/users/commands/deleteUserAccount");
 
 async function createTournament(overrides = {}) {
   return prisma.tournament.create({

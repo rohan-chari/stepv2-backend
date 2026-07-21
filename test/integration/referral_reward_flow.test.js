@@ -20,24 +20,24 @@ const { describe, it, before, beforeEach } = require("node:test");
 
 const { prisma, cleanDatabase, getSharedServer } = require("./setup");
 
-const { hashAppleSub } = require("../../src/utils/appleSubHash");
-const { looksLikeReferralCode } = require("../../src/lib/referralCode");
+const { hashAppleSub } = require("../../src/modules/users/appleSubHash");
+const { looksLikeReferralCode } = require("../../src/shared/lib/referralCode");
 const {
   REFERRER_REWARD_COINS,
   REFEREE_REWARD_COINS,
   QUALIFY_WINDOW_DAYS,
   REFERRAL_DAILY_CAP,
-} = require("../../src/config/referralRewards");
+} = require("../../src/modules/social/referralRewards");
 
-const { getOrCreateReferralCode } = require("../../src/commands/getOrCreateReferralCode");
-const { recordReferral } = require("../../src/commands/recordReferral");
-const { redeemReferralCode } = require("../../src/commands/redeemReferralCode");
+const { getOrCreateReferralCode } = require("../../src/modules/social/commands/getOrCreateReferralCode");
+const { recordReferral } = require("../../src/modules/social/commands/recordReferral");
+const { redeemReferralCode } = require("../../src/modules/social/commands/redeemReferralCode");
 const {
   grantReferralRewardsForRace,
-} = require("../../src/commands/grantReferralReward");
-const { buildCompleteRace } = require("../../src/commands/completeRace");
-const { getReferralPreview } = require("../../src/queries/getReferralPreview");
-const { getReferralStatus } = require("../../src/queries/getReferralStatus");
+} = require("../../src/modules/social/commands/grantReferralReward");
+const { buildCompleteRace } = require("../../src/modules/races/commands/completeRace");
+const { getReferralPreview } = require("../../src/modules/social/queries/getReferralPreview");
+const { getReferralStatus } = require("../../src/modules/social/queries/getReferralStatus");
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 

@@ -5,15 +5,15 @@ const path = require("node:path");
 
 const {
   buildGetPowerupCopyCatalog,
-} = require("../../src/queries/getPowerupCopyCatalog");
+} = require("../../src/modules/powerups/queries/getPowerupCopyCatalog");
 const {
   buildGetPowerupShopCatalog,
-} = require("../../src/queries/getPowerupShopCatalog");
+} = require("../../src/modules/powerups/queries/getPowerupShopCatalog");
 const {
   POWERUP_COPY_SEED,
   POWERUP_COPY_TYPES,
-} = require("../../src/constants/powerupCopySeed");
-const { UPGRADEABLE_TYPES } = require("../../src/utils/powerupUpgrades");
+} = require("../../src/modules/powerups/constants/powerupCopySeed");
+const { UPGRADEABLE_TYPES } = require("../../src/modules/powerups/powerupUpgrades");
 
 // ---------------------------------------------------------------------------
 // GET /powerups/catalog (§9.5) — the single source of truth for powerup copy.

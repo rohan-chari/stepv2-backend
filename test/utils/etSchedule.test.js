@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { etDayKey, etHour, dailyRunKey } = require("../../src/utils/etSchedule");
+const { etDayKey, etHour, dailyRunKey } = require("../../src/shared/time/etSchedule");
 
 // 2026-06-25 is EDT (UTC-4). 16:00 ET == 20:00 UTC; 01:00 ET == 05:00 UTC.
 test("etDayKey returns the ET calendar day, not the UTC day", () => {

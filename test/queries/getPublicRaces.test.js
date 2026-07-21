@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildGetPublicRaces } = require("../../src/queries/getPublicRaces");
+const { buildGetPublicRaces } = require("../../src/modules/races/queries/getPublicRaces");
 
 function makeDeps(races) {
   return {

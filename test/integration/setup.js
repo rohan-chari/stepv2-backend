@@ -1,7 +1,7 @@
 const http = require("node:http");
 const { prisma } = require("../../src/db");
 const { createApp } = require("../../src/app");
-const { signSessionToken } = require("../../src/services/sessionToken");
+const { signSessionToken } = require("../../src/modules/users/services/sessionToken");
 
 // Tables in deletion order (respects foreign key constraints)
 const TABLES_IN_ORDER = [

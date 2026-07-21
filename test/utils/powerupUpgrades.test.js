@@ -8,7 +8,7 @@ const {
   upgradedMagnitude,
   MAX_UPGRADE_LEVEL,
   UPGRADEABLE_TYPES,
-} = require("../../src/utils/powerupUpgrades");
+} = require("../../src/modules/powerups/powerupUpgrades");
 
 const HOUR = 60 * 60 * 1000;
 

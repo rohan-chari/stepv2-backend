@@ -1,31 +1,35 @@
 require("dotenv").config();
 
 const { createApp } = require("./app");
-const { registerEventHandlers } = require("./handlers/eventHandlers");
-const { registerNotificationHandlers } = require("./handlers/notificationHandlers");
-const { scheduleRaceExpiryCheck } = require("./jobs/raceExpiry");
-const { scheduleSeededRaceRenewal } = require("./jobs/seededRaceRenewal");
+const {
+  registerEventHandlers,
+  registerNotificationHandlers,
+} = require("./modules/notifications");
+const { scheduleRaceExpiryCheck } = require("./modules/races");
+const { scheduleSeededRaceRenewal } = require("./modules/races");
 const {
   scheduleTournamentSeedRenewal,
-} = require("./jobs/tournamentSeedRenewal");
-const { scheduleComputeRanks } = require("./jobs/computeRanks");
-const { scheduleComputeRankedWeeks } = require("./jobs/computeRankedWeeks");
-const { scheduleGlobalStepEvents } = require("./jobs/globalStepEventScheduler");
+} = require("./modules/tournaments");
+const {
+  scheduleComputeRanks,
+  scheduleComputeRankedWeeks,
+} = require("./modules/ranked");
+const { scheduleGlobalStepEvents } = require("./modules/steps");
 const {
   scheduleAutoStartScheduledRaces,
-} = require("./jobs/autoStartScheduledRaces");
-const { scheduleRecomputePlacements } = require("./jobs/placementRecompute");
-const { scheduleNotificationCleanup } = require("./jobs/notificationCleanup");
+} = require("./modules/races");
+const { scheduleRecomputePlacements } = require("./modules/races");
+const { scheduleNotificationCleanup } = require("./modules/notifications");
 const {
   scheduleActivationEventCleanup,
-} = require("./jobs/activationEventCleanup");
-const { scheduleDailyMover } = require("./jobs/dailyMover");
+} = require("./modules/analytics");
+const { scheduleDailyMover } = require("./modules/notifications");
 const {
   scheduleDailyRewardReminder,
-} = require("./jobs/dailyRewardReminder");
+} = require("./modules/notifications");
 const {
   scheduleRaceResolutionWorker,
-} = require("./jobs/raceResolutionQueue");
+} = require("./modules/races");
 
 function startServer({
   app = createApp(),

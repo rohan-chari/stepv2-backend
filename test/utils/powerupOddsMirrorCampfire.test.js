@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { rollPowerup, RARITY_TIERS } = require("../../src/utils/powerupOdds");
+const { rollPowerup, RARITY_TIERS } = require("../../src/modules/powerups/powerupOdds");
 
 // ---------------------------------------------------------------------------
 // Generation-pool changes for 1.1.7:

@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildRollPowerup } = require("../../src/commands/rollPowerup");
+const { buildRollPowerup } = require("../../src/modules/powerups/commands/rollPowerup");
 
 // Regression: when nextBoxAtSteps sits at/below an ALREADY-earned box row
 // (e.g. a remediated/reset nextBox, or a legacy orphan), the roll must SKIP that

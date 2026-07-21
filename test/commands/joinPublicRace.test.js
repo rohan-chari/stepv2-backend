@@ -4,7 +4,7 @@ const test = require("node:test");
 const {
   buildJoinPublicRace,
   RaceJoinError,
-} = require("../../src/commands/joinPublicRace");
+} = require("../../src/modules/races/commands/joinPublicRace");
 
 function makeRace(overrides = {}) {
   return {

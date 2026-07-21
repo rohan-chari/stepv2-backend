@@ -15,8 +15,8 @@ const test = require("node:test");
 // values so live totals and finish snapshots never diverge.
 // ---------------------------------------------------------------------------
 
-const { computeEffectModifiers } = require("../../src/queries/getRaceProgress");
-const { calculateCurrentTotal } = require("../../src/services/raceStateResolution");
+const { computeEffectModifiers } = require("../../src/modules/races/queries/getRaceProgress");
+const { calculateCurrentTotal } = require("../../src/modules/races/services/raceStateResolution");
 
 const T0 = new Date("2026-07-04T12:00:00Z");
 const T1 = new Date("2026-07-04T13:00:00Z");

@@ -6,8 +6,8 @@ const test = require("node:test");
 // getRacesResultsSeen.test.js) so we can assert the alphabetical ordering of
 // the friends list without a real DB.
 function withMockedFriends(friendships, fn) {
-  const friendshipModule = require("../../src/models/friendship");
-  const stepsModule = require("../../src/models/steps");
+  const friendshipModule = require("../../src/modules/social/models/friendship");
+  const stepsModule = require("../../src/modules/steps/models/steps");
   const originalFriendship = friendshipModule.Friendship;
   const originalSteps = stepsModule.Steps;
 
@@ -27,13 +27,13 @@ function withMockedFriends(friendships, fn) {
   });
 
   try {
-    delete require.cache[require.resolve("../../src/queries/getFriends")];
-    const mod = require("../../src/queries/getFriends");
+    delete require.cache[require.resolve("../../src/modules/social/queries/getFriends")];
+    const mod = require("../../src/modules/social/queries/getFriends");
     return fn(mod);
   } finally {
     Object.assign(friendshipModule, { Friendship: originalFriendship });
     Object.assign(stepsModule, { Steps: originalSteps });
-    delete require.cache[require.resolve("../../src/queries/getFriends")];
+    delete require.cache[require.resolve("../../src/modules/social/queries/getFriends")];
   }
 }
 

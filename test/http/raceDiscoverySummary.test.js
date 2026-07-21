@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const http = require("node:http");
 const express = require("express");
-const { createRacesRouter } = require("../../src/routes/races");
+const { createRacesRouter } = require("../../src/modules/races/routes");
 
 function auth(features = []) {
   return (req, _res, next) => {

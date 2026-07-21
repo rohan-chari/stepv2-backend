@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildGetHomeRaceCard } = require("../../src/queries/getHomeRaceCard");
+const { buildGetHomeRaceCard } = require("../../src/modules/home/getHomeRaceCard");
 
 const ME_ID = "user-me";
 const FIXED_NOW = new Date("2026-05-21T18:00:00Z");
@@ -269,7 +269,7 @@ function makeFixedStepModels(stepsByUser = {}) {
 
 // Patch the shared RaceActiveEffect model to read from our mock prisma. The
 // model imports its own prisma, so we stub findActiveForRace per-test instead.
-const raceActiveEffectModule = require("../../src/models/raceActiveEffect");
+const raceActiveEffectModule = require("../../src/modules/powerups/models/raceActiveEffect");
 
 function withStealthedRace(raceId, stealthedUserIds) {
   const original = raceActiveEffectModule.RaceActiveEffect.findActiveForRace;

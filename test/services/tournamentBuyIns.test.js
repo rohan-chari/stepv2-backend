@@ -6,7 +6,7 @@ const {
   refundTournamentBuyIn,
   payoutTournamentPot,
   mintChampionPrize,
-} = require("../../src/services/tournamentBuyIns");
+} = require("../../src/modules/tournaments/services/tournamentBuyIns");
 
 function recorder() {
   const calls = [];

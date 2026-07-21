@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildComputeRankedWeeks } = require("../../src/jobs/computeRankedWeeks");
+const { buildComputeRankedWeeks } = require("../../src/modules/ranked/jobs/computeRankedWeeks");
 
 const SILENT = { log() {}, error() {} };
 
@@ -182,6 +182,6 @@ test("kill switch: a past-boundary unsettled week is NOT settled (no coins minte
 test("the shipped default for the kill switch is OFF", () => {
   const {
     RANKED_SETTLEMENT_ENABLED,
-  } = require("../../src/constants/rankedSettlement");
+  } = require("../../src/modules/ranked/constants/rankedSettlement");
   assert.equal(RANKED_SETTLEMENT_ENABLED, false);
 });

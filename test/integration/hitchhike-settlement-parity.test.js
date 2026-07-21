@@ -4,7 +4,7 @@ const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
 // The REAL settlement entry point (the cron job's exported function). Settlement
 // has no HTTP surface, so this IS its public path. Every number asserted below is
 // read back through the API — the scorer is never called directly.
-const { resolveExpiredRaces } = require("../../src/jobs/raceExpiry");
+const { resolveExpiredRaces } = require("../../src/modules/races/jobs/raceExpiry");
 
 // ---------------------------------------------------------------------------
 // §12 — HITCHHIKE display and final settlement agree for the same fixture.

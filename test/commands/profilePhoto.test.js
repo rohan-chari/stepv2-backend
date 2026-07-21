@@ -7,7 +7,7 @@ const {
   buildRemoveProfilePhoto,
   buildDismissProfilePhotoPrompt,
   InvalidProfilePhotoError,
-} = require("../../src/commands/profilePhoto");
+} = require("../../src/modules/users/commands/profilePhoto");
 
 function createStorage(overrides = {}) {
   return {

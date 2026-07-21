@@ -4,7 +4,7 @@ const test = require("node:test");
 // The ad-coin economy is tuned by env override without an App Store cycle, so
 // these overrides are the only thing standing between a typo and an uncapped
 // coin mint. Constants are read at require time — reload the module per case.
-const MODULE_PATH = require.resolve("../../src/config/adRewards");
+const MODULE_PATH = require.resolve("../../src/modules/economy/adRewards");
 
 function loadConfig(env) {
   const previousEnv = process.env;

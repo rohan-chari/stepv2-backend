@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const {
   buildRaceResolutionWorker,
-} = require("../../src/jobs/raceResolutionQueue");
+} = require("../../src/modules/races/jobs/raceResolutionQueue");
 
 const silentLogger = { log() {}, error() {} };
 

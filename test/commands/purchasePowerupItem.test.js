@@ -4,7 +4,7 @@ const test = require("node:test");
 const {
   buildPurchasePowerupItem,
   PowerupPurchaseError,
-} = require("../../src/commands/purchasePowerupItem");
+} = require("../../src/modules/powerups/commands/purchasePowerupItem");
 
 // ---------------------------------------------------------------------------
 // Coin-purchasable powerup store. Buying a PowerupShopItem (e.g. Imposter, 500

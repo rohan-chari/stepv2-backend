@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { buildUsePowerup, PowerupUseError } = require("../../src/commands/usePowerup");
+const { buildUsePowerup, PowerupUseError } = require("../../src/modules/powerups/commands/usePowerup");
 
 // ---------------------------------------------------------------------------
 // Trail Mix — self-only, instant, +100 per unique powerup type used in race

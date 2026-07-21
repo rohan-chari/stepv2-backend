@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildRenewSeededRaces } = require("../../src/jobs/seededRaceRenewal");
+const { buildRenewSeededRaces } = require("../../src/modules/races/jobs/seededRaceRenewal");
 
 // ET 14:00 EDT on 2026-06-25 (Thursday). Daily window [06-25T04Z, 06-26T04Z];
 // weekly window Mon 06-22T04Z .. Mon 06-29T04Z (EDT, UTC-4).

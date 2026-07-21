@@ -15,9 +15,9 @@ const test = require("node:test");
 // authorized product decision.
 // ---------------------------------------------------------------------------
 
-const { computeEffectModifiers } = require("../../src/queries/getRaceProgress");
-const { applyLeechTransfers } = require("../../src/utils/leechTransfers");
-const { calculateCurrentTotal } = require("../../src/services/raceStateResolution");
+const { computeEffectModifiers } = require("../../src/modules/races/queries/getRaceProgress");
+const { applyLeechTransfers } = require("../../src/modules/powerups/leechTransfers");
+const { calculateCurrentTotal } = require("../../src/modules/races/services/raceStateResolution");
 
 const T0 = new Date("2026-07-17T12:00:00Z");
 const T1 = new Date("2026-07-17T12:30:00Z"); // 30-min window end

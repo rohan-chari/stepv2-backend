@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { buildUsePowerup, PowerupUseError } = require("../../src/commands/usePowerup");
-const { buildGetRaceProgress } = require("../../src/queries/getRaceProgress");
+const { buildUsePowerup, PowerupUseError } = require("../../src/modules/powerups/commands/usePowerup");
+const { buildGetRaceProgress } = require("../../src/modules/races/queries/getRaceProgress");
 
 // ---------------------------------------------------------------------------
 // Wrong Turn — targeted, offensive, reverses target's steps for 1 hour

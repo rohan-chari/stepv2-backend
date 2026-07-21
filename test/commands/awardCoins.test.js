@@ -41,8 +41,8 @@ test("awardCoins: awards coins and returns new balance", async () => {
 
   try {
     // Re-require to pick up mock (clear cache first)
-    delete require.cache[require.resolve("../../src/commands/awardCoins")];
-    const { awardCoins } = require("../../src/commands/awardCoins");
+    delete require.cache[require.resolve("../../src/shared/economy/awardCoins")];
+    const { awardCoins } = require("../../src/shared/economy/awardCoins");
 
     const result = await awardCoins({
       userId: "user-1",
@@ -58,7 +58,7 @@ test("awardCoins: awards coins and returns new balance", async () => {
     assert.equal(calls.transactions[0].reason, "challenge_win");
   } finally {
     Object.assign(originalModule, { prisma: originalPrisma });
-    delete require.cache[require.resolve("../../src/commands/awardCoins")];
+    delete require.cache[require.resolve("../../src/shared/economy/awardCoins")];
   }
 });
 
@@ -77,8 +77,8 @@ test("awardCoins: idempotent — skips if already awarded for same reason+refId"
   Object.assign(originalModule, { prisma: mockPrisma });
 
   try {
-    delete require.cache[require.resolve("../../src/commands/awardCoins")];
-    const { awardCoins } = require("../../src/commands/awardCoins");
+    delete require.cache[require.resolve("../../src/shared/economy/awardCoins")];
+    const { awardCoins } = require("../../src/shared/economy/awardCoins");
 
     const result = await awardCoins({
       userId: "user-1",
@@ -91,7 +91,7 @@ test("awardCoins: idempotent — skips if already awarded for same reason+refId"
     assert.equal(result.coins, 100);
   } finally {
     Object.assign(originalModule, { prisma: originalPrisma });
-    delete require.cache[require.resolve("../../src/commands/awardCoins")];
+    delete require.cache[require.resolve("../../src/shared/economy/awardCoins")];
   }
 });
 
@@ -122,8 +122,8 @@ test("awardCoins: no refId skips idempotency check", async () => {
   Object.assign(originalModule, { prisma: mockPrisma });
 
   try {
-    delete require.cache[require.resolve("../../src/commands/awardCoins")];
-    const { awardCoins } = require("../../src/commands/awardCoins");
+    delete require.cache[require.resolve("../../src/shared/economy/awardCoins")];
+    const { awardCoins } = require("../../src/shared/economy/awardCoins");
 
     const result = await awardCoins({
       userId: "user-1",
@@ -135,7 +135,7 @@ test("awardCoins: no refId skips idempotency check", async () => {
     assert.equal(result.coins, 10);
   } finally {
     Object.assign(originalModule, { prisma: originalPrisma });
-    delete require.cache[require.resolve("../../src/commands/awardCoins")];
+    delete require.cache[require.resolve("../../src/shared/economy/awardCoins")];
   }
 });
 
@@ -156,8 +156,8 @@ test("awardCoins: concurrent unique-ledger loser returns the winning balance", a
   const originalPrisma = originalModule.prisma;
   Object.assign(originalModule, { prisma: mockPrisma });
   try {
-    delete require.cache[require.resolve("../../src/commands/awardCoins")];
-    const { awardCoins } = require("../../src/commands/awardCoins");
+    delete require.cache[require.resolve("../../src/shared/economy/awardCoins")];
+    const { awardCoins } = require("../../src/shared/economy/awardCoins");
     assert.deepEqual(
       await awardCoins({
         userId: "user-1",
@@ -169,6 +169,6 @@ test("awardCoins: concurrent unique-ledger loser returns the winning balance", a
     );
   } finally {
     Object.assign(originalModule, { prisma: originalPrisma });
-    delete require.cache[require.resolve("../../src/commands/awardCoins")];
+    delete require.cache[require.resolve("../../src/shared/economy/awardCoins")];
   }
 });

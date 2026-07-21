@@ -8,10 +8,10 @@ const prodUrl = fs
 process.env.DATABASE_URL = prodUrl;
 
 const { prisma } = require("../src/db");
-const { Steps } = require("../src/models/steps");
-const { StepSample } = require("../src/models/stepSample");
-const { calculateBaseAdjusted } = require("../src/services/raceStateResolution");
-const { computeBoxEffectiveSteps } = require("../src/utils/boxSteps");
+const { Steps } = require("../src/modules/steps/models/steps");
+const { StepSample } = require("../src/modules/steps/models/stepSample");
+const { calculateBaseAdjusted } = require("../src/modules/races/services/raceStateResolution");
+const { computeBoxEffectiveSteps } = require("../src/modules/powerups/boxSteps");
 
 const NAME = "Sugaroro";
 const RACE = "RACE ME";

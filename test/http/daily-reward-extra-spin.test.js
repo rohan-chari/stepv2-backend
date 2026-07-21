@@ -3,7 +3,7 @@ const http = require("node:http");
 const test = require("node:test");
 
 const { createApp } = require("../../src/app");
-const { DailyRewardError } = require("../../src/commands/claimDailyReward");
+const { DailyRewardError } = require("../../src/modules/economy/commands/claimDailyReward");
 
 // Extra daily box spin (rewarded ad):
 //   GET  /daily-reward/status          -> additive adExtraSpin block, ONLY for

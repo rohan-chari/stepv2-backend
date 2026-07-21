@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { buildGetRaceProgress } = require("../../src/queries/getRaceProgress");
+const { buildGetRaceProgress } = require("../../src/modules/races/queries/getRaceProgress");
 
 // ===========================================================================
 // SCENARIO A — Same calendar date, half-hour offset

@@ -1,8 +1,8 @@
 const assert = require("node:assert/strict");
 const { describe, it, before, beforeEach } = require("node:test");
 const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
-const { defaultConfig } = require("../../src/services/balanceConfig.defaults");
-const { balanceConfig } = require("../../src/services/balanceConfig");
+const { defaultConfig } = require("../../src/modules/economy/balanceConfig.defaults");
+const { balanceConfig } = require("../../src/modules/economy/balanceConfig");
 
 let server;
 let nextAppleId = 0;

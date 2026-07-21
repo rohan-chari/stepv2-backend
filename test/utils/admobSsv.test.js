@@ -6,7 +6,7 @@ const {
   verifySsvSignature,
   parseSsvQuery,
   buildKeyFetcher,
-} = require("../../src/utils/admobSsv");
+} = require("../../src/modules/economy/admobSsv");
 
 // Real AdMob SSV callbacks are GET requests whose query string ends with
 // &signature=<base64url DER ECDSA-SHA256>&key_id=<id>; the signed message is

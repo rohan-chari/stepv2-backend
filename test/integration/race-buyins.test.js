@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const { describe, it, before, beforeEach } = require("node:test");
 
 const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
-const { resolveExpiredRaces } = require("../../src/jobs/raceExpiry");
+const { resolveExpiredRaces } = require("../../src/modules/races/jobs/raceExpiry");
 
 let server;
 let nextAppleId = 0;

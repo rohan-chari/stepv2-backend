@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildStartRace, RaceStartError } = require("../../src/commands/startRace");
+const { buildStartRace, RaceStartError } = require("../../src/modules/races/commands/startRace");
 
 function makeDeps(overrides = {}) {
   const updates = [];

@@ -4,7 +4,7 @@ const test = require("node:test");
 const {
   buildSettleRankedWeek,
   resolveOutcome,
-} = require("../../src/commands/settleRankedWeek");
+} = require("../../src/modules/ranked/commands/settleRankedWeek");
 
 const FIXED_NOW = new Date("2026-06-15T18:00:00Z");
 const SILENT = { log() {}, error() {}, warn() {} };

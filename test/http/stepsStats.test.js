@@ -3,9 +3,9 @@ const test = require("node:test");
 const http = require("node:http");
 const express = require("express");
 
-const { createStepsRouter } = require("../../src/routes/steps");
-const { SeasonScore } = require("../../src/models/season");
-const { getMondayOfWeek } = require("../../src/utils/week");
+const { createStepsRouter } = require("../../src/modules/steps/routes/steps");
+const { SeasonScore } = require("../../src/modules/ranked/models/season");
+const { getMondayOfWeek } = require("../../src/shared/time/week");
 
 // Mounts the steps router with injected dependencies so GET /steps/stats can be
 // exercised without a database: auth is faked, step history is supplied, and the
@@ -44,7 +44,7 @@ async function withStatsServer(stepsHistory, run) {
 
 // "now" inside the handler comes from new Date(); it buckets steps with
 // lower-bound checks only (date >= this-week's-Monday / month-start / year-start,
-// no upper bound — see src/routes/steps.js:134-144). So we anchor fixture dates
+// no upper bound — see src/modules/steps/routes/steps.js:134-144). So we anchor fixture dates
 // at the LATER of this week's Monday and the first of the current month (itself
 // always >= Jan 1). Every fixture day is then guaranteed inside this week, month,
 // and year on ANY day of the week — including Mondays, when getMondayOfWeek makes

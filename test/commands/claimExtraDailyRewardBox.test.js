@@ -3,8 +3,8 @@ const test = require("node:test");
 
 const {
   buildClaimExtraDailyRewardBox,
-} = require("../../src/commands/claimExtraDailyRewardBox");
-const { DailyRewardError } = require("../../src/commands/claimDailyReward");
+} = require("../../src/modules/economy/commands/claimExtraDailyRewardBox");
+const { DailyRewardError } = require("../../src/modules/economy/commands/claimDailyReward");
 
 // The command validates localDate against real server time (same guard as the
 // free daily claim), so tests use the actual current date.

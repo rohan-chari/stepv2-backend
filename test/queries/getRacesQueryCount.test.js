@@ -38,9 +38,9 @@ function activePowerupRace(id) {
 }
 
 function withMockedModels(races, counters, fn) {
-  const raceModule = require("../../src/models/race");
-  const powerupModule = require("../../src/models/racePowerup");
-  const effectModule = require("../../src/models/raceActiveEffect");
+  const raceModule = require("../../src/modules/races/models/race");
+  const powerupModule = require("../../src/modules/powerups/models/racePowerup");
+  const effectModule = require("../../src/modules/powerups/models/raceActiveEffect");
   const originals = {
     Race: raceModule.Race,
     RacePowerup: powerupModule.RacePowerup,
@@ -78,13 +78,13 @@ function withMockedModels(races, counters, fn) {
   });
 
   try {
-    delete require.cache[require.resolve("../../src/queries/getRaces")];
-    return fn(require("../../src/queries/getRaces"));
+    delete require.cache[require.resolve("../../src/modules/races/queries/getRaces")];
+    return fn(require("../../src/modules/races/queries/getRaces"));
   } finally {
     Object.assign(raceModule, { Race: originals.Race });
     Object.assign(powerupModule, { RacePowerup: originals.RacePowerup });
     Object.assign(effectModule, { RaceActiveEffect: originals.RaceActiveEffect });
-    delete require.cache[require.resolve("../../src/queries/getRaces")];
+    delete require.cache[require.resolve("../../src/modules/races/queries/getRaces")];
   }
 }
 

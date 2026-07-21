@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildGetFeaturedRaces } = require("../../src/queries/getFeaturedRaces");
+const { buildGetFeaturedRaces } = require("../../src/modules/races/queries/getFeaturedRaces");
 
 const NOW = new Date("2026-05-29T12:00:00Z");
 

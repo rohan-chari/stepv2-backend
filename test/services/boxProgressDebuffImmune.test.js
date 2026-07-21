@@ -3,7 +3,7 @@ const test = require("node:test");
 
 const {
   buildSyncRacePowerupState,
-} = require("../../src/services/racePowerupStateSync");
+} = require("../../src/modules/races/services/racePowerupStateSync");
 
 // Box progress tracks RAW walked steps (immune to every buff/debuff multiplier).
 // The step paths compute that raw box total and pass it to the gate as

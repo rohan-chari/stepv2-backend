@@ -6,14 +6,14 @@ const {
   validateConfig,
   checkSoftBounds,
   mergeOverDefaults,
-} = require("../../src/services/balanceConfig");
-const { defaultConfig } = require("../../src/services/balanceConfig.defaults");
+} = require("../../src/modules/economy/balanceConfig");
+const { defaultConfig } = require("../../src/modules/economy/balanceConfig.defaults");
 const {
   rarityOddsForPosition,
   typeOddsForPosition,
   RARITY_ORDER,
-} = require("../../src/utils/powerupOdds");
-const { luckyMinRarity } = require("../../src/commands/usePowerup");
+} = require("../../src/modules/powerups/powerupOdds");
+const { luckyMinRarity } = require("../../src/modules/powerups/commands/usePowerup");
 
 function mulberry32(seed) {
   let s = seed >>> 0;
@@ -243,7 +243,7 @@ describe("Lucky Horseshoe graduated ladder (§6.2)", () => {
 // Test #19
 describe("seeded Monte Carlo — no store-only or retired type ever drops", () => {
   it("300k rolls across the whole position range only ever yield drop-pool types", () => {
-    const { rollPowerup } = require("../../src/utils/powerupOdds");
+    const { rollPowerup } = require("../../src/modules/powerups/powerupOdds");
     const config = defaultConfig();
     const droppable = new Set([
       ...config.dropPool.COMMON,

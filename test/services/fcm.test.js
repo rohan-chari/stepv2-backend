@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildFcmService } = require("../../src/services/fcm");
+const { buildFcmService } = require("../../src/shared/push/fcm");
 
 function mockMessaging() {
   const sent = [];

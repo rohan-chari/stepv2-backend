@@ -4,7 +4,7 @@ const test = require("node:test");
 const {
   buildKickRaceParticipant,
   RaceKickError,
-} = require("../../src/commands/kickRaceParticipant");
+} = require("../../src/modules/races/commands/kickRaceParticipant");
 
 function makeRace(overrides = {}) {
   return {

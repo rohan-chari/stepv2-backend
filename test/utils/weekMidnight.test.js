@@ -6,7 +6,7 @@ const {
   nextMidnightNewYork,
   startOfWeekNewYork,
   nextWeekStartNewYork,
-} = require("../../src/utils/week");
+} = require("../../src/shared/time/week");
 
 const iso = (d) => d.toISOString();
 

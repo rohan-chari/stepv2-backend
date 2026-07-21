@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { buildCompleteRace } = require("../../src/commands/completeRace");
+const { buildCompleteRace } = require("../../src/modules/races/commands/completeRace");
 
 // ---------------------------------------------------------------------------
 // expireAllForRace — on race completion, all HELD, MYSTERY_BOX, and QUEUED

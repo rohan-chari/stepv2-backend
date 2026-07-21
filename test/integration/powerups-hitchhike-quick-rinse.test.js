@@ -4,7 +4,7 @@ const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
 // The REAL settlement entry point (the cron job's exported function). Settlement
 // has no HTTP surface, so this IS its public path — it is not a shortcut past
 // one. Everything asserted below is read back through the API.
-const { resolveExpiredRaces } = require("../../src/jobs/raceExpiry");
+const { resolveExpiredRaces } = require("../../src/modules/races/jobs/raceExpiry");
 
 // Integration coverage for the 2026-07-20 batch (§7, §8, §9.5) against a real DB:
 //   * HITCHHIKE — a 60-minute 1:1 COPY of the target's raw steps into the
@@ -501,7 +501,7 @@ describe("hitchhike / quick rinse — integration", () => {
   it("GET /powerups/catalog serves copy for every user-renderable type", async () => {
     const {
       POWERUP_COPY_SEED,
-    } = require("../../src/constants/powerupCopySeed");
+    } = require("../../src/modules/powerups/constants/powerupCopySeed");
     for (const row of POWERUP_COPY_SEED) {
       await prisma.powerupCopy.upsert({
         where: { powerupType: row.powerupType },

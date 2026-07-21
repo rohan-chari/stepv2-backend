@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildJoinPublicRace } = require("../../src/commands/joinPublicRace");
+const { buildJoinPublicRace } = require("../../src/modules/races/commands/joinPublicRace");
 
 // ---------------------------------------------------------------------------
 // Lightweight in-memory mock of the slice of Prisma the onboarding grant uses:

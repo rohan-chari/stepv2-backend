@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { computeBoxEffectiveSteps } = require("../../src/utils/boxSteps");
+const { computeBoxEffectiveSteps } = require("../../src/modules/powerups/boxSteps");
 
 // Box progress = RAW walked steps (baseAdjusted) ONLY. Additive consumable bonuses
 // (Protein Shake / Trail Mix / Second Wind) help the leaderboard total but must NOT

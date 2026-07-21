@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildRecordSteps } = require("../../src/commands/recordSteps");
+const { buildRecordSteps } = require("../../src/modules/steps/commands/recordSteps");
 
 test("recordSteps stamps lastStepSyncAt when creating a daily record", async () => {
   const updates = [];

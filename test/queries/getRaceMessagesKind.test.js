@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildGetRaceMessages } = require("../../src/queries/getRaceMessages");
+const { buildGetRaceMessages } = require("../../src/modules/social/queries/getRaceMessages");
 
 const T = "2026-05-18T20:00:00.000Z";
 

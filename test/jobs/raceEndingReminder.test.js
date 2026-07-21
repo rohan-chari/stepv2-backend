@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildRecomputePlacements } = require("../../src/jobs/placementRecompute");
+const { buildRecomputePlacements } = require("../../src/modules/races/jobs/placementRecompute");
 
 const NOW = new Date("2026-07-19T12:00:00Z");
 const HOUR = 60 * 60 * 1000;

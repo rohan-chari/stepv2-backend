@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildRecomputePlacements } = require("../../src/jobs/placementRecompute");
+const { buildRecomputePlacements } = require("../../src/modules/races/jobs/placementRecompute");
 
 const FIXED_NOW = new Date("2026-06-24T12:00:00Z");
 

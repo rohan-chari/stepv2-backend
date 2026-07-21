@@ -3,7 +3,7 @@ const test = require("node:test");
 
 const {
   calculateCurrentTotal,
-} = require("../../src/services/raceStateResolution");
+} = require("../../src/modules/races/services/raceStateResolution");
 
 // ---------------------------------------------------------------------------
 // HARD INVARIANT: IMPOSTER is PURELY COSMETIC. The settlement / placement path

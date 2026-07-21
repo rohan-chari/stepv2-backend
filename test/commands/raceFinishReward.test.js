@@ -1,12 +1,12 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { buildCompleteRace } = require("../../src/commands/completeRace");
+const { buildCompleteRace } = require("../../src/modules/races/commands/completeRace");
 
 // ---------------------------------------------------------------------------
 // Seeded-race finish reward — on completion, a minted coin pool is split across
 // a CONCENTRATED set of top finishers (graded by placement). Both the pool size
 // and the number of paid places scale with the field (see
-// src/constants/raceFinishReward.js): more racers mint a bigger prize, but the
+// src/modules/races/constants/raceFinishReward.js): more racers mint a bigger prize, but the
 // paid places are capped so each share stays meaningful rather than dissolving
 // into a long 0-coin tail. These races have no buy-in pot, so the legacy
 // pot-payout path is skipped.

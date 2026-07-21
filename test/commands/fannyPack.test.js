@@ -1,8 +1,8 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { buildUsePowerup, PowerupUseError } = require("../../src/commands/usePowerup");
-const { buildRollPowerup } = require("../../src/commands/rollPowerup");
-const { buildExpireEffects } = require("../../src/commands/expireEffects");
+const { buildUsePowerup, PowerupUseError } = require("../../src/modules/powerups/commands/usePowerup");
+const { buildRollPowerup } = require("../../src/modules/powerups/commands/rollPowerup");
+const { buildExpireEffects } = require("../../src/modules/powerups/commands/expireEffects");
 
 // ---------------------------------------------------------------------------
 // Fanny Pack — self-only, instant, adds 1 extra powerup slot (3 → 4)

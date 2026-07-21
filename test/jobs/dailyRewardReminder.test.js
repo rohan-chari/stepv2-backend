@@ -5,8 +5,8 @@ const {
   buildDailyRewardReminder,
   claimSuppresses,
   zonesAtSlot,
-} = require("../../src/jobs/dailyRewardReminder");
-const { getTimeZoneParts } = require("../../src/utils/week");
+} = require("../../src/modules/notifications/dailyRewardReminder");
+const { getTimeZoneParts } = require("../../src/shared/time/week");
 
 // A `now` at which America/New_York local time is 17:15 (EDT = UTC-4 in July).
 const NY_1715 = new Date("2026-07-19T21:15:00Z");

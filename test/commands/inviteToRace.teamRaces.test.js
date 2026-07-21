@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildInviteToRace } = require("../../src/commands/inviteToRace");
+const { buildInviteToRace } = require("../../src/modules/races/commands/inviteToRace");
 
 function makeDeps({ race, users = {}, existingParticipants = [] } = {}) {
   const state = { createdRecords: null };

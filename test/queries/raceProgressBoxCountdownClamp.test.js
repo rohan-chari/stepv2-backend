@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { buildGetRaceProgress } = require("../../src/queries/getRaceProgress");
+const { buildGetRaceProgress } = require("../../src/modules/races/queries/getRaceProgress");
 
 // ---------------------------------------------------------------------------
 // Display clamp: stepsUntilNextPowerup can never read above one interval.

@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildGetRaceProgress } = require("../../src/queries/getRaceProgress");
+const { buildGetRaceProgress } = require("../../src/modules/races/queries/getRaceProgress");
 
 // TR-401 (team totals from effective steps), TR-656/658 (stealth/imposter mask
 // individual planks only — team totals stay honest), TR-601 (forfeited members

@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { buildUsePowerup } = require("../../src/commands/usePowerup");
-const { buildGetRaceProgress } = require("../../src/queries/getRaceProgress");
+const { buildUsePowerup } = require("../../src/modules/powerups/commands/usePowerup");
+const { buildGetRaceProgress } = require("../../src/modules/races/queries/getRaceProgress");
 
 // ---------------------------------------------------------------------------
 // Step Integrity — powerup bonuses/penalties must not affect real step data

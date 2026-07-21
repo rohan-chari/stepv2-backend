@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { computeBoxEffectiveSteps } = require("../../src/utils/boxSteps");
+const { computeBoxEffectiveSteps } = require("../../src/modules/powerups/boxSteps");
 
 // Box progress = RAW walked steps (baseAdjusted) + the bonus high-water. It takes
 // NO effect-multiplier inputs at all, so it is inherently immune to every buff

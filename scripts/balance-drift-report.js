@@ -1,6 +1,6 @@
 require("dotenv").config();
 const { prisma } = require("../src/db");
-const { readSnapshot, diffPaths } = require("../src/services/balanceSnapshot");
+const { readSnapshot, diffPaths } = require("../src/modules/economy/balanceSnapshot");
 
 // Deploy-time drift report: compares the ACTIVE DB config against the committed
 // data/balance-config.json and logs a warning for each differing path.

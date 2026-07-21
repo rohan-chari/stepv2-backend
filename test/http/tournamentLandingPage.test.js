@@ -4,7 +4,7 @@ const test = require("node:test");
 const {
   renderTournamentLandingPage,
   renderTournamentNotFoundPage,
-} = require("../../src/web/tournamentLandingPage");
+} = require("../../src/modules/web/tournamentLandingPage");
 
 // Item 4: the dedicated tournament landing page (GET /t/ fallback). It must use
 // tournament-specific copy + the TOURNAMENT custom-scheme deep link (not the

@@ -1,22 +1,18 @@
 const { Router } = require("express");
 const { buildRequireAuth } = require("../middleware/requireAuth");
-const { extractReleaseChannel } = require("../utils/releaseChannel");
-const { extractClientFeatures } = require("../utils/clientFeatures");
+const { extractReleaseChannel } = require("../shared/middleware/releaseChannel");
+const { extractClientFeatures } = require("../shared/middleware/clientFeatures");
 const {
   getShopCatalog: defaultGetShopCatalog,
-} = require("../queries/getShopCatalog");
-const {
   purchaseShopItem: defaultPurchaseShopItem,
-} = require("../commands/purchaseShopItem");
-const {
   equipAccessory: defaultEquipAccessory,
-} = require("../commands/equipAccessory");
+} = require("../modules/cosmetics");
 const {
   getPowerupShopCatalog: defaultGetPowerupShopCatalog,
-} = require("../queries/getPowerupShopCatalog");
+} = require("../modules/powerups");
 const {
   purchasePowerupItem: defaultPurchasePowerupItem,
-} = require("../commands/purchasePowerupItem");
+} = require("../modules/powerups");
 
 function createShopRouter(dependencies = {}) {
   const router = Router();

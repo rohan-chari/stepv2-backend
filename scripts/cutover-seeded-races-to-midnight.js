@@ -20,7 +20,7 @@ const { prisma: defaultPrisma } = require("../src/db");
 const {
   nextMidnightNewYork,
   nextWeekStartNewYork,
-} = require("../src/utils/week");
+} = require("../src/shared/time/week");
 
 const SEED_TZ = "America/New_York";
 

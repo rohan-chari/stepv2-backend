@@ -3,7 +3,7 @@ const test = require("node:test");
 
 const {
   calculateBaseAdjusted,
-} = require("../../src/services/raceStateResolution");
+} = require("../../src/modules/races/services/raceStateResolution");
 
 // ---------------------------------------------------------------------------
 // T4 regression: mystery-box over-grant on public mid-race join.
@@ -27,12 +27,12 @@ function withMockPrisma(mockPrisma, fn) {
   const originalPrisma = dbModule.prisma;
   Object.assign(dbModule, { prisma: mockPrisma });
   try {
-    delete require.cache[require.resolve("../../src/models/race")];
-    const mod = require("../../src/models/race");
+    delete require.cache[require.resolve("../../src/modules/races/models/race")];
+    const mod = require("../../src/modules/races/models/race");
     return fn(mod);
   } finally {
     Object.assign(dbModule, { prisma: originalPrisma });
-    delete require.cache[require.resolve("../../src/models/race")];
+    delete require.cache[require.resolve("../../src/modules/races/models/race")];
   }
 }
 

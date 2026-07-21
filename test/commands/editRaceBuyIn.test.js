@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildEditRace, RaceEditError } = require("../../src/commands/editRace");
+const { buildEditRace, RaceEditError } = require("../../src/modules/races/commands/editRace");
 
 // Fakes around a mutable race row + participant list + per-user coin balances,
 // exercising the Issue 4 buy-in reconcile. `withRaceLock` is a pass-through so

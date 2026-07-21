@@ -4,7 +4,7 @@ const test = require("node:test");
 const {
   buildRedeemPowerupToRace,
   RedeemPowerupError,
-} = require("../../src/commands/redeemPowerupToRace");
+} = require("../../src/modules/powerups/commands/redeemPowerupToRace");
 
 // ---------------------------------------------------------------------------
 // Redeem step: the user spends ONE powerup from their GLOBAL inventory

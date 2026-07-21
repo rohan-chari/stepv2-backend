@@ -8,7 +8,7 @@ const test = require("node:test");
 const assert = require("node:assert");
 const {
   buildSyncRacePowerupState,
-} = require("../src/services/racePowerupStateSync");
+} = require("../src/modules/races/services/racePowerupStateSync");
 
 function makeParticipant(overrides = {}) {
   return {

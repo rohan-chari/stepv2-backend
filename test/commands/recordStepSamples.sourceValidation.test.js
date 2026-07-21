@@ -4,7 +4,7 @@ const test = require("node:test");
 const {
   buildRecordStepSamples,
   StepSampleError,
-} = require("../../src/commands/recordStepSamples");
+} = require("../../src/modules/steps/commands/recordStepSamples");
 
 function makeDeps() {
   const saved = [];

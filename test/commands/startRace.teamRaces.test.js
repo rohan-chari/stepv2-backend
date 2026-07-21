@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildStartRace } = require("../../src/commands/startRace");
+const { buildStartRace } = require("../../src/modules/races/commands/startRace");
 
 function participant(userId, team, status = "ACCEPTED") {
   return {

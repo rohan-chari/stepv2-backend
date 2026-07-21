@@ -4,8 +4,8 @@ const test = require("node:test");
 const {
   buildJoinRaceByShareToken,
   RaceShareJoinError,
-} = require("../../src/commands/joinRaceByShareToken");
-const { RaceJoinError } = require("../../src/commands/joinRaceCore");
+} = require("../../src/modules/races/commands/joinRaceByShareToken");
+const { RaceJoinError } = require("../../src/modules/races/commands/joinRaceCore");
 
 function makeRace(overrides = {}) {
   return {

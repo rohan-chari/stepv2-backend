@@ -35,11 +35,11 @@ require("dotenv").config();
 
 const {
   COHORT_TARGET_SIZE,
-} = require("../src/constants/rankedCohorts");
+} = require("../src/modules/ranked/constants/rankedCohorts");
 
 const APPLY = process.argv.includes("--apply");
 
-// Mirrors chunkIntoCohorts() balancing in src/services/rankedCohorts.js: split
+// Mirrors chunkIntoCohorts() balancing in src/modules/ranked/services/rankedCohorts.js: split
 // into the fewest cohorts of <= COHORT_TARGET_SIZE, sizes as even as possible.
 function chunkCount(n, target = COHORT_TARGET_SIZE) {
   return Math.max(1, Math.ceil(n / target));

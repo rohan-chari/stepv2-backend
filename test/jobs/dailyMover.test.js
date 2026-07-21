@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildDailyMover } = require("../../src/jobs/dailyMover");
+const { buildDailyMover } = require("../../src/modules/notifications/dailyMover");
 
 const FOUR_PM_ET = new Date("2026-06-25T20:05:00Z"); // 4:05pm EDT
 const THREE_PM_ET = new Date("2026-06-25T19:00:00Z"); // 3pm EDT

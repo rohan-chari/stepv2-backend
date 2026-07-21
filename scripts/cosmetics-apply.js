@@ -37,7 +37,7 @@ function sanitizeRenderMetadata(raw) {
     }
     out.renderLayer = layer;
   }
-  // Per-animal placement overrides (see routes/admin.js): only the four
+  // Per-animal placement overrides (see modules/admin/routes.js): only the four
   // numeric tuner keys are allowed inside each animal block.
   if (raw.perAnimal !== undefined && raw.perAnimal !== null) {
     if (typeof raw.perAnimal !== "object" || Array.isArray(raw.perAnimal)) {

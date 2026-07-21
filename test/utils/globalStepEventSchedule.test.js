@@ -20,8 +20,8 @@ const {
   GLOBAL_EVENT_MULTIPLIER,
   GLOBAL_EVENT_CATCH_WINDOW_MS,
   GLOBAL_EVENT_WINDOWS_ET_MIN,
-} = require("../../src/utils/globalStepEvent");
-const { getTimeZoneParts, zonedDateTimeToUtc } = require("../../src/utils/week");
+} = require("../../src/modules/steps/globalStepEvent");
+const { getTimeZoneParts, zonedDateTimeToUtc } = require("../../src/shared/time/week");
 
 const ET = "America/New_York";
 

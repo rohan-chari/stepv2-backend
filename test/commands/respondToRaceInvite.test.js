@@ -4,7 +4,7 @@ const test = require("node:test");
 const {
   buildRespondToRaceInvite,
   RaceInviteResponseError,
-} = require("../../src/commands/respondToRaceInvite");
+} = require("../../src/modules/races/commands/respondToRaceInvite");
 
 function makeDeps(overrides = {}) {
   const updates = [];

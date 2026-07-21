@@ -1,13 +1,13 @@
 const {
   verifySessionToken,
   SessionTokenError,
-} = require("../services/sessionToken");
+} = require("../modules/users/services/sessionToken");
 const {
   AppleIdentityTokenError,
   verifyAppleIdentityToken,
-} = require("../services/appleIdentityToken");
-const { ensureAppleUser } = require("../services/ensureAppleUser");
-const { User } = require("../models/user");
+} = require("../modules/users/services/appleIdentityToken");
+const { ensureAppleUser } = require("../modules/users/services/ensureAppleUser");
+const { User } = require("../modules/users/models/user");
 
 class AuthError extends Error {
   constructor(message) {

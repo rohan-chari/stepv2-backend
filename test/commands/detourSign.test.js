@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { buildUsePowerup, PowerupUseError } = require("../../src/commands/usePowerup");
+const { buildUsePowerup, PowerupUseError } = require("../../src/modules/powerups/commands/usePowerup");
 
 // ---------------------------------------------------------------------------
 // Detour Sign — targeted, 3 hours, hides entire leaderboard from target

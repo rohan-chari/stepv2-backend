@@ -4,7 +4,7 @@ const test = require("node:test");
 const {
   buildResolveRaceState,
   determineFinishSnapshot,
-} = require("../../src/services/raceStateResolution");
+} = require("../../src/modules/races/services/raceStateResolution");
 
 const RACE_START = new Date("2026-04-06T12:00:00Z");
 const NOW = new Date("2026-04-07T12:00:00Z");

@@ -149,7 +149,7 @@ test("POST /races/results/seen rejects non-string entries", async () => {
 });
 
 test("POST /races/results/seen surfaces command validation errors", async () => {
-  const { MarkRaceResultsSeenError } = require("../../src/commands/markRaceResultsSeen");
+  const { MarkRaceResultsSeenError } = require("../../src/modules/races/commands/markRaceResultsSeen");
   const server = await startServer(
     depsWithStubAuth({
       markRaceResultsSeen: async () => {

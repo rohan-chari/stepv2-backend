@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { buildGetAdminStats } = require("../../src/queries/getAdminStats");
+const { buildGetAdminStats } = require("../../src/modules/admin/getAdminStats");
 
 test("admin stats group 7/30/90-day activation totals by version and platform", async () => {
   const prisma = {

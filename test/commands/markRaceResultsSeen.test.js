@@ -10,14 +10,14 @@ function withMockPrisma(mockPrisma, fn) {
   Object.assign(originalModule, { prisma: mockPrisma });
   try {
     delete require.cache[
-      require.resolve("../../src/commands/markRaceResultsSeen")
+      require.resolve("../../src/modules/races/commands/markRaceResultsSeen")
     ];
-    const mod = require("../../src/commands/markRaceResultsSeen");
+    const mod = require("../../src/modules/races/commands/markRaceResultsSeen");
     return fn(mod);
   } finally {
     Object.assign(originalModule, { prisma: originalPrisma });
     delete require.cache[
-      require.resolve("../../src/commands/markRaceResultsSeen")
+      require.resolve("../../src/modules/races/commands/markRaceResultsSeen")
     ];
   }
 }

@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildGrantAdReward } = require("../../src/commands/grantAdReward");
+const { buildGrantAdReward } = require("../../src/modules/economy/commands/grantAdReward");
 
 function mockDb({ userExists = true, createError = null } = {}) {
   const created = [];

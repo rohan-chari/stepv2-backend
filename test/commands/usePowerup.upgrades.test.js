@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildUsePowerup, PowerupUseError } = require("../../src/commands/usePowerup");
+const { buildUsePowerup, PowerupUseError } = require("../../src/modules/powerups/commands/usePowerup");
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -116,7 +116,7 @@ function makeDeps(overrides = {}) {
           return overrides.deductCoinsAtomicOverride({ userId, amount, reason, refId });
         }
         if (userCoins < amount) {
-          const { InsufficientCoinsError } = require("../../src/commands/deductCoinsAtomic");
+          const { InsufficientCoinsError } = require("../../src/shared/economy/deductCoinsAtomic");
           throw new InsufficientCoinsError("not enough coins");
         }
         coinDeductions.push({ userId, amount, reason, refId });

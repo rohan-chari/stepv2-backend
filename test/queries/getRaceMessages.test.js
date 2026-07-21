@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildGetRaceMessages } = require("../../src/queries/getRaceMessages");
+const { buildGetRaceMessages } = require("../../src/modules/social/queries/getRaceMessages");
 
 function race(overrides = {}) {
   return {

@@ -7,7 +7,7 @@ const {
   normalizeToCharset,
   DISPLAY_NAME_MIN_LENGTH,
   DISPLAY_NAME_MAX_LENGTH,
-} = require("../../src/lib/displayNameValidator");
+} = require("../../src/shared/lib/displayNameValidator");
 
 test("exports the locked min/max lengths", () => {
   assert.equal(DISPLAY_NAME_MIN_LENGTH, 4);

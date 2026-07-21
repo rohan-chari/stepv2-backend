@@ -3,7 +3,7 @@ const test = require("node:test");
 
 const {
   buildGetSharedRacePreview,
-} = require("../../src/queries/getSharedRacePreview");
+} = require("../../src/modules/races/queries/getSharedRacePreview");
 
 function makeRace(overrides = {}) {
   return {

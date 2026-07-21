@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const {
   serializeRaceResolutionStatus,
-} = require("../../src/models/raceResolutionJob");
+} = require("../../src/modules/races/models/raceResolutionJob");
 
 const baseJob = {
   id: "job-1",

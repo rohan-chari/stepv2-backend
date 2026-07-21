@@ -28,10 +28,10 @@ for (const Ctor of [pg.Client, pg.Pool]) {
 
 const { prisma } = require("../../src/db");
 const { generateFixtures } = require("./generateFixtures");
-const { getRaces } = require("../../src/queries/getRaces");
-const { Race } = require("../../src/models/race");
-const { RaceActiveEffect } = require("../../src/models/raceActiveEffect");
-const { RacePowerup } = require("../../src/models/racePowerup");
+const { getRaces } = require("../../src/modules/races/queries/getRaces");
+const { Race } = require("../../src/modules/races/models/race");
+const { RaceActiveEffect } = require("../../src/modules/powerups/models/raceActiveEffect");
+const { RacePowerup } = require("../../src/modules/powerups/models/racePowerup");
 
 // Faithful reproduction of the PRE-optimization /races DB access pattern:
 // findForUser (deep participant/accessory include) + a per-active-powerup-race

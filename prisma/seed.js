@@ -262,7 +262,7 @@ async function seed() {
   // never duplicates or deletes. MYSTERY_BOX is intentionally absent.
   const {
     POWERUP_COPY_SEED,
-  } = require("../src/constants/powerupCopySeed");
+  } = require("../src/modules/powerups/constants/powerupCopySeed");
   let powerupCopyUpserted = 0;
   for (const row of POWERUP_COPY_SEED) {
     await prisma.powerupCopy.upsert({
@@ -292,7 +292,7 @@ async function seed() {
   // reverted the Leech price, applied to a much bigger surface.
   const {
     balanceConfig: balanceConfigService,
-  } = require("../src/services/balanceConfig");
+  } = require("../src/modules/economy/balanceConfig");
   const seededConfig = await balanceConfigService.ensureSeeded();
   console.log(
     seededConfig

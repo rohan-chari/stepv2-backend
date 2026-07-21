@@ -3,7 +3,7 @@ const test = require("node:test");
 
 const {
   buildGetStepMilestonesToday,
-} = require("../../src/queries/getStepMilestonesToday");
+} = require("../../src/modules/steps/queries/getStepMilestonesToday");
 
 function makePrismaMock({ stepRecord = null, claims = [] } = {}) {
   return {

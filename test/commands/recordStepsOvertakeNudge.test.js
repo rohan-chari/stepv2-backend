@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildRecordSteps } = require("../../src/commands/recordSteps");
+const { buildRecordSteps } = require("../../src/modules/steps/commands/recordSteps");
 
 // The overtake nudge is fire-and-forget (not awaited in the response path), so
 // tests flush the microtask/immediate queue after recordSteps resolves.

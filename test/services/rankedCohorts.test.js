@@ -7,14 +7,14 @@ const {
   chunkIntoCohorts,
   normalizeTier,
   placeNewParticipants,
-} = require("../../src/services/rankedCohorts");
+} = require("../../src/modules/ranked/services/rankedCohorts");
 const {
   zoneSizes,
   placementReward,
   nextTierUp,
   nextTierDown,
   COHORT_TARGET_SIZE,
-} = require("../../src/constants/rankedCohorts");
+} = require("../../src/modules/ranked/constants/rankedCohorts");
 
 // In-memory fakes for the cohort models, enough to exercise placeNewParticipants.
 function makeFakeModels({ cohorts = [], members = [] } = {}) {

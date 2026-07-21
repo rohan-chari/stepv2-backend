@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const { describe, it, before, beforeEach } = require("node:test");
 const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
-const { appSettings } = require("../../src/services/appSettings");
+const { appSettings } = require("../../src/shared/config/appSettings");
 
 // GET /races — the additive `myCurrentMatch` block on tournament summaries (§5).
 //

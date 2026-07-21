@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const { EventEmitter } = require("node:events");
 const test = require("node:test");
 
-const { buildApnsService } = require("../../src/services/apns");
+const { buildApnsService } = require("../../src/shared/push/apns");
 
 function createMockHttp2(statusCode = 200, responseBody = "") {
   return function connect() {

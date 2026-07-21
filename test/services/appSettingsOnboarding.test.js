@@ -3,7 +3,7 @@ const test = require("node:test");
 const {
   buildAppSettings,
   KNOWN_FLAGS,
-} = require("../../src/services/appSettings");
+} = require("../../src/shared/config/appSettings");
 
 test("onboarding v2 is a remotely writable flag that defaults off when missing", async () => {
   const writes = [];

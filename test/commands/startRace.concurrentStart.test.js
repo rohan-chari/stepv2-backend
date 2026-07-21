@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildStartRace } = require("../../src/commands/startRace");
+const { buildStartRace } = require("../../src/modules/races/commands/startRace");
 
 // Fix 2: startRace must only emit RACE_STARTED when it actually flips the race
 // PENDING -> ACTIVE. The status check at the top is a read (TOCTOU): two runners

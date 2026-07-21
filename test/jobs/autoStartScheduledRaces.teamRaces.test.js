@@ -3,7 +3,7 @@ const test = require("node:test");
 
 const {
   buildAutoStartScheduledRaces,
-} = require("../../src/jobs/autoStartScheduledRaces");
+} = require("../../src/modules/races/jobs/autoStartScheduledRaces");
 
 // TR-304: when a scheduled team race is due but teams are uneven, the tick
 // SKIPS it (stays PENDING), notifies the creator once (first failed attempt

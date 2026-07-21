@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { buildUsePowerup, PowerupUseError } = require("../../src/commands/usePowerup");
+const { buildUsePowerup, PowerupUseError } = require("../../src/modules/powerups/commands/usePowerup");
 
 // ---------------------------------------------------------------------------
 // Shortcut — targeted, offensive, steals up to 1000 steps from target

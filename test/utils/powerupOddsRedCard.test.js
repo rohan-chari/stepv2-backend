@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const { describe, it } = require("node:test");
 
-const { rollPowerup, RARITY_TIERS } = require("../../src/utils/powerupOdds");
+const { rollPowerup, RARITY_TIERS } = require("../../src/modules/powerups/powerupOdds");
 
 // Deterministic PRNG so this statistical test never flakes (same seed -> same
 // sequence -> same counts).

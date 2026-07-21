@@ -3,7 +3,7 @@ const test = require("node:test");
 
 const {
   validateRaceBuyInConfig,
-} = require("../../src/services/raceBuyIns");
+} = require("../../src/modules/races/services/raceBuyIns");
 
 class TestError extends Error {
   constructor(message, statusCode) {

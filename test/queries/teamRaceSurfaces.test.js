@@ -1,8 +1,8 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildGetPublicRaces } = require("../../src/queries/getPublicRaces");
-const { buildGetHomeRaceCard } = require("../../src/queries/getHomeRaceCard");
+const { buildGetPublicRaces } = require("../../src/modules/races/queries/getPublicRaces");
+const { buildGetHomeRaceCard } = require("../../src/modules/home/getHomeRaceCard");
 
 // Frontend-requested payload additions (contract FRONTEND QUESTIONS Q5/Q6/Q7):
 //   Q7 — myTeam + myForfeited on GET /races so the results modal (TR-807) can
@@ -14,8 +14,8 @@ const { buildGetHomeRaceCard } = require("../../src/queries/getHomeRaceCard");
 
 // ── GET /races ──────────────────────────────────────────────────────────────
 function withMockedRaces(races, fn) {
-  const raceModule = require("../../src/models/race");
-  const powerupModule = require("../../src/models/racePowerup");
+  const raceModule = require("../../src/modules/races/models/race");
+  const powerupModule = require("../../src/modules/powerups/models/racePowerup");
   const originalRace = raceModule.Race;
   const originalPowerup = powerupModule.RacePowerup;
 
@@ -30,13 +30,13 @@ function withMockedRaces(races, fn) {
   });
 
   try {
-    delete require.cache[require.resolve("../../src/queries/getRaces")];
-    const mod = require("../../src/queries/getRaces");
+    delete require.cache[require.resolve("../../src/modules/races/queries/getRaces")];
+    const mod = require("../../src/modules/races/queries/getRaces");
     return fn(mod);
   } finally {
     Object.assign(raceModule, { Race: originalRace });
     Object.assign(powerupModule, { RacePowerup: originalPowerup });
-    delete require.cache[require.resolve("../../src/queries/getRaces")];
+    delete require.cache[require.resolve("../../src/modules/races/queries/getRaces")];
   }
 }
 

@@ -7,7 +7,7 @@ const {
   addDaysToDateString,
   parseDateString,
   zonedDateTimeToUtc,
-} = require("../../src/utils/week");
+} = require("../../src/shared/time/week");
 
 // Regression test for the box-progress TIMEZONE SPLIT incident ("summer
 // solstice", Jul 2026: countdown pegged flat at one interval while mystery

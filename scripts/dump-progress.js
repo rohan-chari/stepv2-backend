@@ -1,6 +1,6 @@
 require("dotenv").config();
 process.env.DATABASE_URL = process.env.PROD_DATABASE_URL;
-const { getRaceProgress } = require("../src/queries/getRaceProgress");
+const { getRaceProgress } = require("../src/modules/races/queries/getRaceProgress");
 const [,, userId, raceId] = process.argv;
 (async () => {
   const r = await getRaceProgress(userId, raceId, "America/New_York");

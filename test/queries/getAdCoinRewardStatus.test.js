@@ -3,11 +3,11 @@ const test = require("node:test");
 
 const {
   buildGetAdCoinRewardStatus,
-} = require("../../src/queries/getAdCoinRewardStatus");
+} = require("../../src/modules/economy/queries/getAdCoinRewardStatus");
 const {
   AD_COIN_REWARD_AMOUNT,
   AD_COIN_REWARD_DAILY_CAP,
-} = require("../../src/config/adRewards");
+} = require("../../src/modules/economy/adRewards");
 
 function makePrismaMock(grants = []) {
   return {

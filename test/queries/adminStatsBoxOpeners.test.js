@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildGetAdminStats } = require("../../src/queries/getAdminStats");
+const { buildGetAdminStats } = require("../../src/modules/admin/getAdminStats");
 
 // Item 9: admin stats gain activity.avgUniqueBoxOpenersPerDay — the average of
 // DISTINCT box openers per ET day, computed in SQL from MYSTERY_BOX_OPENED rows.

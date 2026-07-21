@@ -9,8 +9,8 @@
 const assert = require("node:assert/strict");
 const { describe, it, before, beforeEach } = require("node:test");
 const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
-const { resolveRaceState } = require("../../src/services/raceStateResolution");
-const { withRaceResolutionLock } = require("../../src/services/withRaceResolutionLock");
+const { resolveRaceState } = require("../../src/modules/races/services/raceStateResolution");
+const { withRaceResolutionLock } = require("../../src/modules/races/services/withRaceResolutionLock");
 const crypto = require("node:crypto");
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -143,7 +143,7 @@ async function seedCrossingScenario() {
 // SKIPPED 2026-07-18 incident: withRaceResolutionLock was reverted to a
 // passthrough because the interactive-transaction advisory lock exhausted the
 // prod connection pool under concurrent /steps load (see the file header in
-// src/services/withRaceResolutionLock.js). These tests assert the serialization
+// src/modules/races/services/withRaceResolutionLock.js). These tests assert the serialization
 // the lock provided; they must be un-skipped only when a pool-safe lock is
 // reimplemented and load-tested. Kept in place (not deleted) as the spec for that
 // future reimplementation.

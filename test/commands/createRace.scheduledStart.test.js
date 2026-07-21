@@ -4,7 +4,7 @@ const test = require("node:test");
 const {
   buildCreateRace,
   RaceCreationError,
-} = require("../../src/commands/createRace");
+} = require("../../src/modules/races/commands/createRace");
 
 // ---------------------------------------------------------------------------
 // 1.1.7 — scheduled race start. createRace accepts an OPTIONAL future

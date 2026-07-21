@@ -1,16 +1,16 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildOpenMysteryBox } = require("../../src/commands/openMysteryBox");
-const { buildUsePowerup, PowerupUseError } = require("../../src/commands/usePowerup");
-const { buildResolveRaceState } = require("../../src/services/raceStateResolution");
-const { RARITY_TIERS } = require("../../src/utils/powerupOdds");
+const { buildOpenMysteryBox } = require("../../src/modules/powerups/commands/openMysteryBox");
+const { buildUsePowerup, PowerupUseError } = require("../../src/modules/powerups/commands/usePowerup");
+const { buildResolveRaceState } = require("../../src/modules/races/services/raceStateResolution");
+const { RARITY_TIERS } = require("../../src/modules/powerups/powerupOdds");
 const {
   isUpgradeable,
   upgradeCost,
   upgradedDuration,
   upgradedMagnitude,
-} = require("../../src/utils/powerupUpgrades");
+} = require("../../src/modules/powerups/powerupUpgrades");
 
 const HOUR = 60 * 60 * 1000;
 

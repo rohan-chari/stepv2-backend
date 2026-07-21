@@ -16,7 +16,7 @@ const {
   clientSupportsTournaments,
   resolveMatchupWinner,
   TOURNAMENTS_FEATURE,
-} = require("../../src/constants/tournaments");
+} = require("../../src/modules/tournaments/constants/tournaments");
 
 class Err extends Error {
   constructor(message, statusCode, code) {

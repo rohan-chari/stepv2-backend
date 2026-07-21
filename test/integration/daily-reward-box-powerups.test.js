@@ -158,7 +158,7 @@ describe("daily reward box powerup prizes", () => {
     // empty accessory pool makes the sub-roll resolve to POWERUP deterministically.
     const {
       claimDailyRewardBox,
-    } = require("../../src/commands/claimDailyRewardBox");
+    } = require("../../src/modules/economy/commands/claimDailyRewardBox");
     const result = await claimDailyRewardBox({
       userId: user.userId,
       localDate: todayLocal(),
@@ -210,7 +210,7 @@ describe("daily reward box powerup prizes", () => {
     // RARE folds to 0. Even a max roll can't yield POWERUP; it pays coins.
     const {
       claimDailyRewardBox,
-    } = require("../../src/commands/claimDailyRewardBox");
+    } = require("../../src/modules/economy/commands/claimDailyRewardBox");
     const result = await claimDailyRewardBox({
       userId: user.userId,
       localDate: todayLocal(),
@@ -257,7 +257,7 @@ describe("daily reward box powerup prizes", () => {
 
     const {
       claimDailyRewardBox,
-    } = require("../../src/commands/claimDailyRewardBox");
+    } = require("../../src/modules/economy/commands/claimDailyRewardBox");
     const first = await claimDailyRewardBox({
       userId: user.userId,
       localDate: todayLocal(),
@@ -293,7 +293,7 @@ describe("daily reward box powerup prizes", () => {
 
     const {
       claimDailyRewardBox,
-    } = require("../../src/commands/claimDailyRewardBox");
+    } = require("../../src/modules/economy/commands/claimDailyRewardBox");
 
     // Without jammer support the jammer is filtered out → powerup pool empty →
     // accessory pool empty → RARE folds → coins, never the jammer.

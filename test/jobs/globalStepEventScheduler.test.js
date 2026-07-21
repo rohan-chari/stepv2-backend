@@ -3,13 +3,13 @@ const test = require("node:test");
 
 const {
   buildMaybeStartGlobalEvent,
-} = require("../../src/jobs/globalStepEventScheduler");
+} = require("../../src/modules/steps/jobs/globalStepEventScheduler");
 const {
   chooseEventStartForEtDay,
   GLOBAL_EVENT_DURATION_MS,
   GLOBAL_EVENT_MULTIPLIER,
-} = require("../../src/utils/globalStepEvent");
-const { zonedDateTimeToUtc } = require("../../src/utils/week");
+} = require("../../src/modules/steps/globalStepEvent");
+const { zonedDateTimeToUtc } = require("../../src/shared/time/week");
 
 // ---------------------------------------------------------------------------
 // Scheduler job (DB read/write + push fan-out). The PURE decision is tested in

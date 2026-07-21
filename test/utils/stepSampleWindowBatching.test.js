@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { prorateSamplesIntoWindow } = require("../../src/models/stepSample");
+const { prorateSamplesIntoWindow } = require("../../src/modules/steps/models/stepSample");
 
 // Guards the sumStepsInWindow -> sumStepsInWindows refactor: summing each
 // window against a SUPERSET fetch (all samples spanning every window) must

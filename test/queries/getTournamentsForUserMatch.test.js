@@ -3,7 +3,7 @@ const test = require("node:test");
 
 const {
   buildGetTournamentsForUser,
-} = require("../../src/queries/getTournamentsForUser");
+} = require("../../src/modules/tournaments/queries/getTournamentsForUser");
 
 // ---------------------------------------------------------------------------
 // GET /races — additive `myCurrentMatch` on tournament summaries (§5).

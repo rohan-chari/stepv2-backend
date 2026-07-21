@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildGetRaceProgress } = require("../../src/queries/getRaceProgress");
+const { buildGetRaceProgress } = require("../../src/modules/races/queries/getRaceProgress");
 
 // ---------------------------------------------------------------------------
 // GET /races/{raceId}/progress — powerupData capability contract (§6.2) and

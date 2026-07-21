@@ -4,7 +4,7 @@ const test = require("node:test");
 const {
   buildEditRace,
   RaceEditError,
-} = require("../../src/commands/editRace");
+} = require("../../src/modules/races/commands/editRace");
 
 const DEFAULT_RACE = {
   id: "race-1",

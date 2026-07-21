@@ -5,8 +5,8 @@ const {
   getFinishRewardConfig,
   computeFinishRewardPool,
   computeFinishRewardPlaces,
-} = require("../../src/constants/raceFinishReward");
-const { computeGradedPayouts } = require("../../src/utils/racePayoutPresets");
+} = require("../../src/modules/races/constants/raceFinishReward");
+const { computeGradedPayouts } = require("../../src/modules/races/racePayoutPresets");
 
 // ---------------------------------------------------------------------------
 // Seeded daily/weekly finish rewards are MINTED, and both knobs respond to the

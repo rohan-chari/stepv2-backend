@@ -9,13 +9,13 @@ const {
   createTestUser,
 } = require("./setup");
 
-const { resolveExpiredRaces } = require("../../src/jobs/raceExpiry");
-const { completeRace } = require("../../src/commands/completeRace");
+const { resolveExpiredRaces } = require("../../src/modules/races/jobs/raceExpiry");
+const { completeRace } = require("../../src/modules/races/commands/completeRace");
 const {
   computeFinishRewardPool,
   computeFinishRewardPlaces,
-} = require("../../src/constants/raceFinishReward");
-const { computeGradedPayouts } = require("../../src/utils/racePayoutPresets");
+} = require("../../src/modules/races/constants/raceFinishReward");
+const { computeGradedPayouts } = require("../../src/modules/races/racePayoutPresets");
 
 // End-to-end coverage for the system-funded graded finish reward on the seeded
 // daily/weekly challenges (commit "graded top-50% finish rewards"). Real DB

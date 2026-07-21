@@ -3,7 +3,7 @@ const test = require("node:test");
 
 const {
   getEligiblePowerupPool,
-} = require("../../src/queries/getEligiblePowerupPool");
+} = require("../../src/modules/powerups/queries/getEligiblePowerupPool");
 
 // Leech + X-Ray (DEFENSE_SCAN) are store-only utility/attack powerups and must
 // NEVER be awarded from the daily box (Item 2) — a spinpowerups-but-not-powerups2

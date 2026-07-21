@@ -3,57 +3,52 @@ const cors = require("cors");
 const express = require("express");
 const compression = require("compression");
 
-const { createAuthRouter } = require("./routes/auth");
-const { createStepsRouter } = require("./routes/steps");
-const { createFriendsRouter } = require("./routes/friends");
-const { createAdminRouter } = require("./routes/admin");
-const { createNotificationsRouter } = require("./routes/notifications");
-const { createLeaderboardRouter } = require("./routes/leaderboard");
-const { createRankedRouter } = require("./routes/ranked");
-const { createRacesRouter } = require("./routes/races");
-const { createTournamentsRouter } = require("./routes/tournaments");
-const { createReferralsRouter } = require("./routes/referrals");
+const { createAuthRouter } = require("./modules/users");
+const { createStepsRouter } = require("./modules/steps");
+const { createFriendsRouter } = require("./modules/social");
+const { createAdminRouter } = require("./modules/admin");
+const { createNotificationsRouter } = require("./modules/notifications");
+const { createLeaderboardRouter } = require("./modules/leaderboard");
+const { createRankedRouter } = require("./modules/ranked");
+const { createRacesRouter } = require("./modules/races");
+const { createTournamentsRouter } = require("./modules/tournaments");
+const { createReferralsRouter } = require("./modules/social");
 const { createShopRouter } = require("./routes/shop");
-const { createPowerupsRouter } = require("./routes/powerups");
-const { createDailyRewardRouter } = require("./routes/dailyReward");
-const { createCoinsRouter } = require("./routes/coins");
-const { createStepMilestonesRouter } = require("./routes/stepMilestones");
+const { createPowerupsRouter } = require("./modules/powerups");
+const { createDailyRewardRouter } = require("./modules/economy");
+const { createCoinsRouter } = require("./modules/economy");
+const { createStepMilestonesRouter } = require("./modules/steps");
 const { createTutorialRouter } = require("./routes/tutorial");
 const { createOnboardingRouter } = require("./routes/onboarding");
-const { createAnalyticsRouter } = require("./routes/analytics");
-const { createHomeRouter } = require("./routes/home");
+const { createAnalyticsRouter } = require("./modules/analytics");
+const { createHomeRouter } = require("./modules/home");
 const { createAppVersionRouter } = require("./routes/appVersion");
-const { createAdsRouter } = require("./routes/ads");
+const { createAdsRouter } = require("./modules/economy");
 const { extractTimezone } = require("./middleware/extractTimezone");
-const { extractClientFeatures } = require("./utils/clientFeatures");
-const sharing = require("./config/sharing");
+const { extractClientFeatures } = require("./shared/middleware/clientFeatures");
 const {
   buildAppleAppSiteAssociation,
   buildAssetLinks,
-} = require("./web/deepLinkFiles");
-const {
   renderRaceLandingPage,
   renderRaceNotFoundPage,
-} = require("./web/raceLandingPage");
-const {
   renderReferralLandingPage,
   renderReferralNotFoundPage,
-} = require("./web/referralLandingPage");
-const {
   renderTournamentLandingPage,
   renderTournamentNotFoundPage,
-} = require("./web/tournamentLandingPage");
+  sharing,
+} = require("./modules/web");
 const {
   getSharedRacePreview: defaultGetSharedRacePreview,
-} = require("./queries/getSharedRacePreview");
+} = require("./modules/races");
 const {
   getReferralPreview: defaultGetReferralPreview,
-} = require("./queries/getReferralPreview");
+} = require("./modules/social");
 const {
   looksLikeReferralCode,
   normalizeReferralCode,
-} = require("./lib/referralCode");
+} = require("./shared/lib/referralCode");
 const { prisma: defaultPrisma } = require("./db");
+const { errorMiddleware } = require("./shared/http/errorMiddleware");
 
 function createApp(dependencies = {}) {
   const app = express();
@@ -112,7 +107,7 @@ function createApp(dependencies = {}) {
   app.use("/home", createHomeRouter(dependencies));
   app.use("/app-version", createAppVersionRouter(dependencies));
   // Unauthenticated by design: Google's AdMob SSV callback, trusted via its
-  // ECDSA signature (see routes/ads.js).
+  // ECDSA signature (see modules/economy/routes/ads.js).
   app.use("/ads", createAdsRouter(dependencies));
 
   app.get("/health", (req, res) => {
@@ -221,7 +216,7 @@ function createApp(dependencies = {}) {
   // the tournament custom-scheme deep link (bara://tournament/<token>).
   const getSharedTournamentPreview =
     dependencies.getSharedTournamentPreview ||
-    require("./queries/getSharedTournamentPreview").getSharedTournamentPreview;
+    require("./modules/tournaments/queries/getSharedTournamentPreview").getSharedTournamentPreview;
   app.get("/t/:token", async (req, res) => {
     const token = req.params.token;
     const links = {
@@ -286,6 +281,10 @@ function createApp(dependencies = {}) {
   app.get("/app-ads.txt", (req, res) =>
     res.type("text/plain").sendFile(path.join(publicDir, "app-ads.txt"))
   );
+
+  // Central error handler — must be mounted LAST so every route/middleware
+  // above can rely on next(err) (see shared/http/errorMiddleware.js).
+  app.use(errorMiddleware);
 
   return app;
 }

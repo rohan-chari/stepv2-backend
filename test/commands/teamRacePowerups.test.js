@@ -1,8 +1,8 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { buildUsePowerup } = require("../../src/commands/usePowerup");
-const { buildOpenMysteryBox } = require("../../src/commands/openMysteryBox");
-const { triggerTrailMines } = require("../../src/services/raceStateResolution");
+const { buildUsePowerup } = require("../../src/modules/powerups/commands/usePowerup");
+const { buildOpenMysteryBox } = require("../../src/modules/powerups/commands/openMysteryBox");
+const { triggerTrailMines } = require("../../src/modules/races/services/raceStateResolution");
 
 // ---------------------------------------------------------------------------
 // Team-aware powerups (TR-650s) + forfeit interactions (TR-602/657)

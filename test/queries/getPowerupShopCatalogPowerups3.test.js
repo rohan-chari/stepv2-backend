@@ -3,12 +3,12 @@ const test = require("node:test");
 
 const {
   buildGetPowerupShopCatalog,
-} = require("../../src/queries/getPowerupShopCatalog");
-const { getEligiblePowerupPool } = require("../../src/queries/getEligiblePowerupPool");
+} = require("../../src/modules/powerups/queries/getPowerupShopCatalog");
+const { getEligiblePowerupPool } = require("../../src/modules/powerups/queries/getEligiblePowerupPool");
 const {
   POWERUPS2_GATED_TYPES,
   POWERUPS3_GATED_TYPES,
-} = require("../../src/constants/powerupGating");
+} = require("../../src/modules/powerups/constants/powerupGating");
 
 // ---------------------------------------------------------------------------
 // `powerups3` gating (§9.2). Two INDEPENDENT, layered gates keep the new store

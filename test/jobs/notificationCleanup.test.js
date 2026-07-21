@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildCleanupNotifications } = require("../../src/jobs/notificationCleanup");
+const { buildCleanupNotifications } = require("../../src/modules/notifications/notificationCleanup");
 
 // 4:05pm ET would be before 1am, so use early-morning ET for the "should run" case.
 const ONE_AM_ET = new Date("2026-06-25T05:10:00Z"); // 1:10am EDT

@@ -5,7 +5,7 @@ const {
   leechRatio,
   computeLeechEarnedTransfer,
   applyLeechTransfers,
-} = require("../../src/utils/leechTransfers");
+} = require("../../src/modules/powerups/leechTransfers");
 
 // A uniform-rate step model over [winStart, winEnd] for one user.
 function uniformModel(stepsByUser, winStart, winEnd) {

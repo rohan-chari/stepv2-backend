@@ -1,8 +1,8 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { computeSeasonRp } = require("../../src/services/rankedPoints");
-const { computeStandings } = require("../../src/services/rankedStandings");
+const { computeSeasonRp } = require("../../src/modules/ranked/services/rankedPoints");
+const { computeStandings } = require("../../src/modules/ranked/services/rankedStandings");
 
 // Build a Date at UTC midnight for a YYYY-MM-DD day (matches Step.date storage).
 function d(day) {

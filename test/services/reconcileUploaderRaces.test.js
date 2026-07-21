@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const {
   buildReconcileUploaderRaces,
-} = require("../../src/services/reconcileUploaderRaces");
+} = require("../../src/modules/races/services/reconcileUploaderRaces");
 
 const NOW = new Date("2026-07-17T18:00:00.000Z");
 

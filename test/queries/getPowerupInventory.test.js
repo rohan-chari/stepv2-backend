@@ -3,10 +3,10 @@ const test = require("node:test");
 
 const {
   buildGetPowerupInventory,
-} = require("../../src/queries/getPowerupInventory");
+} = require("../../src/modules/powerups/queries/getPowerupInventory");
 const {
   buildGetPowerupShopCatalog,
-} = require("../../src/queries/getPowerupShopCatalog");
+} = require("../../src/modules/powerups/queries/getPowerupShopCatalog");
 
 // ---------------------------------------------------------------------------
 // GET /powerups/inventory → the user's UserPowerupItem rows (powerupType +

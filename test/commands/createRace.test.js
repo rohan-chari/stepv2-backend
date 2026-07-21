@@ -4,7 +4,7 @@ const test = require("node:test");
 const {
   buildCreateRace,
   RaceCreationError,
-} = require("../../src/commands/createRace");
+} = require("../../src/modules/races/commands/createRace");
 
 function makeDeps(overrides = {}) {
   const events = [];

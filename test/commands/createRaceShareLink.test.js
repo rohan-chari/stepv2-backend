@@ -4,7 +4,7 @@ const test = require("node:test");
 const {
   buildCreateRaceShareLink,
   RaceShareLinkError,
-} = require("../../src/commands/createRaceShareLink");
+} = require("../../src/modules/races/commands/createRaceShareLink");
 
 function makeRace(overrides = {}) {
   return {

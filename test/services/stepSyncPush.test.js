@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildStepSyncPushService } = require("../../src/services/stepSyncPush");
+const { buildStepSyncPushService } = require("../../src/shared/push/stepSyncPush");
 
 test("requestStepSyncForUsers sends a silent push for stale users outside the cooldown", async () => {
   const sentNotifications = [];

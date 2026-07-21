@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { buildOpenMysteryBox } = require("../../src/commands/openMysteryBox");
+const { buildOpenMysteryBox } = require("../../src/modules/powerups/commands/openMysteryBox");
 
 function makeDeps(overrides = {}) {
   const events = [];

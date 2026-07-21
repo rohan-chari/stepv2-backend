@@ -1,11 +1,11 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildClaimAdCoinReward } = require("../../src/commands/claimAdCoinReward");
+const { buildClaimAdCoinReward } = require("../../src/modules/economy/commands/claimAdCoinReward");
 const {
   AD_COIN_REWARD_AMOUNT,
   AD_COIN_REWARD_DAILY_CAP,
-} = require("../../src/config/adRewards");
+} = require("../../src/modules/economy/adRewards");
 
 function todayLocal() {
   return new Date().toISOString().slice(0, 10);

@@ -1,7 +1,7 @@
 const { Router } = require("express");
 const { prisma: defaultPrisma } = require("../db");
 const { buildRequireAuth } = require("../middleware/requireAuth");
-const { awardCoins: defaultAwardCoins } = require("../commands/awardCoins");
+const { awardCoins: defaultAwardCoins } = require("../shared/economy/awardCoins");
 
 const STARTER_REWARD_COINS = 100;
 // Deliberately identical to the legacy tutorial grant. Together with refId=userId

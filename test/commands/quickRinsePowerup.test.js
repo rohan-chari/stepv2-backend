@@ -4,7 +4,7 @@ const test = require("node:test");
 const {
   buildUsePowerup,
   PowerupUseError,
-} = require("../../src/commands/usePowerup");
+} = require("../../src/modules/powerups/commands/usePowerup");
 
 // ---------------------------------------------------------------------------
 // QUICK RINSE (§8) — store-only, SELF-ONLY, instantaneous. It HALVES the

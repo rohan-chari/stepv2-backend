@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildEditRace } = require("../../src/commands/editRace");
+const { buildEditRace } = require("../../src/modules/races/commands/editRace");
 
 // Minimal fake models around a mutable race row + participant list.
 function makeDeps({ race, participants = [] } = {}) {

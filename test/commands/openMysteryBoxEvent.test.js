@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { buildOpenMysteryBox } = require("../../src/commands/openMysteryBox");
+const { buildOpenMysteryBox } = require("../../src/modules/powerups/commands/openMysteryBox");
 
 // Item 9: opening an in-race mystery box on the NORMAL path must persist a
 // MYSTERY_BOX_OPENED RacePowerupEvent (actorUserId + createdAt) so the admin

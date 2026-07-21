@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { buildGetPublicRaces } = require("../../src/queries/getPublicRaces");
-const { buildGetPublicRaceCount } = require("../../src/queries/getPublicRaceCount");
+const { buildGetPublicRaces } = require("../../src/modules/races/queries/getPublicRaces");
+const { buildGetPublicRaceCount } = require("../../src/modules/races/queries/getPublicRaceCount");
 
 // One shared fixture set of "already-visible-by-where-clause" public races
 // (findPublicPending's SQL where already filtered isPublic/status/review/seeded-

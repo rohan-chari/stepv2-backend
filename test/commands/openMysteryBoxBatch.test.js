@@ -3,7 +3,7 @@ const test = require("node:test");
 
 const {
   buildOpenMysteryBoxBatch,
-} = require("../../src/commands/openMysteryBoxBatch");
+} = require("../../src/modules/powerups/commands/openMysteryBoxBatch");
 
 // ---------------------------------------------------------------------------
 // "Open All Boxes" batch command (Item 1). Opens the explicit slot boxes the

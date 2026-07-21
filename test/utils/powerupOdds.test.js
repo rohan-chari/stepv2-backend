@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { rollPowerup, interpolateOdds, RARITY_TIERS } = require("../../src/utils/powerupOdds");
+const { rollPowerup, interpolateOdds, RARITY_TIERS } = require("../../src/modules/powerups/powerupOdds");
 
 test("rollPowerup returns a valid type and rarity", () => {
   const result = rollPowerup(1, 4);

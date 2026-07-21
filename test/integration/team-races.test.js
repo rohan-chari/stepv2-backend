@@ -1,8 +1,8 @@
 const assert = require("node:assert/strict");
 const { describe, it, before, beforeEach } = require("node:test");
 const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
-const { resolveExpiredRaces } = require("../../src/jobs/raceExpiry");
-const { appSettings } = require("../../src/services/appSettings");
+const { resolveExpiredRaces } = require("../../src/modules/races/jobs/raceExpiry");
+const { appSettings } = require("../../src/shared/config/appSettings");
 
 // End-to-end Team Race Mode lifecycle against the local test DB:
 // create (TR-101..107) → gating (TR-702/703/706/707) → join/sides (TR-200s) →

@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildEnsureAppleUser } = require("../../src/services/ensureAppleUser");
+const { buildEnsureAppleUser } = require("../../src/modules/users/services/ensureAppleUser");
 
 function makeUserModel({ takenOnFirstLookup = false } = {}) {
   let nextId = 1;

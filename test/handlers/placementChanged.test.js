@@ -3,7 +3,7 @@ const test = require("node:test");
 
 const {
   registerNotificationHandlers,
-} = require("../../src/handlers/notificationHandlers");
+} = require("../../src/modules/notifications/notificationHandlers");
 
 function createMockEventBus() {
   const handlers = new Map();

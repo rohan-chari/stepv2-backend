@@ -5,8 +5,8 @@ const test = require("node:test");
 // and re-require getRaces (same monkey-patch pattern as awardCoins.test.js) so
 // we can assert the completed-bucket myResultsSeen flag without a real DB.
 function withMockedRaces(races, fn) {
-  const raceModule = require("../../src/models/race");
-  const powerupModule = require("../../src/models/racePowerup");
+  const raceModule = require("../../src/modules/races/models/race");
+  const powerupModule = require("../../src/modules/powerups/models/racePowerup");
   const originalRace = raceModule.Race;
   const originalPowerup = powerupModule.RacePowerup;
 
@@ -18,13 +18,13 @@ function withMockedRaces(races, fn) {
   });
 
   try {
-    delete require.cache[require.resolve("../../src/queries/getRaces")];
-    const mod = require("../../src/queries/getRaces");
+    delete require.cache[require.resolve("../../src/modules/races/queries/getRaces")];
+    const mod = require("../../src/modules/races/queries/getRaces");
     return fn(mod);
   } finally {
     Object.assign(raceModule, { Race: originalRace });
     Object.assign(powerupModule, { RacePowerup: originalPowerup });
-    delete require.cache[require.resolve("../../src/queries/getRaces")];
+    delete require.cache[require.resolve("../../src/modules/races/queries/getRaces")];
   }
 }
 

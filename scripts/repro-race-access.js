@@ -3,11 +3,11 @@
 require("dotenv").config();
 process.env.DATABASE_URL = process.env.PROD_DATABASE_URL;
 
-const { getRaceDetails } = require("../src/queries/getRaceDetails");
-const { getRaceProgress } = require("../src/queries/getRaceProgress");
-const { getRaceInventory } = require("../src/queries/getRaceInventory");
-const { getRaceFeed } = require("../src/queries/getRaceFeed");
-const { getRaceMessages } = require("../src/queries/getRaceMessages");
+const { getRaceDetails } = require("../src/modules/races/queries/getRaceDetails");
+const { getRaceProgress } = require("../src/modules/races/queries/getRaceProgress");
+const { getRaceInventory } = require("../src/modules/powerups/queries/getRaceInventory");
+const { getRaceFeed } = require("../src/modules/races/queries/getRaceFeed");
+const { getRaceMessages } = require("../src/modules/social/queries/getRaceMessages");
 
 const [, , userId, raceId, tz = "America/New_York"] = process.argv;
 

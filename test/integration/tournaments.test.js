@@ -1,11 +1,11 @@
 const assert = require("node:assert/strict");
 const { describe, it, before, after, beforeEach } = require("node:test");
 const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
-const { completeRace } = require("../../src/commands/completeRace");
+const { completeRace } = require("../../src/modules/races/commands/completeRace");
 const {
   renewTournamentSeeds,
-} = require("../../src/jobs/tournamentSeedRenewal");
-const { appSettings } = require("../../src/services/appSettings");
+} = require("../../src/modules/tournaments/jobs/tournamentSeedRenewal");
+const { appSettings } = require("../../src/shared/config/appSettings");
 
 let server;
 let nextAppleId = 0;

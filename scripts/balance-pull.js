@@ -1,6 +1,6 @@
 require("dotenv").config();
 const { prisma } = require("../src/db");
-const { writeSnapshot, SNAPSHOT_FILE } = require("../src/services/balanceSnapshot");
+const { writeSnapshot, SNAPSHOT_FILE } = require("../src/modules/economy/balanceSnapshot");
 
 // DB -> data/balance-config.json. Mirrors scripts/cosmetics-pull.js.
 //

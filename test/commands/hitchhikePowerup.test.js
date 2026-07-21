@@ -4,13 +4,13 @@ const test = require("node:test");
 const {
   buildUsePowerup,
   PowerupUseError,
-} = require("../../src/commands/usePowerup");
+} = require("../../src/modules/powerups/commands/usePowerup");
 
 // ---------------------------------------------------------------------------
 // HITCHHIKE (§7) — store-only, TARGETED, 60-minute 1:1 raw-step COPY. Using it
 // parks a HITCHHIKE effect on the chosen rival (targetUserId = the walked-on
 // racer, sourceUserId = the hitchhiker). The copy itself is scored later from
-// the TARGET's in-window steps (src/utils/hitchhikeCopies.js) — not here.
+// the TARGET's in-window steps (src/modules/powerups/hitchhikeCopies.js) — not here.
 //
 // Socks/Mirror behavior is achieved by LIST MEMBERSHIP alone (§7.2):
 //   OFFENSIVE_TYPES  => Compression Socks blocks it

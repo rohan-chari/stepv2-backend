@@ -4,7 +4,7 @@ const test = require("node:test");
 const {
   buildAutoStartScheduledRaces,
   selectRacesToAutoStart,
-} = require("../../src/jobs/autoStartScheduledRaces");
+} = require("../../src/modules/races/jobs/autoStartScheduledRaces");
 
 // ---------------------------------------------------------------------------
 // 1.1.7 — auto-start scheduled races cron job. Runs on the same 5-minute cadence

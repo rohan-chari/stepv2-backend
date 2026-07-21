@@ -24,7 +24,7 @@ const test = require("node:test");
 
 const {
   computeGlobalEventBoost,
-} = require("../../src/utils/globalStepEvent");
+} = require("../../src/modules/steps/globalStepEvent");
 
 // A sliced-sum step model identical in behavior to the real StepSample +
 // raceStateResolution test doubles: prorate each sample's steps by the fraction

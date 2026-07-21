@@ -17,12 +17,12 @@ function withMockPrisma(mockPrisma, fn) {
   const originalPrisma = dbModule.prisma;
   Object.assign(dbModule, { prisma: mockPrisma });
   try {
-    delete require.cache[require.resolve("../../src/queries/getLeaderboard")];
-    const mod = require("../../src/queries/getLeaderboard");
+    delete require.cache[require.resolve("../../src/modules/leaderboard/getLeaderboard")];
+    const mod = require("../../src/modules/leaderboard/getLeaderboard");
     return fn(mod);
   } finally {
     Object.assign(dbModule, { prisma: originalPrisma });
-    delete require.cache[require.resolve("../../src/queries/getLeaderboard")];
+    delete require.cache[require.resolve("../../src/modules/leaderboard/getLeaderboard")];
   }
 }
 

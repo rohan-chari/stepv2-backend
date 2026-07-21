@@ -23,7 +23,7 @@ const { prisma } = require("../src/db");
 const {
   normalizeToCharset,
   DISPLAY_NAME_MIN_LENGTH,
-} = require("../src/lib/displayNameValidator");
+} = require("../src/shared/lib/displayNameValidator");
 
 // Build a set of all existing display names (lowercased) so we can detect
 // collisions without hammering the DB per candidate.

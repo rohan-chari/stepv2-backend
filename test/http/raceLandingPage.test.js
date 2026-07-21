@@ -4,7 +4,7 @@ const test = require("node:test");
 const {
   renderRaceLandingPage,
   renderRaceNotFoundPage,
-} = require("../../src/web/raceLandingPage");
+} = require("../../src/modules/web/raceLandingPage");
 
 function makePreview(overrides = {}) {
   return {

@@ -3,7 +3,7 @@ const http = require("node:http");
 const test = require("node:test");
 
 const { createApp } = require("../../src/app");
-const { DailyRewardError } = require("../../src/commands/claimDailyReward");
+const { DailyRewardError } = require("../../src/modules/economy/commands/claimDailyReward");
 
 // Watch-ad-for-coins (Get Coins hub):
 //   GET  /daily-reward/status       -> additive adCoinReward block, ONLY for

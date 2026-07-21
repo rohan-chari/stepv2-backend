@@ -3,7 +3,7 @@ const test = require("node:test");
 
 const {
   computeNextLoginStreak,
-} = require("../../src/queries/getDailyRewardStatus");
+} = require("../../src/modules/economy/queries/getDailyRewardStatus");
 
 test("first ever claim starts streak at 1", () => {
   assert.equal(computeNextLoginStreak(null, 0, 0, "2026-06-10"), 1);

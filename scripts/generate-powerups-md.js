@@ -1,6 +1,6 @@
 const fs = require("node:fs");
 const path = require("node:path");
-const { snapshotConfig } = require("../src/services/balanceSnapshot");
+const { snapshotConfig } = require("../src/modules/economy/balanceSnapshot");
 
 // Regenerates the BALANCE-DERIVED section of POWERUPS.md from the committed
 // balance snapshot (falling back to code defaults).

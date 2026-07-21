@@ -7,7 +7,7 @@ const {
   signSessionToken,
   verifySessionToken,
   SessionTokenError,
-} = require("../../src/services/sessionToken");
+} = require("../../src/modules/users/services/sessionToken");
 
 test("signSessionToken returns a JWT string", () => {
   const token = signSessionToken({ userId: "user-1", appleId: "apple-123" });

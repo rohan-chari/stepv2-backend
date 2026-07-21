@@ -272,7 +272,7 @@ describe("daily reward box (v2)", () => {
     // instead exercise the command directly with a pinned rng.
     const {
       claimDailyRewardBox,
-    } = require("../../src/commands/claimDailyRewardBox");
+    } = require("../../src/modules/economy/commands/claimDailyRewardBox");
     const result = await claimDailyRewardBox({
       userId: user.userId,
       localDate: todayLocal(),
@@ -311,7 +311,7 @@ describe("daily reward box (v2)", () => {
     // The claim roll uses the same folded odds: even a max roll can't land RARE.
     const {
       claimDailyRewardBox,
-    } = require("../../src/commands/claimDailyRewardBox");
+    } = require("../../src/modules/economy/commands/claimDailyRewardBox");
     const result = await claimDailyRewardBox({
       userId: user.userId,
       localDate: todayLocal(),

@@ -4,7 +4,7 @@ const test = require("node:test");
 const {
   buildUsePowerup,
   PowerupUseError,
-} = require("../../src/commands/usePowerup");
+} = require("../../src/modules/powerups/commands/usePowerup");
 
 // ---------------------------------------------------------------------------
 // POCKET WATCH (§6) — two modes on ONE endpoint.

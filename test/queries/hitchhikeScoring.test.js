@@ -3,11 +3,11 @@ const test = require("node:test");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const { buildGetRaceProgress } = require("../../src/queries/getRaceProgress");
+const { buildGetRaceProgress } = require("../../src/modules/races/queries/getRaceProgress");
 const {
   buildResolveRaceState,
-} = require("../../src/services/raceStateResolution");
-const { computeBoxEffectiveSteps } = require("../../src/utils/boxSteps");
+} = require("../../src/modules/races/services/raceStateResolution");
+const { computeBoxEffectiveSteps } = require("../../src/modules/powerups/boxSteps");
 
 // ---------------------------------------------------------------------------
 // HITCHHIKE end-to-end scoring (§7.3) and the LIVE/SETTLEMENT PARITY GUARD.
@@ -376,7 +376,7 @@ function discoverLeechAssemblySites() {
   const srcRoot = path.join(__dirname, "..", "..", "src");
   const EXCLUDED = new Set([
     // Defines applyLeechTransfers; not an assembly site.
-    path.join(srcRoot, "utils", "leechTransfers.js"),
+    path.join(srcRoot, "modules", "powerups", "leechTransfers.js"),
     // Defines applyHitchhikeCopies; not an assembly site.
     path.join(srcRoot, "utils", "hitchhikeCopies.js"),
   ]);

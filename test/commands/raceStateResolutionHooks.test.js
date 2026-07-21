@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildUsePowerup } = require("../../src/commands/usePowerup");
+const { buildUsePowerup } = require("../../src/modules/powerups/commands/usePowerup");
 
 function makeParticipant(id, userId, displayName, overrides = {}) {
   return {

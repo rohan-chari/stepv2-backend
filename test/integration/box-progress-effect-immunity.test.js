@@ -1,7 +1,7 @@
 // Integration tests: "steps until next box" must track RAW WALKED STEPS only.
 // Runner's High, Wrong Turn (and the 2x global step event) move the LEADERBOARD
 // total, but they must never move the box countdown or the box-mint gate
-// (computeBoxEffectiveSteps in src/utils/boxSteps.js).
+// (computeBoxEffectiveSteps in src/modules/powerups/boxSteps.js).
 const assert = require("node:assert/strict");
 const { describe, it, before, after, beforeEach } = require("node:test");
 const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");

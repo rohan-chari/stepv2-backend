@@ -3,7 +3,7 @@ const test = require("node:test");
 
 const {
   getEligiblePowerupPool,
-} = require("../../src/queries/getEligiblePowerupPool");
+} = require("../../src/modules/powerups/queries/getEligiblePowerupPool");
 
 // Fake PowerupShopItem model: records the channel it was queried with and
 // returns a fixed active catalog (the real testOnly filter is exercised by the

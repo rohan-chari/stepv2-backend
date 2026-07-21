@@ -1,9 +1,9 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { buildGetRaceProgress } = require("../../src/queries/getRaceProgress");
+const { buildGetRaceProgress } = require("../../src/modules/races/queries/getRaceProgress");
 const {
   buildResolveRaceState,
-} = require("../../src/services/raceStateResolution");
+} = require("../../src/modules/races/services/raceStateResolution");
 
 // ===========================================================================
 // BUG 1: Race step undercount.

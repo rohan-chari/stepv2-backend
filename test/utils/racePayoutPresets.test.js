@@ -5,7 +5,7 @@ const {
   RACE_PAYOUT_PRESETS,
   computeRacePayouts,
   isRacePayoutPresetCompatible,
-} = require("../../src/utils/racePayoutPresets");
+} = require("../../src/modules/races/racePayoutPresets");
 
 test("computeRacePayouts gives the full pot to first for winner takes all", () => {
   assert.deepEqual(

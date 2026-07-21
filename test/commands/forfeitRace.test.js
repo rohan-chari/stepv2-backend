@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildForfeitRace } = require("../../src/commands/forfeitRace");
+const { buildForfeitRace } = require("../../src/modules/races/commands/forfeitRace");
 
 function member(userId, team, overrides = {}) {
   return {

@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildComputeRanks } = require("../../src/jobs/computeRanks");
+const { buildComputeRanks } = require("../../src/modules/ranked/jobs/computeRanks");
 
 const FIXED_NOW = new Date("2026-06-15T12:00:00Z");
 const SILENT = { log() {}, error() {} };

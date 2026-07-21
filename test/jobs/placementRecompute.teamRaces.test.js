@@ -3,7 +3,7 @@ const test = require("node:test");
 
 const {
   buildRecomputePlacements,
-} = require("../../src/jobs/placementRecompute");
+} = require("../../src/modules/races/jobs/placementRecompute");
 
 // Team-race notification evaluation inside the placement recompute cron:
 // TR-681 (lead change, armed only when both teams > 0), TR-682 (final-stretch

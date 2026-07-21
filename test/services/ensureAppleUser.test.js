@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildEnsureAppleUser } = require("../../src/services/ensureAppleUser");
+const { buildEnsureAppleUser } = require("../../src/modules/users/services/ensureAppleUser");
 
 test("creates a new user and emits registration events when the Apple user is missing", async () => {
   const events = [];

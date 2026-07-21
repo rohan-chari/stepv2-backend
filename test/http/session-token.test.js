@@ -3,7 +3,7 @@ const http = require("node:http");
 const test = require("node:test");
 
 const { createApp } = require("../../src/app");
-const { signSessionToken } = require("../../src/services/sessionToken");
+const { signSessionToken } = require("../../src/modules/users/services/sessionToken");
 
 async function startServer(dependencies = {}) {
   const app = createApp(dependencies);

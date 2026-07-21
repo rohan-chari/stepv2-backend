@@ -1,13 +1,13 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildJoinRaceCore } = require("../../src/commands/joinRaceCore");
+const { buildJoinRaceCore } = require("../../src/modules/races/commands/joinRaceCore");
 const {
   buildJoinPublicRace,
-} = require("../../src/commands/joinPublicRace");
+} = require("../../src/modules/races/commands/joinPublicRace");
 const {
   buildRespondToRaceInvite,
-} = require("../../src/commands/respondToRaceInvite");
+} = require("../../src/modules/races/commands/respondToRaceInvite");
 
 const teamClient = new Set(["team_races"]);
 

@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildRollPowerup } = require("../../src/commands/rollPowerup");
+const { buildRollPowerup } = require("../../src/modules/powerups/commands/rollPowerup");
 
 function makeDeps(overrides = {}) {
   const events = [];

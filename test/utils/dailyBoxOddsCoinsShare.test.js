@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { rollRarePrizeKind } = require("../../src/utils/dailyBoxOdds");
+const { rollRarePrizeKind } = require("../../src/modules/economy/dailyBoxOdds");
 
 // Item 10: a tunable coins slice in the RARE roll (DAILY_SPIN_RARE_COINS_SHARE)
 // revives coin flow for high-streak / all-accessory users. The slice DISPLACES

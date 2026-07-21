@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { calculateBaseAdjusted } = require("../../src/services/raceStateResolution");
+const { calculateBaseAdjusted } = require("../../src/modules/races/services/raceStateResolution");
 
 const TZ = "America/New_York";
 

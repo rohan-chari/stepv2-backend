@@ -10,7 +10,7 @@ const {
   BEGIN,
   END,
 } = require("../../scripts/generate-powerups-md");
-const { defaultConfig } = require("../../src/services/balanceConfig.defaults");
+const { defaultConfig } = require("../../src/modules/economy/balanceConfig.defaults");
 
 // Test #20. POWERUPS.md rotted badly enough to advertise a 5% leader rare rate
 // against an actual 27% — this is the check that stops it happening again.

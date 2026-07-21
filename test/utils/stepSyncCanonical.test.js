@@ -5,7 +5,7 @@ const {
   validateIdempotencyKey,
   StepSyncValidationError,
   MAX_SAMPLES,
-} = require("../../src/utils/stepSyncCanonical");
+} = require("../../src/modules/steps/stepSyncCanonical");
 
 const baseSample = (over = {}) => ({
   periodStart: "2026-07-17T13:00:00.000Z",

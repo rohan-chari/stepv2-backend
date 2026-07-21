@@ -4,10 +4,10 @@ const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
 
 const {
   buildResolveRaceState,
-} = require("../../src/services/raceStateResolution");
+} = require("../../src/modules/races/services/raceStateResolution");
 const {
   buildRecomputePlacements,
-} = require("../../src/jobs/placementRecompute");
+} = require("../../src/modules/races/jobs/placementRecompute");
 
 // Regression coverage for the "you slipped to 2nd, but I'm still 1st" bug.
 //

@@ -4,7 +4,7 @@ const test = require("node:test");
 const {
   buildStartRace,
   RaceStartError,
-} = require("../../src/commands/startRace");
+} = require("../../src/modules/races/commands/startRace");
 
 // ---------------------------------------------------------------------------
 // 1.1.7 — scheduled race start. Manual start (POST /races/:raceId/start) must

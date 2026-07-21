@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { buildUsePowerup, PowerupUseError } = require("../../src/commands/usePowerup");
-const { buildExpireEffects } = require("../../src/commands/expireEffects");
+const { buildUsePowerup, PowerupUseError } = require("../../src/modules/powerups/commands/usePowerup");
+const { buildExpireEffects } = require("../../src/modules/powerups/commands/expireEffects");
 
 // ---------------------------------------------------------------------------
 // Compression Socks — self-only, shield that blocks the next offensive powerup

@@ -4,7 +4,7 @@ const test = require("node:test");
 const {
   buildRollPowerup,
   MAX_BOXES_PER_ROLL,
-} = require("../../src/commands/rollPowerup");
+} = require("../../src/modules/powerups/commands/rollPowerup");
 
 // ---------------------------------------------------------------------------
 // Per-sync grant cap.

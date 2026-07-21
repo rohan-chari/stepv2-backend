@@ -2,11 +2,11 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const http = require("node:http");
 const express = require("express");
-const { createStepsRouter } = require("../../src/routes/steps");
+const { createStepsRouter } = require("../../src/modules/steps/routes/steps");
 const {
   StepSyncValidationError,
-} = require("../../src/utils/stepSyncCanonical");
-const { StepSyncConflictError } = require("../../src/commands/recordStepSyncV2");
+} = require("../../src/modules/steps/stepSyncCanonical");
+const { StepSyncConflictError } = require("../../src/modules/steps/commands/recordStepSyncV2");
 
 const AUTH = (req, _res, next) => {
   req.user = { id: "user-1" };

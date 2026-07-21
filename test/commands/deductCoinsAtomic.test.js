@@ -9,11 +9,11 @@ function withMockPrisma(mockPrisma, fn) {
   const originalPrisma = dbModule.prisma;
   Object.assign(dbModule, { prisma: mockPrisma });
   try {
-    delete require.cache[require.resolve("../../src/commands/deductCoinsAtomic")];
+    delete require.cache[require.resolve("../../src/shared/economy/deductCoinsAtomic")];
     return fn();
   } finally {
     Object.assign(dbModule, { prisma: originalPrisma });
-    delete require.cache[require.resolve("../../src/commands/deductCoinsAtomic")];
+    delete require.cache[require.resolve("../../src/shared/economy/deductCoinsAtomic")];
   }
 }
 
@@ -41,7 +41,7 @@ test("deductCoinsAtomic: deducts coins, creates a CoinTransaction, returns new b
   };
 
   await withMockPrisma(mockPrisma, async () => {
-    const { deductCoinsAtomic } = require("../../src/commands/deductCoinsAtomic");
+    const { deductCoinsAtomic } = require("../../src/shared/economy/deductCoinsAtomic");
     const result = await deductCoinsAtomic({
       userId: "user-1",
       amount: 75,
@@ -88,7 +88,7 @@ test("deductCoinsAtomic: throws InsufficientCoinsError when updateMany matches 0
     const {
       deductCoinsAtomic,
       InsufficientCoinsError,
-    } = require("../../src/commands/deductCoinsAtomic");
+    } = require("../../src/shared/economy/deductCoinsAtomic");
 
     await assert.rejects(
       () =>
@@ -130,7 +130,7 @@ test("deductCoinsAtomic: amount=0 is a no-op (no update, no transaction record)"
   };
 
   await withMockPrisma(mockPrisma, async () => {
-    const { deductCoinsAtomic } = require("../../src/commands/deductCoinsAtomic");
+    const { deductCoinsAtomic } = require("../../src/shared/economy/deductCoinsAtomic");
     const result = await deductCoinsAtomic({
       userId: "user-1",
       amount: 0,
@@ -146,7 +146,7 @@ test("deductCoinsAtomic: amount=0 is a no-op (no update, no transaction record)"
 
 test("deductCoinsAtomic: rejects negative amounts (must be a deduction, not a credit)", async () => {
   await withMockPrisma({}, async () => {
-    const { deductCoinsAtomic } = require("../../src/commands/deductCoinsAtomic");
+    const { deductCoinsAtomic } = require("../../src/shared/economy/deductCoinsAtomic");
     await assert.rejects(
       () =>
         deductCoinsAtomic({
@@ -191,7 +191,7 @@ test("deductCoinsAtomic: simulated concurrent deduction — second call sees cou
     const {
       deductCoinsAtomic,
       InsufficientCoinsError,
-    } = require("../../src/commands/deductCoinsAtomic");
+    } = require("../../src/shared/economy/deductCoinsAtomic");
 
     // First call succeeds
     const r1 = await deductCoinsAtomic({

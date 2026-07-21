@@ -21,7 +21,7 @@ const {
   collectRaceHitchhikeCopies,
   hitchhikeCreditBySourceUser,
   applyHitchhikeCopies,
-} = require("../../src/utils/hitchhikeCopies");
+} = require("../../src/modules/powerups/hitchhikeCopies");
 
 const T0 = new Date("2026-07-20T12:00:00Z");
 const T1 = new Date("2026-07-20T13:00:00Z"); // 60-min window end

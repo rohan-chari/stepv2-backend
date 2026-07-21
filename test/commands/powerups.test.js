@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { buildRollPowerup, DEFAULT_POWERUP_SLOTS } = require("../../src/commands/rollPowerup");
+const { buildRollPowerup, DEFAULT_POWERUP_SLOTS } = require("../../src/modules/powerups/commands/rollPowerup");
 
 // ---------------------------------------------------------------------------
 // General powerup tests — mystery box creation rules

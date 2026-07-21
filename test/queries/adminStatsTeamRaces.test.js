@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildGetAdminStats } = require("../../src/queries/getAdminStats");
+const { buildGetAdminStats } = require("../../src/modules/admin/getAdminStats");
 
 // Team-race adoption counters in the admin stats snapshot (spec §"admin
 // adoption counters"): created / completed totals + 7d, so we can watch the

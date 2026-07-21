@@ -4,7 +4,7 @@ const test = require("node:test");
 const {
   buildSendRaceMessage,
   RaceMessageError,
-} = require("../../src/commands/sendRaceMessage");
+} = require("../../src/modules/social/commands/sendRaceMessage");
 
 function makeRace(overrides = {}) {
   return {

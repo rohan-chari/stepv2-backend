@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { generateShareToken } = require("../../src/utils/shareToken");
+const { generateShareToken } = require("../../src/shared/lib/shareToken");
 
 test("generateShareToken returns a 32-char lowercase hex string", () => {
   const token = generateShareToken();

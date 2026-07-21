@@ -1,14 +1,14 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildGetPublicRaces } = require("../../src/queries/getPublicRaces");
+const { buildGetPublicRaces } = require("../../src/modules/races/queries/getPublicRaces");
 
 // ── getRaces (my races list) — TR-702 filtering + TR-806 team fields ────────
 // getRaces imports the Race + RacePowerup models directly; mock the modules and
 // re-require (same pattern as getRacesResultsSeen.test.js).
 function withMockedRaces(races, fn) {
-  const raceModule = require("../../src/models/race");
-  const powerupModule = require("../../src/models/racePowerup");
+  const raceModule = require("../../src/modules/races/models/race");
+  const powerupModule = require("../../src/modules/powerups/models/racePowerup");
   const originalRace = raceModule.Race;
   const originalPowerup = powerupModule.RacePowerup;
 
@@ -23,13 +23,13 @@ function withMockedRaces(races, fn) {
   });
 
   try {
-    delete require.cache[require.resolve("../../src/queries/getRaces")];
-    const mod = require("../../src/queries/getRaces");
+    delete require.cache[require.resolve("../../src/modules/races/queries/getRaces")];
+    const mod = require("../../src/modules/races/queries/getRaces");
     return fn(mod);
   } finally {
     Object.assign(raceModule, { Race: originalRace });
     Object.assign(powerupModule, { RacePowerup: originalPowerup });
-    delete require.cache[require.resolve("../../src/queries/getRaces")];
+    delete require.cache[require.resolve("../../src/modules/races/queries/getRaces")];
   }
 }
 

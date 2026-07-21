@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { computeGradedPayouts } = require("../../src/utils/racePayoutPresets");
+const { computeGradedPayouts } = require("../../src/modules/races/racePayoutPresets");
 
 test("computeGradedPayouts gives the whole pool to a solo finisher", () => {
   assert.deepEqual(computeGradedPayouts({ pool: 100, count: 1 }), [100]);

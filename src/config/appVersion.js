@@ -9,7 +9,7 @@
 // Versions released before the gate existed have no way to enforce this and will
 // only ever see the App Store / Play Store's own update prompt.
 
-const sharing = require("./sharing");
+const { sharing } = require("../modules/web");
 
 const MIN_SUPPORTED_VERSION =
   process.env.MIN_SUPPORTED_APP_VERSION || "0.0.0";

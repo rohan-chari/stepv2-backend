@@ -4,7 +4,7 @@ const test = require("node:test");
 const {
   buildAppleAppSiteAssociation,
   buildAssetLinks,
-} = require("../../src/web/deepLinkFiles");
+} = require("../../src/modules/web/deepLinkFiles");
 
 test("apple-app-site-association maps /r/* to the configured app id", () => {
   const aasa = buildAppleAppSiteAssociation({
