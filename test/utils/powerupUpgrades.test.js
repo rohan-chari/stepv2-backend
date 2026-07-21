@@ -75,10 +75,15 @@ test("upgradeCost: Common rarity (Protein Shake) — 5/15/45", () => {
   assert.equal(upgradeCost("PROTEIN_SHAKE", 3), 45);
 });
 
-test("upgradeCost: Common rarity (Shortcut) — 5/15/45", () => {
-  assert.equal(upgradeCost("SHORTCUT", 1), 5);
-  assert.equal(upgradeCost("SHORTCUT", 2), 15);
-  assert.equal(upgradeCost("SHORTCUT", 3), 45);
+// Shortcut moved COMMON -> RARE. It has always DROPPED from the RARE tier
+// (powerupOdds RARITY_TIERS) while pricing off the COMMON ladder, so it was the
+// strongest powerup in the game and also the cheapest to max (65 vs 195 coins) —
+// prod shows 190 upgrades / 9,210 coins, the single largest sink. Rarity is now
+// resolved from one canonical table, so cost follows the drop tier.
+test("upgradeCost: Rare rarity (Shortcut) — 15/45/135", () => {
+  assert.equal(upgradeCost("SHORTCUT", 1), 15);
+  assert.equal(upgradeCost("SHORTCUT", 2), 45);
+  assert.equal(upgradeCost("SHORTCUT", 3), 135);
 });
 
 test("upgradeCost: Common rarity (Detour Sign) — 5/15/45", () => {
@@ -97,10 +102,14 @@ test("upgradeCost: Common rarity (Trail Mix) — 5/15/45", () => {
 // upgradeCost — Uncommon rarity: 10/30/90
 // ---------------------------------------------------------------------------
 
-test("upgradeCost: Uncommon rarity (Runner's High) — 10/30/90", () => {
-  assert.equal(upgradeCost("RUNNERS_HIGH", 1), 10);
-  assert.equal(upgradeCost("RUNNERS_HIGH", 2), 30);
-  assert.equal(upgradeCost("RUNNERS_HIGH", 3), 90);
+// Runner's High moved UNCOMMON -> COMMON (cheaper). Like Pinecone Toss, it was
+// retiered in powerupOdds long ago but RARITY_BY_TYPE was never updated — prod
+// drop history shows both rarities on record (133 common / 479 uncommon), which
+// is what identified these as a half-finished migration rather than intent.
+test("upgradeCost: Common rarity (Runner's High) — 5/15/45", () => {
+  assert.equal(upgradeCost("RUNNERS_HIGH", 1), 5);
+  assert.equal(upgradeCost("RUNNERS_HIGH", 2), 15);
+  assert.equal(upgradeCost("RUNNERS_HIGH", 3), 45);
 });
 
 test("upgradeCost: Uncommon rarity (Leg Cramp) — 10/30/90", () => {

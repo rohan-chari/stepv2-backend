@@ -24,17 +24,28 @@ async function awardCoins({ userId, amount, reason, refId }) {
   }
 
   // Atomically create transaction record and update balance
-  const [, user] = await prisma.$transaction([
-    prisma.coinTransaction.create({
-      data: { userId, amount, reason, refId },
-    }),
-    prisma.user.update({
-      where: { id: userId },
-      data: { coins: { increment: amount } },
-    }),
-  ]);
+  try {
+    const [, user] = await prisma.$transaction([
+      prisma.coinTransaction.create({
+        data: { userId, amount, reason, refId },
+      }),
+      prisma.user.update({
+        where: { id: userId },
+        data: { coins: { increment: amount } },
+      }),
+    ]);
 
-  return { awarded: true, coins: user.coins };
+    return { awarded: true, coins: user.coins };
+  } catch (error) {
+    // The preflight read is an optimization, not the concurrency boundary. The
+    // unique ledger index is authoritative: if two devices claim together, one
+    // transaction wins and the other's balance increment is rolled back.
+    if (refId && error?.code === "P2002") {
+      const user = await prisma.user.findUnique({ where: { id: userId } });
+      return { awarded: false, coins: user?.coins ?? 0 };
+    }
+    throw error;
+  }
 }
 
 module.exports = { awardCoins };

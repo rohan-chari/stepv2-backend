@@ -1,13 +1,20 @@
-// NOTE: CAMPFIRE_REST is intentionally NOT generated anymore (1.1.7). Its enum
-// value and effect-resolution code are kept (old apps + in-flight effects still
-// resolve it), but it is no longer rolled into new mystery boxes.
-const RARITY_TIERS = {
-  COMMON: ["PROTEIN_SHAKE", "TRAIL_MIX", "DETOUR_SIGN", "RUNNERS_HIGH", "PINECONE_TOSS"],
-  UNCOMMON: ["LEG_CRAMP", "STEALTH_MODE", "WRONG_TURN"],
-  RARE: ["RED_CARD", "SECOND_WIND", "COMPRESSION_SOCKS", "FANNY_PACK", "LUCKY_HORSESHOE", "POCKET_WATCH", "TRAIL_MINE", "SNEAKY_SWAP", "SHORTCUT", "CLEANSE", "MIRROR"],
-};
+// Mystery-box roller. This module holds MECHANICS ONLY — every number it uses
+// (which types exist per tier, the position-odds curve, per-type weights) comes
+// from `services/balanceConfig`. Do not add a table here; a structural guard
+// test will fail if you do. See balanceConfig.defaults.js for why.
+//
+// NOTE: CAMPFIRE_REST and TRAIL_MAGNET are intentionally NOT generated anymore
+// (1.1.7). Their enum values and effect-resolution code are kept (old apps +
+// in-flight effects still resolve them), but they are absent from the config's
+// dropPool, so they never roll into a new mystery box.
+const { balanceConfig } = require("../services/balanceConfig");
+const { RARITIES } = require("../services/balanceConfig.defaults");
 
-const RARITY_ORDER = ["COMMON", "UNCOMMON", "RARE"];
+const RARITY_ORDER = RARITIES;
+
+function resolveConfig(config) {
+  return config || balanceConfig.getConfigSync();
+}
 
 function coerceMinRarity(rarity, minRarity) {
   if (!minRarity) return rarity;
@@ -17,30 +24,78 @@ function coerceMinRarity(rarity, minRarity) {
   return RARITY_ORDER[Math.max(rarityIndex, minIndex)];
 }
 
-// Position-based odds: [COMMON%, UNCOMMON%, RARE%]
-// Row 0 = leader (1st place), Row 1 = last place
-const ODDS_TABLE = {
-  first: [0.48, 0.25, 0.27],
-  last:  [0.20, 0.35, 0.45],
-};
-
-function interpolateOdds(normalizedPosition) {
-  // normalizedPosition: 0 = leader, 1 = last place
+// normalizedPosition: 0 = leader, 1 = last place. Everything between is a
+// straight linear interpolation of the two configured rows.
+function interpolateOdds(normalizedPosition, config) {
+  const { positionOdds } = resolveConfig(config);
   const t = Math.max(0, Math.min(1, normalizedPosition));
-  return [
-    ODDS_TABLE.first[0] + t * (ODDS_TABLE.last[0] - ODDS_TABLE.first[0]),
-    ODDS_TABLE.first[1] + t * (ODDS_TABLE.last[1] - ODDS_TABLE.first[1]),
-    ODDS_TABLE.first[2] + t * (ODDS_TABLE.last[2] - ODDS_TABLE.first[2]),
-  ];
+  return [0, 1, 2].map(
+    (i) => positionOdds.first[i] + t * (positionOdds.last[i] - positionOdds.first[i])
+  );
+}
+
+function normalizePosition(position, totalParticipants) {
+  return totalParticipants <= 1 ? 0.5 : (position - 1) / (totalParticipants - 1);
+}
+
+// Full [COMMON, UNCOMMON, RARE] distribution for a race slot — the same numbers
+// the roll below actually uses. Exposed so the player-facing odds display and
+// the roller can never drift apart.
+function rarityOddsForPosition(position, totalParticipants, config) {
+  return interpolateOdds(normalizePosition(position, totalParticipants), config);
+}
+
+function weightForType(type, config) {
+  const weight = resolveConfig(config).typeWeights?.[type];
+  return typeof weight === "number" && Number.isFinite(weight) && weight >= 0
+    ? weight
+    : 1;
+}
+
+// Weighted pick within an already-chosen tier.
+//
+// This replaces an older "roll uniformly, then re-roll RED_CARD 50% of the
+// time" hack with a straight weighted draw, which expresses the same intent
+// (RED_CARD half as likely as a uniform rare, the freed mass spread over the
+// rest of the tier) declaratively and generalises to any future per-type weight.
+function pickTypeFromPool(pool, rng, config) {
+  if (!pool || pool.length === 0) return null;
+  const weights = pool.map((type) => weightForType(type, config));
+  const total = weights.reduce((a, b) => a + b, 0);
+  if (total <= 0) return pool[Math.floor(rng() * pool.length)];
+  let roll = rng() * total;
+  for (let i = 0; i < pool.length; i++) {
+    roll -= weights[i];
+    if (roll < 0) return pool[i];
+  }
+  return pool[pool.length - 1];
+}
+
+// Probability of each individual TYPE for a given race slot: P(tier) times the
+// type's weighted share within that tier. Used by the player-facing odds sheet,
+// so what a player is shown is derived from the same tables the roll uses.
+function typeOddsForPosition(position, totalParticipants, config) {
+  const cfg = resolveConfig(config);
+  const rarityOdds = rarityOddsForPosition(position, totalParticipants, cfg);
+  const out = {};
+  RARITY_ORDER.forEach((rarity, tierIndex) => {
+    const pool = cfg.dropPool[rarity] || [];
+    const weights = pool.map((type) => weightForType(type, cfg));
+    const total = weights.reduce((a, b) => a + b, 0);
+    if (total <= 0) return;
+    pool.forEach((type, i) => {
+      out[type] = (out[type] || 0) + rarityOdds[tierIndex] * (weights[i] / total);
+    });
+  });
+  return out;
 }
 
 function rollPowerup(position, totalParticipants, rng = Math.random, options = {}) {
-  // position is 1-based rank (1 = leader)
-  const normalizedPosition = totalParticipants <= 1
-    ? 0.5
-    : (position - 1) / (totalParticipants - 1);
-
-  const [commonOdds, uncommonOdds] = interpolateOdds(normalizedPosition);
+  const config = resolveConfig(options.config);
+  const [commonOdds, uncommonOdds] = interpolateOdds(
+    normalizePosition(position, totalParticipants),
+    config
+  );
 
   const roll = rng();
   let rarity;
@@ -54,22 +109,26 @@ function rollPowerup(position, totalParticipants, rng = Math.random, options = {
 
   rarity = coerceMinRarity(rarity, options.minRarity);
 
-  const tierPowerups = RARITY_TIERS[rarity];
-  const typeIndex = Math.floor(rng() * tierPowerups.length);
-  let type = tierPowerups[typeIndex];
-
-  // Red Card nerf: RED_CARD is now HALF as likely as a uniform rare pick. When
-  // the uniform pick lands on RED_CARD, re-roll to a DIFFERENT rare 50% of the
-  // time. This halves red card exactly (1/11 -> 1/22 within the RARE tier) while
-  // keeping the position curve and the RARE tier's total probability intact; the
-  // freed mass spreads evenly across the other rares. RED_CARD only exists in the
-  // RARE tier, so the type check alone is sufficient.
-  if (type === "RED_CARD" && rng() < 0.5) {
-    const others = tierPowerups.filter((t) => t !== "RED_CARD");
-    type = others[Math.floor(rng() * others.length)];
-  }
-
+  const type = pickTypeFromPool(config.dropPool[rarity], rng, config);
   return { type, rarity };
 }
 
-module.exports = { rollPowerup, interpolateOdds, RARITY_TIERS, ODDS_TABLE, RARITY_ORDER };
+module.exports = {
+  rollPowerup,
+  interpolateOdds,
+  rarityOddsForPosition,
+  typeOddsForPosition,
+  pickTypeFromPool,
+  normalizePosition,
+  coerceMinRarity,
+  RARITY_ORDER,
+  // Legacy named exports, kept so existing callers and tests keep working. They
+  // are live VIEWS onto the active config, not tables — reading one is exactly
+  // equivalent to reading getConfigSync().
+  get RARITY_TIERS() {
+    return balanceConfig.getConfigSync().dropPool;
+  },
+  get ODDS_TABLE() {
+    return balanceConfig.getConfigSync().positionOdds;
+  },
+};

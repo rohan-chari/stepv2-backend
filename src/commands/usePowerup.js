@@ -6,6 +6,7 @@ const { Race } = require("../models/race");
 const { User } = require("../models/user");
 const { PowerupUpgradeEvent } = require("../models/powerupUpgradeEvent");
 const { eventBus } = require("../events/eventBus");
+const { balanceConfig } = require("../services/balanceConfig");
 const { POWERUP_NAMES } = require("./rollPowerup");
 const {
   resolveRaceState: defaultResolveRaceState,
@@ -40,8 +41,18 @@ const {
 // Socks block, and is listed in SHOP_POWERUP_TYPES so a Mirror NEVER reflects
 // it (parity with SIGNAL_JAMMER). Its effect is leecher-driven and scored in
 // getRaceProgress (each of the leecher's in-window steps removes one from the
-// victim, capped); the switch case here just parks the 30-min effect.
-const OFFENSIVE_TYPES = ["LEG_CRAMP", "RED_CARD", "SHORTCUT", "WRONG_TURN", "DETOUR_SIGN", "PINECONE_TOSS", "SNEAKY_SWAP", "SIGNAL_JAMMER", "LEECH"];
+// victim, capped); the switch case here just parks the effect for the
+// capability-versioned window (§7.5).
+// HITCHHIKE (§7) is a store-bought TARGETED link. It gets its Socks-blocks /
+// Mirror-never-reflects behavior purely by LIST MEMBERSHIP — OFFENSIVE_TYPES for
+// target resolution + enemy-only validation + the Compression Socks block,
+// SHOP_POWERUP_TYPES to skip the Mirror reflect pre-check, TARGETED_TYPES for the
+// shared targeting validation. There is deliberately NO hard-coded branch in the
+// style of the IMPOSTER one further down. Its effect is target-driven and scored
+// in src/utils/hitchhikeCopies.js (the caster COPIES the target's raw in-window
+// steps 1:1; the target loses nothing); the switch case here just parks the
+// 60-minute link.
+const OFFENSIVE_TYPES = ["LEG_CRAMP", "RED_CARD", "SHORTCUT", "WRONG_TURN", "DETOUR_SIGN", "PINECONE_TOSS", "SNEAKY_SWAP", "SIGNAL_JAMMER", "LEECH", "HITCHHIKE"];
 // The three coin-shop-only powerups (they exist ONLY via the powerup shop:
 // IMPOSTER, RAINSTORM, SIGNAL_JAMMER). Product rule: none of them can EVER be
 // reflected by a Mirror, but ALL of them can be blocked by Compression Socks.
@@ -50,14 +61,14 @@ const OFFENSIVE_TYPES = ["LEG_CRAMP", "RED_CARD", "SHORTCUT", "WRONG_TURN", "DET
 //   * SIGNAL_JAMMER stays in OFFENSIVE_TYPES → gets the single-target Socks block.
 //   * IMPOSTER gets a dedicated Socks block near its targeting validation.
 //   * RAINSTORM keeps its per-victim Socks branch (Mirror branch removed).
-const SHOP_POWERUP_TYPES = ["IMPOSTER", "RAINSTORM", "SIGNAL_JAMMER", "LEECH"];
+const SHOP_POWERUP_TYPES = ["IMPOSTER", "RAINSTORM", "SIGNAL_JAMMER", "LEECH", "HITCHHIKE"];
 // IMPOSTER is TARGETED (it needs a rival to swap leaderboard display with) but
 // it is deliberately NOT in OFFENSIVE_TYPES: it never touches the target's
 // participant/steps and applies onSelf (target stored in metadata). As a shop
 // powerup it can NEVER be reflected by a Mirror, but Compression Socks DOES
 // block it (a dedicated block near its targeting validation), so it is not
 // subject to the generic OFFENSIVE_TYPES Mirror pre-check.
-const TARGETED_TYPES = ["LEG_CRAMP", "SHORTCUT", "WRONG_TURN", "DETOUR_SIGN", "SNEAKY_SWAP", "IMPOSTER", "SIGNAL_JAMMER", "LEECH"];
+const TARGETED_TYPES = ["LEG_CRAMP", "SHORTCUT", "WRONG_TURN", "DETOUR_SIGN", "SNEAKY_SWAP", "IMPOSTER", "SIGNAL_JAMMER", "LEECH", "HITCHHIKE"];
 // Types Sneaky Swap can never steal: another Sneaky Swap (no steal chains) and
 // unopened Mystery Boxes. Mirrors the isStealable helper in routes/races.js.
 const UNSTEALABLE_TYPES = ["SNEAKY_SWAP", "MYSTERY_BOX"];
@@ -71,7 +82,7 @@ const RAINSTORM_DURATION_MS = 60 * 60 * 1000;
 const RAINSTORM_MULTIPLIER = 0.5;
 // SIGNAL_JAMMER is store-only and non-upgradeable, so its jam lasts a fixed 1h.
 const SIGNAL_JAMMER_DURATION_MS = 60 * 60 * 1000;
-// LEECH is store-only, non-upgradeable: a fixed 30-minute leech window. Scoring
+// LEECH is store-only and non-upgradeable. Scoring
 // is a 2:1 UNCAPPED transfer (§5) — every 2 steps the leecher walks in the window
 // mints 1 step drained from the victim and credited to the leecher, bounded only
 // by the victim's available balance. There is NO per-use cap. The conversion
@@ -79,11 +90,49 @@ const SIGNAL_JAMMER_DURATION_MS = 60 * 60 * 1000;
 // scorer (getRaceProgress) reads `ratio`, defaulting absent metadata to 2 — so a
 // future ratio change is data-only. A victim can be leeched by at most
 // LEECH_MAX_PER_VICTIM sources at once (gang-stall guard).
-const LEECH_DURATION_MS = 30 * 60 * 1000;
+//
+// DURATION IS CAPABILITY-VERSIONED (§7.5). The window is chosen from the
+// REQUEST's client features, never from the user's stored sticky union:
+//   * no `powerups3` (every frozen binary in the wild) => 30 min, exactly the
+//     duration that binary's own bundled copy describes.
+//   * `powerups3` => 60 min, matching Hitchhike. With the in-progress hour bucket
+//     excluded for monotonicity a 30-minute window usually closes before any
+//     bucket it depends on does, so a buyer sees zero effect for the powerup's
+//     whole life. In-flight rows are unaffected: they already carry a concrete
+//     expiresAt.
+const LEGACY_LEECH_DURATION_MS = 30 * 60 * 1000;
+const LEECH_DURATION_MS = 60 * 60 * 1000;
 const LEECH_RATIO = 2;
 const LEECH_SCORING_VERSION = 2;
 const LEECH_MAX_PER_VICTIM = 2;
+// HITCHHIKE (§7.1): store-only, non-upgradeable, fixed 60-minute window. The
+// caster COPIES the target's recorded raw steps at `copyRatio` (1:1) — the target
+// loses nothing. Metadata carries `{ copyRatio, scoringVersion }` and the scorer
+// reads copyRatio (defaulting to 1), so a rebalance is data-only. At most ONE
+// active link per caster AND one per target (§7.2): unlike Leech, Hitchhike is not
+// zero-sum, so concurrent links would compound.
+const HITCHHIKE_DURATION_MS = 60 * 60 * 1000;
+const HITCHHIKE_COPY_RATIO = 1;
+const HITCHHIKE_SCORING_VERSION = 1;
+const HITCHHIKE_MAX_PER_TARGET = 1;
+// QUICK_RINSE (§8): store-only, SELF-ONLY, instantaneous. Halves the REMAINING
+// duration of every active timed opponent-inflicted effect on the user. Never
+// touches self-buffs or untimed effects, and never expires a row outright — the
+// halved expiresAt is always > now, so nothing already scored is clawed back.
+const QUICK_RINSE_REDUCTION_FRACTION = 0.5;
+// Effect types the TARGETED Pocket Watch mode may extend (§6.1). Deliberately a
+// separate allowlist rather than a change to isPocketWatchExtendable, so the
+// legacy self-buff path stays bit-identical. HITCHHIKE is excluded on purpose.
+const POCKET_WATCH_TARGETABLE_TYPES = [
+  "LEG_CRAMP",
+  "WRONG_TURN",
+  "DETOUR_SIGN",
+  "SIGNAL_JAMMER",
+  "LEECH",
+  "RAINSTORM",
+];
 const SELF_ONLY_TYPES = [
+  "QUICK_RINSE",
   "COMPRESSION_SOCKS",
   "MIRROR",
   "CLEANSE",
@@ -120,6 +169,28 @@ function isPocketWatchExtendable(effect) {
     return effect.sourceUserId === effect.targetUserId;
   }
   return true;
+}
+
+// REQUEST-SCOPED capability read (§7.5). `clientFeatures` is whatever the route
+// stamped on the request (a Set today; an array is tolerated defensively). It is
+// NEVER the user's stored `clientFeatures` union — that column is sticky across
+// every device the user has ever authed from (requireAuth.js:41-70), so reading
+// it would silently upgrade a request made by a frozen binary.
+function requestHasFeature(clientFeatures, token) {
+  if (!clientFeatures) return false;
+  if (typeof clientFeatures.has === "function") return clientFeatures.has(token);
+  if (Array.isArray(clientFeatures)) return clientFeatures.includes(token);
+  return false;
+}
+
+// An effect row is a live timed effect when it is ACTIVE and still has a future
+// expiry. Rows whose expiresAt has passed but whose status hasn't been flipped by
+// lazy expiry yet are treated as gone.
+function isLiveTimedEffect(effect, nowDate) {
+  if (!effect) return false;
+  if (effect.status && effect.status !== "ACTIVE") return false;
+  if (!effect.expiresAt) return false;
+  return new Date(effect.expiresAt).getTime() > nowDate.getTime();
 }
 
 // Cleanse selector: an effect is "opponent-inflicted" (and therefore eligible
@@ -180,8 +251,26 @@ function adjacentParticipant(participants, participant, direction) {
   return null;
 }
 
-function luckyMinRarity(upgradeLevel) {
-  return upgradeLevel >= 3 ? "RARE" : "UNCOMMON";
+// Lucky Horseshoe rarity floor for the next mystery box.
+//
+// This used to be a binary cliff — `upgradeLevel >= 3 ? "RARE" : "UNCOMMON"` —
+// under which levels 1 and 2 were literal no-ops: a player paid 15 and then 45
+// coins and the outcome distribution did not change at all. It is now a
+// graduated chance from the balance config: roll against
+// `luckyHorseshoe.rareChanceByLevel[level]` and fall back to the UNCOMMON floor
+// on a miss. L0 is 0 (never rare) and L3 is 1.0 (always rare), so both ends of
+// the old behaviour are preserved exactly.
+//
+// FORWARD-ONLY: the roll happens at USE time and the result is frozen into the
+// effect's metadata (`minRarity`), so Horseshoes already in flight resolve on
+// the value they were created with. No migration, no recomputation of any
+// existing upgradeLevel.
+function luckyMinRarity(upgradeLevel, rng = Math.random, config) {
+  const ladder = (config || balanceConfig.getConfigSync()).luckyHorseshoe
+    .rareChanceByLevel;
+  const level = Math.max(0, Math.min(Math.floor(upgradeLevel || 0), ladder.length - 1));
+  const p = ladder[level];
+  return rng() < p ? "RARE" : "UNCOMMON";
 }
 
 function buildUsePowerup(dependencies = {}) {
@@ -227,6 +316,12 @@ function buildUsePowerup(dependencies = {}) {
     swapRequestedPowerupId,
     timeZone,
     upgradeLevel = 0,
+    // §6.3 — OPTIONAL. Absent (every frozen client, and every legacy request)
+    // means the untouched legacy Pocket Watch behavior.
+    targetEffectId = null,
+    // §7.5 — OPTIONAL, REQUEST-SCOPED capability tokens. Absent means "assume the
+    // oldest contract", which is what a frozen binary's own copy describes.
+    clientFeatures = null,
   }) {
     const powerup = await powerupModel.findById(powerupId);
     if (!powerup) {
@@ -500,6 +595,37 @@ function buildUsePowerup(dependencies = {}) {
       }
     }
 
+    // HITCHHIKE stacking rules (§7.2). Both run BEFORE coin deduction and the
+    // mark-USED step, so a rejected caster keeps the powerup HELD:
+    //   * at most ONE active link per CASTER, and
+    //   * at most HITCHHIKE_MAX_PER_TARGET (1) active link ON any one target.
+    // The target cap is 1 — not 2 as for Leech — because Hitchhike MINTS steps
+    // rather than transferring them, so concurrent links compound against a
+    // player who cannot see the link coming.
+    if (type === "HITCHHIKE" && targetParticipant) {
+      const raceEffects = await effectModel.findActiveForRace(raceId);
+      const liveLinks = (raceEffects || []).filter(
+        (e) => e.type === "HITCHHIKE" && isLiveTimedEffect(e, now())
+      );
+      if (liveLinks.some((e) => e.sourceUserId === userId)) {
+        throw new PowerupUseError(
+          "You already have an active Hitchhike — wait for it to expire",
+          409,
+          "HITCHHIKE_ALREADY_ACTIVE"
+        );
+      }
+      const onTarget = liveLinks.filter(
+        (e) => e.targetUserId === resolvedTargetUserId
+      );
+      if (onTarget.length >= HITCHHIKE_MAX_PER_TARGET) {
+        throw new PowerupUseError(
+          "Someone is already hitching a ride on that racer",
+          409,
+          "HITCHHIKE_TARGET_FULL"
+        );
+      }
+    }
+
     // Reject stacking Runner's High when user already has one active
     if (type === "RUNNERS_HIGH") {
       const existingBuff = await effectModel.findActiveByTypeForParticipant(
@@ -564,11 +690,73 @@ function buildUsePowerup(dependencies = {}) {
       }
     }
 
-    if (type === "POCKET_WATCH") {
+    // POCKET_WATCH (§6.1). Two modes on one endpoint, chosen by the presence of
+    // `targetEffectId`. An absent targetEffectId keeps the legacy path EXACTLY as
+    // it was, including this pre-check — a frozen client's no-parameter request
+    // therefore retains its precise legacy meaning.
+    let pocketWatchTargetEffect = null;
+    if (type === "POCKET_WATCH" && !targetEffectId) {
       const activeTimedEffects = (await effectModel.findActiveForParticipant(myParticipant.id))
         .filter(isPocketWatchExtendable);
       if (activeTimedEffects.length === 0) {
         throw new PowerupUseError("Pocket Watch requires an active timed buff", 400);
+      }
+    }
+    if (type === "POCKET_WATCH" && targetEffectId) {
+      // Every check here runs BEFORE the coin deduction and the mark-USED step,
+      // so a rejected request consumes nothing.
+      const effect =
+        typeof effectModel.findById === "function"
+          ? await effectModel.findById(targetEffectId)
+          : null;
+      const invalid = (message) =>
+        new PowerupUseError(message, 400, "INVALID_EFFECT");
+      if (!effect) {
+        throw invalid("That effect is no longer active");
+      }
+      // Ownership is checked before eligibility so a rival's effect always reads
+      // as a permissions problem rather than a shape problem.
+      if (effect.sourceUserId !== userId) {
+        throw new PowerupUseError(
+          "You can only extend effects you applied",
+          403,
+          "EFFECT_NOT_OWNED"
+        );
+      }
+      if (effect.raceId && effect.raceId !== raceId) {
+        throw invalid("That effect belongs to a different race");
+      }
+      if (!isLiveTimedEffect(effect, now())) {
+        throw invalid("That effect is no longer active");
+      }
+      // Self-buffs belong to the legacy mode; harmful-effect extension is
+      // rival-only. Rows missing either id are treated as self-applied (the same
+      // defensive stance isOpponentInflicted takes).
+      if (!effect.targetUserId || effect.targetUserId === effect.sourceUserId) {
+        throw invalid("Pick a debuff you placed on a rival");
+      }
+      if (!POCKET_WATCH_TARGETABLE_TYPES.includes(effect.type)) {
+        throw invalid("That effect cannot be extended");
+      }
+      pocketWatchTargetEffect = effect;
+    }
+
+    // QUICK_RINSE (§8). Validate BEFORE consumption: with nothing eligible we
+    // reject 409 NO_TIMED_DEBUFFS and the item stays HELD. Note the Signal Jammer
+    // guard at the top of this command already blocked a jammed user — that is
+    // deliberate and matches shipped Cleanse behavior (§8.1); do not add a bypass.
+    let quickRinseTargets = [];
+    if (type === "QUICK_RINSE") {
+      const activeEffects = await effectModel.findActiveForParticipant(myParticipant.id);
+      quickRinseTargets = (activeEffects || []).filter(
+        (e) => isOpponentInflicted(e, userId) && isLiveTimedEffect(e, now())
+      );
+      if (quickRinseTargets.length === 0) {
+        throw new PowerupUseError(
+          "No timed debuffs to rinse",
+          409,
+          "NO_TIMED_DEBUFFS"
+        );
       }
     }
 
@@ -893,7 +1081,7 @@ function buildUsePowerup(dependencies = {}) {
       }
 
       case "LEECH": {
-        // Store-bought, leecher-driven ZERO-SUM transfer. Park a 30-min LEECH
+        // Store-bought, leecher-driven ZERO-SUM transfer. Park a LEECH
         // effect on the victim, sourced by the leecher. The actual transfer is
         // computed in getRaceProgress from the LEECHER's (sourceUserId) in-window
         // steps as floor(steps / ratio), UNCAPPED (bounded only by the victim's
@@ -904,6 +1092,13 @@ function buildUsePowerup(dependencies = {}) {
         // already protected a shielded victim (no effect created). NOT stealthy:
         // the effect targets the victim (renders on their row) and the POWERUP_USED
         // event below drives the victim's push notification.
+        // §7.5: the window length is chosen from the REQUEST's capabilities, so a
+        // frozen binary keeps creating (and describing) the 30-minute effect it
+        // knows about while a powerups3 build gets the 60-minute product.
+        const leechDurationMs = requestHasFeature(clientFeatures, "powerups3")
+          ? LEECH_DURATION_MS
+          : LEGACY_LEECH_DURATION_MS;
+        const leechMinutes = Math.round(leechDurationMs / (60 * 1000));
         const effect = await effectModel.create({
           raceId,
           targetParticipantId: targetParticipant.id,
@@ -912,10 +1107,11 @@ function buildUsePowerup(dependencies = {}) {
           powerupId,
           type: "LEECH",
           startsAt: currentTime,
-          expiresAt: new Date(currentTime.getTime() + LEECH_DURATION_MS),
+          expiresAt: new Date(currentTime.getTime() + leechDurationMs),
           metadata: { ratio: LEECH_RATIO, scoringVersion: LEECH_SCORING_VERSION },
         });
         result.effect = effect;
+        result.durationMs = leechDurationMs;
 
         await eventModel.create({
           raceId,
@@ -923,7 +1119,87 @@ function buildUsePowerup(dependencies = {}) {
           eventType: "POWERUP_USED",
           powerupType: type,
           targetUserId: resolvedTargetUserId,
-          description: `${myDisplayName} is leeching ${targetDisplayName}! Every 2 steps ${myDisplayName} takes steals 1 from ${targetDisplayName} for 30 minutes.`,
+          description: `${myDisplayName} is leeching ${targetDisplayName}! Every 2 steps ${myDisplayName} takes steals 1 from ${targetDisplayName} for ${leechMinutes} minutes.`,
+        });
+        break;
+      }
+
+      case "HITCHHIKE": {
+        // Store-bought, TARGET-driven ADDITIVE copy (§7). Park a 60-minute link on
+        // the walked-on racer, sourced by the hitchhiker. The copy itself is
+        // computed in src/utils/hitchhikeCopies.js from the TARGET's in-window
+        // steps as floor(steps * copyRatio) — NOT here — and is inserted into the
+        // caster's preLeechTotal at every scoring-assembly site. The target's own
+        // steps are never touched. As a shop powerup it can never be reflected
+        // (SHOP_POWERUP_TYPES), and the OFFENSIVE Compression Socks block above
+        // already protected a shielded target (no effect created). NOT stealthy:
+        // the effect targets the walked-on racer (renders on their row) and the
+        // POWERUP_USED event below drives their push.
+        const effect = await effectModel.create({
+          raceId,
+          targetParticipantId: targetParticipant.id,
+          targetUserId: resolvedTargetUserId,
+          sourceUserId: actingUserId,
+          powerupId,
+          type: "HITCHHIKE",
+          startsAt: currentTime,
+          expiresAt: new Date(currentTime.getTime() + HITCHHIKE_DURATION_MS),
+          metadata: {
+            copyRatio: HITCHHIKE_COPY_RATIO,
+            scoringVersion: HITCHHIKE_SCORING_VERSION,
+          },
+        });
+        result.effect = effect;
+        result.durationMs = HITCHHIKE_DURATION_MS;
+        result.copyRatio = HITCHHIKE_COPY_RATIO;
+
+        await eventModel.create({
+          raceId,
+          actorUserId: actingUserId,
+          eventType: "POWERUP_USED",
+          powerupType: type,
+          targetUserId: resolvedTargetUserId,
+          description: `${myDisplayName} hitched a ride on ${targetDisplayName}! Every step ${targetDisplayName} takes for the next hour is copied to ${myDisplayName} — ${targetDisplayName} loses nothing.`,
+        });
+        break;
+      }
+
+      case "QUICK_RINSE": {
+        // Self-only, instantaneous: HALVE the remaining duration of every active
+        // timed opponent-inflicted effect on the user (§8.1). Eligibility was
+        // resolved (and an empty set rejected) before consumption.
+        //
+        // Rows stay ACTIVE with a nearer expiry rather than being expired
+        // outright — normal expiry processing ends them at the new instant. The
+        // new expiresAt is ALWAYS > now, so this is strictly non-retroactive: no
+        // already-closed scoring bucket (a Hitchhike copy, a Leech transfer) is
+        // ever clawed back.
+        const affectedEffects = [];
+        for (const effect of quickRinseTargets) {
+          const remainingMs =
+            new Date(effect.expiresAt).getTime() - currentTime.getTime();
+          const newExpiresAt = new Date(
+            currentTime.getTime() +
+              Math.floor(remainingMs * QUICK_RINSE_REDUCTION_FRACTION)
+          );
+          await effectModel.update(effect.id, { expiresAt: newExpiresAt });
+          affectedEffects.push({
+            id: effect.id,
+            type: effect.type,
+            expiresAt: newExpiresAt,
+          });
+        }
+        result.shortened = affectedEffects.length;
+        result.reductionFraction = QUICK_RINSE_REDUCTION_FRACTION;
+        result.affectedEffects = affectedEffects;
+
+        await eventModel.create({
+          raceId,
+          actorUserId: userId,
+          eventType: "POWERUP_USED",
+          powerupType: type,
+          description: `${myDisplayName} used Quick Rinse! ${affectedEffects.length} debuff${affectedEffects.length === 1 ? "" : "s"} cut in half.`,
+          metadata: { shortened: affectedEffects.length },
         });
         break;
       }
@@ -1467,6 +1743,52 @@ function buildUsePowerup(dependencies = {}) {
 
       case "POCKET_WATCH": {
         const extensionMs = upgradedDuration("POCKET_WATCH", upgradeLevel);
+
+        // TARGETED mode (§6.1): extend EXACTLY ONE already-validated harmful
+        // effect this user applied. The extension modifies an effect that already
+        // passed the target's defenses, so it triggers neither Compression Socks
+        // nor a Mirror. RAINSTORM writes one row per rival, so extending it
+        // prolongs exactly one rival's row — the same single-effect rule as every
+        // other type.
+        if (pocketWatchTargetEffect) {
+          const extended = new Date(
+            new Date(pocketWatchTargetEffect.expiresAt).getTime() + extensionMs
+          );
+          await effectModel.update(pocketWatchTargetEffect.id, {
+            expiresAt: extended,
+          });
+          result.extendedEffects = 1;
+          result.extensionMs = extensionMs;
+          result.extensionMode = "OWN_DEBUFF";
+          result.extendedEffect = {
+            id: pocketWatchTargetEffect.id,
+            type: pocketWatchTargetEffect.type,
+            targetUserId: pocketWatchTargetEffect.targetUserId,
+            expiresAt: extended,
+          };
+
+          const rival = acceptedParticipants.find(
+            (p) => p.userId === pocketWatchTargetEffect.targetUserId
+          );
+          const rivalName = rival?.user?.displayName || "a rival";
+          await eventModel.create({
+            raceId,
+            actorUserId: userId,
+            eventType: "POWERUP_USED",
+            powerupType: type,
+            targetUserId: pocketWatchTargetEffect.targetUserId,
+            description: `${myDisplayName} used ${levelPrefix(upgradeLevel)}Pocket Watch! ${POWERUP_NAMES[pocketWatchTargetEffect.type] || pocketWatchTargetEffect.type} on ${rivalName} lasts longer.`,
+            metadata: {
+              extendedEffects: 1,
+              extensionMs,
+              extensionMode: "OWN_DEBUFF",
+              extendedEffectId: pocketWatchTargetEffect.id,
+            },
+          });
+          break;
+        }
+
+        // LEGACY mode — unchanged, bit for bit.
         const activeTimedEffects = (await effectModel.findActiveForParticipant(myParticipant.id))
           .filter(isPocketWatchExtendable);
         for (const effect of activeTimedEffects) {
@@ -1610,4 +1932,4 @@ function buildUsePowerup(dependencies = {}) {
 
 const usePowerup = buildUsePowerup();
 
-module.exports = { buildUsePowerup, usePowerup, PowerupUseError };
+module.exports = { buildUsePowerup, usePowerup, PowerupUseError, luckyMinRarity };

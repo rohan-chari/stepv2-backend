@@ -14,6 +14,10 @@ const {
 } = require("../services/raceStateResolution");
 const { raceTimeZone } = require("../utils/raceTimeZone");
 const { applyLeechTransfers } = require("../utils/leechTransfers");
+const {
+  collectRaceHitchhikeCopies,
+  applyHitchhikeCopies,
+} = require("../utils/hitchhikeCopies");
 
 // Mid-race forfeit for TEAM races (TR-601..604).
 //
@@ -92,17 +96,48 @@ function buildForfeitRace(dependencies = {}) {
         now: at,
       });
 
+      // §7.3: fold in the forfeiter's OWN hitchhike copies BEFORE the leech
+      // resolution, exactly as every other assembly site does. This total is
+      // FROZEN permanently and feeds standings and payouts, so dropping the
+      // copy here would silently delete steps the caster had already earned and
+      // seen. Unlike leech attacker credit, the copy is exact on a
+      // single-participant path — it depends only on the target's step history,
+      // never on victim availability.
+      //
+      // The forfeiter is the one leaving, so both roles matter and both are
+      // handled by the shared collector: as a CASTER their accrued copy is
+      // preserved (their own forfeit never clamps their own links), and as a
+      // TARGET the clamp lives on the OTHER participant's total, computed
+      // elsewhere. `now: at` also means the shared in-progress-hour exclusion
+      // applies here as it does everywhere — the same monotonicity tradeoff
+      // already accepted for Leech, kept identical so no path can disagree.
+      const hitchhikeCopies = race.powerupsEnabled
+        ? await collectRaceHitchhikeCopies({
+            raceId: race.id,
+            raceEndsAt: race.endsAt,
+            participants: race.participants,
+            raceActiveEffectModel,
+            stepSampleModel,
+            now: at,
+          })
+        : [];
+
       // §5: freeze the forfeiter's total INCLUDING any leech drain against them
       // (the old debuff-folded behavior). Single-participant -> drain-only (no
       // attacker credit computed here), matching the sync-v2 reconcile path.
-      const leechFinals = applyLeechTransfers([
-        {
-          participantId: participant.id,
-          userId: participant.userId,
-          preLeechTotal: total,
-          leechTransfers,
-        },
-      ]);
+      const leechFinals = applyLeechTransfers(
+        applyHitchhikeCopies(
+          [
+            {
+              participantId: participant.id,
+              userId: participant.userId,
+              preLeechTotal: total,
+              leechTransfers,
+            },
+          ],
+          hitchhikeCopies
+        )
+      );
       return leechFinals.get(participant.id) ?? total;
     });
 

@@ -1,8 +1,10 @@
 const { User } = require("../models/user");
 const { PowerupShopItem } = require("../models/powerupShopItem");
 const { UserPowerupItem } = require("../models/userPowerupItem");
+const { PowerupCopy } = require("../models/powerupCopy");
 const {
   POWERUPS2_GATED_TYPES,
+  POWERUPS3_GATED_TYPES,
   isImposterDisabledForCatalog,
 } = require("../constants/powerupGating");
 
@@ -14,16 +16,35 @@ function buildGetPowerupShopCatalog(deps = {}) {
   const userModel = deps.User || User;
   const powerupShopItemModel = deps.PowerupShopItem || PowerupShopItem;
   const userPowerupItemModel = deps.UserPowerupItem || UserPowerupItem;
+  const powerupCopyModel = deps.PowerupCopy || PowerupCopy;
 
   return async function getPowerupShopCatalog(
     userId,
-    { channel = "prod", supportsJammer = false, supportsPowerups2 = false } = {}
+    {
+      channel = "prod",
+      supportsJammer = false,
+      supportsPowerups2 = false,
+      supportsPowerups3 = false,
+    } = {}
   ) {
-    const [coins, items, inventory] = await Promise.all([
+    const [coins, items, inventory, copyRows] = await Promise.all([
       userModel.findCoins(userId),
       powerupShopItemModel.findActive({ channel }),
       userPowerupItemModel.findManyByUser(userId),
+      // §9.5.2: name/description are now served from the copy catalog. The
+      // RESPONSE SHAPE is unchanged — old clients read the same two fields — but
+      // PowerupShopItem.name/.description stop being the source of truth. Read
+      // defensively: a missing/empty copy table falls back to the shop row, so a
+      // half-deployed environment never serves blank strings.
+      typeof powerupCopyModel.findAll === "function"
+        ? powerupCopyModel.findAll().catch(() => [])
+        : Promise.resolve([]),
     ]);
+
+    const copyByType = new Map();
+    for (const row of copyRows || []) {
+      copyByType.set(row.powerupType, row);
+    }
 
     const ownedByType = {};
     for (const row of inventory) {
@@ -45,6 +66,13 @@ function buildGetPowerupShopCatalog(deps = {}) {
       if (!supportsPowerups2 && POWERUPS2_GATED_TYPES.includes(item.powerupType)) {
         return false;
       }
+      // Leech (moved from powerups2), Hitchhike and Quick Rinse are gated behind
+      // `powerups3`. This is VISIBILITY only and is independent of the row's
+      // `testOnly` flag, which PowerupShopItem.findActive already applies as a
+      // release-CHANNEL gate — the two gates are deliberately layered (§9.2).
+      if (!supportsPowerups3 && POWERUPS3_GATED_TYPES.includes(item.powerupType)) {
+        return false;
+      }
       return true;
     });
 
@@ -52,8 +80,9 @@ function buildGetPowerupShopCatalog(deps = {}) {
       coins: coins ?? 0,
       items: visibleItems.map((item) => ({
         sku: item.sku,
-        name: item.name,
-        description: item.description,
+        name: copyByType.get(item.powerupType)?.name || item.name,
+        description:
+          copyByType.get(item.powerupType)?.description ?? item.description,
         priceCoins: item.priceCoins,
         powerupType: item.powerupType,
         ownedQuantity: ownedByType[item.powerupType] ?? 0,

@@ -649,7 +649,9 @@ function createRacesRouter(dependencies = {}) {
         req.user.id,
         req.params.raceId,
         req.timeZone,
-        req.clientFeatures?.has("characters") ?? false
+        req.clientFeatures?.has("characters") ?? false,
+        // §9.3: Hitchhike effect entries are only rendered by powerups3 builds.
+        req.clientFeatures?.has("powerups3") ?? false
       );
       res.json({ progress });
     } catch (error) {
@@ -693,6 +695,7 @@ function createRacesRouter(dependencies = {}) {
         swapOfferedPowerupId,
         swapRequestedPowerupId,
         upgradeLevel,
+        targetEffectId,
       } = req.body;
       const result = await usePowerup({
         userId: req.user.id,
@@ -704,6 +707,12 @@ function createRacesRouter(dependencies = {}) {
         swapRequestedPowerupId,
         timeZone: req.timeZone,
         upgradeLevel: upgradeLevel != null ? upgradeLevel : 0,
+        // §6.3: optional. Absent (every legacy request) keeps the exact legacy
+        // Pocket Watch meaning.
+        targetEffectId: targetEffectId || null,
+        // §7.5: REQUEST-scoped capabilities, never the user's stored sticky
+        // union — that would upgrade a request made by a frozen binary.
+        clientFeatures: req.clientFeatures || null,
       });
       // X-Ray (DEFENSE_SCAN) is an instantaneous intel read: surface the scan at
       // the TOP LEVEL per the contract ({ ok, scan }). `result` is kept alongside

@@ -208,7 +208,13 @@ test("pickAccessory always returns an item from the pool", () => {
   }
 });
 
-test("longer streak biases accessory pick toward pricier items", () => {
+// INVERTED (accessoryWeightMode: "inverse"). This test previously asserted that
+// a longer streak made PRICIER accessories MORE likely — weight was price^(1+t),
+// so at streak cap a 1500-coin cosmetic was ~36x likelier than a 250-coin one.
+// That made the prestige tier the most common daily-box drop, inverting the
+// pricing philosophy (prestige = 4-8 weeks of play). The old behaviour is still
+// reachable via accessoryWeightMode: "legacy" for rollback only.
+test("longer streak biases accessory pick AWAY from pricier items", () => {
   const pool = [
     { id: "cheap", priceCoins: 100 },
     { id: "pricey", priceCoins: 2000 },
@@ -219,9 +225,9 @@ test("longer streak biases accessory pick toward pricier items", () => {
     if (pickAccessory(pool, 1).id === "pricey") priceyAtOne++;
     if (pickAccessory(pool, DAILY_BOX_STREAK_CAP).id === "pricey") priceyAtCap++;
   }
-  // Pricier item is always favored, but the bias must sharpen with streak.
+  // Prestige items must get RARER as the streak grows, not commoner.
   assert.ok(
-    priceyAtCap > priceyAtOne,
-    `pricey at cap (${priceyAtCap}) should exceed pricey at day 1 (${priceyAtOne})`
+    priceyAtCap < priceyAtOne,
+    `pricey at cap (${priceyAtCap}) should be BELOW pricey at day 1 (${priceyAtOne})`
   );
 });

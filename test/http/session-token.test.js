@@ -55,8 +55,37 @@ test("POST /auth/apple returns a sessionToken alongside user", async () => {
     assert.equal(response.status, 200);
     const body = await response.json();
     assert.equal(body.user.id, "user-1");
+    assert.equal(body.user.featureFlags.onboardingV2Enabled, false);
     assert.equal(typeof body.sessionToken, "string");
     assert.ok(body.sessionToken.length > 0);
+  } finally {
+    await server.close();
+  }
+});
+
+test("POST /auth/apple surfaces the remotely enabled onboarding v2 flag", async () => {
+  const server = await startServer({
+    async verifyAppleIdentityToken() {
+      return { sub: "apple-user-flag" };
+    },
+    async ensureAppleUser() {
+      return { id: "user-flag", appleId: "apple-user-flag" };
+    },
+    appSettings: {
+      async getFlag(key) {
+        return key === "onboardingV2Enabled";
+      },
+    },
+  });
+  try {
+    const response = await fetch(`${server.baseUrl}/auth/apple`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ identityToken: "apple-token" }),
+    });
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.user.featureFlags.onboardingV2Enabled, true);
   } finally {
     await server.close();
   }

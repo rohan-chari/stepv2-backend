@@ -17,6 +17,10 @@ const { calculateSubsequentSteps } = require("../utils/raceSteps");
 const { computeBoxEffectiveSteps } = require("../utils/boxSteps");
 const { raceTimeZone } = require("../utils/raceTimeZone");
 const { applyLeechTransfers } = require("../utils/leechTransfers");
+const {
+  collectRaceHitchhikeCopies,
+  applyHitchhikeCopies,
+} = require("../utils/hitchhikeCopies");
 
 // Every effect type that calculateCurrentTotal folds into a participant's
 // live total. Shared with prefetch paths (getHomeRaceCard) so a bulk effect
@@ -719,18 +723,39 @@ function buildResolveRaceState(dependencies = {}) {
         })
       );
 
+      // Phase A2 — HITCHHIKE (§7.3). Identical to the display path's insertion in
+      // getRaceProgress: ONE bulk query for every link in the race, folded into
+      // the CASTER's pre-leech total BEFORE the leech resolution so copied steps
+      // are drainable. Adding it here but not there (or vice versa) is the
+      // live-vs-settlement divergence §7.3 warns about — it would surface as the
+      // score changing at race end. The parity guard in
+      // test/queries/hitchhikeScoring.test.js fails if the two drift.
+      const hitchhikeCopies = race.powerupsEnabled
+        ? await collectRaceHitchhikeCopies({
+            raceId: race.id,
+            raceEndsAt: race.endsAt,
+            participants: race.participants,
+            raceActiveEffectModel,
+            stepSampleModel,
+            now: currentTime,
+          })
+        : [];
+
       // Phase B: resolve all leeches race-wide against real victim availability
       // (zero-sum, deterministic), then persist each active participant's FINAL
       // total. Frozen participants keep their stored total and are never written.
       const leechFinals = applyLeechTransfers(
-        preLeech
-          .filter((e) => e && !e.frozen)
-          .map((e) => ({
-            participantId: e.participant.id,
-            userId: e.participant.userId,
-            preLeechTotal: e.preLeechTotal,
-            leechTransfers: e.leechTransfers,
-          }))
+        applyHitchhikeCopies(
+          preLeech
+            .filter((e) => e && !e.frozen)
+            .map((e) => ({
+              participantId: e.participant.id,
+              userId: e.participant.userId,
+              preLeechTotal: e.preLeechTotal,
+              leechTransfers: e.leechTransfers,
+            })),
+          hitchhikeCopies
+        )
       );
 
       for (let index = 0; index < preLeech.length; index++) {

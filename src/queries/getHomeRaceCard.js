@@ -12,6 +12,10 @@ const { prorateSamplesIntoWindow } = require("../models/stepSample");
 const { raceTimeZone } = require("../utils/raceTimeZone");
 const { buildTeamsBlockFromParticipants } = require("../utils/teamRaces");
 const { applyLeechTransfers } = require("../utils/leechTransfers");
+const {
+  collectRaceHitchhikeCopies,
+  applyHitchhikeCopies,
+} = require("../utils/hitchhikeCopies");
 
 // The effect types the home card must prefetch. LEECH is included (§5): once
 // leech MINTS steps to the attacker, omitting it here made the home-card total
@@ -523,17 +527,36 @@ async function checkActiveRaces(prisma, userId, options = {}) {
         })
       );
 
+      // Phase A2 — HITCHHIKE (§7.3). The home card shows the SAME number race
+      // detail does, so the copy has to be folded in here too: a caster with a
+      // live link would otherwise see one total on the home card and a larger
+      // one in race detail — the live-vs-live divergence the parity rule exists
+      // to prevent. Read-only, like everything else on this path.
+      const hitchhikeCopies = race.powerupsEnabled
+        ? await collectRaceHitchhikeCopies({
+            raceId: race.id,
+            raceEndsAt: race.endsAt,
+            participants: race.participants,
+            raceActiveEffectModel: raceEffectModel,
+            stepSampleModel: raceStepSampleModel,
+            now,
+          })
+        : [];
+
       // Phase B: resolve leech race-wide (zero-sum, deterministic) so the home
       // card's totals match race detail — including the attacker's minted credit.
       const leechFinals = applyLeechTransfers(
-        preLeech
-          .filter((e) => !e.frozen)
-          .map((e) => ({
-            participantId: e.participant.id,
-            userId: e.participant.userId,
-            preLeechTotal: e.preLeechTotal,
-            leechTransfers: e.leechTransfers,
-          }))
+        applyHitchhikeCopies(
+          preLeech
+            .filter((e) => !e.frozen)
+            .map((e) => ({
+              participantId: e.participant.id,
+              userId: e.participant.userId,
+              preLeechTotal: e.preLeechTotal,
+              leechTransfers: e.leechTransfers,
+            })),
+          hitchhikeCopies
+        )
       );
       for (const e of preLeech) {
         liveTotals.set(

@@ -110,6 +110,7 @@ model User {
   challengesProposed ChallengeInstance[] @relation("challengeProposer")
   deviceTokens       DeviceToken[]
   coinTransactions   CoinTransaction[]
+  activationEvents   ActivationEvent[]
 
   racesCreated            Race[]                   @relation("raceCreator")
   racesWon                Race[]                   @relation("raceWinner")
@@ -138,8 +139,8 @@ model User {
   tournamentEntries  TournamentParticipant[]
 
   // ── Async step sync (Home/Races Refresh Performance) — additive back-relations.
-  stepSyncRequests   StepSyncRequest[]
-  raceResolutionJob  RaceResolutionJob?
+  stepSyncRequests  StepSyncRequest[]
+  raceResolutionJob RaceResolutionJob?
 
   // First index on this table. Backs the daily-reward reminder scheduler, which
   // selects users by IANA zone: findMany({ where: { timezone: { in: zonesAtSlot } } }).
@@ -415,6 +416,28 @@ model CoinTransaction {
   @@map("coin_transactions")
 }
 
+// Privacy-bounded product activation telemetry. userId is always derived from
+// the authenticated session; context is validated against a small allowlist at
+// ingestion and never contains names, race IDs, health/step data, or ad IDs.
+model ActivationEvent {
+  id                  String   @id
+  userId              String   @map("user_id")
+  onboardingSessionId String?  @map("onboarding_session_id")
+  name                String
+  context             Json     @default("{}")
+  appVersion          String   @map("app_version")
+  platform            String
+  occurredAt          DateTime @map("occurred_at")
+  createdAt           DateTime @default(now()) @map("created_at")
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
+  @@index([name, createdAt])
+  @@index([appVersion, platform, createdAt])
+  @@map("activation_events")
+}
+
 enum AccessorySlot {
   HEAD
   FACE
@@ -523,9 +546,39 @@ model ShopPurchaseRequest {
 // the new app reads these tables via the new /shop/powerups endpoints.
 
 // Catalog of coin-purchasable powerups (re-buyable, stack in global inventory).
+// The SINGLE SOURCE OF TRUTH for user-facing powerup copy (§9.5), keyed by
+// PowerupType rather than by SKU: only 6 of the usable types have a shop row, so
+// PowerupShopItem could never cover the in-race surfaces. One row per
+// user-renderable type; MYSTERY_BOX is intentionally excluded (it is an
+// unopened-container inventory state, not a usable powerup with use-sheet or
+// effect-rail copy).
+//
+// Served by GET /powerups/catalog and consumed by getPowerupShopCatalog, which
+// keeps its own response SHAPE unchanged for old clients while sourcing `name`
+// and `description` from here.
+model PowerupCopy {
+  powerupType       PowerupType @id @map("powerup_type")
+  name              String
+  description       String
+  // NULLABLE on purpose: only 15 of the 26 pre-existing types have short-form
+  // effect-rail copy today. When it is null the client omits the subtitle line
+  // entirely rather than substituting a truncated description.
+  shortDescription  String?     @map("short_description")
+  // 4 entries for upgradeable types ("Extend 1h", "Extend 1.5h", ...), empty
+  // otherwise. Tier labels encode durations and drift for the same reason the
+  // Leech copy did, so they are data-driven like the upgrade COSTS already are.
+  upgradeTierLabels String[]    @map("upgrade_tier_labels")
+  updatedAt         DateTime    @updatedAt @map("updated_at")
+
+  @@map("powerup_copy")
+}
+
 model PowerupShopItem {
   id          String      @id @default(uuid())
   sku         String      @unique
+  // DEPRECATED as a source of copy (§9.5.2): retained for additive-schema
+  // compatibility and still RETURNED by GET /shop/powerups, but the served
+  // strings now come from PowerupCopy. Do not edit these columns to change copy.
   name        String
   description String?
   priceCoins  Int         @map("price_coins")
@@ -624,6 +677,19 @@ enum PowerupType {
   // defenses (Compression Socks / Mirror) in the use response. Additive enum
   // value, placed before mystery_box to match the schema's declared ordering.
   DEFENSE_SCAN      @map("defense_scan")
+  // HITCHHIKE is STORE-ONLY and never rolls from a mystery box or daily reward
+  // box. Targeted, TARGET-driven copy: for 60 minutes the caster COPIES the
+  // target's recorded raw steps 1:1 into their own score — the target loses
+  // nothing. One active link per caster AND one per target. Compression Socks
+  // block it; a Mirror never reflects it. Copied steps do NOT advance mystery-box
+  // progress (the term is added at the scoring assembly, never to baseAdjusted).
+  // Additive enum value, placed BEFORE mystery_box to match the declared ordering.
+  HITCHHIKE         @map("hitchhike")
+  // QUICK_RINSE is STORE-ONLY, SELF-ONLY and instantaneous: it HALVES the
+  // remaining duration of every active timed opponent-inflicted effect on the
+  // user. It creates no effect of its own. Additive enum value, placed BEFORE
+  // mystery_box to match the declared ordering.
+  QUICK_RINSE       @map("quick_rinse")
   MYSTERY_BOX       @map("mystery_box")
 }
 
@@ -688,26 +754,26 @@ enum RaceTeam {
 }
 
 model Race {
-  id                  String           @id @default(uuid())
-  creatorId           String?          @map("creator_id")
-  seedId              String?          @map("seed_id")
-  name                String
-  targetSteps         Int              @map("target_steps")
-  status              RaceStatus       @default(PENDING)
+  id                   String           @id @default(uuid())
+  creatorId            String?          @map("creator_id")
+  seedId               String?          @map("seed_id")
+  name                 String
+  targetSteps          Int              @map("target_steps")
+  status               RaceStatus       @default(PENDING)
   // maxDurationDays is set on all new races; kept nullable for backward compat
   // with existing rows from the step-goal-only window which have NULL.
-  maxDurationDays     Int?             @map("max_duration_days")
-  buyInAmount         Int              @default(0) @map("buy_in_amount")
-  payoutPreset        RacePayoutPreset @default(WINNER_TAKES_ALL) @map("payout_preset")
-  potCoins            Int              @default(0) @map("pot_coins")
-  startedAt           DateTime?        @map("started_at")
-  endsAt              DateTime?        @map("ends_at")
+  maxDurationDays      Int?             @map("max_duration_days")
+  buyInAmount          Int              @default(0) @map("buy_in_amount")
+  payoutPreset         RacePayoutPreset @default(WINNER_TAKES_ALL) @map("payout_preset")
+  potCoins             Int              @default(0) @map("pot_coins")
+  startedAt            DateTime?        @map("started_at")
+  endsAt               DateTime?        @map("ends_at")
   // Optional future auto-start time (1.1.7). When set and in the future, the
   // race stays PENDING and the autoStartScheduledRaces cron job starts it once
   // this time passes; manual start is blocked until then. Nullable/additive:
   // legacy races and older app clients (which never send it) behave exactly as
   // before — manual instant start.
-  scheduledStartAt    DateTime?        @map("scheduled_start_at")
+  scheduledStartAt     DateTime?        @map("scheduled_start_at")
   // Canonical IANA timezone whose calendar-day boundaries define this race's
   // step buckets (e.g. "America/New_York" for seeded daily/weekly challenges).
   // NULL for user-created races, which keep the legacy behavior: live display
@@ -715,27 +781,27 @@ model Race {
   // settlement bucket in this tz, so "midnight" means the same instant for every
   // participant and live totals match settled totals. Nullable/additive: old app
   // clients never read it; old rows stay NULL and behave exactly as before.
-  timezone            String?          @map("timezone")
-  completedAt         DateTime?        @map("completed_at")
-  winnerUserId        String?          @map("winner_user_id")
-  powerupsEnabled     Boolean          @default(false) @map("powerups_enabled")
-  powerupStepInterval Int?             @map("powerup_step_interval")
-  isPublic            Boolean          @default(false) @map("is_public")
+  timezone             String?          @map("timezone")
+  completedAt          DateTime?        @map("completed_at")
+  winnerUserId         String?          @map("winner_user_id")
+  powerupsEnabled      Boolean          @default(false) @map("powerups_enabled")
+  powerupStepInterval  Int?             @map("powerup_step_interval")
+  isPublic             Boolean          @default(false) @map("is_public")
   // Nullable: NULL means "no participant limit" (unlimited). Older app clients
   // always send an integer, and the @default(10) keeps legacy creates that omit
   // the field unchanged. Additive/backward-compatible — relaxing NOT NULL only.
-  maxParticipants     Int?             @default(10) @map("max_participants")
+  maxParticipants      Int?             @default(10) @map("max_participants")
   // When true, the race never finishes on reaching targetSteps; targetSteps is
   // a display-only goal and the winner is decided by step count when ends_at
   // passes (raceExpiry.js). Additive/backward-compatible: defaults false so
   // legacy target races created by older app versions keep finishing on target.
-  timeBased           Boolean          @default(false) @map("time_based")
+  timeBased            Boolean          @default(false) @map("time_based")
   // Opaque, unguessable token backing shareable race links (https://<host>/r/
   // <token>). Nullable: minted lazily the first time a participant shares the
   // race, so legacy races stay NULL until shared. Additive/backward-compatible —
   // older app clients never read or send it. Unique so a token resolves to at
   // most one race; @unique also creates the lookup index used by findByShareToken.
-  shareToken          String?          @unique @map("share_token")
+  shareToken           String?          @unique @map("share_token")
   // ── Team races (TR-100/§12) ────────────────────────────────────────────────
   // isTeamRace flips a race into two-team mode: exactly two sides, team size
   // 1–5, combined team totals, winnerTeam decides. teamSize is the per-side cap
@@ -744,11 +810,11 @@ model Race {
   // the settled result (TEAM_A|TEAM_B|null); winnerUserId stays null for team
   // races. All additive/nullable — old app builds never send or read them, and a
   // race with isTeamRace=false renders exactly as an individual race.
-  isTeamRace          Boolean          @default(false) @map("is_team_race")
-  teamSize            Int?             @map("team_size")
-  teamAName           String?          @map("team_a_name")
-  teamBName           String?          @map("team_b_name")
-  winnerTeam          RaceTeam?        @map("winner_team")
+  isTeamRace           Boolean          @default(false) @map("is_team_race")
+  teamSize             Int?             @map("team_size")
+  teamAName            String?          @map("team_a_name")
+  teamBName            String?          @map("team_b_name")
+  winnerTeam           RaceTeam?        @map("winner_team")
   // ── Tournaments (bracket mode) ──────────────────────────────────────────────
   // A matchup race is an ordinary time-based WINNER_TAKES_ALL race that belongs
   // to one tournament round. tournamentId != null flags it as a matchup: it is
@@ -758,11 +824,11 @@ model Race {
   // 0-based within the round. The @@unique makes double-advancement a hard DB
   // error (advancement idempotency backstop). All additive/nullable — old app
   // builds never send or read them and old rows stay NULL.
-  tournamentId         String?         @map("tournament_id")
-  tournamentRound      Int?            @map("tournament_round")
-  tournamentMatchIndex Int?            @map("tournament_match_index")
-  createdAt           DateTime         @default(now()) @map("created_at")
-  updatedAt           DateTime         @updatedAt @map("updated_at")
+  tournamentId         String?          @map("tournament_id")
+  tournamentRound      Int?             @map("tournament_round")
+  tournamentMatchIndex Int?             @map("tournament_match_index")
+  createdAt            DateTime         @default(now()) @map("created_at")
+  updatedAt            DateTime         @updatedAt @map("updated_at")
 
   creator       User?              @relation("raceCreator", fields: [creatorId], references: [id])
   seed          RaceSeed?          @relation(fields: [seedId], references: [id])
@@ -834,8 +900,8 @@ model Tournament {
   seedId              String?          @map("seed_id")
   name                String
   status              TournamentStatus @default(PENDING)
-  bracketSize         Int              @map("bracket_size")           // 4 | 8 | 16
-  matchupDurationDays Int              @map("matchup_duration_days")  // 1 | 2 | 3
+  bracketSize         Int              @map("bracket_size") // 4 | 8 | 16
+  matchupDurationDays Int              @map("matchup_duration_days") // 1 | 2 | 3
   // 0 (free), or 10..TOURNAMENT_BUYIN_MAX[bracketSize] = 100/100/62 (D4 ladder).
   buyInAmount         Int              @default(0) @map("buy_in_amount")
   potCoins            Int              @default(0) @map("pot_coins")
@@ -846,8 +912,8 @@ model Tournament {
   // Creator's IANA zone at creation; "America/New_York" for seeded. Matchup
   // races inherit it as their canonical scoring tz.
   timezone            String?          @map("timezone")
-  currentRound        Int              @default(0) @map("current_round")   // 0 = not started
-  totalRounds         Int              @map("total_rounds")                // log2(bracketSize)
+  currentRound        Int              @default(0) @map("current_round") // 0 = not started
+  totalRounds         Int              @map("total_rounds") // log2(bracketSize)
   championUserId      String?          @map("champion_user_id")
   createdAt           DateTime         @default(now()) @map("created_at")
   startedAt           DateTime?        @map("started_at")
@@ -866,15 +932,15 @@ model Tournament {
 }
 
 model TournamentSeed {
-  id                  String   @id            // stable key, e.g. "seed-tournament-daily-dash"
+  id                  String   @id // stable key, e.g. "seed-tournament-daily-dash"
   kind                String   @unique @map("kind") // e.g. "DAILY_DASH"
-  name                String                  // copied verbatim to each minted tournament
+  name                String // copied verbatim to each minted tournament
   bracketSize         Int      @map("bracket_size")
   matchupDurationDays Int      @map("matchup_duration_days")
   powerupsEnabled     Boolean  @default(false) @map("powerups_enabled")
   powerupStepInterval Int?     @map("powerup_step_interval")
   championPrizeCoins  Int      @map("champion_prize_coins") // minted prize (featured are always free); <= 1000
-  active              Boolean  @default(true)               // reconciler only reconciles active seeds
+  active              Boolean  @default(true) // reconciler only reconciles active seeds
   createdAt           DateTime @default(now()) @map("created_at")
   updatedAt           DateTime @updatedAt @map("updated_at")
 
@@ -889,7 +955,7 @@ model TournamentParticipant {
   userId            String                @map("user_id")
   // Reuse the race participant status enum (INVITED/ACCEPTED/DECLINED).
   status            RaceParticipantStatus @default(INVITED)
-  seed              Int?                                        // bracket slot 0..bracketSize-1, assigned at start
+  seed              Int? // bracket slot 0..bracketSize-1, assigned at start
   eliminatedInRound Int?                  @map("eliminated_in_round") // null = still alive (or champion)
   buyInAmount       Int                   @default(0) @map("buy_in_amount")
   // Reuse the race buy-in status enum (NONE/HELD/COMMITTED/REFUNDED).
@@ -998,11 +1064,18 @@ model RacePowerup {
   usedAt        DateTime?      @map("used_at")
   targetUserId  String?        @map("target_user_id")
   upgradeLevel  Int            @default(0) @map("upgrade_level")
+  // Balance-config version that produced this roll (D9 provenance). Nullable and
+  // additive: rows created before balance config shipped stay NULL, and a roll
+  // that happens while the config table is unreadable (code-defaults fallback)
+  // also stays NULL. Stamped only where rarity is actually decided —
+  // openMysteryBox / openMysteryBoxBatch — never in rollPowerup, which mints
+  // unopened MYSTERY_BOX rows and rolls nothing.
+  configVersion Int?           @map("config_version")
   createdAt     DateTime       @default(now()) @map("created_at")
   updatedAt     DateTime       @updatedAt @map("updated_at")
 
-  race         Race              @relation(fields: [raceId], references: [id], onDelete: Cascade)
-  participant  RaceParticipant   @relation(fields: [participantId], references: [id], onDelete: Cascade)
+  race          Race               @relation(fields: [raceId], references: [id], onDelete: Cascade)
+  participant   RaceParticipant    @relation(fields: [participantId], references: [id], onDelete: Cascade)
   activeEffects RaceActiveEffect[]
 
   @@unique([participantId, earnedAtSteps])
@@ -1325,12 +1398,12 @@ model GlobalStepEvent {
 // a week. Storage-only for now (queried directly when debugging); no API exposes
 // it, so old clients are unaffected.
 model Notification {
-  id        String   @id @default(uuid())
-  userId    String   @map("user_id")
-  type      String
-  title     String?
-  body      String?
-  raceId    String?  @map("race_id")
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  type        String
+  title       String?
+  body        String?
+  raceId      String?  @map("race_id")
   // Cross-process atomic-claim key for the daily-reward reminder scheduler
   // (§7). The job INSERTs a deterministic key (daily-reward:<userId>:<localDate>:<slot>)
   // BEFORE sending and only sends on a successful insert, so two cluster workers
@@ -1339,8 +1412,8 @@ model Notification {
   // @unique here is what keeps Prisma's index name stable, the migration adds the
   // predicate. Postgres treats nulls as distinct, so existing null writers never
   // collide regardless.
-  deliveryKey String? @unique @map("delivery_key")
-  createdAt DateTime @default(now()) @map("created_at")
+  deliveryKey String?  @unique @map("delivery_key")
+  createdAt   DateTime @default(now()) @map("created_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -1373,6 +1446,31 @@ model AppSetting {
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
 
   @@map("app_settings")
+}
+
+// Versioned, append-only game-balance configuration (rarity, drop pools,
+// position-odds curves, upgrade ladders, daily-box curves). Exactly one row has
+// active = true; every save writes a NEW row rather than mutating an old one,
+// so history is a full audit trail and rollback is a copy-forward.
+//
+// `version` is assigned by the APPLICATION inside the write transaction
+// (SELECT ... FOR UPDATE on the newest row), NOT by @default(autoincrement()) —
+// Prisma only supports autoincrement on @id for this connector.
+//
+// Per-environment on purpose (D3): prod and staging are tuned independently and
+// nothing is mirrored, so staging stays usable as a balance test bed.
+model BalanceConfig {
+  id            String   @id @default(uuid())
+  version       Int      @unique
+  config        Json
+  note          String?
+  createdBy     String?  @map("created_by")
+  boundOverride Boolean  @default(false) @map("bound_override")
+  active        Boolean  @default(false)
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([active])
+  @@map("balance_config")
 }
 
 // Top-of-funnel tap log for /r/<token> landing-page opens (referral codes and
@@ -1411,7 +1509,7 @@ model StepSyncRequest {
   idempotencyKey     String               @map("idempotency_key") @db.VarChar(36)
   requestHash        String               @map("request_hash") @db.Char(64)
   resolutionTimeZone String               @map("resolution_time_zone") @db.VarChar(255)
-  state              StepSyncRequestState  @default(PROCESSING)
+  state              StepSyncRequestState @default(PROCESSING)
   responseJson       Json?                @map("response_json")
   // Non-null while an owner is performing the uploader reconciliation between
   // Transaction A and B; an expired lease is reclaimable for idempotent recovery.
@@ -1445,22 +1543,22 @@ enum RaceResolutionJobState {
 }
 
 model RaceResolutionJob {
-  id                    String                 @id @default(uuid())
-  userId                String                 @unique @map("user_id")
-  generation            Int                    @default(1)
-  processingGeneration  Int?                   @map("processing_generation")
-  resolutionTimeZone    String                 @map("resolution_time_zone") @db.VarChar(255)
-  processingTimeZone    String?                @map("processing_time_zone") @db.VarChar(255)
-  state                 RaceResolutionJobState @default(QUEUED)
-  attempts              Int                    @default(0)
-  requestedAt           DateTime               @map("requested_at")
-  startedAt             DateTime?              @map("started_at")
-  completedAt           DateTime?              @map("completed_at")
-  retryAt               DateTime?              @map("retry_at")
-  leaseExpiresAt        DateTime?              @map("lease_expires_at")
-  lastErrorCode         String?                @map("last_error_code")
-  createdAt             DateTime               @default(now()) @map("created_at")
-  updatedAt             DateTime               @updatedAt @map("updated_at")
+  id                   String                 @id @default(uuid())
+  userId               String                 @unique @map("user_id")
+  generation           Int                    @default(1)
+  processingGeneration Int?                   @map("processing_generation")
+  resolutionTimeZone   String                 @map("resolution_time_zone") @db.VarChar(255)
+  processingTimeZone   String?                @map("processing_time_zone") @db.VarChar(255)
+  state                RaceResolutionJobState @default(QUEUED)
+  attempts             Int                    @default(0)
+  requestedAt          DateTime               @map("requested_at")
+  startedAt            DateTime?              @map("started_at")
+  completedAt          DateTime?              @map("completed_at")
+  retryAt              DateTime?              @map("retry_at")
+  leaseExpiresAt       DateTime?              @map("lease_expires_at")
+  lastErrorCode        String?                @map("last_error_code")
+  createdAt            DateTime               @default(now()) @map("created_at")
+  updatedAt            DateTime               @updatedAt @map("updated_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 

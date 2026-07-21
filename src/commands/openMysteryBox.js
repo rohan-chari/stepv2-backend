@@ -4,7 +4,8 @@ const { RacePowerupEvent } = require("../models/racePowerupEvent");
 const { Race } = require("../models/race");
 const { RaceActiveEffect } = require("../models/raceActiveEffect");
 const { eventBus } = require("../events/eventBus");
-const { rollPowerup: rollPowerupOdds, RARITY_TIERS, RARITY_ORDER } = require("../utils/powerupOdds");
+const { rollPowerup: rollPowerupOdds, RARITY_ORDER } = require("../utils/powerupOdds");
+const { balanceConfig: defaultBalanceConfig } = require("../services/balanceConfig");
 const { POWERUP_NAMES, DEFAULT_POWERUP_SLOTS } = require("./rollPowerup");
 const {
   syncRacePowerupState: defaultSyncRacePowerupState,
@@ -32,6 +33,7 @@ function buildOpenMysteryBox(dependencies = {}) {
     : RaceActiveEffect);
   const events = dependencies.eventBus || eventBus;
   const rollFn = dependencies.rollPowerupOdds || rollPowerupOdds;
+  const balance = dependencies.balanceConfig || defaultBalanceConfig;
   const syncRacePowerupState = Object.prototype.hasOwnProperty.call(
     dependencies,
     "syncRacePowerupState"
@@ -89,6 +91,12 @@ function buildOpenMysteryBox(dependencies = {}) {
       totalParticipants = sorted.length;
     }
 
+    // Read the config ONCE per open, and stamp the version we actually rolled
+    // from onto the row (D9). Workers cache independently under pm2 cluster
+    // mode, so "which config produced this box?" is only answerable because of
+    // this stamp — the 5s TTL bounds the skew, it does not remove it.
+    const { version: configVersion, config } = await balance.getSnapshot();
+
     const luckyEffect = await effectModel.findActiveByTypeForParticipant?.(
       participant.id,
       "LUCKY_HORSESHOE"
@@ -96,20 +104,20 @@ function buildOpenMysteryBox(dependencies = {}) {
     const minRarity = luckyEffect?.metadata?.minRarity;
 
     // Roll the powerup type now
-    let rolled = rollFn(position, totalParticipants, Math.random, { minRarity });
+    let rolled = rollFn(position, totalParticipants, Math.random, { minRarity, config });
     if (minRarity) {
       const rolledIndex = RARITY_ORDER.indexOf(rolled.rarity);
       const minIndex = RARITY_ORDER.indexOf(minRarity);
       if (rolledIndex !== -1 && minIndex !== -1 && rolledIndex < minIndex) {
         rolled = {
-          type: RARITY_TIERS[minRarity][0],
+          type: config.dropPool[minRarity][0],
           rarity: minRarity,
         };
       }
     }
     // Re-roll Fanny Pack if user already has expanded slots
     while (rolled.type === "FANNY_PACK" && maxSlots > DEFAULT_POWERUP_SLOTS) {
-      rolled = rollFn(position, totalParticipants, Math.random, { minRarity });
+      rolled = rollFn(position, totalParticipants, Math.random, { minRarity, config });
     }
 
     if (luckyEffect) {
@@ -119,7 +127,7 @@ function buildOpenMysteryBox(dependencies = {}) {
     // Fanny Pack auto-activates when inventory is full
     if (rolled.type === "FANNY_PACK" && occupiedCount >= maxSlots) {
       await participantModel.update(participant.id, { powerupSlots: maxSlots + 1 });
-      await powerupModel.update(powerupId, { type: rolled.type, rarity: rolled.rarity, status: "USED", usedAt: new Date() });
+      await powerupModel.update(powerupId, { type: rolled.type, rarity: rolled.rarity, status: "USED", usedAt: new Date(), configVersion });
 
       await eventModel.create({
         raceId,
@@ -143,7 +151,7 @@ function buildOpenMysteryBox(dependencies = {}) {
       return { id: powerup.id, type: rolled.type, rarity: rolled.rarity, autoActivated: true };
     }
 
-    await powerupModel.update(powerupId, { type: rolled.type, rarity: rolled.rarity, status: "HELD" });
+    await powerupModel.update(powerupId, { type: rolled.type, rarity: rolled.rarity, status: "HELD", configVersion });
 
     // Item 9: persist a MYSTERY_BOX_OPENED event so the admin "avg unique box
     // openers / day" metric has data (no history before this deploy). This is the

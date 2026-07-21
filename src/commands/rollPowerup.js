@@ -53,6 +53,11 @@ const POWERUP_NAMES = {
   // message on a Leech, or an EFFECT_EXPIRED "Leech wore off").
   LEECH: "Leech",
   DEFENSE_SCAN: "X-Ray",
+  // HITCHHIKE + QUICK_RINSE are store-only (coin store), never rolled from a
+  // mystery box. Named here for feed/display (e.g. a Compression-Socks block
+  // message on a Hitchhike, or an EFFECT_EXPIRED "Hitchhike wore off").
+  HITCHHIKE: "Hitchhike",
+  QUICK_RINSE: "Quick Rinse",
 };
 
 function buildRollPowerup(dependencies = {}) {

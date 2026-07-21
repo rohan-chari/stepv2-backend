@@ -17,6 +17,10 @@ const {
 const { computeBoxEffectiveSteps } = require("../utils/boxSteps");
 const { raceTimeZone } = require("../utils/raceTimeZone");
 const { applyLeechTransfers } = require("../utils/leechTransfers");
+const {
+  collectRaceHitchhikeCopies,
+  applyHitchhikeCopies,
+} = require("../utils/hitchhikeCopies");
 
 // Narrowly-scoped uploader reconciliation for POST /steps/sync-v2 (§6.4 / Phase
 // C2). For each of the uploader's ACTIVE races it computes and persists ONLY the
@@ -112,14 +116,36 @@ function buildReconcileUploaderRaces(dependencies = {}) {
         // rival-staleness tradeoff sync-v2 already accepts (D14). Passing a single
         // entry yields drain-only by construction: with no attacker participant
         // present, applyLeechTransfers credits nobody.
-        const leechFinals = applyLeechTransfers([
-          {
-            participantId: participant.id,
-            userId: participant.userId,
-            preLeechTotal: total,
-            leechTransfers,
-          },
-        ]);
+        // §7.3: fold in the uploader's OWN hitchhike copies before the leech
+        // resolution, exactly as the race-wide assembly sites do. Unlike leech
+        // attacker credit, this is EXACT on a single-participant path — a copy
+        // depends only on the target's step history, never on victim
+        // availability — so the uploader's total never dips below what
+        // getRaceProgress will show them a moment later.
+        const hitchhikeCopies = race.powerupsEnabled
+          ? await collectRaceHitchhikeCopies({
+              raceId: race.id,
+              raceEndsAt: race.endsAt,
+              participants: race.participants,
+              raceActiveEffectModel,
+              stepSampleModel,
+              now: currentTime,
+            })
+          : [];
+
+        const leechFinals = applyLeechTransfers(
+          applyHitchhikeCopies(
+            [
+              {
+                participantId: participant.id,
+                userId: participant.userId,
+                preLeechTotal: total,
+                leechTransfers,
+              },
+            ],
+            hitchhikeCopies
+          )
+        );
         const finalTotal = leechFinals.get(participant.id) ?? total;
 
         await participantModel.updateTotalSteps(participant.id, finalTotal);

@@ -78,6 +78,28 @@ function createAuthRouter(dependencies = {}) {
     defaultOptUserIntoPendingSeededRaces;
   const appSettings = dependencies.appSettings || defaultAppSettings;
 
+  async function withRuntimeFlags(user) {
+    // Additive nested data: old clients ignore it. Resolve each value
+    // defensively because tests, rolling deploys, or an older settings service
+    // may not yet know the new key.
+    const safeFlag = async (key, fallback) => {
+      try {
+        const value = await appSettings.getFlag(key);
+        return typeof value === "boolean" ? value : fallback;
+      } catch {
+        return fallback;
+      }
+    };
+    return {
+      ...user,
+      featureFlags: {
+        bannerAdsEnabled: await safeFlag("bannerAdsEnabled", false),
+        teamRacesEnabled: await safeFlag("teamRacesEnabled", true),
+        onboardingV2Enabled: await safeFlag("onboardingV2Enabled", false),
+      },
+    };
+  }
+
   async function getHeldCoinsSafe(userId) {
     if (!UserModel.getHeldCoins) {
       return 0;
@@ -123,7 +145,10 @@ function createAuthRouter(dependencies = {}) {
         appleId: appleIdentity.sub,
       });
 
-      res.json({ user: withAdminFlag(user, checkAdmin), sessionToken });
+      res.json({
+        user: await withRuntimeFlags(withAdminFlag(user, checkAdmin)),
+        sessionToken,
+      });
     } catch (error) {
       if (error instanceof AppleIdentityTokenError) {
         return res.status(401).json({ error: error.message });
@@ -164,7 +189,10 @@ function createAuthRouter(dependencies = {}) {
         appleId: user.appleId,
       });
 
-      res.json({ user: withAdminFlag(user, checkAdmin), sessionToken });
+      res.json({
+        user: await withRuntimeFlags(withAdminFlag(user, checkAdmin)),
+        sessionToken,
+      });
     } catch (error) {
       if (error instanceof GoogleIdentityTokenError) {
         return res.status(401).json({ error: error.message });
@@ -219,7 +247,10 @@ function createAuthRouter(dependencies = {}) {
         appleId: user.appleId,
       });
 
-      res.json({ user: withAdminFlag(user, checkAdmin), sessionToken });
+      res.json({
+        user: await withRuntimeFlags(withAdminFlag(user, checkAdmin)),
+        sessionToken,
+      });
     } catch (error) {
       console.error("Review auth error:", error);
       res.status(500).json({ error: "Internal server error" });
@@ -233,37 +264,30 @@ function createAuthRouter(dependencies = {}) {
       // Remote feature flags ride the /auth/me user payload (fetched at launch
       // and on resume). Additive: old clients ignore the key; getFlag never
       // throws (degrades to the flag's declared default).
-      const featureFlags = {
-        bannerAdsEnabled: await appSettings.getFlag("bannerAdsEnabled"),
-        // Team Race Mode creation kill switch (TR-107). When false, new
-        // clients hide the create-flow "Team race" toggle; the server also
-        // rejects team-race creation (403 FEATURE_DISABLED). Existing team
-        // races are unaffected. Additive — old clients ignore the key.
-        teamRacesEnabled: await appSettings.getFlag("teamRacesEnabled"),
-      };
       res.json({
-        user: withAdminFlag(
-          {
-            ...req.user,
-            // 1.1.4 compat: clients pre-step-goal-removal expect a non-null int.
-            stepGoal: req.user.stepGoal ?? 5000,
-            // T8: surface the global-leaderboard opt-out so clients can render
-            // the toggle. Default false when the column is absent (older row /
-            // backend version) — defensive read, never null.
-            hiddenFromLeaderboard: req.user.hiddenFromLeaderboard ?? false,
-            // Auto-join daily/weekly featured challenges toggle. Same
-            // defensive-default story as hiddenFromLeaderboard.
-            autoJoinFeaturedRaces: req.user.autoJoinFeaturedRaces ?? false,
-            incomingFriendRequests,
-            heldCoins,
-            featureFlags,
-          },
-          checkAdmin
+        user: await withRuntimeFlags(
+          withAdminFlag(
+            {
+              ...req.user,
+              // 1.1.4 compat: clients pre-step-goal-removal expect a non-null int.
+              stepGoal: req.user.stepGoal ?? 5000,
+              // T8: surface the global-leaderboard opt-out so clients can render
+              // the toggle. Default false when the column is absent (older row /
+              // backend version) — defensive read, never null.
+              hiddenFromLeaderboard: req.user.hiddenFromLeaderboard ?? false,
+              // Auto-join daily/weekly featured challenges toggle. Same
+              // defensive-default story as hiddenFromLeaderboard.
+              autoJoinFeaturedRaces: req.user.autoJoinFeaturedRaces ?? false,
+              incomingFriendRequests,
+              heldCoins,
+            },
+            checkAdmin
+          )
         ),
       });
     } catch (error) {
       console.error("Get me error:", error);
-      res.json({ user: req.user });
+      res.json({ user: await withRuntimeFlags(req.user) });
     }
   });
 
@@ -271,9 +295,11 @@ function createAuthRouter(dependencies = {}) {
   // call this when the user opens profile. Accept and no-op so they don't 404.
   router.put("/me/step-goal", requireAuth, async (req, res) => {
     res.json({
-      user: withAdminFlag(
-        { ...req.user, stepGoal: req.user.stepGoal ?? 5000 },
-        checkAdmin
+      user: await withRuntimeFlags(
+        withAdminFlag(
+          { ...req.user, stepGoal: req.user.stepGoal ?? 5000 },
+          checkAdmin
+        )
       ),
     });
   });
@@ -288,7 +314,9 @@ function createAuthRouter(dependencies = {}) {
     const heldCoins = await getHeldCoinsSafe(req.user.id);
     res.json({
       sessionToken,
-      user: withAdminFlag({ ...req.user, heldCoins }, checkAdmin),
+      user: await withRuntimeFlags(
+        withAdminFlag({ ...req.user, heldCoins }, checkAdmin)
+      ),
     });
   });
 
@@ -311,7 +339,7 @@ function createAuthRouter(dependencies = {}) {
           displayName: validation.normalized,
         });
 
-        return res.json({ user: updatedUser });
+        return res.json({ user: await withRuntimeFlags(updatedUser) });
       } catch (error) {
         if (error.name === "DisplayNameTakenError") {
           return res.status(409).json({ error: error.message });
@@ -327,7 +355,7 @@ function createAuthRouter(dependencies = {}) {
         displayName: null,
       });
 
-      res.json({ user: updatedUser });
+      res.json({ user: await withRuntimeFlags(updatedUser) });
     } catch (error) {
       if (error instanceof DisplayNameTakenError) {
         return res.status(409).json({ error: error.message });
@@ -353,7 +381,7 @@ function createAuthRouter(dependencies = {}) {
       const user = await UserModel.update(req.user.id, {
         hiddenFromLeaderboard: hidden,
       });
-      return res.json({ user });
+      return res.json({ user: await withRuntimeFlags(user) });
     } catch (error) {
       console.error("Leaderboard visibility error:", error);
       return res.status(500).json({ error: "Internal server error" });
@@ -384,7 +412,7 @@ function createAuthRouter(dependencies = {}) {
           console.error("Featured auto-join opt-in error:", error);
         }
       }
-      return res.json({ user });
+      return res.json({ user: await withRuntimeFlags(user) });
     } catch (error) {
       console.error("Featured auto-join error:", error);
       return res.status(500).json({ error: "Internal server error" });
@@ -445,7 +473,7 @@ function createAuthRouter(dependencies = {}) {
         key: key.trim(),
         url: url.trim(),
       });
-      res.json({ user });
+      res.json({ user: await withRuntimeFlags(user) });
     } catch (error) {
       if (error instanceof InvalidProfilePhotoError) {
         return res.status(400).json({ error: error.message });
@@ -461,7 +489,7 @@ function createAuthRouter(dependencies = {}) {
       const user = await removeProfilePhoto({
         userId: req.user.id,
       });
-      res.json({ user });
+      res.json({ user: await withRuntimeFlags(user) });
     } catch (error) {
       console.error("Profile photo delete error:", error);
       res.status(500).json({ error: "Internal server error" });
@@ -473,7 +501,7 @@ function createAuthRouter(dependencies = {}) {
       const user = await dismissProfilePhotoPrompt({
         userId: req.user.id,
       });
-      res.json({ user });
+      res.json({ user: await withRuntimeFlags(user) });
     } catch (error) {
       console.error("Profile photo prompt dismiss error:", error);
       res.status(500).json({ error: "Internal server error" });
