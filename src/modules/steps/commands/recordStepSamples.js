@@ -118,7 +118,13 @@ function buildRecordStepSamples(dependencies = {}) {
 
     const normalizedSamples = normalizeSamples(samples);
     const cleaned = removeOverlaps(normalizedSamples);
-    await stepSampleModel.upsertBatch(userId, cleaned);
+    // Granularity-aware overlap resolution (§3.3). Capability-detected so injected
+    // test fakes that predate reconcileBatch still exercise their upsertBatch.
+    if (typeof stepSampleModel.reconcileBatch === "function") {
+      await stepSampleModel.reconcileBatch(userId, cleaned);
+    } else {
+      await stepSampleModel.upsertBatch(userId, cleaned);
+    }
     const raceResults = await resolveRaceState({ userId, timeZone });
     if (Array.isArray(raceResults)) {
       await Promise.all(

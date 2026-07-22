@@ -221,13 +221,13 @@
       "active": true,
       "testOnly": true,
       "earnOnly": false,
-      "bobble": false,
+      "bobble": true,
       "sortOrder": 96,
       "renderMetadata": {
         "offsetX": -0.1,
-        "offsetY": -0.1,
-        "rotation": 0,
-        "scale": 1.9,
+        "offsetY": -0.00423728813559332,
+        "rotation": 0.24915254237288265,
+        "scale": 2.1499999999999995,
         "animationFrames": 6,
         "renderLayer": "front"
       }
@@ -239,7 +239,7 @@
       "slot": "BACK",
       "priceCoins": 750,
       "assetKey": "hydration_pack",
-      "active": true,
+      "active": false,
       "testOnly": true,
       "earnOnly": false,
       "bobble": false,
@@ -252,45 +252,6 @@
       }
     },
     {
-      "sku": "corgi_puppy",
-      "name": "Corgi Puppy",
-      "description": "Trade your capybara for a stubby-legged speedster.",
-      "slot": "CHARACTER",
-      "priceCoins": 1000,
-      "assetKey": "corgi_puppy",
-      "active": true,
-      "testOnly": true,
-      "earnOnly": false,
-      "bobble": false,
-      "sortOrder": 200,
-      "renderMetadata": {
-        "offsetX": 0,
-        "offsetY": 0,
-        "rotation": 0,
-        "scale": 1.26906779661017,
-        "animationFrames": 6
-      }
-    },
-    {
-      "sku": "ranked_legend_crown",
-      "name": "Legend Crown",
-      "description": "Earned, never bought. Reach Legend in Ranked.",
-      "slot": "HEAD",
-      "priceCoins": 0,
-      "assetKey": "legend_crown",
-      "active": true,
-      "testOnly": false,
-      "earnOnly": true,
-      "bobble": true,
-      "sortOrder": 1000,
-      "renderMetadata": {
-        "offsetX": 0,
-        "offsetY": 0.03,
-        "rotation": 0,
-        "scale": 1
-      }
-    },
-    {
       "sku": "sweatband",
       "name": "Sweatband",
       "description": "Classic terry-cloth sweatband for serious training.",
@@ -300,12 +261,12 @@
       "active": true,
       "testOnly": true,
       "earnOnly": false,
-      "bobble": false,
+      "bobble": true,
       "sortOrder": 100,
       "renderMetadata": {
-        "offsetX": 0,
-        "offsetY": 0,
-        "rotation": 0,
+        "offsetX": -0.022598870056497078,
+        "offsetY": 0.11983050847457877,
+        "rotation": -0.14466101694914765,
         "scale": 0.9
       }
     },
@@ -319,13 +280,13 @@
       "active": true,
       "testOnly": true,
       "earnOnly": false,
-      "bobble": false,
+      "bobble": true,
       "sortOrder": 101,
       "renderMetadata": {
-        "offsetX": 0,
-        "offsetY": 0,
-        "rotation": 0,
-        "scale": 1.1
+        "offsetX": -0.025,
+        "offsetY": 0.05999999999999999,
+        "rotation": -0.04000000000000001,
+        "scale": 0.95
       }
     },
     {
@@ -338,12 +299,12 @@
       "active": true,
       "testOnly": true,
       "earnOnly": false,
-      "bobble": false,
+      "bobble": true,
       "sortOrder": 102,
       "renderMetadata": {
-        "offsetX": 0,
-        "offsetY": 0,
-        "rotation": 0,
+        "offsetX": -0.05999999999999999,
+        "offsetY": 0.12932203389830166,
+        "rotation": -1.1896610169491577,
         "scale": 0.9
       }
     },
@@ -357,13 +318,13 @@
       "active": true,
       "testOnly": true,
       "earnOnly": false,
-      "bobble": false,
+      "bobble": true,
       "sortOrder": 103,
       "renderMetadata": {
-        "offsetX": 0,
-        "offsetY": 0,
-        "rotation": 0,
-        "scale": 1.1
+        "offsetX": -0.07974576271186429,
+        "offsetY": 0.01,
+        "rotation": -0.18,
+        "scale": 1.2000000000000002
       }
     },
     {
@@ -376,13 +337,13 @@
       "active": true,
       "testOnly": true,
       "earnOnly": false,
-      "bobble": false,
+      "bobble": true,
       "sortOrder": 104,
       "renderMetadata": {
-        "offsetX": 0,
-        "offsetY": 0,
-        "rotation": 0,
-        "scale": 1.1
+        "offsetX": -0.049999999999999996,
+        "offsetY": 0.06497175141242661,
+        "rotation": -0.3559322033898309,
+        "scale": 1.1500000000000001
       }
     },
     {
@@ -395,7 +356,7 @@
       "active": true,
       "testOnly": true,
       "earnOnly": false,
-      "bobble": false,
+      "bobble": true,
       "sortOrder": 105,
       "renderMetadata": {
         "offsetX": 0,
@@ -414,13 +375,13 @@
       "active": true,
       "testOnly": true,
       "earnOnly": false,
-      "bobble": false,
+      "bobble": true,
       "sortOrder": 106,
       "renderMetadata": {
-        "offsetX": 0,
-        "offsetY": 0,
-        "rotation": 0,
-        "scale": 1.1
+        "offsetX": -0.05279661016949268,
+        "offsetY": 0.06499999999999999,
+        "rotation": -0.18,
+        "scale": 1
       }
     },
     {
@@ -433,13 +394,13 @@
       "active": true,
       "testOnly": true,
       "earnOnly": false,
-      "bobble": false,
+      "bobble": true,
       "sortOrder": 107,
       "renderMetadata": {
-        "offsetX": 0,
-        "offsetY": 0,
-        "rotation": 0,
-        "scale": 1.1
+        "offsetX": -0.04,
+        "offsetY": 0.045,
+        "rotation": -0.3470338983050847,
+        "scale": 1.05
       }
     },
     {
@@ -452,13 +413,13 @@
       "active": true,
       "testOnly": true,
       "earnOnly": false,
-      "bobble": false,
+      "bobble": true,
       "sortOrder": 108,
       "renderMetadata": {
-        "offsetX": 0,
-        "offsetY": 0,
-        "rotation": 0,
-        "scale": 1.1
+        "offsetX": -0.06999999999999999,
+        "offsetY": 0.02,
+        "rotation": -0.27999999999999997,
+        "scale": 1.3000000000000003
       }
     },
     {
@@ -471,13 +432,32 @@
       "active": true,
       "testOnly": true,
       "earnOnly": false,
-      "bobble": false,
+      "bobble": true,
       "sortOrder": 109,
       "renderMetadata": {
-        "offsetX": 0,
-        "offsetY": 0,
-        "rotation": 0,
-        "scale": 1.1
+        "offsetX": -0.0757062146892668,
+        "offsetY": 0.0561581920903982,
+        "rotation": 0.08008474576270519,
+        "scale": 0.95
+      }
+    },
+    {
+      "sku": "monocle",
+      "name": "Monocle",
+      "description": "Distinguished. Refined. Absurdly fast.",
+      "slot": "FACE",
+      "priceCoins": 500,
+      "assetKey": "monocle",
+      "active": true,
+      "testOnly": true,
+      "earnOnly": false,
+      "bobble": true,
+      "sortOrder": 110,
+      "renderMetadata": {
+        "offsetX": -0.08500000000000002,
+        "offsetY": 0.03000000000000001,
+        "rotation": -0.2,
+        "scale": 1.8572033898305116
       }
     },
     {
@@ -490,13 +470,13 @@
       "active": true,
       "testOnly": true,
       "earnOnly": false,
-      "bobble": false,
+      "bobble": true,
       "sortOrder": 110,
       "renderMetadata": {
         "offsetX": 0,
-        "offsetY": 0,
-        "rotation": 0,
-        "scale": 1.1
+        "offsetY": 0.030000000000000002,
+        "rotation": -0.27584745762711815,
+        "scale": 0.95
       }
     },
     {
@@ -509,13 +489,13 @@
       "active": true,
       "testOnly": true,
       "earnOnly": false,
-      "bobble": false,
+      "bobble": true,
       "sortOrder": 111,
       "renderMetadata": {
-        "offsetX": 0,
-        "offsetY": 0,
-        "rotation": 0,
-        "scale": 1.1
+        "offsetX": 0.005,
+        "offsetY": 0.11505649717514377,
+        "rotation": -0.1,
+        "scale": 0.5296610169491538
       }
     },
     {
@@ -528,13 +508,90 @@
       "active": true,
       "testOnly": true,
       "earnOnly": false,
-      "bobble": false,
+      "bobble": true,
       "sortOrder": 112,
       "renderMetadata": {
+        "offsetX": -0.05310734463276835,
+        "offsetY": 0.0925706214689257,
+        "rotation": 0.49830508474576085,
+        "scale": 0.8004237288135609
+      }
+    },
+    {
+      "sku": "football_helmet",
+      "name": "Football Helmet",
+      "description": "Suit up — every walk is game day.",
+      "slot": "HEAD",
+      "priceCoins": 500,
+      "assetKey": "football_helmet",
+      "active": true,
+      "testOnly": true,
+      "earnOnly": false,
+      "bobble": true,
+      "sortOrder": 113,
+      "renderMetadata": {
+        "offsetX": 0.026734006734006818,
+        "offsetY": 0.11892255892255887,
+        "rotation": -0.042424242424242475,
+        "scale": 1.1373737373737371
+      }
+    },
+    {
+      "sku": "tennis_visor",
+      "name": "Tennis Visor",
+      "description": "Serve up some serious steps.",
+      "slot": "HEAD",
+      "priceCoins": 250,
+      "assetKey": "tennis_visor",
+      "active": true,
+      "testOnly": true,
+      "earnOnly": false,
+      "bobble": false,
+      "sortOrder": 114,
+      "renderMetadata": {
+        "offsetX": 0.01851851851851849,
+        "offsetY": 0.08922558922558921,
+        "rotation": -0.19090909090909092,
+        "scale": 0.9904040404040403
+      }
+    },
+    {
+      "sku": "cycling_helmet",
+      "name": "Cycling Helmet",
+      "description": "Aero gains for your daily loop.",
+      "slot": "HEAD",
+      "priceCoins": 500,
+      "assetKey": "cycling_helmet",
+      "active": true,
+      "testOnly": true,
+      "earnOnly": false,
+      "bobble": true,
+      "sortOrder": 115,
+      "renderMetadata": {
+        "offsetX": -0.08734463276836224,
+        "offsetY": 0.06172316384180528,
+        "rotation": -0.1956779661016993,
+        "scale": 1.107627118644069
+      }
+    },
+    {
+      "sku": "basketball",
+      "name": "Spinning Basketball",
+      "description": "Show off your ball control — full spin, zero hands.",
+      "slot": "HEAD",
+      "priceCoins": 750,
+      "assetKey": "basketball",
+      "active": true,
+      "testOnly": true,
+      "earnOnly": false,
+      "bobble": false,
+      "sortOrder": 116,
+      "renderMetadata": {
         "offsetX": 0,
-        "offsetY": 0,
+        "offsetY": -0.15,
         "rotation": 0,
-        "scale": 1.1
+        "scale": 0.9,
+        "animationFrames": 6
       }
     },
     {
@@ -547,32 +604,13 @@
       "active": true,
       "testOnly": true,
       "earnOnly": false,
-      "bobble": false,
+      "bobble": true,
       "sortOrder": 120,
       "renderMetadata": {
-        "offsetX": 0,
-        "offsetY": 0,
+        "offsetX": 0.01,
+        "offsetY": 0.049999999999999996,
         "rotation": 0,
-        "scale": 0.9
-      }
-    },
-    {
-      "sku": "monocle",
-      "name": "Monocle",
-      "description": "Inspect your step count with refinement.",
-      "slot": "FACE",
-      "priceCoins": 500,
-      "assetKey": "monocle",
-      "active": true,
-      "testOnly": true,
-      "earnOnly": false,
-      "bobble": false,
-      "sortOrder": 121,
-      "renderMetadata": {
-        "offsetX": 0,
-        "offsetY": 0,
-        "rotation": 0,
-        "scale": 0.8
+        "scale": 1.05
       }
     },
     {
@@ -582,16 +620,16 @@
       "slot": "FACE",
       "priceCoins": 250,
       "assetKey": "domino_mask",
-      "active": true,
+      "active": false,
       "testOnly": true,
       "earnOnly": false,
-      "bobble": false,
+      "bobble": true,
       "sortOrder": 122,
       "renderMetadata": {
-        "offsetX": 0,
+        "offsetX": -0.16666666666666657,
         "offsetY": 0,
         "rotation": 0,
-        "scale": 0.9
+        "scale": 1.610169491525418
       }
     },
     {
@@ -601,16 +639,16 @@
       "slot": "FACE",
       "priceCoins": 250,
       "assetKey": "eyepatch",
-      "active": true,
+      "active": false,
       "testOnly": true,
       "earnOnly": false,
-      "bobble": false,
+      "bobble": true,
       "sortOrder": 123,
       "renderMetadata": {
-        "offsetX": 0,
-        "offsetY": 0,
-        "rotation": 0,
-        "scale": 0.8
+        "offsetX": -0.16525423728813637,
+        "offsetY": -0.0083615819209052,
+        "rotation": -0.5444915254237419,
+        "scale": 1.1889830508474577
       }
     },
     {
@@ -620,16 +658,16 @@
       "slot": "FACE",
       "priceCoins": 250,
       "assetKey": "nerd_glasses",
-      "active": true,
+      "active": false,
       "testOnly": true,
       "earnOnly": false,
-      "bobble": false,
+      "bobble": true,
       "sortOrder": 124,
       "renderMetadata": {
-        "offsetX": 0,
-        "offsetY": 0,
-        "rotation": 0,
-        "scale": 0.9
+        "offsetX": -0.15254237288135625,
+        "offsetY": 0.0225988700564983,
+        "rotation": -0.40042372881357213,
+        "scale": 1.2610169491525427
       }
     },
     {
@@ -642,13 +680,13 @@
       "active": true,
       "testOnly": true,
       "earnOnly": false,
-      "bobble": false,
+      "bobble": true,
       "sortOrder": 125,
       "renderMetadata": {
-        "offsetX": 0,
-        "offsetY": 0,
-        "rotation": 0,
-        "scale": 0.9
+        "offsetX": -0.09322033898305071,
+        "offsetY": -0.022598870056496634,
+        "rotation": -0.23135593220338713,
+        "scale": 1.6012711864406826
       }
     },
     {
@@ -661,32 +699,32 @@
       "active": true,
       "testOnly": true,
       "earnOnly": false,
-      "bobble": false,
+      "bobble": true,
       "sortOrder": 126,
       "renderMetadata": {
-        "offsetX": 0,
-        "offsetY": 0,
-        "rotation": 0,
-        "scale": 0.9
+        "offsetX": -0.0838700564971756,
+        "offsetY": -0.01694915254237289,
+        "rotation": -0.24025423728813378,
+        "scale": 1.6605932203389826
       }
     },
     {
       "sku": "ski_goggles",
       "name": "Ski Goggles",
-      "description": "Ready for the slopes \u2014 or a windy day.",
+      "description": "Ready for the slopes — or a windy day.",
       "slot": "FACE",
       "priceCoins": 500,
       "assetKey": "ski_goggles",
       "active": true,
       "testOnly": true,
       "earnOnly": false,
-      "bobble": false,
+      "bobble": true,
       "sortOrder": 127,
       "renderMetadata": {
-        "offsetX": 0,
-        "offsetY": 0,
-        "rotation": 0,
-        "scale": 0.9
+        "offsetX": -0.0847457627118649,
+        "offsetY": -0.02,
+        "rotation": -0.32923728813559716,
+        "scale": 1.7050847457627016
       }
     },
     {
@@ -699,13 +737,32 @@
       "active": true,
       "testOnly": true,
       "earnOnly": false,
-      "bobble": false,
+      "bobble": true,
       "sortOrder": 128,
       "renderMetadata": {
-        "offsetX": 0,
+        "offsetX": -0.06824858757062126,
         "offsetY": 0,
+        "rotation": -0.24915254237288575,
+        "scale": 2.4631355932203403
+      }
+    },
+    {
+      "sku": "catchers_mask",
+      "name": "Catcher's Mask",
+      "description": "Nothing gets past you.",
+      "slot": "FACE",
+      "priceCoins": 500,
+      "assetKey": "catchers_mask",
+      "active": true,
+      "testOnly": true,
+      "earnOnly": false,
+      "bobble": true,
+      "sortOrder": 129,
+      "renderMetadata": {
+        "offsetX": 0.06638418079096087,
+        "offsetY": 0.014124293785312214,
         "rotation": 0,
-        "scale": 0.9
+        "scale": 1.7288135593220302
       }
     },
     {
@@ -718,13 +775,13 @@
       "active": true,
       "testOnly": true,
       "earnOnly": false,
-      "bobble": false,
+      "bobble": true,
       "sortOrder": 140,
       "renderMetadata": {
-        "offsetX": 0,
-        "offsetY": 0,
+        "offsetX": 0.030000000000000002,
+        "offsetY": -0.015,
         "rotation": 0,
-        "scale": 0.8
+        "scale": 1.0000000000000002
       }
     },
     {
@@ -737,13 +794,13 @@
       "active": true,
       "testOnly": true,
       "earnOnly": false,
-      "bobble": false,
+      "bobble": true,
       "sortOrder": 141,
       "renderMetadata": {
-        "offsetX": 0,
-        "offsetY": 0,
-        "rotation": 0,
-        "scale": 0.9
+        "offsetX": 0.07485875706214962,
+        "offsetY": 0.04008474576271239,
+        "rotation": -0.19999999999999998,
+        "scale": 1.257203389830508
       }
     },
     {
@@ -756,13 +813,13 @@
       "active": true,
       "testOnly": true,
       "earnOnly": false,
-      "bobble": false,
+      "bobble": true,
       "sortOrder": 142,
       "renderMetadata": {
-        "offsetX": 0,
-        "offsetY": 0,
-        "rotation": 0,
-        "scale": 1.0
+        "offsetX": -0.1709039548022599,
+        "offsetY": -0.07954802259886981,
+        "rotation": 0.19999999999999998,
+        "scale": 1.571610169491525
       }
     },
     {
@@ -775,13 +832,13 @@
       "active": true,
       "testOnly": true,
       "earnOnly": false,
-      "bobble": false,
+      "bobble": true,
       "sortOrder": 143,
       "renderMetadata": {
-        "offsetX": 0,
-        "offsetY": 0,
-        "rotation": 0,
-        "scale": 1.0
+        "offsetX": -0.062146892655367214,
+        "offsetY": -0.05999999999999999,
+        "rotation": -0.5605932203389852,
+        "scale": 1.2000000000000002
       }
     },
     {
@@ -794,13 +851,13 @@
       "active": true,
       "testOnly": true,
       "earnOnly": false,
-      "bobble": false,
+      "bobble": true,
       "sortOrder": 144,
       "renderMetadata": {
-        "offsetX": 0,
-        "offsetY": 0,
-        "rotation": 0,
-        "scale": 0.9
+        "offsetX": -0.07485875706214712,
+        "offsetY": -0.048135593220338994,
+        "rotation": -0.2535593220338987,
+        "scale": 0.9851694915254245
       }
     },
     {
@@ -858,6 +915,25 @@
         "offsetY": 0,
         "rotation": 0,
         "scale": 0.9
+      }
+    },
+    {
+      "sku": "skateboard",
+      "name": "Skateboard",
+      "description": "Kickflip your commute.",
+      "slot": "FEET",
+      "priceCoins": 750,
+      "assetKey": "skateboard",
+      "active": true,
+      "testOnly": true,
+      "earnOnly": false,
+      "bobble": false,
+      "sortOrder": 150,
+      "renderMetadata": {
+        "offsetX": 0,
+        "offsetY": 0.05,
+        "rotation": 0,
+        "scale": 1.3
       }
     },
     {
@@ -941,7 +1017,7 @@
     {
       "sku": "rocket",
       "name": "Rocket",
-      "description": "To the moon \u2014 one step at a time.",
+      "description": "To the moon — one step at a time.",
       "slot": "BACK",
       "priceCoins": 1500,
       "assetKey": "rocket",
@@ -976,121 +1052,6 @@
         "rotation": 0,
         "scale": 1.5,
         "renderLayer": "behind"
-      }
-    },
-    {
-      "sku": "football_helmet",
-      "name": "Football Helmet",
-      "description": "Suit up \u2014 every walk is game day.",
-      "slot": "HEAD",
-      "priceCoins": 500,
-      "assetKey": "football_helmet",
-      "active": true,
-      "testOnly": true,
-      "earnOnly": false,
-      "bobble": false,
-      "sortOrder": 113,
-      "renderMetadata": {
-        "offsetX": 0,
-        "offsetY": 0,
-        "rotation": 0,
-        "scale": 1.2
-      }
-    },
-    {
-      "sku": "tennis_visor",
-      "name": "Tennis Visor",
-      "description": "Serve up some serious steps.",
-      "slot": "HEAD",
-      "priceCoins": 250,
-      "assetKey": "tennis_visor",
-      "active": true,
-      "testOnly": true,
-      "earnOnly": false,
-      "bobble": false,
-      "sortOrder": 114,
-      "renderMetadata": {
-        "offsetX": 0,
-        "offsetY": 0,
-        "rotation": 0,
-        "scale": 1.0
-      }
-    },
-    {
-      "sku": "cycling_helmet",
-      "name": "Cycling Helmet",
-      "description": "Aero gains for your daily loop.",
-      "slot": "HEAD",
-      "priceCoins": 500,
-      "assetKey": "cycling_helmet",
-      "active": true,
-      "testOnly": true,
-      "earnOnly": false,
-      "bobble": false,
-      "sortOrder": 115,
-      "renderMetadata": {
-        "offsetX": 0,
-        "offsetY": 0,
-        "rotation": 0,
-        "scale": 1.1
-      }
-    },
-    {
-      "sku": "basketball",
-      "name": "Spinning Basketball",
-      "description": "Show off your ball control \u2014 full spin, zero hands.",
-      "slot": "HEAD",
-      "priceCoins": 750,
-      "assetKey": "basketball",
-      "active": true,
-      "testOnly": true,
-      "earnOnly": false,
-      "bobble": false,
-      "sortOrder": 116,
-      "renderMetadata": {
-        "offsetX": 0,
-        "offsetY": -0.15,
-        "rotation": 0,
-        "scale": 0.9,
-        "animationFrames": 6
-      }
-    },
-    {
-      "sku": "catchers_mask",
-      "name": "Catcher's Mask",
-      "description": "Nothing gets past you.",
-      "slot": "FACE",
-      "priceCoins": 500,
-      "assetKey": "catchers_mask",
-      "active": true,
-      "testOnly": true,
-      "earnOnly": false,
-      "bobble": false,
-      "sortOrder": 129,
-      "renderMetadata": {
-        "offsetX": 0,
-        "offsetY": 0,
-        "rotation": 0,
-        "scale": 1.1
-      }
-    },
-    {
-      "sku": "skateboard",
-      "name": "Skateboard",
-      "description": "Kickflip your commute.",
-      "slot": "FEET",
-      "priceCoins": 750,
-      "assetKey": "skateboard",
-      "active": true,
-      "testOnly": true,
-      "earnOnly": false,
-      "bobble": false,
-      "sortOrder": 150,
-      "renderMetadata": {
-        "offsetX": 0,
-        "offsetY": 0.05,
-        "rotation": 0,
-        "scale": 1.3
       }
     },
     {
@@ -1237,7 +1198,7 @@
     {
       "sku": "reindeer_antlers",
       "name": "Reindeer Antlers",
-      "description": "Lead the sleigh \u2014 or at least the leaderboard.",
+      "description": "Lead the sleigh — or at least the leaderboard.",
       "slot": "HEAD",
       "priceCoins": 500,
       "assetKey": "reindeer_antlers",
@@ -1309,6 +1270,45 @@
         "rotation": 0,
         "scale": 1.9,
         "animationFrames": 6
+      }
+    },
+    {
+      "sku": "corgi_puppy",
+      "name": "Corgi Puppy",
+      "description": "Trade your capybara for a stubby-legged speedster.",
+      "slot": "CHARACTER",
+      "priceCoins": 1000,
+      "assetKey": "corgi_puppy",
+      "active": true,
+      "testOnly": true,
+      "earnOnly": false,
+      "bobble": false,
+      "sortOrder": 200,
+      "renderMetadata": {
+        "offsetX": 0,
+        "offsetY": 0,
+        "rotation": 0,
+        "scale": 1.26906779661017,
+        "animationFrames": 6
+      }
+    },
+    {
+      "sku": "ranked_legend_crown",
+      "name": "Legend Crown",
+      "description": "Earned, never bought. Reach Legend in Ranked.",
+      "slot": "HEAD",
+      "priceCoins": 0,
+      "assetKey": "legend_crown",
+      "active": true,
+      "testOnly": false,
+      "earnOnly": true,
+      "bobble": true,
+      "sortOrder": 1000,
+      "renderMetadata": {
+        "offsetX": 0,
+        "offsetY": 0.03,
+        "rotation": 0,
+        "scale": 1
       }
     }
   ]

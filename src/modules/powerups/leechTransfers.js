@@ -32,26 +32,45 @@ function leechRatio(effect) {
 // earnedTransfer for ONE leech = floor(attackerWindowSteps / ratio), no cap.
 //
 // attackerWindowSteps = the leecher's (sourceUserId) eligible steps in
-// [startsAt, min(expiresAt|now, topOfCurrentHour)] — the in-progress hour bucket
-// is EXCLUDED until it closes, because that bucket's prorated contribution shifts
-// on every re-upsert (its periodEnd is the live endTime, not the hour boundary).
-// Excluding it makes the transferred total monotonic — the property that matters
-// once steps are minted to a visible recipient. Consequence (accepted): up to an
-// hour of lag before a burst of walking lands.
+// [startsAt, min(expiresAt|now, now)], counting ONLY CLOSED buckets — samples
+// whose periodEnd <= now (§3.4, Five-Minute Step Samples). A not-yet-closed
+// bucket is excluded until it closes, because its prorated contribution shifts on
+// every re-upload (its periodEnd is the live endTime). Excluding it makes the
+// transferred total monotonic — the property that matters once steps are minted
+// to a visible recipient. With 5-min buckets the lag drops from up to 60 min to
+// up to one bucket; identical for hour-aligned closed data.
+//
+// Capability-detected: the real StepSample model exposes sumClosedStepsInWindow
+// and takes the generalized (bucket-size-agnostic) path. Injected unit-test fakes
+// that only implement sumStepsInWindow fall back to the legacy top-of-current-hour
+// clamp so their assertions (and the "in-progress hour bucket is excluded" test)
+// stay valid.
 async function computeLeechEarnedTransfer(effect, stepSampleModel, now) {
   if (!effect || !effect.sourceUserId) return 0;
   const nowMs = (now instanceof Date ? now : new Date(now)).getTime();
-  const currentHourStart = Math.floor(nowMs / HOUR_MS) * HOUR_MS;
   const windowStart = new Date(effect.startsAt).getTime();
   const rawEnd = effect.expiresAt ? new Date(effect.expiresAt).getTime() : nowMs;
-  const windowEnd = Math.min(rawEnd, currentHourStart);
-  if (!(windowEnd > windowStart)) return 0;
 
-  const steps = await stepSampleModel.sumStepsInWindow(
-    effect.sourceUserId,
-    new Date(windowStart),
-    new Date(windowEnd)
-  );
+  let steps;
+  if (typeof stepSampleModel.sumClosedStepsInWindow === "function") {
+    const windowEnd = Math.min(rawEnd, nowMs);
+    if (!(windowEnd > windowStart)) return 0;
+    steps = await stepSampleModel.sumClosedStepsInWindow(
+      effect.sourceUserId,
+      new Date(windowStart),
+      new Date(windowEnd),
+      new Date(nowMs)
+    );
+  } else {
+    const currentHourStart = Math.floor(nowMs / HOUR_MS) * HOUR_MS;
+    const windowEnd = Math.min(rawEnd, currentHourStart);
+    if (!(windowEnd > windowStart)) return 0;
+    steps = await stepSampleModel.sumStepsInWindow(
+      effect.sourceUserId,
+      new Date(windowStart),
+      new Date(windowEnd)
+    );
+  }
   if (!(steps > 0)) return 0;
   return Math.floor(steps / leechRatio(effect));
 }

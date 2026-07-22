@@ -90,6 +90,25 @@ function createAuthRouter(dependencies = {}) {
         return fallback;
       }
     };
+    // Numeric feature flag (Five-Minute Step Samples §3.2). Returns the stored
+    // value only when it is an integer in `allowed`; anything else (absent, null,
+    // non-numeric, out-of-set, or a missing getRawFlag on an older settings
+    // service) yields undefined so the key is OMITTED and the client defaults to
+    // its own hourly fallback.
+    const safeNumber = async (key, allowed) => {
+      try {
+        if (typeof appSettings.getRawFlag !== "function") return undefined;
+        const value = await appSettings.getRawFlag(key);
+        const num = typeof value === "number" ? value : Number(value);
+        return Number.isInteger(num) && allowed.includes(num) ? num : undefined;
+      } catch {
+        return undefined;
+      }
+    };
+    const stepSampleBucketMinutes = await safeNumber(
+      "stepSampleBucketMinutes",
+      [5, 10, 15, 30, 60]
+    );
     return {
       ...user,
       featureFlags: {
@@ -97,6 +116,9 @@ function createAuthRouter(dependencies = {}) {
         dualBoxBannersEnabled: await safeFlag("dualBoxBannersEnabled", false),
         teamRacesEnabled: await safeFlag("teamRacesEnabled", true),
         onboardingV2Enabled: await safeFlag("onboardingV2Enabled", false),
+        ...(stepSampleBucketMinutes !== undefined
+          ? { stepSampleBucketMinutes }
+          : {}),
       },
     };
   }

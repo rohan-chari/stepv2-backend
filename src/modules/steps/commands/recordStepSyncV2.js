@@ -232,7 +232,9 @@ function buildRecordStepSyncV2(dependencies = {}) {
         await tx.user.update({ where: { id: userId }, data: { lastStepSyncAt: now() } });
         if (cleaned.length > 0) {
           const { StepSample } = require("../models/stepSample");
-          await StepSample.upsertBatchOn(tx, userId, cleaned);
+          // §3.3 overlap resolution inside Transaction A (same tx as steps +
+          // reservation), so mixed hourly/5-min data never double-counts.
+          await StepSample.reconcileBatchOn(tx, userId, cleaned);
         }
         const res = await stepSyncRequestModel.createReservation(
           {

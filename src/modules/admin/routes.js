@@ -12,6 +12,9 @@ const {
 } = require("../economy/balanceConfig");
 const { serializeBounds } = require("../economy/balanceConfig.defaults");
 
+// Allowed values for the numeric stepSampleBucketMinutes setting (§3.2).
+const STEP_SAMPLE_BUCKET_MINUTES = new Set([5, 10, 15, 30, 60]);
+
 const RENDER_METADATA_NUMBER_KEYS = ["offsetX", "offsetY", "rotation", "scale"];
 const RENDER_METADATA_RENDER_LAYERS = new Set(["front", "behind"]);
 
@@ -130,7 +133,9 @@ function createAdminRouter(dependencies = {}) {
   });
 
   // Body: any subset of the known flags, e.g. { bannerAdsEnabled: false }.
-  // Unknown keys 400 so a typo never silently writes a dead setting.
+  // Boolean flags require a boolean; the numeric stepSampleBucketMinutes flag
+  // (Five-Minute Step Samples §3.2) requires one of {5,10,15,30,60}. Unknown keys
+  // 400 (via setFlag) so a typo never silently writes a dead setting.
   router.patch("/settings", async (req, res) => {
     try {
       const body = req.body || {};
@@ -139,6 +144,15 @@ function createAdminRouter(dependencies = {}) {
         return res.status(400).json({ error: "No settings supplied" });
       }
       for (const [key, value] of entries) {
+        if (key === "stepSampleBucketMinutes") {
+          if (!Number.isInteger(value) || !STEP_SAMPLE_BUCKET_MINUTES.has(value)) {
+            return res.status(400).json({
+              error: "stepSampleBucketMinutes must be one of 5, 10, 15, 30, 60",
+            });
+          }
+          await settings.setFlag(key, value);
+          continue;
+        }
         if (typeof value !== "boolean") {
           return res.status(400).json({ error: `${key} must be a boolean` });
         }

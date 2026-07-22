@@ -38,6 +38,13 @@ const KNOWN_FLAGS = {
   // so flipping this off stops new entries while already-filled brackets finish
   // and pay their champion. Default ON.
   tournamentsEnabled: true,
+  // Step-sample upload granularity in minutes (Five-Minute Step Samples §3.2).
+  // NUMERIC flag, allowed set {5,10,15,30,60}. Default 60 = hourly (today's
+  // behavior). Served on /auth/me via a defensive safeNumber that OMITS the key
+  // unless a valid value is stored, so old backends / absent rows / invalid
+  // values all make the client fall back to 60. Registered here so the admin
+  // settings surface can set it (setFlag rejects unknown keys).
+  stepSampleBucketMinutes: 60,
 };
 
 function buildAppSettings(dependencies = {}) {
@@ -74,6 +81,19 @@ function buildAppSettings(dependencies = {}) {
     }
   }
 
+  // Raw stored value of a setting, or undefined if no row exists (NO default
+  // substitution). Used by numeric flags (stepSampleBucketMinutes) whose served
+  // shape must distinguish "explicitly stored" from "absent" so the client can
+  // apply its own fallback. Degrades to undefined on any read failure.
+  async function getRawFlag(key) {
+    try {
+      const all = await loadAll();
+      return all[key];
+    } catch {
+      return undefined;
+    }
+  }
+
   // All known flags resolved (defaults filled in) — the admin settings screen
   // shape. Throws on DB failure so admin sees the error rather than silently
   // editing defaults.
@@ -106,7 +126,14 @@ function buildAppSettings(dependencies = {}) {
     cache = null; // bust so this process serves the new value immediately
   }
 
-  return { getFlag, getAllFlags, setFlag, KNOWN_FLAGS };
+  // Force the next read to hit the DB. setFlag already busts on write; this is
+  // for out-of-band mutations (a peer process, or a test writing app_settings
+  // directly) that need immediate read-through in THIS process.
+  function bustCache() {
+    cache = null;
+  }
+
+  return { getFlag, getRawFlag, getAllFlags, setFlag, bustCache, KNOWN_FLAGS };
 }
 
 const appSettings = buildAppSettings();

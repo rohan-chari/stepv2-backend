@@ -15,6 +15,7 @@ const {
   scheduleComputeRankedWeeks,
 } = require("./modules/ranked");
 const { scheduleGlobalStepEvents } = require("./modules/steps");
+const { scheduleStepSampleRetention } = require("./modules/steps");
 const {
   scheduleAutoStartScheduledRaces,
 } = require("./modules/races");
@@ -44,6 +45,7 @@ function startServer({
   scheduleComputeRanks: scheduleRanks = scheduleComputeRanks,
   scheduleComputeRankedWeeks: scheduleRankedWeeks = scheduleComputeRankedWeeks,
   scheduleGlobalStepEvents: scheduleGlobalEvents = scheduleGlobalStepEvents,
+  scheduleStepSampleRetention: scheduleStepRetention = scheduleStepSampleRetention,
   scheduleAutoStartScheduledRaces:
     scheduleAutoStartRaces = scheduleAutoStartScheduledRaces,
   scheduleRecomputePlacements: scheduleLivePlacements = scheduleRecomputePlacements,
@@ -91,6 +93,18 @@ function startServer({
       }
       if (process.env.ACTIVATION_EVENT_CLEANUP_DISABLED !== "true") {
         scheduleActivationCleanup();
+      }
+      // step_samples retention prune (3am ET, 45d + unsettled-race guard;
+      // Five-Minute Step Samples §4.1). Kill switch: STEP_SAMPLE_RETENTION_DISABLED=true.
+      //
+      // ROLLOUT (SHIPPED DARK): this MUST be set to "true" in the prod .env on
+      // the initial deploy. The first prod run has to be manually observed (it
+      // logs its delete count) BEFORE the switch is removed — an un-observed
+      // first prune of a mis-computed cutoff is unrecoverable. The build function
+      // ALSO honors the env var, so even if scheduled it no-ops while the switch
+      // is "true". Unset (not "true") => the cron RUNS, so do not forget the .env.
+      if (process.env.STEP_SAMPLE_RETENTION_DISABLED !== "true") {
+        scheduleStepRetention();
       }
       // Daily biggest-mover digest (4pm ET) — like live placement, this can push to
       // the whole active-racer base, so it gets its own kill switch:
