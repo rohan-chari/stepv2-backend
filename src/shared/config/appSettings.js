@@ -18,6 +18,9 @@ const KNOWN_FLAGS = {
   // remote kill switch layered on top. Default OFF (product decision 2026-07-12:
   // banners removed at 70 DAU; rewarded placements are unaffected).
   bannerAdsEnabled: false,
+  // Adds a dedicated top banner to box-opening routes. Kept separate from the
+  // master banner switch so it can be rolled back independently.
+  dualBoxBannersEnabled: false,
   // Team Race Mode creation kill switch (TR-107). When false the server rejects
   // NEW team-race creation (403 FEATURE_DISABLED) and clients hide the create
   // toggle via remote config; existing team races are unaffected (they run,

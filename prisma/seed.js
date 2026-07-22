@@ -231,6 +231,18 @@ async function seed() {
       testOnly: true,
       sortOrder: 7,
     },
+    {
+      // Store-only, powerups4-gated multi-target freeze. Remains dark through
+      // the carrying app's phased rollout.
+      sku: "POWERUP_QUICKSAND",
+      name: "Quicksand",
+      description: "Freeze the steps of up to three rivals for 2 hours. Compression Socks block each target independently; Mirrors can't reflect it.",
+      priceCoins: 300,
+      powerupType: "QUICKSAND",
+      active: true,
+      testOnly: true,
+      sortOrder: 8,
+    },
   ];
   let powerupItemsUpserted = 0;
   for (const p of powerupShopItems) {

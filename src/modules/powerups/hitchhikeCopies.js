@@ -27,6 +27,7 @@
 // box progress — no special case is needed or wanted.
 
 const HOUR_MS = 60 * 60 * 1000;
+const { computeEffectModifiers } = require("../races/services/effectiveStepScoring");
 
 // Default copy strength when an effect row carries no (or malformed)
 // `metadata.copyRatio`. Mirrors leechRatio: reading it per-effect makes the copy
@@ -65,7 +66,9 @@ async function computeHitchhikeCopiedSteps(
   effect,
   stepSampleModel,
   now,
-  { raceEndsAt = null, targetFinishedAt = null, targetForfeitedAt = null } = {}
+  { raceEndsAt = null, targetFinishedAt = null, targetForfeitedAt = null,
+    targetParticipantId = null, raceId = null, raceActiveEffectModel = null,
+    globalEvents = [] } = {}
 ) {
   if (!effect || !effect.targetUserId || !effect.sourceUserId) return 0;
   const nowMs = (now instanceof Date ? now : new Date(now)).getTime();
@@ -90,7 +93,34 @@ async function computeHitchhikeCopiedSteps(
     new Date(windowEnd)
   );
   if (!(steps > 0)) return 0;
-  return Math.floor(steps * hitchhikeCopyRatio(effect));
+
+  const scoringVersion = Number(effect.metadata?.scoringVersion) || 1;
+  if (scoringVersion < 2 || !targetParticipantId || !raceId ||
+      typeof raceActiveEffectModel?.findEffectsForRaceByTypes !== "function") {
+    return Math.floor(steps * hitchhikeCopyRatio(effect));
+  }
+
+  // Run the exact shared leaderboard scorer through an adapter that clips
+  // every interval read to this Hitchhike window.
+  const types = ["LEG_CRAMP", "QUICKSAND", "RUNNERS_HIGH", "WRONG_TURN", "CAMPFIRE_REST", "RAINSTORM"];
+  const byType = await raceActiveEffectModel.findEffectsForRaceByTypes(raceId, targetParticipantId, types);
+  const targetEffects = types.flatMap((type) => byType[type] || []);
+  const clippedSamples = {
+    async sumStepsInWindow(userId, start, end) {
+      const clippedStart = new Date(Math.max(new Date(start).getTime(), windowStart));
+      const clippedEnd = new Date(Math.min(new Date(end).getTime(), windowEnd));
+      if (!(clippedEnd > clippedStart)) return 0;
+      return stepSampleModel.sumStepsInWindow(userId, clippedStart, clippedEnd);
+    },
+  };
+  const modifiers = await computeEffectModifiers(
+    targetEffects, steps, effect.targetUserId, clippedSamples, true,
+    globalEvents.length ? { globalEvents, now: new Date(windowEnd) } : null,
+    new Date(windowEnd)
+  );
+  const effective = steps - modifiers.frozenSteps + modifiers.buffedSteps -
+    2 * modifiers.reversedSteps + (modifiers.globalBoostedSteps || 0);
+  return Math.floor(effective * hitchhikeCopyRatio(effect));
 }
 
 // Every hitchhike copy in a race, in ONE bulk query.
@@ -110,6 +140,7 @@ async function collectRaceHitchhikeCopies({
   raceActiveEffectModel,
   stepSampleModel,
   now,
+  globalEvents = [],
 }) {
   if (
     !raceActiveEffectModel ||
@@ -145,9 +176,15 @@ async function collectRaceHitchhikeCopies({
         raceEndsAt,
         targetFinishedAt: target ? target.finishedAt : null,
         targetForfeitedAt: target ? target.forfeitedAt : null,
+        targetParticipantId: target ? target.id : effect.targetParticipantId,
+        raceId,
+        raceActiveEffectModel,
+        globalEvents,
       }
     );
-    if (copiedSteps <= 0) continue;
+    // v2 contributions may be negative (Wrong Turn). Legacy computation above
+    // remains non-negative; retain either sign and drop only exact zero.
+    if (copiedSteps === 0) continue;
     copies.push({
       effectId: effect.id,
       startsAt: effect.startsAt,
@@ -171,7 +208,7 @@ function hitchhikeCreditBySourceUser(copies) {
   for (const c of copies || []) {
     if (!c || !c.sourceUserId) continue;
     const amount = Number(c.copiedSteps) || 0;
-    if (amount <= 0) continue;
+    if (amount === 0) continue;
     credit.set(c.sourceUserId, (credit.get(c.sourceUserId) || 0) + amount);
   }
   return credit;
@@ -191,8 +228,8 @@ function applyHitchhikeCopies(entries, copies) {
   if (credit.size === 0) return entries;
   return entries.map((e) => {
     const add = credit.get(e.userId) || 0;
-    if (add <= 0) return e;
-    return { ...e, preLeechTotal: (e.preLeechTotal || 0) + add };
+    if (add === 0) return e;
+    return { ...e, preLeechTotal: Math.max(0, (e.preLeechTotal || 0) + add) };
   });
 }
 

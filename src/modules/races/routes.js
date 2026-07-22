@@ -651,7 +651,8 @@ function createRacesRouter(dependencies = {}) {
         req.timeZone,
         req.clientFeatures?.has("characters") ?? false,
         // §9.3: Hitchhike effect entries are only rendered by powerups3 builds.
-        req.clientFeatures?.has("powerups3") ?? false
+        req.clientFeatures?.has("powerups3") ?? false,
+        req.clientFeatures?.has("powerups4") ?? false
       );
       res.json({ progress });
     } catch (error) {
@@ -669,6 +670,9 @@ function createRacesRouter(dependencies = {}) {
   // in-race tray. Additive; only the new app calls this.
   router.post("/:raceId/powerups/redeem", async (req, res) => {
     try {
+      if (req.body?.powerupType === "QUICKSAND" && !req.clientFeatures?.has("powerups4")) {
+        return res.status(400).json({ error: "Update required to use Quicksand", code: "UPDATE_REQUIRED" });
+      }
       const result = await redeemPowerupToRace({
         userId: req.user.id,
         raceId: req.params.raceId,
@@ -691,6 +695,7 @@ function createRacesRouter(dependencies = {}) {
     try {
       const {
         targetUserId,
+        targetUserIds,
         targetDirection,
         swapOfferedPowerupId,
         swapRequestedPowerupId,
@@ -702,6 +707,7 @@ function createRacesRouter(dependencies = {}) {
         raceId: req.params.raceId,
         powerupId: req.params.powerupId,
         targetUserId,
+        targetUserIds,
         targetDirection,
         swapOfferedPowerupId,
         swapRequestedPowerupId,
@@ -807,7 +813,11 @@ function createRacesRouter(dependencies = {}) {
   // GET /races/:raceId/inventory
   router.get("/:raceId/inventory", async (req, res) => {
     try {
-      const result = await getRaceInventory(req.user.id, req.params.raceId);
+      const result = await getRaceInventory(
+        req.user.id,
+        req.params.raceId,
+        req.clientFeatures?.has("powerups4") ?? false
+      );
       res.json(result);
     } catch (error) {
       if (error.statusCode) {
@@ -825,6 +835,7 @@ function createRacesRouter(dependencies = {}) {
       const result = await getRaceFeed(req.user.id, req.params.raceId, {
         cursor,
         limit: limit ? parseInt(limit, 10) : undefined,
+        supportsPowerups4: req.clientFeatures?.has("powerups4") ?? false,
       });
       res.json(result);
     } catch (error) {

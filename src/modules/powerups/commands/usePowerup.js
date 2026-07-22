@@ -6,6 +6,7 @@ const { Race } = require("../../races/models/race");
 const { User } = require("../../users");
 const { PowerupUpgradeEvent } = require("../models/powerupUpgradeEvent");
 const { eventBus } = require("../../../shared/events/eventBus");
+const { prisma: defaultPrisma } = require("../../../db");
 const { balanceConfig } = require("../../economy/balanceConfig");
 const { POWERUP_NAMES } = require("./rollPowerup");
 const {
@@ -113,7 +114,8 @@ const LEECH_MAX_PER_VICTIM = 2;
 // zero-sum, so concurrent links would compound.
 const HITCHHIKE_DURATION_MS = 60 * 60 * 1000;
 const HITCHHIKE_COPY_RATIO = 1;
-const HITCHHIKE_SCORING_VERSION = 1;
+const HITCHHIKE_LEGACY_SCORING_VERSION = 1;
+const HITCHHIKE_EFFECTIVE_SCORING_VERSION = 2;
 const HITCHHIKE_MAX_PER_TARGET = 1;
 // QUICK_RINSE (§8): store-only, SELF-ONLY, instantaneous. Halves the REMAINING
 // duration of every active timed opponent-inflicted effect on the user. Never
@@ -232,6 +234,11 @@ function hoursText(type, upgradeLevel) {
   return hours === 1 ? "1 hour" : `${hours} hours`;
 }
 
+function durationText(durationMs) {
+  const hours = durationMs / (60 * 60 * 1000);
+  return hours === 1 ? "1 hour" : `${hours} hours`;
+}
+
 // TR-902: races are time-based, so nobody finishes mid-race — there is no
 // finished/active split left to make. Ranking is purely by steps desc.
 function sortedActiveParticipants(participants) {
@@ -274,6 +281,7 @@ function luckyMinRarity(upgradeLevel, rng = Math.random, config) {
 }
 
 function buildUsePowerup(dependencies = {}) {
+  const db = dependencies.prisma || defaultPrisma;
   const hasInjectedDeps = Object.keys(dependencies).length > 0;
   const powerupModel = dependencies.RacePowerup || RacePowerup;
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
@@ -311,6 +319,7 @@ function buildUsePowerup(dependencies = {}) {
     raceId,
     powerupId,
     targetUserId,
+    targetUserIds,
     targetDirection,
     swapOfferedPowerupId,
     swapRequestedPowerupId,
@@ -396,6 +405,10 @@ function buildUsePowerup(dependencies = {}) {
     let actingUserId = userId;
     const type = powerup.type;
 
+    if (type !== "QUICKSAND" && targetUserIds !== undefined) {
+      throw new PowerupUseError("targetUserIds is only valid for Quicksand", 400, "INVALID_TARGETS");
+    }
+
     // Imposter is DISABLED for now (Item 3). Reject the use with a friendly
     // message and — crucially — do NOT consume the item (this runs before coin
     // deduction and the mark-USED step, so the powerup stays HELD). Old clients
@@ -435,6 +448,112 @@ function buildUsePowerup(dependencies = {}) {
     const isEnemy = (p) =>
       !isTeamRace || (p.team != null && p.team !== myParticipant.team);
     const isAliveTarget = (p) => !p.finishedAt && !p.forfeitedAt;
+
+    // Quicksand is a capability-gated multi-target command. Resolve and
+    // validate the complete set before the first write so malformed or stale
+    // submissions consume nothing.
+    if (type === "QUICKSAND") {
+      if (!requestHasFeature(clientFeatures, "powerups4")) {
+        throw new PowerupUseError("Update required to use Quicksand", 400, "UPDATE_REQUIRED");
+      }
+      if (targetUserId !== undefined && targetUserId !== null) {
+        throw new PowerupUseError("Quicksand requires targetUserIds", 400, "INVALID_TARGETS");
+      }
+      if (!Array.isArray(targetUserIds) || targetUserIds.length < 1 || targetUserIds.length > 3 ||
+          targetUserIds.some((id) => typeof id !== "string" || id.trim() !== id || !id)) {
+        throw new PowerupUseError("Quicksand requires 1 to 3 target user IDs", 400, "INVALID_TARGETS");
+      }
+      if (new Set(targetUserIds).size !== targetUserIds.length || targetUserIds.includes(userId)) {
+        throw new PowerupUseError("Quicksand targets must be distinct rivals", 400, "INVALID_TARGETS");
+      }
+      const victims = targetUserIds.map((id) => acceptedParticipants.find((p) => p.userId === id));
+      if (victims.some((p) => !p || !isAliveTarget(p) || (isTeamRace && !isEnemy(p)))) {
+        throw new PowerupUseError("Every Quicksand target must be an active enemy", 400, "INVALID_TARGET");
+      }
+      for (const victim of victims) {
+        const [cramp, quicksand] = await Promise.all([
+          effectModel.findActiveByTypeForParticipant(victim.id, "LEG_CRAMP"),
+          effectModel.findActiveByTypeForParticipant(victim.id, "QUICKSAND"),
+        ]);
+        if (cramp || quicksand) {
+          throw new PowerupUseError("A selected target is already frozen", 400, "TARGET_ALREADY_FROZEN");
+        }
+      }
+
+      const currentTime = now();
+      const expiresAt = new Date(currentTime.getTime() + 2 * 60 * 60 * 1000);
+      const targetResults = await db.$transaction(async (tx) => {
+        // Serialize Quicksand submissions within a race. This closes both the
+        // same-item double-submit race and two items racing to freeze one target.
+        await tx.$queryRaw`SELECT id FROM races WHERE id = ${raceId} FOR UPDATE`;
+        const lockedRace = await tx.race.findUnique({
+          where: { id: raceId },
+          include: { participants: true },
+        });
+        if (!lockedRace || lockedRace.status !== "ACTIVE" ||
+            (lockedRace.endsAt && currentTime >= new Date(lockedRace.endsAt))) {
+          throw new PowerupUseError("Race has ended", 409, "RACE_ENDED");
+        }
+        const lockedMe = lockedRace.participants.find((p) => p.userId === userId && p.status === "ACCEPTED");
+        const lockedVictims = targetUserIds.map((id) => lockedRace.participants.find((p) => p.userId === id));
+        if (!lockedMe || lockedVictims.some((p) => !p || p.status !== "ACCEPTED" || p.finishedAt || p.forfeitedAt ||
+            (lockedRace.isTeamRace && (p.team == null || p.team === lockedMe.team)))) {
+          throw new PowerupUseError("Every Quicksand target must be an active enemy", 400, "INVALID_TARGET");
+        }
+        const claimed = await tx.racePowerup.updateMany({
+          where: { id: powerupId, userId, raceId, status: "HELD", type: "QUICKSAND" },
+          data: { status: "USED", usedAt: currentTime, targetUserId: null, upgradeLevel: 0 },
+        });
+        if (claimed.count !== 1) {
+          throw new PowerupUseError("This Quicksand has already been used", 409, "POWERUP_ALREADY_USED");
+        }
+        const results = [];
+        for (const victim of lockedVictims) {
+          const existingFreeze = await tx.raceActiveEffect.findFirst({
+            where: { targetParticipantId: victim.id, type: { in: ["LEG_CRAMP", "QUICKSAND"] }, status: "ACTIVE" },
+          });
+          if (existingFreeze) {
+            throw new PowerupUseError("A selected target is already frozen", 400, "TARGET_ALREADY_FROZEN");
+          }
+          const shield = await tx.raceActiveEffect.findFirst({
+            where: { targetParticipantId: victim.id, type: "COMPRESSION_SOCKS", status: "ACTIVE" },
+            orderBy: { createdAt: "asc" },
+          });
+          if (shield) {
+            await tx.raceActiveEffect.update({ where: { id: shield.id }, data: { status: "BLOCKED" } });
+            results.push({ targetUserId: victim.userId, outcome: "BLOCKED", expiresAt: null });
+          } else {
+            await tx.raceActiveEffect.create({ data: {
+              raceId, targetParticipantId: victim.id, targetUserId: victim.userId,
+              sourceUserId: userId, powerupId, type: "QUICKSAND", status: "ACTIVE",
+              startsAt: currentTime, expiresAt,
+              metadata: { stepsAtFreezeStart: victim.totalSteps || 0 },
+            } });
+            results.push({ targetUserId: victim.userId, outcome: "APPLIED", expiresAt });
+          }
+        }
+        await tx.racePowerupEvent.create({ data: {
+          raceId, actorUserId: userId, eventType: "POWERUP_USED", powerupType: "QUICKSAND",
+          description: `${myDisplayName} used Quicksand on ${victims.length} rival${victims.length === 1 ? "" : "s"}!`,
+          metadata: { targetResults: results.map((r) => ({ targetUserId: r.targetUserId, outcome: r.outcome })) },
+        } });
+        return results;
+      });
+      for (const targetResult of targetResults) {
+        events.emit(targetResult.outcome === "APPLIED" ? "POWERUP_USED" : "POWERUP_BLOCKED", targetResult.outcome === "APPLIED"
+          ? { raceId, userId, powerupType: type, targetUserId: targetResult.targetUserId, upgradeLevel: 0 }
+          : { raceId, attackerUserId: userId, defenderUserId: targetResult.targetUserId, blockedType: type, upgradeLevel: 0 });
+      }
+      await resolveRaceState({ raceId, timeZone });
+      await syncRacePowerupState({ raceId, userId });
+      const applied = targetResults.filter((r) => r.outcome === "APPLIED").length;
+      return {
+        blocked: applied === 0,
+        outcome: applied === 0 ? "BLOCKED" : applied === targetResults.length ? "APPLIED" : "PARTIAL",
+        durationMs: 2 * 60 * 60 * 1000,
+        targetResults,
+      };
+    }
 
     // Rainstorm is untargeted (hits every other racer) and never stacks: while
     // any rainstorm is active in the race, another cannot be started. In a team
@@ -1152,7 +1271,9 @@ function buildUsePowerup(dependencies = {}) {
           expiresAt: new Date(currentTime.getTime() + HITCHHIKE_DURATION_MS),
           metadata: {
             copyRatio: HITCHHIKE_COPY_RATIO,
-            scoringVersion: HITCHHIKE_SCORING_VERSION,
+            scoringVersion: requestHasFeature(clientFeatures, "hitchhike_effective_steps")
+              ? HITCHHIKE_EFFECTIVE_SCORING_VERSION
+              : HITCHHIKE_LEGACY_SCORING_VERSION,
           },
         });
         result.effect = effect;
@@ -1547,6 +1668,9 @@ function buildUsePowerup(dependencies = {}) {
       }
 
       case "STEALTH_MODE": {
+        const stealthDurationMs = requestHasFeature(clientFeatures, "stealth_runner_duration")
+          ? upgradedDuration("RUNNERS_HIGH", upgradeLevel)
+          : upgradedDuration("STEALTH_MODE", upgradeLevel);
         const effect = await effectModel.create({
           raceId,
           targetParticipantId: myParticipant.id,
@@ -1555,16 +1679,17 @@ function buildUsePowerup(dependencies = {}) {
           powerupId,
           type: "STEALTH_MODE",
           startsAt: currentTime,
-          expiresAt: new Date(currentTime.getTime() + upgradedDuration("STEALTH_MODE", upgradeLevel)),
+          expiresAt: new Date(currentTime.getTime() + stealthDurationMs),
         });
         result.effect = effect;
+        result.durationMs = stealthDurationMs;
 
         await eventModel.create({
           raceId,
           actorUserId: userId,
           eventType: "POWERUP_USED",
           powerupType: type,
-          description: `${myDisplayName} activated ${levelPrefix(upgradeLevel)}Stealth Mode! Their progress is hidden for ${hoursText("STEALTH_MODE", upgradeLevel)}.`,
+          description: `${myDisplayName} activated ${levelPrefix(upgradeLevel)}Stealth Mode! Their progress is hidden for ${durationText(stealthDurationMs)}.`,
         });
         break;
       }

@@ -72,12 +72,7 @@
       "HITCHHIKE",
       "QUICK_RINSE"
     ],
-    "dailyBoxExcludedTypes": [
-      "DEFENSE_SCAN",
-      "LEECH",
-      "HITCHHIKE",
-      "QUICK_RINSE"
-    ],
+    "dailyBoxExcludedTypes": [],
     "typeWeights": {
       "RED_CARD": 0.5
     },

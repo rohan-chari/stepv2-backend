@@ -5,6 +5,7 @@ const { PowerupCopy } = require("../models/powerupCopy");
 const {
   POWERUPS2_GATED_TYPES,
   POWERUPS3_GATED_TYPES,
+  POWERUPS4_GATED_TYPES,
   isImposterDisabledForCatalog,
 } = require("../constants/powerupGating");
 
@@ -25,6 +26,7 @@ function buildGetPowerupShopCatalog(deps = {}) {
       supportsJammer = false,
       supportsPowerups2 = false,
       supportsPowerups3 = false,
+      supportsPowerups4 = false,
     } = {}
   ) {
     const [coins, items, inventory, copyRows] = await Promise.all([
@@ -73,6 +75,7 @@ function buildGetPowerupShopCatalog(deps = {}) {
       if (!supportsPowerups3 && POWERUPS3_GATED_TYPES.includes(item.powerupType)) {
         return false;
       }
+      if (!supportsPowerups4 && POWERUPS4_GATED_TYPES.includes(item.powerupType)) return false;
       return true;
     });
 

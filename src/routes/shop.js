@@ -40,6 +40,7 @@ function createShopRouter(dependencies = {}) {
         supportsJammer: req.clientFeatures.has("jammer"),
         supportsPowerups2: req.clientFeatures.has("powerups2"),
         supportsPowerups3: req.clientFeatures.has("powerups3"),
+        supportsPowerups4: req.clientFeatures.has("powerups4"),
       });
       res.json(result);
     } catch (error) {
@@ -51,6 +52,9 @@ function createShopRouter(dependencies = {}) {
   // POST /shop/powerups/purchase — buy a powerup (idempotent via Idempotency-Key).
   router.post("/powerups/purchase", async (req, res) => {
     try {
+      if (req.body?.powerupType === "QUICKSAND" && !req.clientFeatures.has("powerups4")) {
+        return res.status(404).json({ error: "Powerup not found" });
+      }
       const result = await purchasePowerupItem({
         userId: req.user.id,
         sku: req.body.sku,

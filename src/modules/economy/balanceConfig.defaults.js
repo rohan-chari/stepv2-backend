@@ -174,7 +174,7 @@ const DEFAULT_CONFIG = {
   // `itemOdds.powerups: [{ "type": "SIGNAL_JAMMER", "p": 0.5 }]`, which is only
   // possible if Signal Jammer remains daily-box winnable. Splitting the keys
   // keeps ONE authority per question, which is what D13 is actually after.
-  dailyBoxExcludedTypes: ["DEFENSE_SCAN", "LEECH", "HITCHHIKE", "QUICK_RINSE"],
+  dailyBoxExcludedTypes: [],
 
   // Relative weight WITHIN a tier once the tier has been chosen. Absent == 1.0.
   // RED_CARD at 0.5 is the "red card nerf": half as likely as a uniform rare

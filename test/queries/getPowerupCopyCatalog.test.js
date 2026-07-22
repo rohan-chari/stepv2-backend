@@ -175,8 +175,8 @@ test("seeded copy matches the pre-migration frontend strings, except the intenti
   assert.equal(byType.LEG_CRAMP.shortDescription, "Steps frozen");
   assert.equal(
     Object.values(byType).filter((r) => r.shortDescription != null).length,
-    16,
-    "the 15 pre-existing short descriptions plus Hitchhike's"
+    17,
+    "the 15 pre-existing short descriptions plus Hitchhike's and Quicksand's"
   );
   // The one intentional change.
   assert.match(byType.LEECH.description, /^For 60 min, /);

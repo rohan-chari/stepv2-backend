@@ -1,5 +1,6 @@
 const { PowerupShopItem } = require("../models/powerupShopItem");
 const { balanceConfig } = require("../../economy/balanceConfig");
+const { POWERUPS2_GATED_TYPES, POWERUPS3_GATED_TYPES, POWERUPS4_GATED_TYPES, isImposterDisabledForCatalog } = require("../constants/powerupGating");
 
 // Active shop powerups a daily-box RARE roll may award, and the preview shown
 // on the reel for spinpowerups-capable clients. Mirrors getUnownedAccessoryPool
@@ -15,6 +16,9 @@ const { balanceConfig } = require("../../economy/balanceConfig");
 async function getEligiblePowerupPool({
   channel = "prod",
   supportsJammer = false,
+  supportsPowerups2 = false,
+  supportsPowerups3 = false,
+  supportsPowerups4 = false,
   powerupShopItemModel = PowerupShopItem,
   config = null,
 } = {}) {
@@ -36,6 +40,10 @@ async function getEligiblePowerupPool({
   return items.filter((item) => {
     // Signal Jammer stays gated behind the `jammer` client-feature.
     if (!supportsJammer && item.powerupType === "SIGNAL_JAMMER") return false;
+    if (!supportsPowerups2 && POWERUPS2_GATED_TYPES.includes(item.powerupType)) return false;
+    if (!supportsPowerups3 && POWERUPS3_GATED_TYPES.includes(item.powerupType)) return false;
+    if (!supportsPowerups4 && POWERUPS4_GATED_TYPES.includes(item.powerupType)) return false;
+    if (isImposterDisabledForCatalog(item.powerupType)) return false;
     if (excluded.includes(item.powerupType)) return false;
     return true;
   });

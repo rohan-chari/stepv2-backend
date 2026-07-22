@@ -1,7 +1,7 @@
 const { Race } = require("../../races/models/race");
 const { RacePowerup } = require("../models/racePowerup");
 
-async function getRaceInventory(userId, raceId) {
+async function getRaceInventory(userId, raceId, supportsPowerups4 = false) {
   const race = await Race.findById(raceId);
   if (!race) {
     const error = new Error("Race not found");
@@ -20,7 +20,7 @@ async function getRaceInventory(userId, raceId) {
   const mysteryBoxes = await RacePowerup.findMysteryBoxesByParticipant(myParticipant.id);
 
   return {
-    inventory: held.map((p) => ({
+    inventory: held.filter((p) => supportsPowerups4 || p.type !== "QUICKSAND").map((p) => ({
       id: p.id,
       type: p.type,
       rarity: p.rarity,

@@ -130,6 +130,7 @@ function buildReconcileUploaderRaces(dependencies = {}) {
               raceActiveEffectModel,
               stepSampleModel,
               now: currentTime,
+              globalEvents,
             })
           : [];
 

@@ -97,6 +97,7 @@ async function resolveExpiredRaces() {
             stepsModel: Steps,
             stepSampleModel: StepSample,
             now: settlementTime,
+            globalEvents,
           });
 
         const { total, leechTransfers, legCramps, runnersHighs, wrongTurns } =

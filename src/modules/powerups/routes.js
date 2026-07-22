@@ -26,9 +26,9 @@ function createPowerupsRouter(dependencies = {}) {
   // non-blockingly on launch" needs. Old clients never call it; a new client
   // against an older backend gets a 404 and falls back to its persisted or
   // bundled copy, retrying on the next launch/foreground.
-  router.get("/catalog", async (_req, res) => {
+  router.get("/catalog", async (req, res) => {
     try {
-      const result = await getPowerupCopyCatalog();
+      const result = await getPowerupCopyCatalog(req.clientFeatures || new Set());
       res.json(result);
     } catch (error) {
       console.error("Get powerup copy catalog error:", error);
@@ -41,7 +41,10 @@ function createPowerupsRouter(dependencies = {}) {
   // GET /powerups/inventory — the user's owned powerup quantities.
   router.get("/inventory", async (req, res) => {
     try {
-      const result = await getPowerupInventory(req.user.id);
+      const result = await getPowerupInventory(
+        req.user.id,
+        req.clientFeatures?.has("powerups4") ?? false
+      );
       res.json(result);
     } catch (error) {
       console.error("Get powerup inventory error:", error);

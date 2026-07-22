@@ -77,6 +77,7 @@ test("POST /auth/apple provisions the signed-in user", async () => {
       isAdmin: false,
       featureFlags: {
         bannerAdsEnabled: false,
+        dualBoxBannersEnabled: false,
         teamRacesEnabled: true,
         onboardingV2Enabled: false,
       },

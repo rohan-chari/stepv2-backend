@@ -713,6 +713,7 @@ function registerNotificationHandlers(dependencies = {}) {
     // that turns an unexplained score change into an incomprehensible one.
     HITCHHIKE: (attackerName) =>
       `🎒 ${attackerName} linked to your steps! Whatever you walk, they copy — you keep every step.`,
+    QUICKSAND: (attackerName) => `${attackerName} froze your steps for 2 hours!`,
   };
 
   events.on("POWERUP_USED", async (data) => {
@@ -724,18 +725,20 @@ function registerNotificationHandlers(dependencies = {}) {
       // and any future emit site. The in-race POWERUP_REFLECTED feed event
       // already tells both players what happened.
       if (!targetUserId || targetUserId === userId) return;
-      if (!["LEG_CRAMP", "RED_CARD", "SHORTCUT", "WRONG_TURN", "SIGNAL_JAMMER", "LEECH", "HITCHHIKE"].includes(powerupType)) return;
+      if (!["LEG_CRAMP", "RED_CARD", "SHORTCUT", "WRONG_TURN", "SIGNAL_JAMMER", "LEECH", "HITCHHIKE", "QUICKSAND"].includes(powerupType)) return;
 
       // T9 safety net: suppress the attack push if the race is no longer live —
       // not ACTIVE, or already past endsAt (the expired-but-unsettled gap, where
       // status is still ACTIVE until raceExpiry settles it). usePowerup also gates
       // this at the source; this is best-effort, so on any lookup error we proceed
       // rather than drop a legitimate push.
+      let raceForPush = null;
       try {
         const race = await raceModel.findUnique({
           where: { id: raceId },
-          select: { status: true, endsAt: true },
+          select: { status: true, endsAt: true, name: true },
         });
+        raceForPush = race;
         if (race) {
           const ended =
             race.endsAt && Date.now() >= new Date(race.endsAt).getTime();
@@ -743,7 +746,17 @@ function registerNotificationHandlers(dependencies = {}) {
         }
       } catch {}
 
-      const buildBody = POWERUP_ATTACK_MESSAGES[powerupType];
+      const baseBuildBody = POWERUP_ATTACK_MESSAGES[powerupType];
+      const cleanRaceName = (value) => {
+        if (typeof value !== "string") return null;
+        const cleaned = [...value.replace(/[\p{Cc}\p{Cf}]+/gu, " ").trim()].slice(0, 60).join("");
+        return cleaned || null;
+      };
+      const raceName = cleanRaceName(raceForPush?.name);
+      const buildBody = baseBuildBody && ((attackerName) => {
+        const sentence = baseBuildBody(attackerName);
+        return raceName ? `${sentence} Race: ${raceName}.` : sentence;
+      });
       if (!buildBody) return;
 
       await sendNotificationToUser({

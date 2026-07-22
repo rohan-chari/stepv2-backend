@@ -1,13 +1,11 @@
 // Central CLIENT-FEATURE gating helpers for powerups that must not reach every
 // client/version.
 //
-// SCOPE NOTE (balance-config D13): these lists are about which BINARIES may SEE
-// a powerup type, and nothing else. They are no longer consulted for drop
-// eligibility — `storeOnlyTypes` in the balance config is the single authority
-// on what a mystery box or daily box may award (see getEligiblePowerupPool).
-// Keep it that way: this is a frozen-client compatibility concern, and it must
-// NOT become admin-editable. An admin toggling visibility here would expose a
-// type to a build that cannot render, target, or use it.
+// SCOPE NOTE: these lists describe which BINARIES may SEE a powerup type. They
+// are shared by the shop catalog and daily-box pool so neither surface can hand
+// an unknown enum to a frozen client. Product eligibility still comes from the
+// balance config and active/testOnly/channel state; these request-scoped gates
+// are the final compatibility filter and must not become admin-editable.
 //
 //   * POWERUPS2_GATED_TYPES — X-Ray (DEFENSE_SCAN). Hidden from the shop catalog
 //     unless the client advertises the `powerups2` X-Client-Features token, so
@@ -32,6 +30,7 @@
 //     its own copy describes.
 const POWERUPS2_GATED_TYPES = ["DEFENSE_SCAN"];
 const POWERUPS3_GATED_TYPES = ["LEECH", "HITCHHIKE", "QUICK_RINSE"];
+const POWERUPS4_GATED_TYPES = ["QUICKSAND"];
 
 function imposterEnabled() {
   return process.env.IMPOSTER_ENABLED !== "false";
@@ -46,6 +45,7 @@ function isImposterDisabledForCatalog(powerupType) {
 module.exports = {
   POWERUPS2_GATED_TYPES,
   POWERUPS3_GATED_TYPES,
+  POWERUPS4_GATED_TYPES,
   imposterEnabled,
   isImposterDisabledForCatalog,
 };

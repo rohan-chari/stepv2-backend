@@ -690,6 +690,8 @@ enum PowerupType {
   // user. It creates no effect of its own. Additive enum value, placed BEFORE
   // mystery_box to match the declared ordering.
   QUICK_RINSE       @map("quick_rinse")
+  // Store-only multi-target freeze, visible only to powerups4 clients.
+  QUICKSAND         @map("quicksand")
   MYSTERY_BOX       @map("mystery_box")
 }
 

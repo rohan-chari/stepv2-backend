@@ -5,7 +5,7 @@ const { StepSample } = require("../../steps/models/stepSample");
 const { RaceActiveEffect } = require("../../powerups/models/raceActiveEffect");
 const { RacePowerupEvent } = require("../../powerups/models/racePowerupEvent");
 const { GlobalStepEvent } = require("../../steps/models/globalStepEvent");
-const { computeEffectModifiers } = require("../queries/getRaceProgress");
+const { computeEffectModifiers } = require("./effectiveStepScoring");
 const {
   getTimeZoneParts,
   formatDateString,
@@ -39,7 +39,7 @@ const POWERUP_EFFECT_TYPES = [
 // green while production (which always has the bulk method) scores it. The
 // value is folded into the total by the SAME computeEffectModifiers the display
 // path uses, so display == settlement.
-const SETTLEMENT_EFFECT_TYPES = [...POWERUP_EFFECT_TYPES, "LEECH"];
+const SETTLEMENT_EFFECT_TYPES = [...POWERUP_EFFECT_TYPES, "QUICKSAND", "LEECH"];
 
 function getEffectiveStart(participant, raceStartedAt) {
   const joinedAt = participant.joinedAt || raceStartedAt;
@@ -173,7 +173,7 @@ async function calculateCurrentTotal({
         POWERUP_EFFECT_TYPES.map((t, i) => [t, lists[i]])
       );
     }
-    legCramps = byType.LEG_CRAMP;
+    legCramps = [...(byType.LEG_CRAMP || []), ...(byType.QUICKSAND || [])];
     runnersHighs = byType.RUNNERS_HIGH;
     wrongTurns = byType.WRONG_TURN;
     campfires = byType.CAMPFIRE_REST;
@@ -738,6 +738,7 @@ function buildResolveRaceState(dependencies = {}) {
             raceActiveEffectModel,
             stepSampleModel,
             now: currentTime,
+            globalEvents,
           })
         : [];
 

@@ -2,7 +2,7 @@ const { Race } = require("../models/race");
 const { RaceActiveEffect } = require("../../powerups/models/raceActiveEffect");
 const { RacePowerupEvent } = require("../../powerups/models/racePowerupEvent");
 
-async function getRaceFeed(userId, raceId, { cursor, limit = 50 } = {}) {
+async function getRaceFeed(userId, raceId, { cursor, limit = 50, supportsPowerups4 = false } = {}) {
   const race = await Race.findById(raceId);
   if (!race) {
     const error = new Error("Race not found");
@@ -49,6 +49,11 @@ async function getRaceFeed(userId, raceId, { cursor, limit = 50 } = {}) {
   return {
     events: events.map((e) => {
       let description = e.description;
+      if (e.powerupType === "QUICKSAND" && !supportsPowerups4) {
+        description = e.eventType === "POWERUP_EXPIRED"
+          ? "A freezing effect wore off."
+          : "A freezing attack affected one or more runners.";
+      }
 
       // Replace stealthed actor's name with ???
       if (stealthedUserIds.has(e.actorUserId)) {
@@ -69,7 +74,7 @@ async function getRaceFeed(userId, raceId, { cursor, limit = 50 } = {}) {
       return {
         id: e.id,
         eventType: e.eventType,
-        powerupType: e.powerupType,
+        powerupType: e.powerupType === "QUICKSAND" && !supportsPowerups4 ? "LEG_CRAMP" : e.powerupType,
         description,
         actorUserId: e.actorUserId,
         targetUserId: e.targetUserId,

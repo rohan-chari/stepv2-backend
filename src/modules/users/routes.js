@@ -94,6 +94,7 @@ function createAuthRouter(dependencies = {}) {
       ...user,
       featureFlags: {
         bannerAdsEnabled: await safeFlag("bannerAdsEnabled", false),
+        dualBoxBannersEnabled: await safeFlag("dualBoxBannersEnabled", false),
         teamRacesEnabled: await safeFlag("teamRacesEnabled", true),
         onboardingV2Enabled: await safeFlag("onboardingV2Enabled", false),
       },

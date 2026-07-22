@@ -47,6 +47,26 @@ function buildGetAdminStats(dependencies = {}) {
               AND r.status = 'active'
           ))::bigint AS dau_in_active_race`;
 
+    // Verified watches among the exact stepped-today DAU set. created_at is the
+    // trusted SSV verification time; client-supplied granted_date is not used.
+    const [rewardedAdRows] = await prisma.$queryRaw`
+      WITH today_dau AS (
+        SELECT DISTINCT user_id
+        FROM steps
+        WHERE date = (now() AT TIME ZONE 'America/New_York')::date
+      )
+      SELECT
+        COUNT(DISTINCT g.user_id) FILTER (
+          WHERE g.reward_kind = 'coin_reward'
+        )::bigint AS coin_watchers,
+        COUNT(DISTINCT g.user_id) FILTER (
+          WHERE g.reward_kind = 'extra_daily_spin'
+        )::bigint AS extra_spin_watchers
+      FROM ad_reward_grants g
+      JOIN today_dau d ON d.user_id = g.user_id
+      WHERE (g.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date =
+            (now() AT TIME ZONE 'America/New_York')::date`;
+
     const friendsDist = await prisma.$queryRaw`
       WITH counts AS (
         SELECT u.id,
@@ -167,6 +187,8 @@ function buildGetAdminStats(dependencies = {}) {
 
     const dau = n(dauRows?.dau);
     const dauInActiveRace = n(dauRows?.dau_in_active_race);
+    const coinWatchers = n(rewardedAdRows?.coin_watchers);
+    const extraSpinWatchers = n(rewardedAdRows?.extra_spin_watchers);
 
     function activationWindow(countKey) {
       const groups = new Map();
@@ -200,6 +222,17 @@ function buildGetAdminStats(dependencies = {}) {
         dauToday: dau,
         dauInActiveRace,
         pctDauInActiveRace: dau > 0 ? Math.round((dauInActiveRace / dau) * 100) : 0,
+        rewardedAds: {
+          timeZone: "America/New_York",
+          coinReward: {
+            uniqueDauWatchers: coinWatchers,
+            pctOfDau: dau > 0 ? Math.round((coinWatchers / dau) * 100) : 0,
+          },
+          extraSpin: {
+            uniqueDauWatchers: extraSpinWatchers,
+            pctOfDau: dau > 0 ? Math.round((extraSpinWatchers / dau) * 100) : 0,
+          },
+        },
         // Additive (Item 9). Null when there is no box-open data yet (e.g. right
         // after deploy) so the admin UI can render an em dash. Rounded to 1 dp.
         avgUniqueBoxOpenersPerDay:

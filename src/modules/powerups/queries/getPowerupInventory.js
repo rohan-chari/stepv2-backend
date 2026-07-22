@@ -5,11 +5,12 @@ const { UserPowerupItem } = require("../models/userPowerupItem");
 function buildGetPowerupInventory(deps = {}) {
   const userPowerupItemModel = deps.UserPowerupItem || UserPowerupItem;
 
-  return async function getPowerupInventory(userId) {
+  return async function getPowerupInventory(userId, supportsPowerups4 = false) {
     const rows = await userPowerupItemModel.findManyByUser(userId);
     return {
       items: rows
         .filter((r) => (r.quantity ?? 0) > 0)
+        .filter((r) => supportsPowerups4 || r.powerupType !== "QUICKSAND")
         .map((r) => ({ powerupType: r.powerupType, quantity: r.quantity })),
     };
   };

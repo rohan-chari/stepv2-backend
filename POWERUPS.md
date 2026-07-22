@@ -87,7 +87,7 @@ What a mystery box can actually roll. A powerup having a rarity does not make it
 
 Store-only (bought with coins, never rolled from a mystery box): Imposter, Rainstorm, Signal Jammer, Leech, Defense Scan, Hitchhike, Quick Rinse.
 
-Of those, barred from the **daily reward box** too: Defense Scan, Leech, Hitchhike, Quick Rinse. The rest remain winnable as a daily-box RARE prize.
+Of those, barred from the **daily reward box** too: . The rest remain winnable as a daily-box RARE prize.
 
 ## Upgrade Costs
 

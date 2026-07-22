@@ -23,6 +23,7 @@ const { serializeShopItem } = require("../../cosmetics");
 const { serializePowerupShopItem } = require("../../powerups");
 const { grantPowerupToUser } = require("../../powerups");
 const { EXTRA_SPIN_REWARD_KIND } = require("../adRewards");
+const { balanceConfig: defaultBalanceConfig } = require("../balanceConfig");
 
 // Extra daily box spin, paid for by a verified rewarded-ad watch. Consumes an
 // unconsumed AdRewardGrant for the same localDate (minted only by the AdMob
@@ -41,6 +42,7 @@ function buildClaimExtraDailyRewardBox(dependencies = {}) {
     dependencies.getEligiblePowerupPool || getEligiblePowerupPool;
   const grantPowerup =
     dependencies.grantPowerupToUser || grantPowerupToUser;
+  const balanceConfig = dependencies.balanceConfig || defaultBalanceConfig;
 
   return async function claimExtraDailyRewardBox({
     userId,
@@ -50,6 +52,9 @@ function buildClaimExtraDailyRewardBox(dependencies = {}) {
     // keep the legacy coins/accessory-only roll for old clients.
     supportsSpinPowerups = false,
     supportsJammer = false,
+    supportsPowerups2 = false,
+    supportsPowerups3 = false,
+    supportsPowerups4 = false,
     channel = "prod",
   }) {
     if (!isValidLocalDate(localDate)) {
@@ -127,15 +132,17 @@ function buildClaimExtraDailyRewardBox(dependencies = {}) {
       user.dailyStreakDay || 0
     );
 
+    const { config: balance } = await balanceConfig.getSnapshot();
     const pool = await getPool(userId);
     const powerupPool = supportsSpinPowerups
-      ? await getPowerupPool({ channel, supportsJammer })
+      ? await getPowerupPool({ channel, supportsJammer, supportsPowerups2, supportsPowerups3, supportsPowerups4, config: balance })
       : [];
     const rarity = rollDailyBoxRarity(
       streak,
       rng,
       pool.length,
-      powerupPool.length
+      powerupPool.length,
+      balance
     );
 
     let rewardType;
@@ -145,12 +152,12 @@ function buildClaimExtraDailyRewardBox(dependencies = {}) {
     let coinsAfter = null;
 
     if (rarity === "RARE") {
-      const prizeKind = rollRarePrizeKind(pool.length, powerupPool.length, rng);
+      const prizeKind = rollRarePrizeKind(pool.length, powerupPool.length, rng, { config: balance });
       if (prizeKind === "POWERUP") {
-        powerup = pickPowerup(powerupPool, streak, rng);
+        powerup = pickPowerup(powerupPool, streak, rng, balance);
       }
       const rolledAccessory =
-        prizeKind === "ACCESSORY" ? pickAccessory(pool, streak, rng) : null;
+        prizeKind === "ACCESSORY" ? pickAccessory(pool, streak, rng, balance) : null;
 
       if (powerup) {
         rewardType = REWARD_TYPE.POWERUP;

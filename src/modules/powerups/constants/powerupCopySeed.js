@@ -284,6 +284,13 @@ const POWERUP_COPY_SEED = [
     shortDescription: null,
     upgradeTierLabels: [],
   },
+  {
+    powerupType: "QUICKSAND",
+    name: "Quicksand",
+    description: "Freeze the steps of up to three rivals for 2 hours. Compression Socks block each target independently; Mirrors can't reflect it",
+    shortDescription: "Steps frozen",
+    upgradeTierLabels: [],
+  },
 ];
 
 // Every user-renderable type, in catalog order. MYSTERY_BOX is excluded.

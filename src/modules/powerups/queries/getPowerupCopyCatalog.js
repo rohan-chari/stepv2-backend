@@ -21,10 +21,9 @@ function compareRows(a, b) {
 
 // GET /powerups/catalog (§9.5.3) — every user-renderable powerup's copy.
 //
-// Deliberately unauthenticated-safe and client-feature-INDEPENDENT: copy is not
-// a capability. Acquisition gating happens at the shop / roll layer, so
-// receiving copy for a type a client cannot obtain is harmless — and withholding
-// it would strand a client that legitimately owns a banked powerup.
+// Unauthenticated-safe but request-capability-aware. Numeric Stealth copy must
+// agree with the behavior selected for that binary, and Quicksand is an unknown
+// enum to frozen clients, so it is withheld unless the request advertises p4.
 //
 // The response is ADDITIVE-ONLY: future fields append and no client may require
 // them. `version` is the maximum row updatedAt as an ISO-8601 string, so a client
@@ -32,8 +31,12 @@ function compareRows(a, b) {
 function buildGetPowerupCopyCatalog(deps = {}) {
   const powerupCopyModel = deps.PowerupCopy || PowerupCopy;
 
-  return async function getPowerupCopyCatalog() {
+  return async function getPowerupCopyCatalog(clientFeatures = new Set()) {
     const rows = (await powerupCopyModel.findAll()) || [];
+    const has = (token) =>
+      clientFeatures && typeof clientFeatures.has === "function"
+        ? clientFeatures.has(token)
+        : Array.isArray(clientFeatures) && clientFeatures.includes(token);
 
     let newest = null;
     for (const row of rows) {
@@ -44,17 +47,27 @@ function buildGetPowerupCopyCatalog(deps = {}) {
 
     return {
       version: newest ? newest.toISOString() : null,
-      powerups: [...rows].sort(compareRows).map((row) => ({
+      powerups: [...rows]
+        .filter((row) => row.powerupType !== "QUICKSAND" || has("powerups4"))
+        .sort(compareRows).map((row) => {
+        const stealthRunner = row.powerupType === "STEALTH_MODE" && has("stealth_runner_duration");
+        const hitchhikeEffective = row.powerupType === "HITCHHIKE" && has("hitchhike_effective_steps");
+        return {
         type: row.powerupType,
         name: row.name,
-        description: row.description,
+        description: stealthRunner
+          ? "Hide your name, steps, and track position for 3 hours."
+          : hitchhikeEffective
+            ? "Copy the target's effective steps; their boosts and reversals carry over."
+            : row.description,
         // Explicit null (never "") so the client omits the effect-rail subtitle
         // rather than rendering a blank line or truncating the description.
         shortDescription: row.shortDescription ?? null,
-        upgradeTierLabels: Array.isArray(row.upgradeTierLabels)
-          ? row.upgradeTierLabels
-          : [],
-      })),
+        upgradeTierLabels: stealthRunner
+          ? ["Hide 3h", "Hide 4h", "Hide 5h", "Hide 7h"]
+          : Array.isArray(row.upgradeTierLabels) ? row.upgradeTierLabels : [],
+      };
+      }),
     };
   };
 }

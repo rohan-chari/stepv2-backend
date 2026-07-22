@@ -119,6 +119,7 @@ function buildForfeitRace(dependencies = {}) {
             raceActiveEffectModel,
             stepSampleModel,
             now: at,
+            globalEvents,
           })
         : [];
 

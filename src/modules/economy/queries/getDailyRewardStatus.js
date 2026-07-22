@@ -57,6 +57,9 @@ async function getDailyRewardStatus({
   // token): the powerup pool stays empty and RARE folds to 0 exactly as before.
   supportsSpinPowerups = false,
   supportsJammer = false,
+  supportsPowerups2 = false,
+  supportsPowerups3 = false,
+  supportsPowerups4 = false,
   channel = "prod",
 }) {
   const user = await prisma.user.findUnique({
@@ -116,7 +119,7 @@ async function getDailyRewardStatus({
   // old binaries can't render a POWERUP tile/result. Non-flagged clients get an
   // empty pool, so their odds and payload are byte-identical to today.
   const powerupPool = supportsSpinPowerups
-    ? await getEligiblePowerupPool({ channel, supportsJammer, config })
+    ? await getEligiblePowerupPool({ channel, supportsJammer, supportsPowerups2, supportsPowerups3, supportsPowerups4, config })
     : [];
   // Empty pools → RARE folded to 0 so shipped clients never draw the "???"
   // mystery-accessory tile (see dailyBoxOddsForPool). With powerups in play,
