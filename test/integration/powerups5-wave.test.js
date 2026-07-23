@@ -450,6 +450,130 @@ describe("powerups5 wave — integration", () => {
     });
   });
 
+  // ── 11b. Piggy Bank live "banked so far" counter (display-only) ──────────
+  // The viewer's OWN active PIGGY_BANK entry in progress carries an additive
+  // piggyBank:{bankedCoins,coinCap,windowSteps} computed with the SAME
+  // sumStepsInWindow the mint uses over [startsAt, min(expiresAt, now)]. No coin
+  // writes, no mint-timing change. See piggy-bank-live-counter-requirements.md.
+  describe("piggy bank live counter", () => {
+    // hour-aligned start N hours ago (matches giveHourlySamples bucketing).
+    const alignedHoursAgo = (h) =>
+      new Date(Math.floor((Date.now() - h * HOUR_MS) / HOUR_MS) * HOUR_MS);
+
+    it("owner sees bankedCoins = floor(windowSteps/rate), coinCap, windowSteps", async () => {
+      const a = await createUser("LiveSaver");
+      const b = await createUser("LZ");
+      await makeFriends(a, b);
+      const raceId = await createActiveRace(a, [b]);
+      // 4 closed hourly samples of 1500 = 6000 steps inside the window.
+      await giveHourlySamples(a.userId, 6, 4, 1500);
+      await giveEffect(raceId, a.userId, a.userId, "PIGGY_BANK", {
+        startsAt: alignedHoursAgo(6),
+        expiresAt: new Date(Date.now() + HOUR_MS), // future → endCap = now
+        metadata: { stepsPerCoin: 300, coinCap: 80, stepsAtStart: 0 },
+      });
+      const prog = await getProgress(a.token, raceId);
+      const eff = findEffect(prog, "PIGGY_BANK", a.userId);
+      assert.ok(eff, "owner sees their piggy entry");
+      assert.ok(eff.piggyBank, "piggyBank field present");
+      assert.equal(eff.piggyBank.bankedCoins, 20, "floor(6000/300)=20");
+      assert.equal(eff.piggyBank.coinCap, 80, "cap from snapshot");
+      assert.ok(
+        Math.abs(eff.piggyBank.windowSteps - 6000) <= 100,
+        `windowSteps ≈ 6000 (got ${eff.piggyBank.windowSteps})`
+      );
+      assert.equal(Number.isInteger(eff.piggyBank.windowSteps), true, "windowSteps is int");
+    });
+
+    it("clamps bankedCoins to coinCap when steps exceed cap*rate", async () => {
+      const a = await createUser("CapSaver");
+      const b = await createUser("CZ");
+      await makeFriends(a, b);
+      const raceId = await createActiveRace(a, [b]);
+      // 5 × 6000 = 30000 steps → floor(30000/300)=100, clamped to cap 80.
+      await giveHourlySamples(a.userId, 6, 5, 6000);
+      await giveEffect(raceId, a.userId, a.userId, "PIGGY_BANK", {
+        startsAt: alignedHoursAgo(6),
+        expiresAt: new Date(Date.now() + HOUR_MS),
+        metadata: { stepsPerCoin: 300, coinCap: 80, stepsAtStart: 0 },
+      });
+      const prog = await getProgress(a.token, raceId);
+      const eff = findEffect(prog, "PIGGY_BANK", a.userId);
+      assert.equal(eff.piggyBank.bankedCoins, 80, "clamped to coinCap");
+      assert.equal(eff.piggyBank.coinCap, 80);
+    });
+
+    it("excludes steps taken before startsAt", async () => {
+      const a = await createUser("EarlySaver");
+      const b = await createUser("EZ");
+      await makeFriends(a, b);
+      const raceId = await createActiveRace(a, [b]);
+      // Pre-activation sample (now-6h, 9000 steps) must NOT count.
+      await giveHourlySamples(a.userId, 6, 1, 9000);
+      // In-window samples: now-3h and now-2h, 1500 each = 3000.
+      await giveHourlySamples(a.userId, 3, 2, 1500);
+      await giveEffect(raceId, a.userId, a.userId, "PIGGY_BANK", {
+        startsAt: alignedHoursAgo(3),
+        expiresAt: new Date(Date.now() + HOUR_MS),
+        metadata: { stepsPerCoin: 300, coinCap: 80, stepsAtStart: 0 },
+      });
+      const prog = await getProgress(a.token, raceId);
+      const eff = findEffect(prog, "PIGGY_BANK", a.userId);
+      assert.equal(eff.piggyBank.bankedCoins, 10, "floor(3000/300)=10, pre-start excluded");
+      assert.ok(
+        Math.abs(eff.piggyBank.windowSteps - 3000) <= 100,
+        `windowSteps ≈ 3000 (got ${eff.piggyBank.windowSteps})`
+      );
+    });
+
+    it("kill-switch snapshot (coinCap:0) → entry present, piggyBank absent", async () => {
+      const a = await createUser("DeadSaver");
+      const b = await createUser("DZ");
+      await makeFriends(a, b);
+      const raceId = await createActiveRace(a, [b]);
+      await giveHourlySamples(a.userId, 6, 4, 1500);
+      await giveEffect(raceId, a.userId, a.userId, "PIGGY_BANK", {
+        startsAt: alignedHoursAgo(6),
+        expiresAt: new Date(Date.now() + HOUR_MS),
+        metadata: { stepsPerCoin: 300, coinCap: 0, stepsAtStart: 0 },
+      });
+      const prog = await getProgress(a.token, raceId);
+      const eff = findEffect(prog, "PIGGY_BANK", a.userId);
+      assert.ok(eff, "entry still present");
+      assert.equal(eff.piggyBank, undefined, "no piggyBank field when nothing will mint");
+    });
+
+    it("opponent never sees the owner's piggy entry (HIDDEN_FROM_OPPONENTS holds)", async () => {
+      const a = await createUser("HiddenSaver");
+      const b = await createUser("HZ");
+      await makeFriends(a, b);
+      const raceId = await createActiveRace(a, [b]);
+      await giveHourlySamples(a.userId, 6, 4, 1500);
+      await giveEffect(raceId, a.userId, a.userId, "PIGGY_BANK", {
+        startsAt: alignedHoursAgo(6),
+        expiresAt: new Date(Date.now() + HOUR_MS),
+        metadata: { stepsPerCoin: 300, coinCap: 80, stepsAtStart: 0 },
+      });
+      const bProg = await getProgress(b.token, raceId);
+      assert.equal(findEffect(bProg, "PIGGY_BANK"), undefined, "no piggy entry for opponent");
+    });
+
+    it("non-powerups5 client sees no PIGGY_BANK entry at all", async () => {
+      const a = await createUser("OldSaver");
+      const b = await createUser("OZ");
+      await makeFriends(a, b);
+      const raceId = await createActiveRace(a, [b]);
+      await giveHourlySamples(a.userId, 6, 4, 1500);
+      await giveEffect(raceId, a.userId, a.userId, "PIGGY_BANK", {
+        startsAt: alignedHoursAgo(6),
+        expiresAt: new Date(Date.now() + HOUR_MS),
+        metadata: { stepsPerCoin: 300, coinCap: 80, stepsAtStart: 0 },
+      });
+      const prog = await getProgress(a.token, raceId, OLD);
+      assert.equal(findEffect(prog, "PIGGY_BANK"), undefined, "withheld without powerups5");
+    });
+  });
+
   // ── 12. Bounty ──────────────────────────────────────────────────────────
   describe("bounty", () => {
     it("must target a rival ahead; pays out when the caster out-places the target; publicly visible", async () => {

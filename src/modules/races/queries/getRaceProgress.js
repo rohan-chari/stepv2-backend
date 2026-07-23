@@ -635,14 +635,14 @@ function buildGetRaceProgress(deps = {}) {
               "PIGGY_BANK", "DRILL_SERGEANT", "BOUNTY",
             ].includes(e.type)
         )
-        .map((e) => {
+        .map(async (e) => {
           let type = e.type;
           if (type === "QUICKSAND" && !supportsPowerups4) type = "LEG_CRAMP";
           if (!supportsPowerups5) {
             if (type === "POWER_OUTAGE") type = "SIGNAL_JAMMER";
             else if (type === "UPRISING" || type === "RALLY_FLAG") type = "RUNNERS_HIGH";
           }
-          return {
+          const entry = {
             // Additive: the targeted Pocket Watch sheet needs a stable identifier
             // for the one effect the user is paying to extend.
             id: e.id,
@@ -652,7 +652,44 @@ function buildGetRaceProgress(deps = {}) {
             targetUserId: e.targetUserId,
             sourceUserId: e.sourceUserId,
           };
+          // Piggy Bank live "banked so far" counter (display-only). Present ONLY
+          // on the viewer's OWN active piggy (never opponents' — PIGGY_BANK is
+          // already in HIDDEN_FROM_OPPONENTS and gated by powerups5 above) and
+          // only when the snapshot is mintable (kill-switch guard mirrors
+          // mintPiggyBank). Uses the SAME sumStepsInWindow the mint uses over
+          // [startsAt, min(expiresAt, now)] so the shown number can only agree
+          // with the eventual mint. At most one extra query, owner-only. A
+          // thrown sum query omits the field — the progress payload must never
+          // 500 because of a display counter.
+          if (e.type === "PIGGY_BANK" && e.targetUserId === userId) {
+            const meta = e.metadata || {};
+            const stepsPerCoin = Number(meta.stepsPerCoin) || 300;
+            const coinCap = Number.isFinite(Number(meta.coinCap)) ? Number(meta.coinCap) : 80;
+            if (coinCap > 0 && stepsPerCoin > 0) {
+              try {
+                const start = new Date(e.startsAt);
+                const expiry = e.expiresAt ? new Date(e.expiresAt) : now();
+                const nowMs = now().getTime();
+                const end = expiry.getTime() < nowMs ? expiry : new Date(nowMs);
+                if (end.getTime() > start.getTime()) {
+                  const windowSteps = await StepSample.sumStepsInWindow(e.targetUserId, start, end);
+                  entry.piggyBank = {
+                    bankedCoins: Math.min(
+                      Math.floor(Math.max(0, windowSteps) / stepsPerCoin),
+                      coinCap
+                    ),
+                    coinCap,
+                    windowSteps: Math.round(Math.max(0, windowSteps)),
+                  };
+                }
+              } catch (err) {
+                console.error("Piggy Bank live counter failed:", err);
+              }
+            }
+          }
+          return entry;
         });
+      powerupData.activeEffects = await Promise.all(powerupData.activeEffects);
     }
 
     // Build leaderboard with stealth mode and detour sign applied. The
