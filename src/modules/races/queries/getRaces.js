@@ -51,11 +51,62 @@ function getActivePlacement(participants, userId) {
   return index >= 0 ? index + 1 : null;
 }
 
+// Wave-5 effect types a non-powerups5 client cannot render — WITHHELD from
+// myActiveEffects for such clients (mirror of getRaceProgress.js §4.5). The
+// authoritative score is never gated here; the field is a display-only summary.
+const POWERUPS5_WITHHELD_TYPES = new Set([
+  "GHOST_PEPPER",
+  "COIN_FLIP",
+  "DECOY",
+  "UMBRELLA",
+  "PIGGY_BANK",
+  "DRILL_SERGEANT",
+  "BOUNTY",
+]);
+
+// Map ACTIVE effect rows targeting the viewer into the myActiveEffects contract
+// (createdAt-asc preserved from the query). Mirrors getRaceProgress.js:611-655's
+// X-Client-Features downcast/withhold rules so the list never sends a type the
+// binary can't render. HIDDEN_FROM_OPPONENTS filtering is intentionally NOT
+// applied: every row already targets the viewer (same as the progress endpoint
+// always showing the viewer their own effects).
+function serializeMyActiveEffects(rows, features) {
+  const supportsPowerups3 = features.powerups3;
+  const supportsPowerups4 = features.powerups4;
+  const supportsPowerups5 = features.powerups5;
+  const out = [];
+  for (const e of rows) {
+    // §9.3: withhold HITCHHIKE from clients that don't advertise powerups3.
+    if (!supportsPowerups3 && e.type === "HITCHHIKE") continue;
+    // §4.5: withhold wave-5 types a non-powerups5 client can't render.
+    if (!supportsPowerups5 && POWERUPS5_WITHHELD_TYPES.has(e.type)) continue;
+
+    let type = e.type;
+    if (type === "QUICKSAND" && !supportsPowerups4) type = "LEG_CRAMP";
+    if (!supportsPowerups5) {
+      if (type === "POWER_OUTAGE") type = "SIGNAL_JAMMER";
+      else if (type === "UPRISING" || type === "RALLY_FLAG") type = "RUNNERS_HIGH";
+    }
+    out.push({ type, sourceUserId: e.sourceUserId, expiresAt: e.expiresAt });
+  }
+  return out;
+}
+
 // `supportsTeamRaces` (TR-702): whether the requesting client sent the
 // `team_races` X-Client-Features token. Old clients (false/omitted) never see a
 // team race in any bucket — filtered here BEFORE any counts are derived, so an
 // old client's list is simply shorter, never inconsistent.
-async function getRaces(userId, supportsTeamRaces = false) {
+// `options.clientFeatures`: the request's X-Client-Features Set (from
+// req.clientFeatures). Gates ONLY the myActiveEffects display types (powerups3/4/
+// 5 downcast/withhold); default = no tokens, which is safe because tokenless
+// clients also ignore the additive field entirely.
+async function getRaces(userId, supportsTeamRaces = false, options = {}) {
+  const clientFeatures = options.clientFeatures || null;
+  const features = {
+    powerups3: clientFeatures?.has("powerups3") ?? false,
+    powerups4: clientFeatures?.has("powerups4") ?? false,
+    powerups5: clientFeatures?.has("powerups5") ?? false,
+  };
   // Lean list fetch (Phase B1): drops participant user/accessory relations the
   // summaries never read. Falls back to findForUser for injected minimal test
   // fakes that only provide the legacy method (capability detection, matching
@@ -90,22 +141,42 @@ async function getRaces(userId, supportsTeamRaces = false) {
   }
 
   const detourParticipantIds = new Set();
+  // ACTIVE effect rows targeting the viewer, grouped by participant id
+  // (createdAt-asc). Feeds BOTH the Detour mask (filter DETOUR_SIGN) and the
+  // additive myActiveEffects summary field, derived from ONE bulk query.
+  const effectsByParticipant = new Map();
   const inventoryByParticipant = new Map();
+  // Prefer the all-types bulk effect query (production + full fakes); fall back
+  // to the per-type Detour bulk query so the query-count fake that only pins the
+  // Detour shape still runs the bulk path (myActiveEffects is empty there).
+  const hasBulkAllEffects =
+    typeof RaceActiveEffect.findActiveForParticipants === "function";
+  const hasBulkDetourEffects =
+    typeof RaceActiveEffect.findActiveByTypeForParticipants === "function";
   const canBulk =
-    typeof RaceActiveEffect.findActiveByTypeForParticipants === "function" &&
+    (hasBulkAllEffects || hasBulkDetourEffects) &&
     typeof RacePowerup.findInventoryForParticipants === "function";
 
   if (viewerParticipantIds.length > 0 && canBulk) {
     // Production path: exactly two queries, independent of race count.
-    const [detourRows, inventoryRows] = await Promise.all([
-      RaceActiveEffect.findActiveByTypeForParticipants(viewerParticipantIds, "DETOUR_SIGN"),
+    const [effectRows, inventoryRows] = await Promise.all([
+      hasBulkAllEffects
+        ? RaceActiveEffect.findActiveForParticipants(viewerParticipantIds)
+        : RaceActiveEffect.findActiveByTypeForParticipants(viewerParticipantIds, "DETOUR_SIGN"),
       RacePowerup.findInventoryForParticipants(viewerParticipantIds, [
         "HELD",
         "MYSTERY_BOX",
         "QUEUED",
       ]),
     ]);
-    for (const e of detourRows) detourParticipantIds.add(e.targetParticipantId);
+    for (const e of effectRows) {
+      if (e.type === "DETOUR_SIGN") detourParticipantIds.add(e.targetParticipantId);
+      if (hasBulkAllEffects) {
+        let list = effectsByParticipant.get(e.targetParticipantId);
+        if (!list) effectsByParticipant.set(e.targetParticipantId, (list = []));
+        list.push(e);
+      }
+    }
     for (const row of inventoryRows) {
       let list = inventoryByParticipant.get(row.participantId);
       if (!list) inventoryByParticipant.set(row.participantId, (list = []));
@@ -117,7 +188,13 @@ async function getRaces(userId, supportsTeamRaces = false) {
     for (const race of visible) {
       const mine = myParticipantByRace.get(race.id);
       if (!(race.status === "ACTIVE" && race.powerupsEnabled && mine)) continue;
-      if (typeof RaceActiveEffect.findActiveByTypeForParticipant === "function") {
+      if (typeof RaceActiveEffect.findActiveForParticipant === "function") {
+        // All-types per-participant: derive both the Detour mask and the
+        // viewer's effect list from one lookup.
+        const rows = await RaceActiveEffect.findActiveForParticipant(mine.id);
+        effectsByParticipant.set(mine.id, rows);
+        if (rows.some((e) => e.type === "DETOUR_SIGN")) detourParticipantIds.add(mine.id);
+      } else if (typeof RaceActiveEffect.findActiveByTypeForParticipant === "function") {
         const detour = await RaceActiveEffect.findActiveByTypeForParticipant(mine.id, "DETOUR_SIGN");
         if (detour) detourParticipantIds.add(mine.id);
       }
@@ -281,6 +358,18 @@ async function getRaces(userId, supportsTeamRaces = false) {
             .reduce((sum, p) => sum + (p.totalSteps || 0), 0)
         : null,
     };
+
+    // Additive myActiveEffects (races-tab effect badges): effects currently
+    // targeting the viewer in this race, createdAt-asc, feature-gated. Present
+    // ONLY inside powerupContext (ACTIVE + powerupsEnabled + viewer participates)
+    // — omitted entirely otherwise, matching slotItems' semantics so snapshot
+    // clients never see a shape change on non-powerup rows.
+    if (powerupContext) {
+      summary.myActiveEffects = serializeMyActiveEffects(
+        effectsByParticipant.get(myParticipant.id) || [],
+        features
+      );
+    }
 
     if (race.status === "ACTIVE") {
       active.push(summary);

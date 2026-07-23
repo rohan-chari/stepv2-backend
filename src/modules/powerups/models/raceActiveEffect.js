@@ -36,6 +36,24 @@ const RaceActiveEffect = {
     });
   },
 
+  // Bulk all-types variant across many participants (GET /races prefetch). One
+  // query for every ACTIVE effect targeting any of the given participants, in
+  // createdAt-asc order; the caller groups by targetParticipantId and derives
+  // both the Detour mask (type === "DETOUR_SIGN") and the myActiveEffects list
+  // from this single result set. Participant ids are globally unique, so no race
+  // scoping is needed. Supersedes the per-type findActiveByTypeForParticipants
+  // Detour prefetch (whose work is now a filter over these rows).
+  async findActiveForParticipants(participantIds) {
+    if (!participantIds || participantIds.length === 0) return [];
+    return prisma.raceActiveEffect.findMany({
+      where: {
+        targetParticipantId: { in: participantIds },
+        status: "ACTIVE",
+      },
+      orderBy: { createdAt: "asc" },
+    });
+  },
+
   async findActiveForRace(raceId) {
     return prisma.raceActiveEffect.findMany({
       where: { raceId, status: "ACTIVE" },
