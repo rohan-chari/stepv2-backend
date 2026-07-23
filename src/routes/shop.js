@@ -13,6 +13,13 @@ const {
 const {
   purchasePowerupItem: defaultPurchasePowerupItem,
 } = require("../modules/powerups");
+const {
+  POWERUPS5_GATED_TYPES,
+} = require("../modules/powerups/constants/powerupGating");
+
+// SKUs of the Wave 5 store-only powerups (POWERUP_<TYPE>). Kept alongside the
+// type list so the purchase guard can reject by either sku or powerupType.
+const POWERUPS5_SKUS = POWERUPS5_GATED_TYPES.map((t) => `POWERUP_${t}`);
 
 function createShopRouter(dependencies = {}) {
   const router = Router();
@@ -41,6 +48,7 @@ function createShopRouter(dependencies = {}) {
         supportsPowerups2: req.clientFeatures.has("powerups2"),
         supportsPowerups3: req.clientFeatures.has("powerups3"),
         supportsPowerups4: req.clientFeatures.has("powerups4"),
+        supportsPowerups5: req.clientFeatures.has("powerups5"),
       });
       res.json(result);
     } catch (error) {
@@ -53,6 +61,17 @@ function createShopRouter(dependencies = {}) {
   router.post("/powerups/purchase", async (req, res) => {
     try {
       if (req.body?.powerupType === "QUICKSAND" && !req.clientFeatures.has("powerups4")) {
+        return res.status(404).json({ error: "Powerup not found" });
+      }
+      // Wave 5 store-only powerups: reject a purchase from a non-powerups5 client
+      // by sku OR powerupType, mirroring the Quicksand guard above. Old binaries
+      // never learn these skus (the catalog filters them), but a stale/replayed
+      // request must not slip a wave-5 item into an unsupported client.
+      if (
+        (POWERUPS5_GATED_TYPES.includes(req.body?.powerupType) ||
+          POWERUPS5_SKUS.includes(req.body?.sku)) &&
+        !req.clientFeatures.has("powerups5")
+      ) {
         return res.status(404).json({ error: "Powerup not found" });
       }
       const result = await purchasePowerupItem({

@@ -513,7 +513,7 @@ describe("hitchhike / quick rinse — integration", () => {
     const res = await request(server.baseUrl, "GET", "/powerups/catalog");
     assert.equal(res.status, 200);
     const body = await res.json();
-    assert.equal(body.powerups.length, 28);
+    assert.equal(body.powerups.length, 39);
     assert.ok(body.version, "version is the max updatedAt");
     const types = body.powerups.map((p) => p.type);
     assert.ok(!types.includes("MYSTERY_BOX"));

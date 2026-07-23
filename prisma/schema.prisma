@@ -692,6 +692,20 @@ enum PowerupType {
   QUICK_RINSE       @map("quick_rinse")
   // Store-only multi-target freeze, visible only to powerups4 clients.
   QUICKSAND         @map("quicksand")
+  // Powerups Wave 5 (store-only, visible only to `powerups5` clients). All 11
+  // are additive enum values placed BEFORE mystery_box to match the schema's
+  // declared ordering. See docs/powerups5-wave-requirements.md.
+  UPRISING          @map("uprising")
+  GHOST_PEPPER      @map("ghost_pepper")
+  COIN_FLIP         @map("coin_flip")
+  MYSTERY_POTION    @map("mystery_potion")
+  DECOY             @map("decoy")
+  POWER_OUTAGE      @map("power_outage")
+  UMBRELLA          @map("umbrella")
+  RALLY_FLAG        @map("rally_flag")
+  DRILL_SERGEANT    @map("drill_sergeant")
+  PIGGY_BANK        @map("piggy_bank")
+  BOUNTY            @map("bounty")
   MYSTERY_BOX       @map("mystery_box")
 }
 

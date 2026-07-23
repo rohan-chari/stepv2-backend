@@ -48,7 +48,7 @@ test("returns exactly the user-renderable types and EXCLUDES MYSTERY_BOX", async
   const result = await buildGetPowerupCopyCatalog(makeDeps())();
   const types = result.powerups.map((p) => p.type);
 
-  assert.equal(types.length, 28, "26 pre-existing + Hitchhike + Quick Rinse");
+  assert.equal(types.length, 39, "28 through wave 4 + the 11 powerups5-wave types");
   assert.equal(new Set(types).size, types.length, "no duplicate types");
   assert.ok(!types.includes("MYSTERY_BOX"), "MYSTERY_BOX is a container state");
   // Drop-only types (never purchasable, so never in PowerupShopItem) must be
@@ -175,8 +175,8 @@ test("seeded copy matches the pre-migration frontend strings, except the intenti
   assert.equal(byType.LEG_CRAMP.shortDescription, "Steps frozen");
   assert.equal(
     Object.values(byType).filter((r) => r.shortDescription != null).length,
-    17,
-    "the 15 pre-existing short descriptions plus Hitchhike's and Quicksand's"
+    27,
+    "17 through wave 4 + 10 of the 11 powerups5 types (Mystery Potion has none)"
   );
   // The one intentional change.
   assert.match(byType.LEECH.description, /^For 60 min, /);

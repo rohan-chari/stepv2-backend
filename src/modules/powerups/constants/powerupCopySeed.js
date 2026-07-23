@@ -291,6 +291,96 @@ const POWERUP_COPY_SEED = [
     shortDescription: "Steps frozen",
     upgradeTierLabels: [],
   },
+  // ── Powerups Wave 5 (store-only, `powerups5`-gated). All new; never
+  // upgradeable this wave, so upgradeTierLabels is empty for each. ──────────
+  {
+    powerupType: "UPRISING",
+    name: "Uprising",
+    description:
+      "While you're in the bottom half of the standings, you and every racer below the midpoint get 2x steps for 2 hours",
+    shortDescription: "2x steps",
+    upgradeTierLabels: [],
+  },
+  {
+    powerupType: "GHOST_PEPPER",
+    name: "Ghost Pepper",
+    description:
+      "3x steps for 30 min, then a 30-min burnout where your steps are frozen. Self-inflicted — Cleanse and Quick Rinse can't remove it",
+    shortDescription: "Boosted, then frozen",
+    upgradeTierLabels: [],
+  },
+  {
+    powerupType: "COIN_FLIP",
+    name: "Coin Flip",
+    description:
+      "Flip a coin: heads doubles your steps for 1 hour, tails halves them. Self-inflicted — no shield or cleanse changes it",
+    shortDescription: "Steps doubled or halved",
+    upgradeTierLabels: [],
+  },
+  {
+    powerupType: "MYSTERY_POTION",
+    name: "Mystery Potion",
+    description:
+      "Drink for a random effect: it might help you, hit a rival, or backfire",
+    shortDescription: null,
+    upgradeTierLabels: [],
+  },
+  {
+    powerupType: "DECOY",
+    name: "Decoy",
+    description:
+      "The next single-target attack aimed at you is redirected to a random rival. Lasts until it triggers or 24 hours",
+    shortDescription: "Redirects next attack",
+    upgradeTierLabels: [],
+  },
+  {
+    powerupType: "POWER_OUTAGE",
+    name: "Power Outage",
+    description:
+      "Jam every rival — they can't use powerups for 30 minutes. Compression Socks keep one racer online; Mirrors can't reflect it",
+    shortDescription: "Powerups jammed",
+    upgradeTierLabels: [],
+  },
+  {
+    powerupType: "UMBRELLA",
+    name: "Umbrella",
+    description:
+      "Immune to area attacks like Rainstorm and Power Outage for 12 hours. Doesn't stop targeted hits",
+    shortDescription: "Area attacks blocked",
+    upgradeTierLabels: [],
+  },
+  {
+    powerupType: "RALLY_FLAG",
+    name: "Rally Flag",
+    description:
+      "Team races only: give every teammate 1.25x steps for 1 hour",
+    shortDescription: "Team boosted",
+    upgradeTierLabels: [],
+  },
+  {
+    powerupType: "DRILL_SERGEANT",
+    name: "Drill Sergeant",
+    description:
+      "Dare a rival to hit 3,000 steps in 2 hours or lose 1,500. Mirrors reflect it; Compression Socks block it",
+    shortDescription: "Dare or lose steps",
+    upgradeTierLabels: [],
+  },
+  {
+    powerupType: "PIGGY_BANK",
+    name: "Piggy Bank",
+    description:
+      "For 24 hours, bank 1 coin per 300 steps (up to 80). Paid out when it fills or the race ends",
+    shortDescription: "Banking coins",
+    upgradeTierLabels: [],
+  },
+  {
+    powerupType: "BOUNTY",
+    name: "Bounty",
+    description:
+      "Put a bounty on a rival ahead of you: out-place them by race end to collect 150 coins. Not for team races",
+    shortDescription: "Bounty placed",
+    upgradeTierLabels: [],
+  },
 ];
 
 // Every user-renderable type, in catalog order. MYSTERY_BOX is excluded.

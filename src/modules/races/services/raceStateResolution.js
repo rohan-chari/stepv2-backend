@@ -39,7 +39,19 @@ const POWERUP_EFFECT_TYPES = [
 // green while production (which always has the bulk method) scores it. The
 // value is folded into the total by the SAME computeEffectModifiers the display
 // path uses, so display == settlement.
-const SETTLEMENT_EFFECT_TYPES = [...POWERUP_EFFECT_TYPES, "QUICKSAND", "LEECH"];
+const SETTLEMENT_EFFECT_TYPES = [
+  ...POWERUP_EFFECT_TYPES,
+  "QUICKSAND",
+  "LEECH",
+  // Powerups Wave 5 windowed step-modifiers. Fetched via the BULK path only
+  // (production always has findEffectsForRaceByTypes), then folded into the same
+  // computeEffectModifiers the display path uses, so display == settlement.
+  "UPRISING",
+  "RALLY_FLAG",
+  "COIN_FLIP",
+  "GHOST_PEPPER",
+  "UMBRELLA",
+];
 
 function getEffectiveStart(participant, raceStartedAt) {
   const joinedAt = participant.joinedAt || raceStartedAt;
@@ -146,6 +158,11 @@ async function calculateCurrentTotal({
   let campfires = [];
   let rainstorms = [];
   let leeches = [];
+  let uprisings = [];
+  let rallyFlags = [];
+  let coinFlips = [];
+  let ghostPeppers = [];
+  let umbrellas = [];
 
   if (racePowerupsEnabled) {
     // One query for all types when the model supports it (production always
@@ -179,11 +196,19 @@ async function calculateCurrentTotal({
     campfires = byType.CAMPFIRE_REST;
     rainstorms = byType.RAINSTORM;
     leeches = byType.LEECH || [];
+    uprisings = byType.UPRISING || [];
+    rallyFlags = byType.RALLY_FLAG || [];
+    coinFlips = byType.COIN_FLIP || [];
+    ghostPeppers = byType.GHOST_PEPPER || [];
+    umbrellas = byType.UMBRELLA || [];
   }
 
   // Use the SAME computeEffectModifiers the display path uses, including the
   // additive global-event boost, so settlement totals match display exactly.
-  const allEffects = [...legCramps, ...runnersHighs, ...wrongTurns, ...campfires, ...rainstorms, ...leeches];
+  const allEffects = [
+    ...legCramps, ...runnersHighs, ...wrongTurns, ...campfires, ...rainstorms, ...leeches,
+    ...uprisings, ...rallyFlags, ...coinFlips, ...ghostPeppers, ...umbrellas,
+  ];
   const globalContext =
     globalEvents && globalEvents.length > 0 ? { globalEvents, now } : null;
   const { frozenSteps, buffedSteps, reversedSteps, globalBoostedSteps, leechTransfers } =

@@ -19,6 +19,76 @@ const {
   collectRaceHitchhikeCopies,
   applyHitchhikeCopies,
 } = require("../../powerups/hitchhikeCopies");
+const { mintPiggyBank } = require("../../powerups/commands/expireEffects");
+const { awardCoins } = require("../../../shared/economy/awardCoins");
+
+// Env-tunable Bounty payout (§3.11). Frozen into each Bounty's metadata at
+// use-time, so this default only applies to rows written before the env existed.
+function bountyPayoutFallback() {
+  const parsed = Number(process.env.BOUNTY_PAYOUT_COINS);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : 150;
+}
+
+// §3.10 / §3.11 settlement hooks. Piggy Bank mints at min(expiry, settlement);
+// Bounty pays out when the caster out-places the target. Both read effect rows
+// regardless of ACTIVE/EXPIRED status and are idempotent via awardCoins refId.
+async function settleWave5Economy({ race, standings, settlementTime }) {
+  if (!race.powerupsEnabled) return;
+
+  // Piggy Bank — every piggy in the race, capped at settlement time.
+  try {
+    const piggies = await RaceActiveEffect.findRaceEffectsByType(race.id, "PIGGY_BANK");
+    for (const effect of piggies) {
+      try {
+        await mintPiggyBank({ effect, stepSampleModel: StepSample, awardCoins, endCap: settlementTime });
+      } catch (e) {
+        console.error(`[CRON] Piggy Bank settle mint failed (${effect.id}):`, e);
+      }
+    }
+  } catch (e) {
+    console.error("[CRON] Piggy Bank settlement query failed:", e);
+  }
+
+  // Bounty — only individual races (disabled in team races at use-time).
+  if (race.isTeamRace) return;
+  try {
+    const bounties = await RaceActiveEffect.findRaceEffectsByType(race.id, "BOUNTY");
+    if (bounties.length === 0) return;
+    // placement map from the final standings order (index+1). A user absent from
+    // standings ranks worst.
+    const placementByUser = new Map();
+    standings.forEach((s, i) => placementByUser.set(s.participant.userId, i + 1));
+    const worst = standings.length + 1;
+    for (const effect of bounties) {
+      try {
+        const casterUserId = effect.sourceUserId;
+        const targetUserId = (effect.metadata || {}).targetUserId || effect.targetUserId;
+        const casterPlace = placementByUser.get(casterUserId) ?? worst;
+        const targetPlace = placementByUser.get(targetUserId) ?? worst;
+        if (casterPlace < targetPlace) {
+          const payout = Number((effect.metadata || {}).payoutCoins);
+          const coins = Number.isInteger(payout) && payout >= 0 ? payout : bountyPayoutFallback();
+          if (coins > 0) {
+            await awardCoins({ userId: casterUserId, amount: coins, reason: "bounty_payout", refId: effect.id });
+            await RacePowerupEvent.create({
+              raceId: race.id,
+              actorUserId: casterUserId,
+              eventType: "POWERUP_USED",
+              powerupType: "BOUNTY",
+              targetUserId,
+              description: `Bounty collected! Out-placed the target and earned ${coins} coins.`,
+              metadata: { outcome: "PAID", coins },
+            });
+          }
+        }
+      } catch (e) {
+        console.error(`[CRON] Bounty payout failed (${effect.id}):`, e);
+      }
+    }
+  } catch (e) {
+    console.error("[CRON] Bounty settlement query failed:", e);
+  }
+}
 
 async function resolveExpiredRaces() {
   console.log("[CRON] Checking for expired races...");
@@ -184,6 +254,10 @@ async function resolveExpiredRaces() {
       // whole winning team, 2 for the losers, all 1 on tie) are set INSIDE
       // completeRace so the deadline path and the collapse path share it.
       if (race.isTeamRace) {
+        // Piggy Bank mints in team races too (Bounty is individual-only and a
+        // no-op here). Runs before completeRace so the coins land at settlement.
+        await settleWave5Economy({ race, standings, settlementTime });
+
         const teamTotals = { TEAM_A: 0, TEAM_B: 0 };
         for (const standing of standings) {
           const team = standing.participant.team;
@@ -233,6 +307,10 @@ async function resolveExpiredRaces() {
           index + 1
         );
       }
+
+      // §3.10 / §3.11: Piggy Bank mint + Bounty payout, using the just-sorted
+      // standings for placement. Idempotent via awardCoins refId.
+      await settleWave5Economy({ race, standings, settlementTime });
 
       const participantUserIds = acceptedParticipants.map((p) => p.userId);
       const topUserId = standings[0]?.participant.userId || null;

@@ -652,7 +652,8 @@ function createRacesRouter(dependencies = {}) {
         req.clientFeatures?.has("characters") ?? false,
         // §9.3: Hitchhike effect entries are only rendered by powerups3 builds.
         req.clientFeatures?.has("powerups3") ?? false,
-        req.clientFeatures?.has("powerups4") ?? false
+        req.clientFeatures?.has("powerups4") ?? false,
+        req.clientFeatures?.has("powerups5") ?? false
       );
       res.json({ progress });
     } catch (error) {

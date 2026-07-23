@@ -29,6 +29,10 @@ const {
 const {
   imposterEnabled: defaultImposterEnabled,
 } = require("../constants/powerupGating");
+const { awardCoins: defaultAwardCoins } = require("../../../shared/economy/awardCoins");
+const {
+  DEFAULT_CONFIG: BALANCE_DEFAULT_CONFIG,
+} = require("../../economy/balanceConfig.defaults");
 
 // SIGNAL_JAMMER is a single-target attack (store-only): it is OFFENSIVE +
 // TARGETED so the shared targeting validation, finished-target rejection, and
@@ -53,7 +57,7 @@ const {
 // in src/utils/hitchhikeCopies.js (the caster COPIES the target's raw in-window
 // steps 1:1; the target loses nothing); the switch case here just parks the
 // 60-minute link.
-const OFFENSIVE_TYPES = ["LEG_CRAMP", "RED_CARD", "SHORTCUT", "WRONG_TURN", "DETOUR_SIGN", "PINECONE_TOSS", "SNEAKY_SWAP", "SIGNAL_JAMMER", "LEECH", "HITCHHIKE"];
+const OFFENSIVE_TYPES = ["LEG_CRAMP", "RED_CARD", "SHORTCUT", "WRONG_TURN", "DETOUR_SIGN", "PINECONE_TOSS", "SNEAKY_SWAP", "SIGNAL_JAMMER", "LEECH", "HITCHHIKE", "DRILL_SERGEANT"];
 // The three coin-shop-only powerups (they exist ONLY via the powerup shop:
 // IMPOSTER, RAINSTORM, SIGNAL_JAMMER). Product rule: none of them can EVER be
 // reflected by a Mirror, but ALL of them can be blocked by Compression Socks.
@@ -69,10 +73,48 @@ const SHOP_POWERUP_TYPES = ["IMPOSTER", "RAINSTORM", "SIGNAL_JAMMER", "LEECH", "
 // powerup it can NEVER be reflected by a Mirror, but Compression Socks DOES
 // block it (a dedicated block near its targeting validation), so it is not
 // subject to the generic OFFENSIVE_TYPES Mirror pre-check.
-const TARGETED_TYPES = ["LEG_CRAMP", "SHORTCUT", "WRONG_TURN", "DETOUR_SIGN", "SNEAKY_SWAP", "IMPOSTER", "SIGNAL_JAMMER", "LEECH", "HITCHHIKE"];
-// Types Sneaky Swap can never steal: another Sneaky Swap (no steal chains) and
-// unopened Mystery Boxes. Mirrors the isStealable helper in routes/races.js.
-const UNSTEALABLE_TYPES = ["SNEAKY_SWAP", "MYSTERY_BOX"];
+const TARGETED_TYPES = ["LEG_CRAMP", "SHORTCUT", "WRONG_TURN", "DETOUR_SIGN", "SNEAKY_SWAP", "IMPOSTER", "SIGNAL_JAMMER", "LEECH", "HITCHHIKE", "DRILL_SERGEANT", "BOUNTY"];
+// Powerups Wave 5 (§4.1). All 11 are store-only and gated behind `powerups5`.
+const POWERUPS5_TYPES = [
+  "UPRISING", "GHOST_PEPPER", "COIN_FLIP", "MYSTERY_POTION", "DECOY",
+  "POWER_OUTAGE", "UMBRELLA", "RALLY_FLAG", "DRILL_SERGEANT", "PIGGY_BANK", "BOUNTY",
+];
+// Types Sneaky Swap can never steal: another Sneaky Swap (no steal chains),
+// unopened Mystery Boxes, and every wave-5 store purchase (owner decision D6 —
+// expensive buys can't be sniped). Mirrors the isStealable helper in routes/races.js.
+const UNSTEALABLE_TYPES = ["SNEAKY_SWAP", "MYSTERY_BOX", ...POWERUPS5_TYPES];
+// Single-target attacks a Decoy redirects (§3.5): the same set Compression Socks
+// blocks, i.e. OFFENSIVE_TYPES plus IMPOSTER. AoE attacks (Rainstorm, Power
+// Outage, Quicksand) are NOT redirected — they resolve per-victim instead.
+const DECOY_REDIRECTABLE_TYPES = [...OFFENSIVE_TYPES, "IMPOSTER"];
+// Wave-5 durations.
+const UPRISING_DURATION_MS = 2 * 60 * 60 * 1000;
+const UPRISING_MULTIPLIER = 2;
+const GHOST_PEPPER_BOOST_MS = 30 * 60 * 1000;
+const GHOST_PEPPER_FREEZE_MS = 30 * 60 * 1000;
+const GHOST_PEPPER_MULTIPLIER = 3;
+const COIN_FLIP_DURATION_MS = 60 * 60 * 1000;
+const DECOY_DURATION_MS = 24 * 60 * 60 * 1000;
+const POWER_OUTAGE_DURATION_MS = 30 * 60 * 1000;
+const UMBRELLA_DURATION_MS = 12 * 60 * 60 * 1000;
+const RALLY_FLAG_DURATION_MS = 60 * 60 * 1000;
+const RALLY_FLAG_MULTIPLIER = 1.25;
+const DRILL_SERGEANT_DURATION_MS = 2 * 60 * 60 * 1000;
+const DRILL_SERGEANT_GOAL_STEPS = 3000;
+const DRILL_SERGEANT_PENALTY_STEPS = 1500;
+const PIGGY_BANK_DURATION_MS = 24 * 60 * 60 * 1000;
+
+// Env-tunable coin-faucet knobs (§3.10 / §3.11). Frozen into effect metadata at
+// use-time so a mid-flight env change never alters a live piggy/bounty. Read via
+// a positive-int guard so a malformed override falls back to the default rather
+// than silently disabling the cap/payout.
+function positiveIntEnv(raw, fallback) {
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
+}
+const PIGGY_BANK_STEPS_PER_COIN = positiveIntEnv(process.env.PIGGY_BANK_STEPS_PER_COIN, 300) || 300;
+const PIGGY_BANK_COIN_CAP = positiveIntEnv(process.env.PIGGY_BANK_COIN_CAP, 80);
+const BOUNTY_PAYOUT_COINS = positiveIntEnv(process.env.BOUNTY_PAYOUT_COINS, 150);
 const IMPOSTER_DURATION_MS = 60 * 60 * 1000;
 // RAINSTORM is purchase-only and UNTARGETED AoE: it debuffs every OTHER active
 // participant (never the caster) at once, so it is NOT in OFFENSIVE_TYPES /
@@ -149,6 +191,13 @@ const SELF_ONLY_TYPES = [
   "TRAIL_MAGNET",
   "POCKET_WATCH",
   "TRAIL_MINE",
+  // Wave 5 self-activated types (no target picker).
+  "GHOST_PEPPER",
+  "COIN_FLIP",
+  "MYSTERY_POTION",
+  "DECOY",
+  "UMBRELLA",
+  "PIGGY_BANK",
 ];
 
 const FANNY_PACK_DURATION_MS = 24 * 60 * 60 * 1000;
@@ -280,6 +329,275 @@ function luckyMinRarity(upgradeLevel, rng = Math.random, config) {
   return rng() < p ? "RARE" : "UNCOMMON";
 }
 
+// Weighted roll over a [{ outcome, weight }] pool. Uses the injected `random`
+// so tests can pin the outcome deterministically.
+function weightedRoll(pool, random) {
+  const total = pool.reduce((sum, e) => sum + (e.weight > 0 ? e.weight : 0), 0);
+  if (total <= 0) return pool[0]?.outcome ?? null;
+  let r = random() * total;
+  for (const entry of pool) {
+    const w = entry.weight > 0 ? entry.weight : 0;
+    if (r < w) return entry.outcome;
+    r -= w;
+  }
+  return pool[pool.length - 1].outcome;
+}
+
+// Pick a Decoy redirect victim (§3.5 / D3): a uniformly-random alive participant
+// excluding the attacker AND the Decoy holder (in team races, also excluding the
+// holder's teammates so the redirect never friendly-fires the holder's side).
+function pickDecoyRedirectVictim({
+  acceptedParticipants,
+  isAliveTarget,
+  attackerUserId,
+  holderParticipant,
+  isTeamRace,
+  random,
+}) {
+  const pool = acceptedParticipants.filter((p) => {
+    if (!isAliveTarget(p)) return false;
+    if (p.userId === attackerUserId) return false;
+    if (p.id === holderParticipant.id) return false;
+    if (isTeamRace && holderParticipant.team != null && p.team === holderParticipant.team) {
+      return false;
+    }
+    return true;
+  });
+  if (pool.length === 0) return null;
+  return pool[Math.floor(random() * pool.length)];
+}
+
+// Mystery Potion (§3.4): roll a weighted outcome and route it through the normal
+// apply path for that outcome. Self-contained (returns a full use result). A
+// potion may never fail after consumption: any invalid roll (no eligible enemy,
+// a stacking rejection) falls back to PROTEIN_SHAKE.
+async function applyMysteryPotion(ctx) {
+  const {
+    userId, raceId, powerupId, myParticipant, myDisplayName,
+    acceptedParticipants, isEnemy, isAliveTarget, effectModel, participantModel,
+    eventModel, events, awardCoins, random, now, currentTime, finalize,
+  } = ctx;
+
+  const config = (() => {
+    try {
+      return balanceConfig.getConfigSync ? balanceConfig.getConfigSync() : null;
+    } catch {
+      return null;
+    }
+  })();
+  const pool =
+    (config && config.mysteryPotion && Array.isArray(config.mysteryPotion.pool) && config.mysteryPotion.pool.length > 0
+      ? config.mysteryPotion.pool
+      : BALANCE_DEFAULT_CONFIG.mysteryPotion.pool);
+
+  let rolled = weightedRoll(pool, random);
+
+  const enemyOutcomes = new Set(["PINECONE_TOSS", "LEG_CRAMP", "SHORTCUT"]);
+  const aliveEnemies = acceptedParticipants.filter(
+    (p) => p.userId !== userId && isAliveTarget(p) && isEnemy(p)
+  );
+  // Edge: enemy-targeted roll with no eligible enemy → re-roll into the self-only
+  // subset (never an enemy outcome).
+  if (enemyOutcomes.has(rolled) && aliveEnemies.length === 0) {
+    const selfPool = pool.filter((e) => !enemyOutcomes.has(e.outcome));
+    rolled = weightedRoll(selfPool.length ? selfPool : [{ outcome: "PROTEIN_SHAKE", weight: 1 }], random);
+  }
+
+  const result = { blocked: false, upgradeLevel: 0, coinsSpent: 0, outcome: "APPLIED" };
+  const isTeamRace = myParticipant.team != null && acceptedParticipants.some((p) => p.team != null && p.team !== myParticipant.team);
+
+  const applyProteinFallback = async (reason) => {
+    const bonus = 1500;
+    await participantModel.addBonusSteps(myParticipant.id, bonus);
+    result.rolled = "PROTEIN_SHAKE";
+    result.bonus = bonus;
+    result.fallbackFrom = reason;
+    await eventModel.create({
+      raceId, actorUserId: userId, eventType: "POWERUP_USED", powerupType: "MYSTERY_POTION",
+      description: `${myDisplayName} drank a Mystery Potion and got a Protein Shake! +${bonus.toLocaleString()} steps.`,
+      metadata: { rolled: "PROTEIN_SHAKE" },
+    });
+  };
+
+  const createOnSelf = async (effectType, metadata) =>
+    effectModel.create({
+      raceId, targetParticipantId: myParticipant.id, targetUserId: userId,
+      sourceUserId: userId, powerupId, type: effectType, startsAt: currentTime,
+      expiresAt: metadata.expiresAt, metadata: metadata.meta || {},
+    });
+
+  switch (rolled) {
+    case "PROTEIN_SHAKE": {
+      const bonus = 1500;
+      await participantModel.addBonusSteps(myParticipant.id, bonus);
+      result.rolled = "PROTEIN_SHAKE"; result.bonus = bonus;
+      await eventModel.create({ raceId, actorUserId: userId, eventType: "POWERUP_USED", powerupType: "MYSTERY_POTION",
+        description: `${myDisplayName} drank a Mystery Potion and got a Protein Shake! +${bonus.toLocaleString()} steps.`, metadata: { rolled } });
+      break;
+    }
+    case "RUNNERS_HIGH": {
+      const existing = await effectModel.findActiveByTypeForParticipant(myParticipant.id, "RUNNERS_HIGH");
+      if (existing) { await applyProteinFallback("RUNNERS_HIGH"); break; }
+      const effect = await createOnSelf("RUNNERS_HIGH", { expiresAt: new Date(currentTime.getTime() + 3 * 60 * 60 * 1000), meta: { stepsAtBuffStart: myParticipant.totalSteps } });
+      result.rolled = "RUNNERS_HIGH"; result.effect = effect;
+      await eventModel.create({ raceId, actorUserId: userId, eventType: "POWERUP_USED", powerupType: "MYSTERY_POTION",
+        description: `${myDisplayName} drank a Mystery Potion and hit a Runner's High! 2x steps for 3 hours.`, metadata: { rolled } });
+      break;
+    }
+    case "COMPRESSION_SOCKS": {
+      const existing = await effectModel.findActiveByTypeForParticipant(myParticipant.id, "COMPRESSION_SOCKS");
+      if (existing) { await applyProteinFallback("COMPRESSION_SOCKS"); break; }
+      const effect = await createOnSelf("COMPRESSION_SOCKS", { expiresAt: new Date(currentTime.getTime() + 24 * 60 * 60 * 1000) });
+      result.rolled = "COMPRESSION_SOCKS"; result.effect = effect;
+      await eventModel.create({ raceId, actorUserId: userId, eventType: "POWERUP_USED", powerupType: "MYSTERY_POTION",
+        description: `${myDisplayName} drank a Mystery Potion and got Compression Socks! Shielded from the next attack.`, metadata: { rolled } });
+      break;
+    }
+    case "COIN_REFUND": {
+      const refundCoins = 80; // 2x the 40-coin price
+      await awardCoins({ userId, amount: refundCoins, reason: "mystery_potion_refund", refId: powerupId });
+      result.rolled = "COIN_REFUND"; result.coins = refundCoins;
+      await eventModel.create({ raceId, actorUserId: userId, eventType: "POWERUP_USED", powerupType: "MYSTERY_POTION",
+        description: `${myDisplayName} drank a Mystery Potion and struck coins! +${refundCoins} coins.`, metadata: { rolled } });
+      break;
+    }
+    case "LEG_CRAMP_SELF": {
+      const effect = await createOnSelf("LEG_CRAMP", { expiresAt: new Date(currentTime.getTime() + 2 * 60 * 60 * 1000), meta: { stepsAtFreezeStart: myParticipant.totalSteps } });
+      result.rolled = "LEG_CRAMP_SELF"; result.effect = effect;
+      await eventModel.create({ raceId, actorUserId: userId, eventType: "POWERUP_USED", powerupType: "MYSTERY_POTION",
+        description: `${myDisplayName} drank a Mystery Potion and cramped up! Their steps are frozen for 2 hours.`, metadata: { rolled } });
+      break;
+    }
+    case "WRONG_TURN_SELF": {
+      const effect = await createOnSelf("WRONG_TURN", { expiresAt: new Date(currentTime.getTime() + 60 * 60 * 1000), meta: { stepsAtStart: myParticipant.totalSteps } });
+      result.rolled = "WRONG_TURN_SELF"; result.effect = effect;
+      await eventModel.create({ raceId, actorUserId: userId, eventType: "POWERUP_USED", powerupType: "MYSTERY_POTION",
+        description: `${myDisplayName} drank a Mystery Potion and got turned around! Their steps are reversed for 1 hour.`, metadata: { rolled } });
+      break;
+    }
+    case "PINECONE_TOSS":
+    case "LEG_CRAMP":
+    case "SHORTCUT": {
+      const handled = await applyPotionEnemyAttack({
+        rolled, aliveEnemies, acceptedParticipants, isAliveTarget, isTeamRace,
+        userId, myParticipant, myDisplayName, effectModel, participantModel,
+        eventModel, events, random, now, currentTime, raceId, powerupId, result,
+      });
+      if (!handled) { await applyProteinFallback(rolled); }
+      break;
+    }
+    default: {
+      await applyProteinFallback(rolled || "UNKNOWN");
+    }
+  }
+
+  await finalize(null);
+  return result;
+}
+
+// Enemy-targeted Mystery Potion outcome, honoring the victim's defenses in the
+// canonical Mirror → Decoy → Socks order (§3.4/§3.5). Returns false when the roll
+// is INVALID (stacking rejection / no eligible enemy) so the caller falls back to
+// PROTEIN_SHAKE; returns true once the outcome is resolved (applied, blocked,
+// reflected, or redirected).
+async function applyPotionEnemyAttack(a) {
+  const {
+    rolled, aliveEnemies, acceptedParticipants, isAliveTarget, isTeamRace,
+    userId, myParticipant, myDisplayName, effectModel, participantModel,
+    eventModel, events, random, now, currentTime, raceId, powerupId, result,
+  } = a;
+  if (aliveEnemies.length === 0) return false;
+  let victim = aliveEnemies[Math.floor(random() * aliveEnemies.length)];
+
+  // Validity pre-checks (a stacking rejection is INVALID → fallback).
+  if (rolled === "SHORTCUT" && Math.max(0, victim.totalSteps) === 0) return false;
+  if (rolled === "LEG_CRAMP") {
+    const existing = await effectModel.findActiveByTypeForParticipant(victim.id, "LEG_CRAMP");
+    if (existing) return false;
+  }
+
+  let targetParticipant = victim;
+  let sourceUserId = userId;
+  let sourceName = myDisplayName;
+
+  // Mirror (reflectable: these three are not shop types).
+  const mirror = await effectModel.findActiveByTypeForParticipant(victim.id, "MIRROR");
+  if (mirror) {
+    await effectModel.update(mirror.id, { status: "EXPIRED" });
+    targetParticipant = myParticipant; // reflect onto the caster
+    sourceUserId = victim.userId;
+    sourceName = victim.user?.displayName || "A runner";
+    result.reflected = true; result.reflectedBy = "MIRROR";
+  } else {
+    // Decoy redirect (one hop, no chaining).
+    const decoy = await effectModel.findActiveByTypeForParticipant(victim.id, "DECOY");
+    if (decoy) {
+      await effectModel.update(decoy.id, { status: "EXPIRED" });
+      const redirect = pickDecoyRedirectVictim({
+        acceptedParticipants, isAliveTarget, attackerUserId: userId,
+        holderParticipant: victim, isTeamRace, random,
+      });
+      if (!redirect) {
+        result.rolled = rolled; result.blocked = true; result.blockedBy = "DECOY"; result.outcome = "BLOCKED";
+        return true;
+      }
+      targetParticipant = redirect;
+      result.redirected = true; result.redirectedBy = "DECOY"; result.redirectedToUserId = redirect.userId;
+      result.outcome = "REDIRECTED";
+    }
+    // Socks on the (possibly redirected) victim.
+    const socks = await effectModel.findActiveByTypeForParticipant(targetParticipant.id, "COMPRESSION_SOCKS");
+    if (socks) {
+      await effectModel.update(socks.id, { status: "BLOCKED" });
+      result.rolled = rolled; result.blocked = true; result.blockedBy = "COMPRESSION_SOCKS";
+      result.outcome = result.outcome === "REDIRECTED" ? "REDIRECTED" : "BLOCKED";
+      return true;
+    }
+  }
+
+  const resolvedTargetUserId = targetParticipant.userId;
+  const targetName = targetParticipant.user?.displayName || "a runner";
+  result.rolled = rolled;
+
+  if (rolled === "PINECONE_TOSS") {
+    const penalty = 750;
+    await participantModel.subtractBonusSteps(targetParticipant.id, penalty);
+    result.penalty = penalty;
+    await eventModel.create({ raceId, actorUserId: sourceUserId, eventType: "POWERUP_USED", powerupType: "MYSTERY_POTION",
+      targetUserId: resolvedTargetUserId,
+      description: `${sourceName}'s Mystery Potion tossed a Pinecone at ${targetName}! They lost ${penalty.toLocaleString()} steps.`, metadata: { rolled } });
+  } else if (rolled === "SHORTCUT") {
+    const stolen = Math.min(1000, Math.max(0, targetParticipant.totalSteps));
+    if (stolen > 0) {
+      await participantModel.subtractBonusSteps(targetParticipant.id, stolen);
+      await participantModel.addBonusSteps(myParticipant.id, stolen);
+    }
+    result.stolen = stolen;
+    await eventModel.create({ raceId, actorUserId: sourceUserId, eventType: "POWERUP_USED", powerupType: "MYSTERY_POTION",
+      targetUserId: resolvedTargetUserId,
+      description: `${sourceName}'s Mystery Potion took a Shortcut, stealing ${stolen.toLocaleString()} steps from ${targetName}!`, metadata: { rolled } });
+  } else if (rolled === "LEG_CRAMP") {
+    // On reflect, the caster may already hold a cramp — guard to avoid a throw;
+    // if so, treat as resolved (no double-cramp).
+    const existing = await effectModel.findActiveByTypeForParticipant(targetParticipant.id, "LEG_CRAMP");
+    if (!existing) {
+      const effect = await effectModel.create({
+        raceId, targetParticipantId: targetParticipant.id, targetUserId: resolvedTargetUserId,
+        sourceUserId, powerupId, type: "LEG_CRAMP", startsAt: currentTime,
+        expiresAt: new Date(currentTime.getTime() + 2 * 60 * 60 * 1000),
+        metadata: { stepsAtFreezeStart: targetParticipant.totalSteps },
+      });
+      result.effect = effect;
+    }
+    await eventModel.create({ raceId, actorUserId: sourceUserId, eventType: "POWERUP_USED", powerupType: "MYSTERY_POTION",
+      targetUserId: resolvedTargetUserId,
+      description: `${sourceName}'s Mystery Potion cramped ${targetName}! Their steps are frozen for 2 hours.`, metadata: { rolled } });
+  }
+
+  events.emit("POWERUP_USED", { raceId, userId: sourceUserId, powerupType: "MYSTERY_POTION", targetUserId: resolvedTargetUserId, upgradeLevel: 0 });
+  return true;
+}
+
 function buildUsePowerup(dependencies = {}) {
   const db = dependencies.prisma || defaultPrisma;
   const hasInjectedDeps = Object.keys(dependencies).length > 0;
@@ -310,6 +628,7 @@ function buildUsePowerup(dependencies = {}) {
       : defaultSyncRacePowerupState;
   const now = dependencies.now || (() => new Date());
   const random = dependencies.random || Math.random;
+  const awardCoins = dependencies.awardCoins || defaultAwardCoins;
   // Imposter kill switch (Item 3). Injectable for tests; defaults to the env
   // reader (enabled unless IMPOSTER_ENABLED="false").
   const imposterEnabled = dependencies.imposterEnabled || defaultImposterEnabled;
@@ -385,10 +704,17 @@ function buildUsePowerup(dependencies = {}) {
     // rejection. Buying and redeeming go through separate commands and are
     // deliberately NOT gated here. A jam whose expiresAt has already passed (but
     // whose row is still ACTIVE because lazy expiry hasn't run) does not block.
-    const activeJam = await effectModel.findActiveByTypeForParticipant(
-      myParticipant.id,
-      "SIGNAL_JAMMER"
-    );
+    // §3.6: the jam lookup covers BOTH single-target Signal Jammer and the AoE
+    // Power Outage — either one prevents the participant from firing a powerup.
+    // Two typed lookups (rather than findActiveForParticipant) so injected fakes
+    // that only implement findActiveByTypeForParticipant keep working.
+    const isLiveJam = (e) => e && e.expiresAt && new Date(e.expiresAt) > now();
+    const jammer = await effectModel.findActiveByTypeForParticipant(myParticipant.id, "SIGNAL_JAMMER");
+    let activeJam = isLiveJam(jammer) ? jammer : null;
+    if (!activeJam) {
+      const outage = await effectModel.findActiveByTypeForParticipant(myParticipant.id, "POWER_OUTAGE");
+      if (isLiveJam(outage)) activeJam = outage;
+    }
     if (activeJam && activeJam.expiresAt && new Date(activeJam.expiresAt) > now()) {
       const remainingMs = new Date(activeJam.expiresAt).getTime() - now().getTime();
       const remainingMin = Math.max(1, Math.ceil(remainingMs / (60 * 1000)));
@@ -416,6 +742,19 @@ function buildUsePowerup(dependencies = {}) {
     // single env flip (IMPOSTER_ENABLED).
     if (type === "IMPOSTER" && !imposterEnabled()) {
       throw new PowerupUseError("Imposter is temporarily unavailable", 400);
+    }
+
+    // Wave 5 gate (§4.1): a wave-5 held item used from a client that does not
+    // advertise `powerups5` is rejected with UPDATE_REQUIRED. This runs before
+    // coin deduction and the mark-USED step, so the item stays HELD. A frozen
+    // binary can only reach here if it somehow acquired one of these (it never
+    // sees them in the catalog), so this is defense-in-depth.
+    if (POWERUPS5_TYPES.includes(type) && !requestHasFeature(clientFeatures, "powerups5")) {
+      throw new PowerupUseError(
+        `Update required to use ${POWERUP_NAMES[type] || type}`,
+        400,
+        "UPDATE_REQUIRED"
+      );
     }
 
     // Validate upgrade level (cheap, no DB writes)
@@ -555,6 +894,259 @@ function buildUsePowerup(dependencies = {}) {
       };
     }
 
+    // ── Wave 5 targetless fan-out powerups (§3.1/§3.6/§3.8) ─────────────────
+    // These mirror the QUICKSAND/RAINSTORM early-return style: they create their
+    // own effect rows, mark the item USED, and return without touching the
+    // single-target Mirror/Socks switch below (they are buffs or AoE jams).
+    const finalizeSelfContainedUse = async (resolvedTarget = null) => {
+      await powerupModel.update(powerupId, {
+        status: "USED",
+        usedAt: now(),
+        targetUserId: resolvedTarget,
+        upgradeLevel: 0,
+      });
+      await resolveRaceState({ raceId, timeZone });
+      await syncRacePowerupState({ raceId, userId });
+    };
+
+    // Merge helper for per-beneficiary buff windows (§3.1/§3.8): if the
+    // beneficiary already holds an ACTIVE row of this buff type, EXTEND it to the
+    // later end (union) instead of creating a second row, so two casts never
+    // exceed the single multiplier. Returns the created/updated row.
+    const upsertBuffWindow = async (participantId, beneficiaryUserId, effectType, expiresAt, metadata) => {
+      const existing = await effectModel.findActiveByTypeForParticipant(participantId, effectType);
+      if (existing) {
+        const mergedEnd =
+          new Date(existing.expiresAt || 0).getTime() > expiresAt.getTime()
+            ? existing.expiresAt
+            : expiresAt;
+        return effectModel.update(existing.id, { expiresAt: mergedEnd });
+      }
+      return effectModel.create({
+        raceId,
+        targetParticipantId: participantId,
+        targetUserId: beneficiaryUserId,
+        sourceUserId: userId,
+        powerupId,
+        type: effectType,
+        startsAt: now(),
+        expiresAt,
+        metadata,
+      });
+    };
+
+    if (type === "UPRISING" || type === "RALLY_FLAG" || type === "POWER_OUTAGE") {
+      if (targetUserId) {
+        throw new PowerupUseError(
+          `${POWERUP_NAMES[type]} is not aimed at a single racer — remove the target`,
+          400
+        );
+      }
+    }
+
+    if (type === "UPRISING") {
+      // Determine beneficiaries + enforce the bottom-half / losing-team gate.
+      let beneficiaries;
+      if (isTeamRace) {
+        const teamTotals = { TEAM_A: 0, TEAM_B: 0 };
+        for (const p of acceptedParticipants) {
+          if (p.team === "TEAM_A" || p.team === "TEAM_B") {
+            teamTotals[p.team] += p.totalSteps || 0;
+          }
+        }
+        const myTeam = myParticipant.team;
+        const otherTeam = myTeam === "TEAM_A" ? "TEAM_B" : "TEAM_A";
+        if (teamTotals[myTeam] >= teamTotals[otherTeam]) {
+          throw new PowerupUseError(
+            "Uprising can only be used by the losing team",
+            400,
+            "INVALID_TARGET"
+          );
+        }
+        beneficiaries = acceptedParticipants.filter(
+          (p) => p.team === myTeam && isAliveTarget(p)
+        );
+      } else {
+        const alive = acceptedParticipants.filter((p) => isAliveTarget(p));
+        const sorted = sortedActiveParticipants(alive);
+        const n = sorted.length;
+        const bottomStart = Math.ceil(n / 2); // 0-indexed start of the bottom half
+        const myIndex = sorted.findIndex((p) => p.id === myParticipant.id);
+        if (myIndex < bottomStart) {
+          throw new PowerupUseError(
+            "Uprising can only be used from the bottom half of the standings",
+            400,
+            "INVALID_TARGET"
+          );
+        }
+        beneficiaries = sorted.slice(bottomStart);
+      }
+
+      const upEnd = new Date(now().getTime() + UPRISING_DURATION_MS);
+      let ownEffect = null;
+      for (const b of beneficiaries) {
+        const row = await upsertBuffWindow(b.id, b.userId, "UPRISING", upEnd, {
+          multiplier: UPRISING_MULTIPLIER,
+        });
+        if (b.userId === userId) ownEffect = row;
+      }
+
+      await eventModel.create({
+        raceId,
+        actorUserId: userId,
+        eventType: "POWERUP_USED",
+        powerupType: type,
+        description: `${myDisplayName} sparked an Uprising! ${beneficiaries.length} runner${beneficiaries.length === 1 ? "" : "s"} get 2x steps for 2 hours.`,
+        metadata: { affected: beneficiaries.length },
+      });
+      events.emit("POWERUP_USED", { raceId, userId, powerupType: type, upgradeLevel: 0 });
+      await finalizeSelfContainedUse(null);
+      return {
+        blocked: false,
+        upgradeLevel: 0,
+        coinsSpent: 0,
+        outcome: "APPLIED",
+        affected: beneficiaries.length,
+        effect: ownEffect,
+        durationMs: UPRISING_DURATION_MS,
+      };
+    }
+
+    if (type === "RALLY_FLAG") {
+      if (!isTeamRace) {
+        throw new PowerupUseError("Rally Flag needs a team race", 400, "INVALID_TARGET");
+      }
+      const beneficiaries = acceptedParticipants.filter(
+        (p) => p.team === myParticipant.team && isAliveTarget(p)
+      );
+      const flagEnd = new Date(now().getTime() + RALLY_FLAG_DURATION_MS);
+      let ownEffect = null;
+      for (const b of beneficiaries) {
+        const row = await upsertBuffWindow(b.id, b.userId, "RALLY_FLAG", flagEnd, {
+          multiplier: RALLY_FLAG_MULTIPLIER,
+        });
+        if (b.userId === userId) ownEffect = row;
+      }
+      await eventModel.create({
+        raceId,
+        actorUserId: userId,
+        eventType: "POWERUP_USED",
+        powerupType: type,
+        description: `${myDisplayName} raised a Rally Flag! The whole team gets 1.25x steps for 1 hour.`,
+        metadata: { affected: beneficiaries.length },
+      });
+      events.emit("POWERUP_USED", { raceId, userId, powerupType: type, upgradeLevel: 0 });
+      await finalizeSelfContainedUse(null);
+      return {
+        blocked: false,
+        upgradeLevel: 0,
+        coinsSpent: 0,
+        outcome: "APPLIED",
+        affected: beneficiaries.length,
+        effect: ownEffect,
+        durationMs: RALLY_FLAG_DURATION_MS,
+      };
+    }
+
+    if (type === "POWER_OUTAGE") {
+      // AoE jam: one POWER_OUTAGE row per alive enemy, 30 min. Umbrella holders
+      // are skipped (immune, not consumed); Socks holders are skipped with the
+      // shield consumed (blockedCount); already-jammed victims are skipped.
+      const victims = acceptedParticipants.filter(
+        (p) => p.userId !== userId && isAliveTarget(p) && isEnemy(p)
+      );
+      const outageEnd = new Date(now().getTime() + POWER_OUTAGE_DURATION_MS);
+      const affected = [];
+      let blockedCount = 0;
+      for (const victim of victims) {
+        const victimEffects = await effectModel.findActiveForParticipant(victim.id);
+        const umbrella = victimEffects.find(
+          (e) => e.type === "UMBRELLA" && e.expiresAt && new Date(e.expiresAt) > now()
+        );
+        if (umbrella) continue; // immune, shield not consumed
+        const alreadyJammed = victimEffects.find(
+          (e) => e.type === "POWER_OUTAGE" && e.expiresAt && new Date(e.expiresAt) > now()
+        );
+        if (alreadyJammed) continue;
+        const socks = victimEffects.find((e) => e.type === "COMPRESSION_SOCKS");
+        if (socks) {
+          await effectModel.update(socks.id, { status: "BLOCKED" });
+          blockedCount += 1;
+          await eventModel.create({
+            raceId,
+            actorUserId: victim.userId,
+            eventType: "POWERUP_BLOCKED",
+            powerupType: type,
+            targetUserId: userId,
+            description: `${victim.user?.displayName || "A runner"}'s Compression Socks kept the lights on through ${myDisplayName}'s Power Outage!`,
+          });
+          events.emit("POWERUP_BLOCKED", {
+            raceId,
+            attackerUserId: userId,
+            defenderUserId: victim.userId,
+            blockedType: type,
+            upgradeLevel: 0,
+          });
+          continue;
+        }
+        await effectModel.create({
+          raceId,
+          targetParticipantId: victim.id,
+          targetUserId: victim.userId,
+          sourceUserId: userId,
+          powerupId,
+          type: "POWER_OUTAGE",
+          startsAt: now(),
+          expiresAt: outageEnd,
+        });
+        affected.push(victim.userId);
+      }
+      await eventModel.create({
+        raceId,
+        actorUserId: userId,
+        eventType: "POWERUP_USED",
+        powerupType: type,
+        description: `${myDisplayName} triggered a Power Outage! ${affected.length} rival${affected.length === 1 ? "" : "s"} can't use powerups for 30 minutes.`,
+        metadata: { affected: affected.length, blockedCount },
+      });
+      for (const uid of affected) {
+        events.emit("POWERUP_USED", { raceId, userId, powerupType: type, targetUserId: uid, upgradeLevel: 0 });
+      }
+      await finalizeSelfContainedUse(null);
+      return {
+        blocked: affected.length === 0,
+        upgradeLevel: 0,
+        coinsSpent: 0,
+        outcome: affected.length === 0 ? "BLOCKED" : "APPLIED",
+        affected: affected.length,
+        blockedCount,
+        durationMs: POWER_OUTAGE_DURATION_MS,
+      };
+    }
+
+    if (type === "MYSTERY_POTION") {
+      return await applyMysteryPotion({
+        userId,
+        raceId,
+        powerupId,
+        myParticipant,
+        myDisplayName,
+        acceptedParticipants,
+        isEnemy,
+        isAliveTarget,
+        effectModel,
+        participantModel,
+        eventModel,
+        events,
+        powerupModel,
+        awardCoins,
+        random,
+        now,
+        currentTime: now(),
+        finalize: finalizeSelfContainedUse,
+      });
+    }
+
     // Rainstorm is untargeted (hits every other racer) and never stacks: while
     // any rainstorm is active in the race, another cannot be started. In a team
     // race the fan-out is ENEMY-ONLY (teammates stay dry — TR-652).
@@ -664,9 +1256,64 @@ function buildUsePowerup(dependencies = {}) {
       }
     }
 
+    // BOUNTY (§3.11): TARGETED but NOT offensive — it creates no debuff on the
+    // target (so it is never blockable/reflectable/decoy-able). Validate the
+    // wager here, exactly like the Imposter targeting block above.
+    let bountyTargetParticipant = null;
+    if (type === "BOUNTY") {
+      if (isTeamRace) {
+        throw new PowerupUseError("Bounty is not available in team races", 400, "INVALID_TARGET");
+      }
+      // Time-based races only — a target-step race has no fixed end to settle at.
+      if (!race.endsAt) {
+        throw new PowerupUseError("Bounty needs a race with a fixed end time", 400, "INVALID_TARGET");
+      }
+      bountyTargetParticipant = acceptedParticipants.find(
+        (p) => p.userId === resolvedTargetUserId
+      );
+      if (!bountyTargetParticipant || !isAliveTarget(bountyTargetParticipant)) {
+        throw new PowerupUseError("Target is not an active participant in this race", 400);
+      }
+      // Must be strictly AHEAD of the caster (leader-guard style, like Red Card).
+      if ((bountyTargetParticipant.totalSteps || 0) <= (myParticipant.totalSteps || 0)) {
+        throw new PowerupUseError("Bounty must target a rival ahead of you", 400, "INVALID_TARGET");
+      }
+      // One active Bounty per caster per race.
+      const existingBounty = (await effectModel.findActiveForRace(raceId)).find(
+        (e) => e.type === "BOUNTY" && e.sourceUserId === userId &&
+          e.expiresAt && new Date(e.expiresAt) > now()
+      );
+      if (existingBounty) {
+        throw new PowerupUseError("You already have an active Bounty in this race", 409);
+      }
+    }
+
+    // PIGGY_BANK (§3.10): ONE active per user GLOBALLY across all races. Query
+    // any ACTIVE piggy for this user in ANY race and reject with the blocking
+    // race named. Uses the raw client so the check spans races (the effect-model
+    // helpers are all race/participant scoped).
+    if (type === "PIGGY_BANK" && typeof db?.raceActiveEffect?.findFirst === "function") {
+      const activePiggy = await db.raceActiveEffect.findFirst({
+        where: { targetUserId: userId, type: "PIGGY_BANK", status: "ACTIVE", expiresAt: { gt: now() } },
+      });
+      if (activePiggy) {
+        let blockingName = "another race";
+        try {
+          const blockingRace = await raceModel.findById(activePiggy.raceId);
+          if (blockingRace?.name) blockingName = `"${blockingRace.name}"`;
+        } catch { /* best-effort name */ }
+        throw new PowerupUseError(
+          `You already have a Piggy Bank saving in ${blockingName}`,
+          409,
+          "PIGGY_BANK_ALREADY_ACTIVE"
+        );
+      }
+    }
+
     let targetDisplayName =
       targetParticipant?.user?.displayName ||
       imposterTargetParticipant?.user?.displayName ||
+      bountyTargetParticipant?.user?.displayName ||
       "a runner";
 
     // Reject Shortcut on a target with 0 steps — nothing to steal
@@ -980,6 +1627,8 @@ function buildUsePowerup(dependencies = {}) {
     // Shop-bought powerups (SHOP_POWERUP_TYPES) are NEVER reflectable, so they
     // skip this pre-check entirely and fall through to the Socks block below.
     let reflected = false;
+    // Set when a Decoy redirected this single-target attack to a new victim.
+    let decoyRedirectedToUserId = null;
     if (OFFENSIVE_TYPES.includes(type) && !SHOP_POWERUP_TYPES.includes(type) && targetParticipant) {
       const mirror = await effectModel.findActiveByTypeForParticipant(
         targetParticipant.id,
@@ -1023,6 +1672,111 @@ function buildUsePowerup(dependencies = {}) {
           reflectedType: type,
           upgradeLevel,
         });
+      }
+    }
+
+    // Decoy shield block (§3.5). Shield-chain order: Mirror → Decoy → Socks. Runs
+    // only when the attack was NOT reflected (Mirror takes precedence). A Decoy on
+    // the target redirects the next SINGLE-TARGET attack to a random third party;
+    // the Decoy is consumed. If no eligible third party exists (2-player race),
+    // the Decoy behaves as a block (attack fizzles, Decoy consumed). The redirected
+    // victim then gets the full normal treatment INCLUDING their own Mirror/Socks
+    // (one redirect max — a second Decoy on the new victim does not chain): their
+    // Socks is caught by the block below (targetParticipant now points at them),
+    // and their Mirror is handled here.
+    if (!reflected && OFFENSIVE_TYPES.includes(type) && targetParticipant) {
+      const decoy = await effectModel.findActiveByTypeForParticipant(
+        targetParticipant.id,
+        "DECOY"
+      );
+      if (decoy) {
+        await effectModel.update(decoy.id, { status: "EXPIRED" });
+        const holder = targetParticipant;
+        const redirect = pickDecoyRedirectVictim({
+          acceptedParticipants,
+          isAliveTarget,
+          attackerUserId: userId,
+          holderParticipant: holder,
+          isTeamRace,
+          random,
+        });
+        if (!redirect) {
+          // Fizzle as a block: consume the item, create no effect.
+          await powerupModel.update(powerupId, {
+            status: "USED",
+            usedAt: now(),
+            targetUserId: resolvedTargetUserId,
+            upgradeLevel,
+          });
+          await eventModel.create({
+            raceId,
+            actorUserId: holder.userId,
+            eventType: "POWERUP_BLOCKED",
+            powerupType: type,
+            targetUserId: userId,
+            description: `${holder.user?.displayName || "A runner"}'s Decoy absorbed ${myDisplayName}'s ${POWERUP_NAMES[type]}!`,
+          });
+          events.emit("POWERUP_BLOCKED", {
+            raceId,
+            attackerUserId: userId,
+            defenderUserId: holder.userId,
+            blockedType: type,
+            upgradeLevel,
+          });
+          await resolveRaceState({ raceId, timeZone });
+          await syncRacePowerupState({ raceId, userId });
+          return {
+            blocked: true,
+            blockedBy: "DECOY",
+            outcome: "BLOCKED",
+            upgradeLevel,
+            coinsSpent: costCoins,
+          };
+        }
+        // Redirect the attack onto the new victim.
+        targetParticipant = redirect;
+        resolvedTargetUserId = redirect.userId;
+        targetDisplayName = redirect.user?.displayName || "a runner";
+        decoyRedirectedToUserId = redirect.userId;
+
+        // The redirected victim's OWN Mirror still reflects (one redirect max, so
+        // no further Decoy is consulted). SHOP_POWERUP_TYPES are never reflected.
+        if (!SHOP_POWERUP_TYPES.includes(type)) {
+          const newMirror = await effectModel.findActiveByTypeForParticipant(
+            redirect.id,
+            "MIRROR"
+          );
+          if (newMirror) {
+            reflected = true;
+            await effectModel.update(newMirror.id, { status: "EXPIRED" });
+            const originalAttacker = myParticipant;
+            const originalTarget = redirect;
+            const originalAttackerUserId = userId;
+            const originalAttackerName = myDisplayName;
+            const originalTargetName = redirect.user?.displayName || "a runner";
+            myParticipant = originalTarget;
+            targetParticipant = originalAttacker;
+            resolvedTargetUserId = originalAttackerUserId;
+            myDisplayName = originalTargetName;
+            targetDisplayName = originalAttackerName;
+            actingUserId = redirect.userId;
+            await eventModel.create({
+              raceId,
+              actorUserId: redirect.userId,
+              eventType: "POWERUP_REFLECTED",
+              powerupType: type,
+              targetUserId: originalAttackerUserId,
+              description: `${originalTargetName}'s Mirror reflected the redirected ${POWERUP_NAMES[type]} back at ${originalAttackerName}!`,
+            });
+            events.emit("POWERUP_REFLECTED", {
+              raceId,
+              attackerUserId: originalAttackerUserId,
+              defenderUserId: redirect.userId,
+              reflectedType: type,
+              upgradeLevel,
+            });
+          }
+        }
       }
     }
 
@@ -1147,6 +1901,13 @@ function buildUsePowerup(dependencies = {}) {
       result.reflected = true;
       result.reflectedBy = "MIRROR";
       result.outcome = "REFLECTED";
+    } else if (decoyRedirectedToUserId) {
+      // §3.5: a single-target attack that hit a Decoy and was redirected (and NOT
+      // then reflected by the new victim's Mirror, handled above).
+      result.redirected = true;
+      result.redirectedBy = "DECOY";
+      result.redirectedToUserId = decoyRedirectedToUserId;
+      result.outcome = "REDIRECTED";
     } else {
       result.outcome = "APPLIED";
     }
@@ -1539,6 +2300,16 @@ function buildUsePowerup(dependencies = {}) {
 
         for (const victim of victims) {
           const victimName = victim.user?.displayName || "A runner";
+
+          // §3.7: an Umbrella holder is immune to the AoE rain — skipped before
+          // the Socks check, and the Umbrella (a timed aura) is NOT consumed.
+          const victimUmbrella = await effectModel.findActiveByTypeForParticipant(
+            victim.id,
+            "UMBRELLA"
+          );
+          if (victimUmbrella && victimUmbrella.expiresAt && new Date(victimUmbrella.expiresAt) > now()) {
+            continue;
+          }
 
           const victimShield = await effectModel.findActiveByTypeForParticipant(
             victim.id,
@@ -2019,6 +2790,206 @@ function buildUsePowerup(dependencies = {}) {
           metadata: stolen
             ? { stolenPowerupId: stolen.id, stolenType: stolen.type }
             : {},
+        });
+        break;
+      }
+
+      case "DRILL_SERGEANT": {
+        // §3.9: a dare parked on the target for 2h, evaluated at EXPIRY. On a
+        // Mirror reflect the roles were swapped above so it lands on the original
+        // attacker. Metadata snapshots the target's steps at start; the expiry
+        // branch sums their window steps and applies the penalty (or void).
+        const effect = await effectModel.create({
+          raceId,
+          targetParticipantId: targetParticipant.id,
+          targetUserId: resolvedTargetUserId,
+          sourceUserId: actingUserId,
+          powerupId,
+          type: "DRILL_SERGEANT",
+          startsAt: currentTime,
+          expiresAt: new Date(currentTime.getTime() + DRILL_SERGEANT_DURATION_MS),
+          metadata: {
+            goalSteps: DRILL_SERGEANT_GOAL_STEPS,
+            penaltySteps: DRILL_SERGEANT_PENALTY_STEPS,
+            stepsAtStart: targetParticipant.totalSteps || 0,
+          },
+        });
+        result.effect = effect;
+        result.durationMs = DRILL_SERGEANT_DURATION_MS;
+        result.goalSteps = DRILL_SERGEANT_GOAL_STEPS;
+        result.penaltySteps = DRILL_SERGEANT_PENALTY_STEPS;
+        await eventModel.create({
+          raceId,
+          actorUserId: actingUserId,
+          eventType: "POWERUP_USED",
+          powerupType: type,
+          targetUserId: resolvedTargetUserId,
+          description: `${myDisplayName} dared ${targetDisplayName} with a Drill Sergeant! Hit ${DRILL_SERGEANT_GOAL_STEPS.toLocaleString()} steps in 2 hours or lose ${DRILL_SERGEANT_PENALTY_STEPS.toLocaleString()}.`,
+        });
+        break;
+      }
+
+      case "GHOST_PEPPER": {
+        // §3.2: two-phase self buff — boost then freeze (Campfire inverted).
+        const effect = await effectModel.create({
+          raceId,
+          targetParticipantId: myParticipant.id,
+          targetUserId: userId,
+          sourceUserId: userId,
+          powerupId,
+          type: "GHOST_PEPPER",
+          startsAt: currentTime,
+          expiresAt: new Date(currentTime.getTime() + GHOST_PEPPER_BOOST_MS + GHOST_PEPPER_FREEZE_MS),
+          metadata: {
+            boostMs: GHOST_PEPPER_BOOST_MS,
+            multiplier: GHOST_PEPPER_MULTIPLIER,
+            freezeMs: GHOST_PEPPER_FREEZE_MS,
+            stepsAtBoostStart: myParticipant.totalSteps || 0,
+          },
+        });
+        result.effect = effect;
+        result.durationMs = GHOST_PEPPER_BOOST_MS + GHOST_PEPPER_FREEZE_MS;
+        await eventModel.create({
+          raceId,
+          actorUserId: userId,
+          eventType: "POWERUP_USED",
+          powerupType: type,
+          description: `${myDisplayName} ate a Ghost Pepper! 3x steps for 30 minutes, then a 30-minute burnout.`,
+        });
+        break;
+      }
+
+      case "COIN_FLIP": {
+        // §3.3: server rolls 50/50 → 2x (win) or 0.5x (lose), 1h.
+        const win = random() < 0.5;
+        const flipMultiplier = win ? 2 : 0.5;
+        const effect = await effectModel.create({
+          raceId,
+          targetParticipantId: myParticipant.id,
+          targetUserId: userId,
+          sourceUserId: userId,
+          powerupId,
+          type: "COIN_FLIP",
+          startsAt: currentTime,
+          expiresAt: new Date(currentTime.getTime() + COIN_FLIP_DURATION_MS),
+          metadata: { multiplier: flipMultiplier, stepsAtStart: myParticipant.totalSteps || 0 },
+        });
+        result.effect = effect;
+        result.durationMs = COIN_FLIP_DURATION_MS;
+        result.flip = win ? "WIN" : "LOSE";
+        result.multiplier = flipMultiplier;
+        await eventModel.create({
+          raceId,
+          actorUserId: userId,
+          eventType: "POWERUP_USED",
+          powerupType: type,
+          description: win
+            ? `${myDisplayName} flipped a coin and won! 2x steps for 1 hour.`
+            : `${myDisplayName} flipped a coin and lost! Half steps for 1 hour.`,
+          metadata: { flip: result.flip, multiplier: flipMultiplier },
+        });
+        break;
+      }
+
+      case "DECOY": {
+        // §3.5: a held shield hidden from opponents; redirects the next
+        // single-target attack. 24h or until consumed.
+        const effect = await effectModel.create({
+          raceId,
+          targetParticipantId: myParticipant.id,
+          targetUserId: userId,
+          sourceUserId: userId,
+          powerupId,
+          type: "DECOY",
+          startsAt: currentTime,
+          expiresAt: new Date(currentTime.getTime() + DECOY_DURATION_MS),
+        });
+        result.effect = effect;
+        result.durationMs = DECOY_DURATION_MS;
+        // Silent, like Mirror — don't tip opponents that a redirect is armed.
+        break;
+      }
+
+      case "UMBRELLA": {
+        // §3.7: a self timed aura granting AoE-debuff immunity, 12h.
+        const effect = await effectModel.create({
+          raceId,
+          targetParticipantId: myParticipant.id,
+          targetUserId: userId,
+          sourceUserId: userId,
+          powerupId,
+          type: "UMBRELLA",
+          startsAt: currentTime,
+          expiresAt: new Date(currentTime.getTime() + UMBRELLA_DURATION_MS),
+        });
+        result.effect = effect;
+        result.durationMs = UMBRELLA_DURATION_MS;
+        await eventModel.create({
+          raceId,
+          actorUserId: userId,
+          eventType: "POWERUP_USED",
+          powerupType: type,
+          description: `${myDisplayName} opened an Umbrella! Immune to area attacks for 12 hours.`,
+        });
+        break;
+      }
+
+      case "PIGGY_BANK": {
+        // §3.10: a self 24h saver; coins are minted at the earlier of expiry or
+        // settlement (env-tunable rate/cap frozen into metadata at use-time).
+        const effect = await effectModel.create({
+          raceId,
+          targetParticipantId: myParticipant.id,
+          targetUserId: userId,
+          sourceUserId: userId,
+          powerupId,
+          type: "PIGGY_BANK",
+          startsAt: currentTime,
+          expiresAt: new Date(currentTime.getTime() + PIGGY_BANK_DURATION_MS),
+          metadata: {
+            stepsPerCoin: PIGGY_BANK_STEPS_PER_COIN,
+            coinCap: PIGGY_BANK_COIN_CAP,
+            stepsAtStart: myParticipant.totalSteps || 0,
+          },
+        });
+        result.effect = effect;
+        result.durationMs = PIGGY_BANK_DURATION_MS;
+        await eventModel.create({
+          raceId,
+          actorUserId: userId,
+          eventType: "POWERUP_USED",
+          powerupType: type,
+          description: `${myDisplayName} cracked open a Piggy Bank! Banking coins for the next 24 hours.`,
+        });
+        break;
+      }
+
+      case "BOUNTY": {
+        // §3.11: a placement wager on a rival ahead of the caster, settled at
+        // race end. Publicly visible; creates no debuff. Row lives until race end.
+        const effect = await effectModel.create({
+          raceId,
+          targetParticipantId: bountyTargetParticipant.id,
+          targetUserId: resolvedTargetUserId,
+          sourceUserId: userId,
+          powerupId,
+          type: "BOUNTY",
+          startsAt: currentTime,
+          expiresAt: race.endsAt ? new Date(race.endsAt) : null,
+          metadata: {
+            payoutCoins: BOUNTY_PAYOUT_COINS,
+            targetUserId: resolvedTargetUserId,
+          },
+        });
+        result.effect = effect;
+        result.payoutCoins = BOUNTY_PAYOUT_COINS;
+        await eventModel.create({
+          raceId,
+          actorUserId: userId,
+          eventType: "POWERUP_USED",
+          powerupType: type,
+          targetUserId: resolvedTargetUserId,
+          description: `${myDisplayName} placed a Bounty on ${targetDisplayName}! Out-place them by race end to collect ${BOUNTY_PAYOUT_COINS} coins.`,
         });
         break;
       }

@@ -166,10 +166,11 @@ async function seed() {
       description:
         "For 60 min, every 2 steps you take steals 1 step from a chosen rival and adds it to your score. Compression Socks block it; Mirrors can't reflect it",
       // 300 is the INTENDED live price (owner decision), and it is what the prod
-      // row already holds. Source said 150 while prod said 300 — and because the
-      // upsert `update` block DOES include priceCoins (unlike testOnly), every
-      // deploy's seed run was one step away from silently reverting the live
-      // price to 150. Do not "restore" this to 150.
+      // row already holds. Source said 150 while prod said 300. The upsert
+      // `update` block below (seed.js ~line 380) deliberately OMITS priceCoins
+      // and active — both are admin-tuned and must never be reasserted on a
+      // deploy — so re-seeding no longer reverts the live price. Do not
+      // "restore" this to 150; it is the create-path starting value only.
       priceCoins: 300,
       powerupType: "LEECH",
       // Left ACTIVE deliberately. `active:false` RETIRES an item (the Cleanse
@@ -242,6 +243,134 @@ async function seed() {
       active: true,
       testOnly: true,
       sortOrder: 8,
+    },
+    // ── Powerups Wave 5 (store-only, `powerups5`-gated) ──────────────────────
+    // All 11 ship active:true testOnly:true. testOnly gates them to the
+    // TestFlight/dev release channel until the carrying iOS + Android build has
+    // completed phased rollout; flipping it to false is a separately approved,
+    // OWNER-EXECUTED production change. Prices are the launch seed values; live
+    // price/active are admin-tuned and NOT reasserted on re-seed (see the note on
+    // the update block below). See docs/powerups5-wave-requirements.md §3.
+    {
+      sku: "POWERUP_UPRISING",
+      name: "Uprising",
+      description:
+        "Rally the underdogs: while you're in the bottom half of the standings, you and every racer below the midpoint get 2x steps for 2 hours.",
+      priceCoins: 300,
+      powerupType: "UPRISING",
+      active: true,
+      testOnly: true,
+      sortOrder: 9,
+    },
+    {
+      sku: "POWERUP_GHOST_PEPPER",
+      name: "Ghost Pepper",
+      description:
+        "Go all-in: 3x steps for 30 minutes, then a 30-minute burnout where your steps are frozen. Self-inflicted — Cleanse and Quick Rinse can't wash it off.",
+      priceCoins: 75,
+      powerupType: "GHOST_PEPPER",
+      active: true,
+      testOnly: true,
+      sortOrder: 10,
+    },
+    {
+      sku: "POWERUP_COIN_FLIP",
+      name: "Coin Flip",
+      description:
+        "Gamble on yourself: flip a coin. Heads doubles your steps for 1 hour; tails halves them. Self-inflicted — no shield or cleanse changes the result.",
+      priceCoins: 40,
+      powerupType: "COIN_FLIP",
+      active: true,
+      testOnly: true,
+      sortOrder: 11,
+    },
+    {
+      sku: "POWERUP_MYSTERY_POTION",
+      name: "Mystery Potion",
+      description:
+        "Drink up and hope for the best — a random effect fires the moment you use it. Could help you, could hit a rival, could backfire.",
+      priceCoins: 40,
+      powerupType: "MYSTERY_POTION",
+      active: true,
+      testOnly: true,
+      sortOrder: 12,
+    },
+    {
+      sku: "POWERUP_DECOY",
+      name: "Decoy",
+      description:
+        "Set a trap: the next single-target attack aimed at you is redirected to a random rival instead. Lasts until it triggers or 24 hours.",
+      priceCoins: 150,
+      powerupType: "DECOY",
+      active: true,
+      testOnly: true,
+      sortOrder: 13,
+    },
+    {
+      sku: "POWERUP_POWER_OUTAGE",
+      name: "Power Outage",
+      description:
+        "Cut the power on the whole field: every rival is jammed and can't use powerups for 30 minutes. Compression Socks keep one racer online.",
+      priceCoins: 150,
+      powerupType: "POWER_OUTAGE",
+      active: true,
+      testOnly: true,
+      sortOrder: 14,
+    },
+    {
+      sku: "POWERUP_UMBRELLA",
+      name: "Umbrella",
+      description:
+        "Stay dry for 12 hours: you're immune to area attacks like Rainstorm and Power Outage. Doesn't stop targeted hits.",
+      priceCoins: 75,
+      powerupType: "UMBRELLA",
+      active: true,
+      testOnly: true,
+      sortOrder: 15,
+    },
+    {
+      sku: "POWERUP_RALLY_FLAG",
+      name: "Rally Flag",
+      description:
+        "Team races only: plant the flag and give every teammate 1.25x steps for 1 hour.",
+      priceCoins: 150,
+      powerupType: "RALLY_FLAG",
+      active: true,
+      testOnly: true,
+      sortOrder: 16,
+    },
+    {
+      sku: "POWERUP_DRILL_SERGEANT",
+      name: "Drill Sergeant",
+      description:
+        "Issue a dare to a rival: hit 3,000 steps in the next 2 hours or lose 1,500. Mirrors can reflect it, Compression Socks block it.",
+      priceCoins: 150,
+      powerupType: "DRILL_SERGEANT",
+      active: true,
+      testOnly: true,
+      sortOrder: 17,
+    },
+    {
+      sku: "POWERUP_PIGGY_BANK",
+      name: "Piggy Bank",
+      description:
+        "Save as you stride: for 24 hours, bank 1 coin for every 300 steps you take (up to 80). Coins are paid out when it fills or the race ends.",
+      priceCoins: 40,
+      powerupType: "PIGGY_BANK",
+      active: true,
+      testOnly: true,
+      sortOrder: 18,
+    },
+    {
+      sku: "POWERUP_BOUNTY",
+      name: "Bounty",
+      description:
+        "Put a bounty on a rival ahead of you. If you out-place them by race end, collect 150 coins. Everyone can see the wager. Not for team races.",
+      priceCoins: 75,
+      powerupType: "BOUNTY",
+      active: true,
+      testOnly: true,
+      sortOrder: 19,
     },
   ];
   let powerupItemsUpserted = 0;

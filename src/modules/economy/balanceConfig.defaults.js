@@ -48,6 +48,20 @@ const BALANCE_POWERUP_TYPES = [
   "DEFENSE_SCAN",
   "HITCHHIKE",
   "QUICK_RINSE",
+  // Powerups Wave 5 (store-only) — carry balance meaning (rarity is cosmetic
+  // only since none are droppable), so they must be present here and in
+  // rarityByType below.
+  "UPRISING",
+  "GHOST_PEPPER",
+  "COIN_FLIP",
+  "MYSTERY_POTION",
+  "DECOY",
+  "POWER_OUTAGE",
+  "UMBRELLA",
+  "RALLY_FLAG",
+  "DRILL_SERGEANT",
+  "PIGGY_BANK",
+  "BOUNTY",
 ];
 
 const RARITIES = ["COMMON", "UNCOMMON", "RARE"];
@@ -111,6 +125,20 @@ const DEFAULT_CONFIG = {
     DEFENSE_SCAN: "RARE",
     HITCHHIKE: "RARE",
     QUICK_RINSE: "RARE",
+
+    // Powerups Wave 5 — rarity is COSMETIC only (none are droppable), so these
+    // values just drive icon tinting. Per spec §5.
+    UPRISING: "RARE",
+    DECOY: "RARE",
+    POWER_OUTAGE: "UNCOMMON",
+    RALLY_FLAG: "UNCOMMON",
+    DRILL_SERGEANT: "UNCOMMON",
+    BOUNTY: "UNCOMMON",
+    GHOST_PEPPER: "COMMON",
+    COIN_FLIP: "COMMON",
+    MYSTERY_POTION: "COMMON",
+    UMBRELLA: "COMMON",
+    PIGGY_BANK: "COMMON",
   },
 
   // What a mystery box may actually roll, per tier. A type having a rarity does
@@ -158,6 +186,18 @@ const DEFAULT_CONFIG = {
     "DEFENSE_SCAN",
     "HITCHHIKE",
     "QUICK_RINSE",
+    // Powerups Wave 5 — all store-only, never rolled from an in-race mystery box.
+    "UPRISING",
+    "GHOST_PEPPER",
+    "COIN_FLIP",
+    "MYSTERY_POTION",
+    "DECOY",
+    "POWER_OUTAGE",
+    "UMBRELLA",
+    "RALLY_FLAG",
+    "DRILL_SERGEANT",
+    "PIGGY_BANK",
+    "BOUNTY",
   ],
 
   // Which store-only types are ALSO barred from the DAILY reward box.
@@ -174,7 +214,45 @@ const DEFAULT_CONFIG = {
   // `itemOdds.powerups: [{ "type": "SIGNAL_JAMMER", "p": 0.5 }]`, which is only
   // possible if Signal Jammer remains daily-box winnable. Splitting the keys
   // keeps ONE authority per question, which is what D13 is actually after.
-  dailyBoxExcludedTypes: [],
+  dailyBoxExcludedTypes: [
+    // Powerups Wave 5 are store-only and must never be awarded as a daily-box
+    // prize either (they carry use-time validation the daily box can't satisfy).
+    "UPRISING",
+    "GHOST_PEPPER",
+    "COIN_FLIP",
+    "MYSTERY_POTION",
+    "DECOY",
+    "POWER_OUTAGE",
+    "UMBRELLA",
+    "RALLY_FLAG",
+    "DRILL_SERGEANT",
+    "PIGGY_BANK",
+    "BOUNTY",
+  ],
+
+  // Mystery Potion (§3.4): weighted outcome pool rolled at use-time. Weights are
+  // relative; the roller normalizes by their sum. Outcome tokens:
+  //   * a bare PowerupType routes through that type's normal apply path
+  //     (PROTEIN_SHAKE/RUNNERS_HIGH/COMPRESSION_SOCKS on self; PINECONE_TOSS/
+  //     LEG_CRAMP/SHORTCUT on a random alive enemy),
+  //   * "*_SELF" applies the debuff to the caster (self-sourced → not
+  //     Cleanse/Quick-Rinse removable),
+  //   * "COIN_REFUND" refunds 2x the potion price.
+  // Owner mix (D4): 50% helpful / 25% attack a random enemy / 15% defense-jackpot
+  // / 10% self-harm.
+  mysteryPotion: {
+    pool: [
+      { outcome: "PROTEIN_SHAKE", weight: 30 },
+      { outcome: "RUNNERS_HIGH", weight: 20 },
+      { outcome: "PINECONE_TOSS", weight: 10 },
+      { outcome: "LEG_CRAMP", weight: 10 },
+      { outcome: "SHORTCUT", weight: 5 },
+      { outcome: "COMPRESSION_SOCKS", weight: 10 },
+      { outcome: "COIN_REFUND", weight: 5 },
+      { outcome: "LEG_CRAMP_SELF", weight: 5 },
+      { outcome: "WRONG_TURN_SELF", weight: 5 },
+    ],
+  },
 
   // Relative weight WITHIN a tier once the tier has been chosen. Absent == 1.0.
   // RED_CARD at 0.5 is the "red card nerf": half as likely as a uniform rare

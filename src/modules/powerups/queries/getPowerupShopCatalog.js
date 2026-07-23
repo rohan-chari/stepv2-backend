@@ -6,6 +6,7 @@ const {
   POWERUPS2_GATED_TYPES,
   POWERUPS3_GATED_TYPES,
   POWERUPS4_GATED_TYPES,
+  POWERUPS5_GATED_TYPES,
   isImposterDisabledForCatalog,
 } = require("../constants/powerupGating");
 
@@ -27,6 +28,7 @@ function buildGetPowerupShopCatalog(deps = {}) {
       supportsPowerups2 = false,
       supportsPowerups3 = false,
       supportsPowerups4 = false,
+      supportsPowerups5 = false,
     } = {}
   ) {
     const [coins, items, inventory, copyRows] = await Promise.all([
@@ -76,6 +78,9 @@ function buildGetPowerupShopCatalog(deps = {}) {
         return false;
       }
       if (!supportsPowerups4 && POWERUPS4_GATED_TYPES.includes(item.powerupType)) return false;
+      // Wave 5 store-only powerups are gated behind `powerups5`. VISIBILITY only,
+      // layered on top of the row's testOnly release-channel gate (§4.1).
+      if (!supportsPowerups5 && POWERUPS5_GATED_TYPES.includes(item.powerupType)) return false;
       return true;
     });
 

@@ -31,6 +31,25 @@
 const POWERUPS2_GATED_TYPES = ["DEFENSE_SCAN"];
 const POWERUPS3_GATED_TYPES = ["LEECH", "HITCHHIKE", "QUICK_RINSE"];
 const POWERUPS4_GATED_TYPES = ["QUICKSAND"];
+//   * POWERUPS5_GATED_TYPES — the 11 Wave 5 store-only powerups. Same shape and
+//     same purpose one generation on: hidden from the shop catalog (and rejected
+//     at purchase/use) unless the client advertises the `powerups5` token, so a
+//     frozen binary is never offered — nor can it use — a type it cannot
+//     render/target. Catalog VISIBILITY only; an existing owner's banked wave-5
+//     item is still rejected on use from a non-powerups5 client (UPDATE_REQUIRED).
+const POWERUPS5_GATED_TYPES = [
+  "UPRISING",
+  "GHOST_PEPPER",
+  "COIN_FLIP",
+  "MYSTERY_POTION",
+  "DECOY",
+  "POWER_OUTAGE",
+  "UMBRELLA",
+  "RALLY_FLAG",
+  "DRILL_SERGEANT",
+  "PIGGY_BANK",
+  "BOUNTY",
+];
 
 function imposterEnabled() {
   return process.env.IMPOSTER_ENABLED !== "false";
@@ -46,6 +65,7 @@ module.exports = {
   POWERUPS2_GATED_TYPES,
   POWERUPS3_GATED_TYPES,
   POWERUPS4_GATED_TYPES,
+  POWERUPS5_GATED_TYPES,
   imposterEnabled,
   isImposterDisabledForCatalog,
 };

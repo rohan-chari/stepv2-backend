@@ -75,6 +75,11 @@ const HIDDEN_FROM_OPPONENTS = new Set([
   "POCKET_WATCH",
   "FANNY_PACK",
   "TRAIL_MINE",
+  // Wave 5 concealed self-advantages (§4.5). BOUNTY is deliberately NOT here —
+  // its public visibility is the mechanic.
+  "DECOY",
+  "UMBRELLA",
+  "PIGGY_BANK",
 ]);
 
 // Snapshot-based fallback for when StepSample data is unavailable. NOTE: this
@@ -164,7 +169,11 @@ function buildGetRaceProgress(deps = {}) {
     // gates what is RENDERED (the Hitchhike effect entry); the authoritative
     // score is never gated.
     supportsPowerups3 = false,
-    supportsPowerups4 = false
+    supportsPowerups4 = false,
+    // §4.5 — whether the client advertises `powerups5`. Gates ONLY what is
+    // rendered in activeEffects (downcast/withhold for old clients); the
+    // authoritative score is never gated.
+    supportsPowerups5 = false
   ) {
     const race = await raceModel.findById(raceId);
     if (!race) {
@@ -365,6 +374,7 @@ function buildGetRaceProgress(deps = {}) {
         let campfires = [];
         let rainstorms = [];
         let leeches = [];
+        let wave5Effects = [];
 
         if (race.powerupsEnabled) {
           // Fetch all Leg Cramp, Runner's High, and Wrong Turn effects (active + expired) for this participant
@@ -377,9 +387,22 @@ function buildGetRaceProgress(deps = {}) {
           // Leech effects targeting this participant (§5). Scored from the
           // leecher's step history inside computeEffectModifiers as a transfer.
           leeches = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "LEECH");
+          // Powerups Wave 5 windowed step-modifiers (§3) — same fold as the
+          // settlement path (raceStateResolution) so display == settlement.
+          if (typeof raceActiveEffectModel.findEffectsForRaceByTypes === "function") {
+            const w5 = await raceActiveEffectModel.findEffectsForRaceByTypes(
+              raceId,
+              participant.id,
+              ["UPRISING", "RALLY_FLAG", "COIN_FLIP", "GHOST_PEPPER", "UMBRELLA"]
+            );
+            wave5Effects = [
+              ...(w5.UPRISING || []), ...(w5.RALLY_FLAG || []), ...(w5.COIN_FLIP || []),
+              ...(w5.GHOST_PEPPER || []), ...(w5.UMBRELLA || []),
+            ];
+          }
         }
 
-        const allEffects = [...legCramps, ...runnersHighs, ...wrongTurns, ...campfires, ...rainstorms, ...leeches];
+        const allEffects = [...legCramps, ...runnersHighs, ...wrongTurns, ...campfires, ...rainstorms, ...leeches, ...wave5Effects];
         const { frozenSteps, buffedSteps, reversedSteps, globalBoostedSteps, leechTransfers } = await computeEffectModifiers(allEffects, baseAdjusted, participant.userId, stepSampleModel, hasSampleData, globalContext, now());
 
         // Pre-leech total: everything EXCEPT the leech transfer, floored at 0.
@@ -600,16 +623,36 @@ function buildGetRaceProgress(deps = {}) {
         // artifact (the target sees the caster's total climb with no icon). The
         // SCORE is never gated: the backend stays authoritative either way.
         .filter((e) => supportsPowerups3 || e.type !== "HITCHHIKE")
-        .map((e) => ({
-          // Additive: the targeted Pocket Watch sheet needs a stable identifier
-          // for the one effect the user is paying to extend.
-          id: e.id,
-          type: e.type === "QUICKSAND" && !supportsPowerups4 ? "LEG_CRAMP" : e.type,
-          expiresAt: e.expiresAt,
-          onSelf: e.targetUserId === userId,
-          targetUserId: e.targetUserId,
-          sourceUserId: e.sourceUserId,
-        }));
+        // §4.5: wave-5 types a non-powerups5 client cannot render are WITHHELD
+        // (GHOST_PEPPER/COIN_FLIP/DECOY/UMBRELLA/PIGGY_BANK/DRILL_SERGEANT/BOUNTY);
+        // POWER_OUTAGE/UPRISING/RALLY_FLAG are DOWNCAST below to a type the old
+        // client already knows. The score is authoritative regardless.
+        .filter(
+          (e) =>
+            supportsPowerups5 ||
+            ![
+              "GHOST_PEPPER", "COIN_FLIP", "DECOY", "UMBRELLA",
+              "PIGGY_BANK", "DRILL_SERGEANT", "BOUNTY",
+            ].includes(e.type)
+        )
+        .map((e) => {
+          let type = e.type;
+          if (type === "QUICKSAND" && !supportsPowerups4) type = "LEG_CRAMP";
+          if (!supportsPowerups5) {
+            if (type === "POWER_OUTAGE") type = "SIGNAL_JAMMER";
+            else if (type === "UPRISING" || type === "RALLY_FLAG") type = "RUNNERS_HIGH";
+          }
+          return {
+            // Additive: the targeted Pocket Watch sheet needs a stable identifier
+            // for the one effect the user is paying to extend.
+            id: e.id,
+            type,
+            expiresAt: e.expiresAt,
+            onSelf: e.targetUserId === userId,
+            targetUserId: e.targetUserId,
+            sourceUserId: e.sourceUserId,
+          };
+        });
     }
 
     // Build leaderboard with stealth mode and detour sign applied. The

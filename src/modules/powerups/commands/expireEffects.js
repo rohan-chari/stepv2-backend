@@ -2,14 +2,39 @@ const { RaceActiveEffect } = require("../models/raceActiveEffect");
 const { RaceParticipant } = require("../../races/models/raceParticipant");
 const { RacePowerup } = require("../models/racePowerup");
 const { RacePowerupEvent } = require("../models/racePowerupEvent");
+const { Race } = require("../../races/models/race");
+const { StepSample } = require("../../steps/models/stepSample");
 const { eventBus } = require("../../../shared/events/eventBus");
 const { POWERUP_NAMES } = require("./rollPowerup");
+const { awardCoins: defaultAwardCoins } = require("../../../shared/economy/awardCoins");
+
+// Types whose EXPIRY needs the target's step total snapshotted (so a later
+// EXPIRED-row read scores the closed window with the right end). The four wave-5
+// windowed step-modifiers (§6.5) join the existing debuff/buff set.
+const SNAPSHOT_AT_EXPIRY_TYPES = [
+  "LEG_CRAMP", "QUICKSAND", "RUNNERS_HIGH", "CAMPFIRE_REST", "RAINSTORM",
+  "UPRISING", "GHOST_PEPPER", "COIN_FLIP", "RALLY_FLAG",
+];
+
+// Compute a participant's steps over [start, end] from samples, falling back to
+// a snapshot diff when there is no sample data.
+async function windowStepsForTarget(stepSampleModel, effect, startDate, endDate, snapshotSteps) {
+  const samp = await stepSampleModel.sumStepsInWindow(effect.targetUserId, startDate, endDate);
+  if (samp > 0) return samp;
+  const meta = effect.metadata || {};
+  const start = meta.stepsAtStart || 0;
+  const end = snapshotSteps != null ? snapshotSteps : (meta.stepsAtExpiry != null ? meta.stepsAtExpiry : start);
+  return Math.max(0, end - start);
+}
 
 function buildExpireEffects(dependencies = {}) {
   const effectModel = dependencies.RaceActiveEffect || RaceActiveEffect;
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
   const powerupModel = dependencies.RacePowerup || RacePowerup;
   const eventModel = dependencies.RacePowerupEvent || RacePowerupEvent;
+  const raceModel = dependencies.Race || Race;
+  const stepSampleModel = dependencies.StepSample || StepSample;
+  const awardCoins = dependencies.awardCoins || defaultAwardCoins;
   const events = dependencies.eventBus || eventBus;
   const nowFn = dependencies.now || (() => new Date());
 
@@ -24,7 +49,7 @@ function buildExpireEffects(dependencies = {}) {
 
       const metadata = effect.metadata || {};
       // Store current steps at expiry for snapshot-based timed modifiers.
-      if (["LEG_CRAMP", "QUICKSAND", "RUNNERS_HIGH", "CAMPFIRE_REST", "RAINSTORM"].includes(effect.type)) {
+      if (SNAPSHOT_AT_EXPIRY_TYPES.includes(effect.type)) {
         const currentStepsForTarget = participantSteps?.[effect.targetParticipantId];
         if (currentStepsForTarget !== undefined) {
           metadata.stepsAtExpiry = currentStepsForTarget;
@@ -40,6 +65,29 @@ function buildExpireEffects(dependencies = {}) {
           }
         } catch (e) {
           console.error("Failed to revert Fanny Pack slots:", e);
+        }
+      }
+
+      // ── DRILL_SERGEANT (§3.9): judged at expiry. VOID if the race ended before
+      // the dare's expiry; otherwise penalize the target if they missed the goal.
+      if (effect.type === "DRILL_SERGEANT") {
+        try {
+          await evaluateDrillSergeant({
+            effect, raceModel, participantModel, stepSampleModel, eventModel,
+            participantSteps,
+          });
+        } catch (e) {
+          console.error("Drill Sergeant evaluation failed:", e);
+        }
+      }
+
+      // ── PIGGY_BANK (§3.10): mint coins for the window at expiry (idempotent via
+      // awardCoins refId = effect.id; the settlement path uses the same refId).
+      if (effect.type === "PIGGY_BANK") {
+        try {
+          await mintPiggyBank({ effect, raceModel, stepSampleModel, awardCoins, endCap: effect.expiresAt });
+        } catch (e) {
+          console.error("Piggy Bank mint failed:", e);
         }
       }
 
@@ -70,6 +118,87 @@ function buildExpireEffects(dependencies = {}) {
   };
 }
 
+// Drill Sergeant resolution (shared shape for expiry). VOID when the race ended
+// before the dare's expiry.
+async function evaluateDrillSergeant({ effect, raceModel, participantModel, stepSampleModel, eventModel, participantSteps }) {
+  const meta = effect.metadata || {};
+  const goalSteps = Number(meta.goalSteps) || 3000;
+  const penaltySteps = Number(meta.penaltySteps) || 1500;
+
+  const race = await raceModel.findById(effect.raceId);
+  const endedFirst =
+    !race ||
+    race.status !== "ACTIVE" ||
+    (race.endsAt && new Date(race.endsAt) <= new Date(effect.expiresAt));
+
+  if (endedFirst) {
+    await eventModel.create({
+      raceId: effect.raceId,
+      actorUserId: effect.targetUserId,
+      eventType: "POWERUP_USED",
+      powerupType: "DRILL_SERGEANT",
+      targetUserId: effect.targetUserId,
+      description: `The Drill Sergeant dare was voided — the race ended first.`,
+      metadata: { outcome: "VOID" },
+    });
+    return;
+  }
+
+  const snapshotSteps = participantSteps?.[effect.targetParticipantId];
+  const windowSteps = await windowStepsForTarget(
+    stepSampleModel, effect, new Date(effect.startsAt), new Date(effect.expiresAt), snapshotSteps
+  );
+
+  if (windowSteps >= goalSteps) {
+    await eventModel.create({
+      raceId: effect.raceId,
+      actorUserId: effect.targetUserId,
+      eventType: "POWERUP_USED",
+      powerupType: "DRILL_SERGEANT",
+      targetUserId: effect.targetUserId,
+      description: `Dare survived! They walked ${Math.round(windowSteps).toLocaleString()} steps and dodged the Drill Sergeant penalty.`,
+      metadata: { outcome: "SURVIVED", windowSteps: Math.round(windowSteps) },
+    });
+    return;
+  }
+
+  // Missed the goal → instant penalty (Red Card bonus-subtraction, floored at 0).
+  await participantModel.subtractBonusSteps(effect.targetParticipantId, penaltySteps);
+  await eventModel.create({
+    raceId: effect.raceId,
+    actorUserId: effect.sourceUserId,
+    eventType: "POWERUP_USED",
+    powerupType: "DRILL_SERGEANT",
+    targetUserId: effect.targetUserId,
+    description: `Dare failed! They fell short of ${goalSteps.toLocaleString()} steps and lost ${penaltySteps.toLocaleString()}.`,
+    metadata: { outcome: "FAILED", penalty: penaltySteps, windowSteps: Math.round(windowSteps) },
+  });
+}
+
+// Piggy Bank mint (shared by expiry + settlement). Window is [startsAt,
+// min(expiresAt, endCap)]. Idempotent via awardCoins refId = effect.id.
+async function mintPiggyBank({ effect, stepSampleModel, awardCoins, endCap }) {
+  const meta = effect.metadata || {};
+  const stepsPerCoin = Number(meta.stepsPerCoin) || 300;
+  const coinCap = Number.isFinite(Number(meta.coinCap)) ? Number(meta.coinCap) : 80;
+  if (coinCap <= 0 || stepsPerCoin <= 0) return; // env kill switch: nothing to mint
+
+  const start = new Date(effect.startsAt);
+  const expiry = effect.expiresAt ? new Date(effect.expiresAt) : new Date();
+  const cap = endCap ? new Date(endCap) : expiry;
+  const end = cap.getTime() < expiry.getTime() ? cap : expiry;
+  if (end.getTime() <= start.getTime()) return;
+
+  const windowSteps = await stepSampleModel.sumStepsInWindow(effect.targetUserId, start, end);
+  const coins = Math.min(Math.floor(Math.max(0, windowSteps) / stepsPerCoin), coinCap);
+  if (coins <= 0) {
+    // Still record the (zero) attempt so a later settlement mint is a no-op via
+    // the same refId only if coins > 0; a zero mint intentionally does nothing.
+    return;
+  }
+  await awardCoins({ userId: effect.targetUserId, amount: coins, reason: "piggy_bank", refId: effect.id });
+}
+
 const expireEffects = buildExpireEffects();
 
-module.exports = { buildExpireEffects, expireEffects };
+module.exports = { buildExpireEffects, expireEffects, evaluateDrillSergeant, mintPiggyBank };

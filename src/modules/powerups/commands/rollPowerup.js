@@ -58,6 +58,20 @@ const POWERUP_NAMES = {
   // message on a Hitchhike, or an EFFECT_EXPIRED "Hitchhike wore off").
   HITCHHIKE: "Hitchhike",
   QUICK_RINSE: "Quick Rinse",
+  // QUICKSAND + Powerups Wave 5 are store-only (coin store), never rolled from a
+  // mystery box. Named here for feed/display and EFFECT_EXPIRED text.
+  QUICKSAND: "Quicksand",
+  UPRISING: "Uprising",
+  GHOST_PEPPER: "Ghost Pepper",
+  COIN_FLIP: "Coin Flip",
+  MYSTERY_POTION: "Mystery Potion",
+  DECOY: "Decoy",
+  POWER_OUTAGE: "Power Outage",
+  UMBRELLA: "Umbrella",
+  RALLY_FLAG: "Rally Flag",
+  DRILL_SERGEANT: "Drill Sergeant",
+  PIGGY_BANK: "Piggy Bank",
+  BOUNTY: "Bounty",
 };
 
 function buildRollPowerup(dependencies = {}) {
