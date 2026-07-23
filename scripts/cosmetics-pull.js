@@ -25,6 +25,14 @@ function normalizeRenderMetadata(raw) {
   if (RENDER_METADATA_RENDER_LAYERS.has(raw.renderLayer)) {
     out.renderLayer = raw.renderLayer;
   }
+  if (typeof raw.perFoot === "boolean") {
+    out.perFoot = raw.perFoot;
+  }
+  // Per-animal overrides tuned via Admin → Accessory Tuner must survive a pull,
+  // or the next apply wipes them from the DB.
+  if (raw.perAnimal && typeof raw.perAnimal === "object" && !Array.isArray(raw.perAnimal)) {
+    out.perAnimal = raw.perAnimal;
+  }
   return Object.keys(out).length > 0 ? out : null;
 }
 

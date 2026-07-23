@@ -45,6 +45,14 @@ function sanitizeRenderMetadata(input) {
     }
     out.animationFrames = frames;
   }
+  if (input.perFoot !== undefined && input.perFoot !== null) {
+    if (typeof input.perFoot !== "boolean") {
+      const err = new Error("renderMetadata.perFoot must be a boolean");
+      err.statusCode = 400;
+      throw err;
+    }
+    out.perFoot = input.perFoot;
+  }
   if (input.renderLayer !== undefined && input.renderLayer !== null) {
     const layer = String(input.renderLayer);
     if (!RENDER_METADATA_RENDER_LAYERS.has(layer)) {
@@ -99,6 +107,9 @@ function persistentRenderMetadata(raw) {
   }
   if (RENDER_METADATA_RENDER_LAYERS.has(raw.renderLayer)) {
     out.renderLayer = raw.renderLayer;
+  }
+  if (typeof raw.perFoot === "boolean") {
+    out.perFoot = raw.perFoot;
   }
   // Preserve per-animal overrides when a save omits them (e.g. tuning the
   // capybara sliders must not wipe the corgi placement, and vice versa the

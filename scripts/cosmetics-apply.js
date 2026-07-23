@@ -37,6 +37,12 @@ function sanitizeRenderMetadata(raw) {
     }
     out.renderLayer = layer;
   }
+  if (raw.perFoot !== undefined && raw.perFoot !== null) {
+    if (typeof raw.perFoot !== "boolean") {
+      throw new Error("renderMetadata.perFoot must be a boolean");
+    }
+    out.perFoot = raw.perFoot;
+  }
   // Per-animal placement overrides (see modules/admin/routes.js): only the four
   // numeric tuner keys are allowed inside each animal block.
   if (raw.perAnimal !== undefined && raw.perAnimal !== null) {
