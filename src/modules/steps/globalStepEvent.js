@@ -16,6 +16,10 @@
 
 const { getTimeZoneParts, zonedDateTimeToUtc } = require("../../shared/time/week");
 const { etDayKey, ET } = require("../../shared/time/etSchedule");
+const {
+  signedMultiplierAt,
+  multiplierBoundaries,
+} = require("../races/services/effectMultiplier");
 
 // ---------------------------------------------------------------------------
 // Tuning constants — change these to tune frequency/shape of events.
@@ -47,89 +51,14 @@ const GLOBAL_EVENT_CATCH_WINDOW_MS = 10 * 60 * 1000;
 // Step math
 // ---------------------------------------------------------------------------
 
-// Positive per-participant multiplier active at `timeMs`, mirroring the
-// positive component of raceStateResolution.js's multiplierForTime:
-//   * frozen (LEG_CRAMP, or campfire freeze phase) => 0
-//   * else max(RUNNERS_HIGH ? 2 : 1, campfire boost multiplier, 1)
-// Wrong Turn's sign is intentionally ignored here: the global event is a
-// fair positive boost; it never amplifies the reversal penalty.
-function positiveMultiplierForTime(timeMs, effectGroups) {
-  const {
-    legCramps = [],
-    runnersHighs = [],
-    campfires = [],
-  } = effectGroups || {};
-
-  const isActive = (effect) => {
-    const startMs = new Date(effect.startsAt).getTime();
-    const endMs = effect.expiresAt
-      ? new Date(effect.expiresAt).getTime()
-      : Infinity;
-    return startMs <= timeMs && timeMs < endMs;
-  };
-
-  if (legCramps.some(isActive)) return 0;
-
-  const campfireFrozen = campfires.some((effect) => {
-    const startMs = new Date(effect.startsAt).getTime();
-    const freezeMs = (effect.metadata || {}).freezeMs || 0;
-    return startMs <= timeMs && timeMs < startMs + freezeMs;
-  });
-  if (campfireFrozen) return 0;
-
-  const buffed = runnersHighs.some(isActive);
-
-  const campfire = campfires.find((effect) => {
-    const startMs = new Date(effect.startsAt).getTime();
-    const freezeMs = (effect.metadata || {}).freezeMs || 0;
-    const endMs = effect.expiresAt
-      ? new Date(effect.expiresAt).getTime()
-      : Infinity;
-    return startMs <= timeMs && timeMs < endMs && timeMs >= startMs + freezeMs;
-  });
-  const campfireMultiplier = campfire
-    ? (campfire.metadata || {}).multiplier || 1
-    : 1;
-
-  return Math.max(buffed ? 2 : 1, campfireMultiplier, 1);
-}
-
-// Collect the distinct multiplier-boundary timestamps inside [windowStart,
-// windowEnd] so we can slice the window into sub-intervals of constant
-// effective multiplier — the same boundary technique determineFinishSnapshot
-// uses. Boundaries that fall outside the window are clamped to its edges.
-function multiplierBoundaries(windowStart, windowEnd, effectGroups) {
-  const bounds = new Set([windowStart, windowEnd]);
-  const add = (ms) => {
-    if (ms > windowStart && ms < windowEnd) bounds.add(ms);
-  };
-  const {
-    legCramps = [],
-    runnersHighs = [],
-    campfires = [],
-  } = effectGroups || {};
-
-  for (const e of [...legCramps, ...runnersHighs]) {
-    add(new Date(e.startsAt).getTime());
-    if (e.expiresAt) add(new Date(e.expiresAt).getTime());
-  }
-  for (const e of campfires) {
-    const startMs = new Date(e.startsAt).getTime();
-    const freezeMs = (e.metadata || {}).freezeMs || 0;
-    add(startMs);
-    add(startMs + freezeMs); // freeze -> boost transition
-    if (e.expiresAt) add(new Date(e.expiresAt).getTime());
-  }
-
-  return [...bounds].sort((a, b) => a - b);
-}
-
 // EXTRA steps earned from active global events. For each event window, clipped
-// to [startsAt, min(endsAt, now)], we slice it at per-participant multiplier
-// boundaries; within each constant-multiplier sub-interval we read the
-// participant's steps (sliced by overlap by the step model) and add
-//   inWindowSteps * m_p * (multiplier - 1)
-// which makes the combined effect m_p * multiplier (multiplicative stacking).
+// to [startsAt, min(endsAt, now)], we slice it at the participant's multiplier
+// boundaries (shared with all scoring paths); within each constant-multiplier
+// sub-interval we read the participant's steps and add
+//   inWindowSteps * m(t) * (multiplier - 1)
+// with SIGNED m (§3): the event scales the participant's CURRENT rate, so a
+// stacked-buff segment gains m×E, a wrong-turned segment loses more, and a
+// frozen segment (m=0) earns nothing.
 //
 // Boundary slicing is handled by stepSampleModel.sumStepsInWindow, which
 // prorates a sample by the fraction of its duration inside the sub-interval —
@@ -164,8 +93,8 @@ async function computeGlobalEventBoost({
       const segEnd = boundaries[i + 1];
       if (segEnd <= segStart) continue;
 
-      const mp = positiveMultiplierForTime(segStart, effectGroups);
-      if (mp <= 0) continue; // frozen steps get no boost
+      const m = signedMultiplierAt(segStart, effectGroups);
+      if (m === 0) continue; // frozen steps get no boost
 
       const segSteps = await stepSampleModel.sumStepsInWindow(
         userId,
@@ -173,7 +102,7 @@ async function computeGlobalEventBoost({
         new Date(segEnd)
       );
       if (segSteps > 0) {
-        boost += segSteps * mp * (multiplier - 1);
+        boost += segSteps * m * (multiplier - 1);
       }
     }
   }
@@ -262,7 +191,6 @@ function shouldStartGlobalEvent({ now, todaysEvents = [], pickInt }) {
 module.exports = {
   // step math
   computeGlobalEventBoost,
-  positiveMultiplierForTime,
   // scheduler
   shouldStartGlobalEvent,
   chooseEventStartForEtDay,

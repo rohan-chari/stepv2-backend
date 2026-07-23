@@ -170,8 +170,20 @@ async function resolveExpiredRaces() {
             globalEvents,
           });
 
-        const { total, leechTransfers, legCramps, runnersHighs, wrongTurns } =
-          await calculateCurrentTotal({
+        const {
+          total,
+          leechTransfers,
+          legCramps,
+          runnersHighs,
+          wrongTurns,
+          campfires,
+          rainstorms,
+          uprisings,
+          rallyFlags,
+          coinFlipWins,
+          coinFlipLoses,
+          ghostPeppers,
+        } = await calculateCurrentTotal({
             raceId: race.id,
             racePowerupsEnabled: race.powerupsEnabled,
             participant,
@@ -188,7 +200,18 @@ async function resolveExpiredRaces() {
           preLeechTotal: total,
           leechTransfers,
           effectiveStart,
-          effectGroups: { legCramps, runnersHighs, wrongTurns },
+          effectGroups: {
+            legCramps,
+            runnersHighs,
+            wrongTurns,
+            campfires,
+            rainstorms,
+            uprisings,
+            rallyFlags,
+            coinFlipWins,
+            coinFlipLoses,
+            ghostPeppers,
+          },
         });
       }
 

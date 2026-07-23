@@ -7,6 +7,10 @@ const { RacePowerupEvent } = require("../../powerups/models/racePowerupEvent");
 const { GlobalStepEvent } = require("../../steps/models/globalStepEvent");
 const { computeEffectModifiers } = require("./effectiveStepScoring");
 const {
+  signedMultiplierAt,
+  multiplierBoundaries,
+} = require("./effectMultiplier");
+const {
   getTimeZoneParts,
   formatDateString,
   addDaysToDateString,
@@ -239,7 +243,29 @@ async function calculateCurrentTotal({
       (racePowerupsEnabled ? participant.bonusSteps || 0 : 0)
   );
 
-  return { total, leechTransfers, legCramps, runnersHighs, wrongTurns, campfires, rainstorms };
+  // Also expose the wave-5 groups (split coin flips) so settlement's
+  // determineFinishSnapshot can interpolate finish time with the full §3
+  // multiplier (e.g. a target crossed mid-pepper-boost). Additive to the return
+  // shape — existing callers destructure only what they read.
+  const coinFlipWins = coinFlips.filter((e) => Number((e.metadata || {}).multiplier) > 1);
+  const coinFlipLoses = coinFlips.filter((e) => {
+    const m = Number((e.metadata || {}).multiplier);
+    return Number.isFinite(m) && m < 1;
+  });
+  return {
+    total,
+    leechTransfers,
+    legCramps,
+    runnersHighs,
+    wrongTurns,
+    campfires,
+    rainstorms,
+    uprisings,
+    rallyFlags,
+    coinFlipWins,
+    coinFlipLoses,
+    ghostPeppers,
+  };
 }
 
 function buildBonusTimeline(events, participantUserId, effectiveStart, now) {
@@ -295,56 +321,12 @@ function buildBonusTimeline(events, participantUserId, effectiveStart, now) {
   return bonuses;
 }
 
-function multiplierForTime(timeMs, {
-  legCramps,
-  runnersHighs,
-  wrongTurns,
-  campfires = [],
-  rainstorms = [],
-}) {
-  const isActive = (effect) => {
-    const startMs = new Date(effect.startsAt).getTime();
-    const endMs = effect.expiresAt ? new Date(effect.expiresAt).getTime() : Infinity;
-    return startMs <= timeMs && timeMs < endMs;
-  };
-
-  const frozen = legCramps.some(isActive);
-  if (frozen) return 0;
-
-  const buffed = runnersHighs.some(isActive);
-  const campfire = campfires.find((effect) => {
-    const startMs = new Date(effect.startsAt).getTime();
-    const freezeMs = (effect.metadata || {}).freezeMs || 0;
-    const endMs = effect.expiresAt ? new Date(effect.expiresAt).getTime() : Infinity;
-    return startMs <= timeMs && timeMs < endMs && timeMs >= startMs + freezeMs;
-  });
-  const campfireFrozen = campfires.some((effect) => {
-    const startMs = new Date(effect.startsAt).getTime();
-    const freezeMs = (effect.metadata || {}).freezeMs || 0;
-    return startMs <= timeMs && timeMs < startMs + freezeMs;
-  });
-  if (campfireFrozen) return 0;
-
-  const reversed = wrongTurns.some(isActive);
-  const campfireMultiplier = campfire ? ((campfire.metadata || {}).multiplier || 1) : 1;
-  let positiveMultiplier = Math.max(buffed ? 2 : 1, campfireMultiplier);
-
-  if (reversed && positiveMultiplier > 1) return -positiveMultiplier;
-  if (reversed) return -1;
-
-  // Rainstorm: ADDITIVE -0.5x on positive accrual, matching the additive model
-  // in computeEffectModifiers (1x → 0.5x, Runner's High 2x → 1.5x). Suspended
-  // while frozen or reversed — both returned above before reaching here.
-  const raining = rainstorms.some(isActive);
-  if (raining) {
-    const rainMeta = Number((rainstorms.find(isActive).metadata || {}).multiplier);
-    const rainMultiplier =
-      Number.isFinite(rainMeta) && rainMeta >= 0 && rainMeta <= 1 ? rainMeta : 0.5;
-    positiveMultiplier = Math.max(0, positiveMultiplier - (1 - rainMultiplier));
-  }
-
-  if (positiveMultiplier !== 1) return positiveMultiplier;
-  return 1;
+// Finish-time interpolation multiplier. Delegates to the shared signed m(t)
+// (buff-stacking spec §3) so finish snapshots, live display, and settlement all
+// score identically. `effectGroups` carries whatever groups the caller has;
+// missing wave-5 groups default to none inside signedMultiplierAt.
+function multiplierForTime(timeMs, effectGroups) {
+  return signedMultiplierAt(timeMs, effectGroups);
 }
 
 async function determineFinishSnapshot({
@@ -397,25 +379,14 @@ async function determineFinishSnapshot({
     }
   }
 
-  for (const effect of [
-    ...effectGroups.legCramps,
-    ...effectGroups.runnersHighs,
-    ...effectGroups.wrongTurns,
-    ...(effectGroups.campfires || []),
-    ...(effectGroups.rainstorms || []),
-  ]) {
-    const startMs = Math.max(
-      effectiveStart.getTime(),
-      new Date(effect.startsAt).getTime()
-    );
-    const endMs = Math.min(
-      now.getTime(),
-      effect.expiresAt ? new Date(effect.expiresAt).getTime() : now.getTime()
-    );
-    if (endMs > startMs) {
-      boundaries.add(startMs);
-      boundaries.add(endMs);
-    }
+  // Slice at every effect phase edge (pepper/uprising/campfire transitions
+  // included) via the shared boundary set, clamped to [effectiveStart, now].
+  for (const b of multiplierBoundaries(
+    effectiveStart.getTime(),
+    now.getTime(),
+    effectGroups
+  )) {
+    boundaries.add(b);
   }
 
   const ordered = [...boundaries].sort((a, b) => a - b);

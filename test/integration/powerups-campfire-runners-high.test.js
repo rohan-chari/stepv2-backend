@@ -232,11 +232,12 @@ describe("campfire rest + runner's high overlap", () => {
 
     const progress = await getProgress(alice.token, raceId);
     const aliceP = findUser(progress, alice.userId);
-    // Spec: max(2.25, 2) = 2.25x → 1000 base + 1250 buff = 2250
+    // 2026-07-23 sum-stacking rule (see buff-stacking spec): campfire 2.25x + RH
+    // 2x now SUM to 4.25x → 1000 base + 3250 buff = 4250 (was max(2.25,2)=2250).
     assert.equal(
       aliceP.totalSteps,
-      2250,
-      "RH must not stack on campfire boost — take max(campfireMultiplier, 2x RH)",
+      4250,
+      "RH stacks additively on campfire boost — 2.25 + 2 = 4.25x",
     );
   });
 
@@ -292,13 +293,14 @@ describe("campfire rest + runner's high overlap", () => {
 
     const progress = await getProgress(alice.token, raceId);
     const aliceP = findUser(progress, alice.userId);
-    // Spec: 600 base (freeze) - 600 frozen (RH cannot rescue) = 0
-    //     + 800 base (boost) + 800 * (2.25 - 1) buff = 800 + 1000 = 1800
-    // Total = 1800
+    // 2026-07-23 sum-stacking rule (see buff-stacking spec):
+    //   600 base (freeze) - 600 frozen (RH cannot rescue frozen steps) = 0
+    // + 800 base (boost) + 800 * (2.25 + 2 - 1) buff = 800 + 2600 = 3400
+    // Total = 3400 (was 1800 under max(campfire, RH)).
     assert.equal(
       aliceP.totalSteps,
-      1800,
-      "freeze-phase steps stay frozen; boost-phase steps get max(campfire, RH) multiplier",
+      3400,
+      "freeze-phase steps stay frozen; boost-phase steps get campfire+RH summed (4.25x)",
     );
   });
 });

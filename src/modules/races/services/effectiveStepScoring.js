@@ -1,5 +1,9 @@
 const { computeGlobalEventBoost } = require("../../steps/globalStepEvent");
 const { computeLeechEarnedTransfer } = require("../../powerups/leechTransfers");
+const {
+  signedMultiplierAt,
+  multiplierBoundaries,
+} = require("./effectMultiplier");
 
 function computeEffectModifiersFallback(effects, rawTotal) {
   let frozenSteps = 0;
@@ -132,12 +136,75 @@ function mergeRainstormWindows(rainstorms) {
   return merged;
 }
 
+// Interval subtraction: [start, end] minus a set of "holes" (each {start, end}),
+// returning the remaining non-empty sub-intervals. Used to strip UMBRELLA-covered
+// spans out of a rainstorm window before m(t) (§3.3), so the rain penalty simply
+// doesn't exist where an umbrella is up.
+function subtractIntervals(start, end, holes) {
+  let segments = [[start, end]];
+  for (const hole of holes) {
+    const next = [];
+    for (const [s, e] of segments) {
+      if (hole.end <= s || hole.start >= e) {
+        next.push([s, e]);
+        continue;
+      }
+      if (hole.start > s) next.push([s, Math.min(hole.start, e)]);
+      if (hole.end < e) next.push([Math.max(hole.end, s), e]);
+    }
+    segments = next;
+  }
+  return segments.filter(([s, e]) => e > s);
+}
+
+// UMBRELLA-adjusted rainstorm windows: every RAINSTORM row is opponent-sourced by
+// construction, so each umbrella aura cancels the rain penalty over its overlap.
+// Returns pseudo-effect rows ({startsAt, expiresAt, metadata}) carrying each
+// storm's own multiplier so signedMultiplierAt reads the right lostFraction.
+function umbrellaAdjustedRainstorms(rainstorms, umbrellas, nowMs) {
+  if (!umbrellas || umbrellas.length === 0) return rainstorms;
+  const holes = umbrellas
+    .map((u) => ({
+      start: new Date(u.startsAt).getTime(),
+      end: (u.expiresAt ? new Date(u.expiresAt) : new Date(nowMs)).getTime(),
+    }))
+    .filter((h) => Number.isFinite(h.start) && Number.isFinite(h.end) && h.end > h.start);
+  if (holes.length === 0) return rainstorms;
+
+  const adjusted = [];
+  for (const storm of rainstorms) {
+    const rs = new Date(storm.startsAt).getTime();
+    const re = (storm.expiresAt ? new Date(storm.expiresAt) : new Date(nowMs)).getTime();
+    if (!Number.isFinite(rs) || !Number.isFinite(re) || re <= rs) continue;
+    for (const [s, e] of subtractIntervals(rs, re, holes)) {
+      adjusted.push({
+        startsAt: new Date(s),
+        expiresAt: new Date(e),
+        metadata: storm.metadata || {},
+      });
+    }
+  }
+  return adjusted;
+}
+
+async function sumWindows(model, userId, windows) {
+  if (windows.length === 0) return [];
+  if (typeof model.sumStepsInWindows === "function") {
+    return model.sumStepsInWindows(userId, windows);
+  }
+  return Promise.all(
+    windows.map((w) => model.sumStepsInWindow(userId, w.start, w.end))
+  );
+}
+
 // `globalContext` (optional, additive): { globalEvents: [...], now: Date }. When
 // present, the EXTRA steps from any active GlobalStepEvent windows are returned
-// as `globalBoostedSteps`, stacking multiplicatively with the per-participant
-// timed multipliers below. Absent => globalBoostedSteps is 0 (legacy behavior).
+// as `globalBoostedSteps`, scaling the SIGNED per-participant rate (§3): positive
+// segments gain, wrong-turned segments lose more, frozen segments earn 0. Absent
+// => globalBoostedSteps is 0 (legacy behavior).
 async function computeEffectModifiers(effects, rawTotal, userId, stepSampleModel, hasSampleData = false, globalContext = null, now = null) {
   const nowDate = now || (globalContext && globalContext.now) || new Date();
+  const nowMs = new Date(nowDate).getTime();
   let frozenSteps = 0;
   let buffedSteps = 0;
   let reversedSteps = 0;
@@ -151,8 +218,8 @@ async function computeEffectModifiers(effects, rawTotal, userId, stepSampleModel
   const rainstorms = effects.filter((e) => e.type === "RAINSTORM");
   const leeches = effects.filter((e) => e.type === "LEECH");
   // Powerups Wave 5 windowed step-modifiers (§3):
-  //   * UPRISING (2x), RALLY_FLAG (1.25x), COIN_FLIP win (2x) — generic buffs.
-  //   * COIN_FLIP lose (0.5x) — an additive reduction merged with Rainstorm.
+  //   * UPRISING, RALLY_FLAG, COIN_FLIP win — generic buffs (sum).
+  //   * COIN_FLIP lose — an additive reduction alongside Rainstorm.
   //   * GHOST_PEPPER — two-phase boost-then-freeze (Campfire inverted).
   //   * UMBRELLA — subtracts its overlap from opponent-sourced Rainstorm windows.
   const uprisings = effects.filter((e) => e.type === "UPRISING");
@@ -166,408 +233,137 @@ async function computeEffectModifiers(effects, rawTotal, userId, stepSampleModel
   const ghostPeppers = effects.filter((e) => e.type === "GHOST_PEPPER");
   const umbrellas = effects.filter((e) => e.type === "UMBRELLA");
 
-  for (const effect of legCramps) {
-    const windowStart = effect.startsAt;
-    const windowEnd = effect.expiresAt || new Date();
-
-    const sampleSteps = await stepSampleModel.sumStepsInWindow(userId, windowStart, windowEnd);
-    if (sampleSteps > 0) {
-      frozenSteps += sampleSteps;
-    } else if (!hasSampleData) {
-      // Only use snapshot fallback when user has no step sample data at all
-      const meta = effect.metadata || {};
-      const start = meta.stepsAtFreezeStart || 0;
-      const end = effect.status === "EXPIRED" && meta.stepsAtExpiry !== undefined
-        ? meta.stepsAtExpiry
-        : rawTotal;
-      frozenSteps += Math.max(0, end - start);
-    }
-  }
-
-  for (const effect of runnersHighs) {
-    const windowStart = effect.startsAt;
-    const windowEnd = effect.expiresAt || new Date();
-
-    const sampleSteps = await stepSampleModel.sumStepsInWindow(userId, windowStart, windowEnd);
-    if (sampleSteps > 0) {
-      buffedSteps += sampleSteps;
-    } else if (!hasSampleData) {
-      // Only use snapshot fallback when user has no step sample data at all
-      const meta = effect.metadata || {};
-      const start = meta.stepsAtBuffStart || 0;
-      const end = effect.status === "EXPIRED" && meta.stepsAtExpiry !== undefined
-        ? meta.stepsAtExpiry
-        : rawTotal;
-      buffedSteps += Math.max(0, end - start);
-    }
-  }
-
-  for (const effect of campfires) {
-    const meta = effect.metadata || {};
-    const freezeMs = meta.freezeMs || 0;
-    const multiplier = meta.multiplier || 1;
-    const freezeStart = effect.startsAt;
-    const freezeEnd = new Date(new Date(effect.startsAt).getTime() + freezeMs);
-    const boostStart = freezeEnd;
-    const boostEnd = effect.expiresAt || new Date();
-
-    const frozenSampleSteps = await stepSampleModel.sumStepsInWindow(userId, freezeStart, freezeEnd);
-    if (frozenSampleSteps > 0) {
-      frozenSteps += frozenSampleSteps;
-    } else if (!hasSampleData) {
-      const start = meta.stepsAtRestStart || 0;
-      const end = effect.status === "EXPIRED" && meta.stepsAtExpiry !== undefined
-        ? meta.stepsAtExpiry
-        : rawTotal;
-      frozenSteps += Math.max(0, end - start);
-    }
-
-    const boostedSampleSteps = await stepSampleModel.sumStepsInWindow(userId, boostStart, boostEnd);
-    if (boostedSampleSteps > 0) {
-      buffedSteps += boostedSampleSteps * Math.max(0, multiplier - 1);
-    }
-  }
-
-  // Subtract overlap: steps during both a freeze and a buff should be frozen, not buffed
-  for (const cramp of legCramps) {
-    const crampStart = cramp.startsAt.getTime();
-    const crampEnd = (cramp.expiresAt || new Date()).getTime();
-
-    for (const buff of runnersHighs) {
-      const buffStart = buff.startsAt.getTime();
-      const buffEnd = (buff.expiresAt || new Date()).getTime();
-
-      const overlapStart = Math.max(crampStart, buffStart);
-      const overlapEnd = Math.min(crampEnd, buffEnd);
-
-      if (overlapStart < overlapEnd) {
-        const overlapSteps = await stepSampleModel.sumStepsInWindow(
-          userId, new Date(overlapStart), new Date(overlapEnd)
-        );
-        if (overlapSteps > 0) {
-          buffedSteps -= overlapSteps;
-        }
-      }
-    }
-  }
-
-  // Campfire Rest overlap with Runner's High:
-  //   * Freeze phase: steps stay frozen — strip the RH buff for the overlap so
-  //     RH cannot rescue frozen steps.
-  //   * Boost phase: take the larger of the two multipliers, not both. Campfire
-  //     contributes (multiplier - 1) and RH contributes 1; assuming campfire
-  //     multiplier >= 2 (current upgrade range is 2.25–3.0), the RH +1 is the
-  //     redundant one — strip it.
-  // Matches raceStateResolution.js:238's max-not-sum semantics.
-  for (const campfire of campfires) {
-    const cfStart = campfire.startsAt.getTime();
-    const cfFreezeMs = (campfire.metadata || {}).freezeMs || 0;
-    const cfFreezeEnd = cfStart + cfFreezeMs;
-    const cfBoostEnd = (campfire.expiresAt || new Date()).getTime();
-
-    for (const buff of runnersHighs) {
-      const buffStart = buff.startsAt.getTime();
-      const buffEnd = (buff.expiresAt || new Date()).getTime();
-
-      const overlapStart = Math.max(cfStart, buffStart);
-      const overlapEnd = Math.min(cfBoostEnd, buffEnd);
-      if (overlapStart >= overlapEnd) continue;
-
-      const overlapSteps = await stepSampleModel.sumStepsInWindow(
-        userId, new Date(overlapStart), new Date(overlapEnd)
-      );
-      if (overlapSteps > 0) {
-        buffedSteps -= overlapSteps;
-      }
-    }
-  }
-
-  // Wrong Turn: steps during the effect are reversed (subtracted twice — once to undo, once to negate)
-  for (const effect of wrongTurns) {
-    const windowStart = effect.startsAt;
-    const windowEnd = effect.expiresAt || new Date();
-
-    const sampleSteps = await stepSampleModel.sumStepsInWindow(userId, windowStart, windowEnd);
-    if (sampleSteps > 0) {
-      reversedSteps += sampleSteps;
-    }
-  }
-
-  // Wrong Turn + Runner's High overlap: steps are doubled AND negated
-  for (const wt of wrongTurns) {
-    const wtStart = wt.startsAt.getTime();
-    const wtEnd = (wt.expiresAt || new Date()).getTime();
-
-    for (const buff of runnersHighs) {
-      const buffStart = buff.startsAt.getTime();
-      const buffEnd = (buff.expiresAt || new Date()).getTime();
-
-      const overlapStart = Math.max(wtStart, buffStart);
-      const overlapEnd = Math.min(wtEnd, buffEnd);
-
-      if (overlapStart < overlapEnd) {
-        const overlapSteps = await stepSampleModel.sumStepsInWindow(
-          userId, new Date(overlapStart), new Date(overlapEnd)
-        );
-        if (overlapSteps > 0) {
-          // Remove buff credit and negate for doubled reversal
-          buffedSteps -= 2 * overlapSteps;
-        }
-      }
-    }
-  }
-
-  // ── Powerups Wave 5 buffs (UPRISING / RALLY_FLAG / COIN_FLIP win / GHOST_PEPPER
-  // boost) — additive (m-1)×windowSteps, reconciled to MAX-not-sum with each
-  // other and Runner's High (§3.1/§3.3/§3.8), and stripped during any freeze. ─
-  const windowStepsFor = async (effect, metaStartKey) => {
-    const s = effect.startsAt;
-    const e = effect.expiresAt || new Date();
-    const samp = await stepSampleModel.sumStepsInWindow(userId, s, e);
-    if (samp > 0) return samp;
-    if (!hasSampleData) {
-      const meta = effect.metadata || {};
-      const start = meta[metaStartKey] || 0;
-      const end =
-        effect.status === "EXPIRED" && meta.stepsAtExpiry !== undefined
-          ? meta.stepsAtExpiry
-          : rawTotal;
-      return Math.max(0, end - start);
-    }
-    return 0;
+  // Umbrella subtraction happens BEFORE m(t): pass the shared multiplier the
+  // rain windows that actually penalize (§3.3). Display and settlement both build
+  // `groups` here, so the same effectGroups feed the global-event math below —
+  // no divergence.
+  const effectiveRainstorms = umbrellaAdjustedRainstorms(rainstorms, umbrellas, nowMs);
+  const groups = {
+    legCramps,
+    runnersHighs,
+    wrongTurns,
+    campfires,
+    rainstorms: effectiveRainstorms,
+    uprisings,
+    rallyFlags,
+    coinFlipWins,
+    coinFlipLoses,
+    ghostPeppers,
   };
 
-  // Collect boost windows (extra = multiplier − 1) for the max-not-sum pass. RH
-  // is included so RH×(new buff) overlaps also resolve to the larger multiplier.
-  const boostWindows = [];
-  for (const rh of runnersHighs) {
-    boostWindows.push({ start: new Date(rh.startsAt).getTime(), end: (rh.expiresAt ? new Date(rh.expiresAt) : new Date()).getTime(), extra: 1 });
-  }
-  for (const up of uprisings) {
-    const m = Number((up.metadata || {}).multiplier) || 2;
-    buffedSteps += (m - 1) * (await windowStepsFor(up, "stepsAtStart"));
-    boostWindows.push({ start: new Date(up.startsAt).getTime(), end: (up.expiresAt ? new Date(up.expiresAt) : new Date()).getTime(), extra: m - 1 });
-  }
-  for (const rf of rallyFlags) {
-    const m = Number((rf.metadata || {}).multiplier) || 1.25;
-    buffedSteps += (m - 1) * (await windowStepsFor(rf, "stepsAtStart"));
-    boostWindows.push({ start: new Date(rf.startsAt).getTime(), end: (rf.expiresAt ? new Date(rf.expiresAt) : new Date()).getTime(), extra: m - 1 });
-  }
-  for (const cf of coinFlipWins) {
-    const m = Number((cf.metadata || {}).multiplier) || 2;
-    buffedSteps += (m - 1) * (await windowStepsFor(cf, "stepsAtStart"));
-    boostWindows.push({ start: new Date(cf.startsAt).getTime(), end: (cf.expiresAt ? new Date(cf.expiresAt) : new Date()).getTime(), extra: m - 1 });
-  }
-  // Ghost Pepper boost phase [start, start+boostMs): (mult−1)×steps.
-  for (const gp of ghostPeppers) {
-    const meta = gp.metadata || {};
-    const mult = Number(meta.multiplier) || 3;
-    const boostMs = Number(meta.boostMs) || 0;
-    const boostStart = new Date(gp.startsAt);
-    const boostEnd = new Date(new Date(gp.startsAt).getTime() + boostMs);
-    const samp = await stepSampleModel.sumStepsInWindow(userId, boostStart, boostEnd);
-    let boostSteps = samp;
-    if (samp <= 0 && !hasSampleData) {
-      // No conservative snapshot split available for the two phases; skip.
-      boostSteps = 0;
-    }
-    if (boostSteps > 0) buffedSteps += (mult - 1) * boostSteps;
-    boostWindows.push({ start: boostStart.getTime(), end: boostEnd.getTime(), extra: mult - 1 });
-  }
+  const hasStepEffect =
+    legCramps.length ||
+    runnersHighs.length ||
+    wrongTurns.length ||
+    campfires.length ||
+    rainstorms.length ||
+    uprisings.length ||
+    rallyFlags.length ||
+    coinFlips.length ||
+    ghostPeppers.length;
 
-  // MAX-not-sum reconciliation: for every overlapping pair of boost windows,
-  // subtract the SMALLER extra over the overlap so two boosts never sum.
-  for (let i = 0; i < boostWindows.length; i++) {
-    for (let j = i + 1; j < boostWindows.length; j++) {
-      const a = boostWindows[i];
-      const b = boostWindows[j];
-      const overlapStart = Math.max(a.start, b.start);
-      const overlapEnd = Math.min(a.end, b.end);
-      if (overlapStart >= overlapEnd) continue;
-      const overlapSteps = await stepSampleModel.sumStepsInWindow(userId, new Date(overlapStart), new Date(overlapEnd));
-      if (overlapSteps > 0) buffedSteps -= Math.min(a.extra, b.extra) * overlapSteps;
-    }
-  }
-
-  // Ghost Pepper freeze phase [start+boostMs, expiresAt): steps frozen, like a
-  // Leg Cramp. Collected for the rain-suspend pass below too.
-  const ghostFreezeWindows = [];
-  for (const gp of ghostPeppers) {
-    const meta = gp.metadata || {};
-    const boostMs = Number(meta.boostMs) || 0;
-    const freezeStart = new Date(new Date(gp.startsAt).getTime() + boostMs);
-    const freezeEnd = gp.expiresAt ? new Date(gp.expiresAt) : new Date();
-    ghostFreezeWindows.push({ start: freezeStart.getTime(), end: freezeEnd.getTime() });
-    const samp = await stepSampleModel.sumStepsInWindow(userId, freezeStart, freezeEnd);
-    if (samp > 0) frozenSteps += samp;
-  }
-
-  // Strip boost credit that overlaps ANY freeze window (Leg Cramp / Quicksand,
-  // Campfire freeze phase, Ghost Pepper freeze) — freeze beats buff. RH is
-  // already stripped for Leg Cramp / Campfire above; here we strip the new
-  // buffs over every freeze window, plus RH/all over the Ghost freeze window.
-  const allFreezeWindows = [
-    ...legCramps.map((e) => ({ start: new Date(e.startsAt).getTime(), end: (e.expiresAt ? new Date(e.expiresAt) : new Date()).getTime() })),
-    ...campfires.map((e) => ({ start: new Date(e.startsAt).getTime(), end: new Date(e.startsAt).getTime() + ((e.metadata || {}).freezeMs || 0) })),
-    ...ghostFreezeWindows,
-  ];
-  const newBuffWindows = boostWindows.filter((w) =>
-    // Only the wave-5 buffs need stripping here; RH is handled by the existing
-    // Leg Cramp / Campfire loops, so exclude the extra===1 RH windows that were
-    // already stripped. We still strip RH over the GHOST freeze window below.
-    true
-  );
-  for (const fw of allFreezeWindows) {
-    for (const bw of newBuffWindows) {
-      // RH windows over Leg Cramp / Campfire freeze are already stripped by the
-      // earlier loops; avoid double-stripping them there. RH over the Ghost
-      // freeze window is NOT yet stripped, so include RH only for ghost windows.
-      const isRh = bw.extra === 1 && runnersHighs.some(
-        (rh) => new Date(rh.startsAt).getTime() === bw.start
-      );
-      const isGhostFreeze = ghostFreezeWindows.some((g) => g.start === fw.start && g.end === fw.end);
-      if (isRh && !isGhostFreeze) continue;
-      const overlapStart = Math.max(fw.start, bw.start);
-      const overlapEnd = Math.min(fw.end, bw.end);
-      if (overlapStart >= overlapEnd) continue;
-      const overlapSteps = await stepSampleModel.sumStepsInWindow(userId, new Date(overlapStart), new Date(overlapEnd));
-      if (overlapSteps > 0) buffedSteps -= bw.extra * overlapSteps;
-    }
-  }
-
-  // Rainstorm: an ADDITIVE -0.5x on step accrual during the storm window,
-  // folded into frozenSteps (both are plain subtractions from the total).
-  // Interactions:
-  //   * Runner's High / Campfire boost overlap stays additive: 2x - 0.5x = 1.5x.
-  //   * While steps are already FROZEN (Leg Cramp, Campfire freeze phase) or
-  //     REVERSED (Wrong Turn), the rain penalty is SUSPENDED — those windows
-  //     already contribute 0x / -1x, and stacking the rain penalty on top would
-  //     over-punish (e.g. frozen steps going NEGATIVE). The overlap loop below
-  //     subtracts the rain penalty back out for those windows.
-  // multiplierForTime in raceStateResolution.js mirrors exactly this model so
-  // finish-time interpolation agrees with these totals.
-  // B4: apply the storm penalty ONCE over the UNION of all storm windows on
-  // this victim, so two overlapping storms clamp at a single 0.5x (not 0.25x).
-  const rainWindows = mergeRainstormWindows(rainstorms);
-  for (const window of rainWindows) {
-    const windowStart = new Date(window.start);
-    const windowEnd = new Date(window.end);
-    const lostFraction = window.lostFraction;
-
-    const sampleSteps = await stepSampleModel.sumStepsInWindow(userId, windowStart, windowEnd);
-    if (sampleSteps > 0) {
-      frozenSteps += Math.round(sampleSteps * lostFraction);
-    } else if (!hasSampleData) {
-      // Only use snapshot fallback when user has no step sample data at all.
-      // Union approximation: earliest storm's start snapshot to the latest
-      // storm's end snapshot, penalized once.
-      const meta = window.startEffect.metadata || {};
-      const start = meta.stepsAtStart || 0;
-      const endMeta = window.endEffect.metadata || {};
-      const end = window.endEffect.status === "EXPIRED" && endMeta.stepsAtExpiry !== undefined
-        ? endMeta.stepsAtExpiry
-        : rawTotal;
-      frozenSteps += Math.round(Math.max(0, end - start) * lostFraction);
-    }
-  }
-
-  // Suspend the rain penalty during frozen/reversed windows (see note above).
-  // Iterate the same merged storm windows so the suspend subtraction matches
-  // the single-0.5x penalty applied above.
-  for (const storm of rainWindows) {
-    const stormStart = storm.start;
-    const stormEnd = storm.end;
-    const lostFraction = storm.lostFraction;
-
-    const suspendedWindows = [
-      ...legCramps.map((e) => ({
-        start: e.startsAt.getTime(),
-        end: (e.expiresAt || new Date()).getTime(),
-      })),
-      ...wrongTurns.map((e) => ({
-        start: e.startsAt.getTime(),
-        end: (e.expiresAt || new Date()).getTime(),
-      })),
-      ...campfires.map((e) => ({
-        start: e.startsAt.getTime(),
-        end: e.startsAt.getTime() + ((e.metadata || {}).freezeMs || 0),
-      })),
-      // Ghost Pepper freeze phase suspends the rain penalty too.
-      ...ghostFreezeWindows,
-    ];
-
-    for (const window of suspendedWindows) {
-      const overlapStart = Math.max(stormStart, window.start);
-      const overlapEnd = Math.min(stormEnd, window.end);
-      if (overlapStart >= overlapEnd) continue;
-
-      const overlapSteps = await stepSampleModel.sumStepsInWindow(
-        userId, new Date(overlapStart), new Date(overlapEnd)
-      );
-      if (overlapSteps > 0) {
-        frozenSteps -= Math.round(overlapSteps * lostFraction);
+  if (hasStepEffect) {
+    if (hasSampleData) {
+      // ── Segment walk (§4.2). Slice [earliest effect start, now] at every
+      // multiplier boundary, read each segment's steps ONCE, and bucket the
+      // signed multiplier into the existing frozen/buffed/reversed terms so the
+      // total formula (base − frozen + buffed − 2·reversed + event + bonus) is
+      // untouched. Segments only exist where effects exist — a participant with
+      // no effects early-returns above, never adding a query. ──
+      const starts = [];
+      for (const e of [
+        ...legCramps,
+        ...runnersHighs,
+        ...wrongTurns,
+        ...campfires,
+        ...effectiveRainstorms,
+        ...uprisings,
+        ...rallyFlags,
+        ...coinFlipWins,
+        ...coinFlipLoses,
+        ...ghostPeppers,
+      ]) {
+        starts.push(new Date(e.startsAt).getTime());
       }
-    }
-  }
-
-  // ── Coin Flip LOSE (§3.3): a self-inflicted additive reduction, folded into
-  // frozenSteps exactly like Rainstorm. Merged so a user under BOTH a Coin Flip
-  // lose and a Rainstorm is never penalized below 0.5x combined: apply each
-  // penalty over its own merged windows, then subtract the overlap once. The
-  // Umbrella subtraction below deliberately does NOT touch these self windows. ─
-  const coinFlipWindows = mergeRainstormWindows(coinFlipLoses);
-  for (const window of coinFlipWindows) {
-    const sampleSteps = await stepSampleModel.sumStepsInWindow(userId, new Date(window.start), new Date(window.end));
-    if (sampleSteps > 0) {
-      frozenSteps += Math.round(sampleSteps * window.lostFraction);
-    } else if (!hasSampleData) {
-      const meta = window.startEffect.metadata || {};
-      const start = meta.stepsAtStart || 0;
-      const endMeta = window.endEffect.metadata || {};
-      const end = window.endEffect.status === "EXPIRED" && endMeta.stepsAtExpiry !== undefined ? endMeta.stepsAtExpiry : rawTotal;
-      frozenSteps += Math.round(Math.max(0, end - start) * window.lostFraction);
-    }
-  }
-  // Dedupe rain∩coinflip overlap so combined stays at a single 0.5x, not 1.0x.
-  for (const rw of rainWindows) {
-    for (const cw of coinFlipWindows) {
-      const overlapStart = Math.max(rw.start, cw.start);
-      const overlapEnd = Math.min(rw.end, cw.end);
-      if (overlapStart >= overlapEnd) continue;
-      const overlapSteps = await stepSampleModel.sumStepsInWindow(userId, new Date(overlapStart), new Date(overlapEnd));
-      if (overlapSteps > 0) frozenSteps -= Math.round(overlapSteps * Math.min(rw.lostFraction, cw.lostFraction));
-    }
-  }
-  // Coin Flip lose suspended during any freeze/reverse window (freeze beats it).
-  for (const cw of coinFlipWindows) {
-    const suspend = [
-      ...legCramps.map((e) => ({ start: new Date(e.startsAt).getTime(), end: (e.expiresAt ? new Date(e.expiresAt) : new Date()).getTime() })),
-      ...wrongTurns.map((e) => ({ start: new Date(e.startsAt).getTime(), end: (e.expiresAt ? new Date(e.expiresAt) : new Date()).getTime() })),
-      ...ghostFreezeWindows,
-    ];
-    for (const w of suspend) {
-      const overlapStart = Math.max(cw.start, w.start);
-      const overlapEnd = Math.min(cw.end, w.end);
-      if (overlapStart >= overlapEnd) continue;
-      const overlapSteps = await stepSampleModel.sumStepsInWindow(userId, new Date(overlapStart), new Date(overlapEnd));
-      if (overlapSteps > 0) frozenSteps -= Math.round(overlapSteps * cw.lostFraction);
-    }
-  }
-
-  // ── Umbrella (§3.7): subtract the overlap of each Umbrella aura with the
-  // victim's merged Rainstorm windows (opponent-sourced by construction — every
-  // RAINSTORM row on a user was placed by an opponent). Only Rainstorm, never a
-  // self-sourced Coin Flip lose. Conservative fallback: no sample data ⇒ no
-  // subtraction (the rain penalty stands). ─
-  for (const umbrella of umbrellas) {
-    const uStart = new Date(umbrella.startsAt).getTime();
-    const uEnd = (umbrella.expiresAt ? new Date(umbrella.expiresAt) : new Date()).getTime();
-    for (const rw of rainWindows) {
-      const overlapStart = Math.max(uStart, rw.start);
-      const overlapEnd = Math.min(uEnd, rw.end);
-      if (overlapStart >= overlapEnd) continue;
-      const overlapSteps = await stepSampleModel.sumStepsInWindow(userId, new Date(overlapStart), new Date(overlapEnd));
-      if (overlapSteps > 0) frozenSteps -= Math.round(overlapSteps * rw.lostFraction);
+      const windowStart = Math.min(...starts);
+      const windowEnd = nowMs;
+      if (windowEnd > windowStart) {
+        const boundaries = multiplierBoundaries(windowStart, windowEnd, groups);
+        const segments = [];
+        for (let i = 0; i < boundaries.length - 1; i++) {
+          const segStart = boundaries[i];
+          const segEnd = boundaries[i + 1];
+          if (segEnd <= segStart) continue;
+          const m = signedMultiplierAt(segStart, groups);
+          if (m === 1) continue; // no delta from base
+          segments.push({
+            m,
+            start: new Date(segStart),
+            end: new Date(segEnd),
+          });
+        }
+        const sums = await sumWindows(
+          stepSampleModel,
+          userId,
+          segments.map((s) => ({ start: s.start, end: s.end }))
+        );
+        for (let k = 0; k < segments.length; k++) {
+          const s = sums[k];
+          if (!s || s <= 0) continue;
+          const m = segments[k].m;
+          if (m === 0) {
+            frozenSteps += s;
+          } else if (m > 0) {
+            buffedSteps += (m - 1) * s;
+          } else {
+            reversedSteps += s;
+            buffedSteps += (m + 1) * s;
+          }
+        }
+      }
+    } else {
+      // Snapshot fallback (§4.2): no hourly samples, so approximate each effect
+      // from its stored step snapshots. Overlap reconciliation is a no-op without
+      // samples (all overlap sums are 0), so the per-effect deltas below are the
+      // exact behavior the pre-rewrite fallback produced. Wrong Turn / Ghost
+      // freeze / Umbrella have no snapshot term, matching the old path.
+      // Ghost Pepper and Campfire are handled outside this helper: Ghost Pepper
+      // contributes nothing without samples (the boost/freeze split is
+      // unreconstructable from one snapshot — the pre-rewrite path also skipped
+      // it), and Campfire's freeze snapshot keys off stepsAtRestStart below.
+      const snap = computeEffectModifiersFallback(
+        [
+          ...legCramps,
+          ...runnersHighs,
+          ...uprisings,
+          ...rallyFlags,
+          ...coinFlips,
+        ],
+        rawTotal
+      );
+      frozenSteps += snap.frozenSteps;
+      buffedSteps += snap.buffedSteps;
+      reversedSteps += snap.reversedSteps;
+      // Campfire freeze-phase snapshot (computeEffectModifiersFallback keys Leg
+      // Cramp off stepsAtFreezeStart, but Campfire stores stepsAtRestStart).
+      for (const effect of campfires) {
+        const meta = effect.metadata || {};
+        const start = meta.stepsAtRestStart || 0;
+        const end = effect.status === "EXPIRED" && meta.stepsAtExpiry !== undefined
+          ? meta.stepsAtExpiry
+          : rawTotal;
+        frozenSteps += Math.max(0, end - start);
+      }
+      // Rainstorm snapshot over the merged (per-caster-clamped) windows.
+      for (const window of mergeRainstormWindows(rainstorms)) {
+        const meta = window.startEffect.metadata || {};
+        const start = meta.stepsAtStart || 0;
+        const endMeta = window.endEffect.metadata || {};
+        const end = window.endEffect.status === "EXPIRED" && endMeta.stepsAtExpiry !== undefined
+          ? endMeta.stepsAtExpiry
+          : rawTotal;
+        frozenSteps += Math.round(Math.max(0, end - start) * window.lostFraction);
+      }
     }
   }
 
@@ -578,8 +374,6 @@ async function computeEffectModifiers(effects, rawTotal, userId, stepSampleModel
   // is returned as per-leech `earnedTransfer` values so the caller can drain the
   // victim AND credit the attacker against the victim's actual available balance
   // (resolved deterministically across the whole race in applyLeechTransfers).
-  // A leecher who doesn't walk drains nothing. There is no per-use cap; the
-  // victim's floored balance is the only ceiling.
   const leechTransfers = [];
   for (const effect of leeches) {
     if (!effect.sourceUserId) continue;
@@ -598,14 +392,15 @@ async function computeEffectModifiers(effects, rawTotal, userId, stepSampleModel
     }
   }
 
-  // Global step-multiplier event boost (additive, stacks multiplicatively with
-  // the per-participant multipliers above). Computed over the SAME effect groups
-  // so display and settlement agree exactly.
+  // Global step-multiplier event boost (additive term). Computed over the SAME
+  // umbrella-adjusted `groups` with SIGNED m(t), so a pepper-stacked segment
+  // gains m×E, a wrong-turned segment loses, and a frozen segment earns 0 — and
+  // display == settlement because both build `groups` identically.
   let globalBoostedSteps = 0;
   if (globalContext && globalContext.globalEvents && globalContext.globalEvents.length > 0) {
     globalBoostedSteps = await computeGlobalEventBoost({
       globalEvents: globalContext.globalEvents,
-      effectGroups: { legCramps, runnersHighs, wrongTurns, campfires },
+      effectGroups: groups,
       userId,
       stepSampleModel,
       now: globalContext.now,
@@ -614,11 +409,5 @@ async function computeEffectModifiers(effects, rawTotal, userId, stepSampleModel
 
   return { frozenSteps, buffedSteps, reversedSteps, globalBoostedSteps, leechTransfers };
 }
-
-// §5.3 `powerupData.dropOdds`. Mirrors openMysteryBox's ranking rules exactly:
-// individual races rank on true total steps; team races collapse to a 2-slot
-// race where the trailing team gets the catch-up tier and a tie counts both
-// teams as leading. Returns null if the viewer's slot can't be determined, in
-// which case the field is omitted entirely (clients presence-check it).
 
 module.exports = { computeEffectModifiers };
