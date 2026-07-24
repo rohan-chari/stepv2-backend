@@ -379,3 +379,44 @@ describe("five-minute step samples — emersonz replay (§7 item 2)", () => {
     );
   });
 });
+
+// 2026-07-23 prod incident: MAX_SAMPLES was 48 (sized for 24 hourly buckets),
+// so a 5-min day (up to 288 non-zero buckets) started 400-ing every sync for
+// any user active >4h — a total sync outage for that user, not a granularity
+// downgrade. The cap must admit a full 5-min day plus tz-shift slack (spec
+// §3.2: payload shape is granularity-agnostic).
+describe("five-minute step samples — full-day payload fits the sample cap", () => {
+  before(async () => { server = await getSharedServer(); });
+  beforeEach(async () => { await cleanDatabase(); nextAppleId = 0; });
+
+  // 288 contiguous 5-min buckets = a complete 24h day at the finest granularity.
+  it("accepts a complete 288-bucket 5-min day (the incident payload)", async () => {
+    const alice = await createUser("FullDayAlice");
+    const samples = [];
+    for (let i = 288; i > 0; i--) {
+      samples.push({
+        periodStart: minutesAgo(i * 5 + 1),
+        periodEnd: minutesAgo((i - 1) * 5 + 1),
+        steps: 10,
+      });
+    }
+    const res = await syncV2(alice.token, samples, 2880);
+    assert.equal(res.status, 202, `full 5-min day must sync (got ${res.status})`);
+    const rows = await storedRows(alice.userId);
+    assert.equal(rows.length, 288, "all 288 fine buckets persisted");
+    await assertNoOverlaps(alice.userId);
+  });
+
+  it("still rejects a payload beyond the cap (bound stays enforced)", async () => {
+    const alice = await createUser("OverCapAlice");
+    const samples = Array.from({ length: 337 }, (_, i) => ({
+      periodStart: minutesAgo(i * 5 + 2),
+      periodEnd: minutesAgo(i * 5 + 1),
+      steps: 1,
+    }));
+    const res = await syncV2(alice.token, samples, 337);
+    assert.equal(res.status, 400);
+    const body = await res.json();
+    assert.equal(body.code, "INVALID_STEP_SYNC");
+  });
+});

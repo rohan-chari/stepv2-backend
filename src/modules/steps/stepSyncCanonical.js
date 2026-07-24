@@ -28,7 +28,12 @@ class StepSyncValidationError extends Error {
   }
 }
 
-const MAX_SAMPLES = 48;
+// Must admit a complete day at the finest supported granularity: 288 5-min
+// buckets per 24h, plus tz-shift slack (a DST/travel day can span up to 28h of
+// wall clock) => 28h * 12 = 336. Sized for 24 hourly buckets (48) until the
+// 2026-07-23 incident: flipping stepSampleBucketMinutes to 5 made every >4h-active
+// user's sync 400 here, a total sync outage for them.
+const MAX_SAMPLES = 336;
 const MAX_IDEMPOTENCY_KEY_LENGTH = 36;
 const UUID_RE =
   /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
