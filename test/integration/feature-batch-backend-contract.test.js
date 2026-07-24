@@ -62,7 +62,8 @@ describe("2026-07-22 additive backend contracts", () => {
     } });
     const next = await nextRes.json();
     assert.ok(next.powerups.some((p) => p.type === "QUICKSAND"));
-    assert.deepEqual(next.powerups.find((p) => p.type === "STEALTH_MODE").upgradeTierLabels, ["Hide 3h", "Hide 4h", "Hide 5h", "Hide 7h"]);
+    // Item 7 (owner nerf 2026-07-24): stealth durations are now 60/75/90/120 min.
+    assert.deepEqual(next.powerups.find((p) => p.type === "STEALTH_MODE").upgradeTierLabels, ["Hide 1h", "Hide 75m", "Hide 90m", "Hide 2h"]);
     assert.match(next.powerups.find((p) => p.type === "HITCHHIKE").description, /boosts and reversals/i);
   });
 });

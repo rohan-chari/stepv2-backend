@@ -56,7 +56,7 @@ function buildGetPowerupCopyCatalog(deps = {}) {
         type: row.powerupType,
         name: row.name,
         description: stealthRunner
-          ? "Hide your name, steps, and track position for 3 hours."
+          ? "Hide your name, steps, and track position for 1 hour."
           : hitchhikeEffective
             ? "Copy the target's effective steps; their boosts and reversals carry over."
             : row.description,
@@ -64,7 +64,7 @@ function buildGetPowerupCopyCatalog(deps = {}) {
         // rather than rendering a blank line or truncating the description.
         shortDescription: row.shortDescription ?? null,
         upgradeTierLabels: stealthRunner
-          ? ["Hide 3h", "Hide 4h", "Hide 5h", "Hide 7h"]
+          ? ["Hide 1h", "Hide 75m", "Hide 90m", "Hide 2h"]
           : Array.isArray(row.upgradeTierLabels) ? row.upgradeTierLabels : [],
       };
       }),

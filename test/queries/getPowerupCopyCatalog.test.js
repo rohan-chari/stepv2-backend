@@ -229,12 +229,15 @@ test("getPowerupShopCatalog serves copy-catalog strings while keeping its respon
 
   assert.deepEqual(Object.keys(catalog).sort(), ["coins", "items"]);
   const [item] = catalog.items;
+  // Item 9 (2026-07-24): `category` + `rarity` are additive shop-catalog fields.
   assert.deepEqual(Object.keys(item).sort(), [
+    "category",
     "description",
     "name",
     "ownedQuantity",
     "powerupType",
     "priceCoins",
+    "rarity",
     "sku",
   ]);
   assert.equal(item.name, "Leech", "sourced from PowerupCopy, not PowerupShopItem");

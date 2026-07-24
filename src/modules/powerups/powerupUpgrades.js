@@ -28,7 +28,11 @@ function rarityForType(type) {
 const DURATIONS_MS = {
   LEG_CRAMP:         [2 * HOUR, 3 * HOUR, 4 * HOUR, 6 * HOUR],
   RUNNERS_HIGH:      [3 * HOUR, 4 * HOUR, 5 * HOUR, 7 * HOUR],
-  STEALTH_MODE:      [4 * HOUR, 5 * HOUR, 6.5 * HOUR, 8 * HOUR],
+  // Item 7 (owner nerf 2026-07-24): stealth is now 60/75/90/120 min for ALL
+  // clients (server-computed → hits every app version on deploy). Do NOT touch
+  // RUNNERS_HIGH below — modern clients used to borrow it for stealth; usePowerup
+  // now points BOTH stealth branches at this ladder.
+  STEALTH_MODE:      [60 * 60 * 1000, 75 * 60 * 1000, 90 * 60 * 1000, 120 * 60 * 1000],
   WRONG_TURN:        [1 * HOUR, 1.5 * HOUR, 2 * HOUR, 3 * HOUR],
   DETOUR_SIGN:       [3 * HOUR, 4 * HOUR, 5 * HOUR, 7 * HOUR],
   COMPRESSION_SOCKS: [24 * HOUR, 30 * HOUR, 36 * HOUR, 48 * HOUR],

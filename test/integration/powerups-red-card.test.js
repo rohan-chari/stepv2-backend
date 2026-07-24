@@ -140,7 +140,7 @@ describe("red card", () => {
   // === CORE MECHANIC ===
 
   describe("core mechanic", () => {
-    it("deducts 5% of leader's steps", async () => {
+    it("deducts 10% of leader's steps", async () => {
       const alice = await createUser("AliceCardAAA");
       const bob = await createUser("BobCardAAAAA");
       await makeFriends(alice, bob);
@@ -156,11 +156,11 @@ describe("red card", () => {
       assert.equal(res.status, 200);
 
       const body = await res.json();
-      assert.equal(body.result.penalty, 500); // 5% of 10000
+      assert.equal(body.result.penalty, 1000); // 10% of 10000
 
       const progress = await getProgress(alice.token, raceId);
       const bobP = findUser(progress, bob.userId);
-      assert.equal(bobP.totalSteps, 9500); // 10000 - 500
+      assert.equal(bobP.totalSteps, 9000); // 10000 - 1000
     });
 
     it("auto-targets the current leader (no target specified)", async () => {
@@ -177,7 +177,7 @@ describe("red card", () => {
       assert.equal(res.status, 200);
 
       const body = await res.json();
-      assert.equal(body.result.penalty, 1000); // 5% of 20000
+      assert.equal(body.result.penalty, 2000); // 10% of 20000
     });
 
     it("in 3+ player race, always hits the #1 leader", async () => {
@@ -199,11 +199,11 @@ describe("red card", () => {
       assert.equal(res.status, 200);
 
       const body = await res.json();
-      assert.equal(body.result.penalty, 1250); // 5% of 25000 (charlie, not bob)
+      assert.equal(body.result.penalty, 2500); // 10% of 25000 (charlie, not bob)
 
       const progress = await getProgress(alice.token, raceId);
       const charlieP = findUser(progress, charlie.userId);
-      assert.equal(charlieP.totalSteps, 23750); // 25000 - 1250
+      assert.equal(charlieP.totalSteps, 22500); // 25000 - 2500
       // Bob should be unaffected
       const bobP = findUser(progress, bob.userId);
       assert.equal(bobP.totalSteps, 10000);
@@ -215,14 +215,14 @@ describe("red card", () => {
       await makeFriends(alice, bob);
       const raceId = await createActiveRaceWith([alice, bob]);
 
-      // 5% of 1555 = 77.75 → Math.round → 78
+      // 10% of 1555 = 155.5 → Math.round → 156
       await giveBonusSteps(raceId, bob.userId, 1555);
       await giveBonusSteps(raceId, alice.userId, 100);
 
       const card = await giveHeldPowerup(raceId, alice.userId, "RED_CARD", 99901);
       const res = await usePowerup(alice.token, raceId, card.id);
       const body = await res.json();
-      assert.equal(body.result.penalty, 78);
+      assert.equal(body.result.penalty, 156);
     });
   });
 
@@ -384,7 +384,7 @@ describe("red card", () => {
       assert.equal(res.status, 200);
 
       const body = await res.json();
-      assert.equal(body.result.penalty, 150); // 5% of 3000
+      assert.equal(body.result.penalty, 300); // 10% of 3000
     });
 
     it("multiple red cards reduce leader's steps compound", async () => {
@@ -400,20 +400,20 @@ describe("red card", () => {
       await giveBonusSteps(raceId, alice.userId, 2000);
       await giveBonusSteps(raceId, charlie.userId, 2000);
 
-      // Alice red cards — bob loses 500 (5% of 10000) → 9500
+      // Alice red cards — bob loses 1000 (10% of 10000) → 9000
       const c1 = await giveHeldPowerup(raceId, alice.userId, "RED_CARD", 99901);
       await usePowerup(alice.token, raceId, c1.id);
 
       // Sync totalSteps so charlie's red card sees bob's reduced total
       await getProgress(alice.token, raceId);
 
-      // Charlie red cards — bob loses 475 (5% of 9500) → 9025
+      // Charlie red cards — bob loses 900 (10% of 9000) → 8100
       const c2 = await giveHeldPowerup(raceId, charlie.userId, "RED_CARD", 99902);
       await usePowerup(charlie.token, raceId, c2.id);
 
       const progress = await getProgress(alice.token, raceId);
       const bobP = findUser(progress, bob.userId);
-      assert.equal(bobP.totalSteps, 9025);
+      assert.equal(bobP.totalSteps, 8100);
     });
 
     it("stealthed leader is still targeted", async () => {
@@ -435,7 +435,7 @@ describe("red card", () => {
       assert.equal(res.status, 200);
 
       const body = await res.json();
-      assert.equal(body.result.penalty, 500); // 5% of 10000
+      assert.equal(body.result.penalty, 1000); // 10% of 10000
     });
   });
 
@@ -461,8 +461,8 @@ describe("red card", () => {
         (e) => e.eventType === "POWERUP_USED" && e.powerupType === "RED_CARD"
       );
       assert.ok(event, "feed should contain red card event");
-      // 5% of bob's 10000 = 500.
-      assert.ok(event.description.includes("500"));
+      // 10% of bob's 10000 = 1000.
+      assert.ok(event.description.includes("1,000"));
       assert.equal(event.targetUserId, bob.userId);
     });
   });

@@ -187,9 +187,9 @@ test("usePowerup Red Card auto-targets leader", async () => {
   const result = await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1" });
 
   assert.equal(result.blocked, false);
-  assert.equal(result.penalty, 1000); // 5% of 20000
+  assert.equal(result.penalty, 2000); // item 8: 10% of 20000
   assert.equal(ctx.bonusChanges[0].id, "rp-user-2");
-  assert.equal(ctx.bonusChanges[0].amount, 1000);
+  assert.equal(ctx.bonusChanges[0].amount, 2000);
 });
 
 test("usePowerup Red Card rejects when user is leader", async () => {
@@ -320,7 +320,7 @@ test("Finished user's steps are not modified by Red Card", async () => {
 // ===========================================================================
 
 test("Red Card on a user with very few steps does not make them negative", async () => {
-  // user-2 is leader with 100 steps, 5% = 5
+  // user-2 is leader with 100 steps, 10% = 10
   const ctx = makeDeps({
     powerupType: "RED_CARD",
     user1: { totalSteps: 50 },
@@ -331,8 +331,8 @@ test("Red Card on a user with very few steps does not make them negative", async
 
   const result = await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1" });
 
-  // Penalty should be 5 (5% of 100), which keeps them at 95 — not negative
-  assert.equal(result.penalty, 5);
+  // Penalty should be 10 (10% of 100), which keeps them at 90 — not negative
+  assert.equal(result.penalty, 10);
   assert.ok(result.penalty <= 100, "penalty should not exceed the leader's total steps");
 });
 

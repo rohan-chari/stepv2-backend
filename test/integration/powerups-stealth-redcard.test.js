@@ -180,10 +180,10 @@ describe("stealth mode + red card", () => {
     assert.equal(res.status, 200);
     assert.equal(body.result.outcome, "APPLIED");
     assert.ok(!body.result.blocked);
-    assert.equal(body.result.penalty, 400, "5% of the stealthed leader's 8000 steps");
+    assert.equal(body.result.penalty, 800, "10% of the stealthed leader's 8000 steps");
 
     // The penalty hits the stealthed leader's true total.
-    assert.equal(bobSelf.totalSteps, 7600, "leader loses 400 despite being stealthed");
+    assert.equal(bobSelf.totalSteps, 7200, "leader loses 800 despite being stealthed");
 
     // Stealth Mode is untouched — it is a timed buff, not a shield.
     assert.equal(await stealthStatus(raceId, bob.userId), "ACTIVE");

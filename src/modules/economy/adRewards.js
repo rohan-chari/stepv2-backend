@@ -20,6 +20,19 @@ const ADS_COIN_REWARD_ENABLED = process.env.ADS_COIN_REWARD_ENABLED !== "false";
 // rewardKind for coin-reward grants (SSV custom_data "coins:<YYYY-MM-DD>").
 const COIN_REWARD_KIND = "coin_reward";
 
+// Item 10 (2026-07-24): "watch ads to afford a powerup". Grants minted by this
+// unit carry SSV custom_data "powerup_unlock:<userId>:<sku>"; the backend stamps
+// rewardKind = POWERUP_UNLOCK_REWARD_KIND and shopItemId = <sku> so the unlock
+// endpoint can count verified, still-unconsumed watches for this user+sku.
+const POWERUP_UNLOCK_REWARD_KIND = "powerup_unlock";
+
+// Server is the authority on shortfall + ad count (never client-attested): a user
+// within this many coins of a powerup may unlock it by watching ceil(shortfall/50)
+// ads (capped at 3); beyond it, the client routes to the +coins hub instead.
+const POWERUP_UNLOCK_MAX_SHORTFALL = 150;
+const POWERUP_UNLOCK_COINS_PER_AD = 50;
+const POWERUP_UNLOCK_MAX_ADS = 3;
+
 // Flat coins per verified watch, and max redeemed watches per local day. Both
 // are env-overridable so the coin economy can be tuned without an App Store
 // cycle — the client renders whatever the status block reports rather than its
@@ -54,4 +67,8 @@ module.exports = {
   COIN_REWARD_KIND,
   AD_COIN_REWARD_AMOUNT,
   AD_COIN_REWARD_DAILY_CAP,
+  POWERUP_UNLOCK_REWARD_KIND,
+  POWERUP_UNLOCK_MAX_SHORTFALL,
+  POWERUP_UNLOCK_COINS_PER_AD,
+  POWERUP_UNLOCK_MAX_ADS,
 };

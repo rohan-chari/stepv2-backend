@@ -180,11 +180,12 @@ test("upgradedDuration: Runner's High — 3h / 4h / 5h / 7h", () => {
   assert.equal(upgradedDuration("RUNNERS_HIGH", 3), 7 * HOUR);
 });
 
-test("upgradedDuration: Stealth Mode — 4h / 5h / 6.5h / 8h", () => {
-  assert.equal(upgradedDuration("STEALTH_MODE", 0), 4 * HOUR);
-  assert.equal(upgradedDuration("STEALTH_MODE", 1), 5 * HOUR);
-  assert.equal(upgradedDuration("STEALTH_MODE", 2), 6.5 * HOUR);
-  assert.equal(upgradedDuration("STEALTH_MODE", 3), 8 * HOUR);
+// Item 7 (owner nerf 2026-07-24): stealth is now 60/75/90/120 min for all clients.
+test("upgradedDuration: Stealth Mode — 60m / 75m / 90m / 120m", () => {
+  assert.equal(upgradedDuration("STEALTH_MODE", 0), 60 * 60 * 1000);
+  assert.equal(upgradedDuration("STEALTH_MODE", 1), 75 * 60 * 1000);
+  assert.equal(upgradedDuration("STEALTH_MODE", 2), 90 * 60 * 1000);
+  assert.equal(upgradedDuration("STEALTH_MODE", 3), 120 * 60 * 1000);
 });
 
 test("upgradedDuration: Wrong Turn — 1h / 1.5h / 2h / 3h", () => {

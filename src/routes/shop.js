@@ -14,6 +14,9 @@ const {
   purchasePowerupItem: defaultPurchasePowerupItem,
 } = require("../modules/powerups");
 const {
+  unlockPowerupWithAds: defaultUnlockPowerupWithAds,
+} = require("../modules/powerups");
+const {
   POWERUPS5_GATED_TYPES,
 } = require("../modules/powerups/constants/powerupGating");
 
@@ -33,6 +36,8 @@ function createShopRouter(dependencies = {}) {
     dependencies.getPowerupShopCatalog || defaultGetPowerupShopCatalog;
   const purchasePowerupItem =
     dependencies.purchasePowerupItem || defaultPurchasePowerupItem;
+  const unlockPowerupWithAds =
+    dependencies.unlockPowerupWithAds || defaultUnlockPowerupWithAds;
 
   router.use(requireAuth);
   router.use(extractReleaseChannel);
@@ -89,6 +94,30 @@ function createShopRouter(dependencies = {}) {
           .json({ error: error.message });
       }
       console.error("Powerup purchase error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // POST /shop/powerups/unlock-with-ads — item 10. Body { sku, idempotencyKey }
+  // (+ Idempotency-Key header). Server recomputes shortfall + ad count and
+  // requires SSV-verified watches; on success zeroes coins and grants the
+  // powerup. Additive; only the new app calls it. Ships dark-safe.
+  router.post("/powerups/unlock-with-ads", async (req, res) => {
+    try {
+      const result = await unlockPowerupWithAds({
+        userId: req.user.id,
+        sku: req.body.sku,
+        idempotencyKey: req.get("Idempotency-Key") || req.body.idempotencyKey,
+        channel: req.releaseChannel,
+      });
+      res.json(result);
+    } catch (error) {
+      if (error.name === "UnlockWithAdsError") {
+        return res
+          .status(error.statusCode || 400)
+          .json({ error: error.message, ...(error.code ? { code: error.code } : {}) });
+      }
+      console.error("Powerup unlock-with-ads error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });

@@ -9,6 +9,11 @@ const {
   POWERUPS5_GATED_TYPES,
   isImposterDisabledForCatalog,
 } = require("../constants/powerupGating");
+const { categoryForPowerup } = require("../constants/powerupCategories");
+const { balanceConfig } = require("../../economy/balanceConfig");
+const {
+  DEFAULT_CONFIG: BALANCE_DEFAULT_CONFIG,
+} = require("../../economy/balanceConfig.defaults");
 
 // GET /shop/powerups — active coin-purchasable powerups, the user's coin
 // balance, and how many of each type the user already owns. Powerups are
@@ -55,6 +60,18 @@ function buildGetPowerupShopCatalog(deps = {}) {
       ownedByType[row.powerupType] = row.quantity ?? 0;
     }
 
+    // Item 9: canonical rarity per type, read from the live balance config (the
+    // same source powerupUpgrades uses). Read defensively — a not-yet-loaded
+    // config falls back to the shipped defaults so a rarity is always present.
+    let rarityByType;
+    try {
+      rarityByType =
+        (balanceConfig.getConfigSync && balanceConfig.getConfigSync().rarityByType) ||
+        BALANCE_DEFAULT_CONFIG.rarityByType;
+    } catch {
+      rarityByType = BALANCE_DEFAULT_CONFIG.rarityByType;
+    }
+
     // Layered gating (all additive — every other powerup is returned to all
     // clients):
     //   * IMPOSTER is DISABLED going forward: filtered out unconditionally so no
@@ -94,6 +111,10 @@ function buildGetPowerupShopCatalog(deps = {}) {
         priceCoins: item.priceCoins,
         powerupType: item.powerupType,
         ownedQuantity: ownedByType[item.powerupType] ?? 0,
+        // Item 9 — additive. Old clients ignore both; the frontend defaults a
+        // missing category to "utility" and a missing rarity to COMMON.
+        category: categoryForPowerup(item.powerupType),
+        rarity: rarityByType[item.powerupType] ?? "COMMON",
       })),
     };
   };

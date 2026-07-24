@@ -82,6 +82,26 @@ function buildGetRaceDiscoverySummary(dependencies = {}) {
       }
     }
 
+    // Item 2 (2026-07-24): "PUBLIC RACES (X)" should count the featured seeded
+    // daily/weekly races AND the featured Daily Dash brackets the viewer is NOT
+    // already in.
+    //
+    // The featured seeded RACES are ALREADY in getPublicRaceCount: they are ACTIVE
+    // public individual races (no tournamentId, not team), and getPublicRaceCount
+    // already excludes the ones the viewer has joined or that are full. Re-adding
+    // them here would DOUBLE-COUNT. So the only genuinely-missing featured content
+    // is the Daily Dash BRACKETS — Tournament rows, never part of the race count.
+    // We add the featured brackets the viewer is NOT enrolled in (myStatus is
+    // ALWAYS an explicit `null` on real not-enrolled entries, so `=== null` is
+    // exact). /races/public and getPublicRaceCount stay unchanged (the old-client
+    // fallback path). Only add when the base count resolved — otherwise the field
+    // is marked unresolved and the client keeps its last known value regardless.
+    if (resolved.publicRaceCount) {
+      publicRaceCount += featuredTournaments.filter(
+        (t) => t && t.myStatus === null
+      ).length;
+    }
+
     return {
       publicRaceCount,
       featuredRaces,

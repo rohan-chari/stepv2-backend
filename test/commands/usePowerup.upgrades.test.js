@@ -287,18 +287,19 @@ test("Lvl 3 Runner's High: 7h duration, 45 coins deducted", async () => {
   assert.equal(ctx.coinDeductions[0].amount, 45);
 });
 
-test("Lvl 3 Stealth Mode: 8h duration, 90 coins deducted", async () => {
+// Item 7 (2026-07-24): stealth durations nerfed to 60/75/90/120 min (L0..L3).
+test("Lvl 3 Stealth Mode: 2h (120m) duration", async () => {
   const ctx = makeDeps({ powerupType: "STEALTH_MODE" });
   const use = buildUsePowerup(ctx.deps);
   await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", upgradeLevel: 3 });
-  durationAssert(ctx.effectsCreated[0], 8);
+  durationAssert(ctx.effectsCreated[0], 2);
 });
 
-test("Lvl 2 Stealth Mode: 6.5h duration", async () => {
+test("Lvl 2 Stealth Mode: 1.5h (90m) duration", async () => {
   const ctx = makeDeps({ powerupType: "STEALTH_MODE" });
   const use = buildUsePowerup(ctx.deps);
   await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", upgradeLevel: 2 });
-  durationAssert(ctx.effectsCreated[0], 6.5);
+  durationAssert(ctx.effectsCreated[0], 1.5);
 });
 
 test("Lvl 3 Wrong Turn: 3h duration, 90 coins deducted", async () => {

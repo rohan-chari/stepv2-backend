@@ -197,24 +197,33 @@ describe("feed stealth filtering", () => {
     await request(server.baseUrl, "PUT", `/races/${raceId}/respond`, { body: { accept: true }, token: charlie.token });
     await request(server.baseUrl, "POST", `/races/${raceId}/start`, { token: alice.token });
 
+    // Alice is the (stealthed) leader. Item 5 (2026-07-24) now blocks a
+    // MANUALLY-aimed powerup against a stealthed player, so this test uses the
+    // AUTO-targeted Red Card (which still lands on a stealthed leader) to produce
+    // a feed event whose TARGET name must be redacted.
+    const aliceP = await prisma.raceParticipant.findFirst({ where: { raceId, userId: alice.userId } });
+    const bobP = await prisma.raceParticipant.findFirst({ where: { raceId, userId: bob.userId } });
+    await prisma.raceParticipant.update({ where: { id: aliceP.id }, data: { bonusSteps: 10000, totalSteps: 10000 } });
+    await prisma.raceParticipant.update({ where: { id: bobP.id }, data: { bonusSteps: 3000, totalSteps: 3000 } });
+
     // Alice goes stealth
     const stealth = await giveHeldPowerup(raceId, alice.userId, "STEALTH_MODE", 99901);
     await usePowerup(alice.token, raceId, stealth.id);
 
-    // Bob uses leg cramp on stealthed alice
-    const cramp = await giveHeldPowerup(raceId, bob.userId, "LEG_CRAMP", 99902);
-    await usePowerup(bob.token, raceId, cramp.id, alice.userId);
+    // Bob uses Red Card — auto-targets the (stealthed) leader, Alice.
+    const redCard = await giveHeldPowerup(raceId, bob.userId, "RED_CARD", 99902);
+    await usePowerup(bob.token, raceId, redCard.id);
 
     // Charlie views feed — alice's name as TARGET should be hidden
     const feedRes = await request(server.baseUrl, "GET", `/races/${raceId}/feed`, { token: charlie.token });
     const feedBody = await feedRes.json();
 
-    const crampEvent = feedBody.events.find(
-      (e) => e.eventType === "POWERUP_USED" && e.powerupType === "LEG_CRAMP"
+    const redCardEvent = feedBody.events.find(
+      (e) => e.eventType === "POWERUP_USED" && e.powerupType === "RED_CARD"
     );
-    assert.ok(crampEvent);
-    assert.ok(!crampEvent.description.includes("AliceStealth"), "stealthed target name should be hidden");
-    assert.ok(crampEvent.description.includes("???"), "should use ??? for stealthed target");
-    assert.ok(crampEvent.description.includes("BobbyWatcher"), "non-stealthed actor name should still show");
+    assert.ok(redCardEvent);
+    assert.ok(!redCardEvent.description.includes("AliceStealth"), "stealthed target name should be hidden");
+    assert.ok(redCardEvent.description.includes("???"), "should use ??? for stealthed target");
+    assert.ok(redCardEvent.description.includes("BobbyWatcher"), "non-stealthed actor name should still show");
   });
 });

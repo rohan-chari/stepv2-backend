@@ -2,12 +2,17 @@ const { prisma } = require("../../../db");
 const {
   EXTRA_SPIN_REWARD_KIND,
   COIN_REWARD_KIND,
+  POWERUP_UNLOCK_REWARD_KIND,
 } = require("../adRewards");
 
 const LOCAL_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 // custom_data for coin-reward watches: "coins:<local date>". Bare dates are
 // the shipped extra-spin format and must keep minting extra_daily_spin.
 const COIN_CUSTOM_DATA_RE = /^coins:(\d{4}-\d{2}-\d{2})$/;
+// Item 10 — custom_data for a powerup-unlock watch: "powerup_unlock:<userId>:<sku>".
+// The sku (a `POWERUP_<TYPE>` string) is stored on the grant's shopItemId so the
+// unlock endpoint can count verified watches for this user+sku.
+const POWERUP_UNLOCK_CUSTOM_DATA_RE = /^powerup_unlock:([^:]+):(.+)$/;
 
 // Mint an AdRewardGrant from a *verified* AdMob SSV callback (the route owns
 // signature verification; this command owns the ledger). Idempotent on
@@ -43,16 +48,26 @@ function buildGrantAdReward(dependencies = {}) {
       typeof customData === "string"
         ? customData.match(COIN_CUSTOM_DATA_RE)
         : null;
+    const unlockMatch =
+      typeof customData === "string"
+        ? customData.match(POWERUP_UNLOCK_CUSTOM_DATA_RE)
+        : null;
     const grantedDate = coinMatch
       ? coinMatch[1]
       : typeof customData === "string" && LOCAL_DATE_RE.test(customData)
         ? customData
         : serverDate;
-    const kind = coinMatch ? COIN_REWARD_KIND : rewardKind;
+    const kind = unlockMatch
+      ? POWERUP_UNLOCK_REWARD_KIND
+      : coinMatch
+        ? COIN_REWARD_KIND
+        : rewardKind;
+    // For a powerup-unlock watch, remember which sku it was attributed to.
+    const shopItemId = unlockMatch ? unlockMatch[2] : null;
 
     try {
       await db.adRewardGrant.create({
-        data: { userId, transactionId, adUnit, rewardKind: kind, grantedDate },
+        data: { userId, transactionId, adUnit, rewardKind: kind, grantedDate, shopItemId },
       });
     } catch (error) {
       if (error && error.code === "P2002") {

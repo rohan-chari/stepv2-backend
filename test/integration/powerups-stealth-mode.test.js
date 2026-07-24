@@ -381,7 +381,12 @@ describe("stealth mode", () => {
       assert.equal(aliceP.totalSteps, 7000);
     });
 
-    it("opponents can still use powerups on a stealthed user", async () => {
+    // Item 5 (2026-07-24 BUG FIX): a stealthed player can no longer be hit by a
+    // MANUALLY-AIMED (TARGETED) powerup. This test previously asserted the buggy
+    // behavior ("opponents can still use powerups on a stealthed user"); the spec
+    // deliberately reverses it. Auto-targeted Red Card / Pinecone still land — see
+    // powerups-stealth-redcard.test.js (kept green).
+    it("manually-aimed powerups cannot target a stealthed user (item 5)", async () => {
       const alice = await createUser("AliceStepBBB");
       const bob = await createUser("BobStepBBBBB");
       await makeFriends(alice, bob);
@@ -396,13 +401,14 @@ describe("stealth mode", () => {
       ]);
       await getProgress(alice.token, raceId); // update totalSteps
 
-      // Bob uses Leg Cramp on alice — stealth doesn't protect from attacks
+      // Bob tries Leg Cramp on stealthed alice — now rejected, item stays HELD.
       const cramp = await giveHeldPowerup(raceId, bob.userId, "LEG_CRAMP", 99902);
       const res = await usePowerup(bob.token, raceId, cramp.id, alice.userId);
-      assert.equal(res.status, 200);
+      assert.equal(res.status, 400);
+      assert.equal((await res.json()).code, "TARGET_STEALTHED");
 
-      const body = await res.json();
-      assert.ok(!body.result.blocked, "stealth should not block attacks");
+      const stillHeld = await prisma.racePowerup.findUnique({ where: { id: cramp.id } });
+      assert.equal(stillHeld.status, "HELD");
     });
   });
 

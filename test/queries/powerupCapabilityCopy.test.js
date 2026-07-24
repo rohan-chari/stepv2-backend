@@ -16,8 +16,9 @@ test("catalog copy and Quicksand visibility are request-capability scoped", asyn
   assert.match(legacy.powerups.find((p) => p.type === "HITCHHIKE").description, /raw steps/);
 
   const capable = await get(new Set(["powerups4", "stealth_runner_duration", "hitchhike_effective_steps"]));
-  assert.deepEqual(capable.powerups.find((p) => p.type === "STEALTH_MODE").upgradeTierLabels, ["Hide 3h", "Hide 4h", "Hide 5h", "Hide 7h"]);
-  assert.match(capable.powerups.find((p) => p.type === "STEALTH_MODE").description, /3 hours/);
+  // Item 7 (owner nerf 2026-07-24): stealth durations are now 60/75/90/120 min.
+  assert.deepEqual(capable.powerups.find((p) => p.type === "STEALTH_MODE").upgradeTierLabels, ["Hide 1h", "Hide 75m", "Hide 90m", "Hide 2h"]);
+  assert.match(capable.powerups.find((p) => p.type === "STEALTH_MODE").description, /1 hour/);
   assert.match(capable.powerups.find((p) => p.type === "HITCHHIKE").description, /boosts and reversals/i);
   assert.equal(capable.powerups.some((p) => p.type === "QUICKSAND"), true);
 });

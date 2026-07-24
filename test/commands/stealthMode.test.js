@@ -121,7 +121,8 @@ test("Stealth Mode creates an active effect on self", async () => {
   assert.equal(ctx.effectsCreated[0].sourceUserId, "user-1");
 });
 
-test("Stealth Mode effect lasts exactly 4 hours", async () => {
+// Item 7 (owner nerf 2026-07-24): base stealth is now 60 minutes.
+test("Stealth Mode effect lasts exactly 60 minutes", async () => {
   const ctx = makePowerupDeps();
   const use = buildUsePowerup(ctx.deps);
 
@@ -130,9 +131,9 @@ test("Stealth Mode effect lasts exactly 4 hours", async () => {
   const effect = ctx.effectsCreated[0];
   const startsAt = new Date(effect.startsAt).getTime();
   const expiresAt = new Date(effect.expiresAt).getTime();
-  const fourHoursMs = 4 * 60 * 60 * 1000;
+  const sixtyMinutesMs = 60 * 60 * 1000;
 
-  assert.equal(expiresAt - startsAt, fourHoursMs);
+  assert.equal(expiresAt - startsAt, sixtyMinutesMs);
 });
 
 test("Stealth Mode does not modify any step counts", async () => {

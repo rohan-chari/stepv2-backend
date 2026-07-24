@@ -29,6 +29,7 @@ Object.assign(module.exports, require("./commands/discardPowerup"));
 Object.assign(module.exports, require("./commands/redeemPowerupToRace"));
 Object.assign(module.exports, require("./commands/grantPowerupToUser"));
 Object.assign(module.exports, require("./commands/purchasePowerupItem"));
+Object.assign(module.exports, require("./commands/unlockPowerupWithAds"));
 Object.assign(module.exports, require("./commands/expireEffects"));
 Object.assign(module.exports, require("./commands/openMysteryBox"));
 Object.assign(module.exports, require("./commands/openMysteryBoxBatch"));

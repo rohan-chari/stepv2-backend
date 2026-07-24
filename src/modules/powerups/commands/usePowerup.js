@@ -33,6 +33,12 @@ const { awardCoins: defaultAwardCoins } = require("../../../shared/economy/award
 const {
   DEFAULT_CONFIG: BALANCE_DEFAULT_CONFIG,
 } = require("../../economy/balanceConfig.defaults");
+const {
+  signedMultiplierForEffects,
+} = require("../../races/services/effectiveStepScoring");
+const {
+  evaluateHighMultiplierAlert,
+} = require("../../races/services/highMultiplierAlert");
 
 // SIGNAL_JAMMER is a single-target attack (store-only): it is OFFENSIVE +
 // TARGETED so the shared targeting validation, finished-target rejection, and
@@ -257,20 +263,31 @@ function isOpponentInflicted(effect, userId) {
   return effect.sourceUserId !== effect.targetUserId;
 }
 
-// Red Card removes 5% of the leader's steps (nerfed from 10% — heavy-player
-// complaints). Server-side effect, so old clients apply the new value too.
-const RED_CARD_PERCENT = 0.05;
+// Red Card removes 10% of the leader's steps (restored from the 5% nerf — owner
+// decision 2026-07-24). Server-side effect, so old clients apply the new value
+// too. Drop odds (balanceConfig RED_CARD) are intentionally left unchanged.
+const RED_CARD_PERCENT = 0.10;
 const SECOND_WIND_MIN = 500;
 const SECOND_WIND_MAX = 5000;
 const SECOND_WIND_FACTOR = 0.25;
 
 class PowerupUseError extends Error {
-  constructor(message, statusCode, code) {
+  constructor(message, statusCode, code, options) {
     super(message);
     this.name = "PowerupUseError";
     if (statusCode) this.statusCode = statusCode;
     // Optional machine-readable code (INVALID_TARGET). Additive.
     if (code) this.code = code;
+    // Item 12 scope: when true, a rejected REDEEMED powerup is NOT refunded to
+    // the general inventory — it stays HELD in the race. Used for TRANSIENT
+    // "not right now / already-active" guards (a jammed caster, your own storm
+    // already active, a target already jammed), where the powerup is still
+    // legitimately usable in THIS race once the condition clears. This
+    // specifically preserves the owner-confirmed jam design (2026-07-21 B3:
+    // jammed players keep their powerup). Genuine "can't be used here"
+    // rejections (TARGET_STEALTHED, invalid target, Red-Card-while-leading,
+    // capability gates) leave it false, so item 12 hands the item back.
+    if (options && options.retainHeld) this.retainHeld = true;
   }
 }
 
@@ -598,6 +615,44 @@ async function applyPotionEnemyAttack(a) {
   return true;
 }
 
+// Item 12 (BUG): return a REJECTED redeemed powerup to the general inventory
+// instead of stranding it HELD in this race. Called only after usePowerup throws
+// a PowerupUseError — which always happens BEFORE the item is marked USED, so
+// the row is still HELD here. Refunds only REDEEMED powerups (rarity == null &&
+// earnedAtSteps == null, per redeemPowerupToRace.js) — box-earned ones (rarity
+// != null) are legitimately race-bound and stay HELD. Atomic + conditional on
+// still-HELD so a concurrent consume can never double-refund. Best-effort at the
+// call site: a refund failure must never mask the original rejection.
+async function refundRedeemedOnRejection({
+  db,
+  powerupModel,
+  userId,
+  raceId,
+  powerupId,
+}) {
+  if (typeof db?.$transaction !== "function") return;
+  const powerup = await powerupModel.findById(powerupId);
+  if (!powerup) return;
+  if (powerup.userId !== userId || powerup.raceId !== raceId) return;
+  if (powerup.status !== "HELD") return;
+  const isRedeemed = powerup.rarity == null && powerup.earnedAtSteps == null;
+  if (!isRedeemed) return;
+
+  await db.$transaction(async (tx) => {
+    // Only the caller that flips HELD -> DISCARDED performs the hand-back.
+    const discarded = await tx.racePowerup.updateMany({
+      where: { id: powerupId, status: "HELD" },
+      data: { status: "DISCARDED" },
+    });
+    if (discarded.count !== 1) return;
+    await tx.userPowerupItem.upsert({
+      where: { userId_powerupType: { userId, powerupType: powerup.type } },
+      create: { userId, powerupType: powerup.type, quantity: 1 },
+      update: { quantity: { increment: 1 } },
+    });
+  });
+}
+
 function buildUsePowerup(dependencies = {}) {
   const db = dependencies.prisma || defaultPrisma;
   const hasInjectedDeps = Object.keys(dependencies).length > 0;
@@ -633,7 +688,7 @@ function buildUsePowerup(dependencies = {}) {
   // reader (enabled unless IMPOSTER_ENABLED="false").
   const imposterEnabled = dependencies.imposterEnabled || defaultImposterEnabled;
 
-  return async function usePowerup({
+  const usePowerupCore = async function usePowerup({
     userId,
     raceId,
     powerupId,
@@ -720,7 +775,9 @@ function buildUsePowerup(dependencies = {}) {
       const remainingMin = Math.max(1, Math.ceil(remainingMs / (60 * 1000)));
       throw new PowerupUseError(
         `Your powerups are jammed for another ${remainingMin}m!`,
-        409
+        409,
+        undefined,
+        { retainHeld: true } // transient jam — keep the powerup for later (item 12 scope)
       );
     }
 
@@ -1163,7 +1220,12 @@ function buildUsePowerup(dependencies = {}) {
         (e) => e.type === "RAINSTORM" && e.sourceUserId === userId
       );
       if (activeStorm) {
-        throw new PowerupUseError("Your Rainstorm is already active in this race", 400);
+        throw new PowerupUseError(
+          "Your Rainstorm is already active in this race",
+          400,
+          undefined,
+          { retainHeld: true } // transient self-limit — keep for later (item 12 scope)
+        );
       }
       const otherRunners = acceptedParticipants.filter(
         (p) => p.userId !== userId && isAliveTarget(p) && isEnemy(p)
@@ -1310,6 +1372,34 @@ function buildUsePowerup(dependencies = {}) {
       }
     }
 
+    // Item 5 (BUG): a stealthed player must not be targetable by ANY
+    // manually-aimed powerup. Generalizes the old SNEAKY_SWAP-only guard to the
+    // whole TARGETED_TYPES set (the caller-supplies-targetUserId powerups). This
+    // is the single server-side source of truth — it covers hand-crafted
+    // requests and clients defeated by Detour (which forces stealthed:false on
+    // the leaderboard). Runs BEFORE any coin deduction / mark-USED / effect
+    // creation, so the item stays HELD on rejection (and is refunded to general
+    // inventory by the item-12 unwind if it was a redeemed one). Auto-targeted
+    // RED_CARD / PINECONE_TOSS are NOT in TARGETED_TYPES, so a stealthed leader
+    // can still be red-carded (powerups-stealth-redcard.test.js stays green).
+    if (TARGETED_TYPES.includes(type)) {
+      const targetedParticipant =
+        targetParticipant || imposterTargetParticipant || bountyTargetParticipant;
+      if (targetedParticipant) {
+        const targetStealth = await effectModel.findActiveByTypeForParticipant(
+          targetedParticipant.id,
+          "STEALTH_MODE"
+        );
+        if (targetStealth) {
+          throw new PowerupUseError(
+            "You cannot target a stealthed player",
+            400,
+            "TARGET_STEALTHED"
+          );
+        }
+      }
+    }
+
     let targetDisplayName =
       targetParticipant?.user?.displayName ||
       imposterTargetParticipant?.user?.displayName ||
@@ -1341,7 +1431,12 @@ function buildUsePowerup(dependencies = {}) {
         "SIGNAL_JAMMER"
       );
       if (existingJam && existingJam.expiresAt && new Date(existingJam.expiresAt) > now()) {
-        throw new PowerupUseError("That player is already jammed", 409);
+        throw new PowerupUseError(
+          "That player is already jammed",
+          409,
+          undefined,
+          { retainHeld: true } // transient target-limit — keep for later (item 12 scope)
+        );
       }
     }
 
@@ -1548,13 +1643,8 @@ function buildUsePowerup(dependencies = {}) {
     }
 
     if (type === "SNEAKY_SWAP" && targetParticipant) {
-      const targetStealth = await effectModel.findActiveByTypeForParticipant(
-        targetParticipant.id,
-        "STEALTH_MODE"
-      );
-      if (targetStealth) {
-        throw new PowerupUseError("You cannot target a stealthed player", 400);
-      }
+      // Stealth-target rejection is handled by the generic TARGETED_TYPES guard
+      // above (item 5), so it is intentionally not repeated here.
       // Steal semantics: take one RANDOM stealable powerup from the target;
       // the attacker gives up nothing. Old app versions still send
       // swapOfferedPowerupId/swapRequestedPowerupId from the retired
@@ -2439,9 +2529,11 @@ function buildUsePowerup(dependencies = {}) {
       }
 
       case "STEALTH_MODE": {
-        const stealthDurationMs = requestHasFeature(clientFeatures, "stealth_runner_duration")
-          ? upgradedDuration("RUNNERS_HIGH", upgradeLevel)
-          : upgradedDuration("STEALTH_MODE", upgradeLevel);
+        // Item 7: BOTH client cohorts now use the STEALTH_MODE ladder
+        // (60/75/90/120 min). Modern clients (`stealth_runner_duration`) used to
+        // borrow the RUNNERS_HIGH ladder for a longer stealth — that substitution
+        // is removed so the nerf is uniform across every app version.
+        const stealthDurationMs = upgradedDuration("STEALTH_MODE", upgradeLevel);
         const effect = await effectModel.create({
           raceId,
           targetParticipantId: myParticipant.id,
@@ -3028,7 +3120,57 @@ function buildUsePowerup(dependencies = {}) {
     await resolveRaceState({ raceId, timeZone });
     await syncRacePowerupState({ raceId, userId });
 
+    // §6b — a self-buff is the common cause of a high-multiplier spike. Recompute
+    // the CASTER's current (buff-only) multiplier and run the shared evaluator so
+    // the "🔥 stacked at Nx" push fires immediately on the cast (the progress
+    // recompute path additionally folds in global events and handles re-arm).
+    // Best-effort: a push-eval failure must never fail the powerup use.
+    try {
+      if (race.powerupsEnabled) {
+        const freshCaster = await participantModel.findByRaceAndUser(raceId, userId);
+        if (freshCaster && !freshCaster.finishedAt && !freshCaster.forfeitedAt) {
+          const casterEffects = await effectModel.findActiveForParticipant(freshCaster.id);
+          const casterMult = signedMultiplierForEffects(casterEffects, now().getTime());
+          const others = acceptedParticipants.filter((p) => p.userId !== userId);
+          await evaluateHighMultiplierAlert({
+            participant: freshCaster,
+            currentMultiplier: casterMult,
+            race,
+            otherParticipants: others,
+            now,
+          });
+        }
+      }
+    } catch (err) {
+      console.error("high-multiplier alert (usePowerup) failed:", err);
+    }
+
     return result;
+  };
+
+  // Item 12 wrapper: on a rejected use, hand a REDEEMED powerup back to the
+  // general inventory (see refundRedeemedOnRejection). The core always throws
+  // before mark-USED, so the row is still HELD and safe to refund. Best-effort —
+  // never let a refund error replace the original PowerupUseError.
+  return async function usePowerup(args) {
+    try {
+      return await usePowerupCore(args);
+    } catch (err) {
+      if (err instanceof PowerupUseError && !err.retainHeld) {
+        try {
+          await refundRedeemedOnRejection({
+            db,
+            powerupModel,
+            userId: args.userId,
+            raceId: args.raceId,
+            powerupId: args.powerupId,
+          });
+        } catch (refundErr) {
+          console.error("usePowerup redeemed-refund failed:", refundErr);
+        }
+      }
+      throw err;
+    }
   };
 }
 

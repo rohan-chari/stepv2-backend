@@ -410,4 +410,42 @@ async function computeEffectModifiers(effects, rawTotal, userId, stepSampleModel
   return { frozenSteps, buffedSteps, reversedSteps, globalBoostedSteps, leechTransfers };
 }
 
-module.exports = { computeEffectModifiers };
+// Item 6a: build the same `groups` shape computeEffectModifiers uses (including
+// umbrella-adjusted rainstorms) from a flat effect list, then return the SIGNED
+// effective multiplier at `nowMs` via the single source of truth. Pure, no DB —
+// so display (getRaceProgress) can attach a per-participant `currentMultiplier`
+// that agrees with settlement by construction. Semantics: >1 buffed, 1 neutral,
+// 0 frozen, <0 reversed. The caller folds in any active global-event multiplier.
+function signedMultiplierForEffects(effects = [], nowMs = Date.now()) {
+  const legCramps = effects.filter((e) => e.type === "LEG_CRAMP" || e.type === "QUICKSAND");
+  const runnersHighs = effects.filter((e) => e.type === "RUNNERS_HIGH");
+  const wrongTurns = effects.filter((e) => e.type === "WRONG_TURN");
+  const campfires = effects.filter((e) => e.type === "CAMPFIRE_REST");
+  const rainstorms = effects.filter((e) => e.type === "RAINSTORM");
+  const uprisings = effects.filter((e) => e.type === "UPRISING");
+  const rallyFlags = effects.filter((e) => e.type === "RALLY_FLAG");
+  const coinFlips = effects.filter((e) => e.type === "COIN_FLIP");
+  const coinFlipWins = coinFlips.filter((e) => Number((e.metadata || {}).multiplier) > 1);
+  const coinFlipLoses = coinFlips.filter((e) => {
+    const m = Number((e.metadata || {}).multiplier);
+    return Number.isFinite(m) && m < 1;
+  });
+  const ghostPeppers = effects.filter((e) => e.type === "GHOST_PEPPER");
+  const umbrellas = effects.filter((e) => e.type === "UMBRELLA");
+
+  const groups = {
+    legCramps,
+    runnersHighs,
+    wrongTurns,
+    campfires,
+    rainstorms: umbrellaAdjustedRainstorms(rainstorms, umbrellas, nowMs),
+    uprisings,
+    rallyFlags,
+    coinFlipWins,
+    coinFlipLoses,
+    ghostPeppers,
+  };
+  return signedMultiplierAt(nowMs, groups);
+}
+
+module.exports = { computeEffectModifiers, signedMultiplierForEffects };

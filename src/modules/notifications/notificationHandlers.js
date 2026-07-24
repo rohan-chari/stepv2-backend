@@ -1019,6 +1019,80 @@ function registerNotificationHandlers(dependencies = {}) {
     }
   });
 
+  // §6b — HIGH_MULTIPLIER_ALERT. When a racer's stacked (event-inclusive)
+  // multiplier crosses above the threshold, the evaluator emits ONE event
+  // carrying every OTHER active racer as a recipient. We send each a visible
+  // alert. Title/body are always populated so ANY app version renders it; the
+  // deep-link route is a no-op on clients that don't know the type (their
+  // _routeFromType returns null), exactly like PLACEMENT_CHANGED.
+  events.on("HIGH_MULTIPLIER_ALERT", async (data) => {
+    try {
+      const { raceId, raceName, actorUserId, actorName, multiplier, recipientUserIds } =
+        data || {};
+      if (!Array.isArray(recipientUserIds) || recipientUserIds.length === 0) return;
+
+      const name = actorName || (await findActorName(actorUserId));
+      const mult = Number.isFinite(Number(multiplier)) ? Number(multiplier) : null;
+      const title = "🔥 Someone's heating up";
+      const body =
+        `${name}'s multiplier is stacked at ${mult != null ? `${mult}x` : "a high multiplier"}` +
+        ` — slow them down or catch up!`;
+      const payload = {
+        type: "HIGH_MULTIPLIER_ALERT",
+        route: "race_detail",
+        params: { raceId },
+        multiplier: mult,
+      };
+
+      for (const recipientUserId of recipientUserIds) {
+        if (!recipientUserId || recipientUserId === actorUserId) continue;
+        const tokens = await deviceTokenModel.findByUserId(recipientUserId);
+        if (!tokens || tokens.length === 0) continue;
+        for (const tokenRecord of tokens) {
+          try {
+            const result = await pushServiceFor(tokenRecord).sendNotification({
+              deviceToken: tokenRecord.token,
+              title,
+              body,
+              payload,
+              collapseId: `himult_${raceId}_${actorUserId}`,
+            });
+            if (!result.success && !result.unregistered) {
+              logger.warn("HIGH_MULTIPLIER_ALERT push failed", {
+                raceId,
+                recipientUserId,
+                deviceTokenSuffix: deviceTokenSuffix(tokenRecord.token),
+                statusCode: result.statusCode,
+                reason: result.reason,
+              });
+            }
+            if (result.unregistered) {
+              await deviceTokenModel.deleteToken({ userId: recipientUserId, token: tokenRecord.token });
+            }
+          } catch (error) {
+            logger.error("HIGH_MULTIPLIER_ALERT push threw", {
+              raceId,
+              recipientUserId,
+              deviceTokenSuffix: deviceTokenSuffix(tokenRecord.token),
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+        await recordNotification({
+          userId: recipientUserId,
+          type: "HIGH_MULTIPLIER_ALERT",
+          title,
+          body,
+          raceId,
+        });
+      }
+    } catch (error) {
+      logger.error("HIGH_MULTIPLIER_ALERT handler failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
   // ── Tournament (bracket) pushes (§8) ──────────────────────────────────────
   // All additive TOURNAMENT_* types. Old apps show the alert and no-op the deep
   // link (their route resolver returns null for unknown types). Each event is

@@ -40,7 +40,10 @@ const {
   collectRaceHitchhikeCopies,
   applyHitchhikeCopies,
 } = require("../../powerups/hitchhikeCopies");
-const { computeEffectModifiers } = require("../services/effectiveStepScoring");
+const { computeEffectModifiers, signedMultiplierForEffects } = require("../services/effectiveStepScoring");
+const {
+  evaluateHighMultiplierAlert,
+} = require("../services/highMultiplierAlert");
 
 // Additive tournament-matchup context for a matchup race's progress payload
 // (null on ordinary races). The frontend banner reads these defensively.
@@ -408,7 +411,14 @@ function buildGetRaceProgress(deps = {}) {
         // Pre-leech total: everything EXCEPT the leech transfer, floored at 0.
         const preLeechTotal = Math.max(0, baseAdjusted - frozenSteps + buffedSteps - 2 * reversedSteps + (globalBoostedSteps || 0) + (race.powerupsEnabled ? (participant.bonusSteps || 0) : 0));
 
-        return { participant, frozen: false, preLeechTotal, leechTransfers };
+        // §6a — the SIGNED effective multiplier right now (buff stacking; the
+        // global-event fold is applied by the caller once). LEECH is a transfer,
+        // not a rate, so it is correctly ignored by signedMultiplierForEffects.
+        const currentMultiplierRaw = race.powerupsEnabled
+          ? signedMultiplierForEffects(allEffects, now().getTime())
+          : 1;
+
+        return { participant, frozen: false, preLeechTotal, leechTransfers, currentMultiplierRaw };
       })
     );
 
@@ -707,8 +717,57 @@ function buildGetRaceProgress(deps = {}) {
         collectRaceIllusions(activeEffects, userId, nowTime.getTime()));
     }
 
+    // §6a — per-participant CURRENT MULTIPLIER (additive; old clients ignore it).
+    // Fold in any active global 2x event by multiplying the MAGNITUDE (sign
+    // preserved, since the event multiplier is > 0): pepper(3)+RH(2)=5, ×2 = 10;
+    // a frozen 0 stays 0; a wrong-turned −5 becomes −10. Neutral 1 under an event
+    // reads as 2. LEECH (a transfer) never affects this.
+    const nowMsForMult = nowTime.getTime();
+    const activeEventForMult = globalEvents.find((ev) => {
+      const s = new Date(ev.startsAt).getTime();
+      const e = new Date(ev.endsAt).getTime();
+      return s <= nowMsForMult && nowMsForMult < e && Number(ev.multiplier) > 1;
+    });
+    const eventMult = activeEventForMult ? Number(activeEventForMult.multiplier) : 1;
+    const multiplierByParticipantId = new Map();
+    for (const e of preLeech) {
+      const raw = e.frozen ? 1 : (e.currentMultiplierRaw ?? 1);
+      multiplierByParticipantId.set(e.participant.id, raw * eventMult);
+    }
+
+    // §6b — evaluate the high-multiplier alert for every participant. This is the
+    // recompute/re-arm path: it catches event-driven crossings and clears the flag
+    // as buffs decay. The evaluator claims the emit atomically, so concurrent
+    // viewers' polls can't double-fire. Best-effort — a push-eval failure must
+    // never break the progress payload.
+    if (race.powerupsEnabled) {
+      const activeForAlert = acceptedParticipants.filter(
+        (p) => !p.finishedAt && !p.forfeitedAt
+      );
+      for (const p of acceptedParticipants) {
+        try {
+          await evaluateHighMultiplierAlert({
+            participant: p,
+            currentMultiplier: multiplierByParticipantId.get(p.id) ?? 1,
+            race,
+            otherParticipants: activeForAlert,
+            now,
+          });
+        } catch (err) {
+          console.error("high-multiplier alert eval failed:", err);
+        }
+      }
+    }
+
     const leaderboard = stepTotals
       .map(({ participant, totalSteps }) => {
+        // §6a — a masked row (detoured/stealthed opponent) must NOT leak the
+        // player's multiplier (it would reveal a hidden buff/freeze), exactly like
+        // its steps are nulled. currentMultiplier is null for masked rows, else
+        // the event-inclusive signed value (1 => neutral; the client renders
+        // nothing at 1/absent).
+        const rawCurrentMultiplier =
+          multiplierByParticipantId.get(participant.id) ?? 1;
         // Detour Sign: viewer sees ALL participants as ???
         if (viewerIsDetoured) {
           return {
@@ -719,6 +778,7 @@ function buildGetRaceProgress(deps = {}) {
             totalSteps: null,
             finishedAt: participant.finishedAt,
             stealthed: false,
+            currentMultiplier: null,
             // Team identity is structural (column grouping), never masked.
             team: participant.team ?? null,
             forfeitedAt: participant.forfeitedAt ?? null,
@@ -737,6 +797,7 @@ function buildGetRaceProgress(deps = {}) {
           totalSteps: isStealthed ? null : totalSteps,
           finishedAt: participant.finishedAt,
           stealthed: isStealthed,
+          currentMultiplier: isStealthed ? null : rawCurrentMultiplier,
           // Team races (TR-656): stealth masks the individual plank only; the
           // side (and the honest team totals below) stay visible.
           team: participant.team ?? null,

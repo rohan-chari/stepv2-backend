@@ -1024,6 +1024,13 @@ model RaceParticipant {
   // baseline not yet seeded. Additive + nullable; never returned by any API
   // response, so already-shipped app versions are unaffected.
   lastNotifiedPlacement Int?                  @map("last_notified_placement")
+  // High-multiplier alert dedup (item 6b): the moment we last emitted a
+  // HIGH_MULTIPLIER_ALERT because this participant's current (stacked,
+  // event-inclusive) multiplier crossed above the threshold. Set on emit,
+  // CLEARED when the multiplier drops back to <= threshold so the alert re-arms
+  // for the next spike. Additive + nullable; never returned by any API response,
+  // so already-shipped app versions are unaffected.
+  highMultiplierNotifiedAt DateTime?          @map("high_multiplier_notified_at")
   finishedAt            DateTime?             @map("finished_at")
   finishTotalSteps      Int?                  @map("finish_total_steps")
   joinedAt              DateTime              @default(now()) @map("joined_at")
