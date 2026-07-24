@@ -29,9 +29,9 @@ const POWERUP_COPY_SEED = [
   {
     powerupType: "LEG_CRAMP",
     name: "Leg Cramp",
-    description: "Freeze a rival's steps for 2 hours",
+    description: "Freeze a rival's steps for 1 hour",
     shortDescription: "Steps frozen",
-    upgradeTierLabels: ["Freeze 2h", "Freeze 3h", "Freeze 4h", "Freeze 6h"],
+    upgradeTierLabels: ["Freeze 1h", "Freeze 2h", "Freeze 3h", "Freeze 4h"],
   },
   {
     powerupType: "RED_CARD",
@@ -74,9 +74,9 @@ const POWERUP_COPY_SEED = [
   {
     powerupType: "RUNNERS_HIGH",
     name: "Runner's High",
-    description: "2x steps for 3 hours",
+    description: "2x steps for 1 hour",
     shortDescription: "2x steps",
-    upgradeTierLabels: ["2x for 3h", "2x for 4h", "2x for 5h", "2x for 7h"],
+    upgradeTierLabels: ["2x for 1h", "2x for 2h", "2x for 3h", "2x for 4h"],
   },
   {
     powerupType: "SECOND_WIND",
@@ -89,9 +89,9 @@ const POWERUP_COPY_SEED = [
     powerupType: "STEALTH_MODE",
     name: "Stealth Mode",
     description:
-      "Hide your name, steps, and position on the track for 4 hours",
+      "Hide your name, steps, and position on the track for 1 hour",
     shortDescription: "Progress hidden",
-    upgradeTierLabels: ["Hide 4h", "Hide 5h", "Hide 6.5h", "Hide 8h"],
+    upgradeTierLabels: ["Hide 1h", "Hide 2h", "Hide 3h", "Hide 4h"],
   },
   {
     powerupType: "WRONG_TURN",
@@ -100,9 +100,9 @@ const POWERUP_COPY_SEED = [
     shortDescription: "Steps reversed",
     upgradeTierLabels: [
       "Reverse 1h",
-      "Reverse 1.5h",
       "Reverse 2h",
       "Reverse 3h",
+      "Reverse 4h",
     ],
   },
   {
@@ -127,13 +127,13 @@ const POWERUP_COPY_SEED = [
   {
     powerupType: "DETOUR_SIGN",
     name: "Detour Sign",
-    description: "Hide the entire leaderboard from a rival for 3 hours",
+    description: "Hide the entire leaderboard from a rival for 1 hour",
     shortDescription: "Leaderboard hidden",
     upgradeTierLabels: [
+      "Hide leaderboard 1h",
+      "Hide leaderboard 2h",
       "Hide leaderboard 3h",
       "Hide leaderboard 4h",
-      "Hide leaderboard 5h",
-      "Hide leaderboard 7h",
     ],
   },
   {
@@ -177,7 +177,7 @@ const POWERUP_COPY_SEED = [
     name: "Pocket Watch",
     description: "Extend all active timed buffs",
     shortDescription: "Buffs extended",
-    upgradeTierLabels: ["Extend 1h", "Extend 1.5h", "Extend 2h", "Extend 3h"],
+    upgradeTierLabels: ["Extend 1h", "Extend 2h", "Extend 3h", "Extend 4h"],
   },
   {
     powerupType: "TRAIL_MINE",
@@ -287,7 +287,7 @@ const POWERUP_COPY_SEED = [
   {
     powerupType: "QUICKSAND",
     name: "Quicksand",
-    description: "Freeze the steps of up to three rivals for 2 hours. Compression Socks block each target independently; Mirrors can't reflect it",
+    description: "Freeze the steps of up to three rivals for 1 hour. Compression Socks block each target independently; Mirrors can't reflect it",
     shortDescription: "Steps frozen",
     upgradeTierLabels: [],
   },
@@ -297,7 +297,7 @@ const POWERUP_COPY_SEED = [
     powerupType: "UPRISING",
     name: "Uprising",
     description:
-      "While you're in the bottom half of the standings, you and every racer below the midpoint get 2x steps for 2 hours",
+      "While you're in the bottom half of the standings, you and every racer below the midpoint get 2x steps for 1 hour",
     shortDescription: "2x steps",
     upgradeTierLabels: [],
   },
@@ -361,7 +361,7 @@ const POWERUP_COPY_SEED = [
     powerupType: "DRILL_SERGEANT",
     name: "Drill Sergeant",
     description:
-      "Dare a rival to hit 3,000 steps in 2 hours or lose 1,500. Mirrors reflect it; Compression Socks block it",
+      "Dare a rival to hit 3,000 steps in 1 hour or lose 1,500. Mirrors reflect it; Compression Socks block it",
     shortDescription: "Dare or lose steps",
     upgradeTierLabels: [],
   },

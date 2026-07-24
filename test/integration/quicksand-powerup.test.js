@@ -52,7 +52,7 @@ describe("Quicksand real HTTP contract", () => {
     const used = await request(server.baseUrl, "POST", `/races/${raceId}/powerups/${powerupId}/use`, { token: users[0].token, headers: P4, body: { targetUserIds: ids } });
     assert.equal(used.status, 200);
     const result = (await used.json()).result;
-    assert.equal(result.outcome, "PARTIAL"); assert.equal(result.durationMs, 7200000);
+    assert.equal(result.outcome, "PARTIAL"); assert.equal(result.durationMs, 3600000);
     assert.deepEqual(result.targetResults.map((r) => [r.targetUserId, r.outcome]), [[ids[0], "APPLIED"], [ids[1], "BLOCKED"], [ids[2], "APPLIED"]]);
   });
 

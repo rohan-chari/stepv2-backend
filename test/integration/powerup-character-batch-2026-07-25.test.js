@@ -1,0 +1,451 @@
+// Backend batch 2026-07-25 (§3): Drill Sergeant sleep blocker, powerup duration
+// standardization, tournament 2-day round minimum, character powers (Bara herd
+// bonus + Corgi zoomies), and the powerups-disabled hard gate. Real HTTP + real
+// DB (local integration DB only).
+const assert = require("node:assert/strict");
+const { describe, it, before, beforeEach, after } = require("node:test");
+const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
+
+let server;
+let nextAppleId = 0;
+const FEATS = { "X-Client-Features": "characters,powerups3,powerups4,powerups5" };
+const TOURN_FEATS = { "X-Client-Features": "tournaments" };
+
+async function createUser(displayName) {
+  const appleId = `apple-pcb-${++nextAppleId}`;
+  const res = await request(server.baseUrl, "POST", "/auth/apple", {
+    body: { identityToken: appleId },
+  });
+  const body = await res.json();
+  if (displayName) {
+    await request(server.baseUrl, "PUT", "/auth/me/display-name", {
+      body: { displayName },
+      token: body.sessionToken,
+    });
+  }
+  return { userId: body.user.id, token: body.sessionToken };
+}
+
+async function makeFriends(a, b) {
+  const sendRes = await request(server.baseUrl, "POST", "/friends/request", {
+    body: { addresseeId: b.userId },
+    token: a.token,
+  });
+  const fId = (await sendRes.json()).friendship.id;
+  await request(server.baseUrl, "PUT", `/friends/request/${fId}`, {
+    body: { accept: true },
+    token: b.token,
+  });
+}
+
+async function createActiveRace(alice, others, { powerupsEnabled = true } = {}) {
+  const createRes = await request(server.baseUrl, "POST", "/races", {
+    body: {
+      name: "Batch Race",
+      targetSteps: 500000,
+      maxDurationDays: 7,
+      powerupsEnabled,
+      powerupStepInterval: powerupsEnabled ? 5000 : undefined,
+    },
+    token: alice.token,
+  });
+  const raceId = (await createRes.json()).race.id;
+  await request(server.baseUrl, "POST", `/races/${raceId}/invite`, {
+    body: { inviteeIds: others.map((o) => o.userId) },
+    token: alice.token,
+  });
+  for (const o of others) {
+    await request(server.baseUrl, "PUT", `/races/${raceId}/respond`, {
+      body: { accept: true },
+      token: o.token,
+    });
+  }
+  await request(server.baseUrl, "POST", `/races/${raceId}/start`, { token: alice.token });
+  return raceId;
+}
+
+async function backdate(raceId, startTime) {
+  await prisma.race.update({ where: { id: raceId }, data: { startedAt: startTime } });
+  await prisma.raceParticipant.updateMany({ where: { raceId }, data: { joinedAt: startTime } });
+}
+
+async function giveHeld(raceId, userId, type, earnedAtSteps = 4000) {
+  const p = await prisma.raceParticipant.findFirst({ where: { raceId, userId } });
+  return prisma.racePowerup.create({
+    data: { raceId, participantId: p.id, userId, type, rarity: "COMMON", status: "HELD", earnedAtSteps },
+  });
+}
+
+async function usePowerup(token, raceId, powerupId, body = {}) {
+  return request(server.baseUrl, "POST", `/races/${raceId}/powerups/${powerupId}/use`, {
+    body, token, headers: FEATS,
+  });
+}
+
+async function getProgress(token, raceId) {
+  const res = await request(server.baseUrl, "GET", `/races/${raceId}/progress`, {
+    token, headers: FEATS,
+  });
+  return (await res.json()).progress;
+}
+
+function findP(progress, userId) {
+  return progress.participants.find((p) => p.userId === userId);
+}
+
+async function recordSamples(token, samples) {
+  return request(server.baseUrl, "POST", "/steps/samples", { body: { samples }, token });
+}
+
+function hoursAgo(h) {
+  return new Date(Date.now() - h * 60 * 60 * 1000);
+}
+
+// A fixed-offset Etc/GMT zone whose current local hour equals `targetHour`.
+// Etc/GMT sign is inverted (Etc/GMT-5 == UTC+5), and these zones never observe
+// DST, so the target's wall-clock is deterministic regardless of when the test runs.
+function zoneForLocalHour(targetHour) {
+  const utcHour = new Date().getUTCHours();
+  let offset = (((targetHour - utcHour) % 24) + 24) % 24; // 0..23
+  if (offset > 12) offset -= 24; // -11..12
+  if (offset === 0) return "UTC";
+  return offset > 0 ? `Etc/GMT-${offset}` : `Etc/GMT+${-offset}`;
+}
+
+async function setTimezone(userId, tz) {
+  await prisma.user.update({ where: { id: userId }, data: { timezone: tz } });
+}
+
+async function equipCharacter(user, assetKey) {
+  const item = await prisma.shopItem.create({
+    data: {
+      sku: `char-${assetKey}-${user.userId}`,
+      name: assetKey,
+      description: assetKey,
+      slot: "CHARACTER",
+      priceCoins: 0,
+      assetKey,
+      active: true,
+      testOnly: false,
+    },
+  });
+  await prisma.userShopItem.create({ data: { userId: user.userId, shopItemId: item.id } });
+  await prisma.userEquippedAccessory.create({
+    data: { userId: user.userId, shopItemId: item.id, slot: "CHARACTER" },
+  });
+}
+
+describe("Powerup & Character batch 2026-07-25", () => {
+  before(async () => {
+    server = await getSharedServer();
+  });
+  beforeEach(async () => {
+    await cleanDatabase();
+    nextAppleId = 0;
+    delete process.env.CHARACTER_POWERS_ENABLED;
+  });
+  after(() => {
+    delete process.env.CHARACTER_POWERS_ENABLED;
+  });
+
+  // ── §3.7 powerups-disabled hard gate ───────────────────────────────────────
+  describe("§3.7 powerups-disabled hard gate", () => {
+    it("rejects redeem with 400 POWERUPS_DISABLED and does not spend inventory", async () => {
+      const alice = await createUser("DisA");
+      const bob = await createUser("DisB");
+      await makeFriends(alice, bob);
+      const raceId = await createActiveRace(alice, [bob], { powerupsEnabled: false });
+
+      await prisma.userPowerupItem.create({
+        data: { userId: alice.userId, powerupType: "RAINSTORM", quantity: 2 },
+      });
+
+      const res = await request(server.baseUrl, "POST", `/races/${raceId}/powerups/redeem`, {
+        body: { powerupType: "RAINSTORM" }, token: alice.token,
+      });
+      assert.equal(res.status, 400);
+      assert.equal((await res.json()).code, "POWERUPS_DISABLED");
+
+      const inv = await prisma.userPowerupItem.findUnique({
+        where: { userId_powerupType: { userId: alice.userId, powerupType: "RAINSTORM" } },
+      });
+      assert.equal(inv.quantity, 2, "inventory untouched");
+    });
+
+    it("rejects use with 400 POWERUPS_DISABLED and leaves the powerup HELD", async () => {
+      const alice = await createUser("DisC");
+      const bob = await createUser("DisD");
+      await makeFriends(alice, bob);
+      const raceId = await createActiveRace(alice, [bob], { powerupsEnabled: false });
+      const pw = await giveHeld(raceId, alice.userId, "RUNNERS_HIGH");
+
+      const res = await usePowerup(alice.token, raceId, pw.id);
+      assert.equal(res.status, 400);
+      assert.equal((await res.json()).code, "POWERUPS_DISABLED");
+
+      const still = await prisma.racePowerup.findUnique({ where: { id: pw.id } });
+      assert.equal(still.status, "HELD");
+    });
+  });
+
+  // ── §3.1 Drill Sergeant sleep blocker ──────────────────────────────────────
+  describe("§3.1 Drill Sergeant sleep blocker", () => {
+    async function setup() {
+      const alice = await createUser("DrillA");
+      const bob = await createUser("DrillB");
+      await makeFriends(alice, bob);
+      const raceId = await createActiveRace(alice, [bob]);
+      const drill = await giveHeld(raceId, alice.userId, "DRILL_SERGEANT");
+      return { alice, bob, raceId, drill };
+    }
+
+    it("blocks the dare at target-local 02:00 with 400 TARGET_ASLEEP and does not consume it", async () => {
+      const { alice, bob, raceId, drill } = await setup();
+      await setTimezone(bob.userId, zoneForLocalHour(2));
+
+      const res = await usePowerup(alice.token, raceId, drill.id, { targetUserId: bob.userId });
+      assert.equal(res.status, 400);
+      assert.equal((await res.json()).code, "TARGET_ASLEEP");
+
+      const still = await prisma.racePowerup.findUnique({ where: { id: drill.id } });
+      assert.equal(still.status, "HELD", "drill sergeant not consumed");
+    });
+
+    it("allows the dare at target-local 13:00", async () => {
+      const { alice, bob, raceId, drill } = await setup();
+      await setTimezone(bob.userId, zoneForLocalHour(13));
+
+      const res = await usePowerup(alice.token, raceId, drill.id, { targetUserId: bob.userId });
+      assert.equal(res.status, 200);
+    });
+
+    it("falls back to the RACE timezone when the target has none (blocked)", async () => {
+      const { alice, bob, raceId, drill } = await setup();
+      await setTimezone(bob.userId, null);
+      await prisma.race.update({ where: { id: raceId }, data: { timezone: zoneForLocalHour(2) } });
+
+      const res = await usePowerup(alice.token, raceId, drill.id, { targetUserId: bob.userId });
+      assert.equal(res.status, 400);
+      assert.equal((await res.json()).code, "TARGET_ASLEEP");
+    });
+
+    it("fails OPEN (allows) when neither the target nor the race has a timezone", async () => {
+      const { alice, bob, raceId, drill } = await setup();
+      await setTimezone(bob.userId, null);
+      await prisma.race.update({ where: { id: raceId }, data: { timezone: null } });
+
+      const res = await usePowerup(alice.token, raceId, drill.id, { targetUserId: bob.userId });
+      assert.equal(res.status, 200);
+    });
+  });
+
+  // ── §3.4 duration standardization ──────────────────────────────────────────
+  describe("§3.4 duration standardization", () => {
+    const HOUR = 60 * 60 * 1000;
+
+    it("stamps the new 1h base window for ladder + fixed-window powerups", async () => {
+      const alice = await createUser("DurA");
+      const bob = await createUser("DurB");
+      await makeFriends(alice, bob);
+      const raceId = await createActiveRace(alice, [bob]);
+      // Backdate + give bob a lead so the caster (alice) is in the bottom half —
+      // UPRISING only fires for a racer below the midpoint.
+      await backdate(raceId, hoursAgo(2));
+      await recordSamples(bob.token, [
+        { periodStart: hoursAgo(1.5).toISOString(), periodEnd: hoursAgo(1).toISOString(), steps: 10000 },
+      ]);
+
+      const cases = [
+        { type: "LEG_CRAMP", target: bob.userId, expectMs: 1 * HOUR },
+        { type: "RUNNERS_HIGH", target: null, expectMs: 1 * HOUR },
+        { type: "DETOUR_SIGN", target: bob.userId, expectMs: 1 * HOUR },
+        { type: "STEALTH_MODE", target: null, expectMs: 1 * HOUR },
+        { type: "UPRISING", target: null, expectMs: 1 * HOUR },
+        { type: "DRILL_SERGEANT", target: bob.userId, expectMs: 1 * HOUR },
+      ];
+      // Keep bob awake so DRILL_SERGEANT isn't sleep-blocked.
+      await setTimezone(bob.userId, zoneForLocalHour(13));
+
+      for (const c of cases) {
+        const pw = await giveHeld(raceId, alice.userId, c.type, 4000 + Math.floor(Math.random() * 1000));
+        const body = c.target ? { targetUserId: c.target } : {};
+        const res = await usePowerup(alice.token, raceId, pw.id, body);
+        assert.equal(res.status, 200, `${c.type} cast should succeed`);
+        const effect = await prisma.raceActiveEffect.findFirst({
+          where: { raceId, type: c.type === "UPRISING" ? "UPRISING" : c.type, sourceUserId: alice.userId },
+          orderBy: { createdAt: "desc" },
+        });
+        assert.ok(effect, `${c.type} effect row exists`);
+        const dur = new Date(effect.expiresAt).getTime() - new Date(effect.startsAt).getTime();
+        assert.equal(dur, c.expectMs, `${c.type} duration should be 1h`);
+      }
+    });
+
+    it("Quicksand freezes for 1h", async () => {
+      const alice = await createUser("QsA");
+      const bob = await createUser("QsB");
+      await makeFriends(alice, bob);
+      const raceId = await createActiveRace(alice, [bob]);
+      const qs = await giveHeld(raceId, alice.userId, "QUICKSAND");
+      const res = await usePowerup(alice.token, raceId, qs.id, { targetUserIds: [bob.userId] });
+      assert.equal(res.status, 200);
+      const effect = await prisma.raceActiveEffect.findFirst({
+        where: { raceId, type: "QUICKSAND" }, orderBy: { createdAt: "desc" },
+      });
+      const dur = new Date(effect.expiresAt).getTime() - new Date(effect.startsAt).getTime();
+      assert.equal(dur, 1 * HOUR);
+    });
+  });
+
+  // ── §3.5 tournament round minimum (clamp 1 -> 2) ───────────────────────────
+  describe("§3.5 tournament 2-day round minimum", () => {
+    async function createTournament(token, matchupDurationDays) {
+      return request(server.baseUrl, "POST", "/tournaments", {
+        body: { name: "Clamp T", bracketSize: 4, matchupDurationDays, buyInAmount: 0 },
+        token, headers: TOURN_FEATS,
+      });
+    }
+
+    it("clamps matchupDurationDays 1 -> 2 in the create response", async () => {
+      const alice = await createUser("TourA");
+      const res = await createTournament(alice.token, 1);
+      assert.equal(res.status, 201);
+      assert.equal((await res.json()).tournament.matchupDurationDays, 2);
+    });
+
+    it("leaves 2 and 3 unchanged", async () => {
+      const alice = await createUser("TourB");
+      const two = await createTournament(alice.token, 2);
+      assert.equal((await two.json()).tournament.matchupDurationDays, 2);
+      const three = await createTournament(alice.token, 3);
+      assert.equal((await three.json()).tournament.matchupDurationDays, 3);
+    });
+  });
+
+  // ── §3.6.1 Bara herd bonus ─────────────────────────────────────────────────
+  describe("§3.6.1 Bara herd bonus", () => {
+    it("grants +100/day per capybara (incl. self), corgi gets none, and OFF when the flag is off", async () => {
+      const alice = await createUser("HerdA"); // default => capybara
+      const bob = await createUser("HerdB"); // default => capybara
+      const dave = await createUser("HerdD");
+      await makeFriends(alice, bob);
+      await makeFriends(alice, dave);
+      const raceId = await createActiveRace(alice, [bob, dave]);
+      await backdate(raceId, hoursAgo(3)); // single race-local day
+      await equipCharacter(dave, "corgi_puppy"); // dave is a corgi
+
+      // Alice walks 1000 raw steps in the last 3h.
+      await recordSamples(alice.token, [
+        { periodStart: hoursAgo(2).toISOString(), periodEnd: hoursAgo(1).toISOString(), steps: 1000 },
+      ]);
+
+      // Flag OFF: no herd bonus, no characterBonus block.
+      delete process.env.CHARACTER_POWERS_ENABLED;
+      let progress = await getProgress(alice.token, raceId);
+      let me = findP(progress, alice.userId);
+      assert.equal(me.totalSteps, 1000, "no herd bonus when flag off");
+      assert.equal(me.characterBonus, undefined);
+
+      // Flag ON: 3 participants, 2 capybaras (alice, bob) + 1 corgi (dave).
+      process.env.CHARACTER_POWERS_ENABLED = "true";
+      progress = await getProgress(alice.token, raceId);
+      me = findP(progress, alice.userId);
+      // perDay = 100 * 2 capybaras = 200; 1 day => +200.
+      assert.equal(me.characterBonus.animal, "capybara");
+      assert.equal(me.characterBonus.perDay, 200);
+      assert.equal(me.characterBonus.bonusSteps, 200);
+      assert.equal(me.totalSteps, 1200, "1000 raw + 200 herd");
+
+      const corgi = findP(progress, dave.userId);
+      assert.equal(corgi.characterBonus, undefined, "corgi earns no herd bonus");
+    });
+
+    it("does NOT advance box progress (box math stays raw)", async () => {
+      process.env.CHARACTER_POWERS_ENABLED = "true";
+      const alice = await createUser("HerdBoxA");
+      const bob = await createUser("HerdBoxB");
+      await makeFriends(alice, bob);
+      const raceId = await createActiveRace(alice, [bob]);
+      await backdate(raceId, hoursAgo(3));
+      await recordSamples(alice.token, [
+        { periodStart: hoursAgo(2).toISOString(), periodEnd: hoursAgo(1).toISOString(), steps: 1000 },
+      ]);
+
+      const progress = await getProgress(alice.token, raceId);
+      const me = findP(progress, alice.userId);
+      // 2 capybaras => +200 herd in the leaderboard total …
+      assert.equal(me.totalSteps, 1200);
+      // … but box countdown is computed from RAW steps only: interval 5000,
+      // raw 1000 => 4000 to go (herd's 200 must NOT count).
+      assert.equal(progress.powerupData.stepsUntilNextPowerup, 4000);
+    });
+
+    it("is disabled in powerups-disabled races", async () => {
+      process.env.CHARACTER_POWERS_ENABLED = "true";
+      const alice = await createUser("HerdDisA");
+      const bob = await createUser("HerdDisB");
+      await makeFriends(alice, bob);
+      const raceId = await createActiveRace(alice, [bob], { powerupsEnabled: false });
+      await backdate(raceId, hoursAgo(3));
+      await recordSamples(alice.token, [
+        { periodStart: hoursAgo(2).toISOString(), periodEnd: hoursAgo(1).toISOString(), steps: 1000 },
+      ]);
+      const progress = await getProgress(alice.token, raceId);
+      const me = findP(progress, alice.userId);
+      assert.equal(me.totalSteps, 1000, "no herd bonus in a powerups-disabled race");
+      assert.equal(me.characterBonus, undefined);
+    });
+  });
+
+  // ── §3.6.2 Corgi zoomies ───────────────────────────────────────────────────
+  describe("§3.6.2 Corgi zoomies", () => {
+    it("scores steps inside a materialized window at 3x (and non-corgi gets none)", async () => {
+      process.env.CHARACTER_POWERS_ENABLED = "true";
+      const alice = await createUser("ZoomA");
+      const bob = await createUser("ZoomB");
+      await makeFriends(alice, bob);
+      const raceId = await createActiveRace(alice, [bob]);
+      await backdate(raceId, hoursAgo(5));
+      await equipCharacter(alice, "corgi_puppy");
+
+      // A 10-minute zoomies window entirely in the past, inside the race window.
+      const wStart = hoursAgo(3);
+      const wEnd = new Date(wStart.getTime() + 10 * 60 * 1000);
+      await prisma.characterEffectWindow.create({
+        data: {
+          userId: alice.userId, animal: "corgi", multiplier: 3,
+          startsAt: wStart, endsAt: wEnd, localDayKey: "2026-07-25", slot: 0,
+        },
+      });
+
+      // 1000 steps fully inside the window; 1000 steps outside it.
+      await recordSamples(alice.token, [
+        { periodStart: wStart.toISOString(), periodEnd: wEnd.toISOString(), steps: 1000 },
+        { periodStart: hoursAgo(1).toISOString(), periodEnd: hoursAgo(0.5).toISOString(), steps: 1000 },
+      ]);
+
+      const progress = await getProgress(alice.token, raceId);
+      const me = findP(progress, alice.userId);
+      // base 2000 raw + (3-1)*1000 zoomies-boosted = 4000. (Alice is the only
+      // capybara-or-not corgi; herd bonus does not apply to a corgi.)
+      assert.equal(me.totalSteps, 4000);
+    });
+
+    it("no zoomies boost for a non-corgi in the same setup", async () => {
+      process.env.CHARACTER_POWERS_ENABLED = "true";
+      const alice = await createUser("ZoomC");
+      const bob = await createUser("ZoomD");
+      await makeFriends(alice, bob);
+      const raceId = await createActiveRace(alice, [bob]);
+      await backdate(raceId, hoursAgo(5));
+      // No window materialized for bob (default capybara, not corgi).
+      await recordSamples(bob.token, [
+        { periodStart: hoursAgo(3).toISOString(), periodEnd: hoursAgo(2.9).toISOString(), steps: 1000 },
+      ]);
+      const progress = await getProgress(bob.token, raceId);
+      const me = findP(progress, bob.userId);
+      // 1000 raw + herd (2 capybaras => 200/day * 1 day = 200) = 1200; NO 3x.
+      assert.equal(me.totalSteps, 1200);
+    });
+  });
+});

@@ -247,7 +247,7 @@ test("POCKET_WATCH targeted mode extends EXACTLY ONE owned debuff and returns th
   });
 
   assert.equal(result.extendedEffects, 1);
-  assert.equal(result.extensionMs, 1.5 * HOUR);
+  assert.equal(result.extensionMs, 2 * HOUR);
   assert.equal(result.extensionMode, "OWN_DEBUFF");
   assert.deepEqual(
     {
@@ -259,7 +259,7 @@ test("POCKET_WATCH targeted mode extends EXACTLY ONE owned debuff and returns th
   );
   assert.equal(
     new Date(result.extendedEffect.expiresAt).getTime(),
-    cramp.expiresAt.getTime() + 1.5 * HOUR,
+    cramp.expiresAt.getTime() + 2 * HOUR,
     "the tier duration is added to the effect's CURRENT expiresAt"
   );
   assert.equal(ctx.effectUpdates.length, 1, "exactly one effect extended");
@@ -270,9 +270,9 @@ test("POCKET_WATCH targeted mode extends EXACTLY ONE owned debuff and returns th
 test("POCKET_WATCH targeted mode extends each tier by its own duration", async () => {
   const tiers = [
     [0, 1 * HOUR],
-    [1, 1.5 * HOUR],
-    [2, 2 * HOUR],
-    [3, 3 * HOUR],
+    [1, 2 * HOUR],
+    [2, 3 * HOUR],
+    [3, 4 * HOUR],
   ];
   for (const [level, expected] of tiers) {
     const ctx = makeDeps({ effectsById: { d1: myDebuffOnRival("d1", "LEG_CRAMP", 1) } });

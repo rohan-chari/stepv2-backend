@@ -1,5 +1,5 @@
 const { snapshotBaselineFields } = require("../../races/services/raceBaseline");
-const { roundLabel } = require("../constants/tournaments");
+const { roundLabel, clampMatchupDuration } = require("../constants/tournaments");
 const { Steps } = require("../../steps/models/steps");
 
 const RACE_NAME_MAX = 50;
@@ -24,7 +24,9 @@ async function createRoundRaces({
 }) {
   const label = roundLabel(tournament.bracketSize, round);
   const name = `${tournament.name} — ${label}`.slice(0, RACE_NAME_MAX);
-  const durationDays = tournament.matchupDurationDays;
+  // §3.5 defensive clamp: any tournament row carrying a legacy 1-day duration
+  // (created before the 2-day minimum shipped) yields 2-day round races.
+  const durationDays = clampMatchupDuration(tournament.matchupDurationDays);
   const endsAt = new Date(
     startedAt.getTime() + durationDays * 24 * 60 * 60 * 1000
   );

@@ -3,7 +3,7 @@ const test = require("node:test");
 const { buildUsePowerup, PowerupUseError } = require("../../src/modules/powerups/commands/usePowerup");
 
 // ---------------------------------------------------------------------------
-// Detour Sign — targeted, 3 hours, hides entire leaderboard from target
+// Detour Sign — targeted, 1 hour, hides entire leaderboard from target
 // ---------------------------------------------------------------------------
 
 function makeParticipant(id, userId, displayName, overrides = {}) {
@@ -115,7 +115,7 @@ test("Detour Sign creates a 3-hour timed effect on target", async () => {
   // Verify 3-hour duration
   const startsAt = ctx.effectsCreated[0].startsAt.getTime();
   const expiresAt = ctx.effectsCreated[0].expiresAt.getTime();
-  assert.equal(expiresAt - startsAt, 3 * 60 * 60 * 1000);
+  assert.equal(expiresAt - startsAt, 1 * 60 * 60 * 1000);
 });
 
 // ===========================================================================

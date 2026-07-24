@@ -48,14 +48,14 @@ describe("2026-07-22 additive backend contracts", () => {
 
   it("GET /powerups/catalog selects copy and Quicksand by request capabilities", async () => {
     await prisma.powerupCopy.createMany({ data: [
-      { powerupType: "STEALTH_MODE", name: "Stealth Mode", description: "Hide for 4 hours", upgradeTierLabels: ["Hide 4h", "Hide 5h", "Hide 6.5h", "Hide 8h"] },
+      { powerupType: "STEALTH_MODE", name: "Stealth Mode", description: "Hide for 1 hour", upgradeTierLabels: ["Hide 1h", "Hide 2h", "Hide 3h", "Hide 4h"] },
       { powerupType: "HITCHHIKE", name: "Hitchhike", description: "Copy raw steps", upgradeTierLabels: [] },
       { powerupType: "QUICKSAND", name: "Quicksand", description: "Freeze three", upgradeTierLabels: [] },
     ], skipDuplicates: true });
     const oldRes = await request(server.baseUrl, "GET", "/powerups/catalog");
     const old = await oldRes.json();
     assert.equal(old.powerups.some((p) => p.type === "QUICKSAND"), false);
-    assert.match(old.powerups.find((p) => p.type === "STEALTH_MODE").description, /4 hours/);
+    assert.match(old.powerups.find((p) => p.type === "STEALTH_MODE").description, /1 hour/);
 
     const nextRes = await request(server.baseUrl, "GET", "/powerups/catalog", { headers: {
       "X-Client-Features": "powerups4,stealth_runner_duration,hitchhike_effective_steps",

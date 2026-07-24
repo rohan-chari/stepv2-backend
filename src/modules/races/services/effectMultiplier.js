@@ -41,6 +41,10 @@ function signedMultiplierAt(timeMs, groups = {}) {
     coinFlipWins = [],
     coinFlipLoses = [],
     ghostPeppers = [],
+    // Character power (§3.6.2): Corgi zoomies windows — a self-buff that SUMS
+    // into M like Runner's High/Uprising (a lone 3x zoomies => M=3). Freeze still
+    // wins (a zoomies segment inside a Leg Cramp/pepper-freeze earns 0).
+    zoomies = [],
   } = groups;
 
   // 1. Freeze wins over everything (Leg Cramp / Quicksand, Campfire freeze phase,
@@ -107,6 +111,12 @@ function signedMultiplierAt(timeMs, groups = {}) {
       buffed = true;
     }
   }
+  for (const e of zoomies) {
+    if (isActiveAt(e, timeMs)) {
+      sum += Number((e.metadata || {}).multiplier) || 3;
+      buffed = true;
+    }
+  }
   let M = buffed ? sum : 1;
 
   // 3. Reductions subtract additively, floored at 0. Applied ONCE at the max
@@ -153,6 +163,7 @@ function multiplierBoundaries(windowStart, windowEnd, groups = {}) {
     coinFlipWins = [],
     coinFlipLoses = [],
     ghostPeppers = [],
+    zoomies = [],
   } = groups;
 
   for (const e of [
@@ -164,6 +175,7 @@ function multiplierBoundaries(windowStart, windowEnd, groups = {}) {
     ...rallyFlags,
     ...coinFlipWins,
     ...coinFlipLoses,
+    ...zoomies,
   ]) {
     add(toMs(e.startsAt));
     if (e.expiresAt) add(toMs(e.expiresAt));

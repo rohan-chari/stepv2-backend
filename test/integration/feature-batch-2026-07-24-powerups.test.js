@@ -287,14 +287,16 @@ describe("feature batch 2026-07-24 — powerups", () => {
       assert.equal(newDur, 60 * MIN);
     });
 
-    it("upgraded stealth follows the 60/75/90/120 ladder for a modern client", async () => {
+    // §3.4 (2026-07-25): stealth adopts the standard 1/2/3/4h ladder
+    // (§9-authorized existing-test DURATION literal update).
+    it("upgraded stealth follows the 1/2/3/4h ladder for a modern client", async () => {
       const alice = await createUser("AliceFB724F");
       const bob = await createUser("BobFB724FFF");
       await makeFriends(alice, bob);
       // Fund upgrades generously so cost never blocks the cast.
       await prisma.user.update({ where: { id: alice.userId }, data: { coins: 1000000 } });
 
-      const expected = [60 * MIN, 75 * MIN, 90 * MIN, 120 * MIN];
+      const expected = [60 * MIN, 120 * MIN, 180 * MIN, 240 * MIN];
       for (let level = 0; level <= 3; level++) {
         const raceId = await createActiveRace(alice, [bob]);
         const dur = await castStealthDuration({

@@ -142,6 +142,10 @@ model User {
   stepSyncRequests  StepSyncRequest[]
   raceResolutionJob RaceResolutionJob?
 
+  // ── Character powers (Corgi zoomies) — additive back-relation. Old app builds
+  // never see this; existing rows are unaffected (no columns added to users).
+  characterEffectWindows CharacterEffectWindow[]
+
   // First index on this table. Backs the daily-reward reminder scheduler, which
   // selects users by IANA zone: findMany({ where: { timezone: { in: zonesAtSlot } } }).
   @@index([timezone])
@@ -983,7 +987,7 @@ model TournamentParticipant {
   joinedAt          DateTime              @default(now()) @map("joined_at")
   createdAt         DateTime              @default(now()) @map("created_at")
 
-  tournament Tournament @relation(fields: [tournamentId], references: [id])
+  tournament Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
   user       User       @relation(fields: [userId], references: [id])
 
   @@unique([tournamentId, userId])
@@ -1411,6 +1415,35 @@ model GlobalStepEvent {
 
   @@index([startsAt, endsAt])
   @@map("global_step_events")
+}
+
+// Materialized character-power effect windows (Corgi "Zoomies" — §3.6.2). One
+// row per (user, user-local day, slot). A 5-minute scheduler draws two secret
+// 10-minute 3x windows per corgi user-local day and inserts them insert-first
+// against @@unique([userId, localDayKey, slot]) — cluster-safe (JobRun.markRan is
+// NOT atomic; never an advisory lock across the callback, per the 3e6c827 rule).
+// Scoring (getRaceProgress + raceExpiry) folds an active window in as a +multiplier
+// self-buff via the shared effectMultiplier.js boundary math. `notifiedAt` is the
+// CAS push-dedup claim. Rows older than 45 days are pruned by a retention job.
+model CharacterEffectWindow {
+  id         String    @id @default(uuid())
+  userId     String    @map("user_id")
+  animal     String
+  multiplier Float     @default(3)
+  startsAt   DateTime  @map("starts_at")
+  endsAt     DateTime  @map("ends_at")
+  // User-local calendar day, e.g. "2026-07-25" — the idempotency bucket.
+  localDayKey String   @map("local_day_key")
+  // 0 | 1 — which of the day's two windows this row is.
+  slot       Int
+  notifiedAt DateTime? @map("notified_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, localDayKey, slot])
+  @@index([userId, startsAt, endsAt])
+  @@map("character_effect_windows")
 }
 
 // Audit log of every user-facing (visible) push we send. Written at each visible

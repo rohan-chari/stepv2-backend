@@ -133,9 +133,9 @@ test("each entry carries name, description, shortDescription and upgradeTierLabe
   assert.deepEqual(byType.LEECH.upgradeTierLabels, []);
   assert.deepEqual(byType.POCKET_WATCH.upgradeTierLabels, [
     "Extend 1h",
-    "Extend 1.5h",
     "Extend 2h",
     "Extend 3h",
+    "Extend 4h",
   ]);
   assert.equal(
     byType.RED_CARD.shortDescription,
@@ -167,7 +167,7 @@ test("seeded copy matches the pre-migration frontend strings, except the intenti
   // Spot-checks across all three former maps.
   assert.equal(byType.RUNNERS_HIGH.name, "Runner's High");
   assert.equal(byType.DEFENSE_SCAN.name, "X-Ray");
-  assert.equal(byType.LEG_CRAMP.description, "Freeze a rival's steps for 2 hours");
+  assert.equal(byType.LEG_CRAMP.description, "Freeze a rival's steps for 1 hour");
   assert.equal(
     byType.CAMPFIRE_REST.description,
     "Freeze for 30 min, then multiply steps for up to 90 min"

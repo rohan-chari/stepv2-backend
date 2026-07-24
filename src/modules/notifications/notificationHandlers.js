@@ -696,6 +696,33 @@ function registerNotificationHandlers(dependencies = {}) {
     }
   });
 
+  // §3.6.2 Corgi zoomies: fired by the character-effect scheduler at each
+  // materialized window's start (claimed once via CAS notifiedAt, so no
+  // duplicates across cluster workers). Kill switch ZOOMIES_PUSH_DISABLED is
+  // honored at the emit site.
+  events.on("ZOOMIES_STARTED", async (data) => {
+    try {
+      const { userId } = data || {};
+      if (!userId) return;
+      await sendNotificationToUser({
+        eventName: "ZOOMIES_STARTED",
+        recipientUserId: userId,
+        actorUserId: null,
+        title: "ZOOMIES!",
+        buildBody: () => "3x steps for 10 minutes — GO!",
+        payload: {
+          type: "ZOOMIES_STARTED",
+          route: "home",
+        },
+        logContext: { recipientUserId: userId },
+      });
+    } catch (error) {
+      logger.error("ZOOMIES_STARTED handler failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
   const POWERUP_ATTACK_MESSAGES = {
     LEG_CRAMP: (attackerName) => `${attackerName} used Leg Cramp on you! Your steps are frozen for 2 hours.`,
     RED_CARD: (attackerName) => `${attackerName} used Red Card! You lost steps.`,

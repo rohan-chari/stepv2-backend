@@ -124,7 +124,7 @@ test("Leg Cramp creates an active effect on the target", async () => {
   assert.equal(ctx.effectsCreated[0].sourceUserId, "user-1");
 });
 
-test("Leg Cramp effect lasts exactly 2 hours", async () => {
+test("Leg Cramp effect lasts exactly 1 hour", async () => {
   const ctx = makePowerupDeps();
   const use = buildUsePowerup(ctx.deps);
 
@@ -133,9 +133,9 @@ test("Leg Cramp effect lasts exactly 2 hours", async () => {
   const effect = ctx.effectsCreated[0];
   const startsAt = new Date(effect.startsAt).getTime();
   const expiresAt = new Date(effect.expiresAt).getTime();
-  const twoHoursMs = 2 * 60 * 60 * 1000;
+  const oneHourMs = 1 * 60 * 60 * 1000;
 
-  assert.equal(expiresAt - startsAt, twoHoursMs);
+  assert.equal(expiresAt - startsAt, oneHourMs);
 });
 
 test("Leg Cramp captures stepsAtFreezeStart in metadata", async () => {

@@ -126,7 +126,9 @@ describe("tournaments — integration", () => {
     assert.equal(t.currentRound, 1);
     assert.equal(t.potCoins, 0);
 
-    // Round 1: two matchup races, WTA, 2 players, endsAt ~ +1 day, not public.
+    // Round 1: two matchup races, WTA, 2 players, endsAt ~ +2 days (the
+    // legacy matchupDurationDays: 1 in this fixture is clamped to the 2-day
+    // minimum), not public.
     const round1 = await prisma.race.findMany({
       where: { tournamentId, tournamentRound: 1 },
       include: { participants: true },
@@ -141,7 +143,7 @@ describe("tournaments — integration", () => {
       assert.equal(r.isPublic, false);
       assert.equal(r.participants.filter((p) => p.status === "ACCEPTED").length, 2);
       const span = new Date(r.endsAt).getTime() - new Date(r.startedAt).getTime();
-      assert.equal(span, 24 * 60 * 60 * 1000);
+      assert.equal(span, 2 * 24 * 60 * 60 * 1000);
     }
 
     // Settle round 1: first participant of each match wins.

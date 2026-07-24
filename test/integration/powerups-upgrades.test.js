@@ -195,10 +195,10 @@ describe("powerup upgrades — integration", () => {
   });
 
   // ---------------------------------------------------------------------
-  // Lvl 3 Leg Cramp on bob — duration becomes 6 hours
+  // Lvl 3 Leg Cramp on bob — duration becomes 4 hours
   // ---------------------------------------------------------------------
 
-  it("Lvl 3 Leg Cramp: 90 coins, freezes target for 6h, feed shows 'Lvl 3'", async () => {
+  it("Lvl 3 Leg Cramp: 90 coins, freezes target for 4h, feed shows 'Lvl 3'", async () => {
     const alice = await createUser("AliceUpCC");
     const bob = await createUser("BobUpCCCC");
     await makeFriends(alice, bob);
@@ -220,13 +220,13 @@ describe("powerup upgrades — integration", () => {
     });
     assert.ok(effect);
     const durationMs = new Date(effect.expiresAt).getTime() - new Date(effect.startsAt).getTime();
-    assert.equal(durationMs, 6 * 60 * 60 * 1000, "expires 6 hours after start");
+    assert.equal(durationMs, 4 * 60 * 60 * 1000, "expires 4 hours after start");
 
     const feedRes = await request(server.baseUrl, "GET", `/races/${raceId}/feed`, { token: alice.token });
     const feed = (await feedRes.json()).events;
     const ev = feed.find((e) => e.eventType === "POWERUP_USED" && e.powerupType === "LEG_CRAMP");
     assert.match(ev.description, /Lvl 3/);
-    assert.match(ev.description, /6 hours/);
+    assert.match(ev.description, /4 hours/);
   });
 
   // ---------------------------------------------------------------------

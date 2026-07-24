@@ -44,6 +44,14 @@ const { computeEffectModifiers, signedMultiplierForEffects } = require("../servi
 const {
   evaluateHighMultiplierAlert,
 } = require("../services/highMultiplierAlert");
+const { CharacterEffectWindow } = require("../../powerups/models/characterEffectWindow");
+const {
+  characterPowersEnabled,
+  countCapybaras,
+  computeHerdBonus,
+  zoomiesWindowsToEffects,
+  activeZoomiesAt,
+} = require("../services/characterPowers");
 
 // Additive tournament-matchup context for a matchup race's progress payload
 // (null on ordinary races). The frontend banner reads these defensively.
@@ -142,6 +150,8 @@ function buildGetRaceProgress(deps = {}) {
   const racePowerupModel = deps.RacePowerup || RacePowerup;
   const raceActiveEffectModel = deps.RaceActiveEffect || RaceActiveEffect;
   const globalStepEventModel = deps.GlobalStepEvent || GlobalStepEvent;
+  const characterEffectWindowModel =
+    deps.CharacterEffectWindow || CharacterEffectWindow;
   const completeRaceFn = deps.completeRace || completeRace;
   const expireEffectsFn = deps.expireEffects || expireEffects;
   const syncRacePowerupState =
@@ -326,9 +336,19 @@ function buildGetRaceProgress(deps = {}) {
         const baseAdjusted = Math.max(0, startDaySteps + subsequentSteps);
         const hasSampleData = startDaySamples > 0;
         participantStepsMap[p.id] = baseAdjusted;
-        return { participant: p, baseAdjusted, hasSampleData };
+        return { participant: p, baseAdjusted, hasSampleData, effectiveStart };
       })
     );
+
+    // §3.6 character powers (live display side). Gated behind CHARACTER_POWERS_ENABLED
+    // and only in powerups-enabled races. capyCount is the live capybara count
+    // (incl. self) for the herd bonus; herdEnd clamps to race end. Both paths
+    // (this and raceExpiry) fold the same terms so display == settlement.
+    const charPowersOn = characterPowersEnabled() && race.powerupsEnabled;
+    const capyCount = charPowersOn ? countCapybaras(acceptedParticipants) : 0;
+    const herdEnd = race.endsAt
+      ? new Date(Math.min(now().getTime(), new Date(race.endsAt).getTime()))
+      : now();
 
     await expireEffectsFn({ raceId, participantSteps: participantStepsMap });
 
@@ -353,7 +373,7 @@ function buildGetRaceProgress(deps = {}) {
     // (finished/forfeited) participants keep their stored totals and take no part
     // in the transfer.
     const preLeech = await Promise.all(
-      rawStepTotals.map(async ({ participant, baseAdjusted, hasSampleData }) => {
+      rawStepTotals.map(async ({ participant, baseAdjusted, hasSampleData, effectiveStart }) => {
         // TR-601: forfeited team-race members stay FROZEN at the forfeit
         // snapshot — never recomputed on the display path either.
         if (participant.forfeitedAt) {
@@ -405,11 +425,42 @@ function buildGetRaceProgress(deps = {}) {
           }
         }
 
-        const allEffects = [...legCramps, ...runnersHighs, ...wrongTurns, ...campfires, ...rainstorms, ...leeches, ...wave5Effects];
+        // §3.6: Corgi zoomies windows overlapping the race (folded as a self-buff),
+        // and the Bara herd bonus (added to the bonusSteps term). Fetched at read
+        // time so live equips + secret windows are honored.
+        let zoomiesEffects = [];
+        let herdBonusSteps = 0;
+        let characterBonus = null;
+        if (charPowersOn) {
+          const windows = await characterEffectWindowModel.findActiveInRangeForUser(
+            participant.userId,
+            raceStartedAt,
+            now()
+          );
+          zoomiesEffects = zoomiesWindowsToEffects(windows);
+          const herd = computeHerdBonus({
+            participant,
+            capyCount,
+            effectiveStart,
+            end: herdEnd,
+            timeZone: scoringTimeZone,
+          });
+          herdBonusSteps = herd.bonusSteps;
+          if (herd.animal) {
+            characterBonus = {
+              animal: herd.animal,
+              perDay: herd.perDay,
+              bonusSteps: herd.bonusSteps,
+            };
+          }
+        }
+        const zoomiesBlock = activeZoomiesAt(zoomiesEffects, now().getTime());
+
+        const allEffects = [...legCramps, ...runnersHighs, ...wrongTurns, ...campfires, ...rainstorms, ...leeches, ...wave5Effects, ...zoomiesEffects];
         const { frozenSteps, buffedSteps, reversedSteps, globalBoostedSteps, leechTransfers } = await computeEffectModifiers(allEffects, baseAdjusted, participant.userId, stepSampleModel, hasSampleData, globalContext, now());
 
         // Pre-leech total: everything EXCEPT the leech transfer, floored at 0.
-        const preLeechTotal = Math.max(0, baseAdjusted - frozenSteps + buffedSteps - 2 * reversedSteps + (globalBoostedSteps || 0) + (race.powerupsEnabled ? (participant.bonusSteps || 0) : 0));
+        const preLeechTotal = Math.max(0, baseAdjusted - frozenSteps + buffedSteps - 2 * reversedSteps + (globalBoostedSteps || 0) + (race.powerupsEnabled ? (participant.bonusSteps || 0) : 0) + herdBonusSteps);
 
         // §6a — the SIGNED effective multiplier right now (buff stacking; the
         // global-event fold is applied by the caller once). LEECH is a transfer,
@@ -418,9 +469,20 @@ function buildGetRaceProgress(deps = {}) {
           ? signedMultiplierForEffects(allEffects, now().getTime())
           : 1;
 
-        return { participant, frozen: false, preLeechTotal, leechTransfers, currentMultiplierRaw };
+        return { participant, frozen: false, preLeechTotal, leechTransfers, currentMultiplierRaw, characterBonus, zoomies: zoomiesBlock };
       })
     );
+
+    // §4.4 additive per-participant progress blocks, keyed by participant id.
+    // characterBonus (capybara herd) and zoomies (active window) are attached to
+    // the leaderboard rows below; absent => the client renders nothing.
+    const characterBonusByParticipantId = new Map();
+    const zoomiesByParticipantId = new Map();
+    for (const e of preLeech) {
+      if (e.frozen) continue;
+      if (e.characterBonus) characterBonusByParticipantId.set(e.participant.id, e.characterBonus);
+      if (e.zoomies) zoomiesByParticipantId.set(e.participant.id, e.zoomies);
+    }
 
     // Phase A2 — HITCHHIKE (§7.3). ONE bulk query for every link in the race,
     // scored from each TARGET's raw in-window steps and folded into the CASTER's
@@ -787,6 +849,14 @@ function buildGetRaceProgress(deps = {}) {
         const isStealthed = stealthedUserIds.has(participant.userId)
           && participant.userId !== userId
           && !participant.finishedAt;
+        // §4.4: character-power blocks are additive and only for UNMASKED rows
+        // (masking a row must not leak a hidden power). Absent => omitted.
+        const characterBonus = isStealthed
+          ? undefined
+          : characterBonusByParticipantId.get(participant.id);
+        const zoomies = isStealthed
+          ? undefined
+          : zoomiesByParticipantId.get(participant.id);
         return {
           userId: participant.userId,
           displayName: isStealthed ? "???" : participant.user.displayName,
@@ -802,6 +872,8 @@ function buildGetRaceProgress(deps = {}) {
           // side (and the honest team totals below) stay visible.
           team: participant.team ?? null,
           forfeitedAt: participant.forfeitedAt ?? null,
+          ...(characterBonus ? { characterBonus } : {}),
+          ...(zoomies ? { zoomies } : {}),
         };
       })
       .sort((a, b) => {

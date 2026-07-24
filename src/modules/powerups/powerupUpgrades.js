@@ -25,19 +25,24 @@ function rarityForType(type) {
 }
 
 // Duration in ms for timed effects, indexed by level.
+//
+// Duration standardization (2026-07-25, owner-approved §3.4): every windowed,
+// upgradeable powerup runs 1h base and +1h per upgrade level → 1/2/3/4h. Only
+// NEW uses get the new window (durations are stamped into the effect row at use
+// time), so running effects are untouched — forward-only. The strong-short
+// exceptions (GHOST_PEPPER 30m, CAMPFIRE_REST) and the long passives
+// (COMPRESSION_SOCKS shield) keep their historical durations.
 const DURATIONS_MS = {
-  LEG_CRAMP:         [2 * HOUR, 3 * HOUR, 4 * HOUR, 6 * HOUR],
-  RUNNERS_HIGH:      [3 * HOUR, 4 * HOUR, 5 * HOUR, 7 * HOUR],
-  // Item 7 (owner nerf 2026-07-24): stealth is now 60/75/90/120 min for ALL
-  // clients (server-computed → hits every app version on deploy). Do NOT touch
-  // RUNNERS_HIGH below — modern clients used to borrow it for stealth; usePowerup
-  // now points BOTH stealth branches at this ladder.
-  STEALTH_MODE:      [60 * 60 * 1000, 75 * 60 * 1000, 90 * 60 * 1000, 120 * 60 * 1000],
-  WRONG_TURN:        [1 * HOUR, 1.5 * HOUR, 2 * HOUR, 3 * HOUR],
-  DETOUR_SIGN:       [3 * HOUR, 4 * HOUR, 5 * HOUR, 7 * HOUR],
+  LEG_CRAMP:         [1 * HOUR, 2 * HOUR, 3 * HOUR, 4 * HOUR],
+  RUNNERS_HIGH:      [1 * HOUR, 2 * HOUR, 3 * HOUR, 4 * HOUR],
+  // Stealth adopts the standard 1/2/3/4h ladder (supersedes the 2026-07-24
+  // 60/75/90/120 nerf). Server-computed → hits every app version on deploy.
+  STEALTH_MODE:      [1 * HOUR, 2 * HOUR, 3 * HOUR, 4 * HOUR],
+  WRONG_TURN:        [1 * HOUR, 2 * HOUR, 3 * HOUR, 4 * HOUR],
+  DETOUR_SIGN:       [1 * HOUR, 2 * HOUR, 3 * HOUR, 4 * HOUR],
   COMPRESSION_SOCKS: [24 * HOUR, 30 * HOUR, 36 * HOUR, 48 * HOUR],
   CAMPFIRE_REST:     [45 * 60 * 1000, 60 * 60 * 1000, 75 * 60 * 1000, 90 * 60 * 1000],
-  POCKET_WATCH:      [1 * HOUR, 1.5 * HOUR, 2 * HOUR, 3 * HOUR],
+  POCKET_WATCH:      [1 * HOUR, 2 * HOUR, 3 * HOUR, 4 * HOUR],
 };
 
 // Magnitude (steps) for instant-bonus / steal-cap powerups, indexed by level.

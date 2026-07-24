@@ -37,6 +37,17 @@ function buildRedeemPowerupToRace(deps = {}) {
       throw new RedeemPowerupError("Race is not active", 400);
     }
 
+    // §3.7 hard gate: NO powerup — including a shop-redeemed one — may enter a
+    // race whose creator disabled powerups. Rejected BEFORE any inventory
+    // decrement, so nothing the buyer owns is spent.
+    if (race.powerupsEnabled === false) {
+      throw new RedeemPowerupError(
+        "Powerups are disabled in this race.",
+        400,
+        "POWERUPS_DISABLED"
+      );
+    }
+
     const myParticipant = (race.participants || []).find(
       (p) => p.userId === userId && p.status === "ACCEPTED"
     );

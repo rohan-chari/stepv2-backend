@@ -379,8 +379,8 @@ test("Pocket Watch extends all active timed buffs", async () => {
 
   assert.equal(ctx.effectsUpdated.length, 2);
   assert.equal(ctx.effectsUpdated[0].id, "eff-rh");
-  assert.equal(ctx.effectsUpdated[0].fields.expiresAt.toISOString(), "2026-05-14T14:30:00.000Z");
-  assert.equal(ctx.effectsUpdated[1].fields.expiresAt.toISOString(), "2026-05-14T15:30:00.000Z");
+  assert.equal(ctx.effectsUpdated[0].fields.expiresAt.toISOString(), "2026-05-14T15:00:00.000Z");
+  assert.equal(ctx.effectsUpdated[1].fields.expiresAt.toISOString(), "2026-05-14T16:00:00.000Z");
 });
 
 test("Pocket Watch rejects when no timed buff is active", async () => {

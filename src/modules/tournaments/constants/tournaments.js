@@ -9,7 +9,12 @@
 const TOURNAMENT_BUYIN_MAX = { 4: 100, 8: 100, 16: 62 };
 
 const BRACKET_SIZES = [4, 8, 16];
-const MATCHUP_DURATIONS = [1, 2, 3];
+// §3.5 (2026-07-25): rounds are at least 2 days so a single busy day can't decide
+// a bracket. A frozen old client can still submit `matchupDurationDays: 1`; it is
+// CLAMPED to 2 server-side (see validateMatchupDuration), never rejected.
+const MATCHUP_DURATIONS = [2, 3];
+// The legacy 1-day value old clients may still send. Clamped up to this minimum.
+const MATCHUP_DURATION_MIN = 2;
 
 // Buy-ins below this (but non-zero) are rejected — mirrors race buy-ins.
 const MIN_BUY_IN = 10;
@@ -72,14 +77,25 @@ function validateBracketSize(bracketSize, ErrorClass) {
 }
 
 function validateMatchupDuration(matchupDurationDays, ErrorClass) {
-  if (!MATCHUP_DURATIONS.includes(matchupDurationDays)) {
+  // §3.5: old clients (and old creation flows) may still send 1 day — CLAMP it up
+  // to the 2-day minimum rather than reject, so frozen binaries keep working. The
+  // response echoes the clamped value and old clients render whatever comes back.
+  const clamped =
+    matchupDurationDays === 1 ? MATCHUP_DURATION_MIN : matchupDurationDays;
+  if (!MATCHUP_DURATIONS.includes(clamped)) {
     throw new ErrorClass(
-      "Matchup duration must be 1, 2, or 3 days",
+      "Matchup duration must be 2 or 3 days",
       400,
       "VALIDATION"
     );
   }
-  return matchupDurationDays;
+  return clamped;
+}
+
+// Defensive clamp for any tournament row that already carries a 1-day duration
+// (created before the §3.5 deploy). Round races read this at create time.
+function clampMatchupDuration(matchupDurationDays) {
+  return matchupDurationDays === 1 ? MATCHUP_DURATION_MIN : matchupDurationDays;
 }
 
 function validateTournamentName(name, ErrorClass) {
@@ -179,6 +195,8 @@ module.exports = {
   TOURNAMENT_BUYIN_MAX,
   BRACKET_SIZES,
   MATCHUP_DURATIONS,
+  MATCHUP_DURATION_MIN,
+  clampMatchupDuration,
   MIN_BUY_IN,
   MAX_CHAMPION_PRIZE,
   TOURNAMENT_NAME_MAX_LENGTH,

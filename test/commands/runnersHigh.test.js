@@ -121,7 +121,7 @@ test("Runner's High creates an active effect on self", async () => {
   assert.equal(ctx.effectsCreated[0].sourceUserId, "user-1");
 });
 
-test("Runner's High effect lasts exactly 3 hours", async () => {
+test("Runner's High effect lasts exactly 1 hour", async () => {
   const ctx = makePowerupDeps();
   const use = buildUsePowerup(ctx.deps);
 
@@ -130,9 +130,9 @@ test("Runner's High effect lasts exactly 3 hours", async () => {
   const effect = ctx.effectsCreated[0];
   const startsAt = new Date(effect.startsAt).getTime();
   const expiresAt = new Date(effect.expiresAt).getTime();
-  const threeHoursMs = 3 * 60 * 60 * 1000;
+  const oneHourMs = 1 * 60 * 60 * 1000;
 
-  assert.equal(expiresAt - startsAt, threeHoursMs);
+  assert.equal(expiresAt - startsAt, oneHourMs);
 });
 
 test("Runner's High captures stepsAtBuffStart in metadata", async () => {

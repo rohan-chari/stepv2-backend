@@ -166,40 +166,43 @@ test("upgradeCost: level 0 always returns 0 even for non-upgradeable types", () 
 // upgradedDuration — duration-based powerups (returns ms)
 // ---------------------------------------------------------------------------
 
-test("upgradedDuration: Leg Cramp — 2h / 3h / 4h / 6h", () => {
-  assert.equal(upgradedDuration("LEG_CRAMP", 0), 2 * HOUR);
-  assert.equal(upgradedDuration("LEG_CRAMP", 1), 3 * HOUR);
-  assert.equal(upgradedDuration("LEG_CRAMP", 2), 4 * HOUR);
-  assert.equal(upgradedDuration("LEG_CRAMP", 3), 6 * HOUR);
+// §3.4 duration standardization (2026-07-25): windowed upgradeable powerups run
+// 1h base +1h/level → 1/2/3/4h. (§9-authorized existing-test literal update.)
+test("upgradedDuration: Leg Cramp — 1h / 2h / 3h / 4h", () => {
+  assert.equal(upgradedDuration("LEG_CRAMP", 0), 1 * HOUR);
+  assert.equal(upgradedDuration("LEG_CRAMP", 1), 2 * HOUR);
+  assert.equal(upgradedDuration("LEG_CRAMP", 2), 3 * HOUR);
+  assert.equal(upgradedDuration("LEG_CRAMP", 3), 4 * HOUR);
 });
 
-test("upgradedDuration: Runner's High — 3h / 4h / 5h / 7h", () => {
-  assert.equal(upgradedDuration("RUNNERS_HIGH", 0), 3 * HOUR);
-  assert.equal(upgradedDuration("RUNNERS_HIGH", 1), 4 * HOUR);
-  assert.equal(upgradedDuration("RUNNERS_HIGH", 2), 5 * HOUR);
-  assert.equal(upgradedDuration("RUNNERS_HIGH", 3), 7 * HOUR);
+test("upgradedDuration: Runner's High — 1h / 2h / 3h / 4h", () => {
+  assert.equal(upgradedDuration("RUNNERS_HIGH", 0), 1 * HOUR);
+  assert.equal(upgradedDuration("RUNNERS_HIGH", 1), 2 * HOUR);
+  assert.equal(upgradedDuration("RUNNERS_HIGH", 2), 3 * HOUR);
+  assert.equal(upgradedDuration("RUNNERS_HIGH", 3), 4 * HOUR);
 });
 
-// Item 7 (owner nerf 2026-07-24): stealth is now 60/75/90/120 min for all clients.
-test("upgradedDuration: Stealth Mode — 60m / 75m / 90m / 120m", () => {
-  assert.equal(upgradedDuration("STEALTH_MODE", 0), 60 * 60 * 1000);
-  assert.equal(upgradedDuration("STEALTH_MODE", 1), 75 * 60 * 1000);
-  assert.equal(upgradedDuration("STEALTH_MODE", 2), 90 * 60 * 1000);
-  assert.equal(upgradedDuration("STEALTH_MODE", 3), 120 * 60 * 1000);
+// §3.4 (2026-07-25): stealth adopts the standard 1/2/3/4h ladder (supersedes the
+// 2026-07-24 60/75/90/120 nerf).
+test("upgradedDuration: Stealth Mode — 1h / 2h / 3h / 4h", () => {
+  assert.equal(upgradedDuration("STEALTH_MODE", 0), 1 * HOUR);
+  assert.equal(upgradedDuration("STEALTH_MODE", 1), 2 * HOUR);
+  assert.equal(upgradedDuration("STEALTH_MODE", 2), 3 * HOUR);
+  assert.equal(upgradedDuration("STEALTH_MODE", 3), 4 * HOUR);
 });
 
-test("upgradedDuration: Wrong Turn — 1h / 1.5h / 2h / 3h", () => {
+test("upgradedDuration: Wrong Turn — 1h / 2h / 3h / 4h", () => {
   assert.equal(upgradedDuration("WRONG_TURN", 0), 1 * HOUR);
-  assert.equal(upgradedDuration("WRONG_TURN", 1), 1.5 * HOUR);
-  assert.equal(upgradedDuration("WRONG_TURN", 2), 2 * HOUR);
-  assert.equal(upgradedDuration("WRONG_TURN", 3), 3 * HOUR);
+  assert.equal(upgradedDuration("WRONG_TURN", 1), 2 * HOUR);
+  assert.equal(upgradedDuration("WRONG_TURN", 2), 3 * HOUR);
+  assert.equal(upgradedDuration("WRONG_TURN", 3), 4 * HOUR);
 });
 
-test("upgradedDuration: Detour Sign — 3h / 4h / 5h / 7h", () => {
-  assert.equal(upgradedDuration("DETOUR_SIGN", 0), 3 * HOUR);
-  assert.equal(upgradedDuration("DETOUR_SIGN", 1), 4 * HOUR);
-  assert.equal(upgradedDuration("DETOUR_SIGN", 2), 5 * HOUR);
-  assert.equal(upgradedDuration("DETOUR_SIGN", 3), 7 * HOUR);
+test("upgradedDuration: Detour Sign — 1h / 2h / 3h / 4h", () => {
+  assert.equal(upgradedDuration("DETOUR_SIGN", 0), 1 * HOUR);
+  assert.equal(upgradedDuration("DETOUR_SIGN", 1), 2 * HOUR);
+  assert.equal(upgradedDuration("DETOUR_SIGN", 2), 3 * HOUR);
+  assert.equal(upgradedDuration("DETOUR_SIGN", 3), 4 * HOUR);
 });
 
 test("upgradedDuration: Compression Socks — 24h / 30h / 36h / 48h", () => {

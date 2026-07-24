@@ -232,6 +232,10 @@ async function computeEffectModifiers(effects, rawTotal, userId, stepSampleModel
   });
   const ghostPeppers = effects.filter((e) => e.type === "GHOST_PEPPER");
   const umbrellas = effects.filter((e) => e.type === "UMBRELLA");
+  // Character power (§3.6.2): Corgi zoomies pseudo-effect windows, folded in as a
+  // self-buff via the shared math. Threaded in by the callers (getRaceProgress /
+  // settlement) as type "ZOOMIES" rows.
+  const zoomies = effects.filter((e) => e.type === "ZOOMIES");
 
   // Umbrella subtraction happens BEFORE m(t): pass the shared multiplier the
   // rain windows that actually penalize (§3.3). Display and settlement both build
@@ -249,6 +253,7 @@ async function computeEffectModifiers(effects, rawTotal, userId, stepSampleModel
     coinFlipWins,
     coinFlipLoses,
     ghostPeppers,
+    zoomies,
   };
 
   const hasStepEffect =
@@ -260,7 +265,8 @@ async function computeEffectModifiers(effects, rawTotal, userId, stepSampleModel
     uprisings.length ||
     rallyFlags.length ||
     coinFlips.length ||
-    ghostPeppers.length;
+    ghostPeppers.length ||
+    zoomies.length;
 
   if (hasStepEffect) {
     if (hasSampleData) {
@@ -282,6 +288,7 @@ async function computeEffectModifiers(effects, rawTotal, userId, stepSampleModel
         ...coinFlipWins,
         ...coinFlipLoses,
         ...ghostPeppers,
+        ...zoomies,
       ]) {
         starts.push(new Date(e.startsAt).getTime());
       }
@@ -432,6 +439,7 @@ function signedMultiplierForEffects(effects = [], nowMs = Date.now()) {
   });
   const ghostPeppers = effects.filter((e) => e.type === "GHOST_PEPPER");
   const umbrellas = effects.filter((e) => e.type === "UMBRELLA");
+  const zoomies = effects.filter((e) => e.type === "ZOOMIES");
 
   const groups = {
     legCramps,
@@ -444,6 +452,7 @@ function signedMultiplierForEffects(effects = [], nowMs = Date.now()) {
     coinFlipWins,
     coinFlipLoses,
     ghostPeppers,
+    zoomies,
   };
   return signedMultiplierAt(nowMs, groups);
 }

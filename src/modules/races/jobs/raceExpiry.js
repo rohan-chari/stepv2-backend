@@ -21,6 +21,13 @@ const {
 } = require("../../powerups/hitchhikeCopies");
 const { mintPiggyBank } = require("../../powerups/commands/expireEffects");
 const { awardCoins } = require("../../../shared/economy/awardCoins");
+const { CharacterEffectWindow } = require("../../powerups/models/characterEffectWindow");
+const {
+  characterPowersEnabled,
+  countCapybaras,
+  computeHerdBonus,
+  zoomiesWindowsToEffects,
+} = require("../services/characterPowers");
 
 // Env-tunable Bounty payout (§3.11). Frozen into each Bounty's metadata at
 // use-time, so this default only applies to rows written before the env existed.
@@ -123,6 +130,16 @@ async function resolveExpiredRaces() {
         globalEvents = [];
       }
 
+      // §3.6 character powers (settlement side). Gated behind CHARACTER_POWERS_ENABLED
+      // and only in powerups-enabled races. capyCount is the live capybara count
+      // (incl. self) for the herd bonus, computed once per race.
+      const charPowersOn = characterPowersEnabled() && race.powerupsEnabled;
+      const capyCount = charPowersOn ? countCapybaras(acceptedParticipants) : 0;
+      const herdEnd = race.endsAt
+        ? new Date(Math.min(settlementTime.getTime(), new Date(race.endsAt).getTime()))
+        : settlementTime;
+      const settlementTz = raceTimeZone(race, "UTC");
+
       const standings = [];
 
       // Phase A: per-participant PRE-LEECH totals + the leeches targeting each.
@@ -163,12 +180,33 @@ async function resolveExpiredRaces() {
             raceStartedAt: race.startedAt,
             // Seeded races settle in their canonical tz so settled totals match
             // what getRaceProgress showed live; user races keep UTC (legacy).
-            timeZone: raceTimeZone(race, "UTC"),
+            timeZone: settlementTz,
             stepsModel: Steps,
             stepSampleModel: StepSample,
             now: settlementTime,
             globalEvents,
           });
+
+        // §3.6: Corgi zoomies windows overlapping the race, and the Bara herd
+        // bonus (added to the bonusSteps term). Both fold in via calculateCurrentTotal
+        // exactly as the live display path does, so settlement == display.
+        let characterEffects = [];
+        let herdBonusSteps = 0;
+        if (charPowersOn) {
+          const windows = await CharacterEffectWindow.findActiveInRangeForUser(
+            participant.userId,
+            race.startedAt,
+            settlementTime
+          );
+          characterEffects = zoomiesWindowsToEffects(windows);
+          herdBonusSteps = computeHerdBonus({
+            participant,
+            capyCount,
+            effectiveStart,
+            end: herdEnd,
+            timeZone: settlementTz,
+          }).bonusSteps;
+        }
 
         const {
           total,
@@ -183,6 +221,7 @@ async function resolveExpiredRaces() {
           coinFlipWins,
           coinFlipLoses,
           ghostPeppers,
+          zoomies,
         } = await calculateCurrentTotal({
             raceId: race.id,
             racePowerupsEnabled: race.powerupsEnabled,
@@ -193,6 +232,8 @@ async function resolveExpiredRaces() {
             stepSampleModel: StepSample,
             globalEvents,
             now: settlementTime,
+            characterEffects,
+            extraBonusSteps: herdBonusSteps,
           });
 
         preLeech.push({
@@ -211,6 +252,7 @@ async function resolveExpiredRaces() {
             coinFlipWins,
             coinFlipLoses,
             ghostPeppers,
+            zoomies,
           },
         });
       }

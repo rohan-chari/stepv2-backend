@@ -63,6 +63,7 @@ Object.assign(module.exports, require("./commands/autoEnrollNewUser"));
 Object.assign(module.exports, require("./commands/autoJoinFeaturedRaces"));
 
 Object.assign(module.exports, require("./jobs/raceExpiry"));
+Object.assign(module.exports, require("./jobs/characterEffectScheduler"));
 Object.assign(module.exports, require("./jobs/raceResolutionQueue"));
 Object.assign(module.exports, require("./jobs/autoStartScheduledRaces"));
 Object.assign(module.exports, require("./jobs/placementRecompute"));

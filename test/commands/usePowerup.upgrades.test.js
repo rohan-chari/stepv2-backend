@@ -258,7 +258,9 @@ function durationAssert(effect, expectedHours) {
   );
 }
 
-test("Lvl 3 Leg Cramp: 6h freeze duration, 90 coins deducted", async () => {
+// §3.4 duration standardization (2026-07-25): 1/2/3/4h ladders (§9-authorized
+// existing-test DURATION literal update; coin amounts unchanged).
+test("Lvl 3 Leg Cramp: 4h freeze duration, 90 coins deducted", async () => {
   const ctx = makeDeps({ powerupType: "LEG_CRAMP" });
   const use = buildUsePowerup(ctx.deps);
 
@@ -266,54 +268,54 @@ test("Lvl 3 Leg Cramp: 6h freeze duration, 90 coins deducted", async () => {
     userId: "user-1", raceId: "race-1", powerupId: "pw-1", targetUserId: "user-2", upgradeLevel: 3,
   });
 
-  durationAssert(ctx.effectsCreated[0], 6);
+  durationAssert(ctx.effectsCreated[0], 4);
   assert.equal(ctx.coinDeductions[0].amount, 90);
 });
 
-test("Lvl 1 Leg Cramp: 3h freeze, 10 coins", async () => {
+test("Lvl 1 Leg Cramp: 2h freeze, 10 coins", async () => {
   const ctx = makeDeps({ powerupType: "LEG_CRAMP" });
   const use = buildUsePowerup(ctx.deps);
   await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", targetUserId: "user-2", upgradeLevel: 1 });
-  durationAssert(ctx.effectsCreated[0], 3);
+  durationAssert(ctx.effectsCreated[0], 2);
   assert.equal(ctx.coinDeductions[0].amount, 10);
 });
 
-test("Lvl 3 Runner's High: 7h duration, 45 coins deducted", async () => {
+test("Lvl 3 Runner's High: 4h duration, 45 coins deducted", async () => {
   const ctx = makeDeps({ powerupType: "RUNNERS_HIGH" });
   const use = buildUsePowerup(ctx.deps);
   await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", upgradeLevel: 3 });
-  durationAssert(ctx.effectsCreated[0], 7);
+  durationAssert(ctx.effectsCreated[0], 4);
   // Runner's High is COMMON now (was UNCOMMON): 5/15/45.
   assert.equal(ctx.coinDeductions[0].amount, 45);
 });
 
-// Item 7 (2026-07-24): stealth durations nerfed to 60/75/90/120 min (L0..L3).
-test("Lvl 3 Stealth Mode: 2h (120m) duration", async () => {
+// §3.4 (2026-07-25): stealth adopts the standard 1/2/3/4h ladder.
+test("Lvl 3 Stealth Mode: 4h duration", async () => {
   const ctx = makeDeps({ powerupType: "STEALTH_MODE" });
   const use = buildUsePowerup(ctx.deps);
   await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", upgradeLevel: 3 });
-  durationAssert(ctx.effectsCreated[0], 2);
+  durationAssert(ctx.effectsCreated[0], 4);
 });
 
-test("Lvl 2 Stealth Mode: 1.5h (90m) duration", async () => {
+test("Lvl 2 Stealth Mode: 3h duration", async () => {
   const ctx = makeDeps({ powerupType: "STEALTH_MODE" });
   const use = buildUsePowerup(ctx.deps);
   await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", upgradeLevel: 2 });
-  durationAssert(ctx.effectsCreated[0], 1.5);
-});
-
-test("Lvl 3 Wrong Turn: 3h duration, 90 coins deducted", async () => {
-  const ctx = makeDeps({ powerupType: "WRONG_TURN" });
-  const use = buildUsePowerup(ctx.deps);
-  await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", targetUserId: "user-2", upgradeLevel: 3 });
   durationAssert(ctx.effectsCreated[0], 3);
 });
 
-test("Lvl 3 Detour Sign: 7h duration, 25 coins deducted (Common rarity)", async () => {
+test("Lvl 3 Wrong Turn: 4h duration, 90 coins deducted", async () => {
+  const ctx = makeDeps({ powerupType: "WRONG_TURN" });
+  const use = buildUsePowerup(ctx.deps);
+  await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", targetUserId: "user-2", upgradeLevel: 3 });
+  durationAssert(ctx.effectsCreated[0], 4);
+});
+
+test("Lvl 3 Detour Sign: 4h duration, 25 coins deducted (Common rarity)", async () => {
   const ctx = makeDeps({ powerupType: "DETOUR_SIGN" });
   const use = buildUsePowerup(ctx.deps);
   await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", targetUserId: "user-2", upgradeLevel: 3 });
-  durationAssert(ctx.effectsCreated[0], 7);
+  durationAssert(ctx.effectsCreated[0], 4);
   assert.equal(ctx.coinDeductions[0].amount, 45);
 });
 
@@ -510,7 +512,8 @@ test("Lvl 3 Leg Cramp blocked by shield: coins deducted, no effect created", asy
 // Race feed event description includes "Lvl X" prefix
 // ===========================================================================
 
-test("Race feed for Lvl 3 Leg Cramp says 'Lvl 3' and shows 6 hours", async () => {
+// §3.4 (2026-07-25): Lvl 3 Leg Cramp is now 4h (§9-authorized DURATION literal).
+test("Race feed for Lvl 3 Leg Cramp says 'Lvl 3' and shows 4 hours", async () => {
   const ctx = makeDeps({ powerupType: "LEG_CRAMP" });
   const use = buildUsePowerup(ctx.deps);
 
@@ -519,7 +522,7 @@ test("Race feed for Lvl 3 Leg Cramp says 'Lvl 3' and shows 6 hours", async () =>
   const feedEvent = ctx.feedEvents.find((e) => e.eventType === "POWERUP_USED");
   assert.ok(feedEvent, "feed event should exist");
   assert.match(feedEvent.description, /Lvl 3/);
-  assert.match(feedEvent.description, /6 hours/);
+  assert.match(feedEvent.description, /4 hours/);
 });
 
 test("Race feed for Lvl 0 (base) Leg Cramp does NOT include 'Lvl' prefix", async () => {

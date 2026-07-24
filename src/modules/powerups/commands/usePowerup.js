@@ -29,6 +29,9 @@ const {
 const {
   imposterEnabled: defaultImposterEnabled,
 } = require("../constants/powerupGating");
+const {
+  isDrillSergeantQuietHours,
+} = require("../constants/quietHours");
 const { awardCoins: defaultAwardCoins } = require("../../../shared/economy/awardCoins");
 const {
   DEFAULT_CONFIG: BALANCE_DEFAULT_CONFIG,
@@ -94,7 +97,10 @@ const UNSTEALABLE_TYPES = ["SNEAKY_SWAP", "MYSTERY_BOX", ...POWERUPS5_TYPES];
 // Outage, Quicksand) are NOT redirected — they resolve per-victim instead.
 const DECOY_REDIRECTABLE_TYPES = [...OFFENSIVE_TYPES, "IMPOSTER"];
 // Wave-5 durations.
-const UPRISING_DURATION_MS = 2 * 60 * 60 * 1000;
+// §3.4 duration standardization: non-upgradeable action windows standardize to
+// 1h base (was 2h). POWER_OUTAGE (30m) and GHOST_PEPPER (30m+30m) are explicit
+// owner exceptions and keep their durations.
+const UPRISING_DURATION_MS = 1 * 60 * 60 * 1000;
 const UPRISING_MULTIPLIER = 2;
 const GHOST_PEPPER_BOOST_MS = 30 * 60 * 1000;
 const GHOST_PEPPER_FREEZE_MS = 30 * 60 * 1000;
@@ -105,7 +111,7 @@ const POWER_OUTAGE_DURATION_MS = 30 * 60 * 1000;
 const UMBRELLA_DURATION_MS = 12 * 60 * 60 * 1000;
 const RALLY_FLAG_DURATION_MS = 60 * 60 * 1000;
 const RALLY_FLAG_MULTIPLIER = 1.25;
-const DRILL_SERGEANT_DURATION_MS = 2 * 60 * 60 * 1000;
+const DRILL_SERGEANT_DURATION_MS = 1 * 60 * 60 * 1000;
 const DRILL_SERGEANT_GOAL_STEPS = 3000;
 const DRILL_SERGEANT_PENALTY_STEPS = 1500;
 const PIGGY_BANK_DURATION_MS = 24 * 60 * 60 * 1000;
@@ -222,6 +228,21 @@ const CAMPFIRE_BOOST_MS = 60 * 60 * 1000;
 function isPocketWatchExtendable(effect) {
   if (!effect.expiresAt) return false;
   if (effect.type === "POCKET_WATCH") return false;
+  // §3.3 favorable-tail filter (shared by the VALIDATION pre-check AND the
+  // APPLICATION loop, so they can never disagree — validation passing on a
+  // pepper-only state while application extends nothing would waste the watch):
+  // legacy Pocket Watch extends only effects whose REMAINING tail helps the
+  // caster. Excluded self-harms:
+  //   * GHOST_PEPPER — the tail is a burnout FREEZE, so extending expiresAt just
+  //     lengthens the freeze (empirically proven — see the regression test).
+  //   * COIN_FLIP losing rows — a self ×0.5 debuff (same footgun family).
+  // Winning Coin Flips stay extendable, and CAMPFIRE_REST (freeze-then-boost)
+  // stays extendable because extending its expiresAt lengthens the BOOST.
+  if (effect.type === "GHOST_PEPPER") return false;
+  if (effect.type === "COIN_FLIP") {
+    const m = Number((effect.metadata || {}).multiplier);
+    if (Number.isFinite(m) && m < 1) return false;
+  }
   if (effect.sourceUserId && effect.targetUserId) {
     return effect.sourceUserId === effect.targetUserId;
   }
@@ -731,6 +752,17 @@ function buildUsePowerup(dependencies = {}) {
     if (!race || race.status !== "ACTIVE") {
       throw new PowerupUseError("Race is not active", 400);
     }
+
+    // §3.7 hard gate: a race whose creator disabled powerups accepts NONE — not
+    // earned, not store-redeemed. Rejected BEFORE consumption (the powerup stays
+    // HELD; the redeemed-refund path is never reached because nothing is spent).
+    if (race.powerupsEnabled === false) {
+      throw new PowerupUseError(
+        "Powerups are disabled in this race.",
+        400,
+        "POWERUPS_DISABLED"
+      );
+    }
     // End-time gate: between a race's endsAt and the raceExpiry cron settling it
     // (flipping status to COMPLETED), status is still ACTIVE. Without this guard
     // an opponent could fire an offensive powerup — and trigger an attack push —
@@ -838,6 +870,27 @@ function buildUsePowerup(dependencies = {}) {
       throw new PowerupUseError("This powerup cannot be used on another player", 400);
     }
 
+    // §3.1 Drill Sergeant sleep blocker: a dare on a target whose LOCAL time is
+    // inside their sleep window [22:00, 07:00) is rejected BEFORE consumption and
+    // before any coin spend, so the held/redeemed powerup stays usable. Checked
+    // against the ORIGINAL target, before any Mirror bounce (a reflected dare lands
+    // on the caster, who is awake). Fallback: target tz -> race tz -> ALLOW
+    // (fail-open when no timezone is known, owner-confirmed).
+    if (type === "DRILL_SERGEANT") {
+      const targetUser = await userModel.findById(targetUserId);
+      let asleep = isDrillSergeantQuietHours(now(), targetUser && targetUser.timezone);
+      if (asleep === null) {
+        asleep = isDrillSergeantQuietHours(now(), race.timezone);
+      }
+      if (asleep === true) {
+        throw new PowerupUseError(
+          "That rival is likely asleep — Drill Sergeant is blocked from 10PM to 7AM their time.",
+          400,
+          "TARGET_ASLEEP"
+        );
+      }
+    }
+
     // Team races (TR-651/652/653/657): offensive/AoE/auto-target powerups only
     // ever hit the ENEMY team, and forfeited members drop out of every pool.
     const isTeamRace = race.isTeamRace === true;
@@ -877,7 +930,8 @@ function buildUsePowerup(dependencies = {}) {
       }
 
       const currentTime = now();
-      const expiresAt = new Date(currentTime.getTime() + 2 * 60 * 60 * 1000);
+      // §3.4: Quicksand standardizes to a 1h freeze window (was 2h).
+      const expiresAt = new Date(currentTime.getTime() + 1 * 60 * 60 * 1000);
       const targetResults = await db.$transaction(async (tx) => {
         // Serialize Quicksand submissions within a race. This closes both the
         // same-item double-submit race and two items racing to freeze one target.
@@ -946,7 +1000,7 @@ function buildUsePowerup(dependencies = {}) {
       return {
         blocked: applied === 0,
         outcome: applied === 0 ? "BLOCKED" : applied === targetResults.length ? "APPLIED" : "PARTIAL",
-        durationMs: 2 * 60 * 60 * 1000,
+        durationMs: 1 * 60 * 60 * 1000,
         targetResults,
       };
     }
@@ -1053,7 +1107,7 @@ function buildUsePowerup(dependencies = {}) {
         actorUserId: userId,
         eventType: "POWERUP_USED",
         powerupType: type,
-        description: `${myDisplayName} sparked an Uprising! ${beneficiaries.length} runner${beneficiaries.length === 1 ? "" : "s"} get 2x steps for 2 hours.`,
+        description: `${myDisplayName} sparked an Uprising! ${beneficiaries.length} runner${beneficiaries.length === 1 ? "" : "s"} get 2x steps for 1 hour.`,
         metadata: { affected: beneficiaries.length },
       });
       events.emit("POWERUP_USED", { raceId, userId, powerupType: type, upgradeLevel: 0 });
@@ -2916,7 +2970,7 @@ function buildUsePowerup(dependencies = {}) {
           eventType: "POWERUP_USED",
           powerupType: type,
           targetUserId: resolvedTargetUserId,
-          description: `${myDisplayName} dared ${targetDisplayName} with a Drill Sergeant! Hit ${DRILL_SERGEANT_GOAL_STEPS.toLocaleString()} steps in 2 hours or lose ${DRILL_SERGEANT_PENALTY_STEPS.toLocaleString()}.`,
+          description: `${myDisplayName} dared ${targetDisplayName} with a Drill Sergeant! Hit ${DRILL_SERGEANT_GOAL_STEPS.toLocaleString()} steps in 1 hour or lose ${DRILL_SERGEANT_PENALTY_STEPS.toLocaleString()}.`,
         });
         break;
       }
