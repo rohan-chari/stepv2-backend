@@ -1294,6 +1294,26 @@
       }
     },
     {
+      "sku": "turtle",
+      "name": "Turtle",
+      "description": "Slow and steady — and armored. Shell: 30% chance to bounce off any attack a rival throws your way.",
+      "slot": "CHARACTER",
+      "priceCoins": 1000,
+      "assetKey": "turtle",
+      "active": true,
+      "testOnly": true,
+      "earnOnly": false,
+      "bobble": false,
+      "sortOrder": 201,
+      "renderMetadata": {
+        "offsetX": 0,
+        "offsetY": 0.085,
+        "rotation": 0,
+        "scale": 0.7,
+        "animationFrames": 5
+      }
+    },
+    {
       "sku": "ranked_legend_crown",
       "name": "Legend Crown",
       "description": "Earned, never bought. Reach Legend in Ranked.",

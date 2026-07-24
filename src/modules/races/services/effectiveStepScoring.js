@@ -187,8 +187,23 @@ function umbrellaAdjustedRainstorms(rainstorms, umbrellas, nowMs) {
   return adjusted;
 }
 
-async function sumWindows(model, userId, windows) {
+// `now` (optional) opts the caller into CLOSED-bucket sums: samples whose
+// periodEnd is still in the future are excluded. Effect terms MUST use this --
+// a bucket that is still filling gets re-cut by proration on every recompute,
+// which made a ghost pepper's frozen victim bleed steps while standing still and
+// earn ~1.5x while walking (prod, 2026-07-24). Models that predate the closed
+// variant fall back to the open-bucket sums, so external callers and test
+// doubles keep working unchanged.
+async function sumWindows(model, userId, windows, now) {
   if (windows.length === 0) return [];
+  if (now != null && typeof model.sumClosedStepsInWindows === "function") {
+    return model.sumClosedStepsInWindows(userId, windows, now);
+  }
+  if (now != null && typeof model.sumClosedStepsInWindow === "function") {
+    return Promise.all(
+      windows.map((w) => model.sumClosedStepsInWindow(userId, w.start, w.end, now))
+    );
+  }
   if (typeof model.sumStepsInWindows === "function") {
     return model.sumStepsInWindows(userId, windows);
   }
@@ -312,7 +327,8 @@ async function computeEffectModifiers(effects, rawTotal, userId, stepSampleModel
         const sums = await sumWindows(
           stepSampleModel,
           userId,
-          segments.map((s) => ({ start: s.start, end: s.end }))
+          segments.map((s) => ({ start: s.start, end: s.end })),
+          nowDate
         );
         for (let k = 0; k < segments.length; k++) {
           const s = sums[k];

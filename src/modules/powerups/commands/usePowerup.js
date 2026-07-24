@@ -42,6 +42,15 @@ const {
 const {
   evaluateHighMultiplierAlert,
 } = require("../../races/services/highMultiplierAlert");
+// Turtle "Shell" (docs/turtle-character-requirements.md §5.2). Rolled at every
+// site that consults a COMPRESSION_SOCKS shield, AFTER Mirror/Decoy and
+// IMMEDIATELY BEFORE the shield lookup, so a successful bounce leaves the
+// defender's paid shield banked. Self-gating: returns false unless
+// CHARACTER_POWERS_ENABLED is on, TURTLE_SHELL_DISABLED is off, the defender is
+// a turtle, and the attack's TYPE is in the in-race mystery-box drop pool.
+const {
+  shellBlocksAttack: defaultShellBlocksAttack,
+} = require("../../races/services/characterPowers");
 
 // SIGNAL_JAMMER is a single-target attack (store-only): it is OFFENSIVE +
 // TARGETED so the shared targeting validation, finished-target rejection, and
@@ -414,6 +423,7 @@ async function applyMysteryPotion(ctx) {
     userId, raceId, powerupId, myParticipant, myDisplayName,
     acceptedParticipants, isEnemy, isAliveTarget, effectModel, participantModel,
     eventModel, events, awardCoins, random, now, currentTime, finalize,
+    shellBlocksAttack = defaultShellBlocksAttack, shellRandom = () => Math.random(),
   } = ctx;
 
   const config = (() => {
@@ -520,6 +530,7 @@ async function applyMysteryPotion(ctx) {
         rolled, aliveEnemies, acceptedParticipants, isAliveTarget, isTeamRace,
         userId, myParticipant, myDisplayName, effectModel, participantModel,
         eventModel, events, random, now, currentTime, raceId, powerupId, result,
+        shellBlocksAttack, shellRandom,
       });
       if (!handled) { await applyProteinFallback(rolled); }
       break;
@@ -543,6 +554,7 @@ async function applyPotionEnemyAttack(a) {
     rolled, aliveEnemies, acceptedParticipants, isAliveTarget, isTeamRace,
     userId, myParticipant, myDisplayName, effectModel, participantModel,
     eventModel, events, random, now, currentTime, raceId, powerupId, result,
+    shellBlocksAttack = defaultShellBlocksAttack, shellRandom = () => Math.random(),
   } = a;
   if (aliveEnemies.length === 0) return false;
   let victim = aliveEnemies[Math.floor(random() * aliveEnemies.length)];
@@ -582,6 +594,23 @@ async function applyPotionEnemyAttack(a) {
       targetParticipant = redirect;
       result.redirected = true; result.redirectedBy = "DECOY"; result.redirectedToUserId = redirect.userId;
       result.outcome = "REDIRECTED";
+    }
+    // Turtle Shell on the (possibly redirected) victim, immediately before the
+    // socks lookup. §5.1: the test is applied to the ROLLED type, not to the
+    // potion wrapper — a potion that rolls a Leg Cramp IS Shell-blockable even
+    // though MYSTERY_POTION itself is store-exclusive. Mirrors this site's own
+    // socks branch exactly (no feed row: every Mystery Potion feed line is
+    // written as a MYSTERY_POTION event, and a blocked roll writes none).
+    if (
+      shellBlocksAttack({
+        targetUser: targetParticipant.user,
+        powerupType: rolled,
+        random: shellRandom,
+      })
+    ) {
+      result.rolled = rolled; result.blocked = true; result.blockedBy = "SHELL";
+      result.outcome = result.outcome === "REDIRECTED" ? "REDIRECTED" : "BLOCKED";
+      return true;
     }
     // Socks on the (possibly redirected) victim.
     const socks = await effectModel.findActiveByTypeForParticipant(targetParticipant.id, "COMPRESSION_SOCKS");
@@ -708,6 +737,14 @@ function buildUsePowerup(dependencies = {}) {
   // Imposter kill switch (Item 3). Injectable for tests; defaults to the env
   // reader (enabled unless IMPOSTER_ENABLED="false").
   const imposterEnabled = dependencies.imposterEnabled || defaultImposterEnabled;
+  // Turtle Shell roll (§5.2). Injectable for tests; the default reads its own
+  // env gates and the balance-config drop pool at call time.
+  const shellBlocksAttack = dependencies.shellBlocksAttack || defaultShellBlocksAttack;
+  // The Shell's RNG. Honors an injected `dependencies.random` exactly like every
+  // other roll here, but when none is injected it resolves Math.random at CALL
+  // time (the module-level `random` above binds it once at build time, which a
+  // through-the-HTTP-boundary test cannot control).
+  const shellRandom = dependencies.random || (() => Math.random());
 
   const usePowerupCore = async function usePowerup({
     userId,
@@ -965,6 +1002,16 @@ function buildUsePowerup(dependencies = {}) {
           if (existingFreeze) {
             throw new PowerupUseError("A selected target is already frozen", 400, "TARGET_ALREADY_FROZEN");
           }
+          // Turtle Shell, immediately before the shield lookup. The locked
+          // participant rows carry no `user`, so the equipped character comes
+          // from the outer (already-loaded) accepted set. QUICKSAND is not in
+          // the drop pool, so this never fires today — wired for correctness if
+          // the pool ever moves (§4 D5).
+          const victimUser = acceptedParticipants.find((p) => p.userId === victim.userId)?.user;
+          if (shellBlocksAttack({ targetUser: victimUser, powerupType: type, random: shellRandom })) {
+            results.push({ targetUserId: victim.userId, outcome: "BLOCKED", expiresAt: null });
+            continue;
+          }
           const shield = await tx.raceActiveEffect.findFirst({
             where: { targetParticipantId: victim.id, type: "COMPRESSION_SOCKS", status: "ACTIVE" },
             orderBy: { createdAt: "asc" },
@@ -1179,6 +1226,27 @@ function buildUsePowerup(dependencies = {}) {
           (e) => e.type === "POWER_OUTAGE" && e.expiresAt && new Date(e.expiresAt) > now()
         );
         if (alreadyJammed) continue;
+        // Turtle Shell, immediately before the shield lookup. POWER_OUTAGE is
+        // store-exclusive so this never fires today (§4 D5); wired anyway.
+        if (shellBlocksAttack({ targetUser: victim.user, powerupType: type, random: shellRandom })) {
+          blockedCount += 1;
+          await eventModel.create({
+            raceId,
+            actorUserId: victim.userId,
+            eventType: "POWERUP_BLOCKED",
+            powerupType: type,
+            targetUserId: userId,
+            description: `${victim.user?.displayName || "A runner"}'s Shell bounced off ${myDisplayName}'s ${POWERUP_NAMES[type]}!`,
+          });
+          events.emit("POWERUP_BLOCKED", {
+            raceId,
+            attackerUserId: userId,
+            defenderUserId: victim.userId,
+            blockedType: type,
+            upgradeLevel: 0,
+          });
+          continue;
+        }
         const socks = victimEffects.find((e) => e.type === "COMPRESSION_SOCKS");
         if (socks) {
           await effectModel.update(socks.id, { status: "BLOCKED" });
@@ -1255,6 +1323,8 @@ function buildUsePowerup(dependencies = {}) {
         now,
         currentTime: now(),
         finalize: finalizeSelfContainedUse,
+        shellBlocksAttack,
+        shellRandom,
       });
     }
 
@@ -1931,6 +2001,64 @@ function buildUsePowerup(dependencies = {}) {
     // the `!reflected` guard is also what keeps us from checking the attacker's
     // own shields here.
     if (!reflected && OFFENSIVE_TYPES.includes(type) && targetParticipant) {
+      // Turtle Shell (§5.2/§5.3). Rolled here — after Mirror and Decoy, before
+      // the shield lookup — so a bounce does NOT consume the target's socks.
+      // The attacker's upgrade coins are still forfeit, exactly like a socks
+      // block. No effect row is created, so live display and settlement agree
+      // for free: a blocked attack simply never existed.
+      if (
+        shellBlocksAttack({
+          targetUser: targetParticipant.user,
+          powerupType: type,
+          random: shellRandom,
+        })
+      ) {
+        await powerupModel.update(powerupId, {
+          status: "USED",
+          usedAt: now(),
+          targetUserId: resolvedTargetUserId,
+          upgradeLevel,
+        });
+
+        await eventModel.create({
+          raceId,
+          actorUserId: resolvedTargetUserId,
+          eventType: "POWERUP_BLOCKED",
+          powerupType: type,
+          targetUserId: userId,
+          description: `${targetDisplayName}'s Shell bounced off ${myDisplayName}'s ${levelPrefix(upgradeLevel)}${POWERUP_NAMES[type]}!`,
+        });
+
+        if (upgradeLevel > 0) {
+          await upgradeEventModel.create({
+            raceId,
+            userId,
+            powerupId,
+            powerupType: type,
+            tier: upgradeLevel,
+            costCoins,
+            status: "BLOCKED",
+            targetUserId: resolvedTargetUserId,
+          });
+        }
+
+        events.emit("POWERUP_BLOCKED", {
+          raceId,
+          attackerUserId: userId,
+          defenderUserId: resolvedTargetUserId,
+          blockedType: type,
+          upgradeLevel,
+        });
+
+        return {
+          blocked: true,
+          blockedBy: "SHELL",
+          outcome: "BLOCKED",
+          upgradeLevel,
+          coinsSpent: costCoins,
+        };
+      }
+
       const shield = await effectModel.findActiveByTypeForParticipant(
         targetParticipant.id,
         "COMPRESSION_SOCKS"
@@ -1998,6 +2126,51 @@ function buildUsePowerup(dependencies = {}) {
     // non-upgradeable, so upgradeLevel is 0 and no coins were spent — nothing to
     // forfeit and no upgrade event to write.
     if (type === "IMPOSTER" && imposterTargetParticipant) {
+      // Turtle Shell, same position as everywhere else: immediately before the
+      // shield lookup. IMPOSTER is store-exclusive, so `shellBlocksAttack`
+      // returns false for it today (§4 D3) — the call is wired anyway so the
+      // rule stays correct if the drop pool ever moves. Imposter is
+      // non-upgradeable: no coins spent, no upgrade event to write.
+      if (
+        shellBlocksAttack({
+          targetUser: imposterTargetParticipant.user,
+          powerupType: type,
+          random: shellRandom,
+        })
+      ) {
+        await powerupModel.update(powerupId, {
+          status: "USED",
+          usedAt: now(),
+          targetUserId: resolvedTargetUserId,
+          upgradeLevel,
+        });
+
+        await eventModel.create({
+          raceId,
+          actorUserId: resolvedTargetUserId,
+          eventType: "POWERUP_BLOCKED",
+          powerupType: type,
+          targetUserId: userId,
+          description: `${targetDisplayName}'s Shell bounced off ${myDisplayName}'s ${POWERUP_NAMES[type]}!`,
+        });
+
+        events.emit("POWERUP_BLOCKED", {
+          raceId,
+          attackerUserId: userId,
+          defenderUserId: resolvedTargetUserId,
+          blockedType: type,
+          upgradeLevel,
+        });
+
+        return {
+          blocked: true,
+          blockedBy: "SHELL",
+          outcome: "BLOCKED",
+          upgradeLevel,
+          coinsSpent: costCoins,
+        };
+      }
+
       const shield = await effectModel.findActiveByTypeForParticipant(
         imposterTargetParticipant.id,
         "COMPRESSION_SOCKS"
@@ -2452,6 +2625,28 @@ function buildUsePowerup(dependencies = {}) {
             "UMBRELLA"
           );
           if (victimUmbrella && victimUmbrella.expiresAt && new Date(victimUmbrella.expiresAt) > now()) {
+            continue;
+          }
+
+          // Turtle Shell, immediately before the shield lookup. RAINSTORM is
+          // store-exclusive so this never fires today (§4 D5); wired anyway.
+          if (shellBlocksAttack({ targetUser: victim.user, powerupType: type, random: shellRandom })) {
+            blockedNames.push(victimName);
+            await eventModel.create({
+              raceId,
+              actorUserId: victim.userId,
+              eventType: "POWERUP_BLOCKED",
+              powerupType: type,
+              targetUserId: userId,
+              description: `${victimName}'s Shell bounced off ${myDisplayName}'s ${POWERUP_NAMES[type]}!`,
+            });
+            events.emit("POWERUP_BLOCKED", {
+              raceId,
+              attackerUserId: userId,
+              defenderUserId: victim.userId,
+              blockedType: type,
+              upgradeLevel,
+            });
             continue;
           }
 

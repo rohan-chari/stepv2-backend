@@ -331,6 +331,29 @@ async function prefetchScopedModels({
       ]);
       return sums[0];
     },
+    // CLOSED-bucket variant, prefetch-backed. Must exist here or the home card
+    // would score effects off open buckets while GET /races/:id/progress scores
+    // them off closed ones -- the two paths have to agree.
+    async sumClosedStepsInWindows(userId, windows, now) {
+      if (!windows || windows.length === 0) return [];
+      const covered = windows.every((w) => {
+        const ws = new Date(w.start).getTime();
+        const we = new Date(w.end).getTime();
+        return ws >= sampleStartMs && we <= sampleEndMs;
+      });
+      if (!covered) return stepSampleModel.sumClosedStepsInWindows(userId, windows, now);
+      const nowMs = new Date(now).getTime();
+      const rows = (samplesByUser.get(userId) || []).filter(
+        (r) => new Date(r.end).getTime() <= nowMs
+      );
+      return windows.map((w) =>
+        prorateSamplesIntoWindow(
+          rows,
+          new Date(w.start).getTime(),
+          new Date(w.end).getTime()
+        )
+      );
+    },
   };
 
   const scopedSteps = {

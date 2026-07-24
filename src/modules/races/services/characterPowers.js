@@ -16,6 +16,7 @@ const {
   formatDateString,
   parseDateString,
 } = require("../../../shared/time/week");
+const { balanceConfig } = require("../../economy/balanceConfig");
 
 // ── Env gates (§7) ──────────────────────────────────────────────────────────
 // Default OFF. Read at call time so a prod .env flip takes effect on the next
@@ -25,6 +26,11 @@ function characterPowersEnabled() {
 }
 function zoomiesPushDisabled() {
   return process.env.ZOOMIES_PUSH_DISABLED === "true";
+}
+// Turtle-only kill switch (spec §9). Flipping this leaves the cosmetic
+// purchasable and every other character power untouched. Read at call time.
+function turtleShellDisabled() {
+  return process.env.TURTLE_SHELL_DISABLED === "true";
 }
 
 // ── Gameplay character detection ────────────────────────────────────────────
@@ -49,6 +55,55 @@ function isCapybara(user) {
 function isCorgi(user) {
   const animal = characterAnimal(user);
   return typeof animal === "string" && animal.toLowerCase().startsWith("corgi");
+}
+
+function isTurtle(user) {
+  const animal = characterAnimal(user);
+  return typeof animal === "string" && animal.toLowerCase().startsWith("turtle");
+}
+
+// ── Turtle "Shell" block (spec §5.1/§5.2) ───────────────────────────────────
+// A turtle-equipped defender bounces 30% of incoming attacks whose TYPE is
+// obtainable from an in-race mystery-box roll. Per-TYPE, never per-instance
+// (D3): a Leg Cramp bought for coins, won on the daily spin, stolen, or dropped
+// from a box are all identical to the Shell — the coin shop sells the
+// race-rollable attack types too, so a per-instance test would let most real
+// attacks straight through.
+const SHELL_BLOCK_CHANCE = 0.3;
+
+// The in-race mystery-box drop pool is THE authority — read from balance config
+// at call time, never a second hardcoded list (the exact class of drift D13
+// removed). Reads defensively: a missing/broken config means "not blockable",
+// which is the safe direction (the Shell simply doesn't fire).
+function isRaceRolledType(type, config = null) {
+  if (!type) return false;
+  let resolved = config;
+  if (!resolved) {
+    try {
+      resolved = balanceConfig.getConfigSync ? balanceConfig.getConfigSync() : null;
+    } catch {
+      resolved = null;
+    }
+  }
+  const pool = (resolved && resolved.dropPool) || {};
+  return ["COMMON", "UNCOMMON", "RARE"].some((tier) =>
+    (pool[tier] || []).includes(type)
+  );
+}
+
+// Pure, DB-free. `random` is injected exactly like the `random` threaded through
+// usePowerup so tests are deterministic. Both env gates are read at call time.
+function shellBlocksAttack({
+  targetUser,
+  powerupType,
+  random = Math.random,
+  config = null,
+} = {}) {
+  if (!characterPowersEnabled()) return false;
+  if (turtleShellDisabled()) return false;
+  if (!isTurtle(targetUser)) return false;
+  if (!isRaceRolledType(powerupType, config)) return false;
+  return random() < SHELL_BLOCK_CHANCE;
 }
 
 // ── Herd bonus ──────────────────────────────────────────────────────────────
@@ -163,9 +218,14 @@ function activeZoomiesAt(windows, nowMs) {
 module.exports = {
   characterPowersEnabled,
   zoomiesPushDisabled,
+  turtleShellDisabled,
   characterAnimal,
   isCapybara,
   isCorgi,
+  isTurtle,
+  SHELL_BLOCK_CHANCE,
+  isRaceRolledType,
+  shellBlocksAttack,
   HERD_BONUS_PER_CAPY,
   HERD_MAX_CAPY,
   HERD_DAILY_CAP,

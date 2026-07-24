@@ -11,6 +11,9 @@ const {
 const {
   characterPowersEnabled,
   zoomiesPushDisabled,
+  countCapybaras,
+  herdPerDay,
+  isCapybara,
   drawZoomiesStartMinutes,
   ZOOMIES_MULTIPLIER,
   ZOOMIES_WINDOW_MS,
@@ -143,16 +146,151 @@ function buildMaterializeZoomies(dependencies = {}) {
 
 const materializeZoomies = buildMaterializeZoomies();
 
+// ── Herd-bonus race-feed line (spec §5.4) ───────────────────────────────────
+// The Bara herd bonus otherwise surfaces ONLY as the additive `characterBonus`
+// block on the race-progress payload, which a frozen binary cannot render — it
+// just sees its step total quietly inflated. Feed lines are server-rendered
+// strings, so one line per participant per race-local calendar day explains the
+// bonus on EVERY client ever shipped.
+//
+// Emitted from this scheduler (a write path), never from getRaceProgress (a
+// read path). Presentational only: it describes what computeHerdBonus already
+// returns and re-mints nothing, so there is zero scoring risk.
+//
+// DEDUP: an atomic per-(race, user) JobRun claim keyed on the race-local day —
+// insert-first/CAS against a unique PK, exactly like the zoomies windows. NEVER
+// an advisory lock across the callback (3e6c827). The spec asked for a unique
+// constraint on (raceId, userId, localDay); this build ships no migration, and
+// JobRun.claimRun gives the identical "exactly one worker wins the day" property
+// on an existing table.
+//
+// eventType "HERD_BONUS" is a NEW value on a free-form String column (no enum,
+// no migration). Verified safe for frozen clients: race_feed_service parses
+// eventType defensively, race_detail_screen filters nothing, and
+// feed_bubble.dart only compares it to known values for the accent colour —
+// an unknown type renders the server-authored description in the default
+// colour. `powerupType` stays null so no client tries to name a powerup.
+const HERD_FEED_EVENT_TYPE = "HERD_BONUS";
+
+function herdFeedDescription({ displayName, perDay, capyCount }) {
+  return (
+    `🦫 Herd Bonus — ${displayName} +${perDay.toLocaleString("en-US")} steps ` +
+    `(${capyCount} capybara${capyCount === 1 ? "" : "s"} strong)`
+  );
+}
+
+function buildEmitHerdBonusFeed(dependencies = {}) {
+  const prisma = dependencies.prisma || defaultPrisma;
+  const jobRunModel = dependencies.JobRun || defaultJobRun;
+  const now = dependencies.now || (() => new Date());
+  const logger = dependencies.logger || console;
+  const enabledFn = dependencies.characterPowersEnabled || characterPowersEnabled;
+
+  return async function emitHerdBonusFeed() {
+    if (!enabledFn()) return null;
+    const currentTime = now();
+
+    let races = [];
+    try {
+      races = await prisma.race.findMany({
+        // The herd bonus is only folded into scoring for powerups-enabled ACTIVE
+        // races (getRaceProgress: charPowersOn && race.powerupsEnabled), so the
+        // feed line must be scoped identically.
+        where: { status: "ACTIVE", powerupsEnabled: true },
+        select: {
+          id: true,
+          timezone: true,
+          participants: {
+            select: {
+              userId: true,
+              status: true,
+              forfeitedAt: true,
+              user: {
+                select: {
+                  id: true,
+                  displayName: true,
+                  equippedAccessories: {
+                    select: { shopItem: { select: { slot: true, assetKey: true } } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      });
+    } catch (error) {
+      logger.error("[CRON] herd feed: race lookup failed:", error);
+      return null;
+    }
+
+    let written = 0;
+    for (const race of races) {
+      const accepted = race.participants.filter((p) => p.status === "ACCEPTED");
+      const capyCount = countCapybaras(accepted);
+      const perDay = herdPerDay(capyCount);
+      if (perDay <= 0) continue;
+
+      const tz = race.timezone || DEFAULT_TZ;
+      let parts;
+      try {
+        parts = getTimeZoneParts(currentTime, tz);
+      } catch {
+        parts = getTimeZoneParts(currentTime, DEFAULT_TZ);
+      }
+      const localDay = formatDateString(parts.year, parts.month, parts.day);
+
+      for (const participant of accepted) {
+        if (participant.forfeitedAt) continue;
+        if (!isCapybara(participant.user)) continue;
+        const jobName = `herd_feed:${race.id}:${participant.userId}`;
+        try {
+          const claimed = await jobRunModel.claimRun(jobName, localDay);
+          if (!claimed) continue;
+          await prisma.racePowerupEvent.create({
+            data: {
+              raceId: race.id,
+              actorUserId: participant.userId,
+              eventType: HERD_FEED_EVENT_TYPE,
+              targetUserId: null,
+              description: herdFeedDescription({
+                displayName: participant.user?.displayName || "A runner",
+                perDay,
+                capyCount,
+              }),
+              metadata: { perDay, capyCount, localDay },
+            },
+          });
+          written += 1;
+        } catch (error) {
+          logger.error(
+            `[CRON] herd feed: write failed (race ${race.id}, user ${participant.userId}):`,
+            error
+          );
+        }
+      }
+    }
+    return { races: races.length, written };
+  };
+}
+
+const emitHerdBonusFeed = buildEmitHerdBonusFeed();
+
 function scheduleCharacterEffects(dependencies = {}) {
   const interval = dependencies.intervalMs || SCHEDULER_INTERVAL_MS;
   const logger = dependencies.logger || console;
   const runFn = dependencies.materializeZoomies || materializeZoomies;
+  const herdFeedFn = dependencies.emitHerdBonusFeed || emitHerdBonusFeed;
 
   async function run() {
     try {
       await runFn();
     } catch (error) {
       logger.error("[CRON] Character effect scheduler error:", error);
+    }
+    try {
+      await herdFeedFn();
+    } catch (error) {
+      logger.error("[CRON] Herd bonus feed error:", error);
     }
   }
 
@@ -226,6 +364,10 @@ function scheduleCharacterEffectRetention(dependencies = {}) {
 module.exports = {
   buildMaterializeZoomies,
   materializeZoomies,
+  buildEmitHerdBonusFeed,
+  emitHerdBonusFeed,
+  herdFeedDescription,
+  HERD_FEED_EVENT_TYPE,
   scheduleCharacterEffects,
   buildCleanupCharacterEffectWindows,
   scheduleCharacterEffectRetention,

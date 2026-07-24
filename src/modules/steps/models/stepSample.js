@@ -192,6 +192,50 @@ const StepSample = {
     );
   },
 
+  // Batched variant of sumClosedStepsInWindow: ONE fetch spanning all windows,
+  // then the same per-window proration over CLOSED buckets only. Results are
+  // identical to calling sumClosedStepsInWindow per window. Used by the effect
+  // segment walk so an open (in-progress) bucket never drives effect scoring:
+  // proration splits a sample across its STAMPED span, so a bucket that is still
+  // filling would be re-cut on every recompute -- bleeding a frozen user's score
+  // down as the freeze window widens, and paying boosted credit for steps walked
+  // after the boost ended. Same plain ::timestamp comparison style as
+  // sumStepsInWindows (columns hold UTC).
+  async sumClosedStepsInWindows(userId, windows, now) {
+    if (!windows || windows.length === 0) return [];
+
+    const parsed = windows.map((w) => ({
+      start: typeof w.start === "string" ? w.start : new Date(w.start).toISOString(),
+      end: typeof w.end === "string" ? w.end : new Date(w.end).toISOString(),
+    }));
+    const nowIso = typeof now === "string" ? now : new Date(now).toISOString();
+
+    const fetchStart = parsed
+      .map((w) => w.start)
+      .reduce((a, b) => (new Date(a) <= new Date(b) ? a : b));
+    const fetchEnd = parsed
+      .map((w) => w.end)
+      .reduce((a, b) => (new Date(a) >= new Date(b) ? a : b));
+
+    const samples = await prisma.$queryRawUnsafe(
+      `SELECT period_start AS "start", period_end AS "end", steps
+       FROM step_samples
+       WHERE user_id = $1
+         AND period_end > $2::timestamp
+         AND period_start < $3::timestamp
+         AND period_end <= $4::timestamp`,
+      userId, fetchStart, fetchEnd, nowIso
+    );
+
+    return parsed.map((w) =>
+      prorateSamplesIntoWindow(
+        samples,
+        new Date(w.start).getTime(),
+        new Date(w.end).getTime()
+      )
+    );
+  },
+
   // Bulk fetch for cross-participant batching (see getHomeRaceCard): all of
   // several users' samples overlapping [rangeStart, rangeEnd), with the same
   // overlap predicate sumStepsInWindows uses, so prorating these rows against
