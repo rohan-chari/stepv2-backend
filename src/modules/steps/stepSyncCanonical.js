@@ -1,4 +1,5 @@
 const crypto = require("crypto");
+const { compareVersions } = require("../../utils/appVersion");
 
 // Canonicalization + hashing for POST /steps/sync-v2 idempotency (§6.4).
 //
@@ -34,6 +35,34 @@ class StepSyncValidationError extends Error {
 // 2026-07-23 incident: flipping stepSampleBucketMinutes to 5 made every >4h-active
 // user's sync 400 here, a total sync outage for them.
 const MAX_SAMPLES = 336;
+
+// Sub-hourly payloads are gated at the first app version whose fine-grained
+// health read normalizes bucket sums (2026-07-23 incident #2: earlier readers
+// count a boundary-straddling raw chunk once per bucket touched, inflating
+// totals; a device that persisted bucketMinutes=5 from an earlier flag window
+// keeps sending fine payloads on cold-start syncs regardless of what /auth/me
+// serves now). ONE sub-hourly sample is always allowed — every hourly client
+// ends its payload with an in-progress partial bucket. Fails open on
+// absent/garbled versions: builds that old cannot produce fine buckets.
+const FINE_SAMPLE_MIN_APP_VERSION =
+  process.env.FINE_BUCKET_MIN_APP_VERSION || "1.7.1";
+const SUB_HOURLY_MS = 59 * 60 * 1000;
+
+function assertFineSamplesAllowed(samples, clientAppVersion) {
+  const belowFloor =
+    compareVersions(clientAppVersion, FINE_SAMPLE_MIN_APP_VERSION) === -1;
+  if (!belowFloor) return;
+  const subHourly = samples.filter((s) => {
+    const start = new Date(s.periodStart).getTime();
+    const end = new Date(s.periodEnd).getTime();
+    return Number.isFinite(start) && Number.isFinite(end) && end - start < SUB_HOURLY_MS;
+  });
+  if (subHourly.length > 1) {
+    throw new StepSyncValidationError(
+      `sub-hourly samples require app ${FINE_SAMPLE_MIN_APP_VERSION} or newer`
+    );
+  }
+}
 const MAX_IDEMPOTENCY_KEY_LENGTH = 36;
 const UUID_RE =
   /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
@@ -158,6 +187,7 @@ function canonicalizeStepSyncRequest(body) {
 }
 
 module.exports = {
+  assertFineSamplesAllowed,
   StepSyncValidationError,
   canonicalizeStepSyncRequest,
   validateIdempotencyKey,

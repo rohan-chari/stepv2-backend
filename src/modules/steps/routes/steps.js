@@ -1,5 +1,6 @@
 const { Router } = require("express");
 const { recordSteps } = require("../commands/recordSteps");
+const { assertFineSamplesAllowed } = require("../stepSyncCanonical");
 const { recordStepSamples: defaultRecordStepSamples } = require("../commands/recordStepSamples");
 const {
   recordStepSyncV2: defaultRecordStepSyncV2,
@@ -108,6 +109,12 @@ function createStepsRouter(dependencies = {}) {
     }
 
     try {
+      // Below-floor builds may not submit fine-grained samples (see
+      // assertFineSamplesAllowed) — checked here where the version header lives.
+      assertFineSamplesAllowed(
+        Array.isArray(req.body?.samples) ? req.body.samples : [],
+        req.headers["x-app-version"]
+      );
       const response = await recordStepSyncV2({
         userId: req.user.id,
         body: req.body,

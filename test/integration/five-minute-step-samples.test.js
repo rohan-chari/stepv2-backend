@@ -420,3 +420,65 @@ describe("five-minute step samples — full-day payload fits the sample cap", ()
     assert.equal(body.code, "INVALID_STEP_SYNC");
   });
 });
+
+// 2026-07-23 incident #2 backstop: builds below 1.7.1 read fine buckets with
+// the inflating per-window HealthKit query, and a device that PERSISTED
+// bucketMinutes=5 from an earlier flag window keeps sending fine payloads on
+// cold-start syncs no matter what /auth/me now serves. Server-side guard:
+// sync-v2 rejects a below-floor client's payload carrying MORE THAN ONE
+// sub-hourly sample (one is allowed — the legitimate trailing partial bucket
+// of an hourly read). Fail-open on absent/garbled versions: builds that old
+// cannot produce fine buckets at all.
+describe("five-minute step samples — sub-hourly payloads gated at app 1.7.1", () => {
+  before(async () => { server = await getSharedServer(); });
+  beforeEach(async () => { await cleanDatabase(); nextAppleId = 0; });
+
+  function fineSamples(n) {
+    return Array.from({ length: n }, (_, i) => ({
+      periodStart: minutesAgo((n - i) * 5 + 1),
+      periodEnd: minutesAgo((n - i - 1) * 5 + 1),
+      steps: 100,
+    }));
+  }
+
+  async function syncV2Versioned(token, samples, steps, version) {
+    return request(server.baseUrl, "POST", "/steps/sync-v2", {
+      token,
+      headers: {
+        "Idempotency-Key": crypto.randomUUID(),
+        ...(version === undefined ? {} : { "X-App-Version": version }),
+      },
+      body: { date: "2026-07-17", steps, samples },
+    });
+  }
+
+  it("rejects fine samples from a below-floor build (1.7.0)", async () => {
+    const alice = await createUser("GateAlice");
+    const res = await syncV2Versioned(alice.token, fineSamples(6), 600, "1.7.0");
+    assert.equal(res.status, 400);
+    assert.equal((await res.json()).code, "INVALID_STEP_SYNC");
+  });
+
+  it("accepts an hourly payload with ONE trailing partial from a below-floor build", async () => {
+    const alice = await createUser("GateBob");
+    const samples = [
+      { periodStart: minutesAgo(120), periodEnd: minutesAgo(60), steps: 300 },
+      // trailing in-progress partial (< 60min) — every hourly client sends one
+      { periodStart: minutesAgo(60), periodEnd: minutesAgo(20), steps: 200 },
+    ];
+    const res = await syncV2Versioned(alice.token, samples, 500, "1.7.0");
+    assert.equal(res.status, 202);
+  });
+
+  it("accepts fine samples at the floor (1.7.1, normalized reader)", async () => {
+    const alice = await createUser("GateCarol");
+    const res = await syncV2Versioned(alice.token, fineSamples(6), 600, "1.7.1");
+    assert.equal(res.status, 202);
+  });
+
+  it("fails open when the version header is absent", async () => {
+    const alice = await createUser("GateDave");
+    const res = await syncV2Versioned(alice.token, fineSamples(6), 600, undefined);
+    assert.equal(res.status, 202);
+  });
+});
