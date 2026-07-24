@@ -1,4 +1,6 @@
 const { Router } = require("express");
+const { compareVersions } = require("../../utils/appVersion");
+const FINE_BUCKET_MIN_APP_VERSION = process.env.FINE_BUCKET_MIN_APP_VERSION || "1.7.1";
 const {
   AppleIdentityTokenError,
   verifyAppleIdentityToken,
@@ -78,7 +80,7 @@ function createAuthRouter(dependencies = {}) {
     defaultOptUserIntoPendingSeededRaces;
   const appSettings = dependencies.appSettings || defaultAppSettings;
 
-  async function withRuntimeFlags(user) {
+  async function withRuntimeFlags(user, clientAppVersion) {
     // Additive nested data: old clients ignore it. Resolve each value
     // defensively because tests, rolling deploys, or an older settings service
     // may not yet know the new key.
@@ -105,10 +107,16 @@ function createAuthRouter(dependencies = {}) {
         return undefined;
       }
     };
-    const stepSampleBucketMinutes = await safeNumber(
-      "stepSampleBucketMinutes",
-      [5, 10, 15, 30, 60]
-    );
+    // Version-gated (2026-07-23 incident #2): builds 1.6.9–1.7.0 carry the
+    // fine-grained reader but inflate fine buckets; 1.7.1 ships the
+    // normalization fix. Omit the flag below the floor so buggy readers stay
+    // hourly. Fail OPEN on absent/garbled versions (compareVersions → null):
+    // builds that old predate the reader and ignore the flag entirely.
+    const belowFineBucketFloor =
+      compareVersions(clientAppVersion, FINE_BUCKET_MIN_APP_VERSION) === -1;
+    const stepSampleBucketMinutes = belowFineBucketFloor
+      ? undefined
+      : await safeNumber("stepSampleBucketMinutes", [5, 10, 15, 30, 60]);
     return {
       ...user,
       featureFlags: {
@@ -169,7 +177,7 @@ function createAuthRouter(dependencies = {}) {
       });
 
       res.json({
-        user: await withRuntimeFlags(withAdminFlag(user, checkAdmin)),
+        user: await withRuntimeFlags(withAdminFlag(user, checkAdmin), req.headers["x-app-version"]),
         sessionToken,
       });
     } catch (error) {
@@ -213,7 +221,7 @@ function createAuthRouter(dependencies = {}) {
       });
 
       res.json({
-        user: await withRuntimeFlags(withAdminFlag(user, checkAdmin)),
+        user: await withRuntimeFlags(withAdminFlag(user, checkAdmin), req.headers["x-app-version"]),
         sessionToken,
       });
     } catch (error) {
@@ -271,7 +279,7 @@ function createAuthRouter(dependencies = {}) {
       });
 
       res.json({
-        user: await withRuntimeFlags(withAdminFlag(user, checkAdmin)),
+        user: await withRuntimeFlags(withAdminFlag(user, checkAdmin), req.headers["x-app-version"]),
         sessionToken,
       });
     } catch (error) {
@@ -305,7 +313,8 @@ function createAuthRouter(dependencies = {}) {
               heldCoins,
             },
             checkAdmin
-          )
+          ),
+          req.headers["x-app-version"]
         ),
       });
     } catch (error) {
@@ -322,7 +331,8 @@ function createAuthRouter(dependencies = {}) {
         withAdminFlag(
           { ...req.user, stepGoal: req.user.stepGoal ?? 5000 },
           checkAdmin
-        )
+        ),
+        req.headers["x-app-version"]
       ),
     });
   });
@@ -338,7 +348,8 @@ function createAuthRouter(dependencies = {}) {
     res.json({
       sessionToken,
       user: await withRuntimeFlags(
-        withAdminFlag({ ...req.user, heldCoins }, checkAdmin)
+        withAdminFlag({ ...req.user, heldCoins }, checkAdmin),
+        req.headers["x-app-version"]
       ),
     });
   });
@@ -362,7 +373,7 @@ function createAuthRouter(dependencies = {}) {
           displayName: validation.normalized,
         });
 
-        return res.json({ user: await withRuntimeFlags(updatedUser) });
+        return res.json({ user: await withRuntimeFlags(updatedUser, req.headers["x-app-version"]) });
       } catch (error) {
         if (error.name === "DisplayNameTakenError") {
           return res.status(409).json({ error: error.message });
@@ -378,7 +389,7 @@ function createAuthRouter(dependencies = {}) {
         displayName: null,
       });
 
-      res.json({ user: await withRuntimeFlags(updatedUser) });
+      res.json({ user: await withRuntimeFlags(updatedUser, req.headers["x-app-version"]) });
     } catch (error) {
       if (error.name === "DisplayNameTakenError") {
         return res.status(409).json({ error: error.message });
@@ -404,7 +415,7 @@ function createAuthRouter(dependencies = {}) {
       const user = await UserModel.update(req.user.id, {
         hiddenFromLeaderboard: hidden,
       });
-      return res.json({ user: await withRuntimeFlags(user) });
+      return res.json({ user: await withRuntimeFlags(user, req.headers["x-app-version"]) });
     } catch (error) {
       console.error("Leaderboard visibility error:", error);
       return res.status(500).json({ error: "Internal server error" });
@@ -435,7 +446,7 @@ function createAuthRouter(dependencies = {}) {
           console.error("Featured auto-join opt-in error:", error);
         }
       }
-      return res.json({ user: await withRuntimeFlags(user) });
+      return res.json({ user: await withRuntimeFlags(user, req.headers["x-app-version"]) });
     } catch (error) {
       console.error("Featured auto-join error:", error);
       return res.status(500).json({ error: "Internal server error" });
@@ -496,7 +507,7 @@ function createAuthRouter(dependencies = {}) {
         key: key.trim(),
         url: url.trim(),
       });
-      res.json({ user: await withRuntimeFlags(user) });
+      res.json({ user: await withRuntimeFlags(user, req.headers["x-app-version"]) });
     } catch (error) {
       if (error instanceof InvalidProfilePhotoError) {
         return res.status(400).json({ error: error.message });
@@ -512,7 +523,7 @@ function createAuthRouter(dependencies = {}) {
       const user = await removeProfilePhoto({
         userId: req.user.id,
       });
-      res.json({ user: await withRuntimeFlags(user) });
+      res.json({ user: await withRuntimeFlags(user, req.headers["x-app-version"]) });
     } catch (error) {
       console.error("Profile photo delete error:", error);
       res.status(500).json({ error: "Internal server error" });
@@ -524,7 +535,7 @@ function createAuthRouter(dependencies = {}) {
       const user = await dismissProfilePhotoPrompt({
         userId: req.user.id,
       });
-      res.json({ user: await withRuntimeFlags(user) });
+      res.json({ user: await withRuntimeFlags(user, req.headers["x-app-version"]) });
     } catch (error) {
       console.error("Profile photo prompt dismiss error:", error);
       res.status(500).json({ error: "Internal server error" });

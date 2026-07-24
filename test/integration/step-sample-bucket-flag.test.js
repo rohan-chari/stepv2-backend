@@ -111,3 +111,64 @@ describe("featureFlags.stepSampleBucketMinutes", () => {
     }
   });
 });
+
+// 2026-07-23 incident #2: builds 1.6.9–1.7.0 carry the fine-grained reader but
+// INFLATE fine buckets (boundary-straddling raw chunks counted per bucket).
+// The flag is therefore version-gated: omitted for X-App-Version < 1.7.1 (the
+// first build with the normalization fix). Fail-OPEN on absent/garbled version
+// — builds that old predate the fine reader and ignore the flag anyway (and
+// the no-header case is pinned by the existing "is served" test above).
+describe("stepSampleBucketMinutes version gate", () => {
+  before(async () => { server = await getSharedServer(); });
+  beforeEach(async () => {
+    await cleanDatabase();
+    await prisma.appSetting.deleteMany();
+    appSettings.bustCache();
+    nextAppleId = 0;
+  });
+
+  async function meWithVersion(token, version) {
+    const res = await request(server.baseUrl, "GET", "/auth/me", {
+      token,
+      headers: version === undefined ? {} : { "X-App-Version": version },
+    });
+    return (await res.json()).user;
+  }
+
+  async function setFlagTo5() {
+    const admin = await createAdmin();
+    const patch = await request(server.baseUrl, "PATCH", "/admin/settings", {
+      token: admin.token,
+      body: { stepSampleBucketMinutes: 5 },
+    });
+    assert.equal(patch.status, 200);
+    return admin;
+  }
+
+  it("omits the flag for a pre-fix build (1.7.0, the buggy reader)", async () => {
+    const admin = await setFlagTo5();
+    const user = await meWithVersion(admin.token, "1.7.0");
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(user.featureFlags, "stepSampleBucketMinutes"),
+      false
+    );
+  });
+
+  it("serves the flag at exactly the fixed version (1.7.1, inclusive floor)", async () => {
+    const admin = await setFlagTo5();
+    const user = await meWithVersion(admin.token, "1.7.1");
+    assert.equal(user.featureFlags.stepSampleBucketMinutes, 5);
+  });
+
+  it("serves the flag above the fixed version (build metadata tolerated)", async () => {
+    const admin = await setFlagTo5();
+    const user = await meWithVersion(admin.token, "1.8.0+42");
+    assert.equal(user.featureFlags.stepSampleBucketMinutes, 5);
+  });
+
+  it("fails open on a garbled version header", async () => {
+    const admin = await setFlagTo5();
+    const user = await meWithVersion(admin.token, "unknown");
+    assert.equal(user.featureFlags.stepSampleBucketMinutes, 5);
+  });
+});
