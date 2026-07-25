@@ -124,16 +124,19 @@ describe("feature batch 2026-07-24 — shop", () => {
 
   // ── Item 10: unlock-with-ads ───────────────────────────────────────────────
   describe("item 10 — unlock-with-ads", () => {
-    it("grants the powerup and zeroes coins with enough verified watches (shortfall 120 → 3 ads), idempotent on retry", async () => {
-      const user = await createUser(30); // CLEANSE=150 → shortfall 120 → 3 ads
+    // 2026-07-25 (D5): POWERUP_UNLOCK_MAX_SHORTFALL dropped 150 → 20, so the
+    // shortfalls these cases were built on (120, 50) are no longer unlockable at
+    // all. Rewritten to sub-20 shortfalls — owner-approved, since the alternative
+    // was pinning the suite to the old threshold and hiding the shipped default.
+    // At any shortfall <= 20, ceil(shortfall/50) is always 1 ad.
+    it("grants the powerup and zeroes coins with enough verified watches (shortfall 15 → 1 ad), idempotent on retry", async () => {
+      const user = await createUser(135); // CLEANSE=150 → shortfall 15 → 1 ad
       await seedUnlockWatch(user.userId, "POWERUP_CLEANSE", 1);
-      await seedUnlockWatch(user.userId, "POWERUP_CLEANSE", 2);
-      await seedUnlockWatch(user.userId, "POWERUP_CLEANSE", 3);
 
       const first = await unlock(user.token, "POWERUP_CLEANSE", "unlock-key-1");
       assert.equal(first.status, 200);
       assert.equal(first.body.coins, 0);
-      assert.equal(first.body.adsWatched, 3);
+      assert.equal(first.body.adsWatched, 1);
       assert.equal(first.body.inventory.powerupType, "CLEANSE");
       assert.equal(first.body.inventory.quantity, 1);
 
@@ -148,18 +151,16 @@ describe("feature batch 2026-07-24 — shop", () => {
     });
 
     it("rejects when a verified watch is missing (no grant, coins unchanged)", async () => {
-      const user = await createUser(30); // shortfall 120 → needs 3
-      await seedUnlockWatch(user.userId, "POWERUP_CLEANSE", 1);
-      await seedUnlockWatch(user.userId, "POWERUP_CLEANSE", 2); // only 2
+      const user = await createUser(135); // shortfall 15 → needs 1, seed none
 
       const res = await unlock(user.token, "POWERUP_CLEANSE", "unlock-key-2");
       assert.equal(res.status, 409);
       assert.equal(res.body.code, "AD_NOT_VERIFIED");
-      assert.equal(await coinsOf(user.userId), 30);
+      assert.equal(await coinsOf(user.userId), 135);
       assert.equal(await inventoryQty(user.userId, "CLEANSE"), 0);
     });
 
-    it("rejects shortfall > 150 (client should route to +coins)", async () => {
+    it("rejects a shortfall past the ceiling (client should route to +coins)", async () => {
       const user = await createUser(0); // CLEANSE=150, coins 0 → shortfall 150 (ok)
       // Make CLEANSE cost more so shortfall exceeds 150.
       await prisma.powerupShopItem.update({
@@ -181,7 +182,7 @@ describe("feature batch 2026-07-24 — shop", () => {
     });
 
     it("grantAdReward maps SSV custom_data 'powerup_unlock:<userId>:<sku>' to a consumable watch that the unlock endpoint accepts", async () => {
-      const user = await createUser(100); // CLEANSE=150 → shortfall 50 → 1 ad
+      const user = await createUser(135); // CLEANSE=150 → shortfall 15 → 1 ad
       // Mint a grant exactly as the AdMob SSV callback would.
       const res = await grantAdReward({
         userId: user.userId,

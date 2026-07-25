@@ -3,6 +3,7 @@ const {
   EXTRA_SPIN_REWARD_KIND,
   COIN_REWARD_KIND,
   POWERUP_UNLOCK_REWARD_KIND,
+  SHOP_UNLOCK_REWARD_KIND,
 } = require("../adRewards");
 
 const LOCAL_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -13,6 +14,10 @@ const COIN_CUSTOM_DATA_RE = /^coins:(\d{4}-\d{2}-\d{2})$/;
 // The sku (a `POWERUP_<TYPE>` string) is stored on the grant's shopItemId so the
 // unlock endpoint can count verified watches for this user+sku.
 const POWERUP_UNLOCK_CUSTOM_DATA_RE = /^powerup_unlock:([^:]+):(.+)$/;
+// 2026-07-25 §7 — the cosmetic sibling: "shop_unlock:<userId>:<sku>". Distinct
+// prefix and distinct rewardKind so the two unlock endpoints can never consume
+// each other's watches, while the shared daily cap counts both.
+const SHOP_UNLOCK_CUSTOM_DATA_RE = /^shop_unlock:([^:]+):(.+)$/;
 
 // Mint an AdRewardGrant from a *verified* AdMob SSV callback (the route owns
 // signature verification; this command owns the ledger). Idempotent on
@@ -52,6 +57,10 @@ function buildGrantAdReward(dependencies = {}) {
       typeof customData === "string"
         ? customData.match(POWERUP_UNLOCK_CUSTOM_DATA_RE)
         : null;
+    const shopUnlockMatch =
+      typeof customData === "string"
+        ? customData.match(SHOP_UNLOCK_CUSTOM_DATA_RE)
+        : null;
     const grantedDate = coinMatch
       ? coinMatch[1]
       : typeof customData === "string" && LOCAL_DATE_RE.test(customData)
@@ -59,11 +68,17 @@ function buildGrantAdReward(dependencies = {}) {
         : serverDate;
     const kind = unlockMatch
       ? POWERUP_UNLOCK_REWARD_KIND
-      : coinMatch
-        ? COIN_REWARD_KIND
-        : rewardKind;
-    // For a powerup-unlock watch, remember which sku it was attributed to.
-    const shopItemId = unlockMatch ? unlockMatch[2] : null;
+      : shopUnlockMatch
+        ? SHOP_UNLOCK_REWARD_KIND
+        : coinMatch
+          ? COIN_REWARD_KIND
+          : rewardKind;
+    // For an unlock watch (either kind), remember which sku it was attributed to.
+    const shopItemId = unlockMatch
+      ? unlockMatch[2]
+      : shopUnlockMatch
+        ? shopUnlockMatch[2]
+        : null;
 
     try {
       await db.adRewardGrant.create({

@@ -2,6 +2,9 @@ const { Race } = require("../../races/models/race");
 const { RaceMessage } = require("../models/raceMessage");
 const { RaceActiveEffect } = require("../../powerups/models/raceActiveEffect");
 const { RacePowerupEvent } = require("../../powerups/models/racePowerupEvent");
+const {
+  isTournamentParticipant,
+} = require("../../tournaments/services/tournamentAccess");
 
 const CURSOR_VERSION = 1;
 const KIND_RANK = { USER: 1, SYSTEM: 0 };
@@ -103,9 +106,20 @@ function buildGetRaceMessages(dependencies = {}) {
 
     const myParticipant = race.participants.find((p) => p.userId === userId);
     if (!myParticipant) {
-      const error = new Error("You are not a participant in this race");
-      error.statusCode = 403;
-      throw error;
+      // 2026-07-25 §5 — tournament spectating, identical to the relaxation
+      // getRaceDetails/getRaceProgress already apply: any ACCEPTED bracket
+      // player (INCLUDING eliminated) may READ a sibling matchup's chat.
+      // READ ONLY — sendRaceMessage/deleteRaceMessage are untouched. The stealth
+      // redaction below is keyed on `targetUserId !== userId`, so a spectator
+      // (never the stealthed user) is redacted exactly like any other viewer.
+      const canSpectate =
+        race.tournamentId != null &&
+        (await isTournamentParticipant(race.tournamentId, userId));
+      if (!canSpectate) {
+        const error = new Error("You are not a participant in this race");
+        error.statusCode = 403;
+        throw error;
+      }
     }
 
     // Stealth: same redaction logic as feed (only relevant when SYSTEM items

@@ -10,6 +10,10 @@ const { purchaseShopItem, ShopPurchaseError } = require("./purchaseShopItem");
 const { equipAccessory, AccessoryEquipError } = require("./equipAccessory");
 const { grantLegendCosmetic, LEGEND_COSMETIC_SKU } = require("./grantLegendCosmetic");
 const { mirrorShopItemToPeer } = require("./mirrorShopItem");
+const {
+  unlockShopItemWithAds,
+  ShopUnlockWithAdsError,
+} = require("./unlockShopItemWithAds");
 
 module.exports = {
   ...shopCosmetics,
@@ -22,4 +26,6 @@ module.exports = {
   grantLegendCosmetic,
   LEGEND_COSMETIC_SKU,
   mirrorShopItemToPeer,
+  unlockShopItemWithAds,
+  ShopUnlockWithAdsError,
 };

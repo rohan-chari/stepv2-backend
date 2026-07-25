@@ -295,11 +295,21 @@ function createAuthRouter(dependencies = {}) {
       // Remote feature flags ride the /auth/me user payload (fetched at launch
       // and on resume). Additive: old clients ignore the key; getFlag never
       // throws (degrades to the flag's declared default).
+      // 2026-07-25 §9 (contract §4.4) — additive mirror of the
+      // CHARACTER_POWERS_ENABLED env kill switch, read PER REQUEST so flipping
+      // it back off hides the home character-power chip with no redeploy and no
+      // app release. Attached HERE (the session-refresh payload the app fetches
+      // at launch and on resume) rather than inside withRuntimeFlags, so the
+      // POST /auth/apple sign-in response shape is untouched. Old clients ignore
+      // the unknown key; an absent key means false.
+      const characterPowersEnabled =
+        process.env.CHARACTER_POWERS_ENABLED === "true";
       res.json({
         user: await withRuntimeFlags(
           withAdminFlag(
             {
               ...req.user,
+              characterPowersEnabled,
               // 1.1.4 compat: clients pre-step-goal-removal expect a non-null int.
               stepGoal: req.user.stepGoal ?? 5000,
               // T8: surface the global-leaderboard opt-out so clients can render

@@ -4,13 +4,20 @@ const { testOnlyFilter } = require("../../../shared/middleware/releaseChannel");
 const { deductCoinsAtomic } = require("../../../shared/economy/deductCoinsAtomic");
 const {
   POWERUP_UNLOCK_REWARD_KIND,
-  POWERUP_UNLOCK_MAX_SHORTFALL,
-  POWERUP_UNLOCK_COINS_PER_AD,
-  POWERUP_UNLOCK_MAX_ADS,
+  powerupUnlockMaxShortfall,
+  powerupUnlockDailyCap,
 } = require("../../economy/adRewards");
+const {
+  adsNeededFor,
+  resolveLocalDate,
+  assertUnderDailyCap,
+  consumedUnlocksToday,
+  SHORTFALL_TOO_LARGE_MESSAGE,
+} = require("../../economy/services/adUnlockPolicy");
 
 // Item 10 (2026-07-24): "watch ads to afford a powerup". When a user is within
-// POWERUP_UNLOCK_MAX_SHORTFALL (150) coins of a powerup, they may unlock it by
+// powerupUnlockMaxShortfall() coins of a powerup (20 since 2026-07-25 §7; env
+// tunable), they may unlock it by
 // watching ceil(shortfall/50) SSV-verified ads (capped at 3); on success the
 // server ZEROES their coins and grants one powerup. The server is the sole
 // authority on shortfall and the ad count — never a client-sent amount — and the
@@ -25,11 +32,8 @@ class UnlockWithAdsError extends Error {
   }
 }
 
-function adsNeededFor(shortfall) {
-  return Math.min(
-    POWERUP_UNLOCK_MAX_ADS,
-    Math.ceil(shortfall / POWERUP_UNLOCK_COINS_PER_AD)
-  );
+function unlockError(message, statusCode, code) {
+  return new UnlockWithAdsError(message, statusCode, code);
 }
 
 function idempotentResult(request) {
@@ -43,7 +47,16 @@ function buildUnlockPowerupWithAds(dependencies = {}) {
   const runTransaction =
     dependencies.runTransaction || ((fn) => prisma.$transaction((tx) => fn(tx)));
 
-  return async function unlockPowerupWithAds({ userId, sku, idempotencyKey, channel = "prod" }) {
+  return async function unlockPowerupWithAds({
+    userId,
+    sku,
+    idempotencyKey,
+    channel = "prod",
+    // 2026-07-25 §7 — OPTIONAL. Absent (every currently-shipped binary) falls
+    // back to the server date; present-and-malformed is a 400. See
+    // adUnlockPolicy.resolveLocalDate.
+    localDate,
+  }) {
     if (!idempotencyKey || typeof idempotencyKey !== "string") {
       throw new UnlockWithAdsError("Idempotency-Key is required", 400);
     }
@@ -54,6 +67,9 @@ function buildUnlockPowerupWithAds(dependencies = {}) {
     if (!sku || typeof sku !== "string") {
       throw new UnlockWithAdsError("sku is required", 400);
     }
+    // Validated OUTSIDE the transaction: a malformed client-sent date must fail
+    // before anything is claimed.
+    const effectiveLocalDate = resolveLocalDate(localDate, unlockError);
 
     try {
       return await runTransaction(async (tx) => {
@@ -82,13 +98,21 @@ function buildUnlockPowerupWithAds(dependencies = {}) {
             "ALREADY_AFFORDABLE"
           );
         }
-        if (shortfall > POWERUP_UNLOCK_MAX_SHORTFALL) {
+        if (shortfall > powerupUnlockMaxShortfall()) {
+          // Old clients render this string verbatim, AFTER watching the ads
+          // their compiled-in 150 told them to watch (§7.4). It is the only
+          // explanation they get, so it explains the rule change.
           throw new UnlockWithAdsError(
-            "Too many coins short — get more coins first",
+            SHORTFALL_TOO_LARGE_MESSAGE(),
             400,
             "SHORTFALL_TOO_LARGE"
           );
         }
+
+        // Shared daily cap (D4) — one ad unlock per local day across powerups
+        // AND cosmetics. Enforced inside this transaction, and BEFORE anything
+        // is consumed or debited, so the 409 costs the user nothing.
+        await assertUnderDailyCap(tx, userId, effectiveLocalDate, unlockError);
 
         const adsNeeded = adsNeededFor(shortfall);
 
@@ -126,9 +150,19 @@ function buildUnlockPowerupWithAds(dependencies = {}) {
 
         // Consume exactly adsNeeded watches, conditional on still-unconsumed so a
         // concurrent unlock for the same sku can't double-spend the same watch.
+        // grantedDate is restamped to the resolved local date as part of the
+        // consume: an unlock watch is minted with no client date (its SSV
+        // custom_data carries only user+sku), so it arrives stamped with the
+        // SERVER date. Restamping is what makes the daily-cap count above mean
+        // "unlocks performed on the user's day" rather than the server's.
         const consumed = await tx.adRewardGrant.updateMany({
           where: { id: { in: watches.map((w) => w.id) }, consumedAt: null },
-          data: { consumedAt: new Date(), rewardType: "POWERUP", powerupType: item.powerupType },
+          data: {
+            consumedAt: new Date(),
+            grantedDate: effectiveLocalDate,
+            rewardType: "POWERUP",
+            powerupType: item.powerupType,
+          },
         });
         if (consumed.count !== adsNeeded) {
           throw new UnlockWithAdsError(
@@ -157,9 +191,17 @@ function buildUnlockPowerupWithAds(dependencies = {}) {
           update: { quantity: { increment: 1 } },
         });
 
+        // Additive contract fields (§4.1) so the client can grey the affordance
+        // out for the rest of the day without a second round-trip. Counted
+        // after the consume, so it includes this unlock.
+        const cap = powerupUnlockDailyCap();
+        const usedToday = await consumedUnlocksToday(tx, userId, effectiveLocalDate);
+
         const result = {
           coins: 0,
           adsWatched: adsNeeded,
+          adUnlockDailyCap: cap,
+          adUnlockRemainingToday: Math.max(0, cap - usedToday),
           inventory: {
             powerupType: inventoryRow.powerupType,
             quantity: inventoryRow.quantity ?? 0,

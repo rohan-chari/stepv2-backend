@@ -51,6 +51,12 @@ const {
 const {
   shellBlocksAttack: defaultShellBlocksAttack,
 } = require("../../races/services/characterPowers");
+// The SAME team-total summation the board (getRaceProgress -> teams block) uses,
+// so Uprising's losing-team gate can never disagree with the standings the
+// player is looking at (2026-07-25 §3).
+const {
+  buildTeamsBlockFromParticipants,
+} = require("../../races/teamRaces");
 
 // SIGNAL_JAMMER is a single-target attack (store-only): it is OFFENSIVE +
 // TARGETED so the shared targeting validation, finished-target rejection, and
@@ -1122,12 +1128,31 @@ function buildUsePowerup(dependencies = {}) {
       // Determine beneficiaries + enforce the bottom-half / losing-team gate.
       let beneficiaries;
       if (isTeamRace) {
-        const teamTotals = { TEAM_A: 0, TEAM_B: 0 };
-        for (const p of acceptedParticipants) {
-          if (p.team === "TEAM_A" || p.team === "TEAM_B") {
-            teamTotals[p.team] += p.totalSteps || 0;
-          }
-        }
+        // 2026-07-25 §3 — the gate and the board must never disagree.
+        //
+        // The board (getRaceProgress) resolves race state and then sums the
+        // resulting EFFECTIVE per-participant totals with buildTeamsBlock. This
+        // does the same two things, in the same order, with the same helper:
+        // resolve first (stored totals go stale between syncs, exactly like the
+        // Trail Mine case above), then sum the freshly-written rows. Summing the
+        // unresolved column by hand is precisely how the gate came to contradict
+        // the screen.
+        //
+        // DELIBERATELY SCOPED TO THE TEAM BRANCH (D3). The solo bottom-half gate
+        // below, Hitchhike FRONT/BEHIND, participantRank and adjacentParticipant
+        // all keep their existing raw-column behaviour; widening this would
+        // change targeting for a dozen powerups at once and is tracked as a
+        // separate audit (spec §11). Do not hoist this resolve out of here.
+        await resolveRaceState({ raceId, timeZone });
+        const resolvedRace = await raceModel.findById(raceId);
+        const board = buildTeamsBlockFromParticipants(
+          resolvedRace || race,
+          (resolvedRace || race).participants
+        );
+        const teamTotals = {
+          TEAM_A: board.teamA.totalSteps,
+          TEAM_B: board.teamB.totalSteps,
+        };
         const myTeam = myParticipant.team;
         const otherTeam = myTeam === "TEAM_A" ? "TEAM_B" : "TEAM_A";
         if (teamTotals[myTeam] >= teamTotals[otherTeam]) {

@@ -159,16 +159,35 @@ function buildAdvanceTournament(dependencies = {}) {
           prizeCoins: prizeAmount,
         });
 
-        for (const p of allParticipants) {
-          if (p.userId === championUserId) continue;
+        // 2026-07-25 §1 (D1): the TOURNAMENT_COMPLETED fan-out to every
+        // non-champion is GONE. Everyone eliminated in an EARLIER round already
+        // received exactly one TOURNAMENT_ELIMINATED at their own knockout, so
+        // the fan-out was a second, later push about a bracket they were already
+        // out of.
+        //
+        // D1-followup (owner-confirmed 2026-07-25): the RUNNER-UP is the one
+        // exception, and killing the fan-out alone would have left them with NO
+        // end-of-run push at all. TOURNAMENT_ELIMINATED is only emitted on the
+        // round r -> r+1 transition below, and the final has no next round — so
+        // the losing finalist never got one. Emit it here for them explicitly.
+        // Result: every player gets exactly ONE end-of-run push — the champion's
+        // TOURNAMENT_CHAMPION above, or their own TOURNAMENT_ELIMINATED.
+        const runnerUpUserId = losers[0];
+        if (runnerUpUserId) {
           deferred.push({
-            type: "TOURNAMENT_COMPLETED",
+            type: "TOURNAMENT_ELIMINATED",
             tournamentId,
             tournamentName: tournament.name,
-            userId: p.userId,
-            championName: nameByUser.get(championUserId) || "The champion",
+            userId: runnerUpUserId,
+            label,
+            opponentName: nameByUser.get(championUserId) || "your opponent",
           });
         }
+        //
+        // The events.on("TOURNAMENT_COMPLETED") handler is deliberately LEFT in
+        // place: nothing emits it now, so it is inert, and removing it would be
+        // a behaviour change for any future emitter. Old clients simply receive
+        // one fewer push; their `tournament_completed` route case goes unused.
         return;
       }
 

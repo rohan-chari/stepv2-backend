@@ -54,6 +54,14 @@ function createHomeRouter(dependencies = {}) {
         supportsTeamRaces: req.clientFeatures?.has("team_races") ?? false,
       });
 
+      // 2026-07-25 §9 — additive kill-switch mirror. The home character-power
+      // chip renders ONLY when this is present and true, so flipping
+      // CHARACTER_POWERS_ENABLED back off makes the chip vanish with no
+      // redeploy and no app release. Read PER REQUEST (never cached at module
+      // load) for exactly that reason. Old clients ignore the unknown key.
+      result.characterPowersEnabled =
+        process.env.CHARACTER_POWERS_ENABLED === "true";
+
       // Additive: surface the currently-active global step event (if any) as a
       // top-level field of the EXACT same shape getRaceProgress uses, so the new
       // app can render a "2x STEPS — ends in mm:ss" home banner. Old apps ignore

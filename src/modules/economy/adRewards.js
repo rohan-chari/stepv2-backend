@@ -26,10 +26,20 @@ const COIN_REWARD_KIND = "coin_reward";
 // endpoint can count verified, still-unconsumed watches for this user+sku.
 const POWERUP_UNLOCK_REWARD_KIND = "powerup_unlock";
 
-// Server is the authority on shortfall + ad count (never client-attested): a user
-// within this many coins of a powerup may unlock it by watching ceil(shortfall/50)
-// ads (capped at 3); beyond it, the client routes to the +coins hub instead.
-const POWERUP_UNLOCK_MAX_SHORTFALL = 150;
+// 2026-07-25 §7 — the cosmetic sibling of the above. Grants minted by the
+// accessory/character unlock unit carry SSV custom_data
+// "shop_unlock:<userId>:<sku>" and are stamped with this kind. Deliberately a
+// DISTINCT kind from powerup_unlock (different item, grant and idempotency
+// tables), but the two share one daily cap — see POWERUP_UNLOCK_DAILY_CAP.
+const SHOP_UNLOCK_REWARD_KIND = "shop_unlock";
+
+// Both ad-unlock kinds, for the shared daily-cap count (D4: ONE ad unlock per
+// local day TOTAL, not one powerup + one cosmetic).
+const AD_UNLOCK_REWARD_KINDS = [
+  POWERUP_UNLOCK_REWARD_KIND,
+  SHOP_UNLOCK_REWARD_KIND,
+];
+
 const POWERUP_UNLOCK_COINS_PER_AD = 50;
 const POWERUP_UNLOCK_MAX_ADS = 3;
 
@@ -59,7 +69,47 @@ const AD_COIN_REWARD_DAILY_CAP = positiveIntEnv(
   3
 );
 
+// ── Ad-unlock tunables (2026-07-25 §7) ──────────────────────────────────────
+// Read at CALL TIME, not module load, so both are true kill switches: a prod
+// .env edit + restart changes them for every app version at once, and an
+// integration test can exercise both sides. Same positiveIntEnv guard as the
+// coin cap — a malformed override must fall back to the default, never read as
+// "no limit".
+//
+// Server is the authority on shortfall + ad count (never client-attested): a
+// user within maxShortfall coins of an item may unlock it by watching
+// ceil(shortfall/50) ads (capped at 3); beyond it the client routes to the
+// +coins hub. Dropped 150 -> 20 on 2026-07-25 (D5): with COINS_PER_AD = 50,
+// adsNeededFor(<=20) is always 1, so the flow collapses to the single-ad
+// top-up it was always meant to be. Frozen clients hardcode 150 and will offer
+// ads they can't spend — see the SHORTFALL_TOO_LARGE copy, which is the only
+// thing those users see.
+const POWERUP_UNLOCK_MAX_SHORTFALL_DEFAULT = 20;
+function powerupUnlockMaxShortfall() {
+  return positiveIntEnv(
+    process.env.POWERUP_UNLOCK_MAX_SHORTFALL,
+    POWERUP_UNLOCK_MAX_SHORTFALL_DEFAULT
+  );
+}
+
+// One ad unlock per user-local day, TOTAL across powerups and cosmetics (D4).
+// Raise it to disable the cap. Enforced INSIDE the unlock transaction.
+const POWERUP_UNLOCK_DAILY_CAP_DEFAULT = 1;
+function powerupUnlockDailyCap() {
+  return positiveIntEnv(
+    process.env.POWERUP_UNLOCK_DAILY_CAP,
+    POWERUP_UNLOCK_DAILY_CAP_DEFAULT
+  );
+}
+
 module.exports = {
+  SHOP_UNLOCK_REWARD_KIND,
+  AD_UNLOCK_REWARD_KINDS,
+  POWERUP_UNLOCK_MAX_SHORTFALL_DEFAULT,
+  POWERUP_UNLOCK_DAILY_CAP_DEFAULT,
+  powerupUnlockMaxShortfall,
+  powerupUnlockDailyCap,
+  positiveIntEnv,
   ADS_EXTRA_SPIN_ENABLED,
   ADMOB_SSV_SKIP_VERIFY,
   EXTRA_SPIN_REWARD_KIND,
@@ -68,7 +118,6 @@ module.exports = {
   AD_COIN_REWARD_AMOUNT,
   AD_COIN_REWARD_DAILY_CAP,
   POWERUP_UNLOCK_REWARD_KIND,
-  POWERUP_UNLOCK_MAX_SHORTFALL,
   POWERUP_UNLOCK_COINS_PER_AD,
   POWERUP_UNLOCK_MAX_ADS,
 };

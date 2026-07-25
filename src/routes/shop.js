@@ -17,6 +17,13 @@ const {
   unlockPowerupWithAds: defaultUnlockPowerupWithAds,
 } = require("../modules/powerups");
 const {
+  unlockShopItemWithAds: defaultUnlockShopItemWithAds,
+} = require("../modules/cosmetics");
+const {
+  buildAdUnlockBlock,
+} = require("../modules/economy/services/adUnlockPolicy");
+const { prisma } = require("../db");
+const {
   POWERUPS5_GATED_TYPES,
 } = require("../modules/powerups/constants/powerupGating");
 
@@ -38,6 +45,25 @@ function createShopRouter(dependencies = {}) {
     dependencies.purchasePowerupItem || defaultPurchasePowerupItem;
   const unlockPowerupWithAds =
     dependencies.unlockPowerupWithAds || defaultUnlockPowerupWithAds;
+  const unlockShopItemWithAds =
+    dependencies.unlockShopItemWithAds || defaultUnlockShopItemWithAds;
+  const db = dependencies.prisma || prisma;
+
+  // Contract §4.3 — the additive `adUnlock` block, attached to BOTH catalog
+  // responses. New clients render entirely from it (so the 20-coin threshold is
+  // correct on day one and tunable later without an App Store cycle); clients
+  // that don't understand it ignore it and keep their compiled-in 150.
+  // Best-effort: a failure here must never break the catalog.
+  async function attachAdUnlock(result, req) {
+    try {
+      result.adUnlock = await buildAdUnlockBlock(db, req.user.id, {
+        localDate: req.query.localDate,
+      });
+    } catch (error) {
+      console.error("adUnlock block error:", error);
+    }
+    return result;
+  }
 
   router.use(requireAuth);
   router.use(extractReleaseChannel);
@@ -55,7 +81,7 @@ function createShopRouter(dependencies = {}) {
         supportsPowerups4: req.clientFeatures.has("powerups4"),
         supportsPowerups5: req.clientFeatures.has("powerups5"),
       });
-      res.json(result);
+      res.json(await attachAdUnlock(result, req));
     } catch (error) {
       console.error("Get powerup shop catalog error:", error);
       res.status(500).json({ error: "Internal server error" });
@@ -109,6 +135,9 @@ function createShopRouter(dependencies = {}) {
         sku: req.body.sku,
         idempotencyKey: req.get("Idempotency-Key") || req.body.idempotencyKey,
         channel: req.releaseChannel,
+        // 2026-07-25 §7 — OPTIONAL. Old binaries omit it entirely and get the
+        // server date; the command 400s only on a present-but-invalid value.
+        localDate: req.body.localDate,
       });
       res.json(result);
     } catch (error) {
@@ -128,7 +157,7 @@ function createShopRouter(dependencies = {}) {
         channel: req.releaseChannel,
         supportsCharacters: req.clientFeatures.has("characters"),
       });
-      res.json(result);
+      res.json(await attachAdUnlock(result, req));
     } catch (error) {
       console.error("Get shop catalog error:", error);
       res.status(500).json({ error: "Internal server error" });
@@ -155,6 +184,39 @@ function createShopRouter(dependencies = {}) {
       res.status(500).json({ error: "Internal server error" });
     }
   });
+
+  // ── 2026-07-25 §7 — ad-to-buy for accessories + characters ───────────────
+  // POST /shop/:sku/unlock-with-ads  (contract §4.2)
+  // POST /shop/unlock-with-ads       (same handler, sku in the body — mirrors
+  //                                   the powerup endpoint's shape)
+  //
+  // Additive: no shipped binary calls either path, and a 404 is the documented
+  // "feature absent" signal for a client probing an older backend. Registered
+  // AFTER the concrete /powerups/... and /catalog routes so the `:sku` pattern
+  // can never shadow them.
+  async function handleShopUnlockWithAds(req, res) {
+    try {
+      const result = await unlockShopItemWithAds({
+        userId: req.user.id,
+        sku: req.params.sku || req.body.sku,
+        idempotencyKey: req.get("Idempotency-Key") || req.body.idempotencyKey,
+        channel: req.releaseChannel,
+        supportsCharacters: req.clientFeatures.has("characters"),
+        localDate: req.body.localDate,
+      });
+      res.json(result);
+    } catch (error) {
+      if (error.name === "ShopUnlockWithAdsError") {
+        return res
+          .status(error.statusCode || 400)
+          .json({ error: error.message, ...(error.code ? { code: error.code } : {}) });
+      }
+      console.error("Shop unlock-with-ads error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  }
+  router.post("/unlock-with-ads", handleShopUnlockWithAds);
+  router.post("/:sku/unlock-with-ads", handleShopUnlockWithAds);
 
   router.put("/equipment/:slot", async (req, res) => {
     try {

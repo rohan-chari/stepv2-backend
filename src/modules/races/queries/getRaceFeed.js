@@ -1,6 +1,9 @@
 const { Race } = require("../models/race");
 const { RaceActiveEffect } = require("../../powerups/models/raceActiveEffect");
 const { RacePowerupEvent } = require("../../powerups/models/racePowerupEvent");
+const {
+  isTournamentParticipant,
+} = require("../../tournaments/services/tournamentAccess");
 
 async function getRaceFeed(userId, raceId, { cursor, limit = 50, supportsPowerups4 = false } = {}) {
   const race = await Race.findById(raceId);
@@ -12,9 +15,19 @@ async function getRaceFeed(userId, raceId, { cursor, limit = 50, supportsPowerup
 
   const myParticipant = race.participants.find((p) => p.userId === userId);
   if (!myParticipant) {
-    const error = new Error("You are not a participant in this race");
-    error.statusCode = 403;
-    throw error;
+    // 2026-07-25 §5 — tournament spectating, identical to the relaxation
+    // getRaceDetails/getRaceProgress already apply: any ACCEPTED bracket player
+    // (INCLUDING eliminated) may READ a matchup race they aren't in. READ ONLY —
+    // sendRaceMessage/deleteRaceMessage are untouched and stay participant-only.
+    // Non-tournament races and users with no bracket relation still 403.
+    const canSpectate =
+      race.tournamentId != null &&
+      (await isTournamentParticipant(race.tournamentId, userId));
+    if (!canSpectate) {
+      const error = new Error("You are not a participant in this race");
+      error.statusCode = 403;
+      throw error;
+    }
   }
 
   // Build set of stealthed user IDs (exclude self — you can see your own name)
