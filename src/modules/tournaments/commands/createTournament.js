@@ -12,7 +12,7 @@ const {
   ensureUserCanAfford,
   reserveTournamentBuyIn,
 } = require("../services/tournamentBuyIns");
-const { validatePowerupConfig } = require("../../races/services/validateRaceConfig");
+const { normalizePowerupConfig } = require("../../races/services/validateRaceConfig");
 const {
   validateTournamentName,
   validateBracketSize,
@@ -21,7 +21,9 @@ const {
   totalRoundsFor,
   clientSupportsTournaments,
   TOURNAMENTS_FEATURE,
+  MAX_CHAMPION_PRIZE,
 } = require("../constants/tournaments");
+const { computePrizePool } = require("../../../shared/economy/prizePool");
 const {
   serializeTournamentPayload,
 } = require("../queries/serializeTournament");
@@ -87,15 +89,21 @@ function buildCreateTournament(dependencies = {}) {
       matchupDurationDays,
       TournamentError
     );
+    // App-funded bracket pools: while the flag is on, entry is FREE and a frozen
+    // client's buyInAmount is accepted and IGNORED (coerced to 0 BEFORE
+    // validation, so an amount above the legacy per-bracket ceiling can't 400 an
+    // un-updated binary out of creating a bracket).
+    const fundedPrizePools = await settings.getFlag("fundedPrizePoolsEnabled");
     const buyIn = validateTournamentBuyIn({
       bracketSize: size,
-      buyInAmount,
+      buyInAmount: fundedPrizePools ? 0 : buyInAmount,
       ErrorClass: TournamentError,
     });
-    validatePowerupConfig({
+    // Server-decided interval (2,000 always); a frozen client's
+    // powerupStepInterval is accepted and IGNORED, never a 400. Bracket matchup
+    // races copy this value in tournamentRounds.js, so they inherit it too.
+    const normalizedPowerupStepInterval = normalizePowerupConfig({
       powerupsEnabled,
-      powerupStepInterval,
-      ErrorClass: TournamentError,
     });
 
     await ensureUserCanAfford({
@@ -144,8 +152,11 @@ function buildCreateTournament(dependencies = {}) {
       matchupDurationDays: durationDays,
       buyInAmount: buyIn,
       potCoins: 0,
+      // Row-level discriminator: this bracket's champion prize is app-minted and
+      // stays that way even if the flag is flipped back off mid-bracket.
+      fundedPrize: fundedPrizePools === true,
       powerupsEnabled: !!powerupsEnabled,
-      powerupStepInterval: powerupsEnabled ? powerupStepInterval : null,
+      powerupStepInterval: normalizedPowerupStepInterval,
       isPublic: !!isPublic,
       shareToken: mintToken(),
       timezone: normalizeTimeZone(timeZone),
@@ -188,7 +199,15 @@ function buildCreateTournament(dependencies = {}) {
           creatorUserId: userId,
           userId: inviteeId,
           bracketSize: size,
-          potCoins: size * buyIn,
+          // Funded brackets quote the pool a full bracket mints (see
+          // inviteToTournament); paid brackets quote size x buy-in as before.
+          potCoins: fundedPrizePools
+            ? computePrizePool({
+                playerCount: size,
+                durationDays: totalRoundsFor(size) * durationDays,
+                max: MAX_CHAMPION_PRIZE,
+              })
+            : size * buyIn,
           buyInAmount: buyIn,
         });
       }

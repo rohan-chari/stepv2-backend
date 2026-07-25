@@ -94,6 +94,11 @@ async function buildPendingScheduledRace({ scheduledAgoMs, interval = 3000 }) {
       startedAt: null,
       endsAt: null,
       scheduledStartAt,
+      // POST /races now pins every powerup race to 2,000 steps per box, so this
+      // suite's interval fixture is applied directly here (spec §4.3 leaves
+      // already-created races on their original interval, so this is still a
+      // shape that exists in production).
+      powerupStepInterval: interval,
     },
   });
 

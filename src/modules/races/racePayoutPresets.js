@@ -125,6 +125,37 @@ function computeRacePayouts({ preset, potCoins, participantCount }) {
   return distributeByPercentages(getRacePayoutPercentages(preset), safePot);
 }
 
+// Even split across `slots` places: floor(pool / slots) each, with the rounding
+// remainder to 1st so the payouts sum to EXACTLY the advertised pool (D2). The
+// shares are therefore not always round numbers (160 across 3 places -> 54/53/53).
+function distributeEvenly(pool, slots) {
+  if (pool <= 0 || slots <= 0) return [];
+  const share = Math.floor(pool / slots);
+  const amounts = new Array(slots).fill(share);
+  amounts[0] += pool - share * slots;
+  return amounts;
+}
+
+// Coins by place for an APP-FUNDED prize pool (index 0 = 1st). Same preset
+// machinery as the buy-in pot — so old clients' payouts{first,second,third} and
+// new clients' payoutTiers[] keep working — except that the two field-scaled
+// presets split EVENLY (D1) instead of geometrically: a top-half of 300 people
+// should hand out equal shares, not a decaying curve.
+//
+// Deliberately separate from computeRacePayouts: legacy buy-in pots keep their
+// existing geometric curve so an in-flight paid race's payout table doesn't
+// change shape underneath its participants mid-race.
+function computeFundedPayouts({ preset, poolCoins, participantCount }) {
+  const pool = Math.max(0, Math.floor(poolCoins || 0));
+  if (pool === 0) return [];
+
+  if (GRADED_PRESETS.has(preset)) {
+    return distributeEvenly(pool, gradedSlotCount(preset, participantCount));
+  }
+
+  return distributeByPercentages(getRacePayoutPercentages(preset), pool);
+}
+
 function isRacePayoutPresetCompatible({ preset, acceptedCount }) {
   if (preset === RACE_PAYOUT_PRESETS.WINNER_TAKES_ALL) {
     return true;
@@ -163,6 +194,7 @@ module.exports = {
   RACE_PAYOUT_PRESETS,
   MIN_MULTI_PAYOUT_PARTICIPANTS,
   computeRacePayouts,
+  computeFundedPayouts,
   computeGradedPayouts,
   getRacePayoutPercentages,
   isRacePayoutPreset,

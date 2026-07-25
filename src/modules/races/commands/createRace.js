@@ -11,7 +11,7 @@ const {
 const {
   validateRaceName,
   validateDuration,
-  validatePowerupConfig,
+  normalizePowerupConfig,
   validateMaxParticipants,
   validateRaceBuyInConfig,
   validateTeamName,
@@ -189,10 +189,10 @@ function buildCreateRace(dependencies = {}) {
       scheduledStartAt,
       RaceCreationError
     );
-    validatePowerupConfig({
+    // The interval is server-decided (2,000 always). A frozen client's
+    // powerupStepInterval is accepted and IGNORED — never a 400.
+    const normalizedPowerupStepInterval = normalizePowerupConfig({
       powerupsEnabled,
-      powerupStepInterval,
-      ErrorClass: RaceCreationError,
     });
     // null => unlimited (no cap). Older clients omit the field; the destructure
     // default of 10 keeps their behaviour. New clients may send explicit null.
@@ -202,8 +202,16 @@ function buildCreateRace(dependencies = {}) {
       ? teamConfig.teamSize * 2
       : validateMaxParticipants(maxParticipants, RaceCreationError);
 
+    // App-funded prize pools: while the flag is on, entry is FREE. A frozen
+    // client's buyInAmount/buyInEnabled are accepted and IGNORED (coerced to 0)
+    // — never a 400, or every un-updated binary loses the ability to create a
+    // race. Coerced BEFORE validation so even an off-band legacy amount (below
+    // the old 10-coin minimum) still creates cleanly.
+    const fundedPrizePools = await settings.getFlag("fundedPrizePoolsEnabled");
+    const requestedBuyIn = fundedPrizePools ? 0 : buyInAmount;
+
     const buyInConfig = validateRaceBuyInConfig({
-      buyInAmount,
+      buyInAmount: requestedBuyIn,
       // TR-102: payoutPreset is ignored for team races (team pot rules apply);
       // store WINNER_TAKES_ALL for display compat on old clients.
       payoutPreset: teamConfig ? "WINNER_TAKES_ALL" : payoutPreset,
@@ -225,9 +233,12 @@ function buildCreateRace(dependencies = {}) {
       targetSteps: Number.isFinite(targetSteps) && targetSteps > 0 ? targetSteps : 0,
       maxDurationDays,
       powerupsEnabled: !!powerupsEnabled,
-      powerupStepInterval: powerupsEnabled ? powerupStepInterval : null,
+      powerupStepInterval: normalizedPowerupStepInterval,
       buyInAmount: buyInConfig.buyInAmount,
       payoutPreset: buyInConfig.payoutPreset,
+      // The row-level discriminator: this race's prize is app-minted, and stays
+      // app-minted even if the flag is flipped back off mid-race.
+      fundedPrize: fundedPrizePools === true,
       isPublic: !!isPublic,
       maxParticipants: normalizedMaxParticipants,
       scheduledStartAt: normalizedScheduledStartAt,

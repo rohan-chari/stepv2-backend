@@ -83,9 +83,9 @@ What a mystery box can actually roll. A powerup having a rarity does not make it
 
 - **Common** — Protein Shake, Trail Mix, Detour Sign, Runners High, Pinecone Toss
 - **Uncommon** — Leg Cramp, Stealth Mode, Wrong Turn
-- **Rare** — Red Card, Second Wind, Compression Socks, Fanny Pack, Lucky Horseshoe, Pocket Watch, Trail Mine, Sneaky Swap, Shortcut, Cleanse, Mirror
+- **Rare** — Red Card, Second Wind, Compression Socks, Fanny Pack, Lucky Horseshoe, Trail Mine, Sneaky Swap, Shortcut, Cleanse, Mirror
 
-Store-only (bought with coins, never rolled from a mystery box): Imposter, Rainstorm, Signal Jammer, Leech, Defense Scan, Hitchhike, Quick Rinse, Uprising, Ghost Pepper, Coin Flip, Mystery Potion, Decoy, Power Outage, Umbrella, Rally Flag, Drill Sergeant, Piggy Bank, Bounty.
+Store-only (bought with coins, never rolled from a mystery box): Pocket Watch, Imposter, Rainstorm, Signal Jammer, Leech, Defense Scan, Hitchhike, Quick Rinse, Uprising, Ghost Pepper, Coin Flip, Mystery Potion, Decoy, Power Outage, Umbrella, Rally Flag, Drill Sergeant, Piggy Bank, Bounty.
 
 Of those, barred from the **daily reward box** too: Uprising, Ghost Pepper, Coin Flip, Mystery Potion, Decoy, Power Outage, Umbrella, Rally Flag, Drill Sergeant, Piggy Bank, Bounty. The rest remain winnable as a daily-box RARE prize.
 

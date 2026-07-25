@@ -61,6 +61,21 @@ async function createActiveRace(alice, others, { powerupsEnabled = true } = {}) 
     });
   }
   await request(server.baseUrl, "POST", `/races/${raceId}/start`, { token: alice.token });
+  // POST /races now pins every powerup race to 2,000 steps per box, so this
+  // suite's 5,000 fixture is applied directly. Still a real production state:
+  // races created before that change keep their interval (spec §4.3).
+  if (powerupsEnabled) {
+    await prisma.race.update({
+      where: { id: raceId },
+      data: { powerupStepInterval: 5000 },
+    });
+    // nextBoxAtSteps was seeded from the pinned 2,000 at accept time
+    // (respondToRaceInvite.js), so re-seed it to match.
+    await prisma.raceParticipant.updateMany({
+      where: { raceId },
+      data: { nextBoxAtSteps: 5000 },
+    });
+  }
   return raceId;
 }
 

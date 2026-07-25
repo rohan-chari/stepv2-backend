@@ -177,7 +177,10 @@ function buildJoinTournamentCore(dependencies = {}) {
 
         // Buy-in hold. On a rejoin from DECLINED the version was already bumped
         // at refund time, so re-hold uses the CURRENT counter.
-        const buyIn = tournament.buyInAmount || 0;
+        // App-funded brackets never charge to enter (the row's fundedPrize flag,
+        // not the feature flag, is the authority).
+        const buyIn =
+          tournament.fundedPrize === true ? 0 : tournament.buyInAmount || 0;
         const version = existing ? existing.buyInVersion || 0 : 0;
         if (buyIn > 0) {
           await ensureUserCanAfford({

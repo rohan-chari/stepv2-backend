@@ -1,6 +1,8 @@
 const { prisma: defaultPrisma } = require("../../../db");
 const { eventBus } = require("../../../shared/events/eventBus");
+const { appSettings } = require("../../../shared/config/appSettings");
 const { buildAutoJoinFeaturedRaces } = require("../commands/autoJoinFeaturedRaces");
+const { normalizePowerupConfig } = require("../services/validateRaceConfig");
 const {
   startOfDayNewYork,
   nextMidnightNewYork,
@@ -22,6 +24,7 @@ function buildRenewSeededRaces(dependencies = {}) {
   const now = dependencies.now || (() => new Date());
   const logger = dependencies.logger || console;
   const events = dependencies.eventBus || eventBus;
+  const settings = dependencies.appSettings || appSettings;
   const { enrollAutoJoinUsers } = buildAutoJoinFeaturedRaces({ prisma });
 
   // The [start, end) UTC instants of the calendar period containing `fromDate`
@@ -43,8 +46,17 @@ function buildRenewSeededRaces(dependencies = {}) {
   async function createSeededRace(seed, { status, startedAt, endsAt, scheduledStartAt }) {
     const durationHours =
       seed.durationHours || (seed.cadence === "WEEKLY" ? 168 : 24);
+    // App-funded prize pools (D5/D8): seeded challenges move onto the pool
+    // formula and pay TOP_HALF (even shares), so a 300-player Daily spreads the
+    // capped pool across 150 finishers instead of handing it to one winner (the
+    // DB default is WINNER_TAKES_ALL). Gated on the kill switch: while it is off
+    // the races stay legacy (fundedPrize false) and keep minting today's graded
+    // raceFinishReward.
+    const fundedPrizePools = await settings.getFlag("fundedPrizePoolsEnabled");
     return prisma.race.create({
       data: {
+        payoutPreset: "TOP_HALF",
+        fundedPrize: fundedPrizePools === true,
         seedId: seed.id,
         creatorId: null,
         name: seed.name,
@@ -53,7 +65,12 @@ function buildRenewSeededRaces(dependencies = {}) {
         isPublic: true,
         maxParticipants: seed.maxParticipants,
         powerupsEnabled: seed.powerupsEnabled ?? false,
-        powerupStepInterval: seed.powerupStepInterval ?? null,
+        // The seed's own powerup_step_interval column is no longer read: every
+        // seeded challenge runs the fixed 2,000-step cadence like every other
+        // race. (Prod seeds still hold 2500; harmless, just ignored.)
+        powerupStepInterval: normalizePowerupConfig({
+          powerupsEnabled: seed.powerupsEnabled ?? false,
+        }),
         timeBased: seed.timeBased ?? false,
         timezone: SEED_TIMEZONE,
         // PENDING "next" races keep startedAt NULL until promotion so they can

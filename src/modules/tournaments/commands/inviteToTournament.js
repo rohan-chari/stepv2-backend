@@ -4,10 +4,15 @@ const { Tournament } = require("../models/tournament");
 const { Friendship } = require("../../social");
 const { User } = require("../../users");
 const { TournamentError } = require("../services/tournamentErrors");
-const { TOURNAMENTS_FEATURE } = require("../constants/tournaments");
+const {
+  TOURNAMENTS_FEATURE,
+  MAX_CHAMPION_PRIZE,
+} = require("../constants/tournaments");
 const {
   serializeTournamentPayload,
+  tournamentDurationDays,
 } = require("../queries/serializeTournament");
+const { computePrizePool } = require("../../../shared/economy/prizePool");
 
 // Creator-only, PENDING-only lobby invites. Friends of the creator only. Users
 // already ACCEPTED/INVITED are skipped; a previously DECLINED/left user is
@@ -89,8 +94,17 @@ function buildInviteToTournament(dependencies = {}) {
         creatorUserId: userId,
         userId: inviteeId,
         bracketSize: tournament.bracketSize,
-        potCoins: tournament.bracketSize * (tournament.buyInAmount || 0),
-        buyInAmount: tournament.buyInAmount || 0,
+        // An app-funded bracket has no buy-in, so the invite push quotes the
+        // pool a FULL bracket will mint (a bracket only ever starts full).
+        potCoins:
+          tournament.fundedPrize === true
+            ? computePrizePool({
+                playerCount: tournament.bracketSize,
+                durationDays: tournamentDurationDays(tournament),
+                max: MAX_CHAMPION_PRIZE,
+              })
+            : tournament.bracketSize * (tournament.buyInAmount || 0),
+        buyInAmount: tournament.fundedPrize === true ? 0 : tournament.buyInAmount || 0,
       });
     }
 

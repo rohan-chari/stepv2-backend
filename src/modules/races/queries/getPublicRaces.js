@@ -1,9 +1,8 @@
 const { Race } = require("../models/race");
-const { computeRacePayouts } = require("../racePayoutPresets");
 const {
-  computeFinishRewardPool,
-  computeFinishRewardPlaces,
-} = require("../constants/raceFinishReward");
+  buildRaceMoneyView,
+  serializePayouts,
+} = require("../racePrizePool");
 const { buildTeamsBlockFromParticipants } = require("../teamRaces");
 
 // Shared visibility predicate for a browsable public race, applied over the
@@ -44,26 +43,10 @@ function buildGetPublicRaces(dependencies = {}) {
       // null => unlimited; a full race is skipped, but unlimited is never full.
       const maxParticipants = race.maxParticipants ?? null;
 
-      const heldPotCoins = participants.reduce((sum, p) => {
-        if (p.buyInStatus === "HELD") {
-          return sum + (p.buyInAmount || 0);
-        }
-        return sum;
-      }, 0);
-      const projectedPotCoins = (race.potCoins || 0) + heldPotCoins;
-      const payouts = computeRacePayouts({
-        preset: race.payoutPreset,
-        potCoins: projectedPotCoins,
-        participantCount: acceptedCount,
-      });
-      const finishRewardPool = computeFinishRewardPool(
-        race.seedId,
-        acceptedCount
-      );
-      const finishRewardPlaces = computeFinishRewardPlaces(
-        race.seedId,
-        acceptedCount,
-        finishRewardPool
+      // Legacy buy-in pot OR app-funded prize pool (race.fundedPrize decides).
+      const money = buildRaceMoneyView({ race, participants, acceptedCount });
+      const { payouts: legacyPayouts, payoutTiers } = serializePayouts(
+        money.payouts
       );
 
       results.push({
@@ -74,29 +57,21 @@ function buildGetPublicRaces(dependencies = {}) {
         endsAt: race.endsAt,
         startedAt: race.startedAt,
         targetSteps: race.targetSteps, // 1.1.4 compat
-        buyInAmount: race.buyInAmount,
+        buyInAmount: money.buyInAmount,
         payoutPreset: race.payoutPreset,
         powerupsEnabled: race.powerupsEnabled,
         powerupStepInterval: race.powerupStepInterval,
         maxParticipants,
         participantCount: acceptedCount,
-        projectedPotCoins,
+        projectedPotCoins: money.projectedPotCoins,
+        // App-funded prize pool (additive); null for a legacy buy-in race.
+        prizePool: money.prizePool,
         // Legacy three-place shape for app builds that predate payoutTiers; they
         // show only the podium, which degrades gracefully for field-scaled presets.
-        payouts: {
-          first: payouts[0] || 0,
-          second: payouts[1] || 0,
-          third: payouts[2] || 0,
-        },
+        payouts: legacyPayouts,
         // Full breakdown (placement 1..N); newer builds render it, older ignore it.
-        payoutTiers: payouts.map((amount, index) => ({
-          placement: index + 1,
-          amount,
-        })),
-        finishReward:
-          finishRewardPool > 0
-            ? { pool: finishRewardPool, paidPlaces: finishRewardPlaces }
-            : null,
+        payoutTiers,
+        finishReward: money.finishReward,
         creator: race.creator,
         createdAt: race.createdAt,
         // ── Team races (TR-206) — additive; only sent to token clients (the

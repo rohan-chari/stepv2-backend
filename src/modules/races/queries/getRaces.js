@@ -1,11 +1,10 @@
 const { Race } = require("../models/race");
 const { RacePowerup } = require("../../powerups/models/racePowerup");
 const { RaceActiveEffect } = require("../../powerups/models/raceActiveEffect");
-const { computeRacePayouts } = require("../racePayoutPresets");
 const {
-  computeFinishRewardPool,
-  computeFinishRewardPlaces,
-} = require("../constants/raceFinishReward");
+  buildRaceMoneyView,
+  serializePayouts,
+} = require("../racePrizePool");
 const { buildTeamsBlockFromParticipants } = require("../teamRaces");
 
 function compareParticipantsForPlacement(left, right) {
@@ -213,24 +212,9 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
   for (const race of visible) {
     const myParticipant = myParticipantByRace.get(race.id);
     const acceptedCount = race.participants.filter((p) => p.status === "ACCEPTED").length;
-    const heldPotCoins = race.participants.reduce((sum, participant) => {
-      if (participant.buyInStatus === "HELD") {
-        return sum + (participant.buyInAmount || 0);
-      }
-      return sum;
-    }, 0);
-    const projectedPotCoins = (race.potCoins || 0) + heldPotCoins;
-    const payouts = computeRacePayouts({
-      preset: race.payoutPreset,
-      potCoins: projectedPotCoins,
-      participantCount: acceptedCount,
-    });
-    const finishRewardPool = computeFinishRewardPool(race.seedId, acceptedCount);
-    const finishRewardPlaces = computeFinishRewardPlaces(
-      race.seedId,
-      acceptedCount,
-      finishRewardPool
-    );
+    // Legacy buy-in pot OR app-funded prize pool (race.fundedPrize decides).
+    const money = buildRaceMoneyView({ race, acceptedCount });
+    const { payouts: legacyPayouts, payoutTiers } = serializePayouts(money.payouts);
     let myPlacement =
       race.status === "COMPLETED"
         ? myParticipant?.placement ?? null
@@ -284,27 +268,19 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
       status: race.status,
       maxDurationDays: race.maxDurationDays,
       targetSteps: race.targetSteps, // 1.1.4 compat
-      buyInAmount: race.buyInAmount,
+      buyInAmount: money.buyInAmount,
       payoutPreset: race.payoutPreset,
-      potCoins: race.potCoins || 0,
-      heldPotCoins,
-      projectedPotCoins,
+      potCoins: money.potCoins,
+      heldPotCoins: money.heldPotCoins,
+      projectedPotCoins: money.projectedPotCoins,
+      // App-funded prize pool (additive); null for a legacy buy-in race.
+      prizePool: money.prizePool,
       // Legacy three-place shape for app builds that predate payoutTiers; they
       // show only the podium, which degrades gracefully for field-scaled presets.
-      payouts: {
-        first: payouts[0] || 0,
-        second: payouts[1] || 0,
-        third: payouts[2] || 0,
-      },
+      payouts: legacyPayouts,
       // Full breakdown (placement 1..N); newer builds render it, older ignore it.
-      payoutTiers: payouts.map((amount, index) => ({
-        placement: index + 1,
-        amount,
-      })),
-      finishReward:
-        finishRewardPool > 0
-          ? { pool: finishRewardPool, paidPlaces: finishRewardPlaces }
-          : null,
+      payoutTiers,
+      finishReward: money.finishReward,
       startedAt: race.startedAt,
       endsAt: race.endsAt,
       completedAt: race.completedAt,

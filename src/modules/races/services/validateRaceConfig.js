@@ -1,5 +1,8 @@
 const { validateRaceBuyInConfig } = require("./raceBuyIns");
 const { censor } = require("../../../shared/lib/profanity");
+const {
+  FIXED_POWERUP_STEP_INTERVAL,
+} = require("../constants/powerupInterval");
 
 /**
  * Shared validators for race configuration fields. Each helper throws via the
@@ -35,19 +38,19 @@ function validateDuration(maxDurationDays, ErrorClass) {
   return maxDurationDays;
 }
 
-function validatePowerupConfig({ powerupsEnabled, powerupStepInterval, ErrorClass }) {
-  if (powerupsEnabled) {
-    if (
-      !powerupStepInterval ||
-      powerupStepInterval < 2000 ||
-      powerupStepInterval > 50000
-    ) {
-      throw new ErrorClass(
-        "Powerup step interval must be between 2,000 and 50,000",
-        400
-      );
-    }
-  }
+// Returns the interval to persist: the fixed 2,000 when powerups are on, else
+// null. The caller's powerupStepInterval is read ONLY by old clients that still
+// send one, and is deliberately DISCARDED — accepted and ignored, never a 400
+// (same shape as the app-funded buy-in coercion in createRace.js). The legacy
+// "must be between 2,000 and 50,000" error is retired: there is nothing left to
+// validate once the value is thrown away, and a 400 would only punish a frozen
+// binary for a number we ignore.
+//
+// This returns the value (rather than validating in place) on purpose: a call
+// site that forgets to use the return stores `undefined` and fails loudly,
+// instead of silently persisting the client's number.
+function normalizePowerupConfig({ powerupsEnabled }) {
+  return powerupsEnabled ? FIXED_POWERUP_STEP_INTERVAL : null;
 }
 
 function validateMaxParticipants(maxParticipants, ErrorClass) {
@@ -128,7 +131,7 @@ function validateTeamSide(team, ErrorClass, { required = false } = {}) {
 module.exports = {
   validateRaceName,
   validateDuration,
-  validatePowerupConfig,
+  normalizePowerupConfig,
   validateMaxParticipants,
   validateRaceBuyInConfig,
   TEAM_NAME_MAX_LENGTH,

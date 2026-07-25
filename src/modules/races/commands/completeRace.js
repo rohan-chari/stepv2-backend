@@ -9,9 +9,18 @@ const {
 const { eventBus } = require("../../../shared/events/eventBus");
 const {
   computeRacePayouts,
+  computeFundedPayouts,
   computeGradedPayouts,
 } = require("../racePayoutPresets");
-const { payoutRaceCoins, refundRaceBuyIn } = require("../services/raceBuyIns");
+const {
+  payoutRaceCoins,
+  refundRaceBuyIn,
+  payoutRacePrizePool,
+} = require("../services/raceBuyIns");
+const {
+  computeSettledRacePool,
+  settlementPlayerCount,
+} = require("../racePrizePool");
 const {
   computeFinishRewardPool,
   computeFinishRewardPlaces,
@@ -170,9 +179,9 @@ function buildCompleteRace(dependencies = {}) {
         if (race.potCoins > 0) {
           await raceModel.update(raceId, { potCoins: 0 });
         }
-      } else if (race.potCoins > 0) {
+      } else if (race.fundedPrize === true || race.potCoins > 0) {
         // TR-502/503/504: the winning team's NON-FORFEITED members split the
-        // entire pot evenly — floor(pot / winners) each, remainder to the
+        // entire prize evenly — floor(pot / winners) each, remainder to the
         // team's top stepper (tiebreak: earliest joinedAt). Forfeiters stay in
         // placement history but get payoutCoins 0; their buy-in stays in the
         // pot. Deterministic: same inputs, same payout rows. TR-507 guarantees
@@ -189,13 +198,27 @@ function buildCompleteRace(dependencies = {}) {
             return (a.userId || "").localeCompare(b.userId || "");
           });
 
-        if (winners.length > 0) {
-          const share = Math.floor(race.potCoins / winners.length);
-          const remainder = race.potCoins - share * winners.length;
+        // Funded team race: the prize is MINTED from the settled field instead of
+        // being a committed pot. Mutually exclusive with the pot — fundedPrize on
+        // the row is the only authority (never the feature flag), so a mid-race
+        // flip can neither strand nor duplicate a prize.
+        const funded = race.fundedPrize === true;
+        const prize = funded
+          ? computeSettledRacePool({
+              race,
+              participants: accepted,
+              isTeamRace: true,
+            })
+          : race.potCoins;
+
+        if (winners.length > 0 && prize > 0) {
+          const share = Math.floor(prize / winners.length);
+          const remainder = prize - share * winners.length;
           for (let index = 0; index < winners.length; index++) {
             const amount = share + (index === 0 ? remainder : 0);
             if (amount <= 0) continue;
-            await payoutRaceCoins({
+            const payFn = funded ? payoutRacePrizePool : payoutRaceCoins;
+            await payFn({
               awardCoinsFn,
               userId: winners[index].userId,
               raceId,
@@ -207,6 +230,15 @@ function buildCompleteRace(dependencies = {}) {
               amount
             );
           }
+        }
+
+        if (funded) {
+          // Stamp the settled pool so results/history freeze forever, and mirror
+          // it into potCoins so a frozen build's "POT" reads the real prize.
+          await raceModel.update(raceId, {
+            prizePoolCoins: prize,
+            potCoins: prize,
+          });
         }
       }
 
@@ -243,7 +275,55 @@ function buildCompleteRace(dependencies = {}) {
       return race;
     }
 
-    if (race?.potCoins > 0) {
+    // ── Prize: EXACTLY ONE of the two money models ───────────────────────────
+    // `fundedPrize` on the row is the only authority (never
+    // fundedPrizePoolsEnabled), so an in-flight buy-in race settles under the old
+    // rules forever and a funded race under the new ones — and no race can ever
+    // pay under both. A funded race's pool is computed from the SETTLED field
+    // (accepted + ranked + actually walked), so no-shows and alt accounts mint
+    // nothing, then stamped so the numbers freeze.
+    const isFundedRace = race?.fundedPrize === true;
+    if (isFundedRace) {
+      const rankedParticipants = (race.participants || [])
+        .filter((participant) => participant.placement != null)
+        .sort((a, b) => a.placement - b.placement);
+      const pool = computeSettledRacePool({
+        race,
+        participants: race.participants,
+      });
+      // Paid places scale with the SETTLED field for the graded presets, matching
+      // the projection the players were shown. Same helper the read paths use, so
+      // the pool and the number of paid places can never be sized on different
+      // fields.
+      const settledFieldSize = settlementPlayerCount(race.participants);
+      const payouts = computeFundedPayouts({
+        preset: race.payoutPreset || "WINNER_TAKES_ALL",
+        poolCoins: pool,
+        participantCount: settledFieldSize,
+      });
+
+      for (let index = 0; index < payouts.length; index++) {
+        const placement = index + 1;
+        const amount = payouts[index] || 0;
+        if (amount <= 0) continue;
+        const recipient = rankedParticipants[index];
+        if (!recipient) continue;
+
+        await payoutRacePrizePool({
+          awardCoinsFn,
+          userId: recipient.userId,
+          raceId,
+          placement,
+          amount,
+        });
+        await participantModel.incrementPayoutCoins(recipient.id, amount);
+      }
+
+      await raceModel.update(raceId, {
+        prizePoolCoins: pool,
+        potCoins: pool,
+      });
+    } else if (race?.potCoins > 0) {
       // Pay the buy-in pot out by finishing place. The number of paid places is
       // fixed for winner-takes-all/top-3 but scales with the field for the
       // field-scaled presets (top half, everyone but last), so drive the loop off
@@ -294,7 +374,13 @@ function buildCompleteRace(dependencies = {}) {
     // its own reason/refId so the two never collide. It runs at most once per
     // race: completeRace early-returns above once the race is COMPLETED, and
     // awardCoins dedups on (reason, refId) for retries.
-    if (Array.isArray(race?.participants)) {
+    //
+    // RETIRED for funded races (spec §4.3): a funded seeded challenge's prize IS
+    // the app-minted pool above, so this must not fire on top of it. It stays
+    // reachable for fundedPrize=false races only — otherwise every seeded Daily/
+    // Weekly already in flight at deploy time (and, with the kill switch off, all
+    // of them) would silently pay nothing.
+    if (!isFundedRace && Array.isArray(race?.participants)) {
       // Only people who actually walked are eligible; rank by the placement set
       // at race resolution (raceExpiry assigns 1..N before completing).
       const eligible = race.participants

@@ -60,8 +60,22 @@ async function mintChampionPrize({ awardCoinsFn, userId, tournamentId, amount })
   });
 }
 
+// App-funded bracket pool for a free-entry tournament's champion. Distinct
+// reason from both the pot payout and the featured seed prize, so the three
+// branches can never collide on the shared "<tournamentId>:champion" refId.
+async function mintTournamentPrizePool({ awardCoinsFn, userId, tournamentId, amount }) {
+  return creditBuyIn({
+    awardCoinsFn,
+    userId,
+    amount,
+    reason: "tournament_prize_pool_payout",
+    refId: `${tournamentId}:champion`,
+  });
+}
+
 module.exports = {
   buildAtomicHoldFn,
+  mintTournamentPrizePool,
   ensureUserCanAfford,
   reserveTournamentBuyIn,
   refundTournamentBuyIn,

@@ -1,8 +1,5 @@
 const { Race } = require("../models/race");
-const {
-  computeFinishRewardPool,
-  computeFinishRewardPlaces,
-} = require("../constants/raceFinishReward");
+const { buildRaceMoneyView } = require("../racePrizePool");
 
 // Ordering for the featured strip: daily first, then weekly, then anything else.
 const SEED_RANK = { DAILY_10K: 0, WEEKLY_50K: 1 };
@@ -90,16 +87,9 @@ function buildGetFeaturedRaces(dependencies = {}) {
       const myParticipant = participants.find((p) => p.userId === userId);
       const max = race.maxParticipants ?? null; // null = unlimited
       // Projected from the current field; the final pool/places are recomputed
-      // from actual finishers at settlement (completeRace).
-      const finishRewardPool = computeFinishRewardPool(
-        race.seedId,
-        acceptedCount
-      );
-      const finishRewardPlaces = computeFinishRewardPlaces(
-        race.seedId,
-        acceptedCount,
-        finishRewardPool
-      );
+      // from actual finishers at settlement (completeRace). A funded seeded race
+      // carries the app-minted prizePool instead of the retired finishReward.
+      const money = buildRaceMoneyView({ race, participants, acceptedCount });
 
       return {
         raceId: race.id,
@@ -114,10 +104,9 @@ function buildGetFeaturedRaces(dependencies = {}) {
         // Minted reward projection for seeded races. `paidPlaces` replaces the
         // old fixed `topFraction`: newer clients render "Top N split <pool>";
         // older clients read only `pool` (and show their hardcoded copy).
-        finishReward:
-          finishRewardPool > 0
-            ? { pool: finishRewardPool, paidPlaces: finishRewardPlaces }
-            : null,
+        finishReward: money.finishReward,
+        // Additive app-funded pool block (null for a legacy seeded race).
+        prizePool: money.prizePool,
         // null = not joined → render JOIN; otherwise the participant status
         // (ACCEPTED) → render VIEW.
         myStatus: myParticipant ? myParticipant.status : null,

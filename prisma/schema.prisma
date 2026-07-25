@@ -786,6 +786,20 @@ model Race {
   buyInAmount          Int              @default(0) @map("buy_in_amount")
   payoutPreset         RacePayoutPreset @default(WINNER_TAKES_ALL) @map("payout_preset")
   potCoins             Int              @default(0) @map("pot_coins")
+  // ── App-funded prize pools ─────────────────────────────────────────────────
+  // fundedPrize is the discriminator between the two money models and the ONLY
+  // authority at settlement (never the fundedPrizePoolsEnabled flag, so a
+  // mid-race flip can't strand a promised prize). true => nobody was charged to
+  // enter and the app MINTS players × durationPoints(days) × PRIZE_COIN_UNIT at
+  // settlement. false (the default, and every pre-existing row) => the legacy
+  // buy-in pot model: HELD/COMMITTED coins pay out or refund exactly as before.
+  // The two are mutually exclusive, so no competition can ever pay under both.
+  // prizePoolCoins stamps the SETTLED pool so a completed race's numbers can
+  // never drift when the accepted/eligible count changes afterwards.
+  // Additive with safe legacy defaults — no backfill, and old app builds never
+  // read either column.
+  fundedPrize          Boolean          @default(false) @map("funded_prize")
+  prizePoolCoins       Int              @default(0) @map("prize_pool_coins")
   startedAt            DateTime?        @map("started_at")
   endsAt               DateTime?        @map("ends_at")
   // Optional future auto-start time (1.1.7). When set and in the future, the
@@ -925,6 +939,13 @@ model Tournament {
   // 0 (free), or 10..TOURNAMENT_BUYIN_MAX[bracketSize] = 100/100/62 (D4 ladder).
   buyInAmount         Int              @default(0) @map("buy_in_amount")
   potCoins            Int              @default(0) @map("pot_coins")
+  // App-funded bracket pool (same semantics as Race.fundedPrize/prizePoolCoins).
+  // Entry is free; the champion is paid a MINTED pool of
+  // acceptedPlayers × durationPoints(totalRounds × matchupDurationDays) ×
+  // PRIZE_COIN_UNIT, clamped to MAX_CHAMPION_PRIZE. Mutually exclusive with both
+  // the legacy pot payout and a featured seed's championPrizeCoins.
+  fundedPrize         Boolean          @default(false) @map("funded_prize")
+  prizePoolCoins      Int              @default(0) @map("prize_pool_coins")
   powerupsEnabled     Boolean          @default(false) @map("powerups_enabled")
   powerupStepInterval Int?             @map("powerup_step_interval")
   isPublic            Boolean          @default(false) @map("is_public")

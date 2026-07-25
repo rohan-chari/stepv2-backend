@@ -5,6 +5,9 @@ const { generateShareToken } = require("../../../shared/lib/shareToken");
 const { withTournamentLock } = require("../services/tournamentLock");
 const { runTournamentStart } = require("../services/tournamentStart");
 const { totalRoundsFor } = require("../constants/tournaments");
+const {
+  normalizePowerupConfig,
+} = require("../../races/services/validateRaceConfig");
 
 // 60s cadence (matches seeded-race renewal), tight enough that a fresh open
 // bracket respawns within ~a minute of the previous one popping.
@@ -79,7 +82,10 @@ function buildRenewTournamentSeeds(dependencies = {}) {
         buyInAmount: 0,
         potCoins: 0,
         powerupsEnabled: seed.powerupsEnabled === true,
-        powerupStepInterval: seed.powerupsEnabled ? seed.powerupStepInterval : null,
+        // Seed column no longer read — fixed 2,000-step cadence everywhere.
+        powerupStepInterval: normalizePowerupConfig({
+          powerupsEnabled: seed.powerupsEnabled === true,
+        }),
         isPublic: true,
         shareToken: mintToken(),
         timezone: SEED_TIMEZONE,

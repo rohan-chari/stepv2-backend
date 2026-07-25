@@ -34,8 +34,11 @@ async function runTournamentStart({ tx, tournament, now = () => new Date(), rng,
     orderBy: { joinedAt: "asc" },
   });
 
-  // Commit the pot: HELD buy-ins -> COMMITTED; potCoins = size * buyIn.
-  const buyIn = tournament.buyInAmount || 0;
+  // Commit the pot: HELD buy-ins -> COMMITTED; potCoins = size * buyIn. An
+  // app-funded bracket commits NO pot — nobody was charged, and its prize is
+  // minted at advancement instead.
+  const buyIn =
+    tournament.fundedPrize === true ? 0 : tournament.buyInAmount || 0;
   if (buyIn > 0) {
     for (const p of accepted) {
       if (p.buyInStatus === "HELD") {

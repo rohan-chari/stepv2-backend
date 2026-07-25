@@ -1,21 +1,79 @@
 const { characterPresentation } = require("../../cosmetics");
-const { roundLabel, totalRoundsFor } = require("../constants/tournaments");
+const {
+  roundLabel,
+  totalRoundsFor,
+  clampMatchupDuration,
+  MAX_CHAMPION_PRIZE,
+} = require("../constants/tournaments");
+const {
+  computePrizePool,
+  buildPrizePoolPayload,
+} = require("../../../shared/economy/prizePool");
 const {
   collectRaceIllusions,
   isStealthedForViewer,
 } = require("../../races/services/raceIllusions");
 
+// Total bracket length in days — the duration band a funded bracket pool is
+// sized on (D9): every round is played back-to-back.
+function tournamentDurationDays(t) {
+  const rounds = t.totalRounds ?? totalRoundsFor(t.bracketSize);
+  return rounds * clampMatchupDuration(t.matchupDurationDays || 0);
+}
+
+// Legacy buy-in pot OR app-funded bracket pool, discriminated by fundedPrize.
+// Funded brackets report buyInAmount 0 (a frozen build then charges nothing) and
+// carry the pool in potCoins as well, so `lib/utils/tournament.dart` keeps
+// rendering a correct figure on an un-updated binary.
+function tournamentMoneyView(t, acceptedCount) {
+  if (t.fundedPrize !== true) {
+    return {
+      prizePool: null,
+      buyInAmount: t.buyInAmount,
+      potCoins: t.potCoins || 0,
+    };
+  }
+  const completed = t.status === "COMPLETED";
+  const playerCount =
+    acceptedCount != null
+      ? acceptedCount
+      : (t.participants || []).filter((p) => p.status === "ACCEPTED").length;
+  const durationDays = tournamentDurationDays(t);
+  const coins = completed
+    ? t.prizePoolCoins || 0
+    : computePrizePool({
+        playerCount,
+        durationDays,
+        max: MAX_CHAMPION_PRIZE,
+      });
+  return {
+    prizePool: buildPrizePoolPayload({
+      funded: true,
+      playerCount,
+      durationDays,
+      projected: !completed,
+      coins,
+      max: MAX_CHAMPION_PRIZE,
+    }),
+    buyInAmount: 0,
+    potCoins: coins,
+  };
+}
+
 // Summary fields shared by the create/mutation responses, the GET /races
 // tournaments bucket, and the public listing. Excludes participants/rounds.
-function summaryFields(t) {
+function summaryFields(t, acceptedCount = null) {
+  const money = tournamentMoneyView(t, acceptedCount);
   return {
     id: t.id,
     name: t.name,
     status: t.status,
     bracketSize: t.bracketSize,
     matchupDurationDays: t.matchupDurationDays,
-    buyInAmount: t.buyInAmount,
-    potCoins: t.potCoins || 0,
+    buyInAmount: money.buyInAmount,
+    potCoins: money.potCoins,
+    // App-funded bracket pool (additive); null for a legacy paid bracket.
+    prizePool: money.prizePool,
     powerupsEnabled: t.powerupsEnabled === true,
     powerupStepInterval: t.powerupStepInterval ?? null,
     isPublic: t.isPublic === true,
@@ -167,7 +225,7 @@ function serializeTournamentPayload(
   ).length;
 
   return {
-    ...summaryFields(t),
+    ...summaryFields(t, acceptedCount),
     acceptedCount,
     myStatus: myParticipant?.status ?? null,
     participants,
@@ -184,7 +242,7 @@ function serializeTournamentSummary(t, viewerUserId) {
     (p) => p.status === "ACCEPTED"
   ).length;
   return {
-    ...summaryFields(t),
+    ...summaryFields(t, acceptedCount),
     myStatus: myParticipant?.status ?? null,
     myEliminatedInRound: myParticipant?.eliminatedInRound ?? null,
     acceptedCount,
@@ -195,6 +253,7 @@ function serializeTournamentSummary(t, viewerUserId) {
 
 module.exports = {
   summaryFields,
+  tournamentDurationDays,
   serializeTournamentPayload,
   serializeTournamentSummary,
   serializeParticipant,

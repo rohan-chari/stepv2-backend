@@ -20,6 +20,26 @@ function buildGetPublicTournaments(dependencies = {}) {
 
     const featured = [];
     if (activeSeedIds.length > 0) {
+      // Seeds where the viewer is still ALIVE in some bracket. joinTournamentCore
+      // rejects a second bracket of the same seed with ALREADY_IN_FEATURED, so
+      // those lobbies are listed (the card flips to VIEW) but are NOT joinable —
+      // and must not be advertised as an available race to join.
+      const aliveRows = await db.tournamentParticipant.findMany({
+        where: {
+          userId,
+          status: "ACCEPTED",
+          eliminatedInRound: null,
+          tournament: {
+            seedId: { in: activeSeedIds },
+            status: { in: ["PENDING", "ACTIVE"] },
+          },
+        },
+        select: { tournament: { select: { seedId: true } } },
+      });
+      const aliveSeedIds = new Set(
+        aliveRows.map((r) => r.tournament?.seedId).filter(Boolean)
+      );
+
       const featuredRows = await db.tournament.findMany({
         where: { seedId: { in: activeSeedIds }, status: "PENDING" },
         include: summaryInclude,
@@ -29,7 +49,14 @@ function buildGetPublicTournaments(dependencies = {}) {
       for (const t of featuredRows) {
         if (seenSeeds.has(t.seedId)) continue; // one open lobby per seed
         seenSeeds.add(t.seedId);
-        featured.push(serializeTournamentSummary(t, userId));
+        const summary = serializeTournamentSummary(t, userId);
+        // Additive field (§ discovery). Old clients ignore it; the backend uses
+        // it so "PUBLIC RACES (X)" only counts brackets the viewer could join.
+        summary.joinable =
+          summary.myStatus === null &&
+          summary.acceptedCount < summary.bracketSize &&
+          !aliveSeedIds.has(t.seedId);
+        featured.push(summary);
       }
     }
 
@@ -44,7 +71,11 @@ function buildGetPublicTournaments(dependencies = {}) {
         (p) => p.status === "ACCEPTED"
       ).length;
       if (acceptedCount >= t.bracketSize) continue; // no open slots
-      tournaments.push(serializeTournamentSummary(t, userId));
+      // Already filtered to "not mine, has room, no seed" — always joinable.
+      tournaments.push({
+        ...serializeTournamentSummary(t, userId),
+        joinable: true,
+      });
     }
 
     return { featured, tournaments };

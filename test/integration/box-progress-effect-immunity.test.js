@@ -60,8 +60,23 @@ async function createActiveRace(alice, bob) {
   });
   await request(server.baseUrl, "POST", `/races/${raceId}/start`, { token: alice.token });
   const defaultStart = new Date(Date.now() - 7 * 60 * 60 * 1000);
-  await prisma.race.update({ where: { id: raceId }, data: { startedAt: defaultStart } });
-  await prisma.raceParticipant.updateMany({ where: { raceId }, data: { joinedAt: defaultStart } });
+  // POST /races now pins every powerup race to 2,000 steps per box (see
+  // fixed-powerup-interval.test.js), so the interval is set directly here to
+  // keep this suite's fixture. These assertions are about box PROGRESS and
+  // effect immunity, not about the interval — and a non-2,000 race is still a
+  // real production state: races created before that change keep their original
+  // interval forever (spec §4.3 deliberately never re-points them).
+  await prisma.race.update({
+    where: { id: raceId },
+    data: { startedAt: defaultStart, powerupStepInterval: INTERVAL },
+  });
+  // nextBoxAtSteps is seeded from the race's interval when a participant
+  // accepts (respondToRaceInvite.js), which happened while the race was still
+  // at the pinned 2,000 — so it has to be re-seeded alongside the interval.
+  await prisma.raceParticipant.updateMany({
+    where: { raceId },
+    data: { joinedAt: defaultStart, nextBoxAtSteps: INTERVAL },
+  });
   return raceId;
 }
 

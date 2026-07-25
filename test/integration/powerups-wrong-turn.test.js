@@ -298,6 +298,46 @@ describe("wrong turn", () => {
       assert.equal(res.status, 400);
     });
 
+    it("cannot stack via a Mirror reflect bounce landing back on an already-turned attacker", async () => {
+      const alice = await createUser("AliceValMirr");
+      const bob = await createUser("BobValMirror");
+      await makeFriends(alice, bob);
+      const raceId = await createActiveRace(alice, bob);
+
+      // Bob already has an active Wrong Turn on him (from an earlier direct cast).
+      const wt1 = await giveHeldPowerup(raceId, alice.userId, "WRONG_TURN", 99901);
+      const firstRes = await usePowerup(alice.token, raceId, wt1.id, bob.userId);
+      assert.equal(firstRes.status, 200);
+
+      // Alice activates Mirror.
+      const mirror = await giveHeldPowerup(raceId, alice.userId, "MIRROR", 99902);
+      const mirrorRes = await usePowerup(alice.token, raceId, mirror.id);
+      assert.equal(mirrorRes.status, 200);
+
+      // Bob (already Wrong-Turned) fires his own Wrong Turn at Alice. Alice's
+      // Mirror reflects it — the bounce would land back on Bob, who already
+      // has one active. That must be rejected, not stacked.
+      const wt2 = await giveHeldPowerup(raceId, bob.userId, "WRONG_TURN", 99903);
+      const res = await usePowerup(bob.token, raceId, wt2.id, alice.userId);
+      assert.equal(res.status, 400);
+
+      // Bob still has exactly the ONE original active Wrong Turn — no stack.
+      const activeOnBob = await prisma.raceActiveEffect.findMany({
+        where: { raceId, targetUserId: bob.userId, type: "WRONG_TURN", status: "ACTIVE" },
+      });
+      assert.equal(activeOnBob.length, 1);
+
+      // The rejected bounce must not have consumed Alice's Mirror.
+      const mirrorEffect = await prisma.raceActiveEffect.findFirst({
+        where: { raceId, targetUserId: alice.userId, type: "MIRROR" },
+      });
+      assert.equal(mirrorEffect.status, "ACTIVE");
+
+      // And Bob's Wrong Turn item stays HELD (not consumed) so it can be reused.
+      const bobPowerup = await prisma.racePowerup.findUnique({ where: { id: wt2.id } });
+      assert.equal(bobPowerup.status, "HELD");
+    });
+
   });
 
   // === PRORATING ===

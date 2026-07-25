@@ -160,7 +160,6 @@ const DEFAULT_CONFIG = {
       "COMPRESSION_SOCKS",
       "FANNY_PACK",
       "LUCKY_HORSESHOE",
-      "POCKET_WATCH",
       "TRAIL_MINE",
       "SNEAKY_SWAP",
       "SHORTCUT",
@@ -179,6 +178,12 @@ const DEFAULT_CONFIG = {
   // constants/powerupGating.js. That must never become admin-editable: an admin
   // toggle there would expose a type to a build that cannot render it.
   storeOnlyTypes: [
+    // Pocket Watch (2026-07-24, owner decision): pulled OUT of the in-race
+    // mystery-box drop pool and sold in the shop at the cheapest tier instead.
+    // Store-only, NOT retired — every already-owned copy still works, and it
+    // stays winnable from the DAILY box (it is deliberately absent from
+    // dailyBoxExcludedTypes, same as Imposter/Rainstorm/Signal Jammer).
+    "POCKET_WATCH",
     "IMPOSTER",
     "RAINSTORM",
     "SIGNAL_JAMMER",

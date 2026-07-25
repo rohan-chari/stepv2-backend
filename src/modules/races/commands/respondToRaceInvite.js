@@ -132,7 +132,8 @@ function buildRespondToRaceInvite(dependencies = {}) {
     if (acceptTeam) {
       updateFields.team = acceptTeam;
     }
-    const buyInAmount = race.buyInAmount || 0;
+    // App-funded races never charge to enter (see joinRaceCore).
+    const buyInAmount = race.fundedPrize === true ? 0 : race.buyInAmount || 0;
 
     // Late joiner: snapshot current steps so only post-join steps count
     if (accept && race.status === "ACTIVE") {

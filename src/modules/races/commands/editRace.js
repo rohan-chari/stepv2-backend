@@ -8,7 +8,7 @@ const { withRaceJoinLock } = require("../services/raceJoinLock");
 const {
   validateRaceName,
   validateDuration,
-  validatePowerupConfig,
+  normalizePowerupConfig,
   validateMaxParticipants,
   validateRaceBuyInConfig,
   validateTeamName,
@@ -136,28 +136,30 @@ function buildEditRace(dependencies = {}) {
       );
     }
 
-    // Determine effective powerup state for combined validation
-    const effectivePowerupsEnabled = hasField(updates, "powerupsEnabled")
-      ? !!updates.powerupsEnabled
-      : race.powerupsEnabled;
-    const effectivePowerupInterval = hasField(updates, "powerupStepInterval")
-      ? updates.powerupStepInterval
-      : race.powerupStepInterval;
-
-    if (
-      hasField(updates, "powerupsEnabled") ||
-      hasField(updates, "powerupStepInterval")
-    ) {
-      validatePowerupConfig({
-        powerupsEnabled: effectivePowerupsEnabled,
-        powerupStepInterval: effectivePowerupInterval,
-        ErrorClass: RaceEditError,
-      });
-      if (hasField(updates, "powerupsEnabled")) {
-        fields.powerupsEnabled = effectivePowerupsEnabled;
-      }
-      if (hasField(updates, "powerupStepInterval")) {
-        fields.powerupStepInterval = updates.powerupStepInterval;
+    // `updates.powerupStepInterval` is deliberately DROPPED ON THE FLOOR here:
+    // accepted (a frozen edit screen still sends it), never persisted, never a
+    // 400. Re-pointing a race's interval is not a future-only change —
+    // rollPowerup ratchets `currentThreshold += powerupStepInterval`, so
+    // lowering a running race from 5,000 to 2,000 makes the next steps-sync
+    // back-mint every box the player "should" already have (a walker at 20,000
+    // steps jumps from 4 boxes to 10). That is the public-join over-grant bug
+    // class; do not "fix" this back.
+    //
+    // Toggling powerupsEnabled stays editable. false -> true arms the fixed
+    // 2,000 interval; that race's interval was null, so there is no ratchet
+    // history to disturb.
+    if (hasField(updates, "powerupsEnabled")) {
+      const nextPowerupsEnabled = !!updates.powerupsEnabled;
+      fields.powerupsEnabled = nextPowerupsEnabled;
+      // Arm the fixed interval ONLY when the race has none stored. An old edit
+      // screen re-sends `powerupsEnabled: true` on every save, so writing the
+      // constant unconditionally would silently re-point a grandfathered
+      // 5,000-step race to 2,000 — the exact back-mint above, arriving through
+      // the other field.
+      if (nextPowerupsEnabled && race.powerupStepInterval == null) {
+        fields.powerupStepInterval = normalizePowerupConfig({
+          powerupsEnabled: true,
+        });
       }
     }
 
@@ -190,8 +192,24 @@ function buildEditRace(dependencies = {}) {
     // paid amount. Changing the effective amount on a PENDING race reconciles
     // every ACCEPTED participant's coin hold (charge the delta on a raise /
     // free->paid, refund it on a lower / paid->free).
+    //
+    // App-funded races have no buy-in to edit: buyInAmount/buyInEnabled from a
+    // frozen client are accepted and IGNORED (never a 400, never a coin
+    // movement), while payoutPreset edits still apply — the preset is what splits
+    // the funded pool. The reconcile below stays fully reachable for
+    // fundedPrize=false races, so an old client editing an old paid race behaves
+    // exactly as today.
     let buyInNotify = null;
-    if (
+    if (race.fundedPrize === true) {
+      if (hasField(updates, "payoutPreset")) {
+        const presetConfig = validateRaceBuyInConfig({
+          buyInAmount: 0,
+          payoutPreset: updates.payoutPreset,
+          ErrorClass: RaceEditError,
+        });
+        fields.payoutPreset = presetConfig.payoutPreset;
+      }
+    } else if (
       hasField(updates, "buyInAmount") ||
       hasField(updates, "buyInEnabled") ||
       hasField(updates, "payoutPreset")

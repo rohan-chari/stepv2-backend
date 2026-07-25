@@ -38,6 +38,13 @@ const KNOWN_FLAGS = {
   // so flipping this off stops new entries while already-filled brackets finish
   // and pay their champion. Default ON.
   tournamentsEnabled: true,
+  // App-funded prize pools (buy-ins removed). While FALSE the backend behaves
+  // exactly as today: races/brackets charge and hold buy-ins. Flipping it on
+  // affects NEW competitions only — it decides `fundedPrize` at create time, and
+  // settlement reads that column, never this flag, so a mid-race flip can neither
+  // strand a promised prize nor let a competition pay under both models. Default
+  // OFF so deploying this backend changes nothing for any app version.
+  fundedPrizePoolsEnabled: false,
   // Step-sample upload granularity in minutes (Five-Minute Step Samples §3.2).
   // NUMERIC flag, allowed set {5,10,15,30,60}. Default 60 = hourly (today's
   // behavior). Served on /auth/me via a defensive safeNumber that OMITS the key

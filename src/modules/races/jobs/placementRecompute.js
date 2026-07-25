@@ -4,7 +4,11 @@ const { Notification } = require("../../notifications");
 const { eventBus } = require("../../../shared/events/eventBus");
 const { resolveRaceState } = require("../services/raceStateResolution");
 const { stepSyncPushService } = require("../../../shared/push/stepSyncPush");
-const { computeRacePayouts } = require("../racePayoutPresets");
+const {
+  computeRacePayouts,
+  computeFundedPayouts,
+} = require("../racePayoutPresets");
+const { computePrizePool } = require("../../../shared/economy/prizePool");
 
 // Team-race slacker nudge (TR-683): gentle, fires only inside the final 12h,
 // to a member contributing < 25% of their team's per-member average (average
@@ -62,6 +66,14 @@ function buildRecomputePlacements(dependencies = {}) {
   // the durable audit-row guard, so repeated ticks and restarts never re-send.
   async function evaluateRaceEndingSoon({ race, participants, currentTime }) {
     if (isRaceEndingReminderDisabled()) return;
+    // Seeded daily/weekly challenges are excluded (owner decision 2026-07-24).
+    // Every opted-in user is auto-enrolled into these every day, so a "2h left"
+    // nudge on each one is a recurring push nobody chose to receive. The nudge
+    // is for races a user deliberately started or joined. `seedId` is selected
+    // by findActiveInProgress — if it is ever dropped from that select this
+    // reads undefined and the suppression silently stops working, which is what
+    // race-ending-soon-skips-seeded.test.js locks down against the real DB.
+    if (race.seedId) return;
     // Qualify on a definite end instant only (endsAt != null). Open-ended
     // step-target races have no fixed end and are excluded.
     if (!race.endsAt) return;
@@ -280,8 +292,18 @@ function buildRecomputePlacements(dependencies = {}) {
         // alert only on a meaningful threshold crossing (dropping out of the
         // payout) instead of every one-spot slip. 0 when there's no pot — a free
         // race has no paid places, so only lead changes are meaningful.
-        const paidPlaces =
-          (race.potCoins || 0) > 0
+        const paidPlaces = race.fundedPrize
+          ? computeFundedPayouts({
+              preset: race.payoutPreset,
+              // Projected from the live field, exactly as the race screen shows
+              // it; the settled pool is recomputed from actual finishers.
+              poolCoins: computePrizePool({
+                playerCount: ranked.length,
+                durationDays: race.maxDurationDays || 7,
+              }),
+              participantCount: ranked.length,
+            }).length
+          : (race.potCoins || 0) > 0
             ? computeRacePayouts({
                 preset: race.payoutPreset,
                 potCoins: race.potCoins,

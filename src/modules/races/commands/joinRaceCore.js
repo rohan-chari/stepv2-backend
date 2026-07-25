@@ -246,7 +246,10 @@ function buildJoinRaceCore(dependencies = {}) {
       throw new RaceJoinError("This race is full", 400);
     }
 
-    const buyInAmount = race.buyInAmount || 0;
+    // App-funded races never charge to enter. Belt-and-braces: a funded race
+    // already carries buyInAmount 0, and the row's fundedPrize flag (not the
+    // feature flag) is what makes that permanent.
+    const buyInAmount = race.fundedPrize === true ? 0 : race.buyInAmount || 0;
     if (buyInAmount > 0) {
       await ensureUserCanAfford({
         userModel,

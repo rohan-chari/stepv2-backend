@@ -50,7 +50,45 @@ function mergeOverDefaults(stored) {
     }
     return out;
   }
-  return merge(defaultConfig(), isPlainObject(stored) ? stored : {});
+  return enforceStoreOnlyExclusion(
+    merge(defaultConfig(), isPlainObject(stored) ? stored : {})
+  );
+}
+
+// `storeOnlyTypes` is THE drop-exclusion authority (defaults §D13), and
+// validateConfig rejects any SAVE that lists a type in both it and a dropPool
+// tier. But a config saved BEFORE a type became store-only keeps that type in
+// its stored dropPool, and the stored row wins over the code defaults — so
+// moving a powerup to store-only in code would silently do nothing in prod until
+// an admin re-saved the config by hand.
+//
+// Resolving the exclusion here, at the one place a stored config becomes a
+// runtime config, makes the deploy alone sufficient: the roller, the odds sheet,
+// the docs generator and the RARITY_TIERS view all read through this. It only
+// ever REMOVES a type the config itself already declares undroppable.
+//
+// The exclusion is applied from the stored list AND the code defaults' list.
+// `config.storeOnlyTypes` itself is left exactly as stored (arrays still replace
+// wholesale — that invariant is unchanged); only the drop pool is filtered.
+// "This type is not obtainable from a box" is a product decision that ships with
+// the binary, and a stored list written before the decision existed must not be
+// able to un-make it. Filtering is always safe: making a store-only type
+// droppable again requires editing dropPool AND the defaults, which is a code
+// change either way.
+function enforceStoreOnlyExclusion(config) {
+  const storeOnly = new Set([
+    ...(Array.isArray(config?.storeOnlyTypes) ? config.storeOnlyTypes : []),
+    ...defaultConfig().storeOnlyTypes,
+  ]);
+  if (storeOnly.size === 0 || !isPlainObject(config.dropPool)) {
+    return config;
+  }
+  for (const [rarity, pool] of Object.entries(config.dropPool)) {
+    if (!Array.isArray(pool)) continue;
+    const filtered = pool.filter((type) => !storeOnly.has(type));
+    if (filtered.length !== pool.length) config.dropPool[rarity] = filtered;
+  }
+  return config;
 }
 
 // ---------------------------------------------------------------------------

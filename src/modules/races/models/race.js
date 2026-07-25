@@ -77,6 +77,9 @@ const Race = {
     buyInAmount = 0,
     payoutPreset = "WINNER_TAKES_ALL",
     potCoins = 0,
+    // App-funded prize pool discriminator. Defaults false so every legacy caller
+    // (and every existing row) keeps the buy-in model.
+    fundedPrize = false,
     isPublic = false,
     maxParticipants = 10,
     scheduledStartAt = null,
@@ -103,6 +106,7 @@ const Race = {
         buyInAmount,
         payoutPreset,
         potCoins,
+        fundedPrize,
         isPublic,
         maxParticipants,
         scheduledStartAt,
@@ -423,10 +427,20 @@ const Race = {
         name: true,
         payoutPreset: true,
         potCoins: true,
+        // App-funded races carry no pot, so the "in the money" threshold the
+        // placement alert is gated on has to be derived from the pool formula
+        // instead — which needs the discriminator plus the duration band.
+        fundedPrize: true,
+        maxDurationDays: true,
         // startedAt (additive): the race-ending-soon reminder needs the total
         // scheduled duration (endsAt - startedAt) to skip sub-2h seeded races
         // that start already inside the 2h window (§8 short-race guard).
         startedAt: true,
+        // seedId (additive): the race-ending-soon reminder is suppressed for the
+        // seeded daily/weekly challenges — every opted-in user is auto-enrolled
+        // in those daily, so the nudge would be a push nobody asked for. Must
+        // stay in this select or the skip silently reads undefined.
+        seedId: true,
         endsAt: true,
         // Team races: the recompute job suppresses individual placement events
         // and evaluates team lead-change / final-stretch / slacker pushes

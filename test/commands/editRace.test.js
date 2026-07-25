@@ -270,7 +270,14 @@ test("editRace allows maxDurationDays boundary values", async () => {
   assert.equal(ctx.updateCall.fields.maxDurationDays, 30);
 });
 
-test("editRace enables powerups with valid interval", async () => {
+// ── Powerup interval: fixed at 2,000, no longer editable ───────────────────
+// These four tests used to assert the retired contract (a PATCH persisting a
+// creator-chosen interval, and 400s outside [2000, 50000]). Rewritten against
+// the current contract per docs/fixed-powerup-interval-requirements.md §4.3/§5.2
+// with owner authorization, 2026-07-24: the interval is app-decided, so a value
+// sent by any client is accepted and discarded rather than validated.
+
+test("editRace enabling powerups arms the fixed 2,000 interval", async () => {
   const ctx = makeDeps();
   const editRace = buildEditRace(ctx.deps);
 
@@ -281,51 +288,62 @@ test("editRace enables powerups with valid interval", async () => {
   });
 
   assert.equal(ctx.updateCall.fields.powerupsEnabled, true);
-  assert.equal(ctx.updateCall.fields.powerupStepInterval, 3000);
-});
-
-test("editRace rejects powerup interval below 2000", async () => {
-  const { deps } = makeDeps();
-  const editRace = buildEditRace(deps);
-
-  await assert.rejects(
-    () =>
-      editRace({
-        userId: "user-1",
-        raceId: "race-1",
-        updates: { powerupsEnabled: true, powerupStepInterval: 1000 },
-      }),
-    (err) => err instanceof RaceEditError && err.statusCode === 400
+  assert.equal(
+    ctx.updateCall.fields.powerupStepInterval,
+    2000,
+    "the client's 3000 is discarded — the interval is app-decided"
   );
 });
 
-test("editRace rejects powerup interval above 50000", async () => {
-  const { deps } = makeDeps();
-  const editRace = buildEditRace(deps);
+test("editRace ignores an out-of-band interval instead of rejecting it", async () => {
+  // Both ends of the retired [2000, 50000] band. A 400 here would only punish a
+  // frozen client over a number the server throws away.
+  for (const interval of [1000, 60000]) {
+    const ctx = makeDeps();
+    const editRace = buildEditRace(ctx.deps);
 
-  await assert.rejects(
-    () =>
-      editRace({
-        userId: "user-1",
-        raceId: "race-1",
-        updates: { powerupsEnabled: true, powerupStepInterval: 60000 },
-      }),
-    (err) => err instanceof RaceEditError && err.statusCode === 400
-  );
+    await editRace({
+      userId: "user-1",
+      raceId: "race-1",
+      updates: { powerupsEnabled: true, powerupStepInterval: interval },
+    });
+
+    assert.equal(ctx.updateCall.fields.powerupStepInterval, 2000);
+  }
 });
 
-test("editRace rejects enabling powerups without an interval", async () => {
-  const { deps } = makeDeps();
-  const editRace = buildEditRace(deps);
+test("editRace enabling powerups without an interval is fine", async () => {
+  const ctx = makeDeps();
+  const editRace = buildEditRace(ctx.deps);
 
-  await assert.rejects(
-    () =>
-      editRace({
-        userId: "user-1",
-        raceId: "race-1",
-        updates: { powerupsEnabled: true },
-      }),
-    (err) => err instanceof RaceEditError && err.statusCode === 400
+  await editRace({
+    userId: "user-1",
+    raceId: "race-1",
+    updates: { powerupsEnabled: true },
+  });
+
+  assert.equal(ctx.updateCall.fields.powerupStepInterval, 2000);
+});
+
+test("editRace never re-points a race that already has an interval", async () => {
+  // The back-mint guard. An OLD edit screen re-sends `powerupsEnabled: true` on
+  // every save; if that rewrote the interval, a grandfathered 5,000-step race
+  // would drop to 2,000 and rollPowerup's ratchet would back-mint every box the
+  // player "should" already have.
+  const ctx = makeDeps({
+    raceOverrides: { powerupsEnabled: true, powerupStepInterval: 5000 },
+  });
+  const editRace = buildEditRace(ctx.deps);
+
+  await editRace({
+    userId: "user-1",
+    raceId: "race-1",
+    updates: { powerupsEnabled: true, powerupStepInterval: 2000 },
+  });
+
+  assert.ok(
+    !("powerupStepInterval" in ctx.updateCall.fields),
+    "an already-configured race's interval is never rewritten"
   );
 });
 

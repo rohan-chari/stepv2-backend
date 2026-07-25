@@ -293,6 +293,22 @@ function isOpponentInflicted(effect, userId) {
   return effect.sourceUserId !== effect.targetUserId;
 }
 
+// Opponent-APPLIED but NOT a debuff on the target, so it must never be removed
+// by Cleanse or Quick Rinse. BOUNTY (§3.11) is a placement wager the caster
+// puts on a rival ahead of them: it inflicts nothing, it just records a stake
+// settled at race end. Its row nonetheless lives on the TARGET's participant
+// with sourceUserId = caster — exactly the shape isOpponentInflicted() reads as
+// "a debuff someone else put on me" — so without this exclusion the bountied
+// rival could erase the caster's wager with one Cleanse, and a Quick Rinse
+// could be burned on it too (expiresAt = race end makes it a live timed
+// effect). Anything added here must likewise be harmless to its target.
+const NON_CLEANSABLE_TYPES = ["BOUNTY"];
+
+function isCleansableDebuff(effect, userId) {
+  if (NON_CLEANSABLE_TYPES.includes(effect.type)) return false;
+  return isOpponentInflicted(effect, userId);
+}
+
 // Red Card removes 10% of the leader's steps (restored from the 5% nerf — owner
 // decision 2026-07-24). Server-side effect, so old clients apply the new value
 // too. Drop odds (balanceConfig RED_CARD) are intentionally left unchanged.
@@ -1628,6 +1644,35 @@ function buildUsePowerup(dependencies = {}) {
       }
     }
 
+    // Reject stacking Ghost Pepper when the user already has one running.
+    // Stacking is wrong in BOTH directions: two live peppers SUM to 6x
+    // (effectMultiplier sums every active buff row), while a pepper eaten
+    // during the previous one's burnout is destroyed outright (the freeze check
+    // short-circuits to 0 before the buff sum). The check covers the whole
+    // boost+burnout window because the effect row spans both phases.
+    //
+    // retainHeld: Ghost Pepper is a store-bought wave-5 item paid for in coins,
+    // and this is a TRANSIENT limit — the pepper is perfectly usable in this
+    // race once the current one ends, so it stays HELD instead of being eaten
+    // by the rejection (same treatment as Rainstorm / Hitchhike / Piggy Bank).
+    if (type === "GHOST_PEPPER") {
+      const existingPepper = await effectModel.findActiveByTypeForParticipant(
+        myParticipant.id,
+        "GHOST_PEPPER"
+      );
+      // isLiveTimedEffect (not just status ACTIVE) so a row the expireEffects
+      // cron hasn't retired yet stops blocking the moment its window really
+      // ends — the guard must not outlast the pepper.
+      if (existingPepper && isLiveTimedEffect(existingPepper, now())) {
+        throw new PowerupUseError(
+          "You're still burning from a Ghost Pepper — wait for it to wear off",
+          400,
+          "GHOST_PEPPER_ALREADY_ACTIVE",
+          { retainHeld: true }
+        );
+      }
+    }
+
     // Reject stacking Stealth Mode when user already has one active
     if (type === "STEALTH_MODE") {
       const existingStealth = await effectModel.findActiveByTypeForParticipant(
@@ -1740,7 +1785,7 @@ function buildUsePowerup(dependencies = {}) {
     if (type === "QUICK_RINSE") {
       const activeEffects = await effectModel.findActiveForParticipant(myParticipant.id);
       quickRinseTargets = (activeEffects || []).filter(
-        (e) => isOpponentInflicted(e, userId) && isLiveTimedEffect(e, now())
+        (e) => isCleansableDebuff(e, userId) && isLiveTimedEffect(e, now())
       );
       if (quickRinseTargets.length === 0) {
         throw new PowerupUseError(
@@ -1753,7 +1798,7 @@ function buildUsePowerup(dependencies = {}) {
 
     if (type === "CLEANSE") {
       const activeEffects = await effectModel.findActiveForParticipant(myParticipant.id);
-      const hasOpponentDebuff = activeEffects.some((e) => isOpponentInflicted(e, userId));
+      const hasOpponentDebuff = activeEffects.some((e) => isCleansableDebuff(e, userId));
       if (!hasOpponentDebuff) {
         throw new PowerupUseError("No debuffs to cleanse", 400);
       }
@@ -1849,6 +1894,23 @@ function buildUsePowerup(dependencies = {}) {
         "MIRROR"
       );
       if (mirror) {
+        // Re-check Wrong Turn stacking against the actual POST-reflect
+        // landing spot (the original attacker), not the pre-swap target.
+        // The generic "already has an active Wrong Turn" guard above only
+        // validated the target BEFORE the Mirror was known to fire, so a
+        // reflected Wrong Turn could stack a second one onto an attacker who
+        // already had one active. Checked before the Mirror is consumed so a
+        // rejected bounce leaves the Mirror intact and the item HELD.
+        if (type === "WRONG_TURN") {
+          const existingWT = await effectModel.findActiveByTypeForParticipant(
+            myParticipant.id,
+            "WRONG_TURN"
+          );
+          if (existingWT) {
+            throw new PowerupUseError("Target already has an active Wrong Turn", 400);
+          }
+        }
+
         reflected = true;
         // Consume/expire the Mirror.
         await effectModel.update(mirror.id, { status: "EXPIRED" });
@@ -1961,6 +2023,18 @@ function buildUsePowerup(dependencies = {}) {
             "MIRROR"
           );
           if (newMirror) {
+            // Same post-swap Wrong Turn re-check as the primary Mirror block
+            // above, applied to the redirected victim's Mirror bounce.
+            if (type === "WRONG_TURN") {
+              const existingWT = await effectModel.findActiveByTypeForParticipant(
+                myParticipant.id,
+                "WRONG_TURN"
+              );
+              if (existingWT) {
+                throw new PowerupUseError("Target already has an active Wrong Turn", 400);
+              }
+            }
+
             reflected = true;
             await effectModel.update(newMirror.id, { status: "EXPIRED" });
             const originalAttacker = myParticipant;
@@ -2541,7 +2615,7 @@ function buildUsePowerup(dependencies = {}) {
         // RUNNERS_HIGH, STEALTH_MODE, MIRROR) are NEVER touched.
         const activeEffects = await effectModel.findActiveForParticipant(myParticipant.id);
         const opponentDebuffs = activeEffects.filter(
-          (e) => isOpponentInflicted(e, userId)
+          (e) => isCleansableDebuff(e, userId)
         );
         for (const debuff of opponentDebuffs) {
           // Truncate expiresAt to NOW as well as flipping status. Step

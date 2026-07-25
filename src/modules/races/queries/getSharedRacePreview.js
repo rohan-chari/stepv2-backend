@@ -1,4 +1,5 @@
 const { Race } = require("../models/race");
+const { buildRaceMoneyView } = require("../racePrizePool");
 
 // Public, UNAUTHENTICATED preview of a shared race, used by both the web
 // landing page (GET /r/:token) and the app's pre-join screen
@@ -27,12 +28,22 @@ function buildGetSharedRacePreview(dependencies = {}) {
     const isFull =
       race.maxParticipants != null && participantCount >= race.maxParticipants;
 
+    // Legacy buy-in pot OR app-funded prize pool (race.fundedPrize decides). A
+    // funded race reports buyInAmount 0, so a frozen build's pre-join sheet shows
+    // no charge, and carries the pool in the additive prizePool block.
+    const money = buildRaceMoneyView({
+      race,
+      participants,
+      acceptedCount: participantCount,
+    });
+
     return {
       id: race.id,
       name: race.name,
       status: race.status,
       powerupsEnabled: race.powerupsEnabled === true,
-      buyInAmount: race.buyInAmount || 0,
+      buyInAmount: money.buyInAmount,
+      prizePool: money.prizePool,
       maxParticipants: race.maxParticipants ?? null,
       participantCount,
       host: race.creator

@@ -4,13 +4,17 @@ const { awardCoins } = require("../../../shared/economy/awardCoins");
 const {
   payoutTournamentPot,
   mintChampionPrize,
+  mintTournamentPrizePool,
 } = require("../services/tournamentBuyIns");
 const { createRoundRaces } = require("../services/tournamentRounds");
 const {
   totalRoundsFor,
   nextRoundPairings,
   roundLabel,
+  MAX_CHAMPION_PRIZE,
 } = require("../constants/tournaments");
+const { computePrizePool } = require("../../../shared/economy/prizePool");
+const { tournamentDurationDays } = require("../queries/serializeTournament");
 
 // Advance a tournament when its current round is fully settled. Idempotent and
 // concurrency-safe: runs under a tournament FOR UPDATE lock, and the
@@ -94,29 +98,58 @@ function buildAdvanceTournament(dependencies = {}) {
           },
         });
 
-        // Exactly one prize path: pot (paid user tournament) OR minted (seeded).
+        const allParticipants = await tx.tournamentParticipant.findMany({
+          where: { tournamentId, status: "ACCEPTED" },
+          select: { userId: true },
+        });
+
+        // EXACTLY ONE prize path, in this order (spec §4.4):
+        //   1. legacy pot   — an in-flight paid bracket created before the flip,
+        //                     holding real COMMITTED coins. Must pay as today.
+        //   2. featured seed — already app-funded (seed.championPrizeCoins), so it
+        //                     keeps its configured amount and never also mints a
+        //                     funded pool.
+        //   3. funded pool  — free-entry bracket: mint
+        //                     players × durationPoints(totalDays) × unit, clamped
+        //                     to MAX_CHAMPION_PRIZE.
+        // `fundedPrize` on the row (never the feature flag) gates branch 3, so a
+        // mid-bracket flip can neither strand nor duplicate a champion prize.
+        let prizeAmount = 0;
         if ((tournament.buyInAmount || 0) > 0 && (tournament.potCoins || 0) > 0) {
+          prizeAmount = tournament.potCoins || 0;
           await payoutTournamentPot({
             awardCoinsFn,
             userId: championUserId,
             tournamentId,
-            amount: tournament.potCoins,
+            amount: prizeAmount,
           });
         } else if (tournament.seedId && tournament.seed) {
+          prizeAmount = tournament.seed.championPrizeCoins || 0;
           await mintChampionPrize({
             awardCoinsFn,
             userId: championUserId,
             tournamentId,
-            amount: tournament.seed.championPrizeCoins || 0,
+            amount: prizeAmount,
+          });
+        } else if (tournament.fundedPrize === true) {
+          prizeAmount = computePrizePool({
+            playerCount: allParticipants.length,
+            durationDays: tournamentDurationDays(tournament),
+            max: MAX_CHAMPION_PRIZE,
+          });
+          await mintTournamentPrizePool({
+            awardCoinsFn,
+            userId: championUserId,
+            tournamentId,
+            amount: prizeAmount,
+          });
+          // Stamp the settled pool (and mirror it into potCoins so a frozen build
+          // renders the real prize) inside the same transaction as the crowning.
+          await tx.tournament.update({
+            where: { id: tournamentId },
+            data: { prizePoolCoins: prizeAmount, potCoins: prizeAmount },
           });
         }
-
-        const prizeAmount =
-          (tournament.buyInAmount || 0) > 0
-            ? tournament.potCoins || 0
-            : tournament.seed
-              ? tournament.seed.championPrizeCoins || 0
-              : 0;
 
         deferred.push({
           type: "TOURNAMENT_CHAMPION",
@@ -126,10 +159,6 @@ function buildAdvanceTournament(dependencies = {}) {
           prizeCoins: prizeAmount,
         });
 
-        const allParticipants = await tx.tournamentParticipant.findMany({
-          where: { tournamentId, status: "ACCEPTED" },
-          select: { userId: true },
-        });
         for (const p of allParticipants) {
           if (p.userId === championUserId) continue;
           deferred.push({

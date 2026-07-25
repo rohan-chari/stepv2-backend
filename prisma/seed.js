@@ -372,6 +372,26 @@ async function seed() {
       testOnly: true,
       sortOrder: 19,
     },
+    {
+      // Pocket Watch (2026-07-24, owner decision): moved OUT of the in-race
+      // mystery-box drop pool (config.storeOnlyTypes) and sold here at the
+      // cheapest tier instead.
+      //
+      // NOT feature-gated and NOT testOnly, deliberately: Pocket Watch has been
+      // droppable since 1.1.x, so every shipped binary already renders its icon,
+      // copy and two-mode use sheet. There is nothing a frozen old client could
+      // fail to draw, and gating it would only hide it from the users who
+      // already know it.
+      sku: "POWERUP_POCKET_WATCH",
+      name: "Pocket Watch",
+      description:
+        "Wind the clock back: extend every timed buff you have running. Upgrades stretch the extension further.",
+      priceCoins: 40,
+      powerupType: "POCKET_WATCH",
+      active: true,
+      testOnly: false,
+      sortOrder: 20,
+    },
   ];
   let powerupItemsUpserted = 0;
   for (const p of powerupShopItems) {

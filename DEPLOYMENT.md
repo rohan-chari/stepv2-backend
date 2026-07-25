@@ -161,6 +161,41 @@ Migrations are the one thing that's hard to undo. Rules:
 
 ---
 
+## App-funded prize pools (buy-ins removed)
+
+Races and brackets are free to enter; the app MINTS the prize at settlement:
+
+```
+pool = playerCount × durationPoints(days) × PRIZE_COIN_UNIT      (1d=1, 3d=2, 7d=4, 14d=8)
+```
+
+clamped to `PRIZE_POOL_MAX_COINS` per race, and to `MAX_CHAMPION_PRIZE` (1,000,
+in code) per bracket.
+
+| Env var | Default | Notes |
+|---|---|---|
+| `PRIZE_COIN_UNIT` | `20` | Coins per player-point. |
+| `PRIZE_POOL_MAX_COINS` | `3200` | Per-race ceiling. A 300-player Daily saturates it. |
+
+**Both must be set in the droplet `.env` BEFORE the feature is switched on**, so
+the economy can be dialled down in minutes without an App Store release (the
+`AD_COIN_REWARD_AMOUNT` lesson).
+
+Kill switch: the `fundedPrizePoolsEnabled` admin/app-settings flag, default
+**OFF**. It only decides `races.funded_prize` / `tournaments.funded_prize` at
+CREATE time; settlement reads the column, never the flag. Consequences:
+
+- Flipping it on affects **new** competitions only. In-flight buy-in races and
+  brackets keep their `HELD`/`COMMITTED` coins and pay/refund exactly as before —
+  no competition can ever pay under both models.
+- Flipping it back off is a safe rollback: already-funded rows keep paying their
+  minted pool, new competitions revert to the buy-in model.
+- Deploy order is backend first, then the app. Frozen builds see
+  `buyInAmount: 0` (so no confirm sheet, no charge) and read the pool from
+  `projectedPotCoins` / `potCoins`.
+
+---
+
 ## Syncing prod data into staging
 
 From your laptop, not the droplet. Requires `STAGING_DATABASE_URL` in your local `.env`.

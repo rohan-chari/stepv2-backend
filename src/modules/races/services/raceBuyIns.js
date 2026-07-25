@@ -90,10 +90,31 @@ async function payoutRaceCoins({
   });
 }
 
+// App-funded prize pool payout. A MINTED credit (no pot funded it), on its own
+// reason so it can never collide with a legacy pot payout, a refund, or the
+// retired finish reward — a retry replays idempotently on
+// (userId, "race_prize_pool_payout", "<raceId>:<placement>").
+async function payoutRacePrizePool({
+  awardCoinsFn,
+  userId,
+  raceId,
+  placement,
+  amount,
+}) {
+  return creditBuyIn({
+    awardCoinsFn,
+    userId,
+    amount,
+    reason: "race_prize_pool_payout",
+    refId: `${raceId}:${placement}`,
+  });
+}
+
 module.exports = {
   buildAtomicHoldFn,
   ensureUserCanAfford,
   payoutRaceCoins,
+  payoutRacePrizePool,
   refundRaceBuyIn,
   reserveRaceBuyIn,
   validateRaceBuyInConfig,

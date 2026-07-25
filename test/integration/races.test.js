@@ -834,6 +834,15 @@ describe("races", () => {
         token: bob.token,
       });
       await request(server.baseUrl, "POST", `/races/${raceId}/start`, { token: alice.token });
+      // POST /races now pins every powerup race to 2,000 steps per box, so the
+      // 2,500 fixture this assertion is built on is applied directly. What the
+      // test proves — a late joiner's nextBoxAtSteps is initialized to the
+      // race's interval rather than left null — is unchanged, and a
+      // grandfathered non-2,000 race is still a real production shape (§4.3).
+      await prisma.race.update({
+        where: { id: raceId },
+        data: { powerupStepInterval: 2500 },
+      });
 
       // Invite charlie late
       await request(server.baseUrl, "POST", `/races/${raceId}/invite`, {

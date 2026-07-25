@@ -69,10 +69,25 @@ async function createActiveRace(opts = {}) {
   });
   await request(server.baseUrl, "POST", `/races/${raceId}/start`, { token: alice.token });
 
-  // Backdate so step samples fall within race window
+  // Backdate so step samples fall within race window. The interval is also set
+  // directly: POST /races now pins every powerup race to 2,000 steps per box,
+  // so a fixture asking for 5,000 has to be applied here. Grandfathered
+  // non-2,000 races are a real production state (spec §4.3 never re-points an
+  // existing race), so these assertions still cover something that exists.
   const defaultStart = new Date(Date.now() - 2 * 60 * 60 * 1000);
-  await prisma.race.update({ where: { id: raceId }, data: { startedAt: defaultStart } });
-  await prisma.raceParticipant.updateMany({ where: { raceId }, data: { joinedAt: defaultStart } });
+  await prisma.race.update({
+    where: { id: raceId },
+    data: {
+      startedAt: defaultStart,
+      powerupStepInterval: opts.interval || 5000,
+    },
+  });
+  // nextBoxAtSteps was seeded from the pinned 2,000 at accept time
+  // (respondToRaceInvite.js), so re-seed it alongside the interval above.
+  await prisma.raceParticipant.updateMany({
+    where: { raceId },
+    data: { joinedAt: defaultStart, nextBoxAtSteps: opts.interval || 5000 },
+  });
 
   return { alice, bob, raceId };
 }
