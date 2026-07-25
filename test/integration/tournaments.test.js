@@ -115,6 +115,10 @@ describe("tournaments — integration", () => {
     await cleanDatabase();
     nextAppleId = 0;
     await appSettings.setFlag("tournamentsEnabled", true);
+    // Buy-in brackets. App-funded prize pools now default ON, which zeroes
+    // buy-ins at create, so this suite pins the flag OFF: it covers the
+    // buy-in model, which is still live code reachable via the kill switch.
+    await appSettings.setFlag("fundedPrizePoolsEnabled", false);
   });
 
   it("full happy path (free 4-bracket): pop-when-full start, advancement, champion, zero ledger", async () => {

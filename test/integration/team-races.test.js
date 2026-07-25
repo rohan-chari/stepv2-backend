@@ -136,6 +136,11 @@ describe("team races (integration)", () => {
     await cleanDatabase();
     await prisma.notification.deleteMany({});
     nextAppleId = 0;
+    // Team buy-ins, tie refunds and forfeit collapse are asserted in coins, and
+    // app-funded prize pools now default ON (which zeroes buy-ins at create).
+    // Pin the flag OFF: this suite covers the buy-in model, which remains live
+    // code reachable via the kill switch.
+    await appSettings.setFlag("fundedPrizePoolsEnabled", false);
   });
 
   it("TR-101/103/104 creates a 2v2 with fields, distinct names, creator on TEAM_A", async () => {

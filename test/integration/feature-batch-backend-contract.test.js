@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict");
 const { describe, it, before, beforeEach } = require("node:test");
 const { cleanDatabase, prisma, request, getSharedServer, createTestUser } = require("./setup");
+const { appSettings } = require("../../src/shared/config/appSettings");
 
 let server;
 const ADMIN_EMAIL = process.env.ADMIN_EMAILS?.split(",")[0]?.trim() || "admin@test.com";
@@ -10,6 +11,9 @@ describe("2026-07-22 additive backend contracts", () => {
   beforeEach(async () => {
     await cleanDatabase();
     await prisma.appSetting.deleteMany({ where: { key: "dualBoxBannersEnabled" } });
+    // App-funded prize pools now default ON and zero buy-ins at create; the
+    // buy-in assertions here belong to the legacy model, so pin the flag OFF.
+    await appSettings.setFlag("fundedPrizePoolsEnabled", false);
   });
 
   it("serves and patches dualBoxBannersEnabled while /auth/me defaults it off", async () => {

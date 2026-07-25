@@ -42,9 +42,22 @@ const KNOWN_FLAGS = {
   // exactly as today: races/brackets charge and hold buy-ins. Flipping it on
   // affects NEW competitions only — it decides `fundedPrize` at create time, and
   // settlement reads that column, never this flag, so a mid-race flip can neither
-  // strand a promised prize nor let a competition pay under both models. Default
-  // OFF so deploying this backend changes nothing for any app version.
-  fundedPrizePoolsEnabled: false,
+  // strand a promised prize nor let a competition pay under both models.
+  //
+  // Default ON (owner decision 2026-07-24): this ships live rather than dark.
+  // Safe for frozen binaries because the funded read path reports the pool as
+  // `projectedPotCoins` and `buyInAmount: 0` (racePrizePool.js) — an un-updated
+  // build renders the correct prize as POT and charges nothing. In-flight
+  // buy-in races are unaffected; they settle under the old model off their own
+  // `fundedPrize: false` column.
+  //
+  // KILL SWITCH: this is only the fallback. Storing `false` in the AppSetting
+  // row overrides it at runtime with no deploy — new competitions revert to
+  // buy-ins immediately, and any funded race already created still pays its
+  // minted pool. The buy-in code path is therefore still live code, not dead
+  // code: the suites that cover it pin this flag off explicitly rather than
+  // relying on the default.
+  fundedPrizePoolsEnabled: true,
   // Step-sample upload granularity in minutes (Five-Minute Step Samples §3.2).
   // NUMERIC flag, allowed set {5,10,15,30,60}. Default 60 = hourly (today's
   // behavior). Served on /auth/me via a defensive safeNumber that OMITS the key

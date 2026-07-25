@@ -102,6 +102,10 @@ describe("tournament lifecycle commands — kick / invite / share-link / forfeit
     await cleanDatabase();
     nextAppleId = 0;
     await appSettings.setFlag("tournamentsEnabled", true);
+    // Covers buy-in refund/kick paths, which app-funded prize pools bypass —
+    // pin the flag OFF so this suite keeps testing the buy-in model (still
+    // live code behind the kill switch) rather than the new default.
+    await appSettings.setFlag("fundedPrizePoolsEnabled", false);
   });
 
   // ---------------- kickTournamentParticipant ----------------

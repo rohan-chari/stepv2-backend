@@ -428,7 +428,7 @@ describe("Turtle Shell (character power)", () => {
       assert.equal(turtle.priceCoins, 1000);
       assert.equal(turtle.active, true);
       assert.equal(turtle.testOnly, true);
-      assert.equal(turtle.renderMetadata.animationFrames, 5);
+      assert.equal(turtle.renderMetadata.animationFrames, 8);
       await prisma.shopItem.create({
         data: {
           sku: turtle.sku,
@@ -461,7 +461,11 @@ describe("Turtle Shell (character power)", () => {
       assert.ok(found, "characters client sees the turtle");
       assert.equal(found.priceCoins, 1000);
       assert.equal(found.slot, "CHARACTER");
-      assert.equal(found.renderMetadata.animationFrames, 5);
+      // 8, not 5: the walk cycle is 8 slots over 5 drawings (the pass-through
+      // frames repeat), so the sheet was re-cut to 704x88. data/cosmetics.json
+      // and the frontend's animals.dart both carry 8; this assertion was the
+      // last place still saying 5.
+      assert.equal(found.renderMetadata.animationFrames, 8);
 
       const without = await request(server.baseUrl, "GET", "/shop/catalog", {
         token: user.token,
