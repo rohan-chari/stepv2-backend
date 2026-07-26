@@ -54,14 +54,16 @@ const StepSample = {
   // (hour-aligned rows never strictly contain each other and same-start
   // overwrite is preserved), so it is safe to deploy before any client sends
   // finer buckets. Own transaction for the fetch+delete+insert.
-  async reconcileBatch(userId, samples) {
-    return prisma.$transaction((tx) => this.reconcileBatchOn(tx, userId, samples));
+  async reconcileBatch(userId, samples, nowMs = Date.now()) {
+    return prisma.$transaction((tx) =>
+      this.reconcileBatchOn(tx, userId, samples, nowMs)
+    );
   },
 
   // Same reconciliation, run against a caller-provided transaction client so
   // sync-v2's Transaction A can persist steps, samples, and the idempotency
   // reservation atomically.
-  async reconcileBatchOn(client, userId, samples) {
+  async reconcileBatchOn(client, userId, samples, nowMs = Date.now()) {
     if (!samples || samples.length === 0) return;
 
     const incoming = samples.map((s) => ({
@@ -108,16 +110,28 @@ const StepSample = {
         // credit outside what this batch replaces (day-start-after-tz-travel).
         const overlaps = s.end > i.start && s.start < i.end;
         if (!overlaps) continue;
-        const fullySpanned = coveredStart <= s.start && s.end <= coveredEnd;
+        // A stored row may extend past NOW: the iOS background sidecar posts
+        // ANCHORED full-clock-hour rows, so a mid-hour post lands 14:00→15:00 at
+        // 14:15. Time that hasn't elapsed yet cannot hold step credit, so the
+        // guard must not protect it — otherwise the trailing overhang prorates
+        // to >0 and every finer sample for that hour is rejected until the clock
+        // passes 15:00, freezing the user's total and starving live powerup
+        // windows (2026-07-26 incident). Clamp the row to its ELAPSED portion
+        // for both the span check and the proration denominator; a row wholly in
+        // the past is unaffected, so this is a no-op for normal traffic.
+        const effectiveEnd = Math.min(s.end, nowMs);
+        const fullySpanned = coveredStart <= s.start && effectiveEnd <= coveredEnd;
         if (fullySpanned) continue;
         // The guard exists to protect real credit, per its rationale. If the
         // non-spanned overhang prorates to zero steps (e.g. two hour-length
         // re-syncs shifted by a few ms — never real credit), let rule 3 replace S
         // so the newer value wins instead of stranding stale data.
-        const dur = s.end - s.start;
+        const dur = effectiveEnd - s.start;
         let overhangMs = 0;
-        if (s.start < coveredStart) overhangMs += coveredStart - s.start;
-        if (s.end > coveredEnd) overhangMs += s.end - coveredEnd;
+        if (s.start < coveredStart) {
+          overhangMs += Math.min(coveredStart, effectiveEnd) - s.start;
+        }
+        if (effectiveEnd > coveredEnd) overhangMs += effectiveEnd - coveredEnd;
         const overhangSteps =
           dur > 0 ? Math.round((s.steps || 0) * (overhangMs / dur)) : 0;
         if (overhangSteps > 0) return false;
