@@ -68,15 +68,23 @@ function openHourWindow() {
 // Dart client actually sends: it reads HealthKit over [startOfDay, now]. The
 // batch therefore never reaches the anchored hour end, but it also never leaves
 // elapsed time uncovered. Both properties matter to the guard.
+// The final bucket is CLAMPED TO NOW, exactly like the Dart client
+// (`buildBucketWindows(start, end=now, …)` truncates its last window). Stopping
+// at the last whole 5-minute boundary instead would leave up to 5 minutes of
+// ELAPSED-but-uncovered time, which the span guard rightly protects — making
+// this test pass or fail depending on where in the 5-minute cycle it ran.
 function fineBucketsToNow(hourStart, stepsPerBucket = 100) {
   const now = Date.now();
   const out = [];
-  for (let t = hourStart.getTime(); t + 5 * MIN <= now; t += 5 * MIN) {
+  let t = hourStart.getTime();
+  while (t < now) {
+    const end = Math.min(t + 5 * MIN, now);
     out.push({
       periodStart: new Date(t).toISOString(),
-      periodEnd: new Date(t + 5 * MIN).toISOString(),
+      periodEnd: new Date(end).toISOString(),
       steps: stepsPerBucket,
     });
+    t += 5 * MIN;
   }
   return out;
 }

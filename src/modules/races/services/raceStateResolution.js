@@ -138,9 +138,28 @@ async function calculateBaseAdjusted({
     now,
   });
 
+  // `hasSampleData` decides whether effect scoring uses the precise segment walk
+  // or the crude snapshot fallback — for the WHOLE race, every recompute. Keying
+  // it on the start-day sliver alone meant a race that began late at night (a
+  // ~76-minute window while the player slept) pinned every participant to the
+  // fallback permanently, where timed buffs clamp to zero and Leech is dropped
+  // entirely (2026-07-26: 17 of 137 active participants). Widen it: if the start
+  // day is empty, ask whether the player has ANY sample in the race window.
+  //
+  // Capability-detected so injected test fakes that only implement
+  // sumStepsInWindow keep exactly their old behavior.
+  let hasSampleData = startDaySamples > 0;
+  if (!hasSampleData && typeof stepSampleModel.hasAnyInWindow === "function") {
+    hasSampleData = await stepSampleModel.hasAnyInWindow(
+      participant.userId,
+      effectiveStart,
+      now
+    );
+  }
+
   return {
     baseAdjusted: Math.max(0, startDaySteps + subsequentSteps),
-    hasSampleData: startDaySamples > 0,
+    hasSampleData,
     effectiveStart,
   };
 }

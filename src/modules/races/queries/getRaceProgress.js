@@ -334,7 +334,19 @@ function buildGetRaceProgress(deps = {}) {
         });
 
         const baseAdjusted = Math.max(0, startDaySteps + subsequentSteps);
-        const hasSampleData = startDaySamples > 0;
+        // See calculateBaseAdjusted (raceStateResolution.js) for the rationale:
+        // the start-day sliver alone pinned night-started races to the crude
+        // fallback forever, zeroing timed buffs and Leech. Kept identical here so
+        // display and settlement agree. Short-circuits, so the common case
+        // (samples on the start day) adds no query.
+        let hasSampleData = startDaySamples > 0;
+        if (!hasSampleData && typeof stepSampleModel.hasAnyInWindow === "function") {
+          hasSampleData = await stepSampleModel.hasAnyInWindow(
+            p.userId,
+            effectiveStart,
+            now()
+          );
+        }
         participantStepsMap[p.id] = baseAdjusted;
         return { participant: p, baseAdjusted, hasSampleData, effectiveStart };
       })

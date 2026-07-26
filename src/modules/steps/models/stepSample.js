@@ -171,6 +171,25 @@ const StepSample = {
     });
   },
 
+  // Cheap EXISTS over [windowStart, windowEnd): does this user have ANY sample
+  // in the range? Used to decide whether precise (sample-driven) effect scoring
+  // is available. Deliberately not a SUM — a user who walked zero steps but has
+  // rows still HAS sample data, and LIMIT 1 lets the (user_id, period_start,
+  // period_end) index answer without scanning a whole race window.
+  async hasAnyInWindow(userId, windowStart, windowEnd) {
+    const rows = await prisma.$queryRawUnsafe(
+      `SELECT 1 FROM step_samples
+        WHERE user_id = $1
+          AND period_end > $2::timestamp
+          AND period_start < $3::timestamp
+        LIMIT 1`,
+      userId,
+      new Date(windowStart).toISOString(),
+      new Date(windowEnd).toISOString()
+    );
+    return rows.length > 0;
+  },
+
   async sumStepsInWindow(userId, windowStart, windowEnd) {
     const sums = await this.sumStepsInWindows(userId, [
       { start: windowStart, end: windowEnd },
