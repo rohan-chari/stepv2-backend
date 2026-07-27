@@ -491,7 +491,14 @@ function registerNotificationHandlers(dependencies = {}) {
           title: "Team lead change!",
           buildBody: () => body,
           payload: {
-            type: "TEAM_LEAD_CHANGED",
+            // NOT a typo, and NOT the event-bus name. Every shipped client's
+            // route switch matches 'TEAM_LEAD_CHANGE' (no trailing D), so the
+            // D-suffixed string we used to send fell through to the default
+            // case and the push never deep-linked. Sending the D-less spelling
+            // repairs deep-linking for 100% of deployed binaries on deploy,
+            // with no App Store wait. The internal event name
+            // (events.emit/on "TEAM_LEAD_CHANGED") is unchanged.
+            type: "TEAM_LEAD_CHANGE",
             route: "race_detail",
             params: { raceId },
           },
@@ -691,33 +698,6 @@ function registerNotificationHandlers(dependencies = {}) {
       }
     } catch (error) {
       logger.error("GLOBAL_EVENT_STARTED handler failed", {
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  });
-
-  // §3.6.2 Corgi zoomies: fired by the character-effect scheduler at each
-  // materialized window's start (claimed once via CAS notifiedAt, so no
-  // duplicates across cluster workers). Kill switch ZOOMIES_PUSH_DISABLED is
-  // honored at the emit site.
-  events.on("ZOOMIES_STARTED", async (data) => {
-    try {
-      const { userId } = data || {};
-      if (!userId) return;
-      await sendNotificationToUser({
-        eventName: "ZOOMIES_STARTED",
-        recipientUserId: userId,
-        actorUserId: null,
-        title: "ZOOMIES!",
-        buildBody: () => "3x steps for 10 minutes — GO!",
-        payload: {
-          type: "ZOOMIES_STARTED",
-          route: "home",
-        },
-        logContext: { recipientUserId: userId },
-      });
-    } catch (error) {
-      logger.error("ZOOMIES_STARTED handler failed", {
         error: error instanceof Error ? error.message : String(error),
       });
     }

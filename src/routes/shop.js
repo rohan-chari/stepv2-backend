@@ -226,6 +226,8 @@ function createShopRouter(dependencies = {}) {
         itemId: req.body.itemId,
         channel: req.releaseChannel,
         supportsCharacters: req.clientFeatures.has("characters"),
+        // Item 9 (2026-07-26): buckets the per-day character snapshot.
+        timeZone: req.timeZone,
       });
       res.json(result);
     } catch (error) {

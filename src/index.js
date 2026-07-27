@@ -31,11 +31,6 @@ const {
 const {
   scheduleRaceResolutionWorker,
 } = require("./modules/races");
-const {
-  scheduleCharacterEffects,
-  scheduleCharacterEffectRetention,
-} = require("./modules/races");
-
 function startServer({
   app = createApp(),
   port = Number(process.env.PORT || 3000),
@@ -60,9 +55,6 @@ function startServer({
   scheduleDailyRewardReminder:
     scheduleDailyReminder = scheduleDailyRewardReminder,
   scheduleRaceResolutionWorker: scheduleRaceResolution = scheduleRaceResolutionWorker,
-  scheduleCharacterEffects: scheduleCharacterZoomies = scheduleCharacterEffects,
-  scheduleCharacterEffectRetention:
-    scheduleCharacterRetention = scheduleCharacterEffectRetention,
   logger = console,
   // Delay before the cron jobs start ticking. Every scheduler fires an
   // immediate first tick, and under pm2 cluster `reload` the OLD process keeps
@@ -142,13 +134,6 @@ function startServer({
       // Uses its own console (like scheduleTournamentSeedRenewal) rather than the
       // injected startup logger.
       scheduleRaceResolution();
-      // §3.6 Corgi zoomies materialization + push (gated behind
-      // CHARACTER_POWERS_ENABLED inside the job; a no-op when the flag is off) and
-      // the 45-day window retention prune. Both are safe to schedule always —
-      // materialization early-returns while the flag is off, and retention only
-      // ever deletes long-past rows.
-      scheduleCharacterZoomies();
-      scheduleCharacterRetention();
     };
     if (cronStartDelayMs > 0) {
       logger.log(`[CRON] Job scheduling starts in ${cronStartDelayMs / 1000}s`);

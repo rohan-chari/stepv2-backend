@@ -84,7 +84,10 @@ test("TR-681 TEAM_LEAD_CHANGED pushes team-framed copy to every member", async (
   assert.equal(sent.length, 4, "all members of both teams");
   assert.match(sent[0].body, /Swift Capys/);
   assert.match(sent[0].body, /lead/i);
-  assert.equal(sent[0].payload.type, "TEAM_LEAD_CHANGED");
+  // Outbound push payload.type is the D-LESS spelling every shipped binary's
+  // route switch matches (spec §5.12). The internal event-bus name stays
+  // TEAM_LEAD_CHANGED and is asserted elsewhere.
+  assert.equal(sent[0].payload.type, "TEAM_LEAD_CHANGE");
   assert.equal(sent[0].payload.params.raceId, "race-1");
 });
 

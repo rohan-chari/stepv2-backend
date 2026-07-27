@@ -175,6 +175,36 @@ function validateConfig(input) {
     }
   }
 
+  // teamOnlyTypes (2026-07-26): droppable, but only in a team race. OPTIONAL —
+  // a config stored before this key existed simply has none and resolves to the
+  // code default through mergeOverDefaults, so `undefined` must stay valid.
+  //
+  // The contradiction rule is the important one: store-only means "an in-race
+  // box can NEVER roll this", team-only means "an in-race box CAN roll this, in
+  // a team race". A type in both lists has no coherent meaning and silently
+  // letting it through would make the intent of a later edit unrecoverable.
+  let teamOnly = null;
+  if (input.teamOnlyTypes !== undefined) {
+    if (!Array.isArray(input.teamOnlyTypes)) {
+      errors.push({ path: "teamOnlyTypes", message: "teamOnlyTypes must be an array" });
+    } else {
+      teamOnly = input.teamOnlyTypes;
+      for (const type of teamOnly) {
+        if (!BALANCE_POWERUP_TYPES.includes(type)) {
+          errors.push({
+            path: "teamOnlyTypes",
+            message: `${type} is not a valid PowerupType`,
+          });
+        } else if (storeOnly && storeOnly.includes(type)) {
+          errors.push({
+            path: "teamOnlyTypes",
+            message: `${type} is both team-only and store-only; a type cannot be undroppable and conditionally droppable at once`,
+          });
+        }
+      }
+    }
+  }
+
   const dailyBoxExcluded = Array.isArray(input.dailyBoxExcludedTypes)
     ? input.dailyBoxExcludedTypes
     : null;
@@ -190,12 +220,23 @@ function validateConfig(input) {
           path: "dailyBoxExcludedTypes",
           message: `${type} is not a valid PowerupType`,
         });
-      } else if (storeOnly && !storeOnly.includes(type)) {
-        // A type barred from the daily box but still purchasable AND droppable
-        // is almost always a mistake, and it is cheap to catch here.
+      } else if (
+        storeOnly &&
+        !storeOnly.includes(type) &&
+        !(teamOnly && teamOnly.includes(type))
+      ) {
+        // A type barred from the daily box but still purchasable AND freely
+        // droppable is almost always a mistake, and it is cheap to catch here.
+        //
+        // RELAXED 2026-07-26: team-only counts too. The daily box has no race
+        // context, so a team-only type must be excluded from it — and without
+        // this clause the shipped §5.1 config becomes unsaveable the moment
+        // RALLY_FLAG leaves storeOnlyTypes. The rule's intent ("don't silently
+        // bar something that is otherwise freely obtainable") is preserved: a
+        // type that is neither store-only nor team-only still trips it.
         errors.push({
           path: "dailyBoxExcludedTypes",
-          message: `${type} is excluded from the daily box but is not store-only`,
+          message: `${type} is excluded from the daily box but is neither store-only nor team-only`,
         });
       }
     }
@@ -262,6 +303,96 @@ function validateConfig(input) {
           errors.push({
             path: `typeWeights.${type}`,
             message: `typeWeights.${type} must be a non-negative number`,
+          });
+        }
+      }
+    }
+  }
+
+  // positionRules: per-position drop filtering. Optional (a config stored before
+  // the feature existed simply has none and resolves to the code default), but
+  // validated strictly when present.
+  //
+  // The overlap rule is the important one: a type listed in more than one of the
+  // four lists is a config-authoring error, not a meaningful combination. "Hard
+  // exclude it AND down-weight it" has no coherent meaning, and silently letting
+  // it through would make the intent of a later edit unrecoverable.
+  if (input.positionRules !== undefined) {
+    const rules = input.positionRules;
+    if (!isPlainObject(rules)) {
+      errors.push({ path: "positionRules", message: "positionRules must be an object" });
+    } else {
+      const seen = new Map(); // type -> list name
+
+      const claim = (type, listName) => {
+        const previous = seen.get(type);
+        if (previous && previous !== listName) {
+          errors.push({
+            path: `positionRules.${listName}`,
+            message: `${type} appears in both ${previous} and ${listName}; a type may be in at most one positionRules list`,
+          });
+          return;
+        }
+        seen.set(type, listName);
+      };
+
+      for (const listName of ["leaderExcluded", "lastPlaceExcluded"]) {
+        const list = rules[listName];
+        if (list === undefined) continue;
+        if (!Array.isArray(list)) {
+          errors.push({
+            path: `positionRules.${listName}`,
+            message: `positionRules.${listName} must be an array`,
+          });
+          continue;
+        }
+        for (const type of list) {
+          if (!BALANCE_POWERUP_TYPES.includes(type)) {
+            errors.push({
+              path: `positionRules.${listName}`,
+              message: `${type} is not a valid PowerupType`,
+            });
+            continue;
+          }
+          claim(type, listName);
+        }
+      }
+
+      for (const listName of ["leadingDownweight", "trailingDownweight"]) {
+        const map = rules[listName];
+        if (map === undefined) continue;
+        if (!isPlainObject(map)) {
+          errors.push({
+            path: `positionRules.${listName}`,
+            message: `positionRules.${listName} must be an object`,
+          });
+          continue;
+        }
+        for (const [type, multiplier] of Object.entries(map)) {
+          if (!BALANCE_POWERUP_TYPES.includes(type)) {
+            errors.push({
+              path: `positionRules.${listName}`,
+              message: `${type} is not a valid PowerupType`,
+            });
+            continue;
+          }
+          if (!isNonNegNumber(multiplier)) {
+            errors.push({
+              path: `positionRules.${listName}.${type}`,
+              message: `positionRules.${listName}.${type} must be a non-negative number`,
+            });
+          }
+          claim(type, listName);
+        }
+      }
+
+      for (const key of ["leadingDownweightFrom", "trailingDownweightFrom"]) {
+        const value = rules[key];
+        if (value === undefined) continue;
+        if (!isNonNegNumber(value) || value > 1) {
+          errors.push({
+            path: `positionRules.${key}`,
+            message: `positionRules.${key} must be within [0,1]`,
           });
         }
       }

@@ -44,20 +44,36 @@ function buildGetReferralPreview(dependencies = {}) {
           name: true,
           status: true,
           endsAt: true,
+          // Read for the ACTIVE-preferred / most-recent sort below. NOT part of
+          // the returned inviterRace shape — old clients read a fixed key set.
+          startedAt: true,
           maxParticipants: true,
           _count: {
             select: { participants: { where: { status: "ACCEPTED" } } },
           },
         },
-        orderBy: [{ status: "asc" }, { startedAt: "desc" }],
+        orderBy: [{ startedAt: "desc" }],
       });
-      for (const race of candidates) {
+      // ACTIVE-before-PENDING is applied HERE, in JS, not in orderBy.
+      //
+      // This used to be `orderBy: [{ status: "asc" }, …]` with a comment
+      // claiming "asc on the mapped enum sorts 'active' before 'pending'".
+      // That is false: Postgres orders an enum by its DECLARATION order, not by
+      // the mapped label text, and RaceStatus declares PENDING first
+      // (schema.prisma). So the old ordering did the exact OPPOSITE of the rule
+      // and showed invitees a "starts Thursday" lobby when the inviter had a
+      // live race running. Covered by test/integration/onboarding-revamp.test.js.
+      const ordered = [...candidates].sort((a, b) => {
+        if (a.status !== b.status) return a.status === "ACTIVE" ? -1 : 1;
+        const aStarted = a.startedAt ? a.startedAt.getTime() : -Infinity;
+        const bStarted = b.startedAt ? b.startedAt.getTime() : -Infinity;
+        return bStarted - aStarted;
+      });
+      for (const race of ordered) {
         const accepted = race._count?.participants ?? 0;
         if (race.maxParticipants != null && accepted >= race.maxParticipants) {
           continue;
         }
-        // "asc" on the mapped enum sorts 'active' before 'pending', so the
-        // first non-full candidate is the ACTIVE-preferred pick.
         inviterRace = {
           id: race.id,
           name: race.name,

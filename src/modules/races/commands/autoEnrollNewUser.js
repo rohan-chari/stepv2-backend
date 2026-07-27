@@ -120,6 +120,7 @@ function buildAutoEnrollNewUser(dependencies = {}) {
       });
 
       let welcomeTarget = null;
+      let joinedCount = 0;
       for (const race of races) {
         const capacity = await remainingCapacity(race);
         if (capacity <= 0) continue;
@@ -127,12 +128,50 @@ function buildAutoEnrollNewUser(dependencies = {}) {
           const participant = await db.raceParticipant.create({
             data: { raceId: race.id, userId: user.id, status: "ACCEPTED" },
           });
+          joinedCount += 1;
           if (!welcomeTarget && race.status === "ACTIVE") {
             welcomeTarget = { race, participant };
           }
         } catch (error) {
           if (!error || error.code !== "P2002") throw error;
         }
+      }
+
+      // CAPACITY RELAXATION (onboarding revamp §5.6). A full seeded race is a
+      // soft product constraint; a signup that lands in ZERO races is a
+      // dead-on-arrival account that nothing later recovers. So when the loop
+      // above joined nothing, put the user into the most recently started ACTIVE
+      // seeded race anyway, over capacity. `races` is already ordered
+      // startedAt desc, so the first ACTIVE row is that race.
+      //
+      // Deliberately NOT a race-minting fallback: a persistent seed
+      // misconfiguration would then create unbounded races. If there is no
+      // ACTIVE seeded race at all we log and leave the user in nothing.
+      if (joinedCount === 0) {
+        const fallback = races.find((race) => race.status === "ACTIVE");
+        if (fallback) {
+          try {
+            const participant = await db.raceParticipant.create({
+              data: { raceId: fallback.id, userId: user.id, status: "ACCEPTED" },
+            });
+            joinedCount += 1;
+            welcomeTarget = { race: fallback, participant };
+            console.warn(
+              `AUTO_ENROLL_OVER_CAPACITY: every seeded race was full; enrolled user=${user.id} into race=${fallback.id} over its ${fallback.maxParticipants} cap`
+            );
+          } catch (error) {
+            if (!error || error.code !== "P2002") throw error;
+            joinedCount += 1;
+          }
+        }
+      }
+
+      // Distinctive, greppable alarm (§5.6). If this shows up in prod logs the
+      // seed reconciler is broken, not this function.
+      if (joinedCount === 0) {
+        console.warn(
+          `AUTO_ENROLL_EMPTY: signup enrolled in zero races user=${user.id} seededRaceCount=${races.length}`
+        );
       }
 
       if (welcomeTarget) {

@@ -37,6 +37,10 @@ function buildOpenMysteryBoxBatch(dependencies = {}) {
     includeQueued = false,
     maxCount = DEFAULT_MAX_COUNT,
     displayName,
+    // 2026-07-26: threaded through to every openMysteryBox call below. Gating
+    // the single-open path and forgetting this one would leave the compat gate
+    // trivially bypassable by tapping "Open All" instead.
+    supportsPowerups5 = false,
   }) {
     const requestedMax = Number.isFinite(maxCount) ? maxCount : DEFAULT_MAX_COUNT;
     const cap = Math.max(0, Math.min(requestedMax, DEFAULT_MAX_COUNT));
@@ -53,7 +57,13 @@ function buildOpenMysteryBoxBatch(dependencies = {}) {
       if (!pw || pw.userId !== userId || pw.raceId !== raceId) continue;
 
       if (pw.status === "MYSTERY_BOX") {
-        const r = await openMysteryBox({ userId, raceId, powerupId, displayName });
+        const r = await openMysteryBox({
+          userId,
+          raceId,
+          powerupId,
+          displayName,
+          supportsPowerups5,
+        });
         results.push({
           powerupId: r.id,
           type: r.type,
@@ -93,6 +103,7 @@ function buildOpenMysteryBoxBatch(dependencies = {}) {
           raceId,
           powerupId: box.id,
           displayName,
+          supportsPowerups5,
         });
         results.push({
           powerupId: r.id,

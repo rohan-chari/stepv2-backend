@@ -55,7 +55,7 @@ async function equipAccessory({
     throw new AccessoryEquipError("itemId must be a shop item id or null", 400);
   }
 
-  return prisma.$transaction(async (tx) => {
+  const outcome = await prisma.$transaction(async (tx) => {
     const ownership = await tx.userShopItem.findUnique({
       where: { userId_shopItemId: { userId, shopItemId: itemId } },
       include: { shopItem: true },
@@ -85,8 +85,13 @@ async function equipAccessory({
       create: { userId, slot, shopItemId: ownership.shopItemId },
     });
 
-    return { equipped: await getEquipment(userId, tx, { supportsCharacters }) };
+    return {
+      equipped: await getEquipment(userId, tx, { supportsCharacters }),
+      assetKey: ownership.shopItem.assetKey ?? null,
+    };
   });
+
+  return { equipped: outcome.equipped };
 }
 
 module.exports = { equipAccessory, AccessoryEquipError };

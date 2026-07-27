@@ -81,7 +81,10 @@ const RaceParticipant = {
   async updateTotalSteps(id, totalSteps) {
     return prisma.raceParticipant.update({
       where: { id },
-      data: { totalSteps },
+      // Item 16 (2026-07-26): stamp WHEN the persisted total was written, in the
+      // same UPDATE (no extra round-trip), so GET /races can serve `teams.asOf`
+      // without recomputing live totals on the most-frequently-polled screen.
+      data: { totalSteps, totalsUpdatedAt: new Date() },
     });
   },
 

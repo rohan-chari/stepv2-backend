@@ -170,6 +170,82 @@ function buildGetAdminStats(dependencies = {}) {
       GROUP BY app_version, platform, name
       ORDER BY app_version, platform, name`;
 
+    // Onboarding activation funnel (§6.5). Counts are DISTINCT
+    // onboarding_session_id per stage, not raw event counts, so one session
+    // that retries the health prompt three times still counts once. Rows with a
+    // NULL session id are excluded — they cannot be attributed to a funnel run.
+    //
+    // `health_granted` is not an event name: it is a health_result event whose
+    // context says the OS granted access. Stage naming follows §6.5 exactly.
+    //
+    // ANCHORING. Each stage is a DISTINCT-session count computed independently,
+    // so without an anchor nothing ties a stage back to a session that actually
+    // began onboarding: any orphan session contributed +1 to whatever stages it
+    // emitted. The `anchor` join restricts every stage to sessions that have an
+    // `onboarding_started` event, which is what makes this a funnel rather than
+    // a pile of independent event counts.
+    //
+    // WINDOW SEMANTICS, chosen deliberately:
+    //   - A session counts toward a stage when (a) that stage's event falls in
+    //     the column's window (7d or 30d) AND (b) the session is anchored.
+    //   - The anchor is evaluated ONCE and is intentionally UNBOUNDED in time —
+    //     it is not re-applied per column. Anchoring per column would drop a
+    //     legitimate in-progress funnel whose start predates the column window
+    //     (started 9 days ago, reached home 3 days ago), silently shrinking an
+    //     existing number. A 30d/90d-bounded anchor has the same failure mode
+    //     for long-lived installs, whose session id today is per-INSTALL and so
+    //     carries a start date that can be arbitrarily old.
+    //   - Cost: the anchor is a DISTINCT scan over `onboarding_started` rows,
+    //     served by the (name, created_at) index and hash-joined. This is an
+    //     admin-only endpoint; correctness wins over the bounded-scan variant.
+    //   - "Unbounded" is unbounded in SQL only. analytics/activationEventCleanup
+    //     hard-deletes rows past 90 days, so the anchor can never see a start
+    //     older than that no matter what this query asks for. Widening the SQL
+    //     bound cannot help; only changing retention could. This also caps the
+    //     scan, so the unbounded form costs nothing over a 90d-bounded one.
+    //
+    // CONSEQUENCE FOR EXISTING NUMBERS, deliberate and owner-visible: an install
+    // that onboarded more than 90 days ago has had its onboarding_started
+    // deleted, and the client emits that event once per install (it is gated on
+    // !firstRaceOnboardingSeen) so it is never re-emitted. Such an install can
+    // never be re-anchored. Its ongoing events — `home_reached` fires on every
+    // app session, for every user, forever — used to inflate these stages and
+    // now count zero. That is the intended meaning (a veteran opening the app
+    // is not an onboarding funnel), but it is a genuine restatement of
+    // already-collected numbers, not a no-op.
+    //
+    // NOTE: anchoring is only HALF the fix for counting settings-tutorial
+    // replays as onboarding completions. Under today's per-INSTALL session ids
+    // a replay shares the install's id, which IS anchored, so it still counts.
+    // The other half is minting a per-RUN session id on the client; neither
+    // half works alone.
+    const onboardingFunnelRows = await prisma.$queryRaw`
+      SELECT platform, stage,
+        COUNT(DISTINCT onboarding_session_id) FILTER (
+          WHERE created_at >= now() - interval '7 days'
+        )::bigint AS sessions_7d,
+        COUNT(DISTINCT onboarding_session_id) FILTER (
+          WHERE created_at >= now() - interval '30 days'
+        )::bigint AS sessions_30d
+      FROM (
+        SELECT e.platform, e.onboarding_session_id, e.created_at,
+          CASE
+            WHEN e.name = 'health_result' AND e.context->>'result' = 'granted'
+              THEN 'health_granted'
+            ELSE e.name
+          END AS stage
+        FROM activation_events e
+        JOIN (
+          SELECT DISTINCT onboarding_session_id
+          FROM activation_events
+          WHERE name = 'onboarding_started'
+            AND onboarding_session_id IS NOT NULL
+        ) anchor ON anchor.onboarding_session_id = e.onboarding_session_id
+        WHERE e.onboarding_session_id IS NOT NULL
+          AND e.created_at >= now() - interval '30 days'
+      ) staged
+      GROUP BY platform, stage`;
+
     const distribution = { "0": 0, "1": 0, "2": 0, "3-5": 0, "6+": 0 };
     for (const row of friendsDist) distribution[row.bucket] = n(row.users);
 
@@ -209,6 +285,58 @@ function buildGetAdminStats(dependencies = {}) {
         group.total += count;
       }
       return [...groups.values()];
+    }
+
+    // Stage order is the funnel order; every stage is always emitted (0 when
+    // absent) so the admin UI renders a stable set of rows from day one, before
+    // any v3 build has shipped a single event.
+    const ONBOARDING_FUNNEL_STAGES = [
+      "onboarding_started",
+      "health_cta_tapped",
+      "health_granted",
+      "health_escaped",
+      "health_probe_inconclusive",
+      "daily_intro_viewed",
+      // Demo race tutorial. The demo step runs between the race intro and the
+      // home screen, so these sit here and the bars read as one continuous
+      // curve. tutorial_opened/tutorial_completed are the bookends that bracket
+      // the demo — without them the three demo_* stages have no denominator.
+      //
+      // CAVEAT, deliberately not fixed here: this aggregation groups by stage
+      // NAME only and never reads context->>'source'. The settings-tutorial
+      // replay emits the same tutorial_opened/tutorial_completed names with
+      // source:'profile', and onboarding_session_id is minted once per INSTALL
+      // rather than per onboarding run, so a replay is not excluded by the
+      // NOT NULL filter either. The two tutorial_* stages are therefore an
+      // OVER-COUNT wherever users replay from Profile -> Settings. The three
+      // demo_* stages are emitted only by the demo and are exact.
+      //
+      // tutorial_skipped is intentionally absent: a skip is an exit, not a
+      // step, and this structure has no exits bucket. Placing it inline would
+      // distort the curve. It stays visible by name in the `activation`
+      // section, which is not filtered by this list.
+      "tutorial_opened",
+      "demo_box_opened",
+      "demo_powerup_used",
+      "demo_won",
+      "tutorial_completed",
+      "home_reached",
+    ];
+
+    function onboardingByPlatform(countKey) {
+      const byPlatform = {};
+      const emptyStages = () =>
+        Object.fromEntries(ONBOARDING_FUNNEL_STAGES.map((s) => [s, 0]));
+      // ios/android always present even with no data.
+      byPlatform.ios = emptyStages();
+      byPlatform.android = emptyStages();
+      for (const row of onboardingFunnelRows || []) {
+        if (!ONBOARDING_FUNNEL_STAGES.includes(row.stage)) continue;
+        const platform = row.platform || "other";
+        if (!byPlatform[platform]) byPlatform[platform] = emptyStages();
+        byPlatform[platform][row.stage] = n(row[countKey]);
+      }
+      return byPlatform;
     }
 
     return {
@@ -262,6 +390,14 @@ function buildGetAdminStats(dependencies = {}) {
         last7Days: activationWindow("count_7d"),
         last30Days: activationWindow("count_30d"),
         last90Days: activationWindow("count_90d"),
+      },
+      // Additive section (§6.5). `windowDays` + `byPlatform` are the pinned
+      // contract (the 7-day window); `byPlatformLast30Days` is an extra key for
+      // the 30d view. Old admin builds ignore unknown sections entirely.
+      onboardingFunnel: {
+        windowDays: 7,
+        byPlatform: onboardingByPlatform("sessions_7d"),
+        byPlatformLast30Days: onboardingByPlatform("sessions_30d"),
       },
     };
   };

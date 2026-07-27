@@ -142,10 +142,6 @@ model User {
   stepSyncRequests  StepSyncRequest[]
   raceResolutionJob RaceResolutionJob?
 
-  // ── Character powers (Corgi zoomies) — additive back-relation. Old app builds
-  // never see this; existing rows are unaffected (no columns added to users).
-  characterEffectWindows CharacterEffectWindow[]
-
   // First index on this table. Backs the daily-reward reminder scheduler, which
   // selects users by IANA zone: findMany({ where: { timezone: { in: zonesAtSlot } } }).
   @@index([timezone])
@@ -1017,76 +1013,84 @@ model TournamentParticipant {
 }
 
 model RaceParticipant {
-  id                    String                @id @default(uuid())
-  raceId                String                @map("race_id")
-  userId                String                @map("user_id")
-  status                RaceParticipantStatus @default(INVITED)
-  totalSteps            Int                   @default(0) @map("total_steps")
-  baselineSteps         Int                   @default(0) @map("baseline_steps")
-  nextBoxAtSteps        Int                   @default(0) @map("next_box_at_steps")
-  bonusSteps            Int                   @default(0) @map("bonus_steps")
-  maxBonusSteps         Int                   @default(0) @map("max_bonus_steps")
+  id                       String                @id @default(uuid())
+  raceId                   String                @map("race_id")
+  userId                   String                @map("user_id")
+  status                   RaceParticipantStatus @default(INVITED)
+  totalSteps               Int                   @default(0) @map("total_steps")
+  // When `totalSteps` was last persisted (batch 2026-07-26, item 16). GET /races
+  // keeps serving the cheap PERSISTED team totals — no live recompute on the
+  // hottest screen — and now surfaces max(totalsUpdatedAt) as `teams.asOf` so the
+  // client can render "as of N min ago" instead of a silently stale number.
+  // Additive/nullable: NULL simply means "never written since this deploy", and
+  // the client hides the staleness affordance. Written in the same UPDATE that
+  // writes totalSteps, so it costs no extra round-trip.
+  totalsUpdatedAt          DateTime?             @map("totals_updated_at")
+  baselineSteps            Int                   @default(0) @map("baseline_steps")
+  nextBoxAtSteps           Int                   @default(0) @map("next_box_at_steps")
+  bonusSteps               Int                   @default(0) @map("bonus_steps")
+  maxBonusSteps            Int                   @default(0) @map("max_bonus_steps")
   // DEPRECATED / UNUSED. Was a box-progress high-water anchor meant to make box
   // progress immune to Leg Cramp/Wrong Turn, but it froze the countdown while a
   // player sat below their pre-debuff peak. Product decision: box progress is
   // debuff-sensitive (the bonusSteps high-water still protects bonus-steal). No
   // code reads this column anymore; it is retained (not dropped) to avoid a
   // destructive migration. Safe to remove in a future schema-cleanup release.
-  maxBoxProgressSteps   Int?                  @map("max_box_progress_steps")
-  powerupSlots          Int                   @default(3) @map("powerup_slots")
-  buyInAmount           Int                   @default(0) @map("buy_in_amount")
-  buyInStatus           RaceBuyInStatus       @default(NONE) @map("buy_in_status")
+  maxBoxProgressSteps      Int?                  @map("max_box_progress_steps")
+  powerupSlots             Int                   @default(3) @map("powerup_slots")
+  buyInAmount              Int                   @default(0) @map("buy_in_amount")
+  buyInStatus              RaceBuyInStatus       @default(NONE) @map("buy_in_status")
   // Monotonic per-participant edit counter (Issue 4). Bumped each time the owner
   // reconciles the buy-in on a PENDING race; the versioned value forms a unique
   // coin-ledger refId (`<raceId>:<userId>:v<n>`) so a re-charge after a refund is
   // never silently skipped by awardCoins idempotency. Additive, default 0 — old
   // rows and old app versions are unaffected (nothing reads it client-side).
-  buyInVersion          Int                   @default(0) @map("buy_in_version")
-  payoutCoins           Int                   @default(0) @map("payout_coins")
-  placement             Int?
+  buyInVersion             Int                   @default(0) @map("buy_in_version")
+  payoutCoins              Int                   @default(0) @map("payout_coins")
+  placement                Int?
   // Live placement broadcast (Phase 0): last live rank we pushed to this
   // participant, for idempotent change detection in placementRecompute. NULL =
   // baseline not yet seeded. Additive + nullable; never returned by any API
   // response, so already-shipped app versions are unaffected.
-  lastNotifiedPlacement Int?                  @map("last_notified_placement")
+  lastNotifiedPlacement    Int?                  @map("last_notified_placement")
   // High-multiplier alert dedup (item 6b): the moment we last emitted a
   // HIGH_MULTIPLIER_ALERT because this participant's current (stacked,
   // event-inclusive) multiplier crossed above the threshold. Set on emit,
   // CLEARED when the multiplier drops back to <= threshold so the alert re-arms
   // for the next spike. Additive + nullable; never returned by any API response,
   // so already-shipped app versions are unaffected.
-  highMultiplierNotifiedAt DateTime?          @map("high_multiplier_notified_at")
-  finishedAt            DateTime?             @map("finished_at")
-  finishTotalSteps      Int?                  @map("finish_total_steps")
-  joinedAt              DateTime              @default(now()) @map("joined_at")
-  lastReadRaceChatAt    DateTime?             @map("last_read_race_chat_at")
-  lastChatPushAt        DateTime?             @map("last_chat_push_at")
-  chatMuted             Boolean               @default(false) @map("chat_muted")
+  highMultiplierNotifiedAt DateTime?             @map("high_multiplier_notified_at")
+  finishedAt               DateTime?             @map("finished_at")
+  finishTotalSteps         Int?                  @map("finish_total_steps")
+  joinedAt                 DateTime              @default(now()) @map("joined_at")
+  lastReadRaceChatAt       DateTime?             @map("last_read_race_chat_at")
+  lastChatPushAt           DateTime?             @map("last_chat_push_at")
+  chatMuted                Boolean               @default(false) @map("chat_muted")
   // Per-race opt-out for live placement-change pushes (Phase 0). When true, the
   // placementRecompute job keeps this participant's lastNotifiedPlacement baseline
   // in sync but emits no PLACEMENT_CHANGED event, so they get neither the visible
   // alert nor the silent refresh for this race. Additive + default-false: old app
   // versions never set it and behave exactly as before.
-  placementAlertsMuted  Boolean               @default(false) @map("placement_alerts_muted")
+  placementAlertsMuted     Boolean               @default(false) @map("placement_alerts_muted")
   // Daily biggest-mover digest: this participant's live rank captured at the last
   // 4pm-ET digest run, the baseline the next run measures movement against (a
   // rolling 24h window). NULL = not yet seeded; the digest job lazily seeds it and
   // emits nothing for that first partial window. Reset to the current live rank on
   // every run. Additive + nullable; never returned by any API, so already-shipped
   // app versions are unaffected.
-  dayStartPlacement     Int?                  @map("day_start_placement")
-  inviteExpiresAt       DateTime?             @map("invite_expires_at")
-  resultsSeenAt         DateTime?             @map("results_seen_at")
+  dayStartPlacement        Int?                  @map("day_start_placement")
+  inviteExpiresAt          DateTime?             @map("invite_expires_at")
+  resultsSeenAt            DateTime?             @map("results_seen_at")
   // Team-race side (TR-201). Null on individual races and on pre-team-era rows.
   // Set at join/accept for team races; freely switchable while PENDING, locked
   // at start. Additive/nullable — old app builds never read it.
-  team                  RaceTeam?
+  team                     RaceTeam?
   // Mid-race forfeit moment (TR-601, team races only). When set, the member's
   // effective total is FROZEN as-is into totalSteps (active debuffs bite
   // permanently — no re-derivation), they stop accruing, can't use or be
   // targeted by powerups, and get no payout cut even on the winning team.
   // Null = never forfeited. Additive/nullable — old app builds never read it.
-  forfeitedAt           DateTime?             @map("forfeited_at")
+  forfeitedAt              DateTime?             @map("forfeited_at")
 
   race                  Race               @relation(fields: [raceId], references: [id], onDelete: Cascade)
   user                  User               @relation(fields: [userId], references: [id])
@@ -1436,35 +1440,6 @@ model GlobalStepEvent {
 
   @@index([startsAt, endsAt])
   @@map("global_step_events")
-}
-
-// Materialized character-power effect windows (Corgi "Zoomies" — §3.6.2). One
-// row per (user, user-local day, slot). A 5-minute scheduler draws two secret
-// 10-minute 3x windows per corgi user-local day and inserts them insert-first
-// against @@unique([userId, localDayKey, slot]) — cluster-safe (JobRun.markRan is
-// NOT atomic; never an advisory lock across the callback, per the 3e6c827 rule).
-// Scoring (getRaceProgress + raceExpiry) folds an active window in as a +multiplier
-// self-buff via the shared effectMultiplier.js boundary math. `notifiedAt` is the
-// CAS push-dedup claim. Rows older than 45 days are pruned by a retention job.
-model CharacterEffectWindow {
-  id         String    @id @default(uuid())
-  userId     String    @map("user_id")
-  animal     String
-  multiplier Float     @default(3)
-  startsAt   DateTime  @map("starts_at")
-  endsAt     DateTime  @map("ends_at")
-  // User-local calendar day, e.g. "2026-07-25" — the idempotency bucket.
-  localDayKey String   @map("local_day_key")
-  // 0 | 1 — which of the day's two windows this row is.
-  slot       Int
-  notifiedAt DateTime? @map("notified_at")
-  createdAt  DateTime  @default(now()) @map("created_at")
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, localDayKey, slot])
-  @@index([userId, startsAt, endsAt])
-  @@map("character_effect_windows")
 }
 
 // Audit log of every user-facing (visible) push we send. Written at each visible

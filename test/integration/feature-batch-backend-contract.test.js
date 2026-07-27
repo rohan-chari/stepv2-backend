@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const { describe, it, before, beforeEach } = require("node:test");
 const { cleanDatabase, prisma, request, getSharedServer, createTestUser } = require("./setup");
 const { appSettings } = require("../../src/shared/config/appSettings");
+const { etDayKey } = require("../../src/shared/time/etSchedule");
 
 let server;
 const ADMIN_EMAIL = process.env.ADMIN_EMAILS?.split(",")[0]?.trim() || "admin@test.com";
@@ -33,7 +34,18 @@ describe("2026-07-22 additive backend contracts", () => {
     const admin = await createTestUser({ email: ADMIN_EMAIL });
     const watcher = await createTestUser();
     const nonDau = await createTestUser();
-    const today = new Date(); today.setUTCHours(12, 0, 0, 0);
+    // `steps.date` is a @db.Date, which Prisma fills from the JS Date's UTC
+    // calendar date — but the DAU query buckets by
+    // `(now() AT TIME ZONE 'America/New_York')::date`. Deriving the row from
+    // `new Date()` therefore lands it on the UTC day, which is NOT the ET day
+    // once UTC has rolled over for the night — from 20:00 ET under EDT (UTC-4)
+    // and from 19:00 ET under EST (UTC-5) — and the watcher silently drops out
+    // of DAU. That is 4-5 hours of every day. So anchor to the ET calendar day
+    // explicitly via the app's own ET helper: it reads wall-clock ET through
+    // Intl, so it tracks the EDT/EST offset change on its own rather than
+    // assuming a fixed -4 or -5. Noon UTC keeps the instant far from either
+    // midnight, so no further rounding can move it off the intended day.
+    const today = new Date(`${etDayKey(new Date())}T12:00:00.000Z`);
     await prisma.step.create({ data: { userId: watcher.user.id, date: today, steps: 10 } });
     await prisma.adRewardGrant.createMany({ data: [
       { userId: watcher.user.id, transactionId: "coin-1", rewardKind: "coin_reward", grantedDate: "ignored" },

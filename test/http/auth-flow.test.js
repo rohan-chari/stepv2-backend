@@ -80,6 +80,7 @@ test("POST /auth/apple provisions the signed-in user", async () => {
         dualBoxBannersEnabled: false,
         teamRacesEnabled: true,
         onboardingV2Enabled: false,
+        onboardingV3Enabled: false,
       },
     });
     assert.equal(typeof body.sessionToken, "string");

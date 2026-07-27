@@ -9,6 +9,8 @@ const {
   computeFundedPayouts,
 } = require("../racePayoutPresets");
 const { computePrizePool } = require("../../../shared/economy/prizePool");
+const { compareParticipantsForPlacement } = require("../placementOrder");
+const { raceTimeZone } = require("../raceTimeZone");
 
 // Team-race slacker nudge (TR-683): gentle, fires only inside the final 12h,
 // to a member contributing < 25% of their team's per-member average (average
@@ -259,7 +261,17 @@ function buildRecomputePlacements(dependencies = {}) {
     // the pool cap.
     for (const race of races) {
       try {
-        await resolve({ raceId: race.id });
+        // B-12b — the cron used to call resolve() with NO timeZone, which
+        // falls through to UTC inside raceStateResolution while every live
+        // surface resolves raceTimeZone(race, viewerTz). For a user-created
+        // race (timezone NULL) the two bucket steps into different calendar
+        // days for hours around local midnight, which is exactly how the
+        // false "you slipped to Nth" pushes were produced. Resolve the race's
+        // own tz explicitly, falling back to the CREATOR's tz before UTC.
+        await resolve({
+          raceId: race.id,
+          timeZone: raceTimeZone(race, race.creator?.timezone || "UTC"),
+        });
 
         const participants = await participantModel.findAcceptedByRace(race.id);
         if (!participants || participants.length === 0) continue;
@@ -284,9 +296,11 @@ function buildRecomputePlacements(dependencies = {}) {
           continue;
         }
 
-        const ranked = [...participants].sort(
-          (a, b) => (b.totalSteps ?? 0) - (a.totalSteps ?? 0)
-        );
+        // B-12a — the SHARED comparator (finishers first, then steps desc,
+        // then joinedAt, then userId). The old local sort was steps-desc only,
+        // so at 0 steps (start of day) it produced a DB-order rank unrelated to
+        // what home/list/detail showed.
+        const ranked = [...participants].sort(compareParticipantsForPlacement);
 
         // How many places are "in the money" for this race, so the handler can
         // alert only on a meaningful threshold crossing (dropping out of the
@@ -317,6 +331,21 @@ function buildRecomputePlacements(dependencies = {}) {
 
           // Finished participants have frozen standings — never notify them.
           if (participant.finishedAt) continue;
+
+          // Deploy-day guard for the comparator/timezone change above: the
+          // stored baselines were computed under the OLD rules, so the first
+          // tick after deploy would fire a burst of "you slipped to Nth"
+          // pushes for positions that did not really move. Set
+          // PLACEMENT_BASELINE_RESYNC=true for one tick to re-seed every
+          // baseline under the NEW comparator, emitting nothing, then remove it.
+          if (process.env.PLACEMENT_BASELINE_RESYNC === "true") {
+            if (participant.lastNotifiedPlacement !== liveRank) {
+              await participantModel.update(participant.id, {
+                lastNotifiedPlacement: liveRank,
+              });
+            }
+            continue;
+          }
 
           // First observation: seed the baseline silently (avoids a rollout-day
           // notification storm). Only notify on a SUBSEQUENT change.

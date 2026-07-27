@@ -7,6 +7,7 @@ const { RaceActiveEffect } = require("../../powerups/models/raceActiveEffect");
 const { completeRace } = require("../commands/completeRace");
 const { expireEffects } = require("../../powerups/commands/expireEffects");
 const { characterPresentation } = require("../../cosmetics");
+const { placementsByUserId } = require("../placementOrder");
 const {
   buildSyncRacePowerupState,
   syncRacePowerupState: defaultSyncRacePowerupState,
@@ -16,6 +17,7 @@ const { balanceConfig } = require("../../economy/balanceConfig");
 const {
   rarityOddsForPosition,
   typeOddsForPosition,
+  buildRollContext,
   RARITY_ORDER,
 } = require("../../powerups/powerupOdds");
 const { calculateSubsequentSteps } = require("../raceSteps");
@@ -44,14 +46,6 @@ const { computeEffectModifiers, signedMultiplierForEffects } = require("../servi
 const {
   evaluateHighMultiplierAlert,
 } = require("../services/highMultiplierAlert");
-const { CharacterEffectWindow } = require("../../powerups/models/characterEffectWindow");
-const {
-  characterPowersEnabled,
-  countCapybaras,
-  computeHerdBonus,
-  zoomiesWindowsToEffects,
-  activeZoomiesAt,
-} = require("../services/characterPowers");
 
 // Additive tournament-matchup context for a matchup race's progress payload
 // (null on ordinary races). The frontend banner reads these defensively.
@@ -98,7 +92,7 @@ const HIDDEN_FROM_OPPONENTS = new Set([
 // sample-driven computeEffectModifiers below. Leech is a cross-participant
 // transfer that cannot be expressed from a single participant's snapshot, so it
 // returns no leech transfers here; the real scorer handles it.
-function buildDropOdds({ race, userId, stepTotals, myParticipant, snapshot }) {
+function buildDropOdds({ race, userId, stepTotals, myParticipant, snapshot, supportsPowerups5 = false }) {
   const { version, config } = snapshot;
   let position;
   let totalParticipants;
@@ -130,7 +124,31 @@ function buildDropOdds({ race, userId, stepTotals, myParticipant, snapshot }) {
     rarity[name] = rarityRow[i];
   });
 
-  const byType = typeOddsForPosition(position, totalParticipants, config);
+  // Position-aware drop context, from the SAME shared helper openMysteryBox uses
+  // and from the SAME true step totals (never the illusion-masked board), so a
+  // stealthed or masked opponent cannot change what you are eligible to roll and
+  // the quoted byType cannot drift from the actual roll.
+  //
+  // Only `byType` moves — `rarity` above is untouched, and must stay untouched:
+  // the shipped odds sheet hides itself entirely if that block stops summing
+  // to 1.0 ± 0.01.
+  const myTotalSteps =
+    stepTotals.find(({ participant }) => participant.userId === userId)?.totalSteps ?? 0;
+  const ctx = buildRollContext({
+    stepTotals: stepTotals.map(({ totalSteps }) => totalSteps || 0),
+    myTotalSteps,
+    position,
+    totalParticipants,
+    // 2026-07-26 §5.6 — the SAME two hard gates the roll applies. This is not
+    // optional: byType is keyed by raw powerup type, so an ungated odds sheet
+    // would advertise a type this client/race can never actually roll. The roll
+    // and the disclosure read one function with one ctx precisely so they cannot
+    // disagree; drop either field here and the sheet starts lying.
+    isTeamRace: race.isTeamRace === true,
+    supportsPowerups5,
+  });
+
+  const byType = typeOddsForPosition(position, totalParticipants, config, ctx);
 
   return {
     configVersion: version,
@@ -150,8 +168,6 @@ function buildGetRaceProgress(deps = {}) {
   const racePowerupModel = deps.RacePowerup || RacePowerup;
   const raceActiveEffectModel = deps.RaceActiveEffect || RaceActiveEffect;
   const globalStepEventModel = deps.GlobalStepEvent || GlobalStepEvent;
-  const characterEffectWindowModel =
-    deps.CharacterEffectWindow || CharacterEffectWindow;
   const completeRaceFn = deps.completeRace || completeRace;
   const expireEffectsFn = deps.expireEffects || expireEffects;
   const syncRacePowerupState =
@@ -186,7 +202,10 @@ function buildGetRaceProgress(deps = {}) {
     // §4.5 — whether the client advertises `powerups5`. Gates ONLY what is
     // rendered in activeEffects (downcast/withhold for old clients); the
     // authoritative score is never gated.
-    supportsPowerups5 = false
+    supportsPowerups5 = false,
+    // Batch 2026-07-26, item 8. Trailing + optional, defaults to "prod": every
+    // existing caller (and every frozen client) keeps identical behaviour.
+    releaseChannel = "prod"
   ) {
     const race = await raceModel.findById(raceId);
     if (!race) {
@@ -224,7 +243,7 @@ function buildGetRaceProgress(deps = {}) {
           userId: p.userId,
           displayName: p.user.displayName,
           profilePhotoUrl: p.user.profilePhotoUrl,
-          ...characterPresentation(p.user, supportsCharacters),
+          ...characterPresentation(p.user, supportsCharacters, releaseChannel),
           totalSteps: p.totalSteps,
           finishedAt: p.finishedAt,
           // Team races (additive; null on individual races).
@@ -352,16 +371,6 @@ function buildGetRaceProgress(deps = {}) {
       })
     );
 
-    // §3.6 character powers (live display side). Gated behind CHARACTER_POWERS_ENABLED
-    // and only in powerups-enabled races. capyCount is the live capybara count
-    // (incl. self) for the herd bonus; herdEnd clamps to race end. Both paths
-    // (this and raceExpiry) fold the same terms so display == settlement.
-    const charPowersOn = characterPowersEnabled() && race.powerupsEnabled;
-    const capyCount = charPowersOn ? countCapybaras(acceptedParticipants) : 0;
-    const herdEnd = race.endsAt
-      ? new Date(Math.min(now().getTime(), new Date(race.endsAt).getTime()))
-      : now();
-
     await expireEffectsFn({ raceId, participantSteps: participantStepsMap });
 
     // Fetch GlobalStepEvents that overlap [raceStartedAt, now]. These are the
@@ -437,42 +446,11 @@ function buildGetRaceProgress(deps = {}) {
           }
         }
 
-        // §3.6: Corgi zoomies windows overlapping the race (folded as a self-buff),
-        // and the Bara herd bonus (added to the bonusSteps term). Fetched at read
-        // time so live equips + secret windows are honored.
-        let zoomiesEffects = [];
-        let herdBonusSteps = 0;
-        let characterBonus = null;
-        if (charPowersOn) {
-          const windows = await characterEffectWindowModel.findActiveInRangeForUser(
-            participant.userId,
-            raceStartedAt,
-            now()
-          );
-          zoomiesEffects = zoomiesWindowsToEffects(windows);
-          const herd = computeHerdBonus({
-            participant,
-            capyCount,
-            effectiveStart,
-            end: herdEnd,
-            timeZone: scoringTimeZone,
-          });
-          herdBonusSteps = herd.bonusSteps;
-          if (herd.animal) {
-            characterBonus = {
-              animal: herd.animal,
-              perDay: herd.perDay,
-              bonusSteps: herd.bonusSteps,
-            };
-          }
-        }
-        const zoomiesBlock = activeZoomiesAt(zoomiesEffects, now().getTime());
-
-        const allEffects = [...legCramps, ...runnersHighs, ...wrongTurns, ...campfires, ...rainstorms, ...leeches, ...wave5Effects, ...zoomiesEffects];
+        const allEffects = [...legCramps, ...runnersHighs, ...wrongTurns, ...campfires, ...rainstorms, ...leeches, ...wave5Effects];
         const { frozenSteps, buffedSteps, reversedSteps, globalBoostedSteps, leechTransfers } = await computeEffectModifiers(allEffects, baseAdjusted, participant.userId, stepSampleModel, hasSampleData, globalContext, now());
 
         // Pre-leech total: everything EXCEPT the leech transfer, floored at 0.
-        const preLeechTotal = Math.max(0, baseAdjusted - frozenSteps + buffedSteps - 2 * reversedSteps + (globalBoostedSteps || 0) + (race.powerupsEnabled ? (participant.bonusSteps || 0) : 0) + herdBonusSteps);
+        const preLeechTotal = Math.max(0, baseAdjusted - frozenSteps + buffedSteps - 2 * reversedSteps + (globalBoostedSteps || 0) + (race.powerupsEnabled ? (participant.bonusSteps || 0) : 0));
 
         // §6a — the SIGNED effective multiplier right now (buff stacking; the
         // global-event fold is applied by the caller once). LEECH is a transfer,
@@ -481,20 +459,9 @@ function buildGetRaceProgress(deps = {}) {
           ? signedMultiplierForEffects(allEffects, now().getTime())
           : 1;
 
-        return { participant, frozen: false, preLeechTotal, leechTransfers, currentMultiplierRaw, characterBonus, zoomies: zoomiesBlock };
+        return { participant, frozen: false, preLeechTotal, leechTransfers, currentMultiplierRaw };
       })
     );
-
-    // §4.4 additive per-participant progress blocks, keyed by participant id.
-    // characterBonus (capybara herd) and zoomies (active window) are attached to
-    // the leaderboard rows below; absent => the client renders nothing.
-    const characterBonusByParticipantId = new Map();
-    const zoomiesByParticipantId = new Map();
-    for (const e of preLeech) {
-      if (e.frozen) continue;
-      if (e.characterBonus) characterBonusByParticipantId.set(e.participant.id, e.characterBonus);
-      if (e.zoomies) zoomiesByParticipantId.set(e.participant.id, e.zoomies);
-    }
 
     // Phase A2 — HITCHHIKE (§7.3). ONE bulk query for every link in the race,
     // scored from each TARGET's raw in-window steps and folded into the CASTER's
@@ -833,6 +800,22 @@ function buildGetRaceProgress(deps = {}) {
       }
     }
 
+    // Items 12/16 — ONE server-authoritative placement. Computed from the
+    // HONEST live totals (before Stealth masking and before the Imposter slot
+    // swap) with the SHARED comparator that getRaces, getHomeRaceCard and
+    // placementRecompute now also use, so the three surfaces stop disagreeing.
+    // Additive + nullable: frozen clients ignore `placement`/`myPlacement` and
+    // keep their own array-index sort.
+    const placementByUserId = placementsByUserId(
+      stepTotals.map(({ participant, totalSteps }) => ({
+        userId: participant.userId,
+        totalSteps,
+        finishedAt: participant.finishedAt,
+        placement: participant.placement,
+        joinedAt: participant.joinedAt,
+      }))
+    );
+
     const leaderboard = stepTotals
       .map(({ participant, totalSteps }) => {
         // §6a — a masked row (detoured/stealthed opponent) must NOT leak the
@@ -853,6 +836,9 @@ function buildGetRaceProgress(deps = {}) {
             finishedAt: participant.finishedAt,
             stealthed: false,
             currentMultiplier: null,
+            // Detour Sign masks every total, so it must mask every rank too —
+            // otherwise the placement leaks exactly what the "???" hides.
+            placement: null,
             // Team identity is structural (column grouping), never masked.
             team: participant.team ?? null,
             forfeitedAt: participant.forfeitedAt ?? null,
@@ -861,31 +847,25 @@ function buildGetRaceProgress(deps = {}) {
         const isStealthed = stealthedUserIds.has(participant.userId)
           && participant.userId !== userId
           && !participant.finishedAt;
-        // §4.4: character-power blocks are additive and only for UNMASKED rows
-        // (masking a row must not leak a hidden power). Absent => omitted.
-        const characterBonus = isStealthed
-          ? undefined
-          : characterBonusByParticipantId.get(participant.id);
-        const zoomies = isStealthed
-          ? undefined
-          : zoomiesByParticipantId.get(participant.id);
         return {
           userId: participant.userId,
           displayName: isStealthed ? "???" : participant.user.displayName,
           profilePhotoUrl: isStealthed ? null : participant.user.profilePhotoUrl,
           ...(isStealthed
             ? { accessories: [], animal: null }
-            : characterPresentation(participant.user, supportsCharacters)),
+            : characterPresentation(participant.user, supportsCharacters, releaseChannel)),
           totalSteps: isStealthed ? null : totalSteps,
           finishedAt: participant.finishedAt,
           stealthed: isStealthed,
+          // A stealthed rival's steps are nulled, so their rank must be too.
+          placement: isStealthed
+            ? null
+            : placementByUserId.get(participant.userId) ?? null,
           currentMultiplier: isStealthed ? null : rawCurrentMultiplier,
           // Team races (TR-656): stealth masks the individual plank only; the
           // side (and the honest team totals below) stay visible.
           team: participant.team ?? null,
           forfeitedAt: participant.forfeitedAt ?? null,
-          ...(characterBonus ? { characterBonus } : {}),
-          ...(zoomies ? { zoomies } : {}),
         };
       })
       .sort((a, b) => {
@@ -925,6 +905,12 @@ function buildGetRaceProgress(deps = {}) {
       maxDurationDays: race.maxDurationDays,
       targetSteps: race.targetSteps, // 1.1.4 compat
       participants: leaderboard,
+      // Items 12/16 — additive, nullable. `myPlacementHidden` mirrors the
+      // GET /races semantics exactly so the client reads one rule on both.
+      myPlacement: viewerIsDetoured
+        ? null
+        : placementByUserId.get(userId) ?? null,
+      myPlacementHidden: viewerIsDetoured,
       ...tournamentFields(race),
     };
 
@@ -952,6 +938,7 @@ function buildGetRaceProgress(deps = {}) {
         stepTotals,
         myParticipant,
         snapshot: balanceConfigSnapshot,
+        supportsPowerups5,
       });
       if (dropOdds) powerupData.dropOdds = dropOdds;
     }

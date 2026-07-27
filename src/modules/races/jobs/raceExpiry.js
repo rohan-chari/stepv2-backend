@@ -21,13 +21,6 @@ const {
 } = require("../../powerups/hitchhikeCopies");
 const { mintPiggyBank } = require("../../powerups/commands/expireEffects");
 const { awardCoins } = require("../../../shared/economy/awardCoins");
-const { CharacterEffectWindow } = require("../../powerups/models/characterEffectWindow");
-const {
-  characterPowersEnabled,
-  countCapybaras,
-  computeHerdBonus,
-  zoomiesWindowsToEffects,
-} = require("../services/characterPowers");
 
 // Env-tunable Bounty payout (§3.11). Frozen into each Bounty's metadata at
 // use-time, so this default only applies to rows written before the env existed.
@@ -39,6 +32,55 @@ function bountyPayoutFallback() {
 // §3.10 / §3.11 settlement hooks. Piggy Bank mints at min(expiry, settlement);
 // Bounty pays out when the caster out-places the target. Both read effect rows
 // regardless of ACTIVE/EXPIRED status and are idempotent via awardCoins refId.
+// Item 4 (batch 2026-07-26) — COMMS ONLY. No mechanic change.
+//
+// Prod forensics settled the "my Trail Mine never activated" report: mines
+// detonate ~94% of the time fleet-wide (292 expired vs 17 live). The reporter
+// was a runaway leader whose three live mines sat above the entire field, so
+// nobody ever walked through them. That is working as coded — but the owner
+// silently never learns the outcome, which is what makes it feel broken.
+//
+// So at race end, every mine still ACTIVE (i.e. never crossed) gets one feed
+// line telling its owner it expired untriggered. Explicitly NOT doing: no
+// positionSteps offset, no plant-behind, no refund, no change to the
+// "cannot plant while last" rule.
+async function announceUntriggeredTrailMines({ race }) {
+  if (!race.powerupsEnabled) return;
+  try {
+    const mines = await RaceActiveEffect.findRaceEffectsByType(
+      race.id,
+      "TRAIL_MINE"
+    );
+    for (const mine of mines) {
+      if (mine.status !== "ACTIVE") continue; // a detonated mine is EXPIRED
+      const positionSteps = (mine.metadata || {}).positionSteps;
+      try {
+        await RacePowerupEvent.create({
+          raceId: race.id,
+          actorUserId: mine.sourceUserId,
+          eventType: "POWERUP_USED",
+          powerupType: "TRAIL_MINE",
+          targetUserId: null,
+          description:
+            typeof positionSteps === "number"
+              ? `A Trail Mine at ${positionSteps.toLocaleString()} steps was never triggered — nobody crossed it.`
+              : "A Trail Mine was never triggered — nobody crossed it.",
+          metadata: {
+            mineId: mine.id,
+            positionSteps: positionSteps ?? null,
+            untriggered: true,
+          },
+        });
+        await RaceActiveEffect.update(mine.id, { status: "EXPIRED" });
+      } catch (e) {
+        console.error(`[CRON] Trail Mine expiry feed failed (${mine.id}):`, e);
+      }
+    }
+  } catch (e) {
+    console.error("[CRON] Trail Mine expiry query failed:", e);
+  }
+}
+
 async function settleWave5Economy({ race, standings, settlementTime }) {
   if (!race.powerupsEnabled) return;
 
@@ -130,14 +172,8 @@ async function resolveExpiredRaces() {
         globalEvents = [];
       }
 
-      // §3.6 character powers (settlement side). Gated behind CHARACTER_POWERS_ENABLED
-      // and only in powerups-enabled races. capyCount is the live capybara count
-      // (incl. self) for the herd bonus, computed once per race.
-      const charPowersOn = characterPowersEnabled() && race.powerupsEnabled;
-      const capyCount = charPowersOn ? countCapybaras(acceptedParticipants) : 0;
-      const herdEnd = race.endsAt
-        ? new Date(Math.min(settlementTime.getTime(), new Date(race.endsAt).getTime()))
-        : settlementTime;
+      // Seeded races settle in their canonical tz so settled totals match what
+      // getRaceProgress showed live; user races keep UTC (legacy).
       const settlementTz = raceTimeZone(race, "UTC");
 
       const standings = [];
@@ -187,27 +223,6 @@ async function resolveExpiredRaces() {
             globalEvents,
           });
 
-        // §3.6: Corgi zoomies windows overlapping the race, and the Bara herd
-        // bonus (added to the bonusSteps term). Both fold in via calculateCurrentTotal
-        // exactly as the live display path does, so settlement == display.
-        let characterEffects = [];
-        let herdBonusSteps = 0;
-        if (charPowersOn) {
-          const windows = await CharacterEffectWindow.findActiveInRangeForUser(
-            participant.userId,
-            race.startedAt,
-            settlementTime
-          );
-          characterEffects = zoomiesWindowsToEffects(windows);
-          herdBonusSteps = computeHerdBonus({
-            participant,
-            capyCount,
-            effectiveStart,
-            end: herdEnd,
-            timeZone: settlementTz,
-          }).bonusSteps;
-        }
-
         const {
           total,
           leechTransfers,
@@ -221,7 +236,6 @@ async function resolveExpiredRaces() {
           coinFlipWins,
           coinFlipLoses,
           ghostPeppers,
-          zoomies,
         } = await calculateCurrentTotal({
             raceId: race.id,
             racePowerupsEnabled: race.powerupsEnabled,
@@ -232,8 +246,6 @@ async function resolveExpiredRaces() {
             stepSampleModel: StepSample,
             globalEvents,
             now: settlementTime,
-            characterEffects,
-            extraBonusSteps: herdBonusSteps,
           });
 
         preLeech.push({
@@ -252,7 +264,6 @@ async function resolveExpiredRaces() {
             coinFlipWins,
             coinFlipLoses,
             ghostPeppers,
-            zoomies,
           },
         });
       }
@@ -322,6 +333,7 @@ async function resolveExpiredRaces() {
         // Piggy Bank mints in team races too (Bounty is individual-only and a
         // no-op here). Runs before completeRace so the coins land at settlement.
         await settleWave5Economy({ race, standings, settlementTime });
+        await announceUntriggeredTrailMines({ race });
 
         const teamTotals = { TEAM_A: 0, TEAM_B: 0 };
         for (const standing of standings) {
@@ -376,6 +388,7 @@ async function resolveExpiredRaces() {
       // §3.10 / §3.11: Piggy Bank mint + Bounty payout, using the just-sorted
       // standings for placement. Idempotent via awardCoins refId.
       await settleWave5Economy({ race, standings, settlementTime });
+      await announceUntriggeredTrailMines({ race });
 
       const participantUserIds = acceptedParticipants.map((p) => p.userId);
       const topUserId = standings[0]?.participant.userId || null;

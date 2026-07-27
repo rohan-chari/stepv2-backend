@@ -153,7 +153,11 @@ const DEFAULT_CONFIG = {
       "RUNNERS_HIGH",
       "PINECONE_TOSS",
     ],
-    UNCOMMON: ["LEG_CRAMP", "STEALTH_MODE", "WRONG_TURN"],
+    // RALLY_FLAG (2026-07-26, docs/team-only-drop-pool-requirements.md): moved
+    // OUT of storeOnlyTypes and into the drop pool, but it is TEAM-ONLY — see
+    // `teamOnlyTypes` below. Its rarity was already UNCOMMON, which is the tier
+    // it has to sit in for rarityByType and dropPool to agree.
+    UNCOMMON: ["LEG_CRAMP", "STEALTH_MODE", "WRONG_TURN", "RALLY_FLAG"],
     RARE: [
       "RED_CARD",
       "SECOND_WIND",
@@ -199,13 +203,33 @@ const DEFAULT_CONFIG = {
     "DECOY",
     "POWER_OUTAGE",
     "UMBRELLA",
-    "RALLY_FLAG",
+    // RALLY_FLAG deliberately ABSENT (2026-07-26): it is now droppable, but only
+    // in a team race. See `teamOnlyTypes`.
     "DRILL_SERGEANT",
     "PIGGY_BANK",
     "BOUNTY",
   ],
 
-  // Which store-only types are ALSO barred from the DAILY reward box.
+  // Droppable, but ONLY when the race is a team race
+  // (docs/team-only-drop-pool-requirements.md).
+  //
+  // This is a THIRD question, distinct from the two lists around it, and the
+  // three must not be conflated (the D13 rule):
+  //   storeOnlyTypes       -> can an in-race mystery box roll this at all?
+  //   teamOnlyTypes        -> …but only when the race is a team race?
+  //   dailyBoxExcludedTypes-> can the daily spin award it?
+  //
+  // Rally Flag is the first member because its EFFECT is exclusively a team
+  // effect — usePowerup hard-rejects it in a solo race with 400 INVALID_TARGET,
+  // so dropping one into a solo race would be a dead inventory slot. Uprising
+  // and Power Outage are the obvious next two; the seam is general, not
+  // special-cased to Rally Flag.
+  //
+  // Reading this key is default-safe: absent or not an array means "no team
+  // restriction", i.e. exactly the pre-2026-07-26 behaviour.
+  teamOnlyTypes: ["RALLY_FLAG"],
+
+  // Which store-only OR team-only types are ALSO barred from the DAILY reward box.
   //
   // These are two different questions and the spec's §4.3 literal conflated
   // them. `storeOnlyTypes` answers "can an in-race mystery box roll this?" —
@@ -229,6 +253,11 @@ const DEFAULT_CONFIG = {
     "DECOY",
     "POWER_OUTAGE",
     "UMBRELLA",
+    // RALLY_FLAG stays listed even though it is no longer store-only: the daily
+    // reward box has no race context and never can, so it cannot honour
+    // `teamOnlyTypes` and must simply never award it. validateConfig accepts a
+    // dailyBoxExcludedTypes member that is store-only OR team-only for exactly
+    // this case.
     "RALLY_FLAG",
     "DRILL_SERGEANT",
     "PIGGY_BANK",
@@ -265,6 +294,43 @@ const DEFAULT_CONFIG = {
   // total probability and the position curve are untouched.
   typeWeights: {
     RED_CARD: 0.5,
+  },
+
+  // Position-aware drop rules. These act STRICTLY WITHIN an already-chosen
+  // rarity tier — the tier distribution from `positionOdds` below is never
+  // touched by them. That is a hard invariant, not a nicety: the shipped odds
+  // sheet hides itself entirely if the `rarity` block stops summing to 1.0.
+  //
+  // Clearing all four lists restores exact pre-2026-07-26 behaviour with no
+  // deploy, which is this feature's kill switch.
+  positionRules: {
+    // HARD EXCLUSIONS. Only for items the server refuses to let this player use,
+    // or that are mechanically incapable of firing. Nothing else belongs here.
+    //
+    // Excluded when the player is at/tied for the most steps — both throw a 400
+    // at use time for a leader, so dropping them hands out a brick.
+    leaderExcluded: ["RED_CARD", "SECOND_WIND"],
+    // Excluded when nobody is behind the player — Trail Mine can only detonate
+    // on a player crossing the planter's step total from below.
+    lastPlaceExcluded: ["TRAIL_MINE"],
+
+    // DOWN-WEIGHTS. Relative weight multipliers for items that still function
+    // but are low-value at one end of the field. 1.0 == no change. All four
+    // entries below are owner-approved judgment calls, not defect fixes, and a
+    // down-weight must NEVER become a removal.
+    //
+    // Applied toward the FRONT. Runner's High works fine in first place, it just
+    // feels flat when you have already won the position.
+    leadingDownweight: { RUNNERS_HIGH: 0.5 },
+    // Applied toward the BACK. These depend on being attacked, which is rare at
+    // the back of the field.
+    trailingDownweight: { CLEANSE: 0.5, MIRROR: 0.5, STEALTH_MODE: 0.5 },
+
+    // Normalized position (0 = leader, 1 = last) at which each down-weight group
+    // reaches full strength. Between the threshold and mid-field the multiplier
+    // lerps toward 1.0, so there is no cliff at any position.
+    leadingDownweightFrom: 0.4, // full strength at/below this
+    trailingDownweightFrom: 0.6, // full strength at/above this
   },
 
   // [COMMON, UNCOMMON, RARE] by race position. `first` = leader, `last` = last

@@ -1,7 +1,7 @@
 // Backend batch 2026-07-25 (§3): Drill Sergeant sleep blocker, powerup duration
-// standardization, tournament 2-day round minimum, character powers (Bara herd
-// bonus + Corgi zoomies), and the powerups-disabled hard gate. Real HTTP + real
-// DB (local integration DB only).
+// standardization, tournament 2-day round minimum, and the powerups-disabled
+// hard gate. (The character-powers sections were removed with the feature.)
+// Real HTTP + real DB (local integration DB only).
 const assert = require("node:assert/strict");
 const { describe, it, before, beforeEach, after } = require("node:test");
 const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
@@ -157,10 +157,6 @@ describe("Powerup & Character batch 2026-07-25", () => {
   beforeEach(async () => {
     await cleanDatabase();
     nextAppleId = 0;
-    delete process.env.CHARACTER_POWERS_ENABLED;
-  });
-  after(() => {
-    delete process.env.CHARACTER_POWERS_ENABLED;
   });
 
   // ── §3.7 powerups-disabled hard gate ───────────────────────────────────────
@@ -337,130 +333,4 @@ describe("Powerup & Character batch 2026-07-25", () => {
     });
   });
 
-  // ── §3.6.1 Bara herd bonus ─────────────────────────────────────────────────
-  describe("§3.6.1 Bara herd bonus", () => {
-    it("grants +100/day per capybara (incl. self), corgi gets none, and OFF when the flag is off", async () => {
-      const alice = await createUser("HerdA"); // default => capybara
-      const bob = await createUser("HerdB"); // default => capybara
-      const dave = await createUser("HerdD");
-      await makeFriends(alice, bob);
-      await makeFriends(alice, dave);
-      const raceId = await createActiveRace(alice, [bob, dave]);
-      await backdate(raceId, hoursAgo(3)); // single race-local day
-      await equipCharacter(dave, "corgi_puppy"); // dave is a corgi
-
-      // Alice walks 1000 raw steps in the last 3h.
-      await recordSamples(alice.token, [
-        { periodStart: hoursAgo(2).toISOString(), periodEnd: hoursAgo(1).toISOString(), steps: 1000 },
-      ]);
-
-      // Flag OFF: no herd bonus, no characterBonus block.
-      delete process.env.CHARACTER_POWERS_ENABLED;
-      let progress = await getProgress(alice.token, raceId);
-      let me = findP(progress, alice.userId);
-      assert.equal(me.totalSteps, 1000, "no herd bonus when flag off");
-      assert.equal(me.characterBonus, undefined);
-
-      // Flag ON: 3 participants, 2 capybaras (alice, bob) + 1 corgi (dave).
-      process.env.CHARACTER_POWERS_ENABLED = "true";
-      progress = await getProgress(alice.token, raceId);
-      me = findP(progress, alice.userId);
-      // perDay = 100 * 2 capybaras = 200; 1 day => +200.
-      assert.equal(me.characterBonus.animal, "capybara");
-      assert.equal(me.characterBonus.perDay, 200);
-      assert.equal(me.characterBonus.bonusSteps, 200);
-      assert.equal(me.totalSteps, 1200, "1000 raw + 200 herd");
-
-      const corgi = findP(progress, dave.userId);
-      assert.equal(corgi.characterBonus, undefined, "corgi earns no herd bonus");
-    });
-
-    it("does NOT advance box progress (box math stays raw)", async () => {
-      process.env.CHARACTER_POWERS_ENABLED = "true";
-      const alice = await createUser("HerdBoxA");
-      const bob = await createUser("HerdBoxB");
-      await makeFriends(alice, bob);
-      const raceId = await createActiveRace(alice, [bob]);
-      await backdate(raceId, hoursAgo(3));
-      await recordSamples(alice.token, [
-        { periodStart: hoursAgo(2).toISOString(), periodEnd: hoursAgo(1).toISOString(), steps: 1000 },
-      ]);
-
-      const progress = await getProgress(alice.token, raceId);
-      const me = findP(progress, alice.userId);
-      // 2 capybaras => +200 herd in the leaderboard total …
-      assert.equal(me.totalSteps, 1200);
-      // … but box countdown is computed from RAW steps only: interval 5000,
-      // raw 1000 => 4000 to go (herd's 200 must NOT count).
-      assert.equal(progress.powerupData.stepsUntilNextPowerup, 4000);
-    });
-
-    it("is disabled in powerups-disabled races", async () => {
-      process.env.CHARACTER_POWERS_ENABLED = "true";
-      const alice = await createUser("HerdDisA");
-      const bob = await createUser("HerdDisB");
-      await makeFriends(alice, bob);
-      const raceId = await createActiveRace(alice, [bob], { powerupsEnabled: false });
-      await backdate(raceId, hoursAgo(3));
-      await recordSamples(alice.token, [
-        { periodStart: hoursAgo(2).toISOString(), periodEnd: hoursAgo(1).toISOString(), steps: 1000 },
-      ]);
-      const progress = await getProgress(alice.token, raceId);
-      const me = findP(progress, alice.userId);
-      assert.equal(me.totalSteps, 1000, "no herd bonus in a powerups-disabled race");
-      assert.equal(me.characterBonus, undefined);
-    });
-  });
-
-  // ── §3.6.2 Corgi zoomies ───────────────────────────────────────────────────
-  describe("§3.6.2 Corgi zoomies", () => {
-    it("scores steps inside a materialized window at 3x (and non-corgi gets none)", async () => {
-      process.env.CHARACTER_POWERS_ENABLED = "true";
-      const alice = await createUser("ZoomA");
-      const bob = await createUser("ZoomB");
-      await makeFriends(alice, bob);
-      const raceId = await createActiveRace(alice, [bob]);
-      await backdate(raceId, hoursAgo(5));
-      await equipCharacter(alice, "corgi_puppy");
-
-      // A 10-minute zoomies window entirely in the past, inside the race window.
-      const wStart = hoursAgo(3);
-      const wEnd = new Date(wStart.getTime() + 10 * 60 * 1000);
-      await prisma.characterEffectWindow.create({
-        data: {
-          userId: alice.userId, animal: "corgi", multiplier: 3,
-          startsAt: wStart, endsAt: wEnd, localDayKey: "2026-07-25", slot: 0,
-        },
-      });
-
-      // 1000 steps fully inside the window; 1000 steps outside it.
-      await recordSamples(alice.token, [
-        { periodStart: wStart.toISOString(), periodEnd: wEnd.toISOString(), steps: 1000 },
-        { periodStart: hoursAgo(1).toISOString(), periodEnd: hoursAgo(0.5).toISOString(), steps: 1000 },
-      ]);
-
-      const progress = await getProgress(alice.token, raceId);
-      const me = findP(progress, alice.userId);
-      // base 2000 raw + (3-1)*1000 zoomies-boosted = 4000. (Alice is the only
-      // capybara-or-not corgi; herd bonus does not apply to a corgi.)
-      assert.equal(me.totalSteps, 4000);
-    });
-
-    it("no zoomies boost for a non-corgi in the same setup", async () => {
-      process.env.CHARACTER_POWERS_ENABLED = "true";
-      const alice = await createUser("ZoomC");
-      const bob = await createUser("ZoomD");
-      await makeFriends(alice, bob);
-      const raceId = await createActiveRace(alice, [bob]);
-      await backdate(raceId, hoursAgo(5));
-      // No window materialized for bob (default capybara, not corgi).
-      await recordSamples(bob.token, [
-        { periodStart: hoursAgo(3).toISOString(), periodEnd: hoursAgo(2.9).toISOString(), steps: 1000 },
-      ]);
-      const progress = await getProgress(bob.token, raceId);
-      const me = findP(progress, bob.userId);
-      // 1000 raw + herd (2 capybaras => 200/day * 1 day = 200) = 1200; NO 3x.
-      assert.equal(me.totalSteps, 1200);
-    });
-  });
 });

@@ -5,7 +5,6 @@ const { signSessionToken } = require("../../src/modules/users/services/sessionTo
 
 // Tables in deletion order (respects foreign key constraints)
 const TABLES_IN_ORDER = [
-  "character_effect_windows",
   "race_powerup_events",
   "race_active_effects",
   "race_powerups",

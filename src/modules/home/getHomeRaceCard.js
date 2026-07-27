@@ -1,5 +1,6 @@
 const { prisma: defaultPrisma } = require("../../db");
 const { characterPresentation } = require("../cosmetics");
+const { compareParticipantsForPlacement } = require("../races/placementOrder");
 const { RaceActiveEffect } = require("../powerups/models/raceActiveEffect");
 const { Steps } = require("../steps/models/steps");
 const { StepSample } = require("../steps/models/stepSample");
@@ -10,7 +11,10 @@ const {
 } = require("../races/services/raceStateResolution");
 const { prorateSamplesIntoWindow } = require("../steps/models/stepSample");
 const { raceTimeZone } = require("../races/raceTimeZone");
-const { buildTeamsBlockFromParticipants } = require("../races/teamRaces");
+const {
+  buildTeamsBlock,
+  buildTeamsBlockFromParticipants,
+} = require("../races/teamRaces");
 const { applyLeechTransfers } = require("../powerups/leechTransfers");
 const {
   collectRaceHitchhikeCopies,
@@ -44,14 +48,14 @@ const USER_SELECT = {
 
 const FRIEND_FINISHED_WINDOW_MS = 2 * 60 * 60 * 1000; // 2 hours
 
-function serializeUser(user, supportsCharacters = false) {
+function serializeUser(user, supportsCharacters = false, releaseChannel = "prod") {
   if (!user) return null;
   return {
     userId: user.id,
     displayName: user.displayName || "Anonymous",
     profilePhotoUrl: user.profilePhotoUrl || null,
     // {animal, accessories} — naked capy for viewers without `characters`.
-    ...characterPresentation(user, supportsCharacters),
+    ...characterPresentation(user, supportsCharacters, releaseChannel),
   };
 }
 
@@ -70,7 +74,7 @@ async function getAcceptedFriendIds(prisma, userId) {
   return [...ids];
 }
 
-async function checkPendingInvite(prisma, userId, now, supportsCharacters = false) {
+async function checkPendingInvite(prisma, userId, now, supportsCharacters = false, releaseChannel = "prod") {
   const invites = await prisma.raceParticipant.findMany({
     where: {
       userId,
@@ -108,7 +112,7 @@ async function checkPendingInvite(prisma, userId, now, supportsCharacters = fals
       name: race.name,
       durationHours: race.maxDurationDays ? race.maxDurationDays * 24 : null,
       participantCount: race.participants.length,
-      inviter: serializeUser(race.creator, supportsCharacters),
+      inviter: serializeUser(race.creator, supportsCharacters, releaseChannel),
       expiresAt: primary.inviteExpiresAt,
     },
   };
@@ -118,7 +122,8 @@ async function checkActiveRace(
   prisma,
   userId,
   supportsCharacters = false,
-  supportsTeamRaces = false
+  supportsTeamRaces = false,
+  releaseChannel = "prod"
 ) {
   const myActive = await prisma.raceParticipant.findFirst({
     where: {
@@ -180,7 +185,7 @@ async function checkActiveRace(
     return {
       rank: sorted.indexOf(p) + 1,
       totalSteps: p.totalSteps,
-      ...serializeUser(p.user, supportsCharacters),
+      ...serializeUser(p.user, supportsCharacters, releaseChannel),
     };
   }
 
@@ -208,28 +213,6 @@ async function checkActiveRace(
         : {}),
     },
   };
-}
-
-// Deterministic placement order, mirrors compareParticipantsForPlacement in
-// getRaces.js: finished first (by placement/finish time), then by steps desc,
-// then earliest join, then userId. Kept local so this query stays self-contained.
-function compareParticipantsForPlacement(left, right) {
-  if (left.finishedAt && right.finishedAt) {
-    const leftPlacement = left.placement ?? Number.MAX_SAFE_INTEGER;
-    const rightPlacement = right.placement ?? Number.MAX_SAFE_INTEGER;
-    if (leftPlacement !== rightPlacement) return leftPlacement - rightPlacement;
-    const lf = new Date(left.finishedAt).getTime();
-    const rf = new Date(right.finishedAt).getTime();
-    if (lf !== rf) return lf - rf;
-  }
-  if (left.finishedAt) return -1;
-  if (right.finishedAt) return 1;
-  const stepDiff = (right.totalSteps || 0) - (left.totalSteps || 0);
-  if (stepDiff !== 0) return stepDiff;
-  const lj = left.joinedAt ? new Date(left.joinedAt).getTime() : 0;
-  const rj = right.joinedAt ? new Date(right.joinedAt).getTime() : 0;
-  if (lj !== rj) return lj - rj;
-  return String(left.userId || "").localeCompare(String(right.userId || ""));
 }
 
 // Cross-participant prefetch: pull step samples, daily rows, and powerup
@@ -433,6 +416,12 @@ async function checkActiveRaces(prisma, userId, options = {}) {
     stepSampleModel = StepSample,
     raceActiveEffectModel = RaceActiveEffect,
     supportsCharacters = false,
+    releaseChannel = "prod",
+    // TR-809 parity (batch 2026-07-26, B-12d): the ACTIVE_RACES state never
+    // emitted `teams`/`isTeamRace`, unlike the legacy single-card path, so on
+    // the new home state a team race rendered as an individual ticket with no
+    // scoreline. Token-gated exactly like the legacy path.
+    supportsTeamRaces = false,
     // §6.3: when true (new client sent homePersistedTotals=1 after a CURRENT
     // sync-v2), build entries from persisted RaceParticipant.totalSteps instead
     // of recomputing live health windows for every participant. Masking,
@@ -612,19 +601,27 @@ async function checkActiveRaces(prisma, userId, options = {}) {
 
     // Determine stealthed user ids for this race (only when powerups enabled).
     const stealthedUserIds = new Set();
+    // B-12d: Detour Sign had NO handling here at all, so home kept showing a
+    // real placement while the races list and race detail both showed "???".
+    let viewerIsDetoured = false;
     if (race.powerupsEnabled) {
       const activeEffects = await raceEffectModel.findActiveForRace(race.id);
       for (const e of activeEffects) {
         if (e.type === "STEALTH_MODE") stealthedUserIds.add(e.targetUserId);
+        if (e.type === "DETOUR_SIGN" && e.targetUserId === userId) {
+          viewerIsDetoured = true;
+        }
       }
     }
 
     const top3 = ranked.slice(0, 3).map((p, idx) => {
-      // Never stealth self or finished racers (mirrors getRaceProgress).
+      // Detoured viewers see every rival as "???" with no steps, matching
+      // getRaceProgress' masking exactly.
       const isStealthed =
-        stealthedUserIds.has(p.userId) &&
-        p.userId !== userId &&
-        !p.finishedAt;
+        viewerIsDetoured ||
+        (stealthedUserIds.has(p.userId) &&
+          p.userId !== userId &&
+          !p.finishedAt);
       return {
         rank: idx + 1,
         userId: p.userId,
@@ -634,7 +631,8 @@ async function checkActiveRaces(prisma, userId, options = {}) {
           : (() => {
               const { animal, accessories } = characterPresentation(
                 p.user,
-                supportsCharacters
+                supportsCharacters,
+                releaseChannel
               );
               return { equippedAccessories: accessories, animal };
             })()),
@@ -644,7 +642,8 @@ async function checkActiveRaces(prisma, userId, options = {}) {
     });
 
     const myIndex = ranked.findIndex((p) => p.userId === userId);
-    const userPlacement = myIndex >= 0 ? myIndex + 1 : null;
+    const userPlacement =
+      viewerIsDetoured || myIndex < 0 ? null : myIndex + 1;
 
     return {
       raceId: race.id,
@@ -652,7 +651,27 @@ async function checkActiveRaces(prisma, userId, options = {}) {
       endsAt: race.endsAt,
       top3,
       userPlacement,
+      // Additive, mirrors GET /races' myPlacementHidden so the client reads one
+      // rule everywhere. Frozen clients ignore it and just see no chip.
+      userPlacementHidden: viewerIsDetoured,
       participantCount: ranked.length,
+      // B-12d: the canonical team block, from the LIVE totals this entry
+      // already computed (so it matches the ticket's own numbers), built by the
+      // same shared builder every other surface uses.
+      ...(race.isTeamRace && supportsTeamRaces
+        ? {
+            isTeamRace: true,
+            teamSize: race.teamSize ?? null,
+            myTeam:
+              race.participants.find((p) => p.userId === userId)?.team ?? null,
+            teams: buildTeamsBlock(
+              race,
+              liveParticipants
+                .filter((p) => p.status === "ACCEPTED")
+                .map((p) => ({ participant: p, totalSteps: p.totalSteps || 0 }))
+            ),
+          }
+        : {}),
     };
   }
 
@@ -668,7 +687,7 @@ async function checkActiveRaces(prisma, userId, options = {}) {
   return { state: "ACTIVE_RACES", data: { races } };
 }
 
-async function checkFriendRacing(prisma, userId, friendIds, supportsCharacters = false) {
+async function checkFriendRacing(prisma, userId, friendIds, supportsCharacters = false, releaseChannel = "prod") {
   if (friendIds.length === 0) return null;
 
   const friendParticipations = await prisma.raceParticipant.findMany({
@@ -718,17 +737,17 @@ async function checkFriendRacing(prisma, userId, friendIds, supportsCharacters =
       name: race.name,
       endsAt: race.endsAt,
       isPublicJoinable: true,
-      friend: serializeUser(choice.user, supportsCharacters),
+      friend: serializeUser(choice.user, supportsCharacters, releaseChannel),
       participants: race.participants.map((p, idx) => ({
         rank: idx + 1,
         totalSteps: p.totalSteps,
-        ...serializeUser(p.user, supportsCharacters),
+        ...serializeUser(p.user, supportsCharacters, releaseChannel),
       })),
     },
   };
 }
 
-async function checkFriendFinished(prisma, userId, friendIds, now, supportsCharacters = false) {
+async function checkFriendFinished(prisma, userId, friendIds, now, supportsCharacters = false, releaseChannel = "prod") {
   if (friendIds.length === 0) return null;
 
   const cutoff = new Date(now.getTime() - FRIEND_FINISHED_WINDOW_MS);
@@ -754,7 +773,7 @@ async function checkFriendFinished(prisma, userId, friendIds, now, supportsChara
   return {
     state: "FRIEND_FINISHED",
     data: {
-      friend: serializeUser(finisher.user, supportsCharacters),
+      friend: serializeUser(finisher.user, supportsCharacters, releaseChannel),
       raceName: finisher.race.name,
       placement: finisher.placement,
       finishedAt: finisher.race.completedAt,
@@ -829,10 +848,13 @@ function buildGetHomeRaceCard(dependencies = {}) {
     // TR-702/809: whether the caller declared the `team_races` token. Old
     // clients never see a team race on the Home card.
     supportsTeamRaces = false,
+    // Batch 2026-07-26, item 8. Defaults to "prod" — a shipped binary never
+    // receives a test-only assetKey it does not bundle.
+    releaseChannel = "prod",
   }) {
     const now = nowFn();
 
-    const pending = await checkPendingInvite(prisma, userId, now, supportsCharacters);
+    const pending = await checkPendingInvite(prisma, userId, now, supportsCharacters, releaseChannel);
     if (pending) return pending;
 
     // Opt-in path (new app builds): when the client requests homeActiveRaces and
@@ -849,6 +871,8 @@ function buildGetHomeRaceCard(dependencies = {}) {
         stepSampleModel,
         raceActiveEffectModel,
         supportsCharacters,
+        releaseChannel,
+        supportsTeamRaces,
         usePersistedTotals: homePersistedTotals,
       });
       if (activeRaces) return activeRaces;
@@ -857,17 +881,18 @@ function buildGetHomeRaceCard(dependencies = {}) {
         prisma,
         userId,
         supportsCharacters,
-        supportsTeamRaces
+        supportsTeamRaces,
+        releaseChannel
       );
       if (active) return active;
     }
 
     const friendIds = await getAcceptedFriendIds(prisma, userId);
 
-    const friendRacing = await checkFriendRacing(prisma, userId, friendIds, supportsCharacters);
+    const friendRacing = await checkFriendRacing(prisma, userId, friendIds, supportsCharacters, releaseChannel);
     if (friendRacing) return friendRacing;
 
-    const friendFinished = await checkFriendFinished(prisma, userId, friendIds, now, supportsCharacters);
+    const friendFinished = await checkFriendFinished(prisma, userId, friendIds, now, supportsCharacters, releaseChannel);
     if (friendFinished) return friendFinished;
 
     const publicRace = await checkPublicRace(prisma, userId);

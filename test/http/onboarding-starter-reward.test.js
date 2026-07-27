@@ -25,7 +25,11 @@ function dependencies({ membership = { raceId: "daily-1" }, claimed = false } = 
         async findFirst(args) {
           assert.equal(args.where.status, "ACCEPTED");
           assert.equal(args.where.race.status, "ACTIVE");
-          assert.equal(args.where.race.seed.is.kind, "DAILY_10K");
+          // Any ACTIVE *seeded* race qualifies (spec §5.6). The old
+          // seed.kind === "DAILY_10K" pin 403'd users whose only active seeded
+          // race was some other challenge.
+          assert.deepEqual(args.where.race.seedId, { not: null });
+          assert.equal(args.where.race.seed, undefined);
           return membership;
         },
       },

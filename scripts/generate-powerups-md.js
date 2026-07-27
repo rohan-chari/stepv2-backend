@@ -92,9 +92,18 @@ function generateSection(config) {
       .map(titleCase)
       .join(", ")}.`
   );
+  const teamOnly = config.teamOnlyTypes || [];
+  if (teamOnly.length > 0) {
+    lines.push("");
+    lines.push(
+      `Team races only (droppable, but a solo race never rolls them): ${teamOnly
+        .map(titleCase)
+        .join(", ")}.`
+    );
+  }
   lines.push("");
   lines.push(
-    `Of those, barred from the **daily reward box** too: ${(
+    `Barred from the **daily reward box**: ${(
       config.dailyBoxExcludedTypes || []
     )
       .map(titleCase)

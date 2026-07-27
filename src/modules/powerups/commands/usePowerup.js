@@ -42,15 +42,6 @@ const {
 const {
   evaluateHighMultiplierAlert,
 } = require("../../races/services/highMultiplierAlert");
-// Turtle "Shell" (docs/turtle-character-requirements.md §5.2). Rolled at every
-// site that consults a COMPRESSION_SOCKS shield, AFTER Mirror/Decoy and
-// IMMEDIATELY BEFORE the shield lookup, so a successful bounce leaves the
-// defender's paid shield banked. Self-gating: returns false unless
-// CHARACTER_POWERS_ENABLED is on, TURTLE_SHELL_DISABLED is off, the defender is
-// a turtle, and the attack's TYPE is in the in-race mystery-box drop pool.
-const {
-  shellBlocksAttack: defaultShellBlocksAttack,
-} = require("../../races/services/characterPowers");
 // The SAME team-total summation the board (getRaceProgress -> teams block) uses,
 // so Uprising's losing-team gate can never disagree with the standings the
 // player is looking at (2026-07-25 §3).
@@ -445,7 +436,6 @@ async function applyMysteryPotion(ctx) {
     userId, raceId, powerupId, myParticipant, myDisplayName,
     acceptedParticipants, isEnemy, isAliveTarget, effectModel, participantModel,
     eventModel, events, awardCoins, random, now, currentTime, finalize,
-    shellBlocksAttack = defaultShellBlocksAttack, shellRandom = () => Math.random(),
   } = ctx;
 
   const config = (() => {
@@ -532,6 +522,8 @@ async function applyMysteryPotion(ctx) {
       break;
     }
     case "LEG_CRAMP_SELF": {
+      // Item 14 — the self-cramp potion outcome had no stacking check at all.
+      await clearActiveLegCramps(effectModel, myParticipant.id);
       const effect = await createOnSelf("LEG_CRAMP", { expiresAt: new Date(currentTime.getTime() + 2 * 60 * 60 * 1000), meta: { stepsAtFreezeStart: myParticipant.totalSteps } });
       result.rolled = "LEG_CRAMP_SELF"; result.effect = effect;
       await eventModel.create({ raceId, actorUserId: userId, eventType: "POWERUP_USED", powerupType: "MYSTERY_POTION",
@@ -552,7 +544,6 @@ async function applyMysteryPotion(ctx) {
         rolled, aliveEnemies, acceptedParticipants, isAliveTarget, isTeamRace,
         userId, myParticipant, myDisplayName, effectModel, participantModel,
         eventModel, events, random, now, currentTime, raceId, powerupId, result,
-        shellBlocksAttack, shellRandom,
       });
       if (!handled) { await applyProteinFallback(rolled); }
       break;
@@ -571,12 +562,46 @@ async function applyMysteryPotion(ctx) {
 // is INVALID (stacking rejection / no eligible enemy) so the caller falls back to
 // PROTEIN_SHAKE; returns true once the outcome is resolved (applied, blocked,
 // reflected, or redirected).
+// Item 14 (batch 2026-07-26) — Leg Cramp REPLACES, it never stacks.
+//
+// The pre-check at the top of usePowerup only validated the ORIGINAL target, so
+// a Mirror reflect (and the Decoy-redirect Mirror branch, and the LEG_CRAMP_SELF
+// potion outcome) could land a SECOND ACTIVE row on someone already cramped —
+// and the scorers sum both rows, so overlapping windows double-froze.
+//
+// Expire every ACTIVE Leg Cramp on the participant immediately before writing
+// the new one, so the caller's create() always leaves exactly one row, running
+// for the FULL duration from the moment of application (reset, not union-extend
+// and not a second row). QUICKSAND is deliberately untouched: it is the same
+// mutually exclusive freeze family and has its own TARGET_ALREADY_FROZEN guard.
+async function clearActiveLegCramps(effectModel, targetParticipantId) {
+  if (!targetParticipantId) return;
+  if (typeof effectModel.findActiveByTypeForParticipants === "function") {
+    const rows = await effectModel.findActiveByTypeForParticipants(
+      [targetParticipantId],
+      "LEG_CRAMP"
+    );
+    for (const row of rows || []) {
+      await effectModel.update(row.id, { status: "EXPIRED" });
+    }
+    return;
+  }
+  // Minimal test fakes only expose the single-row lookup; drain it.
+  for (let guard = 0; guard < 10; guard++) {
+    const row = await effectModel.findActiveByTypeForParticipant(
+      targetParticipantId,
+      "LEG_CRAMP"
+    );
+    if (!row) return;
+    await effectModel.update(row.id, { status: "EXPIRED" });
+  }
+}
+
 async function applyPotionEnemyAttack(a) {
   const {
     rolled, aliveEnemies, acceptedParticipants, isAliveTarget, isTeamRace,
     userId, myParticipant, myDisplayName, effectModel, participantModel,
     eventModel, events, random, now, currentTime, raceId, powerupId, result,
-    shellBlocksAttack = defaultShellBlocksAttack, shellRandom = () => Math.random(),
   } = a;
   if (aliveEnemies.length === 0) return false;
   let victim = aliveEnemies[Math.floor(random() * aliveEnemies.length)];
@@ -617,23 +642,6 @@ async function applyPotionEnemyAttack(a) {
       result.redirected = true; result.redirectedBy = "DECOY"; result.redirectedToUserId = redirect.userId;
       result.outcome = "REDIRECTED";
     }
-    // Turtle Shell on the (possibly redirected) victim, immediately before the
-    // socks lookup. §5.1: the test is applied to the ROLLED type, not to the
-    // potion wrapper — a potion that rolls a Leg Cramp IS Shell-blockable even
-    // though MYSTERY_POTION itself is store-exclusive. Mirrors this site's own
-    // socks branch exactly (no feed row: every Mystery Potion feed line is
-    // written as a MYSTERY_POTION event, and a blocked roll writes none).
-    if (
-      shellBlocksAttack({
-        targetUser: targetParticipant.user,
-        powerupType: rolled,
-        random: shellRandom,
-      })
-    ) {
-      result.rolled = rolled; result.blocked = true; result.blockedBy = "SHELL";
-      result.outcome = result.outcome === "REDIRECTED" ? "REDIRECTED" : "BLOCKED";
-      return true;
-    }
     // Socks on the (possibly redirected) victim.
     const socks = await effectModel.findActiveByTypeForParticipant(targetParticipant.id, "COMPRESSION_SOCKS");
     if (socks) {
@@ -666,10 +674,11 @@ async function applyPotionEnemyAttack(a) {
       targetUserId: resolvedTargetUserId,
       description: `${sourceName}'s Mystery Potion took a Shortcut, stealing ${stolen.toLocaleString()} steps from ${targetName}!`, metadata: { rolled } });
   } else if (rolled === "LEG_CRAMP") {
-    // On reflect, the caster may already hold a cramp — guard to avoid a throw;
-    // if so, treat as resolved (no double-cramp).
-    const existing = await effectModel.findActiveByTypeForParticipant(targetParticipant.id, "LEG_CRAMP");
-    if (!existing) {
+    // Item 14 — on reflect the caster may already hold a cramp. This used to
+    // silently do nothing (the reflect was swallowed); it now RESETS to the full
+    // duration, matching the main Leg Cramp path.
+    await clearActiveLegCramps(effectModel, targetParticipant.id);
+    {
       const effect = await effectModel.create({
         raceId, targetParticipantId: targetParticipant.id, targetUserId: resolvedTargetUserId,
         sourceUserId, powerupId, type: "LEG_CRAMP", startsAt: currentTime,
@@ -759,15 +768,6 @@ function buildUsePowerup(dependencies = {}) {
   // Imposter kill switch (Item 3). Injectable for tests; defaults to the env
   // reader (enabled unless IMPOSTER_ENABLED="false").
   const imposterEnabled = dependencies.imposterEnabled || defaultImposterEnabled;
-  // Turtle Shell roll (§5.2). Injectable for tests; the default reads its own
-  // env gates and the balance-config drop pool at call time.
-  const shellBlocksAttack = dependencies.shellBlocksAttack || defaultShellBlocksAttack;
-  // The Shell's RNG. Honors an injected `dependencies.random` exactly like every
-  // other roll here, but when none is injected it resolves Math.random at CALL
-  // time (the module-level `random` above binds it once at build time, which a
-  // through-the-HTTP-boundary test cannot control).
-  const shellRandom = dependencies.random || (() => Math.random());
-
   const usePowerupCore = async function usePowerup({
     userId,
     raceId,
@@ -1024,16 +1024,6 @@ function buildUsePowerup(dependencies = {}) {
           if (existingFreeze) {
             throw new PowerupUseError("A selected target is already frozen", 400, "TARGET_ALREADY_FROZEN");
           }
-          // Turtle Shell, immediately before the shield lookup. The locked
-          // participant rows carry no `user`, so the equipped character comes
-          // from the outer (already-loaded) accepted set. QUICKSAND is not in
-          // the drop pool, so this never fires today — wired for correctness if
-          // the pool ever moves (§4 D5).
-          const victimUser = acceptedParticipants.find((p) => p.userId === victim.userId)?.user;
-          if (shellBlocksAttack({ targetUser: victimUser, powerupType: type, random: shellRandom })) {
-            results.push({ targetUserId: victim.userId, outcome: "BLOCKED", expiresAt: null });
-            continue;
-          }
           const shield = await tx.raceActiveEffect.findFirst({
             where: { targetParticipantId: victim.id, type: "COMPRESSION_SOCKS", status: "ACTIVE" },
             orderBy: { createdAt: "asc" },
@@ -1267,27 +1257,6 @@ function buildUsePowerup(dependencies = {}) {
           (e) => e.type === "POWER_OUTAGE" && e.expiresAt && new Date(e.expiresAt) > now()
         );
         if (alreadyJammed) continue;
-        // Turtle Shell, immediately before the shield lookup. POWER_OUTAGE is
-        // store-exclusive so this never fires today (§4 D5); wired anyway.
-        if (shellBlocksAttack({ targetUser: victim.user, powerupType: type, random: shellRandom })) {
-          blockedCount += 1;
-          await eventModel.create({
-            raceId,
-            actorUserId: victim.userId,
-            eventType: "POWERUP_BLOCKED",
-            powerupType: type,
-            targetUserId: userId,
-            description: `${victim.user?.displayName || "A runner"}'s Shell bounced off ${myDisplayName}'s ${POWERUP_NAMES[type]}!`,
-          });
-          events.emit("POWERUP_BLOCKED", {
-            raceId,
-            attackerUserId: userId,
-            defenderUserId: victim.userId,
-            blockedType: type,
-            upgradeLevel: 0,
-          });
-          continue;
-        }
         const socks = victimEffects.find((e) => e.type === "COMPRESSION_SOCKS");
         if (socks) {
           await effectModel.update(socks.id, { status: "BLOCKED" });
@@ -1364,8 +1333,6 @@ function buildUsePowerup(dependencies = {}) {
         now,
         currentTime: now(),
         finalize: finalizeSelfContainedUse,
-        shellBlocksAttack,
-        shellRandom,
       });
     }
 
@@ -1422,6 +1389,27 @@ function buildUsePowerup(dependencies = {}) {
         throw new PowerupUseError("Leaders are tied — wait until the tie is broken to use Red Card", 400);
       }
       resolvedTargetUserId = leader.userId;
+    }
+
+    // SECOND_WIND's leader rejection, moved here from inside the effect switch.
+    // Every other rejection in this file deliberately runs before the coin
+    // deduction / mark-USED preamble so a rejected player keeps their item;
+    // this one was the exception, sitting after the coin deduct. It never cost
+    // anyone an item in practice (mark-USED happens after the switch, and
+    // SECOND_WIND is not upgradeable so costCoins is always 0), but it was one
+    // upgrade-ladder edit away from charging coins for a refused action.
+    // Message and status are byte-identical to the old throw — client-side error
+    // handling is unchanged.
+    if (type === "SECOND_WIND") {
+      const swEligible = acceptedParticipants.filter((p) => !p.finishedAt);
+      const swSorted = [...swEligible].sort((a, b) => b.totalSteps - a.totalSteps);
+      const swLeader = swSorted[0];
+      if (
+        swLeader &&
+        (swLeader.userId === userId || swLeader.totalSteps === myParticipant.totalSteps)
+      ) {
+        throw new PowerupUseError("You cannot use Second Wind while you are in the lead", 400);
+      }
     }
 
     if (type === "PINECONE_TOSS") {
@@ -2100,64 +2088,6 @@ function buildUsePowerup(dependencies = {}) {
     // the `!reflected` guard is also what keeps us from checking the attacker's
     // own shields here.
     if (!reflected && OFFENSIVE_TYPES.includes(type) && targetParticipant) {
-      // Turtle Shell (§5.2/§5.3). Rolled here — after Mirror and Decoy, before
-      // the shield lookup — so a bounce does NOT consume the target's socks.
-      // The attacker's upgrade coins are still forfeit, exactly like a socks
-      // block. No effect row is created, so live display and settlement agree
-      // for free: a blocked attack simply never existed.
-      if (
-        shellBlocksAttack({
-          targetUser: targetParticipant.user,
-          powerupType: type,
-          random: shellRandom,
-        })
-      ) {
-        await powerupModel.update(powerupId, {
-          status: "USED",
-          usedAt: now(),
-          targetUserId: resolvedTargetUserId,
-          upgradeLevel,
-        });
-
-        await eventModel.create({
-          raceId,
-          actorUserId: resolvedTargetUserId,
-          eventType: "POWERUP_BLOCKED",
-          powerupType: type,
-          targetUserId: userId,
-          description: `${targetDisplayName}'s Shell bounced off ${myDisplayName}'s ${levelPrefix(upgradeLevel)}${POWERUP_NAMES[type]}!`,
-        });
-
-        if (upgradeLevel > 0) {
-          await upgradeEventModel.create({
-            raceId,
-            userId,
-            powerupId,
-            powerupType: type,
-            tier: upgradeLevel,
-            costCoins,
-            status: "BLOCKED",
-            targetUserId: resolvedTargetUserId,
-          });
-        }
-
-        events.emit("POWERUP_BLOCKED", {
-          raceId,
-          attackerUserId: userId,
-          defenderUserId: resolvedTargetUserId,
-          blockedType: type,
-          upgradeLevel,
-        });
-
-        return {
-          blocked: true,
-          blockedBy: "SHELL",
-          outcome: "BLOCKED",
-          upgradeLevel,
-          coinsSpent: costCoins,
-        };
-      }
-
       const shield = await effectModel.findActiveByTypeForParticipant(
         targetParticipant.id,
         "COMPRESSION_SOCKS"
@@ -2225,51 +2155,6 @@ function buildUsePowerup(dependencies = {}) {
     // non-upgradeable, so upgradeLevel is 0 and no coins were spent — nothing to
     // forfeit and no upgrade event to write.
     if (type === "IMPOSTER" && imposterTargetParticipant) {
-      // Turtle Shell, same position as everywhere else: immediately before the
-      // shield lookup. IMPOSTER is store-exclusive, so `shellBlocksAttack`
-      // returns false for it today (§4 D3) — the call is wired anyway so the
-      // rule stays correct if the drop pool ever moves. Imposter is
-      // non-upgradeable: no coins spent, no upgrade event to write.
-      if (
-        shellBlocksAttack({
-          targetUser: imposterTargetParticipant.user,
-          powerupType: type,
-          random: shellRandom,
-        })
-      ) {
-        await powerupModel.update(powerupId, {
-          status: "USED",
-          usedAt: now(),
-          targetUserId: resolvedTargetUserId,
-          upgradeLevel,
-        });
-
-        await eventModel.create({
-          raceId,
-          actorUserId: resolvedTargetUserId,
-          eventType: "POWERUP_BLOCKED",
-          powerupType: type,
-          targetUserId: userId,
-          description: `${targetDisplayName}'s Shell bounced off ${myDisplayName}'s ${POWERUP_NAMES[type]}!`,
-        });
-
-        events.emit("POWERUP_BLOCKED", {
-          raceId,
-          attackerUserId: userId,
-          defenderUserId: resolvedTargetUserId,
-          blockedType: type,
-          upgradeLevel,
-        });
-
-        return {
-          blocked: true,
-          blockedBy: "SHELL",
-          outcome: "BLOCKED",
-          upgradeLevel,
-          coinsSpent: costCoins,
-        };
-      }
-
       const shield = await effectModel.findActiveByTypeForParticipant(
         imposterTargetParticipant.id,
         "COMPRESSION_SOCKS"
@@ -2330,6 +2215,11 @@ function buildUsePowerup(dependencies = {}) {
 
     switch (type) {
       case "LEG_CRAMP": {
+        // Item 14 — reset, never stack. On a Mirror/Decoy reflect
+        // targetParticipant has already been swapped to the original attacker,
+        // who may well be cramped already; the top-of-function pre-check never
+        // saw them.
+        await clearActiveLegCramps(effectModel, targetParticipant.id);
         const effect = await effectModel.create({
           raceId,
           targetParticipantId: targetParticipant.id,
@@ -2727,28 +2617,6 @@ function buildUsePowerup(dependencies = {}) {
             continue;
           }
 
-          // Turtle Shell, immediately before the shield lookup. RAINSTORM is
-          // store-exclusive so this never fires today (§4 D5); wired anyway.
-          if (shellBlocksAttack({ targetUser: victim.user, powerupType: type, random: shellRandom })) {
-            blockedNames.push(victimName);
-            await eventModel.create({
-              raceId,
-              actorUserId: victim.userId,
-              eventType: "POWERUP_BLOCKED",
-              powerupType: type,
-              targetUserId: userId,
-              description: `${victimName}'s Shell bounced off ${myDisplayName}'s ${POWERUP_NAMES[type]}!`,
-            });
-            events.emit("POWERUP_BLOCKED", {
-              raceId,
-              attackerUserId: userId,
-              defenderUserId: victim.userId,
-              blockedType: type,
-              upgradeLevel,
-            });
-            continue;
-          }
-
           const victimShield = await effectModel.findActiveByTypeForParticipant(
             victim.id,
             "COMPRESSION_SOCKS"
@@ -2853,12 +2721,12 @@ function buildUsePowerup(dependencies = {}) {
       }
 
       case "SECOND_WIND": {
+        // The leader rejection now runs pre-flight (see the SECOND_WIND block
+        // above, beside RED_CARD's) so a rejected player provably keeps their
+        // item. Reaching here means the check already passed.
         const eligible = acceptedParticipants.filter((p) => !p.finishedAt);
         const sorted = [...eligible].sort((a, b) => b.totalSteps - a.totalSteps);
         const leader = sorted[0];
-        if (leader.userId === userId || leader.totalSteps === myParticipant.totalSteps) {
-          throw new PowerupUseError("You cannot use Second Wind while you are in the lead", 400);
-        }
         const gap = Math.max(0, leader.totalSteps - myParticipant.totalSteps);
         const bonus = Math.min(SECOND_WIND_MAX, Math.max(SECOND_WIND_MIN, Math.round(gap * SECOND_WIND_FACTOR)));
 

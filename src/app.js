@@ -26,6 +26,7 @@ const { createAppVersionRouter } = require("./routes/appVersion");
 const { createAdsRouter } = require("./modules/economy");
 const { extractTimezone } = require("./middleware/extractTimezone");
 const { extractClientFeatures } = require("./shared/middleware/clientFeatures");
+const { extractReleaseChannel } = require("./shared/middleware/releaseChannel");
 const {
   buildAppleAppSiteAssociation,
   buildAssetLinks,
@@ -82,6 +83,12 @@ function createApp(dependencies = {}) {
   // (races, friends, leaderboard, ranked, home) tailor character data to what
   // the client can render, not just the shop.
   app.use(extractClientFeatures);
+  // Batch 2026-07-26, item 8: stamp req.releaseChannel on EVERY request (it was
+  // previously mounted only on the shop + daily-reward routers), so the race,
+  // home, leaderboard, friends and tournament surfaces can present test-only
+  // characters to TestFlight viewers. Prod is the default for anything that
+  // omits the header, so no shipped binary sees an asset it lacks.
+  app.use(extractReleaseChannel);
 
   app.use("/auth", createAuthRouter(dependencies));
   app.use("/steps", createStepsRouter(dependencies));

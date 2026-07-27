@@ -6,38 +6,7 @@ const {
   serializePayouts,
 } = require("../racePrizePool");
 const { buildTeamsBlockFromParticipants } = require("../teamRaces");
-
-function compareParticipantsForPlacement(left, right) {
-  if (left.finishedAt && right.finishedAt) {
-    const leftPlacement = left.placement ?? Number.MAX_SAFE_INTEGER;
-    const rightPlacement = right.placement ?? Number.MAX_SAFE_INTEGER;
-    if (leftPlacement !== rightPlacement) {
-      return leftPlacement - rightPlacement;
-    }
-
-    const leftFinishedAt = new Date(left.finishedAt).getTime();
-    const rightFinishedAt = new Date(right.finishedAt).getTime();
-    if (leftFinishedAt !== rightFinishedAt) {
-      return leftFinishedAt - rightFinishedAt;
-    }
-  }
-
-  if (left.finishedAt) return -1;
-  if (right.finishedAt) return 1;
-
-  const stepDiff = (right.totalSteps || 0) - (left.totalSteps || 0);
-  if (stepDiff !== 0) {
-    return stepDiff;
-  }
-
-  const leftJoinedAt = left.joinedAt ? new Date(left.joinedAt).getTime() : 0;
-  const rightJoinedAt = right.joinedAt ? new Date(right.joinedAt).getTime() : 0;
-  if (leftJoinedAt !== rightJoinedAt) {
-    return leftJoinedAt - rightJoinedAt;
-  }
-
-  return String(left.userId || "").localeCompare(String(right.userId || ""));
-}
+const { compareParticipantsForPlacement } = require("../placementOrder");
 
 function getActivePlacement(participants, userId) {
   const acceptedParticipants = participants

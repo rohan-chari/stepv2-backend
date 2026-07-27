@@ -57,6 +57,7 @@ function createLeaderboardRouter(dependencies = {}) {
         currentUserId: req.user.id,
         timeZone: req.timeZone,
         supportsCharacters: req.clientFeatures?.has("characters") ?? false,
+        releaseChannel: req.releaseChannel,
       });
       res.json(result);
     } catch (error) {

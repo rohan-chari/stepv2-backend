@@ -62,7 +62,7 @@ function getDateBoundary(period, timeZone) {
   }
 }
 
-async function getUserProfiles(userIds, supportsCharacters = false) {
+async function getUserProfiles(userIds, supportsCharacters = false, releaseChannel = "prod") {
   if (userIds.length === 0) {
     return new Map();
   }
@@ -79,7 +79,8 @@ async function getUserProfiles(userIds, supportsCharacters = false) {
         // {animal, accessories} — naked capy for viewers without `characters`.
         const { animal, accessories } = characterPresentation(
           user,
-          supportsCharacters
+          supportsCharacters,
+          releaseChannel
         );
         return {
           displayName: user.displayName || "Anonymous",
@@ -104,7 +105,7 @@ async function getCurrentUserProfile(currentUserId) {
   };
 }
 
-async function getStepLeaderboard(period, currentUserId, timeZone, scope = "global", supportsCharacters = false) {
+async function getStepLeaderboard(period, currentUserId, timeZone, scope = "global", supportsCharacters = false, releaseChannel = "prod") {
   const dateBoundary = getDateBoundary(period, timeZone);
   const dateClause = dateBoundary
     ? { date: { gte: new Date(dateBoundary) } }
@@ -138,7 +139,8 @@ async function getStepLeaderboard(period, currentUserId, timeZone, scope = "glob
 
   const userMap = await getUserProfiles(
     top100Groups.map((group) => group.userId),
-    supportsCharacters
+    supportsCharacters,
+    releaseChannel
   );
 
   let prevRank = 0;
@@ -208,7 +210,7 @@ async function getStepLeaderboard(period, currentUserId, timeZone, scope = "glob
   };
 }
 
-async function getRaceLeaderboard(currentUserId, scope = "global", supportsCharacters = false) {
+async function getRaceLeaderboard(currentUserId, scope = "global", supportsCharacters = false, releaseChannel = "prod") {
   // friends scope: restrict to the viewer + accepted friends. global (default)
   // leaves this null so the query is unfiltered, exactly as before.
   const friendsIdSet = await resolveFriendsIdSet(scope, currentUserId);
@@ -249,7 +251,7 @@ async function getRaceLeaderboard(currentUserId, scope = "global", supportsChara
   }
 
   const userIds = [...statsByUserId.keys(), currentUserId];
-  const userMap = await getUserProfiles(userIds, supportsCharacters);
+  const userMap = await getUserProfiles(userIds, supportsCharacters, releaseChannel);
   const currentUserDisplayName =
     userMap.get(currentUserId)?.displayName || "Anonymous";
 
@@ -265,12 +267,12 @@ async function getRaceLeaderboard(currentUserId, scope = "global", supportsChara
   return buildRaceRecordLeaderboard(entries, currentUserId, currentUserDisplayName);
 }
 
-async function getLeaderboard({ type = "steps", period = "today", scope = "global", currentUserId, timeZone, supportsCharacters = false }) {
+async function getLeaderboard({ type = "steps", period = "today", scope = "global", currentUserId, timeZone, supportsCharacters = false, releaseChannel = "prod" }) {
   if (type === "races") {
-    return getRaceLeaderboard(currentUserId, scope, supportsCharacters);
+    return getRaceLeaderboard(currentUserId, scope, supportsCharacters, releaseChannel);
   }
 
-  return getStepLeaderboard(period, currentUserId, timeZone, scope, supportsCharacters);
+  return getStepLeaderboard(period, currentUserId, timeZone, scope, supportsCharacters, releaseChannel);
 }
 
 module.exports = { getLeaderboard };

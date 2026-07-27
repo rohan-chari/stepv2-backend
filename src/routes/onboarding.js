@@ -15,9 +15,17 @@ async function findActiveDailyMembership(prisma, userId) {
       status: "ACCEPTED",
       race: {
         status: "ACTIVE",
-        // Seed activation controls minting future races; it must not revoke a
-        // reward from a Daily race that is already live.
-        seed: { is: { kind: "DAILY_10K" } },
+        // ANY active seeded race qualifies (onboarding revamp §5.6). Pinning
+        // this to seed.kind === "DAILY_10K" meant a signup whose only ACTIVE
+        // seeded race was some other challenge got a 403 on a reward they had
+        // demonstrably earned. Seed activation controls minting FUTURE races; it
+        // must not revoke a reward from a seeded race that is already live.
+        //
+        // Widening this mints more 100-coin grants, but the per-user ceiling
+        // cannot move: this shares one ledger key (reason "tutorial_complete",
+        // refId = userId) with the legacy tutorial reward, and awardCoins is
+        // idempotent on it. A user who does both still gets 100, not 200.
+        seedId: { not: null },
       },
     },
     select: { raceId: true },

@@ -174,13 +174,6 @@ async function calculateCurrentTotal({
   stepSampleModel,
   globalEvents = [],
   now = null,
-  // §3.6 character powers (additive, default no-op so every existing caller is
-  // unchanged): `characterEffects` are Corgi zoomies pseudo-effect rows folded
-  // into the shared scoring; `extraBonusSteps` is the Bara herd bonus added to
-  // the bonusSteps term. Both are supplied only by settlement (raceExpiry) when
-  // CHARACTER_POWERS_ENABLED — never minted as rows, never in box progress.
-  characterEffects = [],
-  extraBonusSteps = 0,
 }) {
   let legCramps = [];
   let runnersHighs = [];
@@ -238,7 +231,6 @@ async function calculateCurrentTotal({
   const allEffects = [
     ...legCramps, ...runnersHighs, ...wrongTurns, ...campfires, ...rainstorms, ...leeches,
     ...uprisings, ...rallyFlags, ...coinFlips, ...ghostPeppers, ...umbrellas,
-    ...(racePowerupsEnabled ? characterEffects : []),
   ];
   const globalContext =
     globalEvents && globalEvents.length > 0 ? { globalEvents, now } : null;
@@ -267,8 +259,7 @@ async function calculateCurrentTotal({
       buffedSteps -
       2 * reversedSteps +
       (globalBoostedSteps || 0) +
-      (racePowerupsEnabled ? participant.bonusSteps || 0 : 0) +
-      (racePowerupsEnabled ? extraBonusSteps || 0 : 0)
+      (racePowerupsEnabled ? participant.bonusSteps || 0 : 0)
   );
 
   // Also expose the wave-5 groups (split coin flips) so settlement's
@@ -280,7 +271,6 @@ async function calculateCurrentTotal({
     const m = Number((e.metadata || {}).multiplier);
     return Number.isFinite(m) && m < 1;
   });
-  const zoomies = (characterEffects || []).filter((e) => e.type === "ZOOMIES");
   return {
     total,
     leechTransfers,
@@ -294,7 +284,6 @@ async function calculateCurrentTotal({
     coinFlipWins,
     coinFlipLoses,
     ghostPeppers,
-    zoomies,
   };
 }
 

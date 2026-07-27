@@ -182,8 +182,12 @@ const POWERUP_COPY_SEED = [
   {
     powerupType: "TRAIL_MINE",
     name: "Trail Mine",
-    description: "Drop a hidden trap at your current step position",
-    shortDescription: "Mine planted",
+    // Item 4 (2026-07-26) — comms fix. The old copy never said the trap sits at
+    // YOUR OWN step count, so a runaway leader would plant one far above the
+    // whole field, nobody would ever cross it, and it read as "broken".
+    description:
+      "Buries a trap at your current step count. It detonates on the first rival whose step total crosses that number — so if you're way out front, nobody may ever reach it.",
+    shortDescription: "Mine planted at your step count",
     upgradeTierLabels: [
       "3% penalty",
       "5% penalty",

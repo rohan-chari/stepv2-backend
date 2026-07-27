@@ -124,6 +124,10 @@ function createAuthRouter(dependencies = {}) {
         dualBoxBannersEnabled: await safeFlag("dualBoxBannersEnabled", false),
         teamRacesEnabled: await safeFlag("teamRacesEnabled", true),
         onboardingV2Enabled: await safeFlag("onboardingV2Enabled", false),
+        // Additive (onboarding revamp §6.1). Ungated by app version: shipped
+        // binaries read named keys and ignore unknown ones, so this cannot
+        // change behavior for anyone until a v3-capable build reads it.
+        onboardingV3Enabled: await safeFlag("onboardingV3Enabled", false),
         ...(stepSampleBucketMinutes !== undefined
           ? { stepSampleBucketMinutes }
           : {}),
@@ -295,15 +299,10 @@ function createAuthRouter(dependencies = {}) {
       // Remote feature flags ride the /auth/me user payload (fetched at launch
       // and on resume). Additive: old clients ignore the key; getFlag never
       // throws (degrades to the flag's declared default).
-      // 2026-07-25 §9 (contract §4.4) — additive mirror of the
-      // CHARACTER_POWERS_ENABLED env kill switch, read PER REQUEST so flipping
-      // it back off hides the home character-power chip with no redeploy and no
-      // app release. Attached HERE (the session-refresh payload the app fetches
-      // at launch and on resume) rather than inside withRuntimeFlags, so the
-      // POST /auth/apple sign-in response shape is untouched. Old clients ignore
-      // the unknown key; an absent key means false.
-      const characterPowersEnabled =
-        process.env.CHARACTER_POWERS_ENABLED === "true";
+      // Character powers were removed. Kept as a hard `false` (rather than
+      // dropped) so a frozen 2.0.x client, which shows the home character-power
+      // chip whenever this is true, reliably hides it against this backend.
+      const characterPowersEnabled = false;
       res.json({
         user: await withRuntimeFlags(
           withAdminFlag(

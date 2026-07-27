@@ -471,7 +471,8 @@ function createRacesRouter(dependencies = {}) {
       const result = await getRaceDetails(
         req.user.id,
         req.params.raceId,
-        req.clientFeatures?.has("characters") ?? false
+        req.clientFeatures?.has("characters") ?? false,
+        req.releaseChannel
       );
       res.json(result);
 
@@ -653,7 +654,8 @@ function createRacesRouter(dependencies = {}) {
         // §9.3: Hitchhike effect entries are only rendered by powerups3 builds.
         req.clientFeatures?.has("powerups3") ?? false,
         req.clientFeatures?.has("powerups4") ?? false,
-        req.clientFeatures?.has("powerups5") ?? false
+        req.clientFeatures?.has("powerups5") ?? false,
+        req.releaseChannel
       );
       res.json({ progress });
     } catch (error) {
@@ -770,6 +772,10 @@ function createRacesRouter(dependencies = {}) {
         raceId: req.params.raceId,
         powerupId: req.params.powerupId,
         displayName: req.user.displayName,
+        // 2026-07-26 §5.6 — the roll's wave-5 compat gate. A frozen binary that
+        // rolled a wave-5 type would be refused at use time (UPDATE_REQUIRED),
+        // i.e. a dead slot in a live race.
+        supportsPowerups5: req.clientFeatures?.has("powerups5") ?? false,
       });
       res.json({ result });
     } catch (error) {
@@ -796,6 +802,9 @@ function createRacesRouter(dependencies = {}) {
         includeQueued: includeQueued === true,
         maxCount: typeof maxCount === "number" ? maxCount : undefined,
         displayName: req.user.displayName,
+        // Same gate as the single-open path above — "Open All" must not be a
+        // way around it.
+        supportsPowerups5: req.clientFeatures?.has("powerups5") ?? false,
       });
       res.json(result);
     } catch (error) {

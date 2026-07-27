@@ -85,12 +85,32 @@ function buildTeamsBlock(race, entries) {
 // stored `totalSteps` is already the value to sum (list/browser/home surfaces
 // read the persisted totals rather than recomputing).
 function buildTeamsBlockFromParticipants(race, participants = []) {
-  return buildTeamsBlock(
+  const accepted = participants.filter((p) => p.status === "ACCEPTED");
+  const block = buildTeamsBlock(
     race,
-    participants
-      .filter((p) => p.status === "ACCEPTED")
-      .map((participant) => ({ participant, totalSteps: participant.totalSteps || 0 }))
+    accepted.map((participant) => ({
+      participant,
+      totalSteps: participant.totalSteps || 0,
+    }))
   );
+  // Item 16 (batch 2026-07-26) — bounded staleness, made VISIBLE.
+  //
+  // These totals are the cheap PERSISTED ones; race detail recomputes live
+  // effect-adjusted totals, so the two legitimately differ until something
+  // writes. Recomputing here would re-introduce the N+1 the perf work removed,
+  // on the hottest screen, against a single shared vCPU — so instead we publish
+  // when the numbers were last written and let the client say "as of N min ago".
+  //
+  // Additive + NULLABLE: null (nothing written yet, or an older row that
+  // predates the column) means the client hides the affordance and renders
+  // exactly as it does today. Frozen clients ignore the key entirely.
+  let asOf = null;
+  for (const p of accepted) {
+    const stamp = p.totalsUpdatedAt ? new Date(p.totalsUpdatedAt) : null;
+    if (stamp && (!asOf || stamp > asOf)) asOf = stamp;
+  }
+  block.asOf = asOf ? asOf.toISOString() : null;
+  return block;
 }
 
 module.exports = {

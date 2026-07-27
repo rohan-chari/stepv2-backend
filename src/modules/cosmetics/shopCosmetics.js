@@ -61,10 +61,11 @@ function buildEquipmentMap(equippedAccessories = []) {
 // getShopCatalog, which is channel-gated separately so testers still see their
 // test items on their own capybara. Requires `testOnly` in the shopItem select
 // on every feeding query (else it reads undefined and never filters).
-function buildAccessoriesList(user) {
+function buildAccessoriesList(user, channel = "prod") {
+  const includeTestOnly = channel === "testflight";
   const equipped = (user?.equippedAccessories || []).filter(
     (accessory) =>
-      !accessory.shopItem?.testOnly &&
+      (includeTestOnly || !accessory.shopItem?.testOnly) &&
       accessory.shopItem?.slot !== CHARACTER_SLOT
   );
   return Object.values(buildEquipmentMap(equipped));
@@ -75,11 +76,20 @@ function buildAccessoriesList(user) {
 // to the accessories array; old clients ignore the extra key. Test-only
 // characters are stripped for the same reason as test-only accessories above
 // (prod clients don't bundle the asset).
-function equippedAnimal(user) {
+// Batch 2026-07-26, item 8: `channel` makes the testOnly strip RELEASE-CHANNEL
+// aware. `corgi_puppy`/`turtle` are testOnly:true, so before this a TestFlight
+// turtle user was served `animal: null` even for THEIR OWN row on every race
+// surface — the reported "I can't see my character in the race track" bug —
+// while the shop and home hero (which are already channel-gated) showed it.
+// "prod" stays the safe default: a shipped binary never receives an assetKey it
+// does not bundle. Callers thread req.releaseChannel; omitting it is unchanged
+// prod behaviour.
+function equippedAnimal(user, channel = "prod") {
+  const includeTestOnly = channel === "testflight";
   const character = (user?.equippedAccessories || []).find(
     (accessory) =>
       accessory.shopItem?.slot === CHARACTER_SLOT &&
-      !accessory.shopItem?.testOnly
+      (includeTestOnly || !accessory.shopItem?.testOnly)
   );
   return character ? character.shopItem.assetKey : null;
 }
@@ -91,12 +101,12 @@ function equippedAnimal(user) {
 // binary either ignores it or lacks the asset) and no accessories (gear is
 // tuned per-animal; drawn on the wrong body it misrepresents the user).
 // Users with no character equipped are presented identically to everyone.
-function characterPresentation(user, supportsCharacters = false) {
-  const animal = equippedAnimal(user);
+function characterPresentation(user, supportsCharacters = false, channel = "prod") {
+  const animal = equippedAnimal(user, channel);
   if (animal && !supportsCharacters) {
     return { animal: null, accessories: [] };
   }
-  return { animal, accessories: buildAccessoriesList(user) };
+  return { animal, accessories: buildAccessoriesList(user, channel) };
 }
 
 module.exports = {

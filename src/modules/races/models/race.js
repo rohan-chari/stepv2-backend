@@ -222,6 +222,9 @@ const Race = {
           userId: true,
           status: true,
           totalSteps: true,
+          // Item 16 (2026-07-26): feeds `teams.asOf` on GET /races. Omitting it
+          // from this select would silently read undefined and always emit null.
+          totalsUpdatedAt: true,
           placement: true,
           finishedAt: true,
           joinedAt: true,
@@ -449,6 +452,12 @@ const Race = {
         teamSize: true,
         teamAName: true,
         teamBName: true,
+        // Batch 2026-07-26 (B-12b): the placement cron must resolve the race's
+        // OWN timezone rather than falling through to UTC. Omitting `timezone`
+        // from this select is the exact trap that made the cron score in UTC
+        // while every live surface scored in the race tz.
+        timezone: true,
+        creator: { select: { timezone: true } },
       },
     });
   },

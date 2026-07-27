@@ -13,6 +13,15 @@ const KNOWN_FLAGS = {
   // New-user Daily-race activation flow. Default OFF so deploying this backend
   // cannot change behavior for either the current binary or a phased rollout.
   onboardingV2Enabled: false,
+  // Onboarding revamp (v3): health-gate rework + degraded "steps not connected"
+  // state, notification ask relocated to first box open, referral-first landing,
+  // rename affordance, and the 5-step tutorial. Read ONLY by builds carrying the
+  // revamp; frozen binaries read named keys off `featureFlags` and ignore
+  // unknown ones, so serving this is inert for every shipped client and needs no
+  // X-App-Version gate. Default OFF so the backend deploy changes nothing —
+  // flip it from the admin screen once the App Store build has rolled out, and
+  // flip it back to roll the whole flow back with no submission.
+  onboardingV3Enabled: false,
   // iOS banner ads (AdBannerSlot / AdInlineCard). The app also needs the
   // ADMOB_BANNER_AD_UNIT_ID dart-define baked into the build; this flag is the
   // remote kill switch layered on top. Default OFF (product decision 2026-07-12:
