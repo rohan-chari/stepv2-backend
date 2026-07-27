@@ -20,6 +20,15 @@ model User {
   profilePhotoUrl               String?              @map("profile_photo_url")
   profilePhotoKey               String?              @map("profile_photo_key")
   profilePhotoPromptDismissedAt DateTime?            @map("profile_photo_prompt_dismissed_at")
+  // Home SETUP section: how many times the "you can rename yourself" chip has
+  // been shown to this ACCOUNT, and when the user retired it. Previously lived
+  // in device-scoped SharedPreferences, which signOut() wipes — so the chip came
+  // back on every sign-out/sign-in cycle. Additive/back-compat: NOT NULL DEFAULT
+  // 0 and nullable timestamp, so old clients (which never read or write these)
+  // are unaffected, and no backfill is performed (every existing row starts
+  // eligible). See docs/home-setup-section-requirements.md §5.
+  renameChipShownCount          Int                  @default(0) @map("rename_chip_shown_count")
+  renameChipDismissedAt         DateTime?            @map("rename_chip_dismissed_at")
   // Deprecated: step goals are no longer part of the product. Kept
   // nullable for back-compat with existing rows. New code must not read
   // or write this field.

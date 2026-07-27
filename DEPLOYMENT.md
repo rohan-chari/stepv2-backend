@@ -175,7 +175,7 @@ in code) per bracket.
 | Env var | Default | Notes |
 |---|---|---|
 | `PRIZE_COIN_UNIT` | `20` | Coins per player-point. |
-| `PRIZE_POOL_MAX_COINS` | `3200` | Per-race ceiling. A 300-player Daily saturates it. |
+| `PRIZE_POOL_MAX_COINS` | `16000` | Per-race ceiling (raised from 3200, batch 2026-07-27 item 7). 16,000 = the formula's max at the 100-player field cap, so it is non-binding for user-created races; a large seeded Daily/Weekly still saturates it, deliberately. |
 
 **Both must be set in the droplet `.env` BEFORE the feature is switched on**, so
 the economy can be dialled down in minutes without an App Store release (the

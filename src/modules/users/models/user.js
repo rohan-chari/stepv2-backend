@@ -1,5 +1,10 @@
 const { prisma } = require("../../../db");
 
+// Ceiling for User.renameChipShownCount. The client only ever needs to compare
+// against maxRenameChipShows (3); the clamp exists so a misbehaving or looping
+// client cannot unbounded-increment a prod column.
+const MAX_RENAME_CHIP_SHOWN_COUNT = 99;
+
 const User = {
   async findById(id) {
     return prisma.user.findUnique({ where: { id } });
@@ -92,6 +97,36 @@ const User = {
     return { dailyRewardRemindersEnabled: user.dailyRewardRemindersEnabled };
   },
 
+  // Home SETUP section — rename-chip nudge state.
+  //
+  // Both writes are expressed as conditional updateMany + re-read rather than a
+  // read-modify-write so two concurrent requests from the same account cannot
+  // race past the clamp or move an existing dismissal timestamp.
+  //
+  // Clamped increment. No-ops (returning the unchanged row) when the user has
+  // already dismissed the chip — it should never have been shown, so don't count
+  // it, and don't error — or when the count has already hit the ceiling.
+  async recordRenameChipShown(id) {
+    await prisma.user.updateMany({
+      where: {
+        id,
+        renameChipDismissedAt: null,
+        renameChipShownCount: { lt: MAX_RENAME_CHIP_SHOWN_COUNT },
+      },
+      data: { renameChipShownCount: { increment: 1 } },
+    });
+    return prisma.user.findUnique({ where: { id } });
+  },
+
+  // Idempotent stamp: a second call leaves the original timestamp in place.
+  async dismissRenameChip(id, dismissedAt = new Date()) {
+    await prisma.user.updateMany({
+      where: { id, renameChipDismissedAt: null },
+      data: { renameChipDismissedAt: dismissedAt },
+    });
+    return prisma.user.findUnique({ where: { id } });
+  },
+
   async findCoins(id) {
     const user = await prisma.user.findUnique({
       where: { id },
@@ -169,4 +204,4 @@ const User = {
   },
 };
 
-module.exports = { User };
+module.exports = { User, MAX_RENAME_CHIP_SHOWN_COUNT };

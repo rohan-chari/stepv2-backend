@@ -1,4 +1,8 @@
 const { prisma } = require("../../../db");
+const {
+  REFERRER_REWARD_COINS,
+  REFEREE_REWARD_COINS,
+} = require("../referralRewards");
 
 // Authed dashboard feed for GET /referrals/me. Lists the caller's signed-up
 // referees with a coarse stage badge plus the coins they've earned. Only
@@ -40,6 +44,12 @@ function buildGetReferralStatus(dependencies = {}) {
       completedCount: friends.filter((f) => f.stage === "completed").length,
       coinsEarned: earned._sum.coins || 0,
       friends,
+      // ADDITIVE (batch 2026-07-27, item 12): the CONFIGURED reward for each
+      // side of a referral — not a total the caller has earned (that is
+      // `coinsEarned`). Sourced from the constants so retuning the economy
+      // changes the app's copy without a release. Old clients ignore them.
+      referrerCoins: REFERRER_REWARD_COINS,
+      refereeCoins: REFEREE_REWARD_COINS,
     };
   };
 }

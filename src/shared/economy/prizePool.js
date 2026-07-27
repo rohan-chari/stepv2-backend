@@ -11,9 +11,17 @@ function coinUnit() {
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 20;
 }
 
+// 16,000 is the exact maximum the formula can produce for a race a USER can
+// create: validateMaxParticipants caps the field at 100, and durationPoints
+// saturates at 8, so 100 x 8 x 20 = 16,000 (batch 2026-07-27, item 7). The
+// ceiling is therefore non-binding for user races and binds only on seeded
+// daily/weekly challenges, whose maxParticipants comes from the seed row and
+// bypasses that validator — that clamp is deliberate (D3), so total minting
+// cannot scale without limit as signups grow. The default matches .env.example
+// so a missing env var cannot silently reinstate the old 3,200 ceiling.
 function poolMax() {
   const parsed = Number(process.env.PRIZE_POOL_MAX_COINS);
-  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : 3200;
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : 16000;
 }
 
 // Duration bands, doubling at 1 / 3 / 7 / 14 days. Monotonic non-decreasing

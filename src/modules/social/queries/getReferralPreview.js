@@ -1,6 +1,9 @@
 const { prisma } = require("../../../db");
 const { normalizeReferralCode } = require("../../../shared/lib/referralCode");
-const { REFEREE_REWARD_COINS } = require("../referralRewards");
+const {
+  REFEREE_REWARD_COINS,
+  REFERRER_REWARD_COINS,
+} = require("../referralRewards");
 
 // Public, UNAUTHENTICATED preview of a referral code, used by the web landing
 // page (GET /r/BARA-xxxx) and the app's tailored-welcome screen
@@ -97,6 +100,12 @@ function buildGetReferralPreview(dependencies = {}) {
       inviterAvatar: referrer.profilePhotoUrl ?? null,
       // What the NEW user earns for finishing their first qualifying race.
       rewardCoins: REFEREE_REWARD_COINS,
+      // ADDITIVE (batch 2026-07-27, item 12): both sides' figures, so invite
+      // copy can state a number that always matches server config. Old clients
+      // ignore the extra keys; a client that sees them absent (older backend)
+      // must fall back to number-free copy, never to a hardcoded guess.
+      referrerCoins: REFERRER_REWARD_COINS,
+      refereeCoins: REFEREE_REWARD_COINS,
       inviterRace,
     };
   };

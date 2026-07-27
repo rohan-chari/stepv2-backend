@@ -22,6 +22,10 @@ const {
   buildDismissProfilePhotoPrompt,
 } = require("./commands/profilePhoto");
 const {
+  buildRecordRenameChipShown,
+  buildDismissRenameChip,
+} = require("./commands/renameChip");
+const {
   deleteUserAccount: defaultDeleteUserAccount,
   DeleteUserAccountError,
 } = require("./commands/deleteUserAccount");
@@ -70,6 +74,11 @@ function createAuthRouter(dependencies = {}) {
   const dismissProfilePhotoPrompt =
     dependencies.dismissProfilePhotoPrompt ||
     buildDismissProfilePhotoPrompt(dependencies);
+  const recordRenameChipShown =
+    dependencies.recordRenameChipShown ||
+    buildRecordRenameChipShown(dependencies);
+  const dismissRenameChip =
+    dependencies.dismissRenameChip || buildDismissRenameChip(dependencies);
   const getIncomingRequestCount = dependencies.getIncomingFriendRequestCount || defaultGetIncomingFriendRequestCount;
   const deleteUserAccount =
     dependencies.deleteUserAccount || defaultDeleteUserAccount;
@@ -547,6 +556,38 @@ function createAuthRouter(dependencies = {}) {
       res.json({ user: await withRuntimeFlags(user, req.headers["x-app-version"]) });
     } catch (error) {
       console.error("Profile photo prompt dismiss error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // POST /auth/me/rename-chip/shown
+  // Body: {} (empty)
+  // Records one impression of the home SETUP rename chip on the ACCOUNT, so the
+  // nudge doesn't restart after a sign-out/sign-in (it used to live in
+  // device-scoped SharedPreferences). Not idempotent by design — the client
+  // guarantees at-most-once per app session — but the count is clamped, and the
+  // increment is a no-op once the chip has been dismissed. Additive: no shipped
+  // app version calls this, and an old client that never does is unaffected.
+  router.post("/me/rename-chip/shown", requireAuth, async (req, res) => {
+    try {
+      const user = await recordRenameChipShown({ userId: req.user.id });
+      res.json({ user: await withRuntimeFlags(user, req.headers["x-app-version"]) });
+    } catch (error) {
+      console.error("Rename chip shown error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // POST /auth/me/rename-chip/dismiss
+  // Body: {} (empty)
+  // Retires the rename chip for this account. Idempotent: a second call returns
+  // the existing timestamp unchanged.
+  router.post("/me/rename-chip/dismiss", requireAuth, async (req, res) => {
+    try {
+      const user = await dismissRenameChip({ userId: req.user.id });
+      res.json({ user: await withRuntimeFlags(user, req.headers["x-app-version"]) });
+    } catch (error) {
+      console.error("Rename chip dismiss error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });
