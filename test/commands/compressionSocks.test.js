@@ -173,15 +173,21 @@ test("Compression Socks emits POWERUP_USED event with correct payload", async ()
   assert.equal(ctx.events[0].payload.raceId, "race-1");
 });
 
-test("Compression Socks creates a feed event", async () => {
+// Inverted 2026-07-27. This used to assert the activation WROTE a feed event.
+// Announcing "X is shielded" tells every rival to hold their attack, or to burn
+// a cheap one to strip the shield, which defeats the item. MIRROR — the other
+// held shield — was already silent for exactly this reason; socks now match.
+// The internal POWERUP_USED event bus emit above is unaffected (it drives no
+// push for socks), and the after-the-fact POWERUP_BLOCKED feed event still
+// fires when an attack is actually blocked — see "Blocking creates a feed event
+// describing the block" below.
+test("Compression Socks activation is silent (writes no feed event)", async () => {
   const ctx = makeDeps();
   const use = buildUsePowerup(ctx.deps);
 
   await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1" });
 
-  assert.equal(ctx.feedEvents.length, 1);
-  assert.equal(ctx.feedEvents[0].eventType, "POWERUP_USED");
-  assert.equal(ctx.feedEvents[0].powerupType, "COMPRESSION_SOCKS");
+  assert.equal(ctx.feedEvents.length, 0);
 });
 
 // ===========================================================================

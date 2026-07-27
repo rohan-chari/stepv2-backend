@@ -2484,13 +2484,15 @@ function buildUsePowerup(dependencies = {}) {
         });
         result.effect = effect;
 
-        await eventModel.create({
-          raceId,
-          actorUserId: userId,
-          eventType: "POWERUP_USED",
-          powerupType: type,
-          description: `${myDisplayName} activated ${levelPrefix(upgradeLevel)}Compression Socks! They're shielded from the next attack.`,
-        });
+        // Socks activation is intentionally SILENT, exactly like MIRROR below:
+        // no POWERUP_USED feed event, so rivals aren't tipped off that a shield
+        // is armed. Announcing it just told everyone to hold their attack (or to
+        // burn a cheap one to strip the shield), which defeats the item. The
+        // shield lives entirely on the RacePowerupEffect row above; the
+        // after-the-fact POWERUP_BLOCKED event still fires when an attack is
+        // actually blocked, and by then both players already know. No push is
+        // sent for socks either (the POWERUP_USED handler allowlists offensive
+        // types and requires a target), so notificationHandlers needs no change.
         break;
       }
 

@@ -406,4 +406,37 @@ describe("compression socks", () => {
       assert.equal((await res.json()).result.blocked, true);
     });
   });
+
+  describe("activation is silent", () => {
+    // Announcing "X is shielded" tells every rival to hold their attack, or to
+    // burn a cheap one to strip the shield. MIRROR — the other held shield — is
+    // already silent for exactly this reason; socks now match. The after-the-
+    // fact POWERUP_BLOCKED event stays: by then both players know.
+    it("writes no POWERUP_USED feed event when the shield goes up", async () => {
+      const alice = await createUser("AliceSilentA");
+      const bob = await createUser("BobSilentAAAA");
+      await makeFriends(alice, bob);
+      const raceId = await createActiveRace(alice, bob);
+
+      const shield = await giveHeldPowerup(raceId, alice.userId, "COMPRESSION_SOCKS", 99911);
+      const useRes = await usePowerup(alice.token, raceId, shield.id);
+      assert.equal(useRes.status, 200);
+
+      // The shield really is armed...
+      const effects = await prisma.raceActiveEffect.findMany({
+        where: { raceId, targetUserId: alice.userId, type: "COMPRESSION_SOCKS" },
+      });
+      assert.equal(effects.length, 1, "the shield effect row must still be written");
+
+      // ...but nobody is told about it, including the caster.
+      for (const viewer of [alice, bob]) {
+        const feedRes = await request(server.baseUrl, "GET", `/races/${raceId}/feed`, { token: viewer.token });
+        const feedBody = await feedRes.json();
+        const socksEvent = feedBody.events.find(
+          (e) => e.powerupType === "COMPRESSION_SOCKS" && e.eventType === "POWERUP_USED"
+        );
+        assert.equal(socksEvent, undefined, "no POWERUP_USED event may announce the shield");
+      }
+    });
+  });
 });
