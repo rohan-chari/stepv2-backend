@@ -82,6 +82,62 @@ const MIGRATIONS = {
 };
 
 // ---------------------------------------------------------------------------
+// Evaluation — what to validate, and what to persist (they are NOT the same)
+// ---------------------------------------------------------------------------
+
+// A stored row may legitimately be a PARTIAL: prod's is schema-v1, written
+// before eleven powerup types existed, and mergeOverDefaults fills the gaps on
+// every read. validateConfig, however, demands a WHOLE config (rarityByType
+// must cover every type), so validating the stored row standalone rejects a row
+// the runtime is perfectly happy with. That is what blocked this script in prod
+// and staging on 2026-07-27 with 11 × "rarityByType is missing <TYPE>".
+//
+// So: validate the MERGED config — the thing the game actually runs on — and
+// persist the PARTIAL, keeping the original design property that today's code
+// defaults are never frozen into the row.
+function evaluateMigration({ storedConfig, migration }) {
+  const {
+    validateConfig,
+    mergeOverDefaults,
+  } = require("../src/modules/economy/balanceConfig");
+
+  const after = migration.apply(storedConfig);
+  const mergedAfter = mergeOverDefaults(after);
+
+  return {
+    after,
+    mergedAfter,
+    storedDiff: diff(storedConfig, after),
+    mergedDiff: diff(mergeOverDefaults(storedConfig), mergedAfter),
+    errors: validateConfig(mergedAfter),
+    lostAdditions: lostDropPoolAdditions(storedConfig, after, mergedAfter),
+  };
+}
+
+// The defaults-veto trap (docs/team-only-drop-pool-requirements.md §3.2):
+// enforceStoreOnlyExclusion filters the drop pool by the UNION of the stored
+// storeOnlyTypes and the CODE DEFAULTS' list. A migration can therefore add a
+// type to dropPool, validate clean, write a new version — and change nothing at
+// runtime, because the defaults strip it straight back out. Silent no-ops are
+// exactly what this script exists to prevent, so report them and refuse.
+function lostDropPoolAdditions(before, after, mergedAfter) {
+  const beforePool = (before && before.dropPool) || {};
+  const afterPool = (after && after.dropPool) || {};
+  const mergedPool = (mergedAfter && mergedAfter.dropPool) || {};
+  const lost = [];
+
+  for (const [tier, list] of Object.entries(afterPool)) {
+    if (!Array.isArray(list)) continue;
+    const had = new Set(Array.isArray(beforePool[tier]) ? beforePool[tier] : []);
+    const survived = new Set(Array.isArray(mergedPool[tier]) ? mergedPool[tier] : []);
+    for (const type of list) {
+      if (!had.has(type) && !survived.has(type)) lost.push({ tier, type });
+    }
+  }
+  return lost;
+}
+
+// ---------------------------------------------------------------------------
 // Diff
 // ---------------------------------------------------------------------------
 
@@ -194,10 +250,7 @@ async function main() {
 
   // Required AFTER selectDatabase — src/db reads DATABASE_URL at module load.
   const { prisma } = require("../src/db");
-  const {
-    buildBalanceConfig,
-    validateConfig,
-  } = require("../src/modules/economy/balanceConfig");
+  const { buildBalanceConfig } = require("../src/modules/economy/balanceConfig");
   const service = buildBalanceConfig({ prisma });
 
   try {
@@ -210,20 +263,36 @@ async function main() {
     // Migrate the STORED config, not the merged one: writing a merged config back
     // would silently freeze today's code defaults into the row forever.
     const before = row.config;
-    const after = chosen.apply(before);
+    const { after, mergedDiff, errors, lostAdditions } = evaluateMigration({
+      storedConfig: before,
+      migration: chosen,
+    });
 
     console.log(`Active version: v${row.version}`);
-    console.log("Diff:");
+    console.log("Diff (what is written to the stored row):");
     printDiff(diff(before, after));
+    // The stored row is a partial, so the stored diff is not the whole story —
+    // this is what the running game will actually see change.
+    console.log("\nDiff (what the runtime resolves, stored merged over defaults):");
+    printDiff(mergedDiff);
 
-    const errors = validateConfig(after);
     if (errors.length > 0) {
       console.error("\nRESULT IS INVALID — refusing to write:");
       for (const e of errors) console.error(`  ${e.path}: ${e.message}`);
       process.exitCode = 1;
       return;
     }
-    console.log("\nvalidateConfig: OK");
+    if (lostAdditions.length > 0) {
+      console.error(
+        "\nWOULD BE A SILENT NO-OP — refusing to write. These drop-pool additions are"
+      );
+      console.error("vetoed by the code defaults' storeOnlyTypes (§3.2):");
+      for (const l of lostAdditions) console.error(`  dropPool.${l.tier}: ${l.type}`);
+      console.error("Remove the type from defaultConfig().storeOnlyTypes and deploy first.");
+      process.exitCode = 1;
+      return;
+    }
+    console.log("\nvalidateConfig (on the merged config): OK");
 
     if (!opts.apply) {
       console.log("\nDRY RUN — nothing written. Re-run with --apply to save a new version.");
@@ -235,6 +304,11 @@ async function main() {
       note: opts.note || chosen.note,
       createdBy: "scripts/balance-apply.js",
       expectedVersion: row.version,
+      // Validation already ran above, on the MERGED config — the one the game
+      // resolves. saveConfig would re-run it on the partial being persisted and
+      // reject a row the runtime reads happily (11 × "rarityByType is missing").
+      // This skips the duplicate standalone check, not the check itself.
+      skipValidation: true,
       // A pre-existing soft-bound warning must not block an unrelated,
       // reviewed edit; the diff above is what is under review here.
       acknowledgeBoundWarnings: true,
@@ -253,4 +327,11 @@ if (require.main === module) {
   });
 }
 
-module.exports = { MIGRATIONS, teamOnlyRallyFlag, diff, flatten };
+module.exports = {
+  MIGRATIONS,
+  teamOnlyRallyFlag,
+  evaluateMigration,
+  lostDropPoolAdditions,
+  diff,
+  flatten,
+};
