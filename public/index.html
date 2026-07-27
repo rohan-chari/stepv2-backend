@@ -17,324 +17,512 @@
   <meta name="twitter:image" content="https://barastep.com/share-card.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Russo+One&family=Chakra+Petch:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,600;9..40,700;9..40,800&family=Jersey+25&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
   <style>
-    :root {
-      --parchment: #F5E6C8;
-      --parchment-light: #FAF0DC;
-      --parchment-dark: #E0D0B0;
-      --parchment-border: #C0A878;
-      --wood-shadow: #4A2F17;
-      --wood-darker: #6B4423;
-      --wood-dark: #8B5E34;
-      --wood-grain: #A07040;
-      --wood-light: #D4A574;
-      --wood-highlight: #E8C49A;
-      --sky-top: #97CCE8;
-      --sky-bottom: #C0E4F4;
-      --grass: #3DA83D;
-      --grass-dark: #2D8830;
-      --text-dark: #3B2816;
-      --text-mid: #6B5030;
-      --shadow: rgba(74, 47, 23, 0.28);
-      --pill-gold: #E2C66F;
-      --pill-gold-dark: #C39A43;
-      --pill-gold-shadow: #8A672B;
-    }
+/* ===========================================================================
+   Bara web chrome — ported from the Flutter app's design system.
+   Tokens mirror lib/styles.dart (AppPalette.light / AppPalette.night); the
+   component geometry mirrors GameContainer, RetroCard, PillButton,
+   InfoBoardCard and PixelSurfacePainter. Keep this block identical across
+   index.html / privacy.html / support.html — each page is served by its own
+   express sendFile, so there is no shared stylesheet route to link.
+   =========================================================================== */
 
-    * { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+  color-scheme: light;
 
-    body {
-      font-family: 'Chakra Petch', sans-serif;
-      color: var(--text-dark);
-      overflow-x: hidden;
-      min-height: 100vh;
-    }
+  /* Surfaces — AppColors.parchment / parchmentLight / parchmentDark */
+  --surface: #FFFBF5;
+  --surface-2: #F8F2E7;
+  --surface-3: #F3EBDD;
+  --line: #D0C5B4;
 
-    .sky {
-      position: fixed;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background: linear-gradient(180deg, var(--sky-top) 0%, var(--sky-bottom) 60%, #E8F0E0 80%, var(--grass) 95%, var(--grass-dark) 100%);
-      z-index: -2;
-    }
-    .clouds { position: fixed; inset: 0; z-index: -1; overflow: hidden; }
-    .cloud {
-      position: absolute;
-      background: rgba(240, 244, 248, 0.65);
-      border-radius: 50%;
-      filter: blur(20px);
-    }
-    .cloud:nth-child(1) { width: 300px; height: 80px; top: 8%; left: 10%; animation: drift 60s linear infinite; }
-    .cloud:nth-child(2) { width: 250px; height: 60px; top: 15%; left: 55%; animation: drift 80s linear infinite reverse; }
-    .cloud:nth-child(3) { width: 200px; height: 50px; top: 5%; left: 75%; animation: drift 70s linear infinite; }
-    @keyframes drift {
-      from { transform: translateX(-100px); }
-      to { transform: translateX(100px); }
-    }
+  /* Text — textDark / textMid / textLight */
+  --ink: #213128;
+  --muted: #66796F;
+  --cream: #FFFBF5;
+  /* Body copy sits one step below --ink for hierarchy. --muted itself is a
+     4.3:1 label colour — too light to set a privacy policy in. */
+  --body: #3C4F46;
 
-    .content {
-      position: relative;
-      z-index: 1;
-      max-width: 620px;
-      margin: 0 auto;
-      padding: 56px 20px 64px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 24px;
-    }
+  /* Primary green — roofLight / roofMid / roofDark / roofRidge / roofEdge */
+  --sage: #4F8A6A;
+  --sage-deep: #2E5D47;
+  --sage-dark: #213128;
+  --sage-ridge: #77A98B;
+  --sage-edge: #17231C;
 
-    /* Trail sign */
-    .trail-sign { text-align: center; }
-    .trail-sign .board-sign {
-      background: linear-gradient(180deg, var(--wood-light), var(--wood-dark));
-      padding: 18px 44px;
-      border-radius: 8px;
-      box-shadow: 3px 4px 10px var(--shadow), inset 0 1px 0 rgba(255,255,255,0.25);
-      border: 2px solid var(--wood-darker);
-      position: relative;
-    }
-    .trail-sign .board-sign::before,
-    .trail-sign .board-sign::after {
-      content: '';
-      position: absolute;
-      top: 50%;
-      transform: translateY(-50%);
-      width: 10px; height: 10px;
-      background: var(--wood-darker);
-      border-radius: 50%;
-      box-shadow: inset 0 1px 2px rgba(0,0,0,0.4);
-    }
-    .trail-sign .board-sign::before { left: 12px; }
-    .trail-sign .board-sign::after { right: 12px; }
-    .trail-sign h1 {
-      font-family: 'Russo One', sans-serif;
-      font-size: 2.6rem;
-      color: var(--parchment);
-      text-shadow: 2px 2px 0 var(--wood-shadow);
-      letter-spacing: 4px;
-      text-transform: uppercase;
-    }
-    .trail-sign .post {
-      width: 16px;
-      height: 64px;
-      background: linear-gradient(90deg, var(--wood-dark), var(--wood-light), var(--wood-dark));
-      margin: 0 auto;
-      border-radius: 2px;
-      box-shadow: 2px 2px 6px var(--shadow);
-    }
+  /* Pill palettes — PillButtonVariant.primary / .secondary / .accent */
+  --pill-green: #4F8A6A;
+  --pill-green-dark: #2E5D47;
+  --pill-green-shadow: #213128;
+  --pill-gold: #ECC86A;
+  --pill-gold-dark: #D8B54E;
+  --pill-gold-shadow: #9A7A2D;
+  --pill-terra: #D47C52;
+  --pill-terra-dark: #B76442;
+  --pill-terra-shadow: #7F3E26;
 
-    .tagline {
-      font-family: 'Chakra Petch', sans-serif;
-      font-weight: 500;
-      font-size: 1.1rem;
-      color: var(--text-mid);
-      text-align: center;
-      max-width: 420px;
-      line-height: 1.5;
-    }
+  /* Pixel sky bands — skyBand1..7, stepped, never a smooth gradient */
+  --sky-1: #1E9AE8;
+  --sky-2: #25A7ED;
+  --sky-3: #35B5F0;
+  --sky-4: #53C3F2;
+  --sky-5: #73CEF2;
+  --sky-6: #A5DEF0;
+  --sky-7: #DDF2F6;
 
-    /* Bulletin board: outer wood frame + inner parchment */
-    .board {
-      width: 100%;
-      background: linear-gradient(180deg, var(--wood-light) 0%, var(--wood-dark) 100%);
-      border: 2px solid var(--wood-shadow);
-      border-radius: 12px;
-      padding: 6px;
-      box-shadow:
-        0 4px 14px var(--shadow),
-        inset 0 1px 0 rgba(255, 255, 255, 0.18);
-      position: relative;
-    }
-    /* Subtle wood grain lines on the frame */
-    .board::before {
-      content: '';
-      position: absolute;
-      inset: 2px;
-      border-radius: 10px;
-      background-image: repeating-linear-gradient(
-        to bottom,
-        transparent 0 4px,
-        rgba(160, 112, 64, 0.18) 4px 5px
-      );
-      pointer-events: none;
-    }
-    .board-inner {
-      position: relative;
-      background: var(--parchment);
-      background-image:
-        radial-gradient(ellipse at 20% 50%, rgba(200, 170, 110, 0.18) 0%, transparent 70%),
-        radial-gradient(ellipse at 80% 30%, rgba(180, 150, 90, 0.12) 0%, transparent 60%);
-      border: 1px solid var(--parchment-border);
-      border-radius: 8px;
-      overflow: hidden;
-    }
-    .board-inner::before {
-      content: '';
-      position: absolute;
-      top: 0; left: 10px; right: 10px;
-      height: 1px;
-      background: rgba(255, 255, 255, 0.3);
-    }
+  /* Ground — grassBright/Mid/Dark, dirtLight/Mid/Dark */
+  --grass-1: #63C55B;
+  --grass-2: #2FA84A;
+  --grass-3: #23783D;
+  --dirt-1: #C68A4F;
+  --dirt-2: #9F693A;
+  --dirt-3: #6E4428;
 
-    /* Section header row */
-    .section {
-      padding: 14px 16px 10px;
-      font-family: 'Russo One', sans-serif;
-      text-transform: uppercase;
-      letter-spacing: 1.5px;
-      font-size: 0.95rem;
-      color: var(--wood-darker);
-      text-align: center;
-      border-bottom: 1px solid rgba(139, 94, 52, 0.18);
-      background: rgba(139, 94, 52, 0.05);
-    }
-    .section + .row,
-    .section + .row-lv,
-    .section + .row-qa {
-      border-top: none;
-    }
+  /* GameContainer's hard straight-down drop: BoxShadow(0x66000000, (0,4), 0) */
+  --drop: rgba(0, 0, 0, 0.4);
+  /* PixelSurfacePainter: parchmentDark at 32% */
+  --dot: rgba(216, 202, 179, 0.5);
+  --outline: #17231C;
+}
 
-    /* Generic row */
-    .row,
-    .row-lv,
-    .row-qa {
-      padding: 14px 18px;
-      font-size: 1rem;
-      line-height: 1.65;
-      color: var(--text-mid);
-      border-bottom: 1px solid rgba(139, 94, 52, 0.08);
-    }
-    .row:last-child,
-    .row-lv:last-child,
-    .row-qa:last-child { border-bottom: none; }
-    .alt { background: rgba(224, 208, 176, 0.35); }
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
 
-    /* Label-value row */
-    .row-lv {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-    .row-lv .lv-label {
-      flex: 1;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      font-family: 'Chakra Petch', sans-serif;
-      font-weight: 700;
-      color: var(--wood-darker);
-      font-size: 1rem;
-    }
-    .row-lv .lv-value {
-      color: var(--text-mid);
-      font-size: 0.92rem;
-      text-align: right;
-    }
-    .row-icon {
-      font-size: 1.3rem;
-      width: 26px;
-      text-align: center;
-      flex-shrink: 0;
-    }
+    --surface: #1B2A34;
+    --surface-2: #111D27;
+    --surface-3: #243743;
+    --line: #48616A;
 
-    /* Top nav — yellow pill buttons, matches PillButtonVariant.secondary */
-    .top-nav {
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-      justify-content: center;
-    }
-    .pill-btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      font-family: 'Russo One', sans-serif;
-      font-size: 0.82rem;
-      letter-spacing: 1.5px;
-      text-transform: uppercase;
-      color: var(--text-dark);
-      text-decoration: none;
-      padding: 10px 22px;
-      border-radius: 16px;
-      background: linear-gradient(180deg, var(--pill-gold) 0%, var(--pill-gold-dark) 100%);
-      box-shadow: 0 4px 0 var(--pill-gold-shadow);
-      transition: transform 0.08s ease, box-shadow 0.08s ease, filter 0.08s ease;
-      border: none;
-    }
-    .pill-btn:hover { filter: brightness(1.04); }
-    .pill-btn:active {
-      transform: translateY(4px);
-      box-shadow: 0 0 0 var(--pill-gold-shadow);
-    }
+    --ink: #F7F1E7;
+    --muted: #B8C6C8;
+    --cream: #F7F1E7;
+    --body: #C9D6D4;
 
-    @media (max-width: 500px) {
-      .trail-sign h1 { font-size: 2rem; }
-      .trail-sign .board-sign { padding: 14px 30px; }
-      .content { padding: 40px 14px 56px; }
-      .row, .row-lv, .row-qa { padding: 12px 14px; }
-      .row-lv { gap: 10px; }
-      .row-lv .lv-value { font-size: 0.88rem; }
-    }
+    --sage: #315F4D;
+    --sage-deep: #214637;
+    --sage-dark: #142A25;
+    --sage-ridge: #73A58B;
+    --sage-edge: #091817;
 
-    @keyframes fadeUp {
-      from { opacity: 0; transform: translateY(20px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-    .content > * { animation: fadeUp 0.5s ease both; }
-    .content > *:nth-child(1) { animation-delay: 0.05s; }
-    .content > *:nth-child(2) { animation-delay: 0.15s; }
-    .content > *:nth-child(3) { animation-delay: 0.25s; }
-    .content > *:nth-child(4) { animation-delay: 0.35s; }
+    --pill-green: #3F735B;
+    --pill-green-dark: #2C5B47;
+    --pill-green-shadow: #0C1C19;
+    /* Night flips the trail ochre to twilight violet — see the pillGold note
+       in lib/styles.dart. Gold on the night parchment reads as mud. */
+    --pill-gold: #6C5A8F;
+    --pill-gold-dark: #4B3D6B;
+    --pill-gold-shadow: #241D38;
+    --pill-terra: #527486;
+    --pill-terra-dark: #385665;
+    --pill-terra-shadow: #1B303A;
+
+    --sky-1: #06173E;
+    --sky-2: #0A2254;
+    --sky-3: #102F6A;
+    --sky-4: #193D78;
+    --sky-5: #244C86;
+    --sky-6: #315D91;
+    --sky-7: #476D91;
+
+    --grass-1: #617052;
+    --grass-2: #435B45;
+    --grass-3: #29483B;
+    --dirt-1: #69483F;
+    --dirt-2: #523B38;
+    --dirt-3: #34282C;
+
+    --drop: rgba(0, 0, 0, 0.55);
+    --dot: rgba(60, 84, 99, 0.5);
+    --outline: #091817;
+  }
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'DM Sans', system-ui, -apple-system, sans-serif;
+  font-weight: 600;
+  color: var(--ink);
+  background: var(--surface-2);
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+  /* Short pages (the home page) still land the ground on the viewport floor. */
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* --- Backdrop: stepped pixel sky over the scaffold parchment -------------- */
+
+.backdrop { position: fixed; inset: 0; z-index: -1; background: var(--surface-2); }
+.backdrop::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: min(46vh, 380px);
+  background: linear-gradient(
+    180deg,
+    var(--sky-1) 0 14.28%,  var(--sky-2) 14.28% 28.57%,
+    var(--sky-3) 28.57% 42.85%, var(--sky-4) 42.85% 57.14%,
+    var(--sky-5) 57.14% 71.42%, var(--sky-6) 71.42% 85.71%,
+    var(--sky-7) 85.71% 100%
+  );
+}
+
+/* --- Page column ---------------------------------------------------------- */
+
+.page {
+  position: relative;
+  width: 100%;
+  max-width: 660px;
+  margin: 0 auto;
+  padding: 52px 20px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 22px;
+}
+
+/* --- Masthead: PixelText.display (Jersey 25) + PixelText.skyOutline ------- */
+
+.masthead { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+
+.wordmark {
+  display: block;
+  font-family: 'Jersey 25', 'DM Sans', sans-serif;
+  font-size: clamp(64px, 17vw, 108px);
+  line-height: 0.86;
+  color: var(--cream);
+  text-decoration: none;
+  letter-spacing: 0.02em;
+  /* PixelText.skyOutline(3): hard 8-way pixel outline + one soft drop. */
+  text-shadow:
+    -3px -3px 0 var(--outline),  0 -3px 0 var(--outline),  3px -3px 0 var(--outline),
+    -3px  0   0 var(--outline),                            3px  0   0 var(--outline),
+    -3px  3px 0 var(--outline),  0  3px 0 var(--outline),  3px  3px 0 var(--outline),
+    0 4px 6px rgba(0, 0, 0, 0.35);
+}
+.wordmark:focus-visible { outline: 3px solid var(--cream); outline-offset: 6px; border-radius: 4px; }
+
+.masthead .kicker {
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 15px;
+  line-height: 1.3;
+  color: var(--cream);
+  max-width: 30ch;
+  text-shadow: 0 2px 0 var(--outline), 0 3px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* Sub-pages put the page name here instead of the tagline, so it carries the
+   display weight the wordmark hands off to. */
+.masthead .kicker.is-title {
+  font-size: clamp(21px, 5.5vw, 27px);
+  letter-spacing: -0.01em;
+  max-width: none;
+  text-shadow: 0 3px 0 var(--outline), 0 4px 10px rgba(0, 0, 0, 0.32);
+}
+
+.masthead .stamp {
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 800;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink);
+  background: var(--pill-gold);
+  border: 1.5px solid var(--pill-gold-shadow);
+  border-radius: 8px;
+  padding: 7px 14px;
+  box-shadow: 2px 2px 0 var(--pill-gold-shadow);
+}
+
+/* --- Pill nav — PillButton geometry --------------------------------------- */
+
+.pillnav { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 800;
+  font-size: 15px;
+  text-decoration: none;
+  padding: 12px 26px;
+  border-radius: 8px;
+  color: #fff;
+  background: var(--pill-green);
+  border: 2px solid var(--pill-green-dark);
+  box-shadow: 0 4px 0 var(--pill-green-shadow);
+  transition: transform 0.06s ease, box-shadow 0.06s ease;
+}
+.pill:hover { filter: brightness(1.06); }
+.pill:active { transform: translateY(4px); box-shadow: 0 0 0 var(--pill-green-shadow); }
+.pill:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
+
+.pill.is-gold {
+  color: var(--ink);
+  background: var(--pill-gold);
+  border-color: var(--pill-gold-dark);
+  box-shadow: 0 4px 0 var(--pill-gold-shadow);
+}
+@media (prefers-color-scheme: dark) { .pill.is-gold { color: #fff; } }
+.pill.is-gold:active { box-shadow: 0 0 0 var(--pill-gold-shadow); }
+
+.pill.is-terra {
+  background: var(--pill-terra);
+  border-color: var(--pill-terra-dark);
+  box-shadow: 0 4px 0 var(--pill-terra-shadow);
+}
+.pill.is-terra:active { box-shadow: 0 0 0 var(--pill-terra-shadow); }
+
+/* --- Board — GameContainer: 2px frame, 14px radius, hard 4px drop,
+       PixelSurfacePainter dot texture --------------------------------------- */
+
+.board {
+  width: 100%;
+  background-color: var(--surface);
+  /* PixelSurfacePainter: 2px dots on an 18px grid, alternate rows offset 9px */
+  background-image:
+    radial-gradient(circle at 1px 1px, var(--dot) 1px, transparent 1.5px),
+    radial-gradient(circle at 1px 1px, var(--dot) 1px, transparent 1.5px);
+  background-size: 18px 36px, 18px 36px;
+  background-position: 0 0, 9px 18px;
+  border: 2px solid var(--sage-dark);
+  border-radius: 14px;
+  box-shadow: 0 4px 0 var(--drop);
+  overflow: hidden;
+}
+
+/* --- Section header — the InfoBoardCard bar ------------------------------- */
+
+.board-head {
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--cream);
+  background: var(--sage-deep);
+  padding: 11px 20px;
+  border-top: 2px solid var(--sage-dark);
+  border-bottom: 2px solid var(--sage-dark);
+}
+.board > :first-child.board-head { border-top: none; }
+
+/* --- Rows ----------------------------------------------------------------- */
+
+.row {
+  padding: 16px 20px;
+  font-size: 15.5px;
+  line-height: 1.65;
+  color: var(--body);
+  border-bottom: 1px solid var(--line);
+}
+.board > .row:last-child { border-bottom: none; }
+.row.is-alt { background: var(--surface-3); }
+.row p + p { margin-top: 10px; }
+.row strong { color: var(--ink); font-weight: 800; }
+
+.row a { color: var(--sage-deep); font-weight: 800; text-decoration: underline; text-underline-offset: 2px; }
+.row a:hover { color: var(--pill-terra); }
+.row a:focus-visible { outline: 2px solid var(--sage-deep); outline-offset: 2px; border-radius: 2px; }
+@media (prefers-color-scheme: dark) { .row a { color: var(--sage-ridge); } }
+
+/* Label / value row */
+.row.is-pair { display: flex; align-items: flex-start; gap: 18px; }
+.row.is-pair > .k {
+  flex: 0 0 38%;
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 14.5px;
+  line-height: 1.35;
+  color: var(--ink);
+}
+.row.is-pair > .v { flex: 1; font-size: 14.5px; }
+
+/* Question / answer row */
+.row.is-qa > .q {
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--ink);
+  margin-bottom: 5px;
+}
+.row.is-qa > .a { font-size: 14.5px; }
+
+/* --- Callout — InfoBoardCard: accent panel + ArcadeCheckerPainter --------- */
+
+.callout {
+  margin: 16px 20px;
+  padding: 15px 17px;
+  border-radius: 8px;
+  color: var(--cream);
+  background-color: var(--sage-deep);
+  /* ArcadeCheckerPainter fills tiles where (row + col) % 3 == 0 — an 18px
+     tile grid on a period of 3 resolves to 45° bands. */
+  background-image: repeating-linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.05) 0 12.7px,
+    transparent 12.7px 38.2px
+  );
+  border: 2px solid var(--sage-edge);
+  box-shadow: 0 4px 0 var(--drop);
+  font-size: 14.5px;
+  line-height: 1.6;
+  font-weight: 700;
+}
+/* A callout is its own bounded panel, so the row above it shouldn't also draw
+   a divider — that leaves a stranded hairline in the gap. */
+.row:has(+ .callout) { border-bottom: none; }
+
+/* --- Footer: ground bands + the app's own capybara sprite ------------------ */
+
+.trail {
+  width: 100%;
+  margin-top: auto;
+  padding-top: 40px;
+  position: relative;
+  /* Clips the capybara's walk-on and walk-off, not its body. */
+  overflow: hidden;
+}
+
+/* Reserved height so the walking capybara never collides with the footer text. */
+.lane { height: 132px; }
+
+.trail .meta {
+  max-width: 660px;
+  margin: 0 auto;
+  padding: 0 20px 16px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--body);
+}
+.trail .meta a { color: var(--sage-deep); text-decoration: none; }
+.trail .meta a:hover { text-decoration: underline; }
+@media (prefers-color-scheme: dark) { .trail .meta a { color: var(--sage-ridge); } }
+
+.ground {
+  position: relative;
+  height: 156px;
+  /* Flat stepped bands, matching the app's ground strata. */
+  background: linear-gradient(
+    180deg,
+    var(--grass-1) 0 8px,   var(--grass-2) 8px 22px,  var(--grass-3) 22px 34px,
+    var(--dirt-1) 34px 52px, var(--dirt-2) 52px 92px, var(--dirt-3) 92px 100%
+  );
+  border-top: 2px solid var(--sage-edge);
+}
+
+/* 6 frames × 64px on a 384×64 sheet, 80ms/frame — the app's walk cycle. */
+/* The sheet carries 14px of empty frame below the feet (28px at 2x), so the
+   offset below puts the capybara's feet on the grass band, not the dirt. */
+.capy {
+  position: absolute;
+  bottom: 112px;
+  left: 0;
+  width: 128px;
+  height: 128px;
+  background-image: var(--capy-sprite);
+  background-repeat: no-repeat;
+  background-size: 768px 128px;
+  image-rendering: pixelated;
+  animation: capy-walk 0.48s steps(6) infinite, capy-cross 22s linear infinite;
+}
+@keyframes capy-walk { to { background-position-x: -768px; } }
+@keyframes capy-cross {
+  from { transform: translateX(-140px); }
+  to   { transform: translateX(calc(100vw + 20px)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .capy { animation: none; left: 50%; margin-left: -64px; }
+  .page > * { animation: none !important; }
+}
+
+/* --- Load-in ------------------------------------------------------------- */
+
+@keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+.page > * { animation: rise 0.45s ease both; }
+.page > *:nth-child(1) { animation-delay: 0.04s; }
+.page > *:nth-child(2) { animation-delay: 0.12s; }
+.page > *:nth-child(3) { animation-delay: 0.2s; }
+.page > *:nth-child(4) { animation-delay: 0.28s; }
+
+/* --- Responsive ----------------------------------------------------------- */
+
+@media (max-width: 540px) {
+  .page { padding: 36px 14px 0; gap: 18px; }
+  .row { padding: 14px 15px; font-size: 15px; }
+  .board-head { padding: 10px 15px; }
+  .callout { margin: 14px 15px; }
+  .row.is-pair { flex-direction: column; gap: 4px; }
+  .row.is-pair > .k { flex: none; }
+  .lane { height: 74px; }
+  .ground { height: 120px; }
+  .capy { width: 64px; height: 64px; background-size: 384px 64px; bottom: 89px; }
+  @keyframes capy-walk { to { background-position-x: -384px; } }
+  @keyframes capy-cross {
+    from { transform: translateX(-70px); }
+    to   { transform: translateX(calc(100vw + 20px)); }
+  }
+}
+
+/* The app's own capybara walk sheet (assets/images/capybara_walk_right.png),
+   inlined because express serves these pages file-by-file with no static dir. */
+:root { --capy-sprite: url("data:image/png;base64,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"); }
   </style>
 </head>
 <body>
-  <div class="sky"></div>
-  <div class="clouds">
-    <div class="cloud"></div>
-    <div class="cloud"></div>
-    <div class="cloud"></div>
-  </div>
+  <div class="backdrop" aria-hidden="true"></div>
 
-  <div class="content">
-    <div class="trail-sign">
-      <div class="board-sign"><h1>Bara</h1></div>
-      <div class="post"></div>
-    </div>
+  <main class="page">
+    <header class="masthead">
+      <a class="wordmark" href="/">Bara</a>
+      <p class="kicker">Turn your daily steps into weekly hiking challenges with friends.</p>
+    </header>
 
-    <p class="tagline">Turn your daily steps into weekly hiking challenges with friends.</p>
-
-    <div class="top-nav">
-      <a class="pill-btn" href="/support">Support</a>
-      <a class="pill-btn" href="/privacy">Privacy Policy</a>
-    </div>
+    <nav class="pillnav" aria-label="Site">
+      <a class="pill" href="/support">Support</a>
+      <a class="pill is-gold" href="/privacy">Privacy Policy</a>
+    </nav>
 
     <div class="board">
-      <div class="board-inner">
-        <div class="section">The Adventure</div>
-        <div class="row">
-          Bara syncs your daily steps from Apple Health and puts them head-to-head against your friends in weekly challenges. Set stakes, track progress, and see who conquers the trail.
-        </div>
+      <h2 class="board-head">The Adventure</h2>
+      <div class="row">
+        Bara syncs your daily steps from Apple Health and Health Connect, then puts them head-to-head against your friends in weekly challenges. Set stakes, track progress, and see who conquers the trail.
+      </div>
 
-        <div class="section">Features</div>
-        <div class="row-lv">
-          <div class="lv-label">Daily Steps</div>
-          <div class="lv-value">From Apple Health</div>
-        </div>
-        <div class="row-lv alt">
-          <div class="lv-label">Weekly Challenges</div>
-          <div class="lv-value">Head-to-head</div>
-        </div>
-        <div class="row-lv">
-          <div class="lv-label">Friend Matchups</div>
-          <div class="lv-value">Add via display name</div>
-        </div>
-        <div class="row-lv alt">
-          <div class="lv-label">Stakes &amp; Rewards</div>
-          <div class="lv-value">Compete for coins</div>
-        </div>
+      <h2 class="board-head">Features</h2>
+      <div class="row is-pair">
+        <div class="k">Daily steps</div>
+        <div class="v">Read from Apple Health or Health Connect</div>
+      </div>
+      <div class="row is-pair is-alt">
+        <div class="k">Weekly challenges</div>
+        <div class="v">Head-to-head against friends</div>
+      </div>
+      <div class="row is-pair">
+        <div class="k">Friend matchups</div>
+        <div class="v">Add friends by display name</div>
+      </div>
+      <div class="row is-pair is-alt">
+        <div class="k">Stakes &amp; rewards</div>
+        <div class="v">Compete for coins</div>
       </div>
     </div>
-  </div>
+  </main>
+
+  <footer class="trail">
+    <p class="meta"><a href="/support">Support</a> · <a href="/privacy">Privacy Policy</a> · support@barastep.com</p>
+    <div class="lane" aria-hidden="true"></div>
+    <div class="ground" aria-hidden="true"></div>
+    <div class="capy" aria-hidden="true"></div>
+  </footer>
 </body>
 </html>
