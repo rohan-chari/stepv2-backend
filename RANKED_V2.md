@@ -58,7 +58,8 @@ Weekly loop (all on the UTC-midnight date axis, matching `Step.date`):
 
 1. `prisma migrate deploy` (additive: `ranked_weeks`, `ranked_cohorts`,
    `ranked_cohort_members`, `users.ranked_tier_v2*`, `shop_items.earn_only`).
-2. `node scripts/cosmetics-apply.js` to seed `ranked_legend_crown`.
+2. Seed `ranked_legend_crown` (historical: this was done via the since-removed
+   `cosmetics-apply.js`; new items are now created via `POST /admin/shop/items`).
 3. Restart the API — `scheduleComputeRankedWeeks` opens the first week within
    one tick and enrolls from the previous 7 days of steps.
 4. The same deploy zeroes legacy season rewards (no separate step).

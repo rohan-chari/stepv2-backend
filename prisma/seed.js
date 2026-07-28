@@ -78,13 +78,11 @@ async function seed() {
   }
   console.log(`Created ${stakesCreated} stakes (${stakes.length - stakesCreated} already existed)`);
 
-  // NOTE: cosmetics are intentionally NOT applied on deploy. The DBs are kept
-  // in sync by the admin editor's peer mirror (mirrorShopItemToPeer), so a
-  // deploy-time applyCosmetics() would clobber live/mirrored tuned values from
-  // data/cosmetics.json. cosmetics.json remains the git source of truth and the
-  // create/seed path — apply it MANUALLY via `npm run cosmetics:apply` when
-  // adding a new item or seeding a fresh DB, and `npm run cosmetics:pull` after
-  // tuning to persist DB values back to git.
+  // NOTE: cosmetics are intentionally NOT seeded here at all. The DB is the
+  // single source of truth: new items are born via POST /admin/shop/items
+  // (which mirrors to the peer DB), edits mirror via mirrorShopItemToPeer, and
+  // drift is reconciled with `npm run cosmetics:sync-peer`. A fresh/local DB
+  // gets its catalog with `npm run cosmetics:clone` (from staging).
 
   // Powerup store catalog (coin-purchasable powerups). Additive + idempotent:
   // upserts by sku so re-seeding never duplicates or disturbs cosmetics. Old app

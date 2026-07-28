@@ -81,12 +81,12 @@ cd /var/www/step-tracker-backend \
   && pm2 restart 3
 ```
 
-`seed.js` seeds challenges, stakes, and the powerup catalog. It **no longer
-applies cosmetics** — deploy-time apply was removed because it clobbered
-live/mirror-tuned `renderMetadata`. Cosmetics are managed out-of-band: the admin
-tuner's peer mirror keeps prod ↔ staging in sync, and `npm run cosmetics:apply`
-(manual) is the create/seed path for a new item or a fresh DB. See
-`DEPLOYMENT.md` → "Adding a new accessory".
+`seed.js` seeds challenges, stakes, and the powerup catalog. It does **not**
+touch cosmetics — the DB is the single source of truth (there is no
+`data/cosmetics.json` anymore). New items are born via `POST /admin/shop/items`,
+edits mirror prod ↔ staging via the admin tuner's peer mirror, drift is
+reconciled with `npm run cosmetics:sync-peer`, and a fresh DB gets its catalog
+with `npm run cosmetics:clone`. See `DEPLOYMENT.md` → "Adding a new accessory".
 
 > **Forward-compat note — unlimited races (`maxParticipants: null`).** The
 > backend now returns `maxParticipants: null` for unlimited races and accepts

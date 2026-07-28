@@ -23,6 +23,7 @@ async function mirrorShopItemToPeer(item) {
     renderMetadata: item.renderMetadata ?? null,
     active: item.active,
     testOnly: item.testOnly,
+    earnOnly: item.earnOnly ?? false,
     bobble: item.bobble ?? false,
     sortOrder: item.sortOrder,
   };

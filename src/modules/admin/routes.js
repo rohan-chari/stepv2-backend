@@ -18,6 +18,9 @@ const STEP_SAMPLE_BUCKET_MINUTES = new Set([5, 10, 15, 30, 60]);
 const RENDER_METADATA_NUMBER_KEYS = ["offsetX", "offsetY", "rotation", "scale"];
 const RENDER_METADATA_RENDER_LAYERS = new Set(["front", "behind"]);
 
+// Mirror of prisma's AccessorySlot enum for request validation.
+const ACCESSORY_SLOTS = new Set(["HEAD", "FACE", "NECK", "BACK", "FEET", "CHARACTER"]);
+
 function sanitizeRenderMetadata(input) {
   if (input == null) return null;
   if (typeof input !== "object" || Array.isArray(input)) {
@@ -203,6 +206,112 @@ function createAdminRouter(dependencies = {}) {
       });
     } catch (error) {
       console.error("Admin shop list error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Create a cosmetic shop item. This is the ONLY birth channel for new
+  // cosmetics now that data/cosmetics.json is gone — the row is created here
+  // and mirrored to the peer DB (matched by sku) so prod and staging get the
+  // item together, then placement is tuned via the Accessory Tuner PATCH below.
+  router.post("/shop/items", async (req, res) => {
+    try {
+      const body = req.body || {};
+      const requireString = (key) => {
+        const value = body[key];
+        if (typeof value !== "string" || value.trim() === "") {
+          const err = new Error(`${key} must be a non-empty string`);
+          err.statusCode = 400;
+          throw err;
+        }
+        return value.trim();
+      };
+      const optionalBoolean = (key, fallback) => {
+        const value = body[key];
+        if (value === undefined || value === null) return fallback;
+        if (typeof value !== "boolean") {
+          const err = new Error(`${key} must be a boolean`);
+          err.statusCode = 400;
+          throw err;
+        }
+        return value;
+      };
+
+      const sku = requireString("sku");
+      const name = requireString("name");
+      const assetKey = requireString("assetKey");
+      const slot = body.slot;
+      if (!ACCESSORY_SLOTS.has(slot)) {
+        return res.status(400).json({
+          error: `slot must be one of ${[...ACCESSORY_SLOTS].join(", ")}`,
+        });
+      }
+      const priceCoins = Number(body.priceCoins);
+      if (!Number.isInteger(priceCoins) || priceCoins < 0) {
+        return res
+          .status(400)
+          .json({ error: "priceCoins must be a non-negative integer" });
+      }
+      if (
+        body.description !== undefined &&
+        body.description !== null &&
+        typeof body.description !== "string"
+      ) {
+        return res.status(400).json({ error: "description must be a string" });
+      }
+      let sortOrder = 0;
+      if (body.sortOrder !== undefined && body.sortOrder !== null) {
+        sortOrder = Number(body.sortOrder);
+        if (!Number.isInteger(sortOrder)) {
+          return res.status(400).json({ error: "sortOrder must be an integer" });
+        }
+      }
+
+      const created = await prisma.shopItem.create({
+        data: {
+          sku,
+          name,
+          description: body.description ?? null,
+          slot,
+          priceCoins,
+          assetKey,
+          renderMetadata:
+            body.renderMetadata === undefined || body.renderMetadata === null
+              ? null
+              : sanitizeRenderMetadata(body.renderMetadata),
+          active: optionalBoolean("active", true),
+          // Default testOnly:true — a brand-new item's PNG isn't bundled in
+          // frozen binaries yet; flip to false only after the carrying App
+          // Store build has rolled out.
+          testOnly: optionalBoolean("testOnly", true),
+          earnOnly: optionalBoolean("earnOnly", false),
+          bobble: optionalBoolean("bobble", false),
+          sortOrder,
+        },
+      });
+
+      // Keep prod and staging in lockstep from birth: mirror the new item to
+      // the peer DB. No-ops safely if PEER_DATABASE_URL is unset.
+      const mirror = await mirrorShopItemToPeer(created);
+      res.status(201).json({
+        item: {
+          ...serializeShopItem(created),
+          active: created.active,
+          testOnly: created.testOnly,
+          earnOnly: created.earnOnly,
+        },
+        mirror,
+      });
+    } catch (error) {
+      if (error.statusCode) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
+      if (error.code === "P2002") {
+        return res
+          .status(409)
+          .json({ error: "A shop item with that sku already exists" });
+      }
+      console.error("Admin create shop item error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });

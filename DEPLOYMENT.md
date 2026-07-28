@@ -289,60 +289,56 @@ An accessory is two halves that deploy on different tracks:
 - **The PNG** lives in the *app* repo (`assets/images/accessories/{assetKey}.png`)
   and is baked into the binary. It only reaches users via a TestFlight/App Store
   build. There is no image upload or CDN.
-- **The catalog row** lives in each environment's `shop_items` table (source of
-  truth in git: `data/cosmetics.json`). Rows are keyed by `sku`.
+- **The catalog row** lives in each environment's `shop_items` table. The DB is
+  the **single source of truth** — there is no `data/cosmetics.json` anymore.
+  Rows are keyed by `sku`, and the two environments stay in lockstep via the
+  peer mirror (`PEER_DATABASE_URL`, set in both droplet `.env`s prod ↔ staging,
+  configured 2026-06-10).
 
 ### Adding a new accessory
 
 1. Drop the PNG into the app repo (`assets/images/accessories/` — picked up by
    the existing pubspec glob; a newly added file needs a full `flutter run`
    restart, not just hot reload).
-2. Add the item to `data/cosmetics.json` with **`testOnly: true`** and rough
-   `renderMetadata`. There is no admin CREATE endpoint — `cosmetics-apply.js`
-   is how new items are born.
-3. Seed staging from your laptop:
+2. Create the catalog row via the admin API (this is how new items are born;
+   `testOnly` defaults to **true**, keep it that way):
    ```bash
-   DATABASE_URL="$(grep '^STAGING_DATABASE_URL=' .env | cut -d= -f2-)" node scripts/cosmetics-apply.js
+   curl -X POST https://staging.steptracker-api.org/admin/shop/items \
+     -H "Authorization: Bearer <admin session token>" -H "Content-Type: application/json" \
+     -d '{"sku":"wizard_hat","name":"Wizard Hat","slot":"HEAD","priceCoins":750,
+          "assetKey":"wizard_hat","renderMetadata":{"scale":1.2}}'
    ```
-4. Run the app locally against staging (`flutter run --dart-define=BACKEND_BASE_URL=https://staging.steptracker-api.org`).
+   The create is mirrored to the peer DB (upsert by sku), so staging and prod
+   get the item together — safe, because `testOnly: true` hides it from App
+   Store clients everywhere (catalog, purchase, equip, other users' avatars).
+   The response includes a `mirror` status; if `mirror.ok` is false, fix the
+   cause and run `npm run cosmetics:sync-peer -- --repair` from that checkout.
+3. Run the app locally against staging (`flutter run --dart-define=BACKEND_BASE_URL=https://staging.steptracker-api.org`).
    Dev builds send `X-Release-Channel: testflight`, so `testOnly` items are
    visible/purchasable. Tune position/rotation/scale in the admin accessory
-   tuner and save.
-5. Saving in the tuner writes the current environment's DB **and mirrors the
-   full item (upsert by sku) to the peer DB** via `PEER_DATABASE_URL`
-   (`src/utils/mirrorShopItem.js`). Both droplet `.env`s have it set
-   (prod ↔ staging, configured 2026-06-10). So tuning against staging also
-   creates/updates the item in prod — safe, because `testOnly: true` hides it
-   from App Store clients everywhere (catalog, purchase, equip, and other
-   users' avatars).
-6. **After tuning, pull the DB back into git** so `cosmetics.json` matches:
-   ```bash
-   DATABASE_URL="$(grep '^STAGING_DATABASE_URL=' .env | cut -d= -f2-)" node scripts/cosmetics-pull.js
-   ```
-   Commit the result.
-7. Ship the PNG in the next TestFlight build (testers see the item immediately).
+   tuner and save — tuner saves also mirror to the peer
+   (`src/modules/cosmetics/mirrorShopItem.js`).
+4. Ship the PNG in the next TestFlight build (testers see the item immediately).
 
 ### Launching to prod
 
 Once the App Store build containing the PNG is approved and broadly adopted,
-flip `testOnly` off in the admin tuner (mirrors to both DBs) and re-run
-`cosmetics-pull.js` to record it. Old binaries without the PNG fall back to a
-placeholder icon (`errorBuilder`) — they don't crash, but they can buy/equip
-something they can't render, so wait out the phased rollout (~a week) before
-flipping unless the placeholder UX is acceptable.
+flip `testOnly` off in the admin tuner (mirrors to both DBs). Old binaries
+without the PNG fall back to a placeholder icon (`errorBuilder`) — they don't
+crash, but they can buy/equip something they can't render, so wait out the
+phased rollout (~a week) before flipping unless the placeholder UX is
+acceptable.
 
-### The footgun
+### Drift / bootstrap tooling
 
-`cosmetics-apply.js` **upserts every field of every item, including
-`renderMetadata`.** If tuner-saved positioning exists only in the DB and not in
-`cosmetics.json`, re-running apply (e.g. to add the next item) silently
-overwrites the tuning. Always run `cosmetics-pull.js` (step 6) after a tuning
-session, before the next `cosmetics-apply.js`.
-
-Note: `cosmetics-apply.js` is **manual only** — it is no longer run on deploy
-(`prisma/seed.js` stopped calling it for exactly this reason), so a normal deploy
-won't clobber tuned values. The footgun is now scoped to *you* re-running apply,
-not to the deploy pipeline.
+- `npm run cosmetics:sync-peer` — read-only diff of this environment's catalog
+  vs the peer (`PEER_DATABASE_URL`); add `-- --repair` to push primary → peer
+  (creates missing skus, updates differing fields, never deletes). Run it from
+  the environment whose catalog you trust. This is the safety net for a failed
+  mirror (the mirror is best-effort and never blocks the primary write).
+- `SOURCE_DATABASE_URL=<staging url> npm run cosmetics:clone` — bootstrap a
+  fresh/local DB's catalog from a live environment. Create-missing semantics:
+  never touches existing rows. Never point `DATABASE_URL` at prod for this.
 
 ---
 
