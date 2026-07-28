@@ -52,8 +52,11 @@ function buildGetPublicTournaments(dependencies = {}) {
         const summary = serializeTournamentSummary(t, userId);
         // Additive field (§ discovery). Old clients ignore it; the backend uses
         // it so "PUBLIC RACES (X)" only counts brackets the viewer could join.
+        // A DECLINED row is a soft-removed leaver — joinTournamentCore lets
+        // them rejoin, so it counts as joinable (matches the user-created
+        // branch's "status !== DECLINED is mine" rule below).
         summary.joinable =
-          summary.myStatus === null &&
+          (summary.myStatus === null || summary.myStatus === "DECLINED") &&
           summary.acceptedCount < summary.bracketSize &&
           !aliveSeedIds.has(t.seedId);
         featured.push(summary);

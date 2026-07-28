@@ -172,4 +172,50 @@ describe("discovery-summary — only joinable featured brackets are counted", ()
       true
     );
   });
+
+  it("counts a featured bracket the viewer joined and then LEFT (soft-removed DECLINED row)", async () => {
+    const viewer = await createUser();
+    const lobby = await seedDash("DISCJOIN_LEFT", 4);
+
+    const join = await request(
+      server.baseUrl,
+      "POST",
+      `/tournaments/${lobby.id}/join`,
+      { token: viewer.token, headers: FEATURES }
+    );
+    assert.ok(join.status === 200 || join.status === 201, `join ${join.status}`);
+
+    // Leaving soft-removes: the participant row survives with status DECLINED.
+    const leave = await request(
+      server.baseUrl,
+      "POST",
+      `/tournaments/${lobby.id}/leave`,
+      { token: viewer.token, headers: FEATURES }
+    );
+    assert.equal(leave.status, 200);
+    const row = await prisma.tournamentParticipant.findFirst({
+      where: { tournamentId: lobby.id, userId: viewer.userId },
+    });
+    assert.equal(row?.status, "DECLINED", "leave keeps a DECLINED row");
+
+    // The viewer can rejoin (joinTournamentCore flips DECLINED back), so the
+    // bracket must be advertised as an available race to join again.
+    const summary = await discovery(viewer.token);
+    assert.equal(summary.resolved.publicRaceCount, true);
+    const card = summary.featuredTournaments.find((t) => t.id === lobby.id);
+    assert.ok(card, "featured bracket still listed");
+    assert.equal(card.joinable, true, "a left bracket is joinable again");
+    assert.equal(
+      summary.publicRaceCount,
+      1,
+      "the left bracket counts as an available race to join"
+    );
+
+    // And the public listing agrees.
+    const listing = await publicTournaments(viewer.token);
+    assert.equal(
+      listing.featured.find((t) => t.id === lobby.id).joinable,
+      true
+    );
+  });
 });
