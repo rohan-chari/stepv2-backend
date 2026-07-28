@@ -2782,7 +2782,14 @@ function buildUsePowerup(dependencies = {}) {
           "LEG_CRAMP"
         );
         if (existingCramp) {
-          await effectModel.update(existingCramp.id, { status: "EXPIRED" });
+          // Truncate expiresAt as well as flipping status (same as CLEANSE):
+          // step resolution reads EXPIRED rows and freezes over
+          // [startsAt, expiresAt], so a future expiresAt would keep freezing
+          // the target for the cramp's full original duration.
+          await effectModel.update(existingCramp.id, {
+            status: "EXPIRED",
+            expiresAt: currentTime,
+          });
         }
 
         const effect = await effectModel.create({

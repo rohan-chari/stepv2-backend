@@ -465,6 +465,61 @@ describe("wrong turn", () => {
       assert.equal(res.status, 200);
     });
 
+    it("cancelled leg cramp stops freezing — window truncated, steps after the wrong turn count", async () => {
+      const alice = await createUser("AliceInterCC");
+      const bob = await createUser("BobInterCCCC");
+      await makeFriends(alice, bob);
+      const raceId = await createActiveRace(alice, bob);
+
+      const cramp = await giveHeldPowerup(raceId, alice.userId, "LEG_CRAMP", 99901);
+      await usePowerup(alice.token, raceId, cramp.id, bob.userId);
+      const crampEffect = await prisma.raceActiveEffect.findFirst({
+        where: { raceId, type: "LEG_CRAMP" },
+      });
+
+      const wt = await giveHeldPowerup(raceId, alice.userId, "WRONG_TURN", 99902);
+      await usePowerup(alice.token, raceId, wt.id, bob.userId);
+
+      // Scoring reads EXPIRED rows too and freezes over [startsAt, expiresAt],
+      // so the cancel must close the window, not just flip status.
+      const cancelledCramp = await prisma.raceActiveEffect.findFirst({
+        where: { id: crampEffect.id },
+      });
+      assert.ok(
+        cancelledCramp.expiresAt.getTime() <= Date.now(),
+        "cancelled cramp's expiresAt must be truncated to the cancel moment"
+      );
+
+      // Rewind the story 70 minutes: cramp cast + cancelled 70min ago, wrong
+      // turn ran 70→40min ago. Bob then walks 30min ago → now, after both.
+      const shiftMs = 70 * 60 * 1000;
+      await prisma.raceActiveEffect.update({
+        where: { id: cancelledCramp.id },
+        data: {
+          startsAt: new Date(cancelledCramp.startsAt.getTime() - shiftMs),
+          expiresAt: new Date(cancelledCramp.expiresAt.getTime() - shiftMs),
+        },
+      });
+      const wtEffect = await prisma.raceActiveEffect.findFirst({
+        where: { raceId, type: "WRONG_TURN" },
+      });
+      await prisma.raceActiveEffect.update({
+        where: { id: wtEffect.id },
+        data: { startsAt: minutesAgo(70), expiresAt: minutesAgo(40), status: "EXPIRED" },
+      });
+
+      await recordSamples(bob.token, [
+        { periodStart: minutesAgo(30).toISOString(), periodEnd: new Date().toISOString(), steps: 1000 },
+      ]);
+
+      const progress = await getProgress(alice.token, raceId);
+      const bobP = findUser(progress, bob.userId);
+      // With the stale-window bug the cancelled cramp still freezes these
+      // steps (total 0) and reports a frozen multiplier with no visible effect.
+      assert.equal(bobP.totalSteps, 1000, "steps after both effects ended must count in full");
+      assert.equal(bobP.currentMultiplier, 1, "no phantom frozen multiplier after cancellation");
+    });
+
     it("wrong turn during runners high — overlapping steps reversed not buffed", async () => {
       const alice = await createUser("AliceInterBB");
       const bob = await createUser("BobInterBBBB");
