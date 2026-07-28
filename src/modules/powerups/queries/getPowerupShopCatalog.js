@@ -2,13 +2,7 @@ const { User } = require("../../users");
 const { PowerupShopItem } = require("../models/powerupShopItem");
 const { UserPowerupItem } = require("../models/userPowerupItem");
 const { PowerupCopy } = require("../models/powerupCopy");
-const {
-  POWERUPS2_GATED_TYPES,
-  POWERUPS3_GATED_TYPES,
-  POWERUPS4_GATED_TYPES,
-  POWERUPS5_GATED_TYPES,
-  isImposterDisabledForCatalog,
-} = require("../constants/powerupGating");
+const { isPowerupVisibleToClient } = require("../constants/powerupGating");
 const { categoryForPowerup } = require("../constants/powerupCategories");
 const { balanceConfig } = require("../../economy/balanceConfig");
 const {
@@ -72,34 +66,20 @@ function buildGetPowerupShopCatalog(deps = {}) {
       rarityByType = BALANCE_DEFAULT_CONFIG.rarityByType;
     }
 
-    // Layered gating (all additive — every other powerup is returned to all
-    // clients):
-    //   * IMPOSTER is DISABLED going forward: filtered out unconditionally so no
-    //     app version — old or new — is offered it anymore (Item 3). Held/owned
-    //     copies are untouched; re-enable is a single env flip (IMPOSTER_ENABLED).
-    //   * Signal Jammer is gated behind the `jammer` client-feature: old binaries
-    //     that don't advertise it never see it (they can't render/target it).
-    //   * Leech + X-Ray (DEFENSE_SCAN) are gated behind the `powerups2` feature:
-    //     old binaries never see them until the carrying app build rolls out.
-    const visibleItems = items.filter((item) => {
-      if (isImposterDisabledForCatalog(item.powerupType)) return false;
-      if (!supportsJammer && item.powerupType === "SIGNAL_JAMMER") return false;
-      if (!supportsPowerups2 && POWERUPS2_GATED_TYPES.includes(item.powerupType)) {
-        return false;
-      }
-      // Leech (moved from powerups2), Hitchhike and Quick Rinse are gated behind
-      // `powerups3`. This is VISIBILITY only and is independent of the row's
-      // `testOnly` flag, which PowerupShopItem.findActive already applies as a
-      // release-CHANNEL gate — the two gates are deliberately layered (§9.2).
-      if (!supportsPowerups3 && POWERUPS3_GATED_TYPES.includes(item.powerupType)) {
-        return false;
-      }
-      if (!supportsPowerups4 && POWERUPS4_GATED_TYPES.includes(item.powerupType)) return false;
-      // Wave 5 store-only powerups are gated behind `powerups5`. VISIBILITY only,
-      // layered on top of the row's testOnly release-channel gate (§4.1).
-      if (!supportsPowerups5 && POWERUPS5_GATED_TYPES.includes(item.powerupType)) return false;
-      return true;
-    });
+    // Client-feature gating (Imposter kill switch, jammer, powerups2–5) lives
+    // in the shared isPowerupVisibleToClient predicate — the SAME rule the
+    // daily-spin prize pool applies, so the shop and the spinner can never
+    // drift. VISIBILITY only, layered on top of the row's testOnly
+    // release-channel gate which findActive already applied (§9.2).
+    const visibleItems = items.filter((item) =>
+      isPowerupVisibleToClient(item.powerupType, {
+        supportsJammer,
+        supportsPowerups2,
+        supportsPowerups3,
+        supportsPowerups4,
+        supportsPowerups5,
+      })
+    );
 
     return {
       coins: coins ?? 0,

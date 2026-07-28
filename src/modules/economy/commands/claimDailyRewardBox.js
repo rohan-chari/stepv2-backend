@@ -51,6 +51,7 @@ async function claimDailyRewardBox({
   supportsPowerups2 = false,
   supportsPowerups3 = false,
   supportsPowerups4 = false,
+  supportsPowerups5 = false,
   channel = "prod",
 }) {
   if (!isValidLocalDate(localDate)) {
@@ -100,7 +101,7 @@ async function claimDailyRewardBox({
 
   const pool = await getUnownedAccessoryPool(userId);
   const powerupPool = supportsSpinPowerups
-    ? await getEligiblePowerupPool({ channel, supportsJammer, supportsPowerups2, supportsPowerups3, supportsPowerups4, config: balance })
+    ? await getEligiblePowerupPool({ channel, supportsJammer, supportsPowerups2, supportsPowerups3, supportsPowerups4, supportsPowerups5 })
     : [];
   const rarity = rollDailyBoxRarity(
     loginStreak,

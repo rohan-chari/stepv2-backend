@@ -55,6 +55,7 @@ function buildClaimExtraDailyRewardBox(dependencies = {}) {
     supportsPowerups2 = false,
     supportsPowerups3 = false,
     supportsPowerups4 = false,
+    supportsPowerups5 = false,
     channel = "prod",
   }) {
     if (!isValidLocalDate(localDate)) {
@@ -135,7 +136,7 @@ function buildClaimExtraDailyRewardBox(dependencies = {}) {
     const { config: balance } = await balanceConfig.getSnapshot();
     const pool = await getPool(userId);
     const powerupPool = supportsSpinPowerups
-      ? await getPowerupPool({ channel, supportsJammer, supportsPowerups2, supportsPowerups3, supportsPowerups4, config: balance })
+      ? await getPowerupPool({ channel, supportsJammer, supportsPowerups2, supportsPowerups3, supportsPowerups4, supportsPowerups5 })
       : [];
     const rarity = rollDailyBoxRarity(
       streak,

@@ -27,10 +27,9 @@ test("the migration performs exactly the three §5.1 edits", () => {
   assert.deepEqual(after.teamOnlyTypes, ["RALLY_FLAG"]);
   assert.ok(!after.storeOnlyTypes.includes("RALLY_FLAG"));
   assert.ok(after.dropPool.UNCOMMON.includes("RALLY_FLAG"));
-  assert.ok(
-    after.dailyBoxExcludedTypes.includes("RALLY_FLAG"),
-    "the daily box must still never award it"
-  );
+  // (No dailyBoxExcludedTypes write since 2026-07-28 — the key is retired; the
+  // daily spin follows shop visibility, and RALLY_FLAG's shop row is hidden.)
+  assert.ok(!("dailyBoxExcludedTypes" in after), "the retired key must not be (re)created");
 });
 
 test("the migration does not mutate its input", () => {

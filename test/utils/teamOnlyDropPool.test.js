@@ -258,29 +258,16 @@ test("validateConfig ACCEPTS a team-only type that is also in the drop pool", ()
   assert.deepEqual(errors, [], `config must save: ${pathsOf(errors).join(" | ")}`);
 });
 
-test("validateConfig ACCEPTS a daily-box exclusion that is team-only but not store-only", () => {
-  // §5.2 relaxation. Without it the shipped §5.1 config is unsaveable the moment
-  // RALLY_FLAG leaves storeOnlyTypes — the rollout would fail at step 3, after
-  // the deploy.
-  const errors = errorsFor((c) => {
-    c.teamOnlyTypes = ["RALLY_FLAG"];
-    c.storeOnlyTypes = c.storeOnlyTypes.filter((t) => t !== "RALLY_FLAG");
-    c.dropPool.UNCOMMON = [...c.dropPool.UNCOMMON.filter((t) => t !== "RALLY_FLAG"), "RALLY_FLAG"];
-    assert.ok(c.dailyBoxExcludedTypes.includes("RALLY_FLAG"), "fixture: still daily-box excluded");
-  });
-  assert.deepEqual(errors, [], `config must save: ${pathsOf(errors).join(" | ")}`);
-});
+// (Two dailyBoxExcludedTypes validation tests REMOVED 2026-07-28: the key is
+// gone — the daily-spin pool is the shop catalog as the client sees it, so
+// there is no exclusion list left to validate. A stored config still carrying
+// the key is ignored, which the next test's defaults-validity check covers.)
 
-test("validateConfig still rejects a daily-box exclusion that is neither store-only nor team-only", () => {
-  // The relaxation must not become a hole: the rule's intent ("don't silently
-  // bar something that is otherwise freely obtainable") is preserved.
+test("a stored config still carrying dailyBoxExcludedTypes remains valid (key ignored)", () => {
   const errors = errorsFor((c) => {
-    c.dailyBoxExcludedTypes = [...c.dailyBoxExcludedTypes, "PROTEIN_SHAKE"];
+    c.dailyBoxExcludedTypes = ["LEECH", "NOT_EVEN_A_TYPE"];
   });
-  assert.ok(
-    errors.some((e) => e.path === "dailyBoxExcludedTypes" && /PROTEIN_SHAKE/.test(e.message)),
-    `expected the rule to still fire, got ${pathsOf(errors).join(" | ")}`
-  );
+  assert.deepEqual(errors, [], `legacy key must be ignored: ${pathsOf(errors).join(" | ")}`);
 });
 
 test("the shipped defaults are themselves a valid config", () => {
@@ -324,10 +311,8 @@ test("the shipped defaults put RALLY_FLAG in the drop pool and out of storeOnlyT
   assert.ok(!config.storeOnlyTypes.includes("RALLY_FLAG"));
   assert.deepEqual(config.teamOnlyTypes, ["RALLY_FLAG"]);
   assert.ok(config.dropPool.UNCOMMON.includes("RALLY_FLAG"));
-  assert.ok(
-    config.dailyBoxExcludedTypes.includes("RALLY_FLAG"),
-    "the daily spin must still never award it"
-  );
+  // (Daily-spin winnability is no longer configured here: RALLY_FLAG is out of
+  // the spin exactly while its shop row is hidden — active=false in prod.)
   assert.equal(
     config.rarityByType.RALLY_FLAG,
     "UNCOMMON",

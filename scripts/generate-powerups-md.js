@@ -103,11 +103,9 @@ function generateSection(config) {
   }
   lines.push("");
   lines.push(
-    `Barred from the **daily reward box**: ${(
-      config.dailyBoxExcludedTypes || []
-    )
-      .map(titleCase)
-      .join(", ")}. The rest remain winnable as a daily-box RARE prize.`
+    "**Daily reward box** powerup prizes are the shop catalog as the spinning " +
+      "client sees it (active, channel-appropriate, client-feature-gated items) " +
+      "— available in the shop means winnable from the daily spin."
   );
   lines.push("");
 

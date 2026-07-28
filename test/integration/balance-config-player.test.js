@@ -384,13 +384,13 @@ describe("balance config — player-facing (§5.3)", () => {
     }
   });
 
-  // Test #15 (b) — dailyBoxExcludedTypes governs the DAILY box, and is the only
-  // authority doing so (the hardcoded POWERUPS2/3 lists are no longer consulted).
-  //
-  // These are deliberately SEPARATE keys. storeOnlyTypes is the larger set:
-  // Imposter / Rainstorm / Signal Jammer never roll from a mystery box but are
-  // legitimate daily-box prizes — §5.3's own example quotes Signal Jammer odds.
-  it("dailyBoxExcludedTypes is the single authority over the daily-box pool", async () => {
+  // Test #15 (b) — REWRITTEN 2026-07-28 (owner decision): dailyBoxExcludedTypes
+  // is GONE. The daily-box powerup pool is the shop catalog as the client sees
+  // it, so the one and only way to pull a type from the spin is to pull it from
+  // the store (`active=false`, or `testOnly` per channel). storeOnlyTypes still
+  // only governs in-race mystery boxes: Imposter / Rainstorm / Signal Jammer
+  // never roll from a mystery box but stay legitimate daily-box prizes.
+  it("shop visibility is the single authority over the daily-box pool", async () => {
     for (const sku of ["POWERUP_RAINSTORM", "POWERUP_IMPOSTER"]) {
       await prisma.powerupShopItem.upsert({
         where: { sku },
@@ -425,10 +425,11 @@ describe("balance config — player-facing (§5.3)", () => {
       "Rainstorm is store-only but IS a daily-box prize — it must stay winnable"
     );
 
-    // Excluding it in config removes it, with no code change.
-    const config = defaultConfig();
-    config.dailyBoxExcludedTypes = [...config.dailyBoxExcludedTypes, "RAINSTORM"];
-    await activateConfig(config, 2);
+    // Hiding it from the STORE removes it from the spin too — same switch.
+    await prisma.powerupShopItem.update({
+      where: { sku: "POWERUP_RAINSTORM" },
+      data: { active: false },
+    });
     res = await request(
       server.baseUrl,
       "GET",
@@ -437,10 +438,11 @@ describe("balance config — player-facing (§5.3)", () => {
     );
     ({ box } = await res.json());
     types = box.powerupPool.map((p) => p.powerupType);
-    assert.ok(!types.includes("RAINSTORM"), "config must be able to exclude it");
-    // And the four historically-excluded types are still excluded.
+    assert.ok(!types.includes("RAINSTORM"), "hidden from the shop ⟹ gone from the spin");
+    // Capability-gated types stay invisible to a client without their tokens
+    // (this client sent neither powerups2 nor powerups3).
     for (const type of ["DEFENSE_SCAN", "LEECH", "HITCHHIKE", "QUICK_RINSE"]) {
-      assert.ok(!types.includes(type), `${type} must never be a daily-box prize`);
+      assert.ok(!types.includes(type), `${type} must stay hidden from a non-capable client`);
     }
   });
 

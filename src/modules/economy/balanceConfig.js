@@ -205,42 +205,10 @@ function validateConfig(input) {
     }
   }
 
-  const dailyBoxExcluded = Array.isArray(input.dailyBoxExcludedTypes)
-    ? input.dailyBoxExcludedTypes
-    : null;
-  if (!dailyBoxExcluded) {
-    errors.push({
-      path: "dailyBoxExcludedTypes",
-      message: "dailyBoxExcludedTypes must be an array",
-    });
-  } else {
-    for (const type of dailyBoxExcluded) {
-      if (!BALANCE_POWERUP_TYPES.includes(type)) {
-        errors.push({
-          path: "dailyBoxExcludedTypes",
-          message: `${type} is not a valid PowerupType`,
-        });
-      } else if (
-        storeOnly &&
-        !storeOnly.includes(type) &&
-        !(teamOnly && teamOnly.includes(type))
-      ) {
-        // A type barred from the daily box but still purchasable AND freely
-        // droppable is almost always a mistake, and it is cheap to catch here.
-        //
-        // RELAXED 2026-07-26: team-only counts too. The daily box has no race
-        // context, so a team-only type must be excluded from it — and without
-        // this clause the shipped §5.1 config becomes unsaveable the moment
-        // RALLY_FLAG leaves storeOnlyTypes. The rule's intent ("don't silently
-        // bar something that is otherwise freely obtainable") is preserved: a
-        // type that is neither store-only nor team-only still trips it.
-        errors.push({
-          path: "dailyBoxExcludedTypes",
-          message: `${type} is excluded from the daily box but is neither store-only nor team-only`,
-        });
-      }
-    }
-  }
+  // `dailyBoxExcludedTypes` REMOVED 2026-07-28: the daily-spin prize pool is
+  // now the shop catalog as the client sees it (see getEligiblePowerupPool),
+  // so there is no spin-exclusion list to validate. A stored config that still
+  // carries the key is simply ignored — nothing reads it anymore.
 
   // Drop pool: valid type, has a rarity, and is NOT store-only.
   if (!isPlainObject(input.dropPool)) {

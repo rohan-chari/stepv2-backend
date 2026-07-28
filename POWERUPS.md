@@ -89,7 +89,7 @@ Store-only (bought with coins, never rolled from a mystery box): Pocket Watch, I
 
 Team races only (droppable, but a solo race never rolls them): Rally Flag.
 
-Barred from the **daily reward box**: Uprising, Ghost Pepper, Coin Flip, Mystery Potion, Decoy, Power Outage, Umbrella, Rally Flag, Drill Sergeant, Piggy Bank, Bounty. The rest remain winnable as a daily-box RARE prize.
+**Daily reward box** powerup prizes are the shop catalog as the spinning client sees it (active, channel-appropriate, client-feature-gated items) — available in the shop means winnable from the daily spin.
 
 ## Upgrade Costs
 

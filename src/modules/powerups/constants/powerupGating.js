@@ -61,6 +61,32 @@ function isImposterDisabledForCatalog(powerupType) {
   return powerupType === "IMPOSTER" && !imposterEnabled();
 }
 
+// THE single client-visibility rule for a shop powerup (2026-07-28). Both the
+// shop catalog (getPowerupShopCatalog) and the daily-spin prize pool
+// (getEligiblePowerupPool) apply exactly this predicate over findActive rows,
+// which is what makes "visible in the shop ⟺ winnable from the daily spin"
+// hold by construction. There is no separate spin-exclusion list anymore —
+// hiding an item (`active=false`, or `testOnly` per channel) removes it from
+// both surfaces at once. Do not fork this logic back into the call sites.
+function isPowerupVisibleToClient(
+  powerupType,
+  {
+    supportsJammer = false,
+    supportsPowerups2 = false,
+    supportsPowerups3 = false,
+    supportsPowerups4 = false,
+    supportsPowerups5 = false,
+  } = {}
+) {
+  if (isImposterDisabledForCatalog(powerupType)) return false;
+  if (!supportsJammer && powerupType === "SIGNAL_JAMMER") return false;
+  if (!supportsPowerups2 && POWERUPS2_GATED_TYPES.includes(powerupType)) return false;
+  if (!supportsPowerups3 && POWERUPS3_GATED_TYPES.includes(powerupType)) return false;
+  if (!supportsPowerups4 && POWERUPS4_GATED_TYPES.includes(powerupType)) return false;
+  if (!supportsPowerups5 && POWERUPS5_GATED_TYPES.includes(powerupType)) return false;
+  return true;
+}
+
 module.exports = {
   POWERUPS2_GATED_TYPES,
   POWERUPS3_GATED_TYPES,
@@ -68,4 +94,5 @@ module.exports = {
   POWERUPS5_GATED_TYPES,
   imposterEnabled,
   isImposterDisabledForCatalog,
+  isPowerupVisibleToClient,
 };

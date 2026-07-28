@@ -66,9 +66,9 @@ function teamOnlyRallyFlag(config) {
   next.storeOnlyTypes = withoutValue(next.storeOnlyTypes, "RALLY_FLAG");
   next.dropPool = { ...(next.dropPool || {}) };
   next.dropPool.UNCOMMON = withValue(next.dropPool.UNCOMMON, "RALLY_FLAG");
-  // dailyBoxExcludedTypes is deliberately UNCHANGED — the daily box has no race
-  // context and must still never award it (§5.2's relaxed rule permits this).
-  next.dailyBoxExcludedTypes = withValue(next.dailyBoxExcludedTypes, "RALLY_FLAG");
+  // dailyBoxExcludedTypes is NOT written: the key was retired 2026-07-28 (the
+  // daily-spin pool is the shop catalog now), so a stored copy is ignored and
+  // writing to it would be a dead key in the row.
   return next;
 }
 

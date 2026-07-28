@@ -184,9 +184,9 @@ const DEFAULT_CONFIG = {
   storeOnlyTypes: [
     // Pocket Watch (2026-07-24, owner decision): pulled OUT of the in-race
     // mystery-box drop pool and sold in the shop at the cheapest tier instead.
-    // Store-only, NOT retired — every already-owned copy still works, and it
-    // stays winnable from the DAILY box (it is deliberately absent from
-    // dailyBoxExcludedTypes, same as Imposter/Rainstorm/Signal Jammer).
+    // Store-only, NOT retired — every already-owned copy still works, and like
+    // every shop item it stays winnable from the DAILY spin (the spin pool IS
+    // the shop catalog since 2026-07-28).
     "POCKET_WATCH",
     "IMPOSTER",
     "RAINSTORM",
@@ -213,11 +213,12 @@ const DEFAULT_CONFIG = {
   // Droppable, but ONLY when the race is a team race
   // (docs/team-only-drop-pool-requirements.md).
   //
-  // This is a THIRD question, distinct from the two lists around it, and the
-  // three must not be conflated (the D13 rule):
-  //   storeOnlyTypes       -> can an in-race mystery box roll this at all?
-  //   teamOnlyTypes        -> …but only when the race is a team race?
-  //   dailyBoxExcludedTypes-> can the daily spin award it?
+  // This is a SECOND question, distinct from the list above, and the two must
+  // not be conflated (the D13 rule):
+  //   storeOnlyTypes -> can an in-race mystery box roll this at all?
+  //   teamOnlyTypes  -> …but only when the race is a team race?
+  // (The daily spin is a third surface but no longer configured here: its
+  // prize pool is the shop catalog as the client sees it, since 2026-07-28.)
   //
   // Rally Flag is the first member because its EFFECT is exclusively a team
   // effect — usePowerup hard-rejects it in a solo race with 400 INVALID_TARGET,
@@ -229,40 +230,13 @@ const DEFAULT_CONFIG = {
   // restriction", i.e. exactly the pre-2026-07-26 behaviour.
   teamOnlyTypes: ["RALLY_FLAG"],
 
-  // Which store-only OR team-only types are ALSO barred from the DAILY reward box.
-  //
-  // These are two different questions and the spec's §4.3 literal conflated
-  // them. `storeOnlyTypes` answers "can an in-race mystery box roll this?" —
-  // no, for all seven. This key answers "can the daily spin award this as a
-  // RARE prize?" — which was only ever no for these four (the old
-  // POWERUPS2/3_GATED_TYPES lists). Imposter, Rainstorm and Signal Jammer HAVE
-  // been winnable daily-box prizes for spinpowerups-capable clients all along.
-  //
-  // Using the seven-item list here would silently delete the daily box's entire
-  // powerup prize pool — and the spec's own §5.3 example advertises
-  // `itemOdds.powerups: [{ "type": "SIGNAL_JAMMER", "p": 0.5 }]`, which is only
-  // possible if Signal Jammer remains daily-box winnable. Splitting the keys
-  // keeps ONE authority per question, which is what D13 is actually after.
-  dailyBoxExcludedTypes: [
-    // Powerups Wave 5 are store-only and must never be awarded as a daily-box
-    // prize either (they carry use-time validation the daily box can't satisfy).
-    "UPRISING",
-    "GHOST_PEPPER",
-    "COIN_FLIP",
-    "MYSTERY_POTION",
-    "DECOY",
-    "POWER_OUTAGE",
-    "UMBRELLA",
-    // RALLY_FLAG stays listed even though it is no longer store-only: the daily
-    // reward box has no race context and never can, so it cannot honour
-    // `teamOnlyTypes` and must simply never award it. validateConfig accepts a
-    // dailyBoxExcludedTypes member that is store-only OR team-only for exactly
-    // this case.
-    "RALLY_FLAG",
-    "DRILL_SERGEANT",
-    "PIGGY_BANK",
-    "BOUNTY",
-  ],
+  // `dailyBoxExcludedTypes` REMOVED 2026-07-28 (owner decision). The daily-spin
+  // prize pool is now the shop catalog exactly as the spinning client sees it
+  // (isPowerupVisibleToClient over findActive rows — see
+  // getEligiblePowerupPool). "Available in the shop ⟺ winnable from the daily
+  // spin" holds by construction; hiding an item (`active=false` / `testOnly`)
+  // is the one and only disable switch for both surfaces. A stored config that
+  // still carries the old key is ignored.
 
   // Mystery Potion (§3.4): weighted outcome pool rolled at use-time. Weights are
   // relative; the roller normalizes by their sum. Outcome tokens:

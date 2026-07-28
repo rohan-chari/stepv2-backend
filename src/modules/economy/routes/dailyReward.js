@@ -57,6 +57,7 @@ function createDailyRewardRouter(dependencies = {}) {
       supportsPowerups2: req.clientFeatures?.has("powerups2") ?? false,
       supportsPowerups3: req.clientFeatures?.has("powerups3") ?? false,
       supportsPowerups4: req.clientFeatures?.has("powerups4") ?? false,
+      supportsPowerups5: req.clientFeatures?.has("powerups5") ?? false,
       channel: req.releaseChannel,
     };
   }
