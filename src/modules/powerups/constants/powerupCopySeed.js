@@ -36,7 +36,7 @@ const POWERUP_COPY_SEED = [
   {
     powerupType: "RED_CARD",
     name: "Red Card",
-    description: "Remove 5% of the leader's steps",
+    description: "Remove 10% of the leader's steps",
     shortDescription: null,
     upgradeTierLabels: [],
   },
