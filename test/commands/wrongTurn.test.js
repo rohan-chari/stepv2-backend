@@ -266,10 +266,12 @@ test("Wrong Turn powerup stays HELD when rejected due to existing Wrong Turn on 
 });
 
 // ===========================================================================
-// Replaces active Leg Cramp
+// Mutually exclusive with active Leg Cramp (owner decision 2026-07-29 — a
+// DIRECT Wrong Turn on a cramped target is rejected; it used to cancel the
+// cramp. Indirect landings still cancel — see the integration conflict suite.)
 // ===========================================================================
 
-test("Wrong Turn cancels an active Leg Cramp on the target", async () => {
+test("Wrong Turn is rejected when the target has an active Leg Cramp", async () => {
   const ctx = makePowerupDeps({
     existingLegCramp: {
       id: "eff-cramp",
@@ -281,20 +283,17 @@ test("Wrong Turn cancels an active Leg Cramp on the target", async () => {
   });
   const use = buildUsePowerup(ctx.deps);
 
-  await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", targetUserId: "user-2" });
+  await assert.rejects(
+    () => use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", targetUserId: "user-2" }),
+    (err) => err.statusCode === 400 && /Leg Cramp/.test(err.message)
+  );
 
-  // Leg Cramp should be expired/cancelled
-  const crampUpdate = ctx.effectUpdates.find((u) => u.id === "eff-cramp");
-  assert.ok(crampUpdate, "Leg Cramp should be updated");
-  assert.equal(crampUpdate.status, "EXPIRED");
-
-  // Wrong Turn should be created
-  assert.equal(ctx.effectsCreated.length, 1);
-  assert.equal(ctx.effectsCreated[0].type, "WRONG_TURN");
+  // The cramp is untouched and no Wrong Turn effect was created.
+  assert.equal(ctx.effectUpdates.find((u) => u.id === "eff-cramp"), undefined);
+  assert.equal(ctx.effectsCreated.length, 0);
 });
 
-test("Wrong Turn replaces Leg Cramp — Leg Cramp does not resume after Wrong Turn expires", async () => {
-  // This is implicit in the cancellation — Leg Cramp status is EXPIRED, not paused
+test("Wrong Turn rejected on a cramped target keeps the item HELD (not consumed)", async () => {
   const ctx = makePowerupDeps({
     existingLegCramp: {
       id: "eff-cramp",
@@ -306,11 +305,13 @@ test("Wrong Turn replaces Leg Cramp — Leg Cramp does not resume after Wrong Tu
   });
   const use = buildUsePowerup(ctx.deps);
 
-  await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", targetUserId: "user-2" });
+  await assert.rejects(
+    () => use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", targetUserId: "user-2" }),
+    (err) => err.statusCode === 400
+  );
 
-  const crampUpdate = ctx.effectUpdates.find((u) => u.id === "eff-cramp");
-  // Should be permanently expired, not a temporary status
-  assert.equal(crampUpdate.status, "EXPIRED");
+  // The guard runs before mark-USED, so the powerup was never consumed.
+  assert.equal(ctx.updatedPowerup, null);
 });
 
 // ===========================================================================

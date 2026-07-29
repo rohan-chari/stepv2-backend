@@ -523,6 +523,12 @@ async function applyMysteryPotion(ctx) {
     }
     case "LEG_CRAMP_SELF": {
       // Item 14 — the self-cramp potion outcome had no stacking check at all.
+      // LC×WT mutual exclusion: while reversed, a self-cramp is INVALID →
+      // protein fallback (a potion must never cleanse an enemy Wrong Turn).
+      {
+        const activeWT = await effectModel.findActiveByTypeForParticipant(myParticipant.id, "WRONG_TURN");
+        if (activeWT) { await applyProteinFallback("LEG_CRAMP_SELF"); break; }
+      }
       await clearActiveLegCramps(effectModel, myParticipant.id);
       const effect = await createOnSelf("LEG_CRAMP", { expiresAt: new Date(currentTime.getTime() + 2 * 60 * 60 * 1000), meta: { stepsAtFreezeStart: myParticipant.totalSteps } });
       result.rolled = "LEG_CRAMP_SELF"; result.effect = effect;
@@ -531,6 +537,12 @@ async function applyMysteryPotion(ctx) {
       break;
     }
     case "WRONG_TURN_SELF": {
+      // LC×WT mutual exclusion: while frozen, a self-reversal is INVALID →
+      // protein fallback (a potion must never cleanse an enemy Leg Cramp).
+      {
+        const activeCramp = await effectModel.findActiveByTypeForParticipant(myParticipant.id, "LEG_CRAMP");
+        if (activeCramp) { await applyProteinFallback("WRONG_TURN_SELF"); break; }
+      }
       const effect = await createOnSelf("WRONG_TURN", { expiresAt: new Date(currentTime.getTime() + 60 * 60 * 1000), meta: { stepsAtStart: myParticipant.totalSteps } });
       result.rolled = "WRONG_TURN_SELF"; result.effect = effect;
       await eventModel.create({ raceId, actorUserId: userId, eventType: "POWERUP_USED", powerupType: "MYSTERY_POTION",
@@ -611,6 +623,10 @@ async function applyPotionEnemyAttack(a) {
   if (rolled === "LEG_CRAMP") {
     const existing = await effectModel.findActiveByTypeForParticipant(victim.id, "LEG_CRAMP");
     if (existing) return false;
+    // LC×WT mutual exclusion: a wrong-turned victim can't be cramped either —
+    // treat like the stacking rejection (INVALID → protein fallback).
+    const existingWT = await effectModel.findActiveByTypeForParticipant(victim.id, "WRONG_TURN");
+    if (existingWT) return false;
   }
 
   let targetParticipant = victim;
@@ -678,6 +694,21 @@ async function applyPotionEnemyAttack(a) {
     // silently do nothing (the reflect was swallowed); it now RESETS to the full
     // duration, matching the main Leg Cramp path.
     await clearActiveLegCramps(effectModel, targetParticipant.id);
+    // LC×WT mutual exclusion on the POST-shield landing target (a reflect may
+    // have swapped it to the caster, whom the pre-check above never saw):
+    // cancel a live Wrong Turn with a truncated window, same as the main path.
+    {
+      const conflictingWT = await effectModel.findActiveByTypeForParticipant(
+        targetParticipant.id,
+        "WRONG_TURN"
+      );
+      if (conflictingWT) {
+        await effectModel.update(conflictingWT.id, {
+          status: "EXPIRED",
+          expiresAt: currentTime,
+        });
+      }
+    }
     {
       const effect = await effectModel.create({
         raceId, targetParticipantId: targetParticipant.id, targetUserId: resolvedTargetUserId,
@@ -1575,6 +1606,46 @@ function buildUsePowerup(dependencies = {}) {
       }
     }
 
+    // Leg Cramp × Wrong Turn mutual exclusion (owner decision 2026-07-29): a
+    // target never carries a freeze and a reversal at once. DIRECT uses of
+    // either type on a target with the other active are rejected here — BEFORE
+    // coin deduction / shields / mark-USED, so the item stays HELD. This
+    // replaces the old direct-use behavior where Wrong Turn silently cancelled
+    // the target's Leg Cramp. INDIRECT landings (Mirror reflect / Decoy
+    // redirect / potion rolls) can't be pre-checked without wasting the shield,
+    // so their creation sites cancel the conflicting effect instead — the
+    // invariant holds either way. Messages are user-facing: frozen clients
+    // render them verbatim (powerupUseErrorCopy falls through for unknown
+    // codes). retainHeld: transient target-state, usable once it expires.
+    if (type === "LEG_CRAMP" && targetParticipant) {
+      const conflictingWT = await effectModel.findActiveByTypeForParticipant(
+        targetParticipant.id,
+        "WRONG_TURN"
+      );
+      if (conflictingWT) {
+        throw new PowerupUseError(
+          "Target is already on a Wrong Turn — wait for it to end",
+          400,
+          "TARGET_EFFECT_CONFLICT",
+          { retainHeld: true }
+        );
+      }
+    }
+    if (type === "WRONG_TURN" && targetParticipant) {
+      const conflictingCramp = await effectModel.findActiveByTypeForParticipant(
+        targetParticipant.id,
+        "LEG_CRAMP"
+      );
+      if (conflictingCramp) {
+        throw new PowerupUseError(
+          "Target is frozen by a Leg Cramp — wait for it to end",
+          400,
+          "TARGET_EFFECT_CONFLICT",
+          { retainHeld: true }
+        );
+      }
+    }
+
     // Reject stacking Signal Jammer on a target that already has one active. This
     // runs BEFORE coin deduction, the Mirror/Socks pre-checks, and the mark-USED
     // step, so a rejected attacker keeps their jammer HELD (not consumed).
@@ -2220,6 +2291,21 @@ function buildUsePowerup(dependencies = {}) {
         // who may well be cramped already; the top-of-function pre-check never
         // saw them.
         await clearActiveLegCramps(effectModel, targetParticipant.id);
+        // LC×WT mutual exclusion for INDIRECT landings (direct uses were
+        // rejected by the pre-check): a reflected/redirected cramp landing on
+        // a wrong-turned racer cancels the reversal. Truncate expiresAt as
+        // well as flipping status — scoring reads EXPIRED rows over
+        // [startsAt, expiresAt].
+        const conflictingWT = await effectModel.findActiveByTypeForParticipant(
+          targetParticipant.id,
+          "WRONG_TURN"
+        );
+        if (conflictingWT) {
+          await effectModel.update(conflictingWT.id, {
+            status: "EXPIRED",
+            expiresAt: currentTime,
+          });
+        }
         const effect = await effectModel.create({
           raceId,
           targetParticipantId: targetParticipant.id,
@@ -2776,7 +2862,9 @@ function buildUsePowerup(dependencies = {}) {
       }
 
       case "WRONG_TURN": {
-        // Cancel active Leg Cramp on target if present
+        // Cancel active Leg Cramp on target if present. Only INDIRECT landings
+        // (Mirror reflect / Decoy redirect) reach here with a cramped target —
+        // direct uses are rejected by the LC×WT mutual-exclusion pre-check.
         const existingCramp = await effectModel.findActiveByTypeForParticipant(
           targetParticipant.id,
           "LEG_CRAMP"

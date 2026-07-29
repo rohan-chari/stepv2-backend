@@ -414,7 +414,7 @@ describe("leg cramp", () => {
   // === EFFECT INTERACTIONS ===
 
   describe("effect interactions", () => {
-    it("wrong turn cancels an active leg cramp on same target", async () => {
+    it("wrong turn on a cramped target is rejected — the cramp keeps running (owner decision 2026-07-29 — was: cancel)", async () => {
       const alice = await createUser("AliceInterAA");
       const bob = await createUser("BobInterAAAA");
       const charlie = await createUser("CharlieInterA");
@@ -439,15 +439,21 @@ describe("leg cramp", () => {
       const cramp = await giveHeldPowerup(raceId, alice.userId, "LEG_CRAMP", 99901);
       await usePowerup(alice.token, raceId, cramp.id, bob.userId);
 
-      // Charlie uses wrong turn on bob (should cancel the cramp)
+      // Charlie's wrong turn on the cramped bob is rejected: Leg Cramp and
+      // Wrong Turn are mutually exclusive on one target for direct uses.
       const wrongTurn = await giveHeldPowerup(raceId, charlie.userId, "WRONG_TURN", 99902);
       const res = await usePowerup(charlie.token, raceId, wrongTurn.id, bob.userId);
-      assert.equal(res.status, 200);
+      assert.equal(res.status, 400);
+      assert.match((await res.json()).error, /Leg Cramp/);
 
-      // Now a second leg cramp should work (old one was cancelled)
+      // The cramp is still active, so a second cramp still can't stack either.
+      const crampEffect = await prisma.raceActiveEffect.findFirst({
+        where: { raceId, targetUserId: bob.userId, type: "LEG_CRAMP", status: "ACTIVE" },
+      });
+      assert.ok(crampEffect, "original cramp keeps running");
       const cramp2 = await giveHeldPowerup(raceId, alice.userId, "LEG_CRAMP", 99903);
       const res2 = await usePowerup(alice.token, raceId, cramp2.id, bob.userId);
-      assert.equal(res2.status, 200);
+      assert.equal(res2.status, 400);
     });
   });
 

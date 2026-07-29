@@ -433,7 +433,7 @@ describe("wrong turn", () => {
   // === EFFECT INTERACTIONS ===
 
   describe("effect interactions", () => {
-    it("cancels active leg cramp on target when applied", async () => {
+    it("direct wrong turn on a cramped target is rejected (owner decision 2026-07-29 — was: cancel the cramp)", async () => {
       const alice = await createUser("AliceInterAA");
       const bob = await createUser("BobInterAAAA");
       await makeFriends(alice, bob);
@@ -449,23 +449,28 @@ describe("wrong turn", () => {
       });
       assert.ok(crampEffect);
 
-      // Alice applies wrong turn (should cancel the cramp)
+      // Alice applies wrong turn — rejected: Leg Cramp and Wrong Turn are
+      // mutually exclusive on one target for DIRECT uses.
       const wt = await giveHeldPowerup(raceId, alice.userId, "WRONG_TURN", 99902);
-      await usePowerup(alice.token, raceId, wt.id, bob.userId);
+      const wtRes = await usePowerup(alice.token, raceId, wt.id, bob.userId);
+      assert.equal(wtRes.status, 400);
+      assert.match((await wtRes.json()).error, /Leg Cramp/);
 
-      // Leg cramp should now be expired
+      // The cramp keeps running untouched.
       const updatedCramp = await prisma.raceActiveEffect.findFirst({
         where: { id: crampEffect.id },
       });
-      assert.equal(updatedCramp.status, "EXPIRED");
+      assert.equal(updatedCramp.status, "ACTIVE");
 
-      // New leg cramp should be possible (old one cancelled)
-      const cramp2 = await giveHeldPowerup(raceId, alice.userId, "LEG_CRAMP", 99903);
-      const res = await usePowerup(alice.token, raceId, cramp2.id, bob.userId);
-      assert.equal(res.status, 200);
+      // The rejected wrong turn stays HELD for later.
+      const wtItem = await prisma.racePowerup.findUnique({ where: { id: wt.id } });
+      assert.equal(wtItem.status, "HELD");
     });
 
     it("cancelled leg cramp stops freezing — window truncated, steps after the wrong turn count", async () => {
+      // Direct Wrong Turn on a cramped target is rejected now (owner decision
+      // 2026-07-29), so the cancel path is exercised the way it still happens
+      // in prod: an INDIRECT landing via a Mirror reflect.
       const alice = await createUser("AliceInterCC");
       const bob = await createUser("BobInterCCCC");
       await makeFriends(alice, bob);
@@ -477,8 +482,14 @@ describe("wrong turn", () => {
         where: { raceId, type: "LEG_CRAMP" },
       });
 
-      const wt = await giveHeldPowerup(raceId, alice.userId, "WRONG_TURN", 99902);
-      await usePowerup(alice.token, raceId, wt.id, bob.userId);
+      // Alice arms a Mirror; Bob fires his own Wrong Turn at her and the
+      // bounce lands back on Bob — cancelling his cramp and reversing him.
+      const mirror = await giveHeldPowerup(raceId, alice.userId, "MIRROR", 99902);
+      assert.equal((await usePowerup(alice.token, raceId, mirror.id)).status, 200);
+      const wt = await giveHeldPowerup(raceId, bob.userId, "WRONG_TURN", 99903);
+      const reflectRes = await usePowerup(bob.token, raceId, wt.id, alice.userId);
+      assert.equal(reflectRes.status, 200);
+      assert.equal((await reflectRes.json()).result.outcome, "REFLECTED");
 
       // Scoring reads EXPIRED rows too and freezes over [startsAt, expiresAt],
       // so the cancel must close the window, not just flip status.
