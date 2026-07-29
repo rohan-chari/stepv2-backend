@@ -50,22 +50,24 @@ function buildGetPowerupCopyCatalog(deps = {}) {
       powerups: [...rows]
         .filter((row) => row.powerupType !== "QUICKSAND" || has("powerups4"))
         .sort(compareRows).map((row) => {
-        const stealthRunner = row.powerupType === "STEALTH_MODE" && has("stealth_runner_duration");
+        // NOTE: stealth copy is deliberately NOT capability-versioned anymore.
+        // The `stealth_runner_duration` override used to swap in the 2026-07-24
+        // nerf ladder (60/75/90/120 min), but the §3.4 standardization
+        // (2026-07-25) made the duration server-computed and uniform — the
+        // leftover override then served dead labels to exactly the newest
+        // builds ("Hide 90m" for a use that ran 3h, prod bug 2026-07-29). The
+        // DB row is the single source of stealth label truth for every client.
         const hitchhikeEffective = row.powerupType === "HITCHHIKE" && has("hitchhike_effective_steps");
         return {
         type: row.powerupType,
         name: row.name,
-        description: stealthRunner
-          ? "Hide your name, steps, and track position for 1 hour."
-          : hitchhikeEffective
-            ? "Copy the target's effective steps; their boosts and reversals carry over."
-            : row.description,
+        description: hitchhikeEffective
+          ? "Copy the target's effective steps; their boosts and reversals carry over."
+          : row.description,
         // Explicit null (never "") so the client omits the effect-rail subtitle
         // rather than rendering a blank line or truncating the description.
         shortDescription: row.shortDescription ?? null,
-        upgradeTierLabels: stealthRunner
-          ? ["Hide 1h", "Hide 75m", "Hide 90m", "Hide 2h"]
-          : Array.isArray(row.upgradeTierLabels) ? row.upgradeTierLabels : [],
+        upgradeTierLabels: Array.isArray(row.upgradeTierLabels) ? row.upgradeTierLabels : [],
       };
       }),
     };

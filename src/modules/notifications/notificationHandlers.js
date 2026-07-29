@@ -4,6 +4,7 @@ const { DeviceToken } = require("../../shared/push/deviceToken");
 const { apnsService } = require("../../shared/push/apns");
 const { fcmService } = require("../../shared/push/fcm");
 const { Notification } = require("./notification");
+const { upgradedDuration } = require("../powerups/powerupUpgrades");
 const { prisma } = require("../../db");
 
 const CHAT_PUSH_COOLDOWN_MS = 60_000;
@@ -703,11 +704,29 @@ function registerNotificationHandlers(dependencies = {}) {
     }
   });
 
+  // Durations are computed from the same ladder that stamps the effect row
+  // (§3.4 standardization: 1/2/3/4h by upgrade level), so the push can never
+  // drift from what the effect actually does again. upgradeLevel rides on the
+  // POWERUP_USED emit; a missing/invalid level falls back to base.
+  function attackWindowText(type, upgradeLevel) {
+    let ms;
+    try {
+      ms = upgradedDuration(type, upgradeLevel || 0);
+    } catch {
+      ms = upgradedDuration(type, 0);
+    }
+    const hours = ms / (60 * 60 * 1000);
+    if (Number.isInteger(hours)) return `${hours} hour${hours === 1 ? "" : "s"}`;
+    return `${Math.round(ms / (60 * 1000))} minutes`;
+  }
+
   const POWERUP_ATTACK_MESSAGES = {
-    LEG_CRAMP: (attackerName) => `${attackerName} used Leg Cramp on you! Your steps are frozen for 2 hours.`,
+    LEG_CRAMP: (attackerName, upgradeLevel) =>
+      `${attackerName} used Leg Cramp on you! Your steps are frozen for ${attackWindowText("LEG_CRAMP", upgradeLevel)}.`,
     RED_CARD: (attackerName) => `${attackerName} used Red Card! You lost steps.`,
     SHORTCUT: (attackerName) => `${attackerName} stole steps from you with Shortcut!`,
-    WRONG_TURN: (attackerName) => `${attackerName} sent you on a Wrong Turn! Your steps are reversed for 1 hour.`,
+    WRONG_TURN: (attackerName, upgradeLevel) =>
+      `${attackerName} sent you on a Wrong Turn! Your steps are reversed for ${attackWindowText("WRONG_TURN", upgradeLevel)}.`,
     SIGNAL_JAMMER: (attackerName) => `${attackerName} jammed your powerups for 1 hour! 📵`,
     // Leech is deliberately NOT stealthy — the victim is told who's draining them
     // so their steps dropping never becomes a "why?" mystery (Item 2).
@@ -720,12 +739,14 @@ function registerNotificationHandlers(dependencies = {}) {
     // that turns an unexplained score change into an incomprehensible one.
     HITCHHIKE: (attackerName) =>
       `🎒 ${attackerName} linked to your steps! Whatever you walk, they copy — you keep every step.`,
-    QUICKSAND: (attackerName) => `${attackerName} froze your steps for 2 hours!`,
+    // §3.4: Quicksand standardizes to a 1h freeze window (was 2h); it is never
+    // upgradeable, so the window is fixed.
+    QUICKSAND: (attackerName) => `${attackerName} froze your steps for 1 hour!`,
   };
 
   events.on("POWERUP_USED", async (data) => {
     try {
-      const { raceId, userId, powerupType, targetUserId } = data;
+      const { raceId, userId, powerupType, targetUserId, upgradeLevel } = data;
       // B2: after a Mirror reflect, usePowerup emits POWERUP_USED with
       // targetUserId === userId (both the original attacker). Suppress the
       // self-push here — one guard that covers every reflectable offensive type
@@ -761,7 +782,7 @@ function registerNotificationHandlers(dependencies = {}) {
       };
       const raceName = cleanRaceName(raceForPush?.name);
       const buildBody = baseBuildBody && ((attackerName) => {
-        const sentence = baseBuildBody(attackerName);
+        const sentence = baseBuildBody(attackerName, upgradeLevel);
         return raceName ? `${sentence} Race: ${raceName}.` : sentence;
       });
       if (!buildBody) return;

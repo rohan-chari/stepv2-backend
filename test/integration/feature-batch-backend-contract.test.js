@@ -78,8 +78,11 @@ describe("2026-07-22 additive backend contracts", () => {
     } });
     const next = await nextRes.json();
     assert.ok(next.powerups.some((p) => p.type === "QUICKSAND"));
-    // Item 7 (owner nerf 2026-07-24): stealth durations are now 60/75/90/120 min.
-    assert.deepEqual(next.powerups.find((p) => p.type === "STEALTH_MODE").upgradeTierLabels, ["Hide 1h", "Hide 75m", "Hide 90m", "Hide 2h"]);
+    // §3.4 standardization (2026-07-25, supersedes the 07-24 nerf): stealth
+    // labels come straight from the DB row for every client, including ones
+    // advertising `stealth_runner_duration` (prod bug 2026-07-29: the override
+    // served the dead 60/75/90/120 ladder to exactly the newest builds).
+    assert.deepEqual(next.powerups.find((p) => p.type === "STEALTH_MODE").upgradeTierLabels, ["Hide 1h", "Hide 2h", "Hide 3h", "Hide 4h"]);
     assert.match(next.powerups.find((p) => p.type === "HITCHHIKE").description, /boosts and reversals/i);
   });
 });
