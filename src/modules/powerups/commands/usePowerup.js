@@ -658,14 +658,15 @@ async function applyPotionEnemyAttack(a) {
       result.redirected = true; result.redirectedBy = "DECOY"; result.redirectedToUserId = redirect.userId;
       result.outcome = "REDIRECTED";
     }
-    // Socks on the (possibly redirected) victim.
-    const socks = await effectModel.findActiveByTypeForParticipant(targetParticipant.id, "COMPRESSION_SOCKS");
-    if (socks) {
-      await effectModel.update(socks.id, { status: "BLOCKED" });
-      result.rolled = rolled; result.blocked = true; result.blockedBy = "COMPRESSION_SOCKS";
-      result.outcome = result.outcome === "REDIRECTED" ? "REDIRECTED" : "BLOCKED";
-      return true;
-    }
+  }
+  // Socks on the final landing target: the (possibly redirected) victim — or,
+  // after a Mirror reflect, the CASTER, whose own active socks block the bounce.
+  const socks = await effectModel.findActiveByTypeForParticipant(targetParticipant.id, "COMPRESSION_SOCKS");
+  if (socks) {
+    await effectModel.update(socks.id, { status: "BLOCKED" });
+    result.rolled = rolled; result.blocked = true; result.blockedBy = "COMPRESSION_SOCKS";
+    result.outcome = result.outcome === "REDIRECTED" ? "REDIRECTED" : "BLOCKED";
+    return true;
   }
 
   const resolvedTargetUserId = targetParticipant.userId;
@@ -1961,12 +1962,15 @@ function buildUsePowerup(dependencies = {}) {
 
     // Mirror reflect pre-check. Precedence: MIRROR wins even when the target
     // also holds Compression Socks. The Mirror is checked FIRST and, if present,
-    // reflects the attack — the socks block below is then skipped, so the socks
-    // shield is NOT consumed and stays banked for a later attack (a dual-shield
-    // holder gets two saves: reflect now, block next time). When the target
-    // holds an active Mirror, the offensive powerup is REFLECTED back onto the
-    // attacker: we swap roles so the effect lands on the original attacker,
-    // consume the Mirror, and write/emit a POWERUP_REFLECTED event.
+    // reflects the attack — the TARGET's socks are then never consulted, so a
+    // dual-shield holder gets two saves: reflect now, block next time. When the
+    // target holds an active Mirror, the offensive powerup is REFLECTED back
+    // onto the attacker: we swap roles so the effect lands on the original
+    // attacker, consume the Mirror, and write/emit a POWERUP_REFLECTED event.
+    // The bounce then goes through the Socks block below AGAINST THE ATTACKER
+    // (post-swap targetParticipant): an attacker holding their own active
+    // Compression Socks blocks the reflected hit — Mirror and socks are both
+    // consumed and the effect lands on no one.
     // Shop-bought powerups (SHOP_POWERUP_TYPES) are NEVER reflectable, so they
     // skip this pre-check entirely and fall through to the Socks block below.
     let reflected = false;
@@ -1984,14 +1988,22 @@ function buildUsePowerup(dependencies = {}) {
         // validated the target BEFORE the Mirror was known to fire, so a
         // reflected Wrong Turn could stack a second one onto an attacker who
         // already had one active. Checked before the Mirror is consumed so a
-        // rejected bounce leaves the Mirror intact and the item HELD.
+        // rejected bounce leaves the Mirror intact and the item HELD. Skipped
+        // when the attacker holds active socks: the bounce is blocked before
+        // it could stack, so socks precedence wins over the stacking 400.
         if (type === "WRONG_TURN") {
-          const existingWT = await effectModel.findActiveByTypeForParticipant(
+          const attackerSocks = await effectModel.findActiveByTypeForParticipant(
             myParticipant.id,
-            "WRONG_TURN"
+            "COMPRESSION_SOCKS"
           );
-          if (existingWT) {
-            throw new PowerupUseError("Target already has an active Wrong Turn", 400);
+          if (!attackerSocks) {
+            const existingWT = await effectModel.findActiveByTypeForParticipant(
+              myParticipant.id,
+              "WRONG_TURN"
+            );
+            if (existingWT) {
+              throw new PowerupUseError("Target already has an active Wrong Turn", 400);
+            }
           }
         }
 
@@ -2108,14 +2120,22 @@ function buildUsePowerup(dependencies = {}) {
           );
           if (newMirror) {
             // Same post-swap Wrong Turn re-check as the primary Mirror block
-            // above, applied to the redirected victim's Mirror bounce.
+            // above, applied to the redirected victim's Mirror bounce — and the
+            // same socks-precedence skip: an attacker holding active socks has
+            // the bounce blocked below, so stacking can never happen.
             if (type === "WRONG_TURN") {
-              const existingWT = await effectModel.findActiveByTypeForParticipant(
+              const attackerSocks = await effectModel.findActiveByTypeForParticipant(
                 myParticipant.id,
-                "WRONG_TURN"
+                "COMPRESSION_SOCKS"
               );
-              if (existingWT) {
-                throw new PowerupUseError("Target already has an active Wrong Turn", 400);
+              if (!attackerSocks) {
+                const existingWT = await effectModel.findActiveByTypeForParticipant(
+                  myParticipant.id,
+                  "WRONG_TURN"
+                );
+                if (existingWT) {
+                  throw new PowerupUseError("Target already has an active Wrong Turn", 400);
+                }
               }
             }
 
@@ -2152,13 +2172,13 @@ function buildUsePowerup(dependencies = {}) {
       }
     }
 
-    // Compression Socks shield on target. Only consulted when the attack was NOT
-    // already reflected by a Mirror (Mirror takes precedence, above): a target
-    // holding both reflects this hit and keeps the socks for next time. After a
-    // reflect, targetParticipant has been swapped to the original attacker, so
-    // the `!reflected` guard is also what keeps us from checking the attacker's
-    // own shields here.
-    if (!reflected && OFFENSIVE_TYPES.includes(type) && targetParticipant) {
+    // Compression Socks shield on the current landing target. On the direct
+    // path this is the (possibly Decoy-redirected) victim. After a Mirror
+    // reflect, targetParticipant has been swapped to the ORIGINAL ATTACKER —
+    // so this same check is what lets an attacker's own active socks block
+    // the bounced attack (Mirror consumed above, socks consumed here, effect
+    // lands on no one).
+    if (OFFENSIVE_TYPES.includes(type) && targetParticipant) {
       const shield = await effectModel.findActiveByTypeForParticipant(
         targetParticipant.id,
         "COMPRESSION_SOCKS"
@@ -2175,13 +2195,19 @@ function buildUsePowerup(dependencies = {}) {
           upgradeLevel,
         });
 
+        // Post-reflect, the "attacker" of the bounced hit is the Mirror holder
+        // (actingUserId) and the blocker is the original caster — attribute the
+        // feed event and emit accordingly. actingUserId === userId when no
+        // reflect happened, so the direct path is unchanged.
         await eventModel.create({
           raceId,
           actorUserId: resolvedTargetUserId,
           eventType: "POWERUP_BLOCKED",
           powerupType: type,
-          targetUserId: userId,
-          description: `${targetDisplayName}'s Compression Socks blocked ${myDisplayName}'s ${levelPrefix(upgradeLevel)}${POWERUP_NAMES[type]}!`,
+          targetUserId: actingUserId,
+          description: reflected
+            ? `${targetDisplayName}'s Compression Socks blocked the reflected ${levelPrefix(upgradeLevel)}${POWERUP_NAMES[type]}!`
+            : `${targetDisplayName}'s Compression Socks blocked ${myDisplayName}'s ${levelPrefix(upgradeLevel)}${POWERUP_NAMES[type]}!`,
         });
 
         if (upgradeLevel > 0) {
@@ -2199,7 +2225,7 @@ function buildUsePowerup(dependencies = {}) {
 
         events.emit("POWERUP_BLOCKED", {
           raceId,
-          attackerUserId: userId,
+          attackerUserId: actingUserId,
           defenderUserId: resolvedTargetUserId,
           blockedType: type,
           upgradeLevel,
@@ -2207,10 +2233,17 @@ function buildUsePowerup(dependencies = {}) {
 
         // `outcome` is an additive discriminator for clients (a later feature
         // builds a reveal modal off it). Old clients keep reading `blocked`.
+        // On a reflected-then-blocked hit both discriminators are set: new
+        // clients render the combined "bounced but blocked" modal; frozen old
+        // clients switch on outcome and show the plain blocked modal.
         return {
           blocked: true,
           blockedBy: "COMPRESSION_SOCKS",
           outcome: "BLOCKED",
+          ...(reflected ? { reflected: true, reflectedBy: "MIRROR" } : {}),
+          ...(decoyRedirectedToUserId && !reflected
+            ? { redirected: true, redirectedBy: "DECOY", redirectedToUserId: decoyRedirectedToUserId }
+            : {}),
           upgradeLevel,
           coinsSpent: costCoins,
         };
