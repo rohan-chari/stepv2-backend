@@ -16,6 +16,23 @@ const { prisma } = require("../src/db");
 // always safe. NEVER point DATABASE_URL at prod for this — prod is written to
 // only by the admin editor's peer mirror and cosmetics:sync-peer.
 
+// KEEP IN SYNC with MIRRORED_SHOP_ITEM_FIELDS (src/modules/cosmetics/
+// mirrorShopItem.js) and COMPARED_FIELDS (scripts/cosmetics-sync-peer.js).
+const CLONED_FIELDS = [
+  "name",
+  "description",
+  "slot",
+  "priceCoins",
+  "assetKey",
+  "renderMetadata",
+  "active",
+  "testOnly",
+  "earnOnly",
+  "bobble",
+  "sortOrder",
+  "assetVersion",
+];
+
 function openSource(url) {
   const isLocalhost = url.includes("localhost") || url.includes("127.0.0.1");
   const pool = new pg.Pool({
@@ -55,22 +72,12 @@ async function cloneCosmetics({ dryRun = false } = {}) {
 
   let created = 0;
   for (const r of missing) {
-    await prisma.shopItem.create({
-      data: {
-        sku: r.sku,
-        name: r.name,
-        description: r.description,
-        slot: r.slot,
-        priceCoins: r.priceCoins,
-        assetKey: r.assetKey,
-        renderMetadata: r.renderMetadata ?? null,
-        active: r.active,
-        testOnly: r.testOnly,
-        earnOnly: r.earnOnly,
-        bobble: r.bobble,
-        sortOrder: r.sortOrder,
-      },
-    });
+    const data = { sku: r.sku };
+    for (const key of CLONED_FIELDS) {
+      data[key] =
+        key === "renderMetadata" || key === "assetVersion" ? r[key] ?? null : r[key];
+    }
+    await prisma.shopItem.create({ data });
     console.log(`  created ${r.sku}`);
     created++;
   }
@@ -78,7 +85,7 @@ async function cloneCosmetics({ dryRun = false } = {}) {
   return { created };
 }
 
-module.exports = { cloneCosmetics };
+module.exports = { cloneCosmetics, CLONED_FIELDS };
 
 if (require.main === module) {
   cloneCosmetics({ dryRun: process.argv.includes("--dry-run") })

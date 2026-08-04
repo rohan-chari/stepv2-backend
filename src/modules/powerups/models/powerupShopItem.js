@@ -4,9 +4,19 @@ const { testOnlyFilter } = require("../../../shared/middleware/releaseChannel");
 // Catalog of coin-purchasable powerups (separate from the cosmetic ShopItem
 // table so the cosmetic catalog stays byte-compatible for old app versions).
 const PowerupShopItem = {
-  async findActive({ channel = "prod" } = {}) {
+  // `supportsRemoteAssets` DEFAULTS TO TRUE so the other caller of this model —
+  // the daily-spin prize pool (getEligiblePowerupPool) — is completely
+  // unaffected: a powerup whose icon is CDN-served is still winnable from a
+  // box, it just falls back to the generic bolt icon on a client that can't
+  // fetch it. Only the shop catalog opts into the filter, because that's where
+  // the client would otherwise be offered a purchase it can't render.
+  async findActive({ channel = "prod", supportsRemoteAssets = true } = {}) {
     return prisma.powerupShopItem.findMany({
-      where: { active: true, ...testOnlyFilter(channel) },
+      where: {
+        active: true,
+        ...testOnlyFilter(channel),
+        ...(supportsRemoteAssets ? {} : { assetVersion: null }),
+      },
       orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
     });
   },

@@ -1,5 +1,25 @@
 const { getPeerPrisma } = require("../../peerDb");
 
+// Every editable/displayable column (the env-local id/createdAt are omitted).
+// KEEP IN SYNC with scripts/cosmetics-sync-peer.js COMPARED_FIELDS and
+// scripts/cosmetics-clone.js CLONED_FIELDS — a column added to the schema but
+// forgotten in one of these three lists is the known "peer drift" incident:
+// the field silently stops mirroring and prod/staging diverge.
+const MIRRORED_SHOP_ITEM_FIELDS = [
+  "name",
+  "description",
+  "slot",
+  "priceCoins",
+  "assetKey",
+  "renderMetadata",
+  "active",
+  "testOnly",
+  "earnOnly",
+  "bobble",
+  "sortOrder",
+  "assetVersion",
+];
+
 // Mirror a cosmetic shop item to the peer database (matched by sku, since the
 // row's uuid differs across environments) so prod and staging stay consistent
 // no matter which environment the admin accessory editor is pointed at.
@@ -13,20 +33,18 @@ async function mirrorShopItemToPeer(item) {
     return { attempted: false, ok: false, reason: "no_peer_configured" };
   }
 
-  // Mirror every editable/displayable field (omit the env-local id/createdAt).
-  const fields = {
-    name: item.name,
-    description: item.description ?? null,
-    slot: item.slot,
-    priceCoins: item.priceCoins,
-    assetKey: item.assetKey,
-    renderMetadata: item.renderMetadata ?? null,
-    active: item.active,
-    testOnly: item.testOnly,
-    earnOnly: item.earnOnly ?? false,
-    bobble: item.bobble ?? false,
-    sortOrder: item.sortOrder,
-  };
+  const fields = {};
+  for (const key of MIRRORED_SHOP_ITEM_FIELDS) {
+    if (key === "description" || key === "renderMetadata") {
+      fields[key] = item[key] ?? null;
+    } else if (key === "earnOnly" || key === "bobble") {
+      fields[key] = item[key] ?? false;
+    } else if (key === "assetVersion") {
+      fields[key] = item[key] ?? null;
+    } else {
+      fields[key] = item[key];
+    }
+  }
 
   try {
     await peer.shopItem.upsert({
@@ -41,4 +59,4 @@ async function mirrorShopItemToPeer(item) {
   }
 }
 
-module.exports = { mirrorShopItemToPeer };
+module.exports = { mirrorShopItemToPeer, MIRRORED_SHOP_ITEM_FIELDS };

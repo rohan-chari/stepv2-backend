@@ -8,7 +8,11 @@ const { testOnlyFilter } = require("../../shared/middleware/releaseChannel");
 
 async function getShopCatalog(
   userId,
-  { channel = "prod", supportsCharacters = false } = {}
+  {
+    channel = "prod",
+    supportsCharacters = false,
+    supportsRemoteAssets = false,
+  } = {}
 ) {
   const [user, items, owned, equippedAccessories] = await Promise.all([
     prisma.user.findUnique({
@@ -25,6 +29,13 @@ async function getShopCatalog(
         // would render them as HEAD accessories and could buy an animal they
         // can't display.
         ...(supportsCharacters ? {} : { slot: { not: CHARACTER_SLOT } }),
+        // Same reasoning for CDN-served art: a binary that never declared
+        // `remote_assets` support has no way to download or draw a remote PNG,
+        // so it must not see (or be able to buy) an item whose art is remote.
+        // Items with a NULL assetVersion are bundled and stay visible to
+        // everyone — which is every item that exists today, so this filter is a
+        // no-op until the first remote item is created.
+        ...(supportsRemoteAssets ? {} : { assetVersion: null }),
       },
       orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
     }),

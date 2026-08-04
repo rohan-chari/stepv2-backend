@@ -3,6 +3,11 @@ const { buildRequireAuth } = require("../../middleware/requireAuth");
 const { buildRequireAdmin } = require("./requireAdmin");
 const { prisma } = require("../../db");
 const { serializeShopItem, mirrorShopItemToPeer } = require("../cosmetics");
+const {
+  isValidAssetVersion,
+  powerupAssetUrl,
+} = require("../../shared/lib/remoteAssets");
+
 const { appSettings: defaultAppSettings } = require("../../shared/config/appSettings");
 const {
   getAdminStats: defaultGetAdminStats,
@@ -15,7 +20,37 @@ const { serializeBounds } = require("../economy/balanceConfig.defaults");
 // Allowed values for the numeric stepSampleBucketMinutes setting (§3.2).
 const STEP_SAMPLE_BUCKET_MINUTES = new Set([5, 10, 15, 30, 60]);
 
-const RENDER_METADATA_NUMBER_KEYS = ["offsetX", "offsetY", "rotation", "scale"];
+// Shared validator for the `assetVersion` body field on both shop admin
+// surfaces. `undefined` means "not supplied, leave alone"; `null` means
+// "detach — the art is bundled again". Anything else must be a hex digest
+// prefix, because it is interpolated straight into a public asset filename.
+function readAssetVersion(body, key = "assetVersion") {
+  const value = body[key];
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (!isValidAssetVersion(value)) {
+    const err = new Error(
+      "assetVersion must be a hex string of 8-64 characters (sha256 prefix), or null"
+    );
+    err.statusCode = 400;
+    throw err;
+  }
+  return String(value).toLowerCase();
+}
+
+// `baselineOffset` (CDN art build) is the CHARACTER walk-sheet's vertical
+// anchor — the value that used to be hardcoded per animal in the app's
+// kAnimalSprites map. It lives here so a remote character ships its own
+// baseline instead of needing an App Store release. Unlike the four tuner
+// sliders it is NOT resent on every save, so persistentRenderMetadata below
+// must preserve it (the sanitizer-wipe trap).
+const RENDER_METADATA_NUMBER_KEYS = [
+  "offsetX",
+  "offsetY",
+  "rotation",
+  "scale",
+  "baselineOffset",
+];
 const RENDER_METADATA_RENDER_LAYERS = new Set(["front", "behind"]);
 
 // Mirror of prisma's AccessorySlot enum for request validation.
@@ -107,6 +142,12 @@ function persistentRenderMetadata(raw) {
   const out = {};
   if (Number.isInteger(raw.animationFrames) && raw.animationFrames > 0) {
     out.animationFrames = raw.animationFrames;
+  }
+  // Preserve the character baseline across placement-only saves: the Accessory
+  // Tuner sends offsets/rotation/scale, not baselineOffset, so without this a
+  // single slider drag would wipe a remote character's vertical anchor.
+  if (Number.isFinite(raw.baselineOffset)) {
+    out.baselineOffset = raw.baselineOffset;
   }
   if (RENDER_METADATA_RENDER_LAYERS.has(raw.renderLayer)) {
     out.renderLayer = raw.renderLayer;
@@ -202,6 +243,7 @@ function createAdminRouter(dependencies = {}) {
           ...serializeShopItem(item),
           active: item.active,
           testOnly: item.testOnly,
+          assetVersion: item.assetVersion ?? null,
         })),
       });
     } catch (error) {
@@ -287,6 +329,9 @@ function createAdminRouter(dependencies = {}) {
           earnOnly: optionalBoolean("earnOnly", false),
           bobble: optionalBoolean("bobble", false),
           sortOrder,
+          // CDN-served art. Omit (or send null) and the item is bundled-art,
+          // exactly as every item created before this feature.
+          assetVersion: readAssetVersion(body) ?? null,
         },
       });
 
@@ -299,6 +344,10 @@ function createAdminRouter(dependencies = {}) {
           active: created.active,
           testOnly: created.testOnly,
           earnOnly: created.earnOnly,
+          // Admin surfaces always state assetVersion explicitly (the public
+          // serializer omits it when the art is bundled) so the editor can tell
+          // "bundled" from "field missing".
+          assetVersion: created.assetVersion ?? null,
         },
         mirror,
       });
@@ -364,6 +413,11 @@ function createAdminRouter(dependencies = {}) {
         }
         data.bobble = body.bobble;
       }
+      if (body.assetVersion !== undefined) {
+        // null detaches (back to bundled art); a valid hex prefix repoints the
+        // item at a newly deployed PNG.
+        data.assetVersion = readAssetVersion(body);
+      }
       if (Object.keys(data).length === 0) {
         return res.status(400).json({ error: "No updatable fields supplied" });
       }
@@ -379,6 +433,7 @@ function createAdminRouter(dependencies = {}) {
           ...serializeShopItem(updated),
           active: updated.active,
           testOnly: updated.testOnly,
+          assetVersion: updated.assetVersion ?? null,
         },
         mirror,
       });
@@ -419,6 +474,8 @@ function createAdminRouter(dependencies = {}) {
           active: item.active,
           testOnly: item.testOnly,
           sortOrder: item.sortOrder,
+          assetVersion: item.assetVersion ?? null,
+          assetUrl: powerupAssetUrl(item.powerupType, item.assetVersion),
         })),
       });
     } catch (error) {
@@ -453,6 +510,10 @@ function createAdminRouter(dependencies = {}) {
         }
         data.sortOrder = body.sortOrder;
       }
+      if (body.assetVersion !== undefined) {
+        // CDN-served powerup icon; null detaches back to the bundled icon.
+        data.assetVersion = readAssetVersion(body);
+      }
       if (Object.keys(data).length === 0) {
         return res.status(400).json({ error: "No updatable fields supplied" });
       }
@@ -471,9 +532,15 @@ function createAdminRouter(dependencies = {}) {
           active: updated.active,
           testOnly: updated.testOnly,
           sortOrder: updated.sortOrder,
+          assetVersion: updated.assetVersion ?? null,
+          assetUrl: powerupAssetUrl(updated.powerupType, updated.assetVersion),
         },
       });
     } catch (error) {
+      // Validation errors (e.g. a malformed assetVersion) carry statusCode.
+      if (error.statusCode) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
       if (error.code === "P2025") {
         return res.status(404).json({ error: "Powerup shop item not found" });
       }

@@ -8,6 +8,14 @@ const { balanceConfig } = require("../../economy/balanceConfig");
 const {
   DEFAULT_CONFIG: BALANCE_DEFAULT_CONFIG,
 } = require("../../economy/balanceConfig.defaults");
+const { powerupAssetUrl } = require("../../../shared/lib/remoteAssets");
+
+// See shopCosmetics.assetVersionFields — additive, and absent for bundled art.
+function powerupAssetFields(item) {
+  const url = powerupAssetUrl(item.powerupType, item.assetVersion);
+  if (!url) return {};
+  return { assetVersion: item.assetVersion, assetUrl: url };
+}
 
 // GET /shop/powerups — active coin-purchasable powerups, the user's coin
 // balance, and how many of each type the user already owns. Powerups are
@@ -28,11 +36,12 @@ function buildGetPowerupShopCatalog(deps = {}) {
       supportsPowerups3 = false,
       supportsPowerups4 = false,
       supportsPowerups5 = false,
+      supportsRemoteAssets = false,
     } = {}
   ) {
     const [coins, items, inventory, copyRows] = await Promise.all([
       userModel.findCoins(userId),
-      powerupShopItemModel.findActive({ channel }),
+      powerupShopItemModel.findActive({ channel, supportsRemoteAssets }),
       userPowerupItemModel.findManyByUser(userId),
       // §9.5.2: name/description are now served from the copy catalog. The
       // RESPONSE SHAPE is unchanged — old clients read the same two fields — but
@@ -95,6 +104,9 @@ function buildGetPowerupShopCatalog(deps = {}) {
         // missing category to "utility" and a missing rarity to COMMON.
         category: categoryForPowerup(item.powerupType),
         rarity: rarityByType[item.powerupType] ?? "COMMON",
+        // CDN-served icon. Omitted entirely for bundled powerups (every row
+        // today), so the payload old clients parse is byte-identical.
+        ...powerupAssetFields(item),
       })),
     };
   };

@@ -23,6 +23,7 @@ const { createOnboardingRouter } = require("./routes/onboarding");
 const { createAnalyticsRouter } = require("./modules/analytics");
 const { createHomeRouter } = require("./modules/home");
 const { createAppVersionRouter } = require("./routes/appVersion");
+const { createAssetsRouter } = require("./routes/assets");
 const { createAdsRouter } = require("./modules/economy");
 const { extractTimezone } = require("./middleware/extractTimezone");
 const { extractClientFeatures } = require("./shared/middleware/clientFeatures");
@@ -272,6 +273,29 @@ function createApp(dependencies = {}) {
   });
 
   const publicDir = path.join(__dirname, "..", "public");
+
+  // ── CDN-served art ────────────────────────────────────────────────────────
+  // The manifest MUST be registered before the static middleware, otherwise
+  // express.static (fallthrough:false) answers /assets/manifest with a 404
+  // before the route is ever reached.
+  app.use("/assets", createAssetsRouter(dependencies));
+  // Immutable static art. The asset VERSION is part of the filename, so a given
+  // URL's bytes can never change — that's what makes a one-year immutable
+  // max-age safe, and it lets Cloudflare (which already proxies this domain)
+  // edge-cache every PNG. fallthrough:false turns a missing file into a proper
+  // 404 through errorMiddleware instead of falling into the SPA-ish handlers
+  // below; index:false forbids directory listings. serve-static's built-in
+  // path-traversal protection covers ../ and its encoded forms.
+  app.use(
+    "/assets",
+    express.static(path.join(publicDir, "assets"), {
+      immutable: true,
+      maxAge: "365d",
+      fallthrough: false,
+      index: false,
+    })
+  );
+
   app.get("/", (req, res) => res.sendFile(path.join(publicDir, "index.html")));
   app.get("/support", (req, res) => res.sendFile(path.join(publicDir, "support.html")));
   app.get("/support.html", (req, res) => res.sendFile(path.join(publicDir, "support.html")));

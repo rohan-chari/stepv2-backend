@@ -491,6 +491,13 @@ model ShopItem {
   // the extra field and keep using their slot-based fallback, so they're unaffected.
   bobble         Boolean       @default(false)
   sortOrder      Int           @default(0) @map("sort_order")
+  // CDN-served art. NULL (the default, and every pre-existing row) means the
+  // PNG is bundled in the app binary — the historical path, unchanged. A
+  // non-null 12-hex sha256 prefix means the art lives on the server at
+  // /assets/<accessories|characters>/<assetKey>@<assetVersion>.png; the version
+  // is the cache key, so the URL is immutable and safe to cache forever.
+  // Additive + nullable: old deployed code and frozen app binaries never see it.
+  assetVersion   String?       @map("asset_version")
   createdAt      DateTime      @default(now()) @map("created_at")
 
   purchases        UserShopItem[]
@@ -596,6 +603,10 @@ model PowerupShopItem {
   // See ShopItem.testOnly — same prod/TestFlight gate for the powerup catalog.
   testOnly    Boolean     @default(false) @map("test_only")
   sortOrder   Int         @default(0) @map("sort_order")
+  // See ShopItem.assetVersion. NULL => the icon is bundled in the app binary
+  // (PowerupIcon's compiled-in asset map). Non-null => served from
+  // /assets/powerups/<powerup_type lowercased>@<assetVersion>.png.
+  assetVersion String?    @map("asset_version")
   createdAt   DateTime    @default(now()) @map("created_at")
 
   @@index([active, sortOrder])

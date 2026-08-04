@@ -27,6 +27,10 @@ const COMPARED_FIELDS = [
   "earnOnly",
   "bobble",
   "sortOrder",
+  // CDN-served art version. KEEP IN SYNC with MIRRORED_SHOP_ITEM_FIELDS in
+  // src/modules/cosmetics/mirrorShopItem.js and CLONED_FIELDS in
+  // scripts/cosmetics-clone.js.
+  "assetVersion",
 ];
 
 function stable(value) {
@@ -49,7 +53,10 @@ function fieldEqual(a, b) {
 function mirrorFields(item) {
   const out = {};
   for (const key of COMPARED_FIELDS) {
-    out[key] = key === "renderMetadata" ? item[key] ?? null : item[key];
+    out[key] =
+      key === "renderMetadata" || key === "assetVersion"
+        ? item[key] ?? null
+        : item[key];
   }
   return out;
 }
@@ -134,7 +141,7 @@ async function syncPeerCosmetics({ repair = false } = {}) {
   return { created, updated, onlyInPeer: onlyInPeer.length };
 }
 
-module.exports = { syncPeerCosmetics };
+module.exports = { syncPeerCosmetics, COMPARED_FIELDS };
 
 if (require.main === module) {
   syncPeerCosmetics({ repair: process.argv.includes("--repair") })

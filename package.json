@@ -11,6 +11,7 @@
     "test:integration": "DATABASE_URL=postgresql://rohan@localhost:5432/steps-tracker-integration sh -c 'createdb steps-tracker-integration 2>/dev/null; npx prisma migrate deploy && node --test --test-concurrency=1 --test-force-exit test/integration/**/*.test.js'",
     "migrate": "npx prisma migrate dev",
     "generate": "npx prisma generate",
+    "assets:add": "node scripts/assets-add.js",
     "cosmetics:sync-peer": "node scripts/cosmetics-sync-peer.js",
     "cosmetics:clone": "node scripts/cosmetics-clone.js",
     "balance:pull": "node scripts/balance-pull.js",

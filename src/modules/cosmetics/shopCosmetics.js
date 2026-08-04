@@ -1,3 +1,5 @@
+const { shopItemAssetUrl } = require("../../shared/lib/remoteAssets");
+
 const ACCESSORY_SLOTS = ["HEAD", "FACE", "NECK", "BACK", "FEET", "CHARACTER"];
 
 // Base body slot. Items in this slot must NEVER appear in the accessories /
@@ -18,6 +20,18 @@ function bobbleField(item) {
   return typeof item.bobble === "boolean" ? { bobble: item.bobble } : {};
 }
 
+// CDN-served art, additive and OMITTED ENTIRELY for bundled items (the vast
+// majority, and every row that predates the feature) so their payload stays
+// byte-identical to what shipped binaries already parse. A remote item carries
+// both the raw version (cache key) and the fully-built URL, so the client never
+// has to know the path scheme. Same defensive shape as `bobble`: if a feeding
+// query didn't select the column we emit nothing rather than a wrong `null`.
+function assetVersionFields(item) {
+  const url = shopItemAssetUrl(item);
+  if (!url) return {};
+  return { assetVersion: item.assetVersion, assetUrl: url };
+}
+
 function serializeShopItem(item, extras = {}) {
   return {
     id: item.id,
@@ -29,6 +43,7 @@ function serializeShopItem(item, extras = {}) {
     assetKey: item.assetKey,
     renderMetadata: item.renderMetadata,
     ...bobbleField(item),
+    ...assetVersionFields(item),
     ...extras,
   };
 }
@@ -43,6 +58,7 @@ function serializeEquippedAccessory(equippedAccessory) {
     assetKey: item.assetKey,
     renderMetadata: item.renderMetadata,
     ...bobbleField(item),
+    ...assetVersionFields(item),
   };
 }
 
@@ -111,6 +127,7 @@ function characterPresentation(user, supportsCharacters = false, channel = "prod
 
 module.exports = {
   ACCESSORY_SLOTS,
+  assetVersionFields,
   CHARACTER_SLOT,
   serializeShopItem,
   serializeEquippedAccessory,

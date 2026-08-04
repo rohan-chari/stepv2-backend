@@ -80,6 +80,7 @@ function createShopRouter(dependencies = {}) {
         supportsPowerups3: req.clientFeatures.has("powerups3"),
         supportsPowerups4: req.clientFeatures.has("powerups4"),
         supportsPowerups5: req.clientFeatures.has("powerups5"),
+        supportsRemoteAssets: req.clientFeatures.has("remote_assets"),
       });
       res.json(await attachAdUnlock(result, req));
     } catch (error) {
@@ -156,6 +157,7 @@ function createShopRouter(dependencies = {}) {
       const result = await getShopCatalog(req.user.id, {
         channel: req.releaseChannel,
         supportsCharacters: req.clientFeatures.has("characters"),
+        supportsRemoteAssets: req.clientFeatures.has("remote_assets"),
       });
       res.json(await attachAdUnlock(result, req));
     } catch (error) {
