@@ -316,6 +316,10 @@ function buildRecomputePlacements(dependencies = {}) {
                 durationDays: race.maxDurationDays || 7,
               }),
               participantCount: ranked.length,
+              // Only .length is read here (both distributions return exactly
+              // `slots` entries), but pass it anyway so this site can never
+              // drift from the read/settlement sites.
+              curve: race.payoutCurve ?? null,
             }).length
           : (race.potCoins || 0) > 0
             ? computeRacePayouts({

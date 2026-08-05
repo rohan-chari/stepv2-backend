@@ -1,4 +1,6 @@
 const { prisma: defaultPrisma } = require("../../../db");
+const { appSettings: defaultAppSettings } = require("../../../shared/config/appSettings");
+const { filterInactiveUserIds } = require("../services/seededInactivity");
 
 // Auto-join for the seeded daily/weekly featured challenges
 // (users.auto_join_featured_races). Two entry points share the same
@@ -19,6 +21,8 @@ const { prisma: defaultPrisma } = require("../../../db");
 // an existing-participant check, so both entry points are idempotent.
 function buildAutoJoinFeaturedRaces(dependencies = {}) {
   const prisma = dependencies.prisma || defaultPrisma;
+  const settings = dependencies.appSettings || defaultAppSettings;
+  const logger = dependencies.logger || console;
 
   // How many more ACCEPTED participants `race` can take. null max => unlimited.
   async function remainingCapacity(race) {
@@ -54,10 +58,30 @@ function buildAutoJoinFeaturedRaces(dependencies = {}) {
       // Oldest accounts first so the cutoff on a capped race is deterministic.
       orderBy: { createdAt: "asc" },
     });
-    return enroll(
-      race,
-      users.map((u) => u.id)
-    );
+    return enroll(race, await dropInactive(users.map((u) => u.id)));
+  }
+
+  // Hook 1 (spec §4.3): keep 2-day-zero accounts out of the field before the
+  // capacity slice, so the slots go to people actually playing. The race is
+  // being created now, so the race-createdAt exemption is vacuous here.
+  // Fail-open: a predicate failure must never stop the challenge from filling.
+  async function dropInactive(userIds) {
+    if (userIds.length === 0) return userIds;
+    try {
+      if ((await settings.getFlag("seededInactivityPruneEnabled")) !== true) {
+        return userIds;
+      }
+      const inactive = await filterInactiveUserIds({
+        userIds,
+        now: new Date(),
+        prisma,
+      });
+      if (inactive.size === 0) return userIds;
+      return userIds.filter((id) => !inactive.has(id));
+    } catch (error) {
+      logger.error("[CRON] Inactivity enrollment filter failed:", error);
+      return userIds;
+    }
   }
 
   // Toggle path: opt one user into every existing PENDING seeded race they are

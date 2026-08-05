@@ -135,6 +135,10 @@ function buildRaceMoneyView({ race, participants, acceptedCount }) {
       preset: race?.payoutPreset,
       poolCoins: coins,
       participantCount: playerCount,
+      // From the ROW, never the live flag — so the projection and the eventual
+      // settlement (same function, same column) can never disagree, and a
+      // historical race keeps displaying the tiers it actually paid.
+      curve: race?.payoutCurve ?? null,
     }),
     // Retired as a pool source for funded races (spec §4.3). No client reads it.
     finishReward: null,

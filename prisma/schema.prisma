@@ -816,6 +816,14 @@ model Race {
   // read either column.
   fundedPrize          Boolean          @default(false) @map("funded_prize")
   prizePoolCoins       Int              @default(0) @map("prize_pool_coins")
+  // How a FUNDED race splits its pool across the paid places of a graded preset
+  // (TOP_HALF / ALL_BUT_LAST). Stamped at creation and never rewritten, exactly
+  // like fundedPrize: the row is the authority, never the live flag, so an
+  // in-flight race can never have its advertised payout table change shape
+  // underneath it. NULL (every pre-existing row, and every user-created race)
+  // = the even split shipped today; "GEOMETRIC" = the top-heavy 0.7 decay.
+  // Only createSeededRace ever writes it. Not serialized to clients.
+  payoutCurve          String?          @map("payout_curve")
   startedAt            DateTime?        @map("started_at")
   endsAt               DateTime?        @map("ends_at")
   // Optional future auto-start time (1.1.7). When set and in the future, the

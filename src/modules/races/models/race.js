@@ -434,6 +434,10 @@ const Race = {
         // placement alert is gated on has to be derived from the pool formula
         // instead — which needs the discriminator plus the duration band.
         fundedPrize: true,
+        // payoutCurve (additive): the paid-place count is curve-independent, but
+        // this lean select is exactly the kind of place where omitting the
+        // column would silently downgrade a stamped race to the even split.
+        payoutCurve: true,
         maxDurationDays: true,
         // startedAt (additive): the race-ending-soon reminder needs the total
         // scheduled duration (endsAt - startedAt) to skip sub-2h seeded races

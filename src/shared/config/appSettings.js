@@ -74,6 +74,16 @@ const KNOWN_FLAGS = {
   // values all make the client fall back to 60. Registered here so the admin
   // settings surface can set it (setFlag rejects unknown keys).
   stepSampleBucketMinutes: 60,
+  // Top-heavy seeded challenge payouts. Read ONLY by createSeededRace, which
+  // stamps races.payout_curve at creation; settlement and every read path go off
+  // that column, never this flag. Flipping it off therefore stops stamping NEW
+  // races while already-stamped ones honour the curve they advertised — correct,
+  // not a bug. Default OFF so the deploy changes nothing.
+  seededGeometricPayoutsEnabled: false,
+  // Inactive-participant pruning for the seeded challenges: one kill switch over
+  // all three hooks (enrollment filter, promotion prune, weekly mid-race sweep).
+  // OFF restores today's behavior exactly and immediately. Default OFF.
+  seededInactivityPruneEnabled: false,
 };
 
 function buildAppSettings(dependencies = {}) {

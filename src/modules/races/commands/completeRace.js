@@ -300,6 +300,9 @@ function buildCompleteRace(dependencies = {}) {
         preset: race.payoutPreset || "WINNER_TAKES_ALL",
         poolCoins: pool,
         participantCount: settledFieldSize,
+        // Stamped at creation; the row is the authority here exactly as
+        // fundedPrize is, so the curve a race advertised is the curve it pays.
+        curve: race.payoutCurve ?? null,
       });
 
       for (let index = 0; index < payouts.length; index++) {

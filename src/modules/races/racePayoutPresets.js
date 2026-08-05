@@ -136,21 +136,37 @@ function distributeEvenly(pool, slots) {
   return amounts;
 }
 
+// The payout curves a funded race can be stamped with (races.payout_curve).
+// NULL/anything unrecognized means the even split — the historical behaviour
+// every pre-existing row and every user-created race keeps.
+const PAYOUT_CURVES = {
+  GEOMETRIC: "GEOMETRIC",
+};
+
 // Coins by place for an APP-FUNDED prize pool (index 0 = 1st). Same preset
 // machinery as the buy-in pot — so old clients' payouts{first,second,third} and
 // new clients' payoutTiers[] keep working — except that the two field-scaled
 // presets split EVENLY (D1) instead of geometrically: a top-half of 300 people
 // should hand out equal shares, not a decaying curve.
 //
+// `curve` is the race ROW's stamped discriminator, never a live feature flag,
+// so a race's payout table can never change shape underneath it: "GEOMETRIC"
+// makes the graded presets decay top-heavy (seeded challenges), anything else
+// keeps the even split. Slot count is identical either way, so every `.length`
+// consumer (paid-place counts) is unaffected by the curve.
+//
 // Deliberately separate from computeRacePayouts: legacy buy-in pots keep their
 // existing geometric curve so an in-flight paid race's payout table doesn't
 // change shape underneath its participants mid-race.
-function computeFundedPayouts({ preset, poolCoins, participantCount }) {
+function computeFundedPayouts({ preset, poolCoins, participantCount, curve = null }) {
   const pool = Math.max(0, Math.floor(poolCoins || 0));
   if (pool === 0) return [];
 
   if (GRADED_PRESETS.has(preset)) {
-    return distributeEvenly(pool, gradedSlotCount(preset, participantCount));
+    const slots = gradedSlotCount(preset, participantCount);
+    return curve === PAYOUT_CURVES.GEOMETRIC
+      ? distributeGeometric(pool, slots)
+      : distributeEvenly(pool, slots);
   }
 
   return distributeByPercentages(getRacePayoutPercentages(preset), pool);
@@ -192,6 +208,7 @@ function computeGradedPayouts({ pool, count }) {
 
 module.exports = {
   RACE_PAYOUT_PRESETS,
+  PAYOUT_CURVES,
   MIN_MULTI_PAYOUT_PARTICIPANTS,
   computeRacePayouts,
   computeFundedPayouts,

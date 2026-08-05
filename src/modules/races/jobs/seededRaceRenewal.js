@@ -8,7 +8,14 @@ const {
   nextMidnightNewYork,
   startOfWeekNewYork,
   nextWeekStartNewYork,
+  getTimeZoneParts,
+  formatDateString,
 } = require("../../../shared/time/week");
+const { JobRun } = require("../../../shared/db/jobRun");
+const {
+  filterInactiveUserIds,
+  findUsersWithActivitySince,
+} = require("../services/seededInactivity");
 
 // Tight cadence so the midnight promote/settle handoff gap is small: at 00:00 ET
 // the just-expired race is filtered out of Featured while the next race is still
@@ -18,6 +25,10 @@ const RENEWAL_INTERVAL_MS = 60 * 1000;
 // Canonical timezone for seeded daily/weekly challenges. Their day boundaries
 // (and thus "midnight") are defined here for every participant, globally.
 const SEED_TIMEZONE = "America/New_York";
+
+// ET hour the weekly mid-race ghost sweep is allowed to run (spec §4.3 Hook 3).
+// Aligned with the retention job's quiet window; the exact hour isn't load-bearing.
+const WEEKLY_SWEEP_HOUR_ET = 3;
 
 function buildRenewSeededRaces(dependencies = {}) {
   const prisma = dependencies.prisma || defaultPrisma;
@@ -53,9 +64,16 @@ function buildRenewSeededRaces(dependencies = {}) {
     // the races stay legacy (fundedPrize false) and keep minting today's graded
     // raceFinishReward.
     const fundedPrizePools = await settings.getFlag("fundedPrizePoolsEnabled");
+    // Top-heavy payouts are STAMPED here and nowhere else: read paths and
+    // settlement consult the column, so flipping the flag later can only change
+    // what FUTURE races advertise, never an in-flight or historical one.
+    const geometricPayouts = await settings.getFlag(
+      "seededGeometricPayoutsEnabled"
+    );
     return prisma.race.create({
       data: {
         payoutPreset: "TOP_HALF",
+        payoutCurve: geometricPayouts === true ? "GEOMETRIC" : null,
         fundedPrize: fundedPrizePools === true,
         seedId: seed.id,
         creatorId: null,
@@ -114,12 +132,148 @@ function buildRenewSeededRaces(dependencies = {}) {
     }
   }
 
+  // Hook 2 (spec §4.3): drop every 2-day-zero ACCEPTED participant from a
+  // seeded race, regardless of how they joined (D3). Runs while the race is
+  // still PENDING so soon-pruned users are never briefly live.
+  //
+  // deleteMany, not per-row delete: a pm2-cluster double-promotion must be a
+  // silent no-op the second time, not a P2025. Fail-open — the challenge
+  // running matters more than the prune.
+  async function pruneInactiveParticipants(race) {
+    try {
+      if ((await settings.getFlag("seededInactivityPruneEnabled")) !== true) {
+        return 0;
+      }
+      const accepted = await prisma.raceParticipant.findMany({
+        where: { raceId: race.id, status: "ACCEPTED" },
+        select: { userId: true },
+      });
+      if (accepted.length === 0) return 0;
+
+      const inactive = await filterInactiveUserIds({
+        userIds: accepted.map((p) => p.userId),
+        now: now(),
+        raceCreatedAt: race.createdAt,
+        prisma,
+      });
+      if (inactive.size === 0) return 0;
+
+      const { count } = await prisma.raceParticipant.deleteMany({
+        where: {
+          raceId: race.id,
+          status: "ACCEPTED",
+          userId: { in: [...inactive] },
+        },
+      });
+      if (count > 0) {
+        logger.log(
+          `[CRON] Pruned ${count} inactive participant(s) from seeded race ${race.id}`
+        );
+      }
+      return count;
+    } catch (error) {
+      logger.error(`[CRON] Inactivity prune failed for race ${race.id}:`, error);
+      return 0;
+    }
+  }
+
+  // Hook 3 (spec §4.3, D4): once per ET day, sweep the ACTIVE weekly's ghosts —
+  // participants who are 2-day-zero AND have walked nothing at all in the race
+  // so far. A competitor who walked early in the week then rested keeps their
+  // earned position, so the guard is deliberately stricter than the predicate.
+  async function sweepWeeklyGhosts(race, nowDate) {
+    try {
+      if ((await settings.getFlag("seededInactivityPruneEnabled")) !== true) {
+        return 0;
+      }
+      const parts = getTimeZoneParts(nowDate, SEED_TIMEZONE);
+      if (parts.hour < WEEKLY_SWEEP_HOUR_ET) return 0;
+      const dayKey = formatDateString(parts.year, parts.month, parts.day);
+      // Atomic CAS across the pm2 cluster. Never markRan (read-then-upsert lets
+      // two workers both proceed) and never an advisory lock held across this.
+      if (!(await JobRun.claimRun(`seeded_weekly_sweep:${race.id}`, dayKey))) {
+        return 0;
+      }
+
+      const candidates = await prisma.raceParticipant.findMany({
+        where: { raceId: race.id, status: "ACCEPTED", totalSteps: { lte: 0 } },
+        select: { userId: true },
+      });
+      if (candidates.length === 0) return 0;
+
+      const inactive = await filterInactiveUserIds({
+        userIds: candidates.map((p) => p.userId),
+        now: nowDate,
+        raceCreatedAt: race.createdAt,
+        prisma,
+      });
+      if (inactive.size === 0) return 0;
+
+      // Ghost guard: persisted totalSteps can lag, so confirm against the raw
+      // step data for the race window before removing anyone.
+      const walked = await findUsersWithActivitySince({
+        userIds: [...inactive],
+        since: race.startedAt,
+        prisma,
+      });
+
+      // Side-effect guard: a participant holding a powerup — or caught up in an
+      // active effect as caster or target — is skipped. Deleting their row
+      // cascades RacePowerup and, through it, RaceActiveEffect rows that may be
+      // scoring OTHER participants (RaceActiveEffect.sourceUserId carries no FK,
+      // so the cascade travels via the caster's powerup rows).
+      const remaining = [...inactive].filter((id) => !walked.has(id));
+      if (remaining.length === 0) return 0;
+      const [powerups, effects] = await Promise.all([
+        prisma.racePowerup.findMany({
+          where: { raceId: race.id, userId: { in: remaining } },
+          select: { userId: true },
+        }),
+        prisma.raceActiveEffect.findMany({
+          where: {
+            raceId: race.id,
+            OR: [
+              { targetUserId: { in: remaining } },
+              { sourceUserId: { in: remaining } },
+            ],
+          },
+          select: { targetUserId: true, sourceUserId: true },
+        }),
+      ]);
+      const entangled = new Set(powerups.map((p) => p.userId));
+      for (const effect of effects) {
+        entangled.add(effect.targetUserId);
+        entangled.add(effect.sourceUserId);
+      }
+
+      const doomed = remaining.filter((id) => !entangled.has(id));
+      if (doomed.length === 0) return 0;
+
+      const { count } = await prisma.raceParticipant.deleteMany({
+        where: { raceId: race.id, status: "ACCEPTED", userId: { in: doomed } },
+      });
+      if (count > 0) {
+        logger.log(
+          `[CRON] Weekly sweep removed ${count} ghost(s) from race ${race.id}`
+        );
+      }
+      return count;
+    } catch (error) {
+      logger.error(`[CRON] Weekly sweep failed for race ${race.id}:`, error);
+      return 0;
+    }
+  }
+
   // Flip a due PENDING seeded race to ACTIVE. Deliberately NOT startRace: that
   // path requires creatorId===userId (seeded races have none), >=2 accepted
   // participants (a daily race must start even with 0-1 opt-ins), and computes
   // endsAt as +N*24h (wrong on DST days). Here startedAt = the scheduled midnight
   // and endsAt is the pre-computed exact next-midnight from creation.
   async function promoteSeededRace(seed, race) {
+    // BEFORE the ACTIVE flip: the pruned rows never exist on a live race, so no
+    // step sync, featured read, or box init can race them.
+    await pruneInactiveParticipants(race);
+
     const startedAt = race.scheduledStartAt
       ? new Date(race.scheduledStartAt)
       : now();
@@ -218,6 +372,17 @@ function buildRenewSeededRaces(dependencies = {}) {
       });
       await autoEnroll(seed, race);
       results.push({ action: "created-upcoming", seedKind: seed.kind, race });
+    }
+
+    // 4) Weekly only (D4): sweep the ACTIVE race's ghosts once per ET day. The
+    // daily is boundary-only — its field was filtered at enrollment and pruned
+    // at promotion hours earlier, with nearly the same window.
+    if (seed.cadence === "WEEKLY") {
+      const live = await prisma.race.findFirst({
+        where: { seedId: seed.id, status: "ACTIVE" },
+        orderBy: { startedAt: "desc" },
+      });
+      if (live) await sweepWeeklyGhosts(live, nowDate);
     }
   }
 
