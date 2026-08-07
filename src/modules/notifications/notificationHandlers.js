@@ -1072,8 +1072,22 @@ function registerNotificationHandlers(dependencies = {}) {
         multiplier: mult,
       };
 
+      // Once-per-day recipient cap: at most ONE of these pushes per rolling
+      // 24h per recipient, across ALL races and actors — whichever spike
+      // happens first that day wins. Keyed off the recorded notification row
+      // (written only when we actually notify), so it holds across pm2
+      // cluster workers. Capped recipients skip the record too, or the
+      // in-app notification list would still spam.
+      const capCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
       for (const recipientUserId of recipientUserIds) {
         if (!recipientUserId || recipientUserId === actorUserId) continue;
+        const recentAlert = await notificationModel.findFirstByUserTypeSince(
+          recipientUserId,
+          "HIGH_MULTIPLIER_ALERT",
+          capCutoff
+        );
+        if (recentAlert) continue;
         const tokens = await deviceTokenModel.findByUserId(recipientUserId);
         if (!tokens || tokens.length === 0) continue;
         for (const tokenRecord of tokens) {
@@ -1083,7 +1097,12 @@ function registerNotificationHandlers(dependencies = {}) {
               title,
               body,
               payload,
-              collapseId: `himult_${raceId}_${actorUserId}`,
+              // APNs hard-limits `apns-collapse-id` to 64 BYTES. The original
+              // `himult_<raceId>_<actorUserId>` (two full UUIDs, 80 bytes) made
+              // APNs 400 InvalidCollapseId on every send — no one ever received
+              // this push. 8-char UUID prefixes keep it unique enough for
+              // collapse purposes at 25 bytes.
+              collapseId: `himult_${String(raceId ?? "").slice(0, 8)}_${String(actorUserId ?? "").slice(0, 8)}`,
             });
             if (!result.success && !result.unregistered) {
               logger.warn("HIGH_MULTIPLIER_ALERT push failed", {

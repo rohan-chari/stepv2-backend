@@ -19,6 +19,16 @@ const Notification = {
     });
   },
 
+  // Most recent `type` row for `userId` created on/after `since`, or null.
+  // Backs rolling-window recipient caps (e.g. HIGH_MULTIPLIER_ALERT's
+  // once-per-24h limit). Rows only exist for ~a week (nightly prune), which
+  // comfortably covers any sane window.
+  async findFirstByUserTypeSince(userId, type, since) {
+    return prisma.notification.findFirst({
+      where: { userId, type, createdAt: { gte: since } },
+    });
+  },
+
   // Nightly-cleanup primitive: delete everything older than `cutoff`. Returns the
   // Prisma batch-payload ({ count }). Idempotent — re-running deletes nothing more.
   async deleteOlderThan(cutoff) {
