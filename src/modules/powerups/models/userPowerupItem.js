@@ -18,10 +18,16 @@ const UserPowerupItem = {
   // Atomic conditional decrement of 1: succeeds (count 1) only when quantity
   // >= 1, so a user can never spend a powerup they don't own.
   async decrementIfAvailable(userId, powerupType) {
-    return prisma.userPowerupItem.updateMany({
+    const result = await prisma.userPowerupItem.updateMany({
       where: { userId, powerupType, quantity: { gte: 1 } },
       data: { quantity: { decrement: 1 } },
     });
+    // C4 (spec §5 Phase E): the "use" seam. Only invalidate when a row actually
+    // moved — a failed spend changed nothing, so the cached value is still true.
+    if (result?.count > 0) {
+      await require("../services/powerupInventoryCache").invalidateSafe(userId);
+    }
+    return result;
   },
 };
 

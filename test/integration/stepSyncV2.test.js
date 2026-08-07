@@ -9,8 +9,60 @@ const {
   prisma,
 } = require("./setup");
 
+// POST /steps/sync-v2 — the durable async sync contract.
+//
+// UPDATED FOR C0 (docs/redis-derived-data-layer-requirements.md §5a): the
+// resolution queue is keyed by RACE, not by user. A sync therefore enqueues one
+// `race_resolution_jobs_v2` row per ACTIVE race the uploader is in, appending
+// the uploader to that job's `triggeredByUserIds`, and a user with no active
+// races enqueues nothing at all (there is nothing to resolve).
+//
+// The wire contract is unchanged and is asserted here for frozen clients:
+// `raceResolution` is still an object with `jobId` / `generation` / `state` /
+// `requestedAt`, still reports ONE job (the uploader's lexicographically-first
+// active race — the one `GET /steps/race-resolution/:jobId` polls), and now
+// carries `jobId: null` when there is no race to resolve. The shipped client
+// already models `jobId` as nullable (backend_api_service.dart parses it as
+// `rawJobId is String && isNotEmpty ? … : null`) and simply skips its poll.
+
 const uuid = () => crypto.randomUUID();
 const bodyFor = (steps) => ({ date: "2026-07-17", steps, samples: [] });
+
+const HOUR_MS = 60 * 60 * 1000;
+
+async function activeRaceWith(userId, name) {
+  const startedAt = new Date(Date.now() - 3 * HOUR_MS);
+  const race = await prisma.race.create({
+    data: {
+      creatorId: userId,
+      name,
+      targetSteps: 0,
+      isPublic: false,
+      timeBased: true,
+      timezone: "UTC",
+      maxParticipants: 10,
+      maxDurationDays: 7,
+      status: "ACTIVE",
+      startedAt,
+      endsAt: new Date(Date.now() + 24 * HOUR_MS),
+      potCoins: 0,
+    },
+    select: { id: true },
+  });
+  await prisma.raceParticipant.create({
+    data: { raceId: race.id, userId, status: "ACCEPTED", joinedAt: startedAt },
+  });
+  return race.id;
+}
+
+function jobsForRace(raceId) {
+  return prisma.$queryRawUnsafe(
+    `SELECT race_id AS "raceId", generation, state::text AS state,
+            triggered_by_user_ids AS "triggeredByUserIds"
+     FROM race_resolution_jobs_v2 WHERE race_id = $1`,
+    raceId
+  );
+}
 
 describe("POST /steps/sync-v2 (integration)", () => {
   let baseUrl;
@@ -21,7 +73,7 @@ describe("POST /steps/sync-v2 (integration)", () => {
     await cleanDatabase();
   });
 
-  it("persists steps, returns 202 CURRENT, and creates a COMPLETE reservation + QUEUED job", async () => {
+  it("persists steps, returns 202 CURRENT, and completes the reservation", async () => {
     const { token, user } = await createTestUser();
     const key = uuid();
     const res = await request(baseUrl, "POST", "/steps/sync-v2", {
@@ -35,9 +87,6 @@ describe("POST /steps/sync-v2 (integration)", () => {
     assert.equal(json.record.stepGoal, 5000); // 1.1.4 compat default
     assert.equal(json.uploaderReconciliation.state, "CURRENT");
     assert.equal(json.uploaderReconciliation.resolvedRaceCount, 0); // no active races
-    assert.equal(json.raceResolution.state, "QUEUED");
-    assert.equal(json.raceResolution.generation, 1);
-    assert.ok(json.raceResolution.jobId);
 
     const step = await prisma.step.findUnique({
       where: { userId_date: { userId: user.id, date: new Date("2026-07-17") } },
@@ -49,14 +98,83 @@ describe("POST /steps/sync-v2 (integration)", () => {
     });
     assert.equal(reservation.state, "COMPLETE");
     assert.equal(reservation.resolutionTimeZone, "America/New_York"); // default tz
+  });
 
-    const job = await prisma.raceResolutionJob.findUnique({ where: { userId: user.id } });
-    assert.equal(job.state, "QUEUED");
-    assert.equal(job.generation, 1);
+  it("with NO active races: enqueues nothing and returns a frozen-client-safe raceResolution with jobId null", async () => {
+    const { token } = await createTestUser();
+    const res = await request(baseUrl, "POST", "/steps/sync-v2", {
+      token,
+      headers: { "Idempotency-Key": uuid() },
+      body: bodyFor(700),
+    });
+    assert.equal(res.status, 202);
+    const json = await res.json();
+
+    // Shape a frozen binary can parse without crashing: the object is present,
+    // `state` is still the QUEUED string it always was, `requestedAt` still
+    // parses as a date, and `jobId` is null rather than absent.
+    assert.equal(typeof json.raceResolution, "object");
+    assert.notEqual(json.raceResolution, null);
+    assert.ok("jobId" in json.raceResolution);
+    assert.equal(json.raceResolution.jobId, null);
+    assert.equal(json.raceResolution.generation, null);
+    assert.equal(json.raceResolution.state, "QUEUED");
+    assert.ok(!Number.isNaN(new Date(json.raceResolution.requestedAt).getTime()));
+
+    const jobCount = await prisma.$queryRawUnsafe(
+      `SELECT COUNT(*)::int AS c FROM race_resolution_jobs_v2`
+    );
+    assert.equal(jobCount[0].c, 0, "nothing to resolve => nothing enqueued");
+  });
+
+  it("enqueues one RACE-keyed job per active race of the uploader, with the uploader in triggeredByUserIds", async () => {
+    const { token, user } = await createTestUser();
+    const raceA = await activeRaceWith(user.id, "AAA race");
+    const raceB = await activeRaceWith(user.id, "BBB race");
+
+    const res = await request(baseUrl, "POST", "/steps/sync-v2", {
+      token,
+      headers: { "Idempotency-Key": uuid() },
+      body: bodyFor(4321),
+    });
+    assert.equal(res.status, 202);
+    const json = await res.json();
+
+    for (const raceId of [raceA, raceB]) {
+      const [job] = await jobsForRace(raceId);
+      assert.ok(job, `race ${raceId} was enqueued`);
+      assert.equal(job.generation, 1);
+      assert.equal(job.state, "queued");
+      assert.deepEqual(
+        job.triggeredByUserIds,
+        [user.id],
+        "the uploader is recorded so the worker computes THEIR box state"
+      );
+    }
+
+    // Exactly two rows — race-keyed, never one per user.
+    const all = await prisma.$queryRawUnsafe(
+      `SELECT COUNT(*)::int AS c FROM race_resolution_jobs_v2`
+    );
+    assert.equal(all[0].c, 2);
+
+    // The response reports one pollable job: the lexicographically-first race's.
+    const reported = [raceA, raceB].sort((a, b) => a.localeCompare(b))[0];
+    const [reportedJob] = await jobsForRace(reported);
+    assert.ok(json.raceResolution.jobId);
+    assert.equal(json.raceResolution.generation, 1);
+    assert.equal(json.raceResolution.state, "QUEUED");
+    const rows = await prisma.$queryRawUnsafe(
+      `SELECT race_id AS "raceId" FROM race_resolution_jobs_v2 WHERE id = $1`,
+      json.raceResolution.jobId
+    );
+    assert.equal(rows[0].raceId, reported);
+    assert.equal(reportedJob.generation, json.raceResolution.generation);
   });
 
   it("same-key replay with equivalent input returns the stored response and does not bump the generation", async () => {
     const { token, user } = await createTestUser();
+    const raceId = await activeRaceWith(user.id, "Replay race");
     const key = uuid();
     const first = await (
       await request(baseUrl, "POST", "/steps/sync-v2", {
@@ -75,7 +193,7 @@ describe("POST /steps/sync-v2 (integration)", () => {
     const replayJson = await replay.json();
     assert.deepEqual(replayJson, first);
 
-    const job = await prisma.raceResolutionJob.findUnique({ where: { userId: user.id } });
+    const [job] = await jobsForRace(raceId);
     assert.equal(job.generation, 1); // NOT incremented by a replay
   });
 
@@ -96,8 +214,10 @@ describe("POST /steps/sync-v2 (integration)", () => {
     assert.equal((await conflict.json()).code, "IDEMPOTENCY_CONFLICT");
   });
 
-  it("a fresh key coalesces into the one per-user job and bumps the generation", async () => {
+  it("a fresh key coalesces into the SAME race job and bumps its generation", async () => {
     const { token, user } = await createTestUser();
+    const raceId = await activeRaceWith(user.id, "Coalesce race");
+
     await request(baseUrl, "POST", "/steps/sync-v2", {
       token,
       headers: { "Idempotency-Key": uuid() },
@@ -111,9 +231,10 @@ describe("POST /steps/sync-v2 (integration)", () => {
     const secondJson = await second.json();
     assert.equal(secondJson.raceResolution.generation, 2);
 
-    const jobs = await prisma.raceResolutionJob.findMany({ where: { userId: user.id } });
-    assert.equal(jobs.length, 1); // ONE row per user (coalesced)
+    const jobs = await jobsForRace(raceId);
+    assert.equal(jobs.length, 1); // ONE row per RACE (coalesced)
     assert.equal(jobs[0].generation, 2);
+    assert.deepEqual(jobs[0].triggeredByUserIds, [user.id]);
   });
 
   it("a non-UUID idempotency key is rejected 400 INVALID_STEP_SYNC", async () => {
@@ -127,8 +248,9 @@ describe("POST /steps/sync-v2 (integration)", () => {
     assert.equal((await res.json()).code, "INVALID_STEP_SYNC");
   });
 
-  it("owner-only status endpoint returns the job state; a foreign job is a non-leaking 404", async () => {
+  it("status endpoint returns the job state to a participant; a non-participant is a non-leaking 404", async () => {
     const { token, user } = await createTestUser();
+    await activeRaceWith(user.id, "Status race");
     const post = await (
       await request(baseUrl, "POST", "/steps/sync-v2", {
         token,
@@ -137,16 +259,29 @@ describe("POST /steps/sync-v2 (integration)", () => {
       })
     ).json();
     const jobId = post.raceResolution.jobId;
+    assert.ok(jobId, "an active race means there IS a job to poll");
 
-    const ok = await request(baseUrl, "GET", `/steps/race-resolution/${jobId}?generation=1`, { token });
+    const ok = await request(
+      baseUrl,
+      "GET",
+      `/steps/race-resolution/${jobId}?generation=1`,
+      { token }
+    );
     assert.equal(ok.status, 200);
     const okJson = await ok.json();
-    assert.ok(["QUEUED", "RUNNING", "SUCCEEDED"].includes(okJson.raceResolution.state));
+    assert.ok(
+      ["QUEUED", "RUNNING", "SUCCEEDED"].includes(okJson.raceResolution.state)
+    );
 
+    // Ownership is now "is a participant of the job's race" — the job is no
+    // longer keyed by a single user. An outsider still gets a bare 404.
     const { token: otherToken } = await createTestUser();
-    const forbidden = await request(baseUrl, "GET", `/steps/race-resolution/${jobId}?generation=1`, {
-      token: otherToken,
-    });
+    const forbidden = await request(
+      baseUrl,
+      "GET",
+      `/steps/race-resolution/${jobId}?generation=1`,
+      { token: otherToken }
+    );
     assert.equal(forbidden.status, 404);
   });
 });

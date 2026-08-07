@@ -5,6 +5,24 @@ const { prisma } = require("../../../db");
 // client cannot unbounded-increment a prod column.
 const MAX_RENAME_CHIP_SHOWN_COUNT = 99;
 
+// C5 (spec §5 Phase E2): the users row is the bulk of the `/auth/me` payload,
+// so THIS MODEL is the invalidation chokepoint for it. Every users-row mutation
+// in the codebase routes through one of the methods below except the raw
+// `tx.user.update` calls nested inside larger transactions and the two coin
+// seams — those are hooked individually (see the inventory table in
+// services/authMeCache.js). Hooking here rather than at ~30 call sites is what
+// makes "did we miss a seam?" answerable by reading one file.
+//
+// Lazy require: authMeCache pulls in the Redis wrapper, and this model is
+// loaded by the auth middleware on every request path.
+async function invalidateAuthMe(id) {
+  try {
+    await require("../services/authMeCache").invalidateSafe(id);
+  } catch {
+    // Cache bookkeeping must never fail a user write.
+  }
+}
+
 const User = {
   async findById(id) {
     return prisma.user.findUnique({ where: { id } });
@@ -47,10 +65,12 @@ const User = {
   },
 
   async update(id, fields) {
-    return prisma.user.update({
+    const updated = await prisma.user.update({
       where: { id },
       data: fields,
     });
+    await invalidateAuthMe(id);
+    return updated;
   },
 
   // TR-706: persist the user's X-Client-Features tokens (STICKY union — the
@@ -58,10 +78,12 @@ const User = {
   // appeared, so this is never a hot write path). Stamps clientFeaturesAt for
   // observability/debugging.
   async updateClientFeatures(id, features) {
-    return prisma.user.update({
+    const updated = await prisma.user.update({
       where: { id },
       data: { clientFeatures: features, clientFeaturesAt: new Date() },
     });
+    await invalidateAuthMe(id);
+    return updated;
   },
 
   // Sticky-write the user's IANA timezone (§7). Called from requireAuth ONLY
@@ -69,10 +91,12 @@ const User = {
   // stored value — never on every request (mirrors updateClientFeatures; commit
   // 3e6c827's pool-exhaustion lesson). Backs the daily-reward reminder scheduler.
   async updateTimezone(id, timezone) {
-    return prisma.user.update({
+    const updated = await prisma.user.update({
       where: { id },
       data: { timezone },
     });
+    await invalidateAuthMe(id);
+    return updated;
   },
 
   // §9.1: read the user's notification preferences. The column is NOT NULL with a
@@ -94,6 +118,7 @@ const User = {
       data: { dailyRewardRemindersEnabled: enabled },
       select: { dailyRewardRemindersEnabled: true },
     });
+    await invalidateAuthMe(id);
     return { dailyRewardRemindersEnabled: user.dailyRewardRemindersEnabled };
   },
 
@@ -115,6 +140,7 @@ const User = {
       },
       data: { renameChipShownCount: { increment: 1 } },
     });
+    await invalidateAuthMe(id);
     return prisma.user.findUnique({ where: { id } });
   },
 
@@ -124,6 +150,7 @@ const User = {
       where: { id, renameChipDismissedAt: null },
       data: { renameChipDismissedAt: dismissedAt },
     });
+    await invalidateAuthMe(id);
     return prisma.user.findUnique({ where: { id } });
   },
 

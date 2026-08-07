@@ -58,6 +58,16 @@ function idempotentResult(request) {
   return { ...request.resultJson, idempotent: true };
 }
 
+// C5 (spec §5 Phase E2): mirrors purchaseShopItem — `deductCoinsAtomic`'s DEL
+// runs inside the transaction, so invalidate again post-commit to close the
+// re-warm window on the client's most read-back-after-write field.
+async function invalidateAuthMeAfterPurchase(userId) {
+  if (!userId) return;
+  try {
+    await require("../users/services/authMeCache").invalidateSafe(userId);
+  } catch {}
+}
+
 function buildUnlockShopItemWithAds(dependencies = {}) {
   const runTransaction =
     dependencies.runTransaction || ((fn) => prisma.$transaction((tx) => fn(tx)));
@@ -86,7 +96,7 @@ function buildUnlockShopItemWithAds(dependencies = {}) {
     const effectiveLocalDate = resolveLocalDate(localDate, unlockError);
 
     try {
-      return await runTransaction(async (tx) => {
+      const outcome = await runTransaction(async (tx) => {
         const existing = await tx.shopPurchaseRequest.findUnique({
           where: { userId_idempotencyKey: { userId, idempotencyKey: trimmedKey } },
         });
@@ -231,6 +241,8 @@ function buildUnlockShopItemWithAds(dependencies = {}) {
 
         return result;
       });
+      await invalidateAuthMeAfterPurchase(userId);
+      return outcome;
     } catch (error) {
       if (error instanceof ShopUnlockWithAdsError) throw error;
       if (

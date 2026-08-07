@@ -16,6 +16,38 @@ const {
   balanceConfig: defaultBalanceConfig,
 } = require("../economy/balanceConfig");
 const { serializeBounds } = require("../economy/balanceConfig.defaults");
+const derivedCache = require("../../shared/cache/derivedCache");
+const cacheKeys = require("../../shared/cache/cacheKeys");
+
+// C1 invalidation (spec §5 Phase B). Every shop_items / powerup_shop_items
+// mutation below must drop the derived catalog + manifest copies and broadcast
+// to peer workers — otherwise the admin's own write is invisible for up to the
+// 60s TTL, on every worker but the one that served the request.
+//
+// EVERY VARIANT is deleted, not just the caller's: an admin on a TestFlight
+// build editing an item must still bust the prod-channel copy.
+// Invalidate-only — the new row is never written into Redis here (§3).
+async function invalidateShopCaches() {
+  await derivedCache.invalidate({
+    keys: cacheKeys.shopCatalogVariants(),
+    prefix: cacheKeys.PREFIX.SHOP_CATALOG,
+  });
+  await derivedCache.invalidate({
+    keys: cacheKeys.assetsManifestVariants(),
+    prefix: cacheKeys.PREFIX.ASSETS_MANIFEST,
+  });
+}
+
+async function invalidatePowerupShopCaches() {
+  await derivedCache.invalidate({
+    keys: cacheKeys.powerupCatalogVariants(),
+    prefix: cacheKeys.PREFIX.POWERUP_CATALOG,
+  });
+  await derivedCache.invalidate({
+    keys: cacheKeys.assetsManifestVariants(),
+    prefix: cacheKeys.PREFIX.ASSETS_MANIFEST,
+  });
+}
 
 // Allowed values for the numeric stepSampleBucketMinutes setting (§3.2).
 const STEP_SAMPLE_BUCKET_MINUTES = new Set([5, 10, 15, 30, 60]);
@@ -335,6 +367,8 @@ function createAdminRouter(dependencies = {}) {
         },
       });
 
+      await invalidateShopCaches();
+
       // Keep prod and staging in lockstep from birth: mirror the new item to
       // the peer DB. No-ops safely if PEER_DATABASE_URL is unset.
       const mirror = await mirrorShopItemToPeer(created);
@@ -425,6 +459,8 @@ function createAdminRouter(dependencies = {}) {
         where: { id: req.params.itemId },
         data,
       });
+      await invalidateShopCaches();
+
       // Keep prod and staging in lockstep: mirror the full item state to the
       // peer DB (matched by sku). No-ops safely if PEER_DATABASE_URL is unset.
       const mirror = await mirrorShopItemToPeer(updated);
@@ -522,6 +558,7 @@ function createAdminRouter(dependencies = {}) {
         where: { id: req.params.itemId },
         data,
       });
+      await invalidatePowerupShopCaches();
       res.json({
         item: {
           id: updated.id,

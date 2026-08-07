@@ -1,4 +1,18 @@
 const { prisma } = require("../../db");
+// C5 (spec §5 Phase E2, §9's last acceptance box): this file and
+// deductCoinsAtomic.js are the ONLY two `users.coins` writers, pinned by
+// test/services/coinSeamStructuralGuard.test.js. `coins` is the single most
+// read-back-after-write field in the client (15 wallet-refresh sites), so both
+// seams DELETE the 10s `/auth/me` cache. Lazy require: the cache module pulls in
+// the Redis wrapper, and this file is required from settlement paths that must
+// stay Redis-free at load time.
+async function invalidateAuthMe(userId) {
+  try {
+    await require("../../modules/users/services/authMeCache").invalidateSafe(userId);
+  } catch {
+    // A cache DEL must never fail a ledgered coin write.
+  }
+}
 
 /**
  * Award coins to a user. Idempotent — won't double-award for the same
@@ -35,6 +49,7 @@ async function awardCoins({ userId, amount, reason, refId }) {
       }),
     ]);
 
+    await invalidateAuthMe(userId);
     return { awarded: true, coins: user.coins };
   } catch (error) {
     // The preflight read is an optimization, not the concurrency boundary. The

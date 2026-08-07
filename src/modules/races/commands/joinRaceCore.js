@@ -50,7 +50,28 @@ class RaceJoinError extends Error {
 // Extracted verbatim from joinPublicRace so the existing public-join behavior
 // (and its full unit-test suite) is preserved byte-for-byte; share-link join
 // reuses the exact same money/capacity/box logic rather than duplicating it.
+const {
+  enqueueRaceResolution: defaultEnqueueRaceResolution,
+} = require("../services/enqueueRaceResolution");
+// C3 (spec §5 Phase D step 9): this write seam is a snapshot DEL hook — the
+// shared standings snapshot must not outlive the change we just committed. The
+// resolution worker is deliberately NOT in this list: it SETs post-commit.
+const {
+  invalidateRaceProgress,
+} = require("../services/raceProgressSnapshot");
+
 function buildJoinRaceCore(dependencies = {}) {
+  // C0 (spec §5a item 4): after this command's own small writes, mark the race
+  // dirty so the race-keyed worker re-converges its standings. Best-effort and
+  // stubbed out for injected fakes so unit tests stay DB-free.
+  const enqueueRaceResolution = Object.prototype.hasOwnProperty.call(
+    dependencies,
+    "enqueueRaceResolution"
+  )
+    ? dependencies.enqueueRaceResolution
+    : Object.keys(dependencies).length > 0
+      ? async () => null
+      : defaultEnqueueRaceResolution;
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
   const userModel = dependencies.User || User;
   const awardCoinsFn = dependencies.awardCoins || awardCoins;
@@ -148,6 +169,13 @@ function buildJoinRaceCore(dependencies = {}) {
           data: { firstRaceOnboardingSeen: true },
         });
       });
+      // C5 (spec §5 Phase E2): `firstRaceOnboardingSeen` is an IMMEDIATE field —
+      // the onboarding flow reads `/auth/me` back step-to-step. This raw
+      // `tx.user.update` bypasses the `User.update` chokepoint, so it needs its
+      // own hook. Swallowed: the join has already committed.
+      try {
+        await require("../../users/services/authMeCache").invalidateSafe(joiningUserId);
+      } catch {}
     } catch (error) {
       // P2002 = unique violation on the ledger PK: already granted, ever. Any
       // other error is swallowed so the (already-created) join still succeeds.
@@ -312,8 +340,33 @@ function buildJoinRaceCore(dependencies = {}) {
       }
     }
 
+    await invalidateRaceProgress(raceId);
+
+    await enqueueRaceResolution({ raceId, userId });
+
+
+    // C2 invalidation (spec §5 Phase C item 6): a membership change alters the
+
+    // chat's access context (who may read it, who appears in it), so the cached
+
+    // lists must never survive it. Same atomic `SET msgver` + `DEL list` as a
+
+    // post, for BOTH kinds, keyed off this change's own timestamp.
+
+    await invalidateRaceMessagesCache(raceId);
     return participant;
   };
+}
+
+
+// Best-effort: a cache DEL must never fail a membership change.
+async function invalidateRaceMessagesCache(raceId) {
+  try {
+    const {
+      invalidateRace,
+    } = require("../../social/services/raceMessagesCache");
+    await invalidateRace(raceId);
+  } catch {}
 }
 
 module.exports = { buildJoinRaceCore, RaceJoinError };

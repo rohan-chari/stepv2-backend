@@ -3,6 +3,9 @@ const { RaceParticipant } = require("../races/models/raceParticipant");
 const { JobRun } = require("../../shared/db/jobRun");
 const { eventBus } = require("../../shared/events/eventBus");
 const { resolveRaceState } = require("../races/services/raceStateResolution");
+const {
+  enqueueRaceResolution: defaultEnqueueRaceResolution,
+} = require("../races/services/enqueueRaceResolution");
 const { dailyRunKey } = require("../../shared/time/etSchedule");
 
 const JOB_NAME = "daily_mover";
@@ -27,7 +30,17 @@ function buildDailyMover(dependencies = {}) {
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
   const jobRunModel = dependencies.JobRun || JobRun;
   const events = dependencies.eventBus || eventBus;
+  // C0 (spec §5a): this daily digest used to be a fourth bulk writer of
+  // race_participants. It now ENQUEUES and reads the persisted totals the
+  // race-keyed worker maintains — at most one worker cycle stale, against a
+  // once-a-day job whose inputs are day-scale movements. An explicitly injected
+  // resolveRaceState still runs inline (the live-code seam, as elsewhere in C0).
+  const inlineResolveInjected = Object.prototype.hasOwnProperty.call(
+    dependencies,
+    "resolveRaceState"
+  );
   const resolve = dependencies.resolveRaceState || resolveRaceState;
+  const enqueue = dependencies.enqueueRaceResolution || defaultEnqueueRaceResolution;
   const now = dependencies.now || (() => new Date());
   const random = dependencies.random || Math.random;
   const logger = dependencies.logger || console;
@@ -57,7 +70,8 @@ function buildDailyMover(dependencies = {}) {
 
     for (const race of races || []) {
       try {
-        await resolve({ raceId: race.id });
+        await enqueue({ raceId: race.id, now: currentTime });
+        if (inlineResolveInjected) await resolve({ raceId: race.id });
 
         const participants = await participantModel.findAcceptedByRace(race.id);
         if (!participants || participants.length === 0) continue;

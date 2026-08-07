@@ -17,7 +17,7 @@ const PowerupCopy = {
     shortDescription = null,
     upgradeTierLabels = [],
   }) {
-    return prisma.powerupCopy.upsert({
+    const row = await prisma.powerupCopy.upsert({
       where: { powerupType },
       update: { name, description, shortDescription, upgradeTierLabels },
       create: {
@@ -28,6 +28,17 @@ const PowerupCopy = {
         upgradeTierLabels,
       },
     });
+    // C1 invalidation (spec §5 Phase B). This runs at deploy-time seeding
+    // rather than from an HTTP route, so the 60s TTL would cover it anyway —
+    // but a seeded copy change that lingers a minute on one worker and not
+    // another is exactly the incoherence C1 exists to remove.
+    const derivedCache = require("../../../shared/cache/derivedCache");
+    const cacheKeys = require("../../../shared/cache/cacheKeys");
+    await derivedCache.invalidate({
+      keys: cacheKeys.powerupCatalogVariants(),
+      prefix: cacheKeys.PREFIX.POWERUP_CATALOG,
+    });
+    return row;
   },
 };
 

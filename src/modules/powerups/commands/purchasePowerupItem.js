@@ -34,6 +34,20 @@ function idempotentResultFromRequest(request) {
 // `dependencies.runTransaction(fn)` lets tests inject a fake transactional
 // runner with a mocked model surface (tx). In production it runs a real
 // prisma.$transaction.
+// C4 + C5 (spec §5 Phases E/E2): a coin purchase changes BOTH the user's
+// powerup inventory and their `/auth/me` balance. `deductCoinsAtomic` already
+// DELs the auth/me key, but it runs INSIDE this command's transaction — so it
+// fires just before the commit and a concurrent read could re-warm the stale
+// balance. Invalidating again here, after the commit, closes that window for
+// every path a user can actually trigger.
+async function invalidateAfterPurchase(userId) {
+  if (!userId) return;
+  try {
+    await require("../services/powerupInventoryCache").invalidateSafe(userId);
+    await require("../../users/services/authMeCache").invalidateSafe(userId);
+  } catch {}
+}
+
 function buildPurchasePowerupItem(dependencies = {}) {
   const runTransaction =
     dependencies.runTransaction ||
@@ -58,7 +72,7 @@ function buildPurchasePowerupItem(dependencies = {}) {
     }
 
     try {
-      return await runTransaction(async (tx) => {
+      const outcome = await runTransaction(async (tx) => {
         // Idempotency replay check inside the transaction.
         const existing = await findExistingRequest(tx, {
           userId,
@@ -140,6 +154,8 @@ function buildPurchasePowerupItem(dependencies = {}) {
 
         return result;
       });
+      await invalidateAfterPurchase(userId);
+      return outcome;
     } catch (error) {
       if (error instanceof PowerupPurchaseError) throw error;
       // Concurrent duplicate (same key) racing the ledger insert: replay.

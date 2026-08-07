@@ -10,6 +10,19 @@ const { prisma: defaultPrisma } = require("../../../db");
 const { balanceConfig } = require("../../economy/balanceConfig");
 const { POWERUP_NAMES } = require("./rollPowerup");
 const {
+  enqueueRaceResolution: defaultEnqueueRaceResolution,
+} = require("../../races/services/enqueueRaceResolution");
+// C3 (spec §5 Phase D step 9): this write seam is a snapshot DEL hook — the
+// shared standings snapshot must not outlive the change we just committed. The
+// resolution worker is deliberately NOT in this list: it SETs post-commit.
+const {
+  invalidateRaceProgress,
+} = require("../../races/services/raceProgressSnapshot");
+const {
+  computeRaceState: defaultComputeRaceState,
+  overlayComputedTotals,
+} = require("../../races/services/computeRaceState");
+const {
   resolveRaceState: defaultResolveRaceState,
 } = require("../../races/services/raceStateResolution");
 const {
@@ -764,6 +777,13 @@ async function refundRedeemedOnRejection({
       update: { quantity: { increment: 1 } },
     });
   });
+
+  // C4 (spec §5 Phase E): the discard hand-back returns a redeemed powerup to
+  // the GLOBAL inventory, so `v1:user:inventory:{id}` is now wrong. Post-commit
+  // and swallowed — a cache DEL must never fail a discard.
+  try {
+    await require("../services/powerupInventoryCache").invalidateSafe(userId);
+  } catch {}
 }
 
 function buildUsePowerup(dependencies = {}) {
@@ -778,10 +798,43 @@ function buildUsePowerup(dependencies = {}) {
   const upgradeEventModel = dependencies.PowerupUpgradeEvent || PowerupUpgradeEvent;
   const deductCoinsAtomic = dependencies.deductCoinsAtomic || defaultDeductCoinsAtomic;
   const events = dependencies.eventBus || eventBus;
-  const resolveRaceState = Object.prototype.hasOwnProperty.call(
+  // C0 (spec §5a item 4): after a powerup's own small writes, ENQUEUE the race
+  // rather than bulk-writing every participant row inline. The race-keyed worker
+  // owns that write, and the fence serializes it against settlement.
+  //
+  // Two resolveRaceState calls survive inline BY DESIGN and are NOT converted:
+  // the TRAIL_MINE pre-plant refresh and the Uprising losing-team gate. Both
+  // READ freshly-resolved totals to make a decision in the same request, so an
+  // async enqueue would decide off stale numbers (a mine planted behind its
+  // owner detonates instantly on someone far behind). They are accepted residual
+  // writers under §5a item 7 and go through the same ascending-userId write
+  // order inside resolveRaceState.
+  // Injected-deps callers (unit tests) get a no-op unless they pass one: an
+  // enqueue here must never turn a pure unit test into a DB test.
+  const enqueueRaceResolution = Object.prototype.hasOwnProperty.call(
+    dependencies,
+    "enqueueRaceResolution"
+  )
+    ? dependencies.enqueueRaceResolution
+    : hasInjectedDeps
+      ? async () => null
+      : defaultEnqueueRaceResolution;
+  // As elsewhere in C0: an EXPLICITLY injected resolveRaceState still drives the
+  // inline path (it is the seam for exercising it, and the path stays live
+  // behind the `inlineRaceResolutionFallback` lever). The production singleton
+  // injects nothing, so production only enqueues.
+  const inlineResolveInjected = Object.prototype.hasOwnProperty.call(
     dependencies,
     "resolveRaceState"
-  )
+  );
+  // Read-only fresh totals for the two branches that need to DECIDE off current
+  // steps (Trail Mine's plant position + last-place check, and Uprising's
+  // losing-team gate). Both used to call resolveRaceState, which PERSISTS every
+  // participant row — a second concurrent bulk writer in the HTTP request path,
+  // which is precisely the class C0 exists to eliminate. computeRaceState runs
+  // the same scoring pipeline with the writes discarded.
+  const computeRaceState = dependencies.computeRaceState || defaultComputeRaceState;
+  const resolveRaceState = inlineResolveInjected
     ? dependencies.resolveRaceState
     : hasInjectedDeps
       ? async () => {}
@@ -830,18 +883,34 @@ function buildUsePowerup(dependencies = {}) {
     }
 
     // Trail Mine plants at the owner's CURRENT step total, but stored totals go
-    // stale between syncs. Resolve race state BEFORE reading them so the mine
-    // lands at the owner's real position — off a stale total it lands behind
-    // them, and the trailing resolveRaceState below could detonate it instantly
-    // on a runner far behind the owner. Resolving first also freshens the
-    // last-place rank check. (No-op for other powerup types.)
+    // stale between syncs: off a stale total the mine lands BEHIND its owner and
+    // detonates instantly on a runner far behind them. So compute fresh totals
+    // first — and use them for the last-place rank check too.
+    //
+    // C0: this is a READ. It used to call resolveRaceState, which persists every
+    // participant row and made this request path a second bulk writer racing the
+    // fenced worker. computeRaceState runs the identical scoring pipeline
+    // (bases -> effects -> hitchhike -> leech -> trail mines) with the writes
+    // captured and thrown away, then we overlay the numbers onto the in-memory
+    // participant rows below. The trailing enqueueRaceResolution persists them
+    // moments later, through the one owner that is allowed to.
+    // (No-op for other powerup types.)
+    let computedTotals = null;
     if (powerup.type === "TRAIL_MINE") {
-      await resolveRaceState({ raceId, timeZone });
+      const computed = await computeRaceState({ raceId, timeZone });
+      computedTotals = computed.totalsByParticipantId;
     }
 
     const race = await raceModel.findById(raceId);
     if (!race || race.status !== "ACTIVE") {
       throw new PowerupUseError("Race is not active", 400);
+    }
+
+    // Overlay BEFORE myParticipant/acceptedParticipants are derived, so the
+    // plant position and the last-place gate both read the computed values and
+    // can never disagree with each other or use a staler snapshot.
+    if (computedTotals && Array.isArray(race.participants)) {
+      race.participants = overlayComputedTotals(race.participants, computedTotals);
     }
 
     // §3.7 hard gate: a race whose creator disabled powerups accepts NONE — not
@@ -1036,7 +1105,15 @@ function buildUsePowerup(dependencies = {}) {
           throw new PowerupUseError("Race has ended", 409, "RACE_ENDED");
         }
         const lockedMe = lockedRace.participants.find((p) => p.userId === userId && p.status === "ACCEPTED");
-        const lockedVictims = targetUserIds.map((id) => lockedRace.participants.find((p) => p.userId === id));
+        // Ascending-userId WRITE order (spec §5a item 7) — Quicksand is a
+        // multi-target race_participants-adjacent writer inside one transaction,
+        // so it obeys the same global lock order as the resolution worker,
+        // forfeitRace's scan, and Rainstorm. The RESPONSE order is restored to
+        // the caller's requested order below: `targetResults` is part of the
+        // wire contract and reordering it would be an API change.
+        const lockedVictims = [...targetUserIds]
+          .sort((a, b) => String(a).localeCompare(String(b)))
+          .map((id) => lockedRace.participants.find((p) => p.userId === id));
         if (!lockedMe || lockedVictims.some((p) => !p || p.status !== "ACCEPTED" || p.finishedAt || p.forfeitedAt ||
             (lockedRace.isTeamRace && (p.team == null || p.team === lockedMe.team)))) {
           throw new PowerupUseError("Every Quicksand target must be an active enemy", 400, "INVALID_TARGET");
@@ -1078,14 +1155,18 @@ function buildUsePowerup(dependencies = {}) {
           description: `${myDisplayName} used Quicksand on ${victims.length} rival${victims.length === 1 ? "" : "s"}!`,
           metadata: { targetResults: results.map((r) => ({ targetUserId: r.targetUserId, outcome: r.outcome })) },
         } });
-        return results;
+        // Restore the caller's requested target order for the response.
+        const byUser = new Map(results.map((r) => [r.targetUserId, r]));
+        return targetUserIds.map((id) => byUser.get(id)).filter(Boolean);
       });
       for (const targetResult of targetResults) {
         events.emit(targetResult.outcome === "APPLIED" ? "POWERUP_USED" : "POWERUP_BLOCKED", targetResult.outcome === "APPLIED"
           ? { raceId, userId, powerupType: type, targetUserId: targetResult.targetUserId, upgradeLevel: 0 }
           : { raceId, attackerUserId: userId, defenderUserId: targetResult.targetUserId, blockedType: type, upgradeLevel: 0 });
       }
-      await resolveRaceState({ raceId, timeZone });
+      await invalidateRaceProgress(raceId);
+      await enqueueRaceResolution({ raceId, userId, timeZone });
+      if (inlineResolveInjected) await resolveRaceState({ raceId, timeZone });
       await syncRacePowerupState({ raceId, userId });
       const applied = targetResults.filter((r) => r.outcome === "APPLIED").length;
       return {
@@ -1107,7 +1188,9 @@ function buildUsePowerup(dependencies = {}) {
         targetUserId: resolvedTarget,
         upgradeLevel: 0,
       });
-      await resolveRaceState({ raceId, timeZone });
+      await invalidateRaceProgress(raceId);
+      await enqueueRaceResolution({ raceId, userId, timeZone });
+      if (inlineResolveInjected) await resolveRaceState({ raceId, timeZone });
       await syncRacePowerupState({ raceId, userId });
     };
 
@@ -1115,7 +1198,19 @@ function buildUsePowerup(dependencies = {}) {
     // beneficiary already holds an ACTIVE row of this buff type, EXTEND it to the
     // later end (union) instead of creating a second row, so two casts never
     // exceed the single multiplier. Returns the created/updated row.
-    const upsertBuffWindow = async (participantId, beneficiaryUserId, effectType, expiresAt, metadata) => {
+    // `startsAt` MUST come from the same clock read the caller derived
+    // `expiresAt` from. Reading `now()` again below (after an awaited DB round
+    // trip) made the stamped window 3599999ms instead of 3600000ms whenever the
+    // read took ≥1ms — a latent off-by-one-millisecond that any latency change
+    // on this path can surface. The anchor is threaded in instead.
+    const upsertBuffWindow = async (
+      participantId,
+      beneficiaryUserId,
+      effectType,
+      expiresAt,
+      metadata,
+      startsAt
+    ) => {
       const existing = await effectModel.findActiveByTypeForParticipant(participantId, effectType);
       if (existing) {
         const mergedEnd =
@@ -1131,7 +1226,7 @@ function buildUsePowerup(dependencies = {}) {
         sourceUserId: userId,
         powerupId,
         type: effectType,
-        startsAt: now(),
+        startsAt: startsAt || now(),
         expiresAt,
         metadata,
       });
@@ -1152,24 +1247,32 @@ function buildUsePowerup(dependencies = {}) {
       if (isTeamRace) {
         // 2026-07-25 §3 — the gate and the board must never disagree.
         //
-        // The board (getRaceProgress) resolves race state and then sums the
-        // resulting EFFECTIVE per-participant totals with buildTeamsBlock. This
-        // does the same two things, in the same order, with the same helper:
-        // resolve first (stored totals go stale between syncs, exactly like the
-        // Trail Mine case above), then sum the freshly-written rows. Summing the
-        // unresolved column by hand is precisely how the gate came to contradict
-        // the screen.
+        // The board (getRaceProgress) sums the EFFECTIVE per-participant totals
+        // with buildTeamsBlock. This does the same two things, in the same
+        // order, with the same helper: compute the effective totals first
+        // (stored totals go stale between syncs, exactly like the Trail Mine
+        // case above), then sum them. Summing the unresolved column by hand is
+        // precisely how the gate came to contradict the screen.
+        //
+        // C0: the freshening is now a READ (computeRaceState) rather than a
+        // resolve-and-persist. The parity argument is untouched — it is the same
+        // scoring pipeline producing the same numbers, and under C3 the board
+        // will read those numbers from the snapshot the worker publishes. What
+        // changes is only that this request no longer bulk-writes
+        // race_participants, so it cannot race the fenced worker.
         //
         // DELIBERATELY SCOPED TO THE TEAM BRANCH (D3). The solo bottom-half gate
         // below, Hitchhike FRONT/BEHIND, participantRank and adjacentParticipant
         // all keep their existing raw-column behaviour; widening this would
         // change targeting for a dozen powerups at once and is tracked as a
-        // separate audit (spec §11). Do not hoist this resolve out of here.
-        await resolveRaceState({ raceId, timeZone });
-        const resolvedRace = await raceModel.findById(raceId);
+        // separate audit (spec §11). Do not hoist this computation out of here.
+        const { totalsByParticipantId } = await computeRaceState({
+          raceId,
+          timeZone,
+        });
         const board = buildTeamsBlockFromParticipants(
-          resolvedRace || race,
-          (resolvedRace || race).participants
+          race,
+          overlayComputedTotals(race.participants, totalsByParticipantId)
         );
         const teamTotals = {
           TEAM_A: board.teamA.totalSteps,
@@ -1203,12 +1306,18 @@ function buildUsePowerup(dependencies = {}) {
         beneficiaries = sorted.slice(bottomStart);
       }
 
-      const upEnd = new Date(now().getTime() + UPRISING_DURATION_MS);
+      const upStart = now();
+      const upEnd = new Date(upStart.getTime() + UPRISING_DURATION_MS);
       let ownEffect = null;
       for (const b of beneficiaries) {
-        const row = await upsertBuffWindow(b.id, b.userId, "UPRISING", upEnd, {
-          multiplier: UPRISING_MULTIPLIER,
-        });
+        const row = await upsertBuffWindow(
+          b.id,
+          b.userId,
+          "UPRISING",
+          upEnd,
+          { multiplier: UPRISING_MULTIPLIER },
+          upStart
+        );
         if (b.userId === userId) ownEffect = row;
       }
 
@@ -1240,12 +1349,18 @@ function buildUsePowerup(dependencies = {}) {
       const beneficiaries = acceptedParticipants.filter(
         (p) => p.team === myParticipant.team && isAliveTarget(p)
       );
-      const flagEnd = new Date(now().getTime() + RALLY_FLAG_DURATION_MS);
+      const flagStart = now();
+      const flagEnd = new Date(flagStart.getTime() + RALLY_FLAG_DURATION_MS);
       let ownEffect = null;
       for (const b of beneficiaries) {
-        const row = await upsertBuffWindow(b.id, b.userId, "RALLY_FLAG", flagEnd, {
-          multiplier: RALLY_FLAG_MULTIPLIER,
-        });
+        const row = await upsertBuffWindow(
+          b.id,
+          b.userId,
+          "RALLY_FLAG",
+          flagEnd,
+          { multiplier: RALLY_FLAG_MULTIPLIER },
+          flagStart
+        );
         if (b.userId === userId) ownEffect = row;
       }
       await eventModel.create({
@@ -2095,7 +2210,9 @@ function buildUsePowerup(dependencies = {}) {
             blockedType: type,
             upgradeLevel,
           });
-          await resolveRaceState({ raceId, timeZone });
+          await invalidateRaceProgress(raceId);
+          await enqueueRaceResolution({ raceId, userId, timeZone });
+          if (inlineResolveInjected) await resolveRaceState({ raceId, timeZone });
           await syncRacePowerupState({ raceId, userId });
           return {
             blocked: true,
@@ -2719,9 +2836,12 @@ function buildUsePowerup(dependencies = {}) {
         const stormEnd = new Date(currentTime.getTime() + RAINSTORM_DURATION_MS);
         // Team races: rain falls on the ENEMY team only (TR-652); forfeited
         // members stay out of the fan-out (TR-657).
-        const victims = acceptedParticipants.filter(
-          (p) => p.userId !== userId && isAliveTarget(p) && isEnemy(p)
-        );
+        // Ascending-userId fan-out (spec §5a item 7). Rainstorm is the
+        // multi-target powerup path: it touches one row per victim, so it takes
+        // the SAME global lock order as every other multi-row writer.
+        const victims = acceptedParticipants
+          .filter((p) => p.userId !== userId && isAliveTarget(p) && isEnemy(p))
+          .sort((a, b) => String(a.userId).localeCompare(String(b.userId)));
         const affected = [];
         const blockedNames = [];
 
@@ -3165,6 +3285,19 @@ function buildUsePowerup(dependencies = {}) {
             ownerParticipantId: myParticipant.id,
             positionSteps: myParticipant.totalSteps,
             penaltyPercent,
+            // Runners already past the plant point, captured from the SAME
+            // computed totals that produced `positionSteps` (see the read-only
+            // computeRaceState call at the top of this command).
+            // triggerTrailMines excludes them, so "already ahead never trips it"
+            // is recorded as a fact at plant time rather than re-inferred later
+            // from a stored column that other writers also advance.
+            aheadParticipantIds: acceptedParticipants
+              .filter(
+                (p) =>
+                  p.id !== myParticipant.id &&
+                  (p.totalSteps || 0) >= (myParticipant.totalSteps || 0)
+              )
+              .map((p) => p.id),
           },
         });
         result.effect = effect;
@@ -3463,7 +3596,10 @@ function buildUsePowerup(dependencies = {}) {
       upgradeLevel,
     });
 
-    await resolveRaceState({ raceId, timeZone });
+    await invalidateRaceProgress(raceId);
+
+    await enqueueRaceResolution({ raceId, userId, timeZone });
+    if (inlineResolveInjected) await resolveRaceState({ raceId, timeZone });
     await syncRacePowerupState({ raceId, userId });
 
     // §6b — a self-buff is the common cause of a high-multiplier spike. Recompute

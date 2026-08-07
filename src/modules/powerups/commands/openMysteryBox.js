@@ -46,8 +46,29 @@ class MysteryBoxOpenError extends Error {
   }
 }
 
+const {
+  enqueueRaceResolution: defaultEnqueueRaceResolution,
+} = require("../../races/services/enqueueRaceResolution");
+// C3 (spec §5 Phase D step 9): this write seam is a snapshot DEL hook — the
+// shared standings snapshot must not outlive the change we just committed. The
+// resolution worker is deliberately NOT in this list: it SETs post-commit.
+const {
+  invalidateRaceProgress,
+} = require("../../races/services/raceProgressSnapshot");
+
 function buildOpenMysteryBox(dependencies = {}) {
   const hasInjectedDeps = Object.keys(dependencies).length > 0;
+  // C0 (spec §5a item 4): mark the race dirty after the box's own small writes
+  // so the race-keyed worker re-converges standings. No-op stub for injected
+  // fakes so unit tests stay DB-free.
+  const enqueueRaceResolution = Object.prototype.hasOwnProperty.call(
+    dependencies,
+    "enqueueRaceResolution"
+  )
+    ? dependencies.enqueueRaceResolution
+    : hasInjectedDeps
+      ? async () => null
+      : defaultEnqueueRaceResolution;
   const powerupModel = dependencies.RacePowerup || RacePowerup;
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
   const eventModel = dependencies.RacePowerupEvent || RacePowerupEvent;
@@ -214,6 +235,8 @@ function buildOpenMysteryBox(dependencies = {}) {
       });
 
       await syncRacePowerupState({ raceId, userId });
+      await invalidateRaceProgress(raceId);
+      await enqueueRaceResolution({ raceId, userId });
 
       return { id: powerup.id, type: rolled.type, rarity: rolled.rarity, autoActivated: true };
     }
@@ -244,6 +267,8 @@ function buildOpenMysteryBox(dependencies = {}) {
     });
 
     await syncRacePowerupState({ raceId, userId });
+    await invalidateRaceProgress(raceId);
+    await enqueueRaceResolution({ raceId, userId });
 
     return { id: powerup.id, type: rolled.type, rarity: rolled.rarity, autoActivated: false };
   };

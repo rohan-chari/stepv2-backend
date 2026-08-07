@@ -7,6 +7,13 @@ const {
   syncRacePowerupState: defaultSyncRacePowerupState,
 } = require("../../races/services/racePowerupStateSync");
 const { stepSyncPushService } = require("../../../shared/push/stepSyncPush");
+const {
+  enqueueRaceResolutionForUser: defaultEnqueueRaceResolutionForUser,
+} = require("../../races/services/enqueueRaceResolution");
+const {
+  reconcileUploaderRaces: defaultReconcileUploaderRaces,
+} = require("../../races/services/reconcileUploaderRaces");
+const { appSettings: defaultAppSettings } = require("../../../shared/config/appSettings");
 
 // When a sync moves the syncing user ahead of rival(s) on an ACTIVE race's live
 // leaderboard, those rivals' displayed counts are now stale (the standings just
@@ -73,10 +80,11 @@ function buildRecordSteps(dependencies = {}) {
   const stepsModel = dependencies.Steps || Steps;
   const userModel = dependencies.User || User;
   const events = dependencies.eventBus || eventBus;
-  const resolveRaceState = Object.prototype.hasOwnProperty.call(
+  const inlineResolutionInjected = Object.prototype.hasOwnProperty.call(
     dependencies,
     "resolveRaceState"
-  )
+  );
+  const resolveRaceState = inlineResolutionInjected
     ? dependencies.resolveRaceState
     : hasInjectedDeps
       ? async () => {}
@@ -94,6 +102,32 @@ function buildRecordSteps(dependencies = {}) {
     dependencies.requestStepSyncForUsers ||
     stepSyncPushService.requestStepSyncForUsers;
   const now = dependencies.now || (() => new Date());
+  // C0 (spec §5a item 4): the legacy path ENQUEUES the uploader's active races
+  // instead of bulk-writing them inline. Inline resolution here was one of the
+  // two bulk writers that could hit one race concurrently with the worker.
+  const enqueueRaceResolutionForUser = Object.prototype.hasOwnProperty.call(
+    dependencies,
+    "enqueueRaceResolutionForUser"
+  )
+    ? dependencies.enqueueRaceResolutionForUser
+    : hasInjectedDeps
+      ? async () => []
+      : defaultEnqueueRaceResolutionForUser;
+  const reconcileUploaderRaces = Object.prototype.hasOwnProperty.call(
+    dependencies,
+    "reconcileUploaderRaces"
+  )
+    ? dependencies.reconcileUploaderRaces
+    : hasInjectedDeps
+      ? async () => ({ resolvedRaceCount: 0 })
+      : defaultReconcileUploaderRaces;
+  // Injected-deps callers (unit tests) get a DB-free stub unless they pass one:
+  // an app-settings read here must never turn a pure unit test into a DB test.
+  const settings =
+    dependencies.appSettings ||
+    (hasInjectedDeps
+      ? { getFlag: async () => false }
+      : defaultAppSettings);
 
   return async function recordSteps({ userId, steps, date, timeZone, skipRaceResolution = false }) {
     const existing = await stepsModel.findByUserIdAndDate(userId, date);
@@ -110,6 +144,15 @@ function buildRecordSteps(dependencies = {}) {
       events.emit("STEPS_RECORDED", { userId, steps, date });
     }
 
+    // C4 (spec §5 Phase E): this and `recordStepSyncV2` are the ONLY two writers
+    // of the daily `steps` row, so together they are the invalidation seam for
+    // `v1:user:daily:{id}:{date}` — the value `GET /friends/steps` serves to
+    // every one of this user's friends. Hooked at the COMMAND, not at the three
+    // routes that reach it. (`POST /steps/samples` writes only samples, so it
+    // has no daily total to invalidate.) Swallowed: bookkeeping never fails a
+    // sync.
+    await require("../services/dailyStepsCache").invalidateSafe(userId, date);
+
     // Step-goal coin bonuses (daily_goal_1x / daily_goal_2x) are intentionally
     // gone — replaced by the tap-to-claim StepMilestone rewards on home.
 
@@ -117,7 +160,47 @@ function buildRecordSteps(dependencies = {}) {
     // call, race resolution will run again there with fresher sample data —
     // doing it here is duplicate work. The client opts in via
     // skipRaceResolution. Old clients keep the original behavior.
+    // Mark every active race of this uploader dirty. Cheap O(1)-per-race upsert;
+    // the race-keyed worker owns the bulk write. Done even when the client opted
+    // into skipRaceResolution — the generation bump coalesces with the one the
+    // imminent /steps/samples call makes, so it costs nothing and guarantees
+    // convergence if that follow-up never arrives.
+    await enqueueRaceResolutionForUser({ userId, timeZone, now: now() });
+
+    // C0: the bulk resolve is gone, but the UPLOADER-ONLY reconcile stays inline
+    // — the same one sync-v2 runs in its Transaction B. It writes exactly ONE
+    // row (the uploader's own participant) and syncs their box/powerup state, so
+    // it is a residual single-row writer under §5a item 7, not a bulk writer.
+    // Keeping it is what preserves same-request box minting for frozen legacy
+    // clients; pure enqueue-only would defer their box to the next worker cycle.
+    // Rival totals, trail mines, overtakes and placements are the worker's.
     if (!skipRaceResolution) {
+      try {
+        await reconcileUploaderRaces({ userId, timeZone });
+      } catch (error) {
+        console.error("Uploader race reconciliation failed:", error);
+      }
+    }
+
+    // Rollback lever (ii): with `inlineRaceResolutionFallback` ON, this path
+    // resolves inline exactly as it always did (kill switch for a misbehaving
+    // worker while staying on the new binary). Default OFF => enqueue only.
+    //
+    // An EXPLICITLY injected `resolveRaceState` also selects the inline path:
+    // that dependency is the seam for driving this pipeline directly, and it is
+    // still live code precisely because the lever can turn it back on. The
+    // production singleton injects nothing and is therefore flag-driven.
+    let inlineFallback = inlineResolutionInjected;
+    if (!inlineFallback) {
+      try {
+        inlineFallback =
+          (await settings.getFlag("inlineRaceResolutionFallback")) === true;
+      } catch {
+        inlineFallback = false;
+      }
+    }
+
+    if (inlineFallback && !skipRaceResolution) {
       const raceResults = await resolveRaceState({ userId, timeZone });
       if (Array.isArray(raceResults)) {
         await Promise.all(

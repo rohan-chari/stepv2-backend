@@ -43,6 +43,18 @@ async function findExistingRequest({ userId, idempotencyKey, itemId }) {
   return idempotentResultFromRequest(request);
 }
 
+// C5 (spec §5 Phase E2): `deductCoinsAtomic` DELs the 10s `/auth/me` cache, but
+// it runs INSIDE this command's transaction — the DEL lands just before the
+// commit, so a concurrent read could re-warm the pre-purchase balance. A second
+// invalidation AFTER the commit closes that window. `coins` is the field the
+// client re-reads most aggressively after a write (15 wallet-refresh sites).
+async function invalidateAuthMeAfterPurchase(userId) {
+  if (!userId) return;
+  try {
+    await require("../users/services/authMeCache").invalidateSafe(userId);
+  } catch {}
+}
+
 async function purchaseShopItem({
   userId,
   itemId,
@@ -67,7 +79,7 @@ async function purchaseShopItem({
   if (existingResult) return existingResult;
 
   try {
-    return await prisma.$transaction(async (tx) => {
+    const outcome = await prisma.$transaction(async (tx) => {
       const item = await tx.shopItem.findFirst({
         where: {
           id: itemId,
@@ -161,6 +173,8 @@ async function purchaseShopItem({
 
       return result;
     });
+    await invalidateAuthMeAfterPurchase(userId);
+    return outcome;
   } catch (error) {
     if (error instanceof ShopPurchaseError) throw error;
 

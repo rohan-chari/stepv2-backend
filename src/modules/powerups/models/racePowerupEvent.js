@@ -32,9 +32,16 @@ function applyCursor(where, cursor) {
 
 const RacePowerupEvent = {
   async create({ raceId, actorUserId, eventType, powerupType, targetUserId, description, metadata }) {
-    return prisma.racePowerupEvent.create({
+    const row = await prisma.racePowerupEvent.create({
       data: { raceId, actorUserId, eventType, powerupType, targetUserId, description, metadata },
     });
+    // C2 invalidation (spec §5 Phase C): these rows ARE the SYSTEM feed, so a
+    // new one must advance `msgver` and drop the cached SYSTEM list, exactly
+    // like a USER post does. Required at the model rather than at each of the
+    // many powerup call sites, so a new emitter cannot forget it.
+    const raceMessagesCache = require("../../social/services/raceMessagesCache");
+    await raceMessagesCache.invalidateKind(raceId, "SYSTEM", row);
+    return row;
   },
 
   async findByRace(raceId, { cursor, limit = 50, excludeEventTypes } = {}) {

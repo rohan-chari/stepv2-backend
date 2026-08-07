@@ -404,11 +404,32 @@ test("Trail Mine drops a trap at current steps and rejects use in last place", a
   await use({ userId: "user-alice", raceId: "race-1", powerupId: "pw-mine" });
 
   assert.equal(ctx.effectsCreated[0].type, "TRAIL_MINE");
+  // `aheadParticipantIds` (C0, docs/redis-derived-data-layer-requirements.md
+  // §5a) is load-bearing, not incidental: it records who was ALREADY past the
+  // plant point, captured from the same computed totals that produced
+  // `positionSteps`, and triggerTrailMines excludes exactly that set. It
+  // replaced the old "their stored total is below the mine" inference, which
+  // broke once the uploader-only reconcile started advancing the syncing user's
+  // stored row before the resolution worker read it — the runner who actually
+  // crossed arrived already above the mine and was misread as always-ahead, so
+  // the mine never fired for the person who tripped it.
+  //
+  // Fixture: Alice plants at 9,000; Bob (12,000) is ahead and must be excluded;
+  // Charlie (7,000) is behind and must stay eligible to trip it.
   assert.deepEqual(ctx.effectsCreated[0].metadata, {
     ownerParticipantId: "rp-alice",
     positionSteps: 9000,
     penaltyPercent: 0.03,
+    aheadParticipantIds: ["rp-bob"],
   });
+  assert.ok(
+    !ctx.effectsCreated[0].metadata.aheadParticipantIds.includes("rp-charlie"),
+    "a runner behind the plant point must remain able to trigger the mine"
+  );
+  assert.ok(
+    !ctx.effectsCreated[0].metadata.aheadParticipantIds.includes("rp-alice"),
+    "the owner is never in the ahead-set (they are excluded as the owner)"
+  );
 
   const lastPlaceCtx = makeUseDeps({
     powerupType: "TRAIL_MINE",

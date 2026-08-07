@@ -9,6 +9,10 @@ const {
   categoryForSlot,
   powerupAssetUrl,
 } = require("../shared/lib/remoteAssets");
+const derivedCache = require("../shared/cache/derivedCache");
+const cacheKeys = require("../shared/cache/cacheKeys");
+
+const MANIFEST_TTL_SECONDS = 60;
 
 // GET /assets/manifest — the client's registry of CDN-served art.
 //
@@ -31,9 +35,12 @@ function createAssetsRouter(dependencies = {}) {
   const router = Router();
   const prisma = dependencies.prisma || defaultPrisma;
 
-  router.get("/manifest", extractReleaseChannel, async (req, res) => {
-    try {
-      const channelFilter = testOnlyFilter(req.releaseChannel);
+  // C1 (spec §5 Phase B). The manifest is fully global apart from the release
+  // channel, so the assembled body is cached per channel. `Cache-Control:
+  // no-cache` is unchanged — that governs the CLIENT's caching and must keep
+  // meaning exactly what it meant before.
+  async function buildManifest(channel) {
+      const channelFilter = testOnlyFilter(channel);
       const [cosmetics, powerups] = await Promise.all([
         prisma.shopItem.findMany({
           where: { assetVersion: { not: null }, ...channelFilter },
@@ -87,12 +94,34 @@ function createAssetsRouter(dependencies = {}) {
         powerupEntries[item.powerupType] = { url };
       }
 
-      res.set("Cache-Control", "no-cache");
-      res.json({
+      return {
         accessories,
         characters,
         powerups: powerupEntries,
+      };
+  }
+
+  router.get("/manifest", extractReleaseChannel, async (req, res) => {
+    try {
+      let enabled = false;
+      try {
+        const { appSettings } = require("../shared/config/appSettings");
+        enabled =
+          (await appSettings.getFlag("redisCacheCatalogsEnabled")) === true;
+      } catch {
+        enabled = false;
+      }
+
+      const body = await derivedCache.cachedRead({
+        key: cacheKeys.assetsManifest({ channel: req.releaseChannel }),
+        prefix: cacheKeys.PREFIX.ASSETS_MANIFEST,
+        ttlSeconds: MANIFEST_TTL_SECONDS,
+        enabled,
+        load: () => buildManifest(req.releaseChannel),
       });
+
+      res.set("Cache-Control", "no-cache");
+      res.json(body);
     } catch (error) {
       console.error("Asset manifest error:", error);
       res.status(500).json({ error: "Internal server error" });

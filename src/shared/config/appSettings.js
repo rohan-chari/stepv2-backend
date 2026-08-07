@@ -1,4 +1,10 @@
 const { prisma: defaultPrisma } = require("../../db");
+const derivedCache = require("../cache/derivedCache");
+const cacheKeys = require("../cache/cacheKeys");
+
+// Every C1 key is a 60s safety net; invalidation is the primary mechanism
+// (spec §3 key table).
+const CATALOG_TTL_SECONDS = 60;
 
 // DB-backed runtime feature flags, toggleable from the admin screen without a
 // deploy (unlike the hardcoded constants in src/constants/*). Every readable
@@ -84,6 +90,54 @@ const KNOWN_FLAGS = {
   // all three hooks (enrollment filter, promotion prune, weekly mid-race sweep).
   // OFF restores today's behavior exactly and immediately. Default OFF.
   seededInactivityPruneEnabled: false,
+  // C0 rollback lever (i) — Redis derived-data spec §5a item 1 "reverse
+  // handoff". While TRUE the race-keyed v2 worker takes no new claims, so the
+  // v2 table drains to zero unexpired RUNNING leases within the 30s lease
+  // window and the OLD binary can be deployed without two bulk writers ever
+  // overlapping. Read PER TICK and UNCACHED (getUncachedFlag) — this flag exists
+  // precisely because an env kill switch can't change on a running process, so
+  // a 30s cache would blunt exactly the emergency it was built for.
+  raceQueueV2ClaimingDisabled: false,
+  // C0 rollback lever (ii). While TRUE the legacy `/steps` and `/steps/samples`
+  // paths call resolveRaceState INLINE as they always did, instead of only
+  // enqueueing. Lever (i) alone would leave persisted totals frozen; this one
+  // keeps them converging while staying on the new binary. Default FALSE (the
+  // new enqueue-only behavior).
+  inlineRaceResolutionFallback: false,
+  // Phase B / C1 (Redis derived-data spec §5 Phase B): read-through Redis
+  // caching for the near-static catalog/config surfaces (shop catalog, powerup
+  // copy catalog, app settings, balance config, global step events, assets
+  // manifest) plus pub/sub busting of the legacy per-worker in-process caches.
+  // Default OFF: with it off, every one of those surfaces runs its existing
+  // Postgres query exactly as before, so the deploy changes nothing.
+  redisCacheCatalogsEnabled: false,
+  // Phase C / C2 (spec §5 Phase C): read-through cache for the default
+  // `GET /races/:id/messages` query shape plus the per-user cosmetics/presentation
+  // cache it hydrates from. Any non-default query shape (a cursor, a non-50
+  // limit, the merged no-`kind` feed) bypasses the cache entirely. Default OFF.
+  redisCacheMessagesEnabled: false,
+  // Phase D / C3 (spec §5 Phase D) — the incident fix. Turns `GET
+  // /races/:id/progress` into a shared per-race snapshot read (soft 15s /
+  // physical 60s) and REMOVES the endpoint's per-poll `race_participants`
+  // write-back plus its effect-expiry / high-multiplier / powerup-state side
+  // effects (those move to the race-keyed v2 worker). Default OFF: with it off
+  // the endpoint runs its existing replay AND its write-back, byte-for-byte as
+  // before, and the worker publishes nothing.
+  redisStandingsEnabled: false,
+  // Phase E / C4 (spec §5 Phase E): read-through caches for the two per-user
+  // read surfaces — `GET /friends/steps` (one `v1:user:daily:{id}:{date}` key
+  // per friend, 60s) and `GET /powerups/inventory` (`v1:user:inventory:{id}`,
+  // 60s). Both invalidate at their write seams (step sync; powerup
+  // grant/use/open/discard/purchase), so the TTL is only the backstop. Default
+  // OFF: with it off both endpoints run their existing Postgres queries.
+  redisCacheUserBitsEnabled: false,
+  // Phase E2 / C5 (spec §5 Phase E2): 10s cache of the ASSEMBLED `GET /auth/me`
+  // response (`v1:user:authme:{id}:{variant}`). Every field the client re-reads
+  // immediately after mutating it is invalidated at its write site — see the
+  // classification table at the top of
+  // `src/modules/users/services/authMeCache.js`, which per spec §5 step 11 must
+  // be reviewed before this flag flips. Default OFF.
+  redisCacheAuthMeEnabled: false,
 };
 
 function buildAppSettings(dependencies = {}) {
@@ -93,12 +147,65 @@ function buildAppSettings(dependencies = {}) {
   let cache = null;
   let cacheAt = 0;
 
-  async function loadAll() {
-    const now = Date.now();
-    if (cache && now - cacheAt < cacheTtlMs) return cache;
+  async function readRows() {
     const rows = await prisma.appSetting.findMany();
     const byKey = {};
     for (const row of rows) byKey[row.key] = row.value;
+    return byKey;
+  }
+
+  // C1 (spec §5 Phase B): the in-process TTL cache above is per-worker and
+  // therefore cluster-INCOHERENT — a flag flipped on worker A stayed stale on
+  // worker B for up to 30s. Two things fix that here:
+  //   * the Redis read-through below (shared across workers), and
+  //   * `subscribeToInvalidation()`, which busts this process's copy the moment
+  //     any worker writes a setting.
+  //
+  // Bootstrapping note: the flag that enables this cache LIVES in this table, so
+  // the very first load of a process (and any load after a bust) must read
+  // Postgres — otherwise deciding whether to use the cache would require the
+  // cache. That first read is what tells us whether to use Redis from then on.
+  async function loadAll() {
+    // Registered on EVERY load (idempotent), not only when the flag is on: the
+    // pub/sub buster is what makes a peer worker's flip visible here in
+    // milliseconds instead of up to `cacheTtlMs`, and a process that has only
+    // ever served cache hits must still be listening.
+    subscribeToInvalidation();
+
+    const now = Date.now();
+    if (cache && now - cacheAt < cacheTtlMs) return cache;
+
+    const lastKnownEnabled = cache
+      ? cache.redisCacheCatalogsEnabled === true
+      : false;
+
+    let byKey;
+    if (lastKnownEnabled) {
+      byKey = await derivedCache.cachedRead({
+        key: cacheKeys.appSettingsKey,
+        prefix: cacheKeys.PREFIX.APP_SETTINGS,
+        ttlSeconds: CATALOG_TTL_SECONDS,
+        enabled: true,
+        load: readRows,
+      });
+    } else {
+      byKey = await readRows();
+      // The rows we just read may be the ones that TURN the cache on (first
+      // load of a process, or the load right after a bust). Populate the shared
+      // copy now so peers and our own next read are served from Redis rather
+      // than each re-discovering the flag from Postgres.
+      if (byKey.redisCacheCatalogsEnabled === true) {
+        const populated = byKey;
+        await derivedCache.cachedRead({
+          key: cacheKeys.appSettingsKey,
+          prefix: cacheKeys.PREFIX.APP_SETTINGS,
+          ttlSeconds: CATALOG_TTL_SECONDS,
+          enabled: true,
+          load: async () => populated,
+        });
+      }
+    }
+
     cache = byKey;
     cacheAt = now;
     return cache;
@@ -133,6 +240,26 @@ function buildAppSettings(dependencies = {}) {
     }
   }
 
+  // Resolved value of one known flag, read STRAIGHT FROM THE ROW — the 30s
+  // process cache is bypassed entirely (and left untouched, so this can never
+  // poison it). For emergency levers whose whole purpose is to take effect on a
+  // running process within one tick: `raceQueueV2ClaimingDisabled` (C0 reverse
+  // handoff) is read this way by the v2 worker on EVERY tick. Any read failure
+  // degrades to the declared default, never to undefined.
+  async function getUncachedFlag(key) {
+    const fallback = KNOWN_FLAGS[key];
+    try {
+      const row = await prisma.appSetting.findUnique({ where: { key } });
+      const value = row?.value;
+      if (typeof fallback === "boolean") {
+        return typeof value === "boolean" ? value : fallback;
+      }
+      return value === undefined || value === null ? fallback : value;
+    } catch {
+      return fallback;
+    }
+  }
+
   // All known flags resolved (defaults filled in) — the admin settings screen
   // shape. Throws on DB failure so admin sees the error rather than silently
   // editing defaults.
@@ -163,6 +290,25 @@ function buildAppSettings(dependencies = {}) {
       create: { key, value },
     });
     cache = null; // bust so this process serves the new value immediately
+    // C1 invalidation site (spec §5 Phase B): delete the shared copy and tell
+    // every peer worker to bust its own in-process copy. Invalidate-only — we
+    // never write the new value into Redis from a mutation path (§3).
+    await derivedCache.invalidate({
+      keys: [cacheKeys.appSettingsKey],
+      prefix: cacheKeys.PREFIX.APP_SETTINGS,
+    });
+  }
+
+  // Peer-worker coherence: any worker's `setFlag` busts this one's copy.
+  // Registered lazily on first use so merely requiring this module never opens
+  // a socket (the wrapper's inertness contract).
+  let unsubscribe = null;
+  function subscribeToInvalidation() {
+    if (unsubscribe) return unsubscribe;
+    unsubscribe = derivedCache.onInvalidate(cacheKeys.PREFIX.APP_SETTINGS, () => {
+      cache = null;
+    });
+    return unsubscribe;
   }
 
   // Force the next read to hit the DB. setFlag already busts on write; this is
@@ -172,7 +318,16 @@ function buildAppSettings(dependencies = {}) {
     cache = null;
   }
 
-  return { getFlag, getRawFlag, getAllFlags, setFlag, bustCache, KNOWN_FLAGS };
+  return {
+    getFlag,
+    getRawFlag,
+    getUncachedFlag,
+    getAllFlags,
+    setFlag,
+    bustCache,
+    subscribeToInvalidation,
+    KNOWN_FLAGS,
+  };
 }
 
 const appSettings = buildAppSettings();

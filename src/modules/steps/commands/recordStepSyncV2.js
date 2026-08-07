@@ -1,8 +1,9 @@
 const { prisma: defaultPrisma } = require("../../../db");
 const { StepSyncRequest: defaultStepSyncRequestModel } = require("../models/stepSyncRequest");
 const {
-  RaceResolutionJob: defaultRaceResolutionJobModel,
-} = require("../../races/models/raceResolutionJob");
+  RaceResolutionJobV2: defaultRaceResolutionJobModel,
+} = require("../../races/models/raceResolutionJobV2");
+const { Race: defaultRaceModel } = require("../../races/models/race");
 const {
   reconcileUploaderRaces: defaultReconcileUploaderRaces,
 } = require("../../races/services/reconcileUploaderRaces");
@@ -58,7 +59,10 @@ function buildRecordStepSyncV2(dependencies = {}) {
   const stepSyncRequestModel =
     dependencies.StepSyncRequest || defaultStepSyncRequestModel;
   const raceResolutionJobModel =
-    dependencies.RaceResolutionJob || defaultRaceResolutionJobModel;
+    dependencies.RaceResolutionJobV2 ||
+    dependencies.RaceResolutionJob ||
+    defaultRaceResolutionJobModel;
+  const raceModel = dependencies.Race || defaultRaceModel;
   const reconcileUploaderRaces =
     dependencies.reconcileUploaderRaces || defaultReconcileUploaderRaces;
   const events = dependencies.eventBus || defaultEventBus;
@@ -111,22 +115,44 @@ function buildRecordStepSyncV2(dependencies = {}) {
       };
     }
 
-    // Transaction B: enqueue the queue generation + finalize the reservation.
+    // Transaction B: enqueue the queue generation(s) + finalize the reservation.
+    //
+    // C0 (spec §5a item 4): the queue is RACE-keyed now, so one upload enqueues
+    // EVERY active race of the uploader, each with this user appended to the
+    // job's `triggeredByUserIds` so the worker computes their box state.
+    //
+    // Wire-shape compat for frozen clients: `raceResolution` still reports ONE
+    // job — the uploader's lexicographically-first active race, which is the one
+    // `GET /steps/race-resolution/:jobId` polls. A user with no active races has
+    // no job to report and gets `jobId: null`, which the shipped client already
+    // handles (it simply doesn't start the poll; see
+    // backend_api_service.dart's nullable `jobId`).
+    const activeRaces = await raceModel.findActiveForUser(userId).catch(() => []);
+    const activeRaceIds = (activeRaces || [])
+      .map((race) => race.id)
+      .sort((a, b) => String(a).localeCompare(String(b)));
+
     const { response } = await prisma.$transaction(async (tx) => {
       const requestedAt = now();
-      const job = await raceResolutionJobModel.enqueue(
-        { userId, resolutionTimeZone: timeZone, now: requestedAt },
+      const jobs = await raceResolutionJobModel.enqueueMany(
+        {
+          raceIds: activeRaceIds,
+          userId,
+          resolutionTimeZone: timeZone,
+          now: requestedAt,
+        },
         tx
       );
+      const reported = jobs.find(Boolean) || null;
       const built = {
         record,
         sampleCount,
         uploaderReconciliation,
         raceResolution: {
-          jobId: job.id,
-          generation: job.generation,
+          jobId: reported ? reported.id : null,
+          generation: reported ? reported.generation : null,
           state: "QUEUED",
-          requestedAt: job.requestedAt,
+          requestedAt: reported ? reported.requestedAt : requestedAt,
         },
       };
       await stepSyncRequestModel.finalize(
@@ -252,6 +278,15 @@ function buildRecordStepSyncV2(dependencies = {}) {
       reservation = result.res;
       record = serializeRecord(result.step);
       stepsChanged = result.changed;
+      // C4 (spec §5 Phase E): Transaction A has committed the daily total, so
+      // `v1:user:daily:{id}:{date}` — the value every friend of this user reads
+      // from `GET /friends/steps` — is now stale. This and `recordSteps` are the
+      // only two daily-total writers; both invalidate here rather than at their
+      // routes. Swallowed: bookkeeping never fails a sync.
+      await require("../services/dailyStepsCache").invalidateSafe(
+        userId,
+        canonical.date
+      );
     } catch (error) {
       // Unique-violation on the reservation => a concurrent request with the
       // same key created it first. Re-read and treat as a same-hash replay.

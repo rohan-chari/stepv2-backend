@@ -21,6 +21,43 @@ const {
 } = require("../../powerups/hitchhikeCopies");
 const { mintPiggyBank } = require("../../powerups/commands/expireEffects");
 const { awardCoins } = require("../../../shared/economy/awardCoins");
+const {
+  RaceResolutionJobV2,
+} = require("../models/raceResolutionJobV2");
+
+// Settlement acquires the race through the SAME fence-first ownership protocol
+// the resolution worker uses (spec §5a item 6): the write transaction BEGINS by
+// taking the v2 job row FOR UPDATE, before a single participant row is touched.
+// Whichever of {settlement, live worker} gets there first holds the row for its
+// transaction; the other blocks at the fence instead of interleaving bulk writes
+// on the same race. The row is upserted first because a race that never had a
+// resolution job would otherwise have nothing to lock.
+//
+// Rows are written in ASCENDING userId order — the one global lock order shared
+// with the worker, forfeitRace's scan, and the multi-target powerups — and the
+// whole transaction is retried ONCE on a 40P01 deadlock as defence in depth.
+async function withSettlementFence(raceId, write) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      return await prisma.$transaction(
+        async (tx) => {
+          await RaceResolutionJobV2.acquireForWrite(tx, { raceId });
+          return write(tx);
+        },
+        { timeout: 15_000, maxWait: 10_000 }
+      );
+    } catch (error) {
+      if (error && error.code === "40P01" && attempt === 0) {
+        console.warn(`[CRON] settlement deadlock on race ${raceId}; retrying once`);
+        continue;
+      }
+      throw error;
+    }
+  }
+}
+
+const byUserIdAsc = (a, b) =>
+  String(a.participant.userId || "").localeCompare(String(b.participant.userId || ""));
 
 // Env-tunable Bounty payout (§3.11). Frozen into each Bounty's metadata at
 // use-time, so this default only applies to rows written before the env existed.
@@ -299,11 +336,14 @@ async function resolveExpiredRaces() {
         )
       );
 
-      // Phase C: persist each active participant's FINAL total, compute its
-      // reached-at snapshot for tie-breaking, and add it to the standings.
+      // Phase C: compute each active participant's FINAL total and its reached-at
+      // snapshot for tie-breaking. NOTHING is written here — determineFinishSnapshot
+      // is an expensive read (samples + the full powerup event log), and holding
+      // the settlement fence across it would pin the race's job row for the whole
+      // replay. Writes are batched into the fenced transaction below.
+      const finalTotals = [];
       for (const e of preLeech) {
         const total = leechFinals.get(e.participant.id) ?? e.preLeechTotal;
-        await RaceParticipant.updateTotalSteps(e.participant.id, total);
         const reachedSnapshot = await determineFinishSnapshot({
           participant: e.participant,
           currentTotal: total,
@@ -316,12 +356,25 @@ async function resolveExpiredRaces() {
           now: settlementTime,
         });
 
+        finalTotals.push({ participant: e.participant, totalSteps: total });
         standings.push({
           participant: e.participant,
           totalSteps: total,
           reachedAt: reachedSnapshot?.finishedAt || settlementTime,
         });
       }
+
+      // Fenced write #1 — settled totals. Fence acquired FIRST, then rows in
+      // ascending userId order.
+      finalTotals.sort(byUserIdAsc);
+      await withSettlementFence(race.id, async (tx) => {
+        for (const row of finalTotals) {
+          await tx.raceParticipant.update({
+            where: { id: row.participant.id },
+            data: { totalSteps: row.totalSteps, totalsUpdatedAt: new Date() },
+          });
+        }
+      });
 
       // ── Team settlement (TR-401/402/404) ─────────────────────────────────
       // Team total = sum of member effective totals (forfeited members' frozen
@@ -378,12 +431,23 @@ async function resolveExpiredRaces() {
         return (a.participant.userId || "").localeCompare(b.participant.userId || "");
       });
 
-      for (let index = 0; index < standings.length; index++) {
-        await RaceParticipant.setPlacement(
-          standings[index].participant.id,
-          index + 1
-        );
-      }
+      // Fenced write #2 — final placements. Same protocol: fence first, then the
+      // rows in ascending userId order (the placement each row gets comes from
+      // the sorted standings above, so the write ORDER does not change the
+      // values it writes).
+      const placements = standings.map((standing, index) => ({
+        participant: standing.participant,
+        placement: index + 1,
+      }));
+      placements.sort(byUserIdAsc);
+      await withSettlementFence(race.id, async (tx) => {
+        for (const row of placements) {
+          await tx.raceParticipant.update({
+            where: { id: row.participant.id },
+            data: { placement: row.placement },
+          });
+        }
+      });
 
       // §3.10 / §3.11: Piggy Bank mint + Bounty payout, using the just-sorted
       // standings for placement. Idempotent via awardCoins refId.

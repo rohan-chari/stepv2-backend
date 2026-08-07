@@ -1,5 +1,9 @@
 const { PowerupCopy } = require("../models/powerupCopy");
 const { POWERUP_COPY_TYPES } = require("../constants/powerupCopySeed");
+const derivedCache = require("../../../shared/cache/derivedCache");
+const cacheKeys = require("../../../shared/cache/cacheKeys");
+
+const CATALOG_TTL_SECONDS = 60;
 
 // Stable serialization order: the canonical seed order, then anything unknown
 // (a row added ahead of a code deploy) appended alphabetically. Clients key by
@@ -31,12 +35,8 @@ function compareRows(a, b) {
 function buildGetPowerupCopyCatalog(deps = {}) {
   const powerupCopyModel = deps.PowerupCopy || PowerupCopy;
 
-  return async function getPowerupCopyCatalog(clientFeatures = new Set()) {
+  async function assemble(has) {
     const rows = (await powerupCopyModel.findAll()) || [];
-    const has = (token) =>
-      clientFeatures && typeof clientFeatures.has === "function"
-        ? clientFeatures.has(token)
-        : Array.isArray(clientFeatures) && clientFeatures.includes(token);
 
     let newest = null;
     for (const row of rows) {
@@ -71,6 +71,38 @@ function buildGetPowerupCopyCatalog(deps = {}) {
       };
       }),
     };
+  }
+
+  // C1 (spec §5 Phase B). The whole assembled payload is cached because it is
+  // fully determined by (rows, capability tokens) — there is nothing per-user in
+  // it (the endpoint is unauthenticated). Two capability tokens shape the
+  // output, so the key carries both; a single shared key would serve QUICKSAND
+  // copy to a frozen binary that treats it as an unknown enum.
+  return async function getPowerupCopyCatalog(clientFeatures = new Set()) {
+    const has = (token) =>
+      clientFeatures && typeof clientFeatures.has === "function"
+        ? clientFeatures.has(token)
+        : Array.isArray(clientFeatures) && clientFeatures.includes(token);
+
+    let enabled = false;
+    try {
+      const { appSettings } = require("../../../shared/config/appSettings");
+      enabled =
+        (await appSettings.getFlag("redisCacheCatalogsEnabled")) === true;
+    } catch {
+      enabled = false;
+    }
+
+    return derivedCache.cachedRead({
+      key: cacheKeys.powerupCatalog({
+        powerups4: has("powerups4"),
+        hitchhikeEffectiveSteps: has("hitchhike_effective_steps"),
+      }),
+      prefix: cacheKeys.PREFIX.POWERUP_CATALOG,
+      ttlSeconds: CATALOG_TTL_SECONDS,
+      enabled,
+      load: () => assemble(has),
+    });
   };
 }
 

@@ -51,6 +51,7 @@ const {
 } = require("./shared/lib/referralCode");
 const { hashClientIp } = require("./shared/lib/clientIp");
 const { prisma: defaultPrisma } = require("./db");
+const redisCache = require("./shared/cache/redisCache");
 const { errorMiddleware } = require("./shared/http/errorMiddleware");
 
 function createApp(dependencies = {}) {
@@ -119,8 +120,17 @@ function createApp(dependencies = {}) {
   // ECDSA signature (see modules/economy/routes/ads.js).
   app.use("/ads", createAdsRouter(dependencies));
 
-  app.get("/health", (req, res) => {
-    res.json({ status: "ok" });
+  // `redis` is additive and internal-only (spec §3): old clients ignore it, and
+  // `status` keeps its exact previous meaning/value. "disabled" = REDIS_URL
+  // unset (cache inert), "down" = configured but unreachable — never a 500.
+  app.get("/health", async (req, res) => {
+    let redis = "disabled";
+    try {
+      redis = await redisCache.healthStatus();
+    } catch {
+      redis = "down";
+    }
+    res.json({ status: "ok", redis });
   });
 
   // ---- Shareable race links (deep-link verification + web landing page) ----

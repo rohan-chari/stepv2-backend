@@ -48,6 +48,10 @@ async function equipAccessory({
     await prisma.userEquippedAccessory.deleteMany({
       where: { userId, slot },
     });
+    // C2 invalidation (spec §3 `v1:user:{id}:cosmetics`): the UNEQUIP branch
+    // returns early and runs outside the $transaction below, so it needs its
+    // own hook — a single hook after the transaction would silently miss it.
+    await invalidatePresentation(userId);
     return { equipped: await getEquipment(userId, prisma, { supportsCharacters }) };
   }
 
@@ -91,7 +95,29 @@ async function equipAccessory({
     };
   });
 
+  // C2 invalidation: equip changes the user's presentation everywhere it is
+  // hydrated at read time (chat senders today; leaderboard/social later). One
+  // user-scoped DEL propagates to every surface — no message list is touched.
+  await invalidatePresentation(userId);
+
   return { equipped: outcome.equipped };
+}
+
+// Kept defensive: cosmetics must never fail to equip because a cache DEL threw.
+async function invalidatePresentation(userId) {
+  try {
+    const {
+      invalidate,
+    } = require("../social/services/userPresentationCache");
+    await invalidate(userId);
+  } catch {}
+  // C5 (spec §5 Phase E2): equip/unequip is on the spec's named invalidation
+  // list for `v1:user:{id}:authme`, and the client refreshes profile surfaces
+  // right after a cosmetics change. Same defensive posture as above — equipping
+  // must never fail because a cache DEL threw.
+  try {
+    await require("../users/services/authMeCache").invalidateSafe(userId);
+  } catch {}
 }
 
 module.exports = { equipAccessory, AccessoryEquipError };

@@ -18,6 +18,16 @@ async function setDisplayName({ userId, displayName }) {
 
   try {
     const updatedUser = await User.update(userId, { displayName });
+    // C2 invalidation (spec §3 `v1:user:{id}:cosmetics`): the per-user
+    // presentation bundle chat hydrates from carries displayName, so a rename
+    // must drop it — otherwise the old name renders on every cached chat page
+    // for up to the 1h TTL.
+    try {
+      const {
+        invalidate,
+      } = require("../../social/services/userPresentationCache");
+      await invalidate(userId);
+    } catch {}
     eventBus.emit("DISPLAY_NAME_SET", { userId, displayName });
     return updatedUser;
   } catch (error) {

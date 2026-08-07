@@ -7,6 +7,13 @@ const {
   syncRacePowerupState: defaultSyncRacePowerupState,
 } = require("../../races/services/racePowerupStateSync");
 const { stepSyncPushService } = require("../../../shared/push/stepSyncPush");
+const {
+  enqueueRaceResolutionForUser: defaultEnqueueRaceResolutionForUser,
+} = require("../../races/services/enqueueRaceResolution");
+const {
+  reconcileUploaderRaces: defaultReconcileUploaderRaces,
+} = require("../../races/services/reconcileUploaderRaces");
+const { appSettings: defaultAppSettings } = require("../../../shared/config/appSettings");
 const { nudgeOvertakenRivals } = require("./recordSteps");
 
 class StepSampleError extends Error {
@@ -90,10 +97,11 @@ function removeOverlaps(samples) {
 function buildRecordStepSamples(dependencies = {}) {
   const hasInjectedDeps = Object.keys(dependencies).length > 0;
   const stepSampleModel = dependencies.StepSample || StepSample;
-  const resolveRaceState = Object.prototype.hasOwnProperty.call(
+  const inlineResolutionInjected = Object.prototype.hasOwnProperty.call(
     dependencies,
     "resolveRaceState"
-  )
+  );
+  const resolveRaceState = inlineResolutionInjected
     ? dependencies.resolveRaceState
     : hasInjectedDeps
       ? async () => {}
@@ -110,6 +118,27 @@ function buildRecordStepSamples(dependencies = {}) {
   const requestStepSyncForUsers =
     dependencies.requestStepSyncForUsers ||
     stepSyncPushService.requestStepSyncForUsers;
+  // C0 (spec §5a item 4): enqueue the uploader's active races instead of bulk-
+  // writing them inline. See recordSteps.js for the lever semantics.
+  const enqueueRaceResolutionForUser = Object.prototype.hasOwnProperty.call(
+    dependencies,
+    "enqueueRaceResolutionForUser"
+  )
+    ? dependencies.enqueueRaceResolutionForUser
+    : hasInjectedDeps
+      ? async () => []
+      : defaultEnqueueRaceResolutionForUser;
+  const reconcileUploaderRaces = Object.prototype.hasOwnProperty.call(
+    dependencies,
+    "reconcileUploaderRaces"
+  )
+    ? dependencies.reconcileUploaderRaces
+    : hasInjectedDeps
+      ? async () => ({ resolvedRaceCount: 0 })
+      : defaultReconcileUploaderRaces;
+  const settings =
+    dependencies.appSettings ||
+    (hasInjectedDeps ? { getFlag: async () => false } : defaultAppSettings);
 
   return async function recordStepSamples({ userId, samples, timeZone }) {
     if (!Array.isArray(samples) || samples.length === 0) {
@@ -125,6 +154,34 @@ function buildRecordStepSamples(dependencies = {}) {
     } else {
       await stepSampleModel.upsertBatch(userId, cleaned);
     }
+    await enqueueRaceResolutionForUser({ userId, timeZone, now: new Date() });
+
+    // C0: the bulk resolve is gone, but the UPLOADER-ONLY reconcile stays inline
+    // — the same one sync-v2 runs in its Transaction B. It writes exactly ONE
+    // row (the uploader's own participant) and syncs their box/powerup state, so
+    // it is a residual single-row writer under §5a item 7, not a bulk writer.
+    // Keeping it is what preserves same-request box minting for frozen legacy
+    // clients; pure enqueue-only would defer their box to the next worker cycle.
+    // Rival totals, trail mines, overtakes and placements are the worker's.
+    try {
+      await reconcileUploaderRaces({ userId, timeZone });
+    } catch (error) {
+      console.error("Uploader race reconciliation failed:", error);
+    }
+
+    let inlineFallback = inlineResolutionInjected;
+    if (!inlineFallback) {
+      try {
+        inlineFallback =
+          (await settings.getFlag("inlineRaceResolutionFallback")) === true;
+      } catch {
+        inlineFallback = false;
+      }
+    }
+    if (!inlineFallback) {
+      return { count: cleaned.length };
+    }
+
     const raceResults = await resolveRaceState({ userId, timeZone });
     if (Array.isArray(raceResults)) {
       await Promise.all(

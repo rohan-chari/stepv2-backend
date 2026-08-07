@@ -48,6 +48,15 @@ const {
 } = require("../social/queries/findLinkOpenReferralCode");
 const { hashClientIp } = require("../../shared/lib/clientIp");
 const { appSettings: defaultAppSettings } = require("../../shared/config/appSettings");
+const authMeCache = require("./services/authMeCache");
+
+// Version-gated omission of `featureFlags.stepSampleBucketMinutes` (2026-07-23
+// incident #2). Shared by `withRuntimeFlags` (which decides whether to emit the
+// flag) and the C5 cache key (which must not serve a modern payload to a
+// below-floor build) — ONE function so the two can never drift apart.
+function isBelowFineBucketFloor(clientAppVersion) {
+  return compareVersions(clientAppVersion, FINE_BUCKET_MIN_APP_VERSION) === -1;
+}
 
 // Reviewer account constants — kept in sync with scripts/seed-app-review-demo.js.
 // The /auth/review endpoint auto-reprovisions the row if it's missing (e.g.
@@ -133,8 +142,7 @@ function createAuthRouter(dependencies = {}) {
     // normalization fix. Omit the flag below the floor so buggy readers stay
     // hourly. Fail OPEN on absent/garbled versions (compareVersions → null):
     // builds that old predate the reader and ignore the flag entirely.
-    const belowFineBucketFloor =
-      compareVersions(clientAppVersion, FINE_BUCKET_MIN_APP_VERSION) === -1;
+    const belowFineBucketFloor = isBelowFineBucketFloor(clientAppVersion);
     const stepSampleBucketMinutes = belowFineBucketFloor
       ? undefined
       : await safeNumber("stepSampleBucketMinutes", [5, 10, 15, 30, 60]);
@@ -317,17 +325,19 @@ function createAuthRouter(dependencies = {}) {
 
   router.get("/me", requireAuth, async (req, res) => {
     try {
-      const incomingFriendRequests = await getIncomingRequestCount(req.user.id);
-      const heldCoins = await getHeldCoinsSafe(req.user.id);
-      // Remote feature flags ride the /auth/me user payload (fetched at launch
-      // and on resume). Additive: old clients ignore the key; getFlag never
-      // throws (degrades to the flag's declared default).
-      // Character powers were removed. Kept as a hard `false` (rather than
-      // dropped) so a frozen 2.0.x client, which shows the home character-power
-      // chip whenever this is true, reliably hides it against this backend.
-      const characterPowersEnabled = false;
-      res.json({
-        user: await withRuntimeFlags(
+      // The assembly this endpoint has always done: users row + a friendships
+      // COUNT + a race_participants SUM + the app_settings flags.
+      const assemble = async () => {
+        const incomingFriendRequests = await getIncomingRequestCount(req.user.id);
+        const heldCoins = await getHeldCoinsSafe(req.user.id);
+        // Remote feature flags ride the /auth/me user payload (fetched at launch
+        // and on resume). Additive: old clients ignore the key; getFlag never
+        // throws (degrades to the flag's declared default).
+        // Character powers were removed. Kept as a hard `false` (rather than
+        // dropped) so a frozen 2.0.x client, which shows the home character-power
+        // chip whenever this is true, reliably hides it against this backend.
+        const characterPowersEnabled = false;
+        return withRuntimeFlags(
           withAdminFlag(
             {
               ...req.user,
@@ -347,8 +357,29 @@ function createAuthRouter(dependencies = {}) {
             checkAdmin
           ),
           req.headers["x-app-version"]
-        ),
+        );
+      };
+
+      // C5 (spec §5 Phase E2): 10s read-through, keyed by user + the ONLY
+      // request-varying input (the fine-bucket app-version gate). Every
+      // read-back-after-write field invalidates at its write site — see the
+      // classification table atop authMeCache.js. Flag off / Redis unavailable
+      // => `assemble()` runs exactly as before.
+      let cacheEnabled = false;
+      try {
+        cacheEnabled =
+          (await appSettings.getFlag("redisCacheAuthMeEnabled")) === true;
+      } catch {
+        cacheEnabled = false;
+      }
+      const user = await authMeCache.read({
+        userId: req.user.id,
+        fineBucketVariant: isBelowFineBucketFloor(req.headers["x-app-version"]),
+        enabled: cacheEnabled,
+        load: assemble,
       });
+
+      res.json({ user });
     } catch (error) {
       console.error("Get me error:", error);
       res.status(500).json({ error: "Internal server error" });

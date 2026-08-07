@@ -7,6 +7,8 @@ const MAX_BODY_LENGTH = 500;
 const RATE_LIMIT_WINDOW_MS = 10_000;
 const RATE_LIMIT_MAX = 5;
 
+const raceMessagesCache = require("../services/raceMessagesCache");
+
 class RaceMessageError extends Error {
   constructor(message, statusCode = 400) {
     super(message);
@@ -67,6 +69,12 @@ function buildSendRaceMessage(dependencies = {}) {
       body: cleaned,
       kind: "USER",
     });
+
+    // C2 invalidation (spec §5 Phase C): AFTER the Postgres commit, one atomic
+    // Lua `SET msgver <durable marker>` + `DEL list`. The command never writes
+    // the new message INTO the cache — a DEL+push race would leave a list
+    // containing only the new entry (§3 "Write paths never write caches").
+    await raceMessagesCache.invalidateKind(raceId, "USER", message);
 
     events.emit("RACE_MESSAGE_SENT", {
       raceId,

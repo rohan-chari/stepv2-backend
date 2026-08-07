@@ -1,5 +1,6 @@
 const { Friendship } = require("../models/friendship");
-const { Steps } = require("../../steps/models/steps");
+const dailyStepsCache = require("../../steps/services/dailyStepsCache");
+const { appSettings } = require("../../../shared/config/appSettings");
 const { characterPresentation } = require("../../cosmetics");
 const { TEAM_RACES_FEATURE } = require("../../races/teamRaces");
 
@@ -86,14 +87,30 @@ async function getFriendsWithSteps(userId, date, supportsCharacters = false) {
     };
   });
 
-  const stepsResults = await Promise.all(
-    friends.map((f) => Steps.findByUserIdAndDate(f.id, date))
+  // C4 (spec §5 Phase E): one indexed `steps` lookup PER FRIEND is the whole
+  // cost of this endpoint, and the same friend's total is read by every one of
+  // their friends. Cache it per friend+date with a 60s TTL, invalidated by that
+  // friend's step sync. Flag off (or Redis unavailable) => `getMany` runs
+  // exactly the per-user lookups this line used to do.
+  //
+  // Defensive read (CLAUDE.md): the flag lookup can never throw the request —
+  // an unreadable app_settings row means "cache off", i.e. today's behavior.
+  let cacheEnabled = false;
+  try {
+    cacheEnabled = (await appSettings.getFlag("redisCacheUserBitsEnabled")) === true;
+  } catch {
+    cacheEnabled = false;
+  }
+  const stepsByUser = await dailyStepsCache.getMany(
+    friends.map((f) => f.id),
+    date,
+    cacheEnabled
   );
 
   return friends
-    .map((f, i) => ({
+    .map((f) => ({
       ...f,
-      steps: stepsResults[i]?.steps ?? 0,
+      steps: stepsByUser.get(f.id) ?? 0,
       // 1.1.4 compat — pre-step-goal-removal clients render this on friend cards.
       stepGoal: 5000,
     }))

@@ -24,6 +24,26 @@ const {
 // this box?" after the fact. See §3.1 — auditability, not prevention.
 const CACHE_TTL_MS = 5_000;
 
+// C1 (spec §5 Phase B). The Redis layer sits UNDER the 5s in-process cache, so
+// the skew bound above is unchanged — Redis only removes the per-worker
+// Postgres query and, via pub/sub, makes an admin save coherent across workers
+// immediately rather than after each worker's own 5s TTL.
+const derivedCache = require("../../shared/cache/derivedCache");
+const cacheKeys = require("../../shared/cache/cacheKeys");
+const CATALOG_CACHE_TTL_SECONDS = 60;
+
+// Read lazily and defensively: this module is required by the app-settings
+// consumers themselves, and a settings read failure must never take balance
+// config down (it already degrades to code defaults).
+async function catalogCacheEnabled() {
+  try {
+    const { appSettings } = require("../../shared/config/appSettings");
+    return (await appSettings.getFlag("redisCacheCatalogsEnabled")) === true;
+  } catch {
+    return false;
+  }
+}
+
 class BalanceConfigError extends Error {
   constructor(message, statusCode, payload = {}) {
     super(message);
@@ -587,16 +607,44 @@ function buildBalanceConfig(dependencies = {}) {
 
   // Never throws (D4). A DB blip must not break box rolls mid-race, so any
   // failure keeps serving the last good snapshot (or code defaults).
+  // C1 (spec §5 Phase B): peer-worker coherence for this in-process cache. Any
+  // worker's saveConfig/rollbackTo busts every worker's copy immediately
+  // instead of each waiting out its own 5s TTL.
+  let unsubscribe = null;
+  function subscribeToInvalidation() {
+    if (unsubscribe) return unsubscribe;
+    unsubscribe = derivedCache.onInvalidate(cacheKeys.PREFIX.BALANCE, () => {
+      cachedAt = 0;
+    });
+    return unsubscribe;
+  }
+
+  // The RAW active row is what gets cached in Redis — `mergeOverDefaults` is
+  // re-applied on every read so a deploy that changes the code defaults takes
+  // effect immediately instead of being frozen into a cached merge result.
+  async function readActiveRaw() {
+    const row = await prisma.balanceConfig.findFirst({
+      where: { active: true },
+      orderBy: { version: "desc" },
+    });
+    return row ? { version: row.version, config: row.config } : null;
+  }
+
   async function getSnapshot() {
+    subscribeToInvalidation();
     const now = Date.now();
     if (cachedAt && now - cachedAt < cacheTtlMs) return snapshot;
     try {
-      const row = await prisma.balanceConfig.findFirst({
-        where: { active: true },
-        orderBy: { version: "desc" },
+      const enabled = await catalogCacheEnabled();
+      const raw = await derivedCache.cachedRead({
+        key: cacheKeys.balanceKey,
+        prefix: cacheKeys.PREFIX.BALANCE,
+        ttlSeconds: CATALOG_CACHE_TTL_SECONDS,
+        enabled,
+        load: readActiveRaw,
       });
-      snapshot = row
-        ? { version: row.version, config: mergeOverDefaults(row.config) }
+      snapshot = raw
+        ? { version: raw.version, config: mergeOverDefaults(raw.config) }
         : { version: null, config: defaultConfig() };
       cachedAt = now;
     } catch (error) {
@@ -741,6 +789,13 @@ function buildBalanceConfig(dependencies = {}) {
       throw error;
     } finally {
       bustCache();
+      // C1 invalidation site: drop the shared copy and bust every peer's
+      // in-process copy. Invalidate-only — the new config is never written to
+      // Redis here (§3 "Write paths never write caches directly").
+      await derivedCache.invalidate({
+        keys: [cacheKeys.balanceKey],
+        prefix: cacheKeys.PREFIX.BALANCE,
+      });
     }
   }
 

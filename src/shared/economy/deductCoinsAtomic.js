@@ -1,5 +1,23 @@
 const { prisma } = require("../../db");
 
+// C5 (spec §5 Phase E2, §9's last acceptance box): with awardCoins.js, one of
+// the only two `users.coins` writers (pinned by
+// test/services/coinSeamStructuralGuard.test.js). Both DELETE the 10s
+// `/auth/me` cache so a purchase is visible on the client's very next refresh.
+//
+// NOTE on the `tx` variant: when a caller runs this inside its own transaction
+// the DEL fires just BEFORE that transaction commits, so a `/auth/me` landing in
+// that window could re-warm the pre-commit balance. The four purchase commands
+// that pass `tx` therefore invalidate AGAIN post-commit; the 10s TTL is the
+// backstop for anything else.
+async function invalidateAuthMe(userId) {
+  try {
+    await require("../../modules/users/services/authMeCache").invalidateSafe(userId);
+  } catch {
+    // A cache DEL must never fail a ledgered coin write.
+  }
+}
+
 class InsufficientCoinsError extends Error {
   constructor(message = "Insufficient coins") {
     super(message);
@@ -55,7 +73,9 @@ async function deductCoinsAtomic({ userId, amount, reason, refId, tx, insufficie
     return { coins: user.coins };
   };
 
-  return tx ? run(tx) : prisma.$transaction(run);
+  const result = tx ? await run(tx) : await prisma.$transaction(run);
+  await invalidateAuthMe(userId);
+  return result;
 }
 
 module.exports = { deductCoinsAtomic, InsufficientCoinsError };

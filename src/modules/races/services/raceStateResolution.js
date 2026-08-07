@@ -490,6 +490,25 @@ async function triggerTrailMines({
     const ownerParticipantId = metadata.ownerParticipantId || mine.targetParticipantId;
     const positionSteps = metadata.positionSteps;
     const penaltyPercent = metadata.penaltyPercent;
+    // C0: who was ALREADY past the mine when it was planted, recorded at plant
+    // time from the same computed totals the plant position came from.
+    //
+    // This replaces the old heuristic "participant.totalSteps (the value stored
+    // before this resolve) is below positionSteps". That heuristic silently
+    // assumed the resolver was the only thing that ever advanced the stored
+    // column. It no longer is: the uploader-only reconcile persists the SYNCING
+    // user's own row inline (so their box state is current in the same request),
+    // which meant the runner who actually crossed the mine arrived at the worker
+    // already sitting above it and was read as "was always ahead" — the mine
+    // would never fire for the person who tripped it.
+    //
+    // Recording the ahead-set at plant time states the rule directly instead of
+    // inferring it, and is immune to who persisted what in between. Mines
+    // planted by an older binary carry no `aheadParticipantIds`; those fall back
+    // to the previous-total heuristic below, so in-flight mines keep working.
+    const aheadAtPlant = Array.isArray(metadata.aheadParticipantIds)
+      ? new Set(metadata.aheadParticipantIds)
+      : null;
 
     if (typeof positionSteps !== "number" || typeof penaltyPercent !== "number") {
       continue;
@@ -510,8 +529,12 @@ async function triggerTrailMines({
         if (isTeamRace && ownerTeam && participant.team === ownerTeam) {
           return false;
         }
+        // Must be at or past the mine now.
+        if (totalSteps < positionSteps) return false;
+        // …and must NOT have already been past it when it was planted.
+        if (aheadAtPlant) return !aheadAtPlant.has(participant.id);
         const previousTotal = participant.totalSteps || 0;
-        return previousTotal < positionSteps && totalSteps >= positionSteps;
+        return previousTotal < positionSteps;
       })
       .sort((a, b) => a.totalSteps - b.totalSteps);
 
@@ -576,11 +599,22 @@ function buildResolveRaceState(dependencies = {}) {
     dependencies.withRaceResolutionLock || ((_raceId, callback) => callback());
   const now = dependencies.now || (() => new Date());
 
+  // `userIds` (C0, spec §5a item 2) is ADDITIVE to the long-standing `userId`
+  // argument: the race-keyed worker coalesces many uploaders into one resolve,
+  // so it needs box-progress totals for EVERY user in the claimed job's
+  // processing snapshot, not just the last one. Callers that pass only `userId`
+  // are byte-for-byte unaffected — the returned `boxEffectiveSteps` still holds
+  // that user's value.
   return async function resolveRaceState({
     raceId,
     userId,
+    userIds = null,
     timeZone = "UTC",
   } = {}) {
+    const boxUserIds = new Set(
+      (Array.isArray(userIds) ? userIds : []).filter(Boolean)
+    );
+    if (userId) boxUserIds.add(userId);
     let races = [];
 
     if (raceId) {
@@ -633,6 +667,17 @@ function buildResolveRaceState(dependencies = {}) {
       // debuffs. Only the userId participant's value is needed (the caller syncs
       // for that user); stays null when resolveRaceState is called without userId.
       let userBoxEffectiveSteps = null;
+      // Same value keyed by user, for every id in `boxUserIds`. Written from
+      // inside the per-participant Promise.all — safe because each iteration
+      // writes a DISTINCT key and JS is single-threaded between awaits.
+      const boxEffectiveStepsByUser = new Map();
+      // C3 (spec §5 Phase D step 8): the RAW walked total per participant, which
+      // getRaceProgress used to hand to expireEffects on every poll. Now that the
+      // request path no longer runs expireEffects, the worker does — and it needs
+      // this map for the SNAPSHOT_AT_EXPIRY_TYPES stepsAtExpiry stamp and for the
+      // Drill Sergeant judgement. Additive: existing callers destructure only
+      // what they read.
+      const baseAdjustedByParticipantId = {};
 
       // Phase A: compute each participant's PRE-LEECH total + the leeches
       // targeting them, WITHOUT writing yet — leech is a cross-participant zero-sum
@@ -691,6 +736,7 @@ function buildResolveRaceState(dependencies = {}) {
               now: currentTime,
             });
 
+          baseAdjustedByParticipantId[participant.id] = baseAdjusted;
           preLeech[index] = {
             participant,
             frozen: false,
@@ -707,7 +753,7 @@ function buildResolveRaceState(dependencies = {}) {
           // race with a canonical tz the leaderboard `baseAdjusted` just computed
           // above is already bucketed in boxTz, so reuse it — box == leaderboard by
           // construction; only a null-tz race recomputes in the fixed boxTz.
-          if (userId && participant.userId === userId) {
+          if (boxUserIds.has(participant.userId)) {
             const boxTz = raceTimeZone(race, "UTC");
             let boxBaseAdjusted;
             if (raceTimeZone(race, timeZone) === boxTz) {
@@ -722,11 +768,15 @@ function buildResolveRaceState(dependencies = {}) {
                 now: currentTime,
               }));
             }
-            userBoxEffectiveSteps = computeBoxEffectiveSteps({
+            const boxSteps = computeBoxEffectiveSteps({
               baseAdjusted: boxBaseAdjusted,
               bonusSteps: participant.bonusSteps || 0,
               maxBonusSteps: participant.maxBonusSteps || 0,
             });
+            boxEffectiveStepsByUser.set(participant.userId, boxSteps);
+            if (userId && participant.userId === userId) {
+              userBoxEffectiveSteps = boxSteps;
+            }
           }
 
           // TR-902: races are TIME-BASED only — there is no target-based early
@@ -800,6 +850,11 @@ function buildResolveRaceState(dependencies = {}) {
         raceId: race.id,
         race, // expose so callers can hand it to syncRacePowerupState (avoids a duplicate findById)
         boxEffectiveSteps: userBoxEffectiveSteps, // Leg Cramp + Wrong Turn immune; null if no userId
+        // Additive (C0): the same figure for every requested user. Existing
+        // callers destructure only what they read, so this is inert for them.
+        boxEffectiveStepsByUser: Object.fromEntries(boxEffectiveStepsByUser),
+        // C3: participantId -> RAW walked steps, for the worker-side expireEffects.
+        baseAdjustedByParticipantId,
         updatedParticipants: stepTotals.length,
         // Retained (always 0) so existing callers reading this keep working.
         newFinishers: 0,

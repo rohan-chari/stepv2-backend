@@ -5,6 +5,9 @@ const { RacePowerupEvent } = require("../../powerups/models/racePowerupEvent");
 const {
   isTournamentParticipant,
 } = require("../../tournaments/services/tournamentAccess");
+const raceMessagesCache = require("../services/raceMessagesCache");
+const userPresentationCache = require("../services/userPresentationCache");
+const { appSettings } = require("../../../shared/config/appSettings");
 
 const CURSOR_VERSION = 1;
 const KIND_RANK = { USER: 1, SYSTEM: 0 };
@@ -90,6 +93,20 @@ function buildGetRaceMessages(dependencies = {}) {
     raceId,
     { cursor, limit = 50, kind } = {}
   ) {
+    // Flag read is defensive: a settings failure must degrade to "no cache",
+    // never to a 500 on the busiest endpoint in the product.
+    let cacheEnabled = false;
+    if (!dependencies.RaceMessage && !dependencies.RacePowerupEvent) {
+      // Injected models mean a unit test with fakes — the cache would read
+      // straight past them, so it stays off in that configuration.
+      try {
+        cacheEnabled =
+          (await appSettings.getFlag("redisCacheMessagesEnabled")) === true;
+      } catch {
+        cacheEnabled = false;
+      }
+    }
+
     const pageLimit = normalizeLimit(limit);
     const parsedCursor = parseCursor(cursor);
     // Backward compatible: omitted/invalid kind => merged feed (USER + SYSTEM).
@@ -145,39 +162,96 @@ function buildGetRaceMessages(dependencies = {}) {
       }
     }
 
+    // C2 (spec §5 Phase C): only the exact default shape may be served from the
+    // cache. A cursor, a non-50 limit, or the merged (no-`kind`) feed bypasses
+    // entirely — caching unbounded query variants was explicitly rejected.
+    const cacheable =
+      cacheEnabled && raceMessagesCache.isCacheableShape({ cursor, limit, kind });
+
     const fetchLimit = pageLimit + 1;
     const [userMessages, powerupEvents] = await Promise.all([
       includeUser
-        ? raceMessageModel.findByRace(raceId, {
-            cursor: parsedCursor,
-            limit: fetchLimit,
-          })
+        ? cacheable
+          ? (
+              await raceMessagesCache.getRows({
+                raceId,
+                kind: "USER",
+                enabled: true,
+              })
+            ).rows
+          : raceMessageModel.findByRace(raceId, {
+              cursor: parsedCursor,
+              limit: fetchLimit,
+            })
         : Promise.resolve([]),
       includeSystem
-        ? racePowerupEventModel.findByRace(raceId, {
-            cursor: parsedCursor,
-            limit: fetchLimit,
-            // Hidden SYSTEM event types are excluded at the DB level so they
-            // never occupy a page slot (keeps pagination full — see model).
-            // POWERUP_IMPOSTER: stealthy. MYSTERY_BOX_OPENED: box-reveal +
-            // fanny-pack auto-activate audit rows (B1) — audit-only, must never
-            // surface what a box contained.
-            excludeEventTypes: HIDDEN_SYSTEM_EVENT_TYPES,
-          })
+        ? cacheable
+          ? (
+              await raceMessagesCache.getRows({
+                raceId,
+                kind: "SYSTEM",
+                enabled: true,
+                hiddenSystemEventTypes: HIDDEN_SYSTEM_EVENT_TYPES,
+              })
+            ).rows
+          : racePowerupEventModel.findByRace(raceId, {
+              cursor: parsedCursor,
+              limit: fetchLimit,
+              // Hidden SYSTEM event types are excluded at the DB level so they
+              // never occupy a page slot (keeps pagination full — see model).
+              // POWERUP_IMPOSTER: stealthy. MYSTERY_BOX_OPENED: box-reveal +
+              // fanny-pack auto-activate audit rows (B1) — audit-only, must never
+              // surface what a box contained.
+              excludeEventTypes: HIDDEN_SYSTEM_EVENT_TYPES,
+            })
         : Promise.resolve([]),
     ]);
 
-    const userItems = userMessages.map((m) => ({
-      id: m.id,
-      kind: "USER",
-      body: m.body,
-      senderId: m.senderId,
-      senderName: m.sender?.displayName ?? null,
-      senderPhotoUrl: m.sender?.profilePhotoUrl ?? null,
-      createdAt: m.createdAt,
-      _cursorKind: "USER",
-      _cursorId: m.id,
-    }));
+    // Sender presentation is joined HERE, per request, from the per-user cache
+    // (spec §3: "cosmetics are NOT embedded; they hydrate at read time"). The
+    // cached rows carry `senderId` only, so a rename/equip/photo change
+    // propagates into every race's chat without touching a single message list.
+    //
+    // The uncached path still carries a hydrated `sender` relation, so it is
+    // used directly and this lookup is skipped — keeping the two paths
+    // byte-identical rather than merely equivalent.
+    let presentation = null;
+    if (cacheable && includeUser && userMessages.length > 0) {
+      presentation = await userPresentationCache.getMany(
+        userMessages.map((m) => m.senderId),
+        true
+      );
+    }
+
+    const userItems = userMessages.map((m) => {
+      // A sender whose account was deleted: `deleteUserAccount` nulls
+      // `race_messages.sender_id`, so Postgres would report no sender at all.
+      // A cached row still holds the old id, so a MISSING user row must produce
+      // exactly the same null triple rather than a dangling id.
+      let senderId = m.senderId;
+      let senderName;
+      let senderPhotoUrl;
+      if (presentation) {
+        const p = senderId ? presentation.get(senderId) : null;
+        if (senderId && p === null) senderId = null;
+        senderName = p?.displayName ?? null;
+        senderPhotoUrl = p?.profilePhotoUrl ?? null;
+      } else {
+        senderName = m.sender?.displayName ?? null;
+        senderPhotoUrl = m.sender?.profilePhotoUrl ?? null;
+      }
+      return {
+        id: m.id,
+        kind: "USER",
+        body: m.body,
+        senderId,
+        senderName,
+        senderPhotoUrl,
+        createdAt: m.createdAt,
+        _cursorKind: "USER",
+        _cursorId: m.id,
+      };
+    });
 
     const systemItems = powerupEvents
       // Belt-and-suspenders: these are already excluded at the DB level

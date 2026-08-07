@@ -897,6 +897,7 @@ model Race {
   activeEffects RaceActiveEffect[]
   powerupEvents RacePowerupEvent[]
   messages      RaceMessage[]
+  resolutionJob RaceResolutionJobV2?
 
   @@unique([tournamentId, tournamentRound, tournamentMatchIndex])
   @@index([creatorId])
@@ -1652,4 +1653,60 @@ model RaceResolutionJob {
   @@index([state, retryAt])
   @@index([leaseExpiresAt])
   @@map("race_resolution_jobs")
+}
+
+// C0 (Redis derived-data spec §5a) — the RACE-KEYED resolution queue. One row
+// per race (unique raceId): the worker that claims it is the SOLE bulk writer of
+// that race's race_participants rows, and raceExpiry acquires the same row
+// FOR UPDATE before settling, so a live resolve and a settlement can never both
+// be mid-write on one race.
+//
+// EXPAND phase: this table is created ALONGSIDE the old per-user
+// `race_resolution_jobs`, which is left completely untouched so old binaries
+// draining it during a `pm2 reload` overlap never see a schema they don't
+// expect. The contract migration (drop old table) ships >= 1 week later.
+//
+// Extra columns over v1:
+//  - leaseToken                   fencing token minted at claim; the write
+//                                 transaction re-acquires the row
+//                                 `WHERE id = ? AND lease_token = ?` FOR UPDATE
+//                                 BEFORE touching any participant row.
+//  - notBeforeAt                  explicit debounce floor written by
+//                                 recordSuccess (now + RACE_RESOLVE_DEBOUNCE_MS).
+//  - triggeredByUserIds           append-distinct list of users whose enqueue
+//                                 made this race dirty (box state / nudges).
+//  - processingTriggeredByUserIds snapshot moved over at claim; survives a
+//                                 crash so a re-claim UNIONs it back in and no
+//                                 triggering user is ever dropped.
+//  - lastCompletedAt              last successful resolve (debounce/observability).
+model RaceResolutionJobV2 {
+  id                           String                 @id @default(uuid())
+  raceId                       String                 @unique @map("race_id")
+  generation                   Int                    @default(1)
+  processingGeneration         Int?                   @map("processing_generation")
+  resolutionTimeZone           String?                @map("resolution_time_zone") @db.VarChar(255)
+  processingTimeZone           String?                @map("processing_time_zone") @db.VarChar(255)
+  state                        RaceResolutionJobState @default(QUEUED)
+  attempts                     Int                    @default(0)
+  requestedAt                  DateTime               @map("requested_at")
+  startedAt                    DateTime?              @map("started_at")
+  completedAt                  DateTime?              @map("completed_at")
+  lastCompletedAt              DateTime?              @map("last_completed_at")
+  retryAt                      DateTime?              @map("retry_at")
+  notBeforeAt                  DateTime?              @map("not_before_at")
+  leaseExpiresAt               DateTime?              @map("lease_expires_at")
+  leaseToken                   String?                @map("lease_token")
+  lastErrorCode                String?                @map("last_error_code")
+  triggeredByUserIds           Json                   @default("[]") @map("triggered_by_user_ids")
+  processingTriggeredByUserIds Json                   @default("[]") @map("processing_triggered_by_user_ids")
+  createdAt                    DateTime               @default(now()) @map("created_at")
+  updatedAt                    DateTime               @updatedAt @map("updated_at")
+
+  race Race @relation(fields: [raceId], references: [id], onDelete: Cascade)
+
+  @@index([state, retryAt])
+  @@index([leaseExpiresAt])
+  @@index([state, notBeforeAt])
+  @@index([requestedAt])
+  @@map("race_resolution_jobs_v2")
 }

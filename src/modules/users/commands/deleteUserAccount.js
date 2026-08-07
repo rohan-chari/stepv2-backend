@@ -219,6 +219,23 @@ function buildDeleteUserAccount(dependencies = {}) {
       // 6) DailyRewardClaim, UserShopItem, UserEquippedAccessory, and
       //    ShopPurchaseRequest all cascade on user delete.
       await tx.user.delete({ where: { id: userId } });
+    // C2 invalidation (spec §3): drop the user's presentation bundle. Note the
+    // cached chat lists are NOT invalidated here — that fan-out is unbounded
+    // (this delete nulls `race_messages.sender_id` across every race the user
+    // ever posted in). Instead, hydration treats a MISSING presentation as the
+    // deleted case and emits the same null senderId/name/photo Postgres would,
+    // so a stale list stays correct. See getRaceMessages.
+    try {
+      const {
+        invalidate,
+      } = require("../../social/services/userPresentationCache");
+      await invalidate(userId);
+    } catch {}
+    // C5 (spec §5 Phase E2, "account state change"): a warm `/auth/me` would
+    // describe an account that no longer exists.
+    try {
+      await require("../services/authMeCache").invalidateSafe(userId);
+    } catch {}
     });
   };
 }

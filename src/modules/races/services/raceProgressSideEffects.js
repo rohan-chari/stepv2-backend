@@ -1,0 +1,196 @@
+// C3 (spec §5 Phase D steps 8 + 9, §5a item 5): everything the `/progress`
+// endpoint used to do BESIDES answering the request, relocated to the
+// race-keyed v2 worker's post-commit hook.
+//
+// ── Why this module exists at all ──────────────────────────────────────────
+// Phase D step 8 says the endpoint's side effects "move to the resolution
+// worker and expireEffects cron where they already exist". Auditing the tree
+// found that only ONE of the three was actually covered:
+//
+//   syncRacePowerupState  ALREADY in the v2 worker (raceResolutionQueueV2.js —
+//                         it runs for every user in the claimed job's
+//                         processing snapshot, and a progress poll enqueues
+//                         with the viewing userId, so the viewer is one).
+//   expireEffects         NOT covered. `grep -rn expireEffects src/` finds
+//                         exactly two live call sites: getRaceProgress and its
+//                         own definition. There is no expireEffects cron. It
+//                         is what stamps `stepsAtExpiry`, reverts Fanny Pack
+//                         slots, judges Drill Sergeant dares and MINTS PIGGY
+//                         BANK COINS — deleting it from the request path
+//                         without a replacement would silently stop all four.
+//   high-multiplier alert NOT covered. `evaluateHighMultiplierAlert` ran from
+//                         getRaceProgress (the re-arm/event-crossing path) and
+//                         from usePowerup (the immediate self-buff spike). Only
+//                         the latter survives the endpoint change, so the
+//                         event-driven crossing and the re-arm-on-decay would
+//                         both be lost.
+//
+// Both missing ones are wired HERE, into the worker's flow — never back into
+// the endpoint. Everything is best-effort: a failure is logged and swallowed,
+// because none of it may take down a resolution run that already committed.
+//
+// ── And the snapshot publish ───────────────────────────────────────────────
+// After the fenced Postgres commit the worker SETs (replaces) the race's Redis
+// snapshot. Never a DEL: the worker's value is the freshest there is, so the
+// worker is deliberately absent from §3's DEL-hook list. A failed SET is logged
+// and ignored — the older snapshot goes stale within 15s and the next reader
+// rebuilds.
+
+const { RaceActiveEffect } = require("../../powerups/models/raceActiveEffect");
+const { GlobalStepEvent } = require("../../steps/models/globalStepEvent");
+const {
+  expireEffects: defaultExpireEffects,
+} = require("../../powerups/commands/expireEffects");
+const {
+  evaluateHighMultiplierAlert: defaultEvaluateHighMultiplierAlert,
+} = require("./highMultiplierAlert");
+const { signedMultiplierForEffects } = require("./effectiveStepScoring");
+const defaultSnapshotStore = require("./raceProgressSnapshot");
+const { appSettings: defaultAppSettings } = require("../../../shared/config/appSettings");
+const redisCache = require("../../../shared/cache/redisCache");
+
+function buildRaceProgressPostCommit(dependencies = {}) {
+  const effectModel = dependencies.RaceActiveEffect || RaceActiveEffect;
+  const globalStepEventModel = dependencies.GlobalStepEvent || GlobalStepEvent;
+  const expireEffectsFn = dependencies.expireEffects || defaultExpireEffects;
+  const evaluateAlert =
+    dependencies.evaluateHighMultiplierAlert || defaultEvaluateHighMultiplierAlert;
+  const snapshotStore = dependencies.raceProgressSnapshot || defaultSnapshotStore;
+  const settings = dependencies.appSettings || defaultAppSettings;
+  const logger = dependencies.logger || console;
+  const now = dependencies.now || (() => new Date());
+
+  // Same two-condition gate the endpoint uses. With the flag off the worker
+  // publishes nothing and runs no relocated side effect, so the endpoint (which
+  // is still doing all three itself) is not double-firing anything.
+  async function enabled() {
+    if (dependencies.redisStandingsEnabled != null) {
+      return dependencies.redisStandingsEnabled === true;
+    }
+    if (!redisCache.isEnabled()) return false;
+    try {
+      return (await settings.getFlag("redisStandingsEnabled")) === true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Relocated from getRaceProgress: expire timed effects for this race. */
+  async function runExpireEffects({ raceId, result }) {
+    try {
+      await expireEffectsFn({
+        raceId,
+        // Additive field on resolveRaceState's return (C3). Absent on an older
+        // shape => expireEffects simply skips the stepsAtExpiry stamp, exactly
+        // as it does today when a caller omits the map.
+        participantSteps: result?.baseAdjustedByParticipantId || {},
+      });
+    } catch (error) {
+      logger.error(`[C3] expireEffects failed (race ${raceId}):`, error);
+    }
+  }
+
+  /**
+   * Relocated from getRaceProgress §6b: the event-driven crossing + re-arm.
+   * The multiplier is rebuilt from ONE `findActiveForRace` read grouped by
+   * participant — the same `signedMultiplierForEffects` the display path folds,
+   * times any live global 2x event (magnitude only, sign preserved).
+   */
+  async function runHighMultiplierAlert({ raceId, result }) {
+    const race = result?.race;
+    if (!race || !race.powerupsEnabled) return;
+    try {
+      const accepted = (race.participants || []).filter(
+        (p) => p.status === "ACCEPTED"
+      );
+      if (accepted.length === 0) return;
+
+      const activeEffects = (await effectModel.findActiveForRace(raceId)) || [];
+      const byParticipant = new Map();
+      for (const effect of activeEffects) {
+        const key = effect.targetParticipantId;
+        if (!key) continue;
+        if (!byParticipant.has(key)) byParticipant.set(key, []);
+        byParticipant.get(key).push(effect);
+      }
+
+      const nowTime = now();
+      const nowMs = nowTime.getTime();
+      let globalEvents = [];
+      try {
+        globalEvents =
+          (await globalStepEventModel.findActiveInRange(race.startedAt, nowTime)) ||
+          [];
+      } catch {
+        globalEvents = [];
+      }
+      const liveEvent = globalEvents.find((ev) => {
+        const s = new Date(ev.startsAt).getTime();
+        const e = new Date(ev.endsAt).getTime();
+        return s <= nowMs && nowMs < e && Number(ev.multiplier) > 1;
+      });
+      const eventMult = liveEvent ? Number(liveEvent.multiplier) : 1;
+
+      const activeForAlert = accepted.filter((p) => !p.finishedAt && !p.forfeitedAt);
+      for (const p of accepted) {
+        const frozen = Boolean(p.finishedAt || p.forfeitedAt);
+        const raw = frozen
+          ? 1
+          : signedMultiplierForEffects(byParticipant.get(p.id) || [], nowMs);
+        try {
+          await evaluateAlert({
+            participant: p,
+            currentMultiplier: raw * eventMult,
+            race,
+            otherParticipants: activeForAlert,
+            now,
+          });
+        } catch (error) {
+          logger.error("[C3] high-multiplier alert eval failed:", error);
+        }
+      }
+    } catch (error) {
+      logger.error(`[C3] high-multiplier pass failed (race ${raceId}):`, error);
+    }
+  }
+
+  /** SET (never DEL) the race's shared standings snapshot. */
+  async function publishSnapshot({ raceId, timeZone }) {
+    try {
+      // Lazy require: getRaceProgress pulls in most of the race module, and the
+      // worker is constructed at process start.
+      const { getRaceProgress } = require("../queries/getRaceProgress");
+      const snapshot = await getRaceProgress.computeSharedSnapshot({
+        raceId,
+        timeZone: timeZone || "UTC",
+      });
+      if (!snapshot) return false;
+      snapshot.source = "worker";
+      return await snapshotStore.writeSnapshot(raceId, snapshot);
+    } catch (error) {
+      // Logged and ignored by contract: the previous snapshot ages out of
+      // freshness within 15s and the next reader rebuilds it.
+      logger.error(`[C3] snapshot publish failed (race ${raceId}):`, error);
+      return false;
+    }
+  }
+
+  /**
+   * The v2 worker's `onCommitted` hook. Runs strictly AFTER the fenced Postgres
+   * commit, holds no lock, and never throws.
+   */
+  return async function onCommitted({ raceId, job, result } = {}) {
+    if (!raceId) return;
+    if (!(await enabled())) return;
+    await runExpireEffects({ raceId, result });
+    await runHighMultiplierAlert({ raceId, result });
+    await publishSnapshot({
+      raceId,
+      timeZone: job?.processingTimeZone || job?.resolutionTimeZone || "UTC",
+    });
+  };
+}
+
+const raceProgressPostCommit = buildRaceProgressPostCommit();
+
+module.exports = { buildRaceProgressPostCommit, raceProgressPostCommit };

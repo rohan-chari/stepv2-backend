@@ -114,6 +114,21 @@ function buildExpireEffects(dependencies = {}) {
       results.push(effect);
     }
 
+    // C3 (spec §5 Phase D step 9): an expiry changes what every viewer of that
+    // race should see, so the shared standings snapshot must go. Only races we
+    // actually touched are invalidated, and only when something expired — this
+    // runs on the worker's post-commit path, where the publish that follows
+    // immediately re-SETs the fresh value.
+    if (results.length > 0) {
+      const touchedRaceIds = [...new Set(results.map((e) => e.raceId).filter(Boolean))];
+      const {
+        invalidateRaceProgress,
+      } = require("../../races/services/raceProgressSnapshot");
+      for (const id of touchedRaceIds) {
+        await invalidateRaceProgress(id);
+      }
+    }
+
     return results;
   };
 }

@@ -1,5 +1,6 @@
 const { Race } = require("../../races/models/race");
 const { RaceMessage } = require("../models/raceMessage");
+const raceMessagesCache = require("../services/raceMessagesCache");
 
 class DeleteRaceMessageError extends Error {
   constructor(message, statusCode = 400) {
@@ -28,6 +29,13 @@ async function deleteRaceMessage({ userId, raceId, messageId }) {
   }
 
   await RaceMessage.softDelete(messageId);
+  // C2 invalidation: a soft-deleted row must disappear from the cached list.
+  // The marker advances off the deletion instant, which is strictly newer than
+  // any row already in the list.
+  await raceMessagesCache.invalidateKind(raceId, "USER", {
+    id: messageId,
+    createdAt: new Date(),
+  });
   return { success: true };
 }
 

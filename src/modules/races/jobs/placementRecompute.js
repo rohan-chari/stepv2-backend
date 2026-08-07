@@ -3,6 +3,9 @@ const { RaceParticipant } = require("../models/raceParticipant");
 const { Notification } = require("../../notifications");
 const { eventBus } = require("../../../shared/events/eventBus");
 const { resolveRaceState } = require("../services/raceStateResolution");
+const {
+  enqueueRaceResolution: defaultEnqueueRaceResolution,
+} = require("../services/enqueueRaceResolution");
 const { stepSyncPushService } = require("../../../shared/push/stepSyncPush");
 const {
   computeRacePayouts,
@@ -50,6 +53,29 @@ function buildRecomputePlacements(dependencies = {}) {
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
   const events = dependencies.eventBus || eventBus;
   const resolve = dependencies.resolveRaceState || resolveRaceState;
+  // C0 (spec §5a item 4): this cron is ENQUEUE-ONLY for the recompute portion.
+  // It used to be a third bulk writer of race_participants, racing the worker
+  // and the sync paths on the same rows. Now it just marks every active race
+  // dirty every 5 minutes — the convergence backstop for races nobody is
+  // syncing or watching — and the race-keyed worker does the writing.
+  //
+  // The notification evaluation below stays here, reading the persisted rows the
+  // worker keeps fresh. Deliberate: moving it into the worker's post-commit hook
+  // would re-evaluate every placement push at the worker's cadence (up to once
+  // per race per 5s) instead of once per 5 minutes, changing push volume and the
+  // meaning of `lastNotifiedPlacement`'s "last live rank" baseline. Its inputs
+  // (totalSteps) are at most one worker cycle stale, which is the D-3 bound this
+  // cron already lived with.
+  //
+  // An EXPLICITLY injected `resolveRaceState` still runs inline: that dependency
+  // is the seam callers use to drive the recompute directly, and the inline path
+  // is still live code behind the `inlineRaceResolutionFallback` lever. The
+  // production singleton injects nothing, so production is enqueue-only.
+  const inlineResolveInjected = Object.prototype.hasOwnProperty.call(
+    dependencies,
+    "resolveRaceState"
+  );
+  const enqueue = dependencies.enqueueRaceResolution || defaultEnqueueRaceResolution;
   const notificationModel = dependencies.Notification || Notification;
   const requestStepSync =
     dependencies.requestStepSyncForUsers ||
@@ -268,10 +294,11 @@ function buildRecomputePlacements(dependencies = {}) {
         // days for hours around local midnight, which is exactly how the
         // false "you slipped to Nth" pushes were produced. Resolve the race's
         // own tz explicitly, falling back to the CREATOR's tz before UTC.
-        await resolve({
-          raceId: race.id,
-          timeZone: raceTimeZone(race, race.creator?.timezone || "UTC"),
-        });
+        const raceTz = raceTimeZone(race, race.creator?.timezone || "UTC");
+        await enqueue({ raceId: race.id, timeZone: raceTz, now: currentTime });
+        if (inlineResolveInjected) {
+          await resolve({ raceId: race.id, timeZone: raceTz });
+        }
 
         const participants = await participantModel.findAcceptedByRace(race.id);
         if (!participants || participants.length === 0) continue;

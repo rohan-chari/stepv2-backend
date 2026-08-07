@@ -44,7 +44,28 @@ class RaceForfeitError extends Error {
   }
 }
 
+const {
+  enqueueRaceResolution: defaultEnqueueRaceResolution,
+} = require("../services/enqueueRaceResolution");
+// C3 (spec §5 Phase D step 9): this write seam is a snapshot DEL hook — the
+// shared standings snapshot must not outlive the change we just committed. The
+// resolution worker is deliberately NOT in this list: it SETs post-commit.
+const {
+  invalidateRaceProgress,
+} = require("../services/raceProgressSnapshot");
+
 function buildForfeitRace(dependencies = {}) {
+  // C0 (spec §5a item 4): after this command's own small writes, mark the race
+  // dirty so the race-keyed worker re-converges its standings. Best-effort and
+  // stubbed out for injected fakes so unit tests stay DB-free.
+  const enqueueRaceResolution = Object.prototype.hasOwnProperty.call(
+    dependencies,
+    "enqueueRaceResolution"
+  )
+    ? dependencies.enqueueRaceResolution
+    : Object.keys(dependencies).length > 0
+      ? async () => null
+      : defaultEnqueueRaceResolution;
   const raceModel = dependencies.Race || Race;
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
   const powerupEventModel = dependencies.RacePowerupEvent || RacePowerupEvent;
@@ -200,8 +221,15 @@ function buildForfeitRace(dependencies = {}) {
     const collapse = await db.$transaction(async (tx) => {
       // Serialize concurrent forfeits on this race: lock all its participant
       // rows so the alive-count below always sees committed truth.
+      //
+      // ORDER BY user_id is REQUIRED, not cosmetic (spec §5a item 7): this is a
+      // multi-row race_participants writer, and the ONE global lock order every
+      // such writer obeys — the race-keyed resolution worker, this scan, and any
+      // multi-target powerup — is ascending userId. A shared lock order means no
+      // deadlock cycle is constructible. The LockRows node sits above the Sort,
+      // so rows really are locked in sorted order.
       await tx.$queryRawUnsafe(
-        `SELECT id FROM race_participants WHERE race_id = $1 FOR UPDATE`,
+        `SELECT id FROM race_participants WHERE race_id = $1 ORDER BY user_id ASC FOR UPDATE`,
         raceId
       );
 
@@ -279,6 +307,10 @@ function buildForfeitRace(dependencies = {}) {
       collapsed: collapse.collapsed === true,
       winnerTeam: collapse.collapsed ? collapse.winnerTeam : null,
     });
+
+    await invalidateRaceProgress(raceId);
+
+    await enqueueRaceResolution({ raceId, userId });
 
     const updated = await participantModel.findByRaceAndUser(raceId, userId);
     return {

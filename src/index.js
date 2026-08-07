@@ -29,7 +29,7 @@ const {
   scheduleDailyRewardReminder,
 } = require("./modules/notifications");
 const {
-  scheduleRaceResolutionWorker,
+  scheduleRaceResolutionWorkerV2,
 } = require("./modules/races");
 function startServer({
   app = createApp(),
@@ -54,7 +54,11 @@ function startServer({
   scheduleDailyMover: scheduleDaily = scheduleDailyMover,
   scheduleDailyRewardReminder:
     scheduleDailyReminder = scheduleDailyRewardReminder,
-  scheduleRaceResolutionWorker: scheduleRaceResolution = scheduleRaceResolutionWorker,
+  // C0: the RACE-keyed worker. The old per-user worker
+  // (scheduleRaceResolutionWorker) is deliberately left in the codebase — it is
+  // the reverse-handoff rollback target — but this binary never schedules it, so
+  // only one bulk writer per race exists at a time.
+  scheduleRaceResolutionWorker: scheduleRaceResolution = scheduleRaceResolutionWorkerV2,
   logger = console,
   // Delay before the cron jobs start ticking. Every scheduler fires an
   // immediate first tick, and under pm2 cluster `reload` the OLD process keeps

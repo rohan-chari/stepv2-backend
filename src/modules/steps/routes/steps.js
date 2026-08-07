@@ -9,6 +9,12 @@ const {
   RaceResolutionJob: defaultRaceResolutionJobModel,
   serializeRaceResolutionStatus,
 } = require("../../races/models/raceResolutionJob");
+const {
+  RaceResolutionJobV2: defaultRaceResolutionJobV2Model,
+} = require("../../races/models/raceResolutionJobV2");
+const {
+  RaceParticipant: defaultRaceParticipantModel,
+} = require("../../races/models/raceParticipant");
 const { getStepsByDate, getStepsHistory } = require("../queries/getSteps");
 const { getStepCalendar: defaultGetStepCalendar } = require("../queries/getStepCalendar");
 const { buildRequireAuth } = require("../../../middleware/requireAuth");
@@ -32,6 +38,10 @@ function createStepsRouter(dependencies = {}) {
     dependencies.recordStepSyncV2 || defaultRecordStepSyncV2;
   const raceResolutionJobModel =
     dependencies.RaceResolutionJob || defaultRaceResolutionJobModel;
+  const raceResolutionJobV2Model =
+    dependencies.RaceResolutionJobV2 || defaultRaceResolutionJobV2Model;
+  const raceParticipantModel =
+    dependencies.RaceParticipant || defaultRaceParticipantModel;
   const getCalendar = dependencies.getStepCalendar || defaultGetStepCalendar;
 
   router.use(requireAuth);
@@ -158,6 +168,34 @@ function createStepsRouter(dependencies = {}) {
           .status(400)
           .json({ error: "Valid generation is required", code: "INVALID_GENERATION" });
       }
+      // C0: jobs are RACE-keyed now, so ownership is "the caller is an accepted
+      // participant of the job's race" rather than "the job's user_id is the
+      // caller". The v1 lookup stays as a FALLBACK so a job id handed out by an
+      // old binary moments before a pm2 reload still resolves for its poller —
+      // the response shape is identical either way.
+      // Defensive: a v2 read failure (table absent on an old DB, injected model
+      // that only knows v1) must degrade to the v1 lookup, never 500 a poll.
+      let v2Job = null;
+      try {
+        v2Job = await raceResolutionJobV2Model.findById(req.params.jobId);
+      } catch {
+        v2Job = null;
+      }
+      if (v2Job) {
+        const participants = await raceParticipantModel.findAcceptedByRace(
+          v2Job.raceId
+        );
+        const isParticipant = (participants || []).some(
+          (p) => p.userId === req.user.id
+        );
+        if (!isParticipant) {
+          return res.status(404).json({ error: "Race resolution job not found" });
+        }
+        return res.json({
+          raceResolution: serializeRaceResolutionStatus(v2Job, generation),
+        });
+      }
+
       const job = await raceResolutionJobModel.findById(req.params.jobId);
       // Unknown OR not owned by the caller → 404, to avoid leaking identifiers.
       if (!job || job.userId !== req.user.id) {

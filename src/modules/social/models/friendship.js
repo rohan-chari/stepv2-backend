@@ -1,5 +1,19 @@
 const { prisma } = require("../../../db");
 
+// C5 (spec §5 Phase E2): `/auth/me` carries `incomingFriendRequests`, a COUNT
+// over this table, and the client refreshes `/auth/me` IMMEDIATELY after every
+// friend accept / decline / send / remove (FriendsTab.onFriendsChanged ->
+// main_shell.dart:2601). So every mutation here invalidates BOTH sides'
+// assembled payload — the requester's and the addressee's — because either
+// side's pending count can change.
+//
+// Lazy require + swallow: cache bookkeeping must never fail a friendship write.
+async function invalidateAuthMePair(a, b) {
+  try {
+    await require("../../users/services/authMeCache").invalidatePairSafe(a, b);
+  } catch {}
+}
+
 const userDisplaySelect = {
   id: true,
   displayName: true,
@@ -43,16 +57,20 @@ const Friendship = {
   },
 
   async create({ requesterId, addresseeId }) {
-    return prisma.friendship.create({
+    const created = await prisma.friendship.create({
       data: { requesterId, addresseeId },
     });
+    await invalidateAuthMePair(requesterId, addresseeId);
+    return created;
   },
 
   async updateStatus(id, status) {
-    return prisma.friendship.update({
+    const updated = await prisma.friendship.update({
       where: { id },
       data: { status },
     });
+    await invalidateAuthMePair(updated.requesterId, updated.addresseeId);
+    return updated;
   },
 
   async findAcceptedFriendIds(prisma, userId) {
@@ -120,7 +138,9 @@ const Friendship = {
   },
 
   async delete(id) {
-    return prisma.friendship.delete({ where: { id } });
+    const removed = await prisma.friendship.delete({ where: { id } });
+    await invalidateAuthMePair(removed.requesterId, removed.addresseeId);
+    return removed;
   },
 
   async findPendingOutgoing(userId) {

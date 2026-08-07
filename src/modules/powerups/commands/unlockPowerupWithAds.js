@@ -43,6 +43,20 @@ function idempotentResult(request) {
   return { ...request.resultJson, idempotent: true };
 }
 
+// C4 + C5 (spec §5 Phases E/E2): a coin purchase changes BOTH the user's
+// powerup inventory and their `/auth/me` balance. `deductCoinsAtomic` already
+// DELs the auth/me key, but it runs INSIDE this command's transaction — so it
+// fires just before the commit and a concurrent read could re-warm the stale
+// balance. Invalidating again here, after the commit, closes that window for
+// every path a user can actually trigger.
+async function invalidateAfterPurchase(userId) {
+  if (!userId) return;
+  try {
+    await require("../services/powerupInventoryCache").invalidateSafe(userId);
+    await require("../../users/services/authMeCache").invalidateSafe(userId);
+  } catch {}
+}
+
 function buildUnlockPowerupWithAds(dependencies = {}) {
   const runTransaction =
     dependencies.runTransaction || ((fn) => prisma.$transaction((tx) => fn(tx)));
@@ -72,7 +86,7 @@ function buildUnlockPowerupWithAds(dependencies = {}) {
     const effectiveLocalDate = resolveLocalDate(localDate, unlockError);
 
     try {
-      return await runTransaction(async (tx) => {
+      const outcome = await runTransaction(async (tx) => {
         // Idempotency replay: a retry returns the same result, never re-grants.
         const existing = await tx.powerupPurchaseRequest.findUnique({
           where: { userId_idempotencyKey: { userId, idempotencyKey: trimmedKey } },
@@ -222,6 +236,8 @@ function buildUnlockPowerupWithAds(dependencies = {}) {
 
         return result;
       });
+      await invalidateAfterPurchase(userId);
+      return outcome;
     } catch (error) {
       if (error instanceof UnlockWithAdsError) throw error;
       // Concurrent duplicate (same key) racing the request insert: replay.

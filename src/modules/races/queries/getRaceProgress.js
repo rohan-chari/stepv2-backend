@@ -46,6 +46,53 @@ const { computeEffectModifiers, signedMultiplierForEffects } = require("../servi
 const {
   evaluateHighMultiplierAlert,
 } = require("../services/highMultiplierAlert");
+// C3 (spec §5 Phase D). Everything below is INERT unless `redisStandingsEnabled`
+// is on AND `REDIS_URL` is set — see the `standingsCacheEnabled()` gate.
+const redisCache = require("../../../shared/cache/redisCache");
+const defaultSnapshotStore = require("../services/raceProgressSnapshot");
+const {
+  recentBoxMints: defaultRecentBoxMints,
+} = require("../services/recentBoxMints");
+const { appSettings: defaultAppSettings } = require("../../../shared/config/appSettings");
+const {
+  enqueueRaceResolution: defaultEnqueueRaceResolution,
+} = require("../services/enqueueRaceResolution");
+
+// The (releaseChannel × supportsCharacters) combinations `characterPresentation`
+// can produce. Closed set: `resolveReleaseChannel` only ever yields "prod" or
+// "testflight". Precomputing all four keeps raw `equippedAccessories` rows (and
+// their Date columns) out of the snapshot while staying byte-identical to what
+// the uncached response would have emitted.
+const PRESENTATION_CHANNELS = ["prod", "testflight"];
+
+function presentationKey(channel, supportsCharacters) {
+  return `${channel}:${supportsCharacters ? 1 : 0}`;
+}
+
+function buildPresentationVariants(user) {
+  const out = {};
+  for (const channel of PRESENTATION_CHANNELS) {
+    for (const supportsCharacters of [false, true]) {
+      out[presentationKey(channel, supportsCharacters)] = characterPresentation(
+        user,
+        supportsCharacters,
+        channel
+      );
+    }
+  }
+  return out;
+}
+
+function readPresentation(entry, channel, supportsCharacters) {
+  const variants = entry.presentation || {};
+  return (
+    variants[presentationKey(channel, supportsCharacters)] ||
+    variants[presentationKey("prod", supportsCharacters)] || {
+      animal: null,
+      accessories: [],
+    }
+  );
+}
 
 // Additive tournament-matchup context for a matchup race's progress payload
 // (null on ordinary races). The frontend banner reads these defensively.
@@ -188,7 +235,837 @@ function buildGetRaceProgress(deps = {}) {
   // version. Injectable for tests; defaults to the env reader.
   const imposterEnabledFn = deps.imposterEnabled || defaultImposterEnabled;
 
-  return async function getRaceProgress(
+  // ── C3 wiring (spec §5 Phase D). All of it is inert unless the flag is on. ──
+  const snapshotStore = deps.raceProgressSnapshot || defaultSnapshotStore;
+  const settings = deps.appSettings || defaultAppSettings;
+  const enqueueRaceResolutionFn =
+    deps.enqueueRaceResolution || defaultEnqueueRaceResolution;
+  const recentBoxMintsStore = deps.recentBoxMints || defaultRecentBoxMints;
+
+  // The gate for EVERY Phase-D behavior change. Two conditions, both required:
+  //   * `REDIS_URL` is set — with it unset the wrapper is fully inert (Phase A
+  //     contract) and there is no snapshot to serve, so the endpoint keeps its
+  //     legacy replay+write-back. This is also what keeps the ~20 unit-test
+  //     files that build this query with fake models from ever touching
+  //     `app_settings` (they run with no Redis and no database).
+  //   * the `redisStandingsEnabled` app setting is true.
+  // "Redis configured but UNREACHABLE" is deliberately still flag-ON: that is
+  // spec test 5e, where every request must take the cheap persisted read and the
+  // replay must not run.
+  async function standingsCacheEnabled() {
+    if (deps.redisStandingsEnabled != null) {
+      return deps.redisStandingsEnabled === true;
+    }
+    if (!redisCache.isEnabled()) return false;
+    try {
+      return (await settings.getFlag("redisStandingsEnabled")) === true;
+    } catch {
+      return false;
+    }
+  }
+
+  // ── THE SHARED REPLAY (viewer-free) ────────────────────────────────────────
+  //
+  // Every participant's effect-adjusted total, the honest placements, the
+  // per-participant multiplier, the team block, the active-effect rows and the
+  // global-event banner. Nothing in here reads the requester's identity.
+  //
+  // `persist` is the ONLY difference between the two flag states, and it gates
+  // exactly the three side effects Phase D step 8 moves to the worker:
+  //   expireEffects, the `updateTotalSteps` write-back, and the
+  //   high-multiplier-alert claim.
+  // With the flag ON all three are false and this function issues ZERO writes.
+  async function computeSharedState({ race, raceId, scoringTimeZone, persist }) {
+    const participantStepsMap = {};
+    const nowParts = getTimeZoneParts(now(), scoringTimeZone);
+    const today = formatDateString(nowParts.year, nowParts.month, nowParts.day);
+    const acceptedParticipants = race.participants.filter(
+      (p) => p.status === "ACCEPTED"
+    );
+
+    // First pass: raw step totals (baseAdjusted) for expiry snapshots + boxes.
+    const raceStartedAt = race.startedAt;
+    const rawStepTotals = await Promise.all(
+      acceptedParticipants.map(async (p) => {
+        const joinedAt = p.joinedAt || raceStartedAt;
+        // Use the later of joinedAt and raceStartedAt (joinedAt could be pre-start for early accepters)
+        const effectiveStart = joinedAt > raceStartedAt ? joinedAt : raceStartedAt;
+
+        // Daily Steps queries use timezone-aware dates (steps are stored under local dates)
+        const startParts = getTimeZoneParts(effectiveStart, scoringTimeZone);
+        const startDate = formatDateString(startParts.year, startParts.month, startParts.day);
+        const dayAfterStartDate = addDaysToDateString(startDate, 1);
+
+        // StepSample window: from race start to end of the local start day
+        // (midnight of the next day in the user's timezone, converted to UTC).
+        const dayAfterParsed = parseDateString(dayAfterStartDate);
+        const startDayWindowEnd = zonedDateTimeToUtc({
+          year: dayAfterParsed.year,
+          month: dayAfterParsed.month,
+          day: dayAfterParsed.day,
+          hour: 0,
+          minute: 0,
+          second: 0,
+        }, scoringTimeZone);
+
+        // Start-of-local-day instant in the scoring tz. When the race begins
+        // EXACTLY at local midnight the start day is a FULL day, so the
+        // authoritative daily total is safe as a fallback.
+        const startOfStartDay = zonedDateTimeToUtc({
+          year: startParts.year,
+          month: startParts.month,
+          day: startParts.day,
+          hour: 0,
+          minute: 0,
+          second: 0,
+        }, scoringTimeZone);
+        const startsAtLocalMidnight =
+          effectiveStart.getTime() === startOfStartDay.getTime();
+
+        let startDaySteps = 0;
+        const startDaySamples = await stepSampleModel.sumStepsInWindow(
+          p.userId, effectiveStart, startDayWindowEnd
+        );
+        if (startsAtLocalMidnight) {
+          const startDayRow = await stepsModel.findByUserIdAndDate(p.userId, startDate);
+          startDaySteps = Math.max(startDaySamples, startDayRow?.steps ?? 0);
+        } else if (startDaySamples > 0) {
+          startDaySteps = startDaySamples;
+        }
+
+        // Per-day max(samples, daily) for days after the start day. SHARED with
+        // the settlement path via calculateSubsequentSteps.
+        const subsequentSteps = await calculateSubsequentSteps({
+          userId: p.userId,
+          dayAfterStartDate,
+          today,
+          timeZone: scoringTimeZone,
+          stepsModel,
+          stepSampleModel,
+          now: now(),
+        });
+
+        const baseAdjusted = Math.max(0, startDaySteps + subsequentSteps);
+        let hasSampleData = startDaySamples > 0;
+        if (!hasSampleData && typeof stepSampleModel.hasAnyInWindow === "function") {
+          hasSampleData = await stepSampleModel.hasAnyInWindow(
+            p.userId,
+            effectiveStart,
+            now()
+          );
+        }
+        participantStepsMap[p.id] = baseAdjusted;
+        return { participant: p, baseAdjusted, hasSampleData, effectiveStart };
+      })
+    );
+
+    // Phase D step 8 — MOVED to the v2 worker's post-commit hook when the flag
+    // is on (raceProgressSideEffects.runPostResolutionSideEffects).
+    if (persist) {
+      await expireEffectsFn({ raceId, participantSteps: participantStepsMap });
+    }
+
+    // GlobalStepEvents overlapping [raceStartedAt, now] — the 2x windows. Read
+    // defensively: a missing/empty model just yields no boost.
+    let globalEvents = [];
+    try {
+      globalEvents =
+        (await globalStepEventModel.findActiveInRange(raceStartedAt, now())) ||
+        [];
+    } catch {
+      globalEvents = [];
+    }
+    const globalContext = { globalEvents, now: now() };
+
+    // Second pass, phase A: per-participant PRE-LEECH total + the leeches
+    // targeting each participant.
+    const preLeech = await Promise.all(
+      rawStepTotals.map(async ({ participant, baseAdjusted, hasSampleData, effectiveStart }) => {
+        // TR-601: forfeited members stay FROZEN at the forfeit snapshot.
+        if (participant.forfeitedAt) {
+          return {
+            participant,
+            frozen: true,
+            totalSteps: participant.totalSteps || 0,
+          };
+        }
+        if (participant.finishedAt) {
+          return {
+            participant,
+            frozen: true,
+            totalSteps: participant.finishTotalSteps ?? participant.totalSteps,
+          };
+        }
+
+        let legCramps = [];
+        let runnersHighs = [];
+        let wrongTurns = [];
+        let campfires = [];
+        let rainstorms = [];
+        let leeches = [];
+        let wave5Effects = [];
+
+        if (race.powerupsEnabled) {
+          legCramps = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "LEG_CRAMP");
+          legCramps.push(...await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "QUICKSAND"));
+          runnersHighs = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "RUNNERS_HIGH");
+          wrongTurns = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "WRONG_TURN");
+          campfires = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "CAMPFIRE_REST");
+          rainstorms = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "RAINSTORM");
+          leeches = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "LEECH");
+          if (typeof raceActiveEffectModel.findEffectsForRaceByTypes === "function") {
+            const w5 = await raceActiveEffectModel.findEffectsForRaceByTypes(
+              raceId,
+              participant.id,
+              ["UPRISING", "RALLY_FLAG", "COIN_FLIP", "GHOST_PEPPER", "UMBRELLA"]
+            );
+            wave5Effects = [
+              ...(w5.UPRISING || []), ...(w5.RALLY_FLAG || []), ...(w5.COIN_FLIP || []),
+              ...(w5.GHOST_PEPPER || []), ...(w5.UMBRELLA || []),
+            ];
+          }
+        }
+
+        const allEffects = [...legCramps, ...runnersHighs, ...wrongTurns, ...campfires, ...rainstorms, ...leeches, ...wave5Effects];
+        const { frozenSteps, buffedSteps, reversedSteps, globalBoostedSteps, leechTransfers } = await computeEffectModifiers(allEffects, baseAdjusted, participant.userId, stepSampleModel, hasSampleData, globalContext, now());
+
+        const preLeechTotal = Math.max(0, baseAdjusted - frozenSteps + buffedSteps - 2 * reversedSteps + (globalBoostedSteps || 0) + (race.powerupsEnabled ? (participant.bonusSteps || 0) : 0));
+
+        // §6a — the SIGNED effective multiplier right now.
+        const currentMultiplierRaw = race.powerupsEnabled
+          ? signedMultiplierForEffects(allEffects, now().getTime())
+          : 1;
+
+        return { participant, frozen: false, preLeechTotal, leechTransfers, currentMultiplierRaw };
+      })
+    );
+
+    // Phase A2 — HITCHHIKE (§7.3). MUST run BEFORE applyLeechTransfers. The
+    // SAME two lines appear in raceStateResolution.processRace and raceExpiry.
+    const hitchhikeCopies = race.powerupsEnabled
+      ? await collectRaceHitchhikeCopies({
+          raceId,
+          raceEndsAt: race.endsAt,
+          participants: race.participants,
+          raceActiveEffectModel,
+          stepSampleModel,
+          now: now(),
+          globalEvents,
+        })
+      : [];
+
+    // Phase B: resolve every leech across the race against actual availability.
+    const leechFinals = applyLeechTransfers(
+      applyHitchhikeCopies(
+        preLeech
+          .filter((e) => !e.frozen)
+          .map((e) => ({
+            participantId: e.participant.id,
+            userId: e.participant.userId,
+            preLeechTotal: e.preLeechTotal,
+            leechTransfers: e.leechTransfers,
+          })),
+        hitchhikeCopies
+      )
+    );
+
+    const stepTotals = preLeech.map((e) => {
+      if (e.frozen) {
+        return { participant: e.participant, totalSteps: e.totalSteps };
+      }
+      return {
+        participant: e.participant,
+        totalSteps: leechFinals.get(e.participant.id) ?? e.preLeechTotal,
+      };
+    });
+
+    // Phase D step 8 — THE M×N REQUEST-PATH WRITE-BACK. This loop is the writer
+    // the 2026-08-07 incident traced back to: ~2,400 rows rewritten with no
+    // mutual exclusion, once per poll, per viewer. With the flag on it does not
+    // run at all; the race-keyed v2 worker persists the same numbers under its
+    // fence, and the lock winner enqueues that job on snapshot expiry.
+    if (persist) {
+      for (const { participant, totalSteps } of stepTotals) {
+        if (!participant.finishedAt && !participant.forfeitedAt) {
+          await participantModel.updateTotalSteps(participant.id, totalSteps);
+          snapshotStore.__bump("writeBacks");
+        }
+      }
+    }
+
+    // ONE read of the race's ACTIVE effects. The legacy path read this twice
+    // (once for the effects panel, once for the illusions); both consumers are
+    // now viewer-overlay code reading this single array.
+    const raceActiveEffects = race.powerupsEnabled
+      ? await raceActiveEffectModel.findActiveForRace(raceId)
+      : [];
+
+    // §6a — per-participant CURRENT MULTIPLIER, with any active global 2x event
+    // folded into the MAGNITUDE (sign preserved).
+    const nowTime = now();
+    const nowMsForMult = nowTime.getTime();
+    const activeEventForMult = globalEvents.find((ev) => {
+      const s = new Date(ev.startsAt).getTime();
+      const e = new Date(ev.endsAt).getTime();
+      return s <= nowMsForMult && nowMsForMult < e && Number(ev.multiplier) > 1;
+    });
+    const eventMult = activeEventForMult ? Number(activeEventForMult.multiplier) : 1;
+    const multiplierByParticipantId = new Map();
+    for (const e of preLeech) {
+      const raw = e.frozen ? 1 : (e.currentMultiplierRaw ?? 1);
+      multiplierByParticipantId.set(e.participant.id, raw * eventMult);
+    }
+
+    // §6b — high-multiplier alert. Phase D step 8 moves this CLAIM (it writes
+    // race_participants.highMultiplierNotifiedAt) to the worker.
+    if (persist && race.powerupsEnabled) {
+      const activeForAlert = acceptedParticipants.filter(
+        (p) => !p.finishedAt && !p.forfeitedAt
+      );
+      for (const p of acceptedParticipants) {
+        try {
+          await evaluateHighMultiplierAlert({
+            participant: p,
+            currentMultiplier: multiplierByParticipantId.get(p.id) ?? 1,
+            race,
+            otherParticipants: activeForAlert,
+            now,
+          });
+        } catch (err) {
+          console.error("high-multiplier alert eval failed:", err);
+        }
+      }
+    }
+
+    // Items 12/16 — ONE server-authoritative placement, from the HONEST live
+    // totals (before Stealth masking and before the Imposter slot swap).
+    const placementByUserId = placementsByUserId(
+      stepTotals.map(({ participant, totalSteps }) => ({
+        userId: participant.userId,
+        totalSteps,
+        finishedAt: participant.finishedAt,
+        placement: participant.placement,
+        joinedAt: participant.joinedAt,
+      }))
+    );
+
+    const updatedRace = await raceModel.findById(raceId);
+    const raceForStatus = updatedRace || race;
+
+    // Team H2H block (TR-401), computed from TRUE totals before any display
+    // illusion — always honest (TR-658).
+    const teams = race.isTeamRace ? buildTeamsBlock(race, stepTotals) : null;
+
+    // Additive: the currently-active global step event, if any.
+    const nowMsForEvent = now().getTime();
+    const activeEvent = globalEvents.find((ev) => {
+      const startMs = new Date(ev.startsAt).getTime();
+      const endMs = new Date(ev.endsAt).getTime();
+      return startMs <= nowMsForEvent && nowMsForEvent < endMs;
+    });
+    const globalEvent = activeEvent
+      ? {
+          active: true,
+          multiplier: Number(activeEvent.multiplier),
+          endsAt: activeEvent.endsAt,
+        }
+      : null;
+
+    return snapshotStore.buildSnapshot({
+      race: {
+        raceId: race.id,
+        status: raceForStatus.status,
+        endsAt: race.endsAt,
+        maxDurationDays: race.maxDurationDays,
+        targetSteps: race.targetSteps, // 1.1.4 compat
+        isTeamRace: race.isTeamRace,
+        teamSize: race.teamSize ?? null,
+        winnerTeam: raceForStatus.winnerTeam ?? null,
+        powerupsEnabled: race.powerupsEnabled,
+        powerupStepInterval: race.powerupStepInterval,
+        ...tournamentFields(race),
+      },
+      participants: stepTotals.map(({ participant, totalSteps }) => ({
+        participantId: participant.id,
+        userId: participant.userId,
+        displayName: participant.user.displayName,
+        profilePhotoUrl: participant.user.profilePhotoUrl,
+        presentation: buildPresentationVariants(participant.user),
+        totalSteps,
+        finishedAt: participant.finishedAt,
+        forfeitedAt: participant.forfeitedAt ?? null,
+        team: participant.team ?? null,
+        placement: placementByUserId.get(participant.userId) ?? null,
+        currentMultiplier: multiplierByParticipantId.get(participant.id) ?? 1,
+        baseAdjusted: participantStepsMap[participant.id] ?? null,
+      })),
+      teams,
+      globalEvent,
+      activeEffects: raceActiveEffects,
+      scoringTimeZone,
+      asOf: nowTime,
+      source: persist ? "replay-legacy" : "replay",
+    });
+  }
+
+  // ── THE CHEAP PERSISTED-COLUMNS READ (viewer-free) ─────────────────────────
+  //
+  // Phase D step 7's pinned fallback: what a lock LOSER on a true cold start
+  // serves, and what EVERY request serves while Redis is down. It runs the
+  // `getRaceDetails` shape — persisted `totalSteps` + the shared placement
+  // comparator — plus one indexed read of the race's active effects so the
+  // effects panel and the multiplier badge do not blank out. It NEVER runs the
+  // replay, and it is never published to Redis (it is not authoritative).
+  async function loadPersistedState({ race, raceId, scoringTimeZone }) {
+    snapshotStore.__bump("persistedFallbacks");
+    const accepted = race.participants.filter((p) => p.status === "ACCEPTED");
+    const raceActiveEffects = race.powerupsEnabled
+      ? await raceActiveEffectModel.findActiveForRace(raceId)
+      : [];
+
+    let globalEvents = [];
+    try {
+      globalEvents =
+        (await globalStepEventModel.findActiveInRange(race.startedAt, now())) || [];
+    } catch {
+      globalEvents = [];
+    }
+
+    const nowTime = now();
+    const nowMs = nowTime.getTime();
+    const activeEvent = globalEvents.find((ev) => {
+      const startMs = new Date(ev.startsAt).getTime();
+      const endMs = new Date(ev.endsAt).getTime();
+      return startMs <= nowMs && nowMs < endMs;
+    });
+    const eventMult =
+      activeEvent && Number(activeEvent.multiplier) > 1
+        ? Number(activeEvent.multiplier)
+        : 1;
+
+    const effectsByParticipant = new Map();
+    for (const effect of raceActiveEffects) {
+      const key = effect.targetParticipantId;
+      if (!key) continue;
+      if (!effectsByParticipant.has(key)) effectsByParticipant.set(key, []);
+      effectsByParticipant.get(key).push(effect);
+    }
+
+    const totalFor = (p) =>
+      p.finishedAt ? (p.finishTotalSteps ?? p.totalSteps) : (p.totalSteps || 0);
+
+    const placementByUserId = placementsByUserId(
+      accepted.map((p) => ({
+        userId: p.userId,
+        totalSteps: totalFor(p),
+        finishedAt: p.finishedAt,
+        placement: p.placement,
+        joinedAt: p.joinedAt,
+      }))
+    );
+
+    const participants = accepted.map((p) => {
+      const frozen = Boolean(p.finishedAt || p.forfeitedAt);
+      const raw =
+        race.powerupsEnabled && !frozen
+          ? signedMultiplierForEffects(effectsByParticipant.get(p.id) || [], nowMs)
+          : 1;
+      return {
+        participantId: p.id,
+        userId: p.userId,
+        displayName: p.user.displayName,
+        profilePhotoUrl: p.user.profilePhotoUrl,
+        presentation: buildPresentationVariants(p.user),
+        totalSteps: totalFor(p),
+        finishedAt: p.finishedAt,
+        forfeitedAt: p.forfeitedAt ?? null,
+        team: p.team ?? null,
+        placement: placementByUserId.get(p.userId) ?? null,
+        currentMultiplier: raw * eventMult,
+        // Unknown without the replay. The requester's own box countdown falls
+        // back to a per-user `calculateBaseAdjusted` in the overlay.
+        baseAdjusted: null,
+      };
+    });
+
+    return snapshotStore.buildSnapshot({
+      race: {
+        raceId: race.id,
+        status: race.status,
+        endsAt: race.endsAt,
+        maxDurationDays: race.maxDurationDays,
+        targetSteps: race.targetSteps,
+        isTeamRace: race.isTeamRace,
+        teamSize: race.teamSize ?? null,
+        winnerTeam: race.winnerTeam ?? null,
+        powerupsEnabled: race.powerupsEnabled,
+        powerupStepInterval: race.powerupStepInterval,
+        ...tournamentFields(race),
+      },
+      participants,
+      teams: race.isTeamRace
+        ? buildTeamsBlock(
+            race,
+            accepted.map((p) => ({ participant: p, totalSteps: totalFor(p) }))
+          )
+        : null,
+      globalEvent: activeEvent
+        ? {
+            active: true,
+            multiplier: Number(activeEvent.multiplier),
+            endsAt: activeEvent.endsAt,
+          }
+        : null,
+      activeEffects: raceActiveEffects,
+      scoringTimeZone,
+      asOf: nowTime,
+      source: "persisted",
+    });
+  }
+
+  // ── THE VIEWER OVERLAY ─────────────────────────────────────────────────────
+  //
+  // Everything the requester's identity or their client's capabilities decide,
+  // computed per request from the shared snapshot plus the requester's OWN
+  // cheap reads: `myPlacement`/`myPlacementHidden`, the whole `powerupData`
+  // block (box countdown, inventory, queued count, upgrade ladders,
+  // `dropOdds`), the per-viewer effect filter and capability downcasts, the
+  // Stealth/Detour/Imposter illusions, and `characterPresentation`.
+  async function buildViewerResponse({
+    snapshot,
+    race,
+    raceId,
+    userId,
+    myParticipant,
+    scoringTimeZone,
+    supportsCharacters,
+    supportsPowerups3,
+    supportsPowerups4,
+    supportsPowerups5,
+    releaseChannel,
+    syncPowerups,
+  }) {
+    const snapRace = snapshot.race || {};
+    const entries = snapshot.participants || [];
+    const raceActiveEffects = snapshot.activeEffects || [];
+    const nowTime = now();
+
+    // Build leaderboard with stealth mode and detour sign applied, from the
+    // SAME shared collector the tournament bracket uses so the two surfaces
+    // mask identically.
+    let stealthedUserIds = new Set();
+    let viewerIsDetoured = false;
+    let imposterSwaps = [];
+    if (snapRace.powerupsEnabled) {
+      ({ stealthedUserIds, viewerIsDetoured, imposterSwaps } =
+        collectRaceIllusions(raceActiveEffects, userId, nowTime.getTime()));
+    }
+
+    // Roll powerups for the requesting user if they crossed a threshold.
+    // Spectators (no myParticipant) never earn powerups — skip the whole block.
+    let powerupData = null;
+    let balanceConfigSnapshot = null;
+    if (myParticipant && snapRace.powerupsEnabled && snapRace.powerupStepInterval) {
+      // Box progress tracks RAW walked steps — immune to every buff/debuff
+      // multiplier. It buckets calendar days in boxTz = raceTimeZone(race,
+      // "UTC"): the race's canonical persisted tz if set, else the literal
+      // constant "UTC" — never the request tz. When boxTz === the leaderboard's
+      // scoring tz we REUSE the snapshot's `baseAdjusted` so box and leaderboard
+      // agree by construction. A non-ACCEPTED requester, a null-tz race, and the
+      // persisted fallback (which has no baseAdjusted) all recompute here for
+      // THIS USER ONLY. Lazy require breaks the getRaceProgress <->
+      // raceStateResolution import cycle.
+      const boxTz = raceTimeZone(race, "UTC");
+      const myEntry = entries.find((e) => e.participantId === myParticipant.id);
+      const reusedLeaderboardBase = myEntry ? myEntry.baseAdjusted : null;
+      let myBoxBaseAdjusted;
+      if (scoringTimeZone === boxTz && reusedLeaderboardBase != null) {
+        myBoxBaseAdjusted = reusedLeaderboardBase;
+      } else {
+        const { calculateBaseAdjusted } = require("../services/raceStateResolution");
+        ({ baseAdjusted: myBoxBaseAdjusted } = await calculateBaseAdjusted({
+          participant: myParticipant,
+          raceStartedAt: race.startedAt,
+          timeZone: boxTz,
+          stepsModel,
+          stepSampleModel,
+          now: now(),
+        }));
+      }
+      const myBoxEffectiveSteps = computeBoxEffectiveSteps({
+        baseAdjusted: myBoxBaseAdjusted,
+        bonusSteps: myParticipant.bonusSteps || 0,
+        maxBonusSteps: myParticipant.maxBonusSteps || 0,
+      });
+      // Phase D step 8: the box-gate sync WRITES race_participants
+      // (nextBoxAtSteps, maxBonusSteps) and mints RacePowerup rows, so with the
+      // flag on it belongs to the worker, which runs it for every triggering
+      // user of the claimed job — and the progress poll's enqueue makes THIS
+      // viewer one of them.
+      //
+      // The mint delta (`newMysteryBoxes`/`newQueuedBoxes`) is what drives the
+      // client's "You earned a mystery box!" toast, so it cannot simply go
+      // empty (spec v9 item 2). The worker records each mint under the user's
+      // recent-mints key; here we CONSUME this race's entries atomically and
+      // fold them back into the same fields, in the same shape. Only this
+      // race's entries are taken — another race's pending toast survives for
+      // its own next poll.
+      const syncResult = syncPowerups
+        ? await syncRacePowerupState({
+            raceId,
+            userId,
+            boxEffectiveSteps: myBoxEffectiveSteps,
+          })
+        : await recentBoxMintsStore.consume({ userId, raceId });
+      // One config read per request; the same snapshot feeds the upgrade
+      // ladders below and the dropOdds block further down.
+      balanceConfigSnapshot = await balanceConfig.getSnapshot();
+      powerupData = {
+        enabled: true,
+        newMysteryBoxes: syncResult.newMysteryBoxes || [],
+        newQueuedBoxes: syncResult.newQueuedBoxes || 0,
+        powerupStepInterval: snapRace.powerupStepInterval,
+        upgradeCosts: {
+          byRarity: balanceConfigSnapshot.config.upgradeCosts.byRarity,
+          byType: balanceConfigSnapshot.config.upgradeCosts.byType,
+        },
+        rarityByType: balanceConfigSnapshot.config.rarityByType,
+        capabilities: {
+          pocketWatchTargetEffect: true,
+        },
+      };
+
+      // Re-read participant to get current powerupSlots (may have changed via Fanny Pack expiry)
+      const freshParticipant = await participantModel.findById(myParticipant.id);
+      const mySlots = freshParticipant?.powerupSlots || 3;
+      const nextBoxAtSteps =
+        freshParticipant?.nextBoxAtSteps ?? myParticipant.nextBoxAtSteps ?? 0;
+
+      powerupData.powerupSlots = mySlots;
+      if (nextBoxAtSteps > 0) {
+        const bonusNow = freshParticipant?.bonusSteps || 0;
+        const maxBonus = freshParticipant?.maxBonusSteps || 0;
+        const effectiveSteps = computeBoxEffectiveSteps({
+          baseAdjusted: myBoxBaseAdjusted,
+          bonusSteps: bonusNow,
+          maxBonusSteps: maxBonus,
+        });
+        // Clamp the countdown to at most one interval.
+        powerupData.stepsUntilNextPowerup = Math.max(
+          0,
+          Math.min(nextBoxAtSteps - effectiveSteps, snapRace.powerupStepInterval)
+        );
+      }
+
+      // Unified inventory: both HELD and MYSTERY_BOX powerups in slots
+      const slotPowerups = await racePowerupModel.findSlotPowerups(myParticipant.id);
+      powerupData.inventory = slotPowerups.map((p) => ({
+        id: p.id,
+        type: p.type,
+        rarity: p.rarity,
+        status: p.status,
+      }));
+
+      // Queued box count for frontend indicator
+      const queuedCount =
+        syncResult.queuedBoxCount ??
+        await racePowerupModel.countQueuedByParticipant(myParticipant.id);
+      powerupData.queuedBoxCount = queuedCount;
+
+      // (The legacy path also issued a `findActiveForParticipant` here whose
+      // result was never read — dead weight on the hottest endpoint. Dropped;
+      // the per-viewer filter below works off the shared race-wide array.)
+      powerupData.activeEffects = raceActiveEffects
+        // Keep an effect IF the viewer owns it OR its type is not a concealed
+        // self-advantage.
+        .filter(
+          (e) =>
+            e.targetUserId === userId || !HIDDEN_FROM_OPPONENTS.has(e.type)
+        )
+        // §9.3: withhold HITCHHIKE from clients that don't advertise powerups3.
+        .filter((e) => supportsPowerups3 || e.type !== "HITCHHIKE")
+        // §4.5: wave-5 types a non-powerups5 client cannot render are WITHHELD.
+        .filter(
+          (e) =>
+            supportsPowerups5 ||
+            ![
+              "GHOST_PEPPER", "COIN_FLIP", "DECOY", "UMBRELLA",
+              "PIGGY_BANK", "DRILL_SERGEANT", "BOUNTY",
+            ].includes(e.type)
+        )
+        .map(async (e) => {
+          let type = e.type;
+          if (type === "QUICKSAND" && !supportsPowerups4) type = "LEG_CRAMP";
+          if (!supportsPowerups5) {
+            if (type === "POWER_OUTAGE") type = "SIGNAL_JAMMER";
+            else if (type === "UPRISING" || type === "RALLY_FLAG") type = "RUNNERS_HIGH";
+          }
+          const entry = {
+            id: e.id,
+            type,
+            expiresAt: e.expiresAt,
+            onSelf: e.targetUserId === userId,
+            targetUserId: e.targetUserId,
+            sourceUserId: e.sourceUserId,
+          };
+          // Piggy Bank live "banked so far" counter (display-only, owner-only).
+          // At most one extra query, for the requester's OWN effect — a viewer
+          // overlay read, never cached.
+          if (e.type === "PIGGY_BANK" && e.targetUserId === userId) {
+            const meta = e.metadata || {};
+            const stepsPerCoin = Number(meta.stepsPerCoin) || 300;
+            const coinCap = Number.isFinite(Number(meta.coinCap)) ? Number(meta.coinCap) : 80;
+            if (coinCap > 0 && stepsPerCoin > 0) {
+              try {
+                const start = new Date(e.startsAt);
+                const expiry = e.expiresAt ? new Date(e.expiresAt) : now();
+                const nowMs = now().getTime();
+                const end = expiry.getTime() < nowMs ? expiry : new Date(nowMs);
+                if (end.getTime() > start.getTime()) {
+                  const windowSteps = await StepSample.sumStepsInWindow(e.targetUserId, start, end);
+                  entry.piggyBank = {
+                    bankedCoins: Math.min(
+                      Math.floor(Math.max(0, windowSteps) / stepsPerCoin),
+                      coinCap
+                    ),
+                    coinCap,
+                    windowSteps: Math.round(Math.max(0, windowSteps)),
+                  };
+                }
+              } catch (err) {
+                console.error("Piggy Bank live counter failed:", err);
+              }
+            }
+          }
+          return entry;
+        });
+      powerupData.activeEffects = await Promise.all(powerupData.activeEffects);
+    }
+
+    const leaderboard = entries
+      .map((entry) => {
+        // §6a — a masked row must NOT leak the player's multiplier.
+        const rawCurrentMultiplier = entry.currentMultiplier ?? 1;
+        // Detour Sign: viewer sees ALL participants as ???
+        if (viewerIsDetoured) {
+          return {
+            userId: entry.userId,
+            displayName: "???",
+            profilePhotoUrl: null,
+            accessories: [],
+            totalSteps: null,
+            finishedAt: entry.finishedAt,
+            stealthed: false,
+            currentMultiplier: null,
+            // Detour Sign masks every total, so it must mask every rank too.
+            placement: null,
+            // Team identity is structural (column grouping), never masked.
+            team: entry.team ?? null,
+            forfeitedAt: entry.forfeitedAt ?? null,
+          };
+        }
+        const isStealthed = stealthedUserIds.has(entry.userId)
+          && entry.userId !== userId
+          && !entry.finishedAt;
+        return {
+          userId: entry.userId,
+          displayName: isStealthed ? "???" : entry.displayName,
+          profilePhotoUrl: isStealthed ? null : entry.profilePhotoUrl,
+          ...(isStealthed
+            ? { accessories: [], animal: null }
+            : readPresentation(entry, releaseChannel, supportsCharacters)),
+          totalSteps: isStealthed ? null : entry.totalSteps,
+          finishedAt: entry.finishedAt,
+          stealthed: isStealthed,
+          // A stealthed rival's steps are nulled, so their rank must be too.
+          placement: isStealthed ? null : (entry.placement ?? null),
+          currentMultiplier: isStealthed ? null : rawCurrentMultiplier,
+          // Team races (TR-656): stealth masks the individual plank only.
+          team: entry.team ?? null,
+          forfeitedAt: entry.forfeitedAt ?? null,
+        };
+      })
+      .sort((a, b) => {
+        // Stealthed users always appear at the top
+        if (a.stealthed && !b.stealthed) return -1;
+        if (!a.stealthed && b.stealthed) return 1;
+        const aSteps = a.totalSteps ?? 0;
+        const bSteps = b.totalSteps ?? 0;
+        return bSteps - aSteps;
+      });
+
+    // Apply IMPOSTER display swaps (display path only).
+    if (imposterEnabledFn() && imposterSwaps.length > 0) {
+      const swappedUserIds = new Set();
+      for (const { a, b } of imposterSwaps) {
+        if (a === b) continue;
+        if (swappedUserIds.has(a) || swappedUserIds.has(b)) continue;
+        const ia = leaderboard.findIndex((p) => p.userId === a);
+        const ib = leaderboard.findIndex((p) => p.userId === b);
+        if (ia === -1 || ib === -1) continue;
+        [leaderboard[ia], leaderboard[ib]] = [leaderboard[ib], leaderboard[ia]];
+        swappedUserIds.add(a);
+        swappedUserIds.add(b);
+      }
+    }
+
+    const myPlacementEntry = entries.find((e) => e.userId === userId);
+
+    const result = {
+      raceId: snapRace.raceId,
+      status: snapRace.status,
+      endsAt: snapRace.endsAt,
+      maxDurationDays: snapRace.maxDurationDays,
+      targetSteps: snapRace.targetSteps, // 1.1.4 compat
+      participants: leaderboard,
+      // Items 12/16 — additive, nullable. `myPlacementHidden` mirrors the
+      // GET /races semantics exactly so the client reads one rule on both.
+      myPlacement: viewerIsDetoured
+        ? null
+        : (myPlacementEntry ? myPlacementEntry.placement ?? null : null),
+      myPlacementHidden: viewerIsDetoured,
+      tournamentId: snapRace.tournamentId,
+      tournamentRound: snapRace.tournamentRound,
+      tournamentRoundLabel: snapRace.tournamentRoundLabel,
+      tournamentName: snapRace.tournamentName,
+    };
+
+    if (snapRace.isTeamRace) {
+      result.teams = snapshot.teams;
+      result.winnerTeam = snapRace.winnerTeam ?? null;
+      result.isTeamRace = true;
+      result.teamSize = snapRace.teamSize ?? null;
+    }
+
+    // §5.3 — additive `dropOdds`, derived from the SAME helpers the roll uses
+    // and the SAME true step totals openMysteryBox ranks on.
+    if (powerupData && balanceConfigSnapshot) {
+      const dropOdds = buildDropOdds({
+        race,
+        userId,
+        stepTotals: entries.map((e) => ({
+          participant: { userId: e.userId, team: e.team ?? null },
+          totalSteps: e.totalSteps,
+        })),
+        myParticipant,
+        snapshot: balanceConfigSnapshot,
+        supportsPowerups5,
+      });
+      if (dropOdds) powerupData.dropOdds = dropOdds;
+    }
+
+    if (powerupData) {
+      result.powerupData = powerupData;
+    }
+
+    if (snapshot.globalEvent) {
+      result.globalEvent = snapshot.globalEvent;
+    }
+
+    return result;
+  }
+
+  const query = async function getRaceProgress(
     userId,
     raceId,
     timeZone,
@@ -266,706 +1143,125 @@ function buildGetRaceProgress(deps = {}) {
       return nonActiveResult;
     }
 
-    // Expire timed effects before calculating
-    const participantStepsMap = {};
-    // Seeded races bucket steps in their canonical tz (e.g. America/New_York) so
-    // every participant's "midnight" is the same instant AND this live path agrees
-    // with settlement (raceExpiry). User-created races (timezone NULL) keep using
-    // the requester's header tz — legacy behavior.
+    // Seeded races bucket steps in their canonical tz so every participant's
+    // "midnight" is the same instant AND this live path agrees with settlement
+    // (raceExpiry). User-created races (timezone NULL) keep using the
+    // requester's header tz — legacy behavior, and the reason the snapshot
+    // carries its scoring tz (see cacheKeys.raceProgress).
     const scoringTimeZone = raceTimeZone(race, timeZone);
-    const nowParts = getTimeZoneParts(now(), scoringTimeZone);
-    const today = formatDateString(nowParts.year, nowParts.month, nowParts.day);
-    const acceptedParticipants = race.participants.filter((p) => p.status === "ACCEPTED");
+    const cacheOn = await standingsCacheEnabled();
 
-    // First pass: calculate raw step totals for expiry snapshots
-    const raceStartedAt = race.startedAt;
-    const rawStepTotals = await Promise.all(
-      acceptedParticipants.map(async (p) => {
-        const joinedAt = p.joinedAt || raceStartedAt;
-        // Use the later of joinedAt and raceStartedAt (joinedAt could be pre-start for early accepters)
-        const effectiveStart = joinedAt > raceStartedAt ? joinedAt : raceStartedAt;
-
-        // Daily Steps queries use timezone-aware dates (steps are stored under local dates)
-        const startParts = getTimeZoneParts(effectiveStart, scoringTimeZone);
-        const startDate = formatDateString(startParts.year, startParts.month, startParts.day);
-        const dayAfterStartDate = addDaysToDateString(startDate, 1);
-
-        // StepSample window: from race start to end of the local start day
-        // (midnight of the next day in the user's timezone, converted to UTC).
-        // Using local midnight instead of UTC midnight ensures steps taken later
-        // in the same local day are captured even when the race starts near UTC midnight.
-        const dayAfterParsed = parseDateString(dayAfterStartDate);
-        const startDayWindowEnd = zonedDateTimeToUtc({
-          year: dayAfterParsed.year,
-          month: dayAfterParsed.month,
-          day: dayAfterParsed.day,
-          hour: 0,
-          minute: 0,
-          second: 0,
-        }, scoringTimeZone);
-
-        // Start-of-local-day instant in the scoring tz. When the race begins
-        // EXACTLY at local midnight (a midnight-aligned seeded race, for on-time /
-        // pre-registered entrants), the start day is a FULL day: pre-race steps
-        // that day are impossible, so the authoritative daily total is safe to use
-        // as a fallback when hourly samples haven't synced yet.
-        const startOfStartDay = zonedDateTimeToUtc({
-          year: startParts.year,
-          month: startParts.month,
-          day: startParts.day,
-          hour: 0,
-          minute: 0,
-          second: 0,
-        }, scoringTimeZone);
-        const startsAtLocalMidnight =
-          effectiveStart.getTime() === startOfStartDay.getTime();
-
-        // For the start day: try StepSample for precise post-start steps
-        let startDaySteps = 0;
-        const startDaySamples = await stepSampleModel.sumStepsInWindow(
-          p.userId, effectiveStart, startDayWindowEnd
-        );
-        if (startsAtLocalMidnight) {
-          // Full start day: max(daily total, samples) — same rule as later days,
-          // so a daily-only sync still counts and doesn't strand the user at 0.
-          const startDayRow = await stepsModel.findByUserIdAndDate(p.userId, startDate);
-          startDaySteps = Math.max(startDaySamples, startDayRow?.steps ?? 0);
-        } else if (startDaySamples > 0) {
-          // Partial start day (mid-day / late joiner): only post-start samples are
-          // safe — a later daily-total sync can include pre-join steps that were
-          // not present at the join instant.
-          startDaySteps = startDaySamples;
-        }
-
-        // For days after the start day: per-day max(samples, daily). The race
-        // must never count fewer steps than the authoritative daily total for
-        // the covered period, and a stale daily row must never suppress larger
-        // samples. SHARED with the settlement path (raceStateResolution.js) via
-        // calculateSubsequentSteps so display and settlement stay identical.
-        const subsequentSteps = await calculateSubsequentSteps({
-          userId: p.userId,
-          dayAfterStartDate,
-          today,
-          timeZone: scoringTimeZone,
-          stepsModel,
-          stepSampleModel,
-          now: now(),
-        });
-
-        const baseAdjusted = Math.max(0, startDaySteps + subsequentSteps);
-        // See calculateBaseAdjusted (raceStateResolution.js) for the rationale:
-        // the start-day sliver alone pinned night-started races to the crude
-        // fallback forever, zeroing timed buffs and Leech. Kept identical here so
-        // display and settlement agree. Short-circuits, so the common case
-        // (samples on the start day) adds no query.
-        let hasSampleData = startDaySamples > 0;
-        if (!hasSampleData && typeof stepSampleModel.hasAnyInWindow === "function") {
-          hasSampleData = await stepSampleModel.hasAnyInWindow(
-            p.userId,
-            effectiveStart,
-            now()
-          );
-        }
-        participantStepsMap[p.id] = baseAdjusted;
-        return { participant: p, baseAdjusted, hasSampleData, effectiveStart };
-      })
-    );
-
-    await expireEffectsFn({ raceId, participantSteps: participantStepsMap });
-
-    // Fetch GlobalStepEvents that overlap [raceStartedAt, now]. These are the
-    // BeReal-style 2x windows that boost steps for ALL participants. Read
-    // defensively: a missing/empty model just yields no boost. Passed into the
-    // SHARED computeEffectModifiers so display matches settlement exactly.
-    let globalEvents = [];
-    try {
-      globalEvents =
-        (await globalStepEventModel.findActiveInRange(raceStartedAt, now())) ||
-        [];
-    } catch {
-      globalEvents = [];
-    }
-    const globalContext = { globalEvents, now: now() };
-
-    // Second pass, phase A: per-participant PRE-LEECH total + the leeches
-    // targeting each participant. Leech is a cross-participant zero-sum transfer,
-    // so it can't be folded per-participant here — it is resolved race-wide in
-    // phase B (applyLeechTransfers) against real victim availability. Frozen
-    // (finished/forfeited) participants keep their stored totals and take no part
-    // in the transfer.
-    const preLeech = await Promise.all(
-      rawStepTotals.map(async ({ participant, baseAdjusted, hasSampleData, effectiveStart }) => {
-        // TR-601: forfeited team-race members stay FROZEN at the forfeit
-        // snapshot — never recomputed on the display path either.
-        if (participant.forfeitedAt) {
-          return {
-            participant,
-            frozen: true,
-            totalSteps: participant.totalSteps || 0,
-          };
-        }
-        if (participant.finishedAt) {
-          return {
-            participant,
-            frozen: true,
-            totalSteps: participant.finishTotalSteps ?? participant.totalSteps,
-          };
-        }
-
-        let legCramps = [];
-        let runnersHighs = [];
-        let wrongTurns = [];
-        let campfires = [];
-        let rainstorms = [];
-        let leeches = [];
-        let wave5Effects = [];
-
-        if (race.powerupsEnabled) {
-          // Fetch all Leg Cramp, Runner's High, and Wrong Turn effects (active + expired) for this participant
-          legCramps = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "LEG_CRAMP");
-          legCramps.push(...await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "QUICKSAND"));
-          runnersHighs = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "RUNNERS_HIGH");
-          wrongTurns = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "WRONG_TURN");
-          campfires = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "CAMPFIRE_REST");
-          rainstorms = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "RAINSTORM");
-          // Leech effects targeting this participant (§5). Scored from the
-          // leecher's step history inside computeEffectModifiers as a transfer.
-          leeches = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "LEECH");
-          // Powerups Wave 5 windowed step-modifiers (§3) — same fold as the
-          // settlement path (raceStateResolution) so display == settlement.
-          if (typeof raceActiveEffectModel.findEffectsForRaceByTypes === "function") {
-            const w5 = await raceActiveEffectModel.findEffectsForRaceByTypes(
-              raceId,
-              participant.id,
-              ["UPRISING", "RALLY_FLAG", "COIN_FLIP", "GHOST_PEPPER", "UMBRELLA"]
-            );
-            wave5Effects = [
-              ...(w5.UPRISING || []), ...(w5.RALLY_FLAG || []), ...(w5.COIN_FLIP || []),
-              ...(w5.GHOST_PEPPER || []), ...(w5.UMBRELLA || []),
-            ];
-          }
-        }
-
-        const allEffects = [...legCramps, ...runnersHighs, ...wrongTurns, ...campfires, ...rainstorms, ...leeches, ...wave5Effects];
-        const { frozenSteps, buffedSteps, reversedSteps, globalBoostedSteps, leechTransfers } = await computeEffectModifiers(allEffects, baseAdjusted, participant.userId, stepSampleModel, hasSampleData, globalContext, now());
-
-        // Pre-leech total: everything EXCEPT the leech transfer, floored at 0.
-        const preLeechTotal = Math.max(0, baseAdjusted - frozenSteps + buffedSteps - 2 * reversedSteps + (globalBoostedSteps || 0) + (race.powerupsEnabled ? (participant.bonusSteps || 0) : 0));
-
-        // §6a — the SIGNED effective multiplier right now (buff stacking; the
-        // global-event fold is applied by the caller once). LEECH is a transfer,
-        // not a rate, so it is correctly ignored by signedMultiplierForEffects.
-        const currentMultiplierRaw = race.powerupsEnabled
-          ? signedMultiplierForEffects(allEffects, now().getTime())
-          : 1;
-
-        return { participant, frozen: false, preLeechTotal, leechTransfers, currentMultiplierRaw };
-      })
-    );
-
-    // Phase A2 — HITCHHIKE (§7.3). ONE bulk query for every link in the race,
-    // scored from each TARGET's raw in-window steps and folded into the CASTER's
-    // pre-leech total. This MUST run BEFORE applyLeechTransfers: copied steps are
-    // ordinary steps for every downstream purpose, so a Leech on the caster can
-    // drain them (§7.1). It is added at the ASSEMBLY, never into baseAdjusted —
-    // that is what structurally keeps Hitchhike out of mystery-box progress
-    // (computeBoxEffectiveSteps is max(0, baseAdjusted)).
-    //
-    // The SAME two lines appear in raceStateResolution.processRace and
-    // raceExpiry. All three assembly sites must stay in lockstep; the parity
-    // guard in test/queries/hitchhikeScoring.test.js fails if one drifts.
-    const hitchhikeCopies = race.powerupsEnabled
-      ? await collectRaceHitchhikeCopies({
-          raceId,
-          raceEndsAt: race.endsAt,
-          participants: race.participants,
-          raceActiveEffectModel,
-          stepSampleModel,
-          now: now(),
-          globalEvents,
-        })
-      : [];
-
-    // Phase B: resolve every leech across the race against actual availability,
-    // draining victims and crediting attackers (zero-sum, deterministic order).
-    const leechFinals = applyLeechTransfers(
-      applyHitchhikeCopies(
-        preLeech
-          .filter((e) => !e.frozen)
-          .map((e) => ({
-            participantId: e.participant.id,
-            userId: e.participant.userId,
-            preLeechTotal: e.preLeechTotal,
-            leechTransfers: e.leechTransfers,
-          })),
-        hitchhikeCopies
-      )
-    );
-
-    const stepTotals = preLeech.map((e) => {
-      if (e.frozen) {
-        return { participant: e.participant, totalSteps: e.totalSteps };
-      }
-      return {
-        participant: e.participant,
-        totalSteps: leechFinals.get(e.participant.id) ?? e.preLeechTotal,
-      };
-    });
-
-    // Update total steps for each active participant. Race completion is now
-    // strictly time-based (handled by raceExpiry cron); no step-goal finish.
-    for (const { participant, totalSteps } of stepTotals) {
-      if (!participant.finishedAt && !participant.forfeitedAt) {
-        await participantModel.updateTotalSteps(participant.id, totalSteps);
-      }
-    }
-
-    // Roll powerups for the requesting user if they crossed a threshold
-    let powerupData = null;
-    let balanceConfigSnapshot = null;
-
-    // Spectators (no myParticipant) never earn powerups — skip the whole block.
-    if (myParticipant && race.powerupsEnabled && race.powerupStepInterval) {
-      const myStepTotalEntry = stepTotals.find(
-        ({ participant }) => participant.id === myParticipant.id
-      );
-      const myCurrentSteps =
-        myStepTotalEntry?.totalSteps ??
-        myParticipant.finishTotalSteps ??
-        myParticipant.totalSteps ??
-        0;
-      // Box progress tracks RAW walked steps — immune to every buff/debuff
-      // multiplier (the leaderboard total stays effect-sensitive). It buckets
-      // calendar days in the SAME tz the leaderboard uses — boxTz =
-      // raceTimeZone(race, "UTC"): the race's canonical persisted tz if set, else
-      // the literal constant "UTC". Critically the fallback is a CONSTANT, never
-      // the request `timeZone`, so box progress is identical regardless of the
-      // caller's device tz (a request-tz basis once left the countdown clamped
-      // flat at one interval for non-UTC users). For a race with a canonical tz
-      // (all seeded + creator-tz user races) boxTz === scoringTimeZone, so we
-      // REUSE the leaderboard baseAdjusted already computed above — box and
-      // leaderboard then agree by construction (no inline-vs-shared drift). A
-      // non-ACCEPTED requester has no map entry, and a null-tz race is not
-      // reusable; both fall through to a recompute in the fixed boxTz. Lazy
-      // require breaks the getRaceProgress <-> raceStateResolution import cycle.
-      const boxTz = raceTimeZone(race, "UTC");
-      const reusedLeaderboardBase = participantStepsMap[myParticipant.id];
-      let myBoxBaseAdjusted;
-      if (scoringTimeZone === boxTz && reusedLeaderboardBase != null) {
-        myBoxBaseAdjusted = reusedLeaderboardBase;
-      } else {
-        const { calculateBaseAdjusted } = require("../services/raceStateResolution");
-        ({ baseAdjusted: myBoxBaseAdjusted } = await calculateBaseAdjusted({
-          participant: myParticipant,
-          raceStartedAt: race.startedAt,
-          timeZone: boxTz,
-          stepsModel,
-          stepSampleModel,
-          now: now(),
-        }));
-      }
-      const myBoxEffectiveSteps = computeBoxEffectiveSteps({
-        baseAdjusted: myBoxBaseAdjusted,
-        bonusSteps: myParticipant.bonusSteps || 0,
-        maxBonusSteps: myParticipant.maxBonusSteps || 0,
-      });
-      const syncResult = await syncRacePowerupState({
-        raceId,
-        userId,
-        boxEffectiveSteps: myBoxEffectiveSteps,
-      });
-      // One config read per request; the same snapshot feeds the upgrade
-      // ladders below and the dropOdds block further down, so a client can
-      // never be shown two different versions' numbers in one payload.
-      balanceConfigSnapshot = await balanceConfig.getSnapshot();
-      powerupData = {
-        enabled: true,
-        newMysteryBoxes: syncResult.newMysteryBoxes || [],
-        newQueuedBoxes: syncResult.newQueuedBoxes || 0,
-        powerupStepInterval: race.powerupStepInterval,
-        // Authoritative upgrade price ladders so clients display what the
-        // server will actually charge. Additive: old clients ignore this and
-        // fall back to their bundled (possibly stale) tables.
-        // Unchanged SHAPE, now sourced from the balance config instead of a
-        // hardcoded table. Frozen clients read this exactly as before.
-        upgradeCosts: {
-          byRarity: balanceConfigSnapshot.config.upgradeCosts.byRarity,
-          byType: balanceConfigSnapshot.config.upgradeCosts.byType,
-        },
-        // Canonical rarity per powerup, served verbatim from config. Additive:
-        // a frozen client ignores it and keeps using its bundled map (which
-        // labels SHORTCUT COMMON). A client that reads it gets the server's
-        // answer, which is what makes the SHORTCUT mislabel self-heal on update
-        // rather than persist forever. Covers the full enum, so nothing silently
-        // falls back to COMMON.
-        rarityByType: balanceConfigSnapshot.config.rarityByType,
-        // §6.2 — additive capability flags. A NEW client must not offer targeted
-        // Pocket Watch unless it sees pocketWatchTargetEffect === true: an OLDER
-        // backend simply ignores an unknown `targetEffectId` and runs the legacy
-        // self-buff path, which would silently extend the wrong effects. Missing,
-        // null, or malformed capability data means legacy mode only.
-        capabilities: {
-          pocketWatchTargetEffect: true,
-        },
-      };
-
-      // Re-read participant to get current powerupSlots (may have changed via Fanny Pack expiry)
-      const freshParticipant = await participantModel.findById(myParticipant.id);
-      const mySlots = freshParticipant?.powerupSlots || 3;
-      const nextBoxAtSteps =
-        freshParticipant?.nextBoxAtSteps ?? myParticipant.nextBoxAtSteps ?? 0;
-
-      powerupData.powerupSlots = mySlots;
-      if (nextBoxAtSteps > 0) {
-        // Box countdown uses RAW walked steps (baseAdjusted) + the bonus
-        // high-water — immune to every buff/debuff multiplier so it tracks real
-        // walking only and matches the roll gate above exactly. Bonus-stealing
-        // pushbacks stay protected via the high-water (max(bonus, maxBonus)). The
-        // maxBoxProgressSteps anchor is deprecated and intentionally not read here.
-        const bonusNow = freshParticipant?.bonusSteps || 0;
-        const maxBonus = freshParticipant?.maxBonusSteps || 0;
-        const effectiveSteps = computeBoxEffectiveSteps({
-          baseAdjusted: myBoxBaseAdjusted,
-          bonusSteps: bonusNow,
-          maxBonusSteps: maxBonus,
-        });
-        // Clamp the countdown to at most one interval. nextBoxAtSteps ratchets up
-        // off effective steps and a transient step-spike (later corrected) can
-        // push it far above the player's real steps, which would otherwise show a
-        // wildly-inflated "steps to next box" (e.g. ~12000 when the interval is
-        // 2000). The countdown can never legitimately exceed one interval, so cap
-        // it there regardless of how far nextBoxAtSteps has drifted.
-        powerupData.stepsUntilNextPowerup = Math.max(
-          0,
-          Math.min(nextBoxAtSteps - effectiveSteps, race.powerupStepInterval)
-        );
-      }
-
-      // Unified inventory: both HELD and MYSTERY_BOX powerups in slots
-      const slotPowerups = await racePowerupModel.findSlotPowerups(myParticipant.id);
-      powerupData.inventory = slotPowerups.map((p) => ({
-        id: p.id,
-        type: p.type,
-        rarity: p.rarity,
-        status: p.status,
-      }));
-
-      // Queued box count for frontend indicator
-      const queuedCount =
-        syncResult.queuedBoxCount ??
-        await racePowerupModel.countQueuedByParticipant(myParticipant.id);
-      powerupData.queuedBoxCount = queuedCount;
-
-      const myActiveEffects = await raceActiveEffectModel.findActiveForParticipant(myParticipant.id);
-      const raceActiveEffects = await raceActiveEffectModel.findActiveForRace(raceId);
-
-      powerupData.activeEffects = raceActiveEffects
-        // Keep an effect IF the viewer owns it (it's targeting them) OR its type
-        // is not a concealed self-advantage. Otherwise drop opponents' hidden
-        // buffs so they never leak to other racers, while the owner's own
-        // ACTIVE EFFECTS panel (keyed on onSelf/targetUserId===me) keeps working.
-        .filter(
-          (e) =>
-            e.targetUserId === userId || !HIDDEN_FROM_OPPONENTS.has(e.type)
-        )
-        // §9.3: withhold HITCHHIKE entries from clients that don't advertise
-        // `powerups3` — they cannot render the type, and sending an unknown type
-        // to a binary that can't draw it risks a worse failure than the accepted
-        // artifact (the target sees the caster's total climb with no icon). The
-        // SCORE is never gated: the backend stays authoritative either way.
-        .filter((e) => supportsPowerups3 || e.type !== "HITCHHIKE")
-        // §4.5: wave-5 types a non-powerups5 client cannot render are WITHHELD
-        // (GHOST_PEPPER/COIN_FLIP/DECOY/UMBRELLA/PIGGY_BANK/DRILL_SERGEANT/BOUNTY);
-        // POWER_OUTAGE/UPRISING/RALLY_FLAG are DOWNCAST below to a type the old
-        // client already knows. The score is authoritative regardless.
-        .filter(
-          (e) =>
-            supportsPowerups5 ||
-            ![
-              "GHOST_PEPPER", "COIN_FLIP", "DECOY", "UMBRELLA",
-              "PIGGY_BANK", "DRILL_SERGEANT", "BOUNTY",
-            ].includes(e.type)
-        )
-        .map(async (e) => {
-          let type = e.type;
-          if (type === "QUICKSAND" && !supportsPowerups4) type = "LEG_CRAMP";
-          if (!supportsPowerups5) {
-            if (type === "POWER_OUTAGE") type = "SIGNAL_JAMMER";
-            else if (type === "UPRISING" || type === "RALLY_FLAG") type = "RUNNERS_HIGH";
-          }
-          const entry = {
-            // Additive: the targeted Pocket Watch sheet needs a stable identifier
-            // for the one effect the user is paying to extend.
-            id: e.id,
-            type,
-            expiresAt: e.expiresAt,
-            onSelf: e.targetUserId === userId,
-            targetUserId: e.targetUserId,
-            sourceUserId: e.sourceUserId,
-          };
-          // Piggy Bank live "banked so far" counter (display-only). Present ONLY
-          // on the viewer's OWN active piggy (never opponents' — PIGGY_BANK is
-          // already in HIDDEN_FROM_OPPONENTS and gated by powerups5 above) and
-          // only when the snapshot is mintable (kill-switch guard mirrors
-          // mintPiggyBank). Uses the SAME sumStepsInWindow the mint uses over
-          // [startsAt, min(expiresAt, now)] so the shown number can only agree
-          // with the eventual mint. At most one extra query, owner-only. A
-          // thrown sum query omits the field — the progress payload must never
-          // 500 because of a display counter.
-          if (e.type === "PIGGY_BANK" && e.targetUserId === userId) {
-            const meta = e.metadata || {};
-            const stepsPerCoin = Number(meta.stepsPerCoin) || 300;
-            const coinCap = Number.isFinite(Number(meta.coinCap)) ? Number(meta.coinCap) : 80;
-            if (coinCap > 0 && stepsPerCoin > 0) {
-              try {
-                const start = new Date(e.startsAt);
-                const expiry = e.expiresAt ? new Date(e.expiresAt) : now();
-                const nowMs = now().getTime();
-                const end = expiry.getTime() < nowMs ? expiry : new Date(nowMs);
-                if (end.getTime() > start.getTime()) {
-                  const windowSteps = await StepSample.sumStepsInWindow(e.targetUserId, start, end);
-                  entry.piggyBank = {
-                    bankedCoins: Math.min(
-                      Math.floor(Math.max(0, windowSteps) / stepsPerCoin),
-                      coinCap
-                    ),
-                    coinCap,
-                    windowSteps: Math.round(Math.max(0, windowSteps)),
-                  };
-                }
-              } catch (err) {
-                console.error("Piggy Bank live counter failed:", err);
-              }
-            }
-          }
-          return entry;
-        });
-      powerupData.activeEffects = await Promise.all(powerupData.activeEffects);
-    }
-
-    // Build leaderboard with stealth mode and detour sign applied. The
-    // collection is shared with the tournament bracket payload via
-    // collectRaceIllusions so the two surfaces mask identically.
-    // IMPOSTER display swaps swap the DISPLAYED leaderboard slot of two users
-    // for ALL viewers. Cosmetic only — never read by the settlement path.
-    let stealthedUserIds = new Set();
-    let viewerIsDetoured = false;
-    let imposterSwaps = [];
-    const nowTime = now();
-    if (race.powerupsEnabled) {
-      const activeEffects = await raceActiveEffectModel.findActiveForRace(raceId);
-      ({ stealthedUserIds, viewerIsDetoured, imposterSwaps } =
-        collectRaceIllusions(activeEffects, userId, nowTime.getTime()));
-    }
-
-    // §6a — per-participant CURRENT MULTIPLIER (additive; old clients ignore it).
-    // Fold in any active global 2x event by multiplying the MAGNITUDE (sign
-    // preserved, since the event multiplier is > 0): pepper(3)+RH(2)=5, ×2 = 10;
-    // a frozen 0 stays 0; a wrong-turned −5 becomes −10. Neutral 1 under an event
-    // reads as 2. LEECH (a transfer) never affects this.
-    const nowMsForMult = nowTime.getTime();
-    const activeEventForMult = globalEvents.find((ev) => {
-      const s = new Date(ev.startsAt).getTime();
-      const e = new Date(ev.endsAt).getTime();
-      return s <= nowMsForMult && nowMsForMult < e && Number(ev.multiplier) > 1;
-    });
-    const eventMult = activeEventForMult ? Number(activeEventForMult.multiplier) : 1;
-    const multiplierByParticipantId = new Map();
-    for (const e of preLeech) {
-      const raw = e.frozen ? 1 : (e.currentMultiplierRaw ?? 1);
-      multiplierByParticipantId.set(e.participant.id, raw * eventMult);
-    }
-
-    // §6b — evaluate the high-multiplier alert for every participant. This is the
-    // recompute/re-arm path: it catches event-driven crossings and clears the flag
-    // as buffs decay. The evaluator claims the emit atomically, so concurrent
-    // viewers' polls can't double-fire. Best-effort — a push-eval failure must
-    // never break the progress payload.
-    if (race.powerupsEnabled) {
-      const activeForAlert = acceptedParticipants.filter(
-        (p) => !p.finishedAt && !p.forfeitedAt
-      );
-      for (const p of acceptedParticipants) {
-        try {
-          await evaluateHighMultiplierAlert({
-            participant: p,
-            currentMultiplier: multiplierByParticipantId.get(p.id) ?? 1,
-            race,
-            otherParticipants: activeForAlert,
-            now,
-          });
-        } catch (err) {
-          console.error("high-multiplier alert eval failed:", err);
-        }
-      }
-    }
-
-    // Items 12/16 — ONE server-authoritative placement. Computed from the
-    // HONEST live totals (before Stealth masking and before the Imposter slot
-    // swap) with the SHARED comparator that getRaces, getHomeRaceCard and
-    // placementRecompute now also use, so the three surfaces stop disagreeing.
-    // Additive + nullable: frozen clients ignore `placement`/`myPlacement` and
-    // keep their own array-index sort.
-    const placementByUserId = placementsByUserId(
-      stepTotals.map(({ participant, totalSteps }) => ({
-        userId: participant.userId,
-        totalSteps,
-        finishedAt: participant.finishedAt,
-        placement: participant.placement,
-        joinedAt: participant.joinedAt,
-      }))
-    );
-
-    const leaderboard = stepTotals
-      .map(({ participant, totalSteps }) => {
-        // §6a — a masked row (detoured/stealthed opponent) must NOT leak the
-        // player's multiplier (it would reveal a hidden buff/freeze), exactly like
-        // its steps are nulled. currentMultiplier is null for masked rows, else
-        // the event-inclusive signed value (1 => neutral; the client renders
-        // nothing at 1/absent).
-        const rawCurrentMultiplier =
-          multiplierByParticipantId.get(participant.id) ?? 1;
-        // Detour Sign: viewer sees ALL participants as ???
-        if (viewerIsDetoured) {
-          return {
-            userId: participant.userId,
-            displayName: "???",
-            profilePhotoUrl: null,
-            accessories: [],
-            totalSteps: null,
-            finishedAt: participant.finishedAt,
-            stealthed: false,
-            currentMultiplier: null,
-            // Detour Sign masks every total, so it must mask every rank too —
-            // otherwise the placement leaks exactly what the "???" hides.
-            placement: null,
-            // Team identity is structural (column grouping), never masked.
-            team: participant.team ?? null,
-            forfeitedAt: participant.forfeitedAt ?? null,
-          };
-        }
-        const isStealthed = stealthedUserIds.has(participant.userId)
-          && participant.userId !== userId
-          && !participant.finishedAt;
-        return {
-          userId: participant.userId,
-          displayName: isStealthed ? "???" : participant.user.displayName,
-          profilePhotoUrl: isStealthed ? null : participant.user.profilePhotoUrl,
-          ...(isStealthed
-            ? { accessories: [], animal: null }
-            : characterPresentation(participant.user, supportsCharacters, releaseChannel)),
-          totalSteps: isStealthed ? null : totalSteps,
-          finishedAt: participant.finishedAt,
-          stealthed: isStealthed,
-          // A stealthed rival's steps are nulled, so their rank must be too.
-          placement: isStealthed
-            ? null
-            : placementByUserId.get(participant.userId) ?? null,
-          currentMultiplier: isStealthed ? null : rawCurrentMultiplier,
-          // Team races (TR-656): stealth masks the individual plank only; the
-          // side (and the honest team totals below) stay visible.
-          team: participant.team ?? null,
-          forfeitedAt: participant.forfeitedAt ?? null,
-        };
-      })
-      .sort((a, b) => {
-        // Stealthed users always appear at the top
-        if (a.stealthed && !b.stealthed) return -1;
-        if (!a.stealthed && b.stealthed) return 1;
-        const aSteps = a.totalSteps ?? 0;
-        const bSteps = b.totalSteps ?? 0;
-        return bSteps - aSteps;
-      });
-
-    // Apply IMPOSTER display swaps: swap the two users' DISPLAYED leaderboard
-    // SLOTS (array positions) while each row keeps its own name/steps. Applied
-    // deterministically; a user already involved in an earlier swap, or a target
-    // not present in the leaderboard, is skipped so swaps never throw or corrupt
-    // the order. This is the ONLY place the swap is applied (display path only).
-    if (imposterEnabledFn() && imposterSwaps.length > 0) {
-      const swappedUserIds = new Set();
-      for (const { a, b } of imposterSwaps) {
-        if (a === b) continue;
-        if (swappedUserIds.has(a) || swappedUserIds.has(b)) continue;
-        const ia = leaderboard.findIndex((p) => p.userId === a);
-        const ib = leaderboard.findIndex((p) => p.userId === b);
-        if (ia === -1 || ib === -1) continue;
-        [leaderboard[ia], leaderboard[ib]] = [leaderboard[ib], leaderboard[ia]];
-        swappedUserIds.add(a);
-        swappedUserIds.add(b);
-      }
-    }
-
-    const updatedRace = await raceModel.findById(raceId);
-
-    const result = {
-      raceId: race.id,
-      status: updatedRace.status,
-      endsAt: race.endsAt,
-      maxDurationDays: race.maxDurationDays,
-      targetSteps: race.targetSteps, // 1.1.4 compat
-      participants: leaderboard,
-      // Items 12/16 — additive, nullable. `myPlacementHidden` mirrors the
-      // GET /races semantics exactly so the client reads one rule on both.
-      myPlacement: viewerIsDetoured
-        ? null
-        : placementByUserId.get(userId) ?? null,
-      myPlacementHidden: viewerIsDetoured,
-      ...tournamentFields(race),
-    };
-
-    // Team H2H block (TR-401), computed from TRUE totals before any display
-    // illusion — always honest (TR-658). Additive; old clients ignore it.
-    if (race.isTeamRace) {
-      result.teams = buildTeamsBlock(race, stepTotals);
-      result.winnerTeam = updatedRace.winnerTeam ?? null;
-      result.isTeamRace = true;
-      result.teamSize = race.teamSize ?? null;
-    }
-
-    // §5.3 — additive `dropOdds` so a player can see the exact odds they are
-    // playing against. Derived from the SAME helpers the roll uses, and from the
-    // SAME true step totals openMysteryBox ranks on (never the illusion-masked
-    // leaderboard), so what is displayed matches what will actually be rolled.
-    //
-    // `configVersion` is included so a displayed number can be reconciled with a
-    // roll after the fact — under pm2 cluster mode a roll seconds later may
-    // legitimately use a newer config (§3.1: auditability, not prevention).
-    if (powerupData && balanceConfigSnapshot) {
-      const dropOdds = buildDropOdds({
+    let snapshot;
+    if (!cacheOn) {
+      // Flag OFF: byte-for-byte today's behavior — the replay AND its three
+      // side effects (expireEffects, the updateTotalSteps write-back, the
+      // high-multiplier claim) run exactly where they always did.
+      snapshot = await computeSharedState({
         race,
-        userId,
-        stepTotals,
-        myParticipant,
-        snapshot: balanceConfigSnapshot,
-        supportsPowerups5,
+        raceId,
+        scoringTimeZone,
+        persist: true,
       });
-      if (dropOdds) powerupData.dropOdds = dropOdds;
+    } else if (snapshotStore.isBypassed()) {
+      // A DEL failed somewhere in this process, so a KNOWN-STALE snapshot may
+      // still be sitting in Redis. Serve Postgres until the retry lands (§3).
+      snapshot = await loadPersistedState({ race, raceId, scoringTimeZone });
+    } else {
+      const cached = await snapshotStore.readSnapshot(raceId);
+      const usable =
+        cached && snapshotStore.matchesTimeZone(cached, scoringTimeZone)
+          ? cached
+          : null;
+
+      if (usable && snapshotStore.isFresh(usable, now().getTime())) {
+        snapshotStore.__bump("snapshotHits");
+        snapshot = usable;
+      } else {
+        // Miss or soft-expiry. Exactly ONE request rebuilds; the lock
+        // self-expires (PX) so a crashed winner cannot wedge it.
+        const rebuilt = await snapshotStore.withRebuildLock(raceId, async () => {
+          snapshotStore.__bump("requestReplays");
+          const fresh = await computeSharedState({
+            race,
+            raceId,
+            scoringTimeZone,
+            persist: false,
+          });
+          await snapshotStore.writeSnapshot(raceId, fresh);
+          return fresh;
+        });
+
+        if (rebuilt) {
+          snapshot = rebuilt;
+          // Phase D step 8: progress polls keep persisted totals converging for
+          // a watched race by enqueueing ITS race-keyed job — on snapshot
+          // EXPIRY, not on every poll, so the watch-driven cadence is 15s
+          // (§5a item 3). Best-effort by contract.
+          await enqueueRaceResolutionFn({
+            raceId,
+            userId,
+            timeZone: scoringTimeZone,
+          });
+        } else if (usable) {
+          // Lock loser with a stale-but-present snapshot: serve it. This is why
+          // the key physically lives 60s past its 15s soft freshness.
+          snapshotStore.__bump("staleServes");
+          snapshot = usable;
+        } else {
+          // True cold start. Wait on REDIS ONLY for at most 1s — zero pooled
+          // Postgres connections are held, which is the explicit
+          // anti-recurrence guard for the 2026-07-18 advisory-lock pool drain.
+          // Skipped entirely when Redis is unreachable (no snapshot can appear),
+          // so a Redis outage costs a PING, not a second, per request.
+          let waited = null;
+          if ((await redisCache.healthStatus()) === "ok") {
+            waited = await snapshotStore.waitForSnapshot(raceId, scoringTimeZone);
+          }
+          if (waited) {
+            snapshotStore.__bump("staleServes");
+            snapshot = waited;
+          } else {
+            // Losers NEVER fall through to the replay.
+            snapshot = await loadPersistedState({ race, raceId, scoringTimeZone });
+          }
+        }
+      }
     }
 
-    if (powerupData) {
-      result.powerupData = powerupData;
-    }
-
-    // Additive: surface the currently-active global step event (if any) so the
-    // new app can show a "2x STEPS — ends in mm:ss" banner. Old apps ignore the
-    // unknown field. Pick the event whose [startsAt, endsAt) contains `now`.
-    const nowMsForEvent = now().getTime();
-    const activeEvent = globalEvents.find((ev) => {
-      const startMs = new Date(ev.startsAt).getTime();
-      const endMs = new Date(ev.endsAt).getTime();
-      return startMs <= nowMsForEvent && nowMsForEvent < endMs;
+    return buildViewerResponse({
+      snapshot,
+      race,
+      raceId,
+      userId,
+      myParticipant,
+      scoringTimeZone,
+      supportsCharacters,
+      supportsPowerups3,
+      supportsPowerups4,
+      supportsPowerups5,
+      releaseChannel,
+      syncPowerups: !cacheOn,
     });
-    if (activeEvent) {
-      result.globalEvent = {
-        active: true,
-        multiplier: Number(activeEvent.multiplier),
-        endsAt: activeEvent.endsAt,
-      };
-    }
-
-    return result;
   };
+
+  // C3 — the OTHER caller of the one allowlist builder (spec §5 Phase D item 4
+  // / §5a item 5). The race-keyed v2 worker calls this from its post-commit
+  // hook to SET (replace) the race's snapshot with the freshest possible view.
+  // It is the SAME `computeSharedState` the request path's lock winner runs, so
+  // there is no second snapshot shape to keep in lockstep — and it is
+  // `persist: false`, so the publish itself writes nothing to Postgres.
+  query.computeSharedSnapshot = async ({ raceId, timeZone = "UTC" }) => {
+    const race = await raceModel.findById(raceId);
+    if (!race || race.status !== "ACTIVE") return null;
+    return computeSharedState({
+      race,
+      raceId,
+      scoringTimeZone: raceTimeZone(race, timeZone),
+      persist: false,
+    });
+  };
+
+  return query;
 }
 
 const getRaceProgress = buildGetRaceProgress();

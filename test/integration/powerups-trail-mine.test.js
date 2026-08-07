@@ -2,19 +2,37 @@
 //
 // Expected behavior (per triggerTrailMines in raceStateResolution.js): the mine
 // is planted at the owner's current step total; the FIRST runner (other than
-// the owner) whose total CROSSES that point on a later step sync triggers it,
-// and when several cross in the same resolution the one closest past the mine
-// (lowest new total) is hit. Runners already ahead at plant time never trigger.
+// the owner) whose total CROSSES that point triggers it, and when several cross
+// in the same resolution the one closest past the mine (lowest new total) is
+// hit. Runners already ahead at plant time never trigger.
 //
-// The last two tests are INVESTIGATIVE: they document that the mine is planted
-// at the owner's last-STORED total (participant.totalSteps at plant time), not
-// their real walked position — so if the owner's own sync is stale, the mine
-// lands behind them and can immediately hit a runner who is far behind the
-// owner's true position. This is the likely mechanism behind "my mine hit
-// someone way behind me".
+// UPDATED FOR C0 (docs/redis-derived-data-layer-requirements.md §5a):
+// DETONATION IS THE WORKER'S. Trail mines are a cross-participant, fire-once
+// event evaluated inside `resolveRaceState`, and after C0 exactly one actor may
+// bulk-write a race's participant rows: the fenced race-keyed worker. A step
+// sync therefore no longer detonates inline — it ENQUEUES, and the worker
+// detonates on its next tick (250ms in production). That is the point of the
+// change: detonation used to race between the sync path, the placement cron and
+// the worker, and is now serialized by the job-row fence for free.
+//
+// These tests consequently drive an explicit worker tick where they used to
+// rely on the sync's inline resolve, and additionally assert FIRE-ONCE across
+// ticks — the property the old inline evaluation could not guarantee.
+//
+// The PLANT side is unchanged and still inline: usePowerup computes fresh totals
+// read-only (computeRaceState) so the mine lands at the owner's real position.
 const assert = require("node:assert/strict");
 const { describe, it, before, after, beforeEach } = require("node:test");
+
+// The worker's startup handoff gate and debounce are irrelevant to mine
+// semantics; zero them so a test can tick immediately and repeatedly.
+process.env.RACE_QUEUE_V2_QUIET_PERIOD_MS = "0";
+process.env.RACE_RESOLVE_DEBOUNCE_MS = "0";
+
 const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
+const {
+  buildRaceResolutionWorkerV2,
+} = require("../../src/modules/races/jobs/raceResolutionQueueV2");
 
 let server;
 let nextAppleId = 0;
@@ -117,6 +135,19 @@ async function insertSamplesDirect(userId, samples) {
   }
 }
 
+// Drain the race-keyed queue to quiescence — the production worker does this on
+// a 250ms interval. Returns how many jobs it ran, so a test can assert that a
+// SECOND drain found nothing left to do.
+async function runWorker() {
+  const worker = buildRaceResolutionWorkerV2({ bootAt: 0 });
+  let ran = 0;
+  for (let i = 0; i < 20; i++) {
+    if (!(await worker.processOne())) break;
+    ran += 1;
+  }
+  return ran;
+}
+
 async function getProgress(token, raceId) {
   const res = await request(server.baseUrl, "GET", `/races/${raceId}/progress`, { token });
   return (await res.json()).progress;
@@ -185,8 +216,15 @@ describe("trail mine targeting", () => {
     assert.equal(planted.metadata.positionSteps, 10000, "mine planted at Alice's total");
     assert.equal(planted.metadata.penaltyPercent, 0.03);
 
-    // Bob's next sync carries him past the mine: 1,000 → 13,000
+    // Bob's next sync carries him past the mine: 1,000 → 13,000. The sync
+    // enqueues; the worker detonates.
     await recordSamples(bob.token, [sample(4, 3, 12000)]);
+    assert.equal(
+      (await mineTriggerEvents(raceId)).length,
+      0,
+      "the request path itself never detonates — it enqueues"
+    );
+    await runWorker();
 
     const triggers = await mineTriggerEvents(raceId);
     assert.equal(triggers.length, 1, "exactly one trigger event");
@@ -201,6 +239,16 @@ describe("trail mine targeting", () => {
     const progress = await getProgress(alice.token, raceId);
     assert.equal(findUser(progress, bob.userId).totalSteps, 13000 - 390);
     assert.equal(findUser(progress, alice.userId).totalSteps, 10000, "owner unaffected");
+
+    // FIRE-ONCE across ticks: re-dirty the race and drain again. The mine is
+    // EXPIRED, so no second detonation and no second penalty.
+    await recordSamples(bob.token, [sample(2, 1, 5)]);
+    await runWorker();
+    assert.equal(
+      (await mineTriggerEvents(raceId)).length,
+      1,
+      "a later worker tick must not re-detonate a consumed mine"
+    );
   });
 
   it("a runner who stays behind the mine point is NOT hit", async () => {
@@ -217,6 +265,7 @@ describe("trail mine targeting", () => {
 
     // Bob walks, but only to 3,000 — still behind the 10,000 mine
     await recordSamples(bob.token, [sample(4, 3, 2000)]);
+    await runWorker();
 
     assert.equal((await mineTriggerEvents(raceId)).length, 0, "no trigger");
     assert.equal((await getMine(raceId)).status, "ACTIVE", "mine still armed");
@@ -245,6 +294,7 @@ describe("trail mine targeting", () => {
 
     // Dave (already past the mine) keeps walking
     await recordSamples(dave.token, [sample(4, 3, 1000)]);
+    await runWorker();
 
     assert.equal((await mineTriggerEvents(raceId)).length, 0);
     assert.equal((await getMine(raceId)).status, "ACTIVE");
@@ -269,12 +319,15 @@ describe("trail mine targeting", () => {
     await usePowerup(alice.token, raceId, mine.id);
 
     // Both cross the 10,000 mine in the SAME resolution: insert their walked
-    // steps directly (no resolve), then let one sync trigger the resolution.
+    // steps directly (no resolve), then let ONE worker run evaluate the race.
+    // Post-C0 this is the natural shape — the worker resolves the whole race in
+    // one fenced pass, so "the same resolution" is exactly one worker run.
     await insertSamplesDirect(bob.userId, [sample(4, 3, 14000)]); // → 15,000
     await insertSamplesDirect(carol.userId, [sample(4, 3, 11000)]); // → 12,000
     await recordSamples(alice.token, [
       { periodStart: minutesAgo(20).toISOString(), periodEnd: minutesAgo(10).toISOString(), steps: 10 },
     ]);
+    await runWorker();
 
     const triggers = await mineTriggerEvents(raceId);
     assert.equal(triggers.length, 1, "mine fires exactly once");
@@ -307,9 +360,12 @@ describe("trail mine targeting", () => {
   });
 
   // ------------------------------------------------------------------
-  // REGRESSION — usePowerup resolves race state BEFORE planting, so a stale
-  // stored total can't place the mine behind the owner's real position (the
-  // old behavior instantly hit runners far behind the owner).
+  // REGRESSION — usePowerup computes fresh totals (READ-ONLY, computeRaceState)
+  // BEFORE planting, so a stale stored total can't place the mine behind the
+  // owner's real position (the old behavior instantly hit runners far behind
+  // the owner). Pre-C0 this freshening was a resolve-and-PERSIST; it is now a
+  // pure computation, which is what keeps the request path out of the
+  // bulk-writer role. The observable plant behavior is identical.
   // ------------------------------------------------------------------
 
   it("mine is planted at the owner's REAL walked position even when their stored total is stale", async () => {
@@ -329,13 +385,25 @@ describe("trail mine targeting", () => {
     const res = await usePowerup(alice.token, raceId, mine.id);
     assert.equal(res.status, 200);
 
-    // usePowerup resolves race state before planting, so the mine lands at
+    // usePowerup computes race state before planting, so the mine lands at
     // Alice's real 10,000 — not the stale stored 2,000.
     const planted = await getMine(raceId);
     assert.equal(
       planted.metadata.positionSteps,
       10000,
       "mine placed at the owner's real position, not the stale stored total"
+    );
+
+    // …and it did so WITHOUT persisting: the freshening is read-only, so the
+    // stored column is still stale until the worker (enqueued by this use) runs.
+    const stored = await prisma.raceParticipant.findFirst({
+      where: { raceId, userId: alice.userId },
+      select: { totalSteps: true },
+    });
+    assert.equal(
+      stored.totalSteps,
+      2000,
+      "the plant read fresh numbers but wrote none — the worker owns that write"
     );
   });
 
@@ -354,10 +422,18 @@ describe("trail mine targeting", () => {
     const mine = await giveHeldPowerup(raceId, alice.userId, "TRAIL_MINE", 99901);
     await usePowerup(alice.token, raceId, mine.id);
 
-    // Pre-plant resolve puts the mine at Alice's real 10,000 and refreshes
-    // Bob to 5,000 — still behind the mine, so nothing detonates. (Before the
-    // fix the mine landed at the stale 2,000 and hit Bob in the same request.)
+    // The pre-plant COMPUTATION puts the mine at Alice's real 10,000, and Bob's
+    // real position is 5,000 — still behind the mine. (Before the fix the mine
+    // landed at the stale 2,000 and hit Bob in the same request.) Draining the
+    // queue proves it: even a full worker pass over the freshest possible state
+    // finds nothing to detonate.
     assert.equal((await mineTriggerEvents(raceId)).length, 0, "no instant detonation");
+    await runWorker();
+    assert.equal(
+      (await mineTriggerEvents(raceId)).length,
+      0,
+      "and the worker does not detonate it either — Bob is genuinely behind"
+    );
     const planted = await getMine(raceId);
     assert.equal(planted.status, "ACTIVE");
     assert.equal(planted.metadata.positionSteps, 10000);
@@ -368,6 +444,7 @@ describe("trail mine targeting", () => {
 
     // Bob later genuinely crossing the mine still triggers it normally
     await recordSamples(bob.token, [sample(3, 2, 6000)]); // 5,000 → 11,000
+    await runWorker();
     const triggers = await mineTriggerEvents(raceId);
     assert.equal(triggers.length, 1);
     assert.equal(triggers[0].targetUserId, bob.userId);

@@ -67,7 +67,13 @@ function createHomeRouter(dependencies = {}) {
       // the unknown field. Wrapped in try/catch so a DB hiccup never breaks the
       // home card — we just omit the banner.
       try {
-        const activeEvent = await globalStepEventModel.findActiveAt(new Date());
+        // C1: the cached display variant (falls back to findActiveAt when the
+        // flag is off, Redis is down, or an injected test model lacks it).
+        // Settlement paths keep calling findActiveInRange/findActiveAt directly.
+        const activeEvent =
+          typeof globalStepEventModel.findActiveAtCached === "function"
+            ? await globalStepEventModel.findActiveAtCached(new Date())
+            : await globalStepEventModel.findActiveAt(new Date());
         if (activeEvent) {
           result.globalEvent = {
             active: true,
