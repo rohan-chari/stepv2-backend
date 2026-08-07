@@ -1560,9 +1560,16 @@ model LinkOpen {
   id        String   @id @default(uuid())
   kind      String // "referral" | "race_share"
   code      String? // normalized referral code, or the race share token
+  // SHA-256 hash of the viewer's client IP (never the raw IP — the viewer is
+  // anonymous and stays that way). Powers IP-correlated deferred referral
+  // attribution: a codeless signup from the same hashed IP within the fallback
+  // window attributes to the code opened here. Nullable/additive — old rows and
+  // opens with no resolvable IP simply never match.
+  ipHash    String?  @map("ip_hash")
   createdAt DateTime @default(now()) @map("created_at")
 
   @@index([kind, createdAt])
+  @@index([ipHash, createdAt])
   @@map("link_opens")
 }
 

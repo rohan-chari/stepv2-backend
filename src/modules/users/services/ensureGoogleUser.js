@@ -103,6 +103,9 @@ function buildEnsureGoogleUser(dependencies = {}) {
     email,
     name,
     referralCode,
+    // Same IP-correlated fallback as ensureAppleUser — create branch only,
+    // best-effort (see findLinkOpenReferralCode.js).
+    fallbackReferralCode,
     emitSignInEvent = false,
   }) {
     let user = await userModel.findByGoogleSub(googleSub);
@@ -125,7 +128,15 @@ function buildEnsureGoogleUser(dependencies = {}) {
       // Referral attribution (M1) — create branch ONLY, best-effort/never-throws.
       // Mirrors ensureAppleUser; hashes googleSub so Android referees attribute
       // correctly (the appleId||googleSub provider-sub parity).
-      await recordReferralFn({ newUser: user, referralCode });
+      let attributionCode = referralCode;
+      if (!attributionCode && fallbackReferralCode) {
+        try {
+          attributionCode = await fallbackReferralCode();
+        } catch (_) {
+          // Fallback lookup failure = organic signup; never blocks provisioning.
+        }
+      }
+      await recordReferralFn({ newUser: user, referralCode: attributionCode });
 
       // Starter-race enrollment — best-effort/never-throws: every new account
       // starts inside the current seeded challenge (see autoEnrollNewUser.js).

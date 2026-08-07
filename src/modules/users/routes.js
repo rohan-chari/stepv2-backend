@@ -43,6 +43,10 @@ const {
   DISPLAY_NAME_MIN_LENGTH,
 } = require("../../shared/lib/displayNameValidator");
 const { isAdminUser, withAdminFlag } = require("../admin");
+const {
+  findLinkOpenReferralCode: defaultFindLinkOpenReferralCode,
+} = require("../social/queries/findLinkOpenReferralCode");
+const { hashClientIp } = require("../../shared/lib/clientIp");
 const { appSettings: defaultAppSettings } = require("../../shared/config/appSettings");
 
 // Reviewer account constants — kept in sync with scripts/seed-app-review-demo.js.
@@ -63,6 +67,14 @@ function createAuthRouter(dependencies = {}) {
   const requireAuth =
     dependencies.requireAuth || buildRequireAuth(dependencies);
   const signToken = dependencies.signSessionToken || defaultSignSessionToken;
+  const findLinkOpenCode =
+    dependencies.findLinkOpenReferralCode || defaultFindLinkOpenReferralCode;
+  // IP-correlated attribution fallback (create branch only, inside ensure*):
+  // when the provision body has no referralCode, match the signup IP against
+  // recent referral landing-page opens. Thunked so the lookup only runs for
+  // genuinely new users.
+  const fallbackCodeFor = (req) => () =>
+    findLinkOpenCode({ ipHash: hashClientIp(req) });
   const updateDisplayName = dependencies.setDisplayName || defaultSetDisplayName;
   const createProfilePhotoUpload =
     dependencies.createProfilePhotoUpload ||
@@ -181,6 +193,7 @@ function createAuthRouter(dependencies = {}) {
         email: email || appleIdentity.email,
         name,
         referralCode,
+        fallbackReferralCode: fallbackCodeFor(req),
         emitSignInEvent: true,
       });
 
@@ -225,6 +238,7 @@ function createAuthRouter(dependencies = {}) {
         email: email || googleIdentity.email,
         name,
         referralCode,
+        fallbackReferralCode: fallbackCodeFor(req),
         emitSignInEvent: true,
       });
 

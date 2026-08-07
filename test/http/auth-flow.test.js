@@ -86,7 +86,11 @@ test("POST /auth/apple provisions the signed-in user", async () => {
     assert.equal(typeof body.sessionToken, "string");
     assert.ok(body.sessionToken.length > 0);
 
-    assert.deepEqual(receivedPayload, {
+    // fallbackReferralCode is the IP-correlated attribution thunk (2026-08-07)
+    // — assert it's present and a function, then compare the data fields.
+    assert.equal(typeof receivedPayload.fallbackReferralCode, "function");
+    const { fallbackReferralCode, ...dataFields } = receivedPayload;
+    assert.deepEqual(dataFields, {
       appleId: "apple-user-123",
       email: "walker@example.com",
       name: "Rohan Chari",

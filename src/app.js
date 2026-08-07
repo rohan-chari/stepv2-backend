@@ -49,6 +49,7 @@ const {
   looksLikeReferralCode,
   normalizeReferralCode,
 } = require("./shared/lib/referralCode");
+const { hashClientIp } = require("./shared/lib/clientIp");
 const { prisma: defaultPrisma } = require("./db");
 const { errorMiddleware } = require("./shared/http/errorMiddleware");
 
@@ -144,9 +145,12 @@ function createApp(dependencies = {}) {
   const linkOpenDb = dependencies.prisma || defaultPrisma;
   // Top-of-funnel tap logging: one link_opens row per landing-page view.
   // Fire-and-forget — a logging failure must never affect the page render.
-  function logLinkOpen(kind, code) {
+  // ipHash (never the raw IP) powers the referral-attribution fallback: a
+  // codeless signup from the same IP shortly after an open attributes to the
+  // opened code (see findLinkOpenReferralCode.js).
+  function logLinkOpen(kind, code, req) {
     linkOpenDb.linkOpen
-      .create({ data: { kind, code: code || null } })
+      .create({ data: { kind, code: code || null, ipHash: hashClientIp(req) } })
       .catch(() => {});
   }
 
@@ -176,7 +180,7 @@ function createApp(dependencies = {}) {
           .type("html")
           .send(renderReferralNotFoundPage(refLinks));
       }
-      logLinkOpen("referral", code);
+      logLinkOpen("referral", code, req);
       try {
         const preview = await getReferralPreview({ code });
         if (!preview) {
@@ -204,7 +208,7 @@ function createApp(dependencies = {}) {
       playStoreUrl: sharing.PLAY_STORE_URL,
       ogImageUrl: sharing.OG_IMAGE_URL,
     };
-    logLinkOpen("race_share", token);
+    logLinkOpen("race_share", token, req);
     try {
       const preview = await getSharedRacePreview({ token: req.params.token });
       if (!preview) {
@@ -234,7 +238,7 @@ function createApp(dependencies = {}) {
       playStoreUrl: sharing.PLAY_STORE_URL,
       ogImageUrl: sharing.OG_IMAGE_URL,
     };
-    logLinkOpen("tournament_share", token);
+    logLinkOpen("tournament_share", token, req);
     try {
       const preview = await getSharedTournamentPreview({ token });
       if (!preview) {

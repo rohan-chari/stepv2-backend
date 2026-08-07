@@ -39,9 +39,15 @@ function buildRedeemReferralCode(dependencies = {}) {
       return { attributed: false, reason: "self_referral" };
     }
 
-    // Late attribution is disallowed once they've already finished a race.
+    // Late attribution is disallowed once they've finished a race they CHOSE
+    // to join. Seeded races (seedId != null) don't count: signup auto-enrolls
+    // every account into seeded dailies that settle within ~24h through no
+    // action of the user's, which used to slam this door before a genuinely
+    // invited friend ever saw the "enter invite code" screen (emersonz
+    // incident, 2026-08-07). The anti-gaming intent — no claiming a code after
+    // real self-driven engagement — is preserved by the seedId:null count.
     const completedRaces = await db.raceParticipant.count({
-      where: { userId: user.id, race: { status: "COMPLETED" } },
+      where: { userId: user.id, race: { status: "COMPLETED", seedId: null } },
     });
     if (completedRaces > 0) {
       return { attributed: false, reason: "already_raced" };

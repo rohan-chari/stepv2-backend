@@ -95,6 +95,11 @@ function buildEnsureAppleUser(dependencies = {}) {
     email,
     name,
     referralCode,
+    // Async thunk resolving a referral code when the body carried none (the
+    // IP-correlated link_opens fallback — see findLinkOpenReferralCode.js).
+    // Invoked ONLY on the create branch so an existing user re-signing in can
+    // never be fallback-attributed. Best-effort: a failure means organic signup.
+    fallbackReferralCode,
     emitSignInEvent = false,
   }) {
     let user = await userModel.findByAppleId(appleId);
@@ -117,7 +122,18 @@ function buildEnsureAppleUser(dependencies = {}) {
       // Referral attribution (M1) — create branch ONLY, best-effort/never-throws.
       // A code present here came in the provision body (captured pre-sign-in);
       // codes resolved after sign-in attach via POST /referrals/redeem instead.
-      await recordReferralFn({ newUser: user, referralCode });
+      // With no body code, fall back to the IP-correlated link_opens match —
+      // the iOS clipboard handoff silently fails often enough that the body
+      // code alone loses real referrals (emersonz incident, 2026-08-07).
+      let attributionCode = referralCode;
+      if (!attributionCode && fallbackReferralCode) {
+        try {
+          attributionCode = await fallbackReferralCode();
+        } catch (_) {
+          // Fallback lookup failure = organic signup; never blocks provisioning.
+        }
+      }
+      await recordReferralFn({ newUser: user, referralCode: attributionCode });
 
       // Starter-race enrollment — best-effort/never-throws: every new account
       // starts inside the current seeded challenge (see autoEnrollNewUser.js).
