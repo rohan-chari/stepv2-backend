@@ -80,6 +80,10 @@ async function createSoloRace(creator, others) {
       maxDurationDays: 7,
       powerupsEnabled: true,
       powerupStepInterval: 5000,
+      // Public keeps the race out of private-race auto-start so this suite
+      // still exercises the manual start path. Privacy is irrelevant to the
+      // drop-pool behavior asserted here.
+      isPublic: true,
     },
     token: creator.token,
   });
@@ -119,6 +123,8 @@ async function createTeamRace(creator, teamA, teamB) {
       teamSize: 1 + teamA.length,
       powerupsEnabled: true,
       powerupStepInterval: 5000,
+      // See createSoloRace: public == ineligible for private auto-start.
+      isPublic: true,
     },
     token: creator.token,
     headers: P5_HEADERS,

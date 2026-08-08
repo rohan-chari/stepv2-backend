@@ -70,7 +70,11 @@ async function createTeamRace(creator, overrides = {}) {
 
 // Build a started 2v2 (alice+bob vs carol+dave) via the real API.
 async function startedTwoVTwo(alice, bob, carol, dave, overrides = {}) {
-  const createRes = await createTeamRace(alice, overrides);
+  // isPublic keeps the race out of private-race auto-start so this helper
+  // keeps driving the manual `POST /races/:id/start` path it is testing.
+  // Applied here (not in createTeamRace) because the discovery tests above
+  // depend on createTeamRace defaulting to private.
+  const createRes = await createTeamRace(alice, { isPublic: true, ...overrides });
   const race = (await createRes.json()).race;
   await makeFriends(alice, bob);
   await makeFriends(alice, carol);

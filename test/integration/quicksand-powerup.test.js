@@ -5,13 +5,15 @@ const { RaceActiveEffect } = require("../../src/modules/powerups/models/raceActi
 let server;
 const P4 = { "X-Client-Features": "powerups4", "X-Release-Channel": "testflight" };
 
+// isPublic keeps the race ineligible for private-race auto-start, so this
+// helper keeps starting the race through the manual POST /races/:id/start.
 async function activeRace(users) {
   for (const user of users.slice(1)) {
     const sent = await request(server.baseUrl, "POST", "/friends/request", { token: users[0].token, body: { addresseeId: user.user.id } });
     const friendshipId = (await sent.json()).friendship.id;
     await request(server.baseUrl, "PUT", `/friends/request/${friendshipId}`, { token: user.token, body: { accept: true } });
   }
-  const made = await request(server.baseUrl, "POST", "/races", { token: users[0].token, body: { name: "Quicksand Integration", maxDurationDays: 7, powerupsEnabled: true, powerupStepInterval: 5000 } });
+  const made = await request(server.baseUrl, "POST", "/races", { token: users[0].token, body: { name: "Quicksand Integration", maxDurationDays: 7, powerupsEnabled: true, powerupStepInterval: 5000, isPublic: true } });
   const raceId = (await made.json()).race.id;
   await request(server.baseUrl, "POST", `/races/${raceId}/invite`, { token: users[0].token, body: { inviteeIds: users.slice(1).map((u) => u.user.id) } });
   for (const user of users.slice(1)) await request(server.baseUrl, "PUT", `/races/${raceId}/respond`, { token: user.token, body: { accept: true } });

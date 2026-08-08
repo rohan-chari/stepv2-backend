@@ -45,6 +45,10 @@ async function createPendingRace(creator, opponents, opts = {}) {
       name: opts.name || "My Active Effects Test",
       targetSteps: 200000,
       maxDurationDays: 7,
+      // Public → ineligible for private-race auto-start, so the fixture keeps
+      // its explicit PENDING → manual-start lifecycle. Privacy is irrelevant to
+      // everything this suite asserts (bucketing is by status + participation).
+      isPublic: true,
       powerupsEnabled: opts.powerupsEnabled !== false,
       powerupStepInterval: 5000,
     },

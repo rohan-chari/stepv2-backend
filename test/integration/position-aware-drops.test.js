@@ -305,7 +305,9 @@ describe("position-aware mystery-box drops", () => {
 
     for (const other of [bob, carol, dave]) await makeFriends(alice, other, TEAM_HEADERS);
     const createRes = await request(server.baseUrl, "POST", "/races", {
-      body: { name: "Team Drops", maxDurationDays: 7, isTeamRace: true, teamSize: 2 },
+      // Public → ineligible for private-race auto-start, so the manual start
+      // below is still the code path under test. Privacy does not affect drops.
+      body: { name: "Team Drops", maxDurationDays: 7, isTeamRace: true, teamSize: 2, isPublic: true },
       token: alice.token,
       headers: TEAM_HEADERS,
     });

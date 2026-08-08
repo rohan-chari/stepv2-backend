@@ -528,7 +528,9 @@ describe("races", () => {
       const bob = await createUser("BobbyRunner");
       await makeFriends(alice, bob);
 
-      const raceId = (await (await createRace(alice.token)).json()).race.id;
+      // Public so the private-race auto-start never fires: these tests are
+      // about the MANUAL start endpoint and its guards.
+      const raceId = (await (await createRace(alice.token, { isPublic: true })).json()).race.id;
       await request(server.baseUrl, "POST", `/races/${raceId}/invite`, {
         body: { inviteeIds: [bob.userId] },
         token: alice.token,
@@ -598,7 +600,9 @@ describe("races", () => {
         token: alice.token,
       });
 
-      const raceId = (await (await createRace(alice.token)).json()).race.id;
+      // Public so the private-race auto-start never fires and the explicit
+      // start below is what snapshots the baseline.
+      const raceId = (await (await createRace(alice.token, { isPublic: true })).json()).race.id;
       await request(server.baseUrl, "POST", `/races/${raceId}/invite`, {
         body: { inviteeIds: [bob.userId] },
         token: alice.token,

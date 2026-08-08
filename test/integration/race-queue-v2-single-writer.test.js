@@ -454,6 +454,9 @@ describe("5a — read-only powerup gates never bulk-write race_participants", ()
         isTeamRace: true,
         teamSize: 1,
         powerupsEnabled: true,
+        // Public so the private-race auto-start does not fire; this test needs
+        // the explicit manual start below to be the thing that starts the race.
+        isPublic: true,
       },
       token: a1.token,
       headers: TEAMS,

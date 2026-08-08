@@ -111,6 +111,9 @@ describe("race buy-ins", () => {
     const createRes = await createRace(alice.token, {
       buyInAmount: 100,
       payoutPreset: "WINNER_TAKES_ALL",
+      // Public so the private-race auto-start does not fire: this test is about
+      // the MANUAL start committing the pot.
+      isPublic: true,
     });
     const raceId = (await createRes.json()).race.id;
 

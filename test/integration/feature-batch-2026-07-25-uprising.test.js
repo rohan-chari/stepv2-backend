@@ -63,6 +63,9 @@ async function startedTeamRace(teamA, teamB) {
       isTeamRace: true,
       teamSize,
       powerupsEnabled: true,
+      // Public so the race is ineligible for private-race auto-start; this
+      // helper deliberately drives the manual `POST /races/:id/start` path.
+      isPublic: true,
     },
     token: creator.token,
     headers: HEADERS,

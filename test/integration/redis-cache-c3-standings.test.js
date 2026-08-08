@@ -189,6 +189,9 @@ async function createTeamRace(owner, opponent, name) {
       teamSize: 1,
       powerupsEnabled: true,
       powerupStepInterval: 2000,
+      // Public so the private-race auto-start does not fire: this helper starts
+      // the race explicitly below and then rewrites startedAt/joinedAt.
+      isPublic: true,
     },
     token: owner.token,
     headers,

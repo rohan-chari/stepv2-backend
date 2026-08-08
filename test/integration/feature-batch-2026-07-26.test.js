@@ -78,6 +78,10 @@ async function createActiveRace(host, others, overrides = {}) {
       maxDurationDays: 7,
       powerupsEnabled: true,
       powerupStepInterval: 2000,
+      // Public so the race is ineligible for private-race auto-start; this
+      // suite exercises the manual `POST /races/:id/start` path. Privacy is
+      // irrelevant to everything asserted below.
+      isPublic: true,
       ...(overrides.body || {}),
     },
     token: host.token,
