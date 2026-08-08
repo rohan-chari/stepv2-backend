@@ -1,6 +1,9 @@
 const { Race } = require("../models/race");
 const { withRaceJoinLock } = require("../services/raceJoinLock");
 const { buildJoinRaceCore } = require("./joinRaceCore");
+const {
+  buildMaybeAutoStartPrivateRace,
+} = require("../jobs/privateRaceAutoStart");
 
 // Thrown only for the share-token-specific failure: the token resolves to no
 // race (unknown/revoked link). All other join failures (full, already joined,
@@ -22,6 +25,12 @@ function buildJoinRaceByShareToken(dependencies = {}) {
   const raceModel = dependencies.Race || Race;
   const withLock = dependencies.withRaceJoinLock || withRaceJoinLock;
   const joinRaceCore = buildJoinRaceCore(dependencies);
+  // Batch 2026-08-08 item 2 — private-race auto-start hook (see
+  // jobs/privateRaceAutoStart.js). Link-join is the one join path that can land
+  // on a PRIVATE race, so this is where it really fires.
+  const maybeAutoStartPrivateRace =
+    dependencies.maybeAutoStartPrivateRace ||
+    buildMaybeAutoStartPrivateRace(dependencies);
 
   // `team` + `clientFeatures` thread through to the shared core for team races
   // (TR-201/202/204/703); both are ignored on individual races.
@@ -40,7 +49,7 @@ function buildJoinRaceByShareToken(dependencies = {}) {
       throw new RaceShareJoinError("Race not found", 404);
     }
 
-    return withLock(resolved.id, async () => {
+    const participant = await withLock(resolved.id, async () => {
       // Re-read inside the lock for a fresh participant set, so concurrent joins
       // can't both slip past the capacity check (mirrors joinPublicRace).
       const race = await raceModel.findById(resolved.id);
@@ -50,6 +59,12 @@ function buildJoinRaceByShareToken(dependencies = {}) {
 
       return joinRaceCore({ race, userId, onboarding, team, clientFeatures });
     });
+
+    // OUTSIDE the advisory lock, after the participant row has committed —
+    // startRace must never run while the join lock is held (3e6c827).
+    await maybeAutoStartPrivateRace({ raceId: resolved.id });
+
+    return participant;
   };
 }
 

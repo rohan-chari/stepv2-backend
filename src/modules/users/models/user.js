@@ -1,4 +1,5 @@
 const { prisma } = require("../../../db");
+const { addDaysToDateString } = require("../../../shared/time/week");
 
 // Ceiling for User.renameChipShownCount. The client only ever needs to compare
 // against maxRenameChipShows (3); the clamp exists so a misbehaving or looping
@@ -99,15 +100,47 @@ const User = {
     return updated;
   },
 
+  // Batch 2026-08-08 item 9: stamp `lastSeenAt` (+ `lastAppVersion` when this
+  // request carried a valid X-App-Version) for the admin version-spread report.
+  //
+  // THE ONE METHOD ON THIS MODEL THAT DELIBERATELY DOES NOT INVALIDATE THE
+  // /auth/me CACHE, and the reason is the whole point of the method existing:
+  //
+  //   * Every sibling above routes through the C5 chokepoint and DELs
+  //     `v1:user:{id}:authme`. `/auth/me` is the #2 endpoint by volume with a
+  //     10-SECOND TTL, so its value is entirely in the warm window.
+  //   * requireAuth calls this once per user per UTC day (plus once per app
+  //     upgrade). Invalidating would therefore evict a warm payload for
+  //     essentially EVERY active user EVERY day — a measurable hit-rate loss
+  //     bought for a field no client ever reads.
+  //   * Skipping the DEL is safe because neither column is serialized to any
+  //     client: `withRuntimeFlags` in users/routes.js strips both from every
+  //     user payload this backend emits, and an integration test pins that. A
+  //     stale cached payload therefore cannot differ in any observable field.
+  //
+  // If either column is ever exposed to a client, this method MUST start
+  // invalidating (or the exposure must be reverted).
+  //
+  // updateMany, not update: a request that races account deletion must no-op,
+  // not throw a P2025 into the auth middleware.
+  async touchLastSeen(id, fields) {
+    if (!id || !fields || Object.keys(fields).length === 0) return;
+    await prisma.user.updateMany({ where: { id }, data: fields });
+  },
+
   // §9.1: read the user's notification preferences. The column is NOT NULL with a
   // true default, so an absent/never-set preference reads as true.
   async getNotificationPreferences(id) {
     const user = await prisma.user.findUnique({
       where: { id },
-      select: { dailyRewardRemindersEnabled: true },
+      select: {
+        dailyRewardRemindersEnabled: true,
+        stepMilestoneRemindersEnabled: true,
+      },
     });
     return {
       dailyRewardRemindersEnabled: user?.dailyRewardRemindersEnabled ?? true,
+      stepMilestoneRemindersEnabled: user?.stepMilestoneRemindersEnabled ?? true,
     };
   },
 
@@ -120,6 +153,21 @@ const User = {
     });
     await invalidateAuthMe(id);
     return { dailyRewardRemindersEnabled: user.dailyRewardRemindersEnabled };
+  },
+
+  // Batch 2026-08-08 item 3: persist the step-milestone reminder opt-out. A
+  // SEPARATE setter (not a merged "setNotificationPreferences") so a frozen
+  // client's PATCH — which only ever carries dailyRewardRemindersEnabled —
+  // physically cannot write this column. Mirrors the daily-reward setter,
+  // including the /auth/me cache invalidation.
+  async setStepMilestoneRemindersEnabled(id, enabled) {
+    const user = await prisma.user.update({
+      where: { id },
+      data: { stepMilestoneRemindersEnabled: enabled },
+      select: { stepMilestoneRemindersEnabled: true },
+    });
+    await invalidateAuthMe(id);
+    return { stepMilestoneRemindersEnabled: user.stepMilestoneRemindersEnabled };
   },
 
   // Home SETUP section — rename-chip nudge state.
@@ -205,6 +253,62 @@ const User = {
       },
       select: { id: true, timezone: true, lastDailyClaimDate: true },
     });
+  },
+
+  // Batch 2026-08-08 item 3 — step-milestone evening reminder eligibility.
+  //
+  // ONE set-based query per zone (not N per-user round trips):
+  //   * opted in to THIS reminder (findRemindableInZones hardcodes the
+  //     daily-reward pref, so it cannot be reused),
+  //   * has at least one device token (EXISTS, not a per-user fetch loop),
+  //   * has a steps row for the zone's local date at/above the first threshold,
+  //   * crossed more thresholds than they have claimed for that date, and
+  //   * has NO claim for localDate-1 / localDate / localDate+1 (bias to
+  //     silence: the client's claim date is device wall-clock and can disagree
+  //     with the server's tz-derived date by a day near midnight).
+  //
+  // TYPE TRAP: steps.date is a Postgres DATE while step_milestone_claims
+  // .claimed_date is TEXT. Both are driven from the SAME 'YYYY-MM-DD' string,
+  // with an explicit ::date cast on the steps side only.
+  async findStepMilestoneRemindable(
+    zone,
+    localDate,
+    { includeNull = false, thresholds = [] } = {}
+  ) {
+    if (!thresholds.length) return [];
+    const sorted = [...thresholds].sort((a, b) => a - b);
+    const minThreshold = sorted[0];
+    const prevDate = addDaysToDateString(localDate, -1);
+    const nextDate = addDaysToDateString(localDate, 1);
+
+    const rows = await prisma.$queryRaw`
+      SELECT u.id
+      FROM users u
+      JOIN steps s
+        ON s.user_id = u.id
+       AND s.date = ${localDate}::date
+      WHERE u.step_milestone_reminders_enabled = true
+        AND (
+          u.timezone = ${zone}
+          OR (${includeNull}::boolean AND u.timezone IS NULL)
+        )
+        AND s.steps >= ${minThreshold}
+        AND EXISTS (
+          SELECT 1 FROM device_tokens d WHERE d.user_id = u.id
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM step_milestone_claims c
+          WHERE c.user_id = u.id
+            AND c.claimed_date IN (${prevDate}, ${localDate}, ${nextDate})
+        )
+        AND (
+          SELECT count(*) FROM unnest(${sorted}::int[]) AS t(threshold)
+          WHERE s.steps >= t.threshold
+        ) > (
+          SELECT count(*) FROM step_milestone_claims c2
+          WHERE c2.user_id = u.id AND c2.claimed_date = ${localDate}
+        )`;
+    return rows.map((r) => ({ id: r.id }));
   },
 
   async findByDisplayNameInsensitive(displayName, excludeUserId) {

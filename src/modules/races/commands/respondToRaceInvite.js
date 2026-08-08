@@ -15,6 +15,9 @@ const {
   pickAutoAssignTeam,
   clientSupportsTeamRaces,
 } = require("../teamRaces");
+const {
+  buildMaybeAutoStartPrivateRace,
+} = require("../jobs/privateRaceAutoStart");
 
 class RaceInviteResponseError extends Error {
   constructor(message, statusCode, code) {
@@ -42,6 +45,11 @@ function buildRespondToRaceInvite(dependencies = {}) {
       code: "INSUFFICIENT_COINS",
     });
   const events = dependencies.eventBus || eventBus;
+  // Batch 2026-08-08 item 2 — private-race auto-start hook. Built from the same
+  // dependency bag so tests can inject a fake startRace/Race.
+  const maybeAutoStartPrivateRace =
+    dependencies.maybeAutoStartPrivateRace ||
+    buildMaybeAutoStartPrivateRace(dependencies);
 
   // Team races (TR-200s): accepting requires a `team` side, only while the race
   // is still PENDING, and only from a client declaring team_races support.
@@ -202,6 +210,14 @@ function buildRespondToRaceInvite(dependencies = {}) {
         creatorUserId: race.creatorId,
       });
     }
+
+    // Batch 2026-08-08 item 2: a private race whose invites are now all
+    // resolved starts itself. Runs LAST — after the participant write has
+    // committed and outside any lock/transaction — and can never throw, so the
+    // response below is byte-identical whether or not the race started. A
+    // DECLINE can also unblock a start (the decliner was the last holdout), so
+    // this is deliberately not gated on `accept`.
+    await maybeAutoStartPrivateRace({ raceId });
 
     return updated;
   };

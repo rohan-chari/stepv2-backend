@@ -414,7 +414,8 @@ async function resolveExpiredRaces() {
         console.log(
           `[CRON] Team race ${race.id} ("${race.name}") expired. ` +
             (isTie
-              ? `Tie at ${teamTotals.TEAM_A} steps — buy-ins refunded`
+              ? `Tie at ${teamTotals.TEAM_A} steps — buy-ins refunded` +
+                (race.fundedPrize === true ? ", pool split across both teams" : "")
               : `Winner: ${winnerTeam} (${teamTotals.TEAM_A} vs ${teamTotals.TEAM_B})`)
         );
         continue;

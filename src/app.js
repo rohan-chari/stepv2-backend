@@ -21,6 +21,7 @@ const { createStepMilestonesRouter } = require("./modules/steps");
 const { createTutorialRouter } = require("./routes/tutorial");
 const { createOnboardingRouter } = require("./routes/onboarding");
 const { createAnalyticsRouter } = require("./modules/analytics");
+const { createFeedbackRouter } = require("./modules/feedback");
 const { createHomeRouter } = require("./modules/home");
 const { createAppVersionRouter } = require("./routes/appVersion");
 const { createAssetsRouter } = require("./routes/assets");
@@ -114,6 +115,7 @@ function createApp(dependencies = {}) {
   app.use("/tutorial", createTutorialRouter(dependencies));
   app.use("/onboarding", createOnboardingRouter(dependencies));
   app.use("/analytics", createAnalyticsRouter(dependencies));
+  app.use("/feedback", createFeedbackRouter(dependencies));
   app.use("/home", createHomeRouter(dependencies));
   app.use("/app-version", createAppVersionRouter(dependencies));
   // Unauthenticated by design: Google's AdMob SSV callback, trusted via its

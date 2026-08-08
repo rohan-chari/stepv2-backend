@@ -402,6 +402,38 @@ function registerNotificationHandlers(dependencies = {}) {
     }
   });
 
+  // Batch 2026-08-08 item 3: step-milestone evening reminder. Like the
+  // daily-reward reminder, the job has ALREADY written the audit row via its
+  // INSERT-FIRST deliveryKey claim, so skipAudit:true avoids a duplicate.
+  // Old clients don't know this payload type and fall back to a plain alert
+  // with no deep link (notification_service.dart:439).
+  events.on("STEP_MILESTONE_REMINDER", async (data) => {
+    try {
+      const { userId, title, body } = data || {};
+      if (!userId) return;
+      await sendNotificationToUser({
+        eventName: "STEP_MILESTONE_REMINDER",
+        recipientUserId: userId,
+        actorUserId: null,
+        title: title || "Coins waiting! 🪙",
+        buildBody: () =>
+          body ||
+          "You crossed a step milestone today — collect your coins before midnight.",
+        payload: {
+          type: "STEP_MILESTONE_REMINDER",
+          route: "home",
+          params: {},
+        },
+        logContext: { userId },
+        skipAudit: true,
+      });
+    } catch (error) {
+      logger.error("STEP_MILESTONE_REMINDER handler failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
   events.on("RACE_COMPLETED", async (data) => {
     try {
       // Suppress for tournament matchup races (see RACE_STARTED note).

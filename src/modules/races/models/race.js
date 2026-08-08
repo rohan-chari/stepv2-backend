@@ -94,6 +94,10 @@ const Race = {
     teamSize = null,
     teamAName = null,
     teamBName = null,
+    // Item 5 (2026-08-08): the team payout buff, in basis points, STAMPED here
+    // and read by every projection and by settlement. NULL (the default, and
+    // every pre-existing row) means 1.0 — see races/teamPoolMultiplier.js.
+    teamPoolMultBps = null,
   }) {
     return prisma.race.create({
       data: {
@@ -116,6 +120,7 @@ const Race = {
         teamSize,
         teamAName,
         teamBName,
+        teamPoolMultBps,
       },
       include: {
         creator: { select: { id: true, displayName: true, profilePhotoUrl: true } },
@@ -485,6 +490,49 @@ const Race = {
         status: true,
         scheduledStartAt: true,
       },
+    });
+  },
+
+  // Batch 2026-08-08 item 2 — backstop candidates for private-race auto-start.
+  // findScheduledDue can never see these: its where clause requires
+  // `scheduledStartAt: { not: null }`, so an UNSCHEDULED private race would
+  // never be rescued by the cron (and a race whose last invite merely EXPIRED
+  // has no inline hook to fire, because nobody ever accepts again).
+  //
+  // Lean select on purpose: only the fields shouldAutoStartPrivateRace reads,
+  // plus creatorId for the startRace call. NOT the full participantInclude —
+  // this runs every 5 minutes over every pending private race, and the
+  // per-participant user/accessory joins would be pure waste.
+  async findUnscheduledPrivatePending({ limit = 500 } = {}) {
+    return prisma.race.findMany({
+      where: {
+        status: "PENDING",
+        isPublic: false,
+        seedId: null,
+        tournamentId: null,
+        scheduledStartAt: null,
+      },
+      select: {
+        id: true,
+        creatorId: true,
+        status: true,
+        isPublic: true,
+        seedId: true,
+        tournamentId: true,
+        scheduledStartAt: true,
+        isTeamRace: true,
+        participants: {
+          select: {
+            id: true,
+            userId: true,
+            status: true,
+            team: true,
+            inviteExpiresAt: true,
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+      take: limit,
     });
   },
 

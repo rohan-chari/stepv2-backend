@@ -338,6 +338,14 @@ function buildRecomputePlacements(dependencies = {}) {
               preset: race.payoutPreset,
               // Projected from the live field, exactly as the race screen shows
               // it; the settled pool is recomputed from actual finishers.
+              //
+              // No team multiplier here, deliberately (batch 2026-08-08 item 5):
+              // team races `continue` above and never reach this branch, and the
+              // only thing read off this value is `.length` — how many places are
+              // "in the money" for a rank-drop push. Scaling the pool cannot
+              // change that count. Consistent with settlement by construction:
+              // a team race's paid places are decided by completeRace's team
+              // branch (everyone on the winning side), not by this helper.
               poolCoins: computePrizePool({
                 playerCount: ranked.length,
                 durationDays: race.maxDurationDays || 7,

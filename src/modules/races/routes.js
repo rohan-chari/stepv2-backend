@@ -53,6 +53,9 @@ const {
   openMysteryBoxBatch: defaultOpenMysteryBoxBatch,
 } = require("../powerups");
 const {
+  rerollMysteryBox: defaultRerollMysteryBox,
+} = require("../powerups");
+const {
   redeemPowerupToRace: defaultRedeemPowerupToRace,
 } = require("../powerups");
 const { getRaces: defaultGetRaces } = require("./queries/getRaces");
@@ -155,6 +158,8 @@ function createRacesRouter(dependencies = {}) {
   const openMysteryBox = dependencies.openMysteryBox || defaultOpenMysteryBox;
   const openMysteryBoxBatch =
     dependencies.openMysteryBoxBatch || defaultOpenMysteryBoxBatch;
+  const rerollMysteryBox =
+    dependencies.rerollMysteryBox || defaultRerollMysteryBox;
   const redeemPowerupToRace =
     dependencies.redeemPowerupToRace || defaultRedeemPowerupToRace;
   const getRaceInventory =
@@ -655,7 +660,10 @@ function createRacesRouter(dependencies = {}) {
         req.clientFeatures?.has("powerups3") ?? false,
         req.clientFeatures?.has("powerups4") ?? false,
         req.clientFeatures?.has("powerups5") ?? false,
-        req.releaseChannel
+        req.releaseChannel,
+        // Batch 2026-08-08 item 11: only a build that can actually show a
+        // rewarded ad may be told the box-reroll button exists.
+        req.clientFeatures?.has("ads") ?? false
       );
       res.json({ progress });
     } catch (error) {
@@ -750,6 +758,11 @@ function createRacesRouter(dependencies = {}) {
         raceId: req.params.raceId,
         powerupId: req.params.powerupId,
         displayName: req.user.displayName,
+        // Batch 2026-08-08 item 1: the discard coin cap is per LOCAL day. Prefer
+        // the user's STORED zone (sticky-written by requireAuth) over the
+        // per-request header, so the cap can't be widened by spoofing
+        // X-Timezone; fall back to the request zone, then to ET in the service.
+        timezone: req.user.timezone || req.timeZone || null,
       });
       res.json(result);
     } catch (error) {
@@ -786,6 +799,40 @@ function createRacesRouter(dependencies = {}) {
           .json({ error: error.message, ...(error.code ? { code: error.code } : {}) });
       }
       console.error("Open mystery box error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // POST /races/:raceId/powerups/:powerupId/reroll — batch 2026-08-08 item 11.
+  // Spend one SSV-verified rewarded-ad watch to re-roll an already-revealed box
+  // result, ONCE. New endpoint behind a default-OFF kill switch; no shipped
+  // binary calls it.
+  router.post("/:raceId/powerups/:powerupId/reroll", async (req, res) => {
+    try {
+      const result = await rerollMysteryBox({
+        userId: req.user.id,
+        raceId: req.params.raceId,
+        powerupId: req.params.powerupId,
+        displayName: req.user.displayName,
+        // The ad grant is keyed on the watcher's LOCAL date. Prefer the stored
+        // zone (sticky-written by requireAuth) over the spoofable header, same
+        // as the discard cap above. `localDate` in the body is OPTIONAL — the
+        // locked client contract sends no body.
+        timeZone: req.user.timezone || req.timeZone || null,
+        localDate: req.body?.localDate,
+        // Same wave-5 compat gate as /open — a reroll must not be a way to land
+        // a type the requesting binary cannot render or use.
+        supportsPowerups5: req.clientFeatures?.has("powerups5") ?? false,
+      });
+      res.json(result);
+    } catch (error) {
+      if (error.name === "PowerupRerollError") {
+        const status = error.statusCode || 400;
+        return res
+          .status(status)
+          .json({ error: error.message, ...(error.code ? { code: error.code } : {}) });
+      }
+      console.error("Reroll mystery box error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });

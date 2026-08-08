@@ -28,6 +28,7 @@ const TABLES_IN_ORDER = [
   "step_samples",
   "steps",
   "friendships",
+  "suggestions",
   "users",
 ];
 

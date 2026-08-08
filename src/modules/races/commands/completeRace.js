@@ -158,9 +158,46 @@ function buildCompleteRace(dependencies = {}) {
         await participantModel.setPlacement(participant.id, placement);
       }
 
+      // The one ordering both money branches use: highest total, then earliest
+      // join, then userId. Deterministic — same inputs, same payout rows — and
+      // shared so the tie branch's "remainder to the top stepper" can never
+      // drift from the win branch's.
+      const byTopStepper = (a, b) => {
+        const stepDiff = (b.totalSteps || 0) - (a.totalSteps || 0);
+        if (stepDiff !== 0) return stepDiff;
+        const joinDiff =
+          new Date(a.joinedAt).getTime() - new Date(b.joinedAt).getTime();
+        if (joinDiff !== 0) return joinDiff;
+        return (a.userId || "").localeCompare(b.userId || "");
+      };
+
+      // floor(prize / n) to each recipient, the remainder to recipients[0]
+      // (already sorted by byTopStepper), so the whole pool is always paid out
+      // and nothing is minted twice.
+      const splitEvenly = async (recipients, prize, payFn) => {
+        if (recipients.length === 0 || prize <= 0) return;
+        const share = Math.floor(prize / recipients.length);
+        const remainder = prize - share * recipients.length;
+        for (let index = 0; index < recipients.length; index++) {
+          const amount = share + (index === 0 ? remainder : 0);
+          if (amount <= 0) continue;
+          await payFn({
+            awardCoinsFn,
+            userId: recipients[index].userId,
+            raceId,
+            placement: 1,
+            amount,
+          });
+          await participantModel.incrementPayoutCoins(
+            recipients[index].id,
+            amount
+          );
+        }
+      };
+
       if (tie) {
         // TR-404: every PAID buy-in is refunded in full, forfeiters included,
-        // via the existing REFUNDED status. No payouts, pot zeroed.
+        // via the existing REFUNDED status.
         for (const participant of accepted) {
           const paid =
             (participant.buyInAmount || 0) > 0 &&
@@ -179,6 +216,31 @@ function buildCompleteRace(dependencies = {}) {
         if (race.potCoins > 0) {
           await raceModel.update(raceId, { potCoins: 0 });
         }
+
+        // Item 5 (2026-08-08, Rohan): a FUNDED tie mints the pool anyway and
+        // splits it evenly across the non-forfeited members of BOTH teams —
+        // everyone walked the whole race, so nobody should walk away with 0.
+        // Buy-in (non-funded) ties are unchanged: their pot is committed coins,
+        // already refunded above, and minting on top would double-pay.
+        //
+        // This also fixes a latent bug: the tie branch never stamped
+        // prizePoolCoins, so a completed funded tie read as pool 0 on every
+        // read path (buildRaceMoneyView reads the stamp once COMPLETED).
+        if (race.fundedPrize === true) {
+          const prize = computeSettledRacePool({
+            race,
+            participants: accepted,
+            isTeamRace: true,
+          });
+          const sharers = accepted
+            .filter((p) => !p.forfeitedAt)
+            .sort(byTopStepper);
+          await splitEvenly(sharers, prize, payoutRacePrizePool);
+          await raceModel.update(raceId, {
+            prizePoolCoins: prize,
+            potCoins: prize,
+          });
+        }
       } else if (race.fundedPrize === true || race.potCoins > 0) {
         // TR-502/503/504: the winning team's NON-FORFEITED members split the
         // entire prize evenly — floor(pot / winners) each, remainder to the
@@ -189,14 +251,7 @@ function buildCompleteRace(dependencies = {}) {
         // favor before any settlement can crown this one).
         const winners = accepted
           .filter((p) => p.team === winnerTeam && !p.forfeitedAt)
-          .sort((a, b) => {
-            const stepDiff = (b.totalSteps || 0) - (a.totalSteps || 0);
-            if (stepDiff !== 0) return stepDiff;
-            const joinDiff =
-              new Date(a.joinedAt).getTime() - new Date(b.joinedAt).getTime();
-            if (joinDiff !== 0) return joinDiff;
-            return (a.userId || "").localeCompare(b.userId || "");
-          });
+          .sort(byTopStepper);
 
         // Funded team race: the prize is MINTED from the settled field instead of
         // being a committed pot. Mutually exclusive with the pot — fundedPrize on
@@ -211,26 +266,11 @@ function buildCompleteRace(dependencies = {}) {
             })
           : race.potCoins;
 
-        if (winners.length > 0 && prize > 0) {
-          const share = Math.floor(prize / winners.length);
-          const remainder = prize - share * winners.length;
-          for (let index = 0; index < winners.length; index++) {
-            const amount = share + (index === 0 ? remainder : 0);
-            if (amount <= 0) continue;
-            const payFn = funded ? payoutRacePrizePool : payoutRaceCoins;
-            await payFn({
-              awardCoinsFn,
-              userId: winners[index].userId,
-              raceId,
-              placement: 1,
-              amount,
-            });
-            await participantModel.incrementPayoutCoins(
-              winners[index].id,
-              amount
-            );
-          }
-        }
+        await splitEvenly(
+          winners,
+          prize,
+          funded ? payoutRacePrizePool : payoutRaceCoins
+        );
 
         if (funded) {
           // Stamp the settled pool so results/history freeze forever, and mirror

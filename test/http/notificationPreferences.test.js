@@ -21,16 +21,24 @@ async function startServer(dependencies = {}) {
 
 // A User fake backing just the preference methods the router calls. requireAuth's
 // other User methods are unused on the Apple-token path (and are typeof-guarded).
-function prefUser(initial = true) {
-  const store = { enabled: initial };
+function prefUser(initial = true, milestoneInitial = true) {
+  const store = { enabled: initial, milestoneEnabled: milestoneInitial };
   return {
     store,
     async getNotificationPreferences() {
-      return { dailyRewardRemindersEnabled: store.enabled };
+      return {
+        dailyRewardRemindersEnabled: store.enabled,
+        stepMilestoneRemindersEnabled: store.milestoneEnabled,
+      };
     },
     async setDailyRewardRemindersEnabled(id, value) {
       store.enabled = value;
       return { dailyRewardRemindersEnabled: store.enabled };
+    },
+    // Batch 2026-08-08 item 3 — additive second preference.
+    async setStepMilestoneRemindersEnabled(id, value) {
+      store.milestoneEnabled = value;
+      return { stepMilestoneRemindersEnabled: store.milestoneEnabled };
     },
   };
 }
@@ -55,7 +63,10 @@ test("GET /notifications/preferences returns the stored value (defaults true)", 
   try {
     const res = await fetch(`${server.baseUrl}/notifications/preferences`, { headers: AUTH });
     assert.equal(res.status, 200);
-    assert.deepEqual(await res.json(), { dailyRewardRemindersEnabled: true });
+    assert.deepEqual(await res.json(), {
+      dailyRewardRemindersEnabled: true,
+      stepMilestoneRemindersEnabled: true,
+    });
   } finally {
     await server.close();
   }
@@ -83,7 +94,10 @@ test("PATCH /notifications/preferences persists false and returns it", async () 
       body: JSON.stringify({ dailyRewardRemindersEnabled: false }),
     });
     assert.equal(res.status, 200);
-    assert.deepEqual(await res.json(), { dailyRewardRemindersEnabled: false });
+    assert.deepEqual(await res.json(), {
+      dailyRewardRemindersEnabled: false,
+      stepMilestoneRemindersEnabled: true,
+    });
     assert.equal(user.store.enabled, false);
   } finally {
     await server.close();
@@ -100,7 +114,10 @@ test("PATCH ignores unknown fields (echoes current value)", async () => {
       body: JSON.stringify({ somethingElse: 5 }),
     });
     assert.equal(res.status, 200);
-    assert.deepEqual(await res.json(), { dailyRewardRemindersEnabled: true });
+    assert.deepEqual(await res.json(), {
+      dailyRewardRemindersEnabled: true,
+      stepMilestoneRemindersEnabled: true,
+    });
     assert.equal(user.store.enabled, true, "unchanged");
   } finally {
     await server.close();

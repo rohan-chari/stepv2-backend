@@ -246,6 +246,56 @@ function buildGetAdminStats(dependencies = {}) {
       ) staged
       GROUP BY platform, stage`;
 
+    // Batch 2026-08-08 item 9 — install-base version spread.
+    //
+    // Population: users SEEN in the last 30 days (`last_seen_at`, stamped by the
+    // sticky write in requireAuth). Rows never seen since the column shipped are
+    // excluded outright — they are dormant accounts, not an unknown version.
+    //
+    // The NULL bucket is COALESCEd to the literal 'unknown' rather than dropped.
+    // This matters most on day one: no row is backfilled, so until each user
+    // makes their next request everything is NULL, and an omitted bucket would
+    // render as "we have almost no users". A client that literally sends
+    // `X-App-Version: unknown` (the app's own fallback string, which the shared
+    // regex permits) folds into the same bucket, which is the correct reading —
+    // both mean "we do not know this user's version".
+    //
+    // PLATFORM is derived from the account's auth provider, not from any header:
+    // a user is keyed on exactly ONE provider id (appleId for iOS, googleSub for
+    // Android — see User.create), so the column already IS the platform and it
+    // cannot be spoofed by a request. Precedence appleId -> googleSub covers the
+    // rare linked account (today's base is iOS-only); anything with neither (the
+    // review/test accounts) reports 'unknown'.
+    const versionRows = await prisma.$queryRaw`
+      SELECT
+        COALESCE(last_app_version, 'unknown') AS version,
+        CASE
+          WHEN apple_id   IS NOT NULL THEN 'ios'
+          WHEN google_sub IS NOT NULL THEN 'android'
+          ELSE 'unknown'
+        END AS platform,
+        COUNT(*)::bigint AS users
+      FROM users
+      WHERE last_seen_at >= now() - interval '30 days'
+      GROUP BY 1, 2
+      ORDER BY users DESC, version ASC, platform ASC`;
+
+    // The window's left edge, as a plain YYYY-MM-DD, so the admin card can label
+    // the section instead of presenting an undated count.
+    const [versionsSinceRow] = await prisma.$queryRaw`
+      SELECT to_char((now() - interval '30 days')::date, 'YYYY-MM-DD') AS since`;
+
+    // Private (invite-only) vs public race volume, grouped by status. "Active"
+    // is status='active' only; the totals span every status including cancelled,
+    // so privateTotal is lifetime creation volume rather than a live count.
+    const [raceRows] = await prisma.$queryRaw`
+      SELECT
+        COUNT(*) FILTER (WHERE NOT is_public)::bigint                             AS private_total,
+        COUNT(*) FILTER (WHERE NOT is_public AND status = 'active')::bigint       AS private_active,
+        COUNT(*) FILTER (WHERE is_public)::bigint                                 AS public_total,
+        COUNT(*) FILTER (WHERE is_public AND status = 'active')::bigint           AS public_active
+      FROM races`;
+
     const distribution = { "0": 0, "1": 0, "2": 0, "3-5": 0, "6+": 0 };
     for (const row of friendsDist) distribution[row.bucket] = n(row.users);
 
@@ -394,6 +444,22 @@ function buildGetAdminStats(dependencies = {}) {
       // Additive section (§6.5). `windowDays` + `byPlatform` are the pinned
       // contract (the 7-day window); `byPlatformLast30Days` is an extra key for
       // the 30d view. Old admin builds ignore unknown sections entirely.
+      // Additive (item 9). `versions` stays a flat array exactly as specced, so
+      // the two scalars that describe its window ride alongside it rather than
+      // wrapping it. Old admin builds ignore all three keys.
+      versions: (versionRows || []).map((row) => ({
+        version: row.version,
+        platform: row.platform,
+        users: n(row.users),
+      })),
+      versionsSince: versionsSinceRow?.since ?? null,
+      versionsWindowDays: 30,
+      races: {
+        privateTotal: n(raceRows?.private_total),
+        privateActive: n(raceRows?.private_active),
+        publicTotal: n(raceRows?.public_total),
+        publicActive: n(raceRows?.public_active),
+      },
       onboardingFunnel: {
         windowDays: 7,
         byPlatform: onboardingByPlatform("sessions_7d"),

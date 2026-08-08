@@ -35,14 +35,39 @@ function durationPoints(days) {
   return 8; // 8..30 days
 }
 
+// A basis-point pool multiplier (10000 = 1.0x) as a plain factor. NULL/absent
+// or anything that doesn't parse as a positive number means 1.0 — a legacy row
+// (stamped before the column existed) must settle at exactly its old numbers,
+// and a malformed value must never be able to zero a payout.
+function multiplierFromBps(multBps) {
+  if (multBps == null) return 1;
+  const parsed = Number(multBps);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 1;
+  return parsed / 10000;
+}
+
 // The pool for a field of `playerCount` over `durationDays`, clamped to `max`
 // (races use PRIZE_POOL_MAX; tournaments pass their tighter MAX_CHAMPION_PRIZE).
 // A field of fewer than 2 mints nothing — a solo race is not a competition.
-function computePrizePool({ playerCount, durationDays, max = poolMax() }) {
+//
+// `multBps` is the OPT-IN team-race payout buff (batch 2026-08-08 item 5), read
+// from the race row's stamp — never from env at settlement time — so projection
+// and settlement are the same function on the same input. Callers that don't
+// pass it (every tournament call site) are unaffected by construction. The
+// ceiling is applied AFTER multiplication (spec: it now binds earlier for long
+// team races), and the result is floored to an integer so a 1.875x pool can
+// never carry a fraction into the ledger.
+function computePrizePool({
+  playerCount,
+  durationDays,
+  max = poolMax(),
+  multBps = null,
+}) {
   const players = Math.max(0, Math.floor(Number(playerCount) || 0));
   if (players < 2) return 0;
   const raw = players * durationPoints(durationDays) * coinUnit();
-  return Math.min(raw, Math.max(0, Math.floor(Number(max) || 0)));
+  const multiplied = Math.floor(raw * multiplierFromBps(multBps));
+  return Math.min(multiplied, Math.max(0, Math.floor(Number(max) || 0)));
 }
 
 // The additive `prizePool` object every funded payload carries (spec §5.1/§5.2).
@@ -59,10 +84,16 @@ function buildPrizePoolPayload({
   projected = true,
   coins = null,
   max = poolMax(),
+  multBps = null,
 }) {
   if (!funded) return null;
   const ceiling = Math.max(0, Math.floor(Number(max) || 0));
-  const computed = computePrizePool({ playerCount, durationDays, max: ceiling });
+  const computed = computePrizePool({
+    playerCount,
+    durationDays,
+    max: ceiling,
+    multBps,
+  });
   const value = coins == null ? computed : Math.max(0, Math.floor(coins));
   return {
     coins: value,

@@ -146,8 +146,21 @@ function createAuthRouter(dependencies = {}) {
     const stepSampleBucketMinutes = belowFineBucketFloor
       ? undefined
       : await safeNumber("stepSampleBucketMinutes", [5, 10, 15, 30, 60]);
+    // Batch 2026-08-08 item 9: server-only bookkeeping columns. EVERY user
+    // payload this router emits is built by spreading the raw `users` row
+    // (`...req.user` in GET /auth/me, GET /auth/session, PUT /auth/me/step-goal,
+    // and the ensure*User rows returned by the sign-in routes), so a new column
+    // leaks into the API automatically unless it is stripped. Both are stripped
+    // HERE — the single funnel every one of those responses passes through —
+    // rather than at ~10 call sites.
+    //
+    // Removing never-before-present fields is safe for frozen clients: no
+    // shipped build can read a key that has never existed. Keeping them out is
+    // also load-bearing for `User.touchLastSeen`, which skips /auth/me cache
+    // invalidation precisely because neither column is observable to a client.
+    const { lastAppVersion, lastSeenAt, ...clientSafeUser } = user || {};
     return {
-      ...user,
+      ...clientSafeUser,
       featureFlags: {
         bannerAdsEnabled: await safeFlag("bannerAdsEnabled", false),
         dualBoxBannersEnabled: await safeFlag("dualBoxBannersEnabled", false),

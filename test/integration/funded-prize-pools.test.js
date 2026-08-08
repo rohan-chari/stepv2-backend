@@ -669,7 +669,13 @@ describe("app-funded prize pools — races", () => {
     assert.equal(rows.reduce((s, t) => s + t.amount, 0), 80);
   });
 
-  it("10b: a tied funded team race mints nothing and refunds nothing", async () => {
+  // Batch 2026-08-08 item 5 (decided by Rohan): a funded tie no longer pays
+  // everyone 0. It mints the pool and splits it across both teams, and it now
+  // STAMPS prizePoolCoins (the old branch never did, so a completed funded tie
+  // read as pool 0 on every read path). There is still nothing to refund — a
+  // funded race holds no buy-ins. Split arithmetic lives in
+  // test/integration/team-pool-multiplier.test.js.
+  it("10b: a tied funded team race mints the pool and splits it across both teams", async () => {
     const race = await seedRace({
       durationDays: 1,
       isTeamRace: true,
@@ -700,10 +706,19 @@ describe("app-funded prize pools — races", () => {
     const settled = await prisma.race.findUnique({ where: { id: race.id } });
     assert.equal(settled.status, "COMPLETED");
     assert.equal(settled.winnerTeam, null);
-    assert.equal(settled.prizePoolCoins, 0);
-    assert.equal(await coinsOf(a.userId), 0);
-    assert.equal(await coinsOf(b.userId), 0);
-    assert.equal((await txns(race.id, POOL_REASON)).length, 0);
+    // 2 players x durationPoints(1)=1 x 20 = 40, split evenly across both.
+    assert.equal(settled.prizePoolCoins, 40);
+    assert.equal(settled.potCoins, 40);
+    assert.equal(await coinsOf(a.userId), 20);
+    assert.equal(await coinsOf(b.userId), 20);
+    const tieRows = await txns(race.id, POOL_REASON);
+    assert.equal(tieRows.length, 2);
+    assert.equal(tieRows.reduce((s, t) => s + t.amount, 0), 40);
+    // Still nothing refunded — a funded race never held a buy-in.
+    assert.equal(
+      (await txns(race.id, "race_buy_in_refund")).length,
+      0
+    );
   });
 
   // ── 11. PATCH ignores buy-in fields on a funded race ─────────────────────

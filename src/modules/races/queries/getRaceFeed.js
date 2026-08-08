@@ -57,7 +57,16 @@ async function getRaceFeed(userId, raceId, { cursor, limit = 50, supportsPowerup
   // (Item 9). They are audit-only — hide them from the visible feed so the
   // frequent box opens don't bury the powerup-use activity. Filtered post-query
   // so paging cursors (createdAt of the last raw row) stay stable.
-  const events = rawEvents.filter((e) => e.eventType !== "MYSTERY_BOX_OPENED");
+  //
+  // POWERUP_REROLLED (batch 2026-08-08 item 11) is hidden for the same reason
+  // AND a stronger one: it names the rerolled result, which would leak box
+  // contents the open path deliberately conceals. Keep this list in lockstep
+  // with HIDDEN_SYSTEM_EVENT_TYPES in social/queries/getRaceMessages.js.
+  const HIDDEN_FEED_EVENT_TYPES = new Set([
+    "MYSTERY_BOX_OPENED",
+    "POWERUP_REROLLED",
+  ]);
+  const events = rawEvents.filter((e) => !HIDDEN_FEED_EVENT_TYPES.has(e.eventType));
 
   return {
     events: events.map((e) => {

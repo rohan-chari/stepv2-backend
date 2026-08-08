@@ -106,6 +106,20 @@ model User {
   // reads as true (the default). Old clients never call the preference endpoints
   // and keep the default. Additive/back-compat.
   dailyRewardRemindersEnabled   Boolean              @default(true) @map("daily_reward_reminders_enabled")
+  // Batch 2026-08-08 item 3: opt-out for the 19:00-local "you have uncollected
+  // step-milestone coins" push. Same shape and same rationale as the daily-reward
+  // pref above: absent/never-set reads as true, old clients never PATCH it and
+  // keep the default. The job itself ships dark behind
+  // STEP_MILESTONE_REMINDERS_DISABLED, so defaulting true sends nothing on its own.
+  stepMilestoneRemindersEnabled Boolean              @default(true) @map("step_milestone_reminders_enabled")
+  // Batch 2026-08-08 item 9: admin visibility into the app-version spread.
+  // Sticky-written from X-App-Version in requireAuth, but ONLY when the version
+  // changed or the stored lastSeenAt is on an earlier UTC day — never per
+  // request (the 3e6c827 write-amplification lesson). Written through a
+  // dedicated model method that deliberately skips the /auth/me cache DEL, and
+  // NEITHER column is served in the /auth/me payload.
+  lastAppVersion                String?              @map("last_app_version")
+  lastSeenAt                    DateTime?            @map("last_seen_at")
   createdAt                     DateTime             @default(now()) @map("created_at")
   steps                         Step[]
   dailyRewardClaims             DailyRewardClaim[]
@@ -151,10 +165,46 @@ model User {
   stepSyncRequests  StepSyncRequest[]
   raceResolutionJob RaceResolutionJob?
 
+  // Batch 2026-08-08 item 7: in-app suggestion box. Cascade-deleted with the
+  // account (see the FK on Suggestion) and explicitly listed in
+  // deleteUserAccount's deletion set.
+  suggestions Suggestion[]
+
   // First index on this table. Backs the daily-reward reminder scheduler, which
   // selects users by IANA zone: findMany({ where: { timezone: { in: zonesAtSlot } } }).
   @@index([timezone])
+  // Backs the admin version-spread report, which buckets users seen in the
+  // last 30 days by lastAppVersion (batch 2026-08-08 item 9).
+  @@index([lastSeenAt])
   @@map("users")
+}
+
+// Batch 2026-08-08 item 7: free-text product feedback submitted from Settings.
+//
+// PII stance: `text` is user free-writing. It is retained until the account is
+// deleted, readable only through the admin-gated list endpoint, and
+// cascade-deleted with the user. `onDelete: Cascade` is required — account
+// deletion runs against a 5s transaction timeout and a blocking FK would make
+// users with feedback undeletable.
+model Suggestion {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  // Capped at 2000 chars by the endpoint, not the column.
+  text       String
+  category   String?
+  // Provenance for triage, read from the X-App-Version / X-Platform headers.
+  // Nullable: a client that sends neither still gets its suggestion stored.
+  appVersion String?  @map("app_version")
+  platform   String?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Backs the per-user per-UTC-day rate limit (5/day).
+  @@index([userId, createdAt])
+  // Backs the admin list (newest first, keyset-paged on createdAt).
+  @@index([createdAt])
+  @@map("suggestions")
 }
 
 enum FriendshipStatus {
@@ -422,6 +472,10 @@ model CoinTransaction {
 
   @@unique([userId, reason, refId])
   @@index([userId])
+  // Batch 2026-08-08 item 1: the powerup-discard daily coin cap sums this
+  // user's `powerup_discard` rows for one local calendar day on every discard.
+  // With only @@index([userId]) that sum scans a heavy user's whole ledger.
+  @@index([userId, reason, createdAt])
   @@map("coin_transactions")
 }
 
@@ -590,24 +644,24 @@ model PowerupCopy {
 }
 
 model PowerupShopItem {
-  id          String      @id @default(uuid())
-  sku         String      @unique
+  id           String      @id @default(uuid())
+  sku          String      @unique
   // DEPRECATED as a source of copy (§9.5.2): retained for additive-schema
   // compatibility and still RETURNED by GET /shop/powerups, but the served
   // strings now come from PowerupCopy. Do not edit these columns to change copy.
-  name        String
-  description String?
-  priceCoins  Int         @map("price_coins")
-  powerupType PowerupType @map("powerup_type")
-  active      Boolean     @default(true)
+  name         String
+  description  String?
+  priceCoins   Int         @map("price_coins")
+  powerupType  PowerupType @map("powerup_type")
+  active       Boolean     @default(true)
   // See ShopItem.testOnly — same prod/TestFlight gate for the powerup catalog.
-  testOnly    Boolean     @default(false) @map("test_only")
-  sortOrder   Int         @default(0) @map("sort_order")
+  testOnly     Boolean     @default(false) @map("test_only")
+  sortOrder    Int         @default(0) @map("sort_order")
   // See ShopItem.assetVersion. NULL => the icon is bundled in the app binary
   // (PowerupIcon's compiled-in asset map). Non-null => served from
   // /assets/powerups/<powerup_type lowercased>@<assetVersion>.png.
-  assetVersion String?    @map("asset_version")
-  createdAt   DateTime    @default(now()) @map("created_at")
+  assetVersion String?     @map("asset_version")
+  createdAt    DateTime    @default(now()) @map("created_at")
 
   @@index([active, sortOrder])
   @@map("powerup_shop_items")
@@ -824,6 +878,13 @@ model Race {
   // = the even split shipped today; "GEOMETRIC" = the top-heavy 0.7 decay.
   // Only createSeededRace ever writes it. Not serialized to clients.
   payoutCurve          String?          @map("payout_curve")
+  // Batch 2026-08-08 item 5: team-race prize-pool multiplier, in basis points,
+  // STAMPED AT CREATION from the TEAM_POOL_MULT_* envs and read by BOTH the
+  // live projection and settlement so the two can never disagree.
+  // NULL = 1.0x = today's formula, which is what every pre-existing race keeps.
+  // Because it is stamped, an env edit only affects races created after it —
+  // an in-flight race never reprices mid-race.
+  teamPoolMultBps      Int?             @map("team_pool_mult_bps")
   startedAt            DateTime?        @map("started_at")
   endsAt               DateTime?        @map("ends_at")
   // Optional future auto-start time (1.1.7). When set and in the future, the
@@ -888,10 +949,10 @@ model Race {
   createdAt            DateTime         @default(now()) @map("created_at")
   updatedAt            DateTime         @updatedAt @map("updated_at")
 
-  creator       User?              @relation("raceCreator", fields: [creatorId], references: [id])
-  seed          RaceSeed?          @relation(fields: [seedId], references: [id])
-  winner        User?              @relation("raceWinner", fields: [winnerUserId], references: [id])
-  tournament    Tournament?        @relation(fields: [tournamentId], references: [id])
+  creator       User?                @relation("raceCreator", fields: [creatorId], references: [id])
+  seed          RaceSeed?            @relation(fields: [seedId], references: [id])
+  winner        User?                @relation("raceWinner", fields: [winnerUserId], references: [id])
+  tournament    Tournament?          @relation(fields: [tournamentId], references: [id])
   participants  RaceParticipant[]
   powerups      RacePowerup[]
   activeEffects RaceActiveEffect[]
@@ -1152,6 +1213,10 @@ model RacePowerup {
   // openMysteryBox / openMysteryBoxBatch — never in rollPowerup, which mints
   // unopened MYSTERY_BOX rows and rolls nothing.
   configVersion Int?           @map("config_version")
+  // Batch 2026-08-08 item 11: when this rolled powerup was rerolled via a
+  // rewarded ad. NULL = never rerolled (true of every pre-existing row), which
+  // is what the once-per-roll guard tests. Additive/nullable.
+  rerolledAt    DateTime?      @map("rerolled_at")
   createdAt     DateTime       @default(now()) @map("created_at")
   updatedAt     DateTime       @updatedAt @map("updated_at")
 

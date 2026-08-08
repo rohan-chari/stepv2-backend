@@ -33,6 +33,24 @@ const POWERUP_UNLOCK_REWARD_KIND = "powerup_unlock";
 // tables), but the two share one daily cap — see POWERUP_UNLOCK_DAILY_CAP.
 const SHOP_UNLOCK_REWARD_KIND = "shop_unlock";
 
+// Batch 2026-08-08 item 11 — rewarded-ad mystery-box reroll. Grants minted by
+// the reroll unit carry SSV custom_data "box_reroll:<userId>:<localDate>" and
+// are stamped with this kind. A DISTINCT kind is load-bearing, not cosmetic:
+// grantAdReward falls back to EXTRA_SPIN_REWARD_KIND for anything it doesn't
+// recognise, so a reroll watch with unchanged custom_data would mint extra-spin
+// credits and the two features would silently consume each other's grants.
+const BOX_REROLL_REWARD_KIND = "box_reroll";
+
+// Kill switch for the reroll endpoint AND for advertising `boxReroll` in
+// getRaceProgress. Deliberately NOT the `!== "false"` idiom the older switches
+// use: this one must default OFF so the backend can ship dark ahead of the App
+// Store build that carries the button and the ad unit. Read at CALL TIME (a
+// function, not a const) so a prod .env edit + restart flips it for every app
+// version at once, and so an integration test can exercise both sides.
+function adsBoxRerollEnabled() {
+  return process.env.ADS_BOX_REROLL_ENABLED === "true";
+}
+
 // Both ad-unlock kinds, for the shared daily-cap count (D4: ONE ad unlock per
 // local day TOTAL, not one powerup + one cosmetic).
 const AD_UNLOCK_REWARD_KINDS = [
@@ -120,4 +138,6 @@ module.exports = {
   POWERUP_UNLOCK_REWARD_KIND,
   POWERUP_UNLOCK_COINS_PER_AD,
   POWERUP_UNLOCK_MAX_ADS,
+  BOX_REROLL_REWARD_KIND,
+  adsBoxRerollEnabled,
 };

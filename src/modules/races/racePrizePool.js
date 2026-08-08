@@ -10,6 +10,7 @@ const {
   computeFinishRewardPool,
   computeFinishRewardPlaces,
 } = require("./constants/raceFinishReward");
+const { raceTeamPoolMultBps } = require("./teamPoolMultiplier");
 
 // One place that decides what a race's money looks like, for every read path AND
 // for settlement. Two mutually exclusive models, discriminated by the row's
@@ -59,6 +60,9 @@ function computeSettledRacePool({ race, participants, isTeamRace = false }) {
   return computePrizePool({
     playerCount,
     durationDays: raceDurationDays(race),
+    // Item 5: the team payout buff, from the ROW's stamp — never from env here,
+    // so settlement can only ever pay what the projection advertised.
+    multBps: raceTeamPoolMultBps(race),
   });
 }
 
@@ -112,9 +116,16 @@ function buildRaceMoneyView({ race, participants, acceptedCount }) {
       ? teamSettlementPlayerCount(rows)
       : settlementPlayerCount(rows)
     : acceptedCount;
+  // Item 5: the same stamped team multiplier settlement uses, so every read path
+  // (list, detail, featured, public, share preview) projects the buffed pool.
+  const multBps = raceTeamPoolMultBps(race);
   const coins = completed
     ? race?.prizePoolCoins || 0
-    : computePrizePool({ playerCount, durationDays: raceDurationDays(race) });
+    : computePrizePool({
+        playerCount,
+        durationDays: raceDurationDays(race),
+        multBps,
+      });
 
   return {
     prizePool: buildPrizePoolPayload({
@@ -123,6 +134,7 @@ function buildRaceMoneyView({ race, participants, acceptedCount }) {
       durationDays: raceDurationDays(race),
       projected: !completed,
       coins,
+      multBps,
     }),
     // Frozen builds gate their charge + confirm sheets on buyInAmount, and render
     // projectedPotCoins as POT — so a funded race reports 0 and the pool there,

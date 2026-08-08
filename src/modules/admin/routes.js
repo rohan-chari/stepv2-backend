@@ -15,6 +15,9 @@ const {
 const {
   balanceConfig: defaultBalanceConfig,
 } = require("../economy/balanceConfig");
+const {
+  listSuggestions: defaultListSuggestions,
+} = require("../feedback");
 const { serializeBounds } = require("../economy/balanceConfig.defaults");
 const derivedCache = require("../../shared/cache/derivedCache");
 const cacheKeys = require("../../shared/cache/cacheKeys");
@@ -207,6 +210,30 @@ function createAdminRouter(dependencies = {}) {
   const settings = dependencies.appSettings || defaultAppSettings;
   const getAdminStats = dependencies.getAdminStats || defaultGetAdminStats;
   const balance = dependencies.balanceConfig || defaultBalanceConfig;
+  const listSuggestions =
+    dependencies.listSuggestions || defaultListSuggestions;
+
+  // Batch 2026-08-08 item 7 — in-app suggestion box, admin read side.
+  // Newest first, keyset-paged: ?limit=50&before=<ISO createdAt>. `nextBefore`
+  // is the cursor for the following page, or null when the list is exhausted.
+  // PII: `text` is user free-writing, so this router's admin gate (applied
+  // above via router.use) is the only thing standing between it and the world.
+  router.get("/feedback/suggestions", async (req, res) => {
+    try {
+      const page = await listSuggestions({
+        limit: req.query.limit,
+        before: req.query.before,
+        prisma,
+      });
+      res.json(page);
+    } catch (error) {
+      if (error.statusCode === 400) {
+        return res.status(400).json({ error: error.message });
+      }
+      console.error("Admin feedback list error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
 
   // Runtime feature flags (DB-backed, no deploy needed). Per-environment on
   // purpose: prod and staging flip independently, no peer-DB mirroring.

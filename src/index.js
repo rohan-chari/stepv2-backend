@@ -29,6 +29,9 @@ const {
   scheduleDailyRewardReminder,
 } = require("./modules/notifications");
 const {
+  scheduleStepMilestoneReminder,
+} = require("./modules/notifications");
+const {
   scheduleRaceResolutionWorkerV2,
 } = require("./modules/races");
 function startServer({
@@ -54,6 +57,8 @@ function startServer({
   scheduleDailyMover: scheduleDaily = scheduleDailyMover,
   scheduleDailyRewardReminder:
     scheduleDailyReminder = scheduleDailyRewardReminder,
+  scheduleStepMilestoneReminder:
+    scheduleMilestoneReminder = scheduleStepMilestoneReminder,
   // C0: the RACE-keyed worker. The old per-user worker
   // (scheduleRaceResolutionWorker) is deliberately left in the codebase — it is
   // the reverse-handoff rollback target — but this binary never schedules it, so
@@ -128,6 +133,23 @@ function startServer({
       // Unset, this pushes to the entire base at 5pm/9pm ET on day one.
       if (process.env.DAILY_REWARD_REMINDERS_DISABLED !== "true") {
         scheduleDailyReminder();
+      }
+      // Step-milestone evening reminder (7pm local per user timezone; batch
+      // 2026-08-08 item 3). Another whole-base push job, so another kill
+      // switch: STEP_MILESTONE_REMINDERS_DISABLED=true.
+      // ROLLOUT (SHIPS DARK): this MUST be set to "true" in the prod .env on
+      // the initial deploy. Verify on staging first, then remove the switch.
+      // The build function ALSO honors the env var at call time, so even if
+      // scheduled it no-ops while the switch is "true".
+      //
+      // WARNING (same trap as the daily-reward job above): do NOT assume a
+      // null-timezone user base makes this inert. stepMilestoneReminder
+      // unconditionally adds the DEFAULT_ZONE candidate and queries it with
+      // includeNull:true, which matches EVERY user whose timezone is still
+      // null. Unset, this pushes to the whole eligible base at 7pm ET on day
+      // one.
+      if (process.env.STEP_MILESTONE_REMINDERS_DISABLED !== "true") {
+        scheduleMilestoneReminder();
       }
       // Durable async race-resolution worker (Home/Races Refresh Performance).
       // Registered after the cron start delay like the other jobs. Two kill

@@ -2,6 +2,9 @@ const { Race } = require("../models/race");
 const { startRace: defaultStartRace } = require("../commands/startRace");
 const { Notification } = require("../../notifications");
 const { eventBus } = require("../../../shared/events/eventBus");
+const {
+  buildAutoStartUnscheduledPrivateRaces,
+} = require("./privateRaceAutoStart");
 
 // Push type for the TR-304 "teams are uneven" creator nudge. The Notification
 // audit row of this type doubles as the send-once dedup key.
@@ -51,6 +54,12 @@ function buildAutoStartScheduledRaces(dependencies = {}) {
   const logger = dependencies.logger || console;
   const notificationModel = dependencies.Notification || Notification;
   const events = dependencies.eventBus || eventBus;
+  // Batch 2026-08-08 item 2: the UNSCHEDULED private-race backstop shares this
+  // 5-minute tick. It is a separate DB read (findScheduledDue structurally
+  // cannot return unscheduled races) and its own kill switch.
+  const autoStartUnscheduledPrivate =
+    dependencies.autoStartUnscheduledPrivateRaces ||
+    buildAutoStartUnscheduledPrivateRaces(dependencies);
 
   // Returns the list of race ids that were started this tick.
   return async function autoStartScheduledRaces() {
@@ -119,6 +128,18 @@ function buildAutoStartScheduledRaces(dependencies = {}) {
           }
         }
       }
+    }
+
+    // Backstop pass. Deliberately NOT folded into `started` — that return value
+    // is this job's existing "scheduled races started" contract. Failures here
+    // must never abort the scheduled pass.
+    try {
+      await autoStartUnscheduledPrivate();
+    } catch (error) {
+      logger.error(
+        "[CRON] Private-race auto-start backstop error:",
+        error?.message || error
+      );
     }
 
     return started;

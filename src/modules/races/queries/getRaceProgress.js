@@ -14,6 +14,7 @@ const {
 } = require("../services/racePowerupStateSync");
 const { getTimeZoneParts, formatDateString, addDaysToDateString, parseDateString, zonedDateTimeToUtc } = require("../../../shared/time/week");
 const { balanceConfig } = require("../../economy/balanceConfig");
+const { adsBoxRerollEnabled } = require("../../economy/adRewards");
 const {
   rarityOddsForPosition,
   typeOddsForPosition,
@@ -743,6 +744,7 @@ function buildGetRaceProgress(deps = {}) {
     supportsPowerups4,
     supportsPowerups5,
     releaseChannel,
+    supportsAds = false,
     syncPowerups,
   }) {
     const snapRace = snapshot.race || {};
@@ -834,6 +836,14 @@ function buildGetRaceProgress(deps = {}) {
           pocketWatchTargetEffect: true,
         },
       };
+
+      // Batch 2026-08-08 item 11 — advertise the rewarded-ad box reroll. The
+      // key is OMITTED (not `false`) unless BOTH the server kill switch is on
+      // AND this request came from a build that can show a rewarded ad, so the
+      // payload every frozen binary already parses is byte-identical.
+      if (supportsAds && adsBoxRerollEnabled()) {
+        powerupData.boxReroll = true;
+      }
 
       // Re-read participant to get current powerupSlots (may have changed via Fanny Pack expiry)
       const freshParticipant = await participantModel.findById(myParticipant.id);
@@ -1082,7 +1092,11 @@ function buildGetRaceProgress(deps = {}) {
     supportsPowerups5 = false,
     // Batch 2026-07-26, item 8. Trailing + optional, defaults to "prod": every
     // existing caller (and every frozen client) keeps identical behaviour.
-    releaseChannel = "prod"
+    releaseChannel = "prod",
+    // Batch 2026-08-08 item 11 — whether the client advertises `ads`. Trailing +
+    // optional and defaulted false, so every existing caller keeps its exact
+    // behaviour. Gates ONLY whether `powerupData.boxReroll` is advertised.
+    supportsAds = false
   ) {
     const race = await raceModel.findById(raceId);
     if (!race) {
@@ -1240,6 +1254,7 @@ function buildGetRaceProgress(deps = {}) {
       supportsPowerups4,
       supportsPowerups5,
       releaseChannel,
+      supportsAds,
       syncPowerups: !cacheOn,
     });
   };

@@ -23,6 +23,7 @@ const { appSettings } = require("../../../shared/config/appSettings");
 const {
   generateTeamNamePair: defaultGenerateTeamNamePair,
 } = require("../constants/teamNames");
+const { resolveTeamPoolMultBps } = require("../teamPoolMultiplier");
 
 class RaceCreationError extends Error {
   constructor(message, statusCode, code) {
@@ -257,6 +258,13 @@ function buildCreateRace(dependencies = {}) {
       teamSize: teamConfig ? teamConfig.teamSize : null,
       teamAName: teamConfig ? teamConfig.teamAName : null,
       teamBName: teamConfig ? teamConfig.teamBName : null,
+      // Item 5 (2026-08-08): stamp the team payout buff ONCE, here, from env.
+      // Individual races stamp NULL (= 1.0). Read back by every projection and
+      // by settlement, so an env retune never reprices an in-flight race.
+      teamPoolMultBps: resolveTeamPoolMultBps({
+        isTeamRace: !!teamConfig,
+        durationDays: maxDurationDays,
+      }),
     });
 
     await participantModel.create({

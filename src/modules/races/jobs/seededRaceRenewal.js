@@ -70,6 +70,12 @@ function buildRenewSeededRaces(dependencies = {}) {
     const geometricPayouts = await settings.getFlag(
       "seededGeometricPayoutsEnabled"
     );
+    // NOTE (batch 2026-08-08 item 5): this path bypasses raceModel.create, so
+    // it does NOT stamp team_pool_mult_bps — correct, because a seeded
+    // Daily/Weekly is never a team race (isTeamRace stays at the schema default
+    // false) and the team payout buff is a team-mode incentive only. The column
+    // stays NULL = 1.0. If seeded TEAM challenges are ever introduced, this
+    // create must call resolveTeamPoolMultBps like createRace does.
     return prisma.race.create({
       data: {
         payoutPreset: "TOP_HALF",

@@ -9,5 +9,6 @@ Object.assign(module.exports, require("./notificationHandlers"));
 Object.assign(module.exports, require("./eventHandlers"));
 Object.assign(module.exports, require("./notificationCleanup"));
 Object.assign(module.exports, require("./dailyRewardReminder"));
+Object.assign(module.exports, require("./stepMilestoneReminder"));
 Object.assign(module.exports, require("./dailyMover"));
 Object.assign(module.exports, require("./routes"));

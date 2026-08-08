@@ -18,7 +18,14 @@ const KIND_RANK = { USER: 1, SYSTEM: 0 };
 //   * POWERUP_IMPOSTER — stealthy; never surfaced.
 //   * MYSTERY_BOX_OPENED — box-content reveals + the fanny-pack auto-activate
 //     audit rows (B1); audit-only, kept for the admin box-opener metric.
-const HIDDEN_SYSTEM_EVENT_TYPES = ["POWERUP_IMPOSTER", "MYSTERY_BOX_OPENED"];
+//   * POWERUP_REROLLED — batch 2026-08-08 item 11; the ad-funded reroll audit
+//     row, which names the new result and so must stay as hidden as the open
+//     it replaces. Mirrored in races/queries/getRaceFeed.js.
+const HIDDEN_SYSTEM_EVENT_TYPES = [
+  "POWERUP_IMPOSTER",
+  "MYSTERY_BOX_OPENED",
+  "POWERUP_REROLLED",
+];
 
 function normalizeLimit(limit) {
   const parsed = Number(limit);

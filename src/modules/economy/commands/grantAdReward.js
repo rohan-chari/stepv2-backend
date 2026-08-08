@@ -4,6 +4,7 @@ const {
   COIN_REWARD_KIND,
   POWERUP_UNLOCK_REWARD_KIND,
   SHOP_UNLOCK_REWARD_KIND,
+  BOX_REROLL_REWARD_KIND,
 } = require("../adRewards");
 
 const LOCAL_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -18,6 +19,15 @@ const POWERUP_UNLOCK_CUSTOM_DATA_RE = /^powerup_unlock:([^:]+):(.+)$/;
 // prefix and distinct rewardKind so the two unlock endpoints can never consume
 // each other's watches, while the shared daily cap counts both.
 const SHOP_UNLOCK_CUSTOM_DATA_RE = /^shop_unlock:([^:]+):(.+)$/;
+// Batch 2026-08-08 item 11 — "box_reroll:<userId>:<localDate>". Mirrors the two
+// unlock prefixes above, with one difference that matters: the trailing group
+// is a DATE, not a sku, so it feeds `grantedDate` (which the reroll consume
+// filter matches on) and never `shopItemId`.
+//
+// Without this branch a reroll watch would fall through to the `rewardKind`
+// default (extra_daily_spin) and the two features would eat each other's
+// credits — the whole reason the kind is derived from the prefix.
+const BOX_REROLL_CUSTOM_DATA_RE = /^box_reroll:([^:]+):(.+)$/;
 
 // Mint an AdRewardGrant from a *verified* AdMob SSV callback (the route owns
 // signature verification; this command owns the ledger). Idempotent on
@@ -61,18 +71,31 @@ function buildGrantAdReward(dependencies = {}) {
       typeof customData === "string"
         ? customData.match(SHOP_UNLOCK_CUSTOM_DATA_RE)
         : null;
+    const rerollMatch =
+      typeof customData === "string"
+        ? customData.match(BOX_REROLL_CUSTOM_DATA_RE)
+        : null;
+    // The reroll prefix carries the watcher's LOCAL date in group 2; anything
+    // malformed there falls back to the server's date rather than poisoning the
+    // column with a non-date string.
+    const rerollDate =
+      rerollMatch && LOCAL_DATE_RE.test(rerollMatch[2]) ? rerollMatch[2] : null;
     const grantedDate = coinMatch
       ? coinMatch[1]
-      : typeof customData === "string" && LOCAL_DATE_RE.test(customData)
-        ? customData
-        : serverDate;
+      : rerollDate
+        ? rerollDate
+        : typeof customData === "string" && LOCAL_DATE_RE.test(customData)
+          ? customData
+          : serverDate;
     const kind = unlockMatch
       ? POWERUP_UNLOCK_REWARD_KIND
       : shopUnlockMatch
         ? SHOP_UNLOCK_REWARD_KIND
-        : coinMatch
-          ? COIN_REWARD_KIND
-          : rewardKind;
+        : rerollMatch
+          ? BOX_REROLL_REWARD_KIND
+          : coinMatch
+            ? COIN_REWARD_KIND
+            : rewardKind;
     // For an unlock watch (either kind), remember which sku it was attributed to.
     const shopItemId = unlockMatch
       ? unlockMatch[2]

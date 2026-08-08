@@ -31,6 +31,21 @@ const RacePowerup = {
     });
   },
 
+  // Conditional claim of the discard transition (batch 2026-08-08 item 1).
+  //
+  // The discard command used to do a plain read-then-update, which is a TOCTOU:
+  // two concurrent taps both read a HELD row, both pass the status check, and
+  // both write a feed row (and, now that discarding pays, both would mint).
+  // Only the caller whose updateMany matches a still-discardable row
+  // (count === 1) may proceed. Mirrors `updateIfPending` on the Race model and
+  // the conditional claim in stealRandomHeldPowerup below.
+  async claimForDiscard(id) {
+    return prisma.racePowerup.updateMany({
+      where: { id, status: { in: ["HELD", "MYSTERY_BOX"] } },
+      data: { status: "DISCARDED" },
+    });
+  },
+
   async findMysteryBoxesByParticipant(participantId) {
     return prisma.racePowerup.findMany({
       where: { participantId, status: "MYSTERY_BOX" },

@@ -210,6 +210,12 @@ function buildDeleteUserAccount(dependencies = {}) {
       await tx.deviceToken.deleteMany({ where: { userId } });
       await tx.coinTransaction.deleteMany({ where: { userId } });
       await tx.powerupUpgradeEvent.deleteMany({ where: { userId } });
+      // Free-text feedback (batch 2026-08-08 item 7). The FK is ON DELETE
+      // CASCADE so this is not required for correctness, but deleting it
+      // explicitly keeps the row removal inside this transaction — and inside
+      // the 5s timeout — rather than deferring it to the cascade at
+      // tx.user.delete.
+      await tx.suggestion.deleteMany({ where: { userId } });
       await tx.friendship.deleteMany({
         where: {
           OR: [{ requesterId: userId }, { addresseeId: userId }],

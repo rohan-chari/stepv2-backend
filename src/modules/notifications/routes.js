@@ -17,38 +17,63 @@ function createNotificationsRouter(dependencies = {}) {
   // GET /notifications/preferences (§9.1). Auth required. Absent/never-set
   // preference reads as true (the model defaults it). Old clients never call
   // this; device-token registration and all existing endpoints are untouched.
+  // Serialize the preference payload. Both columns are NOT NULL with a true
+  // default, so anything that isn't an explicit false reads as true. Batch
+  // 2026-08-08 item 3 added stepMilestoneRemindersEnabled ADDITIVELY — frozen
+  // clients simply ignore the extra key.
+  function prefsPayload(prefs) {
+    return {
+      dailyRewardRemindersEnabled: prefs.dailyRewardRemindersEnabled !== false,
+      stepMilestoneRemindersEnabled:
+        prefs.stepMilestoneRemindersEnabled !== false,
+    };
+  }
+
   router.get("/preferences", async (req, res) => {
     try {
       const prefs = await User.getNotificationPreferences(req.user.id);
-      res.json({
-        dailyRewardRemindersEnabled: prefs.dailyRewardRemindersEnabled !== false,
-      });
+      res.json(prefsPayload(prefs));
     } catch (error) {
       console.error("Get notification preferences error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });
 
-  // PATCH /notifications/preferences (§9.1). Body: { dailyRewardRemindersEnabled:
-  // boolean }. Unknown fields are ignored; a non-boolean field is a 400. Returns
-  // the persisted value.
+  // PATCH /notifications/preferences (§9.1 + batch 2026-08-08 item 3). Body:
+  // { dailyRewardRemindersEnabled?: boolean, stepMilestoneRemindersEnabled?:
+  // boolean }. Unknown fields are ignored; a present non-boolean field is a 400.
+  //
+  // FROZEN-CLIENT CONTRACT: each field is written only when it is PRESENT, via
+  // its own setter. An old client's body (daily-reward only, or empty) can
+  // therefore never disturb the step-milestone preference. Returns both values.
   router.patch("/preferences", async (req, res) => {
     try {
-      const value = req.body ? req.body.dailyRewardRemindersEnabled : undefined;
-      if (value === undefined) {
-        // No recognized field present — nothing to change; echo current value.
-        const prefs = await User.getNotificationPreferences(req.user.id);
-        return res.json({
-          dailyRewardRemindersEnabled: prefs.dailyRewardRemindersEnabled !== false,
-        });
-      }
-      if (typeof value !== "boolean") {
+      const body = req.body || {};
+      const dailyValue = body.dailyRewardRemindersEnabled;
+      const milestoneValue = body.stepMilestoneRemindersEnabled;
+
+      if (dailyValue !== undefined && typeof dailyValue !== "boolean") {
         return res
           .status(400)
           .json({ error: "dailyRewardRemindersEnabled must be a boolean" });
       }
-      const saved = await User.setDailyRewardRemindersEnabled(req.user.id, value);
-      res.json({ dailyRewardRemindersEnabled: saved.dailyRewardRemindersEnabled });
+      if (milestoneValue !== undefined && typeof milestoneValue !== "boolean") {
+        return res
+          .status(400)
+          .json({ error: "stepMilestoneRemindersEnabled must be a boolean" });
+      }
+
+      if (dailyValue !== undefined) {
+        await User.setDailyRewardRemindersEnabled(req.user.id, dailyValue);
+      }
+      if (milestoneValue !== undefined) {
+        await User.setStepMilestoneRemindersEnabled(req.user.id, milestoneValue);
+      }
+
+      // Read back rather than echoing the request so the response always
+      // reflects what is stored (including the field the client didn't send).
+      const prefs = await User.getNotificationPreferences(req.user.id);
+      res.json(prefsPayload(prefs));
     } catch (error) {
       console.error("Update notification preferences error:", error);
       res.status(500).json({ error: "Internal server error" });

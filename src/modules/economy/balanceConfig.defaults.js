@@ -230,6 +230,27 @@ const DEFAULT_CONFIG = {
   // restriction", i.e. exactly the pre-2026-07-26 behaviour.
   teamOnlyTypes: ["RALLY_FLAG"],
 
+  // Coins paid for discarding a HELD in-race powerup, by rarity (batch
+  // 2026-08-08 item 1). Lives here rather than in an env so the prices are
+  // admin-tunable without an App Store release, exactly like the other balance
+  // numbers.
+  //
+  // OPTIONAL KEY, following the `teamOnlyTypes` precedent above: a config
+  // stored before this key existed simply has none and resolves to these code
+  // defaults through mergeOverDefaults, so `undefined` MUST stay valid.
+  // SCHEMA_VERSION is deliberately NOT bumped — stored rows predate the key and
+  // a version bump would hard-reject every one of them.
+  //
+  // Reading this key is default-safe: a missing rarity, or a missing block
+  // entirely, falls back to the COMMON price (the floor). An UNOPENED
+  // MYSTERY_BOX is priced at 0 in code, not here — that is a rule, not a knob
+  // (paying for unopened boxes makes never-opening dominant, exploit S4).
+  discardPrices: {
+    COMMON: 2,
+    UNCOMMON: 5,
+    RARE: 10,
+  },
+
   // `dailyBoxExcludedTypes` REMOVED 2026-07-28 (owner decision). The daily-spin
   // prize pool is now the shop catalog exactly as the spinning client sees it
   // (isPowerupVisibleToClient over findActive rows — see
@@ -422,6 +443,13 @@ const SOFT_BOUNDS = [
     min: 0,
     max: 0.5,
     rationale: "level 1 should not near-guarantee a rare",
+  },
+  {
+    path: "discardPrices.*",
+    min: 0,
+    max: 50,
+    rationale:
+      "discarding is a coin FAUCET gated only by a 40/day cap; a price above ~50 makes farming boxes for coins beat playing the race",
   },
 ];
 

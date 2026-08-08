@@ -9,6 +9,25 @@ const {
 const { ensureAppleUser } = require("../modules/users/services/ensureAppleUser");
 const { User } = require("../modules/users/models/user");
 
+// Batch 2026-08-08 item 9. Byte-identical to the regex the analytics ingestion
+// endpoint uses to bound `appVersion` (src/modules/analytics/routes.js:84).
+// It is a `const` local to that router and not exported, and this change does
+// not own that file, so it is duplicated here rather than re-exported. If one
+// side is ever loosened the other must follow — both bound the SAME untrusted
+// X-App-Version header from the SAME client field (PackageInfo.version), and
+// the whole point is that admin reporting groups on values from both.
+const SAFE_APP_VERSION =
+  /^(?:unknown|\d{1,4}(?:\.\d{1,4}){1,3}(?:[+-][A-Za-z0-9.-]{1,16})?)$/;
+
+// UTC calendar date ("2026-08-08") of a Date. The sticky write is rate-limited
+// to once per UTC day; UTC (not the user's zone) is deliberate — it is a write
+// throttle, not a reported metric, so it only has to be a stable, cheap,
+// server-side bucket. The admin report reads a 30-day window, which no choice
+// of day boundary can skew.
+function utcDateKey(date) {
+  return date.toISOString().slice(0, 10);
+}
+
 class AuthError extends Error {
   constructor(message) {
     super(message);
@@ -97,6 +116,61 @@ function buildRequireAuth(dependencies = {}) {
     }
   }
 
+  // Batch 2026-08-08 item 9: sticky-write `users.lastAppVersion` +
+  // `users.lastSeenAt` from the X-App-Version header, so admins can see the
+  // version spread of the live install base. Third sibling of
+  // recordClientFeatures / recordTimezone and it obeys the same two rules.
+  //
+  // RULE 1 — NEVER PER REQUEST (commit 3e6c827: a per-request users-row write
+  // exhausted the connection pool). ONE combined UPDATE fires only when:
+  //   * the validated header differs from the stored lastAppVersion, OR
+  //   * the stored lastSeenAt is on an earlier UTC day (or is null).
+  // Steady state for an unchanged app on its second request of the day is ZERO
+  // writes, so the ceiling is one write per user per day plus one per upgrade.
+  //
+  // RULE 2 — DO NOT GO THROUGH THE `User.update` CHOKEPOINT. Every method on
+  // the User model DELs the cached `/auth/me` payload (see
+  // users/services/authMeCache.js). `/auth/me` is the #2 endpoint by volume and
+  // its cache has a 10s TTL, so a daily DEL per user would evict a warm payload
+  // for essentially every active user every day for a field the client never
+  // reads. `User.touchLastSeen` therefore deliberately bypasses invalidation —
+  // it is safe precisely because neither column is ever serialized to a client.
+  //
+  // A missing or malformed header is NOT an error: the version is simply not
+  // stored (the user still counts as seen, and lands in the admin "unknown"
+  // bucket). Best-effort throughout — any failure is swallowed and logged, and
+  // can never fail an authenticated request.
+  async function recordAppVersion(req, user) {
+    try {
+      if (!user || typeof userModel.touchLastSeen !== "function") return;
+
+      const raw = req.headers && req.headers["x-app-version"];
+      const version =
+        typeof raw === "string" && SAFE_APP_VERSION.test(raw) ? raw : null;
+
+      const now = new Date();
+      const seenAt = user.lastSeenAt ? new Date(user.lastSeenAt) : null;
+      const versionChanged = version !== null && version !== user.lastAppVersion;
+      const newUtcDay =
+        !seenAt ||
+        Number.isNaN(seenAt.getTime()) ||
+        utcDateKey(seenAt) !== utcDateKey(now);
+
+      if (!versionChanged && !newUtcDay) return; // steady state: no write
+
+      // Only overwrite lastAppVersion when this request actually carried a
+      // valid one. A header-less internal call or retry must not wipe a real
+      // recorded version (the same flicker guard TR-706/§7 use).
+      await userModel.touchLastSeen(user.id, {
+        lastSeenAt: now,
+        ...(version !== null ? { lastAppVersion: version } : {}),
+      });
+    } catch (error) {
+      // Never let version bookkeeping fail the request.
+      console.warn("recordAppVersion failed (ignored):", error?.message);
+    }
+  }
+
   return async function requireAuth(req, res, next) {
     try {
       const token = extractBearerToken(req.headers.authorization);
@@ -113,6 +187,7 @@ function buildRequireAuth(dependencies = {}) {
         req.user = user;
         await recordClientFeatures(req, user);
         await recordTimezone(req, user);
+        await recordAppVersion(req, user);
         return next();
       } catch (error) {
         if (error instanceof SessionTokenError) {
@@ -145,6 +220,7 @@ function buildRequireAuth(dependencies = {}) {
       req.user = user;
       await recordClientFeatures(req, user);
       await recordTimezone(req, user);
+      await recordAppVersion(req, user);
 
       next();
     } catch (error) {

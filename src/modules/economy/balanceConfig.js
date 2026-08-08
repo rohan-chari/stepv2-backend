@@ -225,6 +225,41 @@ function validateConfig(input) {
     }
   }
 
+  // discardPrices (2026-08-08 item 1): coins paid for discarding a HELD in-race
+  // powerup, by rarity. OPTIONAL for exactly the reason teamOnlyTypes is — a
+  // config stored before this key existed has none and resolves to the code
+  // default through mergeOverDefaults, so `undefined` must stay valid and
+  // SCHEMA_VERSION is NOT bumped.
+  //
+  // Validated only when present: every key must be a known rarity and every
+  // value a non-negative integer. A negative price would invert the faucet into
+  // a silent coin DRAIN on a button labelled "discard", and a fractional price
+  // would round unpredictably against the cap arithmetic.
+  if (input.discardPrices !== undefined) {
+    if (!isPlainObject(input.discardPrices)) {
+      errors.push({
+        path: "discardPrices",
+        message: "discardPrices must be an object",
+      });
+    } else {
+      for (const [rarity, value] of Object.entries(input.discardPrices)) {
+        if (!RARITIES.includes(rarity)) {
+          errors.push({
+            path: "discardPrices",
+            message: `${rarity} is not a valid PowerupRarity`,
+          });
+          continue;
+        }
+        if (!Number.isInteger(value) || value < 0) {
+          errors.push({
+            path: `discardPrices.${rarity}`,
+            message: `discardPrices.${rarity} must be a non-negative integer`,
+          });
+        }
+      }
+    }
+  }
+
   // `dailyBoxExcludedTypes` REMOVED 2026-07-28: the daily-spin prize pool is
   // now the shop catalog as the client sees it (see getEligiblePowerupPool),
   // so there is no spin-exclusion list to validate. A stored config that still
