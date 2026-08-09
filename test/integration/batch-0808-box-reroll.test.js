@@ -290,6 +290,94 @@ describe("Batch 2026-08-08 item 11 — rewarded-ad box reroll", () => {
     assert.equal(untouched.consumedAt, null);
   });
 
+  // ── localDate handling (review blocker 1) ────────────────────────────────
+  //
+  // The grant's `grantedDate` comes from the DEVICE's local date, baked into the
+  // ad's custom_data. The reroll request that spends it must agree, or a watch
+  // taken at 23:59 local is billed to a date the consume filter never looks at
+  // and the credit is permanently unspendable.
+
+  function rerollWithBody(token, raceId, powerupId, body) {
+    return request(
+      server.baseUrl,
+      "POST",
+      `/races/${raceId}/powerups/${powerupId}/reroll`,
+      { token, headers: ADS_FEATURES, body }
+    ).then(async (res) => ({ status: res.status, body: await res.json() }));
+  }
+
+  function shiftDate(days) {
+    return new Date(Date.now() + days * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
+  }
+
+  it("spends a grant stamped YESTERDAY (watch taken just before local midnight)", async () => {
+    const powerup = await seedOpenedPowerup(raceId, alice);
+    const grant = await seedGrant(alice.userId, REROLL_KIND, shiftDate(-1));
+
+    const { status } = await rerollWithBody(alice.token, raceId, powerup.id, {
+      localDate: today(),
+    });
+    assert.equal(status, 200, "a midnight-straddling grant must not be stranded");
+    const spent = await prisma.adRewardGrant.findUnique({ where: { id: grant.id } });
+    assert.ok(spent.consumedAt, "the D-1 grant is the one consumed");
+  });
+
+  it("spends a grant stamped TOMORROW (device clock ahead of the server)", async () => {
+    const powerup = await seedOpenedPowerup(raceId, alice);
+    const grant = await seedGrant(alice.userId, REROLL_KIND, shiftDate(1));
+
+    const { status } = await rerollWithBody(alice.token, raceId, powerup.id, {
+      localDate: today(),
+    });
+    assert.equal(status, 200);
+    const spent = await prisma.adRewardGrant.findUnique({ where: { id: grant.id } });
+    assert.ok(spent.consumedAt);
+  });
+
+  it("does NOT spend a grant three days old (the window is +/-1, not unbounded)", async () => {
+    const powerup = await seedOpenedPowerup(raceId, alice);
+    const grant = await seedGrant(alice.userId, REROLL_KIND, shiftDate(-3));
+
+    const { status, body } = await rerollWithBody(alice.token, raceId, powerup.id, {
+      localDate: today(),
+    });
+    assert.equal(status, 409);
+    assert.equal(body.code, "AD_NOT_VERIFIED");
+    const untouched = await prisma.adRewardGrant.findUnique({ where: { id: grant.id } });
+    assert.equal(untouched.consumedAt, null);
+  });
+
+  it("rejects a localDate far from server time (400), spending nothing", async () => {
+    const powerup = await seedOpenedPowerup(raceId, alice);
+    const grant = await seedGrant(alice.userId, REROLL_KIND, "2020-01-02");
+
+    const { status } = await rerollWithBody(alice.token, raceId, powerup.id, {
+      localDate: "2020-01-01",
+    });
+    assert.equal(status, 400, "a client cannot reach back to an old date's grants");
+    const untouched = await prisma.adRewardGrant.findUnique({ where: { id: grant.id } });
+    assert.equal(untouched.consumedAt, null);
+  });
+
+  it("rejects a malformed localDate (400)", async () => {
+    const powerup = await seedOpenedPowerup(raceId, alice);
+    await seedGrant(alice.userId, REROLL_KIND, today());
+    const { status } = await rerollWithBody(alice.token, raceId, powerup.id, {
+      localDate: "not-a-date",
+    });
+    assert.equal(status, 400);
+  });
+
+  it("FROZEN CONTRACT: a request with NO body still works (localDate is optional)", async () => {
+    const powerup = await seedOpenedPowerup(raceId, alice);
+    await seedGrant(alice.userId, REROLL_KIND, today());
+    // The locked contract sends no body; the server derives the date itself.
+    const { status } = await reroll(alice.token, raceId, powerup.id);
+    assert.equal(status, 200);
+  });
+
   it("another user's grant -> 409 AD_NOT_VERIFIED", async () => {
     const powerup = await seedOpenedPowerup(raceId, alice);
     await seedGrant(bob.userId, REROLL_KIND, today());

@@ -37,6 +37,41 @@ class PowerupRerollError extends Error {
 
 const LOCAL_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+// Same rule the daily-reward claims apply to a client-supplied localDate
+// (claimDailyReward.js): the date must be real, and within ~a day of server
+// time so a client cannot reach back and spend an arbitrary old date's grants.
+function isValidLocalDate(str) {
+  if (typeof str !== "string" || !LOCAL_DATE_RE.test(str)) return false;
+  const [y, m, d] = str.split("-").map((n) => parseInt(n, 10));
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return (
+    dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d
+  );
+}
+
+function withinOneDayOfServer(localDate) {
+  const serverToday = new Date().toISOString().slice(0, 10);
+  const diffDays =
+    Math.abs(new Date(localDate) - new Date(serverToday)) / (1000 * 60 * 60 * 24);
+  return diffDays <= 1.5;
+}
+
+// The dates a reroll credit may legitimately carry: the caller's local date and
+// its two neighbours.
+//
+// The grant is stamped with the DEVICE's local date at ad-watch time, while the
+// spend arrives as a separate request that can land on the other side of local
+// midnight (and the device clock can disagree with the server anyway). Matching
+// one exact date would strand those credits permanently — the user watched the
+// ad and can never spend it. The unconsumed-grant + CAS consume still make
+// double-spending impossible, so widening the LOOKUP costs nothing.
+function adjacentDates(localDate) {
+  const base = new Date(`${localDate}T00:00:00.000Z`).getTime();
+  return [-1, 0, 1].map((offset) =>
+    new Date(base + offset * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  );
+}
+
 // The user's local calendar date. NOT the server's UTC date: the SSV callback
 // stamps `grantedDate` from the DEVICE's local date (custom_data
 // "box_reroll:<userId>:<localDate>"), so matching on the UTC date would fail
@@ -160,16 +195,38 @@ function buildRerollMysteryBox(dependencies = {}) {
 
     // ── Consume ONE verified watch. The grant is "1 reroll credit" — it is not
     // bound to a particular box at mint time; binding happens here.
-    const effectiveDate =
-      typeof localDate === "string" && LOCAL_DATE_RE.test(localDate)
-        ? localDate
-        : localDateFor(timeZone);
+    // `localDate` is OPTIONAL — the locked client contract sends no body, and
+    // those callers get the server's view of the user's local date. When a
+    // client DOES send one (it sends the same date it baked into the ad's
+    // custom_data), it is validated exactly like the daily-reward claims: a real
+    // date, close to server time. An out-of-range date is a 400 rather than a
+    // silent fallback, so a client can never quietly reach a stale date's grants.
+    let effectiveDate;
+    if (localDate === undefined || localDate === null) {
+      effectiveDate = localDateFor(timeZone);
+    } else if (!isValidLocalDate(localDate)) {
+      throw new PowerupRerollError(
+        "Invalid localDate (expected YYYY-MM-DD)",
+        400,
+        "INVALID_LOCAL_DATE"
+      );
+    } else if (!withinOneDayOfServer(localDate)) {
+      throw new PowerupRerollError(
+        "localDate is too far from server time",
+        400,
+        "INVALID_LOCAL_DATE"
+      );
+    } else {
+      effectiveDate = localDate;
+    }
 
     const grant = await db.adRewardGrant.findFirst({
       where: {
         userId,
         rewardKind: BOX_REROLL_REWARD_KIND,
-        grantedDate: effectiveDate,
+        // +/-1 day: see adjacentDates. A watch taken at 23:59 local is stamped
+        // D-1 and spent on D; matching one exact date would strand it forever.
+        grantedDate: { in: adjacentDates(effectiveDate) },
         consumedAt: null,
       },
       orderBy: { createdAt: "asc" },
