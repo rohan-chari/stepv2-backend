@@ -247,6 +247,72 @@ describe("batch 2026-08-08 item 2 — private race auto-start", () => {
     assert.equal(carolRow.status, "INVITED");
   });
 
+  it("the backstop ignores a DORMANT race that meets every other condition", async () => {
+    // Deploy-day safety (review blocker 2). Turning this feature on makes every
+    // historical PENDING private race with 2+ accepted a candidate — without a
+    // recency bound the first cron tick would mass-start races abandoned months
+    // ago and push every one of their participants.
+    const alice = await createUser("OldAlice");
+    const bob = await createUser("OldBob");
+    await makeFriends(alice, bob);
+
+    const raceId = await createRace(alice);
+    await invite(alice, raceId, [bob]);
+
+    // Backdate BOTH the race and the accept so nothing is live, then accept.
+    // (Accept first, then backdate, so the inline hook's own start is undone.)
+    await respond(bob, raceId, true);
+    await prisma.race.update({
+      where: { id: raceId },
+      data: { status: "PENDING", startedAt: null, endsAt: null },
+    });
+    const longAgo = new Date(Date.now() - 45 * 24 * 60 * 60 * 1000);
+    await prisma.$executeRaw`UPDATE races SET created_at = ${longAgo} WHERE id = ${raceId}`;
+
+    // Sanity: it satisfies every OTHER part of the predicate.
+    const row = await prisma.race.findUnique({
+      where: { id: raceId },
+      select: { status: true, isPublic: true, seedId: true, tournamentId: true, scheduledStartAt: true },
+    });
+    assert.equal(row.status, "PENDING");
+    assert.equal(row.isPublic, false);
+    assert.equal(row.seedId, null);
+    assert.equal(row.tournamentId, null);
+    assert.equal(row.scheduledStartAt, null);
+    assert.equal(
+      await prisma.raceParticipant.count({ where: { raceId, status: "ACCEPTED" } }),
+      2
+    );
+
+    await runCron();
+
+    const race = await getRace(alice, raceId);
+    assert.equal(race.status, "PENDING", "a dormant race must never be mass-started");
+    assert.equal(race.startedAt, null);
+  });
+
+  it("the backstop still starts a RECENT race (the recency bound is not a kill switch)", async () => {
+    const alice = await createUser("NewAlice");
+    const bob = await createUser("NewBob");
+    const carol = await createUser("NewCarol");
+    await makeFriends(alice, bob);
+    await makeFriends(alice, carol);
+
+    const raceId = await createRace(alice);
+    await invite(alice, raceId, [bob, carol]);
+    await respond(bob, raceId, true);
+    // Carol's invite lapses -> only the backstop can start it. Race is fresh.
+    await prisma.raceParticipant.updateMany({
+      where: { raceId, userId: carol.userId },
+      data: { inviteExpiresAt: new Date(Date.now() - 60 * 60 * 1000) },
+    });
+
+    await runCron();
+
+    const race = await getRace(alice, raceId);
+    assert.equal(race.status, "ACTIVE", "a race created today is still a candidate");
+  });
+
   it("does NOT start a team race with uneven sides, and shows the accepter no error", async () => {
     const alice = await createUser("TeamAlice");
     const bob = await createUser("TeamBob");

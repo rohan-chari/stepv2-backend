@@ -515,7 +515,14 @@ const Race = {
     });
   },
 
-  async findUnscheduledPrivatePending({ limit = 500 } = {}) {
+  // `maxAgeDays` is a DEPLOY-DAY SAFETY BOUND, not a tuning knob (review
+  // blocker 2). Without it, the first cron tick after this feature is enabled
+  // treats every historical PENDING private race with 2+ accepted participants
+  // as a candidate — mass-starting races abandoned months ago and pushing every
+  // one of their participants. A race nobody has touched in a week is dormant;
+  // the creator can still start it by hand.
+  async findUnscheduledPrivatePending({ limit = 500, maxAgeDays = 7 } = {}) {
+    const createdSince = new Date(Date.now() - maxAgeDays * 24 * 60 * 60 * 1000);
     return prisma.race.findMany({
       where: {
         status: "PENDING",
@@ -523,6 +530,7 @@ const Race = {
         seedId: null,
         tournamentId: null,
         scheduledStartAt: null,
+        createdAt: { gte: createdSince },
       },
       select: {
         id: true,
