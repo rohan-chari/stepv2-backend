@@ -116,6 +116,17 @@ function buildMaybeAutoStartPrivateRace(dependencies = {}) {
     if (!raceId) return false;
 
     try {
+      // Cheap gate first (review fix 4). This hook fires on every join, accept
+      // AND decline; only a PENDING private race can ever auto-start, so reject
+      // the common cases on a two-column read rather than on findById's full
+      // include tree. Capability-detected so injected fakes without the method
+      // simply fall through to the deep read.
+      if (typeof raceModel.findAutoStartGate === "function") {
+        const gate = await raceModel.findAutoStartGate(raceId);
+        if (!gate) return false;
+        if (gate.status !== "PENDING" || gate.isPublic !== false) return false;
+      }
+
       // Fresh read: the caller's copy predates the participant write.
       const race = await raceModel.findById(raceId);
       if (!race) return false;

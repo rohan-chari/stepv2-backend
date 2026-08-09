@@ -503,6 +503,18 @@ const Race = {
   // plus creatorId for the startRace call. NOT the full participantInclude —
   // this runs every 5 minutes over every pending private race, and the
   // per-participant user/accessory joins would be pure waste.
+  // Two-column gate for the inline auto-start hook (review fix 4). The hook
+  // runs on EVERY join/accept/decline, but only a PENDING private race can ever
+  // auto-start — so the common cases (a public join, a decline on an already
+  // ACTIVE race) are rejected on this tiny read instead of paying for
+  // findById's full participant/user include tree.
+  async findAutoStartGate(id) {
+    return prisma.race.findUnique({
+      where: { id },
+      select: { id: true, status: true, isPublic: true },
+    });
+  },
+
   async findUnscheduledPrivatePending({ limit = 500 } = {}) {
     return prisma.race.findMany({
       where: {
