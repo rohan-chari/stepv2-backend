@@ -1,6 +1,55 @@
 const { prisma } = require("../../../db");
 
+// Batch 2026-08-08 item 4 (podium): the top finishers of MANY completed races
+// in ONE query, with the cosmetics relations the avatar needs.
+//
+// `placement: { in: [1,2,3] }` is what keeps this bounded — a 100-player race
+// contributes at most 3 rows, so the result set is O(races), never
+// O(participants). Without that predicate this would pull every participant of
+// every completed race the viewer has ever run.
+const PODIUM_PLACEMENTS = [1, 2, 3];
+
 const RaceParticipant = {
+  // Top-3 finishers for each of `raceIds`, for the completed-races list.
+  // Returns a flat array; the caller groups by raceId. Ordered so that grouping
+  // preserves 1 -> 2 -> 3 without a second sort.
+  async findPodiumForRaces(raceIds) {
+    if (!Array.isArray(raceIds) || raceIds.length === 0) return [];
+    return prisma.raceParticipant.findMany({
+      where: {
+        raceId: { in: raceIds },
+        status: "ACCEPTED",
+        placement: { in: PODIUM_PLACEMENTS },
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            displayName: true,
+            profilePhotoUrl: true,
+            equippedAccessories: {
+              include: {
+                shopItem: {
+                  select: {
+                    id: true,
+                    sku: true,
+                    name: true,
+                    slot: true,
+                    assetKey: true,
+                    renderMetadata: true,
+                    bobble: true,
+                    testOnly: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      orderBy: [{ raceId: "asc" }, { placement: "asc" }],
+    });
+  },
+
   async findById(id) {
     return prisma.raceParticipant.findUnique({ where: { id } });
   },

@@ -1,4 +1,6 @@
 const { Race } = require("../models/race");
+const { RaceParticipant } = require("../models/raceParticipant");
+const { characterPresentation } = require("../../cosmetics/shopCosmetics");
 const { RacePowerup } = require("../../powerups/models/racePowerup");
 const { RaceActiveEffect } = require("../../powerups/models/raceActiveEffect");
 const {
@@ -75,6 +77,11 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
     powerups4: clientFeatures?.has("powerups4") ?? false,
     powerups5: clientFeatures?.has("powerups5") ?? false,
   };
+  // Batch 2026-08-08 item 4: gates the completed-race podium rows' cosmetics,
+  // exactly as getRaceDetails gates its participant rows. Both default to the
+  // naked-capy presentation, so a client that declares nothing is unaffected.
+  const supportsCharacters = clientFeatures?.has("characters") ?? false;
+  const releaseChannel = options.releaseChannel || "prod";
   // Lean list fetch (Phase B1): drops participant user/accessory relations the
   // summaries never read. Falls back to findForUser for injected minimal test
   // fakes that only provide the legacy method (capability detection, matching
@@ -175,6 +182,40 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
         for (let i = 0; i < qc; i++) list.push({ status: "QUEUED" });
       }
       inventoryByParticipant.set(mine.id, list);
+    }
+  }
+
+  // Batch 2026-08-08 item 4 (podium): the top-3 finishers of each COMPLETED
+  // SOLO race, so the results popup can draw a podium without a second
+  // round-trip to GET /races/:id.
+  //
+  // ONE query for every completed race on the list, bounded to 3 rows per race
+  // by the model's `placement IN (1,2,3)` predicate — deliberately not a lookup
+  // inside the loop below, which is the N+1 shape this file has already been
+  // refactored twice to avoid (Phase B1/B2/B3 above).
+  //
+  // Team races are excluded: they render the winning-team board, not a podium.
+  // `findSummariesForUser` is a LEAN fetch that drops the participant->user
+  // relation, so the cosmetics come from this query rather than `race.participants`.
+  const podiumByRace = new Map();
+  const podiumRaceIds = visible
+    .filter((race) => race.status === "COMPLETED" && !race.isTeamRace)
+    .map((race) => race.id);
+  if (podiumRaceIds.length > 0 && typeof RaceParticipant.findPodiumForRaces === "function") {
+    for (const row of await RaceParticipant.findPodiumForRaces(podiumRaceIds)) {
+      const list = podiumByRace.get(row.raceId) || [];
+      list.push({
+        userId: row.userId,
+        displayName: row.user?.displayName ?? null,
+        profilePhotoUrl: row.user?.profilePhotoUrl ?? null,
+        // Same helper and same gating as getRaceDetails, so a client parses
+        // these rows with the code it already has.
+        ...characterPresentation(row.user, supportsCharacters, releaseChannel),
+        totalSteps: row.totalSteps,
+        placement: row.placement,
+        payoutCoins: row.payoutCoins,
+      });
+      podiumByRace.set(row.raceId, list);
     }
   }
 
@@ -321,6 +362,14 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
     } else if (race.status === "PENDING") {
       pending.push(summary);
     } else if (race.status === "COMPLETED") {
+      // Additive podium rows (item 4). Attached ONLY here — a solo completed
+      // race — and only when the race actually has settled placements, so the
+      // key is simply absent for team races and for anything that finished
+      // without placements. Old clients ignore it.
+      const podium = podiumByRace.get(race.id);
+      if (podium && podium.length > 0) {
+        summary.participants = podium;
+      }
       completed.push(summary);
     }
   }

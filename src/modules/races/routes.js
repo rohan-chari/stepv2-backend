@@ -277,7 +277,12 @@ function createRacesRouter(dependencies = {}) {
       // them serially (Phase B4). Old clients pass null and get byte-identical
       // JSON (§4/§6.3).
       const [result, tournaments] = await Promise.all([
-        getRaces(req.user.id, supportsTeamRaces, { clientFeatures: req.clientFeatures }),
+        getRaces(req.user.id, supportsTeamRaces, {
+          clientFeatures: req.clientFeatures,
+          // Batch 2026-08-08 item 4: the completed-race podium rows gate
+          // test-only characters on the release channel, same as race detail.
+          releaseChannel: req.releaseChannel,
+        }),
         supportsTournaments
           ? getTournamentsForUser(req.user.id)
           : Promise.resolve(null),
