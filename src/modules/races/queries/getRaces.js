@@ -368,7 +368,7 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
       // without placements. Old clients ignore it.
       const podium = podiumByRace.get(race.id);
       if (podium && podium.length > 0) {
-        summary.participants = podium;
+        summary.podium = podium;
       }
       completed.push(summary);
     }

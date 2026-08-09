@@ -139,22 +139,22 @@ describe("batch 2026-08-08 item 4 — completed-race participants for the podium
     const race = completed.find((r) => r.id === raceId);
     assert.ok(race, "the completed race must be in the completed bucket");
 
-    assert.ok(Array.isArray(race.participants), "participants must be an array");
-    assert.equal(race.participants.length, 3);
+    assert.ok(Array.isArray(race.podium), "podium must be an array");
+    assert.equal(race.podium.length, 3);
 
     // Ordered by placement, 1 -> 3.
     assert.deepEqual(
-      race.participants.map((p) => p.placement),
+      race.podium.map((p) => p.placement),
       [1, 2, 3]
     );
     assert.deepEqual(
-      race.participants.map((p) => p.displayName),
+      race.podium.map((p) => p.displayName),
       ["AliceRun", "BobRun", "CarolRun"]
     );
 
     // Exactly the documented key set — same names as getRaceDetails so the
     // client's existing participant parser works unchanged.
-    const first = race.participants[0];
+    const first = race.podium[0];
     assert.deepEqual(
       Object.keys(first).sort(),
       [
@@ -174,7 +174,7 @@ describe("batch 2026-08-08 item 4 — completed-race participants for the podium
     assert.equal(first.payoutCoins, 300);
     assert.equal(first.placement, 1);
     assert.ok(Array.isArray(first.accessories), "accessories must be a list");
-    assert.equal(race.participants[2].payoutCoins, 100);
+    assert.equal(race.podium[2].payoutCoins, 100);
   });
 
   it("caps at 3 even when the race had 5 finishers", async () => {
@@ -184,9 +184,9 @@ describe("batch 2026-08-08 item 4 — completed-race participants for the podium
     const raceId = await completedSoloRace(alice, rest);
 
     const race = (await completedBucket(alice.token)).find((r) => r.id === raceId);
-    assert.equal(race.participants.length, 3, "list payload stays small");
+    assert.equal(race.podium.length, 3, "list payload stays small");
     assert.deepEqual(
-      race.participants.map((p) => p.placement),
+      race.podium.map((p) => p.placement),
       [1, 2, 3]
     );
   });
@@ -197,8 +197,8 @@ describe("batch 2026-08-08 item 4 — completed-race participants for the podium
     const raceId = await completedSoloRace(alice, [bob]);
 
     const race = (await completedBucket(alice.token, TEAMS)).find((r) => r.id === raceId);
-    assert.equal(race.participants[0].animal, null);
-    assert.deepEqual(race.participants[0].accessories, []);
+    assert.equal(race.podium[0].animal, null);
+    assert.deepEqual(race.podium[0].accessories, []);
   });
 
   it("a 2-finisher race returns exactly 2 rows (podium degrades)", async () => {
@@ -207,7 +207,7 @@ describe("batch 2026-08-08 item 4 — completed-race participants for the podium
     const raceId = await completedSoloRace(alice, [bob]);
 
     const race = (await completedBucket(alice.token)).find((r) => r.id === raceId);
-    assert.equal(race.participants.length, 2);
+    assert.equal(race.podium.length, 2);
   });
 
   it("batches across MULTIPLE completed races without cross-contaminating rows", async () => {
@@ -224,11 +224,11 @@ describe("batch 2026-08-08 item 4 — completed-race participants for the podium
     const two = completed.find((r) => r.id === r2);
 
     assert.deepEqual(
-      one.participants.map((p) => p.displayName).sort(),
+      one.podium.map((p) => p.displayName).sort(),
       ["MultiA", "MultiB"]
     );
     assert.deepEqual(
-      two.participants.map((p) => p.displayName).sort(),
+      two.podium.map((p) => p.displayName).sort(),
       ["MultiA", "MultiC"]
     );
   });
@@ -273,8 +273,8 @@ describe("batch 2026-08-08 item 4 — completed-race participants for the podium
     const race = (await completedBucket(alice.token)).find((r) => r.id === raceId);
     assert.ok(race, "the team race must still appear in the completed bucket");
     assert.ok(
-      race.participants === undefined || race.participants.length === 0,
-      `team races must not carry a podium list, got ${JSON.stringify(race.participants)}`
+      race.podium === undefined || race.podium.length === 0,
+      `team races must not carry a podium list, got ${JSON.stringify(race.podium)}`
     );
     // The pre-existing team board fields are untouched.
     assert.equal(race.winnerTeam, "TEAM_A");
@@ -300,6 +300,6 @@ describe("batch 2026-08-08 item 4 — completed-race participants for the podium
     assert.ok("payoutTiers" in race, "payoutTiers still present");
     assert.ok("completedAt" in race);
     // And the additive field does not disturb any of the above.
-    assert.ok(Array.isArray(race.participants));
+    assert.ok(Array.isArray(race.podium));
   });
 });

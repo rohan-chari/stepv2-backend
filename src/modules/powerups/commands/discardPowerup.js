@@ -1,3 +1,4 @@
+const { prisma } = require("../../../db");
 const { RacePowerup } = require("../models/racePowerup");
 const { RacePowerupEvent } = require("../models/racePowerupEvent");
 const { eventBus } = require("../../../shared/events/eventBus");
@@ -82,6 +83,12 @@ function buildDiscardPowerup(dependencies = {}) {
     // refId]), so even if the claim above were ever bypassed the coins can only
     // be minted once for this powerup.
     let coins = null;
+    // What the LEDGER actually paid. `awardCoins` returns awarded:false when the
+    // unique (userId, reason, refId) triple already exists, i.e. this powerup was
+    // already paid for — in that case the correct answer on the wire is 0, not
+    // the price we would have paid. Reporting the intended price there would let
+    // a retry show the user coins they never received.
+    let paidCoins = 0;
     if (coinsAwarded > 0) {
       const result = await awardCoins({
         userId,
@@ -89,12 +96,12 @@ function buildDiscardPowerup(dependencies = {}) {
         reason: DISCARD_REASON,
         refId: powerupId,
       });
+      paidCoins = result?.awarded ? coinsAwarded : 0;
       coins = result?.coins ?? null;
     }
     if (coins == null) {
       // No mint happened (box, or cap exhausted) — still report the live
       // balance so the client can reconcile its badge from one response.
-      const { prisma } = require("../../../db");
       const user = await prisma.user.findUnique({
         where: { id: userId },
         select: { coins: true },
@@ -127,7 +134,7 @@ function buildDiscardPowerup(dependencies = {}) {
     return {
       success: true,
       ok: true,
-      coinsAwarded,
+      coinsAwarded: paidCoins,
       coins,
       capRemaining,
     };

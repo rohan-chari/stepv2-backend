@@ -831,6 +831,12 @@ function buildGetRaceProgress(deps = {}) {
           byRarity: balanceConfigSnapshot.config.upgradeCosts.byRarity,
           byType: balanceConfigSnapshot.config.upgradeCosts.byType,
         },
+        // Batch 2026-08-08 item 1: what a discard pays, by rarity. Served from
+        // the same balance config the award itself reads, so the confirm dialog
+        // can never quote a price the server won't honour — the client prefers
+        // this over its bundled map and falls back to that map when the key is
+        // absent (older backend). Additive; old clients ignore it.
+        discardPrices: balanceConfigSnapshot.config.discardPrices,
         rarityByType: balanceConfigSnapshot.config.rarityByType,
         capabilities: {
           pocketWatchTargetEffect: true,
