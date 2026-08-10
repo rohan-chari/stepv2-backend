@@ -601,6 +601,7 @@ async function applyMysteryPotion(ctx) {
     case "LEG_CRAMP":
     case "SHORTCUT": {
       const handled = await applyPotionEnemyAttack({
+        casterStealthed: await casterStealthed(),
         rolled, aliveEnemies, acceptedParticipants, isAliveTarget, isTeamRace,
         userId, myParticipant, myDisplayName, effectModel, participantModel,
         eventModel, events, random, now, currentTime, raceId, powerupId, result,
@@ -774,7 +775,9 @@ async function applyPotionEnemyAttack(a) {
       description: `${sourceName}'s Mystery Potion cramped ${targetName}! Their steps are frozen for 1 hour.`, metadata: { rolled } });
   }
 
-  events.emit("POWERUP_USED", { raceId, userId: sourceUserId, powerupType: "MYSTERY_POTION", targetUserId: resolvedTargetUserId, upgradeLevel: 0 });
+  // `casterStealthed` is threaded in from the caller rather than re-read here:
+  // this helper lives at module scope and has no myParticipant memo of its own.
+  events.emit("POWERUP_USED", { raceId, userId: sourceUserId, powerupType: "MYSTERY_POTION", targetUserId: resolvedTargetUserId, upgradeLevel: 0, stealthed: a.casterStealthed === true });
   return true;
 }
 
@@ -979,6 +982,38 @@ function buildUsePowerup(dependencies = {}) {
     if (myParticipant.forfeitedAt) {
       throw new PowerupUseError("You have forfeited this race", 400);
     }
+
+    // Batch 2026-08-09 item 11 — is the CASTER stealthed?
+    //
+    // The caster's own stealth state was NOT loaded anywhere before the
+    // POWERUP_USED emit (the existing read at the top of the targeting block is
+    // the TARGET's stealth, and the caster's effects are only read much later,
+    // AFTER the emit). So this is a genuinely new read rather than a value that
+    // was lying around.
+    //
+    // Memoized: several emit sites are per-victim loops (Quicksand, Power
+    // Outage), and one indexed lookup per cast is the budget, not one per
+    // victim. Best-effort — a lookup failure resolves FALSE (visible name),
+    // matching the handler's fail-safe default, because accidentally
+    // anonymizing would be a gameplay change while failing to anonymize is the
+    // status quo bug that tests catch.
+    let casterStealthedMemo;
+    const casterStealthed = async () => {
+      if (casterStealthedMemo === undefined) {
+        try {
+          const effect = await effectModel.findActiveByTypeForParticipant?.(
+            myParticipant.id,
+            "STEALTH_MODE"
+          );
+          casterStealthedMemo = Boolean(
+            effect && (!effect.expiresAt || new Date(effect.expiresAt) > now())
+          );
+        } catch {
+          casterStealthedMemo = false;
+        }
+      }
+      return casterStealthedMemo;
+    };
 
     // Signal Jammer JAM GUARD (the feature's single choke point). If this
     // participant is currently jammed, they cannot USE any powerup — earned,
@@ -1198,7 +1233,7 @@ function buildUsePowerup(dependencies = {}) {
       });
       for (const targetResult of targetResults) {
         events.emit(targetResult.outcome === "APPLIED" ? "POWERUP_USED" : "POWERUP_BLOCKED", targetResult.outcome === "APPLIED"
-          ? { raceId, userId, powerupType: type, targetUserId: targetResult.targetUserId, upgradeLevel: 0 }
+          ? { raceId, userId, powerupType: type, targetUserId: targetResult.targetUserId, upgradeLevel: 0, stealthed: await casterStealthed() }
           : { raceId, attackerUserId: userId, defenderUserId: targetResult.targetUserId, blockedType: type, upgradeLevel: 0 });
       }
       await invalidateRaceProgress(raceId);
@@ -1366,7 +1401,7 @@ function buildUsePowerup(dependencies = {}) {
         description: `${myDisplayName} sparked an Uprising! ${beneficiaries.length} runner${beneficiaries.length === 1 ? "" : "s"} get 2x steps for 1 hour.`,
         metadata: { affected: beneficiaries.length },
       });
-      events.emit("POWERUP_USED", { raceId, userId, powerupType: type, upgradeLevel: 0 });
+      events.emit("POWERUP_USED", { raceId, userId, powerupType: type, upgradeLevel: 0, stealthed: await casterStealthed() });
       await finalizeSelfContainedUse(null);
       return {
         blocked: false,
@@ -1408,7 +1443,7 @@ function buildUsePowerup(dependencies = {}) {
         description: `${myDisplayName} raised a Rally Flag! The whole team gets 1.25x steps for 1 hour.`,
         metadata: { affected: beneficiaries.length },
       });
-      events.emit("POWERUP_USED", { raceId, userId, powerupType: type, upgradeLevel: 0 });
+      events.emit("POWERUP_USED", { raceId, userId, powerupType: type, upgradeLevel: 0, stealthed: await casterStealthed() });
       await finalizeSelfContainedUse(null);
       return {
         blocked: false,
@@ -1483,7 +1518,7 @@ function buildUsePowerup(dependencies = {}) {
         metadata: { affected: affected.length, blockedCount },
       });
       for (const uid of affected) {
-        events.emit("POWERUP_USED", { raceId, userId, powerupType: type, targetUserId: uid, upgradeLevel: 0 });
+        events.emit("POWERUP_USED", { raceId, userId, powerupType: type, targetUserId: uid, upgradeLevel: 0, stealthed: await casterStealthed() });
       }
       await finalizeSelfContainedUse(null);
       return {
@@ -3631,6 +3666,7 @@ function buildUsePowerup(dependencies = {}) {
       powerupType: type,
       targetUserId: resolvedTargetUserId,
       upgradeLevel,
+      stealthed: await casterStealthed(),
     });
 
     await invalidateRaceProgress(raceId);
