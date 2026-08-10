@@ -28,6 +28,25 @@ const KNOWN_FLAGS = {
   // flip it from the admin screen once the App Store build has rolled out, and
   // flip it back to roll the whole flow back with no submission.
   onboardingV3Enabled: false,
+  // Mandatory onboarding tutorial (batch 2026-08-09 item 9). When TRUE, a
+  // build that carries the mandatory-capable onboarding removes every escape
+  // hatch from the tutorial (intro skip, in-tutorial skip chip/pill, back
+  // gesture, and mark-seen-on-bail).
+  //
+  // This flag exists because "cannot be skipped" is a HARD BLOCK: a crash or a
+  // broken spotlight anchor in the tutorial would wedge a user out of the app
+  // entirely, and an App Store fix is a ~1-week phased rollout. Flipping this
+  // off from the admin flags card defuses that in seconds for every app
+  // version at once. It is the remote half of the safety story; the client
+  // also carries a LOCAL 3-abandon circuit breaker that re-shows the skip
+  // control regardless of this flag.
+  //
+  // Default FALSE, and the client must read it defensively: absent or false ==
+  // today's skippable behavior. Only an explicit `true` activates mandatory
+  // mode, so this backend deploying ahead of the carrying build changes
+  // nothing for anyone. The Settings "VIEW TUTORIAL" replay is NOT governed by
+  // this flag — a voluntary replay always keeps its exits.
+  tutorialMandatoryEnabled: false,
   // iOS banner ads (AdBannerSlot / AdInlineCard). The app also needs the
   // ADMOB_BANNER_AD_UNIT_ID dart-define baked into the build; this flag is the
   // remote kill switch layered on top. Default OFF (product decision 2026-07-12:

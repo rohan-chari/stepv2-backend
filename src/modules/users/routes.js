@@ -170,6 +170,15 @@ function createAuthRouter(dependencies = {}) {
         // binaries read named keys and ignore unknown ones, so this cannot
         // change behavior for anyone until a v3-capable build reads it.
         onboardingV3Enabled: await safeFlag("onboardingV3Enabled", false),
+        // Additive (batch 2026-08-09 item 9), same shape and same reasoning as
+        // the v3 flag above: an unknown key is ignored by every shipped binary,
+        // so serving it is inert until a mandatory-capable build reads it.
+        // Default FALSE — the safe side, since `true` is what removes a user's
+        // way out of the tutorial.
+        tutorialMandatoryEnabled: await safeFlag(
+          "tutorialMandatoryEnabled",
+          false
+        ),
         ...(stepSampleBucketMinutes !== undefined
           ? { stepSampleBucketMinutes }
           : {}),
