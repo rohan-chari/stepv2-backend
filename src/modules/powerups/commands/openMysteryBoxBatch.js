@@ -73,11 +73,14 @@ function buildOpenMysteryBoxBatch(dependencies = {}) {
         });
       } else if (pw.status === "HELD" || pw.status === "USED") {
         // Idempotent: already opened — return its existing type/rarity.
+        // `alreadyOpened` keeps this branch's shape identical to the single
+        // open's idempotent replay (2026-08-10). Additive; clients ignore it.
         results.push({
           powerupId: pw.id,
           type: pw.type,
           rarity: pw.rarity,
           autoActivated: false,
+          alreadyOpened: true,
           queued: false,
         });
       }

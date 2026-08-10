@@ -111,6 +111,31 @@ function buildOpenMysteryBox(dependencies = {}) {
       throw new MysteryBoxOpenError("This powerup does not belong to you", 403);
     }
     if (powerup.status !== "MYSTERY_BOX") {
+      // Idempotent re-open (2026-08-10). Prod logs show every "failed to open
+      // mystery box" report is a client re-POSTing a box that already opened
+      // fine seconds earlier (stale second screen/device, reroll re-arm). The
+      // roll is done and the reward granted — answering 400 tells the user
+      // something broke when nothing did, and no shipped binary can be patched
+      // out of doing this. Mirror openMysteryBoxBatch's contract instead:
+      // an already-rolled id returns its existing type/rarity as a normal
+      // reveal. Pure read — no event row, no cache invalidation, no re-roll —
+      // which is also why it deliberately sits BEFORE the race-ACTIVE and
+      // participant checks: replaying the caller's own already-rolled row is
+      // safe (ownership verified above) even after the race settles.
+      //
+      // A non-null `type` IS the "this box was already rolled" fact; status is
+      // only a proxy (EXPIRED rows are settlement-swept HELD rolls, equally
+      // replayable). QUEUED / DISCARDED / null-type rows keep the 400.
+      const openedStatuses = ["HELD", "USED", "EXPIRED"];
+      if (powerup.type && openedStatuses.includes(powerup.status)) {
+        return {
+          id: powerup.id,
+          type: powerup.type,
+          rarity: powerup.rarity,
+          autoActivated: false,
+          alreadyOpened: true,
+        };
+      }
       throw new MysteryBoxOpenError("This powerup is not a mystery box", 400);
     }
 

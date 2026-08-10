@@ -93,7 +93,7 @@ test("is idempotent — a re-sent already-opened id returns its existing type/ra
   const result = await batch({ userId: "user-1", raceId: "race-1", powerupIds: ["b1"] });
   assert.equal(opened.length, 0, "already-opened box is not re-rolled");
   assert.equal(result.results.length, 1);
-  assert.deepEqual(result.results[0], { powerupId: "b1", type: "SHORTCUT", rarity: "RARE", autoActivated: false, queued: false });
+  assert.deepEqual(result.results[0], { powerupId: "b1", type: "SHORTCUT", rarity: "RARE", autoActivated: false, alreadyOpened: true, queued: false });
 });
 
 test("materializes + opens queued overflow boxes when includeQueued is set", async () => {

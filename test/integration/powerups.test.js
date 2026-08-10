@@ -369,20 +369,70 @@ describe("powerups (general)", () => {
       assert.ok(res.status >= 400);
     });
 
-    it("cannot open a powerup that's not a mystery box", async () => {
+    // 2026-08-10: re-opening an already-opened box used to 400, but prod logs
+    // showed every such request is a stale client surface re-POSTing a roll
+    // that already succeeded — so the single open now mirrors the batch
+    // endpoint's idempotent contract instead of erroring.
+    it("re-opening an already-opened box is idempotent: same roll back, no second event, no state change", async () => {
       const { alice, raceId } = await createActiveRace({ aliceName: "AliceOpenBad", bobName: "BobOpenBadBB" });
 
       await earnPowerups(alice.token, raceId, 6000);
       const inv = await getInventory(alice.token, raceId);
       const box = inv.inventory.find((p) => p.status === "MYSTERY_BOX");
-      if (!box) return;
+      assert.ok(box, "should have earned a mystery box");
 
       // Open it first
-      await openBox(alice.token, raceId, box.id);
+      const firstRes = await openBox(alice.token, raceId, box.id);
+      assert.equal(firstRes.status, 200);
+      const first = (await firstRes.json()).result;
 
-      // Try to open again (now HELD, not MYSTERY_BOX)
+      // Open again (now HELD, not MYSTERY_BOX): the SAME roll comes back as a
+      // normal 200 reveal instead of a 400.
       const res = await openBox(alice.token, raceId, box.id);
-      assert.equal(res.status, 400);
+      assert.equal(res.status, 200);
+      const second = (await res.json()).result;
+      assert.equal(second.id, first.id);
+      assert.equal(second.type, first.type);
+      assert.equal(second.rarity, first.rarity);
+      assert.equal(second.autoActivated, false);
+      assert.equal(second.alreadyOpened, true);
+
+      // Pure read: the row is unchanged and still spendable...
+      const inv2 = await getInventory(alice.token, raceId);
+      const rows = inv2.inventory.filter((p) => p.id === box.id);
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0].status, "HELD");
+      assert.equal(rows[0].type, first.type);
+
+      // ...and the audit/metric trail still shows exactly ONE open.
+      const openEvents = await prisma.racePowerupEvent.findMany({
+        where: { raceId, eventType: "MYSTERY_BOX_OPENED" },
+      });
+      assert.equal(openEvents.length, 1);
+    });
+
+    it("re-opening a USED powerup also returns its roll instead of erroring", async () => {
+      const { alice, bob, raceId } = await createActiveRace({ aliceName: "AliceOpenUsd", bobName: "BobOpenUsdBB" });
+
+      await earnPowerups(alice.token, raceId, 6000);
+      const inv = await getInventory(alice.token, raceId);
+      const box = inv.inventory.find((p) => p.status === "MYSTERY_BOX");
+      assert.ok(box, "should have earned a mystery box");
+
+      const firstRes = await openBox(alice.token, raceId, box.id);
+      assert.equal(firstRes.status, 200);
+      const first = (await firstRes.json()).result;
+
+      // Spend it (some types need a target, some reject one — either way the
+      // row leaves HELD only on a 200; skip the USED assertion otherwise).
+      const useRes = await usePowerup(alice.token, raceId, box.id, bob.userId);
+      if (useRes.status !== 200) return;
+
+      const res = await openBox(alice.token, raceId, box.id);
+      assert.equal(res.status, 200);
+      const body = (await res.json()).result;
+      assert.equal(body.type, first.type);
+      assert.equal(body.alreadyOpened, true);
     });
 
     it("can discard a HELD powerup", async () => {

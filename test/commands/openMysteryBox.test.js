@@ -108,19 +108,60 @@ test("opens a mystery box — rolls type at open time and transitions to HELD", 
   assert.equal(ctx.updates[0].fields.rarity, "COMMON");
 });
 
-test("rejects if powerup is not a mystery box", async () => {
+// 2026-08-10: an already-rolled id resolves idempotently (the batch endpoint's
+// contract) instead of 400ing — prod showed those requests are always a stale
+// client surface re-POSTing a roll that already succeeded.
+test("re-open of an already-rolled (HELD) powerup returns its roll without writing", async () => {
   const ctx = makeDeps({ powerup: { status: "HELD", type: "PROTEIN_SHAKE", rarity: "COMMON" } });
   const open = buildOpenMysteryBox(ctx.deps);
 
-  await assert.rejects(
-    () => open({ userId: "user-1", raceId: "race-1", powerupId: "pw-1" }),
-    (err) => {
-      assert.equal(err.name, "MysteryBoxOpenError");
-      assert.equal(err.statusCode, 400);
-      return true;
-    },
-  );
+  const result = await open({ userId: "user-1", raceId: "race-1", powerupId: "pw-1" });
+
+  assert.equal(result.id, "pw-1");
+  assert.equal(result.type, "PROTEIN_SHAKE");
+  assert.equal(result.rarity, "COMMON");
+  assert.equal(result.autoActivated, false);
+  assert.equal(result.alreadyOpened, true);
+  // Pure read: no row update, no audit event row, no bus emit.
+  assert.equal(ctx.updates.length, 0);
+  assert.equal(ctx.feedEvents.length, 0);
+  assert.equal(ctx.events.length, 0);
 });
+
+for (const status of ["USED", "EXPIRED"]) {
+  test(`re-open of an already-rolled ${status} powerup also replays its roll`, async () => {
+    const ctx = makeDeps({ powerup: { status, type: "PROTEIN_SHAKE", rarity: "COMMON" } });
+    const open = buildOpenMysteryBox(ctx.deps);
+
+    const result = await open({ userId: "user-1", raceId: "race-1", powerupId: "pw-1" });
+
+    assert.equal(result.type, "PROTEIN_SHAKE");
+    assert.equal(result.alreadyOpened, true);
+    assert.equal(ctx.updates.length, 0);
+    assert.equal(ctx.feedEvents.length, 0);
+  });
+}
+
+for (const powerup of [
+  { status: "QUEUED" },
+  { status: "DISCARDED", type: "PROTEIN_SHAKE", rarity: "COMMON" },
+  // A null-type HELD row was never rolled — there is nothing to replay.
+  { status: "HELD", type: null, rarity: null },
+]) {
+  test(`rejects a non-replayable row (${powerup.status}, type ${powerup.type ?? "null"})`, async () => {
+    const ctx = makeDeps({ powerup });
+    const open = buildOpenMysteryBox(ctx.deps);
+
+    await assert.rejects(
+      () => open({ userId: "user-1", raceId: "race-1", powerupId: "pw-1" }),
+      (err) => {
+        assert.equal(err.name, "MysteryBoxOpenError");
+        assert.equal(err.statusCode, 400);
+        return true;
+      },
+    );
+  });
+}
 
 test("rejects if race is not active", async () => {
   const ctx = makeDeps({ raceStatus: "COMPLETED" });
