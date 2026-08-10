@@ -196,8 +196,22 @@ function buildGetAdminStats(dependencies = {}) {
     // which "hit the cap" means what the player experienced.
     //
     // avgWatchesPerUser: mean coin-reward watches per (user, day) that had at
-    // least one watch — i.e. among watchers, not diluted by the whole base.
-    // NULL (not 0) when nobody has watched, so the UI can render an em dash.
+    // least one watch — i.e. among watchers, not diluted by the whole base,
+    // averaged across the whole 30-day window. NULL (not 0) when nobody has
+    // watched, so the UI can render an em dash.
+    //
+    // usersAtCap is scoped to the LATEST granted_date in the window, not to the
+    // window as a whole (code review 2026-08-09). The admin card labels this
+    // "Users at cap", which reads as a CURRENT count; a 30-day-wide filter
+    // answered a different question — "users who hit the cap on at least one
+    // day in the last month" — and drifted further from the label the longer
+    // the window ran, since it only ever accumulates. The JSON key is part of
+    // the locked contract and is deliberately NOT renamed; the number is
+    // brought in line with the label instead.
+    //
+    // granted_date is a YYYY-MM-DD string, so MAX() is lexicographic and
+    // therefore also chronological. An empty table yields NULL, the FILTER
+    // matches nothing, and usersAtCap is 0 — not an error.
     const cap = AD_COIN_REWARD_DAILY_CAP;
     const [capRow] = await prisma.$queryRaw`
       /* adCapUtilization */
@@ -207,10 +221,14 @@ function buildGetAdminStats(dependencies = {}) {
         WHERE reward_kind = 'coin_reward'
           AND created_at >= now() - interval '30 days'
         GROUP BY 1, 2
-      )
+      ),
+      latest_day AS (SELECT MAX(granted_date) AS d FROM per_user_day)
       SELECT
-        AVG(watches)::float                                          AS avg_watches_per_user,
-        COUNT(DISTINCT user_id) FILTER (WHERE watches >= ${cap})::bigint AS users_at_cap
+        AVG(watches)::float AS avg_watches_per_user,
+        COUNT(DISTINCT user_id) FILTER (
+          WHERE watches >= ${cap}
+            AND granted_date = (SELECT d FROM latest_day)
+        )::bigint AS users_at_cap
       FROM per_user_day`;
 
     return {

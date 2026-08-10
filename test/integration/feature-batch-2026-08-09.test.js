@@ -491,6 +491,55 @@ describe("feature batch 2026-08-09 (backend)", () => {
       assert.equal(typeof stats.adRevenue.capUtilization.usersAtCap, "number");
     });
 
+    // Behavioural proof of the latest-day scoping, against real Postgres. Under
+    // the old window-wide filter BOTH users below counted, so this asserted 1
+    // would have been 2 — i.e. this test fails on the previous query.
+    it("usersAtCap counts only users at the cap on the LATEST day", async () => {
+      const admin = await signUpAdmin();
+      const stale = await signUp();
+      const current = await signUp();
+      const { AD_COIN_REWARD_DAILY_CAP } = require("../../src/modules/economy/adRewards");
+      const cap = AD_COIN_REWARD_DAILY_CAP;
+
+      // `stale` maxed out on an OLDER day; `current` maxed out on the latest.
+      for (let i = 0; i < cap; i++) {
+        await prisma.adRewardGrant.create({
+          data: {
+            userId: stale.userId,
+            transactionId: `cap-stale-${i}-${Date.now()}`,
+            rewardKind: "coin_reward",
+            grantedDate: "2026-08-01",
+          },
+        });
+        await prisma.adRewardGrant.create({
+          data: {
+            userId: current.userId,
+            transactionId: `cap-current-${i}-${Date.now()}`,
+            rewardKind: "coin_reward",
+            grantedDate: "2026-08-09",
+          },
+        });
+      }
+
+      const res = await request(
+        server.baseUrl,
+        "GET",
+        "/admin/stats?sections=ads",
+        { token: admin.token }
+      );
+      const { stats } = await res.json();
+      assert.equal(
+        stats.adRevenue.capUtilization.usersAtCap,
+        1,
+        "only the user at the cap on the latest granted_date counts"
+      );
+      // The average still spans the window, so it sees both users' days.
+      assert.equal(
+        typeof stats.adRevenue.capUtilization.avgWatchesPerUser,
+        "number"
+      );
+    });
+
     it("coinEconomy.days reports a negative ledger row as sunk (positive magnitude)", async () => {
       const admin = await signUpAdmin();
       const { userId } = await signUp();

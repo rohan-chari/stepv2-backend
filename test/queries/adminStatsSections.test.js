@@ -192,6 +192,27 @@ test("unknown section names are ignored, not fatal", async () => {
   assert.equal("adRevenue" in stats, false);
 });
 
+test("usersAtCap is scoped to the latest granted_date, not the whole window", async () => {
+  // The JSON key is contract-locked, so the QUERY is what changed: the admin
+  // card labels this "Users at cap", which reads as a CURRENT count. A
+  // 30-day-wide filter answered "hit the cap on at least one day this month" —
+  // a number that only ever accumulates and drifts further from its label the
+  // longer the window runs.
+  const prisma = makeFakePrisma();
+  await buildGetAdminStats({ prisma })({ sections: ["ads"] });
+  const [sql] = matching(prisma.seen, ["adCapUtilization"]);
+  assert.ok(sql, "the cap-utilization query ran");
+  assert.match(sql, /latest_day/, "must resolve a latest granted_date");
+  assert.match(
+    sql,
+    /granted_date = \(SELECT d FROM latest_day\)/,
+    "the cap FILTER must be scoped to that latest day"
+  );
+  // The AVERAGE is deliberately NOT day-scoped — it stays a 30-day trend.
+  assert.match(sql, /AVG\(watches\)/);
+  assert.match(sql, /interval '30 days'/);
+});
+
 test("every new aggregate is bounded to 30 days", async () => {
   const prisma = makeFakePrisma();
   await buildGetAdminStats({ prisma })({ sections: ["economy", "ads"] });
