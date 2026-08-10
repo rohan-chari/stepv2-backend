@@ -198,8 +198,19 @@ test("new upgrade policy matches the product spec", () => {
   assert.equal(isUpgradeable("PINECONE_TOSS"), true);
   assert.equal(isUpgradeable("SNEAKY_SWAP"), false);
 
-  // Horseshoe's premium ladder was retired: it now prices as plain RARE.
-  assert.equal(upgradeCost("LUCKY_HORSESHOE", 3), 135);
+  // Horseshoe's premium ladder was retired in 2026-07-14 (it repriced to plain
+  // RARE, 135 at L3). Batch 2026-08-09 item 8b retires the ladder ITSELF: the
+  // Horseshoe now guarantees a rare at EVERY level, so levels 1-3 buy nothing
+  // and cost nothing (upgradeCosts.byType.LUCKY_HORSESHOE = [0,0,0,0]).
+  //
+  // isUpgradeable() must STAY true above — that is the frozen-client contract.
+  // A shipped binary decides "is this upgradeable?" from its BUNDLED table, so
+  // dropping the type here would leave old builds offering L1-3 and taking a
+  // permanent 400 ("not upgradeable"). Free-and-inert is what keeps them working.
+  assert.deepEqual(
+    [0, 1, 2, 3].map((level) => upgradeCost("LUCKY_HORSESHOE", level)),
+    [0, 0, 0, 0]
+  );
   assert.deepEqual(
     [0, 1, 2, 3].map((level) => upgradedMagnitude("TRAIL_MAGNET", level)),
     [1000, 1500, 2000, 3000],
