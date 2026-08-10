@@ -1,10 +1,14 @@
 const assert = require("node:assert/strict");
-const { describe, it, before, beforeEach } = require("node:test");
+const { describe, it, before, after, beforeEach } = require("node:test");
 const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
 const {
   registerNotificationHandlers,
 } = require("../../src/modules/notifications/notificationHandlers");
 const { eventBus } = require("../../src/shared/events/eventBus");
+const { balanceConfig } = require("../../src/modules/economy/balanceConfig");
+const {
+  defaultConfig,
+} = require("../../src/modules/economy/balanceConfig.defaults");
 
 // ---------------------------------------------------------------------------
 // Batch 2026-08-09 item 11 — Stealth Mode must not leak the attacker's name in
@@ -386,5 +390,302 @@ describe("stealthed attacks never name the attacker in a push", () => {
     assert.ok(push);
     assert.match(push.body, /SneakySteve/);
     assert.ok(!push.body.includes("???"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// EMIT-SITE COVERAGE (code review, batch 2026-08-09).
+// ---------------------------------------------------------------------------
+//
+// Only the main path was exercised end to end, which is precisely how a
+// ReferenceError on the Mystery Potion path shipped: `applyMysteryPotion` is
+// MODULE-scope and referenced `casterStealthed`, a const declared inside
+// `buildUsePowerup` — no closure relationship, so an enemy roll threw a 500.
+//
+// IMPORTANT FINDING that shapes these tests: of the six emit sites, only TWO
+// can produce a push at all today. The handler returns early unless the payload
+// carries a targetUserId AND the powerupType is in its allowlist
+// (LEG_CRAMP, RED_CARD, SHORTCUT, WRONG_TURN, SIGNAL_JAMMER, LEECH, HITCHHIKE,
+// QUICKSAND). So:
+//   * main path + Quicksand  -> a real push; assert the BODY.
+//   * Uprising / Rally Flag  -> no targetUserId, no push.
+//   * Power Outage / Potion  -> type not allowlisted, no push.
+// For those four, asserting a push body would be asserting a thing that cannot
+// exist. What IS meaningful — and what actually guards the blocker — is that
+// the cast SUCCEEDS (no ReferenceError) and the emitted payload carries the
+// flag, so the day one of those types joins the allowlist it is already
+// correct. Those are asserted off the event bus.
+
+// Capture POWERUP_USED payloads straight off the bus, alongside the push stub.
+//
+// ONE listener registered once, never removed: this project's eventBus is a
+// tiny custom emitter with `on`/`emit` and NO `off`, so a per-test subscribe
+// would leak a handler per test. The array is cleared in beforeEach instead.
+const emittedPowerupUsed = [];
+let powerupUsedListenerRegistered = false;
+function registerPowerupUsedCapture() {
+  if (powerupUsedListenerRegistered) return;
+  eventBus.on("POWERUP_USED", (data) => emittedPowerupUsed.push(data));
+  powerupUsedListenerRegistered = true;
+}
+
+function emitsOfType(powerupType) {
+  return emittedPowerupUsed.filter((e) => e.powerupType === powerupType);
+}
+
+async function pinPotionPool(outcome) {
+  const config = defaultConfig();
+  config.mysteryPotion = { pool: [{ outcome, weight: 1 }] };
+  await prisma.balanceConfig.updateMany({
+    where: { active: true },
+    data: { active: false },
+  });
+  // `version` is unique and balance_config is NOT truncated between suites, so
+  // a fixed version collides with whatever an earlier file left behind.
+  const maxVersion = await prisma.balanceConfig.aggregate({ _max: { version: true } });
+  await prisma.balanceConfig.create({
+    data: {
+      version: (maxVersion._max.version || 0) + 1,
+      config,
+      active: true,
+      note: "stealth push emit-site test",
+    },
+  });
+  balanceConfig.bustCache();
+  // bustCache alone is NOT enough for this path. applyMysteryPotion reads the
+  // pool through `getConfigSync()`, which cannot hit the DB — right after a bust
+  // it falls back to the CODE DEFAULTS until an async load repopulates the
+  // cache. So force that load here, or the pinned pool is silently ignored and
+  // the test rolls against the default weights.
+  await balanceConfig.getSnapshot();
+}
+
+async function restoreBalanceConfig() {
+  await prisma.balanceConfig.updateMany({
+    where: { active: true },
+    data: { active: false },
+  });
+  balanceConfig.bustCache();
+  await balanceConfig.getSnapshot();
+}
+
+describe("every POWERUP_USED emit site threads the stealth flag", () => {
+  before(async () => {
+    server = await getSharedServer();
+    registerNotificationHandlers({
+      eventBus,
+      apnsService: pushStub(),
+      fcmService: pushStub(),
+      logger: { warn() {}, error() {}, info() {}, log() {} },
+    });
+    registerPowerupUsedCapture();
+  });
+
+  beforeEach(async () => {
+    await cleanDatabase();
+    nextAppleId = 0;
+    captured.length = 0;
+    tokenOwner.clear();
+    emittedPowerupUsed.length = 0;
+  });
+
+  after(async () => {
+    await restoreBalanceConfig();
+  });
+
+  // Rally Flag needs a team race; every other case uses the solo helper above.
+  async function createTeamRaceFor(a, mate, foeA, foeB) {
+    const TEAM = {
+      "X-Client-Features": "characters,team_races,powerups3,powerups4,powerups5",
+    };
+    const createRes = await request(server.baseUrl, "POST", "/races", {
+      body: {
+        name: "Stealth Team Race",
+        targetSteps: 200000,
+        maxDurationDays: 7,
+        isTeamRace: true,
+        teamSize: 2,
+        isPublic: true,
+        powerupsEnabled: true,
+        powerupStepInterval: 5000,
+      },
+      token: a.token,
+      headers: TEAM,
+    });
+    const raceId = (await createRes.json()).race.id;
+    for (const o of [mate, foeA, foeB]) await makeFriends(a, o);
+    // Client features are PERSISTED per user from request headers, and the
+    // invite endpoint rejects an invitee who has never advertised `team_races`
+    // (INVITEE_NEEDS_UPDATE). The shared createUser helper in this file signs up
+    // without team headers, so each invitee makes one authenticated call with
+    // them before the invite goes out.
+    for (const o of [mate, foeA, foeB]) {
+      await request(server.baseUrl, "GET", "/auth/me", {
+        token: o.token,
+        headers: TEAM,
+      });
+    }
+    const inv = await request(server.baseUrl, "POST", `/races/${raceId}/invite`, {
+      body: { inviteeIds: [mate.userId, foeA.userId, foeB.userId] },
+      token: a.token,
+      headers: TEAM,
+    });
+    assert.equal(inv.status, 200, `invite: ${await inv.text()}`);
+    for (const [user, team] of [
+      [mate, "TEAM_A"],
+      [foeA, "TEAM_B"],
+      [foeB, "TEAM_B"],
+    ]) {
+      const r = await request(server.baseUrl, "PUT", `/races/${raceId}/respond`, {
+        body: { accept: true, team },
+        token: user.token,
+        headers: TEAM,
+      });
+      assert.equal(r.status, 200, `accept for ${team}: ${await r.text()}`);
+    }
+    const startRes = await request(server.baseUrl, "POST", `/races/${raceId}/start`, {
+      token: a.token,
+      headers: TEAM,
+    });
+    assert.equal(startRes.status, 200);
+    const start = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    await prisma.race.update({
+      where: { id: raceId },
+      data: { startedAt: start, endsAt: new Date(Date.now() + 24 * 60 * 60 * 1000) },
+    });
+    await prisma.raceParticipant.updateMany({
+      where: { raceId },
+      data: { joinedAt: start },
+    });
+    return raceId;
+  }
+
+  async function stealthedCaster(opponentCount = 1) {
+    const attacker = await createUser("SneakySteve");
+    const others = [];
+    for (let i = 0; i < opponentCount; i++) {
+      others.push(await createUser(`Victim${i}`));
+    }
+    for (const o of others) await makeFriends(attacker, o);
+    const raceId = await createActiveRace(attacker, others);
+    for (const o of others) {
+      await giveDeviceToken(o.userId, `tok-${o.userId}`);
+    }
+    await stealthUp(raceId, attacker.userId);
+    return { attacker, others, raceId };
+  }
+
+  // ── the two sites that really push ────────────────────────────────────────
+
+  it("QUICKSAND (per-victim ternary emit) anonymizes the push body", async () => {
+    const { attacker, others, raceId } = await stealthedCaster(2);
+    const pw = await giveHeldPowerup(raceId, attacker.userId, "QUICKSAND");
+
+    const res = await usePowerup(attacker.token, raceId, pw.id, {
+      targetUserIds: others.map((o) => o.userId),
+    });
+    assert.equal(res.status, 200, await res.text?.().catch(() => ""));
+
+    for (const victim of others) {
+      const push = await waitForPush(attackPushTo(victim.userId));
+      assert.ok(push, `victim ${victim.userId} got a push`);
+      assert.match(push.body, /\?\?\?/);
+      assert.ok(
+        !push.body.includes("SneakySteve"),
+        `quicksand leaked the name: ${push.body}`
+      );
+    }
+  });
+
+  // ── the four sites that cannot push today ─────────────────────────────────
+
+  it("MYSTERY_POTION enemy roll succeeds and carries the flag (the 500 regression)", async () => {
+    // This is the blocker test. Before the ctx fix the cast threw a
+    // ReferenceError -> 500, because applyMysteryPotion is module-scope and
+    // `casterStealthed` lives inside buildUsePowerup. Pinning the pool makes the
+    // enemy branch deterministic instead of a 25%-weighted coin flip.
+    await pinPotionPool("LEG_CRAMP");
+    try {
+      const { attacker, raceId } = await stealthedCaster(1);
+      const pw = await giveHeldPowerup(raceId, attacker.userId, "MYSTERY_POTION");
+
+      const res = await usePowerup(attacker.token, raceId, pw.id);
+      assert.equal(res.status, 200, "an enemy potion roll must not 500");
+      const body = await res.json();
+      assert.equal(body.result.rolled, "LEG_CRAMP", "the enemy branch ran");
+
+      const [emit] = emitsOfType("MYSTERY_POTION");
+      assert.ok(emit, "the potion emitted POWERUP_USED");
+      assert.equal(emit.stealthed, true, "the potion emit carries the flag");
+    } finally {
+      await restoreBalanceConfig();
+    }
+  });
+
+  it("POWER_OUTAGE (AoE per-victim emit) carries the flag on every victim", async () => {
+    const { attacker, raceId } = await stealthedCaster(2);
+    const pw = await giveHeldPowerup(raceId, attacker.userId, "POWER_OUTAGE");
+
+    const res = await usePowerup(attacker.token, raceId, pw.id);
+    assert.equal(res.status, 200);
+
+    const emits = emitsOfType("POWER_OUTAGE");
+    assert.ok(emits.length > 0, "power outage emitted per victim");
+    for (const e of emits) {
+      assert.equal(e.stealthed, true, "every AoE victim emit carries the flag");
+    }
+  });
+
+  it("UPRISING (self-buff emit) carries the flag", async () => {
+    {
+      // Four runners so the caster sits in the bottom half and the cast is legal.
+      const { attacker, others, raceId } = await stealthedCaster(3);
+      const p = await prisma.raceParticipant.findFirst({
+        where: { raceId, userId: attacker.userId },
+      });
+      await prisma.raceParticipant.update({
+        where: { id: p.id },
+        data: { totalSteps: 10 },
+      });
+      let steps = 9000;
+      for (const o of others) {
+        const op = await prisma.raceParticipant.findFirst({
+          where: { raceId, userId: o.userId },
+        });
+        await prisma.raceParticipant.update({
+          where: { id: op.id },
+          data: { totalSteps: steps },
+        });
+        steps -= 1000;
+      }
+
+      const pw = await giveHeldPowerup(raceId, attacker.userId, "UPRISING");
+      const res = await usePowerup(attacker.token, raceId, pw.id);
+      assert.equal(res.status, 200);
+
+      const [emit] = emitsOfType("UPRISING");
+      assert.ok(emit, "uprising emitted POWERUP_USED");
+      assert.equal(emit.stealthed, true);
+    }
+  });
+
+  it("RALLY_FLAG (self-buff emit) carries the flag", async () => {
+    {
+      // Rally Flag needs a team race, so this one builds its own 2v2.
+      const attacker = await createUser("SneakySteve");
+      const mate = await createUser("Mate");
+      const foeA = await createUser("FoeA");
+      const foeB = await createUser("FoeB");
+      const raceId = await createTeamRaceFor(attacker, mate, foeA, foeB);
+      await stealthUp(raceId, attacker.userId);
+
+      const pw = await giveHeldPowerup(raceId, attacker.userId, "RALLY_FLAG");
+      const res = await usePowerup(attacker.token, raceId, pw.id);
+      assert.equal(res.status, 200);
+
+      const [emit] = emitsOfType("RALLY_FLAG");
+      assert.ok(emit, "rally flag emitted POWERUP_USED");
+      assert.equal(emit.stealthed, true);
+    }
   });
 });

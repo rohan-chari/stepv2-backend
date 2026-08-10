@@ -476,10 +476,15 @@ function pickDecoyRedirectVictim({
 // potion may never fail after consumption: any invalid roll (no eligible enemy,
 // a stacking rejection) falls back to PROTEIN_SHAKE.
 async function applyMysteryPotion(ctx) {
+  // `casterStealthed` is threaded in through ctx, NOT closed over: this
+  // function is MODULE-scope while the memo it comes from is declared inside
+  // buildUsePowerup, so referencing it directly threw a ReferenceError (-> 500)
+  // on every enemy potion roll. Code review 2026-08-09.
   const {
     userId, raceId, powerupId, myParticipant, myDisplayName,
     acceptedParticipants, isEnemy, isAliveTarget, effectModel, participantModel,
     eventModel, events, awardCoins, random, now, currentTime, finalize,
+    casterStealthed,
   } = ctx;
 
   const config = (() => {
@@ -601,7 +606,7 @@ async function applyMysteryPotion(ctx) {
     case "LEG_CRAMP":
     case "SHORTCUT": {
       const handled = await applyPotionEnemyAttack({
-        casterStealthed: await casterStealthed(),
+        casterStealthed,
         rolled, aliveEnemies, acceptedParticipants, isAliveTarget, isTeamRace,
         userId, myParticipant, myDisplayName, effectModel, participantModel,
         eventModel, events, random, now, currentTime, raceId, powerupId, result,
@@ -1534,6 +1539,9 @@ function buildUsePowerup(dependencies = {}) {
 
     if (type === "MYSTERY_POTION") {
       return await applyMysteryPotion({
+        // Resolved HERE, where the memo is in scope, and handed over as a plain
+        // boolean — applyMysteryPotion is module-scope and can't reach it.
+        casterStealthed: await casterStealthed(),
         userId,
         raceId,
         powerupId,
