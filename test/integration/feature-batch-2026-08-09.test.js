@@ -221,6 +221,48 @@ describe("feature batch 2026-08-09 (backend)", () => {
       assert.equal(after.coins, before.coins, "a retired upgrade must cost nothing");
     });
 
+    // THE contract the new frontend build hides its upgrade UI on. The served
+    // catalog snapshot WINS over the client's bundled fallback, so if this ships
+    // four tier labels a new build renders a free, inert upgrade UI for a ladder
+    // that does nothing. Empty list is how "no ladder" is expressed on the wire
+    // (same as RED_CARD and every other non-upgradeable type).
+    it("GET /powerups/catalog serves the horseshoe with NO upgrade tier labels", async () => {
+      const {
+        POWERUP_COPY_SEED,
+      } = require("../../src/modules/powerups/constants/powerupCopySeed");
+      for (const row of POWERUP_COPY_SEED) {
+        await prisma.powerupCopy.upsert({
+          where: { powerupType: row.powerupType },
+          // `update` must carry the fields too: powerup_copy is NOT truncated
+          // between suites, so a row seeded by an earlier file would otherwise
+          // keep the stale four labels and this test would pass vacuously.
+          update: {
+            description: row.description,
+            shortDescription: row.shortDescription,
+            upgradeTierLabels: row.upgradeTierLabels,
+          },
+          create: row,
+        });
+      }
+
+      const res = await request(server.baseUrl, "GET", "/powerups/catalog");
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      const shoe = body.powerups.find((p) => p.type === "LUCKY_HORSESHOE");
+      assert.ok(shoe, "horseshoe is in the catalog");
+      assert.deepEqual(
+        shoe.upgradeTierLabels,
+        [],
+        "a retired ladder must ship zero labels or new builds show inert upgrades"
+      );
+      assert.match(shoe.description, /rare/i);
+      assert.match(
+        shoe.description,
+        /can't grant another Horseshoe/i,
+        "the self-exclusion must be stated in the copy"
+      );
+    });
+
     it("an unupgraded horseshoe already guarantees RARE (the ramp is retired)", async () => {
       const alice = await signUp();
       const bob = await signUp();
@@ -308,6 +350,19 @@ describe("feature batch 2026-08-09 (backend)", () => {
         typeof stats.adRevenue.capUtilization.usersAtCap,
         "number"
       );
+      // Same wire-contract check as coinEconomy, over the real HTTP body.
+      // avgWatchesPerUser is nullable by design (no data yet -> em dash), so it
+      // is a number OR null, never a string.
+      const avg = stats.adRevenue.capUtilization.avgWatchesPerUser;
+      assert.ok(
+        avg === null || typeof avg === "number",
+        `avgWatchesPerUser must be number|null, got ${typeof avg}`
+      );
+      for (const day of stats.adRevenue.days) {
+        assert.equal(typeof day.date, "string");
+        assert.equal(typeof day.coinRewardWatches, "number");
+        assert.equal(typeof day.extraSpinWatches, "number");
+      }
       assert.equal("coinEconomy" in stats, false);
     });
 
@@ -344,10 +399,96 @@ describe("feature batch 2026-08-09 (backend)", () => {
         { token: admin.token }
       );
       const { stats } = await res.json();
+      // typeof over the REAL parsed HTTP body, against the REAL Postgres
+      // aggregate. This is the assertion that actually protects the frontend:
+      // SUM()/COUNT() come back from the driver as BigInt or as a numeric
+      // STRING, and the client rejects numeric strings by contract — an
+      // uncoerced value would render this block as "—" on a working backend.
+      for (const day of stats.coinEconomy.days) {
+        assert.equal(typeof day.date, "string");
+        assert.equal(typeof day.minted, "number", "minted must be a JSON number");
+        assert.equal(typeof day.sunk, "number", "sunk must be a JSON number");
+      }
+      for (const row of stats.coinEconomy.purchasesBySku) {
+        assert.equal(typeof row.sku, "string");
+        assert.equal(typeof row.count, "number");
+        assert.equal(typeof row.coins, "number");
+      }
+      for (const row of stats.coinEconomy.boxOpens) {
+        assert.equal(typeof row.count, "number");
+      }
+
       const minted = stats.coinEconomy.days.reduce((a, d) => a + d.minted, 0);
       const sunk = stats.coinEconomy.days.reduce((a, d) => a + d.sunk, 0);
       assert.ok(minted >= 137, `expected the 137-coin mint, got ${minted}`);
       assert.equal(typeof sunk, "number");
+    });
+
+    // The typeof loops above only assert something when the aggregates return
+    // ROWS. This seeds real data into every one of the five aggregate queries so
+    // the wire-contract check runs against genuine driver output rather than
+    // vacuously over empty arrays.
+    it("every aggregate returns JSON numbers when it has real rows", async () => {
+      const admin = await signUpAdmin();
+      const { userId } = await signUp();
+
+      await prisma.coinTransaction.create({
+        data: { userId, amount: 250, reason: "batch_0809_wire_mint", refId: `w1-${Date.now()}` },
+      });
+      await prisma.coinTransaction.create({
+        data: { userId, amount: -75, reason: "batch_0809_wire_sink", refId: `w2-${Date.now()}` },
+      });
+      await prisma.adRewardGrant.create({
+        data: {
+          userId,
+          transactionId: `wire-coin-${Date.now()}`,
+          rewardKind: "coin_reward",
+          grantedDate: "2026-08-10",
+        },
+      });
+      await prisma.adRewardGrant.create({
+        data: {
+          userId,
+          transactionId: `wire-spin-${Date.now()}`,
+          rewardKind: "extra_daily_spin",
+          grantedDate: "2026-08-10",
+        },
+      });
+
+      const res = await request(
+        server.baseUrl,
+        "GET",
+        "/admin/stats?sections=economy,ads",
+        { token: admin.token }
+      );
+      const { stats } = await res.json();
+
+      assert.ok(stats.coinEconomy.days.length > 0, "ledger rows present");
+      for (const day of stats.coinEconomy.days) {
+        assert.equal(typeof day.minted, "number");
+        assert.equal(typeof day.sunk, "number");
+      }
+      const totalSunk = stats.coinEconomy.days.reduce((a, d) => a + d.sunk, 0);
+      assert.ok(totalSunk >= 75, "sunk is a positive magnitude number");
+
+      assert.ok(stats.adRevenue.days.length > 0, "ad grant rows present");
+      for (const day of stats.adRevenue.days) {
+        assert.equal(typeof day.coinRewardWatches, "number");
+        assert.equal(typeof day.extraSpinWatches, "number");
+      }
+      const coinWatches = stats.adRevenue.days.reduce(
+        (a, d) => a + d.coinRewardWatches,
+        0
+      );
+      assert.ok(coinWatches >= 1, `expected the seeded coin watch, got ${coinWatches}`);
+
+      // AVG() comes back as a float/string depending on driver — with a real
+      // watcher present it must be a number, not null and not a string.
+      assert.equal(
+        typeof stats.adRevenue.capUtilization.avgWatchesPerUser,
+        "number"
+      );
+      assert.equal(typeof stats.adRevenue.capUtilization.usersAtCap, "number");
     });
 
     it("coinEconomy.days reports a negative ledger row as sunk (positive magnitude)", async () => {
