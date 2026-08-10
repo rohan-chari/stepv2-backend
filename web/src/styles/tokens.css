@@ -23,7 +23,6 @@
   --accent-foreground: #F6EFE1;
   --destructive: #E4593C;
   --destructive-foreground: #F6EFE1;
-  --destructive-text: #F08A6B;
   --border: #2C5842;
   --input: #2C5842;
   --ring: #F0B429;
@@ -33,6 +32,9 @@
   --paper-muted: #5C6F63;
   --paper-border: #DCCFB8;
   --paper-raised: #FFFAF0;
+  --paper-accent: #2E5D47;
+  --paper-ember: #9C3617;
+  --destructive-paper: #A32516;
   --bara-moss: #6FA687;
   --bara-canopy-deep: #0B1A13;
   --bara-shadow: rgba(5, 15, 10, 0.45);
@@ -59,7 +61,6 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
-  --color-destructive-text: var(--destructive-text);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -69,6 +70,9 @@
   --color-paper-muted: var(--paper-muted);
   --color-paper-border: var(--paper-border);
   --color-paper-raised: var(--paper-raised);
+  --color-paper-accent: var(--paper-accent);
+  --color-paper-ember: var(--paper-ember);
+  --color-destructive-paper: var(--destructive-paper);
   --color-moss: var(--bara-moss);
   --color-canopy-deep: var(--bara-canopy-deep);
 

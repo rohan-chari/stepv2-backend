@@ -1,25 +1,25 @@
 {
-  "_SiteFooter-DDAb7LvN.css": {
-    "file": "web-assets/SiteFooter-DDAb7LvN.css",
-    "src": "_SiteFooter-DDAb7LvN.css"
+  "_SiteFooter-Bw0rbu8Y.css": {
+    "file": "web-assets/SiteFooter-Bw0rbu8Y.css",
+    "src": "_SiteFooter-Bw0rbu8Y.css"
   },
-  "_SiteFooter-x8jHBEYM.js": {
-    "file": "web-assets/SiteFooter-x8jHBEYM.js",
+  "_SiteFooter-DdBT2UgR.js": {
+    "file": "web-assets/SiteFooter-DdBT2UgR.js",
     "name": "SiteFooter",
     "css": [
-      "web-assets/SiteFooter-DDAb7LvN.css"
+      "web-assets/SiteFooter-Bw0rbu8Y.css"
     ],
     "assets": [
       "web-assets/capybara_walk_right-zO7gPMEH.png"
     ]
   },
   "index.html": {
-    "file": "web-assets/index-DItJbYUv.js",
+    "file": "web-assets/index-Dkx7n4D6.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
     "imports": [
-      "_SiteFooter-x8jHBEYM.js"
+      "_SiteFooter-DdBT2UgR.js"
     ],
     "assets": [
       "web-assets/coin-7-Uq8maO.png",
@@ -32,12 +32,12 @@
     ]
   },
   "privacy.html": {
-    "file": "web-assets/privacy-BSfVFlgp.js",
+    "file": "web-assets/privacy-DVlLEA-a.js",
     "name": "privacy",
     "src": "privacy.html",
     "isEntry": true,
     "imports": [
-      "_SiteFooter-x8jHBEYM.js"
+      "_SiteFooter-DdBT2UgR.js"
     ]
   },
   "src/assets/capybara_walk_right.png": {
@@ -73,12 +73,12 @@
     "src": "src/assets/trail_mine.png"
   },
   "support.html": {
-    "file": "web-assets/support-DDX_PcQn.js",
+    "file": "web-assets/support-DyzyOUw0.js",
     "name": "support",
     "src": "support.html",
     "isEntry": true,
     "imports": [
-      "_SiteFooter-x8jHBEYM.js"
+      "_SiteFooter-DdBT2UgR.js"
     ]
   }
 }

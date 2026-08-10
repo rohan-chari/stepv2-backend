@@ -17,6 +17,12 @@ export const buttonVariants = cva(
         // Quiet action on the dark ground.
         secondary:
           "bg-secondary text-secondary-foreground border border-border shadow-[0_3px_0_0_var(--bara-canopy-deep)] hover:bg-[color-mix(in_srgb,var(--secondary)_88%,white)]",
+        // Quiet action on the BEIGE ground (the marketing home page). Same
+        // physical shape as the others, but its shadow and border come from the
+        // paper palette — the dark variants' canopy shadow reads as a smudge on
+        // parchment.
+        paper:
+          "bg-paper-raised text-paper-foreground border border-paper-border shadow-[0_3px_0_0_var(--paper-border)] hover:bg-paper",
         outline:
           "border border-border bg-transparent text-foreground hover:bg-secondary",
         ghost: "bg-transparent text-foreground hover:bg-secondary",

@@ -65,10 +65,6 @@ const TOKENS = {
   // body text.
   "--destructive": "#E4593C",
   "--destructive-foreground": "#F6EFE1",
-  // Use THIS for destructive TEXT (e.g. the inline waitlist error, rendered at
-  // 14px). 5.07:1 on --card and 6.28:1 on --background — passes AA for normal
-  // text on both surfaces, which --destructive does not.
-  "--destructive-text": "#F08A6B",
 
   // Lines, inputs, focus rings.
   "--border": "#2C5842",
@@ -85,6 +81,15 @@ const TOKENS = {
   "--paper-muted": "#5C6F63",
   "--paper-border": "#DCCFB8",
   "--paper-raised": "#FFFAF0",
+  // Accents for text ON the beige surface. --primary (lantern gold) is ~1.7:1
+  // against parchment — fine as a button FILL, unreadable as type — so paper
+  // pages get their own pair: deep canopy for labels/eyebrows (7.4:1) and a
+  // darkened ember for the powerup rail (6.1:1). Both clear AA for small text.
+  "--paper-accent": "#2E5D47",
+  "--paper-ember": "#9C3617",
+  // Error text on the beige surface. --destructive is ~3.6:1 there; this is
+  // 6.5:1, so the waitlist validation message clears AA on paper too.
+  "--destructive-paper": "#A32516",
 
   // ── Bara extras ───────────────────────────────────────────────────────────
   "--bara-moss": "#6FA687",

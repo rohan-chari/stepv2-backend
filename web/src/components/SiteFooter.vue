@@ -1,6 +1,8 @@
 <script setup>
-// The trail runs out here: one last capybara walking off the page, same sprite
-// as the hero but small and quiet — a closing beat, not a second headline.
+// The trail runs out here: one last capybara walking the full width of the
+// footer, same sprite and same traverse as the hero but quieter — a closing
+// beat, not a second headline. pt reserves the sprite's height, since it is
+// absolutely positioned above a 1px rule that has no height of its own.
 //
 // No HTML comments in the template: these pages are prerendered and the
 // production client build strips template comments, which would desync
@@ -11,15 +13,15 @@ import capySprite from "@/assets/capybara_walk_right.png";
 <template>
   <footer class="border-t border-border/70 bg-canopy-deep">
     <div class="mx-auto max-w-6xl px-5 py-12 sm:px-8">
-      <div class="mb-8 flex items-end gap-3 opacity-70">
+      <div class="relative mb-8 pt-16 sm:pt-20" aria-hidden="true">
+        <div class="capy-runner bottom-0 opacity-80">
+          <div
+            class="capy-walk"
+            :style="{ '--capy-sprite': `url(${capySprite})` }"
+          />
+        </div>
         <div
-          class="capy-walk shrink-0"
-          :style="{ '--capy-sprite': `url(${capySprite})` }"
-          aria-hidden="true"
-        />
-        <div
-          class="mb-3 h-px flex-1 bg-[repeating-linear-gradient(to_right,var(--border)_0_10px,transparent_10px_18px)]"
-          aria-hidden="true"
+          class="h-px w-full bg-[repeating-linear-gradient(to_right,var(--border)_0_10px,transparent_10px_18px)]"
         />
       </div>
 

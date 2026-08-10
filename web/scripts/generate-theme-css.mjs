@@ -61,7 +61,6 @@ ${tokenLines}
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
-  --color-destructive-text: var(--destructive-text);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -71,6 +70,9 @@ ${tokenLines}
   --color-paper-muted: var(--paper-muted);
   --color-paper-border: var(--paper-border);
   --color-paper-raised: var(--paper-raised);
+  --color-paper-accent: var(--paper-accent);
+  --color-paper-ember: var(--paper-ember);
+  --color-destructive-paper: var(--destructive-paper);
   --color-moss: var(--bara-moss);
   --color-canopy-deep: var(--bara-canopy-deep);
 

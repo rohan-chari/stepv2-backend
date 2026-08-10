@@ -63,7 +63,7 @@ async function submit() {
   <div>
     <p
       v-if="state === 'done'"
-      class="font-display text-xl font-bold text-primary"
+      class="font-display text-xl font-bold text-paper-accent"
       role="status"
     >
       You're on the list. We'll email you when Android is ready.
@@ -95,7 +95,7 @@ async function submit() {
     <p
       v-if="state === 'error'"
       id="waitlist-error"
-      class="mt-2.5 font-body text-sm text-destructive-text"
+      class="mt-2.5 font-body text-sm text-destructive-paper"
       role="alert"
     >
       {{ errorMessage }}
