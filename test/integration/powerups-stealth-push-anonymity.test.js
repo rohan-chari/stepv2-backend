@@ -245,12 +245,14 @@ describe("stealthed attacks never name the attacker in a push", () => {
     assert.ok(!push.body.includes("???"));
   });
 
+  // NOTE: deliberately does NOT call cleanDatabase() between iterations. The
+  // beforeEach hook owns truncation; truncating from inside a test body
+  // deadlocks (40P01) against the rest of the suite file when the runner
+  // interleaves. Each iteration just builds a fresh race with fresh users —
+  // `nextAppleId` keeps identities unique without touching the DB wholesale.
   it("redaction covers the other allowlisted push types too", async () => {
     for (const type of ["WRONG_TURN", "SHORTCUT"]) {
       captured.length = 0;
-      tokenOwner.clear();
-      await cleanDatabase();
-      nextAppleId = 0;
 
       const { attacker, victim, raceId } = await pair();
       await stealthUp(raceId, attacker.userId);

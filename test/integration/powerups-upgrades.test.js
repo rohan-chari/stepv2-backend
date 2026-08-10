@@ -129,13 +129,21 @@ describe("powerup upgrades — integration", () => {
 
     // Progress advertises the authoritative upgrade price ladders so clients
     // can display exactly what the server will charge (no stale bundled table).
+    // byType is no longer empty as of batch 2026-08-09: the WT/LC duration nerf
+    // came with a matching reprice, and the Horseshoe ladder was zeroed when its
+    // upgrades became inert. Serving these to the client is the whole point of
+    // the block — an old build shows its bundled price, a new one shows this.
     assert.deepEqual(progress.powerupData.upgradeCosts, {
       byRarity: {
         COMMON: [0, 5, 15, 45],
         UNCOMMON: [0, 10, 30, 90],
         RARE: [0, 15, 45, 135],
       },
-      byType: {},
+      byType: {
+        LEG_CRAMP: [0, 10, 20, 30],
+        WRONG_TURN: [0, 15, 30, 45],
+        LUCKY_HORSESHOE: [0, 0, 0, 0],
+      },
     });
   });
 
@@ -198,7 +206,8 @@ describe("powerup upgrades — integration", () => {
   // Lvl 3 Leg Cramp on bob — duration becomes 4 hours
   // ---------------------------------------------------------------------
 
-  it("Lvl 3 Leg Cramp: 90 coins, freezes target for 4h, feed shows 'Lvl 3'", async () => {
+  // Batch 2026-08-09 item 1: L3 Leg Cramp is 30 coins for 1h45m (was 90 for 4h).
+  it("Lvl 3 Leg Cramp: 30 coins, freezes target for 1h45m, feed shows 'Lvl 3'", async () => {
     const alice = await createUser("AliceUpCC");
     const bob = await createUser("BobUpCCCC");
     await makeFriends(alice, bob);
@@ -213,20 +222,24 @@ describe("powerup upgrades — integration", () => {
     });
     assert.equal(res.status, 200);
 
-    assert.equal(await getUserCoins(alice.userId), 410);
+    assert.equal(await getUserCoins(alice.userId), 470);
 
     const effect = await prisma.raceActiveEffect.findFirst({
       where: { powerupId: powerup.id },
     });
     assert.ok(effect);
     const durationMs = new Date(effect.expiresAt).getTime() - new Date(effect.startsAt).getTime();
-    assert.equal(durationMs, 4 * 60 * 60 * 1000, "expires 4 hours after start");
+    assert.equal(
+      durationMs,
+      105 * 60 * 1000,
+      "expires 1h45m after start"
+    );
 
     const feedRes = await request(server.baseUrl, "GET", `/races/${raceId}/feed`, { token: alice.token });
     const feed = (await feedRes.json()).events;
     const ev = feed.find((e) => e.eventType === "POWERUP_USED" && e.powerupType === "LEG_CRAMP");
     assert.match(ev.description, /Lvl 3/);
-    assert.match(ev.description, /4 hours/);
+    assert.match(ev.description, /1h 45m/);
   });
 
   // ---------------------------------------------------------------------
