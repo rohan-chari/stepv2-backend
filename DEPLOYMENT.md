@@ -243,6 +243,28 @@ Server setup (additive, ~zero downtime):
   `staging.barastep.com` to staging. `nginx -t && systemctl reload nginx`.
 - Static-page redirects on the OLD host are fine (browser GETs, not the API):
   `301 /privacy`,`/support` on steptracker-api.org → barastep.com.
+
+### The marketing site lives in `web/` and is committed pre-built
+
+`/`, `/privacy` and `/support` are served from **`web/dist`** (Vite + Vue 3 +
+shadcn-vue source in `web/`), not from `public/`. `public/` still owns
+`assets/`, `app-ads.txt`, `share-card.png` and the `.well-known` files.
+
+`web/dist` is **committed to git** and never built on the droplet — the rollback
+procedure above has no build step, and a missing `dist` means `/privacy` (the
+App Store listing's URL) 500s. Workflow for any site change:
+
+```bash
+cd web && npm install && npm run build   # LOCALLY; fails if Vite's assets dir
+                                          # collides with the /assets CDN mount
+git add web/dist && git commit           # ship the built output with the source
+```
+
+Design tokens for the site AND the server-rendered share-link landing pages
+(`/r/:token`, `/f/:code`, `/t/:token`) come from one file,
+`src/modules/web/theme.js`. `npm run build` regenerates the site's CSS from it;
+the landing pages `require` it at runtime. Change a colour there and every
+surface moves together — do not hand-edit `web/src/styles/tokens.css`.
 - Email: Cloudflare Email Routing forwards `support@barastep.com` → your inbox
   (the static pages now use that address). Set this up BEFORE deploying the pages
   or the mail bounces.

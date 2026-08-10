@@ -38,6 +38,7 @@ const {
   renderReferralNotFoundPage,
   renderTournamentLandingPage,
   renderTournamentNotFoundPage,
+  createWaitlistRouter,
   sharing,
 } = require("./modules/web");
 const {
@@ -300,6 +301,17 @@ function createApp(dependencies = {}) {
   });
 
   const publicDir = path.join(__dirname, "..", "public");
+  // The built marketing site (Vite + Vue + shadcn-vue source lives in web/).
+  // web/dist IS committed to git — see docs/marketing-site-rebuild-requirements.md:
+  // the documented rollback procedure has no build step, so a build-artifact-only
+  // dist would leave /privacy (the URL on the App Store listing) serving a stale
+  // page or a 500 after any rollback.
+  const webDistDir = path.join(__dirname, "..", "web", "dist");
+
+  // ── Android waitlist (marketing site form) ────────────────────────────────
+  // Public + unauthenticated: the caller is a browser on barastep.com, not the
+  // app. Mounted before the static handlers so /waitlist/* can never be shadowed.
+  app.use("/waitlist", createWaitlistRouter(dependencies));
 
   // ── CDN-served art ────────────────────────────────────────────────────────
   // The manifest MUST be registered before the static middleware, otherwise
@@ -323,11 +335,30 @@ function createApp(dependencies = {}) {
     })
   );
 
-  app.get("/", (req, res) => res.sendFile(path.join(publicDir, "index.html")));
-  app.get("/support", (req, res) => res.sendFile(path.join(publicDir, "support.html")));
-  app.get("/support.html", (req, res) => res.sendFile(path.join(publicDir, "support.html")));
-  app.get("/privacy", (req, res) => res.sendFile(path.join(publicDir, "privacy.html")));
-  app.get("/privacy.html", (req, res) => res.sendFile(path.join(publicDir, "privacy.html")));
+  // ── Marketing site (built from web/) ──────────────────────────────────────
+  // Vite's own hashed JS/CSS bundles. Mounted at /web-assets, NOT /assets:
+  // the CDN art mount above uses fallthrough:false, so anything Vite emitted
+  // under /assets would hard-404 and the site would render unstyled with no JS.
+  // web/vite.config.js pins build.assetsDir to match this path — change both or
+  // neither.
+  // fallthrough:false matches the CDN mount above: a missing bundle is a broken
+  // build, and it should 404 loudly through errorMiddleware rather than fall
+  // through to the handlers below and answer with something misleading.
+  app.use(
+    "/web-assets",
+    express.static(path.join(webDistDir, "web-assets"), {
+      immutable: true,
+      maxAge: "365d",
+      fallthrough: false,
+      index: false,
+    })
+  );
+
+  app.get("/", (req, res) => res.sendFile(path.join(webDistDir, "index.html")));
+  app.get("/support", (req, res) => res.sendFile(path.join(webDistDir, "support.html")));
+  app.get("/support.html", (req, res) => res.sendFile(path.join(webDistDir, "support.html")));
+  app.get("/privacy", (req, res) => res.sendFile(path.join(webDistDir, "privacy.html")));
+  app.get("/privacy.html", (req, res) => res.sendFile(path.join(webDistDir, "privacy.html")));
   // Bundled share-card image for link previews (point OG_IMAGE_URL at this).
   // 404s harmlessly until a public/share-card.png is added.
   app.get("/share-card.png", (req, res) =>

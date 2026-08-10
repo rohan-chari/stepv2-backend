@@ -30,6 +30,8 @@ const TABLES_IN_ORDER = [
   "friendships",
   "suggestions",
   "users",
+  // Standalone (no FK to users) — the marketing site's Android waitlist.
+  "android_waitlist_entries",
 ];
 
 // Refuse to truncate anything that is not obviously a throwaway database.

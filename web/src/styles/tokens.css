@@ -1,0 +1,82 @@
+/* GENERATED FILE — DO NOT EDIT.
+ *
+ * Written by web/scripts/generate-theme-css.mjs from src/modules/web/theme.js.
+ * Change a token THERE; both this site and the server-rendered share-link
+ * landing pages pick it up. Editing this file by hand gets overwritten on the
+ * next build and silently desyncs the two surfaces.
+ */
+
+:root {
+  --background: #12291F;
+  --foreground: #F6EFE1;
+  --card: #1B3A2B;
+  --card-foreground: #F6EFE1;
+  --popover: #1B3A2B;
+  --popover-foreground: #F6EFE1;
+  --primary: #F0B429;
+  --primary-foreground: #12291F;
+  --secondary: #224835;
+  --secondary-foreground: #F6EFE1;
+  --muted: #224835;
+  --muted-foreground: #A8C4B4;
+  --accent: #D9552B;
+  --accent-foreground: #F6EFE1;
+  --destructive: #E4593C;
+  --destructive-foreground: #F6EFE1;
+  --destructive-text: #F08A6B;
+  --border: #2C5842;
+  --input: #2C5842;
+  --ring: #F0B429;
+  --radius: 0.625rem;
+  --paper: #F6EFE1;
+  --paper-foreground: #1A2B22;
+  --paper-muted: #5C6F63;
+  --paper-border: #DCCFB8;
+  --paper-raised: #FFFAF0;
+  --bara-moss: #6FA687;
+  --bara-canopy-deep: #0B1A13;
+  --bara-shadow: rgba(5, 15, 10, 0.45);
+  --font-display: 'Bricolage Grotesque', ui-sans-serif, system-ui, sans-serif;
+  --font-body: 'Instrument Sans', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: 'Space Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-destructive-text: var(--destructive-text);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-paper: var(--paper);
+  --color-paper-foreground: var(--paper-foreground);
+  --color-paper-muted: var(--paper-muted);
+  --color-paper-border: var(--paper-border);
+  --color-paper-raised: var(--paper-raised);
+  --color-moss: var(--bara-moss);
+  --color-canopy-deep: var(--bara-canopy-deep);
+
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+
+  --font-display: var(--font-display);
+  --font-body: var(--font-body);
+  --font-mono: var(--font-mono);
+}

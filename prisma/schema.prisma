@@ -1696,6 +1696,23 @@ model LinkOpen {
   @@map("link_opens")
 }
 
+// ── Android waitlist (marketing site) ────────────────────────────────────────
+// Email capture from barastep.com's "Android — join the waitlist" form. Written
+// only by the public, unauthenticated POST /waitlist/android; never read by the
+// app (retrieval is a direct DB query). Purely additive — no existing model or
+// column is touched, so a mixed-version deploy is a non-event.
+//
+// `email` is stored NORMALIZED (trimmed + lowercased by the command layer) and
+// is @unique: that pair is what makes a resubmission idempotent instead of an
+// error, and it's why Person@Example.com can't occupy a second row.
+model AndroidWaitlistEntry {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("android_waitlist_entries")
+}
+
 // ── Async step sync (Home/Races Refresh Performance) ─────────────────────────
 // Two ADDITIVE tables backing POST /steps/sync-v2 and the durable race-
 // resolution worker. Old backend code ignores them; old app builds never call

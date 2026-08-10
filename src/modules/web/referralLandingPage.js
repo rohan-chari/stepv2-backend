@@ -11,17 +11,23 @@
 //   * Android — Google Play is not supported yet, so the CTA and the Play
 //     button surface an alert instead of routing to a Play Store URL.
 //
-// Styled to match the "Bara trail" theme shared by barastep.com / /support /
-// /privacy (sky + clouds, wooden trail sign, parchment board, gold pill CTA).
+// Styled from ./theme.js — the SAME token module barastep.com generates its CSS
+// from and the race/tournament shell reads, so all three surfaces share one
+// palette and typeface. Change a colour there, not here.
 //
 // inviterName is user-controlled, so it is HTML-escaped. The code is validated
 // to ^BARA-[A-Z0-9]+$ upstream, and all URLs are JSON-encoded into the script.
 const { escapeHtml } = require("./raceLandingPage");
+const theme = require("./theme");
 
 // Google Play isn't live yet — shown when the Play button or the Android CTA is
 // tapped, instead of routing to a Play Store listing that doesn't exist.
+// Both copies of this string must stay in sync (the other lives in the sibling
+// landing-page module) — they are shown by the same disabled-Play-button
+// handler on two different pages.
 const PLAY_ALERT_MSG =
-  "Google Play isn't supported yet — Bara is currently available on the App Store (iOS).";
+  "Bara isn't on Android yet — it's on the App Store (iOS) today. " +
+  "Join the Android waitlist at barastep.com and we'll email you when it's ready.";
 
 function shell({ title, description, body, links, showCta, scriptBody }) {
   const safeTitle = escapeHtml(title);
@@ -48,89 +54,73 @@ function shell({ title, description, body, links, showCta, scriptBody }) {
   <meta property="og:description" content="${safeDescription}" />
   <meta property="og:type" content="website" />
   ${imageMeta}<meta name="twitter:card" content="${ogImage ? "summary_large_image" : "summary"}" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Russo+One&family=Chakra+Petch:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  ${theme.FONT_LINK_TAGS}
   <style>
-    :root {
-      --parchment:#F5E6C8; --parchment-border:#C0A878;
-      --wood-shadow:#4A2F17; --wood-darker:#6B4423; --wood-dark:#8B5E34; --wood-light:#D4A574;
-      --sky-top:#97CCE8; --sky-bottom:#C0E4F4; --grass:#3DA83D; --grass-dark:#2D8830;
-      --text-dark:#3B2816; --text-mid:#6B5030; --shadow:rgba(74,47,23,0.28);
-      --pill-gold:#E2C66F; --pill-gold-dark:#C39A43; --pill-gold-shadow:#8A672B;
-      color-scheme: light;
-    }
+    ${theme.rootStyleBlock()}
     * { margin:0; padding:0; box-sizing:border-box; }
-    body { font-family:'Chakra Petch', sans-serif; color:var(--text-dark); overflow-x:hidden; min-height:100vh; }
+    body { font-family:var(--font-body); background:var(--background); color:var(--foreground);
+      overflow-x:hidden; min-height:100vh; -webkit-font-smoothing:antialiased; }
 
-    .sky { position:fixed; inset:0; z-index:-2;
-      background:linear-gradient(180deg, var(--sky-top) 0%, var(--sky-bottom) 60%, #E8F0E0 80%, var(--grass) 95%, var(--grass-dark) 100%); }
+    /* Dusk under the canopy — same treatment as the race/tournament shell in
+       raceLandingPage.js. Both read their values from ./theme.js. */
+    .sky { position:fixed; inset:0; z-index:-2; background:var(--background); }
     .clouds { position:fixed; inset:0; z-index:-1; overflow:hidden; }
-    .cloud { position:absolute; background:rgba(240,244,248,0.65); border-radius:50%; filter:blur(20px); }
-    .cloud:nth-child(1){ width:300px; height:80px; top:8%; left:10%; animation:drift 60s linear infinite; }
-    .cloud:nth-child(2){ width:250px; height:60px; top:15%; left:55%; animation:drift 80s linear infinite reverse; }
-    .cloud:nth-child(3){ width:200px; height:50px; top:5%; left:75%; animation:drift 70s linear infinite; }
-    @keyframes drift { from{transform:translateX(-100px);} to{transform:translateX(100px);} }
+    .cloud { position:absolute; background:var(--bara-moss); opacity:0.07; border-radius:50%; filter:blur(60px); }
+    .cloud:nth-child(1){ width:340px; height:200px; top:2%; left:-8%; animation:drift 60s linear infinite; }
+    .cloud:nth-child(2){ width:300px; height:180px; top:38%; left:60%; animation:drift 80s linear infinite reverse; }
+    .cloud:nth-child(3){ width:260px; height:160px; top:72%; left:12%; animation:drift 70s linear infinite; }
+    @keyframes drift { from{transform:translateX(-60px);} to{transform:translateX(60px);} }
 
     .content { position:relative; z-index:1; max-width:430px; margin:0 auto;
       padding:52px 20px 60px; display:flex; flex-direction:column; align-items:center; gap:22px; }
 
     .trail-sign { text-align:center; }
-    .trail-sign .board-sign { background:linear-gradient(180deg, var(--wood-light), var(--wood-dark));
-      padding:14px 40px; border-radius:8px; border:2px solid var(--wood-darker); position:relative;
-      box-shadow:3px 4px 10px var(--shadow), inset 0 1px 0 rgba(255,255,255,0.25); }
-    .trail-sign .board-sign::before, .trail-sign .board-sign::after { content:''; position:absolute; top:50%;
-      transform:translateY(-50%); width:10px; height:10px; background:var(--wood-darker); border-radius:50%;
-      box-shadow:inset 0 1px 2px rgba(0,0,0,0.4); }
-    .trail-sign .board-sign::before{ left:12px; } .trail-sign .board-sign::after{ right:12px; }
-    .trail-sign h1 { font-family:'Russo One', sans-serif; font-size:2.2rem; color:var(--parchment);
-      text-shadow:2px 2px 0 var(--wood-shadow); letter-spacing:4px; text-transform:uppercase; }
-    .trail-sign .post { width:16px; height:44px; margin:0 auto; border-radius:2px;
-      background:linear-gradient(90deg, var(--wood-dark), var(--wood-light), var(--wood-dark)); box-shadow:2px 2px 6px var(--shadow); }
+    .trail-sign .board-sign { padding:0 0 2px; }
+    .trail-sign h1 { font-family:var(--font-display); font-weight:800; font-size:2.4rem;
+      letter-spacing:-0.03em; color:var(--foreground); }
+    .trail-sign .post { width:2px; height:34px; margin:10px auto 0;
+      background-image:repeating-linear-gradient(to bottom, var(--border) 0 6px, transparent 6px 12px); }
 
-    .board { width:100%; background:linear-gradient(180deg, var(--wood-light) 0%, var(--wood-dark) 100%);
-      border:2px solid var(--wood-shadow); border-radius:12px; padding:6px; position:relative;
-      box-shadow:0 4px 14px var(--shadow), inset 0 1px 0 rgba(255,255,255,0.18); }
-    .board::before { content:''; position:absolute; inset:2px; border-radius:10px; pointer-events:none;
-      background-image:repeating-linear-gradient(to bottom, transparent 0 4px, rgba(160,112,64,0.18) 4px 5px); }
-    .board-inner { position:relative; background:var(--parchment); border:1px solid var(--parchment-border);
-      border-radius:8px; overflow:hidden;
-      background-image:radial-gradient(ellipse at 20% 50%, rgba(200,170,110,0.18) 0%, transparent 70%), radial-gradient(ellipse at 80% 30%, rgba(180,150,90,0.12) 0%, transparent 60%); }
+    .board { width:100%; background:var(--card); border:1px solid var(--border); border-radius:var(--radius);
+      padding:0; position:relative; overflow:hidden; box-shadow:0 10px 30px var(--bara-shadow); }
+    .board-inner { position:relative; }
 
-    .section { padding:14px 16px 10px; font-family:'Russo One', sans-serif; text-transform:uppercase;
-      letter-spacing:1.5px; font-size:0.9rem; color:var(--wood-darker); text-align:center;
-      border-bottom:1px solid rgba(139,94,52,0.18); background:rgba(139,94,52,0.05); }
+    .section { padding:14px 18px; font-family:var(--font-mono); text-transform:uppercase;
+      letter-spacing:0.18em; font-size:0.72rem; color:var(--primary); text-align:center;
+      border-bottom:1px solid var(--border); background:var(--secondary); }
 
-    .invite-body { padding:22px 18px 24px; text-align:center; }
-    .avatar { width:76px; height:76px; border-radius:50%; object-fit:cover; display:block; margin:0 auto 14px;
-      border:3px solid var(--wood-dark); box-shadow:0 2px 6px var(--shadow); }
-    .invite-name { font-family:'Russo One', sans-serif; font-size:1.2rem; line-height:1.3; color:var(--wood-darker); margin-bottom:8px; }
-    .invite-sub { font-size:1rem; line-height:1.5; color:var(--text-mid); }
+    .invite-body { padding:26px 20px 28px; text-align:center; }
+    .avatar { width:76px; height:76px; border-radius:50%; object-fit:cover; display:block; margin:0 auto 16px;
+      border:2px solid var(--primary); box-shadow:0 4px 12px var(--bara-shadow); }
+    .invite-name { font-family:var(--font-display); font-weight:800; font-size:1.35rem; line-height:1.25;
+      letter-spacing:-0.02em; color:var(--foreground); margin-bottom:10px; }
+    .invite-sub { font-size:1rem; line-height:1.55; color:var(--muted-foreground); }
 
-    .cta-btn { width:100%; padding:16px 22px; border:none; cursor:pointer; border-radius:16px;
-      font-family:'Russo One', sans-serif; font-size:0.95rem; letter-spacing:1.5px; text-transform:uppercase; color:var(--text-dark);
-      background:linear-gradient(180deg, var(--pill-gold) 0%, var(--pill-gold-dark) 100%); box-shadow:0 5px 0 var(--pill-gold-shadow);
+    .cta-btn { width:100%; padding:16px 22px; border:none; cursor:pointer; border-radius:var(--radius);
+      font-family:var(--font-display); font-weight:700; font-size:1rem; letter-spacing:-0.01em;
+      color:var(--primary-foreground); background:var(--primary); box-shadow:0 4px 0 var(--bara-canopy-deep);
       transition:transform .08s ease, box-shadow .08s ease, filter .08s ease; }
-    .cta-btn:hover { filter:brightness(1.04); }
-    .cta-btn:active { transform:translateY(5px); box-shadow:0 0 0 var(--pill-gold-shadow); }
-    .copied { opacity:0; transition:opacity .2s; font-size:.85rem; color:var(--text-mid); min-height:1.1em; margin-top:-10px; }
-    .copied.show { opacity:.85; }
+    .cta-btn:hover { filter:brightness(1.05); }
+    .cta-btn:active { transform:translateY(4px); box-shadow:0 0 0 var(--bara-canopy-deep); }
+    .copied { opacity:0; transition:opacity .2s; font-size:.85rem; color:var(--muted-foreground);
+      min-height:1.1em; margin-top:-10px; }
+    .copied.show { opacity:1; }
 
     .store-buttons { display:flex; flex-direction:column; gap:12px; width:100%; }
     .store-btn { display:inline-flex; align-items:center; justify-content:center; cursor:pointer;
-      font-family:'Chakra Petch', sans-serif; font-weight:700; font-size:0.95rem; color:var(--parchment); text-decoration:none;
-      padding:14px 18px; border-radius:14px; border:2px solid var(--wood-shadow);
-      background:linear-gradient(180deg, var(--wood-light), var(--wood-dark));
-      box-shadow:0 4px 10px var(--shadow), inset 0 1px 0 rgba(255,255,255,0.18); transition:filter .08s ease, transform .08s ease; }
-    .store-btn:hover { filter:brightness(1.06); }
-    .store-btn:active { transform:translateY(2px); }
-    .store-btn-disabled { opacity:0.55; filter:grayscale(0.5); cursor:not-allowed; }
-    .store-btn-disabled:hover { filter:grayscale(0.5); }
-    .store-btn-disabled:active { transform:none; }
+      font-family:var(--font-display); font-weight:700; font-size:0.95rem; color:var(--foreground); text-decoration:none;
+      padding:14px 18px; border-radius:var(--radius); border:1px solid var(--border);
+      background:var(--secondary); box-shadow:0 3px 0 var(--bara-canopy-deep);
+      transition:filter .08s ease, transform .08s ease; }
+    .store-btn:hover { filter:brightness(1.12); }
+    .store-btn:active { transform:translateY(3px); box-shadow:0 0 0 var(--bara-canopy-deep); }
+    /* Google Play isn't live yet — visible but inert; the click handler explains. */
+    .store-btn-disabled { opacity:0.5; cursor:not-allowed; box-shadow:none; }
+    .store-btn-disabled:hover { filter:none; }
+    .store-btn-disabled:active { transform:none; box-shadow:none; }
 
     @media (max-width:500px){
-      .trail-sign h1 { font-size:1.8rem; }
-      .trail-sign .board-sign { padding:12px 30px; }
+      .trail-sign h1 { font-size:2rem; }
       .content { padding:40px 16px 48px; gap:18px; }
     }
 
@@ -141,6 +131,11 @@ function shell({ title, description, body, links, showCta, scriptBody }) {
     .content > *:nth-child(3){ animation-delay:0.21s; }
     .content > *:nth-child(4){ animation-delay:0.29s; }
     .content > *:nth-child(5){ animation-delay:0.37s; }
+
+    @media (prefers-reduced-motion: reduce) {
+      .cloud { animation:none; }
+      .content > * { animation:none; }
+    }
   </style>
 </head>
 <body>

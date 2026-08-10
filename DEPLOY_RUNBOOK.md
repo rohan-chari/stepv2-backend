@@ -107,7 +107,25 @@ git rev-parse --short HEAD                      # matches what you shipped
 curl -s localhost:3002/health                   # {"status":"ok"}
 curl -s https://steptracker-api.org/health       # {"status":"ok"}  (real prod URL; no api. subdomain)
 pm2 list                                         # id 3 online, restart count stable
+
+# Marketing site (served from the COMMITTED web/dist — see below). All three
+# must be 200: /privacy is the URL on the App Store listing.
+curl -sI https://barastep.com/ | head -1
+curl -sI https://barastep.com/privacy | head -1
+curl -sI https://barastep.com/support | head -1
 ```
+
+> **The marketing site is not built on the droplet.** `web/` (Vite + Vue +
+> shadcn-vue) builds to `web/dist`, and **`web/dist` is committed to git** — the
+> droplet only ever `git pull`s it. This is deliberate: the rollback procedure in
+> `DEPLOYMENT.md` has no build step, so a build-artifact-only dist would leave
+> barastep.com stale or 500ing after a rollback, and building a Vue toolchain on
+> the one-vCPU box during live traffic is cost with no upside.
+>
+> After changing anything under `web/`, run `cd web && npm install && npm run
+> build` **locally**, verify, and commit the regenerated `web/dist` with your
+> change. The build fails loudly if Vite's asset directory ever collides with the
+> `/assets` CDN mount.
 
 Healthy boot prints all three lines:
 

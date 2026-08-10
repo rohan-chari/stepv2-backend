@@ -1,0 +1,84 @@
+{
+  "_SiteFooter-BQeuw6UN.js": {
+    "file": "web-assets/SiteFooter-BQeuw6UN.js",
+    "name": "SiteFooter",
+    "css": [
+      "web-assets/SiteFooter-DuAqegR3.css"
+    ],
+    "assets": [
+      "web-assets/capybara_walk_right-zO7gPMEH.png"
+    ]
+  },
+  "_SiteFooter-DuAqegR3.css": {
+    "file": "web-assets/SiteFooter-DuAqegR3.css",
+    "src": "_SiteFooter-DuAqegR3.css"
+  },
+  "index.html": {
+    "file": "web-assets/index-BWD2_vq5.js",
+    "name": "index",
+    "src": "index.html",
+    "isEntry": true,
+    "imports": [
+      "_SiteFooter-BQeuw6UN.js"
+    ],
+    "assets": [
+      "web-assets/coin-7-Uq8maO.png",
+      "web-assets/trail_mine-Cqqu5wWD.png",
+      "web-assets/leech-BG6GQmBI.png",
+      "web-assets/rainstorm-DPzTxPEp.png",
+      "web-assets/shortcut-Cu2DQVRo.png",
+      "web-assets/signal_jammer-BKm6twE0.png",
+      "web-assets/lucky_horseshoe-fpVcko2t.png"
+    ]
+  },
+  "privacy.html": {
+    "file": "web-assets/privacy-NIRNaRRS.js",
+    "name": "privacy",
+    "src": "privacy.html",
+    "isEntry": true,
+    "imports": [
+      "_SiteFooter-BQeuw6UN.js"
+    ]
+  },
+  "src/assets/capybara_walk_right.png": {
+    "file": "web-assets/capybara_walk_right-zO7gPMEH.png",
+    "src": "src/assets/capybara_walk_right.png"
+  },
+  "src/assets/coin.png": {
+    "file": "web-assets/coin-7-Uq8maO.png",
+    "src": "src/assets/coin.png"
+  },
+  "src/assets/leech.png": {
+    "file": "web-assets/leech-BG6GQmBI.png",
+    "src": "src/assets/leech.png"
+  },
+  "src/assets/lucky_horseshoe.png": {
+    "file": "web-assets/lucky_horseshoe-fpVcko2t.png",
+    "src": "src/assets/lucky_horseshoe.png"
+  },
+  "src/assets/rainstorm.png": {
+    "file": "web-assets/rainstorm-DPzTxPEp.png",
+    "src": "src/assets/rainstorm.png"
+  },
+  "src/assets/shortcut.png": {
+    "file": "web-assets/shortcut-Cu2DQVRo.png",
+    "src": "src/assets/shortcut.png"
+  },
+  "src/assets/signal_jammer.png": {
+    "file": "web-assets/signal_jammer-BKm6twE0.png",
+    "src": "src/assets/signal_jammer.png"
+  },
+  "src/assets/trail_mine.png": {
+    "file": "web-assets/trail_mine-Cqqu5wWD.png",
+    "src": "src/assets/trail_mine.png"
+  },
+  "support.html": {
+    "file": "web-assets/support-PWg04F-H.js",
+    "name": "support",
+    "src": "support.html",
+    "isEntry": true,
+    "imports": [
+      "_SiteFooter-BQeuw6UN.js"
+    ]
+  }
+}

@@ -1,0 +1,223 @@
+@import "tailwindcss";
+/* tokens.css is GENERATED from src/modules/web/theme.js — see
+   scripts/generate-theme-css.mjs. It carries the palette and the @theme inline
+   mapping that teaches Tailwind our token names. */
+@import "./tokens.css";
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-body);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Every piece of Bara's art is pixel art. Browser-default smoothing turns a
+     64px sprite scaled up into mush; this keeps the pixels crisp. */
+  img.pixel {
+    image-rendering: pixelated;
+  }
+
+  ::selection {
+    background: var(--primary);
+    color: var(--primary-foreground);
+  }
+
+  /* The quality floor: motion is a garnish, never the only signal. Everything
+     below either stops or snaps to its end state. */
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+    }
+  }
+}
+
+@layer components {
+  /* ── The signature: the capybara actually walks ────────────────────────────
+     capybara_walk_right.png is the game's real 6-frame walk cycle (384×64, six
+     64px cells). Stepping background-position through it with steps(6) is a
+     sprite animation — the same character the player moves with their steps,
+     moving. This is the page's one loud idea; everything else stays quiet. */
+  .capy-walk {
+    width: 64px;
+    height: 64px;
+    background-image: var(--capy-sprite);
+    background-repeat: no-repeat;
+    background-size: 384px 64px;
+    image-rendering: pixelated;
+    animation: capy-cycle 0.7s steps(6) infinite;
+  }
+
+  @keyframes capy-cycle {
+    from {
+      background-position: 0 0;
+    }
+    to {
+      background-position: -384px 0;
+    }
+  }
+
+  /* The legs cycle in place; this is what actually moves it down the course.
+     Two separate animations on two elements, because the sprite cycle must stay
+     on a steps() timing function while the traverse stays linear. */
+  .capy-runner {
+    position: absolute;
+    animation: capy-traverse 26s linear infinite;
+  }
+
+  @keyframes capy-traverse {
+    from {
+      left: 0;
+    }
+    to {
+      left: calc(100% - 4rem);
+    }
+  }
+
+  @media (min-width: 640px) {
+    .capy-walk {
+      width: 80px;
+      height: 80px;
+      background-size: 480px 80px;
+    }
+    @keyframes capy-cycle {
+      from {
+        background-position: 0 0;
+      }
+      to {
+        background-position: -480px 0;
+      }
+    }
+    @keyframes capy-traverse {
+      from {
+        left: 0;
+      }
+      to {
+        left: calc(100% - 5rem);
+      }
+    }
+  }
+
+  /* Reduced motion: park the sprite at the start on a single clean frame,
+     rather than leaving it mid-blur or mid-course. */
+  @media (prefers-reduced-motion: reduce) {
+    .capy-walk {
+      animation: none;
+      background-position: 0 0;
+    }
+    .capy-runner {
+      animation: none;
+      left: 0;
+    }
+  }
+
+  /* Prose surface for the long-form legal/help pages. Legal text at length
+     needs a light reading ground — see the note in theme.js. */
+  .paper {
+    background-color: var(--paper);
+    color: var(--paper-foreground);
+  }
+
+  .prose-bara h2 {
+    font-family: var(--font-display);
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    font-size: 1.5rem;
+    line-height: 1.2;
+    margin-top: 2.75rem;
+    margin-bottom: 0.875rem;
+    color: var(--paper-foreground);
+  }
+
+  .prose-bara h2:first-child {
+    margin-top: 0;
+  }
+
+  .prose-bara p,
+  .prose-bara li {
+    font-size: 1.0625rem;
+    line-height: 1.7;
+    color: color-mix(in srgb, var(--paper-foreground) 88%, transparent);
+    margin-bottom: 1rem;
+  }
+
+  .prose-bara a {
+    color: var(--paper-foreground);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    text-decoration-thickness: 2px;
+    text-decoration-color: var(--primary);
+  }
+
+  .prose-bara a:hover {
+    background-color: color-mix(in srgb, var(--primary) 28%, transparent);
+  }
+
+  .prose-bara strong {
+    font-weight: 600;
+  }
+
+  /* A definition row — the "field: value" pairs that carry most of the privacy
+     page's substance. */
+  .prose-bara .pair {
+    display: grid;
+    gap: 0.25rem 1.75rem;
+    padding: 0.9rem 0;
+    border-top: 1px solid var(--paper-border);
+  }
+
+  @media (min-width: 720px) {
+    .prose-bara .pair {
+      grid-template-columns: 15rem 1fr;
+    }
+  }
+
+  .prose-bara .pair dt {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--paper-muted);
+    padding-top: 0.2rem;
+  }
+
+  .prose-bara .pair dd {
+    font-size: 1.0625rem;
+    line-height: 1.65;
+    color: color-mix(in srgb, var(--paper-foreground) 88%, transparent);
+  }
+
+  /* Pulled-out emphasis for the two privacy commitments that matter most. */
+  .prose-bara .callout {
+    border-left: 4px solid var(--primary);
+    background: color-mix(in srgb, var(--primary) 12%, transparent);
+    padding: 1rem 1.25rem;
+    margin: 1.5rem 0;
+    font-weight: 500;
+  }
+
+  /* The mono "scoreboard" voice: eyebrows, ticks, nav. Steps are numbers, so
+     numbers get their own face. */
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+  }
+}

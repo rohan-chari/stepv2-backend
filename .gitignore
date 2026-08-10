@@ -24,6 +24,15 @@ npm-debug.log*
 dist/
 build/
 
+# EXCEPTION: the built marketing site IS committed. The documented rollback
+# procedure (DEPLOYMENT.md) is `git checkout <tag> && npm install && pm2
+# restart` with NO build step, so a build-artifact-only dist would leave
+# barastep.com's /, /privacy and /support serving a stale page — or 500ing on a
+# missing file — after any rollback. /privacy is the URL on the App Store
+# listing. Build it locally (`cd web && npm run build`) and commit the result.
+!web/dist/
+!web/dist/**
+
 # APNs certificates
 certs/
 
