@@ -86,6 +86,10 @@ function makeDeps(overrides = {}) {
             maxBonusSteps: overrides.freshMaxBonusSteps || 0,
           };
         },
+        // Mechanical (2026-08-09): production writes participant totals through
+        // updateStepTotals({ totalSteps, rawSteps }); delegate so this fake keeps
+        // recording exactly what it recorded before.
+        async updateStepTotals(id, fields = {}) { return this.updateTotalSteps(id, fields.totalSteps); },
         async updateTotalSteps() {},
         async markFinished() {},
         async setPlacement() {},

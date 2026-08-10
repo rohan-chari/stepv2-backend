@@ -35,6 +35,20 @@ function createWriteCapture({ participantModel, effectModel, eventModel }) {
     writes,
     participants: {
       ...participantModel,
+      // `rawSteps` rides the SAME capture record as `totalSteps` (2026-08-09,
+      // docs/box-raw-steps-position-and-option-h-requirements.md). It must:
+      // an uncaptured write escapes both the worker's fence and this module's
+      // read-only guarantee, and the v2 worker is the PROD writer — miss it and
+      // `raw_steps` stays NULL forever in production.
+      async updateStepTotals(id, { totalSteps, rawSteps } = {}) {
+        writes.push({
+          kind: "participantTotal",
+          participantId: id,
+          totalSteps,
+          rawSteps,
+        });
+        return { id, totalSteps, rawSteps };
+      },
       async updateTotalSteps(id, totalSteps) {
         writes.push({ kind: "participantTotal", participantId: id, totalSteps });
         return { id, totalSteps };

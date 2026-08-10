@@ -282,6 +282,26 @@ function typeOddsForPosition(position, totalParticipants, config, ctx) {
   return out;
 }
 
+// THE rarity a rolled powerup is STAMPED with (2026-08-09,
+// docs/box-raw-steps-position-and-option-h-requirements.md step 7).
+//
+// `dropPool` membership and `rarityByType` are deliberately independent —
+// validateConfig lets a type live in a tier that differs from its canonical
+// rarity, and Option H uses exactly that seam to put the three COMMON
+// self-boosts into the UNCOMMON tier so trailing players draw them.
+//
+// The stamp must be the CANONICAL rarity, not the tier that produced the roll:
+// `discardRewards.priceFor` pays off the stamp, so a Protein Shake rolled from
+// dropPool.UNCOMMON would discard for 5 coins instead of 2 — a coin faucet
+// concentrated on trailing players. Upgrades were already safe (powerupUpgrades
+// keys off rarityByType), and clients tint from the same value, so this also
+// removes the tint inconsistency. Falls back to the rolled tier whenever the
+// config has no (or an invalid) canonical rarity for the type.
+function canonicalRarityFor(type, rolledRarity, config) {
+  const canonical = resolveConfig(config)?.rarityByType?.[type];
+  return RARITY_ORDER.includes(canonical) ? canonical : rolledRarity;
+}
+
 function rollPowerup(position, totalParticipants, rng = Math.random, options = {}) {
   const config = resolveConfig(options.config);
   const [commonOdds, uncommonOdds] = interpolateOdds(
@@ -316,6 +336,7 @@ module.exports = {
   pickTypeFromPool,
   pickTypeForRarity,
   eligiblePoolFor,
+  canonicalRarityFor,
   positionMultiplierFor,
   buildRollContext,
   normalizePosition,

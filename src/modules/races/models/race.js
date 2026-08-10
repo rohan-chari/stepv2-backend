@@ -311,6 +311,13 @@ const Race = {
             userId: true,
             status: true,
             totalSteps: true,
+            // rawSteps is REQUIRED here (2026-08-09): every writer of
+            // `totalSteps` also persists the RAW walked total MONOTONICALLY
+            // (`max(existing, baseAdjusted)`), and this lean select feeds the
+            // step-upload reconcile. Omitting it reads the existing value as
+            // absent, so a downward re-sync would happily write the lower
+            // number back and move a player's drop-odds position backwards.
+            rawSteps: true,
             bonusSteps: true,
             maxBonusSteps: true,
             nextBoxAtSteps: true,

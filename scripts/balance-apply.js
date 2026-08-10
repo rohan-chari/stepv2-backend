@@ -72,7 +72,96 @@ function teamOnlyRallyFlag(config) {
   return next;
 }
 
+// docs/economy.md §8 Option H + docs/box-raw-steps-position-and-option-h-
+// requirements.md step 8 — "trailers catch up by SELF-BOOST, not griefing".
+//
+// ORDER IS MANDATORY: this row goes out only AFTER the raw-steps position fix
+// is deployed. H roughly doubles the value of trailing odds (E[self]/box
+// 635 -> 1,180), so applying it while the odds position still comes from the
+// effect-sensitive `totalSteps` AMPLIFIES the hoarding exploit it depends on
+// the code fix to remove.
+//
+// The enabling mechanic is that `validateConfig` requires a dropPool member to
+// HAVE a rarity in rarityByType, not to MATCH it — so the three COMMON
+// self-boosts can join the UNCOMMON tier while the upgrade ladder stays put.
+// Without that the UNCOMMON tier in a solo race is 100% grief with nowhere for
+// the freed mass to move.
+//
+// TRAP (verified, economy.md §8): never let a tier's total weight reach 0.
+// `drawWeighted` falls back to a UNIFORM pick when the weights sum to zero,
+// which inverts a down-weight into an up-weight. That is what the zero-weight
+// sweep in test/services/optionHBalanceConfig.test.js pins.
+//
+// Idempotent: re-running it on an already-migrated config is a no-op diff.
+function optionHPositionFairness(config) {
+  const next = JSON.parse(JSON.stringify(config));
+
+  next.dropPool = { ...(next.dropPool || {}) };
+  for (const type of ["PROTEIN_SHAKE", "TRAIL_MIX", "RUNNERS_HIGH"]) {
+    next.dropPool.UNCOMMON = withValue(next.dropPool.UNCOMMON, type);
+  }
+
+  next.positionOdds = {
+    ...(next.positionOdds || {}),
+    first: [0.52, 0.2, 0.28],
+    last: [0.3, 0.36, 0.34],
+  };
+
+  next.positionRules = {
+    ...(next.positionRules || {}),
+    // Toward the FRONT: the leader's own self-boosts are damped so the freed
+    // tier mass lands on the trailing end of the ramp.
+    leadingDownweight: { RUNNERS_HIGH: 0.5, PROTEIN_SHAKE: 0.7, TRAIL_MIX: 0.7 },
+    // Toward the BACK: offense moves to mid-pack and the front, where prod
+    // already shows it being USED.
+    //
+    // STEALTH_MODE is restored to full strength — trailers are barely attacked
+    // (0.19 Wrong Turns received per head), so weighting them away from defense
+    // was correct but the freed mass is better spent on self-boost. It is
+    // written as an EXPLICIT 1.0 and NOT omitted: `mergeOverDefaults` merges
+    // plain objects RECURSIVELY (only arrays replace wholesale), so a stored
+    // table that simply leaves the key out inherits the code default's
+    // `STEALTH_MODE: 0.5` and the intended change silently does nothing. 1.0 is
+    // the identity multiplier in positionMultiplierFor, so this is exactly
+    // "no rule" — expressed in the one way the merge cannot undo.
+    trailingDownweight: {
+      WRONG_TURN: 0.2,
+      LEG_CRAMP: 0.25,
+      PINECONE_TOSS: 0.4,
+      DETOUR_SIGN: 0.4,
+      SNEAKY_SWAP: 0.5,
+      CLEANSE: 0.5,
+      MIRROR: 0.5,
+      STEALTH_MODE: 1,
+    },
+  };
+  // leaderExcluded / lastPlaceExcluded / the two ramp endpoints are carried
+  // through unchanged by the spread above — H changes weights, not gates.
+
+  // Drift reconcile, same row (approved by the owner 2026-08-09). The live prod
+  // row says WRONG_TURN is RARE and SNEAKY_SWAP UNCOMMON, both of which
+  // contradict the tier each type actually drops from. `upgradeCost` is
+  // evaluated at PURCHASE time from rarityForType, so already-held rows are
+  // unaffected; only the upgrade ladder moves (WRONG_TURN 195 -> 130,
+  // player-favourable; SNEAKY_SWAP 130 -> 195).
+  next.rarityByType = {
+    ...(next.rarityByType || {}),
+    WRONG_TURN: "UNCOMMON",
+    SNEAKY_SWAP: "RARE",
+  };
+
+  return next;
+}
+
 const MIGRATIONS = {
+  "option-h-position-fairness": {
+    apply: optionHPositionFairness,
+    note: "Option H: trailer catch-up via self-boost + rarityByType drift reconcile",
+    description:
+      "economy.md §8 Option H — add PROTEIN_SHAKE/TRAIL_MIX/RUNNERS_HIGH to dropPool.UNCOMMON, " +
+      "retune positionOdds + both down-weight tables, reconcile WRONG_TURN/SNEAKY_SWAP rarity. " +
+      "APPLY ONLY AFTER the raw-steps position fix is deployed.",
+  },
   "team-only-rally-flag": {
     apply: teamOnlyRallyFlag,
     note: "team-only drop pool: RALLY_FLAG -> dropPool.UNCOMMON, teamOnlyTypes",
@@ -329,6 +418,7 @@ if (require.main === module) {
 
 module.exports = {
   MIGRATIONS,
+  optionHPositionFairness,
   teamOnlyRallyFlag,
   evaluateMigration,
   lostDropPoolAdditions,

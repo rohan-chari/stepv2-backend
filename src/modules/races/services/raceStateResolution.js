@@ -25,6 +25,7 @@ const {
   collectRaceHitchhikeCopies,
   applyHitchhikeCopies,
 } = require("../../powerups/hitchhikeCopies");
+const { nextRawSteps } = require("../../powerups/rawPosition");
 
 // Every effect type that calculateCurrentTotal folds into a participant's
 // live total. Shared with prefetch paths (getHomeRaceCard) so a bulk effect
@@ -831,7 +832,20 @@ function buildResolveRaceState(dependencies = {}) {
           continue;
         }
         const finalTotal = leechFinals.get(e.participant.id) ?? e.preLeechTotal;
-        await participantModel.updateTotalSteps(e.participant.id, finalTotal);
+        // `rawSteps` rides the same write (2026-08-09): the RAW walked total
+        // this participant was just scored from, high-watered against what is
+        // already stored so a downward re-sync can't move their drop-odds
+        // position backwards. Frozen rows never reach here (they `continue`
+        // above), so a finished player's raw_steps stays frozen with their
+        // total. Under the prod configuration this write is CAPTURED, not
+        // executed — the v2 worker replays it inside its fence.
+        await participantModel.updateStepTotals(e.participant.id, {
+          totalSteps: finalTotal,
+          rawSteps: nextRawSteps(
+            e.participant.rawSteps,
+            baseAdjustedByParticipantId[e.participant.id]
+          ),
+        });
         stepTotals[index] = { participant: e.participant, totalSteps: finalTotal };
       }
 

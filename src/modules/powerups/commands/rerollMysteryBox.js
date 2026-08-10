@@ -8,7 +8,9 @@ const {
   RARITY_ORDER,
   buildRollContext,
   pickTypeForRarity,
+  canonicalRarityFor,
 } = require("../powerupOdds");
+const { rawPositionFor } = require("../rawPosition");
 const {
   balanceConfig: defaultBalanceConfig,
 } = require("../../economy/balanceConfig");
@@ -258,26 +260,17 @@ function buildRerollMysteryBox(dependencies = {}) {
     // as openMysteryBox, at the player's CURRENT position (a reroll late in a
     // race rolls on late-race odds, not the odds the box was opened under).
     const allParticipants = await participantModel.findAcceptedByRace(raceId);
-    let position;
-    let totalParticipants;
-    if (race.isTeamRace) {
-      const teamTotals = { TEAM_A: 0, TEAM_B: 0 };
-      for (const p of allParticipants) {
-        if (p.team === "TEAM_A") teamTotals.TEAM_A += p.totalSteps || 0;
-        else if (p.team === "TEAM_B") teamTotals.TEAM_B += p.totalSteps || 0;
-      }
-      const myTeam = participant.team;
-      const otherTeam = myTeam === "TEAM_A" ? "TEAM_B" : "TEAM_A";
-      position = teamTotals[myTeam] < teamTotals[otherTeam] ? 2 : 1;
-      totalParticipants = 2;
-    } else {
-      const sorted = [...allParticipants].sort(
-        (a, b) => b.totalSteps - a.totalSteps
-      );
-      position = sorted.findIndex((p) => p.userId === userId) + 1;
-      totalParticipants = sorted.length;
-    }
+    // The SAME raw-walked-steps position an open uses (2026-08-09,
+    // docs/box-raw-steps-position-and-option-h-requirements.md) — a reroll is a
+    // new roll and must not be a way around the fix.
+    const { position, totalParticipants } = rawPositionFor({
+      participants: allParticipants,
+      race,
+      userId,
+    });
 
+    // ctx step inputs stay on the EFFECT-SENSITIVE totals, exactly as in
+    // openMysteryBox: the exclusion predicates mirror use-time checks.
     const ctx = buildRollContext({
       stepTotals: allParticipants.map((p) => p.totalSteps || 0),
       myTotalSteps: participant.totalSteps || 0,
@@ -311,6 +304,14 @@ function buildRerollMysteryBox(dependencies = {}) {
     }
 
     rolled = resolveNullRoll(rolled, config, ctx);
+
+    // Step 7 — the SAME canonical-rarity stamp openMysteryBox applies, for the
+    // same reason: the discard payout and the client tint read this value, and
+    // it must never claim the tier that happened to produce the roll.
+    rolled = {
+      ...rolled,
+      rarity: canonicalRarityFor(rolled.type, rolled.rarity, config),
+    };
 
     // ── Persist. Conditional on the row still being an un-rerolled HELD row, so
     // two concurrent rerolls cannot both write (the second loses and 409s).

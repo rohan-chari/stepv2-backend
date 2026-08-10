@@ -706,6 +706,10 @@ test("Trail Mine triggers when the next runner crosses its step position", async
       },
     },
     RaceParticipant: {
+      // Mechanical (2026-08-09): production writes participant totals through
+      // updateStepTotals({ totalSteps, rawSteps }); delegate so this fake keeps
+      // recording exactly what it recorded before.
+      async updateStepTotals(id, fields = {}) { return this.updateTotalSteps(id, fields.totalSteps); },
       async updateTotalSteps() {},
       async subtractBonusSteps(id, amount) {
         bonusChanges.push({ id, amount });

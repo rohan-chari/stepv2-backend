@@ -74,7 +74,7 @@ function makeProgressDeps(activeEffects) {
     Race: { async findById() { return race; } },
     StepSample: { async sumStepsInWindow(userId, windowStart) { return windowStart.getTime() === RACE_START.getTime() ? (stepsByUser[userId] || 0) : 0; } },
     Steps: { async findByUserIdAndDate() { return null; }, async findByUserIdAndDateRange() { return []; } },
-    RaceParticipant: { async findById(id) { return { id, powerupSlots: 3, nextBoxAtSteps: 0 }; }, async updateTotalSteps() {} },
+    RaceParticipant: { async findById(id) { return { id, powerupSlots: 3, nextBoxAtSteps: 0 }; }, async updateTotalSteps() {}, async updateStepTotals() {} },
     RaceActiveEffect: { async findEffectsForRaceByType() { return []; }, async findActiveForParticipant() { return []; }, async findActiveForRace() { return activeEffects; } },
     RacePowerup: { async findSlotPowerups() { return []; }, async countQueuedByParticipant() { return 0; }, async findHeldByParticipant() { return []; }, async findMysteryBoxesByParticipant() { return []; }, async countMysteryBoxesByParticipant() { return 0; }, async countOccupiedSlots() { return 0; }, async findQueuedByParticipant() { return []; } },
     expireEffects: async () => {},

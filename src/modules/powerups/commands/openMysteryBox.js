@@ -9,7 +9,9 @@ const {
   RARITY_ORDER,
   buildRollContext,
   pickTypeForRarity,
+  canonicalRarityFor,
 } = require("../powerupOdds");
+const { rawPositionFor } = require("../rawPosition");
 const { balanceConfig: defaultBalanceConfig } = require("../../economy/balanceConfig");
 const { POWERUP_NAMES, DEFAULT_POWERUP_SLOTS } = require("./rollPowerup");
 const {
@@ -125,31 +127,30 @@ function buildOpenMysteryBox(dependencies = {}) {
     const maxSlots = participant.powerupSlots || DEFAULT_POWERUP_SLOTS;
     const occupiedCount = await powerupModel.countOccupiedSlots(participant.id);
 
-    // Calculate current position for odds. Team races (TR-655) roll on TEAM
-    // position instead of individual rank: the trailing team's members get the
-    // existing catch-up odds tier (rank 2 of 2), the leading team rolls
-    // standard (rank 1 of 2), and a tie counts both teams as leading.
+    // Current position for odds, from RAW WALKED steps (2026-08-09,
+    // docs/box-raw-steps-position-and-option-h-requirements.md). Raw steps only
+    // grow by walking, so neither box banking nor powerup hoarding can move a
+    // player's odds tier. The helper owns the solo sort, the team sums (TR-655:
+    // team races roll on TEAM position, 1-of-2 / 2-of-2, a tie counting both as
+    // leading) and the per-race all-or-nothing NULL fallback to `totalSteps`.
+    // getRaceProgress's disclosure calls the SAME helper over the SAME
+    // persisted rows, so the quoted odds and this roll cannot drift.
     const allParticipants = await participantModel.findAcceptedByRace(raceId);
-    let position;
-    let totalParticipants;
-    if (race.isTeamRace) {
-      const teamTotals = { TEAM_A: 0, TEAM_B: 0 };
-      for (const p of allParticipants) {
-        if (p.team === "TEAM_A") teamTotals.TEAM_A += p.totalSteps || 0;
-        else if (p.team === "TEAM_B") teamTotals.TEAM_B += p.totalSteps || 0;
-      }
-      const myTeam = participant.team;
-      const otherTeam = myTeam === "TEAM_A" ? "TEAM_B" : "TEAM_A";
-      position = teamTotals[myTeam] < teamTotals[otherTeam] ? 2 : 1;
-      totalParticipants = 2;
-    } else {
-      const sorted = [...allParticipants].sort((a, b) => b.totalSteps - a.totalSteps);
-      position = sorted.findIndex((p) => p.userId === userId) + 1;
-      totalParticipants = sorted.length;
-    }
+    const { position, totalParticipants } = rawPositionFor({
+      participants: allParticipants,
+      race,
+      userId,
+    });
 
-    // Position-aware drop context. Computed from TRUE INDIVIDUAL step totals in
-    // BOTH solo and team races, and deliberately independent of `position` above:
+    // Position-aware drop context. Computed from TRUE INDIVIDUAL EFFECTIVE step
+    // totals (`totalSteps`) in BOTH solo and team races — deliberately NOT from
+    // the raw steps `position` above. `isStepLeader` / `isStepLast` mirror the
+    // USE-TIME checks for RED_CARD / SECOND_WIND / TRAIL_MINE, and those read
+    // the leaderboard total; moving them to raw steps would start dropping
+    // powerups the server refuses to let the player use. The odds TIER follows
+    // your walking; the eligibility gates follow the board.
+    //
+    // Also deliberately independent of `position` above:
     // team position is collapsed to 1-of-2 for tier purposes, but RED_CARD's
     // use-time check targets the individual leader, and both RED_CARD and
     // SECOND_WIND also reject on a TIE at the top (where sort order is
@@ -203,6 +204,16 @@ function buildOpenMysteryBox(dependencies = {}) {
     // normal roll, Lucky Horseshoe backstop, Fanny Pack re-roll — is covered by
     // one guard rather than three.
     rolled = resolveNullRoll(rolled, config, ctx);
+
+    // Step 7 — stamp the CANONICAL rarity when the tier that produced the roll
+    // disagrees with `rarityByType`. One consistent ladder for the tint, the
+    // upgrade price and the discard payout; without it Option H's boosted
+    // commons would discard for the UNCOMMON price. Applies to BOTH persist
+    // branches below (auto-activate and normal) because it happens here, once.
+    rolled = {
+      ...rolled,
+      rarity: canonicalRarityFor(rolled.type, rolled.rarity, config),
+    };
 
     if (luckyEffect) {
       await effectModel.update(luckyEffect.id, { status: "EXPIRED" });

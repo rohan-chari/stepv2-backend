@@ -49,6 +49,46 @@ test("both production roll/disclosure sites build a roll context with BOTH gate 
   }
 });
 
+// Mystery-box odds position from RAW walked steps
+// (docs/box-raw-steps-position-and-option-h-requirements.md step 4).
+//
+// The exploit fix is only as strong as the promise that NO roll or disclosure
+// site computes its own position by sorting `totalSteps`. That is a statement
+// about the shape of the codebase, so like the ctx guard above it is asserted
+// over source: all THREE sites must derive position from the ONE shared
+// `rawPositionFor` helper, which owns the raw-steps sort, the team sums and the
+// per-race all-or-nothing NULL fallback.
+test("all three roll/disclosure sites derive position from the shared rawPositionFor helper", () => {
+  const sites = [
+    {
+      file: ["modules", "powerups", "commands", "openMysteryBox.js"],
+      label: "the in-race roll",
+    },
+    {
+      file: ["modules", "powerups", "commands", "rerollMysteryBox.js"],
+      label: "the ad-funded reroll",
+    },
+    {
+      file: ["modules", "races", "queries", "getRaceProgress.js"],
+      label: "the odds disclosure",
+    },
+  ];
+
+  for (const site of sites) {
+    const source = read(...site.file);
+    assert.match(
+      source,
+      /rawPositionFor\(\{/,
+      `${site.label} must derive its odds position from the shared rawPositionFor helper`
+    );
+    assert.doesNotMatch(
+      source,
+      /sort\(\s*\(a,\s*b\)\s*=>\s*b\.totalSteps\s*-\s*a\.totalSteps\s*\)/,
+      `${site.label} must NOT rank the field by totalSteps itself — that is the exploit this fix closes`
+    );
+  }
+});
+
 test("both mystery-box open routes forward the powerups5 client feature", () => {
   const routes = read("modules", "races", "routes.js");
 

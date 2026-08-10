@@ -80,6 +80,10 @@ function makeDeps(effects) {
       },
     },
     RaceParticipant: {
+      // Mechanical (2026-08-09): production writes participant totals through
+      // updateStepTotals({ totalSteps, rawSteps }); delegate so this fake keeps
+      // recording exactly what it recorded before.
+      async updateStepTotals(id, fields = {}) { return this.updateTotalSteps(id, fields.totalSteps); },
       async updateTotalSteps() {},
       async findById(id) {
         return participants.find((p) => p.id === id);

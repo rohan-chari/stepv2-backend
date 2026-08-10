@@ -1,0 +1,22 @@
+-- Mystery-box odds position from RAW WALKED STEPS
+-- (docs/box-raw-steps-position-and-option-h-requirements.md, data model).
+--
+-- `raw_steps` is the manipulation-proof quantity box PROGRESS already uses
+-- (`baseAdjusted` — steps you actually walked, immune to buffs, debuffs and
+-- bonus steps). Persisting it lets the drop-odds POSITION be computed from it
+-- instead of from the effect-sensitive `total_steps`, which closes two
+-- exploits: box banking (open while temporarily last) and powerup hoarding
+-- (unused bonus powerups pin `total_steps` low all race).
+--
+-- Additive + NULLABLE with NO backfill, and deliberately NO index (it is never
+-- a query predicate — reviewers should not add one). NULL means "no writer has
+-- persisted this row since the deploy"; every reader falls back to
+-- `total_steps` for the WHOLE race (all-or-nothing per race, never per row),
+-- which is exactly today's behaviour. Rows heal on the next persist of each
+-- active race; finished races never need it.
+--
+-- Mixed-version safe in both directions: old backend code never reads or
+-- writes the column, and a rollback of the code deploy leaves a harmless extra
+-- column behind.
+
+ALTER TABLE "race_participants" ADD COLUMN "raw_steps" INTEGER;

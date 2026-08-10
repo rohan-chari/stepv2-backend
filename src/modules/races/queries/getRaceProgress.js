@@ -21,6 +21,7 @@ const {
   buildRollContext,
   RARITY_ORDER,
 } = require("../../powerups/powerupOdds");
+const { rawPositionFor, nextRawSteps } = require("../../powerups/rawPosition");
 const { calculateSubsequentSteps } = require("../raceSteps");
 const { GlobalStepEvent } = require("../../steps/models/globalStepEvent");
 const { computeGlobalEventBoost } = require("../../steps/globalStepEvent");
@@ -140,31 +141,32 @@ const HIDDEN_FROM_OPPONENTS = new Set([
 // sample-driven computeEffectModifiers below. Leech is a cross-participant
 // transfer that cannot be expressed from a single participant's snapshot, so it
 // returns no leech transfers here; the real scorer handles it.
-function buildDropOdds({ race, userId, stepTotals, myParticipant, snapshot, supportsPowerups5 = false }) {
+function buildDropOdds({
+  race,
+  userId,
+  stepTotals,
+  persistedParticipants,
+  snapshot,
+  supportsPowerups5 = false,
+}) {
   const { version, config } = snapshot;
-  let position;
-  let totalParticipants;
 
-  if (race.isTeamRace) {
-    const teamTotals = { TEAM_A: 0, TEAM_B: 0 };
-    for (const { participant, totalSteps } of stepTotals) {
-      if (participant.team === "TEAM_A") teamTotals.TEAM_A += totalSteps || 0;
-      else if (participant.team === "TEAM_B") teamTotals.TEAM_B += totalSteps || 0;
-    }
-    const myTeam = myParticipant.team;
-    if (myTeam !== "TEAM_A" && myTeam !== "TEAM_B") return null;
-    const otherTeam = myTeam === "TEAM_A" ? "TEAM_B" : "TEAM_A";
-    position = teamTotals[myTeam] < teamTotals[otherTeam] ? 2 : 1;
-    totalParticipants = 2;
-  } else {
-    const sorted = [...stepTotals].sort((a, b) => b.totalSteps - a.totalSteps);
-    const index = sorted.findIndex(
-      ({ participant }) => participant.userId === userId
-    );
-    if (index === -1) return null;
-    position = index + 1;
-    totalParticipants = sorted.length;
-  }
+  // The odds POSITION comes from RAW WALKED steps on the PERSISTED participant
+  // rows (2026-08-09, docs/box-raw-steps-position-and-option-h-requirements.md)
+  // — the same helper and the same source openMysteryBox / rerollMysteryBox
+  // rank on, so the quoted odds and the actual roll cannot disagree.
+  //
+  // Deliberately NOT the live replay's or the snapshot's `baseAdjusted`: those
+  // can lead the persisted column by a replay cycle, which would make the
+  // quoted odds disagree with the real roll in exactly the manipulated case
+  // this feature exists to fix (the invariant at powerupOdds.js:161-163).
+  const { position, totalParticipants, myTeamValid } = rawPositionFor({
+    participants: persistedParticipants,
+    race,
+    userId,
+  });
+  if (race.isTeamRace && !myTeamValid) return null;
+  if (position === 0 || totalParticipants === 0) return null;
 
   const rarityRow = rarityOddsForPosition(position, totalParticipants, config);
   const rarity = {};
@@ -488,7 +490,17 @@ function buildGetRaceProgress(deps = {}) {
     if (persist) {
       for (const { participant, totalSteps } of stepTotals) {
         if (!participant.finishedAt && !participant.forfeitedAt) {
-          await participantModel.updateTotalSteps(participant.id, totalSteps);
+          // `rawSteps` rides the same write (2026-08-09): the RAW walked total
+          // from this replay's first pass, high-watered against the stored
+          // value. Frozen rows are skipped by the guard above, so a finished
+          // player's raw_steps is never advanced.
+          await participantModel.updateStepTotals(participant.id, {
+            totalSteps,
+            rawSteps: nextRawSteps(
+              participant.rawSteps,
+              participantStepsMap[participant.id]
+            ),
+          });
           snapshotStore.__bump("writeBacks");
         }
       }
@@ -1059,11 +1071,16 @@ function buildGetRaceProgress(deps = {}) {
       const dropOdds = buildDropOdds({
         race,
         userId,
+        // ctx inputs: the SAME true (never illusion-masked) effective totals the
+        // roll builds its exclusion predicates from.
         stepTotals: entries.map((e) => ({
           participant: { userId: e.userId, team: e.team ?? null },
           totalSteps: e.totalSteps,
         })),
-        myParticipant,
+        // Position input: the PERSISTED rows, which is what the roll ranks on.
+        persistedParticipants: race.participants.filter(
+          (p) => p.status === "ACCEPTED"
+        ),
         snapshot: balanceConfigSnapshot,
         supportsPowerups5,
       });

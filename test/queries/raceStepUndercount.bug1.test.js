@@ -109,6 +109,10 @@ function makeDisplayDeps({ samples, rangeRecords, now: nowFn } = {}) {
       Steps: createStepsStore(rangeRecords || {}),
       RaceParticipant: {
         async findById(id) { return { id, powerupSlots: 3 }; },
+        // Mechanical (2026-08-09): production writes participant totals through
+        // updateStepTotals({ totalSteps, rawSteps }); delegate so this fake keeps
+        // recording exactly what it recorded before.
+        async updateStepTotals(id, fields = {}) { return this.updateTotalSteps(id, fields.totalSteps); },
         async updateTotalSteps(id, totalSteps) { updates.push({ id, totalSteps }); },
         async markFinished() {},
         async setPlacement() {},
@@ -186,6 +190,10 @@ function makeSettlementCtx({ samples, rangeRecords, now } = {}) {
       },
     },
     RaceParticipant: {
+      // Mechanical (2026-08-09): production writes participant totals through
+      // updateStepTotals({ totalSteps, rawSteps }); delegate so this fake keeps
+      // recording exactly what it recorded before.
+      async updateStepTotals(id, fields = {}) { return this.updateTotalSteps(id, fields.totalSteps); },
       async updateTotalSteps(id, totalSteps) {
         participantUpdates.push({ id, totalSteps });
       },

@@ -167,6 +167,10 @@ function makeFixture({ participants, effects, dailySteps, windowSteps }) {
         },
       },
       RaceParticipant: {
+        // Mechanical (2026-08-09): production writes participant totals through
+        // updateStepTotals({ totalSteps, rawSteps }); delegate so this fake keeps
+        // recording exactly what it recorded before.
+        async updateStepTotals(id, fields = {}) { return this.updateTotalSteps(id, fields.totalSteps); },
         async updateTotalSteps(id, total) {
           written.set(id, total);
         },

@@ -15,6 +15,7 @@ const {
   withRaceResolutionLock: defaultWithRaceResolutionLock,
 } = require("./withRaceResolutionLock");
 const { computeBoxEffectiveSteps } = require("../../powerups/boxSteps");
+const { nextRawSteps } = require("../../powerups/rawPosition");
 const { raceTimeZone } = require("../raceTimeZone");
 const { applyLeechTransfers } = require("../../powerups/leechTransfers");
 const {
@@ -149,7 +150,17 @@ function buildReconcileUploaderRaces(dependencies = {}) {
         );
         const finalTotal = leechFinals.get(participant.id) ?? total;
 
-        await participantModel.updateTotalSteps(participant.id, finalTotal);
+        // The uploader's own row carries its RAW walked total too (2026-08-09,
+        // docs/box-raw-steps-position-and-option-h-requirements.md). This is
+        // the FRESHEST raw source in the system — it runs on the step upload
+        // itself — and writing it here is what heals a race's odds position
+        // between worker cycles. High-watered: a re-sync that rewrites
+        // step_samples downward must never move a player's odds backwards.
+        // Frozen participants returned above, so they are never advanced.
+        await participantModel.updateStepTotals(participant.id, {
+          totalSteps: finalTotal,
+          rawSteps: nextRawSteps(participant.rawSteps, baseAdjusted),
+        });
 
         // Box progress uses the RAW-walked box total in boxTz = raceTimeZone(
         // race, "UTC") — device-independent, immune to buff/debuff multipliers —

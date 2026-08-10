@@ -212,7 +212,20 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           if (write.kind === "participantTotal") {
             await tx.raceParticipant.update({
               where: { id: write.participantId },
-              data: { totalSteps: write.totalSteps, totalsUpdatedAt: now() },
+              data: {
+                totalSteps: write.totalSteps,
+                totalsUpdatedAt: now(),
+                // The RAW walked total (2026-08-09). Same row, same UPDATE,
+                // same fence, same ascending-userId ordering — no new writer
+                // and no extra statement. The captured value is already
+                // high-watered against the stored one. Omitted (never nulled)
+                // when the capture carries none, so a caller without a raw
+                // figure can't blank a healed row.
+                ...(typeof write.rawSteps === "number" &&
+                Number.isFinite(write.rawSteps)
+                  ? { rawSteps: write.rawSteps }
+                  : {}),
+              },
             });
           } else {
             await tx.raceParticipant.update({

@@ -568,6 +568,73 @@ describe("5a — read-only powerup gates never bulk-write race_participants", ()
     );
     assert.ok(await RaceResolutionJobV2.findByRaceId(raceId));
   });
+
+  // raw_steps (2026-08-09, docs/box-raw-steps-position-and-option-h-requirements.md
+  // test 6e). The odds position now READS a persisted column, and the worker
+  // WRITES it inside the same fenced replay that writes total_steps. Neither
+  // half may add a request-path participant write — a bulk (or even per-row)
+  // write from the open route would reintroduce exactly the second writer C0
+  // removed.
+  it("opening a mystery box reads raw_steps and adds ZERO request-path participant writes", async () => {
+    const alice = await createUser("Alice");
+    const bob = await createUser("Bob");
+    const raceId = await createActiveRace(alice, [bob], "Raw steps single writer");
+
+    await postSamples(alice, [sampleAt(4, 3000)]);
+    await postSamples(bob, [sampleAt(4, 9000)]);
+    await drain(makeWorker());
+
+    const raw = async () =>
+      prisma.$queryRawUnsafe(
+        `SELECT user_id AS "userId", xmin::text AS version,
+                total_steps AS "totalSteps", raw_steps AS "rawSteps"
+         FROM race_participants WHERE race_id = $1 ORDER BY user_id ASC`,
+        raceId
+      );
+
+    const before = await raw();
+    assert.ok(
+      before.every((r) => typeof r.rawSteps === "number"),
+      "the fenced worker replay must be a raw_steps writer"
+    );
+
+    const participant = await prisma.raceParticipant.findFirst({
+      where: { raceId, userId: alice.userId },
+      select: { id: true },
+    });
+    const box = await prisma.racePowerup.create({
+      data: {
+        raceId,
+        participantId: participant.id,
+        userId: alice.userId,
+        type: "MYSTERY_BOX",
+        status: "MYSTERY_BOX",
+        earnedAtSteps: 0,
+      },
+    });
+
+    const res = await request(
+      server.baseUrl,
+      "POST",
+      `/races/${raceId}/powerups/${box.id}/open`,
+      { token: alice.token }
+    );
+    assert.equal(res.status, 200);
+
+    const after = await raw();
+    const bobBefore = before.find((r) => r.userId === bob.userId);
+    const bobAfter = after.find((r) => r.userId === bob.userId);
+    assert.equal(
+      bobAfter.version,
+      bobBefore.version,
+      "a rival's participant row must not be rewritten by a box open"
+    );
+    for (const row of after) {
+      const was = before.find((r) => r.userId === row.userId);
+      assert.equal(row.rawSteps, was.rawSteps, "no request-path raw_steps write");
+      assert.equal(row.totalSteps, was.totalSteps, "no request-path total write");
+    }
+  });
 });
 
 describe("5d — explicit debounce", () => {

@@ -1116,6 +1116,21 @@ model RaceParticipant {
   // the client hides the staleness affordance. Written in the same UPDATE that
   // writes totalSteps, so it costs no extra round-trip.
   totalsUpdatedAt          DateTime?             @map("totals_updated_at")
+  // RAW WALKED steps (`baseAdjusted`) as of the last persist — the same
+  // manipulation-proof quantity box progress uses: no buffs, no debuffs, no
+  // bonus steps, so it only ever grows by walking. Written by every writer of
+  // `totalSteps` (legacy replay persist, the v2 worker's fenced replay, and the
+  // step-upload reconcile), monotonically (`max(existing, baseAdjusted)`) so a
+  // downward re-sync of step_samples can never move a player's odds position
+  // backwards. Frozen (finished/forfeited) rows keep their last persisted value.
+  //
+  // Read ONLY as the mystery-box drop-odds position (openMysteryBox,
+  // rerollMysteryBox, getRaceProgress's dropOdds) via the shared
+  // `rawPositionFor` helper. NULL = never persisted since the deploy; if ANY
+  // accepted participant of a race is NULL the whole race falls back to
+  // `totalSteps`. Additive/nullable, no index (never a query predicate), and
+  // never returned by any API — old app versions are unaffected.
+  rawSteps                 Int?                  @map("raw_steps")
   baselineSteps            Int                   @default(0) @map("baseline_steps")
   nextBoxAtSteps           Int                   @default(0) @map("next_box_at_steps")
   bonusSteps               Int                   @default(0) @map("bonus_steps")

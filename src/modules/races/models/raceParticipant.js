@@ -127,14 +127,38 @@ const RaceParticipant = {
     });
   },
 
-  async updateTotalSteps(id, totalSteps) {
+  // THE participant-total write seam. Every writer of `totalSteps` goes
+  // through here (legacy replay persist, the v2 worker's fenced replay, the
+  // step-upload reconcile) and carries `rawSteps` — the RAW WALKED total that
+  // the mystery-box odds position is derived from
+  // (docs/box-raw-steps-position-and-option-h-requirements.md).
+  //
+  // `rawSteps` is OPTIONAL: omit it and the column is left exactly as it was,
+  // so a caller that has no raw figure in scope can never blank a healed row.
+  // Callers pass an ALREADY-MONOTONIC value (`nextRawSteps(existing, computed)`)
+  // — a downward re-sync of step_samples must never move a player's odds
+  // position backwards.
+  async updateStepTotals(id, { totalSteps, rawSteps } = {}) {
     return prisma.raceParticipant.update({
       where: { id },
       // Item 16 (2026-07-26): stamp WHEN the persisted total was written, in the
       // same UPDATE (no extra round-trip), so GET /races can serve `teams.asOf`
       // without recomputing live totals on the most-frequently-polled screen.
-      data: { totalSteps, totalsUpdatedAt: new Date() },
+      data: {
+        totalSteps,
+        totalsUpdatedAt: new Date(),
+        ...(typeof rawSteps === "number" && Number.isFinite(rawSteps)
+          ? { rawSteps: Math.max(0, Math.round(rawSteps)) }
+          : {}),
+      },
     });
+  },
+
+  // Thin wrapper, kept because callers SPREAD this model (computeRaceState's
+  // write capture) and because ~20 unit-test fakes implement it. Writes no
+  // `rawSteps`, so it is only correct for a caller that genuinely has none.
+  async updateTotalSteps(id, totalSteps) {
+    return this.updateStepTotals(id, { totalSteps });
   },
 
   async markFinished(id, finishedAt, finishTotalSteps) {

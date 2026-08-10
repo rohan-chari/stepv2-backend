@@ -335,6 +335,10 @@ test("Protein Shake +1500 bonus that doesn't reach target does NOT trigger win",
     },
     RaceParticipant: {
       async findById(id) { return { id, powerupSlots: 3 }; },
+        // Mechanical (2026-08-09): production writes participant totals through
+        // updateStepTotals({ totalSteps, rawSteps }); delegate so this fake keeps
+        // recording exactly what it recorded before.
+        async updateStepTotals(id, fields = {}) { return this.updateTotalSteps(id, fields.totalSteps); },
         async updateTotalSteps() {},
       async markFinished(id, time) { finishCalls.push({ id, time }); },
       async setPlacement() {},
@@ -401,6 +405,10 @@ test("Protein Shake bonus is reflected in the race progress total", async () => 
     },
     RaceParticipant: {
       async findById(id) { return { id, powerupSlots: 3 }; },
+        // Mechanical (2026-08-09): production writes participant totals through
+        // updateStepTotals({ totalSteps, rawSteps }); delegate so this fake keeps
+        // recording exactly what it recorded before.
+        async updateStepTotals(id, fields = {}) { return this.updateTotalSteps(id, fields.totalSteps); },
         async updateTotalSteps() {},
       async markFinished() {},
       async setPlacement() {},
