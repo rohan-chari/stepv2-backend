@@ -7,24 +7,24 @@
  */
 
 :root {
-  --background: #12291F;
+  --background: #2E5D47;
   --foreground: #F6EFE1;
-  --card: #1B3A2B;
+  --card: #356951;
   --card-foreground: #F6EFE1;
-  --popover: #1B3A2B;
+  --popover: #356951;
   --popover-foreground: #F6EFE1;
   --primary: #F0B429;
   --primary-foreground: #12291F;
-  --secondary: #224835;
+  --secondary: #3F7A5C;
   --secondary-foreground: #F6EFE1;
-  --muted: #224835;
-  --muted-foreground: #A8C4B4;
+  --muted: #3F7A5C;
+  --muted-foreground: #CFE0D5;
   --accent: #D9552B;
   --accent-foreground: #F6EFE1;
   --destructive: #E4593C;
   --destructive-foreground: #F6EFE1;
-  --border: #2C5842;
-  --input: #2C5842;
+  --border: #4A8467;
+  --input: #4A8467;
   --ring: #F0B429;
   --radius: 0.625rem;
   --paper: #F6EFE1;
@@ -35,9 +35,9 @@
   --paper-accent: #2E5D47;
   --paper-ember: #9C3617;
   --destructive-paper: #A32516;
-  --bara-moss: #6FA687;
-  --bara-canopy-deep: #0B1A13;
-  --bara-shadow: rgba(5, 15, 10, 0.45);
+  --bara-moss: #77A98B;
+  --bara-canopy-deep: #213128;
+  --bara-shadow: rgba(15, 30, 22, 0.35);
   --font-display: 'Bricolage Grotesque', ui-sans-serif, system-ui, sans-serif;
   --font-body: 'Instrument Sans', ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: 'Space Mono', ui-monospace, SFMono-Regular, Menlo, monospace;

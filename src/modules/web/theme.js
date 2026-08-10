@@ -30,14 +30,18 @@
 // themselves with no per-component overrides.
 
 const TOKENS = {
-  // ── Base: dusk under the canopy ───────────────────────────────────────────
-  "--background": "#12291F",
+  // ── Base: the app's own forest green ──────────────────────────────────────
+  // These ARE the app's palette (lib/styles.dart AppColors): roofMid #2E5D47
+  // for the ground, roofDark #213128 for the deepest step, roofRidge #77A98B
+  // for the soft highlight. The site previously ran a much darker green of its
+  // own invention, which read as a different product next to the app.
+  "--background": "#2E5D47",
   "--foreground": "#F6EFE1",
 
-  // Raised surfaces on the dark ground.
-  "--card": "#1B3A2B",
+  // Raised surfaces, each a step lighter than the one below it.
+  "--card": "#356951",
   "--card-foreground": "#F6EFE1",
-  "--popover": "#1B3A2B",
+  "--popover": "#356951",
   "--popover-foreground": "#F6EFE1",
 
   // ── Primary: lantern gold. The trail, the coin, the CTA. ──────────────────
@@ -45,13 +49,15 @@ const TOKENS = {
   "--primary-foreground": "#12291F",
 
   // Secondary — a quiet raised step for inert chrome.
-  "--secondary": "#224835",
+  "--secondary": "#3F7A5C",
   "--secondary-foreground": "#F6EFE1",
 
-  // Muted — supporting copy on the dark ground. Contrast-checked against
-  // --background (#12291F): ~7.4:1, comfortably past AA for body text.
-  "--muted": "#224835",
-  "--muted-foreground": "#A8C4B4",
+  // Muted — supporting copy on the green ground. Lightened along with the
+  // background: the old #A8C4B4 was tuned for a near-black green and drops to
+  // ~2.9:1 on #2E5D47. This is 5.6:1, past AA for body and for the small mono
+  // nav/eyebrow type that uses it.
+  "--muted": "#3F7A5C",
+  "--muted-foreground": "#CFE0D5",
 
   // ── Accent: ember. Sabotage energy — powerups, hazards. Used sparingly; ────
   // this is the loudest colour on the page and earns its keep only on the
@@ -67,8 +73,8 @@ const TOKENS = {
   "--destructive-foreground": "#F6EFE1",
 
   // Lines, inputs, focus rings.
-  "--border": "#2C5842",
-  "--input": "#2C5842",
+  "--border": "#4A8467",
+  "--input": "#4A8467",
   "--ring": "#F0B429",
 
   "--radius": "0.625rem",
@@ -92,9 +98,13 @@ const TOKENS = {
   "--destructive-paper": "#A32516",
 
   // ── Bara extras ───────────────────────────────────────────────────────────
-  "--bara-moss": "#6FA687",
-  "--bara-canopy-deep": "#0B1A13",
-  "--bara-shadow": "rgba(5, 15, 10, 0.45)",
+  // roofRidge and roofDark, straight from the app.
+  "--bara-moss": "#77A98B",
+  // The deepest step: footer ground, the hard offset under every button, and
+  // the label strip on the share-link card. Dark enough to read as a shadow
+  // against gold while still being one of the app's own greens.
+  "--bara-canopy-deep": "#213128",
+  "--bara-shadow": "rgba(15, 30, 22, 0.35)",
 };
 
 // ── Type ─────────────────────────────────────────────────────────────────────

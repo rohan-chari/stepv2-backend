@@ -94,9 +94,12 @@ function shell({ title, description, body, links, primaryHtml, scriptBody }) {
       padding:0; position:relative; overflow:hidden; box-shadow:0 10px 30px var(--bara-shadow); }
     .board-inner { position:relative; }
 
+    /* The label strip sits on the DEEPEST green, not --secondary: gold on
+       --secondary is ~2.7:1, which this 0.72rem mono type cannot carry. On
+       --bara-canopy-deep it is 7.3:1. */
     .section { padding:14px 18px; font-family:var(--font-mono); text-transform:uppercase;
       letter-spacing:0.18em; font-size:0.72rem; color:var(--primary); text-align:center;
-      border-bottom:1px solid var(--border); background:var(--secondary); }
+      border-bottom:1px solid var(--border); background:var(--bara-canopy-deep); }
 
     .invite-body { padding:26px 20px 28px; text-align:center; }
     .invite-name { font-family:var(--font-display); font-weight:800; font-size:1.35rem; line-height:1.25;
