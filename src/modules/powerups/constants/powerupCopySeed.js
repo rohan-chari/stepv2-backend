@@ -31,7 +31,13 @@ const POWERUP_COPY_SEED = [
     name: "Leg Cramp",
     description: "Freeze a rival's steps for 1 hour",
     shortDescription: "Steps frozen",
-    upgradeTierLabels: ["Freeze 1h", "Freeze 2h", "Freeze 3h", "Freeze 4h"],
+    // Batch 2026-08-09 item 1: +15m per level, not +1h.
+    upgradeTierLabels: [
+      "Freeze 1h",
+      "Freeze 1h 15m",
+      "Freeze 1h 30m",
+      "Freeze 1h 45m",
+    ],
   },
   {
     powerupType: "RED_CARD",
@@ -98,11 +104,12 @@ const POWERUP_COPY_SEED = [
     name: "Wrong Turn",
     description: "Reverse a rival's steps for 1 hour",
     shortDescription: "Steps reversed",
+    // Batch 2026-08-09 item 1: +15m per level, not +1h.
     upgradeTierLabels: [
       "Reverse 1h",
-      "Reverse 2h",
-      "Reverse 3h",
-      "Reverse 4h",
+      "Reverse 1h 15m",
+      "Reverse 1h 30m",
+      "Reverse 1h 45m",
     ],
   },
   {
@@ -139,14 +146,27 @@ const POWERUP_COPY_SEED = [
   {
     powerupType: "LUCKY_HORSESHOE",
     name: "Lucky Horseshoe",
-    description: "Guarantee a better next mystery box",
-    shortDescription: "Next box boosted",
-    upgradeTierLabels: [
-      "Next box uncommon+",
-      "Better rare odds",
-      "Strong rare odds",
-      "Next box rare",
-    ],
+    // Batch 2026-08-09 item 8b: the guarantee is now unconditional at every
+    // level, and a forced box can no longer hand back another Horseshoe.
+    description: "Guarantees a rare powerup from your next box; can't grant another Horseshoe",
+    shortDescription: "Next box rare",
+    // DELIBERATELY EMPTY while LUCKY_HORSESHOE is still in `upgradeableTypes` —
+    // the one type where those two things disagree, and on purpose:
+    //   * it must STAY upgradeable, because a frozen binary decides "is this
+    //     upgradeable?" from its BUNDLED table and would take a permanent 400
+    //     if the server dropped it (upgradeCosts.byType zeroes the price at
+    //     every level instead, making those upgrades free and inert — the
+    //     numbers live in balanceConfig.defaults, not here, and must not be
+    //     restated as a bracketed ladder literal or the balanceConfig
+    //     structural guard reads this comment as a duplicated cost table);
+    //   * but it must ship NO tier labels, because the server snapshot wins
+    //     over the client's bundled fallback, and a NEW build hides the upgrade
+    //     UI precisely when the label list comes back empty. Leaving the four
+    //     labels here would make new builds render a free, inert upgrade UI for
+    //     a ladder that no longer does anything.
+    // The 4-entries-per-upgradeable-type invariant carries an explicit
+    // exception for this type; see getPowerupCopyCatalog.test.js.
+    upgradeTierLabels: [],
   },
   {
     powerupType: "CAMPFIRE_REST",

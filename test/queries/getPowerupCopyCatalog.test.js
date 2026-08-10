@@ -149,14 +149,56 @@ test("each entry carries name, description, shortDescription and upgradeTierLabe
   }
 });
 
+// RETIRED LADDERS: upgradeable for compatibility, but with no tier labels.
+//
+// LUCKY_HORSESHOE (batch 2026-08-09 item 8b) is the only member and the only
+// place the two lists are allowed to disagree. It must STAY in
+// `upgradeableTypes` or every frozen binary — which decides "is this
+// upgradeable?" from its BUNDLED table — takes a permanent 400 on an upgrade it
+// still offers; the cost ladder is zeroed to [0,0,0,0] instead, so those
+// upgrades are free and inert. But it must ship NO labels, because the server
+// snapshot wins over the bundled fallback and a NEW build hides the upgrade UI
+// exactly when the label list is empty.
+//
+// This is an explicit, named exception rather than a loosened assertion: every
+// other upgradeable type must still carry exactly 4 labels, every
+// non-upgradeable type must still carry 0, and adding a type here requires
+// stating why its ladder is retired.
+const RETIRED_UPGRADE_LADDERS = new Set(["LUCKY_HORSESHOE"]);
+
 test("upgradeTierLabels has 4 entries for every upgradeable type and is empty otherwise", () => {
   for (const row of POWERUP_COPY_SEED) {
-    const expected = UPGRADEABLE_TYPES.has(row.powerupType) ? 4 : 0;
+    const expected =
+      UPGRADEABLE_TYPES.has(row.powerupType) &&
+      !RETIRED_UPGRADE_LADDERS.has(row.powerupType)
+        ? 4
+        : 0;
     assert.equal(
       row.upgradeTierLabels.length,
       expected,
       `${row.powerupType} should have ${expected} tier labels`
     );
+  }
+});
+
+test("a retired ladder stays upgradeable but ships no labels and costs nothing", () => {
+  const { upgradeCost } = require("../../src/modules/powerups/powerupUpgrades");
+  for (const type of RETIRED_UPGRADE_LADDERS) {
+    const row = POWERUP_COPY_SEED.find((r) => r.powerupType === type);
+    assert.ok(row, `${type} must still have a copy row`);
+    // The frozen-client contract: still upgradeable server-side...
+    assert.ok(
+      UPGRADEABLE_TYPES.has(type),
+      `${type} must stay upgradeable or frozen clients 400`
+    );
+    // ...but free, so the inert upgrade an old build offers costs the user nothing.
+    assert.deepEqual(
+      [0, 1, 2, 3].map((lvl) => upgradeCost(type, lvl)),
+      [0, 0, 0, 0],
+      `${type} upgrades must be free`
+    );
+    // ...and invisible to any build that reads the server snapshot.
+    assert.deepEqual(row.upgradeTierLabels, []);
   }
 });
 

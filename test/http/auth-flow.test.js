@@ -85,6 +85,7 @@ test("POST /auth/apple provisions the signed-in user", async () => {
         // above. Pinned here because this deepEqual is the contract test for
         // the exact featureFlags payload every client receives.
         onboardingInviteCodeEnabled: true,
+        tutorialMandatoryEnabled: false,
       },
     });
     assert.equal(typeof body.sessionToken, "string");

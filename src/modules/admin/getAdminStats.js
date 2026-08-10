@@ -1,4 +1,5 @@
 const { prisma: defaultPrisma } = require("../../db");
+const { AD_COIN_REWARD_DAILY_CAP } = require("../economy/adRewards");
 
 // One-shot product-health snapshot for the admin Statistics card. Read-only,
 // admin-gated, and computed entirely in SQL so the numbers are timezone-safe
@@ -16,12 +17,237 @@ const { prisma: defaultPrisma } = require("../../db");
 //   * Funnel     — link_opens (top), referrals attached at signup, referees
 //     who joined any race, referees whose referral qualified/was rewarded
 //     (i.e. finished their first qualifying race).
+//
+// ── OPTIONAL SECTIONS (batch 2026-08-09 item 10) ────────────────────────────
+//
+// `getAdminStats({ sections })` — and `GET /admin/stats?sections=a,b` — adds
+// aggregate blocks that the SHIPPED admin build cannot render. Passing no
+// sections returns exactly the payload above and runs exactly the queries
+// above: not one extra `$queryRaw`. That is the whole point of the parameter.
+// Prod is a one-vCPU box and these are ~5 additional grouped aggregates; the
+// old build must not pay for them, and neither must a new build whose section
+// is collapsed. The frontend requests each section lazily as it expands.
+//
+// Contract (LOCKED — the frontend codes against these exact key names):
+//   sections=economy -> coinEconomy: {
+//     windowDays, timeZone,
+//     days: [{ date, minted, sunk }],
+//     purchasesBySku: [{ sku, count, coins }],
+//     boxOpens: [{ date, count }] }
+//   sections=ads     -> adRevenue: {
+//     windowDays, timeZone,
+//     days: [{ date, coinRewardWatches, extraSpinWatches }],
+//     capUtilization: { avgWatchesPerUser, usersAtCap } }
+// Unknown section names are ignored rather than rejected, so a newer admin
+// build asking for a section this backend has not shipped yet degrades to a
+// missing key instead of a 400.
+//
+// INDEXES. Every new aggregate is bounded to 30 days and reviewed below; none
+// of them ships a migration, deliberately:
+//   * coin_transactions      — filtered on created_at. The existing indexes are
+//     (user_id) and (user_id, reason, created_at); neither leads on created_at,
+//     so the daily ledger roll-up is a seq scan. At the current table size
+//     (well under a million rows at ~1k DAU) that is milliseconds on an
+//     admin-only, human-triggered endpoint. IF this gets slow, the index to add
+//     is `coin_transactions(created_at)` — do not add it speculatively; it is a
+//     write-path cost on the hottest ledger in the system.
+//   * race_powerup_events    — the daily box-open roll-up filters
+//     event_type + created_at. It is STRICTLY CHEAPER than the pre-existing
+//     `avgUniqueBoxOpenersPerDay` query in the default payload, which scans the
+//     same table with NO time bound at all. Nothing to add here that the
+//     default payload would not have needed first.
+//   * ad_reward_grants       — filtered on created_at; the existing index is
+//     (user_id, granted_date). Smallest table of the three (one row per
+//     verified ad watch). Seq scan accepted for the same reason.
+//   * powerup_purchase_requests / user_shop_items — one row per purchase ever
+//     made, in the low thousands. Seq scan accepted.
+// No EXPLAIN on this branch showed a plan that justified a migration; re-check
+// when any of these tables crosses ~10^6 rows.
+//
+// TIME ZONE. New queries use the two-step
+// `(col AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date` form, which
+// is the correct one for this schema: prod datetimes are `timestamp without
+// time zone` holding UTC, so the one-step form (used by the older
+// `avgUniqueBoxOpenersPerDay` query) mislabels rows near midnight. The older
+// query is left alone — changing it would restate an existing number.
 function buildGetAdminStats(dependencies = {}) {
   const prisma = dependencies.prisma || defaultPrisma;
 
   const n = (v) => Number(v ?? 0);
+  const round1 = (v) => (v == null ? null : Math.round(Number(v) * 10) / 10);
 
-  return async function getAdminStats() {
+  const KNOWN_SECTIONS = new Set(["economy", "ads"]);
+  function parseSections(raw) {
+    const list = Array.isArray(raw)
+      ? raw
+      : typeof raw === "string"
+        ? raw.split(",")
+        : [];
+    return new Set(
+      list
+        .map((s) => String(s).trim().toLowerCase())
+        .filter((s) => KNOWN_SECTIONS.has(s))
+    );
+  }
+
+  // ── economy section ───────────────────────────────────────────────────────
+  async function loadCoinEconomy() {
+    // Coins MINTED vs SUNK per ET day. One signed ledger, so the split is a
+    // sign filter rather than a reason allowlist — a new coin source or sink
+    // is counted the day it ships, with no list to keep in sync. `sunk` is
+    // reported POSITIVE (magnitude), which is what the chart plots.
+    const ledgerRows = await prisma.$queryRaw`
+      /* coinLedgerDaily */
+      SELECT
+        to_char(
+          (created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date,
+          'YYYY-MM-DD'
+        )                                                          AS date,
+        COALESCE(SUM(amount) FILTER (WHERE amount > 0), 0)::bigint  AS minted,
+        COALESCE(-SUM(amount) FILTER (WHERE amount < 0), 0)::bigint AS sunk
+      FROM coin_transactions
+      WHERE created_at >= now() - interval '30 days'
+      GROUP BY 1
+      ORDER BY 1`;
+
+    // Purchases by SKU across BOTH shops. The powerup side reads the purchase
+    // REQUEST table rather than coin_transactions because the ledger's ref_id
+    // for a powerup purchase is the per-request id, not the SKU — the ledger
+    // literally cannot answer "which SKU". SUCCEEDED only: a PROCESSING row is
+    // an in-flight or abandoned attempt.
+    const purchaseRows = await prisma.$queryRaw`
+      /* purchasesBySku */
+      SELECT sku, COUNT(*)::bigint AS count, COALESCE(SUM(coins), 0)::bigint AS coins
+      FROM (
+        SELECT psi.sku AS sku, ppr.coins_spent AS coins
+        FROM powerup_purchase_requests ppr
+        JOIN powerup_shop_items psi ON psi.id = ppr.powerup_shop_item_id
+        WHERE ppr.status = 'SUCCEEDED'
+          AND ppr.created_at >= now() - interval '30 days'
+        UNION ALL
+        SELECT si.sku AS sku, si.price_coins AS coins
+        FROM user_shop_items usi
+        JOIN shop_items si ON si.id = usi.shop_item_id
+        WHERE usi.purchased_at >= now() - interval '30 days'
+      ) p
+      GROUP BY sku
+      ORDER BY coins DESC, sku ASC`;
+
+    // Box opens per ET day. Distinct from the default payload's
+    // `avgUniqueBoxOpenersPerDay` (distinct USERS, all time, one scalar): this
+    // is the raw open COUNT per day, which is the series the chart draws.
+    const boxRows = await prisma.$queryRaw`
+      /* boxOpensDaily */
+      SELECT
+        to_char(
+          (created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date,
+          'YYYY-MM-DD'
+        )               AS date,
+        COUNT(*)::bigint AS count
+      FROM race_powerup_events
+      WHERE event_type = 'MYSTERY_BOX_OPENED'
+        AND created_at >= now() - interval '30 days'
+      GROUP BY 1
+      ORDER BY 1`;
+
+    return {
+      windowDays: 30,
+      timeZone: "America/New_York",
+      days: (ledgerRows || []).map((row) => ({
+        date: row.date,
+        minted: n(row.minted),
+        sunk: n(row.sunk),
+      })),
+      purchasesBySku: (purchaseRows || []).map((row) => ({
+        sku: row.sku,
+        count: n(row.count),
+        coins: n(row.coins),
+      })),
+      boxOpens: (boxRows || []).map((row) => ({
+        date: row.date,
+        count: n(row.count),
+      })),
+    };
+  }
+
+  // ── ads section ───────────────────────────────────────────────────────────
+  async function loadAdRevenue() {
+    // Verified watches per ET day, by reward kind. created_at is the SSV
+    // verification time (server-trusted); granted_date is client-supplied and
+    // is deliberately NOT used for the trend — same rule the default payload's
+    // rewardedAds block already follows.
+    const dayRows = await prisma.$queryRaw`
+      /* adWatchesDaily */
+      SELECT
+        to_char(
+          (created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date,
+          'YYYY-MM-DD'
+        )                                                              AS date,
+        COUNT(*) FILTER (WHERE reward_kind = 'coin_reward')::bigint     AS coin_reward_watches,
+        COUNT(*) FILTER (WHERE reward_kind = 'extra_daily_spin')::bigint AS extra_spin_watches
+      FROM ad_reward_grants
+      WHERE created_at >= now() - interval '30 days'
+      GROUP BY 1
+      ORDER BY 1`;
+
+    // Cap utilization. This one DOES bucket by granted_date, and that is not an
+    // inconsistency with the trend above: granted_date is the user-LOCAL day
+    // the daily cap is actually enforced on, so it is the only bucketing under
+    // which "hit the cap" means what the player experienced.
+    //
+    // avgWatchesPerUser: mean coin-reward watches per (user, day) that had at
+    // least one watch — i.e. among watchers, not diluted by the whole base,
+    // averaged across the whole 30-day window. NULL (not 0) when nobody has
+    // watched, so the UI can render an em dash.
+    //
+    // usersAtCap is scoped to the LATEST granted_date in the window, not to the
+    // window as a whole (code review 2026-08-09). The admin card labels this
+    // "Users at cap", which reads as a CURRENT count; a 30-day-wide filter
+    // answered a different question — "users who hit the cap on at least one
+    // day in the last month" — and drifted further from the label the longer
+    // the window ran, since it only ever accumulates. The JSON key is part of
+    // the locked contract and is deliberately NOT renamed; the number is
+    // brought in line with the label instead.
+    //
+    // granted_date is a YYYY-MM-DD string, so MAX() is lexicographic and
+    // therefore also chronological. An empty table yields NULL, the FILTER
+    // matches nothing, and usersAtCap is 0 — not an error.
+    const cap = AD_COIN_REWARD_DAILY_CAP;
+    const [capRow] = await prisma.$queryRaw`
+      /* adCapUtilization */
+      WITH per_user_day AS (
+        SELECT user_id, granted_date, COUNT(*) AS watches
+        FROM ad_reward_grants
+        WHERE reward_kind = 'coin_reward'
+          AND created_at >= now() - interval '30 days'
+        GROUP BY 1, 2
+      ),
+      latest_day AS (SELECT MAX(granted_date) AS d FROM per_user_day)
+      SELECT
+        AVG(watches)::float AS avg_watches_per_user,
+        COUNT(DISTINCT user_id) FILTER (
+          WHERE watches >= ${cap}
+            AND granted_date = (SELECT d FROM latest_day)
+        )::bigint AS users_at_cap
+      FROM per_user_day`;
+
+    return {
+      windowDays: 30,
+      timeZone: "America/New_York",
+      days: (dayRows || []).map((row) => ({
+        date: row.date,
+        coinRewardWatches: n(row.coin_reward_watches),
+        extraSpinWatches: n(row.extra_spin_watches),
+      })),
+      capUtilization: {
+        avgWatchesPerUser: round1(capRow?.avg_watches_per_user),
+        usersAtCap: n(capRow?.users_at_cap),
+      },
+    };
+  }
+
+  return async function getAdminStats(options = {}) {
+    const sections = parseSections(options?.sections);
     const [userRows] = await prisma.$queryRaw`
       SELECT
         COUNT(*)::bigint                                                            AS total,
@@ -389,7 +615,7 @@ function buildGetAdminStats(dependencies = {}) {
       return byPlatform;
     }
 
-    return {
+    const payload = {
       generatedAt: new Date().toISOString(),
       users: {
         total: n(userRows?.total),
@@ -466,6 +692,13 @@ function buildGetAdminStats(dependencies = {}) {
         byPlatformLast30Days: onboardingByPlatform("sessions_30d"),
       },
     };
+
+    // Opt-in sections, appended AFTER the default payload is assembled so the
+    // default query set stays byte-identical in both order and content.
+    if (sections.has("economy")) payload.coinEconomy = await loadCoinEconomy();
+    if (sections.has("ads")) payload.adRevenue = await loadAdRevenue();
+
+    return payload;
   };
 }
 

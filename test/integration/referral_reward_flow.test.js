@@ -297,12 +297,10 @@ describe("Step 2 — reward on first qualifying race (happy path)", () => {
     });
   });
 
-  it("a SEEDED solo race also qualifies (seedId path) and pays", async () => {
-    const { referrer, referee } = await attributedReferee();
-
-    // A seed whose id is NOT in raceFinishReward config → qualifies via seedId
-    // but mints 0 finish reward, keeping the balance assertions clean.
-    const seed = await prisma.raceSeed.create({
+  // A seed whose id is NOT in raceFinishReward config: it exercises the seedId
+  // path but mints 0 finish reward, keeping the balance assertions clean.
+  async function testSeed() {
+    return prisma.raceSeed.create({
       data: {
         id: "test-referral-seed",
         kind: "TEST_REFERRAL",
@@ -311,6 +309,27 @@ describe("Step 2 — reward on first qualifying race (happy path)", () => {
         cadence: "DAILY",
       },
     });
+  }
+
+  // ── Batch 2026-08-09 item 2 — DELIBERATE BEHAVIOR INVERSION ───────────────
+  //
+  // This assertion used to read "a SEEDED solo race also qualifies (seedId
+  // path) and pays". It is inverted here on purpose, with owner sign-off in
+  // docs/feature-batch-2026-08-09-requirements.md item 2 — a product-behavior
+  // change, NOT a weakened assertion. The gate went from
+  //   race.seedId != null || realParticipants.length >= 2
+  // to
+  //   race.seedId == null && realParticipants.length >= 2
+  // because every new account is auto-enrolled in the seeded dailies, so the
+  // old rule completed a referral within ~24h for zero real engagement.
+  //
+  // The assertion is STRENGTHENED rather than merely flipped: it pins that the
+  // referral survives as PENDING (still able to qualify inside its 30-day
+  // window via a real race), that neither side was paid, and that no grant row
+  // exists.
+  it("a SEEDED solo race does NOT qualify (auto-enrolled daily is not engagement)", async () => {
+    const { referrer, referee } = await attributedReferee();
+    const seed = await testSeed();
 
     const completeRace = buildCompleteRace({ eventBus: makeFakeBus() });
     const race = await seedRace({
@@ -320,9 +339,102 @@ describe("Step 2 — reward on first qualifying race (happy path)", () => {
     await completeRace({ raceId: race.id, winnerUserId: referee.id, participantUserIds: [referee.id] });
 
     const ref = await getReferral(referee.id);
-    assert.equal(ref.status, "REWARDED");
-    assert.equal(await coinsOf(referrer.id), REFERRER_REWARD_COINS);
-    assert.equal(await coinsOf(referee.id), REFEREE_REWARD_COINS);
+    assert.equal(ref.status, "PENDING", "referral stays claimable, not rewarded");
+    assert.equal(await prisma.referralRewardGrant.count(), 0);
+    assert.equal(await coinsOf(referrer.id), 0);
+    assert.equal(await coinsOf(referee.id), 0);
+  });
+
+  // The architect-required hardening case. The solo-seeded test above would
+  // ALSO pass under a buggy `seedId == null || length >= 2`; only a seeded race
+  // with two genuine finishers separates the correct AND from that OR.
+  it("a SEEDED race with TWO real finishers still does NOT qualify", async () => {
+    const { referrer, referee } = await attributedReferee();
+    const opponent = await makeUser();
+    const seed = await testSeed();
+
+    const completeRace = buildCompleteRace({ eventBus: makeFakeBus() });
+    const race = await seedRace({
+      seedId: seed.id,
+      participants: [
+        { user: referee, placement: 2, totalSteps: 5000 },
+        { user: opponent, placement: 1, totalSteps: 8000 },
+      ],
+    });
+    await completeRace({
+      raceId: race.id,
+      winnerUserId: opponent.id,
+      participantUserIds: [referee.id, opponent.id],
+    });
+
+    const ref = await getReferral(referee.id);
+    assert.equal(ref.status, "PENDING");
+    assert.equal(await prisma.referralRewardGrant.count(), 0);
+    assert.equal(await coinsOf(referrer.id), 0);
+    assert.equal(await coinsOf(referee.id), 0);
+  });
+
+  // Polarity-flip guard. The gate moved from fail-CLOSED (`undefined != null`
+  // is false) to fail-OPEN (`undefined == null` is true), so a caller handing
+  // over a race projection that never SELECTed seedId would silently re-qualify
+  // every seeded daily. completeRace loads via Race.findById, which uses
+  // `include` (all scalars) — this pins that the object it hands over really
+  // does carry the key, so a future lean `select:` on that path fails here
+  // rather than in prod.
+  it("the settlement path hands grantReferralRewardsForRace a race carrying seedId", async () => {
+    const { referee } = await attributedReferee();
+    const opponent = await makeUser();
+    const seed = await testSeed();
+    const race = await seedRace({
+      seedId: seed.id,
+      participants: [
+        { user: referee, placement: 2, totalSteps: 5000 },
+        { user: opponent, placement: 1, totalSteps: 8000 },
+      ],
+    });
+
+    let handedOver = null;
+    const completeRace = buildCompleteRace({
+      eventBus: makeFakeBus(),
+      grantReferralRewardsForRace: async ({ race: r }) => {
+        handedOver = r;
+        return [];
+      },
+    });
+    await completeRace({
+      raceId: race.id,
+      winnerUserId: opponent.id,
+      participantUserIds: [referee.id, opponent.id],
+    });
+
+    assert.ok(handedOver, "settlement called the referral service");
+    assert.ok(
+      Object.prototype.hasOwnProperty.call(handedOver, "seedId"),
+      "the race projection MUST carry seedId or the gate fails open"
+    );
+    assert.equal(handedOver.seedId, seed.id);
+  });
+
+  // The gate's own fail-closed backstop, exercised directly at the service
+  // seam rather than through settlement (no settlement path can produce this
+  // object today — that is exactly why it needs pinning).
+  it("a race object with NO seedId key is treated as unqualified, not qualified", async () => {
+    const { referrer, referee } = await attributedReferee();
+    const opponent = await makeUser();
+
+    const events = await grantReferralRewardsForRace({
+      race: {
+        id: "projection-without-seed-id",
+        participants: [
+          { userId: referee.id, status: "ACCEPTED", placement: 2, totalSteps: 5000 },
+          { userId: opponent.id, status: "ACCEPTED", placement: 1, totalSteps: 8000 },
+        ],
+      },
+    });
+
+    assert.deepEqual(events, []);
+    assert.equal((await getReferral(referee.id)).status, "PENDING");
+    assert.equal(await coinsOf(referrer.id), 0);
   });
 });
 

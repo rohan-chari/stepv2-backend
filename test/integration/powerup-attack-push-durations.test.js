@@ -181,7 +181,11 @@ describe("powerup attack push states the real effect duration", () => {
     assert.doesNotMatch(push.body, /2 hours/);
   });
 
-  it("Lvl 2 Leg Cramp push says 3 hours (ladder-aware)", async () => {
+  // Batch 2026-08-09 item 1: the LC/WT ladders are now +15m per level, and the
+  // push renders them through the SHARED formatter — so this case also pins
+  // that the notification says "1h 30m" and never the old hand-rolled
+  // non-integer fallback ("90 minutes") or a decimal ("1.5 hours").
+  it("Lvl 2 Leg Cramp push says 1h 30m (ladder-aware, shared formatter)", async () => {
     const alice = await createUser("AliceLC2");
     const bob = await createUser("BobLC2");
     await makeFriends(alice, bob);
@@ -198,10 +202,12 @@ describe("powerup attack push states the real effect duration", () => {
 
     const push = await waitForPush(attackPushTo(bob.userId));
     assert.ok(push, "victim gets an attack push");
-    assert.match(push.body, /frozen for 3 hours/);
+    assert.match(push.body, /frozen for 1h 30m/);
+    assert.doesNotMatch(push.body, /90 minutes/);
+    assert.doesNotMatch(push.body, /\d\.\d/);
   });
 
-  it("Lvl 1 Wrong Turn push says 2 hours (ladder-aware), base says 1 hour", async () => {
+  it("Lvl 1 Wrong Turn push says 1h 15m (ladder-aware), base says 1 hour", async () => {
     const alice = await createUser("AliceWT");
     const bob = await createUser("BobWT");
     const carol = await createUser("CarolWT");
@@ -232,7 +238,8 @@ describe("powerup attack push states the real effect duration", () => {
     );
     const lvlPush = await waitForPush(attackPushTo(carol.userId));
     assert.ok(lvlPush, "upgraded victim gets an attack push");
-    assert.match(lvlPush.body, /reversed for 2 hours/);
+    assert.match(lvlPush.body, /reversed for 1h 15m/);
+    assert.doesNotMatch(lvlPush.body, /75 minutes/);
   });
 
   it("Quicksand push says 1 hour (standardized), not the old 2 hours", async () => {

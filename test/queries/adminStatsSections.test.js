@@ -1,0 +1,328 @@
+const assert = require("node:assert/strict");
+const test = require("node:test");
+
+const { buildGetAdminStats } = require("../../src/modules/admin/getAdminStats");
+
+// Batch 2026-08-09 item 10 — `GET /admin/stats?sections=`.
+//
+// The LOCKED contract this pins:
+//   * no `sections`  -> EXACTLY today's payload, and EXACTLY today's query set.
+//     The shipped admin build must not pay for aggregates it cannot render, on
+//     a one-vCPU box. This is asserted structurally (query count + absence of
+//     the new keys), not by eyeballing the JSON.
+//   * sections=economy -> adds `coinEconomy`
+//   * sections=ads     -> adds `adRevenue`
+// Key names are frontend-visible and must never be renamed.
+
+// A prisma double that records every SQL statement it is asked to run, so a
+// test can assert that an unrequested section costs ZERO extra queries.
+function makeFakePrisma(handlers = {}) {
+  const seen = [];
+  return {
+    seen,
+    async $queryRaw(strings, ...values) {
+      const sql = Array.isArray(strings) ? strings.join(" ? ") : String(strings);
+      seen.push(sql);
+      for (const [needle, rows] of Object.entries(handlers)) {
+        if (sql.includes(needle)) return rows;
+      }
+      // Defaults for the always-on blocks so the assembler never throws.
+      if (sql.includes("FROM users") && sql.includes("new_7d")) {
+        return [{ total: 0n, new_7d: 0n, new_30d: 0n }];
+      }
+      if (sql.includes("dau_in_active_race")) {
+        return [{ dau: 0n, dau_in_active_race: 0n }];
+      }
+      return [];
+    },
+  };
+}
+
+// The new aggregates each carry a unique SQL comment marker so a test can
+// identify them without matching a table name that a legacy query also uses
+// (`ad_reward_grants` and `MYSTERY_BOX_OPENED` both already appear above).
+const ECONOMY_MARKERS = ["coinLedgerDaily", "purchasesBySku", "boxOpensDaily"];
+const AD_MARKERS = ["adWatchesDaily", "adCapUtilization"];
+
+function matching(seen, markers) {
+  return seen.filter((sql) => markers.some((m) => sql.includes(m)));
+}
+
+function economyMarkers(seen) {
+  return matching(seen, ECONOMY_MARKERS);
+}
+
+function adMarkers(seen) {
+  return matching(seen, AD_MARKERS);
+}
+
+test("no sections param: today's payload, and no new keys", async () => {
+  const prisma = makeFakePrisma();
+  const stats = await buildGetAdminStats({ prisma })();
+
+  // The keys the current admin build reads must all still be there.
+  for (const key of [
+    "generatedAt",
+    "users",
+    "activity",
+    "friends",
+    "retention",
+    "teamRaces",
+    "referralFunnel",
+    "activationFunnel",
+    "versions",
+    "versionsSince",
+    "versionsWindowDays",
+    "races",
+    "onboardingFunnel",
+  ]) {
+    assert.ok(key in stats, `legacy key ${key} must still be present`);
+  }
+
+  assert.equal("coinEconomy" in stats, false);
+  assert.equal("adRevenue" in stats, false);
+});
+
+test("no sections param: the new aggregates are not even queried", async () => {
+  const prisma = makeFakePrisma();
+  await buildGetAdminStats({ prisma })();
+  assert.deepEqual(economyMarkers(prisma.seen), []);
+  assert.deepEqual(adMarkers(prisma.seen), []);
+});
+
+test("the default query set is byte-stable when sections are requested", async () => {
+  const base = makeFakePrisma();
+  await buildGetAdminStats({ prisma: base })();
+
+  const withSections = makeFakePrisma();
+  await buildGetAdminStats({ prisma: withSections })({
+    sections: ["economy", "ads"],
+  });
+
+  // Every query the legacy call made is still made, unchanged, in order.
+  assert.deepEqual(
+    withSections.seen.slice(0, base.seen.length),
+    base.seen,
+    "requesting a section must not alter the default query set"
+  );
+});
+
+test("sections=economy adds coinEconomy in the locked shape", async () => {
+  const prisma = makeFakePrisma({
+    coinLedgerDaily: [
+      { date: "2026-08-01", minted: 500n, sunk: 300n },
+      { date: "2026-08-02", minted: 10n, sunk: 0n },
+    ],
+    purchasesBySku: [
+      { sku: "powerup_leg_cramp", count: 4n, coins: 400n },
+      { sku: "hat_cowboy", count: 1n, coins: 250n },
+    ],
+    boxOpensDaily: [{ date: "2026-08-01", count: 42n }],
+  });
+
+  const stats = await buildGetAdminStats({ prisma })({ sections: ["economy"] });
+
+  assert.deepEqual(stats.coinEconomy, {
+    windowDays: 30,
+    timeZone: "America/New_York",
+    days: [
+      { date: "2026-08-01", minted: 500, sunk: 300 },
+      { date: "2026-08-02", minted: 10, sunk: 0 },
+    ],
+    purchasesBySku: [
+      { sku: "powerup_leg_cramp", count: 4, coins: 400 },
+      { sku: "hat_cowboy", count: 1, coins: 250 },
+    ],
+    boxOpens: [{ date: "2026-08-01", count: 42 }],
+  });
+
+  // Not requested -> not computed.
+  assert.equal("adRevenue" in stats, false);
+  assert.deepEqual(adMarkers(prisma.seen), []);
+});
+
+test("sections=ads adds adRevenue in the locked shape", async () => {
+  const prisma = makeFakePrisma({
+    adWatchesDaily: [
+      { date: "2026-08-01", coin_reward_watches: 9n, extra_spin_watches: 3n },
+    ],
+    adCapUtilization: [{ avg_watches_per_user: 2.25, users_at_cap: 7n }],
+  });
+
+  const stats = await buildGetAdminStats({ prisma })({ sections: ["ads"] });
+
+  assert.deepEqual(stats.adRevenue, {
+    windowDays: 30,
+    timeZone: "America/New_York",
+    days: [{ date: "2026-08-01", coinRewardWatches: 9, extraSpinWatches: 3 }],
+    capUtilization: { avgWatchesPerUser: 2.3, usersAtCap: 7 },
+  });
+
+  assert.equal("coinEconomy" in stats, false);
+  assert.deepEqual(economyMarkers(prisma.seen), []);
+});
+
+test("ad capUtilization degrades to nulls/zero rather than NaN with no data", async () => {
+  const prisma = makeFakePrisma({
+    adCapUtilization: [{ avg_watches_per_user: null, users_at_cap: 0n }],
+  });
+  const stats = await buildGetAdminStats({ prisma })({ sections: ["ads"] });
+  assert.deepEqual(stats.adRevenue.capUtilization, {
+    avgWatchesPerUser: null,
+    usersAtCap: 0,
+  });
+  assert.deepEqual(stats.adRevenue.days, []);
+});
+
+test("both sections can be requested at once", async () => {
+  const prisma = makeFakePrisma();
+  const stats = await buildGetAdminStats({ prisma })({
+    sections: ["economy", "ads"],
+  });
+  assert.ok("coinEconomy" in stats);
+  assert.ok("adRevenue" in stats);
+});
+
+test("unknown section names are ignored, not fatal", async () => {
+  const prisma = makeFakePrisma();
+  const stats = await buildGetAdminStats({ prisma })({
+    sections: ["economy", "totally-made-up"],
+  });
+  assert.ok("coinEconomy" in stats);
+  assert.equal("adRevenue" in stats, false);
+});
+
+test("usersAtCap is scoped to the latest granted_date, not the whole window", async () => {
+  // The JSON key is contract-locked, so the QUERY is what changed: the admin
+  // card labels this "Users at cap", which reads as a CURRENT count. A
+  // 30-day-wide filter answered "hit the cap on at least one day this month" —
+  // a number that only ever accumulates and drifts further from its label the
+  // longer the window runs.
+  const prisma = makeFakePrisma();
+  await buildGetAdminStats({ prisma })({ sections: ["ads"] });
+  const [sql] = matching(prisma.seen, ["adCapUtilization"]);
+  assert.ok(sql, "the cap-utilization query ran");
+  assert.match(sql, /latest_day/, "must resolve a latest granted_date");
+  assert.match(
+    sql,
+    /granted_date = \(SELECT d FROM latest_day\)/,
+    "the cap FILTER must be scoped to that latest day"
+  );
+  // The AVERAGE is deliberately NOT day-scoped — it stays a 30-day trend.
+  assert.match(sql, /AVG\(watches\)/);
+  assert.match(sql, /interval '30 days'/);
+});
+
+test("every new aggregate is bounded to 30 days", async () => {
+  const prisma = makeFakePrisma();
+  await buildGetAdminStats({ prisma })({ sections: ["economy", "ads"] });
+  const added = [...economyMarkers(prisma.seen), ...adMarkers(prisma.seen)];
+  assert.ok(added.length >= 4, "expected the new aggregates to have run");
+  for (const sql of added) {
+    assert.match(
+      sql,
+      /interval '30 days'/,
+      `unbounded admin aggregate: ${sql.slice(0, 120)}`
+    );
+  }
+});
+
+// ---------------------------------------------------------------------------
+// NUMBER COERCION — the wire contract, not just the JS object.
+// ---------------------------------------------------------------------------
+//
+// Every numeric field in these two sections comes from a SUM()/COUNT()/AVG()
+// aggregate. Depending on the column type and driver, node-pg/Prisma hands
+// those back as BigInt (bigint) or as a STRING (numeric) — never reliably as a
+// JS number. The frontend reader rejects numeric strings by contract, so a
+// single missing Number() would render a whole block as "—" against a backend
+// that is otherwise working perfectly.
+//
+// STRING fixtures are the load-bearing part of these tests. A BigInt fixture
+// would NOT catch a missing coercion, because JSON.stringify throws on a raw
+// BigInt — the bug would surface loudly. A string sails through serialization
+// silently and reaches the client as `"500"`. So the fixtures below mimic the
+// numeric-as-string case, and the assertions run against JSON.parse(
+// JSON.stringify(...)) rather than the in-memory object, which is the actual
+// shape the client parses.
+function roundTrip(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+test("coinEconomy numbers survive as JSON numbers even from string aggregates", async () => {
+  const prisma = makeFakePrisma({
+    coinLedgerDaily: [{ date: "2026-08-01", minted: "500", sunk: "300" }],
+    purchasesBySku: [{ sku: "powerup_leg_cramp", count: "4", coins: "400" }],
+    boxOpensDaily: [{ date: "2026-08-01", count: "42" }],
+  });
+  const stats = await buildGetAdminStats({ prisma })({ sections: ["economy"] });
+  const wire = roundTrip(stats).coinEconomy;
+
+  assert.equal(typeof wire.days[0].minted, "number");
+  assert.equal(typeof wire.days[0].sunk, "number");
+  assert.equal(typeof wire.purchasesBySku[0].count, "number");
+  assert.equal(typeof wire.purchasesBySku[0].coins, "number");
+  assert.equal(typeof wire.boxOpens[0].count, "number");
+
+  // Values must survive the coercion intact, not just the types.
+  assert.equal(wire.days[0].minted, 500);
+  assert.equal(wire.days[0].sunk, 300);
+  assert.equal(wire.purchasesBySku[0].coins, 400);
+  assert.equal(wire.boxOpens[0].count, 42);
+  // `date` and `sku` are legitimately strings — pinned so a future "coerce
+  // everything" cleanup doesn't turn a date into NaN.
+  assert.equal(typeof wire.days[0].date, "string");
+  assert.equal(typeof wire.purchasesBySku[0].sku, "string");
+});
+
+test("adRevenue numbers survive as JSON numbers even from string aggregates", async () => {
+  const prisma = makeFakePrisma({
+    adWatchesDaily: [
+      { date: "2026-08-01", coin_reward_watches: "9", extra_spin_watches: "3" },
+    ],
+    adCapUtilization: [{ avg_watches_per_user: "2.25", users_at_cap: "7" }],
+  });
+  const stats = await buildGetAdminStats({ prisma })({ sections: ["ads"] });
+  const wire = roundTrip(stats).adRevenue;
+
+  assert.equal(typeof wire.days[0].coinRewardWatches, "number");
+  assert.equal(typeof wire.days[0].extraSpinWatches, "number");
+  assert.equal(typeof wire.capUtilization.avgWatchesPerUser, "number");
+  assert.equal(typeof wire.capUtilization.usersAtCap, "number");
+
+  assert.equal(wire.days[0].coinRewardWatches, 9);
+  assert.equal(wire.capUtilization.avgWatchesPerUser, 2.3);
+  assert.equal(wire.capUtilization.usersAtCap, 7);
+  assert.equal(typeof wire.days[0].date, "string");
+});
+
+test("BigInt aggregates also reach the wire as JSON numbers", async () => {
+  // The other real driver shape. Uncoerced, JSON.stringify would THROW here —
+  // so this case additionally proves the payload is serializable at all.
+  const prisma = makeFakePrisma({
+    coinLedgerDaily: [{ date: "2026-08-01", minted: 500n, sunk: 300n }],
+    adWatchesDaily: [
+      { date: "2026-08-01", coin_reward_watches: 9n, extra_spin_watches: 3n },
+    ],
+    adCapUtilization: [{ avg_watches_per_user: 2.25, users_at_cap: 7n }],
+  });
+  const stats = await buildGetAdminStats({ prisma })({
+    sections: ["economy", "ads"],
+  });
+  const wire = roundTrip(stats);
+  assert.equal(typeof wire.coinEconomy.days[0].minted, "number");
+  assert.equal(typeof wire.adRevenue.days[0].coinRewardWatches, "number");
+  assert.equal(typeof wire.adRevenue.capUtilization.usersAtCap, "number");
+});
+
+test("a null/absent aggregate degrades to 0, never NaN or a string", async () => {
+  const prisma = makeFakePrisma({
+    coinLedgerDaily: [{ date: "2026-08-01", minted: null, sunk: undefined }],
+  });
+  const wire = roundTrip(
+    await buildGetAdminStats({ prisma })({ sections: ["economy"] })
+  ).coinEconomy;
+  assert.equal(wire.days[0].minted, 0);
+  assert.equal(wire.days[0].sunk, 0);
+  assert.ok(!Number.isNaN(wire.days[0].minted));
+});

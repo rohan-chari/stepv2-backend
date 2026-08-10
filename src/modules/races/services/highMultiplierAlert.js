@@ -56,6 +56,30 @@ async function evaluateHighMultiplierAlert({
         !p.finishedAt &&
         !p.forfeitedAt
     );
+    // Batch 2026-08-09 item 11 (second leak). This push names the actor to
+    // every rival, so a STEALTHED player who stacks a multiplier announced
+    // themselves — and stacking a multiplier is precisely what a stealthed
+    // player is hiding. Read the actor's stealth here and let the handler
+    // redact to "???".
+    //
+    // Best-effort, resolving FALSE on any error: the handler defaults to the
+    // visible name too, so an unthreaded or failed read degrades to today's
+    // behavior rather than to a silent anonymization.
+    let stealthed = false;
+    try {
+      const stealth = await prisma.raceActiveEffect.findFirst({
+        where: {
+          targetParticipantId: participant.id,
+          type: "STEALTH_MODE",
+          status: "ACTIVE",
+        },
+        select: { expiresAt: true },
+      });
+      stealthed = Boolean(
+        stealth && (!stealth.expiresAt || new Date(stealth.expiresAt) > now())
+      );
+    } catch {}
+
     events.emit("HIGH_MULTIPLIER_ALERT", {
       raceId: race?.id ?? participant.raceId ?? null,
       raceName: race?.name ?? null,
@@ -63,6 +87,7 @@ async function evaluateHighMultiplierAlert({
       actorName: participant.user?.displayName ?? null,
       multiplier: Math.round(mult),
       recipientUserIds: recipients.map((p) => p.userId),
+      stealthed,
     });
     return { emitted: true, multiplier: Math.round(mult) };
   }

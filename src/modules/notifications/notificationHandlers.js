@@ -4,7 +4,7 @@ const { DeviceToken } = require("../../shared/push/deviceToken");
 const { apnsService } = require("../../shared/push/apns");
 const { fcmService } = require("../../shared/push/fcm");
 const { Notification } = require("./notification");
-const { upgradedDuration } = require("../powerups/powerupUpgrades");
+const { upgradedDuration, formatDuration } = require("../powerups/powerupUpgrades");
 const { prisma } = require("../../db");
 
 const CHAT_PUSH_COOLDOWN_MS = 60_000;
@@ -670,7 +670,10 @@ function registerNotificationHandlers(dependencies = {}) {
         actorUserId: refereeId,
         title: "You earned coins!",
         buildBody: (friendName) =>
-          `${friendName} completed their first race — you earned ${coins} coins!`,
+          // Batch 2026-08-09 item 2: "with friends" is now load-bearing, not
+          // flavour — a seeded daily/weekly no longer qualifies, so the payout
+          // really did come from a race with other real people.
+          `${friendName} finished their first race with friends — you earned ${coins} coins!`,
         payload: {
           type: "REFERRAL_REWARDED",
           route: "home",
@@ -740,6 +743,12 @@ function registerNotificationHandlers(dependencies = {}) {
   // (§3.4 standardization: 1/2/3/4h by upgrade level), so the push can never
   // drift from what the effect actually does again. upgradeLevel rides on the
   // POWERUP_USED emit; a missing/invalid level falls back to base.
+  // Batch 2026-08-09 item 1: the string itself now comes from the ONE shared
+  // formatter (powerupUpgrades.formatDuration), which the race feed also uses.
+  // This function used to own a second, different implementation whose
+  // non-integer branch rendered the new 1h15m ladder as "75 minutes" — so the
+  // push and the feed line about the same cast disagreed. Only the
+  // level-lookup-with-fallback belongs here now.
   function attackWindowText(type, upgradeLevel) {
     let ms;
     try {
@@ -747,9 +756,7 @@ function registerNotificationHandlers(dependencies = {}) {
     } catch {
       ms = upgradedDuration(type, 0);
     }
-    const hours = ms / (60 * 60 * 1000);
-    if (Number.isInteger(hours)) return `${hours} hour${hours === 1 ? "" : "s"}`;
-    return `${Math.round(ms / (60 * 1000))} minutes`;
+    return formatDuration(ms);
   }
 
   const POWERUP_ATTACK_MESSAGES = {
@@ -779,6 +786,16 @@ function registerNotificationHandlers(dependencies = {}) {
   events.on("POWERUP_USED", async (data) => {
     try {
       const { raceId, userId, powerupType, targetUserId, upgradeLevel } = data;
+      // Batch 2026-08-09 item 11. The in-app feed, race messages and the
+      // leaderboard have always redacted a stealthed attacker to "???"; this
+      // push did not, so Stealth Mode leaked the one thing it sells.
+      //
+      // DEFAULT FALSE IS DELIBERATE and is the safe side: an emit site that
+      // forgets to thread `stealthed` shows the real name (today's behavior),
+      // never a silent anonymization. Anonymizing by accident would be a
+      // GAMEPLAY change — victims would stop learning who is attacking them —
+      // whereas failing to anonymize is the status quo bug, caught by tests.
+      const stealthed = data?.stealthed === true;
       // B2: after a Mirror reflect, usePowerup emits POWERUP_USED with
       // targetUserId === userId (both the original attacker). Suppress the
       // self-push here — one guard that covers every reflectable offensive type
@@ -813,8 +830,15 @@ function registerNotificationHandlers(dependencies = {}) {
         return cleaned || null;
       };
       const raceName = cleanRaceName(raceForPush?.name);
+      // "???" is the feed convention (getRaceFeed / getRaceMessages /
+      // raceIllusions), so a victim sees the same redaction in the push as in
+      // the app. Powerup name and duration text are untouched: the victim still
+      // learns WHAT hit them and for how long — only WHO is hidden.
       const buildBody = baseBuildBody && ((attackerName) => {
-        const sentence = baseBuildBody(attackerName, upgradeLevel);
+        const sentence = baseBuildBody(
+          stealthed ? "???" : attackerName,
+          upgradeLevel
+        );
         return raceName ? `${sentence} Race: ${raceName}.` : sentence;
       });
       if (!buildBody) return;
@@ -1203,7 +1227,15 @@ function registerNotificationHandlers(dependencies = {}) {
         data || {};
       if (!Array.isArray(recipientUserIds) || recipientUserIds.length === 0) return;
 
-      const name = actorName || (await findActorName(actorUserId));
+      // The SECOND leak (batch 2026-08-09 item 11, architect REQUIRED). This
+      // push names the actor to every rival, so a stealthed player who
+      // self-buffs into a high multiplier announced themselves — arguably worse
+      // than the attack push, since stacking a multiplier is exactly what a
+      // stealthed player is hiding. Same fail-safe default as above.
+      const stealthed = data?.stealthed === true;
+      const name = stealthed
+        ? "???"
+        : actorName || (await findActorName(actorUserId));
       const mult = Number.isFinite(Number(multiplier)) ? Number(multiplier) : null;
       const title = "🔥 Someone's heating up";
       const body =

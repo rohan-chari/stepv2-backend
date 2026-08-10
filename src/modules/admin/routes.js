@@ -283,9 +283,19 @@ function createAdminRouter(dependencies = {}) {
   });
 
   // Product-health snapshot for the admin Statistics card (read-only SQL).
+  //
+  // `?sections=economy,ads` (batch 2026-08-09 item 10) adds opt-in aggregate
+  // blocks. ABSENT means exactly today's payload and exactly today's query set,
+  // which is what keeps the shipped admin build — and any collapsed section in
+  // the new one — from paying for aggregates it will not render. Unknown names
+  // are ignored inside getAdminStats rather than rejected here, so a newer
+  // client asking for a section this backend predates degrades to a missing key.
   router.get("/stats", async (req, res) => {
     try {
-      res.json({ stats: await getAdminStats() });
+      const sections = req.query?.sections;
+      res.json({
+        stats: await getAdminStats(sections ? { sections } : {}),
+      });
     } catch (error) {
       console.error("Admin stats error:", error);
       res.status(500).json({ error: "Internal server error" });

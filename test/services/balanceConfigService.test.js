@@ -186,45 +186,45 @@ describe("odds interpolation across field sizes", () => {
   });
 });
 
-// Test #18 — this fails against the pre-build code, which is the point:
-// levels 1 and 2 were no-ops there.
-describe("Lucky Horseshoe graduated ladder (§6.2)", () => {
+// Test #18 — the graduated ladder is RETIRED (batch 2026-08-09 item 8b, owner
+// decision). `rareChanceByLevel` is [1,1,1,1]: the Lucky Horseshoe is now
+// simply "your next box is rare", at every level, which is what players always
+// assumed it did.
+//
+// These assertions previously pinned the 0 / 0.2 / 0.45 / 1.0 ramp. That ramp
+// existed to stop levels 1 and 2 being no-ops under an even older binary cliff;
+// it is superseded rather than weakened — the ladder is gone, so the levels are
+// deliberately no-ops again and the cost ladder is zeroed to match
+// (upgradeCosts.byType.LUCKY_HORSESHOE = [0,0,0,0]). The guarantee itself is
+// pinned harder than before: it must hold at EVERY level, not just level 3.
+describe("Lucky Horseshoe flat guarantee (batch 2026-08-09 item 8b)", () => {
   const config = defaultConfig();
 
-  it("level 0 never forces RARE", () => {
+  it("EVERY level forces RARE, including an unupgraded horseshoe", () => {
     const rng = mulberry32(1);
-    for (let i = 0; i < 5000; i++) {
-      assert.equal(luckyMinRarity(0, rng, config), "UNCOMMON");
-    }
-  });
-
-  it("level 3 always forces RARE", () => {
-    const rng = mulberry32(2);
-    for (let i = 0; i < 5000; i++) {
-      assert.equal(luckyMinRarity(3, rng, config), "RARE");
-    }
-  });
-
-  for (const level of [1, 2]) {
-    it(`level ${level} lands within tolerance of its configured chance`, () => {
-      const rng = mulberry32(1000 + level);
-      const N = 40000;
-      let rares = 0;
-      for (let i = 0; i < N; i++) {
-        if (luckyMinRarity(level, rng, config) === "RARE") rares++;
+    for (let level = 0; level <= 3; level++) {
+      for (let i = 0; i < 2000; i++) {
+        assert.equal(
+          luckyMinRarity(level, rng, config),
+          "RARE",
+          `level ${level} must guarantee RARE`
+        );
       }
-      const observed = rares / N;
-      const expected = config.luckyHorseshoe.rareChanceByLevel[level];
-      assert.ok(
-        Math.abs(observed - expected) < 0.01,
-        `level ${level}: observed ${observed.toFixed(4)}, expected ${expected}`
-      );
-      // The whole point of the change: L1 and L2 are NOT no-ops.
-      assert.ok(observed > 0 && observed < 1);
-    });
-  }
+    }
+  });
 
-  it("the floor is always UNCOMMON, never COMMON", () => {
+  it("the configured ladder is flat 100% at all four levels", () => {
+    assert.deepEqual(config.luckyHorseshoe.rareChanceByLevel, [1, 1, 1, 1]);
+  });
+
+  it("the guarantee is independent of the rng — no draw can miss it", () => {
+    for (const value of [0, 0.0001, 0.5, 0.9999]) {
+      assert.equal(luckyMinRarity(0, () => value, config), "RARE");
+      assert.equal(luckyMinRarity(3, () => value, config), "RARE");
+    }
+  });
+
+  it("the floor is always UNCOMMON or better, never COMMON", () => {
     const rng = mulberry32(7);
     for (let level = 0; level <= 3; level++) {
       for (let i = 0; i < 500; i++) {
@@ -235,9 +235,10 @@ describe("Lucky Horseshoe graduated ladder (§6.2)", () => {
 
   it("an out-of-range level is clamped rather than throwing", () => {
     assert.equal(luckyMinRarity(99, () => 0.99, config), "RARE");
-    assert.equal(luckyMinRarity(-5, () => 0.0, config), "UNCOMMON");
+    assert.equal(luckyMinRarity(-5, () => 0.0, config), "RARE");
     assert.ok(["UNCOMMON", "RARE"].includes(luckyMinRarity(undefined, () => 0.5, config)));
   });
+
 });
 
 // Test #19

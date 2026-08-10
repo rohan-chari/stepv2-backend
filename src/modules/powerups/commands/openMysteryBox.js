@@ -205,8 +205,20 @@ function buildOpenMysteryBox(dependencies = {}) {
     );
     const minRarity = luckyEffect?.metadata?.minRarity;
 
-    // Roll the powerup type now
-    let rolled = rollFn(position, totalParticipants, Math.random, { minRarity, ctx, config });
+    // Roll the powerup type now.
+    //
+    // `excludeTypes` (item 8b) only bites when `minRarity` is set — i.e. on a
+    // Horseshoe-FORCED box — so a natural RARE roll can still be a Horseshoe.
+    // The exclusion is applied inside eligiblePoolFor (the shared pool seam),
+    // NOT as a retry here: with rareChanceByLevel = [1,1,1,1] the tier is
+    // coerced before the pick, so the post-pick backstop below never runs.
+    const HORSESHOE_FORCED_EXCLUSIONS = ["LUCKY_HORSESHOE"];
+    let rolled = rollFn(position, totalParticipants, Math.random, {
+      minRarity,
+      ctx,
+      config,
+      excludeTypes: HORSESHOE_FORCED_EXCLUSIONS,
+    });
     if (minRarity) {
       const rolledIndex = RARITY_ORDER.indexOf(rolled.rarity);
       const minIndex = RARITY_ORDER.indexOf(minRarity);
@@ -216,13 +228,35 @@ function buildOpenMysteryBox(dependencies = {}) {
         // RARE the server guarantees a leader cannot use. A real weighted pick
         // from the POSITION-FILTERED pool both fixes that and removes the latent
         // trap where reordering dropPool.RARE silently changes the award.
-        const forced = pickTypeForRarity(minRarity, Math.random, config, ctx);
+        // Same exclusion as the roll above. This branch is unreachable while
+        // the config guarantees RARE at every level, but it IS reachable during
+        // rollout — the stored config may still carry the old ramp
+        // ([0, 0.2, 0.45, 1.0]) until the balance PUT lands, in which case a
+        // level-0 Horseshoe yields minRarity = UNCOMMON and this backstop fires
+        // for real. Excluding here too is what keeps the two windows consistent.
+        const forced = pickTypeForRarity(
+          minRarity,
+          Math.random,
+          config,
+          ctx,
+          HORSESHOE_FORCED_EXCLUSIONS
+        );
         if (forced) rolled = { type: forced, rarity: minRarity };
       }
     }
-    // Re-roll Fanny Pack if user already has expanded slots
+    // Re-roll Fanny Pack if user already has expanded slots.
+    //
+    // DEAD CODE as of batch 2026-08-09 item 8a — FANNY_PACK is no longer in any
+    // dropPool, so `rolled.type` can never be one. Left in place deliberately:
+    // removing it buys nothing, and a held/legacy copy costs nothing to keep
+    // handling. Same for the full-inventory auto-activate branch below.
     while (rolled.type === "FANNY_PACK" && maxSlots > DEFAULT_POWERUP_SLOTS) {
-      rolled = rollFn(position, totalParticipants, Math.random, { minRarity, ctx, config });
+      rolled = rollFn(position, totalParticipants, Math.random, {
+        minRarity,
+        ctx,
+        config,
+        excludeTypes: HORSESHOE_FORCED_EXCLUSIONS,
+      });
     }
 
     // §5.5. Last thing before anything is persisted, so every branch above —

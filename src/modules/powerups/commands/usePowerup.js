@@ -34,6 +34,7 @@ const {
   upgradeCost,
   upgradedDuration,
   upgradedMagnitude,
+  formatDuration,
 } = require("../powerupUpgrades");
 const {
   deductCoinsAtomic: defaultDeductCoinsAtomic,
@@ -111,9 +112,20 @@ const POWERUPS5_TYPES = [
 // unopened Mystery Boxes, and every wave-5 store purchase (owner decision D6 —
 // expensive buys can't be sniped). Mirrors the isStealable helper in routes/races.js.
 const UNSTEALABLE_TYPES = ["SNEAKY_SWAP", "MYSTERY_BOX", ...POWERUPS5_TYPES];
-// Single-target attacks a Decoy redirects (§3.5): the same set Compression Socks
-// blocks, i.e. OFFENSIVE_TYPES plus IMPOSTER. AoE attacks (Rainstorm, Power
-// Outage, Quicksand) are NOT redirected — they resolve per-victim instead.
+// AoE attacks (Rainstorm, Power Outage, Quicksand) are NOT redirected by a
+// Decoy — they resolve per-victim, so a Decoy holder caught in one is hit
+// normally and the Decoy is neither consumed nor triggered. That is deliberate;
+// the intended counters to an AoE are Umbrella (immune) and Compression Socks
+// (blocks).
+//
+// COMMENT CORRECTED, no behavior change (batch 2026-08-09 item 4 — an
+// investigation-only item). This constant is DEAD CODE: the live Decoy gate
+// tests bare `OFFENSIVE_TYPES`, so IMPOSTER is NOT actually Decoy-redirectable
+// despite what this line has claimed since it was written. The comment used to
+// assert the opposite and was the only documentation of the rule, so it was
+// actively misleading. Making IMPOSTER genuinely redirectable is a separate
+// product decision; until someone takes it, this constant describes an intent
+// that was never wired up and must not be read as describing live behavior.
 const DECOY_REDIRECTABLE_TYPES = [...OFFENSIVE_TYPES, "IMPOSTER"];
 // Wave-5 durations.
 // §3.4 duration standardization: non-upgradeable action windows standardize to
@@ -312,7 +324,23 @@ function isOpponentInflicted(effect, userId) {
 // rival could erase the caster's wager with one Cleanse, and a Quick Rinse
 // could be burned on it too (expiresAt = race end makes it a live timed
 // effect). Anything added here must likewise be harmless to its target.
-const NON_CLEANSABLE_TYPES = ["BOUNTY"];
+//
+// RALLY_FLAG and UPRISING (batch 2026-08-09 item 7) are the opposite problem
+// with the same shape: they are BUFFS, and they were being cleansed. Both write
+// ONE ROW PER BENEFICIARY through upsertBuffWindow, all sourced from the
+// caster — so on every beneficiary EXCEPT the caster the row reads
+// sourceUserId = caster, targetUserId = beneficiary, which is exactly what
+// isOpponentInflicted() means by "a debuff someone else put on me". The
+// caster's own copy is self-sourced and was always safe, which is why players
+// reported this as intermittent: whether your rally buff survived a Cleanse
+// depended on whether you were the one who raised the flag.
+//
+// The frontend already classifies both as boosts (effect_polarity.dart); this
+// makes the backend agree. Listing them here fixes CLEANSE and QUICK_RINSE and
+// BOTH "nothing to cleanse/rinse" guards in one edit, because all four read the
+// single isCleansableDebuff predicate below — which is also why the 400 and the
+// 409 both need their own test.
+const NON_CLEANSABLE_TYPES = ["BOUNTY", "RALLY_FLAG", "UPRISING"];
 
 function isCleansableDebuff(effect, userId) {
   if (NON_CLEANSABLE_TYPES.includes(effect.type)) return false;
@@ -351,14 +379,17 @@ function levelPrefix(upgradeLevel) {
   return upgradeLevel > 0 ? `Lvl ${upgradeLevel} ` : "";
 }
 
+// Both delegate to the ONE shared formatter (batch 2026-08-09 item 1). They
+// used to divide by an hour and interpolate, which printed "1.25 hours" the
+// moment a ladder stopped being whole hours — and the push handler had its own
+// third variant that printed "75 minutes" for the same cast. See
+// powerupUpgrades.formatDuration.
 function hoursText(type, upgradeLevel) {
-  const hours = upgradedDuration(type, upgradeLevel) / (60 * 60 * 1000);
-  return hours === 1 ? "1 hour" : `${hours} hours`;
+  return formatDuration(upgradedDuration(type, upgradeLevel));
 }
 
 function durationText(durationMs) {
-  const hours = durationMs / (60 * 60 * 1000);
-  return hours === 1 ? "1 hour" : `${hours} hours`;
+  return formatDuration(durationMs);
 }
 
 // TR-902: races are time-based, so nobody finishes mid-race — there is no
@@ -445,10 +476,15 @@ function pickDecoyRedirectVictim({
 // potion may never fail after consumption: any invalid roll (no eligible enemy,
 // a stacking rejection) falls back to PROTEIN_SHAKE.
 async function applyMysteryPotion(ctx) {
+  // `casterStealthed` is threaded in through ctx, NOT closed over: this
+  // function is MODULE-scope while the memo it comes from is declared inside
+  // buildUsePowerup, so referencing it directly threw a ReferenceError (-> 500)
+  // on every enemy potion roll. Code review 2026-08-09.
   const {
     userId, raceId, powerupId, myParticipant, myDisplayName,
     acceptedParticipants, isEnemy, isAliveTarget, effectModel, participantModel,
     eventModel, events, awardCoins, random, now, currentTime, finalize,
+    casterStealthed,
   } = ctx;
 
   const config = (() => {
@@ -543,10 +579,14 @@ async function applyMysteryPotion(ctx) {
         if (activeWT) { await applyProteinFallback("LEG_CRAMP_SELF"); break; }
       }
       await clearActiveLegCramps(effectModel, myParticipant.id);
-      const effect = await createOnSelf("LEG_CRAMP", { expiresAt: new Date(currentTime.getTime() + 2 * 60 * 60 * 1000), meta: { stepsAtFreezeStart: myParticipant.totalSteps } });
+      // Batch 2026-08-09 item 1: aligned DOWN from 2h to 1h so the Leg Cramp
+      // nerf can't be dodged via a potion. Hardcoded rather than read from the
+      // ladder because a potion outcome has no upgrade level — 1h is the L0
+      // cramp. (The self wrong-turn below was already 1h.)
+      const effect = await createOnSelf("LEG_CRAMP", { expiresAt: new Date(currentTime.getTime() + 60 * 60 * 1000), meta: { stepsAtFreezeStart: myParticipant.totalSteps } });
       result.rolled = "LEG_CRAMP_SELF"; result.effect = effect;
       await eventModel.create({ raceId, actorUserId: userId, eventType: "POWERUP_USED", powerupType: "MYSTERY_POTION",
-        description: `${myDisplayName} drank a Mystery Potion and cramped up! Their steps are frozen for 2 hours.`, metadata: { rolled } });
+        description: `${myDisplayName} drank a Mystery Potion and cramped up! Their steps are frozen for 1 hour.`, metadata: { rolled } });
       break;
     }
     case "WRONG_TURN_SELF": {
@@ -566,6 +606,7 @@ async function applyMysteryPotion(ctx) {
     case "LEG_CRAMP":
     case "SHORTCUT": {
       const handled = await applyPotionEnemyAttack({
+        casterStealthed,
         rolled, aliveEnemies, acceptedParticipants, isAliveTarget, isTeamRace,
         userId, myParticipant, myDisplayName, effectModel, participantModel,
         eventModel, events, random, now, currentTime, raceId, powerupId, result,
@@ -727,17 +768,21 @@ async function applyPotionEnemyAttack(a) {
       const effect = await effectModel.create({
         raceId, targetParticipantId: targetParticipant.id, targetUserId: resolvedTargetUserId,
         sourceUserId, powerupId, type: "LEG_CRAMP", startsAt: currentTime,
-        expiresAt: new Date(currentTime.getTime() + 2 * 60 * 60 * 1000),
+        // Batch 2026-08-09 item 1: 2h -> 1h, same reason as the self-cramp
+        // above — a potion must not out-freeze a real Leg Cramp.
+        expiresAt: new Date(currentTime.getTime() + 60 * 60 * 1000),
         metadata: { stepsAtFreezeStart: targetParticipant.totalSteps },
       });
       result.effect = effect;
     }
     await eventModel.create({ raceId, actorUserId: sourceUserId, eventType: "POWERUP_USED", powerupType: "MYSTERY_POTION",
       targetUserId: resolvedTargetUserId,
-      description: `${sourceName}'s Mystery Potion cramped ${targetName}! Their steps are frozen for 2 hours.`, metadata: { rolled } });
+      description: `${sourceName}'s Mystery Potion cramped ${targetName}! Their steps are frozen for 1 hour.`, metadata: { rolled } });
   }
 
-  events.emit("POWERUP_USED", { raceId, userId: sourceUserId, powerupType: "MYSTERY_POTION", targetUserId: resolvedTargetUserId, upgradeLevel: 0 });
+  // `casterStealthed` is threaded in from the caller rather than re-read here:
+  // this helper lives at module scope and has no myParticipant memo of its own.
+  events.emit("POWERUP_USED", { raceId, userId: sourceUserId, powerupType: "MYSTERY_POTION", targetUserId: resolvedTargetUserId, upgradeLevel: 0, stealthed: a.casterStealthed === true });
   return true;
 }
 
@@ -942,6 +987,38 @@ function buildUsePowerup(dependencies = {}) {
     if (myParticipant.forfeitedAt) {
       throw new PowerupUseError("You have forfeited this race", 400);
     }
+
+    // Batch 2026-08-09 item 11 — is the CASTER stealthed?
+    //
+    // The caster's own stealth state was NOT loaded anywhere before the
+    // POWERUP_USED emit (the existing read at the top of the targeting block is
+    // the TARGET's stealth, and the caster's effects are only read much later,
+    // AFTER the emit). So this is a genuinely new read rather than a value that
+    // was lying around.
+    //
+    // Memoized: several emit sites are per-victim loops (Quicksand, Power
+    // Outage), and one indexed lookup per cast is the budget, not one per
+    // victim. Best-effort — a lookup failure resolves FALSE (visible name),
+    // matching the handler's fail-safe default, because accidentally
+    // anonymizing would be a gameplay change while failing to anonymize is the
+    // status quo bug that tests catch.
+    let casterStealthedMemo;
+    const casterStealthed = async () => {
+      if (casterStealthedMemo === undefined) {
+        try {
+          const effect = await effectModel.findActiveByTypeForParticipant?.(
+            myParticipant.id,
+            "STEALTH_MODE"
+          );
+          casterStealthedMemo = Boolean(
+            effect && (!effect.expiresAt || new Date(effect.expiresAt) > now())
+          );
+        } catch {
+          casterStealthedMemo = false;
+        }
+      }
+      return casterStealthedMemo;
+    };
 
     // Signal Jammer JAM GUARD (the feature's single choke point). If this
     // participant is currently jammed, they cannot USE any powerup — earned,
@@ -1161,7 +1238,7 @@ function buildUsePowerup(dependencies = {}) {
       });
       for (const targetResult of targetResults) {
         events.emit(targetResult.outcome === "APPLIED" ? "POWERUP_USED" : "POWERUP_BLOCKED", targetResult.outcome === "APPLIED"
-          ? { raceId, userId, powerupType: type, targetUserId: targetResult.targetUserId, upgradeLevel: 0 }
+          ? { raceId, userId, powerupType: type, targetUserId: targetResult.targetUserId, upgradeLevel: 0, stealthed: await casterStealthed() }
           : { raceId, attackerUserId: userId, defenderUserId: targetResult.targetUserId, blockedType: type, upgradeLevel: 0 });
       }
       await invalidateRaceProgress(raceId);
@@ -1329,7 +1406,7 @@ function buildUsePowerup(dependencies = {}) {
         description: `${myDisplayName} sparked an Uprising! ${beneficiaries.length} runner${beneficiaries.length === 1 ? "" : "s"} get 2x steps for 1 hour.`,
         metadata: { affected: beneficiaries.length },
       });
-      events.emit("POWERUP_USED", { raceId, userId, powerupType: type, upgradeLevel: 0 });
+      events.emit("POWERUP_USED", { raceId, userId, powerupType: type, upgradeLevel: 0, stealthed: await casterStealthed() });
       await finalizeSelfContainedUse(null);
       return {
         blocked: false,
@@ -1371,7 +1448,7 @@ function buildUsePowerup(dependencies = {}) {
         description: `${myDisplayName} raised a Rally Flag! The whole team gets 1.25x steps for 1 hour.`,
         metadata: { affected: beneficiaries.length },
       });
-      events.emit("POWERUP_USED", { raceId, userId, powerupType: type, upgradeLevel: 0 });
+      events.emit("POWERUP_USED", { raceId, userId, powerupType: type, upgradeLevel: 0, stealthed: await casterStealthed() });
       await finalizeSelfContainedUse(null);
       return {
         blocked: false,
@@ -1446,7 +1523,7 @@ function buildUsePowerup(dependencies = {}) {
         metadata: { affected: affected.length, blockedCount },
       });
       for (const uid of affected) {
-        events.emit("POWERUP_USED", { raceId, userId, powerupType: type, targetUserId: uid, upgradeLevel: 0 });
+        events.emit("POWERUP_USED", { raceId, userId, powerupType: type, targetUserId: uid, upgradeLevel: 0, stealthed: await casterStealthed() });
       }
       await finalizeSelfContainedUse(null);
       return {
@@ -1462,6 +1539,9 @@ function buildUsePowerup(dependencies = {}) {
 
     if (type === "MYSTERY_POTION") {
       return await applyMysteryPotion({
+        // Resolved HERE, where the memo is in scope, and handed over as a plain
+        // boolean — applyMysteryPotion is module-scope and can't reach it.
+        casterStealthed: await casterStealthed(),
         userId,
         raceId,
         powerupId,
@@ -3594,6 +3674,7 @@ function buildUsePowerup(dependencies = {}) {
       powerupType: type,
       targetUserId: resolvedTargetUserId,
       upgradeLevel,
+      stealthed: await casterStealthed(),
     });
 
     await invalidateRaceProgress(raceId);

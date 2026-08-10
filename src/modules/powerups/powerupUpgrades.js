@@ -32,13 +32,28 @@ function rarityForType(type) {
 // time), so running effects are untouched — forward-only. The strong-short
 // exceptions (GHOST_PEPPER 30m, CAMPFIRE_REST) and the long passives
 // (COMPRESSION_SOCKS shield) keep their historical durations.
+//
+// EXCEPTION — the two hard CCs (batch 2026-08-09 item 1, owner decision). A
+// 4-hour Leg Cramp / Wrong Turn is oppressive: it takes a player out of the
+// race for a whole evening. Each upgrade level now adds 15 MINUTES instead of
+// an hour → 1h / 1h15m / 1h30m / 1h45m. The BASE is unchanged, so an
+// unupgraded cast is exactly as strong as it has always been and only the
+// upgrade ladder is nerfed. Forward-only like every other value here: the
+// duration is stamped into the effect row at use time, so in-flight effects
+// keep the window they were created with and every app version picks the new
+// numbers up on deploy with no release.
+//
+// The matching cost reprice lives in balanceConfig.defaults `upgradeCosts.byType`
+// (arithmetic cost for arithmetic duration) — see the comment there for why it
+// is not optional.
+const QUARTER_HOUR = 15 * 60 * 1000;
 const DURATIONS_MS = {
-  LEG_CRAMP:         [1 * HOUR, 2 * HOUR, 3 * HOUR, 4 * HOUR],
+  LEG_CRAMP:         [1 * HOUR, 1 * HOUR + QUARTER_HOUR, 1 * HOUR + 2 * QUARTER_HOUR, 1 * HOUR + 3 * QUARTER_HOUR],
   RUNNERS_HIGH:      [1 * HOUR, 2 * HOUR, 3 * HOUR, 4 * HOUR],
   // Stealth adopts the standard 1/2/3/4h ladder (supersedes the 2026-07-24
   // 60/75/90/120 nerf). Server-computed → hits every app version on deploy.
   STEALTH_MODE:      [1 * HOUR, 2 * HOUR, 3 * HOUR, 4 * HOUR],
-  WRONG_TURN:        [1 * HOUR, 2 * HOUR, 3 * HOUR, 4 * HOUR],
+  WRONG_TURN:        [1 * HOUR, 1 * HOUR + QUARTER_HOUR, 1 * HOUR + 2 * QUARTER_HOUR, 1 * HOUR + 3 * QUARTER_HOUR],
   DETOUR_SIGN:       [1 * HOUR, 2 * HOUR, 3 * HOUR, 4 * HOUR],
   COMPRESSION_SOCKS: [24 * HOUR, 30 * HOUR, 36 * HOUR, 48 * HOUR],
   CAMPFIRE_REST:     [45 * 60 * 1000, 60 * 60 * 1000, 75 * 60 * 1000, 90 * 60 * 1000],
@@ -56,6 +71,31 @@ const MAGNITUDES = {
   PINECONE_TOSS: [750, 1000, 1500, 2250],
   CAMPFIRE_REST: [2.25, 2.5, 2.75, 3],
 };
+
+// THE duration string. One function, shared by every surface that tells a
+// player how long an effect lasts (batch 2026-08-09 item 1).
+//
+// This exists because the 15-minute ladder broke three independent formatters
+// in three different ways: usePowerup's `hoursText` divided by an hour and
+// would have printed "1.25 hours" in the race feed; the push handler's
+// `attackWindowText` had a non-integer fallback that printed "75 minutes"; and
+// the two would then describe the SAME cast differently in the feed and the
+// notification. Fixing each site separately would have left the next
+// non-integer duration to rediscover the same bug, so both now delegate here.
+//
+// Format:
+//   whole hours  -> "1 hour" / "4 hours"
+//   mixed        -> "1h 15m"   (the target format for the new ladder)
+//   under an hour-> "30 minutes" / "1 minute"
+// Never emits a decimal.
+function formatDuration(durationMs) {
+  const totalMinutes = Math.round(durationMs / (60 * 1000));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours === 0) return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+  if (minutes === 0) return `${hours} hour${hours === 1 ? "" : "s"}`;
+  return `${hours}h ${minutes}m`;
+}
 
 function isUpgradeable(type) {
   return upgradeableTypes().has(type);
@@ -123,6 +163,7 @@ module.exports = {
   rarityForType,
   DURATIONS_MS,
   MAGNITUDES,
+  formatDuration,
   isUpgradeable,
   isValidLevel,
   upgradeCost,

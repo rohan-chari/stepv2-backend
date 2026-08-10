@@ -25,9 +25,9 @@ coins, never rolled.
 
 | Powerup | Target | Duration | Effect |
 |---|---|---|---|
-| **Leg Cramp** | Opponent | 2 hours | Freezes target's step progression. All steps they walk during the window are subtracted from their race total |
+| **Leg Cramp** | Opponent | 1 hour (1h / 1h15m / 1h30m / 1h45m by upgrade level) | Freezes target's step progression. All steps they walk during the window are subtracted from their race total |
 | **Stealth Mode** | Self | 4 hours | Hides your progress on the leaderboard. Opponents see "???" for your name and no step count. You can still see your own progress |
-| **Wrong Turn** | Opponent | 1 hour | Reverses the target's steps during the window |
+| **Wrong Turn** | Opponent | 1 hour (1h / 1h15m / 1h30m / 1h45m by upgrade level) | Reverses the target's steps during the window |
 | **Cleanse** | Self | Instant | Clears every opponent-inflicted debuff on you (your own buffs are untouched) |
 
 ### Rare
@@ -83,9 +83,9 @@ What a mystery box can actually roll. A powerup having a rarity does not make it
 
 - **Common** — Protein Shake, Trail Mix, Detour Sign, Runners High, Pinecone Toss
 - **Uncommon** — Leg Cramp, Stealth Mode, Wrong Turn, Rally Flag
-- **Rare** — Red Card, Second Wind, Compression Socks, Fanny Pack, Lucky Horseshoe, Trail Mine, Sneaky Swap, Shortcut, Cleanse, Mirror
+- **Rare** — Red Card, Second Wind, Compression Socks, Lucky Horseshoe, Trail Mine, Sneaky Swap, Shortcut, Cleanse, Mirror, Power Outage
 
-Store-only (bought with coins, never rolled from a mystery box): Pocket Watch, Imposter, Rainstorm, Signal Jammer, Leech, Defense Scan, Hitchhike, Quick Rinse, Uprising, Ghost Pepper, Coin Flip, Mystery Potion, Decoy, Power Outage, Umbrella, Drill Sergeant, Piggy Bank, Bounty.
+Store-only (bought with coins, never rolled from a mystery box): Pocket Watch, Imposter, Rainstorm, Signal Jammer, Leech, Defense Scan, Hitchhike, Quick Rinse, Uprising, Ghost Pepper, Coin Flip, Mystery Potion, Decoy, Umbrella, Drill Sergeant, Piggy Bank, Bounty.
 
 Team races only (droppable, but a solo race never rolls them): Rally Flag.
 
@@ -101,6 +101,12 @@ Coin cost by rarity and level. Level 0 is the base form and is free.
 | Uncommon | 10 | 30 | 90 |
 | Rare | 15 | 45 | 135 |
 
+Per-type overrides:
+
+- **Leg Cramp** — 10 / 20 / 30
+- **Wrong Turn** — 15 / 30 / 45
+- **Lucky Horseshoe** — 0 / 0 / 0
+
 Upgradeable: Protein Shake, Shortcut, Detour Sign, Trail Mix, Runners High, Leg Cramp, Stealth Mode, Wrong Turn, Compression Socks, Lucky Horseshoe, Campfire Rest, Trail Magnet, Pocket Watch, Trail Mine, Pinecone Toss.
 
 ## Lucky Horseshoe
@@ -109,9 +115,9 @@ Chance that the next mystery box is forced to RARE, by upgrade level. On a miss 
 
 | Level | Chance of RARE |
 |---|---|
-| 0 | 0.0% |
-| 1 | 20.0% |
-| 2 | 45.0% |
+| 0 | 100.0% |
+| 1 | 100.0% |
+| 2 | 100.0% |
 | 3 | 100.0% |
 
 ## Daily Reward Box
@@ -214,7 +220,7 @@ For timed effects (Leg Cramp, Runner's High), the system uses StepSample data fo
 | Event | Example |
 |---|---|
 | `POWERUP_EARNED` | "Alex earned a Protein Shake!" |
-| `POWERUP_USED` | "Alex used Leg Cramp on Jordan! Their steps are frozen for 2 hours." |
+| `POWERUP_USED` | "Alex used Leg Cramp on Jordan! Their steps are frozen for 1 hour." |
 | `POWERUP_BLOCKED` | "Jordan's Compression Socks blocked Alex's Leg Cramp!" |
 | `POWERUP_DISCARDED` | "Alex discarded a Banana Peel." |
 | `EFFECT_EXPIRED` | "Leg Cramp wore off." |

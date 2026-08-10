@@ -161,7 +161,23 @@ function positionMultiplierFor(type, ctx, config) {
 // The single seam. `pickTypeForRarity` (the roll) and `typeOddsForPosition` (the
 // disclosure) BOTH read the pool and weights from here — if they ever stop
 // doing so, the odds sheet starts lying to players.
-function eligiblePoolFor(rarity, ctx, config) {
+//
+// `excludeTypes` (batch 2026-08-09 item 8b) is a FOURTH, caller-supplied filter,
+// applied last and ONLY by the forced-rarity path — see rollPowerup, which
+// passes it only when `options.minRarity` is set. Today its sole use is keeping
+// a Lucky-Horseshoe-forced box from handing back another Lucky Horseshoe.
+//
+// It lives HERE, at the shared pool seam, rather than as a post-pick retry in
+// openMysteryBox, because with `rareChanceByLevel = [1,1,1,1]` the tier is
+// coerced BEFORE the pick (rollPowerup -> coerceMinRarity -> pickTypeForRarity),
+// so the old post-pick backstop in openMysteryBox never fires and an exclusion
+// there would be a silent no-op.
+//
+// It has its OWN empty-pool fallback, deliberately separate from the balance
+// one above: excluding the only surviving type must degrade to "you get a
+// horseshoe" rather than to a null roll. It is a nicety, not a compatibility
+// gate, so unlike the hard gates below it is always safe to undo.
+function eligiblePoolFor(rarity, ctx, config, excludeTypes) {
   const cfg = resolveConfig(config);
   const basePool = Array.isArray(cfg.dropPool?.[rarity]) ? cfg.dropPool[rarity] : [];
   const rules = cfg.positionRules;
@@ -214,6 +230,15 @@ function eligiblePoolFor(rarity, ctx, config) {
     }
   }
 
+  // ---- CALLER EXCLUSION (2026-08-09). Last filter, own fallback. -----------
+  if (Array.isArray(excludeTypes) && excludeTypes.length > 0) {
+    const survivors = pool.filter((type) => !excludeTypes.includes(type));
+    // Only take the exclusion if something is left. If the caller just excluded
+    // the entire tier, hand back the un-excluded pool: a guaranteed-rare box
+    // that returns null would be a far worse outcome than a duplicate.
+    if (survivors.length > 0) pool = survivors;
+  }
+
   const weights = pool.map(
     (type) => weightForType(type, cfg) * positionMultiplierFor(type, ctx, cfg)
   );
@@ -248,8 +273,8 @@ function pickTypeFromPool(pool, rng, config) {
 
 // Position-aware pick for a tier. `ctx` absent == no filtering, i.e. exactly the
 // pre-2026-07-26 behaviour, which is what keeps every existing caller intact.
-function pickTypeForRarity(rarity, rng, config, ctx) {
-  const { pool, weights } = eligiblePoolFor(rarity, ctx, config);
+function pickTypeForRarity(rarity, rng, config, ctx, excludeTypes) {
+  const { pool, weights } = eligiblePoolFor(rarity, ctx, config, excludeTypes);
   return drawWeighted(pool, weights, rng);
 }
 
@@ -261,6 +286,15 @@ function pickTypeForRarity(rarity, rng, config, ctx) {
 // Note what does NOT change here: `rarityOdds[tierIndex]` is spread in full
 // across whatever survives the filter, so each tier still contributes exactly
 // its own probability and the tier distribution is untouched.
+//
+// DELIBERATELY DOES NOT MIRROR `excludeTypes` (batch 2026-08-09 item 8b). This
+// is the player-facing odds sheet, and it quotes STEADY-STATE box odds — what
+// your next ordinary box is worth. The Horseshoe self-exclusion applies only to
+// the one forced box a Horseshoe produces, which is a special case the sheet
+// does not model at all (it also does not show the guaranteed-RARE coercion).
+// Mirroring only half of that would make the sheet less accurate, not more. If
+// a per-Horseshoe odds display is ever wanted, it needs its own entry point
+// rather than a flag on this one.
 function typeOddsForPosition(position, totalParticipants, config, ctx) {
   const cfg = resolveConfig(config);
   const rarityOdds = rarityOddsForPosition(position, totalParticipants, cfg);
@@ -332,7 +366,19 @@ function rollPowerup(position, totalParticipants, rng = Math.random, options = {
   // of the odds disclosure mathematically identical to before this feature.
   rarity = coerceMinRarity(rarity, options.minRarity);
 
-  const type = pickTypeForRarity(rarity, rng, config, options.ctx);
+  // The caller exclusion is scoped to FORCED rolls only. A natural (un-floored)
+  // RARE roll may still yield a Lucky Horseshoe — that is a normal drop, not the
+  // dud-feeling "my guaranteed rare was another horseshoe" case this addresses.
+  // Reading `options.minRarity` (rather than a separate flag) is what ties the
+  // two together, so a future caller cannot accidentally get the exclusion on a
+  // natural roll.
+  const type = pickTypeForRarity(
+    rarity,
+    rng,
+    config,
+    options.ctx,
+    options.minRarity ? options.excludeTypes : undefined
+  );
   return { type, rarity };
 }
 

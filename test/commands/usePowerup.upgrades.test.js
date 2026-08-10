@@ -260,7 +260,12 @@ function durationAssert(effect, expectedHours) {
 
 // §3.4 duration standardization (2026-07-25): 1/2/3/4h ladders (§9-authorized
 // existing-test DURATION literal update; coin amounts unchanged).
-test("Lvl 3 Leg Cramp: 4h freeze duration, 90 coins deducted", async () => {
+//
+// Batch 2026-08-09 item 1 restates the LC/WT literals ONLY: those two ladders
+// are now +15m per level (1 / 1.25 / 1.5 / 1.75h) and carry a byType cost
+// override. Every other type's literals below are untouched, which is the point
+// — the nerf is deliberately narrow.
+test("Lvl 3 Leg Cramp: 1h45m freeze duration, 30 coins deducted", async () => {
   const ctx = makeDeps({ powerupType: "LEG_CRAMP" });
   const use = buildUsePowerup(ctx.deps);
 
@@ -268,15 +273,15 @@ test("Lvl 3 Leg Cramp: 4h freeze duration, 90 coins deducted", async () => {
     userId: "user-1", raceId: "race-1", powerupId: "pw-1", targetUserId: "user-2", upgradeLevel: 3,
   });
 
-  durationAssert(ctx.effectsCreated[0], 4);
-  assert.equal(ctx.coinDeductions[0].amount, 90);
+  durationAssert(ctx.effectsCreated[0], 1.75);
+  assert.equal(ctx.coinDeductions[0].amount, 30);
 });
 
-test("Lvl 1 Leg Cramp: 2h freeze, 10 coins", async () => {
+test("Lvl 1 Leg Cramp: 1h15m freeze, 10 coins (entry price unchanged)", async () => {
   const ctx = makeDeps({ powerupType: "LEG_CRAMP" });
   const use = buildUsePowerup(ctx.deps);
   await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", targetUserId: "user-2", upgradeLevel: 1 });
-  durationAssert(ctx.effectsCreated[0], 2);
+  durationAssert(ctx.effectsCreated[0], 1.25);
   assert.equal(ctx.coinDeductions[0].amount, 10);
 });
 
@@ -304,11 +309,14 @@ test("Lvl 2 Stealth Mode: 3h duration", async () => {
   durationAssert(ctx.effectsCreated[0], 3);
 });
 
-test("Lvl 3 Wrong Turn: 4h duration, 90 coins deducted", async () => {
+test("Lvl 3 Wrong Turn: 1h45m duration, 45 coins deducted", async () => {
   const ctx = makeDeps({ powerupType: "WRONG_TURN" });
   const use = buildUsePowerup(ctx.deps);
   await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", targetUserId: "user-2", upgradeLevel: 3 });
-  durationAssert(ctx.effectsCreated[0], 4);
+  durationAssert(ctx.effectsCreated[0], 1.75);
+  // Coins were never asserted here despite the old test name claiming 90.
+  // Pinned now, at the repriced value.
+  assert.equal(ctx.coinDeductions[0].amount, 45);
 });
 
 test("Lvl 3 Detour Sign: 4h duration, 25 coins deducted (Common rarity)", async () => {
@@ -504,7 +512,7 @@ test("Lvl 3 Leg Cramp blocked by shield: coins deducted, no effect created", asy
 
   assert.equal(result.blocked, true);
   assert.equal(ctx.effectsCreated.length, 0);
-  assert.equal(ctx.coinDeductions[0].amount, 90);
+  assert.equal(ctx.coinDeductions[0].amount, 30);
   assert.equal(ctx.upgradeEvents[0].status, "BLOCKED");
 });
 
@@ -512,8 +520,10 @@ test("Lvl 3 Leg Cramp blocked by shield: coins deducted, no effect created", asy
 // Race feed event description includes "Lvl X" prefix
 // ===========================================================================
 
-// §3.4 (2026-07-25): Lvl 3 Leg Cramp is now 4h (§9-authorized DURATION literal).
-test("Race feed for Lvl 3 Leg Cramp says 'Lvl 3' and shows 4 hours", async () => {
+// Batch 2026-08-09 item 1: Lvl 3 Leg Cramp is 1h45m, and the feed string comes
+// from the shared formatter — so this also pins that the feed never renders a
+// decimal hour ("1.75 hours") for the new ladder.
+test("Race feed for Lvl 3 Leg Cramp says 'Lvl 3' and shows 1h 45m", async () => {
   const ctx = makeDeps({ powerupType: "LEG_CRAMP" });
   const use = buildUsePowerup(ctx.deps);
 
@@ -522,7 +532,8 @@ test("Race feed for Lvl 3 Leg Cramp says 'Lvl 3' and shows 4 hours", async () =>
   const feedEvent = ctx.feedEvents.find((e) => e.eventType === "POWERUP_USED");
   assert.ok(feedEvent, "feed event should exist");
   assert.match(feedEvent.description, /Lvl 3/);
-  assert.match(feedEvent.description, /4 hours/);
+  assert.match(feedEvent.description, /1h 45m/);
+  assert.ok(!/\d\.\d/.test(feedEvent.description), "no decimal hours in the feed");
 });
 
 test("Race feed for Lvl 0 (base) Leg Cramp does NOT include 'Lvl' prefix", async () => {
