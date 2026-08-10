@@ -177,7 +177,70 @@ function optionHPositionFairness(config) {
   return next;
 }
 
+// docs/feature-batch-2026-08-09-requirements.md §Cross-cutting rollout order —
+// the ONE consolidated data write for items 1, 6 and 8, applied only AFTER the
+// batch's backend code (which carries the same values in defaults.js) is
+// deployed: enforceStoreOnlyExclusion unions the stored storeOnlyTypes with the
+// CODE defaults' list, so running this against an old backend would see the
+// POWER_OUTAGE drop silently re-stripped (the defaults-veto trap this script
+// refuses on).
+//
+// Deliberately NOT touched: rarityByType.WRONG_TURN. The live prod row says
+// RARE where the code default says UNCOMMON — known drift; the byType reprice
+// below makes the price agree either way, and reconciling the drift belongs to
+// option-h-position-fairness, not this row.
+//
+// Idempotent: re-running it on an already-migrated config is a no-op diff.
+function batch20260809(config) {
+  const next = JSON.parse(JSON.stringify(config));
+
+  // Item 1 — WT/LC upgrade ladder 1h/1h15/1h30/1h45, repriced per level.
+  // Item 8b — Horseshoe stays upgradeable (frozen-client 400 trap) at cost 0.
+  next.upgradeCosts = { ...(next.upgradeCosts || {}) };
+  next.upgradeCosts.byType = {
+    ...(next.upgradeCosts.byType || {}),
+    LEG_CRAMP: [0, 10, 20, 30],
+    WRONG_TURN: [0, 15, 30, 45],
+    LUCKY_HORSESHOE: [0, 0, 0, 0],
+  };
+
+  // Item 8b — every Horseshoe level guarantees a rare.
+  next.luckyHorseshoe = {
+    ...(next.luckyHorseshoe || {}),
+    rareChanceByLevel: [1, 1, 1, 1],
+  };
+
+  // Item 6 — POWER_OUTAGE out of the shop/daily roll, into box drops as RARE,
+  // damped at the front (game-analyst REQUIRED). The down-weight is a single
+  // key MERGED into the existing table — never assign the table wholesale, or
+  // every other tuned key silently reverts (the STEALTH_MODE trap).
+  next.rarityByType = { ...(next.rarityByType || {}), POWER_OUTAGE: "RARE" };
+  next.positionRules = { ...(next.positionRules || {}) };
+  next.positionRules.leadingDownweight = {
+    ...(next.positionRules.leadingDownweight || {}),
+    POWER_OUTAGE: 0.3,
+  };
+  next.storeOnlyTypes = withoutValue(next.storeOnlyTypes, "POWER_OUTAGE");
+  next.dropPool = { ...(next.dropPool || {}) };
+  next.dropPool.RARE = withValue(next.dropPool.RARE, "POWER_OUTAGE");
+
+  // Item 8a — Fanny Pack out of generation. Held copies keep working; the
+  // shop row is untouched here (it was already store-hidden).
+  next.dropPool.RARE = withoutValue(next.dropPool.RARE, "FANNY_PACK");
+
+  return next;
+}
+
 const MIGRATIONS = {
+  "batch-2026-08-09": {
+    apply: batch20260809,
+    note: "batch 2026-08-09 items 1/6/8: WT-LC reprice, PO to RARE drops, Horseshoe all-rare at cost 0",
+    description:
+      "Consolidated data write for batch 2026-08-09 (items 1, 6, 8): WT/LC byType reprice, " +
+      "LUCKY_HORSESHOE [0,0,0,0] + rareChanceByLevel [1,1,1,1], POWER_OUTAGE -> dropPool.RARE " +
+      "with leadingDownweight 0.3 and out of storeOnlyTypes, FANNY_PACK out of dropPool.RARE. " +
+      "APPLY ONLY AFTER the batch backend is deployed (defaults-veto trap).",
+  },
   "option-h-position-fairness": {
     apply: optionHPositionFairness,
     note: "Option H: trailer catch-up via self-boost + rarityByType drift reconcile",
