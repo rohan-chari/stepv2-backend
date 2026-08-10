@@ -33,6 +33,18 @@ const {
 const {
   rollPowerup: realRollPowerup,
 } = require("../../src/modules/powerups/powerupOdds");
+const {
+  RaceActiveEffect,
+} = require("../../src/modules/powerups/models/raceActiveEffect");
+const {
+  optionHPositionFairness,
+} = require("../../scripts/balance-apply");
+const {
+  mergeOverDefaults,
+} = require("../../src/modules/economy/balanceConfig");
+const {
+  defaultConfig,
+} = require("../../src/modules/economy/balanceConfig.defaults");
 
 const HOUR_MS = 60 * 60 * 1000;
 const FEATURES = {
@@ -329,9 +341,27 @@ describe("mystery-box odds position from raw walked steps", () => {
     assert.equal(status, 200);
     assert.equal(rolls[0].position, 1, "unhealed race ranks on totalSteps");
 
+    // The legacy replay HEALS the rows it just recomputed and the disclosure in
+    // the SAME request sees them (code review item 2) — so this progress call
+    // both persists raw_steps and quotes the raw position, rather than quoting
+    // the fallback for one more poll.
     const { body } = await progress(alice, raceId);
-    assert.equal(body.powerupData.dropOdds.position, 1);
     assert.equal(body.powerupData.dropOdds.totalParticipants, 3);
+    assert.equal(
+      body.powerupData.dropOdds.position,
+      3,
+      "the replay heals in-request; the disclosure must not lag its own write"
+    );
+    const healed = await rows(raceId);
+    for (const u of Object.values(healed)) {
+      assert.equal(typeof u.rawSteps, "number", "every row healed");
+    }
+
+    // A subsequent open agrees with what that request quoted.
+    rolls.length = 0;
+    const box2 = await seedBox(raceId, alice);
+    await openBox(alice, raceId, box2.id);
+    assert.equal(rolls[0].position, 3);
   });
 
   it("3b. a PARTIALLY healed race ranks EVERY participant on totalSteps (no raw-vs-boosted mixed comparison)", async () => {
@@ -351,8 +381,32 @@ describe("mystery-box odds position from raw walked steps", () => {
       "one NULL row pins the WHOLE race to totalSteps"
     );
 
-    const { body } = await progress(alice, raceId);
-    assert.equal(body.powerupData.dropOdds.position, 1);
+    // The disclosure agrees for as long as the row is unhealed. Assert it on a
+    // path that does NOT persist — an open, above, and a second one here —
+    // because a legacy-replay progress request heals every row it recomputes
+    // (code review item 2) and would legitimately switch the race to raw.
+    rolls.length = 0;
+    const box2 = await seedBox(raceId, alice);
+    await openBox(alice, raceId, box2.id);
+    assert.equal(rolls[0].position, 1, "still mixed, still on totalSteps");
+
+    await progress(alice, raceId);
+    const healed = await rows(raceId);
+    for (const u of Object.values(healed)) {
+      assert.equal(
+        typeof u.rawSteps,
+        "number",
+        "the replay heals the partial row"
+      );
+    }
+    rolls.length = 0;
+    const box3 = await seedBox(raceId, alice);
+    await openBox(alice, raceId, box3.id);
+    assert.equal(
+      rolls[0].position,
+      3,
+      "once every row is healed the race ranks on raw steps"
+    );
   });
 
   // ── Test 3b (reroll) ─────────────────────────────────────────────────────
@@ -623,6 +677,110 @@ describe("mystery-box odds position from raw walked steps", () => {
       );
     } finally {
       await forcedServer.close();
+    }
+  });
+
+  // ── Code review BLOCKER (2026-08-09) ─────────────────────────────────────
+  //
+  // Lucky Horseshoe promises "guaranteed <minRarity> or better", and at
+  // upgrade level 0 that minimum is UNCOMMON. Under Option H the UNCOMMON tier
+  // is dominated by PROTEIN_SHAKE / TRAIL_MIX / RUNNERS_HIGH, whose CANONICAL
+  // rarity is COMMON — so stamping the canonical rarity unconditionally would
+  // turn a paid guarantee into a COMMON card: wrong tint, and a 2-coin discard
+  // instead of 5. The stamp must be floored at the guarantee.
+  it("6d. Lucky Horseshoe's guaranteed minimum survives the canonical-rarity stamp", async () => {
+    const alice = await createUser("AliceLucky");
+    const bob = await createUser("BobLucky");
+    const raceId = await createActiveRace(alice, [bob], "Lucky stamp");
+    await postSamples(alice, [sampleAt(2, 2000)]);
+
+    const participant = await prisma.raceParticipant.findFirst({
+      where: { raceId, userId: alice.userId },
+    });
+    const box = await seedBox(raceId, alice);
+
+    // An ACTIVE Horseshoe with the level-0 guarantee.
+    const horseshoe = await prisma.racePowerup.create({
+      data: {
+        raceId,
+        participantId: participant.id,
+        userId: alice.userId,
+        type: "LUCKY_HORSESHOE",
+        rarity: "RARE",
+        status: "USED",
+        usedAt: new Date(),
+        earnedAtSteps: 10,
+      },
+    });
+    await prisma.raceActiveEffect.create({
+      data: {
+        raceId,
+        targetParticipantId: participant.id,
+        targetUserId: alice.userId,
+        sourceUserId: alice.userId,
+        powerupId: horseshoe.id,
+        type: "LUCKY_HORSESHOE",
+        status: "ACTIVE",
+        startsAt: new Date(),
+        metadata: { minRarity: "UNCOMMON", consumedOnNextBox: true },
+      },
+    });
+
+    // The real Option H config — the one that puts a COMMON-canonical type in
+    // dropPool.UNCOMMON — plus a roll that lands on it, exactly as the
+    // Horseshoe backstop would.
+    const optionHConfig = mergeOverDefaults(
+      optionHPositionFairness(defaultConfig())
+    );
+    const luckyServer = await startServer({
+      verifyAppleIdentityToken: async (token) => ({
+        sub: token,
+        email: `${token}@example.com`,
+      }),
+      openMysteryBox: buildOpenMysteryBox({
+        rollPowerupOdds: () => ({ type: "PROTEIN_SHAKE", rarity: "UNCOMMON" }),
+        balanceConfig: {
+          async getSnapshot() {
+            return { version: 99001, config: optionHConfig };
+          },
+        },
+        // The real effect model, so the Horseshoe is actually found (injected
+        // deps otherwise stub it out).
+        RaceActiveEffect,
+      }),
+    });
+    try {
+      const { status, body } = await openBox(
+        alice,
+        raceId,
+        box.id,
+        luckyServer.baseUrl
+      );
+      assert.equal(status, 200);
+      assert.equal(body.type, "PROTEIN_SHAKE");
+      assert.equal(
+        body.rarity,
+        "UNCOMMON",
+        "a guaranteed-uncommon box must never be stamped COMMON"
+      );
+
+      const row = await prisma.racePowerup.findUnique({ where: { id: box.id } });
+      assert.equal(row.rarity, "UNCOMMON");
+
+      const discardRes = await request(
+        server.baseUrl,
+        "POST",
+        `/races/${raceId}/powerups/${box.id}/discard`,
+        { token: alice.token, headers: FEATURES }
+      );
+      assert.equal(discardRes.status, 200);
+      assert.equal(
+        (await discardRes.json()).coinsAwarded,
+        5,
+        "…and it discards at the UNCOMMON price the guarantee promised"
+      );
+    } finally {
+      await luckyServer.close();
     }
   });
 });

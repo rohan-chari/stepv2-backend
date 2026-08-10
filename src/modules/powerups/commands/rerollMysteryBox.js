@@ -308,9 +308,16 @@ function buildRerollMysteryBox(dependencies = {}) {
     // Step 7 — the SAME canonical-rarity stamp openMysteryBox applies, for the
     // same reason: the discard payout and the client tint read this value, and
     // it must never claim the tier that happened to produce the roll.
+    //
+    // The guaranteed-minimum floor is threaded through explicitly even though a
+    // reroll has NO Lucky Horseshoe today (the paid buff is consumed by the
+    // open it was active for, and `rollFn` above is called with no minRarity).
+    // If a guaranteed-minimum reroll is ever added, the floor is already here —
+    // the failure mode it prevents (stamping a guarantee back down to COMMON
+    // under Option H) is silent and player-visible only as a wrong price.
     rolled = {
       ...rolled,
-      rarity: canonicalRarityFor(rolled.type, rolled.rarity, config),
+      rarity: canonicalRarityFor(rolled.type, rolled.rarity, config, null),
     };
 
     // ── Persist. Conditional on the row still being an un-rerolled HELD row, so

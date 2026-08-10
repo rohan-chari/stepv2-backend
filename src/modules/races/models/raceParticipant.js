@@ -157,8 +157,12 @@ const RaceParticipant = {
   // Thin wrapper, kept because callers SPREAD this model (computeRaceState's
   // write capture) and because ~20 unit-test fakes implement it. Writes no
   // `rawSteps`, so it is only correct for a caller that genuinely has none.
+  //
+  // Calls through the MODULE binding, not `this`: callers routinely destructure
+  // (`const { updateTotalSteps } = RaceParticipant`) or spread this object, and
+  // either would leave `this` undefined or pointing at an override.
   async updateTotalSteps(id, totalSteps) {
-    return this.updateStepTotals(id, { totalSteps });
+    return RaceParticipant.updateStepTotals(id, { totalSteps });
   },
 
   async markFinished(id, finishedAt, finishTotalSteps) {

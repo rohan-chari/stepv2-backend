@@ -1120,9 +1120,18 @@ model RaceParticipant {
   // manipulation-proof quantity box progress uses: no buffs, no debuffs, no
   // bonus steps, so it only ever grows by walking. Written by every writer of
   // `totalSteps` (legacy replay persist, the v2 worker's fenced replay, and the
-  // step-upload reconcile), monotonically (`max(existing, baseAdjusted)`) so a
-  // downward re-sync of step_samples can never move a player's odds position
-  // backwards. Frozen (finished/forfeited) rows keep their last persisted value.
+  // step-upload reconcile). Frozen (finished/forfeited) rows keep their last
+  // persisted value.
+  //
+  // MONOTONIC PER WRITER, with a bounded race window — NOT a strict
+  // never-decreases guarantee. Each writer high-waters the value it writes
+  // (`max(existing, baseAdjusted)`), which is what stops a downward re-sync of
+  // step_samples from walking a player's odds position backwards. But the
+  // worker reads `existing` OUTSIDE its write transaction, so a concurrent
+  // reconcile write that lands in between can be clobbered by up to one sync
+  // interval's worth of steps. Accepted: it is the same last-writer-wins shape
+  // `total_steps` itself already has, and the worst case is odds computed from
+  // a slightly stale raw total that the next persist repairs.
   //
   // Read ONLY as the mystery-box drop-odds position (openMysteryBox,
   // rerollMysteryBox, getRaceProgress's dropOdds) via the shared

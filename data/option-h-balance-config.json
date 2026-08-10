@@ -4,6 +4,13 @@
   "generatedAt": "2026-08-09",
   "migration": "option-h-position-fairness",
   "validateConfig": [],
+  "preApplyChecklist": [
+    "ORDER: the raw-steps position fix (raw_steps + rawPositionFor + the canonical-rarity stamp) must be DEPLOYED before this row is written anywhere. Option H roughly doubles the value of trailing odds, so applying it first amplifies the hoarding exploit the code fix removes.",
+    "Run `npm run balance:apply -- option-h-position-fairness --db=staging` (DRY RUN) and read EVERY removed positionRules.* path in the mergedDiff: both down-weight tables are replaced wholesale, so any live-tuned key absent from the H list silently reverts to the code default. A key merely OMITTED is re-imposed by mergeOverDefaults (the STEALTH_MODE trap) - neutralise with an explicit 1.0.",
+    "Require a GREEN, NON-SKIPPED run of test/integration/box-raw-steps-worker-redis.test.js. It is the only coverage of the prod writer path (redisStandingsEnabled ON, v2 worker fenced replay) and it SKIPS SILENTLY without a local Redis.",
+    "validateConfig must return [] on the MERGED config (the script checks this) and the zero-weight sweep in test/services/optionHBalanceConfig.test.js must be green: a tier whose weights sum to 0 makes drawWeighted fall back to a UNIFORM pick, inverting the nerf.",
+    "Staging first, verify, then prod with --apply --i-know-this-is-prod. Rollback: balanceConfig.rollbackTo(<previous version>); the four-list kill switch still works."
+  ],
   "config": {
     "schemaVersion": 1,
     "rarityByType": {

@@ -34,6 +34,30 @@
 // SAFETY: --db=prod is a production data write. Per CLAUDE.md it requires
 // explicit in-the-moment confirmation; the script additionally refuses to run
 // against prod unless --apply is paired with --i-know-this-is-prod.
+//
+// ---------------------------------------------------------------------------
+// PRE-APPLY CHECKLIST (added 2026-08-09 after the Option H code review). Run it
+// on STAGING first, then prod, for every migration — the two items below are
+// failure modes a green `validateConfig` does NOT catch.
+//
+//   (a) READ EVERY REMOVED `positionRules.*` PATH IN THE DRY-RUN mergedDiff.
+//       A migration that assigns a down-weight table assigns it WHOLESALE —
+//       `leadingDownweight` / `trailingDownweight` are replaced, not merged
+//       key-by-key, once the migration writes them. Any key an admin tuned live
+//       that is absent from the migration's table silently reverts to the code
+//       default (and a key the migration merely OMITS is re-imposed by
+//       mergeOverDefaults — the STEALTH_MODE trap: neutralise with an explicit
+//       1.0, never by omission). Diff lines showing `+ (absent)` under
+//       positionRules are the ones to read one by one and confirm intentional.
+//
+//   (b) FOR THE RAW-STEPS / OPTION H WORK, REQUIRE A GREEN NON-SKIPPED RUN OF
+//       test/integration/box-raw-steps-worker-redis.test.js. It is the ONLY
+//       coverage of the production writer path (`redisStandingsEnabled` ON, the
+//       v2 worker's fenced replay), and it SKIPS SILENTLY when no local Redis
+//       is available — a "green" suite with that file skipped proves nothing
+//       about prod. Confirm the two cases printed ✔, not ﹣/skipped, before
+//       applying Option H anywhere.
+// ---------------------------------------------------------------------------
 
 require("dotenv").config();
 

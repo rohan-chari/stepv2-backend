@@ -210,9 +210,14 @@ function buildOpenMysteryBox(dependencies = {}) {
     // upgrade price and the discard payout; without it Option H's boosted
     // commons would discard for the UNCOMMON price. Applies to BOTH persist
     // branches below (auto-activate and normal) because it happens here, once.
+    //
+    // `minRarity` is passed so an active Lucky Horseshoe's GUARANTEE outranks
+    // the canonical rarity: the whole tier above was already coerced up to the
+    // guarantee, and stamping a COMMON-canonical type back down would silently
+    // void a paid promise (code review 2026-08-09).
     rolled = {
       ...rolled,
-      rarity: canonicalRarityFor(rolled.type, rolled.rarity, config),
+      rarity: canonicalRarityFor(rolled.type, rolled.rarity, config, minRarity),
     };
 
     if (luckyEffect) {

@@ -494,13 +494,21 @@ function buildGetRaceProgress(deps = {}) {
           // from this replay's first pass, high-watered against the stored
           // value. Frozen rows are skipped by the guard above, so a finished
           // player's raw_steps is never advanced.
+          const nextRaw = nextRawSteps(
+            participant.rawSteps,
+            participantStepsMap[participant.id]
+          );
           await participantModel.updateStepTotals(participant.id, {
             totalSteps,
-            rawSteps: nextRawSteps(
-              participant.rawSteps,
-              participantStepsMap[participant.id]
-            ),
+            rawSteps: nextRaw,
           });
+          // Heal the IN-MEMORY row too. `race` was loaded once at the top of
+          // the request, and buildDropOdds ranks on these same objects — so
+          // without this line the disclosure quotes a position derived from the
+          // pre-write values and heals one poll late, which on a first-ever
+          // resolve means quoting the totalSteps fallback for a request that
+          // just persisted every raw_steps in the race.
+          participant.rawSteps = nextRaw;
           snapshotStore.__bump("writeBacks");
         }
       }

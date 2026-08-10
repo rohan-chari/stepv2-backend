@@ -297,9 +297,17 @@ function typeOddsForPosition(position, totalParticipants, config, ctx) {
 // keys off rarityByType), and clients tint from the same value, so this also
 // removes the tint inconsistency. Falls back to the rolled tier whenever the
 // config has no (or an invalid) canonical rarity for the type.
-function canonicalRarityFor(type, rolledRarity, config) {
+//
+// `minRarity` is a GUARANTEED FLOOR and outranks the canonical rarity (code
+// review 2026-08-09). Lucky Horseshoe promises "guaranteed <minRarity> or
+// better" and its level-0 minimum is UNCOMMON; under Option H the UNCOMMON tier
+// is mostly COMMON-canonical self-boosts, so stamping the canonical rarity
+// unconditionally would hand a paid guarantee back as a COMMON card — wrong
+// tint, and a 2-coin discard instead of 5. Floor first, canonical second.
+function canonicalRarityFor(type, rolledRarity, config, minRarity = null) {
   const canonical = resolveConfig(config)?.rarityByType?.[type];
-  return RARITY_ORDER.includes(canonical) ? canonical : rolledRarity;
+  const stamp = RARITY_ORDER.includes(canonical) ? canonical : rolledRarity;
+  return coerceMinRarity(stamp, minRarity);
 }
 
 function rollPowerup(position, totalParticipants, rng = Math.random, options = {}) {
