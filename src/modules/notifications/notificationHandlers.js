@@ -4,7 +4,7 @@ const { DeviceToken } = require("../../shared/push/deviceToken");
 const { apnsService } = require("../../shared/push/apns");
 const { fcmService } = require("../../shared/push/fcm");
 const { Notification } = require("./notification");
-const { upgradedDuration } = require("../powerups/powerupUpgrades");
+const { upgradedDuration, formatDuration } = require("../powerups/powerupUpgrades");
 const { prisma } = require("../../db");
 
 const CHAT_PUSH_COOLDOWN_MS = 60_000;
@@ -743,6 +743,12 @@ function registerNotificationHandlers(dependencies = {}) {
   // (§3.4 standardization: 1/2/3/4h by upgrade level), so the push can never
   // drift from what the effect actually does again. upgradeLevel rides on the
   // POWERUP_USED emit; a missing/invalid level falls back to base.
+  // Batch 2026-08-09 item 1: the string itself now comes from the ONE shared
+  // formatter (powerupUpgrades.formatDuration), which the race feed also uses.
+  // This function used to own a second, different implementation whose
+  // non-integer branch rendered the new 1h15m ladder as "75 minutes" — so the
+  // push and the feed line about the same cast disagreed. Only the
+  // level-lookup-with-fallback belongs here now.
   function attackWindowText(type, upgradeLevel) {
     let ms;
     try {
@@ -750,9 +756,7 @@ function registerNotificationHandlers(dependencies = {}) {
     } catch {
       ms = upgradedDuration(type, 0);
     }
-    const hours = ms / (60 * 60 * 1000);
-    if (Number.isInteger(hours)) return `${hours} hour${hours === 1 ? "" : "s"}`;
-    return `${Math.round(ms / (60 * 1000))} minutes`;
+    return formatDuration(ms);
   }
 
   const POWERUP_ATTACK_MESSAGES = {

@@ -34,6 +34,7 @@ const {
   upgradeCost,
   upgradedDuration,
   upgradedMagnitude,
+  formatDuration,
 } = require("../powerupUpgrades");
 const {
   deductCoinsAtomic: defaultDeductCoinsAtomic,
@@ -378,14 +379,17 @@ function levelPrefix(upgradeLevel) {
   return upgradeLevel > 0 ? `Lvl ${upgradeLevel} ` : "";
 }
 
+// Both delegate to the ONE shared formatter (batch 2026-08-09 item 1). They
+// used to divide by an hour and interpolate, which printed "1.25 hours" the
+// moment a ladder stopped being whole hours — and the push handler had its own
+// third variant that printed "75 minutes" for the same cast. See
+// powerupUpgrades.formatDuration.
 function hoursText(type, upgradeLevel) {
-  const hours = upgradedDuration(type, upgradeLevel) / (60 * 60 * 1000);
-  return hours === 1 ? "1 hour" : `${hours} hours`;
+  return formatDuration(upgradedDuration(type, upgradeLevel));
 }
 
 function durationText(durationMs) {
-  const hours = durationMs / (60 * 60 * 1000);
-  return hours === 1 ? "1 hour" : `${hours} hours`;
+  return formatDuration(durationMs);
 }
 
 // TR-902: races are time-based, so nobody finishes mid-race — there is no
@@ -570,10 +574,14 @@ async function applyMysteryPotion(ctx) {
         if (activeWT) { await applyProteinFallback("LEG_CRAMP_SELF"); break; }
       }
       await clearActiveLegCramps(effectModel, myParticipant.id);
-      const effect = await createOnSelf("LEG_CRAMP", { expiresAt: new Date(currentTime.getTime() + 2 * 60 * 60 * 1000), meta: { stepsAtFreezeStart: myParticipant.totalSteps } });
+      // Batch 2026-08-09 item 1: aligned DOWN from 2h to 1h so the Leg Cramp
+      // nerf can't be dodged via a potion. Hardcoded rather than read from the
+      // ladder because a potion outcome has no upgrade level — 1h is the L0
+      // cramp. (The self wrong-turn below was already 1h.)
+      const effect = await createOnSelf("LEG_CRAMP", { expiresAt: new Date(currentTime.getTime() + 60 * 60 * 1000), meta: { stepsAtFreezeStart: myParticipant.totalSteps } });
       result.rolled = "LEG_CRAMP_SELF"; result.effect = effect;
       await eventModel.create({ raceId, actorUserId: userId, eventType: "POWERUP_USED", powerupType: "MYSTERY_POTION",
-        description: `${myDisplayName} drank a Mystery Potion and cramped up! Their steps are frozen for 2 hours.`, metadata: { rolled } });
+        description: `${myDisplayName} drank a Mystery Potion and cramped up! Their steps are frozen for 1 hour.`, metadata: { rolled } });
       break;
     }
     case "WRONG_TURN_SELF": {
@@ -754,14 +762,16 @@ async function applyPotionEnemyAttack(a) {
       const effect = await effectModel.create({
         raceId, targetParticipantId: targetParticipant.id, targetUserId: resolvedTargetUserId,
         sourceUserId, powerupId, type: "LEG_CRAMP", startsAt: currentTime,
-        expiresAt: new Date(currentTime.getTime() + 2 * 60 * 60 * 1000),
+        // Batch 2026-08-09 item 1: 2h -> 1h, same reason as the self-cramp
+        // above — a potion must not out-freeze a real Leg Cramp.
+        expiresAt: new Date(currentTime.getTime() + 60 * 60 * 1000),
         metadata: { stepsAtFreezeStart: targetParticipant.totalSteps },
       });
       result.effect = effect;
     }
     await eventModel.create({ raceId, actorUserId: sourceUserId, eventType: "POWERUP_USED", powerupType: "MYSTERY_POTION",
       targetUserId: resolvedTargetUserId,
-      description: `${sourceName}'s Mystery Potion cramped ${targetName}! Their steps are frozen for 2 hours.`, metadata: { rolled } });
+      description: `${sourceName}'s Mystery Potion cramped ${targetName}! Their steps are frozen for 1 hour.`, metadata: { rolled } });
   }
 
   events.emit("POWERUP_USED", { raceId, userId: sourceUserId, powerupType: "MYSTERY_POTION", targetUserId: resolvedTargetUserId, upgradeLevel: 0 });

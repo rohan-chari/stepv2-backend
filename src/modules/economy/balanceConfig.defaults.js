@@ -337,15 +337,30 @@ const DEFAULT_CONFIG = {
   },
 
   // Coin cost to upgrade, indexed by level. Index 0 is the base form and is
-  // always free. byType overrides byRarity for a single type (currently unused —
-  // LUCKY_HORSESHOE's premium ladder was retired 2026-07-14).
+  // always free. byType overrides byRarity for a single type.
   upgradeCosts: {
     byRarity: {
       COMMON: [0, 5, 15, 45],
       UNCOMMON: [0, 10, 30, 90],
       RARE: [0, 15, 45, 135],
     },
-    byType: {},
+    // byType overrides (batch 2026-08-09, game-analyst REQUIRED). These are
+    // config, not code: they can be re-tuned with a PUT and no deploy, and they
+    // have no soft-bound coverage.
+    byType: {
+      // Item 1 — the WT/LC duration nerf makes each upgrade worth 15 minutes
+      // instead of an hour, so the geometric byRarity ladders would leave L3 as
+      // the worst-value purchase in the game and kill the WT/LC upgrade sink
+      // (18.7% of the total upgrade sink). Note WRONG_TURN's canonical rarity
+      // is RARE, so without this it would charge [0,15,45,135] — not the
+      // UNCOMMON ladder one might assume from its drop tier.
+      //
+      // Arithmetic cost for arithmetic duration: flat 43 / 58 steps per coin at
+      // every level, and the L1 entry price is unchanged for both, so nothing a
+      // player already budgeted for got more expensive.
+      LEG_CRAMP: [0, 10, 20, 30],
+      WRONG_TURN: [0, 15, 30, 45],
+    },
   },
 
   // Which types have an upgrade ladder at all. Everything else is level 0 only.

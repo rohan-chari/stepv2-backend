@@ -8,6 +8,7 @@ const {
   upgradedMagnitude,
   MAX_UPGRADE_LEVEL,
   UPGRADEABLE_TYPES,
+  formatDuration,
 } = require("../../src/modules/powerups/powerupUpgrades");
 
 const HOUR = 60 * 60 * 1000;
@@ -112,10 +113,17 @@ test("upgradeCost: Common rarity (Runner's High) — 5/15/45", () => {
   assert.equal(upgradeCost("RUNNERS_HIGH", 3), 45);
 });
 
-test("upgradeCost: Uncommon rarity (Leg Cramp) — 10/30/90", () => {
+// Batch 2026-08-09 item 1 (game-analyst REQUIRED reprice): LEG_CRAMP and
+// WRONG_TURN no longer fall through to the byRarity ladder — they now carry a
+// byType override, because their upgrades buy 15 minutes each instead of an
+// hour. These two tests used LC/WT only as VEHICLES for the UNCOMMON ladder;
+// that ladder is still covered, unweakened, by the Stealth Mode test directly
+// below (and by the explicit byRarity-fallthrough test added at the end of this
+// file). What is asserted here is the override that now takes precedence.
+test("upgradeCost: Leg Cramp overrides the rarity ladder with byType", () => {
   assert.equal(upgradeCost("LEG_CRAMP", 1), 10);
-  assert.equal(upgradeCost("LEG_CRAMP", 2), 30);
-  assert.equal(upgradeCost("LEG_CRAMP", 3), 90);
+  assert.equal(upgradeCost("LEG_CRAMP", 2), 20);
+  assert.equal(upgradeCost("LEG_CRAMP", 3), 30);
 });
 
 test("upgradeCost: Uncommon rarity (Stealth Mode) — 10/30/90", () => {
@@ -124,10 +132,24 @@ test("upgradeCost: Uncommon rarity (Stealth Mode) — 10/30/90", () => {
   assert.equal(upgradeCost("STEALTH_MODE", 3), 90);
 });
 
-test("upgradeCost: Uncommon rarity (Wrong Turn) — 10/30/90", () => {
-  assert.equal(upgradeCost("WRONG_TURN", 1), 10);
+test("upgradeCost: Wrong Turn overrides the rarity ladder with byType", () => {
+  assert.equal(upgradeCost("WRONG_TURN", 1), 15);
   assert.equal(upgradeCost("WRONG_TURN", 2), 30);
-  assert.equal(upgradeCost("WRONG_TURN", 3), 90);
+  assert.equal(upgradeCost("WRONG_TURN", 3), 45);
+});
+
+// The byType override must be NARROW. Every other UNCOMMON type still falls
+// through to byRarity — this is the assertion the two rewritten tests above
+// used to carry, restated so the ladder itself stays pinned independently of
+// which types happen to override it.
+test("upgradeCost: byRarity UNCOMMON ladder still applies to non-overridden types", () => {
+  for (const type of ["STEALTH_MODE"]) {
+    assert.deepEqual(
+      [1, 2, 3].map((lvl) => upgradeCost(type, lvl)),
+      [10, 30, 90],
+      `${type} must still use the UNCOMMON byRarity ladder`
+    );
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -168,11 +190,20 @@ test("upgradeCost: level 0 always returns 0 even for non-upgradeable types", () 
 
 // §3.4 duration standardization (2026-07-25): windowed upgradeable powerups run
 // 1h base +1h/level → 1/2/3/4h. (§9-authorized existing-test literal update.)
-test("upgradedDuration: Leg Cramp — 1h / 2h / 3h / 4h", () => {
+//
+// EXCEPT the two hard CCs. Batch 2026-08-09 item 1 (owner decision): a 4-hour
+// Leg Cramp / Wrong Turn is oppressive, so each upgrade adds 15 MINUTES rather
+// than an hour → 1h / 1h15 / 1h30 / 1h45. Base is unchanged, so an unupgraded
+// cast is exactly as strong as it has always been. Durations are stamped into
+// the effect row at use time, so this hits every app version on deploy and
+// leaves in-flight effects alone.
+const QUARTER = 15 * 60 * 1000;
+
+test("upgradedDuration: Leg Cramp — 1h / 1h15m / 1h30m / 1h45m", () => {
   assert.equal(upgradedDuration("LEG_CRAMP", 0), 1 * HOUR);
-  assert.equal(upgradedDuration("LEG_CRAMP", 1), 2 * HOUR);
-  assert.equal(upgradedDuration("LEG_CRAMP", 2), 3 * HOUR);
-  assert.equal(upgradedDuration("LEG_CRAMP", 3), 4 * HOUR);
+  assert.equal(upgradedDuration("LEG_CRAMP", 1), 1 * HOUR + QUARTER);
+  assert.equal(upgradedDuration("LEG_CRAMP", 2), 1 * HOUR + 2 * QUARTER);
+  assert.equal(upgradedDuration("LEG_CRAMP", 3), 1 * HOUR + 3 * QUARTER);
 });
 
 test("upgradedDuration: Runner's High — 1h / 2h / 3h / 4h", () => {
@@ -191,11 +222,20 @@ test("upgradedDuration: Stealth Mode — 1h / 2h / 3h / 4h", () => {
   assert.equal(upgradedDuration("STEALTH_MODE", 3), 4 * HOUR);
 });
 
-test("upgradedDuration: Wrong Turn — 1h / 2h / 3h / 4h", () => {
+test("upgradedDuration: Wrong Turn — 1h / 1h15m / 1h30m / 1h45m", () => {
   assert.equal(upgradedDuration("WRONG_TURN", 0), 1 * HOUR);
-  assert.equal(upgradedDuration("WRONG_TURN", 1), 2 * HOUR);
-  assert.equal(upgradedDuration("WRONG_TURN", 2), 3 * HOUR);
-  assert.equal(upgradedDuration("WRONG_TURN", 3), 4 * HOUR);
+  assert.equal(upgradedDuration("WRONG_TURN", 1), 1 * HOUR + QUARTER);
+  assert.equal(upgradedDuration("WRONG_TURN", 2), 1 * HOUR + 2 * QUARTER);
+  assert.equal(upgradedDuration("WRONG_TURN", 3), 1 * HOUR + 3 * QUARTER);
+});
+
+// The nerf is SCOPED. Every other windowed upgradeable powerup keeps the
+// standard +1h/level ladder — pinned here so a future "simplify the ladder"
+// refactor can't quietly drag them along.
+test("upgradedDuration: the 15-minute ladder is ONLY Leg Cramp and Wrong Turn", () => {
+  for (const type of ["RUNNERS_HIGH", "STEALTH_MODE", "DETOUR_SIGN", "POCKET_WATCH"]) {
+    assert.equal(upgradedDuration(type, 3), 4 * HOUR, `${type} keeps 4h at L3`);
+  }
 });
 
 test("upgradedDuration: Detour Sign — 1h / 2h / 3h / 4h", () => {
@@ -250,4 +290,83 @@ test("upgradedMagnitude: Trail Mix per-type bonus — 100 / 150 / 200 / 300", ()
 test("upgradedMagnitude: throws for non-magnitude powerups (timed effects)", () => {
   assert.throws(() => upgradedMagnitude("LEG_CRAMP", 1), /no magnitude/i);
   assert.throws(() => upgradedMagnitude("RUNNERS_HIGH", 1), /no magnitude/i);
+});
+
+// ---------------------------------------------------------------------------
+// formatDuration — THE shared duration string (batch 2026-08-09 item 1)
+// ---------------------------------------------------------------------------
+//
+// Before this batch three sites formatted durations independently, and the
+// 15-minute ladder broke all three differently: usePowerup's `hoursText` would
+// have rendered "1.25 hours", and the push handler's `attackWindowText` fell
+// back to "75 minutes" for any non-integer hour count. Both now delegate here,
+// so the feed line and the push notification about the SAME cast can no longer
+// disagree. Target format is "1h 15m".
+test("formatDuration: whole hours read naturally", () => {
+  assert.equal(formatDuration(1 * HOUR), "1 hour");
+  assert.equal(formatDuration(2 * HOUR), "2 hours");
+  assert.equal(formatDuration(4 * HOUR), "4 hours");
+  assert.equal(formatDuration(24 * HOUR), "24 hours");
+});
+
+test("formatDuration: the new quarter-hour ladder renders as 1h 15m", () => {
+  assert.equal(formatDuration(1 * HOUR + 15 * 60 * 1000), "1h 15m");
+  assert.equal(formatDuration(1 * HOUR + 30 * 60 * 1000), "1h 30m");
+  assert.equal(formatDuration(1 * HOUR + 45 * 60 * 1000), "1h 45m");
+});
+
+test("formatDuration: sub-hour durations are plain minutes", () => {
+  assert.equal(formatDuration(30 * 60 * 1000), "30 minutes");
+  assert.equal(formatDuration(45 * 60 * 1000), "45 minutes");
+  assert.equal(formatDuration(1 * 60 * 1000), "1 minute");
+});
+
+test("formatDuration: never emits a decimal hour", () => {
+  for (let minutes = 1; minutes <= 8 * 60; minutes++) {
+    const text = formatDuration(minutes * 60 * 1000);
+    assert.ok(!/\d\.\d/.test(text), `decimal leaked for ${minutes}m: ${text}`);
+  }
+});
+
+// The whole point of the shared helper: every ladder level of the two nerfed
+// types must produce a clean string through the SAME function the feed and the
+// push both call.
+test("formatDuration: every LC/WT upgrade level renders cleanly", () => {
+  assert.deepEqual(
+    [0, 1, 2, 3].map((lvl) => formatDuration(upgradedDuration("LEG_CRAMP", lvl))),
+    ["1 hour", "1h 15m", "1h 30m", "1h 45m"]
+  );
+  assert.deepEqual(
+    [0, 1, 2, 3].map((lvl) => formatDuration(upgradedDuration("WRONG_TURN", lvl))),
+    ["1 hour", "1h 15m", "1h 30m", "1h 45m"]
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Upgrade reprice (game-analyst REQUIRED, batch 2026-08-09 item 1)
+// ---------------------------------------------------------------------------
+//
+// WRONG_TURN's canonical rarity is RARE, so without a byType override it would
+// charge the RARE ladder [0,15,45,135] for what is now a 45-minute-longer
+// freeze — the worst-value purchase in the game, and the death of the WT/LC
+// upgrade coin sink. byType gives arithmetic cost for arithmetic duration.
+test("upgradeCost: Leg Cramp uses the byType ladder [0,10,20,30]", () => {
+  assert.deepEqual(
+    [0, 1, 2, 3].map((lvl) => upgradeCost("LEG_CRAMP", lvl)),
+    [0, 10, 20, 30]
+  );
+});
+
+test("upgradeCost: Wrong Turn uses the byType ladder [0,15,30,45]", () => {
+  assert.deepEqual(
+    [0, 1, 2, 3].map((lvl) => upgradeCost("WRONG_TURN", lvl)),
+    [0, 15, 30, 45]
+  );
+});
+
+// L1 entry price is deliberately unchanged for both, so nothing a player has
+// already budgeted for got more expensive.
+test("upgradeCost: the L1 entry price is unchanged by the reprice", () => {
+  assert.equal(upgradeCost("LEG_CRAMP", 1), 10);
+  assert.equal(upgradeCost("WRONG_TURN", 1), 15);
 });

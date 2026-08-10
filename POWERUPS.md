@@ -25,9 +25,9 @@ coins, never rolled.
 
 | Powerup | Target | Duration | Effect |
 |---|---|---|---|
-| **Leg Cramp** | Opponent | 2 hours | Freezes target's step progression. All steps they walk during the window are subtracted from their race total |
+| **Leg Cramp** | Opponent | 1 hour (1h / 1h15m / 1h30m / 1h45m by upgrade level) | Freezes target's step progression. All steps they walk during the window are subtracted from their race total |
 | **Stealth Mode** | Self | 4 hours | Hides your progress on the leaderboard. Opponents see "???" for your name and no step count. You can still see your own progress |
-| **Wrong Turn** | Opponent | 1 hour | Reverses the target's steps during the window |
+| **Wrong Turn** | Opponent | 1 hour (1h / 1h15m / 1h30m / 1h45m by upgrade level) | Reverses the target's steps during the window |
 | **Cleanse** | Self | Instant | Clears every opponent-inflicted debuff on you (your own buffs are untouched) |
 
 ### Rare
@@ -100,6 +100,11 @@ Coin cost by rarity and level. Level 0 is the base form and is free.
 | Common | 5 | 15 | 45 |
 | Uncommon | 10 | 30 | 90 |
 | Rare | 15 | 45 | 135 |
+
+Per-type overrides:
+
+- **Leg Cramp** — 10 / 20 / 30
+- **Wrong Turn** — 15 / 30 / 45
 
 Upgradeable: Protein Shake, Shortcut, Detour Sign, Trail Mix, Runners High, Leg Cramp, Stealth Mode, Wrong Turn, Compression Socks, Lucky Horseshoe, Campfire Rest, Trail Magnet, Pocket Watch, Trail Mine, Pinecone Toss.
 
@@ -214,7 +219,7 @@ For timed effects (Leg Cramp, Runner's High), the system uses StepSample data fo
 | Event | Example |
 |---|---|
 | `POWERUP_EARNED` | "Alex earned a Protein Shake!" |
-| `POWERUP_USED` | "Alex used Leg Cramp on Jordan! Their steps are frozen for 2 hours." |
+| `POWERUP_USED` | "Alex used Leg Cramp on Jordan! Their steps are frozen for 1 hour." |
 | `POWERUP_BLOCKED` | "Jordan's Compression Socks blocked Alex's Leg Cramp!" |
 | `POWERUP_DISCARDED` | "Alex discarded a Banana Peel." |
 | `EFFECT_EXPIRED` | "Leg Cramp wore off." |

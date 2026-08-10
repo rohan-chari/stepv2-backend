@@ -31,7 +31,13 @@ const POWERUP_COPY_SEED = [
     name: "Leg Cramp",
     description: "Freeze a rival's steps for 1 hour",
     shortDescription: "Steps frozen",
-    upgradeTierLabels: ["Freeze 1h", "Freeze 2h", "Freeze 3h", "Freeze 4h"],
+    // Batch 2026-08-09 item 1: +15m per level, not +1h.
+    upgradeTierLabels: [
+      "Freeze 1h",
+      "Freeze 1h 15m",
+      "Freeze 1h 30m",
+      "Freeze 1h 45m",
+    ],
   },
   {
     powerupType: "RED_CARD",
@@ -98,11 +104,12 @@ const POWERUP_COPY_SEED = [
     name: "Wrong Turn",
     description: "Reverse a rival's steps for 1 hour",
     shortDescription: "Steps reversed",
+    // Batch 2026-08-09 item 1: +15m per level, not +1h.
     upgradeTierLabels: [
       "Reverse 1h",
-      "Reverse 2h",
-      "Reverse 3h",
-      "Reverse 4h",
+      "Reverse 1h 15m",
+      "Reverse 1h 30m",
+      "Reverse 1h 45m",
     ],
   },
   {
