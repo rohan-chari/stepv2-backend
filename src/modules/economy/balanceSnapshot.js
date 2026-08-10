@@ -12,7 +12,7 @@ const { defaultConfig } = require("./balanceConfig.defaults");
 // It deliberately does not block a deploy. The cosmetics equivalent currently
 // aborts deploys on drift, which has repeatedly been worse than the drift it
 // was guarding against.
-const SNAPSHOT_FILE = path.join(__dirname, "..", "..", "data", "balance-config.json");
+const SNAPSHOT_FILE = path.join(__dirname, "..", "..", "..", "data", "balance-config.json");
 
 function readSnapshot() {
   try {

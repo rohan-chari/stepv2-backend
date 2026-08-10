@@ -1,42 +1,54 @@
 {
   "_comment": "Committed record of the balance config. The DATABASE is authoritative at runtime; regenerate this with `npm run balance:pull` after tuning via the admin editor.",
-  "version": 1,
-  "note": "seed: code defaults",
-  "pulledAt": "2026-07-21T01:57:12.789Z",
-  "createdAt": null,
+  "version": 4,
+  "note": "batch 2026-08-09 items 1/6/8: WT-LC reprice, PO to RARE drops, Horseshoe all-rare at cost 0",
+  "pulledAt": "2026-08-10T15:40:38.181Z",
+  "createdAt": "2026-08-10T15:37:51.794Z",
   "config": {
-    "schemaVersion": 1,
-    "rarityByType": {
-      "PROTEIN_SHAKE": "COMMON",
-      "TRAIL_MIX": "COMMON",
-      "DETOUR_SIGN": "COMMON",
-      "RUNNERS_HIGH": "COMMON",
-      "PINECONE_TOSS": "COMMON",
-      "TRAIL_MAGNET": "COMMON",
-      "LEG_CRAMP": "UNCOMMON",
-      "STEALTH_MODE": "UNCOMMON",
-      "WRONG_TURN": "UNCOMMON",
-      "CAMPFIRE_REST": "UNCOMMON",
-      "SHORTCUT": "RARE",
-      "COMPRESSION_SOCKS": "RARE",
-      "LUCKY_HORSESHOE": "RARE",
-      "POCKET_WATCH": "RARE",
-      "TRAIL_MINE": "RARE",
-      "SNEAKY_SWAP": "RARE",
-      "MIRROR": "RARE",
-      "CLEANSE": "RARE",
-      "RED_CARD": "RARE",
-      "SECOND_WIND": "RARE",
-      "FANNY_PACK": "RARE",
-      "IMPOSTER": "RARE",
-      "RAINSTORM": "RARE",
-      "SIGNAL_JAMMER": "RARE",
-      "LEECH": "RARE",
-      "DEFENSE_SCAN": "RARE",
-      "HITCHHIKE": "RARE",
-      "QUICK_RINSE": "RARE"
+    "dailyBox": {
+      "odds": {
+        "last": [
+          0.2,
+          0.35,
+          0.45
+        ],
+        "first": [
+          0.7,
+          0.25,
+          0.05
+        ]
+      },
+      "streakCap": 30,
+      "coinRanges": {
+        "COMMON": [
+          10,
+          30
+        ],
+        "UNCOMMON": [
+          40,
+          80
+        ],
+        "RARE_FALLBACK": [
+          100,
+          200
+        ]
+      },
+      "rareCoinsShare": 0,
+      "accessoryWeightMode": "inverse"
     },
     "dropPool": {
+      "RARE": [
+        "RED_CARD",
+        "SECOND_WIND",
+        "COMPRESSION_SOCKS",
+        "LUCKY_HORSESHOE",
+        "TRAIL_MINE",
+        "SNEAKY_SWAP",
+        "SHORTCUT",
+        "CLEANSE",
+        "MIRROR",
+        "POWER_OUTAGE"
+      ],
       "COMMON": [
         "PROTEIN_SHAKE",
         "TRAIL_MIX",
@@ -47,49 +59,94 @@
       "UNCOMMON": [
         "LEG_CRAMP",
         "STEALTH_MODE",
-        "WRONG_TURN"
-      ],
-      "RARE": [
-        "RED_CARD",
-        "SECOND_WIND",
-        "COMPRESSION_SOCKS",
-        "FANNY_PACK",
-        "LUCKY_HORSESHOE",
-        "POCKET_WATCH",
-        "TRAIL_MINE",
-        "SNEAKY_SWAP",
-        "SHORTCUT",
-        "CLEANSE",
-        "MIRROR"
+        "WRONG_TURN",
+        "RALLY_FLAG"
       ]
     },
-    "storeOnlyTypes": [
-      "IMPOSTER",
-      "RAINSTORM",
-      "SIGNAL_JAMMER",
-      "LEECH",
-      "DEFENSE_SCAN",
-      "HITCHHIKE",
-      "QUICK_RINSE"
-    ],
-    "dailyBoxExcludedTypes": [],
     "typeWeights": {
       "RED_CARD": 0.5
     },
     "positionOdds": {
-      "first": [
-        0.48,
-        0.25,
-        0.27
-      ],
       "last": [
         0.2,
         0.35,
         0.45
+      ],
+      "first": [
+        0.48,
+        0.25,
+        0.27
       ]
     },
+    "rarityByType": {
+      "DECOY": "RARE",
+      "LEECH": "RARE",
+      "BOUNTY": "UNCOMMON",
+      "MIRROR": "RARE",
+      "CLEANSE": "RARE",
+      "IMPOSTER": "RARE",
+      "RED_CARD": "RARE",
+      "SHORTCUT": "RARE",
+      "UMBRELLA": "COMMON",
+      "UPRISING": "RARE",
+      "COIN_FLIP": "COMMON",
+      "HITCHHIKE": "RARE",
+      "LEG_CRAMP": "UNCOMMON",
+      "RAINSTORM": "RARE",
+      "TRAIL_MIX": "COMMON",
+      "FANNY_PACK": "RARE",
+      "PIGGY_BANK": "COMMON",
+      "RALLY_FLAG": "UNCOMMON",
+      "TRAIL_MINE": "RARE",
+      "WRONG_TURN": "RARE",
+      "DETOUR_SIGN": "COMMON",
+      "QUICK_RINSE": "RARE",
+      "SECOND_WIND": "RARE",
+      "SNEAKY_SWAP": "UNCOMMON",
+      "DEFENSE_SCAN": "RARE",
+      "GHOST_PEPPER": "COMMON",
+      "POCKET_WATCH": "RARE",
+      "POWER_OUTAGE": "RARE",
+      "RUNNERS_HIGH": "COMMON",
+      "STEALTH_MODE": "UNCOMMON",
+      "TRAIL_MAGNET": "COMMON",
+      "CAMPFIRE_REST": "UNCOMMON",
+      "PINECONE_TOSS": "COMMON",
+      "PROTEIN_SHAKE": "COMMON",
+      "SIGNAL_JAMMER": "RARE",
+      "DRILL_SERGEANT": "UNCOMMON",
+      "MYSTERY_POTION": "COMMON",
+      "LUCKY_HORSESHOE": "RARE",
+      "COMPRESSION_SOCKS": "RARE"
+    },
     "upgradeCosts": {
+      "byType": {
+        "LEG_CRAMP": [
+          0,
+          10,
+          20,
+          30
+        ],
+        "WRONG_TURN": [
+          0,
+          15,
+          30,
+          45
+        ],
+        "LUCKY_HORSESHOE": [
+          0,
+          0,
+          0,
+          0
+        ]
+      },
       "byRarity": {
+        "RARE": [
+          0,
+          15,
+          45,
+          135
+        ],
         "COMMON": [
           0,
           5,
@@ -101,16 +158,90 @@
           10,
           30,
           90
-        ],
-        "RARE": [
-          0,
-          15,
-          45,
-          135
         ]
-      },
-      "byType": {}
+      }
     },
+    "mysteryPotion": {
+      "pool": [
+        {
+          "weight": 30,
+          "outcome": "PROTEIN_SHAKE"
+        },
+        {
+          "weight": 20,
+          "outcome": "RUNNERS_HIGH"
+        },
+        {
+          "weight": 10,
+          "outcome": "PINECONE_TOSS"
+        },
+        {
+          "weight": 10,
+          "outcome": "LEG_CRAMP"
+        },
+        {
+          "weight": 5,
+          "outcome": "SHORTCUT"
+        },
+        {
+          "weight": 10,
+          "outcome": "COMPRESSION_SOCKS"
+        },
+        {
+          "weight": 5,
+          "outcome": "COIN_REFUND"
+        },
+        {
+          "weight": 5,
+          "outcome": "LEG_CRAMP_SELF"
+        },
+        {
+          "weight": 5,
+          "outcome": "WRONG_TURN_SELF"
+        }
+      ]
+    },
+    "positionRules": {
+      "leaderExcluded": [
+        "RED_CARD",
+        "SECOND_WIND"
+      ],
+      "lastPlaceExcluded": [
+        "TRAIL_MINE"
+      ],
+      "leadingDownweight": {
+        "POWER_OUTAGE": 0.3,
+        "RUNNERS_HIGH": 0.5
+      },
+      "trailingDownweight": {
+        "MIRROR": 0.5,
+        "CLEANSE": 0.5,
+        "STEALTH_MODE": 0.5
+      },
+      "leadingDownweightFrom": 0.4,
+      "trailingDownweightFrom": 0.6
+    },
+    "schemaVersion": 1,
+    "teamOnlyTypes": [
+      "RALLY_FLAG"
+    ],
+    "luckyHorseshoe": {
+      "rareChanceByLevel": [
+        1,
+        1,
+        1,
+        1
+      ]
+    },
+    "storeOnlyTypes": [
+      "IMPOSTER",
+      "RAINSTORM",
+      "SIGNAL_JAMMER",
+      "LEECH",
+      "DEFENSE_SCAN",
+      "HITCHHIKE",
+      "QUICK_RINSE"
+    ],
     "upgradeableTypes": [
       "PROTEIN_SHAKE",
       "SHORTCUT",
@@ -128,44 +259,12 @@
       "TRAIL_MINE",
       "PINECONE_TOSS"
     ],
-    "luckyHorseshoe": {
-      "rareChanceByLevel": [
-        0,
-        0.2,
-        0.45,
-        1
-      ]
-    },
-    "dailyBox": {
-      "streakCap": 30,
-      "odds": {
-        "first": [
-          0.7,
-          0.25,
-          0.05
-        ],
-        "last": [
-          0.2,
-          0.35,
-          0.45
-        ]
-      },
-      "coinRanges": {
-        "COMMON": [
-          10,
-          30
-        ],
-        "UNCOMMON": [
-          40,
-          80
-        ],
-        "RARE_FALLBACK": [
-          100,
-          200
-        ]
-      },
-      "rareCoinsShare": 0,
-      "accessoryWeightMode": "inverse"
-    }
+    "dailyBoxExcludedTypes": [
+      "DEFENSE_SCAN",
+      "LEECH",
+      "HITCHHIKE",
+      "QUICK_RINSE",
+      "RALLY_FLAG"
+    ]
   }
 }
