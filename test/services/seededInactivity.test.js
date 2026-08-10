@@ -4,6 +4,7 @@ const test = require("node:test");
 const {
   filterInactiveUserIds,
   findUsersWithActivitySince,
+  inactivityWindowStart,
 } = require("../../src/modules/races/services/seededInactivity");
 
 // Inactivity predicate ET-window math (spec §7 test 16). Pure date/tz algebra
@@ -215,6 +216,47 @@ test("an empty user list short-circuits without querying", async () => {
   });
   assert.equal(inactive.size, 0);
   assert.deepEqual(prisma.calls, {});
+});
+
+// ── Shared window helper (batch 2026-08-10 item 1) ─────────────────────────
+// The auto-enroll flip's box-open query bounds on the SAME instant the steps
+// predicate does. These assert the helper IS that instant, so the two can never
+// disagree about where the window starts.
+
+test("inactivityWindowStart is the ET start of D-2 (DST-exact, spring)", async () => {
+  const now = new Date("2026-03-11T01:30:00.000Z"); // 21:30 ET on Mar 10
+  assert.equal(
+    inactivityWindowStart(now).toISOString(),
+    "2026-03-08T05:00:00.000Z" // Mar 8 00:00 EST
+  );
+});
+
+test("inactivityWindowStart is the ET start of D-2 (DST-exact, fall)", async () => {
+  const now = new Date("2026-11-03T17:00:00.000Z"); // 12:00 ET on Nov 3
+  assert.equal(
+    inactivityWindowStart(now).toISOString(),
+    "2026-11-01T04:00:00.000Z" // Nov 1 00:00 EDT
+  );
+});
+
+test("inactivityWindowStart is exactly the bound the steps predicate queries on", async () => {
+  const now = new Date("2026-03-11T01:30:00.000Z");
+  const prisma = fakePrisma({ users: [user("u1")] });
+  await filterInactiveUserIds({ userIds: ["u1"], now, prisma });
+  assert.equal(
+    prisma.calls.stepSample.where.periodEnd.gt.toISOString(),
+    inactivityWindowStart(now).toISOString(),
+    "one window, shared by the steps predicate and the box-open predicate"
+  );
+});
+
+test("inactivityWindowStart honours an explicit timezone", async () => {
+  const now = new Date("2026-03-11T01:30:00.000Z");
+  // In UTC the calendar day is already Mar 11, so D-2 is Mar 9 00:00Z.
+  assert.equal(
+    inactivityWindowStart(now, "UTC").toISOString(),
+    "2026-03-09T00:00:00.000Z"
+  );
 });
 
 test("findUsersWithActivitySince reports race-window walkers only", async () => {

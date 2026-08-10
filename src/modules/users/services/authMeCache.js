@@ -40,7 +40,7 @@
 // | displayName                 | display_name_screen.dart:190 applies the PUT response locally; no fetchMe follows. (Invalidated anyway via User.update — free.) |
 // | renameChipShownCount/DismissedAt | auth_service.dart:766/:548 apply the mutation response |
 // | hiddenFromLeaderboard       | auth_service.dart:576 optimistic local write + applyBackendUser(response) |
-// | autoJoinFeaturedRaces       | auth_service.dart:607 — same pattern     |
+// | autoJoinFeaturedRaces       | auth_service.dart:607 — same pattern. ALSO written server-side by the seeded-race ghost flip (batch 2026-08-10 item 1): that write goes through User.disableAutoJoinFeaturedRaces, which invalidates per flipped id, so the settings screen can't show the toggle ON against a row the cron already turned off. |
 // | isAdmin                     | derived from ADMIN_EMAILS + the user row; changes only by ops |
 // | featureFlags.*              | server-side remote flags; the spec explicitly names these as ≤10s-acceptable |
 // | characterPowersEnabled      | hard-coded `false`                        |

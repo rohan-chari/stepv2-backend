@@ -35,6 +35,9 @@ const {
 
 const CURVE_FLAG = "seededGeometricPayoutsEnabled";
 const PRUNE_FLAG = "seededInactivityPruneEnabled";
+// Batch 2026-08-10 item 1: sub-switch over the auto-enroll flip. Only ever
+// consulted inside the prune hooks, so PRUNE_FLAG must also be on.
+const AUTO_OFF_FLAG = "seededInactivityAutoEnrollOffEnabled";
 const FUNDED_FLAG = "fundedPrizePoolsEnabled";
 const POOL_REASON = "race_prize_pool_payout";
 const TZ = "America/New_York";
@@ -85,6 +88,55 @@ async function walkOn(userId, dayKey, steps = 5000) {
 async function dailyRow(userId, dayKey, steps) {
   await prisma.step.create({
     data: { userId, date: new Date(`${dayKey}T00:00:00.000Z`), steps },
+  });
+}
+
+// A mystery-box open by `userId` at `at` (batch 2026-08-10 item 1). The event
+// row is what "engaged with the game loop" means; `eventType` is overridable so
+// a reroll-style row can prove it does NOT count.
+async function boxEvent(userId, raceId, at, eventType = "MYSTERY_BOX_OPENED") {
+  await prisma.racePowerupEvent.create({
+    data: {
+      raceId,
+      actorUserId: userId,
+      eventType,
+      description: "opened a mystery box",
+      createdAt: at,
+    },
+  });
+}
+
+// Noon ET on the ET calendar day `offset` days from today.
+function etNoon(offset) {
+  return new Date(etDayStart(dayKeyOffset(offset)).getTime() + 12 * 3600 * 1000);
+}
+
+async function autoJoinFlagOf(userId) {
+  const row = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { autoJoinFeaturedRaces: true },
+  });
+  return row.autoJoinFeaturedRaces;
+}
+
+// A PENDING seeded daily race whose scheduled start has already passed, i.e.
+// one the next renewal tick will promote (and prune).
+async function duePendingDaily(overrides = {}) {
+  return prisma.race.create({
+    data: {
+      seedId: dailySeed.id,
+      name: "Daily",
+      targetSteps: 0,
+      status: "PENDING",
+      isPublic: true,
+      timeBased: true,
+      maxParticipants: 100,
+      maxDurationDays: 1,
+      createdAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
+      scheduledStartAt: new Date(Date.now() - 60 * 1000),
+      endsAt: new Date(Date.now() + 23 * 60 * 60 * 1000),
+      ...overrides,
+    },
   });
 }
 
@@ -227,11 +279,13 @@ describe("seeded challenge payouts + inactivity pruning", () => {
     await appSettings.setFlag(FUNDED_FLAG, true);
     await appSettings.setFlag(CURVE_FLAG, false);
     await appSettings.setFlag(PRUNE_FLAG, false);
+    await appSettings.setFlag(AUTO_OFF_FLAG, false);
   });
 
   after(async () => {
     await appSettings.setFlag(CURVE_FLAG, false);
     await appSettings.setFlag(PRUNE_FLAG, false);
+    await appSettings.setFlag(AUTO_OFF_FLAG, false);
     await appSettings.setFlag(FUNDED_FLAG, true);
     await prisma.race.deleteMany({
       where: { seedId: { in: [dailySeed.id, weeklySeed.id] } },
@@ -937,6 +991,271 @@ describe("seeded challenge payouts + inactivity pruning", () => {
     assert.ok(
       (await participantUserIds(weekly.id)).includes(ghost.userId),
       "second tick the same ET day does not sweep again"
+    );
+  });
+
+  // ── Feature C — auto-enroll flip for ghosts (batch 2026-08-10 item 1) ─────
+  //
+  // Rule: inactive-by-steps (the existing predicate) AND zero MYSTERY_BOX_OPENED
+  // events since the window start => users.auto_join_featured_races is set false,
+  // so the renewal cron stops re-enrolling a dead account into every new race.
+
+  it("16: promotion prune ALSO flips auto-enroll off for a boxless ghost", async () => {
+    await appSettings.setFlag(PRUNE_FLAG, true);
+    await appSettings.setFlag(AUTO_OFF_FLAG, true);
+
+    const ghost = await makeUser({ autoJoinFeaturedRaces: true });
+    const race = await duePendingDaily();
+    await prisma.raceParticipant.create({
+      data: { raceId: race.id, userId: ghost.userId, status: "ACCEPTED" },
+    });
+
+    await buildRenewSeededRaces({ prisma })();
+
+    assert.deepEqual(await participantUserIds(race.id), [], "ghost pruned");
+    assert.equal(
+      await autoJoinFlagOf(ghost.userId),
+      false,
+      "auto-enroll flipped off so the cron stops re-enrolling them"
+    );
+  });
+
+  it("16b: the enrollment filter flips the flag too (the steady-state path)", async () => {
+    await appSettings.setFlag(PRUNE_FLAG, true);
+    await appSettings.setFlag(AUTO_OFF_FLAG, true);
+
+    const ghost = await makeUser({ autoJoinFeaturedRaces: true });
+    const walker = await makeUser({ autoJoinFeaturedRaces: true });
+    await walkOn(walker.userId, dayKeyOffset(-1));
+
+    const race = await duePendingDaily({
+      scheduledStartAt: new Date(Date.now() + 60 * 60 * 1000),
+    });
+
+    const { enrollAutoJoinUsers } = buildAutoJoinFeaturedRaces({ prisma });
+    await enrollAutoJoinUsers({ id: race.id, maxParticipants: 100 });
+
+    assert.deepEqual(
+      await participantUserIds(race.id),
+      [walker.userId],
+      "ghost is filtered out of enrollment"
+    );
+    assert.equal(await autoJoinFlagOf(ghost.userId), false, "ghost flipped off");
+    assert.equal(
+      await autoJoinFlagOf(walker.userId),
+      true,
+      "an active user's preference is never touched"
+    );
+  });
+
+  it("17: a ghost who opened a box INSIDE the window keeps auto-enroll on", async () => {
+    await appSettings.setFlag(PRUNE_FLAG, true);
+    await appSettings.setFlag(AUTO_OFF_FLAG, true);
+
+    const opener = await makeUser({ autoJoinFeaturedRaces: true });
+    const race = await duePendingDaily();
+    await prisma.raceParticipant.create({
+      data: { raceId: race.id, userId: opener.userId, status: "ACCEPTED" },
+    });
+    await boxEvent(opener.userId, race.id, etNoon(-1));
+
+    await buildRenewSeededRaces({ prisma })();
+
+    assert.deepEqual(
+      await participantUserIds(race.id),
+      [],
+      "the steps-only prune still removes them from the race"
+    );
+    assert.equal(
+      await autoJoinFlagOf(opener.userId),
+      true,
+      "still engaged with the game loop (maybe HealthKit is broken) — flag stays on"
+    );
+  });
+
+  it("18: a box opened BEFORE the window does not protect the flag", async () => {
+    await appSettings.setFlag(PRUNE_FLAG, true);
+    await appSettings.setFlag(AUTO_OFF_FLAG, true);
+
+    const ghost = await makeUser({ autoJoinFeaturedRaces: true });
+    const race = await duePendingDaily();
+    await prisma.raceParticipant.create({
+      data: { raceId: race.id, userId: ghost.userId, status: "ACCEPTED" },
+    });
+    await boxEvent(ghost.userId, race.id, etNoon(-5));
+
+    await buildRenewSeededRaces({ prisma })();
+
+    assert.equal(await autoJoinFlagOf(ghost.userId), false);
+  });
+
+  it("18b: a box opened TODAY protects the flag (no upper bound, deliberately)", async () => {
+    await appSettings.setFlag(PRUNE_FLAG, true);
+    await appSettings.setFlag(AUTO_OFF_FLAG, true);
+
+    const opener = await makeUser({ autoJoinFeaturedRaces: true });
+    const race = await duePendingDaily();
+    await prisma.raceParticipant.create({
+      data: { raceId: race.id, userId: opener.userId, status: "ACCEPTED" },
+    });
+    // Right now: after the two-day steps window has already closed.
+    await boxEvent(opener.userId, race.id, new Date());
+
+    await buildRenewSeededRaces({ prisma })();
+
+    assert.equal(
+      await autoJoinFlagOf(opener.userId),
+      true,
+      "someone who opened a box an hour ago is engaged"
+    );
+  });
+
+  it("19: with the auto-enroll sub-switch OFF the prune runs but no flag is touched", async () => {
+    await appSettings.setFlag(PRUNE_FLAG, true);
+    await appSettings.setFlag(AUTO_OFF_FLAG, false);
+
+    const ghost = await makeUser({ autoJoinFeaturedRaces: true });
+    const race = await duePendingDaily();
+    await prisma.raceParticipant.create({
+      data: { raceId: race.id, userId: ghost.userId, status: "ACCEPTED" },
+    });
+
+    await buildRenewSeededRaces({ prisma })();
+
+    assert.deepEqual(await participantUserIds(race.id), [], "prune still runs");
+    assert.equal(
+      await autoJoinFlagOf(ghost.userId),
+      true,
+      "default-off setting means zero behavior change at deploy time"
+    );
+  });
+
+  it("20: the weekly mid-race sweep flips the flag under the same rule", async () => {
+    await appSettings.setFlag(PRUNE_FLAG, true);
+    await appSettings.setFlag(AUTO_OFF_FLAG, true);
+
+    const weekly = await prisma.race.create({
+      data: {
+        seedId: weeklySeed.id,
+        name: "Weekly",
+        targetSteps: 0,
+        status: "ACTIVE",
+        isPublic: true,
+        timeBased: true,
+        maxParticipants: 100,
+        maxDurationDays: 7,
+        createdAt: new Date(Date.now() - 9 * 24 * 60 * 60 * 1000),
+        startedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
+        endsAt: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000),
+      },
+    });
+
+    const ghost = await makeUser({ autoJoinFeaturedRaces: true });
+    const opener = await makeUser({ autoJoinFeaturedRaces: true });
+    for (const user of [ghost, opener]) {
+      await prisma.raceParticipant.create({
+        data: { raceId: weekly.id, userId: user.userId, status: "ACCEPTED" },
+      });
+    }
+    await boxEvent(opener.userId, weekly.id, etNoon(-1));
+
+    const sweepAt = new Date(etDayStart(dayKeyOffset(0)).getTime() + 10 * 3600 * 1000);
+    await buildRenewSeededRaces({ prisma, now: () => sweepAt })();
+
+    assert.equal(await autoJoinFlagOf(ghost.userId), false, "swept ghost flipped");
+    assert.equal(
+      await autoJoinFlagOf(opener.userId),
+      true,
+      "box opener keeps auto-enroll even though the sweep removed them"
+    );
+  });
+
+  it("21: review accounts and brand-new accounts never lose auto-enroll", async () => {
+    await appSettings.setFlag(PRUNE_FLAG, true);
+    await appSettings.setFlag(AUTO_OFF_FLAG, true);
+
+    const review = await makeUser({
+      isReviewAccount: true,
+      autoJoinFeaturedRaces: true,
+    });
+    const fresh = await makeUser({
+      createdAt: new Date(),
+      autoJoinFeaturedRaces: true,
+    });
+
+    const race = await duePendingDaily();
+    for (const user of [review, fresh]) {
+      await prisma.raceParticipant.create({
+        data: { raceId: race.id, userId: user.userId, status: "ACCEPTED" },
+      });
+    }
+
+    await buildRenewSeededRaces({ prisma })();
+
+    assert.equal(await autoJoinFlagOf(review.userId), true);
+    assert.equal(await autoJoinFlagOf(fresh.userId), true);
+  });
+
+  it("22: the flip is idempotent — an already-off ghost is never re-written", async () => {
+    await appSettings.setFlag(PRUNE_FLAG, true);
+    await appSettings.setFlag(AUTO_OFF_FLAG, true);
+
+    const ghostOn = await makeUser({ autoJoinFeaturedRaces: true });
+    const ghostOff = await makeUser({ autoJoinFeaturedRaces: false });
+    const race = await duePendingDaily();
+    for (const user of [ghostOn, ghostOff]) {
+      await prisma.raceParticipant.create({
+        data: { raceId: race.id, userId: user.userId, status: "ACCEPTED" },
+      });
+    }
+
+    const logs = [];
+    const logger = { log: (...a) => logs.push(a.join(" ")), error() {}, warn() {} };
+    await buildRenewSeededRaces({ prisma, logger })();
+
+    const flipLogs = logs.filter((line) => /auto-enroll/i.test(line));
+    assert.equal(flipLogs.length, 1, "one flip batch logged");
+    assert.match(flipLogs[0], /1 /, "exactly one user in the batch");
+    assert.equal(await autoJoinFlagOf(ghostOn.userId), false);
+    assert.equal(await autoJoinFlagOf(ghostOff.userId), false);
+
+    // Second cron pass over the same users: the `autoJoinFeaturedRaces: true`
+    // guard makes the write a no-op, so nothing is logged at all.
+    await prisma.race.update({
+      where: { id: race.id },
+      data: { status: "PENDING", startedAt: null },
+    });
+    for (const user of [ghostOn, ghostOff]) {
+      await prisma.raceParticipant.create({
+        data: { raceId: race.id, userId: user.userId, status: "ACCEPTED" },
+      });
+    }
+    logs.length = 0;
+    await buildRenewSeededRaces({ prisma, logger })();
+    assert.equal(
+      logs.filter((line) => /auto-enroll/i.test(line)).length,
+      0,
+      "second pass writes nothing (updateMany guard)"
+    );
+  });
+
+  it("23: a reroll event is not a box open and does not protect the flag", async () => {
+    await appSettings.setFlag(PRUNE_FLAG, true);
+    await appSettings.setFlag(AUTO_OFF_FLAG, true);
+
+    const rerollOnly = await makeUser({ autoJoinFeaturedRaces: true });
+    const race = await duePendingDaily();
+    await prisma.raceParticipant.create({
+      data: { raceId: race.id, userId: rerollOnly.userId, status: "ACCEPTED" },
+    });
+    await boxEvent(rerollOnly.userId, race.id, etNoon(-1), "MYSTERY_BOX_REROLLED");
+
+    await buildRenewSeededRaces({ prisma })();
+
+    assert.equal(
+      await autoJoinFlagOf(rerollOnly.userId),
+      false,
+      "only MYSTERY_BOX_OPENED counts as engagement"
     );
   });
 });

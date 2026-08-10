@@ -202,6 +202,47 @@ const User = {
     return prisma.user.findUnique({ where: { id } });
   },
 
+  // Batch 2026-08-10 item 1 — the seeded-race prune's auto-enroll flip. The
+  // ONLY writer of auto_join_featured_races outside the user's own toggle, and
+  // it lives here rather than as a raw updateMany in the races module because
+  // this model is the /auth/me invalidation chokepoint: the flag is served from
+  // the cached payload, so a bypassing write would leave a stale `true` for the
+  // cache TTL.
+  //
+  // Guarded updateMany (only rows still true) so a repeat cron pass writes
+  // nothing, and so an account that re-enabled the toggle between the read and
+  // the write is never silently flipped back. Returns the ids it turned off,
+  // for the caller's capped observability log.
+  async disableAutoJoinFeaturedRaces(userIds, { prisma: client = prisma } = {}) {
+    const ids = [...new Set(userIds || [])];
+    if (ids.length === 0) return [];
+
+    const rows = await client.user.findMany({
+      where: { id: { in: ids }, autoJoinFeaturedRaces: true },
+      select: { id: true },
+    });
+    if (rows.length === 0) return [];
+
+    const targets = rows.map((row) => row.id);
+    const { count } = await client.user.updateMany({
+      where: { id: { in: targets }, autoJoinFeaturedRaces: true },
+      data: { autoJoinFeaturedRaces: false },
+    });
+    if (count === 0) return [];
+
+    for (const id of targets) await invalidateAuthMe(id);
+    if (count === targets.length) return targets;
+
+    // Someone re-enabled the toggle between the read and the guarded write, so
+    // the pre-read list over-reports. Re-read rather than return ids we did not
+    // actually turn off — the caller logs this list as the flip batch.
+    const flipped = await client.user.findMany({
+      where: { id: { in: targets }, autoJoinFeaturedRaces: false },
+      select: { id: true },
+    });
+    return flipped.map((row) => row.id);
+  },
+
   async findCoins(id) {
     const user = await prisma.user.findUnique({
       where: { id },

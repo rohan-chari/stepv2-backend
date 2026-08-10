@@ -1,6 +1,9 @@
 const { prisma: defaultPrisma } = require("../../../db");
 const { appSettings: defaultAppSettings } = require("../../../shared/config/appSettings");
-const { filterInactiveUserIds } = require("../services/seededInactivity");
+const {
+  filterInactiveUserIds,
+  disableAutoEnrollForInactive,
+} = require("../services/seededInactivity");
 
 // Auto-join for the seeded daily/weekly featured challenges
 // (users.auto_join_featured_races). Two entry points share the same
@@ -67,21 +70,43 @@ function buildAutoJoinFeaturedRaces(dependencies = {}) {
   // Fail-open: a predicate failure must never stop the challenge from filling.
   async function dropInactive(userIds) {
     if (userIds.length === 0) return userIds;
+    const now = new Date();
+    let inactive;
+    let remaining = userIds;
     try {
       if ((await settings.getFlag("seededInactivityPruneEnabled")) !== true) {
         return userIds;
       }
-      const inactive = await filterInactiveUserIds({
-        userIds,
-        now: new Date(),
-        prisma,
-      });
+      inactive = await filterInactiveUserIds({ userIds, now, prisma });
       if (inactive.size === 0) return userIds;
-      return userIds.filter((id) => !inactive.has(id));
+      remaining = userIds.filter((id) => !inactive.has(id));
     } catch (error) {
       logger.error("[CRON] Inactivity enrollment filter failed:", error);
       return userIds;
     }
+
+    // THE terminating path (batch 2026-08-10 item 1). With the prune on, a
+    // ghost is filtered out here and never becomes a participant, so hooks 2/3
+    // would never see them again — if the flip lived only there, this filter
+    // would re-evaluate the same dead accounts against every new seeded race
+    // forever. Once flipped they drop out of the `autoJoinFeaturedRaces: true`
+    // query above, so the ghost set shrinks monotonically.
+    //
+    // Runs AFTER the filter result is computed and in its OWN try/catch that
+    // never rethrows: the catch above returns the UNFILTERED list, so a flip
+    // failure must never reach it and undo the prune.
+    try {
+      await disableAutoEnrollForInactive({
+        userIds: [...inactive],
+        now,
+        prisma,
+        appSettings: settings,
+        logger,
+      });
+    } catch (error) {
+      logger.error("[CRON] Auto-enroll flip failed (enrollment filter):", error);
+    }
+    return remaining;
   }
 
   // Toggle path: opt one user into every existing PENDING seeded race they are

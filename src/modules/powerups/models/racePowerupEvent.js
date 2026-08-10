@@ -1,4 +1,5 @@
-const { prisma } = require("../../../db");
+const { prisma: defaultPrisma } = require("../../../db");
+const prisma = defaultPrisma;
 
 function applyCursor(where, cursor) {
   if (!cursor) return;
@@ -59,6 +60,36 @@ const RacePowerupEvent = {
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: limit,
     });
+  },
+
+  // Which of `userIds` produced at least one `eventType` event at or after
+  // `since` (batch 2026-08-10 item 1: "did this account still open a mystery
+  // box?"). Returns a Set. Cross-race by design — engagement is engagement,
+  // whichever race the box came from. `prisma` is injectable because the
+  // callers (the seeded-inactivity service and its hooks) are already
+  // prisma-injected end to end.
+  //
+  // Backed by race_powerup_events(actor_user_id, event_type, created_at); the
+  // table is dominated by other event types, so the eventType column earns its
+  // place in the index.
+  async findActorIdsWithEventSince({
+    userIds,
+    eventType,
+    since,
+    prisma: client = defaultPrisma,
+  } = {}) {
+    const ids = [...new Set(userIds || [])];
+    if (ids.length === 0 || !eventType || !since) return new Set();
+    const rows = await client.racePowerupEvent.findMany({
+      where: {
+        actorUserId: { in: ids },
+        eventType,
+        createdAt: { gte: new Date(since) },
+      },
+      select: { actorUserId: true },
+      distinct: ["actorUserId"],
+    });
+    return new Set(rows.map((row) => row.actorUserId));
   },
 
   async findByRaceAsc(raceId) {

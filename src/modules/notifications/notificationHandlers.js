@@ -960,6 +960,65 @@ function registerNotificationHandlers(dependencies = {}) {
   const PLACEMENT_ALERT_COOLDOWN_MS = 10 * 60 * 1000;
   const lastPlacementAlertAt = new Map(); // `${raceId}:${userId}` -> epoch ms
 
+  // Batch 2026-08-10 item 3 — the payout-drop alert is only actionable near the
+  // end of a race. At 7am on a daily challenge with 17h to go, totals churn off
+  // tiny step counts as devices sync and "you're out of the prize places" is
+  // pure noise. Read PER EVENT so the knob can be retuned with a pm2 restart
+  // (no deploy) — the whole point of it being an env var.
+  const DEFAULT_PAYOUT_DROP_WINDOW_HOURS = 3;
+  function payoutDropWindowMs() {
+    const hours = Number(process.env.PAYOUT_DROP_WINDOW_HOURS);
+    const safe =
+      Number.isFinite(hours) && hours > 0 ? hours : DEFAULT_PAYOUT_DROP_WINDOW_HOURS;
+    return safe * 60 * 60 * 1000;
+  }
+
+  // `endsAt` rides in on the emitted change (placementRecompute.js). NULL is
+  // NOT "suppress": step-target races legitimately have no end instant and can
+  // still carry a pot, so they keep today's timing (meaningful crossing +
+  // cooldown) and gain only the once-per-race cap. A malformed value is treated
+  // the same way — never silently mute a race forever.
+  function withinPayoutDropWindow(endsAt, nowMs) {
+    if (endsAt == null) return true;
+    const endsAtMs = new Date(endsAt).getTime();
+    if (!Number.isFinite(endsAtMs)) return true;
+    return endsAtMs - nowMs <= payoutDropWindowMs();
+  }
+
+  // INSERT-FIRST durable claim for the once-per-(race,user) payout-drop cap.
+  // Deliberately NOT recordNotification: that wrapper swallows every create
+  // error by design, so a unique violation would be invisible and the push
+  // would re-send on every 5-minute tick. Mirrors dailyRewardReminder.js's
+  // claim. The row IS the audit row — the caller skips the trailing
+  // recordNotification so exactly one row exists per sent alert.
+  //
+  // Returns true only when THIS process won the claim. P2002 = another tick /
+  // cluster worker already sent it. Any other error is also treated as "don't
+  // send": an unclaimable alert downgrades to the silent refresh rather than
+  // becoming an un-capped every-10-minutes push, which is the spam this item
+  // exists to kill. A claimed-but-unsent alert is an accepted permanent loss.
+  async function claimPayoutDrop({ userId, raceId, title, body }) {
+    try {
+      await notificationModel.create({
+        userId,
+        type: "PLACEMENT_CHANGED",
+        title,
+        body,
+        raceId,
+        deliveryKey: `payout-drop:${raceId}:${userId}`,
+      });
+      return true;
+    } catch (error) {
+      if (error && error.code === "P2002") return false; // already sent
+      logger.error("payout-drop claim failed", {
+        raceId,
+        recipientUserId: userId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
+  }
+
   function ordinal(n) {
     const s = ["th", "st", "nd", "rd"];
     const v = n % 100;
@@ -968,8 +1027,15 @@ function registerNotificationHandlers(dependencies = {}) {
 
   events.on("PLACEMENT_CHANGED", async (data) => {
     try {
-      const { raceId, raceName, userId, previousPlacement, placement, paidPlaces } =
-        data || {};
+      const {
+        raceId,
+        raceName,
+        userId,
+        previousPlacement,
+        placement,
+        paidPlaces,
+        endsAt,
+      } = data || {};
       if (!userId || placement == null) return;
 
       const tokens = await deviceTokenModel.findByUserId(userId);
@@ -990,30 +1056,73 @@ function registerNotificationHandlers(dependencies = {}) {
         paidPlaces > 0 &&
         previousPlacement <= paidPlaces &&
         placement > paidPlaces;
-      const meaningful = tookFirst || lostFirst || droppedOutOfPaid;
+      const nowMs = Date.now();
+
+      // The payout-drop VARIANT is the one whose copy says "out of the payout"
+      // — i.e. a drop out of the money that isn't also a take-1st. It alone is
+      // time-gated and capped. Evaluation order is pinned (item 3): variant ->
+      // time gate -> shared cooldown -> durable claim (last gate before send).
+      //
+      // A 1st -> out-of-the-money drop is BOTH lostFirst and droppedOutOfPaid.
+      // Whenever the payout-drop variant is refused — by the time gate here, or
+      // by the durable claim below — we fall back to the lost-lead alert rather
+      // than swallowing it: this item promises tookFirst/lostFirst are
+      // unchanged, and neither the window nor a spent claim has anything to say
+      // about losing 1st place.
+      let payoutDrop =
+        droppedOutOfPaid &&
+        !tookFirst &&
+        withinPayoutDropWindow(endsAt, nowMs);
+
+      const meaningful = tookFirst || lostFirst || payoutDrop;
 
       const cooldownKey = `${raceId}:${userId}`;
-      const nowMs = Date.now();
       const withinCooldown =
         nowMs - (lastPlacementAlertAt.get(cooldownKey) || 0) <
         PLACEMENT_ALERT_COOLDOWN_MS;
-      const sendAlert = meaningful && !withinCooldown;
-      if (sendAlert) lastPlacementAlertAt.set(cooldownKey, nowMs);
+      let sendAlert = meaningful && !withinCooldown;
 
       const label = raceName || "your race";
+      const lostLeadTitle = "You lost the lead";
+      const lostLeadBody = `You slipped to ${ordinal(placement)} in ${label}.`;
       let title;
       let body;
       if (tookFirst) {
         title = "You're in the lead!";
         body = `You took 1st in ${label}.`;
-      } else if (droppedOutOfPaid) {
+      } else if (payoutDrop) {
         title = "Out of the payout";
         body = `You dropped to ${ordinal(placement)} in ${label} — out of the prize places.`;
       } else {
         // lostFirst
-        title = "You lost the lead";
-        body = `You slipped to ${ordinal(placement)} in ${label}.`;
+        title = lostLeadTitle;
+        body = lostLeadBody;
       }
+
+      // LAST gate before sending. Claiming any earlier (e.g. before the
+      // cooldown check) would let an unrelated lostFirst alert three minutes
+      // ago burn this user's one-and-only payout-drop claim on a push that
+      // never went out.
+      if (sendAlert && payoutDrop) {
+        const claimed = await claimPayoutDrop({ userId, raceId, title, body });
+        if (!claimed) {
+          // The payout-drop alert is spent for this race. Clearing the flag
+          // (rather than just muting the send) is what re-arms the normal
+          // audit write below for the downgraded alert.
+          payoutDrop = false;
+          if (lostFirst) {
+            title = lostLeadTitle;
+            body = lostLeadBody;
+          } else {
+            sendAlert = false;
+          }
+        }
+      }
+
+      // A SUPPRESSED alert must not stamp the shared Map, or the gate would
+      // start silencing tookFirst/lostFirst too.
+      if (sendAlert) lastPlacementAlertAt.set(cooldownKey, nowMs);
+
       const payload = {
         type: "PLACEMENT_CHANGED",
         route: "race_detail",
@@ -1062,8 +1171,11 @@ function registerNotificationHandlers(dependencies = {}) {
         }
       }
 
-      // Record only the visible alert; the silent refresh push is not user-facing.
-      if (sendAlert) {
+      // Record only the visible alert; the silent refresh push is not
+      // user-facing. The payout-drop variant already wrote its row as the
+      // insert-first claim (§7 skipAudit pattern), so recording again here
+      // would double it.
+      if (sendAlert && !payoutDrop) {
         await recordNotification({
           userId,
           type: "PLACEMENT_CHANGED",

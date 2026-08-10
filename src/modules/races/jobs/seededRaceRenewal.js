@@ -15,6 +15,7 @@ const { JobRun } = require("../../../shared/db/jobRun");
 const {
   filterInactiveUserIds,
   findUsersWithActivitySince,
+  disableAutoEnrollForInactive,
 } = require("../services/seededInactivity");
 
 // Tight cadence so the midnight promote/settle handoff gap is small: at 00:00 ET
@@ -36,7 +37,10 @@ function buildRenewSeededRaces(dependencies = {}) {
   const logger = dependencies.logger || console;
   const events = dependencies.eventBus || eventBus;
   const settings = dependencies.appSettings || appSettings;
-  const { enrollAutoJoinUsers } = buildAutoJoinFeaturedRaces({ prisma });
+  // Pass the cron's logger down: the enrollment filter is a prune hook too
+  // (hook 1), and its inactivity/auto-enroll-flip logging belongs in the same
+  // stream as this job's, not on the default console.
+  const { enrollAutoJoinUsers } = buildAutoJoinFeaturedRaces({ prisma, logger });
 
   // The [start, end) UTC instants of the calendar period containing `fromDate`
   // in the seed's cadence: a single ET day (daily) or Mon 00:00 -> Mon 00:00 ET
@@ -138,6 +142,24 @@ function buildRenewSeededRaces(dependencies = {}) {
     }
   }
 
+  // Batch 2026-08-10 item 1: turn auto-enroll off for the ghosts this tick just
+  // pruned (boxless ones only — the service decides). ALWAYS called after the
+  // hook's own deleteMany and ALWAYS swallowing: each hook's outer catch changes
+  // what the prune returns, so a flip failure must never reach it.
+  async function flipAutoEnroll(userIds, nowDate, where) {
+    try {
+      await disableAutoEnrollForInactive({
+        userIds,
+        now: nowDate,
+        prisma,
+        appSettings: settings,
+        logger,
+      });
+    } catch (error) {
+      logger.error(`[CRON] Auto-enroll flip failed (${where}):`, error);
+    }
+  }
+
   // Hook 2 (spec §4.3): drop every 2-day-zero ACCEPTED participant from a
   // seeded race, regardless of how they joined (D3). Runs while the race is
   // still PENDING so soon-pruned users are never briefly live.
@@ -176,6 +198,7 @@ function buildRenewSeededRaces(dependencies = {}) {
           `[CRON] Pruned ${count} inactive participant(s) from seeded race ${race.id}`
         );
       }
+      await flipAutoEnroll([...inactive], now(), "promotion prune");
       return count;
     } catch (error) {
       logger.error(`[CRON] Inactivity prune failed for race ${race.id}:`, error);
@@ -215,55 +238,66 @@ function buildRenewSeededRaces(dependencies = {}) {
       });
       if (inactive.size === 0) return 0;
 
-      // Ghost guard: persisted totalSteps can lag, so confirm against the raw
-      // step data for the race window before removing anyone.
-      const walked = await findUsersWithActivitySince({
-        userIds: [...inactive],
-        since: race.startedAt,
-        prisma,
-      });
+      // Every exit below flips (batch 2026-08-10 item 1) — the delete guards
+      // that follow are about what is safe to REMOVE mid-race, not about who is
+      // still playing the game, so a ghost spared by them still loses
+      // auto-enroll. try/finally rather than a call before each `return` so a
+      // future early exit cannot silently skip it. The flip's input is the
+      // inactivity predicate's output, exactly as in the other two hooks, and
+      // flipAutoEnroll never throws, so this cannot mask the sweep's result.
+      try {
+        // Ghost guard: persisted totalSteps can lag, so confirm against the raw
+        // step data for the race window before removing anyone.
+        const walked = await findUsersWithActivitySince({
+          userIds: [...inactive],
+          since: race.startedAt,
+          prisma,
+        });
 
-      // Side-effect guard: a participant holding a powerup — or caught up in an
-      // active effect as caster or target — is skipped. Deleting their row
-      // cascades RacePowerup and, through it, RaceActiveEffect rows that may be
-      // scoring OTHER participants (RaceActiveEffect.sourceUserId carries no FK,
-      // so the cascade travels via the caster's powerup rows).
-      const remaining = [...inactive].filter((id) => !walked.has(id));
-      if (remaining.length === 0) return 0;
-      const [powerups, effects] = await Promise.all([
-        prisma.racePowerup.findMany({
-          where: { raceId: race.id, userId: { in: remaining } },
-          select: { userId: true },
-        }),
-        prisma.raceActiveEffect.findMany({
-          where: {
-            raceId: race.id,
-            OR: [
-              { targetUserId: { in: remaining } },
-              { sourceUserId: { in: remaining } },
-            ],
-          },
-          select: { targetUserId: true, sourceUserId: true },
-        }),
-      ]);
-      const entangled = new Set(powerups.map((p) => p.userId));
-      for (const effect of effects) {
-        entangled.add(effect.targetUserId);
-        entangled.add(effect.sourceUserId);
+        // Side-effect guard: a participant holding a powerup — or caught up in an
+        // active effect as caster or target — is skipped. Deleting their row
+        // cascades RacePowerup and, through it, RaceActiveEffect rows that may be
+        // scoring OTHER participants (RaceActiveEffect.sourceUserId carries no FK,
+        // so the cascade travels via the caster's powerup rows).
+        const remaining = [...inactive].filter((id) => !walked.has(id));
+        if (remaining.length === 0) return 0;
+        const [powerups, effects] = await Promise.all([
+          prisma.racePowerup.findMany({
+            where: { raceId: race.id, userId: { in: remaining } },
+            select: { userId: true },
+          }),
+          prisma.raceActiveEffect.findMany({
+            where: {
+              raceId: race.id,
+              OR: [
+                { targetUserId: { in: remaining } },
+                { sourceUserId: { in: remaining } },
+              ],
+            },
+            select: { targetUserId: true, sourceUserId: true },
+          }),
+        ]);
+        const entangled = new Set(powerups.map((p) => p.userId));
+        for (const effect of effects) {
+          entangled.add(effect.targetUserId);
+          entangled.add(effect.sourceUserId);
+        }
+
+        const doomed = remaining.filter((id) => !entangled.has(id));
+        if (doomed.length === 0) return 0;
+
+        const { count } = await prisma.raceParticipant.deleteMany({
+          where: { raceId: race.id, status: "ACCEPTED", userId: { in: doomed } },
+        });
+        if (count > 0) {
+          logger.log(
+            `[CRON] Weekly sweep removed ${count} ghost(s) from race ${race.id}`
+          );
+        }
+        return count;
+      } finally {
+        await flipAutoEnroll([...inactive], nowDate, "weekly sweep");
       }
-
-      const doomed = remaining.filter((id) => !entangled.has(id));
-      if (doomed.length === 0) return 0;
-
-      const { count } = await prisma.raceParticipant.deleteMany({
-        where: { raceId: race.id, status: "ACCEPTED", userId: { in: doomed } },
-      });
-      if (count > 0) {
-        logger.log(
-          `[CRON] Weekly sweep removed ${count} ghost(s) from race ${race.id}`
-        );
-      }
-      return count;
     } catch (error) {
       logger.error(`[CRON] Weekly sweep failed for race ${race.id}:`, error);
       return 0;

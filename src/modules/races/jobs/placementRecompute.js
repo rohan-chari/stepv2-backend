@@ -417,6 +417,11 @@ function buildRecomputePlacements(dependencies = {}) {
             placement: liveRank,
             totalParticipants: ranked.length,
             paidPlaces,
+            // Batch 2026-08-10 item 3: the handler gates the payout-drop alert
+            // on time-to-end. Passed through from the row already in scope
+            // rather than re-queried per participant. NULL for step-target
+            // races, where the handler deliberately skips the gate.
+            endsAt: race.endsAt || null,
           };
           events.emit("PLACEMENT_CHANGED", change);
           emitted.push(change);

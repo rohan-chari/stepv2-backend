@@ -1,5 +1,15 @@
 const { prisma: defaultPrisma } = require("../../../db");
 const {
+  appSettings: defaultAppSettings,
+} = require("../../../shared/config/appSettings");
+// Concrete-path imports, not the module indexes: this service is loaded from
+// the enrollment command and the renewal cron, both of which sit inside the
+// races module's own require cycle.
+const { User } = require("../../users/models/user");
+const {
+  RacePowerupEvent,
+} = require("../../powerups/models/racePowerupEvent");
+const {
   addDaysToDateString,
   formatDateString,
   getTimeZoneParts,
@@ -48,6 +58,15 @@ function dateColumnBound(dayKey) {
   return new Date(`${dayKey}T00:00:00.000Z`);
 }
 
+// The UTC instant the inactivity window opens at `now`: the start of the ET day
+// D-2. Exported so the auto-enroll flip's box-open query bounds on EXACTLY the
+// instant the steps predicate does — one window, two data sources, no way for
+// them to drift apart.
+function inactivityWindowStart(now = new Date(), timeZone = SEED_TIMEZONE) {
+  const today = etDayKey(now, timeZone);
+  return etDayStart(addDaysToDateString(today, -2), timeZone);
+}
+
 function sumByUserAndDay(samples, timeZone) {
   const totals = new Map();
   for (const sample of samples) {
@@ -83,7 +102,7 @@ async function filterInactiveUserIds({
   const dayMinus2 = addDaysToDateString(today, -2);
   const dayMinus3 = addDaysToDateString(today, -3);
 
-  const windowStart = etDayStart(dayMinus2, timeZone);
+  const windowStart = inactivityWindowStart(now, timeZone); // = start of D-2
   const windowEnd = etDayStart(today, timeZone); // = end of D-1
 
   const [samples, dailyRows, users] = await Promise.all([
@@ -177,9 +196,76 @@ async function findUsersWithActivitySince({
   return active;
 }
 
+// ── Auto-enroll flip for ghosts (batch 2026-08-10 item 1) ──────────────────
+//
+// The prune removes ghosts from a seeded race; the renewal cron then re-enrolls
+// the very same accounts into the next one, forever. This closes that loop:
+//
+//   inactive-by-steps (filterInactiveUserIds, whose exemptions we therefore
+//   inherit) AND zero MYSTERY_BOX_OPENED events since the window opened
+//     => users.auto_join_featured_races = false
+//
+// A user who still opens boxes is engaged — maybe HealthKit is broken — so the
+// flag stays on even though the steps-only prune still drops them from the race.
+const MYSTERY_BOX_OPENED_EVENT = "MYSTERY_BOX_OPENED";
+
+// pm2 logs rotate, so never dump an unbounded id list; the durable restore
+// list is a SQL query over the flipped rows.
+const FLIP_LOG_ID_CAP = 10;
+
+// `userIds` is the OUTPUT of filterInactiveUserIds — the caller's ghost set.
+// Returns the ids actually flipped (empty when the sub-switch is off, when
+// everyone opened a box, or when the guard found nothing left to write).
+// Idempotent: the `autoJoinFeaturedRaces: true` guard makes a repeat a no-op.
+async function disableAutoEnrollForInactive({
+  userIds,
+  now = new Date(),
+  prisma = defaultPrisma,
+  timeZone = SEED_TIMEZONE,
+  appSettings = defaultAppSettings,
+  userModel = User,
+  racePowerupEventModel = RacePowerupEvent,
+  logger = console,
+}) {
+  const ids = [...new Set(userIds || [])];
+  if (ids.length === 0) return [];
+
+  // Sub-switch, checked here so all three hooks are covered by one read. It
+  // only ever runs inside the prune hooks, so the parent prune switch is
+  // already on by construction.
+  if ((await appSettings.getFlag("seededInactivityAutoEnrollOffEnabled")) !== true) {
+    return [];
+  }
+
+  // Deliberately NO upper bound: a box opened today — after the two-day steps
+  // window closed — still protects the flag. Someone who opened a box an hour
+  // ago is engaged, whatever their step data says.
+  const engaged = await racePowerupEventModel.findActorIdsWithEventSince({
+    userIds: ids,
+    eventType: MYSTERY_BOX_OPENED_EVENT,
+    since: inactivityWindowStart(now, timeZone),
+    prisma,
+  });
+
+  const doomed = ids.filter((id) => !engaged.has(id));
+  if (doomed.length === 0) return [];
+
+  const flipped = await userModel.disableAutoJoinFeaturedRaces(doomed, { prisma });
+  if (flipped.length > 0) {
+    const shown = flipped.slice(0, FLIP_LOG_ID_CAP).join(", ");
+    logger.log(
+      `[CRON] Auto-enroll disabled for ${flipped.length} inactive user(s): ${shown}` +
+        (flipped.length > FLIP_LOG_ID_CAP ? ", …" : "")
+    );
+  }
+  return flipped;
+}
+
 module.exports = {
   filterInactiveUserIds,
   findUsersWithActivitySince,
+  disableAutoEnrollForInactive,
+  inactivityWindowStart,
   etDayKey,
   SEED_TIMEZONE,
 };

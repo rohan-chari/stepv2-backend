@@ -27,9 +27,30 @@ function setup({
   const apnsCalls = { alert: [], silent: [] };
   const fcmCalls = { alert: [], silent: [] };
   const deleted = [];
+  // Recording Notification model. The payout-drop variant (batch 2026-08-10
+  // item 3) makes an INSERT-FIRST deliveryKey claim whose result decides
+  // whether the push goes out, so this seam has to be injected here; the
+  // unique-key behaviour itself is proved end-to-end against the real DB in
+  // test/integration/payout-drop-push-window.test.js.
+  const created = [];
+  const deliveryKeys = new Set();
   const eventBus = createMockEventBus();
   registerNotificationHandlers({
     eventBus,
+    Notification: {
+      async create(row) {
+        if (row.deliveryKey) {
+          if (deliveryKeys.has(row.deliveryKey)) {
+            const error = new Error("Unique constraint failed");
+            error.code = "P2002";
+            throw error;
+          }
+          deliveryKeys.add(row.deliveryKey);
+        }
+        created.push(row);
+        return { id: `notif-${created.length}`, ...row };
+      },
+    },
     User: { async findById() { return null; } },
     DeviceToken: {
       async findByUserId() { return tokens; },
@@ -45,7 +66,7 @@ function setup({
     },
     logger: { log() {}, warn() {}, error() {} },
   });
-  return { eventBus, apnsCalls, fcmCalls, deleted };
+  return { eventBus, apnsCalls, fcmCalls, deleted, created };
 }
 
 const CHANGE = (over) => ({

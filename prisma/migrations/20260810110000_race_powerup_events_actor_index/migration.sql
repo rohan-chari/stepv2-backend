@@ -1,0 +1,21 @@
+-- Batch 2026-08-10 item 1 — auto-enroll flip for seeded-race ghosts.
+--
+-- The flip asks, once per renewal tick, "which of these N users produced a
+-- MYSTERY_BOX_OPENED event since <window start>?". race_powerup_events had no
+-- index on actor_user_id at all (only [race_id, created_at]), so that predicate
+-- was a full scan of a table dominated by other event types.
+--
+-- Three columns: the query always pins event_type and ranges on created_at. A
+-- PARTIAL index (WHERE event_type = 'MYSTERY_BOX_OPENED') would be tighter, but
+-- Prisma cannot express one, and a hand-written partial index would show up as
+-- permanent drift in every future `migrate diff`.
+--
+-- Index-only change: no columns, no backfill, nothing for an old backend or a
+-- frozen client to notice. Deliberately NOT `CREATE INDEX CONCURRENTLY` —
+-- Prisma runs each migration inside a transaction, where CONCURRENTLY is
+-- illegal, and no existing migration in this repo uses it. At current scale the
+-- ACCESS EXCLUSIVE lock is brief; deploy off-peak and check the row count
+-- first.
+
+-- CreateIndex
+CREATE INDEX "race_powerup_events_actor_user_id_event_type_created_at_idx" ON "race_powerup_events"("actor_user_id", "event_type", "created_at");

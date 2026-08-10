@@ -99,6 +99,14 @@ const KNOWN_FLAGS = {
   // all three hooks (enrollment filter, promotion prune, weekly mid-race sweep).
   // OFF restores today's behavior exactly and immediately. Default OFF.
   seededInactivityPruneEnabled: false,
+  // Sub-switch of the prune (batch 2026-08-10 item 1): when a pruned user is
+  // ALSO boxless in the same window, turn their auto_join_featured_races off so
+  // the renewal cron stops re-enrolling a dead account into every new seeded
+  // race. Only ever consulted from inside the prune hooks, so the parent switch
+  // above gates it too. Default OFF = zero behavior change at deploy time.
+  // Rollback is the toggle; already-flipped users stay off (they can re-enable
+  // from the settings screen at any time).
+  seededInactivityAutoEnrollOffEnabled: false,
   // C0 rollback lever (i) — Redis derived-data spec §5a item 1 "reverse
   // handoff". While TRUE the race-keyed v2 worker takes no new claims, so the
   // v2 table drains to zero unexpired RUNNING leases within the 30s lease

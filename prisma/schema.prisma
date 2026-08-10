@@ -1313,6 +1313,13 @@ model RacePowerupEvent {
   race Race @relation(fields: [raceId], references: [id], onDelete: Cascade)
 
   @@index([raceId, createdAt])
+  // Batch 2026-08-10 item 1: the seeded-race auto-enroll flip asks "did any of
+  // these N users open a mystery box since <instant>?" on every renewal tick.
+  // Three columns because the predicate always pins event_type, and the table
+  // is dominated by other event types. (A partial index on
+  // event_type = 'MYSTERY_BOX_OPENED' would be tighter, but Prisma can't
+  // express one without permanent schema drift.)
+  @@index([actorUserId, eventType, createdAt])
   @@map("race_powerup_events")
 }
 
