@@ -130,7 +130,7 @@ const DEFAULT_CONFIG = {
     // values just drive icon tinting. Per spec §5.
     UPRISING: "RARE",
     DECOY: "RARE",
-    POWER_OUTAGE: "UNCOMMON",
+    POWER_OUTAGE: "RARE",
     RALLY_FLAG: "UNCOMMON",
     DRILL_SERGEANT: "UNCOMMON",
     BOUNTY: "UNCOMMON",
@@ -162,13 +162,25 @@ const DEFAULT_CONFIG = {
       "RED_CARD",
       "SECOND_WIND",
       "COMPRESSION_SOCKS",
-      "FANNY_PACK",
+      // FANNY_PACK REMOVED from generation (batch 2026-08-09 item 8a). It keeps
+      // its rarityByType entry — validateConfig requires rarity coverage, and
+      // rarity-without-a-drop-slot is the established retirement pattern
+      // (CAMPFIRE_REST / TRAIL_MAGNET). Held copies still work and the
+      // slot-revert on expiry is untouched; the auto-activate and re-roll
+      // special cases in openMysteryBox become dead code and are left in place
+      // to keep the diff minimal.
       "LUCKY_HORSESHOE",
       "TRAIL_MINE",
       "SNEAKY_SWAP",
       "SHORTCUT",
       "CLEANSE",
       "MIRROR",
+      // POWER_OUTAGE joins the RARE tier (batch 2026-08-09 item 6). A
+      // slot-for-slot swap with the Fanny Pack removed above: the RARE tier
+      // weight stays 9.5, so every other type's odds are byte-identical.
+      // Also removed from storeOnlyTypes below — the two lists are the
+      // disjoint authorities and BOTH had to change (D13).
+      "POWER_OUTAGE",
     ],
   },
 
@@ -201,7 +213,11 @@ const DEFAULT_CONFIG = {
     "COIN_FLIP",
     "MYSTERY_POTION",
     "DECOY",
-    "POWER_OUTAGE",
+    // POWER_OUTAGE deliberately ABSENT (batch 2026-08-09 item 6): it is now
+    // box-droppable as a RARE. This list and the code default are UNIONED by
+    // enforceStoreOnlyExclusion on every config load, so leaving it here would
+    // silently re-strip it from the drop pool after any deploy no matter what
+    // the live config says. Its shop row is hidden separately, at deploy time.
     "UMBRELLA",
     // RALLY_FLAG deliberately ABSENT (2026-07-26): it is now droppable, but only
     // in a team race. See `teamOnlyTypes`.
@@ -316,7 +332,13 @@ const DEFAULT_CONFIG = {
     //
     // Applied toward the FRONT. Runner's High works fine in first place, it just
     // feels flat when you have already won the position.
-    leadingDownweight: { RUNNERS_HIGH: 0.5 },
+    // POWER_OUTAGE (batch 2026-08-09 item 6, game-analyst REQUIRED). Without
+    // it, leaders net 5.34x more Power Outages per race than last place —
+    // box-VOLUME dominance swamps the per-box trailer bias — and a field-wide
+    // 30-minute freeze becomes a lead-preservation tool. At 0.3 the per-race
+    // ratio is 1.76:1 and the peak holder is mid-pack. A flat type-weight cut
+    // was rejected: it scales BOTH ends and fixes nothing.
+    leadingDownweight: { RUNNERS_HIGH: 0.5, POWER_OUTAGE: 0.3 },
     // Applied toward the BACK. These depend on being attacked, which is rare at
     // the back of the field.
     trailingDownweight: { CLEANSE: 0.5, MIRROR: 0.5, STEALTH_MODE: 0.5 },
@@ -360,6 +382,15 @@ const DEFAULT_CONFIG = {
       // player already budgeted for got more expensive.
       LEG_CRAMP: [0, 10, 20, 30],
       WRONG_TURN: [0, 15, 30, 45],
+      // Item 8b — the Horseshoe upgrade ladder is RETIRED, but the type stays
+      // in `upgradeableTypes` on purpose. A client's "is this upgradeable?"
+      // decision is BUNDLED in the app binary, so removing it here would leave
+      // every frozen build still offering levels 1-3 and taking a permanent 400
+      // ("not upgradeable"). Zeroing the cost instead makes those upgrades free
+      // and inert; the new build hides the UI. No refund for the 4 upgrades ever
+      // purchased (owner decision) — all were consumed, zero upgraded copies are
+      // currently held.
+      LUCKY_HORSESHOE: [0, 0, 0, 0],
     },
   },
 
@@ -390,8 +421,19 @@ const DEFAULT_CONFIG = {
   // change in outcome. Forward-only: rarity is rolled at USE time and frozen
   // into the effect's metadata, so effects already in flight resolve on the
   // value they were created with and need no migration.
+  // Batch 2026-08-09 item 8b: 100% RARE at EVERY level. The ramp is retired —
+  // the Horseshoe is now simply "your next box is rare", which is what players
+  // always assumed it did. Levels 1-3 buy nothing, which is why the cost ladder
+  // is zeroed in upgradeCosts.byType above rather than the type being pulled
+  // from upgradeableTypes (that would 400 every frozen client that still offers
+  // the upgrade).
+  //
+  // EV note, for copy and expectations: a forced-rare box is worth 0.94-1.01x a
+  // normal box mid-pack but only 0.51x for the LEADER, because leaderExcluded
+  // strips the high-swing rares (Red Card, Second Wind) from their pool.
+  // "Guaranteed rare" is a feel upgrade, not an EV upgrade. Accepted.
   luckyHorseshoe: {
-    rareChanceByLevel: [0, 0.2, 0.45, 1.0],
+    rareChanceByLevel: [1, 1, 1, 1],
   },
 
   dailyBox: {
@@ -453,12 +495,12 @@ const SOFT_BOUNDS = [
     max: 90,
     rationale: "a cap outside this makes the streak curve meaningless or unreachable",
   },
-  {
-    path: "luckyHorseshoe.rareChanceByLevel.1",
-    min: 0,
-    max: 0.5,
-    rationale: "level 1 should not near-guarantee a rare",
-  },
+  // luckyHorseshoe.rareChanceByLevel.1 bound DELETED (batch 2026-08-09 item
+  // 8b). It guarded a RAMP that no longer exists. Widening it was rejected:
+  // [1,1,1,1] trips the level-1 bound, which would force every future save of
+  // this config through `acknowledgeBoundWarnings` — and that stamps a sticky
+  // boundOverride=true on the row, masking genuine warnings from then on. A
+  // bound protecting a retired mechanic is worse than no bound.
   {
     path: "discardPrices.*",
     min: 0,

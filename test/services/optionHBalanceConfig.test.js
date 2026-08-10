@@ -139,6 +139,14 @@ test("Option H applies docs/economy.md §8 exactly, and is idempotent", () => {
     RUNNERS_HIGH: 0.5,
     PROTEIN_SHAKE: 0.7,
     TRAIL_MIX: 0.7,
+    // POWER_OUTAGE arrives from the CODE DEFAULT (batch 2026-08-09 item 6), not
+    // from the Option H list. Its survival here is the desired outcome and is
+    // exactly the trap the pre-apply checklist warns about, seen from the good
+    // side: the transform replaces this table wholesale, and mergeOverDefaults
+    // then re-imposes any default key the H list omits. If a future edit makes
+    // Option H drop it, leaders regain a 5.34x Power Outage advantage silently
+    // — which is why it is pinned here rather than left to the merge.
+    POWER_OUTAGE: 0.3,
   });
   assert.deepEqual(after.positionRules.trailingDownweight, {
     WRONG_TURN: 0.2,

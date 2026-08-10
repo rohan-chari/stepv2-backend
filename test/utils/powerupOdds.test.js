@@ -18,10 +18,12 @@ test("rollPowerup returns COMMON type when rng favors common", () => {
 });
 
 test("rollPowerup returns RARE type when rng favors rare", () => {
-  // rng returns 0.99 => last bucket (RARE), then 0.99 => last powerup in tier
+  // rng returns 0.99 => last bucket (RARE), then 0.99 => last powerup in tier.
+  // The last entry is POWER_OUTAGE as of batch 2026-08-09 item 6 (it took the
+  // slot vacated by FANNY_PACK, appended at the end of dropPool.RARE).
   const result = rollPowerup(1, 4, () => 0.99);
   assert.equal(result.rarity, "RARE");
-  assert.equal(result.type, "MIRROR");
+  assert.equal(result.type, "POWER_OUTAGE");
 });
 
 test("leader gets more commons than last place over many rolls", () => {

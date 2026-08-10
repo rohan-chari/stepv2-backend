@@ -44,7 +44,7 @@
       "QUICK_RINSE": "RARE",
       "UPRISING": "RARE",
       "DECOY": "RARE",
-      "POWER_OUTAGE": "UNCOMMON",
+      "POWER_OUTAGE": "RARE",
       "RALLY_FLAG": "UNCOMMON",
       "DRILL_SERGEANT": "UNCOMMON",
       "BOUNTY": "UNCOMMON",
@@ -75,13 +75,13 @@
         "RED_CARD",
         "SECOND_WIND",
         "COMPRESSION_SOCKS",
-        "FANNY_PACK",
         "LUCKY_HORSESHOE",
         "TRAIL_MINE",
         "SNEAKY_SWAP",
         "SHORTCUT",
         "CLEANSE",
-        "MIRROR"
+        "MIRROR",
+        "POWER_OUTAGE"
       ]
     },
     "storeOnlyTypes": [
@@ -98,7 +98,6 @@
       "COIN_FLIP",
       "MYSTERY_POTION",
       "DECOY",
-      "POWER_OUTAGE",
       "UMBRELLA",
       "DRILL_SERGEANT",
       "PIGGY_BANK",
@@ -165,6 +164,7 @@
       ],
       "leadingDownweight": {
         "RUNNERS_HIGH": 0.5,
+        "POWER_OUTAGE": 0.3,
         "PROTEIN_SHAKE": 0.7,
         "TRAIL_MIX": 0.7
       },
@@ -214,7 +214,26 @@
           135
         ]
       },
-      "byType": {}
+      "byType": {
+        "LEG_CRAMP": [
+          0,
+          10,
+          20,
+          30
+        ],
+        "WRONG_TURN": [
+          0,
+          15,
+          30,
+          45
+        ],
+        "LUCKY_HORSESHOE": [
+          0,
+          0,
+          0,
+          0
+        ]
+      }
     },
     "upgradeableTypes": [
       "PROTEIN_SHAKE",
@@ -235,9 +254,9 @@
     ],
     "luckyHorseshoe": {
       "rareChanceByLevel": [
-        0,
-        0.2,
-        0.45,
+        1,
+        1,
+        1,
         1
       ]
     },

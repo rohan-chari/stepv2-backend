@@ -296,6 +296,14 @@ test("cleared positionRules restore exactly the pre-change weights", () => {
     myTotalSteps: 100,
     position: 1,
     totalParticipants: 2,
+    // supportsPowerups5 must be TRUE here or this test stops testing what it
+    // says. POWER_OUTAGE joined dropPool.RARE (batch 2026-08-09 item 6) and is
+    // powerups5-GATED, and that hard gate is deliberately NOT restored by the
+    // positionRules kill switch — clearing the balance rules must not hand a
+    // frozen binary a type it cannot render. Without this flag the pool would
+    // legitimately differ from dropPool.RARE and the assertion below would be
+    // measuring the compat gate rather than the kill switch.
+    supportsPowerups5: true,
   });
   const { pool, weights } = eligiblePoolFor("RARE", ctx, config);
   assert.deepEqual(pool, config.dropPool.RARE);

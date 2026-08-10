@@ -118,6 +118,130 @@ describe("feature batch 2026-08-09 (backend)", () => {
     });
   });
 
+  // ── Item 8 — Lucky Horseshoe rework ───────────────────────────────────────
+
+  describe("item 8 — Lucky Horseshoe", () => {
+    let earnCounter = 0;
+    const P5 = { "X-Client-Features": "characters,powerups3,powerups4,powerups5" };
+
+    async function activeRace(creator, opponents) {
+      const createRes = await request(server.baseUrl, "POST", "/races", {
+        body: {
+          name: "Horseshoe Race",
+          targetSteps: 200000,
+          maxDurationDays: 7,
+          powerupsEnabled: true,
+          powerupStepInterval: 5000,
+        },
+        token: creator.token,
+      });
+      const raceId = (await createRes.json()).race.id;
+      for (const o of opponents) {
+        const fr = await request(server.baseUrl, "POST", "/friends/request", {
+          body: { addresseeId: o.userId },
+          token: creator.token,
+        });
+        const fid = (await fr.json()).friendship.id;
+        await request(server.baseUrl, "PUT", `/friends/request/${fid}`, {
+          body: { accept: true },
+          token: o.token,
+        });
+      }
+      await request(server.baseUrl, "POST", `/races/${raceId}/invite`, {
+        body: { inviteeIds: opponents.map((o) => o.userId) },
+        token: creator.token,
+      });
+      for (const o of opponents) {
+        await request(server.baseUrl, "PUT", `/races/${raceId}/respond`, {
+          body: { accept: true },
+          token: o.token,
+        });
+      }
+      await request(server.baseUrl, "POST", `/races/${raceId}/start`, {
+        token: creator.token,
+      });
+      const start = new Date(Date.now() - 8 * 60 * 60 * 1000);
+      await prisma.race.update({
+        where: { id: raceId },
+        data: { startedAt: start, endsAt: new Date(Date.now() + 24 * 60 * 60 * 1000) },
+      });
+      await prisma.raceParticipant.updateMany({
+        where: { raceId },
+        data: { joinedAt: start },
+      });
+      return raceId;
+    }
+
+    async function giveHeld(raceId, userId, type) {
+      const p = await prisma.raceParticipant.findFirst({ where: { raceId, userId } });
+      return prisma.racePowerup.create({
+        data: {
+          raceId,
+          participantId: p.id,
+          userId,
+          type,
+          rarity: "RARE",
+          status: "HELD",
+          earnedAtSteps: ++earnCounter,
+        },
+      });
+    }
+
+    // THE mixed-version case. A frozen binary decides "is this upgradeable?"
+    // from its BUNDLED table, so it will keep offering levels 1-3 for the
+    // Horseshoe long after the ladder is retired. Removing LUCKY_HORSESHOE from
+    // `upgradeableTypes` would make every one of those a permanent 400; zeroing
+    // the byType cost instead makes them free and inert. This asserts the old
+    // client's request still SUCCEEDS.
+    it("a frozen client posting upgradeLevel:3 succeeds and behaves as L0", async () => {
+      const alice = await signUp();
+      const bob = await signUp();
+      const raceId = await activeRace(alice, [bob]);
+
+      const before = await prisma.user.findUnique({ where: { id: alice.userId } });
+      const shoe = await giveHeld(raceId, alice.userId, "LUCKY_HORSESHOE");
+      const res = await request(
+        server.baseUrl,
+        "POST",
+        `/races/${raceId}/powerups/${shoe.id}/use`,
+        { body: { upgradeLevel: 3 }, token: alice.token, headers: P5 }
+      );
+      assert.equal(res.status, 200, "an old client's L3 horseshoe must not 400");
+
+      // Behaves as L0: every level is now a 100% RARE guarantee, so the stamped
+      // minimum is RARE regardless of the level claimed.
+      const effect = await prisma.raceActiveEffect.findFirst({
+        where: { raceId, type: "LUCKY_HORSESHOE", status: "ACTIVE" },
+      });
+      assert.ok(effect, "the horseshoe effect exists");
+      assert.equal(effect.metadata.minRarity, "RARE");
+
+      // And the retired ladder is free — no coins were taken for levels 1-3.
+      const after = await prisma.user.findUnique({ where: { id: alice.userId } });
+      assert.equal(after.coins, before.coins, "a retired upgrade must cost nothing");
+    });
+
+    it("an unupgraded horseshoe already guarantees RARE (the ramp is retired)", async () => {
+      const alice = await signUp();
+      const bob = await signUp();
+      const raceId = await activeRace(alice, [bob]);
+
+      const shoe = await giveHeld(raceId, alice.userId, "LUCKY_HORSESHOE");
+      const res = await request(
+        server.baseUrl,
+        "POST",
+        `/races/${raceId}/powerups/${shoe.id}/use`,
+        { body: {}, token: alice.token, headers: P5 }
+      );
+      assert.equal(res.status, 200);
+
+      const effect = await prisma.raceActiveEffect.findFirst({
+        where: { raceId, type: "LUCKY_HORSESHOE", status: "ACTIVE" },
+      });
+      assert.equal(effect.metadata.minRarity, "RARE", "L0 guarantees RARE now");
+    });
+  });
+
   // ── Item 10 — GET /admin/stats?sections= ──────────────────────────────────
 
   describe("item 10 — admin stats sections", () => {

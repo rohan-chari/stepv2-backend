@@ -83,9 +83,9 @@ What a mystery box can actually roll. A powerup having a rarity does not make it
 
 - **Common** — Protein Shake, Trail Mix, Detour Sign, Runners High, Pinecone Toss
 - **Uncommon** — Leg Cramp, Stealth Mode, Wrong Turn, Rally Flag
-- **Rare** — Red Card, Second Wind, Compression Socks, Fanny Pack, Lucky Horseshoe, Trail Mine, Sneaky Swap, Shortcut, Cleanse, Mirror
+- **Rare** — Red Card, Second Wind, Compression Socks, Lucky Horseshoe, Trail Mine, Sneaky Swap, Shortcut, Cleanse, Mirror, Power Outage
 
-Store-only (bought with coins, never rolled from a mystery box): Pocket Watch, Imposter, Rainstorm, Signal Jammer, Leech, Defense Scan, Hitchhike, Quick Rinse, Uprising, Ghost Pepper, Coin Flip, Mystery Potion, Decoy, Power Outage, Umbrella, Drill Sergeant, Piggy Bank, Bounty.
+Store-only (bought with coins, never rolled from a mystery box): Pocket Watch, Imposter, Rainstorm, Signal Jammer, Leech, Defense Scan, Hitchhike, Quick Rinse, Uprising, Ghost Pepper, Coin Flip, Mystery Potion, Decoy, Umbrella, Drill Sergeant, Piggy Bank, Bounty.
 
 Team races only (droppable, but a solo race never rolls them): Rally Flag.
 
@@ -105,6 +105,7 @@ Per-type overrides:
 
 - **Leg Cramp** — 10 / 20 / 30
 - **Wrong Turn** — 15 / 30 / 45
+- **Lucky Horseshoe** — 0 / 0 / 0
 
 Upgradeable: Protein Shake, Shortcut, Detour Sign, Trail Mix, Runners High, Leg Cramp, Stealth Mode, Wrong Turn, Compression Socks, Lucky Horseshoe, Campfire Rest, Trail Magnet, Pocket Watch, Trail Mine, Pinecone Toss.
 
@@ -114,9 +115,9 @@ Chance that the next mystery box is forced to RARE, by upgrade level. On a miss 
 
 | Level | Chance of RARE |
 |---|---|
-| 0 | 0.0% |
-| 1 | 20.0% |
-| 2 | 45.0% |
+| 0 | 100.0% |
+| 1 | 100.0% |
+| 2 | 100.0% |
 | 3 | 100.0% |
 
 ## Daily Reward Box
