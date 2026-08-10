@@ -364,6 +364,30 @@ function createApp(dependencies = {}) {
   app.get("/share-card.png", (req, res) =>
     res.sendFile(path.join(publicDir, "share-card.png"))
   );
+  // ── Favicon / touch icons ─────────────────────────────────────────────────
+  // The Bara app icon, served from stable unhashed paths in public/ so BOTH the
+  // built marketing site and the server-rendered share-link pages can point at
+  // the same URLs (the landing pages are template strings and can't reference a
+  // Vite-hashed filename). /favicon.ico is requested by browsers automatically
+  // even on pages that declare no icon — serving the PNG there is well
+  // supported and saves shipping a second format.
+  const iconRoutes = [
+    ["/favicon.ico", "favicon-32.png"],
+    ["/favicon-32.png", "favicon-32.png"],
+    ["/apple-touch-icon.png", "apple-touch-icon.png"],
+    // iOS asks for these two variants before falling back to the plain name.
+    ["/apple-touch-icon-precomposed.png", "apple-touch-icon.png"],
+    ["/icon-192.png", "icon-192.png"],
+  ];
+  for (const [route, file] of iconRoutes) {
+    app.get(route, (req, res) =>
+      res.sendFile(path.join(publicDir, file), {
+        maxAge: "7d",
+        headers: { "Content-Type": "image/png" },
+      })
+    );
+  }
+
   // AdMob app-ads.txt verification. Crawled by Google at the domain listed as
   // the app's developer website on the store listings; must be text/plain at
   // exactly this path. One file covers every app on this domain.

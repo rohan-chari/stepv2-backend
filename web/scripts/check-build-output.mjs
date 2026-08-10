@@ -10,12 +10,15 @@
 // vite.config.js pins build.assetsDir to "web-assets". This asserts the build
 // actually honoured it, and fails the build loudly if not.
 
+import { createRequire } from "node:module";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+const require = createRequire(import.meta.url);
 const here = dirname(fileURLToPath(import.meta.url));
 const distDir = join(here, "..", "dist");
+const theme = require(join(here, "..", "..", "src", "modules", "web", "theme.js"));
 
 const problems = [];
 
@@ -62,6 +65,29 @@ for (const page of ["index.html", "privacy.html", "support.html"]) {
   if (html.includes('<div id="app"></div>')) {
     problems.push(
       `dist/${page} still has an EMPTY mount point — prerender.mjs did not fill it.`
+    );
+  }
+
+  // The app-icon links are authored by hand in each entry HTML (they point at
+  // stable express-served paths, so Vite never rewrites them). Assert they are
+  // actually present, and that the hand-written theme-color still matches the
+  // token it mirrors — this is the one value that can silently drift from
+  // theme.js, because unlike the palette it isn't generated.
+  if (!html.includes('href="/favicon-32.png"')) {
+    problems.push(`dist/${page} is missing its favicon link.`);
+  }
+  if (!html.includes('href="/apple-touch-icon.png"')) {
+    problems.push(`dist/${page} is missing its apple-touch-icon link.`);
+  }
+  const themeColor = html.match(/<meta name="theme-color" content="([^"]+)"/);
+  if (!themeColor) {
+    problems.push(`dist/${page} is missing its theme-color meta.`);
+  } else if (
+    themeColor[1].toUpperCase() !== theme.TOKENS["--background"].toUpperCase()
+  ) {
+    problems.push(
+      `dist/${page} theme-color is ${themeColor[1]} but theme.js --background is ` +
+        `${theme.TOKENS["--background"]} — update the <meta> in web/${page}.`
     );
   }
 }

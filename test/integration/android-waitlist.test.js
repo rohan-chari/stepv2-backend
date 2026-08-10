@@ -186,6 +186,27 @@ describe("marketing site + static routes still serve", () => {
     assert.equal(cardRes.status, 200);
   });
 
+  // The Bara app icon in the browser tab. These paths are hardcoded in both the
+  // built HTML and the server-rendered landing-page shells, and /favicon.ico is
+  // requested by browsers with no link tag at all — so all of them must resolve.
+  it("serves the app icon at every path the pages and browsers ask for", async () => {
+    for (const path of [
+      "/favicon.ico",
+      "/favicon-32.png",
+      "/apple-touch-icon.png",
+      "/apple-touch-icon-precomposed.png",
+      "/icon-192.png",
+    ]) {
+      const res = await fetch(`${server.baseUrl}${path}`);
+      assert.equal(res.status, 200, `${path} should be 200`);
+      assert.match(
+        res.headers.get("content-type") || "",
+        /image\/png/,
+        `${path} should be served as a PNG`
+      );
+    }
+  });
+
   it("serves the deep-link verification files unchanged", async () => {
     const aasa = await fetch(
       `${server.baseUrl}/.well-known/apple-app-site-association`

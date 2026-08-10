@@ -107,6 +107,14 @@ const FONT_LINK_TAGS = `<link rel="preconnect" href="https://fonts.googleapis.co
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Instrument+Sans:wght@400;500;600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />`;
 
+// The Bara app icon in the browser tab. Absolute, unhashed paths served by
+// express (see the iconRoutes block in src/app.js) so the same markup works
+// from a runtime-rendered landing page and from the built marketing site.
+// theme-color paints Safari/Chrome mobile chrome to match the page.
+const ICON_LINK_TAGS = `<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+  <meta name="theme-color" content="${TOKENS["--background"]}" />`;
+
 // Renders the tokens as a `:root { … }` block for direct injection into a
 // server-rendered <style>. Values are literal CSS constants defined in this
 // file — never user input — so there is nothing to escape.
@@ -129,5 +137,6 @@ module.exports = {
   FONT_BODY,
   FONT_MONO,
   FONT_LINK_TAGS,
+  ICON_LINK_TAGS,
   rootStyleBlock,
 };

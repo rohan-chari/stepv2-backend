@@ -54,6 +54,7 @@ function shell({ title, description, body, links, showCta, scriptBody }) {
   <meta property="og:description" content="${safeDescription}" />
   <meta property="og:type" content="website" />
   ${imageMeta}<meta name="twitter:card" content="${ogImage ? "summary_large_image" : "summary"}" />
+  ${theme.ICON_LINK_TAGS}
   ${theme.FONT_LINK_TAGS}
   <style>
     ${theme.rootStyleBlock()}
