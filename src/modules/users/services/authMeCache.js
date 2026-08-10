@@ -49,6 +49,7 @@
 // | currentTier / rankedTierV2  | written weekly by ranked settlement; display-only counter |
 // | lastStepSyncAt              | bookkeeping; not read by the client       |
 // | timezone, clientFeatures    | never read from /auth/me by the client (clientFeatures is an OUTBOUND header only) |
+// | referredByCode              | The onboarding invite-code step hides itself on this field, but never by reading it back after a write: on a successful redeem the client acts on the REDEEM RESPONSE (`attributed: true`) plus its local done-flag, and an attributed-at-provision user gets the value in the provision response itself (ensure*User merges it — the freshness fix). So the only stale window is a redeem performed on ANOTHER device within 10s, whose worst case is one redundant prompt answered by `already_attributed` and dismissed. Deliberately NOT invalidated from the social module: recordReferral/redeemReferralCode are raw-`tx` writers (see the chokepoint note below), and reaching across modules to DEL a users cache key would buy nothing but coupling. |
 //
 // ── ACCOUNT-STATE CHANGES ─────────────────────────────────────────────────
 // deleteUserAccount invalidates (the row is gone; a warm payload would describe

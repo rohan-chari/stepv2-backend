@@ -50,7 +50,7 @@ const {
   looksLikeReferralCode,
   normalizeReferralCode,
 } = require("./shared/lib/referralCode");
-const { hashClientIp } = require("./shared/lib/clientIp");
+const { hashClientIp, hashClientNet } = require("./shared/lib/clientIp");
 const { prisma: defaultPrisma } = require("./db");
 const redisCache = require("./shared/cache/redisCache");
 const { errorMiddleware } = require("./shared/http/errorMiddleware");
@@ -162,7 +162,18 @@ function createApp(dependencies = {}) {
   // opened code (see findLinkOpenReferralCode.js).
   function logLinkOpen(kind, code, req) {
     linkOpenDb.linkOpen
-      .create({ data: { kind, code: code || null, ipHash: hashClientIp(req) } })
+      .create({
+        data: {
+          kind,
+          code: code || null,
+          // Both hashes on every open: the exact IP (tier 1) and the network
+          // prefix (tier 2). Writing ip_net_hash unconditionally from day one
+          // is what lets tier 2 be switched on later without a backfill —
+          // rows written before the switch are already matchable.
+          ipHash: hashClientIp(req),
+          ipNetHash: hashClientNet(req),
+        },
+      })
       .catch(() => {});
   }
 

@@ -47,6 +47,28 @@ const ALLOWED_EVENT_NAMES = new Set([
   "demo_box_opened",
   "demo_powerup_used",
   "demo_won",
+  // Invite-code onboarding step (spec §4). Same reasoning as every widening
+  // above: accepting more names can only increase what lands, so no shipped
+  // client changes behavior.
+  "invite_code_step_shown",
+  "invite_code_applied",
+  "invite_code_skipped",
+  // Clipboard-handoff funnel (spec part C). The iOS pasteboard handoff fails
+  // silently and we have never known at which stage; these are the stages.
+  //
+  // THE OUTCOME IS ENCODED IN THE NAME, ON PURPOSE — do NOT "tidy" this into
+  // one `install_attr` event with a context key. An unknown event NAME
+  // soft-drops per event (below), but an unknown context key/value 400s the
+  // ENTIRE batch, and the client retains failed batches — so against an older
+  // backend one such event would poison every subsequent flush until it rolled
+  // off the 50-event queue. Names are ordering-safe; context keys are not.
+  "install_attr_deep_link",
+  "install_attr_detect_miss",
+  "install_attr_read_denied",
+  "install_attr_read_no_code",
+  "install_attr_code_captured",
+  "install_attr_install_referrer",
+  "install_attr_error",
 ]);
 
 const ALLOWED_CONTEXT = {

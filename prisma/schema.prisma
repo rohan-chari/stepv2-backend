@@ -1364,6 +1364,20 @@ model Referral {
   refereeSubHash String   @unique @map("referee_sub_hash") // hashAppleSub(referee appleId||googleSub)
   code           String? // code used at signup, if any
   status         String   @default("PENDING") // PENDING -> QUALIFIED -> REWARDED -> EXPIRED
+  // WHICH MECHANISM attributed this referral (invite-code onboarding spec, part
+  // B). Plain string, not an enum, to match `status` in this same table and to
+  // keep adding a mechanism a code-only change. Values and their SINGLE write
+  // sites:
+  //   provision_body     recordReferral, code came in the /auth/* body
+  //   ip_fallback_exact  recordReferral, findLinkOpenReferralCode tier 1
+  //   ip_fallback_net    recordReferral, findLinkOpenReferralCode tier 2
+  //   redeem             redeemReferralCode (onboarding step / referral screen)
+  //   repair             reserved for ops scripts — never written by app code
+  // NULL = attributed before this column existed (no backfill by design).
+  // Load-bearing beyond observability: redeemReferralCode reads it to decide
+  // whether an explicit manual redeem may REPLACE a weak `ip_fallback_net`
+  // guess (see that command) — so a wrong tier-2 match can never be permanent.
+  source         String?
   createdAt      DateTime @default(now()) @map("created_at")
 
   referrer     User?                 @relation("ReferralsMade", fields: [referrerId], references: [id], onDelete: SetNull)
@@ -1656,10 +1670,22 @@ model LinkOpen {
   // window attributes to the code opened here. Nullable/additive — old rows and
   // opens with no resolvable IP simply never match.
   ipHash    String?  @map("ip_hash")
+  // SHA-256 hash of the viewer's NETWORK PREFIX (IPv4 /24, IPv6 /64) — tier 2
+  // of the two-tier fallback. The exact-IP match breaks whenever the landing
+  // page and the app egress from different addresses on the same network
+  // (IPv4<->IPv6, Wi-Fi<->cellular, NAT churn); the prefix survives that.
+  // Same privacy posture as ipHash: only the hash is ever persisted.
+  //
+  // Nullable/additive. Old rows stay NULL and age out of the 48h window within
+  // two days of deploy, so no backfill. A NULL here must NEVER be used as a
+  // match key — `where: { ipNetHash: null }` would match every legacy row at
+  // once; findLinkOpenReferralCode skips tier 2 entirely on a null hash.
+  ipNetHash String?  @map("ip_net_hash")
   createdAt DateTime @default(now()) @map("created_at")
 
   @@index([kind, createdAt])
   @@index([ipHash, createdAt])
+  @@index([ipNetHash, createdAt])
   @@map("link_opens")
 }
 

@@ -203,8 +203,21 @@ function buildGrantReferralRewardsForRace(dependencies = {}) {
       });
 
       for (const referral of referrals) {
-        const ev = await grantForReferral(referral);
-        events.push(...ev);
+        // Per-referral isolation: a concurrent manual redeem may replace a
+        // PENDING ip_fallback_net attribution (delete + recreate) between our
+        // grants and the status update, throwing P2025 — that referral's pass
+        // is void, but the other finishers in this settlement must not lose
+        // theirs. The ledger unique makes a retry of the voided one safe.
+        try {
+          const ev = await grantForReferral(referral);
+          events.push(...ev);
+        } catch (error) {
+          console.warn(
+            `Referral reward skipped for ${referral.id}: ${
+              error && error.message ? error.message : error
+            }`
+          );
+        }
       }
     } catch (error) {
       // Never break settlement. Emit whatever already committed.

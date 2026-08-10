@@ -30,8 +30,31 @@ function buildRedeemReferralCode(dependencies = {}) {
     if (!refereeSubHash) return { attributed: false, reason: "no_identity" };
 
     // One attribution per human, ever (survives reinstall) — refereeSubHash key.
+    //
+    // ONE EXCEPTION — explicit intent beats a tier-2 IP GUESS. A wrong
+    // `ip_fallback_net` match would otherwise be permanent: refereeSubHash is
+    // unique and this very guard answers `already_attributed` off it, so the
+    // genuine inviter would be lost forever and the onboarding step would tell
+    // the user "You're already connected to your inviter!" about a stranger.
+    // A user typing a code is far stronger evidence than a shared /24.
+    //
+    // Deliberately narrow, and safe ONLY because `source` is stamped:
+    //   * `ip_fallback_net` only — provision_body and ip_fallback_exact are
+    //     trustworthy, and a NULL source (pre-tracking) is unknown, so none of
+    //     them may be replaced;
+    //   * PENDING only — a QUALIFIED/REWARDED referral has already moved coins,
+    //     and re-pointing it would corrupt the payout ledger.
+    // Note this reads the STAMP on the existing row, not the current env: rows
+    // minted while tier 2 was enabled stay pre-emptible after it is switched
+    // off, which is exactly when a bad match tends to be noticed.
     const already = await db.referral.findUnique({ where: { refereeSubHash } });
-    if (already) return { attributed: false, reason: "already_attributed" };
+    const preemptible =
+      !!already &&
+      already.status === "PENDING" &&
+      already.source === "ip_fallback_net";
+    if (already && !preemptible) {
+      return { attributed: false, reason: "already_attributed" };
+    }
 
     const referrer = await userModel.findByReferralCode(code);
     if (!referrer) return { attributed: false, reason: "unknown_code" };
@@ -55,6 +78,20 @@ function buildRedeemReferralCode(dependencies = {}) {
 
     try {
       await db.$transaction(async (tx) => {
+        if (preemptible) {
+          // deleteMany (not delete) with the guard conditions repeated: it is a
+          // compare-and-swap that cannot throw P2025 if a concurrent redeem or
+          // a reward settlement already moved the row. When it removes nothing,
+          // the create below hits the refereeSubHash unique and we answer
+          // `already_attributed` — the correct outcome for that race.
+          await tx.referral.deleteMany({
+            where: {
+              id: already.id,
+              status: "PENDING",
+              source: "ip_fallback_net",
+            },
+          });
+        }
         await tx.referral.create({
           data: {
             referrerId: referrer.id,
@@ -62,6 +99,7 @@ function buildRedeemReferralCode(dependencies = {}) {
             refereeSubHash,
             code,
             status: "PENDING",
+            source: "redeem",
           },
         });
         await tx.user.update({

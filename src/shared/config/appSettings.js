@@ -28,6 +28,15 @@ const KNOWN_FLAGS = {
   // flip it from the admin screen once the App Store build has rolled out, and
   // flip it back to roll the whole flow back with no submission.
   onboardingV3Enabled: false,
+  // Invite-code onboarding step (a KILL SWITCH, not an opt-in — note the
+  // default differs from onboardingV3Enabled above on purpose). The step asks a
+  // new v3 user whether a friend invited them, catching the referrals the
+  // clipboard handoff and IP fallback miss; it can only ever ADD attributions,
+  // so the safe posture is ON and the switch exists to yank it without an App
+  // Store submission. The client mirrors that: absent or non-boolean ⇒ ON, only
+  // a literal `false` disables. Inert for every frozen binary, which reads named
+  // keys off `featureFlags` and ignores unknown ones.
+  onboardingInviteCodeEnabled: true,
   // iOS banner ads (AdBannerSlot / AdInlineCard). The app also needs the
   // ADMOB_BANNER_AD_UNIT_ID dart-define baked into the build; this flag is the
   // remote kill switch layered on top. Default OFF (product decision 2026-07-12:

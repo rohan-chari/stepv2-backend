@@ -3,6 +3,10 @@ const crypto = require("node:crypto");
 const { eventBus } = require("../../../shared/events/eventBus");
 const { User } = require("../models/user");
 const { recordReferral } = require("../../social/commands/recordReferral");
+const {
+  resolveSignupAttribution,
+  logAttributionResolved,
+} = require("./resolveSignupAttribution");
 const { autoEnrollNewUser } = require("../../races/commands/autoEnrollNewUser");
 const { validateDisplayName } = require("../../../shared/lib/displayNameValidator");
 
@@ -125,15 +129,32 @@ function buildEnsureAppleUser(dependencies = {}) {
       // With no body code, fall back to the IP-correlated link_opens match —
       // the iOS clipboard handoff silently fails often enough that the body
       // code alone loses real referrals (emersonz incident, 2026-08-07).
-      let attributionCode = referralCode;
-      if (!attributionCode && fallbackReferralCode) {
-        try {
-          attributionCode = await fallbackReferralCode();
-        } catch (_) {
-          // Fallback lookup failure = organic signup; never blocks provisioning.
-        }
+      const attribution = await resolveSignupAttribution({
+        referralCode,
+        fallbackReferralCode,
+        signupId: user.id,
+      });
+      const outcome = await recordReferralFn({
+        newUser: user,
+        referralCode: attribution.code,
+        source: attribution.source,
+      });
+      // FRESHNESS: `user` was built BEFORE recordReferral ran its
+      // `user.update({referredByCode})`, so without this merge a
+      // just-attributed signup serializes `referredByCode: null` and the
+      // client shows the onboarding invite-code step to a user who was in fact
+      // attributed. Merge ONLY on a confirmed attribution — recordReferral
+      // declines silently on unknown code, review account, self-referral and a
+      // swallowed P2002, and echoing a declined code here would hide the step
+      // from precisely the users it exists to catch.
+      if (outcome && outcome.attributed === true && outcome.code) {
+        user = { ...user, referredByCode: outcome.code };
+        logAttributionResolved({
+          source: outcome.source,
+          code: outcome.code,
+          userId: user.id,
+        });
       }
-      await recordReferralFn({ newUser: user, referralCode: attributionCode });
 
       // Starter-race enrollment — best-effort/never-throws: every new account
       // starts inside the current seeded challenge (see autoEnrollNewUser.js).

@@ -46,7 +46,7 @@ const { isAdminUser, withAdminFlag } = require("../admin");
 const {
   findLinkOpenReferralCode: defaultFindLinkOpenReferralCode,
 } = require("../social/queries/findLinkOpenReferralCode");
-const { hashClientIp } = require("../../shared/lib/clientIp");
+const { hashClientIp, hashClientNet } = require("../../shared/lib/clientIp");
 const { appSettings: defaultAppSettings } = require("../../shared/config/appSettings");
 const authMeCache = require("./services/authMeCache");
 
@@ -82,8 +82,16 @@ function createAuthRouter(dependencies = {}) {
   // when the provision body has no referralCode, match the signup IP against
   // recent referral landing-page opens. Thunked so the lookup only runs for
   // genuinely new users.
-  const fallbackCodeFor = (req) => () =>
-    findLinkOpenCode({ ipHash: hashClientIp(req) });
+  // Two-tier since the invite-code onboarding spec (part D): the exact IP hash
+  // AND a coarser network-prefix hash. Both are computed from the same request;
+  // the query decides which tier may answer. `signupId` is supplied by the
+  // provisioner so the query can name the account in its [REFERRAL] log lines.
+  const fallbackCodeFor = (req) => (signupId) =>
+    findLinkOpenCode({
+      ipHash: hashClientIp(req),
+      ipNetHash: hashClientNet(req),
+      signupId,
+    });
   const updateDisplayName = dependencies.setDisplayName || defaultSetDisplayName;
   const createProfilePhotoUpload =
     dependencies.createProfilePhotoUpload ||
@@ -170,6 +178,14 @@ function createAuthRouter(dependencies = {}) {
         // binaries read named keys and ignore unknown ones, so this cannot
         // change behavior for anyone until a v3-capable build reads it.
         onboardingV3Enabled: await safeFlag("onboardingV3Enabled", false),
+        // Kill switch for the onboarding invite-code step. Defaults TRUE (see
+        // KNOWN_FLAGS) — it fails open so a settings hiccup cannot silently
+        // cost us referrals; flipping it false hides the step instantly across
+        // every shipped build with no resubmission.
+        onboardingInviteCodeEnabled: await safeFlag(
+          "onboardingInviteCodeEnabled",
+          true
+        ),
         ...(stepSampleBucketMinutes !== undefined
           ? { stepSampleBucketMinutes }
           : {}),

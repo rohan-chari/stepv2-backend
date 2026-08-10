@@ -3,6 +3,10 @@ const crypto = require("node:crypto");
 const { eventBus } = require("../../../shared/events/eventBus");
 const { User } = require("../models/user");
 const { recordReferral } = require("../../social/commands/recordReferral");
+const {
+  resolveSignupAttribution,
+  logAttributionResolved,
+} = require("./resolveSignupAttribution");
 const { autoEnrollNewUser } = require("../../races/commands/autoEnrollNewUser");
 const { validateDisplayName } = require("../../../shared/lib/displayNameValidator");
 
@@ -128,15 +132,28 @@ function buildEnsureGoogleUser(dependencies = {}) {
       // Referral attribution (M1) — create branch ONLY, best-effort/never-throws.
       // Mirrors ensureAppleUser; hashes googleSub so Android referees attribute
       // correctly (the appleId||googleSub provider-sub parity).
-      let attributionCode = referralCode;
-      if (!attributionCode && fallbackReferralCode) {
-        try {
-          attributionCode = await fallbackReferralCode();
-        } catch (_) {
-          // Fallback lookup failure = organic signup; never blocks provisioning.
-        }
+      const attribution = await resolveSignupAttribution({
+        referralCode,
+        fallbackReferralCode,
+        signupId: user.id,
+      });
+      const outcome = await recordReferralFn({
+        newUser: user,
+        referralCode: attribution.code,
+        source: attribution.source,
+      });
+      // FRESHNESS: see the identical block in ensureAppleUser — `user` predates
+      // recordReferral's `referredByCode` write, and merging on anything less
+      // than a confirmed attribution would hide the onboarding invite-code step
+      // from users whose code was silently declined.
+      if (outcome && outcome.attributed === true && outcome.code) {
+        user = { ...user, referredByCode: outcome.code };
+        logAttributionResolved({
+          source: outcome.source,
+          code: outcome.code,
+          userId: user.id,
+        });
       }
-      await recordReferralFn({ newUser: user, referralCode: attributionCode });
 
       // Starter-race enrollment — best-effort/never-throws: every new account
       // starts inside the current seeded challenge (see autoEnrollNewUser.js).

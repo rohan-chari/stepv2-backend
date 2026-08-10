@@ -81,6 +81,10 @@ test("POST /auth/apple provisions the signed-in user", async () => {
         teamRacesEnabled: true,
         onboardingV2Enabled: false,
         onboardingV3Enabled: false,
+        // Kill switch, so it defaults ON — unlike the opt-in onboarding flags
+        // above. Pinned here because this deepEqual is the contract test for
+        // the exact featureFlags payload every client receives.
+        onboardingInviteCodeEnabled: true,
       },
     });
     assert.equal(typeof body.sessionToken, "string");

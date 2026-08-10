@@ -16,26 +16,38 @@ const { normalizeReferralCode } = require("../../../shared/lib/referralCode");
 //
 // Any failure (bad/unknown code, self-referral, race, DB hiccup) is swallowed:
 // SIGNUP MUST NEVER FAIL because of a referral code.
+//
+// RETURNS `{ attributed, code, source }` — `attributed: false` for every one of
+// the silent declines below. Callers use this to decide what the provision
+// response should say about `referredByCode`; reporting an ATTEMPTED code as
+// attributed would hide the onboarding invite-code step from exactly the users
+// whose code was rejected, which is the population that step exists to catch.
+// The old callers ignored the return value entirely, so adding one is safe.
+const DECLINED = { attributed: false, code: null, source: null };
+
 function buildRecordReferral(dependencies = {}) {
   const db = dependencies.prisma || prisma;
   const userModel = dependencies.User || User;
   const hashSub = dependencies.hashAppleSub || hashAppleSub;
 
-  return async function recordReferral({ newUser, referralCode }) {
+  // `source` records WHICH MECHANISM produced this attribution
+  // (provision_body | ip_fallback_exact | ip_fallback_net). Optional and
+  // defaulted to null so every pre-existing caller and test is unaffected.
+  return async function recordReferral({ newUser, referralCode, source = null }) {
     try {
-      if (!newUser || !newUser.id) return;
+      if (!newUser || !newUser.id) return DECLINED;
 
       const code = normalizeReferralCode(referralCode);
-      if (!code) return; // no / invalid code → organic signup
+      if (!code) return DECLINED; // no / invalid code → organic signup
 
       const referrer = await userModel.findByReferralCode(code);
-      if (!referrer) return; // unknown code → skip silently
-      if (referrer.id === newUser.id) return; // self-referral guard
+      if (!referrer) return DECLINED; // unknown code → skip silently
+      if (referrer.id === newUser.id) return DECLINED; // self-referral guard
 
       // Review/demo-account exclusion (§8.10): never attribute when either side
       // is a review account, so they stay out of counts and payouts entirely.
       if (referrer.isReviewAccount === true || newUser.isReviewAccount === true) {
-        return;
+        return DECLINED;
       }
 
       // Provider-neutral stable identity: Apple users have appleId, Google
@@ -44,7 +56,7 @@ function buildRecordReferral(dependencies = {}) {
       // bit onboarding boxes before — see joinRaceCore.js).
       const providerSub = newUser.appleId || newUser.googleSub || null;
       const refereeSubHash = hashSub(providerSub);
-      if (!refereeSubHash) return; // no stable identity to gate on → skip
+      if (!refereeSubHash) return DECLINED; // no stable identity to gate on → skip
 
       await db.$transaction(async (tx) => {
         await tx.referral.create({
@@ -54,6 +66,7 @@ function buildRecordReferral(dependencies = {}) {
             refereeSubHash,
             code,
             status: "PENDING",
+            source,
           },
         });
         // Audit-only mirror on the user row (the Referral table is the source
@@ -89,6 +102,8 @@ function buildRecordReferral(dependencies = {}) {
           );
         }
       }
+
+      return { attributed: true, code, source };
     } catch (error) {
       // P2002 = this human was already attributed under a prior account: exactly
       // the reinstall case we want to no-op. Any other error is swallowed so the
@@ -100,6 +115,9 @@ function buildRecordReferral(dependencies = {}) {
           }`
         );
       }
+      // Swallowed P2002 included: the attribution did NOT happen on this
+      // account, so the caller must not advertise the code as attributed.
+      return DECLINED;
     }
   };
 }
