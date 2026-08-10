@@ -111,9 +111,20 @@ const POWERUPS5_TYPES = [
 // unopened Mystery Boxes, and every wave-5 store purchase (owner decision D6 —
 // expensive buys can't be sniped). Mirrors the isStealable helper in routes/races.js.
 const UNSTEALABLE_TYPES = ["SNEAKY_SWAP", "MYSTERY_BOX", ...POWERUPS5_TYPES];
-// Single-target attacks a Decoy redirects (§3.5): the same set Compression Socks
-// blocks, i.e. OFFENSIVE_TYPES plus IMPOSTER. AoE attacks (Rainstorm, Power
-// Outage, Quicksand) are NOT redirected — they resolve per-victim instead.
+// AoE attacks (Rainstorm, Power Outage, Quicksand) are NOT redirected by a
+// Decoy — they resolve per-victim, so a Decoy holder caught in one is hit
+// normally and the Decoy is neither consumed nor triggered. That is deliberate;
+// the intended counters to an AoE are Umbrella (immune) and Compression Socks
+// (blocks).
+//
+// COMMENT CORRECTED, no behavior change (batch 2026-08-09 item 4 — an
+// investigation-only item). This constant is DEAD CODE: the live Decoy gate
+// tests bare `OFFENSIVE_TYPES`, so IMPOSTER is NOT actually Decoy-redirectable
+// despite what this line has claimed since it was written. The comment used to
+// assert the opposite and was the only documentation of the rule, so it was
+// actively misleading. Making IMPOSTER genuinely redirectable is a separate
+// product decision; until someone takes it, this constant describes an intent
+// that was never wired up and must not be read as describing live behavior.
 const DECOY_REDIRECTABLE_TYPES = [...OFFENSIVE_TYPES, "IMPOSTER"];
 // Wave-5 durations.
 // §3.4 duration standardization: non-upgradeable action windows standardize to
@@ -312,7 +323,23 @@ function isOpponentInflicted(effect, userId) {
 // rival could erase the caster's wager with one Cleanse, and a Quick Rinse
 // could be burned on it too (expiresAt = race end makes it a live timed
 // effect). Anything added here must likewise be harmless to its target.
-const NON_CLEANSABLE_TYPES = ["BOUNTY"];
+//
+// RALLY_FLAG and UPRISING (batch 2026-08-09 item 7) are the opposite problem
+// with the same shape: they are BUFFS, and they were being cleansed. Both write
+// ONE ROW PER BENEFICIARY through upsertBuffWindow, all sourced from the
+// caster — so on every beneficiary EXCEPT the caster the row reads
+// sourceUserId = caster, targetUserId = beneficiary, which is exactly what
+// isOpponentInflicted() means by "a debuff someone else put on me". The
+// caster's own copy is self-sourced and was always safe, which is why players
+// reported this as intermittent: whether your rally buff survived a Cleanse
+// depended on whether you were the one who raised the flag.
+//
+// The frontend already classifies both as boosts (effect_polarity.dart); this
+// makes the backend agree. Listing them here fixes CLEANSE and QUICK_RINSE and
+// BOTH "nothing to cleanse/rinse" guards in one edit, because all four read the
+// single isCleansableDebuff predicate below — which is also why the 400 and the
+// 409 both need their own test.
+const NON_CLEANSABLE_TYPES = ["BOUNTY", "RALLY_FLAG", "UPRISING"];
 
 function isCleansableDebuff(effect, userId) {
   if (NON_CLEANSABLE_TYPES.includes(effect.type)) return false;
