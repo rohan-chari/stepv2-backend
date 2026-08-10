@@ -172,16 +172,53 @@ function buildGrantReferralRewardsForRace(dependencies = {}) {
     try {
       if (!race || !Array.isArray(race.participants)) return events;
 
-      // Qualifying-race gate (anti-farm, §5C.2 / §8.1): a system-SEEDED race
-      // (the referee can't spin one up) OR a genuine multi-person contest — at
-      // least 2 distinct ACCEPTED finishers who actually accrued steps. This
-      // closes the solo self-created throwaway-race vector that totalSteps>0
-      // alone leaves open.
+      // Qualifying-race gate (anti-farm, §5C.2 / §8.1; TIGHTENED by batch
+      // 2026-08-09 item 2).
+      //
+      // A qualifying race is a NON-SEEDED race with a genuine multi-person
+      // field: at least 2 distinct ACCEPTED participants who actually accrued
+      // steps. Both halves are required.
+      //
+      // The seeded half used to be an OR that qualified unconditionally, even
+      // solo. That was wrong in practice rather than in theory: `autoEnrollNewUser`
+      // puts every new account into every seeded daily/weekly, so a referred
+      // user completed their referrer's payout within ~24h having done nothing
+      // but sync steps once. The referral is meant to pay for bringing someone
+      // into a REAL race with real people, so a system-seeded challenge now
+      // never qualifies, at any field size.
+      //
+      // This also makes the payout gate consistent with the redeem-window guard
+      // in redeemReferralCode.js, which has always counted only `seedId: null`
+      // races. The two used to treat seeded races oppositely.
+      //
+      // In-flight PENDING referrals are subject to the new rule immediately
+      // (owner decision): no migration, no grandfathering — they can still
+      // qualify via a real race inside their 30-day window.
+      //
+      // POLARITY HAZARD, explicitly closed below. Flipping `!= null` to
+      // `== null` also flips the failure mode from fail-CLOSED to fail-OPEN: a
+      // caller handing over a race projection that never SELECTed `seedId`
+      // would have `undefined == null` evaluate TRUE and silently re-qualify
+      // every seeded daily. Today's only callers (completeRace's two sites) go
+      // through Race.findById, which uses `include` and therefore carries every
+      // scalar — but "today's callers are fine" is not a guarantee, and the
+      // consequence of a future lean `select:` is a silent regression of the
+      // exact vector this change exists to close. So the KEY's presence is
+      // required, not just its value.
+      const hasSeedIdField = Object.prototype.hasOwnProperty.call(race, "seedId");
+      if (!hasSeedIdField) {
+        console.warn(
+          "referral gate: race projection is missing seedId — treating as non-qualifying",
+          { raceId: race.id }
+        );
+        return events;
+      }
+
       const realParticipants = race.participants.filter(
         (p) => p.status === "ACCEPTED" && (p.totalSteps || 0) > 0
       );
       const isQualifyingRace =
-        race.seedId != null || realParticipants.length >= 2;
+        race.seedId == null && realParticipants.length >= 2;
       if (!isQualifyingRace) return events;
 
       // Settled finishers who actually walked (not no-shows).

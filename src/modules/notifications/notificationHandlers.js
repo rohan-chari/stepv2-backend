@@ -670,7 +670,10 @@ function registerNotificationHandlers(dependencies = {}) {
         actorUserId: refereeId,
         title: "You earned coins!",
         buildBody: (friendName) =>
-          `${friendName} completed their first race — you earned ${coins} coins!`,
+          // Batch 2026-08-09 item 2: "with friends" is now load-bearing, not
+          // flavour — a seeded daily/weekly no longer qualifies, so the payout
+          // really did come from a race with other real people.
+          `${friendName} finished their first race with friends — you earned ${coins} coins!`,
         payload: {
           type: "REFERRAL_REWARDED",
           route: "home",
