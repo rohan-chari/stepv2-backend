@@ -154,8 +154,11 @@ const POWERUP_COPY_SEED = [
     // the one type where those two things disagree, and on purpose:
     //   * it must STAY upgradeable, because a frozen binary decides "is this
     //     upgradeable?" from its BUNDLED table and would take a permanent 400
-    //     if the server dropped it (upgradeCosts.byType zeroes the price to
-    //     [0,0,0,0] instead, making those upgrades free and inert);
+    //     if the server dropped it (upgradeCosts.byType zeroes the price at
+    //     every level instead, making those upgrades free and inert — the
+    //     numbers live in balanceConfig.defaults, not here, and must not be
+    //     restated as a bracketed ladder literal or the balanceConfig
+    //     structural guard reads this comment as a duplicated cost table);
     //   * but it must ship NO tier labels, because the server snapshot wins
     //     over the client's bundled fallback, and a NEW build hides the upgrade
     //     UI precisely when the label list comes back empty. Leaving the four
