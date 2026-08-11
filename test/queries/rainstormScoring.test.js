@@ -15,12 +15,17 @@ const test = require("node:test");
 // values so live totals and finish snapshots never diverge.
 //
 // NOTE (batch 2026-08-10b item 6): the "rain + Runner's High = 1.5x" case below
-// describes the behaviour with RAINSTORM_MULTIPLICATIVE_ENABLED unset/"false",
-// which is the shipped default. That flag makes rain MULTIPLICATIVE, and this
-// is the one existing expected value the fix legitimately changes (1.5x -> 1x).
-// The assertion is left exactly as-is because it pins the flag-OFF path, which
-// is production at deploy time; the flag-ON value is asserted in the item 6
-// section at the bottom of this file. See the batch spec, §Item 6.
+// describes the behaviour with RAINSTORM_MULTIPLICATIVE_ENABLED unset/"false".
+// That flag makes rain MULTIPLICATIVE, and this is the one existing expected
+// value the fix legitimately changes (1.5x -> 1x).
+//
+// **PROD NOW RUNS FLAG-ON** (set 2026-08-10). This assertion is still correct
+// and must NOT be changed to 6000: the test process does not set the env var,
+// so it exercises the flag-OFF path, and the flag-ON value is asserted
+// separately by the item 6 section at the bottom of this file (which sets and
+// restores the flag itself via `withFlag`). What this block pins is the
+// fallback behaviour if the flag is ever turned back off. See the batch spec,
+// §Item 6.
 // ---------------------------------------------------------------------------
 
 const { computeEffectModifiers } = require("../../src/modules/races/queries/getRaceProgress");
