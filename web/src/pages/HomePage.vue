@@ -110,7 +110,7 @@ const APP_STORE_URL =
         >
           Dozens of ways to shake up the race.
         </h2>
-        <p class="mb-10 max-w-xl font-body text-lg text-paper-muted sm:mb-14">
+        <p class="mb-10 max-w-xl font-body text-lg text-paper-muted sm:mb-12">
           Mystery boxes drop as you walk. Some of what's inside speeds you up.
           The rest slows your friends down.
         </p>

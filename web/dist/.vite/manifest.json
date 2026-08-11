@@ -1,22 +1,22 @@
 {
-  "_SiteFooter-CIDCqbHD.css": {
-    "file": "web-assets/SiteFooter-CIDCqbHD.css",
-    "src": "_SiteFooter-CIDCqbHD.css"
+  "_SiteFooter-CGOJKJmv.css": {
+    "file": "web-assets/SiteFooter-CGOJKJmv.css",
+    "src": "_SiteFooter-CGOJKJmv.css"
   },
-  "_SiteFooter-DbVVm98m.js": {
-    "file": "web-assets/SiteFooter-DbVVm98m.js",
+  "_SiteFooter-yd_5pagW.js": {
+    "file": "web-assets/SiteFooter-yd_5pagW.js",
     "name": "SiteFooter",
     "css": [
-      "web-assets/SiteFooter-CIDCqbHD.css"
+      "web-assets/SiteFooter-CGOJKJmv.css"
     ]
   },
   "index.html": {
-    "file": "web-assets/index-DRGF1SJe.js",
+    "file": "web-assets/index-BM0XlKqS.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
     "imports": [
-      "_SiteFooter-DbVVm98m.js"
+      "_SiteFooter-yd_5pagW.js"
     ],
     "assets": [
       "web-assets/runners_high-CKr9XeFl.png",
@@ -31,12 +31,12 @@
     ]
   },
   "privacy.html": {
-    "file": "web-assets/privacy-BxkbWDoF.js",
+    "file": "web-assets/privacy-B4JOFFMu.js",
     "name": "privacy",
     "src": "privacy.html",
     "isEntry": true,
     "imports": [
-      "_SiteFooter-DbVVm98m.js"
+      "_SiteFooter-yd_5pagW.js"
     ]
   },
   "src/assets/app-store-badge.svg": {
@@ -76,12 +76,12 @@
     "src": "src/assets/wrong_turn.png"
   },
   "support.html": {
-    "file": "web-assets/support-23hrKits.js",
+    "file": "web-assets/support-BFwkgN2P.js",
     "name": "support",
     "src": "support.html",
     "isEntry": true,
     "imports": [
-      "_SiteFooter-DbVVm98m.js"
+      "_SiteFooter-yd_5pagW.js"
     ]
   }
 }

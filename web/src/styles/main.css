@@ -268,7 +268,7 @@
   /* ── The mystery-box reel ─────────────────────────────────────────────────
      A web reproduction of the app's case-opening cabinet (the Flutter repo's
      lib/widgets/case_opening_strip.dart): powerup tiles on dark felt behind a
-     gold-framed window, a chevron pointer and win-line through the centre, and
+     gold-framed window, a chevron pointer and win line through the centre, and
      edge fades so tiles surface out of the dark and sink back into it.
 
      The colours below are the APP's palette (its lib/styles.dart), NOT this
@@ -276,9 +276,10 @@
      looks like the thing you actually touch in the game. Don't "correct" them
      to token names — they would stop matching the app, which is the feature.
 
-     Swiping is native overflow scrolling with scroll-snap, so the reel works
-     with JavaScript off and on the prerendered HTML. PowerupReel.vue only adds
-     click-and-drag for mice and keeps the caption naming whatever has snapped. */
+     The row is TRANSFORMED, not scrolled — see PowerupReel.vue for why (a
+     scroller cannot spin with a deceleration curve, cannot loop, and cannot
+     drift on its own, which are the three things this reel is for). So there is
+     no overflow scrolling here and no scroll-snap; the window simply clips. */
   .reel-cabinet {
     --felt: #1a2b20;
     --gold: #ecc86a;
@@ -286,6 +287,8 @@
     --parchment: #fffbf5;
     --parchment-light: #f8f2e7;
     --reel-frame: #2e5d47;
+    --reel-ink: #213128;
+    --reel-muted: #66796f;
     --tile-width: 128px;
 
     background-color: var(--parchment-light);
@@ -296,67 +299,56 @@
     padding: 0.75rem 0.625rem 0.875rem;
   }
 
+  .reel-label,
+  .reel-hint {
+    color: var(--reel-muted);
+  }
+
   .reel-window {
     position: relative;
     height: 166px;
+    overflow: hidden;
     border: 2px solid var(--gold-shadow);
     border-radius: 8px;
     background-color: var(--felt);
     box-shadow: 0 0 14px 1px rgba(236, 200, 106, 0.28);
-  }
-
-  /* The scroller itself. It sits ABOVE the win line, so a card that lands under
-     the pointer covers the beam and the line only shows in the 8px of felt above
-     and below it — the card reads as sitting ON the line, not sliced by it.
-
-     Deliberately NOT padded by half the window: the app's reel is packed with
-     tiles edge to edge, and half a window of empty felt at either end would be
-     the one thing that gives the port away. The list is repeated instead (see
-     PowerupReel.vue), which is also how the real reel is built. */
-  .reel-track {
-    position: relative;
-    z-index: 1;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    height: 100%;
-    overflow-x: auto;
-    overscroll-behavior-x: contain;
-    scroll-snap-type: x mandatory;
-    padding-inline: 8px;
-    scroll-padding-inline: 8px;
-    border-radius: 6px;
-    scrollbar-width: none;
-    -ms-overflow-style: none;
     cursor: grab;
-    /* A mouse drag across the felt must move the reel, not paint a text
-       selection across three powerup names. */
+    /* Horizontal gestures drive the reel; vertical ones must still scroll the
+       page, or the cabinet becomes a trap on a phone. */
+    touch-action: pan-y;
     -webkit-user-select: none;
     user-select: none;
   }
 
-  .reel-track::-webkit-scrollbar {
-    display: none;
+  .reel-window:active {
+    cursor: grabbing;
   }
 
-  /* Grabbing anywhere on the felt drags the reel (pointer-drag, mice only).
-     Touch and trackpads already scroll it natively. */
-  .reel-track.is-dragging {
-    cursor: grabbing;
-    scroll-snap-type: none;
+  /* The strip. Absolutely positioned so its width never feeds back into the
+     window's, and translated on the compositor — this moves every frame. */
+  .reel-track {
+    position: absolute;
+    /* Above .reel-line, so the beam passes BEHIND the card sitting on it rather
+       than being drawn across its face and through its name. */
+    z-index: 1;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    will-change: transform;
   }
 
   .reel-tile {
     flex: 0 0 var(--tile-width);
     height: 150px;
-    scroll-snap-align: center;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     gap: 0.25rem;
     padding: 7px 6px 6px;
-    cursor: pointer;
     background-color: var(--parchment);
     /* The tile's arcade checker: 18px cells, every third on the diagonal lit,
        drawn once over a 54px repeat — the app's ArcadeCheckerPainter. */
@@ -372,16 +364,11 @@
 
   /* The lock-in pop: whatever is under the pointer lifts, grows and catches the
      gold, exactly as the winning tile does when the app's reel settles. Gated on
-     .is-live so the prerendered HTML — which cannot know which tile the
-     viewport will centre — doesn't pop the wrong one and then slide. */
-  .reel-track.is-live .reel-tile[aria-current="true"] {
+     .is-live so the prerendered HTML — which cannot know which tile a viewport
+     it has never measured will centre — doesn't pop the wrong one. */
+  .reel-track.is-live .reel-tile.is-lit {
     transform: translateY(-5px) scale(1.07);
     box-shadow: 0 0 18px 2px rgba(236, 200, 106, 0.85);
-  }
-
-  .reel-tile:focus-visible {
-    outline: 3px solid var(--gold);
-    outline-offset: 2px;
   }
 
   .reel-tile-name {
@@ -390,18 +377,16 @@
     font-size: 0.6875rem;
     line-height: 1.15;
     text-align: center;
-    color: #213128;
+    color: var(--reel-ink);
   }
 
   /* The win line, and the soft column of light behind it. Sits UNDER the track
      and over the felt, so it reads as a beam the centred card has landed on
-     rather than a rule drawn across its face. */
+     rather than a rule drawn across its face. Nearly full height, because at the
+     app's 6px inset a 150px card would hide almost all of it. */
   .reel-line {
     position: absolute;
     z-index: 0;
-    /* Runs nearly the full height of the window so the beam still shows in the
-       felt above and below a 150px card — at the app's 6px inset it would be
-       almost entirely hidden behind one. */
     top: 2px;
     bottom: 2px;
     left: 50%;
@@ -421,19 +406,19 @@
   }
 
   /* Narrower than the app's 46px, and it should be: the app fades a strip that
-     is flying past, where this one sits over a card the visitor is trying to
-     read. 36px still sinks the end tiles into the dark without burying them. */
+     is flying past, where this one also sits over cards at rest. 36px still
+     sinks the end tiles into the dark without burying them. */
   .reel-fade {
     position: absolute;
     z-index: 3;
-    top: 2px;
-    bottom: 2px;
+    top: 0;
+    bottom: 0;
     width: 36px;
     pointer-events: none;
   }
 
   .reel-fade-left {
-    left: 2px;
+    left: 0;
     background-image: linear-gradient(
       to right,
       rgba(26, 43, 32, 0.85),
@@ -442,7 +427,7 @@
   }
 
   .reel-fade-right {
-    right: 2px;
+    right: 0;
     background-image: linear-gradient(
       to left,
       rgba(26, 43, 32, 0.85),
@@ -459,11 +444,11 @@
   }
 
   .reel-pointer-top {
-    top: -3px;
+    top: 0;
   }
 
   .reel-pointer-bottom {
-    bottom: -3px;
+    bottom: 0;
     transform: rotate(180deg);
   }
 
