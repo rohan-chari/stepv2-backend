@@ -335,6 +335,35 @@ onMounted(() => {
     resumeAutoSoon();
   };
 
+  // Desktop "swipe" is a two-finger trackpad gesture, which arrives as wheel
+  // events, NOT as a drag. The scroll-snap version got this free by being a real
+  // scroller; a transformed row gets nothing unless it asks. Without this the
+  // reel is dead to every trackpad on the site, which is most desktop visitors.
+  //
+  // Only HORIZONTAL gestures are claimed. A vertical wheel must keep scrolling
+  // the page — swallowing it would trap the reader inside the cabinet. Claiming
+  // the horizontal one also suppresses macOS swipe-to-go-back, which would
+  // otherwise navigate away mid-gesture.
+  let wheelTimer = 0;
+  const onWheel = (event) => {
+    if (Math.abs(event.deltaX) <= Math.abs(event.deltaY)) return;
+    event.preventDefault();
+    // deltaMode 1 is lines, not pixels — some mice report that way.
+    const dx = event.deltaX * (event.deltaMode === 1 ? 16 : 1);
+    pauseAuto();
+    tween = null;
+    velocity = 0;
+    pos.value += dx;
+    paint();
+    // The trackpad's own momentum tail supplies the spin, so all that is left is
+    // to land square once the tail stops arriving.
+    clearTimeout(wheelTimer);
+    wheelTimer = setTimeout(() => {
+      glideTo(snapDelta(), 220);
+      resumeAutoSoon();
+    }, 130);
+  };
+
   const onEnter = () => {
     hovering = true;
     pauseAuto();
@@ -349,6 +378,7 @@ onMounted(() => {
   el.addEventListener("pointerup", endDrag);
   el.addEventListener("pointercancel", endDrag);
   el.addEventListener("click", onClick, true);
+  el.addEventListener("wheel", onWheel, { passive: false });
   el.addEventListener("pointerenter", onEnter);
   el.addEventListener("pointerleave", onLeave);
 
@@ -392,6 +422,8 @@ onMounted(() => {
     el.removeEventListener("pointerup", endDrag);
     el.removeEventListener("pointercancel", endDrag);
     el.removeEventListener("click", onClick, true);
+    clearTimeout(wheelTimer);
+    el.removeEventListener("wheel", onWheel);
     el.removeEventListener("pointerenter", onEnter);
     el.removeEventListener("pointerleave", onLeave);
   };
