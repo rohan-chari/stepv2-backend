@@ -1,28 +1,26 @@
 {
-  "_SiteFooter-BfB92qkN.js": {
-    "file": "web-assets/SiteFooter-BfB92qkN.js",
+  "_SiteFooter-CME6RWqh.js": {
+    "file": "web-assets/SiteFooter-CME6RWqh.js",
     "name": "SiteFooter",
     "css": [
-      "web-assets/SiteFooter-NyCpvOqz.css"
-    ],
-    "assets": [
-      "web-assets/capybara_walk_right-zO7gPMEH.png"
+      "web-assets/SiteFooter-IiNr25t3.css"
     ]
   },
-  "_SiteFooter-NyCpvOqz.css": {
-    "file": "web-assets/SiteFooter-NyCpvOqz.css",
-    "src": "_SiteFooter-NyCpvOqz.css"
+  "_SiteFooter-IiNr25t3.css": {
+    "file": "web-assets/SiteFooter-IiNr25t3.css",
+    "src": "_SiteFooter-IiNr25t3.css"
   },
   "index.html": {
-    "file": "web-assets/index-uNbwADVw.js",
+    "file": "web-assets/index-DdFjwIDq.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
     "imports": [
-      "_SiteFooter-BfB92qkN.js"
+      "_SiteFooter-CME6RWqh.js"
     ],
     "assets": [
       "web-assets/app-store-badge-CVyK0T4N.svg",
+      "web-assets/capybara_walk_right-zO7gPMEH.png",
       "web-assets/trail_ground-IvNzw0ZZ.png",
       "web-assets/runners_high-CKr9XeFl.png",
       "web-assets/wrong_turn-8wsZKMY2.png",
@@ -33,12 +31,12 @@
     ]
   },
   "privacy.html": {
-    "file": "web-assets/privacy-DLLlqu1v.js",
+    "file": "web-assets/privacy-COexTM4T.js",
     "name": "privacy",
     "src": "privacy.html",
     "isEntry": true,
     "imports": [
-      "_SiteFooter-BfB92qkN.js"
+      "_SiteFooter-CME6RWqh.js"
     ]
   },
   "src/assets/app-store-badge.svg": {
@@ -78,12 +76,12 @@
     "src": "src/assets/wrong_turn.png"
   },
   "support.html": {
-    "file": "web-assets/support-hgfi8OpK.js",
+    "file": "web-assets/support-r23Rf-Hn.js",
     "name": "support",
     "src": "support.html",
     "isEntry": true,
     "imports": [
-      "_SiteFooter-BfB92qkN.js"
+      "_SiteFooter-CME6RWqh.js"
     ]
   }
 }

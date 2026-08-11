@@ -66,7 +66,7 @@ const powerups = [
         <h1
           class="max-w-4xl font-wordmark text-[clamp(2.6rem,8vw,5.5rem)] leading-[0.98] tracking-[0.01em] text-paper-foreground"
         >
-          Step challenges are more fun when you can steal steps from someone
+          Step challenges are more fun when you can steal steps from someone.
         </h1>
 
         <p
@@ -126,8 +126,8 @@ const powerups = [
           Dozens of ways to shake up the race.
         </h2>
         <p class="mb-10 max-w-xl font-body text-lg text-paper-muted sm:mb-14">
-          Mystery boxes drop as you walk. Some of what's inside gives you a
-          boost. The rest is for having fun with your friends.
+          Mystery boxes drop as you walk. Some of what's inside speeds you up.
+          The rest slows your friends down.
         </p>
 
         <ul class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
