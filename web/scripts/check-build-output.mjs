@@ -39,8 +39,8 @@ if (existsSync(join(distDir, "assets"))) {
 // is skipped or silently fails, /privacy (the App Store listing's URL) becomes
 // a blank page that still returns 200, which is invisible in any status check.
 const REQUIRED_PROSE = {
-  "index.html": "steal steps from someone",
-  "privacy.html": "we do not write to or modify your health data",
+  "index.html": "more fun when you can steal",
+  "privacy.html": "not write to or modify your health data",
   "support.html": "Common trail troubles",
 };
 

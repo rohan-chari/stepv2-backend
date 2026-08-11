@@ -160,9 +160,9 @@ describe("marketing site + static routes still serve", () => {
   // already broken; neither may render blank when the JS fails to load.
   it("ships page copy in the HTML, not just a JS mount point", async () => {
     const expectations = [
-      ["/privacy", "we do not write to or modify your health data"],
+      ["/privacy", "not write to or modify your health data"],
       ["/support", "Common trail troubles"],
-      ["/", "steal steps from someone"],
+      ["/", "more fun when you can steal"],
     ];
     for (const [path, prose] of expectations) {
       const html = await (await fetch(`${server.baseUrl}${path}`)).text();
@@ -224,6 +224,43 @@ describe("marketing site + static routes still serve", () => {
       assert.equal(typeof review.body, "string");
     }
   });
+  // The powerups are what the "what's in the boxes" section exists to sell, and
+  // they now live inside the mystery-box reel (web/src/components/PowerupReel.vue)
+  // rather than a plain grid. The reel is a scroll-snap track precisely so it
+  // still works with no JavaScript — but only if the tiles and their copy are in
+  // the PRERENDERED html. Were it ever to regress to a client-only render, the
+  // section would degrade to an empty felt window and nothing else would fail.
+  //
+  // Asserted on the served HTML, escaped exactly as Vue's SSR pass writes it.
+  it("ships every powerup's name and effect in the reel's prerendered HTML", async () => {
+    const html = await (await fetch(`${server.baseUrl}/`)).text();
+
+    const powerups = [
+      ["Protein Shake", "+1,500 bonus steps, instantly."],
+      ["Runner&#39;s High", "2x your steps for an hour."],
+      ["Wrong Turn", "Reverse a rival&#39;s steps for an hour."],
+      ["Stealth Mode", "Hide your name, steps, and position for an hour."],
+      ["Trail Mine", "Buries a trap at your step count."],
+      ["Rainstorm", "Everyone else&#39;s steps count for half for an hour."],
+    ];
+
+    for (const [name, effect] of powerups) {
+      assert.ok(html.includes(name), `the reel must name ${name}`);
+      assert.ok(
+        html.includes(effect),
+        `${name}'s effect copy must be in the served HTML, not JS-only`
+      );
+    }
+
+    // The chrome itself, so a reel that renders its contents into no cabinet
+    // (a dropped stylesheet class, a refactor that loses the track) is caught.
+    assert.ok(html.includes("reel-track"), "the reel's scroll track must be present");
+    assert.ok(
+      html.includes("reel-tile"),
+      "the reel must render tiles, not just the caption"
+    );
+  });
+
   it("keeps serving the untouched static files out of public/", async () => {
     const adsRes = await fetch(`${server.baseUrl}/app-ads.txt`);
     assert.equal(adsRes.status, 200);

@@ -265,6 +265,208 @@
     }
   }
 
+  /* ── The mystery-box reel ─────────────────────────────────────────────────
+     A web reproduction of the app's case-opening cabinet (the Flutter repo's
+     lib/widgets/case_opening_strip.dart): powerup tiles on dark felt behind a
+     gold-framed window, a chevron pointer and win-line through the centre, and
+     edge fades so tiles surface out of the dark and sink back into it.
+
+     The colours below are the APP's palette (its lib/styles.dart), NOT this
+     site's tokens, and that is deliberate: the point of the block is that it
+     looks like the thing you actually touch in the game. Don't "correct" them
+     to token names — they would stop matching the app, which is the feature.
+
+     Swiping is native overflow scrolling with scroll-snap, so the reel works
+     with JavaScript off and on the prerendered HTML. PowerupReel.vue only adds
+     click-and-drag for mice and keeps the caption naming whatever has snapped. */
+  .reel-cabinet {
+    --felt: #1a2b20;
+    --gold: #ecc86a;
+    --gold-shadow: #9a7a2d;
+    --parchment: #fffbf5;
+    --parchment-light: #f8f2e7;
+    --reel-frame: #2e5d47;
+    --tile-width: 128px;
+
+    background-color: var(--parchment-light);
+    border: 2px solid var(--reel-frame);
+    border-radius: 14px;
+    /* Game-piece language: a hard straight-down drop, never a soft blur. */
+    box-shadow: 0 4px 0 rgba(0, 0, 0, 0.4);
+    padding: 0.75rem 0.625rem 0.875rem;
+  }
+
+  .reel-window {
+    position: relative;
+    height: 166px;
+    border: 2px solid var(--gold-shadow);
+    border-radius: 8px;
+    background-color: var(--felt);
+    box-shadow: 0 0 14px 1px rgba(236, 200, 106, 0.28);
+  }
+
+  /* The scroller itself. It sits ABOVE the win line, so a card that lands under
+     the pointer covers the beam and the line only shows in the 8px of felt above
+     and below it — the card reads as sitting ON the line, not sliced by it.
+
+     Deliberately NOT padded by half the window: the app's reel is packed with
+     tiles edge to edge, and half a window of empty felt at either end would be
+     the one thing that gives the port away. The list is repeated instead (see
+     PowerupReel.vue), which is also how the real reel is built. */
+  .reel-track {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 100%;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x mandatory;
+    padding-inline: 8px;
+    scroll-padding-inline: 8px;
+    border-radius: 6px;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    cursor: grab;
+    /* A mouse drag across the felt must move the reel, not paint a text
+       selection across three powerup names. */
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  .reel-track::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Grabbing anywhere on the felt drags the reel (pointer-drag, mice only).
+     Touch and trackpads already scroll it natively. */
+  .reel-track.is-dragging {
+    cursor: grabbing;
+    scroll-snap-type: none;
+  }
+
+  .reel-tile {
+    flex: 0 0 var(--tile-width);
+    height: 150px;
+    scroll-snap-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.25rem;
+    padding: 7px 6px 6px;
+    cursor: pointer;
+    background-color: var(--parchment);
+    /* The tile's arcade checker: 18px cells, every third on the diagonal lit,
+       drawn once over a 54px repeat — the app's ArcadeCheckerPainter. */
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='54' height='54'%3E%3Cpath fill='%23ffffff' fill-opacity='0.031' d='M0 0h18v18H0zM36 18h18v18H36zM18 36h18v18H18z'/%3E%3C/svg%3E");
+    border: 2.5px solid var(--rarity);
+    border-radius: 8px;
+    /* Hard, rarity-tinted, offset — the same sticker-shadow the app's tiles use. */
+    box-shadow: 3px 3px 0 color-mix(in srgb, var(--rarity) 18%, transparent);
+    transition:
+      transform 0.18s ease,
+      box-shadow 0.18s ease;
+  }
+
+  /* The lock-in pop: whatever is under the pointer lifts, grows and catches the
+     gold, exactly as the winning tile does when the app's reel settles. Gated on
+     .is-live so the prerendered HTML — which cannot know which tile the
+     viewport will centre — doesn't pop the wrong one and then slide. */
+  .reel-track.is-live .reel-tile[aria-current="true"] {
+    transform: translateY(-5px) scale(1.07);
+    box-shadow: 0 0 18px 2px rgba(236, 200, 106, 0.85);
+  }
+
+  .reel-tile:focus-visible {
+    outline: 3px solid var(--gold);
+    outline-offset: 2px;
+  }
+
+  .reel-tile-name {
+    font-family: var(--font-display);
+    font-weight: 800;
+    font-size: 0.6875rem;
+    line-height: 1.15;
+    text-align: center;
+    color: #213128;
+  }
+
+  /* The win line, and the soft column of light behind it. Sits UNDER the track
+     and over the felt, so it reads as a beam the centred card has landed on
+     rather than a rule drawn across its face. */
+  .reel-line {
+    position: absolute;
+    z-index: 0;
+    /* Runs nearly the full height of the window so the beam still shows in the
+       felt above and below a 150px card — at the app's 6px inset it would be
+       almost entirely hidden behind one. */
+    top: 2px;
+    bottom: 2px;
+    left: 50%;
+    width: 3px;
+    margin-left: -1.5px;
+    border-radius: 2px;
+    background-color: var(--gold);
+    pointer-events: none;
+  }
+
+  .reel-line::before {
+    content: "";
+    position: absolute;
+    inset: -2px -5.5px;
+    background-color: rgba(236, 200, 106, 0.22);
+    filter: blur(6px);
+  }
+
+  /* Narrower than the app's 46px, and it should be: the app fades a strip that
+     is flying past, where this one sits over a card the visitor is trying to
+     read. 36px still sinks the end tiles into the dark without burying them. */
+  .reel-fade {
+    position: absolute;
+    z-index: 3;
+    top: 2px;
+    bottom: 2px;
+    width: 36px;
+    pointer-events: none;
+  }
+
+  .reel-fade-left {
+    left: 2px;
+    background-image: linear-gradient(
+      to right,
+      rgba(26, 43, 32, 0.85),
+      rgba(26, 43, 32, 0)
+    );
+  }
+
+  .reel-fade-right {
+    right: 2px;
+    background-image: linear-gradient(
+      to left,
+      rgba(26, 43, 32, 0.85),
+      rgba(26, 43, 32, 0)
+    );
+  }
+
+  .reel-pointer {
+    position: absolute;
+    z-index: 4;
+    left: 50%;
+    margin-left: -14px;
+    pointer-events: none;
+  }
+
+  .reel-pointer-top {
+    top: -3px;
+  }
+
+  .reel-pointer-bottom {
+    bottom: -3px;
+    transform: rotate(180deg);
+  }
+
   /* The mono "scoreboard" voice: eyebrows, ticks, nav. Steps are numbers, so
      numbers get their own face. */
   .eyebrow {

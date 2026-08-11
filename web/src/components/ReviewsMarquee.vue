@@ -78,7 +78,7 @@ onMounted(async () => {
 
     <ul class="sr-only">
       <li v-for="review in fiveStar" :key="review.id">
-        Five stars. {{ review.title }}. {{ review.body }} — {{ review.author }}
+        Five stars. {{ review.title }}. {{ review.body }} Reviewed by {{ review.author }}.
       </li>
     </ul>
 

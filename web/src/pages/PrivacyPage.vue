@@ -10,7 +10,7 @@ const EFFECTIVE_DATE = "July 14, 2026";
 const collected = [
   {
     term: "Account identifier (Apple / Google)",
-    def: "Account creation and sign-in — via Sign in with Apple or Google Sign-In on iOS, and Google Sign-In on Android. We receive only the opaque user identifier the provider supplies — we do not access your Apple ID or Google password.",
+    def: "Account creation and sign-in via Sign in with Apple or Google Sign-In on iOS, and Google Sign-In on Android. We receive only the opaque user identifier the provider supplies. We do not access your Apple ID or Google password.",
   },
   {
     term: "Display name",
@@ -42,7 +42,7 @@ const collected = [
   },
   {
     term: "Push notification token (APNs / FCM)",
-    def: "Registered with our server to deliver push notifications about race and challenge updates — Apple Push Notification service on iOS, Firebase Cloud Messaging on Android. Stored only while notifications are enabled.",
+    def: "Registered with our server to deliver push notifications about race and challenge updates. We use Apple Push Notification service on iOS and Firebase Cloud Messaging on Android. Stored only while notifications are enabled.",
   },
 ];
 </script>
@@ -73,9 +73,9 @@ const collected = [
         <h2>Health Data</h2>
         <p>
           Bara reads your <strong>daily step count</strong> with your explicit
-          permission — from <strong>Apple HealthKit</strong> on iOS and from
+          permission. It comes from <strong>Apple HealthKit</strong> on iOS and from
           <strong>Android Health Connect</strong> on Android. We request
-          read-only access — we do not write to or modify your health data in
+          read-only access. We do not write to or modify your health data in
           any way. Your step count is synced to our server solely to display
           your daily progress and power step races and head-to-head challenges.
         </p>
@@ -89,8 +89,8 @@ const collected = [
           read your step count <strong>in the background</strong>: on iOS via
           periodic background app refresh, and on Android via Health Connect's
           background-read permission, which you grant separately and can revoke
-          at any time. Background reads collect the same single data type — your
-          daily step count — and nothing else.
+          at any time. Background reads collect the same single data type and
+          nothing else. That single type is your daily step count.
         </p>
         <p>
           You can revoke health access at any time: on <strong>iOS</strong> in
@@ -114,7 +114,7 @@ const collected = [
           Google Sign-In on Android. When you sign in, the provider gives us an
           opaque user identifier and, if you choose to share it, an email
           address. With Apple's "Hide My Email," we receive only Apple's relay
-          address — we never see your real email. We do not access your Apple ID
+          address. We never see your real email. We do not access your Apple ID
           or Google password. The two providers are independent identities; an
           Apple account and a Google account are not automatically linked, even
           if they use the same email address.
@@ -135,7 +135,7 @@ const collected = [
         <p>
           Your step count, display name, and profile photo (if you add one) are
           visible to friends you've accepted in the app and to participants in
-          races you join. This is necessary for the challenge feature — if
+          races you join. This is necessary for the challenge feature. If
           you're in a head-to-head challenge, your opponent can see your step
           progress for that week. We do not sell or rent your personal data, and
           outside of the advertising partner described in the "Advertising"

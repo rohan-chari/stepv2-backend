@@ -21,7 +21,7 @@ const questions = [
   },
   {
     q: "Not receiving challenge notifications?",
-    html: "On <strong>iOS</strong>: Settings → Notifications → Bara, and make sure notifications are allowed. On <strong>Android</strong>: Settings → Apps → Bara → Notifications. If you previously denied them, you'll need to enable them from Settings — the app won't ask again.",
+    html: "On <strong>iOS</strong>: Settings → Notifications → Bara, and make sure notifications are allowed. On <strong>Android</strong>: Settings → Apps → Bara → Notifications. If you previously denied them, you'll need to enable them from Settings. The app won't ask again.",
   },
   {
     q: "Can't find a friend?",
@@ -51,7 +51,7 @@ const questions = [
       <p
         class="mt-5 mb-12 font-body text-lg leading-relaxed text-[var(--paper-muted)]"
       >
-        Questions, feedback, or a bug on the trail — all welcome. Email
+        Questions, feedback, or a bug on the trail. All welcome. Email
         <a
           class="font-medium text-[var(--paper-foreground)] underline decoration-[var(--primary)] decoration-2 underline-offset-4"
           href="mailto:support@barastep.com?subject=Bara%20Support"

@@ -3,17 +3,12 @@ import SiteHeader from "@/components/SiteHeader.vue";
 import SiteFooter from "@/components/SiteFooter.vue";
 import WaitlistForm from "@/components/WaitlistForm.vue";
 import ReviewsMarquee from "@/components/ReviewsMarquee.vue";
+import PowerupReel from "@/components/PowerupReel.vue";
 import GooglePlayMark from "@/components/GooglePlayMark.vue";
 import { Button } from "@/components/ui/button";
 import appStoreBadge from "@/assets/app-store-badge.svg";
 import capySprite from "@/assets/capybara_walk_right.png";
 import trailGround from "@/assets/trail_ground.png";
-import runnersHigh from "@/assets/runners_high.png";
-import wrongTurn from "@/assets/wrong_turn.png";
-import proteinShake from "@/assets/protein_shake.png";
-import stealthMode from "@/assets/stealth_mode.png";
-import trailMine from "@/assets/trail_mine.png";
-import rainstorm from "@/assets/rainstorm.png";
 
 // Page order: hero -> the trail, walked by the game's real sprite on the game's
 // real ground -> 5-star App Store reviews -> the powerups -> the Android
@@ -41,18 +36,8 @@ const APP_STORE_URL =
 //                    the feet sink a pixel into the grass rather than skim it)
 // Re-measure both if either asset is ever replaced.
 
-// The six powerups, with the app's real art. `effect` is the backend's own
-// catalog copy (src/modules/powerups/constants/powerupCopySeed.js), lightly
-// trimmed for a marketing page — so the site can't promise a duration the game
-// doesn't actually apply.
-const powerups = [
-  { art: runnersHigh, name: "Runner's High", effect: "2x your steps for an hour." },
-  { art: wrongTurn, name: "Wrong Turn", effect: "Reverse a rival's steps for an hour." },
-  { art: proteinShake, name: "Protein Shake", effect: "+1,500 bonus steps, instantly." },
-  { art: stealthMode, name: "Stealth Mode", effect: "Hide your name, steps, and position for an hour." },
-  { art: trailMine, name: "Trail Mine", effect: "Buries a trap at your step count. It goes off on the first rival to cross it." },
-  { art: rainstorm, name: "Rainstorm", effect: "Everyone else's steps count for half for an hour." },
-];
+// The six powerups, their art and their copy now live in PowerupReel.vue —
+// the mystery-box reel lifted from the app's case-opening screen.
 </script>
 
 <template>
@@ -66,7 +51,7 @@ const powerups = [
         <h1
           class="max-w-4xl font-wordmark text-[clamp(2.6rem,8vw,5.5rem)] leading-[0.98] tracking-[0.01em] text-paper-foreground"
         >
-          Step challenges are more fun when you can steal steps from someone.
+          Step challenges are more fun when you can steal someone’s steps.
         </h1>
 
         <p
@@ -92,7 +77,7 @@ const powerups = [
             />
           </a>
           <Button as="a" href="#android" variant="paper" size="lg" class="self-start">
-            Android — join the waitlist
+            Join the Android waitlist
           </Button>
         </div>
       </div>
@@ -130,30 +115,7 @@ const powerups = [
           The rest slows your friends down.
         </p>
 
-        <ul class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <li
-            v-for="p in powerups"
-            :key="p.name"
-            class="flex items-start gap-4 rounded-lg border border-paper-border bg-paper-raised p-5"
-          >
-            <img
-              :src="p.art"
-              alt=""
-              width="56"
-              height="56"
-              loading="lazy"
-              class="pixel size-14 shrink-0"
-            />
-            <div>
-              <p class="font-display text-lg font-bold text-paper-foreground">
-                {{ p.name }}
-              </p>
-              <p class="mt-1 font-body text-sm leading-relaxed text-paper-muted">
-                {{ p.effect }}
-              </p>
-            </div>
-          </li>
-        </ul>
+        <PowerupReel />
       </div>
     </section>
 
@@ -175,7 +137,7 @@ const powerups = [
           </h2>
           <p class="mb-8 font-body text-lg leading-relaxed text-paper-muted">
             Bara is on iPhone today. Leave your email and we'll tell you the day
-            the Android app is ready — nothing else, ever.
+            the Android app is ready. Nothing else, ever.
           </p>
 
           <WaitlistForm />

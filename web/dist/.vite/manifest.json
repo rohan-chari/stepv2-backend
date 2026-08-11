@@ -1,42 +1,42 @@
 {
-  "_SiteFooter-CME6RWqh.js": {
-    "file": "web-assets/SiteFooter-CME6RWqh.js",
+  "_SiteFooter-CIDCqbHD.css": {
+    "file": "web-assets/SiteFooter-CIDCqbHD.css",
+    "src": "_SiteFooter-CIDCqbHD.css"
+  },
+  "_SiteFooter-DbVVm98m.js": {
+    "file": "web-assets/SiteFooter-DbVVm98m.js",
     "name": "SiteFooter",
     "css": [
-      "web-assets/SiteFooter-IiNr25t3.css"
+      "web-assets/SiteFooter-CIDCqbHD.css"
     ]
   },
-  "_SiteFooter-IiNr25t3.css": {
-    "file": "web-assets/SiteFooter-IiNr25t3.css",
-    "src": "_SiteFooter-IiNr25t3.css"
-  },
   "index.html": {
-    "file": "web-assets/index-DdFjwIDq.js",
+    "file": "web-assets/index-DRGF1SJe.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
     "imports": [
-      "_SiteFooter-CME6RWqh.js"
+      "_SiteFooter-DbVVm98m.js"
     ],
     "assets": [
-      "web-assets/app-store-badge-CVyK0T4N.svg",
-      "web-assets/capybara_walk_right-zO7gPMEH.png",
-      "web-assets/trail_ground-IvNzw0ZZ.png",
       "web-assets/runners_high-CKr9XeFl.png",
       "web-assets/wrong_turn-8wsZKMY2.png",
       "web-assets/protein_shake-7P-rkKVZ.png",
       "web-assets/stealth_mode-Dmz-uV7g.png",
       "web-assets/trail_mine-Cqqu5wWD.png",
-      "web-assets/rainstorm-DPzTxPEp.png"
+      "web-assets/rainstorm-DPzTxPEp.png",
+      "web-assets/app-store-badge-CVyK0T4N.svg",
+      "web-assets/capybara_walk_right-zO7gPMEH.png",
+      "web-assets/trail_ground-IvNzw0ZZ.png"
     ]
   },
   "privacy.html": {
-    "file": "web-assets/privacy-COexTM4T.js",
+    "file": "web-assets/privacy-BxkbWDoF.js",
     "name": "privacy",
     "src": "privacy.html",
     "isEntry": true,
     "imports": [
-      "_SiteFooter-CME6RWqh.js"
+      "_SiteFooter-DbVVm98m.js"
     ]
   },
   "src/assets/app-store-badge.svg": {
@@ -76,12 +76,12 @@
     "src": "src/assets/wrong_turn.png"
   },
   "support.html": {
-    "file": "web-assets/support-r23Rf-Hn.js",
+    "file": "web-assets/support-23hrKits.js",
     "name": "support",
     "src": "support.html",
     "isEntry": true,
     "imports": [
-      "_SiteFooter-CME6RWqh.js"
+      "_SiteFooter-DbVVm98m.js"
     ]
   }
 }
