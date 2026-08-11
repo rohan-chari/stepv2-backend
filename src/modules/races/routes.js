@@ -56,6 +56,9 @@ const {
   rerollMysteryBox: defaultRerollMysteryBox,
 } = require("../powerups");
 const {
+  rerollMysteryBoxBatch: defaultRerollMysteryBoxBatch,
+} = require("../powerups");
+const {
   redeemPowerupToRace: defaultRedeemPowerupToRace,
 } = require("../powerups");
 const { getRaces: defaultGetRaces } = require("./queries/getRaces");
@@ -160,6 +163,8 @@ function createRacesRouter(dependencies = {}) {
     dependencies.openMysteryBoxBatch || defaultOpenMysteryBoxBatch;
   const rerollMysteryBox =
     dependencies.rerollMysteryBox || defaultRerollMysteryBox;
+  const rerollMysteryBoxBatch =
+    dependencies.rerollMysteryBoxBatch || defaultRerollMysteryBoxBatch;
   const redeemPowerupToRace =
     dependencies.redeemPowerupToRace || defaultRedeemPowerupToRace;
   const getRaceInventory =
@@ -668,7 +673,12 @@ function createRacesRouter(dependencies = {}) {
         req.releaseChannel,
         // Batch 2026-08-08 item 11: only a build that can actually show a
         // rewarded ad may be told the box-reroll button exists.
-        req.clientFeatures?.has("ads") ?? false
+        req.clientFeatures?.has("ads") ?? false,
+        // Batch 2026-08-10b item 2: the discard coin cap is per LOCAL day.
+        // Prefer the user's STORED zone (sticky-written by requireAuth) over
+        // the per-request header, exactly as the discard route does, so the cap
+        // can't be widened by spoofing X-Timezone.
+        req.user.timezone || req.timeZone || null
       );
       res.json({ progress });
     } catch (error) {
@@ -838,6 +848,42 @@ function createRacesRouter(dependencies = {}) {
           .json({ error: error.message, ...(error.code ? { code: error.code } : {}) });
       }
       console.error("Reroll mystery box error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // POST /races/:raceId/powerups/reroll-batch — batch 2026-08-10b item 1.
+  // ONE rewarded-ad watch re-rolls EVERY eligible box from an Open All batch.
+  //
+  // Routing note: this is safe alongside `/:raceId/powerups/:powerupId/reroll`
+  // because every parameterized powerup route carries a further path segment
+  // and no bare `POST /:raceId/powerups/:powerupId` route exists — verified
+  // before adding, since a bare one would shadow this literal path.
+  router.post("/:raceId/powerups/reroll-batch", async (req, res) => {
+    try {
+      const result = await rerollMysteryBoxBatch({
+        userId: req.user.id,
+        raceId: req.params.raceId,
+        powerupIds: req.body?.powerupIds,
+        displayName: req.user.displayName,
+        // The ad grant is keyed on the WATCHER's local date. Prefer the stored
+        // zone (sticky-written by requireAuth) over the spoofable header, same
+        // as the single reroll. `localDate` in the body is OPTIONAL.
+        timeZone: req.user.timezone || req.timeZone || null,
+        localDate: req.body?.localDate,
+        // Same wave-5 compat gate as /open and the single reroll — REROLL ALL
+        // must not be a way to land a type the requesting binary cannot use.
+        supportsPowerups5: req.clientFeatures?.has("powerups5") ?? false,
+      });
+      res.json(result);
+    } catch (error) {
+      if (error.name === "PowerupRerollBatchError") {
+        const status = error.statusCode || 400;
+        return res
+          .status(status)
+          .json({ error: error.message, ...(error.code ? { code: error.code } : {}) });
+      }
+      console.error("Reroll mystery box batch error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });

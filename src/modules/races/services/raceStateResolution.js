@@ -5,7 +5,10 @@ const { StepSample } = require("../../steps/models/stepSample");
 const { RaceActiveEffect } = require("../../powerups/models/raceActiveEffect");
 const { RacePowerupEvent } = require("../../powerups/models/racePowerupEvent");
 const { GlobalStepEvent } = require("../../steps/models/globalStepEvent");
-const { computeEffectModifiers } = require("./effectiveStepScoring");
+const {
+  computeEffectModifiers,
+  umbrellaAdjustedRainstorms,
+} = require("./effectiveStepScoring");
 const {
   signedMultiplierAt,
   multiplierBoundaries,
@@ -272,6 +275,21 @@ async function calculateCurrentTotal({
     const m = Number((e.metadata || {}).multiplier);
     return Number.isFinite(m) && m < 1;
   });
+  // Batch 2026-08-10b item 6 / architect R9 — the rainstorm windows handed to
+  // finish-time interpolation must be UMBRELLA-ADJUSTED, exactly like the ones
+  // computeEffectModifiers just scored with. Until now this returned the raw
+  // `byType.RAINSTORM` list and dropped `umbrellas` on the floor, so an
+  // umbrella'd racer's finish-time multiplier was already wrong by a
+  // subtractive 0.5; once the storm is multiplicative it would have been wrong
+  // by a FACTOR on a buffed racer. Same helper, same nowMs, so display and
+  // settlement agree by construction.
+  const umbrellaNowMs = (now ? new Date(now) : new Date()).getTime();
+  const effectiveRainstorms = umbrellaAdjustedRainstorms(
+    rainstorms,
+    umbrellas,
+    umbrellaNowMs
+  );
+
   return {
     total,
     leechTransfers,
@@ -279,7 +297,7 @@ async function calculateCurrentTotal({
     runnersHighs,
     wrongTurns,
     campfires,
-    rainstorms,
+    rainstorms: effectiveRainstorms,
     uprisings,
     rallyFlags,
     coinFlipWins,

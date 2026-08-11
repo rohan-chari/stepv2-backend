@@ -362,4 +362,16 @@ function buildRerollMysteryBox(dependencies = {}) {
 
 const rerollMysteryBox = buildRerollMysteryBox();
 
-module.exports = { buildRerollMysteryBox, rerollMysteryBox, PowerupRerollError };
+module.exports = {
+  buildRerollMysteryBox,
+  rerollMysteryBox,
+  PowerupRerollError,
+  // Batch 2026-08-10b item 1 — shared with rerollMysteryBoxBatch.js. EXPORTED
+  // rather than copy-pasted on purpose: three divergent copies of a date guard
+  // is the shape of the renderMetadata incident.
+  isValidLocalDate,
+  withinOneDayOfServer,
+  adjacentDates,
+  localDateFor,
+  resolveNullRoll,
+};

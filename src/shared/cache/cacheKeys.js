@@ -27,6 +27,8 @@ const PREFIX = {
   USER_DAILY: "v1:user:daily",
   USER_INVENTORY: "v1:user:inventory",
   USER_RECENT_MINTS: "v1:user:recentmints",
+  // Batch 2026-08-10b item 2: the viewer's remaining daily discard-coin cap.
+  USER_DISCARD_CAP: "v1:user:discardcap",
   // C5 (spec §3): the assembled `/auth/me` response.
   USER_AUTHME: "v1:user:authme",
 };
@@ -188,6 +190,16 @@ function userRecentMints(userId) {
   return `${PREFIX.USER_RECENT_MINTS}:${userId}`;
 }
 
+// ── C4: the user's remaining daily discard-coin cap ─────────────────────────
+// Batch 2026-08-10b item 2. Keyed on `userId` ALONE — deliberately NO localDate
+// component (architect S2): at a 60s TTL a date component buys nothing, and it
+// would introduce a JS-local-date vs SQL-local-day disagreement right at
+// midnight, which is the one moment the value changes. The TTL self-heals the
+// rollover. Invalidated at the one write seam that can move it (discardPowerup).
+function userDiscardCap(userId) {
+  return `${PREFIX.USER_DISCARD_CAP}:${userId}`;
+}
+
 // ── C5: the assembled `/auth/me` response ───────────────────────────────────
 // One variant axis, and only one: `withRuntimeFlags` OMITS
 // `featureFlags.stepSampleBucketMinutes` for builds below
@@ -215,6 +227,7 @@ module.exports = {
   userDaily,
   userInventory,
   userRecentMints,
+  userDiscardCap,
   userAuthMe,
   userAuthMeVariants,
   raceProgress,

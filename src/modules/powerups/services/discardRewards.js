@@ -57,6 +57,15 @@ function priceFor({ status, rarity, config }) {
 //
 // Backed by coin_transactions(user_id, reason, created_at) — without that index
 // this sums a heavy user's entire ledger on every discard.
+// The `created_at >= now() - interval '3 days'` pre-filter is REQUIRED
+// (architect R6), not an optimization detail. The tz-date equality below wraps
+// `created_at` in an expression, which defeats range pruning on
+// coin_transactions(user_id, reason, created_at): without the pre-filter this
+// scans every `powerup_discard` row the user has ever accumulated. That was
+// tolerable on a button press; batch 2026-08-10b puts the same query behind
+// `GET /races/:id/progress`, the hottest endpoint on a one-vCPU box, and a memo
+// does not help the users with the longest ledgers. 3 days is a wide margin
+// over the ~26h any local calendar day can be away from UTC.
 async function consumedToday({ prisma, userId, timezone }) {
   const zone = timezone || DEFAULT_ZONE;
   const rows = await prisma.$queryRaw`
@@ -64,9 +73,29 @@ async function consumedToday({ prisma, userId, timezone }) {
     FROM coin_transactions
     WHERE user_id = ${userId}
       AND reason = ${DISCARD_REASON}
+      AND created_at >= now() - interval '3 days'
       AND (created_at AT TIME ZONE 'UTC' AT TIME ZONE ${zone})::date
         = (now() AT TIME ZONE ${zone})::date`;
   return Number(rows?.[0]?.consumed ?? 0);
+}
+
+// Headroom left on the user's daily discard-coin cap, right now, in their local
+// day. Batch 2026-08-10b item 2: `getRaceProgress` serves this as
+// `powerupData.discardCapRemaining` so the confirm dialog knows the cap BEFORE
+// the first discard of a screen visit (it previously only learned it FROM a
+// discard response, and so lied exactly once per visit).
+//
+// Extracted rather than re-derived: there must be exactly ONE implementation of
+// the day-boundary SQL. Prod datetimes are tz-naive and node-pg shifts them, so
+// computing the local day in JS is how this silently drifts by a day.
+async function discardCapRemainingFor({
+  userId,
+  timezone,
+  prisma: injectedPrisma,
+} = {}) {
+  const client = injectedPrisma || defaultPrisma;
+  const consumed = await consumedToday({ prisma: client, userId, timezone });
+  return Math.max(0, discardDailyCap() - consumed);
 }
 
 function buildDiscardRewards(dependencies = {}) {
@@ -118,6 +147,7 @@ module.exports = {
   computeDiscardAward,
   priceFor,
   discardDailyCap,
+  discardCapRemainingFor,
   DISCARD_REASON,
   DEFAULT_DAILY_CAP,
 };

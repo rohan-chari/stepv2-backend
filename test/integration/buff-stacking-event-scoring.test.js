@@ -296,6 +296,118 @@ describe("buff stacking (sum) + signed event scoring — integration", () => {
     assert.equal(snapshot.finishedAt.toISOString(), "2026-04-07T10:25:00.000Z");
   });
 
+  // ── Batch 2026-08-10b item 6 — RAINSTORM is MULTIPLICATIVE ──────────────
+  //
+  // Behind RAINSTORM_MULTIPLICATIVE_ENABLED (default "false", read at call
+  // time). Scenario 10 above pins the unbuffed case, which is bit-identical in
+  // both flag states; these pin the buffed case end-to-end through the HTTP
+  // response a client actually receives.
+  const RAIN_FLAG = "RAINSTORM_MULTIPLICATIVE_ENABLED";
+
+  async function prodRepro(a, b, raceId) {
+    // DrAmogh's row: Rally Flag (×1.25) + Ghost Pepper boost (×3) during a 2×
+    // global step event, rainstormed. Buff sum = 4.25.
+    await giveHourlySamples(a.userId, 4, 1, 100);
+    await giveEffect(raceId, a.userId, a.userId, "GHOST_PEPPER", {
+      startsAt: alignedHoursAgo(4), expiresAt: alignedHoursAgo(2), metadata: pepperMeta(3),
+    });
+    await giveEffect(raceId, a.userId, a.userId, "RALLY_FLAG", {
+      startsAt: alignedHoursAgo(4), expiresAt: alignedHoursAgo(3), metadata: { multiplier: 1.25 },
+    });
+    await giveEffect(raceId, a.userId, b.userId, "RAINSTORM", {
+      startsAt: alignedHoursAgo(4), expiresAt: alignedHoursAgo(3), metadata: { multiplier: 0.5, stepsAtStart: 0 },
+    });
+    await createGlobalEvent({ startsAt: alignedHoursAgo(4), endsAt: alignedHoursAgo(3) });
+  }
+
+  it("item 6 ON: buffed + rainstorm halves the whole stack (4.25 → 2.125, not 3.75)", async () => {
+    process.env[RAIN_FLAG] = "true";
+    try {
+      const a = await createUser("A13"); const b = await createUser("B13");
+      await makeFriends(a, b);
+      const raceId = await createActiveRace(a, [b]);
+      await prodRepro(a, b, raceId);
+      const prog = await getProgress(a.token, raceId);
+      // rate 4.25 × 0.5 = 2.125; × 2 event = 4.25 → 100 walked steps score 425.
+      assert.equal(boardSteps(prog, a.userId), 425, "2.125 rate × 2x event");
+    } finally {
+      delete process.env[RAIN_FLAG];
+    }
+  });
+
+  it("item 6 OFF (deploy default): the same race keeps today's subtractive 3.75", async () => {
+    delete process.env[RAIN_FLAG];
+    const a = await createUser("A14"); const b = await createUser("B14");
+    await makeFriends(a, b);
+    const raceId = await createActiveRace(a, [b]);
+    await prodRepro(a, b, raceId);
+    const prog = await getProgress(a.token, raceId);
+    // 4.25 − 0.5 = 3.75; × 2 event = 7.5 → 750. This is the bug, shipped OFF.
+    assert.equal(boardSteps(prog, a.userId), 750, "flag off == byte-identical to today");
+  });
+
+  it("item 6 ON: settlement matches the live buffed-storm total", async () => {
+    process.env[RAIN_FLAG] = "true";
+    try {
+      const a = await createUser("A15"); const b = await createUser("B15");
+      await makeFriends(a, b);
+      const raceId = await createActiveRace(a, [b]);
+      await prodRepro(a, b, raceId);
+      const live = boardSteps(await getProgress(a.token, raceId), a.userId);
+      assert.equal(live, 425);
+      await prisma.race.update({ where: { id: raceId }, data: { endsAt: new Date(Date.now() - 60 * 1000) } });
+      await resolveExpiredRaces();
+      const settled = await participant(raceId, a.userId);
+      assert.equal(settled.totalSteps, live, "settled == live (no divergence)");
+    } finally {
+      delete process.env[RAIN_FLAG];
+    }
+  });
+
+  it("item 6 ON: an unbuffed rainstormed racer is bit-identical to scenario 10", async () => {
+    process.env[RAIN_FLAG] = "true";
+    try {
+      const a = await createUser("A16"); const b = await createUser("B16");
+      await makeFriends(a, b);
+      const raceId = await createActiveRace(a, [b]);
+      await giveHourlySamples(a.userId, 4, 1, 100);
+      await giveEffect(raceId, a.userId, b.userId, "RAINSTORM", {
+        startsAt: alignedHoursAgo(4), expiresAt: alignedHoursAgo(3), metadata: { multiplier: 0.5, stepsAtStart: 0 },
+      });
+      await createGlobalEvent({ startsAt: alignedHoursAgo(4), endsAt: alignedHoursAgo(3) });
+      const prog = await getProgress(a.token, raceId);
+      assert.equal(boardSteps(prog, a.userId), 100, "M=1 unbuffed: unchanged by the fix");
+    } finally {
+      delete process.env[RAIN_FLAG];
+    }
+  });
+
+  it("item 6 ON: an umbrella'd victim is protected while it is up and halved after", async () => {
+    process.env[RAIN_FLAG] = "true";
+    try {
+      const a = await createUser("A17"); const b = await createUser("B17");
+      await makeFriends(a, b);
+      const raceId = await createActiveRace(a, [b]);
+      // Two walked hours; the umbrella covers only the first.
+      await giveHourlySamples(a.userId, 5, 2, 100); // [5h,4h) and [4h,3h)
+      await giveEffect(raceId, a.userId, a.userId, "RUNNERS_HIGH", {
+        startsAt: alignedHoursAgo(5), expiresAt: alignedHoursAgo(3), metadata: {},
+      });
+      await giveEffect(raceId, a.userId, b.userId, "RAINSTORM", {
+        startsAt: alignedHoursAgo(5), expiresAt: alignedHoursAgo(3), metadata: { multiplier: 0.5, stepsAtStart: 0 },
+      });
+      await giveEffect(raceId, a.userId, a.userId, "UMBRELLA", {
+        startsAt: alignedHoursAgo(5), expiresAt: alignedHoursAgo(4), metadata: {},
+      });
+      const prog = await getProgress(a.token, raceId);
+      // hour 1: RH 2x, umbrella cancels the rain → 200.
+      // hour 2: RH 2x halved → 1x → 100. (Old rule: 2 − 0.5 = 1.5 → 150.)
+      assert.equal(boardSteps(prog, a.userId), 300, "200 + 100");
+    } finally {
+      delete process.env[RAIN_FLAG];
+    }
+  });
+
   // 12. No-effects regression: with and without an event → plain 1x / 2x.
   it("no effects: 1x without event, 2x with event", async () => {
     const a = await createUser("A12"); const b = await createUser("B12");
