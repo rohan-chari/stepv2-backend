@@ -88,3 +88,21 @@ test("not-found page renders a friendly 404 body", () => {
   assert.match(html, /<!DOCTYPE html>/i);
   assert.match(html, /not found|no longer/i);
 });
+
+// The wordmark lockup. wordmarkParity.test.js proves the two SOURCE copies
+// agree; this proves the shell actually renders one — a dropped
+// ${theme.WORDMARK_STYLES} or ${theme.wordmarkHtml()} interpolation would
+// otherwise ship an unstyled or missing logo with every test still green.
+test("landing pages render the Bara wordmark lockup", () => {
+  for (const html of [
+    renderRaceLandingPage(makePreview(), links),
+    renderRaceNotFoundPage(links),
+  ]) {
+    assert.match(html, /aria-label="Bara: Step Challenges"/);
+    assert.match(html, /\/icon-192\.png/);
+    // The styles must be injected too, not just the markup.
+    assert.match(html, /\.wordmark-text \{ font-family:var\(--font-wordmark\)/);
+    // And the face itself must actually be requested.
+    assert.match(html, /Jersey\+25/);
+  }
+});

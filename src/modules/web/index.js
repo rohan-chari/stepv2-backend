@@ -1,7 +1,8 @@
 // Public interface of the web module (audit Phase 9d): deep-link verification
 // files, share landing pages, the sharing config surface (share URLs + store
-// links) that the share-link routes and app-version gate consume, and the
-// Android waitlist router behind the marketing site's capture form.
+// links) that the share-link routes and app-version gate consume, and the two
+// public browser-facing routers the marketing site calls: the Android waitlist
+// capture form and the App Store review feed.
 //
 // ./theme.js is deliberately NOT re-exported here: its two consumers (the two
 // landing-page shells) require it directly, and the marketing site reads it
@@ -25,9 +26,11 @@ const {
 } = require("./tournamentLandingPage");
 const sharing = require("./sharing");
 const { createWaitlistRouter } = require("./waitlist/router");
+const { createReviewsRouter } = require("./reviews/router");
 
 module.exports = {
   createWaitlistRouter,
+  createReviewsRouter,
   buildAppleAppSiteAssociation,
   buildAssetLinks,
   renderRaceLandingPage,

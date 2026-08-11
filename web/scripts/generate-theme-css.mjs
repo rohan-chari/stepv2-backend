@@ -38,6 +38,7 @@ const css = `/* GENERATED FILE — DO NOT EDIT.
 
 :root {
 ${tokenLines}
+  --font-wordmark: ${theme.FONT_WORDMARK};
   --font-display: ${theme.FONT_DISPLAY};
   --font-body: ${theme.FONT_BODY};
   --font-mono: ${theme.FONT_MONO};
@@ -80,6 +81,7 @@ ${tokenLines}
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);
 
+  --font-wordmark: var(--font-wordmark);
   --font-display: var(--font-display);
   --font-body: var(--font-body);
   --font-mono: var(--font-mono);

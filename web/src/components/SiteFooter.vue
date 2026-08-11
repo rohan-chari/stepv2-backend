@@ -8,6 +8,7 @@
 // production client build strips template comments, which would desync
 // hydration on every page that renders this footer.
 import capySprite from "@/assets/capybara_walk_right.png";
+import BaraWordmark from "@/components/BaraWordmark.vue";
 </script>
 
 <template>
@@ -28,7 +29,7 @@ import capySprite from "@/assets/capybara_walk_right.png";
       <div
         class="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between"
       >
-        <p class="font-display text-xl font-extrabold text-foreground">Bara</p>
+        <BaraWordmark size="sm" />
 
         <nav class="flex flex-wrap items-center gap-x-5 gap-y-2" aria-label="Footer">
           <a

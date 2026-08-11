@@ -39,6 +39,7 @@ const {
   renderTournamentLandingPage,
   renderTournamentNotFoundPage,
   createWaitlistRouter,
+  createReviewsRouter,
   sharing,
 } = require("./modules/web");
 const {
@@ -312,6 +313,12 @@ function createApp(dependencies = {}) {
   // Public + unauthenticated: the caller is a browser on barastep.com, not the
   // app. Mounted before the static handlers so /waitlist/* can never be shadowed.
   app.use("/waitlist", createWaitlistRouter(dependencies));
+
+  // ── App Store reviews (marketing site review strip) ───────────────────────
+  // Same shape: public, browser-only, mounted ahead of the static handlers.
+  // Proxies Apple's public review feed so the site needs no third-party widget
+  // script — see src/modules/web/reviews/appStoreReviews.js.
+  app.use("/reviews", createReviewsRouter(dependencies));
 
   // ── CDN-served art ────────────────────────────────────────────────────────
   // The manifest MUST be registered before the static middleware, otherwise

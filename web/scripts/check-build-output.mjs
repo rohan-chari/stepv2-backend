@@ -39,7 +39,7 @@ if (existsSync(join(distDir, "assets"))) {
 // is skipped or silently fails, /privacy (the App Store listing's URL) becomes
 // a blank page that still returns 200, which is invisible in any status check.
 const REQUIRED_PROSE = {
-  "index.html": "Your steps are",
+  "index.html": "steal steps from someone",
   "privacy.html": "we do not write to or modify your health data",
   "support.html": "Common trail troubles",
 };
@@ -79,6 +79,55 @@ for (const page of ["index.html", "privacy.html", "support.html"]) {
   if (!html.includes('href="/apple-touch-icon.png"')) {
     problems.push(`dist/${page} is missing its apple-touch-icon link.`);
   }
+  // The wordmark is set in Jersey 25 — the app's own title face — which is
+  // fetched from Google Fonts via theme.FONT_LINK_TAGS. If that request line
+  // ever loses the family, the wordmark silently falls back to Bricolage and
+  // the site stops matching the app, with nothing else breaking to signal it.
+  if (!html.includes("Jersey+25")) {
+    problems.push(
+      `dist/${page} does not request the Jersey 25 webfont — the wordmark would ` +
+        `fall back to the display face. Check FONT_LINK_TAGS in theme.js.`
+    );
+  }
+
+  // The review belt animates translateX(0 -> -50%), which is seamless ONLY if
+  // the track is exactly two identical halves. Get that wrong and it scrolls
+  // partway and hard-resets — visible on every loop, and invisible to every
+  // test that only asks whether reviews are present. Checked on the SHIPPED
+  // html because that is the artifact that has to be right.
+  if (page === "index.html") {
+    const track = html.match(/<div class="marquee"[^>]*>([\s\S]*?)<\/div><\/div>/);
+    if (!track) {
+      problems.push(
+        "dist/index.html has no review marquee track — the strip would be missing entirely."
+      );
+    } else {
+      const cards = track[1].split('<div class="mr-4').slice(1);
+      if (cards.length < 2 || cards.length % 2 !== 0) {
+        problems.push(
+          `dist/index.html marquee has ${cards.length} cards — it must be an EVEN ` +
+            `count (two identical halves) or the -50% loop visibly snaps.`
+        );
+      } else {
+        // Strip Vue's SSR fragment anchors (<!--[-->, <!--]-->, <!---->) before
+        // comparing: renderToString brackets a v-for list with them, so the
+        // LAST card of the track carries a closing anchor the middle card does
+        // not. That is hydration machinery, not content, and comparing it would
+        // make this guard fail on a perfectly correct track.
+        const strip = (s) => s.replace(/<!--(\[|\]|)-->/g, "");
+        const half = cards.length / 2;
+        const first = strip(cards.slice(0, half).join(""));
+        const second = strip(cards.slice(half).join(""));
+        if (first !== second) {
+          problems.push(
+            "dist/index.html marquee's two halves differ — the -50% loop will jump. " +
+              "The track must be one list rendered exactly twice."
+          );
+        }
+      }
+    }
+  }
+
   const themeColor = html.match(/<meta name="theme-color" content="([^"]+)"/);
   if (!themeColor) {
     problems.push(`dist/${page} is missing its theme-color meta.`);

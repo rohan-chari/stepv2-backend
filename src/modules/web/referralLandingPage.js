@@ -77,8 +77,7 @@ function shell({ title, description, body, links, showCta, scriptBody }) {
 
     .trail-sign { text-align:center; }
     .trail-sign .board-sign { padding:0 0 2px; }
-    .trail-sign h1 { font-family:var(--font-display); font-weight:800; font-size:2.4rem;
-      letter-spacing:-0.03em; color:var(--foreground); }
+    ${theme.WORDMARK_STYLES}
     .trail-sign .post { width:2px; height:34px; margin:10px auto 0;
       background-image:repeating-linear-gradient(to bottom, var(--border) 0 6px, transparent 6px 12px); }
 
@@ -124,7 +123,6 @@ function shell({ title, description, body, links, showCta, scriptBody }) {
     .store-btn-disabled:active { transform:none; box-shadow:none; }
 
     @media (max-width:500px){
-      .trail-sign h1 { font-size:2rem; }
       .content { padding:40px 16px 48px; gap:18px; }
     }
 
@@ -146,7 +144,7 @@ function shell({ title, description, body, links, showCta, scriptBody }) {
   <div class="sky"></div>
   <div class="clouds"><div class="cloud"></div><div class="cloud"></div><div class="cloud"></div></div>
   <main class="content">
-    <div class="trail-sign"><div class="board-sign"><h1>Bara</h1></div><div class="post"></div></div>
+    <div class="trail-sign"><div class="board-sign">${theme.wordmarkHtml()}</div><div class="post"></div></div>
     <div class="board"><div class="board-inner">${body}</div></div>
     ${ctaBlock}
     <div class="store-buttons">
@@ -200,7 +198,7 @@ function renderReferralLandingPage(preview, links) {
     <div class="section">You're Invited</div>
     <div class="invite-body">
       ${avatar}
-      <div class="invite-name">${escapeHtml(inviterName)} invited you to Bara</div>
+      <h1 class="invite-name">${escapeHtml(inviterName)} invited you to Bara</h1>
       <div class="invite-sub">Finish a race with friends — you both earn coins. Daily &amp; weekly challenges don't count.</div>
     </div>
   `;
@@ -212,7 +210,7 @@ function renderReferralNotFoundPage(links) {
   const body = `
     <div class="section">Invite not found</div>
     <div class="invite-body">
-      <div class="invite-name">This invite link is no longer valid</div>
+      <h1 class="invite-name">This invite link is no longer valid</h1>
       <div class="invite-sub">Download Bara to start racing with friends.</div>
     </div>
   `;

@@ -46,7 +46,7 @@ function renderTournamentLandingPage(preview, links) {
   const body = `
     <div class="section">Bracket Tournament</div>
     <div class="invite-body">
-      <div class="invite-name">${escapeHtml(hostName)} invited you to a tournament</div>
+      <h1 class="invite-name">${escapeHtml(hostName)} invited you to a tournament</h1>
       <div class="invite-sub">${escapeHtml(preview.name)} · ${escapeHtml(bracketLine)}</div>
     </div>
   `;
@@ -60,7 +60,7 @@ function renderTournamentNotFoundPage(links) {
   const body = `
     <div class="section">Tournament not found</div>
     <div class="invite-body">
-      <div class="invite-name">This tournament link is no longer valid</div>
+      <h1 class="invite-name">This tournament link is no longer valid</h1>
       <div class="invite-sub">Download Bara to start your own bracket.</div>
     </div>
   `;

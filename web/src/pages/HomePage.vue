@@ -2,7 +2,10 @@
 import SiteHeader from "@/components/SiteHeader.vue";
 import SiteFooter from "@/components/SiteFooter.vue";
 import WaitlistForm from "@/components/WaitlistForm.vue";
+import PhoneMockup from "@/components/PhoneMockup.vue";
+import ReviewsMarquee from "@/components/ReviewsMarquee.vue";
 import { Button } from "@/components/ui/button";
+import appStoreBadge from "@/assets/app-store-badge.svg";
 import capySprite from "@/assets/capybara_walk_right.png";
 import coin from "@/assets/coin.png";
 import trailMine from "@/assets/trail_mine.png";
@@ -12,7 +15,8 @@ import shortcut from "@/assets/shortcut.png";
 import signalJammer from "@/assets/signal_jammer.png";
 import luckyHorseshoe from "@/assets/lucky_horseshoe.png";
 
-// Page order: hero (the thesis — your steps are a race) -> the trail, where the
+// Page order: hero (the thesis — stealing steps is the hook, with a phone
+// showing it happen) -> real 5-star App Store reviews -> the trail, where the
 // game's real walk sprite walks it -> how it works -> the powerups -> the
 // Android waitlist.
 //
@@ -56,38 +60,47 @@ const howItWorks = [
 
   <main class="paper">
     <section class="relative overflow-hidden">
-      <div class="mx-auto max-w-6xl px-5 pt-12 pb-6 sm:px-8 sm:pt-24">
-        <p class="eyebrow mb-5 text-paper-accent">Step challenges with friends</p>
+      <div
+        class="mx-auto grid max-w-6xl items-center gap-12 px-5 pt-12 pb-6 sm:px-8 sm:pt-20 lg:grid-cols-[1.15fr_1fr] lg:gap-16"
+      >
+        <div>
+          <p class="eyebrow mb-5 text-paper-accent">Free on iPhone</p>
 
-        <h1
-          class="max-w-4xl font-display text-[clamp(2.75rem,9vw,6.5rem)] leading-[0.92] font-extrabold tracking-[-0.035em] text-paper-foreground"
-        >
-          <span class="block">Your steps are</span>
-          <span class="block text-paper-accent">a race.</span>
-        </h1>
-
-        <p
-          class="mt-7 max-w-xl font-body text-lg leading-relaxed text-paper-muted sm:text-xl"
-        >
-          Bara turns your daily step count into a live race against your
-          friends — with mystery boxes, powerups, and every trick they can throw
-          at you.
-        </p>
-
-        <div class="mt-9 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-          <Button as="a" :href="APP_STORE_URL" size="lg" class="w-full sm:w-auto">
-            Download on iPhone
-          </Button>
-          <Button
-            as="a"
-            href="#android"
-            variant="paper"
-            size="lg"
-            class="w-full sm:w-auto"
+          <h1
+            class="max-w-3xl font-display text-[clamp(2.1rem,6.2vw,4.15rem)] leading-[1.02] font-extrabold tracking-[-0.03em] text-paper-foreground"
           >
-            Android — join the waitlist
-          </Button>
+            Step challenges are more fun when you can
+            <span class="text-paper-accent">steal steps from someone</span>
+          </h1>
+
+          <p
+            class="mt-7 max-w-xl font-body text-lg leading-relaxed text-paper-muted sm:text-xl"
+          >
+            Bara turns your daily step count into a live race against your
+            friends — with mystery boxes, powerups, and every trick they can throw
+            at you.
+          </p>
+
+          <div class="mt-9 flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-center">
+            <a
+              :href="APP_STORE_URL"
+              class="inline-block rounded-lg focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none"
+            >
+              <img
+                :src="appStoreBadge"
+                alt="Download on the App Store"
+                width="144"
+                height="48"
+                class="h-12 w-auto"
+              />
+            </a>
+            <Button as="a" href="#android" variant="paper" size="lg" class="self-start">
+              Android — join the waitlist
+            </Button>
+          </div>
         </div>
+
+        <PhoneMockup class="order-first lg:order-none" />
       </div>
 
       <div class="mx-auto max-w-6xl px-5 pt-8 pb-14 sm:px-8 sm:pb-20">
@@ -117,6 +130,8 @@ const howItWorks = [
         </div>
       </div>
     </section>
+
+    <ReviewsMarquee />
 
     <section class="border-t border-paper-border bg-paper-raised">
       <div class="mx-auto max-w-6xl px-5 py-16 sm:px-8 sm:py-20">

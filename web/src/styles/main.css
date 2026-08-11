@@ -212,6 +212,40 @@
     font-weight: 500;
   }
 
+  /* ── The review strip ──────────────────────────────────────────────────────
+     The track holds the SAME list twice. Translating it exactly -50% lands the
+     second copy precisely where the first began, so the loop point is invisible
+     and there is no snap — which is the whole trick, and why the duplicate copy
+     must be aria-hidden rather than simply repeated in the DOM.
+
+     Duration is set per-instance from the review count (--marquee-seconds), so
+     adding reviews makes the strip longer rather than faster. */
+  .marquee {
+    display: flex;
+    width: max-content;
+    animation: marquee-slide var(--marquee-seconds, 60s) linear infinite;
+  }
+
+  @keyframes marquee-slide {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(-50%);
+    }
+  }
+
+  /* Reduced motion: stop the belt and hand the user the scrollbar instead, so
+     the content is still fully reachable rather than frozen mid-sentence. */
+  @media (prefers-reduced-motion: reduce) {
+    .marquee {
+      animation: none;
+    }
+    .marquee-viewport {
+      overflow-x: auto;
+    }
+  }
+
   /* The mono "scoreboard" voice: eyebrows, ticks, nav. Steps are numbers, so
      numbers get their own face. */
   .eyebrow {

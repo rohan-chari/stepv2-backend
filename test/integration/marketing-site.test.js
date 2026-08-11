@@ -1,5 +1,5 @@
 const assert = require("node:assert/strict");
-const { describe, it, before, beforeEach } = require("node:test");
+const { describe, it, before, after, beforeEach } = require("node:test");
 const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
 
 // POST /waitlist/android — the marketing site's Android email capture.
@@ -162,7 +162,7 @@ describe("marketing site + static routes still serve", () => {
     const expectations = [
       ["/privacy", "we do not write to or modify your health data"],
       ["/support", "Common trail troubles"],
-      ["/", "Your steps are"],
+      ["/", "steal steps from someone"],
     ];
     for (const [path, prose] of expectations) {
       const html = await (await fetch(`${server.baseUrl}${path}`)).text();
@@ -177,6 +177,53 @@ describe("marketing site + static routes still serve", () => {
     }
   });
 
+  // The header lockup and the review strip are the two pieces a visitor sees
+  // before anything else, and both would fail silently: a missing logo is a
+  // broken-image icon, and an empty strip just looks like a design choice.
+  it("ships the wordmark lockup and its logo in the served HTML", async () => {
+    const html = await (await fetch(`${server.baseUrl}/`)).text();
+
+    // The visible text is split across spans for the responsive truncation, so
+    // assert on the accessible name — the one string that is always complete.
+    assert.ok(
+      html.includes('aria-label="Bara: Step Challenges"'),
+      "the wordmark must carry the full name as its accessible name"
+    );
+    assert.ok(
+      html.includes("/icon-192.png"),
+      "the wordmark must reference the app icon"
+    );
+    assert.ok(
+      html.includes("Jersey+25"),
+      "the page must request the app's own wordmark face"
+    );
+  });
+
+  it("ships real review copy in the HTML, so the strip is not JS-only", async () => {
+    const html = await (await fetch(`${server.baseUrl}/`)).text();
+    const snapshot = require("../../web/src/data/reviews.json");
+
+    assert.ok(snapshot.length > 0, "the build-time review snapshot should not be empty");
+    assert.ok(
+      html.includes(snapshot[0].body),
+      "the prerendered HTML must already contain review copy"
+    );
+  });
+
+  // Smoke test against the REAL feed. Deliberately weak — it must pass whatever
+  // Apple says today, including saying nothing — so the filter itself is proved
+  // by the stubbed-feed test below, which cannot silently pass on an empty list.
+  it("answers /reviews/ios with a 200 and a well-formed list", async () => {
+    const res = await fetch(`${server.baseUrl}/reviews/ios`);
+    assert.equal(res.status, 200);
+
+    const body = await res.json();
+    assert.ok(Array.isArray(body.reviews), "reviews must be an array");
+    for (const review of body.reviews) {
+      assert.equal(review.rating, 5, `leaked a ${review.rating}-star review`);
+      assert.equal(typeof review.body, "string");
+    }
+  });
   it("keeps serving the untouched static files out of public/", async () => {
     const adsRes = await fetch(`${server.baseUrl}/app-ads.txt`);
     assert.equal(adsRes.status, 200);
@@ -216,4 +263,75 @@ describe("marketing site + static routes still serve", () => {
     const assetLinks = await fetch(`${server.baseUrl}/.well-known/assetlinks.json`);
     assert.equal(assetLinks.status, 200);
   });
+});
+
+describe("GET /reviews/ios filters the feed it is given", () => {
+  const {
+    getFiveStarReviews,
+    parseFeed,
+    resetCacheForTests,
+  } = require("../../src/modules/web/reviews/appStoreReviews");
+  const { startServer } = require("./setup");
+
+  function entry(rating, id, body) {
+    return {
+      id: { label: id },
+      title: { label: `Title ${id}` },
+      content: { label: body },
+      author: { name: { label: `Author ${id}` } },
+      "im:rating": { label: String(rating) },
+    };
+  }
+
+  // The first element of Apple's real feed is the app record, which carries no
+  // im:rating — included here so the route is exercised against the shape it
+  // actually receives.
+  const STUB_FEED = {
+    feed: {
+      entry: [
+        { id: { label: "app" }, title: { label: "Bara" } },
+        entry(5, "keep-1", "Genuinely five stars"),
+        entry(1, "drop-1", "One star, must never ship"),
+        entry(3, "drop-2", "Three stars, must never ship"),
+        entry(5, "keep-2", "Also five stars"),
+        entry(4, "drop-3", "Four stars, still must never ship"),
+      ],
+    },
+  };
+
+  let stubbed;
+
+  before(async () => {
+    resetCacheForTests();
+    stubbed = await startServer({
+      getFiveStarReviews: () =>
+        getFiveStarReviews({ fetchImpl: async () => parseFeed(STUB_FEED) }),
+    });
+  });
+
+  after(async () => {
+    await stubbed.close();
+    resetCacheForTests();
+  });
+
+  it("returns the 5-star entries and drops every lower rating", async () => {
+    const res = await fetch(`${stubbed.baseUrl}/reviews/ios`);
+    assert.equal(res.status, 200);
+
+    const { reviews } = await res.json();
+    assert.deepEqual(
+      reviews.map((r) => r.id),
+      ["keep-1", "keep-2"],
+      "only the 5-star entries may reach the page"
+    );
+
+    const serialized = JSON.stringify(reviews);
+    for (const leaked of ["drop-1", "drop-2", "drop-3", "must never ship"]) {
+      assert.ok(
+        !serialized.includes(leaked),
+        `low-star content "${leaked}" reached the response`
+      );
+    }
+  });
+
 });

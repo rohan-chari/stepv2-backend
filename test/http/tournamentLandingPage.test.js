@@ -52,3 +52,16 @@ test("not-found page renders with the store buttons", () => {
   assert.match(html, /Tournament not found/i);
   assert.match(html, /App Store/);
 });
+
+// Same guard as raceLandingPage.test.js: the tournament page reuses that
+// module's shell, so a change there must keep the lockup on this page too.
+test("tournament pages render the Bara wordmark lockup", () => {
+  for (const html of [
+    renderTournamentLandingPage({ name: "Bracket", participantCount: 4 }, LINKS),
+    renderTournamentNotFoundPage(LINKS),
+  ]) {
+    assert.match(html, /aria-label="Bara: Step Challenges"/);
+    assert.match(html, /\/icon-192\.png/);
+    assert.match(html, /Jersey\+25/);
+  }
+});

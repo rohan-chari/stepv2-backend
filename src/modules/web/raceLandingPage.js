@@ -82,11 +82,13 @@ function shell({ title, description, body, links, primaryHtml, scriptBody }) {
     .content { position:relative; z-index:1; max-width:430px; margin:0 auto;
       padding:52px 20px 60px; display:flex; flex-direction:column; align-items:center; gap:22px; }
 
-    /* The wordmark, plus the dashed trail running down to the invite card. */
+    /* The wordmark, plus the dashed trail running down to the invite card.
+       The lockup itself comes from theme.wordmarkHtml() so this page, the
+       tournament page, the referral page and barastep.com all show the same
+       icon + "Bara: Step Challenges" in the app's own title face. */
     .trail-sign { text-align:center; }
     .trail-sign .board-sign { padding:0 0 2px; }
-    .trail-sign h1 { font-family:var(--font-display); font-weight:800; font-size:2.4rem;
-      letter-spacing:-0.03em; color:var(--foreground); }
+    ${theme.WORDMARK_STYLES}
     .trail-sign .post { width:2px; height:34px; margin:10px auto 0;
       background-image:repeating-linear-gradient(to bottom, var(--border) 0 6px, transparent 6px 12px); }
 
@@ -131,7 +133,6 @@ function shell({ title, description, body, links, primaryHtml, scriptBody }) {
     .store-btn-disabled:active { transform:none; box-shadow:none; }
 
     @media (max-width:500px){
-      .trail-sign h1 { font-size:2rem; }
       .content { padding:40px 16px 48px; gap:18px; }
     }
 
@@ -152,7 +153,7 @@ function shell({ title, description, body, links, primaryHtml, scriptBody }) {
   <div class="sky"></div>
   <div class="clouds"><div class="cloud"></div><div class="cloud"></div><div class="cloud"></div></div>
   <main class="content">
-    <div class="trail-sign"><div class="board-sign"><h1>Bara</h1></div><div class="post"></div></div>
+    <div class="trail-sign"><div class="board-sign">${theme.wordmarkHtml()}</div><div class="post"></div></div>
     <div class="board"><div class="board-inner">${body}</div></div>
     ${primaryHtml || ""}
     <div class="store-buttons">
@@ -189,7 +190,7 @@ function renderRaceLandingPage(preview, links) {
   const body = `
     <div class="section">Step Race</div>
     <div class="invite-body">
-      <div class="invite-name">${escapeHtml(hostName)} invited you to a step race</div>
+      <h1 class="invite-name">${escapeHtml(hostName)} invited you to a step race</h1>
       <div class="invite-sub">${escapeHtml(preview.name)} · ${escapeHtml(playerLine)}</div>
     </div>
   `;
@@ -203,7 +204,7 @@ function renderRaceNotFoundPage(links) {
   const body = `
     <div class="section">Race not found</div>
     <div class="invite-body">
-      <div class="invite-name">This race link is no longer valid</div>
+      <h1 class="invite-name">This race link is no longer valid</h1>
       <div class="invite-sub">Download Bara to start your own step race.</div>
     </div>
   `;

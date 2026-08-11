@@ -108,19 +108,34 @@ const TOKENS = {
 };
 
 // ── Type ─────────────────────────────────────────────────────────────────────
-// Three roles, three voices:
-//   display — Bricolage Grotesque. Quirky, variable, slightly condensed; it has
+// Four roles, four voices:
+//   wordmark — Jersey 25. THE APP'S OWN TITLE FACE. See the note below.
+//   display  — Bricolage Grotesque. Quirky, variable, slightly condensed; it has
 //     an actual opinion, unlike the geometric sans every product page ships.
-//   body    — Instrument Sans. Clean and warm, stays out of the way at length.
-//   mono    — Space Mono. The scoreboard voice: step counts, distance ticks,
+//   body     — Instrument Sans. Clean and warm, stays out of the way at length.
+//   mono     — Space Mono. The scoreboard voice: step counts, distance ticks,
 //     eyebrows, nav. Steps are numbers, so numbers get their own face.
+//
+// ── Why wordmark is its own role and not just --font-display ─────────────────
+// Jersey 25 is what the app sets "Bara" in on the title screen you meet on first
+// launch (PixelText.display, lib/styles.dart) — so the site's wordmark uses it
+// and the two products read as one.
+//
+// It does NOT become the general display face. It is a true bitmap-pixel face
+// with a very small x-height; the app's own comment reserves it for "the arcade
+// wordmark treatment" because "it only reads well large", and the app never
+// sets it under 30px. Headlines and section titles stay on Bricolage. Use this
+// token for the wordmark and nothing else.
+const FONT_WORDMARK = "'Jersey 25', 'Bricolage Grotesque', ui-sans-serif, system-ui, sans-serif";
 const FONT_DISPLAY = "'Bricolage Grotesque', ui-sans-serif, system-ui, sans-serif";
 const FONT_BODY = "'Instrument Sans', ui-sans-serif, system-ui, -apple-system, sans-serif";
 const FONT_MONO = "'Space Mono', ui-monospace, SFMono-Regular, Menlo, monospace";
 
+// Jersey 25 ships a single weight (400) — asking for others silently returns
+// nothing, so the wordmark styles must never set font-weight.
 const FONT_LINK_TAGS = `<link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Instrument+Sans:wght@400;500;600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />`;
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Instrument+Sans:wght@400;500;600&family=Jersey+25&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />`;
 
 // The Bara app icon in the browser tab. Absolute, unhashed paths served by
 // express (see the iconRoutes block in src/app.js) so the same markup works
@@ -139,6 +154,7 @@ function rootStyleBlock() {
     .join("\n");
   return `:root {
 ${declarations}
+      --font-wordmark: ${FONT_WORDMARK};
       --font-display: ${FONT_DISPLAY};
       --font-body: ${FONT_BODY};
       --font-mono: ${FONT_MONO};
@@ -146,12 +162,65 @@ ${declarations}
     }`;
 }
 
+// The app icon + "Bara: Step Challenges", for the top of the three
+// server-rendered share-link pages. The Vue site renders the same lockup from
+// its own SiteHeader component; both pull the icon from the SAME unhashed
+// /icon-192.png that express serves (see iconRoutes in src/app.js), so there is
+// one logo file rather than a bundled copy and a served copy that can drift.
+//
+// ": Step Challenges" is hidden under 360px. Note this is a LOWER cutoff than
+// the site header's 420px, and deliberately so: these pages centre the wordmark
+// on its own line with nothing beside it, while the header has to fit three nav
+// links on the same row. A share link is the branding surface most people meet
+// first, so it shows the full name at every width that can hold it.
+//
+// The <a>'s aria-label carries the full name at every width either way, so what
+// a screen reader announces never changes with the viewport.
+const WORDMARK_STYLES = `
+    /* min-width:0 + max-width:100% so this can never push the page wider than
+       the viewport: the fonts load with display=swap, so the FIRST paint uses
+       the fallback face, which is wider than Jersey 25 at the same size. Sizing
+       that only fits once the webfont lands is sizing that overflows on every
+       cold load. */
+    .wordmark { display:inline-flex; align-items:center; gap:10px;
+      color:var(--foreground); max-width:100%; min-width:0; }
+    .wordmark img { width:34px; height:34px; border-radius:8px; display:block; flex-shrink:0; }
+    /* Jersey 25 is a single-weight face: never set font-weight, and give it
+       size — it measures larger than it reads. */
+    .wordmark-text { font-family:var(--font-wordmark); font-size:2.1rem; line-height:1;
+      letter-spacing:0.01em; min-width:0; }
+    .wordmark-tail { color:var(--primary); }
+    /* The size steps live HERE, with the lockup, rather than in each page shell
+       — otherwise a new consumer of wordmarkHtml() silently gets no responsive
+       behaviour at all. */
+    @media (max-width:500px){ .wordmark-text { font-size:1.8rem; } }
+    @media (max-width:400px){ .wordmark-text { font-size:1.5rem; } }
+    @media (max-width:359px){ .wordmark-tail { display:none; } }`;
+
+// NOT a link. These pages are served from the API host (and from staging), so a
+// hardcoded barastep.com would send staging visitors to production; and the
+// element it replaces was a plain <h1>, so making the first thing on an invite
+// page a link OFF that page would be a behaviour change nobody asked for.
+//
+// role="img" + aria-label gives the lockup one accessible name and hides the
+// split spans behind it, so a screen reader announces "Bara: Step Challenges"
+// at every width even though the tail is visually dropped on a narrow phone.
+function wordmarkHtml() {
+  return `<div class="wordmark" role="img" aria-label="Bara: Step Challenges">
+      <img src="/icon-192.png" alt="" width="34" height="34" aria-hidden="true" />
+      <span class="wordmark-text" aria-hidden="true">Bara<span class="wordmark-tail">: Step Challenges</span></span>
+    </div>`;
+}
+
 module.exports = {
   TOKENS,
+  FONT_WORDMARK,
   FONT_DISPLAY,
   FONT_BODY,
   FONT_MONO,
   FONT_LINK_TAGS,
   ICON_LINK_TAGS,
+  WORDMARK_STYLES,
+  wordmarkHtml,
   rootStyleBlock,
 };

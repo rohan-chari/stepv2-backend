@@ -6,8 +6,9 @@
   "description": "barastep.com — Vue 3 + Vite + shadcn-vue marketing site. Builds to web/dist, which the Express backend serves as static files (see src/app.js). Deliberately its own package.json: none of these deps belong in the backend's runtime dependency tree.",
   "scripts": {
     "theme": "node scripts/generate-theme-css.mjs",
+    "reviews": "node scripts/fetch-reviews.mjs",
     "dev": "npm run theme && vite",
-    "build": "npm run theme && vite build && node scripts/prerender.mjs && node scripts/check-build-output.mjs",
+    "build": "npm run theme && npm run reviews && vite build && node scripts/prerender.mjs && node scripts/check-build-output.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -38,6 +38,7 @@
   --bara-moss: #77A98B;
   --bara-canopy-deep: #213128;
   --bara-shadow: rgba(15, 30, 22, 0.35);
+  --font-wordmark: 'Jersey 25', 'Bricolage Grotesque', ui-sans-serif, system-ui, sans-serif;
   --font-display: 'Bricolage Grotesque', ui-sans-serif, system-ui, sans-serif;
   --font-body: 'Instrument Sans', ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: 'Space Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -80,6 +81,7 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);
 
+  --font-wordmark: var(--font-wordmark);
   --font-display: var(--font-display);
   --font-body: var(--font-body);
   --font-mono: var(--font-mono);
