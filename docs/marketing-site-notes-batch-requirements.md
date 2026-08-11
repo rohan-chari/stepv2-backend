@@ -203,6 +203,48 @@ falling back to a system face).
 - No third-party script origin is added to any page.
 - Existing routes, OG tags, and the waitlist all behave as before.
 
+## Second notes pass (2026-08-10, later the same evening)
+
+A follow-up screenshot pair reversed two decisions from the first pass and
+tightened the page:
+
+- **Headings move to Jersey 25 and go black.** The first pass deliberately kept
+  the hero on Bricolage, reasoning that a 63-character headline in a bitmap face
+  would be unreadable. Rendered, it is not — Jersey 25 is condensed enough to
+  carry the full sentence in three lines at 5.5rem. `--font-wordmark` now also
+  sets the hero `h1` and the section `h2`s. The green accent spans are gone;
+  headings are `--paper-foreground` throughout, and the small mono eyebrows are
+  the only coloured text left.
+- **The phone mockup is removed** ("looks a little weird and takes up a lot of
+  space"). `PhoneMockup.vue` is deleted rather than left unused, along with the
+  five powerup PNGs and the coin that nothing imports any more. The open item
+  about swapping in a real screenshot is closed — there is no slot for one.
+- **New hero subcopy**, supplied verbatim.
+- **The dashed rule is replaced by the app's actual trail.**
+  `assets/images/home_hero_ground.png` — the same ground strip the app's home
+  screen walks along, grass lip over dirt blocks, no grandstand (the note asked
+  for it "without the bleachers in the back", which rules out
+  `race_day_course.png`). It runs full-bleed rather than inside the content
+  column, so the capybara now walks the whole viewport.
+  - The art is 1350x164 and does **not** wrap seamlessly (best repeat period
+    scores well above zero), so it is drawn at an exact 2:1 downscale — 82px
+    tall, 675px per tile — which both hides the repeat on most viewports and
+    keeps the pixels on a clean integer ratio.
+  - The walk sprite carries **14px of transparent padding below the feet** in
+    its 64px cell, so aligning the element box to the grass leaves the animal
+    hovering. The `bottom` offsets are derived from that padding and the
+    measured grass line; the arithmetic is written out in `HomePage.vue`.
+- **The "Walk. Compete. Keep them guessing." section is removed** entirely.
+- **The powerup grid is respecified** to Runner's High, Wrong Turn, Protein
+  Shake, Stealth Mode, Trail Mine, Rainstorm, in that order. Copy is the
+  backend's own catalog text (`powerupCopySeed.js`), trimmed — so the page
+  cannot promise a duration the game does not apply.
+- **A Google Play mark replaces the coin** beside "Android". It is the icon, not
+  the "Get it on Google Play" badge, deliberately: the app has no Play listing,
+  and a store badge would advertise one. Drawn as inline SVG
+  (`GooglePlayMark.vue`); swap in Google's official asset if exactness ever
+  matters.
+
 ## Revision log
 
 - **2026-08-10 — Code review (verdict FIX FIRST), all items resolved.**

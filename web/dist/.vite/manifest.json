@@ -1,44 +1,44 @@
 {
-  "_SiteFooter-CTJidjoX.js": {
-    "file": "web-assets/SiteFooter-CTJidjoX.js",
+  "_SiteFooter-BfB92qkN.js": {
+    "file": "web-assets/SiteFooter-BfB92qkN.js",
     "name": "SiteFooter",
     "css": [
-      "web-assets/SiteFooter-iKqifibG.css"
+      "web-assets/SiteFooter-NyCpvOqz.css"
     ],
     "assets": [
       "web-assets/capybara_walk_right-zO7gPMEH.png"
     ]
   },
-  "_SiteFooter-iKqifibG.css": {
-    "file": "web-assets/SiteFooter-iKqifibG.css",
-    "src": "_SiteFooter-iKqifibG.css"
+  "_SiteFooter-NyCpvOqz.css": {
+    "file": "web-assets/SiteFooter-NyCpvOqz.css",
+    "src": "_SiteFooter-NyCpvOqz.css"
   },
   "index.html": {
-    "file": "web-assets/index-Cvo8Qlip.js",
+    "file": "web-assets/index-uNbwADVw.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
     "imports": [
-      "_SiteFooter-CTJidjoX.js"
+      "_SiteFooter-BfB92qkN.js"
     ],
     "assets": [
-      "web-assets/leech-BG6GQmBI.png",
       "web-assets/app-store-badge-CVyK0T4N.svg",
-      "web-assets/coin-7-Uq8maO.png",
+      "web-assets/trail_ground-IvNzw0ZZ.png",
+      "web-assets/runners_high-CKr9XeFl.png",
+      "web-assets/wrong_turn-8wsZKMY2.png",
+      "web-assets/protein_shake-7P-rkKVZ.png",
+      "web-assets/stealth_mode-Dmz-uV7g.png",
       "web-assets/trail_mine-Cqqu5wWD.png",
-      "web-assets/rainstorm-DPzTxPEp.png",
-      "web-assets/shortcut-Cu2DQVRo.png",
-      "web-assets/signal_jammer-BKm6twE0.png",
-      "web-assets/lucky_horseshoe-fpVcko2t.png"
+      "web-assets/rainstorm-DPzTxPEp.png"
     ]
   },
   "privacy.html": {
-    "file": "web-assets/privacy-OzUpD-Hv.js",
+    "file": "web-assets/privacy-DLLlqu1v.js",
     "name": "privacy",
     "src": "privacy.html",
     "isEntry": true,
     "imports": [
-      "_SiteFooter-CTJidjoX.js"
+      "_SiteFooter-BfB92qkN.js"
     ]
   },
   "src/assets/app-store-badge.svg": {
@@ -49,41 +49,41 @@
     "file": "web-assets/capybara_walk_right-zO7gPMEH.png",
     "src": "src/assets/capybara_walk_right.png"
   },
-  "src/assets/coin.png": {
-    "file": "web-assets/coin-7-Uq8maO.png",
-    "src": "src/assets/coin.png"
-  },
-  "src/assets/leech.png": {
-    "file": "web-assets/leech-BG6GQmBI.png",
-    "src": "src/assets/leech.png"
-  },
-  "src/assets/lucky_horseshoe.png": {
-    "file": "web-assets/lucky_horseshoe-fpVcko2t.png",
-    "src": "src/assets/lucky_horseshoe.png"
+  "src/assets/protein_shake.png": {
+    "file": "web-assets/protein_shake-7P-rkKVZ.png",
+    "src": "src/assets/protein_shake.png"
   },
   "src/assets/rainstorm.png": {
     "file": "web-assets/rainstorm-DPzTxPEp.png",
     "src": "src/assets/rainstorm.png"
   },
-  "src/assets/shortcut.png": {
-    "file": "web-assets/shortcut-Cu2DQVRo.png",
-    "src": "src/assets/shortcut.png"
+  "src/assets/runners_high.png": {
+    "file": "web-assets/runners_high-CKr9XeFl.png",
+    "src": "src/assets/runners_high.png"
   },
-  "src/assets/signal_jammer.png": {
-    "file": "web-assets/signal_jammer-BKm6twE0.png",
-    "src": "src/assets/signal_jammer.png"
+  "src/assets/stealth_mode.png": {
+    "file": "web-assets/stealth_mode-Dmz-uV7g.png",
+    "src": "src/assets/stealth_mode.png"
+  },
+  "src/assets/trail_ground.png": {
+    "file": "web-assets/trail_ground-IvNzw0ZZ.png",
+    "src": "src/assets/trail_ground.png"
   },
   "src/assets/trail_mine.png": {
     "file": "web-assets/trail_mine-Cqqu5wWD.png",
     "src": "src/assets/trail_mine.png"
   },
+  "src/assets/wrong_turn.png": {
+    "file": "web-assets/wrong_turn-8wsZKMY2.png",
+    "src": "src/assets/wrong_turn.png"
+  },
   "support.html": {
-    "file": "web-assets/support-BJhBoBfr.js",
+    "file": "web-assets/support-hgfi8OpK.js",
     "name": "support",
     "src": "support.html",
     "isEntry": true,
     "imports": [
-      "_SiteFooter-CTJidjoX.js"
+      "_SiteFooter-BfB92qkN.js"
     ]
   }
 }

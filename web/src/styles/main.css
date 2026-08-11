@@ -127,6 +127,25 @@
     }
   }
 
+  /* ── The trail ────────────────────────────────────────────────────────────
+     home_hero_ground.png, the SAME ground strip the app's home screen walks its
+     capybara along — grass lip over dirt blocks, no grandstand. It replaces a
+     dashed rule that only ever suggested a course.
+
+     The art is 1350x164 and does NOT wrap seamlessly, so it is drawn at an
+     exact 2:1 downscale (82px tall) and repeated: at half size a tile is 675px,
+     and the repeat lands off the edge of most viewports. Half is chosen so the
+     downscale is a clean integer ratio — pixel art at a fractional scale
+     shimmers, whatever image-rendering says. */
+  .trail-ground {
+    height: 82px;
+    background-image: var(--trail-ground);
+    background-repeat: repeat-x;
+    background-position: left top;
+    background-size: auto 82px;
+    image-rendering: pixelated;
+  }
+
   /* Prose surface for the long-form legal/help pages. Legal text at length
      needs a light reading ground — see the note in theme.js. */
   .paper {

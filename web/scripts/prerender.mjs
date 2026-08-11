@@ -31,7 +31,7 @@ const PAGES = [
 ];
 
 // Vite's SSR module loader resolves asset imports to their SOURCE urls
-// (/src/assets/coin.png), which don't exist in the built output. The client
+// (/src/assets/capybara_walk_right.png), which don't exist in the built output. The client
 // build's manifest maps each source path to its emitted hashed file, so the
 // prerendered markup gets rewritten to the same URLs the hydrating client will
 // request — otherwise every <img> would 404 for exactly the no-JS visitors this
