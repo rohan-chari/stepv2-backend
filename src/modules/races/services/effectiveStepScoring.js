@@ -371,6 +371,15 @@ async function computeEffectModifiers(effects, rawTotal, userId, stepSampleModel
         frozenSteps += Math.max(0, end - start);
       }
       // Rainstorm snapshot over the merged (per-caster-clamped) windows.
+      //
+      // DELIBERATELY NOT MIGRATED to item 6's multiplicative rule (spec
+      // 2026-08-10b): this branch is the `hasSampleData === false` fallback and
+      // subtracts `windowSteps * lostFraction` from RAW steps — it does not
+      // know about buffs at all, so there is no M to multiply. It is already a
+      // different approximation from the sampled path, and "fixing" it to match
+      // would mean inventing a buff model it has no inputs for. The consequence
+      // is recorded in the release notes: a sample-less user now diverges from a
+      // sampled one by a FACTOR rather than an offset while buffed.
       for (const window of mergeRainstormWindows(rainstorms)) {
         const meta = window.startEffect.metadata || {};
         const start = meta.stepsAtStart || 0;
@@ -464,4 +473,11 @@ function signedMultiplierForEffects(effects = [], nowMs = Date.now()) {
   return signedMultiplierAt(nowMs, groups);
 }
 
-module.exports = { computeEffectModifiers, signedMultiplierForEffects };
+module.exports = {
+  computeEffectModifiers,
+  signedMultiplierForEffects,
+  // Exported for raceStateResolution.calculateCurrentTotal (batch 2026-08-10b
+  // item 6 / architect R9): finish-time interpolation must see the SAME
+  // umbrella-adjusted rain windows the display and scoring paths see.
+  umbrellaAdjustedRainstorms,
+};

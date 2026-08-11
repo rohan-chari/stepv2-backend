@@ -174,6 +174,13 @@ const KNOWN_FLAGS = {
   // `src/modules/users/services/authMeCache.js`, which per spec §5 step 11 must
   // be reviewed before this flag flips. Default OFF.
   redisCacheAuthMeEnabled: false,
+  // Batch 2026-08-10b item 2 (C4): 60s read-through cache for
+  // `powerupData.discardCapRemaining` (`v1:user:discardcap:{id}`), invalidated
+  // at the discard write seam. Default OFF: with it off the value is computed
+  // from Postgres on every progress poll that has a discardable row, which is
+  // correct but costs a query. Turning it off can only cost latency, never
+  // correctness — the field itself is NEVER gated on Redis being available.
+  redisCacheDiscardCapEnabled: false,
 };
 
 function buildAppSettings(dependencies = {}) {

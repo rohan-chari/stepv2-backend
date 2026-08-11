@@ -11,6 +11,7 @@ const {
 const {
   syncRacePowerupState: defaultSyncRacePowerupState,
 } = require("../../races/services/racePowerupStateSync");
+const defaultDiscardCapCache = require("../services/discardCapCache");
 
 class PowerupDiscardError extends Error {
   constructor(message, statusCode) {
@@ -28,6 +29,7 @@ function buildDiscardPowerup(dependencies = {}) {
   const awardCoins = dependencies.awardCoins || defaultAwardCoins;
   const computeDiscardAward =
     dependencies.computeDiscardAward || defaultComputeDiscardAward;
+  const discardCapCache = dependencies.discardCapCache || defaultDiscardCapCache;
   const syncRacePowerupState = Object.prototype.hasOwnProperty.call(
     dependencies,
     "syncRacePowerupState"
@@ -126,6 +128,13 @@ function buildDiscardPowerup(dependencies = {}) {
     });
 
     await syncRacePowerupState({ raceId, userId });
+
+    // Batch 2026-08-10b item 2 — the ONE write seam that moves
+    // `powerupData.discardCapRemaining`. Invalidate-only (never write), and
+    // never allowed to fail a ledgered coin award: without this a poll landing
+    // on a pre-discard cache entry would re-serve stale headroom for up to 60s,
+    // which is the exact lie the field exists to fix.
+    await discardCapCache.invalidateSafe(userId);
 
     // `success` is the PRE-EXISTING wire field and is deliberately kept: the
     // shipped App Store build ignores the body, but nothing is gained by

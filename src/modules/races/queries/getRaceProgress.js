@@ -59,6 +59,10 @@ const { appSettings: defaultAppSettings } = require("../../../shared/config/appS
 const {
   enqueueRaceResolution: defaultEnqueueRaceResolution,
 } = require("../services/enqueueRaceResolution");
+// Batch 2026-08-10b item 2 — C4 read-through for `discardCapRemaining`. Falls
+// through to Postgres whenever Redis or its flag is unavailable; the field is
+// never gated on the cache existing.
+const discardCapCache = require("../../powerups/services/discardCapCache");
 
 // The (releaseChannel × supportsCharacters) combinations `characterPresentation`
 // can produce. Closed set: `resolveReleaseChannel` only ever yields "prod" or
@@ -765,6 +769,10 @@ function buildGetRaceProgress(deps = {}) {
     supportsPowerups5,
     releaseChannel,
     supportsAds = false,
+    // Batch 2026-08-10b item 2: the viewer's STORED timezone (falling back to
+    // the request zone at the route). Used ONLY for the discard-cap day
+    // boundary; the leaderboard's scoring tz is `scoringTimeZone` above.
+    userTimeZone = null,
     syncPowerups,
   }) {
     const snapRace = snapshot.race || {};
@@ -869,6 +877,11 @@ function buildGetRaceProgress(deps = {}) {
       // payload every frozen binary already parses is byte-identical.
       if (supportsAds && adsBoxRerollEnabled()) {
         powerupData.boxReroll = true;
+        // Batch 2026-08-10b item 1 — REROLL ALL after OPEN ALL. Advertised
+        // under the SAME condition as `boxReroll` (one kill switch governs both
+        // endpoints), and OMITTED rather than `false` when off, so the payload
+        // every frozen binary already parses stays byte-identical.
+        powerupData.boxRerollBatch = true;
       }
 
       // Re-read participant to get current powerupSlots (may have changed via Fanny Pack expiry)
@@ -901,6 +914,37 @@ function buildGetRaceProgress(deps = {}) {
         rarity: p.rarity,
         status: p.status,
       }));
+
+      // Batch 2026-08-10b item 2 — how much of the DAILY DISCARD COIN CAP is
+      // left, so the confirm dialog can quote the clamped amount BEFORE the
+      // first discard of a screen visit (it previously only learned the cap
+      // FROM a discard response, and so lied exactly once per visit).
+      //
+      // Placed HERE, not next to `discardPrices` above (architect R5):
+      // `slotPowerups` is the only thing that can answer "does this viewer hold
+      // a discardable row?", and it is not read until just above. Computing it
+      // earlier would either cost a second query or silently drop the guard.
+      //
+      // Overlay-only (architect S3): this is a PER-VIEWER value and must never
+      // enter the shared C3 `v1:race:progress` snapshot or its pinned field
+      // allowlist. Structurally safe today because `powerupData` is built
+      // entirely in the overlay — stated so it stays that way.
+      //
+      // Additive: an integer >= 0, ignored by every frozen client.
+      if (powerupData.inventory.some((p) => p.status === "HELD")) {
+        try {
+          powerupData.discardCapRemaining = await discardCapCache.getDiscardCapRemaining({
+            userId,
+            // Same precedence as the discard route: the STORED zone first, so
+            // the cap can't be widened by spoofing X-Timezone.
+            timezone: userTimeZone || null,
+            appSettings: settings,
+          });
+        } catch {
+          // A display hint must never fail the whole progress poll. Omitted on
+          // error, which degrades to today's (occasionally wrong) dialog.
+        }
+      }
 
       // Queued box count for frontend indicator
       const queuedCount =
@@ -1127,7 +1171,11 @@ function buildGetRaceProgress(deps = {}) {
     // Batch 2026-08-08 item 11 — whether the client advertises `ads`. Trailing +
     // optional and defaulted false, so every existing caller keeps its exact
     // behaviour. Gates ONLY whether `powerupData.boxReroll` is advertised.
-    supportsAds = false
+    supportsAds = false,
+    // Batch 2026-08-10b item 2. Trailing + optional, defaults null: every
+    // existing caller keeps identical behaviour. The user's STORED timezone,
+    // used only for the discard-cap local-day boundary.
+    userTimeZone = null
   ) {
     const race = await raceModel.findById(raceId);
     if (!race) {
@@ -1286,6 +1334,7 @@ function buildGetRaceProgress(deps = {}) {
       supportsPowerups5,
       releaseChannel,
       supportsAds,
+      userTimeZone,
       syncPowerups: !cacheOn,
     });
   };

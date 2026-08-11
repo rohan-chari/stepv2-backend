@@ -28,6 +28,18 @@ function reductionLostFraction(effect) {
   return 1 - r;
 }
 
+// Batch 2026-08-10b item 6 — kill switch for the MULTIPLICATIVE rainstorm.
+//
+// Read at CALL time (the idiom `discardDailyCap()` uses), not module load:
+// this function is pure and DB-free, so an app setting is the wrong shape, but
+// "revert the commit" is not adequate for a change that alters scoring for
+// every in-flight race on restart. With this OFF a bad settlement is reverted
+// by a pm2 reload rather than a deploy. Ships "false"; flipped on in prod after
+// staging verification (architect R10).
+function rainstormMultiplicativeEnabled() {
+  return process.env.RAINSTORM_MULTIPLICATIVE_ENABLED === "true";
+}
+
 // §3 — the signed effective multiplier at instant `timeMs`.
 function signedMultiplierAt(timeMs, groups = {}) {
   const {
@@ -109,24 +121,46 @@ function signedMultiplierAt(timeMs, groups = {}) {
   }
   let M = buffed ? sum : 1;
 
-  // 3. Reductions subtract additively, floored at 0. Applied ONCE at the max
-  //    lostFraction among active reductions so a victim under two storms (or a
-  //    storm + coin-flip loss) clamps at a single 0.5x, never 0.25x/0x.
-  let lost = 0;
-  let reduced = false;
+  // 3. Reductions. Compute the resulting M for EVERY active reduction
+  //    independently and keep the LOWEST (batch 2026-08-10b item 6):
+  //      * a `rainstorms` candidate yields M * retained — a TRUE halving. The
+  //        copy says "Steps halved by rain" and the metadata field is literally
+  //        `multiplier: 0.5`; subtracting 0.5 only equals halving when the
+  //        victim is unbuffed (prod, "runners hi", 2026-08-10: a 4.25x stack
+  //        went to 3.75x instead of 2.125x).
+  //      * a `coinFlipLoses` candidate yields max(0, M − lost) — UNCHANGED.
+  //        The divergence is deliberate and user-decided, not drift.
+  //
+  //    "Lowest resulting M" rather than "max lostFraction wins, then branch":
+  //    with one branch multiplicative and one subtractive, `lostFraction` is no
+  //    longer a valid ordering. At M = 4.25 a coin-flip loss with
+  //    lostFraction 0.75 yields 3.5 while a 0.5 Rainstorm yields 2.125, so the
+  //    nominally STRONGER debuff would have shielded the victim from the storm.
+  //    Taking the minimum also preserves the "never stack two reductions" clamp
+  //    exactly: two storms both yield M * 0.5, and min(M*0.5, M*0.5) = M*0.5.
+  //
+  //    DISPATCH IS ON THE GROUP ARRAY, NEVER ON `effect.type` (architect R8).
+  //    `umbrellaAdjustedRainstorms` feeds synthetic {startsAt, expiresAt,
+  //    metadata} rows into `rainstorms` with NO `type` field, so a type-based
+  //    branch would silently leave umbrella-holders on the old subtractive
+  //    math — wrong in exactly the case the Umbrella exists for.
+  const multiplicative = rainstormMultiplicativeEnabled();
+  let reducedM = null;
+  const consider = (candidate) => {
+    reducedM = reducedM === null ? candidate : Math.min(reducedM, candidate);
+  };
   for (const e of rainstorms) {
-    if (isActiveAt(e, timeMs)) {
-      lost = Math.max(lost, reductionLostFraction(e));
-      reduced = true;
-    }
+    if (!isActiveAt(e, timeMs)) continue;
+    const lostFraction = reductionLostFraction(e);
+    consider(
+      multiplicative ? M * (1 - lostFraction) : Math.max(0, M - lostFraction)
+    );
   }
   for (const e of coinFlipLoses) {
-    if (isActiveAt(e, timeMs)) {
-      lost = Math.max(lost, reductionLostFraction(e));
-      reduced = true;
-    }
+    if (!isActiveAt(e, timeMs)) continue;
+    consider(Math.max(0, M - reductionLostFraction(e)));
   }
-  if (reduced) M = Math.max(0, M - lost);
+  if (reducedM !== null) M = Math.max(0, reducedM);
 
   // 4. Wrong Turn negates the full effective rate (including the reductions).
   if (wrongTurns.some((e) => isActiveAt(e, timeMs))) return -M;
