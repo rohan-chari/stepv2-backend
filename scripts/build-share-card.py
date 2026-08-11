@@ -1,112 +1,136 @@
-# Re-typesets public/share-card.png's wordmark to the current Bara logo lockup:
-# the app icon + "Bara" in Jersey 25, the app's own title face.
+# Builds public/share-card.png — the 1200x630 Open Graph image iMessage and
+# social show when barastep.com or a /r/ share link is posted.
 #
-#   python3 scripts/build-share-card.py
+#   python3 scripts/build-share-card.py [subject_height]
 #
-# This is a RETOUCH, not a generator. The pixel-art scene has no source file, so
-# the script repaints only the flat cream vignette behind the old wordmark and
-# composites the new lockup on top. It draws no artwork (see CLAUDE.md) — the
-# capybara, trail and trees are all the original image's pixels.
+# The card IS the logo: the app icon's capybara on the app icon's sunburst,
+# nothing else. It replaced an illustrated trail scene that had a small wordmark
+# sitting on it.
 #
-# It reads the font and icon out of the FRONTEND repo, so the card can never
-# drift onto a different face or a stale icon than the app ships:
-#   ../stepv2-frontend/assets/fonts/Jersey25-Regular.ttf
-#   ../stepv2-frontend/docs/app-icon-source-1024.png
-# Adjust FRONTEND below if your checkout lives elsewhere (see CLAUDE.local.md).
+# ── Where every pixel comes from ────────────────────────────────────────────
+# The single source is the app icon in the frontend repo. Nothing is drawn:
+#   * the capybara is lifted out of the icon by flooding the green background
+#     inward from the border, so the mark is the icon's own pixels;
+#   * the background is the icon's own sunburst CONTINUED outward. The icon is
+#     square and this card is 1.91:1, so the pattern has to reach past the
+#     icon's edges. For each output pixel we take its angle from centre and read
+#     the icon's colour at that same angle — a polar resample of the existing
+#     artwork, so the wedge count, widths, phase and both greens are all the
+#     artwork's own. Cropping the icon to fill the frame instead was tried and
+#     clips the ears and chin.
 #
-# It is NOT idempotent: it erases a fixed rectangle (BBOX, the measured bounds
-# of the ORIGINAL wordmark) and draws over it. Running it twice on its own
-# output is harmless only because the new lockup fits inside that same box —
-# but if you change the lockup's size, re-run it from the committed original
-# (`git show <rev>:public/share-card.png`), not from the current file.
+# Colours are snapped to the two dominant greens: the icon is an upscaled render
+# carrying faint texture and compression speckle, and copying that noise into a
+# large flat area reads as dirt rather than texture.
 #
-# The output is quantized back to a 256-colour palette: the source is palette
-# PNG pixel art, and staying paletted keeps the file smaller than the original
-# rather than doubling it as full RGB.
+# Regenerating after a new app icon is just re-running this.
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
+from collections import Counter
 from pathlib import Path
+import math
 import os
+import sys
 
 REPO = Path(__file__).resolve().parent.parent
 # Sibling checkout by default; override with BARA_FRONTEND (see CLAUDE.local.md).
 FRONTEND = Path(os.environ.get("BARA_FRONTEND", REPO.parent / "stepv2-frontend"))
 
-CARD = REPO / "public" / "share-card.png"
-FONT = FRONTEND / "assets" / "fonts" / "Jersey25-Regular.ttf"
 ICON = FRONTEND / "docs" / "app-icon-source-1024.png"
+OUT = REPO / "public" / "share-card.png"
 
-for required in (CARD, FONT, ICON):
-    if not required.exists():
-        raise SystemExit(f"missing input: {required}\n"
-                         f"(set BARA_FRONTEND if the frontend repo is elsewhere)")
+if not ICON.exists():
+    raise SystemExit(
+        f"missing app icon: {ICON}\n(set BARA_FRONTEND if the frontend repo is elsewhere)"
+    )
 
-INK = (43, 63, 53)           # the wordmark green already on this card
-BBOX = (404, 124, 802, 257)  # measured bounds of the ORIGINAL "Bara"
-PAD = 14
-GAP = 30
-SCALE = 4                    # nearest-neighbour upscale for the pixel face
+W, H = 1200, 630
+SUBJECT_H = int(sys.argv[1]) if len(sys.argv) > 1 else 540
+FLOOD_TOLERANCE = 60
+ANGLE_STEPS = 4096
+SAMPLE_RADII = (0.38, 0.42, 0.46, 0.49)  # fractions of the icon's width
 
-im = Image.open(CARD).convert("RGB")
-W, H = im.size
-px = im.load()
+icon = Image.open(ICON).convert("RGB")
+S = icon.size[0]
+C = S // 2
+ip = icon.load()
 
-# --- erase the old wordmark -------------------------------------------------
-# The vignette behind it is flat (254,248,233 +/-1), so each row is refilled by
-# interpolating between the pixels just outside the text on that row. No
-# rectangle edge shows, and a future gradient would still be followed.
-x0, y0, x1, y1 = BBOX[0] - PAD, BBOX[1] - PAD, BBOX[2] + PAD, BBOX[3] + PAD
-for y in range(y0, y1 + 1):
-    left, right = px[x0 - 3, y], px[x1 + 3, y]
-    span = max(1, x1 - x0)
-    for x in range(x0, x1 + 1):
-        t = (x - x0) / span
-        px[x, y] = tuple(
-            round(left[i] * (1 - t) + right[i] * t) for i in range(3)
-        )
+# ── 1. lift the capybara out of the icon ────────────────────────────────────
+# Flood the background from every border pixel. The mark is whatever the flood
+# cannot reach, which is why the headband's green stripes survive: they sit
+# inside the mark's dark outline.
+flood = icon.copy()
+KEY = (255, 0, 255)
+for x in range(0, S, 8):
+    for y in (0, S - 1):
+        if flood.getpixel((x, y)) != KEY:
+            ImageDraw.floodfill(flood, (x, y), KEY, thresh=FLOOD_TOLERANCE)
+for y in range(0, S, 8):
+    for x in (0, S - 1):
+        if flood.getpixel((x, y)) != KEY:
+            ImageDraw.floodfill(flood, (x, y), KEY, thresh=FLOOD_TOLERANCE)
 
+mask = Image.new("L", (S, S), 0)
+mp = mask.load()
+fp = flood.load()
+for y in range(S):
+    for x in range(S):
+        if fp[x, y] != KEY:
+            mp[x, y] = 255
 
-def render_text(text, size):
-    """Jersey 25 rasterised WITHOUT antialiasing, then upscaled nearest.
+box = mask.getbbox()
+subject = icon.crop(box)
+subject_mask = mask.crop(box)
 
-    It is a pixel face: rendering it smooth at final size gives soft web type
-    sitting on top of pixel art. Rasterising small, hard-thresholding, and
-    scaling up keeps the letterforms chunky and of a piece with the scene.
-    """
-    font = ImageFont.truetype(str(FONT), size)
-    l, t, r, b = font.getbbox(text)
-    tmp = Image.new("L", (r - l + 4, b - t + 4), 0)
-    ImageDraw.Draw(tmp).text((-l + 2, -t + 2), text, font=font, fill=255)
-    tmp = tmp.point(lambda v: 255 if v >= 128 else 0)
-    return tmp.crop(tmp.getbbox())
+# ── 2. the two sunburst greens, from the artwork ────────────────────────────
+tally = Counter()
+for i in range(2000):
+    th = i * 2 * math.pi / 2000
+    for rr in SAMPLE_RADII:
+        x = min(S - 1, max(0, int(C + S * rr * math.cos(th))))
+        y = min(S - 1, max(0, int(C + S * rr * math.sin(th))))
+        tally[ip[x, y]] += 1
 
-
-mask = render_text("Bara", 46)
-mask = mask.resize((mask.width * SCALE, mask.height * SCALE), Image.NEAREST)
-
-# --- the icon ---------------------------------------------------------------
-icon_h = mask.height + 18
-icon = Image.open(ICON).convert("RGBA").resize((icon_h, icon_h), Image.LANCZOS)
-# iOS rounds the icon at display time; a flat PNG has to round it itself.
-corner = Image.new("L", (icon_h, icon_h), 0)
-ImageDraw.Draw(corner).rounded_rectangle(
-    [0, 0, icon_h - 1, icon_h - 1], radius=int(icon_h * 0.225), fill=255
-)
-icon.putalpha(corner)
-
-# --- compose, centred on the card ------------------------------------------
-total_w = icon.width + GAP + mask.width
-left_x = W // 2 - total_w // 2
-mid_y = (BBOX[1] + BBOX[3]) // 2
-
-im.paste(icon, (left_x, mid_y - icon.height // 2), icon)
-im.paste(
-    Image.new("RGB", mask.size, INK),
-    (left_x + icon.width + GAP, mid_y - mask.height // 2),
-    mask,
+ranked = [c for c, _ in tally.most_common(80)]
+LIGHT = ranked[0]
+DARK = next(
+    (c for c in ranked[1:] if sum(abs(a - b) for a, b in zip(c, LIGHT)) > 40), LIGHT
 )
 
-# Back to a palette: the source is paletted pixel art, and staying paletted
-# keeps this SMALLER than the original instead of doubling it as RGB.
-im.quantize(colors=256, method=Image.MEDIANCUT).save(CARD, optimize=True)
-print(f"wrote {CARD} ({W}x{H}) — wordmark {mask.size}, icon {icon.size}")
+# ── 3. the sunburst, continued to the full canvas ───────────────────────────
+lut = []
+for i in range(ANGLE_STEPS):
+    th = i * 2 * math.pi / ANGLE_STEPS
+    light_votes = 0
+    for rr in SAMPLE_RADII:
+        x = min(S - 1, max(0, int(C + S * rr * math.cos(th))))
+        y = min(S - 1, max(0, int(C + S * rr * math.sin(th))))
+        p = ip[x, y]
+        near_light = sum(abs(a - b) for a, b in zip(p, LIGHT))
+        near_dark = sum(abs(a - b) for a, b in zip(p, DARK))
+        light_votes += 1 if near_light <= near_dark else 0
+    lut.append(LIGHT if light_votes * 2 >= len(SAMPLE_RADII) else DARK)
+
+card = Image.new("RGB", (W, H))
+cp = card.load()
+cx, cy = W / 2, H / 2
+two_pi = 2 * math.pi
+for y in range(H):
+    dy = y - cy
+    for x in range(W):
+        th = math.atan2(dy, x - cx) % two_pi
+        cp[x, y] = lut[int(th / two_pi * ANGLE_STEPS) % ANGLE_STEPS]
+
+# ── 4. drop the mark in the middle ──────────────────────────────────────────
+scale = SUBJECT_H / subject.height
+sw, sh = round(subject.width * scale), round(subject.height * scale)
+card.paste(
+    subject.resize((sw, sh), Image.LANCZOS),
+    (W // 2 - sw // 2, H // 2 - sh // 2),
+    subject_mask.resize((sw, sh), Image.LANCZOS),
+)
+
+# Paletted, like the icon: two flat background colours plus the mark compress
+# far smaller as a palette PNG than as RGB.
+card.quantize(colors=256, method=Image.MEDIANCUT).save(OUT, optimize=True)
+print(f"wrote {OUT} ({W}x{H}) — mark {sw}x{sh}, greens {LIGHT} / {DARK}")
