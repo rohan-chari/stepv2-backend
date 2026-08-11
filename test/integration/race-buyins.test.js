@@ -3,6 +3,7 @@ const { describe, it, before, beforeEach } = require("node:test");
 
 const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
 const { resolveExpiredRaces } = require("../../src/modules/races/jobs/raceExpiry");
+const { appSettings } = require("../../src/shared/config/appSettings");
 
 let server;
 let nextAppleId = 0;
@@ -75,6 +76,11 @@ describe("race buy-ins", () => {
   beforeEach(async () => {
     await cleanDatabase();
     nextAppleId = 0;
+    // This suite exercises the legacy buy-in model; app_settings persists
+    // across test files (it isn't truncated by cleanDatabase), so pin the
+    // funded-prize-pools flag off explicitly rather than relying on whatever
+    // an earlier file happened to leave it as.
+    await appSettings.setFlag("fundedPrizePoolsEnabled", false);
   });
 
   it("creating a paid race reserves the creator buy-in and reports held coins", async () => {

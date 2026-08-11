@@ -1,5 +1,7 @@
 const { prisma } = require("../../../db");
 const { awardCoins } = require("../../../shared/economy/awardCoins");
+const { withAdvisoryLock } = require("../../../shared/db/withAdvisoryLock");
+const { recordServerActivationEvent } = require("../../analytics/serverActivationEvents");
 const {
   REFERRER_REWARD_COINS,
   REFEREE_REWARD_COINS,
@@ -26,29 +28,25 @@ function buildGrantReferralRewardsForRace(dependencies = {}) {
   // from a deleted+reinstalled account, since the row outlives the account) and
   // aborts before a coin mints — exactly-once per human per role, forever.
   // Returns true only when THIS call minted the grant (so we emit once).
-  async function grantRole({ referralId, userId, role, refereeSubHash, coins }) {
-    try {
-      await db.referralRewardGrant.create({
-        data: { referralId, userId, role, refereeSubHash, coins },
-      });
-    } catch (error) {
-      if (error && error.code === "P2002") return false; // already rewarded
-      throw error;
-    }
-    // awardCoins runs in its own transaction and dedups on (reason, refId), so a
-    // retry after a crash between the two never double-grants.
+  async function grantRole(store, { referralId, userId, role, refereeSubHash, coins }) {
+    const inserted = await store.referralRewardGrant.createMany({
+      data: [{ referralId, userId, role, refereeSubHash, coins }],
+      skipDuplicates: true,
+    });
+    if (inserted.count === 0) return false;
     await awardCoinsFn({
       userId,
       amount: coins,
       reason: "referral_reward",
       refId: `referral:${referralId}:${role}`,
+      tx: store,
     });
     return true;
   }
 
-  async function isReviewAccount(userId) {
+  async function isReviewAccount(store, userId) {
     if (!userId) return false;
-    const user = await db.user.findUnique({
+    const user = await store.user.findUnique({
       where: { id: userId },
       select: { isReviewAccount: true },
     });
@@ -59,18 +57,18 @@ function buildGrantReferralRewardsForRace(dependencies = {}) {
   // REFERRER rewards as the daily/monthly cap allows within the trailing window.
   // Counts committed REFERRER grants (grantedAt), so the (cap+1)th referral is
   // the one that gets held. A burst past the cap is the signature of a ring.
-  async function referrerOverVelocityCap(referrerId) {
-    const dayStart = new Date(now().getTime() - DAY_MS);
-    const monthStart = new Date(now().getTime() - 30 * DAY_MS);
+  async function referrerOverVelocityCap(store, referrerId, decisionTime) {
+    const dayStart = new Date(decisionTime.getTime() - DAY_MS);
+    const monthStart = new Date(decisionTime.getTime() - 30 * DAY_MS);
     const [dayCount, monthCount] = await Promise.all([
-      db.referralRewardGrant.count({
+      store.referralRewardGrant.count({
         where: {
           userId: referrerId,
           role: "REFERRER",
           grantedAt: { gte: dayStart },
         },
       }),
-      db.referralRewardGrant.count({
+      store.referralRewardGrant.count({
         where: {
           userId: referrerId,
           role: "REFERRER",
@@ -82,88 +80,82 @@ function buildGrantReferralRewardsForRace(dependencies = {}) {
   }
 
   // Process one PENDING attribution. Returns REFERRAL_REWARDED payloads to emit.
-  async function grantForReferral(referral) {
+  async function grantForReferral(initialReferral) {
     const events = [];
-
-    // Attribution-window check: a stale PENDING attribution never pays out.
-    const ageMs = now().getTime() - new Date(referral.createdAt).getTime();
-    if (ageMs > QUALIFY_WINDOW_DAYS * DAY_MS) {
-      await db.referral.update({
-        where: { id: referral.id },
-        data: { status: "EXPIRED" },
-      });
-      return events;
-    }
-
-    // Review/demo-account exclusion (§8.10): a review-account referee never
-    // triggers a payout. Mark EXCLUDED (terminal) so it doesn't re-process on
-    // every later race.
-    if (await isReviewAccount(referral.refereeId)) {
-      await db.referral.update({
-        where: { id: referral.id },
-        data: { status: "EXCLUDED" },
-      });
-      return events;
-    }
-
-    const { refereeSubHash } = referral;
-
-    // The referrer earns only if they still exist (referrerId not SetNull'd by
-    // account deletion) AND are not a review/demo account.
-    const referrerEligible =
-      referral.referrerId != null &&
-      !(await isReviewAccount(referral.referrerId));
-
-    // Velocity cap: hold the WHOLE referral (both sides) for manual review when
-    // the referrer is over the cap. Holding the referee too is intentional — a
-    // burst past the cap looks like a ring, so nothing auto-pays until a human
-    // clears it (flips FLAGGED -> PENDING or grants manually). Skipped when the
-    // referrer is ineligible (deleted/review) — there's no one to rate-limit.
-    if (referrerEligible && (await referrerOverVelocityCap(referral.referrerId))) {
-      await db.referral.update({
-        where: { id: referral.id },
-        data: { status: "FLAGGED" },
-      });
-      console.warn(
-        `Referral ${referral.id} held for review: referrer ${referral.referrerId} over velocity cap`
-      );
-      return events;
-    }
-
-    // Referrer side — skip if ineligible (deleted/review); the referee is still
-    // paid below.
-    if (referrerEligible) {
-      const paid = await grantRole({
-        referralId: referral.id,
-        userId: referral.referrerId,
-        role: "REFERRER",
-        refereeSubHash,
-        coins: REFERRER_REWARD_COINS,
-      });
-      if (paid) {
-        events.push({
-          referrerId: referral.referrerId,
-          refereeId: referral.refereeId,
+    const lockId = initialReferral.referrerId
+      ? `referral-velocity:${initialReferral.referrerId}`
+      : `referral:${initialReferral.id}`;
+    await withAdvisoryLock(lockId, async (tx) => {
+      const referral = await tx.referral.findUnique({ where: { id: initialReferral.id } });
+      if (!referral || referral.status !== "PENDING") return;
+      const decisionTime = now();
+      const ageMs = decisionTime.getTime() - new Date(referral.createdAt).getTime();
+      if (ageMs > QUALIFY_WINDOW_DAYS * DAY_MS) {
+        await tx.referral.update({ where: { id: referral.id }, data: { status: "EXPIRED" } });
+        return;
+      }
+      if (await isReviewAccount(tx, referral.refereeId)) {
+        await tx.referral.update({ where: { id: referral.id }, data: { status: "EXCLUDED" } });
+        return;
+      }
+      const referrerEligible =
+        referral.referrerId != null &&
+        !(await isReviewAccount(tx, referral.referrerId));
+      if (
+        referrerEligible &&
+        (await referrerOverVelocityCap(tx, referral.referrerId, decisionTime))
+      ) {
+        await tx.referral.update({ where: { id: referral.id }, data: { status: "FLAGGED" } });
+        console.warn(
+          `Referral ${referral.id} held for review: referrer ${referral.referrerId} over velocity cap`
+        );
+        return;
+      }
+      const roleGrants = [];
+      if (referrerEligible) {
+        roleGrants.push({
+          referralId: referral.id,
+          userId: referral.referrerId,
+          role: "REFERRER",
+          refereeSubHash: referral.refereeSubHash,
           coins: REFERRER_REWARD_COINS,
         });
       }
-    }
-
-    // Referee side (double-sided) — independent of the referrer grant, so a
-    // P2002 on one role never blocks the other (§5C.6).
-    await grantRole({
-      referralId: referral.id,
-      userId: referral.refereeId,
-      role: "REFEREE",
-      refereeSubHash,
-      coins: REFEREE_REWARD_COINS,
-    });
-
-    await db.referral.update({
-      where: { id: referral.id },
-      data: { status: "REWARDED" },
-    });
-
+      roleGrants.push({
+        referralId: referral.id,
+        userId: referral.refereeId,
+        role: "REFEREE",
+        refereeSubHash: referral.refereeSubHash,
+        coins: REFEREE_REWARD_COINS,
+      });
+      roleGrants.sort((a, b) => String(a.userId).localeCompare(String(b.userId)));
+      for (const roleGrant of roleGrants) {
+        const paid = await grantRole(tx, roleGrant);
+        if (paid && roleGrant.role === "REFERRER") {
+          events.push({
+            referrerId: referral.referrerId,
+            refereeId: referral.refereeId,
+            coins: REFERRER_REWARD_COINS,
+          });
+        }
+      }
+      await tx.referral.update({ where: { id: referral.id }, data: { status: "REWARDED" } });
+      if (referral.sourceRaceId) {
+        await recordServerActivationEvent({
+          db: tx,
+          id: `server:race-share-qualified:${referral.id}`,
+          userId: referral.referrerId || referral.refereeId,
+          name: "race_share_referral_qualified",
+          context: {
+            source_race_id: referral.sourceRaceId,
+            qualification_latency_seconds: String(
+              Math.max(0, Math.floor(ageMs / 1000))
+            ),
+          },
+          occurredAt: decisionTime,
+        });
+      }
+    }, { prisma: db });
     return events;
   }
 
@@ -215,7 +207,10 @@ function buildGrantReferralRewardsForRace(dependencies = {}) {
       }
 
       const realParticipants = race.participants.filter(
-        (p) => p.status === "ACCEPTED" && (p.totalSteps || 0) > 0
+        (p) =>
+          p.status === "ACCEPTED" &&
+          typeof p.rawSteps === "number" &&
+          p.rawSteps >= 2000
       );
       const isQualifyingRace =
         race.seedId == null && realParticipants.length >= 2;
@@ -226,7 +221,8 @@ function buildGrantReferralRewardsForRace(dependencies = {}) {
         (p) =>
           p.status === "ACCEPTED" &&
           p.placement != null &&
-          (p.totalSteps || 0) > 0
+          typeof p.rawSteps === "number" &&
+          p.rawSteps >= 2000
       );
       if (finishers.length === 0) return events;
 
@@ -238,6 +234,9 @@ function buildGrantReferralRewardsForRace(dependencies = {}) {
           status: "PENDING",
         },
       });
+      referrals.sort((a, b) =>
+        String(a.refereeId || "").localeCompare(String(b.refereeId || ""))
+      );
 
       for (const referral of referrals) {
         // Per-referral isolation: a concurrent manual redeem may replace a

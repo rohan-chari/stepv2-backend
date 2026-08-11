@@ -480,8 +480,9 @@ model CoinTransaction {
 }
 
 // Privacy-bounded product activation telemetry. userId is always derived from
-// the authenticated session; context is validated against a small allowlist at
-// ingestion and never contains names, race IDs, health/step data, or ad IDs.
+// the authenticated session (or a durable server-owned lifecycle write);
+// context is validated/built from a small allowlist and never contains names,
+// health/step data, or ad IDs. Opaque race IDs are allowed for funnel joins.
 model ActivationEvent {
   id                  String   @id
   userId              String   @map("user_id")
@@ -878,6 +879,12 @@ model Race {
   // = the even split shipped today; "GEOMETRIC" = the top-heavy 0.7 decay.
   // Only createSeededRace ever writes it. Not serialized to clients.
   payoutCurve          String?          @map("payout_curve")
+  // Next-race quick-create provenance. Both are nullable so every existing
+  // race and every frozen client remains on the legacy/manual-start path.
+  // Prisma does not model the predicate-specific indexes added by the raw
+  // migration; that schema drift is intentional and those indexes must remain.
+  creationSource       String?          @map("creation_source")
+  startPolicy          String?          @map("start_policy")
   // Batch 2026-08-08 item 5: team-race prize-pool multiplier, in basis points,
   // STAMPED AT CREATION from the TEAM_POOL_MULT_* envs and read by BOTH the
   // live projection and settlement so the two can never disagree.
@@ -1385,6 +1392,7 @@ model Referral {
   // whether an explicit manual redeem may REPLACE a weak `ip_fallback_net`
   // guess (see that command) — so a wrong tier-2 match can never be permanent.
   source         String?
+  sourceRaceId   String?  @map("source_race_id")
   createdAt      DateTime @default(now()) @map("created_at")
 
   referrer     User?                 @relation("ReferralsMade", fields: [referrerId], references: [id], onDelete: SetNull)
@@ -1668,15 +1676,16 @@ model BalanceConfig {
 // race share links). One row per page view; feeds the invite-funnel numbers in
 // GET /admin/stats. Append-only, no user linkage (the viewer is anonymous).
 model LinkOpen {
-  id        String   @id @default(uuid())
-  kind      String // "referral" | "race_share"
-  code      String? // normalized referral code, or the race share token
+  id           String   @id @default(uuid())
+  kind         String // "referral" | "race_share"
+  code         String? // normalized referral code, or the race share token
+  sourceRaceId String?  @map("source_race_id")
   // SHA-256 hash of the viewer's client IP (never the raw IP — the viewer is
   // anonymous and stays that way). Powers IP-correlated deferred referral
   // attribution: a codeless signup from the same hashed IP within the fallback
   // window attributes to the code opened here. Nullable/additive — old rows and
   // opens with no resolvable IP simply never match.
-  ipHash    String?  @map("ip_hash")
+  ipHash       String?  @map("ip_hash")
   // SHA-256 hash of the viewer's NETWORK PREFIX (IPv4 /24, IPv6 /64) — tier 2
   // of the two-tier fallback. The exact-IP match breaks whenever the landing
   // page and the app egress from different addresses on the same network
@@ -1687,8 +1696,8 @@ model LinkOpen {
   // two days of deploy, so no backfill. A NULL here must NEVER be used as a
   // match key — `where: { ipNetHash: null }` would match every legacy row at
   // once; findLinkOpenReferralCode skips tier 2 entirely on a null hash.
-  ipNetHash String?  @map("ip_net_hash")
-  createdAt DateTime @default(now()) @map("created_at")
+  ipNetHash    String?  @map("ip_net_hash")
+  createdAt    DateTime @default(now()) @map("created_at")
 
   @@index([kind, createdAt])
   @@index([ipHash, createdAt])

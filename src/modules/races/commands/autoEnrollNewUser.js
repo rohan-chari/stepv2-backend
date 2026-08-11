@@ -78,7 +78,7 @@ function buildAutoEnrollNewUser(dependencies = {}) {
               actorUserId: user.id,
               eventType: "POWERUP_EARNED",
               powerupType: "MYSTERY_BOX",
-              description: "Welcome gift — a mystery box!",
+              description: "Welcome gift. A mystery box!",
             },
           });
           earnedEvents.push({

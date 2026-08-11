@@ -29,7 +29,7 @@ function buildLeaveTournament(dependencies = {}) {
         // leave-only rule, kept inline.
         if (tournament.creatorId === userId) {
           throw new TournamentError(
-            "The creator can't leave — cancel the tournament instead",
+            "The creator can't leave. Cancel the tournament instead",
             400,
             "CREATOR_CANNOT_LEAVE"
           );

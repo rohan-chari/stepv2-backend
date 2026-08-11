@@ -68,13 +68,13 @@ function buildLeaveRace(dependencies = {}) {
     }
     if (race.creatorId === userId) {
       throw new RaceLeaveError(
-        "The race creator can't leave — cancel the race instead",
+        "The race creator can't leave. Cancel the race instead",
         400
       );
     }
     if (race.status === "ACTIVE") {
       throw new RaceLeaveError(
-        "The race has already started — you can forfeit instead",
+        "The race has already started. You can forfeit instead",
         409,
         "RACE_ALREADY_STARTED"
       );

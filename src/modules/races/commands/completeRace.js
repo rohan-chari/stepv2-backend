@@ -20,6 +20,7 @@ const {
 const {
   computeSettledRacePool,
   settlementPlayerCount,
+  quickSettlementParticipants,
 } = require("../racePrizePool");
 const {
   computeFinishRewardPool,
@@ -324,7 +325,8 @@ function buildCompleteRace(dependencies = {}) {
     // nothing, then stamped so the numbers freeze.
     const isFundedRace = race?.fundedPrize === true;
     if (isFundedRace) {
-      const rankedParticipants = (race.participants || [])
+      const quickQualifiers = quickSettlementParticipants(race, race.participants);
+      const rankedParticipants = (quickQualifiers || race.participants || [])
         .filter((participant) => participant.placement != null)
         .sort((a, b) => a.placement - b.placement);
       const pool = computeSettledRacePool({
@@ -335,7 +337,11 @@ function buildCompleteRace(dependencies = {}) {
       // the projection the players were shown. Same helper the read paths use, so
       // the pool and the number of paid places can never be sized on different
       // fields.
-      const settledFieldSize = settlementPlayerCount(race.participants);
+      const settledFieldSize = quickQualifiers
+        ? quickQualifiers.length >= 2
+          ? quickQualifiers.length
+          : 0
+        : settlementPlayerCount(race.participants);
       const payouts = computeFundedPayouts({
         preset: race.payoutPreset || "WINNER_TAKES_ALL",
         poolCoins: pool,
@@ -345,13 +351,23 @@ function buildCompleteRace(dependencies = {}) {
         curve: race.payoutCurve ?? null,
       });
 
+      const fundedAwards = [];
       for (let index = 0; index < payouts.length; index++) {
         const placement = index + 1;
         const amount = payouts[index] || 0;
         if (amount <= 0) continue;
         const recipient = rankedParticipants[index];
         if (!recipient) continue;
-
+        fundedAwards.push({ recipient, placement, amount });
+      }
+      // Quick-race settlement shares the C0 global participant-write order.
+      // Legacy settlement retains its historical placement order.
+      if (quickQualifiers) {
+        fundedAwards.sort((a, b) =>
+          String(a.recipient.userId).localeCompare(String(b.recipient.userId))
+        );
+      }
+      for (const { recipient, placement, amount } of fundedAwards) {
         await payoutRacePrizePool({
           awardCoinsFn,
           userId: recipient.userId,

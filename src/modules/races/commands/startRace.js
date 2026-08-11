@@ -7,6 +7,7 @@ const { isRacePayoutPresetCompatible } = require("../racePayoutPresets");
 
 const { acceptedTeamCounts } = require("../teamRaces");
 const { snapshotBaselineFields } = require("../services/raceBaseline");
+const { commitRaceStart } = require("../services/commitRaceStart");
 
 class RaceStartError extends Error {
   constructor(message, statusCode, code) {
@@ -24,7 +25,15 @@ function buildStartRace(dependencies = {}) {
   const stepsModel = dependencies.Steps || Steps;
   const eventModel = dependencies.RacePowerupEvent || RacePowerupEvent;
   const events = dependencies.eventBus || eventBus;
+  const commitRaceStartFn = dependencies.commitRaceStart || commitRaceStart;
+  const beforeCommitRaceStart = dependencies.beforeCommitRaceStart;
+  const beforeRaceStartedRecord = dependencies.beforeRaceStartedRecord;
   const now = dependencies.now || (() => new Date());
+  const useDurableStart =
+    !dependencies.Race &&
+    !dependencies.RaceParticipant &&
+    !dependencies.Steps &&
+    !dependencies.RacePowerupEvent;
 
   // 1.1.7: `bypassSchedule` lets the autoStartScheduledRaces cron job start a
   // scheduled race at the scheduled moment (it pins `now` to scheduledStartAt so
@@ -76,14 +85,20 @@ function buildStartRace(dependencies = {}) {
         counts.TEAM_A !== counts.TEAM_B
       ) {
         throw new RaceStartError(
-          `Teams must be even to start — currently ${counts.TEAM_A}v${counts.TEAM_B}`,
+          `Teams must be even to start. Currently ${counts.TEAM_A}v${counts.TEAM_B}`,
           409,
           "TEAMS_UNEVEN"
         );
       }
     }
 
+    const quickTwoPersonTop3 =
+      race.creationSource === "QUICK_CREATE" &&
+      race.startPolicy === "ON_MINIMUM_PARTICIPANTS" &&
+      race.payoutPreset === "TOP3_70_20_10" &&
+      acceptedCount >= 2;
     if (
+      !quickTwoPersonTop3 &&
       !isRacePayoutPresetCompatible({
         preset: race.payoutPreset || "WINNER_TAKES_ALL",
         acceptedCount,
@@ -107,6 +122,64 @@ function buildStartRace(dependencies = {}) {
       }
       return sum;
     }, 0);
+
+    if (useDurableStart) {
+      const participantUpdates = [];
+      for (const participant of [...acceptedParticipants].sort((a, b) =>
+        a.userId.localeCompare(b.userId)
+      )) {
+        const fields = await snapshotBaselineFields({
+          participant,
+          race,
+          startedAt,
+          stepsModel,
+        });
+        if ((participant.buyInAmount || 0) > 0 && participant.buyInStatus === "HELD") {
+          fields.buyInStatus = "COMMITTED";
+        }
+        participantUpdates.push({
+          id: participant.id,
+          userId: participant.userId,
+          fields,
+        });
+      }
+      if (beforeCommitRaceStart) {
+        await beforeCommitRaceStart({ raceId, participantUpdates });
+      }
+      const committed = await commitRaceStartFn({
+        raceId,
+        actorUserId: userId,
+        startedAt,
+        endsAt,
+        potCoins: (race.potCoins || 0) + heldPot,
+        participantUpdates,
+        beforeRaceStartedRecord,
+      });
+      if (committed.participantChanged) {
+        // A join committed while baselines were being read. Retry from a fresh
+        // race/participant snapshot; the first transaction wrote nothing.
+        return startRace({ userId, raceId, bypassSchedule, now: nowOverride });
+      }
+      if (!committed.started) return raceModel.findById(raceId);
+
+      const participantUserIds = participantUpdates.map((p) => p.userId);
+      events.emit("RACE_STARTED", {
+        raceId,
+        raceName: race.name,
+        creatorUserId: userId,
+        participantUserIds,
+        isTeamRace: race.isTeamRace === true,
+        teamAName: race.teamAName ?? null,
+        teamBName: race.teamBName ?? null,
+      });
+      try {
+        await require("../../social/services/raceMessagesCache").invalidateKind(
+          raceId,
+          "SYSTEM"
+        );
+      } catch {}
+      return raceModel.findById(raceId);
+    }
 
     // Conditional flip: claim the PENDING -> ACTIVE transition. The status check
     // at line 36 is a read (TOCTOU) — two concurrent starters (manual Start vs the

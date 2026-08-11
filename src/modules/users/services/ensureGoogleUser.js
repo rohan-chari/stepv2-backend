@@ -107,6 +107,7 @@ function buildEnsureGoogleUser(dependencies = {}) {
     email,
     name,
     referralCode,
+    referralSourceRaceId = null,
     // Same IP-correlated fallback as ensureAppleUser — create branch only,
     // best-effort (see findLinkOpenReferralCode.js).
     fallbackReferralCode,
@@ -134,6 +135,7 @@ function buildEnsureGoogleUser(dependencies = {}) {
       // correctly (the appleId||googleSub provider-sub parity).
       const attribution = await resolveSignupAttribution({
         referralCode,
+        referralSourceRaceId,
         fallbackReferralCode,
         signupId: user.id,
       });
@@ -141,6 +143,7 @@ function buildEnsureGoogleUser(dependencies = {}) {
         newUser: user,
         referralCode: attribution.code,
         source: attribution.source,
+        sourceRaceId: attribution.sourceRaceId,
       });
       // FRESHNESS: see the identical block in ensureAppleUser — `user` predates
       // recordReferral's `referredByCode` write, and merging on anything less

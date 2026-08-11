@@ -2,6 +2,7 @@ const { prisma } = require("../../../db");
 const { User } = require("../../users/models/user");
 const { hashAppleSub } = require("../../users/appleSubHash");
 const { normalizeReferralCode } = require("../../../shared/lib/referralCode");
+const { recordServerActivationEvent } = require("../../analytics/serverActivationEvents");
 
 // Best-effort, NEVER-throws attribution writer (M1). Called only from the
 // new-user create branch of the provisioners, so:
@@ -33,7 +34,12 @@ function buildRecordReferral(dependencies = {}) {
   // `source` records WHICH MECHANISM produced this attribution
   // (provision_body | ip_fallback_exact | ip_fallback_net). Optional and
   // defaulted to null so every pre-existing caller and test is unaffected.
-  return async function recordReferral({ newUser, referralCode, source = null }) {
+  return async function recordReferral({
+    newUser,
+    referralCode,
+    source = null,
+    sourceRaceId = null,
+  }) {
     try {
       if (!newUser || !newUser.id) return DECLINED;
 
@@ -59,7 +65,7 @@ function buildRecordReferral(dependencies = {}) {
       if (!refereeSubHash) return DECLINED; // no stable identity to gate on → skip
 
       await db.$transaction(async (tx) => {
-        await tx.referral.create({
+        const referral = await tx.referral.create({
           data: {
             referrerId: referrer.id,
             refereeId: newUser.id,
@@ -67,6 +73,7 @@ function buildRecordReferral(dependencies = {}) {
             code,
             status: "PENDING",
             source,
+            sourceRaceId: sourceRaceId || null,
           },
         });
         // Audit-only mirror on the user row (the Referral table is the source
@@ -75,6 +82,18 @@ function buildRecordReferral(dependencies = {}) {
           where: { id: newUser.id },
           data: { referredByCode: code },
         });
+        if (sourceRaceId) {
+          await recordServerActivationEvent({
+            db: tx,
+            id: `server:race-share-attributed:${referral.id}`,
+            userId: referrer.id,
+            name: "race_share_referral_attributed",
+            context: {
+              source_race_id: sourceRaceId,
+              deferred_install: "true",
+            },
+          });
+        }
       });
 
       // Auto-friend the pair (product decision 2026-07-12): accepting the

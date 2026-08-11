@@ -278,7 +278,7 @@ function registerNotificationHandlers(dependencies = {}) {
         actorUserId: creatorUserId,
         title: "Teams are uneven",
         buildBody: () =>
-          "Your race couldn't start — teams are uneven. Even them up and it'll start on the next check!",
+          "Your race couldn't start. Teams are uneven. Even them up and it'll start on the next check!",
         payload: {
           type: "TEAM_RACE_SCHEDULED_UNEVEN",
           route: "race_detail",
@@ -311,7 +311,7 @@ function registerNotificationHandlers(dependencies = {}) {
       // TR-684: team races get team-framed start copy.
       const startBody =
         isTeamRace && teamAName && teamBName
-          ? `The team race "${raceName}" has started — ${teamAName} vs ${teamBName}. Go!`
+          ? `The team race "${raceName}" has started. ${teamAName} vs ${teamBName}. Go!`
           : `The race "${raceName}" has started! Go!`;
       for (const participantUserId of participantUserIds) {
         if (participantUserId === creatorUserId) continue;
@@ -358,7 +358,7 @@ function registerNotificationHandlers(dependencies = {}) {
         actorUserId: null,
         title: "Race ending soon",
         buildBody: () =>
-          `${label} ends in about ${hoursText} — time for a final push.`,
+          `${label} ends in about ${hoursText}. Time for a final push.`,
         payload: {
           type: "RACE_ENDING_SOON",
           route: "race_detail",
@@ -418,7 +418,7 @@ function registerNotificationHandlers(dependencies = {}) {
         title: title || "Coins waiting! 🪙",
         buildBody: () =>
           body ||
-          "You crossed a step milestone today — collect your coins before midnight.",
+          "You crossed a step milestone today. Collect your coins before midnight.",
         payload: {
           type: "STEP_MILESTONE_REMINDER",
           route: "home",
@@ -457,14 +457,14 @@ function registerNotificationHandlers(dependencies = {}) {
         let buildBody;
         if (isTeamResult) {
           if (tie === true) {
-            buildBody = () => `It's a tie — buy-ins refunded.`;
+            buildBody = () => `It's a tie. Buy-ins refunded.`;
           } else {
             const recipientTeam = (memberTeams || {})[participantUserId] || null;
             const won = recipientTeam != null && recipientTeam === winnerTeam;
             buildBody = won
               ? () => `${winnerTeamName || "Your team"} win! Great racing.`
               : () =>
-                  `${winnerTeamName || "The other team"} took it — better luck next time, ${loserTeamName || "team"}.`;
+                  `${winnerTeamName || "The other team"} took it. Better luck next time, ${loserTeamName || "team"}.`;
           }
         } else {
           buildBody = (winnerName) => `${winnerName} won the race!`;
@@ -596,11 +596,11 @@ function registerNotificationHandlers(dependencies = {}) {
         const recipientTeam = (memberTeams || {})[recipientUserId] || null;
         let body;
         if (leading == null) {
-          body = `${timeLeft} left in ${raceName || "your race"} — it's dead even. Every step counts!`;
+          body = `${timeLeft} left in ${raceName || "your race"} and it's dead even. Every step counts!`;
         } else if (recipientTeam === leading) {
-          body = `${timeLeft} left — you're up ${diff.toLocaleString()}, hold the lead!`;
+          body = `${timeLeft} left. You're up ${diff.toLocaleString()}, hold the lead!`;
         } else {
-          body = `${timeLeft} left — your team is down ${diff.toLocaleString()} steps. Rally!`;
+          body = `${timeLeft} left. Your team is down ${diff.toLocaleString()} steps. Rally!`;
         }
 
         await sendNotificationToUser({
@@ -638,7 +638,7 @@ function registerNotificationHandlers(dependencies = {}) {
         actorUserId: userId,
         title: "Your team believes in you!",
         buildBody: () =>
-          `${teamName || "Your team"} could use a few more steps in ${raceName || "your race"} — even a quick stroll helps. You've got this!`,
+          `${teamName || "Your team"} could use a few more steps in ${raceName || "your race"} . Even a quick stroll helps. You've got this!`,
         payload: {
           type: "TEAM_SLACKER_NUDGE",
           route: "race_detail",
@@ -673,7 +673,7 @@ function registerNotificationHandlers(dependencies = {}) {
           // Batch 2026-08-09 item 2: "with friends" is now load-bearing, not
           // flavour — a seeded daily/weekly no longer qualifies, so the payout
           // really did come from a race with other real people.
-          `${friendName} finished their first race with friends — you earned ${coins} coins!`,
+          `${friendName} finished their first race with friends. You earned ${coins} coins!`,
         payload: {
           type: "REFERRAL_REWARDED",
           route: "home",
@@ -724,7 +724,7 @@ function registerNotificationHandlers(dependencies = {}) {
           actorUserId: null,
           title: `${mult}x STEPS EVENT`,
           buildBody: () =>
-            `Double steps are LIVE for 30 minutes — every step counts ${mult}x in your races! Go!`,
+            `Double steps are LIVE for 30 minutes. Every step counts ${mult}x in your races! Go!`,
           payload: {
             type: "GLOBAL_EVENT_STARTED",
             route: "home",
@@ -777,7 +777,7 @@ function registerNotificationHandlers(dependencies = {}) {
     // frozen binary can't render the type, and naming it would be the one thing
     // that turns an unexplained score change into an incomprehensible one.
     HITCHHIKE: (attackerName) =>
-      `🎒 ${attackerName} linked to your steps! Whatever you walk, they copy — you keep every step.`,
+      `🎒 ${attackerName} linked to your steps! Whatever you walk, they copy. You keep every step.`,
     // §3.4: Quicksand standardizes to a 1h freeze window (was 2h); it is never
     // upgradeable, so the window is fixed.
     QUICKSAND: (attackerName) => `${attackerName} froze your steps for 1 hour!`,
@@ -1116,7 +1116,7 @@ function registerNotificationHandlers(dependencies = {}) {
         body = `You took 1st in ${label}.`;
       } else if (payoutDrop) {
         title = "Out of the payout";
-        body = `You dropped to ${ordinal(placement)} in ${label} — out of the prize places.`;
+        body = `You dropped to ${ordinal(placement)} in ${label}. You're out of the prize places.`;
       } else {
         // lostFirst
         title = lostLeadTitle;
@@ -1240,7 +1240,7 @@ function registerNotificationHandlers(dependencies = {}) {
       const title = "🔥 Someone's heating up";
       const body =
         `${name}'s multiplier is stacked at ${mult != null ? `${mult}x` : "a high multiplier"}` +
-        ` — slow them down or catch up!`;
+        `. Slow them down or catch up!`;
       const payload = {
         type: "HIGH_MULTIPLIER_ALERT",
         route: "race_detail",
@@ -1336,7 +1336,7 @@ function registerNotificationHandlers(dependencies = {}) {
         actorUserId: creatorUserId,
         title: "Tournament invite",
         buildBody: (creatorName) =>
-          `${creatorName} invited you to ${tournamentName} — ${bracketSize} racers, ${prize}`,
+          `${creatorName} invited you to ${tournamentName}. ${bracketSize} racers, ${prize}`,
         payload: {
           type: "TOURNAMENT_INVITE_SENT",
           route: "tournament_detail",
@@ -1361,7 +1361,7 @@ function registerNotificationHandlers(dependencies = {}) {
         actorUserId: null,
         title: "The bracket is set!",
         buildBody: () =>
-          `Round 1: you vs ${opponentName}. ${days}d — go!`,
+          `Round 1: you vs ${opponentName}. ${days}d. Go!`,
         payload: {
           type: "TOURNAMENT_STARTED",
           route: "race_detail",
@@ -1507,7 +1507,7 @@ function registerNotificationHandlers(dependencies = {}) {
       if (!userId) return;
       const body =
         buyInAmount && buyInAmount > 0
-          ? `${tournamentName} was called off — your ${buyInAmount} coins are back.`
+          ? `${tournamentName} was called off. Your ${buyInAmount} coins are back.`
           : `${tournamentName} was called off.`;
       await sendNotificationToUser({
         eventName: "TOURNAMENT_CANCELLED",
@@ -1544,8 +1544,8 @@ function registerNotificationHandlers(dependencies = {}) {
       const climbed = movement > 0;
       const title = climbed ? "You're climbing!" : "You slipped";
       const body = climbed
-        ? `You moved up ${spots} ${spots === 1 ? "spot" : "spots"} in ${label} today — now ${ordinal(placement)}.`
-        : `You dropped ${spots} ${spots === 1 ? "spot" : "spots"} in ${label} today — now ${ordinal(placement)}.`;
+        ? `You moved up ${spots} ${spots === 1 ? "spot" : "spots"} in ${label} today. Now ${ordinal(placement)}.`
+        : `You dropped ${spots} ${spots === 1 ? "spot" : "spots"} in ${label} today. Now ${ordinal(placement)}.`;
 
       const payload = {
         type: "DAILY_MOVER",

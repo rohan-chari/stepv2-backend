@@ -280,7 +280,7 @@ function buildForfeitRace(dependencies = {}) {
         raceId,
         actorUserId: userId,
         eventType: "PARTICIPANT_FORFEITED",
-        description: `${participant.user?.displayName || "A runner"} forfeited — their steps stay with the team.`,
+        description: `${participant.user?.displayName || "A runner"} forfeited. Their steps stay with the team.`,
         metadata: { frozenTotal, team: participant.team },
       });
     } catch {

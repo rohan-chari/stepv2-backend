@@ -49,6 +49,7 @@ const {
 const { hashClientIp, hashClientNet } = require("../../shared/lib/clientIp");
 const { appSettings: defaultAppSettings } = require("../../shared/config/appSettings");
 const authMeCache = require("./services/authMeCache");
+const { prisma } = require("../../db");
 
 // Version-gated omission of `featureFlags.stepSampleBucketMinutes` (2026-07-23
 // incident #2). Shared by `withRuntimeFlags` (which decides whether to emit the
@@ -92,6 +93,18 @@ function createAuthRouter(dependencies = {}) {
       ipNetHash: hashClientNet(req),
       signupId,
     });
+  const referralSourceRaceIdFor = async (token) => {
+    if (typeof token !== "string" || !token) return null;
+    try {
+      const race = await prisma.race.findUnique({
+        where: { shareToken: token },
+        select: { id: true },
+      });
+      return race?.id || null;
+    } catch {
+      return null;
+    }
+  };
   const updateDisplayName = dependencies.setDisplayName || defaultSetDisplayName;
   const createProfilePhotoUpload =
     dependencies.createProfilePhotoUpload ||
@@ -186,6 +199,18 @@ function createAuthRouter(dependencies = {}) {
           "onboardingInviteCodeEnabled",
           true
         ),
+        openUserRaceDiscoveryEnabled: await safeFlag(
+          "openUserRaceDiscoveryEnabled",
+          false
+        ),
+        quickCreateRaceCtaEnabled: await safeFlag(
+          "quickCreateRaceCtaEnabled",
+          false
+        ),
+        setupInviteCodePromptEnabled: await safeFlag(
+          "setupInviteCodePromptEnabled",
+          false
+        ),
         // Additive (batch 2026-08-09 item 9), same shape and same reasoning as
         // the v3 flag above: an unknown key is ignored by every shipped binary,
         // so serving it is inert until a mandatory-capable build reads it.
@@ -221,8 +246,14 @@ function createAuthRouter(dependencies = {}) {
   // older backends ignored it, so it's safe both ways (CLAUDE.md old-client rule).
   router.post("/apple", async (req, res) => {
     try {
-      const { identityToken, userIdentifier, email, name, referralCode } =
-        req.body;
+      const {
+        identityToken,
+        userIdentifier,
+        email,
+        name,
+        referralCode,
+        referralSourceRaceToken,
+      } = req.body;
 
       if (!identityToken) {
         return res.status(400).json({ error: "identityToken is required" });
@@ -239,6 +270,9 @@ function createAuthRouter(dependencies = {}) {
         email: email || appleIdentity.email,
         name,
         referralCode,
+        referralSourceRaceId: referralCode
+          ? await referralSourceRaceIdFor(referralSourceRaceToken)
+          : null,
         fallbackReferralCode: fallbackCodeFor(req),
         emitSignInEvent: true,
       });
@@ -271,7 +305,7 @@ function createAuthRouter(dependencies = {}) {
   // additive/optional (old clients omit it; old backends ignored it).
   router.post("/google", async (req, res) => {
     try {
-      const { idToken, email, name, referralCode } = req.body;
+      const { idToken, email, name, referralCode, referralSourceRaceToken } = req.body;
 
       if (!idToken) {
         return res.status(400).json({ error: "idToken is required" });
@@ -284,6 +318,9 @@ function createAuthRouter(dependencies = {}) {
         email: email || googleIdentity.email,
         name,
         referralCode,
+        referralSourceRaceId: referralCode
+          ? await referralSourceRaceIdFor(referralSourceRaceToken)
+          : null,
         fallbackReferralCode: fallbackCodeFor(req),
         emitSignInEvent: true,
       });

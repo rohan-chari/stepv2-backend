@@ -9,7 +9,7 @@ const {
 // SKIPS it (stays PENDING), notifies the creator once (first failed attempt
 // only), and retries next tick.
 function unevenError() {
-  const err = new Error("Teams must be even to start — currently 2v1");
+  const err = new Error("Teams must be even to start. Currently 2v1");
   err.name = "RaceStartError";
   err.statusCode = 409;
   err.code = "TEAMS_UNEVEN";

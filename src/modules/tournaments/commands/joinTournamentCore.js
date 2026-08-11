@@ -155,7 +155,7 @@ function buildJoinTournamentCore(dependencies = {}) {
           });
           if (aliveElsewhere) {
             throw new TournamentError(
-              "You're already in this featured tournament — finish it first",
+              "You're already in this featured tournament. Finish it first",
               409,
               "ALREADY_IN_FEATURED"
             );

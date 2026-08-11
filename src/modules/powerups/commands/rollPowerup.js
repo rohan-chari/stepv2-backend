@@ -209,7 +209,7 @@ function buildRollPowerup(dependencies = {}) {
               eventType: "POWERUP_EARNED",
               powerupType: "MYSTERY_BOX",
               description: queued
-                ? `${displayName || "A runner"} earned a mystery box! (queued — inventory full)`
+                ? `${displayName || "A runner"} earned a mystery box! (queued, inventory full)`
                 : `${displayName || "A runner"} earned a mystery box!`,
             },
           });
@@ -240,7 +240,7 @@ function buildRollPowerup(dependencies = {}) {
             actorUserId: userId,
             eventType: "POWERUP_FORFEITED",
             powerupType: "MYSTERY_BOX",
-            description: `${displayName || "A runner"} forfeited ${forfeitedCount} ${boxWord} — open your queued box first!`,
+            description: `${displayName || "A runner"} forfeited ${forfeitedCount} ${boxWord}. Open your queued box first!`,
           },
         });
       }

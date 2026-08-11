@@ -4,6 +4,11 @@ const { buildJoinRaceCore } = require("./joinRaceCore");
 const {
   buildMaybeAutoStartPrivateRace,
 } = require("../jobs/privateRaceAutoStart");
+const {
+  withQuickMembershipLock,
+  countLiveQuickMemberships,
+} = require("../services/nextRacePolicy");
+const { RaceJoinError } = require("./joinRaceCore");
 
 // Thrown only for the share-token-specific failure: the token resolves to no
 // race (unknown/revoked link). All other join failures (full, already joined,
@@ -49,7 +54,7 @@ function buildJoinRaceByShareToken(dependencies = {}) {
       throw new RaceShareJoinError("Race not found", 404);
     }
 
-    const participant = await withLock(resolved.id, async () => {
+    const joinUnderRaceLock = () => withLock(resolved.id, async () => {
       // Re-read inside the lock for a fresh participant set, so concurrent joins
       // can't both slip past the capacity check (mirrors joinPublicRace).
       const race = await raceModel.findById(resolved.id);
@@ -59,6 +64,19 @@ function buildJoinRaceByShareToken(dependencies = {}) {
 
       return joinRaceCore({ race, userId, onboarding, team, clientFeatures });
     });
+    const participant =
+      resolved.creationSource === "QUICK_CREATE"
+      ? await withQuickMembershipLock(userId, async () => {
+          if (await countLiveQuickMemberships(userId) >= 3) {
+            throw new RaceJoinError(
+              "Finish or leave a quick race before joining another.",
+              409,
+              "QUICK_RACE_MEMBERSHIP_LIMIT"
+            );
+          }
+          return joinUnderRaceLock();
+        })
+      : await joinUnderRaceLock();
 
     // OUTSIDE the advisory lock, after the participant row has committed —
     // startRace must never run while the join lock is held (3e6c827).

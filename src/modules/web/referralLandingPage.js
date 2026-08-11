@@ -26,7 +26,7 @@ const theme = require("./theme");
 // landing-page module) — they are shown by the same disabled-Play-button
 // handler on two different pages.
 const PLAY_ALERT_MSG =
-  "Bara isn't on Android yet — it's on the App Store (iOS) today. " +
+  "Bara isn't on Android yet. It's on the App Store (iOS) today. " +
   "Join the Android waitlist at barastep.com and we'll email you when it's ready.";
 
 function shell({ title, description, body, links, showCta, scriptBody }) {
@@ -42,7 +42,7 @@ function shell({ title, description, body, links, showCta, scriptBody }) {
     : "";
   const ctaBlock = showCta
     ? `<button id="cta" class="cta-btn" type="button">Use my invite &amp; continue</button>
-    <div id="copied" class="copied">Invite copied — opening the App Store…</div>`
+    <div id="copied" class="copied">Invite copied. Opening the App Store…</div>`
     : "";
   return `<!DOCTYPE html>
 <html lang="en">
@@ -199,7 +199,7 @@ function renderReferralLandingPage(preview, links) {
     <div class="invite-body">
       ${avatar}
       <h1 class="invite-name">${escapeHtml(inviterName)} invited you to Bara</h1>
-      <div class="invite-sub">Finish a race with friends — you both earn coins. Daily &amp; weekly challenges don't count.</div>
+      <div class="invite-sub">Finish a race with friends. You both earn coins. Daily &amp; weekly challenges don't count.</div>
     </div>
   `;
 
@@ -215,7 +215,7 @@ function renderReferralNotFoundPage(links) {
     </div>
   `;
   return shell({
-    title: "Invite not found — Bara",
+    title: "Invite not found on Bara",
     description: "This invite link is no longer valid.",
     body,
     links,

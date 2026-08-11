@@ -1121,7 +1121,7 @@ function buildUsePowerup(dependencies = {}) {
       }
       if (asleep === true) {
         throw new PowerupUseError(
-          "That rival is likely asleep — Drill Sergeant is blocked from 10PM to 7AM their time.",
+          "That rival is likely asleep. Drill Sergeant is blocked from 10PM to 7AM their time.",
           400,
           "TARGET_ASLEEP"
         );
@@ -1312,7 +1312,7 @@ function buildUsePowerup(dependencies = {}) {
     if (type === "UPRISING" || type === "RALLY_FLAG" || type === "POWER_OUTAGE") {
       if (targetUserId) {
         throw new PowerupUseError(
-          `${POWERUP_NAMES[type]} is not aimed at a single racer — remove the target`,
+          `${POWERUP_NAMES[type]} is not aimed at a single racer. Remove the target`,
           400
         );
       }
@@ -1568,7 +1568,7 @@ function buildUsePowerup(dependencies = {}) {
     // race the fan-out is ENEMY-ONLY (teammates stay dry — TR-652).
     if (type === "RAINSTORM") {
       if (targetUserId) {
-        throw new PowerupUseError("Rainstorm hits every racer — you cannot specify a target", 400);
+        throw new PowerupUseError("Rainstorm hits every racer. You cannot specify a target", 400);
       }
       // B4: PER-CASTER limit. Each user may have one active storm at a time;
       // different users' storms may overlap (a victim under two storms is
@@ -1599,7 +1599,7 @@ function buildUsePowerup(dependencies = {}) {
     let resolvedTargetUserId = targetUserId;
     if (type === "RED_CARD") {
       if (targetUserId) {
-        throw new PowerupUseError("Red Card auto-targets the leader — you cannot specify a target", 400);
+        throw new PowerupUseError("Red Card auto-targets the leader. You cannot specify a target", 400);
       }
       const eligible = acceptedParticipants.filter(
         (p) => isAliveTarget(p) && isEnemy(p)
@@ -1613,7 +1613,7 @@ function buildUsePowerup(dependencies = {}) {
         throw new PowerupUseError("You cannot use Red Card while you are in the lead", 400);
       }
       if (sorted.length > 1 && leader.totalSteps === sorted[1].totalSteps) {
-        throw new PowerupUseError("Leaders are tied — wait until the tie is broken to use Red Card", 400);
+        throw new PowerupUseError("Leaders are tied. Wait until the tie is broken to use Red Card", 400);
       }
       resolvedTargetUserId = leader.userId;
     }
@@ -1641,7 +1641,7 @@ function buildUsePowerup(dependencies = {}) {
 
     if (type === "PINECONE_TOSS") {
       if (targetUserId) {
-        throw new PowerupUseError("Pinecone Toss targets by direction — choose front or behind", 400);
+        throw new PowerupUseError("Pinecone Toss targets by direction. Choose front or behind", 400);
       }
       if (!["FRONT", "BEHIND"].includes(targetDirection)) {
         throw new PowerupUseError("Pinecone Toss requires FRONT or BEHIND", 400);
@@ -1788,7 +1788,7 @@ function buildUsePowerup(dependencies = {}) {
 
     // Reject Shortcut on a target with 0 steps — nothing to steal
     if (type === "SHORTCUT" && targetParticipant && Math.max(0, targetParticipant.totalSteps) === 0) {
-      throw new PowerupUseError("Target has 0 steps — nothing to steal", 400);
+      throw new PowerupUseError("Target has 0 steps. Nothing to steal", 400);
     }
 
     // Reject stacking Leg Cramp on a target that already has one active
@@ -1820,7 +1820,7 @@ function buildUsePowerup(dependencies = {}) {
       );
       if (conflictingWT) {
         throw new PowerupUseError(
-          "Target is already on a Wrong Turn — wait for it to end",
+          "Target is already on a Wrong Turn. Wait for it to end",
           400,
           "TARGET_EFFECT_CONFLICT",
           { retainHeld: true }
@@ -1834,7 +1834,7 @@ function buildUsePowerup(dependencies = {}) {
       );
       if (conflictingCramp) {
         throw new PowerupUseError(
-          "Target is frozen by a Leg Cramp — wait for it to end",
+          "Target is frozen by a Leg Cramp. Wait for it to end",
           400,
           "TARGET_EFFECT_CONFLICT",
           { retainHeld: true }
@@ -1896,7 +1896,7 @@ function buildUsePowerup(dependencies = {}) {
       );
       if (liveLinks.some((e) => e.sourceUserId === userId)) {
         throw new PowerupUseError(
-          "You already have an active Hitchhike — wait for it to expire",
+          "You already have an active Hitchhike. Wait for it to expire",
           409,
           "HITCHHIKE_ALREADY_ACTIVE"
         );
@@ -1945,7 +1945,7 @@ function buildUsePowerup(dependencies = {}) {
       // ends — the guard must not outlast the pepper.
       if (existingPepper && isLiveTimedEffect(existingPepper, now())) {
         throw new PowerupUseError(
-          "You're still burning from a Ghost Pepper — wait for it to wear off",
+          "You're still burning from a Ghost Pepper. Wait for it to wear off",
           400,
           "GHOST_PEPPER_ALREADY_ACTIVE",
           { retainHeld: true }
@@ -2669,7 +2669,7 @@ function buildUsePowerup(dependencies = {}) {
           eventType: "POWERUP_USED",
           powerupType: type,
           targetUserId: resolvedTargetUserId,
-          description: `${myDisplayName} hitched a ride on ${targetDisplayName}! Every step ${targetDisplayName} takes for the next hour is copied to ${myDisplayName} — ${targetDisplayName} loses nothing.`,
+          description: `${myDisplayName} hitched a ride on ${targetDisplayName}! Every step ${targetDisplayName} takes for the next hour is copied to ${myDisplayName}. ${targetDisplayName} loses nothing.`,
         });
         break;
       }

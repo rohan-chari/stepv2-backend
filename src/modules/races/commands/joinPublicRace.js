@@ -4,6 +4,10 @@ const { buildJoinRaceCore, RaceJoinError } = require("./joinRaceCore");
 const {
   buildMaybeAutoStartPrivateRace,
 } = require("../jobs/privateRaceAutoStart");
+const {
+  withQuickMembershipLock,
+  countLiveQuickMemberships,
+} = require("../services/nextRacePolicy");
 
 // Browse-join: a user joins a PUBLIC race they found in the public races list.
 // Resolves the race by id, enforces the `isPublic` gate, then defers to the
@@ -31,7 +35,11 @@ function buildJoinPublicRace(dependencies = {}) {
     team = null,
     clientFeatures = null,
   }) {
-    const participant = await withLock(raceId, async () => {
+    const resolved = await raceModel.findById(raceId);
+    if (!resolved) {
+      throw new RaceJoinError("Race not found", 404, "RACE_NOT_FOUND");
+    }
+    const joinUnderRaceLock = () => withLock(raceId, async () => {
       const race = await raceModel.findById(raceId);
       if (!race) {
         throw new RaceJoinError("Race not found", 404, "RACE_NOT_FOUND");
@@ -49,6 +57,19 @@ function buildJoinPublicRace(dependencies = {}) {
 
       return joinRaceCore({ race, userId, onboarding, team, clientFeatures });
     });
+    const participant =
+      resolved.creationSource === "QUICK_CREATE"
+      ? await withQuickMembershipLock(userId, async () => {
+          if (await countLiveQuickMemberships(userId) >= 3) {
+            throw new RaceJoinError(
+              "Finish or leave a quick race before joining another.",
+              409,
+              "QUICK_RACE_MEMBERSHIP_LIMIT"
+            );
+          }
+          return joinUnderRaceLock();
+        })
+      : await joinUnderRaceLock();
 
     // OUTSIDE the advisory lock, after the participant row has committed.
     // startRace does per-participant step lookups + updates + push fan-out;

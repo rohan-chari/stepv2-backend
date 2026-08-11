@@ -40,7 +40,7 @@ function renderTournamentLandingPage(preview, links) {
       ? `${joined}/${bracketSize} in the bracket`
       : `${joined} in the bracket`;
 
-  const title = `${preview.name} — join the tournament on Bara`;
+  const title = `${preview.name}: join the tournament on Bara`;
   const description = `${hostName} invited you to the "${preview.name}" bracket. ${bracketLine}. Tap to join.`;
 
   const body = `
@@ -65,7 +65,7 @@ function renderTournamentNotFoundPage(links) {
     </div>
   `;
   return shell({
-    title: "Tournament not found — Bara",
+    title: "Tournament not found on Bara",
     description: "This tournament link is no longer valid.",
     body,
     links,

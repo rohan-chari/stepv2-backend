@@ -13,6 +13,9 @@ const {
   getAdExtraSpinStatus: defaultGetAdExtraSpinStatus,
 } = require("../economy/queries/getAdExtraSpinStatus");
 const defaultAdRewardsConfig = require("../economy/adRewards");
+const { appSettings } = require("../../shared/config/appSettings");
+const { getNextRaceHome } = require("../races/queries/getNextRaceHome");
+const { supportsNextRace } = require("../races/services/nextRacePolicy");
 
 function createHomeRouter(dependencies = {}) {
   const router = Router();
@@ -27,6 +30,7 @@ function createHomeRouter(dependencies = {}) {
   const getAdExtraSpinStatus =
     dependencies.getAdExtraSpinStatus || defaultGetAdExtraSpinStatus;
   const adRewardsConfig = dependencies.adRewardsConfig || defaultAdRewardsConfig;
+  const getNextRaceHomeFn = dependencies.getNextRaceHome || getNextRaceHome;
 
   router.use(requireAuth);
 
@@ -60,6 +64,40 @@ function createHomeRouter(dependencies = {}) {
       // frozen 2.0.x clients — which render the home character-power chip when
       // it is present and true — keep hiding the chip against this backend.
       result.characterPowersEnabled = false;
+
+      // Capability + flag gate is deliberately outside getHomeRaceCard: a
+      // frozen client performs none of the new eligibility/discovery queries.
+      if (supportsNextRace(req.clientFeatures)) {
+        try {
+          const [discoveryEnabled, createEnabled] = await Promise.all([
+            appSettings.getFlag("openUserRaceDiscoveryEnabled"),
+            appSettings.getFlag("quickCreateRaceCtaEnabled"),
+          ]);
+          result.nextRace =
+            discoveryEnabled || createEnabled
+              ? await getNextRaceHomeFn({
+                  userId: req.user.id,
+                  discoveryEnabled,
+                  createEnabled,
+                })
+              : {
+                  resolved: true,
+                  eligible: false,
+                  discoveryEnabled: false,
+                  createEnabled: false,
+                  openRaces: [],
+                };
+        } catch (error) {
+          console.error("Build Home nextRace error:", error);
+          result.nextRace = {
+            resolved: false,
+            eligible: false,
+            discoveryEnabled: false,
+            createEnabled: false,
+            openRaces: [],
+          };
+        }
+      }
 
       // Additive: surface the currently-active global step event (if any) as a
       // top-level field of the EXACT same shape getRaceProgress uses, so the new

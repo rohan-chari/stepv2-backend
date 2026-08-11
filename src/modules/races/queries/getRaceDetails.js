@@ -51,6 +51,8 @@ async function getRaceDetails(userId, raceId, supportsCharacters = false, releas
     // use it to show a clean "Daily/Weekly Challenge" label in the header.
     seedKind: race.seed?.kind || null,
     status: race.status,
+    creationSource: race.creationSource ?? null,
+    startPolicy: race.startPolicy ?? null,
     maxDurationDays: race.maxDurationDays,
     targetSteps: race.targetSteps, // 1.1.4 compat
     buyInAmount: money.buyInAmount,

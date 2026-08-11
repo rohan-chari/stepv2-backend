@@ -206,7 +206,7 @@ const POWERUP_COPY_SEED = [
     // YOUR OWN step count, so a runaway leader would plant one far above the
     // whole field, nobody would ever cross it, and it read as "broken".
     description:
-      "Buries a trap at your current step count. It detonates on the first rival whose step total crosses that number — so if you're way out front, nobody may ever reach it.",
+      "Buries a trap at your current step count. It detonates on the first rival whose step total crosses that number. If you're way out front, nobody may ever reach it.",
     shortDescription: "Mine planted at your step count",
     upgradeTierLabels: [
       "3% penalty",
@@ -268,7 +268,7 @@ const POWERUP_COPY_SEED = [
     powerupType: "SIGNAL_JAMMER",
     name: "Signal Jammer",
     description:
-      "Jam a rival's signal — they can't use any powerups for 1 hour. Mirrors can't reflect it; Compression Socks block it",
+      "Jam a rival's signal. They can't use any powerups for 1 hour. Mirrors can't reflect it; Compression Socks block it",
     shortDescription: "Powerups jammed",
     upgradeTierLabels: [],
   },
@@ -296,7 +296,7 @@ const POWERUP_COPY_SEED = [
     powerupType: "HITCHHIKE",
     name: "Hitchhike",
     description:
-      "For 60 min, every step a chosen rival takes is copied into your score — they lose nothing. Compression Socks block it; Mirrors can't reflect it",
+      "For 60 min, every step a chosen rival takes is copied into your score. They lose nothing. Compression Socks block it; Mirrors can't reflect it",
     shortDescription: "Steps being copied",
     upgradeTierLabels: [],
   },
@@ -329,7 +329,7 @@ const POWERUP_COPY_SEED = [
     powerupType: "GHOST_PEPPER",
     name: "Ghost Pepper",
     description:
-      "3x steps for 30 min, then a 30-min burnout where your steps are frozen. Self-inflicted — Cleanse and Quick Rinse can't remove it",
+      "3x steps for 30 min, then a 30-min burnout where your steps are frozen. Self-inflicted, so Cleanse and Quick Rinse can't remove it",
     shortDescription: "Boosted, then frozen",
     upgradeTierLabels: [],
   },
@@ -337,7 +337,7 @@ const POWERUP_COPY_SEED = [
     powerupType: "COIN_FLIP",
     name: "Coin Flip",
     description:
-      "Flip a coin: heads doubles your steps for 1 hour, tails halves them. Self-inflicted — no shield or cleanse changes it",
+      "Flip a coin: heads doubles your steps for 1 hour, tails halves them. Self-inflicted, so no shield or cleanse changes it",
     shortDescription: "Steps doubled or halved",
     upgradeTierLabels: [],
   },
@@ -361,7 +361,7 @@ const POWERUP_COPY_SEED = [
     powerupType: "POWER_OUTAGE",
     name: "Power Outage",
     description:
-      "Jam every rival — they can't use powerups for 30 minutes. Compression Socks keep one racer online; Mirrors can't reflect it",
+      "Jam every rival. They can't use powerups for 30 minutes. Compression Socks keep one racer online; Mirrors can't reflect it",
     shortDescription: "Powerups jammed",
     upgradeTierLabels: [],
   },

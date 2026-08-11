@@ -153,7 +153,7 @@ async function evaluateDrillSergeant({ effect, raceModel, participantModel, step
       eventType: "POWERUP_USED",
       powerupType: "DRILL_SERGEANT",
       targetUserId: effect.targetUserId,
-      description: `The Drill Sergeant dare was voided — the race ended first.`,
+      description: `The Drill Sergeant dare was voided. The race ended first.`,
       metadata: { outcome: "VOID" },
     });
     return;

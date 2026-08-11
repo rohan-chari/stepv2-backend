@@ -77,13 +77,26 @@ cd /var/www/step-tracker-backend \
   && npm install \
   && npx prisma migrate deploy \
   && npx prisma generate \
-  && node prisma/seed.js \
+  && npm run powerups:copy:sync -- --apply \
   && pm2 restart 3
 ```
 
-`seed.js` seeds challenges, stakes, and the powerup catalog. It does **not**
-touch cosmetics — the DB is the single source of truth (there is no
-`data/cosmetics.json` anymore). New items are born via `POST /admin/shop/items`,
+`prisma/seed.js` no longer runs on a deploy. It is the bootstrap for a *fresh*
+database; against a live one it reasserts rows that other systems own. Its one
+deploy-relevant job — refreshing user-facing powerup copy — is now
+`powerups:copy:sync`, which touches only the `PowerupCopy` table, prints the
+database it is pointed at, dry-runs without `--apply`, and never deactivates a
+row it does not find in the seed file. (The `--` is required; without it npm
+swallows the flag and you get a dry run.) Run it on staging first and read the
+diff.
+
+If you ever do need the full seed against a live DB, note that the
+challenge/stake `active` sweep is now opt-in behind `--deactivate-removed`. The
+default run will not flip `active` on rows that are absent from the file, which
+is what used to resurrect anything an admin had switched off.
+
+Neither script touches cosmetics — the DB is the single source of truth (there
+is no `data/cosmetics.json` anymore). New items are born via `POST /admin/shop/items`,
 edits mirror prod ↔ staging via the admin tuner's peer mirror, drift is
 reconciled with `npm run cosmetics:sync-peer`, and a fresh DB gets its catalog
 with `npm run cosmetics:clone`. See `DEPLOYMENT.md` → "Adding a new accessory".

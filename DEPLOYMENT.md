@@ -101,10 +101,17 @@ git pull origin main
 npm install
 npx prisma migrate deploy
 npx prisma generate
-node prisma/seed.js
+npm run powerups:copy:sync -- --apply   # user-facing powerup copy; NOT the seed
 npm run balance:drift      # reports (never blocks) balance config drift vs git
 pm2 restart 3
 ```
+
+`prisma/seed.js` is **not** part of a deploy any more. It is the bootstrap for a
+*fresh* database (local dev, the integration DB, a rebuilt staging), and running
+it against a live environment reasserts rows that are managed elsewhere. The one
+thing in it that genuinely needs re-applying on deploy is the powerup copy
+catalog — `powerups:copy:sync` does exactly that and nothing else. See
+"Powerup copy" below.
 
 `balance:drift` compares the live `balance_config` row against the committed
 `data/balance-config.json` and prints a warning per differing path. It exits 0
@@ -112,6 +119,28 @@ even on drift — a value tuned in the admin editor and not yet pulled back to g
 is normal and must never stop a deploy. If it reports drift you did not expect,
 that is the audit trail the Leech price revert never had; run
 `npm run balance:pull` and commit to record the live values.
+
+#### Powerup copy
+
+`src/modules/powerups/constants/powerupCopySeed.js` is the source of truth for
+every user-renderable powerup name/description/short description/tier label —
+there is no admin editor for it, so a wording change only reaches players once
+the `PowerupCopy` rows are updated.
+
+```bash
+npm run powerups:copy:sync              # DRY RUN: prints a field-level diff
+npm run powerups:copy:sync -- --apply   # writes
+```
+
+It prints the host/database it is pointed at, touches **only** `PowerupCopy`,
+and never deletes or deactivates a row that exists in the DB but not in the file
+— a frozen client may still be rendering it. Run it on staging, eyeball the
+diff, then prod. The `--` before `--apply` is required: without it npm eats the
+flag and you get a dry run.
+
+The Flutter app ships its own copy of these strings
+(`lib/constants/powerup_copy.dart`) as the fallback for anything the backend
+does not return, so keep the two in step when you change wording.
 
 ### 4. Smoke test
 

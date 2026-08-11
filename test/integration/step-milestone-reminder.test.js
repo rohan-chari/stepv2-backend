@@ -243,7 +243,7 @@ describe("step-milestone evening reminder (batch 2026-08-08 item 3)", () => {
       assert.equal(row.title, "Coins waiting! 🪙");
       assert.equal(
         row.body,
-        "You crossed a step milestone today — collect your coins before midnight."
+        "You crossed a step milestone today. Collect your coins before midnight."
       );
       assert.equal(emitted[0].data.title, row.title);
       assert.equal(emitted[0].data.body, row.body);

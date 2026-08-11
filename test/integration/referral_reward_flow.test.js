@@ -27,6 +27,7 @@ const {
   REFEREE_REWARD_COINS,
   QUALIFY_WINDOW_DAYS,
   REFERRAL_DAILY_CAP,
+  REFERRAL_MONTHLY_CAP,
 } = require("../../src/modules/social/referralRewards");
 
 const { getOrCreateReferralCode } = require("../../src/modules/social/commands/getOrCreateReferralCode");
@@ -79,6 +80,7 @@ async function seedRace({ seedId = null, status = "ACTIVE", participants }) {
           status: p.status || "ACCEPTED",
           placement: p.placement ?? null,
           totalSteps: p.totalSteps ?? 0,
+          rawSteps: p.rawSteps ?? p.totalSteps ?? 0,
         })),
       },
     },
@@ -185,6 +187,29 @@ describe("Step 1 — signup attribution (recordReferral)", () => {
     assert.equal(await prisma.referralRewardGrant.count(), 0);
     assert.equal(await coinsOf(referrer.id), 0);
     assert.equal(await coinsOf(referee.id), 0);
+  });
+
+  it("durably records race-share attribution with its source race", async () => {
+    const { referrer, code } = await makeReferrerWithCode();
+    const referee = await makeUser();
+    const race = await seedRace({ participants: [{ user: referrer, totalSteps: 0 }] });
+
+    await recordReferral({
+      newUser: referee,
+      referralCode: code,
+      source: "provision_body",
+      sourceRaceId: race.id,
+    });
+
+    const referral = await getReferral(referee.id);
+    const event = await prisma.activationEvent.findUnique({
+      where: { id: `server:race-share-attributed:${referral.id}` },
+    });
+    assert.equal(event.name, "race_share_referral_attributed");
+    assert.deepEqual(event.context, {
+      source_race_id: race.id,
+      deferred_install: "true",
+    });
   });
 
   it("ignores a self-referral (own code) — no referral row", async () => {
@@ -295,6 +320,37 @@ describe("Step 2 — reward on first qualifying race (happy path)", () => {
       refereeId: referee.id,
       coins: REFERRER_REWARD_COINS,
     });
+  });
+
+  it("durably records race-share qualification with bounded provenance", async () => {
+    const referrer = await makeUser();
+    const code = await getOrCreateReferralCode({ userId: referrer.id });
+    const referee = await makeUser();
+    const sourceRace = await seedRace({ participants: [{ user: referrer, totalSteps: 0 }] });
+    await recordReferral({
+      newUser: referee,
+      referralCode: code,
+      source: "provision_body",
+      sourceRaceId: sourceRace.id,
+    });
+    const opponent = await makeUser();
+    const race = await seedRace({
+      participants: [
+        { user: referee, placement: 2, totalSteps: 5000 },
+        { user: opponent, placement: 1, totalSteps: 8000 },
+      ],
+    });
+    await buildCompleteRace({ eventBus: makeFakeBus() })({
+      raceId: race.id,
+      winnerUserId: opponent.id,
+    });
+    const referral = await getReferral(referee.id);
+    const event = await prisma.activationEvent.findUnique({
+      where: { id: `server:race-share-qualified:${referral.id}` },
+    });
+    assert.equal(event.name, "race_share_referral_qualified");
+    assert.equal(event.context.source_race_id, sourceRace.id);
+    assert.match(event.context.qualification_latency_seconds, /^\d+$/);
   });
 
   // A seed whose id is NOT in raceFinishReward config: it exercises the seedId
@@ -426,8 +482,8 @@ describe("Step 2 — reward on first qualifying race (happy path)", () => {
       race: {
         id: "projection-without-seed-id",
         participants: [
-          { userId: referee.id, status: "ACCEPTED", placement: 2, totalSteps: 5000 },
-          { userId: opponent.id, status: "ACCEPTED", placement: 1, totalSteps: 8000 },
+          { userId: referee.id, status: "ACCEPTED", placement: 2, totalSteps: 5000, rawSteps: 5000 },
+          { userId: opponent.id, status: "ACCEPTED", placement: 1, totalSteps: 8000, rawSteps: 8000 },
         ],
       },
     });
@@ -666,6 +722,67 @@ describe("Reward-time guards", () => {
     // Only the filler grants exist; no new grant for THIS referral.
     const grantsForRef = await prisma.referralRewardGrant.findMany({ where: { referralId: after.id } });
     assert.equal(grantsForRef.length, 0);
+  });
+
+  it("the twenty-sixth monthly grant is held even when the daily window is clear", async () => {
+    const { referrer, referee } = await attributedReferee();
+    const twoDaysAgo = new Date(Date.now() - 2 * DAY_MS);
+    for (let i = 0; i < REFERRAL_MONTHLY_CAP; i++) {
+      await prisma.referralRewardGrant.create({
+        data: {
+          userId: referrer.id,
+          role: "REFERRER",
+          refereeSubHash: `monthly-cap-filler-${seq}-${i}`,
+          coins: REFERRER_REWARD_COINS,
+          grantedAt: twoDaysAgo,
+        },
+      });
+    }
+    const race = await qualifyingRace(referee);
+    await buildCompleteRace({ eventBus: makeFakeBus() })({
+      raceId: race.id,
+      winnerUserId: referee.id,
+    });
+    assert.equal((await getReferral(referee.id)).status, "FLAGGED");
+    assert.equal((await referralRewardTxns(referrer.id)).length, 0);
+    assert.equal((await referralRewardTxns(referee.id)).length, 0);
+  });
+
+  it("serializes simultaneous cap decisions for one referrer", async () => {
+    const referrer = await makeUser();
+    const code = await getOrCreateReferralCode({ userId: referrer.id });
+    const firstReferee = await makeUser();
+    const secondReferee = await makeUser();
+    await recordReferral({ newUser: firstReferee, referralCode: code });
+    await recordReferral({ newUser: secondReferee, referralCode: code });
+    for (let i = 0; i < REFERRAL_DAILY_CAP - 1; i++) {
+      await prisma.referralRewardGrant.create({
+        data: {
+          userId: referrer.id,
+          role: "REFERRER",
+          refereeSubHash: `concurrent-cap-filler-${seq}-${i}`,
+          coins: REFERRER_REWARD_COINS,
+        },
+      });
+    }
+    const [firstRace, secondRace] = await Promise.all([
+      qualifyingRace(firstReferee),
+      qualifyingRace(secondReferee),
+    ]);
+    const completeRace = buildCompleteRace({ eventBus: makeFakeBus() });
+    await Promise.all([
+      completeRace({ raceId: firstRace.id, winnerUserId: firstReferee.id }),
+      completeRace({ raceId: secondRace.id, winnerUserId: secondReferee.id }),
+    ]);
+
+    const referrals = await prisma.referral.findMany({
+      where: { refereeId: { in: [firstReferee.id, secondReferee.id] } },
+    });
+    assert.deepEqual(referrals.map((r) => r.status).sort(), ["FLAGGED", "REWARDED"]);
+    assert.equal(await prisma.referralRewardGrant.count({
+      where: { userId: referrer.id, role: "REFERRER" },
+    }), REFERRAL_DAILY_CAP);
+    assert.equal((await referralRewardTxns(referrer.id)).length, 1);
   });
 });
 

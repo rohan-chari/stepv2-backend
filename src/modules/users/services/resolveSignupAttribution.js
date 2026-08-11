@@ -19,13 +19,18 @@ const TIER_SOURCES = {
 
 async function resolveSignupAttribution({
   referralCode,
+  referralSourceRaceId = null,
   fallbackReferralCode,
   signupId,
 }) {
   if (referralCode) {
-    return { code: referralCode, source: "provision_body" };
+    return {
+      code: referralCode,
+      source: "provision_body",
+      sourceRaceId: referralSourceRaceId || null,
+    };
   }
-  if (!fallbackReferralCode) return { code: null, source: null };
+  if (!fallbackReferralCode) return { code: null, source: null, sourceRaceId: null };
 
   try {
     // The thunk is passed the new user's id purely so the query can name it in
@@ -41,17 +46,21 @@ async function resolveSignupAttribution({
     // silently downgrade a real referral to an organic signup, so this is a
     // correctness guard, not politeness.
     if (typeof resolved === "string") {
-      return { code: resolved, source: TIER_SOURCES.exact };
+      return { code: resolved, source: TIER_SOURCES.exact, sourceRaceId: null };
     }
     if (typeof resolved === "object" && resolved.code) {
       const source = TIER_SOURCES[resolved.tier] || TIER_SOURCES.exact;
-      return { code: resolved.code, source };
+      return {
+        code: resolved.code,
+        source,
+        sourceRaceId: resolved.sourceRaceId || null,
+      };
     }
   } catch (_) {
     // Fallback lookup failure = organic signup; never blocks provisioning.
   }
 
-  return { code: null, source: null };
+  return { code: null, source: null, sourceRaceId: null };
 }
 
 // Logged only once the write actually landed, so the line means "this user IS

@@ -58,7 +58,7 @@ function buildSendRaceMessage(dependencies = {}) {
       since
     );
     if (recentCount >= RATE_LIMIT_MAX) {
-      throw new RaceMessageError("Slow down — too many messages", 429);
+      throw new RaceMessageError("Slow down. Too many messages", 429);
     }
 
     const cleaned = censorFn(trimmed);

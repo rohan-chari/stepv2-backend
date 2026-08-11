@@ -362,8 +362,60 @@ describe("feature batch 2026-08-09 (backend)", () => {
         assert.equal(typeof day.date, "string");
         assert.equal(typeof day.coinRewardWatches, "number");
         assert.equal(typeof day.extraSpinWatches, "number");
+        assert.equal(typeof day.boxRerollWatches, "number");
       }
       assert.equal("coinEconomy" in stats, false);
+    });
+
+    it("adRevenue.boxReroll counts real reroll ad grants and their conversion", async () => {
+      const admin = await signUpAdmin();
+      const { userId } = await signUp();
+      // Two verified reroll ads from one user; only one was spent on an actual
+      // reroll. Watched-but-unconsumed is the drop-off the card exists to show.
+      await prisma.adRewardGrant.createMany({
+        data: [
+          {
+            userId,
+            transactionId: "reroll-consumed",
+            rewardKind: "box_reroll",
+            grantedDate: "2026-08-09",
+            consumedAt: new Date(),
+          },
+          {
+            userId,
+            transactionId: "reroll-abandoned",
+            rewardKind: "box_reroll",
+            grantedDate: "2026-08-09",
+          },
+          // A different kind must not leak into the reroll totals.
+          {
+            userId,
+            transactionId: "spin-unrelated",
+            rewardKind: "extra_daily_spin",
+            grantedDate: "2026-08-09",
+          },
+        ],
+      });
+
+      const res = await request(
+        server.baseUrl,
+        "GET",
+        "/admin/stats?sections=ads",
+        { token: admin.token }
+      );
+      assert.equal(res.status, 200);
+      const { stats } = await res.json();
+
+      assert.deepEqual(stats.adRevenue.boxReroll, {
+        watches: 2,
+        uniqueWatchers: 1,
+        consumed: 1,
+        pctConsumed: 50,
+      });
+
+      const today = stats.adRevenue.days.at(-1);
+      assert.equal(today.boxRerollWatches, 2);
+      assert.equal(today.extraSpinWatches, 1);
     });
 
     it("both sections at once, and an unknown name is ignored not fatal", async () => {

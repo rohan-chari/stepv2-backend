@@ -8,9 +8,11 @@ const {
   respondToRaceInvite: defaultRespondToRaceInvite,
 } = require("./commands/respondToRaceInvite");
 const {
+  buildJoinPublicRace,
   joinPublicRace: defaultJoinPublicRace,
 } = require("./commands/joinPublicRace");
 const {
+  buildJoinRaceByShareToken,
   joinRaceByShareToken: defaultJoinRaceByShareToken,
 } = require("./commands/joinRaceByShareToken");
 const {
@@ -29,7 +31,7 @@ const {
 const {
   getFeaturedRaces: defaultGetFeaturedRaces,
 } = require("./queries/getFeaturedRaces");
-const { startRace: defaultStartRace } = require("./commands/startRace");
+const { buildStartRace, startRace: defaultStartRace } = require("./commands/startRace");
 const { cancelRace: defaultCancelRace } = require("./commands/cancelRace");
 const { editRace: defaultEditRace } = require("./commands/editRace");
 const {
@@ -106,6 +108,16 @@ const {
   RaceActiveEffect: defaultEffectModel,
 } = require("../powerups");
 const { stepSyncPushService } = require("../../shared/push/stepSyncPush");
+const {
+  supportsNextRace,
+  hasAnyQuickMetadata,
+  withQuickMembershipLock,
+  hasLiveUserCreatedRace,
+} = require("./services/nextRacePolicy");
+const { appSettings } = require("../../shared/config/appSettings");
+const {
+  getOrCreateReferralCode,
+} = require("../social/commands/getOrCreateReferralCode");
 
 // A powerup is STEALABLE via Sneaky Swap only if it is currently HELD and its
 // type is neither SNEAKY_SWAP (not stealable in either direction) nor
@@ -127,9 +139,15 @@ function createRacesRouter(dependencies = {}) {
   const respondToRaceInvite =
     dependencies.respondToRaceInvite || defaultRespondToRaceInvite;
   const joinPublicRace =
-    dependencies.joinPublicRace || defaultJoinPublicRace;
+    dependencies.joinPublicRace ||
+    (dependencies.beforeCommitRaceStart || dependencies.beforeRaceStartedRecord
+      ? buildJoinPublicRace(dependencies)
+      : defaultJoinPublicRace);
   const joinRaceByShareToken =
-    dependencies.joinRaceByShareToken || defaultJoinRaceByShareToken;
+    dependencies.joinRaceByShareToken ||
+    (dependencies.beforeCommitRaceStart || dependencies.beforeRaceStartedRecord
+      ? buildJoinRaceByShareToken(dependencies)
+      : defaultJoinRaceByShareToken);
   const createRaceShareLink =
     dependencies.createRaceShareLink || defaultCreateRaceShareLink;
   const getSharedRacePreview =
@@ -140,7 +158,11 @@ function createRacesRouter(dependencies = {}) {
     dependencies.getPublicRaces || defaultGetPublicRaces;
   const getFeaturedRaces =
     dependencies.getFeaturedRaces || defaultGetFeaturedRaces;
-  const startRace = dependencies.startRace || defaultStartRace;
+  const startRace =
+    dependencies.startRace ||
+    (dependencies.beforeCommitRaceStart || dependencies.beforeRaceStartedRecord
+      ? buildStartRace(dependencies)
+      : defaultStartRace);
   const cancelRace = dependencies.cancelRace || defaultCancelRace;
   const editRace = dependencies.editRace || defaultEditRace;
   const switchRaceTeam = dependencies.switchRaceTeam || defaultSwitchRaceTeam;
@@ -192,6 +214,8 @@ function createRacesRouter(dependencies = {}) {
     dependencies.requestStepSyncForUsers ||
     stepSyncPushService.requestStepSyncForUsers;
   const logger = dependencies.logger || console;
+  const hasLiveUserCreatedRaceFn =
+    dependencies.hasLiveUserCreatedRace || hasLiveUserCreatedRace;
 
   // GET /races/share/:token  — PUBLIC, declared BEFORE requireAuth so the
   // landing page and the app's pre-join screen can read a shared race without a
@@ -233,8 +257,10 @@ function createRacesRouter(dependencies = {}) {
         teamAName,
         teamBName,
         team,
+        creationSource,
+        startPolicy,
       } = req.body;
-      const race = await createRace({
+      const create = () => createRace({
         userId: req.user.id,
         name,
         maxDurationDays,
@@ -255,7 +281,13 @@ function createRacesRouter(dependencies = {}) {
         teamBName,
         team,
         clientFeatures: req.clientFeatures,
+        creationSource,
+        startPolicy,
       });
+      const race = supportsNextRace(req.clientFeatures) &&
+        hasAnyQuickMetadata({ creationSource, startPolicy })
+        ? await withQuickMembershipLock(req.user.id, create)
+        : await create();
       res.status(201).json({ race });
     } catch (error) {
       if (error.name === "RaceCreationError") {
@@ -294,6 +326,24 @@ function createRacesRouter(dependencies = {}) {
       ]);
       if (tournaments) {
         result.tournaments = tournaments;
+      }
+      if (supportsNextRace(req.clientFeatures)) {
+        try {
+          const createEnabled = await appSettings.getFlag("quickCreateRaceCtaEnabled");
+          // The results surface consumes eligibility only when creation can be
+          // offered. With the default-off flag, avoid even the existence query.
+          const eligible = createEnabled
+            ? !(await hasLiveUserCreatedRaceFn(req.user.id))
+            : false;
+          result.nextRace = { resolved: true, eligible, createEnabled };
+        } catch (error) {
+          logger.error("Build races nextRace error:", error);
+          result.nextRace = {
+            resolved: false,
+            eligible: false,
+            createEnabled: false,
+          };
+        }
       }
       res.json(result);
     } catch (error) {
@@ -402,7 +452,16 @@ function createRacesRouter(dependencies = {}) {
         userId: req.user.id,
         raceId: req.params.raceId,
       });
-      res.status(201).json({ shareToken, url: buildShareUrl(shareToken) });
+      let url = buildShareUrl(shareToken);
+      try {
+        const referralCode = await getOrCreateReferralCode({ userId: req.user.id });
+        if (referralCode) {
+          url = buildShareUrl(shareToken, referralCode);
+        }
+      } catch (error) {
+        logger.error("Referral lookup for race share failed:", error);
+      }
+      res.status(201).json({ shareToken, url });
     } catch (error) {
       if (error.name === "RaceShareLinkError") {
         const status = error.statusCode || 400;

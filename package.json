@@ -20,6 +20,7 @@
     "powerups:docs": "node scripts/generate-powerups-md.js",
     "powerups:docs:check": "node scripts/generate-powerups-md.js --check",
     "powerups:store": "node scripts/powerup-store.js",
+    "powerups:copy:sync": "node scripts/powerup-copy-sync.js",
     "referrals:audit": "node scripts/referral-attribution-audit.js",
     "seed:app-review-demo": "node scripts/seed-app-review-demo.js",
     "reset-review": "node scripts/reset-app-review.js",

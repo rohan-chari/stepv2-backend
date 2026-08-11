@@ -86,7 +86,8 @@ function buildFindLinkOpenReferralCode(dependencies = {}) {
   async function lookupTier({ tier, field, value, maxOpens, since, signupId }) {
     const opens = await db.linkOpen.findMany({
       where: { kind: "referral", [field]: value, createdAt: { gte: since } },
-      select: { code: true },
+      select: { code: true, sourceRaceId: true },
+      orderBy: { createdAt: "desc" },
       take: maxOpens + 1,
     });
 
@@ -103,7 +104,14 @@ function buildFindLinkOpenReferralCode(dependencies = {}) {
       return { count: opens.length, code: null };
     }
 
-    return { count: opens.length, code: codes.values().next().value };
+    const code = codes.values().next().value;
+    return {
+      count: opens.length,
+      code,
+      sourceRaceId:
+        opens.find((open) => open.code === code && open.sourceRaceId)?.sourceRaceId ||
+        null,
+    };
   }
 
   return async function findLinkOpenReferralCode({
@@ -123,7 +131,13 @@ function buildFindLinkOpenReferralCode(dependencies = {}) {
         since,
         signupId,
       });
-      if (exact.code) return { code: exact.code, tier: "exact" };
+      if (exact.code) {
+        return {
+          code: exact.code,
+          tier: "exact",
+          sourceRaceId: exact.sourceRaceId || null,
+        };
+      }
       // Found opens but declined them → never widen to the coarser tier.
       if (exact.count > 0) return null;
     }
@@ -145,7 +159,13 @@ function buildFindLinkOpenReferralCode(dependencies = {}) {
       since,
       signupId,
     });
-    if (netMatch.code) return { code: netMatch.code, tier: "net" };
+    if (netMatch.code) {
+      return {
+        code: netMatch.code,
+        tier: "net",
+        sourceRaceId: netMatch.sourceRaceId || null,
+      };
+    }
 
     return null;
   };

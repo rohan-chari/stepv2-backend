@@ -36,15 +36,17 @@ const { acceptedTeamCounts } = require("../teamRaces");
 const MAX_INLINE_PARTICIPANTS = 10;
 
 // Safety bound on the backstop's scan. PENDING private races that never start
-// accumulate; newest-first so a fresh "last invite just expired" race is always
-// in the window.
+// accumulate; oldest eligible first so no race can starve behind newer rows.
 const BACKSTOP_SCAN_LIMIT = 500;
 
 // Kill switch. Read at CALL time (never at module load) so it can be flipped on
 // a running process and exercised by tests. Matches the `*_DISABLED` idiom in
 // src/index.js: the feature is ENABLED unless the env var is exactly "true".
 function isPrivateRaceAutoStartDisabled() {
-  return process.env.PRIVATE_RACE_AUTOSTART_DISABLED === "true";
+  return (
+    process.env.RACE_POLICY_AUTOSTART_DISABLED === "true" ||
+    process.env.PRIVATE_RACE_AUTOSTART_DISABLED === "true"
+  );
 }
 
 // An INVITED row only blocks auto-start while its invite is still LIVE. Nothing
@@ -64,9 +66,12 @@ function isOutstandingInvite(participant, now) {
 function shouldAutoStartPrivateRace({ race, now = new Date() }) {
   if (!race) return false;
   if (race.status !== "PENDING") return false;
-  // Strict false: a lean select that omitted the column must never be read as
-  // "private".
-  if (race.isPublic !== false) return false;
+  const quickPolicy =
+    race.creationSource === "QUICK_CREATE" &&
+    race.startPolicy === "ON_MINIMUM_PARTICIPANTS";
+  // Legacy auto-start remains private-only. Public races require the explicit
+  // persisted quick pair; never infer policy from free/public configuration.
+  if (!quickPolicy && race.isPublic !== false) return false;
   // Seeded challenges renew/start via seededRaceRenewal; tournament matchups
   // are owned by the tournament engine's lifecycle.
   if (race.seedId) return false;
@@ -82,7 +87,7 @@ function shouldAutoStartPrivateRace({ race, now = new Date() }) {
   }
 
   const participants = race.participants || [];
-  if (participants.some((p) => isOutstandingInvite(p, now))) return false;
+  if (!quickPolicy && participants.some((p) => isOutstandingInvite(p, now))) return false;
 
   const acceptedCount = participants.filter((p) => p.status === "ACCEPTED").length;
   if (acceptedCount < 2) return false;
@@ -124,7 +129,10 @@ function buildMaybeAutoStartPrivateRace(dependencies = {}) {
       if (typeof raceModel.findAutoStartGate === "function") {
         const gate = await raceModel.findAutoStartGate(raceId);
         if (!gate) return false;
-        if (gate.status !== "PENDING" || gate.isPublic !== false) return false;
+        const quickGate =
+          gate.creationSource === "QUICK_CREATE" &&
+          gate.startPolicy === "ON_MINIMUM_PARTICIPANTS";
+        if (gate.status !== "PENDING" || (gate.isPublic !== false && !quickGate)) return false;
       }
 
       // Fresh read: the caller's copy predates the participant write.

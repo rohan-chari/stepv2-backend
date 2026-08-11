@@ -162,12 +162,13 @@ function createApp(dependencies = {}) {
   // ipHash (never the raw IP) powers the referral-attribution fallback: a
   // codeless signup from the same IP shortly after an open attributes to the
   // opened code (see findLinkOpenReferralCode.js).
-  function logLinkOpen(kind, code, req) {
+  function logLinkOpen(kind, code, req, sourceRaceId = null) {
     linkOpenDb.linkOpen
       .create({
         data: {
           kind,
           code: code || null,
+          sourceRaceId,
           // Both hashes on every open: the exact IP (tier 1) and the network
           // prefix (tier 2). Writing ip_net_hash unconditionally from day one
           // is what lets tier 2 be switched on later without a backfill —
@@ -226,16 +227,22 @@ function createApp(dependencies = {}) {
       }
     }
 
+    const referralCode = normalizeReferralCode(req.query.ref);
     const links = {
-      shareUrl: sharing.buildShareUrl(token),
-      appDeepLink: sharing.buildAppDeepLink(token),
+      shareUrl: sharing.buildShareUrl(token, referralCode),
+      appDeepLink: sharing.buildAppDeepLink(token, referralCode),
       appStoreUrl: sharing.APP_STORE_URL,
-      playStoreUrl: sharing.PLAY_STORE_URL,
+      playStoreUrl: `${sharing.PLAY_STORE_URL}&referrer=${encodeURIComponent(
+        `raceToken=${token}${referralCode ? `&ref=${referralCode}` : ""}`
+      )}`,
       ogImageUrl: sharing.OG_IMAGE_URL,
     };
-    logLinkOpen("race_share", token, req);
     try {
       const preview = await getSharedRacePreview({ token: req.params.token });
+      logLinkOpen("race_share", token, req, preview?.id || null);
+      if (referralCode) {
+        logLinkOpen("referral", referralCode, req, preview?.id || null);
+      }
       if (!preview) {
         return res.status(404).type("html").send(renderRaceNotFoundPage(links));
       }

@@ -26,8 +26,8 @@ const QUALIFY_WINDOW_DAYS = Number(
 // race completions in a day; bursts past these caps are the signature of a
 // referral ring. Held referrals stay queryable (status FLAGGED) and never
 // auto-pay — a human flips them back to PENDING or grants manually.
-const REFERRAL_DAILY_CAP = Number(process.env.REFERRAL_DAILY_CAP || 20);
-const REFERRAL_MONTHLY_CAP = Number(process.env.REFERRAL_MONTHLY_CAP || 100);
+const REFERRAL_DAILY_CAP = Number(process.env.REFERRAL_DAILY_CAP || 5);
+const REFERRAL_MONTHLY_CAP = Number(process.env.REFERRAL_MONTHLY_CAP || 25);
 
 module.exports = {
   REFERRER_REWARD_COINS,

@@ -21,6 +21,7 @@ const {
 } = require("../../powerups/hitchhikeCopies");
 const { mintPiggyBank } = require("../../powerups/commands/expireEffects");
 const { awardCoins } = require("../../../shared/economy/awardCoins");
+const { nextRawSteps } = require("../../powerups/rawPosition");
 const {
   RaceResolutionJobV2,
 } = require("../models/raceResolutionJobV2");
@@ -54,6 +55,21 @@ async function withSettlementFence(raceId, write) {
       throw error;
     }
   }
+}
+
+function isQuickSettlementRace(race) {
+  return (
+    race?.creationSource === "QUICK_CREATE" &&
+    race?.startPolicy === "ON_MINIMUM_PARTICIPANTS"
+  );
+}
+
+// Keep the complete/payout/referral phase inside the same C0 ownership fence
+// for quick races. The legacy path is deliberately untouched.
+function completeRaceUnderSettlementFence(race, args) {
+  return isQuickSettlementRace(race)
+    ? withSettlementFence(race.id, () => completeRace(args))
+    : completeRace(args);
 }
 
 const byUserIdAsc = (a, b) =>
@@ -100,8 +116,8 @@ async function announceUntriggeredTrailMines({ race }) {
           targetUserId: null,
           description:
             typeof positionSteps === "number"
-              ? `A Trail Mine at ${positionSteps.toLocaleString()} steps was never triggered — nobody crossed it.`
-              : "A Trail Mine was never triggered — nobody crossed it.",
+              ? `A Trail Mine at ${positionSteps.toLocaleString()} steps was never triggered. Nobody crossed it.`
+              : "A Trail Mine was never triggered. Nobody crossed it.",
           metadata: {
             mineId: mine.id,
             positionSteps: positionSteps ?? null,
@@ -287,6 +303,7 @@ async function resolveExpiredRaces() {
 
         preLeech.push({
           participant,
+          rawSteps: nextRawSteps(participant.rawSteps, baseAdjusted),
           preLeechTotal: total,
           leechTransfers,
           effectiveStart,
@@ -356,7 +373,11 @@ async function resolveExpiredRaces() {
           now: settlementTime,
         });
 
-        finalTotals.push({ participant: e.participant, totalSteps: total });
+        finalTotals.push({
+          participant: e.participant,
+          totalSteps: total,
+          rawSteps: e.rawSteps,
+        });
         standings.push({
           participant: e.participant,
           totalSteps: total,
@@ -371,7 +392,11 @@ async function resolveExpiredRaces() {
         for (const row of finalTotals) {
           await tx.raceParticipant.update({
             where: { id: row.participant.id },
-            data: { totalSteps: row.totalSteps, totalsUpdatedAt: new Date() },
+            data: {
+              totalSteps: row.totalSteps,
+              rawSteps: row.rawSteps,
+              totalsUpdatedAt: new Date(),
+            },
           });
         }
       });
@@ -403,7 +428,7 @@ async function resolveExpiredRaces() {
             ? "TEAM_A"
             : "TEAM_B";
 
-        await completeRace({
+        await completeRaceUnderSettlementFence(race, {
           raceId: race.id,
           winnerUserId: null,
           winnerTeam,
@@ -459,7 +484,7 @@ async function resolveExpiredRaces() {
       const topUserId = standings[0]?.participant.userId || null;
       const topSteps = standings[0]?.totalSteps || 0;
 
-      await completeRace({
+      await completeRaceUnderSettlementFence(race, {
         raceId: race.id,
         winnerUserId: topUserId,
         participantUserIds,
@@ -514,4 +539,8 @@ function scheduleRaceExpiryCheck() {
   console.log("[CRON] Race expiry check scheduled (hourly)");
 }
 
-module.exports = { resolveExpiredRaces, scheduleRaceExpiryCheck };
+module.exports = {
+  resolveExpiredRaces,
+  scheduleRaceExpiryCheck,
+  completeRaceUnderSettlementFence,
+};

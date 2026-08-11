@@ -176,7 +176,7 @@ async function checkActiveRace(
   } else if (me && sorted.length > 1) {
     const next = sorted[1];
     const gap = me.totalSteps - (next?.totalSteps || 0);
-    gapText = gap > 0 ? `${gap.toLocaleString()} steps ahead — keep going` : "Tied for the lead";
+    gapText = gap > 0 ? `${gap.toLocaleString()} steps ahead. Keep going` : "Tied for the lead";
   } else if (me) {
     gapText = "Leading the race";
   }

@@ -184,11 +184,27 @@ function buildGetAdminStats(dependencies = {}) {
           'YYYY-MM-DD'
         )                                                              AS date,
         COUNT(*) FILTER (WHERE reward_kind = 'coin_reward')::bigint     AS coin_reward_watches,
-        COUNT(*) FILTER (WHERE reward_kind = 'extra_daily_spin')::bigint AS extra_spin_watches
+        COUNT(*) FILTER (WHERE reward_kind = 'extra_daily_spin')::bigint AS extra_spin_watches,
+        COUNT(*) FILTER (WHERE reward_kind = 'box_reroll')::bigint       AS box_reroll_watches
       FROM ad_reward_grants
       WHERE created_at >= now() - interval '30 days'
       GROUP BY 1
       ORDER BY 1`;
+
+    // Reroll ads only. A verified watch mints a grant; the grant is consumed
+    // when the player actually rerolls a box (rerollMysteryBox CASes
+    // consumed_at). Watched-but-unconsumed is therefore the drop-off between
+    // sitting through the ad and completing the reroll — the one number the
+    // daily counts above cannot show.
+    const [rerollRow] = await prisma.$queryRaw`
+      /* boxRerollAds */
+      SELECT
+        COUNT(*)::bigint                                            AS watches,
+        COUNT(DISTINCT user_id)::bigint                             AS unique_watchers,
+        COUNT(*) FILTER (WHERE consumed_at IS NOT NULL)::bigint     AS consumed
+      FROM ad_reward_grants
+      WHERE reward_kind = 'box_reroll'
+        AND created_at >= now() - interval '30 days'`;
 
     // Cap utilization. This one DOES bucket by granted_date, and that is not an
     // inconsistency with the trend above: granted_date is the user-LOCAL day
@@ -238,7 +254,19 @@ function buildGetAdminStats(dependencies = {}) {
         date: row.date,
         coinRewardWatches: n(row.coin_reward_watches),
         extraSpinWatches: n(row.extra_spin_watches),
+        boxRerollWatches: n(row.box_reroll_watches),
       })),
+      boxReroll: {
+        watches: n(rerollRow?.watches),
+        uniqueWatchers: n(rerollRow?.unique_watchers),
+        consumed: n(rerollRow?.consumed),
+        // Null rather than 0 when nobody has watched: "0% converted" would
+        // read as a broken reroll flow when the truth is no data yet.
+        pctConsumed:
+          n(rerollRow?.watches) > 0
+            ? Math.round((n(rerollRow?.consumed) / n(rerollRow?.watches)) * 100)
+            : null,
+      },
       capUtilization: {
         avgWatchesPerUser: round1(capRow?.avg_watches_per_user),
         usersAtCap: n(capRow?.users_at_cap),
@@ -287,7 +315,10 @@ function buildGetAdminStats(dependencies = {}) {
         )::bigint AS coin_watchers,
         COUNT(DISTINCT g.user_id) FILTER (
           WHERE g.reward_kind = 'extra_daily_spin'
-        )::bigint AS extra_spin_watchers
+        )::bigint AS extra_spin_watchers,
+        COUNT(DISTINCT g.user_id) FILTER (
+          WHERE g.reward_kind = 'box_reroll'
+        )::bigint AS box_reroll_watchers
       FROM ad_reward_grants g
       JOIN today_dau d ON d.user_id = g.user_id
       WHERE (g.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date =
@@ -541,6 +572,7 @@ function buildGetAdminStats(dependencies = {}) {
     const dauInActiveRace = n(dauRows?.dau_in_active_race);
     const coinWatchers = n(rewardedAdRows?.coin_watchers);
     const extraSpinWatchers = n(rewardedAdRows?.extra_spin_watchers);
+    const boxRerollWatchers = n(rewardedAdRows?.box_reroll_watchers);
 
     function activationWindow(countKey) {
       const groups = new Map();
@@ -635,6 +667,14 @@ function buildGetAdminStats(dependencies = {}) {
           extraSpin: {
             uniqueDauWatchers: extraSpinWatchers,
             pctOfDau: dau > 0 ? Math.round((extraSpinWatchers / dau) * 100) : 0,
+          },
+          // Additive. Reroll ads ship behind ADS_BOX_REROLL_ENABLED and are
+          // iOS-only, so 0 here is the expected reading while the switch is
+          // off — it is not the same signal as a missing key on an older
+          // backend, which the client renders as an em dash.
+          boxReroll: {
+            uniqueDauWatchers: boxRerollWatchers,
+            pctOfDau: dau > 0 ? Math.round((boxRerollWatchers / dau) * 100) : 0,
           },
         },
         // Additive (Item 9). Null when there is no box-open data yet (e.g. right

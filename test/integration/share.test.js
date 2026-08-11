@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const { describe, it, before, beforeEach } = require("node:test");
-const { cleanDatabase, request, getSharedServer } = require("./setup");
+const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
 
 let server;
 let nextAppleId = 0;
@@ -58,7 +58,7 @@ describe("race share links", () => {
     assert.equal(first.status, 201);
     const firstBody = await first.json();
     assert.match(firstBody.shareToken, /^[0-9a-f]{32}$/);
-    assert.match(firstBody.url, /\/r\/[0-9a-f]{32}$/);
+    assert.match(firstBody.url, /\/r\/[0-9a-f]{32}\?ref=BARA-[A-Z0-9]{4}$/);
 
     // Idempotent: the same race returns the same token.
     const second = await request(
@@ -224,6 +224,35 @@ describe("race share links", () => {
     const html = await res.text();
     assert.match(html, /Landing Page Race/);
     assert.match(html, /og:title/);
+  });
+
+  it("preserves race + referral through the combined landing and records both opens", async () => {
+    const alice = await createUser("AliceWalker");
+    const raceId = (await (await createRace(alice.token)).json()).race.id;
+    const share = await request(server.baseUrl, "POST", `/races/${raceId}/share-link`, {
+      token: alice.token,
+    });
+    const { url } = await share.json();
+    const parsed = new URL(url);
+    const res = await fetch(`${server.baseUrl}${parsed.pathname}${parsed.search}`);
+    assert.equal(res.status, 200);
+    const html = await res.text();
+    assert.match(html, /bara:\/\/join\/[0-9a-f]{32}\?ref=BARA-[A-Z0-9]{4}/);
+    assert.match(html, /id="playstore"[^>]+aria-disabled="true"/);
+    assert.match(html, /navigator\.clipboard\.writeText\(/);
+    assert.match(html, new RegExp(JSON.stringify(url).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.match(html, /window\.location\.href=app\.href/);
+
+    for (let i = 0; i < 20; i++) {
+      const count = await prisma.linkOpen.count({ where: { sourceRaceId: raceId } });
+      if (count >= 2) break;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    const opens = await prisma.linkOpen.findMany({
+      where: { sourceRaceId: raceId },
+      orderBy: { kind: "asc" },
+    });
+    assert.deepEqual(opens.map((open) => open.kind).sort(), ["race_share", "referral"]);
   });
 
   it("renders a 404 landing page for an unknown token", async () => {

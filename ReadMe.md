@@ -18,7 +18,7 @@ cd /var/www/step-tracker-backend && \
   npm install && \
   npx prisma migrate deploy && \
   npx prisma generate && \
-  node prisma/seed.js && \
+  npm run powerups:copy:sync -- --apply && \
   pm2 restart 3
 ```
 
@@ -33,10 +33,14 @@ cd /var/www/step-tracker-backend-staging && \
   npm install && \
   npx prisma migrate deploy && \
   npx prisma generate && \
+  npm run powerups:copy:sync -- --apply && \
   pm2 restart steps-tracker-staging
 ```
 
-Note: no `prisma/seed.js` on staging — seeding is for prod only.
+Note: `prisma/seed.js` runs on neither. It bootstraps a *fresh* database; a live
+one gets only `powerups:copy:sync`, which touches the `PowerupCopy` table and
+nothing else. Drop the `--apply` to see the diff first. See `DEPLOYMENT.md` ->
+"Powerup copy".
 
 ## Sync prod data into staging (or local)
 

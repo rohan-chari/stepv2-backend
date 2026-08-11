@@ -51,6 +51,7 @@ describe("2026-07-22 additive backend contracts", () => {
       { userId: watcher.user.id, transactionId: "coin-1", rewardKind: "coin_reward", grantedDate: "ignored" },
       { userId: watcher.user.id, transactionId: "coin-2", rewardKind: "coin_reward", grantedDate: "ignored" },
       { userId: watcher.user.id, transactionId: "spin-1", rewardKind: "extra_daily_spin", grantedDate: "ignored" },
+      { userId: watcher.user.id, transactionId: "reroll-1", rewardKind: "box_reroll", grantedDate: "ignored" },
       { userId: nonDau.user.id, transactionId: "coin-nondau", rewardKind: "coin_reward", grantedDate: "ignored" },
     ] });
     const res = await request(server.baseUrl, "GET", "/admin/stats", { token: admin.token });
@@ -59,6 +60,7 @@ describe("2026-07-22 additive backend contracts", () => {
       timeZone: "America/New_York",
       coinReward: { uniqueDauWatchers: 1, pctOfDau: 100 },
       extraSpin: { uniqueDauWatchers: 1, pctOfDau: 100 },
+      boxReroll: { uniqueDauWatchers: 1, pctOfDau: 100 },
     });
   });
 

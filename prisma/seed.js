@@ -20,22 +20,42 @@ const stakes = [
   { name: "Venmo $5", description: "Loser sends the winner $5", category: "digital", relationshipTags: ["friend", "coworker", "sibling"], format: "VIRTUAL" },
 ];
 
+// Flipping `active` on challenge/stake rows is OPT-IN (`--deactivate-removed`).
+//
+// It used to run on every deploy, which meant this file silently owned the
+// `active` column of two tables it does not otherwise manage: anything an admin
+// switched off in the DB got switched back ON by the next deploy, and anything
+// added outside this file got switched off. Bootstrapping a fresh database
+// never needs either sweep — there is nothing to deactivate — so the default is
+// now the non-destructive path and the sweep is something you ask for.
+const DEACTIVATE_REMOVED = process.argv.includes("--deactivate-removed");
+
 async function seed() {
   const activeTitles = new Set(challenges.map((c) => c.title));
 
-  // Deactivate challenges no longer in the seed
-  console.log("Deactivating removed challenges...");
-  const deactivated = await prisma.challenge.updateMany({
-    where: { title: { notIn: [...activeTitles] }, active: true },
-    data: { active: false },
-  });
-  console.log(`Deactivated ${deactivated.count} old challenges`);
+  if (DEACTIVATE_REMOVED) {
+    // Deactivate challenges no longer in the seed
+    console.log("Deactivating removed challenges...");
+    const deactivated = await prisma.challenge.updateMany({
+      where: { title: { notIn: [...activeTitles] }, active: true },
+      data: { active: false },
+    });
+    console.log(`Deactivated ${deactivated.count} old challenges`);
 
-  // Re-activate any that were previously deactivated but are back in the seed
-  await prisma.challenge.updateMany({
-    where: { title: { in: [...activeTitles] }, active: false },
-    data: { active: true },
-  });
+    // Re-activate any that were previously deactivated but are back in the seed
+    await prisma.challenge.updateMany({
+      where: { title: { in: [...activeTitles] }, active: false },
+      data: { active: true },
+    });
+  } else {
+    const stale = await prisma.challenge.count({
+      where: { title: { notIn: [...activeTitles] }, active: true },
+    });
+    console.log(
+      `Skipping challenge active/inactive sweep (${stale} active row(s) not in this file). ` +
+        "Pass --deactivate-removed to apply it."
+    );
+  }
 
   console.log("Seeding challenges...");
   let created = 0;
@@ -50,20 +70,30 @@ async function seed() {
   }
   console.log(`Created ${created} challenges (${challenges.length - created} already existed)`);
 
-  // Deactivate stakes no longer in the seed
   const activeStakeNames = new Set(stakes.map((s) => s.name));
-  console.log("Deactivating removed stakes...");
-  const deactivatedStakes = await prisma.stake.updateMany({
-    where: { name: { notIn: [...activeStakeNames] }, active: true },
-    data: { active: false },
-  });
-  console.log(`Deactivated ${deactivatedStakes.count} old stakes`);
+  if (DEACTIVATE_REMOVED) {
+    // Deactivate stakes no longer in the seed
+    console.log("Deactivating removed stakes...");
+    const deactivatedStakes = await prisma.stake.updateMany({
+      where: { name: { notIn: [...activeStakeNames] }, active: true },
+      data: { active: false },
+    });
+    console.log(`Deactivated ${deactivatedStakes.count} old stakes`);
 
-  // Re-activate any that were previously deactivated but are back in the seed
-  await prisma.stake.updateMany({
-    where: { name: { in: [...activeStakeNames] }, active: false },
-    data: { active: true },
-  });
+    // Re-activate any that were previously deactivated but are back in the seed
+    await prisma.stake.updateMany({
+      where: { name: { in: [...activeStakeNames] }, active: false },
+      data: { active: true },
+    });
+  } else {
+    const staleStakes = await prisma.stake.count({
+      where: { name: { notIn: [...activeStakeNames] }, active: true },
+    });
+    console.log(
+      `Skipping stake active/inactive sweep (${staleStakes} active row(s) not in this file). ` +
+        "Pass --deactivate-removed to apply it."
+    );
+  }
 
   console.log("Seeding stakes...");
   let stakesCreated = 0;
@@ -93,7 +123,7 @@ async function seed() {
       sku: "POWERUP_IMPOSTER",
       name: "Imposter",
       description:
-        "Swap your leaderboard position with a rival's for 1 hour. Purely cosmetic — real standings and payouts are unaffected. Mirrors can't reflect it, but Compression Socks block it.",
+        "Swap your leaderboard position with a rival's for 1 hour. Purely cosmetic, so real standings and payouts are unaffected. Mirrors can't reflect it, but Compression Socks block it.",
       priceCoins: 75,
       powerupType: "IMPOSTER",
       active: true,
@@ -126,7 +156,7 @@ async function seed() {
       sku: "POWERUP_SIGNAL_JAMMER",
       name: "Signal Jammer",
       description:
-        "Jam a rival's signal — they can't use any powerups for 1 hour. They can still buy and stash powerups; they just can't fire them. Mirrors can't reflect it, but Compression Socks block it.",
+        "Jam a rival's signal. They can't use any powerups for 1 hour. They can still buy and stash powerups; they just can't fire them. Mirrors can't reflect it, but Compression Socks block it.",
       priceCoins: 75,
       powerupType: "SIGNAL_JAMMER",
       active: true,
@@ -136,7 +166,7 @@ async function seed() {
       sku: "POWERUP_CLEANSE",
       name: "Cleanse",
       description:
-        "Wash away every debuff a rival has stuck on you — frozen steps, wrong turns, detours, and more. Your own buffs stay put.",
+        "Wash away every debuff a rival has stuck on you: frozen steps, wrong turns, detours, and more. Your own buffs stay put.",
       priceCoins: 150,
       powerupType: "CLEANSE",
       // Retired from the store AND the daily reward box (the box pool is drawn
@@ -192,7 +222,7 @@ async function seed() {
       sku: "POWERUP_XRAY",
       name: "X-Ray",
       description:
-        "Instantly scan every opponent and see who has a defense up — Compression Socks or a Mirror — and when it expires. Pure recon: it reveals nothing to anyone else.",
+        "Instantly scan every opponent and see who has a defense up, Compression Socks or a Mirror, and when it expires. Pure recon: it reveals nothing to anyone else.",
       priceCoins: 150,
       powerupType: "DEFENSE_SCAN",
       active: true,
@@ -209,7 +239,7 @@ async function seed() {
       sku: "POWERUP_HITCHHIKE",
       name: "Hitchhike",
       description:
-        "For 60 min, every step a chosen rival takes is copied into your score — they lose nothing. Compression Socks block it; Mirrors can't reflect it",
+        "For 60 min, every step a chosen rival takes is copied into your score. They lose nothing. Compression Socks block it; Mirrors can't reflect it",
       priceCoins: 150,
       powerupType: "HITCHHIKE",
       active: true,
@@ -264,7 +294,7 @@ async function seed() {
       sku: "POWERUP_GHOST_PEPPER",
       name: "Ghost Pepper",
       description:
-        "Go all-in: 3x steps for 30 minutes, then a 30-minute burnout where your steps are frozen. Self-inflicted — Cleanse and Quick Rinse can't wash it off.",
+        "Go all-in: 3x steps for 30 minutes, then a 30-minute burnout where your steps are frozen. Self-inflicted, so Cleanse and Quick Rinse can't wash it off.",
       priceCoins: 75,
       powerupType: "GHOST_PEPPER",
       active: true,
@@ -275,7 +305,7 @@ async function seed() {
       sku: "POWERUP_COIN_FLIP",
       name: "Coin Flip",
       description:
-        "Gamble on yourself: flip a coin. Heads doubles your steps for 1 hour; tails halves them. Self-inflicted — no shield or cleanse changes the result.",
+        "Gamble on yourself: flip a coin. Heads doubles your steps for 1 hour; tails halves them. Self-inflicted, so no shield or cleanse changes the result.",
       priceCoins: 40,
       powerupType: "COIN_FLIP",
       active: true,
@@ -286,7 +316,7 @@ async function seed() {
       sku: "POWERUP_MYSTERY_POTION",
       name: "Mystery Potion",
       description:
-        "Drink up and hope for the best — a random effect fires the moment you use it. Could help you, could hit a rival, could backfire.",
+        "Drink up and hope for the best. A random effect fires the moment you use it. Could help you, could hit a rival, could backfire.",
       priceCoins: 40,
       powerupType: "MYSTERY_POTION",
       active: true,

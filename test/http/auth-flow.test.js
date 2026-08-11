@@ -86,6 +86,9 @@ test("POST /auth/apple provisions the signed-in user", async () => {
         // the exact featureFlags payload every client receives.
         onboardingInviteCodeEnabled: true,
         tutorialMandatoryEnabled: false,
+        openUserRaceDiscoveryEnabled: false,
+        quickCreateRaceCtaEnabled: false,
+        setupInviteCodePromptEnabled: false,
       },
     });
     assert.equal(typeof body.sessionToken, "string");
@@ -100,6 +103,7 @@ test("POST /auth/apple provisions the signed-in user", async () => {
       email: "walker@example.com",
       name: "Rohan Chari",
       referralCode: undefined,
+      referralSourceRaceId: null,
       emitSignInEvent: true,
     });
   } finally {

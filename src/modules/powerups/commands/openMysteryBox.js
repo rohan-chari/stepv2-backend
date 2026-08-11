@@ -297,7 +297,7 @@ function buildOpenMysteryBox(dependencies = {}) {
         actorUserId: userId,
         eventType: "MYSTERY_BOX_OPENED",
         powerupType: rolled.type,
-        description: `${displayName || "A runner"} opened a mystery box — ${POWERUP_NAMES[rolled.type]}! Auto-activated — extra slot unlocked.`,
+        description: `${displayName || "A runner"} opened a mystery box: ${POWERUP_NAMES[rolled.type]}! Auto-activated. Extra slot unlocked.`,
       });
 
       events.emit("MYSTERY_BOX_OPENED", {
@@ -329,7 +329,7 @@ function buildOpenMysteryBox(dependencies = {}) {
       actorUserId: userId,
       eventType: "MYSTERY_BOX_OPENED",
       powerupType: rolled.type,
-      description: `${displayName || "A runner"} opened a mystery box — ${POWERUP_NAMES[rolled.type] || rolled.type}!`,
+      description: `${displayName || "A runner"} opened a mystery box: ${POWERUP_NAMES[rolled.type] || rolled.type}!`,
     });
 
     events.emit("MYSTERY_BOX_OPENED", {

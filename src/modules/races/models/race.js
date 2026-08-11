@@ -98,6 +98,8 @@ const Race = {
     // and read by every projection and by settlement. NULL (the default, and
     // every pre-existing row) means 1.0 — see races/teamPoolMultiplier.js.
     teamPoolMultBps = null,
+    creationSource = null,
+    startPolicy = null,
   }) {
     return prisma.race.create({
       data: {
@@ -121,6 +123,8 @@ const Race = {
         teamAName,
         teamBName,
         teamPoolMultBps,
+        creationSource,
+        startPolicy,
       },
       include: {
         creator: { select: { id: true, displayName: true, profilePhotoUrl: true } },
@@ -518,7 +522,13 @@ const Race = {
   async findAutoStartGate(id) {
     return prisma.race.findUnique({
       where: { id },
-      select: { id: true, status: true, isPublic: true },
+      select: {
+        id: true,
+        status: true,
+        isPublic: true,
+        creationSource: true,
+        startPolicy: true,
+      },
     });
   },
 
@@ -533,7 +543,13 @@ const Race = {
     return prisma.race.findMany({
       where: {
         status: "PENDING",
-        isPublic: false,
+        OR: [
+          { isPublic: false },
+          {
+            creationSource: "QUICK_CREATE",
+            startPolicy: "ON_MINIMUM_PARTICIPANTS",
+          },
+        ],
         seedId: null,
         tournamentId: null,
         scheduledStartAt: null,
@@ -544,6 +560,8 @@ const Race = {
         creatorId: true,
         status: true,
         isPublic: true,
+        creationSource: true,
+        startPolicy: true,
         seedId: true,
         tournamentId: true,
         scheduledStartAt: true,
@@ -558,7 +576,7 @@ const Race = {
           },
         },
       },
-      orderBy: { createdAt: "desc" },
+      orderBy: { createdAt: "asc" },
       take: limit,
     });
   },

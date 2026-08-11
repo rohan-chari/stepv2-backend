@@ -91,7 +91,7 @@ async function assertUnderDailyCap(tx, userId, localDate, makeError) {
   const used = await consumedUnlocksToday(tx, userId, localDate);
   if (used >= cap) {
     throw makeError(
-      "You've already used your daily ad unlock — come back tomorrow.",
+      "You've already used your daily ad unlock. Come back tomorrow.",
       409,
       "DAILY_CAP_REACHED"
     );

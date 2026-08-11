@@ -312,6 +312,8 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
       // this defensively (int? ?? 10) so they show a finite figure but never crash.
       maxParticipants: race.maxParticipants ?? null,
       createdAt: race.createdAt,
+      creationSource: race.creationSource ?? null,
+      startPolicy: race.startPolicy ?? null,
       // ── Team races (TR-806/807) — additive; old clients ignore them and
       // never receive a team race anyway (filtered above).
       isTeamRace: race.isTeamRace === true,

@@ -37,6 +37,11 @@ const KNOWN_FLAGS = {
   // a literal `false` disables. Inert for every frozen binary, which reads named
   // keys off `featureFlags` and ignores unknown ones.
   onboardingInviteCodeEnabled: true,
+  // Next-race CTA rollout switches. Default OFF: deploying the backend alone
+  // performs no new discovery work and exposes no new creation behavior.
+  openUserRaceDiscoveryEnabled: false,
+  quickCreateRaceCtaEnabled: false,
+  setupInviteCodePromptEnabled: false,
   // Mandatory onboarding tutorial (batch 2026-08-09 item 9). When TRUE, a
   // build that carries the mandatory-capable onboarding removes every escape
   // hatch from the tutorial (intro skip, in-tutorial skip chip/pill, back

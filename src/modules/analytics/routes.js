@@ -69,13 +69,51 @@ const ALLOWED_EVENT_NAMES = new Set([
   "install_attr_code_captured",
   "install_attr_install_referrer",
   "install_attr_error",
+  // Next-race discovery/create and invite-code relocation. New names are
+  // additive; an older backend soft-drops them per event.
+  "open_race_discovery_shown",
+  "open_race_join_succeeded",
+  "next_race_cta_shown",
+  "next_race_cta_tapped",
+  "quick_create_selected",
+  "quick_create_succeeded",
+  "quick_create_failed",
+  "race_share_prompt_shown",
+  "race_share_completed",
+  "invite_code_setup_shown",
+  "invite_code_setup_dismissed",
+  "invite_code_setup_applied",
+  "settings_invite_code_opened",
+  "quick_race_auto_started",
+  "race_share_referral_attributed",
+  "race_share_referral_qualified",
 ]);
 
 const ALLOWED_CONTEXT = {
-  source: new Set(["onboarding", "profile", "races", "empty_state", "share_link"]),
+  source: new Set([
+    "onboarding",
+    "profile",
+    "races",
+    "empty_state",
+    "share_link",
+    "next_race",
+  ]),
   race_state: new Set(["active", "pending"]),
   result: new Set(["granted", "denied", "dismissed", "unsupported", "failed"]),
   mode: new Set(["solo", "team", "tournament"]),
+  surface: new Set(["home", "results"]),
+  preset: new Set(["2_day", "7_day"]),
+  race_count: new Set(["0", "1", "2", "3"]),
+  attributed: new Set(["true", "false"]),
+  deferred_install: new Set(["true", "false"]),
+  error_code: new Set([
+    "INVALID_QUICK_CREATE_CONFIG",
+    "QUICK_CREATE_DISABLED",
+    "QUICK_RACE_ALREADY_LIVE",
+    "QUICK_RACE_MEMBERSHIP_LIMIT",
+    "NETWORK",
+    "UNKNOWN",
+  ]),
 };
 
 // Context keys whose allowed values are a PATTERN rather than a finite Set,
@@ -98,6 +136,13 @@ const ALLOWED_CONTEXT = {
 const ALLOWED_PATTERN_CONTEXT = {
   // "1".."10". Rejects "0", "11", "-1", "2.5", the zero-padded "03", and "".
   step: /^(?:[1-9]|10)$/,
+  // Required next-race funnel identifiers. UUIDs are bounded and validated;
+  // share targets are client-normalized tokens, never raw platform payloads.
+  race_id: /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+  source_race_id: /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+  share_target: /^[A-Za-z0-9._:-]{1,64}$/,
+  seconds_from_creation: /^(?:0|[1-9][0-9]{0,9})$/,
+  qualification_latency_seconds: /^(?:0|[1-9][0-9]{0,9})$/,
 };
 
 const SAFE_ID = /^[A-Za-z0-9._:-]+$/;

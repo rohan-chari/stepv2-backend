@@ -1,0 +1,91 @@
+const { prisma } = require("../../../db");
+const {
+  RaceResolutionJobV2,
+} = require("../models/raceResolutionJobV2");
+const { recordServerActivationEvent } = require("../../analytics/serverActivationEvents");
+
+// Durable start claim. Baselines are collected before this short transaction;
+// the accepted-id snapshot is rechecked under the C0 writer fence before any
+// state changes. A changed field returns `participantChanged` and leaves the
+// race wholly PENDING for a fresh idempotent retry.
+async function commitRaceStart({
+  raceId,
+  actorUserId,
+  startedAt,
+  endsAt,
+  potCoins,
+  participantUpdates,
+  beforeRaceStartedRecord,
+}) {
+  return prisma.$transaction(async (tx) => {
+    await RaceResolutionJobV2.acquireForWrite(tx, { raceId });
+    const race = await tx.race.findUnique({
+      where: { id: raceId },
+      select: { status: true, creationSource: true, startPolicy: true, createdAt: true },
+    });
+    if (!race || race.status !== "PENDING") return { started: false };
+
+    const accepted = await tx.raceParticipant.findMany({
+      where: { raceId, status: "ACCEPTED" },
+      select: { id: true, userId: true },
+      orderBy: { userId: "asc" },
+    });
+    const expected = [...participantUpdates].sort((a, b) =>
+      a.userId.localeCompare(b.userId)
+    );
+    if (
+      accepted.length !== expected.length ||
+      accepted.some(
+        (row, index) =>
+          row.id !== expected[index].id || row.userId !== expected[index].userId
+      )
+    ) {
+      return { started: false, participantChanged: true };
+    }
+
+    const flip = await tx.race.updateMany({
+      where: { id: raceId, status: "PENDING" },
+      data: { status: "ACTIVE", startedAt, endsAt, potCoins },
+    });
+    if (flip.count !== 1) return { started: false };
+
+    for (const participant of expected) {
+      await tx.raceParticipant.update({
+        where: { id: participant.id },
+        data: participant.fields,
+      });
+    }
+    if (beforeRaceStartedRecord) {
+      await beforeRaceStartedRecord({ tx, raceId, participantUpdates: expected });
+    }
+    await tx.racePowerupEvent.create({
+      data: {
+        raceId,
+        actorUserId,
+        eventType: "RACE_STARTED",
+        description: "Race started!",
+      },
+    });
+    if (
+      race.creationSource === "QUICK_CREATE" &&
+      race.startPolicy === "ON_MINIMUM_PARTICIPANTS"
+    ) {
+      await recordServerActivationEvent({
+        db: tx,
+        id: `server:quick-start:${raceId}`,
+        userId: actorUserId,
+        name: "quick_race_auto_started",
+        context: {
+          race_id: raceId,
+          seconds_from_creation: String(
+            Math.max(0, Math.floor((startedAt.getTime() - race.createdAt.getTime()) / 1000))
+          ),
+        },
+        occurredAt: startedAt,
+      });
+    }
+    return { started: true };
+  });
+}
+
+module.exports = { commitRaceStart };

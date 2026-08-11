@@ -99,6 +99,7 @@ function buildEnsureAppleUser(dependencies = {}) {
     email,
     name,
     referralCode,
+    referralSourceRaceId = null,
     // Async thunk resolving a referral code when the body carried none (the
     // IP-correlated link_opens fallback — see findLinkOpenReferralCode.js).
     // Invoked ONLY on the create branch so an existing user re-signing in can
@@ -131,6 +132,7 @@ function buildEnsureAppleUser(dependencies = {}) {
       // code alone loses real referrals (emersonz incident, 2026-08-07).
       const attribution = await resolveSignupAttribution({
         referralCode,
+        referralSourceRaceId,
         fallbackReferralCode,
         signupId: user.id,
       });
@@ -138,6 +140,7 @@ function buildEnsureAppleUser(dependencies = {}) {
         newUser: user,
         referralCode: attribution.code,
         source: attribution.source,
+        sourceRaceId: attribution.sourceRaceId,
       });
       // FRESHNESS: `user` was built BEFORE recordReferral ran its
       // `user.update({referredByCode})`, so without this merge a

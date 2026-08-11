@@ -42,7 +42,7 @@ function makeFakePrisma(handlers = {}) {
 // identify them without matching a table name that a legacy query also uses
 // (`ad_reward_grants` and `MYSTERY_BOX_OPENED` both already appear above).
 const ECONOMY_MARKERS = ["coinLedgerDaily", "purchasesBySku", "boxOpensDaily"];
-const AD_MARKERS = ["adWatchesDaily", "adCapUtilization"];
+const AD_MARKERS = ["adWatchesDaily", "adCapUtilization", "boxRerollAds"];
 
 function matching(seen, markers) {
   return seen.filter((sql) => markers.some((m) => sql.includes(m)));
@@ -144,9 +144,15 @@ test("sections=economy adds coinEconomy in the locked shape", async () => {
 test("sections=ads adds adRevenue in the locked shape", async () => {
   const prisma = makeFakePrisma({
     adWatchesDaily: [
-      { date: "2026-08-01", coin_reward_watches: 9n, extra_spin_watches: 3n },
+      {
+        date: "2026-08-01",
+        coin_reward_watches: 9n,
+        extra_spin_watches: 3n,
+        box_reroll_watches: 5n,
+      },
     ],
     adCapUtilization: [{ avg_watches_per_user: 2.25, users_at_cap: 7n }],
+    boxRerollAds: [{ watches: 5n, unique_watchers: 2n, consumed: 4n }],
   });
 
   const stats = await buildGetAdminStats({ prisma })({ sections: ["ads"] });
@@ -154,7 +160,20 @@ test("sections=ads adds adRevenue in the locked shape", async () => {
   assert.deepEqual(stats.adRevenue, {
     windowDays: 30,
     timeZone: "America/New_York",
-    days: [{ date: "2026-08-01", coinRewardWatches: 9, extraSpinWatches: 3 }],
+    days: [
+      {
+        date: "2026-08-01",
+        coinRewardWatches: 9,
+        extraSpinWatches: 3,
+        boxRerollWatches: 5,
+      },
+    ],
+    boxReroll: {
+      watches: 5,
+      uniqueWatchers: 2,
+      consumed: 4,
+      pctConsumed: 80,
+    },
     capUtilization: { avgWatchesPerUser: 2.3, usersAtCap: 7 },
   });
 
@@ -172,6 +191,33 @@ test("ad capUtilization degrades to nulls/zero rather than NaN with no data", as
     usersAtCap: 0,
   });
   assert.deepEqual(stats.adRevenue.days, []);
+});
+
+test("boxReroll conversion is null, not 0%, when nobody has watched", async () => {
+  const prisma = makeFakePrisma({
+    boxRerollAds: [{ watches: 0n, unique_watchers: 0n, consumed: 0n }],
+  });
+  const stats = await buildGetAdminStats({ prisma })({ sections: ["ads"] });
+  assert.deepEqual(stats.adRevenue.boxReroll, {
+    watches: 0,
+    uniqueWatchers: 0,
+    consumed: 0,
+    pctConsumed: null,
+  });
+});
+
+test("box_reroll watchers land in the default rewardedAds block", async () => {
+  const prisma = makeFakePrisma({
+    box_reroll_watchers: [
+      { coin_watchers: 4n, extra_spin_watchers: 2n, box_reroll_watchers: 3n },
+    ],
+    dau_in_active_race: [{ dau: 10n, dau_in_active_race: 5n }],
+  });
+  const stats = await buildGetAdminStats({ prisma })();
+  assert.deepEqual(stats.activity.rewardedAds.boxReroll, {
+    uniqueDauWatchers: 3,
+    pctOfDau: 30,
+  });
 });
 
 test("both sections can be requested at once", async () => {
@@ -278,9 +324,15 @@ test("coinEconomy numbers survive as JSON numbers even from string aggregates", 
 test("adRevenue numbers survive as JSON numbers even from string aggregates", async () => {
   const prisma = makeFakePrisma({
     adWatchesDaily: [
-      { date: "2026-08-01", coin_reward_watches: "9", extra_spin_watches: "3" },
+      {
+        date: "2026-08-01",
+        coin_reward_watches: "9",
+        extra_spin_watches: "3",
+        box_reroll_watches: "5",
+      },
     ],
     adCapUtilization: [{ avg_watches_per_user: "2.25", users_at_cap: "7" }],
+    boxRerollAds: [{ watches: "5", unique_watchers: "2", consumed: "4" }],
   });
   const stats = await buildGetAdminStats({ prisma })({ sections: ["ads"] });
   const wire = roundTrip(stats).adRevenue;
@@ -294,6 +346,16 @@ test("adRevenue numbers survive as JSON numbers even from string aggregates", as
   assert.equal(wire.capUtilization.avgWatchesPerUser, 2.3);
   assert.equal(wire.capUtilization.usersAtCap, 7);
   assert.equal(typeof wire.days[0].date, "string");
+
+  // A string aggregate is the quiet failure mode: it serializes fine and
+  // reaches the client as "5", which the admin reader rejects as a non-number
+  // and draws as an em dash. The ratio must not go NaN off string inputs
+  // either.
+  assert.equal(typeof wire.days[0].boxRerollWatches, "number");
+  assert.equal(typeof wire.boxReroll.watches, "number");
+  assert.equal(typeof wire.boxReroll.uniqueWatchers, "number");
+  assert.equal(typeof wire.boxReroll.consumed, "number");
+  assert.equal(wire.boxReroll.pctConsumed, 80);
 });
 
 test("BigInt aggregates also reach the wire as JSON numbers", async () => {

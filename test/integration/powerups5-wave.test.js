@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const { describe, it, before, beforeEach } = require("node:test");
 const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
 const { resolveExpiredRaces } = require("../../src/modules/races/jobs/raceExpiry");
+const { appSettings } = require("../../src/shared/config/appSettings");
 
 let server;
 let nextAppleId = 0;
@@ -135,7 +136,14 @@ function boardSteps(progress, userId) {
 
 describe("powerups5 wave — integration", () => {
   before(async () => { server = await getSharedServer(); });
-  beforeEach(async () => { await cleanDatabase(); nextAppleId = 0; });
+  beforeEach(async () => {
+    await cleanDatabase();
+    nextAppleId = 0;
+    // app_settings persists across test files; pin this suite's payout math
+    // to the pre-funded-prize-pools baseline it was written against, rather
+    // than relying on whatever an earlier file happened to leave it as.
+    await appSettings.setFlag("fundedPrizePoolsEnabled", false);
+  });
 
   // ── 1. Gating matrix ────────────────────────────────────────────────────
   describe("gating", () => {

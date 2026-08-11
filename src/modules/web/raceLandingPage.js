@@ -12,9 +12,6 @@
 // generates its CSS from, so a share link and barastep.com can never drift onto
 // different palettes or typefaces. Change a colour there, not here.
 //
-// Google Play isn't live yet, so its button surfaces an alert instead of routing
-// to a Play Store listing.
-//
 // The race name and host display name are user-controlled, so EVERYTHING
 // interpolated into the markup is HTML-escaped to prevent injection/XSS.
 
@@ -35,7 +32,7 @@ function escapeHtml(value) {
 // landing-page module) — they are shown by the same disabled-Play-button
 // handler on two different pages.
 const PLAY_ALERT_MSG =
-  "Bara isn't on Android yet — it's on the App Store (iOS) today. " +
+  "Bara isn't on Android yet. It's on the App Store (iOS) today. " +
   "Join the Android waitlist at barastep.com and we'll email you when it's ready.";
 
 function shell({ title, description, body, links, primaryHtml, scriptBody }) {
@@ -126,8 +123,6 @@ function shell({ title, description, body, links, primaryHtml, scriptBody }) {
       transition:filter .08s ease, transform .08s ease; }
     .store-btn:hover { filter:brightness(1.12); }
     .store-btn:active { transform:translateY(3px); box-shadow:0 0 0 var(--bara-canopy-deep); }
-    /* Google Play isn't live yet. Kept visible but inert — the click handler in
-       pageScript() explains why rather than routing to a listing that 404s. */
     .store-btn-disabled { opacity:0.5; cursor:not-allowed; box-shadow:none; }
     .store-btn-disabled:hover { filter:none; }
     .store-btn-disabled:active { transform:none; box-shadow:none; }
@@ -158,7 +153,9 @@ function shell({ title, description, body, links, primaryHtml, scriptBody }) {
     ${primaryHtml || ""}
     <div class="store-buttons">
       <a id="appstore" class="store-btn" href="${escapeHtml(links.appStoreUrl)}">Download on the App Store</a>
-      <button id="playstore" class="store-btn store-btn-disabled" type="button" aria-disabled="true">Get it on Google Play</button>
+      ${links.playStoreEnabled
+        ? `<a id="playstore" class="store-btn" href="${escapeHtml(links.playStoreUrl)}">Get it on Google Play</a>`
+        : `<button id="playstore" class="store-btn store-btn-disabled" type="button" aria-disabled="true">Get it on Google Play</button>`}
     </div>
   </main>
   <script>${scriptBody}</script>
@@ -166,11 +163,24 @@ function shell({ title, description, body, links, primaryHtml, scriptBody }) {
 </html>`;
 }
 
-function pageScript() {
+function pageScript({ shareUrl = null, playStoreEnabled = false } = {}) {
   return `(function(){
   var PLAY_MSG=${JSON.stringify(PLAY_ALERT_MSG)};
   var play=document.getElementById("playstore");
-  if(play){ play.addEventListener("click", function(e){ e.preventDefault(); alert(PLAY_MSG); }); }
+  if(play&&!${JSON.stringify(playStoreEnabled)}){ play.addEventListener("click", function(e){ e.preventDefault(); alert(PLAY_MSG); }); }
+  var app=document.getElementById("appstore");
+  var shareUrl=${JSON.stringify(shareUrl)};
+  if(app&&shareUrl){
+    app.addEventListener("click", function(e){
+      e.preventDefault();
+      var navigate=function(){ window.location.href=app.href; };
+      try {
+        var copied=navigator.clipboard&&navigator.clipboard.writeText(shareUrl);
+        if(copied&&typeof copied.then==="function"){ copied.then(navigate,navigate); }
+        else { navigate(); }
+      } catch (_) { navigate(); }
+    });
+  }
 })();`;
 }
 
@@ -184,7 +194,7 @@ function renderRaceLandingPage(preview, links) {
       ? `${preview.participantCount}/${preview.maxParticipants} players`
       : `${preview.participantCount} players`;
 
-  const title = `${preview.name} — join the race on Bara`;
+  const title = `${preview.name}: join the race on Bara`;
   const description = `${hostName} invited you to "${preview.name}". ${playerLine}. Tap to join.`;
 
   const body = `
@@ -197,7 +207,14 @@ function renderRaceLandingPage(preview, links) {
 
   const primaryHtml = `<a id="openapp" class="cta-btn" href="${escapeHtml(links.appDeepLink)}">Open in app</a>`;
 
-  return shell({ title, description, body, links, primaryHtml, scriptBody: pageScript() });
+  return shell({
+    title,
+    description,
+    body,
+    links,
+    primaryHtml,
+    scriptBody: pageScript({ shareUrl: links.shareUrl }),
+  });
 }
 
 function renderRaceNotFoundPage(links) {
@@ -209,7 +226,7 @@ function renderRaceNotFoundPage(links) {
     </div>
   `;
   return shell({
-    title: "Race not found — Bara",
+    title: "Race not found on Bara",
     description: "This race link is no longer valid.",
     body,
     links,
@@ -218,9 +235,9 @@ function renderRaceNotFoundPage(links) {
   });
 }
 
-// `shell` + `pageScript` are exported so the tournament landing page
-// (web/tournamentLandingPage.js) reuses the exact same Bara-trail chrome, store
-// buttons, and Play-alert script — only the inner copy differs.
+// `shell` + `pageScript` are exported so the other landing pages reuse the same
+// Bara-trail chrome. Race links opt into the live Play/install handoff; older
+// referral/tournament pages retain their existing disabled-Play behavior.
 module.exports = {
   renderRaceLandingPage,
   renderRaceNotFoundPage,

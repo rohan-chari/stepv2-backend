@@ -348,7 +348,7 @@ function buildRerollMysteryBox(dependencies = {}) {
       actorUserId: userId,
       eventType: "POWERUP_REROLLED",
       powerupType: rolled.type,
-      description: `${displayName || "A runner"} rerolled a mystery box — ${
+      description: `${displayName || "A runner"} rerolled a mystery box: ${
         POWERUP_NAMES[rolled.type] || rolled.type
       }!`,
     });

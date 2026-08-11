@@ -34,7 +34,7 @@ const DEFAULT_ZONE = "America/New_York";
 
 const REMINDER_TITLE = "Coins waiting! 🪙";
 const REMINDER_BODY =
-  "You crossed a step milestone today — collect your coins before midnight.";
+  "You crossed a step milestone today. Collect your coins before midnight.";
 const NOTIFICATION_TYPE = "STEP_MILESTONE_REMINDER";
 
 const THRESHOLD_STEPS = STEP_MILESTONE_THRESHOLDS.map((t) => t.steps);

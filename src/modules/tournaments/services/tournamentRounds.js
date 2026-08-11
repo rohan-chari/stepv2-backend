@@ -23,7 +23,7 @@ async function createRoundRaces({
   stepsModel = Steps,
 }) {
   const label = roundLabel(tournament.bracketSize, round);
-  const name = `${tournament.name} — ${label}`.slice(0, RACE_NAME_MAX);
+  const name = `${tournament.name}: ${label}`.slice(0, RACE_NAME_MAX);
   // §3.5 defensive clamp: any tournament row carrying a legacy 1-day duration
   // (created before the 2-day minimum shipped) yields 2-day round races.
   const durationDays = clampMatchupDuration(tournament.matchupDurationDays);

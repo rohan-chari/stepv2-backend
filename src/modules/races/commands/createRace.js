@@ -24,6 +24,14 @@ const {
   generateTeamNamePair: defaultGenerateTeamNamePair,
 } = require("../constants/teamNames");
 const { resolveTeamPoolMultBps } = require("../teamPoolMultiplier");
+const {
+  supportsNextRace,
+  hasAnyQuickMetadata,
+  isSupportedQuickConfig,
+  hasLiveUserCreatedRace,
+  QUICK_SOURCE,
+  AUTO_START_POLICY,
+} = require("../services/nextRacePolicy");
 
 class RaceCreationError extends Error {
   constructor(message, statusCode, code) {
@@ -117,7 +125,50 @@ function buildCreateRace(dependencies = {}) {
     team = null,
     // The requester's resolved X-Client-Features tokens (array or Set).
     clientFeatures = null,
+    creationSource = null,
+    startPolicy = null,
   }) {
+    const capable = supportsNextRace(
+      clientFeatures instanceof Set ? clientFeatures : new Set(clientFeatures || [])
+    );
+    const quickInput = {
+      creationSource,
+      startPolicy,
+      maxDurationDays,
+      isPublic,
+      buyInAmount,
+      payoutPreset,
+      powerupsEnabled,
+      powerupStepInterval,
+      maxParticipants,
+      isTeamRace,
+    };
+    const requestedQuickMetadata = hasAnyQuickMetadata(quickInput);
+    if (capable && requestedQuickMetadata && !isSupportedQuickConfig(quickInput)) {
+      throw new RaceCreationError(
+        "This quick-race configuration is not supported.",
+        400,
+        "INVALID_QUICK_CREATE_CONFIG"
+      );
+    }
+    const normalizedQuick = capable && isSupportedQuickConfig(quickInput);
+    if (normalizedQuick) {
+      const enabled = await settings.getFlag("quickCreateRaceCtaEnabled");
+      if (!enabled) {
+        throw new RaceCreationError(
+          "Quick create is temporarily unavailable.",
+          503,
+          "QUICK_CREATE_DISABLED"
+        );
+      }
+      if (await hasLiveUserCreatedRace(userId)) {
+        throw new RaceCreationError(
+          "Finish or leave your current race before starting another.",
+          409,
+          "QUICK_RACE_ALREADY_LIVE"
+        );
+      }
+    }
     validateRaceName(name, RaceCreationError);
     validateDuration(maxDurationDays, RaceCreationError);
 
@@ -265,6 +316,8 @@ function buildCreateRace(dependencies = {}) {
         isTeamRace: !!teamConfig,
         durationDays: maxDurationDays,
       }),
+      creationSource: normalizedQuick ? QUICK_SOURCE : null,
+      startPolicy: normalizedQuick ? AUTO_START_POLICY : null,
     });
 
     await participantModel.create({

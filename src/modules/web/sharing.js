@@ -62,13 +62,15 @@ const APP_URL_SCHEME = process.env.APP_URL_SCHEME || "bara";
 // The canonical shareable link. This is the URL sent in iMessage; iOS/Android
 // route it straight into the app when installed (universal/app link), otherwise
 // the browser loads the landing page at the same URL.
-function buildShareUrl(shareToken) {
-  return `${PUBLIC_BASE_URL}/r/${shareToken}`;
+function buildShareUrl(shareToken, referralCode = null) {
+  const base = `${PUBLIC_BASE_URL}/r/${shareToken}`;
+  return referralCode ? `${base}?ref=${encodeURIComponent(referralCode)}` : base;
 }
 
 // Custom-scheme deep link for the landing page's "Open in app" button.
-function buildAppDeepLink(shareToken) {
-  return `${APP_URL_SCHEME}://join/${shareToken}`;
+function buildAppDeepLink(shareToken, referralCode = null) {
+  const base = `${APP_URL_SCHEME}://join/${shareToken}`;
+  return referralCode ? `${base}?ref=${encodeURIComponent(referralCode)}` : base;
 }
 
 // Tournament share link + custom-scheme deep link (mirrors /r/* for races).

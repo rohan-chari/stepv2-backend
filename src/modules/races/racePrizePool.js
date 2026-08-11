@@ -42,6 +42,22 @@ function settlementPlayerCount(participants) {
   ).length;
 }
 
+function quickSettlementParticipants(race, participants) {
+  if (
+    race?.creationSource !== "QUICK_CREATE" ||
+    race?.startPolicy !== "ON_MINIMUM_PARTICIPANTS"
+  ) {
+    return null;
+  }
+  return (participants || []).filter(
+    (p) =>
+      p.status === "ACCEPTED" &&
+      p.placement != null &&
+      typeof p.rawSteps === "number" &&
+      p.rawSteps >= 2000
+  );
+}
+
 // Team settlement runs placement assignment INSIDE completeRace, so the loaded
 // participant rows still have placement === null there. Count walkers instead —
 // the same "no-shows don't mint" rule without depending on write ordering.
@@ -54,9 +70,14 @@ function teamSettlementPlayerCount(participants) {
 // The pool a funded race mints at settlement.
 function computeSettledRacePool({ race, participants, isTeamRace = false }) {
   if (race?.fundedPrize !== true) return 0;
-  const playerCount = isTeamRace
-    ? teamSettlementPlayerCount(participants)
-    : settlementPlayerCount(participants);
+  const quick = quickSettlementParticipants(race, participants);
+  const playerCount = quick
+    ? quick.length >= 2
+      ? quick.length
+      : 0
+    : isTeamRace
+      ? teamSettlementPlayerCount(participants)
+      : settlementPlayerCount(participants);
   return computePrizePool({
     playerCount,
     durationDays: raceDurationDays(race),
@@ -111,10 +132,15 @@ function buildRaceMoneyView({ race, participants, acceptedCount }) {
 
   // Funded: nothing is ever held, and a completed race reads its STAMPED pool so
   // its numbers can never drift as the field changes afterwards.
+  const completedQuick = completed ? quickSettlementParticipants(race, rows) : null;
   const playerCount = completed
-    ? race?.isTeamRace
-      ? teamSettlementPlayerCount(rows)
-      : settlementPlayerCount(rows)
+    ? completedQuick
+      ? completedQuick.length >= 2
+        ? completedQuick.length
+        : 0
+      : race?.isTeamRace
+        ? teamSettlementPlayerCount(rows)
+        : settlementPlayerCount(rows)
     : acceptedCount;
   // Item 5: the same stamped team multiplier settlement uses, so every read path
   // (list, detail, featured, public, share preview) projects the buffed pool.
@@ -175,6 +201,7 @@ function serializePayouts(payouts) {
 module.exports = {
   raceDurationDays,
   settlementPlayerCount,
+  quickSettlementParticipants,
   teamSettlementPlayerCount,
   computeSettledRacePool,
   buildRaceMoneyView,
