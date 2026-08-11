@@ -21,7 +21,7 @@ import leech from "@/assets/leech.png";
 const standings = [
   { place: "1", name: "You", steps: "12,480", you: true },
   { place: "2", name: "Marcus", steps: "11,240", you: false },
-  { place: "3", name: "Priya", steps: "9,905", you: false },
+  { place: "3", name: "Jordan", steps: "9,905", you: false },
 ];
 </script>
 
