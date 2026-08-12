@@ -42,6 +42,23 @@ test("two lanes claim and process distinct race-resolution jobs concurrently", a
   assert.equal(await ticking, 2);
 });
 
+test("three lanes claim and process distinct race-resolution jobs concurrently", async () => {
+  const releases = [];
+  const started = [];
+
+  const ticking = runBoundedRaceResolutionJobs(3, async () => {
+    const id = started.length + 1;
+    started.push(id);
+    await new Promise((resolve) => releases.push(resolve));
+    return { id: `job-${id}` };
+  });
+
+  await Promise.resolve();
+  assert.deepEqual(started, [1, 2, 3]);
+  releases.forEach((release) => release());
+  assert.equal(await ticking, 3);
+});
+
 test("an empty lane does not prevent a claimed sibling job from completing", async () => {
   let calls = 0;
   const completed = await runBoundedRaceResolutionJobs(2, async () => {

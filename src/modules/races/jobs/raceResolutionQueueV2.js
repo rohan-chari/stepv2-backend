@@ -38,7 +38,7 @@ const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 // Keeping this helper small and pure makes the scheduler's actual parallelism
 // directly testable without mocking the worker's settlement machinery.
 async function runBoundedRaceResolutionJobs(concurrency, processOne) {
-  const lanes = Math.min(2, Math.max(1, Number(concurrency) || 1));
+  const lanes = Math.min(3, Math.max(1, Number(concurrency) || 1));
   // Do not reject early: the scheduler clears its in-flight guard when tick()
   // settles. An early rejection while a sibling is still resolving would let
   // the next 250ms tick exceed the lane cap. Surface the error only once every
@@ -374,7 +374,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
   async function tick() {
     if (process.env.ASYNC_RACE_RESOLUTION_WORKER_DISABLED === "true") return 0;
     const concurrency = Math.min(
-      2,
+      3,
       Math.max(1, Number(process.env.ASYNC_RACE_RESOLUTION_CONCURRENCY) || 1)
     );
     return runBoundedRaceResolutionJobs(concurrency, processOne);
