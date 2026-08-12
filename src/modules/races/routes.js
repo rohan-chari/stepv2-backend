@@ -65,6 +65,9 @@ const {
 } = require("../powerups");
 const { getRaces: defaultGetRaces } = require("./queries/getRaces");
 const {
+  getRaceInvitePreflight: defaultGetRaceInvitePreflight,
+} = require("./queries/getRaceInvitePreflight");
+const {
   getRacePayoutDoubleOffer: defaultGetRacePayoutDoubleOffer,
   buildGetRacePayoutDoubleOffer,
 } = require("./queries/getRacePayoutDoubleOffer");
@@ -194,6 +197,8 @@ function createRacesRouter(dependencies = {}) {
   const generateTeamNamePair =
     dependencies.generateTeamNamePair || defaultGenerateTeamNamePair;
   const getRaces = dependencies.getRaces || defaultGetRaces;
+  const getRaceInvitePreflight =
+    dependencies.getRaceInvitePreflight || defaultGetRaceInvitePreflight;
   const racePayoutDoubleModel =
     dependencies.RacePayoutDouble ||
     (dependencies.prisma
@@ -368,12 +373,30 @@ function createRacesRouter(dependencies = {}) {
     }
   });
 
+  // Fresh invite decision check for the Races-tab gate. This must precede the
+  // full list: the gate needs only pending invitation cards, not list payload.
+  router.get("/invite-preflight", async (req, res) => {
+    try {
+      const supportsTournaments = req.clientFeatures?.has("tournaments") ?? false;
+      res.json(
+        await getRaceInvitePreflight({
+          userId: req.user.id,
+          supportsTournaments,
+        })
+      );
+    } catch (error) {
+      logger.error("Load race invite preflight error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   // GET /races
   router.get("/", async (req, res) => {
     try {
       // TR-702: old clients (no team_races token) never receive team races.
       const supportsTeamRaces = req.clientFeatures?.has("team_races") ?? false;
       const supportsTournaments = req.clientFeatures?.has("tournaments") ?? false;
+      const supportsCharacters = req.clientFeatures?.has("characters") ?? false;
       // Start the core race list and (for token clients) the tournament list
       // concurrently — they read disjoint rows, so there's no reason to await
       // them serially (Phase B4). Old clients pass null and get byte-identical
@@ -401,7 +424,10 @@ function createRacesRouter(dependencies = {}) {
             : [],
         }),
         supportsTournaments
-          ? getTournamentsForUser(req.user.id)
+          ? getTournamentsForUser(req.user.id, {
+              supportsCharacters,
+              releaseChannel: req.releaseChannel,
+            })
           : Promise.resolve(null),
       ]);
       if (tournaments) {

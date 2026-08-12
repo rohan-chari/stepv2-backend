@@ -124,7 +124,12 @@ function buildAdvanceTournament(dependencies = {}) {
             amount: prizeAmount,
           });
         } else if (tournament.seedId && tournament.seed) {
-          prizeAmount = tournament.seed.championPrizeCoins || 0;
+          // Lobby snapshot wins. NULL is the deliberate legacy fallback for a
+          // featured bracket minted before the snapshot migration.
+          prizeAmount =
+            tournament.championPrizeCoinsSnapshot ??
+            tournament.seed.championPrizeCoins ??
+            0;
           await mintChampionPrize({
             awardCoinsFn,
             userId: championUserId,

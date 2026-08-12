@@ -1061,38 +1061,41 @@ enum TournamentStatus {
 }
 
 model Tournament {
-  id                  String           @id @default(uuid())
+  id                         String           @id @default(uuid())
   // null = seeded/featured (system-minted), mirrors Race.creatorId.
-  creatorId           String?          @map("creator_id")
+  creatorId                  String?          @map("creator_id")
   // Links to the TournamentSeed for featured brackets; null for user-created.
-  seedId              String?          @map("seed_id")
-  name                String
-  status              TournamentStatus @default(PENDING)
-  bracketSize         Int              @map("bracket_size") // 4 | 8 | 16
-  matchupDurationDays Int              @map("matchup_duration_days") // 1 | 2 | 3
+  seedId                     String?          @map("seed_id")
+  name                       String
+  status                     TournamentStatus @default(PENDING)
+  bracketSize                Int              @map("bracket_size") // 4 | 8 | 16
+  matchupDurationDays        Int              @map("matchup_duration_days") // 1 | 2 | 3
   // 0 (free), or 10..TOURNAMENT_BUYIN_MAX[bracketSize] = 100/100/62 (D4 ladder).
-  buyInAmount         Int              @default(0) @map("buy_in_amount")
-  potCoins            Int              @default(0) @map("pot_coins")
+  buyInAmount                Int              @default(0) @map("buy_in_amount")
+  potCoins                   Int              @default(0) @map("pot_coins")
   // App-funded bracket pool (same semantics as Race.fundedPrize/prizePoolCoins).
   // Entry is free; the champion is paid a MINTED pool of
   // acceptedPlayers × durationPoints(totalRounds × matchupDurationDays) ×
   // PRIZE_COIN_UNIT, clamped to MAX_CHAMPION_PRIZE. Mutually exclusive with both
   // the legacy pot payout and a featured seed's championPrizeCoins.
-  fundedPrize         Boolean          @default(false) @map("funded_prize")
-  prizePoolCoins      Int              @default(0) @map("prize_pool_coins")
-  powerupsEnabled     Boolean          @default(false) @map("powerups_enabled")
-  powerupStepInterval Int?             @map("powerup_step_interval")
-  isPublic            Boolean          @default(false) @map("is_public")
-  shareToken          String?          @unique @map("share_token")
+  fundedPrize                Boolean          @default(false) @map("funded_prize")
+  prizePoolCoins             Int              @default(0) @map("prize_pool_coins")
+  powerupsEnabled            Boolean          @default(false) @map("powerups_enabled")
+  powerupStepInterval        Int?             @map("powerup_step_interval")
+  isPublic                   Boolean          @default(false) @map("is_public")
+  shareToken                 String?          @unique @map("share_token")
   // Creator's IANA zone at creation; "America/New_York" for seeded. Matchup
   // races inherit it as their canonical scoring tz.
-  timezone            String?          @map("timezone")
-  currentRound        Int              @default(0) @map("current_round") // 0 = not started
-  totalRounds         Int              @map("total_rounds") // log2(bracketSize)
-  championUserId      String?          @map("champion_user_id")
-  createdAt           DateTime         @default(now()) @map("created_at")
-  startedAt           DateTime?        @map("started_at")
-  completedAt         DateTime?        @map("completed_at")
+  timezone                   String?          @map("timezone")
+  currentRound               Int              @default(0) @map("current_round") // 0 = not started
+  totalRounds                Int              @map("total_rounds") // log2(bracketSize)
+  championUserId             String?          @map("champion_user_id")
+  // Featured-seed prize quoted when the lobby is minted. Nullable so legacy
+  // rows keep their historical seed lookup until they settle.
+  championPrizeCoinsSnapshot Int?             @map("champion_prize_coins_snapshot")
+  createdAt                  DateTime         @default(now()) @map("created_at")
+  startedAt                  DateTime?        @map("started_at")
+  completedAt                DateTime?        @map("completed_at")
 
   creator      User?                   @relation("TournamentCreator", fields: [creatorId], references: [id])
   champion     User?                   @relation("TournamentChampion", fields: [championUserId], references: [id])

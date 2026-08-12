@@ -272,6 +272,60 @@ describe("tournaments — integration", () => {
     assert.equal((await noTokCreate.json()).code, "UPDATE_REQUIRED");
   });
 
+  it("paid tournament invite preflight quotes the real buy-in before the invitee accepts it", async () => {
+    const creator = await createUser("Paid Host");
+    const invitee = await createUser("Paid Invitee");
+    await setCoins(creator.userId, 100);
+    await setCoins(invitee.userId, 100);
+
+    const friendship = await request(server.baseUrl, "POST", "/friends/request", {
+      token: creator.token,
+      body: { addresseeId: invitee.userId },
+    });
+    const friendshipId = (await friendship.json()).friendship.id;
+    const acceptedFriendship = await request(
+      server.baseUrl,
+      "PUT",
+      `/friends/request/${friendshipId}`,
+      { token: invitee.token, body: { accept: true } }
+    );
+    assert.equal(acceptedFriendship.status, 200);
+
+    const created = await createTournament(creator.token, {
+      name: "Paid Invite Cup",
+      bracketSize: 4,
+      buyInAmount: 50,
+      isPublic: false,
+      inviteeIds: [invitee.userId],
+    });
+    assert.equal(created.status, 201);
+    const { tournament } = await created.json();
+
+    const preflight = await authReq("GET", "/races/invite-preflight", {
+      token: invitee.token,
+    });
+    assert.equal(preflight.status, 200);
+    const cards = await preflight.json();
+    assert.equal(cards.tournaments.length, 1);
+    assert.equal(cards.tournaments[0].id, tournament.id);
+    assert.equal(cards.tournaments[0].buyInAmount, 50);
+
+    const accepted = await authReq("PUT", `/tournaments/${tournament.id}/respond`, {
+      token: invitee.token,
+      body: { accept: true },
+    });
+    assert.equal(accepted.status, 200);
+    const participant = (await accepted.json()).tournament.participants.find(
+      (entry) => entry.userId === invitee.userId
+    );
+    assert.equal(participant.status, "ACCEPTED");
+    const inviteeAfter = await prisma.user.findUnique({
+      where: { id: invitee.userId },
+      select: { coins: true },
+    });
+    assert.equal(inviteeAfter.coins, 50);
+  });
+
   it("every race-level mutation on a matchup race returns TOURNAMENT_RACE_LOCKED", async () => {
     const { users, tournamentId } = await fillFourBracket();
     const matchup = await prisma.race.findFirst({

@@ -83,7 +83,11 @@ function summaryFields(t, acceptedCount = null) {
     creatorId: t.creatorId ?? null,
     seedId: t.seedId ?? null,
     seedKind: t.seed ? t.seed.kind : null,
-    championPrizeCoins: t.seed ? t.seed.championPrizeCoins ?? null : null,
+    // A featured lobby quotes its prize at mint. Pre-snapshot rows remain
+    // readable through the seed fallback during the mixed-version rollout.
+    championPrizeCoins:
+      t.championPrizeCoinsSnapshot ??
+      (t.seed ? t.seed.championPrizeCoins ?? null : null),
     championUserId: t.championUserId ?? null,
     startedAt: t.startedAt ?? null,
     completedAt: t.completedAt ?? null,

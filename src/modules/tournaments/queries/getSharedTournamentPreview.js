@@ -25,7 +25,9 @@ function buildGetSharedTournamentPreview(dependencies = {}) {
       buyInAmount: t.buyInAmount || 0,
       participantCount: acceptedCount,
       seedKind: t.seed ? t.seed.kind : null,
-      championPrizeCoins: t.seed ? t.seed.championPrizeCoins ?? null : null,
+      championPrizeCoins:
+        t.championPrizeCoinsSnapshot ??
+        (t.seed ? t.seed.championPrizeCoins ?? null : null),
       host: t.creator
         ? {
             displayName: t.creator.displayName ?? null,

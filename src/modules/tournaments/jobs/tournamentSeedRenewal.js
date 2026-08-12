@@ -71,29 +71,46 @@ function buildRenewTournamentSeeds(dependencies = {}) {
     });
     if (existing) return;
 
-    const created = await prisma.tournament.create({
-      data: {
-        creatorId: null,
-        seedId: seed.id,
-        name: seed.name,
-        status: "PENDING",
-        bracketSize: seed.bracketSize,
-        matchupDurationDays: seed.matchupDurationDays,
-        buyInAmount: 0,
-        potCoins: 0,
-        powerupsEnabled: seed.powerupsEnabled === true,
-        // Seed column no longer read — fixed 2,000-step cadence everywhere.
-        powerupStepInterval: normalizePowerupConfig({
+    let created;
+    try {
+      created = await prisma.tournament.create({
+        data: {
+          creatorId: null,
+          seedId: seed.id,
+          name: seed.name,
+          status: "PENDING",
+          bracketSize: seed.bracketSize,
+          matchupDurationDays: seed.matchupDurationDays,
+          buyInAmount: 0,
+          potCoins: 0,
+          // Immutable lobby quote: serializer + settlement prefer this over a
+          // subsequently edited seed, while legacy rows safely fall back.
+          championPrizeCoinsSnapshot: seed.championPrizeCoins,
           powerupsEnabled: seed.powerupsEnabled === true,
-        }),
-        isPublic: true,
-        shareToken: mintToken(),
-        timezone: SEED_TIMEZONE,
-        currentRound: 0,
-        totalRounds: totalRoundsFor(seed.bracketSize),
-      },
-      select: { id: true },
-    });
+          // Seed column no longer read — fixed 2,000-step cadence everywhere.
+          powerupStepInterval: normalizePowerupConfig({
+            powerupsEnabled: seed.powerupsEnabled === true,
+          }),
+          isPublic: true,
+          shareToken: mintToken(),
+          timezone: SEED_TIMEZONE,
+          currentRound: 0,
+          totalRounds: totalRoundsFor(seed.bracketSize),
+        },
+        select: { id: true },
+      });
+    } catch (error) {
+      // Parallel workers may both observe no lobby. The partial unique index is
+      // authoritative; a loser reads the winner rather than treating a normal
+      // renewal race as an error or attempting another mint.
+      if (error?.code !== "P2002") throw error;
+      const winner = await prisma.tournament.findFirst({
+        where: { seedId: seed.id, status: "PENDING" },
+        select: { id: true },
+      });
+      if (winner) return;
+      throw error;
+    }
     logger.log(`[CRON] Minted featured tournament lobby ${created.id} (${seed.kind})`);
   }
 

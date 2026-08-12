@@ -175,6 +175,7 @@ const Tournament = {
           t.total_rounds AS "totalRounds",
           t.creator_id AS "creatorId",
           t.seed_id AS "seedId",
+          t.champion_prize_coins_snapshot AS "championPrizeCoinsSnapshot",
           t.created_at AS "createdAt",
           t.started_at AS "startedAt",
           t.completed_at AS "completedAt",

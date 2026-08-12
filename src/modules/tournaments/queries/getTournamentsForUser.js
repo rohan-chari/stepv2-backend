@@ -2,6 +2,7 @@ const { prisma: defaultPrisma } = require("../../../db");
 const { Tournament } = require("../models/tournament");
 const { RacePowerup } = require("../../powerups/models/racePowerup");
 const { RaceActiveEffect } = require("../../powerups/models/raceActiveEffect");
+const { characterPresentation } = require("../../cosmetics");
 const { serializeTournamentSummary } = require("./serializeTournament");
 
 // Live-matchup placement uses the SAME ordering rule the ordinary active-race
@@ -30,9 +31,56 @@ function buildGetTournamentsForUser(dependencies = {}) {
   const raceActiveEffectModel =
     dependencies.RaceActiveEffect || RaceActiveEffect;
 
-  return async function getTournamentsForUser(userId) {
+  return async function getTournamentsForUser(
+    userId,
+    { supportsCharacters = false, releaseChannel = "prod" } = {}
+  ) {
     const rows = await tournamentModel.findForUser(userId);
     if (rows.length === 0) return [];
+
+    // GET /races may list several tournaments, but the viewer's identity is
+    // invariant across those rows. Resolve it once and attach the same bounded
+    // presentation only for clients that explicitly support characters.
+    let myIdentity;
+    if (supportsCharacters) {
+      const viewer = await db.user.findUnique({
+        where: { id: userId },
+        select: {
+          displayName: true,
+          equippedAccessories: {
+            include: {
+              shopItem: {
+                select: {
+                  id: true,
+                  sku: true,
+                  name: true,
+                  slot: true,
+                  assetKey: true,
+                  renderMetadata: true,
+                  bobble: true,
+                  testOnly: true,
+                },
+              },
+            },
+          },
+        },
+      });
+      const presentation = characterPresentation(viewer, true, releaseChannel);
+      myIdentity = viewer
+        ? {
+            displayName: viewer.displayName ?? null,
+            animal: presentation.animal ?? null,
+            // This list has its own intentionally compact contract. Do not
+            // leak the full shop-item payload into every tournament row.
+            equippedAccessories: (presentation.accessories ?? []).map(
+              (accessory) => ({
+                slot: accessory.slot ?? null,
+                assetId: accessory.assetKey ?? null,
+              })
+            ),
+          }
+        : null;
+    }
 
     // Live matchup raceId per ACTIVE tournament for this viewer.
     const activeIds = rows
@@ -170,6 +218,7 @@ function buildGetTournamentsForUser(dependencies = {}) {
       // Additive: an older client ignores this object; a newer client talking to
       // an older backend sees it absent and falls back to bracket navigation.
       summary.myCurrentMatch = matchDetailByTournament.get(t.id) || null;
+      if (supportsCharacters) summary.myIdentity = myIdentity;
       return summary;
     });
 
