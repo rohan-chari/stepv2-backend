@@ -5,7 +5,7 @@ import SiteFooter from "@/components/SiteFooter.vue";
 // Copy is carried over verbatim from the previous public/privacy.html. This is
 // a legal document: the rebuild changes how it reads, never what it says.
 // Effective date must be bumped here (and only here) when the policy changes.
-const EFFECTIVE_DATE = "July 14, 2026";
+const EFFECTIVE_DATE = "August 11, 2026";
 
 const collected = [
   {
@@ -14,7 +14,11 @@ const collected = [
   },
   {
     term: "Display name",
-    def: "A name you choose so friends can find and challenge you. Visible to other Bara users.",
+    def: "A race name you choose for your profile, races, and challenges. Visible to other Bara users.",
+  },
+  {
+    term: "Discoverable name",
+    def: "The first name and optional last name you review and submit so friends can find you in Bara. It becomes searchable by other Bara users only after you confirm setup. We store a normalized search-only copy, which is never returned to clients.",
   },
   {
     term: "Email address",
@@ -124,7 +128,8 @@ const collected = [
         <p>
           All data we collect is used to operate the app: to show your daily
           step count and goal progress, to run weekly challenges and display
-          head-to-head results, to let friends find and challenge you, and to
+          head-to-head results, to let friends find and challenge you by the
+          discoverable name and race name you submit, and to
           send you notifications about challenge activity when you've opted in.
           Aside from the advertising described in the "Advertising" section
           below, we do not use your data for advertising, analytics profiling,
@@ -133,9 +138,11 @@ const collected = [
 
         <h2>Data Sharing</h2>
         <p>
-          Your step count, display name, and profile photo (if you add one) are
-          visible to friends you've accepted in the app and to participants in
-          races you join. This is necessary for the challenge feature. If
+          Your submitted discoverable name can appear in Friends search results
+          to other Bara users after you confirm setup. Your step count, race
+          name, and profile photo (if you add one) are visible to friends you've
+          accepted in the app and to participants in races you join. This is
+          necessary for the challenge feature. If
           you're in a head-to-head challenge, your opponent can see your step
           progress for that week. We do not sell or rent your personal data, and
           outside of the advertising partner described in the "Advertising"
@@ -181,7 +188,8 @@ const collected = [
           You can sign out at any time from the Settings tab, which clears your
           local session data and unregisters your device from push
           notifications. To request complete deletion of your account and all
-          data from our servers, email
+          data from our servers, including your discoverable-name fields and
+          their private normalized search value, email
           <a href="mailto:support@barastep.com">support@barastep.com</a>. We
           will process deletion requests within 30 days.
         </p>

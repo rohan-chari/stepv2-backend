@@ -1,5 +1,11 @@
-const { Friendship } = require("../models/friendship");
+const { prisma: defaultPrisma } = require("../../../db");
 const { eventBus } = require("../../../shared/events/eventBus");
+const {
+  buildFriendshipAutoLinkSuppression,
+} = require("../models/friendshipAutoLinkSuppression");
+const {
+  withFriendshipPairLock,
+} = require("../services/friendshipPairLock");
 
 class FriendResponseError extends Error {
   constructor(message) {
@@ -8,32 +14,83 @@ class FriendResponseError extends Error {
   }
 }
 
-async function respondToFriendRequest({ userId, friendshipId, accept }) {
-  const friendship = await Friendship.findById(friendshipId);
+function buildRespondToFriendRequest(dependencies = {}) {
+  const db = dependencies.prisma || defaultPrisma;
+  const suppressionModel =
+    dependencies.FriendshipAutoLinkSuppression ||
+    buildFriendshipAutoLinkSuppression({ prisma: db });
+  const beforeSuppressionWrite =
+    dependencies.beforeAutoLinkSuppressionWrite || (async () => {});
 
-  if (!friendship) {
-    throw new FriendResponseError("Friend request not found");
-  }
-
-  if (friendship.addresseeId !== userId) {
-    throw new FriendResponseError("You are not the recipient of this request");
-  }
-
-  if (friendship.status !== "PENDING") {
-    throw new FriendResponseError("This request has already been responded to");
-  }
-
-  const status = accept ? "ACCEPTED" : "DECLINED";
-  const updated = await Friendship.updateStatus(friendshipId, status);
-
-  const event = accept ? "FRIEND_REQUEST_ACCEPTED" : "FRIEND_REQUEST_DECLINED";
-  eventBus.emit(event, {
+  return async function respondToFriendRequest({
     userId,
     friendshipId,
-    requesterId: friendship.requesterId,
-  });
+    accept,
+  }) {
+    const friendship = await db.friendship.findUnique({
+      where: { id: friendshipId },
+    });
 
-  return updated;
+    if (!friendship) {
+      throw new FriendResponseError("Friend request not found");
+    }
+
+    const status = accept ? "ACCEPTED" : "DECLINED";
+    const updated = await withFriendshipPairLock(
+      friendship.requesterId,
+      friendship.addresseeId,
+      async (tx) => {
+        const current = await tx.friendship.findUnique({
+          where: { id: friendshipId },
+        });
+        if (!current) {
+          throw new FriendResponseError("Friend request not found");
+        }
+        if (current.addresseeId !== userId) {
+          throw new FriendResponseError("You are not the recipient of this request");
+        }
+        if (current.status !== "PENDING") {
+          throw new FriendResponseError("This request has already been responded to");
+        }
+
+        const result = await tx.friendship.update({
+          where: { id: friendshipId },
+          data: { status },
+        });
+        if (!accept) {
+          await beforeSuppressionWrite({ friendship: result, prisma: tx });
+          await suppressionModel.upsert(
+            current.requesterId,
+            current.addresseeId,
+            "DECLINED",
+            tx
+          );
+        }
+        return result;
+      },
+      { prisma: db }
+    );
+
+    await require("../../users/services/authMeCache").invalidatePairSafe(
+      updated.requesterId,
+      updated.addresseeId
+    );
+
+    const event = accept ? "FRIEND_REQUEST_ACCEPTED" : "FRIEND_REQUEST_DECLINED";
+    eventBus.emit(event, {
+      userId,
+      friendshipId,
+      requesterId: friendship.requesterId,
+    });
+
+    return updated;
+  };
 }
 
-module.exports = { respondToFriendRequest, FriendResponseError };
+const respondToFriendRequest = buildRespondToFriendRequest();
+
+module.exports = {
+  buildRespondToFriendRequest,
+  respondToFriendRequest,
+  FriendResponseError,
+};

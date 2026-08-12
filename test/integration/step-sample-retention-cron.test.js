@@ -13,6 +13,10 @@ const {
 
 const DAY = 24 * 60 * 60 * 1000;
 
+// Fixed clock keeps age calculations deterministic regardless of when the
+// suite runs.
+const NOW = () => new Date("2026-07-22T12:00:00.000Z");
+
 async function seedUser() {
   return prisma.user.create({
     data: {
@@ -23,7 +27,7 @@ async function seedUser() {
 }
 
 async function seedSample(userId, daysOldEnd, steps = 100) {
-  const end = new Date(Date.now() - daysOldEnd * DAY);
+  const end = new Date(NOW().getTime() - daysOldEnd * DAY);
   const start = new Date(end.getTime() - 60 * 60 * 1000);
   return prisma.stepSample.create({
     data: { userId, periodStart: start, periodEnd: end, steps },
@@ -38,9 +42,6 @@ function passJobRun() {
     async claimRun(jobName, dayKey) { marks.push({ jobName, dayKey }); return true; },
   };
 }
-
-// now anchored at a fixed hour so dailyRunKey (targetHour 3 ET) fires.
-const NOW = () => new Date("2026-07-22T12:00:00.000Z");
 
 describe("step_samples retention cron", () => {
   before(async () => { await getSharedServer(); });
@@ -75,7 +76,7 @@ describe("step_samples retention cron", () => {
         name: "Long ultra race",
         targetSteps: 1000000,
         status: "ACTIVE",
-        startedAt: new Date(Date.now() - 55 * DAY),
+        startedAt: new Date(NOW().getTime() - 55 * DAY),
       },
     });
 
@@ -96,7 +97,7 @@ describe("step_samples retention cron", () => {
         name: "Finished race",
         targetSteps: 1000,
         status: "COMPLETED",
-        startedAt: new Date(Date.now() - 55 * DAY),
+        startedAt: new Date(NOW().getTime() - 55 * DAY),
       },
     });
 

@@ -13,7 +13,17 @@ const {
 const { ensureGoogleUser } = require("./services/ensureGoogleUser");
 const { buildRequireAuth } = require("../../middleware/requireAuth");
 const { signSessionToken: defaultSignSessionToken } = require("./services/sessionToken");
-const { setDisplayName: defaultSetDisplayName } = require("./commands/setDisplayName");
+const {
+  setDisplayName: defaultSetDisplayName,
+  buildSetDisplayName,
+} = require("./commands/setDisplayName");
+const {
+  setDiscoverableName: defaultSetDiscoverableName,
+  buildSetDiscoverableName,
+} = require("./commands/setDiscoverableName");
+const {
+  serializeAuthenticatedUser,
+} = require("./services/serializeAuthenticatedUser");
 const {
   InvalidProfilePhotoError,
   buildCreateProfilePhotoUpload,
@@ -50,6 +60,8 @@ const { hashClientIp, hashClientNet } = require("../../shared/lib/clientIp");
 const { appSettings: defaultAppSettings } = require("../../shared/config/appSettings");
 const authMeCache = require("./services/authMeCache");
 const { prisma } = require("../../db");
+const { asyncHandler } = require("../../shared/http/asyncHandler");
+const { ValidationError } = require("../../shared/errors/AppError");
 
 // Version-gated omission of `featureFlags.stepSampleBucketMinutes` (2026-07-23
 // incident #2). Shared by `withRuntimeFlags` (which decides whether to emit the
@@ -105,7 +117,16 @@ function createAuthRouter(dependencies = {}) {
       return null;
     }
   };
-  const updateDisplayName = dependencies.setDisplayName || defaultSetDisplayName;
+  const updateDisplayName =
+    dependencies.setDisplayName ||
+    (dependencies.User
+      ? buildSetDisplayName(dependencies)
+      : defaultSetDisplayName);
+  const updateDiscoverableName =
+    dependencies.setDiscoverableName ||
+    (dependencies.User
+      ? buildSetDiscoverableName(dependencies)
+      : defaultSetDiscoverableName);
   const createProfilePhotoUpload =
     dependencies.createProfilePhotoUpload ||
     buildCreateProfilePhotoUpload(dependencies);
@@ -179,7 +200,7 @@ function createAuthRouter(dependencies = {}) {
     // shipped build can read a key that has never existed. Keeping them out is
     // also load-bearing for `User.touchLastSeen`, which skips /auth/me cache
     // invalidation precisely because neither column is observable to a client.
-    const { lastAppVersion, lastSeenAt, ...clientSafeUser } = user || {};
+    const clientSafeUser = serializeAuthenticatedUser(user);
     return {
       ...clientSafeUser,
       featureFlags: {
@@ -209,6 +230,19 @@ function createAuthRouter(dependencies = {}) {
         ),
         setupInviteCodePromptEnabled: await safeFlag(
           "setupInviteCodePromptEnabled",
+          false
+        ),
+        racesInviteDecisionGateEnabled: await safeFlag(
+          "racesInviteDecisionGateEnabled",
+          false
+        ),
+        // Additive capability for Home's share-first quick-race CTA. This is
+        // the same server-owned switch that gates transactional auto-friendship
+        // on a share-token join, so clients never advertise behavior the
+        // backend will not perform. Literal boolean, fail-closed, and inert for
+        // frozen clients that ignore unknown featureFlags keys.
+        quickRaceShareAutoFriendEnabled: await safeFlag(
+          "quickRaceShareAutoFriendEnabled",
           false
         ),
         // Additive (batch 2026-08-09 item 9), same shape and same reasoning as
@@ -274,6 +308,12 @@ function createAuthRouter(dependencies = {}) {
           ? await referralSourceRaceIdFor(referralSourceRaceToken)
           : null,
         fallbackReferralCode: fallbackCodeFor(req),
+        ...(req.clientFeatures?.has("discoverable_identity") === true &&
+        (await appSettings.getFlag(
+          "discoverableIdentityOnboardingEnrollmentEnabled"
+        )) === true
+          ? { nameSetupOnboardingRequired: true }
+          : {}),
         emitSignInEvent: true,
       });
 
@@ -322,6 +362,12 @@ function createAuthRouter(dependencies = {}) {
           ? await referralSourceRaceIdFor(referralSourceRaceToken)
           : null,
         fallbackReferralCode: fallbackCodeFor(req),
+        ...(req.clientFeatures?.has("discoverable_identity") === true &&
+        (await appSettings.getFlag(
+          "discoverableIdentityOnboardingEnrollmentEnabled"
+        )) === true
+          ? { nameSetupOnboardingRequired: true }
+          : {}),
         emitSignInEvent: true,
       });
 
@@ -492,11 +538,46 @@ function createAuthRouter(dependencies = {}) {
     });
   });
 
+  router.put(
+    "/me/discoverable-name",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      const { firstName, lastName } = req.body || {};
+      const result = await updateDiscoverableName({
+        userId: req.user.id,
+        firstName,
+        lastName,
+      });
+      res.json({
+        user: await withRuntimeFlags(
+          result.user,
+          req.headers["x-app-version"]
+        ),
+        suggestedDisplayName: result.suggestedDisplayName,
+      });
+    })
+  );
+
   router.put("/me/display-name", requireAuth, async (req, res) => {
-    const { displayName } = req.body;
+    const { displayName, completeDiscoverableNameSetup } = req.body || {};
+
+    if (
+      completeDiscoverableNameSetup !== undefined &&
+      typeof completeDiscoverableNameSetup !== "boolean"
+    ) {
+      return res.status(400).json({
+        error: "completeDiscoverableNameSetup must be a boolean",
+        code: "INVALID_DISCOVERABLE_SETUP_FLAG",
+      });
+    }
 
     if (displayName === undefined) {
       return res.status(400).json({ error: "displayName is required" });
+    }
+    if (displayName === null && completeDiscoverableNameSetup === true) {
+      return res.status(400).json({
+        error: "Display name must be a non-empty string or null",
+      });
     }
 
     if (displayName !== null) {
@@ -509,12 +590,29 @@ function createAuthRouter(dependencies = {}) {
         const updatedUser = await updateDisplayName({
           userId: req.user.id,
           displayName: validation.normalized,
+          ...(completeDiscoverableNameSetup !== undefined
+            ? { completeDiscoverableNameSetup }
+            : {}),
         });
 
         return res.json({ user: await withRuntimeFlags(updatedUser, req.headers["x-app-version"]) });
       } catch (error) {
         if (error.name === "DisplayNameTakenError") {
-          return res.status(409).json({ error: error.message });
+          return res.status(409).json({
+            error: error.message,
+            ...(completeDiscoverableNameSetup === true
+              ? {
+                  code: "DISPLAY_NAME_TAKEN",
+                  suggestedDisplayName: error.suggestedDisplayName,
+                }
+              : {}),
+          });
+        }
+        if (error instanceof ValidationError) {
+          return res.status(error.statusCode).json({
+            error: error.message,
+            code: error.code,
+          });
         }
         console.error("Display name error:", error);
         return res.status(500).json({ error: "Internal server error" });
@@ -525,12 +623,29 @@ function createAuthRouter(dependencies = {}) {
       const updatedUser = await updateDisplayName({
         userId: req.user.id,
         displayName: null,
+        ...(completeDiscoverableNameSetup !== undefined
+          ? { completeDiscoverableNameSetup }
+          : {}),
       });
 
       res.json({ user: await withRuntimeFlags(updatedUser, req.headers["x-app-version"]) });
     } catch (error) {
       if (error.name === "DisplayNameTakenError") {
-        return res.status(409).json({ error: error.message });
+        return res.status(409).json({
+          error: error.message,
+          ...(completeDiscoverableNameSetup === true
+            ? {
+                code: "DISPLAY_NAME_TAKEN",
+                suggestedDisplayName: error.suggestedDisplayName,
+              }
+            : {}),
+        });
+      }
+      if (error instanceof ValidationError) {
+        return res.status(error.statusCode).json({
+          error: error.message,
+          code: error.code,
+        });
       }
       console.error("Display name error:", error);
       res.status(500).json({ error: "Internal server error" });

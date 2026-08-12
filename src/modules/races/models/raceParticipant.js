@@ -10,6 +10,36 @@ const { prisma } = require("../../../db");
 const PODIUM_PLACEMENTS = [1, 2, 3];
 
 const RaceParticipant = {
+  // One presentation row per computed list leader, fetched after the lean race
+  // summaries establish rank. Bounded by race count rather than participant
+  // count, so the hot GET /races query does not materialize every racer's gear.
+  async findPresentationsByUserIds(userIds) {
+    if (!Array.isArray(userIds) || userIds.length === 0) return [];
+    return prisma.user.findMany({
+      where: { id: { in: [...new Set(userIds)] } },
+      select: {
+        id: true,
+        displayName: true,
+        equippedAccessories: {
+          include: {
+            shopItem: {
+              select: {
+                id: true,
+                sku: true,
+                name: true,
+                slot: true,
+                assetKey: true,
+                renderMetadata: true,
+                bobble: true,
+                testOnly: true,
+              },
+            },
+          },
+        },
+      },
+    });
+  },
+
   // Top-3 finishers for each of `raceIds`, for the completed-races list.
   // Returns a flat array; the caller groups by raceId. Ordered so that grouping
   // preserves 1 -> 2 -> 3 without a second sort.

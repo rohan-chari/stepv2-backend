@@ -73,6 +73,7 @@ describe("ad coin reward (Get Coins hub)", () => {
       pendingGrant: false,
       remainingToday: 3,
       coinAmount: 25,
+      dailyCap: 3,
     });
 
     const res = await request(

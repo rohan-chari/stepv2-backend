@@ -46,7 +46,15 @@ const User = {
     return prisma.user.findUnique({ where: { referralCode } });
   },
 
-  async create({ appleId, googleSub, email, name, displayName, isReviewAccount }) {
+  async create({
+    appleId,
+    googleSub,
+    email,
+    name,
+    displayName,
+    isReviewAccount,
+    nameSetupOnboardingRequired,
+  }) {
     // A user is keyed on exactly one provider id (appleId for iOS, googleSub for
     // Android). Only set the one that was supplied so the other stays null.
     const data = { email, name };
@@ -61,6 +69,9 @@ const User = {
     }
     if (isReviewAccount !== undefined) {
       data.isReviewAccount = isReviewAccount;
+    }
+    if (nameSetupOnboardingRequired !== undefined) {
+      data.nameSetupOnboardingRequired = nameSetupOnboardingRequired === true;
     }
     return prisma.user.create({ data });
   },

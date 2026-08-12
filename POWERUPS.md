@@ -85,7 +85,7 @@ What a mystery box can actually roll. A powerup having a rarity does not make it
 - **Uncommon** — Leg Cramp, Stealth Mode, Wrong Turn, Rally Flag
 - **Rare** — Red Card, Second Wind, Compression Socks, Lucky Horseshoe, Trail Mine, Sneaky Swap, Shortcut, Cleanse, Mirror, Power Outage
 
-Store-only (bought with coins, never rolled from a mystery box): Pocket Watch, Imposter, Rainstorm, Signal Jammer, Leech, Defense Scan, Hitchhike, Quick Rinse, Uprising, Ghost Pepper, Coin Flip, Mystery Potion, Decoy, Umbrella, Drill Sergeant, Piggy Bank, Bounty.
+Store-only (bought with coins, never rolled from a mystery box): Imposter, Rainstorm, Signal Jammer, Leech, Defense Scan, Hitchhike, Quick Rinse.
 
 Team races only (droppable, but a solo race never rolls them): Rally Flag.
 

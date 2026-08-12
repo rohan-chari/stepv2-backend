@@ -4,6 +4,7 @@ const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
 
 let server;
 let nextAppleId = 0;
+let nextEffectStep = 50000;
 
 async function createUser(displayName) {
   const appleId = `apple-race-list-${++nextAppleId}`;
@@ -93,6 +94,37 @@ async function postSamples(token, steps) {
   assert.equal(response.status, 200);
 }
 
+async function createActiveEffect(raceId, targetUserId, sourceUserId, type) {
+  const participant = await prisma.raceParticipant.findFirst({
+    where: { raceId, userId: targetUserId },
+  });
+  assert.ok(participant);
+  const powerup = await prisma.racePowerup.create({
+    data: {
+      raceId,
+      participantId: participant.id,
+      userId: sourceUserId,
+      type,
+      rarity: "COMMON",
+      status: "USED",
+      earnedAtSteps: ++nextEffectStep,
+    },
+  });
+  return prisma.raceActiveEffect.create({
+    data: {
+      raceId,
+      targetParticipantId: participant.id,
+      targetUserId,
+      sourceUserId,
+      powerupId: powerup.id,
+      type,
+      status: "ACTIVE",
+      startsAt: new Date(Date.now() - 60 * 1000),
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+    },
+  });
+}
+
 describe("race list sync", () => {
   before(async () => {
     server = await getSharedServer();
@@ -101,6 +133,7 @@ describe("race list sync", () => {
   beforeEach(async () => {
     await cleanDatabase();
     nextAppleId = 0;
+    nextEffectStep = 50000;
   });
 
   it("POST /steps/samples earns queued boxes on write and exposes them in GET /races", async () => {
@@ -194,5 +227,125 @@ describe("race list sync", () => {
     assert.equal(bobRacesRes.status, 200);
     const bobBody = await bobRacesRes.json();
     assert.equal(bobBody.active[0].myPlacement, 2);
+  });
+
+  it("GET /races includes the current first-place racer's capy summary", async () => {
+    const { alice, bob } = await createActiveRace({
+      powerupsEnabled: false,
+      name: "Leader Avatar Race",
+    });
+    const hat = await prisma.shopItem.create({
+      data: {
+        sku: "race_list_leader_hat",
+        name: "Leader Hat",
+        description: "Race-list character test",
+        slot: "HEAD",
+        priceCoins: 0,
+        assetKey: "cowboy_hat",
+        renderMetadata: { offsetX: 0, offsetY: 0 },
+      },
+    });
+    await prisma.userEquippedAccessory.create({
+      data: {
+        userId: bob.userId,
+        slot: "HEAD",
+        shopItemId: hat.id,
+      },
+    });
+    await postSamples(alice.token, 3000);
+    await postSamples(bob.token, 6000);
+
+    const racesRes = await request(server.baseUrl, "GET", "/races", {
+      token: alice.token,
+      headers: { "X-Client-Features": "characters" },
+    });
+    assert.equal(racesRes.status, 200);
+    const body = await racesRes.json();
+    assert.deepEqual(body.active[0].leader, {
+      userId: bob.userId,
+      displayName: "BobListAAAAA",
+      animal: null,
+      accessories: [
+        {
+          id: hat.id,
+          sku: "race_list_leader_hat",
+          name: "Leader Hat",
+          slot: "HEAD",
+          assetKey: "cowboy_hat",
+          renderMetadata: { offsetX: 0, offsetY: 0 },
+          bobble: false,
+        },
+      ],
+    });
+  });
+
+  it("GET /races masks the leader avatar exactly like the viewer's race leaderboard", async () => {
+    const { alice, bob, raceId } = await createActiveRace({
+      powerupsEnabled: true,
+      name: "Masked Leader Avatar Race",
+    });
+    await postSamples(alice.token, 3000);
+    await postSamples(bob.token, 6000);
+
+    const stealth = await createActiveEffect(
+      raceId,
+      bob.userId,
+      bob.userId,
+      "STEALTH_MODE",
+    );
+
+    const rivalView = await request(server.baseUrl, "GET", "/races", {
+      token: alice.token,
+    });
+    assert.equal(rivalView.status, 200);
+    assert.deepEqual((await rivalView.json()).active[0].leader, {
+      userId: null,
+      displayName: "???",
+      animal: null,
+      accessories: [],
+    });
+
+    const selfView = await request(server.baseUrl, "GET", "/races", {
+      token: bob.token,
+    });
+    assert.equal(selfView.status, 200);
+    assert.deepEqual((await selfView.json()).active[0].leader, {
+      userId: bob.userId,
+      displayName: "BobListAAAAA",
+      animal: null,
+      accessories: [],
+    });
+
+    await prisma.raceActiveEffect.update({
+      where: { id: stealth.id },
+      data: {
+        expiresAt: new Date(Date.now() - 1000),
+      },
+    });
+    const expiredView = await request(server.baseUrl, "GET", "/races", {
+      token: alice.token,
+    });
+    assert.equal(expiredView.status, 200);
+    assert.equal(
+      (await expiredView.json()).active[0].leader.displayName,
+      "BobListAAAAA",
+    );
+
+    await createActiveEffect(
+      raceId,
+      alice.userId,
+      bob.userId,
+      "DETOUR_SIGN",
+    );
+    const detouredView = await request(server.baseUrl, "GET", "/races", {
+      token: alice.token,
+    });
+    assert.equal(detouredView.status, 200);
+    assert.deepEqual((await detouredView.json()).active[0].leader, {
+      userId: null,
+      displayName: "???",
+      animal: null,
+      accessories: [],
+    });
   });
 });

@@ -105,6 +105,7 @@ function buildEnsureAppleUser(dependencies = {}) {
     // Invoked ONLY on the create branch so an existing user re-signing in can
     // never be fallback-attributed. Best-effort: a failure means organic signup.
     fallbackReferralCode,
+    nameSetupOnboardingRequired,
     emitSignInEvent = false,
   }) {
     let user = await userModel.findByAppleId(appleId);
@@ -114,6 +115,9 @@ function buildEnsureAppleUser(dependencies = {}) {
         appleId,
         email: email || null,
         name: name || null,
+        ...(nameSetupOnboardingRequired === true
+          ? { nameSetupOnboardingRequired: true }
+          : {}),
       });
 
       if (!user.displayName) {

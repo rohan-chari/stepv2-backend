@@ -2,6 +2,9 @@ const { prisma } = require("../../../db");
 const { User } = require("../../users");
 const { hashAppleSub } = require("../../users");
 const { normalizeReferralCode } = require("../../../shared/lib/referralCode");
+const {
+  buildApplyAutomaticFriendship,
+} = require("../services/automaticFriendship");
 
 // Attach a referrer to an ALREADY-signed-in user (M1, late path). Used when the
 // code wasn't in the provision body — i.e. an iOS UIPasteControl tap or manual
@@ -18,6 +21,9 @@ function buildRedeemReferralCode(dependencies = {}) {
   const db = dependencies.prisma || prisma;
   const userModel = dependencies.User || User;
   const hashSub = dependencies.hashAppleSub || hashAppleSub;
+  const applyAutomaticFriendship =
+    dependencies.applyAutomaticFriendship ||
+    buildApplyAutomaticFriendship(dependencies);
 
   return async function redeemReferralCode({ user, referralCode }) {
     if (!user || !user.id) return { attributed: false, reason: "no_user" };
@@ -108,33 +114,19 @@ function buildRedeemReferralCode(dependencies = {}) {
         });
       });
 
-      // Auto-friend the pair, mirroring recordReferral. Unlike the signup
-      // path the referee account may already have friendship rows, so upgrade
-      // an existing row (either direction) instead of blindly creating.
-      // Best-effort AFTER the attribution tx — a hiccup never unwinds it.
+      // Best-effort AFTER the attribution transaction. The shared automatic
+      // seam honors durable decline/removal suppression and existing accepted
+      // rows while still upgrading an unsuppressed pending request.
       try {
-        const existing = await db.friendship.findFirst({
-          where: {
-            OR: [
-              { requesterId: referrer.id, addresseeId: user.id },
-              { requesterId: user.id, addresseeId: referrer.id },
-            ],
-          },
+        await applyAutomaticFriendship({
+          userAId: referrer.id,
+          userBId: user.id,
+          prisma: db,
         });
-        if (!existing) {
-          await db.friendship.create({
-            data: {
-              requesterId: referrer.id,
-              addresseeId: user.id,
-              status: "ACCEPTED",
-            },
-          });
-        } else if (existing.status === "PENDING") {
-          await db.friendship.update({
-            where: { id: existing.id },
-            data: { status: "ACCEPTED" },
-          });
-        }
+        await require("../../users/services/authMeCache").invalidatePairSafe(
+          referrer.id,
+          user.id
+        );
       } catch (friendError) {
         console.warn(
           `Referral auto-friend skipped: ${

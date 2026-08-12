@@ -126,8 +126,8 @@ async function giveHourlySamples(userId, hoursAgoStart, hourCount, stepsPerHour)
   }
 }
 
-// Target's own steps after race-end truncation: 9 of 10 hourly samples.
-const TARGET_TRUNCATED_TOTAL = 27000;
+// Target's own steps after race-end truncation: 8 of 10 hourly samples.
+const TARGET_TRUNCATED_TOTAL = 24000;
 
 function windowStartFor(hoursAgo) {
   return new Date(
@@ -415,14 +415,45 @@ describe("hitchhike / quick rinse — integration", () => {
     await resolveExpiredRaces();
     const settled = await progressFor(raceId, alice);
     // 10 hourly samples of 3000 were written at hours-ago 11..2, but the race
-    // ends ~3h ago, so the latest sample lies entirely outside the race window
-    // and is correctly not counted. This 27000 is the baseline the hitchhike
-    // case below must match EXACTLY.
+    // ends at the top of the hour ~3h ago. The two latest samples begin at or
+    // after that half-open boundary, so neither counts. This 24000 is the
+    // baseline the hitchhike case below must match EXACTLY.
     assert.equal(
       totalFor(settled, bob.userId),
       TARGET_TRUNCATED_TOTAL,
-      "baseline: race-end truncation alone costs the target one hourly sample"
+      "baseline: race-end truncation excludes both post-end hourly samples"
     );
+  });
+
+  it("settlement ignores a final-day daily row updated after the deadline", async () => {
+    const alice = await createUser("DailyCutoffA");
+    const bob = await createUser("DailyCutoffB");
+    await makeFriends(alice, bob);
+    const raceId = await createActiveRace(alice, [bob]);
+    await giveHourlySamples(bob.userId, 11, 10, 3000);
+
+    const endsAt = new Date(windowStartFor(4).getTime() + HOUR_MS);
+    const startedAt = new Date(endsAt.getTime() - 36 * HOUR_MS);
+    await prisma.race.update({
+      where: { id: raceId },
+      data: { startedAt, endsAt, timezone: "UTC" },
+    });
+    await prisma.raceParticipant.updateMany({
+      where: { raceId },
+      data: { joinedAt: startedAt },
+    });
+    await prisma.step.create({
+      data: {
+        userId: bob.userId,
+        date: new Date(`${endsAt.toISOString().slice(0, 10)}T00:00:00.000Z`),
+        steps: 99999,
+      },
+    });
+
+    await resolveExpiredRaces();
+    const settled = await progressFor(raceId, alice);
+    assert.equal(settled.progress.status, "COMPLETED");
+    assert.equal(totalFor(settled, bob.userId), TARGET_TRUNCATED_TOTAL);
   });
 
   it("race end truncates the scoring window, as seen in the settled result", async () => {

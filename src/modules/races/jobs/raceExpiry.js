@@ -273,6 +273,7 @@ async function resolveExpiredRaces() {
             stepsModel: Steps,
             stepSampleModel: StepSample,
             now: settlementTime,
+            raceEndsAt: race.endsAt,
             globalEvents,
           });
 

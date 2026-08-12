@@ -111,6 +111,7 @@ function buildEnsureGoogleUser(dependencies = {}) {
     // Same IP-correlated fallback as ensureAppleUser — create branch only,
     // best-effort (see findLinkOpenReferralCode.js).
     fallbackReferralCode,
+    nameSetupOnboardingRequired,
     emitSignInEvent = false,
   }) {
     let user = await userModel.findByGoogleSub(googleSub);
@@ -120,6 +121,9 @@ function buildEnsureGoogleUser(dependencies = {}) {
         googleSub,
         email: email || null,
         name: name || null,
+        ...(nameSetupOnboardingRequired === true
+          ? { nameSetupOnboardingRequired: true }
+          : {}),
       });
 
       if (!user.displayName) {

@@ -42,6 +42,15 @@ const KNOWN_FLAGS = {
   openUserRaceDiscoveryEnabled: false,
   quickCreateRaceCtaEnabled: false,
   setupInviteCodePromptEnabled: false,
+  // Discoverable identity rollout controls. Contract support and additive
+  // response fields ship independently; this switch only enrolls capable NEW
+  // creates into mandatory onboarding.
+  discoverableIdentityOnboardingEnrollmentEnabled: false,
+  // Client-transported capability flag for the blocking Races invite gate.
+  // Only literal true activates it; false is the safe inline-invite fallback.
+  racesInviteDecisionGateEnabled: false,
+  // Server-only switch for transactional quick-share automatic friendship.
+  quickRaceShareAutoFriendEnabled: false,
   // Mandatory onboarding tutorial (batch 2026-08-09 item 9). When TRUE, a
   // build that carries the mandatory-capable onboarding removes every escape
   // hatch from the tutorial (intro skip, in-tutorial skip chip/pill, back

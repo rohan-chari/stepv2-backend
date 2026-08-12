@@ -794,12 +794,14 @@ test("Leg Cramp suspends Runner's High during freeze, Runner's High resumes afte
       const e = end.getTime();
       // Full race window
       if (s === RACE_START.getTime()) return 9500;
+      // The segment scorer splits overlapping effects at every boundary.
+      if (s === RH_START.getTime() && e === FREEZE_START.getTime()) return 3000;
+      if (s === FREEZE_START.getTime() && e === RH_END.getTime()) return 1500;
+      if (s === RH_END.getTime() && e === FREEZE_END.getTime()) return 1000;
       // Leg Cramp window (12:00-14:00)
       if (s === FREEZE_START.getTime() && e === FREEZE_END.getTime()) return 2500;
       // Runner's High window (10:00-13:00)
       if (s === RH_START.getTime() && e === RH_END.getTime()) return 4500;
-      // Overlap window (12:00-13:00)
-      if (s === FREEZE_START.getTime() && e === RH_END.getTime()) return 1500;
       return 0;
     },
     legCramps: [{

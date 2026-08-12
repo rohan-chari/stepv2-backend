@@ -2727,7 +2727,10 @@ function buildUsePowerup(dependencies = {}) {
           const oppEffects = await effectModel.findActiveForParticipant(opp.id);
           const defenses = oppEffects
             .filter(
-              (e) => e.type === "COMPRESSION_SOCKS" || e.type === "MIRROR"
+              (e) =>
+                e.type === "COMPRESSION_SOCKS" ||
+                e.type === "MIRROR" ||
+                e.type === "DECOY"
             )
             .map((e) => ({ type: e.type, expiresAt: e.expiresAt }));
           opponents.push({

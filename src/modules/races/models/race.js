@@ -1,3 +1,4 @@
+const { Prisma } = require("@prisma/client");
 const { prisma } = require("../../../db");
 
 const participantInclude = {
@@ -241,6 +242,7 @@ const Race = {
           buyInAmount: true,
           payoutCoins: true,
           resultsSeenAt: true,
+          inviteExpiresAt: true,
           team: true,
           forfeitedAt: true,
         },
@@ -374,6 +376,94 @@ const Race = {
       },
       orderBy: { createdAt: "desc" },
     });
+  },
+
+  // Home Suggested Races: one bounded Postgres read whose COMPLETE eligibility
+  // predicate runs before LIMIT 4. This is deliberately separate from the
+  // legacy browse query above: /races/public must remain exhaustive and
+  // byte-compatible, while Home must not let a window of newer ineligible rows
+  // hide an older joinable race.
+  async findPublicSuggestions({
+    userId,
+    supportsTeamRaces = false,
+    excludeSeeded = false,
+    limit = 4,
+  }) {
+    const teamPredicate = supportsTeamRaces
+      ? Prisma.sql`AND (r.is_team_race = FALSE OR r.status = 'pending'::"RaceStatus")`
+      : Prisma.sql`AND r.is_team_race = FALSE`;
+    const seedPredicate = excludeSeeded
+      ? Prisma.sql`AND r.seed_id IS NULL`
+      : Prisma.empty;
+
+    return prisma.$queryRaw`
+      SELECT
+        r.id,
+        r.name,
+        r.status::text AS status,
+        r.max_duration_days AS "maxDurationDays",
+        r.ends_at AS "endsAt",
+        r.started_at AS "startedAt",
+        r.target_steps AS "targetSteps",
+        r.buy_in_amount AS "buyInAmount",
+        r.payout_preset::text AS "payoutPreset",
+        r.pot_coins AS "potCoins",
+        r.funded_prize AS "fundedPrize",
+        r.prize_pool_coins AS "prizePoolCoins",
+        r.payout_curve AS "payoutCurve",
+        r.powerups_enabled AS "powerupsEnabled",
+        r.powerup_step_interval AS "powerupStepInterval",
+        r.max_participants AS "maxParticipants",
+        r.is_team_race AS "isTeamRace",
+        r.team_size AS "teamSize",
+        r.team_a_name AS "teamAName",
+        r.team_b_name AS "teamBName",
+        r.team_pool_mult_bps AS "teamPoolMultBps",
+        r.seed_id AS "seedId",
+        r.creation_source AS "creationSource",
+        r.start_policy AS "startPolicy",
+        r.created_at AS "createdAt",
+        COALESCE(parts.accepted_count, 0)::int AS "acceptedCount",
+        COALESCE(parts.rows, '[]'::jsonb) AS participants
+      FROM races r
+      LEFT JOIN users creator ON creator.id = r.creator_id
+      LEFT JOIN LATERAL (
+        SELECT
+          COUNT(*) FILTER (WHERE rp.status = 'accepted'::"RaceParticipantStatus") AS accepted_count,
+          JSONB_AGG(
+            JSONB_BUILD_OBJECT(
+              'userId', rp.user_id,
+              'status', UPPER(rp.status::text),
+              'buyInStatus', UPPER(rp.buy_in_status::text),
+              'buyInAmount', rp.buy_in_amount,
+              'team', CASE WHEN rp.team IS NULL THEN NULL ELSE UPPER(rp.team::text) END,
+              'totalSteps', rp.total_steps,
+              'totalsUpdatedAt', rp.totals_updated_at
+            )
+            ORDER BY rp.joined_at ASC
+          ) AS rows
+        FROM race_participants rp
+        WHERE rp.race_id = r.id
+      ) parts ON TRUE
+      WHERE r.is_public = TRUE
+        AND r.status IN ('pending'::"RaceStatus", 'active'::"RaceStatus")
+        AND r.tournament_id IS NULL
+        AND (r.creator_id IS NULL OR creator.is_review_account = FALSE)
+        AND NOT (r.status = 'pending'::"RaceStatus" AND r.seed_id IS NOT NULL)
+        ${seedPredicate}
+        ${teamPredicate}
+        AND NOT EXISTS (
+          SELECT 1
+          FROM race_participants mine
+          WHERE mine.race_id = r.id AND mine.user_id = ${userId}
+        )
+        AND (
+          r.max_participants IS NULL
+          OR COALESCE(parts.accepted_count, 0) < r.max_participants
+        )
+      ORDER BY r.created_at DESC, r.id ASC
+      LIMIT ${limit}
+    `;
   },
 
   // Lean variant of findPublicPending: the SAME where clause, but selecting only
@@ -596,6 +686,87 @@ const Race = {
       },
       orderBy: { startedAt: "desc" },
     });
+  },
+
+  // Home's featured branch differs from the legacy /races/featured surface:
+  // joined/invited and full cards are excluded, expired ACTIVE rows are
+  // excluded, and eligibility happens before the one-live-row-per-seed choice.
+  // The lateral aggregate keeps this one category round-trip without loading
+  // arbitrary participant relations.
+  async findFeaturedSuggestions({ userId, now }) {
+    return prisma.$queryRaw`
+      WITH eligible AS (
+        SELECT
+          r.id,
+          r.name,
+          r.status::text AS status,
+          r.ends_at AS "endsAt",
+          r.started_at AS "startedAt",
+          r.max_duration_days AS "maxDurationDays",
+          r.buy_in_amount AS "buyInAmount",
+          r.payout_preset::text AS "payoutPreset",
+          r.pot_coins AS "potCoins",
+          r.funded_prize AS "fundedPrize",
+          r.prize_pool_coins AS "prizePoolCoins",
+          r.payout_curve AS "payoutCurve",
+          r.powerups_enabled AS "powerupsEnabled",
+          r.max_participants AS "maxParticipants",
+          r.is_team_race AS "isTeamRace",
+          r.team_pool_mult_bps AS "teamPoolMultBps",
+          r.seed_id AS "seedId",
+          seed.kind AS "seedKind",
+          COALESCE(parts.accepted_count, 0)::int AS "acceptedCount",
+          COALESCE(parts.rows, '[]'::jsonb) AS participants,
+          ROW_NUMBER() OVER (
+            PARTITION BY r.seed_id
+            ORDER BY r.started_at DESC NULLS LAST, r.id ASC
+          ) AS seed_rank
+        FROM races r
+        JOIN race_seeds seed ON seed.id = r.seed_id
+        LEFT JOIN users creator ON creator.id = r.creator_id
+        LEFT JOIN LATERAL (
+          SELECT
+            COUNT(*) FILTER (WHERE rp.status = 'accepted'::"RaceParticipantStatus") AS accepted_count,
+            JSONB_AGG(
+              JSONB_BUILD_OBJECT(
+                'userId', rp.user_id,
+                'status', UPPER(rp.status::text),
+                'buyInStatus', UPPER(rp.buy_in_status::text),
+                'buyInAmount', rp.buy_in_amount
+              )
+              ORDER BY rp.joined_at ASC
+            ) AS rows
+          FROM race_participants rp
+          WHERE rp.race_id = r.id
+        ) parts ON TRUE
+        WHERE seed.kind IN ('DAILY_10K', 'WEEKLY_50K')
+          AND seed.active = TRUE
+          AND (r.creator_id IS NULL OR creator.is_review_account = FALSE)
+          AND r.status = 'active'::"RaceStatus"
+          AND r.ends_at > ${now}
+          AND NOT EXISTS (
+            SELECT 1
+            FROM race_participants mine
+            WHERE mine.race_id = r.id
+              AND mine.user_id = ${userId}
+              AND mine.status IN (
+                'accepted'::"RaceParticipantStatus",
+                'invited'::"RaceParticipantStatus"
+              )
+          )
+          AND (
+            r.max_participants IS NULL
+            OR COALESCE(parts.accepted_count, 0) < r.max_participants
+          )
+      )
+      SELECT *
+      FROM eligible
+      WHERE seed_rank = 1
+      ORDER BY
+        CASE "seedKind" WHEN 'DAILY_10K' THEN 0 WHEN 'WEEKLY_50K' THEN 1 ELSE 2 END,
+        id ASC
+      LIMIT 2
+    `;
   },
 
 };

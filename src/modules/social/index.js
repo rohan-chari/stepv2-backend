@@ -9,9 +9,15 @@
 // commands already present on the exports object.
 Object.assign(module.exports, require("./models/friendship"));
 Object.assign(module.exports, require("./models/raceMessage"));
+Object.assign(module.exports, require("./models/friendSearchRateWindow"));
+Object.assign(module.exports, require("./models/friendshipAutoLinkSuppression"));
 Object.assign(module.exports, require("./referralRewards"));
 Object.assign(module.exports, require("./queries/getFriends"));
 Object.assign(module.exports, require("./queries/searchUsers"));
+Object.assign(module.exports, require("./queries/searchDiscoverableUsers"));
+Object.assign(module.exports, require("./services/searchFriendsByIdentity"));
+Object.assign(module.exports, require("./services/automaticFriendship"));
+Object.assign(module.exports, require("./services/friendshipPairLock"));
 Object.assign(module.exports, require("./queries/getReferralPreview"));
 Object.assign(module.exports, require("./queries/getReferralStatus"));
 Object.assign(module.exports, require("./queries/getRaceMessages"));

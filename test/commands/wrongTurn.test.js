@@ -760,12 +760,12 @@ test("Wrong Turn + Runner's High: steps are doubled and negated", async () => {
       const s = start.getTime();
       const e = end.getTime();
       if (s === RACE_START.getTime()) return 9500;
+      // The segment scorer splits overlapping effects at every boundary.
+      if (s === RH_START.getTime() && e === WT_START.getTime()) return 2000;
+      if (s === WT_START.getTime() && e === WT_END.getTime()) return 1000;
+      if (s === WT_END.getTime() && e === RH_END.getTime()) return 1500;
       // Runner's High window
       if (s === RH_START.getTime() && e === RH_END.getTime()) return 4500;
-      // Wrong Turn window
-      if (s === WT_START.getTime() && e === WT_END.getTime()) return 1000;
-      // Overlap (RH start to WT end, or WT start to RH end — overlap is 12:00-13:00)
-      if (s === WT_START.getTime() && e === WT_END.getTime()) return 1000;
       return 0;
     },
     runnersHighs: [{

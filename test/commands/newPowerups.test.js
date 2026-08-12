@@ -183,7 +183,10 @@ function makeUseDeps(overrides = {}) {
 
 test("new powerups are assigned to the intended rarity pools", () => {
   assert.ok(RARITY_TIERS.RARE.includes("LUCKY_HORSESHOE"));
-  assert.ok(RARITY_TIERS.RARE.includes("POCKET_WATCH"));
+  assert.ok(
+    !Object.values(RARITY_TIERS).some((tier) => tier.includes("POCKET_WATCH")),
+    "Pocket Watch is disabled indefinitely and must not roll from a box"
+  );
   assert.ok(RARITY_TIERS.RARE.includes("TRAIL_MINE"));
   assert.ok(RARITY_TIERS.COMMON.includes("PINECONE_TOSS"));
   assert.ok(RARITY_TIERS.RARE.includes("SNEAKY_SWAP"));
@@ -855,4 +858,3 @@ test("Pocket Watch rejects when only opponent-applied debuffs are active", async
     },
   );
 });
-

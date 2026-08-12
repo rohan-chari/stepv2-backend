@@ -3,6 +3,9 @@ const { User } = require("../../users/models/user");
 const { hashAppleSub } = require("../../users/appleSubHash");
 const { normalizeReferralCode } = require("../../../shared/lib/referralCode");
 const { recordServerActivationEvent } = require("../../analytics/serverActivationEvents");
+const {
+  buildApplyAutomaticFriendship,
+} = require("../services/automaticFriendship");
 
 // Best-effort, NEVER-throws attribution writer (M1). Called only from the
 // new-user create branch of the provisioners, so:
@@ -30,6 +33,9 @@ function buildRecordReferral(dependencies = {}) {
   const db = dependencies.prisma || prisma;
   const userModel = dependencies.User || User;
   const hashSub = dependencies.hashAppleSub || hashAppleSub;
+  const applyAutomaticFriendship =
+    dependencies.applyAutomaticFriendship ||
+    buildApplyAutomaticFriendship(dependencies);
 
   // `source` records WHICH MECHANISM produced this attribution
   // (provision_body | ip_fallback_exact | ip_fallback_net). Optional and
@@ -96,30 +102,25 @@ function buildRecordReferral(dependencies = {}) {
         }
       });
 
-      // Auto-friend the pair (product decision 2026-07-12): accepting the
-      // invite IS the friend request — the invitee should not have to find and
-      // add the inviter manually. Separate best-effort write AFTER the
-      // attribution tx so a friendship hiccup never rolls back attribution.
-      // The referee is a brand-new account, so no reverse row can exist; the
-      // @@unique([requesterId, addresseeId]) makes a retry a no-op (P2002).
+      // Auto-friend remains a separate best-effort write AFTER attribution, so
+      // a friendship hiccup never rolls attribution back. A prior decline or
+      // removal is durable user intent and suppresses this automatic source.
       try {
-        await db.friendship.create({
-          data: {
-            requesterId: referrer.id,
-            addresseeId: newUser.id,
-            status: "ACCEPTED",
-          },
+        await applyAutomaticFriendship({
+          userAId: referrer.id,
+          userBId: newUser.id,
+          prisma: db,
         });
+        await require("../../users/services/authMeCache").invalidatePairSafe(
+          referrer.id,
+          newUser.id
+        );
       } catch (friendError) {
-        if (!friendError || friendError.code !== "P2002") {
-          console.warn(
-            `Referral auto-friend skipped: ${
-              friendError && friendError.message
-                ? friendError.message
-                : friendError
-            }`
-          );
-        }
+        console.warn(
+          `Referral auto-friend skipped: ${
+            friendError && friendError.message ? friendError.message : friendError
+          }`
+        );
       }
 
       return { attributed: true, code, source };

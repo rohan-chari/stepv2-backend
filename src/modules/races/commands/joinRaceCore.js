@@ -204,6 +204,8 @@ function buildJoinRaceCore(dependencies = {}) {
     onboarding,
     team = null,
     clientFeatures = null,
+    transactionClient = null,
+    deferPostCommit = false,
   }) {
     const raceId = race.id;
 
@@ -297,14 +299,34 @@ function buildJoinRaceCore(dependencies = {}) {
 
     let participant;
     try {
-      participant = await participantModel.create({
-        raceId,
-        userId,
-        status: "ACCEPTED",
-        buyInAmount,
-        buyInStatus: buyInAmount > 0 ? "HELD" : "NONE",
-        team: joinTeam,
-      });
+      participant = transactionClient
+        ? await transactionClient.raceParticipant.create({
+            data: {
+              raceId,
+              userId,
+              status: "ACCEPTED",
+              buyInAmount,
+              buyInStatus: buyInAmount > 0 ? "HELD" : "NONE",
+              team: joinTeam,
+            },
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  displayName: true,
+                  profilePhotoUrl: true,
+                },
+              },
+            },
+          })
+        : await participantModel.create({
+            raceId,
+            userId,
+            status: "ACCEPTED",
+            buyInAmount,
+            buyInStatus: buyInAmount > 0 ? "HELD" : "NONE",
+            team: joinTeam,
+          });
     } catch (error) {
       if (buyInAmount > 0) {
         try {
@@ -319,41 +341,39 @@ function buildJoinRaceCore(dependencies = {}) {
       throw error;
     }
 
-    events.emit("RACE_PUBLIC_JOINED", {
-      raceId,
-      userId,
-      creatorUserId: race.creatorId,
-      raceName: race.name,
-    });
-
-    // Onboarding first-race bonus boxes. Eligibility is enforced inside the
-    // helper regardless of the flag; falsy `onboarding` => no bonus (current
-    // behavior preserved for old clients that omit it).
-    if (onboarding === true) {
-      const grantedEvents = await maybeGrantOnboardingBoxes({
-        participant,
-        race,
-        joiningUserId: userId,
+    const runPostCommit = async () => {
+      events.emit("RACE_PUBLIC_JOINED", {
+        raceId,
+        userId,
+        creatorUserId: race.creatorId,
+        raceName: race.name,
       });
-      for (const payload of grantedEvents) {
-        events.emit("POWERUP_EARNED", payload);
+
+      // Onboarding first-race bonus boxes. Eligibility is enforced inside the
+      // helper regardless of the flag; falsy `onboarding` => no bonus (current
+      // behavior preserved for old clients that omit it).
+      if (onboarding === true) {
+        const grantedEvents = await maybeGrantOnboardingBoxes({
+          participant,
+          race,
+          joiningUserId: userId,
+        });
+        for (const payload of grantedEvents) {
+          events.emit("POWERUP_EARNED", payload);
+        }
       }
-    }
 
-    await invalidateRaceProgress(raceId);
+      await invalidateRaceProgress(raceId);
 
-    await enqueueRaceResolution({ raceId, userId });
+      await enqueueRaceResolution({ raceId, userId });
 
+      // C2 invalidation (spec §5 Phase C item 6): a membership change alters
+      // the chat's access context. This remains post-commit and best-effort.
+      await invalidateRaceMessagesCache(raceId);
+    };
 
-    // C2 invalidation (spec §5 Phase C item 6): a membership change alters the
-
-    // chat's access context (who may read it, who appears in it), so the cached
-
-    // lists must never survive it. Same atomic `SET msgver` + `DEL list` as a
-
-    // post, for BOTH kinds, keyed off this change's own timestamp.
-
-    await invalidateRaceMessagesCache(raceId);
+    if (deferPostCommit) return { participant, runPostCommit };
+    await runPostCommit();
     return participant;
   };
 }

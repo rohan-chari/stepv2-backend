@@ -11,7 +11,40 @@ function buildGetPublicTournaments(dependencies = {}) {
   const db = dependencies.prisma || defaultPrisma;
   const tournamentModel = dependencies.Tournament || Tournament;
 
-  return async function getPublicTournaments({ userId }) {
+  return async function getPublicTournaments({ userId, suggestionMode = false }) {
+    if (suggestionMode) {
+      const rows = await tournamentModel.findPublicSuggestions({
+        userId,
+        limit: 4,
+      });
+      const featured = [];
+      const tournaments = [];
+      for (const raw of rows) {
+        const tournament = {
+          ...raw,
+          status: String(raw.status || "").toUpperCase(),
+          participants: raw.participants || [],
+          seed: raw.seedId
+            ? {
+                id: raw.seedId,
+                kind: raw.seedKind,
+                championPrizeCoins: raw.championPrizeCoins,
+              }
+            : null,
+        };
+        const summary = {
+          ...serializeTournamentSummary(tournament, userId),
+          // Suggested Races owns this ordering field. Keep it out of the
+          // frozen legacy tournament serializer and /tournaments/public path.
+          createdAt: raw.createdAt,
+          joinable: true,
+        };
+        if (raw.seedId) featured.push(summary);
+        else tournaments.push(summary);
+      }
+      return { featured, tournaments };
+    }
+
     const activeSeeds = await db.tournamentSeed.findMany({
       where: { active: true },
       select: { id: true },

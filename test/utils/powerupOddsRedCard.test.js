@@ -15,8 +15,8 @@ function mulberry32(seed) {
   };
 }
 
-describe("powerupOdds — Red Card nerf (half rate within RARE tier)", () => {
-  it("RED_CARD lands at ~half its prior uniform rate; other rares unchanged relatively; tier is leak-free", () => {
+describe("powerupOdds — Red Card half-weight within RARE tier", () => {
+  it("RED_CARD follows its 0.5 weight; other rares remain full-weight; tier is leak-free", () => {
     const rng = mulberry32(20260716);
     const N = 400000;
     // Roll at last place (RARE-heavy) to accumulate plenty of rare samples.
@@ -36,11 +36,12 @@ describe("powerupOdds — Red Card nerf (half rate within RARE tier)", () => {
     assert.ok(rareTotal > 50000, `expected many rare samples, got ${rareTotal}`);
 
     const redFraction = (rareCounts["RED_CARD"] || 0) / rareTotal;
-    // Prior uniform rate was 1/11 ≈ 0.0909; the nerf targets exactly half = 1/22.
-    const TARGET = 1 / 22;
+    // Prod has ten Rare types: RED_CARD at weight 0.5 and nine others at 1.0.
+    // Its conditional share is therefore 0.5 / 9.5 = 1/19.
+    const TARGET = 0.5 / (0.5 + validRares.size - 1);
     assert.ok(
       Math.abs(redFraction - TARGET) < 0.004,
-      `RED_CARD within-tier fraction ${redFraction.toFixed(4)} should be ~${TARGET.toFixed(4)} (half of 1/11)`
+      `RED_CARD within-tier fraction ${redFraction.toFixed(4)} should be ~${TARGET.toFixed(4)} (weight 0.5)`
     );
 
     // A representative OTHER rare should sit at ~21/220 (its share plus the tiny
@@ -52,7 +53,7 @@ describe("powerupOdds — Red Card nerf (half rate within RARE tier)", () => {
       `a normal rare (${otherFraction.toFixed(4)}) should clearly exceed RED_CARD (${redFraction.toFixed(4)})`
     );
 
-    // The RARE tier still sums to 1 across the 11 rares (probability preserved,
+    // The RARE tier still sums to 1 across the configured pool (probability preserved,
     // no mass lost or leaked to other tiers).
     const sum = Object.values(rareCounts).reduce((a, b) => a + b, 0);
     assert.equal(sum, rareTotal);

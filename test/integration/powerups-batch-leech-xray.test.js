@@ -197,6 +197,7 @@ describe("open-batch / leech / x-ray — integration", () => {
     const raceId = await createActiveRace(alice, bob);
 
     await giveActiveEffect(raceId, bob.userId, "COMPRESSION_SOCKS");
+    await giveActiveEffect(raceId, bob.userId, "DECOY");
     const xray = await giveHeld(raceId, alice.userId, "DEFENSE_SCAN");
 
     const res = await request(server.baseUrl, "POST", `/races/${raceId}/powerups/${xray.id}/use`, {
@@ -210,7 +211,7 @@ describe("open-batch / leech / x-ray — integration", () => {
     assert.ok(body.scan, "scan present at the top level");
     const bobEntry = body.scan.opponents.find((o) => o.userId === bob.userId);
     assert.ok(bobEntry);
-    assert.deepEqual(bobEntry.defenses.map((d) => d.type), ["COMPRESSION_SOCKS"]);
+    assert.deepEqual(bobEntry.defenses.map((d) => d.type), ["COMPRESSION_SOCKS", "DECOY"]);
 
     // Consumed, and silent recon => no LEECH/scan effect leaked to others.
     const used = await prisma.racePowerup.findUnique({ where: { id: xray.id } });

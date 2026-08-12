@@ -5,6 +5,7 @@ const {
 } = require("../commands/getOrCreateReferralCode");
 const {
   redeemReferralCode: defaultRedeemReferralCode,
+  buildRedeemReferralCode,
 } = require("../commands/redeemReferralCode");
 const {
   getReferralStatus: defaultGetReferralStatus,
@@ -25,7 +26,11 @@ function createReferralsRouter(dependencies = {}) {
     dependencies.requireAuth || buildRequireAuth(dependencies);
   const getOrCreateCode =
     dependencies.getOrCreateReferralCode || defaultGetOrCreateReferralCode;
-  const redeem = dependencies.redeemReferralCode || defaultRedeemReferralCode;
+  const redeem =
+    dependencies.redeemReferralCode ||
+    (dependencies.prisma || dependencies.beforeAutoFriendWrite
+      ? buildRedeemReferralCode(dependencies)
+      : defaultRedeemReferralCode);
   const getStatus = dependencies.getReferralStatus || defaultGetReferralStatus;
   const getPreview =
     dependencies.getReferralPreview || defaultGetReferralPreview;

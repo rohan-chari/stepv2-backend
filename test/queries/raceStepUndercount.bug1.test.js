@@ -3,6 +3,7 @@ const test = require("node:test");
 const { buildGetRaceProgress } = require("../../src/modules/races/queries/getRaceProgress");
 const {
   buildResolveRaceState,
+  calculateBaseAdjusted,
 } = require("../../src/modules/races/services/raceStateResolution");
 
 // ===========================================================================
@@ -75,14 +76,14 @@ function createStepsStore(rangeRecords = {}) {
 // DISPLAY PATH (getRaceProgress)
 // ===========================================================================
 
-function makeDisplayDeps({ samples, rangeRecords, now: nowFn } = {}) {
+function makeDisplayDeps({ samples, rangeRecords, now: nowFn, raceEndsAt } = {}) {
   const updates = [];
   const race = {
     id: "race-1",
     status: "ACTIVE",
     targetSteps: 1000000,
     startedAt: RACE_START,
-    endsAt: new Date("2026-06-08T13:00:00.000Z"),
+    endsAt: raceEndsAt || new Date("2026-06-08T13:00:00.000Z"),
     powerupsEnabled: false,
     powerupStepInterval: 0,
     participants: [
@@ -148,7 +149,7 @@ function displayStepsFor(result, userId) {
 // SETTLEMENT PATH (buildResolveRaceState -> calculateBaseAdjusted)
 // ===========================================================================
 
-function makeSettlementCtx({ samples, rangeRecords, now } = {}) {
+function makeSettlementCtx({ samples, rangeRecords, now, raceEndsAt } = {}) {
   const participantUpdates = [];
   const participants = [
     {
@@ -174,7 +175,7 @@ function makeSettlementCtx({ samples, rangeRecords, now } = {}) {
     targetSteps: 0, // time-based: never finishes, just tracks totals
     timeBased: true,
     startedAt: RACE_START,
-    endsAt: new Date("2026-06-08T13:00:00.000Z"),
+    endsAt: raceEndsAt || new Date("2026-06-08T13:00:00.000Z"),
     powerupsEnabled: false,
     powerupStepInterval: null,
     participants,
@@ -384,6 +385,81 @@ test("settlement: start day stays samples-only and excludes pre-race daily steps
   });
   await buildResolveRaceState(ctx.deps)({ raceId: "race-1", timeZone: TZ_ET });
   assert.equal(settlementStepsFor(ctx, "rp-1"), 1200);
+});
+
+// ---------------------------------------------------------------------------
+// (e) Same-day scoring must stop at `now` (race endsAt during settlement).
+//     Samples later on the local start day are outside the race window even
+//     though they are earlier than the next local midnight.
+// ---------------------------------------------------------------------------
+
+const CASE_E_SAMPLES = [
+  ...START_DAY_SAMPLES,
+  { userId: "user-1", periodStart: "2026-06-01T16:00:00.000Z", periodEnd: "2026-06-01T17:00:00.000Z", steps: 900 },
+];
+const CASE_E_NOW = () => new Date("2026-06-01T16:00:00.000Z");
+
+test("display: expired same-day race excludes samples at or after its deadline", async () => {
+  const { deps } = makeDisplayDeps({
+    samples: CASE_E_SAMPLES,
+    now: CASE_E_NOW,
+    raceEndsAt: CASE_E_NOW(),
+  });
+  const result = await buildGetRaceProgress(deps)("user-1", "race-1", TZ_ET);
+  assert.equal(displayStepsFor(result, "user-1"), 1200);
+});
+
+test("settlement: same-day start window excludes samples at or after race end", async () => {
+  const { baseAdjusted } = await calculateBaseAdjusted({
+    participant: { userId: "user-1", joinedAt: RACE_START },
+    raceStartedAt: RACE_START,
+    timeZone: TZ_ET,
+    stepsModel: createStepsStore(),
+    stepSampleModel: createStepSampleStore(CASE_E_SAMPLES),
+    now: CASE_E_NOW(),
+    raceEndsAt: CASE_E_NOW(),
+  });
+  assert.equal(baseAdjusted, 1200);
+});
+
+const CASE_F_SAMPLES = [
+  ...START_DAY_SAMPLES,
+  { userId: "user-1", periodStart: "2026-06-02T12:00:00.000Z", periodEnd: "2026-06-02T13:00:00.000Z", steps: 1000 },
+  { userId: "user-1", periodStart: "2026-06-02T16:00:00.000Z", periodEnd: "2026-06-02T17:00:00.000Z", steps: 900 },
+];
+const CASE_F_RANGE = {
+  "user-1": [{ date: "2026-06-02", steps: 9999 }],
+};
+const CASE_F_END = () => new Date("2026-06-02T15:00:00.000Z");
+
+test("display: expired multi-day race uses samples only on its partial final day", async () => {
+  const { deps } = makeDisplayDeps({
+    samples: CASE_F_SAMPLES,
+    rangeRecords: CASE_F_RANGE,
+    now: () => new Date("2026-06-02T18:00:00.000Z"),
+    raceEndsAt: CASE_F_END(),
+  });
+  const result = await buildGetRaceProgress(deps)("user-1", "race-1", TZ_ET);
+  assert.equal(displayStepsFor(result, "user-1"), 1200 + 1000);
+});
+
+test("settlement: midnight starter cannot leak a partial-day daily total", async () => {
+  const midnightStart = new Date("2026-06-01T04:00:00.000Z"); // midnight ET
+  const cutoff = new Date("2026-06-01T16:00:00.000Z");
+  const { baseAdjusted } = await calculateBaseAdjusted({
+    participant: { userId: "user-1", joinedAt: midnightStart },
+    raceStartedAt: midnightStart,
+    timeZone: TZ_ET,
+    stepsModel: createStepsStore({
+      "user-1": [{ date: "2026-06-01", steps: 9999 }],
+    }),
+    stepSampleModel: createStepSampleStore([
+      { userId: "user-1", periodStart: "2026-06-01T12:00:00.000Z", periodEnd: "2026-06-01T13:00:00.000Z", steps: 700 },
+    ]),
+    now: new Date("2026-06-01T18:00:00.000Z"),
+    raceEndsAt: cutoff,
+  });
+  assert.equal(baseAdjusted, 700);
 });
 
 // ---------------------------------------------------------------------------

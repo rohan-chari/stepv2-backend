@@ -15,6 +15,8 @@ function collectRaceIllusions(activeEffects, viewerUserId, nowMs = Date.now()) {
   const imposterSwaps = [];
 
   for (const e of activeEffects || []) {
+    const notExpired = !e.expiresAt || new Date(e.expiresAt).getTime() > nowMs;
+    if (!notExpired) continue;
     if (e.type === "STEALTH_MODE") {
       stealthedUserIds.add(e.targetUserId);
     }
@@ -22,8 +24,6 @@ function collectRaceIllusions(activeEffects, viewerUserId, nowMs = Date.now()) {
       viewerIsDetoured = true;
     }
     if (e.type === "IMPOSTER") {
-      const notExpired =
-        !e.expiresAt || new Date(e.expiresAt).getTime() > nowMs;
       const swapWithUserId = (e.metadata || {}).swapWithUserId;
       if (notExpired && e.targetUserId && swapWithUserId) {
         imposterSwaps.push({ a: e.targetUserId, b: swapWithUserId });

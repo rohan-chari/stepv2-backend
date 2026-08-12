@@ -3,4 +3,5 @@
 // (milestones, global step events), and economy (ad extra-spin status).
 // Router last, per the standing index-ordering rule.
 Object.assign(module.exports, require("./getHomeRaceCard"));
+Object.assign(module.exports, require("./queries/getSuggestedRaces"));
 Object.assign(module.exports, require("./routes"));

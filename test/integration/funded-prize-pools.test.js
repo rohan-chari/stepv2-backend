@@ -225,7 +225,7 @@ describe("app-funded prize pools — races", () => {
       durationDays: 3,
       durationPoints: 2,
       coinUnit: 20,
-      maxCoins: 3200,
+      maxCoins: 16000,
       funded: true,
     });
     assert.equal(body.buyInAmount, 0);
@@ -753,7 +753,7 @@ describe("app-funded prize pools — races", () => {
 
   // ── 12. the cap ──────────────────────────────────────────────────────────
 
-  it("12: a 100-player 14-day race clamps to 3,200 with atMax", async () => {
+  it("12: a 100-player 14-day race reaches the 16,000 cap with atMax", async () => {
     const race = await seedRace({ durationDays: 14, expired: false });
     const viewer = await makeUser();
     await prisma.raceParticipant.create({
@@ -785,11 +785,11 @@ describe("app-funded prize pools — races", () => {
 
     const detail = await req("GET", `/races/${race.id}`, { token: viewer.token });
     const body = await detail.json();
-    assert.equal(body.prizePool.coins, 3200);
+    assert.equal(body.prizePool.coins, 16000);
     assert.equal(body.prizePool.atMax, true);
     assert.equal(body.prizePool.playerCount, 100);
-    assert.equal(body.prizePool.maxCoins, 3200);
-    assert.equal(body.projectedPotCoins, 3200);
+    assert.equal(body.prizePool.maxCoins, 16000);
+    assert.equal(body.projectedPotCoins, 16000);
   });
 
   // ── 13. seeded races ────────────────────────────────────────────────────

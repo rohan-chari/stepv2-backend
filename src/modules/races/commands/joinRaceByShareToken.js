@@ -9,6 +9,11 @@ const {
   countLiveQuickMemberships,
 } = require("../services/nextRacePolicy");
 const { RaceJoinError } = require("./joinRaceCore");
+const { prisma: defaultPrisma } = require("../../../db");
+const { appSettings: defaultAppSettings } = require("../../../shared/config/appSettings");
+const {
+  buildApplyAutomaticFriendship,
+} = require("../../social/services/automaticFriendship");
 
 // Thrown only for the share-token-specific failure: the token resolves to no
 // race (unknown/revoked link). All other join failures (full, already joined,
@@ -30,6 +35,11 @@ function buildJoinRaceByShareToken(dependencies = {}) {
   const raceModel = dependencies.Race || Race;
   const withLock = dependencies.withRaceJoinLock || withRaceJoinLock;
   const joinRaceCore = buildJoinRaceCore(dependencies);
+  const db = dependencies.prisma || defaultPrisma;
+  const settings = dependencies.appSettings || defaultAppSettings;
+  const applyAutomaticFriendship =
+    dependencies.applyAutomaticFriendship ||
+    buildApplyAutomaticFriendship(dependencies);
   // Batch 2026-08-08 item 2 — private-race auto-start hook (see
   // jobs/privateRaceAutoStart.js). Link-join is the one join path that can land
   // on a PRIVATE race, so this is where it really fires.
@@ -54,7 +64,7 @@ function buildJoinRaceByShareToken(dependencies = {}) {
       throw new RaceShareJoinError("Race not found", 404);
     }
 
-    const joinUnderRaceLock = () => withLock(resolved.id, async () => {
+    const joinUnderRaceLock = () => withLock(resolved.id, async (lockTx) => {
       // Re-read inside the lock for a fresh participant set, so concurrent joins
       // can't both slip past the capacity check (mirrors joinPublicRace).
       const race = await raceModel.findById(resolved.id);
@@ -62,9 +72,53 @@ function buildJoinRaceByShareToken(dependencies = {}) {
         throw new RaceShareJoinError("Race not found", 404);
       }
 
-      return joinRaceCore({ race, userId, onboarding, team, clientFeatures });
+      const autoFriendEnabled =
+        race.creationSource === "QUICK_CREATE" &&
+        (await settings.getFlag("quickRaceShareAutoFriendEnabled")) === true;
+
+      if (!autoFriendEnabled) {
+        return {
+          ...(await joinRaceCore({
+            race,
+            userId,
+            onboarding,
+            team,
+            clientFeatures,
+            deferPostCommit: true,
+          })),
+          invalidateFriendshipPair: false,
+        };
+      }
+
+      const commitDurableJoin = async (tx) => {
+        const joined = await joinRaceCore({
+          race,
+          userId,
+          onboarding,
+          team,
+          clientFeatures,
+          transactionClient: tx,
+          deferPostCommit: true,
+        });
+        await applyAutomaticFriendship({
+          userAId: race.creatorId,
+          userBId: userId,
+          transactionClient: tx,
+        });
+        return { ...joined, invalidateFriendshipPair: true };
+      };
+      // Production's race join lock supplies its transaction client, so the
+      // advisory lock and both durable writes share one transaction/connection.
+      // Minimal injected locks used by unit tests may omit it; retain an
+      // explicit transaction fallback for those callers.
+      return lockTx
+        ? await commitDurableJoin(lockTx)
+        : await db.$transaction(commitDurableJoin);
     });
-    const participant =
+    // Both advisory helpers own transactions. Bubble the deferred callbacks
+    // all the way out of BOTH callbacks so events, cache invalidation, boxes,
+    // and queue/cache work can only run after both commits have resolved.
+    const deferred =
       resolved.creationSource === "QUICK_CREATE"
       ? await withQuickMembershipLock(userId, async () => {
           if (await countLiveQuickMemberships(userId) >= 3) {
@@ -78,11 +132,19 @@ function buildJoinRaceByShareToken(dependencies = {}) {
         })
       : await joinUnderRaceLock();
 
+    if (deferred.invalidateFriendshipPair) {
+      await require("../../users/services/authMeCache").invalidatePairSafe(
+        resolved.creatorId,
+        userId
+      );
+    }
+    await deferred.runPostCommit();
+
     // OUTSIDE the advisory lock, after the participant row has committed —
     // startRace must never run while the join lock is held (3e6c827).
     await maybeAutoStartPrivateRace({ raceId: resolved.id });
 
-    return participant;
+    return deferred.participant;
   };
 }
 

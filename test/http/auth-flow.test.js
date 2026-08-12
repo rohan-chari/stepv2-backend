@@ -75,6 +75,10 @@ test("POST /auth/apple provisions the signed-in user", async () => {
       email: "walker@example.com",
       name: "Rohan Chari",
       isAdmin: false,
+      firstName: null,
+      lastName: null,
+      nameSetupOnboardingRequired: false,
+      nameSetupCompletedAt: null,
       featureFlags: {
         bannerAdsEnabled: false,
         dualBoxBannersEnabled: false,
@@ -89,6 +93,8 @@ test("POST /auth/apple provisions the signed-in user", async () => {
         openUserRaceDiscoveryEnabled: false,
         quickCreateRaceCtaEnabled: false,
         setupInviteCodePromptEnabled: false,
+        racesInviteDecisionGateEnabled: false,
+        quickRaceShareAutoFriendEnabled: false,
       },
     });
     assert.equal(typeof body.sessionToken, "string");

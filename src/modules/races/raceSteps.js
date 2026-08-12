@@ -33,6 +33,7 @@ async function calculateSubsequentSteps({
   stepsModel,
   stepSampleModel,
   now,
+  allowPartialDayDaily = true,
 }) {
   if (dayAfterStartDate > today) {
     return 0;
@@ -92,12 +93,13 @@ async function calculateSubsequentSteps({
       },
       timeZone
     );
+    const isCompleteDay = dayEnd.getTime() <= nowMs;
     // Cap the final (today) day's window at `now` so we never count beyond it.
     if (dayEnd.getTime() > nowMs) {
       dayEnd = new Date(nowMs);
     }
 
-    dayWindows.push({ date, start: dayStart, end: dayEnd });
+    dayWindows.push({ date, start: dayStart, end: dayEnd, isCompleteDay });
   }
 
   // Batched path when the model supports it (the real StepSample does); fall
@@ -114,7 +116,13 @@ async function calculateSubsequentSteps({
 
   let total = 0;
   for (let i = 0; i < dayWindows.length; i++) {
-    const dailySteps = dailyByDate.get(dayWindows[i].date) || 0;
+    // A daily row is authoritative for a completed local day and for the
+    // genuinely-live current day (where it cannot contain future walking). At
+    // a historical race deadline inside a day, however, that row may have been
+    // updated after the race ended; use only time-sliced samples there.
+    const dailySteps = dayWindows[i].isCompleteDay || allowPartialDayDaily
+      ? (dailyByDate.get(dayWindows[i].date) || 0)
+      : 0;
     total += Math.max(daySampleSums[i] || 0, dailySteps);
   }
 

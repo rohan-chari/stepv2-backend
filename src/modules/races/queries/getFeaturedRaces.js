@@ -13,7 +13,42 @@ function buildGetFeaturedRaces(dependencies = {}) {
   // joined or full races — a featured card stays pinned and flips to a VIEW /
   // FULL state instead. Each entry carries the viewer's join status so the
   // client can render JOIN vs VIEW without a failed join round-trip.
-  return async function getFeaturedRaces({ userId }) {
+  return async function getFeaturedRaces({ userId, suggestionMode = false }) {
+    if (suggestionMode) {
+      const rows = await raceModel.findFeaturedSuggestions({
+        userId,
+        now: now(),
+      });
+      return rows.map((raw) => {
+        const participants = raw.participants || [];
+        const acceptedCount = Number(raw.acceptedCount || 0);
+        const race = {
+          ...raw,
+          status: "ACTIVE",
+          payoutPreset: raw.payoutPreset
+            ? String(raw.payoutPreset).toUpperCase()
+            : null,
+          participants,
+        };
+        const money = buildRaceMoneyView({ race, participants, acceptedCount });
+        const max = race.maxParticipants ?? null;
+        return {
+          raceId: race.id,
+          seedKind: race.seedKind,
+          name: race.name,
+          endsAt: race.endsAt,
+          participantCount: acceptedCount,
+          maxParticipants: max ?? 100,
+          isFull: max != null && acceptedCount >= max,
+          powerupsEnabled: race.powerupsEnabled === true,
+          finishReward: money.finishReward,
+          prizePool: money.prizePool,
+          myStatus: null,
+          upcoming: null,
+        };
+      });
+    }
+
     const races = await raceModel.findLiveSeeded();
     const currentTime = now();
 

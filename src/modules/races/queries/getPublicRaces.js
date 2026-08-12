@@ -30,7 +30,64 @@ function buildGetPublicRaces(dependencies = {}) {
   // `supportsTeamRaces` (TR-702): old clients never see team races in the
   // browser. TR-204: team races are browsable only while PENDING — once ACTIVE
   // they lock, unlike individual public races which stay joinable mid-flight.
-  return async function getPublicRaces({ userId, supportsTeamRaces = false }) {
+  return async function getPublicRaces({
+    userId,
+    supportsTeamRaces = false,
+    // Additive, internal-only Home inputs. Both default false so every existing
+    // caller — especially GET /races/public — stays on the byte-identical
+    // legacy path below.
+    excludeSeeded = false,
+    suggestionMode = false,
+  }) {
+    if (suggestionMode) {
+      const rows = await raceModel.findPublicSuggestions({
+        userId,
+        supportsTeamRaces,
+        excludeSeeded,
+        limit: 4,
+      });
+      return rows.map((raw) => {
+        const race = {
+          ...raw,
+          status: String(raw.status || "").toUpperCase(),
+          payoutPreset: raw.payoutPreset
+            ? String(raw.payoutPreset).toUpperCase()
+            : null,
+          participants: raw.participants || [],
+        };
+        const acceptedCount = Number(raw.acceptedCount || 0);
+        const maxParticipants = race.maxParticipants ?? null;
+        const money = buildRaceMoneyView({
+          race,
+          participants: race.participants,
+          acceptedCount,
+        });
+
+        return {
+          id: race.id,
+          name: race.name,
+          status: race.status,
+          maxDurationDays: race.maxDurationDays,
+          endsAt: race.endsAt,
+          startedAt: race.startedAt,
+          participantCount: acceptedCount,
+          maxParticipants,
+          buyInAmount: money.buyInAmount,
+          payoutPreset: race.payoutPreset,
+          powerupsEnabled: race.powerupsEnabled === true,
+          prizePool: money.prizePool,
+          isTeamRace: race.isTeamRace === true,
+          teamSize: race.teamSize ?? null,
+          teamAName: race.teamAName ?? null,
+          teamBName: race.teamBName ?? null,
+          teams: race.isTeamRace
+            ? buildTeamsBlockFromParticipants(race, race.participants)
+            : null,
+          createdAt: race.createdAt,
+        };
+      });
+    }
+
     const races = await raceModel.findPublicPending();
 
     const results = [];

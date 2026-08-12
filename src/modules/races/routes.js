@@ -145,7 +145,10 @@ function createRacesRouter(dependencies = {}) {
       : defaultJoinPublicRace);
   const joinRaceByShareToken =
     dependencies.joinRaceByShareToken ||
-    (dependencies.beforeCommitRaceStart || dependencies.beforeRaceStartedRecord
+    (dependencies.beforeCommitRaceStart ||
+    dependencies.beforeRaceStartedRecord ||
+    dependencies.beforeAutoFriendWrite ||
+    dependencies.prisma
       ? buildJoinRaceByShareToken(dependencies)
       : defaultJoinRaceByShareToken);
   const createRaceShareLink =

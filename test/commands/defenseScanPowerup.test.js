@@ -7,8 +7,8 @@ const { buildUsePowerup } = require("../../src/modules/powerups/commands/usePowe
 // DEFENSE_SCAN — shipped as "X-Ray" (Item 2). An instantaneous intel read: it
 // creates NO effect and writes NO feed event (silent recon), consumes one
 // scanner, and returns a snapshot of every opponent's active defenses
-// (Compression Socks / Mirror) in the use RESULT (surfaced at the top level by
-// the route). In team races it reveals only the enemy team.
+// (Compression Socks / Mirror / Decoy) in the use RESULT (surfaced at the top
+// level by the route). In team races it reveals only the enemy team.
 // ---------------------------------------------------------------------------
 
 const NOW = new Date("2026-07-17T12:00:00Z");
@@ -85,7 +85,7 @@ test("X-Ray returns each opponent's active defenses, consumes the scanner, creat
   const ctx = makeDeps({
     existingEffects: {
       "rp-2": [{ type: "COMPRESSION_SOCKS", expiresAt: socksExpiry }, { type: "LEG_CRAMP", expiresAt: socksExpiry }],
-      "rp-3": [{ type: "MIRROR", expiresAt: socksExpiry }],
+      "rp-3": [{ type: "MIRROR", expiresAt: socksExpiry }, { type: "DECOY", expiresAt: socksExpiry }],
     },
   });
   const use = buildUsePowerup(ctx.deps);
@@ -99,8 +99,8 @@ test("X-Ray returns each opponent's active defenses, consumes the scanner, creat
   // user-2 (Bob): only defenses surface — the LEG_CRAMP is not a defense.
   assert.deepEqual(byUser["user-2"].defenses.map((d) => d.type), ["COMPRESSION_SOCKS"]);
   assert.equal(byUser["user-2"].displayName, "Bob");
-  // user-3 (Carol): a Mirror is up.
-  assert.deepEqual(byUser["user-3"].defenses.map((d) => d.type), ["MIRROR"]);
+  // user-3 (Carol): a Mirror AND a Decoy are up.
+  assert.deepEqual(byUser["user-3"].defenses.map((d) => d.type), ["MIRROR", "DECOY"]);
   // Self is never in the scan.
   assert.equal(byUser["user-1"], undefined);
 

@@ -104,7 +104,10 @@ async function startedTwoVTwo(alice, bob, carol, dave, overrides = {}) {
   return race.id;
 }
 
-// Backdate the race to a UTC-midnight start and give members daily step rows.
+// Backdate the race to a UTC-midnight start and give members both the daily
+// aggregate and a time-bounded sample. Deadline settlement deliberately cannot
+// trust a partial historical day's aggregate (it may include post-race steps),
+// so the sample is the authoritative clamped fixture for these team mechanics.
 async function backdateAndWalk(raceId, stepsByUserId, { expire = true } = {}) {
   const now = new Date();
   const startedAt = new Date(
@@ -127,6 +130,15 @@ async function backdateAndWalk(raceId, stepsByUserId, { expire = true } = {}) {
       where: { userId_date: { userId, date } },
       update: { steps },
       create: { userId, steps, date },
+    });
+    await prisma.stepSample.create({
+      data: {
+        userId,
+        periodStart: startedAt,
+        periodEnd: endsAt,
+        steps,
+        sourceName: "healthkit",
+      },
     });
   }
 }

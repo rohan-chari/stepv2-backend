@@ -7,19 +7,28 @@ datasource db {
 }
 
 model User {
-  id                            String               @id @default(uuid())
+  id                            String                          @id @default(uuid())
   // Auth identity is single-provider per user: Apple (iOS) OR Google (Android).
   // Both are nullable+unique so a pure-Google user has no appleId and vice versa.
   // Postgres unique indexes allow multiple NULLs, so many users can share a null
   // on either column. Existing Apple rows are untouched. See ANDROID.md §G1.
-  appleId                       String?              @unique @map("apple_id")
-  googleSub                     String?              @unique @map("google_sub")
+  appleId                       String?                         @unique @map("apple_id")
+  googleSub                     String?                         @unique @map("google_sub")
   email                         String?
   name                          String?
-  displayName                   String?              @unique @map("display_name")
-  profilePhotoUrl               String?              @map("profile_photo_url")
-  profilePhotoKey               String?              @map("profile_photo_key")
-  profilePhotoPromptDismissedAt DateTime?            @map("profile_photo_prompt_dismissed_at")
+  displayName                   String?                         @unique @map("display_name")
+  // Explicit discoverable identity. Provider `name` is intentionally not
+  // repurposed: these fields are written only after the user reviews the
+  // in-product disclosure. All nullable so mixed-version deploys and existing
+  // rows are safe. Completion — not field presence — controls disclosure.
+  firstName                     String?                         @map("first_name")
+  lastName                      String?                         @map("last_name")
+  discoverableNameSearch        String?                         @map("discoverable_name_search")
+  nameSetupOnboardingRequired   Boolean                         @default(false) @map("name_setup_onboarding_required")
+  nameSetupCompletedAt          DateTime?                       @map("name_setup_completed_at")
+  profilePhotoUrl               String?                         @map("profile_photo_url")
+  profilePhotoKey               String?                         @map("profile_photo_key")
+  profilePhotoPromptDismissedAt DateTime?                       @map("profile_photo_prompt_dismissed_at")
   // Home SETUP section: how many times the "you can rename yourself" chip has
   // been shown to this ACCOUNT, and when the user retired it. Previously lived
   // in device-scoped SharedPreferences, which signOut() wipes — so the chip came
@@ -27,61 +36,61 @@ model User {
   // 0 and nullable timestamp, so old clients (which never read or write these)
   // are unaffected, and no backfill is performed (every existing row starts
   // eligible). See docs/home-setup-section-requirements.md §5.
-  renameChipShownCount          Int                  @default(0) @map("rename_chip_shown_count")
-  renameChipDismissedAt         DateTime?            @map("rename_chip_dismissed_at")
+  renameChipShownCount          Int                             @default(0) @map("rename_chip_shown_count")
+  renameChipDismissedAt         DateTime?                       @map("rename_chip_dismissed_at")
   // Deprecated: step goals are no longer part of the product. Kept
   // nullable for back-compat with existing rows. New code must not read
   // or write this field.
-  stepGoal                      Int?                 @map("step_goal")
-  lastStepSyncAt                DateTime?            @map("last_step_sync_at")
-  lastSilentPushSentAt          DateTime?            @map("last_silent_push_sent_at")
-  coins                         Int                  @default(0)
-  lastDailyClaimDate            String?              @map("last_daily_claim_date")
-  dailyStreakDay                Int                  @default(0) @map("daily_streak_day")
+  stepGoal                      Int?                            @map("step_goal")
+  lastStepSyncAt                DateTime?                       @map("last_step_sync_at")
+  lastSilentPushSentAt          DateTime?                       @map("last_silent_push_sent_at")
+  coins                         Int                             @default(0)
+  lastDailyClaimDate            String?                         @map("last_daily_claim_date")
+  dailyStreakDay                Int                             @default(0) @map("daily_streak_day")
   // Consecutive-day login streak (unbounded) driving daily-box rarity odds.
   // Additive: dailyStreakDay keeps the legacy 6-day cycle for old app builds;
   // both claim paths maintain both counters.
-  dailyLoginStreak              Int                  @default(0) @map("daily_login_streak")
-  isReviewAccount               Boolean              @default(false) @map("is_review_account")
+  dailyLoginStreak              Int                             @default(0) @map("daily_login_streak")
+  isReviewAccount               Boolean                         @default(false) @map("is_review_account")
   // Global-leaderboard opt-out. When true the user is hidden from OTHER users'
   // global step leaderboard (top list + rank count); they still appear to
   // friends and still see their own global rank. Additive/back-compat: defaults
   // false so existing rows and old clients (which ignore the field) are
   // unaffected. Mirrors isReviewAccount's column style.
-  hiddenFromLeaderboard         Boolean              @default(false) @map("hidden_from_leaderboard")
+  hiddenFromLeaderboard         Boolean                         @default(false) @map("hidden_from_leaderboard")
   // Auto-join the seeded daily/weekly featured challenges: the renewal cron
   // enrolls opted-in users into each newly created seeded race, and enabling
   // the toggle opts them into the already-pending next race. Additive/back-
   // compat: defaults false. See src/commands/autoJoinFeaturedRaces.js.
-  autoJoinFeaturedRaces         Boolean              @default(false) @map("auto_join_featured_races")
+  autoJoinFeaturedRaces         Boolean                         @default(false) @map("auto_join_featured_races")
   // True once the user has either joined their first race via the onboarding
   // step or explicitly skipped it. Additive/back-compat: defaults false so
   // existing rows and old clients (which ignore the field) are unaffected.
-  firstRaceOnboardingSeen       Boolean              @default(false) @map("first_race_onboarding_seen")
+  firstRaceOnboardingSeen       Boolean                         @default(false) @map("first_race_onboarding_seen")
   // True once the user has either completed or explicitly skipped the tutorial
   // step in onboarding. Gates only the onboarding step UI — the one-time 100-coin
   // tutorial reward is protected independently by the CoinTransaction ledger (see
   // awardCoins reason="tutorial_complete"). Additive/back-compat: defaults false;
   // a data migration backfills existing rows to true so they aren't re-onboarded.
-  tutorialOnboardingSeen        Boolean              @default(false) @map("tutorial_onboarding_seen")
+  tutorialOnboardingSeen        Boolean                         @default(false) @map("tutorial_onboarding_seen")
   // Ranked: denormalized final tier from the most recently settled season, for
   // cheap cross-surface badges (races, leaderboard, profile). Additive/nullable
   // — null means unranked. Set by season settlement; never read by old clients.
-  currentTier                   String?              @map("current_tier")
-  currentDivision               Int?                 @map("current_division")
+  currentTier                   String?                         @map("current_tier")
+  currentDivision               Int?                            @map("current_division")
   // Ranked v2 (weekly cohorts): the user's persistent home tier on the 6-tier
   // ladder (BRONZE..LEGEND). Null = never placed (treated as BRONZE). Additive;
   // old clients never see this column — they keep reading currentTier, which v2
   // settlement writes with a legacy-mapped value (PLATINUM/LEGEND -> DIAMOND).
-  rankedTierV2                  String?              @map("ranked_tier_v2")
-  rankedTierV2Since             DateTime?            @map("ranked_tier_v2_since")
+  rankedTierV2                  String?                         @map("ranked_tier_v2")
+  rankedTierV2Since             DateTime?                       @map("ranked_tier_v2_since")
   // ── Referral attribution (all nullable/additive) ─────────────────────────
   // This user's own shareable invite code (BARA-XXXX), minted lazily on first
   // /referrals/link call. The Referral table is the single source of truth for
   // who referred whom; referredByCode is audit-only and never the dedup key.
   // Old clients never read either column. See REFERRAL_FEATURE_RESEARCH.md §4A.
-  referralCode                  String?              @unique @map("referral_code")
-  referredByCode                String?              @map("referred_by_code")
+  referralCode                  String?                         @unique @map("referral_code")
+  referredByCode                String?                         @map("referred_by_code")
   // ── Team races: per-user client capabilities (TR-706) ─────────────────────
   // The union of every `X-Client-Features` token (e.g. ["team_races"]) ever
   // seen on one of this user's authenticated requests. STICKY: tokens are only
@@ -93,39 +102,42 @@ model User {
   // since before this deploy). clientFeaturesAt stamps the last write.
   // Additive/nullable — old app builds neither send nor read these; existing
   // rows default to an empty array.
-  clientFeatures                String[]             @default([]) @map("client_features")
-  clientFeaturesAt              DateTime?            @map("client_features_at")
+  clientFeatures                String[]                        @default([]) @map("client_features")
+  clientFeaturesAt              DateTime?                       @map("client_features_at")
   // ── Notification reminders (all additive) ─────────────────────────────────
   // The user's last-known IANA timezone, sticky-written from the request-scoped
   // X-Timezone header using the SAME never-on-every-request pattern as
   // clientFeatures/clientFeaturesAt (only written when it changed). Backfilled
   // null; the daily-reward reminder scheduler falls back to America/New_York for
   // a null timezone. First indexed column on this table (@@index below).
-  timezone                      String?              @map("timezone")
+  timezone                      String?                         @map("timezone")
   // Opt-out for the evening daily-reward reminder pushes (§9.1). Absent/never-set
   // reads as true (the default). Old clients never call the preference endpoints
   // and keep the default. Additive/back-compat.
-  dailyRewardRemindersEnabled   Boolean              @default(true) @map("daily_reward_reminders_enabled")
+  dailyRewardRemindersEnabled   Boolean                         @default(true) @map("daily_reward_reminders_enabled")
   // Batch 2026-08-08 item 3: opt-out for the 19:00-local "you have uncollected
   // step-milestone coins" push. Same shape and same rationale as the daily-reward
   // pref above: absent/never-set reads as true, old clients never PATCH it and
   // keep the default. The job itself ships dark behind
   // STEP_MILESTONE_REMINDERS_DISABLED, so defaulting true sends nothing on its own.
-  stepMilestoneRemindersEnabled Boolean              @default(true) @map("step_milestone_reminders_enabled")
+  stepMilestoneRemindersEnabled Boolean                         @default(true) @map("step_milestone_reminders_enabled")
   // Batch 2026-08-08 item 9: admin visibility into the app-version spread.
   // Sticky-written from X-App-Version in requireAuth, but ONLY when the version
   // changed or the stored lastSeenAt is on an earlier UTC day — never per
   // request (the 3e6c827 write-amplification lesson). Written through a
   // dedicated model method that deliberately skips the /auth/me cache DEL, and
   // NEITHER column is served in the /auth/me payload.
-  lastAppVersion                String?              @map("last_app_version")
-  lastSeenAt                    DateTime?            @map("last_seen_at")
-  createdAt                     DateTime             @default(now()) @map("created_at")
+  lastAppVersion                String?                         @map("last_app_version")
+  lastSeenAt                    DateTime?                       @map("last_seen_at")
+  createdAt                     DateTime                        @default(now()) @map("created_at")
   steps                         Step[]
   dailyRewardClaims             DailyRewardClaim[]
   stepMilestoneClaims           StepMilestoneClaim[]
-  sentRequests                  Friendship[]         @relation("sentRequests")
-  receivedRequests              Friendship[]         @relation("receivedRequests")
+  sentRequests                  Friendship[]                    @relation("sentRequests")
+  receivedRequests              Friendship[]                    @relation("receivedRequests")
+  autoLinkSuppressionsAsA       FriendshipAutoLinkSuppression[] @relation("AutoLinkSuppressionA")
+  autoLinkSuppressionsAsB       FriendshipAutoLinkSuppression[] @relation("AutoLinkSuppressionB")
+  friendSearchRateWindow        FriendSearchRateWindow?
 
   challengesAsUserA  ChallengeInstance[] @relation("challengeUserA")
   challengesAsUserB  ChallengeInstance[] @relation("challengeUserB")
@@ -305,6 +317,27 @@ model Friendship {
   @@index([addresseeId, status])
   @@index([requesterId, status])
   @@map("friendships")
+}
+
+model FriendshipAutoLinkSuppression {
+  userAId   String   @map("user_a_id")
+  userBId   String   @map("user_b_id")
+  reason    String   @default("REMOVED")
+  createdAt DateTime @default(now()) @map("created_at")
+  userA     User     @relation("AutoLinkSuppressionA", fields: [userAId], references: [id], onDelete: Cascade)
+  userB     User     @relation("AutoLinkSuppressionB", fields: [userBId], references: [id], onDelete: Cascade)
+
+  @@id([userAId, userBId])
+  @@map("friendship_auto_link_suppressions")
+}
+
+model FriendSearchRateWindow {
+  userId      String   @id @map("user_id")
+  windowStart DateTime @map("window_start")
+  count       Int
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("friend_search_rate_windows")
 }
 
 model Step {

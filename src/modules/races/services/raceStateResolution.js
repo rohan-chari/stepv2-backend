@@ -73,6 +73,7 @@ async function calculateBaseAdjusted({
   stepsModel,
   stepSampleModel,
   now,
+  raceEndsAt = null,
 }) {
   const effectiveStart = getEffectiveStart(participant, raceStartedAt);
   const startParts = getTimeZoneParts(effectiveStart, timeZone);
@@ -81,11 +82,17 @@ async function calculateBaseAdjusted({
     startParts.month,
     startParts.day
   );
-  const nowParts = getTimeZoneParts(now, timeZone);
+  const wallNowMs = new Date(now).getTime();
+  const raceEndMs = raceEndsAt == null
+    ? Number.POSITIVE_INFINITY
+    : new Date(raceEndsAt).getTime();
+  const deadlinePassed = Number.isFinite(raceEndMs) && raceEndMs <= wallNowMs;
+  const scoringNow = new Date(deadlinePassed ? raceEndMs : wallNowMs);
+  const nowParts = getTimeZoneParts(scoringNow, timeZone);
   const today = formatDateString(nowParts.year, nowParts.month, nowParts.day);
   const dayAfterStartDate = addDaysToDateString(startDate, 1);
   const dayAfterParsed = parseDateString(dayAfterStartDate);
-  const startDayWindowEnd = zonedDateTimeToUtc(
+  const nextStartDayMidnight = zonedDateTimeToUtc(
     {
       year: dayAfterParsed.year,
       month: dayAfterParsed.month,
@@ -95,6 +102,14 @@ async function calculateBaseAdjusted({
       second: 0,
     },
     timeZone
+  );
+  // Once the deadline has passed, keep the start-day slice inside the race
+  // window. Active races deliberately keep reading through midnight because an
+  // in-progress HealthKit bucket is stamped with a future periodEnd but its
+  // entire `steps` value represents walking already observed by the client.
+  const settledCutoff = deadlinePassed ? raceEndMs : Number.POSITIVE_INFINITY;
+  const startDayWindowEnd = new Date(
+    Math.min(nextStartDayMidnight.getTime(), settledCutoff)
   );
 
   // When the race begins EXACTLY at local midnight (midnight-aligned seeded
@@ -122,7 +137,9 @@ async function calculateBaseAdjusted({
     startDayWindowEnd
   );
 
-  if (startsAtLocalMidnight) {
+  const startDayIsCompleteAtCutoff =
+    !deadlinePassed || nextStartDayMidnight.getTime() <= raceEndMs;
+  if (startsAtLocalMidnight && startDayIsCompleteAtCutoff) {
     const startDayRow = await stepsModel.findByUserIdAndDate(
       participant.userId,
       startDate
@@ -139,7 +156,8 @@ async function calculateBaseAdjusted({
     timeZone,
     stepsModel,
     stepSampleModel,
-    now,
+    now: scoringNow,
+    allowPartialDayDaily: !deadlinePassed,
   });
 
   // `hasSampleData` decides whether effect scoring uses the precise segment walk
@@ -157,7 +175,7 @@ async function calculateBaseAdjusted({
     hasSampleData = await stepSampleModel.hasAnyInWindow(
       participant.userId,
       effectiveStart,
-      now
+      scoringNow
     );
   }
 
@@ -740,6 +758,7 @@ function buildResolveRaceState(dependencies = {}) {
               stepsModel,
               stepSampleModel,
               now: currentTime,
+              raceEndsAt: race.endsAt,
             });
 
           const { total, leechTransfers } =
@@ -785,6 +804,7 @@ function buildResolveRaceState(dependencies = {}) {
                 stepsModel,
                 stepSampleModel,
                 now: currentTime,
+                raceEndsAt: race.endsAt,
               }));
             }
             const boxSteps = computeBoxEffectiveSteps({

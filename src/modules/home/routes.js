@@ -1,5 +1,6 @@
 const { Router } = require("express");
 const { buildRequireAuth } = require("../../middleware/requireAuth");
+const { asyncHandler } = require("../../shared/http/asyncHandler");
 const {
   getHomeRaceCard: defaultGetHomeRaceCard,
 } = require("./getHomeRaceCard");
@@ -16,6 +17,9 @@ const defaultAdRewardsConfig = require("../economy/adRewards");
 const { appSettings } = require("../../shared/config/appSettings");
 const { getNextRaceHome } = require("../races/queries/getNextRaceHome");
 const { supportsNextRace } = require("../races/services/nextRacePolicy");
+const {
+  getSuggestedRaces: defaultGetSuggestedRaces,
+} = require("./queries/getSuggestedRaces");
 
 function createHomeRouter(dependencies = {}) {
   const router = Router();
@@ -31,8 +35,29 @@ function createHomeRouter(dependencies = {}) {
     dependencies.getAdExtraSpinStatus || defaultGetAdExtraSpinStatus;
   const adRewardsConfig = dependencies.adRewardsConfig || defaultAdRewardsConfig;
   const getNextRaceHomeFn = dependencies.getNextRaceHome || getNextRaceHome;
+  const getSuggestedRaces =
+    dependencies.getSuggestedRaces ||
+    (dependencies.getFeaturedRaces ||
+    dependencies.getPublicRaces ||
+    dependencies.getPublicTournaments ||
+    dependencies.logger
+      ? require("./queries/getSuggestedRaces").buildGetSuggestedRaces(dependencies)
+      : defaultGetSuggestedRaces);
 
   router.use(requireAuth);
+
+  router.get(
+    "/suggested-races",
+    asyncHandler(async (req, res) => {
+      const result = await getSuggestedRaces({
+        userId: req.user.id,
+        supportsTeamRaces: req.clientFeatures?.has("team_races") ?? false,
+        supportsTournaments:
+          req.clientFeatures?.has("tournaments") ?? false,
+      });
+      res.json(result);
+    })
+  );
 
   router.get("/race-card", async (req, res) => {
     try {

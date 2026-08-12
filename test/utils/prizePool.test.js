@@ -61,13 +61,13 @@ test("a solo field mints nothing", () => {
   assert.equal(computePrizePool({ playerCount: null, durationDays: 7 }), 0);
 });
 
-test("the race cap clamps a big field", () => {
+test("the race cap allows the legal 100-player maximum and clamps oversized fields", () => {
   assert.equal(PRIZE_COIN_UNIT, 20);
-  assert.equal(PRIZE_POOL_MAX, 3200);
-  // 100 players x 14 days would be 16,000.
-  assert.equal(computePrizePool({ playerCount: 100, durationDays: 14 }), 3200);
-  // 300-player Daily: 300 x 1 x 20 = 6,000 -> clamped.
-  assert.equal(computePrizePool({ playerCount: 300, durationDays: 1 }), 3200);
+  assert.equal(PRIZE_POOL_MAX, 16000);
+  // 100 players x 14 days reaches the configured legal-field maximum.
+  assert.equal(computePrizePool({ playerCount: 100, durationDays: 14 }), 16000);
+  // A hypothetical oversized field is still clamped.
+  assert.equal(computePrizePool({ playerCount: 300, durationDays: 14 }), 16000);
 });
 
 test("tournaments pass their own tighter ceiling", () => {

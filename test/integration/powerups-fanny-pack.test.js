@@ -44,7 +44,7 @@ async function makeFriends(a, b) {
 async function createActiveRace(alice, bob, opts = {}) {
   const createRes = await request(server.baseUrl, "POST", "/races", {
     body: {
-      name: opts.name || "Fanny Pack Test",
+      name: opts.name || "Extra Pocket Test",
       targetSteps: opts.targetSteps || 200000,
       maxDurationDays: 7,
       powerupsEnabled: true,

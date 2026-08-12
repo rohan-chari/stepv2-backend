@@ -150,6 +150,109 @@ const Tournament = {
       take: 25,
     });
   },
+
+  // Home Suggested Races: featured and user-created candidates share one
+  // bounded Postgres read. Membership, capacity, active-seed, same-seed alive,
+  // review, and public predicates all precede the combined LIMIT 4. Featured
+  // rows sort first; each group is newest-first with id as the stable tie break.
+  async findPublicSuggestions({ userId, limit = 4 }) {
+    return prisma.$queryRaw`
+      WITH eligible AS (
+        SELECT
+          t.id,
+          t.name,
+          t.status::text AS status,
+          t.bracket_size AS "bracketSize",
+          t.matchup_duration_days AS "matchupDurationDays",
+          t.buy_in_amount AS "buyInAmount",
+          t.pot_coins AS "potCoins",
+          t.funded_prize AS "fundedPrize",
+          t.prize_pool_coins AS "prizePoolCoins",
+          t.powerups_enabled AS "powerupsEnabled",
+          t.powerup_step_interval AS "powerupStepInterval",
+          t.is_public AS "isPublic",
+          t.current_round AS "currentRound",
+          t.total_rounds AS "totalRounds",
+          t.creator_id AS "creatorId",
+          t.seed_id AS "seedId",
+          t.created_at AS "createdAt",
+          t.started_at AS "startedAt",
+          t.completed_at AS "completedAt",
+          seed.kind AS "seedKind",
+          seed.champion_prize_coins AS "championPrizeCoins",
+          COALESCE(parts.accepted_count, 0)::int AS "acceptedCount",
+          COALESCE(parts.rows, '[]'::jsonb) AS participants,
+          CASE WHEN t.seed_id IS NOT NULL THEN 0 ELSE 1 END AS category_rank,
+          CASE
+            WHEN t.seed_id IS NOT NULL THEN
+              ROW_NUMBER() OVER (
+                PARTITION BY t.seed_id
+                ORDER BY t.created_at DESC, t.id ASC
+              )
+            ELSE 1
+          END AS seed_rank
+        FROM tournaments t
+        LEFT JOIN tournament_seeds seed ON seed.id = t.seed_id
+        LEFT JOIN users creator ON creator.id = t.creator_id
+        LEFT JOIN LATERAL (
+          SELECT
+            COUNT(*) FILTER (WHERE tp.status = 'accepted'::"RaceParticipantStatus") AS accepted_count,
+            JSONB_AGG(
+              JSONB_BUILD_OBJECT(
+                'userId', tp.user_id,
+                'status', UPPER(tp.status::text),
+                'eliminatedInRound', tp.eliminated_in_round,
+                'joinedAt', tp.joined_at
+              )
+              ORDER BY tp.joined_at ASC
+            ) AS rows
+          FROM tournament_participants tp
+          WHERE tp.tournament_id = t.id
+        ) parts ON TRUE
+        WHERE t.status = 'pending'::"TournamentStatus"
+          AND (
+            (t.seed_id IS NOT NULL AND seed.active = TRUE)
+            OR (
+              t.seed_id IS NULL
+              AND t.is_public = TRUE
+              AND (t.creator_id IS NULL OR creator.is_review_account = FALSE)
+            )
+          )
+          AND COALESCE(parts.accepted_count, 0) < t.bracket_size
+          AND NOT EXISTS (
+            SELECT 1
+            FROM tournament_participants mine
+            WHERE mine.tournament_id = t.id
+              AND mine.user_id = ${userId}
+              AND mine.status <> 'declined'::"RaceParticipantStatus"
+          )
+          AND (
+            t.seed_id IS NULL
+            OR NOT EXISTS (
+              SELECT 1
+              FROM tournament_participants alive
+              JOIN tournaments alive_t ON alive_t.id = alive.tournament_id
+              WHERE alive.user_id = ${userId}
+                AND alive.status = 'accepted'::"RaceParticipantStatus"
+                AND alive.eliminated_in_round IS NULL
+                AND alive_t.seed_id = t.seed_id
+                AND alive_t.status IN (
+                  'pending'::"TournamentStatus",
+                  'active'::"TournamentStatus"
+                )
+            )
+          )
+      ), ranked AS (
+        SELECT *
+        FROM eligible
+        WHERE seed_rank = 1
+      )
+      SELECT *
+      FROM ranked
+      ORDER BY category_rank ASC, "createdAt" DESC, id ASC
+      LIMIT ${limit}
+    `;
+  },
 };
 
 module.exports = { Tournament, tournamentInclude, summaryInclude };

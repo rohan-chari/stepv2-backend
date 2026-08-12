@@ -153,6 +153,19 @@ function buildGetTournamentsForUser(dependencies = {}) {
 
     const summaries = rows.map((t) => {
       const summary = serializeTournamentSummary(t, userId);
+      // Invite context only. These fields are intentionally not part of the
+      // shared tournament serializer because frozen public/create/detail
+      // response shapes must remain unchanged.
+      if (summary.myStatus === "INVITED") {
+        summary.createdAt = t.createdAt ?? null;
+        summary.creator = t.creator
+          ? {
+              id: t.creator.id,
+              displayName: t.creator.displayName ?? null,
+              profilePhotoUrl: t.creator.profilePhotoUrl ?? null,
+            }
+          : null;
+      }
       summary.myCurrentMatchRaceId = matchByTournament.get(t.id) || null;
       // Additive: an older client ignores this object; a newer client talking to
       // an older backend sees it absent and falls back to bracket navigation.

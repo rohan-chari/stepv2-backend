@@ -417,8 +417,8 @@ test("Stealth Mode — stealthed Bob shows ??? to others, normal to self", async
   const stealthEffect = {
     id: "stealth-1", type: "STEALTH_MODE", status: "ACTIVE",
     targetParticipantId: RP_BOB, targetUserId: BOB, sourceUserId: BOB,
-    startsAt: new Date("2026-03-28T12:00:00.000Z"),
-    expiresAt: new Date("2026-03-28T16:00:00.000Z"),
+    startsAt: new Date("2026-03-31T12:00:00.000Z"),
+    expiresAt: new Date("2026-03-31T20:00:00.000Z"),
   };
 
   // Viewing as Alice — Bob should be stealthed

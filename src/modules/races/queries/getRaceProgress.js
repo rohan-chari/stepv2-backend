@@ -284,7 +284,13 @@ function buildGetRaceProgress(deps = {}) {
   // With the flag ON all three are false and this function issues ZERO writes.
   async function computeSharedState({ race, raceId, scoringTimeZone, persist }) {
     const participantStepsMap = {};
-    const nowParts = getTimeZoneParts(now(), scoringTimeZone);
+    const requestNow = now();
+    const raceEndMs = race.endsAt == null
+      ? Number.POSITIVE_INFINITY
+      : new Date(race.endsAt).getTime();
+    const deadlinePassed = Number.isFinite(raceEndMs) && raceEndMs <= requestNow.getTime();
+    const scoringNow = new Date(deadlinePassed ? raceEndMs : requestNow.getTime());
+    const nowParts = getTimeZoneParts(scoringNow, scoringTimeZone);
     const today = formatDateString(nowParts.year, nowParts.month, nowParts.day);
     const acceptedParticipants = race.participants.filter(
       (p) => p.status === "ACCEPTED"
@@ -306,7 +312,7 @@ function buildGetRaceProgress(deps = {}) {
         // StepSample window: from race start to end of the local start day
         // (midnight of the next day in the user's timezone, converted to UTC).
         const dayAfterParsed = parseDateString(dayAfterStartDate);
-        const startDayWindowEnd = zonedDateTimeToUtc({
+        const nextStartDayMidnight = zonedDateTimeToUtc({
           year: dayAfterParsed.year,
           month: dayAfterParsed.month,
           day: dayAfterParsed.day,
@@ -314,6 +320,15 @@ function buildGetRaceProgress(deps = {}) {
           minute: 0,
           second: 0,
         }, scoringTimeZone);
+        // Once the race deadline has passed, keep the start-day slice inside
+        // that deadline. An active race deliberately reads through midnight so
+        // an open HealthKit bucket (future periodEnd, already-observed steps)
+        // is counted in full rather than linearly truncated at request time.
+        const settledCutoff = deadlinePassed ? raceEndMs : Number.POSITIVE_INFINITY;
+        const startDayWindowEnd = new Date(Math.min(
+          nextStartDayMidnight.getTime(),
+          settledCutoff
+        ));
 
         // Start-of-local-day instant in the scoring tz. When the race begins
         // EXACTLY at local midnight the start day is a FULL day, so the
@@ -333,7 +348,9 @@ function buildGetRaceProgress(deps = {}) {
         const startDaySamples = await stepSampleModel.sumStepsInWindow(
           p.userId, effectiveStart, startDayWindowEnd
         );
-        if (startsAtLocalMidnight) {
+        const startDayIsCompleteAtCutoff =
+          !deadlinePassed || nextStartDayMidnight.getTime() <= raceEndMs;
+        if (startsAtLocalMidnight && startDayIsCompleteAtCutoff) {
           const startDayRow = await stepsModel.findByUserIdAndDate(p.userId, startDate);
           startDaySteps = Math.max(startDaySamples, startDayRow?.steps ?? 0);
         } else if (startDaySamples > 0) {
@@ -349,7 +366,8 @@ function buildGetRaceProgress(deps = {}) {
           timeZone: scoringTimeZone,
           stepsModel,
           stepSampleModel,
-          now: now(),
+          now: scoringNow,
+          allowPartialDayDaily: !deadlinePassed,
         });
 
         const baseAdjusted = Math.max(0, startDaySteps + subsequentSteps);
@@ -358,7 +376,7 @@ function buildGetRaceProgress(deps = {}) {
           hasSampleData = await stepSampleModel.hasAnyInWindow(
             p.userId,
             effectiveStart,
-            now()
+            scoringNow
           );
         }
         participantStepsMap[p.id] = baseAdjusted;
@@ -377,12 +395,12 @@ function buildGetRaceProgress(deps = {}) {
     let globalEvents = [];
     try {
       globalEvents =
-        (await globalStepEventModel.findActiveInRange(raceStartedAt, now())) ||
+        (await globalStepEventModel.findActiveInRange(raceStartedAt, scoringNow)) ||
         [];
     } catch {
       globalEvents = [];
     }
-    const globalContext = { globalEvents, now: now() };
+    const globalContext = { globalEvents, now: scoringNow };
 
     // Second pass, phase A: per-participant PRE-LEECH total + the leeches
     // targeting each participant.
@@ -434,13 +452,13 @@ function buildGetRaceProgress(deps = {}) {
         }
 
         const allEffects = [...legCramps, ...runnersHighs, ...wrongTurns, ...campfires, ...rainstorms, ...leeches, ...wave5Effects];
-        const { frozenSteps, buffedSteps, reversedSteps, globalBoostedSteps, leechTransfers } = await computeEffectModifiers(allEffects, baseAdjusted, participant.userId, stepSampleModel, hasSampleData, globalContext, now());
+        const { frozenSteps, buffedSteps, reversedSteps, globalBoostedSteps, leechTransfers } = await computeEffectModifiers(allEffects, baseAdjusted, participant.userId, stepSampleModel, hasSampleData, globalContext, scoringNow);
 
         const preLeechTotal = Math.max(0, baseAdjusted - frozenSteps + buffedSteps - 2 * reversedSteps + (globalBoostedSteps || 0) + (race.powerupsEnabled ? (participant.bonusSteps || 0) : 0));
 
         // §6a — the SIGNED effective multiplier right now.
         const currentMultiplierRaw = race.powerupsEnabled
-          ? signedMultiplierForEffects(allEffects, now().getTime())
+          ? signedMultiplierForEffects(allEffects, scoringNow.getTime())
           : 1;
 
         return { participant, frozen: false, preLeechTotal, leechTransfers, currentMultiplierRaw };
@@ -456,7 +474,7 @@ function buildGetRaceProgress(deps = {}) {
           participants: race.participants,
           raceActiveEffectModel,
           stepSampleModel,
-          now: now(),
+          now: scoringNow,
           globalEvents,
         })
       : [];
@@ -527,7 +545,7 @@ function buildGetRaceProgress(deps = {}) {
 
     // §6a — per-participant CURRENT MULTIPLIER, with any active global 2x event
     // folded into the MAGNITUDE (sign preserved).
-    const nowTime = now();
+    const nowTime = scoringNow;
     const nowMsForMult = nowTime.getTime();
     const activeEventForMult = globalEvents.find((ev) => {
       const s = new Date(ev.startsAt).getTime();
@@ -554,7 +572,7 @@ function buildGetRaceProgress(deps = {}) {
             currentMultiplier: multiplierByParticipantId.get(p.id) ?? 1,
             race,
             otherParticipants: activeForAlert,
-            now,
+            now: () => scoringNow,
           });
         } catch (err) {
           console.error("high-multiplier alert eval failed:", err);
@@ -582,7 +600,7 @@ function buildGetRaceProgress(deps = {}) {
     const teams = race.isTeamRace ? buildTeamsBlock(race, stepTotals) : null;
 
     // Additive: the currently-active global step event, if any.
-    const nowMsForEvent = now().getTime();
+    const nowMsForEvent = scoringNow.getTime();
     const activeEvent = globalEvents.find((ev) => {
       const startMs = new Date(ev.startsAt).getTime();
       const endMs = new Date(ev.endsAt).getTime();
@@ -820,6 +838,7 @@ function buildGetRaceProgress(deps = {}) {
           stepsModel,
           stepSampleModel,
           now: now(),
+          raceEndsAt: race.endsAt,
         }));
       }
       const myBoxEffectiveSteps = computeBoxEffectiveSteps({

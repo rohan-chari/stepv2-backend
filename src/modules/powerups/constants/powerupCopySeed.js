@@ -288,7 +288,7 @@ const POWERUP_COPY_SEED = [
     powerupType: "DEFENSE_SCAN",
     name: "X-Ray",
     description:
-      "Instantly reveal every opponent's active defenses (shields and mirrors)",
+      "Instantly reveal every opponent's active defenses (shields, mirrors, and decoys)",
     shortDescription: null,
     upgradeTierLabels: [],
   },

@@ -2,9 +2,11 @@ const { Router } = require("express");
 const { buildRequireAuth } = require("../../../middleware/requireAuth");
 const {
   sendFriendRequest: defaultSendFriendRequest,
+  buildSendFriendRequest,
 } = require("../commands/sendFriendRequest");
 const {
   respondToFriendRequest: defaultRespondToFriendRequest,
+  buildRespondToFriendRequest,
 } = require("../commands/respondToFriendRequest");
 const {
   getFriendsList: defaultGetFriendsList,
@@ -19,8 +21,14 @@ const {
 } = require("../commands/updateRelationshipType");
 const {
   removeFriend: defaultRemoveFriend,
+  buildRemoveFriend,
 } = require("../commands/removeFriend");
 const { stepSyncPushService } = require("../../../shared/push/stepSyncPush");
+const {
+  searchFriendsByIdentity: defaultSearchFriendsByIdentity,
+  SearchRateLimitError,
+} = require("../services/searchFriendsByIdentity");
+const { asyncHandler } = require("../../../shared/http/asyncHandler");
 
 function todayDateString() {
   return new Date().toISOString().slice(0, 10);
@@ -32,18 +40,30 @@ function createFriendsRouter(dependencies = {}) {
     dependencies.requireAuth || buildRequireAuth(dependencies);
   const searchUsers =
     dependencies.searchUsersByDisplayName || defaultSearchUsersByDisplayName;
+  const searchByIdentity =
+    dependencies.searchFriendsByIdentity || defaultSearchFriendsByIdentity;
   const getFriends = dependencies.getFriendsList || defaultGetFriendsList;
   const getPending =
     dependencies.getPendingRequests || defaultGetPendingRequests;
   const sendRequest =
-    dependencies.sendFriendRequest || defaultSendFriendRequest;
+    dependencies.sendFriendRequest ||
+    (dependencies.prisma || dependencies.beforeFriendshipWrite
+      ? buildSendFriendRequest(dependencies)
+      : defaultSendFriendRequest);
   const respondToRequest =
-    dependencies.respondToFriendRequest || defaultRespondToFriendRequest;
+    dependencies.respondToFriendRequest ||
+    (dependencies.prisma || dependencies.beforeAutoLinkSuppressionWrite
+      ? buildRespondToFriendRequest(dependencies)
+      : defaultRespondToFriendRequest);
   const getFriendsWithSteps =
     dependencies.getFriendsWithSteps || defaultGetFriendsWithSteps;
   const updateRelationType =
     dependencies.updateRelationshipType || defaultUpdateRelationshipType;
-  const removeFriend = dependencies.removeFriend || defaultRemoveFriend;
+  const removeFriend =
+    dependencies.removeFriend ||
+    (dependencies.prisma || dependencies.beforeAutoLinkSuppressionWrite
+      ? buildRemoveFriend(dependencies)
+      : defaultRemoveFriend);
   const requestStepSyncForUsers =
     dependencies.requestStepSyncForUsers ||
     stepSyncPushService.requestStepSyncForUsers;
@@ -67,6 +87,26 @@ function createFriendsRouter(dependencies = {}) {
       res.status(500).json({ error: "Internal server error" });
     }
   });
+
+  // POST keeps real-name queries out of access-log URLs. The legacy GET above
+  // remains display-name-only and byte-compatible for frozen clients.
+  router.post(
+    "/search",
+    asyncHandler(async (req, res) => {
+      try {
+        const users = await searchByIdentity({
+          userId: req.user.id,
+          q: req.body && req.body.q,
+        });
+        res.json({ users });
+      } catch (error) {
+        if (error instanceof SearchRateLimitError) {
+          res.set("Retry-After", String(error.retryAfter));
+        }
+        throw error;
+      }
+    })
+  );
 
   // GET /friends/steps?date=YYYY-MM-DD
   router.get("/steps", async (req, res) => {

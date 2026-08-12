@@ -9,6 +9,10 @@ const {
 } = require("../racePrizePool");
 const { buildTeamsBlockFromParticipants } = require("../teamRaces");
 const { compareParticipantsForPlacement } = require("../placementOrder");
+const {
+  collectRaceIllusions,
+  isStealthedForViewer,
+} = require("../services/raceIllusions");
 
 function getActivePlacement(participants, userId) {
   const acceptedParticipants = participants
@@ -19,6 +23,45 @@ function getActivePlacement(participants, userId) {
     (participant) => participant.userId === userId
   );
   return index >= 0 ? index + 1 : null;
+}
+
+function getFirstPlaceRacer(
+  participants,
+  viewerUserId,
+  leaderUser,
+  activeEffects = [],
+  powerupsEnabled = false,
+  supportsCharacters = false,
+  releaseChannel = "prod",
+) {
+  const leader = participants
+    .filter((participant) => participant.status === "ACCEPTED")
+    .sort(compareParticipantsForPlacement)[0];
+  if (!leader) return null;
+  const illusions = powerupsEnabled
+    ? collectRaceIllusions(activeEffects, viewerUserId)
+    : { stealthedUserIds: new Set(), viewerIsDetoured: false };
+  const hidden =
+    illusions.viewerIsDetoured ||
+    isStealthedForViewer(leader.userId, {
+      stealthedUserIds: illusions.stealthedUserIds,
+      viewerUserId,
+      finished: leader.finishedAt != null,
+    });
+  return {
+    // Unlike the full leaderboard, this object sits in a position that itself
+    // means "first". Withholding the id too prevents the client from tinting a
+    // masked avatar as "me" and thereby revealing the viewer's hidden rank.
+    userId: hidden ? null : leader.userId,
+    displayName: hidden ? "???" : (leaderUser?.displayName ?? null),
+    ...(hidden
+      ? { animal: null, accessories: [] }
+      : characterPresentation(
+          leaderUser,
+          supportsCharacters,
+          releaseChannel,
+        )),
+  };
 }
 
 // Wave-5 effect types a non-powerups5 client cannot render — WITHHELD from
@@ -101,17 +144,37 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
     (race) => !race.tournamentId && !(race.isTeamRace && !supportsTeamRaces)
   );
 
+  const leaderUserIds = visible
+    .map(
+      (race) =>
+        race.participants
+          .filter((participant) => participant.status === "ACCEPTED")
+          .sort(compareParticipantsForPlacement)[0]?.userId,
+    )
+    .filter(Boolean);
+  const leaderUsers =
+    typeof RaceParticipant.findPresentationsByUserIds === "function"
+      ? await RaceParticipant.findPresentationsByUserIds(leaderUserIds)
+      : [];
+  const leaderUserById = new Map(leaderUsers.map((user) => [user.id, user]));
+
   // Prefetch the viewer's Detour state + slot/queued inventory for ALL relevant
   // participants in TWO bulk queries instead of three per active powerup race
   // (Phase B2/B3). Query count is now independent of the user's active
   // powerup-race count — no DB await runs inside the serialization loop below.
   const viewerParticipantIds = [];
+  const effectParticipantIds = [];
   const myParticipantByRace = new Map();
   for (const race of visible) {
     const mine = race.participants.find((p) => p.userId === userId);
     myParticipantByRace.set(race.id, mine || null);
     if (race.status === "ACTIVE" && race.powerupsEnabled && mine) {
       viewerParticipantIds.push(mine.id);
+      for (const participant of race.participants) {
+        if (participant.status === "ACCEPTED") {
+          effectParticipantIds.push(participant.id);
+        }
+      }
     }
   }
 
@@ -120,6 +183,7 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
   // (createdAt-asc). Feeds BOTH the Detour mask (filter DETOUR_SIGN) and the
   // additive myActiveEffects summary field, derived from ONE bulk query.
   const effectsByParticipant = new Map();
+  const effectsByRace = new Map();
   const inventoryByParticipant = new Map();
   // Prefer the all-types bulk effect query (production + full fakes); fall back
   // to the per-type Detour bulk query so the query-count fake that only pins the
@@ -136,7 +200,7 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
     // Production path: exactly two queries, independent of race count.
     const [effectRows, inventoryRows] = await Promise.all([
       hasBulkAllEffects
-        ? RaceActiveEffect.findActiveForParticipants(viewerParticipantIds)
+        ? RaceActiveEffect.findActiveForParticipants(effectParticipantIds)
         : RaceActiveEffect.findActiveByTypeForParticipants(viewerParticipantIds, "DETOUR_SIGN"),
       RacePowerup.findInventoryForParticipants(viewerParticipantIds, [
         "HELD",
@@ -150,6 +214,9 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
         let list = effectsByParticipant.get(e.targetParticipantId);
         if (!list) effectsByParticipant.set(e.targetParticipantId, (list = []));
         list.push(e);
+        let raceList = effectsByRace.get(e.raceId);
+        if (!raceList) effectsByRace.set(e.raceId, (raceList = []));
+        raceList.push(e);
       }
     }
     for (const row of inventoryRows) {
@@ -297,6 +364,22 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
       creator: race.creator,
       winner: race.winner,
       participantCount: acceptedCount,
+      // Additive identity-only summary for the leading portrait on new app
+      // builds. It follows the exact persisted ordering used by myPlacement;
+      // old clients ignore it and Redis availability cannot affect the shape.
+      leader: getFirstPlaceRacer(
+        race.participants,
+        userId,
+        leaderUserById.get(
+          race.participants
+            .filter((participant) => participant.status === "ACCEPTED")
+            .sort(compareParticipantsForPlacement)[0]?.userId,
+        ),
+        effectsByRace.get(race.id) || [],
+        race.status === "ACTIVE" && race.powerupsEnabled,
+        supportsCharacters,
+        releaseChannel,
+      ),
       myStatus: myParticipant?.status || null,
       myPlacement,
       myPlacementHidden,
@@ -312,6 +395,8 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
       // this defensively (int? ?? 10) so they show a finite figure but never crash.
       maxParticipants: race.maxParticipants ?? null,
       createdAt: race.createdAt,
+      scheduledStartAt: race.scheduledStartAt ?? null,
+      myInviteExpiresAt: myParticipant?.inviteExpiresAt ?? null,
       creationSource: race.creationSource ?? null,
       startPolicy: race.startPolicy ?? null,
       // ── Team races (TR-806/807) — additive; old clients ignore them and
