@@ -32,6 +32,27 @@ const QUEUE_LAG_ALARM_MS = 30 * 1000;
 // over from the v1 scheduler, which src/index.js no longer starts.
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 
+// Starts a bounded number of independently-claimed jobs at once. Every
+// [processOne] claim uses `FOR UPDATE SKIP LOCKED` and the later fenced write is
+// race-keyed, so separate lanes can never write the same race concurrently.
+// Keeping this helper small and pure makes the scheduler's actual parallelism
+// directly testable without mocking the worker's settlement machinery.
+async function runBoundedRaceResolutionJobs(concurrency, processOne) {
+  const lanes = Math.min(2, Math.max(1, Number(concurrency) || 1));
+  // Do not reject early: the scheduler clears its in-flight guard when tick()
+  // settles. An early rejection while a sibling is still resolving would let
+  // the next 250ms tick exceed the lane cap. Surface the error only once every
+  // lane has settled, so the scheduler stays closed over all active work.
+  const settled = await Promise.allSettled(
+    Array.from({ length: lanes }, () => processOne())
+  );
+  const failure = settled.find((result) => result.status === "rejected");
+  if (failure) throw failure.reason;
+  return settled.filter(
+    (result) => result.status === "fulfilled" && result.value
+  ).length;
+}
+
 // §5a item 1 "worker handoff": the v2 worker must not claim while an OLD-binary
 // worker could still be draining the per-user table during a `pm2 reload`
 // overlap. 60s > the old worker's 30s lease + the reload window. Env-tunable so
@@ -356,13 +377,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
       2,
       Math.max(1, Number(process.env.ASYNC_RACE_RESOLUTION_CONCURRENCY) || 1)
     );
-    let processed = 0;
-    for (let i = 0; i < concurrency; i++) {
-      const job = await processOne();
-      if (!job) break;
-      processed += 1;
-    }
-    return processed;
+    return runBoundedRaceResolutionJobs(concurrency, processOne);
   }
 
   async function logQueueLag() {
@@ -428,6 +443,7 @@ module.exports = {
   scheduleRaceResolutionWorkerV2,
   FenceLostError,
   createWriteCapture,
+  runBoundedRaceResolutionJobs,
   quietPeriodMs,
   POLL_INTERVAL_MS,
 };
