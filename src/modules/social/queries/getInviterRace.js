@@ -12,9 +12,13 @@ const { prisma } = require("../../../db");
 //   * A race the caller has ALREADY joined is still returned, flagged
 //     `alreadyJoined: true`, so the UI can say "you're both in this one".
 //
-// Selection rule: the inviter is an ACCEPTED participant, status ACTIVE or
-// PENDING, not a tournament matchup, not at capacity. ACTIVE beats PENDING,
-// then most recent startedAt.
+// Selection rule: a still-joinable Referral.sourceRaceId wins first so a
+// frozen app that retained referral attribution but lost the install-time race
+// token still reaches the race that was actually shared. Otherwise choose only
+// a public, human-created race where the inviter is ACCEPTED: ACTIVE beats
+// PENDING, then most recent startedAt. Seeded/private/tournament races are not
+// useful fallbacks because the caller either already has the seeded challenges
+// or cannot join a private race through this public-id handoff.
 function buildGetInviterRace(dependencies = {}) {
   const db = dependencies.prisma || prisma;
 
@@ -24,7 +28,7 @@ function buildGetInviterRace(dependencies = {}) {
 
     const referral = await db.referral.findUnique({
       where: { refereeId: userId },
-      select: { referrerId: true },
+      select: { referrerId: true, sourceRaceId: true },
     });
     // referrerId is nullable (SetNull when the referrer deletes their account).
     if (!referral || !referral.referrerId) return empty;
@@ -37,6 +41,9 @@ function buildGetInviterRace(dependencies = {}) {
 
     const candidates = await db.race.findMany({
       where: {
+        isPublic: true,
+        creatorId: { not: null },
+        seedId: null,
         status: { in: ["ACTIVE", "PENDING"] },
         // Tournament matchup races are managed solely by the bracket engine and
         // are filtered out of every other race listing; they are not joinable.
@@ -58,12 +65,21 @@ function buildGetInviterRace(dependencies = {}) {
       orderBy: [{ startedAt: "desc" }],
     });
 
+    // Exact shared-race provenance wins before the generic ranking. This is the
+    // compatibility path for App Store builds that can recover the referral via
+    // IP fallback but cannot carry a race token across installation.
+    //
     // ACTIVE-before-PENDING is done HERE, not in orderBy. `status: "asc"` sorts
     // by the Postgres enum's DECLARATION order (pending, active, completed,
     // cancelled) — not alphabetically by the mapped label — so ordering on it
     // would put PENDING first, which is the opposite of the rule. Verified by
     // the ordering test in test/integration/onboarding-revamp.test.js.
     const ordered = [...candidates].sort((a, b) => {
+      const aIsSource =
+        referral.sourceRaceId != null && a.id === referral.sourceRaceId;
+      const bIsSource =
+        referral.sourceRaceId != null && b.id === referral.sourceRaceId;
+      if (aIsSource !== bIsSource) return aIsSource ? -1 : 1;
       if (a.status !== b.status) return a.status === "ACTIVE" ? -1 : 1;
       const aStarted = a.startedAt ? a.startedAt.getTime() : -Infinity;
       const bStarted = b.startedAt ? b.startedAt.getTime() : -Infinity;

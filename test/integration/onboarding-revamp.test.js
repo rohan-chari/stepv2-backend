@@ -505,12 +505,13 @@ describe("onboarding revamp", () => {
 
   // ── §6.3 — GET /referrals/inviter-race ────────────────────────────────────
 
-  async function attachReferral({ referrerId, refereeId }) {
+  async function attachReferral({ referrerId, refereeId, sourceRaceId = null }) {
     return prisma.referral.create({
       data: {
         referrerId,
         refereeId,
         refereeSubHash: `sub-${refereeId}`,
+        sourceRaceId,
       },
     });
   }
@@ -526,6 +527,7 @@ describe("onboarding revamp", () => {
         startedAt: new Date(Date.now() - 60 * 60 * 1000),
         endsAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
         timeBased: true,
+        isPublic: true,
         maxParticipants: 10,
         ...overrides,
       },
@@ -577,6 +579,77 @@ describe("onboarding revamp", () => {
       profilePhotoUrl: null,
       steps: 2400,
     });
+  });
+
+  it("12aa. a race-share referral prefers its exact source race over seeded fallback", async () => {
+    const inviter = await signUp();
+    const sourceRace = await createUserRace(inviter.userId, {
+      name: "Shared quick race",
+      status: "PENDING",
+      startedAt: null,
+      endsAt: null,
+    });
+
+    const seed = await createSeed(`SOURCE_FALLBACK_${Date.now()}`);
+    const seededRace = await createSeededRace(seed, {
+      name: "Daily Challenge",
+      startedAt: new Date(),
+    });
+    await prisma.raceParticipant.create({
+      data: {
+        raceId: seededRace.id,
+        userId: inviter.userId,
+        status: "ACCEPTED",
+      },
+    });
+
+    const referee = await signUp();
+    await attachReferral({
+      referrerId: inviter.userId,
+      refereeId: referee.userId,
+      sourceRaceId: sourceRace.id,
+    });
+
+    const res = await request(
+      server.baseUrl,
+      "GET",
+      "/referrals/inviter-race",
+      { token: referee.token }
+    );
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.race.id, sourceRace.id);
+    assert.equal(body.race.name, "Shared quick race");
+    assert.equal(body.race.alreadyJoined, false);
+  });
+
+  it("12ab. generic inviter fallback excludes seeded and private races", async () => {
+    const inviter = await signUp();
+    await createUserRace(inviter.userId, {
+      name: "Private race",
+      isPublic: false,
+    });
+    const seed = await createSeed(`GENERIC_FALLBACK_${Date.now()}`);
+    const seededRace = await createSeededRace(seed, { name: "Daily Challenge" });
+    await prisma.raceParticipant.create({
+      data: {
+        raceId: seededRace.id,
+        userId: inviter.userId,
+        status: "ACCEPTED",
+      },
+    });
+
+    const referee = await signUp();
+    await attachReferral({ referrerId: inviter.userId, refereeId: referee.userId });
+
+    const res = await request(
+      server.baseUrl,
+      "GET",
+      "/referrals/inviter-race",
+      { token: referee.token }
+    );
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { race: null, inviter: null });
   });
 
   it("12b. an unreferred user gets {race:null, inviter:null}", async () => {
@@ -729,6 +802,42 @@ describe("onboarding revamp", () => {
     assert.equal(referral.inviterRace.id, active.id);
     assert.equal(referral.inviterRace.name, "Live race");
     assert.equal(referral.inviterRace.status, "ACTIVE");
+  });
+
+  it("13bb. GET /referrals/:code excludes seeded races from the inviter fallback", async () => {
+    const inviter = await signUp();
+    const link = await request(server.baseUrl, "POST", "/referrals/link", {
+      token: inviter.token,
+    });
+    assert.equal(link.status, 200);
+    const { code } = await link.json();
+
+    const humanRace = await createUserRace(inviter.userId, {
+      name: "Shared human race",
+      status: "PENDING",
+      startedAt: null,
+      endsAt: null,
+      isPublic: true,
+    });
+    const seed = await createSeed(`PUBLIC_PREVIEW_${Date.now()}`);
+    const seededRace = await createSeededRace(seed, {
+      name: "Daily Challenge",
+      startedAt: new Date(),
+      isPublic: true,
+    });
+    await prisma.raceParticipant.create({
+      data: {
+        raceId: seededRace.id,
+        userId: inviter.userId,
+        status: "ACCEPTED",
+      },
+    });
+
+    const res = await request(server.baseUrl, "GET", `/referrals/${code}`);
+    assert.equal(res.status, 200);
+    const { referral } = await res.json();
+    assert.equal(referral.inviterRace.id, humanRace.id);
+    assert.equal(referral.inviterRace.name, "Shared human race");
   });
 
   it("13c. GET /referrals/:code still offers a PENDING race when that is all there is", async () => {

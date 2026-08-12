@@ -16,8 +16,11 @@ const {
 // race, so a referred install can be offered a one-tap "race your friend now"
 // after signup instead of generic onboarding. Display-safe on purpose — the
 // race id of a PUBLIC race is already exposed by the public-races browse list.
-// Only public, non-full, PENDING/ACTIVE races the inviter is actually racing
-// in qualify (ACTIVE preferred, so the invitee lands on a live leaderboard).
+// Only public, human-created, non-tournament, non-full PENDING/ACTIVE races the
+// inviter is actually racing in qualify. Seeded challenges are excluded: new
+// accounts are already auto-enrolled in those, and selecting an ACTIVE Daily
+// over the human race that motivated the invite strands frozen install flows on
+// the wrong destination. ACTIVE is otherwise preferred.
 // Old clients ignore the extra key.
 function buildGetReferralPreview(dependencies = {}) {
   const db = dependencies.prisma || prisma;
@@ -37,6 +40,9 @@ function buildGetReferralPreview(dependencies = {}) {
       const candidates = await db.race.findMany({
         where: {
           isPublic: true,
+          creatorId: { not: null },
+          seedId: null,
+          tournamentId: null,
           status: { in: ["ACTIVE", "PENDING"] },
           participants: {
             some: { userId: referrer.id, status: "ACCEPTED" },
