@@ -51,6 +51,10 @@ const KNOWN_FLAGS = {
   racesInviteDecisionGateEnabled: false,
   // Server-only switch for transactional quick-share automatic friendship.
   quickRaceShareAutoFriendEnabled: false,
+  // Rewarded-ad race payout double cohort percentage. Numeric 0..100; zero is
+  // the deployment-safe default. Preparation rechecks the row uncached inside
+  // its transaction, while GET /races may use this short-lived advisory cache.
+  racePayoutDoubleRolloutPercent: 0,
   // Mandatory onboarding tutorial (batch 2026-08-09 item 9). When TRUE, a
   // build that carries the mandatory-capable onboarding removes every escape
   // hatch from the tutorial (intro skip, in-tutorial skip chip/pill, back
@@ -340,6 +344,25 @@ function buildAppSettings(dependencies = {}) {
       const err = new Error(`Unknown setting: ${key}`);
       err.statusCode = 400;
       throw err;
+    }
+    if (key === "racePayoutDoubleRolloutPercent") {
+      if (!Number.isInteger(value) || value < 0 || value > 100) {
+        const err = new Error("racePayoutDoubleRolloutPercent must be an integer from 0 to 100");
+        err.statusCode = 400;
+        throw err;
+      }
+      if (value > 0) {
+        const healthy = await prisma.jobRun.findUnique({
+          where: { jobName: "race-payout-double-reconcile-healthy" },
+        });
+        if (!healthy) {
+          const err = new Error(
+            "Race payout double rollout requires one healthy reconciliation run",
+          );
+          err.statusCode = 409;
+          throw err;
+        }
+      }
     }
     await prisma.appSetting.upsert({
       where: { key },

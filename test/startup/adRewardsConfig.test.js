@@ -18,6 +18,16 @@ function loadConfig(env) {
   }
 }
 
+function withRuntimeEnv(env, fn) {
+  const previous = { ...process.env };
+  Object.assign(process.env, env);
+  try {
+    return fn();
+  } finally {
+    process.env = previous;
+  }
+}
+
 test("adRewards — defaults to 25 coins x 3 watches when unset", () => {
   const config = loadConfig({
     AD_COIN_REWARD_AMOUNT: undefined,
@@ -47,5 +57,92 @@ for (const bad of ["", "unlimited", "3.5", "-1", "0", "1e3x"]) {
     const config = loadConfig({ AD_COIN_REWARD_DAILY_CAP: bad });
 
     assert.equal(config.AD_COIN_REWARD_DAILY_CAP, 3);
+  });
+}
+
+test("race payout double switches default off and allowlist defaults empty", () => {
+  const config = loadConfig({
+    ADS_RACE_PAYOUT_DOUBLE_PREPARE_ENABLED: undefined,
+    ADS_RACE_PAYOUT_DOUBLE_CLAIM_ENABLED: undefined,
+    ADMOB_RACE_PAYOUT_DOUBLE_AD_UNIT_IDS: undefined,
+  });
+  assert.equal(config.adsRacePayoutDoublePrepareEnabled(), false);
+  assert.equal(config.adsRacePayoutDoubleClaimEnabled(), false);
+  assert.deepEqual(config.racePayoutDoubleAdUnitIds(), []);
+});
+
+test("race payout double parses canonical dedicated-unit IDs with surrounding whitespace and deduplicates", () => {
+  const config = loadConfig({});
+  assert.deepEqual(
+    withRuntimeEnv(
+      {
+        ADMOB_RACE_PAYOUT_DOUBLE_AD_UNIT_IDS:
+          " ca-app-pub-3940256099942544/5224354917,ca-app-pub-3940256099942544/1712485313, ca-app-pub-3940256099942544/5224354917 ",
+      },
+      () => config.racePayoutDoubleAdUnitIds(),
+    ),
+    [
+      "ca-app-pub-3940256099942544/5224354917",
+      "ca-app-pub-3940256099942544/1712485313",
+    ],
+  );
+});
+
+for (const raw of [undefined, "", "   ", "\t\n"]) {
+  test(`race payout double allowlist stays off for ${JSON.stringify(raw)}`, () => {
+    const config = loadConfig({});
+    assert.deepEqual(
+      withRuntimeEnv(
+        { ADMOB_RACE_PAYOUT_DOUBLE_AD_UNIT_IDS: raw },
+        () => config.racePayoutDoubleAdUnitIds(),
+      ),
+      [],
+    );
+  });
+}
+
+for (const raw of [
+  "ca-app-pub-3940256099942544/5224354917,",
+  ",ca-app-pub-3940256099942544/5224354917",
+  "ca-app-pub-3940256099942544/5224354917,,ca-app-pub-3940256099942544/1712485313",
+  "ca-app-pub-3940256099942544/5224354917,ios",
+  "ios,ca-app-pub-3940256099942544/5224354917",
+  "ca-app-pub-394025609994254/5224354917",
+  "ca-app-pub-39402560999425444/5224354917",
+  "ca-app-pub-3940256099942544/522435491",
+  "ca-app-pub-3940256099942544/52243549177",
+  "ca-app-pub-394025609994254x/5224354917",
+  "ca-app-pub-3940256099942544/522435491x",
+  "ca-app-pub-3940256099942544 /5224354917",
+  "ca-app-pub-3940256099942544/ 5224354917",
+  "CA-APP-PUB-3940256099942544/5224354917",
+  "pub-3940256099942544/5224354917",
+  "ca-app-pub-3940256099942544~5224354917",
+]) {
+  test(`race payout double allowlist fails closed for malformed input ${JSON.stringify(raw)}`, () => {
+    const config = loadConfig({});
+    assert.deepEqual(
+      withRuntimeEnv(
+        { ADMOB_RACE_PAYOUT_DOUBLE_AD_UNIT_IDS: raw },
+        () => config.racePayoutDoubleAdUnitIds(),
+      ),
+      [],
+    );
+  });
+}
+
+for (const [raw, expected] of [
+  ["1", 1], ["500", 500], ["0", 500], ["-1", 500], ["501", 500],
+  ["3.5", 500], ["bad", 500], ["", 500],
+]) {
+  test(`race payout double cap ${JSON.stringify(raw)} resolves to ${expected}`, () => {
+    const config = loadConfig({});
+    assert.equal(
+      withRuntimeEnv(
+        { RACE_PAYOUT_DOUBLE_MAX_BONUS_COINS: raw },
+        () => config.racePayoutDoubleMaxBonusCoins(),
+      ),
+      expected,
+    );
   });
 }

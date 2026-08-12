@@ -12,6 +12,7 @@
 // this index. Only top-of-graph consumers (app.js, src/index.js) use it.
 Object.assign(module.exports, require("./models/race"));
 Object.assign(module.exports, require("./models/raceParticipant"));
+Object.assign(module.exports, require("./models/racePayoutDouble"));
 Object.assign(module.exports, require("./models/raceResolutionJob"));
 Object.assign(module.exports, require("./models/raceResolutionJobV2"));
 
@@ -33,9 +34,12 @@ Object.assign(module.exports, require("./services/computeRaceState"));
 Object.assign(module.exports, require("./services/racePowerupStateSync"));
 Object.assign(module.exports, require("./services/reconcileUploaderRaces"));
 Object.assign(module.exports, require("./services/validateRaceConfig"));
+Object.assign(module.exports, require("./services/racePayoutDoublePolicy"));
+Object.assign(module.exports, require("./services/withRacePayoutDoubleTransaction"));
 
 Object.assign(module.exports, require("./queries/getRaceProgress"));
 Object.assign(module.exports, require("./queries/getRaces"));
+Object.assign(module.exports, require("./queries/getRacePayoutDoubleOffer"));
 Object.assign(module.exports, require("./queries/getRaceDetails"));
 Object.assign(module.exports, require("./queries/getRaceFeed"));
 Object.assign(module.exports, require("./queries/getFeaturedRaces"));
@@ -62,6 +66,8 @@ Object.assign(module.exports, require("./commands/switchRaceTeam"));
 Object.assign(module.exports, require("./commands/setRaceChatMute"));
 Object.assign(module.exports, require("./commands/setRacePlacementMute"));
 Object.assign(module.exports, require("./commands/markRaceResultsSeen"));
+Object.assign(module.exports, require("./commands/createRacePayoutDoubleOffer"));
+Object.assign(module.exports, require("./commands/claimRacePayoutDouble"));
 Object.assign(module.exports, require("./commands/autoEnrollNewUser"));
 Object.assign(module.exports, require("./commands/autoJoinFeaturedRaces"));
 
@@ -73,5 +79,6 @@ Object.assign(module.exports, require("./jobs/raceResolutionQueueV2"));
 Object.assign(module.exports, require("./jobs/autoStartScheduledRaces"));
 Object.assign(module.exports, require("./jobs/placementRecompute"));
 Object.assign(module.exports, require("./jobs/seededRaceRenewal"));
+Object.assign(module.exports, require("./jobs/racePayoutDoubleReconcile"));
 
 Object.assign(module.exports, require("./routes"));

@@ -131,7 +131,7 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
   // the bulk-or-fallback pattern used across this codebase).
   const races =
     typeof Race.findSummariesForUser === "function"
-      ? await Race.findSummariesForUser(userId)
+      ? await Race.findSummariesForUser(userId, options.extraCompletedRaceIds || [])
       : await Race.findForUser(userId);
 
   const active = [];

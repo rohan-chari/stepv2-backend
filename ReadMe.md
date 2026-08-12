@@ -1,5 +1,12 @@
 # Steps Tracker Backend — Deployment
 
+Race-payout ad double is additive and default-off. Its controls are
+`ADS_RACE_PAYOUT_DOUBLE_PREPARE_ENABLED`,
+`ADS_RACE_PAYOUT_DOUBLE_CLAIM_ENABLED`,
+`ADMOB_RACE_PAYOUT_DOUBLE_AD_UNIT_IDS`,
+`RACE_PAYOUT_DOUBLE_MAX_BONUS_COINS`, and
+`RACE_PAYOUT_DOUBLE_RECONCILE_ENABLED`. See `DEPLOYMENT.md` for rollout order.
+
 Both environments run on the same DigitalOcean droplet, as separate pm2 processes against separate Postgres databases. Both track the `main` branch.
 
 | Env     | Path                                          | pm2 name                | Port | DB                     | APNS host |

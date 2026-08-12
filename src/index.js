@@ -34,6 +34,9 @@ const {
 const {
   scheduleRaceResolutionWorkerV2,
 } = require("./modules/races");
+const {
+  scheduleRacePayoutDoubleReconcile,
+} = require("./modules/races");
 function startServer({
   app = createApp(),
   port = Number(process.env.PORT || 3000),
@@ -64,6 +67,8 @@ function startServer({
   // the reverse-handoff rollback target — but this binary never schedules it, so
   // only one bulk writer per race exists at a time.
   scheduleRaceResolutionWorker: scheduleRaceResolution = scheduleRaceResolutionWorkerV2,
+  scheduleRacePayoutDoubleReconcile:
+    schedulePayoutDoubleReconcile = scheduleRacePayoutDoubleReconcile,
   logger = console,
   // Delay before the cron jobs start ticking. Every scheduler fires an
   // immediate first tick, and under pm2 cluster `reload` the OLD process keeps
@@ -160,6 +165,9 @@ function startServer({
       // Uses its own console (like scheduleTournamentSeedRenewal) rather than the
       // injected startup logger.
       scheduleRaceResolution();
+      if (process.env.RACE_PAYOUT_DOUBLE_RECONCILE_ENABLED === "true") {
+        schedulePayoutDoubleReconcile();
+      }
     };
     if (cronStartDelayMs > 0) {
       logger.log(`[CRON] Job scheduling starts in ${cronStartDelayMs / 1000}s`);

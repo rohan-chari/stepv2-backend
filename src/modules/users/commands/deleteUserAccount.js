@@ -4,6 +4,10 @@ const {
 } = require("../services/profilePhotoStorage");
 
 const SENTINEL_APPLE_ID = "__deleted_user_sentinel__";
+const {
+  providerSubHash,
+  cohortBucket,
+} = require("../../races/services/racePayoutDoublePolicy");
 
 class DeleteUserAccountError extends Error {
   constructor(message, statusCode) {
@@ -51,6 +55,7 @@ function buildDeleteUserAccount(dependencies = {}) {
 
     const sentinel = await ensureSentinelUser(db);
     const sentinelId = sentinel.id;
+    const payoutDoubleProviderHash = providerSubHash(user);
 
     // Best-effort profile photo cleanup (outside the transaction).
     if (user.profilePhotoKey) {
@@ -64,6 +69,33 @@ function buildDeleteUserAccount(dependencies = {}) {
     }
 
     await db.$transaction(async (tx) => {
+      // Shared race-payout-double lock order: durable provider identity first,
+      // then user. Tombstone receipts before the user cascade removes offers,
+      // grants and ledger rows so reconciliation can distinguish deletion from
+      // settlement corruption without retaining raw provider identity.
+      if (payoutDoubleProviderHash) {
+        await tx.racePayoutDoubleIdentity.upsert({
+          where: { providerSubHash: payoutDoubleProviderHash },
+          create: {
+            providerSubHash: payoutDoubleProviderHash,
+            cohortBucket: cohortBucket(payoutDoubleProviderHash),
+          },
+          update: {},
+        });
+        await tx.$queryRaw`SELECT provider_sub_hash FROM race_payout_double_identities WHERE provider_sub_hash = ${payoutDoubleProviderHash} FOR UPDATE`;
+      }
+      await tx.$queryRaw`SELECT id FROM users WHERE id = ${userId} FOR UPDATE`;
+      const claimedPayoutOffers = await tx.racePayoutDoubleOffer.findMany({
+        where: { userId, status: "CLAIMED" },
+        select: { id: true },
+      });
+      if (claimedPayoutOffers.length > 0) {
+        await tx.racePayoutDoubleClaimReceipt.updateMany({
+          where: { offerId: { in: claimedPayoutOffers.map((offer) => offer.id) } },
+          data: { accountDeletedAt: new Date() },
+        });
+      }
+
       // 1) Race participations: forfeit any held buy-ins into the pot, then
       //    detach the user from each race depending on race lifecycle.
       const participations = await tx.raceParticipant.findMany({

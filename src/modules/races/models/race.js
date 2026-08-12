@@ -221,7 +221,7 @@ const Race = {
   // — getRaces never reads them (it renders row summaries, not capybaras). Keeps
   // creator/winner (used for the summary's creator/winner blocks). findForUser is
   // left unchanged for other callers.
-  async findSummariesForUser(userId) {
+  async findSummariesForUser(userId, extraCompletedRaceIds = []) {
     const participantFilter = {
       participants: { some: { userId, status: { not: "DECLINED" } } },
     };
@@ -255,7 +255,7 @@ const Race = {
       ...leanParticipants,
     };
 
-    const [current, completed] = await Promise.all([
+    const [current, completed, injectedCompleted] = await Promise.all([
       prisma.race.findMany({
         where: { ...participantFilter, status: { not: "COMPLETED" } },
         include,
@@ -267,9 +267,23 @@ const Race = {
         orderBy: { completedAt: "desc" },
         take: 10,
       }),
+      extraCompletedRaceIds.length > 0
+        ? prisma.race.findMany({
+            where: {
+              ...participantFilter,
+              status: "COMPLETED",
+              id: { in: extraCompletedRaceIds },
+            },
+            include,
+            orderBy: { completedAt: "desc" },
+          })
+        : Promise.resolve([]),
     ]);
 
-    return [...current, ...completed].sort(
+    const completedById = new Map(
+      [...completed, ...injectedCompleted].map((race) => [race.id, race]),
+    );
+    return [...current, ...completedById.values()].sort(
       (a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)
     );
   },

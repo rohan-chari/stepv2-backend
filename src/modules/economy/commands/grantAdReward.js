@@ -5,7 +5,12 @@ const {
   POWERUP_UNLOCK_REWARD_KIND,
   SHOP_UNLOCK_REWARD_KIND,
   BOX_REROLL_REWARD_KIND,
+  RACE_PAYOUT_DOUBLE_REWARD_KIND,
+  racePayoutDoubleAdUnitIds,
 } = require("../adRewards");
+const {
+  safeStructuredEvent,
+} = require("../../races/services/racePayoutDoublePolicy");
 
 const LOCAL_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 // custom_data for coin-reward watches: "coins:<local date>". Bare dates are
@@ -28,6 +33,9 @@ const SHOP_UNLOCK_CUSTOM_DATA_RE = /^shop_unlock:([^:]+):(.+)$/;
 // default (extra_daily_spin) and the two features would eat each other's
 // credits — the whole reason the kind is derived from the prefix.
 const BOX_REROLL_CUSTOM_DATA_RE = /^box_reroll:([^:]+):(.+)$/;
+const RACE_PAYOUT_DOUBLE_PREFIX = "race_payout_double:";
+const RACE_PAYOUT_DOUBLE_CUSTOM_DATA_RE =
+  /^race_payout_double:([^:]+):([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/;
 
 // Mint an AdRewardGrant from a *verified* AdMob SSV callback (the route owns
 // signature verification; this command owns the ledger). Idempotent on
@@ -36,6 +44,8 @@ const BOX_REROLL_CUSTOM_DATA_RE = /^box_reroll:([^:]+):(.+)$/;
 // pattern; the grant is later consumed by claimExtraDailyRewardBox.
 function buildGrantAdReward(dependencies = {}) {
   const db = dependencies.prisma || prisma;
+  const logger = dependencies.logger || console;
+  const unitIds = dependencies.racePayoutDoubleAdUnitIds || racePayoutDoubleAdUnitIds;
 
   return async function grantAdReward({
     userId,
@@ -46,6 +56,10 @@ function buildGrantAdReward(dependencies = {}) {
     serverDate,
   }) {
     if (!userId || !transactionId) {
+      safeStructuredEvent(logger, {
+        event: "race_payout_double_ssv_metric",
+        outcome: "invalid",
+      });
       return { granted: false, reason: "invalid" };
     }
 
@@ -53,7 +67,35 @@ function buildGrantAdReward(dependencies = {}) {
     // an attacker-controlled value is possible — it can only ever point a
     // grant at an existing account, and only that account can redeem it.
     const user = await db.user.findUnique({ where: { id: userId } });
-    if (!user) return { granted: false, reason: "unknown_user" };
+    if (!user) {
+      safeStructuredEvent(logger, {
+        event: "race_payout_double_ssv_metric",
+        outcome: "unknown_user",
+      });
+      return { granted: false, reason: "unknown_user" };
+    }
+
+    const reservedRaceDouble =
+      typeof customData === "string" && customData.startsWith(RACE_PAYOUT_DOUBLE_PREFIX);
+    const raceDoubleMatch = reservedRaceDouble
+      ? customData.match(RACE_PAYOUT_DOUBLE_CUSTOM_DATA_RE)
+      : null;
+    if (
+      reservedRaceDouble &&
+      (!raceDoubleMatch ||
+        raceDoubleMatch[1] !== userId ||
+        !unitIds().includes(adUnit))
+    ) {
+      safeStructuredEvent(logger, {
+        event: "race_payout_double_ssv_metric",
+        outcome: !raceDoubleMatch
+          ? "malformed"
+          : raceDoubleMatch[1] !== userId
+            ? "user_mismatch"
+            : "unit_rejected",
+      });
+      return { granted: false, reason: "invalid_race_payout_double" };
+    }
 
     // custom_data carries the watcher's local date (matches the localDate the
     // claim will send) and, for coin-reward watches, a "coins:" prefix that
@@ -87,7 +129,9 @@ function buildGrantAdReward(dependencies = {}) {
         : typeof customData === "string" && LOCAL_DATE_RE.test(customData)
           ? customData
           : serverDate;
-    const kind = unlockMatch
+    const kind = raceDoubleMatch
+      ? RACE_PAYOUT_DOUBLE_REWARD_KIND
+      : unlockMatch
       ? POWERUP_UNLOCK_REWARD_KIND
       : shopUnlockMatch
         ? SHOP_UNLOCK_REWARD_KIND
@@ -102,16 +146,37 @@ function buildGrantAdReward(dependencies = {}) {
       : shopUnlockMatch
         ? shopUnlockMatch[2]
         : null;
+    const contextId = raceDoubleMatch ? raceDoubleMatch[2] : null;
 
     try {
       await db.adRewardGrant.create({
-        data: { userId, transactionId, adUnit, rewardKind: kind, grantedDate, shopItemId },
+        data: {
+          userId,
+          transactionId,
+          adUnit,
+          rewardKind: kind,
+          grantedDate,
+          shopItemId,
+          contextId,
+        },
       });
     } catch (error) {
       if (error && error.code === "P2002") {
+        if (reservedRaceDouble) {
+          safeStructuredEvent(logger, {
+            event: "race_payout_double_ssv_metric",
+            outcome: "duplicate",
+          });
+        }
         return { granted: false, reason: "duplicate" };
       }
       throw error;
+    }
+    if (raceDoubleMatch) {
+      safeStructuredEvent(logger, {
+        event: "race_payout_double_ssv_metric",
+        outcome: "granted",
+      });
     }
     return { granted: true };
   };
@@ -119,4 +184,8 @@ function buildGrantAdReward(dependencies = {}) {
 
 const grantAdReward = buildGrantAdReward();
 
-module.exports = { buildGrantAdReward, grantAdReward };
+module.exports = {
+  RACE_PAYOUT_DOUBLE_CUSTOM_DATA_RE,
+  buildGrantAdReward,
+  grantAdReward,
+};

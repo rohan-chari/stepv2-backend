@@ -41,6 +41,38 @@ const SHOP_UNLOCK_REWARD_KIND = "shop_unlock";
 // credits and the two features would silently consume each other's grants.
 const BOX_REROLL_REWARD_KIND = "box_reroll";
 
+// Race-results payout double. Both switches deliberately default OFF. Prepare
+// controls only new offers; claim is an independent emergency brake so rollout
+// can stop without invalidating already-prepared entitlements.
+const RACE_PAYOUT_DOUBLE_REWARD_KIND = "race_payout_double";
+
+function adsRacePayoutDoublePrepareEnabled() {
+  return process.env.ADS_RACE_PAYOUT_DOUBLE_PREPARE_ENABLED === "true";
+}
+
+function adsRacePayoutDoubleClaimEnabled() {
+  return process.env.ADS_RACE_PAYOUT_DOUBLE_CLAIM_ENABLED === "true";
+}
+
+// AdMob ad unit IDs have one canonical representation: a 16-digit publisher
+// ID followed by a 10-digit unit ID. Treat the allowlist as one configuration
+// value rather than independently salvaging valid members: a typo in either
+// platform's unit must keep the whole variable dark.
+const ADMOB_AD_UNIT_ID_PATTERN = /^ca-app-pub-\d{16}\/\d{10}$/;
+
+function racePayoutDoubleAdUnitIds() {
+  const raw = process.env.ADMOB_RACE_PAYOUT_DOUBLE_AD_UNIT_IDS;
+  if (typeof raw !== "string" || raw.trim().length === 0) return [];
+  const values = raw.split(",").map((value) => value.trim());
+  if (values.some((value) => !ADMOB_AD_UNIT_ID_PATTERN.test(value))) return [];
+  return [...new Set(values)];
+}
+
+function racePayoutDoubleMaxBonusCoins() {
+  const parsed = Number(process.env.RACE_PAYOUT_DOUBLE_MAX_BONUS_COINS);
+  return Number.isInteger(parsed) && parsed >= 1 && parsed <= 500 ? parsed : 500;
+}
+
 // Kill switch for the reroll endpoint AND for advertising `boxReroll` in
 // getRaceProgress. Deliberately NOT the `!== "false"` idiom the older switches
 // use: this one must default OFF so the backend can ship dark ahead of the App
@@ -140,4 +172,9 @@ module.exports = {
   POWERUP_UNLOCK_MAX_ADS,
   BOX_REROLL_REWARD_KIND,
   adsBoxRerollEnabled,
+  RACE_PAYOUT_DOUBLE_REWARD_KIND,
+  adsRacePayoutDoublePrepareEnabled,
+  adsRacePayoutDoubleClaimEnabled,
+  racePayoutDoubleAdUnitIds,
+  racePayoutDoubleMaxBonusCoins,
 };

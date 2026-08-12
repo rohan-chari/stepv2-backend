@@ -5,9 +5,13 @@ const {
   buildKeyFetcher,
 } = require("../admobSsv");
 const {
+  buildGrantAdReward,
   grantAdReward: defaultGrantAdReward,
 } = require("../commands/grantAdReward");
 const defaultAdRewardsConfig = require("../adRewards");
+const {
+  safeStructuredEvent,
+} = require("../../races/services/racePayoutDoublePolicy");
 
 // AdMob server-side verification callback. Unauthenticated — GOOGLE calls it
 // (configured on the ad unit in the AdMob console), and its trust comes from
@@ -16,8 +20,13 @@ const defaultAdRewardsConfig = require("../adRewards");
 // ad".
 function createAdsRouter(dependencies = {}) {
   const router = Router();
-  const grantAdReward = dependencies.grantAdReward || defaultGrantAdReward;
+  const grantAdReward =
+    dependencies.grantAdReward ||
+    (dependencies.prisma || dependencies.logger
+      ? buildGrantAdReward(dependencies)
+      : defaultGrantAdReward);
   const config = dependencies.adRewardsConfig || defaultAdRewardsConfig;
+  const logger = dependencies.logger || console;
   const fetchKeys = dependencies.fetchSsvKeys || buildKeyFetcher();
   const verifySsv =
     dependencies.verifySsv ||
@@ -33,10 +42,18 @@ function createAdsRouter(dependencies = {}) {
       // params, no signature) and requires a 200. Nothing mints without a
       // verified transaction_id/user_id, so acknowledging is harmless.
       if (!params.transaction_id || !params.user_id) {
+        safeStructuredEvent(logger, {
+          event: "race_payout_double_ssv_metric",
+          outcome: "missing_params",
+        });
         return res.json({ ok: false, reason: "missing_params" });
       }
 
       if (!config.ADMOB_SSV_SKIP_VERIFY && !(await verifySsv(rawQuery))) {
+        safeStructuredEvent(logger, {
+          event: "race_payout_double_ssv_metric",
+          outcome: "invalid_signature",
+        });
         return res.status(403).json({ error: "Invalid SSV signature" });
       }
 
@@ -51,7 +68,11 @@ function createAdsRouter(dependencies = {}) {
       });
       res.json({ ok: true });
     } catch (error) {
-      console.error("AdMob SSV callback error:", error);
+      safeStructuredEvent(logger, {
+        event: "race_payout_double_ssv_metric",
+        outcome: "internal_error",
+      });
+      try { logger.error("AdMob SSV callback error:", error); } catch {}
       res.status(500).json({ error: "Internal server error" });
     }
   });

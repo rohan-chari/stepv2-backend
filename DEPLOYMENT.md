@@ -1,5 +1,29 @@
 # Backend Deployment
 
+## Race payout double rewarded-ad rollout
+
+This feature ships dark. Configure exactly the environment's two dedicated
+iOS/Android rewarded unit IDs in the comma-separated
+`ADMOB_RACE_PAYOUT_DOUBLE_AD_UNIT_IDS`. The iOS unit is
+`ca-app-pub-4538901002392200/6376353967`; until the separate Android unit is
+created, leave the allowlist empty so the coupled rollout stays dark. Each member must use canonical
+`ca-app-pub-<16 digits>/<10 digits>` form; one malformed member disables the
+whole allowlist. Never reuse another rewarded placement's unit.
+
+```dotenv
+ADS_RACE_PAYOUT_DOUBLE_PREPARE_ENABLED=false
+ADS_RACE_PAYOUT_DOUBLE_CLAIM_ENABLED=false
+ADMOB_RACE_PAYOUT_DOUBLE_AD_UNIT_IDS=
+RACE_PAYOUT_DOUBLE_MAX_BONUS_COINS=500
+RACE_PAYOUT_DOUBLE_RECONCILE_ENABLED=false
+```
+
+Deploy backend first. Enable reconciliation and observe a healthy run while
+`racePayoutDoubleRolloutPercent` remains `0`; then enable claims, preparation,
+and at most 10% rollout during a staffed window. Normal rollback is rollout 0
+plus preparation false while claims stay true. Staging must use staging-routed
+units, never production callback/allowlist wiring.
+
 Two pm2 processes running on the same DigitalOcean droplet, each from its own git checkout against its own Postgres database. Both track different branches.
 
 | Env     | Checkout path                            | pm2 name                | Port | Database               | Branch       | APNS host  |

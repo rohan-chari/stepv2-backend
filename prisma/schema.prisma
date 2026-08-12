@@ -162,10 +162,11 @@ model User {
   notifications           Notification[]
 
   // Referral back-relations. Referral is the single source of truth for who→whom.
-  referralsMade        Referral[]            @relation("ReferralsMade")
-  referralReceived     Referral?             @relation("ReferralReceived")
-  referralRewardGrants ReferralRewardGrant[]
-  adRewardGrants       AdRewardGrant[]
+  referralsMade          Referral[]              @relation("ReferralsMade")
+  referralReceived       Referral?               @relation("ReferralReceived")
+  referralRewardGrants   ReferralRewardGrant[]
+  adRewardGrants         AdRewardGrant[]
+  racePayoutDoubleOffers RacePayoutDoubleOffer[]
 
   // ── Tournaments (bracket mode) — all additive back-relations. Old app builds
   // never see these; existing rows are unaffected (no columns added to users).
@@ -292,13 +293,18 @@ model AdRewardGrant {
   rarity        String?
   coinAmount    Int?      @map("coin_amount")
   shopItemId    String?   @map("shop_item_id")
+  // Server-issued context for reward kinds whose SSV must bind to an immutable
+  // backend object. Nullable so every legacy grant remains byte-compatible.
+  contextId     String?   @map("context_id")
   // Powerup type won when rewardType = POWERUP (extra-spin shop-powerup prize).
   powerupType   String?   @map("powerup_type")
   createdAt     DateTime  @default(now()) @map("created_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@unique([userId, rewardKind, contextId])
   @@index([userId, grantedDate])
+  @@index([rewardKind, consumedAt])
   @@map("ad_reward_grants")
 }
 
@@ -509,6 +515,7 @@ model CoinTransaction {
   // user's `powerup_discard` rows for one local calendar day on every discard.
   // With only @@index([userId]) that sum scans a heavy user's whole ledger.
   @@index([userId, reason, createdAt])
+  @@index([reason, createdAt])
   @@map("coin_transactions")
 }
 
@@ -989,16 +996,17 @@ model Race {
   createdAt            DateTime         @default(now()) @map("created_at")
   updatedAt            DateTime         @updatedAt @map("updated_at")
 
-  creator       User?                @relation("raceCreator", fields: [creatorId], references: [id])
-  seed          RaceSeed?            @relation(fields: [seedId], references: [id])
-  winner        User?                @relation("raceWinner", fields: [winnerUserId], references: [id])
-  tournament    Tournament?          @relation(fields: [tournamentId], references: [id])
-  participants  RaceParticipant[]
-  powerups      RacePowerup[]
-  activeEffects RaceActiveEffect[]
-  powerupEvents RacePowerupEvent[]
-  messages      RaceMessage[]
-  resolutionJob RaceResolutionJobV2?
+  creator                User?                       @relation("raceCreator", fields: [creatorId], references: [id])
+  seed                   RaceSeed?                   @relation(fields: [seedId], references: [id])
+  winner                 User?                       @relation("raceWinner", fields: [winnerUserId], references: [id])
+  tournament             Tournament?                 @relation(fields: [tournamentId], references: [id])
+  participants           RaceParticipant[]
+  powerups               RacePowerup[]
+  activeEffects          RaceActiveEffect[]
+  powerupEvents          RacePowerupEvent[]
+  messages               RaceMessage[]
+  payoutDoubleOfferItems RacePayoutDoubleOfferItem[]
+  resolutionJob          RaceResolutionJobV2?
 
   @@unique([tournamentId, tournamentRound, tournamentMatchIndex])
   @@index([creatorId])
@@ -1246,16 +1254,92 @@ model RaceParticipant {
   // Null = never forfeited. Additive/nullable — old app builds never read it.
   forfeitedAt              DateTime?             @map("forfeited_at")
 
-  race                  Race               @relation(fields: [raceId], references: [id], onDelete: Cascade)
-  user                  User               @relation(fields: [userId], references: [id])
+  race                  Race                       @relation(fields: [raceId], references: [id], onDelete: Cascade)
+  user                  User                       @relation(fields: [userId], references: [id])
   powerups              RacePowerup[]
   activeEffectsReceived RaceActiveEffect[]
+  payoutDoubleOfferItem RacePayoutDoubleOfferItem?
 
   @@unique([raceId, userId])
   @@index([userId, status])
   @@index([raceId, status])
   @@index([userId, status, inviteExpiresAt])
   @@map("race_participants")
+}
+
+// One immutable, server-prepared rewarded-ad batch. These tables are additive
+// and dark by default; frozen clients neither create nor read them.
+model RacePayoutDoubleOffer {
+  id                             String    @id @default(uuid())
+  userId                         String    @map("user_id")
+  baseCoins                      Int       @map("base_coins")
+  bonusCoins                     Int       @map("bonus_coins")
+  maxBonusCoins                  Int       @map("max_bonus_coins")
+  rolling24hRemainingBeforeClaim Int       @map("rolling_24h_remaining_before_claim")
+  providerSubHash                String    @map("provider_sub_hash")
+  status                         String    @default("PENDING")
+  claimedAt                      DateTime? @map("claimed_at")
+  forfeitedAt                    DateTime? @map("forfeited_at")
+  createdAt                      DateTime  @default(now()) @map("created_at")
+
+  user  User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items RacePayoutDoubleOfferItem[]
+
+  @@index([userId, status, createdAt])
+  @@index([status, claimedAt])
+  @@map("race_payout_double_offers")
+}
+
+model RacePayoutDoubleOfferItem {
+  id                String  @id @default(uuid())
+  offerId           String  @map("offer_id")
+  raceParticipantId String? @unique @map("race_participant_id")
+  raceId            String? @map("race_id")
+  raceIdSnapshot    String  @map("race_id_snapshot")
+  placementSnapshot Int?    @map("placement_snapshot")
+  eligibleCoins     Int     @map("eligible_coins")
+  sourceReason      String  @map("source_reason")
+  sourceRefId       String  @map("source_ref_id")
+
+  offer           RacePayoutDoubleOffer @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  raceParticipant RaceParticipant?      @relation(fields: [raceParticipantId], references: [id], onDelete: SetNull)
+  race            Race?                 @relation(fields: [raceId], references: [id], onDelete: SetNull)
+
+  @@unique([offerId, raceIdSnapshot])
+  @@map("race_payout_double_offer_items")
+}
+
+// Provider-neutral durable identity and rolling records deliberately do not
+// reference User, so delete/recreate cannot reset cohort or 24h allowance.
+model RacePayoutDoubleIdentity {
+  providerSubHash String   @id @map("provider_sub_hash")
+  cohortBucket    Int      @map("cohort_bucket")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@map("race_payout_double_identities")
+}
+
+model RacePayoutDoubleVelocityGrant {
+  id              String   @id @default(uuid())
+  providerSubHash String   @map("provider_sub_hash")
+  offerId         String   @unique @map("offer_id")
+  bonusCoins      Int      @map("bonus_coins")
+  claimedAt       DateTime @default(now()) @map("claimed_at")
+
+  @@index([providerSubHash, claimedAt])
+  @@index([claimedAt])
+  @@map("race_payout_double_velocity_grants")
+}
+
+model RacePayoutDoubleClaimReceipt {
+  offerId          String    @id @map("offer_id")
+  providerSubHash  String    @map("provider_sub_hash")
+  bonusCoins       Int       @map("bonus_coins")
+  claimedAt        DateTime  @map("claimed_at")
+  accountDeletedAt DateTime? @map("account_deleted_at")
+
+  @@index([claimedAt])
+  @@map("race_payout_double_claim_receipts")
 }
 
 model RacePowerup {

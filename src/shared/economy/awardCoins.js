@@ -25,11 +25,18 @@ async function invalidateAuthMe(userId) {
  * @param {string} [params.refId] - dedup key (instanceId, date string, etc.)
  * @returns {Promise<{awarded: boolean, coins: number}>}
  */
-async function awardCoins({ userId, amount, reason, refId, tx = null }) {
+async function awardCoins({ userId, amount, reason, refId, createdAt, tx = null }) {
   const db = tx || prisma;
+  const transactionData = {
+    userId,
+    amount,
+    reason,
+    refId,
+    ...(createdAt ? { createdAt } : {}),
+  };
   if (tx) {
     const inserted = await db.coinTransaction.createMany({
-      data: [{ userId, amount, reason, refId }],
+      data: [transactionData],
       skipDuplicates: true,
     });
     if (inserted.count === 0) {
@@ -58,7 +65,7 @@ async function awardCoins({ userId, amount, reason, refId, tx = null }) {
   try {
     const [, user] = await prisma.$transaction([
       prisma.coinTransaction.create({
-        data: { userId, amount, reason, refId },
+        data: transactionData,
       }),
       prisma.user.update({
         where: { id: userId },

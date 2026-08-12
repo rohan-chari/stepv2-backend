@@ -65,6 +65,26 @@ const {
 } = require("../powerups");
 const { getRaces: defaultGetRaces } = require("./queries/getRaces");
 const {
+  getRacePayoutDoubleOffer: defaultGetRacePayoutDoubleOffer,
+  buildGetRacePayoutDoubleOffer,
+} = require("./queries/getRacePayoutDoubleOffer");
+const {
+  createRacePayoutDoubleOffer: defaultCreateRacePayoutDoubleOffer,
+  buildCreateRacePayoutDoubleOffer,
+} = require("./commands/createRacePayoutDoubleOffer");
+const {
+  claimRacePayoutDouble: defaultClaimRacePayoutDouble,
+  buildClaimRacePayoutDouble,
+} = require("./commands/claimRacePayoutDouble");
+const {
+  RacePayoutDouble: defaultRacePayoutDoubleModel,
+  buildRacePayoutDoubleModel,
+} = require("./models/racePayoutDouble");
+const { asyncHandler } = require("../../shared/http/asyncHandler");
+const {
+  safeStructuredEvent,
+} = require("./services/racePayoutDoublePolicy");
+const {
   getTournamentsForUser: defaultGetTournamentsForUser,
 } = require("../tournaments/queries/getTournamentsForUser");
 const {
@@ -174,6 +194,33 @@ function createRacesRouter(dependencies = {}) {
   const generateTeamNamePair =
     dependencies.generateTeamNamePair || defaultGenerateTeamNamePair;
   const getRaces = dependencies.getRaces || defaultGetRaces;
+  const racePayoutDoubleModel =
+    dependencies.RacePayoutDouble ||
+    (dependencies.prisma
+      ? buildRacePayoutDoubleModel(dependencies)
+      : defaultRacePayoutDoubleModel);
+  const getRacePayoutDoubleOffer =
+    dependencies.getRacePayoutDoubleOffer ||
+    (dependencies.prisma || dependencies.appSettings || dependencies.adRewardsConfig
+      ? buildGetRacePayoutDoubleOffer({
+          ...dependencies,
+          RacePayoutDouble: racePayoutDoubleModel,
+        })
+      : defaultGetRacePayoutDoubleOffer);
+  const createRacePayoutDoubleOffer =
+    dependencies.createRacePayoutDoubleOffer ||
+    (dependencies.prisma || dependencies.adRewardsConfig
+      ? buildCreateRacePayoutDoubleOffer(dependencies)
+      : defaultCreateRacePayoutDoubleOffer);
+  const claimRacePayoutDouble =
+    dependencies.claimRacePayoutDouble ||
+    (dependencies.prisma ||
+    dependencies.adRewardsConfig ||
+    dependencies.awardCoins ||
+    dependencies.beforeRacePayoutDoubleCommit ||
+    dependencies.onRacePayoutDoubleError
+      ? buildClaimRacePayoutDouble(dependencies)
+      : defaultClaimRacePayoutDouble);
   const getTournamentsForUser =
     dependencies.getTournamentsForUser || defaultGetTournamentsForUser;
   const getRaceDiscoverySummary =
@@ -219,6 +266,21 @@ function createRacesRouter(dependencies = {}) {
   const logger = dependencies.logger || console;
   const hasLiveUserCreatedRaceFn =
     dependencies.hasLiveUserCreatedRace || hasLiveUserCreatedRace;
+
+  function payoutDoubleEndpoint(operation, handler) {
+    return asyncHandler(async (req, res) => {
+      try {
+        await handler(req, res);
+      } catch (error) {
+        safeStructuredEvent(logger, {
+          event: "race_payout_double_endpoint_metric",
+          operation,
+          code: error?.code || "INTERNAL_ERROR",
+        });
+        throw error;
+      }
+    });
+  }
 
   // GET /races/share/:token  — PUBLIC, declared BEFORE requireAuth so the
   // landing page and the app's pre-join screen can read a shared race without a
@@ -316,12 +378,27 @@ function createRacesRouter(dependencies = {}) {
       // concurrently — they read disjoint rows, so there's no reason to await
       // them serially (Phase B4). Old clients pass null and get byte-identical
       // JSON (§4/§6.3).
+      const supportsPayoutDouble =
+        req.clientFeatures?.has("race_payout_double") ?? false;
+      let pendingPayoutDoubleOffer = null;
+      if (supportsPayoutDouble) {
+        try {
+          pendingPayoutDoubleOffer = await racePayoutDoubleModel.findPending(
+            req.user.id,
+          );
+        } catch (error) {
+          logger.error("Load pending race payout double offer error:", error);
+        }
+      }
       const [result, tournaments] = await Promise.all([
         getRaces(req.user.id, supportsTeamRaces, {
           clientFeatures: req.clientFeatures,
           // Batch 2026-08-08 item 4: the completed-race podium rows gate
           // test-only characters on the release channel, same as race detail.
           releaseChannel: req.releaseChannel,
+          extraCompletedRaceIds: pendingPayoutDoubleOffer
+            ? pendingPayoutDoubleOffer.items.map((item) => item.raceIdSnapshot)
+            : [],
         }),
         supportsTournaments
           ? getTournamentsForUser(req.user.id)
@@ -348,9 +425,75 @@ function createRacesRouter(dependencies = {}) {
           };
         }
       }
+      if (supportsPayoutDouble) {
+        try {
+          const offer = await getRacePayoutDoubleOffer({
+            userId: req.user.id,
+            completed: result.completed,
+            pendingOffer: pendingPayoutDoubleOffer,
+          });
+          if (offer) result.payoutDoubleOffer = offer;
+        } catch (error) {
+          logger.error("Build race payout double offer error:", error);
+        }
+      }
       res.json(result);
     } catch (error) {
       console.error("Get races error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Static payout-double paths MUST precede every /:raceId route. New clients
+  // prepare before loading an ad; old clients never call these endpoints.
+  router.post(
+    "/results/double-payout/offer",
+    payoutDoubleEndpoint("prepare", async (req, res) => {
+      const result = await createRacePayoutDoubleOffer({
+        userId: req.user.id,
+        raceIds: req.body?.raceIds,
+        clientFeatures: req.clientFeatures,
+      });
+      res.status(result.created ? 201 : 200).json(result.body);
+    }),
+  );
+
+  router.post(
+    "/results/double-payout/:offerId/claim",
+    payoutDoubleEndpoint("claim", async (req, res) => {
+      const body = await claimRacePayoutDouble({
+        userId: req.user.id,
+        offerId: req.params.offerId,
+        clientFeatures: req.clientFeatures,
+      });
+      res.json(body);
+    }),
+  );
+
+  router.post("/results/seen", async (req, res) => {
+    try {
+      const { raceIds } = req.body || {};
+      if (
+        !Array.isArray(raceIds) ||
+        raceIds.length === 0 ||
+        !raceIds.every((id) => typeof id === "string" && id.length > 0)
+      ) {
+        return res
+          .status(400)
+          .json({ error: "raceIds must be a non-empty array of strings" });
+      }
+      await markRaceResultsSeen({
+        userId: req.user.id,
+        raceIds,
+        racePayoutDoubleCapability:
+          req.clientFeatures?.has("race_payout_double") ?? false,
+      });
+      res.json({ success: true });
+    } catch (error) {
+      if (error.name === "MarkRaceResultsSeenError") {
+        return res.status(error.statusCode || 400).json({ error: error.message });
+      }
+      console.error("Mark race results seen error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });
@@ -1239,39 +1382,6 @@ function createRacesRouter(dependencies = {}) {
           .json({ error: error.message });
       }
       console.error("Mark race chat read error:", error);
-      res.status(500).json({ error: "Internal server error" });
-    }
-  });
-
-  // POST /races/results/seen
-  // Body: { raceIds: [...] }. Marks the calling user's race-results popup as
-  // seen for the given races. Additive + display-only; old app builds never
-  // call this. Validates raceIds is a non-empty array of strings; unknown ids
-  // are ignored gracefully by the underlying updateMany.
-  router.post("/results/seen", async (req, res) => {
-    try {
-      const { raceIds } = req.body || {};
-      if (
-        !Array.isArray(raceIds) ||
-        raceIds.length === 0 ||
-        !raceIds.every((id) => typeof id === "string" && id.length > 0)
-      ) {
-        return res
-          .status(400)
-          .json({ error: "raceIds must be a non-empty array of strings" });
-      }
-      await markRaceResultsSeen({
-        userId: req.user.id,
-        raceIds,
-      });
-      res.json({ success: true });
-    } catch (error) {
-      if (error.name === "MarkRaceResultsSeenError") {
-        return res
-          .status(error.statusCode || 400)
-          .json({ error: error.message });
-      }
-      console.error("Mark race results seen error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });
