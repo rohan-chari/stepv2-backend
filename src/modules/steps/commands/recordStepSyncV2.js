@@ -65,6 +65,14 @@ function buildRecordStepSyncV2(dependencies = {}) {
   const raceModel = dependencies.Race || defaultRaceModel;
   const reconcileUploaderRaces =
     dependencies.reconcileUploaderRaces || defaultReconcileUploaderRaces;
+  // The race-keyed worker is the authoritative full-field reconciler. Keeping
+  // this on by default preserves the established response behavior, while a
+  // runtime flag lets production return after durable enqueue when inline
+  // reconciliation makes a step upload slow. Read at request time so a PM2
+  // reload is an immediate, reversible rollout/rollback.
+  const inlineUploaderReconciliation =
+    dependencies.inlineUploaderReconciliation ||
+    (() => process.env.SYNC_V2_INLINE_UPLOADER_RECONCILIATION !== "false");
   const events = dependencies.eventBus || defaultEventBus;
   const now = dependencies.now || (() => new Date());
   const maxWaitMs = dependencies.maxWaitMs ?? DEFAULT_MAX_WAIT_MS;
@@ -95,24 +103,32 @@ function buildRecordStepSyncV2(dependencies = {}) {
     // Locked uploader reconciliation. On failure, still return DEFERRED — the
     // already-enqueued full job owns recovery.
     let uploaderReconciliation;
-    try {
-      const { resolvedRaceCount, boxStateCurrent } = await reconcileUploaderRaces({
-        userId,
-        timeZone,
-      });
-      uploaderReconciliation = {
-        state: "CURRENT",
-        resolvedRaceCount,
-        boxStateCurrent,
-      };
-    } catch (error) {
-      // Logged + counted against SLO metrics by the worker/metrics layer.
-      console.error("sync-v2 uploader reconciliation failed:", error);
+    if (!inlineUploaderReconciliation()) {
       uploaderReconciliation = {
         state: "DEFERRED",
         resolvedRaceCount: 0,
         boxStateCurrent: false,
       };
+    } else {
+      try {
+        const { resolvedRaceCount, boxStateCurrent } = await reconcileUploaderRaces({
+          userId,
+          timeZone,
+        });
+        uploaderReconciliation = {
+          state: "CURRENT",
+          resolvedRaceCount,
+          boxStateCurrent,
+        };
+      } catch (error) {
+        // Logged + counted against SLO metrics by the worker/metrics layer.
+        console.error("sync-v2 uploader reconciliation failed:", error);
+        uploaderReconciliation = {
+          state: "DEFERRED",
+          resolvedRaceCount: 0,
+          boxStateCurrent: false,
+        };
+      }
     }
 
     // Transaction B: enqueue the queue generation(s) + finalize the reservation.

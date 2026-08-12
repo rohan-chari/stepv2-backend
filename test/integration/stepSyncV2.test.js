@@ -172,6 +172,42 @@ describe("POST /steps/sync-v2 (integration)", () => {
     assert.equal(reportedJob.generation, json.raceResolution.generation);
   });
 
+  it("can defer active-race reconciliation to the durable worker without changing the response shape", async () => {
+    const { token, user } = await createTestUser();
+    const raceId = await activeRaceWith(user.id, "Deferred reconciliation race");
+    const previous = process.env.SYNC_V2_INLINE_UPLOADER_RECONCILIATION;
+    process.env.SYNC_V2_INLINE_UPLOADER_RECONCILIATION = "false";
+    try {
+      const res = await request(baseUrl, "POST", "/steps/sync-v2", {
+        token,
+        headers: { "Idempotency-Key": uuid() },
+        body: bodyFor(4321),
+      });
+      assert.equal(res.status, 202);
+      const json = await res.json();
+
+      // Frozen clients already model DEFERRED: they fetch a live home card
+      // while the race-keyed worker performs the authoritative reconciliation.
+      assert.deepEqual(json.uploaderReconciliation, {
+        state: "DEFERRED",
+        resolvedRaceCount: 0,
+        boxStateCurrent: false,
+      });
+      assert.ok(json.raceResolution.jobId);
+
+      const [job] = await jobsForRace(raceId);
+      assert.ok(job);
+      assert.equal(job.state, "queued");
+      assert.deepEqual(job.triggeredByUserIds, [user.id]);
+    } finally {
+      if (previous == null) {
+        delete process.env.SYNC_V2_INLINE_UPLOADER_RECONCILIATION;
+      } else {
+        process.env.SYNC_V2_INLINE_UPLOADER_RECONCILIATION = previous;
+      }
+    }
+  });
+
   it("same-key replay with equivalent input returns the stored response and does not bump the generation", async () => {
     const { token, user } = await createTestUser();
     const raceId = await activeRaceWith(user.id, "Replay race");
