@@ -184,12 +184,16 @@ describe("featured races auto-join", () => {
   it("uses the private candidate stream, not a global pending row, for a capable auto-join opt-in", async () => {
     await appSettings.setFlag("seededRaceBucketsEnabled", true);
     const seed = await getDailySeed();
-    const now = Date.now();
+    const { upcomingWindowFor } = require("../../src/modules/races/services/seededRaceBuckets");
+    const { windowStart, windowEnd } = upcomingWindowFor(seed, new Date());
     const legacyUpcoming = await createSeededRace(seed.id, {
       status: "PENDING",
       startedAt: null,
-      scheduledStartAt: new Date(now + 23 * 60 * 60 * 1000),
-      endsAt: new Date(now + 47 * 60 * 60 * 1000),
+      scheduledStartAt: windowStart,
+      endsAt: windowEnd,
+    });
+    await prisma.seededRaceWindowModeRecord.create({
+      data: { seedId: seed.id, windowStart, windowEnd, mode: "BUCKET" },
     });
     const { user, token } = await createTestUser();
 
@@ -219,6 +223,9 @@ describe("featured races auto-join", () => {
     const seed = await getDailySeed();
     const { upcomingWindowFor } = require("../../src/modules/races/services/seededRaceBuckets");
     const { windowStart, windowEnd } = upcomingWindowFor(seed, new Date());
+    await prisma.seededRaceWindowModeRecord.create({
+      data: { seedId: seed.id, windowStart, windowEnd, mode: "BUCKET" },
+    });
     await createSeededRace(seed.id, {
       status: "PENDING",
       startedAt: null,

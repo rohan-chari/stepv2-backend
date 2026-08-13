@@ -4,7 +4,7 @@ const {
   filterInactiveUserIds,
   disableAutoEnrollForInactive,
 } = require("../services/seededInactivity");
-const { claimLegacyStream } = require("../services/seededRaceBuckets");
+const { claimLegacyStream, readWindowMode, BUCKET_FEATURE } = require("../services/seededRaceBuckets");
 
 // Auto-join for the seeded daily/weekly featured challenges
 // (users.auto_join_featured_races). Two entry points share the same
@@ -61,8 +61,18 @@ function buildAutoJoinFeaturedRaces(dependencies = {}) {
   // Cron path: enroll every opted-in user into a just-created seeded race.
   // `race` needs { id, maxParticipants }.
   async function enrollAutoJoinUsers(race) {
+    const windowStart = race.scheduledStartAt || race.startedAt;
+    const mode = race.seedId && windowStart
+      ? await readWindowMode({ prisma, seedId: race.seedId, windowStart })
+      : "LEGACY";
     const users = await prisma.user.findMany({
-      where: { autoJoinFeaturedRaces: true },
+      where: {
+        autoJoinFeaturedRaces: true,
+        // In a durable BUCKET window the capable accounts are elected by the
+        // bucket service before this legacy pass. Everybody else remains on
+        // the frozen-client compatible global field.
+        ...(mode === "BUCKET" ? { NOT: { clientFeatures: { has: BUCKET_FEATURE } } } : {}),
+      },
       select: { id: true },
       // Oldest accounts first so the cutoff on a capped race is deterministic.
       orderBy: { createdAt: "asc" },

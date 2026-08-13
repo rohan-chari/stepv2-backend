@@ -14,6 +14,7 @@ const TABLES_IN_ORDER = [
   "race_active_effects",
   "race_powerups",
   "race_participants",
+  "seeded_race_window_modes",
   "tournament_participants",
   "tournaments",
   "tournament_seeds",

@@ -701,14 +701,11 @@ function createAuthRouter(dependencies = {}) {
       });
       if (enabled) {
         try {
-          const bucketMode =
-            (await appSettings.getFlag("seededRaceBucketsEnabled")) === true &&
-            supportsSeededRaceBuckets(req.clientFeatures);
-          if (bucketMode) {
-            // This is an explicit, capable-client preference mutation, so it
-            // elects the next private candidate rather than enrolling the
-            // user in a global PENDING race. The election is idempotent and
-            // deliberately does not create or reveal a bucket online.
+          // Capability is durable account state, not a one-request header:
+          // a tokenless settings request after an upgrade must still choose
+          // the private stream of an already-stamped BUCKET window.
+          const storedFeatures = new Set(user.clientFeatures || req.user.clientFeatures || []);
+          if (supportsSeededRaceBuckets(storedFeatures)) {
             for (const seedKind of ["DAILY_10K", "WEEKLY_50K"]) {
               try {
                 await seededBuckets.elect({
@@ -717,18 +714,21 @@ function createAuthRouter(dependencies = {}) {
                   window: "UPCOMING",
                 });
               } catch (error) {
-                // A disabled/missing individual seed is harmless; the user
-                // preference still persists and another active seed can be
-                // elected. Infrastructure failures remain best-effort just as
-                // the legacy auto-enrollment path has always been.
-                if (!(error instanceof SeededBucketError) || error.code !== "SEED_NOT_FOUND_OR_DISABLED") {
+                // LEGACY/missing windows retain the legacy enrollment below;
+                // the preference write itself remains best-effort as it has
+                // always been.
+                if (!(error instanceof SeededBucketError) || ![
+                  "SEED_NOT_FOUND_OR_DISABLED", "MATCHING_UNAVAILABLE",
+                ].includes(error.code)) {
                   throw error;
                 }
               }
             }
-          } else {
-            await optUserIntoPendingSeededRaces(req.user.id);
           }
+          // This command consults the stamped mode and excludes capable users
+          // only from BUCKET windows, so it fills every applicable LEGACY row
+          // without relying on the current request token or live flag.
+          await optUserIntoPendingSeededRaces(req.user.id);
         } catch (error) {
           console.error("Featured auto-join opt-in error:", error);
         }

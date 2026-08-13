@@ -145,8 +145,14 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
 
   // Races visible to this client (matchup races and — for tokenless clients —
   // team races are excluded from every bucket).
+  const supportsBuckets = clientFeatures?.has("seeded_race_buckets") ?? false;
   const visible = races.filter(
-    (race) => !race.tournamentId && !(race.isTeamRace && !supportsTeamRaces)
+    (race) =>
+      !race.tournamentId &&
+      !(race.isTeamRace && !supportsTeamRaces) &&
+      // An older/tokenless binary cannot render a private bucket card. The
+      // membership remains durable, but this compatible list simply omits it.
+      !(race.seededBucketId && !supportsBuckets)
   );
 
   const leaderUserIds = visible

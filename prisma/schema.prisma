@@ -918,6 +918,14 @@ enum SeededRaceWindowStream {
   BUCKET
 }
 
+// Immutable placement policy for one seeded Daily/Weekly window. This is
+// deliberately distinct from the live feature flag: a window is stamped once
+// at creation, so a rollback can affect only later windows.
+enum SeededRaceWindowMode {
+  LEGACY
+  BUCKET
+}
+
 model Race {
   id                   String           @id @default(uuid())
   creatorId            String?          @map("creator_id")
@@ -1087,6 +1095,7 @@ model RaceSeed {
   races Race[]
   seededBuckets SeededRaceBucket[]
   seededWindowMemberships SeededRaceWindowMembership[]
+  seededWindowModes SeededRaceWindowModeRecord[]
 
   @@map("race_seeds")
 }
@@ -1367,6 +1376,21 @@ model SeededRaceWindowMembership {
   @@unique([seedId, windowStart, userId])
   @@index([seedId, windowStart, stream])
   @@map("seeded_race_window_memberships")
+}
+
+model SeededRaceWindowModeRecord {
+  seedId      String               @map("seed_id")
+  windowStart DateTime             @db.Timestamptz(3) @map("window_start")
+  mode        SeededRaceWindowMode
+  windowEnd   DateTime             @db.Timestamptz(3) @map("window_end")
+  createdAt   DateTime             @default(now()) @map("created_at")
+  updatedAt   DateTime             @updatedAt @map("updated_at")
+
+  seed RaceSeed @relation(fields: [seedId], references: [id])
+
+  @@id([seedId, windowStart])
+  @@index([windowStart, mode])
+  @@map("seeded_race_window_modes")
 }
 
 // One immutable, server-prepared rewarded-ad batch. These tables are additive

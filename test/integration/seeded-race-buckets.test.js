@@ -21,6 +21,15 @@ describe("private seeded race buckets (integration)", () => {
   beforeEach(async () => {
     await cleanDatabase();
     await appSettings.setFlag("seededRaceBucketsEnabled", true);
+    // The runtime flag selects only a newly-created window. Existing test
+    // fixtures are intentionally explicit about their durable mode.
+    for (const kind of ["DAILY_10K", "WEEKLY_50K"]) {
+      const seed = await prisma.raceSeed.findUnique({ where: { kind } });
+      const { windowStart, windowEnd } = upcomingWindowFor(seed, new Date());
+      await prisma.seededRaceWindowModeRecord.create({
+        data: { seedId: seed.id, windowStart, windowEnd, mode: "BUCKET" },
+      });
+    }
   });
 
   it("keeps GET virtual, elects only through explicit UPCOMING POST, and persists ELECTED", async () => {
@@ -103,6 +112,11 @@ describe("private seeded race buckets (integration)", () => {
     // day, so the deterministic plan exists before the card becomes live.
     const beforeBoundary = new Date("2026-08-12T03:58:00.000Z");
     const { windowStart, windowEnd } = upcomingWindowFor(seed, beforeBoundary);
+    await prisma.seededRaceWindowModeRecord.upsert({
+      where: { seedId_windowStart: { seedId: seed.id, windowStart } },
+      create: { seedId: seed.id, windowStart, windowEnd, mode: "BUCKET" },
+      update: {},
+    });
     await prisma.seededRaceWindowMembership.createMany({
       data: [alice, bob].map(({ user }) => ({
         seedId: seed.id,
@@ -223,6 +237,36 @@ describe("private seeded race buckets (integration)", () => {
     });
     assert.equal(guessedJoin.status, 403);
     assert.equal((await guessedJoin.json()).code, "RACE_PRIVATE");
+
+    const frozenOwnDetail = await request(baseUrl, "GET", `/races/${race.id}`, {
+      token: alice.token,
+    });
+    assert.equal(frozenOwnDetail.status, 404);
+    assert.deepEqual(await frozenOwnDetail.json(), {
+      error: "Race not found",
+      code: "RACE_NOT_FOUND",
+    });
+    const capableOwnDetail = await request(baseUrl, "GET", `/races/${race.id}`, {
+      token: alice.token,
+      headers: FEATURES,
+    });
+    assert.equal(capableOwnDetail.status, 200);
+    const frozenList = await request(baseUrl, "GET", "/races", {
+      token: alice.token,
+    });
+    assert.equal(frozenList.status, 200);
+    assert.equal(
+      (await frozenList.json()).active.some((row) => row.id === race.id),
+      false,
+      "a durable BUCKET member on a tokenless device never receives an unusable bucket card"
+    );
+    for (const suffix of ["progress", "inventory", "feed", "messages"]) {
+      const response = await request(baseUrl, "GET", `/races/${race.id}/${suffix}`, {
+        token: alice.token,
+      });
+      assert.equal(response.status, 404, `tokenless bucket ${suffix} is non-revealing`);
+      assert.deepEqual(await response.json(), { error: "Race not found", code: "RACE_NOT_FOUND" });
+    }
 
     // Durable PRUNED assignments retain an audit participant row, but that row
     // must not authorize a former member to read private activity/chat/inventory.

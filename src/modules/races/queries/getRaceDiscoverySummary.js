@@ -34,6 +34,8 @@ function buildGetRaceDiscoverySummary(dependencies = {}) {
     supportsTeamRaces = false,
     supportsTournaments = false,
     supportsBuckets = false,
+    hiddenSeedKinds = new Set(),
+    hiddenSeededWindows = [],
   }) {
     const resolved = {
       publicRaceCount: true,
@@ -45,9 +47,10 @@ function buildGetRaceDiscoverySummary(dependencies = {}) {
       getPublicRaceCount({
         userId,
         supportsTeamRaces,
-        excludeSeeded: supportsBuckets,
+        excludeSeeded: false,
+        hiddenSeededWindows,
       }),
-      getFeaturedRaces({ userId, supportsBuckets }),
+      getFeaturedRaces({ userId, supportsBuckets, hiddenSeedKinds }),
       supportsTournaments
         ? getPublicTournaments({ userId })
         : Promise.resolve({ featured: [] }),

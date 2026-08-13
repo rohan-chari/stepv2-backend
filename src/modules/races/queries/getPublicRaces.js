@@ -37,6 +37,7 @@ function buildGetPublicRaces(dependencies = {}) {
     // caller — especially GET /races/public — stays on the byte-identical
     // legacy path below.
     excludeSeeded = false,
+    hiddenSeededWindows = [],
     suggestionMode = false,
   }) {
     if (suggestionMode) {
@@ -88,11 +89,15 @@ function buildGetPublicRaces(dependencies = {}) {
       });
     }
 
+    const hiddenWindows = new Set(hiddenSeededWindows.map(
+      (row) => `${row.seedId}:${new Date(row.windowStart).toISOString()}`
+    ));
     const races = await raceModel.findPublicPending({ excludeSeeded });
 
     const results = [];
     for (const race of races) {
       if (excludeSeeded && race.seedId) continue;
+      if (race.seedId && hiddenWindows.has(`${race.seedId}:${new Date(race.scheduledStartAt || race.startedAt).toISOString()}`)) continue;
       if (!isVisiblePublicRace(race, userId, supportsTeamRaces)) continue;
       const participants = race.participants || [];
       const acceptedCount = participants.filter(

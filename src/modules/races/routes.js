@@ -269,6 +269,16 @@ function createRacesRouter(dependencies = {}) {
   const markRaceResultsSeen =
     dependencies.markRaceResultsSeen || defaultMarkRaceResultsSeen;
   const raceModel = dependencies.Race || defaultRaceModel;
+
+  async function rejectTokenlessBucketDetail(req, res) {
+    if (supportsSeededRaceBuckets(req.clientFeatures)) return false;
+    const race = typeof raceModel.findSeededBucketMarker === "function"
+      ? await raceModel.findSeededBucketMarker(req.params.raceId)
+      : await raceModel.findById(req.params.raceId);
+    if (!race?.seededBucketId) return false;
+    res.status(404).json({ error: "Race not found", code: "RACE_NOT_FOUND" });
+    return true;
+  }
   const userModel = dependencies.User || defaultUserModel;
   const powerupModel = dependencies.RacePowerup || defaultPowerupModel;
   const effectModel = dependencies.RaceActiveEffect || defaultEffectModel;
@@ -545,14 +555,20 @@ function createRacesRouter(dependencies = {}) {
   // never read as a race id.
   router.get("/discovery-summary", async (req, res) => {
     try {
-      const bucketMode =
-        (await settings.getFlag("seededRaceBucketsEnabled")) === true &&
-        supportsSeededRaceBuckets(req.clientFeatures);
+      const capable = supportsSeededRaceBuckets(req.clientFeatures);
+      const hiddenSeedKinds = capable
+        ? new Set()
+        : await seededBuckets.selectedBucketSeedKinds(req.user.id);
+      const hiddenSeededWindows = await seededBuckets.bucketModeWindowKeys({
+        userId: capable ? null : req.user.id,
+      });
       const summary = await getRaceDiscoverySummary({
         userId: req.user.id,
         supportsTeamRaces: req.clientFeatures?.has("team_races") ?? false,
         supportsTournaments: req.clientFeatures?.has("tournaments") ?? false,
-        supportsBuckets: bucketMode,
+        supportsBuckets: capable,
+        hiddenSeedKinds,
+        hiddenSeededWindows,
       });
       res.json(summary);
     } catch (error) {
@@ -564,16 +580,17 @@ function createRacesRouter(dependencies = {}) {
   // GET /races/public
   router.get("/public", async (req, res) => {
     try {
-      const bucketMode =
-        (await settings.getFlag("seededRaceBucketsEnabled")) &&
-        supportsSeededRaceBuckets(req.clientFeatures);
+      const capable = supportsSeededRaceBuckets(req.clientFeatures);
       const races = await getPublicRaces({
         userId: req.user.id,
         // TR-702: old clients never see team races in the public browser.
         supportsTeamRaces: req.clientFeatures?.has("team_races") ?? false,
         // Capable clients never see the legacy global seeded field during the
         // mixed-version bridge; their private card is /featured-only.
-        excludeSeeded: bucketMode,
+        excludeSeeded: false,
+        hiddenSeededWindows: await seededBuckets.bucketModeWindowKeys({
+          userId: capable ? null : req.user.id,
+        }),
       });
       res.json({ races });
     } catch (error) {
@@ -588,10 +605,21 @@ function createRacesRouter(dependencies = {}) {
   // New endpoint — old clients never call it.
   router.get("/featured", async (req, res) => {
     try {
-      const bucketEnabled = await settings.getFlag("seededRaceBucketsEnabled");
+      const capable = supportsSeededRaceBuckets(req.clientFeatures);
+      // The documented GET mutation: it is capability-gated and protected by
+      // the window advisory lock inside the service. Any thrown infrastructure
+      // error reaches the existing 500 response with no partial transfer.
+      if (capable && req.user.autoJoinFeaturedRaces === true) {
+        await seededBuckets.reconcileFeaturedUser({
+          userId: req.user.id,
+          capable,
+          autoJoinFeaturedRaces: true,
+        });
+      }
       const races = await getFeaturedRaces({
         userId: req.user.id,
-        supportsBuckets: bucketEnabled && supportsSeededRaceBuckets(req.clientFeatures),
+        supportsBuckets: capable,
+        hiddenSeedKinds: capable ? new Set() : await seededBuckets.selectedBucketSeedKinds(req.user.id),
       });
       res.json({ races });
     } catch (error) {
@@ -604,7 +632,7 @@ function createRacesRouter(dependencies = {}) {
   // static and intentionally declared before /:raceId routes.
   router.post("/seeded/:seedKind/assign", async (req, res) => {
     try {
-      if (!(await settings.getFlag("seededRaceBucketsEnabled")) || !supportsSeededRaceBuckets(req.clientFeatures)) {
+      if (!supportsSeededRaceBuckets(req.clientFeatures)) {
         return res.status(503).json({ error: "Seeded bucket matching is unavailable", code: "MATCHING_UNAVAILABLE" });
       }
       const result = await seededBuckets.elect({ userId: req.user.id, seedKind: req.params.seedKind, window: req.body?.window });
@@ -631,6 +659,19 @@ function createRacesRouter(dependencies = {}) {
     } catch (error) {
       console.error("Team name suggest error:", error);
       res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Private seeded buckets are a capability-gated surface. Put this ahead of
+  // every dynamic `/:raceId/...` route so a frozen device sharing an upgraded
+  // account cannot use a remembered/push-delivered id to read or mutate bucket
+  // data it cannot render. Static routes above remain unaffected.
+  router.use("/:raceId", async (req, res, next) => {
+    try {
+      if (await rejectTokenlessBucketDetail(req, res)) return;
+      next();
+    } catch (error) {
+      next(error);
     }
   });
 
@@ -767,7 +808,8 @@ function createRacesRouter(dependencies = {}) {
         req.releaseChannel,
         req.clientFeatures?.has("remote_assets") ?? false,
         req.clientFeatures?.has("race_leave") ?? false,
-        req.clientFeatures?.has("team_races") ?? false
+        req.clientFeatures?.has("team_races") ?? false,
+        supportsSeededRaceBuckets(req.clientFeatures)
       );
       res.json(result);
 
@@ -798,7 +840,10 @@ function createRacesRouter(dependencies = {}) {
       }
     } catch (error) {
       if (error.statusCode) {
-        return res.status(error.statusCode).json({ error: error.message });
+        return res.status(error.statusCode).json({
+          error: error.message,
+          ...(error.code ? { code: error.code } : {}),
+        });
       }
       console.error("Get race details error:", error);
       res.status(500).json({ error: "Internal server error" });

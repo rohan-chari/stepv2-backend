@@ -307,7 +307,14 @@ function registerNotificationHandlers(dependencies = {}) {
         isTeamRace,
         teamAName,
         teamBName,
+        isSeededBucket,
       } = data;
+      // Device capabilities are not tracked per token. A private seeded bucket
+      // must therefore never send its account-wide start notification with a
+      // deep-link race ID: an older device sharing this account would receive
+      // an unusable/private route. The capable app discovers its assigned card
+      // through the authenticated bucket-aware reads instead.
+      if (isSeededBucket === true) return;
       // TR-684: team races get team-framed start copy.
       const startBody =
         isTeamRace && teamAName && teamBName

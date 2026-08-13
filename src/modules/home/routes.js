@@ -56,7 +56,9 @@ function createHomeRouter(dependencies = {}) {
         supportsTournaments:
           req.clientFeatures?.has("tournaments") ?? false,
         supportsBuckets:
-          (await appSettings.getFlag("seededRaceBucketsEnabled")) === true &&
+          // The stamped window, resolved by the race query, is authoritative;
+          // the live flag is only a creation-time input and must not hide an
+          // already-selected private stream after a rollback.
           supportsSeededRaceBuckets(req.clientFeatures),
       });
       res.json(result);

@@ -39,6 +39,16 @@ const participantInclude = {
 };
 
 const Race = {
+  // Capability guard for dynamic race routes. Deliberately lean: old clients
+  // poll progress frequently, so checking whether an opaque id is a private
+  // seeded bucket must not hydrate the full participant/accessory graph.
+  async findSeededBucketMarker(id) {
+    return prisma.race.findUnique({
+      where: { id },
+      select: { seededBucketId: true },
+    });
+  },
+
   async findById(id) {
     return prisma.race.findUnique({
       where: { id },
@@ -309,6 +319,9 @@ const Race = {
       },
       select: {
         id: true,
+        seedId: true,
+        startedAt: true,
+        scheduledStartAt: true,
         status: true,
         startedAt: true,
         targetSteps: true,
@@ -510,6 +523,9 @@ const Race = {
       },
       select: {
         id: true,
+        seedId: true,
+        startedAt: true,
+        scheduledStartAt: true,
         tournamentId: true,
         isTeamRace: true,
         status: true,

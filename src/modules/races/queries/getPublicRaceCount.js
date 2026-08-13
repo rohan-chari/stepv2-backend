@@ -13,10 +13,15 @@ function buildGetPublicRaceCount(dependencies = {}) {
     userId,
     supportsTeamRaces = false,
     excludeSeeded = false,
+    hiddenSeededWindows = [],
   }) {
+    const hiddenWindows = new Set(hiddenSeededWindows.map(
+      (row) => `${row.seedId}:${new Date(row.windowStart).toISOString()}`
+    ));
     const races = await raceModel.findPublicPendingLean({ excludeSeeded });
     let count = 0;
     for (const race of races) {
+      if (race.seedId && hiddenWindows.has(`${race.seedId}:${new Date(race.scheduledStartAt || race.startedAt).toISOString()}`)) continue;
       if (isVisiblePublicRace(race, userId, supportsTeamRaces)) count += 1;
     }
     return count;

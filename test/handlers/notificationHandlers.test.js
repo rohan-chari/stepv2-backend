@@ -110,6 +110,28 @@ test("FRIEND_REQUEST_ACCEPTED sends push to requester with friends route payload
   });
 });
 
+test("RACE_STARTED suppresses private seeded-bucket deep links for mixed-device accounts", async () => {
+  const eventBus = createMockEventBus();
+  const sent = [];
+  registerNotificationHandlers({
+    eventBus,
+    DeviceToken: {
+      async findByUserId() { return [{ token: "old-device", platform: "ios" }]; },
+      async deleteToken() {},
+    },
+    apnsService: {
+      async sendNotification(args) { sent.push(args); return { success: true }; },
+    },
+    logger: { warn() {}, error() {} },
+  });
+
+  await eventBus.emit("RACE_STARTED", {
+    raceId: "private-bucket", raceName: "Daily 10K", participantUserIds: ["account"],
+    isSeededBucket: true,
+  });
+  assert.equal(sent.length, 0);
+});
+
 test("POWERUP_USED pushes an attack alert while the race is live (ACTIVE, before endsAt)", async () => {
   const eventBus = createMockEventBus();
   let sentNotification;

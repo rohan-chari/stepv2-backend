@@ -8,6 +8,7 @@ const {
 } = require("../../../shared/time/week");
 const { prorateSamplesIntoWindow } = require("../../steps/models/stepSample");
 const { normalizePowerupConfig } = require("./validateRaceConfig");
+const { filterInactiveUserIds } = require("./seededInactivity");
 
 const SEED_TIMEZONE = "America/New_York";
 const BUCKET_CAPACITY = 15;
@@ -40,6 +41,42 @@ function supportsBuckets(clientFeatures) {
   return clientFeatures?.has(BUCKET_FEATURE) === true;
 }
 
+function windowLockKey(seedId, windowStart) {
+  return `seeded-bucket:${seedId}:${new Date(windowStart).toISOString()}`;
+}
+
+// Lock ordering is intentional and shared by every cross-stream operation:
+// take the window advisory lock before touching a race/participant row, then
+// re-read durable policy and membership while that lock is held.
+async function withSeededWindowLock({ prisma, seedId, windowStart, fn }) {
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${windowLockKey(seedId, windowStart)}))`;
+    return fn(tx);
+  });
+}
+
+async function readWindowMode({ prisma, seedId, windowStart }) {
+  if (!prisma.seededRaceWindowModeRecord) return "LEGACY";
+  const row = await prisma.seededRaceWindowModeRecord.findUnique({
+    where: { seedId_windowStart: { seedId, windowStart: new Date(windowStart) } },
+    select: { mode: true },
+  });
+  // Mixed deploy safe default: code may arrive before the migration backfill
+  // has touched a row, and that row must remain on the legacy path.
+  return row?.mode || "LEGACY";
+}
+
+async function stampWindowMode({ prisma, seedId, windowStart, windowEnd, mode }) {
+  return withSeededWindowLock({ prisma, seedId, windowStart, fn: async (tx) => {
+    if (!tx.seededRaceWindowModeRecord) return { mode: "LEGACY" };
+    return tx.seededRaceWindowModeRecord.upsert({
+      where: { seedId_windowStart: { seedId, windowStart } },
+      create: { seedId, windowStart, windowEnd, mode },
+      update: {},
+    });
+  }});
+}
+
 // The ledger is the single authority across the temporary global stream and
 // private buckets. Legacy enrollment must claim it before adding a
 // RaceParticipant; otherwise the same person can enter both fields by changing
@@ -49,24 +86,14 @@ async function claimLegacyStream({ prisma, race, userId }) {
   if (!race?.seedId || !prisma?.seededRaceWindowMembership) return true;
   const windowStart = race.scheduledStartAt || race.startedAt;
   if (!windowStart) return true;
-  const membership = await prisma.seededRaceWindowMembership.upsert({
-    where: {
-      seedId_windowStart_userId: {
-        seedId: race.seedId,
-        windowStart: new Date(windowStart),
-        userId,
-      },
-    },
-    create: {
-      seedId: race.seedId,
-      windowStart: new Date(windowStart),
-      userId,
-      stream: "LEGACY",
-      raceId: race.id,
-    },
-    update: {},
-  });
-  return membership.stream === "LEGACY";
+  return withSeededWindowLock({ prisma, seedId: race.seedId, windowStart, fn: async (tx) => {
+    const membership = await tx.seededRaceWindowMembership.upsert({
+      where: { seedId_windowStart_userId: { seedId: race.seedId, windowStart: new Date(windowStart), userId } },
+      create: { seedId: race.seedId, windowStart: new Date(windowStart), userId, stream: "LEGACY", raceId: race.id },
+      update: {},
+    });
+    return membership.stream === "LEGACY";
+  }});
 }
 
 function skillBand(a, b) {
@@ -192,6 +219,80 @@ function buildSeededRaceBuckets(dependencies = {}) {
   const now = dependencies.now || (() => new Date());
   const settings = dependencies.appSettings || defaultAppSettings;
 
+  async function automaticCandidates(tx) {
+    const users = await tx.user.findMany({
+      where: {
+        autoJoinFeaturedRaces: true,
+        clientFeatures: { has: BUCKET_FEATURE },
+      },
+      select: { id: true },
+      orderBy: { id: "asc" },
+    });
+    const ids = users.map((user) => user.id);
+    if (!ids.length) return ids;
+    if ((await settings.getFlag("seededInactivityPruneEnabled")) !== true) return ids;
+    try {
+      const inactive = await filterInactiveUserIds({ userIds: ids, now: now(), prisma: tx });
+      return ids.filter((id) => !inactive.has(id));
+    } catch (error) {
+      // Preserve the legacy enrollment policy's fail-open availability rule.
+      return ids;
+    }
+  }
+
+  async function electAutomatic({ seed, windowStart, windowEnd }) {
+    return withSeededWindowLock({ prisma, seedId: seed.id, windowStart, fn: async (tx) => {
+      if (await readWindowMode({ prisma: tx, seedId: seed.id, windowStart }) !== "BUCKET") return 0;
+      if (now() >= windowStart) return 0;
+      const finalized = await tx.seededRaceBucket.count({ where: { seedId: seed.id, windowStart } });
+      if (finalized > 0) return 0;
+      const userIds = await automaticCandidates(tx);
+      if (!userIds.length) return 0;
+      const existing = await tx.seededRaceWindowMembership.findMany({
+        where: { seedId: seed.id, windowStart, userId: { in: userIds } },
+        select: { userId: true, stream: true },
+      });
+      const taken = new Set(existing.map((row) => row.userId));
+      const candidates = userIds.filter((id) => !taken.has(id));
+      if (!candidates.length) return 0;
+      await tx.seededRaceWindowMembership.createMany({
+        data: candidates.map((userId) => ({ seedId: seed.id, windowStart, userId, stream: "BUCKET" })),
+        skipDuplicates: true,
+      });
+      return candidates.length;
+    }});
+  }
+
+  async function reconcileFeatured({ userId, seed, windowStart, capable, autoJoinFeaturedRaces }) {
+    if (!capable || !autoJoinFeaturedRaces || now() >= windowStart) return false;
+    return withSeededWindowLock({ prisma, seedId: seed.id, windowStart, fn: async (tx) => {
+      if (await readWindowMode({ prisma: tx, seedId: seed.id, windowStart }) !== "BUCKET") return false;
+      if (now() >= windowStart) return false;
+      const [bucketCount, membership] = await Promise.all([
+        tx.seededRaceBucket.count({ where: { seedId: seed.id, windowStart } }),
+        tx.seededRaceWindowMembership.findUnique({
+          where: { seedId_windowStart_userId: { seedId: seed.id, windowStart, userId } },
+        }),
+      ]);
+      if (bucketCount || membership?.stream === "BUCKET") return false;
+      const participant = await tx.raceParticipant.findFirst({
+        where: {
+          userId,
+          status: "ACCEPTED",
+          race: { seedId: seed.id, seededBucketId: null, status: "PENDING", scheduledStartAt: windowStart },
+        },
+        select: { id: true, raceId: true },
+      });
+      if (!participant || membership?.stream !== "LEGACY") return false;
+      await tx.raceParticipant.delete({ where: { id: participant.id } });
+      await tx.seededRaceWindowMembership.update({
+        where: { seedId_windowStart_userId: { seedId: seed.id, windowStart, userId } },
+        data: { stream: "BUCKET", raceId: null },
+      });
+      return true;
+    }});
+  }
+
   async function elect({ userId, seedKind, window = "UPCOMING" }) {
     if (window !== "UPCOMING") throw new SeededBucketError("Window must be UPCOMING", 400, "INVALID_WINDOW");
     const seed = await prisma.raceSeed.findFirst({ where: { kind: seedKind, active: true } });
@@ -203,11 +304,12 @@ function buildSeededRaceBuckets(dependencies = {}) {
     // Election and finalization share the identical transaction-scoped lock.
     // Without it, an election that commits after finalise snapshots candidates
     // but before the boundary would receive 202 yet never get an assignment.
-    const lockKey = `seeded-bucket:${seed.id}:${new Date(windowStart).toISOString()}`;
-    await prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+    await withSeededWindowLock({ prisma, seedId: seed.id, windowStart, fn: async (tx) => {
       if (now() >= windowStart) {
         throw new SeededBucketError("Window is finalized", 409, "WINDOW_FINALIZED");
+      }
+      if (await readWindowMode({ prisma: tx, seedId: seed.id, windowStart }) !== "BUCKET") {
+        throw new SeededBucketError("Seeded bucket matching is unavailable", 503, "MATCHING_UNAVAILABLE");
       }
       const finalized = await tx.seededRaceBucket.count({
         where: { seedId: seed.id, windowStart },
@@ -257,7 +359,7 @@ function buildSeededRaceBuckets(dependencies = {}) {
       if (membership.stream === "LEGACY") {
         throw new SeededBucketError("Legacy stream elected", 409, "LEGACY_STREAM_ELECTED");
       }
-    });
+    }});
     return { elected: true, raceId: null, finalizesAt: windowStart, windowEnd };
   }
 
@@ -270,9 +372,8 @@ function buildSeededRaceBuckets(dependencies = {}) {
       settings.getFlag("fundedPrizePoolsEnabled"),
       settings.getFlag("seededGeometricPayoutsEnabled"),
     ]);
-    const lockKey = `seeded-bucket:${seed.id}:${new Date(windowStart).toISOString()}`;
-    return prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+    return withSeededWindowLock({ prisma, seedId: seed.id, windowStart, fn: async (tx) => {
+      if (await readWindowMode({ prisma: tx, seedId: seed.id, windowStart }) !== "BUCKET") return [];
       const elected = await tx.seededRaceWindowMembership.findMany({
         where: { seedId: seed.id, windowStart, stream: "BUCKET" },
         select: { userId: true }, orderBy: { userId: "asc" },
@@ -312,7 +413,7 @@ function buildSeededRaceBuckets(dependencies = {}) {
         rows.push(bucket);
       }
       return rows;
-    });
+    }});
   }
 
   async function featuredCards(userId) {
@@ -324,6 +425,11 @@ function buildSeededRaceBuckets(dependencies = {}) {
     for (const seed of seeds) {
       const current = windowFor(seed, now());
       const upcoming = upcomingWindowFor(seed, now());
+      const [currentMode, upcomingMode] = await Promise.all([
+        readWindowMode({ prisma, seedId: seed.id, windowStart: current.windowStart }),
+        readWindowMode({ prisma, seedId: seed.id, windowStart: upcoming.windowStart }),
+      ]);
+      if (currentMode !== "BUCKET" && upcomingMode !== "BUCKET") continue;
       const bucket = await prisma.seededRaceBucket.findFirst({
         // Membership predicate is the privacy boundary: never select another
         // player's bucket merely to discover that this viewer has no row.
@@ -364,7 +470,63 @@ function buildSeededRaceBuckets(dependencies = {}) {
     return cards;
   }
 
-  return { elect, finalise, featuredCards };
+  async function reconcileFeaturedUser({ userId, capable, autoJoinFeaturedRaces }) {
+    if (!capable || !autoJoinFeaturedRaces) return 0;
+    const seeds = await prisma.raceSeed.findMany({
+      where: { active: true, kind: { in: ["DAILY_10K", "WEEKLY_50K"] } },
+    });
+    let moved = 0;
+    for (const seed of seeds) {
+      const upcoming = upcomingWindowFor(seed, now());
+      if (await reconcileFeatured({ userId, seed, windowStart: upcoming.windowStart, capable, autoJoinFeaturedRaces })) moved += 1;
+    }
+    return moved;
+  }
+
+  async function selectedBucketSeedKinds(userId) {
+    const seeds = await prisma.raceSeed.findMany({
+      where: { active: true, kind: { in: ["DAILY_10K", "WEEKLY_50K"] } },
+      select: { id: true, kind: true, cadence: true },
+    });
+    const keys = [];
+    for (const seed of seeds) {
+      const current = windowFor(seed, now());
+      const upcoming = upcomingWindowFor(seed, now());
+      keys.push({ seedId: seed.id, windowStart: current.windowStart });
+      keys.push({ seedId: seed.id, windowStart: upcoming.windowStart });
+    }
+    if (!keys.length) return new Set();
+    const rows = await prisma.seededRaceWindowMembership.findMany({
+      where: { userId, stream: "BUCKET", OR: keys },
+      select: { seedId: true },
+    });
+    const selected = new Set(rows.map((row) => row.seedId));
+    return new Set(seeds.filter((seed) => selected.has(seed.id)).map((seed) => seed.kind));
+  }
+
+  async function bucketModeWindowKeys({ userId = null } = {}) {
+    const seeds = await prisma.raceSeed.findMany({
+      where: { active: true, kind: { in: ["DAILY_10K", "WEEKLY_50K"] } },
+      select: { id: true, cadence: true },
+    });
+    const windows = [];
+    for (const seed of seeds) {
+      for (const period of [windowFor(seed, now()), upcomingWindowFor(seed, now())]) {
+        if (await readWindowMode({ prisma, seedId: seed.id, windowStart: period.windowStart }) === "BUCKET") {
+          windows.push({ seedId: seed.id, windowStart: period.windowStart });
+        }
+      }
+    }
+    if (!userId || !windows.length) return windows;
+    const selected = await prisma.seededRaceWindowMembership.findMany({
+      where: { userId, stream: "BUCKET", OR: windows },
+      select: { seedId: true, windowStart: true },
+    });
+    const selectedKeys = new Set(selected.map((row) => `${row.seedId}:${new Date(row.windowStart).toISOString()}`));
+    return windows.filter((row) => selectedKeys.has(`${row.seedId}:${new Date(row.windowStart).toISOString()}`));
+  }
+
+  return { elect, electAutomatic, finalise, featuredCards, reconcileFeatured, reconcileFeaturedUser, selectedBucketSeedKinds, bucketModeWindowKeys };
 }
 
-module.exports = { buildSeededRaceBuckets, SeededBucketError, windowFor, upcomingWindowFor, supportsBuckets, claimLegacyStream, planBuckets, BUCKET_CAPACITY, BUCKET_FEATURE };
+module.exports = { buildSeededRaceBuckets, SeededBucketError, windowFor, upcomingWindowFor, supportsBuckets, claimLegacyStream, planBuckets, BUCKET_CAPACITY, BUCKET_FEATURE, withSeededWindowLock, readWindowMode, stampWindowMode };

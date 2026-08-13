@@ -15,14 +15,16 @@ function buildGetFeaturedRaces(dependencies = {}) {
   // joined or full races — a featured card stays pinned and flips to a VIEW /
   // FULL state instead. Each entry carries the viewer's join status so the
   // client can render JOIN vs VIEW without a failed join round-trip.
-  return async function getFeaturedRaces({ userId, suggestionMode = false, supportsBuckets = false }) {
-    if (supportsBuckets && !suggestionMode) return seededBuckets.featuredCards(userId);
+  return async function getFeaturedRaces({ userId, suggestionMode = false, supportsBuckets = false, hiddenSeedKinds = new Set() }) {
+    const bucketCards = supportsBuckets && !suggestionMode
+      ? await seededBuckets.featuredCards(userId)
+      : [];
     if (suggestionMode) {
       const rows = await raceModel.findFeaturedSuggestions({
         userId,
         now: now(),
       });
-      return rows.map((raw) => {
+      return rows.filter((raw) => !hiddenSeedKinds.has(raw.seedKind)).map((raw) => {
         const participants = raw.participants || [];
         const acceptedCount = Number(raw.acceptedCount || 0);
         const race = {
@@ -161,7 +163,10 @@ function buildGetFeaturedRaces(dependencies = {}) {
       return aRank - bRank;
     });
 
-    return featured;
+    if (!bucketCards.length) return featured.filter((card) => !hiddenSeedKinds.has(card.seedKind));
+    const bucketKinds = new Set(bucketCards.map((card) => card.seedKind));
+    return [...featured.filter((card) => !bucketKinds.has(card.seedKind) && !hiddenSeedKinds.has(card.seedKind)), ...bucketCards]
+      .sort((a, b) => (SEED_RANK[a.seedKind] ?? 2) - (SEED_RANK[b.seedKind] ?? 2));
   };
 }
 

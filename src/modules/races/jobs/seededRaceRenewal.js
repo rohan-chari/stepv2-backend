@@ -2,7 +2,7 @@ const { prisma: defaultPrisma } = require("../../../db");
 const { eventBus } = require("../../../shared/events/eventBus");
 const { appSettings } = require("../../../shared/config/appSettings");
 const { buildAutoJoinFeaturedRaces } = require("../commands/autoJoinFeaturedRaces");
-const { buildSeededRaceBuckets } = require("../services/seededRaceBuckets");
+const { buildSeededRaceBuckets, stampWindowMode } = require("../services/seededRaceBuckets");
 const { normalizePowerupConfig } = require("../services/validateRaceConfig");
 const {
   startOfDayNewYork,
@@ -134,6 +134,9 @@ function buildRenewSeededRaces(dependencies = {}) {
       const joined = await enrollAutoJoinUsers({
         id: race.id,
         maxParticipants: seed.maxParticipants,
+        seedId: race.seedId,
+        startedAt: race.startedAt,
+        scheduledStartAt: race.scheduledStartAt,
       });
       if (joined > 0) {
         logger.log(
@@ -400,6 +403,7 @@ function buildRenewSeededRaces(dependencies = {}) {
       raceName: race.name,
       creatorUserId: null,
       participantUserIds: accepted.map((p) => p.userId),
+      isSeededBucket: Boolean(race.seededBucketId),
     });
 
     return {
@@ -419,10 +423,7 @@ function buildRenewSeededRaces(dependencies = {}) {
     // Buckets finalise once, inside their own advisory-locked transaction, in a
     // short deterministic pre-boundary window. This never affects historical
     // legacy/global rows and fails closed if matching cannot complete.
-    if (
-      ["DAILY_10K", "WEEKLY_50K"].includes(seed.kind) &&
-      (await settings.getFlag("seededRaceBucketsEnabled")) === true
-    ) {
+    if (["DAILY_10K", "WEEKLY_50K"].includes(seed.kind)) {
       const next = windowFor(seed, current.endsAt);
       if (next.startedAt.getTime() - nowMs <= 5 * 60 * 1000) {
         const buckets = await seededBuckets.finalise({
@@ -479,6 +480,15 @@ function buildRenewSeededRaces(dependencies = {}) {
         endsAt: current.endsAt,
         scheduledStartAt: null,
       });
+      // A cold-start active window cannot safely be bucketed after its
+      // matching cutoff; stamp it legacy rather than consulting the flag on a
+      // later read/finalizer pass.
+      if (["DAILY_10K", "WEEKLY_50K"].includes(seed.kind)) {
+        await stampWindowMode({
+          prisma, seedId: seed.id, windowStart: current.startedAt,
+          windowEnd: current.endsAt, mode: "LEGACY",
+        });
+      }
       await autoEnroll(seed, race);
       results.push({ action: "created-active", seedKind: seed.kind, race });
     }
@@ -496,6 +506,22 @@ function buildRenewSeededRaces(dependencies = {}) {
         scheduledStartAt: next.startedAt,
         endsAt: next.endsAt,
       });
+      if (["DAILY_10K", "WEEKLY_50K"].includes(seed.kind)) {
+        const mode = (await settings.getFlag("seededRaceBucketsEnabled")) === true
+          ? "BUCKET"
+          : "LEGACY";
+        // The race and durable mode are created in the same renewal turn; the
+        // upsert is write-once, so a flag flip can never retarget this window.
+        await stampWindowMode({
+          prisma, seedId: seed.id, windowStart: next.startedAt,
+          windowEnd: next.endsAt, mode,
+        });
+        if (mode === "BUCKET") {
+          await seededBuckets.electAutomatic({
+            seed, windowStart: next.startedAt, windowEnd: next.endsAt,
+          });
+        }
+      }
       await autoEnroll(seed, race);
       results.push({ action: "created-upcoming", seedKind: seed.kind, race });
     }
