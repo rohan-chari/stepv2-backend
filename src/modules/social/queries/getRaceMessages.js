@@ -27,6 +27,21 @@ const HIDDEN_SYSTEM_EVENT_TYPES = [
   "POWERUP_REROLLED",
 ];
 
+const WELCOME_MYSTERY_BOX_DESCRIPTIONS = new Set([
+  "Welcome gift. A mystery box!",
+  "Welcome gift — a mystery box!",
+]);
+
+// A previously populated Redis list can outlive this deployment briefly. Keep
+// this defensive filter so those rows never render; the DB predicate below is
+// still required to keep fresh pages full.
+function isHiddenSystemEvent(event) {
+  return HIDDEN_SYSTEM_EVENT_TYPES.includes(event.eventType) ||
+    (event.eventType === "POWERUP_EARNED" &&
+      event.powerupType === "MYSTERY_BOX" &&
+      WELCOME_MYSTERY_BOX_DESCRIPTIONS.has(event.description));
+}
+
 function normalizeLimit(limit) {
   const parsed = Number(limit);
   if (!Number.isFinite(parsed)) return 50;
@@ -210,6 +225,9 @@ function buildGetRaceMessages(dependencies = {}) {
               // fanny-pack auto-activate audit rows (B1) — audit-only, must never
               // surface what a box contained.
               excludeEventTypes: HIDDEN_SYSTEM_EVENT_TYPES,
+              // Welcome grants are onboarding gifts, not race activity. This is
+              // query-level so they cannot consume a page slot.
+              excludeWelcomeMysteryBoxEvents: true,
             })
         : Promise.resolve([]),
     ]);
@@ -264,7 +282,7 @@ function buildGetRaceMessages(dependencies = {}) {
       // Belt-and-suspenders: these are already excluded at the DB level
       // (excludeEventTypes -> notIn); the JS filter is a redundant no-op that
       // keeps the feed safe even if the model call is ever changed.
-      .filter((e) => !HIDDEN_SYSTEM_EVENT_TYPES.includes(e.eventType))
+      .filter((e) => !isHiddenSystemEvent(e))
       .map((e) => {
       let description = e.description;
       if (stealthedUserIds.has(e.actorUserId)) {

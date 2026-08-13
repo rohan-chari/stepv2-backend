@@ -83,6 +83,11 @@ function isCacheableShape({ cursor, limit, kind }) {
   );
 }
 
+const WELCOME_MYSTERY_BOX_DESCRIPTIONS = [
+  "Welcome gift. A mystery box!",
+  "Welcome gift — a mystery box!",
+];
+
 async function loadRows(raceId, kind, hiddenSystemEventTypes) {
   if (kind === "USER") {
     return prisma.raceMessage.findMany({
@@ -100,6 +105,11 @@ async function loadRows(raceId, kind, hiddenSystemEventTypes) {
       ...(hiddenSystemEventTypes && hiddenSystemEventTypes.length > 0
         ? { eventType: { notIn: hiddenSystemEventTypes } }
         : {}),
+      NOT: {
+        eventType: "POWERUP_EARNED",
+        powerupType: "MYSTERY_BOX",
+        description: { in: WELCOME_MYSTERY_BOX_DESCRIPTIONS },
+      },
     },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: CACHE_ROW_CAP,

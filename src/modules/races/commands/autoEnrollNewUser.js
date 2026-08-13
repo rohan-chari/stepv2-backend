@@ -72,15 +72,6 @@ function buildAutoEnrollNewUser(dependencies = {}) {
               earnedAtSteps: i,
             },
           });
-          await tx.racePowerupEvent.create({
-            data: {
-              raceId: race.id,
-              actorUserId: user.id,
-              eventType: "POWERUP_EARNED",
-              powerupType: "MYSTERY_BOX",
-              description: "Welcome gift. A mystery box!",
-            },
-          });
           earnedEvents.push({
             raceId: race.id,
             userId: user.id,

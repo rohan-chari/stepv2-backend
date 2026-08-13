@@ -118,6 +118,13 @@ async function getMessages(token, raceId, { kind, limit, cursor } = {}) {
   return res.json();
 }
 
+async function getFeed(token, raceId) {
+  const res = await request(server.baseUrl, "GET", `/races/${raceId}/feed`, {
+    token,
+  });
+  return res.json();
+}
+
 describe("B1 — mystery-box reveals hidden from race messages feed", () => {
   before(async () => {
     server = await getSharedServer();
@@ -178,13 +185,69 @@ describe("B1 — mystery-box reveals hidden from race messages feed", () => {
         description: "AliceB1BBBB earned a mystery box!",
       },
     });
-
     const { messages } = await getMessages(alice.token, raceId, {
       kind: "SYSTEM",
     });
     assert.ok(
       messages.some((m) => m.eventType === "POWERUP_EARNED"),
       "milestone POWERUP_EARNED event still visible"
+    );
+  });
+
+  it("welcome mystery-box grants never appear in the activity feed", async () => {
+    const alice = await createUser("AliceB1Welcome");
+    const bob = await createUser("BobB1WelcomeX");
+    await makeFriends(alice, bob);
+    const raceId = await createActiveRace(alice, bob);
+
+    await prisma.racePowerupEvent.create({
+      data: {
+        raceId,
+        actorUserId: alice.userId,
+        eventType: "POWERUP_EARNED",
+        powerupType: "MYSTERY_BOX",
+        description: "Welcome gift. A mystery box!",
+      },
+    });
+    await prisma.racePowerupEvent.create({
+      data: {
+        raceId,
+        actorUserId: alice.userId,
+        eventType: "POWERUP_EARNED",
+        powerupType: "MYSTERY_BOX",
+        description: "Welcome gift — a mystery box!",
+      },
+    });
+    await prisma.racePowerupEvent.create({
+      data: {
+        raceId,
+        actorUserId: alice.userId,
+        eventType: "POWERUP_EARNED",
+        powerupType: "MYSTERY_BOX",
+        description: "AliceB1Welcome earned a mystery box!",
+      },
+    });
+
+    const { messages } = await getMessages(alice.token, raceId, {
+      kind: "SYSTEM",
+    });
+    assert.ok(
+      !messages.some((m) => m.body === "Welcome gift. A mystery box!"),
+      "welcome gift is hidden"
+    );
+    assert.ok(
+      !messages.some((m) => m.body === "Welcome gift — a mystery box!"),
+      "legacy welcome gift is hidden"
+    );
+    assert.ok(
+      messages.some((m) => m.body === "AliceB1Welcome earned a mystery box!"),
+      "earned mystery boxes remain visible"
+    );
+
+    const legacyFeed = await getFeed(alice.token, raceId);
+    assert.ok(
+      !legacyFeed.events.some((e) => e.description === "Welcome gift. A mystery box!" || e.description === "Welcome gift — a mystery box!"),
+      "legacy activity endpoint also hides welcome gifts"
     );
   });
 

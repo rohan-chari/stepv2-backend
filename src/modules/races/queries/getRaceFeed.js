@@ -51,7 +51,11 @@ async function getRaceFeed(userId, raceId, { cursor, limit = 50, supportsPowerup
     }
   }
 
-  const rawEvents = await RacePowerupEvent.findByRace(raceId, { cursor, limit });
+  const rawEvents = await RacePowerupEvent.findByRace(raceId, {
+    cursor,
+    limit,
+    excludeWelcomeMysteryBoxEvents: true,
+  });
 
   // MYSTERY_BOX_OPENED rows are persisted only for the admin box-opener metric
   // (Item 9). They are audit-only — hide them from the visible feed so the

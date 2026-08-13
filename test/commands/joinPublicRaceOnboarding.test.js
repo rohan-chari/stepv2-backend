@@ -149,13 +149,8 @@ test("eligible onboarding join grants 3 mystery boxes + ledger row + flag", asyn
   const steps = prismaMock.racePowerups.map((p) => p.earnedAtSteps);
   assert.equal(new Set(steps).size, 3);
 
-  // A matching POWERUP_EARNED event row per box (mirrors rollPowerup).
-  assert.equal(prismaMock.powerupEvents.length, 3);
-  assert.ok(
-    prismaMock.powerupEvents.every(
-      (e) => e.eventType === "POWERUP_EARNED" && e.powerupType === "MYSTERY_BOX"
-    )
-  );
+  // Welcome gifts are not race-feed activity.
+  assert.equal(prismaMock.powerupEvents.length, 0);
 
   // Ledger row inserted, keyed on the hash of the Apple sub.
   assert.equal(prismaMock.ledger.size, 1);
@@ -242,7 +237,7 @@ test("powerupSlots cap is respected (slots=2 => only 2 boxes)", async () => {
   await join({ userId: "user-2", raceId: "race-1", onboarding: true });
 
   assert.equal(prismaMock.racePowerups.length, 2);
-  assert.equal(prismaMock.powerupEvents.length, 2);
+  assert.equal(prismaMock.powerupEvents.length, 0);
   // Grant still recorded + flag still set.
   assert.equal(prismaMock.ledger.size, 1);
   assert.equal(prismaMock.userUpdates[0].data.firstRaceOnboardingSeen, true);

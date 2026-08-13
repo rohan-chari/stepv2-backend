@@ -45,7 +45,12 @@ const RacePowerupEvent = {
     return row;
   },
 
-  async findByRace(raceId, { cursor, limit = 50, excludeEventTypes } = {}) {
+  async findByRace(raceId, {
+    cursor,
+    limit = 50,
+    excludeEventTypes,
+    excludeWelcomeMysteryBoxEvents = false,
+  } = {}) {
     const where = { raceId };
     applyCursor(where, cursor);
     // DB-level exclusion (Prisma notIn) so filtered rows don't consume page
@@ -54,6 +59,13 @@ const RacePowerupEvent = {
     // under-fill a page and prematurely null the cursor.
     if (Array.isArray(excludeEventTypes) && excludeEventTypes.length > 0) {
       where.eventType = { notIn: excludeEventTypes };
+    }
+    if (excludeWelcomeMysteryBoxEvents) {
+      where.NOT = {
+        eventType: "POWERUP_EARNED",
+        powerupType: "MYSTERY_BOX",
+        description: { in: ["Welcome gift. A mystery box!", "Welcome gift — a mystery box!"] },
+      };
     }
     return prisma.racePowerupEvent.findMany({
       where,

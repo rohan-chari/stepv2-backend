@@ -93,8 +93,8 @@ function buildJoinRaceCore(dependencies = {}) {
   //
   // Failures here never break the join: the participant already exists; we only
   // log and move on. Mirrors rollPowerup's MYSTERY_BOX creation (a RacePowerup
-  // row with type/rarity null, status MYSTERY_BOX, plus a matching
-  // POWERUP_EARNED racePowerupEvent — see src/commands/rollPowerup.js).
+  // row with type/rarity null and status MYSTERY_BOX), but welcome gifts are
+  // deliberately not race-feed activity.
   async function maybeGrantOnboardingBoxes({ participant, race, joiningUserId }) {
     // Events to emit AFTER the grant transaction commits, so subscribers see
     // settled DB state (mirrors rollPowerup's deferred-emit pattern).
@@ -144,16 +144,6 @@ function buildJoinRaceCore(dependencies = {}) {
               // Distinct values satisfy the @@unique([participantId,
               // earnedAtSteps]) constraint for a brand-new participant.
               earnedAtSteps: i,
-            },
-          });
-
-          await tx.racePowerupEvent.create({
-            data: {
-              raceId: race.id,
-              actorUserId: joiningUserId,
-              eventType: "POWERUP_EARNED",
-              powerupType: "MYSTERY_BOX",
-              description: "Welcome gift. A mystery box!",
             },
           });
 
