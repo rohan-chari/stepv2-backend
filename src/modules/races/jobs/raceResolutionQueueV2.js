@@ -73,6 +73,27 @@ class FenceLostError extends Error {
   }
 }
 
+function participantTotalWriteChangesRow(write, current) {
+  if (write.kind !== "participantTotal") return true;
+  if (!current || current.totalSteps !== write.totalSteps) return true;
+  return (
+    typeof write.rawSteps === "number" &&
+    Number.isFinite(write.rawSteps) &&
+    current.rawSteps !== write.rawSteps
+  );
+}
+
+function retainTeamAsOfHeartbeat(candidateWrites, changedWrites, isTeamRace) {
+  if (!isTeamRace) return changedWrites;
+  if (changedWrites.some((write) => write.kind === "participantTotal")) {
+    return changedWrites;
+  }
+  const heartbeat = candidateWrites.find(
+    (write) => write.kind === "participantTotal"
+  );
+  return heartbeat ? [...changedWrites, heartbeat] : changedWrites;
+}
+
 // The write-capture proxy lives in services/computeRaceState.js — the SAME one
 // the read-only callers (usePowerup's Trail Mine plant and Uprising gate) use.
 // One capture, one definition of "the write surface of resolveRaceState": the
@@ -211,9 +232,25 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
       const sortKey = (w) =>
         `${userIdByParticipant.get(w.participantId) ?? "￿"}:${w.participantId}`;
 
-      const participantWrites = capture.writes
-        .filter((w) => w.kind === "participantTotal" || w.kind === "participantBonus")
-        .sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
+      const participantById = new Map(
+        (result?.race?.participants || []).map((participant) => [
+          participant.id,
+          participant,
+        ])
+      );
+      const candidateParticipantWrites = capture.writes.filter(
+        (w) => w.kind === "participantTotal" || w.kind === "participantBonus"
+      );
+      const participantWrites = retainTeamAsOfHeartbeat(
+        candidateParticipantWrites,
+        candidateParticipantWrites.filter((write) =>
+          participantTotalWriteChangesRow(
+            write,
+            participantById.get(write.participantId)
+          )
+        ),
+        result?.race?.isTeamRace === true
+      ).sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
       const sideWrites = capture.writes.filter(
         (w) => w.kind === "effectUpdate" || w.kind === "eventCreate"
       );
@@ -291,7 +328,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
 
       // ── Post-commit. Everything below is best-effort and holds no lock. ──
       try {
-        await onCommitted({ raceId: job.raceId, job, result });
+        await onCommitted({ raceId: job.raceId, job, result, superseded });
       } catch (error) {
         logger.error("[RACE_RESOLUTION_V2] post-commit hook error:", error);
       }
@@ -446,4 +483,6 @@ module.exports = {
   runBoundedRaceResolutionJobs,
   quietPeriodMs,
   POLL_INTERVAL_MS,
+  participantTotalWriteChangesRow,
+  retainTeamAsOfHeartbeat,
 };

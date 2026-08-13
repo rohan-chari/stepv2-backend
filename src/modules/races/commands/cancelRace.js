@@ -19,9 +19,6 @@ class RaceCancelError extends Error {
   }
 }
 
-const {
-  enqueueRaceResolution: defaultEnqueueRaceResolution,
-} = require("../services/enqueueRaceResolution");
 // C3 (spec §5 Phase D step 9): this write seam is a snapshot DEL hook — the
 // shared standings snapshot must not outlive the change we just committed. The
 // resolution worker is deliberately NOT in this list: it SETs post-commit.
@@ -30,17 +27,6 @@ const {
 } = require("../services/raceProgressSnapshot");
 
 function buildCancelRace(dependencies = {}) {
-  // C0 (spec §5a item 4). A CANCELLED race resolves to a no-op inside the
-  // worker, but the enqueue is kept for uniformity: every mutating race command
-  // marks its race dirty, with no per-command exceptions to remember.
-  const enqueueRaceResolution = Object.prototype.hasOwnProperty.call(
-    dependencies,
-    "enqueueRaceResolution"
-  )
-    ? dependencies.enqueueRaceResolution
-    : Object.keys(dependencies).length > 0
-      ? async () => null
-      : defaultEnqueueRaceResolution;
   const raceModel = dependencies.Race || Race;
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
   const awardCoinsFn = dependencies.awardCoins || awardCoins;
@@ -110,7 +96,7 @@ function buildCancelRace(dependencies = {}) {
 
     await invalidateRaceProgress(raceId);
 
-    await enqueueRaceResolution({ raceId, userId });
+    // The race is already CANCELLED; the ACTIVE-only worker would no-op.
 
     return updated;
   };

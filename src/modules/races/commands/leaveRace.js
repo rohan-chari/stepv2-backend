@@ -27,9 +27,6 @@ class RaceLeaveError extends Error {
   }
 }
 
-const {
-  enqueueRaceResolution: defaultEnqueueRaceResolution,
-} = require("../services/enqueueRaceResolution");
 // C3 (spec §5 Phase D step 9): this write seam is a snapshot DEL hook — the
 // shared standings snapshot must not outlive the change we just committed. The
 // resolution worker is deliberately NOT in this list: it SETs post-commit.
@@ -38,17 +35,6 @@ const {
 } = require("../services/raceProgressSnapshot");
 
 function buildLeaveRace(dependencies = {}) {
-  // C0 (spec §5a item 4): after this command's own small writes, mark the race
-  // dirty so the race-keyed worker re-converges its standings. Best-effort and
-  // stubbed out for injected fakes so unit tests stay DB-free.
-  const enqueueRaceResolution = Object.prototype.hasOwnProperty.call(
-    dependencies,
-    "enqueueRaceResolution"
-  )
-    ? dependencies.enqueueRaceResolution
-    : Object.keys(dependencies).length > 0
-      ? async () => null
-      : defaultEnqueueRaceResolution;
   const raceModel = dependencies.Race || Race;
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
   const awardCoinsFn = dependencies.awardCoins || awardCoins;
@@ -190,7 +176,8 @@ function buildLeaveRace(dependencies = {}) {
 
     await invalidateRaceProgress(raceId);
 
-    await enqueueRaceResolution({ raceId, userId });
+    // This branch is PENDING-only. Active exits delegate to forfeitRace above,
+    // which owns the one necessary enqueue.
 
 
     // C2 invalidation (spec §5 Phase C item 6): a membership change alters the

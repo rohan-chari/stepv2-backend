@@ -31,10 +31,10 @@
 //
 // ── And the snapshot publish ───────────────────────────────────────────────
 // After the fenced Postgres commit the worker SETs (replaces) the race's Redis
-// snapshot. Never a DEL: the worker's value is the freshest there is, so the
-// worker is deliberately absent from §3's DEL-hook list. A failed SET is logged
-// and ignored — the older snapshot goes stale within 15s and the next reader
-// rebuilds.
+// snapshot from the totals it just committed. Never a DEL: the worker's value
+// is the freshest there is, so the worker is deliberately absent from §3's
+// DEL-hook list. A failed SET is logged and ignored — the older snapshot goes
+// stale within 15s and the next reader rebuilds.
 
 const { RaceActiveEffect } = require("../../powerups/models/raceActiveEffect");
 const { GlobalStepEvent } = require("../../steps/models/globalStepEvent");
@@ -155,14 +155,18 @@ function buildRaceProgressPostCommit(dependencies = {}) {
   }
 
   /** SET (never DEL) the race's shared standings snapshot. */
-  async function publishSnapshot({ raceId, timeZone }) {
+  async function publishSnapshot({ raceId, timeZone, result }) {
     try {
       // Lazy require: getRaceProgress pulls in most of the race module, and the
       // worker is constructed at process start.
-      const { getRaceProgress } = require("../queries/getRaceProgress");
-      const snapshot = await getRaceProgress.computeSharedSnapshot({
+      const getRaceProgress =
+        dependencies.getRaceProgress ||
+        require("../queries/getRaceProgress").getRaceProgress;
+      const snapshot = await getRaceProgress.computePersistedSnapshot({
         raceId,
         timeZone: timeZone || "UTC",
+        baseAdjustedByParticipantId:
+          result?.baseAdjustedByParticipantId || null,
       });
       if (!snapshot) return false;
       snapshot.source = "worker";
@@ -179,15 +183,21 @@ function buildRaceProgressPostCommit(dependencies = {}) {
    * The v2 worker's `onCommitted` hook. Runs strictly AFTER the fenced Postgres
    * commit, holds no lock, and never throws.
    */
-  return async function onCommitted({ raceId, job, result } = {}) {
+  return async function onCommitted({ raceId, job, result, superseded = false } = {}) {
     if (!raceId) return;
     if (!(await enabled())) return;
     await runExpireEffects({ raceId, result });
     await runHighMultiplierAlert({ raceId, result });
-    await publishSnapshot({
-      raceId,
-      timeZone: job?.processingTimeZone || job?.resolutionTimeZone || "UTC",
-    });
+    // A newer generation arrived while this one ran. Its mutation already
+    // invalidated the snapshot; do not overwrite that DEL with older committed
+    // totals while the follow-up worker is waiting in the quiet period.
+    if (!superseded) {
+      await publishSnapshot({
+        raceId,
+        timeZone: job?.processingTimeZone || job?.resolutionTimeZone || "UTC",
+        result,
+      });
+    }
   };
 }
 

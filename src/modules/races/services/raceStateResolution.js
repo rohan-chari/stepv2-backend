@@ -29,38 +29,23 @@ const {
   applyHitchhikeCopies,
 } = require("../../powerups/hitchhikeCopies");
 const { nextRawSteps } = require("../../powerups/rawPosition");
+const {
+  POWERUP_EFFECT_TYPES,
+  SETTLEMENT_EFFECT_TYPES,
+} = require("./raceScoringEffectTypes");
+const {
+  prefetchRaceScoringModels: defaultPrefetchRaceScoringModels,
+} = require("./raceScoringPrefetch");
 
 // Every effect type that calculateCurrentTotal folds into a participant's
 // live total. Shared with prefetch paths (getHomeRaceCard) so a bulk effect
 // fetch covers exactly the types the math will ask for.
-const POWERUP_EFFECT_TYPES = [
-  "LEG_CRAMP",
-  "RUNNERS_HIGH",
-  "WRONG_TURN",
-  "CAMPFIRE_REST",
-  "RAINSTORM",
-];
-
 // Leech (Item 2) is a step-affecting effect too, but it is fetched only via the
 // BULK (findEffectsForRaceByTypes) path below — never the per-type fallback — so
 // the settlement invariant test (which locks the per-type query set) stays
 // green while production (which always has the bulk method) scores it. The
 // value is folded into the total by the SAME computeEffectModifiers the display
 // path uses, so display == settlement.
-const SETTLEMENT_EFFECT_TYPES = [
-  ...POWERUP_EFFECT_TYPES,
-  "QUICKSAND",
-  "LEECH",
-  // Powerups Wave 5 windowed step-modifiers. Fetched via the BULK path only
-  // (production always has findEffectsForRaceByTypes), then folded into the same
-  // computeEffectModifiers the display path uses, so display == settlement.
-  "UPRISING",
-  "RALLY_FLAG",
-  "COIN_FLIP",
-  "GHOST_PEPPER",
-  "UMBRELLA",
-];
-
 function getEffectiveStart(participant, raceStartedAt) {
   const joinedAt = participant.joinedAt || raceStartedAt;
   return joinedAt > raceStartedAt ? joinedAt : raceStartedAt;
@@ -623,6 +608,9 @@ function buildResolveRaceState(dependencies = {}) {
     dependencies.RacePowerupEvent || RacePowerupEvent;
   const globalStepEventModel =
     dependencies.GlobalStepEvent || GlobalStepEvent;
+  const prefetchRaceScoringModels =
+    dependencies.prefetchRaceScoringModels || defaultPrefetchRaceScoringModels;
+  const logger = dependencies.logger || console;
   // Phase C4: every full-field reconciliation of a race runs under the shared
   // per-race advisory lock, so the four full-field paths (legacy /steps sync via
   // recordSteps/recordStepSamples, placementRecompute, usePowerup, and the durable
@@ -679,6 +667,28 @@ function buildResolveRaceState(dependencies = {}) {
         (p) => p.status === "ACCEPTED"
       );
       const currentTime = now();
+      let prefetched = null;
+      try {
+        prefetched = await prefetchRaceScoringModels({
+          races: [race],
+          now: currentTime,
+          stepsModel,
+          stepSampleModel,
+          raceActiveEffectModel,
+        });
+      } catch (error) {
+        // A bulk-read failure must not make resolution unavailable. Fall back
+        // to the canonical per-participant model calls for this run.
+        logger.error(
+          `[RACE_RESOLUTION] scoring prefetch failed (race ${race.id}):`,
+          error
+        );
+      }
+      const scoringStepsModel = prefetched?.stepsModel || stepsModel;
+      const scoringStepSampleModel =
+        prefetched?.stepSampleModel || stepSampleModel;
+      const scoringEffectModel =
+        prefetched?.raceActiveEffectModel || raceActiveEffectModel;
 
       // Fetch GlobalStepEvents overlapping [race start, now] once per race and
       // hand them to the SHARED math so this path matches getRaceProgress.
@@ -755,8 +765,8 @@ function buildResolveRaceState(dependencies = {}) {
               // recompute agrees with getRaceProgress and settlement; user races
               // use the resolve caller's tz (legacy, default UTC).
               timeZone: raceTimeZone(race, timeZone),
-              stepsModel,
-              stepSampleModel,
+              stepsModel: scoringStepsModel,
+              stepSampleModel: scoringStepSampleModel,
               now: currentTime,
               raceEndsAt: race.endsAt,
             });
@@ -768,8 +778,8 @@ function buildResolveRaceState(dependencies = {}) {
               participant,
               baseAdjusted,
               hasSampleData,
-              raceActiveEffectModel,
-              stepSampleModel,
+              raceActiveEffectModel: scoringEffectModel,
+              stepSampleModel: scoringStepSampleModel,
               globalEvents,
               now: currentTime,
             });
@@ -801,8 +811,8 @@ function buildResolveRaceState(dependencies = {}) {
                 participant,
                 raceStartedAt: race.startedAt,
                 timeZone: boxTz,
-                stepsModel,
-                stepSampleModel,
+                stepsModel: scoringStepsModel,
+                stepSampleModel: scoringStepSampleModel,
                 now: currentTime,
                 raceEndsAt: race.endsAt,
               }));
@@ -839,8 +849,8 @@ function buildResolveRaceState(dependencies = {}) {
             raceId: race.id,
             raceEndsAt: race.endsAt,
             participants: race.participants,
-            raceActiveEffectModel,
-            stepSampleModel,
+            raceActiveEffectModel: scoringEffectModel,
+            stepSampleModel: scoringStepSampleModel,
             now: currentTime,
             globalEvents,
           })
@@ -892,7 +902,7 @@ function buildResolveRaceState(dependencies = {}) {
           raceId: race.id,
           race,
           stepTotals,
-          raceActiveEffectModel,
+          raceActiveEffectModel: scoringEffectModel,
           participantModel,
           powerupEventModel,
         });
@@ -942,6 +952,7 @@ const resolveRaceState = buildResolveRaceState({
 
 module.exports = {
   POWERUP_EFFECT_TYPES,
+  SETTLEMENT_EFFECT_TYPES,
   calculateBaseAdjusted,
   calculateSubsequentSteps,
   calculateCurrentTotal,

@@ -63,6 +63,9 @@ const {
 // through to Postgres whenever Redis or its flag is unavailable; the field is
 // never gated on the cache existing.
 const discardCapCache = require("../../powerups/services/discardCapCache");
+const {
+  prefetchRaceScoringModels: defaultPrefetchRaceScoringModels,
+} = require("../services/raceScoringPrefetch");
 
 // The (releaseChannel × supportsCharacters × supportsRemoteAssets) combinations
 // `characterPresentation` can produce. Closed set: `resolveReleaseChannel` only
@@ -258,6 +261,9 @@ function buildGetRaceProgress(deps = {}) {
   const enqueueRaceResolutionFn =
     deps.enqueueRaceResolution || defaultEnqueueRaceResolution;
   const recentBoxMintsStore = deps.recentBoxMints || defaultRecentBoxMints;
+  const prefetchRaceScoringModels =
+    deps.prefetchRaceScoringModels || defaultPrefetchRaceScoringModels;
+  const logger = deps.logger || console;
 
   // The gate for EVERY Phase-D behavior change. Two conditions, both required:
   //   * `REDIS_URL` is set — with it unset the wrapper is fully inert (Phase A
@@ -305,6 +311,26 @@ function buildGetRaceProgress(deps = {}) {
     const acceptedParticipants = race.participants.filter(
       (p) => p.status === "ACCEPTED"
     );
+    let prefetched = null;
+    try {
+      prefetched = await prefetchRaceScoringModels({
+        races: [race],
+        now: scoringNow,
+        stepsModel,
+        stepSampleModel,
+        raceActiveEffectModel,
+      });
+    } catch (error) {
+      logger.error(
+        `[RACE_PROGRESS] scoring prefetch failed (race ${raceId}):`,
+        error
+      );
+    }
+    const scoringStepsModel = prefetched?.stepsModel || stepsModel;
+    const scoringStepSampleModel =
+      prefetched?.stepSampleModel || stepSampleModel;
+    const scoringEffectModel =
+      prefetched?.raceActiveEffectModel || raceActiveEffectModel;
 
     // First pass: raw step totals (baseAdjusted) for expiry snapshots + boxes.
     const raceStartedAt = race.startedAt;
@@ -355,13 +381,16 @@ function buildGetRaceProgress(deps = {}) {
           effectiveStart.getTime() === startOfStartDay.getTime();
 
         let startDaySteps = 0;
-        const startDaySamples = await stepSampleModel.sumStepsInWindow(
+        const startDaySamples = await scoringStepSampleModel.sumStepsInWindow(
           p.userId, effectiveStart, startDayWindowEnd
         );
         const startDayIsCompleteAtCutoff =
           !deadlinePassed || nextStartDayMidnight.getTime() <= raceEndMs;
         if (startsAtLocalMidnight && startDayIsCompleteAtCutoff) {
-          const startDayRow = await stepsModel.findByUserIdAndDate(p.userId, startDate);
+          const startDayRow = await scoringStepsModel.findByUserIdAndDate(
+            p.userId,
+            startDate
+          );
           startDaySteps = Math.max(startDaySamples, startDayRow?.steps ?? 0);
         } else if (startDaySamples > 0) {
           startDaySteps = startDaySamples;
@@ -374,16 +403,19 @@ function buildGetRaceProgress(deps = {}) {
           dayAfterStartDate,
           today,
           timeZone: scoringTimeZone,
-          stepsModel,
-          stepSampleModel,
+          stepsModel: scoringStepsModel,
+          stepSampleModel: scoringStepSampleModel,
           now: scoringNow,
           allowPartialDayDaily: !deadlinePassed,
         });
 
         const baseAdjusted = Math.max(0, startDaySteps + subsequentSteps);
         let hasSampleData = startDaySamples > 0;
-        if (!hasSampleData && typeof stepSampleModel.hasAnyInWindow === "function") {
-          hasSampleData = await stepSampleModel.hasAnyInWindow(
+        if (
+          !hasSampleData &&
+          typeof scoringStepSampleModel.hasAnyInWindow === "function"
+        ) {
+          hasSampleData = await scoringStepSampleModel.hasAnyInWindow(
             p.userId,
             effectiveStart,
             scoringNow
@@ -441,15 +473,15 @@ function buildGetRaceProgress(deps = {}) {
         let wave5Effects = [];
 
         if (race.powerupsEnabled) {
-          legCramps = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "LEG_CRAMP");
-          legCramps.push(...await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "QUICKSAND"));
-          runnersHighs = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "RUNNERS_HIGH");
-          wrongTurns = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "WRONG_TURN");
-          campfires = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "CAMPFIRE_REST");
-          rainstorms = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "RAINSTORM");
-          leeches = await raceActiveEffectModel.findEffectsForRaceByType(raceId, participant.id, "LEECH");
-          if (typeof raceActiveEffectModel.findEffectsForRaceByTypes === "function") {
-            const w5 = await raceActiveEffectModel.findEffectsForRaceByTypes(
+          legCramps = await scoringEffectModel.findEffectsForRaceByType(raceId, participant.id, "LEG_CRAMP");
+          legCramps.push(...await scoringEffectModel.findEffectsForRaceByType(raceId, participant.id, "QUICKSAND"));
+          runnersHighs = await scoringEffectModel.findEffectsForRaceByType(raceId, participant.id, "RUNNERS_HIGH");
+          wrongTurns = await scoringEffectModel.findEffectsForRaceByType(raceId, participant.id, "WRONG_TURN");
+          campfires = await scoringEffectModel.findEffectsForRaceByType(raceId, participant.id, "CAMPFIRE_REST");
+          rainstorms = await scoringEffectModel.findEffectsForRaceByType(raceId, participant.id, "RAINSTORM");
+          leeches = await scoringEffectModel.findEffectsForRaceByType(raceId, participant.id, "LEECH");
+          if (typeof scoringEffectModel.findEffectsForRaceByTypes === "function") {
+            const w5 = await scoringEffectModel.findEffectsForRaceByTypes(
               raceId,
               participant.id,
               ["UPRISING", "RALLY_FLAG", "COIN_FLIP", "GHOST_PEPPER", "UMBRELLA"]
@@ -462,7 +494,7 @@ function buildGetRaceProgress(deps = {}) {
         }
 
         const allEffects = [...legCramps, ...runnersHighs, ...wrongTurns, ...campfires, ...rainstorms, ...leeches, ...wave5Effects];
-        const { frozenSteps, buffedSteps, reversedSteps, globalBoostedSteps, leechTransfers } = await computeEffectModifiers(allEffects, baseAdjusted, participant.userId, stepSampleModel, hasSampleData, globalContext, scoringNow);
+        const { frozenSteps, buffedSteps, reversedSteps, globalBoostedSteps, leechTransfers } = await computeEffectModifiers(allEffects, baseAdjusted, participant.userId, scoringStepSampleModel, hasSampleData, globalContext, scoringNow);
 
         const preLeechTotal = Math.max(0, baseAdjusted - frozenSteps + buffedSteps - 2 * reversedSteps + (globalBoostedSteps || 0) + (race.powerupsEnabled ? (participant.bonusSteps || 0) : 0));
 
@@ -482,8 +514,8 @@ function buildGetRaceProgress(deps = {}) {
           raceId,
           raceEndsAt: race.endsAt,
           participants: race.participants,
-          raceActiveEffectModel,
-          stepSampleModel,
+          raceActiveEffectModel: scoringEffectModel,
+          stepSampleModel: scoringStepSampleModel,
           now: scoringNow,
           globalEvents,
         })
@@ -550,7 +582,7 @@ function buildGetRaceProgress(deps = {}) {
     // (once for the effects panel, once for the illusions); both consumers are
     // now viewer-overlay code reading this single array.
     const raceActiveEffects = race.powerupsEnabled
-      ? await raceActiveEffectModel.findActiveForRace(raceId)
+      ? await scoringEffectModel.findActiveForRace(raceId)
       : [];
 
     // §6a — per-participant CURRENT MULTIPLIER, with any active global 2x event
@@ -668,8 +700,14 @@ function buildGetRaceProgress(deps = {}) {
   // `getRaceDetails` shape — persisted `totalSteps` + the shared placement
   // comparator — plus one indexed read of the race's active effects so the
   // effects panel and the multiplier badge do not blank out. It NEVER runs the
-  // replay, and it is never published to Redis (it is not authoritative).
-  async function loadPersistedState({ race, raceId, scoringTimeZone }) {
+  // replay. Cold-start fallbacks are not published; the worker may publish this
+  // shape immediately after committing the authoritative totals.
+  async function loadPersistedState({
+    race,
+    raceId,
+    scoringTimeZone,
+    baseAdjustedByParticipantId = null,
+  }) {
     snapshotStore.__bump("persistedFallbacks");
     const accepted = race.participants.filter((p) => p.status === "ACCEPTED");
     const raceActiveEffects = race.powerupsEnabled
@@ -735,9 +773,11 @@ function buildGetRaceProgress(deps = {}) {
         team: p.team ?? null,
         placement: placementByUserId.get(p.userId) ?? null,
         currentMultiplier: raw * eventMult,
-        // Unknown without the replay. The requester's own box countdown falls
-        // back to a per-user `calculateBaseAdjusted` in the overlay.
-        baseAdjusted: null,
+        // A worker publish threads through the raw totals it just computed.
+        // Cold-start/Redis-outage fallbacks omit the map and retain the
+        // requester-only calculation in the overlay.
+        baseAdjusted:
+          baseAdjustedByParticipantId?.[p.id] ?? null,
       };
     });
 
@@ -1398,6 +1438,26 @@ function buildGetRaceProgress(deps = {}) {
       scoringTimeZone: raceTimeZone(race, timeZone),
       persist: false,
     });
+  };
+
+  // The worker has just committed these exact totals, so publishing them does
+  // not need a second race-wide scoring replay. The shape is the same shared
+  // snapshot used by the Redis-outage fallback; only the source label differs.
+  query.computePersistedSnapshot = async ({
+    raceId,
+    timeZone = "UTC",
+    baseAdjustedByParticipantId = null,
+  }) => {
+    const race = await raceModel.findById(raceId);
+    if (!race || race.status !== "ACTIVE") return null;
+    const snapshot = await loadPersistedState({
+      race,
+      raceId,
+      scoringTimeZone: raceTimeZone(race, timeZone),
+      baseAdjustedByParticipantId,
+    });
+    snapshot.source = "worker-persisted";
+    return snapshot;
   };
 
   return query;

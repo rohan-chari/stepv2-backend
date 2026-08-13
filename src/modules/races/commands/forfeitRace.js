@@ -381,7 +381,11 @@ function buildForfeitRace(dependencies = {}) {
 
     await invalidateRaceProgress(raceId);
 
-    await enqueueRaceResolution({ raceId, userId });
+    // Team collapse completes the race inline; an ACTIVE-only worker would
+    // immediately no-op afterward. Non-collapse forfeits still need convergence.
+    if (!collapse.collapsed) {
+      await enqueueRaceResolution({ raceId, userId });
+    }
 
     const updated = await participantModel.findByRaceAndUser(raceId, userId);
     return {

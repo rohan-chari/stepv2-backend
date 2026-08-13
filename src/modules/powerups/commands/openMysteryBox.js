@@ -343,7 +343,6 @@ function buildOpenMysteryBox(dependencies = {}) {
 
     await syncRacePowerupState({ raceId, userId });
     await invalidateRaceProgress(raceId);
-    await enqueueRaceResolution({ raceId, userId });
 
     return { id: powerup.id, type: rolled.type, rarity: rolled.rarity, autoActivated: false };
   };

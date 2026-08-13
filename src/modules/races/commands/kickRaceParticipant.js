@@ -95,7 +95,9 @@ function buildKickRaceParticipant(dependencies = {}) {
 
     await invalidateRaceProgress(raceId);
 
-    await enqueueRaceResolution({ raceId, userId: targetUserId });
+    if (race.status === "ACTIVE") {
+      await enqueueRaceResolution({ raceId, userId: targetUserId });
+    }
 
 
     // C2 invalidation (spec §5 Phase C item 6): a membership change alters the
