@@ -24,30 +24,11 @@ function depsWithStubAuth(overrides = {}) {
   return {
     requireAuth(req, _res, next) {
       req.user = { id: "user-1", appleId: "apple-sub-1", displayName: "Me" };
+      req.clientFeatures = new Set(["seeded_race_buckets"]);
       next();
     },
     ...overrides,
   };
-}
-
-// A deferred that requestStepSyncForUsers resolves when it fires — lets a test
-// await the fire-and-forget nudge without racing it.
-function deferred() {
-  let resolve;
-  const promise = new Promise((r) => {
-    resolve = r;
-  });
-  return { promise, resolve };
-}
-
-// Await a nudge, but fail (rather than hang the runner) if it never fires.
-function withTimeout(promise, ms = 1000) {
-  return Promise.race([
-    promise,
-    new Promise((_, reject) =>
-      setTimeout(() => reject(new Error("nudge was never fired")), ms)
-    ),
-  ]);
 }
 
 function get(baseUrl, raceId) {
@@ -56,9 +37,9 @@ function get(baseUrl, raceId) {
   });
 }
 
-// A three-participant in-progress race detail: the viewer (user-1, ACCEPTED),
-// two accepted rivals, plus a declined and a pending invitee that must be
-// filtered out.
+// A three-participant in-progress race detail. Opening any race must remain a
+// read-only operation: normal device/background syncing owns freshness, rather
+// than one viewer creating a fan-out of rival sync requests.
 function inProgressDetail(overrides = {}) {
   return {
     id: "race-1",
@@ -77,18 +58,16 @@ function inProgressDetail(overrides = {}) {
   };
 }
 
-test("GET /races/:raceId nudges accepted rivals of an in-progress race, excluding the viewer", async () => {
-  const fired = deferred();
-  let receivedUserIds;
+test("GET /races/:raceId does not request step syncs when an active race is opened", async () => {
+  let syncRequested = false;
 
   const server = await startServer(
     depsWithStubAuth({
       async getRaceDetails() {
         return inProgressDetail();
       },
-      async requestStepSyncForUsers(userIds) {
-        receivedUserIds = userIds;
-        fired.resolve();
+      async requestStepSyncForUsers() {
+        syncRequested = true;
       },
     })
   );
@@ -99,146 +78,9 @@ test("GET /races/:raceId nudges accepted rivals of an in-progress race, excludin
     const body = await res.json();
     assert.equal(body.id, "race-1");
 
-    await withTimeout(fired.promise);
-    // Only ACCEPTED rivals, viewer excluded.
-    assert.deepEqual([...receivedUserIds].sort(), ["user-2", "user-3"]);
-  } finally {
-    await server.close();
-  }
-});
-
-test("GET /races/:raceId excludes declined and pending invitees from the nudge", async () => {
-  const fired = deferred();
-  let receivedUserIds;
-
-  const server = await startServer(
-    depsWithStubAuth({
-      async getRaceDetails() {
-        return inProgressDetail();
-      },
-      async requestStepSyncForUsers(userIds) {
-        receivedUserIds = userIds;
-        fired.resolve();
-      },
-    })
-  );
-
-  try {
-    const res = await get(server.baseUrl, "race-1");
-    assert.equal(res.status, 200);
-    await withTimeout(fired.promise);
-    assert.ok(!receivedUserIds.includes("user-4"), "declined excluded");
-    assert.ok(!receivedUserIds.includes("user-5"), "pending excluded");
-    assert.ok(!receivedUserIds.includes("user-1"), "viewer excluded");
-  } finally {
-    await server.close();
-  }
-});
-
-test("GET /races/:raceId does NOT nudge for a completed race", async () => {
-  let syncRequested = false;
-
-  const server = await startServer(
-    depsWithStubAuth({
-      async getRaceDetails() {
-        return inProgressDetail({
-          status: "COMPLETED",
-          completedAt: new Date().toISOString(),
-        });
-      },
-      async requestStepSyncForUsers() {
-        syncRequested = true;
-      },
-    })
-  );
-
-  try {
-    const res = await get(server.baseUrl, "race-1");
-    assert.equal(res.status, 200);
-    // Give any (erroneously) scheduled fire-and-forget nudge a chance to run.
-    await new Promise((r) => setTimeout(r, 30));
+    // Give any erroneously scheduled post-response work a chance to run.
+    await new Promise((resolve) => setTimeout(resolve, 30));
     assert.equal(syncRequested, false);
-  } finally {
-    await server.close();
-  }
-});
-
-test("GET /races/:raceId does NOT nudge for a pending race", async () => {
-  let syncRequested = false;
-
-  const server = await startServer(
-    depsWithStubAuth({
-      async getRaceDetails() {
-        return inProgressDetail({
-          status: "PENDING",
-          startedAt: null,
-          endsAt: null,
-        });
-      },
-      async requestStepSyncForUsers() {
-        syncRequested = true;
-      },
-    })
-  );
-
-  try {
-    const res = await get(server.baseUrl, "race-1");
-    assert.equal(res.status, 200);
-    await new Promise((r) => setTimeout(r, 30));
-    assert.equal(syncRequested, false);
-  } finally {
-    await server.close();
-  }
-});
-
-test("GET /races/:raceId does NOT nudge for an ACTIVE race already past endsAt", async () => {
-  let syncRequested = false;
-
-  const server = await startServer(
-    depsWithStubAuth({
-      async getRaceDetails() {
-        return inProgressDetail({
-          endsAt: new Date(Date.now() - 60 * 1000).toISOString(),
-        });
-      },
-      async requestStepSyncForUsers() {
-        syncRequested = true;
-      },
-    })
-  );
-
-  try {
-    const res = await get(server.baseUrl, "race-1");
-    assert.equal(res.status, 200);
-    await new Promise((r) => setTimeout(r, 30));
-    assert.equal(syncRequested, false);
-  } finally {
-    await server.close();
-  }
-});
-
-test("GET /races/:raceId still returns 200 with the normal body when the push service rejects", async () => {
-  const server = await startServer(
-    depsWithStubAuth({
-      async getRaceDetails() {
-        return inProgressDetail();
-      },
-      async requestStepSyncForUsers() {
-        throw new Error("push transport down");
-      },
-      // Swallow the expected error log so the test output stays clean.
-      logger: { error() {} },
-    })
-  );
-
-  try {
-    const res = await get(server.baseUrl, "race-1");
-    assert.equal(res.status, 200);
-    const body = await res.json();
-    assert.equal(body.id, "race-1");
-    assert.equal(body.status, "ACTIVE");
-    // Let the rejected fire-and-forget settle before tearing down.
-    await new Promise((r) => setTimeout(r, 30));
   } finally {
     await server.close();
   }
