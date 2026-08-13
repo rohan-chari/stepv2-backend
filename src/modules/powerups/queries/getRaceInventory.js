@@ -10,7 +10,7 @@ async function getRaceInventory(userId, raceId, supportsPowerups4 = false) {
   }
 
   const myParticipant = race.participants.find((p) => p.userId === userId);
-  if (!myParticipant) {
+  if (!myParticipant || (race.seededBucketId && myParticipant.status !== "ACCEPTED")) {
     const error = new Error("You are not a participant in this race");
     error.statusCode = 403;
     throw error;

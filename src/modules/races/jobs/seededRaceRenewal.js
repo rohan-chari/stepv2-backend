@@ -2,6 +2,7 @@ const { prisma: defaultPrisma } = require("../../../db");
 const { eventBus } = require("../../../shared/events/eventBus");
 const { appSettings } = require("../../../shared/config/appSettings");
 const { buildAutoJoinFeaturedRaces } = require("../commands/autoJoinFeaturedRaces");
+const { buildSeededRaceBuckets } = require("../services/seededRaceBuckets");
 const { normalizePowerupConfig } = require("../services/validateRaceConfig");
 const {
   startOfDayNewYork,
@@ -41,6 +42,7 @@ function buildRenewSeededRaces(dependencies = {}) {
   // (hook 1), and its inactivity/auto-enroll-flip logging belongs in the same
   // stream as this job's, not on the default console.
   const { enrollAutoJoinUsers } = buildAutoJoinFeaturedRaces({ prisma, logger });
+  const seededBuckets = buildSeededRaceBuckets({ prisma, now });
 
   // The [start, end) UTC instants of the calendar period containing `fromDate`
   // in the seed's cadence: a single ET day (daily) or Mon 00:00 -> Mon 00:00 ET
@@ -111,6 +113,7 @@ function buildRenewSeededRaces(dependencies = {}) {
       },
       select: {
         id: true,
+        seedId: true,
         name: true,
         status: true,
         startedAt: true,
@@ -186,13 +189,29 @@ function buildRenewSeededRaces(dependencies = {}) {
       });
       if (inactive.size === 0) return 0;
 
-      const { count } = await prisma.raceParticipant.deleteMany({
-        where: {
-          raceId: race.id,
-          status: "ACCEPTED",
-          userId: { in: [...inactive] },
-        },
-      });
+      const participantWhere = {
+        raceId: race.id,
+        status: "ACCEPTED",
+        userId: { in: [...inactive] },
+      };
+      // Assignment rows intentionally retain their exact participant pointer
+      // as the audit of the immutable plan. A private bucket therefore prunes
+      // by revoking the participant instead of deleting it (the FK stays valid
+      // and the row no longer occupies an ACCEPTED slot); legacy races retain
+      // their historical delete semantics.
+      let count;
+      if (race.seededBucketId) {
+        await prisma.seededRaceBucketAssignment.updateMany({
+          where: { bucketId: race.seededBucketId, userId: { in: [...inactive] } },
+          data: { state: "PRUNED" },
+        });
+        ({ count } = await prisma.raceParticipant.updateMany({
+          where: participantWhere,
+          data: { status: "DECLINED" },
+        }));
+      } else {
+        ({ count } = await prisma.raceParticipant.deleteMany({ where: participantWhere }));
+      }
       if (count > 0) {
         logger.log(
           `[CRON] Pruned ${count} inactive participant(s) from seeded race ${race.id}`
@@ -286,9 +305,24 @@ function buildRenewSeededRaces(dependencies = {}) {
         const doomed = remaining.filter((id) => !entangled.has(id));
         if (doomed.length === 0) return 0;
 
-        const { count } = await prisma.raceParticipant.deleteMany({
-          where: { raceId: race.id, status: "ACCEPTED", userId: { in: doomed } },
-        });
+        const participantWhere = {
+          raceId: race.id,
+          status: "ACCEPTED",
+          userId: { in: doomed },
+        };
+        let count;
+        if (race.seededBucketId) {
+          await prisma.seededRaceBucketAssignment.updateMany({
+            where: { bucketId: race.seededBucketId, userId: { in: doomed } },
+            data: { state: "PRUNED" },
+          });
+          ({ count } = await prisma.raceParticipant.updateMany({
+            where: participantWhere,
+            data: { status: "DECLINED" },
+          }));
+        } else {
+          ({ count } = await prisma.raceParticipant.deleteMany({ where: participantWhere }));
+        }
         if (count > 0) {
           logger.log(
             `[CRON] Weekly sweep removed ${count} ghost(s) from race ${race.id}`
@@ -322,7 +356,25 @@ function buildRenewSeededRaces(dependencies = {}) {
     if (!race.endsAt) {
       data.endsAt = windowFor(seed, startedAt).endsAt;
     }
-    await prisma.race.update({ where: { id: race.id }, data });
+    // One cron worker owns promotion. The compare-and-swap prevents a second
+    // process that read the same PENDING row from duplicating box init and
+    // RACE_STARTED push fanout.
+    const transition = typeof prisma.race.updateMany === "function"
+      ? await prisma.race.updateMany({
+          where: { id: race.id, status: "PENDING" },
+          data,
+        })
+      : { count: 1, ...(await prisma.race.update({ where: { id: race.id }, data })) };
+    if (transition.count !== 1) return null;
+    // A bucket is a normal seeded Race for scoring/settlement, but its durable
+    // lifecycle record must track the same transition. Keep the legacy global
+    // path byte-for-byte unchanged (it has no seededBucketId).
+    if (race.seededBucketId && prisma.seededRaceBucket) {
+      await prisma.seededRaceBucket.updateMany({
+        where: { id: race.seededBucketId, status: "PENDING" },
+        data: { status: "ACTIVE" },
+      });
+    }
 
     const accepted = await prisma.raceParticipant.findMany({
       where: { raceId: race.id, status: "ACCEPTED" },
@@ -364,24 +416,58 @@ function buildRenewSeededRaces(dependencies = {}) {
     const nowMs = nowDate.getTime();
     const current = windowFor(seed, nowDate);
 
-    // 1) Promote a PENDING race whose scheduled start has passed.
-    const pending = await prisma.race.findFirst({
-      where: { seedId: seed.id, status: "PENDING" },
-      orderBy: { scheduledStartAt: "asc" },
-    });
+    // Buckets finalise once, inside their own advisory-locked transaction, in a
+    // short deterministic pre-boundary window. This never affects historical
+    // legacy/global rows and fails closed if matching cannot complete.
     if (
-      pending &&
-      pending.scheduledStartAt &&
-      new Date(pending.scheduledStartAt).getTime() <= nowMs
+      ["DAILY_10K", "WEEKLY_50K"].includes(seed.kind) &&
+      (await settings.getFlag("seededRaceBucketsEnabled")) === true
     ) {
-      const race = await promoteSeededRace(seed, pending);
-      results.push({ action: "promoted", seedKind: seed.kind, race });
+      const next = windowFor(seed, current.endsAt);
+      if (next.startedAt.getTime() - nowMs <= 5 * 60 * 1000) {
+        const buckets = await seededBuckets.finalise({
+          seed,
+          windowStart: next.startedAt,
+          windowEnd: next.endsAt,
+        });
+        if (buckets.length) results.push({ action: "finalized-buckets", seedKind: seed.kind, race: { id: buckets[0].raceId, endsAt: next.endsAt } });
+      }
+    }
+
+    // 1) Promote every due PENDING race. A legacy seed has at most one, while
+    // the private stream can have many finalized buckets for the same window.
+    // Do not use findFirst here: leaving later bucket rows PENDING would strand
+    // their members even though the boundary has passed.
+    // The fallback preserves the narrow injected Prisma doubles used by the
+    // long-standing lifecycle unit tests. Production always exposes findMany
+    // and therefore promotes every due bucket.
+    const pending = typeof prisma.race.findMany === "function"
+      ? await prisma.race.findMany({
+          where: {
+            seedId: seed.id,
+            status: "PENDING",
+            scheduledStartAt: { lte: nowDate },
+          },
+          orderBy: { scheduledStartAt: "asc" },
+        })
+      : [await prisma.race.findFirst({
+          where: { seedId: seed.id, status: "PENDING" },
+          orderBy: { scheduledStartAt: "asc" },
+        })].filter(
+          (race) =>
+            race &&
+            race.scheduledStartAt &&
+            new Date(race.scheduledStartAt).getTime() <= nowMs
+        );
+    for (const due of pending) {
+      const race = await promoteSeededRace(seed, due);
+      if (race) results.push({ action: "promoted", seedKind: seed.kind, race });
     }
 
     // 2) Ensure an ACTIVE race covers `now`. (After a promotion the promoted race
     // covers it, so this is a no-op; it only creates on a true gap / cold start.)
     const active = await prisma.race.findFirst({
-      where: { seedId: seed.id, status: "ACTIVE" },
+      where: { seedId: seed.id, status: "ACTIVE", seededBucketId: null },
       orderBy: { startedAt: "desc" },
     });
     const activeCoversNow =
@@ -399,7 +485,7 @@ function buildRenewSeededRaces(dependencies = {}) {
 
     // 3) Ensure exactly one upcoming PENDING race exists for the next window.
     const upcoming = await prisma.race.findFirst({
-      where: { seedId: seed.id, status: "PENDING" },
+      where: { seedId: seed.id, status: "PENDING", seededBucketId: null },
       orderBy: { scheduledStartAt: "desc" },
     });
     if (!upcoming) {

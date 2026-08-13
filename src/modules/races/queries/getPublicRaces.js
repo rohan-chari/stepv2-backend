@@ -88,10 +88,11 @@ function buildGetPublicRaces(dependencies = {}) {
       });
     }
 
-    const races = await raceModel.findPublicPending();
+    const races = await raceModel.findPublicPending({ excludeSeeded });
 
     const results = [];
     for (const race of races) {
+      if (excludeSeeded && race.seedId) continue;
       if (!isVisiblePublicRace(race, userId, supportsTeamRaces)) continue;
       const participants = race.participants || [];
       const acceptedCount = participants.filter(

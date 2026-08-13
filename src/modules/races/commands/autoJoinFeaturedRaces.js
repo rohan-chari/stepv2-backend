@@ -4,6 +4,7 @@ const {
   filterInactiveUserIds,
   disableAutoEnrollForInactive,
 } = require("../services/seededInactivity");
+const { claimLegacyStream } = require("../services/seededRaceBuckets");
 
 // Auto-join for the seeded daily/weekly featured challenges
 // (users.auto_join_featured_races). Two entry points share the same
@@ -40,7 +41,12 @@ function buildAutoJoinFeaturedRaces(dependencies = {}) {
     if (userIds.length === 0) return 0;
     const capacity = await remainingCapacity(race);
     if (capacity <= 0) return 0;
-    const toAdd = capacity === Infinity ? userIds : userIds.slice(0, capacity);
+    const candidates = capacity === Infinity ? userIds : userIds.slice(0, capacity);
+    const toAdd = [];
+    for (const userId of candidates) {
+      if (await claimLegacyStream({ prisma, race, userId })) toAdd.push(userId);
+    }
+    if (toAdd.length === 0) return 0;
     const result = await prisma.raceParticipant.createMany({
       data: toAdd.map((userId) => ({
         raceId: race.id,
@@ -115,7 +121,13 @@ function buildAutoJoinFeaturedRaces(dependencies = {}) {
   async function optUserIntoPendingSeededRaces(userId) {
     const pending = await prisma.race.findMany({
       where: { status: "PENDING", seedId: { not: null } },
-      select: { id: true, maxParticipants: true },
+      select: {
+        id: true,
+        seedId: true,
+        startedAt: true,
+        scheduledStartAt: true,
+        maxParticipants: true,
+      },
     });
     let joined = 0;
     for (const race of pending) {

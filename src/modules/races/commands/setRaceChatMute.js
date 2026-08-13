@@ -12,7 +12,7 @@ async function setRaceChatMute({ userId, raceId, muted }) {
   const participant = await prisma.raceParticipant.findUnique({
     where: { raceId_userId: { raceId, userId } },
   });
-  if (!participant) {
+  if (!participant || (await prisma.race.findUnique({ where: { id: raceId }, select: { seededBucketId: true } }))?.seededBucketId && participant.status !== "ACCEPTED") {
     throw new SetRaceChatMuteError("Not a participant in this race", 403);
   }
   return prisma.raceParticipant.update({
@@ -25,7 +25,7 @@ async function markRaceChatRead({ userId, raceId }) {
   const participant = await prisma.raceParticipant.findUnique({
     where: { raceId_userId: { raceId, userId } },
   });
-  if (!participant) {
+  if (!participant || (await prisma.race.findUnique({ where: { id: raceId }, select: { seededBucketId: true } }))?.seededBucketId && participant.status !== "ACCEPTED") {
     throw new SetRaceChatMuteError("Not a participant in this race", 403);
   }
   return prisma.raceParticipant.update({

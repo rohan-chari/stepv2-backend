@@ -68,6 +68,11 @@ const {
   getRaceInvitePreflight: defaultGetRaceInvitePreflight,
 } = require("./queries/getRaceInvitePreflight");
 const {
+  buildSeededRaceBuckets,
+  SeededBucketError,
+  supportsBuckets: supportsSeededRaceBuckets,
+} = require("./services/seededRaceBuckets");
+const {
   getRacePayoutDoubleOffer: defaultGetRacePayoutDoubleOffer,
   buildGetRacePayoutDoubleOffer,
 } = require("./queries/getRacePayoutDoubleOffer");
@@ -199,6 +204,8 @@ function createRacesRouter(dependencies = {}) {
   const getRaces = dependencies.getRaces || defaultGetRaces;
   const getRaceInvitePreflight =
     dependencies.getRaceInvitePreflight || defaultGetRaceInvitePreflight;
+  const settings = dependencies.appSettings || appSettings;
+  const seededBuckets = dependencies.seededBuckets || buildSeededRaceBuckets(dependencies);
   const racePayoutDoubleModel =
     dependencies.RacePayoutDouble ||
     (dependencies.prisma
@@ -378,10 +385,15 @@ function createRacesRouter(dependencies = {}) {
   router.get("/invite-preflight", async (req, res) => {
     try {
       const supportsTournaments = req.clientFeatures?.has("tournaments") ?? false;
+      const homeInviteModal =
+        (req.clientFeatures?.has("home_invite_modal") ?? false) &&
+        (await settings.getFlag("homeInviteModalEnabled"));
       res.json(
         await getRaceInvitePreflight({
           userId: req.user.id,
           supportsTournaments,
+          supportsTeamRaces: req.clientFeatures?.has("team_races") ?? false,
+          homeInviteModal,
         })
       );
     } catch (error) {
@@ -531,10 +543,14 @@ function createRacesRouter(dependencies = {}) {
   // never read as a race id.
   router.get("/discovery-summary", async (req, res) => {
     try {
+      const bucketMode =
+        (await settings.getFlag("seededRaceBucketsEnabled")) === true &&
+        supportsSeededRaceBuckets(req.clientFeatures);
       const summary = await getRaceDiscoverySummary({
         userId: req.user.id,
         supportsTeamRaces: req.clientFeatures?.has("team_races") ?? false,
         supportsTournaments: req.clientFeatures?.has("tournaments") ?? false,
+        supportsBuckets: bucketMode,
       });
       res.json(summary);
     } catch (error) {
@@ -546,10 +562,16 @@ function createRacesRouter(dependencies = {}) {
   // GET /races/public
   router.get("/public", async (req, res) => {
     try {
+      const bucketMode =
+        (await settings.getFlag("seededRaceBucketsEnabled")) &&
+        supportsSeededRaceBuckets(req.clientFeatures);
       const races = await getPublicRaces({
         userId: req.user.id,
         // TR-702: old clients never see team races in the public browser.
         supportsTeamRaces: req.clientFeatures?.has("team_races") ?? false,
+        // Capable clients never see the legacy global seeded field during the
+        // mixed-version bridge; their private card is /featured-only.
+        excludeSeeded: bucketMode,
       });
       res.json({ races });
     } catch (error) {
@@ -564,10 +586,32 @@ function createRacesRouter(dependencies = {}) {
   // New endpoint — old clients never call it.
   router.get("/featured", async (req, res) => {
     try {
-      const races = await getFeaturedRaces({ userId: req.user.id });
+      const bucketEnabled = await settings.getFlag("seededRaceBucketsEnabled");
+      const races = await getFeaturedRaces({
+        userId: req.user.id,
+        supportsBuckets: bucketEnabled && supportsSeededRaceBuckets(req.clientFeatures),
+      });
       res.json({ races });
     } catch (error) {
       console.error("Get featured races error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Explicit election only: GET /featured remains virtual/read-only. This is
+  // static and intentionally declared before /:raceId routes.
+  router.post("/seeded/:seedKind/assign", async (req, res) => {
+    try {
+      if (!(await settings.getFlag("seededRaceBucketsEnabled")) || !supportsSeededRaceBuckets(req.clientFeatures)) {
+        return res.status(503).json({ error: "Seeded bucket matching is unavailable", code: "MATCHING_UNAVAILABLE" });
+      }
+      const result = await seededBuckets.elect({ userId: req.user.id, seedKind: req.params.seedKind, window: req.body?.window });
+      res.status(202).json({ elected: true, raceId: null, finalizesAt: result.finalizesAt });
+    } catch (error) {
+      if (error instanceof SeededBucketError || error.name === "SeededBucketError") {
+        return res.status(error.statusCode).json({ error: error.message, code: error.code });
+      }
+      logger.error("Seeded bucket election error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });
@@ -1255,13 +1299,20 @@ function createRacesRouter(dependencies = {}) {
       const me = race.participants.find(
         (p) => p.userId === req.user.id && p.status === "ACCEPTED"
       );
+      // This target list discloses participant identities and held-item
+      // eligibility. It is therefore member-only even for ordinary races, and
+      // a retained PRUNED bucket assignment (DECLINED participant) is not an
+      // access credential.
+      if (!me) {
+        return res.status(403).json({ error: "You are not an active participant in this race" });
+      }
       const candidates = race.participants.filter(
         (p) =>
           p.userId !== req.user.id &&
           p.status === "ACCEPTED" &&
           !p.finishedAt &&
           !p.forfeitedAt &&
-          (!race.isTeamRace || (me && p.team != null && p.team !== me.team))
+          (!race.isTeamRace || (p.team != null && p.team !== me.team))
       );
 
       const evaluated = await Promise.all(

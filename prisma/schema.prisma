@@ -43,6 +43,11 @@ model User {
   // or write this field.
   stepGoal                      Int?                            @map("step_goal")
   lastStepSyncAt                DateTime?                       @map("last_step_sync_at")
+  // Authoritative, cross-device cooldown stamp for explicitly opt-in Home
+  // pull-to-refresh syncs. Nullable/additive: existing users and every frozen
+  // client retain the pre-cooldown behavior until a capable client sends the
+  // exact intent header.
+  lastHomePullStepSyncAt        DateTime?                       @map("last_home_pull_step_sync_at")
   lastSilentPushSentAt          DateTime?                       @map("last_silent_push_sent_at")
   coins                         Int                             @default(0)
   lastDailyClaimDate            String?                         @map("last_daily_claim_date")
@@ -182,6 +187,8 @@ model User {
   // account (see the FK on Suggestion) and explicitly listed in
   // deleteUserAccount's deletion set.
   suggestions Suggestion[]
+  seededBucketAssignments SeededRaceBucketAssignment[]
+  seededRaceWindowMemberships SeededRaceWindowMembership[]
 
   // First index on this table. Backs the daily-reward reminder scheduler, which
   // selects users by IANA zone: findMany({ where: { timezone: { in: zonesAtSlot } } }).
@@ -884,6 +891,24 @@ enum RaceTeam {
   TEAM_B @map("team_b")
 }
 
+enum SeededRaceBucketStatus {
+  PENDING
+  ACTIVE
+  COMPLETED
+}
+
+enum SeededRaceBucketAssignmentState {
+  ELECTED
+  ASSIGNED
+  PRUNED
+  FINAL
+}
+
+enum SeededRaceWindowStream {
+  LEGACY
+  BUCKET
+}
+
 model Race {
   id                   String           @id @default(uuid())
   creatorId            String?          @map("creator_id")
@@ -993,6 +1018,9 @@ model Race {
   tournamentId         String?          @map("tournament_id")
   tournamentRound      Int?             @map("tournament_round")
   tournamentMatchIndex Int?             @map("tournament_match_index")
+  // A private Daily/Weekly bucket's immutable identity. Nullable and unique so
+  // all historical/global seeded races continue on the legacy stream.
+  seededBucketId       String?          @unique @map("seeded_bucket_id")
   createdAt            DateTime         @default(now()) @map("created_at")
   updatedAt            DateTime         @updatedAt @map("updated_at")
 
@@ -1007,6 +1035,7 @@ model Race {
   messages               RaceMessage[]
   payoutDoubleOfferItems RacePayoutDoubleOfferItem[]
   resolutionJob          RaceResolutionJobV2?
+  seededBucket           SeededRaceBucket?          @relation("SeededBucketRace")
 
   @@unique([tournamentId, tournamentRound, tournamentMatchIndex])
   @@index([creatorId])
@@ -1044,6 +1073,8 @@ model RaceSeed {
   updatedAt           DateTime        @updatedAt @map("updated_at")
 
   races Race[]
+  seededBuckets SeededRaceBucket[]
+  seededWindowMemberships SeededRaceWindowMembership[]
 
   @@map("race_seeds")
 }
@@ -1262,12 +1293,68 @@ model RaceParticipant {
   powerups              RacePowerup[]
   activeEffectsReceived RaceActiveEffect[]
   payoutDoubleOfferItem RacePayoutDoubleOfferItem?
+  seededBucketAssignment SeededRaceBucketAssignment?
 
   @@unique([raceId, userId])
   @@index([userId, status])
   @@index([raceId, status])
   @@index([userId, status, inviteExpiresAt])
   @@map("race_participants")
+}
+
+model SeededRaceBucket {
+  id          String                 @id @default(uuid())
+  seedId      String                 @map("seed_id")
+  windowStart DateTime               @db.Timestamptz(3) @map("window_start")
+  windowEnd   DateTime               @db.Timestamptz(3) @map("window_end")
+  raceId      String                 @unique @map("race_id")
+  status      SeededRaceBucketStatus @default(PENDING)
+  createdAt   DateTime               @default(now()) @map("created_at")
+  updatedAt   DateTime               @updatedAt @map("updated_at")
+
+  seed        RaceSeed                    @relation(fields: [seedId], references: [id])
+  race        Race                        @relation("SeededBucketRace", fields: [raceId], references: [id])
+  assignments SeededRaceBucketAssignment[]
+
+  @@unique([seedId, windowStart, id])
+  @@index([seedId, windowStart, status, createdAt])
+  @@map("seeded_race_buckets")
+}
+
+model SeededRaceBucketAssignment {
+  bucketId          String                           @map("bucket_id")
+  userId            String                           @map("user_id")
+  seedId            String                           @map("seed_id")
+  windowStart       DateTime                         @db.Timestamptz(3) @map("window_start")
+  raceParticipantId String                           @unique @map("race_participant_id")
+  matchSteps        Int                              @default(0) @map("match_steps")
+  assignedAt        DateTime                         @default(now()) @map("assigned_at")
+  state             SeededRaceBucketAssignmentState @default(ASSIGNED)
+
+  bucket            SeededRaceBucket @relation(fields: [bucketId], references: [id], onDelete: Cascade)
+  user              User             @relation(fields: [userId], references: [id])
+  raceParticipant   RaceParticipant  @relation(fields: [raceParticipantId], references: [id])
+
+  @@id([bucketId, userId])
+  @@unique([seedId, windowStart, userId])
+  @@map("seeded_race_bucket_assignments")
+}
+
+model SeededRaceWindowMembership {
+  id          String                  @id @default(uuid())
+  seedId      String                  @map("seed_id")
+  windowStart DateTime                @db.Timestamptz(3) @map("window_start")
+  userId      String                  @map("user_id")
+  stream      SeededRaceWindowStream
+  raceId      String?                 @map("race_id")
+  createdAt   DateTime                @default(now()) @map("created_at")
+
+  seed        RaceSeed @relation(fields: [seedId], references: [id])
+  user        User     @relation(fields: [userId], references: [id])
+
+  @@unique([seedId, windowStart, userId])
+  @@index([seedId, windowStart, stream])
+  @@map("seeded_race_window_memberships")
 }
 
 // One immutable, server-prepared rewarded-ad batch. These tables are additive

@@ -19,6 +19,20 @@ const COMPAT_STEP_GOAL = 5000;
 const RECONCILE_LEASE_MS = 30 * 1000;
 const DEFAULT_MAX_WAIT_MS = 5000;
 const DEFAULT_POLL_MS = 150;
+const HOME_PULL_COOLDOWN_SECONDS = 30;
+
+class StepSyncCooldownError extends Error {
+  constructor(retryAfterSeconds) {
+    super("Step sync is cooling down");
+    this.name = "StepSyncCooldownError";
+    this.code = "STEP_SYNC_COOLDOWN";
+    this.statusCode = 429;
+    this.retryAfterSeconds = Math.max(
+      1,
+      Math.min(HOME_PULL_COOLDOWN_SECONDS, Math.ceil(retryAfterSeconds || 1))
+    );
+  }
+}
 
 // 409: the idempotency key was reused with a DIFFERENT canonical request. The
 // server may already have persisted the first request's data.
@@ -259,6 +273,32 @@ function buildRecordStepSyncV2(dependencies = {}) {
     let stepsChanged;
     try {
       const result = await prisma.$transaction(async (tx) => {
+        // This conditional UPDATE is deliberately first inside Transaction A:
+        // PostgreSQL's CURRENT_TIMESTAMP is the authority, so simultaneous
+        // devices cannot both enter. Idempotency replay/recovery above happens
+        // before reaching here, so a lost successful response still replays.
+        if (homePull) {
+          const stamped = await tx.$queryRaw`
+            UPDATE "users"
+            SET "last_home_pull_step_sync_at" = CURRENT_TIMESTAMP
+            WHERE "id" = ${userId}
+              AND (
+                "last_home_pull_step_sync_at" IS NULL
+                OR "last_home_pull_step_sync_at" <= CURRENT_TIMESTAMP - INTERVAL '30 seconds'
+              )
+            RETURNING "last_home_pull_step_sync_at" AS "lastHomePullStepSyncAt"
+          `;
+          if (stamped.length !== 1) {
+            const cooldown = await tx.$queryRaw`
+              SELECT CEIL(EXTRACT(EPOCH FROM (
+                "last_home_pull_step_sync_at" + INTERVAL '30 seconds' - CURRENT_TIMESTAMP
+              )))::int AS "retryAfterSeconds"
+              FROM "users"
+              WHERE "id" = ${userId}
+            `;
+            throw new StepSyncCooldownError(cooldown[0]?.retryAfterSeconds);
+          }
+        }
         const existingStep = await tx.step.findUnique({
           where: { userId_date: { userId, date: new Date(canonical.date) } },
         });
@@ -348,5 +388,6 @@ module.exports = {
   buildRecordStepSyncV2,
   recordStepSyncV2,
   StepSyncConflictError,
+  StepSyncCooldownError,
   StepSyncValidationError,
 };

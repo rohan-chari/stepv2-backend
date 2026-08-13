@@ -130,6 +130,9 @@ function createStepsRouter(dependencies = {}) {
         body: req.body,
         idempotencyKey: req.headers["idempotency-key"],
         timeZone: req.timeZone,
+        // Exact case-sensitive value only. Headerless and any other value keep
+        // the legacy unrestricted sync contract.
+        homePull: req.get("X-Step-Sync-Intent") === "home-pull",
       });
       res.status(202).json(response);
     } catch (error) {
@@ -142,6 +145,18 @@ function createStepsRouter(dependencies = {}) {
         return res
           .status(400)
           .json({ error: error.message, code: "INVALID_STEP_SYNC" });
+      }
+      if (error.code === "STEP_SYNC_COOLDOWN" || error.name === "StepSyncCooldownError") {
+        const retryAfterSeconds = Math.max(1, Math.min(30, Number(error.retryAfterSeconds) || 1));
+        return res
+          .status(429)
+          .set("Retry-After", String(retryAfterSeconds))
+          .set("Cache-Control", "no-store")
+          .json({
+            error: "Step sync is cooling down",
+            code: "STEP_SYNC_COOLDOWN",
+            retryAfterSeconds,
+          });
       }
       if (
         error.code === "IDEMPOTENCY_CONFLICT" ||

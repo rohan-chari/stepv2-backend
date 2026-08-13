@@ -16,6 +16,10 @@ const CATALOG_TTL_SECONDS = 60;
 // add a query per request; an admin PATCH busts the cache immediately in the
 // process that served it, and other processes converge within CACHE_TTL_MS.
 const KNOWN_FLAGS = {
+  // Accessory visual-region compatibility is additive at the API/schema level,
+  // but enforcement stays dark until the app build that explains 409 conflicts
+  // has rolled out. Frozen clients still receive the longstanding `{error}`.
+  accessoryCompatibilityEnforcement: false,
   // New-user Daily-race activation flow. Default OFF so deploying this backend
   // cannot change behavior for either the current binary or a phased rollout.
   onboardingV2Enabled: false,
@@ -49,6 +53,13 @@ const KNOWN_FLAGS = {
   // Client-transported capability flag for the blocking Races invite gate.
   // Only literal true activates it; false is the safe inline-invite fallback.
   racesInviteDecisionGateEnabled: false,
+  // Capability-scoped Home invite preflight serializer. Default OFF: deploys
+  // preserve the legacy preflight buckets until the carrying mobile build is
+  // ready, and a fast flag rollback simply returns the old serializer.
+  homeInviteModalEnabled: false,
+  // Private daily/weekly bucket stream stays dark until the carrying app build
+  // is available. Non-capable users remain on the existing global stream.
+  seededRaceBucketsEnabled: false,
   // Server-only switch for transactional quick-share automatic friendship.
   quickRaceShareAutoFriendEnabled: false,
   // Rewarded-ad race payout double cohort percentage. Numeric 0..100; zero is

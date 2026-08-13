@@ -43,6 +43,11 @@ const { getIncomingFriendRequestCount: defaultGetIncomingFriendRequestCount } = 
 const {
   optUserIntoPendingSeededRaces: defaultOptUserIntoPendingSeededRaces,
 } = require("../races/commands/autoJoinFeaturedRaces");
+const {
+  buildSeededRaceBuckets,
+  SeededBucketError,
+  supportsBuckets: supportsSeededRaceBuckets,
+} = require("../races/services/seededRaceBuckets");
 const { User: DefaultUser } = require("./models/user");
 const {
   ALLOWED_PROFILE_PHOTO_CONTENT_TYPES,
@@ -151,6 +156,8 @@ function createAuthRouter(dependencies = {}) {
     dependencies.optUserIntoPendingSeededRaces ||
     defaultOptUserIntoPendingSeededRaces;
   const appSettings = dependencies.appSettings || defaultAppSettings;
+  const seededBuckets =
+    dependencies.seededBuckets || buildSeededRaceBuckets(dependencies);
 
   async function withRuntimeFlags(user, clientAppVersion) {
     // Additive nested data: old clients ignore it. Resolve each value
@@ -694,7 +701,34 @@ function createAuthRouter(dependencies = {}) {
       });
       if (enabled) {
         try {
-          await optUserIntoPendingSeededRaces(req.user.id);
+          const bucketMode =
+            (await appSettings.getFlag("seededRaceBucketsEnabled")) === true &&
+            supportsSeededRaceBuckets(req.clientFeatures);
+          if (bucketMode) {
+            // This is an explicit, capable-client preference mutation, so it
+            // elects the next private candidate rather than enrolling the
+            // user in a global PENDING race. The election is idempotent and
+            // deliberately does not create or reveal a bucket online.
+            for (const seedKind of ["DAILY_10K", "WEEKLY_50K"]) {
+              try {
+                await seededBuckets.elect({
+                  userId: req.user.id,
+                  seedKind,
+                  window: "UPCOMING",
+                });
+              } catch (error) {
+                // A disabled/missing individual seed is harmless; the user
+                // preference still persists and another active seed can be
+                // elected. Infrastructure failures remain best-effort just as
+                // the legacy auto-enrollment path has always been.
+                if (!(error instanceof SeededBucketError) || error.code !== "SEED_NOT_FOUND_OR_DISABLED") {
+                  throw error;
+                }
+              }
+            }
+          } else {
+            await optUserIntoPendingSeededRaces(req.user.id);
+          }
         } catch (error) {
           console.error("Featured auto-join opt-in error:", error);
         }

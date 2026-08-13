@@ -117,6 +117,27 @@ const RaceParticipant = {
     });
   },
 
+  // Compare-and-swap the only mutable live-invite state. The expiry predicate
+  // runs in the UPDATE itself: a response racing the expiry boundary cannot
+  // turn an expired INVITED row into ACCEPTED/DECLINED.
+  async updateLiveInvite(id, fields, now = new Date()) {
+    const updated = await prisma.raceParticipant.updateMany({
+      where: {
+        id,
+        status: "INVITED",
+        OR: [{ inviteExpiresAt: null }, { inviteExpiresAt: { gt: now } }],
+      },
+      data: fields,
+    });
+    if (updated.count !== 1) return null;
+    return prisma.raceParticipant.findUnique({
+      where: { id },
+      include: {
+        user: { select: { id: true, displayName: true, profilePhotoUrl: true } },
+      },
+    });
+  },
+
   async findByRace(raceId) {
     return prisma.raceParticipant.findMany({
       where: { raceId },

@@ -1,11 +1,13 @@
 const { Race } = require("../models/race");
 const { buildRaceMoneyView } = require("../racePrizePool");
+const { buildSeededRaceBuckets } = require("../services/seededRaceBuckets");
 
 // Ordering for the featured strip: daily first, then weekly, then anything else.
 const SEED_RANK = { DAILY_10K: 0, WEEKLY_50K: 1 };
 
 function buildGetFeaturedRaces(dependencies = {}) {
   const raceModel = dependencies.Race || Race;
+  const seededBuckets = dependencies.seededBuckets || buildSeededRaceBuckets(dependencies);
   const now = dependencies.now || (() => new Date());
 
   // Returns the current live seeded races (daily + weekly) for the Featured
@@ -13,7 +15,8 @@ function buildGetFeaturedRaces(dependencies = {}) {
   // joined or full races — a featured card stays pinned and flips to a VIEW /
   // FULL state instead. Each entry carries the viewer's join status so the
   // client can render JOIN vs VIEW without a failed join round-trip.
-  return async function getFeaturedRaces({ userId, suggestionMode = false }) {
+  return async function getFeaturedRaces({ userId, suggestionMode = false, supportsBuckets = false }) {
+    if (supportsBuckets && !suggestionMode) return seededBuckets.featuredCards(userId);
     if (suggestionMode) {
       const rows = await raceModel.findFeaturedSuggestions({
         userId,
@@ -49,7 +52,7 @@ function buildGetFeaturedRaces(dependencies = {}) {
       });
     }
 
-    const races = await raceModel.findLiveSeeded();
+    const races = await raceModel.findLiveSeeded({ legacyOnly: true });
     const currentTime = now();
 
     // Partition the live seeded races by status:

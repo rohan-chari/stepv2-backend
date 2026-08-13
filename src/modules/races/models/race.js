@@ -25,6 +25,8 @@ const participantInclude = {
                   renderMetadata: true,
                   bobble: true,
                   testOnly: true,
+                  remoteOnly: true,
+                  assetVersion: true,
                 },
               },
             },
@@ -368,7 +370,7 @@ const Race = {
   // ACTIVE with no creator — are joinable from the browser, not just the home
   // card. Allow null-creator (seeded) races through while still hiding races
   // created by review/demo accounts.
-  async findPublicPending() {
+  async findPublicPending({ excludeSeeded = false } = {}) {
     return prisma.race.findMany({
       where: {
         isPublic: true,
@@ -383,6 +385,11 @@ const Race = {
         // not-yet-started race here with an "ends in" countdown — never see it.
         // User-created (seedId null) PENDING races still appear as before.
         NOT: { status: "PENDING", seedId: { not: null } },
+        // Capable bucket clients must not receive the mixed-version legacy
+        // seeded stream. Keep this predicate in SQL (rather than filtering the
+        // serialized cards) so neither rows nor their participant counts can
+        // accidentally leak into another consumer.
+        ...(excludeSeeded ? { seedId: null } : {}),
       },
       include: {
         creator: { select: { id: true, displayName: true, profilePhotoUrl: true } },
@@ -486,13 +493,14 @@ const Race = {
   // getPublicRaceCount so the Races tab can show a public-race count without
   // transferring full public race cards. Membership/capacity/seed/team rules
   // stay identical because the where clause and predicate are shared.
-  async findPublicPendingLean() {
+  async findPublicPendingLean({ excludeSeeded = false } = {}) {
     return prisma.race.findMany({
       where: {
         isPublic: true,
         status: { in: ["PENDING", "ACTIVE"] },
         OR: [{ creatorId: null }, { creator: { isReviewAccount: false } }],
         NOT: { status: "PENDING", seedId: { not: null } },
+        ...(excludeSeeded ? { seedId: null } : {}),
       },
       select: {
         id: true,
@@ -688,11 +696,15 @@ const Race = {
   // Live (PENDING/ACTIVE) seeded races — the recurring daily/weekly challenges.
   // Used by the Featured Races section. Includes the seed kind and full
   // participants so the caller can compute counts and the viewer's join status.
-  async findLiveSeeded() {
+  async findLiveSeeded({ legacyOnly = false } = {}) {
     return prisma.race.findMany({
       where: {
         seedId: { not: null },
         status: { in: ["PENDING", "ACTIVE"] },
+        // Frozen clients retain the global seeded serializer. Private bucket
+        // rows must never enter that query, even though those clients do not
+        // send the capability token used by the new virtual-card path.
+        ...(legacyOnly ? { seededBucketId: null } : {}),
       },
       include: {
         seed: { select: { kind: true } },
@@ -755,6 +767,9 @@ const Race = {
         ) parts ON TRUE
         WHERE seed.kind IN ('DAILY_10K', 'WEEKLY_50K')
           AND seed.active = TRUE
+          -- Home's legacy suggestion branch is consumed by frozen clients;
+          -- bucket IDs and their participant aggregates are never safe there.
+          AND r.seeded_bucket_id IS NULL
           AND (r.creator_id IS NULL OR creator.is_review_account = FALSE)
           AND r.status = 'active'::"RaceStatus"
           AND r.ends_at > ${now}

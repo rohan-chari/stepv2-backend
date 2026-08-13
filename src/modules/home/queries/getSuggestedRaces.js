@@ -94,10 +94,16 @@ function buildGetSuggestedRaces(dependencies = {}) {
     userId,
     supportsTeamRaces = false,
     supportsTournaments = false,
+    supportsBuckets = false,
   }) {
     const [featuredResult, publicResult, tournamentResult] =
       await Promise.allSettled([
-        getFeaturedRaces({ userId, suggestionMode: true }),
+        // Bucket featured cards are private, viewer-specific state rather than
+        // Home discovery suggestions. Never fall back to the legacy global
+        // seeded field for a capable request.
+        supportsBuckets
+          ? Promise.resolve([])
+          : getFeaturedRaces({ userId, suggestionMode: true }),
         getPublicRaces({
           userId,
           supportsTeamRaces,

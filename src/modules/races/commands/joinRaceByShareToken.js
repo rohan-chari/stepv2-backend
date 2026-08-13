@@ -71,6 +71,13 @@ function buildJoinRaceByShareToken(dependencies = {}) {
       if (!race) {
         throw new RaceShareJoinError("Race not found", 404);
       }
+      // A bucket race never receives a share token, but retain this defensive
+      // authorization check for rows minted before the feature or by an
+      // operational script. Possession of an old token must not make a private
+      // bucket discoverable or joinable.
+      if (race.seededBucketId) {
+        throw new RaceJoinError("This seeded race is private", 403, "RACE_PRIVATE");
+      }
 
       const autoFriendEnabled =
         race.creationSource === "QUICK_CREATE" &&

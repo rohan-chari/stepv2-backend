@@ -72,6 +72,17 @@ function completeRaceUnderSettlementFence(race, args) {
     : completeRace(args);
 }
 
+// The Race remains the settlement authority. This companion write only keeps
+// the private bucket lifecycle/audit row in sync after a successful settlement;
+// legacy races have no reciprocal id and remain untouched.
+async function markSeededBucketCompleted(race) {
+  if (!race?.seededBucketId) return;
+  await prisma.seededRaceBucket.updateMany({
+    where: { id: race.seededBucketId, status: "ACTIVE" },
+    data: { status: "COMPLETED" },
+  });
+}
+
 const byUserIdAsc = (a, b) =>
   String(a.participant.userId || "").localeCompare(String(b.participant.userId || ""));
 
@@ -436,6 +447,7 @@ async function resolveExpiredRaces() {
           tie: isTie,
           participantUserIds: acceptedParticipants.map((p) => p.userId),
         });
+        await markSeededBucketCompleted(race);
 
         console.log(
           `[CRON] Team race ${race.id} ("${race.name}") expired. ` +
@@ -490,6 +502,7 @@ async function resolveExpiredRaces() {
         winnerUserId: topUserId,
         participantUserIds,
       });
+      await markSeededBucketCompleted(race);
 
       console.log(
         `[CRON] Race ${race.id} ("${race.name}") expired. Winner: ${topUserId || "none"} with ${topSteps} steps`

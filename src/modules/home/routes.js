@@ -17,6 +17,7 @@ const defaultAdRewardsConfig = require("../economy/adRewards");
 const { appSettings } = require("../../shared/config/appSettings");
 const { getNextRaceHome } = require("../races/queries/getNextRaceHome");
 const { supportsNextRace } = require("../races/services/nextRacePolicy");
+const { supportsBuckets: supportsSeededRaceBuckets } = require("../races/services/seededRaceBuckets");
 const {
   getSuggestedRaces: defaultGetSuggestedRaces,
 } = require("./queries/getSuggestedRaces");
@@ -54,6 +55,9 @@ function createHomeRouter(dependencies = {}) {
         supportsTeamRaces: req.clientFeatures?.has("team_races") ?? false,
         supportsTournaments:
           req.clientFeatures?.has("tournaments") ?? false,
+        supportsBuckets:
+          (await appSettings.getFlag("seededRaceBucketsEnabled")) === true &&
+          supportsSeededRaceBuckets(req.clientFeatures),
       });
       res.json(result);
     })
@@ -79,6 +83,7 @@ function createHomeRouter(dependencies = {}) {
         // the race-detail screen compute identical race-relative totals.
         timeZone: req.timeZone,
         supportsCharacters: req.clientFeatures?.has("characters") ?? false,
+        supportsRemoteAssets: req.clientFeatures?.has("remote_assets") ?? false,
         // Batch 2026-07-26, item 8: TestFlight viewers see test-only characters.
         releaseChannel: req.releaseChannel,
         // TR-702/809: old clients never get a team race on the Home card.

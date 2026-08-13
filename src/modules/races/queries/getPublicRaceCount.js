@@ -9,8 +9,12 @@ const { isVisiblePublicRace } = require("./getPublicRaces");
 function buildGetPublicRaceCount(dependencies = {}) {
   const raceModel = dependencies.Race || Race;
 
-  return async function getPublicRaceCount({ userId, supportsTeamRaces = false }) {
-    const races = await raceModel.findPublicPendingLean();
+  return async function getPublicRaceCount({
+    userId,
+    supportsTeamRaces = false,
+    excludeSeeded = false,
+  }) {
+    const races = await raceModel.findPublicPendingLean({ excludeSeeded });
     let count = 0;
     for (const race of races) {
       if (isVisiblePublicRace(race, userId, supportsTeamRaces)) count += 1;

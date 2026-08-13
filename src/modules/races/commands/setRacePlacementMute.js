@@ -16,7 +16,7 @@ async function setRacePlacementMute({ userId, raceId, muted }) {
   const participant = await prisma.raceParticipant.findUnique({
     where: { raceId_userId: { raceId, userId } },
   });
-  if (!participant) {
+  if (!participant || (await prisma.race.findUnique({ where: { id: raceId }, select: { seededBucketId: true } }))?.seededBucketId && participant.status !== "ACCEPTED") {
     throw new SetRacePlacementMuteError("Not a participant in this race", 403);
   }
   return prisma.raceParticipant.update({

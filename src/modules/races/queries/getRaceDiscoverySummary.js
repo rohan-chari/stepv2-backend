@@ -33,6 +33,7 @@ function buildGetRaceDiscoverySummary(dependencies = {}) {
     userId,
     supportsTeamRaces = false,
     supportsTournaments = false,
+    supportsBuckets = false,
   }) {
     const resolved = {
       publicRaceCount: true,
@@ -41,8 +42,12 @@ function buildGetRaceDiscoverySummary(dependencies = {}) {
     };
 
     const [countResult, featuredResult, tournamentsResult] = await Promise.allSettled([
-      getPublicRaceCount({ userId, supportsTeamRaces }),
-      getFeaturedRaces({ userId }),
+      getPublicRaceCount({
+        userId,
+        supportsTeamRaces,
+        excludeSeeded: supportsBuckets,
+      }),
+      getFeaturedRaces({ userId, supportsBuckets }),
       supportsTournaments
         ? getPublicTournaments({ userId })
         : Promise.resolve({ featured: [] }),

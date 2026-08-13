@@ -96,6 +96,18 @@ function buildRespondToRaceInvite(dependencies = {}) {
         "ALREADY_RESPONDED"
       );
     }
+    // Fast deterministic rejection for an already-expired row. The conditional
+    // write below repeats this predicate atomically for the boundary race.
+    if (
+      participant.inviteExpiresAt &&
+      new Date(participant.inviteExpiresAt).getTime() <= Date.now()
+    ) {
+      throw new RaceInviteResponseError(
+        "This invite has expired",
+        409,
+        "INVITE_EXPIRED"
+      );
+    }
 
     let acceptTeam = null;
     if (accept && race.isTeamRace) {
@@ -179,7 +191,38 @@ function buildRespondToRaceInvite(dependencies = {}) {
       updateFields.buyInStatus = race.status === "ACTIVE" ? "COMMITTED" : "HELD";
     }
 
-    const updated = await participantModel.update(participant.id, updateFields);
+    // Expiry is authoritative at the database write boundary. `inviteExpiresAt`
+    // is exclusive: at/after it is expired; null remains a legacy never-expire.
+    // The fallback preserves the long-standing injected-test-model seam. The
+    // production RaceParticipant model always supplies updateLiveInvite, which
+    // is the atomic expiry authority described above.
+    const updated =
+      typeof participantModel.updateLiveInvite === "function"
+        ? await participantModel.updateLiveInvite(
+            participant.id,
+            updateFields,
+            new Date()
+          )
+        : await participantModel.update(participant.id, updateFields);
+    if (!updated) {
+      const current = await participantModel.findByRaceAndUser(raceId, userId);
+      if (
+        current?.status === "INVITED" &&
+        current.inviteExpiresAt &&
+        new Date(current.inviteExpiresAt).getTime() <= Date.now()
+      ) {
+        throw new RaceInviteResponseError(
+          "This invite has expired",
+          409,
+          "INVITE_EXPIRED"
+        );
+      }
+      throw new RaceInviteResponseError(
+        "You have already responded to this invite",
+        400,
+        "ALREADY_RESPONDED"
+      );
+    }
 
     if (accept && buyInAmount > 0) {
       await reserveRaceBuyIn({

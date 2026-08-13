@@ -10,6 +10,9 @@ const {
 } = require("./setup");
 
 const { buildRenewSeededRaces } = require("../../src/modules/races/jobs/seededRaceRenewal");
+const { appSettings } = require("../../src/shared/config/appSettings");
+
+const BUCKET_FEATURES = { "X-Client-Features": "seeded_race_buckets" };
 
 // End-to-end coverage for the auto-join-featured-races preference:
 //   * PUT /auth/me/featured-auto-join persists the flag and (on enable)
@@ -176,6 +179,71 @@ describe("featured races auto-join", () => {
       where: { raceId: upcoming.id, userId: user.id },
     });
     assert.equal(participant, null);
+  });
+
+  it("uses the private candidate stream, not a global pending row, for a capable auto-join opt-in", async () => {
+    await appSettings.setFlag("seededRaceBucketsEnabled", true);
+    const seed = await getDailySeed();
+    const now = Date.now();
+    const legacyUpcoming = await createSeededRace(seed.id, {
+      status: "PENDING",
+      startedAt: null,
+      scheduledStartAt: new Date(now + 23 * 60 * 60 * 1000),
+      endsAt: new Date(now + 47 * 60 * 60 * 1000),
+    });
+    const { user, token } = await createTestUser();
+
+    const response = await request(
+      server.baseUrl,
+      "PUT",
+      "/auth/me/featured-auto-join",
+      { token, headers: BUCKET_FEATURES, body: { enabled: true } }
+    );
+    assert.equal(response.status, 200);
+    const membership = await prisma.seededRaceWindowMembership.findFirst({
+      where: { userId: user.id, seedId: seed.id },
+    });
+    assert.equal(membership?.stream, "BUCKET");
+    assert.equal(
+      await prisma.raceParticipant.count({
+        where: { raceId: legacyUpcoming.id, userId: user.id },
+      }),
+      0,
+      "capable opt-in must not silently enter the legacy global field"
+    );
+    await appSettings.setFlag("seededRaceBucketsEnabled", false);
+  });
+
+  it("records a LEGACY stream election before old-client auto-enrollment, blocking a later bucket election", async () => {
+    await appSettings.setFlag("seededRaceBucketsEnabled", true);
+    const seed = await getDailySeed();
+    const { upcomingWindowFor } = require("../../src/modules/races/services/seededRaceBuckets");
+    const { windowStart, windowEnd } = upcomingWindowFor(seed, new Date());
+    await createSeededRace(seed.id, {
+      status: "PENDING",
+      startedAt: null,
+      scheduledStartAt: windowStart,
+      endsAt: windowEnd,
+    });
+    const { user, token } = await createTestUser();
+    const oldClient = await request(server.baseUrl, "PUT", "/auth/me/featured-auto-join", {
+      token,
+      body: { enabled: true },
+    });
+    assert.equal(oldClient.status, 200);
+    const membership = await prisma.seededRaceWindowMembership.findFirst({
+      where: { userId: user.id, seedId: seed.id },
+    });
+    assert.equal(membership?.stream, "LEGACY");
+    const bucketAttempt = await request(
+      server.baseUrl,
+      "POST",
+      "/races/seeded/DAILY_10K/assign",
+      { token, headers: BUCKET_FEATURES, body: { window: "UPCOMING" } }
+    );
+    assert.equal(bucketAttempt.status, 409);
+    assert.equal((await bucketAttempt.json()).code, "LEGACY_STREAM_ELECTED");
+    await appSettings.setFlag("seededRaceBucketsEnabled", false);
   });
 
   it("cron enrolls opted-in users (and only them) into newly created seeded races, idempotently", async () => {

@@ -8,6 +8,8 @@ const {
   withQuickMembershipLock,
   countLiveQuickMemberships,
 } = require("../services/nextRacePolicy");
+const { prisma: defaultPrisma } = require("../../../db");
+const { claimLegacyStream } = require("../services/seededRaceBuckets");
 
 // Browse-join: a user joins a PUBLIC race they found in the public races list.
 // Resolves the race by id, enforces the `isPublic` gate, then defers to the
@@ -16,6 +18,7 @@ const {
 // from here unchanged.
 function buildJoinPublicRace(dependencies = {}) {
   const raceModel = dependencies.Race || Race;
+  const prisma = dependencies.prisma || defaultPrisma;
   const withLock = dependencies.withRaceJoinLock || withRaceJoinLock;
   const joinRaceCore = buildJoinRaceCore(dependencies);
   // Batch 2026-08-08 item 2 — private-race auto-start hook. A no-op on this
@@ -52,7 +55,17 @@ function buildJoinPublicRace(dependencies = {}) {
         );
       }
       if (!race.isPublic) {
+        if (race.seededBucketId) {
+          throw new RaceJoinError("This seeded race is private", 403, "RACE_PRIVATE");
+        }
         throw new RaceJoinError("This race is not public", 403);
+      }
+      if (!(await claimLegacyStream({ prisma, race, userId }))) {
+        throw new RaceJoinError(
+          "This featured race uses the private stream",
+          409,
+          "BUCKET_STREAM_ELECTED"
+        );
       }
 
       return joinRaceCore({ race, userId, onboarding, team, clientFeatures });

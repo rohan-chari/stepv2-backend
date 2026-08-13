@@ -129,7 +129,7 @@ function buildGetRaceMessages(dependencies = {}) {
     }
 
     const myParticipant = race.participants.find((p) => p.userId === userId);
-    if (!myParticipant) {
+    if (!myParticipant || (race.seededBucketId && myParticipant.status !== "ACCEPTED")) {
       // 2026-07-25 §5 — tournament spectating, identical to the relaxation
       // getRaceDetails/getRaceProgress already apply: any ACCEPTED bracket
       // player (INCLUDING eliminated) may READ a sibling matchup's chat.

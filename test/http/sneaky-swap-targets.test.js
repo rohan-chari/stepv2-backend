@@ -132,6 +132,21 @@ test("targets EXCLUDES a participant who holds only a SNEAKY_SWAP and/or MYSTERY
   }
 });
 
+test("targets is member-only and rejects a retained non-accepted participant", async () => {
+  const race = buildRace([{ id: "p-bob", userId: "user-bob", displayName: "Bob" }]);
+  race.participants[0].status = "DECLINED";
+  const server = await startServer(makeDeps({
+    race,
+    powerupsByParticipant: { "p-bob": [{ type: "LEG_CRAMP", status: "HELD" }] },
+  }));
+  try {
+    const { status } = await getTargets(server.baseUrl, race.id);
+    assert.equal(status, 403);
+  } finally {
+    await server.close();
+  }
+});
+
 test("targets INCLUDES a participant who holds a stealable powerup alongside a sneaky swap", async () => {
   const race = buildRace([
     { id: "p-bob", userId: "user-bob", displayName: "Bob" },
