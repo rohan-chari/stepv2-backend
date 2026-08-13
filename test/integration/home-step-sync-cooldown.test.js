@@ -176,6 +176,23 @@ describe("Home pull step-sync cooldown (integration)", () => {
     assert.ok(row[0].lastHomePullStepSyncAt);
   });
 
+  it("concurrent same-key home-pulls replay one accepted result before cooldown", async () => {
+    const { token, user } = await createTestUser();
+    const raceId = await activeRaceFor(user.id);
+    const idempotencyKey = key();
+    const responses = await Promise.all(
+      [0, 1].map(() => request(baseUrl, "POST", "/steps/sync-v2", {
+        token,
+        headers: { "Idempotency-Key": idempotencyKey, ...homePull },
+        body: body(600),
+      }))
+    );
+    assert.deepEqual(responses.map((response) => response.status), [202, 202]);
+    const bodies = await Promise.all(responses.map((response) => response.json()));
+    assert.deepEqual(bodies[0], bodies[1]);
+    assert.equal(await jobGeneration(raceId), 1);
+  });
+
   it("does not stamp an invalid request", async () => {
     const { user, token } = await createTestUser();
     const invalid = await request(baseUrl, "POST", "/steps/sync-v2", {

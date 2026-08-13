@@ -237,7 +237,38 @@ function buildRecordStepSyncV2(dependencies = {}) {
     });
   }
 
-  return async function recordStepSyncV2({ userId, body, idempotencyKey, timeZone = "UTC" }) {
+  // Same-key resolution is deliberately shared by the initial read and the
+  // post-admission-loss read. In particular, two concurrent home pulls can
+  // both miss the first lookup: the loser must replay/recover the winner's
+  // reservation, not turn the winner's committed cooldown stamp into a 429.
+  async function replayExisting({ reservation, userId, idempotencyKey, timeZone, canonical, hash }) {
+    if (reservation.requestHash !== hash) throw new StepSyncConflictError();
+    if (reservation.state === "COMPLETE") return reservation.responseJson;
+    const deadline = now().getTime() + maxWaitMs;
+    let current = reservation;
+    while (now().getTime() < deadline) {
+      if (leaseExpired(current, now().getTime())) {
+        return recover({ reservation: current, userId, timeZone, canonical });
+      }
+      await sleep(pollMs);
+      const row = await stepSyncRequestModel.findByKey(userId, idempotencyKey);
+      if (!row) break;
+      if (row.state === "COMPLETE") return row.responseJson;
+      current = row;
+    }
+    const row = await stepSyncRequestModel.findByKey(userId, idempotencyKey);
+    if (row && row.state === "COMPLETE") return row.responseJson;
+    if (row) return recover({ reservation: row, userId, timeZone, canonical });
+    return null;
+  }
+
+  return async function recordStepSyncV2({
+    userId,
+    body,
+    idempotencyKey,
+    timeZone = "UTC",
+    homePull = false,
+  }) {
     validateIdempotencyKey(idempotencyKey);
     const { canonical, hash } = canonicalizeStepSyncRequest(body);
     // Enforce manual-sample rejection / recordingMethod rules (400) up front.
@@ -247,24 +278,10 @@ function buildRecordStepSyncV2(dependencies = {}) {
     // Idempotency: inspect any existing reservation for this (user, key).
     const existing = await stepSyncRequestModel.findByKey(userId, idempotencyKey);
     if (existing) {
-      if (existing.requestHash !== hash) throw new StepSyncConflictError();
-      if (existing.state === "COMPLETE") return existing.responseJson;
-      // PROCESSING same-hash: wait for completion or recover an expired lease.
-      const deadline = now().getTime() + maxWaitMs;
-      while (now().getTime() < deadline) {
-        if (leaseExpired(existing, now().getTime())) {
-          return recover({ reservation: existing, userId, timeZone, canonical });
-        }
-        await sleep(pollMs);
-        const row = await stepSyncRequestModel.findByKey(userId, idempotencyKey);
-        if (!row) break;
-        if (row.state === "COMPLETE") return row.responseJson;
-        existing.leaseExpiresAt = row.leaseExpiresAt;
-      }
-      const row = await stepSyncRequestModel.findByKey(userId, idempotencyKey);
-      if (row && row.state === "COMPLETE") return row.responseJson;
-      if (row) return recover({ reservation: row, userId, timeZone, canonical });
-      // Row vanished (cleanup); fall through to a fresh persist.
+      const replay = await replayExisting({
+        reservation: existing, userId, idempotencyKey, timeZone, canonical, hash,
+      });
+      if (replay) return replay;
     }
 
     // ── Transaction A: persist steps/samples + create the reservation. ──
@@ -344,6 +361,19 @@ function buildRecordStepSyncV2(dependencies = {}) {
         canonical.date
       );
     } catch (error) {
+      // A concurrent home-pull winner may have committed Transaction A's
+      // reservation while this request waited on the conditional timestamp
+      // stamp. Re-read before surfacing the cooldown: same-key retries always
+      // replay/recover the winner's result first.
+      if (error?.code === "STEP_SYNC_COOLDOWN") {
+        const row = await stepSyncRequestModel.findByKey(userId, idempotencyKey);
+        if (row) {
+          const replay = await replayExisting({
+            reservation: row, userId, idempotencyKey, timeZone, canonical, hash,
+          });
+          if (replay) return replay;
+        }
+      }
       // Unique-violation on the reservation => a concurrent request with the
       // same key created it first. Re-read and treat as a same-hash replay.
       if (error && error.code === "P2002") {
