@@ -453,47 +453,126 @@ describe("next-race CTA backend contract", () => {
     }
   });
 
-  it("caps a walker at three live quick-race memberships", async () => {
+  it("caps a walker at five live quick-race memberships", async () => {
     await appSettings.setFlag("quickCreateRaceCtaEnabled", true);
     const walker = await user("Walker");
     const raceIds = [];
-    for (let i = 0; i < 4; i++) {
+    const hosts = [];
+    for (let i = 0; i < 6; i++) {
       const host = await user(`Host${i}`);
       const created = await createQuick(host, { name: `Sprint ${i}` });
+      hosts.push(host);
       raceIds.push((await created.json()).race.id);
     }
-    for (const raceId of raceIds.slice(0, 3)) {
+    for (const raceId of raceIds.slice(0, 5)) {
       const joined = await request(server.baseUrl, "POST", `/races/${raceId}/join`, {
         token: walker.token,
         headers: CAPABLE,
       });
       assert.equal(joined.status, 201);
     }
-    const fourth = await request(server.baseUrl, "POST", `/races/${raceIds[3]}/join`, {
-      token: walker.token,
-      headers: CAPABLE,
+    const shareLink = await request(
+      server.baseUrl,
+      "POST",
+      `/races/${raceIds[5]}/share-link`,
+      { token: hosts[5].token }
+    );
+    assert.equal(shareLink.status, 201);
+    const { shareToken } = await shareLink.json();
+    const sixth = await request(
+      server.baseUrl,
+      "POST",
+      `/races/share/${shareToken}/join`,
+      { token: walker.token, headers: CAPABLE }
+    );
+    assert.equal(sixth.status, 409);
+    assert.deepEqual(await sixth.json(), {
+      error:
+        "You're already in 5 races that start automatically. Try again after one is over.",
+      code: "QUICK_RACE_MEMBERSHIP_LIMIT",
     });
-    assert.equal(fourth.status, 409);
-    assert.equal((await fourth.json()).code, "QUICK_RACE_MEMBERSHIP_LIMIT");
+  });
+
+  it("serializes public and share-token joins when one quick-race slot remains", async () => {
+    await appSettings.setFlag("quickCreateRaceCtaEnabled", true);
+    const walker = await user("ConcurrentWalker");
+    const races = [];
+    const hosts = [];
+    for (let i = 0; i < 6; i++) {
+      const host = await user(`ConcurrentHost${i}`);
+      hosts.push(host);
+      races.push(
+        (await (await createQuick(host, { name: `Concurrent Sprint ${i}` })).json())
+          .race.id
+      );
+    }
+
+    for (const raceId of races.slice(0, 4)) {
+      const joined = await request(server.baseUrl, "POST", `/races/${raceId}/join`, {
+        token: walker.token,
+        headers: CAPABLE,
+      });
+      assert.equal(joined.status, 201);
+    }
+
+    const shareLink = await request(
+      server.baseUrl,
+      "POST",
+      `/races/${races[5]}/share-link`,
+      { token: hosts[5].token }
+    );
+    assert.equal(shareLink.status, 201);
+    const { shareToken } = await shareLink.json();
+
+    const results = await Promise.all([
+      request(server.baseUrl, "POST", `/races/${races[4]}/join`, {
+        token: walker.token,
+        headers: CAPABLE,
+      }),
+      request(server.baseUrl, "POST", `/races/share/${shareToken}/join`, {
+        token: walker.token,
+        headers: CAPABLE,
+      }),
+    ]);
+
+    assert.deepEqual(
+      results.map((result) => result.status).sort(),
+      [201, 409]
+    );
+    const rejected = results.find((result) => result.status === 409);
+    assert.equal((await rejected.json()).code, "QUICK_RACE_MEMBERSHIP_LIMIT");
+    assert.equal(
+      await prisma.raceParticipant.count({
+        where: {
+          userId: walker.id,
+          status: "ACCEPTED",
+          race: { creationSource: "QUICK_CREATE", status: { in: ["PENDING", "ACTIVE"] } },
+        },
+      }),
+      5
+    );
   });
 
   it("enforces the persisted quick-membership cap for a frozen client too", async () => {
     await appSettings.setFlag("quickCreateRaceCtaEnabled", true);
     const walker = await user("FrozenWalker");
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 6; i++) {
       const host = await user(`Host${i}`);
       const raceId = (await (await createQuick(host, { name: `Frozen Sprint ${i}` })).json())
         .race.id;
       const joined = await request(server.baseUrl, "POST", `/races/${raceId}/join`, {
         token: walker.token,
       });
-      if (i < 3) {
+      if (i < 5) {
         assert.equal(joined.status, 201, JSON.stringify(await joined.clone().json()));
       } else {
         assert.equal(joined.status, 409);
         const body = await joined.json();
         assert.equal(body.code, "QUICK_RACE_MEMBERSHIP_LIMIT");
-        assert.match(body.error, /finish or leave/i);
+        assert.equal(
+          body.error,
+          "You're already in 5 races that start automatically. Try again after one is over."
+        );
       }
     }
     assert.equal(
@@ -504,7 +583,7 @@ describe("next-race CTA backend contract", () => {
           race: { creationSource: "QUICK_CREATE", status: { in: ["PENDING", "ACTIVE"] } },
         },
       }),
-      3
+      5
     );
   });
 

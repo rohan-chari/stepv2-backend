@@ -4,6 +4,13 @@ const { withAdvisoryLock } = require("../../../shared/db/withAdvisoryLock");
 const FEATURE = "next_race_cta";
 const QUICK_SOURCE = "QUICK_CREATE";
 const AUTO_START_POLICY = "ON_MINIMUM_PARTICIPANTS";
+// A single walking stream earns independently in every quick race. Keep this
+// server-authoritative for capable and frozen clients so prize/box reuse stays
+// bounded. The owner-approved V1 adjustment raised the bound from 3 to 5.
+const MAX_LIVE_QUICK_MEMBERSHIPS = 5;
+const QUICK_MEMBERSHIP_LIMIT_MESSAGE =
+  `You're already in ${MAX_LIVE_QUICK_MEMBERSHIPS} races that start automatically. ` +
+  "Try again after one is over.";
 
 function supportsNextRace(clientFeatures) {
   return clientFeatures?.has(FEATURE) === true;
@@ -68,6 +75,8 @@ module.exports = {
   FEATURE,
   QUICK_SOURCE,
   AUTO_START_POLICY,
+  MAX_LIVE_QUICK_MEMBERSHIPS,
+  QUICK_MEMBERSHIP_LIMIT_MESSAGE,
   supportsNextRace,
   hasAnyQuickMetadata,
   isExactQuickPair,

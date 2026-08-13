@@ -7,6 +7,8 @@ const {
 const {
   withQuickMembershipLock,
   countLiveQuickMemberships,
+  MAX_LIVE_QUICK_MEMBERSHIPS,
+  QUICK_MEMBERSHIP_LIMIT_MESSAGE,
 } = require("../services/nextRacePolicy");
 const { RaceJoinError } = require("./joinRaceCore");
 const { prisma: defaultPrisma } = require("../../../db");
@@ -128,9 +130,12 @@ function buildJoinRaceByShareToken(dependencies = {}) {
     const deferred =
       resolved.creationSource === "QUICK_CREATE"
       ? await withQuickMembershipLock(userId, async () => {
-          if (await countLiveQuickMemberships(userId) >= 3) {
+          if (
+            (await countLiveQuickMemberships(userId)) >=
+            MAX_LIVE_QUICK_MEMBERSHIPS
+          ) {
             throw new RaceJoinError(
-              "Finish or leave a quick race before joining another.",
+              QUICK_MEMBERSHIP_LIMIT_MESSAGE,
               409,
               "QUICK_RACE_MEMBERSHIP_LIMIT"
             );
