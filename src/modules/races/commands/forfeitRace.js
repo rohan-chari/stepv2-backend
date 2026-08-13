@@ -163,10 +163,17 @@ function buildForfeitRace(dependencies = {}) {
       return leechFinals.get(participant.id) ?? total;
     });
 
-  return async function forfeitRace({ userId, raceId }) {
+  return async function forfeitRace({
+    userId,
+    raceId,
+    // Internal capability path used only by POST /races/:id/leave. The public
+    // /forfeit endpoint never supplies these options, preserving old clients.
+    allowIndividual = false,
+    requireExitPolicy = false,
+  }) {
     const race = await raceModel.findById(raceId);
     if (!race) {
-      throw new RaceForfeitError("Race not found", 404);
+      throw new RaceForfeitError("Race not found", 404, "RACE_NOT_FOUND");
     }
     if (race.tournamentId) {
       throw new RaceForfeitError(
@@ -175,16 +182,45 @@ function buildForfeitRace(dependencies = {}) {
         "TOURNAMENT_RACE_LOCKED"
       );
     }
-    if (!race.isTeamRace) {
+    if (!race.isTeamRace && !allowIndividual) {
       throw new RaceForfeitError(
         "Only team races support forfeiting",
         400
       );
     }
+    if (requireExitPolicy && race.exitActionsEnabled !== true) {
+      throw new RaceForfeitError(
+        "This race does not support leaving",
+        400,
+        "RACE_NOT_LEAVABLE"
+      );
+    }
+    if (requireExitPolicy && race.creatorId === userId) {
+      throw new RaceForfeitError(
+        "The race creator can't leave. Cancel the race instead",
+        400,
+        "RACE_CREATOR_CANNOT_LEAVE"
+      );
+    }
     if (race.status !== "ACTIVE") {
       throw new RaceForfeitError(
         "You can only forfeit a race that is in progress",
-        400
+        400,
+        "RACE_NOT_LEAVABLE"
+      );
+    }
+
+    // Once the deadline has passed, expiry owns settlement. Do not mutate a
+    // row from a stale ACTIVE snapshot while that worker ranks and pays it.
+    if (
+      requireExitPolicy &&
+      race.endsAt &&
+      new Date(race.endsAt) <= now()
+    ) {
+      throw new RaceForfeitError(
+        "You can only forfeit a race that is in progress",
+        400,
+        "RACE_NOT_LEAVABLE"
       );
     }
 
@@ -193,7 +229,7 @@ function buildForfeitRace(dependencies = {}) {
       userId
     );
     if (!participant || participant.status !== "ACCEPTED") {
-      throw new RaceForfeitError("You are not in this race", 403);
+      throw new RaceForfeitError("You are not in this race", 403, "NOT_A_PARTICIPANT");
     }
     if (participant.forfeitedAt) {
       throw new RaceForfeitError(
@@ -201,7 +237,11 @@ function buildForfeitRace(dependencies = {}) {
         400
       );
     }
-    if (participant.team !== "TEAM_A" && participant.team !== "TEAM_B") {
+    if (
+      race.isTeamRace &&
+      participant.team !== "TEAM_A" &&
+      participant.team !== "TEAM_B"
+    ) {
       throw new RaceForfeitError("You are not on a team in this race", 400);
     }
 
@@ -219,6 +259,28 @@ function buildForfeitRace(dependencies = {}) {
 
     // Atomic forfeit + collapse evaluation (TR-604).
     const collapse = await db.$transaction(async (tx) => {
+      // Lock and re-check the lifecycle row inside the same mutation
+      // transaction. A completion that wins after our optimistic read makes
+      // this a normal RACE_NOT_LEAVABLE conflict, never a late forfeit write.
+      await tx.$queryRawUnsafe(
+        `SELECT id FROM races WHERE id = $1 FOR UPDATE`,
+        raceId
+      );
+      const lockedRace = tx.race?.findUnique
+        ? await tx.race.findUnique({
+            where: { id: raceId },
+            select: { status: true, endsAt: true },
+          })
+        : { status: race.status, endsAt: race.endsAt };
+      if (
+        !lockedRace ||
+        lockedRace.status !== "ACTIVE" ||
+        (requireExitPolicy &&
+          lockedRace.endsAt &&
+          new Date(lockedRace.endsAt) <= forfeitedAt)
+      ) {
+        return { noLongerActive: true };
+      }
       // Serialize concurrent forfeits on this race: lock all its participant
       // rows so the alive-count below always sees committed truth.
       //
@@ -245,6 +307,8 @@ function buildForfeitRace(dependencies = {}) {
       const accepted = await tx.raceParticipant.findMany({
         where: { raceId, status: "ACCEPTED" },
       });
+      if (!race.isTeamRace) return { collapsed: false };
+
       const aliveByTeam = { TEAM_A: 0, TEAM_B: 0 };
       for (const row of accepted) {
         if (row.forfeitedAt) continue;
@@ -271,6 +335,13 @@ function buildForfeitRace(dependencies = {}) {
       throw new RaceForfeitError(
         "You have already forfeited this race",
         400
+      );
+    }
+    if (collapse.noLongerActive) {
+      throw new RaceForfeitError(
+        "You can only forfeit a race that is in progress",
+        400,
+        "RACE_NOT_LEAVABLE"
       );
     }
 

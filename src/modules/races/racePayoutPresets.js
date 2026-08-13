@@ -69,6 +69,7 @@ function gradedSlotCount(preset, participantCount) {
 // Distribute `pot` across `percentages` (index 0 = 1st). Lower places are floored
 // and 1st takes the rounding remainder, so the split always sums to the pot.
 function distributeByPercentages(percentages, pot) {
+  if (pot <= 0 || !percentages || percentages.length === 0) return [];
   const amounts = percentages.map((percent, index) =>
     index === 0 ? 0 : Math.floor((pot * percent) / 100)
   );
@@ -111,18 +112,40 @@ function distributeGeometric(pot, slots) {
 // an empty pot. Callers map the first three entries onto the legacy
 // {first,second,third} shape for older app builds and expose the full array as
 // payoutTiers for newer ones.
-function computeRacePayouts({ preset, potCoins, participantCount }) {
+function computeRacePayouts({
+  preset,
+  potCoins,
+  participantCount,
+  // Only the leave-enabled individual-race settlement path supplies this.
+  // Keeping it separate from participantCount preserves the advertised fixed
+  // TOP3 tables for every legacy race, including a two-runner race.
+  eligibleRecipientCount = null,
+}) {
   const safePot = Math.max(0, potCoins || 0);
   if (safePot === 0) return [];
 
   if (GRADED_PRESETS.has(preset)) {
     return distributeGeometric(
       safePot,
-      gradedSlotCount(preset, participantCount)
+      gradedSlotCount(
+        preset,
+        eligibleRecipientCount == null ? participantCount : eligibleRecipientCount
+      )
     );
   }
 
-  return distributeByPercentages(getRacePayoutPercentages(preset), safePot);
+  const percentages = getRacePayoutPercentages(preset);
+  if (eligibleRecipientCount == null) {
+    return distributeByPercentages(percentages, safePot);
+  }
+  // If an opt-in leave-enabled race has fewer eligible finishers than its
+  // advertised fixed places, compact the tiers. First receives omitted lower
+  // percentages, so settlement never strands committed coins.
+  const eligible = Math.max(0, Math.floor(eligibleRecipientCount || 0));
+  return distributeByPercentages(
+    percentages.slice(0, Math.min(percentages.length, eligible)),
+    safePot
+  );
 }
 
 // Even split across `slots` places: floor(pool / slots) each, with the rounding
@@ -158,18 +181,35 @@ const PAYOUT_CURVES = {
 // Deliberately separate from computeRacePayouts: legacy buy-in pots keep their
 // existing geometric curve so an in-flight paid race's payout table doesn't
 // change shape underneath its participants mid-race.
-function computeFundedPayouts({ preset, poolCoins, participantCount, curve = null }) {
+function computeFundedPayouts({
+  preset,
+  poolCoins,
+  participantCount,
+  curve = null,
+  eligibleRecipientCount = null,
+}) {
   const pool = Math.max(0, Math.floor(poolCoins || 0));
   if (pool === 0) return [];
 
   if (GRADED_PRESETS.has(preset)) {
-    const slots = gradedSlotCount(preset, participantCount);
+    const slots = gradedSlotCount(
+      preset,
+      eligibleRecipientCount == null ? participantCount : eligibleRecipientCount
+    );
     return curve === PAYOUT_CURVES.GEOMETRIC
       ? distributeGeometric(pool, slots)
       : distributeEvenly(pool, slots);
   }
 
-  return distributeByPercentages(getRacePayoutPercentages(preset), pool);
+  const percentages = getRacePayoutPercentages(preset);
+  if (eligibleRecipientCount == null) {
+    return distributeByPercentages(percentages, pool);
+  }
+  const eligible = Math.max(0, Math.floor(eligibleRecipientCount || 0));
+  return distributeByPercentages(
+    percentages.slice(0, Math.min(percentages.length, eligible)),
+    pool
+  );
 }
 
 function isRacePayoutPresetCompatible({ preset, acceptedCount }) {

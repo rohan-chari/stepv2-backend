@@ -1,8 +1,11 @@
 const { Race } = require("../models/race");
 const { RaceParticipant } = require("../models/raceParticipant");
 const { awardCoins } = require("../../../shared/economy/awardCoins");
+const { prisma: defaultPrisma } = require("../../../db");
 const { eventBus } = require("../../../shared/events/eventBus");
 const { refundRaceBuyIn } = require("../services/raceBuyIns");
+const { forfeitRace: defaultForfeitRace } = require("./forfeitRace");
+const { buildRaceMoneyView } = require("../racePrizePool");
 const {
   assertFound,
   assertStatusIn,
@@ -50,11 +53,17 @@ function buildLeaveRace(dependencies = {}) {
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
   const awardCoinsFn = dependencies.awardCoins || awardCoins;
   const events = dependencies.eventBus || eventBus;
+  const forfeitRace = dependencies.forfeitRace || defaultForfeitRace;
+  const db = dependencies.prisma || defaultPrisma;
+  // Injected command doubles deliberately omit Prisma. Do not silently route
+  // those tests through the process-wide database connection.
+  const useTransactionalMutation =
+    Object.keys(dependencies).length === 0 || dependencies.prisma != null;
 
-  return async function leaveRace({ userId, raceId }) {
+  return async function leaveRace({ userId, raceId, supportsRaceLeave = false }) {
     const race = assertFound(
       await raceModel.findById(raceId),
-      () => new RaceLeaveError("Race not found", 404)
+      () => new RaceLeaveError("Race not found", 404, "RACE_NOT_FOUND")
     );
     if (race.tournamentId) {
       throw new RaceLeaveError(
@@ -63,16 +72,49 @@ function buildLeaveRace(dependencies = {}) {
         "TOURNAMENT_RACE_LOCKED"
       );
     }
-    if (!race.isTeamRace) {
-      throw new RaceLeaveError("This race does not support leaving", 400);
-    }
+    // Broaden ONLY for a client that knows this protocol and a race that was
+    // explicitly stamped for it. Every old caller stays on the historic
+    // pending-team-only path below, including its exact ACTIVE 409 behaviour.
+    const expanded =
+      supportsRaceLeave === true && race.exitActionsEnabled === true;
     if (race.creatorId === userId) {
       throw new RaceLeaveError(
         "The race creator can't leave. Cancel the race instead",
-        400
+        400,
+        "RACE_CREATOR_CANNOT_LEAVE"
       );
     }
-    if (race.status === "ACTIVE") {
+    if (expanded && race.status === "ACTIVE") {
+      try {
+        await forfeitRace({
+          userId,
+          raceId,
+          allowIndividual: true,
+          requireExitPolicy: true,
+        });
+        const updatedRace = await raceModel.findById(raceId);
+        const acceptedCount = (updatedRace?.participants || []).filter(
+          (p) => p.status === "ACCEPTED"
+        ).length;
+        return {
+          success: true,
+          action: "FORFEITED",
+          prizePool: buildRaceMoneyView({
+            race: updatedRace,
+            acceptedCount,
+          }).prizePool,
+        };
+      } catch (error) {
+        if (error.name === "RaceForfeitError") {
+          throw new RaceLeaveError(error.message, error.statusCode, error.code);
+        }
+        throw error;
+      }
+    }
+    if (!expanded && !race.isTeamRace) {
+      throw new RaceLeaveError("This race does not support leaving", 400);
+    }
+    if (!expanded && race.status === "ACTIVE") {
       throw new RaceLeaveError(
         "The race has already started. You can forfeit instead",
         409,
@@ -82,23 +124,62 @@ function buildLeaveRace(dependencies = {}) {
     assertStatusIn(
       race,
       ["PENDING"],
-      () => new RaceLeaveError("This race is no longer running", 400)
+      () => new RaceLeaveError("This race is no longer running", 400, "RACE_NOT_LEAVABLE")
     );
 
-    const participant = await participantModel.findByRaceAndUser(raceId, userId);
+    let participant = await participantModel.findByRaceAndUser(raceId, userId);
     if (!participant) {
-      throw new RaceLeaveError("You are not in this race", 403);
+      throw new RaceLeaveError("You are not in this race", 403, "NOT_A_PARTICIPANT");
     }
 
-    // Release a HELD buy-in before dropping the row (mirrors kickRaceParticipant).
-    await refundHeldBuyIn({
-      participant,
-      awardCoinsFn,
-      refundFn: ({ awardCoinsFn: fn, userId: uid, amount }) =>
-        refundRaceBuyIn({ awardCoinsFn: fn, userId: uid, raceId, amount }),
-    });
-
-    await participantModel.delete(participant.id);
+    // Serialize the pending-state check, any held-buy-in release, and row
+    // deletion under the race lifecycle lock. This prevents a concurrent start
+    // from turning a valid lobby leave into an active-row deletion/refund.
+    if (useTransactionalMutation && typeof db.$transaction === "function") {
+      participant = await db.$transaction(async (tx) => {
+        await tx.$queryRawUnsafe(
+          `SELECT id FROM races WHERE id = $1 FOR UPDATE`,
+          raceId
+        );
+        const lockedRace = await tx.race.findUnique({
+          where: { id: raceId },
+          select: { status: true },
+        });
+        if (!lockedRace || lockedRace.status !== "PENDING") {
+          throw new RaceLeaveError("This race is no longer running", 400, "RACE_NOT_LEAVABLE");
+        }
+        const current = await tx.raceParticipant.findUnique({
+          where: { raceId_userId: { raceId, userId } },
+        });
+        if (!current || current.status !== "ACCEPTED") {
+          throw new RaceLeaveError("You are not in this race", 403, "NOT_A_PARTICIPANT");
+        }
+        if (
+          (current.buyInAmount || 0) > 0 &&
+          current.buyInStatus === "HELD"
+        ) {
+          await awardCoinsFn({
+            userId,
+            amount: current.buyInAmount,
+            reason: "race_buy_in_refund",
+            refId: `${raceId}:${userId}`,
+            tx,
+          });
+        }
+        await tx.raceParticipant.delete({ where: { id: current.id } });
+        return current;
+      });
+    } else {
+      // Injectable unit-test models without a transaction preserve the legacy
+      // seam; the real command always takes the serialized path above.
+      await refundHeldBuyIn({
+        participant,
+        awardCoinsFn,
+        refundFn: ({ awardCoinsFn: fn, userId: uid, amount }) =>
+          refundRaceBuyIn({ awardCoinsFn: fn, userId: uid, raceId, amount }),
+      });
+      await participantModel.delete(participant.id);
+    }
 
     events.emit("RACE_PARTICIPANT_LEFT", {
       raceId,
@@ -121,7 +202,16 @@ function buildLeaveRace(dependencies = {}) {
     // post, for BOTH kinds, keyed off this change's own timestamp.
 
     await invalidateRaceMessagesCache(raceId);
-    return { success: true };
+    if (!expanded) return { success: true };
+    const updatedRace = await raceModel.findById(raceId);
+    const acceptedCount = (updatedRace?.participants || []).filter(
+      (p) => p.status === "ACCEPTED"
+    ).length;
+    return {
+      success: true,
+      action: "LEFT",
+      prizePool: buildRaceMoneyView({ race: updatedRace, acceptedCount }).prizePool,
+    };
   };
 }
 

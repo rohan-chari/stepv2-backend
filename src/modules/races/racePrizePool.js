@@ -67,6 +67,19 @@ function teamSettlementPlayerCount(participants) {
   ).length;
 }
 
+// An ACTIVE forfeiter with a positive frozen total remains an entrant in the
+// projected funded pool. A zero-step forfeiter is a no-show immediately, so
+// their amount is removed before settlement as well as by settlementPlayerCount.
+function activeFundedProjectionPlayerCount(participants, acceptedCount) {
+  const rows = participants || [];
+  if (rows.length === 0) return acceptedCount;
+  return rows.filter(
+    (p) =>
+      p.status === "ACCEPTED" &&
+      !(p.forfeitedAt != null && (p.totalSteps || 0) <= 0)
+  ).length;
+}
+
 // The pool a funded race mints at settlement.
 function computeSettledRacePool({ race, participants, isTeamRace = false }) {
   if (race?.fundedPrize !== true) return 0;
@@ -94,6 +107,28 @@ function buildRaceMoneyView({ race, participants, acceptedCount }) {
   const rows = participants || race?.participants || [];
   const funded = race?.fundedPrize === true;
   const completed = race?.status === "COMPLETED";
+  const compactForExitPolicy =
+    race?.exitActionsEnabled === true && race?.isTeamRace !== true;
+  const completedQuick = completed
+    ? quickSettlementParticipants(race, rows)
+    : null;
+  // Match completeRace exactly: for quick races only qualifying walkers rank;
+  // otherwise every placed participant ranks, while a forfeiter never gets a
+  // payout tier. This compacting is exclusive to the stamped new protocol.
+  const exitEligibleRecipientCount = !compactForExitPolicy
+    ? null
+    : completed
+      ? (completedQuick || rows).filter(
+          (p) =>
+            p.placement != null &&
+            p.forfeitedAt == null &&
+            (completedQuick || (p.totalSteps || 0) > 0)
+        ).length
+      : race?.status === "ACTIVE"
+        ? rows.filter(
+            (p) => p.status === "ACCEPTED" && p.forfeitedAt == null
+          ).length
+        : null;
 
   if (!funded) {
     const heldPotCoins = rows.reduce(
@@ -105,6 +140,7 @@ function buildRaceMoneyView({ race, participants, acceptedCount }) {
       preset: race?.payoutPreset,
       potCoins: projectedPotCoins,
       participantCount: acceptedCount,
+      eligibleRecipientCount: exitEligibleRecipientCount,
     });
     // Legacy seeded races keep minting their graded finish reward until they
     // settle — retiring it unconditionally would silently zero out every
@@ -132,7 +168,6 @@ function buildRaceMoneyView({ race, participants, acceptedCount }) {
 
   // Funded: nothing is ever held, and a completed race reads its STAMPED pool so
   // its numbers can never drift as the field changes afterwards.
-  const completedQuick = completed ? quickSettlementParticipants(race, rows) : null;
   const playerCount = completed
     ? completedQuick
       ? completedQuick.length >= 2
@@ -141,7 +176,14 @@ function buildRaceMoneyView({ race, participants, acceptedCount }) {
       : race?.isTeamRace
         ? teamSettlementPlayerCount(rows)
         : settlementPlayerCount(rows)
-    : acceptedCount;
+    : race?.status === "ACTIVE" &&
+        race?.exitActionsEnabled === true &&
+        race?.isTeamRace !== true
+      ? activeFundedProjectionPlayerCount(rows, acceptedCount)
+      : acceptedCount;
+  // A positive-step forfeiter keeps the pool size but is never eligible for a
+  // tier. Project the tier table over eligible finishers so the UI matches the
+  // deterministic full redistribution that completeRace will perform.
   // Item 5: the same stamped team multiplier settlement uses, so every read path
   // (list, detail, featured, public, share preview) projects the buffed pool.
   const multBps = raceTeamPoolMultBps(race);
@@ -173,6 +215,7 @@ function buildRaceMoneyView({ race, participants, acceptedCount }) {
       preset: race?.payoutPreset,
       poolCoins: coins,
       participantCount: playerCount,
+      eligibleRecipientCount: exitEligibleRecipientCount,
       // From the ROW, never the live flag — so the projection and the eventual
       // settlement (same function, same column) can never disagree, and a
       // historical race keeps displaying the tiers it actually paid.
@@ -203,6 +246,7 @@ module.exports = {
   settlementPlayerCount,
   quickSettlementParticipants,
   teamSettlementPlayerCount,
+  activeFundedProjectionPlayerCount,
   computeSettledRacePool,
   buildRaceMoneyView,
   serializePayouts,

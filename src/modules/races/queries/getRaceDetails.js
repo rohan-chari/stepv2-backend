@@ -6,6 +6,7 @@ const {
   buildRaceMoneyView,
   serializePayouts,
 } = require("../racePrizePool");
+const { getRaceLeaveAction } = require("../services/raceLeaveAction");
 
 // `releaseChannel` (batch 2026-07-26, item 8) is trailing + optional and
 // defaults to "prod", so every existing caller keeps byte-identical behaviour.
@@ -14,7 +15,10 @@ async function getRaceDetails(
   raceId,
   supportsCharacters = false,
   releaseChannel = "prod",
-  supportsRemoteAssets = false
+  supportsRemoteAssets = false,
+  // Trailing capability gate: frozen callers retain their exact payload.
+  supportsRaceLeave = false,
+  supportsTeamRaces = false
 ) {
   const race = await Race.findById(raceId);
   if (!race) {
@@ -49,7 +53,7 @@ async function getRaceDetails(
   const money = buildRaceMoneyView({ race, acceptedCount });
   const { payouts: legacyPayouts, payoutTiers } = serializePayouts(money.payouts);
 
-  return {
+  const result = {
     id: race.id,
     name: race.name,
     // Seed kind for the auto-generated daily/weekly public challenges (null for
@@ -144,6 +148,17 @@ async function getRaceDetails(
         : null,
     tournamentName: race.tournament?.name ?? null,
   };
+  // Omitted for clients that did not advertise the protocol, preserving their
+  // historical detail shape. Capable clients receive null or a known action.
+  if (supportsRaceLeave || supportsTeamRaces) {
+    result.leaveAction = getRaceLeaveAction({
+      race,
+      participant: myParticipant,
+      supportsRaceLeave,
+      supportsTeamRaces,
+    });
+  }
+  return result;
 }
 
 module.exports = { getRaceDetails };

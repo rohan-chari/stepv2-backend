@@ -945,6 +945,9 @@ model Race {
   // read either column.
   fundedPrize          Boolean          @default(false) @map("funded_prize")
   prizePoolCoins       Int              @default(0) @map("prize_pool_coins")
+  // Default-off, creation-stamped exit policy. Existing races remain false so
+  // enabling the rollout setting never changes an already-open competition.
+  exitActionsEnabled   Boolean          @default(false) @map("exit_actions_enabled")
   // How a FUNDED race splits its pool across the paid places of a graded preset
   // (TOP_HALF / ALL_BUT_LAST). Stamped at creation and never rewritten, exactly
   // like fundedPrize: the row is the authority, never the live flag, so an

@@ -130,6 +130,11 @@ const KNOWN_FLAGS = {
   // code: the suites that cover it pin this flag off explicitly rather than
   // relying on the default.
   fundedPrizePoolsEnabled: true,
+  // Ordinary-race leave/forfeit protocol. This controls STAMPING ON NEW races
+  // only; a race reads its own exitActionsEnabled column for its whole life, so
+  // flipping this off is a safe creation rollback and cannot strand a client
+  // that was already offered an exit action.
+  raceExitActionsEnabled: false,
   // Step-sample upload granularity in minutes (Five-Minute Step Samples §3.2).
   // NUMERIC flag, allowed set {5,10,15,30,60}. Default 60 = hourly (today's
   // behavior). Served on /auth/me via a defensive safeNumber that OMITS the key

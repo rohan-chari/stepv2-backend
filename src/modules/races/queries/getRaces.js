@@ -13,6 +13,7 @@ const {
   collectRaceIllusions,
   isStealthedForViewer,
 } = require("../services/raceIllusions");
+const { getRaceLeaveAction } = require("../services/raceLeaveAction");
 
 function getActivePlacement(participants, userId) {
   const acceptedParticipants = participants
@@ -122,6 +123,7 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
     powerups4: clientFeatures?.has("powerups4") ?? false,
     powerups5: clientFeatures?.has("powerups5") ?? false,
   };
+  const supportsRaceLeave = clientFeatures?.has("race_leave") ?? false;
   // Batch 2026-08-08 item 4: gates the completed-race podium rows' cosmetics,
   // exactly as getRaceDetails gates its participant rows. Both default to the
   // naked-capy presentation, so a client that declares nothing is unaffected.
@@ -451,6 +453,15 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
         effectsByParticipant.get(myParticipant.id) || [],
         features
       );
+    }
+
+    if (supportsRaceLeave || supportsTeamRaces) {
+      summary.leaveAction = getRaceLeaveAction({
+        race,
+        participant: myParticipant,
+        supportsRaceLeave,
+        supportsTeamRaces,
+      });
     }
 
     if (race.status === "ACTIVE") {

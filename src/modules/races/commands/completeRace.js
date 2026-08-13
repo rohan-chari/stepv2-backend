@@ -327,16 +327,29 @@ function buildCompleteRace(dependencies = {}) {
     if (isFundedRace) {
       const quickQualifiers = quickSettlementParticipants(race, race.participants);
       const rankedParticipants = (quickQualifiers || race.participants || [])
-        .filter((participant) => participant.placement != null)
+        // A frozen forfeiter remains in the settled funded-player count when
+        // they walked, but can never receive a tier. The payout array stays
+        // sized by that full pool; assigning tiers to this filtered sequence
+        // deterministically redistributes every coin to eligible finishers.
+        .filter(
+          (participant) =>
+            participant.placement != null && participant.forfeitedAt == null
+        )
+        .sort((a, b) => a.placement - b.placement);
+      const eligibleRecipients = (quickQualifiers || race.participants || [])
+        .filter(
+          (participant) =>
+            participant.placement != null &&
+            participant.forfeitedAt == null &&
+            (quickQualifiers || (participant.totalSteps || 0) > 0)
+        )
         .sort((a, b) => a.placement - b.placement);
       const pool = computeSettledRacePool({
         race,
         participants: race.participants,
       });
-      // Paid places scale with the SETTLED field for the graded presets, matching
-      // the projection the players were shown. Same helper the read paths use, so
-      // the pool and the number of paid places can never be sized on different
-      // fields.
+      // Preserve the legacy field sizing. The new exit-policy compaction below
+      // is an explicit second input, never a reinterpretation of this count.
       const settledFieldSize = quickQualifiers
         ? quickQualifiers.length >= 2
           ? quickQualifiers.length
@@ -345,7 +358,14 @@ function buildCompleteRace(dependencies = {}) {
       const payouts = computeFundedPayouts({
         preset: race.payoutPreset || "WINNER_TAKES_ALL",
         poolCoins: pool,
+        // The pool count intentionally includes positive-step forfeits, but
+        // paid places are recalculated over only eligible finishers so no tier
+        // is stranded. computeFundedPayouts always sums to pool for this field.
         participantCount: settledFieldSize,
+        eligibleRecipientCount:
+          race.exitActionsEnabled === true && race.isTeamRace !== true
+            ? eligibleRecipients.length
+            : null,
         // Stamped at creation; the row is the authority here exactly as
         // fundedPrize is, so the curve a race advertised is the curve it pays.
         curve: race.payoutCurve ?? null,
@@ -391,12 +411,19 @@ function buildCompleteRace(dependencies = {}) {
       // settlement path the whole accepted field is ranked, which is exactly what
       // those presets need.
       const rankedParticipants = race.participants
-        .filter((participant) => participant.placement != null)
+        .filter(
+          (participant) =>
+            participant.placement != null && participant.forfeitedAt == null
+        )
         .sort((a, b) => a.placement - b.placement);
       const payouts = computeRacePayouts({
         preset: race.payoutPreset || "WINNER_TAKES_ALL",
         potCoins: race.potCoins,
         participantCount: rankedParticipants.length,
+        eligibleRecipientCount:
+          race.exitActionsEnabled === true && race.isTeamRace !== true
+            ? rankedParticipants.length
+            : null,
       });
 
       for (let index = 0; index < payouts.length; index++) {

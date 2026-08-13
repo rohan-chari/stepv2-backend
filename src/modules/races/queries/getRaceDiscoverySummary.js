@@ -87,9 +87,9 @@ function buildGetRaceDiscoverySummary(dependencies = {}) {
       }
     }
 
-    // Item 2 (2026-07-24): "PUBLIC RACES (X)" should count the featured seeded
-    // daily/weekly races AND the featured Daily Dash brackets the viewer is NOT
-    // already in.
+    // "PUBLIC RACES (X)" includes every joinable public tournament, not only
+    // featured Daily Dash brackets. Ordinary individual/team races are already
+    // counted by getPublicRaceCount; tournament rows are a distinct domain.
     //
     // The featured seeded RACES are ALREADY in getPublicRaceCount: they are ACTIVE
     // public individual races (no tournamentId, not team), and getPublicRaceCount
@@ -97,20 +97,22 @@ function buildGetRaceDiscoverySummary(dependencies = {}) {
     // them here would DOUBLE-COUNT. So the only genuinely-missing featured content
     // is the Daily Dash BRACKETS — Tournament rows, never part of the race count.
     //
-    // We add only the featured brackets the viewer could ACTUALLY join, which
-    // getPublicTournaments answers with the additive `joinable` flag: not already
-    // enrolled, has an open slot, and the viewer isn't still alive in another
-    // bracket of the same seed (joinTournamentCore rejects that with
-    // ALREADY_IN_FEATURED). "Not enrolled in THIS lobby" alone was too loose —
-    // it advertised "1 race available to join" for a bracket that answers 409.
-    // The check is strict `=== true` so a branch that returned entries without
-    // the flag contributes nothing rather than over-counting.
+    // getPublicTournaments supplies the same additive `joinable` predicate for
+    // featured and user-created brackets: not enrolled, open slot, and (for a
+    // seed) not alive in another bracket that joinTournamentCore would reject.
+    // The strict check prevents a malformed partial result from over-counting.
     //
     // /races/public and getPublicRaceCount stay unchanged (the old-client
     // fallback path). Only add when the base count resolved — otherwise the field
     // is marked unresolved and the client keeps its last known value regardless.
     if (resolved.publicRaceCount) {
-      publicRaceCount += featuredTournaments.filter(
+      const joinableTournaments = [
+        ...featuredTournaments,
+        ...(Array.isArray(tournamentsResult.value?.tournaments)
+          ? tournamentsResult.value.tournaments
+          : []),
+      ];
+      publicRaceCount += joinableTournaments.filter(
         (t) => t && t.joinable === true
       ).length;
     }

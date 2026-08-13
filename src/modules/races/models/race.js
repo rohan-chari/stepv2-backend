@@ -83,6 +83,9 @@ const Race = {
     // App-funded prize pool discriminator. Defaults false so every legacy caller
     // (and every existing row) keeps the buy-in model.
     fundedPrize = false,
+    // Creation-stamped exit protocol. Defaults false so all direct/legacy
+    // callers preserve their existing race lifecycle.
+    exitActionsEnabled = false,
     isPublic = false,
     maxParticipants = 10,
     scheduledStartAt = null,
@@ -116,6 +119,7 @@ const Race = {
         payoutPreset,
         potCoins,
         fundedPrize,
+        exitActionsEnabled,
         isPublic,
         maxParticipants,
         scheduledStartAt,
@@ -434,6 +438,7 @@ const Race = {
         r.payout_curve AS "payoutCurve",
         r.powerups_enabled AS "powerupsEnabled",
         r.powerup_step_interval AS "powerupStepInterval",
+        r.exit_actions_enabled AS "exitActionsEnabled",
         r.max_participants AS "maxParticipants",
         r.is_team_race AS "isTeamRace",
         r.team_size AS "teamSize",
@@ -459,6 +464,7 @@ const Race = {
               'buyInAmount', rp.buy_in_amount,
               'team', CASE WHEN rp.team IS NULL THEN NULL ELSE UPPER(rp.team::text) END,
               'totalSteps', rp.total_steps,
+              'forfeitedAt', rp.forfeited_at,
               'totalsUpdatedAt', rp.totals_updated_at
             )
             ORDER BY rp.joined_at ASC

@@ -765,7 +765,9 @@ function createRacesRouter(dependencies = {}) {
         req.params.raceId,
         req.clientFeatures?.has("characters") ?? false,
         req.releaseChannel,
-        req.clientFeatures?.has("remote_assets") ?? false
+        req.clientFeatures?.has("remote_assets") ?? false,
+        req.clientFeatures?.has("race_leave") ?? false,
+        req.clientFeatures?.has("team_races") ?? false
       );
       res.json(result);
 
@@ -872,16 +874,16 @@ function createRacesRouter(dependencies = {}) {
     }
   });
 
-  // POST /races/:raceId/leave — leave a PENDING team race lobby (TR-205).
-  // Releases a HELD buy-in and frees the slot; re-joining later is a fresh
-  // join. New endpoint; old clients never call it.
+  // POST /races/:raceId/leave — legacy PENDING team leave, plus the additive
+  // token+stamp-gated ordinary PENDING leave / ACTIVE forfeit protocol.
   router.post("/:raceId/leave", async (req, res) => {
     try {
-      await leaveRace({
+      const result = await leaveRace({
         userId: req.user.id,
         raceId: req.params.raceId,
+        supportsRaceLeave: req.clientFeatures?.has("race_leave") ?? false,
       });
-      res.json({ success: true });
+      res.json(result);
     } catch (error) {
       if (error.name === "RaceLeaveError") {
         const status = error.statusCode || 400;
