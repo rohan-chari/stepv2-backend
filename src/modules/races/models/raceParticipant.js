@@ -162,6 +162,32 @@ const RaceParticipant = {
     });
   },
 
+  // Placement-recompute's five-minute notification scan needs the same lean
+  // persisted standings for every active race. Fetch them in one round-trip
+  // instead of issuing one query per race. No presentation relations are
+  // selected because the cron only reads ranking/team/notification fields.
+  async findAcceptedByRaces(raceIds) {
+    const ids = [...new Set(raceIds || [])].filter(Boolean);
+    if (ids.length === 0) return [];
+    return prisma.raceParticipant.findMany({
+      where: { raceId: { in: ids }, status: "ACCEPTED" },
+      select: {
+        id: true,
+        raceId: true,
+        userId: true,
+        totalSteps: true,
+        placement: true,
+        joinedAt: true,
+        finishedAt: true,
+        forfeitedAt: true,
+        team: true,
+        lastNotifiedPlacement: true,
+        placementAlertsMuted: true,
+      },
+      orderBy: [{ raceId: "asc" }, { joinedAt: "asc" }],
+    });
+  },
+
   async findChargedByRace(raceId) {
     return prisma.raceParticipant.findMany({
       where: {

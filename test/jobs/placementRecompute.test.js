@@ -1,7 +1,10 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { buildRecomputePlacements } = require("../../src/modules/races/jobs/placementRecompute");
+const {
+  buildRecomputePlacements,
+  scheduleRecomputePlacements,
+} = require("../../src/modules/races/jobs/placementRecompute");
 
 const FIXED_NOW = new Date("2026-06-24T12:00:00Z");
 
@@ -198,6 +201,182 @@ test("no participants -> no step-sync pull", async () => {
   const { deps, pullCalls } = makeDeps({ races: [] });
   await buildRecomputePlacements(deps)();
   assert.equal(pullCalls.length, 0);
+});
+
+test("production path batches accepted-participant reads across active races", async () => {
+  const batchCalls = [];
+  const run = buildRecomputePlacements({
+    now: () => FIXED_NOW,
+    logger: { log() {}, warn() {}, error() {} },
+    eventBus: { emit() {} },
+    requestStepSyncForUsers: async () => {},
+    Race: {
+      async findActiveInProgress() {
+        return [
+          { id: "r1", name: "R1" },
+          { id: "r2", name: "R2" },
+        ];
+      },
+    },
+    RaceResolutionJobV2: {
+      async findRecoveryRaceIds() {
+        return [];
+      },
+    },
+    RaceActiveEffect: {
+      async findDueRaceIds() {
+        return [];
+      },
+    },
+    RaceParticipant: {
+      async findAcceptedByRaces(raceIds) {
+        batchCalls.push(raceIds);
+        return [
+          P({
+            id: "p1",
+            raceId: "r1",
+            userId: "u1",
+            totalSteps: 100,
+            lastNotifiedPlacement: 1,
+          }),
+          P({
+            id: "p2",
+            raceId: "r2",
+            userId: "u2",
+            totalSteps: 100,
+            lastNotifiedPlacement: 1,
+          }),
+        ];
+      },
+      async findAcceptedByRace() {
+        throw new Error("per-race participant query must not run");
+      },
+      async update() {},
+    },
+  });
+
+  await run();
+
+  assert.deepEqual(batchCalls, [["r1", "r2"]]);
+});
+
+test("production path batches notification audit reads", async () => {
+  const auditCalls = [];
+  const emitted = [];
+  const run = buildRecomputePlacements({
+    now: () => FIXED_NOW,
+    logger: { log() {}, warn() {}, error() {} },
+    eventBus: { emit: (event, data) => emitted.push({ event, data }) },
+    requestStepSyncForUsers: async () => {},
+    Race: {
+      async findActiveInProgress() {
+        return [
+          {
+            id: "r1",
+            name: "Ending Soon",
+            startedAt: new Date(FIXED_NOW.getTime() - 5 * 60 * 60 * 1000),
+            endsAt: new Date(FIXED_NOW.getTime() + 60 * 60 * 1000),
+          },
+        ];
+      },
+    },
+    RaceResolutionJobV2: {
+      async findRecoveryRaceIds() {
+        return [];
+      },
+    },
+    RaceActiveEffect: {
+      async findDueRaceIds() {
+        return [];
+      },
+    },
+    RaceParticipant: {
+      async findAcceptedByRaces() {
+        return [
+          P({
+            id: "p1",
+            raceId: "r1",
+            userId: "u1",
+            totalSteps: 100,
+            lastNotifiedPlacement: 1,
+          }),
+          P({
+            id: "p2",
+            raceId: "r1",
+            userId: "u2",
+            totalSteps: 90,
+            lastNotifiedPlacement: 2,
+          }),
+        ];
+      },
+      async update() {},
+    },
+    Notification: {
+      async findExistingByUserTypeRaceKeys(keys) {
+        auditCalls.push(keys);
+        return [{ userId: "u1", type: "RACE_ENDING_SOON", raceId: "r1" }];
+      },
+      async claimDelivery({ userId }) {
+        return userId === "u2";
+      },
+    },
+  });
+
+  await run();
+
+  assert.equal(auditCalls.length, 1);
+  assert.equal(auditCalls[0].length, 2);
+  assert.deepEqual(
+    emitted
+      .filter((entry) => entry.event === "RACE_ENDING_SOON")
+      .map((entry) => entry.data.userId),
+    ["u2"]
+  );
+});
+
+test("scheduler skips a tick while the previous tick is still running", async () => {
+  let releaseFirst;
+  const firstRun = new Promise((resolve) => {
+    releaseFirst = resolve;
+  });
+  let raceReads = 0;
+  const warnings = [];
+  let intervalTick;
+  const scheduled = scheduleRecomputePlacements({
+    logger: {
+      log() {},
+      error() {},
+      warn(message) {
+        warnings.push(message);
+      },
+    },
+    setInterval(callback) {
+      intervalTick = callback;
+      return "timer";
+    },
+    Race: {
+      async findActiveInProgress() {
+        raceReads += 1;
+        if (raceReads === 1) await firstRun;
+        return [];
+      },
+    },
+    RaceResolutionJobV2: {
+      async findRecoveryRaceIds() {
+        return [];
+      },
+    },
+  });
+
+  assert.equal(scheduled.interval, "timer");
+  await intervalTick();
+  assert.equal(raceReads, 1);
+  assert.equal(warnings.length, 1);
+
+  releaseFirst();
+  await new Promise((resolve) => setImmediate(resolve));
+  await intervalTick();
+  assert.equal(raceReads, 2);
 });
 
 test("step-sync pull failure does not break the job", async () => {

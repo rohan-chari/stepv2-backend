@@ -40,7 +40,10 @@ function buildExpireEffects(dependencies = {}) {
 
   return async function expireEffects({ raceId, participantSteps } = {}) {
     const currentTime = nowFn();
-    const expired = await effectModel.findExpired(currentTime);
+    const expired =
+      raceId && typeof effectModel.findExpiredForRace === "function"
+        ? await effectModel.findExpiredForRace(raceId, currentTime)
+        : await effectModel.findExpired(currentTime);
 
     const results = [];
 

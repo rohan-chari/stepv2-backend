@@ -70,6 +70,40 @@ const RaceActiveEffect = {
     });
   },
 
+  // One row per race whose time-driven effect transition is due. The placement
+  // cron uses this to preserve the historical five-minute expiry bound without
+  // replaying every active race merely because time passed somewhere else.
+  async findDueRaceIds(now, activeRaceIds) {
+    const raceIds = [...new Set(activeRaceIds || [])].filter(Boolean);
+    if (raceIds.length === 0) return [];
+    const rows = await prisma.raceActiveEffect.findMany({
+      where: {
+        // Scoping to the already-loaded ACTIVE races lets Postgres use the
+        // existing (raceId,status) index and avoids a global historical scan.
+        raceId: { in: raceIds },
+        status: "ACTIVE",
+        expiresAt: { not: null, lte: now },
+      },
+      select: { raceId: true },
+      distinct: ["raceId"],
+    });
+    return rows.map((row) => row.raceId);
+  },
+
+  // Scoped expiry read for the worker post-commit hook. The old implementation
+  // loaded every due effect globally once per resolved race and filtered in JS;
+  // this uses the existing (raceId,status) index and only returns relevant rows.
+  async findExpiredForRace(raceId, now) {
+    if (!raceId) return this.findExpired(now);
+    return prisma.raceActiveEffect.findMany({
+      where: {
+        raceId,
+        status: "ACTIVE",
+        expiresAt: { not: null, lte: now },
+      },
+    });
+  },
+
   async findEffectsForRaceByType(raceId, targetParticipantId, type) {
     return prisma.raceActiveEffect.findMany({
       where: { raceId, targetParticipantId, type, status: { in: ["ACTIVE", "EXPIRED"] } },

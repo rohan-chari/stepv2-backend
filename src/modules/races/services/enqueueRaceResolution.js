@@ -14,10 +14,10 @@ const {
 //                                paths, which know a user and not a race)
 //
 // Both are BEST-EFFORT when called outside a transaction: a queue write must
-// never fail a user's request. The convergence backstop is placementRecompute,
-// which bumps every active race every 5 minutes. Inside a caller-supplied `tx`
-// (sync-v2 Transaction B) errors DO propagate — there the enqueue is part of the
-// atomic unit the caller is building.
+// never fail a user's request. placementRecompute retains a bounded recovery
+// backstop for missing/failed/hour-old rows instead of replaying every race.
+// Inside a caller-supplied `tx` (sync-v2 Transaction B) errors DO propagate —
+// there the enqueue is part of the atomic unit the caller is building.
 
 async function enqueueRaceResolution(
   { raceId, userId = null, timeZone = null, now = new Date() },

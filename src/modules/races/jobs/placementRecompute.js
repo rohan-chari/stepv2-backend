@@ -6,6 +6,12 @@ const { resolveRaceState } = require("../services/raceStateResolution");
 const {
   enqueueRaceResolution: defaultEnqueueRaceResolution,
 } = require("../services/enqueueRaceResolution");
+const {
+  RaceResolutionJobV2: defaultRaceResolutionJobV2,
+} = require("../models/raceResolutionJobV2");
+const {
+  RaceActiveEffect: defaultRaceActiveEffect,
+} = require("../../powerups/models/raceActiveEffect");
 const { stepSyncPushService } = require("../../../shared/push/stepSyncPush");
 const {
   computeRacePayouts,
@@ -23,11 +29,12 @@ const SLACKER_FRACTION = 0.25;
 const SLACKER_PUSH_TYPE = "TEAM_SLACKER_NUDGE";
 
 const RECOMPUTE_INTERVAL_MS = 5 * 60 * 1000; // every 5 minutes
+const RECOVERY_RACE_LIMIT = 2;
 
 // Race-ending-soon reminder (§8): one push per active participant of a TIMED
 // race, ~2h before it ends. Fired on the FIRST tick where msLeft <= 2h (and > 0),
-// then made send-once by the durable Notification audit row (findFirstByUserTypeRace) —
-// NOT an in-memory throttle, so it survives restarts and multiple cluster workers.
+// then made send-once by a unique deliveryKey claim in the Notification audit
+// table — not an in-memory throttle, so it survives restarts and cluster workers.
 const RACE_ENDING_SOON_WINDOW_MS = 2 * 60 * 60 * 1000; // fire when <= 2h remain
 const RACE_ENDING_SOON_PUSH_TYPE = "RACE_ENDING_SOON";
 
@@ -37,27 +44,23 @@ const RACE_ENDING_SOON_PUSH_TYPE = "RACE_ENDING_SOON";
 const FINAL_STRETCH_WINDOW_MS = 60 * 60 * 1000; // ends within the next hour
 const FINAL_STRETCH_MIN_INTERVAL_MS = 30 * 60 * 1000; // push at most every 30 min
 
-// Live placement broadcast (Phase 0). Recomputes standings for every ACTIVE,
-// not-yet-expired race and emits PLACEMENT_CHANGED when a participant's live rank
-// changes, so users see standings update without opening the race. Backend-only:
-// works for every shipped app version (the fan-out is server-side).
+// Live placement broadcast (Phase 0). Reads persisted standings for every
+// ACTIVE, not-yet-expired race and emits PLACEMENT_CHANGED when a participant's
+// live rank changes, so users see standings update without opening the race.
+// Backend-only: works for every shipped app version (the fan-out is server-side).
 //
-// The recompute primitive is resolveRaceState({ raceId }) — it already fetches the
-// race, loops all ACCEPTED participants, and persists totalSteps/placement/finish
-// state, defaulting timeZone to UTC when called without a requesting user. We then
-// read the freshly-updated participants and derive a transient "live rank" by
-// sorting totalSteps desc (the settlement `placement` column stays null until the
-// race ends). Idempotent: a participant whose rank is unchanged is not re-notified.
+// Mutation paths keep these rows fresh through the race-keyed resolution queue.
+// This scan derives a transient "live rank" from the persisted totals (the
+// settlement `placement` column stays null until the race ends). Idempotent: a
+// participant whose rank is unchanged is not re-notified.
 function buildRecomputePlacements(dependencies = {}) {
   const raceModel = dependencies.Race || Race;
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
   const events = dependencies.eventBus || eventBus;
   const resolve = dependencies.resolveRaceState || resolveRaceState;
-  // C0 (spec §5a item 4): this cron is ENQUEUE-ONLY for the recompute portion.
-  // It used to be a third bulk writer of race_participants, racing the worker
-  // and the sync paths on the same rows. Now it just marks every active race
-  // dirty every 5 minutes — the convergence backstop for races nobody is
-  // syncing or watching — and the race-keyed worker does the writing.
+  // C0 (spec §5a item 4): real mutations enqueue at their write seams. This
+  // cron evaluates notifications from persisted standings and only enqueues a
+  // bounded recovery set for missing/failed/hour-old job rows.
   //
   // The notification evaluation below stays here, reading the persisted rows the
   // worker keeps fresh. Deliberate: moving it into the worker's post-commit hook
@@ -70,29 +73,97 @@ function buildRecomputePlacements(dependencies = {}) {
   // An EXPLICITLY injected `resolveRaceState` still runs inline: that dependency
   // is the seam callers use to drive the recompute directly, and the inline path
   // is still live code behind the `inlineRaceResolutionFallback` lever. The
-  // production singleton injects nothing, so production is enqueue-only.
+  // production singleton injects nothing, so production uses the bounded queue.
   const inlineResolveInjected = Object.prototype.hasOwnProperty.call(
     dependencies,
     "resolveRaceState"
   );
   const enqueue = dependencies.enqueueRaceResolution || defaultEnqueueRaceResolution;
+  const resolutionJobModel =
+    dependencies.RaceResolutionJobV2 || defaultRaceResolutionJobV2;
+  const effectModel = dependencies.RaceActiveEffect || defaultRaceActiveEffect;
   const notificationModel = dependencies.Notification || Notification;
   const requestStepSync =
     dependencies.requestStepSyncForUsers ||
     stepSyncPushService.requestStepSyncForUsers;
   const now = dependencies.now || (() => new Date());
   const logger = dependencies.logger || console;
+  const monotonicNow = dependencies.monotonicNow || Date.now;
   // §8 kill switch: RACE_ENDING_REMINDER_DISABLED=true stops the race-ending-soon
   // reminder without stopping placement pushes. Injectable for tests.
   const isRaceEndingReminderDisabled =
     dependencies.isRaceEndingReminderDisabled ||
     (() => process.env.RACE_ENDING_REMINDER_DISABLED === "true");
 
+  const auditKey = (userId, type, raceId) => `${userId}|${type}|${raceId}`;
+
+  async function claimNotification(
+    userId,
+    type,
+    raceId,
+    existingNotificationKeys
+  ) {
+    const key = auditKey(userId, type, raceId);
+    if (existingNotificationKeys?.has(key)) return false;
+
+    // Degraded fallback: if the bulk audit snapshot was unavailable, preserve
+    // legacy rows created before deliveryKey claims existed. This N+1 lookup is
+    // intentionally limited to the error path; normal ticks use the batch set.
+    if (
+      existingNotificationKeys == null &&
+      typeof notificationModel.findFirstByUserTypeRace === "function"
+    ) {
+      const alreadySent = await notificationModel.findFirstByUserTypeRace(
+        userId,
+        type,
+        raceId
+      );
+      if (alreadySent) return false;
+    }
+
+    if (typeof notificationModel.claimDelivery === "function") {
+      try {
+        const claimed = await notificationModel.claimDelivery({
+          userId,
+          type,
+          raceId,
+          deliveryKey: `cron:${type}:${raceId}:${userId}`,
+        });
+        if (claimed && existingNotificationKeys) {
+          existingNotificationKeys.add(key);
+        }
+        return claimed;
+      } catch (error) {
+        logger.error("[CRON] placementRecompute: notification claim failed:", {
+          userId,
+          type,
+          raceId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return false;
+      }
+    }
+
+    // Compatibility seam for focused tests and rollback injections that still
+    // provide the older notification model shape.
+    const alreadySent = await notificationModel.findFirstByUserTypeRace(
+      userId,
+      type,
+      raceId
+    );
+    return !alreadySent;
+  }
+
   // §8: emit a one-shot RACE_ENDING_SOON per eligible participant of a timed race
   // ~2h before it ends. Applies to BOTH individual and team races (any race with a
   // definite end instant). Excludes finished/forfeited participants. Send-once via
   // the durable audit-row guard, so repeated ticks and restarts never re-send.
-  async function evaluateRaceEndingSoon({ race, participants, currentTime }) {
+  async function evaluateRaceEndingSoon({
+    race,
+    participants,
+    currentTime,
+    existingNotificationKeys,
+  }) {
     if (isRaceEndingReminderDisabled()) return;
     // Seeded daily/weekly challenges are excluded (owner decision 2026-07-24).
     // Every opted-in user is auto-enrolled into these every day, so a "2h left"
@@ -119,17 +190,20 @@ function buildRecomputePlacements(dependencies = {}) {
     for (const p of participants) {
       // Exclude finished (frozen standings) and forfeited participants.
       if (p.finishedAt || p.forfeitedAt) continue;
-      const alreadySent = await notificationModel.findFirstByUserTypeRace(
+      const claimed = await claimNotification(
         p.userId,
         RACE_ENDING_SOON_PUSH_TYPE,
-        race.id
+        race.id,
+        existingNotificationKeys
       );
-      if (alreadySent) continue;
+      if (!claimed) continue;
       events.emit("RACE_ENDING_SOON", {
         raceId: race.id,
         raceName: race.name,
         endsAt: race.endsAt,
         userId: p.userId,
+        notificationClaimed:
+          typeof notificationModel.claimDelivery === "function",
       });
     }
   }
@@ -141,7 +215,12 @@ function buildRecomputePlacements(dependencies = {}) {
   // (1 = leading side, 2 = trailing side); it is never returned by any API and
   // individual placement events never fire for team races, so the reuse is
   // invisible outside this job.
-  async function evaluateTeamRace({ race, participants, currentTime }) {
+  async function evaluateTeamRace({
+    race,
+    participants,
+    currentTime,
+    existingNotificationKeys,
+  }) {
     const totals = { TEAM_A: 0, TEAM_B: 0 };
     const members = participants.filter(
       (p) => p.team === "TEAM_A" || p.team === "TEAM_B"
@@ -244,12 +323,13 @@ function buildRecomputePlacements(dependencies = {}) {
         if (average <= 0) continue;
         for (const p of active) {
           if ((p.totalSteps || 0) >= average * SLACKER_FRACTION) continue;
-          const alreadySent = await notificationModel.findFirstByUserTypeRace(
+          const claimed = await claimNotification(
             p.userId,
             SLACKER_PUSH_TYPE,
-            race.id
+            race.id,
+            existingNotificationKeys
           );
-          if (alreadySent) continue;
+          if (!claimed) continue;
           events.emit("TEAM_SLACKER_NUDGE", {
             raceId: race.id,
             raceName: race.name,
@@ -257,6 +337,8 @@ function buildRecomputePlacements(dependencies = {}) {
             teamName: team === "TEAM_A" ? race.teamAName : race.teamBName,
             totalSteps: p.totalSteps || 0,
             teamAverage: Math.round(average),
+            notificationClaimed:
+              typeof notificationModel.claimDelivery === "function",
           });
         }
       }
@@ -264,8 +346,12 @@ function buildRecomputePlacements(dependencies = {}) {
   }
 
   return async function recomputePlacements() {
+    const startedAtMs = monotonicNow();
     const currentTime = now();
     const emitted = [];
+    let participantCount = 0;
+    let recoveryEnqueues = 0;
+    let dueEffectEnqueues = 0;
     // Split for the step-sync "pull" below: participants of at least one race
     // ending within the next hour ("final stretch") get a tighter push throttle;
     // everyone else keeps the default hourly cooldown.
@@ -280,11 +366,153 @@ function buildRecomputePlacements(dependencies = {}) {
       return emitted;
     }
 
-    if (!races || races.length === 0) return emitted;
+    if (!races || races.length === 0) {
+      logger.log(
+        `[CRON] placementRecompute completed races=0 participants=0 dueEffectEnqueues=0 recoveryEnqueues=0 emitted=0 durationMs=${Math.max(0, monotonicNow() - startedAtMs)}`
+      );
+      return emitted;
+    }
 
-    // Sequential over races: resolveRaceState fans out participants in parallel
-    // internally, so looping races one-at-a-time bounds peak DB connections under
-    // the pool cap.
+    // Time itself is a mutation source for expiring powerups. Preserve the old
+    // <=5-minute expiry/adjudication/mint bound by enqueueing every ACTIVE race
+    // with an effect due now. These are correctness jobs and are deliberately
+    // outside the two-race insurance cap.
+    const activeRaceIds = new Set(races.map((race) => race.id));
+    const dueEffectRaceIds = new Set();
+    if (!inlineResolveInjected) {
+      try {
+        const dueRaceIds = await effectModel.findDueRaceIds(
+          currentTime,
+          [...activeRaceIds]
+        );
+        for (const raceId of dueRaceIds || []) {
+          if (activeRaceIds.has(raceId)) dueEffectRaceIds.add(raceId);
+        }
+      } catch (error) {
+        logger.error(
+          "[CRON] placementRecompute: failed to select due effects:",
+          error
+        );
+      }
+    }
+
+    const recoveryRaceIds = new Set();
+    if (!inlineResolveInjected) {
+      try {
+        const candidates = await resolutionJobModel.findRecoveryRaceIds({
+          raceIds: races.map((race) => race.id),
+          now: currentTime,
+          limit: RECOVERY_RACE_LIMIT,
+        });
+        for (const raceId of candidates || []) {
+          if (recoveryRaceIds.size >= RECOVERY_RACE_LIMIT) break;
+          recoveryRaceIds.add(raceId);
+        }
+      } catch (error) {
+        logger.error(
+          "[CRON] placementRecompute: failed to select recovery races:",
+          error
+        );
+      }
+    }
+
+    // The production path fetches every accepted participant in one lean query.
+    // Inline resolution must retain the per-race read-after-write behavior used
+    // by tests and the rollback lever.
+    let participantsByRace = null;
+    if (
+      !inlineResolveInjected &&
+      typeof participantModel.findAcceptedByRaces === "function"
+    ) {
+      try {
+        const allParticipants = await participantModel.findAcceptedByRaces(
+          races.map((race) => race.id)
+        );
+        participantsByRace = new Map();
+        for (const participant of allParticipants || []) {
+          if (!participantsByRace.has(participant.raceId)) {
+            participantsByRace.set(participant.raceId, []);
+          }
+          participantsByRace.get(participant.raceId).push(participant);
+        }
+      } catch (error) {
+        logger.error(
+          "[CRON] placementRecompute: participant batch read failed; falling back:",
+          error
+        );
+        participantsByRace = null;
+      }
+    }
+
+    // Only the ending-soon and team-slacker branches consult the durable audit
+    // log. Fetch all potentially relevant audit rows once, then match exact
+    // user/type/race triples in memory before the insert-first claim.
+    let existingNotificationKeys = null;
+    if (
+      participantsByRace &&
+      typeof notificationModel.findExistingByUserTypeRaceKeys === "function"
+    ) {
+      const keys = [];
+      for (const race of races) {
+        const participants = participantsByRace.get(race.id) || [];
+        const endMs = race.endsAt ? new Date(race.endsAt).getTime() : null;
+        const msLeft = endMs == null ? null : endMs - currentTime.getTime();
+        const durationMs =
+          endMs != null && race.startedAt
+            ? endMs - new Date(race.startedAt).getTime()
+            : null;
+        if (
+          !race.seedId &&
+          msLeft != null &&
+          msLeft > 0 &&
+          msLeft <= RACE_ENDING_SOON_WINDOW_MS &&
+          durationMs != null &&
+          durationMs > RACE_ENDING_SOON_WINDOW_MS
+        ) {
+          for (const participant of participants) {
+            if (!participant.finishedAt && !participant.forfeitedAt) {
+              keys.push({
+                userId: participant.userId,
+                type: RACE_ENDING_SOON_PUSH_TYPE,
+                raceId: race.id,
+              });
+            }
+          }
+        }
+        if (
+          race.isTeamRace &&
+          (race.teamSize ?? 0) > 1 &&
+          msLeft != null &&
+          msLeft > 0 &&
+          msLeft <= SLACKER_WINDOW_MS
+        ) {
+          for (const participant of participants) {
+            keys.push({
+              userId: participant.userId,
+              type: SLACKER_PUSH_TYPE,
+              raceId: race.id,
+            });
+          }
+        }
+      }
+      try {
+        const existing =
+          await notificationModel.findExistingByUserTypeRaceKeys(keys);
+        existingNotificationKeys = new Set(
+          (existing || []).map((row) =>
+            auditKey(row.userId, row.type, row.raceId)
+          )
+        );
+      } catch (error) {
+        logger.error(
+          "[CRON] placementRecompute: notification batch read failed; falling back:",
+          error
+        );
+        existingNotificationKeys = null;
+      }
+    }
+
+    // Sequential over races bounds notification writes and preserves ordering.
     for (const race of races) {
       try {
         // B-12b — the cron used to call resolve() with NO timeZone, which
@@ -295,13 +523,26 @@ function buildRecomputePlacements(dependencies = {}) {
         // false "you slipped to Nth" pushes were produced. Resolve the race's
         // own tz explicitly, falling back to the CREATOR's tz before UTC.
         const raceTz = raceTimeZone(race, race.creator?.timezone || "UTC");
-        await enqueue({ raceId: race.id, timeZone: raceTz, now: currentTime });
+        if (dueEffectRaceIds.has(race.id) || recoveryRaceIds.has(race.id)) {
+          const queued = await enqueue({
+            raceId: race.id,
+            timeZone: raceTz,
+            now: currentTime,
+          });
+          if (queued) {
+            if (dueEffectRaceIds.has(race.id)) dueEffectEnqueues += 1;
+            else recoveryEnqueues += 1;
+          }
+        }
         if (inlineResolveInjected) {
           await resolve({ raceId: race.id, timeZone: raceTz });
         }
 
-        const participants = await participantModel.findAcceptedByRace(race.id);
+        const participants = participantsByRace
+          ? participantsByRace.get(race.id) || []
+          : await participantModel.findAcceptedByRace(race.id);
         if (!participants || participants.length === 0) continue;
+        participantCount += participants.length;
 
         // Collect for the step-sync "pull" below. A time-based race ending within
         // the hour is "final stretch"; step-target races (endsAt null) never are.
@@ -314,12 +555,22 @@ function buildRecomputePlacements(dependencies = {}) {
 
         // §8: race-ending-soon reminder — applies to every timed race (individual
         // or team), independent of the placement/team-push logic below.
-        await evaluateRaceEndingSoon({ race, participants, currentTime });
+        await evaluateRaceEndingSoon({
+          race,
+          participants,
+          currentTime,
+          existingNotificationKeys,
+        });
 
         // Team races: individual placement events are suppressed (TR-685);
         // evaluate the team pushes instead and skip the individual loop.
         if (race.isTeamRace) {
-          await evaluateTeamRace({ race, participants, currentTime });
+          await evaluateTeamRace({
+            race,
+            participants,
+            currentTime,
+            existingNotificationKeys,
+          });
           continue;
         }
 
@@ -468,6 +719,9 @@ function buildRecomputePlacements(dependencies = {}) {
       }
     }
 
+    logger.log(
+      `[CRON] placementRecompute completed races=${races.length} participants=${participantCount} dueEffectEnqueues=${dueEffectEnqueues} recoveryEnqueues=${recoveryEnqueues} emitted=${emitted.length} durationMs=${Math.max(0, monotonicNow() - startedAtMs)}`
+    );
     return emitted;
   };
 }
@@ -475,18 +729,31 @@ function buildRecomputePlacements(dependencies = {}) {
 function scheduleRecomputePlacements(dependencies = {}) {
   const run = buildRecomputePlacements(dependencies);
   const logger = dependencies.logger || console;
+  const setIntervalFn = dependencies.setInterval || setInterval;
+  let running = false;
 
   async function tick() {
+    if (running) {
+      const message =
+        "[CRON] placementRecompute skipped overlapping five-minute tick";
+      if (typeof logger.warn === "function") logger.warn(message);
+      else logger.log(message);
+      return;
+    }
+    running = true;
     try {
       await run();
     } catch (error) {
       logger.error("[CRON] placementRecompute tick error:", error);
+    } finally {
+      running = false;
     }
   }
 
   tick(); // run once shortly after boot
-  setInterval(tick, RECOMPUTE_INTERVAL_MS);
+  const interval = setIntervalFn(tick, RECOMPUTE_INTERVAL_MS);
   logger.log("[CRON] Live placement recompute scheduled (every 5 minutes)");
+  return { tick, interval };
 }
 
 module.exports = { buildRecomputePlacements, scheduleRecomputePlacements };

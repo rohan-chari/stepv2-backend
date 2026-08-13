@@ -59,6 +59,39 @@ test("RACE_ENDING_SOON deep-links to the race and carries the §9.2 payload", as
   assert.equal(state.recorded[0].type, "RACE_ENDING_SOON");
 });
 
+test("a scheduler-claimed race reminder sends without writing a second audit row", async () => {
+  const { eventBus, state } = harness();
+  await eventBus.emit("RACE_ENDING_SOON", {
+    raceId: "race-claimed",
+    raceName: "Claimed Race",
+    endsAt: new Date(Date.now() + 60 * 60 * 1000),
+    userId: "u1",
+    notificationClaimed: true,
+  });
+  assert.ok(state.sent);
+  assert.equal(state.recorded.length, 0);
+});
+
+test("a new handler suppresses an unclaimed old-cron event when another process won", async () => {
+  const { eventBus, state } = harness({
+    Notification: {
+      async claimDelivery() {
+        return false;
+      },
+      async create() {
+        throw new Error("losing handler must not audit or send");
+      },
+    },
+  });
+  await eventBus.emit("RACE_ENDING_SOON", {
+    raceId: "race-lost-claim",
+    raceName: "Claimed Elsewhere",
+    endsAt: new Date(Date.now() + 60 * 60 * 1000),
+    userId: "u1",
+  });
+  assert.equal(state.sent, null);
+});
+
 test("DAILY_REWARD_REMINDER_17 carries the daily_reward payload and skips its own audit row", async () => {
   const { eventBus, state } = harness();
   await eventBus.emit("DAILY_REWARD_REMINDER", {

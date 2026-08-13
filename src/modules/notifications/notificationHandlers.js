@@ -42,6 +42,40 @@ function registerNotificationHandlers(dependencies = {}) {
     }
   }
 
+  // Rolling-deploy compatibility for cron notifications. New schedulers claim
+  // before emitting and set notificationClaimed=true. If an old scheduler emits
+  // without that flag into this new handler, claim here before delivery. The
+  // unique deliveryKey makes concurrent new processes exactly-once.
+  async function claimCronNotification({
+    userId,
+    type,
+    raceId,
+    notificationClaimed,
+  }) {
+    if (notificationClaimed === true) {
+      return { send: true, skipAudit: true };
+    }
+    if (typeof notificationModel.claimDelivery !== "function") {
+      return { send: true, skipAudit: false };
+    }
+    try {
+      const claimed = await notificationModel.claimDelivery({
+        userId,
+        type,
+        raceId,
+        deliveryKey: `cron:${type}:${raceId}:${userId}`,
+      });
+      return { send: claimed, skipAudit: claimed };
+    } catch (error) {
+      logger.error(`${type} notification claim failed`, {
+        raceId,
+        userId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return { send: false, skipAudit: false };
+    }
+  }
+
   function deviceTokenSuffix(token) {
     if (!token || typeof token !== "string") return "";
     return token.slice(-9);
@@ -343,15 +377,28 @@ function registerNotificationHandlers(dependencies = {}) {
     }
   });
 
-  // §8: race-ending-soon reminder. The placementRecompute job emits ONE event
-  // per eligible participant (it does the durable send-once dedup via the audit
-  // row before emitting), so this handler just delivers the push to that user.
+  // §8: race-ending-soon reminder. The placementRecompute job claims each new
+  // delivery before emitting; the handler's rolling-deploy fallback claims an
+  // event from an older scheduler before delivering it.
   // `formatTimeLeft` is defined below in the team-push block; declared with a
   // function statement so it's hoisted and usable here.
   events.on("RACE_ENDING_SOON", async (data) => {
     try {
-      const { raceId, raceName, endsAt, userId } = data || {};
+      const {
+        raceId,
+        raceName,
+        endsAt,
+        userId,
+        notificationClaimed,
+      } = data || {};
       if (!raceId || !userId) return;
+      const claim = await claimCronNotification({
+        userId,
+        type: "RACE_ENDING_SOON",
+        raceId,
+        notificationClaimed,
+      });
+      if (!claim.send) return;
       const label = raceName || "Your race";
       // "about N hours" — round to the nearest hour so a fire at ~1h55m left
       // reads "2 hours" (floor-based formatTimeLeft would say "1h"). The reminder
@@ -372,6 +419,7 @@ function registerNotificationHandlers(dependencies = {}) {
           params: { raceId },
         },
         logContext: { raceId, userId },
+        skipAudit: claim.skipAudit,
       });
     } catch (error) {
       logger.error("RACE_ENDING_SOON handler failed", {
@@ -632,13 +680,25 @@ function registerNotificationHandlers(dependencies = {}) {
   });
 
   // TR-683: gentle slacker nudge. The placementRecompute job enforces the
-  // final-12h window and once-per-race dedup (via the Notification audit row
-  // this handler records) — this handler just delivers playful, never-shaming
-  // copy.
+  // final-12h window and claims the once-per-race audit row before emitting.
+  // This handler just delivers playful, never-shaming copy.
   events.on("TEAM_SLACKER_NUDGE", async (data) => {
     try {
-      const { raceId, raceName, userId, teamName } = data || {};
+      const {
+        raceId,
+        raceName,
+        userId,
+        teamName,
+        notificationClaimed,
+      } = data || {};
       if (!raceId || !userId) return;
+      const claim = await claimCronNotification({
+        userId,
+        type: "TEAM_SLACKER_NUDGE",
+        raceId,
+        notificationClaimed,
+      });
+      if (!claim.send) return;
       await sendNotificationToUser({
         eventName: "TEAM_SLACKER_NUDGE",
         recipientUserId: userId,
@@ -652,6 +712,7 @@ function registerNotificationHandlers(dependencies = {}) {
           params: { raceId },
         },
         logContext: { raceId, userId },
+        skipAudit: claim.skipAudit,
       });
     } catch (error) {
       logger.error("TEAM_SLACKER_NUDGE handler failed", {

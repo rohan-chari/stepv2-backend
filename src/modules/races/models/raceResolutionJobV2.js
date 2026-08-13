@@ -17,6 +17,7 @@ const LEASE_MS = 30 * 1000;
 const RETRY_BACKOFF_MS = [1000, 5000, 30000];
 const MAX_ATTEMPTS = 3;
 const DEFAULT_DEBOUNCE_MS = 5000;
+const DEFAULT_RECOVERY_STALE_MS = 60 * 60 * 1000;
 
 // §5a item 3: the work cap is an explicit rule, not an emergent property.
 // recordSuccess pushes `not_before_at` this far into the future; claim
@@ -145,8 +146,8 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
       return normalizeRow(rows[0]);
     },
 
-    // Convenience for the multi-race enqueue sites (sync-v2 Transaction B,
-    // placementRecompute). Enqueues in stable ascending raceId order so two
+    // Convenience for the multi-race enqueue sites (sync-v2 Transaction B).
+    // Enqueues in stable ascending raceId order so two
     // concurrent uploaders never take the row locks in opposite orders.
     async enqueueMany(
       { raceIds, userId = null, resolutionTimeZone = null, now = new Date() },
@@ -364,6 +365,60 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
       return normalizeRow(rows[0]);
     },
 
+    // Bounded convergence backstop for the five-minute placement cron. Normal
+    // mutations enqueue directly; this only identifies active races whose job
+    // row is missing, terminally failed, or has not had an insurance replay in
+    // the configured stale window. Selection is lean and happens in memory
+    // after one indexed read of the active race ids supplied by the caller.
+    async findRecoveryRaceIds({
+      raceIds,
+      now = new Date(),
+      limit = 2,
+      staleMs = DEFAULT_RECOVERY_STALE_MS,
+    }) {
+      const ids = [...new Set(raceIds || [])].filter(Boolean);
+      const cap = Math.max(0, Math.min(2, Number(limit) || 0));
+      if (ids.length === 0 || cap === 0) return [];
+
+      const jobs = await prisma.raceResolutionJobV2.findMany({
+        where: { raceId: { in: ids } },
+        select: {
+          raceId: true,
+          state: true,
+          requestedAt: true,
+          lastCompletedAt: true,
+        },
+      });
+      const byRaceId = new Map(jobs.map((job) => [job.raceId, job]));
+      const staleBefore = now.getTime() - Math.max(0, Number(staleMs) || 0);
+
+      return ids
+        .map((raceId) => {
+          const job = byRaceId.get(raceId);
+          if (!job) return { raceId, priority: 0, age: 0 };
+          if (job.state === "FAILED") {
+            return {
+              raceId,
+              priority: 1,
+              age: (job.lastCompletedAt || job.requestedAt).getTime(),
+            };
+          }
+          if (job.state !== "SUCCEEDED") return null;
+          const completedAt = job.lastCompletedAt || job.requestedAt;
+          if (completedAt.getTime() > staleBefore) return null;
+          return { raceId, priority: 2, age: completedAt.getTime() };
+        })
+        .filter(Boolean)
+        .sort(
+          (left, right) =>
+            left.priority - right.priority ||
+            left.age - right.age ||
+            String(left.raceId).localeCompare(String(right.raceId))
+        )
+        .slice(0, cap)
+        .map((candidate) => candidate.raceId);
+    },
+
     // Backpressure metric (§5a "Worker capacity"): max age of an unserviced
     // request. Alarm threshold is 30s; the worker logs it once a minute.
     async queueLagMs(now = new Date()) {
@@ -410,4 +465,5 @@ module.exports = {
   MAX_ATTEMPTS,
   RETRY_BACKOFF_MS,
   DEFAULT_DEBOUNCE_MS,
+  DEFAULT_RECOVERY_STALE_MS,
 };
