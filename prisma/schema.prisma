@@ -572,6 +572,10 @@ model ShopItem {
   priceCoins     Int           @map("price_coins")
   assetKey       String        @map("asset_key")
   renderMetadata Json?         @map("render_metadata")
+  // Optional server-owned compatibility policy. Null/absent means this item
+  // neither declares tags nor blocks another item. It is intentionally not in
+  // public catalog serializers: clients do not get to enforce outfit rules.
+  compatibility  Json?
   active         Boolean       @default(true)
   // When true, the item is hidden from prod-channel clients (only requests that
   // identify as a TestFlight build see it). Flip to false to launch it to ALL
@@ -600,6 +604,11 @@ model ShopItem {
   // is the cache key, so the URL is immutable and safe to cache forever.
   // Additive + nullable: old deployed code and frozen app binaries never see it.
   assetVersion   String?       @map("asset_version")
+  // A remote-only PNG has no bundled fallback in pre-CDN app binaries. Keep the
+  // default false so an existing (or newly created) remote-backed item remains
+  // visible to every client and can use its bundled fallback. Only true is
+  // capability-gated to `remote_assets` clients.
+  remoteOnly     Boolean       @default(false) @map("remote_only")
   createdAt      DateTime      @default(now()) @map("created_at")
 
   purchases        UserShopItem[]

@@ -66,6 +66,7 @@ function buildCreateTournament(dependencies = {}) {
     timeZone = null,
     clientFeatures = null,
     supportsCharacters = false,
+    supportsRemoteAssets = false,
   }) {
     if (!clientSupportsTournaments(clientFeatures)) {
       throw new TournamentError(
@@ -214,7 +215,10 @@ function buildCreateTournament(dependencies = {}) {
     }
 
     const full = await tournamentModel.findById(tournament.id);
-    return serializeTournamentPayload(full, userId, { supportsCharacters });
+    return serializeTournamentPayload(full, userId, {
+      supportsCharacters,
+      supportsRemoteAssets,
+    });
   };
 }
 

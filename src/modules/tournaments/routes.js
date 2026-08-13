@@ -57,7 +57,9 @@ function createTournamentsRouter(dependencies = {}) {
   const getSharedTournamentPreview =
     dependencies.getSharedTournamentPreview || defaultGetSharedPreview;
 
-  const supportsCharacters = (req) => req.clientFeatures?.has("characters") ?? false;
+const supportsCharacters = (req) => req.clientFeatures?.has("characters") ?? false;
+const supportsRemoteAssets = (req) =>
+  req.clientFeatures?.has("remote_assets") ?? false;
 
   // GET /tournaments/share/:token — PUBLIC preview, declared before requireAuth.
   router.get(
@@ -100,6 +102,7 @@ function createTournamentsRouter(dependencies = {}) {
         timeZone: req.timeZone,
         clientFeatures: req.clientFeatures,
         supportsCharacters: supportsCharacters(req),
+        supportsRemoteAssets: supportsRemoteAssets(req),
       });
       res.status(201).json({ tournament });
     })
@@ -124,6 +127,7 @@ function createTournamentsRouter(dependencies = {}) {
         token: req.params.token,
         clientFeatures: req.clientFeatures,
         supportsCharacters: supportsCharacters(req),
+        supportsRemoteAssets: supportsRemoteAssets(req),
       });
       res.status(201).json({ tournament });
     })
@@ -138,6 +142,7 @@ function createTournamentsRouter(dependencies = {}) {
         tournamentId: req.params.id,
         clientFeatures: req.clientFeatures,
         supportsCharacters: supportsCharacters(req),
+        supportsRemoteAssets: supportsRemoteAssets(req),
       });
       res.status(201).json({ tournament });
     })
@@ -153,6 +158,7 @@ function createTournamentsRouter(dependencies = {}) {
         accept: req.body ? req.body.accept : true,
         clientFeatures: req.clientFeatures,
         supportsCharacters: supportsCharacters(req),
+        supportsRemoteAssets: supportsRemoteAssets(req),
       });
       res.json({ tournament });
     })
@@ -167,6 +173,7 @@ function createTournamentsRouter(dependencies = {}) {
         tournamentId: req.params.id,
         userIds: (req.body && req.body.userIds) || [],
         supportsCharacters: supportsCharacters(req),
+        supportsRemoteAssets: supportsRemoteAssets(req),
       });
       res.json(result);
     })
@@ -180,6 +187,7 @@ function createTournamentsRouter(dependencies = {}) {
         userId: req.user.id,
         tournamentId: req.params.id,
         supportsCharacters: supportsCharacters(req),
+        supportsRemoteAssets: supportsRemoteAssets(req),
       });
       res.json({ tournament });
     })
@@ -194,6 +202,7 @@ function createTournamentsRouter(dependencies = {}) {
         tournamentId: req.params.id,
         targetUserId: req.body && req.body.userId,
         supportsCharacters: supportsCharacters(req),
+        supportsRemoteAssets: supportsRemoteAssets(req),
       });
       res.json({ tournament });
     })
@@ -207,6 +216,7 @@ function createTournamentsRouter(dependencies = {}) {
         userId: req.user.id,
         tournamentId: req.params.id,
         supportsCharacters: supportsCharacters(req),
+        supportsRemoteAssets: supportsRemoteAssets(req),
       });
       res.json({ tournament });
     })
@@ -220,6 +230,7 @@ function createTournamentsRouter(dependencies = {}) {
         userId: req.user.id,
         tournamentId: req.params.id,
         supportsCharacters: supportsCharacters(req),
+        supportsRemoteAssets: supportsRemoteAssets(req),
       });
       res.json({ tournament });
     })
@@ -257,6 +268,7 @@ function createTournamentsRouter(dependencies = {}) {
         userId: req.user.id,
         tournamentId: req.params.id,
         supportsCharacters: supportsCharacters(req),
+        supportsRemoteAssets: supportsRemoteAssets(req),
       });
       res.json({ tournament });
     })

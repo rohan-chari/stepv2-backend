@@ -30,6 +30,7 @@ function buildInviteToTournament(dependencies = {}) {
     tournamentId,
     userIds,
     supportsCharacters,
+    supportsRemoteAssets = false,
   }) {
     const tournament = await tournamentModel.findById(tournamentId);
     if (!tournament) {
@@ -110,7 +111,10 @@ function buildInviteToTournament(dependencies = {}) {
 
     const full = await tournamentModel.findById(tournamentId);
     return {
-      tournament: serializeTournamentPayload(full, userId, { supportsCharacters }),
+      tournament: serializeTournamentPayload(full, userId, {
+        supportsCharacters,
+        supportsRemoteAssets,
+      }),
       invited,
       needsUpdate,
     };

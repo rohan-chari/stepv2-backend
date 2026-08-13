@@ -18,7 +18,7 @@ const CATALOG_TTL_SECONDS = 60;
 // viewer can ever be served another viewer's ownership state.
 //
 // The cache key carries the channel + capability variants because the row set
-// itself is filtered by them (testOnly, CHARACTER slot, remote assetVersion) —
+// itself is filtered by them (testOnly, CHARACTER slot, remote-only art) —
 // a single shared key would leak a TestFlight-only item to a prod build.
 async function loadCatalogItems({ channel, supportsCharacters, supportsRemoteAssets }) {
   return prisma.shopItem.findMany({
@@ -31,13 +31,11 @@ async function loadCatalogItems({ channel, supportsCharacters, supportsRemoteAss
       // would render them as HEAD accessories and could buy an animal they
       // can't display.
       ...(supportsCharacters ? {} : { slot: { not: CHARACTER_SLOT } }),
-      // Same reasoning for CDN-served art: a binary that never declared
-      // `remote_assets` support has no way to download or draw a remote PNG,
-      // so it must not see (or be able to buy) an item whose art is remote.
-      // Items with a NULL assetVersion are bundled and stay visible to
-      // everyone — which is every item that exists today, so this filter is a
-      // no-op until the first remote item is created.
-      ...(supportsRemoteAssets ? {} : { assetVersion: null }),
+      // A non-null assetVersion does NOT by itself make an item unsafe for old
+      // clients: remote-backed rows retain their bundled PNG fallback. Only a
+      // remoteOnly row has no such fallback, so only those rows are withheld
+      // from clients that cannot resolve remote art.
+      ...(supportsRemoteAssets ? {} : { remoteOnly: false }),
     },
     orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
   });
@@ -93,7 +91,10 @@ async function getShopCatalog(
       // Same reasoning as the catalog filter: a CHARACTER row equipped from a
       // characters-capable build must not reach an old binary's `equipped`
       // map, or it renders as a floating accessory on the capybara.
-      (supportsCharacters || entry.shopItem?.slot !== CHARACTER_SLOT)
+      (supportsCharacters || entry.shopItem?.slot !== CHARACTER_SLOT) &&
+      // Do not return an already-equipped remote-only item to an older binary
+      // after a downgrade/another device. Remote-backed fallback rows remain.
+      (supportsRemoteAssets || !entry.shopItem?.remoteOnly)
   );
   const equipped = buildEquipmentMap(visibleEquipped);
   const equippedItemIdSet = new Set(

@@ -94,7 +94,11 @@ function summaryFields(t, acceptedCount = null) {
   };
 }
 
-function serializeParticipant(p, supportsCharacters) {
+function serializeParticipant(
+  p,
+  supportsCharacters,
+  supportsRemoteAssets = false
+) {
   return {
     userId: p.userId,
     displayName: p.user?.displayName ?? null,
@@ -102,7 +106,12 @@ function serializeParticipant(p, supportsCharacters) {
     seed: p.seed ?? null,
     eliminatedInRound: p.eliminatedInRound ?? null,
     avatar: p.user?.profilePhotoUrl ?? null,
-    ...characterPresentation(p.user, supportsCharacters),
+    ...characterPresentation(
+      p.user,
+      supportsCharacters,
+      "prod",
+      supportsRemoteAssets
+    ),
   };
 }
 
@@ -216,10 +225,14 @@ function buildRounds(t, viewerUserId, nowMs) {
 function serializeTournamentPayload(
   t,
   viewerUserId,
-  { supportsCharacters = false, now = () => new Date() } = {}
+  {
+    supportsCharacters = false,
+    supportsRemoteAssets = false,
+    now = () => new Date(),
+  } = {}
 ) {
   const participants = (t.participants || []).map((p) =>
-    serializeParticipant(p, supportsCharacters)
+    serializeParticipant(p, supportsCharacters, supportsRemoteAssets)
   );
   const myParticipant = (t.participants || []).find(
     (p) => p.userId === viewerUserId

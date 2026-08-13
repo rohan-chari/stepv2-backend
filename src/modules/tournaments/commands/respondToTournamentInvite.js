@@ -11,6 +11,7 @@ function buildRespondToTournamentInvite(dependencies = {}) {
     accept,
     clientFeatures,
     supportsCharacters,
+    supportsRemoteAssets = false,
   }) {
     return core({
       userId,
@@ -19,6 +20,7 @@ function buildRespondToTournamentInvite(dependencies = {}) {
       accept: accept !== false,
       clientFeatures,
       supportsCharacters,
+      supportsRemoteAssets,
     });
   };
 }

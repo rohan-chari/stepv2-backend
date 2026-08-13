@@ -16,7 +16,7 @@ function buildForfeitTournament(dependencies = {}) {
   const completeRace = dependencies.completeRace || defaultCompleteRace;
   const now = dependencies.now || (() => new Date());
 
-  return async function forfeitTournament({ userId, tournamentId, supportsCharacters }) {
+  return async function forfeitTournament({ userId, tournamentId, supportsCharacters, supportsRemoteAssets = false }) {
     const tournament = await tournamentModel.findSummaryById(tournamentId);
     if (!tournament) {
       throw new TournamentError("Tournament not found", 404, "TOURNAMENT_NOT_FOUND");
@@ -66,7 +66,10 @@ function buildForfeitTournament(dependencies = {}) {
     });
 
     const full = await tournamentModel.findById(tournamentId);
-    return serializeTournamentPayload(full, userId, { supportsCharacters });
+    return serializeTournamentPayload(full, userId, {
+      supportsCharacters,
+      supportsRemoteAssets,
+    });
   };
 }
 

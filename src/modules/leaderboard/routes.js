@@ -57,6 +57,7 @@ function createLeaderboardRouter(dependencies = {}) {
         currentUserId: req.user.id,
         timeZone: req.timeZone,
         supportsCharacters: req.clientFeatures?.has("characters") ?? false,
+        supportsRemoteAssets: req.clientFeatures?.has("remote_assets") ?? false,
         releaseChannel: req.releaseChannel,
       });
       res.json(result);

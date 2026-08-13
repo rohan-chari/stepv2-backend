@@ -236,7 +236,16 @@ function createShopRouter(dependencies = {}) {
       if (error.name === "AccessoryEquipError") {
         return res
           .status(error.statusCode || 400)
-          .json({ error: error.message });
+          .json({
+            error: error.message,
+            ...(error.code ? { code: error.code } : {}),
+            ...(Array.isArray(error.conflictingItemIds)
+              ? { conflictingItemIds: error.conflictingItemIds }
+              : {}),
+            ...(Array.isArray(error.conflictingSlots)
+              ? { conflictingSlots: error.conflictingSlots }
+              : {}),
+          });
       }
       console.error("Equip accessory error:", error);
       res.status(500).json({ error: "Internal server error" });

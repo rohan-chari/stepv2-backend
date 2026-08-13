@@ -13,6 +13,7 @@
     "migrate": "npx prisma migrate dev",
     "generate": "npx prisma generate",
     "assets:add": "node scripts/assets-add.js",
+    "cosmetics:cleanup-compatibility": "node scripts/accessory-compatibility-cleanup.js",
     "cosmetics:sync-peer": "node scripts/cosmetics-sync-peer.js",
     "cosmetics:clone": "node scripts/cosmetics-clone.js",
     "balance:pull": "node scripts/balance-pull.js",

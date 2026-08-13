@@ -4,12 +4,15 @@ const {
   CHARACTER_SLOT,
   buildEquipmentMap,
 } = require("./shopCosmetics");
+const { appSettings } = require("../../shared/config/appSettings");
+const { findConflictingEquipment } = require("./accessoryCompatibility");
 
 class AccessoryEquipError extends Error {
-  constructor(message, statusCode = 400) {
+  constructor(message, statusCode = 400, extras = {}) {
     super(message);
     this.name = "AccessoryEquipError";
     this.statusCode = statusCode;
+    Object.assign(this, extras);
   }
 }
 
@@ -59,7 +62,19 @@ async function equipAccessory({
     throw new AccessoryEquipError("itemId must be a shop item id or null", 400);
   }
 
+  const compatibilityEnforced =
+    (await appSettings.getFlag("accessoryCompatibilityEnforcement")) === true;
+
   const outcome = await prisma.$transaction(async (tx) => {
+    // One per-user row lock serializes all cross-slot equip attempts. The slot
+    // unique index alone cannot protect a HEAD/FACE conflict because each
+    // request writes a different row. Lock before the equipment read, then
+    // re-read inside the same transaction so exactly one racing request wins.
+    if (compatibilityEnforced) {
+      await tx.$queryRaw`
+        SELECT 1 FROM "users" WHERE "id" = ${userId} FOR UPDATE
+      `;
+    }
     const ownership = await tx.userShopItem.findUnique({
       where: { userId_shopItemId: { userId, shopItemId: itemId } },
       include: { shopItem: true },
@@ -81,6 +96,31 @@ async function equipAccessory({
 
     if (ownership.shopItem.slot !== slot) {
       throw new AccessoryEquipError("Shop item does not fit this slot", 400);
+    }
+
+    if (compatibilityEnforced) {
+      const equippedAccessories = await tx.userEquippedAccessory.findMany({
+        where: { userId },
+        include: { shopItem: true },
+      });
+      // The same-slot item is being replaced by the candidate and is therefore
+      // not part of the resulting loadout.
+      const conflicts = findConflictingEquipment(
+        ownership.shopItem,
+        equippedAccessories.filter((entry) => entry.slot !== slot)
+      );
+      if (conflicts.length > 0) {
+        const first = conflicts[0];
+        throw new AccessoryEquipError(
+          `That accessory conflicts with ${first.shopItem.name}.`,
+          409,
+          {
+            code: "ACCESSORY_CONFLICT",
+            conflictingItemIds: conflicts.map((entry) => entry.shopItemId),
+            conflictingSlots: conflicts.map((entry) => entry.slot),
+          }
+        );
+      }
     }
 
     await tx.userEquippedAccessory.upsert({

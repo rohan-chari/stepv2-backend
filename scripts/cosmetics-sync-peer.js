@@ -22,6 +22,7 @@ const COMPARED_FIELDS = [
   "priceCoins",
   "assetKey",
   "renderMetadata",
+  "compatibility",
   "active",
   "testOnly",
   "earnOnly",
@@ -31,6 +32,7 @@ const COMPARED_FIELDS = [
   // src/modules/cosmetics/mirrorShopItem.js and CLONED_FIELDS in
   // scripts/cosmetics-clone.js.
   "assetVersion",
+  "remoteOnly",
 ];
 
 function stable(value) {
@@ -54,8 +56,10 @@ function mirrorFields(item) {
   const out = {};
   for (const key of COMPARED_FIELDS) {
     out[key] =
-      key === "renderMetadata" || key === "assetVersion"
+      key === "renderMetadata" || key === "compatibility" || key === "assetVersion"
         ? item[key] ?? null
+        : key === "remoteOnly"
+          ? item[key] ?? false
         : item[key];
   }
   return out;

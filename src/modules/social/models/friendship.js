@@ -34,6 +34,8 @@ const userDisplaySelect = {
           renderMetadata: true,
           bobble: true,
           testOnly: true,
+          remoteOnly: true,
+          assetVersion: true,
         },
       },
     },

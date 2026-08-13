@@ -404,6 +404,33 @@ crash, but they can buy/equip something they can't render, so wait out the
 phased rollout (~a week) before flipping unless the placeholder UX is
 acceptable.
 
+### Remote-first Gold Chain launch
+
+Gold Chain is the remote-first exception to the bundled-art flow above. Its
+immutable artifact version is **`bde871582fef`**. Do these steps in order:
+
+1. Deploy the backend artifact containing
+   `public/assets/accessories/gold_chain@bde871582fef.png`. Before creating or
+   changing its catalog row, verify both the deployed file's SHA-256 prefix
+   (`bde871582fef`) and a production `GET
+   /assets/accessories/gold_chain@bde871582fef.png` (200, PNG bytes, immutable
+   cache header). Do not rely on a file being present only in the git checkout.
+2. Create/update the Gold Chain row with
+   `assetVersion:"bde871582fef"`, `remoteOnly:true`, and `testOnly:true`.
+   That makes it available only to TestFlight clients that advertise
+   `remote_assets`; frozen binaries neither see nor attempt to render it.
+3. Ship and make broadly available the app build that carries the bundled Gold
+   Chain fallback. Verify the shipped asset key and the ordinary bundled render
+   on both iOS and Android.
+4. **Only after that artifact deployment/checksum verification and carrying-app
+   availability** may the row be changed to `remoteOnly:false`. This is the
+   compatibility flip: clients without `remote_assets` then receive the row and
+   must have the bundled fallback. Keep `testOnly:true` until the normal
+   App-Store rollout gate above is satisfied; then flip `testOnly:false`.
+
+The admin mutation mirrors to the peer catalog. Check `mirror.ok` and use
+`npm run cosmetics:sync-peer -- --repair` if it reports a failure.
+
 ### Drift / bootstrap tooling
 
 - `npm run cosmetics:sync-peer` — read-only diff of this environment's catalog

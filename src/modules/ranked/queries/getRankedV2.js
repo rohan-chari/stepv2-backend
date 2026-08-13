@@ -42,6 +42,8 @@ const memberUserSelect = {
           renderMetadata: true,
           bobble: true,
           testOnly: true,
+          remoteOnly: true,
+          assetVersion: true,
         },
       },
     },
@@ -62,7 +64,11 @@ function zoneForRank(rank, size, tier) {
   return "HOLD";
 }
 
-async function getUserProfiles(userIds, supportsCharacters = false) {
+async function getUserProfiles(
+  userIds,
+  supportsCharacters = false,
+  supportsRemoteAssets = false
+) {
   if (userIds.length === 0) return new Map();
   const users = await prisma.user.findMany({
     where: { id: { in: userIds } },
@@ -75,7 +81,9 @@ async function getUserProfiles(userIds, supportsCharacters = false) {
         // {animal, accessories} — naked capy for viewers without `characters`.
         const { animal, accessories } = characterPresentation(
           u,
-          supportsCharacters
+          supportsCharacters,
+          "prod",
+          supportsRemoteAssets
         );
         return {
           displayName: u.displayName || "Anonymous",
@@ -122,6 +130,7 @@ async function getRankedV2({
   memberModel = defaultRankedCohortMember,
   now = () => new Date(),
   supportsCharacters = false,
+  supportsRemoteAssets = false,
 } = {}) {
   // During the Monday grace window the next week hasn't opened yet (it waits
   // for the prior week to settle — see computeRankedWeeks). getCurrent() is null
@@ -174,7 +183,8 @@ async function getRankedV2({
   const { promote, demote } = zoneSizes(size, tier);
   const profiles = await getUserProfiles(
     cohortMembers.map((m) => m.userId),
-    supportsCharacters
+    supportsCharacters,
+    supportsRemoteAssets
   );
 
   const members = cohortMembers.map((m, index) => {

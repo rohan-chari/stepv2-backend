@@ -20,6 +20,8 @@ const ladderUserSelect = {
           renderMetadata: true,
           bobble: true,
           testOnly: true,
+          remoteOnly: true,
+          assetVersion: true,
         },
       },
     },
@@ -37,7 +39,11 @@ const TIER_SUMMARY = TIERS.map((t) => ({
   reward: TIER_REWARDS[t.key] ? TIER_REWARDS[t.key].coins : 0,
 }));
 
-async function getUserProfiles(userIds, supportsCharacters = false) {
+async function getUserProfiles(
+  userIds,
+  supportsCharacters = false,
+  supportsRemoteAssets = false
+) {
   if (userIds.length === 0) return new Map();
   const users = await prisma.user.findMany({
     where: { id: { in: userIds } },
@@ -50,7 +56,9 @@ async function getUserProfiles(userIds, supportsCharacters = false) {
         // {animal, accessories} — naked capy for viewers without `characters`.
         const { animal, accessories } = characterPresentation(
           u,
-          supportsCharacters
+          supportsCharacters,
+          "prod",
+          supportsRemoteAssets
         );
         return {
           displayName: u.displayName || "Anonymous",
@@ -67,7 +75,7 @@ async function getUserProfiles(userIds, supportsCharacters = false) {
 // user's own standing (pinned even when outside the visible window). Returns a
 // clear unranked state when there is no active season or the user has no score
 // yet, so the client never has to invent a fake number.
-async function getRanked({ currentUserId, seasonModel = Season, seasonScoreModel = SeasonScore, supportsCharacters = false } = {}) {
+async function getRanked({ currentUserId, seasonModel = Season, seasonScoreModel = SeasonScore, supportsCharacters = false, supportsRemoteAssets = false } = {}) {
   const season = await seasonModel.getActive();
   if (!season) {
     return { season: null, currentUser: null, ladder: [], tiers: TIER_SUMMARY };
@@ -76,7 +84,8 @@ async function getRanked({ currentUserId, seasonModel = Season, seasonScoreModel
   const scores = await seasonScoreModel.listForSeason(season.id);
   const profiles = await getUserProfiles(
     scores.map((s) => s.userId),
-    supportsCharacters
+    supportsCharacters,
+    supportsRemoteAssets
   );
 
   const ladder = scores.slice(0, LADDER_LIMIT).map((s, index) => ({

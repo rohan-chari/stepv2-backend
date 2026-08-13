@@ -23,6 +23,7 @@ function createRankedRouter(dependencies = {}) {
       const result = await getRankedV2({
         currentUserId: req.user.id,
         supportsCharacters: req.clientFeatures?.has("characters") ?? false,
+        supportsRemoteAssets: req.clientFeatures?.has("remote_assets") ?? false,
       });
       res.json(result);
     } catch (error) {
@@ -60,6 +61,7 @@ function createRankedRouter(dependencies = {}) {
         currentUserId: req.user.id,
         timeZone: req.timeZone,
         supportsCharacters: req.clientFeatures?.has("characters") ?? false,
+        supportsRemoteAssets: req.clientFeatures?.has("remote_assets") ?? false,
       });
       res.json(result);
     } catch (error) {

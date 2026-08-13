@@ -45,6 +45,7 @@ function buildJoinTournamentCore(dependencies = {}) {
     accept = true,
     clientFeatures = null,
     supportsCharacters = false,
+    supportsRemoteAssets = false,
   }) {
     if (!clientSupportsTournaments(clientFeatures)) {
       throw new TournamentError(
@@ -252,7 +253,10 @@ function buildJoinTournamentCore(dependencies = {}) {
     }
 
     const full = await tournamentModel.findById(resolvedId);
-    return serializeTournamentPayload(full, userId, { supportsCharacters });
+    return serializeTournamentPayload(full, userId, {
+      supportsCharacters,
+      supportsRemoteAssets,
+    });
   };
 }
 

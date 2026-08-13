@@ -20,7 +20,7 @@ function buildStartTournament(dependencies = {}) {
   const rng = dependencies.rng;
   const stepsModel = dependencies.Steps;
 
-  return async function startTournament({ userId, tournamentId, supportsCharacters }) {
+  return async function startTournament({ userId, tournamentId, supportsCharacters, supportsRemoteAssets = false }) {
     const { deferred } = await withTournamentLock(
       tournamentId,
       async (tx, def) => {
@@ -67,7 +67,10 @@ function buildStartTournament(dependencies = {}) {
       events.emit(payload.type, payload);
     }
     const full = await tournamentModel.findById(tournamentId);
-    return serializeTournamentPayload(full, userId, { supportsCharacters });
+    return serializeTournamentPayload(full, userId, {
+      supportsCharacters,
+      supportsRemoteAssets,
+    });
   };
 }
 

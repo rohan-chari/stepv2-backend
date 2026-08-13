@@ -25,12 +25,14 @@ const CLONED_FIELDS = [
   "priceCoins",
   "assetKey",
   "renderMetadata",
+  "compatibility",
   "active",
   "testOnly",
   "earnOnly",
   "bobble",
   "sortOrder",
   "assetVersion",
+  "remoteOnly",
 ];
 
 function openSource(url) {
@@ -75,7 +77,11 @@ async function cloneCosmetics({ dryRun = false } = {}) {
     const data = { sku: r.sku };
     for (const key of CLONED_FIELDS) {
       data[key] =
-        key === "renderMetadata" || key === "assetVersion" ? r[key] ?? null : r[key];
+        key === "renderMetadata" || key === "compatibility" || key === "assetVersion"
+          ? r[key] ?? null
+          : key === "remoteOnly"
+            ? r[key] ?? false
+          : r[key];
     }
     await prisma.shopItem.create({ data });
     console.log(`  created ${r.sku}`);

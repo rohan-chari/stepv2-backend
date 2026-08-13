@@ -9,7 +9,12 @@ function buildGetTournament(dependencies = {}) {
   const tournamentModel = dependencies.Tournament || Tournament;
   const now = dependencies.now || (() => new Date());
 
-  return async function getTournament({ userId, tournamentId, supportsCharacters = false }) {
+  return async function getTournament({
+    userId,
+    tournamentId,
+    supportsCharacters = false,
+    supportsRemoteAssets = false,
+  }) {
     const t = await tournamentModel.findById(tournamentId);
     if (!t) {
       throw new TournamentError("Tournament not found", 404, "TOURNAMENT_NOT_FOUND");
@@ -23,7 +28,11 @@ function buildGetTournament(dependencies = {}) {
     if (!isParticipant && !canSeePending) {
       throw new TournamentError("Tournament not found", 404, "TOURNAMENT_NOT_FOUND");
     }
-    return serializeTournamentPayload(t, userId, { supportsCharacters, now });
+    return serializeTournamentPayload(t, userId, {
+      supportsCharacters,
+      supportsRemoteAssets,
+      now,
+    });
   };
 }
 

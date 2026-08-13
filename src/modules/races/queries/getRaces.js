@@ -33,6 +33,7 @@ function getFirstPlaceRacer(
   powerupsEnabled = false,
   supportsCharacters = false,
   releaseChannel = "prod",
+  supportsRemoteAssets = false,
 ) {
   const leader = participants
     .filter((participant) => participant.status === "ACCEPTED")
@@ -60,6 +61,7 @@ function getFirstPlaceRacer(
           leaderUser,
           supportsCharacters,
           releaseChannel,
+          supportsRemoteAssets
         )),
   };
 }
@@ -124,6 +126,7 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
   // exactly as getRaceDetails gates its participant rows. Both default to the
   // naked-capy presentation, so a client that declares nothing is unaffected.
   const supportsCharacters = clientFeatures?.has("characters") ?? false;
+  const supportsRemoteAssets = clientFeatures?.has("remote_assets") ?? false;
   const releaseChannel = options.releaseChannel || "prod";
   // Lean list fetch (Phase B1): drops participant user/accessory relations the
   // summaries never read. Falls back to findForUser for injected minimal test
@@ -277,7 +280,12 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
         profilePhotoUrl: row.user?.profilePhotoUrl ?? null,
         // Same helper and same gating as getRaceDetails, so a client parses
         // these rows with the code it already has.
-        ...characterPresentation(row.user, supportsCharacters, releaseChannel),
+        ...characterPresentation(
+          row.user,
+          supportsCharacters,
+          releaseChannel,
+          supportsRemoteAssets
+        ),
         totalSteps: row.totalSteps,
         placement: row.placement,
         payoutCoins: row.payoutCoins,
@@ -379,6 +387,7 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
         race.status === "ACTIVE" && race.powerupsEnabled,
         supportsCharacters,
         releaseChannel,
+        supportsRemoteAssets,
       ),
       myStatus: myParticipant?.status || null,
       myPlacement,

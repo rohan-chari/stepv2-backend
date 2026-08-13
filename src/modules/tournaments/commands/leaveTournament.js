@@ -17,7 +17,7 @@ function buildLeaveTournament(dependencies = {}) {
   const tournamentModel = dependencies.Tournament || Tournament;
   const awardCoinsFn = dependencies.awardCoins || awardCoins;
 
-  return async function leaveTournament({ userId, tournamentId, supportsCharacters }) {
+  return async function leaveTournament({ userId, tournamentId, supportsCharacters, supportsRemoteAssets = false }) {
     await withTournamentLock(
       tournamentId,
       async (tx) => {
@@ -60,7 +60,10 @@ function buildLeaveTournament(dependencies = {}) {
     );
 
     const full = await tournamentModel.findById(tournamentId);
-    return serializeTournamentPayload(full, userId, { supportsCharacters });
+    return serializeTournamentPayload(full, userId, {
+      supportsCharacters,
+      supportsRemoteAssets,
+    });
   };
 }
 

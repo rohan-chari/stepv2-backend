@@ -25,6 +25,7 @@ function buildKickTournamentParticipant(dependencies = {}) {
     tournamentId,
     targetUserId,
     supportsCharacters,
+    supportsRemoteAssets = false,
   }) {
     await withTournamentLock(
       tournamentId,
@@ -64,7 +65,10 @@ function buildKickTournamentParticipant(dependencies = {}) {
     );
 
     const full = await tournamentModel.findById(tournamentId);
-    return serializeTournamentPayload(full, userId, { supportsCharacters });
+    return serializeTournamentPayload(full, userId, {
+      supportsCharacters,
+      supportsRemoteAssets,
+    });
   };
 }
 

@@ -39,6 +39,7 @@ const USER_SELECT = {
           renderMetadata: true,
           bobble: true,
           testOnly: true,
+          remoteOnly: true,
           assetVersion: true,
         },
       },

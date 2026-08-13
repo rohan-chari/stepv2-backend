@@ -33,7 +33,11 @@ function buildGetTournamentsForUser(dependencies = {}) {
 
   return async function getTournamentsForUser(
     userId,
-    { supportsCharacters = false, releaseChannel = "prod" } = {}
+    {
+      supportsCharacters = false,
+      releaseChannel = "prod",
+      supportsRemoteAssets = false,
+    } = {}
   ) {
     const rows = await tournamentModel.findForUser(userId);
     if (rows.length === 0) return [];
@@ -59,13 +63,20 @@ function buildGetTournamentsForUser(dependencies = {}) {
                   renderMetadata: true,
                   bobble: true,
                   testOnly: true,
+                  remoteOnly: true,
+                  assetVersion: true,
                 },
               },
             },
           },
         },
       });
-      const presentation = characterPresentation(viewer, true, releaseChannel);
+      const presentation = characterPresentation(
+        viewer,
+        true,
+        releaseChannel,
+        supportsRemoteAssets
+      );
       myIdentity = viewer
         ? {
             displayName: viewer.displayName ?? null,

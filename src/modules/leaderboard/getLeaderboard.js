@@ -33,6 +33,8 @@ const leaderboardUserSelect = {
           renderMetadata: true,
           bobble: true,
           testOnly: true,
+          remoteOnly: true,
+          assetVersion: true,
         },
       },
     },
@@ -62,7 +64,12 @@ function getDateBoundary(period, timeZone) {
   }
 }
 
-async function getUserProfiles(userIds, supportsCharacters = false, releaseChannel = "prod") {
+async function getUserProfiles(
+  userIds,
+  supportsCharacters = false,
+  releaseChannel = "prod",
+  supportsRemoteAssets = false
+) {
   if (userIds.length === 0) {
     return new Map();
   }
@@ -80,7 +87,8 @@ async function getUserProfiles(userIds, supportsCharacters = false, releaseChann
         const { animal, accessories } = characterPresentation(
           user,
           supportsCharacters,
-          releaseChannel
+          releaseChannel,
+          supportsRemoteAssets
         );
         return {
           displayName: user.displayName || "Anonymous",
@@ -105,7 +113,15 @@ async function getCurrentUserProfile(currentUserId) {
   };
 }
 
-async function getStepLeaderboard(period, currentUserId, timeZone, scope = "global", supportsCharacters = false, releaseChannel = "prod") {
+async function getStepLeaderboard(
+  period,
+  currentUserId,
+  timeZone,
+  scope = "global",
+  supportsCharacters = false,
+  releaseChannel = "prod",
+  supportsRemoteAssets = false
+) {
   const dateBoundary = getDateBoundary(period, timeZone);
   const dateClause = dateBoundary
     ? { date: { gte: new Date(dateBoundary) } }
@@ -140,7 +156,8 @@ async function getStepLeaderboard(period, currentUserId, timeZone, scope = "glob
   const userMap = await getUserProfiles(
     top100Groups.map((group) => group.userId),
     supportsCharacters,
-    releaseChannel
+    releaseChannel,
+    supportsRemoteAssets
   );
 
   let prevRank = 0;
@@ -210,7 +227,13 @@ async function getStepLeaderboard(period, currentUserId, timeZone, scope = "glob
   };
 }
 
-async function getRaceLeaderboard(currentUserId, scope = "global", supportsCharacters = false, releaseChannel = "prod") {
+async function getRaceLeaderboard(
+  currentUserId,
+  scope = "global",
+  supportsCharacters = false,
+  releaseChannel = "prod",
+  supportsRemoteAssets = false
+) {
   // friends scope: restrict to the viewer + accepted friends. global (default)
   // leaves this null so the query is unfiltered, exactly as before.
   const friendsIdSet = await resolveFriendsIdSet(scope, currentUserId);
@@ -251,7 +274,12 @@ async function getRaceLeaderboard(currentUserId, scope = "global", supportsChara
   }
 
   const userIds = [...statsByUserId.keys(), currentUserId];
-  const userMap = await getUserProfiles(userIds, supportsCharacters, releaseChannel);
+  const userMap = await getUserProfiles(
+    userIds,
+    supportsCharacters,
+    releaseChannel,
+    supportsRemoteAssets
+  );
   const currentUserDisplayName =
     userMap.get(currentUserId)?.displayName || "Anonymous";
 
@@ -267,12 +295,26 @@ async function getRaceLeaderboard(currentUserId, scope = "global", supportsChara
   return buildRaceRecordLeaderboard(entries, currentUserId, currentUserDisplayName);
 }
 
-async function getLeaderboard({ type = "steps", period = "today", scope = "global", currentUserId, timeZone, supportsCharacters = false, releaseChannel = "prod" }) {
+async function getLeaderboard({ type = "steps", period = "today", scope = "global", currentUserId, timeZone, supportsCharacters = false, releaseChannel = "prod", supportsRemoteAssets = false }) {
   if (type === "races") {
-    return getRaceLeaderboard(currentUserId, scope, supportsCharacters, releaseChannel);
+    return getRaceLeaderboard(
+      currentUserId,
+      scope,
+      supportsCharacters,
+      releaseChannel,
+      supportsRemoteAssets
+    );
   }
 
-  return getStepLeaderboard(period, currentUserId, timeZone, scope, supportsCharacters, releaseChannel);
+  return getStepLeaderboard(
+    period,
+    currentUserId,
+    timeZone,
+    scope,
+    supportsCharacters,
+    releaseChannel,
+    supportsRemoteAssets
+  );
 }
 
 module.exports = { getLeaderboard };

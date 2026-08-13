@@ -1,12 +1,16 @@
 const assert = require("node:assert/strict");
 const { describe, it, before, beforeEach } = require("node:test");
 const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
+const derivedCache = require("../../src/shared/cache/derivedCache");
+const cacheKeys = require("../../src/shared/cache/cacheKeys");
+const { appSettings } = require("../../src/shared/config/appSettings");
 
 // CDN-served art (remote assets) — end-to-end coverage for:
 //   * the static /assets route (immutable cache headers, 404, traversal)
 //   * GET /assets/manifest (shape, release-channel filtering, character extras)
-//   * catalog gating on the `remote_assets` X-Client-Features token, for both
-//     GET /shop/catalog and GET /shop/powerups
+//   * `remoteOnly` catalog gating on the `remote_assets` X-Client-Features
+//     token, while remote-backed rows with bundled fallbacks stay visible to
+//     every client
 //   * admin create/update of `assetVersion` on both shop tables, plus the new
 //     renderMetadata.baselineOffset key surviving the PATCH merge
 //
@@ -24,6 +28,19 @@ const ASSET_BASE = process.env.ASSET_BASE_URL || "https://steptracker-api.org";
 const HAT_VERSION = "4ff6ab670a58";
 const PANDA_VERSION = "619b0e8b0c87";
 const BOOST_VERSION = "6a34118ba2e0";
+
+async function invalidateRemoteAssetReadCaches() {
+  await Promise.all([
+    derivedCache.invalidate({
+      keys: cacheKeys.assetsManifestVariants(),
+      prefix: cacheKeys.PREFIX.ASSETS_MANIFEST,
+    }),
+    derivedCache.invalidate({
+      keys: cacheKeys.shopCatalogVariants(),
+      prefix: cacheKeys.PREFIX.SHOP_CATALOG,
+    }),
+  ]);
+}
 
 async function createUser({ admin = false } = {}) {
   const appleId = `apple-remote-assets-${++nextAppleId}`;
@@ -111,17 +128,22 @@ describe("GET /assets/manifest", () => {
 
   beforeEach(async () => {
     await cleanDatabase();
+    // This suite writes raw fixture rows. Keep catalog/manifest cache coverage
+    // in its dedicated tests; otherwise a prior suite's enabled cache can
+    // legally serve a now-truncated fixture set for up to its TTL.
+    await appSettings.setFlag("redisCacheCatalogsEnabled", false);
     await prisma.powerupShopItem.deleteMany({});
 
     await prisma.shopItem.createMany({
       data: [
         {
-          sku: "remote_hat",
-          name: "Remote Hat",
+          sku: "remote_fallback_hat",
+          name: "Remote Fallback Hat",
           slot: "HEAD",
           priceCoins: 75,
           assetKey: "fixture_hat",
           assetVersion: HAT_VERSION,
+          remoteOnly: false,
           testOnly: false,
           sortOrder: 1,
         },
@@ -214,6 +236,7 @@ describe("GET /assets/manifest", () => {
         },
       ],
     });
+    await invalidateRemoteAssetReadCaches();
   });
 
   it("returns only rows carrying an assetVersion, keyed by assetKey / powerup type", async () => {
@@ -283,18 +306,31 @@ describe("remote_assets client-feature gating", () => {
 
   beforeEach(async () => {
     await cleanDatabase();
+    await appSettings.setFlag("redisCacheCatalogsEnabled", false);
     await prisma.powerupShopItem.deleteMany({});
     await prisma.shopItem.createMany({
       data: [
         {
-          sku: "remote_hat",
-          name: "Remote Hat",
+          sku: "remote_fallback_hat",
+          name: "Remote Fallback Hat",
           slot: "HEAD",
           priceCoins: 75,
           assetKey: "fixture_hat",
           assetVersion: HAT_VERSION,
+          remoteOnly: false,
           testOnly: false,
           sortOrder: 1,
+        },
+        {
+          sku: "remote_only_hat",
+          name: "Remote-only Hat",
+          slot: "HEAD",
+          priceCoins: 75,
+          assetKey: "secret_hat",
+          assetVersion: "aaaaaaaaaaaa",
+          remoteOnly: true,
+          testOnly: false,
+          sortOrder: 2,
         },
         {
           sku: "bundled_hat",
@@ -303,7 +339,7 @@ describe("remote_assets client-feature gating", () => {
           priceCoins: 75,
           assetKey: "cowboy_hat",
           testOnly: false,
-          sortOrder: 2,
+          sortOrder: 3,
         },
       ],
     });
@@ -330,23 +366,37 @@ describe("remote_assets client-feature gating", () => {
         },
       ],
     });
+    await invalidateRemoteAssetReadCaches();
   });
 
-  it("hides remote-only cosmetics from a client without the token", async () => {
+  it("keeps remote-backed cosmetics with bundled fallbacks visible to clients without the token", async () => {
     const user = await createUser();
     const body = await (
       await get("/shop/catalog", { token: user.token })
     ).json();
     const skus = body.items.map((i) => i.sku);
     assert.ok(skus.includes("bundled_hat"));
-    assert.ok(!skus.includes("remote_hat"));
-    // Bundled rows are byte-compatible: no assetUrl invented for them.
+    assert.ok(skus.includes("remote_fallback_hat"));
+    assert.ok(!skus.includes("remote_only_hat"));
+
+    // The fields are additive: old clients ignore them and retain their
+    // bundled resolution, while newer clients can read the immutable URL.
+    const remoteFallback = body.items.find(
+      (i) => i.sku === "remote_fallback_hat"
+    );
+    assert.equal(remoteFallback.assetVersion, HAT_VERSION);
+    assert.equal(
+      remoteFallback.assetUrl,
+      `${ASSET_BASE}/assets/accessories/fixture_hat@${HAT_VERSION}.png`
+    );
+
+    // Bundled rows remain byte-compatible: no assetUrl is invented for them.
     const bundled = body.items.find((i) => i.sku === "bundled_hat");
     assert.equal(bundled.assetVersion ?? null, null);
     assert.equal(bundled.assetUrl ?? null, null);
   });
 
-  it("serves remote cosmetics with assetVersion + assetUrl to a remote_assets client", async () => {
+  it("serves remote-only cosmetics only to a remote_assets client", async () => {
     const user = await createUser();
     const body = await (
       await get("/shop/catalog", {
@@ -356,17 +406,67 @@ describe("remote_assets client-feature gating", () => {
     ).json();
     const skus = body.items.map((i) => i.sku);
     assert.ok(skus.includes("bundled_hat"));
-    assert.ok(skus.includes("remote_hat"));
+    assert.ok(skus.includes("remote_fallback_hat"));
+    assert.ok(skus.includes("remote_only_hat"));
 
-    const remote = body.items.find((i) => i.sku === "remote_hat");
-    assert.equal(remote.assetVersion, HAT_VERSION);
+    const remote = body.items.find((i) => i.sku === "remote_only_hat");
+    assert.equal(remote.assetVersion, "aaaaaaaaaaaa");
     assert.equal(
       remote.assetUrl,
-      `${ASSET_BASE}/assets/accessories/fixture_hat@${HAT_VERSION}.png`
+      `${ASSET_BASE}/assets/accessories/secret_hat@aaaaaaaaaaaa.png`
     );
   });
 
-  it("hides remote-only powerups from a client without the token", async () => {
+  it("withholds another user's remote-only equipped accessory unless the viewer supports remote_assets", async () => {
+    const viewer = await createUser();
+    const wearer = await createUser();
+    const remoteOnlyHat = await prisma.shopItem.findUnique({
+      where: { sku: "remote_only_hat" },
+    });
+    assert.ok(remoteOnlyHat);
+    await prisma.userShopItem.create({
+      data: { userId: wearer.userId, shopItemId: remoteOnlyHat.id },
+    });
+    await prisma.userEquippedAccessory.create({
+      data: {
+        userId: wearer.userId,
+        shopItemId: remoteOnlyHat.id,
+        slot: "HEAD",
+      },
+    });
+    await prisma.friendship.create({
+      data: {
+        requesterId: viewer.userId,
+        addresseeId: wearer.userId,
+        status: "ACCEPTED",
+      },
+    });
+
+    const legacy = await (await get("/friends", { token: viewer.token })).json();
+    assert.deepEqual(
+      legacy.friends.find((friend) => friend.id === wearer.userId)?.accessories,
+      [],
+      "a frozen client must not be told to render art it cannot download"
+    );
+
+    const modern = await (
+      await get("/friends", {
+        token: viewer.token,
+        headers: { "X-Client-Features": "remote_assets" },
+      })
+    ).json();
+    const modernAccessory = modern.friends.find(
+      (friend) => friend.id === wearer.userId
+    )?.accessories?.[0];
+    assert.equal(modernAccessory?.assetKey, "secret_hat");
+    assert.equal(modernAccessory?.assetVersion, "aaaaaaaaaaaa");
+    assert.equal(
+      modernAccessory?.assetUrl,
+      `${ASSET_BASE}/assets/accessories/secret_hat@aaaaaaaaaaaa.png`
+    );
+  });
+
+  it("keeps the existing remote-backed powerup gate for a client without the token", async () => {
     const user = await createUser();
     const body = await (
       await get("/shop/powerups", { token: user.token })
@@ -397,7 +497,7 @@ describe("remote_assets client-feature gating", () => {
     assert.equal(plain.assetUrl ?? null, null);
   });
 
-  it("serves a CHARACTER remote row only to a characters + remote_assets client", async () => {
+  it("serves a remote-backed CHARACTER row to any characters-capable client when it has a bundled fallback", async () => {
     await prisma.shopItem.create({
       data: {
         sku: "remote_panda",
@@ -419,7 +519,7 @@ describe("remote_assets client-feature gating", () => {
         headers: { "X-Client-Features": "characters" },
       })
     ).json();
-    assert.ok(!withoutRemote.items.map((i) => i.sku).includes("remote_panda"));
+    assert.ok(withoutRemote.items.map((i) => i.sku).includes("remote_panda"));
 
     const withBoth = await (
       await get("/shop/catalog", {
@@ -460,11 +560,13 @@ describe("admin assetVersion management", () => {
         priceCoins: 75,
         assetKey: "fixture_hat",
         assetVersion: HAT_VERSION,
+        remoteOnly: true,
       },
     });
     assert.equal(res.status, 201);
     const body = await res.json();
     assert.equal(body.item.assetVersion, HAT_VERSION);
+    assert.equal(body.item.remoteOnly, true);
     assert.equal(
       body.item.assetUrl,
       `${ASSET_BASE}/assets/accessories/fixture_hat@${HAT_VERSION}.png`
@@ -472,6 +574,45 @@ describe("admin assetVersion management", () => {
 
     const row = await prisma.shopItem.findUnique({ where: { sku: "remote_hat" } });
     assert.equal(row.assetVersion, HAT_VERSION);
+    assert.equal(row.remoteOnly, true);
+  });
+
+  it("defaults remoteOnly to false and validates it on create and PATCH", async () => {
+    const admin = await createUser({ admin: true });
+    const createRes = await request(server.baseUrl, "POST", "/admin/shop/items", {
+      token: admin.token,
+      body: {
+        sku: "remote_default_hat",
+        name: "Remote Default Hat",
+        slot: "HEAD",
+        priceCoins: 75,
+        assetKey: "fixture_hat",
+        assetVersion: HAT_VERSION,
+      },
+    });
+    assert.equal(createRes.status, 201);
+    const created = await createRes.json();
+    assert.equal(created.item.remoteOnly, false);
+
+    const itemId = created.item.id;
+    const patchRes = await request(
+      server.baseUrl,
+      "PATCH",
+      `/admin/shop/items/${itemId}`,
+      { token: admin.token, body: { remoteOnly: true } }
+    );
+    assert.equal(patchRes.status, 200);
+    assert.equal((await patchRes.json()).item.remoteOnly, true);
+
+    for (const remoteOnly of ["true", 1, null]) {
+      const badRes = await request(
+        server.baseUrl,
+        "PATCH",
+        `/admin/shop/items/${itemId}`,
+        { token: admin.token, body: { remoteOnly } }
+      );
+      assert.equal(badRes.status, 400, `expected 400 for ${String(remoteOnly)}`);
+    }
   });
 
   it("POST /admin/shop/items rejects a malformed assetVersion", async () => {
@@ -642,6 +783,10 @@ describe("admin assetVersion management", () => {
       MIRRORED_SHOP_ITEM_FIELDS.includes("assetVersion"),
       "mirrorShopItem must mirror assetVersion"
     );
+    assert.ok(
+      MIRRORED_SHOP_ITEM_FIELDS.includes("remoteOnly"),
+      "mirrorShopItem must mirror remoteOnly"
+    );
     const {
       COMPARED_FIELDS,
     } = require("../../scripts/cosmetics-sync-peer");
@@ -649,12 +794,20 @@ describe("admin assetVersion management", () => {
       COMPARED_FIELDS.includes("assetVersion"),
       "cosmetics:sync-peer must compare assetVersion"
     );
+    assert.ok(
+      COMPARED_FIELDS.includes("remoteOnly"),
+      "cosmetics:sync-peer must compare remoteOnly"
+    );
     const {
       CLONED_FIELDS,
     } = require("../../scripts/cosmetics-clone");
     assert.ok(
       CLONED_FIELDS.includes("assetVersion"),
       "cosmetics:clone must clone assetVersion"
+    );
+    assert.ok(
+      CLONED_FIELDS.includes("remoteOnly"),
+      "cosmetics:clone must clone remoteOnly"
     );
   });
 });

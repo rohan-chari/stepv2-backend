@@ -4,13 +4,14 @@ const { buildJoinTournamentCore } = require("./joinTournamentCore");
 // core in "public" mode (requires isPublic).
 function buildJoinTournament(dependencies = {}) {
   const core = dependencies.joinTournamentCore || buildJoinTournamentCore(dependencies);
-  return async function joinTournament({ userId, tournamentId, clientFeatures, supportsCharacters }) {
+  return async function joinTournament({ userId, tournamentId, clientFeatures, supportsCharacters, supportsRemoteAssets = false }) {
     return core({
       userId,
       tournamentId,
       mode: "public",
       clientFeatures,
       supportsCharacters,
+      supportsRemoteAssets,
     });
   };
 }

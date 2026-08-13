@@ -64,36 +64,46 @@ const {
 // never gated on the cache existing.
 const discardCapCache = require("../../powerups/services/discardCapCache");
 
-// The (releaseChannel × supportsCharacters) combinations `characterPresentation`
-// can produce. Closed set: `resolveReleaseChannel` only ever yields "prod" or
-// "testflight". Precomputing all four keeps raw `equippedAccessories` rows (and
+// The (releaseChannel × supportsCharacters × supportsRemoteAssets) combinations
+// `characterPresentation` can produce. Closed set: `resolveReleaseChannel` only
+// ever yields "prod" or "testflight". Precomputing all eight keeps raw `equippedAccessories` rows (and
 // their Date columns) out of the snapshot while staying byte-identical to what
 // the uncached response would have emitted.
 const PRESENTATION_CHANNELS = ["prod", "testflight"];
 
-function presentationKey(channel, supportsCharacters) {
-  return `${channel}:${supportsCharacters ? 1 : 0}`;
+function presentationKey(channel, supportsCharacters, supportsRemoteAssets) {
+  return `${channel}:${supportsCharacters ? 1 : 0}:${supportsRemoteAssets ? 1 : 0}`;
 }
 
 function buildPresentationVariants(user) {
   const out = {};
   for (const channel of PRESENTATION_CHANNELS) {
     for (const supportsCharacters of [false, true]) {
-      out[presentationKey(channel, supportsCharacters)] = characterPresentation(
-        user,
-        supportsCharacters,
-        channel
-      );
+      for (const supportsRemoteAssets of [false, true]) {
+        out[
+          presentationKey(channel, supportsCharacters, supportsRemoteAssets)
+        ] = characterPresentation(
+          user,
+          supportsCharacters,
+          channel,
+          supportsRemoteAssets
+        );
+      }
     }
   }
   return out;
 }
 
-function readPresentation(entry, channel, supportsCharacters) {
+function readPresentation(
+  entry,
+  channel,
+  supportsCharacters,
+  supportsRemoteAssets = false
+) {
   const variants = entry.presentation || {};
   return (
-    variants[presentationKey(channel, supportsCharacters)] ||
-    variants[presentationKey("prod", supportsCharacters)] || {
+    variants[presentationKey(channel, supportsCharacters, supportsRemoteAssets)] ||
+    variants[presentationKey("prod", supportsCharacters, supportsRemoteAssets)] || {
       animal: null,
       accessories: [],
     }
@@ -782,6 +792,7 @@ function buildGetRaceProgress(deps = {}) {
     myParticipant,
     scoringTimeZone,
     supportsCharacters,
+    supportsRemoteAssets,
     supportsPowerups3,
     supportsPowerups4,
     supportsPowerups5,
@@ -1072,7 +1083,12 @@ function buildGetRaceProgress(deps = {}) {
           profilePhotoUrl: isStealthed ? null : entry.profilePhotoUrl,
           ...(isStealthed
             ? { accessories: [], animal: null }
-            : readPresentation(entry, releaseChannel, supportsCharacters)),
+            : readPresentation(
+                entry,
+                releaseChannel,
+                supportsCharacters,
+                supportsRemoteAssets
+              )),
           totalSteps: isStealthed ? null : entry.totalSteps,
           finishedAt: entry.finishedAt,
           stealthed: isStealthed,
@@ -1194,7 +1210,10 @@ function buildGetRaceProgress(deps = {}) {
     // Batch 2026-08-10b item 2. Trailing + optional, defaults null: every
     // existing caller keeps identical behaviour. The user's STORED timezone,
     // used only for the discard-cap local-day boundary.
-    userTimeZone = null
+    userTimeZone = null,
+    // Trailing/defaulted capability gate: old direct callers retain the safe
+    // no-remote-art presentation.
+    supportsRemoteAssets = false
   ) {
     const race = await raceModel.findById(raceId);
     if (!race) {
@@ -1232,7 +1251,12 @@ function buildGetRaceProgress(deps = {}) {
           userId: p.userId,
           displayName: p.user.displayName,
           profilePhotoUrl: p.user.profilePhotoUrl,
-          ...characterPresentation(p.user, supportsCharacters, releaseChannel),
+          ...characterPresentation(
+            p.user,
+            supportsCharacters,
+            releaseChannel,
+            supportsRemoteAssets
+          ),
           totalSteps: p.totalSteps,
           finishedAt: p.finishedAt,
           // Team races (additive; null on individual races).
@@ -1348,6 +1372,7 @@ function buildGetRaceProgress(deps = {}) {
       myParticipant,
       scoringTimeZone,
       supportsCharacters,
+      supportsRemoteAssets,
       supportsPowerups3,
       supportsPowerups4,
       supportsPowerups5,

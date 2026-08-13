@@ -718,6 +718,32 @@ describe("races", () => {
       assert.equal(body.pending.length, 1);
     });
 
+    it("GET /races/invite-preflight returns only the viewer's outstanding invite cards", async () => {
+      const alice = await createUser("AliceWalker");
+      const bob = await createUser("BobbyRunner");
+      await makeFriends(alice, bob);
+
+      const created = await createRace(alice.token, { name: "Preflight race" });
+      const raceId = (await created.json()).race.id;
+      await request(server.baseUrl, "POST", `/races/${raceId}/invite`, {
+        body: { inviteeIds: [bob.userId] },
+        token: alice.token,
+      });
+
+      const res = await request(server.baseUrl, "GET", "/races/invite-preflight", {
+        token: bob.token,
+      });
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.deepEqual(body.active, []);
+      assert.equal(body.pending.length, 1);
+      assert.equal(body.pending[0].id, raceId);
+      assert.equal(body.pending[0].name, "Preflight race");
+      assert.equal(body.pending[0].myStatus, "INVITED");
+      assert.equal(body.pending[0].buyInAmount, 0);
+      assert.equal("completed" in body, false);
+    });
+
     it("GET /races/:raceId returns race with participant list", async () => {
       const alice = await createUser("AliceWalker");
       const bob = await createUser("BobbyRunner");

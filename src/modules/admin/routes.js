@@ -3,6 +3,7 @@ const { buildRequireAuth } = require("../../middleware/requireAuth");
 const { buildRequireAdmin } = require("./requireAdmin");
 const { prisma } = require("../../db");
 const { serializeShopItem, mirrorShopItemToPeer } = require("../cosmetics");
+const { sanitizeCompatibility } = require("../cosmetics/accessoryCompatibility");
 const {
   isValidAssetVersion,
   powerupAssetUrl,
@@ -312,6 +313,8 @@ function createAdminRouter(dependencies = {}) {
           ...serializeShopItem(item),
           active: item.active,
           testOnly: item.testOnly,
+          remoteOnly: item.remoteOnly,
+          compatibility: item.compatibility ?? null,
           assetVersion: item.assetVersion ?? null,
         })),
       });
@@ -390,6 +393,8 @@ function createAdminRouter(dependencies = {}) {
             body.renderMetadata === undefined || body.renderMetadata === null
               ? null
               : sanitizeRenderMetadata(body.renderMetadata),
+          compatibility:
+            body.compatibility === undefined ? null : sanitizeCompatibility(body.compatibility),
           active: optionalBoolean("active", true),
           // Default testOnly:true — a brand-new item's PNG isn't bundled in
           // frozen binaries yet; flip to false only after the carrying App
@@ -401,6 +406,7 @@ function createAdminRouter(dependencies = {}) {
           // CDN-served art. Omit (or send null) and the item is bundled-art,
           // exactly as every item created before this feature.
           assetVersion: readAssetVersion(body) ?? null,
+          remoteOnly: optionalBoolean("remoteOnly", false),
         },
       });
 
@@ -415,6 +421,8 @@ function createAdminRouter(dependencies = {}) {
           active: created.active,
           testOnly: created.testOnly,
           earnOnly: created.earnOnly,
+          remoteOnly: created.remoteOnly,
+          compatibility: created.compatibility ?? null,
           // Admin surfaces always state assetVersion explicitly (the public
           // serializer omits it when the art is bundled) so the editor can tell
           // "bundled" from "field missing".
@@ -489,6 +497,15 @@ function createAdminRouter(dependencies = {}) {
         // item at a newly deployed PNG.
         data.assetVersion = readAssetVersion(body);
       }
+      if (body.remoteOnly !== undefined) {
+        if (typeof body.remoteOnly !== "boolean") {
+          return res.status(400).json({ error: "remoteOnly must be a boolean" });
+        }
+        data.remoteOnly = body.remoteOnly;
+      }
+      if (body.compatibility !== undefined) {
+        data.compatibility = sanitizeCompatibility(body.compatibility);
+      }
       if (Object.keys(data).length === 0) {
         return res.status(400).json({ error: "No updatable fields supplied" });
       }
@@ -506,6 +523,8 @@ function createAdminRouter(dependencies = {}) {
           ...serializeShopItem(updated),
           active: updated.active,
           testOnly: updated.testOnly,
+          remoteOnly: updated.remoteOnly,
+          compatibility: updated.compatibility ?? null,
           assetVersion: updated.assetVersion ?? null,
         },
         mirror,

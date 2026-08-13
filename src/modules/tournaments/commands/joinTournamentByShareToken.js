@@ -4,13 +4,14 @@ const { buildJoinTournamentCore } = require("./joinTournamentCore");
 // IS the invite, so it bypasses isPublic (mode "share").
 function buildJoinTournamentByShareToken(dependencies = {}) {
   const core = dependencies.joinTournamentCore || buildJoinTournamentCore(dependencies);
-  return async function joinTournamentByShareToken({ userId, token, clientFeatures, supportsCharacters }) {
+  return async function joinTournamentByShareToken({ userId, token, clientFeatures, supportsCharacters, supportsRemoteAssets = false }) {
     return core({
       userId,
       shareToken: token,
       mode: "share",
       clientFeatures,
       supportsCharacters,
+      supportsRemoteAssets,
     });
   };
 }

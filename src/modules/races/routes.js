@@ -439,6 +439,8 @@ function createRacesRouter(dependencies = {}) {
           ? getTournamentsForUser(req.user.id, {
               supportsCharacters,
               releaseChannel: req.releaseChannel,
+              supportsRemoteAssets:
+                req.clientFeatures?.has("remote_assets") ?? false,
             })
           : Promise.resolve(null),
       ]);
@@ -762,7 +764,8 @@ function createRacesRouter(dependencies = {}) {
         req.user.id,
         req.params.raceId,
         req.clientFeatures?.has("characters") ?? false,
-        req.releaseChannel
+        req.releaseChannel,
+        req.clientFeatures?.has("remote_assets") ?? false
       );
       res.json(result);
 
@@ -953,7 +956,10 @@ function createRacesRouter(dependencies = {}) {
         // Prefer the user's STORED zone (sticky-written by requireAuth) over
         // the per-request header, exactly as the discard route does, so the cap
         // can't be widened by spoofing X-Timezone.
-        req.user.timezone || req.timeZone || null
+        req.user.timezone || req.timeZone || null,
+        // Remote-only equipped art has no bundled fallback, so only a viewer
+        // that can resolve immutable asset URLs may receive it.
+        req.clientFeatures?.has("remote_assets") ?? false
       );
       res.json({ progress });
     } catch (error) {

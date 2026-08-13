@@ -41,21 +41,31 @@ const USER_SELECT = {
       // assetKey is what the client uses to resolve the cosmetic PNG; including
       // it lets capybara renders show real equipped cosmetics. Additive only —
       // existing fields are unchanged, so older clients are unaffected.
-      shopItem: { select: { id: true, sku: true, slot: true, assetKey: true, renderMetadata: true, bobble: true, testOnly: true } },
+      shopItem: { select: { id: true, sku: true, slot: true, assetKey: true, renderMetadata: true, bobble: true, testOnly: true, remoteOnly: true, assetVersion: true } },
     },
   },
 };
 
 const FRIEND_FINISHED_WINDOW_MS = 2 * 60 * 60 * 1000; // 2 hours
 
-function serializeUser(user, supportsCharacters = false, releaseChannel = "prod") {
+function serializeUser(
+  user,
+  supportsCharacters = false,
+  releaseChannel = "prod",
+  supportsRemoteAssets = false
+) {
   if (!user) return null;
   return {
     userId: user.id,
     displayName: user.displayName || "Anonymous",
     profilePhotoUrl: user.profilePhotoUrl || null,
     // {animal, accessories} — naked capy for viewers without `characters`.
-    ...characterPresentation(user, supportsCharacters, releaseChannel),
+    ...characterPresentation(
+      user,
+      supportsCharacters,
+      releaseChannel,
+      supportsRemoteAssets
+    ),
   };
 }
 
@@ -74,7 +84,14 @@ async function getAcceptedFriendIds(prisma, userId) {
   return [...ids];
 }
 
-async function checkPendingInvite(prisma, userId, now, supportsCharacters = false, releaseChannel = "prod") {
+async function checkPendingInvite(
+  prisma,
+  userId,
+  now,
+  supportsCharacters = false,
+  releaseChannel = "prod",
+  supportsRemoteAssets = false
+) {
   const invites = await prisma.raceParticipant.findMany({
     where: {
       userId,
@@ -112,7 +129,12 @@ async function checkPendingInvite(prisma, userId, now, supportsCharacters = fals
       name: race.name,
       durationHours: race.maxDurationDays ? race.maxDurationDays * 24 : null,
       participantCount: race.participants.length,
-      inviter: serializeUser(race.creator, supportsCharacters, releaseChannel),
+      inviter: serializeUser(
+        race.creator,
+        supportsCharacters,
+        releaseChannel,
+        supportsRemoteAssets
+      ),
       expiresAt: primary.inviteExpiresAt,
     },
   };
@@ -123,7 +145,8 @@ async function checkActiveRace(
   userId,
   supportsCharacters = false,
   supportsTeamRaces = false,
-  releaseChannel = "prod"
+  releaseChannel = "prod",
+  supportsRemoteAssets = false
 ) {
   const myActive = await prisma.raceParticipant.findFirst({
     where: {
@@ -185,7 +208,12 @@ async function checkActiveRace(
     return {
       rank: sorted.indexOf(p) + 1,
       totalSteps: p.totalSteps,
-      ...serializeUser(p.user, supportsCharacters, releaseChannel),
+      ...serializeUser(
+        p.user,
+        supportsCharacters,
+        releaseChannel,
+        supportsRemoteAssets
+      ),
     };
   }
 
@@ -417,6 +445,7 @@ async function checkActiveRaces(prisma, userId, options = {}) {
     raceActiveEffectModel = RaceActiveEffect,
     supportsCharacters = false,
     releaseChannel = "prod",
+    supportsRemoteAssets = false,
     // TR-809 parity (batch 2026-07-26, B-12d): the ACTIVE_RACES state never
     // emitted `teams`/`isTeamRace`, unlike the legacy single-card path, so on
     // the new home state a team race rendered as an individual ticket with no
@@ -632,7 +661,8 @@ async function checkActiveRaces(prisma, userId, options = {}) {
               const { animal, accessories } = characterPresentation(
                 p.user,
                 supportsCharacters,
-                releaseChannel
+                releaseChannel,
+                supportsRemoteAssets
               );
               return { equippedAccessories: accessories, animal };
             })()),
@@ -687,7 +717,14 @@ async function checkActiveRaces(prisma, userId, options = {}) {
   return { state: "ACTIVE_RACES", data: { races } };
 }
 
-async function checkFriendRacing(prisma, userId, friendIds, supportsCharacters = false, releaseChannel = "prod") {
+async function checkFriendRacing(
+  prisma,
+  userId,
+  friendIds,
+  supportsCharacters = false,
+  releaseChannel = "prod",
+  supportsRemoteAssets = false
+) {
   if (friendIds.length === 0) return null;
 
   const friendParticipations = await prisma.raceParticipant.findMany({
@@ -737,17 +774,35 @@ async function checkFriendRacing(prisma, userId, friendIds, supportsCharacters =
       name: race.name,
       endsAt: race.endsAt,
       isPublicJoinable: true,
-      friend: serializeUser(choice.user, supportsCharacters, releaseChannel),
+      friend: serializeUser(
+        choice.user,
+        supportsCharacters,
+        releaseChannel,
+        supportsRemoteAssets
+      ),
       participants: race.participants.map((p, idx) => ({
         rank: idx + 1,
         totalSteps: p.totalSteps,
-        ...serializeUser(p.user, supportsCharacters, releaseChannel),
+        ...serializeUser(
+          p.user,
+          supportsCharacters,
+          releaseChannel,
+          supportsRemoteAssets
+        ),
       })),
     },
   };
 }
 
-async function checkFriendFinished(prisma, userId, friendIds, now, supportsCharacters = false, releaseChannel = "prod") {
+async function checkFriendFinished(
+  prisma,
+  userId,
+  friendIds,
+  now,
+  supportsCharacters = false,
+  releaseChannel = "prod",
+  supportsRemoteAssets = false
+) {
   if (friendIds.length === 0) return null;
 
   const cutoff = new Date(now.getTime() - FRIEND_FINISHED_WINDOW_MS);
@@ -773,7 +828,12 @@ async function checkFriendFinished(prisma, userId, friendIds, now, supportsChara
   return {
     state: "FRIEND_FINISHED",
     data: {
-      friend: serializeUser(finisher.user, supportsCharacters, releaseChannel),
+      friend: serializeUser(
+        finisher.user,
+        supportsCharacters,
+        releaseChannel,
+        supportsRemoteAssets
+      ),
       raceName: finisher.race.name,
       placement: finisher.placement,
       finishedAt: finisher.race.completedAt,
@@ -845,6 +905,7 @@ function buildGetHomeRaceCard(dependencies = {}) {
     homePersistedTotals = false,
     timeZone = "UTC",
     supportsCharacters = false,
+    supportsRemoteAssets = false,
     // TR-702/809: whether the caller declared the `team_races` token. Old
     // clients never see a team race on the Home card.
     supportsTeamRaces = false,
@@ -854,7 +915,14 @@ function buildGetHomeRaceCard(dependencies = {}) {
   }) {
     const now = nowFn();
 
-    const pending = await checkPendingInvite(prisma, userId, now, supportsCharacters, releaseChannel);
+    const pending = await checkPendingInvite(
+      prisma,
+      userId,
+      now,
+      supportsCharacters,
+      releaseChannel,
+      supportsRemoteAssets
+    );
     if (pending) return pending;
 
     // Opt-in path (new app builds): when the client requests homeActiveRaces and
@@ -872,6 +940,7 @@ function buildGetHomeRaceCard(dependencies = {}) {
         raceActiveEffectModel,
         supportsCharacters,
         releaseChannel,
+        supportsRemoteAssets,
         supportsTeamRaces,
         usePersistedTotals: homePersistedTotals,
       });
@@ -882,17 +951,33 @@ function buildGetHomeRaceCard(dependencies = {}) {
         userId,
         supportsCharacters,
         supportsTeamRaces,
-        releaseChannel
+        releaseChannel,
+        supportsRemoteAssets
       );
       if (active) return active;
     }
 
     const friendIds = await getAcceptedFriendIds(prisma, userId);
 
-    const friendRacing = await checkFriendRacing(prisma, userId, friendIds, supportsCharacters, releaseChannel);
+    const friendRacing = await checkFriendRacing(
+      prisma,
+      userId,
+      friendIds,
+      supportsCharacters,
+      releaseChannel,
+      supportsRemoteAssets
+    );
     if (friendRacing) return friendRacing;
 
-    const friendFinished = await checkFriendFinished(prisma, userId, friendIds, now, supportsCharacters, releaseChannel);
+    const friendFinished = await checkFriendFinished(
+      prisma,
+      userId,
+      friendIds,
+      now,
+      supportsCharacters,
+      releaseChannel,
+      supportsRemoteAssets
+    );
     if (friendFinished) return friendFinished;
 
     const publicRace = await checkPublicRace(prisma, userId);

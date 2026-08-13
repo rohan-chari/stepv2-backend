@@ -37,7 +37,10 @@ const redisCache = require("../../../shared/cache/redisCache");
 const derivedCache = require("../../../shared/cache/derivedCache");
 const cacheKeys = require("../../../shared/cache/cacheKeys");
 
-const SCHEMA_VERSION = 1;
+// v2 adds a remote-assets capability variant to each presentation. Rejecting
+// v1 snapshots is a compatibility requirement: a v1 tokenless variant could
+// contain a `remoteOnly` accessory from before server-side filtering existed.
+const SCHEMA_VERSION = 2;
 const SOFT_TTL_MS = 15_000;
 const PHYSICAL_TTL_SECONDS = 60;
 const LOCK_TTL_MS = 10_000;
@@ -81,8 +84,8 @@ const SNAPSHOT_RACE_FIELDS = [
 ];
 
 // Per-participant HONEST state — before any per-viewer illusion is applied.
-// `presentation` holds `characterPresentation`'s output for all four
-// (releaseChannel × supportsCharacters) combinations, because that function is
+// `presentation` holds `characterPresentation`'s output for all eight
+// (releaseChannel × supportsCharacters × supportsRemoteAssets) combinations, because that function is
 // keyed by CLIENT CAPABILITY, not by viewer identity: precomputing the closed
 // set keeps the raw `equippedAccessories` rows (and their Date columns) out of
 // the cache while staying byte-identical to what the response would have held.

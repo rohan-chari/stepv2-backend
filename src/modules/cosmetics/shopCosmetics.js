@@ -77,11 +77,19 @@ function buildEquipmentMap(equippedAccessories = []) {
 // getShopCatalog, which is channel-gated separately so testers still see their
 // test items on their own capybara. Requires `testOnly` in the shopItem select
 // on every feeding query (else it reads undefined and never filters).
-function buildAccessoriesList(user, channel = "prod") {
+function buildAccessoriesList(
+  user,
+  channel = "prod",
+  supportsRemoteAssets = false
+) {
   const includeTestOnly = channel === "testflight";
   const equipped = (user?.equippedAccessories || []).filter(
     (accessory) =>
       (includeTestOnly || !accessory.shopItem?.testOnly) &&
+      // `remoteOnly` has no bundled fallback. Never tell a frozen client to
+      // render it just because another user equipped it; absent/missing stays
+      // false so older feeding queries retain their safe bundled behavior.
+      (supportsRemoteAssets || !accessory.shopItem?.remoteOnly) &&
       accessory.shopItem?.slot !== CHARACTER_SLOT
   );
   return Object.values(buildEquipmentMap(equipped));
@@ -100,12 +108,13 @@ function buildAccessoriesList(user, channel = "prod") {
 // "prod" stays the safe default: a shipped binary never receives an assetKey it
 // does not bundle. Callers thread req.releaseChannel; omitting it is unchanged
 // prod behaviour.
-function equippedAnimal(user, channel = "prod") {
+function equippedAnimal(user, channel = "prod", supportsRemoteAssets = false) {
   const includeTestOnly = channel === "testflight";
   const character = (user?.equippedAccessories || []).find(
     (accessory) =>
       accessory.shopItem?.slot === CHARACTER_SLOT &&
-      (includeTestOnly || !accessory.shopItem?.testOnly)
+      (includeTestOnly || !accessory.shopItem?.testOnly) &&
+      (supportsRemoteAssets || !accessory.shopItem?.remoteOnly)
   );
   return character ? character.shopItem.assetKey : null;
 }
@@ -117,12 +126,20 @@ function equippedAnimal(user, channel = "prod") {
 // binary either ignores it or lacks the asset) and no accessories (gear is
 // tuned per-animal; drawn on the wrong body it misrepresents the user).
 // Users with no character equipped are presented identically to everyone.
-function characterPresentation(user, supportsCharacters = false, channel = "prod") {
-  const animal = equippedAnimal(user, channel);
+function characterPresentation(
+  user,
+  supportsCharacters = false,
+  channel = "prod",
+  supportsRemoteAssets = false
+) {
+  const animal = equippedAnimal(user, channel, supportsRemoteAssets);
   if (animal && !supportsCharacters) {
     return { animal: null, accessories: [] };
   }
-  return { animal, accessories: buildAccessoriesList(user, channel) };
+  return {
+    animal,
+    accessories: buildAccessoriesList(user, channel, supportsRemoteAssets),
+  };
 }
 
 module.exports = {

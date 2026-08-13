@@ -12,12 +12,14 @@ const MIRRORED_SHOP_ITEM_FIELDS = [
   "priceCoins",
   "assetKey",
   "renderMetadata",
+  "compatibility",
   "active",
   "testOnly",
   "earnOnly",
   "bobble",
   "sortOrder",
   "assetVersion",
+  "remoteOnly",
 ];
 
 // Mirror a cosmetic shop item to the peer database (matched by sku, since the
@@ -35,12 +37,14 @@ async function mirrorShopItemToPeer(item) {
 
   const fields = {};
   for (const key of MIRRORED_SHOP_ITEM_FIELDS) {
-    if (key === "description" || key === "renderMetadata") {
+    if (key === "description" || key === "renderMetadata" || key === "compatibility") {
       fields[key] = item[key] ?? null;
     } else if (key === "earnOnly" || key === "bobble") {
       fields[key] = item[key] ?? false;
     } else if (key === "assetVersion") {
       fields[key] = item[key] ?? null;
+    } else if (key === "remoteOnly") {
+      fields[key] = item[key] ?? false;
     } else {
       fields[key] = item[key];
     }

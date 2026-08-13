@@ -14,7 +14,11 @@ function isTeamRaceEligible(friend) {
     : false;
 }
 
-async function getFriendsList(userId, supportsCharacters = false) {
+async function getFriendsList(
+  userId,
+  supportsCharacters = false,
+  supportsRemoteAssets = false
+) {
   const friendships = await Friendship.findFriends(userId);
 
   return friendships
@@ -24,7 +28,7 @@ async function getFriendsList(userId, supportsCharacters = false) {
         id: friend.id,
         displayName: friend.displayName,
         profilePhotoUrl: friend.profilePhotoUrl,
-        ...characterPresentation(friend, supportsCharacters),
+        ...characterPresentation(friend, supportsCharacters, "prod", supportsRemoteAssets),
         friendshipId: f.id,
         // TR-708: always present, context-free. The friend picker grays out
         // ineligible friends instead of failing at invite time.
@@ -72,7 +76,12 @@ async function getIncomingFriendRequestCount(userId) {
   return Friendship.countPendingIncoming(userId);
 }
 
-async function getFriendsWithSteps(userId, date, supportsCharacters = false) {
+async function getFriendsWithSteps(
+  userId,
+  date,
+  supportsCharacters = false,
+  supportsRemoteAssets = false
+) {
   const friendships = await Friendship.findAcceptedFriendsWithDisplay(userId);
 
   const friends = friendships.map((f) => {
@@ -81,7 +90,7 @@ async function getFriendsWithSteps(userId, date, supportsCharacters = false) {
       id: friend.id,
       displayName: friend.displayName,
       profilePhotoUrl: friend.profilePhotoUrl,
-      ...characterPresentation(friend, supportsCharacters),
+      ...characterPresentation(friend, supportsCharacters, "prod", supportsRemoteAssets),
       // TR-708: same flag on the with-steps list (invite picker source).
       teamRaceEligible: isTeamRaceEligible(friend),
     };

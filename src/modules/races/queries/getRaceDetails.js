@@ -9,7 +9,13 @@ const {
 
 // `releaseChannel` (batch 2026-07-26, item 8) is trailing + optional and
 // defaults to "prod", so every existing caller keeps byte-identical behaviour.
-async function getRaceDetails(userId, raceId, supportsCharacters = false, releaseChannel = "prod") {
+async function getRaceDetails(
+  userId,
+  raceId,
+  supportsCharacters = false,
+  releaseChannel = "prod",
+  supportsRemoteAssets = false
+) {
   const race = await Race.findById(raceId);
   if (!race) {
     const error = new Error("Race not found");
@@ -100,7 +106,12 @@ async function getRaceDetails(userId, raceId, supportsCharacters = false, releas
       displayName: p.user.displayName,
       profilePhotoUrl: p.user.profilePhotoUrl,
       // {animal, accessories} — naked capy for viewers without `characters`.
-      ...characterPresentation(p.user, supportsCharacters, releaseChannel),
+      ...characterPresentation(
+        p.user,
+        supportsCharacters,
+        releaseChannel,
+        supportsRemoteAssets
+      ),
       status: p.status,
       totalSteps: p.totalSteps,
       finishedAt: p.finishedAt,

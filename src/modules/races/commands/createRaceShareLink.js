@@ -39,6 +39,9 @@ function buildCreateRaceShareLink(dependencies = {}) {
         "TOURNAMENT_RACE_LOCKED"
       );
     }
+    if (race.seededBucketId) {
+      throw new RaceShareLinkError("This seeded race is private", 403, "RACE_PRIVATE");
+    }
 
     assertAcceptedParticipant(
       race,
