@@ -26,8 +26,8 @@ const {
   resolveRaceState: defaultResolveRaceState,
 } = require("../../races/services/raceStateResolution");
 const {
-  syncRacePowerupState: defaultSyncRacePowerupState,
-} = require("../../races/services/racePowerupStateSync");
+  repairRacePowerupInventory: defaultRepairRacePowerupInventory,
+} = require("../../races/services/racePowerupInventoryRepair");
 const {
   isUpgradeable,
   isValidLevel,
@@ -884,14 +884,11 @@ function buildUsePowerup(dependencies = {}) {
     : hasInjectedDeps
       ? async () => {}
       : defaultResolveRaceState;
-  const syncRacePowerupState = Object.prototype.hasOwnProperty.call(
-    dependencies,
-    "syncRacePowerupState"
-  )
-    ? dependencies.syncRacePowerupState
-    : hasInjectedDeps
+  const repairRacePowerupInventory = dependencies.repairRacePowerupInventory ||
+    dependencies.syncRacePowerupState ||
+    (hasInjectedDeps
       ? async () => {}
-      : defaultSyncRacePowerupState;
+      : defaultRepairRacePowerupInventory);
   const now = dependencies.now || (() => new Date());
   const random = dependencies.random || Math.random;
   const awardCoins = dependencies.awardCoins || defaultAwardCoins;
@@ -915,6 +912,8 @@ function buildUsePowerup(dependencies = {}) {
     // §7.5 — OPTIONAL, REQUEST-SCOPED capability tokens. Absent means "assume the
     // oldest contract", which is what a frozen binary's own copy describes.
     clientFeatures = null,
+    // Internal observability seam. Never serialized or accepted from HTTP.
+    onPerformanceContext = null,
   }) {
     const powerup = await powerupModel.findById(powerupId);
     if (!powerup) {
@@ -926,6 +925,7 @@ function buildUsePowerup(dependencies = {}) {
     if (powerup.status !== "HELD") {
       throw new PowerupUseError("This powerup has already been used or discarded", 400);
     }
+    onPerformanceContext?.({ powerupType: powerup.type || null });
 
     // Trail Mine plants at the owner's CURRENT step total, but stored totals go
     // stale between syncs: off a stale total the mine lands BEHIND its owner and
@@ -941,12 +941,18 @@ function buildUsePowerup(dependencies = {}) {
     // moments later, through the one owner that is allowed to.
     // (No-op for other powerup types.)
     let computedTotals = null;
+    let race = null;
     if (powerup.type === "TRAIL_MINE") {
       const computed = await computeRaceState({ raceId, timeZone });
       computedTotals = computed.totalsByParticipantId;
+      race = computed.result?.race || null;
     }
 
-    const race = await raceModel.findById(raceId);
+    if (!race) {
+      race = typeof raceModel.findPowerupUseContext === "function"
+        ? await raceModel.findPowerupUseContext(raceId)
+        : await raceModel.findById(raceId);
+    }
     if (!race || race.status !== "ACTIVE") {
       throw new PowerupUseError("Race is not active", 400);
     }
@@ -987,6 +993,7 @@ function buildUsePowerup(dependencies = {}) {
     if (myParticipant.forfeitedAt) {
       throw new PowerupUseError("You have forfeited this race", 400);
     }
+    const casterParticipant = myParticipant;
 
     // Batch 2026-08-09 item 11 — is the CASTER stealthed?
     //
@@ -1244,7 +1251,7 @@ function buildUsePowerup(dependencies = {}) {
       await invalidateRaceProgress(raceId);
       await enqueueRaceResolution({ raceId, userId, timeZone });
       if (inlineResolveInjected) await resolveRaceState({ raceId, timeZone });
-      await syncRacePowerupState({ raceId, userId });
+      await repairRacePowerupInventory({ raceId, userId, refresh: true });
       const applied = targetResults.filter((r) => r.outcome === "APPLIED").length;
       return {
         blocked: applied === 0,
@@ -1268,7 +1275,7 @@ function buildUsePowerup(dependencies = {}) {
       await invalidateRaceProgress(raceId);
       await enqueueRaceResolution({ raceId, userId, timeZone });
       if (inlineResolveInjected) await resolveRaceState({ raceId, timeZone });
-      await syncRacePowerupState({ raceId, userId });
+      await repairRacePowerupInventory({ raceId, userId, refresh: true });
     };
 
     // Merge helper for per-beneficiary buff windows (§3.1/§3.8): if the
@@ -2293,7 +2300,7 @@ function buildUsePowerup(dependencies = {}) {
           await invalidateRaceProgress(raceId);
           await enqueueRaceResolution({ raceId, userId, timeZone });
           if (inlineResolveInjected) await resolveRaceState({ raceId, timeZone });
-          await syncRacePowerupState({ raceId, userId });
+          await repairRacePowerupInventory({ raceId, userId, refresh: true });
           return {
             blocked: true,
             blockedBy: "DECOY",
@@ -3684,7 +3691,7 @@ function buildUsePowerup(dependencies = {}) {
 
     await enqueueRaceResolution({ raceId, userId, timeZone });
     if (inlineResolveInjected) await resolveRaceState({ raceId, timeZone });
-    await syncRacePowerupState({ raceId, userId });
+    await repairRacePowerupInventory({ raceId, userId, refresh: true });
 
     // §6b — a self-buff is the common cause of a high-multiplier spike. Recompute
     // the CASTER's current (buff-only) multiplier and run the shared evaluator so
@@ -3693,7 +3700,16 @@ function buildUsePowerup(dependencies = {}) {
     // Best-effort: a push-eval failure must never fail the powerup use.
     try {
       if (race.powerupsEnabled) {
-        const freshCaster = await participantModel.findByRaceAndUser(raceId, userId);
+        // The cast and its resolution enqueue can overlap race expiry/forfeit
+        // or another evaluator. Re-read the minimal current caster row at the
+        // call site: cached finish/forfeit/dedup state would incorrectly emit
+        // or re-arm from the pre-cast snapshot.
+        const freshCaster =
+          typeof participantModel.findHighMultiplierContext === "function"
+            ? await participantModel.findHighMultiplierContext(raceId, userId)
+            : typeof participantModel.findByRaceAndUser === "function"
+              ? await participantModel.findByRaceAndUser(raceId, userId)
+              : casterParticipant;
         if (freshCaster && !freshCaster.finishedAt && !freshCaster.forfeitedAt) {
           const casterEffects = await effectModel.findActiveForParticipant(freshCaster.id);
           const casterMult = signedMultiplierForEffects(casterEffects, now().getTime());

@@ -561,4 +561,35 @@ describe("payout-drop push — time gate + durable once-per-race cap", () => {
     assert.equal(rows[0].title, "Out of the payout");
     assert.ok(rows[0].body, "body persisted for the audit trail");
   });
+
+  it("12: the real handler cooldown keeps a second visible move silent and audits only the alert", async () => {
+    const userId = await makeUser();
+    const race = await makeRace({ endsAt: new Date(Date.now() + 17 * HOUR_MS) });
+    const { bus, alerts, silent } = worker();
+
+    await bus.emit(
+      "PLACEMENT_CHANGED",
+      dropChange(race.id, userId, {
+        endsAt: race.endsAt,
+        previousPlacement: 2,
+        placement: 1,
+        paidPlaces: 3,
+      })
+    );
+    await bus.emit(
+      "PLACEMENT_CHANGED",
+      dropChange(race.id, userId, {
+        endsAt: race.endsAt,
+        previousPlacement: 1,
+        placement: 2,
+        paidPlaces: 3,
+      })
+    );
+
+    assert.equal(alerts.length, 1, "first meaningful crossing is visible");
+    assert.equal(silent.length, 1, "second meaningful crossing is cooldown-silent");
+    const rows = await allNotifications(userId);
+    assert.equal(rows.length, 1, "only the visible alert is audited");
+    assert.equal(rows[0].title, "You're in the lead!");
+  });
 });

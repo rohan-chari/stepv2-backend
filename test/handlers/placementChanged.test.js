@@ -23,7 +23,9 @@ function setup({
   tokens = [{ token: "tok-ios", platform: "ios" }],
   apnsResult,
   fcmResult,
+  inertSuppression = false,
 } = {}) {
+  const logs = [];
   const apnsCalls = { alert: [], silent: [] };
   const fcmCalls = { alert: [], silent: [] };
   const deleted = [];
@@ -35,6 +37,7 @@ function setup({
   const created = [];
   const deliveryKeys = new Set();
   const eventBus = createMockEventBus();
+  let tokenReads = 0;
   registerNotificationHandlers({
     eventBus,
     Notification: {
@@ -53,7 +56,7 @@ function setup({
     },
     User: { async findById() { return null; } },
     DeviceToken: {
-      async findByUserId() { return tokens; },
+      async findByUserId() { tokenReads += 1; return tokens; },
       async deleteToken(arg) { deleted.push(arg); },
     },
     apnsService: {
@@ -64,9 +67,24 @@ function setup({
       async sendNotification(a) { fcmCalls.alert.push(a); return fcmResult || { success: true }; },
       async sendSilentNotification(a) { fcmCalls.silent.push(a); return fcmResult || { success: true }; },
     },
-    logger: { log() {}, warn() {}, error() {} },
+    logger: {
+      log(message, fields) { logs.push({ message, fields }); },
+      warn() {},
+      error() {},
+    },
+    getPerformanceFlags: () => ({
+      placementInertPushSuppressionEnabled: inertSuppression,
+    }),
   });
-  return { eventBus, apnsCalls, fcmCalls, deleted, created };
+  return {
+    eventBus,
+    apnsCalls,
+    fcmCalls,
+    deleted,
+    created,
+    logs,
+    tokenReads: () => tokenReads,
+  };
 }
 
 const CHANGE = (over) => ({
@@ -138,6 +156,69 @@ test("non-meaningful improvement (3rd -> 2nd) sends a SILENT push only", async (
   assert.equal(apnsCalls.alert.length, 0);
   assert.equal(apnsCalls.silent.length, 1);
   assert.equal(apnsCalls.silent[0].payload.type, "PLACEMENT_CHANGED");
+});
+
+test("inert suppression returns before token lookup and the flag-off path stays legacy", async () => {
+  const enabled = setup({ inertSuppression: true });
+  await enabled.eventBus.emit(
+    "PLACEMENT_CHANGED",
+    CHANGE({ previousPlacement: 3, placement: 2 })
+  );
+  assert.equal(enabled.tokenReads(), 0);
+  assert.equal(enabled.apnsCalls.silent.length, 0);
+
+  const legacy = setup({ inertSuppression: false });
+  await legacy.eventBus.emit(
+    "PLACEMENT_CHANGED",
+    CHANGE({ previousPlacement: 3, placement: 2 })
+  );
+  assert.equal(legacy.tokenReads(), 1);
+  assert.equal(legacy.apnsCalls.silent.length, 1);
+});
+
+test("potentially visible placement still checks tokens before any alert work", async () => {
+  const enabled = setup({ inertSuppression: true, tokens: [] });
+  await enabled.eventBus.emit(
+    "PLACEMENT_CHANGED",
+    CHANGE({ previousPlacement: 2, placement: 1 })
+  );
+  assert.equal(enabled.tokenReads(), 1);
+  assert.equal(enabled.created.length, 0);
+  assert.equal(enabled.apnsCalls.alert.length, 0);
+});
+
+test("outside-window payout cutoff is classified inert before token lookup", async () => {
+  const enabled = setup({ inertSuppression: true });
+  await enabled.eventBus.emit(
+    "PLACEMENT_CHANGED",
+    CHANGE({
+      previousPlacement: 3,
+      placement: 4,
+      paidPlaces: 3,
+      endsAt: new Date(Date.now() + 17 * 60 * 60 * 1000),
+    })
+  );
+  assert.equal(enabled.tokenReads(), 0);
+  assert.equal(enabled.apnsCalls.alert.length, 0);
+  assert.equal(enabled.apnsCalls.silent.length, 0);
+  const perf = enabled.logs.find(
+    (entry) => entry.message === "[PERF] placement notification"
+  );
+  assert.equal(perf.fields.outcome, "skipped-inert");
+  assert.equal(typeof perf.fields.durationMs, "number");
+});
+
+test("visible placement logs handler completion duration and push outcomes", async () => {
+  const visible = setup();
+  await visible.eventBus.emit("PLACEMENT_CHANGED", CHANGE());
+  const perf = visible.logs.find(
+    (entry) => entry.message === "[PERF] placement notification"
+  );
+  assert.equal(perf.fields.outcome, "alert-sent");
+  assert.equal(perf.fields.tokenReads, 1);
+  assert.equal(perf.fields.pushAttempts, 1);
+  assert.equal(perf.fields.pushSuccesses, 1);
+  assert.equal(typeof perf.fields.durationMs, "number");
 });
 
 test("alert cooldown: a second meaningful move within the window is silent", async () => {

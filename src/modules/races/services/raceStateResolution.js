@@ -643,7 +643,9 @@ function buildResolveRaceState(dependencies = {}) {
     let races = [];
 
     if (raceId) {
-      const race = await raceModel.findById(raceId);
+      const race = typeof raceModel.findForResolution === "function"
+        ? await raceModel.findForResolution(raceId)
+        : await raceModel.findById(raceId);
       if (race) races = [race];
     } else if (userId) {
       races = await raceModel.findActiveForUser(userId);

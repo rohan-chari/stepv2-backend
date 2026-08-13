@@ -105,6 +105,10 @@ const {
   getRaceProgress: defaultGetRaceProgress,
 } = require("./queries/getRaceProgress");
 const {
+  getSneakySwapTargets: defaultGetSneakySwapTargets,
+  buildGetSneakySwapTargets,
+} = require("./queries/getSneakySwapTargets");
+const {
   getRaceInventory: defaultGetRaceInventory,
 } = require("../powerups");
 const {
@@ -156,10 +160,39 @@ function isStealable(powerup) {
   return powerup.type !== "SNEAKY_SWAP" && powerup.type !== "MYSTERY_BOX";
 }
 
+function beginRacePerformance(queryCounter) {
+  return {
+    startedAt: process.hrtime.bigint(),
+    queryCounter,
+    queryStart:
+      queryCounter && typeof queryCounter.snapshot === "function"
+        ? queryCounter.snapshot()
+        : null,
+  };
+}
+
+function logRacePerformance(logger, endpoint, performance, fields = {}) {
+  const queryEnd =
+    performance.queryStart != null &&
+    typeof performance.queryCounter?.snapshot === "function"
+      ? performance.queryCounter.snapshot()
+      : null;
+  logger.log?.("[PERF] race endpoint", {
+    endpoint,
+    durationMs:
+      Number(process.hrtime.bigint() - performance.startedAt) / 1e6,
+    ...(queryEnd != null
+      ? { dbQueryCount: Math.max(0, queryEnd - performance.queryStart) }
+      : {}),
+    ...fields,
+  });
+}
+
 function createRacesRouter(dependencies = {}) {
   const router = Router();
   const requireAuth =
     dependencies.requireAuth || buildRequireAuth(dependencies);
+  const performanceQueryCounter = dependencies.performanceQueryCounter || null;
 
   const createRace = dependencies.createRace || defaultCreateRace;
   const inviteToRace = dependencies.inviteToRace || defaultInviteToRace;
@@ -239,6 +272,11 @@ function createRacesRouter(dependencies = {}) {
   const getRaceDetails = dependencies.getRaceDetails || defaultGetRaceDetails;
   const getRaceProgress =
     dependencies.getRaceProgress || defaultGetRaceProgress;
+  const getSneakySwapTargets =
+    dependencies.getSneakySwapTargets ||
+    (dependencies.Race || dependencies.RacePowerup || dependencies.RaceActiveEffect
+      ? buildGetSneakySwapTargets(dependencies)
+      : defaultGetSneakySwapTargets);
   const usePowerup = dependencies.usePowerup || defaultUsePowerup;
   const discardPowerup = dependencies.discardPowerup || defaultDiscardPowerup;
   const openMysteryBox = dependencies.openMysteryBox || defaultOpenMysteryBox;
@@ -1016,6 +1054,9 @@ function createRacesRouter(dependencies = {}) {
   });
 
   router.post("/:raceId/powerups/:powerupId/use", async (req, res) => {
+    const performance = beginRacePerformance(performanceQueryCounter);
+    let perfOutcome = "error";
+    let perfType = null;
     try {
       const {
         targetUserId,
@@ -1043,7 +1084,12 @@ function createRacesRouter(dependencies = {}) {
         // §7.5: REQUEST-scoped capabilities, never the user's stored sticky
         // union — that would upgrade a request made by a frozen binary.
         clientFeatures: req.clientFeatures || null,
+        onPerformanceContext: ({ powerupType }) => {
+          perfType = powerupType;
+        },
       });
+      perfOutcome = "success";
+      perfType = result?.type || result?.powerupType || null;
       // X-Ray (DEFENSE_SCAN) is an instantaneous intel read: surface the scan at
       // the TOP LEVEL per the contract ({ ok, scan }). `result` is kept alongside
       // for back-compat with clients that read the standard use-result envelope.
@@ -1060,6 +1106,11 @@ function createRacesRouter(dependencies = {}) {
       }
       console.error("Use powerup error:", error);
       res.status(500).json({ error: "Internal server error" });
+    } finally {
+      logRacePerformance(logger, "use-powerup", performance, {
+        powerupType: perfType,
+        outcome: perfOutcome,
+      });
     }
   });
 
@@ -1092,6 +1143,10 @@ function createRacesRouter(dependencies = {}) {
 
   // POST /races/:raceId/powerups/:powerupId/open
   router.post("/:raceId/powerups/:powerupId/open", async (req, res) => {
+    const performance = beginRacePerformance(performanceQueryCounter);
+    let perfOutcome = "error";
+    let perfType = null;
+    let perfPostRepair = false;
     try {
       const result = await openMysteryBox({
         userId: req.user.id,
@@ -1103,6 +1158,9 @@ function createRacesRouter(dependencies = {}) {
         // i.e. a dead slot in a live race.
         supportsPowerups5: req.clientFeatures?.has("powerups5") ?? false,
       });
+      perfOutcome = result.alreadyOpened ? "replay" : "opened";
+      perfType = result.type || null;
+      perfPostRepair = !result.alreadyOpened;
       res.json({ result });
     } catch (error) {
       if (error.name === "MysteryBoxOpenError") {
@@ -1113,6 +1171,12 @@ function createRacesRouter(dependencies = {}) {
       }
       console.error("Open mystery box error:", error);
       res.status(500).json({ error: "Internal server error" });
+    } finally {
+      logRacePerformance(logger, "open-mystery-box", performance, {
+        powerupType: perfType,
+        outcome: perfOutcome,
+        optionalPostWork: perfPostRepair,
+      });
     }
   });
 
@@ -1189,6 +1253,9 @@ function createRacesRouter(dependencies = {}) {
   // POST /races/:raceId/powerups/open-batch — "Open All Boxes" (Item 1).
   // Additive; only the new app calls it. Old clients keep using single .../open.
   router.post("/:raceId/powerups/open-batch", async (req, res) => {
+    const performance = beginRacePerformance(performanceQueryCounter);
+    let perfOutcome = "error";
+    let perfOpened = 0;
     try {
       const { powerupIds, includeQueued, maxCount } = req.body || {};
       const result = await openMysteryBoxBatch({
@@ -1202,6 +1269,8 @@ function createRacesRouter(dependencies = {}) {
         // way around it.
         supportsPowerups5: req.clientFeatures?.has("powerups5") ?? false,
       });
+      perfOutcome = "success";
+      perfOpened = Array.isArray(result?.results) ? result.results.length : 0;
       res.json(result);
     } catch (error) {
       if (
@@ -1213,6 +1282,11 @@ function createRacesRouter(dependencies = {}) {
       }
       console.error("Open mystery box batch error:", error);
       res.status(500).json({ error: "Internal server error" });
+    } finally {
+      logRacePerformance(logger, "open-mystery-box-batch", performance, {
+        outcome: perfOutcome,
+        opened: perfOpened,
+      });
     }
   });
 
@@ -1310,55 +1384,28 @@ function createRacesRouter(dependencies = {}) {
   // requester, NOT stealthed, NOT finished, and who hold >=1 STEALABLE powerup
   // (HELD, type not SNEAKY_SWAP and not MYSTERY_BOX). Old apps never call this
   // and keep using the per-target options endpoint.
-  router.get("/:raceId/powerups/sneaky-swap-targets", async (req, res) => {
-    try {
-      const race = await raceModel.findById(req.params.raceId);
-      if (!race || race.status !== "ACTIVE") {
-        return res.status(400).json({ error: "Race is not active" });
+  router.get(
+    "/:raceId/powerups/sneaky-swap-targets",
+    asyncHandler(async (req, res) => {
+      const performance = beginRacePerformance(performanceQueryCounter);
+      let outcome = "error";
+      let targets = 0;
+      try {
+        const result = await getSneakySwapTargets(
+          req.user.id,
+          req.params.raceId
+        );
+        outcome = "success";
+        targets = result.targets.length;
+        res.json(result);
+      } finally {
+        logRacePerformance(logger, "sneaky-swap-targets", performance, {
+          outcome,
+          targets,
+        });
       }
-
-      // Team races (TR-651/657): Sneaky Swap is enemy-only, and forfeited
-      // members drop out of the target pool entirely.
-      const me = race.participants.find(
-        (p) => p.userId === req.user.id && p.status === "ACCEPTED"
-      );
-      // This target list discloses participant identities and held-item
-      // eligibility. It is therefore member-only even for ordinary races, and
-      // a retained PRUNED bucket assignment (DECLINED participant) is not an
-      // access credential.
-      if (!me) {
-        return res.status(403).json({ error: "You are not an active participant in this race" });
-      }
-      const candidates = race.participants.filter(
-        (p) =>
-          p.userId !== req.user.id &&
-          p.status === "ACCEPTED" &&
-          !p.finishedAt &&
-          !p.forfeitedAt &&
-          (!race.isTeamRace || (p.team != null && p.team !== me.team))
-      );
-
-      const evaluated = await Promise.all(
-        candidates.map(async (p) => {
-          const [stealth, held] = await Promise.all([
-            effectModel.findActiveByTypeForParticipant(p.id, "STEALTH_MODE"),
-            powerupModel.findHeldByParticipant(p.id),
-          ]);
-          if (stealth) return null;
-          if (!held.some((pw) => isStealable(pw))) return null;
-          return {
-            userId: p.userId,
-            displayName: p.user ? p.user.displayName : null,
-          };
-        })
-      );
-
-      res.json({ targets: evaluated.filter(Boolean) });
-    } catch (error) {
-      console.error("Sneaky swap targets error:", error);
-      res.status(500).json({ error: "Internal server error" });
-    }
-  });
+    })
+  );
 
   // GET /races/:raceId/messages
   router.get("/:raceId/messages", async (req, res) => {

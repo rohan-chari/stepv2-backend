@@ -1,4 +1,8 @@
 require("dotenv").config();
+const { apnsService } = require("./shared/push/apns");
+const {
+  logPerformanceFlags,
+} = require("./shared/config/performanceFlags");
 
 const { createApp } = require("./app");
 const {
@@ -84,6 +88,9 @@ function startServer({
 
   return app.listen(port, host, () => {
     logger.log(`Steps Tracker API running on ${host}:${port}`);
+    // Keep dependency-injected startup probes byte-for-byte stable; production
+    // uses the default console logger and records the dark-switch snapshot.
+    if (logger === console) logPerformanceFlags(logger);
     const startCrons = () => {
       scheduleRaceExpiry();
       scheduleSeededRenewal();
@@ -178,6 +185,35 @@ function startServer({
   });
 }
 
+function installProductionShutdownHandlers({
+  server,
+  apnsService: apns = apnsService,
+  processObject = process,
+  setTimer = setTimeout,
+  clearTimer = clearTimeout,
+  hardExitMs = 5000,
+} = {}) {
+  let shuttingDown = false;
+  let hardExitTimer = null;
+  const shutdown = () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    hardExitTimer = setTimer(() => processObject.exit(0), hardExitMs);
+    hardExitTimer?.unref?.();
+    server.close(async () => {
+      try {
+        await apns.close();
+      } finally {
+        if (hardExitTimer) clearTimer(hardExitTimer);
+        processObject.exit(0);
+      }
+    });
+  };
+  processObject.on("SIGINT", shutdown);
+  processObject.on("SIGTERM", shutdown);
+  return shutdown;
+}
+
 if (require.main === module) {
   const server = startServer();
 
@@ -186,17 +222,12 @@ if (require.main === module) {
   // The 5s hard-exit backstop stays under pm2's kill window escalation and
   // covers a hung keep-alive connection.
   if (process.env.NODE_ENV === "production") {
-    let shuttingDown = false;
-    process.on("SIGINT", () => {
-      if (shuttingDown) return;
-      shuttingDown = true;
-      server.close(() => process.exit(0));
-      setTimeout(() => process.exit(0), 5000).unref();
-    });
+    installProductionShutdownHandlers({ server });
   }
 
 }
 
 module.exports = {
+  installProductionShutdownHandlers,
   startServer,
 };

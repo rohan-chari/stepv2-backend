@@ -38,6 +38,52 @@ const participantInclude = {
   },
 };
 
+const mysteryBoxParticipantSelect = {
+  id: true,
+  userId: true,
+  status: true,
+  totalSteps: true,
+  rawSteps: true,
+  bonusSteps: true,
+  maxBonusSteps: true,
+  nextBoxAtSteps: true,
+  powerupSlots: true,
+  finishedAt: true,
+  finishTotalSteps: true,
+  forfeitedAt: true,
+  team: true,
+  joinedAt: true,
+};
+
+const resolutionParticipantSelect = {
+  ...mysteryBoxParticipantSelect,
+  placement: true,
+  highMultiplierNotifiedAt: true,
+  user: { select: { id: true, displayName: true } },
+};
+
+const resolutionRaceSelect = {
+  id: true,
+  name: true,
+  status: true,
+  startedAt: true,
+  scheduledStartAt: true,
+  endsAt: true,
+  timezone: true,
+  targetSteps: true,
+  timeBased: true,
+  powerupsEnabled: true,
+  powerupStepInterval: true,
+  isTeamRace: true,
+  teamSize: true,
+  teamAName: true,
+  teamBName: true,
+  participants: {
+    select: resolutionParticipantSelect,
+    orderBy: { joinedAt: "asc" },
+  },
+};
+
 const Race = {
   // Capability guard for dynamic race routes. Deliberately lean: old clients
   // poll progress frequently, so checking whether an opaque id is a private
@@ -60,6 +106,88 @@ const Race = {
         // ordinary races).
         tournament: { select: { id: true, name: true, bracketSize: true } },
         ...participantInclude,
+      },
+    });
+  },
+
+  async findMysteryBoxContext(id) {
+    return prisma.race.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        status: true,
+        powerupsEnabled: true,
+        powerupStepInterval: true,
+        isTeamRace: true,
+        teamSize: true,
+        participants: {
+          select: mysteryBoxParticipantSelect,
+          orderBy: { joinedAt: "asc" },
+        },
+      },
+    });
+  },
+
+  async findPowerupUseContext(id) {
+    return prisma.race.findUnique({
+      where: { id },
+      select: resolutionRaceSelect,
+    });
+  },
+
+  async findSneakySwapTargetContext(id) {
+    return prisma.race.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        status: true,
+        isTeamRace: true,
+        participants: {
+          select: {
+            id: true,
+            userId: true,
+            status: true,
+            finishedAt: true,
+            forfeitedAt: true,
+            team: true,
+            joinedAt: true,
+            user: { select: { displayName: true } },
+          },
+          orderBy: { joinedAt: "asc" },
+        },
+      },
+    });
+  },
+
+  async findForResolution(id) {
+    return prisma.race.findUnique({
+      where: { id },
+      select: resolutionRaceSelect,
+    });
+  },
+
+  async findPowerupRepairContext(id, userId) {
+    return prisma.race.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        status: true,
+        powerupsEnabled: true,
+        powerupStepInterval: true,
+        participants: {
+          where: { userId },
+          select: {
+            id: true,
+            userId: true,
+            status: true,
+            powerupSlots: true,
+            bonusSteps: true,
+            maxBonusSteps: true,
+            nextBoxAtSteps: true,
+            finishedAt: true,
+            finishTotalSteps: true,
+          },
+        },
       },
     });
   },

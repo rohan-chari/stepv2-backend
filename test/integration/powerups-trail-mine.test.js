@@ -407,6 +407,120 @@ describe("trail mine targeting", () => {
     );
   });
 
+  it("ACTIVE/null-started races fall back to the stored lean context without participant writes", async () => {
+    const alice = await createUser("AliceMineNull");
+    const bob = await createUser("BobMineNullAA");
+    await makeFriends(alice, bob);
+    const raceId = await createActiveRace(alice, [bob]);
+    const participants = await prisma.raceParticipant.findMany({
+      where: { raceId },
+    });
+    const aliceParticipant = participants.find((p) => p.userId === alice.userId);
+    const bobParticipant = participants.find((p) => p.userId === bob.userId);
+    await prisma.raceParticipant.update({
+      where: { id: aliceParticipant.id },
+      data: { totalSteps: 10000, bonusSteps: 111, maxBonusSteps: 222 },
+    });
+    await prisma.raceParticipant.update({
+      where: { id: bobParticipant.id },
+      data: { totalSteps: 1000 },
+    });
+    await prisma.race.update({
+      where: { id: raceId },
+      data: { startedAt: null },
+    });
+
+    const mine = await giveHeldPowerup(raceId, alice.userId, "TRAIL_MINE", 99901);
+    const response = await usePowerup(alice.token, raceId, mine.id);
+    assert.equal(response.status, 200);
+    const planted = await getMine(raceId);
+    assert.equal(planted.metadata.positionSteps, 10000);
+
+    const after = await prisma.raceParticipant.findUnique({
+      where: { id: aliceParticipant.id },
+      select: { totalSteps: true, bonusSteps: true, maxBonusSteps: true },
+    });
+    assert.deepEqual(after, {
+      totalSteps: 10000,
+      bonusSteps: 111,
+      maxBonusSteps: 222,
+    });
+  });
+
+  it("plants from canonical scoring across 300 participants without persisting captured totals", async () => {
+    const alice = await createUser("AliceMine300");
+    const startedAt = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    const race = await prisma.race.create({
+      data: {
+        creatorId: alice.userId,
+        name: "Trail Mine 300",
+        targetSteps: 500000,
+        status: "ACTIVE",
+        startedAt,
+        endsAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        timezone: "UTC",
+        powerupsEnabled: true,
+        powerupStepInterval: 5000,
+      },
+    });
+    const others = Array.from({ length: 299 }, (_, index) => ({
+      id: `30000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+      appleId: `trail-300-${index}`,
+      displayName: `Trail ${index}`,
+    }));
+    await prisma.user.createMany({ data: others });
+    const aliceParticipantId = "40000000-0000-4000-8000-000000000000";
+    await prisma.raceParticipant.createMany({
+      data: [
+        {
+          id: aliceParticipantId,
+          raceId: race.id,
+          userId: alice.userId,
+          status: "ACCEPTED",
+          totalSteps: 5,
+          joinedAt: startedAt,
+        },
+        ...others.map((user, index) => ({
+          id: `40000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+          raceId: race.id,
+          userId: user.id,
+          status: "ACCEPTED",
+          totalSteps: 5,
+          joinedAt: new Date(startedAt.getTime() + index + 1),
+        })),
+      ],
+    });
+    const periodStart = new Date(startedAt.getTime() + 60_000);
+    const periodEnd = new Date(startedAt.getTime() + 120_000);
+    await prisma.stepSample.createMany({
+      data: [
+        {
+          userId: alice.userId,
+          periodStart,
+          periodEnd,
+          steps: 10000,
+        },
+        ...others.map((user, index) => ({
+          userId: user.id,
+          periodStart,
+          periodEnd,
+          steps: 1000 + (index % 500),
+        })),
+      ],
+    });
+    const mine = await giveHeldPowerup(race.id, alice.userId, "TRAIL_MINE", 99901);
+    const response = await usePowerup(alice.token, race.id, mine.id);
+    assert.equal(response.status, 200);
+    assert.equal((await getMine(race.id)).metadata.positionSteps, 10000);
+    assert.equal(
+      await prisma.raceParticipant.count({
+        where: { raceId: race.id, totalSteps: { not: 5 } },
+      }),
+      0,
+      "the canonical scoring pass captures rather than persists all 300 participant writes"
+    );
+  });
+
   it("a stale owner sync never detonates the mine on a runner far behind the owner", async () => {
     const alice = await createUser("AliceMineGGG");
     const bob = await createUser("BobMineGGGGG");

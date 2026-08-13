@@ -106,6 +106,61 @@ async function getTargets(baseUrl, raceId) {
   return { status: res.status, body };
 }
 
+test("performance log includes DB query count only when an explicit counter is instrumented", async () => {
+  const race = buildRace([
+    { id: "p-bob", userId: "user-bob", displayName: "Bob" },
+  ]);
+  const logs = [];
+  let queryCount = 10;
+  const dependencies = {
+    ...makeDeps({
+      race,
+      powerupsByParticipant: {
+        "p-bob": [{ type: "LEG_CRAMP", status: "HELD" }],
+      },
+    }),
+    logger: {
+      log(message, fields) { logs.push({ message, fields }); },
+      warn() {},
+      error() {},
+    },
+    performanceQueryCounter: {
+      snapshot() {
+        const current = queryCount;
+        queryCount += current === 10 ? 3 : 0;
+        return current;
+      },
+    },
+  };
+  const server = await startServer(dependencies);
+  try {
+    assert.equal((await getTargets(server.baseUrl, race.id)).status, 200);
+    const perf = logs.find((entry) => entry.message === "[PERF] race endpoint");
+    assert.equal(perf.fields.dbQueryCount, 3);
+    assert.equal(typeof perf.fields.durationMs, "number");
+  } finally {
+    await server.close();
+  }
+
+  logs.length = 0;
+  const uninstrumented = await startServer({
+    ...makeDeps({
+      race,
+      powerupsByParticipant: {
+        "p-bob": [{ type: "LEG_CRAMP", status: "HELD" }],
+      },
+    }),
+    logger: dependencies.logger,
+  });
+  try {
+    assert.equal((await getTargets(uninstrumented.baseUrl, race.id)).status, 200);
+    const perf = logs.find((entry) => entry.message === "[PERF] race endpoint");
+    assert.equal(Object.hasOwn(perf.fields, "dbQueryCount"), false);
+  } finally {
+    await uninstrumented.close();
+  }
+});
+
 test("targets EXCLUDES a participant who holds only a SNEAKY_SWAP and/or MYSTERY_BOX", async () => {
   const race = buildRace([
     { id: "p-bob", userId: "user-bob", displayName: "Bob" },

@@ -6,6 +6,9 @@ const { fcmService } = require("../../shared/push/fcm");
 const { Notification } = require("./notification");
 const { upgradedDuration, formatDuration } = require("../powerups/powerupUpgrades");
 const { prisma } = require("../../db");
+const {
+  readPerformanceFlags,
+} = require("../../shared/config/performanceFlags");
 
 const CHAT_PUSH_COOLDOWN_MS = 60_000;
 
@@ -19,6 +22,8 @@ function registerNotificationHandlers(dependencies = {}) {
   const raceModel = dependencies.Race || prisma.race;
   const notificationModel = dependencies.Notification || Notification;
   const logger = dependencies.logger || console;
+  const getPerformanceFlags = dependencies.getPerformanceFlags ||
+    (() => readPerformanceFlags());
 
   // Persist one row per user-facing (visible) notification we send, for audit /
   // debugging (a nightly job prunes rows older than a week). Best-effort: a
@@ -1118,6 +1123,13 @@ function registerNotificationHandlers(dependencies = {}) {
   }
 
   events.on("PLACEMENT_CHANGED", async (data) => {
+    const perfStartedAt = process.hrtime.bigint();
+    let perfOutcome = "ignored";
+    let perfTokenReads = 0;
+    let perfPushAttempts = 0;
+    let perfPushSuccesses = 0;
+    let perfUnregistered = 0;
+    let perfFailures = 0;
     try {
       const {
         raceId,
@@ -1130,13 +1142,6 @@ function registerNotificationHandlers(dependencies = {}) {
       } = data || {};
       if (!userId || placement == null) return;
 
-      const tokens = await deviceTokenModel.findByUserId(userId);
-      if (!tokens || tokens.length === 0) return;
-
-      // A visible alert fires only on a MEANINGFUL threshold crossing, not on
-      // every one-spot slip (which, at a 5-min recompute cadence over a multi-day
-      // race, was the source of the notification flood). The silent refresh below
-      // still fires on every change for updated clients.
       const tookFirst = placement === 1 && previousPlacement !== 1;
       const lostFirst =
         typeof previousPlacement === "number" &&
@@ -1148,8 +1153,36 @@ function registerNotificationHandlers(dependencies = {}) {
         paidPlaces > 0 &&
         previousPlacement <= paidPlaces &&
         placement > paidPlaces;
+      // Pure visibility classification belongs before token lookup. A payout
+      // cutoff crossing outside its configured time window is just as inert as
+      // any mid-pack movement on every shipped client. took/lost-first remain
+      // visible regardless of that window.
       const nowMs = Date.now();
+      const payoutDropWithinWindow =
+        droppedOutOfPaid &&
+        !tookFirst &&
+        withinPayoutDropWindow(endsAt, nowMs);
+      if (
+        getPerformanceFlags().placementInertPushSuppressionEnabled &&
+        !tookFirst &&
+        !lostFirst &&
+        !payoutDropWithinWindow
+      ) {
+        perfOutcome = "skipped-inert";
+        return;
+      }
 
+      perfTokenReads += 1;
+      const tokens = await deviceTokenModel.findByUserId(userId);
+      if (!tokens || tokens.length === 0) {
+        perfOutcome = "no-tokens";
+        return;
+      }
+
+      // A visible alert fires only on a MEANINGFUL threshold crossing, not on
+      // every one-spot slip (which, at a 5-min recompute cadence over a multi-day
+      // race, was the source of the notification flood). The silent refresh below
+      // still fires on every change for updated clients.
       // The payout-drop VARIANT is the one whose copy says "out of the payout"
       // — i.e. a drop out of the money that isn't also a take-1st. It alone is
       // time-gated and capped. Evaluation order is pinned (item 3): variant ->
@@ -1161,10 +1194,7 @@ function registerNotificationHandlers(dependencies = {}) {
       // than swallowing it: this item promises tookFirst/lostFirst are
       // unchanged, and neither the window nor a spent claim has anything to say
       // about losing 1st place.
-      let payoutDrop =
-        droppedOutOfPaid &&
-        !tookFirst &&
-        withinPayoutDropWindow(endsAt, nowMs);
+      let payoutDrop = payoutDropWithinWindow;
 
       const meaningful = tookFirst || lostFirst || payoutDrop;
 
@@ -1223,6 +1253,7 @@ function registerNotificationHandlers(dependencies = {}) {
       };
 
       for (const tokenRecord of tokens) {
+        perfPushAttempts += 1;
         try {
           const push = pushServiceFor(tokenRecord);
           const result = sendAlert
@@ -1239,6 +1270,7 @@ function registerNotificationHandlers(dependencies = {}) {
               });
 
           if (!result.success && !result.unregistered) {
+            perfFailures += 1;
             logger.warn("PLACEMENT_CHANGED push failed", {
               raceId,
               recipientUserId: userId,
@@ -1248,12 +1280,15 @@ function registerNotificationHandlers(dependencies = {}) {
             });
           }
           if (result.unregistered) {
+            perfUnregistered += 1;
             await deviceTokenModel.deleteToken({
               userId,
               token: tokenRecord.token,
             });
           }
+          if (result.success) perfPushSuccesses += 1;
         } catch (error) {
+          perfFailures += 1;
           logger.error("PLACEMENT_CHANGED push threw", {
             raceId,
             recipientUserId: userId,
@@ -1276,9 +1311,22 @@ function registerNotificationHandlers(dependencies = {}) {
           raceId,
         });
       }
+      perfOutcome = sendAlert ? "alert-sent" : "silent-sent";
     } catch (error) {
+      perfOutcome = "handler-error";
       logger.error("PLACEMENT_CHANGED handler failed", {
         error: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      logger.log?.("[PERF] placement notification", {
+        outcome: perfOutcome,
+        tokenReads: perfTokenReads,
+        pushAttempts: perfPushAttempts,
+        pushSuccesses: perfPushSuccesses,
+        unregisteredTokens: perfUnregistered,
+        failedPushes: perfFailures,
+        durationMs:
+          Number(process.hrtime.bigint() - perfStartedAt) / 1e6,
       });
     }
   });

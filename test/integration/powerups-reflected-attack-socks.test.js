@@ -277,6 +277,32 @@ describe("reflected attack blocked by the attacker's own compression socks", () 
     assert.equal(await activeEffectCount(raceId, "WRONG_TURN"), 0);
   });
 
+  it("Leg Cramp consumes Mirror before Decoy before Compression Socks when defenses coexist", async () => {
+    const alice = await createUser("AliceOrder");
+    const bob = await createUser("BobOrder");
+    const carol = await createUser("CarolOrder");
+    await makeFriends(alice, bob);
+    await makeFriends(alice, carol);
+    const raceId = await createActiveRace(alice, [bob, carol]);
+    for (const user of [alice, bob, carol]) {
+      await giveBonusSteps(raceId, user.userId, 5000);
+    }
+    await activateShield(raceId, bob, "COMPRESSION_SOCKS", 99801);
+    await activateShield(raceId, bob, "DECOY", 99802);
+    await activateShield(raceId, bob, "MIRROR", 99803);
+
+    const cramp = await giveHeldPowerup(raceId, alice.userId, "LEG_CRAMP", 99804);
+    const response = await usePowerup(alice.token, raceId, cramp.id, bob.userId);
+    assert.equal(response.status, 200);
+    const { result } = await response.json();
+    assert.equal(result.outcome, "REFLECTED");
+    assert.equal(result.reflectedBy, "MIRROR");
+    assert.equal(await shieldStatus(raceId, bob.userId, "MIRROR"), "EXPIRED");
+    assert.equal(await shieldStatus(raceId, bob.userId, "DECOY"), "ACTIVE");
+    assert.equal(await shieldStatus(raceId, bob.userId, "COMPRESSION_SOCKS"), "ACTIVE");
+    assert.equal(await shieldStatus(raceId, alice.userId, "LEG_CRAMP"), "ACTIVE");
+  });
+
   it("Mystery Potion enemy attack reflected by the victim's Mirror is blocked by the caster's socks", async () => {
     const alice = await createUser("AlicePot");
     const bob = await createUser("BobMirror");

@@ -206,5 +206,117 @@ describe("feature batch 2026-07-24 — currentMultiplier + high-multiplier push"
       const freshAlice = await participant(raceId, alice.userId);
       assert.equal(freshAlice.highMultiplierNotifiedAt, null);
     });
+
+    it("shared-tail evaluation fresh-reads a caster finished/forfeited concurrently after consumption", async () => {
+      const alice = await createUser("AliceMultFresh");
+      const bob = await createUser("BobMultFresh");
+      await makeFriends(alice, bob);
+      const raceId = await createActiveRace(alice, bob);
+      const aliceP = await participant(raceId, alice.userId);
+      const alreadyNotifiedAt = new Date(Date.now() - 60_000);
+      await prisma.raceParticipant.update({
+        where: { id: aliceP.id },
+        data: { highMultiplierNotifiedAt: alreadyNotifiedAt },
+      });
+      const protein = await giveBoxHeldPowerup(
+        raceId,
+        alice.userId,
+        "PROTEIN_SHAKE",
+        99999
+      );
+
+      // The trigger models race-expiry/forfeit landing after usePowerup's
+      // initial race snapshot but at the durable HELD -> USED mutation. The
+      // public HTTP request must observe this current caster state at the
+      // shared-tail evaluator and must not clear the re-arm marker.
+      await prisma.$executeRawUnsafe(`
+        CREATE OR REPLACE FUNCTION test_finish_caster_on_use()
+        RETURNS trigger AS $$
+        BEGIN
+          IF NEW.id = '${protein.id}' AND NEW.status = 'used' THEN
+            UPDATE race_participants
+            SET finished_at = CURRENT_TIMESTAMP, forfeited_at = CURRENT_TIMESTAMP
+            WHERE id = NEW.participant_id;
+          END IF;
+          RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql
+      `);
+      await prisma.$executeRawUnsafe(`
+        CREATE TRIGGER test_finish_caster_on_use_trigger
+        AFTER UPDATE OF status ON race_powerups
+        FOR EACH ROW EXECUTE FUNCTION test_finish_caster_on_use()
+      `);
+      try {
+        const response = await usePowerup(alice.token, raceId, protein.id);
+        assert.equal(response.status, 200);
+      } finally {
+        await prisma.$executeRawUnsafe(
+          "DROP TRIGGER IF EXISTS test_finish_caster_on_use_trigger ON race_powerups"
+        );
+        await prisma.$executeRawUnsafe(
+          "DROP FUNCTION IF EXISTS test_finish_caster_on_use()"
+        );
+      }
+
+      const current = await participant(raceId, alice.userId);
+      assert.ok(current.finishedAt);
+      assert.ok(current.forfeitedAt);
+      assert.equal(
+        current.highMultiplierNotifiedAt.toISOString(),
+        alreadyNotifiedAt.toISOString()
+      );
+    });
+
+    it("keeps shared-tail Leg Cramp re-arm and self-contained Potion call-site behavior", async () => {
+      const alice = await createUser("AliceMultParity");
+      const bob = await createUser("BobMultParity");
+      await makeFriends(alice, bob);
+      const raceId = await createActiveRace(alice, bob);
+      const aliceP = await participant(raceId, alice.userId);
+      await prisma.raceParticipant.update({
+        where: { id: aliceP.id },
+        data: { highMultiplierNotifiedAt: new Date(Date.now() - 60_000) },
+      });
+
+      const cramp = await giveBoxHeldPowerup(raceId, alice.userId, "LEG_CRAMP", 99991);
+      const crampResponse = await usePowerup(alice.token, raceId, cramp.id, {
+        targetUserId: bob.userId,
+      });
+      assert.equal(crampResponse.status, 200);
+      assert.equal(
+        (await participant(raceId, alice.userId)).highMultiplierNotifiedAt,
+        null,
+        "non-reflected Leg Cramp retains the shared-tail evaluator and re-arms below threshold"
+      );
+
+      const marker = new Date(Date.now() - 30_000);
+      await prisma.raceParticipant.update({
+        where: { id: aliceP.id },
+        data: { highMultiplierNotifiedAt: marker },
+      });
+      const potion = await giveBoxHeldPowerup(
+        raceId,
+        alice.userId,
+        "MYSTERY_POTION",
+        99992
+      );
+      const potionResponse = await request(
+        server.baseUrl,
+        "POST",
+        `/races/${raceId}/powerups/${potion.id}/use`,
+        {
+          body: {},
+          token: alice.token,
+          headers: { "X-Client-Features": "powerups2,powerups3,powerups4,powerups5" },
+        }
+      );
+      assert.equal(potionResponse.status, 200);
+      assert.equal(
+        (await participant(raceId, alice.userId)).highMultiplierNotifiedAt.toISOString(),
+        marker.toISOString(),
+        "the self-contained Potion early return does not gain shared-tail evaluation"
+      );
+    });
   });
 });

@@ -29,6 +29,14 @@ const pool = new pg.Pool({
 
 const adapter = new PrismaPg(pool);
 
-const prisma = new PrismaClient({ adapter });
+const prisma = new PrismaClient({
+  adapter,
+  // Query events are deliberately opt-in. Integration/benchmark processes may
+  // enable them before loading db.js; production keeps Prisma's global query
+  // event stream disabled so endpoint instrumentation cannot add hot-path work.
+  ...(process.env.PRISMA_QUERY_EVENTS_ENABLED === "true"
+    ? { log: [{ emit: "event", level: "query" }] }
+    : {}),
+});
 
 module.exports = { prisma };

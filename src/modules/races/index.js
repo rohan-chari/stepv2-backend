@@ -32,6 +32,7 @@ Object.assign(module.exports, require("./services/withRaceResolutionLock"));
 Object.assign(module.exports, require("./services/raceStateResolution"));
 Object.assign(module.exports, require("./services/computeRaceState"));
 Object.assign(module.exports, require("./services/racePowerupStateSync"));
+Object.assign(module.exports, require("./services/racePowerupInventoryRepair"));
 Object.assign(module.exports, require("./services/reconcileUploaderRaces"));
 Object.assign(module.exports, require("./services/validateRaceConfig"));
 Object.assign(module.exports, require("./services/racePayoutDoublePolicy"));
@@ -47,6 +48,7 @@ Object.assign(module.exports, require("./queries/getPublicRaces"));
 Object.assign(module.exports, require("./queries/getPublicRaceCount"));
 Object.assign(module.exports, require("./queries/getRaceDiscoverySummary"));
 Object.assign(module.exports, require("./queries/getSharedRacePreview"));
+Object.assign(module.exports, require("./queries/getSneakySwapTargets"));
 
 Object.assign(module.exports, require("./commands/joinRaceCore"));
 Object.assign(module.exports, require("./commands/createRace"));

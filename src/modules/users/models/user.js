@@ -1,4 +1,5 @@
 const { prisma } = require("../../../db");
+const { Prisma } = require("@prisma/client");
 const { addDaysToDateString } = require("../../../shared/time/week");
 
 // Ceiling for User.renameChipShownCount. The client only ever needs to compare
@@ -27,6 +28,32 @@ async function invalidateAuthMe(id) {
 const User = {
   async findById(id) {
     return prisma.user.findUnique({ where: { id } });
+  },
+
+  async findStepSyncCandidates(ids) {
+    const userIds = [...new Set(ids || [])].filter(Boolean);
+    if (userIds.length === 0) return [];
+    return prisma.user.findMany({
+      where: { id: { in: userIds } },
+      select: {
+        id: true,
+        lastStepSyncAt: true,
+        lastSilentPushSentAt: true,
+      },
+    });
+  },
+
+  async updateLastSilentPushAttemptedAt(ids, attemptedAt) {
+    const userIds = [...new Set(ids || [])].filter(Boolean);
+    if (userIds.length === 0) return 0;
+    return prisma.$executeRaw`
+      UPDATE users
+      SET last_silent_push_sent_at = GREATEST(
+        COALESCE(last_silent_push_sent_at, ${attemptedAt}),
+        ${attemptedAt}
+      )
+      WHERE id IN (${Prisma.join(userIds)})
+    `;
   },
 
   async findByAppleId(appleId) {

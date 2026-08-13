@@ -15,8 +15,8 @@ const { rawPositionFor } = require("../rawPosition");
 const { balanceConfig: defaultBalanceConfig } = require("../../economy/balanceConfig");
 const { POWERUP_NAMES, DEFAULT_POWERUP_SLOTS } = require("./rollPowerup");
 const {
-  syncRacePowerupState: defaultSyncRacePowerupState,
-} = require("../../races/services/racePowerupStateSync");
+  repairRacePowerupInventory: defaultRepairRacePowerupInventory,
+} = require("../../races/services/racePowerupInventoryRepair");
 
 // §5.5 — empty-tier cascade.
 //
@@ -84,14 +84,14 @@ function buildOpenMysteryBox(dependencies = {}) {
   const events = dependencies.eventBus || eventBus;
   const rollFn = dependencies.rollPowerupOdds || rollPowerupOdds;
   const balance = dependencies.balanceConfig || defaultBalanceConfig;
-  const syncRacePowerupState = Object.prototype.hasOwnProperty.call(
+  const repairRacePowerupInventory = Object.prototype.hasOwnProperty.call(
     dependencies,
-    "syncRacePowerupState"
+    "repairRacePowerupInventory"
   )
-    ? dependencies.syncRacePowerupState
+    ? dependencies.repairRacePowerupInventory
     : hasInjectedDeps
       ? async () => {}
-      : defaultSyncRacePowerupState;
+      : defaultRepairRacePowerupInventory;
 
   // `supportsPowerups5` (2026-07-26) is OPTIONAL and defaults to false — the
   // safe side of a compatibility gate. Threaded from the route's
@@ -139,12 +139,19 @@ function buildOpenMysteryBox(dependencies = {}) {
       throw new MysteryBoxOpenError("This powerup is not a mystery box", 400);
     }
 
-    const race = await raceModel.findById(raceId);
+    const race = typeof raceModel.findMysteryBoxContext === "function"
+      ? await raceModel.findMysteryBoxContext(raceId)
+      : await raceModel.findById(raceId);
     if (!race || race.status !== "ACTIVE") {
       throw new MysteryBoxOpenError("Race is not active", 400);
     }
 
-    const participant = await participantModel.findByRaceAndUser(raceId, userId);
+    const participantsFromRace = Array.isArray(race.participants)
+      ? race.participants
+      : null;
+    const participant = participantsFromRace
+      ? participantsFromRace.find((entry) => entry.userId === userId)
+      : await participantModel.findByRaceAndUser(raceId, userId);
     if (!participant) {
       throw new MysteryBoxOpenError("You are not in this race", 403);
     }
@@ -160,7 +167,9 @@ function buildOpenMysteryBox(dependencies = {}) {
     // leading) and the per-race all-or-nothing NULL fallback to `totalSteps`.
     // getRaceProgress's disclosure calls the SAME helper over the SAME
     // persisted rows, so the quoted odds and this roll cannot drift.
-    const allParticipants = await participantModel.findAcceptedByRace(raceId);
+    const allParticipants = participantsFromRace
+      ? participantsFromRace.filter((entry) => entry.status === "ACCEPTED")
+      : await participantModel.findAcceptedByRace(raceId);
     const { position, totalParticipants } = rawPositionFor({
       participants: allParticipants,
       race,
@@ -286,6 +295,7 @@ function buildOpenMysteryBox(dependencies = {}) {
     // Fanny Pack auto-activates when inventory is full
     if (rolled.type === "FANNY_PACK" && occupiedCount >= maxSlots) {
       await participantModel.update(participant.id, { powerupSlots: maxSlots + 1 });
+      participant.powerupSlots = maxSlots + 1;
       await powerupModel.update(powerupId, { type: rolled.type, rarity: rolled.rarity, status: "USED", usedAt: new Date(), configVersion });
 
       // B1: use MYSTERY_BOX_OPENED (not POWERUP_EARNED) so this reveal is hidden
@@ -309,7 +319,7 @@ function buildOpenMysteryBox(dependencies = {}) {
         autoActivated: true,
       });
 
-      await syncRacePowerupState({ raceId, userId });
+      await repairRacePowerupInventory({ raceId, userId, race, participant });
       await invalidateRaceProgress(raceId);
       await enqueueRaceResolution({ raceId, userId });
 
@@ -341,7 +351,7 @@ function buildOpenMysteryBox(dependencies = {}) {
       autoActivated: false,
     });
 
-    await syncRacePowerupState({ raceId, userId });
+    await repairRacePowerupInventory({ raceId, userId, race, participant });
     await invalidateRaceProgress(raceId);
 
     return { id: powerup.id, type: rolled.type, rarity: rolled.rarity, autoActivated: false };

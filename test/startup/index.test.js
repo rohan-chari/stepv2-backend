@@ -1,7 +1,11 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
+const { EventEmitter } = require("node:events");
 
-const { startServer } = require("../../src/index");
+const {
+  startServer,
+  installProductionShutdownHandlers,
+} = require("../../src/index");
 
 test("startServer listens on 0.0.0.0 by default", () => {
   let listenArgs;
@@ -113,3 +117,44 @@ test("cronStartDelayMs defers job scheduling past the reload overlap window", as
   assert.equal(scheduleCalls.raceExpiry, 1);
   assert.equal(scheduleCalls.dailyMover, 1);
 });
+
+for (const signal of ["SIGINT", "SIGTERM"]) {
+  test(`${signal} production wiring closes HTTP then APNs and exits once`, async () => {
+    const processObject = new EventEmitter();
+    const calls = [];
+    processObject.exit = (code) => { calls.push(["exit", code]); };
+    const server = {
+      close(callback) {
+        calls.push(["server.close"]);
+        process.nextTick(callback);
+      },
+    };
+    const apns = {
+      async close() { calls.push(["apns.close"]); },
+    };
+    let hardExitCallback;
+    let hardExitCleared = false;
+    installProductionShutdownHandlers({
+      server,
+      apnsService: apns,
+      processObject,
+      setTimer(callback, delay) {
+        assert.equal(delay, 5000);
+        hardExitCallback = callback;
+        return { unref() {} };
+      },
+      clearTimer() { hardExitCleared = true; },
+    });
+
+    processObject.emit(signal);
+    processObject.emit(signal);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(calls, [
+      ["server.close"],
+      ["apns.close"],
+      ["exit", 0],
+    ]);
+    assert.equal(hardExitCleared, true);
+    if (!hardExitCleared) hardExitCallback();
+  });
+}

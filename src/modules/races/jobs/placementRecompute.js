@@ -20,6 +20,11 @@ const {
 const { computePrizePool } = require("../../../shared/economy/prizePool");
 const { compareParticipantsForPlacement } = require("../placementOrder");
 const { raceTimeZone } = require("../raceTimeZone");
+const { JobRun: defaultJobRun } = require("../../../shared/db/jobRun");
+const {
+  readPerformanceFlags,
+} = require("../../../shared/config/performanceFlags");
+const { runBounded } = require("../../../shared/lib/runBounded");
 
 // Team-race slacker nudge (TR-683): gentle, fires only inside the final 12h,
 // to a member contributing < 25% of their team's per-member average (average
@@ -30,6 +35,13 @@ const SLACKER_PUSH_TYPE = "TEAM_SLACKER_NUDGE";
 
 const RECOMPUTE_INTERVAL_MS = 5 * 60 * 1000; // every 5 minutes
 const RECOVERY_RACE_LIMIT = 2;
+
+function fiveMinuteBucketKey(date) {
+  const bucketMs =
+    Math.floor(new Date(date).getTime() / RECOMPUTE_INTERVAL_MS) *
+    RECOMPUTE_INTERVAL_MS;
+  return new Date(bucketMs).toISOString();
+}
 
 // Race-ending-soon reminder (§8): one push per active participant of a TIMED
 // race, ~2h before it ends. Fired on the FIRST tick where msLeft <= 2h (and > 0),
@@ -88,6 +100,10 @@ function buildRecomputePlacements(dependencies = {}) {
     stepSyncPushService.requestStepSyncForUsers;
   const now = dependencies.now || (() => new Date());
   const logger = dependencies.logger || console;
+  const jobRunModel = dependencies.JobRun || defaultJobRun;
+  const getPerformanceFlags = dependencies.getPerformanceFlags ||
+    (() => readPerformanceFlags());
+  let activePerformanceFlags = getPerformanceFlags();
   const monotonicNow = dependencies.monotonicNow || Date.now;
   // §8 kill switch: RACE_ENDING_REMINDER_DISABLED=true stops the race-ending-soon
   // reminder without stopping placement pushes. Injectable for tests.
@@ -262,8 +278,16 @@ function buildRecomputePlacements(dependencies = {}) {
       }
 
       if (flipped && armed) {
-        const trailingTeam = leadingTeam === "TEAM_A" ? "TEAM_B" : "TEAM_A";
-        events.emit("TEAM_LEAD_CHANGED", {
+        let mayEmit = true;
+        if (activePerformanceFlags.placementLeanBaselineWritesEnabled) {
+          mayEmit = await jobRunModel.claimRun(
+            `team-lead:${race.id}`,
+            `${previousLeader}->${leadingTeam}`
+          );
+        }
+        if (mayEmit) {
+          const trailingTeam = leadingTeam === "TEAM_A" ? "TEAM_B" : "TEAM_A";
+          events.emit("TEAM_LEAD_CHANGED", {
           raceId: race.id,
           raceName: race.name,
           leadingTeam,
@@ -277,7 +301,8 @@ function buildRecomputePlacements(dependencies = {}) {
           memberTeams: Object.fromEntries(
             members.map((p) => [p.userId, p.team])
           ),
-        });
+          });
+        }
       }
     }
 
@@ -348,28 +373,102 @@ function buildRecomputePlacements(dependencies = {}) {
   return async function recomputePlacements() {
     const startedAtMs = monotonicNow();
     const currentTime = now();
+    activePerformanceFlags = getPerformanceFlags();
     const emitted = [];
     let participantCount = 0;
     let recoveryEnqueues = 0;
     let dueEffectEnqueues = 0;
+    let baselineProposals = 0;
+    let baselineCasWins = 0;
+    let baselineCasLosses = 0;
+    let claimOutcome = activePerformanceFlags.placementDistributedClaimEnabled
+      ? "pending"
+      : "disabled";
+    const phaseMs = {
+      claim: 0,
+      raceScan: 0,
+      auxiliaryScans: 0,
+      participantScan: 0,
+      baselineWrites: 0,
+      eventDispatch: 0,
+      stepSyncScheduling: 0,
+      total: 0,
+    };
+    let activeRaceCount = 0;
+    const logStructuredPerformance = (outcome) => {
+      phaseMs.total = Math.max(0, monotonicNow() - startedAtMs);
+      logger.log?.("[PERF] placement recompute", {
+        outcome,
+        claimOutcome,
+        activeRaces: activeRaceCount,
+        participants: participantCount,
+        dueEffectEnqueues,
+        recoveryEnqueues,
+        baselineProposals,
+        baselineCasWins,
+        baselineCasLosses,
+        emittedEvents: emitted.length,
+        // Inert classification happens in the async notification handler, not
+        // this scheduler. Its own structured completion log owns that count.
+        skippedInertEvents: 0,
+        finalStretchStepSyncUsers: finalStretchUserIds.size,
+        normalStepSyncUsers: normalUserIds.size,
+        handlerDrainTracked: false,
+        phaseMs: { ...phaseMs },
+      });
+    };
     // Split for the step-sync "pull" below: participants of at least one race
     // ending within the next hour ("final stretch") get a tighter push throttle;
     // everyone else keeps the default hourly cooldown.
     const finalStretchUserIds = new Set();
     const normalUserIds = new Set();
 
+    if (activePerformanceFlags.placementDistributedClaimEnabled) {
+      const claimStartedAt = monotonicNow();
+      try {
+        const claimed = await jobRunModel.claimRun(
+          "placement-recompute-v2",
+          fiveMinuteBucketKey(currentTime)
+        );
+        if (!claimed) {
+          claimOutcome = "lost";
+          phaseMs.claim = Math.max(0, monotonicNow() - claimStartedAt);
+          logger.log("[CRON] placementRecompute lost distributed bucket claim");
+          logStructuredPerformance("claim-lost");
+          return emitted;
+        }
+        claimOutcome = "won";
+      } catch (error) {
+        claimOutcome = "error";
+        phaseMs.claim = Math.max(0, monotonicNow() - claimStartedAt);
+        logger.error(
+          "[CRON] placementRecompute distributed claim failed:",
+          error
+        );
+        logStructuredPerformance("claim-error");
+        return emitted;
+      }
+      phaseMs.claim = Math.max(0, monotonicNow() - claimStartedAt);
+    }
+
     let races;
+    const raceScanStartedAt = monotonicNow();
     try {
       races = await raceModel.findActiveInProgress(currentTime);
     } catch (error) {
+      phaseMs.raceScan = Math.max(0, monotonicNow() - raceScanStartedAt);
       logger.error("[CRON] placementRecompute: failed to load active races:", error);
+      logStructuredPerformance("race-scan-error");
       return emitted;
     }
+    phaseMs.raceScan = Math.max(0, monotonicNow() - raceScanStartedAt);
+    activeRaceCount = races?.length || 0;
 
     if (!races || races.length === 0) {
       logger.log(
-        `[CRON] placementRecompute completed races=0 participants=0 dueEffectEnqueues=0 recoveryEnqueues=0 emitted=0 durationMs=${Math.max(0, monotonicNow() - startedAtMs)}`
+        `[CRON] placementRecompute completed races=0 participants=0 dueEffectEnqueues=0 recoveryEnqueues=0 baselineProposals=0 baselineCasWins=0 baselineCasLosses=0 emitted=0 durationMs=${Math.max(0, monotonicNow() - startedAtMs)}`
       );
+      logStructuredPerformance("completed");
       return emitted;
     }
 
@@ -378,6 +477,7 @@ function buildRecomputePlacements(dependencies = {}) {
     // with an effect due now. These are correctness jobs and are deliberately
     // outside the two-race insurance cap.
     const activeRaceIds = new Set(races.map((race) => race.id));
+    const auxiliaryScansStartedAt = monotonicNow();
     const dueEffectRaceIds = new Set();
     if (!inlineResolveInjected) {
       try {
@@ -425,8 +525,13 @@ function buildRecomputePlacements(dependencies = {}) {
       typeof participantModel.findAcceptedByRaces === "function"
     ) {
       try {
+        const participantScanStartedAt = monotonicNow();
         const allParticipants = await participantModel.findAcceptedByRaces(
           races.map((race) => race.id)
+        );
+        phaseMs.participantScan += Math.max(
+          0,
+          monotonicNow() - participantScanStartedAt
         );
         participantsByRace = new Map();
         for (const participant of allParticipants || []) {
@@ -511,6 +616,10 @@ function buildRecomputePlacements(dependencies = {}) {
         existingNotificationKeys = null;
       }
     }
+    phaseMs.auxiliaryScans = Math.max(
+      0,
+      monotonicNow() - auxiliaryScansStartedAt
+    );
 
     // Sequential over races bounds notification writes and preserves ordering.
     for (const race of races) {
@@ -540,7 +649,15 @@ function buildRecomputePlacements(dependencies = {}) {
 
         const participants = participantsByRace
           ? participantsByRace.get(race.id) || []
-          : await participantModel.findAcceptedByRace(race.id);
+          : await (async () => {
+              const participantScanStartedAt = monotonicNow();
+              const rows = await participantModel.findAcceptedByRace(race.id);
+              phaseMs.participantScan += Math.max(
+                0,
+                monotonicNow() - participantScanStartedAt
+              );
+              return rows;
+            })();
         if (!participants || participants.length === 0) continue;
         participantCount += participants.length;
 
@@ -615,7 +732,83 @@ function buildRecomputePlacements(dependencies = {}) {
               }).length
             : 0;
 
-        for (let i = 0; i < ranked.length; i++) {
+        if (activePerformanceFlags.placementLeanBaselineWritesEnabled) {
+          const baselineStartedAt = monotonicNow();
+          const proposals = [];
+          for (let i = 0; i < ranked.length; i++) {
+            const participant = ranked[i];
+            const liveRank = i + 1;
+            if (participant.finishedAt) continue;
+
+            let kind = "ordinary";
+            if (process.env.PLACEMENT_BASELINE_RESYNC === "true") {
+              kind = "resync";
+            } else if (participant.lastNotifiedPlacement == null) {
+              kind = "first-observation";
+            } else if (participant.placementAlertsMuted) {
+              kind = "muted";
+            }
+            if (participant.lastNotifiedPlacement === liveRank) continue;
+            proposals.push({
+              participant,
+              liveRank,
+              kind,
+              change:
+                kind === "ordinary"
+                  ? {
+                      raceId: race.id,
+                      raceName: race.name,
+                      userId: participant.userId,
+                      previousPlacement:
+                        participant.lastNotifiedPlacement,
+                      placement: liveRank,
+                      totalParticipants: ranked.length,
+                      paidPlaces,
+                      endsAt: race.endsAt || null,
+                    }
+                  : null,
+            });
+          }
+
+          const outcomes = await runBounded(
+            proposals,
+            activePerformanceFlags.placementBaselineWriteConcurrency,
+            async (proposal) => {
+              try {
+                const won =
+                  await participantModel.compareAndSetPlacementBaseline(
+                    proposal.participant.id,
+                    proposal.participant.lastNotifiedPlacement,
+                    proposal.liveRank
+                  );
+                return { ...proposal, won };
+              } catch (error) {
+                logger.error(
+                  `[CRON] placementRecompute: participant baseline ${proposal.participant.id} failed:`,
+                  error
+                );
+                return { ...proposal, won: false };
+              }
+            }
+          );
+          baselineProposals += proposals.length;
+          for (const outcome of outcomes) {
+            if (outcome.won) baselineCasWins += 1;
+            else baselineCasLosses += 1;
+            if (!outcome.won || outcome.kind !== "ordinary") continue;
+            const eventStartedAt = monotonicNow();
+            events.emit("PLACEMENT_CHANGED", outcome.change);
+            phaseMs.eventDispatch += Math.max(
+              0,
+              monotonicNow() - eventStartedAt
+            );
+            emitted.push(outcome.change);
+          }
+          phaseMs.baselineWrites += Math.max(
+            0,
+            monotonicNow() - baselineStartedAt
+          );
+        } else for (let i = 0; i < ranked.length; i++) {
           const participant = ranked[i];
           const liveRank = i + 1;
 
@@ -674,7 +867,12 @@ function buildRecomputePlacements(dependencies = {}) {
             // races, where the handler deliberately skips the gate.
             endsAt: race.endsAt || null,
           };
+          const eventStartedAt = monotonicNow();
           events.emit("PLACEMENT_CHANGED", change);
+          phaseMs.eventDispatch += Math.max(
+            0,
+            monotonicNow() - eventStartedAt
+          );
           emitted.push(change);
 
           await participantModel.update(participant.id, {
@@ -697,6 +895,7 @@ function buildRecomputePlacements(dependencies = {}) {
     // the default hourly cooldown. A user in both kinds of race belongs to the
     // final-stretch set only, so we never nudge them twice in one tick.
     for (const userId of finalStretchUserIds) normalUserIds.delete(userId);
+    const stepSyncStartedAt = monotonicNow();
 
     if (finalStretchUserIds.size > 0) {
       try {
@@ -718,10 +917,15 @@ function buildRecomputePlacements(dependencies = {}) {
         logger.error("[CRON] placementRecompute: step-sync pull failed:", error);
       }
     }
+    phaseMs.stepSyncScheduling = Math.max(
+      0,
+      monotonicNow() - stepSyncStartedAt
+    );
 
     logger.log(
-      `[CRON] placementRecompute completed races=${races.length} participants=${participantCount} dueEffectEnqueues=${dueEffectEnqueues} recoveryEnqueues=${recoveryEnqueues} emitted=${emitted.length} durationMs=${Math.max(0, monotonicNow() - startedAtMs)}`
+      `[CRON] placementRecompute completed races=${races.length} participants=${participantCount} dueEffectEnqueues=${dueEffectEnqueues} recoveryEnqueues=${recoveryEnqueues} baselineProposals=${baselineProposals} baselineCasWins=${baselineCasWins} baselineCasLosses=${baselineCasLosses} emitted=${emitted.length} durationMs=${Math.max(0, monotonicNow() - startedAtMs)}`
     );
+    logStructuredPerformance("completed");
     return emitted;
   };
 }
@@ -756,4 +960,8 @@ function scheduleRecomputePlacements(dependencies = {}) {
   return { tick, interval };
 }
 
-module.exports = { buildRecomputePlacements, scheduleRecomputePlacements };
+module.exports = {
+  buildRecomputePlacements,
+  fiveMinuteBucketKey,
+  scheduleRecomputePlacements,
+};
