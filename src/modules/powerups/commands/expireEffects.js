@@ -8,13 +8,13 @@ const { eventBus } = require("../../../shared/events/eventBus");
 const { POWERUP_NAMES } = require("./rollPowerup");
 const { awardCoins: defaultAwardCoins } = require("../../../shared/economy/awardCoins");
 
-// Types whose EXPIRY needs the target's step total snapshotted (so a later
-// EXPIRED-row read scores the closed window with the right end). The four wave-5
-// windowed step-modifiers (§6.5) join the existing debuff/buff set.
-const SNAPSHOT_AT_EXPIRY_TYPES = [
-  "LEG_CRAMP", "QUICKSAND", "RUNNERS_HIGH", "CAMPFIRE_REST", "RAINSTORM",
-  "UPRISING", "GHOST_PEPPER", "COIN_FLIP", "RALLY_FLAG",
-];
+// Both lists live in a dependency-free constants module so consumers (the
+// race-scoring dependency-closure table) can derive from them without loading
+// this file's model/eventBus/awardCoins graph. Re-exported below unchanged.
+const {
+  SNAPSHOT_AT_EXPIRY_TYPES,
+  EXPIRY_CONSEQUENCE_TYPES,
+} = require("../constants/expiryEffectTypes");
 
 // Compute a participant's steps over [start, end] from samples, falling back to
 // a snapshot diff when there is no sample data.
@@ -219,4 +219,13 @@ async function mintPiggyBank({ effect, stepSampleModel, awardCoins, endCap }) {
 
 const expireEffects = buildExpireEffects();
 
-module.exports = { buildExpireEffects, expireEffects, evaluateDrillSergeant, mintPiggyBank };
+// Both type lists are re-exported so existing importers of this module keep
+// working; the dependency-free constants module is the definition site.
+module.exports = {
+  buildExpireEffects,
+  expireEffects,
+  evaluateDrillSergeant,
+  mintPiggyBank,
+  SNAPSHOT_AT_EXPIRY_TYPES,
+  EXPIRY_CONSEQUENCE_TYPES,
+};
