@@ -97,11 +97,15 @@ class FenceLostError extends Error {
 
 function participantTotalWriteChangesRow(write, current) {
   if (write.kind !== "participantTotal") return true;
-  if (!current || current.totalSteps !== write.totalSteps) return true;
+  // Compare against the same normalization the writer applies
+  // (normalizeParticipantWrites rounds; the model clamps rawSteps): a fractional
+  // capture (e.g. 2150.5 under a 0.5x effect) compared raw against the stored
+  // integer would classify the row as changed on every resolution forever.
+  if (!current || current.totalSteps !== Math.round(write.totalSteps)) return true;
   return (
     typeof write.rawSteps === "number" &&
     Number.isFinite(write.rawSteps) &&
-    current.rawSteps !== write.rawSteps
+    current.rawSteps !== Math.max(0, Math.round(write.rawSteps))
   );
 }
 
@@ -186,24 +190,39 @@ function normalizeParticipantWrites(writes) {
       if (!Number.isFinite(write.amount)) {
         throw new Error("invalid participant bonus capture");
       }
-      row.bonusDecrement += write.amount;
+      // Safety net only: today's sole producer (Trail Mine's Math.round'ed
+      // penalty) already emits an integer.
+      row.bonusDecrement += Math.round(write.amount);
       continue;
     }
     if (write.kind !== "participantTotal" || !Number.isFinite(write.totalSteps)) {
       throw new Error("invalid participant total capture");
     }
+    // Effect multipliers (0.5x debuffs, freeze proration, …) produce fractional
+    // totals. The legacy per-row Prisma UPDATE survived them because Postgres
+    // ROUNDS on numeric→int assignment, but jsonb_to_recordset's `integer`
+    // column is a text cast that raises 22P02 on "59939.5" — which failed the
+    // whole resolution transaction for any race with such an effect. Round here
+    // to keep the exact values the legacy writer persisted (assignment casts
+    // round half AWAY FROM ZERO vs Math.round's half-up — they differ only on
+    // negative halves, unreachable because totals are floored at 0 upstream).
+    // `rawSteps` also
+    // mirrors the model's `Math.max(0, Math.round(...))` clamp, which this bulk
+    // writer bypasses.
+    const totalSteps = Math.round(write.totalSteps);
     const hasRaw = Number.isFinite(write.rawSteps);
+    const rawSteps = hasRaw ? Math.max(0, Math.round(write.rawSteps)) : null;
     if (
       row.hasTotal &&
-      (row.totalSteps !== write.totalSteps ||
+      (row.totalSteps !== totalSteps ||
         row.hasRaw !== hasRaw ||
-        (hasRaw && row.rawSteps !== write.rawSteps))
+        (hasRaw && row.rawSteps !== rawSteps))
     ) {
       throw new Error("conflicting participant total capture");
     }
-    row.totalSteps = write.totalSteps;
+    row.totalSteps = totalSteps;
     row.hasTotal = true;
-    row.rawSteps = hasRaw ? write.rawSteps : null;
+    row.rawSteps = rawSteps;
     row.hasRaw = hasRaw;
   }
   return [...byParticipant.values()];
@@ -845,6 +864,18 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         outcome: "failed",
         reasonClasses: job.processingDirtyReasons || ["FULL"],
         errorCode: error?.code || "WORKER_ERROR",
+        // Diagnosability for raw-query failures (dependency-closure spec,
+        // rollout item 7). Under the pg driver adapter (src/db.js) the
+        // SQLSTATE lives at meta.driverAdapterError.cause.originalCode —
+        // meta.code is undefined there; it only carries the SQLSTATE on the
+        // non-adapter engine. Log the bare five-char code only — never SQL
+        // text, IDs, raw steps, or tokens.
+        sqlState: (() => {
+          const s =
+            error?.meta?.driverAdapterError?.cause?.originalCode ??
+            error?.meta?.code;
+          return typeof s === "string" && /^[0-9A-Z]{5}$/.test(s) ? s : null;
+        })(),
       }));
       try {
         await jobModel.recordFailure({

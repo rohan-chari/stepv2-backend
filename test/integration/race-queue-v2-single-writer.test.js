@@ -314,6 +314,66 @@ describe("5a — one bulk writer per race", () => {
     assert.equal(job.state, "SUCCEEDED");
   });
 
+  // Regression (prod 2026-08-14): a 0.5x debuff over an odd step count produces
+  // a FRACTIONAL effective total (e.g. 2150.5). The legacy per-row Prisma UPDATE
+  // survived that because Postgres rounds on numeric→int assignment, but the
+  // bulk writer's jsonb_to_recordset(... "totalSteps" integer) is a text cast
+  // that raises 22P02 — failing the whole fenced transaction, so effect expiry
+  // and the snapshot never ran for any race carrying such an effect.
+  it("bulk-write persists fractional effect-adjusted totals instead of failing the fence", async () => {
+    const alice = await createUser("Fraction Alice");
+    const bob = await createUser("Fraction Bob");
+    const raceId = await createActiveRace(alice, [bob], "Fractional total race");
+    await appSettings.setFlag("raceResolutionBulkWriteV1Enabled", true);
+
+    const aliceParticipant = await prisma.raceParticipant.findFirstOrThrow({
+      where: { raceId, userId: alice.userId },
+    });
+    // Opponent-sourced Rainstorm covering the whole scoring window: every
+    // closed-bucket step Alice posts is halved.
+    const powerup = await prisma.racePowerup.create({
+      data: {
+        raceId,
+        participantId: (await prisma.raceParticipant.findFirstOrThrow({
+          where: { raceId, userId: bob.userId },
+        })).id,
+        userId: bob.userId,
+        type: "RAINSTORM",
+        status: "USED",
+        usedAt: new Date(),
+        targetUserId: alice.userId,
+      },
+    });
+    await prisma.raceActiveEffect.create({
+      data: {
+        raceId,
+        targetParticipantId: aliceParticipant.id,
+        targetUserId: alice.userId,
+        sourceUserId: bob.userId,
+        powerupId: powerup.id,
+        type: "RAINSTORM",
+        status: "ACTIVE",
+        startsAt: new Date(Date.now() - 6 * HOUR_MS),
+        expiresAt: new Date(Date.now() + HOUR_MS),
+      },
+    });
+
+    // Odd closed-bucket count → 4301 * 0.5 = 2150.5 effective.
+    assert.equal((await postSamples(alice, [sampleAt(2, 4301)])).status, 200);
+    const claims = await drain(makeWorker());
+    assert.ok(claims.length >= 1);
+
+    const job = await RaceResolutionJobV2.findByRaceId(raceId);
+    assert.equal(job.state, "SUCCEEDED");
+    const stored = await prisma.raceParticipant.findUniqueOrThrow({
+      where: { id: aliceParticipant.id },
+    });
+    // Rounded exactly as the legacy assignment cast did, never truncated —
+    // and the raw walked figure rides the same write un-halved.
+    assert.equal(stored.totalSteps, 2151);
+    assert.equal(stored.rawSteps, 4301);
+  });
+
   it("two users in the same two races sync concurrently: one job row per race, totals match a serial control, zero deadlocks over 50 iterations", async () => {
     const alice = await createUser("Alice");
     const bob = await createUser("Bob");
