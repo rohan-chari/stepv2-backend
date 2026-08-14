@@ -21,6 +21,13 @@ const { buildRequireAuth } = require("../../../middleware/requireAuth");
 const { getMondayOfWeek, getTimeZoneParts } = require("../../../shared/time/week");
 const { calculateStreak } = require("../streak");
 const { SeasonScore } = require("../../ranked");
+const {
+  getProfileStats: defaultGetProfileStats,
+} = require("../queries/getProfileStats");
+const { appSettings: defaultAppSettings } = require("../../../shared/config/appSettings");
+const {
+  isStrictFlagEnabled,
+} = require("../../../shared/config/isStrictFlagEnabled");
 
 // 64 KiB cap on the encoded sync-v2 body (§6.4). The app-wide express.json outer
 // limit is unchanged; this is the tighter v2-specific bound.
@@ -43,6 +50,9 @@ function createStepsRouter(dependencies = {}) {
   const raceParticipantModel =
     dependencies.RaceParticipant || defaultRaceParticipantModel;
   const getCalendar = dependencies.getStepCalendar || defaultGetStepCalendar;
+  const getProfileStats =
+    dependencies.getProfileStats || defaultGetProfileStats;
+  const settings = dependencies.appSettings || defaultAppSettings;
 
   router.use(requireAuth);
 
@@ -252,14 +262,29 @@ function createStepsRouter(dependencies = {}) {
   // GET /steps/stats
   router.get("/stats", async (req, res) => {
     try {
-      const allSteps = await readStepsHistory(req.user.id);
-
       const now = new Date();
       const parts = getTimeZoneParts(now, req.timeZone);
       const todayStr = `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
       const weekOf = getMondayOfWeek(now, req.timeZone);
       const monthStart = `${parts.year}-${String(parts.month).padStart(2, "0")}-01`;
       const yearStart = `${parts.year}-01-01`;
+
+      const compact =
+        req.query.view === "profile-v1" &&
+        (await isStrictFlagEnabled(settings, "apiProfileStatsV1Enabled"));
+      if (compact) {
+        return res.json(
+          await getProfileStats({
+            userId: req.user.id,
+            today: todayStr,
+            weekStart: weekOf,
+            monthStart,
+            yearStart,
+          })
+        );
+      }
+
+      const allSteps = await readStepsHistory(req.user.id);
 
       let thisWeek = 0;
       let thisMonth = 0;

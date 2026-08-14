@@ -17,6 +17,8 @@ Object.assign(module.exports, require("./services/tournamentRounds"));
 Object.assign(module.exports, require("./services/tournamentStart"));
 Object.assign(module.exports, require("./queries/serializeTournament"));
 Object.assign(module.exports, require("./queries/getTournament"));
+Object.assign(module.exports, require("./queries/getTournamentDetail"));
+Object.assign(module.exports, require("./queries/getTournamentActionWallet"));
 Object.assign(module.exports, require("./queries/getTournamentsForUser"));
 Object.assign(module.exports, require("./queries/getPublicTournaments"));
 Object.assign(module.exports, require("./queries/getSharedTournamentPreview"));

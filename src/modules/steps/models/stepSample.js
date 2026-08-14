@@ -1,4 +1,7 @@
 const { prisma } = require("../../../db");
+const {
+  bumpScoringInputVersion,
+} = require("../services/scoringInputVersion");
 
 // One raw, set-based, ON CONFLICT DO UPDATE multi-row insert (Five-Minute Step
 // Samples §3.3). Absent optional fields are inserted as NULL; EXCLUDED (the
@@ -158,6 +161,7 @@ const StepSample = {
     );
 
     await insertSamplesOn(client, userId, kept.map((i) => i.raw));
+    await bumpScoringInputVersion(client, userId);
   },
 
   async findByUserIdAndTimeRange(userId, startTime, endTime) {

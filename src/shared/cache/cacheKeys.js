@@ -13,6 +13,8 @@
 // (`variantsFor*` below) rather than relying on SCAN, which is O(keyspace) and
 // unsafe to run on the request path.
 
+const { createHash } = require("node:crypto");
+
 const PREFIX = {
   SHOP_CATALOG: "v1:catalog:shop",
   POWERUP_CATALOG: "v1:catalog:powerups",
@@ -23,6 +25,7 @@ const PREFIX = {
   USER_COSMETICS: "v1:user:cosmetics",
   RACE_MESSAGES: "v1:race:msgs",
   RACE_PROGRESS: "v1:race:progress",
+  RACE_RESOLUTION_ARTIFACT: "v1:race:resolution-artifact",
   // C4 (spec §3): per-user derived bits.
   USER_DAILY: "v1:user:daily",
   USER_INVENTORY: "v1:user:inventory",
@@ -31,6 +34,13 @@ const PREFIX = {
   USER_DISCARD_CAP: "v1:user:discardcap",
   // C5 (spec §3): the assembled `/auth/me` response.
   USER_AUTHME: "v1:user:authme",
+  USER_FRIENDS: "v1:user:friends",
+  USER_FRIENDS_VERSION: "v1:user:friendsver",
+  USER_COSMETICS_VERSION: "v1:user:cosmeticsver",
+  LEADERBOARD_STEPS_GLOBAL: "v1:leaderboard:steps:global",
+  LEADERBOARD_STEPS_FRIENDS: "v1:leaderboard:steps:friends",
+  LEADERBOARD_LOCK: "v1:lock:leaderboard",
+  FRIEND_SEARCH_RATE: "v1:user:friendsearchrate",
 };
 
 // The only two values `resolveReleaseChannel` can ever produce
@@ -100,6 +110,64 @@ function userCosmetics(userId) {
   return `${PREFIX.USER_COSMETICS}:${userId}`;
 }
 
+function userCosmeticsVersion(userId) {
+  return `${PREFIX.USER_COSMETICS_VERSION}:${userId}`;
+}
+
+function userFriends(userId) {
+  return `${PREFIX.USER_FRIENDS}:${userId}`;
+}
+
+function userFriendsVersion(userId) {
+  return `${PREFIX.USER_FRIENDS_VERSION}:${userId}`;
+}
+
+const LEADERBOARD_PERIODS = new Set(["today", "week", "month", "allTime"]);
+function normalizedLeaderboardBoundary(period, boundary) {
+  if (!LEADERBOARD_PERIODS.has(period)) throw new TypeError("invalid leaderboard period");
+  if (period === "allTime") {
+    if (boundary !== "all") throw new TypeError("allTime boundary must be all");
+    return "all";
+  }
+  if (typeof boundary !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(boundary)) {
+    throw new TypeError("leaderboard boundary must be YYYY-MM-DD");
+  }
+  return boundary;
+}
+
+function leaderboardGlobal({ eligibilityEpoch, period, boundary }) {
+  if (!Number.isSafeInteger(eligibilityEpoch) || eligibilityEpoch < 0) {
+    throw new TypeError("invalid eligibility epoch");
+  }
+  return `${PREFIX.LEADERBOARD_STEPS_GLOBAL}:${eligibilityEpoch}:${period}:${normalizedLeaderboardBoundary(period, boundary)}`;
+}
+
+function leaderboardFriends({ viewerId, eligibilityEpoch, acceptedSetHash, period, boundary }) {
+  if (!viewerId || !/^[a-f0-9]{64}$/.test(acceptedSetHash || "")) {
+    throw new TypeError("invalid friends leaderboard identity");
+  }
+  if (!Number.isSafeInteger(eligibilityEpoch) || eligibilityEpoch < 0) {
+    throw new TypeError("invalid eligibility epoch");
+  }
+  return `${PREFIX.LEADERBOARD_STEPS_FRIENDS}:${viewerId}:${eligibilityEpoch}:${acceptedSetHash}:${period}:${normalizedLeaderboardBoundary(period, boundary)}`;
+}
+
+function leaderboardLock(logicalRankingKey) {
+  const digest = createHash("sha256").update(logicalRankingKey).digest("hex");
+  return `${PREFIX.LEADERBOARD_LOCK}:${digest}`;
+}
+
+function acceptedFriendSetHash(friendIds) {
+  return createHash("sha256").update([...new Set(friendIds)].sort().join("\n")).digest("hex");
+}
+
+function friendSearchRate(userId, utcMinuteEpoch) {
+  if (!userId || !Number.isSafeInteger(utcMinuteEpoch) || utcMinuteEpoch < 0) {
+    throw new TypeError("invalid friend-search rate key input");
+  }
+  return `${PREFIX.FRIEND_SEARCH_RATE}:${userId}:${utcMinuteEpoch}`;
+}
+
 // ── C2: race chat lists + their durable version marker ──────────────────────
 function raceMessages(raceId, kind) {
   return `${PREFIX.RACE_MESSAGES}:${raceId}:${kind}`;
@@ -109,6 +177,10 @@ function raceMessagesVersion(raceId, kind) {
   return `v1:race:msgver:${raceId}:${kind}`;
 }
 
+function raceMessageWatermark(raceId) {
+  return `v1:race:msgwatermark:${raceId}:USER`;
+}
+
 const MESSAGE_KINDS = ["USER", "SYSTEM"];
 
 /** Both list keys + both version keys for a race — the full invalidation set. */
@@ -116,6 +188,7 @@ function raceMessagesAllKeys(raceId) {
   return [
     ...MESSAGE_KINDS.map((k) => raceMessages(raceId, k)),
     ...MESSAGE_KINDS.map((k) => raceMessagesVersion(raceId, k)),
+    raceMessageWatermark(raceId),
   ];
 }
 
@@ -190,6 +263,16 @@ function userRecentMints(userId) {
   return `${PREFIX.USER_RECENT_MINTS}:${userId}`;
 }
 
+function raceResolutionArtifact(opaqueArtifactId) {
+  if (
+    typeof opaqueArtifactId !== "string" ||
+    !/^[A-Za-z0-9_-]{1,128}$/.test(opaqueArtifactId)
+  ) {
+    throw new TypeError("invalid opaque artifact id");
+  }
+  return `${PREFIX.RACE_RESOLUTION_ARTIFACT}:${opaqueArtifactId}`;
+}
+
 // ── C4: the user's remaining daily discard-coin cap ─────────────────────────
 // Batch 2026-08-10b item 2. Keyed on `userId` ALONE — deliberately NO localDate
 // component (architect S2): at a 60s TTL a date component buys nothing, and it
@@ -211,13 +294,26 @@ function userDiscardCap(userId) {
 // The variant set is EXACTLY two values, so invalidation enumerates them rather
 // than SCANning (same rule as the C1 catalog variants).
 const AUTHME_VARIANTS = ["0", "1"];
+const AUTHME_CONTRACTS = ["legacy", "shell-v1"];
 
-function userAuthMe(userId, variant) {
-  return `${PREFIX.USER_AUTHME}:${userId}:${variant ? "1" : "0"}`;
+function userAuthMe(userId, variant, contract = "legacy") {
+  if (!AUTHME_CONTRACTS.includes(contract)) {
+    throw new TypeError("invalid auth-me contract variant");
+  }
+  const fine = variant ? "1" : "0";
+  // Keep the deployed legacy key byte-for-byte stable during rolling deploys;
+  // only the additive compact contract receives the new contract axis.
+  return contract === "legacy"
+    ? `${PREFIX.USER_AUTHME}:${userId}:${fine}`
+    : `${PREFIX.USER_AUTHME}:${userId}:${contract}:${fine}`;
 }
 
 function userAuthMeVariants(userId) {
-  return AUTHME_VARIANTS.map((v) => `${PREFIX.USER_AUTHME}:${userId}:${v}`);
+  return AUTHME_CONTRACTS.flatMap((contract) =>
+    AUTHME_VARIANTS.map((variant) =>
+      userAuthMe(userId, variant === "1", contract)
+    )
+  );
 }
 
 module.exports = {
@@ -242,8 +338,18 @@ module.exports = {
   balanceKey,
   globalEventsKey,
   userCosmetics,
+  userCosmeticsVersion,
+  userFriends,
+  userFriendsVersion,
+  leaderboardGlobal,
+  leaderboardFriends,
+  leaderboardLock,
+  acceptedFriendSetHash,
+  friendSearchRate,
   raceMessages,
   raceMessagesVersion,
+  raceMessageWatermark,
   raceMessagesAllKeys,
+  raceResolutionArtifact,
   MESSAGE_KINDS,
 };

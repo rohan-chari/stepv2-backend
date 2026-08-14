@@ -66,6 +66,17 @@ const discardCapCache = require("../../powerups/services/discardCapCache");
 const {
   prefetchRaceScoringModels: defaultPrefetchRaceScoringModels,
 } = require("../services/raceScoringPrefetch");
+const {
+  computeRaceState: defaultComputeRaceState,
+} = require("../services/computeRaceState");
+const {
+  raceResolutionDisplayArtifact: defaultDisplayArtifactStore,
+  computeArtifactReuseDeadline,
+} = require("../services/raceResolutionDisplayArtifact");
+const {
+  buildRaceResolutionInputFingerprint: defaultBuildInputFingerprint,
+} = require("../services/raceResolutionInputFingerprint");
+const { isStrictFlagEnabled } = require("../../../shared/config/isStrictFlagEnabled");
 
 // The (releaseChannel × supportsCharacters × supportsRemoteAssets) combinations
 // `characterPresentation` can produce. Closed set: `resolveReleaseChannel` only
@@ -264,6 +275,18 @@ function buildGetRaceProgress(deps = {}) {
   const prefetchRaceScoringModels =
     deps.prefetchRaceScoringModels || defaultPrefetchRaceScoringModels;
   const logger = deps.logger || console;
+  const computeRaceState = deps.computeRaceState || defaultComputeRaceState;
+  const displayArtifactStore =
+    deps.raceResolutionDisplayArtifact || defaultDisplayArtifactStore;
+  const buildInputFingerprint =
+    deps.buildRaceResolutionInputFingerprint || defaultBuildInputFingerprint;
+
+  async function displayArtifactReuseEnabled() {
+    if (deps.raceResolutionDisplayArtifactReuseV1Enabled != null) {
+      return deps.raceResolutionDisplayArtifactReuseV1Enabled === true;
+    }
+    return isStrictFlagEnabled(settings, "raceResolutionDisplayArtifactReuseV1Enabled");
+  }
 
   // The gate for EVERY Phase-D behavior change. Two conditions, both required:
   //   * `REDIS_URL` is set — with it unset the wrapper is fully inert (Phase A
@@ -690,6 +713,78 @@ function buildGetRaceProgress(deps = {}) {
       scoringTimeZone,
       asOf: nowTime,
       source: persist ? "replay-legacy" : "replay",
+    });
+  }
+
+  function buildSnapshotFromResolution({ result, race: displayRace = null, scoringTimeZone }) {
+    const race = displayRace || result?.race;
+    const capture = result?.displayCapture;
+    if (!race || !capture || !Array.isArray(capture.stepTotals)) return null;
+    const participantById = new Map(
+      (race.participants || []).map((participant) => [participant.id, participant])
+    );
+    const stepTotals = capture.stepTotals.map((row) => ({
+      participant: participantById.get(row.participantId),
+      totalSteps: row.totalSteps,
+    }));
+    if (stepTotals.some((row) => !row.participant)) return null;
+    const placementByUserId = placementsByUserId(
+      stepTotals.map(({ participant, totalSteps }) => ({
+        userId: participant.userId,
+        totalSteps,
+        finishedAt: participant.finishedAt,
+        placement: participant.placement,
+        joinedAt: participant.joinedAt,
+      }))
+    );
+    const asOf = new Date(capture.asOf);
+    if (Number.isNaN(asOf.getTime())) return null;
+    const activeEvent = (capture.globalEvents || []).find((event) => {
+      const startMs = new Date(event.startsAt).getTime();
+      const endMs = new Date(event.endsAt).getTime();
+      return startMs <= asOf.getTime() && asOf.getTime() < endMs;
+    });
+    return snapshotStore.buildSnapshot({
+      race: {
+        raceId: race.id,
+        status: race.status,
+        endsAt: race.endsAt,
+        maxDurationDays: race.maxDurationDays,
+        targetSteps: race.targetSteps,
+        isTeamRace: race.isTeamRace,
+        teamSize: race.teamSize ?? null,
+        winnerTeam: race.winnerTeam ?? null,
+        powerupsEnabled: race.powerupsEnabled,
+        powerupStepInterval: race.powerupStepInterval,
+        ...tournamentFields(race),
+      },
+      participants: stepTotals.map(({ participant, totalSteps }) => ({
+        participantId: participant.id,
+        userId: participant.userId,
+        displayName: participant.user.displayName,
+        profilePhotoUrl: participant.user.profilePhotoUrl,
+        presentation: buildPresentationVariants(participant.user),
+        totalSteps,
+        finishedAt: participant.finishedAt,
+        forfeitedAt: participant.forfeitedAt ?? null,
+        team: participant.team ?? null,
+        placement: placementByUserId.get(participant.userId) ?? null,
+        currentMultiplier:
+          capture.currentMultiplierByParticipantId?.[participant.id] ?? 1,
+        baseAdjusted: result.baseAdjustedByParticipantId?.[participant.id] ?? null,
+      })),
+      teams: race.isTeamRace ? buildTeamsBlock(race, stepTotals) : null,
+      globalEvent: activeEvent
+        ? {
+            active: true,
+            multiplier: Number(activeEvent.multiplier),
+            endsAt: activeEvent.endsAt,
+          }
+        : null,
+      activeEffects: capture.activeEffects || [],
+      scoringTimeZone,
+      asOf,
+      source: "replay-artifact",
     });
   }
 
@@ -1253,13 +1348,17 @@ function buildGetRaceProgress(deps = {}) {
     userTimeZone = null,
     // Trailing/defaulted capability gate: old direct callers retain the safe
     // no-remote-art presentation.
-    supportsRemoteAssets = false
+    supportsRemoteAssets = false,
+    resolvedContext = null
   ) {
     const race = await raceModel.findById(raceId);
     if (!race) {
       const error = new Error("Race not found");
       error.statusCode = 404;
       throw error;
+    }
+    if (resolvedContext && typeof resolvedContext === "object") {
+      resolvedContext.race = race;
     }
 
     const myParticipant = race.participants.find((p) => p.userId === userId);
@@ -1353,16 +1452,86 @@ function buildGetRaceProgress(deps = {}) {
         snapshotStore.__bump("snapshotHits");
         snapshot = usable;
       } else {
+        let displayArtifactRef = null;
         // Miss or soft-expiry. Exactly ONE request rebuilds; the lock
         // self-expires (PX) so a crashed winner cannot wedge it.
         const rebuilt = await snapshotStore.withRebuildLock(raceId, async () => {
           snapshotStore.__bump("requestReplays");
-          const fresh = await computeSharedState({
-            race,
-            raceId,
-            scoringTimeZone,
-            persist: false,
-          });
+          let fresh = null;
+          let artifactEnabled = false;
+          try {
+            artifactEnabled = await displayArtifactReuseEnabled();
+          } catch {
+            artifactEnabled = false;
+          }
+          if (artifactEnabled) {
+            try {
+              const configA = await balanceConfig.getSnapshot();
+              const fingerprintA = await buildInputFingerprint({
+                raceId,
+                now: now(),
+                balanceConfigVersion: configA.version,
+              });
+              if (fingerprintA) {
+                const computed = await computeRaceState({
+                  raceId,
+                  timeZone: scoringTimeZone,
+                  userIds: [userId],
+                });
+                const configB = await balanceConfig.getSnapshot();
+                const fingerprintB = await buildInputFingerprint({
+                  raceId,
+                  now: now(),
+                  balanceConfigVersion: configB.version,
+                });
+                const result = computed?.result || null;
+                fresh = buildSnapshotFromResolution({
+                  result,
+                  race,
+                  scoringTimeZone,
+                });
+                const reuseDeadline = fingerprintB && result
+                  ? computeArtifactReuseDeadline({
+                      asOf: result.displayCapture?.asOf,
+                      timeZone: scoringTimeZone,
+                      raceEndsAt: result.race?.endsAt,
+                      nextSampleBoundary: fingerprintB.nextSampleBoundary,
+                      activeEffects: fingerprintB.activeEffects,
+                      globalEvents: fingerprintB.globalEvents,
+                    })
+                  : null;
+                if (
+                  fresh &&
+                  reuseDeadline &&
+                  fingerprintA.digest === fingerprintB?.digest &&
+                  String(configA.version ?? "code-default") ===
+                    String(configB.version ?? "code-default")
+                ) {
+                  displayArtifactRef = await displayArtifactStore.put({
+                    raceId,
+                    timeZone: scoringTimeZone,
+                    triggeringUserIds: [userId].filter(Boolean).sort(),
+                    participants: result.displayCapture.stepTotals,
+                    inputFingerprint: fingerprintB.digest,
+                    balanceConfigVersion: configB.version ?? null,
+                    reuseDeadline: reuseDeadline.toISOString(),
+                    writes: computed.writes,
+                    result,
+                  });
+                }
+              }
+            } catch {
+              displayArtifactRef = null;
+            }
+          }
+          if (!fresh) {
+            fresh = await computeSharedState({
+              race,
+              raceId,
+              scoringTimeZone,
+              persist: false,
+            });
+          }
           await snapshotStore.writeSnapshot(raceId, fresh);
           return fresh;
         });
@@ -1377,6 +1546,9 @@ function buildGetRaceProgress(deps = {}) {
             raceId,
             userId,
             timeZone: scoringTimeZone,
+            reason: "DISPLAY_REFRESH",
+            priority: "IMMEDIATE",
+            displayArtifact: displayArtifactRef,
           });
         } else if (usable) {
           // Lock loser with a stale-but-present snapshot: serve it. This is why

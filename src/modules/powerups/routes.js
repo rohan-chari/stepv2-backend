@@ -6,6 +6,11 @@ const {
 const {
   getPowerupCopyCatalog: defaultGetPowerupCopyCatalog,
 } = require("./queries/getPowerupCopyCatalog");
+const { appSettings: defaultAppSettings } = require("../../shared/config/appSettings");
+const {
+  isStrictFlagEnabled,
+} = require("../../shared/config/isStrictFlagEnabled");
+const { sendConditionalJson } = require("../../shared/http/representationEtag");
 
 // Global powerup inventory routes (additive; only the new app calls these).
 function createPowerupsRouter(dependencies = {}) {
@@ -17,6 +22,7 @@ function createPowerupsRouter(dependencies = {}) {
 
   const getPowerupCopyCatalog =
     dependencies.getPowerupCopyCatalog || defaultGetPowerupCopyCatalog;
+  const settings = dependencies.appSettings || defaultAppSettings;
 
   // GET /powerups/catalog — the single source of truth for powerup copy (§9.5).
   //
@@ -29,6 +35,9 @@ function createPowerupsRouter(dependencies = {}) {
   router.get("/catalog", async (req, res) => {
     try {
       const result = await getPowerupCopyCatalog(req.clientFeatures || new Set());
+      if (await isStrictFlagEnabled(settings, "apiStaticEtagsV1Enabled")) {
+        return sendConditionalJson(req, res, result, "X-Client-Features");
+      }
       res.json(result);
     } catch (error) {
       console.error("Get powerup copy catalog error:", error);

@@ -8,6 +8,8 @@ const {
 const {
   searchDiscoverableUsers,
 } = require("../queries/searchDiscoverableUsers");
+const { appSettings: defaultAppSettings } = require("../../../shared/config/appSettings");
+const { friendSearchRateLimiter: defaultRedisLimiter } = require("./friendSearchRateLimiter");
 
 class SearchRateLimitError extends AppError {
   constructor(retryAfter) {
@@ -22,6 +24,9 @@ function buildSearchFriendsByIdentity(dependencies = {}) {
   const searchUsers =
     dependencies.searchDiscoverableUsers || searchDiscoverableUsers;
   const now = dependencies.now || (() => new Date());
+  const settings = dependencies.appSettings || defaultAppSettings;
+  const redisLimiter = dependencies.friendSearchRateLimiter || defaultRedisLimiter;
+  const logger = dependencies.logger || console;
 
   return async function searchFriendsByIdentity({ userId, q }) {
     if (typeof q !== "string") {
@@ -40,7 +45,21 @@ function buildSearchFriendsByIdentity(dependencies = {}) {
     }
 
     const current = now();
-    const window = await rateWindow.consume(userId, current);
+    let window = null;
+    let redisEnabled = false;
+    try {
+      redisEnabled = (await settings.getFlag("redisFriendSearchRateLimitEnabled")) === true;
+    } catch {}
+    if (redisEnabled) {
+      const startedAt = Date.now();
+      try { window = await redisLimiter(userId, current); } catch {}
+      logger.info?.("social-cache", {
+        surface: "friend-search-rate",
+        outcome: window ? "hit" : "bypass/error",
+        durationMs: Date.now() - startedAt,
+      });
+    }
+    if (!window) window = await rateWindow.consume(userId, current);
     if (window.count > 30) {
       const nextMinute = window.windowStart.getTime() + 60_000;
       const retryAfter = Math.max(

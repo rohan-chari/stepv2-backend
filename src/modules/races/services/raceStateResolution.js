@@ -7,6 +7,7 @@ const { RacePowerupEvent } = require("../../powerups/models/racePowerupEvent");
 const { GlobalStepEvent } = require("../../steps/models/globalStepEvent");
 const {
   computeEffectModifiers,
+  signedMultiplierForEffects,
   umbrellaAdjustedRainstorms,
 } = require("./effectiveStepScoring");
 const {
@@ -295,6 +296,7 @@ async function calculateCurrentTotal({
 
   return {
     total,
+    currentMultiplierRaw: signedMultiplierForEffects(allEffects, umbrellaNowMs),
     leechTransfers,
     legCramps,
     runnersHighs,
@@ -497,11 +499,14 @@ async function triggerTrailMines({
   raceActiveEffectModel,
   participantModel,
   powerupEventModel,
+  activeEffects = null,
 }) {
   if (typeof raceActiveEffectModel.findActiveForRace !== "function") {
     return;
   }
-  const mines = (await raceActiveEffectModel.findActiveForRace(raceId)).filter(
+  const mines = (Array.isArray(activeEffects)
+    ? activeEffects
+    : await raceActiveEffectModel.findActiveForRace(raceId)).filter(
     (effect) => effect.type === "TRAIL_MINE"
   );
 
@@ -773,7 +778,7 @@ function buildResolveRaceState(dependencies = {}) {
               raceEndsAt: race.endsAt,
             });
 
-          const { total, leechTransfers } =
+          const { total, leechTransfers, currentMultiplierRaw } =
             await calculateCurrentTotal({
               raceId: race.id,
               racePowerupsEnabled: race.powerupsEnabled,
@@ -792,6 +797,7 @@ function buildResolveRaceState(dependencies = {}) {
             frozen: false,
             preLeechTotal: total,
             leechTransfers,
+            currentMultiplierRaw,
           };
 
           // Capture the requesting user's RAW-walked-steps box total for the gate
@@ -899,6 +905,19 @@ function buildResolveRaceState(dependencies = {}) {
         stepTotals[index] = { participant: e.participant, totalSteps: finalTotal };
       }
 
+      // Freeze the exact pre-detonation standings exposed by the HTTP display
+      // path. Trail Mine then continues against the mutable stepTotals array so
+      // the worker capture carries post-detonation writes only.
+      const preMineStepTotals = stepTotals.map(({ participant, totalSteps }) => ({
+        participantId: participant.id,
+        userId: participant.userId,
+        totalSteps,
+      }));
+      const activeEffects =
+        race.powerupsEnabled && typeof scoringEffectModel.findActiveForRace === "function"
+          ? (await scoringEffectModel.findActiveForRace(race.id)) || []
+          : [];
+
       if (race.powerupsEnabled) {
         await triggerTrailMines({
           raceId: race.id,
@@ -907,8 +926,23 @@ function buildResolveRaceState(dependencies = {}) {
           raceActiveEffectModel: scoringEffectModel,
           participantModel,
           powerupEventModel,
+          activeEffects,
         });
       }
+
+      const currentMs = currentTime.getTime();
+      const activeGlobalEvent = globalEvents.find((event) => {
+        const startsAt = new Date(event.startsAt).getTime();
+        const endsAt = new Date(event.endsAt).getTime();
+        return startsAt <= currentMs && currentMs < endsAt && Number(event.multiplier) > 1;
+      });
+      const globalMultiplier = activeGlobalEvent ? Number(activeGlobalEvent.multiplier) : 1;
+      const currentMultiplierByParticipantId = Object.fromEntries(
+        preLeech.map((entry) => [
+          entry.participant.id,
+          (entry.frozen ? 1 : entry.currentMultiplierRaw ?? 1) * globalMultiplier,
+        ])
+      );
 
       return {
         raceId: race.id,
@@ -919,6 +953,13 @@ function buildResolveRaceState(dependencies = {}) {
         boxEffectiveStepsByUser: Object.fromEntries(boxEffectiveStepsByUser),
         // C3: participantId -> RAW walked steps, for the worker-side expireEffects.
         baseAdjustedByParticipantId,
+        displayCapture: {
+          stepTotals: preMineStepTotals,
+          currentMultiplierByParticipantId,
+          activeEffects,
+          globalEvents,
+          asOf: currentTime,
+        },
         updatedParticipants: stepTotals.length,
         // Retained (always 0) so existing callers reading this keep working.
         newFinishers: 0,

@@ -115,6 +115,10 @@ function buildRecordReferral(dependencies = {}) {
           referrer.id,
           newUser.id
         );
+        await require("../services/friendsTopologyCache").invalidatePairSafe(
+          referrer.id,
+          newUser.id
+        );
       } catch (friendError) {
         console.warn(
           `Referral auto-friend skipped: ${

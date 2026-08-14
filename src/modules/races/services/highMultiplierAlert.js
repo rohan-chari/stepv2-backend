@@ -29,6 +29,8 @@ async function evaluateHighMultiplierAlert({
   otherParticipants = [],
   prisma = defaultPrisma,
   events = eventBus,
+  emitAlert = null,
+  deferClaim = false,
   now = () => new Date(),
 }) {
   if (disabled()) return { emitted: false, reason: "disabled" };
@@ -40,13 +42,16 @@ async function evaluateHighMultiplierAlert({
 
   // Crossed ABOVE the threshold and not yet notified → claim + emit once.
   if (Number.isFinite(mult) && mult > T && !alreadyNotified) {
-    const claimed = await prisma.raceParticipant.updateMany({
-      where: { id: participant.id, highMultiplierNotifiedAt: null },
-      data: { highMultiplierNotifiedAt: now() },
-    });
-    if (!claimed || claimed.count !== 1) {
-      // Another concurrent recompute won the claim; it emits, not us.
-      return { emitted: false, reason: "claim_lost" };
+    const claimedAt = now();
+    if (!deferClaim) {
+      const claimed = await prisma.raceParticipant.updateMany({
+        where: { id: participant.id, highMultiplierNotifiedAt: null },
+        data: { highMultiplierNotifiedAt: claimedAt },
+      });
+      if (!claimed || claimed.count !== 1) {
+        // Another concurrent recompute won the claim; it emits, not us.
+        return { emitted: false, reason: "claim_lost" };
+      }
     }
     const recipients = (otherParticipants || []).filter(
       (p) =>
@@ -80,7 +85,7 @@ async function evaluateHighMultiplierAlert({
       );
     } catch {}
 
-    events.emit("HIGH_MULTIPLIER_ALERT", {
+    const alert = {
       raceId: race?.id ?? participant.raceId ?? null,
       raceName: race?.name ?? null,
       actorUserId: participant.userId,
@@ -88,8 +93,18 @@ async function evaluateHighMultiplierAlert({
       multiplier: Math.round(mult),
       recipientUserIds: recipients.map((p) => p.userId),
       stealthed,
-    });
-    return { emitted: true, multiplier: Math.round(mult) };
+    };
+    const deliveryIntents = emitAlert
+      ? await emitAlert(alert, {
+          participantId: participant.id,
+          claimedAt,
+        })
+      : (events.emit("HIGH_MULTIPLIER_ALERT", alert), []);
+    return {
+      emitted: true,
+      multiplier: Math.round(mult),
+      deliveryIntents: Array.isArray(deliveryIntents) ? deliveryIntents : [],
+    };
   }
 
   // Dropped back to/below the threshold → clear the flag to re-arm.

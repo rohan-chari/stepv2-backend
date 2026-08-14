@@ -48,6 +48,10 @@ const { signedMultiplierForEffects } = require("./effectiveStepScoring");
 const defaultSnapshotStore = require("./raceProgressSnapshot");
 const { appSettings: defaultAppSettings } = require("../../../shared/config/appSettings");
 const redisCache = require("../../../shared/cache/redisCache");
+const { eventBus } = require("../../../shared/events/eventBus");
+const {
+  raceResolutionDeliveryIntents: defaultDeliveryIntents,
+} = require("./raceResolutionDeliveryIntents");
 
 function buildRaceProgressPostCommit(dependencies = {}) {
   const effectModel = dependencies.RaceActiveEffect || RaceActiveEffect;
@@ -58,6 +62,9 @@ function buildRaceProgressPostCommit(dependencies = {}) {
   const snapshotStore = dependencies.raceProgressSnapshot || defaultSnapshotStore;
   const settings = dependencies.appSettings || defaultAppSettings;
   const logger = dependencies.logger || console;
+  const deliveryIntents =
+    dependencies.raceResolutionDeliveryIntents || defaultDeliveryIntents;
+  const events = dependencies.eventBus || eventBus;
   const now = dependencies.now || (() => new Date());
 
   // Same two-condition gate the endpoint uses. With the flag off the worker
@@ -96,14 +103,20 @@ function buildRaceProgressPostCommit(dependencies = {}) {
    * participant — the same `signedMultiplierForEffects` the display path folds,
    * times any live global 2x event (magnitude only, sign preserved).
    */
-  async function runHighMultiplierAlert({ raceId, result }) {
+  async function runHighMultiplierAlert({
+    raceId,
+    result,
+    deferDelivery = false,
+    sourceGeneration = null,
+  }) {
     const race = result?.race;
-    if (!race || !race.powerupsEnabled) return;
+    if (!race || !race.powerupsEnabled) return [];
+    const intentClaims = [];
     try {
       const accepted = (race.participants || []).filter(
         (p) => p.status === "ACCEPTED"
       );
-      if (accepted.length === 0) return;
+      if (accepted.length === 0) return intentClaims;
 
       const activeEffects = (await effectModel.findActiveForRace(raceId)) || [];
       const byParticipant = new Map();
@@ -138,13 +151,26 @@ function buildRaceProgressPostCommit(dependencies = {}) {
           ? 1
           : signedMultiplierForEffects(byParticipant.get(p.id) || [], nowMs);
         try {
-          await evaluateAlert({
+          const outcome = await evaluateAlert({
             participant: p,
             currentMultiplier: raw * eventMult,
             race,
             otherParticipants: activeForAlert,
             now,
+            ...(deferDelivery ? {
+              deferClaim: true,
+              emitAlert: async (alert, participantClaim) => {
+                intentClaims.push({
+                  kind: "HIGH_MULTIPLIER",
+                  data: alert,
+                  participantClaim,
+                  sourceGeneration,
+                });
+                return [];
+              },
+            } : {}),
           });
+          void outcome;
         } catch (error) {
           logger.error("[C3] high-multiplier alert eval failed:", error);
         }
@@ -152,6 +178,7 @@ function buildRaceProgressPostCommit(dependencies = {}) {
     } catch (error) {
       logger.error(`[C3] high-multiplier pass failed (race ${raceId}):`, error);
     }
+    return intentClaims;
   }
 
   /** SET (never DEL) the race's shared standings snapshot. */
@@ -183,22 +210,52 @@ function buildRaceProgressPostCommit(dependencies = {}) {
    * The v2 worker's `onCommitted` hook. Runs strictly AFTER the fenced Postgres
    * commit, holds no lock, and never throws.
    */
-  return async function onCommitted({ raceId, job, result, superseded = false } = {}) {
+  async function onCommitted({
+    raceId,
+    job,
+    result,
+    superseded = false,
+    deferSnapshot = false,
+    deferDelivery = false,
+  } = {}) {
     if (!raceId) return;
     if (!(await enabled())) return;
     await runExpireEffects({ raceId, result });
-    await runHighMultiplierAlert({ raceId, result });
+    const intentClaims = await runHighMultiplierAlert({
+      raceId,
+      result,
+      deferDelivery,
+      sourceGeneration: job?.processingGeneration ?? null,
+    });
     // A newer generation arrived while this one ran. Its mutation already
     // invalidated the snapshot; do not overwrite that DEL with older committed
     // totals while the follow-up worker is waiting in the quiet period.
-    if (!superseded) {
-      await publishSnapshot({
-        raceId,
-        timeZone: job?.processingTimeZone || job?.resolutionTimeZone || "UTC",
-        result,
-      });
+    const snapshotCommand = {
+      raceId,
+      timeZone: job?.processingTimeZone || job?.resolutionTimeZone || "UTC",
+    };
+    if (deferSnapshot) {
+      return deferDelivery ? { snapshotCommand, intentClaims } : { snapshotCommand };
     }
+    if (superseded) return { snapshotCommand: null, intentClaims: [] };
+    await publishSnapshot({ ...snapshotCommand, result });
+    return { snapshotCommand: null, intentClaims: [] };
+  }
+
+  // The durable post-task runner receives only the allowlisted command. It
+  // re-reads committed rows and never re-enters scoring/RNG/recipient logic.
+  onCommitted.publishSnapshotCommand = async function publishSnapshotCommand(command) {
+    if (
+      !command ||
+      typeof command.raceId !== "string" ||
+      typeof command.timeZone !== "string"
+    ) {
+      return false;
+    }
+    return publishSnapshot(command);
   };
+
+  return onCommitted;
 }
 
 const raceProgressPostCommit = buildRaceProgressPostCommit();

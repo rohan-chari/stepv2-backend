@@ -75,6 +75,90 @@ const Tournament = {
     });
   },
 
+  async findDetailV1(id) {
+    return prisma.tournament.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        creatorId: true,
+        seedId: true,
+        name: true,
+        status: true,
+        bracketSize: true,
+        matchupDurationDays: true,
+        buyInAmount: true,
+        potCoins: true,
+        fundedPrize: true,
+        prizePoolCoins: true,
+        powerupsEnabled: true,
+        powerupStepInterval: true,
+        isPublic: true,
+        shareToken: true,
+        currentRound: true,
+        totalRounds: true,
+        championUserId: true,
+        championPrizeCoinsSnapshot: true,
+        startedAt: true,
+        completedAt: true,
+        seed: {
+          select: { id: true, kind: true, championPrizeCoins: true },
+        },
+        participants: {
+          select: {
+            userId: true,
+            status: true,
+            seed: true,
+            eliminatedInRound: true,
+            joinedAt: true,
+            user: {
+              select: {
+                id: true,
+                displayName: true,
+                profilePhotoUrl: true,
+              },
+            },
+          },
+          orderBy: { joinedAt: "asc" },
+        },
+        races: {
+          select: {
+            id: true,
+            tournamentRound: true,
+            tournamentMatchIndex: true,
+            status: true,
+            endsAt: true,
+            powerupsEnabled: true,
+            winnerUserId: true,
+            participants: {
+              select: {
+                userId: true,
+                status: true,
+                totalSteps: true,
+                finishedAt: true,
+                forfeitedAt: true,
+                joinedAt: true,
+              },
+              orderBy: { joinedAt: "asc" },
+            },
+            activeEffects: {
+              where: { status: "ACTIVE" },
+              select: {
+                type: true,
+                targetUserId: true,
+                expiresAt: true,
+                metadata: true,
+              },
+            },
+          },
+          orderBy: [
+            { tournamentRound: "asc" },
+            { tournamentMatchIndex: "asc" },
+          ],
+        },
+      },
+    });
+  },
+
   async findByShareToken(shareToken) {
     if (!shareToken) return null;
     return prisma.tournament.findUnique({

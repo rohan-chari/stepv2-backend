@@ -48,12 +48,17 @@ function buildReconcileUploaderRaces(dependencies = {}) {
     dependencies.withRaceResolutionLock || defaultWithRaceResolutionLock;
   const now = dependencies.now || (() => new Date());
 
-  return async function reconcileUploaderRaces({ userId, timeZone = "UTC" }) {
+  return async function reconcileUploaderRaces({
+    userId,
+    timeZone = "UTC",
+    includeReconciledRaces = false,
+  }) {
     const races = await raceModel.findActiveForUser(userId);
     // Stable sorted order to avoid advisory-lock deadlocks across paths.
     const ordered = [...races].sort((a, b) => String(a.id).localeCompare(String(b.id)));
 
     let resolvedRaceCount = 0;
+    const reconciledRaces = [];
 
     for (const race of ordered) {
       if (race.status !== "ACTIVE" || !race.startedAt) continue;
@@ -157,7 +162,7 @@ function buildReconcileUploaderRaces(dependencies = {}) {
         // between worker cycles. High-watered: a re-sync that rewrites
         // step_samples downward must never move a player's odds backwards.
         // Frozen participants returned above, so they are never advanced.
-        await participantModel.updateStepTotals(participant.id, {
+        const updatedParticipant = await participantModel.updateStepTotals(participant.id, {
           totalSteps: finalTotal,
           rawSteps: nextRawSteps(participant.rawSteps, baseAdjusted),
         });
@@ -194,12 +199,32 @@ function buildReconcileUploaderRaces(dependencies = {}) {
           race,
           boxEffectiveSteps,
         });
+
+        // Internal claimability token/result. It is produced only after the
+        // participant update and box sync above have completed inside the same
+        // race-serialization boundary; callers use presence to decide whether
+        // STEP_SYNC is safely narrow or must become FULL.
+        if (includeReconciledRaces) {
+          reconciledRaces.push({
+            raceId: race.id,
+            participantId: participant.id,
+            totalsUpdatedAt:
+              updatedParticipant?.totalsUpdatedAt || participant.totalsUpdatedAt || null,
+            totalSteps: finalTotal,
+            rawSteps: nextRawSteps(participant.rawSteps, baseAdjusted),
+            boxEffectiveSteps,
+          });
+        }
       });
 
       resolvedRaceCount += 1;
     }
 
-    return { resolvedRaceCount, boxStateCurrent: true };
+    return {
+      resolvedRaceCount,
+      boxStateCurrent: true,
+      ...(includeReconciledRaces ? { reconciledRaces } : {}),
+    };
   };
 }
 

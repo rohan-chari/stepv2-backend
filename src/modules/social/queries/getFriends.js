@@ -3,6 +3,8 @@ const dailyStepsCache = require("../../steps/services/dailyStepsCache");
 const { appSettings } = require("../../../shared/config/appSettings");
 const { characterPresentation } = require("../../cosmetics");
 const { TEAM_RACES_FEATURE } = require("../../races/teamRaces");
+const friendsTopologyCache = require("../services/friendsTopologyCache");
+const userPresentationCache = require("../services/userPresentationCache");
 
 // TR-708: a friend is team-race-eligible once any client of theirs has declared
 // the team_races token (TR-706 records these stickily, so this never flickers
@@ -72,6 +74,72 @@ async function getPendingRequests(userId) {
   };
 }
 
+function buildGetFriendsPage(dependencies = {}) {
+  const topologyCache = dependencies.friendsTopologyCache || friendsTopologyCache;
+  const presentationCache = dependencies.userPresentationCache || userPresentationCache;
+  const settings = dependencies.appSettings || appSettings;
+
+  return async function getFriendsPage(
+    userId,
+    supportsCharacters = false,
+    supportsRemoteAssets = false
+  ) {
+    let enabled = false;
+    try {
+      const [guard, surface] = await Promise.all([
+        settings.getFlag("redisPresentationGenerationGuardEnabled"),
+        settings.getFlag("redisCacheFriendsEnabled"),
+      ]);
+      enabled = guard === true && surface === true;
+    } catch {}
+    if (!enabled) {
+      const [friends, pending] = await Promise.all([
+        getFriendsList(userId, supportsCharacters, supportsRemoteAssets),
+        getPendingRequests(userId),
+      ]);
+      return { friends, pending };
+    }
+
+    const topology = await topologyCache.get(userId);
+    const ids = [
+      ...topology.accepted,
+      ...topology.incoming,
+      ...topology.outgoing,
+    ].map((item) => item.userId);
+    const presentation = await presentationCache.getMany(ids, true);
+    const friends = topology.accepted.flatMap((item) => {
+      const friend = presentation.get(item.userId);
+      if (!friend) return [];
+      return [{
+        id: friend.id,
+        displayName: friend.displayName,
+        profilePhotoUrl: friend.profilePhotoUrl,
+        ...characterPresentation(friend, supportsCharacters, "prod", supportsRemoteAssets),
+        friendshipId: item.friendshipId,
+        teamRaceEligible: isTeamRaceEligible(friend),
+      }];
+    }).sort((a, b) => (a.displayName ?? "").localeCompare(
+      b.displayName ?? "", undefined, { sensitivity: "base" }
+    ));
+    const pendingItems = (items) => items.flatMap((item) => {
+      const user = presentation.get(item.userId);
+      return user ? [{
+        friendshipId: item.friendshipId,
+        user: { id: user.id, displayName: user.displayName, profilePhotoUrl: user.profilePhotoUrl },
+      }] : [];
+    });
+    return {
+      friends,
+      pending: {
+        incoming: pendingItems(topology.incoming),
+        outgoing: pendingItems(topology.outgoing),
+      },
+    };
+  };
+}
+
+const getFriendsPage = buildGetFriendsPage();
+
 async function getIncomingFriendRequestCount(userId) {
   return Friendship.countPendingIncoming(userId);
 }
@@ -134,4 +202,4 @@ async function getFriendsWithSteps(
     );
 }
 
-module.exports = { getFriendsList, getPendingRequests, getIncomingFriendRequestCount, getFriendsWithSteps };
+module.exports = { getFriendsList, getPendingRequests, getFriendsPage, buildGetFriendsPage, getIncomingFriendRequestCount, getFriendsWithSteps };

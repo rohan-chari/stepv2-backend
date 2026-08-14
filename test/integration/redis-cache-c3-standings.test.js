@@ -322,7 +322,207 @@ beforeEach(async () => {
   appSettings.bustCache();
   await appSettings.setFlag("raceQueueV2ClaimingDisabled", false);
   await appSettings.setFlag("inlineRaceResolutionFallback", false);
+  await appSettings.setFlag("raceResolutionDisplayArtifactReuseV1Enabled", false);
   snapshotStore.__resetCounters();
+});
+
+describe("display artifact reuse", () => {
+  it("reuses the canonical pre-mine display while committing captured mine effects and feed", async (t) => {
+    if (skipReason) return t.skip(skipReason);
+    await enableRedis();
+    await setFlag(true);
+    await appSettings.setFlag("raceResolutionDisplayArtifactReuseV1Enabled", true);
+    const alice = await createUser("Artifact Mine Alice");
+    const bob = await createUser("Artifact Mine Bob");
+    const raceId = await createActiveRace(alice, [bob], "Artifact mine");
+    await drain();
+    const participants = await prisma.raceParticipant.findMany({ where: { raceId } });
+    const owner = participants.find((row) => row.userId === alice.userId);
+    const victim = participants.find((row) => row.userId === bob.userId);
+    const powerup = await prisma.racePowerup.create({
+      data: {
+        raceId, participantId: owner.id, userId: alice.userId,
+        type: "TRAIL_MINE", rarity: "RARE", status: "USED", earnedAtSteps: 0,
+      },
+    });
+    const mine = await prisma.raceActiveEffect.create({
+      data: {
+        raceId, targetParticipantId: owner.id, targetUserId: alice.userId,
+        sourceUserId: alice.userId, powerupId: powerup.id, type: "TRAIL_MINE",
+        status: "ACTIVE", startsAt: new Date(Date.now() - HOUR_MS),
+        metadata: {
+          ownerParticipantId: owner.id,
+          positionSteps: 1000,
+          penaltyPercent: 0.1,
+          aheadParticipantIds: [],
+        },
+      },
+    });
+    assert.equal((await postSamples(bob, [sampleAt(4, 1500)])).status, 200);
+    // Fixture-only: leave scoring inputs/effect dirty but remove the sync
+    // generation so the public cold rebuild owns a pure DISPLAY_REFRESH claim.
+    await prisma.raceResolutionJobV2.delete({ where: { raceId } });
+    await probe.flushdb();
+
+    const response = await progress(alice, raceId);
+    assert.equal(
+      response.participants.find((row) => row.userId === bob.userId).totalSteps,
+      1500,
+      "HTTP keeps the legacy pre-detonation view"
+    );
+    const rename = await request(server.baseUrl, "PUT", "/auth/me/display-name", {
+      body: { displayName: "ReboundBob" },
+      token: bob.token,
+    });
+    assert.equal(rename.status, 200);
+    const events = [];
+    assert.ok(await makeWorker({
+      logger: {
+        log(line) { try { events.push(JSON.parse(line)); } catch {} },
+        error() {},
+      },
+    }).processOne());
+    const committed = events.find((event) => event.event === "race_resolution_v2");
+    assert.equal(committed?.resolutionPlan, "ARTIFACT_REUSE", JSON.stringify(events));
+    assert.equal((await prisma.raceActiveEffect.findUnique({ where: { id: mine.id } })).status, "EXPIRED");
+    const feed = await prisma.racePowerupEvent.findFirst({
+      where: { raceId, powerupType: "TRAIL_MINE", targetUserId: bob.userId },
+    });
+    assert.ok(feed);
+    assert.match(feed.description, /ReboundBob/);
+    assert.equal((await prisma.raceParticipant.findUnique({ where: { id: victim.id } })).bonusSteps, -150);
+  });
+
+  it("cold public progress emits one opaque artifact and the fenced worker consumes it", async (t) => {
+    if (skipReason) return t.skip(skipReason);
+    await enableRedis();
+    await setFlag(true);
+    await appSettings.setFlag("raceResolutionReasonAwareV1Enabled", false);
+
+    const alice = await createUser("Artifact Alice");
+    const bob = await createUser("Artifact Bob");
+    const raceId = await createActiveRace(alice, [bob], "Artifact reuse");
+    await postSamples(alice, [sampleAt(6, 1200)]);
+    await postSamples(bob, [sampleAt(6, 700)]);
+    await drain();
+    await probe.flushdb();
+
+    const baseline = await progress(alice, raceId);
+    await drain();
+    await probe.flushdb();
+    await appSettings.setFlag("raceResolutionDisplayArtifactReuseV1Enabled", true);
+    const response = await progress(alice, raceId);
+    assert.deepEqual(response, baseline, "canonical artifact snapshot must match deployed display bytes");
+    const queued = await prisma.raceResolutionJobV2.findUnique({ where: { raceId } });
+    assert.ok(queued.displayArtifactId, "the public cold rebuild stores only an opaque ref in PG");
+    assert.match(queued.displayArtifactDigest, /^[a-f0-9]{64}$/);
+    const artifactKey = `${ENV_PREFIX}${cacheKeys.raceResolutionArtifact(queued.displayArtifactId)}`;
+    assert.ok(await probe.get(artifactKey));
+
+    const events = [];
+    const logger = {
+      log(line) { try { events.push(JSON.parse(line)); } catch {} },
+      error() {},
+    };
+    assert.ok(await makeWorker({ logger }).processOne());
+    const committed = events.find((event) => event.event === "race_resolution_v2");
+    assert.equal(committed?.artifactHit, true, JSON.stringify(committed));
+    assert.equal(committed?.resolutionPlan, "ARTIFACT_REUSE");
+    assert.equal(await probe.get(artifactKey), null, "successful fenced commit consumes the key");
+  });
+
+  it("missing Redis artifact falls back to the deployed full worker without a lost update", async (t) => {
+    if (skipReason) return t.skip(skipReason);
+    await enableRedis();
+    await setFlag(true);
+    await appSettings.setFlag("raceResolutionDisplayArtifactReuseV1Enabled", true);
+
+    const alice = await createUser("Artifact Fallback Alice");
+    const bob = await createUser("Artifact Fallback Bob");
+    const raceId = await createActiveRace(alice, [bob], "Artifact fallback");
+    await postSamples(alice, [sampleAt(6, 1400)]);
+    await postSamples(bob, [sampleAt(6, 600)]);
+    await drain();
+    await probe.flushdb();
+    await progress(alice, raceId);
+
+    const queued = await prisma.raceResolutionJobV2.findUnique({ where: { raceId } });
+    assert.ok(queued.displayArtifactId);
+    const artifactKey = `${ENV_PREFIX}${cacheKeys.raceResolutionArtifact(queued.displayArtifactId)}`;
+    await probe.del(artifactKey);
+    const events = [];
+    const worker = makeWorker({
+      logger: {
+        log(line) { try { events.push(JSON.parse(line)); } catch {} },
+        error(line) {
+          try { events.push(JSON.parse(line)); }
+          catch { events.push({ error: String(line) }); }
+        },
+      },
+    });
+    assert.ok(await worker.processOne());
+    const committed = events.find((event) => event.event === "race_resolution_v2");
+    assert.equal(committed?.artifactHit, false, JSON.stringify(events));
+    assert.equal(committed?.artifactFallbackReason, "load_or_envelope_mismatch");
+    assert.equal(committed?.resolutionPlan, "FULL");
+    const totals = await participantRows(raceId);
+    assert.ok(totals.every((row) => row.totalsUpdatedAt instanceof Date));
+  });
+
+  it("a public step mutation between artifact validation and the fence forces same-run FULL", async (t) => {
+    if (skipReason) return t.skip(skipReason);
+    await enableRedis();
+    await setFlag(true);
+    await appSettings.setFlag("raceResolutionDisplayArtifactReuseV1Enabled", true);
+    const alice = await createUser("Artifact Fence Alice");
+    const bob = await createUser("Artifact Fence Bob");
+    const raceId = await createActiveRace(alice, [bob], "Artifact fence");
+    await postSamples(alice, [sampleAt(6, 1100)]);
+    await postSamples(bob, [sampleAt(6, 500)]);
+    await drain();
+    await probe.flushdb();
+    await progress(alice, raceId);
+    const queued = await prisma.raceResolutionJobV2.findUnique({ where: { raceId } });
+    const artifactKey = `${ENV_PREFIX}${cacheKeys.raceResolutionArtifact(queued.displayArtifactId)}`;
+
+    let injected = false;
+    const realTransaction = prisma.$transaction.bind(prisma);
+    const pausedTransaction = async (...args) => {
+      if (!injected) {
+        injected = true;
+        const response = await postSamples(bob, [sampleAt(5, 900)]);
+        assert.equal(response.ok, true, `step mutation failed: ${response.status}`);
+      }
+      return realTransaction(...args);
+    };
+    const prismaWithPausedFence = new Proxy({}, {
+      get(_target, property) {
+        if (property === "$transaction") return pausedTransaction;
+        const value = prisma[property];
+        return typeof value === "function" ? value.bind(prisma) : value;
+      },
+    });
+    const events = [];
+    const worker = makeWorker({
+      prisma: prismaWithPausedFence,
+      logger: {
+        log(line) { try { events.push(JSON.parse(line)); } catch {} },
+        error(line) {
+          try { events.push(JSON.parse(line)); }
+          catch { events.push({ error: String(line) }); }
+        },
+      },
+    });
+    assert.ok(await worker.processOne());
+    const committed = events.find((event) => event.event === "race_resolution_v2");
+    assert.equal(committed?.artifactHit, false, JSON.stringify(events));
+    assert.equal(committed?.artifactFallbackReason, "fence_mismatch");
+    assert.equal(committed?.resolutionPlan, "FULL");
+    assert.equal(await probe.get(artifactKey), null);
+    await drain();
+    const bobRow = (await participantRows(raceId)).find((row) => row.userId === bob.userId);
+    assert.ok(bobRow.totalSteps >= 1400, "the mutation survives artifact rejection and convergence");
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

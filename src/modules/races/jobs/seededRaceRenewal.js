@@ -18,6 +18,9 @@ const {
   findUsersWithActivitySince,
   disableAutoEnrollForInactive,
 } = require("../services/seededInactivity");
+const {
+  enqueueRaceResolution: defaultEnqueueRaceResolution,
+} = require("../services/enqueueRaceResolution");
 
 // Tight cadence so the midnight promote/settle handoff gap is small: at 00:00 ET
 // the just-expired race is filtered out of Featured while the next race is still
@@ -38,6 +41,14 @@ function buildRenewSeededRaces(dependencies = {}) {
   const logger = dependencies.logger || console;
   const events = dependencies.eventBus || eventBus;
   const settings = dependencies.appSettings || appSettings;
+  const enqueueRaceResolution = Object.prototype.hasOwnProperty.call(
+    dependencies,
+    "enqueueRaceResolution"
+  )
+    ? dependencies.enqueueRaceResolution
+    : Object.keys(dependencies).length > 0
+      ? async () => null
+      : defaultEnqueueRaceResolution;
   // Pass the cron's logger down: the enrollment filter is a prune hook too
   // (hook 1), and its inactivity/auto-enroll-flip logging belongs in the same
   // stream as this job's, not on the default console.
@@ -404,6 +415,11 @@ function buildRenewSeededRaces(dependencies = {}) {
       creatorUserId: null,
       participantUserIds: accepted.map((p) => p.userId),
       isSeededBucket: Boolean(race.seededBucketId),
+    });
+    await enqueueRaceResolution({
+      raceId: race.id,
+      reason: "RACE_START",
+      priority: "IMMEDIATE",
     });
 
     return {

@@ -65,6 +65,10 @@ function buildRemoveFriend(dependencies = {}) {
       removed.requesterId,
       removed.addresseeId
     );
+    await require("../services/friendsTopologyCache").invalidatePairSafe(
+      removed.requesterId,
+      removed.addresseeId
+    );
 
     eventBus.emit("FRIENDSHIP_REMOVED", {
       userId,

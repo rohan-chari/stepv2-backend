@@ -96,6 +96,9 @@ const {
   getTournamentsForUser: defaultGetTournamentsForUser,
 } = require("../tournaments/queries/getTournamentsForUser");
 const {
+  getPublicTournaments: defaultGetPublicTournaments,
+} = require("../tournaments/queries/getPublicTournaments");
+const {
   getRaceDiscoverySummary: defaultGetRaceDiscoverySummary,
 } = require("./queries/getRaceDiscoverySummary");
 const {
@@ -116,7 +119,11 @@ const {
 } = require("./queries/getRaceFeed");
 const {
   getRaceMessages: defaultGetRaceMessages,
+  getRaceMessageStreams: defaultGetRaceMessageStreams,
 } = require("../social");
+const {
+  getPowerupInventory: defaultGetPowerupInventory,
+} = require("../powerups");
 const {
   sendRaceMessage: defaultSendRaceMessage,
 } = require("../social");
@@ -149,6 +156,9 @@ const { appSettings } = require("../../shared/config/appSettings");
 const {
   getOrCreateReferralCode,
 } = require("../social/commands/getOrCreateReferralCode");
+const {
+  isStrictFlagEnabled,
+} = require("../../shared/config/isStrictFlagEnabled");
 
 // A powerup is STEALABLE via Sneaky Swap only if it is currently HELD and its
 // type is neither SNEAKY_SWAP (not stealable in either direction) nor
@@ -267,6 +277,8 @@ function createRacesRouter(dependencies = {}) {
       : defaultClaimRacePayoutDouble);
   const getTournamentsForUser =
     dependencies.getTournamentsForUser || defaultGetTournamentsForUser;
+  const getPublicTournaments =
+    dependencies.getPublicTournaments || defaultGetPublicTournaments;
   const getRaceDiscoverySummary =
     dependencies.getRaceDiscoverySummary || defaultGetRaceDiscoverySummary;
   const getRaceDetails = dependencies.getRaceDetails || defaultGetRaceDetails;
@@ -293,6 +305,10 @@ function createRacesRouter(dependencies = {}) {
   const getRaceFeed = dependencies.getRaceFeed || defaultGetRaceFeed;
   const getRaceMessages =
     dependencies.getRaceMessages || defaultGetRaceMessages;
+  const getRaceMessageStreams =
+    dependencies.getRaceMessageStreams || defaultGetRaceMessageStreams;
+  const getPowerupInventory =
+    dependencies.getPowerupInventory || defaultGetPowerupInventory;
   const sendRaceMessage =
     dependencies.sendRaceMessage || defaultSendRaceMessage;
   const deleteRaceMessage =
@@ -322,6 +338,53 @@ function createRacesRouter(dependencies = {}) {
   const logger = dependencies.logger || console;
   const hasLiveUserCreatedRaceFn =
     dependencies.hasLiveUserCreatedRace || hasLiveUserCreatedRace;
+
+  function loadRaceProgress(req, resolvedContext = null) {
+    return getRaceProgress(
+      req.user.id,
+      req.params.raceId,
+      req.timeZone,
+      req.clientFeatures?.has("characters") ?? false,
+      req.clientFeatures?.has("powerups3") ?? false,
+      req.clientFeatures?.has("powerups4") ?? false,
+      req.clientFeatures?.has("powerups5") ?? false,
+      req.releaseChannel,
+      req.clientFeatures?.has("ads") ?? false,
+      req.user.timezone || req.timeZone || null,
+      req.clientFeatures?.has("remote_assets") ?? false,
+      resolvedContext
+    );
+  }
+
+  async function loadBootstrapAccess(req) {
+    const context = typeof raceModel.findBootstrapAccessContext === "function"
+      ? await raceModel.findBootstrapAccessContext(req.params.raceId, req.user.id)
+      : null;
+    if (!context) {
+      const error = new Error("Race not found");
+      error.statusCode = 404;
+      throw error;
+    }
+    if (
+      context.seededBucketId &&
+      !supportsSeededRaceBuckets(req.clientFeatures)
+    ) {
+      const error = new Error("Race not found");
+      error.statusCode = 404;
+      error.code = "RACE_NOT_FOUND";
+      throw error;
+    }
+    const direct = context.participants?.[0];
+    const tournamentAccess =
+      context.tournamentId != null &&
+      (context.tournament?.participants?.length || 0) > 0;
+    if ((!direct || direct.status === "DECLINED") && !tournamentAccess) {
+      const error = new Error("You are not a participant in this race");
+      error.statusCode = 403;
+      throw error;
+    }
+    return context;
+  }
 
   function payoutDoubleEndpoint(operation, handler) {
     return asyncHandler(async (req, res) => {
@@ -615,7 +678,13 @@ function createRacesRouter(dependencies = {}) {
   router.get("/public", async (req, res) => {
     try {
       const capable = supportsSeededRaceBuckets(req.clientFeatures);
-      const races = await getPublicRaces({
+      const compact =
+        req.query.view === "browser-v1" &&
+        (await isStrictFlagEnabled(
+          settings,
+          "apiPublicRaceBrowserV1Enabled"
+        ));
+      const publicPromise = getPublicRaces({
         userId: req.user.id,
         // TR-702: old clients never see team races in the public browser.
         supportsTeamRaces: req.clientFeatures?.has("team_races") ?? false,
@@ -626,7 +695,66 @@ function createRacesRouter(dependencies = {}) {
           userId: capable ? null : req.user.id,
         }),
       });
-      res.json({ races });
+      if (!compact) return res.json({ races: await publicPromise });
+
+      const supportsTournaments =
+        req.clientFeatures?.has("tournaments") ?? false;
+      const featuredPromise = (async () => {
+        if (capable && req.user.autoJoinFeaturedRaces === true) {
+          await seededBuckets.reconcileFeaturedUser({
+            userId: req.user.id,
+            capable,
+            autoJoinFeaturedRaces: true,
+          });
+        }
+        return getFeaturedRaces({
+          userId: req.user.id,
+          supportsBuckets: capable,
+          hiddenSeedKinds: capable
+            ? new Set()
+            : await seededBuckets.selectedBucketSeedKinds(req.user.id),
+        });
+      })();
+      const tournamentsPromise = supportsTournaments
+        ? getPublicTournaments({ userId: req.user.id })
+        : Promise.resolve({ featured: [], tournaments: [] });
+      const minePromise = supportsTournaments
+        ? getTournamentsForUser(req.user.id, {
+            supportsCharacters: false,
+            releaseChannel: req.releaseChannel,
+            supportsRemoteAssets: false,
+          })
+        : Promise.resolve([]);
+      const [publicResult, featuredResult, tournamentsResult, mineResult] =
+        await Promise.allSettled([
+          publicPromise,
+          featuredPromise,
+          tournamentsPromise,
+          minePromise,
+        ]);
+      if (publicResult.status === "rejected") throw publicResult.reason;
+      res.json({
+        contract: "public-race-browser-v1",
+        races: publicResult.value,
+        resolved: {
+          featuredRaces: featuredResult.status === "fulfilled",
+          tournaments: tournamentsResult.status === "fulfilled",
+          mine: mineResult.status === "fulfilled",
+        },
+        featuredRaces:
+          featuredResult.status === "fulfilled" ? featuredResult.value : [],
+        tournaments: {
+          featured:
+            tournamentsResult.status === "fulfilled"
+              ? tournamentsResult.value.featured
+              : [],
+          public:
+            tournamentsResult.status === "fulfilled"
+              ? tournamentsResult.value.tournaments
+              : [],
+          mine: mineResult.status === "fulfilled" ? mineResult.value : [],
+        },
+      });
     } catch (error) {
       console.error("Get public races error:", error);
       res.status(500).json({ error: "Internal server error" });
@@ -807,6 +935,102 @@ function createRacesRouter(dependencies = {}) {
       res.json({ success: true });
     } catch (error) {
       console.error("Mark first-race onboarding seen error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Additive capable-client contract. Disabled is a definite 404 so the app
+  // can cache its legacy three-request fallback without changing any frozen
+  // client's existing route or response.
+  router.get("/:raceId/bootstrap", async (req, res) => {
+    if (!(await isStrictFlagEnabled(settings, "apiRaceBootstrapV1Enabled"))) {
+      return res.status(404).json({ error: "Not found" });
+    }
+    try {
+      const access = await loadBootstrapAccess(req);
+      const detailArgs = [
+        req.user.id,
+        req.params.raceId,
+        req.clientFeatures?.has("characters") ?? false,
+        req.releaseChannel,
+        req.clientFeatures?.has("remote_assets") ?? false,
+        req.clientFeatures?.has("race_leave") ?? false,
+        req.clientFeatures?.has("team_races") ?? false,
+        supportsSeededRaceBuckets(req.clientFeatures),
+      ];
+      if (access.status !== "ACTIVE") {
+        const race = await getRaceDetails(...detailArgs);
+        return res.json({
+          contract: "race-bootstrap-v1",
+          race,
+          progress: null,
+          progressError: null,
+          globalPowerupInventory: null,
+        });
+      }
+      const resolvedContext = {};
+      const [progressResult, inventoryResult] = await Promise.allSettled([
+        loadRaceProgress(req, resolvedContext),
+        getPowerupInventory(
+          req.user.id,
+          req.clientFeatures?.has("powerups4") ?? false
+        ),
+      ]);
+      if (progressResult.status === "rejected") {
+        logger.error("Race bootstrap progress unavailable", {
+          error: progressResult.reason?.message || "unknown",
+        });
+      }
+      if (inventoryResult.status === "rejected") {
+        logger.error("Race bootstrap inventory unavailable", {
+          error: inventoryResult.reason?.message || "unknown",
+        });
+      }
+      const race = await getRaceDetails(
+        ...detailArgs,
+        resolvedContext.race || null
+      );
+      res.json({
+        contract: "race-bootstrap-v1",
+        race,
+        progress:
+          progressResult.status === "fulfilled" ? progressResult.value : null,
+        progressError:
+          progressResult.status === "fulfilled"
+            ? null
+            : { code: "PROGRESS_UNAVAILABLE" },
+        globalPowerupInventory:
+          inventoryResult.status === "fulfilled" ? inventoryResult.value : null,
+      });
+    } catch (error) {
+      if (error.statusCode) {
+        return res.status(error.statusCode).json({
+          error: error.message,
+          ...(error.code ? { code: error.code } : {}),
+        });
+      }
+      logger.error("Race bootstrap error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  router.get("/:raceId/message-streams", async (req, res) => {
+    if (!(await isStrictFlagEnabled(settings, "apiRaceMessageStreamsV1Enabled"))) {
+      return res.status(404).json({ error: "Not found" });
+    }
+    try {
+      const result = await getRaceMessageStreams({
+        userId: req.user.id,
+        raceId: req.params.raceId,
+        includeUser: req.query.includeUser !== "false",
+        limit: req.query.limit,
+      });
+      res.json(result);
+    } catch (error) {
+      if (error.statusCode) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
+      logger.error("Race message streams error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });
@@ -994,29 +1218,30 @@ function createRacesRouter(dependencies = {}) {
   // GET /races/:raceId/progress
   router.get("/:raceId/progress", async (req, res) => {
     try {
-      const progress = await getRaceProgress(
+      const compact =
+        req.query.view === "compact-v1" &&
+        (await isStrictFlagEnabled(
+          settings,
+          "apiRaceProgressCompactV1Enabled"
+        ));
+      if (!compact) {
+        const progress = await loadRaceProgress(req);
+        return res.json({ progress });
+      }
+      const inventoryPromise = getPowerupInventory(
         req.user.id,
-        req.params.raceId,
-        req.timeZone,
-        req.clientFeatures?.has("characters") ?? false,
-        // §9.3: Hitchhike effect entries are only rendered by powerups3 builds.
-        req.clientFeatures?.has("powerups3") ?? false,
-        req.clientFeatures?.has("powerups4") ?? false,
-        req.clientFeatures?.has("powerups5") ?? false,
-        req.releaseChannel,
-        // Batch 2026-08-08 item 11: only a build that can actually show a
-        // rewarded ad may be told the box-reroll button exists.
-        req.clientFeatures?.has("ads") ?? false,
-        // Batch 2026-08-10b item 2: the discard coin cap is per LOCAL day.
-        // Prefer the user's STORED zone (sticky-written by requireAuth) over
-        // the per-request header, exactly as the discard route does, so the cap
-        // can't be widened by spoofing X-Timezone.
-        req.user.timezone || req.timeZone || null,
-        // Remote-only equipped art has no bundled fallback, so only a viewer
-        // that can resolve immutable asset URLs may receive it.
-        req.clientFeatures?.has("remote_assets") ?? false
+        req.clientFeatures?.has("powerups4") ?? false
       );
-      res.json({ progress });
+      const progress = await loadRaceProgress(req);
+      const inventoryResult = await Promise.allSettled([inventoryPromise]);
+      res.json({
+        contract: "race-progress-compact-v1",
+        progress,
+        globalPowerupInventory:
+          inventoryResult[0].status === "fulfilled"
+            ? inventoryResult[0].value
+            : null,
+      });
     } catch (error) {
       if (error.statusCode) {
         return res.status(error.statusCode).json({ error: error.message });

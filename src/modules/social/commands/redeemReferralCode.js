@@ -127,6 +127,10 @@ function buildRedeemReferralCode(dependencies = {}) {
           referrer.id,
           user.id
         );
+        await require("../services/friendsTopologyCache").invalidatePairSafe(
+          referrer.id,
+          user.id
+        );
       } catch (friendError) {
         console.warn(
           `Referral auto-friend skipped: ${

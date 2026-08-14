@@ -215,6 +215,41 @@ const KNOWN_FLAGS = {
   // correct but costs a query. Turning it off can only cost latency, never
   // correctness — the field itself is NEVER gated on Redis being available.
   redisCacheDiscardCapEnabled: false,
+  // Social-read optimizations. All default OFF, preserving every existing
+  // client path on deploy. Friends/leaderboard additionally require the
+  // generation guard so an old DEL-only worker cannot race a guarded fill.
+  redisPresentationGenerationGuardEnabled: false,
+  redisCacheLeaderboardEnabled: false,
+  redisCacheFriendsEnabled: false,
+  redisFriendSearchRateLimitEnabled: false,
+  // API page-payload cleanup. Every compact/new surface is independently
+  // dark by default: absent/failed reads must preserve the byte-compatible
+  // legacy path, while disabled additive endpoints return 404 so capable
+  // clients can cache their legacy fallback for the process lifetime.
+  apiRaceBootstrapV1Enabled: false,
+  apiRaceProgressCompactV1Enabled: false,
+  apiRaceMessageStreamsV1Enabled: false,
+  apiFriendsSummaryV1Enabled: false,
+  apiAuthShellV1Enabled: false,
+  apiHomeShellV1Enabled: false,
+  apiGetCoinsV1Enabled: false,
+  apiPublicRaceBrowserV1Enabled: false,
+  apiRankedV2CompactV1Enabled: false,
+  apiProfileStatsV1Enabled: false,
+  apiShopBootstrapV1Enabled: false,
+  apiStaticEtagsV1Enabled: false,
+  apiTournamentDetailV1Enabled: false,
+  // Independent body-free USER watermark cache. This never gates the public
+  // message-stream contract; cache failure/unavailability falls back to the
+  // bounded Postgres id/createdAt projection.
+  apiRaceChatWatermarkCacheV1Enabled: false,
+  // Backend-only race-resolution optimizations. These remain independently
+  // reversible and default to the deployed full-resolution behavior.
+  raceResolutionDisplayArtifactReuseV1Enabled: false,
+  raceResolutionReasonAwareV1Enabled: false,
+  raceResolutionBurstCoalescingV1Enabled: false,
+  raceResolutionBulkWriteV1Enabled: false,
+  raceResolutionPostTasksV1Enabled: false,
 };
 
 function buildAppSettings(dependencies = {}) {

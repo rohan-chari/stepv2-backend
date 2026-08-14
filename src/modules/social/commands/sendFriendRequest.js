@@ -99,6 +99,10 @@ function buildSendFriendRequest(dependencies = {}) {
       userId,
       addresseeId
     );
+    await require("../services/friendsTopologyCache").invalidatePairSafe(
+      userId,
+      addresseeId
+    );
     events.emit(result.event, result.eventPayload);
     return result.friendship;
   };

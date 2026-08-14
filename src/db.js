@@ -39,4 +39,11 @@ const prisma = new PrismaClient({
     : {}),
 });
 
+if (process.env.PRISMA_QUERY_EVENTS_ENABLED === "true") {
+  const {
+    incrementRequestQueryCount,
+  } = require("./shared/http/requestQueryCounter");
+  prisma.$on("query", incrementRequestQueryCount);
+}
+
 module.exports = { prisma };

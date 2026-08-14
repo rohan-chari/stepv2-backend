@@ -113,7 +113,7 @@ function buildGetRaceMessages(dependencies = {}) {
   return async function getRaceMessages(
     userId,
     raceId,
-    { cursor, limit = 50, kind } = {}
+    { cursor, limit = 50, kind, accessContext = null } = {}
   ) {
     // Flag read is defensive: a settings failure must degrade to "no cache",
     // never to a 500 on the busiest endpoint in the product.
@@ -136,7 +136,7 @@ function buildGetRaceMessages(dependencies = {}) {
       kind === "USER" || kind === "SYSTEM" ? kind : null;
     const includeUser = normalizedKind !== "SYSTEM";
     const includeSystem = normalizedKind !== "USER";
-    const race = await raceModel.findById(raceId);
+    const race = accessContext || (await raceModel.findById(raceId));
     if (!race) {
       const error = new Error("Race not found");
       error.statusCode = 404;
@@ -144,7 +144,7 @@ function buildGetRaceMessages(dependencies = {}) {
     }
 
     const myParticipant = race.participants.find((p) => p.userId === userId);
-    if (!myParticipant || (race.seededBucketId && myParticipant.status !== "ACCEPTED")) {
+    if (!accessContext && (!myParticipant || (race.seededBucketId && myParticipant.status !== "ACCEPTED"))) {
       // 2026-07-25 §5 — tournament spectating, identical to the relaxation
       // getRaceDetails/getRaceProgress already apply: any ACCEPTED bracket
       // player (INCLUDING eliminated) may READ a sibling matchup's chat.

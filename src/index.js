@@ -37,6 +37,7 @@ const {
 } = require("./modules/notifications");
 const {
   scheduleRaceResolutionWorkerV2,
+  scheduleRaceResolutionPostTaskRunner,
 } = require("./modules/races");
 const {
   scheduleRacePayoutDoubleReconcile,
@@ -71,6 +72,8 @@ function startServer({
   // the reverse-handoff rollback target — but this binary never schedules it, so
   // only one bulk writer per race exists at a time.
   scheduleRaceResolutionWorker: scheduleRaceResolution = scheduleRaceResolutionWorkerV2,
+  scheduleRaceResolutionPostTasks:
+    scheduleResolutionPostTasks = scheduleRaceResolutionPostTaskRunner,
   scheduleRacePayoutDoubleReconcile:
     schedulePayoutDoubleReconcile = scheduleRacePayoutDoubleReconcile,
   logger = console,
@@ -172,6 +175,12 @@ function startServer({
       // Uses its own console (like scheduleTournamentSeedRenewal) rather than the
       // injected startup logger.
       scheduleRaceResolution();
+      // Delivery/publication groups are durable and drain independently of the
+      // creation flag. The whole-runner emergency switch is checked here and
+      // again on each scheduler tick; disabling it leaves every row untouched.
+      if (process.env.RACE_RESOLUTION_POST_TASK_WORKER_DISABLED !== "true") {
+        scheduleResolutionPostTasks();
+      }
       if (process.env.RACE_PAYOUT_DOUBLE_RECONCILE_ENABLED === "true") {
         schedulePayoutDoubleReconcile();
       }

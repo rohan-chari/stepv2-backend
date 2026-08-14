@@ -22,5 +22,6 @@ Object.assign(module.exports, require("./services/ensureGoogleUser"));
 Object.assign(module.exports, require("./commands/setDisplayName"));
 Object.assign(module.exports, require("./commands/setDiscoverableName"));
 Object.assign(module.exports, require("./commands/deleteUserAccount"));
+Object.assign(module.exports, require("./commands/setLeaderboardVisibility"));
 Object.assign(module.exports, require("./commands/profilePhoto"));
 Object.assign(module.exports, require("./routes")); // createAuthRouter — LAST

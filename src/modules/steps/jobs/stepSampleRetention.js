@@ -1,4 +1,7 @@
 const { prisma: defaultPrisma } = require("../../../db");
+const {
+  bumpManyScoringInputVersions,
+} = require("../services/scoringInputVersion");
 const { JobRun: defaultJobRun } = require("../../../shared/db/jobRun");
 const { dailyRunKey } = require("../../../shared/time/etSchedule");
 
@@ -75,19 +78,27 @@ function buildCleanupStepSamples(dependencies = {}) {
 
     let total = 0;
     for (;;) {
-      const deleted = await prisma.$executeRawUnsafe(
-        `DELETE FROM step_samples s USING (
-           SELECT id FROM step_samples
-           WHERE period_end < $1::timestamp
-             AND period_end < COALESCE($2::timestamp, 'infinity'::timestamp)
-           LIMIT ${batchSize}
-         ) d
-         WHERE s.id = d.id`,
-        cutoff45.toISOString(),
-        guardIso
-      );
-      total += deleted;
-      if (deleted < batchSize) break;
+      const deletedUsers = await prisma.$transaction(async (tx) => {
+        const rows = await tx.$queryRawUnsafe(
+          `DELETE FROM step_samples s USING (
+             SELECT id FROM step_samples
+             WHERE period_end < $1::timestamp
+               AND period_end < COALESCE($2::timestamp, 'infinity'::timestamp)
+             LIMIT ${batchSize}
+           ) d
+           WHERE s.id = d.id
+           RETURNING s.user_id AS "userId"`,
+          cutoff45.toISOString(),
+          guardIso
+        );
+        await bumpManyScoringInputVersions(
+          tx,
+          rows.map((row) => row.userId)
+        );
+        return rows;
+      });
+      total += deletedUsers.length;
+      if (deletedUsers.length < batchSize) break;
     }
 
     logger.log(

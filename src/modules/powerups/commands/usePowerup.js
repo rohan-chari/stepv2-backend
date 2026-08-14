@@ -1249,7 +1249,7 @@ function buildUsePowerup(dependencies = {}) {
           : { raceId, attackerUserId: userId, defenderUserId: targetResult.targetUserId, blockedType: type, upgradeLevel: 0 });
       }
       await invalidateRaceProgress(raceId);
-      await enqueueRaceResolution({ raceId, userId, timeZone });
+      await enqueueRaceResolution({ raceId, userId, timeZone, reason: "POWERUP_MUTATION", powerupTypes: [type], priority: "IMMEDIATE" });
       if (inlineResolveInjected) await resolveRaceState({ raceId, timeZone });
       await repairRacePowerupInventory({ raceId, userId, refresh: true });
       const applied = targetResults.filter((r) => r.outcome === "APPLIED").length;
@@ -1273,7 +1273,7 @@ function buildUsePowerup(dependencies = {}) {
         upgradeLevel: 0,
       });
       await invalidateRaceProgress(raceId);
-      await enqueueRaceResolution({ raceId, userId, timeZone });
+      await enqueueRaceResolution({ raceId, userId, timeZone, reason: "POWERUP_MUTATION", powerupTypes: [type], priority: "IMMEDIATE" });
       if (inlineResolveInjected) await resolveRaceState({ raceId, timeZone });
       await repairRacePowerupInventory({ raceId, userId, refresh: true });
     };
@@ -2298,7 +2298,7 @@ function buildUsePowerup(dependencies = {}) {
             upgradeLevel,
           });
           await invalidateRaceProgress(raceId);
-          await enqueueRaceResolution({ raceId, userId, timeZone });
+          await enqueueRaceResolution({ raceId, userId, timeZone, reason: "POWERUP_MUTATION", powerupTypes: [type], priority: "IMMEDIATE" });
           if (inlineResolveInjected) await resolveRaceState({ raceId, timeZone });
           await repairRacePowerupInventory({ raceId, userId, refresh: true });
           return {
@@ -3689,7 +3689,7 @@ function buildUsePowerup(dependencies = {}) {
 
     await invalidateRaceProgress(raceId);
 
-    await enqueueRaceResolution({ raceId, userId, timeZone });
+    await enqueueRaceResolution({ raceId, userId, timeZone, reason: "POWERUP_MUTATION", powerupTypes: [type], priority: "IMMEDIATE" });
     if (inlineResolveInjected) await resolveRaceState({ raceId, timeZone });
     await repairRacePowerupInventory({ raceId, userId, refresh: true });
 

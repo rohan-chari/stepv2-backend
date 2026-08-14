@@ -355,7 +355,12 @@ function buildJoinRaceCore(dependencies = {}) {
 
       await invalidateRaceProgress(raceId);
 
-      await enqueueRaceResolution({ raceId, userId });
+      await enqueueRaceResolution({
+        raceId,
+        userId,
+        reason: "JOIN_LEAVE_KICK",
+        priority: "IMMEDIATE",
+      });
 
       // C2 invalidation (spec §5 Phase C item 6): a membership change alters
       // the chat's access context. This remains post-commit and best-effort.

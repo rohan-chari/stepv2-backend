@@ -35,11 +35,13 @@ Deploys use `pm2 reload` (NEVER `restart`; see backend deploy notes).
 |---|---|
 | `redisCacheCatalogsEnabled` | C1 catalogs/config |
 | `redisCacheMessagesEnabled` | C2 chat |
+| `apiRaceChatWatermarkCacheV1Enabled` | Body-free lazy-Chat USER watermark (`v1:race:msgwatermark:{raceId}:USER`); enable with message-streams |
 | `redisStandingsEnabled` | C3 standings snapshot + write-back removal |
 | `redisCacheUserBitsEnabled` | C4 friends-steps + inventory |
 | `redisCacheAuthMeEnabled` | C5 /auth/me (flip only after the invalidation inventory review) |
 | `raceQueueV2ClaimingDisabled` | C0 rollback: stops v2 worker claims (read per tick, uncached) |
 | `inlineRaceResolutionFallback` | C0 rollback: restores inline resolution on legacy paths |
+| `raceResolutionDisplayArtifactReuseV1Enabled` | Single-use 120s display artifact (`v1:race:resolution-artifact:{opaqueArtifactId}`); enable last after scorer-token baseline proof |
 
 ## Kill switches, in escalating order
 
@@ -99,3 +101,42 @@ Deploys use `pm2 reload` (NEVER `restart`; see backend deploy notes).
    flag that *changes* behavior — write-back removal), then others to attribute.
 6. Contract migration (drop old `race_resolution_jobs`) ≥1 week after expand,
    as its own deploy.
+
+## Social-read caches (generation-guarded rollout)
+
+The four social-read flags also default false:
+
+| Flag | Surface |
+|---|---|
+| `redisPresentationGenerationGuardEnabled` | prerequisite for guarded presentation/topology readers |
+| `redisCacheFriendsEnabled` | raw friendship topology behind `GET /friends` |
+| `redisCacheLeaderboardEnabled` | raw step-ranking cores only |
+| `redisFriendSearchRateLimitEnabled` | modern friend-search fixed-window counter |
+
+Deploy Phase A with all four false. New workers advance topology/presentation
+generation markers after commits even while readers remain legacy. Do not
+enable the generation guard until telemetry proves every old DEL-only worker
+has drained. Then enable the guard, wait through app-setting propagation, and
+verify every worker reports guarded mode before enabling friends or leaderboard.
+The search counter is independent. On staging, enable friends, leaderboard, and
+search separately, exercise mutations between flips, and soak together for 24h.
+
+Normal rollback disables only the affected surface. Before rolling back to a
+binary with DEL-only invalidators: disable friends and leaderboard, wait for
+propagation and in-flight reads to drain, disable the generation guard, verify
+legacy-reader mode, then roll back the binary. Disable search too when returning
+to a binary that lacks its counter.
+
+Search throttling is availability-first and best-effort. A mid-minute flag or
+mixed-worker transition can split allowances between Redis and Postgres (up to
+30 on each while both retain state). A lost Redis reply can also consume Redis
+and then fall back to Postgres. Redis eviction/restart resets its side; repeated
+resets therefore have no strict per-minute upper bound. Search visibility and
+authorization never depend on Redis, and search terms/results are never cached.
+
+Before rollout, record endpoint `rt`/`urt` p50/p95 and volume, Postgres query
+counts/plans on production-like staging, Redis memory/hits/key count, and verify
+both partial friend-search GIN indexes are valid, ready, and used by the exact
+predicates. Pin `LEADERBOARD_CACHE_WAIT_MS` to
+`clamp(ceil(1.5 × measured cold-loader p95), 250ms, 5s)` and the lock lease to
+`max(10s, ceil(5 × p95))`; record both measured values here before production.

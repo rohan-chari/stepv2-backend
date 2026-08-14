@@ -1,6 +1,6 @@
 const { Router } = require("express");
 const { buildRequireAuth } = require("../../middleware/requireAuth");
-const { getLeaderboard: defaultGetLeaderboard } = require("./getLeaderboard");
+const { getLeaderboard: defaultGetLeaderboard, buildGetLeaderboard } = require("./getLeaderboard");
 
 const VALID_PERIODS = ["today", "week", "month", "allTime"];
 const VALID_TYPES = ["steps", "races"];
@@ -10,7 +10,10 @@ function createLeaderboardRouter(dependencies = {}) {
   const router = Router();
   const requireAuth =
     dependencies.requireAuth || buildRequireAuth(dependencies);
-  const getLeaderboard = dependencies.getLeaderboard || defaultGetLeaderboard;
+  const getLeaderboard = dependencies.getLeaderboard ||
+    (dependencies.prisma || dependencies.appSettings || dependencies.stepLeaderboardCache
+      ? buildGetLeaderboard(dependencies)
+      : defaultGetLeaderboard);
 
   router.use(requireAuth);
 

@@ -23,6 +23,9 @@ const {
   RaceResolutionJobV2,
 } = require("../../src/modules/races/models/raceResolutionJobV2");
 const { appSettings } = require("../../src/shared/config/appSettings");
+const {
+  buildRaceResolutionPostTaskHandoff,
+} = require("../../src/modules/races/services/raceResolutionPostTaskHandoff");
 
 let server;
 let nextAppleId = 0;
@@ -148,6 +151,10 @@ beforeEach(async () => {
   await cleanDatabase();
   await appSettings.setFlag("raceQueueV2ClaimingDisabled", false);
   await appSettings.setFlag("inlineRaceResolutionFallback", false);
+  await appSettings.setFlag("raceResolutionBulkWriteV1Enabled", false);
+  await appSettings.setFlag("raceResolutionBurstCoalescingV1Enabled", false);
+  await appSettings.setFlag("raceResolutionReasonAwareV1Enabled", false);
+  await appSettings.setFlag("raceResolutionPostTasksV1Enabled", false);
 });
 
 after(async () => {
@@ -156,6 +163,157 @@ after(async () => {
 });
 
 describe("5a — one bulk writer per race", () => {
+  it("public mutation durably reserves an exact nudge intent before queued handoff", async () => {
+    const alice = await createUser("Intent Alice");
+    const bob = await createUser("Intent Bob");
+    const raceId = await createActiveRace(alice, [bob], "Intent race");
+    await drain(makeWorker());
+    await prisma.deviceToken.create({
+      data: { userId: bob.userId, token: `intent-${Date.now()}`, platform: "ios" },
+    });
+    await prisma.raceParticipant.updateMany({
+      where: { raceId, userId: alice.userId },
+      data: { lastNotifiedPlacement: 2 },
+    });
+    await prisma.raceParticipant.updateMany({
+      where: { raceId, userId: bob.userId },
+      data: { lastNotifiedPlacement: 1 },
+    });
+    await appSettings.setFlag("raceResolutionPostTasksV1Enabled", true);
+    assert.equal((await postSamples(alice, [sampleAt(2, 3100)])).status, 200);
+
+    const handoff = buildRaceResolutionPostTaskHandoff({
+      runner: {
+        async isReady() { return true; },
+        async processTaskId() { assert.fail("healthy runner leaves the task queued"); },
+      },
+    });
+    const claimed = await makeWorker({
+      raceResolutionPostTaskHandoff: handoff,
+      async onCommitted({ job }) {
+        return {
+          snapshotCommand: {
+            raceId,
+            timeZone: job.processingTimeZone || "UTC",
+          },
+          intents: [],
+        };
+      },
+    }).processOne();
+    assert.ok(claimed);
+
+    const task = await prisma.raceResolutionPostTask.findFirst({
+      where: { raceId },
+      include: { intents: { orderBy: { ordinal: "asc" } } },
+    });
+    assert.equal(task.state, "queued");
+    assert.equal(task.intents.length, 1);
+    assert.equal(task.intents[0].kind, "NUDGE");
+    assert.equal(task.intents[0].recipientUserId, bob.userId);
+    assert.ok(task.intents[0].cooldownClaimId);
+    assert.equal(JSON.stringify(task.intents[0].payload).includes("intent-"), false);
+    const reserved = await prisma.user.findUnique({ where: { id: bob.userId } });
+    assert.ok(reserved.lastSilentPushSentAt);
+  });
+
+  it("public sync creates and inline-claims one durable snapshot task when the post runner is unhealthy", async () => {
+    const alice = await createUser("Post Task Alice");
+    const bob = await createUser("Post Task Bob");
+    const raceId = await createActiveRace(alice, [bob], "Post task race");
+    await appSettings.setFlag("raceResolutionPostTasksV1Enabled", true);
+    await postSamples(alice, [sampleAt(2, 3100)]);
+
+    const worker = makeWorker({
+      async onCommitted({ raceId: committedRaceId, job, deferSnapshot }) {
+        assert.equal(committedRaceId, raceId);
+        assert.equal(deferSnapshot, true);
+        return {
+          snapshotCommand: {
+            raceId,
+            timeZone: job.processingTimeZone || "UTC",
+          },
+        };
+      },
+    });
+    const claimed = await worker.processOne();
+    assert.ok(claimed);
+
+    const tasks = await prisma.raceResolutionPostTask.findMany({
+      where: { raceId },
+      include: { intents: true },
+    });
+    assert.equal(tasks.length, 1);
+    assert.equal(tasks[0].sourceGeneration, claimed.processingGeneration);
+    assert.ok(["succeeded", "succeeded_with_failures"].includes(tasks[0].state));
+    assert.equal(tasks[0].intents.length, 0);
+    assert.notEqual(tasks[0].snapshotState, "pending");
+  });
+
+  it("public mutation resolves deferred nudge claims only after known task assembly failure", async () => {
+    const alice = await createUser("Fallback Intent Alice");
+    const bob = await createUser("Fallback Intent Bob");
+    const raceId = await createActiveRace(alice, [bob], "Fallback intent race");
+    await drain(makeWorker());
+    await prisma.deviceToken.create({
+      data: { userId: bob.userId, token: `fallback-${Date.now()}`, platform: "ios" },
+    });
+    await prisma.raceParticipant.updateMany({
+      where: { raceId, userId: alice.userId }, data: { lastNotifiedPlacement: 2 },
+    });
+    await prisma.raceParticipant.updateMany({
+      where: { raceId, userId: bob.userId }, data: { lastNotifiedPlacement: 1 },
+    });
+    await appSettings.setFlag("raceResolutionPostTasksV1Enabled", true);
+    assert.equal((await postSamples(alice, [sampleAt(2, 3100)])).status, 200);
+    const delivered = [];
+    const handoff = buildRaceResolutionPostTaskHandoff({
+      RaceResolutionPostTask: {
+        async create() { throw new RangeError("forced assembly failure"); },
+        async findByGeneration() { return null; },
+      },
+      runner: { async isReady() { return true; } },
+      async publishSnapshotInline() {},
+      async deliverIntentInline(intent) { delivered.push(intent); return { accepted: true }; },
+    });
+    // The production post-commit hook intentionally stays off until the
+    // Redis-standings rollout flag is enabled.  This case exercises the
+    // durable handoff fallback itself, so provide the same post-commit
+    // command seam as the queued-intent case above instead of depending on
+    // that unrelated rollout gate.
+    await makeWorker({
+      raceResolutionPostTaskHandoff: handoff,
+      async onCommitted({ job }) {
+        return {
+          snapshotCommand: {
+            raceId,
+            timeZone: job.processingTimeZone || "UTC",
+          },
+          intents: [],
+        };
+      },
+    }).processOne();
+    assert.equal(delivered.filter((intent) => intent.kind === "NUDGE").length, 1);
+    const reserved = await prisma.user.findUniqueOrThrow({ where: { id: bob.userId } });
+    assert.ok(reserved.lastSilentPushSentAt);
+    assert.equal(await prisma.raceResolutionPostTask.count({ where: { raceId } }), 0);
+  });
+
+  it("bulk-write rollout preserves real HTTP sync totals through the fenced worker", async () => {
+    const alice = await createUser("Bulk Alice");
+    const bob = await createUser("Bulk Bob");
+    const raceId = await createActiveRace(alice, [bob], "Bulk write race");
+    await appSettings.setFlag("raceResolutionBulkWriteV1Enabled", true);
+
+    await postSamples(alice, [sampleAt(2, 4300)]);
+    await postSamples(bob, [sampleAt(2, 2100)]);
+    const claims = await drain(makeWorker());
+    assert.ok(claims.length >= 1);
+    const totals = await totalsByUser(raceId);
+    assert.ok(totals[alice.userId] > totals[bob.userId]);
+    const job = await RaceResolutionJobV2.findByRaceId(raceId);
+    assert.equal(job.state, "SUCCEEDED");
+  });
+
   it("two users in the same two races sync concurrently: one job row per race, totals match a serial control, zero deadlocks over 50 iterations", async () => {
     const alice = await createUser("Alice");
     const bob = await createUser("Bob");
@@ -282,6 +440,132 @@ describe("5a — one bulk writer per race", () => {
     const job = await RaceResolutionJobV2.findByRaceId(raceId);
     assert.ok(job, "the legacy path enqueued the uploader's active race");
     assert.deepEqual(job.triggeredByUserIds, [alice.userId]);
+  });
+
+  it("reason-aware legacy POST /steps commits uploader reconciliation before narrow STEP_SYNC becomes claimable", async () => {
+    const alice = await createUser("Reason Alice");
+    const bob = await createUser("Reason Bob");
+    const raceId = await createActiveRace(alice, [bob], "Reason-aware ordering");
+    // Drain creation/start work first. During mixed-version rollout an
+    // ambiguous already-queued empty envelope intentionally becomes FULL; a
+    // clean successful row is the point from which narrow work is safe.
+    await drain(makeWorker());
+    await appSettings.setFlag("raceResolutionReasonAwareV1Enabled", true);
+
+    const response = await request(server.baseUrl, "POST", "/steps", {
+      body: { steps: 8123, date: new Date().toISOString().slice(0, 10) },
+      token: alice.token,
+      headers: { "X-Timezone": "UTC" },
+    });
+    assert.equal(response.status, 200);
+
+    const [job, participant, token] = await Promise.all([
+      RaceResolutionJobV2.findByRaceId(raceId),
+      prisma.raceParticipant.findUnique({
+        where: { raceId_userId: { raceId, userId: alice.userId } },
+      }),
+      prisma.userScoringInputVersion.findUnique({
+        where: { userId: alice.userId },
+      }),
+    ]);
+    assert.deepEqual(job.dirtyReasons, ["STEP_SYNC"]);
+    assert.deepEqual(job.dirtyParticipantIds, [participant.id]);
+    assert.ok(participant.totalsUpdatedAt, "uploader total was committed");
+    assert.ok(
+      participant.totalsUpdatedAt.getTime() <= job.requestedAt.getTime(),
+      "claimable generation cannot predate uploader reconciliation"
+    );
+    assert.ok(token && token.generation >= 1n);
+  });
+
+  it("pure STEP_SYNC uses committed uploader rows without rewriting participants", async () => {
+    const alice = await createUser("Scoped Sync Alice");
+    const bob = await createUser("Scoped Sync Bob");
+    const raceId = await createActiveRace(alice, [bob], "Scoped sync");
+    await drain(makeWorker());
+    await appSettings.setFlag("raceResolutionReasonAwareV1Enabled", true);
+
+    const response = await postSamples(alice, [sampleAt(3, 2468)]);
+    assert.equal(response.status, 200);
+    const before = await participantVersions(raceId);
+    const events = [];
+    const worker = makeWorker({
+      logger: {
+        log(line) { try { events.push(JSON.parse(line)); } catch {} },
+        error(line) { events.push({ error: String(line) }); },
+      },
+    });
+    assert.ok(await worker.processOne());
+
+    const committed = events.find((event) => event.event === "race_resolution_v2");
+    assert.equal(committed?.resolutionPlan, "STEP_SYNC_COMMITTED", JSON.stringify(events));
+    assert.equal(committed?.changedRows, 0);
+    assert.deepEqual(await participantVersions(raceId), before);
+    assert.equal((await RaceResolutionJobV2.findByRaceId(raceId)).state, "SUCCEEDED");
+  });
+
+  it("a public step mutation before the STEP_SYNC fence falls back to FULL in the same run", async () => {
+    const alice = await createUser("Scoped Fence Alice");
+    const bob = await createUser("Scoped Fence Bob");
+    const raceId = await createActiveRace(alice, [bob], "Scoped fence");
+    await drain(makeWorker());
+    await appSettings.setFlag("raceResolutionReasonAwareV1Enabled", true);
+    assert.equal((await postSamples(alice, [sampleAt(5, 1100)])).status, 200);
+
+    let injected = false;
+    const realTransaction = prisma.$transaction.bind(prisma);
+    const pausedTransaction = async (...args) => {
+      if (!injected) {
+        injected = true;
+        const response = await postSamples(alice, [sampleAt(4, 900)]);
+        assert.equal(response.status, 200);
+      }
+      return realTransaction(...args);
+    };
+    const prismaWithPausedFence = new Proxy({}, {
+      get(_target, property) {
+        if (property === "$transaction") return pausedTransaction;
+        const value = prisma[property];
+        return typeof value === "function" ? value.bind(prisma) : value;
+      },
+    });
+    const events = [];
+    const worker = makeWorker({
+      prisma: prismaWithPausedFence,
+      logger: {
+        log(line) { try { events.push(JSON.parse(line)); } catch {} },
+        error(line) { events.push({ error: String(line) }); },
+      },
+    });
+    assert.ok(await worker.processOne());
+    const committed = events.find((event) => event.event === "race_resolution_v2");
+    assert.equal(committed?.resolutionPlan, "FULL", JSON.stringify(events));
+    const totals = await totalsByUser(raceId);
+    assert.ok(totals[alice.userId] >= 2000, "both public mutations survive the fallback");
+  });
+
+  it("malformed mixed-version dirty metadata atomically becomes FULL instead of losing the enqueue", async () => {
+    const alice = await createUser("Malformed Alice");
+    const bob = await createUser("Malformed Bob");
+    const raceId = await createActiveRace(alice, [bob], "Malformed envelope");
+    await drain(makeWorker());
+    await prisma.$executeRawUnsafe(
+      `UPDATE race_resolution_jobs_v2
+       SET dirty_reasons='{}'::jsonb
+       WHERE race_id=$1`,
+      raceId
+    );
+    await appSettings.setFlag("raceResolutionReasonAwareV1Enabled", true);
+
+    const response = await request(server.baseUrl, "POST", "/steps", {
+      body: { steps: 100, date: new Date().toISOString().slice(0, 10) },
+      token: alice.token,
+      headers: { "X-Timezone": "UTC" },
+    });
+    assert.equal(response.status, 200);
+    const job = await RaceResolutionJobV2.findByRaceId(raceId);
+    assert.deepEqual(job.dirtyReasons, ["FULL"]);
+    assert.equal(job.state, "QUEUED");
   });
 
   it("N rapid syncs coalesce to <= 2 worker runs with correct totals, and EVERY triggering user's box state is processed", async () => {
@@ -852,5 +1136,51 @@ describe("5h — reverse handoff (rollback drill)", () => {
       data: { value: false },
     });
     assert.ok(await worker.processOne());
+  });
+});
+
+describe("reason-aware superseded scope merge", () => {
+  it("dedupes stable scopes and atomically escalates an over-cap union to FULL", async () => {
+    const alice = await createUser("Scope Alice");
+    const bob = await createUser("Scope Bob");
+    const raceId = await createActiveRace(alice, [bob], "Scope Merge");
+    const leaseToken = "scope-lease";
+    const participantIds = Array.from({ length: 1000 }, (_, index) => `p-${index}`);
+    await prisma.raceResolutionJobV2.update({
+      where: { raceId },
+      data: {
+        generation: 2,
+        processingGeneration: 1,
+        state: "RUNNING",
+        leaseToken,
+        leaseExpiresAt: new Date(Date.now() + 30_000),
+        lastCompletedAt: new Date(),
+        dirtyReasons: ["STEP_SYNC"],
+        processingDirtyReasons: ["STEP_SYNC", "STEP_SYNC"],
+        dirtyParticipantIds: participantIds,
+        processingDirtyParticipantIds: [participantIds[0], "p-overflow"],
+        dirtyPowerupTypes: ["LEECH"],
+        processingDirtyPowerupTypes: ["LEECH"],
+        dirtyPriority: "COALESCE",
+        processingDirtyPriority: "COALESCE",
+        triggeredByUserIds: [alice.userId, alice.userId],
+        processingTriggeredByUserIds: [alice.userId, bob.userId],
+      },
+    });
+
+    const job = await prisma.raceResolutionJobV2.findUniqueOrThrow({ where: { raceId } });
+    const outcome = await prisma.$transaction((tx) =>
+      RaceResolutionJobV2.discardSuperseded({
+        id: job.id,
+        leaseToken,
+        now: new Date(),
+      }, tx)
+    );
+    assert.equal(outcome.applied, true);
+    const merged = await prisma.raceResolutionJobV2.findUniqueOrThrow({ where: { raceId } });
+    assert.deepEqual(merged.dirtyReasons, ["FULL"]);
+    assert.deepEqual(merged.dirtyParticipantIds, []);
+    assert.deepEqual(merged.dirtyPowerupTypes, []);
+    assert.deepEqual(merged.triggeredByUserIds, [alice.userId, bob.userId]);
   });
 });

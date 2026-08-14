@@ -3,6 +3,46 @@ const test = require("node:test");
 
 const { buildRecordStepSamples, StepSampleError } = require("../../src/modules/steps/commands/recordStepSamples");
 
+test("reason-aware samples reconcile before enqueueing a claimable STEP_SYNC", async () => {
+  const calls = [];
+  const record = buildRecordStepSamples({
+    StepSample: {
+      async reconcileBatch() { calls.push("samples"); },
+    },
+    appSettings: {
+      async getFlag(key) {
+        return key === "raceResolutionReasonAwareV1Enabled";
+      },
+    },
+    reconcileUploaderRaces: async () => {
+      calls.push("reconcile");
+      return {
+        reconciledRaces: [{ raceId: "race-1", participantId: "participant-1" }],
+      };
+    },
+    enqueueRaceResolutionForUser: async (payload) => {
+      calls.push("enqueue");
+      assert.deepEqual(payload.reconciledRaces, [
+        { raceId: "race-1", participantId: "participant-1" },
+      ]);
+      return [];
+    },
+  });
+
+  await record({
+    userId: "user-1",
+    timeZone: "UTC",
+    samples: [{
+      periodStart: "2026-08-13T00:00:00.000Z",
+      periodEnd: "2026-08-13T00:05:00.000Z",
+      steps: 10,
+      recordingMethod: "automatic",
+    }],
+  });
+
+  assert.deepEqual(calls, ["samples", "reconcile", "enqueue"]);
+});
+
 function makeDeps() {
   const saved = [];
 

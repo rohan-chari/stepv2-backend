@@ -14,6 +14,7 @@ const { createRacesRouter } = require("./modules/races");
 const { createTournamentsRouter } = require("./modules/tournaments");
 const { createReferralsRouter } = require("./modules/social");
 const { createShopRouter } = require("./routes/shop");
+const { createShopBootstrapRouter } = require("./modules/shop");
 const { createPowerupsRouter } = require("./modules/powerups");
 const { createDailyRewardRouter } = require("./modules/economy");
 const { createCoinsRouter } = require("./modules/economy");
@@ -56,6 +57,7 @@ const { hashClientIp, hashClientNet } = require("./shared/lib/clientIp");
 const { prisma: defaultPrisma } = require("./db");
 const redisCache = require("./shared/cache/redisCache");
 const { errorMiddleware } = require("./shared/http/errorMiddleware");
+const { createApiContractTelemetry } = require("./shared/http/apiContractTelemetry");
 
 function createApp(dependencies = {}) {
   const app = express();
@@ -95,6 +97,9 @@ function createApp(dependencies = {}) {
   // characters to TestFlight viewers. Prod is the default for anything that
   // omits the header, so no shipped binary sees an asset it lacks.
   app.use(extractReleaseChannel);
+  app.use(
+    createApiContractTelemetry({ logger: dependencies.logger || console })
+  );
 
   app.use("/auth", createAuthRouter(dependencies));
   app.use("/steps", createStepsRouter(dependencies));
@@ -106,6 +111,7 @@ function createApp(dependencies = {}) {
   app.use("/races", createRacesRouter(dependencies));
   app.use("/tournaments", createTournamentsRouter(dependencies));
   app.use("/referrals", createReferralsRouter(dependencies));
+  app.use("/shop", createShopBootstrapRouter(dependencies));
   app.use("/shop", createShopRouter(dependencies));
   app.use("/powerups", createPowerupsRouter(dependencies));
   app.use("/daily-reward", createDailyRewardRouter(dependencies));

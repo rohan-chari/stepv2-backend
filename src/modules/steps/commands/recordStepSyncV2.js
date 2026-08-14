@@ -14,6 +14,11 @@ const {
   StepSyncValidationError,
 } = require("../stepSyncCanonical");
 const { normalizeSamples, removeOverlaps } = require("./recordStepSamples");
+const { appSettings: defaultAppSettings } = require("../../../shared/config/appSettings");
+const { isStrictFlagEnabled } = require("../../../shared/config/isStrictFlagEnabled");
+const {
+  bumpScoringInputVersion,
+} = require("../services/scoringInputVersion");
 
 const COMPAT_STEP_GOAL = 5000;
 const RECONCILE_LEASE_MS = 30 * 1000;
@@ -88,6 +93,7 @@ function buildRecordStepSyncV2(dependencies = {}) {
     dependencies.inlineUploaderReconciliation ||
     (() => process.env.SYNC_V2_INLINE_UPLOADER_RECONCILIATION !== "false");
   const events = dependencies.eventBus || defaultEventBus;
+  const appSettings = dependencies.appSettings || defaultAppSettings;
   const now = dependencies.now || (() => new Date());
   const maxWaitMs = dependencies.maxWaitMs ?? DEFAULT_MAX_WAIT_MS;
   const pollMs = dependencies.pollMs ?? DEFAULT_POLL_MS;
@@ -103,6 +109,8 @@ function buildRecordStepSyncV2(dependencies = {}) {
     stepsChanged,
     eventDate,
     eventSteps,
+    reasonAware,
+    burstCoalescing,
   }) {
     // One-time step-event emission, guarded by the reservation claim.
     const claimed = await stepSyncRequestModel.claimEventsEmission(reservation.id, now());
@@ -161,6 +169,22 @@ function buildRecordStepSyncV2(dependencies = {}) {
     const activeRaceIds = (activeRaces || [])
       .map((race) => race.id)
       .sort((a, b) => String(a).localeCompare(String(b)));
+    const dirtyEnvelopeByRaceId = new Map();
+    if (reasonAware) {
+      for (const race of activeRaces || []) {
+        const uploader = (race.participants || []).find(
+          (participant) =>
+            participant.userId === userId && participant.status === "ACCEPTED"
+        );
+        dirtyEnvelopeByRaceId.set(race.id, {
+          reason: "STEP_SYNC",
+          dirtyUserIds: [userId],
+          dirtyParticipantIds: uploader ? [uploader.id] : [],
+          powerupTypes: [],
+          priority: uploader ? "COALESCE" : "IMMEDIATE",
+        });
+      }
+    }
 
     const { response } = await prisma.$transaction(async (tx) => {
       const requestedAt = now();
@@ -170,6 +194,8 @@ function buildRecordStepSyncV2(dependencies = {}) {
           userId,
           resolutionTimeZone: timeZone,
           now: requestedAt,
+          dirtyEnvelopeByRaceId,
+          burstCoalescing,
         },
         tx
       );
@@ -262,7 +288,7 @@ function buildRecordStepSyncV2(dependencies = {}) {
     return null;
   }
 
-  return async function recordStepSyncV2({
+    return async function recordStepSyncV2({
     userId,
     body,
     idempotencyKey,
@@ -283,6 +309,15 @@ function buildRecordStepSyncV2(dependencies = {}) {
       });
       if (replay) return replay;
     }
+
+    const reasonAware = await isStrictFlagEnabled(
+      appSettings,
+      "raceResolutionReasonAwareV1Enabled"
+    );
+    const burstCoalescing = await isStrictFlagEnabled(
+      appSettings,
+      "raceResolutionBurstCoalescingV1Enabled"
+    );
 
     // ── Transaction A: persist steps/samples + create the reservation. ──
     let reservation;
@@ -335,6 +370,7 @@ function buildRecordStepSyncV2(dependencies = {}) {
           // reservation), so mixed hourly/5-min data never double-counts.
           await StepSample.reconcileBatchOn(tx, userId, cleaned);
         }
+        await bumpScoringInputVersion(tx, userId);
         const res = await stepSyncRequestModel.createReservation(
           {
             userId,
@@ -408,6 +444,8 @@ function buildRecordStepSyncV2(dependencies = {}) {
       stepsChanged,
       eventDate: canonical.date,
       eventSteps: canonical.steps,
+      reasonAware,
+      burstCoalescing,
     });
   };
 }

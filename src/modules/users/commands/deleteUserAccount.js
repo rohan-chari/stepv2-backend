@@ -8,6 +8,7 @@ const {
   providerSubHash,
   cohortBucket,
 } = require("../../races/services/racePayoutDoublePolicy");
+const { buildLeaderboardEligibilityEpoch } = require("../../../shared/config/leaderboardEligibilityEpoch");
 
 class DeleteUserAccountError extends Error {
   constructor(message, statusCode) {
@@ -36,6 +37,8 @@ function buildDeleteUserAccount(dependencies = {}) {
   const storage =
     dependencies.profilePhotoStorage || defaultProfilePhotoStorage;
   const logger = dependencies.logger || console;
+  const eligibilityEpoch = dependencies.leaderboardEligibilityEpoch ||
+    buildLeaderboardEligibilityEpoch({ prisma: db });
 
   return async function deleteUserAccount({ userId }) {
     if (!userId) {
@@ -68,6 +71,7 @@ function buildDeleteUserAccount(dependencies = {}) {
       }
     }
 
+    let counterpartIds = [];
     await db.$transaction(async (tx) => {
       // Shared race-payout-double lock order: durable provider identity first,
       // then user. Tombstone receipts before the user cascade removes offers,
@@ -248,15 +252,24 @@ function buildDeleteUserAccount(dependencies = {}) {
       // the 5s timeout — rather than deferring it to the cascade at
       // tx.user.delete.
       await tx.suggestion.deleteMany({ where: { userId } });
-      await tx.friendship.deleteMany({
+      const friendshipRows = await tx.friendship.findMany({
         where: {
           OR: [{ requesterId: userId }, { addresseeId: userId }],
         },
+        select: { requesterId: true, addresseeId: true },
+      });
+      counterpartIds = friendshipRows.map((row) =>
+        row.requesterId === userId ? row.addresseeId : row.requesterId
+      );
+      await tx.friendship.deleteMany({
+        where: { OR: [{ requesterId: userId }, { addresseeId: userId }] },
       });
 
       // 6) DailyRewardClaim, UserShopItem, UserEquippedAccessory, and
       //    ShopPurchaseRequest all cascade on user delete.
       await tx.user.delete({ where: { id: userId } });
+      await eligibilityEpoch.advance(tx);
+    });
     // C2 invalidation (spec §3): drop the user's presentation bundle. Note the
     // cached chat lists are NOT invalidated here — that fan-out is unbounded
     // (this delete nulls `race_messages.sender_id` across every race the user
@@ -272,9 +285,15 @@ function buildDeleteUserAccount(dependencies = {}) {
     // C5 (spec §5 Phase E2, "account state change"): a warm `/auth/me` would
     // describe an account that no longer exists.
     try {
-      await require("../services/authMeCache").invalidateSafe(userId);
+      const authMeCache = require("../services/authMeCache");
+      await Promise.all(
+        [userId, ...counterpartIds].map((id) => authMeCache.invalidateSafe(id))
+      );
     } catch {}
-    });
+    try {
+      await require("../../social/services/friendsTopologyCache")
+        .invalidateUsersSafe([userId, ...counterpartIds]);
+    } catch {}
   };
 }
 

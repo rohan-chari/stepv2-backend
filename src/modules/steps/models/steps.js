@@ -1,4 +1,7 @@
 const { prisma } = require("../../../db");
+const {
+  bumpScoringInputVersion,
+} = require("../services/scoringInputVersion");
 
 const Steps = {
   async findByUserId(userId) {
@@ -15,15 +18,20 @@ const Steps = {
   },
 
   async create({ userId, steps, date, stepGoal }) {
-    return prisma.step.create({
-      data: { userId, steps, date: new Date(date), stepGoal },
+    return prisma.$transaction(async (tx) => {
+      const row = await tx.step.create({
+        data: { userId, steps, date: new Date(date), stepGoal },
+      });
+      await bumpScoringInputVersion(tx, userId);
+      return row;
     });
   },
 
   async update(id, fields) {
-    return prisma.step.update({
-      where: { id },
-      data: fields,
+    return prisma.$transaction(async (tx) => {
+      const row = await tx.step.update({ where: { id }, data: fields });
+      await bumpScoringInputVersion(tx, row.userId);
+      return row;
     });
   },
 

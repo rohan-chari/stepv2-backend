@@ -154,7 +154,22 @@ function buildRecordStepSamples(dependencies = {}) {
     } else {
       await stepSampleModel.upsertBatch(userId, cleaned);
     }
-    await enqueueRaceResolutionForUser({ userId, timeZone, now: new Date() });
+    let reasonAware = false;
+    try {
+      reasonAware =
+        (await settings.getFlag("raceResolutionReasonAwareV1Enabled")) === true;
+    } catch {
+      reasonAware = false;
+    }
+    if (!reasonAware) {
+      await enqueueRaceResolutionForUser({
+        userId,
+        timeZone,
+        now: new Date(),
+        reason: "STEP_SYNC",
+        priority: "COALESCE",
+      });
+    }
 
     // C0: the bulk resolve is gone, but the UPLOADER-ONLY reconcile stays inline
     // — the same one sync-v2 runs in its Transaction B. It writes exactly ONE
@@ -163,10 +178,28 @@ function buildRecordStepSamples(dependencies = {}) {
     // Keeping it is what preserves same-request box minting for frozen legacy
     // clients; pure enqueue-only would defer their box to the next worker cycle.
     // Rival totals, trail mines, overtakes and placements are the worker's.
+    let reconciliation = null;
     try {
-      await reconcileUploaderRaces({ userId, timeZone });
+      reconciliation = await reconcileUploaderRaces({
+        userId,
+        timeZone,
+        includeReconciledRaces: reasonAware,
+      });
     } catch (error) {
       console.error("Uploader race reconciliation failed:", error);
+    }
+
+    if (reasonAware) {
+      const narrowReady =
+        reconciliation && Array.isArray(reconciliation.reconciledRaces);
+      await enqueueRaceResolutionForUser({
+        userId,
+        timeZone,
+        now: new Date(),
+        reason: narrowReady ? "STEP_SYNC" : null,
+        priority: narrowReady ? "COALESCE" : "IMMEDIATE",
+        reconciledRaces: narrowReady ? reconciliation.reconciledRaces : null,
+      });
     }
 
     let inlineFallback = inlineResolutionInjected;

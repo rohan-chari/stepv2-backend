@@ -144,6 +144,22 @@ test("startRace emits RACE_STARTED event", async () => {
   assert.deepEqual(events[0].payload.participantUserIds, ["creator-1", "friend-1"]);
 });
 
+test("startRace enqueues one immediate RACE_START generation after the winning transition", async () => {
+  const { deps } = makeDeps();
+  const enqueues = [];
+  deps.enqueueRaceResolution = async (value) => enqueues.push(value);
+  const startRace = buildStartRace(deps);
+
+  await startRace({ userId: "creator-1", raceId: "race-1" });
+
+  assert.deepEqual(enqueues, [{
+    raceId: "race-1",
+    userId: "creator-1",
+    reason: "RACE_START",
+    priority: "IMMEDIATE",
+  }]);
+});
+
 test("startRace only counts steps after race start (baseline subtracts pre-race steps)", async () => {
   // Simulate: creator had 5000 steps before race started
   // After race, creator walks 2000 more -> step record updates to 7000

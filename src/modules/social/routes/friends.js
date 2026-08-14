@@ -11,8 +11,16 @@ const {
 const {
   getFriendsList: defaultGetFriendsList,
   getPendingRequests: defaultGetPendingRequests,
+  getFriendsPage: defaultGetFriendsPage,
   getFriendsWithSteps: defaultGetFriendsWithSteps,
 } = require("../queries/getFriends");
+const {
+  getFriendsSummary: defaultGetFriendsSummary,
+} = require("../queries/getFriendsSummary");
+const { appSettings: defaultAppSettings } = require("../../../shared/config/appSettings");
+const {
+  isStrictFlagEnabled,
+} = require("../../../shared/config/isStrictFlagEnabled");
 const {
   searchUsersByDisplayName: defaultSearchUsersByDisplayName,
 } = require("../queries/searchUsers");
@@ -45,6 +53,19 @@ function createFriendsRouter(dependencies = {}) {
   const getFriends = dependencies.getFriendsList || defaultGetFriendsList;
   const getPending =
     dependencies.getPendingRequests || defaultGetPendingRequests;
+  const getPage = dependencies.getFriendsPage ||
+    (dependencies.getFriendsList || dependencies.getPendingRequests
+      ? async (userId, supportsCharacters, supportsRemoteAssets) => {
+          const [friends, pending] = await Promise.all([
+            getFriends(userId, supportsCharacters, supportsRemoteAssets),
+            getPending(userId),
+          ]);
+          return { friends, pending };
+        }
+      : defaultGetFriendsPage);
+  const settings = dependencies.appSettings || defaultAppSettings;
+  const getFriendsSummary =
+    dependencies.getFriendsSummary || defaultGetFriendsSummary;
   const sendRequest =
     dependencies.sendFriendRequest ||
     (dependencies.prisma || dependencies.beforeFriendshipWrite
@@ -137,16 +158,18 @@ function createFriendsRouter(dependencies = {}) {
   // GET /friends
   router.get("/", async (req, res) => {
     try {
-      const [friends, pending] = await Promise.all([
-        getFriends(
-          req.user.id,
-          req.clientFeatures?.has("characters") ?? false,
-          req.clientFeatures?.has("remote_assets") ?? false
-        ),
-        getPending(req.user.id),
-      ]);
-
-      res.json({ friends, pending });
+      const compact =
+        req.query.view === "summary-v1" &&
+        (await isStrictFlagEnabled(settings, "apiFriendsSummaryV1Enabled"));
+      if (compact) {
+        return res.json(await getFriendsSummary(req.user.id));
+      }
+      const page = await getPage(
+        req.user.id,
+        req.clientFeatures?.has("characters") ?? false,
+        req.clientFeatures?.has("remote_assets") ?? false
+      );
+      res.json(page);
     } catch (error) {
       console.error("Friends list error:", error);
       res.status(500).json({ error: "Internal server error" });

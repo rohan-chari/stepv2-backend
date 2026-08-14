@@ -8,6 +8,9 @@ const { isRacePayoutPresetCompatible } = require("../racePayoutPresets");
 const { acceptedTeamCounts } = require("../teamRaces");
 const { snapshotBaselineFields } = require("../services/raceBaseline");
 const { commitRaceStart } = require("../services/commitRaceStart");
+const {
+  enqueueRaceResolution: defaultEnqueueRaceResolution,
+} = require("../services/enqueueRaceResolution");
 
 class RaceStartError extends Error {
   constructor(message, statusCode, code) {
@@ -28,6 +31,14 @@ function buildStartRace(dependencies = {}) {
   const commitRaceStartFn = dependencies.commitRaceStart || commitRaceStart;
   const beforeCommitRaceStart = dependencies.beforeCommitRaceStart;
   const beforeRaceStartedRecord = dependencies.beforeRaceStartedRecord;
+  const enqueueRaceResolution = Object.prototype.hasOwnProperty.call(
+    dependencies,
+    "enqueueRaceResolution"
+  )
+    ? dependencies.enqueueRaceResolution
+    : Object.keys(dependencies).length > 0
+      ? async () => null
+      : defaultEnqueueRaceResolution;
   const now = dependencies.now || (() => new Date());
   const useDurableStart =
     !dependencies.Race &&
@@ -230,6 +241,13 @@ function buildStartRace(dependencies = {}) {
       isTeamRace: race.isTeamRace === true,
       teamAName: race.teamAName ?? null,
       teamBName: race.teamBName ?? null,
+    });
+
+    await enqueueRaceResolution({
+      raceId,
+      userId,
+      reason: "RACE_START",
+      priority: "IMMEDIATE",
     });
 
     return raceModel.findById(raceId);

@@ -165,7 +165,27 @@ function buildRecordSteps(dependencies = {}) {
     // into skipRaceResolution — the generation bump coalesces with the one the
     // imminent /steps/samples call makes, so it costs nothing and guarantees
     // convergence if that follow-up never arrives.
-    await enqueueRaceResolutionForUser({ userId, timeZone, now: now() });
+    let reasonAware = false;
+    try {
+      reasonAware =
+        (await settings.getFlag("raceResolutionReasonAwareV1Enabled")) === true;
+    } catch {
+      reasonAware = false;
+    }
+
+    // Frozen/flag-off clients retain the deployed enqueue-before-reconcile
+    // behavior byte-for-byte. The opt-in reason-aware path below reverses the
+    // order so a narrow STEP_SYNC can never become claimable before the
+    // uploader row it depends on has committed.
+    if (!reasonAware) {
+      await enqueueRaceResolutionForUser({
+        userId,
+        timeZone,
+        now: now(),
+        reason: "STEP_SYNC",
+        priority: "COALESCE",
+      });
+    }
 
     // C0: the bulk resolve is gone, but the UPLOADER-ONLY reconcile stays inline
     // — the same one sync-v2 runs in its Transaction B. It writes exactly ONE
@@ -174,12 +194,34 @@ function buildRecordSteps(dependencies = {}) {
     // Keeping it is what preserves same-request box minting for frozen legacy
     // clients; pure enqueue-only would defer their box to the next worker cycle.
     // Rival totals, trail mines, overtakes and placements are the worker's.
+    let reconciliation = null;
     if (!skipRaceResolution) {
       try {
-        await reconcileUploaderRaces({ userId, timeZone });
+        reconciliation = await reconcileUploaderRaces({
+          userId,
+          timeZone,
+          includeReconciledRaces: reasonAware,
+        });
       } catch (error) {
         console.error("Uploader race reconciliation failed:", error);
       }
+    }
+
+    if (reasonAware) {
+      const narrowReady =
+        !skipRaceResolution &&
+        reconciliation &&
+        Array.isArray(reconciliation.reconciledRaces);
+      await enqueueRaceResolutionForUser({
+        userId,
+        timeZone,
+        now: now(),
+        // Missing/skipped/failed reconciliation deliberately normalizes to
+        // FULL at the closed registry instead of guessing at a narrow scope.
+        reason: narrowReady ? "STEP_SYNC" : null,
+        priority: narrowReady ? "COALESCE" : "IMMEDIATE",
+        reconciledRaces: narrowReady ? reconciliation.reconciledRaces : null,
+      });
     }
 
     // Rollback lever (ii): with `inlineRaceResolutionFallback` ON, this path

@@ -3,6 +3,16 @@ const {
   RaceResolutionJobV2,
 } = require("../models/raceResolutionJobV2");
 const { recordServerActivationEvent } = require("../../analytics/serverActivationEvents");
+const {
+  enqueueRaceResolution,
+} = require("./enqueueRaceResolution");
+
+class RaceStartTransactionAbort extends Error {
+  constructor(result) {
+    super("race start transaction not applied");
+    this.result = result;
+  }
+}
 
 // Durable start claim. Baselines are collected before this short transaction;
 // the accepted-id snapshot is rechecked under the C0 writer fence before any
@@ -17,13 +27,26 @@ async function commitRaceStart({
   participantUpdates,
   beforeRaceStartedRecord,
 }) {
-  return prisma.$transaction(async (tx) => {
+  try {
+    return await prisma.$transaction(async (tx) => {
+    // Enqueue first inside the same transaction, then lock the resulting job
+    // row before touching participants. A failed/retried start throws below so
+    // the generation rolls back with every other attempted mutation.
+    await enqueueRaceResolution({
+      raceId,
+      userId: actorUserId,
+      reason: "RACE_START",
+      priority: "IMMEDIATE",
+      now: startedAt,
+    }, tx);
     await RaceResolutionJobV2.acquireForWrite(tx, { raceId });
     const race = await tx.race.findUnique({
       where: { id: raceId },
       select: { status: true, creationSource: true, startPolicy: true, createdAt: true },
     });
-    if (!race || race.status !== "PENDING") return { started: false };
+    if (!race || race.status !== "PENDING") {
+      throw new RaceStartTransactionAbort({ started: false });
+    }
 
     const accepted = await tx.raceParticipant.findMany({
       where: { raceId, status: "ACCEPTED" },
@@ -40,14 +63,14 @@ async function commitRaceStart({
           row.id !== expected[index].id || row.userId !== expected[index].userId
       )
     ) {
-      return { started: false, participantChanged: true };
+      throw new RaceStartTransactionAbort({ started: false, participantChanged: true });
     }
 
     const flip = await tx.race.updateMany({
       where: { id: raceId, status: "PENDING" },
       data: { status: "ACTIVE", startedAt, endsAt, potCoins },
     });
-    if (flip.count !== 1) return { started: false };
+    if (flip.count !== 1) throw new RaceStartTransactionAbort({ started: false });
 
     for (const participant of expected) {
       await tx.raceParticipant.update({
@@ -85,7 +108,11 @@ async function commitRaceStart({
       });
     }
     return { started: true };
-  });
+    });
+  } catch (error) {
+    if (error instanceof RaceStartTransactionAbort) return error.result;
+    throw error;
+  }
 }
 
 module.exports = { commitRaceStart };

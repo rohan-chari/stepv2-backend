@@ -637,6 +637,10 @@ function buildRecomputePlacements(dependencies = {}) {
             raceId: race.id,
             timeZone: raceTz,
             now: currentTime,
+            reason: dueEffectRaceIds.has(race.id)
+              ? "EFFECT_BOUNDARY"
+              : "RECOVERY",
+            priority: "IMMEDIATE",
           });
           if (queued) {
             if (dueEffectRaceIds.has(race.id)) dueEffectEnqueues += 1;

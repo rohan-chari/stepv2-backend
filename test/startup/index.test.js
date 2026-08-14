@@ -45,6 +45,7 @@ test("startServer listens on 0.0.0.0 by default", () => {
     scheduleNotificationCleanup: track("notificationCleanup"),
     scheduleActivationEventCleanup: track("activationEventCleanup"),
     scheduleDailyMover: track("dailyMover"),
+    scheduleRaceResolutionPostTasks() {},
     logger: {
       log(message) {
         logs.push(message);
@@ -101,6 +102,7 @@ test("cronStartDelayMs defers job scheduling past the reload overlap window", as
     scheduleNotificationCleanup: track("notificationCleanup"),
     scheduleActivationEventCleanup: track("activationEventCleanup"),
     scheduleDailyMover: track("dailyMover"),
+    scheduleRaceResolutionPostTasks() {},
     logger: {
       log(message) {
         logs.push(message);

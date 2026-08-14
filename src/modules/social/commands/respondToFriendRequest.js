@@ -75,6 +75,10 @@ function buildRespondToFriendRequest(dependencies = {}) {
       updated.requesterId,
       updated.addresseeId
     );
+    await require("../services/friendsTopologyCache").invalidatePairSafe(
+      updated.requesterId,
+      updated.addresseeId
+    );
 
     const event = accept ? "FRIEND_REQUEST_ACCEPTED" : "FRIEND_REQUEST_DECLINED";
     eventBus.emit(event, {

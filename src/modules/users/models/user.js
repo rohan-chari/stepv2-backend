@@ -122,6 +122,9 @@ const User = {
       data: { clientFeatures: features, clientFeaturesAt: new Date() },
     });
     await invalidateAuthMe(id);
+    try {
+      await require("../../social/services/userPresentationCache").invalidate(id);
+    } catch {}
     return updated;
   },
 

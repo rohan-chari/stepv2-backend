@@ -1,6 +1,9 @@
 const { snapshotBaselineFields } = require("../../races/services/raceBaseline");
 const { roundLabel, clampMatchupDuration } = require("../constants/tournaments");
 const { Steps } = require("../../steps/models/steps");
+const {
+  enqueueRaceResolution,
+} = require("../../races/services/enqueueRaceResolution");
 
 const RACE_NAME_MAX = 50;
 
@@ -88,6 +91,12 @@ async function createRoundRaces({
         },
       });
     }
+
+    await enqueueRaceResolution({
+      raceId: race.id,
+      reason: "RACE_START",
+      priority: "IMMEDIATE",
+    }, tx);
 
     created.push({
       raceId: race.id,

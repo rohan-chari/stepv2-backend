@@ -96,7 +96,12 @@ function buildKickRaceParticipant(dependencies = {}) {
     await invalidateRaceProgress(raceId);
 
     if (race.status === "ACTIVE") {
-      await enqueueRaceResolution({ raceId, userId: targetUserId });
+      await enqueueRaceResolution({
+        raceId,
+        userId: targetUserId,
+        reason: "JOIN_LEAVE_KICK",
+        priority: "IMMEDIATE",
+      });
     }
 
 

@@ -49,12 +49,15 @@ const TTL_SECONDS = 15 * 60;
 // `merged.length > pageLimit` next-cursor test behaving exactly as it does
 // against the live `take: 51` query (both are "more than a page exists").
 const CACHE_ROW_CAP = 100;
+const WATERMARK_ROW_CAP = 50;
 
 // Atomic invalidation. KEYS[1]=msgver, KEYS[2]=list. Deleting the list and
 // advancing the version must be indivisible.
 const INVALIDATE_LUA = `
 redis.call("set", KEYS[1], ARGV[1], "EX", ARGV[2])
-redis.call("del", KEYS[2])
+for i = 2, #KEYS do
+  redis.call("del", KEYS[i])
+end
 return 1
 `;
 
@@ -116,6 +119,68 @@ async function loadRows(raceId, kind, hiddenSystemEventTypes) {
   });
 }
 
+async function loadWatermarkRows(raceId) {
+  return prisma.raceMessage.findMany({
+    where: { raceId, kind: "USER", deletedAt: null },
+    select: { id: true, createdAt: true },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: WATERMARK_ROW_CAP,
+  });
+}
+
+function projectWatermark(rows) {
+  return {
+    latestId: rows[0]?.id ?? null,
+    latestAt: rows[0]?.createdAt ?? null,
+    recentIds: rows.map((row) => row.id),
+  };
+}
+
+async function getWatermark({ raceId, enabled }) {
+  const dataKey = cacheKeys.raceMessageWatermark(raceId);
+  const versionKey = cacheKeys.raceMessagesVersion(raceId, "USER");
+  const load = () => loadWatermarkRows(raceId);
+  if (!enabled || !redisCache.isEnabled()) return projectWatermark(await load());
+  derivedCache.ensureSubscribed();
+  if (derivedCache.isBypassed(cacheKeys.PREFIX.RACE_MESSAGES)) {
+    return projectWatermark(await load());
+  }
+  const cached = await redisCache.getJSON(dataKey);
+  if (
+    cached &&
+    Array.isArray(cached.rows) &&
+    cached.rows.every(
+      (row) =>
+        row &&
+        typeof row.id === "string" &&
+        row.createdAt != null &&
+        Object.keys(row).every((key) => key === "id" || key === "createdAt")
+    )
+  ) {
+    return projectWatermark(cached.rows);
+  }
+  let queried = null;
+  await redisCache.withWatch([versionKey], async (ctx) => {
+    const observed = await ctx.get(versionKey);
+    queried = await load();
+    const newestMarker = queried.length > 0 ? encodeMarker(queried[0]) : null;
+    const marker =
+      observed && newestMarker
+        ? observed > newestMarker
+          ? observed
+          : newestMarker
+        : newestMarker || observed || encodeMarker(null);
+    return {
+      sets: [
+        { key: dataKey, value: { rows: queried }, ttlSeconds: TTL_SECONDS },
+        { key: versionKey, value: marker, ttlSeconds: TTL_SECONDS },
+      ],
+    };
+  });
+  if (queried === null) queried = await load();
+  return projectWatermark(queried);
+}
+
 /**
  * Cached raw rows for one (race, kind). Returns rows in the same order and
  * shape the live query would produce.
@@ -125,6 +190,8 @@ async function loadRows(raceId, kind, hiddenSystemEventTypes) {
 async function getRows({ raceId, kind, enabled, hiddenSystemEventTypes }) {
   const listKey = cacheKeys.raceMessages(raceId, kind);
   const versionKey = cacheKeys.raceMessagesVersion(raceId, kind);
+  const dataKeys = [listKey];
+  if (kind === "USER") dataKeys.push(cacheKeys.raceMessageWatermark(raceId));
   const load = () => loadRows(raceId, kind, hiddenSystemEventTypes);
 
   if (!enabled || !redisCache.isEnabled()) {
@@ -199,6 +266,8 @@ async function invalidateKind(raceId, kind, durableRow) {
   if (!raceId) return true;
   const listKey = cacheKeys.raceMessages(raceId, kind);
   const versionKey = cacheKeys.raceMessagesVersion(raceId, kind);
+  const dataKeys = [listKey];
+  if (kind === "USER") dataKeys.push(cacheKeys.raceMessageWatermark(raceId));
   const marker = JSON.stringify(encodeMarker(durableRow));
 
   return derivedCache.invalidate({
@@ -206,7 +275,7 @@ async function invalidateKind(raceId, kind, durableRow) {
     run: async () => {
       const { ok, disabled } = await redisCache.evalLua(
         INVALIDATE_LUA,
-        [versionKey, listKey],
+        [versionKey, ...dataKeys],
         [marker, String(TTL_SECONDS)]
       );
       return { ok, disabled };
@@ -227,11 +296,13 @@ async function invalidateRace(raceId, at = new Date()) {
 
 module.exports = {
   getRows,
+  getWatermark,
   invalidateKind,
   invalidateRace,
   isCacheableShape,
   encodeMarker,
   TTL_SECONDS,
   CACHE_ROW_CAP,
+  WATERMARK_ROW_CAP,
   __setTestHooks,
 };

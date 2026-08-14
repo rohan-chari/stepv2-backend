@@ -14,6 +14,12 @@ async function invalidateAuthMePair(a, b) {
   } catch {}
 }
 
+async function invalidateTopologyPair(a, b) {
+  try {
+    await require("../services/friendsTopologyCache").invalidatePairSafe(a, b);
+  } catch {}
+}
+
 const userDisplaySelect = {
   id: true,
   displayName: true,
@@ -63,6 +69,7 @@ const Friendship = {
       data: { requesterId, addresseeId },
     });
     await invalidateAuthMePair(requesterId, addresseeId);
+    await invalidateTopologyPair(requesterId, addresseeId);
     return created;
   },
 
@@ -72,6 +79,7 @@ const Friendship = {
       data: { status },
     });
     await invalidateAuthMePair(updated.requesterId, updated.addresseeId);
+    await invalidateTopologyPair(updated.requesterId, updated.addresseeId);
     return updated;
   },
 
@@ -142,6 +150,7 @@ const Friendship = {
   async delete(id) {
     const removed = await prisma.friendship.delete({ where: { id } });
     await invalidateAuthMePair(removed.requesterId, removed.addresseeId);
+    await invalidateTopologyPair(removed.requesterId, removed.addresseeId);
     return removed;
   },
 

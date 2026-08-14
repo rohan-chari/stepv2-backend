@@ -5,6 +5,10 @@ const { getRankedV2: defaultGetRankedV2 } = require("./queries/getRankedV2");
 const {
   markRankedResultsSeen: defaultMarkRankedResultsSeen,
 } = require("./commands/markRankedResultsSeen");
+const { appSettings: defaultAppSettings } = require("../../shared/config/appSettings");
+const {
+  isStrictFlagEnabled,
+} = require("../../shared/config/isStrictFlagEnabled");
 
 function createRankedRouter(dependencies = {}) {
   const router = Router();
@@ -13,6 +17,7 @@ function createRankedRouter(dependencies = {}) {
   const getRankedV2 = dependencies.getRankedV2 || defaultGetRankedV2;
   const markRankedResultsSeen =
     dependencies.markRankedResultsSeen || defaultMarkRankedResultsSeen;
+  const settings = dependencies.appSettings || defaultAppSettings;
 
   router.use(requireAuth);
 
@@ -20,11 +25,18 @@ function createRankedRouter(dependencies = {}) {
   // below keeps serving shipped binaries unchanged.
   router.get("/v2", async (req, res) => {
     try {
+      const compact =
+        req.query.view === "compact-v1" &&
+        (await isStrictFlagEnabled(settings, "apiRankedV2CompactV1Enabled"));
       const result = await getRankedV2({
         currentUserId: req.user.id,
-        supportsCharacters: req.clientFeatures?.has("characters") ?? false,
-        supportsRemoteAssets: req.clientFeatures?.has("remote_assets") ?? false,
+        supportsCharacters:
+          !compact && (req.clientFeatures?.has("characters") ?? false),
+        supportsRemoteAssets:
+          !compact && (req.clientFeatures?.has("remote_assets") ?? false),
+        compact,
       });
+      if (compact) result.contract = "ranked-v2-compact-v1";
       res.json(result);
     } catch (error) {
       console.error("Ranked v2 error:", error);

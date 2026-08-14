@@ -21,6 +21,14 @@ const {
   getAdCoinRewardStatus: defaultGetAdCoinRewardStatus,
 } = require("../queries/getAdCoinRewardStatus");
 const defaultAdRewardsConfig = require("../adRewards");
+const {
+  REFERRER_REWARD_COINS,
+  REFEREE_REWARD_COINS,
+} = require("../../social/referralRewards");
+const { appSettings: defaultAppSettings } = require("../../../shared/config/appSettings");
+const {
+  isStrictFlagEnabled,
+} = require("../../../shared/config/isStrictFlagEnabled");
 
 function createDailyRewardRouter(dependencies = {}) {
   const router = Router();
@@ -39,6 +47,7 @@ function createDailyRewardRouter(dependencies = {}) {
   const getAdCoinRewardStatus =
     dependencies.getAdCoinRewardStatus || defaultGetAdCoinRewardStatus;
   const adRewardsConfig = dependencies.adRewardsConfig || defaultAdRewardsConfig;
+  const settings = dependencies.appSettings || defaultAppSettings;
 
   router.use(requireAuth);
   // Release channel (testOnly gating for powerup prizes). X-Client-Features is
@@ -69,6 +78,29 @@ function createDailyRewardRouter(dependencies = {}) {
         return res
           .status(400)
           .json({ error: "localDate query param required (YYYY-MM-DD)" });
+      }
+      const compact =
+        req.query.view === "get-coins-v1" &&
+        (await isStrictFlagEnabled(settings, "apiGetCoinsV1Enabled"));
+      if (compact) {
+        const status = {
+          contract: "get-coins-v1",
+          claimedToday: req.user.lastDailyClaimDate === localDate,
+          referralRewards: {
+            referrerCoins: REFERRER_REWARD_COINS,
+            refereeCoins: REFEREE_REWARD_COINS,
+          },
+        };
+        if (
+          adRewardsConfig.ADS_COIN_REWARD_ENABLED &&
+          req.clientFeatures?.has("ads")
+        ) {
+          status.adCoinReward = await getAdCoinRewardStatus({
+            userId: req.user.id,
+            localDate,
+          });
+        }
+        return res.json(status);
       }
       const status = await getDailyRewardStatus({
         userId: req.user.id,

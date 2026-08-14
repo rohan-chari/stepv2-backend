@@ -21,6 +21,15 @@ const { supportsBuckets: supportsSeededRaceBuckets } = require("../races/service
 const {
   getSuggestedRaces: defaultGetSuggestedRaces,
 } = require("./queries/getSuggestedRaces");
+const {
+  getHomeShellPresentation: defaultGetHomeShellPresentation,
+} = require("./queries/getHomeShellPresentation");
+const {
+  getFriendsSummary: defaultGetFriendsSummary,
+} = require("../social/queries/getFriendsSummary");
+const {
+  isStrictFlagEnabled,
+} = require("../../shared/config/isStrictFlagEnabled");
 
 function createHomeRouter(dependencies = {}) {
   const router = Router();
@@ -44,6 +53,11 @@ function createHomeRouter(dependencies = {}) {
     dependencies.logger
       ? require("./queries/getSuggestedRaces").buildGetSuggestedRaces(dependencies)
       : defaultGetSuggestedRaces);
+  const getHomeShellPresentation =
+    dependencies.getHomeShellPresentation || defaultGetHomeShellPresentation;
+  const getFriendsSummary =
+    dependencies.getFriendsSummary || defaultGetFriendsSummary;
+  const settings = dependencies.appSettings || appSettings;
 
   router.use(requireAuth);
 
@@ -67,6 +81,22 @@ function createHomeRouter(dependencies = {}) {
 
   router.get("/race-card", async (req, res) => {
     try {
+      const compact =
+        req.query.view === "shell-v1" &&
+        (await isStrictFlagEnabled(settings, "apiHomeShellV1Enabled"));
+      const optionalShellPromises = compact
+        ? [
+            getHomeShellPresentation({
+              userId: req.user.id,
+              channel: req.releaseChannel,
+              supportsCharacters:
+                req.clientFeatures?.has("characters") ?? false,
+              supportsRemoteAssets:
+                req.clientFeatures?.has("remote_assets") ?? false,
+            }),
+            getFriendsSummary(req.user.id),
+          ]
+        : null;
       // Opt-in flag set only by new app builds. Without it, response is the
       // legacy single-state shape so older clients are unaffected.
       const homeActiveRaces =
@@ -102,8 +132,8 @@ function createHomeRouter(dependencies = {}) {
       if (supportsNextRace(req.clientFeatures)) {
         try {
           const [discoveryEnabled, createEnabled] = await Promise.all([
-            appSettings.getFlag("openUserRaceDiscoveryEnabled"),
-            appSettings.getFlag("quickCreateRaceCtaEnabled"),
+            settings.getFlag("openUserRaceDiscoveryEnabled"),
+            settings.getFlag("quickCreateRaceCtaEnabled"),
           ]);
           result.nextRace =
             discoveryEnabled || createEnabled
@@ -200,6 +230,19 @@ function createHomeRouter(dependencies = {}) {
         }
       }
 
+      if (optionalShellPromises) {
+        const [presentation, friends] = await Promise.allSettled(
+          optionalShellPromises
+        );
+        result.contract = "home-shell-v1";
+        result.resolved = {
+          presentation: presentation.status === "fulfilled",
+          friends: friends.status === "fulfilled",
+        };
+        result.presentation =
+          presentation.status === "fulfilled" ? presentation.value : null;
+        result.friends = friends.status === "fulfilled" ? friends.value : null;
+      }
       res.json(result);
     } catch (error) {
       console.error("Home race-card error:", error);

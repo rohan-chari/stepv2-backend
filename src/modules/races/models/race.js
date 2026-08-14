@@ -85,6 +85,32 @@ const resolutionRaceSelect = {
 };
 
 const Race = {
+  async findBootstrapAccessContext(id, userId) {
+    return prisma.race.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        status: true,
+        seededBucketId: true,
+        tournamentId: true,
+        participants: {
+          where: { userId },
+          select: { userId: true, status: true },
+          take: 1,
+        },
+        tournament: {
+          select: {
+            participants: {
+              where: { userId, status: "ACCEPTED" },
+              select: { userId: true },
+              take: 1,
+            },
+          },
+        },
+      },
+    });
+  },
+
   // Capability guard for dynamic race routes. Deliberately lean: old clients
   // poll progress frequently, so checking whether an opaque id is a private
   // seeded bucket must not hydrate the full participant/accessory graph.

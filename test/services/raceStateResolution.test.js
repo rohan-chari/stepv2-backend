@@ -306,6 +306,29 @@ test("resolveRaceState still resolves an open-ended (endsAt null) race normally"
   assert.ok(ctx.participantUpdates.length > 0, "resolution ran and wrote totals");
 });
 
+test("canonical resolver exposes a bounded pre-mine display capture without changing writes", async () => {
+  const alice = makeParticipant("rp-1", "user-1", "Alice");
+  const ctx = makeContext({
+    participants: [alice],
+    samplesByUser: new Map([["user-1", [{
+      periodStart: "2026-04-07T10:00:00Z",
+      periodEnd: "2026-04-07T11:00:00Z",
+      steps: 1200,
+    }]]]),
+  });
+  const result = (await buildResolveRaceState(ctx.deps)({ raceId: "race-1" }))[0];
+  assert.deepEqual(result.displayCapture.stepTotals, [{
+    participantId: "rp-1",
+    userId: "user-1",
+    totalSteps: 1200,
+  }]);
+  assert.deepEqual(result.displayCapture.currentMultiplierByParticipantId, { "rp-1": 1 });
+  assert.deepEqual(result.displayCapture.activeEffects, []);
+  assert.deepEqual(result.displayCapture.globalEvents, []);
+  assert.equal(result.displayCapture.asOf.toISOString(), NOW.toISOString());
+  assert.equal(ctx.participantUpdates.length, 1, "existing canonical write surface is unchanged");
+});
+
 test("resolveRaceState ignores same-day steps row delta when no post-start samples exist", async () => {
   const raceStart = new Date("2026-04-07T10:00:00Z");
   const alice = makeParticipant("rp-1", "user-1", "Alice", {

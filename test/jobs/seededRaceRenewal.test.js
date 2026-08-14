@@ -33,6 +33,7 @@ const weeklySeed = {
 function makeCtx({ seeds = [], races = [], participantsByRace = {} } = {}) {
   let idSeq = races.length;
   const emitted = [];
+  const enqueued = [];
   const prisma = {
     raceSeed: {
       async findMany() {
@@ -85,6 +86,7 @@ function makeCtx({ seeds = [], races = [], participantsByRace = {} } = {}) {
     races,
     participantsByRace,
     emitted,
+    enqueued,
     eventBus: { emit: (name, payload) => emitted.push({ name, payload }) },
   };
 }
@@ -95,6 +97,7 @@ function buildRenew(ctx) {
     now: () => NOW,
     logger: silent,
     eventBus: ctx.eventBus,
+    enqueueRaceResolution: async (value) => ctx.enqueued.push(value),
   });
 }
 
@@ -250,6 +253,11 @@ test("promotion initializes nextBoxAtSteps for opt-ins when powerups are enabled
   await buildRenew(ctx)();
 
   assert.equal(ctx.participantsByRace["pending-due"][0].nextBoxAtSteps, 2000);
+  assert.deepEqual(ctx.enqueued, [{
+    raceId: "pending-due",
+    reason: "RACE_START",
+    priority: "IMMEDIATE",
+  }]);
 });
 
 test("cold-start gap mid-day: ACTIVE anchors to today's ET midnight, not now", async () => {

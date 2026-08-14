@@ -42,6 +42,7 @@ function buildSetProfilePhoto(dependencies = {}) {
       profilePhotoUrl: url,
       profilePhotoPromptDismissedAt: null,
     });
+    await require("../../social/services/userPresentationCache").invalidate(userId);
 
     if (previousKey && previousKey !== key) {
       try {
@@ -77,6 +78,7 @@ function buildRemoveProfilePhoto(dependencies = {}) {
       profilePhotoKey: null,
       profilePhotoUrl: null,
     });
+    await require("../../social/services/userPresentationCache").invalidate(userId);
 
     try {
       await storage.deleteObject(user.profilePhotoKey);

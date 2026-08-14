@@ -22,9 +22,10 @@ async function getRaceDetails(
   // A frozen/tokenless client cannot render a private bucket card. Return the
   // same non-revealing absence it gets for an unknown race, even if it is a
   // participant, rather than leaking a private race id through detail.
-  supportsBuckets = false
+  supportsBuckets = false,
+  preloadedRace = null
 ) {
-  const race = await Race.findById(raceId);
+  const race = preloadedRace || (await Race.findById(raceId));
   if (!race) {
     const error = new Error("Race not found");
     error.statusCode = 404;

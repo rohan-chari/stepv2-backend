@@ -26,6 +26,7 @@ const {
 // `rawJobId is String && isNotEmpty ? … : null`) and simply skips its poll.
 
 const uuid = () => crypto.randomUUID();
+const { appSettings } = require("../../src/shared/config/appSettings");
 const bodyFor = (steps) => ({ date: "2026-07-17", steps, samples: [] });
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -71,6 +72,75 @@ describe("POST /steps/sync-v2 (integration)", () => {
   });
   beforeEach(async () => {
     await cleanDatabase();
+    await appSettings.setFlag("raceResolutionReasonAwareV1Enabled", false);
+    await appSettings.setFlag("raceResolutionBurstCoalescingV1Enabled", false);
+  });
+
+  it("coalescing uses a fixed five-second window that later syncs cannot extend", async () => {
+    const { token, user } = await createTestUser();
+    const raceId = await activeRaceWith(user.id, "Fixed coalescing race");
+    await appSettings.setFlag("raceResolutionReasonAwareV1Enabled", true);
+    await appSettings.setFlag("raceResolutionBurstCoalescingV1Enabled", true);
+
+    const firstRequestedAt = new Date();
+    const first = await request(baseUrl, "POST", "/steps/sync-v2", {
+      token,
+      headers: { "Idempotency-Key": uuid() },
+      body: bodyFor(100),
+    });
+    assert.equal(first.status, 202);
+    const [firstJob] = await prisma.$queryRawUnsafe(
+      `SELECT not_before_at AS "notBeforeAt" FROM race_resolution_jobs_v2 WHERE race_id = $1`,
+      raceId
+    );
+    assert.ok(firstJob.notBeforeAt >= firstRequestedAt);
+    assert.ok(firstJob.notBeforeAt.getTime() <= firstRequestedAt.getTime() + 5500);
+
+    const second = await request(baseUrl, "POST", "/steps/sync-v2", {
+      token,
+      headers: { "Idempotency-Key": uuid() },
+      body: bodyFor(101),
+    });
+    assert.equal(second.status, 202);
+    const [secondJob] = await prisma.$queryRawUnsafe(
+      `SELECT not_before_at AS "notBeforeAt" FROM race_resolution_jobs_v2 WHERE race_id = $1`,
+      raceId
+    );
+    assert.equal(secondJob.notBeforeAt.toISOString(), firstJob.notBeforeAt.toISOString());
+  });
+
+  it("reason-aware sync atomically bumps the scoring token and enqueues bounded STEP_SYNC scope", async () => {
+    const { token, user } = await createTestUser();
+    const raceId = await activeRaceWith(user.id, "Reason-aware sync race");
+    await appSettings.setFlag("raceResolutionReasonAwareV1Enabled", true);
+
+    const res = await request(baseUrl, "POST", "/steps/sync-v2", {
+      token,
+      headers: { "Idempotency-Key": uuid() },
+      body: bodyFor(2468),
+    });
+    assert.equal(res.status, 202);
+
+    const [version] = await prisma.$queryRawUnsafe(
+      `SELECT generation FROM user_scoring_input_versions WHERE user_id = $1`,
+      user.id
+    );
+    assert.equal(Number(version.generation), 1);
+
+    const [job] = await prisma.$queryRawUnsafe(
+      `SELECT dirty_reasons AS "dirtyReasons",
+              dirty_participant_ids AS "dirtyParticipantIds",
+              dirty_priority AS "dirtyPriority"
+       FROM race_resolution_jobs_v2 WHERE race_id = $1`,
+      raceId
+    );
+    const participant = await prisma.raceParticipant.findUnique({
+      where: { raceId_userId: { raceId, userId: user.id } },
+      select: { id: true },
+    });
+    assert.deepEqual(job.dirtyReasons, ["STEP_SYNC"]);
+    assert.deepEqual(job.dirtyParticipantIds, [participant.id]);
+    assert.equal(job.dirtyPriority, "COALESCE");
   });
 
   it("persists steps, returns 202 CURRENT, and completes the reservation", async () => {

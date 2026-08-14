@@ -149,6 +149,10 @@ function buildJoinRaceByShareToken(dependencies = {}) {
         resolved.creatorId,
         userId
       );
+      await require("../../social/services/friendsTopologyCache").invalidatePairSafe(
+        resolved.creatorId,
+        userId
+      );
     }
     await deferred.runPostCommit();
 

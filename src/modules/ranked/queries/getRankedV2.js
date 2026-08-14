@@ -50,6 +50,12 @@ const memberUserSelect = {
   },
 };
 
+const compactMemberUserSelect = {
+  id: true,
+  displayName: true,
+  profilePhotoUrl: true,
+};
+
 function settlesAt(week) {
   return new Date(
     new Date(week.endsOn).getTime() + SETTLE_GRACE_HOURS * 60 * 60 * 1000
@@ -67,24 +73,27 @@ function zoneForRank(rank, size, tier) {
 async function getUserProfiles(
   userIds,
   supportsCharacters = false,
-  supportsRemoteAssets = false
+  supportsRemoteAssets = false,
+  compact = false
 ) {
   if (userIds.length === 0) return new Map();
   const users = await prisma.user.findMany({
     where: { id: { in: userIds } },
-    select: memberUserSelect,
+    select: compact ? compactMemberUserSelect : memberUserSelect,
   });
   return new Map(
     users.map((u) => [
       u.id,
       (() => {
         // {animal, accessories} — naked capy for viewers without `characters`.
-        const { animal, accessories } = characterPresentation(
-          u,
-          supportsCharacters,
-          "prod",
-          supportsRemoteAssets
-        );
+        const { animal, accessories } = compact
+          ? { animal: undefined, accessories: undefined }
+          : characterPresentation(
+              u,
+              supportsCharacters,
+              "prod",
+              supportsRemoteAssets
+            );
         return {
           displayName: u.displayName || "Anonymous",
           profilePhotoUrl: u.profilePhotoUrl || null,
@@ -131,6 +140,7 @@ async function getRankedV2({
   now = () => new Date(),
   supportsCharacters = false,
   supportsRemoteAssets = false,
+  compact = false,
 } = {}) {
   // During the Monday grace window the next week hasn't opened yet (it waits
   // for the prior week to settle — see computeRankedWeeks). getCurrent() is null
@@ -184,20 +194,25 @@ async function getRankedV2({
   const profiles = await getUserProfiles(
     cohortMembers.map((m) => m.userId),
     supportsCharacters,
-    supportsRemoteAssets
+    supportsRemoteAssets,
+    compact
   );
 
   const members = cohortMembers.map((m, index) => {
     const rank = m.provisionalRank ?? index + 1;
-    return {
+    const member = {
       rank,
       userId: m.userId,
       displayName: profiles.get(m.userId)?.displayName || "Anonymous",
       profilePhotoUrl: profiles.get(m.userId)?.profilePhotoUrl || null,
-      equippedAccessories: profiles.get(m.userId)?.equippedAccessories || [],
       weeklySteps: m.weeklySteps,
       zone: zoneForRank(rank, size, tier),
     };
+    if (!compact) {
+      member.equippedAccessories =
+        profiles.get(m.userId)?.equippedAccessories || [];
+    }
+    return member;
   });
 
   const myRank = me.provisionalRank;

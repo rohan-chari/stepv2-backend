@@ -14,6 +14,7 @@ const noopSchedulers = {
   scheduleNotificationCleanup() {},
   scheduleActivationEventCleanup() {},
   scheduleDailyMover() {},
+  scheduleRaceResolutionPostTasks() {},
 };
 
 function fakeApp() {

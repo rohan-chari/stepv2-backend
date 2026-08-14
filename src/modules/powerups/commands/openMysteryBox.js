@@ -321,7 +321,12 @@ function buildOpenMysteryBox(dependencies = {}) {
 
       await repairRacePowerupInventory({ raceId, userId, race, participant });
       await invalidateRaceProgress(raceId);
-      await enqueueRaceResolution({ raceId, userId });
+      await enqueueRaceResolution({
+        raceId,
+        userId,
+        reason: "BOX_OPEN",
+        priority: "IMMEDIATE",
+      });
 
       return { id: powerup.id, type: rolled.type, rarity: rolled.rarity, autoActivated: true };
     }

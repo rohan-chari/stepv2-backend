@@ -18,6 +18,9 @@ const RETRY_BACKOFF_MS = [1000, 5000, 30000];
 const MAX_ATTEMPTS = 3;
 const DEFAULT_DEBOUNCE_MS = 5000;
 const DEFAULT_RECOVERY_STALE_MS = 60 * 60 * 1000;
+const {
+  normalizeDirtyEnvelope,
+} = require("../services/raceResolutionReasonRegistry");
 
 // §5a item 3: the work cap is an explicit rule, not an emergent property.
 // recordSuccess pushes `not_before_at` this far into the future; claim
@@ -53,7 +56,21 @@ const jobColumns = (q = "") => `
   ${q}lease_token                        AS "leaseToken",
   ${q}last_error_code                    AS "lastErrorCode",
   ${q}triggered_by_user_ids              AS "triggeredByUserIds",
-  ${q}processing_triggered_by_user_ids   AS "processingTriggeredByUserIds"
+  ${q}processing_triggered_by_user_ids   AS "processingTriggeredByUserIds",
+  ${q}dirty_reasons                      AS "dirtyReasons",
+  ${q}dirty_participant_ids              AS "dirtyParticipantIds",
+  ${q}dirty_powerup_types                 AS "dirtyPowerupTypes",
+  ${q}dirty_priority                      AS "dirtyPriority",
+  ${q}processing_dirty_reasons            AS "processingDirtyReasons",
+  ${q}processing_dirty_participant_ids    AS "processingDirtyParticipantIds",
+  ${q}processing_dirty_powerup_types      AS "processingDirtyPowerupTypes",
+  ${q}processing_dirty_priority           AS "processingDirtyPriority",
+  ${q}display_artifact_id                 AS "displayArtifactId",
+  ${q}display_artifact_digest             AS "displayArtifactDigest",
+  ${q}display_artifact_schema             AS "displayArtifactSchema",
+  ${q}processing_display_artifact_id      AS "processingDisplayArtifactId",
+  ${q}processing_display_artifact_digest  AS "processingDisplayArtifactDigest",
+  ${q}processing_display_artifact_schema  AS "processingDisplayArtifactSchema"
 `;
 
 // The stored enum labels are LOWERCASE ('queued' | 'running' | ...); Prisma maps
@@ -69,6 +86,22 @@ function normalizeRow(row) {
       : [],
     processingTriggeredByUserIds: Array.isArray(row.processingTriggeredByUserIds)
       ? row.processingTriggeredByUserIds
+      : [],
+    dirtyReasons: Array.isArray(row.dirtyReasons) ? row.dirtyReasons : [],
+    dirtyParticipantIds: Array.isArray(row.dirtyParticipantIds)
+      ? row.dirtyParticipantIds
+      : [],
+    dirtyPowerupTypes: Array.isArray(row.dirtyPowerupTypes)
+      ? row.dirtyPowerupTypes
+      : [],
+    processingDirtyReasons: Array.isArray(row.processingDirtyReasons)
+      ? row.processingDirtyReasons
+      : [],
+    processingDirtyParticipantIds: Array.isArray(row.processingDirtyParticipantIds)
+      ? row.processingDirtyParticipantIds
+      : [],
+    processingDirtyPowerupTypes: Array.isArray(row.processingDirtyPowerupTypes)
+      ? row.processingDirtyPowerupTypes
       : [],
   };
 }
@@ -96,20 +129,49 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
     // Runs inside the caller's transaction when `tx` is provided (sync-v2
     // Transaction B) so the queue row only becomes visible with the rest of it.
     async enqueue(
-      { raceId, userId = null, resolutionTimeZone = null, now = new Date() },
+      {
+        raceId,
+        userId = null,
+        resolutionTimeZone = null,
+        now = new Date(),
+        dirtyEnvelope = null,
+        displayArtifact = null,
+        burstCoalescing = false,
+      },
       tx = prisma
     ) {
       if (!raceId) return null;
       const triggered = JSON.stringify(userId ? [userId] : []);
+      const dirty = dirtyEnvelope ? normalizeDirtyEnvelope(dirtyEnvelope) : null;
+      const dirtyReasons = JSON.stringify(dirty?.reasons || []);
+      const dirtyParticipantIds = JSON.stringify(dirty?.dirtyParticipantIds || []);
+      const dirtyPowerupTypes = JSON.stringify(dirty?.powerupTypes || []);
+      const dirtyPriority = dirty?.priority || "IMMEDIATE";
+      const artifact =
+        displayArtifact &&
+        typeof displayArtifact.id === "string" &&
+        /^[a-f0-9]{64}$/i.test(displayArtifact.digest || "") &&
+        Number.isInteger(displayArtifact.schema)
+          ? displayArtifact
+          : null;
+      const firstNotBeforeAt =
+        burstCoalescing && dirty?.priority === "COALESCE"
+          ? new Date(now.getTime() + DEFAULT_DEBOUNCE_MS)
+          : null;
       const rows = await tx.$queryRawUnsafe(
         `
         INSERT INTO race_resolution_jobs_v2 (
           id, race_id, generation, resolution_time_zone, state, attempts,
-          requested_at, triggered_by_user_ids, processing_triggered_by_user_ids,
+          requested_at, not_before_at, triggered_by_user_ids, processing_triggered_by_user_ids,
+          dirty_reasons, dirty_participant_ids, dirty_powerup_types, dirty_priority,
+          display_artifact_id, display_artifact_digest, display_artifact_schema,
           created_at, updated_at
         ) VALUES (
           gen_random_uuid()::text, $1, 1, $2, 'queued', 0,
-          $3, $4::jsonb, '[]'::jsonb, $3, $3
+          $3, $12, $4::jsonb, '[]'::jsonb,
+          $5::jsonb, $6::jsonb, $7::jsonb, $8,
+          $9, $10, $11,
+          $3, $3
         )
         ON CONFLICT (race_id) DO UPDATE SET
           generation = race_resolution_jobs_v2.generation + 1,
@@ -135,13 +197,110 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
               race_resolution_jobs_v2.triggered_by_user_ids || $4::jsonb
             ) AS v
           ),
+          dirty_reasons = CASE
+            WHEN jsonb_typeof(race_resolution_jobs_v2.dirty_reasons) IS DISTINCT FROM 'array'
+              OR NOT race_resolution_jobs_v2.dirty_reasons <@ '["DISPLAY_REFRESH","STEP_SYNC","POWERUP_MUTATION","BOX_OPEN","JOIN_LEAVE_KICK","FORFEIT_TEAM","RACE_START","EFFECT_BOUNDARY","GLOBAL_EVENT_BOUNDARY","RECOVERY","DAILY_MOVER","FULL"]'::jsonb
+              OR jsonb_typeof(race_resolution_jobs_v2.dirty_participant_ids) IS DISTINCT FROM 'array'
+              OR jsonb_path_exists(race_resolution_jobs_v2.dirty_participant_ids, '$[*] ? (@.type() != "string" || @ == "")')
+              OR jsonb_typeof(race_resolution_jobs_v2.dirty_powerup_types) IS DISTINCT FROM 'array'
+              OR jsonb_path_exists(race_resolution_jobs_v2.dirty_powerup_types, '$[*] ? (@.type() != "string" || @ == "")')
+              OR (race_resolution_jobs_v2.dirty_reasons = '[]'::jsonb
+                  AND race_resolution_jobs_v2.state <> 'succeeded')
+              OR race_resolution_jobs_v2.dirty_reasons ? 'FULL'
+              OR $5::jsonb ? 'FULL'
+              OR (SELECT COUNT(*) FROM (
+                    SELECT DISTINCT value
+                    FROM jsonb_array_elements(race_resolution_jobs_v2.dirty_participant_ids || $6::jsonb)
+                  ) participant_scope) > 1000
+              OR (SELECT COUNT(*) FROM (
+                    SELECT DISTINCT value
+                    FROM jsonb_array_elements(race_resolution_jobs_v2.dirty_powerup_types || $7::jsonb)
+                  ) powerup_scope) > 64
+              THEN '["FULL"]'::jsonb
+            ELSE (
+              SELECT COALESCE(jsonb_agg(value ORDER BY first_ordinal), '[]'::jsonb)
+              FROM (
+                SELECT value, MIN(ordinality) AS first_ordinal
+                FROM jsonb_array_elements(race_resolution_jobs_v2.dirty_reasons || $5::jsonb)
+                  WITH ORDINALITY AS merged(value, ordinality)
+                GROUP BY value
+              ) stable
+            )
+          END,
+          dirty_participant_ids = CASE
+            WHEN jsonb_typeof(race_resolution_jobs_v2.dirty_reasons) IS DISTINCT FROM 'array'
+              OR NOT race_resolution_jobs_v2.dirty_reasons <@ '["DISPLAY_REFRESH","STEP_SYNC","POWERUP_MUTATION","BOX_OPEN","JOIN_LEAVE_KICK","FORFEIT_TEAM","RACE_START","EFFECT_BOUNDARY","GLOBAL_EVENT_BOUNDARY","RECOVERY","DAILY_MOVER","FULL"]'::jsonb
+              OR jsonb_typeof(race_resolution_jobs_v2.dirty_participant_ids) IS DISTINCT FROM 'array'
+              OR jsonb_path_exists(race_resolution_jobs_v2.dirty_participant_ids, '$[*] ? (@.type() != "string" || @ == "")')
+              OR jsonb_typeof(race_resolution_jobs_v2.dirty_powerup_types) IS DISTINCT FROM 'array'
+              OR jsonb_path_exists(race_resolution_jobs_v2.dirty_powerup_types, '$[*] ? (@.type() != "string" || @ == "")')
+              OR (race_resolution_jobs_v2.dirty_reasons = '[]'::jsonb
+                  AND race_resolution_jobs_v2.state <> 'succeeded')
+              OR race_resolution_jobs_v2.dirty_reasons ? 'FULL'
+              OR $5::jsonb ? 'FULL'
+              OR (SELECT COUNT(*) FROM (
+                    SELECT DISTINCT value
+                    FROM jsonb_array_elements(race_resolution_jobs_v2.dirty_participant_ids || $6::jsonb)
+                  ) participant_scope) > 1000
+              THEN '[]'::jsonb
+            ELSE (
+              SELECT COALESCE(jsonb_agg(value ORDER BY first_ordinal), '[]'::jsonb)
+              FROM (
+                SELECT value, MIN(ordinality) AS first_ordinal
+                FROM jsonb_array_elements(race_resolution_jobs_v2.dirty_participant_ids || $6::jsonb)
+                  WITH ORDINALITY AS merged(value, ordinality)
+                GROUP BY value
+                HAVING COUNT(*) >= 1
+              ) stable
+            )
+          END,
+          dirty_powerup_types = CASE
+            WHEN jsonb_typeof(race_resolution_jobs_v2.dirty_reasons) IS DISTINCT FROM 'array'
+              OR NOT race_resolution_jobs_v2.dirty_reasons <@ '["DISPLAY_REFRESH","STEP_SYNC","POWERUP_MUTATION","BOX_OPEN","JOIN_LEAVE_KICK","FORFEIT_TEAM","RACE_START","EFFECT_BOUNDARY","GLOBAL_EVENT_BOUNDARY","RECOVERY","DAILY_MOVER","FULL"]'::jsonb
+              OR jsonb_typeof(race_resolution_jobs_v2.dirty_participant_ids) IS DISTINCT FROM 'array'
+              OR jsonb_path_exists(race_resolution_jobs_v2.dirty_participant_ids, '$[*] ? (@.type() != "string" || @ == "")')
+              OR jsonb_typeof(race_resolution_jobs_v2.dirty_powerup_types) IS DISTINCT FROM 'array'
+              OR jsonb_path_exists(race_resolution_jobs_v2.dirty_powerup_types, '$[*] ? (@.type() != "string" || @ == "")')
+              OR (race_resolution_jobs_v2.dirty_reasons = '[]'::jsonb
+                  AND race_resolution_jobs_v2.state <> 'succeeded')
+              OR race_resolution_jobs_v2.dirty_reasons ? 'FULL'
+              OR $5::jsonb ? 'FULL'
+              OR (SELECT COUNT(*) FROM (
+                    SELECT DISTINCT value
+                    FROM jsonb_array_elements(race_resolution_jobs_v2.dirty_powerup_types || $7::jsonb)
+                  ) powerup_scope) > 64
+              THEN '[]'::jsonb
+            ELSE (
+              SELECT COALESCE(jsonb_agg(value ORDER BY first_ordinal), '[]'::jsonb)
+              FROM (
+                SELECT value, MIN(ordinality) AS first_ordinal
+                FROM jsonb_array_elements(race_resolution_jobs_v2.dirty_powerup_types || $7::jsonb)
+                  WITH ORDINALITY AS merged(value, ordinality)
+                GROUP BY value
+              ) stable
+            )
+          END,
+          dirty_priority = CASE
+            WHEN race_resolution_jobs_v2.dirty_priority = 'IMMEDIATE' OR $8 = 'IMMEDIATE'
+              THEN 'IMMEDIATE' ELSE 'COALESCE' END,
+          display_artifact_id = CASE WHEN $5::jsonb = '["DISPLAY_REFRESH"]'::jsonb THEN $9 ELSE NULL END,
+          display_artifact_digest = CASE WHEN $5::jsonb = '["DISPLAY_REFRESH"]'::jsonb THEN $10 ELSE NULL END,
+          display_artifact_schema = CASE WHEN $5::jsonb = '["DISPLAY_REFRESH"]'::jsonb THEN $11 ELSE NULL END,
           updated_at = $3
         RETURNING ${jobColumns()}
         `,
         raceId,
         resolutionTimeZone,
         now,
-        triggered
+        triggered,
+        dirtyReasons,
+        dirtyParticipantIds,
+        dirtyPowerupTypes,
+        dirtyPriority,
+        artifact?.id || null,
+        artifact?.digest || null,
+        artifact?.schema || null,
+        firstNotBeforeAt
       );
       return normalizeRow(rows[0]);
     },
@@ -150,7 +309,14 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
     // Enqueues in stable ascending raceId order so two
     // concurrent uploaders never take the row locks in opposite orders.
     async enqueueMany(
-      { raceIds, userId = null, resolutionTimeZone = null, now = new Date() },
+      {
+        raceIds,
+        userId = null,
+        resolutionTimeZone = null,
+        now = new Date(),
+        dirtyEnvelopeByRaceId = null,
+        burstCoalescing = false,
+      },
       tx = prisma
     ) {
       const ordered = [...new Set(raceIds || [])]
@@ -159,7 +325,17 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
       const out = [];
       for (const raceId of ordered) {
         out.push(
-          await this.enqueue({ raceId, userId, resolutionTimeZone, now }, tx)
+          await this.enqueue(
+            {
+              raceId,
+              userId,
+              resolutionTimeZone,
+              now,
+              dirtyEnvelope: dirtyEnvelopeByRaceId?.get?.(raceId) || null,
+              burstCoalescing,
+            },
+            tx
+          )
         );
       }
       return out;
@@ -212,7 +388,89 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
                 j.processing_triggered_by_user_ids || j.triggered_by_user_ids
               ) AS v
             ),
+            processing_dirty_reasons = CASE
+              WHEN jsonb_typeof(j.processing_dirty_reasons) IS DISTINCT FROM 'array'
+                OR jsonb_typeof(j.dirty_reasons) IS DISTINCT FROM 'array'
+                OR NOT (j.processing_dirty_reasons || j.dirty_reasons) <@ '["DISPLAY_REFRESH","STEP_SYNC","POWERUP_MUTATION","BOX_OPEN","JOIN_LEAVE_KICK","FORFEIT_TEAM","RACE_START","EFFECT_BOUNDARY","GLOBAL_EVENT_BOUNDARY","RECOVERY","DAILY_MOVER","FULL"]'::jsonb
+                OR jsonb_typeof(j.processing_dirty_participant_ids) IS DISTINCT FROM 'array'
+                OR jsonb_typeof(j.dirty_participant_ids) IS DISTINCT FROM 'array'
+                OR jsonb_path_exists(j.processing_dirty_participant_ids || j.dirty_participant_ids, '$[*] ? (@.type() != "string" || @ == "")')
+                OR jsonb_typeof(j.processing_dirty_powerup_types) IS DISTINCT FROM 'array'
+                OR jsonb_typeof(j.dirty_powerup_types) IS DISTINCT FROM 'array'
+                OR jsonb_path_exists(j.processing_dirty_powerup_types || j.dirty_powerup_types, '$[*] ? (@.type() != "string" || @ == "")')
+                OR (j.processing_dirty_reasons = '[]'::jsonb
+                    AND j.dirty_reasons = '[]'::jsonb)
+                OR (j.processing_dirty_reasons || j.dirty_reasons) ? 'FULL'
+                OR (SELECT COUNT(DISTINCT value)
+                    FROM jsonb_array_elements(j.processing_dirty_participant_ids || j.dirty_participant_ids)) > 1000
+                OR (SELECT COUNT(DISTINCT value)
+                    FROM jsonb_array_elements(j.processing_dirty_powerup_types || j.dirty_powerup_types)) > 64
+                THEN '["FULL"]'::jsonb
+              ELSE (
+                SELECT COALESCE(jsonb_agg(value ORDER BY first_ordinal), '[]'::jsonb)
+                FROM (
+                  SELECT value, MIN(ordinality) AS first_ordinal
+                  FROM jsonb_array_elements(j.processing_dirty_reasons || j.dirty_reasons)
+                    WITH ORDINALITY AS merged(value, ordinality)
+                  GROUP BY value
+                ) stable
+              )
+            END,
+            processing_dirty_participant_ids = CASE
+              WHEN jsonb_typeof(j.processing_dirty_reasons) IS DISTINCT FROM 'array'
+                OR jsonb_typeof(j.dirty_reasons) IS DISTINCT FROM 'array'
+                OR (j.processing_dirty_reasons || j.dirty_reasons) ? 'FULL'
+                OR jsonb_typeof(j.processing_dirty_participant_ids) IS DISTINCT FROM 'array'
+                OR jsonb_typeof(j.dirty_participant_ids) IS DISTINCT FROM 'array'
+                OR jsonb_path_exists(j.processing_dirty_participant_ids || j.dirty_participant_ids, '$[*] ? (@.type() != "string" || @ == "")')
+                OR (SELECT COUNT(DISTINCT value)
+                    FROM jsonb_array_elements(j.processing_dirty_participant_ids || j.dirty_participant_ids)) > 1000
+                THEN '[]'::jsonb
+              ELSE (
+                SELECT COALESCE(jsonb_agg(value ORDER BY first_ordinal), '[]'::jsonb)
+                FROM (
+                  SELECT value, MIN(ordinality) AS first_ordinal
+                  FROM jsonb_array_elements(j.processing_dirty_participant_ids || j.dirty_participant_ids)
+                    WITH ORDINALITY AS merged(value, ordinality)
+                  GROUP BY value
+                ) stable
+              )
+            END,
+            processing_dirty_powerup_types = CASE
+              WHEN jsonb_typeof(j.processing_dirty_reasons) IS DISTINCT FROM 'array'
+                OR jsonb_typeof(j.dirty_reasons) IS DISTINCT FROM 'array'
+                OR (j.processing_dirty_reasons || j.dirty_reasons) ? 'FULL'
+                OR jsonb_typeof(j.processing_dirty_powerup_types) IS DISTINCT FROM 'array'
+                OR jsonb_typeof(j.dirty_powerup_types) IS DISTINCT FROM 'array'
+                OR jsonb_path_exists(j.processing_dirty_powerup_types || j.dirty_powerup_types, '$[*] ? (@.type() != "string" || @ == "")')
+                OR (SELECT COUNT(DISTINCT value)
+                    FROM jsonb_array_elements(j.processing_dirty_powerup_types || j.dirty_powerup_types)) > 64
+                THEN '[]'::jsonb
+              ELSE (
+                SELECT COALESCE(jsonb_agg(value ORDER BY first_ordinal), '[]'::jsonb)
+                FROM (
+                  SELECT value, MIN(ordinality) AS first_ordinal
+                  FROM jsonb_array_elements(j.processing_dirty_powerup_types || j.dirty_powerup_types)
+                    WITH ORDINALITY AS merged(value, ordinality)
+                  GROUP BY value
+                ) stable
+              )
+            END,
+            processing_dirty_priority = CASE
+              WHEN j.processing_dirty_reasons = '[]'::jsonb THEN j.dirty_priority
+              WHEN j.processing_dirty_priority = 'IMMEDIATE' OR j.dirty_priority = 'IMMEDIATE'
+                THEN 'IMMEDIATE' ELSE 'COALESCE' END,
+            processing_display_artifact_id = j.display_artifact_id,
+            processing_display_artifact_digest = j.display_artifact_digest,
+            processing_display_artifact_schema = j.display_artifact_schema,
             triggered_by_user_ids = '[]'::jsonb,
+            dirty_reasons = '[]'::jsonb,
+            dirty_participant_ids = '[]'::jsonb,
+            dirty_powerup_types = '[]'::jsonb,
+            dirty_priority = 'IMMEDIATE',
+            display_artifact_id = NULL,
+            display_artifact_digest = NULL,
+            display_artifact_schema = NULL,
             updated_at = $1
         FROM candidate c
         WHERE j.id = c.id
@@ -260,6 +518,13 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
             lease_token = NULL,
             last_error_code = NULL,
             processing_triggered_by_user_ids = '[]'::jsonb,
+            processing_dirty_reasons = '[]'::jsonb,
+            processing_dirty_participant_ids = '[]'::jsonb,
+            processing_dirty_powerup_types = '[]'::jsonb,
+            processing_dirty_priority = 'IMMEDIATE',
+            processing_display_artifact_id = NULL,
+            processing_display_artifact_digest = NULL,
+            processing_display_artifact_schema = NULL,
             updated_at = $4
         WHERE id = $1 AND lease_token = $2
         RETURNING generation
@@ -275,6 +540,86 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
         applied: true,
         superseded: Number(rows[0].generation) !== Number(processingGeneration),
       };
+    },
+
+    async discardSuperseded(
+      { id, leaseToken, now = new Date() },
+      tx = prisma
+    ) {
+      const rows = await tx.$queryRawUnsafe(
+        `WITH merged AS MATERIALIZED (
+           SELECT job.id,
+             (SELECT COALESCE(jsonb_agg(value ORDER BY first_ordinal), '[]'::jsonb)
+              FROM (
+                SELECT value, MIN(ordinality) AS first_ordinal
+                FROM jsonb_array_elements(job.dirty_reasons || job.processing_dirty_reasons)
+                  WITH ORDINALITY AS item(value, ordinality)
+                GROUP BY value
+              ) stable) AS reasons,
+             (SELECT COALESCE(jsonb_agg(value ORDER BY first_ordinal), '[]'::jsonb)
+              FROM (
+                SELECT value, MIN(ordinality) AS first_ordinal
+                FROM jsonb_array_elements(job.dirty_participant_ids || job.processing_dirty_participant_ids)
+                  WITH ORDINALITY AS item(value, ordinality)
+                GROUP BY value
+              ) stable) AS participants,
+             (SELECT COALESCE(jsonb_agg(value ORDER BY first_ordinal), '[]'::jsonb)
+              FROM (
+                SELECT value, MIN(ordinality) AS first_ordinal
+                FROM jsonb_array_elements(job.dirty_powerup_types || job.processing_dirty_powerup_types)
+                  WITH ORDINALITY AS item(value, ordinality)
+                GROUP BY value
+              ) stable) AS powerups,
+             (SELECT COALESCE(jsonb_agg(value ORDER BY first_ordinal), '[]'::jsonb)
+              FROM (
+                SELECT value, MIN(ordinality) AS first_ordinal
+                FROM jsonb_array_elements(job.triggered_by_user_ids || job.processing_triggered_by_user_ids)
+                  WITH ORDINALITY AS item(value, ordinality)
+                GROUP BY value
+              ) stable) AS triggers
+           FROM race_resolution_jobs_v2 job
+           WHERE job.id=$1 AND job.lease_token=$2
+             AND job.generation > job.processing_generation
+             AND job.dirty_priority='COALESCE'
+             AND job.processing_dirty_priority='COALESCE'
+             AND job.last_completed_at >= $3::timestamp - INTERVAL '15 seconds'
+         )
+         UPDATE race_resolution_jobs_v2 job
+         SET state='queued', attempts=0, retry_at=NULL,
+             dirty_reasons = CASE
+               WHEN merged.reasons ? 'FULL'
+                 OR jsonb_array_length(merged.participants) > 1000
+                 OR jsonb_array_length(merged.powerups) > 64
+                 THEN '["FULL"]'::jsonb
+               ELSE merged.reasons END,
+             dirty_participant_ids = CASE
+               WHEN merged.reasons ? 'FULL'
+                 OR jsonb_array_length(merged.participants) > 1000
+                 OR jsonb_array_length(merged.powerups) > 64
+                 THEN '[]'::jsonb
+               ELSE merged.participants END,
+             dirty_powerup_types = CASE
+               WHEN merged.reasons ? 'FULL'
+                 OR jsonb_array_length(merged.participants) > 1000
+                 OR jsonb_array_length(merged.powerups) > 64
+                 THEN '[]'::jsonb
+               ELSE merged.powerups END,
+             dirty_priority='COALESCE',
+             processing_dirty_reasons='[]'::jsonb,
+             processing_dirty_participant_ids='[]'::jsonb,
+             processing_dirty_powerup_types='[]'::jsonb,
+             processing_dirty_priority='IMMEDIATE',
+             triggered_by_user_ids = merged.triggers,
+             processing_triggered_by_user_ids='[]'::jsonb,
+             lease_expires_at=NULL, lease_token=NULL, updated_at=$3
+         FROM merged
+         WHERE job.id=merged.id
+         RETURNING job.id`,
+        id,
+        leaseToken,
+        now
+      );
+      return { applied: rows.length === 1 };
     },
 
     // Transient failure: back off and retry while attempts remain, else FAILED.

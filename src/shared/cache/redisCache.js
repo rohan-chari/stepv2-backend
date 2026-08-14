@@ -170,6 +170,53 @@ async function setJSON(key, value, ttlSeconds) {
   }
 }
 
+async function getManyJSON(keys) {
+  if (!Array.isArray(keys)) return { ok: false, disabled: false, values: [] };
+  if (keys.length === 0) return { ok: true, disabled: false, values: [] };
+  try {
+    const client = await readyClient();
+    if (!client) return { ok: false, disabled: true, values: [] };
+    const raws = await client.mget(...keys.map(prefixed));
+    if (!Array.isArray(raws) || raws.length !== keys.length) {
+      return { ok: false, disabled: false, values: [] };
+    }
+    const values = raws.map((raw) => {
+      if (raw == null) return null;
+      try { return JSON.parse(raw); } catch { return undefined; }
+    });
+    if (values.includes(undefined)) return { ok: false, disabled: false, values: [] };
+    return { ok: true, disabled: false, values };
+  } catch (error) {
+    logOnce("getManyJSON", error);
+    return { ok: false, disabled: false, values: [] };
+  }
+}
+
+async function setManyJSON(entries) {
+  if (!Array.isArray(entries) || entries.length === 0) {
+    return { ok: false, disabled: false, count: 0 };
+  }
+  try {
+    const client = await readyClient();
+    if (!client) return { ok: false, disabled: true, count: 0 };
+    const pipeline = client.pipeline();
+    for (const { key, value, ttlSeconds, ttlMs } of entries) {
+      const payload = JSON.stringify(value);
+      if (ttlMs > 0) pipeline.set(prefixed(key), payload, "PX", Math.ceil(ttlMs));
+      else if (ttlSeconds > 0) pipeline.set(prefixed(key), payload, "EX", Math.ceil(ttlSeconds));
+      else pipeline.set(prefixed(key), payload);
+    }
+    const replies = await pipeline.exec();
+    if (!Array.isArray(replies) || replies.length !== entries.length || replies.some(([err]) => err)) {
+      return { ok: false, disabled: false, count: 0 };
+    }
+    return { ok: true, disabled: false, count: replies.length };
+  } catch (error) {
+    logOnce("setManyJSON", error);
+    return { ok: false, disabled: false, count: 0 };
+  }
+}
+
 /**
  * @param {string|string[]} keys
  * @returns {Promise<boolean>} true when the DEL command succeeded (even if it
@@ -201,15 +248,16 @@ async function del(keys) {
  * Redis disabled or erroring counts as "not acquired" (null) — so with Redis
  * down every caller takes the cheap fallback and the expensive path never runs.
  *
- * @returns {Promise<any|null>} `fn`'s result when acquired, else null.
- *   Callers must not use `null` as a meaningful `fn` return value.
+ * @returns {Promise<{status:"acquired"|"contended"|"disabled"|"error", value:any}>}
+ *   Detailed status lets latency-sensitive callers poll only genuine healthy
+ *   lock contention, while disabled/error Redis falls through immediately.
  */
-async function withLock(key, ttlMs, fn) {
+async function withLockStatus(key, ttlMs, fn) {
   let client;
   let token;
   try {
     client = await readyClient();
-    if (!client) return null;
+    if (!client) return { status: "disabled", value: null };
     token = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const acquired = await client.set(
       prefixed(key),
@@ -218,14 +266,14 @@ async function withLock(key, ttlMs, fn) {
       Math.max(1, Math.ceil(ttlMs)),
       "NX"
     );
-    if (acquired !== "OK") return null;
+    if (acquired !== "OK") return { status: "contended", value: null };
   } catch (error) {
     logOnce("withLock-acquire", error);
-    return null;
+    return { status: "error", value: null };
   }
 
   try {
-    return await fn();
+    return { status: "acquired", value: await fn() };
   } finally {
     try {
       await client.eval(RELEASE_LOCK_LUA, 1, prefixed(key), token);
@@ -233,6 +281,12 @@ async function withLock(key, ttlMs, fn) {
       logOnce("withLock-release", error);
     }
   }
+}
+
+/** Backward-compatible lock helper for existing callers. */
+async function withLock(key, ttlMs, fn) {
+  const result = await withLockStatus(key, ttlMs, fn);
+  return result.status === "acquired" ? result.value : null;
 }
 
 /**
@@ -456,9 +510,11 @@ async function withWatch(watchKeys, fn) {
     }
 
     const multi = conn.multi();
-    for (const { key, value, ttlSeconds } of sets) {
+    for (const { key, value, ttlSeconds, ttlMs } of sets) {
       const payload = JSON.stringify(value);
-      if (ttlSeconds && ttlSeconds > 0) {
+      if (ttlMs && ttlMs > 0) {
+        multi.set(prefixed(key), payload, "PX", Math.ceil(ttlMs));
+      } else if (ttlSeconds && ttlSeconds > 0) {
         multi.set(prefixed(key), payload, "EX", Math.ceil(ttlSeconds));
       } else {
         multi.set(prefixed(key), payload);
@@ -541,9 +597,12 @@ async function close() {
 module.exports = {
   isEnabled,
   getJSON,
+  getManyJSON,
   setJSON,
+  setManyJSON,
   del,
   withLock,
+  withLockStatus,
   evalLua,
   withWatch,
   publishInvalidate,

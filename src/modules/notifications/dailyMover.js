@@ -70,7 +70,12 @@ function buildDailyMover(dependencies = {}) {
 
     for (const race of races || []) {
       try {
-        await enqueue({ raceId: race.id, now: currentTime });
+        await enqueue({
+          raceId: race.id,
+          now: currentTime,
+          reason: "DAILY_MOVER",
+          priority: "IMMEDIATE",
+        });
         if (inlineResolveInjected) await resolve({ raceId: race.id });
 
         const participants = await participantModel.findAcceptedByRace(race.id);

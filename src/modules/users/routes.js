@@ -67,6 +67,13 @@ const authMeCache = require("./services/authMeCache");
 const { prisma } = require("../../db");
 const { asyncHandler } = require("../../shared/http/asyncHandler");
 const { ValidationError } = require("../../shared/errors/AppError");
+const { buildSetLeaderboardVisibility } = require("./commands/setLeaderboardVisibility");
+const {
+  serializeAuthShellUser,
+} = require("./services/serializeAuthShellUser");
+const {
+  isStrictFlagEnabled,
+} = require("../../shared/config/isStrictFlagEnabled");
 
 // Version-gated omission of `featureFlags.stepSampleBucketMinutes` (2026-07-23
 // incident #2). Shared by `withRuntimeFlags` (which decides whether to emit the
@@ -152,6 +159,10 @@ function createAuthRouter(dependencies = {}) {
     dependencies.deleteUserAccount || defaultDeleteUserAccount;
   const checkAdmin = dependencies.isAdminUser || isAdminUser;
   const UserModel = dependencies.User || DefaultUser;
+  const setLeaderboardVisibility = dependencies.setLeaderboardVisibility ||
+    (dependencies.User
+      ? async ({ userId, hidden }) => UserModel.update(userId, { hiddenFromLeaderboard: hidden })
+      : buildSetLeaderboardVisibility(dependencies));
   const optUserIntoPendingSeededRaces =
     dependencies.optUserIntoPendingSeededRaces ||
     defaultOptUserIntoPendingSeededRaces;
@@ -453,6 +464,9 @@ function createAuthRouter(dependencies = {}) {
 
   router.get("/me", requireAuth, async (req, res) => {
     try {
+      const compact =
+        req.query.view === "shell-v1" &&
+        (await isStrictFlagEnabled(appSettings, "apiAuthShellV1Enabled"));
       // The assembly this endpoint has always done: users row + a friendships
       // COUNT + a race_participants SUM + the app_settings flags.
       const assemble = async () => {
@@ -503,11 +517,16 @@ function createAuthRouter(dependencies = {}) {
       const user = await authMeCache.read({
         userId: req.user.id,
         fineBucketVariant: isBelowFineBucketFloor(req.headers["x-app-version"]),
+        contract: compact ? "shell-v1" : "legacy",
         enabled: cacheEnabled,
         load: assemble,
       });
 
-      res.json({ user });
+      res.json(
+        compact
+          ? { contract: "auth-shell-v1", user: serializeAuthShellUser(user) }
+          : { user }
+      );
     } catch (error) {
       console.error("Get me error:", error);
       res.status(500).json({ error: "Internal server error" });
@@ -530,19 +549,47 @@ function createAuthRouter(dependencies = {}) {
 
   // GET /auth/session — refresh session token
   router.get("/session", requireAuth, async (req, res) => {
+    const compact =
+      req.query.view === "shell-v1" &&
+      (await isStrictFlagEnabled(appSettings, "apiAuthShellV1Enabled"));
     const sessionToken = signToken({
       userId: req.user.id,
       appleId: req.user.appleId,
     });
 
-    const heldCoins = await getHeldCoinsSafe(req.user.id);
-    res.json({
-      sessionToken,
-      user: await withRuntimeFlags(
-        withAdminFlag({ ...req.user, heldCoins }, checkAdmin),
-        req.headers["x-app-version"]
+    const [heldCoins, incomingFriendRequests] = await Promise.all([
+      getHeldCoinsSafe(req.user.id),
+      compact ? getIncomingRequestCount(req.user.id) : Promise.resolve(undefined),
+    ]);
+    const user = await withRuntimeFlags(
+      withAdminFlag(
+        {
+          ...req.user,
+          heldCoins,
+          ...(compact
+            ? {
+                incomingFriendRequests,
+                characterPowersEnabled: false,
+                hiddenFromLeaderboard:
+                  req.user.hiddenFromLeaderboard ?? false,
+                autoJoinFeaturedRaces:
+                  req.user.autoJoinFeaturedRaces ?? false,
+              }
+            : {}),
+        },
+        checkAdmin
       ),
-    });
+      req.headers["x-app-version"]
+    );
+    res.json(
+      compact
+        ? {
+            contract: "auth-shell-v1",
+            sessionToken,
+            user: serializeAuthShellUser(user),
+          }
+        : { sessionToken, user }
+    );
   });
 
   router.put(
@@ -672,9 +719,7 @@ function createAuthRouter(dependencies = {}) {
     }
 
     try {
-      const user = await UserModel.update(req.user.id, {
-        hiddenFromLeaderboard: hidden,
-      });
+      const user = await setLeaderboardVisibility({ userId: req.user.id, hidden });
       return res.json({ user: await withRuntimeFlags(user, req.headers["x-app-version"]) });
     } catch (error) {
       console.error("Leaderboard visibility error:", error);

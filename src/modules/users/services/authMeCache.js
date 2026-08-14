@@ -88,10 +88,16 @@ const TTL_SECONDS = 10;
  * @param {boolean} opts.enabled the C5 app-setting flag
  * @param {() => Promise<object>} opts.load the existing Postgres assembly
  */
-async function read({ userId, fineBucketVariant, enabled, load }) {
+async function read({
+  userId,
+  fineBucketVariant,
+  contract = "legacy",
+  enabled,
+  load,
+}) {
   if (!enabled || !userId) return load();
   return derivedCache.cachedRead({
-    key: cacheKeys.userAuthMe(userId, fineBucketVariant),
+    key: cacheKeys.userAuthMe(userId, fineBucketVariant, contract),
     prefix: cacheKeys.PREFIX.USER_AUTHME,
     ttlSeconds: TTL_SECONDS,
     enabled: true,

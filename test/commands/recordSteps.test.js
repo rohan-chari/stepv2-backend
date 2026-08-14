@@ -143,3 +143,44 @@ test("recordSteps resolves active race state after writing steps", async () => {
 
   assert.deepEqual(resolved, { userId: "user-1", timeZone: undefined });
 });
+
+test("reason-aware recordSteps reconciles before enqueueing a claimable STEP_SYNC", async () => {
+  const calls = [];
+  const recordSteps = buildRecordSteps({
+    Steps: {
+      async findByUserIdAndDate() { return null; },
+      async create(payload) { return { id: "step-1", ...payload }; },
+    },
+    User: { async update() {} },
+    eventBus: { emit() {} },
+    appSettings: {
+      async getFlag(key) {
+        return key === "raceResolutionReasonAwareV1Enabled";
+      },
+    },
+    reconcileUploaderRaces: async () => {
+      calls.push("reconcile");
+      return {
+        resolvedRaceCount: 1,
+        reconciledRaces: [{ raceId: "race-1", participantId: "participant-1" }],
+      };
+    },
+    enqueueRaceResolutionForUser: async (payload) => {
+      calls.push("enqueue");
+      assert.equal(payload.reason, "STEP_SYNC");
+      assert.deepEqual(payload.reconciledRaces, [
+        { raceId: "race-1", participantId: "participant-1" },
+      ]);
+      return [];
+    },
+  });
+
+  await recordSteps({
+    userId: "user-1",
+    steps: 100,
+    date: "2026-08-13",
+    timeZone: "UTC",
+  });
+
+  assert.deepEqual(calls, ["reconcile", "enqueue"]);
+});

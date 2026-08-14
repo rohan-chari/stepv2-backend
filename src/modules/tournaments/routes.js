@@ -24,11 +24,21 @@ const {
 } = require("./commands/createTournamentShareLink");
 const { getTournament: defaultGetTournament } = require("./queries/getTournament");
 const {
+  getTournamentDetail: defaultGetTournamentDetail,
+} = require("./queries/getTournamentDetail");
+const {
+  getTournamentActionWallet: defaultGetTournamentActionWallet,
+} = require("./queries/getTournamentActionWallet");
+const {
   getPublicTournaments: defaultGetPublicTournaments,
 } = require("./queries/getPublicTournaments");
 const {
   getSharedTournamentPreview: defaultGetSharedPreview,
 } = require("./queries/getSharedTournamentPreview");
+const { appSettings: defaultAppSettings } = require("../../shared/config/appSettings");
+const {
+  isStrictFlagEnabled,
+} = require("../../shared/config/isStrictFlagEnabled");
 
 // Error serialization (the { error, code } shape old clients read `error` from
 // and new clients branch on `code`) is handled centrally: TournamentError is an
@@ -53,13 +63,75 @@ function createTournamentsRouter(dependencies = {}) {
   const createTournamentShareLink =
     dependencies.createTournamentShareLink || defaultCreateShareLink;
   const getTournament = dependencies.getTournament || defaultGetTournament;
+  const getTournamentDetail =
+    dependencies.getTournamentDetail || defaultGetTournamentDetail;
+  const settings = dependencies.appSettings || defaultAppSettings;
+  const logger = dependencies.logger || console;
+  const getTournamentActionWallet =
+    dependencies.getTournamentActionWallet || defaultGetTournamentActionWallet;
   const getPublicTournaments = dependencies.getPublicTournaments || defaultGetPublicTournaments;
   const getSharedTournamentPreview =
     dependencies.getSharedTournamentPreview || defaultGetSharedPreview;
 
-const supportsCharacters = (req) => req.clientFeatures?.has("characters") ?? false;
-const supportsRemoteAssets = (req) =>
-  req.clientFeatures?.has("remote_assets") ?? false;
+  const supportsCharacters = (req) =>
+    req.clientFeatures?.has("characters") ?? false;
+  const supportsRemoteAssets = (req) =>
+    req.clientFeatures?.has("remote_assets") ?? false;
+
+  async function compactRequested(req) {
+    return (
+      req.query.view === "detail-v1" &&
+      (await isStrictFlagEnabled(settings, "apiTournamentDetailV1Enabled"))
+    );
+  }
+
+  async function projectAfterCommit(userId, tournamentId) {
+    try {
+      return {
+        tournament: await getTournamentDetail({ userId, tournamentId }),
+        projectionError: null,
+      };
+    } catch (error) {
+      logger.error(JSON.stringify({
+        event: "tournament_action_enrichment",
+        operation: "detail_projection",
+        outcome: "unavailable",
+        errorCode: error?.code || "DETAIL_UNAVAILABLE",
+      }));
+      return {
+        tournament: null,
+        projectionError: { code: "DETAIL_UNAVAILABLE" },
+      };
+    }
+  }
+
+  async function walletAfterCommit(userId) {
+    try {
+      return {
+        wallet: await getTournamentActionWallet(userId),
+        walletError: null,
+      };
+    } catch (error) {
+      logger.error(JSON.stringify({
+        event: "tournament_action_enrichment",
+        operation: "wallet_projection",
+        outcome: "unavailable",
+        errorCode: error?.code || "WALLET_UNAVAILABLE",
+      }));
+      return {
+        wallet: null,
+        walletError: { code: "WALLET_UNAVAILABLE" },
+      };
+    }
+  }
+
+  async function detailAndWalletAfterCommit(userId, tournamentId) {
+    const [detail, wallet] = await Promise.all([
+      projectAfterCommit(userId, tournamentId),
+      walletAfterCommit(userId),
+    ]);
+    return { ...detail, ...wallet };
+  }
 
   // GET /tournaments/share/:token — PUBLIC preview, declared before requireAuth.
   router.get(
@@ -122,6 +194,7 @@ const supportsRemoteAssets = (req) =>
   router.post(
     "/share/:token/join",
     asyncHandler(async (req, res) => {
+      const compact = await compactRequested(req);
       const tournament = await joinTournamentByShareToken({
         userId: req.user.id,
         token: req.params.token,
@@ -129,6 +202,15 @@ const supportsRemoteAssets = (req) =>
         supportsCharacters: supportsCharacters(req),
         supportsRemoteAssets: supportsRemoteAssets(req),
       });
+      if (compact) {
+        return res.status(201).json({
+          contract: "tournament-action-v1",
+          ...(await detailAndWalletAfterCommit(
+            req.user.id,
+            tournament.id
+          )),
+        });
+      }
       res.status(201).json({ tournament });
     })
   );
@@ -137,6 +219,7 @@ const supportsRemoteAssets = (req) =>
   router.post(
     "/:id/join",
     asyncHandler(async (req, res) => {
+      const compact = await compactRequested(req);
       const tournament = await joinTournament({
         userId: req.user.id,
         tournamentId: req.params.id,
@@ -144,6 +227,15 @@ const supportsRemoteAssets = (req) =>
         supportsCharacters: supportsCharacters(req),
         supportsRemoteAssets: supportsRemoteAssets(req),
       });
+      if (compact) {
+        return res.status(201).json({
+          contract: "tournament-action-v1",
+          ...(await detailAndWalletAfterCommit(
+            req.user.id,
+            tournament.id
+          )),
+        });
+      }
       res.status(201).json({ tournament });
     })
   );
@@ -152,14 +244,27 @@ const supportsRemoteAssets = (req) =>
   router.put(
     "/:id/respond",
     asyncHandler(async (req, res) => {
+      const compact = await compactRequested(req);
+      const accept = req.body ? req.body.accept : true;
       const tournament = await respondToTournamentInvite({
         userId: req.user.id,
         tournamentId: req.params.id,
-        accept: req.body ? req.body.accept : true,
+        accept,
         clientFeatures: req.clientFeatures,
         supportsCharacters: supportsCharacters(req),
         supportsRemoteAssets: supportsRemoteAssets(req),
       });
+      if (compact) {
+        return res.json({
+          contract: "tournament-action-v1",
+          ...(accept === false
+            ? await walletAfterCommit(req.user.id)
+            : await detailAndWalletAfterCommit(
+                req.user.id,
+                tournament.id
+              )),
+        });
+      }
       res.json({ tournament });
     })
   );
@@ -168,6 +273,7 @@ const supportsRemoteAssets = (req) =>
   router.post(
     "/:id/invite",
     asyncHandler(async (req, res) => {
+      const compact = await compactRequested(req);
       const result = await inviteToTournament({
         userId: req.user.id,
         tournamentId: req.params.id,
@@ -175,6 +281,14 @@ const supportsRemoteAssets = (req) =>
         supportsCharacters: supportsCharacters(req),
         supportsRemoteAssets: supportsRemoteAssets(req),
       });
+      if (compact) {
+        return res.json({
+          contract: "tournament-action-v1",
+          ...(await projectAfterCommit(req.user.id, req.params.id)),
+          invited: result.invited,
+          needsUpdate: result.needsUpdate,
+        });
+      }
       res.json(result);
     })
   );
@@ -183,12 +297,19 @@ const supportsRemoteAssets = (req) =>
   router.post(
     "/:id/leave",
     asyncHandler(async (req, res) => {
+      const compact = await compactRequested(req);
       const tournament = await leaveTournament({
         userId: req.user.id,
         tournamentId: req.params.id,
         supportsCharacters: supportsCharacters(req),
         supportsRemoteAssets: supportsRemoteAssets(req),
       });
+      if (compact) {
+        return res.json({
+          contract: "tournament-action-v1",
+          ...(await walletAfterCommit(req.user.id)),
+        });
+      }
       res.json({ tournament });
     })
   );
@@ -197,6 +318,7 @@ const supportsRemoteAssets = (req) =>
   router.post(
     "/:id/kick",
     asyncHandler(async (req, res) => {
+      const compact = await compactRequested(req);
       const tournament = await kickTournamentParticipant({
         userId: req.user.id,
         tournamentId: req.params.id,
@@ -204,6 +326,12 @@ const supportsRemoteAssets = (req) =>
         supportsCharacters: supportsCharacters(req),
         supportsRemoteAssets: supportsRemoteAssets(req),
       });
+      if (compact) {
+        return res.json({
+          contract: "tournament-action-v1",
+          ...(await projectAfterCommit(req.user.id, req.params.id)),
+        });
+      }
       res.json({ tournament });
     })
   );
@@ -212,12 +340,19 @@ const supportsRemoteAssets = (req) =>
   router.post(
     "/:id/start",
     asyncHandler(async (req, res) => {
+      const compact = await compactRequested(req);
       const tournament = await startTournament({
         userId: req.user.id,
         tournamentId: req.params.id,
         supportsCharacters: supportsCharacters(req),
         supportsRemoteAssets: supportsRemoteAssets(req),
       });
+      if (compact) {
+        return res.json({
+          contract: "tournament-action-v1",
+          ...(await projectAfterCommit(req.user.id, req.params.id)),
+        });
+      }
       res.json({ tournament });
     })
   );
@@ -226,12 +361,19 @@ const supportsRemoteAssets = (req) =>
   router.post(
     "/:id/forfeit",
     asyncHandler(async (req, res) => {
+      const compact = await compactRequested(req);
       const tournament = await forfeitTournament({
         userId: req.user.id,
         tournamentId: req.params.id,
         supportsCharacters: supportsCharacters(req),
         supportsRemoteAssets: supportsRemoteAssets(req),
       });
+      if (compact) {
+        return res.json({
+          contract: "tournament-action-v1",
+          ...(await projectAfterCommit(req.user.id, req.params.id)),
+        });
+      }
       res.json({ tournament });
     })
   );
@@ -252,10 +394,18 @@ const supportsRemoteAssets = (req) =>
   router.delete(
     "/:id",
     asyncHandler(async (req, res) => {
+      const compact = await compactRequested(req);
       const result = await cancelTournament({
         userId: req.user.id,
         tournamentId: req.params.id,
       });
+      if (compact) {
+        return res.json({
+          contract: "tournament-action-v1",
+          success: true,
+          ...(await walletAfterCommit(req.user.id)),
+        });
+      }
       res.json(result);
     })
   );
@@ -264,6 +414,16 @@ const supportsRemoteAssets = (req) =>
   router.get(
     "/:id",
     asyncHandler(async (req, res) => {
+      const compact =
+        req.query.view === "detail-v1" &&
+        (await isStrictFlagEnabled(settings, "apiTournamentDetailV1Enabled"));
+      if (compact) {
+        const tournament = await getTournamentDetail({
+          userId: req.user.id,
+          tournamentId: req.params.id,
+        });
+        return res.json({ contract: "tournament-detail-v1", tournament });
+      }
       const tournament = await getTournament({
         userId: req.user.id,
         tournamentId: req.params.id,
