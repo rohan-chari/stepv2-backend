@@ -478,6 +478,74 @@ describe("5a — one bulk writer per race", () => {
     assert.ok(token && token.generation >= 1n);
   });
 
+  it("reason-aware POST /steps with skipRaceResolution stamps a coalescable STEP_SYNC envelope, never FULL/IMMEDIATE", async () => {
+    const alice = await createUser("Backstop Alice");
+    const bob = await createUser("Backstop Bob");
+    const raceId = await createActiveRace(alice, [bob], "Backstop envelope");
+    // Start from a clean succeeded row so the merge semantics — not creation
+    // leftovers — are what the assertions exercise.
+    await drain(makeWorker());
+    await appSettings.setFlag("raceResolutionReasonAwareV1Enabled", true);
+
+    const response = await request(server.baseUrl, "POST", "/steps", {
+      body: {
+        steps: 4321,
+        date: new Date().toISOString().slice(0, 10),
+        skipRaceResolution: true,
+      },
+      token: alice.token,
+      headers: { "X-Timezone": "UTC" },
+    });
+    assert.equal(response.status, 200);
+
+    const [job, participant] = await Promise.all([
+      RaceResolutionJobV2.findByRaceId(raceId),
+      prisma.raceParticipant.findUnique({
+        where: { raceId_userId: { raceId, userId: alice.userId } },
+      }),
+    ]);
+    // The backstop enqueue must not poison the coalesced job: a null reason
+    // normalizes to a sticky FULL envelope and every later STEP_SYNC merged
+    // into the row inherits it, forcing an IMMEDIATE full-field recompute of
+    // large races on every sync cycle. (dirty_priority is NOT asserted here:
+    // the merge keeps IMMEDIATE from the row's pre-drain creation history,
+    // and priority only affects the debounce floor of a fresh insert — the
+    // fresh-insert case is asserted below.)
+    assert.deepEqual(job.dirtyReasons, ["STEP_SYNC"]);
+    assert.deepEqual(job.dirtyParticipantIds, [participant.id]);
+    assert.deepEqual(job.triggeredByUserIds, [alice.userId]);
+
+    // Fresh-insert path: with the row gone, the backstop enqueue must create a
+    // COALESCE-priority STEP_SYNC row (the shape that lets burst coalescing
+    // set a debounce floor), not an IMMEDIATE FULL row.
+    await prisma.$executeRawUnsafe(
+      `DELETE FROM race_resolution_jobs_v2 WHERE race_id = $1`,
+      raceId
+    );
+    const fresh = await request(server.baseUrl, "POST", "/steps", {
+      body: {
+        steps: 4322,
+        date: new Date().toISOString().slice(0, 10),
+        skipRaceResolution: true,
+      },
+      token: alice.token,
+      headers: { "X-Timezone": "UTC" },
+    });
+    assert.equal(fresh.status, 200);
+    const freshJob = await RaceResolutionJobV2.findByRaceId(raceId);
+    assert.deepEqual(freshJob.dirtyReasons, ["STEP_SYNC"]);
+    assert.equal(freshJob.dirtyPriority, "COALESCE");
+
+    // The real follow-up — the /steps/samples call this backstop covers for —
+    // reconciles and merges its own narrow STEP_SYNC without escalating the
+    // row to FULL.
+    const samplesRes = await postSamples(alice, [sampleAt(2, 3100)]);
+    assert.equal(samplesRes.status, 200);
+    const merged = await RaceResolutionJobV2.findByRaceId(raceId);
+    assert.deepEqual(merged.dirtyReasons, ["STEP_SYNC"]);
+    assert.deepEqual(merged.dirtyParticipantIds, [participant.id]);
+  });
+
   it("pure STEP_SYNC uses committed uploader rows without rewriting participants", async () => {
     const alice = await createUser("Scoped Sync Alice");
     const bob = await createUser("Scoped Sync Bob");

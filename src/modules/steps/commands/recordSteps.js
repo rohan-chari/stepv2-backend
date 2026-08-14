@@ -162,9 +162,12 @@ function buildRecordSteps(dependencies = {}) {
     // skipRaceResolution. Old clients keep the original behavior.
     // Mark every active race of this uploader dirty. Cheap O(1)-per-race upsert;
     // the race-keyed worker owns the bulk write. Done even when the client opted
-    // into skipRaceResolution — the generation bump coalesces with the one the
-    // imminent /steps/samples call makes, so it costs nothing and guarantees
-    // convergence if that follow-up never arrives.
+    // into skipRaceResolution — but note the contract: that enqueue carries a
+    // narrow STEP_SYNC scope, and a STEP_SYNC_COMMITTED run only RE-PUBLISHES
+    // committed totals; it does not reconcile this request's daily row into
+    // race_participants. The uploader's own row is healed by the imminent
+    // /steps/samples reconcile — or, if that call never lands, by the next
+    // sync or any progress poll's DISPLAY_REFRESH (base plan FULL).
     let reasonAware = false;
     try {
       reasonAware =
@@ -212,14 +215,24 @@ function buildRecordSteps(dependencies = {}) {
         !skipRaceResolution &&
         reconciliation &&
         Array.isArray(reconciliation.reconciledRaces);
+      // skipRaceResolution means a /steps/samples call (with its own reconcile
+      // and STEP_SYNC enqueue) is imminent; this enqueue is only the
+      // convergence backstop, so it must still carry the STEP_SYNC reason. A
+      // null reason normalizes to a FULL envelope at the registry, and FULL is
+      // sticky across the job row's coalescing merge — one such enqueue per
+      // sync cycle poisoned every coalesced big-race job into an IMMEDIATE
+      // full-field recompute. Without reconciledRaces the enqueue resolves the
+      // uploader's participant scope from findActiveForUser; the claim-time
+      // scope/fence validation degrades any incoherent snapshot to FULL.
+      const backstopSync = skipRaceResolution === true;
       await enqueueRaceResolutionForUser({
         userId,
         timeZone,
         now: now(),
-        // Missing/skipped/failed reconciliation deliberately normalizes to
-        // FULL at the closed registry instead of guessing at a narrow scope.
-        reason: narrowReady ? "STEP_SYNC" : null,
-        priority: narrowReady ? "COALESCE" : "IMMEDIATE",
+        // A FAILED reconcile still deliberately normalizes to FULL at the
+        // closed registry instead of guessing at a narrow scope.
+        reason: narrowReady || backstopSync ? "STEP_SYNC" : null,
+        priority: narrowReady || backstopSync ? "COALESCE" : "IMMEDIATE",
         reconciledRaces: narrowReady ? reconciliation.reconciledRaces : null,
       });
     }
