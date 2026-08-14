@@ -56,6 +56,18 @@ resolver would produce.
   a separate future-window mitigation, capped at 15 participants.
 - Do not rely on a viewer opening a race to reconcile state.
 
+**Staleness contract for non-closure participants (architecture review 3,
+R11).** Under the closure, a participant who never uploads is refreshed only
+by their own sync, any `FULL` job, or settlement — while their score remains
+time-dependent through open-ended `ACTIVE` effects (`effectMultiplier.js`
+treats a null `expiresAt` as `Infinity`) and through hourly buckets closing
+(`leechTransfers.js`). The bounded convergence mechanism is
+`findRecoveryRaceIds` (`raceResolutionJobV2.js`: limit 2 races per tick, 1h
+stale window): worst-case persisted-total staleness for an idle participant in
+a race under continuous closure traffic is ~1h plus recovery-queue delay. A
+required test proves a race under continuous closure with no
+`FULL`-triggering event still converges via recovery.
+
 ## Current behavior and root cause
 
 `src/modules/races/jobs/raceResolutionQueueV2.js` currently selects `FULL`
@@ -101,13 +113,27 @@ Rules:
 1. The only candidate input is a known `STEP_SYNC` reason, with
    accepted dirty participant IDs and a coherent committed uploader snapshot.
    Missing, capped, malformed, stale, or unknown metadata returns `FULL`.
-   **Merged-reason carve-out (gap pass 3):** a coalesced
-   `STEP_SYNC + DISPLAY_REFRESH` envelope remains closure-eligible — the
-   display generation is served by the fenced snapshot assembler this document
-   already requires, never by a second scoring pass. Watched races enqueue
-   `DISPLAY_REFRESH` on a ~15s snapshot-expiry cadence, so treating that merge
-   as unknown would demote most big-race step syncs back to `FULL`. Every
-   other reason mix stays `FULL`.
+   **Merged-reason carve-out (gap pass 3, amended by architecture review 3):**
+   a coalesced `STEP_SYNC + DISPLAY_REFRESH` envelope remains closure-eligible
+   — the display generation is served by the fenced snapshot assembler this
+   document already requires, never by a second scoring pass. Watched races
+   enqueue `DISPLAY_REFRESH` on a ~15s snapshot-expiry cadence, so treating
+   that merge as unknown would demote most big-race step syncs back to `FULL`.
+   Every other reason mix stays `FULL`. Implementation constraints:
+   - `buildRaceResolutionStepSyncScope` currently rejects any envelope with
+     more than one reason (`raceResolutionStepSyncScope.js:8-11`); it must
+     admit exactly the set `{STEP_SYNC, DISPLAY_REFRESH}` (order-independent)
+     and nothing else. The existing `["STEP_SYNC","BOX_OPEN"]` red case in
+     `test/services/raceResolutionStepSyncScope.test.js` must stay red.
+   - Closure entry is gated on the reason **set**, never on
+     `baseResolutionPlan === "FULL"` (`resolutionPlanForDirtyReasons` returns
+     `FULL` for `RECOVERY`, `DAILY_MOVER`, `JOIN_LEAVE_KICK`, …).
+   - Precedence when a job carries both a display artifact and a merged
+     envelope: artifact attempt → on any artifact fallback reason, closure
+     attempt → on closure rejection, `FULL`. The existing `forceFull` retry
+     loop also disables the closure on its second pass.
+   - The merge SQL NULLs `display_artifact_*` when a STEP_SYNC lands after a
+     DISPLAY_REFRESH; that is the DESIRED outcome — do not "fix" it.
 2. Load the accepted race participants and the canonical **scoring-effect
    history** in a bounded number of race-scoped queries. This includes the
    `ACTIVE` and `EXPIRED` rows that the canonical Leech/Hitchhike helpers read;
@@ -128,19 +154,74 @@ Rules:
    (`LEG_CRAMP`, `RUNNERS_HIGH`, `WRONG_TURN`, `CAMPFIRE_REST`, `RAINSTORM`,
    `QUICKSAND`), cross-score rows (`LEECH`; Hitchhike scoring v1 and v2), and
    non-scoring-but-boundary-sensitive rows (including `FANNY_PACK`,
-   `DRILL_SERGEANT`, and `PIGGY_BANK`). Trail Mine, team/race-wide mechanics,
-   unknown metadata, and every unsupported catalog row are `FULL` in v1.
+   `DRILL_SERGEANT`, and `PIGGY_BANK`). Team/race-wide mechanics, unknown
+   metadata, and every unsupported catalog row are `FULL` in v1.
+   `isTeamRace === true` is an explicit `FULL` condition row, not an
+   inference — the worker's team write logic (`retainTeamAsOfHeartbeat`,
+   `buildTeamsBlock`) assumes a full field.
 
-   **Scoring-inert rows are mandatory in v1 (gap pass 3).** The scorer's
-   canonical effect intake is `SETTLEMENT_EFFECT_TYPES` in
-   `src/modules/races/services/raceScoringEffectTypes.js`; any catalog type the
-   scorer never reads (`POWER_OUTAGE`, `SIGNAL_JAMMER`, `STEALTH_MODE`,
-   `MIRROR`, `COMPRESSION_SOCKS`, `DECOY`, `DEFENSE_SCAN`, `QUICK_RINSE`,
-   `CLEANSE`, and peers) must carry an explicit `SCORING_INERT` classification:
-   it contributes no dependency edge and does not veto a closure, while its
-   expiry boundaries still participate in the due-boundary `FULL` checks so
-   `expireEffects` timing is unchanged. A structural test must fail if a type
-   in `SETTLEMENT_EFFECT_TYPES` is marked `SCORING_INERT` or vice versa.
+   **`TRAIL_MINE` — `CLOSURE_ELIGIBLE_WITH_ESCALATION` (not a veto;
+   architecture review 3 delta).** An `ACTIVE` `TRAIL_MINE` row does not force
+   `FULL`. Prod forensics (2026-08-14): mines live ~5.6h on the Weekly
+   Challenge, so a hard veto makes the v1 production gate unachievable on the
+   target race. Instead, the subset resolver evaluates `triggerTrailMines`'
+   candidate predicate
+   (`src/modules/races/services/raceStateResolution.js:551-566`) over a
+   **full-field projection**: newly computed totals for closure participants,
+   persisted `race_participants.total_steps` for every other accepted row,
+   taken from the same fingerprint read
+   (`raceResolutionInputFingerprint.js:27-42`) — no additional query. If the
+   selected victim is a closure participant and no non-closure participant
+   satisfies the predicate, the detonation proceeds inside the closure (its
+   only writes are the victim's `bonusSteps`, the mine row, and one feed
+   event — all inside the closure). If **any** non-closure participant
+   qualifies as a candidate for any active mine, the generation escalates to
+   `FULL` before the fence and no closure write occurs. The escalation is
+   mandatory because `reconcileUploaderRaces`
+   (`src/modules/steps/commands/recordSteps.js:193-211`) persists a syncing
+   user's own total outside the worker, so a participant absent from this
+   generation's dirty set can have crossed a mine threshold since the last
+   full run; `candidates[0]` is the lowest-total crosser, so omitting them
+   changes *which* player the mine hits and the mine then `EXPIRE`s.
+   `TRAIL_MINE` is never `SCORING_INERT` (it reads every participant's
+   total).
+
+   **Scoring-inert rows are mandatory in v1 (gap pass 3, amended by
+   architecture review 3).** Types the scorer never reads (`POWER_OUTAGE`,
+   `SIGNAL_JAMMER`, `STEALTH_MODE`, `MIRROR`, `COMPRESSION_SOCKS`, `DECOY`,
+   `DEFENSE_SCAN`, `QUICK_RINSE`, `CLEANSE`, …) carry an explicit
+   `SCORING_INERT` classification: no dependency edge, no closure veto. A type
+   may be classified `SCORING_INERT` only if it is absent from **all** of:
+   `SETTLEMENT_EFFECT_TYPES`
+   (`src/modules/races/services/raceScoringEffectTypes.js`), `{HITCHHIKE}`
+   (read by `collectRaceHitchhikeCopies`,
+   `src/modules/powerups/hitchhikeCopies.js:152`), `{TRAIL_MINE}` (read by
+   `triggerTrailMines`,
+   `src/modules/races/services/raceStateResolution.js:540`),
+   `SNAPSHOT_AT_EXPIRY_TYPES` and `{DRILL_SERGEANT, FANNY_PACK, PIGGY_BANK}`
+   (`src/modules/powerups/commands/expireEffects.js:14,63,76,89`). A
+   structural test derives the inert set from those five source lists and
+   fails if the checked-in table disagrees, and fails if any key of
+   `POWERUP_SCOPE_BY_TYPE` is missing a row. The reverse implication is NOT
+   asserted: a type outside `SETTLEMENT_EFFECT_TYPES` is not automatically
+   inert. The table's key set is exactly `POWERUP_SCOPE_BY_TYPE`
+   (`raceResolutionReasonRegistry.js`); classifications are derived from the
+   source lists above, never hand-listed twice. `POCKET_WATCH` is inert
+   **only because** it mutates other rows' `expiresAt` at cast time and every
+   cast is `POWERUP_MUTATION` → `FULL`; that conditional rationale must be a
+   comment on its row.
+
+   **Inert types need no expiry veto**: `expireEffects` runs from the
+   worker's post-commit hook for every admitted plan and reads its own due
+   set race-wide, so inert expiry timing, ordering, and consequences are
+   unchanged by plan selection. A due boundary forces `FULL` only when the
+   expiry consumes data the closure did not compute — i.e. a due effect of a
+   type in `SNAPSHOT_AT_EXPIRY_TYPES` or `DRILL_SERGEANT` whose
+   `targetParticipantId` is NOT in the closure, because
+   `expireEffects.js:56-59` and `:165` silently skip the `stepsAtExpiry`
+   stamp / dare judgement on a missing key rather than failing loudly. That
+   condition is evaluated at plan selection and re-evaluated before the
+   post-commit handoff.
    Production evidence (2026-08-14): the Weekly Challenge saw 331 Power Outage
    casts in 24h (~30 min each) — overlapping coverage over the whole day — so a
    table that leaves `POWER_OUTAGE` unclassified or `RACE_WIDE` means the
@@ -166,7 +247,26 @@ Rules:
    scoring versions from their existing authoritative metadata. It must use the
    same sources as `leechTransfers.js` and `hitchhikeCopies.js`. It must not
    infer dependencies from powerup type alone.
-7. Every graph edge, accepted participant membership set, the relevant users'
+7. `graphFingerprint` IS the shipped
+   `buildRaceResolutionInputFingerprint`
+   (`src/modules/races/services/raceResolutionInputFingerprint.js`) — it
+   already digests the race row, every participant row, every accepted
+   member's `user_scoring_input_versions.generation`, active effects, global
+   events, `nextSampleBoundary`, and `balanceConfigVersion` in four
+   race-scoped queries, and is already used in the pre/post-bracket pattern
+   with in-fence re-verification. A second fingerprint implementation is
+   prohibited. Its one gap: it selects `status='active_effect'` only, while
+   the closure graph needs `EXPIRED` `LEECH`/`HITCHHIKE` rows — bump the
+   payload `schema` to 2 and include them (a schema bump harmlessly
+   invalidates in-flight display artifacts: digest mismatch → `FULL`).
+   The closure's exclusive validity deadline is the minimum over the boundary
+   set produced by `multiplierBoundaries` semantics
+   (`effectMultiplier.js` — including `startsAt+freezeMs` and
+   `startsAt+boostMs` intra-effect transitions), the next closed-sample
+   boundary, global-event edges, race `endsAt`, and the legacy Hitchhike
+   top-of-hour; `computeArtifactReuseDeadline`'s `startsAt`/`expiresAt`-only
+   enumeration is NOT sufficient. Every graph edge, accepted participant
+   membership set, the relevant users'
    `user_scoring_input_versions.generation`, effect metadata/version, and the
    earliest relevant closed-sample, effect, and global-event time boundary
    contributes to `graphFingerprint` and its exclusive validity deadline. The
@@ -211,26 +311,39 @@ Rules:
    worker uses the existing `FULL` path.
 6. A closure result must include the same generation-time artifacts required by
    the post-commit path. `expireEffects` still receives the correct immutable
-   base-adjusted values for any due effect; otherwise the plan is `FULL`.
-   Snapshot publication must use a fenced persisted-row assembler that is
+   base-adjusted values for any due effect targeting a closure participant;
+   a due `SNAPSHOT_AT_EXPIRY_TYPES`/`DRILL_SERGEANT` effect targeting a
+   NON-closure participant forces `FULL` (rule 3's narrowed veto). Snapshot
+   publication must use a fenced persisted-row assembler that is
    byte-equivalent to the current snapshot, without a second score recompute.
-   Add nullable `race_participants.lastResolvedBaseAdjusted` and
-   `lastResolvedBaseAt` plus `lastResolvedInputGeneration`: full resolution and
-   closure resolution atomically write the exact base-adjusted value and the
-   source user's scoring-input generation for every participant they score.
-   NULL, stale, or current-generation mismatch on any roster row forces `FULL`.
-   A race-keyed, idempotent baseline/healing pass uses the canonical full
-   resolver after every old worker process is gone—never `raw_steps`, which
-   is a high-water value and not equivalent. The assembler reads these values
-   plus persisted totals; it must not silently emit null base values for
-   unscored members.
+   **Deferred out of v1 (architecture review 3, R8):** the earlier
+   `race_participants.lastResolvedBaseAdjusted` / `lastResolvedBaseAt` /
+   `lastResolvedInputGeneration` columns and their race-wide healing pass are
+   NOT built in v1 — the narrowed veto above covers the only consumer that
+   needs a base value for a non-closure participant, and requiring non-NULL
+   on every roster row would keep the closure from ever firing until a
+   whole-base fan-out completed. They return as a Phase 5 only if rollout
+   evidence shows the narrowed veto fires too often; if built, the healing
+   pass must be a `buildX`/`scheduleX` cron registered in `src/index.js`
+   behind an env kill switch with `job_runs` insert-first dedup — never an
+   ad-hoc loop, never an advisory lock, never derived from `raw_steps` (a
+   high-water value, not equivalent — note the shipped `STEP_SYNC_COMMITTED`
+   scope already uses `participant.rawSteps` as its base for dirty rows;
+   that is grandfathered for the zero-effect case it serves, not endorsed
+   for closure use).
 7. The post-commit worker path must not reintroduce an N-participant scoring
    hydrate. It may process only source/closure users for box work and must
    retain current generation ordering, one-attempt delivery semantics, and
    durable intent claims. High-multiplier re-arm/alert behavior must remain
-   exact: the closure path either evaluates it from an allowlisted full
-   participant *projection* without recalculating all scores, or selects
-   `FULL`. It may not silently omit alerts or invent a later retry.
+   exact — and the projection is pinned (architecture review 3, R9): **a
+   `DEPENDENCY_CLOSURE` result carries the full accepted roster in
+   `result.race.participants`; only `stepTotals`,
+   `baseAdjustedByParticipantId`, and the captured writes are subset.**
+   `runHighMultiplierAlert` already reads only
+   `id`/`userId`/`status`/`finishedAt`/`forfeitedAt` off the roster with one
+   `findActiveForRace` read and no score recompute; narrowing `result.race`
+   would silently shrink alert recipients and re-arm coverage. It may not
+   silently omit alerts or invent a later retry.
 8. `DEPENDENCY_CLOSURE` is admitted to the existing `onCommitted` path. Its
    plan carries an exclusive post-commit deadline and the immutable fields
    required by expiry/alert/snapshot work. If a due effect or global boundary
@@ -246,11 +359,10 @@ Rules:
 No persistent dependency graph is introduced in release one. Effect history is
 read fresh. Add only the following additive state:
 
-- Nullable `race_participants.lastResolvedBaseAdjusted`, `lastResolvedBaseAt`,
-  and `lastResolvedInputGeneration` for exact worker snapshot assembly. They
-  are never API fields. Old binaries ignore them; NULL or a current-generation
-  mismatch means `FULL` until the race-keyed baseline/healing pass has
-  populated them from canonical scoring.
+- ~~`race_participants.lastResolvedBaseAdjusted` / `lastResolvedBaseAt` /
+  `lastResolvedInputGeneration`~~ — deferred out of v1 entirely (architecture
+  review 3, R8; see resolver-integration item 6). No `race_participants`
+  migration ships in release one.
 
 - `race_resolution_jobs_v2` gets nullable processing graph fingerprint/as-of
   fields only if the existing processing metadata cannot safely carry them.
@@ -317,6 +429,50 @@ Production gates for a 396-person legacy race over at least one hour:
   expiry/box outcomes;
 - p95 `/health` and race/open/powerup endpoint latency do not regress;
 - CPU burst duration and queue lag improve versus the pre-rollout baseline.
+
+## Implementation phases (architecture review 3)
+
+All behind `raceResolutionDependencyClosureV1Enabled`, default false, declared
+in `KNOWN_FLAGS` (`src/shared/config/appSettings.js`). Each phase is
+independently landable and reviewable.
+
+1. **Phase 1 — classification table + inertness proof.** Ship
+   `src/modules/races/services/raceScoringDependencyClosure.js` exporting only
+   the table and its classifier. No plan change, no flag read, zero production
+   behavior change. Gate: the R1 structural test (inert set derived from the
+   five source lists; every `POWERUP_SCOPE_BY_TYPE` key has a row; a fake
+   `PowerupType` fails the suite; `HITCHHIKE`, `TRAIL_MINE`, every
+   `SNAPSHOT_AT_EXPIRY_TYPES` member, `DRILL_SERGEANT`, `FANNY_PACK`,
+   `PIGGY_BANK` are provably not inert).
+2. **Phase 2 — planner in shadow mode.** Closure traversal (Leech/Hitchhike
+   edges, transitive fixed point, 64 cap), fingerprint reuse (rule 7),
+   `multiplierBoundaries` deadline, gatekeeper edits
+   ({STEP_SYNC, DISPLAY_REFRESH} admission; artifact → closure → FULL
+   precedence). The worker computes and logs the plan but still runs `FULL`.
+   `TRAIL_MINE` is not in the veto set; the shadow log records `minesActive`
+   and `wouldEscalateOnMine` so the escalation rate on the Weekly is measured
+   before any write path exists. Gate: closure membership matches a
+   brute-force full-graph oracle (Leech chains, both Hitchhike versions,
+   frozen/absent sources); every veto selected correctly; staging shadow-log
+   forensics.
+3. **Phase 3 — subset resolver and fenced write.** `scoreParticipantIds`
+   threaded into `processRace`'s Phase A loop (Phase A2 Hitchhike and Phase B
+   `applyLeechTransfers` unchanged — never a second scorer file);
+   `DEPENDENCY_CLOSURE` admitted to the write path and `onCommitted`; full
+   roster retained per R9; the Trail-Mine full-field projection + escalation
+   with its three required tests (byte-identical detonation; inline-reconcile
+   crosser escalates with zero partial writes; in+out crosser pair escalates
+   and the `FULL` rerun picks the lower-total victim). Gate: byte-parity
+   matrix, mutation/fence tests, 10/100/350 `EXPLAIN` evidence,
+   crash/lease/rollback tests; suite passes with `REDIS_URL` unset.
+4. **Phase 4 — post-commit exactness + rollout.** Narrowed expiry veto wired
+   at plan selection and pre-handoff; re-arm/alert, snapshot, one-attempt
+   delivery parity; the R11 convergence test. Staging one core lane → bounded
+   prod cohort, baselined only after the `ce77551` fix and the 30s debounce
+   have been live a full hour.
+5. **Phase 5 (contingent).** The deferred `race_participants` baseline columns
+   and healing cron, only if Phase 4 evidence shows the narrowed veto firing
+   too often.
 
 ## Test plan — tests first
 
@@ -402,6 +558,26 @@ frozen client sends legacy step-sync requests or never declares bucket support.
 - Architecture re-review: added an atomically stored input-generation attestation
   for every persisted snapshot base, and made the metric honest about the
   candidate-plus-fence graph scans.
+- Architecture review 3 (2026-08-14, delta on gap pass 3): corrected the
+  structural test to a one-way implication derived from five source lists
+  (the biconditional would have forced `HITCHHIKE` inert and deleted its
+  edges); replaced the inert-expiry veto wording (expireEffects is
+  plan-independent; only due `SNAPSHOT_AT_EXPIRY_TYPES`/`DRILL_SERGEANT`
+  effects targeting non-closure participants force `FULL`); pinned
+  `graphFingerprint` to the shipped `buildRaceResolutionInputFingerprint`
+  (schema 2 adds EXPIRED LEECH/HITCHHIKE rows) and the validity deadline to
+  `multiplierBoundaries` semantics; made the `{STEP_SYNC, DISPLAY_REFRESH}`
+  admission, artifact→closure→FULL precedence, and reason-set gating
+  explicit; deferred the `race_participants` baseline columns to a contingent
+  Phase 5; pinned the full-roster projection for alerts/re-arm; made
+  `isTeamRace` an explicit `FULL` row; added the non-closure staleness
+  contract (recovery backstop, ~1h worst case); and replaced the Trail Mine
+  hard veto with `CLOSURE_ELIGIBLE_WITH_ESCALATION` after prod forensics
+  showed ~5.6h mine lifetimes on the Weekly (the original closure-scoped rule
+  was rejected as unsafe: `reconcileUploaderRaces` advances non-closure
+  totals outside the worker, changing victim selection). Measured
+  non-binding: global events (~2% coverage, 30-min events), team buffs
+  (target races are non-team).
 - Gap pass 3 (2026-08-14, production forensics): mandated explicit
   `SCORING_INERT` rows keyed off `SETTLEMENT_EFFECT_TYPES` (Power Outage alone
   covered the Weekly Challenge ~24/7 — 331 casts/day — and would otherwise veto
