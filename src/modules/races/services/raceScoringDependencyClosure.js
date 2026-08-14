@@ -689,9 +689,31 @@ function participantTotalsFrom(rows) {
   const totals = {};
   for (const row of rows || []) {
     if (!row?.id) continue;
+    // MUST match what triggerTrailMines actually scores a row at, or the
+    // escalation predicate and the detonation disagree about who is a
+    // candidate. A FINISHED participant is NOT skipped by triggerTrailMines —
+    // only a forfeited one is — and its total in `stepTotals` is the FROZEN
+    // `finishTotalSteps ?? totalSteps` (raceStateResolution.js's Phase A frozen
+    // branch), which can be strictly GREATER than the persisted `total_steps`.
+    //
+    // Reading `total_steps` alone would judge a non-closure finished row with
+    // finish_total_steps >= positionSteps > total_steps as "not a candidate",
+    // report no escalation, and let the closure detonate on the wrong player —
+    // after which the mine EXPIREs, which is unrecoverable.
+    const finishedAt = row.finishedAt ?? row.finished_at ?? null;
+    const finishTotal = row.finishTotalSteps ?? row.finish_total_steps ?? null;
+    const persistedTotal = Number(row.totalSteps ?? row.total_steps ?? 0);
+    const scoredTotal =
+      finishedAt && finishTotal != null ? Number(finishTotal) : persistedTotal;
     totals[row.id] = {
       participantId: row.id,
-      totalSteps: Number(row.totalSteps ?? row.total_steps ?? 0),
+      totalSteps: scoredTotal,
+      // Set only when the row is finished AND the fingerprint did not supply a
+      // frozen total to score it at. `wouldTrailMineEscalate` treats this as an
+      // unconditional escalation: we cannot compute the number the detonation
+      // would compare against, and guessing `total_steps` would be a definite
+      // answer to a question we did not answer.
+      finishedTotalUnknown: Boolean(finishedAt) && finishTotal == null,
       // DELIBERATELY ABSENT. The persisted total is the value AFTER whatever
       // has already been written this generation (reconcileUploaderRaces
       // persists a syncing user's own row outside the worker), so aliasing it
@@ -767,7 +789,15 @@ function wouldTrailMineEscalate({
       if (!row?.participantId) continue;
       if (closure.has(row.participantId)) continue;
       if (row.participantId === ownerParticipantId) continue;
+      // triggerTrailMines skips forfeited rows (TR-657) and ONLY forfeited
+      // rows; a finished row is still a live mine candidate at its frozen total.
       if (row.forfeitedAt) continue;
+      // A finished row whose frozen total we could not read is unanswerable,
+      // not "no". Same rule as the legacy-mine case below.
+      if (row.finishedTotalUnknown) {
+        unknown = true;
+        continue;
+      }
       const total = Number(row.totalSteps);
       if (!Number.isFinite(total) || total < positionSteps) continue;
       if (aheadAtPlant) {

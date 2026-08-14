@@ -635,11 +635,20 @@ function buildResolveRaceState(dependencies = {}) {
   // processing snapshot, not just the last one. Callers that pass only `userId`
   // are byte-for-byte unaffected — the returned `boxEffectiveSteps` still holds
   // that user's value.
+  // `scoreParticipantIds` (dependency-closure spec, resolver-integration item 3)
+  // is ADDITIVE and defaults to null = score the whole accepted field, which is
+  // the only behavior any shipped caller gets. When present it is the planner's
+  // sorted, bounded closure: Phase A computes and writes ONLY those rows.
+  //
+  // This is deliberately an option on the ONE canonical resolver rather than a
+  // second scorer: item 3 forbids a copied scoring loop, and a fork would be a
+  // second thing to keep byte-identical with every future scoring change.
   return async function resolveRaceState({
     raceId,
     userId,
     userIds = null,
     timeZone = "UTC",
+    scoreParticipantIds = null,
   } = {}) {
     const boxUserIds = new Set(
       (Array.isArray(userIds) ? userIds : []).filter(Boolean)
@@ -673,6 +682,21 @@ function buildResolveRaceState(dependencies = {}) {
       const acceptedParticipants = race.participants.filter(
         (p) => p.status === "ACCEPTED"
       );
+      // The closure scope. `null` (every shipped caller) keeps the full field,
+      // so the whole subset path is unreachable unless a caller opts in.
+      //
+      // Only the SCORE-AND-WRITE set narrows. `race.participants` stays the full
+      // accepted roster everywhere it is read below — Phase A2's Hitchhike target
+      // lookup needs targets outside the closure, and the returned `result.race`
+      // must carry the full roster (architecture review 3, R9) or the
+      // post-commit high-multiplier alert would silently shrink its recipients.
+      const scoreScope =
+        Array.isArray(scoreParticipantIds) && scoreParticipantIds.length > 0
+          ? new Set(scoreParticipantIds)
+          : null;
+      const scoredParticipants = scoreScope
+        ? acceptedParticipants.filter((p) => scoreScope.has(p.id))
+        : acceptedParticipants;
       const currentTime = now();
       let prefetched = null;
       try {
@@ -694,8 +718,47 @@ function buildResolveRaceState(dependencies = {}) {
       const scoringStepsModel = prefetched?.stepsModel || stepsModel;
       const scoringStepSampleModel =
         prefetched?.stepSampleModel || stepSampleModel;
-      const scoringEffectModel =
+      const prefetchedEffectModel =
         prefetched?.raceActiveEffectModel || raceActiveEffectModel;
+      // Bound Phase A2's copy work to links whose CASTER is in the closure.
+      //
+      // Done by narrowing the model's one bulk read rather than by editing the
+      // Phase A2 call, which stays literally unchanged (spec Phase 3 note). The
+      // filter is parity-exact, not an approximation: `applyHitchhikeCopies`
+      // credits per SOURCE userId and drops any caster absent from the entry
+      // list, so a link whose caster is outside the closure contributes exactly
+      // nothing to a closure participant's total. Dropping it therefore changes
+      // no number — it only skips the per-link step-sample read that would have
+      // computed a credit destined for the floor, which is what keeps the
+      // closure's scoring cost O(C) instead of O(links-in-race).
+      //
+      // ONLY `findRaceEffectsByType` is intercepted. `computeHitchhikeCopiedSteps`
+      // reaches back through this same model for the v2 scoring version via
+      // `findEffectsForRaceByTypes`, and `triggerTrailMines`/`calculateCurrentTotal`
+      // use `findActiveForRace`/`findEffectsForRaceByTypes` — all pass straight
+      // through untouched.
+      //
+      // Built as a SPREAD, not `Object.create`: these effect models are passed
+      // around and re-wrapped by spread elsewhere (raceScoringPrefetch.js's
+      // `scopedEffects` does exactly `{...raceActiveEffectModel, ...}`), and a
+      // spread copies only OWN ENUMERABLE properties. A prototype-delegating
+      // wrapper — or an own property defined with `Object.defineProperty`,
+      // which is non-enumerable by default — would be silently dropped by the
+      // next spread, quietly restoring the unbounded read.
+      const scoringEffectModel =
+        scoreScope && typeof prefetchedEffectModel.findRaceEffectsByType === "function"
+          ? {
+            ...prefetchedEffectModel,
+            findRaceEffectsByType: async (...args) => {
+              const rows =
+                  (await prefetchedEffectModel.findRaceEffectsByType(...args)) || [];
+              const casterUserIds = new Set(
+                scoredParticipants.map((p) => p.userId)
+              );
+              return rows.filter((row) => casterUserIds.has(row.sourceUserId));
+            },
+          }
+          : prefetchedEffectModel;
 
       // Fetch GlobalStepEvents overlapping [race start, now] once per race and
       // hand them to the SHARED math so this path matches getRaceProgress.
@@ -715,7 +778,7 @@ function buildResolveRaceState(dependencies = {}) {
       // participant's step_samples/race_active_effects and writes only this
       // participant's row, so we can fan them out in parallel safely. The one
       // ordering dependent (trailMines) runs after.
-      const stepTotals = new Array(acceptedParticipants.length);
+      const stepTotals = new Array(scoredParticipants.length);
       // Box-progress total for the requesting user (Leg Cramp + Wrong Turn
       // immune). Threaded to syncRacePowerupState so the roll gate ignores those
       // debuffs. Only the userId participant's value is needed (the caller syncs
@@ -738,9 +801,9 @@ function buildResolveRaceState(dependencies = {}) {
       // transfer resolved race-wide in phase B (applyLeechTransfers) so display,
       // settlement, and this path agree. `preLeech[index]` holds either a frozen
       // total or {preLeechTotal, leechTransfers}. Writes are deferred to phase B.
-      const preLeech = new Array(acceptedParticipants.length);
+      const preLeech = new Array(scoredParticipants.length);
       await Promise.all(
-        acceptedParticipants.map(async (participant, index) => {
+        scoredParticipants.map(async (participant, index) => {
           // TR-601: forfeited team-race members are FROZEN at the total the
           // forfeit command snapshotted — never recomputed here (their timed
           // effects expire naturally but the frozen number stands).

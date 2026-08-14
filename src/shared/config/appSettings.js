@@ -263,6 +263,17 @@ const KNOWN_FLAGS = {
   // binary rolled, with no separate go/no-go. Shadow code must never read the
   // Phase 3 key, and the Phase 3 key stays undeclared until it exists.
   raceResolutionDependencyClosureShadowV1Enabled: false,
+  // Dependency-closure PHASE 3 — closure WRITES. A subset resolution is
+  // committed only when BOTH this flag is on AND the planner returns
+  // DEPENDENCY_CLOSURE; either alone leaves the job on the existing full path.
+  //
+  // Independent of the shadow key above, in both directions (spec rollout item
+  // 4: "do not flip all resolver flags together"). Turning this on with the
+  // shadow off is the normal Phase 3 state — the planner then runs ONCE and
+  // serves both the plan decision and the log line. Turning it off mid-queue is
+  // the rollback: the next claim takes FULL and nothing is stranded, because a
+  // closure generation is only ever committed whole inside the existing fence.
+  raceResolutionDependencyClosureV1Enabled: false,
 };
 
 function buildAppSettings(dependencies = {}) {

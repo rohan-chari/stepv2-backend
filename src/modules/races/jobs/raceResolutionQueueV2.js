@@ -169,6 +169,65 @@ async function rebindArtifactPresentation(tx, artifactPayload) {
   return true;
 }
 
+// How far PAST the fence instant a due expiry still forces the closure away.
+//
+// `expireEffects` does not run inside the fence — it runs from the post-commit
+// hook, against a LATER `now()` than the one the fence checked. So "not due at
+// the fence" is not the same as "not due when expiry runs", and the gap is
+// whatever the write transaction plus the commit plus the hook's own startup
+// costs. 30s is chosen to strictly dominate that gap: the fenced write
+// transaction's own timeout is 15s (see the `$transaction` options below), so
+// 30s covers a worst-case full-duration transaction plus commit plus hook entry
+// with room to spare.
+//
+// The cost of the slack being too LARGE is bounded and benign — some closures
+// fall back to FULL slightly earlier than strictly necessary. The cost of it
+// being too SMALL is a silently skipped `stepsAtExpiry` stamp on a row that is
+// then written EXPIRED permanently, which is unrecoverable. Asymmetric risk, so
+// the constant is deliberately generous.
+const POST_COMMIT_SLACK_MS = 30_000;
+
+// The types whose expiry consumes a value the generation computed for its
+// TARGET, looked up by participant id in `baseAdjustedByParticipantId` — and
+// both of which SILENTLY skip on a missing key rather than failing loudly
+// (expireEffects.js:56-59 for the stepsAtExpiry stamp, :165 for the Drill
+// Sergeant dare judgement).
+const {
+  SNAPSHOT_AT_EXPIRY_TYPES,
+} = require("../../powerups/constants/expiryEffectTypes");
+const FENCE_DUE_EXPIRY_VETO_TYPES = Object.freeze(
+  new Set([...SNAPSHOT_AT_EXPIRY_TYPES, "DRILL_SERGEANT"])
+);
+
+/**
+ * True when an active effect whose expiry needs a closure-computed value is (or
+ * is about to become) due on a participant OUTSIDE the closure.
+ *
+ * This is a re-check, not a duplicate of the planner's `DUE_EXPIRY_OUTSIDE_CLOSURE`
+ * veto. That veto is evaluated once, at the planner's `asOf`, against effects
+ * already due at that instant. It cannot cover an effect that becomes due
+ * between plan selection and the post-commit hook — and the closure's
+ * `validUntil` does not close the hole either, because its effect-boundary term
+ * enumerates only CLOSURE-RELEVANT effects, and by construction this row's
+ * target is not in the closure.
+ *
+ * Evaluated against the in-fence fingerprint re-read, so it costs no extra
+ * query: those rows were already selected and already digested.
+ */
+function dueExpiryOutsideClosureAtFence(activeEffects, closureParticipantIds, currentTime) {
+  const closure = new Set(closureParticipantIds || []);
+  const horizonMs = currentTime.getTime() + POST_COMMIT_SLACK_MS;
+  for (const effect of activeEffects || []) {
+    if (!FENCE_DUE_EXPIRY_VETO_TYPES.has(effect?.type)) continue;
+    if (closure.has(effect.targetParticipantId)) continue;
+    if (effect.expiresAt == null) continue;
+    const expiresAtMs = new Date(effect.expiresAt).getTime();
+    // An unparseable expiry is treated as due: we cannot prove it is not.
+    if (!Number.isFinite(expiresAtMs) || expiresAtMs <= horizonMs) return true;
+  }
+  return false;
+}
+
 function resolutionPlanForDirtyReasons(reasons) {
   return Array.isArray(reasons) &&
     reasons.length === 1 &&
@@ -506,17 +565,43 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
     // even a settings read. A candidate envelope with the flag off costs one
     // `getFlag` against the same warm appSettings cache the four flag reads
     // below already use, and zero database queries.
+    // ── Phase 3 restructure: the planner runs ONCE per claim. ──────────────
+    //
+    // Phase 2b ran it purely for the log. Phase 3 also needs its verdict to
+    // SELECT a plan, and running it twice would double the planner's cost on
+    // exactly the big races it exists to speed up, and — worse — could produce
+    // two different graph reads for one generation, so the plan committed and
+    // the plan logged would describe different worlds. One call, two consumers.
+    //
+    // The two flags are independent in BOTH directions (spec rollout item 4).
+    // Shadow-only = observe, never select. Write-only = select, and the same
+    // result still fills the `shadow*` log fields so the rollout series does not
+    // go blind the moment the write flag comes on. Both off = the planner is
+    // never constructed and no settings read past the pure reason-set test
+    // happens at all.
     let closureShadow = NULL_CLOSURE_SHADOW_FIELDS;
+    // `closurePlan` is non-null ONLY when the write flag is on, the planner
+    // returned DEPENDENCY_CLOSURE, and the Trail-Mine escalation cleared. It is
+    // the single gate every closure behavior below reads.
+    let closurePlan = null;
+    // bool when a closure plan was evaluated, null when none was (the flag is
+    // off, the envelope is not candidate-shaped, or the planner said FULL).
+    let closureEscalatedOnMine = null;
     {
       if (isClosureEligibleReasonSet(job.processingDirtyReasons)) {
-        // The SHADOW flag, deliberately not `raceResolutionDependencyClosureV1Enabled`:
-        // that key is reserved for Phase 3's "closure writes" meaning and must
-        // never be read by observation-only code.
+        // Two DISTINCT keys, never conflated. The shadow key means "observe";
+        // the V1 key means "commit subset results". Reading one for the other
+        // would make the Phase 3 deploy flip every environment already running
+        // the measurement straight into writing.
         const closureShadowEnabled = await isStrictFlagEnabled(
           settings,
           "raceResolutionDependencyClosureShadowV1Enabled"
         );
-        if (closureShadowEnabled) {
+        const closureWritesEnabled = await isStrictFlagEnabled(
+          settings,
+          "raceResolutionDependencyClosureV1Enabled"
+        );
+        if (closureShadowEnabled || closureWritesEnabled) {
           const shadowStartedAt = Date.now();
           try {
             const shadowConfig = await balanceConfig.getSnapshot();
@@ -529,19 +614,75 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
               RaceActiveEffect: effectModel,
               RaceParticipant: participantModel,
               balanceConfigVersion: shadowConfig?.version ?? null,
+              // ONE fingerprint seam for the whole generation. Without this the
+              // planner lazily resolves the shipped module itself while the
+              // fence uses this worker's injected dependency — two different
+              // code paths computing the digest that must match each other, and
+              // a test can only ever see one of them.
+              buildInputFingerprint,
             });
-            closureShadow = summarizeClosureShadow(
-              shadowResult,
-              Math.max(0, Date.now() - shadowStartedAt),
-              wouldTrailMineEscalateProbe
-            );
+            const plannerMs = Math.max(0, Date.now() - shadowStartedAt);
+            if (closureShadowEnabled) {
+              closureShadow = summarizeClosureShadow(
+                shadowResult,
+                plannerMs,
+                wouldTrailMineEscalateProbe
+              );
+            }
+            if (
+              closureWritesEnabled &&
+              shadowResult &&
+              shadowResult.plan === "DEPENDENCY_CLOSURE"
+            ) {
+              // ── TRAIL_MINE escalation (spec core rule 3). ────────────────
+              //
+              // Evaluated HERE — before the resolve, before the fence, before
+              // any write — so an escalation costs a plan selection and nothing
+              // else. "Zero partial writes" is therefore structural, not a
+              // rollback: the closure path is simply never entered.
+              //
+              // The predicate runs over the full-field projection the planner
+              // already assembled from its fingerprint read: fresh totals for
+              // closure participants, persisted `total_steps` for every other
+              // accepted row. Note the predicate SKIPS closure members outright
+              // (they detonate in-closure exactly as FULL would), so the only
+              // rows it reads are the non-closure ones — which is precisely why
+              // no fresh score is needed to answer it and no second query is
+              // issued.
+              //
+              // Tri-state, and "UNKNOWN" (a legacy pre-2026-08-07 mine with no
+              // `aheadParticipantIds` and no pre-generation total) ESCALATES.
+              // Answering "no" to a question we did not answer would send the
+              // mine to the wrong player — `candidates[0]` is the LOWEST-total
+              // crosser — and the mine then EXPIREs, which is unrecoverable.
+              let escalate = false;
+              if (shadowResult.minesActive === true) {
+                try {
+                  escalate =
+                    wouldTrailMineEscalateProbe({
+                      mines: shadowResult.mines,
+                      closureIds: shadowResult.participantIds,
+                      participantTotals: shadowResult.participantTotals,
+                    }) !== false;
+                } catch {
+                  // Fail CLOSED. An unanswerable predicate is an escalation.
+                  escalate = true;
+                }
+              }
+              closureEscalatedOnMine = escalate;
+              if (!escalate) closurePlan = shadowResult;
+            }
           } catch (error) {
             // The duration is still honest and still useful (a timeout is the
-            // failure mode worth measuring); every other field stays null.
-            closureShadow = {
-              ...NULL_CLOSURE_SHADOW_FIELDS,
-              shadowPlannerMs: Math.max(0, Date.now() - shadowStartedAt),
-            };
+            // failure mode worth measuring); every other field stays null. With
+            // the write flag on, a planner throw leaves `closurePlan` null, so
+            // the job proceeds down the existing FULL path unchanged.
+            if (closureShadowEnabled) {
+              closureShadow = {
+                ...NULL_CLOSURE_SHADOW_FIELDS,
+                shadowPlannerMs: Math.max(0, Date.now() - shadowStartedAt),
+              };
+            }
             logger.error(JSON.stringify({
               event: "race_resolution_v2_shadow_error",
               operation: "dependency_closure_planner",
@@ -588,6 +729,9 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
       let forceFull = false;
       let artifactHit = false;
       let artifactFallbackReason = null;
+      // Aggregate count only — how many times a closure was turned away at the
+      // fence for this claim. Never an id, a total, or a reason string.
+      let closureCommittedRejections = 0;
 
       for (;;) {
         let artifactPayload = null;
@@ -650,6 +794,17 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
             resolutionPlan = stepSyncScope.plan;
             result = stepSyncScope.result;
           } else if (resolutionPlan === "FULL") {
+            // Precedence (spec rule 1): artifact → cheap committed scope →
+            // closure → FULL. `forceFull` (the retry loop's second pass, and the
+            // path a rejected fence takes) disables the closure exactly as it
+            // disables the artifact, so a rejected closure can never be retried
+            // as another closure.
+            //
+            // The cheap STEP_SYNC_COMMITTED scope above stays ahead of the
+            // closure deliberately: it fires only on a race with ZERO active
+            // effects, where the closure would compute the same rows for more
+            // work. Nothing shipped changes ordering here.
+            const useClosure = !forceFull && closurePlan != null;
             const computeStartedAt = Date.now();
             const computeResolve = buildResolveRaceState({
               Race: raceModel,
@@ -662,9 +817,17 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
               raceId: job.raceId,
               userIds: triggeringUserIds,
               timeZone: job.processingTimeZone || "UTC",
+              // Additive and null on every non-closure run, so the FULL path is
+              // byte-for-byte what it was.
+              ...(useClosure
+                ? { scoreParticipantIds: closurePlan.participantIds }
+                : {}),
             });
             result = Array.isArray(processed) ? processed[0] : null;
             computeMs += Math.max(0, Date.now() - computeStartedAt);
+            // Only after a result actually came back: a null result means the
+            // race was skipped (settled/ended) and no plan was executed.
+            if (useClosure && result) resolutionPlan = "DEPENDENCY_CLOSURE";
           }
         }
 
@@ -697,6 +860,8 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         // ── Step 3: the ONE write transaction. ─────────────────────────────
         let artifactRejectedAtFence = false;
         let stepSyncRejectedAtFence = false;
+        let closureRejectedAtFence = false;
+        const closureCommitting = resolutionPlan === "DEPENDENCY_CLOSURE";
         const writeStartedAt = Date.now();
         await prisma.$transaction(async (tx) => {
         // (i) fence
@@ -734,6 +899,61 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
             await stepSyncScopeMatchesFence(stepSyncScope, tx, job.raceId);
           if (!inputsStillMatch) {
             stepSyncRejectedAtFence = true;
+            return;
+          }
+        }
+
+        // ── Closure fence re-verify (spec rule 7). ─────────────────────────
+        //
+        // Atomic, inside the SAME transaction that holds the job row, and
+        // strictly BEFORE the first participant write. Any mismatch returns
+        // having written nothing and retries the generation as FULL — a stale
+        // closure is never committed.
+        //
+        // ONE re-read covers four of the five required checks, because
+        // `buildRaceResolutionInputFingerprint` already digests all of them:
+        // the graph (active effects + the schema-2 EXPIRED LEECH/HITCHHIKE
+        // rows), MEMBERSHIP (every participant row, so a join/leave/forfeit or
+        // an accepted-status change moves the digest), the accepted members'
+        // `user_scoring_input_versions.generation`, and the race row itself.
+        // Re-deriving those separately would be a second fingerprint
+        // implementation, which rule 7 prohibits.
+        //
+        // The remaining two are checked explicitly:
+        //   * job generation — a newer generation arrived, so this plan was
+        //     computed against a superseded dirty set;
+        //   * the closure's exclusive validity deadline — a boundary the
+        //     planner could SEE may now have crossed. `validUntil` is a
+        //     NECESSARY condition only; the digest above is what makes the
+        //     write safe, and it stays mandatory inside the window.
+        //   * a due expiry landing on a NON-closure participant. See
+        //     `dueExpiryOutsideClosureAtFence` — the planner's own veto is
+        //     evaluated at its `asOf` and cannot cover this.
+        if (closureCommitting) {
+          const currentConfig = await balanceConfig.getSnapshot();
+          const fingerprint = await buildInputFingerprint({
+            raceId: job.raceId,
+            now: now(),
+            balanceConfigVersion: currentConfig.version,
+            client: tx,
+          });
+          const deadline = closurePlan.validUntil
+            ? new Date(closurePlan.validUntil).getTime()
+            : null;
+          if (
+            Number(fenced.generation) !== Number(fenced.processingGeneration) ||
+            !fingerprint ||
+            fingerprint.digest !== closurePlan.graphFingerprint ||
+            deadline == null ||
+            !Number.isFinite(deadline) ||
+            now().getTime() >= deadline ||
+            dueExpiryOutsideClosureAtFence(
+              fingerprint.activeEffects,
+              closurePlan.participantIds,
+              now()
+            )
+          ) {
+            closureRejectedAtFence = true;
             return;
           }
         }
@@ -827,6 +1047,15 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           forceFull = true;
           continue;
         }
+        if (closureRejectedAtFence) {
+          // The graph, membership, an input generation, the job generation, or
+          // the validity deadline moved under us. Nothing was written (the fence
+          // returned before the first participant UPDATE). Retry the SAME
+          // generation as FULL, which commits the current full state.
+          closureCommittedRejections += 1;
+          forceFull = true;
+          continue;
+        }
         if (artifactPayload) {
           artifactHit = true;
           await displayArtifactStore.consume(job.processingDisplayArtifactId);
@@ -860,10 +1089,36 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
       // cooldown/cap until the durable post-task row has won its generation
       // dedupe insert, and they are resolved inside that same transaction.
       const deferredIntentClaims = [];
+      // DEPENDENCY_CLOSURE is ADMITTED here, not exempted (spec item 8): it must
+      // never skip expireEffects, box consequences, the high-multiplier re-arm,
+      // the snapshot, or one-attempt delivery just because the scoring was
+      // scoped. It carries the same generation-time artifacts:
+      //   * `result.race.participants` is the FULL accepted roster (R9), so the
+      //     alert pass reads exactly the recipients a FULL run would;
+      //   * `baseAdjustedByParticipantId` is SUBSET, and the guarantee that
+      //     makes that safe is INCOMPLETE — read this carefully before enabling
+      //     the flag. Two checks currently cover it, and neither is a proof:
+      //       - the planner's DUE_EXPIRY_OUTSIDE_CLOSURE veto, evaluated at the
+      //         planner's `asOf`; and
+      //       - `dueExpiryOutsideClosureAtFence`, re-evaluated in the fence with
+      //         POST_COMMIT_SLACK_MS of lookahead.
+      //     `expireEffects` nevertheless runs post-commit against a still-later
+      //     `now()`, so an effect on a NON-closure target that becomes due after
+      //     the fence horizon can still have its `stepsAtExpiry` stamp silently
+      //     skipped (expireEffects.js:56-59) and then be written EXPIRED
+      //     permanently. The slack makes that window small, not empty.
+      //     Closing it is Phase 4's pre-handoff re-check (spec item 8: "if a due
+      //     effect or global boundary could cross between fence and post-commit
+      //     handling, it selects FULL before writes"), and closure enablement is
+      //     gated on that work landing;
+      //   * the snapshot is assembled by `computePersistedSnapshot`, which
+      //     re-reads the committed rows. No second full score recompute happens
+      //     on any plan, so no closure-specific approximation exists to make.
       if (
         resolutionPlan === "FULL" ||
         resolutionPlan === "ARTIFACT_REUSE" ||
-        resolutionPlan === "STEP_SYNC_COMMITTED"
+        resolutionPlan === "STEP_SYNC_COMMITTED" ||
+        resolutionPlan === "DEPENDENCY_CLOSURE"
       ) {
         try {
           const outcome = await onCommitted({
@@ -1008,9 +1263,19 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         postTaskMs: Math.max(0, Date.now() - postStartedAt),
         coreMs: Math.max(0, Date.now() - startMs),
         queueLagMs: Math.max(0, startMs - new Date(job.requestedAt).getTime()),
-        // Additive, aggregate-only Phase 2b shadow dimensions. All null when
-        // the flag is off or the envelope is not closure-candidate-shaped.
+        // Additive, aggregate-only Phase 2b shadow dimensions. They are
+        // populated ONLY when the shadow flag is on: with just the write flag
+        // on, the planner still runs (once) but every `shadow*` field is null,
+        // and the plan it chose is reported by `resolutionPlan` instead. Both
+        // flags on = both, from that same single planner call.
         ...closureShadow,
+        // Phase 3, aggregate-only. `null` when no closure plan was evaluated
+        // (write flag off, envelope not candidate-shaped, or the planner said
+        // FULL); `true` when an active mine had a non-closure candidate or an
+        // UNKNOWN answer and the generation was escalated to FULL before any
+        // write; `false` when a closure ran with the mine question answered no.
+        closureEscalatedOnMine,
+        closureFenceRejections: closureCommittedRejections,
         sqlCount: typeof dependencies.sqlCount === "function" ? dependencies.sqlCount() : null,
       }));
       return job;

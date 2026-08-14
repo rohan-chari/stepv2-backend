@@ -387,6 +387,11 @@ model StepSample {
 
   @@unique([userId, periodStart])
   @@index([userId, periodStart, periodEnd])
+  // Ordered path for the resolution fingerprint's per-member
+  // `MIN(period_end) WHERE period_end > now` correlated subselect. The composite
+  // above cannot serve it in sorted order (period_end is not the second key), so
+  // it scanned every sample row per member. Additive index only.
+  @@index([userId, periodEnd])
   @@map("step_samples")
 }
 
