@@ -250,6 +250,19 @@ const KNOWN_FLAGS = {
   raceResolutionBurstCoalescingV1Enabled: false,
   raceResolutionBulkWriteV1Enabled: false,
   raceResolutionPostTasksV1Enabled: false,
+  // Dependency-closure planner, PHASE 2b SHADOW ONLY. When true the worker
+  // computes the closure plan for a closure-candidate envelope and logs it as
+  // aggregate `shadow*` fields on the existing race_resolution_v2 line. It
+  // selects no plan, writes nothing, and changes no post-commit work — a
+  // planner failure is logged and dropped.
+  //
+  // Deliberately a SEPARATE key from `raceResolutionDependencyClosureV1Enabled`
+  // (Phase 3), which will mean "closure WRITES". Reusing one key would silently
+  // change its meaning at the Phase 3 deploy: every environment already running
+  // the measurement would start writing subset results the moment the new
+  // binary rolled, with no separate go/no-go. Shadow code must never read the
+  // Phase 3 key, and the Phase 3 key stays undeclared until it exists.
+  raceResolutionDependencyClosureShadowV1Enabled: false,
 };
 
 function buildAppSettings(dependencies = {}) {

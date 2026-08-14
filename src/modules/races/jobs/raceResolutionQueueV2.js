@@ -42,7 +42,14 @@ const { balanceConfig: defaultBalanceConfig } = require("../../economy/balanceCo
 const {
   buildRaceResolutionStepSyncScope: defaultBuildStepSyncScope,
   stepSyncScopeMatchesFence: defaultStepSyncScopeMatchesFence,
+  isClosureEligibleReasonSet,
 } = require("../services/raceResolutionStepSyncScope");
+const {
+  buildRaceScoringDependencyClosure: defaultBuildDependencyClosure,
+  wouldTrailMineEscalate: defaultWouldTrailMineEscalate,
+  TRAIL_MINE_ESCALATION_UNKNOWN,
+  CLOSURE_FALLBACK_REASON_VALUES,
+} = require("../services/raceScoringDependencyClosure");
 const {
   raceResolutionDeliveryIntents: defaultDeliveryIntents,
 } = require("../services/raceResolutionDeliveryIntents");
@@ -168,6 +175,88 @@ function resolutionPlanForDirtyReasons(reasons) {
     reasons[0] === "BOX_OPEN"
     ? "NO_SCORE"
     : "FULL";
+}
+
+// ── Phase 2b: dependency-closure SHADOW observability ───────────────────────
+//
+// The planner's result carries in-memory handoffs (participant ids, effect
+// rows, per-participant step totals) that exist for the Phase 3 write path.
+// NONE of them may reach a log line. What follows is the complete, closed set
+// of fields the shadow is allowed to emit: plan, a closed-enum fallback reason,
+// three counts, two booleans/tri-state, and a duration. No user id, participant
+// id, step total, or effect metadata — spec §Observability and the result-field
+// contract comment on raceScoringDependencyClosure's return value.
+//
+// Every field is null when the flag is off or the envelope is not
+// closure-candidate-shaped, so "the shadow did not run" is unambiguous in the
+// log rather than indistinguishable from "it ran and found nothing".
+const NULL_CLOSURE_SHADOW_FIELDS = Object.freeze({
+  shadowClosurePlan: null,
+  shadowClosureFallbackReason: null,
+  shadowClosureCount: null,
+  shadowSourceCount: null,
+  shadowMinesActive: null,
+  shadowWouldEscalateOnMine: null,
+  shadowPlannerMs: null,
+  shadowRetainedSourceCount: null,
+});
+
+function summarizeClosureShadow(
+  result,
+  plannerMs,
+  escalationProbe = defaultWouldTrailMineEscalate
+) {
+  if (!result || typeof result !== "object") {
+    return { ...NULL_CLOSURE_SHADOW_FIELDS, shadowPlannerMs: plannerMs };
+  }
+  const plan =
+    result.plan === "DEPENDENCY_CLOSURE" || result.plan === "FULL"
+      ? result.plan
+      : null;
+  const isClosure = plan === "DEPENDENCY_CLOSURE";
+  const minesActive = result.minesActive === true;
+  let wouldEscalate = null;
+  if (isClosure && minesActive) {
+    const verdict = escalationProbe({
+      mines: result.mines,
+      closureIds: result.participantIds,
+      participantTotals: result.participantTotals,
+    });
+    // The tri-state is the whole point of this measurement: "UNKNOWN" is the
+    // legacy-mine case (no `aheadParticipantIds`, no pre-generation total) and
+    // Phase 3 must treat it as ESCALATE. It is logged as the STRING "UNKNOWN",
+    // never coerced to a boolean and never dropped — the rate of this exact
+    // value on the Weekly is what decides whether the closure can ship there.
+    wouldEscalate =
+      verdict === TRAIL_MINE_ESCALATION_UNKNOWN
+        ? String(TRAIL_MINE_ESCALATION_UNKNOWN)
+        : verdict === true;
+  }
+  return {
+    shadowClosurePlan: plan,
+    // Closed enum only. An unrecognized value is logged as null rather than
+    // widening the dimension the rollout gates are read from.
+    shadowClosureFallbackReason: CLOSURE_FALLBACK_REASON_VALUES.has(
+      result.fallbackReason
+    )
+      ? result.fallbackReason
+      : null,
+    // Null (not 0) on a FULL plan: there is no closure to size, and a 0 would
+    // drag every aggregate over closure size toward zero.
+    shadowClosureCount: isClosure ? (result.participantIds || []).length : null,
+    shadowSourceCount: Array.isArray(result.sourceParticipantIds)
+      ? result.sourceParticipantIds.length
+      : null,
+    // On a FULL fallback the planner may have short-circuited before ever
+    // inspecting the active set — "no mines" and "never looked" must not
+    // collapse into the same value, so mines are reported only on a closure.
+    shadowMinesActive: isClosure ? minesActive : null,
+    shadowWouldEscalateOnMine: wouldEscalate,
+    shadowPlannerMs: plannerMs,
+    shadowRetainedSourceCount: Array.isArray(result.retainedUnresolvedSources)
+      ? result.retainedUnresolvedSources.length
+      : null,
+  };
 }
 
 function normalizeParticipantWrites(writes) {
@@ -308,6 +397,12 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
     dependencies.stepSyncScopeMatchesFence || defaultStepSyncScopeMatchesFence;
   const deliveryIntents =
     dependencies.raceResolutionDeliveryIntents || defaultDeliveryIntents;
+  // Phase 2b shadow seam. Injectable so a test can assert the planner is NEVER
+  // called with the flag off, and can force a planner failure.
+  const buildDependencyClosure =
+    dependencies.buildRaceScoringDependencyClosure || defaultBuildDependencyClosure;
+  const wouldTrailMineEscalateProbe =
+    dependencies.wouldTrailMineEscalate || defaultWouldTrailMineEscalate;
   const now = dependencies.now || (() => new Date());
   const leaseMs = dependencies.leaseMs ?? LEASE_MS;
   // Phase D hangs the Redis snapshot publish off this hook. It runs strictly
@@ -391,6 +486,74 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
       leaseToken: newLeaseToken(),
     });
     if (!job) return null;
+
+    // ── Phase 2b: the dependency-closure planner, in SHADOW MODE. ──────────
+    //
+    // Runs after the claim and strictly BEFORE plan selection, because that
+    // is where Phase 3 will consume it. Nothing below reads `closureShadow`
+    // except the commit log line: it cannot select a plan, change a write,
+    // add or skip a post-task, or fail the job. A planner throw is caught,
+    // logged as a shadow failure, and dropped — the job then proceeds exactly
+    // as it would have with the flag off.
+    //
+    // Sits ABOVE the `startMs` bind so `coreMs` stays comparable across the
+    // flag flip: the shadow's cost is reported ONLY as `shadowPlannerMs`,
+    // never folded into the series the rollout gate reads.
+    //
+    // Ordering note (zero off-flag overhead): the candidate-shape test is a
+    // PURE array comparison against the gatekeeper's own admitted reason sets
+    // and runs FIRST, so a non-candidate envelope does no work at all — not
+    // even a settings read. A candidate envelope with the flag off costs one
+    // `getFlag` against the same warm appSettings cache the four flag reads
+    // below already use, and zero database queries.
+    let closureShadow = NULL_CLOSURE_SHADOW_FIELDS;
+    {
+      if (isClosureEligibleReasonSet(job.processingDirtyReasons)) {
+        // The SHADOW flag, deliberately not `raceResolutionDependencyClosureV1Enabled`:
+        // that key is reserved for Phase 3's "closure writes" meaning and must
+        // never be read by observation-only code.
+        const closureShadowEnabled = await isStrictFlagEnabled(
+          settings,
+          "raceResolutionDependencyClosureShadowV1Enabled"
+        );
+        if (closureShadowEnabled) {
+          const shadowStartedAt = Date.now();
+          try {
+            const shadowConfig = await balanceConfig.getSnapshot();
+            const shadowResult = await buildDependencyClosure({
+              raceId: job.raceId,
+              dirtyParticipantIds: job.processingDirtyParticipantIds,
+              job,
+              now: now(),
+              Race: raceModel,
+              RaceActiveEffect: effectModel,
+              RaceParticipant: participantModel,
+              balanceConfigVersion: shadowConfig?.version ?? null,
+            });
+            closureShadow = summarizeClosureShadow(
+              shadowResult,
+              Math.max(0, Date.now() - shadowStartedAt),
+              wouldTrailMineEscalateProbe
+            );
+          } catch (error) {
+            // The duration is still honest and still useful (a timeout is the
+            // failure mode worth measuring); every other field stays null.
+            closureShadow = {
+              ...NULL_CLOSURE_SHADOW_FIELDS,
+              shadowPlannerMs: Math.max(0, Date.now() - shadowStartedAt),
+            };
+            logger.error(JSON.stringify({
+              event: "race_resolution_v2_shadow_error",
+              operation: "dependency_closure_planner",
+              errorCode: String(error?.code || "SHADOW_PLANNER_ERROR"),
+              // A race id is not user data; without it a failure spike cannot
+              // be correlated to the race that provokes it.
+              raceId: job.raceId,
+            }));
+          }
+        }
+      }
+    }
 
     const startMs = Date.now();
     const triggeringUserIds = Array.isArray(job.processingTriggeredByUserIds)
@@ -845,6 +1008,9 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         postTaskMs: Math.max(0, Date.now() - postStartedAt),
         coreMs: Math.max(0, Date.now() - startMs),
         queueLagMs: Math.max(0, startMs - new Date(job.requestedAt).getTime()),
+        // Additive, aggregate-only Phase 2b shadow dimensions. All null when
+        // the flag is off or the envelope is not closure-candidate-shaped.
+        ...closureShadow,
         sqlCount: typeof dependencies.sqlCount === "function" ? dependencies.sqlCount() : null,
       }));
       return job;
@@ -977,4 +1143,6 @@ module.exports = {
   writeParticipantsBulk,
   supersededRunMayDiscard,
   resolutionPlanForDirtyReasons,
+  summarizeClosureShadow,
+  NULL_CLOSURE_SHADOW_FIELDS,
 };
