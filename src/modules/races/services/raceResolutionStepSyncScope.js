@@ -2,15 +2,39 @@ const { Race } = require("../models/race");
 const { RaceActiveEffect } = require("../../powerups/models/raceActiveEffect");
 const { computeBoxEffectiveSteps } = require("../../powerups/boxSteps");
 
+// The only reason sets this cheap plan may serve (dependency-closure spec
+// rule 1, merged-reason carve-out). A coalesced STEP_SYNC + DISPLAY_REFRESH
+// envelope is admitted because watched races enqueue DISPLAY_REFRESH on a ~15s
+// snapshot cadence, so treating the merge as unknown demotes most big-race step
+// syncs to FULL. Every other mix — including ["STEP_SYNC","BOX_OPEN"] — stays
+// rejected. Deliberately a SET test: order is not significant.
+const CLOSURE_ELIGIBLE_REASON_SETS = Object.freeze([
+  Object.freeze(["STEP_SYNC"]),
+  Object.freeze(["DISPLAY_REFRESH", "STEP_SYNC"]),
+]);
+
+// The dirty-row ceiling for a step-sync envelope. Exported because the
+// dependency-closure planner gates on the SAME number: a second copy could
+// drift and let the closure admit an envelope this scope would refuse.
+const MAX_STEP_SYNC_DIRTY_PARTICIPANTS = 1000;
+
+function isClosureEligibleReasonSet(reasons) {
+  if (!Array.isArray(reasons) || reasons.length === 0) return false;
+  const unique = [...new Set(reasons)].sort();
+  return CLOSURE_ELIGIBLE_REASON_SETS.some(
+    (candidate) =>
+      candidate.length === unique.length &&
+      candidate.every((reason, index) => reason === unique[index])
+  );
+}
+
 async function buildRaceResolutionStepSyncScope(job, dependencies = {}) {
   if (
     !job ||
-    !Array.isArray(job.processingDirtyReasons) ||
-    job.processingDirtyReasons.length !== 1 ||
-    job.processingDirtyReasons[0] !== "STEP_SYNC" ||
+    !isClosureEligibleReasonSet(job.processingDirtyReasons) ||
     !Array.isArray(job.processingDirtyParticipantIds) ||
     job.processingDirtyParticipantIds.length === 0 ||
-    job.processingDirtyParticipantIds.length > 1000 ||
+    job.processingDirtyParticipantIds.length > MAX_STEP_SYNC_DIRTY_PARTICIPANTS ||
     !Array.isArray(job.processingTriggeredByUserIds)
   ) return null;
   const claimStartedAt = new Date(job.startedAt || 0);
@@ -98,6 +122,9 @@ async function stepSyncScopeMatchesFence(scope, tx, raceId) {
 }
 
 module.exports = {
+  CLOSURE_ELIGIBLE_REASON_SETS,
+  MAX_STEP_SYNC_DIRTY_PARTICIPANTS,
+  isClosureEligibleReasonSet,
   buildRaceResolutionStepSyncScope,
   stepSyncScopeMatchesFence,
 };

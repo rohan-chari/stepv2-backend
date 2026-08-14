@@ -56,6 +56,73 @@ test("fingerprint changes for a monotonic source token, effect, event, or config
   }
 });
 
+// Schema 2 (dependency-closure spec rule 7). The effect read now returns the
+// ACTIVE rows plus the EXPIRED LEECH/HITCHHIKE history the closure graph needs;
+// the two populations are split by status.
+test("schema 2 digests EXPIRED leech/hitchhike rows and splits them from the active set", async () => {
+  const now = new Date("2026-08-13T12:00:00.000Z");
+  const activeRow = {
+    id: "e1", type: "LEECH", status: "ACTIVE", targetParticipantId: "p1",
+    sourceUserId: "u2", startsAt: now, expiresAt: null, metadata: {},
+  };
+  const expiredRow = { ...activeRow, status: "EXPIRED" };
+  const base = await buildRaceResolutionInputFingerprint({
+    raceId: "r1", now, balanceConfigVersion: 1,
+    client: fakeClient({ inputs: [{ userId: "u1", generation: "1" }], effects: [activeRow] }),
+  });
+  const transitioned = await buildRaceResolutionInputFingerprint({
+    raceId: "r1", now, balanceConfigVersion: 1,
+    client: fakeClient({ inputs: [{ userId: "u1", generation: "1" }], effects: [expiredRow] }),
+  });
+  // The ACTIVE -> EXPIRED transition of a scoring row must move the digest;
+  // under schema 1 the row simply vanished from the query and a closure could
+  // be reused across the transition.
+  assert.notEqual(base.digest, transitioned.digest);
+  assert.deepEqual(base.activeEffects, [activeRow]);
+  assert.deepEqual(base.expiredScoringEffects, []);
+  // activeEffects stays ACTIVE-only: computeArtifactReuseDeadline enumerates
+  // its startsAt/expiresAt and must not be handed an elapsed boundary.
+  assert.deepEqual(transitioned.activeEffects, []);
+  assert.deepEqual(transitioned.expiredScoringEffects, [expiredRow]);
+});
+
+test("the global-event query looks AHEAD, not only at events already started", async () => {
+  const now = new Date("2026-08-13T12:00:00.000Z");
+  const calls = [];
+  const results = [[{ race: { id: "r1" }, participants: [] }], [], [], []];
+  let index = 0;
+  const client = {
+    async $queryRawUnsafe(sql, ...params) {
+      calls.push({ sql, params });
+      return results[index++];
+    },
+  };
+  await buildRaceResolutionInputFingerprint({ raceId: "r1", now, client });
+  const eventQuery = calls.find((call) => call.sql.includes("global_step_events"));
+  const horizon = new Date(eventQuery.params[1]);
+  // The old `now + 5s` horizon selected only events that had ALREADY started,
+  // so an imminent event was invisible to every deadline built from these rows.
+  // It must now cover at least the closure's maximum validity window.
+  assert.ok(
+    horizon.getTime() - now.getTime() >= 10 * 60 * 1000,
+    `horizon only ${horizon.getTime() - now.getTime()}ms ahead`
+  );
+  // The ended-event exclusion is unchanged.
+  assert.match(eventQuery.sql, /ends_at > race\.started_at/);
+});
+
+test("the fingerprint exposes the participant rows the trail-mine projection needs", async () => {
+  const value = await buildRaceResolutionInputFingerprint({
+    raceId: "r1",
+    now: new Date("2026-08-13T12:00:00.000Z"),
+    balanceConfigVersion: 1,
+    client: fakeClient({ inputs: [{ userId: "u1", generation: "1" }] }),
+  });
+  // Same read, no extra query (spec rule 3's full-field projection).
+  assert.deepEqual(value.participants, []);
+  assert.equal(value.participantCount, 0);
+});
+
 test("missing source token with existing steps/samples fails closed", async () => {
   const value = await buildRaceResolutionInputFingerprint({
     raceId: "r1",

@@ -538,7 +538,734 @@ function findClassificationTableProblems(
   return problems;
 }
 
+// ---------------------------------------------------------------------------
+// PHASE 2a — the planner.
+//
+// Standalone: nothing in the worker calls this yet (Phase 2b wires it into the
+// shadow log). It reads, it never writes, and every unproven condition returns
+// plan FULL with a classified reason from CLOSURE_FALLBACK_REASONS.
+// ---------------------------------------------------------------------------
+
+// effectMultiplier is pure (no DB), so it is safe at module load.
+const { multiplierBoundaries } = require("./effectMultiplier");
+
+const HOUR_MS = 60 * 60 * 1000;
+
+// Spec rule 5.
+const MAX_DEPENDENCY_CLOSURE_PARTICIPANTS = 64;
+// Hard ceiling on the closure's exclusive validity deadline. `validUntil` is a
+// NECESSARY condition only — it says "no boundary we can SEE crosses before
+// this". Sufficiency comes from the in-fence fingerprint re-verify, never from
+// this timestamp. The cap exists because some boundaries are structurally
+// invisible to a candidate-time read (a global event created after the read; a
+// sample bucket for a user whose row we did not select; an effect cast between
+// the read and the fence), so an uncapped deadline derived only from race
+// `endsAt` would let a closure claim validity for days.
+const MAX_CLOSURE_VALIDITY_MS = 10 * 60 * 1000;
+
+// hitchhikeCopies.js: `Number(effect.metadata?.scoringVersion) || 1`. Version 1
+// is the legacy top-of-hour copy; version 2 runs the shared scorer clipped to
+// the window. Anything else is an unknown scoring rule -> FULL (spec rule 6).
+const SUPPORTED_HITCHHIKE_SCORING_VERSIONS = Object.freeze(new Set([1, 2]));
+const LEGACY_HITCHHIKE_SCORING_VERSION = 1;
+
+// Types whose DUE expiry consumes a closure-computed value for its target
+// (spec rule 3's narrowed veto): SNAPSHOT_AT_EXPIRY_TYPES stamp stepsAtExpiry
+// and DRILL_SERGEANT judges its dare, both by looking the target up in the
+// generation's participantSteps map and both SILENTLY skipping a missing key.
+const DUE_EXPIRY_VETO_TYPES = Object.freeze(
+  new Set([...SNAPSHOT_AT_EXPIRY_TYPES, "DRILL_SERGEANT"])
+);
+
+// The CLOSED enum of fallback reasons. Never a free-text string: these values
+// are the observability dimension the rollout gates are read from.
+const CLOSURE_FALLBACK_REASONS = Object.freeze({
+  // --- admission (rule 1) ---
+  NOT_STEP_SYNC_REASON_SET: "NOT_STEP_SYNC_REASON_SET",
+  JOB_ENVELOPE_INVALID: "JOB_ENVELOPE_INVALID",
+  DIRTY_PARTICIPANTS_INVALID: "DIRTY_PARTICIPANTS_INVALID",
+  UPLOADER_SNAPSHOT_INCOHERENT: "UPLOADER_SNAPSHOT_INCOHERENT",
+  // --- reads (rules 2, 7) ---
+  GRAPH_READ_FAILED: "GRAPH_READ_FAILED",
+  FINGERPRINT_UNAVAILABLE: "FINGERPRINT_UNAVAILABLE",
+  // --- race lifecycle (rules 3, 5) ---
+  RACE_NOT_ACTIVE: "RACE_NOT_ACTIVE",
+  RACE_WINDOW_CLOSED: "RACE_WINDOW_CLOSED",
+  TEAM_RACE: "TEAM_RACE",
+  // --- graph classification (rules 3, 6) ---
+  UNKNOWN_POWERUP_TYPE: "UNKNOWN_POWERUP_TYPE",
+  RACE_WIDE_EFFECT_ACTIVE: "RACE_WIDE_EFFECT_ACTIVE",
+  UNSUPPORTED_EFFECT_ACTIVE: "UNSUPPORTED_EFFECT_ACTIVE",
+  UNSUPPORTED_HITCHHIKE_VERSION: "UNSUPPORTED_HITCHHIKE_VERSION",
+  EFFECT_ROW_MALFORMED: "EFFECT_ROW_MALFORMED",
+  // A LEECH/HITCHHIKE row whose source (or target) is not an accepted
+  // participant. See the veto's rationale at the traversal site: the
+  // fingerprint's `members` CTE is accepted-only, so such a source's
+  // user_scoring_input_versions generation is never digested.
+  RETAINED_SOURCE_UNRESOLVED: "RETAINED_SOURCE_UNRESOLVED",
+  // --- boundaries and bounds (rules 5, 7) ---
+  GLOBAL_EVENT_ACTIVE: "GLOBAL_EVENT_ACTIVE",
+  CLOSURE_CAP_EXCEEDED: "CLOSURE_CAP_EXCEEDED",
+  DUE_EXPIRY_OUTSIDE_CLOSURE: "DUE_EXPIRY_OUTSIDE_CLOSURE",
+});
+
+const CLOSURE_FALLBACK_REASON_VALUES = Object.freeze(
+  new Set(Object.values(CLOSURE_FALLBACK_REASONS))
+);
+
+// The shipped fingerprint module pulls in prisma at require time. Phase 1's
+// table (and its structural test) must stay dependency-free, so the default is
+// resolved lazily on first planner call instead of at module load.
+let cachedFingerprintBuilder = null;
+function resolveFingerprintBuilder(injected) {
+  if (typeof injected === "function") return injected;
+  if (!cachedFingerprintBuilder) {
+    ({
+      buildRaceResolutionInputFingerprint: cachedFingerprintBuilder,
+    } = require("./raceResolutionInputFingerprint"));
+  }
+  return cachedFingerprintBuilder;
+}
+
+// Same lazy-require rationale: raceResolutionStepSyncScope loads the Race model
+// (and therefore prisma). The admitted reason SET has exactly ONE definition —
+// that module's — so the gatekeeper and the planner can never drift apart.
+let cachedStepSyncScopeModule = null;
+function stepSyncScopeModule() {
+  if (!cachedStepSyncScopeModule) {
+    cachedStepSyncScopeModule = require("./raceResolutionStepSyncScope");
+  }
+  return cachedStepSyncScopeModule;
+}
+
+function reasonSetIsClosureEligible(reasons) {
+  return stepSyncScopeModule().isClosureEligibleReasonSet(reasons);
+}
+
+// The dirty-row ceiling is the gatekeeper's, imported rather than re-stated:
+// two copies of the same number drift, and the closure must never admit an
+// envelope the cheap plan would have refused.
+function maxDirtyParticipants() {
+  return stepSyncScopeModule().MAX_STEP_SYNC_DIRTY_PARTICIPANTS;
+}
+
+function toMsOrNull(value) {
+  if (value == null) return null;
+  const ms = value instanceof Date ? value.getTime() : new Date(value).getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function sortedUnique(values) {
+  return [...new Set(values)].sort();
+}
+
+// Effect rows arrive from up to three reads (active set + LEECH history +
+// HITCHHIKE history) whose populations overlap on the ACTIVE rows. Dedupe by
+// id, preferring the first sighting, so an edge is never counted twice.
+function dedupeById(rowLists) {
+  const byId = new Map();
+  for (const rows of rowLists) {
+    for (const row of rows || []) {
+      if (!row || !row.id || byId.has(row.id)) continue;
+      byId.set(row.id, row);
+    }
+  }
+  return [...byId.values()];
+}
+
+// hitchhikeCopies.js reads the version off metadata and defaults an ABSENT
+// value to legacy v1. A PRESENT but unrecognized value is the "unknown stored
+// scoring version" case the spec sends to FULL — it must not silently adopt
+// the legacy default here.
+function hitchhikeScoringVersion(effect) {
+  const raw = effect?.metadata?.scoringVersion;
+  if (raw == null) return LEGACY_HITCHHIKE_SCORING_VERSION;
+  const version = Number(raw);
+  if (!Number.isFinite(version)) return null;
+  return SUPPORTED_HITCHHIKE_SCORING_VERSIONS.has(version) ? version : null;
+}
+
+function participantTotalsFrom(rows) {
+  const totals = {};
+  for (const row of rows || []) {
+    if (!row?.id) continue;
+    totals[row.id] = {
+      participantId: row.id,
+      totalSteps: Number(row.totalSteps ?? row.total_steps ?? 0),
+      // DELIBERATELY ABSENT. The persisted total is the value AFTER whatever
+      // has already been written this generation (reconcileUploaderRaces
+      // persists a syncing user's own row outside the worker), so aliasing it
+      // to previousTotalSteps would make the legacy "was below at plant time"
+      // heuristic read as a definite NO. Left undefined, the predicate reports
+      // UNKNOWN instead — the only honest answer without a pre-generation value.
+      forfeitedAt: row.forfeitedAt ?? row.forfeited_at ?? null,
+    };
+  }
+  return totals;
+}
+
+function normalizeTotalsInput(participantTotals) {
+  if (participantTotals instanceof Map) {
+    return [...participantTotals.entries()].map(([participantId, row]) => ({
+      participantId,
+      ...(row || {}),
+    }));
+  }
+  if (Array.isArray(participantTotals)) {
+    return participantTotals.filter(Boolean);
+  }
+  return Object.entries(participantTotals || {}).map(([participantId, row]) => ({
+    participantId,
+    ...(row || {}),
+  }));
+}
+
+// The TRAIL_MINE escalation predicate (spec rule 3), evaluated over a
+// FULL-FIELD projection. It is a faithful transcription of triggerTrailMines'
+// candidate filter (raceStateResolution.js:551-566), with the team filter
+// omitted — isTeamRace is an independent FULL veto so a team race never reaches
+// here, and omitting it only ever escalates MORE.
+//
+// TRI-STATE, and the third state is load-bearing:
+//   true      — a non-closure participant provably qualifies as a candidate.
+//   false     — provably none does; the detonation may stay inside the closure.
+//   "UNKNOWN" — a legacy mine (no `aheadParticipantIds`, planted before
+//               2026-08-07 and still ACTIVE in prod on rows with a null
+//               expiresAt) has a non-closure participant at or past its
+//               threshold, but the caller supplied no `previousTotalSteps`, so
+//               "was they already ahead when it was planted?" is unanswerable.
+// CALLERS MUST TREAT "UNKNOWN" AS ESCALATE. Reporting false there would be a
+// definite negative for a question we did not answer, and the consequence is
+// the wrong player taking the mine (candidates[0] is the LOWEST-total crosser)
+// followed by the mine EXPIRING — unrecoverable.
+//
+// `true` outranks `"UNKNOWN"`: a definite candidate anywhere ends the scan.
+const TRAIL_MINE_ESCALATION_UNKNOWN = "UNKNOWN";
+
+function wouldTrailMineEscalate({
+  mines = [],
+  closureIds = [],
+  participantTotals = {},
+} = {}) {
+  const closure = new Set(closureIds);
+  const rows = normalizeTotalsInput(participantTotals);
+  let unknown = false;
+  for (const mine of mines || []) {
+    const metadata = (mine && mine.metadata) || {};
+    const positionSteps = metadata.positionSteps;
+    const penaltyPercent = metadata.penaltyPercent;
+    // triggerTrailMines skips the mine entirely on either non-number.
+    if (typeof positionSteps !== "number" || typeof penaltyPercent !== "number") {
+      continue;
+    }
+    const ownerParticipantId =
+      metadata.ownerParticipantId || (mine && mine.targetParticipantId) || null;
+    const aheadAtPlant = Array.isArray(metadata.aheadParticipantIds)
+      ? new Set(metadata.aheadParticipantIds)
+      : null;
+    for (const row of rows) {
+      if (!row?.participantId) continue;
+      if (closure.has(row.participantId)) continue;
+      if (row.participantId === ownerParticipantId) continue;
+      if (row.forfeitedAt) continue;
+      const total = Number(row.totalSteps);
+      if (!Number.isFinite(total) || total < positionSteps) continue;
+      if (aheadAtPlant) {
+        if (!aheadAtPlant.has(row.participantId)) return true;
+        continue;
+      }
+      if (row.previousTotalSteps == null) {
+        // Legacy mine + no pre-generation total: unanswerable, not "no".
+        unknown = true;
+        continue;
+      }
+      const previous = Number(row.previousTotalSteps);
+      if (!Number.isFinite(previous)) {
+        unknown = true;
+        continue;
+      }
+      if (previous < positionSteps) return true;
+    }
+  }
+  return unknown ? TRAIL_MINE_ESCALATION_UNKNOWN : false;
+}
+
+// Every multiplier-transition instant strictly after `asOf` that the closure's
+// own effect rows can produce, using the PINNED multiplierBoundaries semantics
+// (so startsAt+freezeMs / startsAt+boostMs intra-effect transitions are
+// included — computeArtifactReuseDeadline's startsAt/expiresAt enumeration is
+// not sufficient, spec rule 7).
+function nextMultiplierBoundaryMs(effects, asOfMs, horizonMs) {
+  const groups = {
+    legCramps: [],
+    runnersHighs: [],
+    wrongTurns: [],
+    campfires: [],
+    rainstorms: [],
+    uprisings: [],
+    rallyFlags: [],
+    coinFlipWins: [],
+    coinFlipLoses: [],
+    ghostPeppers: [],
+  };
+  for (const effect of effects) {
+    switch (effect.type) {
+      case "LEG_CRAMP":
+      case "QUICKSAND":
+        groups.legCramps.push(effect);
+        break;
+      case "RUNNERS_HIGH":
+        groups.runnersHighs.push(effect);
+        break;
+      case "WRONG_TURN":
+        groups.wrongTurns.push(effect);
+        break;
+      case "CAMPFIRE_REST":
+        groups.campfires.push(effect);
+        break;
+      case "RAINSTORM":
+        groups.rainstorms.push(effect);
+        break;
+      case "UPRISING":
+        groups.uprisings.push(effect);
+        break;
+      case "RALLY_FLAG":
+        groups.rallyFlags.push(effect);
+        break;
+      case "GHOST_PEPPER":
+        groups.ghostPeppers.push(effect);
+        break;
+      case "COIN_FLIP": {
+        const multiplier = Number((effect.metadata || {}).multiplier);
+        if (Number.isFinite(multiplier) && multiplier < 1) {
+          groups.coinFlipLoses.push(effect);
+        } else {
+          groups.coinFlipWins.push(effect);
+        }
+        break;
+      }
+      default:
+        break;
+    }
+  }
+  if (!(horizonMs > asOfMs)) return null;
+  const boundaries = multiplierBoundaries(asOfMs, horizonMs, groups);
+  const next = boundaries.find((ms) => ms > asOfMs);
+  return next == null ? null : next;
+}
+
+async function buildRaceScoringDependencyClosure({
+  raceId,
+  dirtyParticipantIds,
+  job,
+  now,
+  Race,
+  RaceActiveEffect,
+  RaceParticipant,
+  // Additive, optional, test-injectable. Defaults to the SHIPPED fingerprint —
+  // spec rule 7 prohibits a second implementation.
+  buildInputFingerprint,
+  balanceConfigVersion = null,
+  fingerprintClient,
+} = {}) {
+  const asOf = now instanceof Date ? new Date(now.getTime()) : new Date(now || Date.now());
+  const rawSources = Array.isArray(dirtyParticipantIds)
+    ? dirtyParticipantIds
+    : job && Array.isArray(job.processingDirtyParticipantIds)
+      ? job.processingDirtyParticipantIds
+      : [];
+  const sourceParticipantIds = sortedUnique(
+    rawSources.filter((id) => typeof id === "string" && id.length > 0)
+  );
+
+  const fallback = (fallbackReason, extra = {}) => ({
+    plan: "FULL",
+    participantIds: [],
+    sourceParticipantIds,
+    graphFingerprint: null,
+    asOf,
+    fallbackReason,
+    validUntil: null,
+    minesActive: false,
+    mines: [],
+    participantTotals: {},
+    acceptedParticipantCount: null,
+    ...extra,
+  });
+
+  if (Number.isNaN(asOf.getTime())) {
+    return fallback(CLOSURE_FALLBACK_REASONS.JOB_ENVELOPE_INVALID);
+  }
+  if (!raceId || typeof raceId !== "string") {
+    return fallback(CLOSURE_FALLBACK_REASONS.JOB_ENVELOPE_INVALID);
+  }
+  if (!job || !Array.isArray(job.processingTriggeredByUserIds)) {
+    return fallback(CLOSURE_FALLBACK_REASONS.JOB_ENVELOPE_INVALID);
+  }
+  // Gated on the reason SET, never on resolutionPlanForDirtyReasons' base plan
+  // (spec rule 1): that helper returns FULL for RECOVERY/DAILY_MOVER/… and
+  // reading it here would make the closure unreachable.
+  if (!reasonSetIsClosureEligible(job.processingDirtyReasons)) {
+    return fallback(CLOSURE_FALLBACK_REASONS.NOT_STEP_SYNC_REASON_SET);
+  }
+  const claimStartedAt = new Date(job.startedAt || 0);
+  if (Number.isNaN(claimStartedAt.getTime())) {
+    return fallback(CLOSURE_FALLBACK_REASONS.JOB_ENVELOPE_INVALID);
+  }
+  if (
+    sourceParticipantIds.length === 0 ||
+    sourceParticipantIds.length !== rawSources.length ||
+    sourceParticipantIds.length > maxDirtyParticipants()
+  ) {
+    return fallback(CLOSURE_FALLBACK_REASONS.DIRTY_PARTICIPANTS_INVALID);
+  }
+
+  // Fingerprint FIRST, graph reads second. The ordering is deliberate: a row
+  // written between the two reads lands in the GRAPH but not the digest, which
+  // can only widen the closure or trip a veto (safe), and the fence's re-read
+  // in a later phase then mismatches and retries as FULL. The reverse order
+  // would let a row be digested yet missing from the graph — an edge the
+  // closure never saw, with a digest that still verifies.
+  const fingerprintBuilder = resolveFingerprintBuilder(buildInputFingerprint);
+  let fingerprint = null;
+  let race = null;
+  let activeEffects = [];
+  let leechHistory = [];
+  let hitchhikeHistory = [];
+  try {
+    fingerprint = await fingerprintBuilder({
+      raceId,
+      now: asOf,
+      balanceConfigVersion,
+      ...(fingerprintClient ? { client: fingerprintClient } : {}),
+    });
+    if (!fingerprint || typeof fingerprint.digest !== "string") {
+      return fallback(CLOSURE_FALLBACK_REASONS.FINGERPRINT_UNAVAILABLE);
+    }
+    const raceModel = Race;
+    const effectModel = RaceActiveEffect;
+    if (
+      !raceModel ||
+      typeof raceModel.findById !== "function" ||
+      !effectModel ||
+      typeof effectModel.findActiveForRace !== "function" ||
+      typeof effectModel.findRaceEffectsByType !== "function"
+    ) {
+      return fallback(CLOSURE_FALLBACK_REASONS.GRAPH_READ_FAILED);
+    }
+    // Bounded, race-scoped, and INDEPENDENT of participant count: the active
+    // set plus the two canonical cross-participant histories. findRaceEffectsByType
+    // is the exact read collectRaceHitchhikeCopies uses (status IN ACTIVE,
+    // EXPIRED), which is also the status set the LEECH scorer consumes.
+    [race, activeEffects, leechHistory, hitchhikeHistory] = await Promise.all([
+      raceModel.findById(raceId),
+      effectModel.findActiveForRace(raceId),
+      effectModel.findRaceEffectsByType(raceId, "LEECH"),
+      effectModel.findRaceEffectsByType(raceId, "HITCHHIKE"),
+    ]);
+  } catch {
+    return fallback(CLOSURE_FALLBACK_REASONS.GRAPH_READ_FAILED);
+  }
+
+  if (!race || race.status !== "ACTIVE") {
+    return fallback(CLOSURE_FALLBACK_REASONS.RACE_NOT_ACTIVE);
+  }
+  // Explicit FULL row, not an inference: the worker's team write logic assumes
+  // a full field (spec rule 3).
+  if (race.isTeamRace === true) {
+    return fallback(CLOSURE_FALLBACK_REASONS.TEAM_RACE);
+  }
+  const asOfMs = asOf.getTime();
+  const raceEndsAtMs = toMsOrNull(race.endsAt);
+  if (raceEndsAtMs != null && raceEndsAtMs <= asOfMs) {
+    return fallback(CLOSURE_FALLBACK_REASONS.RACE_WINDOW_CLOSED);
+  }
+
+  // Race.findById already includes the roster, so this costs no extra query on
+  // the normal path. The RaceParticipant read is a defensive fallback for a
+  // race row that arrives without its participants; a roster we cannot read at
+  // all fails closed rather than producing an empty "closure".
+  let rosterSource = Array.isArray(race.participants) ? race.participants : null;
+  if (rosterSource == null) {
+    if (typeof RaceParticipant?.findAcceptedByRace !== "function") {
+      return fallback(CLOSURE_FALLBACK_REASONS.GRAPH_READ_FAILED);
+    }
+    try {
+      rosterSource = await RaceParticipant.findAcceptedByRace(raceId);
+    } catch {
+      return fallback(CLOSURE_FALLBACK_REASONS.GRAPH_READ_FAILED);
+    }
+    if (!Array.isArray(rosterSource)) {
+      return fallback(CLOSURE_FALLBACK_REASONS.GRAPH_READ_FAILED);
+    }
+  }
+  // joinedAt order is preserved wherever current scoring/tie behavior consumes
+  // it (spec rule 2); id breaks ties so the userId->participantId map below is
+  // deterministic across reads.
+  const accepted = rosterSource
+    .filter((row) => row && row.status === "ACCEPTED")
+    .slice()
+    .sort((left, right) => {
+      const l = toMsOrNull(left.joinedAt) ?? 0;
+      const r = toMsOrNull(right.joinedAt) ?? 0;
+      if (l !== r) return l - r;
+      return String(left.id).localeCompare(String(right.id));
+    });
+  const acceptedById = new Map(accepted.map((row) => [row.id, row]));
+  const participantIdByUserId = new Map();
+  for (const row of accepted) {
+    if (!participantIdByUserId.has(row.userId)) {
+      participantIdByUserId.set(row.userId, row.id);
+    }
+  }
+
+  // Coherent committed uploader snapshot (spec rule 1) — the same conditions
+  // raceResolutionStepSyncScope enforces, re-checked here because that scope
+  // returns null the moment the race has any active effect.
+  const triggeringUsers = new Set(job.processingTriggeredByUserIds);
+  for (const participantId of sourceParticipantIds) {
+    const participant = acceptedById.get(participantId);
+    const token = new Date(participant?.totalsUpdatedAt || 0);
+    if (
+      !participant ||
+      !triggeringUsers.has(participant.userId) ||
+      // Stricter than the STEP_SYNC_COMMITTED scope, deliberately: that plan
+      // grandfathers a null token into the epoch, but a closure has to PROVE
+      // the uploader's committed snapshot predates the claim.
+      participant.totalsUpdatedAt == null ||
+      Number.isNaN(token.getTime()) ||
+      token.getTime() > claimStartedAt.getTime() ||
+      !Number.isFinite(participant.rawSteps)
+    ) {
+      return fallback(CLOSURE_FALLBACK_REASONS.UPLOADER_SNAPSHOT_INCOHERENT);
+    }
+  }
+
+  // Any global event overlapping the as-of instant forces FULL (spec rule 5).
+  // Non-overlapping edges still contribute to the validity deadline below.
+  const globalEvents = fingerprint.globalEvents || [];
+  for (const event of globalEvents) {
+    const startsAt = toMsOrNull(event.startsAt);
+    const endsAt = toMsOrNull(event.endsAt);
+    if (startsAt == null || endsAt == null) {
+      return fallback(CLOSURE_FALLBACK_REASONS.GLOBAL_EVENT_ACTIVE);
+    }
+    if (startsAt <= asOfMs && endsAt > asOfMs) {
+      return fallback(CLOSURE_FALLBACK_REASONS.GLOBAL_EVENT_ACTIVE);
+    }
+  }
+
+  // --- classification of the ACTIVE set (vetoes) -----------------------------
+  const mines = [];
+  for (const effect of activeEffects || []) {
+    let entry;
+    try {
+      entry = classifyPowerupTypeForScoring(effect?.type);
+    } catch {
+      return fallback(CLOSURE_FALLBACK_REASONS.UNKNOWN_POWERUP_TYPE);
+    }
+    if (entry.classification === "RACE_WIDE") {
+      return fallback(CLOSURE_FALLBACK_REASONS.RACE_WIDE_EFFECT_ACTIVE);
+    }
+    if (entry.classification === "UNSUPPORTED") {
+      return fallback(CLOSURE_FALLBACK_REASONS.UNSUPPORTED_EFFECT_ACTIVE);
+    }
+    if (entry.classification === "CLOSURE_ELIGIBLE_WITH_ESCALATION") {
+      // TRAIL_MINE does NOT veto. It is surfaced for the escalation predicate.
+      mines.push(effect);
+    }
+    // SELF and SCORING_INERT contribute neither an edge nor a veto.
+  }
+
+  // --- dependency edges (ACTIVE + EXPIRED history) --------------------------
+  const historyRows = dedupeById([
+    leechHistory,
+    hitchhikeHistory,
+    (activeEffects || []).filter(
+      (effect) => effect?.type === "LEECH" || effect?.type === "HITCHHIKE"
+    ),
+  ]);
+  const edges = [];
+  const adjacency = new Map();
+  const addAdjacency = (from, to) => {
+    if (!adjacency.has(from)) adjacency.set(from, new Set());
+    adjacency.get(from).add(to);
+  };
+  // Rule 9: a Leech source that is frozen, no longer accepted, or absent from
+  // the active scoring entries STILL drains its victim — computeLeechEarnedTransfer
+  // reads that source's step samples by sourceUserId with no participation
+  // check. The victim's correct total therefore depends on an input the
+  // fingerprint CANNOT see: buildRaceResolutionInputFingerprint's `members` CTE
+  // selects `status='accepted'` only, so an unaccepted source's
+  // user_scoring_input_versions generation is never digested. Its re-upload
+  // would change a closure participant's correct total while leaving the digest
+  // UNCHANGED, and the fence would then wave a stale write through.
+  //
+  // v1 therefore records these rows and takes FULL. Widening the fingerprint's
+  // member set to cover them is the real fix and is deliberately deferred: it
+  // changes a shipped digest's input set for every consumer, which is not a
+  // Phase 2a change.
+  const retainedUnresolvedSources = [];
+  let hasLegacyHitchhike = false;
+
+  for (const effect of historyRows) {
+    const entry = SCORING_CLASSIFICATION_BY_TYPE[effect.type];
+    if (!entry || entry.classification !== "DEPENDENCY") {
+      return fallback(CLOSURE_FALLBACK_REASONS.UNKNOWN_POWERUP_TYPE);
+    }
+    if (!effect.targetParticipantId || !effect.sourceUserId) {
+      return fallback(CLOSURE_FALLBACK_REASONS.EFFECT_ROW_MALFORMED);
+    }
+    if (effect.type === "HITCHHIKE") {
+      const version = hitchhikeScoringVersion(effect);
+      if (version == null) {
+        return fallback(CLOSURE_FALLBACK_REASONS.UNSUPPORTED_HITCHHIKE_VERSION);
+      }
+      if (version === LEGACY_HITCHHIKE_SCORING_VERSION) hasLegacyHitchhike = true;
+    }
+    const targetParticipantId = acceptedById.has(effect.targetParticipantId)
+      ? effect.targetParticipantId
+      : participantIdByUserId.get(effect.targetUserId) || null;
+    const sourceParticipantId =
+      participantIdByUserId.get(effect.sourceUserId) || null;
+    if (!targetParticipantId || !sourceParticipantId) {
+      retainedUnresolvedSources.push({
+        effectId: effect.id,
+        type: effect.type,
+        targetParticipantId,
+        sourceParticipantId,
+      });
+      continue;
+    }
+    if (targetParticipantId === sourceParticipantId) continue;
+    // Edge direction is READ off the Phase 1 table, never re-derived here.
+    edges.push({
+      effectId: effect.id,
+      type: effect.type,
+      status: effect.status,
+      direction: entry.edgeDirection,
+      targetParticipantId,
+      sourceParticipantId,
+    });
+    // Traversal expands INCOMING and OUTGOING edges alike (spec rule 4), so
+    // adjacency is symmetric regardless of the pinned direction; the direction
+    // is retained on the edge for the later ordered-transfer work.
+    addAdjacency(targetParticipantId, sourceParticipantId);
+    addAdjacency(sourceParticipantId, targetParticipantId);
+  }
+
+  if (retainedUnresolvedSources.length > 0) {
+    return fallback(CLOSURE_FALLBACK_REASONS.RETAINED_SOURCE_UNRESOLVED, {
+      retainedUnresolvedSources,
+    });
+  }
+
+  // --- traversal to fixed point ---------------------------------------------
+  const closure = new Set(sourceParticipantIds);
+  const queue = [...sourceParticipantIds];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    for (const neighbour of adjacency.get(current) || []) {
+      if (closure.has(neighbour)) continue;
+      closure.add(neighbour);
+      if (closure.size > MAX_DEPENDENCY_CLOSURE_PARTICIPANTS) {
+        return fallback(CLOSURE_FALLBACK_REASONS.CLOSURE_CAP_EXCEEDED);
+      }
+      queue.push(neighbour);
+    }
+  }
+  if (closure.size > MAX_DEPENDENCY_CLOSURE_PARTICIPANTS) {
+    return fallback(CLOSURE_FALLBACK_REASONS.CLOSURE_CAP_EXCEEDED);
+  }
+
+  // --- narrowed expiry veto (spec rule 3 / resolver integration item 6) -----
+  for (const effect of activeEffects || []) {
+    if (!DUE_EXPIRY_VETO_TYPES.has(effect?.type)) continue;
+    const expiresAtMs = toMsOrNull(effect.expiresAt);
+    if (expiresAtMs == null || expiresAtMs > asOfMs) continue;
+    if (!closure.has(effect.targetParticipantId)) {
+      return fallback(CLOSURE_FALLBACK_REASONS.DUE_EXPIRY_OUTSIDE_CLOSURE);
+    }
+  }
+
+  // --- exclusive validity deadline (spec rule 7) ----------------------------
+  const closureRelevant = (activeEffects || []).filter((effect) => {
+    if (closure.has(effect.targetParticipantId)) return true;
+    const sourceParticipantId = participantIdByUserId.get(effect.sourceUserId);
+    return sourceParticipantId ? closure.has(sourceParticipantId) : false;
+  });
+  // The cap is always a candidate, so the boundary set is never empty and the
+  // deadline is never synthesized out of nothing.
+  const horizonMs = Math.min(
+    raceEndsAtMs == null ? Infinity : raceEndsAtMs,
+    asOfMs + MAX_CLOSURE_VALIDITY_MS
+  );
+  const deadlineCandidates = [asOfMs + MAX_CLOSURE_VALIDITY_MS];
+  const addDeadline = (ms) => {
+    if (ms != null && Number.isFinite(ms) && ms > asOfMs) deadlineCandidates.push(ms);
+  };
+  addDeadline(nextMultiplierBoundaryMs(closureRelevant, asOfMs, horizonMs));
+  addDeadline(toMsOrNull(fingerprint.nextSampleBoundary));
+  for (const event of globalEvents) {
+    addDeadline(toMsOrNull(event.startsAt));
+    addDeadline(toMsOrNull(event.endsAt));
+  }
+  addDeadline(raceEndsAtMs);
+  // Legacy Hitchhike re-buckets at every absolute top of hour.
+  if (hasLegacyHitchhike) {
+    addDeadline(Math.floor(asOfMs / HOUR_MS) * HOUR_MS + HOUR_MS);
+  }
+  const validUntil = new Date(Math.min(...deadlineCandidates));
+
+  // Persisted totals for the TRAIL_MINE full-field projection, taken from the
+  // SAME fingerprint read the spec pins (no additional query). Restricted to
+  // accepted rows, which are the only ones triggerTrailMines ever scores.
+  const totalsSource = Array.isArray(fingerprint.participants)
+    ? fingerprint.participants.filter((row) => acceptedById.has(row?.id))
+    : accepted;
+  const participantTotals = participantTotalsFrom(
+    totalsSource.length > 0 ? totalsSource : accepted
+  );
+
+  return {
+    plan: "DEPENDENCY_CLOSURE",
+    participantIds: [...closure].sort(),
+    sourceParticipantIds,
+    graphFingerprint: fingerprint.digest,
+    asOf,
+    fallbackReason: null,
+    // EXCLUSIVE, and a NECESSARY condition only: it asserts that no boundary
+    // VISIBLE at candidate time crosses before this instant. It is never
+    // sufficient on its own — the in-fence fingerprint re-verify is what makes
+    // the write safe, and it stays mandatory even inside this window.
+    validUntil,
+    // TRAIL_MINE is closure-eligible; these two carry the escalation data.
+    //
+    // OBSERVABILITY CONTRACT for Phase 2b: these are IN-MEMORY handoffs to
+    // wouldTrailMineEscalate, NOT log fields. The shadow log may record
+    // `minesActive` (a boolean) and `wouldEscalateOnMine` (true/false/UNKNOWN)
+    // and counts — never a participant id, user id, effect metadata, or any
+    // step total out of `participantTotals`.
+    minesActive: mines.length > 0,
+    mines,
+    participantTotals,
+    acceptedParticipantCount: accepted.length,
+    edges,
+    retainedUnresolvedSources,
+    hasLegacyHitchhike,
+  };
+}
+
 module.exports = {
+  MAX_DEPENDENCY_CLOSURE_PARTICIPANTS,
+  MAX_CLOSURE_VALIDITY_MS,
+  TRAIL_MINE_ESCALATION_UNKNOWN,
+  CLOSURE_FALLBACK_REASONS,
+  CLOSURE_FALLBACK_REASON_VALUES,
+  SUPPORTED_HITCHHIKE_SCORING_VERSIONS,
+  DUE_EXPIRY_VETO_TYPES,
+  buildRaceScoringDependencyClosure,
+  wouldTrailMineEscalate,
   SCORING_CLASSIFICATION_BY_TYPE,
   CLASSIFICATIONS,
   EDGE_DIRECTIONS,

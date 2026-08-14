@@ -166,8 +166,16 @@ function buildRecordSteps(dependencies = {}) {
     // narrow STEP_SYNC scope, and a STEP_SYNC_COMMITTED run only RE-PUBLISHES
     // committed totals; it does not reconcile this request's daily row into
     // race_participants. The uploader's own row is healed by the imminent
-    // /steps/samples reconcile — or, if that call never lands, by the next
-    // sync or any progress poll's DISPLAY_REFRESH (base plan FULL).
+    // /steps/samples reconcile — or, if that call never lands, by (a) the next
+    // successful sync's reconcile, (b) an UN-MERGED DISPLAY_REFRESH job (base
+    // plan FULL), or (c) the findRecoveryRaceIds backstop (~1h worst case).
+    //
+    // NOT by every progress poll any more: since the dependency-closure work,
+    // buildRaceResolutionStepSyncScope admits a coalesced
+    // {STEP_SYNC, DISPLAY_REFRESH} envelope, so a poll that COALESCES with a
+    // step sync on a zero-effect race takes STEP_SYNC_COMMITTED and writes
+    // nothing. Staleness is still bounded by (a)-(c); this note exists so the
+    // heal is not assumed to come from the poll.
     let reasonAware = false;
     try {
       reasonAware =

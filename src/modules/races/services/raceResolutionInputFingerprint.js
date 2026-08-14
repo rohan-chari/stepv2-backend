@@ -8,7 +8,19 @@ async function buildRaceResolutionInputFingerprint({
   client = defaultPrisma,
 } = {}) {
   if (!raceId || !client || typeof client.$queryRawUnsafe !== "function") return null;
-  const horizon = new Date(now.getTime() + 5_000);
+  // Global-event lookahead. This was `now + 5s`, which selected only events
+  // that had ALREADY started — so an event about to begin was invisible to
+  // every deadline computed from these rows, and a closure (or a reused display
+  // artifact) could be declared valid straight across the event's start. The
+  // window is now wide enough to cover the dependency-closure planner's maximum
+  // validity (10 min).
+  //
+  // Safe for the shipped consumer: computeArtifactReuseDeadline takes the MIN
+  // over its candidates and always seeds `asOf + 5s`, so extra upcoming events
+  // can only SHORTEN a reuse deadline, never lengthen one. The ended-event
+  // exclusion (`ends_at > race.started_at`) is unchanged.
+  const GLOBAL_EVENT_LOOKAHEAD_MS = 10 * 60 * 1000;
+  const horizon = new Date(now.getTime() + GLOBAL_EVENT_LOOKAHEAD_MS);
   const [raceRows, inputs, effects, events] = await Promise.all([
     client.$queryRawUnsafe(
       `SELECT jsonb_build_object(
@@ -65,6 +77,15 @@ async function buildRaceResolutionInputFingerprint({
       raceId,
       now
     ),
+    // Schema 2 (dependency-closure spec rule 7): the closure graph needs the
+    // EXPIRED LEECH/HITCHHIKE rows too — leechTransfers.js and
+    // hitchhikeCopies.js both read status IN (ACTIVE, EXPIRED), so an EXPIRED
+    // row is still a live scoring input and a fingerprint that ignores it can
+    // report "unchanged" across a real graph transition. Folded into the SAME
+    // query rather than a fifth one so the race-scoped query count (and every
+    // injected test client's result ordering) is unchanged. The enum's DB
+    // labels are lowercase (`active_effect` / `expired_effect`); type labels
+    // are lowercase too, hence UPPER(type::text) in the filter.
     client.$queryRawUnsafe(
       `SELECT id, target_participant_id AS "targetParticipantId",
          target_user_id AS "targetUserId", source_user_id AS "sourceUserId",
@@ -72,7 +93,10 @@ async function buildRaceResolutionInputFingerprint({
          UPPER(status::text) AS status, starts_at AS "startsAt",
          expires_at AS "expiresAt", metadata, updated_at AS "updatedAt"
        FROM race_active_effects
-       WHERE race_id=$1 AND status='active_effect'
+       WHERE race_id=$1
+         AND (status='active_effect'
+              OR (status='expired_effect'
+                  AND UPPER(type::text) IN ('LEECH', 'HITCHHIKE')))
        ORDER BY id`,
       raceId
     ),
@@ -109,12 +133,25 @@ async function buildRaceResolutionInputFingerprint({
   const nextSampleBoundary = boundaries.length
     ? new Date(Math.min(...boundaries.map((value) => value.getTime())))
     : null;
+  // The effect read now returns two populations. `activeEffects` stays
+  // ACTIVE-only because its shipped consumer is computeArtifactReuseDeadline
+  // (getRaceProgress.js), which enumerates startsAt/expiresAt boundaries and
+  // would pull an already-elapsed boundary out of an EXPIRED row. The closure
+  // planner consumes `expiredScoringEffects` separately.
+  const allEffects = effects || [];
+  const expiredScoringEffects = allEffects.filter((row) => row.status === "EXPIRED");
+  const activeEffects = allEffects.filter((row) => row.status !== "EXPIRED");
   const payload = {
-    schema: 1,
+    // schema 2: EXPIRED LEECH/HITCHHIKE rows are digested. The bump changes
+    // every digest, which is exactly the intended invalidation — an in-flight
+    // display artifact carrying a schema-1 digest simply mismatches and the
+    // job falls back to FULL. Nothing parses the digest, so nothing crashes.
+    schema: 2,
     race: raceRow.race,
     participants: raceRow.participants,
     inputs: normalizedInputs,
-    effects: effects || [],
+    effects: activeEffects,
+    expiredScoringEffects,
     events: events || [],
     balanceConfigVersion: balanceConfigVersion == null
       ? "code-default"
@@ -124,8 +161,15 @@ async function buildRaceResolutionInputFingerprint({
     digest: digestPayload(payload),
     participantCount: raceRow.participants.length,
     nextSampleBoundary,
-    activeEffects: effects || [],
+    activeEffects,
+    expiredScoringEffects,
     globalEvents: events || [],
+    // Spec rule 3 (TRAIL_MINE full-field projection) requires the persisted
+    // total_steps of every accepted row "taken from the same fingerprint read —
+    // no additional query". These rows were already selected and already
+    // digested; returning them only widens what callers can READ off the
+    // existing result.
+    participants: raceRow.participants,
   };
 }
 
