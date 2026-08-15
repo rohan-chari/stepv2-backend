@@ -345,7 +345,11 @@ function createRacesRouter(dependencies = {}) {
   // Without it, a client appending `?view=participants-v1` to that URL would get
   // a 10-row page AND a null `powerupData`, which its own gate reads as "not an
   // active participant" and answers 403.
-  function loadRaceProgress(req, resolvedContext = null, { forceFullParticipants = false } = {}) {
+  function loadRaceProgress(
+    req,
+    resolvedContext = null,
+    { forceFullParticipants = false, participantsViewOverride = null } = {}
+  ) {
     const view = forceFullParticipants ? null : req.query.view;
     const rawOffset = Number(req.query.offset);
     const rawLimit = Number(req.query.limit);
@@ -372,7 +376,9 @@ function createRacesRouter(dependencies = {}) {
       req.clientFeatures?.has("remote_assets") ?? false,
       resolvedContext,
       {
-        participantsView: isParticipantsView ? "participants-v1" : null,
+        participantsView: isParticipantsView
+          ? participantsViewOverride || "participants-v1"
+          : null,
         participantsOffset: isParticipantsView ? participantsOffset : 0,
         participantsLimit: isParticipantsView ? clampedLimit : 10,
       }
@@ -993,7 +999,13 @@ function createRacesRouter(dependencies = {}) {
       }
       const resolvedContext = {};
       const [progressResult, inventoryResult] = await Promise.allSettled([
-        loadRaceProgress(req, resolvedContext),
+        // A client that asks the race-open packet to page gets the
+        // participants sliced but KEEPS powerupData/globalEvent — this is the
+        // payload the powerup rail and event banner render from. Old clients
+        // send no view and are served the whole roster exactly as before.
+        loadRaceProgress(req, resolvedContext, {
+          participantsViewOverride: "bootstrap-v1",
+        }),
         getPowerupInventory(
           req.user.id,
           req.clientFeatures?.has("powerups4") ?? false

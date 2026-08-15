@@ -1329,7 +1329,25 @@ function buildGetRaceProgress(deps = {}) {
     // race's results screen reads this same payload, and truncating it to ten
     // rows would silently amputate the final standings. `pagination` is still
     // emitted so a paging client can see total == returned and stop asking.
-    if (participantsView === "participants-v1" && result.status !== "ACTIVE") {
+    //
+    // Two paging flavours share the slicing and differ in ONE respect:
+    //
+    //   participants-v1  the standalone board poll. Drops powerupData and
+    //                    globalEvent per §5.2; targeting comes from
+    //                    /powerups/use-context at action time.
+    //   bootstrap-v1     the race-open packet. Slices participants the same
+    //                    way but KEEPS powerupData/globalEvent, because this
+    //                    is the payload that feeds powerup slots, queued-box
+    //                    count and the event banner on first paint and on
+    //                    every poll. Nulling them here would page the list at
+    //                    the cost of blanking the powerup UI — the participant
+    //                    array is the payload weight, powerupData is a handful
+    //                    of fields.
+    const pagingRequested =
+      participantsView === "participants-v1" ||
+      participantsView === "bootstrap-v1";
+    const dropsAuxiliaryPayload = participantsView === "participants-v1";
+    if (pagingRequested && result.status !== "ACTIVE") {
       const totalParticipants = result.participants.length;
       result.pagination = {
         offset: 0,
@@ -1338,9 +1356,11 @@ function buildGetRaceProgress(deps = {}) {
         hasMore: false,
         nextOffset: totalParticipants,
       };
-      result.powerupData = null;
-      result.globalEvent = null;
-    } else if (participantsView === "participants-v1") {
+      if (dropsAuxiliaryPayload) {
+        result.powerupData = null;
+        result.globalEvent = null;
+      }
+    } else if (pagingRequested) {
       const totalParticipants = result.participants.length;
       const safeOffset =
         Number(participantsOffset) > 0 ? Math.floor(participantsOffset) : 0;
@@ -1358,8 +1378,10 @@ function buildGetRaceProgress(deps = {}) {
         hasMore: start + safeLimit < totalParticipants,
         nextOffset: start + safeLimit,
       };
-      result.powerupData = null;
-      result.globalEvent = null;
+      if (dropsAuxiliaryPayload) {
+        result.powerupData = null;
+        result.globalEvent = null;
+      }
     }
 
     return result;

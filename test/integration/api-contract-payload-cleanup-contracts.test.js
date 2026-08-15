@@ -408,6 +408,56 @@ describe("API page-payload cleanup — locked additive contracts", () => {
     assert.deepEqual(second, expected.slice(10, 18));
   });
 
+  it("pages the race-open bootstrap packet while keeping powerupData", async () => {
+    // The bootstrap route 404s unless its capable-client flag is on; the
+    // default in beforeEach is off so the legacy path stays covered.
+    await setCleanupFlags(true);
+    const creator = await createTestUser({ displayName: "Bootstrap Pager" });
+    const { race } = await seedLargeActiveRace({
+      creator,
+      size: 24,
+      powerupsEnabled: true,
+    });
+
+    // No paging query => the whole field, exactly as every shipped build sees.
+    const fullResponse = await get(
+      `/races/${race.id}/bootstrap`,
+      creator.token
+    );
+    assert.equal(fullResponse.status, 200);
+    const full = await json(fullResponse);
+    assert.equal(full.contract, "race-bootstrap-v1");
+    assert.equal(full.progress.participants.length, 24);
+    assert.equal(full.progress.pagination, undefined);
+
+    // Paging query => first page only, but powerupData/globalEvent SURVIVE.
+    // That is the whole difference from participants-v1: this payload is what
+    // renders the powerup rail on first paint, so blanking it would page the
+    // list at the cost of the powerup UI.
+    const pagedResponse = await get(
+      `/races/${race.id}/bootstrap?view=participants-v1&offset=0&limit=10`,
+      creator.token
+    );
+    assert.equal(pagedResponse.status, 200);
+    const paged = await json(pagedResponse);
+    assert.equal(paged.contract, "race-bootstrap-v1");
+    assert.equal(paged.progress.participants.length, 10);
+    assert.equal(paged.progress.pagination.total, 24);
+    assert.equal(paged.progress.pagination.hasMore, true);
+    assert.equal(paged.progress.pagination.nextOffset, 10);
+    assert.notEqual(paged.progress.powerupData, null);
+    assert.equal(paged.progress.powerupData.enabled, true);
+
+    // The paged page is the same leaderboard prefix, not a different ordering.
+    const expected = full.progress.participants
+      .slice(0, 10)
+      .map((p) => p.userId);
+    assert.deepEqual(
+      paged.progress.participants.map((p) => p.userId),
+      expected
+    );
+  });
+
   it("returns full participant context for powerup use actions", async () => {
     const creator = await createTestUser({
       displayName: "Use-Context Creator",
