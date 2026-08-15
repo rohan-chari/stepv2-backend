@@ -87,6 +87,15 @@ const ALLOWED_EVENT_NAMES = new Set([
   "quick_race_auto_started",
   "race_share_referral_attributed",
   "race_share_referral_qualified",
+  // Extra-spin CTA funnel. These are progress signals only: a completed ad
+  // event is client-reported, while the signed SSV callback remains the only
+  // authority that can mint or redeem an extra-daily-spin grant.
+  "extra_spin_offer_shown",
+  "extra_spin_cta_tapped",
+  "extra_spin_ad_ready",
+  "extra_spin_ad_not_ready",
+  "extra_spin_ad_completed",
+  "extra_spin_claim_succeeded",
 ]);
 
 const ALLOWED_CONTEXT = {
@@ -99,7 +108,16 @@ const ALLOWED_CONTEXT = {
     "next_race",
   ]),
   race_state: new Set(["active", "pending"]),
-  result: new Set(["granted", "denied", "dismissed", "unsupported", "failed"]),
+  result: new Set([
+    "granted",
+    "denied",
+    "dismissed",
+    "unsupported",
+    "failed",
+    // Extra-spin CTA funnel: a bounded ad-load failure reason. `dismissed`
+    // and `unsupported` above were already admissible and stay unchanged.
+    "load_failed",
+  ]),
   mode: new Set(["solo", "team", "tournament"]),
   surface: new Set(["home", "results"]),
   preset: new Set(["2_day", "7_day"]),

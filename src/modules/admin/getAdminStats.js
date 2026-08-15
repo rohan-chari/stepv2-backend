@@ -38,6 +38,18 @@ const { AD_COIN_REWARD_DAILY_CAP } = require("../economy/adRewards");
 //     windowDays, timeZone,
 //     days: [{ date, coinRewardWatches, extraSpinWatches }],
 //     capUtilization: { avgWatchesPerUser, usersAtCap } }
+//   sections=extra-spin-funnel -> extraSpinFunnel: {
+//     windowDays, timeZone,
+//     sources: { clientTelemetry: { label, reliability },
+//                serverVerified: { label, reliability } },
+//     byPlatformAndAppVersion: [{
+//       platform, appVersion,
+//       clientTelemetry: {
+//         offerShownUsers, ctaTappedUsers, adReadyUsers, adNotReadyUsers,
+//         adCompletedUsers, claimSucceededUsers },
+//       serverVerified: {
+//         watchGrants, uniqueWatchers, redeemedSpinGrants, uniqueRedeemers }
+//     }] }
 // Unknown section names are ignored rather than rejected, so a newer admin
 // build asking for a section this backend has not shipped yet degrades to a
 // missing key instead of a 400.
@@ -76,7 +88,7 @@ function buildGetAdminStats(dependencies = {}) {
   const n = (v) => Number(v ?? 0);
   const round1 = (v) => (v == null ? null : Math.round(Number(v) * 10) / 10);
 
-  const KNOWN_SECTIONS = new Set(["economy", "ads"]);
+  const KNOWN_SECTIONS = new Set(["economy", "ads", "extra-spin-funnel"]);
   function parseSections(raw) {
     const list = Array.isArray(raw)
       ? raw
@@ -271,6 +283,134 @@ function buildGetAdminStats(dependencies = {}) {
         avgWatchesPerUser: round1(capRow?.avg_watches_per_user),
         usersAtCap: n(capRow?.users_at_cap),
       },
+    };
+  }
+
+  // ── extra-spin CTA funnel section ─────────────────────────────────────────
+  //
+  // Both sources use the trailing 30 ET calendar days, including today. The
+  // two-step conversion is necessary because this schema's `created_at` values
+  // are UTC instants stored in a `timestamp without time zone` column.
+  //
+  // Client telemetry dimensions come from the event itself. SSV rows do not
+  // carry a client platform/version (correctly: that callback is server-owned),
+  // so their platform is derived from the account provider and their version is
+  // the user's latest sticky X-App-Version value. The source labels are part of
+  // the wire contract so an admin cannot mistake best-effort client events for
+  // verified reward records.
+  async function loadExtraSpinFunnel() {
+    const rows = await prisma.$queryRaw`
+      WITH window_start AS (
+        SELECT (
+          (((now() AT TIME ZONE 'America/New_York')::date - 29)::timestamp
+            AT TIME ZONE 'America/New_York') AT TIME ZONE 'UTC'
+        )::timestamp AS created_at
+      ),
+      client AS (
+        SELECT
+          e.platform,
+          e.app_version,
+          COUNT(DISTINCT e.user_id) FILTER (
+            WHERE e.name = 'extra_spin_offer_shown'
+          )::bigint AS offer_shown_users,
+          COUNT(DISTINCT e.user_id) FILTER (
+            WHERE e.name = 'extra_spin_cta_tapped'
+          )::bigint AS cta_tapped_users,
+          COUNT(DISTINCT e.user_id) FILTER (
+            WHERE e.name = 'extra_spin_ad_ready'
+          )::bigint AS ad_ready_users,
+          COUNT(DISTINCT e.user_id) FILTER (
+            WHERE e.name = 'extra_spin_ad_not_ready'
+          )::bigint AS ad_not_ready_users,
+          COUNT(DISTINCT e.user_id) FILTER (
+            WHERE e.name = 'extra_spin_ad_completed'
+          )::bigint AS ad_completed_users,
+          COUNT(DISTINCT e.user_id) FILTER (
+            WHERE e.name = 'extra_spin_claim_succeeded'
+          )::bigint AS claim_succeeded_users
+        FROM activation_events e
+        CROSS JOIN window_start w
+        WHERE e.created_at >= w.created_at
+          AND e.name IN (
+            'extra_spin_offer_shown',
+            'extra_spin_cta_tapped',
+            'extra_spin_ad_ready',
+            'extra_spin_ad_not_ready',
+            'extra_spin_ad_completed',
+            'extra_spin_claim_succeeded'
+          )
+        GROUP BY e.platform, e.app_version
+      ),
+      verified AS (
+        SELECT
+          CASE
+            WHEN u.apple_id IS NOT NULL THEN 'ios'
+            WHEN u.google_sub IS NOT NULL THEN 'android'
+            ELSE 'other'
+          END AS platform,
+          COALESCE(u.last_app_version, 'unknown') AS app_version,
+          COUNT(*)::bigint AS watch_grants,
+          COUNT(DISTINCT g.user_id)::bigint AS unique_watchers,
+          COUNT(*) FILTER (WHERE g.consumed_at IS NOT NULL)::bigint
+            AS redeemed_spin_grants,
+          COUNT(DISTINCT g.user_id) FILTER (WHERE g.consumed_at IS NOT NULL)::bigint
+            AS unique_redeemers
+        FROM ad_reward_grants g
+        JOIN users u ON u.id = g.user_id
+        CROSS JOIN window_start w
+        WHERE g.created_at >= w.created_at
+          AND g.reward_kind = 'extra_daily_spin'
+        GROUP BY 1, 2
+      )
+      SELECT
+        COALESCE(c.platform, v.platform) AS platform,
+        COALESCE(c.app_version, v.app_version) AS app_version,
+        c.offer_shown_users,
+        c.cta_tapped_users,
+        c.ad_ready_users,
+        c.ad_not_ready_users,
+        c.ad_completed_users,
+        c.claim_succeeded_users,
+        v.watch_grants,
+        v.unique_watchers,
+        v.redeemed_spin_grants,
+        v.unique_redeemers
+      FROM client c
+      FULL OUTER JOIN verified v
+        ON v.platform = c.platform AND v.app_version = c.app_version
+      ORDER BY 1, 2`;
+
+    return {
+      windowDays: 30,
+      timeZone: "America/New_York",
+      sources: {
+        clientTelemetry: {
+          label: "Client telemetry",
+          reliability: "best_effort_may_be_lost_offline",
+        },
+        serverVerified: {
+          label: "Server-verified AdMob SSV",
+          reliability: "authoritative",
+        },
+      },
+      byPlatformAndAppVersion: (rows || []).map((row) => ({
+        platform: row.platform,
+        appVersion: row.app_version,
+        clientTelemetry: {
+          offerShownUsers: n(row.offer_shown_users),
+          ctaTappedUsers: n(row.cta_tapped_users),
+          adReadyUsers: n(row.ad_ready_users),
+          adNotReadyUsers: n(row.ad_not_ready_users),
+          adCompletedUsers: n(row.ad_completed_users),
+          claimSucceededUsers: n(row.claim_succeeded_users),
+        },
+        serverVerified: {
+          watchGrants: n(row.watch_grants),
+          uniqueWatchers: n(row.unique_watchers),
+          redeemedSpinGrants: n(row.redeemed_spin_grants),
+          uniqueRedeemers: n(row.unique_redeemers),
+        },
+      })),
     };
   }
 
@@ -737,6 +877,9 @@ function buildGetAdminStats(dependencies = {}) {
     // default query set stays byte-identical in both order and content.
     if (sections.has("economy")) payload.coinEconomy = await loadCoinEconomy();
     if (sections.has("ads")) payload.adRevenue = await loadAdRevenue();
+    if (sections.has("extra-spin-funnel")) {
+      payload.extraSpinFunnel = await loadExtraSpinFunnel();
+    }
 
     return payload;
   };

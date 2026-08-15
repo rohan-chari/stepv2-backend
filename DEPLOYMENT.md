@@ -24,12 +24,28 @@ and at most 10% rollout during a staffed window. Normal rollback is rollout 0
 plus preparation false while claims stay true. Staging must use staging-routed
 units, never production callback/allowlist wiring.
 
-Two pm2 processes running on the same DigitalOcean droplet, each from its own git checkout against its own Postgres database. Both track different branches.
+Two pm2 apps running on the same DigitalOcean droplet, each from its own git checkout against its own Postgres database. Both track different branches. **Always address pm2 processes by name, never by id — ids get reassigned across restarts/scaling (see incidents in DEPLOY_RUNBOOK.md).**
 
 | Env     | Checkout path                            | pm2 name                | Port | Database               | Branch       | APNS host  |
 | ------- | ---------------------------------------- | ----------------------- | ---- | ---------------------- | ------------ | ---------- |
-| prod    | `/var/www/step-tracker-backend`          | `steps-tracker` (id `3`) | 3002 | `step-tracker`         | `main`       | production |
-| staging | `/var/www/step-tracker-backend-staging`  | `steps-tracker-staging` (id `4`) | 3003 | `step-tracker-staging` | release branch (`1.1.5`, `1.1.6`, …) | sandbox |
+| prod    | `/var/www/step-tracker-backend`          | `steps-tracker` | 3002 | `step-tracker`         | `main`       | production |
+| staging | `/var/www/step-tracker-backend-staging`  | `steps-tracker-staging` | 3003 | `step-tracker-staging` | release branch (`1.1.5`, `1.1.6`, …) | sandbox |
+
+**Both run 2 pm2 cluster instances as of 2026-08-15** (commit `d23ec2e`,
+matching the droplet's 2 vCPUs). This is safe *only* because
+`src/index.js`'s `startCrons()` call is gated behind
+`process.env.NODE_APP_INSTANCE === "0"` — pm2 sets that env var per cluster
+worker, and without the guard, scaling past 1 instance would double-run
+every cron (race resolution, live placement push, payout reconcile, ~17
+schedulers total). **If you ever see cron-driven side effects happening
+twice, check this guard is still intact before anything else.** Full
+writeup: `docs/pm2-cluster-scaling-plan.md`. Also fixed the same day: both
+vhosts' nginx config had `proxy_set_header Connection 'upgrade';` hardcoded
+unconditionally, which broke upstream connection keepalive and was the
+actual dominant capacity bottleneck under load (worse than instance count) —
+see the frontend repo's `nginx-connection-upgrade-misconfig` memory for the
+full incident writeup; the live fix is in `/etc/nginx/conf.d/websocket-upgrade-map.conf`
+and both `/etc/nginx/sites-enabled/*` vhost files on the droplet.
 
 nginx + Let's Encrypt front both:
 - prod:    `https://steptracker-api.org`         → `localhost:3002`
@@ -77,8 +93,12 @@ git pull origin 1.1.5
 npm install
 npx prisma migrate deploy
 npx prisma generate
-pm2 restart steps-tracker-staging
+pm2 reload steps-tracker-staging
 ```
+
+`pm2 reload` (not `restart`) — zero-downtime, restarts cluster instances one
+at a time instead of killing them all at once. `restart` caused a ~10s outage
+with user-visible 502s the one time it was used on prod (2026-07-12).
 
 Confirm it came up:
 
@@ -127,8 +147,12 @@ npx prisma migrate deploy
 npx prisma generate
 npm run powerups:copy:sync -- --apply   # user-facing powerup copy; NOT the seed
 npm run balance:drift      # reports (never blocks) balance config drift vs git
-pm2 restart 3
+pm2 reload steps-tracker
 ```
+
+`pm2 reload` (not `restart` — see the staging deploy note above), addressed
+by **name**, not id. Prod runs 2 cluster instances; reload cycles them one at
+a time with zero downtime.
 
 `prisma/seed.js` is **not** part of a deploy any more. It is the bootstrap for a
 *fresh* database (local dev, the integration DB, a rebuilt staging), and running
@@ -194,7 +218,7 @@ cd /var/www/step-tracker-backend
 git checkout pre-1.1.5
 npm install                        # in case dependencies changed
 npx prisma generate                # in case Prisma client needs regen
-pm2 restart 3
+pm2 reload steps-tracker
 ```
 
 **Do NOT run `prisma migrate deploy` during rollback.** Migrations are forward-only. If a migration was applied as part of 1.1.5, the schema stays migrated. The reverted code must be compatible with the new schema, OR you need to write a new "down" migration (rare; usually means redesigning the change).
