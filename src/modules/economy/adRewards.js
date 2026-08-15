@@ -68,6 +68,24 @@ function racePayoutDoubleAdUnitIds() {
   return [...new Set(values)];
 }
 
+// AdMob's SSV callback's `ad_unit` query param is the bare numeric unit ID
+// (e.g. "6376353967"), never the "ca-app-pub-<publisher>/<unit>" form stored
+// in the env allowlist above — confirmed against real callbacks in the nginx
+// access log. Comparing the raw callback value against the full-string
+// allowlist never matches, so every claim silently dead-ends as
+// "unit_rejected". Derive the bare suffixes at call time, like the allowlist
+// above, for that comparison.
+function racePayoutDoubleAdUnitSuffixes() {
+  return racePayoutDoubleAdUnitIds().map((value) => value.split("/")[1]);
+}
+
+// Callback/stored values may be the bare suffix (the normal case) or, if a
+// mediation adapter or an older stored grant ever used the full string, that
+// form too — accept either rather than failing the whole match on shape.
+function normalizeAdUnit(value) {
+  return typeof value === "string" ? value.split("/").pop() : null;
+}
+
 function racePayoutDoubleMaxBonusCoins() {
   const parsed = Number(process.env.RACE_PAYOUT_DOUBLE_MAX_BONUS_COINS);
   return Number.isInteger(parsed) && parsed >= 1 && parsed <= 500 ? parsed : 500;
@@ -176,5 +194,7 @@ module.exports = {
   adsRacePayoutDoublePrepareEnabled,
   adsRacePayoutDoubleClaimEnabled,
   racePayoutDoubleAdUnitIds,
+  racePayoutDoubleAdUnitSuffixes,
+  normalizeAdUnit,
   racePayoutDoubleMaxBonusCoins,
 };

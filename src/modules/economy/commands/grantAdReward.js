@@ -6,7 +6,8 @@ const {
   SHOP_UNLOCK_REWARD_KIND,
   BOX_REROLL_REWARD_KIND,
   RACE_PAYOUT_DOUBLE_REWARD_KIND,
-  racePayoutDoubleAdUnitIds,
+  racePayoutDoubleAdUnitSuffixes,
+  normalizeAdUnit,
 } = require("../adRewards");
 const {
   safeStructuredEvent,
@@ -45,7 +46,8 @@ const RACE_PAYOUT_DOUBLE_CUSTOM_DATA_RE =
 function buildGrantAdReward(dependencies = {}) {
   const db = dependencies.prisma || prisma;
   const logger = dependencies.logger || console;
-  const unitIds = dependencies.racePayoutDoubleAdUnitIds || racePayoutDoubleAdUnitIds;
+  const unitSuffixes =
+    dependencies.racePayoutDoubleAdUnitSuffixes || racePayoutDoubleAdUnitSuffixes;
 
   return async function grantAdReward({
     userId,
@@ -84,7 +86,7 @@ function buildGrantAdReward(dependencies = {}) {
       reservedRaceDouble &&
       (!raceDoubleMatch ||
         raceDoubleMatch[1] !== userId ||
-        !unitIds().includes(adUnit))
+        !unitSuffixes().includes(normalizeAdUnit(adUnit)))
     ) {
       safeStructuredEvent(logger, {
         event: "race_payout_double_ssv_metric",

@@ -131,7 +131,7 @@ test("grantAdReward: exact race payout double namespace binds context and dedica
   const db = mockDb();
   const grantAdReward = buildGrantAdReward({
     prisma: db,
-    racePayoutDoubleAdUnitIds: () => ["race-unit"],
+    racePayoutDoubleAdUnitSuffixes: () => ["race-unit"],
     logger: { info() {} },
   });
   const offerId = "d05cb2a4-16b7-463f-977d-58231987a0ac";
@@ -148,6 +148,24 @@ test("grantAdReward: exact race payout double namespace binds context and dedica
   assert.equal(db.created[0].shopItemId, null);
 });
 
+test("grantAdReward: race payout double also accepts the full ca-app-pub/<unit> shape, not just the bare suffix", async () => {
+  const db = mockDb();
+  const grantAdReward = buildGrantAdReward({
+    prisma: db,
+    racePayoutDoubleAdUnitSuffixes: () => ["race-unit"],
+    logger: { info() {} },
+  });
+  const offerId = "d05cb2a4-16b7-463f-977d-58231987a0ac";
+  const result = await grantAdReward({
+    userId: "user-1",
+    transactionId: "txn-race-2",
+    adUnit: "ca-app-pub-0000000000000000/race-unit",
+    customData: `race_payout_double:user-1:${offerId}`,
+    serverDate: "2026-08-12",
+  });
+  assert.deepEqual(result, { granted: true });
+});
+
 for (const [label, customData, unit] of [
   ["malformed UUID", "race_payout_double:user-1:not-a-uuid", "race-unit"],
   ["mismatched user", "race_payout_double:user-2:d05cb2a4-16b7-463f-977d-58231987a0ac", "race-unit"],
@@ -157,7 +175,7 @@ for (const [label, customData, unit] of [
     const db = mockDb();
     const grantAdReward = buildGrantAdReward({
       prisma: db,
-      racePayoutDoubleAdUnitIds: () => ["race-unit"],
+      racePayoutDoubleAdUnitSuffixes: () => ["race-unit"],
       logger: { info() { throw new Error("logger down"); } },
     });
     const result = await grantAdReward({
@@ -186,14 +204,14 @@ test("grantAdReward: rejected-Promise observability never changes valid, rejecte
 
   const valid = buildGrantAdReward({
     prisma: mockDb(),
-    racePayoutDoubleAdUnitIds: () => ["race-unit"],
+    racePayoutDoubleAdUnitSuffixes: () => ["race-unit"],
     logger,
   });
   assert.deepEqual(await valid({ ...args, transactionId: "valid" }), { granted: true });
 
   const rejected = buildGrantAdReward({
     prisma: mockDb(),
-    racePayoutDoubleAdUnitIds: () => ["race-unit"],
+    racePayoutDoubleAdUnitSuffixes: () => ["race-unit"],
     logger,
   });
   assert.deepEqual(
@@ -203,7 +221,7 @@ test("grantAdReward: rejected-Promise observability never changes valid, rejecte
 
   const duplicate = buildGrantAdReward({
     prisma: mockDb({ createError: Object.assign(new Error("unique"), { code: "P2002" }) }),
-    racePayoutDoubleAdUnitIds: () => ["race-unit"],
+    racePayoutDoubleAdUnitSuffixes: () => ["race-unit"],
     logger,
   });
   assert.deepEqual(await duplicate({ ...args, transactionId: "duplicate" }), {

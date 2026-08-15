@@ -16,6 +16,11 @@ const {
 
 const CAPABLE = { "X-Client-Features": "race_payout_double" };
 const ALLOWED_UNIT = "ca-app-pub-3940256099942544/5224354917";
+// AdMob's real SSV callback sends `ad_unit` as the bare unit ID (no publisher
+// prefix) — this is what actually lands in the ad_unit query param and gets
+// stored on ad_reward_grants.adUnit, so every simulated grant/callback below
+// must use this, not ALLOWED_UNIT, or the test stops reflecting production.
+const ALLOWED_UNIT_SUFFIX = "5224354917";
 
 let server;
 
@@ -78,7 +83,7 @@ async function verifyAndClaim({ userId, token, offerId }) {
     data: {
       userId,
       transactionId: crypto.randomUUID(),
-      adUnit: ALLOWED_UNIT,
+      adUnit: ALLOWED_UNIT_SUFFIX,
       rewardKind: "race_payout_double",
       grantedDate: "2026-08-12",
       contextId: offerId,
@@ -252,6 +257,30 @@ describe("race payout double rewarded ad", () => {
     assert.equal(await prisma.coinTransaction.count({ where: { reason: "race_payout_ad_double" } }), 0);
   });
 
+  it("rejects an SSV callback for a foreign ad unit and mints no grant", async () => {
+    const { user, token } = await createTestUser({ coins: 10 });
+    const a = await completedRace(user.id, { payoutCoins: 40, reason: "race_prize_pool_payout" });
+    const offer = await prepare(token, [a.race.id]);
+    const offerId = offer.body.offerId;
+    const ssvServer = await startServer({ verifySsv: async () => true });
+    try {
+      const qs = new URLSearchParams({
+        transaction_id: crypto.randomUUID(),
+        user_id: user.id,
+        ad_unit: "9999999999",
+        custom_data: `race_payout_double:${user.id}:${offerId}`,
+      });
+      const ssv = await fetch(`${ssvServer.baseUrl}/ads/ssv?${qs}`);
+      assert.equal(ssv.status, 200);
+    } finally {
+      await ssvServer.close();
+    }
+    const grant = await prisma.adRewardGrant.findFirst({
+      where: { userId: user.id, rewardKind: "race_payout_double", contextId: offerId },
+    });
+    assert.equal(grant, null);
+  });
+
   it("accepts only allowlisted exact SSV namespace and claims once with idempotent replay", async () => {
     const { user, token } = await createTestUser({ coins: 10 });
     const a = await completedRace(user.id, { payoutCoins: 40, reason: "race_prize_pool_payout" });
@@ -262,7 +291,7 @@ describe("race payout double rewarded ad", () => {
       const qs = new URLSearchParams({
         transaction_id: crypto.randomUUID(),
         user_id: user.id,
-        ad_unit: ALLOWED_UNIT,
+        ad_unit: ALLOWED_UNIT_SUFFIX,
         custom_data: `race_payout_double:${user.id}:${offerId}`,
       });
       const ssv = await fetch(`${ssvServer.baseUrl}/ads/ssv?${qs}`);
@@ -317,7 +346,7 @@ describe("race payout double rewarded ad", () => {
       data: {
         userId: user.id,
         transactionId: crypto.randomUUID(),
-        adUnit: ALLOWED_UNIT,
+        adUnit: ALLOWED_UNIT_SUFFIX,
         rewardKind: "race_payout_double",
         grantedDate: "2026-08-12",
         contextId: offer.body.offerId,
@@ -356,7 +385,7 @@ describe("race payout double rewarded ad", () => {
       data: {
         userId: user.id,
         transactionId: crypto.randomUUID(),
-        adUnit: ALLOWED_UNIT,
+        adUnit: ALLOWED_UNIT_SUFFIX,
         rewardKind: "race_payout_double",
         grantedDate: "2026-08-12",
         contextId: offer.body.offerId,
@@ -510,7 +539,7 @@ describe("race payout double rewarded ad", () => {
       data: {
         userId: user.id,
         transactionId: crypto.randomUUID(),
-        adUnit: ALLOWED_UNIT,
+        adUnit: ALLOWED_UNIT_SUFFIX,
         rewardKind: "race_payout_double",
         grantedDate: "2026-08-12",
         contextId: offer.body.offerId,
@@ -682,7 +711,7 @@ describe("race payout double rewarded ad", () => {
       data: {
         userId: user.id,
         transactionId: crypto.randomUUID(),
-        adUnit: ALLOWED_UNIT,
+        adUnit: ALLOWED_UNIT_SUFFIX,
         rewardKind: "race_payout_double",
         grantedDate: "2026-08-12",
         contextId: offer.body.offerId,

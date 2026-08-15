@@ -142,7 +142,12 @@ function buildClaimRacePayoutDouble(dependencies = {}) {
           },
           orderBy: { createdAt: "asc" },
         });
-        if (!grant || !config.racePayoutDoubleAdUnitIds().includes(grant.adUnit)) {
+        if (
+          !grant ||
+          !config
+            .racePayoutDoubleAdUnitSuffixes()
+            .includes(adRewards.normalizeAdUnit(grant.adUnit))
+        ) {
           throw new ConflictError("Ad reward has not been verified", "AD_NOT_VERIFIED");
         }
         await tx.$queryRaw`SELECT id FROM ad_reward_grants WHERE id = ${grant.id} FOR UPDATE`;

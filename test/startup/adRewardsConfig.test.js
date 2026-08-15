@@ -88,6 +88,20 @@ test("race payout double parses canonical dedicated-unit IDs with surrounding wh
   );
 });
 
+test("race payout double suffixes strip the publisher prefix to match AdMob's bare-unit SSV ad_unit param", () => {
+  const config = loadConfig({});
+  assert.deepEqual(
+    withRuntimeEnv(
+      {
+        ADMOB_RACE_PAYOUT_DOUBLE_AD_UNIT_IDS:
+          "ca-app-pub-3940256099942544/5224354917,ca-app-pub-3940256099942544/1712485313",
+      },
+      () => config.racePayoutDoubleAdUnitSuffixes(),
+    ),
+    ["5224354917", "1712485313"],
+  );
+});
+
 for (const raw of [undefined, "", "   ", "\t\n"]) {
   test(`race payout double allowlist stays off for ${JSON.stringify(raw)}`, () => {
     const config = loadConfig({});
