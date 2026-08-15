@@ -9,6 +9,9 @@ const { expireEffects } = require("../../powerups/commands/expireEffects");
 const { characterPresentation } = require("../../cosmetics");
 const { placementsByUserId } = require("../placementOrder");
 const {
+  clampOffsetLimit,
+} = require("../../../shared/pagination/clampOffsetLimit");
+const {
   buildSyncRacePowerupState,
   syncRacePowerupState: defaultSyncRacePowerupState,
 } = require("../services/racePowerupStateSync");
@@ -1356,21 +1359,22 @@ function buildGetRaceProgress(deps = {}) {
       };
     } else if (pagingRequested) {
       const totalParticipants = result.participants.length;
-      const safeOffset =
-        Number(participantsOffset) > 0 ? Math.floor(participantsOffset) : 0;
-      const parsedLimit = Number(participantsLimit);
-      const safeLimit = Math.min(
-        Math.max(Number.isFinite(parsedLimit) ? Math.floor(parsedLimit) : 10, 1),
-        50
-      );
-      const start = Math.min(safeOffset, totalParticipants);
+      // Shared with the race-details pager (src/shared/pagination) so the two
+      // participant arrays on the bootstrap response page by identical rules.
+      // The helper owns the offset/limit ARITHMETIC only — the pageable-shape
+      // decision above stays here, where its domain reasons are written down.
+      const { start, safeLimit, hasMore, nextOffset } = clampOffsetLimit({
+        offset: participantsOffset,
+        limit: participantsLimit,
+        total: totalParticipants,
+      });
       result.participants = result.participants.slice(start, start + safeLimit);
       result.pagination = {
         offset: start,
         limit: safeLimit,
         total: totalParticipants,
-        hasMore: start + safeLimit < totalParticipants,
-        nextOffset: start + safeLimit,
+        hasMore,
+        nextOffset,
       };
     }
 

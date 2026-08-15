@@ -339,15 +339,18 @@ function createRacesRouter(dependencies = {}) {
   const hasLiveUserCreatedRaceFn =
     dependencies.hasLiveUserCreatedRace || hasLiveUserCreatedRace;
 
+  // The `view=participants-v1&offset&limit` trio, parsed once. Shared by the
+  // progress pager and the race-details pager so a single request can never see
+  // the two arrays disagree about which page it asked for.
+  //
   // `forceFullParticipants` is for callers that need the WHOLE roster regardless
   // of what the client put in the query string — currently /powerups/use-context,
   // whose entire purpose is action-time targeting against every participant.
   // Without it, a client appending `?view=participants-v1` to that URL would get
   // a 10-row page AND a null `powerupData`, which its own gate reads as "not an
   // active participant" and answers 403.
-  function loadRaceProgress(
+  function readParticipantsPagingQuery(
     req,
-    resolvedContext = null,
     { forceFullParticipants = false } = {}
   ) {
     const view = forceFullParticipants ? null : req.query.view;
@@ -358,9 +361,42 @@ function createRacesRouter(dependencies = {}) {
     const participantsLimit =
       Number.isFinite(rawLimit) && rawLimit > 0 ? Math.floor(rawLimit) : 10;
     const isParticipantsView = view === "participants-v1";
-    const clampedLimit = isParticipantsView
-      ? Math.min(Math.max(participantsLimit, 1), 50)
-      : participantsLimit;
+    return {
+      isParticipantsView,
+      participantsOffset: isParticipantsView ? participantsOffset : 0,
+      participantsLimit: isParticipantsView
+        ? Math.min(Math.max(participantsLimit, 1), 50)
+        : 10,
+    };
+  }
+
+  // Pagination inputs for getRaceDetails. Slicing `race.participants` requires
+  // BOTH the `race_participants_paging` capability token and the query param:
+  // the build shipped today already sends the query param (meaning it for
+  // `progress`) while still scanning the whole details array for membership and
+  // counts, so gating on the param alone would break it the moment this
+  // deploys. Only a build that has migrated every one of those consumers
+  // advertises the token.
+  function raceDetailsPagingOptions(req) {
+    const { isParticipantsView, participantsOffset, participantsLimit } =
+      readParticipantsPagingQuery(req);
+    return {
+      pagination: {
+        capable: req.clientFeatures?.has("race_participants_paging") ?? false,
+        view: isParticipantsView ? "participants-v1" : null,
+        offset: participantsOffset,
+        limit: participantsLimit,
+      },
+    };
+  }
+
+  function loadRaceProgress(
+    req,
+    resolvedContext = null,
+    { forceFullParticipants = false } = {}
+  ) {
+    const { isParticipantsView, participantsOffset, participantsLimit } =
+      readParticipantsPagingQuery(req, { forceFullParticipants });
 
     return getRaceProgress(
       req.user.id,
@@ -377,8 +413,8 @@ function createRacesRouter(dependencies = {}) {
       resolvedContext,
       {
         participantsView: isParticipantsView ? "participants-v1" : null,
-        participantsOffset: isParticipantsView ? participantsOffset : 0,
-        participantsLimit: isParticipantsView ? clampedLimit : 10,
+        participantsOffset,
+        participantsLimit,
       }
     );
   }
@@ -985,8 +1021,9 @@ function createRacesRouter(dependencies = {}) {
         req.clientFeatures?.has("team_races") ?? false,
         supportsSeededRaceBuckets(req.clientFeatures),
       ];
+      const detailPaging = raceDetailsPagingOptions(req);
       if (access.status !== "ACTIVE") {
-        const race = await getRaceDetails(...detailArgs);
+        const race = await getRaceDetails(...detailArgs, null, detailPaging);
         return res.json({
           contract: "race-bootstrap-v1",
           race,
@@ -1015,9 +1052,17 @@ function createRacesRouter(dependencies = {}) {
           error: inventoryResult.reason?.message || "unknown",
         });
       }
+      // The progress query's race object is reused as a preload on this branch,
+      // paged or not, to save a whole fat read. It is the SAME `Race.findById`
+      // the unpaged detail path runs (getRaceProgress.js), already hydrated for
+      // the full field — so on this branch the fat read is sunk cost either way,
+      // and running the lean paged plan on top of it would only ADD queries.
+      // getRaceDetails slices the page out of the preload in JS when it gets
+      // one; the other two paged call sites pass null and keep the lean plan.
       const race = await getRaceDetails(
         ...detailArgs,
-        resolvedContext.race || null
+        resolvedContext.race || null,
+        detailPaging
       );
       res.json({
         contract: "race-bootstrap-v1",
@@ -1096,7 +1141,9 @@ function createRacesRouter(dependencies = {}) {
         req.clientFeatures?.has("remote_assets") ?? false,
         req.clientFeatures?.has("race_leave") ?? false,
         req.clientFeatures?.has("team_races") ?? false,
-        supportsSeededRaceBuckets(req.clientFeatures)
+        supportsSeededRaceBuckets(req.clientFeatures),
+        null,
+        raceDetailsPagingOptions(req)
       );
       res.json(result);
     } catch (error) {
