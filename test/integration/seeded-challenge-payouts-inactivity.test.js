@@ -832,6 +832,49 @@ describe("seeded challenge payouts + inactivity pruning", () => {
     assert.equal(row.autoJoinFeaturedRaces, true);
   });
 
+  it("13b: signup auto-enroll never lands in a private bucket cohort (prod 2026-08-15 regression)", async () => {
+    const legacyActive = await prisma.race.create({
+      data: {
+        seedId: dailySeed.id,
+        name: "Daily field",
+        targetSteps: 0,
+        status: "ACTIVE",
+        isPublic: true,
+        timeBased: true,
+        maxParticipants: 100,
+        maxDurationDays: 1,
+        startedAt: new Date(Date.now() - 60 * 60 * 1000),
+        endsAt: new Date(Date.now() + 23 * 60 * 60 * 1000),
+      },
+    });
+    // A finalized private bucket: isPublic false, seededBucketId set, matched
+    // by the election flow. A brand-new signup was never a candidate in that
+    // match, so it must never be auto-joined into it.
+    const bucketActive = await prisma.race.create({
+      data: {
+        seedId: dailySeed.id,
+        name: "Daily cohort",
+        targetSteps: 0,
+        status: "ACTIVE",
+        isPublic: false,
+        seededBucketId: require("node:crypto").randomUUID(),
+        timeBased: true,
+        maxParticipants: 15,
+        maxDurationDays: 1,
+        startedAt: new Date(Date.now() - 60 * 60 * 1000),
+        endsAt: new Date(Date.now() + 23 * 60 * 60 * 1000),
+      },
+    });
+
+    const fresh = await makeUser({ createdAt: new Date() });
+    await autoEnrollNewUser({
+      user: await prisma.user.findUnique({ where: { id: fresh.userId } }),
+    });
+
+    assert.deepEqual(await participantUserIds(legacyActive.id), [fresh.userId]);
+    assert.deepEqual(await participantUserIds(bucketActive.id), []);
+  });
+
   it("14: a user whose only activity is a future-dated daily row is never pruned", async () => {
     await appSettings.setFlag(PRUNE_FLAG, true);
     // tz-ahead client keying its total to local date D+1.

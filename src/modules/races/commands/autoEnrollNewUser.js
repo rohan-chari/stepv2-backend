@@ -105,8 +105,18 @@ function buildAutoEnrollNewUser(dependencies = {}) {
         data: { autoJoinFeaturedRaces: true },
       });
 
+      // seededBucketId: null excludes private bucket cohorts. A bucket is
+      // skill/friendship-matched by the election+finalise flow; a brand-new
+      // signup dropped straight in bypasses that matching and the cohort's
+      // privacy boundary entirely (confirmed in prod 2026-08-15: two signups
+      // landed in a 3-person private cohort seconds after account creation).
+      // Legacy/global seeded races have no such invariant to protect.
       const races = await db.race.findMany({
-        where: { seedId: { not: null }, status: { in: ["ACTIVE", "PENDING"] } },
+        where: {
+          seedId: { not: null },
+          seededBucketId: null,
+          status: { in: ["ACTIVE", "PENDING"] },
+        },
         orderBy: { startedAt: "desc" },
       });
 

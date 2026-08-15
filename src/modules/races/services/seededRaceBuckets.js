@@ -529,4 +529,4 @@ function buildSeededRaceBuckets(dependencies = {}) {
   return { elect, electAutomatic, finalise, featuredCards, reconcileFeatured, reconcileFeaturedUser, selectedBucketSeedKinds, bucketModeWindowKeys };
 }
 
-module.exports = { buildSeededRaceBuckets, SeededBucketError, windowFor, upcomingWindowFor, supportsBuckets, claimLegacyStream, planBuckets, BUCKET_CAPACITY, BUCKET_FEATURE, withSeededWindowLock, readWindowMode, stampWindowMode };
+module.exports = { buildSeededRaceBuckets, SeededBucketError, windowFor, upcomingWindowFor, supportsBuckets, claimLegacyStream, planBuckets, matchStepsForCandidates, BUCKET_CAPACITY, BUCKET_FEATURE, withSeededWindowLock, readWindowMode, stampWindowMode };

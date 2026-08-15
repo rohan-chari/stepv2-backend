@@ -2,7 +2,7 @@ const { prisma: defaultPrisma } = require("../../../db");
 const { eventBus } = require("../../../shared/events/eventBus");
 const { appSettings } = require("../../../shared/config/appSettings");
 const { buildAutoJoinFeaturedRaces } = require("../commands/autoJoinFeaturedRaces");
-const { buildSeededRaceBuckets, stampWindowMode } = require("../services/seededRaceBuckets");
+const { buildSeededRaceBuckets, stampWindowMode, readWindowMode } = require("../services/seededRaceBuckets");
 const { normalizePowerupConfig } = require("../services/validateRaceConfig");
 const {
   startOfDayNewYork,
@@ -510,36 +510,61 @@ function buildRenewSeededRaces(dependencies = {}) {
     }
 
     // 3) Ensure exactly one upcoming PENDING race exists for the next window.
-    const upcoming = await prisma.race.findFirst({
+    let upcoming = await prisma.race.findFirst({
       where: { seedId: seed.id, status: "PENDING", seededBucketId: null },
       orderBy: { scheduledStartAt: "desc" },
     });
     if (!upcoming) {
       const next = windowFor(seed, current.endsAt);
-      const race = await createSeededRace(seed, {
+      upcoming = await createSeededRace(seed, {
         status: "PENDING",
         startedAt: null,
         scheduledStartAt: next.startedAt,
         endsAt: next.endsAt,
       });
-      if (["DAILY_10K", "WEEKLY_50K"].includes(seed.kind)) {
+      results.push({ action: "created-upcoming", seedKind: seed.kind, race: upcoming });
+    }
+    // Retried on EVERY tick, not just the one that created the race.
+    // enrollAutoJoinUsers is documented idempotent (skipDuplicates /
+    // claimLegacyStream dedupe), so this is safe to call in steady state —
+    // it's a no-op once everyone eligible is already in. Previously this only
+    // ran once, tied to race creation: a single failed tick (e.g. the
+    // connection-pool-exhaustion incident on 2026-08-14) silently and
+    // permanently dropped the bulk of that day's auto-join population, who
+    // only trickled back in by manually opening the app.
+    await autoEnroll(seed, upcoming);
+
+    // 3b) Mode-stamp + automatic bucket election, retried on EVERY tick (not
+    // just the one that created the race). A single failed tick used to
+    // permanently strand every auto-join user who was eligible at that
+    // instant — electAutomatic() only ever ran once per window, with no
+    // retry, so a transient DB hiccup (e.g. connection-pool exhaustion) on
+    // that one tick silently dropped the whole day's cohort. Both calls are
+    // idempotent (stampWindowMode is a write-once upsert; electAutomatic
+    // re-checks mode/finalized/already-taken and skips users already swept),
+    // so re-running them every minute until the window closes just backfills
+    // whoever a prior tick missed.
+    if (["DAILY_10K", "WEEKLY_50K"].includes(seed.kind)) {
+      const next = windowFor(seed, current.endsAt);
+      if (nowMs < next.startedAt.getTime()) {
         const mode = (await settings.getFlag("seededRaceBucketsEnabled")) === true
           ? "BUCKET"
           : "LEGACY";
-        // The race and durable mode are created in the same renewal turn; the
-        // upsert is write-once, so a flag flip can never retarget this window.
+        // Write-once: a flag flip after the window's mode is first decided
+        // can never retarget it.
         await stampWindowMode({
           prisma, seedId: seed.id, windowStart: next.startedAt,
           windowEnd: next.endsAt, mode,
         });
-        if (mode === "BUCKET") {
+        const decidedMode = await readWindowMode({
+          prisma, seedId: seed.id, windowStart: next.startedAt,
+        });
+        if (decidedMode === "BUCKET") {
           await seededBuckets.electAutomatic({
             seed, windowStart: next.startedAt, windowEnd: next.endsAt,
           });
         }
       }
-      await autoEnroll(seed, race);
-      results.push({ action: "created-upcoming", seedKind: seed.kind, race });
     }
 
     // 4) Weekly only (D4): sweep the ACTIVE race's ghosts once per ET day. The
