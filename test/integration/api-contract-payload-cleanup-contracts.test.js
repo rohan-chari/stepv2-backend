@@ -381,8 +381,12 @@ describe("API page-payload cleanup — locked additive contracts", () => {
     assert.equal(firstProgress.pagination?.hasMore, true);
     assert.equal(firstProgress.pagination?.nextOffset, 10);
     assert.equal(firstProgress.pagination?.total, 24);
-    assert.equal(firstProgress.powerupData, null);
-    assert.equal(firstProgress.globalEvent, null);
+    // Paging slices participants ONLY. §5.2 originally specified nulling these
+    // two, but the client re-reads both from every 30s poll to draw the powerup
+    // rail, the queued-box count and the event banner — honouring it blanked
+    // that UI ~30s after opening any large race. The participant array is the
+    // payload weight; these are a handful of fields.
+    assert.notEqual(firstProgress.powerupData, null);
 
     const secondPageResponse = await get(
       `/races/${race.id}/progress?view=participants-v1&offset=10&limit=8`,

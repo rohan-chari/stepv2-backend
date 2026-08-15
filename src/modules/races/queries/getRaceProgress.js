@@ -1330,24 +1330,22 @@ function buildGetRaceProgress(deps = {}) {
     // rows would silently amputate the final standings. `pagination` is still
     // emitted so a paging client can see total == returned and stop asking.
     //
-    // Two paging flavours share the slicing and differ in ONE respect:
+    // DELIBERATE DEVIATION from §5.2, which specified nulling powerupData and
+    // globalEvent on a paged response "to keep payload lean". The client polls
+    // this every 30s and re-reads both into the powerup rail, the queued-box
+    // count and the event banner, so honouring that would blank the powerup UI
+    // ~30 seconds after opening any large race and again on every "show more".
+    // The participant array IS the payload weight; powerupData is a handful of
+    // fields. Paging therefore slices participants and leaves everything else
+    // exactly as an unpaged response has it.
     //
-    //   participants-v1  the standalone board poll. Drops powerupData and
-    //                    globalEvent per §5.2; targeting comes from
-    //                    /powerups/use-context at action time.
-    //   bootstrap-v1     the race-open packet. Slices participants the same
-    //                    way but KEEPS powerupData/globalEvent, because this
-    //                    is the payload that feeds powerup slots, queued-box
-    //                    count and the event banner on first paint and on
-    //                    every poll. Nulling them here would page the list at
-    //                    the cost of blanking the powerup UI — the participant
-    //                    array is the payload weight, powerupData is a handful
-    //                    of fields.
-    const pagingRequested =
-      participantsView === "participants-v1" ||
-      participantsView === "bootstrap-v1";
-    const dropsAuxiliaryPayload = participantsView === "participants-v1";
-    if (pagingRequested && result.status !== "ACTIVE") {
+    // Team races and non-ACTIVE races are never sliced: their rosters render
+    // through paths with no load-more control (team columns, pending roster,
+    // final standings), so a page would silently hide members with no way to
+    // reveal them.
+    const pagingRequested = participantsView === "participants-v1";
+    const pageableShape = result.status === "ACTIVE" && !result.isTeamRace;
+    if (pagingRequested && !pageableShape) {
       const totalParticipants = result.participants.length;
       result.pagination = {
         offset: 0,
@@ -1356,10 +1354,6 @@ function buildGetRaceProgress(deps = {}) {
         hasMore: false,
         nextOffset: totalParticipants,
       };
-      if (dropsAuxiliaryPayload) {
-        result.powerupData = null;
-        result.globalEvent = null;
-      }
     } else if (pagingRequested) {
       const totalParticipants = result.participants.length;
       const safeOffset =
@@ -1378,10 +1372,6 @@ function buildGetRaceProgress(deps = {}) {
         hasMore: start + safeLimit < totalParticipants,
         nextOffset: start + safeLimit,
       };
-      if (dropsAuxiliaryPayload) {
-        result.powerupData = null;
-        result.globalEvent = null;
-      }
     }
 
     return result;
