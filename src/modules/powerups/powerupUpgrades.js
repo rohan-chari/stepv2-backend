@@ -27,21 +27,24 @@ function rarityForType(type) {
 // Duration in ms for timed effects, indexed by level.
 //
 // Duration standardization (2026-07-25, owner-approved §3.4): every windowed,
-// upgradeable powerup runs 1h base and +1h per upgrade level → 1/2/3/4h. Only
-// NEW uses get the new window (durations are stamped into the effect row at use
-// time), so running effects are untouched — forward-only. The strong-short
-// exceptions (GHOST_PEPPER 30m, CAMPFIRE_REST) and the long passives
-// (COMPRESSION_SOCKS shield) keep their historical durations.
+// upgradeable powerup runs 1h base. Only NEW uses get a duration change
+// (durations are stamped into the effect row at use time), so running effects
+// are untouched — forward-only. The strong-short exceptions (GHOST_PEPPER 30m,
+// CAMPFIRE_REST) and the long passives (COMPRESSION_SOCKS shield) keep their
+// historical durations.
 //
-// EXCEPTION — the two hard CCs (batch 2026-08-09 item 1, owner decision). A
-// 4-hour Leg Cramp / Wrong Turn is oppressive: it takes a player out of the
-// race for a whole evening. Each upgrade level now adds 15 MINUTES instead of
-// an hour → 1h / 1h15m / 1h30m / 1h45m. The BASE is unchanged, so an
-// unupgraded cast is exactly as strong as it has always been and only the
-// upgrade ladder is nerfed. Forward-only like every other value here: the
-// duration is stamped into the effect row at use time, so in-flight effects
-// keep the window they were created with and every app version picks the new
-// numbers up on deploy with no release.
+// 15-MINUTE UPGRADE LADDER (owner decision 2026-08-15): every non-shop, timed
+// drop-pool powerup adds 15 MINUTES per upgrade level instead of an hour →
+// 1h / 1h15m / 1h30m / 1h45m. Originally shipped for the two hard CCs only
+// (batch 2026-08-09 item 1 — a 4-hour Leg Cramp / Wrong Turn is oppressive),
+// then extended to RUNNERS_HIGH, STEALTH_MODE, and DETOUR_SIGN so every
+// drop-pool powerup upgrades on the same timeframe. The BASE is unchanged, so
+// an unupgraded cast is exactly as strong as it has always been and only the
+// upgrade ladder is nerfed. POCKET_WATCH is excluded — it's shop-only
+// (`storeOnlyTypes`), not drop-pool. Forward-only like every other value
+// here: the duration is stamped into the effect row at use time, so in-flight
+// effects keep the window they were created with and every app version picks
+// the new numbers up on deploy with no release.
 //
 // The matching cost reprice lives in balanceConfig.defaults `upgradeCosts.byType`
 // (arithmetic cost for arithmetic duration) — see the comment there for why it
@@ -49,12 +52,10 @@ function rarityForType(type) {
 const QUARTER_HOUR = 15 * 60 * 1000;
 const DURATIONS_MS = {
   LEG_CRAMP:         [1 * HOUR, 1 * HOUR + QUARTER_HOUR, 1 * HOUR + 2 * QUARTER_HOUR, 1 * HOUR + 3 * QUARTER_HOUR],
-  RUNNERS_HIGH:      [1 * HOUR, 2 * HOUR, 3 * HOUR, 4 * HOUR],
-  // Stealth adopts the standard 1/2/3/4h ladder (supersedes the 2026-07-24
-  // 60/75/90/120 nerf). Server-computed → hits every app version on deploy.
-  STEALTH_MODE:      [1 * HOUR, 2 * HOUR, 3 * HOUR, 4 * HOUR],
+  RUNNERS_HIGH:      [1 * HOUR, 1 * HOUR + QUARTER_HOUR, 1 * HOUR + 2 * QUARTER_HOUR, 1 * HOUR + 3 * QUARTER_HOUR],
+  STEALTH_MODE:      [1 * HOUR, 1 * HOUR + QUARTER_HOUR, 1 * HOUR + 2 * QUARTER_HOUR, 1 * HOUR + 3 * QUARTER_HOUR],
   WRONG_TURN:        [1 * HOUR, 1 * HOUR + QUARTER_HOUR, 1 * HOUR + 2 * QUARTER_HOUR, 1 * HOUR + 3 * QUARTER_HOUR],
-  DETOUR_SIGN:       [1 * HOUR, 2 * HOUR, 3 * HOUR, 4 * HOUR],
+  DETOUR_SIGN:       [1 * HOUR, 1 * HOUR + QUARTER_HOUR, 1 * HOUR + 2 * QUARTER_HOUR, 1 * HOUR + 3 * QUARTER_HOUR],
   COMPRESSION_SOCKS: [24 * HOUR, 30 * HOUR, 36 * HOUR, 48 * HOUR],
   CAMPFIRE_REST:     [45 * 60 * 1000, 60 * 60 * 1000, 75 * 60 * 1000, 90 * 60 * 1000],
   POCKET_WATCH:      [1 * HOUR, 2 * HOUR, 3 * HOUR, 4 * HOUR],

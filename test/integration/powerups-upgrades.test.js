@@ -133,6 +133,9 @@ describe("powerup upgrades — integration", () => {
     // came with a matching reprice, and the Horseshoe ladder was zeroed when its
     // upgrades became inert. Serving these to the client is the whole point of
     // the block — an old build shows its bundled price, a new one shows this.
+    //
+    // 2026-08-15: RUNNERS_HIGH, DETOUR_SIGN, and STEALTH_MODE joined the
+    // 15-min duration ladder with matching byType overrides.
     assert.deepEqual(progress.powerupData.upgradeCosts, {
       byRarity: {
         COMMON: [0, 5, 15, 45],
@@ -142,6 +145,9 @@ describe("powerup upgrades — integration", () => {
       byType: {
         LEG_CRAMP: [0, 10, 20, 30],
         WRONG_TURN: [0, 15, 30, 45],
+        RUNNERS_HIGH: [0, 5, 10, 15],
+        DETOUR_SIGN: [0, 5, 10, 15],
+        STEALTH_MODE: [0, 10, 20, 30],
         LUCKY_HORSESHOE: [0, 0, 0, 0],
       },
     });
@@ -406,5 +412,46 @@ describe("powerup upgrades — integration", () => {
       where: { userId: alice.userId, reason: "powerup_upgrade" },
     });
     assert.equal(txs.length, 1, "exactly one CoinTransaction recorded");
+  });
+
+  // 2026-08-15: RUNNERS_HIGH, STEALTH_MODE, and DETOUR_SIGN joined the 15-min
+  // upgrade ladder. The seed (powerupCopySeed.js) is the served catalog's
+  // source of truth, not the DURATIONS_MS table this suite otherwise tests —
+  // a duration-table-only edit ships a nerf while every client still
+  // advertises the old 2h/3h/4h tier labels. Guards against that drift.
+  it("GET /powerups/catalog never advertises a retired 2h+ tier label for the 15-min-ladder types", async () => {
+    const {
+      POWERUP_COPY_SEED,
+    } = require("../../src/modules/powerups/constants/powerupCopySeed");
+    for (const row of POWERUP_COPY_SEED) {
+      await prisma.powerupCopy.upsert({
+        where: { powerupType: row.powerupType },
+        update: {
+          description: row.description,
+          shortDescription: row.shortDescription,
+          upgradeTierLabels: row.upgradeTierLabels,
+        },
+        create: row,
+      });
+    }
+
+    const alice = await createUser("AliceCopyGuard");
+    const res = await request(server.baseUrl, "GET", "/powerups/catalog", {
+      token: alice.token,
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+
+    for (const type of ["RUNNERS_HIGH", "STEALTH_MODE", "DETOUR_SIGN", "LEG_CRAMP", "WRONG_TURN"]) {
+      const entry = body.powerups.find((p) => p.type === type);
+      assert.ok(entry, `${type} is in the catalog`);
+      for (const label of entry.upgradeTierLabels) {
+        assert.doesNotMatch(
+          label,
+          /\b[234]h\b/,
+          `${type} tier "${label}" still names a pre-nerf duration`
+        );
+      }
+    }
   });
 });

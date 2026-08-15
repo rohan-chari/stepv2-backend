@@ -82,7 +82,13 @@ const POWERUP_COPY_SEED = [
     name: "Runner's High",
     description: "2x steps for 1 hour",
     shortDescription: "2x steps",
-    upgradeTierLabels: ["2x for 1h", "2x for 2h", "2x for 3h", "2x for 4h"],
+    // 2026-08-15: joined the 15-min upgrade ladder, +15m per level not +1h.
+    upgradeTierLabels: [
+      "2x for 1h",
+      "2x for 1h 15m",
+      "2x for 1h 30m",
+      "2x for 1h 45m",
+    ],
   },
   {
     powerupType: "SECOND_WIND",
@@ -97,7 +103,13 @@ const POWERUP_COPY_SEED = [
     description:
       "Hide your name, steps, and position on the track for 1 hour",
     shortDescription: "Progress hidden",
-    upgradeTierLabels: ["Hide 1h", "Hide 2h", "Hide 3h", "Hide 4h"],
+    // 2026-08-15: joined the 15-min upgrade ladder, +15m per level not +1h.
+    upgradeTierLabels: [
+      "Hide 1h",
+      "Hide 1h 15m",
+      "Hide 1h 30m",
+      "Hide 1h 45m",
+    ],
   },
   {
     powerupType: "WRONG_TURN",
@@ -136,11 +148,12 @@ const POWERUP_COPY_SEED = [
     name: "Detour Sign",
     description: "Hide the entire leaderboard from a rival for 1 hour",
     shortDescription: "Leaderboard hidden",
+    // 2026-08-15: joined the 15-min upgrade ladder, +15m per level not +1h.
     upgradeTierLabels: [
       "Hide leaderboard 1h",
-      "Hide leaderboard 2h",
-      "Hide leaderboard 3h",
-      "Hide leaderboard 4h",
+      "Hide leaderboard 1h 15m",
+      "Hide leaderboard 1h 30m",
+      "Hide leaderboard 1h 45m",
     ],
   },
   {
