@@ -938,6 +938,13 @@ function buildGetRaceProgress(deps = {}) {
     // boundary; the leaderboard's scoring tz is `scoringTimeZone` above.
     userTimeZone = null,
     syncPowerups,
+    // Participants pagination (docs/race-participants-pagination-requirements.md
+    // §5.2). Threaded from the outer query, NOT read from an outer scope: the
+    // slicing block below runs inside THIS function, so these must arrive as
+    // parameters or every progress request throws a ReferenceError.
+    participantsView = null,
+    participantsOffset = 0,
+    participantsLimit = 10,
   }) {
     const snapRace = snapshot.race || {};
     const entries = snapshot.participants || [];
@@ -1317,6 +1324,44 @@ function buildGetRaceProgress(deps = {}) {
       result.globalEvent = snapshot.globalEvent;
     }
 
+    // Requirements §5.2: paging is defined for ACTIVE races, and the server MAY
+    // answer non-ACTIVE ones whole "to avoid regressions". It does: a finished
+    // race's results screen reads this same payload, and truncating it to ten
+    // rows would silently amputate the final standings. `pagination` is still
+    // emitted so a paging client can see total == returned and stop asking.
+    if (participantsView === "participants-v1" && result.status !== "ACTIVE") {
+      const totalParticipants = result.participants.length;
+      result.pagination = {
+        offset: 0,
+        limit: totalParticipants,
+        total: totalParticipants,
+        hasMore: false,
+        nextOffset: totalParticipants,
+      };
+      result.powerupData = null;
+      result.globalEvent = null;
+    } else if (participantsView === "participants-v1") {
+      const totalParticipants = result.participants.length;
+      const safeOffset =
+        Number(participantsOffset) > 0 ? Math.floor(participantsOffset) : 0;
+      const parsedLimit = Number(participantsLimit);
+      const safeLimit = Math.min(
+        Math.max(Number.isFinite(parsedLimit) ? Math.floor(parsedLimit) : 10, 1),
+        50
+      );
+      const start = Math.min(safeOffset, totalParticipants);
+      result.participants = result.participants.slice(start, start + safeLimit);
+      result.pagination = {
+        offset: start,
+        limit: safeLimit,
+        total: totalParticipants,
+        hasMore: start + safeLimit < totalParticipants,
+        nextOffset: start + safeLimit,
+      };
+      result.powerupData = null;
+      result.globalEvent = null;
+    }
+
     return result;
   }
 
@@ -1349,7 +1394,10 @@ function buildGetRaceProgress(deps = {}) {
     // Trailing/defaulted capability gate: old direct callers retain the safe
     // no-remote-art presentation.
     supportsRemoteAssets = false,
-    resolvedContext = null
+    resolvedContext = null,
+    participantsView = null,
+    participantsOffset = 0,
+    participantsLimit = 10
   ) {
     const race = await raceModel.findById(raceId);
     if (!race) {
@@ -1592,6 +1640,9 @@ function buildGetRaceProgress(deps = {}) {
       supportsAds,
       userTimeZone,
       syncPowerups: !cacheOn,
+      participantsView,
+      participantsOffset,
+      participantsLimit,
     });
   };
 

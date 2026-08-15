@@ -339,7 +339,25 @@ function createRacesRouter(dependencies = {}) {
   const hasLiveUserCreatedRaceFn =
     dependencies.hasLiveUserCreatedRace || hasLiveUserCreatedRace;
 
-  function loadRaceProgress(req, resolvedContext = null) {
+  // `forceFullParticipants` is for callers that need the WHOLE roster regardless
+  // of what the client put in the query string — currently /powerups/use-context,
+  // whose entire purpose is action-time targeting against every participant.
+  // Without it, a client appending `?view=participants-v1` to that URL would get
+  // a 10-row page AND a null `powerupData`, which its own gate reads as "not an
+  // active participant" and answers 403.
+  function loadRaceProgress(req, resolvedContext = null, { forceFullParticipants = false } = {}) {
+    const view = forceFullParticipants ? null : req.query.view;
+    const rawOffset = Number(req.query.offset);
+    const rawLimit = Number(req.query.limit);
+    const participantsOffset =
+      Number.isFinite(rawOffset) && rawOffset > 0 ? Math.floor(rawOffset) : 0;
+    const participantsLimit =
+      Number.isFinite(rawLimit) && rawLimit > 0 ? Math.floor(rawLimit) : 10;
+    const isParticipantsView = view === "participants-v1";
+    const clampedLimit = isParticipantsView
+      ? Math.min(Math.max(participantsLimit, 1), 50)
+      : participantsLimit;
+
     return getRaceProgress(
       req.user.id,
       req.params.raceId,
@@ -352,7 +370,10 @@ function createRacesRouter(dependencies = {}) {
       req.clientFeatures?.has("ads") ?? false,
       req.user.timezone || req.timeZone || null,
       req.clientFeatures?.has("remote_assets") ?? false,
-      resolvedContext
+      resolvedContext,
+      isParticipantsView ? "participants-v1" : null,
+      isParticipantsView ? participantsOffset : 0,
+      isParticipantsView ? clampedLimit : 10
     );
   }
 
@@ -1226,6 +1247,17 @@ function createRacesRouter(dependencies = {}) {
         ));
       if (!compact) {
         const progress = await loadRaceProgress(req);
+        // Requirements §5.2: the paged view answers with its own contract tag.
+        // It is the ONLY signal a client can use to tell "this backend paginates"
+        // from "this backend ignored my query string and sent everything", which
+        // is what §8's degrade-to-legacy path keys on. Classic requests keep the
+        // bare `{ progress }` envelope byte-for-byte.
+        if (req.query.view === "participants-v1") {
+          return res.json({
+            contract: "race-progress-participants-v1",
+            progress,
+          });
+        }
         return res.json({ progress });
       }
       const inventoryPromise = getPowerupInventory(
@@ -1247,6 +1279,58 @@ function createRacesRouter(dependencies = {}) {
         return res.status(error.statusCode).json({ error: error.message });
       }
       console.error("Race progress error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // GET /races/:raceId/powerups/use-context
+  // Additive endpoint (new app only): returns full participant rows (active
+  // participants only) plus the viewer's held powerups/slots for
+  // action-time targeting. Older apps never call this and keep using legacy
+  // progress-derived candidates.
+  router.get("/:raceId/powerups/use-context", async (req, res) => {
+    try {
+      const progress = await loadRaceProgress(req, null, {
+        forceFullParticipants: true,
+      });
+      if (progress?.status !== "ACTIVE") {
+        return res.status(400).json({
+          error: "Race is not active",
+          code: "RACE_NOT_ACTIVE",
+        });
+      }
+      const powerupData = progress?.powerupData;
+      if (!powerupData || powerupData.enabled !== true) {
+        return res.status(403).json({
+          error: "You are not an active participant in this race",
+          code: "NOT_ACTIVE_PARTICIPANT",
+        });
+      }
+
+      const rawParticipants = Array.isArray(progress?.participants)
+        ? progress.participants
+        : [];
+      const participants = rawParticipants
+        .map((participant) =>
+          participant && typeof participant === "object" ? participant : null
+        )
+        .filter(Boolean);
+
+      res.json({
+        contract: "race-powerup-use-context-v1",
+        participants,
+        powerupData: {
+          powerupSlots: powerupData.powerupSlots ?? 3,
+          inventory: Array.isArray(powerupData.inventory) ? powerupData.inventory : [],
+          queuedBoxCount: powerupData.queuedBoxCount ?? 0,
+          myPlacement: progress?.myPlacement ?? null,
+        },
+      });
+    } catch (error) {
+      if (error.statusCode) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
+      console.error("Race powerup use-context error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });

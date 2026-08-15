@@ -72,7 +72,7 @@ async function get(path, token, headers = CAPABLE_HEADERS) {
   return request(server.baseUrl, "GET", path, { token, headers });
 }
 
-async function createRace(token) {
+async function createRace(token, overrides = {}) {
   const response = await request(server.baseUrl, "POST", "/races", {
     token,
     headers: CAPABLE_HEADERS,
@@ -82,10 +82,43 @@ async function createRace(token) {
       maxDurationDays: 7,
       powerupsEnabled: false,
       isPublic: true,
+      ...overrides,
     },
   });
   assert.equal(response.status, 201);
   return (await json(response)).race;
+}
+
+async function seedLargeActiveRace({ creator, size = 30, powerupsEnabled = false }) {
+  // A race defaults to maxParticipants=10 (schema default, echoed by
+  // createRace.js), so a paging fixture MUST ask for the capacity it seeds or
+  // the 10th join answers 400 "This race is full". The create-time ceiling is
+  // 100, which bounds how large a page fixture can legally get.
+  const race = await createRace(creator.token, {
+    maxParticipants: size,
+    powerupsEnabled,
+  });
+  const joiners = [];
+  for (let index = 0; index < size - 1; index += 1) {
+    const user = await createTestUser({ displayName: `Race Joiner ${index + 1}` });
+    const join = await request(
+      server.baseUrl,
+      "POST",
+      `/races/${race.id}/join`,
+      { token: user.token, headers: CAPABLE_HEADERS }
+    );
+    assert.equal(join.status, 201);
+    joiners.push(user.user);
+  }
+
+  const start = await request(
+    server.baseUrl,
+    "POST",
+    `/races/${race.id}/start`,
+    { token: creator.token, headers: CAPABLE_HEADERS }
+  );
+  assert.equal(start.status, 200);
+  return { race, joiners };
 }
 
 describe("API page-payload cleanup — locked additive contracts", () => {
@@ -325,6 +358,98 @@ describe("API page-payload cleanup — locked additive contracts", () => {
       compact.globalPowerupInventory === null ||
         Array.isArray(compact.globalPowerupInventory.items)
     );
+  });
+
+  it("supports participants-v1 paged progress on large ACTIVE races", async () => {
+    const creator = await createTestUser({ displayName: "Paged Viewer" });
+    const { race } = await seedLargeActiveRace({
+      creator,
+      size: 24,
+    });
+
+    const firstPageResponse = await get(
+      `/races/${race.id}/progress?view=participants-v1`,
+      creator.token
+    );
+    assert.equal(firstPageResponse.status, 200);
+    const firstPage = await json(firstPageResponse);
+    const firstProgress = firstPage.progress;
+    assert.equal(Array.isArray(firstProgress?.participants), true);
+    assert.equal(firstProgress.participants.length, 10);
+    assert.equal(firstProgress.pagination?.offset, 0);
+    assert.equal(firstProgress.pagination?.limit, 10);
+    assert.equal(firstProgress.pagination?.hasMore, true);
+    assert.equal(firstProgress.pagination?.nextOffset, 10);
+    assert.equal(firstProgress.pagination?.total, 24);
+    assert.equal(firstProgress.powerupData, null);
+    assert.equal(firstProgress.globalEvent, null);
+
+    const secondPageResponse = await get(
+      `/races/${race.id}/progress?view=participants-v1&offset=10&limit=8`,
+      creator.token
+    );
+    assert.equal(secondPageResponse.status, 200);
+    const secondPage = await json(secondPageResponse);
+    const secondProgress = secondPage.progress;
+    assert.equal(secondProgress.participants.length, 8);
+    assert.equal(secondProgress.pagination.offset, 10);
+    assert.equal(secondProgress.pagination.limit, 8);
+    assert.equal(secondProgress.pagination.hasMore, true);
+    assert.equal(secondProgress.pagination.nextOffset, 18);
+
+    const fullResponse = await get(`/races/${race.id}/progress`, creator.token);
+    const fullProgress = await json(fullResponse);
+    const expected = (fullProgress.progress.participants || []).map(
+      (participant) => participant.userId
+    );
+    const first = firstProgress.participants.map((participant) => participant.userId);
+    assert.deepEqual(first, expected.slice(0, 10));
+    const second = secondProgress.participants.map((participant) => participant.userId);
+    assert.deepEqual(second, expected.slice(10, 18));
+  });
+
+  it("returns full participant context for powerup use actions", async () => {
+    const creator = await createTestUser({
+      displayName: "Use-Context Creator",
+    });
+    const { race } = await seedLargeActiveRace({
+      creator,
+      size: 12,
+      // use-context is a POWERUP endpoint: its gate reads `powerupData.enabled`,
+      // which a powerups-disabled race legitimately reports false, answering 403.
+      // The targeting contract only means anything on a powerup-enabled race.
+      powerupsEnabled: true,
+    });
+    const contextResponse = await get(
+      `/races/${race.id}/powerups/use-context`,
+      creator.token
+    );
+    assert.equal(contextResponse.status, 200);
+    const context = await json(contextResponse);
+    assert.equal(context.contract, "race-powerup-use-context-v1");
+    assert.equal(Array.isArray(context.participants), true);
+    assert.equal(context.participants.length, 12);
+    // Every seeded participant has zero steps, so which of them lands in slot 1
+    // is a tie-break detail, not part of this contract. What §5.3 promises is
+    // that the picker receives the viewer's placement at all — pin that.
+    assert.equal(Number.isInteger(context.powerupData?.myPlacement), true);
+    assert.equal(
+      context.powerupData.myPlacement >= 1 &&
+        context.powerupData.myPlacement <= 12,
+      true
+    );
+    assert.equal(context.powerupData?.powerupSlots >= 3, true);
+    assert.equal(context.powerupData?.queuedBoxCount >= 0, true);
+    assert.equal(Array.isArray(context.powerupData?.inventory), true);
+
+    const nonParticipant = await createTestUser({
+      displayName: "Use-Context Spectator",
+    });
+    const denied = await get(
+      `/races/${race.id}/powerups/use-context`,
+      nonParticipant.token
+    );
+    assert.equal(denied.status, 403);
   });
 
   it("builds bootstrap detail after active progress reconciliation completes the race", async () => {
