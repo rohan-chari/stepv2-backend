@@ -514,8 +514,41 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
     }
   }
 
+  // ── Claiming kill-switch read cache. ────────────────────────────────────────
+  //
+  // `claimingDisabled()` runs on EVERY 250ms tick, forever, even with an empty
+  // queue — ~345k `appSetting.findUnique` round trips a day on a 1-vCPU box that
+  // is ~50% busy, essentially all of them answering "no, still enabled".
+  //
+  // The read stays UNCACHED in the sense that matters (it never rides the 30s
+  // in-process appSettings cache, which is what the rollback drill proves); it
+  // is memoized here for a deliberately tiny window instead. Two asymmetries
+  // keep the emergency-response intent intact:
+  //
+  //   1. Only the ENABLED answer (`false`) is cached. A `true` read — the switch
+  //      is actively thrown — is never cached, so UN-flipping it resumes claims
+  //      on the very next tick, with no delay at all. Only the boring idle
+  //      answer is allowed to go stale.
+  //   2. The cache is dropped whenever a job is actually claimed. A worker doing
+  //      real work re-reads the switch; only a worker idling against an empty
+  //      queue coasts on the cached answer, which is exactly the traffic we are
+  //      trying to remove.
+  //
+  // Net worst case for THROWING the switch: CLAIMING_FLAG_TTL_MS of additional
+  // claiming on an otherwise-idle worker. Clearing it: unchanged, one tick.
+  const CLAIMING_FLAG_TTL_MS = dependencies.claimingFlagTtlMs ?? 2_000;
+  let claimingEnabledCachedUntil = 0;
+
+  function invalidateClaimingFlagCache() {
+    claimingEnabledCachedUntil = 0;
+  }
+
   async function claimingDisabled() {
-    return (await settings.getUncachedFlag("raceQueueV2ClaimingDisabled")) === true;
+    if (Date.now() < claimingEnabledCachedUntil) return false;
+    const disabled =
+      (await settings.getUncachedFlag("raceQueueV2ClaimingDisabled")) === true;
+    claimingEnabledCachedUntil = disabled ? 0 : Date.now() + CLAIMING_FLAG_TTL_MS;
+    return disabled;
   }
 
   // ── The fenced ownership protocol (§5a item 5). Ordering is NOT negotiable. ──
@@ -545,6 +578,9 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
       leaseToken: newLeaseToken(),
     });
     if (!job) return null;
+    // Real work claimed => stop coasting on the cached kill-switch answer (see
+    // CLAIMING_FLAG_TTL_MS). Only idle ticks are allowed to reuse it.
+    invalidateClaimingFlagCache();
 
     // ── Phase 2b: the dependency-closure planner, in SHADOW MODE. ──────────
     //

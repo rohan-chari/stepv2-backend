@@ -42,11 +42,20 @@ async function buildRaceResolutionStepSyncScope(job, dependencies = {}) {
   const raceModel = dependencies.Race || Race;
   const effectModel = dependencies.RaceActiveEffect || RaceActiveEffect;
   try {
-    const [race, activeEffects] = await Promise.all([
-      raceModel.findById(job.raceId),
-      effectModel.findActiveForRace(job.raceId),
-    ]);
-    if (!race || race.status !== "ACTIVE" || (activeEffects || []).length > 0) {
+    // SEQUENCED, not parallel — deliberately. This scope is admissible ONLY on
+    // a race with zero active effects, and in prod ~79% of jobs have at least
+    // one (7222 FULL vs 1709 STEP_SYNC_COMMITTED), so the parallel version
+    // issued the race read and threw it away four times out of five.
+    //
+    // The effects read is the cheap one (a single indexed lookup) and it is the
+    // one that short-circuits, so checking it FIRST costs the surviving 21% one
+    // serialized round trip and saves the other 79% an entire race hydration.
+    // Losing the parallelism is the intended trade.
+    const activeEffects = await effectModel.findActiveForRace(job.raceId);
+    if ((activeEffects || []).length > 0) return null;
+
+    const race = await raceModel.findForStepSyncScope(job.raceId);
+    if (!race || race.status !== "ACTIVE") {
       return null;
     }
     const byId = new Map((race.participants || []).map((row) => [row.id, row]));

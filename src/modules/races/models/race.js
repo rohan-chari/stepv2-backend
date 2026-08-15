@@ -84,7 +84,61 @@ const resolutionRaceSelect = {
   },
 };
 
+// The STEP_SYNC_COMMITTED scope's race read (see
+// services/raceResolutionStepSyncScope.js). It is `resolutionRaceSelect` plus
+// ONE column, deliberately:
+//
+//   * `totalsUpdatedAt` is the scope's staleness token — it is compared against
+//     the claim instant and re-verified in the write fence, so it is the one
+//     field the ordinary resolution select does not already carry.
+//
+// What it drops versus the FAT `findById` include this replaced is the whole
+// point: the entire cosmetic-hydration subtree (participant -> user -> equipped
+// cosmetics -> shop item render metadata), plus `creator`, `winner`, `seed` and
+// `tournament`. That subtree is four Prisma queries and the dominant cost of
+// the read, and NOTHING on the step-sync path renders an avatar or a cosmetic.
+// The structural guard in test/services/racePowerupPerformance.test.js pins
+// that this whole region stays free of cosmetic hydration.
+//
+// It is NOT narrower than that. Every remaining field is load-bearing for a
+// downstream consumer of `result.race` on this plan — audited call by call:
+//   * `isTeamRace`            -> retainTeamAsOfHeartbeat (queue worker)
+//   * `name`, `startedAt`,
+//     `powerupsEnabled`       -> the high-multiplier alert pass
+//                                (raceProgressSideEffects -> highMultiplierAlert)
+//   * `powerupStepInterval`,
+//     `status`                -> syncRacePowerupState
+//   * participants' `totalSteps`, `finishedAt`, `finishTotalSteps`,
+//     `forfeitedAt`, `nextBoxAtSteps`, `powerupSlots`, `bonusSteps`,
+//     `maxBonusSteps`         -> syncRacePowerupState's box/slot math
+//   * participants' `highMultiplierNotifiedAt`, `user.displayName`
+//                             -> the alert's already-notified guard and actor name
+//
+// Participants are fetched UNFILTERED (no `status: ACCEPTED` where-clause) and
+// in `joinedAt` order, matching the fat include exactly: the scope builder and
+// the alert pass BOTH filter on `status` themselves, and the alert requires the
+// full accepted roster to pick recipients.
+const stepSyncScopeParticipantSelect = {
+  ...resolutionParticipantSelect,
+  totalsUpdatedAt: true,
+};
+
+const stepSyncScopeRaceSelect = {
+  ...resolutionRaceSelect,
+  participants: {
+    select: stepSyncScopeParticipantSelect,
+    orderBy: { joinedAt: "asc" },
+  },
+};
+
 const Race = {
+  async findForStepSyncScope(id) {
+    return prisma.race.findUnique({
+      where: { id },
+      select: stepSyncScopeRaceSelect,
+    });
+  },
+
   async findBootstrapAccessContext(id, userId) {
     return prisma.race.findUnique({
       where: { id },

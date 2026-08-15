@@ -17,7 +17,7 @@ const job = {
 function dependencies(overrides = {}) {
   return {
     Race: {
-      async findById() {
+      async findForStepSyncScope() {
         return {
           id: "r1", status: "ACTIVE", powerupsEnabled: true,
           participants: [{
@@ -86,7 +86,7 @@ test("mixed reason, missing/stale token, membership mismatch, or active effect f
     { id: "p1", userId: "u1", status: "DECLINED", totalsUpdatedAt: new Date("2026-08-13T12:00:04.000Z") },
   ]) {
     const deps = dependencies({
-      Race: { async findById() { return { id: "r1", status: "ACTIVE", participants: [participant] }; } },
+      Race: { async findForStepSyncScope() { return { id: "r1", status: "ACTIVE", participants: [participant] }; } },
     });
     assert.equal(await buildRaceResolutionStepSyncScope(job, deps), null);
   }
