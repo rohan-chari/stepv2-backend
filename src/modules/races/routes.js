@@ -371,9 +371,11 @@ function createRacesRouter(dependencies = {}) {
       req.user.timezone || req.timeZone || null,
       req.clientFeatures?.has("remote_assets") ?? false,
       resolvedContext,
-      isParticipantsView ? "participants-v1" : null,
-      isParticipantsView ? participantsOffset : 0,
-      isParticipantsView ? clampedLimit : 10
+      {
+        participantsView: isParticipantsView ? "participants-v1" : null,
+        participantsOffset: isParticipantsView ? participantsOffset : 0,
+        participantsLimit: isParticipantsView ? clampedLimit : 10,
+      }
     );
   }
 

@@ -1395,9 +1395,18 @@ function buildGetRaceProgress(deps = {}) {
     // no-remote-art presentation.
     supportsRemoteAssets = false,
     resolvedContext = null,
-    participantsView = null,
-    participantsOffset = 0,
-    participantsLimit = 10
+    // Participants pagination (docs/race-participants-pagination-requirements.md
+    // §13 REQUIRED) arrives as ONE named options object rather than three more
+    // positional arguments. Everything above this line is positional for
+    // historical reasons and six of those are booleans defaulting to false, so
+    // a transposed pair there is silent — it mis-gates what a client renders
+    // rather than throwing. Adding to that tail is how that class of bug grows;
+    // new options go here, by name, where order cannot matter.
+    {
+      participantsView = null,
+      participantsOffset = 0,
+      participantsLimit = 10,
+    } = {}
   ) {
     const race = await raceModel.findById(raceId);
     if (!race) {
