@@ -87,10 +87,12 @@ test("upgradeCost: Rare rarity (Shortcut) — 15/45/135", () => {
   assert.equal(upgradeCost("SHORTCUT", 3), 135);
 });
 
-test("upgradeCost: Common rarity (Detour Sign) — 5/15/45", () => {
+// 2026-08-15: Detour Sign joined the 15-min duration ladder and now carries a
+// matching byType cost override instead of falling through to byRarity COMMON.
+test("upgradeCost: Detour Sign overrides the rarity ladder with byType — 5/10/15", () => {
   assert.equal(upgradeCost("DETOUR_SIGN", 1), 5);
-  assert.equal(upgradeCost("DETOUR_SIGN", 2), 15);
-  assert.equal(upgradeCost("DETOUR_SIGN", 3), 45);
+  assert.equal(upgradeCost("DETOUR_SIGN", 2), 10);
+  assert.equal(upgradeCost("DETOUR_SIGN", 3), 15);
 });
 
 test("upgradeCost: Common rarity (Trail Mix) — 5/15/45", () => {
@@ -107,10 +109,12 @@ test("upgradeCost: Common rarity (Trail Mix) — 5/15/45", () => {
 // retiered in powerupOdds long ago but RARITY_BY_TYPE was never updated — prod
 // drop history shows both rarities on record (133 common / 479 uncommon), which
 // is what identified these as a half-finished migration rather than intent.
-test("upgradeCost: Common rarity (Runner's High) — 5/15/45", () => {
+// 2026-08-15: Runner's High joined the 15-min duration ladder and now carries
+// a matching byType cost override instead of falling through to byRarity COMMON.
+test("upgradeCost: Runner's High overrides the rarity ladder with byType — 5/10/15", () => {
   assert.equal(upgradeCost("RUNNERS_HIGH", 1), 5);
-  assert.equal(upgradeCost("RUNNERS_HIGH", 2), 15);
-  assert.equal(upgradeCost("RUNNERS_HIGH", 3), 45);
+  assert.equal(upgradeCost("RUNNERS_HIGH", 2), 10);
+  assert.equal(upgradeCost("RUNNERS_HIGH", 3), 15);
 });
 
 // Batch 2026-08-09 item 1 (game-analyst REQUIRED reprice): LEG_CRAMP and
@@ -126,10 +130,12 @@ test("upgradeCost: Leg Cramp overrides the rarity ladder with byType", () => {
   assert.equal(upgradeCost("LEG_CRAMP", 3), 30);
 });
 
-test("upgradeCost: Uncommon rarity (Stealth Mode) — 10/30/90", () => {
+// 2026-08-15: Stealth Mode joined the 15-min duration ladder and now carries
+// a matching byType cost override instead of falling through to byRarity UNCOMMON.
+test("upgradeCost: Stealth Mode overrides the rarity ladder with byType — 10/20/30", () => {
   assert.equal(upgradeCost("STEALTH_MODE", 1), 10);
-  assert.equal(upgradeCost("STEALTH_MODE", 2), 30);
-  assert.equal(upgradeCost("STEALTH_MODE", 3), 90);
+  assert.equal(upgradeCost("STEALTH_MODE", 2), 20);
+  assert.equal(upgradeCost("STEALTH_MODE", 3), 30);
 });
 
 test("upgradeCost: Wrong Turn overrides the rarity ladder with byType", () => {
@@ -143,7 +149,7 @@ test("upgradeCost: Wrong Turn overrides the rarity ladder with byType", () => {
 // used to carry, restated so the ladder itself stays pinned independently of
 // which types happen to override it.
 test("upgradeCost: byRarity UNCOMMON ladder still applies to non-overridden types", () => {
-  for (const type of ["STEALTH_MODE"]) {
+  for (const type of ["CAMPFIRE_REST"]) {
     assert.deepEqual(
       [1, 2, 3].map((lvl) => upgradeCost(type, lvl)),
       [10, 30, 90],
@@ -206,20 +212,22 @@ test("upgradedDuration: Leg Cramp — 1h / 1h15m / 1h30m / 1h45m", () => {
   assert.equal(upgradedDuration("LEG_CRAMP", 3), 1 * HOUR + 3 * QUARTER);
 });
 
-test("upgradedDuration: Runner's High — 1h / 2h / 3h / 4h", () => {
+// 2026-08-15 (owner decision): Runner's High joined the 15-minute upgrade
+// ladder alongside Leg Cramp / Wrong Turn — 1h base, +15m per level.
+test("upgradedDuration: Runner's High — 1h / 1h15m / 1h30m / 1h45m", () => {
   assert.equal(upgradedDuration("RUNNERS_HIGH", 0), 1 * HOUR);
-  assert.equal(upgradedDuration("RUNNERS_HIGH", 1), 2 * HOUR);
-  assert.equal(upgradedDuration("RUNNERS_HIGH", 2), 3 * HOUR);
-  assert.equal(upgradedDuration("RUNNERS_HIGH", 3), 4 * HOUR);
+  assert.equal(upgradedDuration("RUNNERS_HIGH", 1), 1 * HOUR + QUARTER);
+  assert.equal(upgradedDuration("RUNNERS_HIGH", 2), 1 * HOUR + 2 * QUARTER);
+  assert.equal(upgradedDuration("RUNNERS_HIGH", 3), 1 * HOUR + 3 * QUARTER);
 });
 
-// §3.4 (2026-07-25): stealth adopts the standard 1/2/3/4h ladder (supersedes the
-// 2026-07-24 60/75/90/120 nerf).
-test("upgradedDuration: Stealth Mode — 1h / 2h / 3h / 4h", () => {
+// 2026-08-15 (owner decision): Stealth Mode joined the 15-minute upgrade
+// ladder (supersedes the §3.4 2026-07-25 1/2/3/4h standardization).
+test("upgradedDuration: Stealth Mode — 1h / 1h15m / 1h30m / 1h45m", () => {
   assert.equal(upgradedDuration("STEALTH_MODE", 0), 1 * HOUR);
-  assert.equal(upgradedDuration("STEALTH_MODE", 1), 2 * HOUR);
-  assert.equal(upgradedDuration("STEALTH_MODE", 2), 3 * HOUR);
-  assert.equal(upgradedDuration("STEALTH_MODE", 3), 4 * HOUR);
+  assert.equal(upgradedDuration("STEALTH_MODE", 1), 1 * HOUR + QUARTER);
+  assert.equal(upgradedDuration("STEALTH_MODE", 2), 1 * HOUR + 2 * QUARTER);
+  assert.equal(upgradedDuration("STEALTH_MODE", 3), 1 * HOUR + 3 * QUARTER);
 });
 
 test("upgradedDuration: Wrong Turn — 1h / 1h15m / 1h30m / 1h45m", () => {
@@ -229,20 +237,20 @@ test("upgradedDuration: Wrong Turn — 1h / 1h15m / 1h30m / 1h45m", () => {
   assert.equal(upgradedDuration("WRONG_TURN", 3), 1 * HOUR + 3 * QUARTER);
 });
 
-// The nerf is SCOPED. Every other windowed upgradeable powerup keeps the
-// standard +1h/level ladder — pinned here so a future "simplify the ladder"
-// refactor can't quietly drag them along.
-test("upgradedDuration: the 15-minute ladder is ONLY Leg Cramp and Wrong Turn", () => {
-  for (const type of ["RUNNERS_HIGH", "STEALTH_MODE", "DETOUR_SIGN", "POCKET_WATCH"]) {
-    assert.equal(upgradedDuration(type, 3), 4 * HOUR, `${type} keeps 4h at L3`);
-  }
+// 2026-08-15: the 15-minute ladder now covers every non-shop, timed drop-pool
+// powerup. POCKET_WATCH is the one deliberate holdout — it's shop-only
+// (`storeOnlyTypes`), not drop-pool, so it was excluded from this change and
+// keeps the standard +1h/level ladder. Pinned here so a future "simplify the
+// ladder" refactor can't quietly drag it along too.
+test("upgradedDuration: the 15-minute ladder excludes shop-only Pocket Watch", () => {
+  assert.equal(upgradedDuration("POCKET_WATCH", 3), 4 * HOUR, "POCKET_WATCH keeps 4h at L3");
 });
 
-test("upgradedDuration: Detour Sign — 1h / 2h / 3h / 4h", () => {
+test("upgradedDuration: Detour Sign — 1h / 1h15m / 1h30m / 1h45m", () => {
   assert.equal(upgradedDuration("DETOUR_SIGN", 0), 1 * HOUR);
-  assert.equal(upgradedDuration("DETOUR_SIGN", 1), 2 * HOUR);
-  assert.equal(upgradedDuration("DETOUR_SIGN", 2), 3 * HOUR);
-  assert.equal(upgradedDuration("DETOUR_SIGN", 3), 4 * HOUR);
+  assert.equal(upgradedDuration("DETOUR_SIGN", 1), 1 * HOUR + QUARTER);
+  assert.equal(upgradedDuration("DETOUR_SIGN", 2), 1 * HOUR + 2 * QUARTER);
+  assert.equal(upgradedDuration("DETOUR_SIGN", 3), 1 * HOUR + 3 * QUARTER);
 });
 
 test("upgradedDuration: Compression Socks — 24h / 30h / 36h / 48h", () => {

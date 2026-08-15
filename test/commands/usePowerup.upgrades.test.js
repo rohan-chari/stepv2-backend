@@ -258,13 +258,13 @@ function durationAssert(effect, expectedHours) {
   );
 }
 
-// §3.4 duration standardization (2026-07-25): 1/2/3/4h ladders (§9-authorized
-// existing-test DURATION literal update; coin amounts unchanged).
+// Batch 2026-08-09 item 1: LEG_CRAMP and WRONG_TURN moved to +15m per level
+// (1 / 1.25 / 1.5 / 1.75h) with a byType cost override.
 //
-// Batch 2026-08-09 item 1 restates the LC/WT literals ONLY: those two ladders
-// are now +15m per level (1 / 1.25 / 1.5 / 1.75h) and carry a byType cost
-// override. Every other type's literals below are untouched, which is the point
-// — the nerf is deliberately narrow.
+// 2026-08-15 (owner decision): RUNNERS_HIGH, STEALTH_MODE, and DETOUR_SIGN
+// joined the same 15-min ladder and byType cost overrides — every non-shop,
+// timed drop-pool powerup now upgrades on the same timeframe. POCKET_WATCH is
+// excluded (shop-only) and keeps the old 1/2/3/4h ladder.
 test("Lvl 3 Leg Cramp: 1h45m freeze duration, 30 coins deducted", async () => {
   const ctx = makeDeps({ powerupType: "LEG_CRAMP" });
   const use = buildUsePowerup(ctx.deps);
@@ -285,28 +285,26 @@ test("Lvl 1 Leg Cramp: 1h15m freeze, 10 coins (entry price unchanged)", async ()
   assert.equal(ctx.coinDeductions[0].amount, 10);
 });
 
-test("Lvl 3 Runner's High: 4h duration, 45 coins deducted", async () => {
+test("Lvl 3 Runner's High: 1h45m duration, 15 coins deducted", async () => {
   const ctx = makeDeps({ powerupType: "RUNNERS_HIGH" });
   const use = buildUsePowerup(ctx.deps);
   await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", upgradeLevel: 3 });
-  durationAssert(ctx.effectsCreated[0], 4);
-  // Runner's High is COMMON now (was UNCOMMON): 5/15/45.
-  assert.equal(ctx.coinDeductions[0].amount, 45);
+  durationAssert(ctx.effectsCreated[0], 1.75);
+  assert.equal(ctx.coinDeductions[0].amount, 15);
 });
 
-// §3.4 (2026-07-25): stealth adopts the standard 1/2/3/4h ladder.
-test("Lvl 3 Stealth Mode: 4h duration", async () => {
+test("Lvl 3 Stealth Mode: 1h45m duration", async () => {
   const ctx = makeDeps({ powerupType: "STEALTH_MODE" });
   const use = buildUsePowerup(ctx.deps);
   await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", upgradeLevel: 3 });
-  durationAssert(ctx.effectsCreated[0], 4);
+  durationAssert(ctx.effectsCreated[0], 1.75);
 });
 
-test("Lvl 2 Stealth Mode: 3h duration", async () => {
+test("Lvl 2 Stealth Mode: 1h30m duration", async () => {
   const ctx = makeDeps({ powerupType: "STEALTH_MODE" });
   const use = buildUsePowerup(ctx.deps);
   await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", upgradeLevel: 2 });
-  durationAssert(ctx.effectsCreated[0], 3);
+  durationAssert(ctx.effectsCreated[0], 1.5);
 });
 
 test("Lvl 3 Wrong Turn: 1h45m duration, 45 coins deducted", async () => {
@@ -319,12 +317,12 @@ test("Lvl 3 Wrong Turn: 1h45m duration, 45 coins deducted", async () => {
   assert.equal(ctx.coinDeductions[0].amount, 45);
 });
 
-test("Lvl 3 Detour Sign: 4h duration, 25 coins deducted (Common rarity)", async () => {
+test("Lvl 3 Detour Sign: 1h45m duration, 15 coins deducted (byType override)", async () => {
   const ctx = makeDeps({ powerupType: "DETOUR_SIGN" });
   const use = buildUsePowerup(ctx.deps);
   await use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", targetUserId: "user-2", upgradeLevel: 3 });
-  durationAssert(ctx.effectsCreated[0], 4);
-  assert.equal(ctx.coinDeductions[0].amount, 45);
+  durationAssert(ctx.effectsCreated[0], 1.75);
+  assert.equal(ctx.coinDeductions[0].amount, 15);
 });
 
 test("Lvl 3 Compression Socks: 48h duration, 135 coins deducted (Rare rarity)", async () => {

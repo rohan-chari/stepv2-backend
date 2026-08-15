@@ -382,6 +382,17 @@ const DEFAULT_CONFIG = {
       // player already budgeted for got more expensive.
       LEG_CRAMP: [0, 10, 20, 30],
       WRONG_TURN: [0, 15, 30, 45],
+      // 2026-08-15 — RUNNERS_HIGH/DETOUR_SIGN/STEALTH_MODE joined the 15-min
+      // upgrade ladder (see powerupUpgrades.js DURATIONS_MS). Without a
+      // reprice the byRarity geometric ladders (COMMON [0,5,15,45], UNCOMMON
+      // [0,10,30,90]) would charge 45-135 coins for a 45-minute gain — 87-173
+      // coins/extra-hour, making L3 the worst-value purchase in the game.
+      // Arithmetic cost for arithmetic duration, same pattern as LEG_CRAMP/
+      // WRONG_TURN: flat coins-per-15-minutes at every level, L1 price
+      // unchanged so nothing already budgeted for got more expensive.
+      RUNNERS_HIGH: [0, 5, 10, 15],
+      DETOUR_SIGN: [0, 5, 10, 15],
+      STEALTH_MODE: [0, 10, 20, 30],
       // Item 8b — the Horseshoe upgrade ladder is RETIRED, but the type stays
       // in `upgradeableTypes` on purpose. A client's "is this upgradeable?"
       // decision is BUNDLED in the app binary, so removing it here would leave
