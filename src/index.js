@@ -185,11 +185,19 @@ function startServer({
         schedulePayoutDoubleReconcile();
       }
     };
-    if (cronStartDelayMs > 0) {
-      logger.log(`[CRON] Job scheduling starts in ${cronStartDelayMs / 1000}s`);
-      setTimeout(startCrons, cronStartDelayMs);
+    // Cluster-mode guard: pm2 sets NODE_APP_INSTANCE per worker (0, 1, ...).
+    // Only worker 0 schedules crons -- every scheduler above runs unguarded,
+    // so more than one worker running them means duplicate race resolutions,
+    // duplicate pushes, duplicate payout reconcile, etc.
+    if (process.env.NODE_APP_INSTANCE === "0") {
+      if (cronStartDelayMs > 0) {
+        logger.log(`[CRON] Job scheduling starts in ${cronStartDelayMs / 1000}s`);
+        setTimeout(startCrons, cronStartDelayMs);
+      } else {
+        startCrons();
+      }
     } else {
-      startCrons();
+      logger.log(`[CRON] Skipping cron scheduling on NODE_APP_INSTANCE=${process.env.NODE_APP_INSTANCE}`);
     }
   });
 }
