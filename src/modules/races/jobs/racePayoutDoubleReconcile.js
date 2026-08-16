@@ -204,7 +204,6 @@ function buildRacePayoutDoubleReconcile(dependencies = {}) {
           createdAt: { gt: cutoff, lte: now },
         },
       });
-      if (bonus > 370) failures.push("initial_rollout_bonus_threshold");
       const healthy = failures.length === 0;
       const event = {
         event: healthy ? "race_payout_double_reconcile" : "race_payout_double_alert",
