@@ -1,6 +1,38 @@
 const { Prisma } = require("@prisma/client");
 const { prisma } = require("../../../db");
 
+// The cosmetic hydration subtree: participant -> user -> equipped cosmetics ->
+// shop item render metadata. Four Prisma queries and the dominant cost of any
+// read that carries it (see the long note on stepSyncScopeRaceSelect below).
+// Shared so the paged detail read below hydrates EXACTLY the same shape for its
+// page as the fat include does for the whole field — a page and a whole answer
+// must be indistinguishable per participant.
+const participantCosmeticUserSelect = {
+  select: {
+    id: true,
+    displayName: true,
+    profilePhotoUrl: true,
+    equippedAccessories: {
+      include: {
+        shopItem: {
+          select: {
+            id: true,
+            sku: true,
+            name: true,
+            slot: true,
+            assetKey: true,
+            renderMetadata: true,
+            bobble: true,
+            testOnly: true,
+            remoteOnly: true,
+            assetVersion: true,
+          },
+        },
+      },
+    },
+  },
+};
+
 const participantInclude = {
   participants: {
     // Uses `include` (not `select`), so all RaceParticipant scalar fields —
@@ -8,35 +40,66 @@ const participantInclude = {
     // returned automatically. The lean findActiveForUser select does NOT need
     // resultsSeenAt; race resolution never reads it.
     include: {
-      user: {
-        select: {
-          id: true,
-          displayName: true,
-          profilePhotoUrl: true,
-          equippedAccessories: {
-            include: {
-              shopItem: {
-                select: {
-                  id: true,
-                  sku: true,
-                  name: true,
-                  slot: true,
-                  assetKey: true,
-                  renderMetadata: true,
-                  bobble: true,
-                  testOnly: true,
-                  remoteOnly: true,
-                  assetVersion: true,
-                },
-              },
-            },
-          },
-        },
-      },
+      user: participantCosmeticUserSelect,
     },
     orderBy: { joinedAt: "asc" },
   },
 };
+
+// ── Paged race-detail read plan ───────────────────────────────────────────────
+// Used ONLY when a client both advertises `race_participants_paging` and asks
+// for `view=participants-v1`. Every other caller keeps `findById` verbatim.
+//
+// The point is the QUERY plan, not the payload: `findById` hydrates the cosmetic
+// subtree for all N participants (477 on the prod Weekly Challenge), and slicing
+// the serialized array afterwards saves bytes but not database time. This plan
+// splits that one fat read into:
+//
+//   findDetailsCore              -> the race row + creator/winner/seed/tournament,
+//                                   with NO participants relation at all.
+//   findDetailsParticipantSummaries -> every participant row, scalars only, no
+//                                   user/accessory join. Feeds the ACCEPTED /
+//                                   per-team counts, the money view (which needs
+//                                   per-row buyIn/placement/forfeit scalars, so a
+//                                   GROUP BY could not replace it), the pagination
+//                                   total and participantUserIds.
+//   findDetailsParticipantPage   -> ONE page, cosmetics and all, LIMIT/OFFSET
+//                                   applied by the database.
+//
+// `findDetailsCore` deliberately uses `include` rather than `select`, so every
+// race scalar comes back exactly as `findById` returns it. A `select` here would
+// silently drop a field the money view or the leave-action resolver reads.
+const detailsRelationInclude = {
+  creator: { select: { id: true, displayName: true, profilePhotoUrl: true } },
+  winner: { select: { id: true, displayName: true, profilePhotoUrl: true } },
+  seed: { select: { kind: true } },
+  tournament: { select: { id: true, name: true, bracketSize: true } },
+};
+
+// Every participant scalar any non-cosmetic detail consumer reads. Cheap enough
+// to fetch for the whole field: it is one row of small columns per participant
+// with no joins, which is what replaces "scan all 477 hydrated rows for a count".
+const detailsParticipantSummarySelect = {
+  id: true,
+  userId: true,
+  status: true,
+  team: true,
+  totalSteps: true,
+  rawSteps: true,
+  placement: true,
+  finishedAt: true,
+  forfeitedAt: true,
+  buyInAmount: true,
+  buyInStatus: true,
+  joinedAt: true,
+};
+
+// `joinedAt` alone has no tiebreak, and seeded Daily/Weekly races bulk-enroll
+// hundreds of rows in the same instant — precisely the races this pager exists
+// for. Without the `id` tiebreak, Postgres may order tied rows differently
+// between two LIMIT/OFFSET reads, so a page walk can duplicate or skip a
+// participant and page 0 can reshuffle between polls.
+const detailsParticipantOrder = [{ joinedAt: "asc" }, { id: "asc" }];
 
 const mysteryBoxParticipantSelect = {
   id: true,
@@ -147,6 +210,12 @@ const Race = {
         status: true,
         seededBucketId: true,
         tournamentId: true,
+        // Required by the race-preview carve-out in loadBootstrapAccess
+        // (canReadRacePreview reads race.isPublic). /bootstrap is the FIRST call
+        // the race-detail screen makes, so without this column that gate 403s
+        // before getRaceDetails — which has isPublic via findDetailsCore's
+        // include — is ever reached.
+        isPublic: true,
         participants: {
           where: { userId },
           select: { userId: true, status: true },
@@ -179,14 +248,41 @@ const Race = {
     return prisma.race.findUnique({
       where: { id },
       include: {
-        creator: { select: { id: true, displayName: true, profilePhotoUrl: true } },
-        winner: { select: { id: true, displayName: true, profilePhotoUrl: true } },
-        seed: { select: { kind: true } },
+        ...detailsRelationInclude,
         // Tournament context for a matchup race's banner (additive; null on
-        // ordinary races).
-        tournament: { select: { id: true, name: true, bracketSize: true } },
+        // ordinary races) is part of detailsRelationInclude.
         ...participantInclude,
       },
+    });
+  },
+
+  // Race scalars + the four display relations, with NO participants. See the
+  // "Paged race-detail read plan" note above.
+  async findDetailsCore(id) {
+    return prisma.race.findUnique({
+      where: { id },
+      include: detailsRelationInclude,
+    });
+  },
+
+  // Every participant row, scalars only — no user / cosmetic join.
+  async findDetailsParticipantSummaries(raceId) {
+    return prisma.raceParticipant.findMany({
+      where: { raceId },
+      select: detailsParticipantSummarySelect,
+      orderBy: detailsParticipantOrder,
+    });
+  },
+
+  // ONE page of participants, cosmetics included, LIMIT/OFFSET pushed into the
+  // database rather than sliced in JS after the fact.
+  async findDetailsParticipantPage(raceId, { skip = 0, take = 10 } = {}) {
+    return prisma.raceParticipant.findMany({
+      where: { raceId },
+      include: { user: participantCosmeticUserSelect },
+      orderBy: detailsParticipantOrder,
+      skip,
+      take,
     });
   },
 

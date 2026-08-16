@@ -257,7 +257,8 @@ const POWERUP_COPY_SEED = [
   {
     powerupType: "CLEANSE",
     name: "Cleanse",
-    description: "Remove all debuffs an opponent placed on you",
+    description:
+      "Remove all debuffs an opponent placed on you, except Power Outage",
     shortDescription: null,
     upgradeTierLabels: [],
   },
@@ -317,7 +318,7 @@ const POWERUP_COPY_SEED = [
     powerupType: "QUICK_RINSE",
     name: "Quick Rinse",
     description:
-      "Cut the remaining time on every opponent effect currently on you in half. Your own buffs stay put",
+      "Cut the remaining time on every opponent effect currently on you in half, except Power Outage. Your own buffs stay put",
     shortDescription: null,
     upgradeTierLabels: [],
   },

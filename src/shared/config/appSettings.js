@@ -62,6 +62,24 @@ const KNOWN_FLAGS = {
   seededRaceBucketsEnabled: false,
   // Server-only switch for transactional quick-share automatic friendship.
   quickRaceShareAutoFriendEnabled: false,
+  // Race/tournament preview-before-joining (docs/race-preview-before-join-spec.md).
+  // Lets a NON-participant read a PUBLIC, non-tournament-matchup race on the
+  // three access-gated endpoints (GET /races/:id, /bootstrap, /progress).
+  //
+  // This is a KILL SWITCH layered on top of the client `race_preview` capability
+  // token, not a redundant second gate. The token is a COMPAT gate — it proves
+  // the caller's build can render a preview — but once that build is on the App
+  // Store it is frozen, so the token can never be withdrawn without a new
+  // submission. Two concrete risks make an instant off switch necessary: preview
+  // /progress reads deliberately fall through to the read-only persisted path on
+  // a cross-timezone snapshot miss (a full participants + active-effects read on
+  // the system's most expensive endpoint), and if the participants[] financial
+  // redaction is ever found incomplete, this flag is the only remediation that
+  // isn't a week-long phased rollout.
+  //
+  // Default FALSE: deploying this backend changes nothing for anyone. Flip it on
+  // only after the carrying app build has substantially rolled out.
+  racePreviewEnabled: false,
   // Rewarded-ad race payout double cohort percentage. Numeric 0..100; zero is
   // the deployment-safe default. Preparation rechecks the row uncached inside
   // its transaction, while GET /races may use this short-lived advisory cache.
