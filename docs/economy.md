@@ -13,6 +13,26 @@ payouts/refunds and every unrelated reason are excluded. Rollout stops disable
 preparation without invalidating pending claims; the claim switch is reserved
 as an exceptional exploit brake.
 
+**Verified 2026-08-16 (prod, read-only):**
+
+| Item | Value | Source of truth |
+| --- | ---: | --- |
+| Per-offer / rolling-24h-per-identity cap | **500 coins** | `race_payout_double_offers.max_bonus_coins` = 500 on all prod rows; `RACE_PAYOUT_DOUBLE_MAX_BONUS_COINS` unset → default 500 in `src/modules/economy/adRewards.js:90` |
+| `racePayoutDoubleRolloutPercent` | 0 (feature off) | `app_settings` row |
+| Lifetime claims | 10 claims / 1,554 bonus coins / 10 distinct identities, all 2026-08-15 | `race_payout_double_offers` where `status='CLAIMED'` |
+| Largest single claim | 500 coins (at cap) | same |
+| Aggregate canary threshold | `bonus > 370` per trailing 24h, cluster-wide | `src/modules/races/jobs/racePayoutDoubleReconcile.js:207` |
+| Identity key | `hashAppleSub(appleId || googleSub)` | `services/racePayoutDoublePolicy.js` |
+
+Eligible base is the sum of exact positive race prize rows. Prod prize-payout
+distribution (7d): 744 rows, median 1 coin, mean 51, max 2,163 —
+`coin_transactions.reason='race_prize_pool_payout'`. No `race_finish_reward`
+rows minted in the trailing 7 days.
+
+Economy context (7d, prod `coin_transactions`): total mint ≈ 19,632 coins/day,
+total sink ≈ 5,921 coins/day; per-user daily earn p10 = 1, median = 80,
+p90 = 203 (n = 1,243 user-days). DAU ≈ 447, 613 total users.
+
 ## QUICK_CREATE live-membership cap
 
 **Approved target: 5 live memberships per user (2026-08-13).** A membership is
