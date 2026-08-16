@@ -12,6 +12,7 @@ const {
   serializePayouts,
 } = require("../racePrizePool");
 const { getRaceLeaveAction } = require("../services/raceLeaveAction");
+const { canReadRacePreview } = require("../services/canReadRacePreview");
 
 // The JS twin of the model's `detailsParticipantOrder` ([joinedAt asc, id asc]).
 // Used only when a page is sliced out of a preloaded race instead of taken by
@@ -53,7 +54,14 @@ async function getRaceDetails(
   // param alone would be a compat break: the build in the field TODAY already
   // sends `view=participants-v1` (it means it for `progress`) while still
   // scanning the whole race.participants array for membership and counts.
-  { pagination = null } = {}
+  //
+  //   previewViewer      -> the client advertised `race_preview`. A BOOLEAN,
+  //                         computed in routes.js from req.clientFeatures; the
+  //                         feature set itself is deliberately not threaded into
+  //                         the query layer. It only ENABLES the public-preview
+  //                         carve-out below — the flag and the race's own
+  //                         public/non-tournament shape still have to agree.
+  { pagination = null, previewViewer = false } = {}
 ) {
   const pagingCapable = pagination?.capable === true;
   const pagingRequested =
@@ -124,17 +132,35 @@ async function getRaceDetails(
 
   // Declining revokes access: the decliner is treated like a non-participant
   // instead of getting a read-only ghost view of the race.
+  //
+  // Drives the financial redaction below. TRUE only on the NEW public-preview
+  // branch — the long-shipped tournament-spectate branch keeps serving its
+  // buyIn/payout fields exactly as it does in production today.
+  let isPublicPreview = false;
   if (!myParticipant || myParticipant.status === "DECLINED") {
-    // Tournament spectating: any ACCEPTED bracket player (including eliminated)
-    // may READ a matchup race they aren't in. Read-only — no write path is
-    // relaxed here. Non-tournament races and non-participants still 403.
-    const canSpectate =
-      race.tournamentId != null &&
-      (await isTournamentParticipant(race.tournamentId, userId));
-    if (!canSpectate) {
-      const error = new Error("You are not a participant in this race");
-      error.statusCode = 403;
-      throw error;
+    // Cheap, purely in-memory checks first (and the two branches are mutually
+    // exclusive: the preview predicate returns false whenever tournamentId is
+    // set, which is the only case canSpectate can be true). Asking about the
+    // preview first is what keeps the spectate branch's DB round trip off the
+    // common public-race path.
+    isPublicPreview = await canReadRacePreview({
+      race,
+      myParticipant,
+      previewViewer,
+    });
+    if (!isPublicPreview) {
+      // Tournament spectating: any ACCEPTED bracket player (including
+      // eliminated) may READ a matchup race they aren't in. Read-only — no write
+      // path is relaxed here. Non-tournament races and non-participants still
+      // 403.
+      const canSpectate =
+        race.tournamentId != null &&
+        (await isTournamentParticipant(race.tournamentId, userId));
+      if (!canSpectate) {
+        const error = new Error("You are not a participant in this race");
+        error.statusCode = 403;
+        throw error;
+      }
     }
   }
 
@@ -265,9 +291,16 @@ async function getRaceDetails(
       totalSteps: p.totalSteps,
       finishedAt: p.finishedAt,
       joinedAt: p.joinedAt,
-      buyInAmount: p.buyInAmount,
-      buyInStatus: p.buyInStatus,
-      payoutCoins: p.payoutCoins,
+      // Financial redaction for a public-preview viewer. These three are the
+      // only fields in this payload the public race listing does not already
+      // expose, so lifting the 403 without nulling them would be a NEW leak of
+      // every participant's stake and winnings to any stranger browsing the
+      // public list. There is no "my own row" to exempt: a preview viewer has
+      // no participant row at all. Null (never omitted) so a defensive client
+      // read cannot tell a missing key from a null value.
+      buyInAmount: isPublicPreview ? null : p.buyInAmount,
+      buyInStatus: isPublicPreview ? null : p.buyInStatus,
+      payoutCoins: isPublicPreview ? null : p.payoutCoins,
       // Team races (additive; null on individual races). The lobby renders the
       // two-column face-off from `team`; forfeitedAt marks frozen members.
       team: p.team ?? null,

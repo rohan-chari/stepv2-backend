@@ -39,6 +39,7 @@ const {
 } = require("../../powerups/constants/powerupGating");
 const { roundLabel } = require("../../tournaments/constants/tournaments");
 const { isTournamentParticipant } = require("../../tournaments/services/tournamentAccess");
+const { canReadRacePreview } = require("../services/canReadRacePreview");
 const {
   computeLeechEarnedTransfer,
   applyLeechTransfers,
@@ -1422,6 +1423,11 @@ function buildGetRaceProgress(deps = {}) {
       participantsView = null,
       participantsOffset = 0,
       participantsLimit = 10,
+      // Race preview-before-joining: did the caller advertise `race_preview`?
+      // A BOOLEAN computed in routes.js from req.clientFeatures. It only enables
+      // the public-preview carve-out — the kill switch and the race's own
+      // public/non-tournament shape still have to agree (canReadRacePreview).
+      previewViewer = false,
     } = {}
   ) {
     const race = await raceModel.findById(raceId);
@@ -1436,18 +1442,33 @@ function buildGetRaceProgress(deps = {}) {
 
     const myParticipant = race.participants.find((p) => p.userId === userId);
     // Mirrors getRaceDetails: declining revokes access to the race.
+    //
+    // TRUE only on the NEW public-preview branch. Everything this flag gates
+    // below is about making the read STRICTLY read-only — see the snapshot block.
+    let isPublicPreview = false;
     if (!myParticipant || myParticipant.status === "DECLINED") {
-      // Tournament spectating: an ACCEPTED bracket player (incl. eliminated) may
-      // READ a matchup race they aren't in. Read-only — the powerup-earn block
-      // below is skipped for a spectator (no myParticipant), and no write path
-      // is relaxed here. Non-tournament races and non-participants still 403.
-      const canSpectate =
-        race.tournamentId != null &&
-        (await isTournamentParticipantFn(race.tournamentId, userId));
-      if (!canSpectate) {
-        const error = new Error("You are not a participant in this race");
-        error.statusCode = 403;
-        throw error;
+      // Same order, same predicate, same reasoning as getRaceDetails: the cheap
+      // in-memory checks first, and the two branches are mutually exclusive
+      // (the preview predicate is false whenever tournamentId is set).
+      isPublicPreview = await canReadRacePreview({
+        race,
+        myParticipant,
+        previewViewer,
+      });
+      if (!isPublicPreview) {
+        // Tournament spectating: an ACCEPTED bracket player (incl. eliminated)
+        // may READ a matchup race they aren't in. Read-only — the powerup-earn
+        // block below is skipped for a spectator (no myParticipant), and no
+        // write path is relaxed here. Non-tournament races and non-participants
+        // still 403.
+        const canSpectate =
+          race.tournamentId != null &&
+          (await isTournamentParticipantFn(race.tournamentId, userId));
+        if (!canSpectate) {
+          const error = new Error("You are not a participant in this race");
+          error.statusCode = 403;
+          throw error;
+        }
       }
     }
 
@@ -1500,7 +1521,40 @@ function buildGetRaceProgress(deps = {}) {
     const cacheOn = await standingsCacheEnabled();
 
     let snapshot;
-    if (!cacheOn) {
+    if (isPublicPreview) {
+      // ── STRICTLY READ-ONLY PREVIEW PATH ───────────────────────────────────
+      // A stranger browsing the public list must never be able to mutate a race
+      // they have no relationship to. Without this branch a single preview tap
+      // could (a) win `withRebuildLock` and run a full scoring replay for a
+      // 477-participant seeded race, (b) run `computeSharedState({ persist:
+      // true })` on the cache-off path — which writes back totalSteps, expires
+      // effects and processes high-multiplier claims — and (c) enqueue a
+      // DISPLAY_REFRESH resolution job. All three are skipped here: serve
+      // whatever snapshot exists REGARDLESS of staleness, else fall through to
+      // the read-only persisted read.
+      //
+      // The staleness tolerance is deliberate. A preview is a browse, not a
+      // watch (the client fetches once and does not poll), so a few seconds of
+      // drift is invisible — and the alternative is letting an unbounded,
+      // unauthenticated-by-membership audience drive the system's most expensive
+      // rebuild.
+      //
+      // ACCEPTED: user-created public races carry `timezone = NULL` and score in
+      // the REQUESTER's tz, so a preview viewer in another timezone misses the
+      // snapshot and lands on loadPersistedState. That is correct. Do NOT "fix"
+      // it by adding timezone to the C3 cache key — that makes the key's
+      // invalidation set unenumerable (cacheKeys.js).
+      let usable = null;
+      if (cacheOn && !snapshotStore.isBypassed()) {
+        const cached = await snapshotStore.readSnapshot(raceId);
+        if (cached && snapshotStore.matchesTimeZone(cached, scoringTimeZone)) {
+          usable = cached;
+          snapshotStore.__bump("snapshotHits");
+        }
+      }
+      snapshot =
+        usable || (await loadPersistedState({ race, raceId, scoringTimeZone }));
+    } else if (!cacheOn) {
       // Flag OFF: byte-for-byte today's behavior — the replay AND its three
       // side effects (expireEffects, the updateTotalSteps write-back, the
       // high-multiplier claim) run exactly where they always did.
@@ -1664,7 +1718,12 @@ function buildGetRaceProgress(deps = {}) {
       releaseChannel,
       supportsAds,
       userTimeZone,
-      syncPowerups: !cacheOn,
+      // The powerup box-gate sync WRITES race_participants and mints RacePowerup
+      // rows. It is already unreachable for a preview viewer (the whole block is
+      // gated on `myParticipant`, which they do not have), but this is the
+      // response builder's own write seam and the read-only contract is worth
+      // stating at it rather than relying on a guard two functions away.
+      syncPowerups: !cacheOn && !isPublicPreview,
       participantsView,
       participantsOffset,
       participantsLimit,

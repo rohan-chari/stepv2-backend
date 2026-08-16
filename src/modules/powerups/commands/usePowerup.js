@@ -340,7 +340,16 @@ function isOpponentInflicted(effect, userId) {
 // BOTH "nothing to cleanse/rinse" guards in one edit, because all four read the
 // single isCleansableDebuff predicate below — which is also why the 400 and the
 // 409 both need their own test.
-const NON_CLEANSABLE_TYPES = ["BOUNTY", "RALLY_FLAG", "UPRISING"];
+// POWER_OUTAGE (batch 2026-08-15 item 6) joins the list for a third reason: it
+// IS a genuine opponent-inflicted debuff, but it is an AoE strategic jam in the
+// same family as RALLY_FLAG/UPRISING and the owner decided a single Cleanse
+// should not undo a 30-minute blackout. Note the interaction that makes this
+// mostly a guard-path change: a victim with a LIVE outage is already blocked by
+// the jam guard above (~line 1043) and cannot fire a Cleanse at all, so the
+// only state this exclusion actually changes is a lapsed-but-still-ACTIVE row
+// that lazy expiry hasn't swept — CLEANSE, unlike QUICK_RINSE, does not test
+// liveness. Both are covered by powerups-power-outage-not-cleansable.test.js.
+const NON_CLEANSABLE_TYPES = ["BOUNTY", "RALLY_FLAG", "UPRISING", "POWER_OUTAGE"];
 
 function isCleansableDebuff(effect, userId) {
   if (NON_CLEANSABLE_TYPES.includes(effect.type)) return false;

@@ -210,6 +210,12 @@ const Race = {
         status: true,
         seededBucketId: true,
         tournamentId: true,
+        // Required by the race-preview carve-out in loadBootstrapAccess
+        // (canReadRacePreview reads race.isPublic). /bootstrap is the FIRST call
+        // the race-detail screen makes, so without this column that gate 403s
+        // before getRaceDetails — which has isPublic via findDetailsCore's
+        // include — is ever reached.
+        isPublic: true,
         participants: {
           where: { userId },
           select: { userId: true, status: true },

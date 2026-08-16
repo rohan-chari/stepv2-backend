@@ -73,6 +73,10 @@ const {
   supportsBuckets: supportsSeededRaceBuckets,
 } = require("./services/seededRaceBuckets");
 const {
+  canReadRacePreview,
+  hasRacePreviewToken,
+} = require("./services/canReadRacePreview");
+const {
   getRacePayoutDoubleOffer: defaultGetRacePayoutDoubleOffer,
   buildGetRacePayoutDoubleOffer,
 } = require("./queries/getRacePayoutDoubleOffer");
@@ -387,13 +391,19 @@ function createRacesRouter(dependencies = {}) {
         offset: participantsOffset,
         limit: participantsLimit,
       },
+      // Race preview-before-joining. The TOKEN check is computed here, where
+      // req.clientFeatures lives, and handed to the query layer as a plain
+      // boolean in this existing trailing options object — getRaceDetails
+      // deliberately never learns about clientFeatures, and never grows a tenth
+      // positional parameter.
+      previewViewer: hasRacePreviewToken(req.clientFeatures),
     };
   }
 
   function loadRaceProgress(
     req,
     resolvedContext = null,
-    { forceFullParticipants = false } = {}
+    { forceFullParticipants = false, allowPreview = true } = {}
   ) {
     const { isParticipantsView, participantsOffset, participantsLimit } =
       readParticipantsPagingQuery(req, { forceFullParticipants });
@@ -415,6 +425,15 @@ function createRacesRouter(dependencies = {}) {
         participantsView: isParticipantsView ? "participants-v1" : null,
         participantsOffset,
         participantsLimit,
+        // Same boolean, same trailing-options mechanism as raceDetailsPagingOptions.
+        // On this endpoint it additionally forces the STRICTLY READ-ONLY snapshot
+        // path (no rebuild lock, no persist, no resolution enqueue). allowPreview
+        // lets a specific call site (e.g. /powerups/use-context, which always
+        // requires real ACTIVE participation and never serves a preview viewer)
+        // opt out entirely, so a non-participant token holder hits the cheap
+        // early 403 instead of a full forceFullParticipants read that would only
+        // be denied afterward anyway.
+        previewViewer: allowPreview && hasRacePreviewToken(req.clientFeatures),
       }
     );
   }
@@ -442,9 +461,23 @@ function createRacesRouter(dependencies = {}) {
       context.tournamentId != null &&
       (context.tournament?.participants?.length || 0) > 0;
     if ((!direct || direct.status === "DECLINED") && !tournamentAccess) {
-      const error = new Error("You are not a participant in this race");
-      error.statusCode = 403;
-      throw error;
+      // Race preview-before-joining: the SAME predicate the two query-layer
+      // gates use. This one matters most — /bootstrap is the FIRST request the
+      // race-detail screen makes, so a carve-out that skipped this gate would
+      // 403 the feature dead before it ever reached getRaceDetails.
+      //
+      // `direct` is passed as myParticipant so a DECLINED row still fails the
+      // predicate's first check and keeps getting the real 403.
+      const preview = await canReadRacePreview({
+        race: context,
+        myParticipant: direct,
+        previewViewer: hasRacePreviewToken(req.clientFeatures),
+      });
+      if (!preview) {
+        const error = new Error("You are not a participant in this race");
+        error.statusCode = 403;
+        throw error;
+      }
     }
     return context;
   }
@@ -1347,6 +1380,10 @@ function createRacesRouter(dependencies = {}) {
     try {
       const progress = await loadRaceProgress(req, null, {
         forceFullParticipants: true,
+        // This endpoint always requires real ACTIVE participation — never
+        // serve it to a preview viewer, cheap early 403 instead of a full
+        // participant read that would only be denied afterward anyway.
+        allowPreview: false,
       });
       if (progress?.status !== "ACTIVE") {
         return res.status(400).json({
