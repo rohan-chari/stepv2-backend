@@ -219,13 +219,43 @@ Two things this surfaced, both worth keeping in mind before touching the sort:
   a "many concurrent enqueues, no 40P01" test cannot by itself protect this
   invariant. Verified by mutation: reversing the order fails 3 of the 5 cases.
 
-### 3.2 Compute the guard once instead of three times
+### 3.2 Compute the guard once instead of three times — TRIED, REJECTED 2026-08-17
 
-Hoist the ~12-condition guard into a single `WITH` CTE (or one `LATERAL`)
-evaluated once, then reference the boolean three times. **Pure refactor — the
-predicate is unchanged, so `FULL` is forced in exactly the cases it is today.**
+**Do not re-attempt without new evidence.** The change was written, tested for
+behavioural parity, benchmarked, and reverted. It is **9% slower**, not ~3×
+faster.
 
-Expected ~3× reduction in the jsonb work per upsert on its own.
+Implementation used, since a CTE cannot reach `EXCLUDED`: multi-column
+assignment, `SET (dirty_reasons, dirty_participant_ids, dirty_powerup_types) =
+(SELECT … FROM (guard) g)`. The guard's condition list, its OR ordering, its
+three-valued logic and the laziness of the merge branches were all preserved.
+
+Measured on the integration database, 900 stored participant ids, 400 executions
+per trial inside one server-side plpgsql loop, median of 5 trials
+(`scripts/bench-enqueue-statement.js`):
+
+| Statement | per-execution |
+|---|---|
+| shipped (guard written out ×3) | **1.12 ms** |
+| hoisted (guard evaluated ×1) | **1.22 ms** |
+
+Reproduced at 100 participants too (0.338 → 0.353 ms), and the wall-clock
+end-to-end benchmark agrees. So evaluating the guard *once* costs more than
+evaluating it *three times* — most plausibly Postgres was already sharing those
+repeated subexpressions, while the nested `SubPlan`-inside-`SubPlan` the hoist
+introduces adds per-invocation overhead that exceeds anything it saves.
+
+**Two things worth keeping from the attempt:**
+
+1. **`test/integration/race-queue-v2-enqueue-scope-guard.test.js` was kept.** The
+   enqueue guard had NO coverage of any of its degrade branches — the one
+   existing over-cap test drives `discardSuperseded`, a different statement with
+   its own copy. 13 cases now pin every branch, and they pass identically on the
+   shipped statement and on the rejected rewrite, which is what established that
+   the rewrite was a true behavioural no-op before it was judged on speed.
+2. **Per-call `EXPLAIN ANALYZE` is not usable at this effect size.** Its variance
+   exceeded the signal and it reported a **41% win** for the change the loop
+   benchmark shows is a 9% loss. Use the loop benchmark.
 
 ### 3.3 Replace the cap checks with `jsonb_array_length`
 
@@ -245,6 +275,29 @@ alone: if arrays can contain duplicates, `jsonb_array_length` over-counts and
 would force `FULL` slightly earlier than today. Forcing `FULL` early is the
 *safe* direction (correct, just slower), but it must be a deliberate, tested
 decision. **Confirm the dedup invariant first.**
+
+**Ceiling measured 2026-08-17 — this is the one still worth doing.** Same
+harness and conditions as 3.2, neutralising *only* the cap counts
+(`VARIANT=nocaps`):
+
+| Component of the shipped statement | per-execution | share |
+|---|---|---|
+| the two `SELECT DISTINCT` cap counts | 0.355 ms | **31%** |
+| the rest of the guard (typeof / `<@` / `jsonb_path_exists`) | 0.311 ms | 27% |
+| merges, insert, WAL, lock | 0.495 ms | 43% |
+| **total** | **1.16 ms** | 100% |
+
+So 3.3 is worth ~31% of the hottest statement in the backend — a real target,
+and the largest single one left. Note this also revises 3.2's premise: the guard
+as a whole is ~58% of the statement, but its cost is in *what it computes*, not
+in *how many times it is written*.
+
+Two cautions the 3.2 attempt earned:
+
+- **Measure with `scripts/bench-enqueue-statement.js`, not `EXPLAIN ANALYZE`.**
+- **Extend `race-queue-v2-enqueue-scope-guard.test.js` first.** It already pins
+  the exact-cap boundary (1000 and 64 pass; 1001 and 65 degrade). If the dedup
+  invariant does not hold, those are the cases that will say so.
 
 ### 3.4 Skip the upsert when it would be a no-op
 
