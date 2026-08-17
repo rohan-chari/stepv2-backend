@@ -141,23 +141,91 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
       tx = prisma
     ) {
       if (!raceId) return null;
-      const triggered = JSON.stringify(userId ? [userId] : []);
-      const dirty = dirtyEnvelope ? normalizeDirtyEnvelope(dirtyEnvelope) : null;
-      const dirtyReasons = JSON.stringify(dirty?.reasons || []);
-      const dirtyParticipantIds = JSON.stringify(dirty?.dirtyParticipantIds || []);
-      const dirtyPowerupTypes = JSON.stringify(dirty?.powerupTypes || []);
-      const dirtyPriority = dirty?.priority || "IMMEDIATE";
-      const artifact =
-        displayArtifact &&
-        typeof displayArtifact.id === "string" &&
-        /^[a-f0-9]{64}$/i.test(displayArtifact.digest || "") &&
-        Number.isInteger(displayArtifact.schema)
-          ? displayArtifact
+      const [row] = await this.enqueueMany(
+        {
+          raceIds: [raceId],
+          userId,
+          resolutionTimeZone,
+          now,
+          dirtyEnvelopeByRaceId: new Map([[raceId, dirtyEnvelope]]),
+          displayArtifactByRaceId: new Map([[raceId, displayArtifact]]),
+          burstCoalescing,
+        },
+        tx
+      );
+      return row || null;
+    },
+
+    // Convenience for the multi-race enqueue sites (sync-v2 Transaction B).
+    // Enqueues in stable ascending raceId order so two
+    // concurrent uploaders never take the row locks in opposite orders.
+    //
+    // PERFORMANCE (2026-08-17): this used to be a `for` loop issuing the upsert
+    // once per race, sequentially, inside the caller's transaction. Profiling at
+    // 61 rps showed that statement was **81% of all database busy time**, and
+    // marshalling it N times per sync was the bulk of the 34.8% of app CPU spent
+    // in Prisma. A user in the median 4 active races paid 4 sequential round
+    // trips with a transaction — and its row locks — held open across all of
+    // them, which is what produced the `idle in transaction` pileup.
+    //
+    // It is now ONE statement for all races. The per-race values travel as a
+    // jsonb array expanded by `jsonb_to_recordset`; the conflict clause is
+    // unchanged in meaning, reading each race's new values from `EXCLUDED`
+    // instead of from positional parameters.
+    //
+    // `ORDER BY i."raceId"` is load-bearing, not cosmetic: it is the same
+    // ascending lock order the old loop guaranteed, and it is what stops two
+    // concurrent uploaders sharing two races from deadlocking against each
+    // other. See test/integration/race-queue-v2-single-writer.test.js.
+    async enqueueMany(
+      {
+        raceIds,
+        userId = null,
+        resolutionTimeZone = null,
+        now = new Date(),
+        dirtyEnvelopeByRaceId = null,
+        displayArtifactByRaceId = null,
+        burstCoalescing = false,
+      },
+      tx = prisma
+    ) {
+      const ordered = [...new Set(raceIds || [])]
+        .filter(Boolean)
+        .sort((a, b) => String(a).localeCompare(String(b)));
+      if (!ordered.length) return [];
+
+      const triggered = userId ? [userId] : [];
+      const rowsIn = ordered.map((raceId) => {
+        const dirty = dirtyEnvelopeByRaceId?.get?.(raceId)
+          ? normalizeDirtyEnvelope(dirtyEnvelopeByRaceId.get(raceId))
           : null;
-      const firstNotBeforeAt =
-        burstCoalescing && dirty?.priority === "COALESCE"
-          ? new Date(now.getTime() + DEFAULT_DEBOUNCE_MS)
-          : null;
+        const candidate = displayArtifactByRaceId?.get?.(raceId) || null;
+        const artifact =
+          candidate &&
+          typeof candidate.id === "string" &&
+          /^[a-f0-9]{64}$/i.test(candidate.digest || "") &&
+          Number.isInteger(candidate.schema)
+            ? candidate
+            : null;
+        const priority = dirty?.priority || "IMMEDIATE";
+        return {
+          raceId,
+          resolutionTimeZone,
+          triggered,
+          dirtyReasons: dirty?.reasons || [],
+          dirtyParticipantIds: dirty?.dirtyParticipantIds || [],
+          dirtyPowerupTypes: dirty?.powerupTypes || [],
+          dirtyPriority: priority,
+          artifactId: artifact?.id || null,
+          artifactDigest: artifact?.digest || null,
+          artifactSchema: artifact?.schema || null,
+          notBeforeAt:
+            burstCoalescing && priority === "COALESCE"
+              ? new Date(now.getTime() + DEFAULT_DEBOUNCE_MS).toISOString()
+              : null,
+        };
+      });
+
       const rows = await tx.$queryRawUnsafe(
         `
         INSERT INTO race_resolution_jobs_v2 (
@@ -166,16 +234,30 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
           dirty_reasons, dirty_participant_ids, dirty_powerup_types, dirty_priority,
           display_artifact_id, display_artifact_digest, display_artifact_schema,
           created_at, updated_at
-        ) VALUES (
-          gen_random_uuid()::text, $1, 1, $2, 'queued', 0,
-          $3, $12, $4::jsonb, '[]'::jsonb,
-          $5::jsonb, $6::jsonb, $7::jsonb, $8,
-          $9, $10, $11,
-          $3, $3
         )
+        SELECT
+          gen_random_uuid()::text, i."raceId", 1, i."resolutionTimeZone", 'queued', 0,
+          $2::timestamp, i."notBeforeAt", i."triggered", '[]'::jsonb,
+          i."dirtyReasons", i."dirtyParticipantIds", i."dirtyPowerupTypes", i."dirtyPriority",
+          i."artifactId", i."artifactDigest", i."artifactSchema",
+          $2::timestamp, $2::timestamp
+        FROM jsonb_to_recordset($1::jsonb) AS i(
+          "raceId" text,
+          "resolutionTimeZone" text,
+          "triggered" jsonb,
+          "dirtyReasons" jsonb,
+          "dirtyParticipantIds" jsonb,
+          "dirtyPowerupTypes" jsonb,
+          "dirtyPriority" text,
+          "artifactId" text,
+          "artifactDigest" text,
+          "artifactSchema" integer,
+          "notBeforeAt" timestamp
+        )
+        ORDER BY i."raceId"
         ON CONFLICT (race_id) DO UPDATE SET
           generation = race_resolution_jobs_v2.generation + 1,
-          resolution_time_zone = COALESCE($2, race_resolution_jobs_v2.resolution_time_zone),
+          resolution_time_zone = COALESCE(EXCLUDED.resolution_time_zone, race_resolution_jobs_v2.resolution_time_zone),
           state = CASE
             WHEN race_resolution_jobs_v2.state = 'running' THEN 'running'::"RaceResolutionJobState"
             ELSE 'queued'::"RaceResolutionJobState"
@@ -187,14 +269,14 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
           requested_at = CASE
             WHEN race_resolution_jobs_v2.state IN ('queued', 'running')
               THEN race_resolution_jobs_v2.requested_at
-            ELSE $3
+            ELSE $2::timestamp
           END,
           retry_at = NULL,
           last_error_code = NULL,
           triggered_by_user_ids = (
             SELECT COALESCE(jsonb_agg(DISTINCT v), '[]'::jsonb)
             FROM jsonb_array_elements(
-              race_resolution_jobs_v2.triggered_by_user_ids || $4::jsonb
+              race_resolution_jobs_v2.triggered_by_user_ids || EXCLUDED.triggered_by_user_ids
             ) AS v
           ),
           dirty_reasons = CASE
@@ -207,21 +289,21 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
               OR (race_resolution_jobs_v2.dirty_reasons = '[]'::jsonb
                   AND race_resolution_jobs_v2.state <> 'succeeded')
               OR race_resolution_jobs_v2.dirty_reasons ? 'FULL'
-              OR $5::jsonb ? 'FULL'
+              OR EXCLUDED.dirty_reasons ? 'FULL'
               OR (SELECT COUNT(*) FROM (
                     SELECT DISTINCT value
-                    FROM jsonb_array_elements(race_resolution_jobs_v2.dirty_participant_ids || $6::jsonb)
+                    FROM jsonb_array_elements(race_resolution_jobs_v2.dirty_participant_ids || EXCLUDED.dirty_participant_ids)
                   ) participant_scope) > 1000
               OR (SELECT COUNT(*) FROM (
                     SELECT DISTINCT value
-                    FROM jsonb_array_elements(race_resolution_jobs_v2.dirty_powerup_types || $7::jsonb)
+                    FROM jsonb_array_elements(race_resolution_jobs_v2.dirty_powerup_types || EXCLUDED.dirty_powerup_types)
                   ) powerup_scope) > 64
               THEN '["FULL"]'::jsonb
             ELSE (
               SELECT COALESCE(jsonb_agg(value ORDER BY first_ordinal), '[]'::jsonb)
               FROM (
                 SELECT value, MIN(ordinality) AS first_ordinal
-                FROM jsonb_array_elements(race_resolution_jobs_v2.dirty_reasons || $5::jsonb)
+                FROM jsonb_array_elements(race_resolution_jobs_v2.dirty_reasons || EXCLUDED.dirty_reasons)
                   WITH ORDINALITY AS merged(value, ordinality)
                 GROUP BY value
               ) stable
@@ -237,17 +319,17 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
               OR (race_resolution_jobs_v2.dirty_reasons = '[]'::jsonb
                   AND race_resolution_jobs_v2.state <> 'succeeded')
               OR race_resolution_jobs_v2.dirty_reasons ? 'FULL'
-              OR $5::jsonb ? 'FULL'
+              OR EXCLUDED.dirty_reasons ? 'FULL'
               OR (SELECT COUNT(*) FROM (
                     SELECT DISTINCT value
-                    FROM jsonb_array_elements(race_resolution_jobs_v2.dirty_participant_ids || $6::jsonb)
+                    FROM jsonb_array_elements(race_resolution_jobs_v2.dirty_participant_ids || EXCLUDED.dirty_participant_ids)
                   ) participant_scope) > 1000
               THEN '[]'::jsonb
             ELSE (
               SELECT COALESCE(jsonb_agg(value ORDER BY first_ordinal), '[]'::jsonb)
               FROM (
                 SELECT value, MIN(ordinality) AS first_ordinal
-                FROM jsonb_array_elements(race_resolution_jobs_v2.dirty_participant_ids || $6::jsonb)
+                FROM jsonb_array_elements(race_resolution_jobs_v2.dirty_participant_ids || EXCLUDED.dirty_participant_ids)
                   WITH ORDINALITY AS merged(value, ordinality)
                 GROUP BY value
                 HAVING COUNT(*) >= 1
@@ -264,81 +346,44 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
               OR (race_resolution_jobs_v2.dirty_reasons = '[]'::jsonb
                   AND race_resolution_jobs_v2.state <> 'succeeded')
               OR race_resolution_jobs_v2.dirty_reasons ? 'FULL'
-              OR $5::jsonb ? 'FULL'
+              OR EXCLUDED.dirty_reasons ? 'FULL'
               OR (SELECT COUNT(*) FROM (
                     SELECT DISTINCT value
-                    FROM jsonb_array_elements(race_resolution_jobs_v2.dirty_powerup_types || $7::jsonb)
+                    FROM jsonb_array_elements(race_resolution_jobs_v2.dirty_powerup_types || EXCLUDED.dirty_powerup_types)
                   ) powerup_scope) > 64
               THEN '[]'::jsonb
             ELSE (
               SELECT COALESCE(jsonb_agg(value ORDER BY first_ordinal), '[]'::jsonb)
               FROM (
                 SELECT value, MIN(ordinality) AS first_ordinal
-                FROM jsonb_array_elements(race_resolution_jobs_v2.dirty_powerup_types || $7::jsonb)
+                FROM jsonb_array_elements(race_resolution_jobs_v2.dirty_powerup_types || EXCLUDED.dirty_powerup_types)
                   WITH ORDINALITY AS merged(value, ordinality)
                 GROUP BY value
               ) stable
             )
           END,
           dirty_priority = CASE
-            WHEN race_resolution_jobs_v2.dirty_priority = 'IMMEDIATE' OR $8 = 'IMMEDIATE'
+            WHEN race_resolution_jobs_v2.dirty_priority = 'IMMEDIATE' OR EXCLUDED.dirty_priority = 'IMMEDIATE'
               THEN 'IMMEDIATE' ELSE 'COALESCE' END,
-          display_artifact_id = CASE WHEN $5::jsonb = '["DISPLAY_REFRESH"]'::jsonb THEN $9 ELSE NULL END,
-          display_artifact_digest = CASE WHEN $5::jsonb = '["DISPLAY_REFRESH"]'::jsonb THEN $10 ELSE NULL END,
-          display_artifact_schema = CASE WHEN $5::jsonb = '["DISPLAY_REFRESH"]'::jsonb THEN $11 ELSE NULL END,
-          updated_at = $3
+          display_artifact_id = CASE WHEN EXCLUDED.dirty_reasons = '["DISPLAY_REFRESH"]'::jsonb THEN EXCLUDED.display_artifact_id ELSE NULL END,
+          display_artifact_digest = CASE WHEN EXCLUDED.dirty_reasons = '["DISPLAY_REFRESH"]'::jsonb THEN EXCLUDED.display_artifact_digest ELSE NULL END,
+          display_artifact_schema = CASE WHEN EXCLUDED.dirty_reasons = '["DISPLAY_REFRESH"]'::jsonb THEN EXCLUDED.display_artifact_schema ELSE NULL END,
+          updated_at = $2::timestamp
         RETURNING ${jobColumns()}
         `,
-        raceId,
-        resolutionTimeZone,
-        now,
-        triggered,
-        dirtyReasons,
-        dirtyParticipantIds,
-        dirtyPowerupTypes,
-        dirtyPriority,
-        artifact?.id || null,
-        artifact?.digest || null,
-        artifact?.schema || null,
-        firstNotBeforeAt
+        JSON.stringify(rowsIn),
+        now
       );
-      return normalizeRow(rows[0]);
-    },
 
-    // Convenience for the multi-race enqueue sites (sync-v2 Transaction B).
-    // Enqueues in stable ascending raceId order so two
-    // concurrent uploaders never take the row locks in opposite orders.
-    async enqueueMany(
-      {
-        raceIds,
-        userId = null,
-        resolutionTimeZone = null,
-        now = new Date(),
-        dirtyEnvelopeByRaceId = null,
-        burstCoalescing = false,
-      },
-      tx = prisma
-    ) {
-      const ordered = [...new Set(raceIds || [])]
-        .filter(Boolean)
-        .sort((a, b) => String(a).localeCompare(String(b)));
-      const out = [];
-      for (const raceId of ordered) {
-        out.push(
-          await this.enqueue(
-            {
-              raceId,
-              userId,
-              resolutionTimeZone,
-              now,
-              dirtyEnvelope: dirtyEnvelopeByRaceId?.get?.(raceId) || null,
-              burstCoalescing,
-            },
-            tx
-          )
-        );
+      // RETURNING order is not guaranteed, and callers depend on the ascending
+      // ordering (sync-v2 reports the lexicographically-first race's job to
+      // frozen clients). Re-key and emit in the requested order.
+      const byRaceId = new Map();
+      for (const row of rows) {
+        const normalized = normalizeRow(row);
+        if (normalized) byRaceId.set(normalized.raceId, normalized);
       }
-      return out;
+      return ordered.map((raceId) => byRaceId.get(raceId) || null);
     },
 
     // Claim ONE eligible race with FOR UPDATE SKIP LOCKED, mint a FRESH lease

@@ -86,7 +86,8 @@ cd /var/www/step-tracker-backend \
   && npx prisma migrate deploy \
   && npx prisma generate \
   && npm run powerups:copy:sync -- --apply \
-  && pm2 reload steps-tracker
+  && pm2 startOrReload ecosystem.config.js --only steps-tracker \
+  && pm2 save
 ```
 
 **`reload`, not `restart`, and by name, not id.** `reload` cycles the cluster
@@ -94,14 +95,23 @@ workers one at a time (zero downtime); `restart` kills them all at once and
 caused a ~10s outage with user-visible 502s the one time it was used on prod
 (2026-07-12). See `DEPLOYMENT.md` for the same rule stated at the source.
 
+**Why `startOrReload ecosystem.config.js --only …` instead of a bare
+`pm2 reload steps-tracker`:** the bare form reloads whatever pm2 currently has,
+so if the process had drifted to 1 instance the deploy happily preserves the
+drift. Going through the config file re-asserts `instances: 2` on every deploy,
+which is what stops the 2026-08-16 half-capacity incident recurring. `--only`
+scopes it to one app; the trailing `pm2 save` updates the dump a reboot restores.
+
 ### 3a. Cluster instances — verify BOTH workers came back
 
-Prod and staging each run **2 pm2 cluster instances** as of 2026-08-15
-(`d23ec2e`), matching the droplet's 2 vCPUs. Scaling past 1 is safe *only*
-because `src/index.js:188-201` gates the whole `startCrons()` call behind
-`process.env.NODE_APP_INSTANCE === "0"` — pm2 sets that per worker, and without
-the guard every one of the ~17 schedulers (race resolution, live placement
-push, payout reconcile) would double-run on each extra worker.
+Prod and staging each run **2 pm2 cluster instances**, matching the droplet's
+2 vCPUs. **As of 2026-08-16 this is declared in `ecosystem.config.js` at the
+repo root** — that file, not the server's memory, is the source of truth. Scaling
+past 1 is safe *only* because `src/index.js:188-201` gates the whole
+`startCrons()` call behind `process.env.NODE_APP_INSTANCE === "0"` — pm2 sets
+that per worker, and without the guard every one of the ~17 schedulers (race
+resolution, live placement push, payout reconcile) would double-run on each
+extra worker.
 
 A cluster app shows **one `pm2 list` row per instance, sharing a name**. Two
 rows named `steps-tracker` is correct; one row means prod is running at half
@@ -113,13 +123,26 @@ pm2 describe steps-tracker | grep -E "instances|exec mode|status"
 ```
 
 If only one row is present, the scale was lost (a reboot, or a resurrect from a
-dump that predates the change — the dump does not reliably record the instance
-count):
+dump that predates the change). Re-assert it **from the config file**, so the
+count comes from the repo rather than being typed from memory:
 
 ```bash
-pm2 scale steps-tracker 2
+pm2 startOrReload ecosystem.config.js --only steps-tracker
 pm2 save                      # persist so the next resurrect keeps 2
 ```
+
+The `--only` is not optional: `ecosystem.config.js` declares BOTH apps, and
+omitting it would have a prod deploy reload staging too.
+
+The manual equivalent (`pm2 scale steps-tracker 2 && pm2 save`) still works, but
+prefer the config file — the whole point is that the number stops living in
+someone's head. **`pm2 save` is still required either way**; the ecosystem file
+governs starts and reloads, while the dump is what a *reboot* resurrects.
+
+> **Do not use `pm2 scale` on a shared droplet without checking the other apps
+> first.** On 2026-08-16 a `pm2 scale steps-tracker-staging 2` rebuilt pm2's
+> whole process table and dropped **prod** from 2 workers to 1 as a side effect,
+> restarting both apps. Always `pm2 list` before and after.
 
 **Confirm exactly one worker schedules crons after any scale or reload.** This
 is the invariant the guard exists to protect, and it is the thing that silently
