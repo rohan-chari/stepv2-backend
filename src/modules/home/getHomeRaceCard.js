@@ -31,6 +31,22 @@ const HOME_EFFECT_TYPES = [...POWERUP_EFFECT_TYPES, "LEECH"];
 // Max number of active races returned in the new ACTIVE_RACES (opt-in) state.
 const MAX_ACTIVE_RACES = 5;
 
+// The home card's duration label, in hours (spec §5.5).
+//
+// `maxDurationDays × 24` is only the true length while endsAt is derived from
+// it. A custom-window race's persisted duration is the FLOORED day count, so
+// that expression under-reports a 30h race as 24h. When the race has actually
+// started, the stamped instants are the truth — use them. Otherwise (a PENDING
+// invite, where endsAt is null by design) keep the existing expression exactly.
+// Purely a label; home_tab.dart reads it defensively already.
+function raceDurationHours(race) {
+  if (race?.startedAt && race?.endsAt) {
+    const ms = new Date(race.endsAt).getTime() - new Date(race.startedAt).getTime();
+    if (Number.isFinite(ms) && ms > 0) return Math.round(ms / (60 * 60 * 1000));
+  }
+  return race?.maxDurationDays ? race.maxDurationDays * 24 : null;
+}
+
 const USER_SELECT = {
   id: true,
   displayName: true,
@@ -127,7 +143,7 @@ async function checkPendingInvite(
     data: {
       raceId: race.id,
       name: race.name,
-      durationHours: race.maxDurationDays ? race.maxDurationDays * 24 : null,
+      durationHours: raceDurationHours(race),
       participantCount: race.participants.length,
       inviter: serializeUser(
         race.creator,

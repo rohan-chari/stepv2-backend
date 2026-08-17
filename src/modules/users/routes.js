@@ -250,6 +250,14 @@ function createAuthRouter(dependencies = {}) {
           "setupInviteCodePromptEnabled",
           false
         ),
+        // Custom race windows (spec §5.2a). Additive and ungated by app
+        // version: frozen binaries read named keys off featureFlags and ignore
+        // unknown ones. Fail-CLOSED (false) — the client must not offer a
+        // control the backend will reject with 403 FEATURE_DISABLED.
+        customRaceWindowEnabled: await safeFlag(
+          "customRaceWindowEnabled",
+          false
+        ),
         racesInviteDecisionGateEnabled: await safeFlag(
           "racesInviteDecisionGateEnabled",
           false

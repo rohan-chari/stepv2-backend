@@ -530,6 +530,11 @@ function createRacesRouter(dependencies = {}) {
         isPublic,
         maxParticipants,
         scheduledStartAt,
+        // Custom race window (spec §5.2). Optional and additive: absent from
+        // every frozen client's body, in which case createRace behaves exactly
+        // as today. Covers BOTH individual and team races — they share this one
+        // route and one createRace command.
+        scheduledEndAt,
         targetSteps,
         // Team races (TR-100s). Old clients never send these.
         isTeamRace,
@@ -551,6 +556,7 @@ function createRacesRouter(dependencies = {}) {
         isPublic,
         maxParticipants,
         scheduledStartAt,
+        scheduledEndAt,
         targetSteps,
         // Creator's device tz -> race's canonical scoring tz, so live standings
         // and placement pushes match what every participant sees on-screen.
@@ -1956,6 +1962,14 @@ function createRacesRouter(dependencies = {}) {
         teamAName,
         teamBName,
         teamSize,
+        // Custom race window (spec §5.2, Q4). BOTH are new to PATCH — a race's
+        // scheduled start has been create-only and permanently immutable until
+        // now. Read with `!== undefined`, never truthiness (architect S1): the
+        // `scheduledEndAt: null` clears-the-window contract only works if the
+        // field's PRESENCE is what's tested, and an `if (scheduledEndAt)` check
+        // would make the clear a silent no-op that passes every happy path.
+        scheduledStartAt,
+        scheduledEndAt,
       } = req.body || {};
 
       const updates = {};
@@ -1972,6 +1986,8 @@ function createRacesRouter(dependencies = {}) {
       if (teamAName !== undefined) updates.teamAName = teamAName;
       if (teamBName !== undefined) updates.teamBName = teamBName;
       if (teamSize !== undefined) updates.teamSize = teamSize;
+      if (scheduledStartAt !== undefined) updates.scheduledStartAt = scheduledStartAt;
+      if (scheduledEndAt !== undefined) updates.scheduledEndAt = scheduledEndAt;
 
       const race = await editRace({
         userId: req.user.id,

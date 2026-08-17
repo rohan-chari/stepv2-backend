@@ -70,6 +70,8 @@ function buildGetPublicRaces(dependencies = {}) {
           status: race.status,
           maxDurationDays: race.maxDurationDays,
           endsAt: race.endsAt,
+          scheduledStartAt: race.scheduledStartAt ?? null,
+          scheduledEndAt: race.scheduledEndAt ?? null,
           startedAt: race.startedAt,
           participantCount: acceptedCount,
           maxParticipants,
@@ -118,6 +120,8 @@ function buildGetPublicRaces(dependencies = {}) {
         status: race.status,
         maxDurationDays: race.maxDurationDays,
         endsAt: race.endsAt,
+        scheduledStartAt: race.scheduledStartAt ?? null,
+        scheduledEndAt: race.scheduledEndAt ?? null,
         startedAt: race.startedAt,
         targetSteps: race.targetSteps, // 1.1.4 compat
         buyInAmount: money.buyInAmount,

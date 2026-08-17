@@ -413,6 +413,10 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
       maxParticipants: race.maxParticipants ?? null,
       createdAt: race.createdAt,
       scheduledStartAt: race.scheduledStartAt ?? null,
+      // Custom race window (spec §5.2): additive ISO instant or null. On a
+      // PENDING race this is where the chosen end lives (endsAt is null until
+      // start); frozen clients ignore the unknown key.
+      scheduledEndAt: race.scheduledEndAt ?? null,
       myInviteExpiresAt: myParticipant?.inviteExpiresAt ?? null,
       creationSource: race.creationSource ?? null,
       startPolicy: race.startPolicy ?? null,

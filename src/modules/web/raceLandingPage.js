@@ -184,6 +184,42 @@ function pageScript({ shareUrl = null, playStoreEnabled = false } = {}) {
 })();`;
 }
 
+// A share link's timing line (spec §5.7). Rendered server-side with no viewer
+// timezone available, so instants are shown in UTC and labelled as such rather
+// than implying a local time the reader doesn't have.
+function formatInstantUtc(value) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return `${date.toLocaleString("en-US", {
+    timeZone: "UTC",
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  })} UTC`;
+}
+
+// `endsAt ?? scheduledEndAt`, never `endsAt` alone: on a PENDING race endsAt is
+// null by design (§5.1) and the chosen end lives in scheduledEndAt, so reading
+// endsAt alone would show a pre-start share link no end at all.
+function raceTimingLine(preview) {
+  const start = formatInstantUtc(preview.scheduledStartAt);
+  const end = formatInstantUtc(preview.endsAt ?? preview.scheduledEndAt);
+  const parts = [];
+  if (start) parts.push(`Starts ${start}`);
+  if (end) parts.push(`Ends ${end}`);
+  if (parts.length === 0) {
+    // Neither instant is known (an unscheduled, not-yet-started race). Fall back
+    // to the length the race will run, which every race has.
+    const days = preview.maxDurationDays;
+    if (!days) return "";
+    return `Runs ${days} day${days === 1 ? "" : "s"}`;
+  }
+  return parts.join(" · ");
+}
+
 function renderRaceLandingPage(preview, links) {
   const hostName =
     preview.host && preview.host.displayName
@@ -197,11 +233,23 @@ function renderRaceLandingPage(preview, links) {
   const title = `${preview.name}: join the race on Bara`;
   const description = `${hostName} invited you to "${preview.name}". ${playerLine}. Tap to join.`;
 
+  // Additive timing line. Empty string when the race has no timing to show, so
+  // the card renders exactly as it does today.
+  const timingLine = raceTimingLine(preview);
+  const timingHtml = timingLine
+    // Deliberately reuses the existing `.invite-sub` class rather than adding a
+    // new rule: the race and tournament pages share ONE `shell` here while the
+    // referral page keeps a forked copy of the same inline stylesheet, so any
+    // new class would have to be added in two places to avoid drifting — for a
+    // line only this page renders.
+    ? `\n      <div class="invite-sub">${escapeHtml(timingLine)}</div>`
+    : "";
+
   const body = `
     <div class="section">Step Race</div>
     <div class="invite-body">
       <h1 class="invite-name">${escapeHtml(hostName)} invited you to a step race</h1>
-      <div class="invite-sub">${escapeHtml(preview.name)} · ${escapeHtml(playerLine)}</div>
+      <div class="invite-sub">${escapeHtml(preview.name)} · ${escapeHtml(playerLine)}</div>${timingHtml}
     </div>
   `;
 

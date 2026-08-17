@@ -14,7 +14,11 @@ const {
   validateTeamName,
   validateTeamSize,
   assertTeamNamesDiffer,
+  parseScheduledEndAt,
+  validateRaceWindow,
+  durationDaysFromWindow,
 } = require("../services/validateRaceConfig");
+const { resolveTeamPoolMultBps } = require("../teamPoolMultiplier");
 
 class RaceEditError extends Error {
   constructor(message, statusCode, code) {
@@ -63,9 +67,16 @@ function buildEditRace(dependencies = {}) {
       throw new RaceEditError("Only the race creator can edit the race", 403);
     }
     if (race.status !== "PENDING") {
+      // Architect R1: this stays a 400, deliberately. It already rejects EVERY
+      // edit of a non-PENDING race — name, buy-in, everything — before a single
+      // field is inspected, and every shipped edit screen is coded against that
+      // status. Moving the guard below field parsing to emit a 409 for the two
+      // new window fields would change the code frozen clients get for edits
+      // they already make. `code` is purely additive.
       throw new RaceEditError(
         "Race settings can only be edited while the race is pending",
-        400
+        400,
+        "RACE_ALREADY_STARTED"
       );
     }
 
@@ -141,6 +152,136 @@ function buildEditRace(dependencies = {}) {
         updates.maxDurationDays,
         RaceEditError
       );
+    }
+
+    // ── Custom race window (spec §5.2 Q4, §5.2a, §5.3) ───────────────────────
+    // Both fields are read through hasField, never truthiness (architect S1):
+    // `scheduledEndAt: null` CLEARS the window, and an `if (updates.x)` test
+    // would turn that clear into a silent no-op.
+    const startInUpdates = hasField(updates, "scheduledStartAt");
+    const endInUpdates = hasField(updates, "scheduledEndAt");
+
+    // A start that is present-but-unparseable is IGNORED (treated as absent),
+    // the same forgiving rule createRace uses. It must never fall through to
+    // "clear" — see the null case below for why clearing is not a capability.
+    let nextScheduledStartAt = race.scheduledStartAt ?? null;
+    let startProvided = false;
+    if (startInUpdates) {
+      const raw = updates.scheduledStartAt;
+      if (raw === null || raw === "") {
+        // Architect R2/S7: un-scheduling is NOT "revert to manual start".
+        // shouldAutoStartPrivateRace skips its schedule guard entirely when
+        // scheduledStartAt is null, so a cleared schedule on a private race
+        // with >= 2 accepted and no outstanding invites means the 5-minute
+        // backstop starts it on the NEXT TICK — the opposite of what the
+        // control appears to do. A creator who wants a later start moves the
+        // start; they never need to clear it.
+        throw new RaceEditError(
+          "A scheduled start can be moved, but not removed",
+          400,
+          "SCHEDULED_START_NOT_CLEARABLE"
+        );
+      }
+      const parsedStart = raw instanceof Date ? raw : new Date(raw);
+      if (!Number.isNaN(parsedStart.getTime())) {
+        if (parsedStart.getTime() <= Date.now()) {
+          throw new RaceEditError(
+            "Scheduled start time must be in the future",
+            400
+          );
+        }
+        nextScheduledStartAt = parsedStart;
+        startProvided = true;
+      }
+    }
+
+    // Resulting end: explicit null clears; a parseable value sets; an
+    // unparseable value is ignored (keeps whatever is stored).
+    let nextScheduledEndAt = race.scheduledEndAt ?? null;
+    let endProvided = false;
+    if (endInUpdates) {
+      if (updates.scheduledEndAt === null || updates.scheduledEndAt === "") {
+        nextScheduledEndAt = null;
+        endProvided = true;
+      } else {
+        const parsedEnd = parseScheduledEndAt(updates.scheduledEndAt);
+        if (parsedEnd) {
+          nextScheduledEndAt = parsedEnd;
+          endProvided = true;
+        }
+      }
+    }
+
+    // Kill switch (§5.2a). Fires only for a request that SETS window state —
+    // clearing a window (`scheduledEndAt: null`) stays available while the flag
+    // is off so a creator is never stranded with a window the server no longer
+    // honors on the edit surface.
+    if (startProvided || (endProvided && nextScheduledEndAt !== null)) {
+      const customWindowEnabled = await settings.getFlag(
+        "customRaceWindowEnabled"
+      );
+      if (!customWindowEnabled) {
+        throw new RaceEditError(
+          "Custom race windows are temporarily unavailable",
+          403,
+          "FEATURE_DISABLED"
+        );
+      }
+    }
+
+    if (startProvided) fields.scheduledStartAt = nextScheduledStartAt;
+    if (endProvided) fields.scheduledEndAt = nextScheduledEndAt;
+
+    // §5.2a old-client compat, the important one: a frozen edit screen sends
+    // maxDurationDays on save and knows nothing about scheduledEndAt. An
+    // explicit maxDurationDays in a PATCH that does NOT also carry a window
+    // CLEARS the window. Silently keeping a custom end while the old client
+    // renders "7d" makes the edit screen lie; the user changed the duration, so
+    // duration wins. Deterministic and honest.
+    if (
+      hasField(updates, "maxDurationDays") &&
+      !endProvided &&
+      race.scheduledEndAt != null
+    ) {
+      fields.scheduledEndAt = null;
+      nextScheduledEndAt = null;
+    }
+
+    // Architect R3, both halves:
+    //  * Window validation runs ONLY when one of the two fields is in
+    //    `updates`. "Effective start = now" means a manual-start custom race's
+    //    remaining window shrinks in real time, so revalidating on every PATCH
+    //    would make a request that merely RENAMES the race fail with
+    //    RACE_WINDOW_TOO_SHORT once its end came within 24 hours.
+    //  * It validates the MERGED pair, never the submitted field: moving only
+    //    the start must still leave a legal window against the STORED end.
+    if ((startProvided || endProvided) && nextScheduledEndAt != null) {
+      const effectiveStart = nextScheduledStartAt || new Date();
+      validateRaceWindow({
+        effectiveStart,
+        scheduledEndAt: nextScheduledEndAt,
+        ErrorClass: RaceEditError,
+      });
+      // Re-derive the priced duration whenever either end moves — and only when
+      // the RESULTING end is non-null, so moving the scheduled start of a plain
+      // 7-day preset race never touches its duration. This deliberately
+      // overrides any maxDurationDays in the same request: with a window
+      // present, the server owns the number (§5.3).
+      fields.maxDurationDays = durationDaysFromWindow(
+        effectiveStart,
+        nextScheduledEndAt
+      );
+      // Re-stamp the team payout multiplier from the SAME derived duration, in
+      // the same write. teamPoolMultBps was stamped at CREATE and settlement
+      // reads it back verbatim, so shrinking a 14-day team window to 25 hours
+      // without this leaves a 1-day race carrying the 1.875x long-race buff —
+      // 37.5 coins/player-day against the ceiling of 20 (architect R5).
+      if (race.isTeamRace === true) {
+        fields.teamPoolMultBps = resolveTeamPoolMultBps({
+          isTeamRace: true,
+          durationDays: fields.maxDurationDays,
+        });
+      }
     }
 
     // `updates.powerupStepInterval` is deliberately DROPPED ON THE FLOOR here:

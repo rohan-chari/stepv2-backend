@@ -1,0 +1,17 @@
+-- Custom race windows (docs/race-timeline-options-requirements.md §5.1).
+--
+-- ADDITIVE, NULLABLE, NO BACKFILL. Every existing row stays NULL and behaves
+-- byte-for-byte as today: startRace's resolveRaceEndsAt takes its branch-1
+-- (duration) path whenever this column is null, which is every race that
+-- exists and every race a frozen client can create.
+--
+-- Mixed-version safety (rollout ordering, spec §7 step 0): this migration must
+-- run BEFORE the pm2 reload. Prisma emits explicit column lists, so the NEW
+-- binary against an UN-migrated DB throws; the OLD binary against a MIGRATED DB
+-- is fine (it never names the column, and the column is nullable so its INSERTs
+-- still satisfy the table). The additive-nullable shape is what makes that
+-- ordering safe in exactly one direction.
+--
+-- No default, no index: nothing filters or sorts on this column — it is read
+-- only by id, alongside the row it belongs to.
+ALTER TABLE "races" ADD COLUMN IF NOT EXISTS "scheduled_end_at" TIMESTAMP(3);

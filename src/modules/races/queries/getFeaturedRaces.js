@@ -110,6 +110,7 @@ function buildGetFeaturedRaces(dependencies = {}) {
       return {
         raceId: race.id,
         scheduledStartAt: race.scheduledStartAt,
+        scheduledEndAt: race.scheduledEndAt ?? null,
         endsAt: race.endsAt,
         participantCount: acceptedCount,
         maxParticipants: max,

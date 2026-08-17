@@ -46,6 +46,15 @@ function buildGetSharedRacePreview(dependencies = {}) {
       prizePool: money.prizePool,
       maxParticipants: race.maxParticipants ?? null,
       participantCount,
+      // Timing (spec §5.7). Four additive, display-only fields so a link pasted
+      // in a group chat can say when the race runs. On a PENDING race `endsAt`
+      // is null by design and the end lives in `scheduledEndAt`, so any renderer
+      // must read `endsAt ?? scheduledEndAt`, never `endsAt` alone. A frozen
+      // client that ignores all four is unaffected.
+      scheduledStartAt: race.scheduledStartAt ?? null,
+      scheduledEndAt: race.scheduledEndAt ?? null,
+      endsAt: race.endsAt ?? null,
+      maxDurationDays: race.maxDurationDays ?? null,
       host: race.creator
         ? {
             displayName: race.creator.displayName ?? null,

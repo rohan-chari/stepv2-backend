@@ -62,10 +62,18 @@ connections and a session advisory lock. **Stop staging first** so the prod
 migrate has headroom:
 
 ```bash
-pm2 stop steps-tracker-staging      # id 4
+pm2 stop steps-tracker-staging
 ```
 
 (Per `DEPLOYMENT.md`, staging is safe to stop — separate DB, sandbox APNS.)
+
+> **Always address pm2 apps by NAME, never by id.** The ids drift — they are
+> assigned in start order and get reshuffled by any `pm2 delete`/`start`, a
+> droplet reboot, or a resurrect from a stale dump. This runbook used to say
+> `pm2 restart 3` for prod; by 2026-08-16 id 3 was **staging** and id 4 was
+> prod, so following it literally would have reloaded staging, left prod on the
+> old code, and still passed the step-4 health check (prod is up — just not
+> updated). Names are stable; ids are not.
 
 ---
 
@@ -78,8 +86,59 @@ cd /var/www/step-tracker-backend \
   && npx prisma migrate deploy \
   && npx prisma generate \
   && npm run powerups:copy:sync -- --apply \
-  && pm2 restart 3
+  && pm2 reload steps-tracker
 ```
+
+**`reload`, not `restart`, and by name, not id.** `reload` cycles the cluster
+workers one at a time (zero downtime); `restart` kills them all at once and
+caused a ~10s outage with user-visible 502s the one time it was used on prod
+(2026-07-12). See `DEPLOYMENT.md` for the same rule stated at the source.
+
+### 3a. Cluster instances — verify BOTH workers came back
+
+Prod and staging each run **2 pm2 cluster instances** as of 2026-08-15
+(`d23ec2e`), matching the droplet's 2 vCPUs. Scaling past 1 is safe *only*
+because `src/index.js:188-201` gates the whole `startCrons()` call behind
+`process.env.NODE_APP_INSTANCE === "0"` — pm2 sets that per worker, and without
+the guard every one of the ~17 schedulers (race resolution, live placement
+push, payout reconcile) would double-run on each extra worker.
+
+A cluster app shows **one `pm2 list` row per instance, sharing a name**. Two
+rows named `steps-tracker` is correct; one row means prod is running at half
+capacity.
+
+```bash
+pm2 list                      # expect TWO rows named steps-tracker, TWO named steps-tracker-staging
+pm2 describe steps-tracker | grep -E "instances|exec mode|status"
+```
+
+If only one row is present, the scale was lost (a reboot, or a resurrect from a
+dump that predates the change — the dump does not reliably record the instance
+count):
+
+```bash
+pm2 scale steps-tracker 2
+pm2 save                      # persist so the next resurrect keeps 2
+```
+
+**Confirm exactly one worker schedules crons after any scale or reload.** This
+is the invariant the guard exists to protect, and it is the thing that silently
+breaks:
+
+```bash
+pm2 logs steps-tracker --lines 200 --nostream | grep -E "\[CRON\]"
+# Expect: the scheduling lines ONCE (from NODE_APP_INSTANCE=0), plus
+#         "[CRON] Skipping cron scheduling on NODE_APP_INSTANCE=1" from the other.
+# Two copies of "Race expiry check scheduled" = the guard is broken. Stop and
+# fix before walking away; duplicate race resolution and duplicate pushes follow.
+```
+
+> **Known live drift, 2026-08-16.** Both apps were found running a *single*
+> instance despite the above, i.e. the `pm2 scale` had been lost since
+> 2026-08-15. Crons were unaffected (the sole worker is `NODE_APP_INSTANCE=0`,
+> so the guard still admits exactly one), but prod was serving at half its
+> intended capacity. If you find one row per app, that is this drift, not a new
+> design — re-scale and `pm2 save`.
 
 `prisma/seed.js` no longer runs on a deploy. It is the bootstrap for a *fresh*
 database; against a live one it reasserts rows that other systems own. Its one
@@ -119,7 +178,7 @@ with `npm run cosmetics:clone`. See `DEPLOYMENT.md` → "Adding a new accessory"
 git rev-parse --short HEAD                      # matches what you shipped
 curl -s localhost:3002/health                   # {"status":"ok"}
 curl -s https://steptracker-api.org/health       # {"status":"ok"}  (real prod URL; no api. subdomain)
-pm2 list                                         # id 3 online, restart count stable
+pm2 list                                         # BOTH steps-tracker rows online, restart count stable
 
 # Marketing site (served from the COMMITTED web/dist — see below). All three
 # must be 200: /privacy is the URL on the App Store listing.
@@ -151,9 +210,9 @@ Steps Tracker API running on 0.0.0.0:3002
 To distinguish **fresh** errors from stale log history, flush then watch:
 
 ```bash
-pm2 flush 3
+pm2 flush steps-tracker
 sleep 25
-pm2 logs 3 --lines 200 --nostream | grep -iE "error|P2002|unhandled|TooManyConnections"
+pm2 logs steps-tracker --lines 200 --nostream | grep -iE "error|P2002|unhandled|TooManyConnections"
 ```
 
 (The pm2 error log is **not** cleared on restart, so old errors look current
@@ -167,6 +226,7 @@ deploy.)
 ```bash
 pm2 start steps-tracker-staging
 curl -s https://staging.steptracker-api.org/health
+pm2 list    # staging back to TWO rows; if one, `pm2 scale steps-tracker-staging 2 && pm2 save` (see 3a)
 ```
 
 ---

@@ -46,6 +46,17 @@ const KNOWN_FLAGS = {
   openUserRaceDiscoveryEnabled: false,
   quickCreateRaceCtaEnabled: false,
   setupInviteCodePromptEnabled: false,
+  // Custom race windows (docs/race-timeline-options-requirements.md §5.2a): the
+  // CUSTOM timeline chip and the scheduledStartAt/scheduledEndAt fields on
+  // create/edit. Default OFF so deploying this backend changes nothing for
+  // anyone; while off, a scheduledEndAt on create or PATCH is REJECTED with
+  // 403 FEATURE_DISABLED rather than silently dropped — silently dropping it
+  // would create a race that ends at a time the creator did not choose, which
+  // is worse than a clean error. Clients default it false when absent, so an
+  // older backend simply hides the chip. The flip is NOT instant: it clears
+  // only after the in-process settings TTL and the userAuthMe Redis TTL both
+  // expire.
+  customRaceWindowEnabled: false,
   // Discoverable identity rollout controls. Contract support and additive
   // response fields ship independently; this switch only enrolls capable NEW
   // creates into mandatory onboarding.

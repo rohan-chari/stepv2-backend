@@ -93,6 +93,9 @@ test("POST /auth/apple provisions the signed-in user", async () => {
         openUserRaceDiscoveryEnabled: false,
         quickCreateRaceCtaEnabled: false,
         setupInviteCodePromptEnabled: false,
+        // Custom race windows. Fail-closed: the client must not offer a
+        // control the backend will reject with 403 FEATURE_DISABLED.
+        customRaceWindowEnabled: false,
         racesInviteDecisionGateEnabled: false,
         quickRaceShareAutoFriendEnabled: false,
       },

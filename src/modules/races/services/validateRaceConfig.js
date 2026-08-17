@@ -38,6 +38,92 @@ function validateDuration(maxDurationDays, ErrorClass) {
   return maxDurationDays;
 }
 
+// ── Custom race windows (docs/race-timeline-options-requirements.md §5.2/5.6) ─
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// The floor on a custom window. Custom buys an EXACT END INSTANT, not a shorter
+// race: every race that has ever run is >= 1 day, and five systems assume it
+// (calendar-day step bucketing, the hasSampleData start-day buff zeroing, the
+// 2,000-step box cadence, the >2h final-stretch nudge guard, and the 5-minute
+// settlement cron). A 24h floor keeps every custom race inside territory prod
+// already exercises. ONE named constant on purpose (spec §5.6): relaxing it
+// later is a one-line change plus that section's risk list.
+const MIN_RACE_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+// The ceiling is the SAME bound validateDuration already enforces (30 days), so
+// a window can never express a race the duration field couldn't.
+const MAX_RACE_WINDOW_MS = 30 * DAY_MS;
+
+// Parse an optional scheduledEndAt. Returns a Date, or null when absent/empty/
+// UNPARSEABLE. Unparseable is deliberately treated as "not provided" rather than
+// a 400 — the exact forgiving rule createRace's validateScheduledStartAt uses,
+// so a quirky or older client can never have a race rejected for sending junk
+// in a field the server owns anyway.
+function parseScheduledEndAt(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
+}
+
+// Validate a resolved (start, end) pair. `effectiveStart` is scheduledStartAt
+// when set, else now — so a manual-start custom race's window is measured from
+// the moment of the request. Callers MUST pass the MERGED pair on edit (spec
+// §5.2): a PATCH that moves only one end still has to leave a legal window
+// against the STORED other end.
+//
+// All four failures are 400 with an additive machine-readable `code`; old
+// clients read `error` alone and are unaffected.
+function validateRaceWindow({
+  effectiveStart,
+  scheduledEndAt,
+  now = new Date(),
+  ErrorClass,
+}) {
+  if (!scheduledEndAt) return null;
+  const startMs = new Date(effectiveStart).getTime();
+  const endMs = new Date(scheduledEndAt).getTime();
+  const throwWith = (message, code) => {
+    const err = new ErrorClass(message, 400);
+    err.code = code;
+    throw err;
+  };
+  if (!(endMs > startMs)) {
+    throwWith("The race has to end after it starts", "RACE_WINDOW_INVALID");
+  }
+  if (endMs <= now.getTime()) {
+    throwWith("The race end time must be in the future", "RACE_WINDOW_INVALID");
+  }
+  const windowMs = endMs - startMs;
+  if (windowMs < MIN_RACE_WINDOW_MS) {
+    throwWith("A race has to run at least 1 day", "RACE_WINDOW_TOO_SHORT");
+  }
+  if (windowMs > MAX_RACE_WINDOW_MS) {
+    throwWith("A race can run at most 30 days", "RACE_WINDOW_TOO_LONG");
+  }
+  return scheduledEndAt;
+}
+
+// The priced duration implied by a window: FLOOR of whole elapsed days, clamped
+// to the legal 1..30 band.
+//
+// FLOOR, never ceil or round (game-analyst R1 — the ceil draft was rated
+// UNSOUND). The metric that governs an app-funded pool is coins minted per
+// walker per ELAPSED day, and floor is the only rounding that holds it at
+// today's ceiling of 20: with ceil, a 24h+1min window prices at the 2-day band
+// and DOUBLES the mint rate of the most-used duration in prod, in a number the
+// create screen shows the creator. floor also keeps durationPoints monotonic
+// non-decreasing over the whole range, so prizePool.js's invariant — a shorter
+// competition can never pay more than a longer one — survives.
+function durationDaysFromWindow(startAt, endAt) {
+  const startMs = new Date(startAt).getTime();
+  const endMs = new Date(endAt).getTime();
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return null;
+  const days = Math.floor((endMs - startMs) / DAY_MS);
+  return Math.min(30, Math.max(1, days));
+}
+
 // Returns the interval to persist: the fixed 2,000 when powerups are on, else
 // null. The caller's powerupStepInterval is read ONLY by old clients that still
 // send one, and is deliberately DISCARDED — accepted and ignored, never a 400
@@ -131,6 +217,11 @@ function validateTeamSide(team, ErrorClass, { required = false } = {}) {
 module.exports = {
   validateRaceName,
   validateDuration,
+  MIN_RACE_WINDOW_MS,
+  MAX_RACE_WINDOW_MS,
+  parseScheduledEndAt,
+  validateRaceWindow,
+  durationDaysFromWindow,
   normalizePowerupConfig,
   validateMaxParticipants,
   validateRaceBuyInConfig,

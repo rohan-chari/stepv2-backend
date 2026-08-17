@@ -256,6 +256,15 @@ async function getRaceDetails(
     finishReward: money.finishReward,
     startedAt: race.startedAt,
     endsAt: race.endsAt,
+    // Custom race windows (spec §5.2, architect R6). BOTH are additive keys and
+    // BOTH are new here: this endpoint returns startedAt/endsAt but has never
+    // returned scheduledStartAt, so the edit screen literally could not render a
+    // PENDING race's window without them (edit_race_screen initializes from this
+    // map). On a PENDING race endsAt is null by design and the chosen end lives
+    // in scheduledEndAt; once ACTIVE, endsAt is authoritative. Frozen clients
+    // ignore unknown keys.
+    scheduledStartAt: race.scheduledStartAt ?? null,
+    scheduledEndAt: race.scheduledEndAt ?? null,
     completedAt: race.completedAt,
     creator: race.creator,
     winner: race.winner,

@@ -35,6 +35,7 @@ function buildGetRaceInvitePreflight(dependencies = {}) {
           buyInAmount: true,
           isTeamRace: true,
           scheduledStartAt: true,
+          scheduledEndAt: true,
           createdAt: true,
           creator: { select: { id: true, displayName: true, profilePhotoUrl: true } },
           participants: {
@@ -90,6 +91,7 @@ function buildGetRaceInvitePreflight(dependencies = {}) {
           status: race.status,
           createdAt: race.createdAt,
           scheduledStartAt: race.scheduledStartAt ?? null,
+          scheduledEndAt: race.scheduledEndAt ?? null,
           myInviteExpiresAt: race.participants[0]?.inviteExpiresAt ?? null,
           maxDurationDays: race.maxDurationDays ?? null,
           isTeamRace: race.isTeamRace === true,
@@ -127,6 +129,12 @@ function buildGetRaceInvitePreflight(dependencies = {}) {
         status: race.status,
         maxDurationDays: race.maxDurationDays,
         buyInAmount: race.buyInAmount,
+        // NOTE: scheduledEndAt is deliberately NOT added to this LEGACY
+        // serializer. It is the payload a frozen, non-capability client
+        // receives, and test/integration/home-invite-preflight.test.js pins it
+        // byte-for-byte ("keeps frozen gate clients byte-compatible"). The
+        // capability-gated `invites` serializer above carries the field, which
+        // is the surface any client that can render a window actually reads.
         scheduledStartAt: race.scheduledStartAt,
         createdAt: race.createdAt,
         creator: race.creator,

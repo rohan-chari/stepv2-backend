@@ -26,6 +26,16 @@ async function commitRaceStart({
   potCoins,
   participantUpdates,
   beforeRaceStartedRecord,
+  // Custom race windows §5.3a: the duration RE-DERIVED from the actual
+  // (endsAt - startedAt) when a custom end is honored, written in the same CAS
+  // write as the status flip so priced duration can never diverge from elapsed
+  // duration. null (every legacy start) leaves the column untouched.
+  maxDurationDays = null,
+  // The team payout multiplier re-derived from that same duration. It MUST
+  // move with maxDurationDays — settlement reads this column back verbatim, so
+  // a re-priced duration carrying a stale multiplier pays a long-race buff on a
+  // short race. null for individual races and every legacy start.
+  teamPoolMultBps = null,
 }) {
   try {
     return await prisma.$transaction(async (tx) => {
@@ -68,7 +78,14 @@ async function commitRaceStart({
 
     const flip = await tx.race.updateMany({
       where: { id: raceId, status: "PENDING" },
-      data: { status: "ACTIVE", startedAt, endsAt, potCoins },
+      data: {
+        status: "ACTIVE",
+        startedAt,
+        endsAt,
+        potCoins,
+        ...(maxDurationDays != null ? { maxDurationDays } : {}),
+        ...(teamPoolMultBps != null ? { teamPoolMultBps } : {}),
+      },
     });
     if (flip.count !== 1) throw new RaceStartTransactionAbort({ started: false });
 

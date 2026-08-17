@@ -992,6 +992,17 @@ model Race {
   // legacy races and older app clients (which never send it) behave exactly as
   // before — manual instant start.
   scheduledStartAt     DateTime?        @map("scheduled_start_at")
+  // Optional EXACT end instant chosen by the creator (custom race window). Inert
+  // until startRace promotes it: it is NOT `endsAt`, because `endsAt` on a
+  // non-COMPLETED race is read everywhere as "this live race's end" (featured
+  // lists, next-race home, powerup guards, placement recompute). Stamping that
+  // on a PENDING race would change the field's meaning for every one of those
+  // readers. At start, resolveRaceEndsAt copies it into `endsAt` when at least
+  // MIN_RACE_WINDOW_MS of the window is left; otherwise the race falls back to
+  // maxDurationDays from the actual start and this column stays as a record of
+  // intent. Nullable/additive with NO backfill: every existing row stays NULL
+  // and behaves byte-for-byte as today, and frozen clients never send or read it.
+  scheduledEndAt       DateTime?        @map("scheduled_end_at")
   // Canonical IANA timezone whose calendar-day boundaries define this race's
   // step buckets (e.g. "America/New_York" for seeded daily/weekly challenges).
   // NULL for user-created races, which keep the legacy behavior: live display

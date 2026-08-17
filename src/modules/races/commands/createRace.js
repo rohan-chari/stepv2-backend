@@ -18,6 +18,9 @@ const {
   validateTeamSize,
   assertTeamNamesDiffer,
   validateTeamSide,
+  parseScheduledEndAt,
+  validateRaceWindow,
+  durationDaysFromWindow,
 } = require("../services/validateRaceConfig");
 const { appSettings } = require("../../../shared/config/appSettings");
 const {
@@ -104,6 +107,13 @@ function buildCreateRace(dependencies = {}) {
     // 1.1.7: optional future auto-start time. Older clients never send it, so it
     // stays null and the race behaves exactly as today (manual instant start).
     scheduledStartAt = null,
+    // Custom race window (spec §5.2). An EXACT end instant. Optional and
+    // additive: frozen clients never send it, so it stays null and the race
+    // ends at startedAt + maxDurationDays × 24h exactly as today. Gated by the
+    // customRaceWindowEnabled flag (403 FEATURE_DISABLED while off, never a
+    // silent drop) and, when accepted, it OVERWRITES the client's
+    // maxDurationDays with the floor-derived day count (§5.3).
+    scheduledEndAt = null,
     // 1.1.4 compat: legacy clients still send targetSteps on createRace. New
     // clients don't, in which case it stays 0. TR-903 keeps accepting, storing
     // and returning it so a frozen old binary can still render the target it
@@ -241,6 +251,42 @@ function buildCreateRace(dependencies = {}) {
       scheduledStartAt,
       RaceCreationError
     );
+
+    // ── Custom race window (spec §5.2, §5.2a, §5.3) ──────────────────────────
+    // Unparseable => null => this whole block is a no-op and the race is a
+    // plain preset race, which is exactly what every frozen client creates.
+    const normalizedScheduledEndAt = parseScheduledEndAt(scheduledEndAt);
+    // Derived AFTER the quick-config check and validateDuration and BEFORE
+    // raceModel.create (architect R5): maxDurationDays is not only the
+    // prize-pool input, it is also what resolveTeamPoolMultBps stamps into
+    // teamPoolMultBps — a creation-time economy value SETTLEMENT reads back. If
+    // the persisted duration and the pool multiplier came from different
+    // numbers, a team custom race would settle against a multiplier for a
+    // duration it never had.
+    let effectiveMaxDurationDays = maxDurationDays;
+    if (normalizedScheduledEndAt) {
+      const customWindowEnabled = await settings.getFlag(
+        "customRaceWindowEnabled"
+      );
+      if (!customWindowEnabled) {
+        throw new RaceCreationError(
+          "Custom race windows are temporarily unavailable",
+          403,
+          "FEATURE_DISABLED"
+        );
+      }
+      // "Effective start" = scheduledStartAt when set, else now.
+      const effectiveStart = normalizedScheduledStartAt || new Date();
+      validateRaceWindow({
+        effectiveStart,
+        scheduledEndAt: normalizedScheduledEndAt,
+        ErrorClass: RaceCreationError,
+      });
+      effectiveMaxDurationDays = durationDaysFromWindow(
+        effectiveStart,
+        normalizedScheduledEndAt
+      );
+    }
     // The interval is server-decided (2,000 always). A frozen client's
     // powerupStepInterval is accepted and IGNORED — never a 400.
     const normalizedPowerupStepInterval = normalizePowerupConfig({
@@ -287,7 +333,10 @@ function buildCreateRace(dependencies = {}) {
       // 1.1.4 compat: persist whatever targetSteps the legacy client sent so it
       // can render its own UI. Display-only — see the note in the signature.
       targetSteps: Number.isFinite(targetSteps) && targetSteps > 0 ? targetSteps : 0,
-      maxDurationDays,
+      // §5.3: when a custom window is accepted the SERVER owns this number —
+      // the client's value is overwritten with the floor-derived day count so
+      // the plaque, the persisted race and the payout can never disagree.
+      maxDurationDays: effectiveMaxDurationDays,
       powerupsEnabled: !!powerupsEnabled,
       powerupStepInterval: normalizedPowerupStepInterval,
       buyInAmount: buyInConfig.buyInAmount,
@@ -299,6 +348,7 @@ function buildCreateRace(dependencies = {}) {
       isPublic: !!isPublic,
       maxParticipants: normalizedMaxParticipants,
       scheduledStartAt: normalizedScheduledStartAt,
+      scheduledEndAt: normalizedScheduledEndAt,
       timezone: normalizeRaceTimeZone(timeZone),
       // Team races are time-based ONLY (TR-401): they settle at endsAt via
       // raceExpiry and must never finish on a step target. Individual races
@@ -319,7 +369,8 @@ function buildCreateRace(dependencies = {}) {
       // by settlement, so an env retune never reprices an in-flight race.
       teamPoolMultBps: resolveTeamPoolMultBps({
         isTeamRace: !!teamConfig,
-        durationDays: maxDurationDays,
+        // The SAME derived number persisted as maxDurationDays above (R5).
+        durationDays: effectiveMaxDurationDays,
       }),
       creationSource: normalizedQuick ? QUICK_SOURCE : null,
       startPolicy: normalizedQuick ? AUTO_START_POLICY : null,

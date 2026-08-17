@@ -8,6 +8,11 @@ const { isRacePayoutPresetCompatible } = require("../racePayoutPresets");
 const { acceptedTeamCounts } = require("../teamRaces");
 const { snapshotBaselineFields } = require("../services/raceBaseline");
 const { commitRaceStart } = require("../services/commitRaceStart");
+const { resolveRaceEndsAt } = require("../services/resolveRaceEndsAt");
+const {
+  durationDaysFromWindow,
+} = require("../services/validateRaceConfig");
+const { resolveTeamPoolMultBps } = require("../teamPoolMultiplier");
 const {
   enqueueRaceResolution: defaultEnqueueRaceResolution,
 } = require("../services/enqueueRaceResolution");
@@ -123,9 +128,54 @@ function buildStartRace(dependencies = {}) {
 
     const startedAt = startNow();
     const durationDays = race.maxDurationDays || 7;
-    const endsAt = new Date(
+    // Legacy end: startedAt + N × 24h. Still the answer for every race without
+    // a custom window, which is every race that exists today (spec §5.4).
+    const fallbackEndsAt = new Date(
       startedAt.getTime() + durationDays * 24 * 60 * 60 * 1000
     );
+    const { endsAt, honoredCustomEnd } = resolveRaceEndsAt({
+      race,
+      startedAt,
+      fallbackEndsAt,
+    });
+    // §5.3a — THE anti-exploit rule. Today "priced duration == elapsed
+    // duration" holds BY CONSTRUCTION, because endsAt is derived from
+    // maxDurationDays. A stamped end instant breaks that: the price was derived
+    // at CREATE time from the effective start, while the honored end is
+    // measured against whatever startedAt turns out to be. A public race
+    // (no auto-start, never pruned) created with a 30-day window and started
+    // with 24h left would otherwise pay a 30-day pool — 8x — for a one-day
+    // race, unbounded by any rate limit and needing one step per colluder.
+    // Re-deriving here, inside the SAME PENDING->ACTIVE CAS write, restores
+    // priced == elapsed by construction and makes the feature's economy delta
+    // exactly zero.
+    const pricedDurationDays = honoredCustomEnd
+      ? durationDaysFromWindow(startedAt, endsAt)
+      : null;
+    // maxDurationDays is NOT the only economy value derived from the duration:
+    // teamPoolMultBps was stamped at CREATE from the create-time duration and
+    // settlement reads it back verbatim (racePrizePool -> raceTeamPoolMultBps).
+    // Re-pricing the duration without re-stamping the multiplier is exactly the
+    // divergence architect R5 named — a team race whose teams stay uneven until
+    // day 29 of a 30-day window would re-price to 1 day while keeping the
+    // 1.875x long-race buff, minting 37.5 coins/player-day against the stated
+    // ceiling of 20. Both values move in the SAME write or neither does.
+    const pricedTeamPoolMultBps =
+      pricedDurationDays != null && race.isTeamRace === true
+        ? resolveTeamPoolMultBps({
+            isTeamRace: true,
+            durationDays: pricedDurationDays,
+          })
+        : null;
+    const startFields =
+      pricedDurationDays != null
+        ? {
+            maxDurationDays: pricedDurationDays,
+            ...(pricedTeamPoolMultBps != null
+              ? { teamPoolMultBps: pricedTeamPoolMultBps }
+              : {}),
+          }
+        : {};
     const acceptedParticipants = await participantModel.findAcceptedByRace(raceId);
     const heldPot = acceptedParticipants.reduce((sum, participant) => {
       if ((participant.buyInStatus || "NONE") === "HELD") {
@@ -162,6 +212,11 @@ function buildStartRace(dependencies = {}) {
         actorUserId: userId,
         startedAt,
         endsAt,
+        // §5.3a: re-priced duration AND the team multiplier derived from it,
+        // written in the same CAS write as the status flip (null => untouched,
+        // the legacy path).
+        maxDurationDays: pricedDurationDays,
+        teamPoolMultBps: pricedTeamPoolMultBps,
         potCoins: (race.potCoins || 0) + heldPot,
         participantUpdates,
         beforeRaceStartedRecord,
@@ -202,6 +257,7 @@ function buildStartRace(dependencies = {}) {
       status: "ACTIVE",
       startedAt,
       endsAt,
+      ...startFields,
       potCoins: (race.potCoins || 0) + heldPot,
     });
     if (flip.count === 0) {

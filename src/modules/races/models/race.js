@@ -403,6 +403,9 @@ const Race = {
     isPublic = false,
     maxParticipants = 10,
     scheduledStartAt = null,
+    // Optional exact end instant for a custom race window. NULL (every legacy
+    // caller, every seeded race, every frozen client) = duration-derived end.
+    scheduledEndAt = null,
     // Canonical IANA tz that buckets this race's steps. NULL keeps the legacy
     // (caller-tz live, UTC settlement) behavior for callers that don't supply one.
     timezone = null,
@@ -437,6 +440,7 @@ const Race = {
         isPublic,
         maxParticipants,
         scheduledStartAt,
+        scheduledEndAt,
         timezone,
         timeBased,
         isTeamRace,
@@ -745,6 +749,8 @@ const Race = {
         r.status::text AS status,
         r.max_duration_days AS "maxDurationDays",
         r.ends_at AS "endsAt",
+        r.scheduled_start_at AS "scheduledStartAt",
+        r.scheduled_end_at AS "scheduledEndAt",
         r.started_at AS "startedAt",
         r.target_steps AS "targetSteps",
         r.buy_in_amount AS "buyInAmount",
@@ -830,6 +836,7 @@ const Race = {
         seedId: true,
         startedAt: true,
         scheduledStartAt: true,
+        scheduledEndAt: true,
         tournamentId: true,
         isTeamRace: true,
         status: true,
