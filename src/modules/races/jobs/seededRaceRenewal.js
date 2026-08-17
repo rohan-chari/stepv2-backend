@@ -524,16 +524,6 @@ function buildRenewSeededRaces(dependencies = {}) {
       });
       results.push({ action: "created-upcoming", seedKind: seed.kind, race: upcoming });
     }
-    // Retried on EVERY tick, not just the one that created the race.
-    // enrollAutoJoinUsers is documented idempotent (skipDuplicates /
-    // claimLegacyStream dedupe), so this is safe to call in steady state —
-    // it's a no-op once everyone eligible is already in. Previously this only
-    // ran once, tied to race creation: a single failed tick (e.g. the
-    // connection-pool-exhaustion incident on 2026-08-14) silently and
-    // permanently dropped the bulk of that day's auto-join population, who
-    // only trickled back in by manually opening the app.
-    await autoEnroll(seed, upcoming);
-
     // 3b) Mode-stamp + automatic bucket election, retried on EVERY tick (not
     // just the one that created the race). A single failed tick used to
     // permanently strand every auto-join user who was eligible at that
@@ -566,6 +556,26 @@ function buildRenewSeededRaces(dependencies = {}) {
         }
       }
     }
+
+    // 3c) Legacy/global enrollment, retried on EVERY tick, not just the one
+    // that created the race. enrollAutoJoinUsers is documented idempotent
+    // (skipDuplicates / claimLegacyStream dedupe), so this is a no-op once
+    // everyone eligible is already in. Previously this only ran once, tied to
+    // race creation: a single failed tick (e.g. the connection-pool-exhaustion
+    // incident on 2026-08-14) silently and permanently dropped the bulk of
+    // that day's auto-join population, who only trickled back in by manually
+    // opening the app.
+    //
+    // ORDERING IS LOAD-BEARING and must stay after 3b. enrollAutoJoinUsers
+    // decides whether to exclude bucket-capable accounts by reading the
+    // window's durable mode, and readWindowMode's mixed-deploy default is
+    // LEGACY. On the tick that CREATES a window there is no mode row yet, so
+    // running this first makes it claim every capable user into the write-once
+    // LEGACY stream; electAutomatic then finds them all taken and elects
+    // nobody. That inversion shipped in a5a3ddb and put the entire capable
+    // cohort back in the 450-person global field for the 2026-08-17 and
+    // 2026-08-18 windows.
+    await autoEnroll(seed, upcoming);
 
     // 4) Weekly only (D4): sweep the ACTIVE race's ghosts once per ET day. The
     // daily is boundary-only — its field was filtered at enrollment and pruned
