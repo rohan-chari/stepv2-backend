@@ -237,6 +237,36 @@ describe("batched enqueue: dirty-scope validation guard", () => {
     );
   });
 
+  // The cap counts DISTINCT values, not array entries, and the distinction is
+  // load-bearing rather than incidental. Both sides of the merge are already
+  // deduplicated on their own -- the stored side by the merge's GROUP BY, the
+  // incoming side by stableStrings() in the reason registry -- but they OVERLAP,
+  // and re-reporting an id you already reported is the single most common thing
+  // a step sync does. A cheaper cap that measured the concatenated LENGTH
+  // instead would count those duplicates, so a full race would degrade to FULL
+  // on essentially every sync. Guard the semantics, not just the boundary.
+  it("an incoming id already in the stored scope does not push it over the cap", async () => {
+    const raceId = await createQueuedRace("Guard Duplicate At Cap");
+    await seedStoredScope(raceId, {
+      reasons: ["STEP_SYNC"],
+      participantIds: Array.from({ length: 1000 }, (_, i) => `p-${i}`),
+      powerupTypes: ["LEECH"],
+    });
+
+    // Sitting exactly on the cap, re-reporting an id that is already stored.
+    // Distinct union is still 1000; concatenated length would be 1001.
+    await enqueueWith(raceId, {
+      reason: "STEP_SYNC",
+      participantIds: ["p-0"],
+      powerupTypes: ["LEECH"],
+    });
+
+    const scope = await readScope(raceId);
+    assert.deepEqual(scope.dirtyReasons, ["STEP_SYNC"], "a duplicate id must not force FULL");
+    assert.equal(scope.dirtyParticipantIds.length, 1000);
+    assert.deepEqual(scope.dirtyPowerupTypes, ["LEECH"]);
+  });
+
   it("stays exactly at the caps without degrading", async () => {
     const raceId = await createQueuedRace("Guard At Cap");
     await seedStoredScope(raceId, {

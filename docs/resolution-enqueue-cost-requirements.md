@@ -270,11 +270,56 @@ are already deduplicated on write — which the `triggered_by_user_ids` merge
 already does via `jsonb_agg(DISTINCT v)` — a plain `jsonb_array_length` upper
 bound is sufficient and is O(1) on the jsonb header.
 
-**This one changes behaviour at the boundary** and must not ship on reasoning
-alone: if arrays can contain duplicates, `jsonb_array_length` over-counts and
-would force `FULL` slightly earlier than today. Forcing `FULL` early is the
-*safe* direction (correct, just slower), but it must be a deliberate, tested
-decision. **Confirm the dedup invariant first.**
+**DONE 2026-08-17 — but NOT in the form proposed above.** The dedup invariant
+does not hold in the way this section assumed, and the proposed rewrite is
+unsafe. What shipped is a cheap *pre-filter* in front of the existing exact
+check.
+
+**Why the proposal above is wrong.** Both sides of the merge are individually
+deduplicated — the stored side by the merge's `GROUP BY`, the incoming side by
+`stableStrings()` in the reason registry — but they **overlap**, and their
+concatenation is therefore not deduplicated. Re-reporting a participant id you
+already reported is what a step sync does constantly. Swapping in
+`jsonb_array_length` counts those duplicates, so a race sitting near 1,000
+participants would degrade to `FULL` on nearly every sync — the expensive
+direction, on the hottest path, for the largest races. Demonstrated: the naive
+rewrite fails exactly one test, "an incoming id already in the stored scope does
+not push it over the cap", and passes the other 13.
+
+**What shipped instead:**
+
+```sql
+jsonb_array_length(a || b) > CAP AND <existing DISTINCT count over a || b> > CAP
+```
+
+`jsonb_array_length` is an O(1) header read and an exact **upper bound** on the
+distinct count, so when it lands at or under the cap the DISTINCT pass cannot
+change the answer and is skipped. Semantics are identical — the AND makes it
+exact — and the expensive pass now runs only for scopes genuinely near the cap.
+
+| stored scope | before | after | |
+|---|---|---|---|
+| 20 ids | 0.265 ms | 0.261 ms | neutral |
+| 100 ids | 0.337 ms | 0.311 ms | −8% |
+| 900 ids | 1.129 ms | 0.840 ms | **−26%** |
+
+The win scales with scope size, which is the right shape: big races are both the
+expensive case and the one that actually recurs under load. Against the
+`VARIANT=noguard` floor of 0.806 ms this captures roughly 80% of the theoretical
+31%.
+
+**Two exact reformulations were tried first and are both WORSE** — do not
+re-attempt:
+
+| Form | p=900 |
+|---|---|
+| shipped `SELECT DISTINCT` + `COUNT(*)` (baseline) | 1.14 ms |
+| `COUNT(DISTINCT value)` inline | **3.66 ms** (3.2× worse) |
+| reuse the merge's deduped array, take its length | 1.42 ms (25% worse) |
+
+The third of those also disproves the hypothesis raised by 3.2 that Postgres
+shares identical subexpressions across the SET clause; if it did, reusing the
+merge would have been free.
 
 **Ceiling measured 2026-08-17 — this is the one still worth doing.** Same
 harness and conditions as 3.2, neutralising *only* the cap counts
