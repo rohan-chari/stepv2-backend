@@ -363,7 +363,8 @@ function buildRecordStepSyncV2(dependencies = {}) {
           : await tx.step.create({
               data: { userId, steps: canonical.steps, date: new Date(canonical.date), stepGoal: null },
             });
-        await tx.user.update({ where: { id: userId }, data: { lastStepSyncAt: now() } });
+        // `lastStepSyncAt` is deliberately NOT stamped here — see the note after
+        // this transaction commits.
         if (cleaned.length > 0) {
           const { StepSample } = require("../models/stepSample");
           // §3.3 overlap resolution inside Transaction A (same tx as steps +
@@ -387,6 +388,34 @@ function buildRecordStepSyncV2(dependencies = {}) {
       reservation = result.res;
       record = serializeRecord(result.step);
       stepsChanged = result.changed;
+      // PERFORMANCE (2026-08-17, transaction-hold-time §2.3a): this stamp used
+      // to live inside Transaction A. It is a timestamp, but writing it there
+      // took a row lock on `users` and HELD it for the rest of the transaction —
+      // across the sample reconcile, the scoring-input bump and the reservation
+      // insert. On the highest-traffic endpoint in the backend that is a long
+      // hold on a row every one of this user's requests contends for, and it
+      // bought nothing: nothing in the transaction reads it back.
+      //
+      // Safe to move because it is not a correctness gate. All three readers are
+      // push-suppression heuristics — stepSyncPush.js (twice) and the batch
+      // eligibility SQL in raceResolutionDeliveryIntents.js — plus the auth/me
+      // payload, which annotates it "bookkeeping; not read by the client". The
+      // v1 path (`recordSteps`) already stamps it outside any transaction, so
+      // non-atomic stamping is existing behaviour rather than a new risk.
+      //
+      // Swallowed for the same reason the cache invalidation below is: the steps
+      // are already committed, and failing the sync over a bookkeeping stamp
+      // would be far worse than losing it. If it is lost the user looks LESS
+      // recently-synced than they are, so at worst they get one extra silent
+      // push — the safe direction. No double-counted steps, no missed scoring.
+      try {
+        await prisma.user.update({
+          where: { id: userId },
+          data: { lastStepSyncAt: now() },
+        });
+      } catch {
+        // Intentionally ignored; see above.
+      }
       // C4 (spec §5 Phase E): Transaction A has committed the daily total, so
       // `v1:user:daily:{id}:{date}` — the value every friend of this user reads
       // from `GET /friends/steps` — is now stale. This and `recordSteps` are the

@@ -155,6 +155,29 @@ be atomic with the step write.
 
 **Proposed, in increasing order of risk:**
 
+- **(a) DONE 2026-08-17 — moved out of Transaction A.** The stamp now runs after
+  the transaction commits, next to the daily-steps cache invalidation, and its
+  failure is swallowed for the same reason: the steps are already committed, so
+  failing a sync over a bookkeeping timestamp would be strictly worse than losing
+  it. Transaction A drops from 7 statements to 6, and — the actual point — it no
+  longer holds a `users` row lock across the sample reconcile, the scoring-input
+  bump and the reservation insert.
+
+  Two things that made this safe beyond the reader audit below: nothing inside
+  the transaction reads the value back, and the **v1 path (`recordSteps`) already
+  stamps it outside any transaction**, so non-atomic stamping was existing
+  behaviour rather than something this change introduces.
+
+  A regression test was added (`stepSyncV2.test.js`, "stamps lastStepSyncAt on a
+  successful sync") because the behaviour had **no coverage at all**, in or out
+  of the transaction; mutation-checked by deleting the stamp.
+
+  **The benefit is not locally measurable** — it is lock hold time under
+  contention, so it shows up in the `idle in transaction` sample during a staging
+  load run (§5), not in a single-request timing.
+
+  Original reasoning follows.
+
 - **(a) Move `tx.user.update({ lastStepSyncAt })` out of the transaction.** It is
   a timestamp; a crash between commit and stamp costs one stale
   `lastStepSyncAt`, which the next sync corrects.

@@ -109,6 +109,38 @@ describe("POST /steps/sync-v2 (integration)", () => {
     assert.equal(secondJob.notBeforeAt.toISOString(), firstJob.notBeforeAt.toISOString());
   });
 
+  // `lastStepSyncAt` moved OUT of Transaction A (transaction-hold-time §2.3a):
+  // stamping it there held a `users` row lock across the rest of the write for
+  // no benefit. It must still be stamped — three push-suppression readers use it
+  // to decide whether a user needs a silent push, and a permanently-null stamp
+  // would make every user look never-synced. This had no coverage before the
+  // move, in or out of the transaction.
+  it("stamps lastStepSyncAt on a successful sync", async () => {
+    const { token, user } = await createTestUser();
+    const before = await prisma.user.findUniqueOrThrow({
+      where: { id: user.id },
+      select: { lastStepSyncAt: true },
+    });
+
+    const res = await request(baseUrl, "POST", "/steps/sync-v2", {
+      token,
+      headers: { "Idempotency-Key": uuid() },
+      body: bodyFor(3210),
+    });
+    assert.equal(res.status, 202);
+
+    const after = await prisma.user.findUniqueOrThrow({
+      where: { id: user.id },
+      select: { lastStepSyncAt: true },
+    });
+    assert.ok(after.lastStepSyncAt, "lastStepSyncAt must be stamped after a sync");
+    assert.notDeepEqual(
+      after.lastStepSyncAt,
+      before.lastStepSyncAt,
+      "the stamp must advance"
+    );
+  });
+
   it("reason-aware sync atomically bumps the scoring token and enqueues bounded STEP_SYNC scope", async () => {
     const { token, user } = await createTestUser();
     const raceId = await activeRaceWith(user.id, "Reason-aware sync race");
