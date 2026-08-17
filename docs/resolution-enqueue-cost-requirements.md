@@ -191,11 +191,33 @@ Test result after both fixes: **74 pass, 0 fail** across
 `race-queue-v2-closure-scaling` (2), `api-contract-resolution-query-count` (1),
 `stepSyncV2` (11), `home-step-sync-cooldown` (7).
 
-**Still unverified for 3.1:** the `ORDER BY i."raceId"` lock-ordering claim.
-Postgres processes `INSERT … SELECT` rows in the produced order in practice, but
-that is not a documented guarantee the way the old sequential loop was. The
-single-writer suite passes, which is evidence, not proof. Worth an explicit
-concurrent-deadlock test before this reaches prod.
+**Lock ordering for 3.1 — VERIFIED 2026-08-17.**
+`test/integration/race-queue-v2-enqueue-lock-order.test.js` measures the
+acquisition order directly rather than inferring it from an absence of
+deadlocks: a blocker transaction parks on one queue row, the enqueue is run so
+it collides with that row, and a third session probes the *other* row with
+`FOR UPDATE NOWAIT`. Whether the probe succeeds says which row the enqueue had
+already taken when it stalled.
+
+Result: blocked on the high id it already holds the low one; blocked on the low
+id it has not yet reached the high one — ascending, and it stays ascending when
+the caller passes the races in descending order. A control case runs the same
+statement shape with rows fed descending and no `ORDER BY`, and the lock order
+flips, which is what proves the experiment can detect order at all and that the
+ordering is load-bearing rather than Postgres being incidentally well-behaved.
+
+Two things this surfaced, both worth keeping in mind before touching the sort:
+
+- **The JS `.sort()` alone would satisfy the ordering cases** — rows reach the
+  server already ascending and `jsonb_to_recordset` preserves array order, so
+  `ORDER BY i."raceId"` is redundant *today*. It is kept because it is what makes
+  the order true if the planner ever stops preserving that input order, and a
+  source-level guard asserts both halves are still present.
+- **The concurrency case alone would not have caught a regression.** Reversing
+  both the sort and the `ORDER BY` still passes it, because *consistent
+  descending* is equally deadlock-free. Only an inconsistent order deadlocks, so
+  a "many concurrent enqueues, no 40P01" test cannot by itself protect this
+  invariant. Verified by mutation: reversing the order fails 3 of the 5 cases.
 
 ### 3.2 Compute the guard once instead of three times
 
