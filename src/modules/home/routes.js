@@ -30,6 +30,9 @@ const {
 const {
   isStrictFlagEnabled,
 } = require("../../shared/config/isStrictFlagEnabled");
+const { prisma: defaultPrisma } = require("../../db");
+const derivedCache = require("../../shared/cache/derivedCache");
+const cacheKeys = require("../../shared/cache/cacheKeys");
 
 function createHomeRouter(dependencies = {}) {
   const router = Router();
@@ -58,6 +61,7 @@ function createHomeRouter(dependencies = {}) {
   const getFriendsSummary =
     dependencies.getFriendsSummary || defaultGetFriendsSummary;
   const settings = dependencies.appSettings || appSettings;
+  const prisma = dependencies.prisma || defaultPrisma;
 
   router.use(requireAuth);
 
@@ -230,6 +234,57 @@ function createHomeRouter(dependencies = {}) {
         }
       }
 
+      // All additions below are viewer-bound and capability gated. Their
+      // absence is the old-backend downgrade path for a carrying app build.
+      if (
+        req.clientFeatures?.has("impact_summaries") === true &&
+        (await isStrictFlagEnabled(settings, "apiImpactSummariesEnabled"))
+      ) {
+        const summary = await derivedCache.cachedRead({
+          key: cacheKeys.homeImpactSummary(req.user.id),
+          prefix: cacheKeys.PREFIX.HOME_IMPACT_SUMMARY,
+          ttlSeconds: 60,
+          enabled: await isStrictFlagEnabled(settings, "redisCacheHomeImpactSummaryEnabled"),
+          load: () => prisma.globalEventUserSummary.findFirst({
+            where: { userId: req.user.id, acknowledgedAt: null },
+            orderBy: [{ settledAt: "desc" }, { id: "desc" }],
+            select: { id: true, eventId: true, extraRaceSteps: true, raceCount: true, settledAt: true },
+          }),
+        });
+        if (summary) result.globalEventSummary = summary;
+      }
+
+      if (
+        req.clientFeatures?.has("inbox_v1") === true &&
+        (await isStrictFlagEnabled(settings, "apiInboxV1Enabled"))
+      ) {
+        const now = new Date();
+        result.inboxUnreadCount = await derivedCache.cachedRead({
+          key: cacheKeys.homeInboxUnread(req.user.id),
+          prefix: cacheKeys.PREFIX.HOME_INBOX_UNREAD,
+          ttlSeconds: 60,
+          enabled: await isStrictFlagEnabled(settings, "redisCacheHomeInboxUnreadEnabled"),
+          load: async () => {
+            const [alerts, unreadThreads] = await Promise.all([
+              prisma.inboxAlert.count({ where: { userId: req.user.id, readAt: null, expiresAt: { gt: now } } }),
+              prisma.feedbackThread.count({ where: { userId: req.user.id, expiresAt: { gt: now }, userReadAt: null } }),
+            ]);
+            return alerts + unreadThreads;
+          },
+        });
+      }
+
+      const [bannerEnabled, bannerMessage] = await Promise.all([
+        settings.getFlag("homeServiceBannerEnabled"),
+        settings.getFlag("homeServiceBannerMessage"),
+      ]);
+      if (bannerEnabled === true && typeof bannerMessage === "string") {
+        const message = bannerMessage.trim();
+        if (message.length >= 1 && message.length <= 240) {
+          result.homeServiceBanner = { enabled: true, message };
+        }
+      }
+
       if (optionalShellPromises) {
         const [presentation, friends] = await Promise.allSettled(
           optionalShellPromises
@@ -249,6 +304,23 @@ function createHomeRouter(dependencies = {}) {
       res.status(500).json({ error: "Internal server error" });
     }
   });
+
+  router.post("/global-event-summaries/:id/acknowledge", asyncHandler(async (req, res) => {
+    const enabled = req.clientFeatures?.has("impact_summaries") === true &&
+      (await isStrictFlagEnabled(settings, "apiImpactSummariesEnabled"));
+    if (!enabled) return res.status(404).json({ error: "Global event summaries are unavailable", code: "FEATURE_DISABLED" });
+    const existing = await prisma.globalEventUserSummary.findFirst({
+      where: { id: req.params.id, userId: req.user.id }, select: { id: true, acknowledgedAt: true },
+    });
+    if (!existing) return res.status(404).json({ error: "Summary not found", code: "NOT_FOUND" });
+    if (existing.acknowledgedAt) return res.status(409).json({ error: "Summary already acknowledged", code: "ALREADY_ACKNOWLEDGED" });
+    const updated = await prisma.globalEventUserSummary.updateMany({
+      where: { id: existing.id, userId: req.user.id, acknowledgedAt: null }, data: { acknowledgedAt: new Date() },
+    });
+    if (updated.count !== 1) return res.status(409).json({ error: "Summary already acknowledged", code: "ALREADY_ACKNOWLEDGED" });
+    await derivedCache.invalidate({ keys: [cacheKeys.homeImpactSummary(req.user.id)], prefix: cacheKeys.PREFIX.HOME_IMPACT_SUMMARY });
+    return res.json({ acknowledged: true });
+  }));
 
   return router;
 }

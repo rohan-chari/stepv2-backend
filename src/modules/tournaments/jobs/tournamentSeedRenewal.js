@@ -71,6 +71,7 @@ function buildRenewTournamentSeeds(dependencies = {}) {
     });
     if (existing) return;
 
+    const payoutRoundingVersion = (await settings.getFlag("payoutRoundingV1Enabled")) === true ? 1 : 0;
     let created;
     try {
       created = await prisma.tournament.create({
@@ -86,6 +87,7 @@ function buildRenewTournamentSeeds(dependencies = {}) {
           // Immutable lobby quote: serializer + settlement prefer this over a
           // subsequently edited seed, while legacy rows safely fall back.
           championPrizeCoinsSnapshot: seed.championPrizeCoins,
+          payoutRoundingVersion,
           powerupsEnabled: seed.powerupsEnabled === true,
           // Seed column no longer read — fixed 2,000-step cadence everywhere.
           powerupStepInterval: normalizePowerupConfig({

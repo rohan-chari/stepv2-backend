@@ -6,10 +6,9 @@ const {
   GLOBAL_EVENT_DURATION_MS,
 } = require("../globalStepEvent");
 
-// The scheduler runs on the same 5-minute cadence as the other cron jobs in
-// src/index.js. The "should an event start now?" decision is the PURE function
+// The scheduler runs once per minute. The "should an event start now?" decision is the PURE function
 // shouldStartGlobalEvent; this job only does the DB read/write + push fan-out.
-const SCHEDULER_INTERVAL_MS = 5 * 60 * 1000; // every 5 minutes
+const SCHEDULER_INTERVAL_MS = 60 * 1000; // every minute
 
 function buildMaybeStartGlobalEvent(dependencies = {}) {
   const globalStepEventModel = dependencies.GlobalStepEvent || GlobalStepEvent;
@@ -35,12 +34,21 @@ function buildMaybeStartGlobalEvent(dependencies = {}) {
     });
     if (!decision) return null;
 
-    const event = await globalStepEventModel.create({
+    const eventInput = {
       startsAt: decision.startsAt,
       endsAt: decision.endsAt,
       multiplier: decision.multiplier,
       label: dependencies.label ?? null,
-    });
+    };
+    const created = typeof globalStepEventModel.createIfAbsentWithEnrollments === "function"
+      ? await globalStepEventModel.createIfAbsentWithEnrollments(eventInput)
+      : typeof globalStepEventModel.createIfAbsent === "function"
+      ? await globalStepEventModel.createIfAbsent(eventInput)
+      : { event: await globalStepEventModel.create(eventInput), created: true };
+    // A peer won the durable anchor fence. It owns the only fan-out; doing any
+    // participant work here would be both duplicate delivery and needless load.
+    if (!created.created) return null;
+    const event = created.event;
 
     logger.log(
       `[CRON] Global step event started: ${decision.multiplier}x ` +
@@ -48,12 +56,14 @@ function buildMaybeStartGlobalEvent(dependencies = {}) {
     );
 
     // Fan-out target set: every distinct user currently in an ACTIVE race.
-    let participantUserIds = [];
-    try {
-      participantUserIds =
-        (await raceModel.findActiveParticipantUserIds()) || [];
-    } catch (error) {
-      logger.error("[CRON] Global event participant lookup failed:", error);
+    let participantUserIds = created.participantUserIds || [];
+    if (!Array.isArray(created.participantUserIds)) {
+      try {
+        participantUserIds =
+          (await raceModel.findActiveParticipantUserIds()) || [];
+      } catch (error) {
+        logger.error("[CRON] Global event participant lookup failed:", error);
+      }
     }
 
     // Emit on the shared event bus; notificationHandlers.js handles the actual
@@ -76,6 +86,7 @@ function scheduleGlobalStepEvents(dependencies = {}) {
   const interval = dependencies.intervalMs || SCHEDULER_INTERVAL_MS;
   const logger = dependencies.logger || console;
   const runFn = dependencies.maybeStartGlobalEvent || maybeStartGlobalEvent;
+  const schedule = dependencies.setInterval || setInterval;
 
   async function run() {
     try {
@@ -86,7 +97,8 @@ function scheduleGlobalStepEvents(dependencies = {}) {
   }
 
   run();
-  setInterval(run, interval);
+  const timer = schedule(run, interval);
+  timer?.unref?.();
   logger.log(
     `[CRON] Global step event scheduler scheduled (every ${interval / 1000}s)`
   );

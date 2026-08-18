@@ -3,6 +3,8 @@ const test = require("node:test");
 
 const {
   buildMaybeStartGlobalEvent,
+  scheduleGlobalStepEvents,
+  SCHEDULER_INTERVAL_MS,
 } = require("../../src/modules/steps/jobs/globalStepEventScheduler");
 const {
   chooseEventStartForEtDay,
@@ -25,10 +27,13 @@ function makeCtx({ recentEvents = [], participantUserIds = [] } = {}) {
   const created = [];
   const emitted = [];
   const sinceCalls = [];
+  let participantReads = 0;
+  let createdEvent = null;
   return {
     created,
     emitted,
     sinceCalls,
+    get participantReads() { return participantReads; },
     deps: {
       GlobalStepEvent: {
         async findStartedSince(since) {
@@ -40,9 +45,16 @@ function makeCtx({ recentEvents = [], participantUserIds = [] } = {}) {
           created.push(event);
           return event;
         },
+        async createIfAbsent(data) {
+          if (createdEvent) return { event: createdEvent, created: false };
+          createdEvent = { id: `gse-${created.length + 1}`, ...data };
+          created.push(createdEvent);
+          return { event: createdEvent, created: true };
+        },
       },
       Race: {
         async findActiveParticipantUserIds() {
+          participantReads += 1;
           return participantUserIds;
         },
       },
@@ -119,6 +131,52 @@ test("idempotent: does not create a second event when one already exists for the
   assert.equal(event, null, "no event created");
   assert.equal(ctx.created.length, 0);
   assert.equal(ctx.emitted.length, 0, "no fan-out when nothing started");
+  assert.equal(ctx.participantReads, 0, "idempotency-only ticks avoid active-racer reads");
+});
+
+test("concurrent ticks retain one event and the losing tick skips heavy participant work", async () => {
+  const now = chosenNow();
+  const ctx = makeCtx({ recentEvents: [], participantUserIds: ["user-1"] });
+  const first = buildMaybeStartGlobalEvent({ ...ctx.deps, now: () => now });
+  const second = buildMaybeStartGlobalEvent({ ...ctx.deps, now: () => now });
+  const results = await Promise.all([first(), second()]);
+
+  assert.equal(ctx.created.length, 1);
+  assert.equal(results.filter(Boolean).length, 1);
+  assert.equal(ctx.emitted.length, 1);
+  assert.equal(ctx.participantReads, 1);
+});
+
+test("uses the creation transaction's enrollment snapshot for the only fan-out", async () => {
+  const now = chosenNow();
+  const emitted = [];
+  let legacyParticipantRead = 0;
+  const run = buildMaybeStartGlobalEvent({
+    now: () => now,
+    GlobalStepEvent: {
+      async findStartedSince() { return []; },
+      async createIfAbsentWithEnrollments(data) {
+        return {
+          created: true,
+          event: { id: "gse-atomic", ...data },
+          participantUserIds: ["user-1", "user-2"],
+        };
+      },
+    },
+    Race: {
+      async findActiveParticipantUserIds() {
+        legacyParticipantRead += 1;
+        return ["wrong-user"];
+      },
+    },
+    eventBus: { emit(name, payload) { emitted.push({ name, payload }); } },
+    logger: { log() {}, error() {} },
+  });
+
+  await run();
+
+  assert.equal(legacyParticipantRead, 0);
+  assert.deepEqual(emitted[0].payload.participantUserIds, ["user-1", "user-2"]);
 });
 
 test("does nothing when now is before the chosen time", async () => {
@@ -131,4 +189,19 @@ test("does nothing when now is before the chosen time", async () => {
   assert.equal(event, null);
   assert.equal(ctx.created.length, 0);
   assert.equal(ctx.emitted.length, 0);
+  assert.equal(ctx.participantReads, 0, "ordinary ticks do not read active racers");
+});
+
+test("uses a one-minute default interval", async () => {
+  let scheduledMs = null;
+  let runs = 0;
+  scheduleGlobalStepEvents({
+    maybeStartGlobalEvent: async () => { runs += 1; },
+    setInterval(fn, ms) { scheduledMs = ms; return { unref() {} }; },
+    logger: { log() {}, error() {} },
+  });
+  // run() is async, so only assert the synchronous schedule contract here.
+  assert.equal(SCHEDULER_INTERVAL_MS, 60 * 1000);
+  assert.equal(scheduledMs, 60 * 1000);
+  assert.equal(runs, 1, "the scheduler still executes an immediate lightweight tick");
 });

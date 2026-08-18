@@ -6,6 +6,7 @@ const MAX_CATEGORY_LENGTH = 64;
 // cannot write an unbounded string into the table via a header.
 const MAX_PROVENANCE_LENGTH = 32;
 const DAILY_SUBMISSION_LIMIT = 5;
+const THREAD_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
 class SuggestionError extends Error {
   constructor(message, statusCode, code) {
@@ -92,14 +93,33 @@ async function createSuggestion({
     );
   }
 
-  await prisma.suggestion.create({
-    data: {
-      userId,
-      text: cleanText,
-      category: cleanCategory,
-      appVersion: sanitizeProvenance(appVersion),
-      platform: sanitizeProvenance(platform),
-    },
+  // A suggestion and its first support-message are one durable unit. Older
+  // clients still receive the historical `{ok:true}` response; the thread is
+  // additive server state for inbox-capable builds only.
+  await prisma.$transaction(async (tx) => {
+    const suggestion = await tx.suggestion.create({
+      data: {
+        userId,
+        text: cleanText,
+        category: cleanCategory,
+        appVersion: sanitizeProvenance(appVersion),
+        platform: sanitizeProvenance(platform),
+      },
+    });
+    const expiresAt = new Date(now.getTime() + THREAD_RETENTION_MS);
+    const thread = await tx.feedbackThread.create({
+      data: { suggestionId: suggestion.id, userId, lastMessageAt: now, expiresAt, staffReadAt: null },
+    });
+    await tx.feedbackMessage.create({
+      data: {
+        threadId: thread.id,
+        senderKind: "USER",
+        text: cleanText,
+        // Server-generated, deterministic for the immutable initial message;
+        // user follow-ups use a caller idempotency UUID through the thread API.
+        idempotencyKey: `initial:${suggestion.id}`,
+      },
+    });
   });
 
   return { ok: true };
@@ -111,4 +131,5 @@ module.exports = {
   MAX_TEXT_LENGTH,
   MAX_CATEGORY_LENGTH,
   DAILY_SUBMISSION_LIMIT,
+  THREAD_RETENTION_MS,
 };

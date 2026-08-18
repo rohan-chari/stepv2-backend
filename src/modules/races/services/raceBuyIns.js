@@ -80,6 +80,7 @@ async function payoutRaceCoins({
   raceId,
   placement,
   amount,
+  payoutMetadata,
 }) {
   return creditBuyIn({
     awardCoinsFn,
@@ -87,6 +88,7 @@ async function payoutRaceCoins({
     amount,
     reason: "race_buy_in_payout",
     refId: `${raceId}:${placement}`,
+    payoutMetadata,
   });
 }
 
@@ -100,6 +102,7 @@ async function payoutRacePrizePool({
   raceId,
   placement,
   amount,
+  payoutMetadata,
 }) {
   return creditBuyIn({
     awardCoinsFn,
@@ -107,6 +110,7 @@ async function payoutRacePrizePool({
     amount,
     reason: "race_prize_pool_payout",
     refId: `${raceId}:${placement}`,
+    payoutMetadata,
   });
 }
 

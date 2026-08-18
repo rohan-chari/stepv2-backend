@@ -46,6 +46,7 @@ function buildGetFeaturedRaces(dependencies = {}) {
           maxParticipants: max ?? 100,
           isFull: max != null && acceptedCount >= max,
           powerupsEnabled: race.powerupsEnabled === true,
+          payoutRoundingVersion: race.payoutRoundingVersion ?? 0,
           finishReward: money.finishReward,
           prizePool: money.prizePool,
           myStatus: null,
@@ -142,6 +143,7 @@ function buildGetFeaturedRaces(dependencies = {}) {
         maxParticipants: max ?? 100,
         isFull: max != null && acceptedCount >= max,
         powerupsEnabled: race.powerupsEnabled || false,
+        payoutRoundingVersion: race.payoutRoundingVersion ?? 0,
         // Minted reward projection for seeded races. `paidPlaces` replaces the
         // old fixed `topFraction`: newer clients render "Top N split <pool>";
         // older clients read only `pool` (and show their hardcoded copy).

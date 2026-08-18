@@ -22,6 +22,9 @@ const {
   collectRaceHitchhikeCopies,
   applyHitchhikeCopies,
 } = require("../../powerups/hitchhikeCopies");
+const {
+  startCapacityPhase,
+} = require("../../../shared/observability/capacityPhaseMetrics");
 
 // Narrowly-scoped uploader reconciliation for POST /steps/sync-v2 (§6.4 / Phase
 // C2). For each of the uploader's ACTIVE races it computes and persists ONLY the
@@ -53,12 +56,18 @@ function buildReconcileUploaderRaces(dependencies = {}) {
     timeZone = "UTC",
     includeReconciledRaces = false,
   }) {
-    const races = await raceModel.findActiveForUser(userId);
-    // Stable sorted order to avoid advisory-lock deadlocks across paths.
-    const ordered = [...races].sort((a, b) => String(a.id).localeCompare(String(b.id)));
-
+    const capacity = startCapacityPhase("uploader_reconciliation");
+    let capacityOutcome = "error";
+    let races = [];
     let resolvedRaceCount = 0;
     const reconciledRaces = [];
+    try {
+    races = await capacity.measurePhase(
+      "activeRaceLoad",
+      () => raceModel.findActiveForUser(userId),
+    );
+    // Stable sorted order to avoid advisory-lock deadlocks across paths.
+    const ordered = [...races].sort((a, b) => String(a.id).localeCompare(String(b.id)));
 
     for (const race of ordered) {
       if (race.status !== "ACTIVE" || !race.startedAt) continue;
@@ -77,31 +86,40 @@ function buildReconcileUploaderRaces(dependencies = {}) {
         continue;
       }
 
-      await withRaceResolutionLock(race.id, async () => {
+      await capacity.measurePhase("perRaceReconciliation", () =>
+        withRaceResolutionLock(race.id, async () => {
         const currentTime = now();
 
         let globalEvents = [];
         try {
           globalEvents =
-            (await globalStepEventModel.findActiveInRange(
-              race.startedAt,
-              currentTime
+            (await capacity.measurePhase(
+              "globalEventLoad",
+              () => globalStepEventModel.findActiveInRange(
+                race.startedAt,
+                currentTime
+              ),
             )) || [];
         } catch {
           globalEvents = [];
         }
 
         const scoreTz = raceTimeZone(race, timeZone);
-        const { baseAdjusted, hasSampleData } = await calculateBaseAdjusted({
+        const { baseAdjusted, hasSampleData } = await capacity.measurePhase(
+          "stepSampleScoring",
+          () => calculateBaseAdjusted({
           participant,
           raceStartedAt: race.startedAt,
           timeZone: scoreTz,
           stepsModel,
           stepSampleModel,
           now: currentTime,
-        });
+          }),
+        );
 
-        const { total, leechTransfers } = await calculateCurrentTotal({
+        const { total, leechTransfers } = await capacity.measurePhase(
+          "effectScoring",
+          () => calculateCurrentTotal({
           raceId: race.id,
           racePowerupsEnabled: race.powerupsEnabled,
           participant,
@@ -111,7 +129,8 @@ function buildReconcileUploaderRaces(dependencies = {}) {
           stepSampleModel,
           globalEvents,
           now: currentTime,
-        });
+          }),
+        );
 
         // §5: apply DRAIN-ONLY leech for the uploader. This narrow path persists
         // only the uploader's own row, so we resolve the leeches TARGETING the
@@ -129,7 +148,9 @@ function buildReconcileUploaderRaces(dependencies = {}) {
         // availability — so the uploader's total never dips below what
         // getRaceProgress will show them a moment later.
         const hitchhikeCopies = race.powerupsEnabled
-          ? await collectRaceHitchhikeCopies({
+          ? await capacity.measurePhase(
+            "hitchhikeLoad",
+            () => collectRaceHitchhikeCopies({
               raceId: race.id,
               raceEndsAt: race.endsAt,
               participants: race.participants,
@@ -137,7 +158,8 @@ function buildReconcileUploaderRaces(dependencies = {}) {
               stepSampleModel,
               now: currentTime,
               globalEvents,
-            })
+            }),
+          )
           : [];
 
         const leechFinals = applyLeechTransfers(
@@ -162,10 +184,13 @@ function buildReconcileUploaderRaces(dependencies = {}) {
         // between worker cycles. High-watered: a re-sync that rewrites
         // step_samples downward must never move a player's odds backwards.
         // Frozen participants returned above, so they are never advanced.
-        const updatedParticipant = await participantModel.updateStepTotals(participant.id, {
-          totalSteps: finalTotal,
-          rawSteps: nextRawSteps(participant.rawSteps, baseAdjusted),
-        });
+        const updatedParticipant = await capacity.measurePhase(
+          "participantPersist",
+          () => participantModel.updateStepTotals(participant.id, {
+            totalSteps: finalTotal,
+            rawSteps: nextRawSteps(participant.rawSteps, baseAdjusted),
+          }),
+        );
 
         // Box progress uses the RAW-walked box total in boxTz = raceTimeZone(
         // race, "UTC") — device-independent, immune to buff/debuff multipliers —
@@ -175,14 +200,17 @@ function buildReconcileUploaderRaces(dependencies = {}) {
         if (scoreTz === boxTz) {
           boxBaseAdjusted = baseAdjusted;
         } else {
-          ({ baseAdjusted: boxBaseAdjusted } = await calculateBaseAdjusted({
+          ({ baseAdjusted: boxBaseAdjusted } = await capacity.measurePhase(
+            "boxStepSampleScoring",
+            () => calculateBaseAdjusted({
             participant,
             raceStartedAt: race.startedAt,
             timeZone: boxTz,
             stepsModel,
             stepSampleModel,
             now: currentTime,
-          }));
+            }),
+          ));
         }
         const boxEffectiveSteps = computeBoxEffectiveSteps({
           baseAdjusted: boxBaseAdjusted,
@@ -193,12 +221,15 @@ function buildReconcileUploaderRaces(dependencies = {}) {
         // Sync ONLY the uploader's box/powerup state. Pass the lean race so no
         // duplicate findById round-trip; syncRacePowerupState self-refetches when
         // a roll mutates the field.
-        await syncRacePowerupState({
-          raceId: race.id,
-          userId,
-          race,
-          boxEffectiveSteps,
-        });
+        await capacity.measurePhase(
+          "boxPowerupSync",
+          () => syncRacePowerupState({
+            raceId: race.id,
+            userId,
+            race,
+            boxEffectiveSteps,
+          }),
+        );
 
         // Internal claimability token/result. It is produced only after the
         // participant update and box sync above have completed inside the same
@@ -215,16 +246,25 @@ function buildReconcileUploaderRaces(dependencies = {}) {
             boxEffectiveSteps,
           });
         }
-      });
+        })
+      );
 
       resolvedRaceCount += 1;
     }
 
+    capacityOutcome = "success";
     return {
       resolvedRaceCount,
       boxStateCurrent: true,
       ...(includeReconciledRaces ? { reconciledRaces } : {}),
     };
+    } finally {
+      capacity.setCounts({
+        activeRaces: Array.isArray(races) ? races.length : 0,
+        resolvedRaces: resolvedRaceCount,
+      });
+      capacity.finish(capacityOutcome);
+    }
   };
 }
 

@@ -227,6 +227,24 @@
           30,
           45
         ],
+        "RUNNERS_HIGH": [
+          0,
+          5,
+          10,
+          15
+        ],
+        "DETOUR_SIGN": [
+          0,
+          5,
+          10,
+          15
+        ],
+        "STEALTH_MODE": [
+          0,
+          10,
+          20,
+          30
+        ],
         "LUCKY_HORSESHOE": [
           0,
           0,

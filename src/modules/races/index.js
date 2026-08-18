@@ -38,6 +38,7 @@ Object.assign(module.exports, require("./services/racePowerupInventoryRepair"));
 Object.assign(module.exports, require("./services/reconcileUploaderRaces"));
 Object.assign(module.exports, require("./services/validateRaceConfig"));
 Object.assign(module.exports, require("./services/racePayoutDoublePolicy"));
+Object.assign(module.exports, require("./services/reviewPrompt"));
 Object.assign(module.exports, require("./services/withRacePayoutDoubleTransaction"));
 
 Object.assign(module.exports, require("./queries/getRaceProgress"));
@@ -45,6 +46,7 @@ Object.assign(module.exports, require("./queries/getRaces"));
 Object.assign(module.exports, require("./queries/getRacePayoutDoubleOffer"));
 Object.assign(module.exports, require("./queries/getRaceDetails"));
 Object.assign(module.exports, require("./queries/getRaceFeed"));
+Object.assign(module.exports, require("./queries/raceImpactNotices"));
 Object.assign(module.exports, require("./queries/getFeaturedRaces"));
 Object.assign(module.exports, require("./queries/getPublicRaces"));
 Object.assign(module.exports, require("./queries/getPublicRaceCount"));

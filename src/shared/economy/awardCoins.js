@@ -25,7 +25,7 @@ async function invalidateAuthMe(userId) {
  * @param {string} [params.refId] - dedup key (instanceId, date string, etc.)
  * @returns {Promise<{awarded: boolean, coins: number}>}
  */
-async function awardCoins({ userId, amount, reason, refId, createdAt, tx = null }) {
+async function awardCoins({ userId, amount, reason, refId, createdAt, payoutMetadata, tx = null }) {
   const db = tx || prisma;
   const transactionData = {
     userId,
@@ -33,6 +33,7 @@ async function awardCoins({ userId, amount, reason, refId, createdAt, tx = null 
     reason,
     refId,
     ...(createdAt ? { createdAt } : {}),
+    ...(payoutMetadata ? { payoutMetadata } : {}),
   };
   if (tx) {
     const inserted = await db.coinTransaction.createMany({

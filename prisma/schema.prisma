@@ -189,6 +189,12 @@ model User {
   // account (see the FK on Suggestion) and explicitly listed in
   // deleteUserAccount's deletion set.
   suggestions                 Suggestion[]
+  raceEffectImpacts           RaceEffectImpact[]
+  globalEventRaceImpacts      GlobalEventRaceImpact[]
+  globalEventUserSummaries    GlobalEventUserSummary[]
+  appReviewPromptAttempts     AppReviewPromptAttempt[]
+  inboxAlerts                 InboxAlert[]
+  feedbackThreads             FeedbackThread[]
   seededBucketAssignments     SeededRaceBucketAssignment[]
   seededRaceWindowMemberships SeededRaceWindowMembership[]
 
@@ -221,12 +227,171 @@ model Suggestion {
   createdAt  DateTime @default(now()) @map("created_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  feedbackThread FeedbackThread?
 
   // Backs the per-user per-UTC-day rate limit (5/day).
   @@index([userId, createdAt])
   // Backs the admin list (newest first, keyset-paged on createdAt).
   @@index([createdAt])
   @@map("suggestions")
+}
+
+// Immutable, recipient-private components of a frozen race score. The effect
+// ID is a stable canonical-artifact key rather than an FK: active-effect rows
+// are lifecycle data and can be pruned after their settled explanation exists.
+model RaceEffectImpact {
+  id                   String   @id @default(uuid())
+  raceId               String   @map("race_id")
+  userId               String   @map("user_id")
+  effectId             String   @map("effect_id")
+  powerupType          String   @map("powerup_type")
+  deltaSteps           Int      @map("delta_steps")
+  attributionVersion   Int      @default(1) @map("attribution_version")
+  settledAt            DateTime @default(now()) @map("settled_at")
+  acknowledgedAt       DateTime? @map("acknowledged_at")
+
+  race Race @relation(fields: [raceId], references: [id], onDelete: Restrict)
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([raceId, userId, effectId])
+  @@index([raceId, userId, acknowledgedAt, settledAt(sort: Desc)])
+  @@index([userId, settledAt(sort: Desc)])
+  @@map("race_effect_impacts")
+}
+
+model GlobalEventRaceImpact {
+  id                 String   @id @default(uuid())
+  eventId            String   @map("event_id")
+  raceId             String   @map("race_id")
+  userId             String   @map("user_id")
+  status             String   @default("PENDING")
+  deltaSteps         Int?     @map("delta_steps")
+  attributionVersion Int      @default(1) @map("attribution_version")
+  settledAt          DateTime? @map("settled_at")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  event GlobalStepEvent @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  race  Race            @relation(fields: [raceId], references: [id], onDelete: Restrict)
+  user  User            @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([eventId, raceId, userId])
+  @@index([eventId, userId, settledAt])
+  @@index([userId, eventId])
+  @@map("global_event_race_impacts")
+}
+
+model GlobalEventUserSummary {
+  id                 String   @id @default(uuid())
+  eventId            String   @map("event_id")
+  userId             String   @map("user_id")
+  extraRaceSteps     Int      @map("extra_race_steps")
+  raceCount          Int      @map("race_count")
+  attributionVersion Int      @default(1) @map("attribution_version")
+  settledAt          DateTime @default(now()) @map("settled_at")
+  acknowledgedAt     DateTime? @map("acknowledged_at")
+
+  event GlobalStepEvent @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  user  User            @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([eventId, userId])
+  @@index([userId, acknowledgedAt, settledAt(sort: Desc)])
+  @@map("global_event_user_summaries")
+}
+
+model AppReviewPromptAttempt {
+  id            String   @id @default(uuid())
+  userId        String   @map("user_id")
+  raceId        String   @map("race_id")
+  opportunityId String   @unique @map("opportunity_id")
+  expiresAt     DateTime @map("expires_at")
+  claimedAt     DateTime? @map("claimed_at")
+  attemptedAt   DateTime? @map("attempted_at")
+  policyVersion Int      @default(1) @map("policy_version")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+  race Race @relation(fields: [raceId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, raceId])
+  @@index([userId, expiresAt, claimedAt])
+  @@map("app_review_prompt_attempts")
+}
+
+model InboxAlert {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  type        String
+  destination Json
+  title       String
+  body        String
+  sourceKey   String   @map("source_key")
+  readAt      DateTime? @map("read_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  expiresAt   DateTime @map("expires_at")
+
+  user   User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  outbox InboxDeliveryOutbox[]
+
+  @@unique([userId, sourceKey])
+  @@index([userId, readAt, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([expiresAt])
+  @@map("inbox_alerts")
+}
+
+model InboxDeliveryOutbox {
+  id           String   @id @default(uuid())
+  alertId      String   @map("alert_id")
+  kind         String   @default("PUSH")
+  payload      Json
+  status       String   @default("PENDING")
+  attemptCount Int      @default(0) @map("attempt_count")
+  availableAt  DateTime @default(now()) @map("available_at")
+  leaseUntil   DateTime? @map("lease_until")
+  deliveredAt  DateTime? @map("delivered_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  alert InboxAlert @relation(fields: [alertId], references: [id], onDelete: Cascade)
+
+  @@unique([alertId, kind])
+  @@index([status, availableAt, leaseUntil])
+  @@map("inbox_delivery_outbox")
+}
+
+model FeedbackThread {
+  id            String   @id @default(uuid())
+  suggestionId  String   @unique @map("suggestion_id")
+  userId        String   @map("user_id")
+  lastMessageAt DateTime @default(now()) @map("last_message_at")
+  expiresAt     DateTime @map("expires_at")
+  userReadAt    DateTime? @map("user_read_at")
+  staffReadAt   DateTime? @map("staff_read_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  suggestion Suggestion        @relation(fields: [suggestionId], references: [id], onDelete: Cascade)
+  user       User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages   FeedbackMessage[]
+
+  @@index([userId, expiresAt, lastMessageAt(sort: Desc), id(sort: Desc)])
+  @@index([expiresAt])
+  @@map("feedback_threads")
+}
+
+model FeedbackMessage {
+  id             String   @id @default(uuid())
+  threadId       String   @map("thread_id")
+  senderKind     String   @map("sender_kind")
+  text           String
+  idempotencyKey String   @map("idempotency_key")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  thread FeedbackThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@unique([threadId, idempotencyKey])
+  @@index([threadId, createdAt, id])
+  @@map("feedback_messages")
 }
 
 enum FriendshipStatus {
@@ -520,6 +685,9 @@ model CoinTransaction {
   amount    Int
   reason    String
   refId     String?  @map("ref_id")
+  // Canonical raw/final/subsidy payout artifact when this ledger row is a race
+  // or tournament prize. NULL leaves every non-payout transaction unchanged.
+  payoutMetadata Json? @map("payout_metadata")
   createdAt DateTime @default(now()) @map("created_at")
   user      User     @relation(fields: [userId], references: [id])
 
@@ -960,6 +1128,10 @@ model Race {
   // read either column.
   fundedPrize          Boolean          @default(false) @map("funded_prize")
   prizePoolCoins       Int              @default(0) @map("prize_pool_coins")
+  // Immutable at creation: 0 preserves the historical payout formula, 1 rounds
+  // every final positive recipient award up to a multiple of five.
+  payoutRoundingVersion Int             @default(0) @map("payout_rounding_version")
+  payoutRoundingMetadata Json?          @map("payout_rounding_metadata")
   // Default-off, creation-stamped exit policy. Existing races remain false so
   // enabling the rollout setting never changes an already-open competition.
   exitActionsEnabled   Boolean          @default(false) @map("exit_actions_enabled")
@@ -1075,6 +1247,9 @@ model Race {
   resolutionJob          RaceResolutionJobV2?
   resolutionPostTasks    RaceResolutionPostTask[]
   seededBucket           SeededRaceBucket?           @relation("SeededBucketRace")
+  effectImpacts          RaceEffectImpact[]
+  globalEventImpacts     GlobalEventRaceImpact[]
+  reviewPromptAttempts   AppReviewPromptAttempt[]
 
   @@unique([tournamentId, tournamentRound, tournamentMatchIndex])
   @@index([creatorId])
@@ -1151,6 +1326,8 @@ model Tournament {
   // the legacy pot payout and a featured seed's championPrizeCoins.
   fundedPrize                Boolean          @default(false) @map("funded_prize")
   prizePoolCoins             Int              @default(0) @map("prize_pool_coins")
+  payoutRoundingVersion      Int              @default(0) @map("payout_rounding_version")
+  payoutRoundingMetadata     Json?            @map("payout_rounding_metadata")
   powerupsEnabled            Boolean          @default(false) @map("powerups_enabled")
   powerupStepInterval        Int?             @map("powerup_step_interval")
   isPublic                   Boolean          @default(false) @map("is_public")
@@ -1849,6 +2026,9 @@ model GlobalStepEvent {
   multiplier Float    @default(2)
   label      String?
   createdAt  DateTime @default(now()) @map("created_at")
+
+  raceImpacts GlobalEventRaceImpact[]
+  userSummaries GlobalEventUserSummary[]
 
   @@index([startsAt, endsAt])
   @@map("global_step_events")

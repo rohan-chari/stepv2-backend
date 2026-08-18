@@ -4,6 +4,8 @@ const { User } = require("../../users");
 const { DeviceToken } = require("../../../shared/push/deviceToken");
 const { apnsService } = require("../../../shared/push/apns");
 const { fcmService } = require("../../../shared/push/fcm");
+const { appSettings: defaultAppSettings } = require("../../../shared/config/appSettings");
+const { createInboxAlert: defaultCreateInboxAlert } = require("../../inbox/services/inbox");
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
@@ -15,6 +17,8 @@ function buildRaceResolutionDeliveryIntents(dependencies = {}) {
   const deviceTokenModel = dependencies.DeviceToken || DeviceToken;
   const apns = dependencies.apnsService || apnsService;
   const fcm = dependencies.fcmService || fcmService;
+  const appSettings = dependencies.appSettings || defaultAppSettings;
+  const createInboxAlert = dependencies.createInboxAlert || defaultCreateInboxAlert;
   const now = dependencies.now || (() => new Date());
   const secret = dependencies.secret || process.env.SESSION_TOKEN_SECRET;
 
@@ -48,6 +52,7 @@ function buildRaceResolutionDeliveryIntents(dependencies = {}) {
       multiplier != null ? `${multiplier}x` : "a high multiplier"
     }. Slow them down or catch up!`;
     const currentTime = now();
+    const inboxEnabled = (await appSettings.getFlag("apiInboxV1Enabled")) === true;
     const candidates = recipients.map((userId, ordinal) => ({
       id: crypto.randomUUID(),
       userId,
@@ -86,9 +91,9 @@ function buildRaceResolutionDeliveryIntents(dependencies = {}) {
        SELECT input.id, input."userId", 'HIGH_MULTIPLIER_ALERT', $3, $4, $5,
               input."deliveryKey", $6
        FROM input
-       WHERE EXISTS (
+       WHERE ($7::boolean OR EXISTS (
          SELECT 1 FROM device_tokens token WHERE token.user_id=input."userId"
-       )
+       ))
        AND NOT EXISTS (
          SELECT 1 FROM notifications existing
          WHERE existing.user_id=input."userId"
@@ -102,13 +107,36 @@ function buildRaceResolutionDeliveryIntents(dependencies = {}) {
         title,
         body,
         raceId,
-        currentTime
+        currentTime,
+        inboxEnabled,
       );
     };
+    const commitClaims = async (transaction) => {
+      const rows = await claimRows(transaction);
+      if (inboxEnabled) {
+        const byUserId = new Map(candidates.map((candidate) => [candidate.userId, candidate]));
+        for (const row of rows) {
+          const candidate = byUserId.get(row.userId);
+          if (!candidate) continue;
+          await createInboxAlert({
+            userId: candidate.userId,
+            type: "HIGH_MULTIPLIER_ALERT",
+            title,
+            body,
+            destination: { route: "raceDetail", raceId: String(raceId) },
+            sourceKey: candidate.deliveryKey,
+            now: currentTime,
+            tx: transaction,
+          });
+        }
+      }
+      return rows;
+    };
     const rows = client
-      ? await claimRows(client)
-      : await prisma.$transaction(claimRows);
+      ? await commitClaims(client)
+      : await prisma.$transaction(commitClaims);
     const claimed = new Set(rows.map((row) => row.userId));
+    if (inboxEnabled) return [];
     return candidates.filter((candidate) => claimed.has(candidate.userId)).map((candidate) => ({
       kind: "STATE_NOTIFICATION",
       recipientUserId: candidate.userId,

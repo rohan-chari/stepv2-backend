@@ -160,7 +160,7 @@ describe("race payout double rewarded ad", () => {
     assert.equal(capable.body.completed.length, 3);
   });
 
-  it("caps the server bonus at 500 while preserving authoritative baseCoins", async () => {
+  it("offers the full authoritative rounded base without a coin-cap clip", async () => {
     const { user, token } = await createTestUser();
     await completedRace(user.id, {
       payoutCoins: 800,
@@ -169,7 +169,7 @@ describe("race payout double rewarded ad", () => {
     });
     const { body } = await list(token);
     assert.equal(body.payoutDoubleOffer.baseCoins, 800);
-    assert.equal(body.payoutDoubleOffer.bonusCoins, 500);
+    assert.equal(body.payoutDoubleOffer.bonusCoins, 800);
     assert.equal(body.payoutDoubleOffer.maxBonusCoins, 500);
   });
 
@@ -466,7 +466,7 @@ describe("race payout double rewarded ad", () => {
     assert.equal(await prisma.racePayoutDoubleOffer.count(), 0);
   });
 
-  it("enforces the durable rolling-24-hour allowance across batches", async () => {
+  it("retains velocity telemetry without clipping an approved full-base claim", async () => {
     const { user, token } = await createTestUser();
     const firstRace = await completedRace(user.id, {
       payoutCoins: 480,
@@ -488,13 +488,13 @@ describe("race payout double rewarded ad", () => {
     });
     const prospective = await list(token);
     assert.equal(prospective.body.payoutDoubleOffer.baseCoins, 100);
-    assert.equal(prospective.body.payoutDoubleOffer.bonusCoins, 20);
+    assert.equal(prospective.body.payoutDoubleOffer.bonusCoins, 100);
     assert.equal(prospective.body.payoutDoubleOffer.rolling24hRemainingBeforeClaim, 20);
     const secondOffer = await prepare(token, [secondRace.race.id]);
-    assert.equal(secondOffer.body.bonusCoins, 20);
+    assert.equal(secondOffer.body.bonusCoins, 100);
     const secondClaim = await verifyAndClaim({ userId: user.id, token, offerId: secondOffer.body.offerId });
     assert.equal(secondClaim.response.status, 200);
-    assert.equal(secondClaim.body.coins, 500);
+    assert.equal(secondClaim.body.coins, 580);
     await request(server.baseUrl, "POST", "/races/results/seen", {
       token, headers: CAPABLE, body: { raceIds: [secondRace.race.id] },
     });
@@ -503,8 +503,9 @@ describe("race payout double rewarded ad", () => {
       amount: 10,
       reason: "race_prize_pool_payout",
     });
-    const exhausted = await list(token);
-    assert.equal(Object.hasOwn(exhausted.body, "payoutDoubleOffer"), false);
+    const stillEligible = await list(token);
+    assert.equal(stillEligible.body.payoutDoubleOffer.baseCoins, 10);
+    assert.equal(stillEligible.body.payoutDoubleOffer.bonusCoins, 10);
   });
 
   it("injects a pending offer's old races beyond the 10-row page only for capable clients", async () => {

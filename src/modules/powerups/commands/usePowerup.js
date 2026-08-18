@@ -207,6 +207,18 @@ const HITCHHIKE_MAX_PER_TARGET = 1;
 // touches self-buffs or untimed effects, and never expires a row outright — the
 // halved expiresAt is always > now, so nothing already scored is clawed back.
 const QUICK_RINSE_REDUCTION_FRACTION = 0.5;
+// Owner decision 2026-08-17: at most ONE Quick Rinse per user per race per hour.
+// Stacking rinses back to back reduced any incoming debuff to noise (two rinses
+// = a quarter of the duration for two cheap items), so the halving is only worth
+// paying for if it can't be chained.
+//
+// The cooldown is derived from the POWERUP_USED feed events rather than a new
+// column: Quick Rinse is instantaneous and writes no effect row, so the event is
+// the only durable record of a use — and it is already written on every success
+// (including uses by app versions that predate this rule, so no client can dodge
+// the cooldown by being old). Scoped to (race, user): a rinse in one race never
+// blocks another.
+const QUICK_RINSE_COOLDOWN_MS = 60 * 60 * 1000;
 // Effect types the TARGETED Pocket Watch mode may extend (§6.1). Deliberately a
 // separate allowlist rather than a change to isPocketWatchExtendable, so the
 // legacy self-buff path stays bit-identical. HITCHHIKE is excluded on purpose.
@@ -2070,6 +2082,30 @@ function buildUsePowerup(dependencies = {}) {
     // deliberate and matches shipped Cleanse behavior (§8.1); do not add a bypass.
     let quickRinseTargets = [];
     if (type === "QUICK_RINSE") {
+      // Cooldown first: on cooldown AND holding no debuffs, "wait 12 min" is the
+      // actionable message, not "nothing to rinse". Transient, so retainHeld
+      // keeps a REDEEMED item in the race instead of refunding it to inventory.
+      const lastUsedAt = await eventModel.findLastPowerupUseAt({
+        raceId,
+        actorUserId: userId,
+        powerupType: "QUICK_RINSE",
+      });
+      if (lastUsedAt) {
+        const readyAt = new Date(
+          new Date(lastUsedAt).getTime() + QUICK_RINSE_COOLDOWN_MS
+        );
+        const remainingMs = readyAt.getTime() - now().getTime();
+        if (remainingMs > 0) {
+          throw new PowerupUseError(
+            // Floor the copy at a minute: formatDuration rounds, so the last 30
+            // seconds of the window would otherwise read "0 minutes".
+            `Quick Rinse can only be used once an hour in a race. Ready again in ${formatDuration(Math.max(remainingMs, 60 * 1000))}`,
+            409,
+            "QUICK_RINSE_COOLDOWN",
+            { retainHeld: true }
+          );
+        }
+      }
       const activeEffects = await effectModel.findActiveForParticipant(myParticipant.id);
       quickRinseTargets = (activeEffects || []).filter(
         (e) => isCleansableDebuff(e, userId) && isLiveTimedEffect(e, now())
@@ -2709,6 +2745,11 @@ function buildUsePowerup(dependencies = {}) {
         result.shortened = affectedEffects.length;
         result.reductionFraction = QUICK_RINSE_REDUCTION_FRACTION;
         result.affectedEffects = affectedEffects;
+        // Additive: when the next rinse becomes usable in this race. Frozen
+        // clients ignore it; nothing may require it.
+        result.nextAvailableAt = new Date(
+          currentTime.getTime() + QUICK_RINSE_COOLDOWN_MS
+        ).toISOString();
 
         await eventModel.create({
           raceId,

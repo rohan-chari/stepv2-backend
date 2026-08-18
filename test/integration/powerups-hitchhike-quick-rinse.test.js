@@ -393,6 +393,98 @@ describe("hitchhike / quick rinse — integration", () => {
         `${row.type} remaining time is halved`
       );
     }
+    assert.ok(
+      new Date(result.nextAvailableAt).getTime() > Date.now(),
+      "the response advertises when the next rinse unlocks"
+    );
+  });
+
+  // Owner decision 2026-08-17: one rinse per user per race per hour, derived
+  // from the POWERUP_USED feed event the successful rinse wrote.
+  it("Quick Rinse is limited to once an hour per race", async () => {
+    const alice = await createUser("RinseCdA");
+    const bob = await createUser("RinseCdB");
+    await makeFriends(alice, bob);
+    const raceId = await createActiveRace(alice, [bob]);
+
+    // One long debuff on Bob. Halving it leaves plenty of remaining time, so it
+    // stays rinsable for every attempt below — the only thing that can reject a
+    // later attempt is the cooldown itself.
+    const cramp = await giveHeld(raceId, alice.userId, "LEG_CRAMP");
+    const crampRes = await request(
+      server.baseUrl,
+      "POST",
+      `/races/${raceId}/powerups/${cramp.id}/use`,
+      { body: { targetUserId: bob.userId }, token: alice.token, headers: POWERUPS3 }
+    );
+    assert.equal(crampRes.status, 200);
+
+    const first = await giveHeld(raceId, bob.userId, "QUICK_RINSE");
+    const firstRes = await request(
+      server.baseUrl,
+      "POST",
+      `/races/${raceId}/powerups/${first.id}/use`,
+      { token: bob.token, headers: POWERUPS3 }
+    );
+    assert.equal(firstRes.status, 200);
+
+    // A second rinse minutes later is refused, and the item is NOT consumed.
+    const second = await giveHeld(raceId, bob.userId, "QUICK_RINSE");
+    const secondRes = await request(
+      server.baseUrl,
+      "POST",
+      `/races/${raceId}/powerups/${second.id}/use`,
+      { token: bob.token, headers: POWERUPS3 }
+    );
+    assert.equal(secondRes.status, 409);
+    const secondBody = await secondRes.json();
+    assert.equal(secondBody.code, "QUICK_RINSE_COOLDOWN");
+    assert.match(secondBody.error || secondBody.message || "", /once an hour/i);
+    assert.equal(
+      (await prisma.racePowerup.findUnique({ where: { id: second.id } })).status,
+      "HELD",
+      "the item is retained"
+    );
+
+    // A rinse in a DIFFERENT race is unaffected by this race's cooldown.
+    const otherRaceId = await createActiveRace(alice, [bob]);
+    const otherCramp = await giveHeld(otherRaceId, alice.userId, "LEG_CRAMP");
+    await request(
+      server.baseUrl,
+      "POST",
+      `/races/${otherRaceId}/powerups/${otherCramp.id}/use`,
+      { body: { targetUserId: bob.userId }, token: alice.token, headers: POWERUPS3 }
+    );
+    const otherRinse = await giveHeld(otherRaceId, bob.userId, "QUICK_RINSE");
+    const otherRes = await request(
+      server.baseUrl,
+      "POST",
+      `/races/${otherRaceId}/powerups/${otherRinse.id}/use`,
+      { token: bob.token, headers: POWERUPS3 }
+    );
+    assert.equal(otherRes.status, 200, "the cooldown is scoped per race");
+
+    // Backdate the first race's rinse event past the hour: the window reopens.
+    await prisma.racePowerupEvent.updateMany({
+      where: {
+        raceId,
+        actorUserId: bob.userId,
+        eventType: "POWERUP_USED",
+        powerupType: "QUICK_RINSE",
+      },
+      data: { createdAt: new Date(Date.now() - 61 * 60 * 1000) },
+    });
+    const thirdRes = await request(
+      server.baseUrl,
+      "POST",
+      `/races/${raceId}/powerups/${second.id}/use`,
+      { token: bob.token, headers: POWERUPS3 }
+    );
+    assert.equal(thirdRes.status, 200, "usable again once the hour has passed");
+    assert.equal(
+      (await prisma.racePowerup.findUnique({ where: { id: second.id } })).status,
+      "USED"
+    );
   });
 
   // CONTROL: identical setup, but NO hitchhike is ever cast. Whatever Bob scores

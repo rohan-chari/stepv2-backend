@@ -305,7 +305,10 @@ function buildCreateRace(dependencies = {}) {
     // — never a 400, or every un-updated binary loses the ability to create a
     // race. Coerced BEFORE validation so even an off-band legacy amount (below
     // the old 10-coin minimum) still creates cleanly.
-    const fundedPrizePools = await settings.getFlag("fundedPrizePoolsEnabled");
+    const [fundedPrizePools, payoutRoundingV1Enabled] = await Promise.all([
+      settings.getFlag("fundedPrizePoolsEnabled"),
+      settings.getFlag("payoutRoundingV1Enabled"),
+    ]);
     // Same creation-time stamping rule as fundedPrize: this setting controls
     // only future races. An in-flight race's capabilities never reprice when a
     // remote flag flips during a phased app rollout.
@@ -344,6 +347,7 @@ function buildCreateRace(dependencies = {}) {
       // The row-level discriminator: this race's prize is app-minted, and stays
       // app-minted even if the flag is flipped back off mid-race.
       fundedPrize: fundedPrizePools === true,
+      payoutRoundingVersion: fundedPrizePools === true && payoutRoundingV1Enabled === true ? 1 : 0,
       exitActionsEnabled: exitActionsEnabled === true,
       isPublic: !!isPublic,
       maxParticipants: normalizedMaxParticipants,

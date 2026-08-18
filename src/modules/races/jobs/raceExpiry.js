@@ -25,6 +25,10 @@ const { nextRawSteps } = require("../../powerups/rawPosition");
 const {
   RaceResolutionJobV2,
 } = require("../models/raceResolutionJobV2");
+const { SETTLEMENT_EFFECT_TYPES } = require("../services/raceScoringEffectTypes");
+const {
+  computeSettlementAttributionVector,
+} = require("../services/raceSettlementAttribution");
 
 // Settlement acquires the race through the SAME fence-first ownership protocol
 // the resolution worker uses (spec §5a item 6): the write transaction BEGINS by
@@ -85,6 +89,94 @@ async function markSeededBucketCompleted(race) {
 
 const byUserIdAsc = (a, b) =>
   String(a.participant.userId || "").localeCompare(String(b.participant.userId || ""));
+
+function chronologicalEffects(rows) {
+  return [...rows].sort((a, b) => {
+    const at = new Date(a.startsAt || 0).getTime();
+    const bt = new Date(b.startsAt || 0).getTime();
+    if (at !== bt) return at - bt;
+    return String(a.id).localeCompare(String(b.id));
+  });
+}
+
+// A read-only adapter over the exact settled effect rows. Attribution changes
+// only which already-persisted effects are visible to the canonical scorer; it
+// does not duplicate multiplier, floor, Leech, or Hitchhike calculations.
+function buildAttributionEffectModel({ effectsByParticipant, hitchhikes, includedEffectIds }) {
+  const included = includedEffectIds || new Set();
+  const select = (rows) => chronologicalEffects((rows || []).filter((row) => included.has(row.id)));
+  return {
+    async findEffectsForRaceByTypes(_raceId, participantId, types) {
+      const rows = select(effectsByParticipant.get(participantId));
+      const byType = Object.fromEntries((types || []).map((type) => [type, []]));
+      for (const row of rows) if (byType[row.type]) byType[row.type].push(row);
+      return byType;
+    },
+    async findRaceEffectsByType(_raceId, type) {
+      return type === "HITCHHIKE" ? select(hitchhikes) : [];
+    },
+  };
+}
+
+async function loadSettlementAttributionEffects({ raceId, participants, raceActiveEffectModel }) {
+  const effectsByParticipant = new Map();
+  for (const participant of participants) {
+    const byType = await raceActiveEffectModel.findEffectsForRaceByTypes(
+      raceId, participant.id, SETTLEMENT_EFFECT_TYPES
+    );
+    effectsByParticipant.set(participant.id, SETTLEMENT_EFFECT_TYPES.flatMap((type) => byType[type] || []));
+  }
+  const hitchhikes = await raceActiveEffectModel.findRaceEffectsByType(raceId, "HITCHHIKE");
+  return { effectsByParticipant, hitchhikes: chronologicalEffects(hitchhikes) };
+}
+
+async function computeSettlementEffectAttribution({
+  race, acceptedParticipants, preLeech, settlementTime, attributionEffects, globalEvents,
+}) {
+  const settledEvents = chronologicalEffects(globalEvents || []);
+  const effects = chronologicalEffects([
+    ...[...attributionEffects.effectsByParticipant.values()].flat(),
+    ...attributionEffects.hitchhikes,
+  ]);
+  if (effects.length === 0 && settledEvents.length === 0) return null;
+  const frozenTotals = new Map(acceptedParticipants
+    .filter((participant) => participant.forfeitedAt || participant.finishedAt)
+    .map((participant) => [participant.id, participant.finishTotalSteps ?? participant.totalSteps ?? race.targetSteps]));
+
+  const score = async ({ effectIds, globalEvents: scoringGlobalEvents }) => {
+    const effectModel = buildAttributionEffectModel({ ...attributionEffects, includedEffectIds: effectIds });
+    const active = [];
+    for (const entry of preLeech) {
+      const recomputed = await calculateCurrentTotal({
+        raceId: race.id,
+        racePowerupsEnabled: race.powerupsEnabled,
+        participant: entry.participant,
+        baseAdjusted: entry.baseAdjusted,
+        hasSampleData: entry.hasSampleData,
+        raceActiveEffectModel: effectModel,
+        stepSampleModel: StepSample,
+        globalEvents: scoringGlobalEvents,
+        now: settlementTime,
+      });
+      active.push({
+        participantId: entry.participant.id, userId: entry.participant.userId,
+        preLeechTotal: recomputed.total, leechTransfers: recomputed.leechTransfers,
+      });
+    }
+    const copies = await collectRaceHitchhikeCopies({
+      raceId: race.id, raceEndsAt: settlementTime, participants: acceptedParticipants,
+      raceActiveEffectModel: effectModel, stepSampleModel: StepSample, now: settlementTime,
+    });
+    const finals = applyLeechTransfers(applyHitchhikeCopies(active, copies));
+    for (const [participantId, total] of frozenTotals) finals.set(participantId, total);
+    return finals;
+  };
+
+  const vector = await computeSettlementAttributionVector({
+    participants: acceptedParticipants, effects, globalEvents: settledEvents, score,
+  });
+  return vector;
+}
 
 // Env-tunable Bounty payout (§3.11). Frozen into each Bounty's metadata at
 // use-time, so this default only applies to rows written before the env existed.
@@ -225,16 +317,15 @@ async function resolveExpiredRaces() {
 
       // GlobalStepEvents overlapping the race window. Passed into the SHARED
       // resolution so the settled standings match what getRaceProgress showed.
-      let globalEvents = [];
-      try {
-        globalEvents =
-          (await GlobalStepEvent.findActiveInRange(
-            race.startedAt,
-            settlementTime
-          )) || [];
-      } catch {
-        globalEvents = [];
-      }
+      // This is settlement input, not an optional display decoration. If the
+      // event read fails, leave the race ACTIVE so the next cron retries the
+      // same canonical scorer rather than completing with a fabricated zero
+      // global vector and permanently stranding its PENDING recap rows.
+      const globalEvents =
+        (await GlobalStepEvent.findActiveInRange(
+          race.startedAt,
+          settlementTime
+        )) || [];
 
       // Seeded races settle in their canonical tz so settled totals match what
       // getRaceProgress showed live; user races keep UTC (legacy).
@@ -315,6 +406,8 @@ async function resolveExpiredRaces() {
 
         preLeech.push({
           participant,
+          baseAdjusted,
+          hasSampleData,
           rawSteps: nextRawSteps(participant.rawSteps, baseAdjusted),
           preLeechTotal: total,
           leechTransfers,
@@ -397,6 +490,28 @@ async function resolveExpiredRaces() {
         });
       }
 
+      // Re-run only the existing whole-race scorer under ordered subsets of
+      // already-settled effect rows. Any attribution failure leaves canonical
+      // settlement untouched and produces no fabricated explanation rows.
+      let effectAttribution = null;
+      try {
+        const attributionEffects = await loadSettlementAttributionEffects({
+          raceId: race.id,
+          participants: acceptedParticipants,
+          raceActiveEffectModel: RaceActiveEffect,
+        });
+        effectAttribution = await computeSettlementEffectAttribution({
+          race,
+          acceptedParticipants,
+          preLeech,
+          settlementTime,
+          attributionEffects,
+          globalEvents,
+        });
+      } catch (error) {
+        console.error(`[CRON] Effect attribution failed for race ${race.id}:`, error);
+      }
+
       // Fenced write #1 — settled totals. Fence acquired FIRST, then rows in
       // ascending userId order.
       finalTotals.sort(byUserIdAsc);
@@ -408,6 +523,39 @@ async function resolveExpiredRaces() {
               totalSteps: row.totalSteps,
               rawSteps: row.rawSteps,
               totalsUpdatedAt: new Date(),
+            },
+          });
+        }
+        for (const row of effectAttribution?.effectImpacts || []) {
+          await tx.raceEffectImpact.upsert({
+            where: { raceId_userId_effectId: { raceId: race.id, userId: row.userId, effectId: row.effectId } },
+            update: {},
+            create: {
+              raceId: race.id, userId: row.userId, effectId: row.effectId,
+              powerupType: row.powerupType, deltaSteps: row.deltaSteps,
+              attributionVersion: effectAttribution.attributionVersion,
+              settledAt: settlementTime,
+            },
+          });
+        }
+        // PENDING is normally written at event start/race start/late join.
+        // Upserting the final canonical vector here is also the repair fence
+        // for a previously interrupted enrollment write: it never derives any
+        // score itself, and the recap worker still waits for event close plus
+        // every enrolled race/user to be FINAL.
+        for (const row of effectAttribution?.globalImpacts || []) {
+          await tx.globalEventRaceImpact.upsert({
+            where: { eventId_raceId_userId: { eventId: row.eventId, raceId: race.id, userId: row.userId } },
+            update: {
+              status: "FINAL", deltaSteps: row.deltaSteps,
+              attributionVersion: effectAttribution.attributionVersion,
+              settledAt: settlementTime,
+            },
+            create: {
+              eventId: row.eventId, raceId: race.id, userId: row.userId,
+              status: "FINAL", deltaSteps: row.deltaSteps,
+              attributionVersion: effectAttribution.attributionVersion,
+              settledAt: settlementTime,
             },
           });
         }

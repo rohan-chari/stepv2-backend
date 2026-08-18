@@ -397,6 +397,7 @@ const Race = {
     // App-funded prize pool discriminator. Defaults false so every legacy caller
     // (and every existing row) keeps the buy-in model.
     fundedPrize = false,
+    payoutRoundingVersion = 0,
     // Creation-stamped exit protocol. Defaults false so all direct/legacy
     // callers preserve their existing race lifecycle.
     exitActionsEnabled = false,
@@ -436,6 +437,7 @@ const Race = {
         payoutPreset,
         potCoins,
         fundedPrize,
+        payoutRoundingVersion,
         exitActionsEnabled,
         isPublic,
         maxParticipants,
@@ -757,6 +759,7 @@ const Race = {
         r.payout_preset::text AS "payoutPreset",
         r.pot_coins AS "potCoins",
         r.funded_prize AS "fundedPrize",
+        r.payout_rounding_version AS "payoutRoundingVersion",
         r.prize_pool_coins AS "prizePoolCoins",
         r.payout_curve AS "payoutCurve",
         r.powerups_enabled AS "powerupsEnabled",
@@ -1066,6 +1069,7 @@ const Race = {
           r.payout_preset::text AS "payoutPreset",
           r.pot_coins AS "potCoins",
           r.funded_prize AS "fundedPrize",
+          r.payout_rounding_version AS "payoutRoundingVersion",
           r.prize_pool_coins AS "prizePoolCoins",
           r.payout_curve AS "payoutCurve",
           r.powerups_enabled AS "powerupsEnabled",

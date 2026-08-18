@@ -80,7 +80,10 @@ function buildRenewSeededRaces(dependencies = {}) {
     // DB default is WINNER_TAKES_ALL). Gated on the kill switch: while it is off
     // the races stay legacy (fundedPrize false) and keep minting today's graded
     // raceFinishReward.
-    const fundedPrizePools = await settings.getFlag("fundedPrizePoolsEnabled");
+    const [fundedPrizePools, payoutRoundingV1Enabled] = await Promise.all([
+      settings.getFlag("fundedPrizePoolsEnabled"),
+      settings.getFlag("payoutRoundingV1Enabled"),
+    ]);
     // Top-heavy payouts are STAMPED here and nowhere else: read paths and
     // settlement consult the column, so flipping the flag later can only change
     // what FUTURE races advertise, never an in-flight or historical one.
@@ -98,6 +101,7 @@ function buildRenewSeededRaces(dependencies = {}) {
         payoutPreset: "TOP_HALF",
         payoutCurve: geometricPayouts === true ? "GEOMETRIC" : null,
         fundedPrize: fundedPrizePools === true,
+        payoutRoundingVersion: payoutRoundingV1Enabled === true ? 1 : 0,
         seedId: seed.id,
         creatorId: null,
         name: seed.name,

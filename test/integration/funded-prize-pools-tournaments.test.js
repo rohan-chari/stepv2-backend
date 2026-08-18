@@ -125,10 +125,39 @@ describe("app-funded prize pools — tournaments", () => {
     seq = 0;
     await appSettings.setFlag("tournamentsEnabled", true);
     await appSettings.setFlag(FLAG, true);
+    await appSettings.setFlag("payoutRoundingV1Enabled", true);
   });
 
   after(async () => {
     await appSettings.setFlag(FLAG, false);
+    await appSettings.setFlag("payoutRoundingV1Enabled", true);
+  });
+
+  it("stamps public app-funded tournament rows v1 by default and v0 after the creation kill switch", async () => {
+    const firstUser = await createUser();
+    const first = await authReq("POST", "/tournaments", {
+      token: firstUser.token,
+      body: { name: "v1 cup", bracketSize: 4, matchupDurationDays: 1, isPublic: true },
+    });
+    assert.equal(first.status, 201);
+    const { tournament: firstTournament } = await first.json();
+    assert.equal(
+      (await prisma.tournament.findUnique({ where: { id: firstTournament.id } })).payoutRoundingVersion,
+      1
+    );
+
+    await appSettings.setFlag("payoutRoundingV1Enabled", false);
+    const secondUser = await createUser();
+    const second = await authReq("POST", "/tournaments", {
+      token: secondUser.token,
+      body: { name: "v0 cup", bracketSize: 4, matchupDurationDays: 1, isPublic: true },
+    });
+    assert.equal(second.status, 201);
+    const { tournament: secondTournament } = await second.json();
+    assert.equal(
+      (await prisma.tournament.findUnique({ where: { id: secondTournament.id } })).payoutRoundingVersion,
+      0
+    );
   });
 
   // ── 14. the bracket fixtures ─────────────────────────────────────────────

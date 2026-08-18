@@ -37,39 +37,42 @@ async function refundTournamentBuyIn({ awardCoinsFn, userId, tournamentId, amoun
 }
 
 // Pot payout for a user-created (paid) tournament champion.
-async function payoutTournamentPot({ awardCoinsFn, userId, tournamentId, amount }) {
+async function payoutTournamentPot({ awardCoinsFn, userId, tournamentId, amount, payoutMetadata }) {
   return creditBuyIn({
     awardCoinsFn,
     userId,
     amount,
     reason: "tournament_payout",
     refId: `${tournamentId}:champion`,
+    payoutMetadata,
   });
 }
 
 // Minted champion prize for a featured (seeded) tournament — a distinct reason
 // from the pot payout so the two never collide, mirroring seeded races'
 // race_finish_reward vs buy-in payout separation.
-async function mintChampionPrize({ awardCoinsFn, userId, tournamentId, amount }) {
+async function mintChampionPrize({ awardCoinsFn, userId, tournamentId, amount, payoutMetadata }) {
   return creditBuyIn({
     awardCoinsFn,
     userId,
     amount,
     reason: "tournament_champion_reward",
     refId: `${tournamentId}:champion`,
+    payoutMetadata,
   });
 }
 
 // App-funded bracket pool for a free-entry tournament's champion. Distinct
 // reason from both the pot payout and the featured seed prize, so the three
 // branches can never collide on the shared "<tournamentId>:champion" refId.
-async function mintTournamentPrizePool({ awardCoinsFn, userId, tournamentId, amount }) {
+async function mintTournamentPrizePool({ awardCoinsFn, userId, tournamentId, amount, payoutMetadata }) {
   return creditBuyIn({
     awardCoinsFn,
     userId,
     amount,
     reason: "tournament_prize_pool_payout",
     refId: `${tournamentId}:champion`,
+    payoutMetadata,
   });
 }
 

@@ -25,6 +25,12 @@ const {
   readPerformanceFlags,
 } = require("../../../shared/config/performanceFlags");
 const { runBounded } = require("../../../shared/lib/runBounded");
+const { appSettings: defaultAppSettings } = require("../../../shared/config/appSettings");
+const { getDbPoolPressure } = require("../../../db");
+const {
+  runCapacityMetricsEntry,
+  startCapacityPhase,
+} = require("../../../shared/observability/capacityPhaseMetrics");
 
 // Team-race slacker nudge (TR-683): gentle, fires only inside the final 12h,
 // to a member contributing < 25% of their team's per-member average (average
@@ -66,6 +72,7 @@ const FINAL_STRETCH_MIN_INTERVAL_MS = 30 * 60 * 1000; // push at most every 30 m
 // settlement `placement` column stays null until the race ends). Idempotent: a
 // participant whose rank is unchanged is not re-notified.
 function buildRecomputePlacements(dependencies = {}) {
+  const hasInjectedDeps = Object.keys(dependencies).length > 0;
   const raceModel = dependencies.Race || Race;
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
   const events = dependencies.eventBus || eventBus;
@@ -105,6 +112,9 @@ function buildRecomputePlacements(dependencies = {}) {
     (() => readPerformanceFlags());
   let activePerformanceFlags = getPerformanceFlags();
   const monotonicNow = dependencies.monotonicNow || Date.now;
+  const capacitySettings =
+    dependencies.appSettings ||
+    (hasInjectedDeps ? { getFlag: async () => false } : defaultAppSettings);
   // §8 kill switch: RACE_ENDING_REMINDER_DISABLED=true stops the race-ending-soon
   // reminder without stopping placement pushes. Injectable for tests.
   const isRaceEndingReminderDisabled =
@@ -370,7 +380,7 @@ function buildRecomputePlacements(dependencies = {}) {
     }
   }
 
-  return async function recomputePlacements() {
+  async function recomputePlacementsInternal(capacity, capacityState) {
     const startedAtMs = monotonicNow();
     const currentTime = now();
     activePerformanceFlags = getPerformanceFlags();
@@ -396,6 +406,7 @@ function buildRecomputePlacements(dependencies = {}) {
     };
     let activeRaceCount = 0;
     const logStructuredPerformance = (outcome) => {
+      capacityState.outcome = outcome;
       phaseMs.total = Math.max(0, monotonicNow() - startedAtMs);
       logger.log?.("[PERF] placement recompute", {
         outcome,
@@ -416,6 +427,18 @@ function buildRecomputePlacements(dependencies = {}) {
         handlerDrainTracked: false,
         phaseMs: { ...phaseMs },
       });
+      capacity.recordPhases(phaseMs);
+      capacity.setCounts({
+        activeRaces: activeRaceCount,
+        participants: participantCount,
+        placementProposals: baselineProposals,
+        placementCasWins: baselineCasWins,
+        placementCasLosses: baselineCasLosses,
+        placementEvents: emitted.length,
+        dueEffectEnqueues,
+        recoveryEnqueues,
+      });
+      capacity.setDimensions({ claimOutcome });
     };
     // Split for the step-sync "pull" below: participants of at least one race
     // ending within the next hour ("final stretch") get a tighter push throttle;
@@ -931,6 +954,39 @@ function buildRecomputePlacements(dependencies = {}) {
     );
     logStructuredPerformance("completed");
     return emitted;
+  }
+
+  async function recomputePlacementsMeasured() {
+    const capacity = startCapacityPhase("placement");
+    const capacityState = { outcome: "error" };
+    try {
+      // One enclosing async query phase owns the whole tick. Its branches are
+      // intentionally not measured with overlapping request-wide snapshots.
+      return await capacity.measurePhase(
+        "tick",
+        () => recomputePlacementsInternal(capacity, capacityState),
+      );
+    } finally {
+      capacity.finish(capacityState.outcome);
+    }
+  }
+
+  return function recomputePlacements() {
+    return runCapacityMetricsEntry(
+      {
+        settings: capacitySettings,
+        logger,
+        env: dependencies.capacityMetricsEnv || process.env,
+        random: dependencies.capacityMetricsRandom || Math.random,
+        readDbPoolPressure:
+          dependencies.getDbPoolPressure || getDbPoolPressure,
+        // This tick occurs only every five minutes. Always retain it once the
+        // operator enables telemetry; otherwise a deliberately triggered heavy
+        // placement cohort could have no placement sample at all.
+        forceSample: true,
+      },
+      recomputePlacementsMeasured,
+    );
   };
 }
 

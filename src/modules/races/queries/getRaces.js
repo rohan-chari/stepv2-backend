@@ -362,6 +362,10 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
       maxDurationDays: race.maxDurationDays,
       targetSteps: race.targetSteps, // 1.1.4 compat
       buyInAmount: money.buyInAmount,
+      // Additive creation-time payout protocol; see getRaceDetails. Keeping it
+      // on every list bucket lets a result/edit flow carry the same immutable
+      // authority without an extra details request.
+      payoutRoundingVersion: race.payoutRoundingVersion ?? 0,
       payoutPreset: race.payoutPreset,
       potCoins: money.potCoins,
       heldPotCoins: money.heldPotCoins,

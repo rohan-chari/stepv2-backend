@@ -28,6 +28,7 @@ const FEATURED_KEYS = [
   "name",
   "participantCount",
   "powerupsEnabled",
+  "payoutRoundingVersion",
   "prizePool",
   "seedKind",
   "status",
@@ -46,6 +47,7 @@ const PUBLIC_KEYS = [
   "participantCount",
   "payoutPreset",
   "powerupsEnabled",
+  "payoutRoundingVersion",
   "prizePool",
   "startedAt",
   "status",
@@ -414,9 +416,13 @@ describe("GET /home/suggested-races", () => {
 
     const daily = await createFeaturedRace("DAILY_10K", {
       id: "featured-daily",
+      payoutRoundingVersion: 1,
+      fundedPrize: true,
     });
     const weekly = await createFeaturedRace("WEEKLY_50K", {
       id: "featured-weekly",
+      payoutRoundingVersion: 1,
+      fundedPrize: true,
     });
     await addRaceParticipant(daily.id, owner.id);
 
@@ -431,6 +437,7 @@ describe("GET /home/suggested-races", () => {
       creatorId: owner.id,
       name: "Newer public A",
       createdAt: new Date("2026-08-11T11:00:00.000Z"),
+      payoutRoundingVersion: 1,
     });
     const publicTieB = await createRace({
       id: "public-b",
@@ -486,6 +493,10 @@ describe("GET /home/suggested-races", () => {
     assertTournamentContract(body.suggestions[5]);
     assertTournamentContract(body.suggestions[6]);
     assert.equal(body.suggestions[0].participantCount, 1);
+    assert.equal(body.suggestions[0].payoutRoundingVersion, 1);
+    assert.equal(body.suggestions[1].payoutRoundingVersion, 1);
+    assert.equal(body.suggestions[2].payoutRoundingVersion, 1);
+    assert.equal(body.suggestions[0].prizePool?.coins % 5, 0);
     assert.equal(body.suggestions[0].id, daily.id, "raceId maps to id");
     assert.equal(body.suggestions[5].acceptedCount, 1);
     assert.equal(body.suggestions[5].seedKind, "DAILY_DASH");

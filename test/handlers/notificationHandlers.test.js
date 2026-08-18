@@ -21,6 +21,56 @@ function createMockEventBus() {
   };
 }
 
+test("Inbox-enabled visible writers enqueue exactly one durable alert and never immediate-push", async () => {
+  const eventBus = createMockEventBus();
+  const alerts = [];
+  let directPushes = 0;
+  registerNotificationHandlers({
+    eventBus,
+    appSettings: { async getFlag(key) { return key === "apiInboxV1Enabled"; } },
+    createInboxAlert: async (alert) => { alerts.push(alert); },
+    User: { async findById() { return { displayName: "Alex" }; } },
+    DeviceToken: {
+      async findByUserId() { throw new Error("durable Inbox must not inspect tokens"); },
+      async deleteToken() {},
+    },
+    RaceParticipant: {
+      async findMany() { return [{ id: "participant", userId: "recipient", lastChatPushAt: null }]; },
+      async update() {},
+    },
+    Notification: {
+      async create() {},
+      async findFirstByUserTypeSince() { return null; },
+    },
+    apnsService: { async sendNotification() { directPushes += 1; return { success: true }; } },
+    logger: { warn() {}, error() {}, log() {} },
+  });
+
+  await eventBus.emit("FRIEND_REQUEST_SENT", { userId: "actor", addresseeId: "recipient" });
+  await eventBus.emit("RACE_MESSAGE_SENT", {
+    raceId: "race-chat", messageId: "message-1", senderId: "actor", body: "hello", raceName: "Chat race",
+  });
+  await eventBus.emit("PLACEMENT_CHANGED", {
+    raceId: "race-placement", userId: "recipient", previousPlacement: 2, placement: 1, raceName: "Placement race",
+  });
+  await eventBus.emit("HIGH_MULTIPLIER_ALERT", {
+    raceId: "race-multiplier", actorUserId: "actor", actorName: "Alex", multiplier: 5, recipientUserIds: ["recipient"],
+  });
+  await eventBus.emit("DAILY_MOVER", {
+    userId: "recipient", raceId: "race-daily", raceName: "Daily race", movement: 1, placement: 2,
+  });
+
+  assert.equal(directPushes, 0);
+  assert.equal(alerts.length, 5);
+  assert.deepEqual(alerts.map((alert) => alert.destination), [
+    { route: "friends" },
+    { route: "raceDetail", raceId: "race-chat" },
+    { route: "raceDetail", raceId: "race-placement" },
+    { route: "raceDetail", raceId: "race-multiplier" },
+    { route: "raceDetail", raceId: "race-daily" },
+  ]);
+});
+
 test("FRIEND_REQUEST_SENT sends push to addressee with friends route payload", async () => {
   const eventBus = createMockEventBus();
   let sentNotification;

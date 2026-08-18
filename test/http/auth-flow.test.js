@@ -98,6 +98,7 @@ test("POST /auth/apple provisions the signed-in user", async () => {
         customRaceWindowEnabled: false,
         racesInviteDecisionGateEnabled: false,
         quickRaceShareAutoFriendEnabled: false,
+        stepSampleBucketMinutes: 5,
       },
     });
     assert.equal(typeof body.sessionToken, "string");

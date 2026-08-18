@@ -94,7 +94,10 @@ function buildCreateTournament(dependencies = {}) {
     // client's buyInAmount is accepted and IGNORED (coerced to 0 BEFORE
     // validation, so an amount above the legacy per-bracket ceiling can't 400 an
     // un-updated binary out of creating a bracket).
-    const fundedPrizePools = await settings.getFlag("fundedPrizePoolsEnabled");
+    const [fundedPrizePools, payoutRoundingV1Enabled] = await Promise.all([
+      settings.getFlag("fundedPrizePoolsEnabled"),
+      settings.getFlag("payoutRoundingV1Enabled"),
+    ]);
     const buyIn = validateTournamentBuyIn({
       bracketSize: size,
       buyInAmount: fundedPrizePools ? 0 : buyInAmount,
@@ -156,6 +159,7 @@ function buildCreateTournament(dependencies = {}) {
       // Row-level discriminator: this bracket's champion prize is app-minted and
       // stays that way even if the flag is flipped back off mid-bracket.
       fundedPrize: fundedPrizePools === true,
+      payoutRoundingVersion: fundedPrizePools === true && payoutRoundingV1Enabled === true ? 1 : 0,
       powerupsEnabled: !!powerupsEnabled,
       powerupStepInterval: normalizedPowerupStepInterval,
       isPublic: !!isPublic,

@@ -5,7 +5,9 @@ const {
 const {
   computeRacePayouts,
   computeFundedPayouts,
+  computeGradedPayouts,
 } = require("./racePayoutPresets");
+const { buildPayoutPlan } = require("./services/payoutRounding");
 const {
   computeFinishRewardPool,
   computeFinishRewardPlaces,
@@ -112,6 +114,22 @@ function buildRaceMoneyView({ race, participants, acceptedCount }) {
   const completedQuick = completed
     ? quickSettlementParticipants(race, rows)
     : null;
+  const payoutVersion = race?.payoutRoundingVersion ?? 0;
+  // Before a team winner (and therefore the eligible recipient count) is
+  // known, there is no honest single rounded total.  In particular, rounding a
+  // winner's eventual split is not the same as rounding the whole projected
+  // pool.  v1 consequently withholds the legacy scalar projection; completed
+  // team races below always expose the actual credited total.
+  const withholdTeamProjection =
+    payoutVersion === 1 && race?.isTeamRace === true && !completed;
+  const finalAwards = (rawPayouts) => buildPayoutPlan({
+    payoutRoundingVersion: payoutVersion,
+    awards: (rawPayouts || []).map((rawAwardCoins, index) => ({
+      recipientId: `placement:${index + 1}`,
+      placement: index + 1,
+      rawAwardCoins,
+    })),
+  });
   // Match completeRace exactly: for quick races only qualifying walkers rank;
   // otherwise every placed participant ranks, while a forfeiter never gets a
   // payout tier. This compacting is exclusive to the stamped new protocol.
@@ -136,7 +154,7 @@ function buildRaceMoneyView({ race, participants, acceptedCount }) {
       0
     );
     const projectedPotCoins = (race?.potCoins || 0) + heldPotCoins;
-    const payouts = computeRacePayouts({
+    const rawPayouts = computeRacePayouts({
       preset: race?.payoutPreset,
       potCoins: projectedPotCoins,
       participantCount: acceptedCount,
@@ -146,6 +164,7 @@ function buildRaceMoneyView({ race, participants, acceptedCount }) {
     // settle — retiring it unconditionally would silently zero out every
     // in-flight Daily/Weekly the moment this deploys (and, with the kill switch
     // off, would zero them permanently).
+    const payoutPlan = finalAwards(rawPayouts);
     const finishRewardPool = computeFinishRewardPool(race?.seedId, acceptedCount);
     const finishRewardPlaces = computeFinishRewardPlaces(
       race?.seedId,
@@ -158,10 +177,20 @@ function buildRaceMoneyView({ race, participants, acceptedCount }) {
       potCoins: race?.potCoins || 0,
       heldPotCoins,
       projectedPotCoins,
-      payouts,
+      payouts: payoutPlan.awards.map((award) => award.awardCoins),
       finishReward:
         finishRewardPool > 0
-          ? { pool: finishRewardPool, paidPlaces: finishRewardPlaces }
+          ? (() => {
+              const rewards = computeGradedPayouts({
+                pool: finishRewardPool,
+                count: finishRewardPlaces,
+              });
+              const rewardPlan = finalAwards(rewards);
+              return {
+                pool: rewardPlan.totals.awardCoins,
+                paidPlaces: finishRewardPlaces,
+              };
+            })()
           : null,
     };
   }
@@ -195,32 +224,52 @@ function buildRaceMoneyView({ race, participants, acceptedCount }) {
         multBps,
       });
 
+  const rawPayouts = computeFundedPayouts({
+    preset: race?.payoutPreset,
+    poolCoins: coins,
+    participantCount: playerCount,
+    eligibleRecipientCount: exitEligibleRecipientCount,
+    curve: race?.payoutCurve ?? null,
+  });
+  const payoutPlan = finalAwards(rawPayouts);
+  const completedV1Payouts = payoutVersion === 1 && completed
+    ? rows
+      .filter((p) => p.placement != null && (p.payoutCoins || 0) > 0)
+      .sort((a, b) => a.placement - b.placement)
+      .map((p) => p.payoutCoins)
+    : null;
+  const visiblePayouts = completedV1Payouts || payoutPlan.awards.map((award) => award.awardCoins);
+  const visibleTotal = visiblePayouts.reduce((sum, amount) => sum + amount, 0);
+  if (withholdTeamProjection) {
+    return {
+      prizePool: null,
+      buyInAmount: 0,
+      potCoins: 0,
+      heldPotCoins: 0,
+      // Undefined is intentional: JSON serializers omit the old scalar rather
+      // than publishing a false authoritative v1 total.
+      projectedPotCoins: undefined,
+      payouts: [],
+      finishReward: null,
+    };
+  }
   return {
     prizePool: buildPrizePoolPayload({
       funded: true,
       playerCount,
       durationDays: raceDurationDays(race),
       projected: !completed,
-      coins,
+      coins: payoutVersion === 1 ? visibleTotal : coins,
       multBps,
     }),
     // Frozen builds gate their charge + confirm sheets on buyInAmount, and render
     // projectedPotCoins as POT — so a funded race reports 0 and the pool there,
     // and an un-updated binary shows the right prize while charging nothing.
     buyInAmount: 0,
-    potCoins: completed ? coins : 0,
+    potCoins: completed ? (payoutVersion === 1 ? visibleTotal : coins) : 0,
     heldPotCoins: 0,
-    projectedPotCoins: coins,
-    payouts: computeFundedPayouts({
-      preset: race?.payoutPreset,
-      poolCoins: coins,
-      participantCount: playerCount,
-      eligibleRecipientCount: exitEligibleRecipientCount,
-      // From the ROW, never the live flag — so the projection and the eventual
-      // settlement (same function, same column) can never disagree, and a
-      // historical race keeps displaying the tiers it actually paid.
-      curve: race?.payoutCurve ?? null,
-    }),
+    projectedPotCoins: payoutVersion === 1 ? visibleTotal : coins,
+    payouts: visiblePayouts,
     // Retired as a pool source for funded races (spec §4.3). No client reads it.
     finishReward: null,
   };

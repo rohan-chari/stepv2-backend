@@ -3,6 +3,9 @@ const derivedCacheDefault = require("../../../shared/cache/derivedCache");
 const redisCacheDefault = require("../../../shared/cache/redisCache");
 const cacheKeysDefault = require("../../../shared/cache/cacheKeys");
 const { appSettings: defaultAppSettings } = require("../../../shared/config/appSettings");
+const {
+  startCapacityPhase,
+} = require("../../../shared/observability/capacityPhaseMetrics");
 
 const TTL_SECONDS = 3600;
 const GENERATION_TTL_SECONDS = 7200;
@@ -118,42 +121,84 @@ function buildUserPresentationCache(dependencies = {}) {
 
   async function getMany(userIds, enabled) {
     const started = Date.now();
+    const capacity = startCapacityPhase("presentation_cache");
     const unique = [...new Set((userIds || []).filter(Boolean))];
-    if (unique.length === 0) return new Map();
+    let cacheHits = 0;
+    let cacheMisses = 0;
+    let cacheBypassedIdentities = 0;
+    let cacheErrorOperations = 0;
+    let cacheErrorFallbackIdentities = 0;
+    let databaseLoadOperations = 0;
+    let databaseLoadedIdentities = 0;
+    let databaseLoadErrorOperations = 0;
+    let cacheInstallOperations = 0;
+    let cacheInstalledIdentities = 0;
+    let capacityOutcome = "error";
+
+    async function loadMeasured(ids) {
+      databaseLoadOperations += 1;
+      try {
+        const loaded = await capacity.measurePhase("databaseLoad", () => loadMany(ids));
+        databaseLoadedIdentities += [...loaded.values()].filter(
+          (value) => value !== null,
+        ).length;
+        return loaded;
+      } catch (error) {
+        databaseLoadErrorOperations += 1;
+        throw error;
+      }
+    }
+
+    try {
+    if (unique.length === 0) {
+      capacityOutcome = "empty";
+      return new Map();
+    }
     if (!enabled || !redisCache.isEnabled()) {
-      const loaded = await loadMany(unique);
+      cacheBypassedIdentities = unique.length;
+      const loaded = await loadMeasured(unique);
       logger.info?.("social-cache", {
         surface: "presentation", outcome: "bypass/error",
         durationMs: Date.now() - started,
       });
+      capacityOutcome = "bypass";
       return loaded;
     }
 
     if (!(await guardEnabled())) {
       const out = new Map();
       await Promise.all(unique.map(async (id) => {
+        let loadedFromDatabase = false;
         const value = await derivedCache.cachedRead({
           key: cacheKeys.userCosmetics(id),
           prefix: cacheKeys.PREFIX.USER_COSMETICS,
           ttlSeconds: TTL_SECONDS,
           enabled: true,
-          load: async () => (await loadMany([id])).get(id),
+          load: async () => {
+            loadedFromDatabase = true;
+            cacheMisses += 1;
+            return (await loadMeasured([id])).get(id);
+          },
         });
+        if (!loadedFromDatabase) cacheHits += 1;
         out.set(id, value);
       }));
       logger.info?.("social-cache", {
         surface: "presentation", outcome: "bypass/error",
         durationMs: Date.now() - started,
       });
+      capacityOutcome = "unguarded";
       return out;
     }
 
     if (unique.some((id) => derivedCache.isBypassed(cacheKeys.userCosmetics(id)))) {
-      const loaded = await loadMany(unique);
+      cacheBypassedIdentities = unique.length;
+      const loaded = await loadMeasured(unique);
       logger.info?.("social-cache", {
         surface: "presentation", outcome: "bypass/error",
         durationMs: Date.now() - started,
       });
+      capacityOutcome = "bypass";
       return loaded;
     }
     derivedCache.ensureSubscribed();
@@ -161,13 +206,19 @@ function buildUserPresentationCache(dependencies = {}) {
       cacheKeys.userCosmetics(id),
       cacheKeys.userCosmeticsVersion(id),
     ]);
-    const batch = await redisCache.getManyJSON(pairs);
+    const batch = await capacity.measurePhase(
+      "cacheLookup",
+      () => redisCache.getManyJSON(pairs),
+    );
     if (!batch.ok || batch.values.length !== pairs.length) {
-      const loaded = await loadMany(unique);
+      cacheErrorOperations += 1;
+      cacheErrorFallbackIdentities = unique.length;
+      const loaded = await loadMeasured(unique);
       logger.info?.("social-cache", {
         surface: "presentation", outcome: "bypass/error",
         durationMs: Date.now() - started,
       });
+      capacityOutcome = "cache-error";
       return loaded;
     }
 
@@ -185,11 +236,14 @@ function buildUserPresentationCache(dependencies = {}) {
       if (validMarker && validBox) out.set(id, box.v);
       else misses.push(id);
     }
+    cacheHits = out.size;
+    cacheMisses = misses.length;
     if (misses.length === 0) {
       logger.info?.("social-cache", {
         surface: "presentation", outcome: "hit/fresh",
         durationMs: Date.now() - started,
       });
+      capacityOutcome = "hit";
       return out;
     }
 
@@ -197,13 +251,15 @@ function buildUserPresentationCache(dependencies = {}) {
       cacheKeys.userCosmeticsVersion(id), cacheKeys.userCosmetics(id),
     ]);
     let loaded = null;
-    const install = await redisCache.withWatch(watchKeys, async (ctx) => {
+    cacheInstallOperations += 1;
+    const install = await capacity.measurePhase("cacheInstall", () =>
+      redisCache.withWatch(watchKeys, async (ctx) => {
       const generations = new Map();
       for (const id of misses) {
         const marker = await ctx.get(cacheKeys.userCosmeticsVersion(id));
         generations.set(id, Number.isSafeInteger(marker) && marker >= 0 ? marker : 0);
       }
-      loaded = await loadMany(misses);
+      loaded = await loadMeasured(misses);
       const sets = [];
       for (const id of misses) {
         const generation = generations.get(id);
@@ -211,16 +267,36 @@ function buildUserPresentationCache(dependencies = {}) {
         sets.push({ key: cacheKeys.userCosmetics(id), value: { v: loaded.get(id), generation }, ttlSeconds: TTL_SECONDS });
       }
       return { sets };
-    });
+      })
+    );
+    if (install.installed) cacheInstalledIdentities = misses.length;
     if (!loaded || install.disabled || (!install.installed && !install.aborted)) {
-      loaded = await loadMany(misses);
+      loaded = await loadMeasured(misses);
     }
     for (const id of misses) out.set(id, loaded.get(id));
     logger.info?.("social-cache", {
       surface: "presentation", outcome: "miss",
       durationMs: Date.now() - started,
     });
+    capacityOutcome = "miss";
     return out;
+    } finally {
+      capacity.setCounts({
+        requestedIdentities: unique.length,
+        cacheHits,
+        cacheMisses,
+        cacheBypassedIdentities,
+        cacheErrorOperations,
+        cacheErrorFallbackIdentities,
+        databaseLoadOperations,
+        databaseLoadedIdentities,
+        databaseLoadErrorOperations,
+        cacheInstallOperations,
+        cacheInstalledIdentities,
+      });
+      capacity.setDimensions({ cacheEnabled: enabled === true });
+      capacity.finish(capacityOutcome);
+    }
   }
 
   async function invalidate(userId) {

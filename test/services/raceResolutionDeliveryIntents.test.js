@@ -18,6 +18,7 @@ test("claims high-multiplier recipients in input order with allowlisted token-fr
       },
     },
     User: { async findById() { return { displayName: "Alice" }; } },
+    appSettings: { async getFlag() { return false; } },
     now: () => new Date("2026-08-14T12:00:00.000Z"),
   });
   const intents = await service.claimHighMultiplier({

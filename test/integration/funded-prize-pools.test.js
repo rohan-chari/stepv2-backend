@@ -153,10 +153,12 @@ describe("app-funded prize pools — races", () => {
     await cleanDatabase();
     seq = 0;
     await appSettings.setFlag(FLAG, true);
+    await appSettings.setFlag("payoutRoundingV1Enabled", true);
   });
 
   after(async () => {
     await appSettings.setFlag(FLAG, false);
+    await appSettings.setFlag("payoutRoundingV1Enabled", true);
   });
 
   // ── 1. create is free, and a frozen client's buy-in is ignored (never 400) ──
@@ -203,6 +205,48 @@ describe("app-funded prize pools — races", () => {
     assert.equal(res2.status, 201);
     const { race: race2 } = await res2.json();
     assert.equal(race2.buyInAmount, 0);
+  });
+
+  it("stamps v1 only at creation, and the payout-rounding kill switch stamps later funded rows v0", async () => {
+    const creator = await makeUser({ coins: 0 });
+    const first = await req("POST", "/races", {
+      token: creator.token,
+      body: { name: "v1 stamp", maxDurationDays: 3, isPublic: true },
+    });
+    assert.equal(first.status, 201);
+    const { race: firstRace } = await first.json();
+    assert.equal(firstRace.payoutRoundingVersion, 1);
+    assert.equal(
+      (await prisma.race.findUnique({ where: { id: firstRace.id } })).payoutRoundingVersion,
+      1
+    );
+    const firstDetail = await req("GET", `/races/${firstRace.id}`, { token: creator.token });
+    assert.equal(firstDetail.status, 200);
+    assert.equal((await firstDetail.json()).payoutRoundingVersion, 1);
+    const firstList = await req("GET", "/races", { token: creator.token });
+    assert.equal(firstList.status, 200);
+    assert.equal(
+      (await firstList.json()).pending.find((row) => row.id == firstRace.id)?.payoutRoundingVersion,
+      1
+    );
+
+    await appSettings.setFlag("payoutRoundingV1Enabled", false);
+    const second = await req("POST", "/races", {
+      token: creator.token,
+      body: { name: "v0 stamp", maxDurationDays: 3, isPublic: true },
+    });
+    assert.equal(second.status, 201);
+    const { race: secondRace } = await second.json();
+    assert.equal(secondRace.payoutRoundingVersion, 0);
+    assert.equal(
+      (await prisma.race.findUnique({ where: { id: secondRace.id } })).payoutRoundingVersion,
+      0
+    );
+    assert.equal(
+      (await prisma.race.findUnique({ where: { id: firstRace.id } })).payoutRoundingVersion,
+      1,
+      "kill switch never reinterprets an existing row"
+    );
   });
 
   it("1b: the create response and GET /races/:id carry the projected prizePool", async () => {

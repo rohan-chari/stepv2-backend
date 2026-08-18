@@ -35,6 +35,12 @@ function makeCtx({ seeds = [], races = [], participantsByRace = {} } = {}) {
   const emitted = [];
   const enqueued = [];
   const prisma = {
+    async $transaction(fn) {
+      return fn(prisma);
+    },
+    async $executeRaw() {
+      return [];
+    },
     raceSeed: {
       async findMany() {
         return seeds;
@@ -94,6 +100,11 @@ function makeCtx({ seeds = [], races = [], participantsByRace = {} } = {}) {
 function buildRenew(ctx) {
   return buildRenewSeededRaces({
     prisma: ctx.prisma,
+    appSettings: {
+      async getFlag(key) {
+        return key === "fundedPrizePoolsEnabled" || key === "payoutRoundingV1Enabled";
+      },
+    },
     now: () => NOW,
     logger: silent,
     eventBus: ctx.eventBus,

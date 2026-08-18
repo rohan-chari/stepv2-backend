@@ -31,6 +31,11 @@ const { resolveMatchupWinner } = require("../../tournaments/constants/tournament
 const {
   advanceTournament: defaultAdvanceTournament,
 } = require("../../tournaments/commands/advanceTournament");
+const { createReviewOpportunity: defaultCreateReviewOpportunity } = require("../services/reviewPrompt");
+const {
+  buildPayoutPlan,
+  payoutRoundingMetadata,
+} = require("../services/payoutRounding");
 
 function buildCompleteRace(dependencies = {}) {
   const raceModel = dependencies.Race || Race;
@@ -45,6 +50,98 @@ function buildCompleteRace(dependencies = {}) {
   const db = dependencies.prisma || defaultPrisma;
   const advanceTournamentFn =
     dependencies.advanceTournament || defaultAdvanceTournament;
+  const createReviewOpportunity =
+    dependencies.createReviewOpportunity || defaultCreateReviewOpportunity;
+
+  // A race status is a settlement *claim*, not a durable proof that each
+  // idempotent ledger credit made it into its result row.  This reconciler is
+  // deliberately fed only from the immutable v1 ledger artifacts, never from a
+  // recalculated pool, so a retry after a process crash cannot mint a second
+  // rounding subsidy or drift the displayed total.
+  async function reconcileV1PayoutArtifact(race) {
+    if (!race || race.payoutRoundingVersion !== 1 || !db?.coinTransaction) {
+      return null;
+    }
+    const credits = await db.coinTransaction.findMany({
+      where: {
+        refId: { startsWith: `${race.id}:` },
+        reason: {
+          in: [
+            "race_prize_pool_payout",
+            "race_buy_in_payout",
+            "race_finish_reward",
+          ],
+        },
+      },
+      select: { userId: true, amount: true, payoutMetadata: true },
+    });
+    const awards = credits
+      .map((credit) => ({
+        ...(credit.payoutMetadata && typeof credit.payoutMetadata === "object"
+          ? credit.payoutMetadata
+          : {}),
+        recipientId: credit.payoutMetadata?.recipientId || credit.userId,
+        rawAwardCoins: credit.payoutMetadata?.rawAwardCoins ?? credit.amount,
+        awardCoins: credit.amount,
+        roundingSubsidyCoins:
+          credit.payoutMetadata?.roundingSubsidyCoins ?? 0,
+      }))
+      .filter((award) => award.awardCoins > 0);
+    if (awards.length === 0) return null;
+
+    const paidByUser = new Map();
+    for (const credit of credits) {
+      paidByUser.set(
+        credit.userId,
+        (paidByUser.get(credit.userId) || 0) + Math.max(0, credit.amount || 0)
+      );
+    }
+    await Promise.all(
+      (race.participants || []).map((participant) => {
+        const payoutCoins = paidByUser.get(participant.userId) || 0;
+        return db.raceParticipant.updateMany({
+          where: { id: participant.id },
+          data: { payoutCoins },
+        });
+      })
+    );
+
+    const totals = awards.reduce(
+      (summary, award) => ({
+        rawAwardCoins: summary.rawAwardCoins + Math.max(0, award.rawAwardCoins || 0),
+        awardCoins: summary.awardCoins + Math.max(0, award.awardCoins || 0),
+        roundingSubsidyCoins:
+          summary.roundingSubsidyCoins + Math.max(0, award.roundingSubsidyCoins || 0),
+        recipientCount: summary.recipientCount + 1,
+        smallAwardRecipientCount:
+          summary.smallAwardRecipientCount +
+          (award.rawAwardCoins > 0 && award.rawAwardCoins < 5 ? 1 : 0),
+      }),
+      {
+        rawAwardCoins: 0,
+        awardCoins: 0,
+        roundingSubsidyCoins: 0,
+        recipientCount: 0,
+        smallAwardRecipientCount: 0,
+      }
+    );
+    const data = {
+      payoutRoundingMetadata: {
+        payoutRoundingVersion: 1,
+        rawAwardCoins: totals.rawAwardCoins,
+        roundedAwardCoins: totals.awardCoins,
+        roundingSubsidyCoins: totals.roundingSubsidyCoins,
+        recipientCount: totals.recipientCount,
+        smallAwardRecipientCount: totals.smallAwardRecipientCount,
+      },
+    };
+    if (race.fundedPrize === true) {
+      data.prizePoolCoins = totals.awardCoins;
+      data.potCoins = totals.awardCoins;
+    }
+    await db.race.update({ where: { id: race.id }, data });
+    return data.payoutRoundingMetadata;
+  }
 
   // Team races (TR-400s/500s): callers pass `winnerTeam` (TEAM_A|TEAM_B) or
   // `tie: true` instead of winnerUserId — winnerUserId stays NULL for team
@@ -64,8 +161,20 @@ function buildCompleteRace(dependencies = {}) {
       ...(isTeamSettlement ? { winnerTeam: winnerTeam || null } : {}),
     });
 
+    // A v1 retry must resume after the active->completed fence: a previous
+    // process may have committed a ledger row just before dying.  Legacy rows
+    // preserve their long-standing early-return behavior byte-for-byte.
+    let isRecovery = false;
     if (result.count === 0) {
-      return null;
+      const completedRace = await raceModel.findById(raceId);
+      if (
+        !completedRace ||
+        completedRace.status !== "COMPLETED" ||
+        completedRace.payoutRoundingVersion !== 1
+      ) {
+        return null;
+      }
+      isRecovery = true;
     }
 
     // Expire all remaining active effects and held powerups
@@ -179,21 +288,34 @@ function buildCompleteRace(dependencies = {}) {
         if (recipients.length === 0 || prize <= 0) return;
         const share = Math.floor(prize / recipients.length);
         const remainder = prize - share * recipients.length;
+        const plan = buildPayoutPlan({
+          payoutRoundingVersion: race.payoutRoundingVersion,
+          awards: recipients.map((recipient, index) => ({
+            recipientId: recipient.id,
+            placement: 1,
+            rawAwardCoins: share + (index === 0 ? remainder : 0),
+          })),
+        });
         for (let index = 0; index < recipients.length; index++) {
-          const amount = share + (index === 0 ? remainder : 0);
+          const award = plan.awards[index];
+          const amount = award.awardCoins;
           if (amount <= 0) continue;
-          await payFn({
+          const credit = await payFn({
             awardCoinsFn,
             userId: recipients[index].userId,
             raceId,
             placement: 1,
             amount,
+            ...(race.payoutRoundingVersion === 1 ? { payoutMetadata: award } : {}),
           });
-          await participantModel.incrementPayoutCoins(
-            recipients[index].id,
-            amount
-          );
+          if (credit?.awarded !== false) {
+            await participantModel.incrementPayoutCoins(
+              recipients[index].id,
+              amount
+            );
+          }
         }
+        return plan;
       };
 
       if (tie) {
@@ -236,10 +358,13 @@ function buildCompleteRace(dependencies = {}) {
           const sharers = accepted
             .filter((p) => !p.forfeitedAt)
             .sort(byTopStepper);
-          await splitEvenly(sharers, prize, payoutRacePrizePool);
+          const plan = await splitEvenly(sharers, prize, payoutRacePrizePool);
           await raceModel.update(raceId, {
-            prizePoolCoins: prize,
-            potCoins: prize,
+            prizePoolCoins: plan?.totals.awardCoins ?? prize,
+            potCoins: plan?.totals.awardCoins ?? prize,
+            ...(race.payoutRoundingVersion === 1
+              ? { payoutRoundingMetadata: payoutRoundingMetadata(plan) }
+              : {}),
           });
         }
       } else if (race.fundedPrize === true || race.potCoins > 0) {
@@ -267,7 +392,7 @@ function buildCompleteRace(dependencies = {}) {
             })
           : race.potCoins;
 
-        await splitEvenly(
+        const plan = await splitEvenly(
           winners,
           prize,
           funded ? payoutRacePrizePool : payoutRaceCoins
@@ -277,41 +402,49 @@ function buildCompleteRace(dependencies = {}) {
           // Stamp the settled pool so results/history freeze forever, and mirror
           // it into potCoins so a frozen build's "POT" reads the real prize.
           await raceModel.update(raceId, {
-            prizePoolCoins: prize,
-            potCoins: prize,
+            prizePoolCoins: plan?.totals.awardCoins ?? prize,
+            potCoins: plan?.totals.awardCoins ?? prize,
+            ...(race.payoutRoundingVersion === 1
+              ? { payoutRoundingMetadata: payoutRoundingMetadata(plan) }
+              : {}),
           });
         }
       }
 
-      // Referral rewards behave exactly as for individual races.
-      const teamReferralEvents = await grantReferralRewards({ race });
+      // Referral rewards behave exactly as for individual races. A recovery
+      // replays ledger/result work only, never a second visible completion.
+      const teamReferralEvents = isRecovery ? [] : await grantReferralRewards({ race });
 
-      events.emit("RACE_COMPLETED", {
-        raceId,
-        winnerUserId: null,
-        winnerTeam: winnerTeam || null,
-        tie: tie === true,
-        participantUserIds,
-        // TR-684: team-framed completion copy needs names + each recipient's
-        // side (win vs loss framing).
-        winnerTeamName: tie
-          ? null
-          : winnerTeam === "TEAM_A"
-            ? race.teamAName
-            : race.teamBName,
-        loserTeamName: tie
-          ? null
-          : winnerTeam === "TEAM_A"
-            ? race.teamBName
-            : race.teamAName,
-        memberTeams: Object.fromEntries(
-          accepted.map((p) => [p.userId, p.team])
-        ),
-      });
+      if (!isRecovery) {
+        events.emit("RACE_COMPLETED", {
+          raceId,
+          winnerUserId: null,
+          winnerTeam: winnerTeam || null,
+          tie: tie === true,
+          participantUserIds,
+          // TR-684: team-framed completion copy needs names + each recipient's
+          // side (win vs loss framing).
+          winnerTeamName: tie
+            ? null
+            : winnerTeam === "TEAM_A"
+              ? race.teamAName
+              : race.teamBName,
+          loserTeamName: tie
+            ? null
+            : winnerTeam === "TEAM_A"
+              ? race.teamBName
+              : race.teamAName,
+          memberTeams: Object.fromEntries(
+            accepted.map((p) => [p.userId, p.team])
+          ),
+        });
+      }
 
       for (const payload of teamReferralEvents) {
         events.emit("REFERRAL_REWARDED", payload);
       }
+
+      await reconcileV1PayoutArtifact(race);
 
       return race;
     }
@@ -378,7 +511,7 @@ function buildCompleteRace(dependencies = {}) {
         if (amount <= 0) continue;
         const recipient = rankedParticipants[index];
         if (!recipient) continue;
-        fundedAwards.push({ recipient, placement, amount });
+        fundedAwards.push({ recipient, placement, rawAwardCoins: amount });
       }
       // Quick-race settlement shares the C0 global participant-write order.
       // Legacy settlement retains its historical placement order.
@@ -387,20 +520,37 @@ function buildCompleteRace(dependencies = {}) {
           String(a.recipient.userId).localeCompare(String(b.recipient.userId))
         );
       }
-      for (const { recipient, placement, amount } of fundedAwards) {
-        await payoutRacePrizePool({
+      const plan = buildPayoutPlan({
+        payoutRoundingVersion: race.payoutRoundingVersion,
+        awards: fundedAwards.map((award) => ({
+          recipientId: award.recipient.id,
+          placement: award.placement,
+          rawAwardCoins: award.rawAwardCoins,
+        })),
+      });
+      for (let index = 0; index < fundedAwards.length; index++) {
+        const { recipient, placement } = fundedAwards[index];
+        const award = plan.awards[index];
+        const amount = award.awardCoins;
+        const credit = await payoutRacePrizePool({
           awardCoinsFn,
           userId: recipient.userId,
           raceId,
           placement,
           amount,
+          ...(race.payoutRoundingVersion === 1 ? { payoutMetadata: award } : {}),
         });
-        await participantModel.incrementPayoutCoins(recipient.id, amount);
+        if (credit?.awarded !== false) {
+          await participantModel.incrementPayoutCoins(recipient.id, amount);
+        }
       }
 
       await raceModel.update(raceId, {
-        prizePoolCoins: pool,
-        potCoins: pool,
+        prizePoolCoins: plan.totals.awardCoins,
+        potCoins: plan.totals.awardCoins,
+        ...(race.payoutRoundingVersion === 1
+          ? { payoutRoundingMetadata: payoutRoundingMetadata(plan) }
+          : {}),
       });
     } else if (race?.potCoins > 0) {
       // Pay the buy-in pot out by finishing place. The number of paid places is
@@ -426,9 +576,18 @@ function buildCompleteRace(dependencies = {}) {
             : null,
       });
 
+      const plan = buildPayoutPlan({
+        payoutRoundingVersion: race.payoutRoundingVersion,
+        awards: payouts.map((rawAwardCoins, index) => ({
+          recipientId: `placement:${index + 1}`,
+          placement: index + 1,
+          rawAwardCoins,
+        })),
+      });
       for (let index = 0; index < payouts.length; index++) {
         const placement = index + 1;
-        const amount = payouts[index] || 0;
+        const award = plan.awards[index];
+        const amount = award.awardCoins;
         if (amount <= 0) continue;
 
         const recipient =
@@ -439,14 +598,17 @@ function buildCompleteRace(dependencies = {}) {
 
         if (!recipient) continue;
 
-        await payoutRaceCoins({
+        const credit = await payoutRaceCoins({
           awardCoinsFn,
           userId: recipient.userId,
           raceId,
           placement,
           amount,
+          ...(race.payoutRoundingVersion === 1 ? { payoutMetadata: award } : {}),
         });
-        await participantModel.incrementPayoutCoins(recipient.id, amount);
+        if (credit?.awarded !== false) {
+          await participantModel.incrementPayoutCoins(recipient.id, amount);
+        }
       }
     }
 
@@ -494,18 +656,37 @@ function buildCompleteRace(dependencies = {}) {
         count: rewardSlots,
       });
 
+      const plan = buildPayoutPlan({
+        payoutRoundingVersion: race.payoutRoundingVersion,
+        awards: rewards.map((rawAwardCoins, index) => ({
+          recipientId: eligible[index]?.id,
+          placement: eligible[index]?.placement ?? index + 1,
+          rawAwardCoins,
+        })),
+      });
       for (let index = 0; index < rewardSlots; index++) {
         const recipient = eligible[index];
-        const amount = rewards[index] || 0;
+        const award = plan.awards[index];
+        const amount = award.awardCoins;
         if (!recipient || amount <= 0) continue;
 
-        await awardCoinsFn({
+        const credit = await awardCoinsFn({
           userId: recipient.userId,
           amount,
           reason: "race_finish_reward",
           refId: `${raceId}:rank:${recipient.placement}`,
+          ...(race.payoutRoundingVersion === 1 ? { payoutMetadata: award } : {}),
         });
-        await participantModel.incrementPayoutCoins(recipient.id, amount);
+        if (credit?.awarded !== false) {
+          await participantModel.incrementPayoutCoins(recipient.id, amount);
+        }
+      }
+      // Legacy model fakes — and, more importantly, legacy rows — retain the
+      // pre-v1 behavior. There is no metadata to persist when rounding is off.
+      if (race.payoutRoundingVersion === 1) {
+        await raceModel.update(raceId, {
+          payoutRoundingMetadata: payoutRoundingMetadata(plan),
+        });
       }
     }
 
@@ -515,17 +696,36 @@ function buildCompleteRace(dependencies = {}) {
     // payouts so a referral hiccup can't block settlement coins. It returns the
     // REFERRAL_REWARDED payloads to emit once the grant has committed (mirrors
     // joinRaceCore's deferred-emit-after-commit).
-    const referralEvents = await grantReferralRewards({ race });
+    // Reconciliation performs no second notification/referral fan-out.  Coin
+    // mutations themselves retain their deterministic ledger refs.
+    const referralEvents = isRecovery ? [] : await grantReferralRewards({ race });
 
-    events.emit("RACE_COMPLETED", {
-      raceId,
-      winnerUserId,
-      participantUserIds,
-    });
-
-    for (const payload of referralEvents) {
-      events.emit("REFERRAL_REWARDED", payload);
+    // The only v1 review trigger is a completed first-place finish. Teams and
+    // ties have no individual winnerUserId; forfeiters never receive one.
+    const winningParticipant = race?.participants?.find(
+      (participant) => participant.userId === winnerUserId && participant.forfeitedAt == null
+    );
+    if (!isRecovery && !isTeamSettlement && winningParticipant && winnerUserId) {
+      try {
+        await createReviewOpportunity({ prisma: db, userId: winnerUserId, raceId, now: now() });
+      } catch (error) {
+        // A review opportunity is optional product UX, never a reason to roll
+        // back a frozen result/payout.
+        console.error("Create review opportunity error:", error);
+      }
     }
+
+    if (!isRecovery) {
+      events.emit("RACE_COMPLETED", {
+        raceId,
+        winnerUserId,
+        participantUserIds,
+      });
+    }
+
+    for (const payload of referralEvents) events.emit("REFERRAL_REWARDED", payload);
+
+    await reconcileV1PayoutArtifact(race);
 
     return race;
   };

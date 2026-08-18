@@ -128,12 +128,6 @@ function buildCreateRacePayoutDoubleOffer(dependencies = {}) {
           0,
           maxBonusCoins - (velocity._sum.bonusCoins || 0),
         );
-        if (rolling24hRemainingBeforeClaim <= 0) {
-          throw new ForbiddenError(
-            "Race payout double preparation is disabled",
-            "PREPARATION_DISABLED",
-          );
-        }
 
         const completed = await tx.race.findMany({
           where: {
@@ -195,11 +189,11 @@ function buildCreateRacePayoutDoubleOffer(dependencies = {}) {
           throw new ConflictError("Offer snapshot changed", "OFFER_CHANGED");
         }
         const baseCoins = items.reduce((sum, item) => sum + item.eligibleCoins, 0);
-        const bonusCoins = Math.min(
-          baseCoins,
-          maxBonusCoins,
-          rolling24hRemainingBeforeClaim,
-        );
+        // §4.15: a verified offer is one full additional copy of its durable,
+        // already-rounded base ledger payout. The historical cap fields remain
+        // serialized for old clients/observability but cannot clip an approved
+        // v1 offer into a partial award.
+        const bonusCoins = baseCoins;
         if (baseCoins <= 0 || bonusCoins <= 0) {
           throw new ConflictError("Offer snapshot changed", "OFFER_CHANGED");
         }

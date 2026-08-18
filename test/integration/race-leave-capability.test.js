@@ -452,9 +452,9 @@ describe("race leave capability (integration)", () => {
       include: { participants: true },
     });
     const byUser = Object.fromEntries(settled.participants.map((p) => [p.userId, p]));
-    assert.equal(settled.prizePoolCoins, 80);
-    assert.equal(byUser[creator.userId].payoutCoins, 64);
-    assert.equal(byUser[runner.userId].payoutCoins, 16);
+    assert.equal(settled.prizePoolCoins, 85);
+    assert.equal(byUser[creator.userId].payoutCoins, 65);
+    assert.equal(byUser[runner.userId].payoutCoins, 20);
     assert.equal(byUser[forfeiterA.userId].payoutCoins, 0);
     assert.equal(byUser[forfeiterB.userId].payoutCoins, 0);
     assert.equal(

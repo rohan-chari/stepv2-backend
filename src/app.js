@@ -24,6 +24,7 @@ const { createOnboardingRouter } = require("./routes/onboarding");
 const { createAnalyticsRouter } = require("./modules/analytics");
 const { createFeedbackRouter } = require("./modules/feedback");
 const { createHomeRouter } = require("./modules/home");
+const { createInboxRouter } = require("./modules/inbox");
 const { createAppVersionRouter } = require("./routes/appVersion");
 const { createAssetsRouter } = require("./routes/assets");
 const { createAdsRouter } = require("./modules/economy");
@@ -54,10 +55,14 @@ const {
   normalizeReferralCode,
 } = require("./shared/lib/referralCode");
 const { hashClientIp, hashClientNet } = require("./shared/lib/clientIp");
-const { prisma: defaultPrisma } = require("./db");
+const { prisma: defaultPrisma, getDbPoolPressure } = require("./db");
 const redisCache = require("./shared/cache/redisCache");
 const { errorMiddleware } = require("./shared/http/errorMiddleware");
 const { createApiContractTelemetry } = require("./shared/http/apiContractTelemetry");
+const {
+  createCapacityPhaseMetricsMiddleware,
+} = require("./shared/observability/capacityPhaseMetrics");
+const { appSettings } = require("./shared/config/appSettings");
 
 function createApp(dependencies = {}) {
   const app = express();
@@ -100,6 +105,16 @@ function createApp(dependencies = {}) {
   app.use(
     createApiContractTelemetry({ logger: dependencies.logger || console })
   );
+  app.use(
+    createCapacityPhaseMetricsMiddleware({
+      settings: dependencies.appSettings || appSettings,
+      logger: dependencies.logger || console,
+      random: dependencies.capacityMetricsRandom || Math.random,
+      env: dependencies.capacityMetricsEnv || process.env,
+      readDbPoolPressure:
+        dependencies.getDbPoolPressure || getDbPoolPressure,
+    })
+  );
 
   app.use("/auth", createAuthRouter(dependencies));
   app.use("/steps", createStepsRouter(dependencies));
@@ -125,6 +140,7 @@ function createApp(dependencies = {}) {
   app.use("/analytics", createAnalyticsRouter(dependencies));
   app.use("/feedback", createFeedbackRouter(dependencies));
   app.use("/home", createHomeRouter(dependencies));
+  app.use("/inbox", createInboxRouter(dependencies));
   app.use("/app-version", createAppVersionRouter(dependencies));
   // Unauthenticated by design: Google's AdMob SSV callback, trusted via its
   // ECDSA signature (see modules/economy/routes/ads.js).

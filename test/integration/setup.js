@@ -5,20 +5,44 @@ const { signSessionToken } = require("../../src/modules/users/services/sessionTo
 
 // Tables in deletion order (respects foreign key constraints)
 const TABLES_IN_ORDER = [
+  // Keep this complete and child-to-parent ordered. TRUNCATE ... CASCADE walks
+  // the whole FK graph and takes AccessExclusive locks on every discovered
+  // table/index; on the local integration DB that turned an empty cleanup into
+  // a 20s operation after the feature-batch tables were added.
+  "inbox_delivery_outbox",
+  "inbox_alerts",
+  "feedback_messages",
+  "feedback_threads",
+  "app_review_prompt_attempts",
+  "global_event_user_summaries",
+  "global_event_race_impacts",
+  "race_effect_impacts",
   "race_payout_double_offer_items",
   "race_payout_double_offers",
   "race_payout_double_velocity_grants",
   "race_payout_double_claim_receipts",
   "race_payout_double_identities",
+  "race_resolution_delivery_intents",
+  "race_resolution_post_tasks",
+  "race_resolution_jobs_v2",
+  "race_resolution_jobs",
+  "race_messages",
   "race_powerup_events",
   "race_active_effects",
   "race_powerups",
+  "seeded_race_window_memberships",
+  "seeded_race_bucket_assignments",
   "race_participants",
+  "seeded_race_buckets",
   "seeded_race_window_modes",
+  "ranked_cohort_members",
+  "season_scores",
   "tournament_participants",
   "tournaments",
   "tournament_seeds",
   "races",
+  "powerup_purchase_requests",
+  "user_powerup_items",
   "shop_purchase_requests",
   "step_milestone_claims",
   "daily_reward_claims",
@@ -26,6 +50,8 @@ const TABLES_IN_ORDER = [
   "user_shop_items",
   "shop_items",
   "coin_transactions",
+  "ad_reward_grants",
+  "activation_events",
   "device_tokens",
   "stakes",
   "challenge_instances",
@@ -34,7 +60,15 @@ const TABLES_IN_ORDER = [
   "step_samples",
   "steps",
   "friendships",
+  "friendship_auto_link_suppressions",
+  "friend_search_rate_windows",
+  "step_sync_requests",
+  "user_scoring_input_versions",
+  "referral_reward_grants",
+  "referrals",
+  "notifications",
   "suggestions",
+  "global_step_events",
   "users",
   // Standalone (no FK to users) — the marketing site's Android waitlist.
   "android_waitlist_entries",
@@ -42,8 +76,8 @@ const TABLES_IN_ORDER = [
 
 // Refuse to truncate anything that is not obviously a throwaway database.
 //
-// This is a blast-radius guard, not a test behaviour: `cleanDatabase` TRUNCATEs
-// the users table (and CASCADEs from it), so pointing DATABASE_URL at the wrong
+// This is a blast-radius guard, not a test behaviour: `cleanDatabase` deletes
+// the users table and its dependent rows, so pointing DATABASE_URL at the wrong
 // host for one command is unrecoverable. The allowed names are the ones the
 // project already uses for disposable databases: a `*-integration` DB (what
 // `npm run test:integration` creates) or any `*_test` DB.
@@ -61,7 +95,7 @@ function assertDisposableDatabase() {
   }
   if (!/-integration$|_test$/.test(name)) {
     throw new Error(
-      `cleanDatabase() refused to TRUNCATE: DATABASE_URL database is "${name || "(unset)"}", ` +
+      `cleanDatabase() refused to modify: DATABASE_URL database is "${name || "(unset)"}", ` +
         `which does not end in "-integration" or "_test". ` +
         `Integration tests must never run against a real database — ` +
         `use \`npm run test:integration\`, which points at steps-tracker-integration.`
@@ -71,9 +105,27 @@ function assertDisposableDatabase() {
 
 async function cleanDatabase() {
   assertDisposableDatabase();
-  await prisma.$executeRawUnsafe(
-    `TRUNCATE ${TABLES_IN_ORDER.map((t) => `"${t}"`).join(", ")} CASCADE`
-  );
+  // TRUNCATE rewrites every relation and index. On the local disposable
+  // Postgres volume that is ~25 seconds even when the tables are empty, because
+  // this suite has a broad FK graph. Test fixtures create only small row sets,
+  // so ordered DELETEs are dramatically cheaper while preserving the same
+  // isolation (all primary keys are UUIDs; no sequence reset is required).
+  const tableLiterals = TABLES_IN_ORDER.map(
+    (table) => `'${table.replace(/'/g, "''")}'`
+  ).join(", ");
+  // One server-side block rather than one Prisma round trip per table: the
+  // latter can exceed Prisma's default 5s interactive-transaction timeout on
+  // a busy local adapter pool.
+  await prisma.$executeRawUnsafe(`
+    DO $$
+    DECLARE table_name text;
+    BEGIN
+      FOREACH table_name IN ARRAY ARRAY[${tableLiterals}]
+      LOOP
+        EXECUTE format('DELETE FROM %I', table_name);
+      END LOOP;
+    END $$;
+  `);
 }
 
 async function startServer(dependencies = {}) {

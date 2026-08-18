@@ -163,6 +163,16 @@ const {
 const {
   isStrictFlagEnabled,
 } = require("../../shared/config/isStrictFlagEnabled");
+const {
+  getImpactNotices: defaultGetImpactNotices,
+  acknowledgeImpactNotice: defaultAcknowledgeImpactNotice,
+  resolveRaceImpactAccess: defaultResolveRaceImpactAccess,
+  impactTitle,
+} = require("./queries/raceImpactNotices");
+const { decodeCursor, encodeCursor, parseLimit } = require("../inbox/services/inbox");
+const {
+  startCapacityPhase,
+} = require("../../shared/observability/capacityPhaseMetrics");
 
 // A powerup is STEALABLE via Sneaky Swap only if it is currently HELD and its
 // type is neither SNEAKY_SWAP (not stealable in either direction) nor
@@ -326,6 +336,9 @@ function createRacesRouter(dependencies = {}) {
   const markRaceResultsSeen =
     dependencies.markRaceResultsSeen || defaultMarkRaceResultsSeen;
   const raceModel = dependencies.Race || defaultRaceModel;
+  const getImpactNotices = dependencies.getImpactNotices || defaultGetImpactNotices;
+  const acknowledgeImpactNotice = dependencies.acknowledgeImpactNotice || defaultAcknowledgeImpactNotice;
+  const resolveRaceImpactAccess = dependencies.resolveRaceImpactAccess || defaultResolveRaceImpactAccess;
 
   async function rejectTokenlessBucketDetail(req, res) {
     if (supportsSeededRaceBuckets(req.clientFeatures)) return false;
@@ -686,6 +699,30 @@ function createRacesRouter(dependencies = {}) {
           logger.error("Build race payout double offer error:", error);
         }
       }
+      if (
+        req.clientFeatures?.has("review_prompt") === true &&
+        (await isStrictFlagEnabled(settings, "apiReviewPromptEnabled"))
+      ) {
+        try {
+          const prisma = require("../../db").prisma;
+          const opportunities = await prisma.appReviewPromptAttempt.findMany({
+            where: {
+              userId: req.user.id, claimedAt: null, expiresAt: { gt: new Date() },
+              raceId: { in: result.completed.map((race) => race.id) },
+            },
+            select: { opportunityId: true, raceId: true, expiresAt: true },
+          });
+          const byRace = new Map(opportunities.map((row) => [row.raceId, row]));
+          for (const race of result.completed) {
+            const opportunity = byRace.get(race.id);
+            if (opportunity) race.reviewOpportunity = {
+              id: opportunity.opportunityId, raceId: opportunity.raceId, expiresAt: opportunity.expiresAt,
+            };
+          }
+        } catch (error) {
+          logger.error("Build review opportunities error:", error);
+        }
+      }
       res.json(result);
     } catch (error) {
       console.error("Get races error:", error);
@@ -744,6 +781,51 @@ function createRacesRouter(dependencies = {}) {
       }
       console.error("Mark race results seen error:", error);
       res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  router.post("/:raceId/review-opportunities/:id/claim", async (req, res) => {
+    try {
+      const enabled = req.clientFeatures?.has("review_prompt") === true &&
+        (await isStrictFlagEnabled(settings, "apiReviewPromptEnabled"));
+      if (!enabled) return res.status(404).json({ error: "Review prompt is unavailable", code: "FEATURE_DISABLED" });
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(req.params.id)) {
+        return res.status(400).json({ error: "Invalid review opportunity", code: "INVALID_ID" });
+      }
+      const prisma = require("../../db").prisma;
+      const now = new Date();
+      const cooldownStart = new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000);
+      const outcome = await prisma.$transaction(async (tx) => {
+        // A user may have multiple unclaimed opportunities from distinct race
+        // completions. Serialize their claim attempts so the 180-day policy is
+        // enforced even when two result screens submit at the same moment.
+        await tx.$executeRawUnsafe(
+          "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+          `review-prompt:${req.user.id}`
+        );
+        const opportunity = await tx.appReviewPromptAttempt.findFirst({
+          where: { opportunityId: req.params.id, raceId: req.params.raceId, userId: req.user.id },
+        });
+        if (!opportunity) return "NOT_FOUND";
+        if (opportunity.expiresAt <= now || opportunity.claimedAt) return "ALREADY_CLAIMED";
+        const prior = await tx.appReviewPromptAttempt.findFirst({
+          where: { userId: req.user.id, attemptedAt: { gte: cooldownStart }, NOT: { id: opportunity.id } },
+          select: { id: true },
+        });
+        if (prior) return "COOLDOWN";
+        const claimed = await tx.appReviewPromptAttempt.updateMany({
+          where: { id: opportunity.id, userId: req.user.id, claimedAt: null, expiresAt: { gt: now } },
+          data: { claimedAt: now, attemptedAt: now },
+        });
+        return claimed.count === 1 ? "CLAIMED" : "ALREADY_CLAIMED";
+      });
+      if (outcome === "NOT_FOUND") return res.status(404).json({ error: "Review opportunity not found", code: "NOT_FOUND" });
+      if (outcome === "COOLDOWN") return res.status(409).json({ error: "Review cooldown is active", code: "COOLDOWN" });
+      if (outcome !== "CLAIMED") return res.status(409).json({ error: "Review opportunity is unavailable", code: "ALREADY_CLAIMED" });
+      return res.json({ claimed: true });
+    } catch (error) {
+      console.error("Review opportunity claim error:", error);
+      return res.status(500).json({ error: "Internal server error", code: "INTERNAL_ERROR" });
     }
   });
 
@@ -1048,8 +1130,15 @@ function createRacesRouter(dependencies = {}) {
     if (!(await isStrictFlagEnabled(settings, "apiRaceBootstrapV1Enabled"))) {
       return res.status(404).json({ error: "Not found" });
     }
+    const capacity = startCapacityPhase("bootstrap_projection_hydration");
+    const paging = readParticipantsPagingQuery(req);
+    let capacityOutcome = "error";
+    let capacityHydratedIds = 0;
     try {
-      const access = await loadBootstrapAccess(req);
+      const access = await capacity.measurePhase(
+        "access",
+        () => loadBootstrapAccess(req),
+      );
       const detailArgs = [
         req.user.id,
         req.params.raceId,
@@ -1062,7 +1151,14 @@ function createRacesRouter(dependencies = {}) {
       ];
       const detailPaging = raceDetailsPagingOptions(req);
       if (access.status !== "ACTIVE") {
-        const race = await getRaceDetails(...detailArgs, null, detailPaging);
+        const race = await capacity.measurePhase(
+          "detailsProjectionHydration",
+          () => getRaceDetails(...detailArgs, null, detailPaging),
+        );
+        capacityHydratedIds = Array.isArray(race?.participants)
+          ? race.participants.length
+          : 0;
+        capacityOutcome = "success";
         return res.json({
           contract: "race-bootstrap-v1",
           race,
@@ -1075,7 +1171,10 @@ function createRacesRouter(dependencies = {}) {
       const [progressResult, inventoryResult] = await Promise.allSettled([
         // Honours the same paging query as /progress. Old clients send no view
         // and are served the whole roster exactly as before.
-        loadRaceProgress(req, resolvedContext),
+        capacity.measurePhase(
+          "progressProjectionHydration",
+          () => loadRaceProgress(req, resolvedContext),
+        ),
         getPowerupInventory(
           req.user.id,
           req.clientFeatures?.has("powerups4") ?? false
@@ -1098,11 +1197,18 @@ function createRacesRouter(dependencies = {}) {
       // and running the lean paged plan on top of it would only ADD queries.
       // getRaceDetails slices the page out of the preload in JS when it gets
       // one; the other two paged call sites pass null and keep the lean plan.
-      const race = await getRaceDetails(
-        ...detailArgs,
-        resolvedContext.race || null,
-        detailPaging
+      const race = await capacity.measurePhase(
+        "detailsProjectionHydration",
+        () => getRaceDetails(
+          ...detailArgs,
+          resolvedContext.race || null,
+          detailPaging
+        ),
       );
+      capacityHydratedIds = Array.isArray(resolvedContext.race?.participants)
+        ? resolvedContext.race.participants.length
+        : 0;
+      capacityOutcome = "success";
       res.json({
         contract: "race-bootstrap-v1",
         race,
@@ -1124,6 +1230,15 @@ function createRacesRouter(dependencies = {}) {
       }
       logger.error("Race bootstrap error:", error);
       res.status(500).json({ error: "Internal server error" });
+    } finally {
+      capacity.setCounts({
+        pageSize: paging.participantsLimit,
+        hydratedIds: capacityHydratedIds,
+      });
+      capacity.setDimensions({
+        paged: paging.isParticipantsView,
+      });
+      capacity.finish(capacityOutcome);
     }
   });
 
@@ -1332,6 +1447,10 @@ function createRacesRouter(dependencies = {}) {
 
   // GET /races/:raceId/progress
   router.get("/:raceId/progress", async (req, res) => {
+    const capacity = startCapacityPhase("progress_projection_hydration");
+    const paging = readParticipantsPagingQuery(req);
+    const resolvedContext = {};
+    let capacityOutcome = "error";
     try {
       const compact =
         req.query.view === "compact-v1" &&
@@ -1340,26 +1459,35 @@ function createRacesRouter(dependencies = {}) {
           "apiRaceProgressCompactV1Enabled"
         ));
       if (!compact) {
-        const progress = await loadRaceProgress(req);
+        const progress = await capacity.measurePhase(
+          "projectionHydration",
+          () => loadRaceProgress(req, resolvedContext),
+        );
         // Requirements §5.2: the paged view answers with its own contract tag.
         // It is the ONLY signal a client can use to tell "this backend paginates"
         // from "this backend ignored my query string and sent everything", which
         // is what §8's degrade-to-legacy path keys on. Classic requests keep the
         // bare `{ progress }` envelope byte-for-byte.
         if (req.query.view === "participants-v1") {
+          capacityOutcome = "success";
           return res.json({
             contract: "race-progress-participants-v1",
             progress,
           });
         }
+        capacityOutcome = "success";
         return res.json({ progress });
       }
       const inventoryPromise = getPowerupInventory(
         req.user.id,
         req.clientFeatures?.has("powerups4") ?? false
       );
-      const progress = await loadRaceProgress(req);
+      const progress = await capacity.measurePhase(
+        "projectionHydration",
+        () => loadRaceProgress(req, resolvedContext),
+      );
       const inventoryResult = await Promise.allSettled([inventoryPromise]);
+      capacityOutcome = "success";
       res.json({
         contract: "race-progress-compact-v1",
         progress,
@@ -1374,6 +1502,85 @@ function createRacesRouter(dependencies = {}) {
       }
       console.error("Race progress error:", error);
       res.status(500).json({ error: "Internal server error" });
+    } finally {
+      capacity.setCounts({
+        pageSize: paging.participantsLimit,
+        hydratedIds: Array.isArray(resolvedContext.race?.participants)
+          ? resolvedContext.race.participants.length
+          : 0,
+      });
+      capacity.setDimensions({ paged: paging.isParticipantsView });
+      capacity.finish(capacityOutcome);
+    }
+  });
+
+  // Recipient-private settled score explanations. These never reuse the shared
+  // race-feed cache: a guessed row ID must disclose neither another user's
+  // amount nor its existence.
+  router.get("/:raceId/impact-notices", async (req, res) => {
+    try {
+      const enabled = req.clientFeatures?.has("impact_notices") === true &&
+        (await isStrictFlagEnabled(settings, "apiImpactNoticesEnabled"));
+      if (!enabled) return res.status(404).json({ error: "Impact notices are unavailable", code: "FEATURE_DISABLED" });
+      const notices = await getImpactNotices({ userId: req.user.id, raceId: req.params.raceId });
+      return res.json({ notices });
+    } catch (error) {
+      if (error.statusCode) return res.status(error.statusCode).json({ error: error.message, code: error.code || "REQUEST_FAILED" });
+      console.error("Race impact notice read error:", error);
+      return res.status(500).json({ error: "Internal server error", code: "INTERNAL_ERROR" });
+    }
+  });
+
+  router.post("/:raceId/impact-notices/:noticeId/acknowledge", async (req, res) => {
+    try {
+      const enabled = req.clientFeatures?.has("impact_notices") === true &&
+        (await isStrictFlagEnabled(settings, "apiImpactNoticesEnabled"));
+      if (!enabled) return res.status(404).json({ error: "Impact notices are unavailable", code: "FEATURE_DISABLED" });
+      if (!req.params.noticeId) return res.status(400).json({ error: "Invalid notice id", code: "INVALID_ID" });
+      const acknowledged = await acknowledgeImpactNotice({ userId: req.user.id, raceId: req.params.raceId, noticeId: req.params.noticeId });
+      if (!acknowledged) return res.status(404).json({ error: "Impact notice not found", code: "NOT_FOUND" });
+      return res.json({ acknowledged: true });
+    } catch (error) {
+      console.error("Race impact notice acknowledgement error:", error);
+      return res.status(500).json({ error: "Internal server error", code: "INTERNAL_ERROR" });
+    }
+  });
+
+  router.get("/:raceId/private-impact-feed", async (req, res) => {
+    try {
+      const enabled = req.clientFeatures?.has("impact_notices") === true &&
+        (await isStrictFlagEnabled(settings, "apiImpactNoticesEnabled"));
+      if (!enabled) return res.status(404).json({ error: "Impact feed is unavailable", code: "FEATURE_DISABLED" });
+      const limit = parseLimit(req.query.limit, 50);
+      const cursor = decodeCursor(req.query.cursor);
+      const access = await resolveRaceImpactAccess({ userId: req.user.id, raceId: req.params.raceId });
+      if (access.spectator) return res.json({ events: [], nextCursor: null });
+      const prisma = require("../../db").prisma;
+      const rows = await prisma.raceEffectImpact.findMany({
+        where: {
+          raceId: req.params.raceId, userId: req.user.id,
+          ...(cursor ? { OR: [
+            { settledAt: { lt: cursor.createdAt } },
+            { settledAt: cursor.createdAt, id: { lt: cursor.id } },
+          ] } : {}),
+        },
+        orderBy: [{ settledAt: "desc" }, { id: "desc" }], take: limit + 1,
+      });
+      const more = rows.length > limit;
+      const page = rows.slice(0, limit);
+      const events = page.map((row) => ({
+        id: `impact:${row.id}`, eventType: "EFFECT_IMPACT", powerupType: row.powerupType,
+        description: row.deltaSteps >= 0
+          ? `You gained ${row.deltaSteps} steps from ${impactTitle(row.powerupType)}.`
+          : `You lost ${Math.abs(row.deltaSteps)} steps to ${impactTitle(row.powerupType)}.`,
+        createdAt: row.settledAt,
+      }));
+      return res.json({ events, nextCursor: more ? encodeCursor({ id: page.at(-1).id, createdAt: page.at(-1).settledAt }) : null });
+    } catch (error) {
+      if (error.statusCode === 400) return res.status(400).json({ error: error.message, code: error.code || "INVALID_REQUEST" });
+      if (error.statusCode) return res.status(error.statusCode).json({ error: error.message, code: error.code || "REQUEST_FAILED" });
+      console.error("Race private impact feed error:", error);
+      return res.status(500).json({ error: "Internal server error", code: "INTERNAL_ERROR" });
     }
   });
 
@@ -1816,16 +2023,26 @@ function createRacesRouter(dependencies = {}) {
 
   // GET /races/:raceId/messages
   router.get("/:raceId/messages", async (req, res) => {
+    const capacity = startCapacityPhase("message_access");
+    let capacityOutcome = "error";
+    let returnedItems = 0;
     try {
       const { cursor, limit, kind } = req.query;
       const parsedLimit = limit ? Math.min(Number(limit) || 50, 100) : 50;
       // Backward compatible: omit kind => merged feed (legacy clients).
       const parsedKind = kind === "USER" || kind === "SYSTEM" ? kind : undefined;
-      const result = await getRaceMessages(req.user.id, req.params.raceId, {
-        cursor,
-        limit: parsedLimit,
-        kind: parsedKind,
-      });
+      const result = await capacity.measurePhase(
+        "accessProjection",
+        () => getRaceMessages(req.user.id, req.params.raceId, {
+          cursor,
+          limit: parsedLimit,
+          kind: parsedKind,
+        }),
+      );
+      returnedItems =
+        (Array.isArray(result?.messages) ? result.messages.length : 0) +
+        (Array.isArray(result?.activity) ? result.activity.length : 0);
+      capacityOutcome = "success";
       res.json(result);
     } catch (error) {
       if (error.statusCode) {
@@ -1833,6 +2050,15 @@ function createRacesRouter(dependencies = {}) {
       }
       console.error("Get race messages error:", error);
       res.status(500).json({ error: "Internal server error" });
+    } finally {
+      capacity.setCounts({ requestedLimit: Number(req.query.limit) || 50, returnedItems });
+      capacity.setDimensions({
+        cursor: typeof req.query.cursor === "string" && req.query.cursor.length > 0,
+        kind: req.query.kind === "USER" || req.query.kind === "SYSTEM"
+          ? req.query.kind
+          : "MERGED",
+      });
+      capacity.finish(capacityOutcome);
     }
   });
 

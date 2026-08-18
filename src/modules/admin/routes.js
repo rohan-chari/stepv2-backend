@@ -22,6 +22,14 @@ const {
 const { serializeBounds } = require("../economy/balanceConfig.defaults");
 const derivedCache = require("../../shared/cache/derivedCache");
 const cacheKeys = require("../../shared/cache/cacheKeys");
+const {
+  createInboxAlert,
+  decodeCursor,
+  encodeCursor,
+  parseLimit,
+  beforeCursor,
+  invalidateInboxUnread,
+} = require("../inbox/services/inbox");
 
 // C1 invalidation (spec §5 Phase B). Every shop_items / powerup_shop_items
 // mutation below must drop the derived catalog + manifest copies and broadcast
@@ -55,6 +63,19 @@ async function invalidatePowerupShopCaches() {
 
 // Allowed values for the numeric stepSampleBucketMinutes setting (§3.2).
 const STEP_SAMPLE_BUCKET_MINUTES = new Set([5, 10, 15, 30, 60]);
+
+function staffInboxEnabled(req, settings) {
+  return req.clientFeatures?.has("inbox_v1") === true && settings.getFlag("apiInboxV1Enabled");
+}
+function validThreadIdempotencyKey(value) {
+  return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+function cleanStaffThreadText(value) {
+  if (typeof value !== "string") return null;
+  const text = value.trim();
+  return text.length >= 1 && text.length <= 2000 ? text : null;
+}
+function staffThreadExpiry(now) { return new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000); }
 
 // Shared validator for the `assetVersion` body field on both shop admin
 // surfaces. `undefined` means "not supplied, leave alone"; `null` means
@@ -236,6 +257,107 @@ function createAdminRouter(dependencies = {}) {
     }
   });
 
+  // Inbox v1 staff surface. This deliberately exposes thread content only — no
+  // profile, email, device, or administrator identity is serialized.
+  router.get("/feedback/threads", async (req, res) => {
+    try {
+      if (!(await staffInboxEnabled(req, settings))) {
+        return res.status(404).json({ error: "Inbox is unavailable", code: "FEATURE_DISABLED" });
+      }
+      const limit = parseLimit(req.query.limit);
+      const cursor = decodeCursor(req.query.cursor);
+      const where = {
+        expiresAt: { gt: new Date() },
+        ...(cursor ? { OR: [
+          { lastMessageAt: { lt: cursor.createdAt } },
+          { lastMessageAt: cursor.createdAt, id: { lt: cursor.id } },
+        ] } : {}),
+      };
+      const rows = await prisma.feedbackThread.findMany({
+        where, take: limit + 1, orderBy: [{ lastMessageAt: "desc" }, { id: "desc" }],
+        include: { messages: { orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 1 } },
+      });
+      const more = rows.length > limit;
+      const threads = rows.slice(0, limit);
+      return res.json({
+        threads: threads.map((thread) => ({
+          id: thread.id, suggestionId: thread.suggestionId,
+          preview: thread.messages[0]?.text || "", lastMessageAt: thread.lastMessageAt,
+          userUnread: thread.staffReadAt == null,
+        })),
+        nextCursor: more ? encodeCursor({ id: threads.at(-1).id, createdAt: threads.at(-1).lastMessageAt }) : null,
+      });
+    } catch (error) {
+      if (error.statusCode === 400) return res.status(400).json({ error: error.message, code: error.code || "INVALID_REQUEST" });
+      console.error("Admin feedback thread list error:", error);
+      return res.status(500).json({ error: "Internal server error", code: "INTERNAL_ERROR" });
+    }
+  });
+
+  router.get("/feedback/threads/:id", async (req, res) => {
+    try {
+      if (!(await staffInboxEnabled(req, settings))) {
+        return res.status(404).json({ error: "Inbox is unavailable", code: "FEATURE_DISABLED" });
+      }
+      const limit = parseLimit(req.query.limit);
+      const before = decodeCursor(req.query.before);
+      const thread = await prisma.feedbackThread.findFirst({ where: { id: req.params.id, expiresAt: { gt: new Date() } } });
+      if (!thread) return res.status(404).json({ error: "Thread not found", code: "NOT_FOUND" });
+      const rows = await prisma.feedbackMessage.findMany({
+        where: { threadId: thread.id, ...(beforeCursor(before) || {}) },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: limit + 1,
+      });
+      const more = rows.length > limit;
+      const page = rows.slice(0, limit);
+      await prisma.feedbackThread.update({ where: { id: thread.id }, data: { staffReadAt: new Date() } });
+      return res.json({
+        thread: { id: thread.id, expiresAt: thread.expiresAt },
+        messages: [...page].reverse().map((message) => ({ id: message.id, senderKind: message.senderKind, text: message.text, createdAt: message.createdAt })),
+        nextBefore: more ? encodeCursor(page.at(-1)) : null,
+      });
+    } catch (error) {
+      if (error.statusCode === 400) return res.status(400).json({ error: error.message, code: error.code || "INVALID_REQUEST" });
+      console.error("Admin feedback thread detail error:", error);
+      return res.status(500).json({ error: "Internal server error", code: "INTERNAL_ERROR" });
+    }
+  });
+
+  router.post("/feedback/threads/:id/messages", async (req, res) => {
+    try {
+      if (!(await staffInboxEnabled(req, settings))) {
+        return res.status(404).json({ error: "Inbox is unavailable", code: "FEATURE_DISABLED" });
+      }
+      const text = cleanStaffThreadText(req.body?.text);
+      const idempotencyKey = req.body?.idempotencyKey;
+      if (!text || !validThreadIdempotencyKey(idempotencyKey)) {
+        return res.status(400).json({ error: "Invalid message payload", code: "INVALID_BODY" });
+      }
+      const now = new Date();
+      const thread = await prisma.feedbackThread.findFirst({ where: { id: req.params.id, expiresAt: { gt: now } } });
+      if (!thread) return res.status(404).json({ error: "Thread not found", code: "NOT_FOUND" });
+      const existing = await prisma.feedbackMessage.findUnique({ where: { threadId_idempotencyKey: { threadId: thread.id, idempotencyKey } } });
+      if (existing) return res.status(200).json({ message: { id: existing.id, senderKind: existing.senderKind, text: existing.text, createdAt: existing.createdAt } });
+      const hourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+      const recent = await prisma.feedbackMessage.count({ where: { senderKind: "STAFF", createdAt: { gte: hourAgo } } });
+      if (recent >= 60) return res.status(429).json({ error: "Too many support replies", code: "RATE_LIMITED" });
+      const message = await prisma.$transaction(async (tx) => {
+        const created = await tx.feedbackMessage.create({ data: { threadId: thread.id, senderKind: "STAFF", text, idempotencyKey } });
+        await tx.feedbackThread.update({ where: { id: thread.id }, data: { lastMessageAt: now, expiresAt: staffThreadExpiry(now), staffReadAt: now, userReadAt: null } });
+        await createInboxAlert({
+          userId: thread.userId, type: "SUPPORT_REPLY", title: "BARA SUPPORT",
+          body: text, destination: { route: "supportThread", threadId: thread.id }, sourceKey: `support-reply:${created.id}`,
+          now, tx,
+        });
+        return created;
+      });
+      await invalidateInboxUnread(thread.userId);
+      return res.status(201).json({ message: { id: message.id, senderKind: message.senderKind, text: message.text, createdAt: message.createdAt } });
+    } catch (error) {
+      console.error("Admin feedback reply error:", error);
+      return res.status(500).json({ error: "Internal server error", code: "INTERNAL_ERROR" });
+    }
+  });
+
   // Runtime feature flags (DB-backed, no deploy needed). Per-environment on
   // purpose: prod and staging flip independently, no peer-DB mirroring.
   router.get("/settings", async (req, res) => {
@@ -259,6 +381,14 @@ function createAdminRouter(dependencies = {}) {
         return res.status(400).json({ error: "No settings supplied" });
       }
       for (const [key, value] of entries) {
+        if (
+          key === "homeServiceBannerEnabled" ||
+          key === "homeServiceBannerMessage"
+        ) {
+          return res.status(400).json({
+            error: "Use PATCH /admin/settings/home-service-banner for banner settings",
+          });
+        }
         if (key === "stepSampleBucketMinutes") {
           if (!Number.isInteger(value) || !STEP_SAMPLE_BUCKET_MINUTES.has(value)) {
             return res.status(400).json({
@@ -279,6 +409,40 @@ function createAdminRouter(dependencies = {}) {
         return res.status(error.statusCode).json({ error: error.message });
       }
       console.error("Admin settings write error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Atomic pair: an enabled banner is meaningless without an explicitly
+  // validated plain-text message. This endpoint intentionally owns both keys;
+  // generic PATCH /settings remains boolean-only for its historical contract.
+  router.patch("/settings/home-service-banner", async (req, res) => {
+    try {
+      const { enabled, message } = req.body || {};
+      if (typeof enabled !== "boolean" || typeof message !== "string") {
+        return res.status(400).json({ error: "enabled and message are required" });
+      }
+      const cleanMessage = message.trim();
+      if (
+        (enabled && (cleanMessage.length < 1 || cleanMessage.length > 240)) ||
+        (!enabled && cleanMessage.length > 0)
+      ) {
+        return res.status(400).json({
+          error: enabled
+            ? "message must be 1 to 240 characters when enabled"
+            : "message must be empty when disabled",
+        });
+      }
+      await settings.setFlagsAtomically([
+        ["homeServiceBannerEnabled", enabled],
+        ["homeServiceBannerMessage", enabled ? cleanMessage : ""],
+      ]);
+      // Preserve the established settings mutation envelope so the admin
+      // client needs no endpoint-specific response parser.
+      res.json({ settings: await settings.getAllFlags() });
+    } catch (error) {
+      if (error.statusCode) return res.status(error.statusCode).json({ error: error.message });
+      console.error("Home service banner settings error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });

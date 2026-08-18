@@ -246,6 +246,15 @@ function buildDeleteUserAccount(dependencies = {}) {
       await tx.deviceToken.deleteMany({ where: { userId } });
       await tx.coinTransaction.deleteMany({ where: { userId } });
       await tx.powerupUpgradeEvent.deleteMany({ where: { userId } });
+      // Final-score impact rows intentionally use RESTRICT FKs (a race
+      // retention job owns their historical lifecycle), so account deletion
+      // removes this user's private rows explicitly in its existing transaction.
+      await tx.raceEffectImpact.deleteMany({ where: { userId } });
+      await tx.globalEventRaceImpact.deleteMany({ where: { userId } });
+      await tx.globalEventUserSummary.deleteMany({ where: { userId } });
+      await tx.appReviewPromptAttempt.deleteMany({ where: { userId } });
+      await tx.inboxAlert.deleteMany({ where: { userId } });
+      await tx.feedbackThread.deleteMany({ where: { userId } });
       // Free-text feedback (batch 2026-08-08 item 7). The FK is ON DELETE
       // CASCADE so this is not required for correctness, but deleting it
       // explicitly keeps the row removal inside this transaction — and inside

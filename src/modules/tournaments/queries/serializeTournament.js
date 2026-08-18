@@ -13,6 +13,7 @@ const {
   collectRaceIllusions,
   isStealthedForViewer,
 } = require("../../races/services/raceIllusions");
+const { buildPayoutPlan } = require("../../races/services/payoutRounding");
 
 // Total bracket length in days — the duration band a funded bracket pool is
 // sized on (D9): every round is played back-to-back.
@@ -26,11 +27,15 @@ function tournamentDurationDays(t) {
 // carry the pool in potCoins as well, so `lib/utils/tournament.dart` keeps
 // rendering a correct figure on an un-updated binary.
 function tournamentMoneyView(t, acceptedCount) {
+  const award = (rawAwardCoins) => buildPayoutPlan({
+    payoutRoundingVersion: t.payoutRoundingVersion,
+    awards: [{ recipientId: "champion", placement: 1, rawAwardCoins }],
+  }).totals.awardCoins;
   if (t.fundedPrize !== true) {
     return {
       prizePool: null,
       buyInAmount: t.buyInAmount,
-      potCoins: t.potCoins || 0,
+      potCoins: award(t.potCoins || 0),
     };
   }
   const completed = t.status === "COMPLETED";
@@ -39,13 +44,14 @@ function tournamentMoneyView(t, acceptedCount) {
       ? acceptedCount
       : (t.participants || []).filter((p) => p.status === "ACCEPTED").length;
   const durationDays = tournamentDurationDays(t);
-  const coins = completed
+  const rawCoins = completed
     ? t.prizePoolCoins || 0
     : computePrizePool({
         playerCount,
         durationDays,
         max: MAX_CHAMPION_PRIZE,
       });
+  const coins = award(rawCoins);
   return {
     prizePool: buildPrizePoolPayload({
       funded: true,
@@ -85,9 +91,16 @@ function summaryFields(t, acceptedCount = null) {
     seedKind: t.seed ? t.seed.kind : null,
     // A featured lobby quotes its prize at mint. Pre-snapshot rows remain
     // readable through the seed fallback during the mixed-version rollout.
-    championPrizeCoins:
-      t.championPrizeCoinsSnapshot ??
-      (t.seed ? t.seed.championPrizeCoins ?? null : null),
+    championPrizeCoins: t.seedId
+      ? buildPayoutPlan({
+          payoutRoundingVersion: t.payoutRoundingVersion,
+          awards: [{
+            recipientId: "champion",
+            placement: 1,
+            rawAwardCoins: t.championPrizeCoinsSnapshot ?? t.seed?.championPrizeCoins ?? 0,
+          }],
+        }).totals.awardCoins
+      : null,
     championUserId: t.championUserId ?? null,
     startedAt: t.startedAt ?? null,
     completedAt: t.completedAt ?? null,

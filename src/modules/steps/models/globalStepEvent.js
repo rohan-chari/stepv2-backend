@@ -1,4 +1,18 @@
 const { prisma } = require("../../../db");
+const {
+  createPendingEnrollments,
+  uniqueUserIds,
+  acquireGlobalEnrollmentLock,
+} = require("../services/globalEventEnrollment");
+
+async function invalidateGlobalEventCache() {
+  const derivedCache = require("../../../shared/cache/derivedCache");
+  const cacheKeys = require("../../../shared/cache/cacheKeys");
+  await derivedCache.invalidate({
+    keys: [cacheKeys.globalEventsKey],
+    prefix: cacheKeys.PREFIX.GLOBAL_EVENTS,
+  });
+}
 
 const GlobalStepEvent = {
   async create({ startsAt, endsAt, multiplier, label }) {
@@ -8,13 +22,78 @@ const GlobalStepEvent = {
     // C1 invalidation (spec §5 Phase B): the scheduler that mints a new event
     // must drop the cached not-yet-ended row set, or the "2x STEPS" home banner
     // appears up to 60s after the event actually starts.
-    const derivedCache = require("../../../shared/cache/derivedCache");
-    const cacheKeys = require("../../../shared/cache/cacheKeys");
-    await derivedCache.invalidate({
-      keys: [cacheKeys.globalEventsKey],
-      prefix: cacheKeys.PREFIX.GLOBAL_EVENTS,
-    });
+    await invalidateGlobalEventCache();
     return row;
+  },
+
+  // The daily start anchor is deterministic, but read-then-create alone is not
+  // sufficient across pm2 processes. Lock the anchor inside the transaction,
+  // re-read it, and return the winner's row without emitting/fanning out from
+  // losing ticks. This avoids an unsafe unique migration over historical rows.
+  async createIfAbsent({ startsAt, endsAt, multiplier, label }) {
+    const start = new Date(startsAt);
+    const result = await prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+        `global-step-event:${start.toISOString()}`
+      );
+      await acquireGlobalEnrollmentLock(tx);
+      const existing = await tx.globalStepEvent.findFirst({ where: { startsAt: start } });
+      if (existing) return { event: existing, created: false };
+      const event = await tx.globalStepEvent.create({
+        data: { startsAt: start, endsAt, multiplier, label: label ?? null },
+      });
+      return { event, created: true };
+    });
+    if (result.created) await invalidateGlobalEventCache();
+    return result;
+  },
+
+  // The event row and its initial PENDING race/user enrollment set are one
+  // transaction. A created event can therefore never be visible to settlement
+  // without the snapshot of everyone already racing at its start instant.
+  async createIfAbsentWithEnrollments({ startsAt, endsAt, multiplier, label }) {
+    const start = new Date(startsAt);
+    const result = await prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+        `global-step-event:${start.toISOString()}`
+      );
+      await acquireGlobalEnrollmentLock(tx);
+      const existing = await tx.globalStepEvent.findFirst({ where: { startsAt: start } });
+      if (existing) return { event: existing, created: false, participantUserIds: [] };
+
+      const event = await tx.globalStepEvent.create({
+        data: { startsAt: start, endsAt, multiplier, label: label ?? null },
+      });
+      const participants = await tx.raceParticipant.findMany({
+        where: {
+          status: "ACCEPTED",
+          race: {
+            status: "ACTIVE",
+            startedAt: { lte: start },
+            OR: [{ endsAt: null }, { endsAt: { gt: start } }],
+          },
+        },
+        select: { raceId: true, userId: true },
+      });
+      const byRace = new Map();
+      for (const participant of participants) {
+        const userIds = byRace.get(participant.raceId) || [];
+        userIds.push(participant.userId);
+        byRace.set(participant.raceId, userIds);
+      }
+      for (const [raceId, userIds] of byRace) {
+        await createPendingEnrollments(tx, { eventId: event.id, raceId, userIds });
+      }
+      return {
+        event,
+        created: true,
+        participantUserIds: uniqueUserIds(participants.map((participant) => participant.userId)),
+      };
+    });
+    if (result.created) await invalidateGlobalEventCache();
+    return result;
   },
 
   // Events whose window overlaps [rangeStart, rangeEnd]. Used by getRaceProgress

@@ -15,6 +15,7 @@ const {
 } = require("../constants/tournaments");
 const { computePrizePool } = require("../../../shared/economy/prizePool");
 const { tournamentDurationDays } = require("../queries/serializeTournament");
+const { buildPayoutPlan, payoutRoundingMetadata } = require("../../races/services/payoutRounding");
 
 // Advance a tournament when its current round is fully settled. Idempotent and
 // concurrency-safe: runs under a tournament FOR UPDATE lock, and the
@@ -115,44 +116,84 @@ function buildAdvanceTournament(dependencies = {}) {
         // `fundedPrize` on the row (never the feature flag) gates branch 3, so a
         // mid-bracket flip can neither strand nor duplicate a champion prize.
         let prizeAmount = 0;
+        let payoutPlan = null;
         if ((tournament.buyInAmount || 0) > 0 && (tournament.potCoins || 0) > 0) {
-          prizeAmount = tournament.potCoins || 0;
+          payoutPlan = buildPayoutPlan({
+            payoutRoundingVersion: tournament.payoutRoundingVersion,
+            awards: [{ recipientId: championUserId, placement: 1, rawAwardCoins: tournament.potCoins || 0 }],
+          });
+          prizeAmount = payoutPlan.totals.awardCoins;
           await payoutTournamentPot({
             awardCoinsFn,
             userId: championUserId,
             tournamentId,
             amount: prizeAmount,
+            ...(tournament.payoutRoundingVersion === 1
+              ? { payoutMetadata: payoutPlan.awards[0] }
+              : {}),
           });
         } else if (tournament.seedId && tournament.seed) {
           // Lobby snapshot wins. NULL is the deliberate legacy fallback for a
           // featured bracket minted before the snapshot migration.
-          prizeAmount =
+          const rawPrizeAmount =
             tournament.championPrizeCoinsSnapshot ??
             tournament.seed.championPrizeCoins ??
             0;
+          payoutPlan = buildPayoutPlan({
+            payoutRoundingVersion: tournament.payoutRoundingVersion,
+            awards: [{ recipientId: championUserId, placement: 1, rawAwardCoins: rawPrizeAmount }],
+          });
+          prizeAmount = payoutPlan.totals.awardCoins;
           await mintChampionPrize({
             awardCoinsFn,
             userId: championUserId,
             tournamentId,
             amount: prizeAmount,
+            ...(tournament.payoutRoundingVersion === 1
+              ? { payoutMetadata: payoutPlan.awards[0] }
+              : {}),
           });
         } else if (tournament.fundedPrize === true) {
-          prizeAmount = computePrizePool({
+          const rawPrizeAmount = computePrizePool({
             playerCount: allParticipants.length,
             durationDays: tournamentDurationDays(tournament),
             max: MAX_CHAMPION_PRIZE,
           });
+          payoutPlan = buildPayoutPlan({
+            payoutRoundingVersion: tournament.payoutRoundingVersion,
+            awards: [{ recipientId: championUserId, placement: 1, rawAwardCoins: rawPrizeAmount }],
+          });
+          prizeAmount = payoutPlan.totals.awardCoins;
           await mintTournamentPrizePool({
             awardCoinsFn,
             userId: championUserId,
             tournamentId,
             amount: prizeAmount,
+            ...(tournament.payoutRoundingVersion === 1
+              ? { payoutMetadata: payoutPlan.awards[0] }
+              : {}),
           });
           // Stamp the settled pool (and mirror it into potCoins so a frozen build
           // renders the real prize) inside the same transaction as the crowning.
           await tx.tournament.update({
             where: { id: tournamentId },
-            data: { prizePoolCoins: prizeAmount, potCoins: prizeAmount },
+            data: {
+              prizePoolCoins: prizeAmount,
+              potCoins: prizeAmount,
+              ...(tournament.payoutRoundingVersion === 1
+                ? { payoutRoundingMetadata: payoutRoundingMetadata(payoutPlan) }
+                : {}),
+            },
+          });
+        }
+        if (
+          tournament.fundedPrize !== true &&
+          tournament.payoutRoundingVersion === 1 &&
+          payoutPlan
+        ) {
+          await tx.tournament.update({
+            where: { id: tournamentId },
+            data: { payoutRoundingMetadata: payoutRoundingMetadata(payoutPlan) },
           });
         }
 

@@ -41,12 +41,17 @@ function makeDeps({ race, effectiveTotal = 1234 }) {
     forfeitWrites: [],
     completions: [],
     events: [],
+    lockedLifecycleRaces: [],
     lockedRaces: [],
   };
   // The fake tx mirrors the tiny surface the command uses.
   const tx = {
     async $queryRawUnsafe(sql, raceId) {
-      state.lockedRaces.push(raceId);
+      if (sql.includes("race_participants")) {
+        state.lockedRaces.push(raceId);
+      } else if (sql.includes("FROM races")) {
+        state.lockedLifecycleRaces.push(raceId);
+      }
       return [];
     },
     raceParticipant: {
@@ -190,6 +195,7 @@ test("TR-604 forfeit locks the race participants before evaluating collapse", as
   const ctx = makeDeps({ race });
   const forfeitRace = buildForfeitRace(ctx.deps);
   await forfeitRace({ userId: "a1", raceId: "race-1" });
+  assert.deepEqual(ctx.state.lockedLifecycleRaces, ["race-1"]);
   assert.deepEqual(ctx.state.lockedRaces, ["race-1"]);
   // 1v1: a1 forfeiting collapses team A instantly.
   assert.equal(ctx.state.completions.length, 1);

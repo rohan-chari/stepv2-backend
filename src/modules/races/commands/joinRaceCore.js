@@ -59,6 +59,9 @@ const {
 const {
   invalidateRaceProgress,
 } = require("../services/raceProgressSnapshot");
+const {
+  enrollIfGlobalEventActive,
+} = require("../../steps/services/globalEventEnrollment");
 
 function buildJoinRaceCore(dependencies = {}) {
   // C0 (spec §5a item 4): after this command's own small writes, mark the race
@@ -82,6 +85,10 @@ function buildJoinRaceCore(dependencies = {}) {
     buildAtomicHoldFn({ ErrorClass: RaceJoinError, code: "INSUFFICIENT_COINS" });
   const events = dependencies.eventBus || eventBus;
   const db = dependencies.prisma || defaultPrisma;
+  // Unit seams commonly inject only a participant model; never open a real
+  // default-prisma transaction underneath those fakes. Production uses the
+  // default persistence pair and takes the atomic late-join path.
+  const usesDefaultPersistence = !dependencies.RaceParticipant && !dependencies.prisma;
   const hashSub = dependencies.hashAppleSub || hashAppleSub;
 
   // Best-effort, server-enforced one-time grant of bonus mystery boxes for the
@@ -287,10 +294,9 @@ function buildJoinRaceCore(dependencies = {}) {
       });
     }
 
-    let participant;
-    try {
-      participant = transactionClient
-        ? await transactionClient.raceParticipant.create({
+    const createParticipant = async (client) => {
+      const created = client
+        ? await client.raceParticipant.create({
             data: {
               raceId,
               userId,
@@ -301,22 +307,26 @@ function buildJoinRaceCore(dependencies = {}) {
             },
             include: {
               user: {
-                select: {
-                  id: true,
-                  displayName: true,
-                  profilePhotoUrl: true,
-                },
+                select: { id: true, displayName: true, profilePhotoUrl: true },
               },
             },
           })
         : await participantModel.create({
-            raceId,
-            userId,
-            status: "ACCEPTED",
-            buyInAmount,
-            buyInStatus: buyInAmount > 0 ? "HELD" : "NONE",
-            team: joinTeam,
+            raceId, userId, status: "ACCEPTED", buyInAmount,
+            buyInStatus: buyInAmount > 0 ? "HELD" : "NONE", team: joinTeam,
           });
+      if (race.status === "ACTIVE" && client) {
+        await enrollIfGlobalEventActive(client, { raceId, userIds: [userId], at: new Date() });
+      }
+      return created;
+    };
+    let participant;
+    try {
+      participant = transactionClient
+        ? await createParticipant(transactionClient)
+        : race.status === "ACTIVE" && usesDefaultPersistence && typeof db.$transaction === "function"
+          ? await db.$transaction((tx) => createParticipant(tx))
+          : await createParticipant(null);
     } catch (error) {
       if (buyInAmount > 0) {
         try {

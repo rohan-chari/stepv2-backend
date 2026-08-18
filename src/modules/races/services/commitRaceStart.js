@@ -6,6 +6,9 @@ const { recordServerActivationEvent } = require("../../analytics/serverActivatio
 const {
   enqueueRaceResolution,
 } = require("./enqueueRaceResolution");
+const {
+  enrollIfGlobalEventActive,
+} = require("../../steps/services/globalEventEnrollment");
 
 class RaceStartTransactionAbort extends Error {
   constructor(result) {
@@ -95,6 +98,17 @@ async function commitRaceStart({
         data: participant.fields,
       });
     }
+    // The race is now ACTIVE in this same transaction, so a start that lands
+    // inside a global window durably enrolls all accepted racers before any
+    // push/event can observe it.
+    await enrollIfGlobalEventActive(tx, {
+      raceId,
+      userIds: expected.map((participant) => participant.userId),
+      // `startedAt` may be a scheduled anchor in the past when a delayed cron
+      // promotes a PENDING race. Membership begins at this committed transition,
+      // so use wall-clock time for the currently-active event predicate.
+      at: new Date(),
+    });
     if (beforeRaceStartedRecord) {
       await beforeRaceStartedRecord({ tx, raceId, participantUpdates: expected });
     }

@@ -19,12 +19,14 @@ const {
   scheduleComputeRankedWeeks,
 } = require("./modules/ranked");
 const { scheduleGlobalStepEvents } = require("./modules/steps");
+const { scheduleGlobalEventSummaryTick } = require("./modules/steps");
 const { scheduleStepSampleRetention } = require("./modules/steps");
 const {
   scheduleAutoStartScheduledRaces,
 } = require("./modules/races");
 const { scheduleRecomputePlacements } = require("./modules/races");
 const { scheduleNotificationCleanup } = require("./modules/notifications");
+const { scheduleInboxExpiry, scheduleInboxDelivery } = require("./modules/inbox");
 const {
   scheduleActivationEventCleanup,
 } = require("./modules/analytics");
@@ -55,11 +57,14 @@ function startServer({
   scheduleComputeRanks: scheduleRanks = scheduleComputeRanks,
   scheduleComputeRankedWeeks: scheduleRankedWeeks = scheduleComputeRankedWeeks,
   scheduleGlobalStepEvents: scheduleGlobalEvents = scheduleGlobalStepEvents,
+  scheduleGlobalEventSummaryTick: scheduleGlobalSummary = scheduleGlobalEventSummaryTick,
   scheduleStepSampleRetention: scheduleStepRetention = scheduleStepSampleRetention,
   scheduleAutoStartScheduledRaces:
     scheduleAutoStartRaces = scheduleAutoStartScheduledRaces,
   scheduleRecomputePlacements: scheduleLivePlacements = scheduleRecomputePlacements,
   scheduleNotificationCleanup: scheduleNotifCleanup = scheduleNotificationCleanup,
+  scheduleInboxExpiry: scheduleInboxExpiryJob = scheduleInboxExpiry,
+  scheduleInboxDelivery: scheduleInboxDeliveryJob = scheduleInboxDelivery,
   scheduleActivationEventCleanup:
     scheduleActivationCleanup = scheduleActivationEventCleanup,
   scheduleDailyMover: scheduleDaily = scheduleDailyMover,
@@ -101,6 +106,9 @@ function startServer({
       scheduleRanks();
       scheduleRankedWeeks();
       scheduleGlobalEvents();
+      if (process.env.GLOBAL_EVENT_SUMMARY_DISABLED !== "true") {
+        scheduleGlobalSummary();
+      }
       scheduleAutoStartRaces();
       // Live placement broadcast (Phase 0). Runs by default like the other jobs. The
       // env var is an emergency kill switch ONLY (set LIVE_PLACEMENT_DISABLED=true to
@@ -113,6 +121,12 @@ function startServer({
       // NOTIFICATION_CLEANUP_DISABLED=true.
       if (process.env.NOTIFICATION_CLEANUP_DISABLED !== "true") {
         scheduleNotifCleanup();
+      }
+      if (process.env.INBOX_EXPIRY_DISABLED !== "true") {
+        scheduleInboxExpiryJob();
+      }
+      if (process.env.INBOX_DELIVERY_DISABLED !== "true") {
+        scheduleInboxDeliveryJob();
       }
       if (process.env.ACTIVATION_EVENT_CLEANUP_DISABLED !== "true") {
         scheduleActivationCleanup();
@@ -189,7 +203,13 @@ function startServer({
     // Only worker 0 schedules crons -- every scheduler above runs unguarded,
     // so more than one worker running them means duplicate race resolutions,
     // duplicate pushes, duplicate payout reconcile, etc.
-    if (process.env.NODE_APP_INSTANCE === "0") {
+    // PM2 always provides NODE_APP_INSTANCE. Outside PM2 (local development,
+    // one-off single-process runs, and startup tests), an absent value means
+    // this is the sole process and therefore the cron owner.
+    if (
+      process.env.NODE_APP_INSTANCE == null ||
+      process.env.NODE_APP_INSTANCE === "0"
+    ) {
       if (cronStartDelayMs > 0) {
         logger.log(`[CRON] Job scheduling starts in ${cronStartDelayMs / 1000}s`);
         setTimeout(startCrons, cronStartDelayMs);

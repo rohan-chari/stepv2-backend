@@ -317,7 +317,7 @@ const POWERUP_COPY_SEED = [
     powerupType: "QUICK_RINSE",
     name: "Quick Rinse",
     description:
-      "Cut the remaining time on every opponent effect currently on you in half. Your own buffs stay put",
+      "Cut the remaining time on every opponent effect currently on you in half. Your own buffs stay put. Once an hour per race",
     shortDescription: null,
     upgradeTierLabels: [],
   },

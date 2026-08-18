@@ -368,9 +368,10 @@ function buildSeededRaceBuckets(dependencies = {}) {
     // These values are stamped exactly as the legacy renewal path stamps
     // them. Bucket matching must never silently alter a seeded race's payout
     // economics merely because its participant field is private.
-    const [fundedPrizePools, geometricPayouts] = await Promise.all([
+    const [fundedPrizePools, geometricPayouts, payoutRoundingV1Enabled] = await Promise.all([
       settings.getFlag("fundedPrizePoolsEnabled"),
       settings.getFlag("seededGeometricPayoutsEnabled"),
+      settings.getFlag("payoutRoundingV1Enabled"),
     ]);
     return withSeededWindowLock({ prisma, seedId: seed.id, windowStart, fn: async (tx) => {
       if (await readWindowMode({ prisma: tx, seedId: seed.id, windowStart }) !== "BUCKET") return [];
@@ -398,6 +399,7 @@ function buildSeededRaceBuckets(dependencies = {}) {
             maxDurationDays: seed.cadence === "WEEKLY" ? 7 : 1, payoutPreset: "TOP_HALF",
             payoutCurve: geometricPayouts === true ? "GEOMETRIC" : null,
             fundedPrize: fundedPrizePools === true,
+            payoutRoundingVersion: payoutRoundingV1Enabled === true ? 1 : 0,
             powerupStepInterval: normalizePowerupConfig({
               powerupsEnabled: seed.powerupsEnabled ?? false,
             }),

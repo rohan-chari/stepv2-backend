@@ -27,6 +27,14 @@ const pool = new pg.Pool({
   ...(isLocalhost ? {} : { ssl: { rejectUnauthorized: false } }),
 });
 
+function getDbPoolPressure() {
+  return {
+    total: pool.totalCount,
+    idle: pool.idleCount,
+    waiting: pool.waitingCount,
+  };
+}
+
 const adapter = new PrismaPg(pool);
 
 const prisma = new PrismaClient({
@@ -46,4 +54,4 @@ if (process.env.PRISMA_QUERY_EVENTS_ENABLED === "true") {
   prisma.$on("query", incrementRequestQueryCount);
 }
 
-module.exports = { prisma };
+module.exports = { prisma, getDbPoolPressure };

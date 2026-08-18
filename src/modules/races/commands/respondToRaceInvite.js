@@ -4,6 +4,7 @@ const { Steps } = require("../../steps/models/steps");
 const { User } = require("../../users");
 const { awardCoins } = require("../../../shared/economy/awardCoins");
 const { eventBus } = require("../../../shared/events/eventBus");
+const { prisma: defaultPrisma } = require("../../../db");
 const {
   buildAtomicHoldFn,
   ensureUserCanAfford,
@@ -18,6 +19,9 @@ const {
 const {
   buildMaybeAutoStartPrivateRace,
 } = require("../jobs/privateRaceAutoStart");
+const {
+  enrollIfGlobalEventActive,
+} = require("../../steps/services/globalEventEnrollment");
 
 class RaceInviteResponseError extends Error {
   constructor(message, statusCode, code) {
@@ -45,6 +49,8 @@ function buildRespondToRaceInvite(dependencies = {}) {
       code: "INSUFFICIENT_COINS",
     });
   const events = dependencies.eventBus || eventBus;
+  const db = dependencies.prisma || defaultPrisma;
+  const usesDefaultPersistence = !dependencies.RaceParticipant && !dependencies.prisma;
   // Batch 2026-08-08 item 2 — private-race auto-start hook. Built from the same
   // dependency bag so tests can inject a fake startRace/Race.
   const maybeAutoStartPrivateRace =
@@ -196,12 +202,32 @@ function buildRespondToRaceInvite(dependencies = {}) {
     // The fallback preserves the long-standing injected-test-model seam. The
     // production RaceParticipant model always supplies updateLiveInvite, which
     // is the atomic expiry authority described above.
+    const inviteResponseNow = new Date();
     const updated =
-      typeof participantModel.updateLiveInvite === "function"
+      accept && race.status === "ACTIVE" && usesDefaultPersistence
+        ? await db.$transaction(async (tx) => {
+            const claimed = await tx.raceParticipant.updateMany({
+              where: {
+                id: participant.id,
+                status: "INVITED",
+                OR: [{ inviteExpiresAt: null }, { inviteExpiresAt: { gt: inviteResponseNow } }],
+              },
+              data: updateFields,
+            });
+            if (claimed.count !== 1) return null;
+            await enrollIfGlobalEventActive(tx, {
+              raceId, userIds: [userId], at: inviteResponseNow,
+            });
+            return tx.raceParticipant.findUnique({
+              where: { id: participant.id },
+              include: { user: { select: { id: true, displayName: true, profilePhotoUrl: true } } },
+            });
+          })
+        : typeof participantModel.updateLiveInvite === "function"
         ? await participantModel.updateLiveInvite(
             participant.id,
             updateFields,
-            new Date()
+            inviteResponseNow
           )
         : await participantModel.update(participant.id, updateFields);
     if (!updated) {

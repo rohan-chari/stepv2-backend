@@ -76,6 +76,7 @@ function buildGetPublicRaces(dependencies = {}) {
           participantCount: acceptedCount,
           maxParticipants,
           buyInAmount: money.buyInAmount,
+          payoutRoundingVersion: race.payoutRoundingVersion ?? 0,
           payoutPreset: race.payoutPreset,
           powerupsEnabled: race.powerupsEnabled === true,
           prizePool: money.prizePool,
@@ -125,6 +126,7 @@ function buildGetPublicRaces(dependencies = {}) {
         startedAt: race.startedAt,
         targetSteps: race.targetSteps, // 1.1.4 compat
         buyInAmount: money.buyInAmount,
+        payoutRoundingVersion: race.payoutRoundingVersion ?? 0,
         payoutPreset: race.payoutPreset,
         powerupsEnabled: race.powerupsEnabled,
         powerupStepInterval: race.powerupStepInterval,

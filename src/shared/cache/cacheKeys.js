@@ -41,6 +41,8 @@ const PREFIX = {
   LEADERBOARD_STEPS_FRIENDS: "v1:leaderboard:steps:friends",
   LEADERBOARD_LOCK: "v1:lock:leaderboard",
   FRIEND_SEARCH_RATE: "v1:user:friendsearchrate",
+  HOME_IMPACT_SUMMARY: "v1:home:impact-summary",
+  HOME_INBOX_UNREAD: "v1:home:inbox-unread",
 };
 
 // The only two values `resolveReleaseChannel` can ever produce
@@ -167,6 +169,9 @@ function friendSearchRate(userId, utcMinuteEpoch) {
   }
   return `${PREFIX.FRIEND_SEARCH_RATE}:${userId}:${utcMinuteEpoch}`;
 }
+
+function homeImpactSummary(userId) { return `${PREFIX.HOME_IMPACT_SUMMARY}:${userId}`; }
+function homeInboxUnread(userId) { return `${PREFIX.HOME_INBOX_UNREAD}:${userId}`; }
 
 // ── C2: race chat lists + their durable version marker ──────────────────────
 function raceMessages(raceId, kind) {
@@ -346,6 +351,8 @@ module.exports = {
   leaderboardLock,
   acceptedFriendSetHash,
   friendSearchRate,
+  homeImpactSummary,
+  homeInboxUnread,
   raceMessages,
   raceMessagesVersion,
   raceMessageWatermark,

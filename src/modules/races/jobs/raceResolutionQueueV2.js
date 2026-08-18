@@ -1,4 +1,4 @@
-const { prisma: defaultPrisma } = require("../../../db");
+const { prisma: defaultPrisma, getDbPoolPressure } = require("../../../db");
 const { Race } = require("../models/race");
 const { RaceParticipant } = require("../models/raceParticipant");
 const { RaceActiveEffect } = require("../../powerups/models/raceActiveEffect");
@@ -53,6 +53,10 @@ const {
 const {
   raceResolutionDeliveryIntents: defaultDeliveryIntents,
 } = require("../services/raceResolutionDeliveryIntents");
+const {
+  runCapacityMetricsEntry,
+  startCapacityPhase,
+} = require("../../../shared/observability/capacityPhaseMetrics");
 
 const POLL_INTERVAL_MS = 250;
 const QUEUE_LAG_LOG_INTERVAL_MS = 60 * 1000;
@@ -1372,20 +1376,45 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
     return runBoundedRaceResolutionJobs(concurrency, processOne);
   }
 
-  async function logQueueLag() {
+  async function logQueueLagInternal() {
+    const capacity = startCapacityPhase("resolution_queue_lag");
+    let outcome = "error";
     try {
-      const lagMs = await jobModel.queueLagMs(now());
+      const lagMs = await capacity.measurePhase(
+        "lagProbe",
+        () => jobModel.queueLagMs(now()),
+      );
       const level = lagMs > QUEUE_LAG_ALARM_MS ? "warn" : "log";
       (logger[level] || logger.log).call(
         logger,
         `[RACE_RESOLUTION_V2] queue_lag_ms=${lagMs}` +
           (lagMs > QUEUE_LAG_ALARM_MS ? " ALARM(>30s) — raise ASYNC_RACE_RESOLUTION_CONCURRENCY" : "")
       );
+      capacity.setCounts({ lagMs });
+      capacity.setDimensions({ alarm: lagMs > QUEUE_LAG_ALARM_MS });
+      outcome = "success";
       return lagMs;
     } catch (error) {
       logger.error("[RACE_RESOLUTION_V2] queue lag probe failed:", error);
       return null;
+    } finally {
+      capacity.finish(outcome);
     }
+  }
+
+  function logQueueLag() {
+    return runCapacityMetricsEntry(
+      {
+        settings,
+        logger,
+        env: dependencies.capacityMetricsEnv || process.env,
+        random: dependencies.capacityMetricsRandom || Math.random,
+        readDbPoolPressure:
+          dependencies.getDbPoolPressure || getDbPoolPressure,
+        forceSample: true,
+      },
+      logQueueLagInternal,
+    );
   }
 
   return { processOne, tick, logQueueLag, readyToClaim, claimingDisabled, FenceLostError };

@@ -249,11 +249,12 @@ async function seed() {
     {
       // Store-only, `powerups3`-gated. Self-only, instantaneous: halves the
       // remaining duration of every active timed opponent effect on you. Blocked
-      // while jammed, exactly like Cleanse. See the testOnly note above.
+      // while jammed, exactly like Cleanse. Usable at most once an hour per race
+      // (2026-08-17), so rinses can't be chained. See the testOnly note above.
       sku: "POWERUP_QUICK_RINSE",
       name: "Quick Rinse",
       description:
-        "Cut the remaining time on every opponent effect currently on you in half. Your own buffs stay put",
+        "Cut the remaining time on every opponent effect currently on you in half. Your own buffs stay put. Once an hour per race",
       priceCoins: 75,
       powerupType: "QUICK_RINSE",
       active: true,

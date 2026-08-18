@@ -113,6 +113,16 @@ function makeDeps(overrides = {}) {
           feedEvents.push(data);
           return { id: "fe-1", ...data };
         },
+        // Backs the once-an-hour-per-race cooldown. `lastRinseAt` is the
+        // POWERUP_USED event this user's previous rinse in THIS race wrote.
+        // Backs the once-an-hour-per-race cooldown. A stored rinse answers only
+        // for the (race, user, type) it belongs to, exactly like the real query.
+        async findLastPowerupUseAt({ raceId, actorUserId, powerupType }) {
+          if (!overrides.lastRinseAt) return null;
+          if (raceId !== (overrides.lastRinseRaceId || "race-1")) return null;
+          if (actorUserId !== "user-1" || powerupType !== "QUICK_RINSE") return null;
+          return overrides.lastRinseAt;
+        },
       },
       Race: {
         async findById() {
@@ -216,6 +226,96 @@ test("QUICK_RINSE halves the remaining duration of every eligible timed debuff",
   assert.equal(
     new Date(response.d1.expiresAt).getTime(),
     NOW.getTime() + 30 * MIN
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Cooldown (owner decision 2026-08-17): ONE rinse per user per race per hour.
+// Derived from the POWERUP_USED feed event, which every successful rinse writes
+// — including rinses from app versions that predate the rule.
+// ---------------------------------------------------------------------------
+
+test("QUICK_RINSE is rejected 409 QUICK_RINSE_COOLDOWN within an hour of the last rinse", async () => {
+  const ctx = makeDeps({
+    lastRinseAt: new Date(NOW.getTime() - 48 * MIN),
+    existingEffects: { "rp-1": [debuff("d1", "LEG_CRAMP", 60)] },
+  });
+  const use = buildUsePowerup(ctx.deps);
+
+  await assert.rejects(
+    () => use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1" }),
+    (err) =>
+      err instanceof PowerupUseError &&
+      err.statusCode === 409 &&
+      err.code === "QUICK_RINSE_COOLDOWN" &&
+      // Transient guard: a REDEEMED item stays in the race rather than being
+      // refunded to the general inventory.
+      err.retainHeld === true &&
+      /12 minutes/.test(err.message)
+  );
+  assert.equal(ctx.effectUpdates.length, 0, "nothing halved");
+  assert.equal(ctx.updatedPowerup, null, "item retained");
+  assert.equal(ctx.feedEvents.length, 0, "no feed event for a rejected use");
+});
+
+test("QUICK_RINSE cooldown is reported ahead of NO_TIMED_DEBUFFS", async () => {
+  // On cooldown AND holding nothing rinsable: "wait" is the actionable message.
+  const ctx = makeDeps({
+    lastRinseAt: new Date(NOW.getTime() - 1 * MIN),
+    existingEffects: { "rp-1": [] },
+  });
+  const use = buildUsePowerup(ctx.deps);
+  await assert.rejects(
+    () => use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1" }),
+    (err) => err.code === "QUICK_RINSE_COOLDOWN"
+  );
+});
+
+test("QUICK_RINSE is usable again once the hour has elapsed", async () => {
+  const ctx = makeDeps({
+    lastRinseAt: new Date(NOW.getTime() - 60 * MIN),
+    existingEffects: { "rp-1": [debuff("d1", "LEG_CRAMP", 60)] },
+  });
+  const use = buildUsePowerup(ctx.deps);
+
+  const result = await use({
+    userId: "user-1",
+    raceId: "race-1",
+    powerupId: "pw-1",
+  });
+  assert.equal(result.shortened, 1);
+  assert.equal(
+    result.nextAvailableAt,
+    new Date(NOW.getTime() + 60 * MIN).toISOString(),
+    "the response advertises when the next rinse unlocks"
+  );
+  assert.equal(ctx.updatedPowerup.status, "USED");
+});
+
+test("QUICK_RINSE cooldown is per race — a rinse in another race does not gate this one", async () => {
+  const ctx = makeDeps({
+    lastRinseAt: new Date(NOW.getTime() - 5 * MIN),
+    lastRinseRaceId: "race-other",
+    existingEffects: { "rp-1": [debuff("d1", "LEG_CRAMP", 60)] },
+  });
+  const seen = [];
+  const inner = ctx.deps.RacePowerupEvent.findLastPowerupUseAt;
+  ctx.deps.RacePowerupEvent.findLastPowerupUseAt = async (args) => {
+    seen.push(args);
+    return inner(args);
+  };
+  const use = buildUsePowerup(ctx.deps);
+
+  const result = await use({
+    userId: "user-1",
+    raceId: "race-1",
+    powerupId: "pw-1",
+  });
+  assert.equal(result.shortened, 1);
+  assert.deepEqual(
+    seen,
+    [{ raceId: "race-1", actorUserId: "user-1", powerupType: "QUICK_RINSE" }],
+    "the cooldown lookup is scoped to this race, this user, this type"
   );
 });
 

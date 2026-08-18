@@ -237,6 +237,10 @@ async function getRaceDetails(
     maxDurationDays: race.maxDurationDays,
     targetSteps: race.targetSteps, // 1.1.4 compat
     buyInAmount: money.buyInAmount,
+    // Immutable creation-time payout protocol. Additive: frozen clients ignore
+    // it; v1-capable edit/detail views use it to avoid recreating server payout
+    // math locally. Missing old rows are represented as the legacy v0 value.
+    payoutRoundingVersion: race.payoutRoundingVersion ?? 0,
     payoutPreset: race.payoutPreset,
     potCoins: money.potCoins,
     heldPotCoins: money.heldPotCoins,

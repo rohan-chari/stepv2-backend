@@ -4,6 +4,29 @@ const {
 } = require("../models/raceResolutionJobV2");
 const { appSettings } = require("../../../shared/config/appSettings");
 const { isStrictFlagEnabled } = require("../../../shared/config/isStrictFlagEnabled");
+const {
+  startCapacityPhase,
+} = require("../../../shared/observability/capacityPhaseMetrics");
+
+function enqueueCounts(rows, at) {
+  const values = (Array.isArray(rows) ? rows : [rows]).filter(Boolean);
+  let maxLagMs = 0;
+  for (const row of values) {
+    if (row.requestedAt) {
+      maxLagMs = Math.max(
+        maxLagMs,
+        Math.max(0, at.getTime() - new Date(row.requestedAt).getTime()),
+      );
+    }
+  }
+  return {
+    jobs: values.length,
+    generationCreates: values.filter((row) => Number(row.generation) === 1).length,
+    generationBumps: values.filter((row) => Number(row.generation) > 1).length,
+    generationReuses: 0,
+    maxLagMs,
+  };
+}
 
 async function rolloutOptions({
   reason = null,
@@ -66,13 +89,19 @@ async function enqueueRaceResolution(
   tx = null
 ) {
   if (!raceId) return null;
-  const rollout = await rolloutOptions({
-    reason,
-    dirtyUserIds,
-    dirtyParticipantIds,
-    powerupTypes,
-    priority,
-  });
+  const capacity = startCapacityPhase("resolution_enqueue");
+  let capacityOutcome = "error";
+  let result = null;
+  try {
+  const rollout = await capacity.measurePhase("rolloutFlags", () =>
+    rolloutOptions({
+      reason,
+      dirtyUserIds,
+      dirtyParticipantIds,
+      powerupTypes,
+      priority,
+    })
+  );
   // Artifact reuse is independently rollable and must work with only its own
   // flag enabled. The opaque ref is safe only for a pure display generation,
   // so stamp that closed reason even while broader reason-aware scoping is off.
@@ -86,23 +115,37 @@ async function enqueueRaceResolution(
     };
   }
   if (tx) {
-    return RaceResolutionJobV2.enqueue(
-      { raceId, userId, resolutionTimeZone: timeZone, now, displayArtifact, ...rollout },
-      tx
+    result = await capacity.measurePhase("persist", () =>
+      RaceResolutionJobV2.enqueue(
+        { raceId, userId, resolutionTimeZone: timeZone, now, displayArtifact, ...rollout },
+        tx
+      )
     );
+    capacityOutcome = "success";
+    return result;
   }
   try {
-    return await RaceResolutionJobV2.enqueue({
-      raceId,
-      userId,
-      resolutionTimeZone: timeZone,
-      now,
-      displayArtifact,
-      ...rollout,
-    });
+    result = await capacity.measurePhase("persist", () =>
+      RaceResolutionJobV2.enqueue({
+        raceId,
+        userId,
+        resolutionTimeZone: timeZone,
+        now,
+        displayArtifact,
+        ...rollout,
+      })
+    );
+    capacityOutcome = "success";
+    return result;
   } catch (error) {
     console.error(`[RACE_RESOLUTION_V2] enqueue failed (race ${raceId}):`, error);
+    capacityOutcome = "best-effort-error";
     return null;
+  }
+  } finally {
+    capacity.setCounts(enqueueCounts(result, now));
+    capacity.setDimensions({ transactional: tx != null, batch: false });
+    capacity.finish(capacityOutcome);
   }
 }
 
@@ -119,6 +162,10 @@ async function enqueueRaceResolutionForUser(
   tx = null
 ) {
   if (!userId) return [];
+  const capacity = startCapacityPhase("resolution_enqueue");
+  let capacityOutcome = "error";
+  let result = [];
+  try {
   const load = async () => {
     if (Array.isArray(reconciledRaces)) {
       return reconciledRaces.map((row) => ({
@@ -155,23 +202,45 @@ async function enqueueRaceResolutionForUser(
   };
 
   if (tx) {
-    const options = await buildOptions(await load());
-    return RaceResolutionJobV2.enqueueMany(
-      { ...options, userId, resolutionTimeZone: timeZone, now },
-      tx
+    const races = await capacity.measurePhase("activeRaceLoad", load);
+    const options = await capacity.measurePhase(
+      "rolloutFlags",
+      () => buildOptions(races),
     );
+    result = await capacity.measurePhase("persist", () =>
+      RaceResolutionJobV2.enqueueMany(
+        { ...options, userId, resolutionTimeZone: timeZone, now },
+        tx
+      )
+    );
+    capacityOutcome = "success";
+    return result;
   }
   try {
-    const options = await buildOptions(await load());
-    return await RaceResolutionJobV2.enqueueMany({
-      ...options,
-      userId,
-      resolutionTimeZone: timeZone,
-      now,
-    });
+    const races = await capacity.measurePhase("activeRaceLoad", load);
+    const options = await capacity.measurePhase(
+      "rolloutFlags",
+      () => buildOptions(races),
+    );
+    result = await capacity.measurePhase("persist", () =>
+      RaceResolutionJobV2.enqueueMany({
+        ...options,
+        userId,
+        resolutionTimeZone: timeZone,
+        now,
+      })
+    );
+    capacityOutcome = "success";
+    return result;
   } catch (error) {
     console.error(`[RACE_RESOLUTION_V2] enqueue failed (user ${userId}):`, error);
+    capacityOutcome = "best-effort-error";
     return [];
+  }
+  } finally {
+    capacity.setCounts(enqueueCounts(result, now));
+    capacity.setDimensions({ transactional: tx != null, batch: true });
+    capacity.finish(capacityOutcome);
   }
 }
 

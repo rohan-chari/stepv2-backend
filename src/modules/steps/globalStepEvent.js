@@ -41,11 +41,11 @@ const GLOBAL_EVENT_DURATION_MS = 30 * 60 * 1000;
 // 2x steps during the window.
 const GLOBAL_EVENT_MULTIPLIER = 2;
 
-// Catch window: the scheduler runs every 5 minutes, so a tick may land a few
-// minutes after the anchor. Start the event if `now` is within this many ms
-// AFTER the anchor (and not before it). Kept >= the tick interval so an anchor
-// is never missed between ticks.
-const GLOBAL_EVENT_CATCH_WINDOW_MS = 10 * 60 * 1000;
+// Catch window: the scheduler runs each minute, so normal timer drift is at
+// most about one minute. Permit a bounded two-minute restart catch-up, then
+// skip the day's stale event rather than presenting a misleading late 30-minute
+// event and delayed push.
+const GLOBAL_EVENT_CATCH_WINDOW_MS = 2 * 60 * 1000;
 
 // ---------------------------------------------------------------------------
 // Step math

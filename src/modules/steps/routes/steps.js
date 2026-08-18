@@ -273,15 +273,20 @@ function createStepsRouter(dependencies = {}) {
         req.query.view === "profile-v1" &&
         (await isStrictFlagEnabled(settings, "apiProfileStatsV1Enabled"));
       if (compact) {
-        return res.json(
-          await getProfileStats({
-            userId: req.user.id,
-            today: todayStr,
-            weekStart: weekOf,
-            monthStart,
-            yearStart,
-          })
-        );
+        const profile = await getProfileStats({
+          userId: req.user.id,
+          today: todayStr,
+          weekStart: weekOf,
+          monthStart,
+          yearStart,
+        });
+        // The compact stats contract already ships in frozen binaries. Keep its
+        // exact historical payload unless the carrying profile build declares
+        // it can render the positive-only podium card.
+        if (req.clientFeatures?.has("profile_podiums") !== true) {
+          delete profile.racePodiums;
+        }
+        return res.json(profile);
       }
 
       const allSteps = await readStepsHistory(req.user.id);

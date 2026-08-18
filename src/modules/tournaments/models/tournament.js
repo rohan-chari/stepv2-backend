@@ -90,6 +90,8 @@ const Tournament = {
         potCoins: true,
         fundedPrize: true,
         prizePoolCoins: true,
+        payoutRoundingVersion: true,
+        payoutRoundingMetadata: true,
         powerupsEnabled: true,
         powerupStepInterval: true,
         isPublic: true,

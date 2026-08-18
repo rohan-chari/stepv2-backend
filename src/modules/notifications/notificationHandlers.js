@@ -9,8 +9,24 @@ const { prisma } = require("../../db");
 const {
   readPerformanceFlags,
 } = require("../../shared/config/performanceFlags");
+const { appSettings } = require("../../shared/config/appSettings");
+const { createInboxAlert } = require("../inbox/services/inbox");
+const { createHash } = require("node:crypto");
 
 const CHAT_PUSH_COOLDOWN_MS = 60_000;
+const INBOX_VISIBLE_TYPES = new Set([
+  "FRIEND_REQUEST_SENT", "FRIEND_REQUEST_ACCEPTED",
+  "RACE_INVITE_SENT", "RACE_INVITE_ACCEPTED", "RACE_BUYIN_CHANGED",
+  "TEAM_RACE_SCHEDULED_UNEVEN", "RACE_STARTED", "RACE_ENDING_SOON",
+  "STEP_MILESTONE_REMINDER", "RACE_COMPLETED", "TEAM_LEAD_CHANGE",
+  "TEAM_FINAL_STRETCH", "TEAM_SLACKER_NUDGE", "REFERRAL_REWARDED",
+  "RACE_CANCELLED", "GLOBAL_EVENT_STARTED", "POWERUP_USED", "race_message",
+  "PLACEMENT_CHANGED", "HIGH_MULTIPLIER_ALERT", "DAILY_MOVER",
+  "TOURNAMENT_INVITE_SENT", "TOURNAMENT_STARTED", "TOURNAMENT_ROUND_STARTED",
+  "TOURNAMENT_MATCHUP_WON", "TOURNAMENT_ELIMINATED", "TOURNAMENT_CHAMPION",
+  "TOURNAMENT_COMPLETED", "TOURNAMENT_CANCELLED",
+  "DAILY_REWARD_REMINDER_17", "DAILY_REWARD_REMINDER_21",
+]);
 
 function registerNotificationHandlers(dependencies = {}) {
   const events = dependencies.eventBus || eventBus;
@@ -22,6 +38,8 @@ function registerNotificationHandlers(dependencies = {}) {
   const raceModel = dependencies.Race || prisma.race;
   const notificationModel = dependencies.Notification || Notification;
   const logger = dependencies.logger || console;
+  const settings = dependencies.appSettings || appSettings;
+  const createAlert = dependencies.createInboxAlert || createInboxAlert;
   const getPerformanceFlags = dependencies.getPerformanceFlags ||
     (() => readPerformanceFlags());
 
@@ -44,6 +62,47 @@ function registerNotificationHandlers(dependencies = {}) {
         type,
         error: error instanceof Error ? error.message : String(error),
       });
+    }
+  }
+
+  async function queueInboxDelivery({ recipientUserId, eventName, title, body, payload }) {
+    if ((await settings.getFlag("apiInboxV1Enabled")) !== true) return false;
+    const raceId = payload?.raceId || payload?.params?.raceId || null;
+    const tournamentId = payload?.tournamentId || payload?.params?.tournamentId || null;
+    // Preserve the wire type used by shipped push clients. `eventName` is the
+    // server event (for example RACE_MESSAGE_SENT), while `payload.type` is
+    // sometimes its older public spelling (`race_message`).
+    const type = String(payload?.type || eventName || "ALERT");
+    if (!INBOX_VISIBLE_TYPES.has(type)) {
+      logger.warn("Inbox alert skipped for unknown visible type", { eventName: type, userId: recipientUserId });
+      return false;
+    }
+    const destination = raceId
+      ? { route: "raceDetail", raceId: String(raceId) }
+      : tournamentId
+        ? { route: "tournamentDetail", tournamentId: String(tournamentId) }
+        : /DAILY|REWARD|BOX/.test(type)
+          ? { route: "dailyReward" }
+          : /FRIEND|SOCIAL/.test(type)
+            ? { route: "friends" }
+            : { route: "home" };
+    // Most domain events carry an immutable ID. Older writers that predate that
+    // convention still funnel through the durable path using a stable digest of
+    // the visible event (never a random retry key), so they cannot bypass Inbox
+    // merely because the user has no device token.
+    const domainId = payload?.messageId || payload?.eventId || payload?.id ||
+      payload?.deliveryKey || raceId || tournamentId ||
+      createHash("sha256").update(`${type}\n${title || ""}\n${body || ""}`).digest("hex");
+    try {
+      await createAlert({
+        userId: recipientUserId, type, title: title || "BARA", body,
+        destination, sourceKey: `legacy:${type}:${recipientUserId}:${domainId}`,
+      });
+      return true;
+    } catch (error) {
+      logger.error("Inbox alert creation failed", { eventName: type, userId: recipientUserId, error: error?.message || String(error) });
+      // Preserve the long-shipped immediate push on an Inbox write failure.
+      return false;
     }
   }
 
@@ -122,10 +181,14 @@ function registerNotificationHandlers(dependencies = {}) {
     skipAudit = false,
   }) {
     const actorName = await findActorName(actorUserId);
+    const body = buildBody(actorName);
+    const queued = await queueInboxDelivery({ recipientUserId, eventName, title, body, payload });
+    // Once Inbox v1 accepts the command, its outbox is the ONLY delivery path.
+    // Sending here as well causes exactly the duplicate-push bug this seam is
+    // intended to eliminate. With the rollout flag off, retain legacy delivery.
+    if (queued) return;
     const tokens = await deviceTokenModel.findByUserId(recipientUserId);
     if (!tokens || tokens.length === 0) return;
-
-    const body = buildBody(actorName);
 
     for (const tokenRecord of tokens) {
       try {
@@ -961,9 +1024,6 @@ function registerNotificationHandlers(dependencies = {}) {
           lastPush &&
           now.getTime() - new Date(lastPush).getTime() < CHAT_PUSH_COOLDOWN_MS;
 
-        const tokens = await deviceTokenModel.findByUserId(recipient.userId);
-        if (!tokens || tokens.length === 0) continue;
-
         const payload = {
           type: "race_message",
           route: "race_detail",
@@ -971,6 +1031,39 @@ function registerNotificationHandlers(dependencies = {}) {
           raceId,
           messageId,
         };
+
+        // A chat alert that is not on its cooldown is user-visible. Persist it
+        // before attempting any provider delivery; otherwise users without a
+        // currently registered device lose both the alert and its deep link.
+        if (!onCooldown) {
+          const queued = await queueInboxDelivery({
+            recipientUserId: recipient.userId,
+            eventName: "RACE_MESSAGE_SENT",
+            title: raceName || "Race chat",
+            body: alertBody,
+            payload,
+          });
+          if (queued) {
+            try {
+              await raceParticipantModel.update({
+                where: { id: recipient.id }, data: { lastChatPushAt: now },
+              });
+            } catch (error) {
+              logger.error("RACE_MESSAGE_SENT lastChatPushAt update failed", {
+                raceId, recipientUserId: recipient.userId,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+            await recordNotification({
+              userId: recipient.userId, type: "race_message",
+              title: raceName || "Race chat", body: alertBody, raceId,
+            });
+            continue;
+          }
+        }
+
+        const tokens = await deviceTokenModel.findByUserId(recipient.userId);
+        if (!tokens || tokens.length === 0) continue;
 
         for (const tokenRecord of tokens) {
           try {
@@ -1172,13 +1265,6 @@ function registerNotificationHandlers(dependencies = {}) {
         return;
       }
 
-      perfTokenReads += 1;
-      const tokens = await deviceTokenModel.findByUserId(userId);
-      if (!tokens || tokens.length === 0) {
-        perfOutcome = "no-tokens";
-        return;
-      }
-
       // A visible alert fires only on a MEANINGFUL threshold crossing, not on
       // every one-spot slip (which, at a 5-min recompute cadence over a multi-day
       // race, was the source of the notification flood). The silent refresh below
@@ -1252,6 +1338,29 @@ function registerNotificationHandlers(dependencies = {}) {
         placement,
       };
 
+      // Visible placement changes use the Inbox outbox as their only visible
+      // delivery path. Silent refreshes intentionally remain immediate.
+      const queuedVisible = sendAlert && await queueInboxDelivery({
+        recipientUserId: userId,
+        eventName: "PLACEMENT_CHANGED",
+        title,
+        body,
+        payload,
+      });
+
+      // Inbox alerts deliberately exist even when no device is registered.
+      // The remaining immediate path is only a legacy fallback or a silent
+      // refresh, both of which need a device token.
+      let tokens = [];
+      if (!queuedVisible) {
+        perfTokenReads += 1;
+        tokens = await deviceTokenModel.findByUserId(userId);
+        if (!tokens || tokens.length === 0) {
+          perfOutcome = "no-tokens";
+          return;
+        }
+      }
+
       for (const tokenRecord of tokens) {
         perfPushAttempts += 1;
         try {
@@ -1311,7 +1420,7 @@ function registerNotificationHandlers(dependencies = {}) {
           raceId,
         });
       }
-      perfOutcome = sendAlert ? "alert-sent" : "silent-sent";
+      perfOutcome = sendAlert ? (queuedVisible ? "alert-queued" : "alert-sent") : "silent-sent";
     } catch (error) {
       perfOutcome = "handler-error";
       logger.error("PLACEMENT_CHANGED handler failed", {
@@ -1380,6 +1489,23 @@ function registerNotificationHandlers(dependencies = {}) {
           capCutoff
         );
         if (recentAlert) continue;
+        const queued = await queueInboxDelivery({
+          recipientUserId,
+          eventName: "HIGH_MULTIPLIER_ALERT",
+          title,
+          body,
+          payload,
+        });
+        if (queued) {
+          await recordNotification({
+            userId: recipientUserId,
+            type: "HIGH_MULTIPLIER_ALERT",
+            title,
+            body,
+            raceId,
+          });
+          continue;
+        }
         const tokens = await deviceTokenModel.findByUserId(recipientUserId);
         if (!tokens || tokens.length === 0) continue;
         for (const tokenRecord of tokens) {
@@ -1652,9 +1778,6 @@ function registerNotificationHandlers(dependencies = {}) {
       const { userId, raceId, raceName, movement, placement } = data || {};
       if (!userId || !movement || placement == null) return;
 
-      const tokens = await deviceTokenModel.findByUserId(userId);
-      if (!tokens || tokens.length === 0) return;
-
       const label = raceName || "your race";
       const spots = Math.abs(movement);
       const climbed = movement > 0;
@@ -1669,6 +1792,21 @@ function registerNotificationHandlers(dependencies = {}) {
         params: { raceId },
         placement,
       };
+
+      const queued = await queueInboxDelivery({
+        recipientUserId: userId,
+        eventName: "DAILY_MOVER",
+        title,
+        body,
+        payload,
+      });
+      if (queued) {
+        await recordNotification({ userId, type: "DAILY_MOVER", title, body, raceId });
+        return;
+      }
+
+      const tokens = await deviceTokenModel.findByUserId(userId);
+      if (!tokens || tokens.length === 0) return;
 
       for (const tokenRecord of tokens) {
         try {

@@ -61,7 +61,6 @@ function buildGetRacePayoutDoubleOffer(dependencies = {}) {
       0,
       maxBonusCoins - (velocity._sum.bonusCoins || 0),
     );
-    if (rolling24hRemainingBeforeClaim <= 0) return null;
 
     const eligibleRows = completed.filter(
       (race) => race.myStatus === "ACCEPTED" && race.myResultsSeen === false,
@@ -86,11 +85,9 @@ function buildGetRacePayoutDoubleOffer(dependencies = {}) {
     );
     const baseCoins = items.reduce((sum, item) => sum + item.eligibleCoins, 0);
     if (baseCoins <= 0) return null;
-    const bonusCoins = Math.min(
-      baseCoins,
-      maxBonusCoins,
-      rolling24hRemainingBeforeClaim,
-    );
+    // A payout double is exact: no displayed/claimable offer may be a capped
+    // partial copy of the authoritative rounded base ledger amount.
+    const bonusCoins = baseCoins;
     if (bonusCoins <= 0) return null;
     const completedOrder = new Map(completed.map((race, index) => [race.id, index]));
     items.sort(

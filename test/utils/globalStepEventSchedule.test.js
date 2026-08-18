@@ -7,7 +7,7 @@ const test = require("node:test");
 // The daily event fires at a randomized ET wall-clock time drawn from ONE
 // window used every day of the week: [08:00–22:00) ET.
 // The pick is deterministic per ET day (hash-seeded, like the old jitter) so
-// it is stable across 5-minute ticks and process restarts without persistence,
+// it is stable across one-minute ticks and process restarts without persistence,
 // and `shouldStartGlobalEvent` stays idempotent via todaysEvents.
 //
 // Written from the spec, not by mirroring implementation.
@@ -150,7 +150,7 @@ test("deterministic per ET day: every tick of the day agrees on the start time",
   }
 });
 
-test("fires at the chosen time, self-heals within the catch window, and skips after it", () => {
+test("fires at the chosen time, catches at most two minutes late, and skips stale anchors", () => {
   const day = etNoonOf(2026, 6, 8);
   const start = chooseEventStartForEtDay(day);
 
@@ -164,9 +164,11 @@ test("fires at the chosen time, self-heals within the catch window, and skips af
   );
   assert.equal(atStart.multiplier, GLOBAL_EVENT_MULTIPLIER);
 
-  // 8 minutes late (restart / missed boundary) — still inside the catch window.
+  assert.equal(GLOBAL_EVENT_CATCH_WINDOW_MS, 2 * 60 * 1000);
+
+  // Exactly two minutes late is the final permitted restart/drift catch-up.
   const late = shouldStartGlobalEvent({
-    now: new Date(start.getTime() + 8 * 60 * 1000),
+    now: new Date(start.getTime() + 2 * 60 * 1000),
     todaysEvents: [],
   });
   assert.ok(late, "self-heals within the catch window");
@@ -183,7 +185,7 @@ test("fires at the chosen time, self-heals within the catch window, and skips af
   // Way past the catch window: the day's event is SKIPPED, not fired late.
   assert.equal(
     shouldStartGlobalEvent({
-      now: new Date(start.getTime() + GLOBAL_EVENT_CATCH_WINDOW_MS + 60 * 1000),
+    now: new Date(start.getTime() + GLOBAL_EVENT_CATCH_WINDOW_MS + 1),
       todaysEvents: [],
     }),
     null,

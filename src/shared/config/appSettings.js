@@ -16,6 +16,10 @@ const CATALOG_TTL_SECONDS = 60;
 // add a query per request; an admin PATCH busts the cache immediately in the
 // process that served it, and other processes converge within CACHE_TTL_MS.
 const KNOWN_FLAGS = {
+  // Capacity Milestone 5.0: sampled aggregate-only phase/query telemetry.
+  // Default OFF; it changes no response or business behavior. Reads use the
+  // existing 30-second settings cache and instrumentation issues no SQL itself.
+  capacityPhaseMetricsV1Enabled: false,
   // Accessory visual-region compatibility is additive at the API/schema level,
   // but enforcement stays dark until the app build that explains 409 conflicts
   // has rolled out. Frozen clients still receive the longstanding `{error}`.
@@ -159,6 +163,10 @@ const KNOWN_FLAGS = {
   // code: the suites that cover it pin this flag off explicitly rather than
   // relying on the default.
   fundedPrizePoolsEnabled: true,
+  // §4.15 payout rounding is a creation-time kill switch. Default ON by owner
+  // decision: it stamps only newly created eligible competitions, while every
+  // existing row retains its immutable version 0 settlement/display behavior.
+  payoutRoundingV1Enabled: true,
   // Ordinary-race leave/forfeit protocol. This controls STAMPING ON NEW races
   // only; a race reads its own exitActionsEnabled column for its whole life, so
   // flipping this off is a safe creation rollback and cannot strand a client
@@ -265,6 +273,17 @@ const KNOWN_FLAGS = {
   apiPublicRaceBrowserV1Enabled: false,
   apiRankedV2CompactV1Enabled: false,
   apiProfileStatsV1Enabled: false,
+  // Feature batch 2026-08-17. Capability-gated, default-off contracts; a
+  // deployed backend is inert until both the mobile build and operator flag are
+  // ready, while old clients simply ignore the additive fields/endpoints.
+  apiImpactNoticesEnabled: false,
+  apiImpactSummariesEnabled: false,
+  apiReviewPromptEnabled: false,
+  apiInboxV1Enabled: false,
+  redisCacheHomeImpactSummaryEnabled: false,
+  redisCacheHomeInboxUnreadEnabled: false,
+  homeServiceBannerEnabled: false,
+  homeServiceBannerMessage: "",
   apiShopBootstrapV1Enabled: false,
   apiStaticEtagsV1Enabled: false,
   apiTournamentDetailV1Enabled: false,
@@ -483,6 +502,39 @@ function buildAppSettings(dependencies = {}) {
     });
   }
 
+  // Settings that form one user-visible contract must never be observed half
+  // written. Home's banner is such a pair: an enabled row without a valid
+  // message would force every client to guess. Kept separate from setFlag so
+  // the legacy boolean-only admin PATCH cannot mutate either key.
+  async function setFlagsAtomically(entries) {
+    if (!Array.isArray(entries) || entries.length === 0) {
+      const err = new Error("No settings supplied");
+      err.statusCode = 400;
+      throw err;
+    }
+    for (const [key] of entries) {
+      if (!(key in KNOWN_FLAGS)) {
+        const err = new Error(`Unknown setting: ${key}`);
+        err.statusCode = 400;
+        throw err;
+      }
+    }
+    await prisma.$transaction(
+      entries.map(([key, value]) =>
+        prisma.appSetting.upsert({
+          where: { key },
+          update: { value },
+          create: { key, value },
+        })
+      )
+    );
+    cache = null;
+    await derivedCache.invalidate({
+      keys: [cacheKeys.appSettingsKey],
+      prefix: cacheKeys.PREFIX.APP_SETTINGS,
+    });
+  }
+
   // Peer-worker coherence: any worker's `setFlag` busts this one's copy.
   // Registered lazily on first use so merely requiring this module never opens
   // a socket (the wrapper's inertness contract).
@@ -508,6 +560,7 @@ function buildAppSettings(dependencies = {}) {
     getUncachedFlag,
     getAllFlags,
     setFlag,
+    setFlagsAtomically,
     bustCache,
     subscribeToInvalidation,
     KNOWN_FLAGS,

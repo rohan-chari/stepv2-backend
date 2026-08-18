@@ -92,7 +92,14 @@ async function holdBuyIn({ awardCoinsFn, userId, amount, reason, refId }) {
 
 // Refunds, payouts, and minted prizes are all positive idempotent credits —
 // deliberately unguarded (a credit cannot overdraw).
-async function creditBuyIn({ awardCoinsFn, userId, amount, reason, refId }) {
+async function creditBuyIn({
+  awardCoinsFn,
+  userId,
+  amount,
+  reason,
+  refId,
+  payoutMetadata,
+}) {
   if (!amount) return null;
 
   return awardCoinsFn({
@@ -100,6 +107,7 @@ async function creditBuyIn({ awardCoinsFn, userId, amount, reason, refId }) {
     amount,
     reason,
     refId,
+    ...(payoutMetadata ? { payoutMetadata } : {}),
   });
 }
 

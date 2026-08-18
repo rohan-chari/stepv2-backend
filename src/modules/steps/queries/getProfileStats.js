@@ -49,11 +49,34 @@ function buildGetProfileStats(dependencies = {}) {
           ON s.user_id = ${userId}
          AND s.date = streak.day
          AND s.steps > 0
+      ),
+      podiums AS (
+        SELECT
+          COUNT(*) FILTER (WHERE effective_placement = 1)::bigint AS first_count,
+          COUNT(*) FILTER (WHERE effective_placement = 2)::bigint AS second_count,
+          COUNT(*) FILTER (WHERE effective_placement = 3)::bigint AS third_count
+        FROM (
+          SELECT CASE
+            WHEN r.is_team_race = TRUE AND r.winner_team IS NULL THEN NULL
+            WHEN r.is_team_race = TRUE AND rp.team = r.winner_team THEN 1
+            WHEN r.is_team_race = TRUE THEN 2
+            ELSE rp.placement
+          END AS effective_placement
+          FROM race_participants rp
+          JOIN races r ON r.id = rp.race_id
+          WHERE rp.user_id = ${userId}
+            AND rp.forfeited_at IS NULL
+            AND r.status = 'completed'::"RaceStatus"
+        ) placements
       )
       SELECT
         totals.*,
-        (SELECT COALESCE(MAX(length), 0) FROM streak)::bigint AS prior_streak
+        (SELECT COALESCE(MAX(length), 0) FROM streak)::bigint AS prior_streak,
+        podiums.first_count,
+        podiums.second_count,
+        podiums.third_count
       FROM totals
+      CROSS JOIN podiums
     `;
     const row = rows[0] || {};
     const thisWeek = toSafeInteger(row.this_week);
@@ -74,6 +97,11 @@ function buildGetProfileStats(dependencies = {}) {
       streak:
         toSafeInteger(row.prior_streak) +
         (toSafeInteger(row.today_steps) > 0 ? 1 : 0),
+      racePodiums: {
+        first: Math.max(0, toSafeInteger(row.first_count)),
+        second: Math.max(0, toSafeInteger(row.second_count)),
+        third: Math.max(0, toSafeInteger(row.third_count)),
+      },
     };
   };
 }

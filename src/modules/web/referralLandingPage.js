@@ -184,10 +184,8 @@ function renderReferralLandingPage(preview, links) {
   const inviterName =
     preview && preview.inviterName ? preview.inviterName : "A friend";
   const title = `${inviterName} invited you to Bara`;
-  // Batch 2026-08-09 item 2: the qualifying race is now a NON-SEEDED race with
-  // at least one other real player who logs steps. Official daily/weekly
-  // challenges no longer count, so the copy must not promise otherwise.
-  const description = `Race a friend and you'll both earn coins. Tap to join ${inviterName} on Bara.`;
+  const qualificationCopy = "Finish any race with at least one other player to earn your referral reward. Daily and Weekly challenges don’t count.";
+  const description = `${qualificationCopy} Tap to join ${inviterName} on Bara.`;
 
   const avatar =
     preview && preview.inviterAvatar
@@ -199,7 +197,7 @@ function renderReferralLandingPage(preview, links) {
     <div class="invite-body">
       ${avatar}
       <h1 class="invite-name">${escapeHtml(inviterName)} invited you to Bara</h1>
-      <div class="invite-sub">Finish a race with friends. You both earn coins. Daily &amp; weekly challenges don't count.</div>
+      <div class="invite-sub">${escapeHtml(qualificationCopy)}</div>
     </div>
   `;
 

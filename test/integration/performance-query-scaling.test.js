@@ -16,6 +16,7 @@ const {
 const {
   buildStepSyncPushService,
 } = require("../../src/shared/push/stepSyncPush");
+const { appSettings } = require("../../src/shared/config/appSettings");
 
 let server;
 let activeQueries = null;
@@ -115,6 +116,11 @@ async function seedSneaky(candidateCount, { withActiveEffects = false } = {}) {
 async function runSneaky(candidateCount) {
   await cleanDatabase();
   const { viewer, race } = await seedSneaky(candidateCount);
+  // Capacity metrics reads the DB-backed flag before every request, with the
+  // established settings cache making that query cold-start-only. Warm it
+  // outside the measured request so both field sizes measure the same steady
+  // state and the scaling assertion remains exact.
+  await appSettings.getFlag("capacityPhaseMetricsV1Enabled");
   const { result: response, events } = await recordQueries(() =>
     request(
       server.baseUrl,

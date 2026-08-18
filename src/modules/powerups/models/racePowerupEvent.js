@@ -104,6 +104,23 @@ const RacePowerupEvent = {
     return new Set(rows.map((row) => row.actorUserId));
   },
 
+  // When did `actorUserId` last USE `powerupType` in `raceId`? Returns the Date
+  // or null. Backs the Quick Rinse once-per-hour-per-race cooldown (2026-08-17):
+  // that powerup is instantaneous and writes no effect row, so its POWERUP_USED
+  // feed event is the only durable record of a use.
+  //
+  // Served by race_powerup_events(race_id, created_at) — one race's event list is
+  // small, and the extra predicates filter inside it.
+  async findLastPowerupUseAt({ raceId, actorUserId, powerupType, prisma: client = defaultPrisma } = {}) {
+    if (!raceId || !actorUserId || !powerupType) return null;
+    const row = await client.racePowerupEvent.findFirst({
+      where: { raceId, actorUserId, eventType: "POWERUP_USED", powerupType },
+      orderBy: { createdAt: "desc" },
+      select: { createdAt: true },
+    });
+    return row ? row.createdAt : null;
+  },
+
   async findByRaceAsc(raceId) {
     return prisma.racePowerupEvent.findMany({
       where: { raceId },
