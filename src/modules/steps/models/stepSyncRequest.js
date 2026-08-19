@@ -23,7 +23,15 @@ function buildStepSyncRequestModel(prisma = defaultPrisma) {
     // (Transaction A) when `tx` is supplied so the steps/samples upsert and the
     // reservation commit atomically.
     async createReservation(
-      { userId, idempotencyKey, requestHash, resolutionTimeZone, leaseMs = 0, now = new Date() },
+      {
+        userId,
+        idempotencyKey,
+        requestHash,
+        resolutionTimeZone,
+        scoringChanged = null,
+        leaseMs = 0,
+        now = new Date(),
+      },
       tx = prisma
     ) {
       return tx.stepSyncRequest.create({
@@ -32,6 +40,7 @@ function buildStepSyncRequestModel(prisma = defaultPrisma) {
           idempotencyKey,
           requestHash,
           resolutionTimeZone,
+          scoringChanged,
           state: "PROCESSING",
           leaseExpiresAt: leaseMs > 0 ? new Date(now.getTime() + leaseMs) : null,
           expiresAt: new Date(now.getTime() + RETENTION_MS),

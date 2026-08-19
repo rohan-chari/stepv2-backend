@@ -731,6 +731,9 @@ function buildResolveRaceState(dependencies = {}) {
             stepsModel,
             stepSampleModel,
             raceActiveEffectModel,
+            ...(scoreScope
+              ? { scoringParticipantIds: [...scoreScope] }
+              : {}),
           })
         );
       } catch (error) {

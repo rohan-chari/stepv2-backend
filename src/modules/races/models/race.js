@@ -121,6 +121,9 @@ const mysteryBoxParticipantSelect = {
 const resolutionParticipantSelect = {
   ...mysteryBoxParticipantSelect,
   placement: true,
+  // Internal-only input for race-level overtake nudge batching. Never exposed
+  // by a public serializer; lets the worker reuse its hydrated lean roster.
+  lastNotifiedPlacement: true,
   highMultiplierNotifiedAt: true,
   user: { select: { id: true, displayName: true } },
 };
@@ -1224,6 +1227,15 @@ const Race = {
       distinct: ["userId"],
     });
     return rows.map((r) => r.userId);
+  },
+
+  async findActiveIds() {
+    const rows = await prisma.race.findMany({
+      where: { status: "ACTIVE", startedAt: { not: null } },
+      select: { id: true, timezone: true },
+      orderBy: { id: "asc" },
+    });
+    return rows;
   },
 
   async findActiveExpired(now) {

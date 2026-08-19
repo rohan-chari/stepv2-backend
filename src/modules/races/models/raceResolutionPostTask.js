@@ -96,6 +96,7 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
       snapshotCommand,
       intents,
       resolveIntents = null,
+      fastHandoff = false,
       recordPhaseTiming = null,
       now = new Date(),
       }, tx = null) {
@@ -132,7 +133,9 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
              ON CONFLICT (race_id, source_generation) DO NOTHING
              RETURNING id`,
             id, raceId, sourceGeneration, dedupeKey, now,
-            JSON.stringify(snapshotCommand), 0, 0
+            JSON.stringify(snapshotCommand),
+            fastHandoff ? jsonBytes(snapshotCommand) : 0,
+            0
           )
         );
         if (task.length === 0) {
@@ -148,6 +151,50 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
           ? await measure("resolveIntents", () => resolveIntents(client))
           : intents;
         const payload = validatePostTaskPayload({ snapshotCommand, intents: decidedIntents });
+        // The winning insert already carries the final snapshot command and its
+        // exact bytes. With no resolved intents there is nothing left to amend.
+        if (fastHandoff && payload.intents.length === 0) {
+          return { created: true, id, dedupeKey, ...payload };
+        }
+        if (fastHandoff && payload.intents.length > 0) {
+          const rows = payload.intents.map((intent) => ({
+            id: crypto.randomUUID(),
+            taskId: id,
+            ...intent,
+          }));
+          // One database round trip: finalize the owner row and insert its
+          // immutable intents in the same statement/transaction.
+          await measure(
+            "intentInsert",
+            () => client.$executeRawUnsafe(
+              `WITH finalized AS (
+                 UPDATE race_resolution_post_tasks
+                 SET payload_bytes=$2, intent_count=$3, updated_at=$4
+                 WHERE id=$1 RETURNING id
+               )
+               INSERT INTO race_resolution_delivery_intents (
+                 id, task_id, ordinal, kind, recipient_user_id, payload,
+                 payload_bytes, delivery_key_hash, cooldown_claim_id, state,
+                 created_at, updated_at
+               )
+               SELECT row.id, row."taskId", row.ordinal, row.kind,
+                      row."recipientUserId", row.payload, row."payloadBytes",
+                      row."deliveryKeyHash", row."cooldownClaimId", 'pending', $4, $4
+               FROM finalized,
+                 jsonb_to_recordset($5::jsonb) AS row(
+                   id text, "taskId" text, ordinal integer, kind text,
+                   "recipientUserId" text, payload jsonb, "payloadBytes" integer,
+                   "deliveryKeyHash" text, "cooldownClaimId" text
+                 )`,
+              id,
+              payload.payloadBytes,
+              payload.intentCount,
+              now,
+              JSON.stringify(rows)
+            )
+          );
+          return { created: true, id, dedupeKey, ...payload };
+        }
         await measure(
           "taskUpdate",
           () => client.$executeRawUnsafe(

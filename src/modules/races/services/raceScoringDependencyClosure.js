@@ -576,6 +576,11 @@ const LEGACY_HITCHHIKE_SCORING_VERSION = 1;
 const DUE_EXPIRY_VETO_TYPES = Object.freeze(
   new Set([...SNAPSHOT_AT_EXPIRY_TYPES, "DRILL_SERGEANT"])
 );
+const MULTIPLIER_BOUNDARY_TYPES = Object.freeze(new Set([
+  "LEG_CRAMP", "QUICKSAND", "RUNNERS_HIGH", "WRONG_TURN",
+  "CAMPFIRE_REST", "RAINSTORM", "UPRISING", "RALLY_FLAG",
+  "GHOST_PEPPER", "COIN_FLIP",
+]));
 
 // The CLOSED enum of fallback reasons. Never a free-text string: these values
 // are the observability dimension the rollout gates are read from.
@@ -605,6 +610,8 @@ const CLOSURE_FALLBACK_REASONS = Object.freeze({
   RETAINED_SOURCE_UNRESOLVED: "RETAINED_SOURCE_UNRESOLVED",
   // --- boundaries and bounds (rules 5, 7) ---
   GLOBAL_EVENT_ACTIVE: "GLOBAL_EVENT_ACTIVE",
+  GLOBAL_BOUNDARY_SCHEDULE_UNAVAILABLE: "GLOBAL_BOUNDARY_SCHEDULE_UNAVAILABLE",
+  BOUNDARY_METADATA_UNCLASSIFIABLE: "BOUNDARY_METADATA_UNCLASSIFIABLE",
   CLOSURE_CAP_EXCEEDED: "CLOSURE_CAP_EXCEEDED",
   DUE_EXPIRY_OUTSIDE_CLOSURE: "DUE_EXPIRY_OUTSIDE_CLOSURE",
 });
@@ -653,6 +660,21 @@ function toMsOrNull(value) {
   if (value == null) return null;
   const ms = value instanceof Date ? value.getTime() : new Date(value).getTime();
   return Number.isFinite(ms) ? ms : null;
+}
+
+function effectBoundaryMetadataIsClassifiable(effect) {
+  if (!effect || toMsOrNull(effect.startsAt) == null) return false;
+  if (effect.expiresAt != null && toMsOrNull(effect.expiresAt) == null) return false;
+  if (DUE_EXPIRY_VETO_TYPES.has(effect.type) && effect.expiresAt == null) return false;
+  if (effect.type === "CAMPFIRE_REST" && effect.metadata?.freezeMs != null) {
+    return typeof effect.metadata.freezeMs === "number" &&
+      Number.isFinite(effect.metadata.freezeMs) && effect.metadata.freezeMs >= 0;
+  }
+  if (effect.type === "GHOST_PEPPER" && effect.metadata?.boostMs != null) {
+    return typeof effect.metadata.boostMs === "number" &&
+      Number.isFinite(effect.metadata.boostMs) && effect.metadata.boostMs >= 0;
+  }
+  return true;
 }
 
 function sortedUnique(values) {
@@ -1007,6 +1029,9 @@ async function buildRaceScoringDependencyClosure({
   }
   const asOfMs = asOf.getTime();
   const raceEndsAtMs = toMsOrNull(race.endsAt);
+  if (race.endsAt != null && raceEndsAtMs == null) {
+    return fallback(CLOSURE_FALLBACK_REASONS.BOUNDARY_METADATA_UNCLASSIFIABLE);
+  }
   if (raceEndsAtMs != null && raceEndsAtMs <= asOfMs) {
     return fallback(CLOSURE_FALLBACK_REASONS.RACE_WINDOW_CLOSED);
   }
@@ -1208,22 +1233,52 @@ async function buildRaceScoringDependencyClosure({
     return fallback(CLOSURE_FALLBACK_REASONS.CLOSURE_CAP_EXCEEDED);
   }
 
-  // --- narrowed expiry veto (spec rule 3 / resolver integration item 6) -----
+  // Exact expiry compute set. Keep `participantIds` as the dependency graph
+  // component for backwards-compatible diagnostics, and expose the actual
+  // resolver/prefetch set separately. Every active snapshot-at-expiry/Drill
+  // target expands this set regardless of distance, then graph dependencies
+  // are walked again to fixed point. Already-due outside targets retain the
+  // longstanding conservative FULL fallback (safe and regression-compatible).
+  const scoringClosure = new Set(closure);
+  const scoringQueue = [];
   for (const effect of activeEffects || []) {
     if (!DUE_EXPIRY_VETO_TYPES.has(effect?.type)) continue;
+    const targetId = effect?.targetParticipantId;
+    if (!targetId || !acceptedById.has(targetId)) {
+      return fallback(CLOSURE_FALLBACK_REASONS.EFFECT_ROW_MALFORMED);
+    }
     const expiresAtMs = toMsOrNull(effect.expiresAt);
-    if (expiresAtMs == null || expiresAtMs > asOfMs) continue;
-    if (!closure.has(effect.targetParticipantId)) {
+    if (expiresAtMs != null && expiresAtMs <= asOfMs && !closure.has(targetId)) {
       return fallback(CLOSURE_FALLBACK_REASONS.DUE_EXPIRY_OUTSIDE_CLOSURE);
     }
+    if (!scoringClosure.has(targetId)) {
+      scoringClosure.add(targetId);
+      scoringQueue.push(targetId);
+    }
+  }
+  while (scoringQueue.length > 0) {
+    const current = scoringQueue.shift();
+    for (const neighbour of adjacency.get(current) || []) {
+      if (scoringClosure.has(neighbour)) continue;
+      scoringClosure.add(neighbour);
+      scoringQueue.push(neighbour);
+    }
+  }
+  if (scoringClosure.size > MAX_DEPENDENCY_CLOSURE_PARTICIPANTS) {
+    return fallback(CLOSURE_FALLBACK_REASONS.CLOSURE_CAP_EXCEEDED);
   }
 
   // --- exclusive validity deadline (spec rule 7) ----------------------------
   const closureRelevant = (activeEffects || []).filter((effect) => {
-    if (closure.has(effect.targetParticipantId)) return true;
+    if (scoringClosure.has(effect.targetParticipantId)) return true;
     const sourceParticipantId = participantIdByUserId.get(effect.sourceUserId);
-    return sourceParticipantId ? closure.has(sourceParticipantId) : false;
+    return sourceParticipantId ? scoringClosure.has(sourceParticipantId) : false;
   });
+  if (closureRelevant.some((effect) =>
+    !effectBoundaryMetadataIsClassifiable(effect)
+  )) {
+    return fallback(CLOSURE_FALLBACK_REASONS.BOUNDARY_METADATA_UNCLASSIFIABLE);
+  }
   // The cap is always a candidate, so the boundary set is never empty and the
   // deadline is never synthesized out of nothing.
   const horizonMs = Math.min(
@@ -1234,8 +1289,28 @@ async function buildRaceScoringDependencyClosure({
   const addDeadline = (ms) => {
     if (ms != null && Number.isFinite(ms) && ms > asOfMs) deadlineCandidates.push(ms);
   };
-  addDeadline(nextMultiplierBoundaryMs(closureRelevant, asOfMs, horizonMs));
+  let multiplierBoundary;
+  try {
+    multiplierBoundary = nextMultiplierBoundaryMs(
+      closureRelevant.filter((effect) => MULTIPLIER_BOUNDARY_TYPES.has(effect.type)),
+      asOfMs,
+      horizonMs
+    );
+  } catch {
+    return fallback(CLOSURE_FALLBACK_REASONS.BOUNDARY_METADATA_UNCLASSIFIABLE);
+  }
+  addDeadline(multiplierBoundary);
+  if (
+    fingerprint.nextSampleBoundary != null &&
+    toMsOrNull(fingerprint.nextSampleBoundary) == null
+  ) {
+    return fallback(CLOSURE_FALLBACK_REASONS.BOUNDARY_METADATA_UNCLASSIFIABLE);
+  }
   addDeadline(toMsOrNull(fingerprint.nextSampleBoundary));
+  for (const effect of closureRelevant) {
+    addDeadline(toMsOrNull(effect.startsAt));
+    addDeadline(toMsOrNull(effect.expiresAt));
+  }
   for (const event of globalEvents) {
     addDeadline(toMsOrNull(event.startsAt));
     addDeadline(toMsOrNull(event.endsAt));
@@ -1260,6 +1335,7 @@ async function buildRaceScoringDependencyClosure({
   return {
     plan: "DEPENDENCY_CLOSURE",
     participantIds: [...closure].sort(),
+    scoringParticipantIds: [...scoringClosure].sort(),
     sourceParticipantIds,
     graphFingerprint: fingerprint.digest,
     asOf,

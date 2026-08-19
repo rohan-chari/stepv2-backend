@@ -1,6 +1,10 @@
 const { prisma } = require("../../../db");
 const {
   bumpScoringInputVersion,
+  lockScoringInputState,
+  readCanonicalSampleInput,
+  scoringBoundaryIsSafe,
+  persistScoringInputState,
 } = require("../services/scoringInputVersion");
 
 // One raw, set-based, ON CONFLICT DO UPDATE multi-row insert (Five-Minute Step
@@ -57,17 +61,28 @@ const StepSample = {
   // (hour-aligned rows never strictly contain each other and same-start
   // overwrite is preserved), so it is safe to deploy before any client sends
   // finer buckets. Own transaction for the fetch+delete+insert.
-  async reconcileBatch(userId, samples, nowMs = Date.now()) {
+  async reconcileBatch(userId, samples, nowMs = Date.now(), options = {}) {
     return prisma.$transaction((tx) =>
-      this.reconcileBatchOn(tx, userId, samples, nowMs)
+      this.reconcileBatchOn(tx, userId, samples, nowMs, options)
     );
   },
 
   // Same reconciliation, run against a caller-provided transaction client so
   // sync-v2's Transaction A can persist steps, samples, and the idempotency
   // reservation atomically.
-  async reconcileBatchOn(client, userId, samples, nowMs = Date.now()) {
-    if (!samples || samples.length === 0) return;
+  async reconcileBatchOn(client, userId, samples, nowMs = Date.now(), {
+    noopSuppression = false,
+    manageScoringVersion = true,
+  } = {}) {
+    if (!samples || samples.length === 0) {
+      return { storageChanged: false, scoringChanged: false };
+    }
+    const state = noopSuppression && manageScoringVersion
+      ? await lockScoringInputState(client, userId)
+      : null;
+    const beforeCanonical = state
+      ? await readCanonicalSampleInput(client, userId, state.dbNow)
+      : null;
 
     const incoming = samples.map((s) => ({
       raw: s,
@@ -142,7 +157,17 @@ const StepSample = {
       return true;
     });
 
-    if (kept.length === 0) return;
+    if (kept.length === 0) {
+      if (!state) return { storageChanged: false, scoringChanged: false };
+      const unchangedCanonical = await readCanonicalSampleInput(client, userId);
+      const decisionState = { ...state, dbNow: unchangedCanonical.dbNow };
+      const scoringChanged = !scoringBoundaryIsSafe(decisionState) ||
+        state.scoringWatermark !== unchangedCanonical.scoringWatermark;
+      await persistScoringInputState(
+        client, userId, state, unchangedCanonical, scoringChanged
+      );
+      return { storageChanged: false, scoringChanged };
+    }
 
     // Rule 3: delete every stored sample overlapping ANY kept incoming window in
     // one set-based DELETE (parallel-array unnest), then batch-insert the kept
@@ -161,7 +186,21 @@ const StepSample = {
     );
 
     await insertSamplesOn(client, userId, kept.map((i) => i.raw));
-    await bumpScoringInputVersion(client, userId);
+    if (!manageScoringVersion) {
+      return { storageChanged: true, scoringChanged: true };
+    }
+    if (!state) {
+      await bumpScoringInputVersion(client, userId);
+      return { storageChanged: true, scoringChanged: true };
+    }
+    const afterCanonical = await readCanonicalSampleInput(client, userId);
+    const storageChanged = beforeCanonical.storageWatermark !==
+      afterCanonical.storageWatermark;
+    const decisionState = { ...state, dbNow: afterCanonical.dbNow };
+    const scoringChanged = !scoringBoundaryIsSafe(decisionState) ||
+      state.scoringWatermark !== afterCanonical.scoringWatermark;
+    await persistScoringInputState(client, userId, state, afterCanonical, scoringChanged);
+    return { storageChanged, scoringChanged };
   },
 
   async findByUserIdAndTimeRange(userId, startTime, endTime) {

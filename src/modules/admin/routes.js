@@ -370,9 +370,9 @@ function createAdminRouter(dependencies = {}) {
   });
 
   // Body: any subset of the known flags, e.g. { bannerAdsEnabled: false }.
-  // Boolean flags require a boolean; the numeric stepSampleBucketMinutes flag
-  // (Five-Minute Step Samples §3.2) requires one of {5,10,15,30,60}. Unknown keys
-  // 400 (via setFlag) so a typo never silently writes a dead setting.
+  // Boolean flags require a boolean; numeric flags validate their own bounded
+  // rollout domains. Unknown keys 400 (via setFlag) so a typo never silently
+  // writes a dead setting.
   router.patch("/settings", async (req, res) => {
     try {
       const body = req.body || {};
@@ -395,6 +395,10 @@ function createAdminRouter(dependencies = {}) {
               error: "stepSampleBucketMinutes must be one of 5, 10, 15, 30, 60",
             });
           }
+          await settings.setFlag(key, value);
+          continue;
+        }
+        if (key === "raceResolutionDependencyClosureV1Percent") {
           await settings.setFlag(key, value);
           continue;
         }

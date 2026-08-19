@@ -48,6 +48,11 @@ function buildRaceResolutionPostTaskRunner(dependencies = {}) {
   const env = dependencies.env || process.env;
   const workBudget = dependencies.raceResolutionWorkBudget || defaultWorkBudget;
   let lastSuccessfulClaimProbeAt = null;
+  let positiveReadinessCachedUntilMs = 0;
+
+  function invalidateReadinessCache() {
+    positiveReadinessCachedUntilMs = 0;
+  }
 
   async function processIntent(intent) {
     if (intent.state !== "pending") return;
@@ -141,29 +146,52 @@ function buildRaceResolutionPostTaskRunner(dependencies = {}) {
     },
     async tick() {
       if (postTaskWorkerDisabled(env)) return null;
-      return workBudget.run("post", async () => {
-        const task = await model.claimNext({ now: now() });
-        lastSuccessfulClaimProbeAt = now();
-        return processClaimedTask(task);
-      });
+      try {
+        return await workBudget.run("post", async () => {
+          const task = await model.claimNext({ now: now() });
+          lastSuccessfulClaimProbeAt = now();
+          return processClaimedTask(task);
+        });
+      } catch (error) {
+        invalidateReadinessCache();
+        throw error;
+      }
     },
     async processTaskId(id) {
       if (postTaskWorkerDisabled(env)) return null;
-      const task = await model.claimById({ id, now: now() });
-      lastSuccessfulClaimProbeAt = now();
-      return processClaimedTask(task);
+      try {
+        const task = await model.claimById({ id, now: now() });
+        lastSuccessfulClaimProbeAt = now();
+        return processClaimedTask(task);
+      } catch (error) {
+        invalidateReadinessCache();
+        throw error;
+      }
     },
-    async isReady() {
+    async isReady({ positiveCacheMs = 0 } = {}) {
       if (postTaskWorkerDisabled(env) || !lastSuccessfulClaimProbeAt) return false;
       const currentTime = now();
+      if (currentTime.getTime() < positiveReadinessCachedUntilMs) return true;
       if (currentTime.getTime() - lastSuccessfulClaimProbeAt.getTime() > 60_000) {
+        invalidateReadinessCache();
         return false;
       }
-      const health = await model.readinessSnapshot({ now: currentTime });
-      return (
-        Number(health?.oldestPendingLagMs || 0) < 30_000 &&
-        Number(health?.expiredAttemptCount || 0) === 0
-      );
+      let health;
+      try {
+        health = await model.readinessSnapshot({ now: currentTime });
+      } catch (error) {
+        invalidateReadinessCache();
+        throw error;
+      }
+      const ready = Number(health?.oldestPendingLagMs || 0) < 30_000 &&
+        Number(health?.expiredAttemptCount || 0) === 0;
+      if (ready && positiveCacheMs > 0) {
+        positiveReadinessCachedUntilMs = currentTime.getTime() +
+          Math.min(1000, Math.max(0, Number(positiveCacheMs) || 0));
+      } else if (!ready) {
+        invalidateReadinessCache();
+      }
+      return ready;
     },
     async cleanup() {
       if (postTaskCleanupDisabled(env)) return 0;

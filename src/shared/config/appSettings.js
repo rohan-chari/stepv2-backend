@@ -323,6 +323,11 @@ const KNOWN_FLAGS = {
   raceResolutionQueuedGenerationMergeV1Enabled: false,
   raceResolutionBulkWriteV1Enabled: false,
   raceResolutionPostTasksV1Enabled: false,
+  // Independently reversible resource optimizations. Missing rows retain the
+  // shipped paths; none of these flags changes a public API contract.
+  raceResolutionNudgeBatchV1Enabled: false,
+  raceResolutionPostTaskFastHandoffV1Enabled: false,
+  raceResolutionNoopInputSuppressionV1Enabled: false,
   // Dependency-closure planner, PHASE 2b SHADOW ONLY. When true the worker
   // computes the closure plan for a closure-candidate envelope and logs it as
   // aggregate `shadow*` fields on the existing race_resolution_v2 line. It
@@ -347,6 +352,9 @@ const KNOWN_FLAGS = {
   // the rollback: the next claim takes FULL and nothing is stranded, because a
   // closure generation is only ever committed whole inside the existing fence.
   raceResolutionDependencyClosureV1Enabled: false,
+  // Stable race-id cohort for dependency-closure WRITES. The boolean above is
+  // the master kill switch; zero keeps writes dark even when it is enabled.
+  raceResolutionDependencyClosureV1Percent: 0,
 };
 
 function buildAppSettings(dependencies = {}) {
@@ -449,6 +457,19 @@ function buildAppSettings(dependencies = {}) {
     }
   }
 
+  // Presence-aware raw read for rollout controls whose absent-row semantics
+  // intentionally differ from their declared default. `available:false` is a
+  // read failure and must never be mistaken for a legacy absent row.
+  async function getRawFlagState(key) {
+    try {
+      const all = await loadAll();
+      const present = Object.prototype.hasOwnProperty.call(all, key);
+      return { available: true, present, value: present ? all[key] : undefined };
+    } catch {
+      return { available: false, present: false, value: undefined };
+    }
+  }
+
   // Resolved value of one known flag, read STRAIGHT FROM THE ROW — the 30s
   // process cache is bypassed entirely (and left untouched, so this can never
   // poison it). For emergency levers whose whole purpose is to take effect on a
@@ -493,13 +514,16 @@ function buildAppSettings(dependencies = {}) {
       err.statusCode = 400;
       throw err;
     }
-    if (key === "racePayoutDoubleRolloutPercent") {
+    if (
+      key === "racePayoutDoubleRolloutPercent" ||
+      key === "raceResolutionDependencyClosureV1Percent"
+    ) {
       if (!Number.isInteger(value) || value < 0 || value > 100) {
-        const err = new Error("racePayoutDoubleRolloutPercent must be an integer from 0 to 100");
+        const err = new Error(`${key} must be an integer from 0 to 100`);
         err.statusCode = 400;
         throw err;
       }
-      if (value > 0) {
+      if (key === "racePayoutDoubleRolloutPercent" && value > 0) {
         const healthy = await prisma.jobRun.findUnique({
           where: { jobName: "race-payout-double-reconcile-healthy" },
         });
@@ -624,6 +648,7 @@ function buildAppSettings(dependencies = {}) {
   return {
     getFlag,
     getRawFlag,
+    getRawFlagState,
     getUncachedFlag,
     getAllFlags,
     setFlag,

@@ -1,6 +1,17 @@
 const { GlobalStepEvent } = require("../models/globalStepEvent");
+const {
+  GlobalStepEventBoundaryCursor,
+} = require("../models/globalStepEventBoundaryCursor");
 const { Race } = require("../../races/models/race");
 const { eventBus } = require("../../../shared/events/eventBus");
+const { appSettings } = require("../../../shared/config/appSettings");
+const { isStrictFlagEnabled } = require("../../../shared/config/isStrictFlagEnabled");
+const {
+  dependencyClosureRolloutPercent,
+} = require("../../races/services/raceResolutionDependencyClosureRollout");
+const {
+  enqueueRaceResolution,
+} = require("../../races/services/enqueueRaceResolution");
 const {
   shouldStartGlobalEvent,
   GLOBAL_EVENT_DURATION_MS,
@@ -16,10 +27,70 @@ function buildMaybeStartGlobalEvent(dependencies = {}) {
   const events = dependencies.eventBus || eventBus;
   const now = dependencies.now || (() => new Date());
   const logger = dependencies.logger || console;
+  const settings = dependencies.appSettings || appSettings;
+  const enqueue = dependencies.enqueueRaceResolution || enqueueRaceResolution;
+  const boundaryCursor = dependencies.GlobalStepEventBoundaryCursor ||
+    GlobalStepEventBoundaryCursor;
+
+  async function boundarySchedulingEnabled() {
+    const enabled = await isStrictFlagEnabled(
+      settings,
+      "raceResolutionDependencyClosureV1Enabled"
+    );
+    if (!enabled) return false;
+    return (await dependencyClosureRolloutPercent(settings, true)) > 0;
+  }
+
+  async function enqueueBoundaryForActiveRaces(at) {
+    const races = typeof raceModel.findActiveIds === "function"
+      ? await raceModel.findActiveIds()
+      : [];
+    let complete = true;
+    for (const race of races || []) {
+      const job = await enqueue({
+        raceId: race.id,
+        timeZone: race.timezone || "UTC",
+        now: at,
+        reason: "GLOBAL_EVENT_BOUNDARY",
+        priority: "IMMEDIATE",
+      });
+      if (!job) complete = false;
+    }
+    return complete;
+  }
+
+  async function deliverDueBoundaries(at) {
+    if (typeof boundaryCursor?.claim !== "function") return false;
+    const claim = await boundaryCursor.claim({ now: at });
+    if (!claim) return false;
+    try {
+      const boundary = await boundaryCursor.findLatestDue(claim, at);
+      if (!boundary) {
+        await boundaryCursor.release(claim, at);
+        return true;
+      }
+      const persisted = await enqueueBoundaryForActiveRaces(at);
+      if (!persisted) {
+        await boundaryCursor.release(claim, at);
+        return false;
+      }
+      return boundaryCursor.advance(claim, boundary, at);
+    } catch (error) {
+      try { await boundaryCursor.release(claim, at); } catch {}
+      throw error;
+    }
+  }
 
   // Returns the created event (or null if nothing started this tick).
   return async function maybeStartGlobalEvent() {
     const currentTime = now();
+
+    // A cluster-owned DB cursor coalesces all due event edges through the latest
+    // crossing. Its lease is reclaimable after process loss, and the cursor is
+    // advanced only after every active race has a durable FULL enqueue.
+    if (await boundarySchedulingEnabled()) {
+      await deliverDueBoundaries(currentTime);
+    }
 
     // Idempotency input: events started in the last 24h (rolling window — see
     // findStartedSince for why this isn't a UTC calendar-day bucket).
@@ -49,6 +120,13 @@ function buildMaybeStartGlobalEvent(dependencies = {}) {
     // participant work here would be both duplicate delivery and needless load.
     if (!created.created) return null;
     const event = created.event;
+
+    // Make the newly-visible start boundary produce a newer FULL generation
+    // before an older closure post-task can publish. The queue row is durable;
+    // post-task supersession then drops the older snapshot.
+    if (await boundarySchedulingEnabled()) {
+      await deliverDueBoundaries(currentTime);
+    }
 
     logger.log(
       `[CRON] Global step event started: ${decision.multiplier}x ` +

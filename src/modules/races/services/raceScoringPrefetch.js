@@ -20,6 +20,7 @@ async function prefetchRaceScoringModels({
   stepsModel,
   stepSampleModel,
   raceActiveEffectModel,
+  scoringParticipantIds = null,
 }) {
   const started = (races || []).filter((race) => race?.startedAt);
   if (started.length === 0) return null;
@@ -40,16 +41,25 @@ async function prefetchRaceScoringModels({
   const sampleRangeEnd = new Date(currentTime.getTime() + 7 * DAY_MS);
   const dailyRangeStart = new Date(earliestStartMs - 3 * DAY_MS);
   const dailyRangeEnd = new Date(currentTime.getTime() + 3 * DAY_MS);
+  const scoringIds = Array.isArray(scoringParticipantIds)
+    ? new Set(scoringParticipantIds)
+    : null;
+  const scoringParticipants = started.flatMap((race) =>
+    (race.participants || []).filter((participant) =>
+      !scoringIds || scoringIds.has(participant.id)
+    )
+  );
+  if (scoringIds && scoringParticipants.length !== scoringIds.size) return null;
   const userIds = [
     ...new Set(
-      started.flatMap((race) =>
-        (race.participants || []).map((participant) => participant.userId)
-      )
+      scoringParticipants.map((participant) => participant.userId)
     ),
   ];
   const powerupRaces = started.filter((race) => race.powerupsEnabled);
   const participantIds = powerupRaces.flatMap((race) =>
-    (race.participants || []).map((participant) => participant.id)
+    (race.participants || [])
+      .filter((participant) => !scoringIds || scoringIds.has(participant.id))
+      .map((participant) => participant.id)
   );
   const raceIds = powerupRaces.map((race) => race.id);
 

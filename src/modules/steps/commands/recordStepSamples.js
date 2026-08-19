@@ -147,13 +147,25 @@ function buildRecordStepSamples(dependencies = {}) {
 
     const normalizedSamples = normalizeSamples(samples);
     const cleaned = removeOverlaps(normalizedSamples);
+    let persistence = null;
+    let noopSuppression = false;
+    try {
+      noopSuppression =
+        (await settings.getFlag("raceResolutionNoopInputSuppressionV1Enabled")) === true;
+    } catch {}
     // Granularity-aware overlap resolution (§3.3). Capability-detected so injected
     // test fakes that predate reconcileBatch still exercise their upsertBatch.
     if (typeof stepSampleModel.reconcileBatch === "function") {
-      await stepSampleModel.reconcileBatch(userId, cleaned);
+      persistence = await stepSampleModel.reconcileBatch(
+        userId,
+        cleaned,
+        Date.now(),
+        { noopSuppression }
+      );
     } else {
       await stepSampleModel.upsertBatch(userId, cleaned);
     }
+    const scoringChanged = !noopSuppression || persistence?.scoringChanged !== false;
     let reasonAware = false;
     try {
       reasonAware =
@@ -161,7 +173,7 @@ function buildRecordStepSamples(dependencies = {}) {
     } catch {
       reasonAware = false;
     }
-    if (!reasonAware) {
+    if (!reasonAware && scoringChanged) {
       await enqueueRaceResolutionForUser({
         userId,
         timeZone,
@@ -189,7 +201,7 @@ function buildRecordStepSamples(dependencies = {}) {
       console.error("Uploader race reconciliation failed:", error);
     }
 
-    if (reasonAware) {
+    if (reasonAware && scoringChanged) {
       const narrowReady =
         reconciliation && Array.isArray(reconciliation.reconciledRaces);
       await enqueueRaceResolutionForUser({

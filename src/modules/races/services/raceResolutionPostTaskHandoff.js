@@ -44,6 +44,7 @@ function buildRaceResolutionPostTaskHandoff(dependencies = {}) {
     snapshotCommand,
     intents = [],
     resolveIntents = null,
+    fastHandoff = false,
     recordPhaseTiming = null,
   }) {
     const measure = async (name, operation) => {
@@ -81,6 +82,7 @@ function buildRaceResolutionPostTaskHandoff(dependencies = {}) {
           snapshotCommand,
           intents,
           resolveIntents,
+          fastHandoff,
           recordPhaseTiming,
         })
       );
@@ -119,7 +121,9 @@ function buildRaceResolutionPostTaskHandoff(dependencies = {}) {
     // A duplicate generation already has one durable owner. Never execute a
     // second inline copy of its publication or intents.
     if (!task?.created) return { mode: "deduped", taskId: task?.id || null };
-    if (!(await measure("runnerReadiness", () => runner.isReady()))) {
+    if (!(await measure("runnerReadiness", () => runner.isReady({
+      positiveCacheMs: fastHandoff ? 1000 : 0,
+    })))) {
       await measure("inlineClaim", () => runner.processTaskId(task.id));
       return { mode: "inline_claim", taskId: task.id };
     }

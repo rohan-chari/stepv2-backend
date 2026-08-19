@@ -1,6 +1,10 @@
 const { prisma } = require("../../../db");
 const {
   bumpScoringInputVersion,
+  lockScoringInputState,
+  readCanonicalSampleInput,
+  scoringBoundaryIsSafe,
+  persistScoringInputState,
 } = require("../services/scoringInputVersion");
 
 const Steps = {
@@ -17,21 +21,42 @@ const Steps = {
     });
   },
 
-  async create({ userId, steps, date, stepGoal }) {
+  async create({ userId, steps, date, stepGoal }, { noopSuppression = false } = {}) {
     return prisma.$transaction(async (tx) => {
+      const state = noopSuppression ? await lockScoringInputState(tx, userId) : null;
       const row = await tx.step.create({
         data: { userId, steps, date: new Date(date), stepGoal },
       });
-      await bumpScoringInputVersion(tx, userId);
-      return row;
+      if (!noopSuppression) {
+        await bumpScoringInputVersion(tx, userId);
+        return row;
+      }
+      const next = await readCanonicalSampleInput(tx, userId, state.dbNow);
+      await persistScoringInputState(tx, userId, state, next, true);
+      return { record: row, storageChanged: true, scoringChanged: true };
     });
   },
 
-  async update(id, fields) {
+  async update(id, fields, { noopSuppression = false } = {}) {
     return prisma.$transaction(async (tx) => {
+      const before = noopSuppression
+        ? await tx.step.findUnique({ where: { id } })
+        : null;
+      const state = noopSuppression
+        ? await lockScoringInputState(tx, before?.userId)
+        : null;
       const row = await tx.step.update({ where: { id }, data: fields });
-      await bumpScoringInputVersion(tx, row.userId);
-      return row;
+      if (!noopSuppression) {
+        await bumpScoringInputVersion(tx, row.userId);
+        return row;
+      }
+      const next = await readCanonicalSampleInput(tx, row.userId);
+      const storageChanged = Number(before?.steps) !== Number(row.steps);
+      const decisionState = { ...state, dbNow: next.dbNow };
+      const scoringChanged = storageChanged || !scoringBoundaryIsSafe(decisionState) ||
+        state.scoringWatermark !== next.scoringWatermark;
+      await persistScoringInputState(tx, row.userId, state, next, scoringChanged);
+      return { record: row, storageChanged, scoringChanged };
     });
   },
 

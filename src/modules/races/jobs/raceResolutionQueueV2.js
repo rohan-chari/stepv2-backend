@@ -1,4 +1,8 @@
+const crypto = require("node:crypto");
 const { prisma: defaultPrisma, getDbPoolPressure } = require("../../../db");
+const {
+  dependencyClosureRolloutPercent,
+} = require("../services/raceResolutionDependencyClosureRollout");
 const { Race } = require("../models/race");
 const { RaceParticipant } = require("../models/raceParticipant");
 const { RaceActiveEffect } = require("../../powerups/models/raceActiveEffect");
@@ -64,6 +68,13 @@ const QUEUE_LAG_ALARM_MS = 30 * 1000;
 // Best-effort reservation cleanup cadence (never affects correctness). Carried
 // over from the v1 scheduler, which src/index.js no longer starts.
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
+
+function dependencyClosureRaceBucket(raceId) {
+  const digest = crypto.createHash("sha256")
+    .update(`race_resolution_dependency_closure:v1:${raceId}`, "utf8")
+    .digest();
+  return digest.readUInt32BE(0) % 100;
+}
 
 // Keep one stable phase schema on every successful job line so production log
 // aggregation can compare jobs without treating an unvisited branch as missing
@@ -261,65 +272,6 @@ async function rebindArtifactPresentation(tx, artifactPayload) {
       } steps.`;
   }
   return true;
-}
-
-// How far PAST the fence instant a due expiry still forces the closure away.
-//
-// `expireEffects` does not run inside the fence — it runs from the post-commit
-// hook, against a LATER `now()` than the one the fence checked. So "not due at
-// the fence" is not the same as "not due when expiry runs", and the gap is
-// whatever the write transaction plus the commit plus the hook's own startup
-// costs. 30s is chosen to strictly dominate that gap: the fenced write
-// transaction's own timeout is 15s (see the `$transaction` options below), so
-// 30s covers a worst-case full-duration transaction plus commit plus hook entry
-// with room to spare.
-//
-// The cost of the slack being too LARGE is bounded and benign — some closures
-// fall back to FULL slightly earlier than strictly necessary. The cost of it
-// being too SMALL is a silently skipped `stepsAtExpiry` stamp on a row that is
-// then written EXPIRED permanently, which is unrecoverable. Asymmetric risk, so
-// the constant is deliberately generous.
-const POST_COMMIT_SLACK_MS = 30_000;
-
-// The types whose expiry consumes a value the generation computed for its
-// TARGET, looked up by participant id in `baseAdjustedByParticipantId` — and
-// both of which SILENTLY skip on a missing key rather than failing loudly
-// (expireEffects.js:56-59 for the stepsAtExpiry stamp, :165 for the Drill
-// Sergeant dare judgement).
-const {
-  SNAPSHOT_AT_EXPIRY_TYPES,
-} = require("../../powerups/constants/expiryEffectTypes");
-const FENCE_DUE_EXPIRY_VETO_TYPES = Object.freeze(
-  new Set([...SNAPSHOT_AT_EXPIRY_TYPES, "DRILL_SERGEANT"])
-);
-
-/**
- * True when an active effect whose expiry needs a closure-computed value is (or
- * is about to become) due on a participant OUTSIDE the closure.
- *
- * This is a re-check, not a duplicate of the planner's `DUE_EXPIRY_OUTSIDE_CLOSURE`
- * veto. That veto is evaluated once, at the planner's `asOf`, against effects
- * already due at that instant. It cannot cover an effect that becomes due
- * between plan selection and the post-commit hook — and the closure's
- * `validUntil` does not close the hole either, because its effect-boundary term
- * enumerates only CLOSURE-RELEVANT effects, and by construction this row's
- * target is not in the closure.
- *
- * Evaluated against the in-fence fingerprint re-read, so it costs no extra
- * query: those rows were already selected and already digested.
- */
-function dueExpiryOutsideClosureAtFence(activeEffects, closureParticipantIds, currentTime) {
-  const closure = new Set(closureParticipantIds || []);
-  const horizonMs = currentTime.getTime() + POST_COMMIT_SLACK_MS;
-  for (const effect of activeEffects || []) {
-    if (!FENCE_DUE_EXPIRY_VETO_TYPES.has(effect?.type)) continue;
-    if (closure.has(effect.targetParticipantId)) continue;
-    if (effect.expiresAt == null) continue;
-    const expiresAtMs = new Date(effect.expiresAt).getTime();
-    // An unparseable expiry is treated as due: we cannot prove it is not.
-    if (!Number.isFinite(expiresAtMs) || expiresAtMs <= horizonMs) return true;
-  }
-  return false;
 }
 
 function resolutionPlanForDirtyReasons(reasons) {
@@ -741,7 +693,15 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
             "raceResolutionDependencyClosureV1Enabled"
           )
         );
-        if (closureShadowEnabled || closureWritesEnabled) {
+        const closurePercent = closureWritesEnabled
+          ? await phaseTimer.measure(
+            "planSettings",
+            () => dependencyClosureRolloutPercent(settings, true)
+          )
+          : 0;
+        const closureRaceEnrolled = closureWritesEnabled &&
+          dependencyClosureRaceBucket(job.raceId) < closurePercent;
+        if (closureShadowEnabled || closureRaceEnrolled) {
           const shadowStartedAt = Date.now();
           try {
             const shadowConfig = await balanceConfig.getSnapshot();
@@ -773,7 +733,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
               );
             }
             if (
-              closureWritesEnabled &&
+              closureRaceEnrolled &&
               shadowResult &&
               shadowResult.plan === "DEPENDENCY_CLOSURE"
             ) {
@@ -804,7 +764,8 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
                   escalate =
                     wouldTrailMineEscalateProbe({
                       mines: shadowResult.mines,
-                      closureIds: shadowResult.participantIds,
+                      closureIds: shadowResult.scoringParticipantIds ||
+                        shadowResult.participantIds,
                       participantTotals: shadowResult.participantTotals,
                     }) !== false;
                 } catch {
@@ -994,7 +955,8 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
                 // Additive and null on every non-closure run, so the FULL path is
                 // byte-for-byte what it was.
                 ...(useClosure
-                  ? { scoreParticipantIds: closurePlan.participantIds }
+                  ? { scoreParticipantIds:
+                    closurePlan.scoringParticipantIds || closurePlan.participantIds }
                   : {}),
               })
             );
@@ -1092,7 +1054,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         // having written nothing and retries the generation as FULL — a stale
         // closure is never committed.
         //
-        // ONE re-read covers four of the five required checks, because
+        // ONE re-read covers the required scoring checks, because
         // `buildRaceResolutionInputFingerprint` already digests all of them:
         // the graph (active effects + the schema-2 EXPIRED LEECH/HITCHHIKE
         // rows), MEMBERSHIP (every participant row, so a join/leave/forfeit or
@@ -1101,21 +1063,25 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         // Re-deriving those separately would be a second fingerprint
         // implementation, which rule 7 prohibits.
         //
-        // The remaining two are checked explicitly:
+        // The remaining conditions are checked explicitly:
         //   * job generation — a newer generation arrived, so this plan was
         //     computed against a superseded dirty set;
         //   * the closure's exclusive validity deadline — a boundary the
         //     planner could SEE may now have crossed. `validUntil` is a
         //     NECESSARY condition only; the digest above is what makes the
         //     write safe, and it stays mandatory inside the window.
-        //   * a due expiry landing on a NON-closure participant. See
-        //     `dueExpiryOutsideClosureAtFence` — the planner's own veto is
-        //     evaluated at its `asOf` and cannot cover this.
+        //   * durable global-boundary delivery is current. A missing cursor or
+        //     any due-but-undelivered start/end edge forces FULL.
         if (closureCommitting) {
+          const dbClock = await tx.$queryRawUnsafe(
+            `SELECT (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::float8
+               AS "dbNowMs"`
+          );
+          const fenceNow = new Date(Number(dbClock[0]?.dbNowMs));
           const currentConfig = await balanceConfig.getSnapshot();
           const fingerprint = await buildInputFingerprint({
             raceId: job.raceId,
-            now: now(),
+            now: fenceNow,
             balanceConfigVersion: currentConfig.version,
             client: tx,
           });
@@ -1126,14 +1092,17 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
             Number(fenced.generation) !== Number(fenced.processingGeneration) ||
             !fingerprint ||
             fingerprint.digest !== closurePlan.graphFingerprint ||
+            fingerprint.globalBoundaryScheduleCurrent !== true ||
             deadline == null ||
             !Number.isFinite(deadline) ||
-            now().getTime() >= deadline ||
-            dueExpiryOutsideClosureAtFence(
-              fingerprint.activeEffects,
-              closurePlan.participantIds,
-              now()
-            )
+            !Number.isFinite(fenceNow.getTime()) ||
+            fenceNow.getTime() >= deadline ||
+            (fingerprint.globalEvents || []).some((event) => {
+              const start = new Date(event.startsAt).getTime();
+              const end = new Date(event.endsAt).getTime();
+              return !Number.isFinite(start) || !Number.isFinite(end) ||
+                (start <= fenceNow.getTime() && fenceNow.getTime() < end);
+            })
           ) {
             closureRejectedAtFence = true;
             return;
@@ -1298,22 +1267,14 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
       // scoped. It carries the same generation-time artifacts:
       //   * `result.race.participants` is the FULL accepted roster (R9), so the
       //     alert pass reads exactly the recipients a FULL run would;
-      //   * `baseAdjustedByParticipantId` is SUBSET, and the guarantee that
-      //     makes that safe is INCOMPLETE — read this carefully before enabling
-      //     the flag. Two checks currently cover it, and neither is a proof:
-      //       - the planner's DUE_EXPIRY_OUTSIDE_CLOSURE veto, evaluated at the
-      //         planner's `asOf`; and
-      //       - `dueExpiryOutsideClosureAtFence`, re-evaluated in the fence with
-      //         POST_COMMIT_SLACK_MS of lookahead.
-      //     `expireEffects` nevertheless runs post-commit against a still-later
-      //     `now()`, so an effect on a NON-closure target that becomes due after
-      //     the fence horizon can still have its `stepsAtExpiry` stamp silently
-      //     skipped (expireEffects.js:56-59) and then be written EXPIRED
-      //     permanently. The slack makes that window small, not empty.
-      //     Closing it is Phase 4's pre-handoff re-check (spec item 8: "if a due
-      //     effect or global boundary could cross between fence and post-commit
-      //     handling, it selects FULL before writes"), and closure enablement is
-      //     gated on that work landing;
+      //   * `baseAdjustedByParticipantId` is SUBSET, made safe by the planner's
+      //     exact scoringClosure expansion: every active snapshot-at-expiry or
+      //     Drill target and its graph component is computed regardless of
+      //     expiry distance. Its starts/expiry transitions also participate in
+      //     validUntil; malformed boundary metadata selects FULL. The in-fence
+      //     digest/deadline re-read then rejects any crossed or changed input
+      //     before writes, so post-commit expiry always has the value it may
+      //     consume without a timing-slack heuristic;
       //   * the snapshot is assembled by `computePersistedSnapshot`, which
       //     re-reads the committed rows. No second full score recompute happens
       //     on any plan, so no closure-specific approximation exists to make.
@@ -1376,11 +1337,23 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         stopPowerupStateSync();
 
         const stopOvertakeNudges = phaseTimer.start("overtakeNudges");
-        for (const triggerUserId of orderedTriggeringUserIds) {
+        const nudgeBatchEnabled = await phaseTimer.measure(
+          "postSettings",
+          () => isStrictFlagEnabled(settings, "raceResolutionNudgeBatchV1Enabled")
+        );
+        const nudgeTriggerGroups = nudgeBatchEnabled
+          ? [orderedTriggeringUserIds]
+          : orderedTriggeringUserIds.map((id) => [id]);
+        for (const nudgeTriggerIds of nudgeTriggerGroups) {
           try {
             await nudge({
               raceResults: [result],
-              userId: triggerUserId,
+              userId: nudgeTriggerIds[0] || null,
+              ...(nudgeBatchEnabled ? {
+                userIds: nudgeTriggerIds,
+                participantWrites,
+                preferHydratedRoster: true,
+              } : {}),
               participantModel,
               recordPhaseTiming: (name, durationMs) =>
                 addPhaseTiming(nudgePhaseMs, name, durationMs),
@@ -1420,6 +1393,13 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
       if (postTasksEnabled && deferredSnapshotCommand) {
         const stopPostTaskHandoff = phaseTimer.start("postTaskHandoff");
         try {
+          const fastHandoff = await phaseTimer.measure(
+            "postSettings",
+            () => isStrictFlagEnabled(
+              settings,
+              "raceResolutionPostTaskFastHandoffV1Enabled"
+            )
+          );
           const resolveIntents = async (client) => {
             const resolved = [];
             for (const claim of deferredIntentClaims) {
@@ -1446,6 +1426,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
             snapshotCommand: deferredSnapshotCommand,
             intents: deferredIntents,
             resolveIntents,
+            fastHandoff,
             recordPhaseTiming: (name, durationMs) =>
               addPhaseTiming(postHandoffPhaseMs, name, durationMs),
           });
@@ -1578,18 +1559,47 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
     const capacity = startCapacityPhase("resolution_queue_lag");
     let outcome = "error";
     try {
-      const lagMs = await capacity.measurePhase(
+      const service = await capacity.measurePhase(
         "lagProbe",
-        () => jobModel.queueLagMs(now()),
+        () => typeof jobModel.queueServiceSnapshot === "function"
+          ? jobModel.queueServiceSnapshot(now())
+          : jobModel.queueLagMs(now()).then((oldestRequestAgeMs) => ({
+            oldestRequestAgeMs,
+            claimableCount: 0,
+            oldestClaimableAgeMs: 0,
+            runningCount: 0,
+          })),
       );
-      const level = lagMs > QUEUE_LAG_ALARM_MS ? "warn" : "log";
+      const lanes = typeof workBudget.snapshot === "function"
+        ? workBudget.snapshot()
+        : { active: null, queuedCore: null, queuedPost: null };
+      const lagMs = service.oldestRequestAgeMs;
+      const claimableLagMs = service.oldestClaimableAgeMs;
+      const level = claimableLagMs > QUEUE_LAG_ALARM_MS ? "warn" : "log";
       (logger[level] || logger.log).call(
         logger,
-        `[RACE_RESOLUTION_V2] queue_lag_ms=${lagMs}` +
-          (lagMs > QUEUE_LAG_ALARM_MS ? " ALARM(>30s) — raise ASYNC_RACE_RESOLUTION_CONCURRENCY" : "")
+        JSON.stringify({
+          event: "race_resolution_v2_queue_service",
+          oldestRequestAgeMs: lagMs,
+          claimableCount: service.claimableCount,
+          oldestClaimableAgeMs: claimableLagMs,
+          runningCount: service.runningCount,
+          workLaneActive: lanes.active,
+          workLaneQueuedCore: lanes.queuedCore,
+          workLaneQueuedPost: lanes.queuedPost,
+          alarm: claimableLagMs > QUEUE_LAG_ALARM_MS,
+        })
       );
-      capacity.setCounts({ lagMs });
-      capacity.setDimensions({ alarm: lagMs > QUEUE_LAG_ALARM_MS });
+      capacity.setCounts({
+        lagMs,
+        claimableCount: service.claimableCount,
+        claimableLagMs,
+        runningCount: service.runningCount,
+        workLaneActive: lanes.active,
+        workLaneQueuedCore: lanes.queuedCore,
+        workLaneQueuedPost: lanes.queuedPost,
+      });
+      capacity.setDimensions({ alarm: claimableLagMs > QUEUE_LAG_ALARM_MS });
       outcome = "success";
       return lagMs;
     } catch (error) {
@@ -1673,4 +1683,5 @@ module.exports = {
   resolutionPlanForDirtyReasons,
   summarizeClosureShadow,
   NULL_CLOSURE_SHADOW_FIELDS,
+  dependencyClosureRaceBucket,
 };

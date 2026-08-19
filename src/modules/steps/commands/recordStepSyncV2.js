@@ -18,6 +18,10 @@ const { appSettings: defaultAppSettings } = require("../../../shared/config/appS
 const { isStrictFlagEnabled } = require("../../../shared/config/isStrictFlagEnabled");
 const {
   bumpScoringInputVersion,
+  lockScoringInputState,
+  readCanonicalSampleInput,
+  scoringBoundaryIsSafe,
+  persistScoringInputState,
 } = require("../services/scoringInputVersion");
 
 const COMPAT_STEP_GOAL = 5000;
@@ -111,6 +115,7 @@ function buildRecordStepSyncV2(dependencies = {}) {
     eventSteps,
     reasonAware,
     burstCoalescing,
+    scoringChanged = true,
   }) {
     // One-time step-event emission, guarded by the reservation claim.
     const claimed = await stepSyncRequestModel.claimEventsEmission(reservation.id, now());
@@ -196,18 +201,26 @@ function buildRecordStepSyncV2(dependencies = {}) {
 
     const { response } = await prisma.$transaction(async (tx) => {
       const requestedAt = now();
-      const jobs = await raceResolutionJobModel.enqueueMany(
-        {
-          raceIds: activeRaceIds,
-          userId,
-          resolutionTimeZone: timeZone,
-          now: requestedAt,
-          dirtyEnvelopeByRaceId,
-          burstCoalescing,
-          queuedGenerationMerge,
-        },
-        tx
-      );
+      let jobs = [];
+      if (scoringChanged === false && activeRaceIds.length > 0 &&
+          typeof raceResolutionJobModel.findByRaceIds === "function") {
+        jobs = await raceResolutionJobModel.findByRaceIds(activeRaceIds, tx);
+      }
+      // Missing durable ownership is uncertainty, so preserve today's enqueue.
+      if (scoringChanged !== false || jobs.length !== activeRaceIds.length) {
+        jobs = await raceResolutionJobModel.enqueueMany(
+          {
+            raceIds: activeRaceIds,
+            userId,
+            resolutionTimeZone: timeZone,
+            now: requestedAt,
+            dirtyEnvelopeByRaceId,
+            burstCoalescing,
+            queuedGenerationMerge,
+          },
+          tx
+        );
+      }
       const reported = jobs.find(Boolean) || null;
       const built = {
         record,
@@ -260,6 +273,10 @@ function buildRecordStepSyncV2(dependencies = {}) {
       ? serializeRecord(step)
       : { id: null, userId, date: new Date(date), steps: canonical.steps, stepGoal: COMPAT_STEP_GOAL };
 
+    const [reasonAware, burstCoalescing] = await Promise.all([
+      isStrictFlagEnabled(appSettings, "raceResolutionReasonAwareV1Enabled"),
+      isStrictFlagEnabled(appSettings, "raceResolutionBurstCoalescingV1Enabled"),
+    ]);
     return finalizeReservation({
       reservation,
       userId,
@@ -269,6 +286,10 @@ function buildRecordStepSyncV2(dependencies = {}) {
       stepsChanged: true,
       eventDate: date,
       eventSteps: canonical.steps,
+      reasonAware,
+      burstCoalescing,
+      // Null/missing is an old or in-flight reservation: fail closed to enqueue.
+      scoringChanged: reservation.scoringChanged === false ? false : true,
     });
   }
 
@@ -327,6 +348,10 @@ function buildRecordStepSyncV2(dependencies = {}) {
       appSettings,
       "raceResolutionBurstCoalescingV1Enabled"
     );
+    const noopSuppression = await isStrictFlagEnabled(
+      appSettings,
+      "raceResolutionNoopInputSuppressionV1Enabled"
+    );
 
     // ── Transaction A: persist steps/samples + create the reservation. ──
     let reservation;
@@ -360,10 +385,15 @@ function buildRecordStepSyncV2(dependencies = {}) {
             throw new StepSyncCooldownError(cooldown[0]?.retryAfterSeconds);
           }
         }
+        const scoringState = noopSuppression
+          ? await lockScoringInputState(tx, userId)
+          : null;
         const existingStep = await tx.step.findUnique({
           where: { userId_date: { userId, date: new Date(canonical.date) } },
         });
         const changed = Boolean(existingStep);
+        const dailyScoringChanged = !existingStep ||
+          Number(existingStep.steps) !== Number(canonical.steps);
         const step = existingStep
           ? await tx.step.update({
               where: { id: existingStep.id },
@@ -378,21 +408,42 @@ function buildRecordStepSyncV2(dependencies = {}) {
           const { StepSample } = require("../models/stepSample");
           // §3.3 overlap resolution inside Transaction A (same tx as steps +
           // reservation), so mixed hourly/5-min data never double-counts.
-          await StepSample.reconcileBatchOn(tx, userId, cleaned);
+          await StepSample.reconcileBatchOn(tx, userId, cleaned, Date.now(), {
+            noopSuppression,
+            // sync-v2 owns the one transaction-level generation decision below.
+            manageScoringVersion: false,
+          });
         }
-        await bumpScoringInputVersion(tx, userId);
+        let transactionScoringChanged = true;
+        if (noopSuppression) {
+          const nextInput = await readCanonicalSampleInput(tx, userId);
+          const decisionState = { ...scoringState, dbNow: nextInput.dbNow };
+          transactionScoringChanged = dailyScoringChanged ||
+            !scoringBoundaryIsSafe(decisionState) ||
+            scoringState.scoringWatermark !== nextInput.scoringWatermark;
+          await persistScoringInputState(
+            tx,
+            userId,
+            scoringState,
+            nextInput,
+            transactionScoringChanged
+          );
+        } else {
+          await bumpScoringInputVersion(tx, userId);
+        }
         const res = await stepSyncRequestModel.createReservation(
           {
             userId,
             idempotencyKey,
             requestHash: hash,
             resolutionTimeZone: timeZone,
+            scoringChanged: noopSuppression ? transactionScoringChanged : null,
             leaseMs: RECONCILE_LEASE_MS,
             now: now(),
           },
           tx
         );
-        return { step, changed, res };
+        return { step, changed, res, scoringChanged: transactionScoringChanged };
       });
       reservation = result.res;
       record = serializeRecord(result.step);
@@ -484,6 +535,7 @@ function buildRecordStepSyncV2(dependencies = {}) {
       eventSteps: canonical.steps,
       reasonAware,
       burstCoalescing,
+      scoringChanged: reservation.scoringChanged === false ? false : true,
     });
   };
 }

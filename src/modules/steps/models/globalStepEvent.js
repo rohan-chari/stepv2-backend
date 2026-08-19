@@ -188,6 +188,7 @@ const GlobalStepEvent = {
       orderBy: { startsAt: "asc" },
     });
   },
+
 };
 
 module.exports = { GlobalStepEvent };

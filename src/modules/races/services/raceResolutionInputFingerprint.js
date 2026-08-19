@@ -21,7 +21,7 @@ async function buildRaceResolutionInputFingerprint({
   // exclusion (`ends_at > race.started_at`) is unchanged.
   const GLOBAL_EVENT_LOOKAHEAD_MS = 10 * 60 * 1000;
   const horizon = new Date(now.getTime() + GLOBAL_EVENT_LOOKAHEAD_MS);
-  const [raceRows, inputs, effects, events] = await Promise.all([
+  const [raceRows, inputs, effects, eventRows] = await Promise.all([
     client.$queryRawUnsafe(
       `SELECT jsonb_build_object(
           'id', race.id,
@@ -101,14 +101,46 @@ async function buildRaceResolutionInputFingerprint({
       raceId
     ),
     client.$queryRawUnsafe(
-      `SELECT event.id, event.starts_at AS "startsAt", event.ends_at AS "endsAt",
-         event.multiplier, event.label
-       FROM global_step_events event
-       JOIN races race ON race.id=$1
-       WHERE event.ends_at > race.started_at AND event.starts_at <= $2
+      `WITH race_window AS (
+         SELECT started_at FROM races WHERE id=$1
+       ), schedule AS (
+         SELECT COALESCE((
+           SELECT NOT EXISTS (
+             SELECT 1
+             FROM (
+               SELECT source.starts_at AS boundary_at, source.id AS event_id,
+                 'START'::text AS boundary_kind
+               FROM global_step_events source
+               JOIN race_window race ON source.ends_at > race.started_at
+               UNION ALL
+               SELECT source.ends_at AS boundary_at, source.id AS event_id,
+                 'END'::text AS boundary_kind
+               FROM global_step_events source
+               JOIN race_window race ON source.ends_at > race.started_at
+             ) boundary
+             WHERE boundary.boundary_at <=
+                 (to_timestamp($3::float8 / 1000) AT TIME ZONE 'UTC')
+               AND (boundary.boundary_at, boundary.event_id, boundary.boundary_kind) >
+                 (cursor.boundary_at, cursor.event_id, cursor.boundary_kind)
+           )
+           FROM global_step_event_boundary_cursors cursor
+           WHERE cursor.key='global'
+         ), false) AS current
+       ), candidate_events AS (
+         SELECT event.id, event.starts_at, event.ends_at,
+           event.multiplier, event.label
+         FROM global_step_events event
+         JOIN races race ON race.id=$1
+         WHERE event.ends_at > race.started_at AND event.starts_at <= $2
+       )
+       SELECT event.id, event.starts_at AS "startsAt", event.ends_at AS "endsAt",
+         event.multiplier, event.label,
+         schedule.current AS "globalBoundaryScheduleCurrent"
+       FROM schedule LEFT JOIN candidate_events event ON TRUE
        ORDER BY event.starts_at, event.id`,
       raceId,
-      horizon
+      horizon,
+      now.getTime()
     ),
   ]);
 
@@ -138,6 +170,7 @@ async function buildRaceResolutionInputFingerprint({
   // (getRaceProgress.js), which enumerates startsAt/expiresAt boundaries and
   // would pull an already-elapsed boundary out of an EXPIRED row. The closure
   // planner consumes `expiredScoringEffects` separately.
+  const events = (eventRows || []).filter((row) => row?.id);
   const allEffects = effects || [];
   const expiredScoringEffects = allEffects.filter((row) => row.status === "EXPIRED");
   const activeEffects = allEffects.filter((row) => row.status !== "EXPIRED");
@@ -164,6 +197,8 @@ async function buildRaceResolutionInputFingerprint({
     activeEffects,
     expiredScoringEffects,
     globalEvents: events || [],
+    globalBoundaryScheduleCurrent:
+      eventRows?.[0]?.globalBoundaryScheduleCurrent === true,
     // Spec rule 3 (TRAIL_MINE full-field projection) requires the persisted
     // total_steps of every accepted row "taken from the same fingerprint read —
     // no additional query". These rows were already selected and already

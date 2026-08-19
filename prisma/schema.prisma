@@ -2042,6 +2042,22 @@ model GlobalStepEvent {
   @@map("global_step_events")
 }
 
+// Cluster-owned durable cursor for global-event start/end boundary delivery.
+// A due boundary remains pending until every active race has a durable FULL
+// enqueue; expired leases are safely reclaimable after process loss.
+model GlobalStepEventBoundaryCursor {
+  key              String    @id
+  boundaryAt       DateTime  @map("boundary_at")
+  eventId          String    @map("event_id")
+  boundaryKind     String    @map("boundary_kind") @db.VarChar(8)
+  leaseExpiresAt   DateTime? @map("lease_expires_at")
+  leaseToken       String?   @map("lease_token")
+  updatedAt        DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  @@index([leaseExpiresAt])
+  @@map("global_step_event_boundary_cursors")
+}
+
 // Audit log of every user-facing (visible) push we send. Written at each visible
 // send site in notificationHandlers.js; silent refresh pushes are NOT recorded.
 // `type` is a free-form String (the push payload's `type`, e.g. RACE_STARTED,
@@ -2275,6 +2291,9 @@ model StepSyncRequest {
   // Set exactly once, under a conditional `eventsEmittedAt IS NULL` claim, so a
   // replay/recovery can never re-emit STEPS_RECORDED/STEPS_UPDATED.
   eventsEmittedAt    DateTime?            @map("events_emitted_at")
+  // Transaction A's crash-safe no-op classification. Null is the mixed-version
+  // fail-closed value and always means "enqueue".
+  scoringChanged     Boolean?             @map("scoring_changed")
   createdAt          DateTime             @default(now()) @map("created_at")
   updatedAt          DateTime             @updatedAt @map("updated_at")
   expiresAt          DateTime             @map("expires_at")
@@ -2396,9 +2415,11 @@ model RaceResolutionJobV2 {
 }
 
 model UserScoringInputVersion {
-  userId     String   @id @map("user_id")
-  generation BigInt   @default(1)
-  updatedAt  DateTime @updatedAt @map("updated_at")
+  userId                 String    @id @map("user_id")
+  generation             BigInt    @default(1)
+  scoringWatermark       String?   @map("scoring_watermark") @db.Char(64)
+  nextSampleBoundaryAt   DateTime? @map("next_sample_boundary_at")
+  updatedAt              DateTime  @updatedAt @map("updated_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 

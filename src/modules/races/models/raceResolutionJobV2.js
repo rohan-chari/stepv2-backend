@@ -843,6 +843,17 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
       return normalizeRow(rows[0]);
     },
 
+    async findByRaceIds(raceIds, tx = prisma) {
+      const ids = [...new Set(raceIds || [])].filter(Boolean).sort();
+      if (ids.length === 0) return [];
+      const rows = await tx.$queryRawUnsafe(
+        `SELECT ${jobColumns()} FROM race_resolution_jobs_v2
+         WHERE race_id = ANY($1::text[]) ORDER BY race_id`,
+        ids
+      );
+      return rows.map(normalizeRow);
+    },
+
     // Bounded convergence backstop for the five-minute placement cron. Normal
     // mutations enqueue directly; this only identifies active races whose job
     // row is missing, terminally failed, or has not had an insurance replay in
@@ -912,6 +923,43 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
       );
       const lag = Number(rows[0]?.lag ?? 0);
       return Number.isFinite(lag) ? Math.max(0, Math.round(lag)) : 0;
+    },
+
+    // One once-per-minute aggregate probe using the exact claimNext predicate.
+    // The existing state/deadline indexes remain usable and no hot-path query is
+    // added. Oldest request age is retained separately for continuity.
+    async queueServiceSnapshot(now = new Date()) {
+      const rows = await prisma.$queryRawUnsafe(
+        `SELECT
+           COALESCE(MAX(EXTRACT(EPOCH FROM ($1::timestamp-requested_at))*1000)
+             FILTER (WHERE state IN ('queued','running')), 0)::float8 AS "oldestRequestAgeMs",
+           COUNT(*) FILTER (WHERE
+             (state='queued' AND (retry_at IS NULL OR retry_at <= $1)
+              AND (not_before_at IS NULL OR not_before_at <= $1))
+             OR (state='running' AND lease_expires_at IS NOT NULL
+                 AND lease_expires_at <= $1))::int AS "claimableCount",
+           COALESCE(MAX(EXTRACT(EPOCH FROM ($1::timestamp-requested_at))*1000)
+             FILTER (WHERE
+               (state='queued' AND (retry_at IS NULL OR retry_at <= $1)
+                AND (not_before_at IS NULL OR not_before_at <= $1))
+               OR (state='running' AND lease_expires_at IS NOT NULL
+                   AND lease_expires_at <= $1)), 0)::float8 AS "oldestClaimableAgeMs",
+           COUNT(*) FILTER (WHERE state='running')::int AS "runningCount"
+         FROM race_resolution_jobs_v2
+         WHERE state IN ('queued','running')`,
+        now
+      );
+      const row = rows[0] || {};
+      const safeMs = (value) => {
+        const numeric = Number(value || 0);
+        return Number.isFinite(numeric) ? Math.max(0, Math.round(numeric)) : 0;
+      };
+      return {
+        oldestRequestAgeMs: safeMs(row.oldestRequestAgeMs),
+        claimableCount: Math.max(0, Number(row.claimableCount || 0)),
+        oldestClaimableAgeMs: safeMs(row.oldestClaimableAgeMs),
+        runningCount: Math.max(0, Number(row.runningCount || 0)),
+      };
     },
 
     // Rollback drill assertion (test 5h / runbook step ii): zero RUNNING rows

@@ -31,6 +31,9 @@ const { appSettings: defaultAppSettings } = require("../../../shared/config/appS
 async function nudgeOvertakenRivals({
   raceResults,
   userId,
+  userIds = null,
+  participantWrites = null,
+  preferHydratedRoster = false,
   participantModel,
   requestStepSyncForUsers,
   recordPhaseTiming = null,
@@ -68,39 +71,78 @@ async function nudgeOvertakenRivals({
   }
 
   const rivalIds = new Set();
+  const triggerUserIds = [...new Set(
+    (Array.isArray(userIds) ? userIds : [userId]).filter(Boolean)
+  )].sort();
 
   for (const result of raceResults) {
     if (!result || !result.raceId) continue;
 
-    const participants = await measure(
-      "participantLoad",
-      () => participantModel.findAcceptedByRace(result.raceId)
-    );
+    let participants = null;
+    if (preferHydratedRoster) {
+      const hydrated = result?.race?.participants;
+      const projectionComplete = Array.isArray(hydrated) && hydrated.every((row) =>
+        row && row.id && row.userId && row.status && row.joinedAt != null &&
+        Object.prototype.hasOwnProperty.call(row, "totalSteps") &&
+        Object.prototype.hasOwnProperty.call(row, "bonusSteps") &&
+        Object.prototype.hasOwnProperty.call(row, "lastNotifiedPlacement")
+      );
+      if (projectionComplete) {
+        participants = hydrated
+          .filter((row) => row.status === "ACCEPTED")
+          .map((row) => ({ ...row }));
+        const byId = new Map(participants.map((row) => [row.id, row]));
+        let replayUnambiguous = Array.isArray(participantWrites);
+        if (replayUnambiguous) {
+          for (const write of participantWrites) {
+            const row = byId.get(write?.participantId);
+            if (!row || !["participantTotal", "participantBonus"].includes(write.kind)) {
+              replayUnambiguous = false;
+              break;
+            }
+            if (write.kind === "participantTotal" && Number.isFinite(write.totalSteps)) {
+              row.totalSteps = write.totalSteps;
+            } else if (write.kind === "participantBonus" && Number.isFinite(write.amount)) {
+              row.bonusSteps = Math.max(0, Number(row.bonusSteps || 0) - write.amount);
+            } else {
+              replayUnambiguous = false;
+              break;
+            }
+          }
+        }
+        if (!replayUnambiguous) participants = null;
+      }
+    }
+    // Fail closed to exactly one current accepted-roster read. A partial old
+    // artifact/projection is never used to guess recipients.
+    if (!participants) {
+      participants = await measure(
+        "participantLoad",
+        () => participantModel.findAcceptedByRace(result.raceId)
+      );
+    }
     if (!participants || participants.length === 0) continue;
 
     measureSync("ranking", () => {
       const ranked = [...participants].sort(
-        (a, b) => (b.totalSteps ?? 0) - (a.totalSteps ?? 0)
+        (a, b) =>
+          (b.totalSteps ?? 0) - (a.totalSteps ?? 0) ||
+          new Date(a.joinedAt || 0).getTime() - new Date(b.joinedAt || 0).getTime()
       );
-
-      const userIndex = ranked.findIndex((p) => p.userId === userId);
-      if (userIndex < 0) return;
-
-      const beforeRank = ranked[userIndex].lastNotifiedPlacement;
-      const afterRank = userIndex + 1;
-
-      // No prior live rank (never seeded by the cron) or the user did not climb =>
-      // nobody was overtaken by this sync.
-      if (beforeRank == null || afterRank >= beforeRank) return;
-
-      for (let i = userIndex + 1; i < ranked.length; i++) {
-        const rival = ranked[i];
-        if (rival.userId === userId) continue;
-        if (rival.finishedAt) continue;
-        if (rival.lastNotifiedPlacement == null) continue;
-        // Only rivals that were ahead of the user before this sync were passed.
-        if (rival.lastNotifiedPlacement < beforeRank) {
-          rivalIds.add(rival.userId);
+      const indexByUserId = new Map(
+        ranked.map((participant, index) => [participant.userId, index])
+      );
+      for (const triggerUserId of triggerUserIds) {
+        const userIndex = indexByUserId.get(triggerUserId);
+        if (userIndex == null) continue;
+        const beforeRank = ranked[userIndex].lastNotifiedPlacement;
+        const afterRank = userIndex + 1;
+        if (beforeRank == null || afterRank >= beforeRank) continue;
+        for (let i = userIndex + 1; i < ranked.length; i++) {
+          const rival = ranked[i];
+          if (rival.userId === triggerUserId || rival.finishedAt) continue;
+          if (rival.lastNotifiedPlacement == null) continue;
+          if (rival.lastNotifiedPlacement < beforeRank) rivalIds.add(rival.userId);
         }
       }
     });
@@ -109,7 +151,7 @@ async function nudgeOvertakenRivals({
   if (rivalIds.size > 0) {
     await measure(
       "intentHandoff",
-      () => requestStepSyncForUsers([...rivalIds])
+      () => requestStepSyncForUsers([...rivalIds].sort())
     );
   }
 }
@@ -171,14 +213,28 @@ function buildRecordSteps(dependencies = {}) {
   return async function recordSteps({ userId, steps, date, timeZone, skipRaceResolution = false }) {
     const existing = await stepsModel.findByUserIdAndDate(userId, date);
 
+    let noopSuppression = false;
+    try {
+      noopSuppression =
+        (await settings.getFlag("raceResolutionNoopInputSuppressionV1Enabled")) === true;
+    } catch {}
+
     let record;
+    let scoringChanged = true;
 
     if (existing) {
-      record = await stepsModel.update(existing.id, { steps });
+      const persisted = await stepsModel.update(existing.id, { steps }, { noopSuppression });
+      record = persisted?.record || persisted;
+      if (noopSuppression) scoringChanged = persisted?.scoringChanged !== false;
       await userModel.update(userId, { lastStepSyncAt: now() });
       events.emit("STEPS_UPDATED", { userId, steps, date });
     } else {
-      record = await stepsModel.create({ userId, steps, date, stepGoal: null });
+      const persisted = await stepsModel.create(
+        { userId, steps, date, stepGoal: null },
+        { noopSuppression }
+      );
+      record = persisted?.record || persisted;
+      if (noopSuppression) scoringChanged = persisted?.scoringChanged !== false;
       await userModel.update(userId, { lastStepSyncAt: now() });
       events.emit("STEPS_RECORDED", { userId, steps, date });
     }
@@ -227,7 +283,7 @@ function buildRecordSteps(dependencies = {}) {
     // behavior byte-for-byte. The opt-in reason-aware path below reverses the
     // order so a narrow STEP_SYNC can never become claimable before the
     // uploader row it depends on has committed.
-    if (!reasonAware) {
+    if (!reasonAware && scoringChanged) {
       await enqueueRaceResolutionForUser({
         userId,
         timeZone,
@@ -257,7 +313,7 @@ function buildRecordSteps(dependencies = {}) {
       }
     }
 
-    if (reasonAware) {
+    if (reasonAware && scoringChanged) {
       const narrowReady =
         !skipRaceResolution &&
         reconciliation &&
