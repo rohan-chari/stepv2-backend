@@ -472,6 +472,7 @@ async function checkActiveRaces(prisma, userId, options = {}) {
     // of recomputing live health windows for every participant. Masking,
     // ordering, top-three, placement, and team blocks are unchanged.
     usePersistedTotals = false,
+    leanLiveEnabled = false,
   } = options;
 
   const myActive = await prisma.raceParticipant.findMany({
@@ -486,7 +487,9 @@ async function checkActiveRaces(prisma, userId, options = {}) {
         include: {
           participants: {
             where: { status: "ACCEPTED" },
-            include: { user: { select: USER_SELECT } },
+            ...(leanLiveEnabled
+              ? {}
+              : { include: { user: { select: USER_SELECT } } }),
             orderBy: { totalSteps: "desc" },
           },
         },
@@ -643,6 +646,20 @@ async function checkActiveRaces(prisma, userId, options = {}) {
     // Sort participants for placement (deterministic, matches getRaces) using
     // the LIVE totals.
     const ranked = [...liveParticipants].sort(compareParticipantsForPlacement);
+
+    if (leanLiveEnabled) {
+      const visibleIds = ranked.slice(0, 3).map((participant) => participant.userId);
+      const users = visibleIds.length > 0
+        ? await prisma.user.findMany({
+            where: { id: { in: visibleIds } },
+            select: USER_SELECT,
+          })
+        : [];
+      const userById = new Map(users.map((user) => [user.id, user]));
+      for (const participant of ranked.slice(0, 3)) {
+        participant.user = userById.get(participant.userId) || null;
+      }
+    }
 
     // Determine stealthed user ids for this race (only when powerups enabled).
     const stealthedUserIds = new Set();
@@ -928,6 +945,7 @@ function buildGetHomeRaceCard(dependencies = {}) {
     // Batch 2026-07-26, item 8. Defaults to "prod" — a shipped binary never
     // receives a test-only assetKey it does not bundle.
     releaseChannel = "prod",
+    leanLiveEnabled = false,
   }) {
     const now = nowFn();
 
@@ -959,6 +977,7 @@ function buildGetHomeRaceCard(dependencies = {}) {
         supportsRemoteAssets,
         supportsTeamRaces,
         usePersistedTotals: homePersistedTotals,
+        leanLiveEnabled,
       });
       if (activeRaces) return activeRaces;
     } else {

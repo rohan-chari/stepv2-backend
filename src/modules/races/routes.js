@@ -112,6 +112,10 @@ const {
   getRaceProgress: defaultGetRaceProgress,
 } = require("./queries/getRaceProgress");
 const {
+  getRacePowerupTargetContext: defaultGetRacePowerupTargetContext,
+  buildGetRacePowerupTargetContext,
+} = require("./queries/getRacePowerupTargetContext");
+const {
   getSneakySwapTargets: defaultGetSneakySwapTargets,
   buildGetSneakySwapTargets,
 } = require("./queries/getSneakySwapTargets");
@@ -173,6 +177,12 @@ const { decodeCursor, encodeCursor, parseLimit } = require("../inbox/services/in
 const {
   startCapacityPhase,
 } = require("../../shared/observability/capacityPhaseMetrics");
+const {
+  compactRaceList,
+  hasCompactCapability,
+  messageStreamsRevision,
+  quotedEtag,
+} = require("../../shared/http/requestPathPayloadContracts");
 
 // A powerup is STEALABLE via Sneaky Swap only if it is currently HELD and its
 // type is neither SNEAKY_SWAP (not stealable in either direction) nor
@@ -298,6 +308,11 @@ function createRacesRouter(dependencies = {}) {
   const getRaceDetails = dependencies.getRaceDetails || defaultGetRaceDetails;
   const getRaceProgress =
     dependencies.getRaceProgress || defaultGetRaceProgress;
+  const getRacePowerupTargetContext =
+    dependencies.getRacePowerupTargetContext ||
+    (dependencies.Race || dependencies.RacePowerup || dependencies.RaceActiveEffect
+      ? buildGetRacePowerupTargetContext(dependencies)
+      : defaultGetRacePowerupTargetContext);
   const getSneakySwapTargets =
     dependencies.getSneakySwapTargets ||
     (dependencies.Race || dependencies.RacePowerup || dependencies.RaceActiveEffect
@@ -416,7 +431,11 @@ function createRacesRouter(dependencies = {}) {
   function loadRaceProgress(
     req,
     resolvedContext = null,
-    { forceFullParticipants = false, allowPreview = true } = {}
+    {
+      forceFullParticipants = false,
+      allowPreview = true,
+      leanScoringContext = false,
+    } = {}
   ) {
     const { isParticipantsView, participantsOffset, participantsLimit } =
       readParticipantsPagingQuery(req, { forceFullParticipants });
@@ -447,6 +466,7 @@ function createRacesRouter(dependencies = {}) {
         // early 403 instead of a full forceFullParticipants read that would only
         // be denied afterward anyway.
         previewViewer: allowPreview && hasRacePreviewToken(req.clientFeatures),
+        leanScoringContext,
       }
     );
   }
@@ -473,7 +493,13 @@ function createRacesRouter(dependencies = {}) {
     const tournamentAccess =
       context.tournamentId != null &&
       (context.tournament?.participants?.length || 0) > 0;
-    if ((!direct || direct.status === "DECLINED") && !tournamentAccess) {
+    if (direct && direct.status !== "DECLINED") {
+      return { race: context, kind: "DIRECT_PARTICIPANT" };
+    }
+    if (tournamentAccess) {
+      return { race: context, kind: "TOURNAMENT_SPECTATOR" };
+    }
+    if (!direct || direct.status === "DECLINED") {
       // Race preview-before-joining: the SAME predicate the two query-layer
       // gates use. This one matters most — /bootstrap is the FIRST request the
       // race-detail screen makes, so a carve-out that skipped this gate would
@@ -491,8 +517,13 @@ function createRacesRouter(dependencies = {}) {
         error.statusCode = 403;
         throw error;
       }
+      return { race: context, kind: "PUBLIC_PREVIEW" };
     }
-    return context;
+    // Structurally unreachable, but fail closed if a future participant status
+    // is added without an explicit bootstrap access classification.
+    const error = new Error("You are not a participant in this race");
+    error.statusCode = 403;
+    throw error;
   }
 
   function payoutDoubleEndpoint(operation, handler) {
@@ -627,6 +658,14 @@ function createRacesRouter(dependencies = {}) {
   // GET /races
   router.get("/", async (req, res) => {
     try {
+      const compactRaceListEnabled =
+        hasCompactCapability(req.clientFeatures) &&
+        req.query.view === "compact-v1" &&
+        (await isStrictFlagEnabled(settings, "apiRaceListCompactV1Enabled"));
+      const sqlSummaryEnabled = await isStrictFlagEnabled(
+        settings,
+        "raceListSqlSummaryV1Enabled"
+      );
       // TR-702: old clients (no team_races token) never receive team races.
       const supportsTeamRaces = req.clientFeatures?.has("team_races") ?? false;
       const supportsTournaments = req.clientFeatures?.has("tournaments") ?? false;
@@ -656,6 +695,7 @@ function createRacesRouter(dependencies = {}) {
           extraCompletedRaceIds: pendingPayoutDoubleOffer
             ? pendingPayoutDoubleOffer.items.map((item) => item.raceIdSnapshot)
             : [],
+          sqlSummaryEnabled,
         }),
         supportsTournaments
           ? getTournamentsForUser(req.user.id, {
@@ -723,7 +763,7 @@ function createRacesRouter(dependencies = {}) {
           logger.error("Build review opportunities error:", error);
         }
       }
-      res.json(result);
+      res.json(compactRaceListEnabled ? compactRaceList(result) : result);
     } catch (error) {
       console.error("Get races error:", error);
       res.status(500).json({ error: "Internal server error" });
@@ -1135,6 +1175,14 @@ function createRacesRouter(dependencies = {}) {
     let capacityOutcome = "error";
     let capacityHydratedIds = 0;
     try {
+      const compactRequested =
+        hasCompactCapability(req.clientFeatures) &&
+        req.query.shape === "compact-v1" &&
+        paging.isParticipantsView &&
+        (await isStrictFlagEnabled(
+          settings,
+          "apiRaceBootstrapCompactV1Enabled"
+        ));
       const access = await capacity.measurePhase(
         "access",
         () => loadBootstrapAccess(req),
@@ -1150,7 +1198,7 @@ function createRacesRouter(dependencies = {}) {
         supportsSeededRaceBuckets(req.clientFeatures),
       ];
       const detailPaging = raceDetailsPagingOptions(req);
-      if (access.status !== "ACTIVE") {
+      if (access.race.status !== "ACTIVE") {
         const race = await capacity.measurePhase(
           "detailsProjectionHydration",
           () => getRaceDetails(...detailArgs, null, detailPaging),
@@ -1190,26 +1238,22 @@ function createRacesRouter(dependencies = {}) {
           error: inventoryResult.reason?.message || "unknown",
         });
       }
-      // The progress query's race object is reused as a preload on this branch,
-      // paged or not, to save a whole fat read. It is the SAME `Race.findById`
-      // the unpaged detail path runs (getRaceProgress.js), already hydrated for
-      // the full field — so on this branch the fat read is sunk cost either way,
-      // and running the lean paged plan on top of it would only ADD queries.
-      // getRaceDetails slices the page out of the preload in JS when it gets
-      // one; the other two paged call sites pass null and keep the lean plan.
+      // The legacy progress query's fat race object remains a reusable preload.
+      // A lean progress context is intentionally NOT a details preload: paged
+      // bootstrap runs the existing details core/page projection so neither
+      // side hydrates the complete user/accessory graph.
       const race = await capacity.measurePhase(
         "detailsProjectionHydration",
         () => getRaceDetails(
           ...detailArgs,
-          resolvedContext.race || null,
+          resolvedContext.race?._leanProgressProjection
+            ? null
+            : resolvedContext.race || null,
           detailPaging
         ),
       );
-      capacityHydratedIds = Array.isArray(resolvedContext.race?.participants)
-        ? resolvedContext.race.participants.length
-        : 0;
       capacityOutcome = "success";
-      res.json({
+      const body = {
         contract: "race-bootstrap-v1",
         race,
         progress:
@@ -1220,7 +1264,37 @@ function createRacesRouter(dependencies = {}) {
             : { code: "PROGRESS_UNAVAILABLE" },
         globalPowerupInventory:
           inventoryResult.status === "fulfilled" ? inventoryResult.value : null,
-      });
+      };
+      if (resolvedContext.race?._leanProgressProjection) {
+        const hydratedIds = new Set([
+          ...(Array.isArray(race?.participants)
+            ? race.participants.map((participant) => participant.userId)
+            : []),
+          ...(Array.isArray(body.progress?.participants)
+            ? body.progress.participants.map((participant) => participant.userId)
+            : []),
+        ]);
+        capacityHydratedIds = hydratedIds.size;
+      } else {
+        capacityHydratedIds = Array.isArray(resolvedContext.race?.participants)
+          ? resolvedContext.race.participants.length
+          : 0;
+      }
+      const compactEligible =
+        compactRequested &&
+        access.kind === "DIRECT_PARTICIPANT" &&
+        race?.status === "ACTIVE" &&
+        race?.isTeamRace !== true &&
+        progressResult.status === "fulfilled" &&
+        Array.isArray(progressResult.value?.participants) &&
+        race?.participantsPagination &&
+        typeof race.participantsPagination === "object";
+      if (compactEligible) {
+        body.contract = "race-bootstrap-compact-v1";
+        body.race = { ...race };
+        delete body.race.participants;
+      }
+      res.json(body);
     } catch (error) {
       if (error.statusCode) {
         return res.status(error.statusCode).json({
@@ -1247,13 +1321,33 @@ function createRacesRouter(dependencies = {}) {
       return res.status(404).json({ error: "Not found" });
     }
     try {
+      const conditional =
+        hasCompactCapability(req.clientFeatures) &&
+        req.query.view === "conditional-v1" &&
+        (await isStrictFlagEnabled(
+          settings,
+          "apiRaceMessageConditionalV1Enabled"
+        ));
       const result = await getRaceMessageStreams({
         userId: req.user.id,
         raceId: req.params.raceId,
         includeUser: req.query.includeUser !== "false",
         limit: req.query.limit,
       });
-      res.json(result);
+      if (!conditional) return res.json(result);
+      const revision = messageStreamsRevision(result);
+      const etag = quotedEtag(revision);
+      res.set({
+        ETag: etag,
+        "Cache-Control": "private, no-cache",
+        Vary: "Authorization, X-Client-Features",
+      });
+      if (req.get("If-None-Match") === etag) return res.status(304).end();
+      res.json({
+        ...result,
+        contract: "race-message-streams-conditional-v1",
+        revision,
+      });
     } catch (error) {
       if (error.statusCode) {
         return res.status(error.statusCode).json({ error: error.message });
@@ -1591,6 +1685,27 @@ function createRacesRouter(dependencies = {}) {
   // progress-derived candidates.
   router.get("/:raceId/powerups/use-context", async (req, res) => {
     try {
+      const typed =
+        hasCompactCapability(req.clientFeatures) &&
+        req.query.view === "targets-v1" &&
+        typeof req.query.powerupType === "string" &&
+        (await isStrictFlagEnabled(
+          settings,
+          "apiRacePowerupTargetContextV1Enabled"
+        ));
+      if (typed) {
+        const result = await getRacePowerupTargetContext({
+          userId: req.user.id,
+          raceId: req.params.raceId,
+          powerupType: req.query.powerupType,
+          loadBountyProgress: () => loadRaceProgress(req, null, {
+            forceFullParticipants: true,
+            allowPreview: false,
+            leanScoringContext: true,
+          }),
+        });
+        if (result) return res.json(result);
+      }
       const progress = await loadRaceProgress(req, null, {
         forceFullParticipants: true,
         // This endpoint always requires real ACTIVE participation — never
@@ -1633,7 +1748,10 @@ function createRacesRouter(dependencies = {}) {
       });
     } catch (error) {
       if (error.statusCode) {
-        return res.status(error.statusCode).json({ error: error.message });
+        return res.status(error.statusCode).json({
+          error: error.message,
+          ...(error.code ? { code: error.code } : {}),
+        });
       }
       console.error("Race powerup use-context error:", error);
       res.status(500).json({ error: "Internal server error" });

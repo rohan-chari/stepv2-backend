@@ -264,6 +264,73 @@ const RaceParticipant = {
     });
   },
 
+  // Uploader-only generation fence. The version-row lock, current-generation
+  // comparison, membership/status recheck, and participant write are one
+  // transaction. Callers must recompute and retry on VERSION_MISMATCH; this
+  // method never writes a value calculated from a superseded upload.
+  async updateUploaderTotalsIfScoringVersion({
+    id,
+    raceId,
+    userId,
+    expectedGeneration,
+    totalSteps,
+    rawSteps,
+  }) {
+    return prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`
+        INSERT INTO "user_scoring_input_versions"
+          ("user_id", "generation", "updated_at")
+        VALUES (${userId}, 1, CURRENT_TIMESTAMP)
+        ON CONFLICT ("user_id") DO NOTHING
+      `;
+      const versions = await tx.$queryRaw`
+        SELECT "generation"
+        FROM "user_scoring_input_versions"
+        WHERE "user_id" = ${userId}
+        FOR UPDATE
+      `;
+      const currentGeneration = versions[0]?.generation ?? null;
+      if (
+        currentGeneration == null ||
+        expectedGeneration == null ||
+        BigInt(currentGeneration) !== BigInt(expectedGeneration)
+      ) {
+        return {
+          status: "VERSION_MISMATCH",
+          generation: currentGeneration,
+        };
+      }
+
+      const rows = await tx.$queryRaw`
+        UPDATE race_participants AS participant
+        SET
+          total_steps = ${Math.max(0, Math.round(totalSteps))},
+          raw_steps = GREATEST(
+            COALESCE(participant.raw_steps, 0),
+            ${Math.max(0, Math.round(rawSteps))}
+          ),
+          totals_updated_at = CURRENT_TIMESTAMP
+        FROM races AS race
+        WHERE participant.id = ${id}
+          AND participant.race_id = ${raceId}
+          AND participant.user_id = ${userId}
+          AND participant.status = 'accepted'::"RaceParticipantStatus"
+          AND participant.finished_at IS NULL
+          AND participant.forfeited_at IS NULL
+          AND race.id = participant.race_id
+          AND race.status = 'active'::"RaceStatus"
+        RETURNING
+          participant.id,
+          participant.total_steps AS "totalSteps",
+          participant.raw_steps AS "rawSteps",
+          participant.totals_updated_at AS "totalsUpdatedAt"
+      `;
+      return rows[0]
+        ? { status: "COMMITTED", participant: rows[0] }
+        : { status: "NOT_ELIGIBLE" };
+    });
+  },
+
   // Thin wrapper, kept because callers SPREAD this model (computeRaceState's
   // write capture) and because ~20 unit-test fakes implement it. Writes no
   // `rawSteps`, so it is only correct for a caller that genuinely has none.

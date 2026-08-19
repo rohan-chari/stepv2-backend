@@ -1,6 +1,12 @@
 const { Router } = require("express");
 const { buildRequireAuth } = require("../../middleware/requireAuth");
 const { getLeaderboard: defaultGetLeaderboard, buildGetLeaderboard } = require("./getLeaderboard");
+const { appSettings } = require("../../shared/config/appSettings");
+const { isStrictFlagEnabled } = require("../../shared/config/isStrictFlagEnabled");
+const {
+  compactLeaderboard,
+  hasCompactCapability,
+} = require("../../shared/http/requestPathPayloadContracts");
 
 const VALID_PERIODS = ["today", "week", "month", "allTime"];
 const VALID_TYPES = ["steps", "races"];
@@ -14,6 +20,7 @@ function createLeaderboardRouter(dependencies = {}) {
     (dependencies.prisma || dependencies.appSettings || dependencies.stepLeaderboardCache
       ? buildGetLeaderboard(dependencies)
       : defaultGetLeaderboard);
+  const settings = dependencies.appSettings || appSettings;
 
   router.use(requireAuth);
 
@@ -63,7 +70,11 @@ function createLeaderboardRouter(dependencies = {}) {
         supportsRemoteAssets: req.clientFeatures?.has("remote_assets") ?? false,
         releaseChannel: req.releaseChannel,
       });
-      res.json(result);
+      const compact =
+        hasCompactCapability(req.clientFeatures) &&
+        req.query.view === "compact-v1" &&
+        (await isStrictFlagEnabled(settings, "apiLeaderboardCompactV1Enabled"));
+      res.json(compact ? compactLeaderboard(result) : result);
     } catch (error) {
       console.error("Leaderboard error:", error);
       res.status(500).json({ error: "Internal server error" });

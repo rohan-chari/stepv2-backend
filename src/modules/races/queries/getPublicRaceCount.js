@@ -1,5 +1,7 @@
 const { Race } = require("../models/race");
 const { isVisiblePublicRace } = require("./getPublicRaces");
+const { appSettings: defaultAppSettings } = require("../../../shared/config/appSettings");
+const { isStrictFlagEnabled } = require("../../../shared/config/isStrictFlagEnabled");
 
 // Count of browsable public races for the viewer, applying the SAME visibility,
 // membership, capacity, seed, and team-race rules as getPublicRaces but without
@@ -8,6 +10,7 @@ const { isVisiblePublicRace } = require("./getPublicRaces");
 // predicate reads) so the count always equals getPublicRaces(...).length.
 function buildGetPublicRaceCount(dependencies = {}) {
   const raceModel = dependencies.Race || Race;
+  const settings = dependencies.appSettings || defaultAppSettings;
 
   return async function getPublicRaceCount({
     userId,
@@ -15,6 +18,23 @@ function buildGetPublicRaceCount(dependencies = {}) {
     excludeSeeded = false,
     hiddenSeededWindows = [],
   }) {
+    let sqlEnabled = false;
+    if (dependencies.publicRaceCountSqlV1Enabled != null) {
+      sqlEnabled = dependencies.publicRaceCountSqlV1Enabled === true;
+    } else if (!dependencies.Race || dependencies.appSettings) {
+      sqlEnabled = await isStrictFlagEnabled(
+        settings,
+        "publicRaceCountSqlV1Enabled"
+      );
+    }
+    if (sqlEnabled && typeof raceModel.countVisiblePublicRaces === "function") {
+      return raceModel.countVisiblePublicRaces({
+        userId,
+        supportsTeamRaces,
+        excludeSeeded,
+        hiddenSeededWindows,
+      });
+    }
     const hiddenWindows = new Set(hiddenSeededWindows.map(
       (row) => `${row.seedId}:${new Date(row.windowStart).toISOString()}`
     ));

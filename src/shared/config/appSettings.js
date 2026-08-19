@@ -20,6 +20,22 @@ const KNOWN_FLAGS = {
   // Default OFF; it changes no response or business behavior. Reads use the
   // existing 30-second settings cache and instrumentation issues no SQL itself.
   capacityPhaseMetricsV1Enabled: false,
+  // Request-path/payload optimization switches. Every switch is independently
+  // reversible and defaults OFF so deploying support cannot change any frozen
+  // client's response or server-side read plan.
+  raceProgressLeanProjectionV1Enabled: false,
+  legacyUploaderStepSamplePrefetchV1Enabled: false,
+  raceMessageLeanAccessV1Enabled: false,
+  raceListSqlSummaryV1Enabled: false,
+  apiRaceListCompactV1Enabled: false,
+  apiRaceBootstrapCompactV1Enabled: false,
+  homeRaceCardLeanLiveV1Enabled: false,
+  homeRaceCardParallelOptionalV1Enabled: false,
+  publicRaceCountSqlV1Enabled: false,
+  apiRaceMessageConditionalV1Enabled: false,
+  apiRacePowerupTargetContextV1Enabled: false,
+  racePowerupLeanUseContextV1Enabled: false,
+  apiLeaderboardCompactV1Enabled: false,
   // Accessory visual-region compatibility is additive at the API/schema level,
   // but enforcement stays dark until the app build that explains 409 conflicts
   // has rolled out. Frozen clients still receive the longstanding `{error}`.

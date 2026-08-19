@@ -147,6 +147,46 @@ const resolutionRaceSelect = {
   },
 };
 
+const powerupUseRosterParticipantSelect = {
+  id: true,
+  userId: true,
+  status: true,
+  totalSteps: true,
+  finishedAt: true,
+  forfeitedAt: true,
+  team: true,
+  joinedAt: true,
+  user: { select: { displayName: true } },
+};
+
+const powerupUseCasterSelect = {
+  ...powerupUseRosterParticipantSelect,
+  bonusSteps: true,
+  maxBonusSteps: true,
+  nextBoxAtSteps: true,
+  powerupSlots: true,
+  placement: true,
+  highMultiplierNotifiedAt: true,
+};
+
+const powerupUseRaceScalars = {
+  id: true,
+  name: true,
+  status: true,
+  startedAt: true,
+  scheduledStartAt: true,
+  endsAt: true,
+  timezone: true,
+  targetSteps: true,
+  timeBased: true,
+  powerupsEnabled: true,
+  powerupStepInterval: true,
+  isTeamRace: true,
+  teamSize: true,
+  teamAName: true,
+  teamBName: true,
+};
+
 // The STEP_SYNC_COMMITTED scope's race read (see
 // services/raceResolutionStepSyncScope.js). It is `resolutionRaceSelect` plus
 // ONE column, deliberately:
@@ -234,6 +274,32 @@ const Race = {
     });
   },
 
+  async findMessageAccessContext(id, userId) {
+    return prisma.race.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        seededBucketId: true,
+        tournamentId: true,
+        powerupsEnabled: true,
+        participants: {
+          where: { userId },
+          select: { userId: true, status: true },
+          take: 1,
+        },
+        tournament: {
+          select: {
+            participants: {
+              where: { userId, status: "ACCEPTED" },
+              select: { userId: true },
+              take: 1,
+            },
+          },
+        },
+      },
+    });
+  },
+
   // Capability guard for dynamic race routes. Deliberately lean: old clients
   // poll progress frequently, so checking whether an opaque id is a private
   // seeded bucket must not hydrate the full participant/accessory graph.
@@ -253,6 +319,23 @@ const Race = {
         // ordinary races) is part of detailsRelationInclude.
         ...participantInclude,
       },
+    });
+  },
+
+  async findProgressScoringContext(id) {
+    return prisma.race.findUnique({
+      where: { id },
+      include: {
+        participants: { orderBy: { joinedAt: "asc" } },
+        tournament: { select: { id: true, name: true, bracketSize: true } },
+      },
+    });
+  },
+
+  async findProgressStatus(id) {
+    return prisma.race.findUnique({
+      where: { id },
+      select: { status: true, winnerTeam: true },
     });
   },
 
@@ -308,6 +391,66 @@ const Race = {
     return prisma.race.findUnique({
       where: { id },
       select: resolutionRaceSelect,
+    });
+  },
+
+  async findPowerupUseContextV1(id, casterUserId) {
+    return prisma.$transaction(async (tx) => {
+      const race = await tx.race.findUnique({
+        where: { id },
+        select: {
+          ...powerupUseRaceScalars,
+          participants: {
+            where: { status: "ACCEPTED" },
+            select: powerupUseRosterParticipantSelect,
+            orderBy: { joinedAt: "asc" },
+          },
+        },
+      });
+      const caster = await tx.raceParticipant.findUnique({
+        where: { raceId_userId: { raceId: id, userId: casterUserId } },
+        select: powerupUseCasterSelect,
+      });
+      if (!race || !caster || caster.status !== "ACCEPTED") return race;
+      race.participants = race.participants.map((participant) =>
+        participant.userId === casterUserId ? caster : participant
+      );
+      return race;
+    }, {
+      isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+    });
+  },
+
+  // Target-picker read: accepted identity/team/forfeit rows only. It is
+  // intentionally distinct from the POST-use resolution read because picker
+  // data is advisory; the mutation always revalidates against fresh state.
+  async findPowerupTargetContext(id) {
+    return prisma.race.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        status: true,
+        powerupsEnabled: true,
+        participants: {
+          where: { status: "ACCEPTED" },
+          select: {
+            id: true,
+            userId: true,
+            status: true,
+            totalSteps: true,
+            finishedAt: true,
+            placement: true,
+            forfeitedAt: true,
+            team: true,
+            joinedAt: true,
+            powerupSlots: true,
+            user: {
+              select: { displayName: true, profilePhotoUrl: true },
+            },
+          },
+          orderBy: { joinedAt: "asc" },
+        },
+      },
     });
   },
 
@@ -614,6 +757,178 @@ const Race = {
     );
   },
 
+  async findSqlSummariesForUser(userId, extraCompletedRaceIds = []) {
+    const participantFilter = {
+      participants: { some: { userId, status: { not: "DECLINED" } } },
+    };
+    const relations = {
+      creator: { select: { id: true, displayName: true, profilePhotoUrl: true } },
+      winner: { select: { id: true, displayName: true, profilePhotoUrl: true } },
+    };
+    const [current, completed, injectedCompleted] = await Promise.all([
+      prisma.race.findMany({
+        where: { ...participantFilter, status: { not: "COMPLETED" } },
+        include: relations,
+        orderBy: { updatedAt: "desc" },
+      }),
+      prisma.race.findMany({
+        where: { ...participantFilter, status: "COMPLETED" },
+        include: relations,
+        orderBy: { completedAt: "desc" },
+        take: 10,
+      }),
+      extraCompletedRaceIds.length > 0
+        ? prisma.race.findMany({
+            where: {
+              ...participantFilter,
+              status: "COMPLETED",
+              id: { in: extraCompletedRaceIds },
+            },
+            include: relations,
+            orderBy: { completedAt: "desc" },
+          })
+        : Promise.resolve([]),
+    ]);
+    const completedById = new Map(
+      [...completed, ...injectedCompleted].map((race) => [race.id, race])
+    );
+    const races = [...current, ...completedById.values()].sort(
+      (a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)
+    );
+    if (races.length === 0) {
+      return { ambiguousFinisherOrder: false, races: [] };
+    }
+    const ids = races.map((race) => race.id);
+
+    const rows = await prisma.$queryRaw`
+      WITH accepted AS (
+        SELECT
+          rp.*,
+          ROW_NUMBER() OVER (
+            PARTITION BY rp.race_id
+            ORDER BY
+              CASE WHEN rp.finished_at IS NOT NULL THEN 0 ELSE 1 END ASC,
+              CASE WHEN rp.finished_at IS NOT NULL
+                   THEN COALESCE(rp.placement::bigint, 9007199254740991) END ASC,
+              CASE WHEN rp.finished_at IS NOT NULL THEN rp.finished_at END ASC,
+              CASE WHEN rp.finished_at IS NULL THEN COALESCE(rp.total_steps, 0) END DESC,
+              COALESCE(rp.joined_at, TIMESTAMP '1970-01-01 00:00:00') ASC,
+              rp.user_id COLLATE "C" ASC
+          ) AS persisted_position,
+          COUNT(*) OVER (
+            PARTITION BY rp.race_id, rp.placement, rp.finished_at
+          ) AS finish_key_count
+        FROM race_participants rp
+        WHERE rp.race_id IN (${Prisma.join(ids)})
+          AND rp.status = 'accepted'::"RaceParticipantStatus"
+      ), aggregates AS (
+        SELECT
+          race_id,
+          COUNT(*)::int AS accepted_count,
+          COUNT(*) FILTER (WHERE team = 'team_a'::"RaceTeam")::int AS team_a_count,
+          COUNT(*) FILTER (WHERE team = 'team_b'::"RaceTeam")::int AS team_b_count,
+          COALESCE(SUM(total_steps) FILTER (WHERE team = 'team_a'::"RaceTeam"), 0)::bigint AS team_a_steps,
+          COALESCE(SUM(total_steps) FILTER (WHERE team = 'team_b'::"RaceTeam"), 0)::bigint AS team_b_steps,
+          MAX(totals_updated_at) AS totals_as_of,
+          BOOL_OR(finished_at IS NOT NULL AND finish_key_count > 1) AS ambiguous_finisher_order
+        FROM accepted
+        GROUP BY race_id
+      )
+      SELECT
+        r.id AS "raceId",
+        COALESCE(a.accepted_count, 0)::int AS "acceptedCount",
+        COALESCE(a.team_a_count, 0)::int AS "teamACount",
+        COALESCE(a.team_b_count, 0)::int AS "teamBCount",
+        COALESCE(a.team_a_steps, 0)::text AS "teamASteps",
+        COALESCE(a.team_b_steps, 0)::text AS "teamBSteps",
+        a.totals_as_of AS "totalsAsOf",
+        COALESCE(a.ambiguous_finisher_order, FALSE) AS "ambiguousFinisherOrder",
+        mine.id AS "viewerParticipantId",
+        mine.status::text AS "viewerStatus",
+        mine.placement AS "viewerPlacement",
+        mine.buy_in_status::text AS "viewerBuyInStatus",
+        mine.payout_coins AS "viewerPayoutCoins",
+        mine.results_seen_at AS "viewerResultsSeenAt",
+        mine.invite_expires_at AS "viewerInviteExpiresAt",
+        mine.team::text AS "viewerTeam",
+        mine.forfeited_at AS "viewerForfeitedAt",
+        ranked.persisted_position::int AS "viewerPosition",
+        leader.id AS "leaderParticipantId",
+        leader.user_id AS "leaderUserId",
+        leader.total_steps AS "leaderTotalSteps",
+        leader.placement AS "leaderPlacement",
+        leader.finished_at AS "leaderFinishedAt",
+        leader.joined_at AS "leaderJoinedAt"
+      FROM races r
+      LEFT JOIN aggregates a ON a.race_id = r.id
+      LEFT JOIN race_participants mine
+        ON mine.race_id = r.id AND mine.user_id = ${userId}
+      LEFT JOIN accepted ranked ON ranked.id = mine.id
+      LEFT JOIN accepted leader
+        ON leader.race_id = r.id AND leader.persisted_position = 1
+      WHERE r.id IN (${Prisma.join(ids)})
+    `;
+    if (rows.some((row) => row.ambiguousFinisherOrder === true)) {
+      return { ambiguousFinisherOrder: true, races: [] };
+    }
+    const byRaceId = new Map(rows.map((row) => [row.raceId, row]));
+    return {
+      ambiguousFinisherOrder: false,
+      races: races.map((race) => {
+        const row = byRaceId.get(race.id) || {};
+        const viewer = row.viewerParticipantId
+          ? {
+              id: row.viewerParticipantId,
+              userId,
+              status: String(row.viewerStatus || "").toUpperCase(),
+              placement: row.viewerPlacement,
+              buyInStatus: String(row.viewerBuyInStatus || "NONE").toUpperCase(),
+              payoutCoins: row.viewerPayoutCoins,
+              resultsSeenAt: row.viewerResultsSeenAt,
+              inviteExpiresAt: row.viewerInviteExpiresAt,
+              team: row.viewerTeam ? String(row.viewerTeam).toUpperCase() : null,
+              forfeitedAt: row.viewerForfeitedAt,
+            }
+          : null;
+        const leader = row.leaderParticipantId
+          ? {
+              id: row.leaderParticipantId,
+              userId: row.leaderUserId,
+              status: "ACCEPTED",
+              totalSteps: row.leaderTotalSteps,
+              placement: row.leaderPlacement,
+              finishedAt: row.leaderFinishedAt,
+              joinedAt: row.leaderJoinedAt,
+            }
+          : null;
+        return {
+          ...race,
+          participants: [viewer, leader].filter(
+            (participant, index, list) => participant &&
+              list.findIndex((candidate) => candidate?.id === participant.id) === index
+          ),
+          _listSummary: {
+            acceptedCount: Number(row.acceptedCount || 0),
+            viewerPosition: row.viewerPosition == null
+              ? null
+              : Number(row.viewerPosition),
+            leaderUserId: row.leaderUserId || null,
+            leaderParticipantId: row.leaderParticipantId || null,
+            teamA: {
+              memberCount: Number(row.teamACount || 0),
+              totalSteps: Number(row.teamASteps || 0),
+            },
+            teamB: {
+              memberCount: Number(row.teamBCount || 0),
+              totalSteps: Number(row.teamBSteps || 0),
+            },
+            totalsAsOf: row.totalsAsOf || null,
+          },
+        };
+      }),
+    };
+  },
+
   async findActiveForUser(userId) {
     // Lean fetch used only by resolveRaceState + syncRacePowerupState. These
     // services only read race id/status/startedAt/targetSteps/powerupsEnabled/
@@ -848,6 +1163,56 @@ const Race = {
       },
       orderBy: { createdAt: "desc" },
     });
+  },
+
+  async countVisiblePublicRaces({
+    userId,
+    supportsTeamRaces = false,
+    excludeSeeded = false,
+    hiddenSeededWindows = [],
+  }) {
+    const teamPredicate = supportsTeamRaces
+      ? Prisma.sql`AND (r.is_team_race = FALSE OR r.status = 'pending'::"RaceStatus")`
+      : Prisma.sql`AND r.is_team_race = FALSE`;
+    const seedPredicate = excludeSeeded
+      ? Prisma.sql`AND r.seed_id IS NULL`
+      : Prisma.empty;
+    const hiddenPredicates = (hiddenSeededWindows || [])
+      .filter((row) => row?.seedId && row?.windowStart)
+      .map((row) => Prisma.sql`(
+        r.seed_id = ${row.seedId}
+        AND COALESCE(r.scheduled_start_at, r.started_at) = ${new Date(row.windowStart)}
+      )`);
+    const hiddenPredicate = hiddenPredicates.length > 0
+      ? Prisma.sql`AND NOT (${Prisma.join(hiddenPredicates, " OR ")})`
+      : Prisma.empty;
+
+    const rows = await prisma.$queryRaw`
+      SELECT COUNT(*)::int AS count
+      FROM races r
+      LEFT JOIN users creator ON creator.id = r.creator_id
+      WHERE r.is_public = TRUE
+        AND r.status IN ('pending'::"RaceStatus", 'active'::"RaceStatus")
+        AND r.tournament_id IS NULL
+        AND (r.creator_id IS NULL OR creator.is_review_account = FALSE)
+        AND NOT (r.status = 'pending'::"RaceStatus" AND r.seed_id IS NOT NULL)
+        ${seedPredicate}
+        ${teamPredicate}
+        ${hiddenPredicate}
+        AND NOT EXISTS (
+          SELECT 1 FROM race_participants mine
+          WHERE mine.race_id = r.id AND mine.user_id = ${userId}
+        )
+        AND (
+          r.max_participants IS NULL OR (
+            SELECT COUNT(*)
+            FROM race_participants accepted
+            WHERE accepted.race_id = r.id
+              AND accepted.status = 'accepted'::"RaceParticipantStatus"
+          ) < r.max_participants
+        )
+    `;
+    return Number(rows[0]?.count || 0);
   },
 
   // Distinct userIds of ACCEPTED participants in currently-ACTIVE races. Used

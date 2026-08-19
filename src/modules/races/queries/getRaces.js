@@ -134,10 +134,26 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
   // summaries never read. Falls back to findForUser for injected minimal test
   // fakes that only provide the legacy method (capability detection, matching
   // the bulk-or-fallback pattern used across this codebase).
-  const races =
-    typeof Race.findSummariesForUser === "function"
+  let races;
+  if (
+    options.sqlSummaryEnabled === true &&
+    typeof Race.findSqlSummariesForUser === "function"
+  ) {
+    const sqlResult = await Race.findSqlSummariesForUser(
+      userId,
+      options.extraCompletedRaceIds || []
+    );
+    // The legacy comparator has one anomalous duplicate-finisher case that no
+    // total SQL order can reproduce. This is the sole deliberate dual-read
+    // fallback; SQL errors are allowed to fail the request and never retry.
+    races = sqlResult?.ambiguousFinisherOrder === true
+      ? await Race.findSummariesForUser(userId, options.extraCompletedRaceIds || [])
+      : sqlResult.races;
+  } else {
+    races = typeof Race.findSummariesForUser === "function"
       ? await Race.findSummariesForUser(userId, options.extraCompletedRaceIds || [])
       : await Race.findForUser(userId);
+  }
 
   const active = [];
   const pending = [];
@@ -158,7 +174,7 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
   const leaderUserIds = visible
     .map(
       (race) =>
-        race.participants
+        race._listSummary?.leaderUserId || race.participants
           .filter((participant) => participant.status === "ACCEPTED")
           .sort(compareParticipantsForPlacement)[0]?.userId,
     )
@@ -304,7 +320,8 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
 
   for (const race of visible) {
     const myParticipant = myParticipantByRace.get(race.id);
-    const acceptedCount = race.participants.filter((p) => p.status === "ACCEPTED").length;
+    const acceptedCount = race._listSummary?.acceptedCount ??
+      race.participants.filter((p) => p.status === "ACCEPTED").length;
     // Legacy buy-in pot OR app-funded prize pool (race.fundedPrize decides).
     const money = buildRaceMoneyView({ race, acceptedCount });
     const { payouts: legacyPayouts, payoutTiers } = serializePayouts(money.payouts);
@@ -312,7 +329,8 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
       race.status === "COMPLETED"
         ? myParticipant?.placement ?? null
         : race.status === "ACTIVE"
-          ? getActivePlacement(race.participants, userId)
+          ? race._listSummary?.viewerPosition ??
+            getActivePlacement(race.participants, userId)
           : null;
     // Detour Sign hides the viewer's live placement on the race list, matching
     // the race-detail masking in getRaceProgress (status-ACTIVE effect rows,
@@ -388,10 +406,15 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
       // builds. It follows the exact persisted ordering used by myPlacement;
       // old clients ignore it and Redis availability cannot affect the shape.
       leader: getFirstPlaceRacer(
-        race.participants,
+        race._listSummary
+          ? race.participants.filter(
+              (participant) =>
+                participant.userId === race._listSummary.leaderUserId
+            )
+          : race.participants,
         userId,
         leaderUserById.get(
-          race.participants
+          race._listSummary?.leaderUserId || race.participants
             .filter((participant) => participant.status === "ACCEPTED")
             .sort(compareParticipantsForPlacement)[0]?.userId,
         ),
@@ -441,17 +464,31 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
       // list row can draw the mini scoreline without an N+1 fetch. Null on
       // individual races.
       teams: race.isTeamRace
-        ? buildTeamsBlockFromParticipants(race, race.participants)
+        ? race._listSummary
+          ? {
+              teamA: {
+                name: race.teamAName ?? null,
+                ...race._listSummary.teamA,
+              },
+              teamB: {
+                name: race.teamBName ?? null,
+                ...race._listSummary.teamB,
+              },
+              asOf: race._listSummary.totalsAsOf
+                ? new Date(race._listSummary.totalsAsOf).toISOString()
+                : null,
+            }
+          : buildTeamsBlockFromParticipants(race, race.participants)
         : null,
       // Flat convenience totals, kept alongside `teams` for older new-clients
       // that shipped reading these first.
       teamATotalSteps: race.isTeamRace
-        ? race.participants
+        ? race._listSummary?.teamA.totalSteps ?? race.participants
             .filter((p) => p.status === "ACCEPTED" && p.team === "TEAM_A")
             .reduce((sum, p) => sum + (p.totalSteps || 0), 0)
         : null,
       teamBTotalSteps: race.isTeamRace
-        ? race.participants
+        ? race._listSummary?.teamB.totalSteps ?? race.participants
             .filter((p) => p.status === "ACCEPTED" && p.team === "TEAM_B")
             .reduce((sum, p) => sum + (p.totalSteps || 0), 0)
         : null,

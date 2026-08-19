@@ -5,6 +5,7 @@ const { appSettings: defaultAppSettings } = require("../../../shared/config/appS
 const {
   isStrictFlagEnabled,
 } = require("../../../shared/config/isStrictFlagEnabled");
+const { Race: defaultRaceModel } = require("../../races/models/race");
 
 function normalizeTopSnapshotLimit(raw) {
   if (raw == null || raw === "") return 50;
@@ -22,9 +23,13 @@ function buildGetRaceMessageStreams(dependencies = {}) {
   const logger = dependencies.logger || console;
   const cache = dependencies.raceMessagesCache || raceMessagesCache;
   const settings = dependencies.appSettings || defaultAppSettings;
+  const raceModel = dependencies.Race || defaultRaceModel;
 
-  async function getAccessContext(userId, raceId) {
-    const race = await prisma.race.findUnique({
+  async function getAccessContext(userId, raceId, leanAccessEnabled) {
+    const race = leanAccessEnabled &&
+        typeof raceModel.findMessageAccessContext === "function"
+      ? await raceModel.findMessageAccessContext(raceId, userId)
+      : await prisma.race.findUnique({
       where: { id: raceId },
       select: {
         id: true,
@@ -82,7 +87,15 @@ function buildGetRaceMessageStreams(dependencies = {}) {
     includeUser,
     limit,
   }) {
-    const accessContext = await getAccessContext(userId, raceId);
+    const leanAccessEnabled = await isStrictFlagEnabled(
+      settings,
+      "raceMessageLeanAccessV1Enabled"
+    );
+    const accessContext = await getAccessContext(
+      userId,
+      raceId,
+      leanAccessEnabled
+    );
     const requested = { USER: includeUser, SYSTEM: true };
     const pageLimit = normalizeTopSnapshotLimit(limit);
     const userPromise = includeUser

@@ -62,6 +62,9 @@ const {
 const {
   buildTeamsBlockFromParticipants,
 } = require("../../races/teamRaces");
+const { POWERUP_COPY_TYPES } = require("../constants/powerupCopySeed");
+const { appSettings: defaultAppSettings } = require("../../../shared/config/appSettings");
+const { isStrictFlagEnabled } = require("../../../shared/config/isStrictFlagEnabled");
 
 // SIGNAL_JAMMER is a single-target attack (store-only): it is OFFENSIVE +
 // TARGETED so the shared targeting validation, finished-target rejection, and
@@ -851,6 +854,7 @@ function buildUsePowerup(dependencies = {}) {
   const effectModel = dependencies.RaceActiveEffect || RaceActiveEffect;
   const eventModel = dependencies.RacePowerupEvent || RacePowerupEvent;
   const raceModel = dependencies.Race || Race;
+  const settings = dependencies.appSettings || defaultAppSettings;
   const userModel = dependencies.User || User;
   const upgradeEventModel = dependencies.PowerupUpgradeEvent || PowerupUpgradeEvent;
   const deductCoinsAtomic = dependencies.deductCoinsAtomic || defaultDeductCoinsAtomic;
@@ -961,9 +965,24 @@ function buildUsePowerup(dependencies = {}) {
     }
 
     if (!race) {
-      race = typeof raceModel.findPowerupUseContext === "function"
-        ? await raceModel.findPowerupUseContext(raceId)
-        : await raceModel.findById(raceId);
+      let leanUseContextEnabled = false;
+      if (dependencies.racePowerupLeanUseContextV1Enabled != null) {
+        leanUseContextEnabled =
+          dependencies.racePowerupLeanUseContextV1Enabled === true;
+      } else if (!hasInjectedDeps || dependencies.appSettings) {
+        leanUseContextEnabled = await isStrictFlagEnabled(
+          settings,
+          "racePowerupLeanUseContextV1Enabled"
+        );
+      }
+      const knownNonTrailType =
+        powerup.type !== "TRAIL_MINE" && POWERUP_COPY_TYPES.includes(powerup.type);
+      race = leanUseContextEnabled && knownNonTrailType &&
+          typeof raceModel.findPowerupUseContextV1 === "function"
+        ? await raceModel.findPowerupUseContextV1(raceId, userId)
+        : typeof raceModel.findPowerupUseContext === "function"
+          ? await raceModel.findPowerupUseContext(raceId)
+          : await raceModel.findById(raceId);
     }
     if (!race || race.status !== "ACTIVE") {
       throw new PowerupUseError("Race is not active", 400);

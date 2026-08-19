@@ -81,6 +81,7 @@ const {
   buildRaceResolutionInputFingerprint: defaultBuildInputFingerprint,
 } = require("../services/raceResolutionInputFingerprint");
 const { isStrictFlagEnabled } = require("../../../shared/config/isStrictFlagEnabled");
+const userPresentationCache = require("../../social/services/userPresentationCache");
 
 // The (releaseChannel × supportsCharacters × supportsRemoteAssets) combinations
 // `characterPresentation` can produce. Closed set: `resolveReleaseChannel` only
@@ -94,6 +95,7 @@ function presentationKey(channel, supportsCharacters, supportsRemoteAssets) {
 }
 
 function buildPresentationVariants(user) {
+  if (!user) return {};
   const out = {};
   for (const channel of PRESENTATION_CHANNELS) {
     for (const supportsCharacters of [false, true]) {
@@ -284,6 +286,8 @@ function buildGetRaceProgress(deps = {}) {
     deps.raceResolutionDisplayArtifact || defaultDisplayArtifactStore;
   const buildInputFingerprint =
     deps.buildRaceResolutionInputFingerprint || defaultBuildInputFingerprint;
+  const presentationCache =
+    deps.userPresentationCache || userPresentationCache;
 
   async function displayArtifactReuseEnabled() {
     if (deps.raceResolutionDisplayArtifactReuseV1Enabled != null) {
@@ -661,7 +665,10 @@ function buildGetRaceProgress(deps = {}) {
       }))
     );
 
-    const updatedRace = await raceModel.findById(raceId);
+    const updatedRace = race._leanProgressProjection &&
+        typeof raceModel.findProgressStatus === "function"
+      ? await raceModel.findProgressStatus(raceId)
+      : await raceModel.findById(raceId);
     const raceForStatus = updatedRace || race;
 
     // Team H2H block (TR-401), computed from TRUE totals before any display
@@ -700,9 +707,13 @@ function buildGetRaceProgress(deps = {}) {
       participants: stepTotals.map(({ participant, totalSteps }) => ({
         participantId: participant.id,
         userId: participant.userId,
-        displayName: participant.user.displayName,
-        profilePhotoUrl: participant.user.profilePhotoUrl,
-        presentation: buildPresentationVariants(participant.user),
+        ...(participant.user
+          ? {
+              displayName: participant.user.displayName,
+              profilePhotoUrl: participant.user.profilePhotoUrl,
+              presentation: buildPresentationVariants(participant.user),
+            }
+          : {}),
         totalSteps,
         finishedAt: participant.finishedAt,
         forfeitedAt: participant.forfeitedAt ?? null,
@@ -717,6 +728,9 @@ function buildGetRaceProgress(deps = {}) {
       scoringTimeZone,
       asOf: nowTime,
       source: persist ? "replay-legacy" : "replay",
+      schemaVersion: race._leanProgressProjection
+        ? snapshotStore.LEAN_SCHEMA_VERSION
+        : snapshotStore.SCHEMA_VERSION,
     });
   }
 
@@ -765,9 +779,13 @@ function buildGetRaceProgress(deps = {}) {
       participants: stepTotals.map(({ participant, totalSteps }) => ({
         participantId: participant.id,
         userId: participant.userId,
-        displayName: participant.user.displayName,
-        profilePhotoUrl: participant.user.profilePhotoUrl,
-        presentation: buildPresentationVariants(participant.user),
+        ...(participant.user
+          ? {
+              displayName: participant.user.displayName,
+              profilePhotoUrl: participant.user.profilePhotoUrl,
+              presentation: buildPresentationVariants(participant.user),
+            }
+          : {}),
         totalSteps,
         finishedAt: participant.finishedAt,
         forfeitedAt: participant.forfeitedAt ?? null,
@@ -789,6 +807,9 @@ function buildGetRaceProgress(deps = {}) {
       scoringTimeZone,
       asOf,
       source: "replay-artifact",
+      schemaVersion: race._leanProgressProjection
+        ? snapshotStore.LEAN_SCHEMA_VERSION
+        : snapshotStore.SCHEMA_VERSION,
     });
   }
 
@@ -863,9 +884,13 @@ function buildGetRaceProgress(deps = {}) {
       return {
         participantId: p.id,
         userId: p.userId,
-        displayName: p.user.displayName,
-        profilePhotoUrl: p.user.profilePhotoUrl,
-        presentation: buildPresentationVariants(p.user),
+        ...(p.user
+          ? {
+              displayName: p.user.displayName,
+              profilePhotoUrl: p.user.profilePhotoUrl,
+              presentation: buildPresentationVariants(p.user),
+            }
+          : {}),
         totalSteps: totalFor(p),
         finishedAt: p.finishedAt,
         forfeitedAt: p.forfeitedAt ?? null,
@@ -912,6 +937,9 @@ function buildGetRaceProgress(deps = {}) {
       scoringTimeZone,
       asOf: nowTime,
       source: "persisted",
+      schemaVersion: race._leanProgressProjection
+        ? snapshotStore.LEAN_SCHEMA_VERSION
+        : snapshotStore.SCHEMA_VERSION,
     });
   }
 
@@ -949,6 +977,7 @@ function buildGetRaceProgress(deps = {}) {
     participantsView = null,
     participantsOffset = 0,
     participantsLimit = 10,
+    hydratePresentation = false,
   }) {
     const snapRace = snapshot.race || {};
     const entries = snapshot.participants || [];
@@ -1379,6 +1408,43 @@ function buildGetRaceProgress(deps = {}) {
       };
     }
 
+    // The lean progress context deliberately carries no participant user/
+    // accessory graph. Hydrate only the rows that survived illusion masking,
+    // imposter swapping, sorting, and page selection. A Detour-masked row is
+    // also intentionally skipped: loading its presentation would add work and
+    // make it easier for a future serializer change to leak the concealed
+    // identity.
+    if (hydratePresentation) {
+      const visibleIds = result.participants
+        .filter(
+          (participant) =>
+            participant.stealthed !== true && participant.displayName !== "???"
+        )
+        .map((participant) => participant.userId);
+      const presentations = await presentationCache.getMany(visibleIds, true);
+      result.participants = result.participants.map((participant) => {
+        if (
+          participant.stealthed === true ||
+          participant.displayName === "???"
+        ) {
+          return participant;
+        }
+        const presentation = presentations.get(participant.userId);
+        if (!presentation) return participant;
+        return {
+          ...participant,
+          displayName: presentation.displayName,
+          profilePhotoUrl: presentation.profilePhotoUrl,
+          ...characterPresentation(
+            presentation,
+            supportsCharacters,
+            releaseChannel,
+            supportsRemoteAssets
+          ),
+        };
+      });
+    }
+
     return result;
   }
 
@@ -1428,13 +1494,45 @@ function buildGetRaceProgress(deps = {}) {
       // the public-preview carve-out — the kill switch and the race's own
       // public/non-tournament shape still have to agree (canReadRacePreview).
       previewViewer = false,
+      // Internal typed-target consumer: it needs the complete honest roster,
+      // but not the participant user/accessory graph. Its own endpoint flag is
+      // the operation gate; Redis standings still has to be enabled before the
+      // lean context is safe.
+      leanScoringContext = false,
     } = {}
   ) {
-    const race = await raceModel.findById(raceId);
+    const cacheOn = await standingsCacheEnabled();
+    const leanProjectionEnabled =
+      cacheOn &&
+      (participantsView === "participants-v1" || leanScoringContext === true) &&
+      typeof raceModel.findProgressScoringContext === "function" &&
+      (leanScoringContext === true ||
+        (await isStrictFlagEnabled(
+          settings,
+          "raceProgressLeanProjectionV1Enabled"
+        )));
+    let race = leanProjectionEnabled
+      ? await raceModel.findProgressScoringContext(raceId)
+      : await raceModel.findById(raceId);
     if (!race) {
       const error = new Error("Race not found");
       error.statusCode = 404;
       throw error;
+    }
+    // Lobby/result serializers still require their legacy full graph. ACTIVE
+    // solo and team serializers use only scoring rows plus bounded visible
+    // presentation, so both can take the lean context.
+    let usingLeanProjection =
+      leanProjectionEnabled &&
+      race.status === "ACTIVE";
+    if (leanProjectionEnabled && !usingLeanProjection) {
+      race = await raceModel.findById(raceId);
+    }
+    if (usingLeanProjection) {
+      Object.defineProperty(race, "_leanProgressProjection", {
+        value: true,
+        enumerable: false,
+      });
     }
     if (resolvedContext && typeof resolvedContext === "object") {
       resolvedContext.race = race;
@@ -1518,8 +1616,9 @@ function buildGetRaceProgress(deps = {}) {
     // requester's header tz — legacy behavior, and the reason the snapshot
     // carries its scoring tz (see cacheKeys.raceProgress).
     const scoringTimeZone = raceTimeZone(race, timeZone);
-    const cacheOn = await standingsCacheEnabled();
-
+    const snapshotSchemaVersion = usingLeanProjection
+      ? snapshotStore.LEAN_SCHEMA_VERSION
+      : snapshotStore.SCHEMA_VERSION;
     let snapshot;
     if (isPublicPreview) {
       // ── STRICTLY READ-ONLY PREVIEW PATH ───────────────────────────────────
@@ -1546,7 +1645,10 @@ function buildGetRaceProgress(deps = {}) {
       // invalidation set unenumerable (cacheKeys.js).
       let usable = null;
       if (cacheOn && !snapshotStore.isBypassed()) {
-        const cached = await snapshotStore.readSnapshot(raceId);
+        const cached = await snapshotStore.readSnapshot(
+          raceId,
+          snapshotSchemaVersion
+        );
         if (cached && snapshotStore.matchesTimeZone(cached, scoringTimeZone)) {
           usable = cached;
           snapshotStore.__bump("snapshotHits");
@@ -1569,7 +1671,10 @@ function buildGetRaceProgress(deps = {}) {
       // still be sitting in Redis. Serve Postgres until the retry lands (§3).
       snapshot = await loadPersistedState({ race, raceId, scoringTimeZone });
     } else {
-      const cached = await snapshotStore.readSnapshot(raceId);
+      const cached = await snapshotStore.readSnapshot(
+        raceId,
+        snapshotSchemaVersion
+      );
       const usable =
         cached && snapshotStore.matchesTimeZone(cached, scoringTimeZone)
           ? cached
@@ -1690,7 +1795,12 @@ function buildGetRaceProgress(deps = {}) {
           // so a Redis outage costs a PING, not a second, per request.
           let waited = null;
           if ((await redisCache.healthStatus()) === "ok") {
-            waited = await snapshotStore.waitForSnapshot(raceId, scoringTimeZone);
+            waited = await snapshotStore.waitForSnapshot(
+              raceId,
+              scoringTimeZone,
+              undefined,
+              snapshotSchemaVersion
+            );
           }
           if (waited) {
             snapshotStore.__bump("staleServes");
@@ -1727,6 +1837,7 @@ function buildGetRaceProgress(deps = {}) {
       participantsView,
       participantsOffset,
       participantsLimit,
+      hydratePresentation: usingLeanProjection,
     });
   };
 

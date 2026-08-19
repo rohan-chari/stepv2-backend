@@ -34,6 +34,7 @@ const { prisma: defaultPrisma } = require("../../db");
 const derivedCache = require("../../shared/cache/derivedCache");
 const cacheKeys = require("../../shared/cache/cacheKeys");
 const { getInboxUnreadCount } = require("../inbox");
+const { buildHomeRaceCardResponse } = require("./buildHomeRaceCardResponse");
 
 function createHomeRouter(dependencies = {}) {
   const router = Router();
@@ -63,6 +64,21 @@ function createHomeRouter(dependencies = {}) {
     dependencies.getFriendsSummary || defaultGetFriendsSummary;
   const settings = dependencies.appSettings || appSettings;
   const prisma = dependencies.prisma || defaultPrisma;
+  const assembleHomeRaceCard = dependencies.buildHomeRaceCardResponse ||
+    buildHomeRaceCardResponse({
+      getHomeRaceCard,
+      getHomeShellPresentation,
+      getFriendsSummary,
+      getNextRaceHome: getNextRaceHomeFn,
+      GlobalStepEvent: globalStepEventModel,
+      getStepMilestonesToday,
+      getAdExtraSpinStatus,
+      getInboxUnreadCount: dependencies.getInboxUnreadCount || getInboxUnreadCount,
+      adRewardsConfig,
+      appSettings: settings,
+      prisma,
+      logger: dependencies.logger || console,
+    });
 
   router.use(requireAuth);
 
@@ -89,6 +105,46 @@ function createHomeRouter(dependencies = {}) {
       const compact =
         req.query.view === "shell-v1" &&
         (await isStrictFlagEnabled(settings, "apiHomeShellV1Enabled"));
+      // Opt-in flag set only by new app builds. Without it, response is the
+      // legacy single-state shape so older clients are unaffected.
+      const homeActiveRaces =
+        req.query.homeActiveRaces === "1" || req.query.homeActiveRaces === "true";
+      // §6.3 opt-in: only meaningful together with homeActiveRaces. Old clients
+      // never send it and keep the live-computation path.
+      const homePersistedTotals =
+        req.query.homePersistedTotals === "1" ||
+        req.query.homePersistedTotals === "true";
+      const leanLiveEnabled = await isStrictFlagEnabled(
+        settings,
+        "homeRaceCardLeanLiveV1Enabled"
+      );
+      if (
+        await isStrictFlagEnabled(
+          settings,
+          "homeRaceCardParallelOptionalV1Enabled"
+        )
+      ) {
+        const result = await assembleHomeRaceCard({
+          user: req.user,
+          timeZone: req.timeZone,
+          releaseChannel: req.releaseChannel,
+          supportsCharacters: req.clientFeatures?.has("characters") ?? false,
+          supportsRemoteAssets:
+            req.clientFeatures?.has("remote_assets") ?? false,
+          supportsTeamRaces: req.clientFeatures?.has("team_races") ?? false,
+          supportsNextRace: supportsNextRace(req.clientFeatures),
+          supportsAds: req.clientFeatures?.has("ads") ?? false,
+          supportsImpactSummaries:
+            req.clientFeatures?.has("impact_summaries") ?? false,
+          supportsInbox: req.clientFeatures?.has("inbox_v1") ?? false,
+          compactShell: compact,
+          homeActiveRaces,
+          homePersistedTotals,
+          localDate: req.query.localDate,
+          leanLiveEnabled,
+        });
+        return res.json(result);
+      }
       const optionalShellPromises = compact
         ? [
             getHomeShellPresentation({
@@ -102,15 +158,6 @@ function createHomeRouter(dependencies = {}) {
             getFriendsSummary(req.user.id),
           ]
         : null;
-      // Opt-in flag set only by new app builds. Without it, response is the
-      // legacy single-state shape so older clients are unaffected.
-      const homeActiveRaces =
-        req.query.homeActiveRaces === "1" || req.query.homeActiveRaces === "true";
-      // §6.3 opt-in: only meaningful together with homeActiveRaces. Old clients
-      // never send it and keep the live-computation path.
-      const homePersistedTotals =
-        req.query.homePersistedTotals === "1" ||
-        req.query.homePersistedTotals === "true";
       const result = await getHomeRaceCard({
         userId: req.user.id,
         homeActiveRaces,
@@ -125,6 +172,7 @@ function createHomeRouter(dependencies = {}) {
         releaseChannel: req.releaseChannel,
         // TR-702/809: old clients never get a team race on the Home card.
         supportsTeamRaces: req.clientFeatures?.has("team_races") ?? false,
+        leanLiveEnabled,
       });
 
       // Character powers were removed. The key is still sent (always false) so

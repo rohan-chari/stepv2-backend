@@ -25,4 +25,27 @@ async function bumpManyScoringInputVersions(client, userIds) {
   );
 }
 
-module.exports = { bumpScoringInputVersion, bumpManyScoringInputVersions };
+// Legacy rows predate generation tracking, and a sample reconciliation that
+// keeps no incoming rows is intentionally a no-op. The uploader optimization
+// therefore materializes the fence row before it captures inputs. INSERT is
+// idempotent and does not advance an existing generation.
+async function materializeAndReadScoringInputVersion(client, userId) {
+  if (!client || !userId) return null;
+  await client.$executeRaw`
+    INSERT INTO "user_scoring_input_versions" ("user_id", "generation", "updated_at")
+    VALUES (${userId}, 1, CURRENT_TIMESTAMP)
+    ON CONFLICT ("user_id") DO NOTHING
+  `;
+  const rows = await client.$queryRaw`
+    SELECT "generation"
+    FROM "user_scoring_input_versions"
+    WHERE "user_id" = ${userId}
+  `;
+  return rows[0]?.generation ?? null;
+}
+
+module.exports = {
+  bumpScoringInputVersion,
+  bumpManyScoringInputVersions,
+  materializeAndReadScoringInputVersion,
+};

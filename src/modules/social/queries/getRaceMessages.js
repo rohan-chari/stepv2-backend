@@ -183,6 +183,20 @@ function buildGetRaceMessages(dependencies = {}) {
         }
       }
     }
+    if (stealthedNames.size < stealthedUserIds.size) {
+      const missingIds = [...stealthedUserIds].filter(
+        (stealthedUserId) => !stealthedNames.has(stealthedUserId)
+      );
+      if (missingIds.length > 0) {
+        const names = await userPresentationCache.getMany(missingIds, true);
+        for (const stealthedUserId of missingIds) {
+          const user = names.get(stealthedUserId);
+          if (user?.displayName) {
+            stealthedNames.set(stealthedUserId, user.displayName);
+          }
+        }
+      }
+    }
 
     // C2 (spec §5 Phase C): only the exact default shape may be served from the
     // cache. A cursor, a non-50 limit, or the merged (no-`kind`) feed bypasses

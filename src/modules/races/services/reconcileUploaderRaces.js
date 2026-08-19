@@ -25,6 +25,15 @@ const {
 const {
   startCapacityPhase,
 } = require("../../../shared/observability/capacityPhaseMetrics");
+const { prisma: defaultPrisma } = require("../../../db");
+const { appSettings: defaultAppSettings } = require("../../../shared/config/appSettings");
+const { isStrictFlagEnabled } = require("../../../shared/config/isStrictFlagEnabled");
+const {
+  materializeAndReadScoringInputVersion,
+} = require("../../steps/services/scoringInputVersion");
+const {
+  prefetchUploaderScoringInputs: defaultPrefetchUploaderScoringInputs,
+} = require("./uploaderScoringPrefetch");
 
 // Narrowly-scoped uploader reconciliation for POST /steps/sync-v2 (§6.4 / Phase
 // C2). For each of the uploader's ACTIVE races it computes and persists ONLY the
@@ -34,11 +43,13 @@ const {
 //
 // It explicitly does NOT evaluate trail mines, overtakes, rival totals, rival
 // writes, placement events, or any other cross-participant work — the durable
-// full-field worker owns all of that. Each race is processed under the shared
-// per-race advisory lock, in stable sorted race-id order, so it never interleaves
-// with the worker/legacy/placement paths or deadlocks a multi-race user.
+// full-field worker owns all of that. The historical lock wrapper is now a
+// deliberate passthrough; the optional prefetch path instead fences the only
+// participant write with the uploader's scoring-input generation. Stable race
+// order remains for compatibility with other ordered multi-race paths.
 
 function buildReconcileUploaderRaces(dependencies = {}) {
+  const hasInjectedDeps = Object.keys(dependencies).length > 0;
   const raceModel = dependencies.Race || Race;
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
   const stepsModel = dependencies.Steps || Steps;
@@ -50,6 +61,106 @@ function buildReconcileUploaderRaces(dependencies = {}) {
   const withRaceResolutionLock =
     dependencies.withRaceResolutionLock || defaultWithRaceResolutionLock;
   const now = dependencies.now || (() => new Date());
+  const prisma = dependencies.prisma || defaultPrisma;
+  const settings = dependencies.appSettings || defaultAppSettings;
+  const prefetchUploaderScoringInputs =
+    dependencies.prefetchUploaderScoringInputs ||
+    defaultPrefetchUploaderScoringInputs;
+
+  async function prefetchEnabled() {
+    if (dependencies.legacyUploaderStepSamplePrefetchV1Enabled != null) {
+      return dependencies.legacyUploaderStepSamplePrefetchV1Enabled === true;
+    }
+    if (hasInjectedDeps && !dependencies.appSettings) return false;
+    return isStrictFlagEnabled(
+      settings,
+      "legacyUploaderStepSamplePrefetchV1Enabled"
+    );
+  }
+
+  async function calculateUploaderRace({
+    capacity,
+    race,
+    participant,
+    currentTime,
+    baseStepsModel,
+    baseStepSampleModel,
+    globalEvents,
+    requestTimeZone,
+  }) {
+    const scoreTz = raceTimeZone(race, requestTimeZone);
+    const { baseAdjusted, hasSampleData } = await capacity.measurePhase(
+      "stepSampleScoring",
+      () => calculateBaseAdjusted({
+        participant,
+        raceStartedAt: race.startedAt,
+        timeZone: scoreTz,
+        stepsModel: baseStepsModel,
+        stepSampleModel: baseStepSampleModel,
+        now: currentTime,
+      })
+    );
+    const { total, leechTransfers } = await capacity.measurePhase(
+      "effectScoring",
+      () => calculateCurrentTotal({
+        raceId: race.id,
+        racePowerupsEnabled: race.powerupsEnabled,
+        participant,
+        baseAdjusted,
+        hasSampleData,
+        raceActiveEffectModel,
+        stepSampleModel,
+        globalEvents,
+        now: currentTime,
+      })
+    );
+    const hitchhikeCopies = race.powerupsEnabled
+      ? await capacity.measurePhase("hitchhikeLoad", () =>
+          collectRaceHitchhikeCopies({
+            raceId: race.id,
+            raceEndsAt: race.endsAt,
+            participants: race.participants,
+            raceActiveEffectModel,
+            stepSampleModel,
+            now: currentTime,
+            globalEvents,
+          })
+        )
+      : [];
+    const leechFinals = applyLeechTransfers(
+      applyHitchhikeCopies(
+        [{
+          participantId: participant.id,
+          userId: participant.userId,
+          preLeechTotal: total,
+          leechTransfers,
+        }],
+        hitchhikeCopies
+      )
+    );
+    const finalTotal = leechFinals.get(participant.id) ?? total;
+    const boxTz = raceTimeZone(race, "UTC");
+    let boxBaseAdjusted = baseAdjusted;
+    if (scoreTz !== boxTz) {
+      ({ baseAdjusted: boxBaseAdjusted } = await capacity.measurePhase(
+        "boxStepSampleScoring",
+        () => calculateBaseAdjusted({
+          participant,
+          raceStartedAt: race.startedAt,
+          timeZone: boxTz,
+          stepsModel: baseStepsModel,
+          stepSampleModel: baseStepSampleModel,
+          now: currentTime,
+        })
+      ));
+    }
+    const boxEffectiveSteps = computeBoxEffectiveSteps({
+      baseAdjusted: boxBaseAdjusted,
+      bonusSteps: participant.bonusSteps || 0,
+      maxBonusSteps: participant.maxBonusSteps || 0,
+    });
+    return { baseAdjusted, finalTotal, boxEffectiveSteps };
+  }
 
   return async function reconcileUploaderRaces({
     userId,
@@ -66,6 +177,29 @@ function buildReconcileUploaderRaces(dependencies = {}) {
       "activeRaceLoad",
       () => raceModel.findActiveForUser(userId),
     );
+    const usePrefetch =
+      (await prefetchEnabled()) &&
+      typeof participantModel.updateUploaderTotalsIfScoringVersion === "function";
+    let capturedGeneration = null;
+    let prefetched = null;
+    if (usePrefetch) {
+      capturedGeneration = await materializeAndReadScoringInputVersion(
+        prisma,
+        userId
+      );
+      const asOf = now();
+      prefetched = await capacity.measurePhase("stepSamplePrefetch", () =>
+        prefetchUploaderScoringInputs({
+          userId,
+          races,
+          requestTimeZone: timeZone,
+          asOf,
+          Steps: stepsModel,
+          StepSample: stepSampleModel,
+          GlobalStepEvent: globalStepEventModel,
+        })
+      );
+    }
     // Stable sorted order to avoid advisory-lock deadlocks across paths.
     const ordered = [...races].sort((a, b) => String(a.id).localeCompare(String(b.id)));
 
@@ -88,135 +222,111 @@ function buildReconcileUploaderRaces(dependencies = {}) {
 
       await capacity.measurePhase("perRaceReconciliation", () =>
         withRaceResolutionLock(race.id, async () => {
-        const currentTime = now();
-
-        let globalEvents = [];
-        try {
-          globalEvents =
-            (await capacity.measurePhase(
-              "globalEventLoad",
-              () => globalStepEventModel.findActiveInRange(
-                race.startedAt,
-                currentTime
-              ),
-            )) || [];
-        } catch {
-          globalEvents = [];
-        }
-
-        const scoreTz = raceTimeZone(race, timeZone);
-        const { baseAdjusted, hasSampleData } = await capacity.measurePhase(
-          "stepSampleScoring",
-          () => calculateBaseAdjusted({
-          participant,
-          raceStartedAt: race.startedAt,
-          timeZone: scoreTz,
-          stepsModel,
-          stepSampleModel,
-          now: currentTime,
-          }),
-        );
-
-        const { total, leechTransfers } = await capacity.measurePhase(
-          "effectScoring",
-          () => calculateCurrentTotal({
-          raceId: race.id,
-          racePowerupsEnabled: race.powerupsEnabled,
-          participant,
-          baseAdjusted,
-          hasSampleData,
-          raceActiveEffectModel,
-          stepSampleModel,
+        let workingRace = race;
+        let workingParticipant = participant;
+        let expectedGeneration = capturedGeneration;
+        let currentTime = prefetched?.asOf || now();
+        let globalEvents = prefetched
+          ? prefetched.globalEventsForRace(workingRace)
+          : await capacity.measurePhase("globalEventLoad", async () => {
+              try {
+                return (await globalStepEventModel.findActiveInRange(
+                  workingRace.startedAt,
+                  currentTime
+                )) || [];
+              } catch {
+                return [];
+              }
+            });
+        let calculation = await calculateUploaderRace({
+          capacity,
+          race: workingRace,
+          participant: workingParticipant,
+          currentTime,
+          baseStepsModel: prefetched?.stepsModel || stepsModel,
+          baseStepSampleModel: prefetched?.stepSampleModel || stepSampleModel,
           globalEvents,
-          now: currentTime,
-          }),
-        );
-
-        // §5: apply DRAIN-ONLY leech for the uploader. This narrow path persists
-        // only the uploader's own row, so we resolve the leeches TARGETING the
-        // uploader (draining their pre-leech total, floored at 0) but do NOT
-        // compute the uploader's attacker credit for leeches THEY cast on rivals —
-        // that requires the victims' availability and is applied by the durable
-        // full-field worker (resolveRaceState) shortly after, matching the same
-        // rival-staleness tradeoff sync-v2 already accepts (D14). Passing a single
-        // entry yields drain-only by construction: with no attacker participant
-        // present, applyLeechTransfers credits nobody.
-        // §7.3: fold in the uploader's OWN hitchhike copies before the leech
-        // resolution, exactly as the race-wide assembly sites do. Unlike leech
-        // attacker credit, this is EXACT on a single-participant path — a copy
-        // depends only on the target's step history, never on victim
-        // availability — so the uploader's total never dips below what
-        // getRaceProgress will show them a moment later.
-        const hitchhikeCopies = race.powerupsEnabled
-          ? await capacity.measurePhase(
-            "hitchhikeLoad",
-            () => collectRaceHitchhikeCopies({
-              raceId: race.id,
-              raceEndsAt: race.endsAt,
-              participants: race.participants,
-              raceActiveEffectModel,
-              stepSampleModel,
-              now: currentTime,
-              globalEvents,
-            }),
-          )
-          : [];
-
-        const leechFinals = applyLeechTransfers(
-          applyHitchhikeCopies(
-            [
-              {
-                participantId: participant.id,
-                userId: participant.userId,
-                preLeechTotal: total,
-                leechTransfers,
-              },
-            ],
-            hitchhikeCopies
-          )
-        );
-        const finalTotal = leechFinals.get(participant.id) ?? total;
-
-        // The uploader's own row carries its RAW walked total too (2026-08-09,
-        // docs/box-raw-steps-position-and-option-h-requirements.md). This is
-        // the FRESHEST raw source in the system — it runs on the step upload
-        // itself — and writing it here is what heals a race's odds position
-        // between worker cycles. High-watered: a re-sync that rewrites
-        // step_samples downward must never move a player's odds backwards.
-        // Frozen participants returned above, so they are never advanced.
-        const updatedParticipant = await capacity.measurePhase(
-          "participantPersist",
-          () => participantModel.updateStepTotals(participant.id, {
-            totalSteps: finalTotal,
-            rawSteps: nextRawSteps(participant.rawSteps, baseAdjusted),
-          }),
-        );
-
-        // Box progress uses the RAW-walked box total in boxTz = raceTimeZone(
-        // race, "UTC") — device-independent, immune to buff/debuff multipliers —
-        // exactly like the resolver's userBoxEffectiveSteps.
-        const boxTz = raceTimeZone(race, "UTC");
-        let boxBaseAdjusted;
-        if (scoreTz === boxTz) {
-          boxBaseAdjusted = baseAdjusted;
-        } else {
-          ({ baseAdjusted: boxBaseAdjusted } = await capacity.measurePhase(
-            "boxStepSampleScoring",
-            () => calculateBaseAdjusted({
-            participant,
-            raceStartedAt: race.startedAt,
-            timeZone: boxTz,
-            stepsModel,
-            stepSampleModel,
-            now: currentTime,
-            }),
-          ));
-        }
-        const boxEffectiveSteps = computeBoxEffectiveSteps({
-          baseAdjusted: boxBaseAdjusted,
-          bonusSteps: participant.bonusSteps || 0,
-          maxBonusSteps: participant.maxBonusSteps || 0,
+          requestTimeZone: timeZone,
         });
+
+        let updatedParticipant;
+        if (usePrefetch) {
+          // An upload can commit after the shared prefetch. The version-row
+          // lock makes the participant write conditional on the exact captured
+          // generation. A mismatch reloads just in time and retries the same
+          // atomic path; no stale calculation is ever written.
+          for (let attempt = 0; attempt < 3; attempt += 1) {
+            const rawSteps = nextRawSteps(
+              workingParticipant.rawSteps,
+              calculation.baseAdjusted
+            );
+            const committed = await capacity.measurePhase(
+              "participantPersist",
+              () => participantModel.updateUploaderTotalsIfScoringVersion({
+                id: workingParticipant.id,
+                raceId: workingRace.id,
+                userId,
+                expectedGeneration,
+                totalSteps: calculation.finalTotal,
+                rawSteps,
+              })
+            );
+            if (committed.status === "COMMITTED") {
+              updatedParticipant = committed.participant;
+              break;
+            }
+            if (committed.status === "NOT_ELIGIBLE") return;
+            if (attempt === 2) {
+              throw new Error("Uploader scoring inputs changed during reconciliation");
+            }
+            expectedGeneration = await materializeAndReadScoringInputVersion(
+              prisma,
+              userId
+            );
+            const freshRaces = await raceModel.findActiveForUser(userId);
+            workingRace = freshRaces.find((candidate) => candidate.id === race.id);
+            workingParticipant = workingRace?.participants.find(
+              (candidate) =>
+                candidate.userId === userId && candidate.status === "ACCEPTED"
+            );
+            if (
+              !workingRace ||
+              !workingParticipant ||
+              workingParticipant.finishedAt ||
+              workingParticipant.forfeitedAt
+            ) return;
+            currentTime = now();
+            try {
+              globalEvents = (await globalStepEventModel.findActiveInRange(
+                workingRace.startedAt,
+                currentTime
+              )) || [];
+            } catch {
+              globalEvents = [];
+            }
+            calculation = await calculateUploaderRace({
+              capacity,
+              race: workingRace,
+              participant: workingParticipant,
+              currentTime,
+              baseStepsModel: stepsModel,
+              baseStepSampleModel: stepSampleModel,
+              globalEvents,
+              requestTimeZone: timeZone,
+            });
+          }
+        } else {
+          updatedParticipant = await capacity.measurePhase(
+            "participantPersist",
+            () => participantModel.updateStepTotals(workingParticipant.id, {
+              totalSteps: calculation.finalTotal,
+              rawSteps: nextRawSteps(
+                workingParticipant.rawSteps,
+                calculation.baseAdjusted
+              ),
+            })
+          );
+        }
 
         // Sync ONLY the uploader's box/powerup state. Pass the lean race so no
         // duplicate findById round-trip; syncRacePowerupState self-refetches when
@@ -224,10 +334,10 @@ function buildReconcileUploaderRaces(dependencies = {}) {
         await capacity.measurePhase(
           "boxPowerupSync",
           () => syncRacePowerupState({
-            raceId: race.id,
+            raceId: workingRace.id,
             userId,
-            race,
-            boxEffectiveSteps,
+            race: workingRace,
+            boxEffectiveSteps: calculation.boxEffectiveSteps,
           }),
         );
 
@@ -237,13 +347,19 @@ function buildReconcileUploaderRaces(dependencies = {}) {
         // STEP_SYNC is safely narrow or must become FULL.
         if (includeReconciledRaces) {
           reconciledRaces.push({
-            raceId: race.id,
-            participantId: participant.id,
+            raceId: workingRace.id,
+            participantId: workingParticipant.id,
             totalsUpdatedAt:
-              updatedParticipant?.totalsUpdatedAt || participant.totalsUpdatedAt || null,
-            totalSteps: finalTotal,
-            rawSteps: nextRawSteps(participant.rawSteps, baseAdjusted),
-            boxEffectiveSteps,
+              updatedParticipant?.totalsUpdatedAt ||
+              workingParticipant.totalsUpdatedAt || null,
+            totalSteps: calculation.finalTotal,
+            rawSteps:
+              updatedParticipant?.rawSteps ??
+              nextRawSteps(
+                workingParticipant.rawSteps,
+                calculation.baseAdjusted
+              ),
+            boxEffectiveSteps: calculation.boxEffectiveSteps,
           });
         }
         })

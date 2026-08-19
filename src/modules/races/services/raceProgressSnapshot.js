@@ -41,6 +41,10 @@ const cacheKeys = require("../../../shared/cache/cacheKeys");
 // v1 snapshots is a compatibility requirement: a v1 tokenless variant could
 // contain a `remoteOnly` accessory from before server-side filtering existed.
 const SCHEMA_VERSION = 2;
+// v3 removes participant presentation from the inner snapshot. It is written
+// only by the default-off lean projection. A mixed-version v2 process rejects
+// it instead of accepting a presentation-free roster it cannot hydrate.
+const LEAN_SCHEMA_VERSION = 3;
 const SOFT_TTL_MS = 15_000;
 const PHYSICAL_TTL_SECONDS = 60;
 const LOCK_TTL_MS = 10_000;
@@ -193,9 +197,10 @@ function buildSnapshot({
   scoringTimeZone,
   asOf,
   source = "replay",
+  schemaVersion = SCHEMA_VERSION,
 }) {
   const snapshot = {
-    v: SCHEMA_VERSION,
+    v: schemaVersion,
     asOf: (asOf instanceof Date ? asOf : new Date(asOf)).toISOString(),
     scoringTimeZone,
     source,
@@ -239,7 +244,11 @@ function bump(key) {
 // ── lifecycle ───────────────────────────────────────────────────────────────
 
 function isFresh(snapshot, nowMs = Date.now()) {
-  if (!snapshot || snapshot.v !== SCHEMA_VERSION || !snapshot.asOf) return false;
+  if (
+    !snapshot ||
+    ![SCHEMA_VERSION, LEAN_SCHEMA_VERSION].includes(snapshot.v) ||
+    !snapshot.asOf
+  ) return false;
   const asOf = new Date(snapshot.asOf).getTime();
   if (!Number.isFinite(asOf)) return false;
   return nowMs - asOf <= SOFT_TTL_MS;
@@ -250,9 +259,9 @@ function matchesTimeZone(snapshot, scoringTimeZone) {
   return Boolean(snapshot) && snapshot.scoringTimeZone === scoringTimeZone;
 }
 
-async function readSnapshot(raceId) {
+async function readSnapshot(raceId, schemaVersion = SCHEMA_VERSION) {
   const value = await redisCache.getJSON(cacheKeys.raceProgress(raceId));
-  return value && value.v === SCHEMA_VERSION ? value : null;
+  return value && value.v === schemaVersion ? value : null;
 }
 
 /**
@@ -299,11 +308,16 @@ function isBypassed() {
  * Lock-loser cold-start wait: poll REDIS for at most `LOSER_WAIT_MS`. No
  * Postgres connection is held for the duration — that is the whole point.
  */
-async function waitForSnapshot(raceId, scoringTimeZone, deadlineMs = LOSER_WAIT_MS) {
+async function waitForSnapshot(
+  raceId,
+  scoringTimeZone,
+  deadlineMs = LOSER_WAIT_MS,
+  schemaVersion = SCHEMA_VERSION
+) {
   const until = Date.now() + deadlineMs;
   while (Date.now() < until) {
     await new Promise((resolve) => setTimeout(resolve, LOSER_POLL_MS));
-    const snapshot = await readSnapshot(raceId);
+    const snapshot = await readSnapshot(raceId, schemaVersion);
     if (snapshot && matchesTimeZone(snapshot, scoringTimeZone)) return snapshot;
   }
   return null;
@@ -316,6 +330,7 @@ async function withRebuildLock(raceId, fn) {
 
 module.exports = {
   SCHEMA_VERSION,
+  LEAN_SCHEMA_VERSION,
   SOFT_TTL_MS,
   PHYSICAL_TTL_SECONDS,
   LOCK_TTL_MS,
