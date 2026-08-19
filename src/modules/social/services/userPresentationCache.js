@@ -106,19 +106,6 @@ function buildUserPresentationCache(dependencies = {}) {
     }
   }
 
-  async function presentationCacheEnabled() {
-    try {
-      const values = await Promise.all([
-        settings.getFlag("redisCacheMessagesEnabled"),
-        settings.getFlag("redisCacheLeaderboardEnabled"),
-        settings.getFlag("redisCacheFriendsEnabled"),
-      ]);
-      return values.some((value) => value === true);
-    } catch {
-      return false;
-    }
-  }
-
   async function getMany(userIds, enabled) {
     const started = Date.now();
     const capacity = startCapacityPhase("presentation_cache");
@@ -302,7 +289,7 @@ function buildUserPresentationCache(dependencies = {}) {
   async function invalidate(userId) {
     if (!userId || !redisCache.isEnabled()) return true;
     const payloadKey = cacheKeys.userCosmetics(userId);
-    if (!(await presentationCacheEnabled()) || !(await guardEnabled())) {
+    if (!(await guardEnabled())) {
       return derivedCache.invalidate({
         prefix: payloadKey,
         run: () => redisCache.del(payloadKey),

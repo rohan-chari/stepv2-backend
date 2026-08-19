@@ -124,6 +124,52 @@ async function makeFriends(a, b) {
   });
 }
 
+async function equipRacePresentation(user) {
+  const items = await Promise.all([
+    prisma.shopItem.create({
+      data: {
+        sku: `c3-character-${user.userId}`,
+        name: "C3 Corgi",
+        description: "Lean progress character fixture",
+        slot: "CHARACTER",
+        priceCoins: 0,
+        assetKey: "corgi_puppy",
+        renderMetadata: { offsetX: 0, offsetY: 0 },
+      },
+    }),
+    ...[
+      ["HEAD", "baseball_cap"],
+      ["FACE", "sunglasses"],
+      ["BACK", "beaver_tail"],
+    ].map(([slot, assetKey]) =>
+      prisma.shopItem.create({
+        data: {
+          sku: `c3-${slot.toLowerCase()}-${user.userId}`,
+          name: `C3 ${slot}`,
+          description: `Lean progress ${slot} fixture`,
+          slot,
+          priceCoins: 0,
+          assetKey,
+          renderMetadata: { offsetX: 0, offsetY: 0 },
+        },
+      })
+    ),
+  ]);
+  await prisma.userShopItem.createMany({
+    data: items.map((item) => ({
+      userId: user.userId,
+      shopItemId: item.id,
+    })),
+  });
+  await prisma.userEquippedAccessory.createMany({
+    data: items.map((item) => ({
+      userId: user.userId,
+      slot: item.slot,
+      shopItemId: item.id,
+    })),
+  });
+}
+
 /**
  * A started, powerup-enabled race whose `timezone` is pinned to UTC. Pinning it
  * matters: a NULL-timezone race scores in the REQUESTER's header tz, and the
@@ -324,6 +370,79 @@ beforeEach(async () => {
   await appSettings.setFlag("inlineRaceResolutionFallback", false);
   await appSettings.setFlag("raceResolutionDisplayArtifactReuseV1Enabled", false);
   snapshotStore.__resetCounters();
+});
+
+describe("lean progress presentation parity", () => {
+  it("keeps the visible page's equipped character, head, face and tail", async (t) => {
+    if (skipReason) return t.skip(skipReason);
+
+    await enableRedis();
+    await setFlag(true);
+    await appSettings.setFlag("raceProgressLeanProjectionV1Enabled", true);
+
+    const alice = await createUser("LeanPresentationAlice");
+    const bob = await createUser("LeanPresentationBob");
+    await equipRacePresentation(bob);
+    const raceId = await createActiveRace(
+      alice,
+      [bob],
+      "Lean presentation parity"
+    );
+
+    const response = await request(
+      server.baseUrl,
+      "GET",
+      `/races/${raceId}/progress?view=participants-v1&offset=0&limit=15`,
+      {
+        token: alice.token,
+        headers: {
+          "X-Client-Features": `${FEAT},race_participants_paging`,
+          "X-Release-Channel": "prod",
+          "X-Timezone": "UTC",
+        },
+      }
+    );
+    const responseText = await response.text();
+    assert.equal(response.status, 200, responseText);
+    const body = JSON.parse(responseText);
+    const bobRow = body.progress.participants.find(
+      (participant) => participant.userId === bob.userId
+    );
+    assert.ok(bobRow, "equipped participant must remain on the visible page");
+    assert.equal(bobRow.animal, "corgi_puppy");
+    assert.deepEqual(
+      bobRow.accessories.map((item) => item.assetKey).sort(),
+      ["baseball_cap", "beaver_tail", "sunglasses"],
+    );
+
+    await appSettings.setFlag("apiRaceBootstrapV1Enabled", true);
+    await appSettings.setFlag("apiRaceBootstrapCompactV1Enabled", true);
+    const bootstrapResponse = await request(
+      server.baseUrl,
+      "GET",
+      `/races/${raceId}/bootstrap?view=participants-v1&offset=0&limit=15&shape=compact-v1`,
+      {
+        token: alice.token,
+        headers: {
+          "X-Client-Features": `${FEAT},race_participants_paging,api_payload_compact_v1`,
+          "X-Release-Channel": "prod",
+          "X-Timezone": "UTC",
+        },
+      }
+    );
+    const bootstrapText = await bootstrapResponse.text();
+    assert.equal(bootstrapResponse.status, 200, bootstrapText);
+    const bootstrap = JSON.parse(bootstrapText);
+    assert.equal(bootstrap.contract, "race-bootstrap-compact-v1");
+    const bootstrapBob = bootstrap.progress.participants.find(
+      (participant) => participant.userId === bob.userId
+    );
+    assert.equal(bootstrapBob.animal, "corgi_puppy");
+    assert.deepEqual(
+      bootstrapBob.accessories.map((item) => item.assetKey).sort(),
+      ["baseball_cap", "beaver_tail", "sunglasses"],
+    );
+  });
 });
 
 describe("display artifact reuse", () => {

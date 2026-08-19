@@ -64,7 +64,13 @@ function serializeEquippedAccessory(equippedAccessory) {
 
 function buildEquipmentMap(equippedAccessories = []) {
   return equippedAccessories.reduce((equipment, accessory) => {
-    equipment[accessory.slot] = serializeEquippedAccessory(accessory);
+    // Presentation-cache v1 intentionally stores only `shopItem`. Prefer the
+    // live relation scalar when it exists, but retain compatibility with the
+    // shared cached shape so rolling deploys and warm entries keep every slot.
+    const slot = accessory.slot ?? accessory.shopItem?.slot;
+    if (typeof slot === "string" && slot.length > 0) {
+      equipment[slot] = serializeEquippedAccessory(accessory);
+    }
     return equipment;
   }, {});
 }

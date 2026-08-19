@@ -17,6 +17,9 @@ const {
 const {
   buildSearchFriendsByIdentity,
 } = require("../../src/modules/social/services/searchFriendsByIdentity");
+const {
+  buildEquipmentMap,
+} = require("../../src/modules/cosmetics/shopCosmetics");
 
 function deferred() {
   let resolve;
@@ -92,6 +95,33 @@ test("presentation validation rejects malformed nested cache members", () => {
     ...valid,
     equippedAccessories: [{ shopItem: { ...valid.equippedAccessories[0].shopItem, secret: true } }],
   }, "user-1"), false);
+});
+
+test("equipment mapping preserves every slot from presentation-cache v1 rows", () => {
+  const equipped = [
+    ["HEAD", "baseball_cap"],
+    ["FACE", "sunglasses"],
+    ["BACK", "beaver_tail"],
+  ].map(([slot, assetKey], index) => ({
+    shopItem: {
+      id: `item-${index}`,
+      sku: assetKey,
+      name: assetKey,
+      slot,
+      assetKey,
+      renderMetadata: null,
+      bobble: false,
+      testOnly: false,
+      remoteOnly: false,
+      assetVersion: null,
+    },
+  }));
+
+  assert.deepEqual(Object.keys(buildEquipmentMap(equipped)).sort(), [
+    "BACK",
+    "FACE",
+    "HEAD",
+  ]);
 });
 
 test("presentation cache projects Prisma relation scalars out before the warm hit", async () => {
@@ -187,6 +217,32 @@ test("presentation WATCH abort serves its current PG read without installing sta
   continueLoad.resolve();
   assert.equal((await read).get("u").displayName, "Before");
   assert.equal(storedPayload, null, "concurrent invalidation must abort stale install");
+});
+
+test("presentation invalidation advances the generation when only the guard is enabled", async () => {
+  let evalCalls = 0;
+  const cache = buildUserPresentationCache({
+    appSettings: {
+      getFlag: async (name) => name === "redisPresentationGenerationGuardEnabled",
+    },
+    derivedCache: {
+      invalidate: async ({ run }) => run(),
+    },
+    redisCache: {
+      isEnabled: () => true,
+      evalLua: async (_script, keys) => {
+        evalCalls += 1;
+        assert.equal(keys.length, 2);
+        return 1;
+      },
+      del: async () => {
+        assert.fail("guarded invalidation must not use an unversioned delete");
+      },
+    },
+  });
+
+  await cache.invalidate("user-1");
+  assert.equal(evalCalls, 1);
 });
 
 test("topology WATCH abort cannot reinstall a pre-mutation friendship list", async () => {

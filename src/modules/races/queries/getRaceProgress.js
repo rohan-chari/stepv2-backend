@@ -1238,6 +1238,7 @@ function buildGetRaceProgress(deps = {}) {
             displayName: "???",
             profilePhotoUrl: null,
             accessories: [],
+            animal: null,
             totalSteps: null,
             finishedAt: entry.finishedAt,
             stealthed: false,
