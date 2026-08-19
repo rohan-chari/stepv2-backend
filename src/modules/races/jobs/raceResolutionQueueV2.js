@@ -90,9 +90,43 @@ const RACE_RESOLUTION_PHASES = Object.freeze([
   "overtakeNudges",
   "postTaskHandoff",
 ]);
+const RACE_RESOLUTION_COMPUTE_PHASES = Object.freeze([
+  "raceLoad",
+  "scoringPrefetch",
+  "globalEvents",
+  "participantScoring",
+  "hitchhikeCopies",
+  "leechAndCapture",
+  "activeEffects",
+  "trailMines",
+]);
+const RACE_RESOLUTION_NUDGE_PHASES = Object.freeze([
+  "participantLoad",
+  "ranking",
+  "intentHandoff",
+]);
+const RACE_RESOLUTION_HANDOFF_PHASES = Object.freeze([
+  "taskInsert",
+  "resolveIntents",
+  "taskUpdate",
+  "intentInsert",
+  "taskTransaction",
+  "runnerReadiness",
+  "inlineClaim",
+]);
+
+function emptyPhaseTotals(names) {
+  return Object.fromEntries(names.map((name) => [name, 0]));
+}
+
+function addPhaseTiming(totals, name, durationMs) {
+  if (!Object.hasOwn(totals, name)) return;
+  const duration = Number(durationMs);
+  if (Number.isFinite(duration)) totals[name] += Math.max(0, duration);
+}
 
 function createRaceResolutionPhaseTimer(monotonicNow = process.hrtime.bigint) {
-  const totals = Object.fromEntries(RACE_RESOLUTION_PHASES.map((name) => [name, 0]));
+  const totals = emptyPhaseTotals(RACE_RESOLUTION_PHASES);
 
   function start(name) {
     if (!Object.hasOwn(totals, name)) throw new Error(`unknown race resolution phase: ${name}`);
@@ -810,6 +844,12 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
       ? job.processingTriggeredByUserIds.filter(Boolean)
       : [];
     const orderedTriggeringUserIds = [...new Set(triggeringUserIds)].sort();
+    const computePhaseMs = emptyPhaseTotals(RACE_RESOLUTION_COMPUTE_PHASES);
+    const nudgePhaseMs = emptyPhaseTotals(RACE_RESOLUTION_NUDGE_PHASES);
+    const postHandoffPhaseMs = emptyPhaseTotals(RACE_RESOLUTION_HANDOFF_PHASES);
+    const stepSyncScopePhaseMs = { activeEffects: 0, raceHydration: 0 };
+    let stepSyncScopeOutcome = "not_attempted";
+    let stepSyncScopeActiveEffectCount = 0;
 
     try {
       // ── Step 2: computation, outside every transaction. ──────────────────
@@ -904,6 +944,19 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
               () => buildStepSyncScope(job, {
                 Race: raceModel,
                 RaceActiveEffect: effectModel,
+                recordDiagnostics: (diagnostics) => {
+                  stepSyncScopeOutcome = diagnostics?.outcome || "unknown";
+                  stepSyncScopeActiveEffectCount = Math.max(
+                    0,
+                    Number(diagnostics?.activeEffectCount) || 0
+                  );
+                  for (const name of Object.keys(stepSyncScopePhaseMs)) {
+                    const value = Number(diagnostics?.phaseMs?.[name]);
+                    if (Number.isFinite(value)) {
+                      stepSyncScopePhaseMs[name] += Math.max(0, value);
+                    }
+                  }
+                },
               })
             );
           }
@@ -929,6 +982,8 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
               RaceActiveEffect: capture.effects,
               RacePowerupEvent: capture.events,
               now,
+              recordPhaseTiming: (name, durationMs) =>
+                addPhaseTiming(computePhaseMs, name, durationMs),
             });
             const processed = await phaseTimer.measure(
               "compute",
@@ -1215,6 +1270,12 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           writeMs,
           durationMs: Math.max(0, Date.now() - startMs),
           phaseMs: phaseTimer.snapshot(),
+          computePhaseMs,
+          nudgePhaseMs,
+          postHandoffPhaseMs,
+          stepSyncScopeOutcome,
+          stepSyncScopeActiveEffectCount,
+          stepSyncScopePhaseMs,
         }));
         return { jobId: job.id, discarded: true };
       }
@@ -1321,6 +1382,8 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
               raceResults: [result],
               userId: triggerUserId,
               participantModel,
+              recordPhaseTiming: (name, durationMs) =>
+                addPhaseTiming(nudgePhaseMs, name, durationMs),
               requestStepSyncForUsers: postTasksEnabled
                 ? async (recipientIds) => {
                   try {
@@ -1383,6 +1446,8 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
             snapshotCommand: deferredSnapshotCommand,
             intents: deferredIntents,
             resolveIntents,
+            recordPhaseTiming: (name, durationMs) =>
+              addPhaseTiming(postHandoffPhaseMs, name, durationMs),
           });
         } catch (error) {
           // A created row remains recoverable by the runner; never issue an
@@ -1430,6 +1495,12 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         closureFenceRejections: closureCommittedRejections,
         sqlCount: typeof dependencies.sqlCount === "function" ? dependencies.sqlCount() : null,
         phaseMs: phaseTimer.snapshot(),
+        computePhaseMs,
+        nudgePhaseMs,
+        postHandoffPhaseMs,
+        stepSyncScopeOutcome,
+        stepSyncScopeActiveEffectCount,
+        stepSyncScopePhaseMs,
       }));
       return job;
     } catch (error) {
@@ -1441,6 +1512,12 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           outcome: "fence_lost",
           reasonClasses: job.processingDirtyReasons || ["FULL"],
           phaseMs: phaseTimer.snapshot(),
+          computePhaseMs,
+          nudgePhaseMs,
+          postHandoffPhaseMs,
+          stepSyncScopeOutcome,
+          stepSyncScopeActiveEffectCount,
+          stepSyncScopePhaseMs,
         }));
         return job;
       }
@@ -1450,6 +1527,12 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         reasonClasses: job.processingDirtyReasons || ["FULL"],
         errorCode: error?.code || "WORKER_ERROR",
         phaseMs: phaseTimer.snapshot(),
+        computePhaseMs,
+        nudgePhaseMs,
+        postHandoffPhaseMs,
+        stepSyncScopeOutcome,
+        stepSyncScopeActiveEffectCount,
+        stepSyncScopePhaseMs,
         // Diagnosability for raw-query failures (dependency-closure spec,
         // rollout item 7). Under the pg driver adapter (src/db.js) the
         // SQLSTATE lives at meta.driverAdapterError.cause.originalCode —

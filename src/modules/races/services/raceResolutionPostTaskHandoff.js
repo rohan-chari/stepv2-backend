@@ -44,7 +44,22 @@ function buildRaceResolutionPostTaskHandoff(dependencies = {}) {
     snapshotCommand,
     intents = [],
     resolveIntents = null,
+    recordPhaseTiming = null,
   }) {
+    const measure = async (name, operation) => {
+      if (typeof recordPhaseTiming !== "function") return operation();
+      const startedAt = process.hrtime.bigint();
+      try {
+        return await operation();
+      } finally {
+        try {
+          recordPhaseTiming(
+            name,
+            Math.max(0, Number(process.hrtime.bigint() - startedAt) / 1e6)
+          );
+        } catch {}
+      }
+    };
     if (!snapshotCommand) return { mode: "none", taskId: null };
     if (typeof runner.isDisabled === "function" && runner.isDisabled()) {
       // The kill switch intentionally retains the legacy inline delivery
@@ -58,13 +73,17 @@ function buildRaceResolutionPostTaskHandoff(dependencies = {}) {
     }
     let task;
     try {
-      task = await model.create({
-        raceId,
-        sourceGeneration,
-        snapshotCommand,
-        intents,
-        resolveIntents,
-      });
+      task = await measure(
+        "taskTransaction",
+        () => model.create({
+          raceId,
+          sourceGeneration,
+          snapshotCommand,
+          intents,
+          resolveIntents,
+          recordPhaseTiming,
+        })
+      );
     } catch (error) {
       // A transaction error can be returned after a server-side commit. Never
       // blindly replay its notification decisions: first prove that this
@@ -100,8 +119,8 @@ function buildRaceResolutionPostTaskHandoff(dependencies = {}) {
     // A duplicate generation already has one durable owner. Never execute a
     // second inline copy of its publication or intents.
     if (!task?.created) return { mode: "deduped", taskId: task?.id || null };
-    if (!(await runner.isReady())) {
-      await runner.processTaskId(task.id);
+    if (!(await measure("runnerReadiness", () => runner.isReady()))) {
+      await measure("inlineClaim", () => runner.processTaskId(task.id));
       return { mode: "inline_claim", taskId: task.id };
     }
     return { mode: "queued", taskId: task.id };

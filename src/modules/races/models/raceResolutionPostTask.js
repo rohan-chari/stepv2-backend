@@ -96,8 +96,23 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
       snapshotCommand,
       intents,
       resolveIntents = null,
+      recordPhaseTiming = null,
       now = new Date(),
       }, tx = null) {
+      const measure = async (name, operation) => {
+        if (typeof recordPhaseTiming !== "function") return operation();
+        const startedAt = process.hrtime.bigint();
+        try {
+          return await operation();
+        } finally {
+          try {
+            recordPhaseTiming(
+              name,
+              Math.max(0, Number(process.hrtime.bigint() - startedAt) / 1e6)
+            );
+          } catch {}
+        }
+      };
       const insert = async (client) => {
         // Validate the command before opening a claim transaction.  Delivery
         // claims deliberately happen only after this generation has won the
@@ -106,16 +121,19 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
         validatePostTaskPayload({ snapshotCommand, intents: [] });
         const id = crypto.randomUUID();
         const dedupeKey = `v1:post-delivery:${raceId}:${sourceGeneration}`;
-        const task = await client.$queryRawUnsafe(
-          `INSERT INTO race_resolution_post_tasks (
-             id, race_id, source_generation, dedupe_key, state, requested_at,
-             not_before_at, snapshot_state, snapshot_command, payload_bytes,
-             intent_count, created_at, updated_at
-           ) VALUES ($1,$2,$3,$4,'queued',$5,$5,'pending',$6::jsonb,$7,$8,$5,$5)
-           ON CONFLICT (race_id, source_generation) DO NOTHING
-           RETURNING id`,
-          id, raceId, sourceGeneration, dedupeKey, now,
-          JSON.stringify(snapshotCommand), 0, 0
+        const task = await measure(
+          "taskInsert",
+          () => client.$queryRawUnsafe(
+            `INSERT INTO race_resolution_post_tasks (
+               id, race_id, source_generation, dedupe_key, state, requested_at,
+               not_before_at, snapshot_state, snapshot_command, payload_bytes,
+               intent_count, created_at, updated_at
+             ) VALUES ($1,$2,$3,$4,'queued',$5,$5,'pending',$6::jsonb,$7,$8,$5,$5)
+             ON CONFLICT (race_id, source_generation) DO NOTHING
+             RETURNING id`,
+            id, raceId, sourceGeneration, dedupeKey, now,
+            JSON.stringify(snapshotCommand), 0, 0
+          )
         );
         if (task.length === 0) {
           const existing = await client.$queryRawUnsafe(
@@ -127,18 +145,21 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
           return { created: false, id: existing[0]?.id || null };
         }
         const decidedIntents = typeof resolveIntents === "function"
-          ? await resolveIntents(client)
+          ? await measure("resolveIntents", () => resolveIntents(client))
           : intents;
         const payload = validatePostTaskPayload({ snapshotCommand, intents: decidedIntents });
-        await client.$executeRawUnsafe(
-          `UPDATE race_resolution_post_tasks
-           SET snapshot_command=$2::jsonb, payload_bytes=$3, intent_count=$4, updated_at=$5
-           WHERE id=$1`,
-          id,
-          JSON.stringify(payload.snapshotCommand),
-          payload.payloadBytes,
-          payload.intentCount,
-          now
+        await measure(
+          "taskUpdate",
+          () => client.$executeRawUnsafe(
+            `UPDATE race_resolution_post_tasks
+             SET snapshot_command=$2::jsonb, payload_bytes=$3, intent_count=$4, updated_at=$5
+             WHERE id=$1`,
+            id,
+            JSON.stringify(payload.snapshotCommand),
+            payload.payloadBytes,
+            payload.intentCount,
+            now
+          )
         );
         if (payload.intents.length > 0) {
           const rows = payload.intents.map((intent) => ({
@@ -146,22 +167,25 @@ function buildRaceResolutionPostTaskModel(prisma = defaultPrisma) {
             taskId: id,
             ...intent,
           }));
-          await client.$executeRawUnsafe(
-            `INSERT INTO race_resolution_delivery_intents (
-               id, task_id, ordinal, kind, recipient_user_id, payload,
-               payload_bytes, delivery_key_hash, cooldown_claim_id, state,
-               created_at, updated_at
-             )
-             SELECT row.id, row."taskId", row.ordinal, row.kind,
-                    row."recipientUserId", row.payload, row."payloadBytes",
-                    row."deliveryKeyHash", row."cooldownClaimId", 'pending', $2, $2
-             FROM jsonb_to_recordset($1::jsonb) AS row(
-               id text, "taskId" text, ordinal integer, kind text,
-               "recipientUserId" text, payload jsonb, "payloadBytes" integer,
-               "deliveryKeyHash" text, "cooldownClaimId" text
-             )`,
-            JSON.stringify(rows),
-            now
+          await measure(
+            "intentInsert",
+            () => client.$executeRawUnsafe(
+              `INSERT INTO race_resolution_delivery_intents (
+                 id, task_id, ordinal, kind, recipient_user_id, payload,
+                 payload_bytes, delivery_key_hash, cooldown_claim_id, state,
+                 created_at, updated_at
+               )
+               SELECT row.id, row."taskId", row.ordinal, row.kind,
+                      row."recipientUserId", row.payload, row."payloadBytes",
+                      row."deliveryKeyHash", row."cooldownClaimId", 'pending', $2, $2
+               FROM jsonb_to_recordset($1::jsonb) AS row(
+                 id text, "taskId" text, ordinal integer, kind text,
+                 "recipientUserId" text, payload jsonb, "payloadBytes" integer,
+                 "deliveryKeyHash" text, "cooldownClaimId" text
+               )`,
+              JSON.stringify(rows),
+              now
+            )
           );
         }
         return { created: true, id, dedupeKey, ...payload };

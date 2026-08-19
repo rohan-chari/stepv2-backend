@@ -616,6 +616,24 @@ function buildResolveRaceState(dependencies = {}) {
   const prefetchRaceScoringModels =
     dependencies.prefetchRaceScoringModels || defaultPrefetchRaceScoringModels;
   const logger = dependencies.logger || console;
+  const recordPhaseTiming =
+    typeof dependencies.recordPhaseTiming === "function"
+      ? dependencies.recordPhaseTiming
+      : null;
+  async function measureResolutionPhase(name, operation) {
+    if (!recordPhaseTiming) return operation();
+    const startedAt = process.hrtime.bigint();
+    try {
+      return await operation();
+    } finally {
+      try {
+        recordPhaseTiming(
+          name,
+          Math.max(0, Number(process.hrtime.bigint() - startedAt) / 1e6)
+        );
+      } catch {}
+    }
+  }
   // Phase C4: every full-field reconciliation of a race runs under the shared
   // per-race advisory lock, so the four full-field paths (legacy /steps sync via
   // recordSteps/recordStepSamples, placementRecompute, usePowerup, and the durable
@@ -657,12 +675,17 @@ function buildResolveRaceState(dependencies = {}) {
     let races = [];
 
     if (raceId) {
-      const race = typeof raceModel.findForResolution === "function"
-        ? await raceModel.findForResolution(raceId)
-        : await raceModel.findById(raceId);
+      const race = await measureResolutionPhase("raceLoad", () =>
+        typeof raceModel.findForResolution === "function"
+          ? raceModel.findForResolution(raceId)
+          : raceModel.findById(raceId)
+      );
       if (race) races = [race];
     } else if (userId) {
-      races = await raceModel.findActiveForUser(userId);
+      races = await measureResolutionPhase(
+        "raceLoad",
+        () => raceModel.findActiveForUser(userId)
+      );
     }
 
     async function processRace(race) {
@@ -700,13 +723,16 @@ function buildResolveRaceState(dependencies = {}) {
       const currentTime = now();
       let prefetched = null;
       try {
-        prefetched = await prefetchRaceScoringModels({
-          races: [race],
-          now: currentTime,
-          stepsModel,
-          stepSampleModel,
-          raceActiveEffectModel,
-        });
+        prefetched = await measureResolutionPhase(
+          "scoringPrefetch",
+          () => prefetchRaceScoringModels({
+            races: [race],
+            now: currentTime,
+            stepsModel,
+            stepSampleModel,
+            raceActiveEffectModel,
+          })
+        );
       } catch (error) {
         // A bulk-read failure must not make resolution unavailable. Fall back
         // to the canonical per-participant model calls for this run.
@@ -765,11 +791,13 @@ function buildResolveRaceState(dependencies = {}) {
       // Read defensively: any failure or missing model => no boost.
       let globalEvents = [];
       try {
-        globalEvents =
-          (await globalStepEventModel.findActiveInRange(
+        globalEvents = (await measureResolutionPhase(
+          "globalEvents",
+          () => globalStepEventModel.findActiveInRange(
             race.startedAt,
             currentTime
-          )) || [];
+          )
+        )) || [];
       } catch {
         globalEvents = [];
       }
@@ -802,7 +830,7 @@ function buildResolveRaceState(dependencies = {}) {
       // settlement, and this path agree. `preLeech[index]` holds either a frozen
       // total or {preLeechTotal, leechTransfers}. Writes are deferred to phase B.
       const preLeech = new Array(scoredParticipants.length);
-      await Promise.all(
+      await measureResolutionPhase("participantScoring", () => Promise.all(
         scoredParticipants.map(async (participant, index) => {
           // TR-601: forfeited team-race members are FROZEN at the total the
           // forfeit command snapshotted — never recomputed here (their timed
@@ -906,7 +934,7 @@ function buildResolveRaceState(dependencies = {}) {
           // Daily 10K / Weekly 50K) and completes nothing. Legacy rows that
           // already carry finishedAt keep their frozen totals (handled above).
         })
-      );
+      ));
 
       // Phase A2 — HITCHHIKE (§7.3). Identical to the display path's insertion in
       // getRaceProgress: ONE bulk query for every link in the race, folded into
@@ -916,57 +944,57 @@ function buildResolveRaceState(dependencies = {}) {
       // score changing at race end. The parity guard in
       // test/queries/hitchhikeScoring.test.js fails if the two drift.
       const hitchhikeCopies = race.powerupsEnabled
-        ? await collectRaceHitchhikeCopies({
-            raceId: race.id,
-            raceEndsAt: race.endsAt,
-            participants: race.participants,
-            raceActiveEffectModel: scoringEffectModel,
-            stepSampleModel: scoringStepSampleModel,
-            now: currentTime,
-            globalEvents,
-          })
+        ? await measureResolutionPhase(
+            "hitchhikeCopies",
+            () => collectRaceHitchhikeCopies({
+              raceId: race.id,
+              raceEndsAt: race.endsAt,
+              participants: race.participants,
+              raceActiveEffectModel: scoringEffectModel,
+              stepSampleModel: scoringStepSampleModel,
+              now: currentTime,
+              globalEvents,
+            })
+          )
         : [];
 
       // Phase B: resolve all leeches race-wide against real victim availability
       // (zero-sum, deterministic), then persist each active participant's FINAL
       // total. Frozen participants keep their stored total and are never written.
-      const leechFinals = applyLeechTransfers(
-        applyHitchhikeCopies(
-          preLeech
-            .filter((e) => e && !e.frozen)
-            .map((e) => ({
-              participantId: e.participant.id,
-              userId: e.participant.userId,
-              preLeechTotal: e.preLeechTotal,
-              leechTransfers: e.leechTransfers,
-            })),
-          hitchhikeCopies
-        )
-      );
+      await measureResolutionPhase("leechAndCapture", async () => {
+        const leechFinals = applyLeechTransfers(
+          applyHitchhikeCopies(
+            preLeech
+              .filter((e) => e && !e.frozen)
+              .map((e) => ({
+                participantId: e.participant.id,
+                userId: e.participant.userId,
+                preLeechTotal: e.preLeechTotal,
+                leechTransfers: e.leechTransfers,
+              })),
+            hitchhikeCopies
+          )
+        );
 
-      for (let index = 0; index < preLeech.length; index++) {
-        const e = preLeech[index];
-        if (e.frozen) {
-          stepTotals[index] = { participant: e.participant, totalSteps: e.totalSteps };
-          continue;
+        for (let index = 0; index < preLeech.length; index++) {
+          const e = preLeech[index];
+          if (e.frozen) {
+            stepTotals[index] = { participant: e.participant, totalSteps: e.totalSteps };
+            continue;
+          }
+          const finalTotal = leechFinals.get(e.participant.id) ?? e.preLeechTotal;
+          // Under the prod configuration this write is CAPTURED, not executed —
+          // the v2 worker replays it inside its fence.
+          await participantModel.updateStepTotals(e.participant.id, {
+            totalSteps: finalTotal,
+            rawSteps: nextRawSteps(
+              e.participant.rawSteps,
+              baseAdjustedByParticipantId[e.participant.id]
+            ),
+          });
+          stepTotals[index] = { participant: e.participant, totalSteps: finalTotal };
         }
-        const finalTotal = leechFinals.get(e.participant.id) ?? e.preLeechTotal;
-        // `rawSteps` rides the same write (2026-08-09): the RAW walked total
-        // this participant was just scored from, high-watered against what is
-        // already stored so a downward re-sync can't move their drop-odds
-        // position backwards. Frozen rows never reach here (they `continue`
-        // above), so a finished player's raw_steps stays frozen with their
-        // total. Under the prod configuration this write is CAPTURED, not
-        // executed — the v2 worker replays it inside its fence.
-        await participantModel.updateStepTotals(e.participant.id, {
-          totalSteps: finalTotal,
-          rawSteps: nextRawSteps(
-            e.participant.rawSteps,
-            baseAdjustedByParticipantId[e.participant.id]
-          ),
-        });
-        stepTotals[index] = { participant: e.participant, totalSteps: finalTotal };
-      }
+      });
 
       // Freeze the exact pre-detonation standings exposed by the HTTP display
       // path. Trail Mine then continues against the mutable stepTotals array so
@@ -978,19 +1006,25 @@ function buildResolveRaceState(dependencies = {}) {
       }));
       const activeEffects =
         race.powerupsEnabled && typeof scoringEffectModel.findActiveForRace === "function"
-          ? (await scoringEffectModel.findActiveForRace(race.id)) || []
+          ? (await measureResolutionPhase(
+              "activeEffects",
+              () => scoringEffectModel.findActiveForRace(race.id)
+            )) || []
           : [];
 
       if (race.powerupsEnabled) {
-        await triggerTrailMines({
-          raceId: race.id,
-          race,
-          stepTotals,
-          raceActiveEffectModel: scoringEffectModel,
-          participantModel,
-          powerupEventModel,
-          activeEffects,
-        });
+        await measureResolutionPhase(
+          "trailMines",
+          () => triggerTrailMines({
+            raceId: race.id,
+            race,
+            stepTotals,
+            raceActiveEffectModel: scoringEffectModel,
+            participantModel,
+            powerupEventModel,
+            activeEffects,
+          })
+        );
       }
 
       const currentMs = currentTime.getTime();

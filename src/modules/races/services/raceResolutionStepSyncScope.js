@@ -29,6 +29,26 @@ function isClosureEligibleReasonSet(reasons) {
 }
 
 async function buildRaceResolutionStepSyncScope(job, dependencies = {}) {
+  const diagnostics = {
+    outcome: "not_attempted",
+    activeEffectCount: 0,
+    phaseMs: { activeEffects: 0, raceHydration: 0 },
+  };
+  const emitDiagnostics = (outcome) => {
+    diagnostics.outcome = outcome;
+    try { dependencies.recordDiagnostics?.({ ...diagnostics, phaseMs: { ...diagnostics.phaseMs } }); } catch {}
+  };
+  const measure = async (name, operation) => {
+    const startedAt = process.hrtime.bigint();
+    try {
+      return await operation();
+    } finally {
+      diagnostics.phaseMs[name] += Math.max(
+        0,
+        Number(process.hrtime.bigint() - startedAt) / 1e6
+      );
+    }
+  };
   if (
     !job ||
     !isClosureEligibleReasonSet(job.processingDirtyReasons) ||
@@ -36,9 +56,15 @@ async function buildRaceResolutionStepSyncScope(job, dependencies = {}) {
     job.processingDirtyParticipantIds.length === 0 ||
     job.processingDirtyParticipantIds.length > MAX_STEP_SYNC_DIRTY_PARTICIPANTS ||
     !Array.isArray(job.processingTriggeredByUserIds)
-  ) return null;
+  ) {
+    emitDiagnostics("invalid_envelope");
+    return null;
+  }
   const claimStartedAt = new Date(job.startedAt || 0);
-  if (Number.isNaN(claimStartedAt.getTime())) return null;
+  if (Number.isNaN(claimStartedAt.getTime())) {
+    emitDiagnostics("invalid_claim_time");
+    return null;
+  }
   const raceModel = dependencies.Race || Race;
   const effectModel = dependencies.RaceActiveEffect || RaceActiveEffect;
   try {
@@ -51,11 +77,22 @@ async function buildRaceResolutionStepSyncScope(job, dependencies = {}) {
     // one that short-circuits, so checking it FIRST costs the surviving 21% one
     // serialized round trip and saves the other 79% an entire race hydration.
     // Losing the parallelism is the intended trade.
-    const activeEffects = await effectModel.findActiveForRace(job.raceId);
-    if ((activeEffects || []).length > 0) return null;
+    const activeEffects = await measure(
+      "activeEffects",
+      () => effectModel.findActiveForRace(job.raceId)
+    );
+    diagnostics.activeEffectCount = (activeEffects || []).length;
+    if ((activeEffects || []).length > 0) {
+      emitDiagnostics("active_effects");
+      return null;
+    }
 
-    const race = await raceModel.findForStepSyncScope(job.raceId);
+    const race = await measure(
+      "raceHydration",
+      () => raceModel.findForStepSyncScope(job.raceId)
+    );
     if (!race || race.status !== "ACTIVE") {
+      emitDiagnostics("race_unavailable");
       return null;
     }
     const byId = new Map((race.participants || []).map((row) => [row.id, row]));
@@ -74,7 +111,10 @@ async function buildRaceResolutionStepSyncScope(job, dependencies = {}) {
         Number.isNaN(token.getTime()) ||
         token.getTime() > claimStartedAt.getTime() ||
         !Number.isFinite(participant.rawSteps)
-      ) return null;
+      ) {
+        emitDiagnostics("participant_mismatch");
+        return null;
+      }
       participantTokens[participant.id] = token.toISOString();
       participantUserIds[participant.id] = participant.userId;
       baseAdjustedByParticipantId[participant.id] = participant.rawSteps;
@@ -84,7 +124,7 @@ async function buildRaceResolutionStepSyncScope(job, dependencies = {}) {
         maxBonusSteps: participant.maxBonusSteps || 0,
       });
     }
-    return {
+    const scope = {
       plan: "STEP_SYNC_COMMITTED",
       participantTokens,
       participantUserIds,
@@ -95,7 +135,10 @@ async function buildRaceResolutionStepSyncScope(job, dependencies = {}) {
         boxEffectiveStepsByUser,
       },
     };
+    emitDiagnostics("success");
+    return scope;
   } catch {
+    emitDiagnostics("error");
     return null;
   }
 }

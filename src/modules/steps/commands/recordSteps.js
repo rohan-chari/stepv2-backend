@@ -33,45 +33,84 @@ async function nudgeOvertakenRivals({
   userId,
   participantModel,
   requestStepSyncForUsers,
+  recordPhaseTiming = null,
 }) {
   if (!Array.isArray(raceResults) || raceResults.length === 0) return;
+
+  async function measure(name, operation) {
+    if (typeof recordPhaseTiming !== "function") return operation();
+    const startedAt = process.hrtime.bigint();
+    try {
+      return await operation();
+    } finally {
+      try {
+        recordPhaseTiming(
+          name,
+          Math.max(0, Number(process.hrtime.bigint() - startedAt) / 1e6)
+        );
+      } catch {}
+    }
+  }
+
+  function measureSync(name, operation) {
+    if (typeof recordPhaseTiming !== "function") return operation();
+    const startedAt = process.hrtime.bigint();
+    try {
+      return operation();
+    } finally {
+      try {
+        recordPhaseTiming(
+          name,
+          Math.max(0, Number(process.hrtime.bigint() - startedAt) / 1e6)
+        );
+      } catch {}
+    }
+  }
 
   const rivalIds = new Set();
 
   for (const result of raceResults) {
     if (!result || !result.raceId) continue;
 
-    const participants = await participantModel.findAcceptedByRace(result.raceId);
+    const participants = await measure(
+      "participantLoad",
+      () => participantModel.findAcceptedByRace(result.raceId)
+    );
     if (!participants || participants.length === 0) continue;
 
-    const ranked = [...participants].sort(
-      (a, b) => (b.totalSteps ?? 0) - (a.totalSteps ?? 0)
-    );
+    measureSync("ranking", () => {
+      const ranked = [...participants].sort(
+        (a, b) => (b.totalSteps ?? 0) - (a.totalSteps ?? 0)
+      );
 
-    const userIndex = ranked.findIndex((p) => p.userId === userId);
-    if (userIndex < 0) continue;
+      const userIndex = ranked.findIndex((p) => p.userId === userId);
+      if (userIndex < 0) return;
 
-    const beforeRank = ranked[userIndex].lastNotifiedPlacement;
-    const afterRank = userIndex + 1;
+      const beforeRank = ranked[userIndex].lastNotifiedPlacement;
+      const afterRank = userIndex + 1;
 
-    // No prior live rank (never seeded by the cron) or the user did not climb =>
-    // nobody was overtaken by this sync.
-    if (beforeRank == null || afterRank >= beforeRank) continue;
+      // No prior live rank (never seeded by the cron) or the user did not climb =>
+      // nobody was overtaken by this sync.
+      if (beforeRank == null || afterRank >= beforeRank) return;
 
-    for (let i = userIndex + 1; i < ranked.length; i++) {
-      const rival = ranked[i];
-      if (rival.userId === userId) continue;
-      if (rival.finishedAt) continue;
-      if (rival.lastNotifiedPlacement == null) continue;
-      // Only rivals that were ahead of the user before this sync were passed.
-      if (rival.lastNotifiedPlacement < beforeRank) {
-        rivalIds.add(rival.userId);
+      for (let i = userIndex + 1; i < ranked.length; i++) {
+        const rival = ranked[i];
+        if (rival.userId === userId) continue;
+        if (rival.finishedAt) continue;
+        if (rival.lastNotifiedPlacement == null) continue;
+        // Only rivals that were ahead of the user before this sync were passed.
+        if (rival.lastNotifiedPlacement < beforeRank) {
+          rivalIds.add(rival.userId);
+        }
       }
-    }
+    });
   }
 
   if (rivalIds.size > 0) {
-    await requestStepSyncForUsers([...rivalIds]);
+    await measure(
+      "intentHandoff",
+      () => requestStepSyncForUsers([...rivalIds])
+    );
   }
 }
 
