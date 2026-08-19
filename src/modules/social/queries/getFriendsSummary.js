@@ -17,34 +17,40 @@ const pendingUserSelect = {
 function buildGetFriendsSummary(dependencies = {}) {
   const prisma = dependencies.prisma || defaultPrisma;
   return async function getFriendsSummary(userId) {
-    const [accepted, incoming, outgoing] = await Promise.all([
-      prisma.friendship.findMany({
-        where: {
-          status: "ACCEPTED",
-          OR: [{ requesterId: userId }, { addresseeId: userId }],
-        },
-        select: {
-          id: true,
-          requesterId: true,
-          requester: { select: summaryUserSelect },
-          addressee: { select: summaryUserSelect },
-        },
-      }),
-      prisma.friendship.findMany({
-        where: { addresseeId: userId, status: "PENDING" },
-        select: {
-          id: true,
-          requester: { select: pendingUserSelect },
-        },
-      }),
-      prisma.friendship.findMany({
-        where: { requesterId: userId, status: "PENDING" },
-        select: {
-          id: true,
-          addressee: { select: pendingUserSelect },
-        },
-      }),
-    ]);
+    // One relationship read is enough for all three buckets. The previous
+    // implementation issued three concurrent queries over the same indexed
+    // user/status predicates on every Home refresh. Keep the response shape
+    // unchanged by projecting pending users back to their narrower contract.
+    const relationships = await prisma.friendship.findMany({
+      where: {
+        OR: [
+          { status: "ACCEPTED", requesterId: userId },
+          { status: "ACCEPTED", addresseeId: userId },
+          { status: "PENDING", requesterId: userId },
+          { status: "PENDING", addresseeId: userId },
+        ],
+      },
+      select: {
+        id: true,
+        status: true,
+        requesterId: true,
+        addresseeId: true,
+        requester: { select: summaryUserSelect },
+        addressee: { select: summaryUserSelect },
+      },
+    });
+    const accepted = relationships.filter((row) => row.status === "ACCEPTED");
+    const incoming = relationships.filter(
+      (row) => row.status === "PENDING" && row.addresseeId === userId
+    );
+    const outgoing = relationships.filter(
+      (row) => row.status === "PENDING" && row.requesterId === userId
+    );
+    const pendingUser = (user) => {
+      const out = {};
+      for (const key of Object.keys(pendingUserSelect)) out[key] = user?.[key] ?? null;
+      return out;
+    };
     const friends = accepted
       .map((friendship) => {
         const user =
@@ -71,11 +77,11 @@ function buildGetFriendsSummary(dependencies = {}) {
     const pending = {
       incoming: incoming.map((friendship) => ({
         friendshipId: friendship.id,
-        user: friendship.requester,
+        user: pendingUser(friendship.requester),
       })),
       outgoing: outgoing.map((friendship) => ({
         friendshipId: friendship.id,
-        user: friendship.addressee,
+        user: pendingUser(friendship.addressee),
       })),
     };
     return {

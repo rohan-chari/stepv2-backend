@@ -36,6 +36,12 @@ const KNOWN_FLAGS = {
   apiRaceBootstrapCompactV1Enabled: false,
   homeRaceCardLeanLiveV1Enabled: false,
   homeRaceCardParallelOptionalV1Enabled: false,
+  // Home may reuse the viewer-neutral standings snapshot only while the
+  // corresponding race-resolution job is fully current. Any missing, stale,
+  // boundary-crossed, or generation-mismatched snapshot falls back to the
+  // existing live scorer. Separate from the lean flag so rollout/rollback is
+  // immediate and does not disturb the already-proven projection path.
+  homeRaceCardSnapshotReuseV1Enabled: false,
   publicRaceCountSqlV1Enabled: false,
   apiRaceMessageConditionalV1Enabled: false,
   apiRacePowerupTargetContextV1Enabled: false,

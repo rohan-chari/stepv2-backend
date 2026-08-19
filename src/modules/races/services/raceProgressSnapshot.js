@@ -264,6 +264,15 @@ async function readSnapshot(raceId, schemaVersion = SCHEMA_VERSION) {
   return value && value.v === schemaVersion ? value : null;
 }
 
+// Both supported viewer-neutral schemas share one physical key. Consumers
+// that accept either can fetch once instead of probing the same key twice.
+async function readSupportedSnapshot(raceId) {
+  const value = await redisCache.getJSON(cacheKeys.raceProgress(raceId));
+  return value && [SCHEMA_VERSION, LEAN_SCHEMA_VERSION].includes(value.v)
+    ? value
+    : null;
+}
+
 /**
  * SET (never DEL). A failed publish is logged and IGNORED: the older snapshot
  * ages out of freshness within 15s and the next reader rebuilds (§5 Phase D
@@ -345,6 +354,7 @@ module.exports = {
   isFresh,
   matchesTimeZone,
   readSnapshot,
+  readSupportedSnapshot,
   writeSnapshot,
   invalidateRaceProgress,
   isBypassed,

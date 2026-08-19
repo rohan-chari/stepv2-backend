@@ -114,10 +114,10 @@ function createHomeRouter(dependencies = {}) {
       const homePersistedTotals =
         req.query.homePersistedTotals === "1" ||
         req.query.homePersistedTotals === "true";
-      const leanLiveEnabled = await isStrictFlagEnabled(
-        settings,
-        "homeRaceCardLeanLiveV1Enabled"
-      );
+      const [leanLiveEnabled, snapshotReuseEnabled] = await Promise.all([
+        isStrictFlagEnabled(settings, "homeRaceCardLeanLiveV1Enabled"),
+        isStrictFlagEnabled(settings, "homeRaceCardSnapshotReuseV1Enabled"),
+      ]);
       if (
         await isStrictFlagEnabled(
           settings,
@@ -142,6 +142,7 @@ function createHomeRouter(dependencies = {}) {
           homePersistedTotals,
           localDate: req.query.localDate,
           leanLiveEnabled,
+          snapshotReuseEnabled,
         });
         return res.json(result);
       }
@@ -149,6 +150,7 @@ function createHomeRouter(dependencies = {}) {
         ? [
             getHomeShellPresentation({
               userId: req.user.id,
+              coins: req.user.coins,
               channel: req.releaseChannel,
               supportsCharacters:
                 req.clientFeatures?.has("characters") ?? false,
@@ -173,6 +175,7 @@ function createHomeRouter(dependencies = {}) {
         // TR-702/809: old clients never get a team race on the Home card.
         supportsTeamRaces: req.clientFeatures?.has("team_races") ?? false,
         leanLiveEnabled,
+        snapshotReuseEnabled,
       });
 
       // Character powers were removed. The key is still sent (always false) so

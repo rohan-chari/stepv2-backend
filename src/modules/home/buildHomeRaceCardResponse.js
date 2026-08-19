@@ -44,6 +44,7 @@ function buildHomeRaceCardResponse(dependencies) {
       homePersistedTotals,
       localDate,
       leanLiveEnabled,
+      snapshotReuseEnabled,
     } = params;
 
     // Wave 1: the core card and the two optional shell branches. At most three
@@ -59,10 +60,12 @@ function buildHomeRaceCardResponse(dependencies) {
         releaseChannel,
         supportsTeamRaces,
         leanLiveEnabled,
+        snapshotReuseEnabled,
       }), logger, "core"),
       compactShell
         ? settle(() => getHomeShellPresentation({
             userId: user.id,
+            coins: user.coins,
             channel: releaseChannel,
             supportsCharacters,
             supportsRemoteAssets,

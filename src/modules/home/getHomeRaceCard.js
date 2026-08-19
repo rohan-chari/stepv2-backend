@@ -20,6 +20,10 @@ const {
   collectRaceHitchhikeCopies,
   applyHitchhikeCopies,
 } = require("../powerups/hitchhikeCopies");
+const defaultRaceProgressSnapshot = require("../races/services/raceProgressSnapshot");
+const {
+  RaceResolutionJobV2: defaultRaceResolutionJobV2,
+} = require("../races/models/raceResolutionJobV2");
 
 // The effect types the home card must prefetch. LEECH is included (§5): once
 // leech MINTS steps to the attacker, omitting it here made the home-card total
@@ -108,23 +112,29 @@ async function checkPendingInvite(
   releaseChannel = "prod",
   supportsRemoteAssets = false
 ) {
+  const where = {
+    userId,
+    status: "INVITED",
+    race: { status: "PENDING" },
+    OR: [
+      { inviteExpiresAt: null },
+      { inviteExpiresAt: { gt: now } },
+    ],
+  };
   const invites = await prisma.raceParticipant.findMany({
-    where: {
-      userId,
-      status: "INVITED",
-      race: { status: "PENDING" },
-      OR: [
-        { inviteExpiresAt: null },
-        { inviteExpiresAt: { gt: now } },
-      ],
-    },
-    include: {
+    where,
+    select: {
+      inviteExpiresAt: true,
+      joinedAt: true,
       race: {
-        include: {
+        select: {
+          id: true,
+          name: true,
+          startedAt: true,
+          endsAt: true,
+          maxDurationDays: true,
           creator: { select: USER_SELECT },
-          participants: {
-            select: { id: true, status: true },
-          },
+          _count: { select: { participants: true } },
         },
       },
     },
@@ -144,7 +154,8 @@ async function checkPendingInvite(
       raceId: race.id,
       name: race.name,
       durationHours: raceDurationHours(race),
-      participantCount: race.participants.length,
+      participantCount:
+        race._count?.participants ?? race.participants?.length ?? 0,
       inviter: serializeUser(
         race.creator,
         supportsCharacters,
@@ -452,6 +463,243 @@ async function prefetchScopedModels({
 // the legacy single-state response (see buildGetHomeRaceCard). When an opted-in
 // user has zero active races this returns null and we fall through to the
 // existing single-state logic (invites / public / friend prompts).
+function snapshotTimeBoundaryIsCurrent(snapshot, now) {
+  const nowMs = now.getTime();
+  const asOfMs = new Date(snapshot?.asOf).getTime();
+  if (!Number.isFinite(asOfMs) || asOfMs > nowMs + 1000) return false;
+
+  const boundaries = [snapshot?.race?.endsAt];
+  for (const effect of snapshot?.activeEffects || []) {
+    boundaries.push(effect?.startsAt, effect?.expiresAt);
+  }
+  for (const raw of boundaries) {
+    if (raw == null) continue;
+    const boundaryMs = new Date(raw).getTime();
+    if (!Number.isFinite(boundaryMs)) return false;
+    if (boundaryMs > asOfMs && boundaryMs <= nowMs) return false;
+  }
+  return true;
+}
+
+function snapshotMatchesCompletedGeneration({
+  snapshot,
+  job,
+  race,
+  now,
+  timeZone,
+  store,
+}) {
+  if (!snapshot || !job || job.state !== "SUCCEEDED") return false;
+  if (Number(job.generation) !== Number(job.processingGeneration)) return false;
+  if (!store.isFresh(snapshot, now.getTime())) return false;
+  if (!store.matchesTimeZone(snapshot, raceTimeZone(race, timeZone))) return false;
+  if (!snapshotTimeBoundaryIsCurrent(snapshot, now)) return false;
+
+  const asOfMs = new Date(snapshot.asOf).getTime();
+  const completedMs = new Date(job.lastCompletedAt).getTime();
+  if (!Number.isFinite(completedMs) || asOfMs < completedMs) return false;
+  if (snapshot.race?.raceId !== race.id || snapshot.race?.status !== "ACTIVE") {
+    return false;
+  }
+  if (
+    new Date(snapshot.race?.endsAt).getTime() !== new Date(race.endsAt).getTime() ||
+    snapshot.race?.powerupsEnabled !== race.powerupsEnabled ||
+    snapshot.race?.isTeamRace !== race.isTeamRace ||
+    (snapshot.race?.teamSize ?? null) !== (race.teamSize ?? null)
+  ) {
+    return false;
+  }
+
+  const participants = Array.isArray(snapshot.participants)
+    ? snapshot.participants
+    : [];
+  if (participants.length === 0) return false;
+  const placements = new Set();
+  const userIds = new Set();
+  for (const participant of participants) {
+    const placement = Number(participant?.placement);
+    if (!participant?.userId || !Number.isInteger(placement)) return false;
+    if (placement < 1 || placement > participants.length) return false;
+    placements.add(placement);
+    userIds.add(participant.userId);
+  }
+  return placements.size === participants.length && userIds.size === participants.length;
+}
+
+async function readHomeSnapshot(store, raceId) {
+  try {
+    if (typeof store.readSupportedSnapshot === "function") {
+      return await store.readSupportedSnapshot(raceId);
+    }
+    return (
+      (await store.readSnapshot(raceId, store.LEAN_SCHEMA_VERSION)) ||
+      (await store.readSnapshot(raceId, store.SCHEMA_VERSION))
+    );
+  } catch {
+    return null;
+  }
+}
+
+async function checkActiveRacesFromSnapshots(prisma, userId, options = {}) {
+  const {
+    timeZone = "UTC",
+    now = new Date(),
+    supportsCharacters = false,
+    releaseChannel = "prod",
+    supportsRemoteAssets = false,
+    supportsTeamRaces = false,
+    snapshotStore = defaultRaceProgressSnapshot,
+    raceResolutionJobModel = defaultRaceResolutionJobV2,
+    fallback,
+  } = options;
+
+  // A failed invalidation opens this process-local breaker because Redis may
+  // still contain pre-mutation standings. Honor it before reading any key.
+  if (snapshotStore.isBypassed?.() === true) return fallback();
+
+  const myActive = await prisma.raceParticipant.findMany({
+    where: {
+      userId,
+      status: "ACCEPTED",
+      race: { status: "ACTIVE", tournamentId: null },
+    },
+    select: {
+      team: true,
+      race: {
+        select: {
+          id: true,
+          name: true,
+          startedAt: true,
+          endsAt: true,
+          timezone: true,
+          powerupsEnabled: true,
+          isTeamRace: true,
+          teamSize: true,
+        },
+      },
+    },
+    orderBy: { race: { startedAt: "desc" } },
+    take: MAX_ACTIVE_RACES,
+  });
+  if (!myActive || myActive.length === 0) return null;
+
+  const raceIds = myActive.map((row) => row.race?.id).filter(Boolean);
+  let jobs;
+  try {
+    const snapshots = await Promise.all(
+      raceIds.map((raceId) => readHomeSnapshot(snapshotStore, raceId))
+    );
+    // A missing/stale Redis value is the common miss case. Avoid adding a job
+    // table read before taking the exact live fallback on those requests.
+    if (snapshots.some((snapshot) => !snapshotStore.isFresh(snapshot, now.getTime()))) {
+      return fallback();
+    }
+    const loadedJobs = await raceResolutionJobModel.findByRaceIds(raceIds);
+    jobs = new Map(loadedJobs.map((job) => [job.raceId, job]));
+    for (let index = 0; index < myActive.length; index += 1) {
+      const race = myActive[index].race;
+      const snapshot = snapshots[index];
+      if (
+        !race ||
+        !snapshotMatchesCompletedGeneration({
+          snapshot,
+          job: jobs.get(race.id),
+          race,
+          now,
+          timeZone,
+          store: snapshotStore,
+        }) ||
+        !snapshot.participants.some((participant) => participant.userId === userId) ||
+        (race.isTeamRace && supportsTeamRaces && !snapshot.teams)
+      ) {
+        return fallback();
+      }
+      myActive[index].snapshot = snapshot;
+    }
+  } catch {
+    return fallback();
+  }
+
+  const visibleUserIds = [
+    ...new Set(
+      myActive.flatMap((row) =>
+        [...row.snapshot.participants]
+          .sort((left, right) => Number(left.placement) - Number(right.placement))
+          .slice(0, 3)
+          .map((participant) => participant.userId)
+      )
+    ),
+  ];
+  const users = visibleUserIds.length > 0
+    ? await prisma.user.findMany({
+        where: { id: { in: visibleUserIds } },
+        select: USER_SELECT,
+      })
+    : [];
+  const userById = new Map(users.map((user) => [user.id, user]));
+
+  const races = myActive.map(({ race, team, snapshot }) => {
+    const ranked = [...snapshot.participants].sort(
+      (left, right) => Number(left.placement) - Number(right.placement)
+    );
+    const stealthedUserIds = new Set();
+    let viewerIsDetoured = false;
+    if (race.powerupsEnabled) {
+      for (const effect of snapshot.activeEffects || []) {
+        if (effect.type === "STEALTH_MODE") stealthedUserIds.add(effect.targetUserId);
+        if (effect.type === "DETOUR_SIGN" && effect.targetUserId === userId) {
+          viewerIsDetoured = true;
+        }
+      }
+    }
+    const top3 = ranked.slice(0, 3).map((participant, index) => {
+      const isStealthed =
+        viewerIsDetoured ||
+        (stealthedUserIds.has(participant.userId) &&
+          participant.userId !== userId &&
+          !participant.finishedAt);
+      const user = userById.get(participant.userId) || null;
+      return {
+        rank: index + 1,
+        userId: participant.userId,
+        displayName: isStealthed ? "???" : (user?.displayName || "Anonymous"),
+        ...(isStealthed
+          ? { equippedAccessories: [], animal: null }
+          : (() => {
+              const { animal, accessories } = characterPresentation(
+                user,
+                supportsCharacters,
+                releaseChannel,
+                supportsRemoteAssets
+              );
+              return { equippedAccessories: accessories, animal };
+            })()),
+        totalSteps: isStealthed ? null : participant.totalSteps,
+        isStealthed,
+      };
+    });
+    const myIndex = ranked.findIndex((participant) => participant.userId === userId);
+    return {
+      raceId: race.id,
+      name: race.name,
+      endsAt: race.endsAt,
+      top3,
+      userPlacement: viewerIsDetoured || myIndex < 0 ? null : myIndex + 1,
+      userPlacementHidden: viewerIsDetoured,
+      participantCount: ranked.length,
+      ...(race.isTeamRace && supportsTeamRaces
+        ? {
+            isTeamRace: true,
+            teamSize: race.teamSize ?? null,
+            myTeam: team ?? null,
+            teams: snapshot.teams,
+          }
+        : {}),
+    };
+  });
+  return { state: "ACTIVE_RACES", data: { races } };
+}
+
 async function checkActiveRaces(prisma, userId, options = {}) {
   const {
     timeZone = "UTC",
@@ -929,6 +1177,10 @@ function buildGetHomeRaceCard(dependencies = {}) {
   const stepsModel = dependencies.Steps || Steps;
   const stepSampleModel = dependencies.StepSample || StepSample;
   const raceActiveEffectModel = dependencies.RaceActiveEffect || RaceActiveEffect;
+  const snapshotStore =
+    dependencies.raceProgressSnapshot || defaultRaceProgressSnapshot;
+  const raceResolutionJobModel =
+    dependencies.RaceResolutionJobV2 || defaultRaceResolutionJobV2;
 
   return async function getHomeRaceCard({
     userId,
@@ -946,6 +1198,7 @@ function buildGetHomeRaceCard(dependencies = {}) {
     // receives a test-only assetKey it does not bundle.
     releaseChannel = "prod",
     leanLiveEnabled = false,
+    snapshotReuseEnabled = false,
   }) {
     const now = nowFn();
 
@@ -966,7 +1219,7 @@ function buildGetHomeRaceCard(dependencies = {}) {
     // this flag, so they always get the legacy ACTIVE_RACE single-card response
     // (byte-for-byte unchanged).
     if (homeActiveRaces) {
-      const activeRaces = await checkActiveRaces(prisma, userId, {
+      const activeRaceOptions = {
         timeZone,
         now,
         stepsModel,
@@ -978,7 +1231,15 @@ function buildGetHomeRaceCard(dependencies = {}) {
         supportsTeamRaces,
         usePersistedTotals: homePersistedTotals,
         leanLiveEnabled,
-      });
+      };
+      const activeRaces = snapshotReuseEnabled && !homePersistedTotals
+        ? await checkActiveRacesFromSnapshots(prisma, userId, {
+            ...activeRaceOptions,
+            snapshotStore,
+            raceResolutionJobModel,
+            fallback: () => checkActiveRaces(prisma, userId, activeRaceOptions),
+          })
+        : await checkActiveRaces(prisma, userId, activeRaceOptions);
       if (activeRaces) return activeRaces;
     } else {
       const active = await checkActiveRace(

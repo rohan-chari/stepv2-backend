@@ -10,15 +10,18 @@ function buildGetHomeShellPresentation(dependencies = {}) {
   const prisma = dependencies.prisma || defaultPrisma;
   return async function getHomeShellPresentation({
     userId,
+    coins: authenticatedCoins = null,
     channel = "prod",
     supportsCharacters = false,
     supportsRemoteAssets = false,
   }) {
     const [user, equippedRows, capeRow] = await Promise.all([
-      prisma.user.findUnique({
-        where: { id: userId },
-        select: { coins: true },
-      }),
+      Number.isInteger(authenticatedCoins)
+        ? Promise.resolve({ coins: authenticatedCoins })
+        : prisma.user.findUnique({
+            where: { id: userId },
+            select: { coins: true },
+          }),
       prisma.userEquippedAccessory.findMany({
         where: { userId },
         include: { shopItem: true },
