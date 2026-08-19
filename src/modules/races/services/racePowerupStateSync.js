@@ -147,19 +147,45 @@ function buildSyncRacePowerupState(dependencies = {}) {
       }
     }
 
-    const occupiedCount = await powerupModel.countOccupiedSlots(participant.id);
-    const openSlots = Math.max(0, (participant.powerupSlots || 3) - occupiedCount);
-    if (openSlots > 0) {
-      const queuedBoxes = await powerupModel.findQueuedByParticipant(participant.id);
+    let queuedBoxCount;
+    if (typeof powerupModel.findInventoryForParticipants === "function") {
+      // One current-state read replaces occupied-count + queued-list + final
+      // queued-count. QUEUED inventory is capped and promotions are selected in
+      // the same createdAt order as the legacy methods, so the observable box
+      // result is unchanged while the hot sync path sheds two round trips.
+      const inventory = await powerupModel.findInventoryForParticipants(
+        [participant.id],
+        ["HELD", "MYSTERY_BOX", "QUEUED"]
+      );
+      const occupiedCount = inventory.filter(
+        (box) => box.status === "HELD" || box.status === "MYSTERY_BOX"
+      ).length;
+      const queuedBoxes = inventory.filter((box) => box.status === "QUEUED");
+      const openSlots = Math.max(
+        0,
+        (participant.powerupSlots || 3) - occupiedCount
+      );
       const toPromote = queuedBoxes.slice(0, openSlots);
       for (const box of toPromote) {
         await powerupModel.update(box.id, { status: "MYSTERY_BOX" });
       }
+      queuedBoxCount = queuedBoxes.length - toPromote.length;
+    } else {
+      // Compatibility seam for injected implementations that predate the bulk
+      // inventory reader.
+      const occupiedCount = await powerupModel.countOccupiedSlots(participant.id);
+      const openSlots = Math.max(0, (participant.powerupSlots || 3) - occupiedCount);
+      if (openSlots > 0) {
+        const queuedBoxes = await powerupModel.findQueuedByParticipant(participant.id);
+        const toPromote = queuedBoxes.slice(0, openSlots);
+        for (const box of toPromote) {
+          await powerupModel.update(box.id, { status: "MYSTERY_BOX" });
+        }
+      }
+      queuedBoxCount = await powerupModel.countQueuedByParticipant(
+        participant.id
+      );
     }
-
-    const queuedBoxCount = await powerupModel.countQueuedByParticipant(
-      participant.id
-    );
 
     return {
       enabled: true,
