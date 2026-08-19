@@ -65,6 +65,62 @@ const QUEUE_LAG_ALARM_MS = 30 * 1000;
 // over from the v1 scheduler, which src/index.js no longer starts.
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 
+// Keep one stable phase schema on every successful job line so production log
+// aggregation can compare jobs without treating an unvisited branch as missing
+// data. These are aggregate timings only: no ids, payloads, or query text.
+const RACE_RESOLUTION_PHASES = Object.freeze([
+  "claimReadiness",
+  "claim",
+  "planSettings",
+  "dependencyClosurePlanner",
+  "artifactLookup",
+  "stepSyncScope",
+  "compute",
+  "prepareWrites",
+  "transaction",
+  "fenceAcquire",
+  "fenceValidation",
+  "discardSuperseded",
+  "participantWrites",
+  "sideWrites",
+  "recordSuccess",
+  "postSettings",
+  "postCommitHook",
+  "powerupStateSync",
+  "overtakeNudges",
+  "postTaskHandoff",
+]);
+
+function createRaceResolutionPhaseTimer(monotonicNow = process.hrtime.bigint) {
+  const totals = Object.fromEntries(RACE_RESOLUTION_PHASES.map((name) => [name, 0]));
+
+  function start(name) {
+    if (!Object.hasOwn(totals, name)) throw new Error(`unknown race resolution phase: ${name}`);
+    const startedAt = monotonicNow();
+    let stopped = false;
+    return () => {
+      if (stopped) return;
+      stopped = true;
+      totals[name] += Math.max(0, Number(monotonicNow() - startedAt) / 1e6);
+    };
+  }
+
+  return {
+    start,
+    async measure(name, operation) {
+      const stop = start(name);
+      try {
+        return await operation();
+      } finally {
+        stop();
+      }
+    },
+    snapshot() {
+      return { ...totals };
+    },
+  };
+}
+
 // Starts a bounded number of independently-claimed jobs at once. Every
 // [processOne] claim uses `FOR UPDATE SKIP LOCKED` and the later fenced write is
 // race-keyed, so separate lanes can never write the same race concurrently.
@@ -572,15 +628,19 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
   // job-row lock before its first participant write. The held job-row lock also
   // serializes this against raceExpiry, which acquires the same row.
   async function processOneUnbudgeted() {
+    const phaseTimer = createRaceResolutionPhaseTimer();
     const currentTime = now();
-    if (await claimingDisabled()) return null;
-    if (!(await readyToClaim(currentTime))) return null;
-
-    const job = await jobModel.claimNext({
-      now: currentTime,
-      leaseMs,
-      leaseToken: newLeaseToken(),
+    const ready = await phaseTimer.measure("claimReadiness", async () => {
+      if (await claimingDisabled()) return false;
+      return readyToClaim(currentTime);
     });
+    if (!ready) return null;
+
+    const job = await phaseTimer.measure("claim", () => jobModel.claimNext({
+        now: currentTime,
+        leaseMs,
+        leaseToken: newLeaseToken(),
+      }));
     if (!job) return null;
     // Real work claimed => stop coasting on the cached kill-switch answer (see
     // CLAIMING_FLAG_TTL_MS). Only idle ticks are allowed to reuse it.
@@ -633,34 +693,43 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         // the V1 key means "commit subset results". Reading one for the other
         // would make the Phase 3 deploy flip every environment already running
         // the measurement straight into writing.
-        const closureShadowEnabled = await isStrictFlagEnabled(
-          settings,
-          "raceResolutionDependencyClosureShadowV1Enabled"
+        const closureShadowEnabled = await phaseTimer.measure(
+          "planSettings",
+          () => isStrictFlagEnabled(
+            settings,
+            "raceResolutionDependencyClosureShadowV1Enabled"
+          )
         );
-        const closureWritesEnabled = await isStrictFlagEnabled(
-          settings,
-          "raceResolutionDependencyClosureV1Enabled"
+        const closureWritesEnabled = await phaseTimer.measure(
+          "planSettings",
+          () => isStrictFlagEnabled(
+            settings,
+            "raceResolutionDependencyClosureV1Enabled"
+          )
         );
         if (closureShadowEnabled || closureWritesEnabled) {
           const shadowStartedAt = Date.now();
           try {
             const shadowConfig = await balanceConfig.getSnapshot();
-            const shadowResult = await buildDependencyClosure({
-              raceId: job.raceId,
-              dirtyParticipantIds: job.processingDirtyParticipantIds,
-              job,
-              now: now(),
-              Race: raceModel,
-              RaceActiveEffect: effectModel,
-              RaceParticipant: participantModel,
-              balanceConfigVersion: shadowConfig?.version ?? null,
-              // ONE fingerprint seam for the whole generation. Without this the
-              // planner lazily resolves the shipped module itself while the
-              // fence uses this worker's injected dependency — two different
-              // code paths computing the digest that must match each other, and
-              // a test can only ever see one of them.
-              buildInputFingerprint,
-            });
+            const shadowResult = await phaseTimer.measure(
+              "dependencyClosurePlanner",
+              () => buildDependencyClosure({
+                raceId: job.raceId,
+                dirtyParticipantIds: job.processingDirtyParticipantIds,
+                job,
+                now: now(),
+                Race: raceModel,
+                RaceActiveEffect: effectModel,
+                RaceParticipant: participantModel,
+                balanceConfigVersion: shadowConfig?.version ?? null,
+                // ONE fingerprint seam for the whole generation. Without this the
+                // planner lazily resolves the shipped module itself while the
+                // fence uses this worker's injected dependency — two different
+                // code paths computing the digest that must match each other, and
+                // a test can only ever see one of them.
+                buildInputFingerprint,
+              })
+            );
             const plannerMs = Math.max(0, Date.now() - shadowStartedAt);
             if (closureShadowEnabled) {
               closureShadow = summarizeClosureShadow(
@@ -744,22 +813,22 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
 
     try {
       // ── Step 2: computation, outside every transaction. ──────────────────
-      const reasonAwareEnabled = await isStrictFlagEnabled(
-        settings,
-        "raceResolutionReasonAwareV1Enabled"
+      const reasonAwareEnabled = await phaseTimer.measure(
+        "planSettings",
+        () => isStrictFlagEnabled(settings, "raceResolutionReasonAwareV1Enabled")
       );
       const baseResolutionPlan = reasonAwareEnabled
         ? resolutionPlanForDirtyReasons(job.processingDirtyReasons)
         : "FULL";
       let result = null;
       let computeMs = 0;
-      const bulkWritesEnabled = await isStrictFlagEnabled(
-        settings,
-        "raceResolutionBulkWriteV1Enabled"
+      const bulkWritesEnabled = await phaseTimer.measure(
+        "planSettings",
+        () => isStrictFlagEnabled(settings, "raceResolutionBulkWriteV1Enabled")
       );
-      const burstCoalescingEnabled = await isStrictFlagEnabled(
-        settings,
-        "raceResolutionBurstCoalescingV1Enabled"
+      const burstCoalescingEnabled = await phaseTimer.measure(
+        "planSettings",
+        () => isStrictFlagEnabled(settings, "raceResolutionBurstCoalescingV1Enabled")
       );
       let superseded = false;
       let discarded = false;
@@ -777,44 +846,49 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         let artifactPayload = null;
         let stepSyncScope = null;
         let capture = null;
-        const artifactEnabled = !forceFull && await isStrictFlagEnabled(
-          settings,
-          "raceResolutionDisplayArtifactReuseV1Enabled"
+        const artifactEnabled = !forceFull && await phaseTimer.measure(
+          "planSettings",
+          () => isStrictFlagEnabled(
+            settings,
+            "raceResolutionDisplayArtifactReuseV1Enabled"
+          )
         );
-        if (
-          artifactEnabled &&
-          job.processingDisplayArtifactId &&
-          baseResolutionPlan === "FULL"
-        ) {
-          const loaded = await displayArtifactStore.load({
-            id: job.processingDisplayArtifactId,
-            digest: job.processingDisplayArtifactDigest,
-            schema: job.processingDisplayArtifactSchema,
-            raceId: job.raceId,
-            timeZone: job.processingTimeZone || "UTC",
-          });
-          if (!loaded) {
-            artifactFallbackReason = "load_or_envelope_mismatch";
-          } else if (!artifactMatchesClaim(loaded, job)) {
-            artifactFallbackReason = "claim_mismatch";
-          } else {
-            const config = await balanceConfig.getSnapshot();
-            const fingerprint = await buildInputFingerprint({
+        await phaseTimer.measure("artifactLookup", async () => {
+          if (
+            artifactEnabled &&
+            job.processingDisplayArtifactId &&
+            baseResolutionPlan === "FULL"
+          ) {
+            const loaded = await displayArtifactStore.load({
+              id: job.processingDisplayArtifactId,
+              digest: job.processingDisplayArtifactDigest,
+              schema: job.processingDisplayArtifactSchema,
               raceId: job.raceId,
-              now: now(),
-              balanceConfigVersion: config.version,
+              timeZone: job.processingTimeZone || "UTC",
             });
-            if (
-              fingerprint?.digest === loaded.inputFingerprint &&
-              String(config.version ?? "code-default") ===
-                String(loaded.balanceConfigVersion ?? "code-default")
-            ) {
-              artifactPayload = loaded;
+            if (!loaded) {
+              artifactFallbackReason = "load_or_envelope_mismatch";
+            } else if (!artifactMatchesClaim(loaded, job)) {
+              artifactFallbackReason = "claim_mismatch";
             } else {
-              artifactFallbackReason = "input_or_config_mismatch";
+              const config = await balanceConfig.getSnapshot();
+              const fingerprint = await buildInputFingerprint({
+                raceId: job.raceId,
+                now: now(),
+                balanceConfigVersion: config.version,
+              });
+              if (
+                fingerprint?.digest === loaded.inputFingerprint &&
+                String(config.version ?? "code-default") ===
+                  String(loaded.balanceConfigVersion ?? "code-default")
+              ) {
+                artifactPayload = loaded;
+              } else {
+                artifactFallbackReason = "input_or_config_mismatch";
+              }
             }
           }
-        }
+        });
 
         if (artifactPayload) {
           resolutionPlan = "ARTIFACT_REUSE";
@@ -825,10 +899,13 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           capture = createWriteCapture({ participantModel, effectModel, eventModel });
           result = null;
           if (!forceFull && reasonAwareEnabled && resolutionPlan === "FULL") {
-            stepSyncScope = await buildStepSyncScope(job, {
-              Race: raceModel,
-              RaceActiveEffect: effectModel,
-            });
+            stepSyncScope = await phaseTimer.measure(
+              "stepSyncScope",
+              () => buildStepSyncScope(job, {
+                Race: raceModel,
+                RaceActiveEffect: effectModel,
+              })
+            );
           }
           if (stepSyncScope) {
             resolutionPlan = stepSyncScope.plan;
@@ -853,16 +930,19 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
               RacePowerupEvent: capture.events,
               now,
             });
-            const processed = await computeResolve({
-              raceId: job.raceId,
-              userIds: triggeringUserIds,
-              timeZone: job.processingTimeZone || "UTC",
-              // Additive and null on every non-closure run, so the FULL path is
-              // byte-for-byte what it was.
-              ...(useClosure
-                ? { scoreParticipantIds: closurePlan.participantIds }
-                : {}),
-            });
+            const processed = await phaseTimer.measure(
+              "compute",
+              () => computeResolve({
+                raceId: job.raceId,
+                userIds: triggeringUserIds,
+                timeZone: job.processingTimeZone || "UTC",
+                // Additive and null on every non-closure run, so the FULL path is
+                // byte-for-byte what it was.
+                ...(useClosure
+                  ? { scoreParticipantIds: closurePlan.participantIds }
+                  : {}),
+              })
+            );
             result = Array.isArray(processed) ? processed[0] : null;
             computeMs += Math.max(0, Date.now() - computeStartedAt);
             // Only after a result actually came back: a null result means the
@@ -871,6 +951,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           }
         }
 
+        const stopPrepareWrites = phaseTimer.start("prepareWrites");
         const userIdByParticipant = new Map();
         for (const participant of result?.race?.participants || []) {
           userIdByParticipant.set(participant.id, participant.userId);
@@ -896,6 +977,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         const sideWrites = capture.writes.filter(
           (write) => write.kind === "effectUpdate" || write.kind === "eventCreate"
         );
+        stopPrepareWrites();
 
         // ── Step 3: the ONE write transaction. ─────────────────────────────
         let artifactRejectedAtFence = false;
@@ -903,14 +985,19 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         let closureRejectedAtFence = false;
         const closureCommitting = resolutionPlan === "DEPENDENCY_CLOSURE";
         const writeStartedAt = Date.now();
-        await prisma.$transaction(async (tx) => {
+        await phaseTimer.measure("transaction", () => prisma.$transaction(async (tx) => {
         // (i) fence
-        const fenced = await jobModel.acquireForWrite(tx, {
-          id: job.id,
-          expectedLeaseToken: job.leaseToken,
-        });
+        const fenced = await phaseTimer.measure(
+          "fenceAcquire",
+          () => jobModel.acquireForWrite(tx, {
+            id: job.id,
+            expectedLeaseToken: job.leaseToken,
+          })
+        );
         if (!fenced) throw new FenceLostError();
 
+        const stopFenceValidation = phaseTimer.start("fenceValidation");
+        try {
         if (artifactPayload) {
           const currentConfig = await balanceConfig.getSnapshot();
           const fingerprint = await buildInputFingerprint({
@@ -998,14 +1085,21 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           }
         }
 
+        } finally {
+          stopFenceValidation();
+        }
+
         if (
           burstCoalescingEnabled &&
           supersededRunMayDiscard(fenced, now()) &&
           typeof jobModel.discardSuperseded === "function"
         ) {
-          const outcome = await jobModel.discardSuperseded(
-            { id: job.id, leaseToken: job.leaseToken, now: now() },
-            tx
+          const outcome = await phaseTimer.measure(
+            "discardSuperseded",
+            () => jobModel.discardSuperseded(
+              { id: job.id, leaseToken: job.leaseToken, now: now() },
+              tx
+            )
           );
           if (outcome.applied) {
             discarded = true;
@@ -1014,58 +1108,65 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         }
 
         // (ii) participant rows, ascending userId
-        if (bulkWritesEnabled) {
-          await writeParticipantsBulk(tx, participantWrites, now());
-        } else for (const write of participantWrites) {
-          if (write.kind === "participantTotal") {
-            await tx.raceParticipant.update({
-              where: { id: write.participantId },
-              data: {
-                totalSteps: write.totalSteps,
-                totalsUpdatedAt: now(),
-                // The RAW walked total (2026-08-09). Same row, same UPDATE,
-                // same fence, same ascending-userId ordering — no new writer
-                // and no extra statement. The captured value is already
-                // high-watered against the stored one. Omitted (never nulled)
-                // when the capture carries none, so a caller without a raw
-                // figure can't blank a healed row.
-                ...(typeof write.rawSteps === "number" &&
-                Number.isFinite(write.rawSteps)
-                  ? { rawSteps: write.rawSteps }
-                  : {}),
-              },
-            });
-          } else {
-            await tx.raceParticipant.update({
-              where: { id: write.participantId },
-              data: { bonusSteps: { decrement: write.amount } },
-            });
+        await phaseTimer.measure("participantWrites", async () => {
+          if (bulkWritesEnabled) {
+            await writeParticipantsBulk(tx, participantWrites, now());
+          } else for (const write of participantWrites) {
+            if (write.kind === "participantTotal") {
+              await tx.raceParticipant.update({
+                where: { id: write.participantId },
+                data: {
+                  totalSteps: write.totalSteps,
+                  totalsUpdatedAt: now(),
+                  // The RAW walked total (2026-08-09). Same row, same UPDATE,
+                  // same fence, same ascending-userId ordering — no new writer
+                  // and no extra statement. The captured value is already
+                  // high-watered against the stored one. Omitted (never nulled)
+                  // when the capture carries none, so a caller without a raw
+                  // figure can't blank a healed row.
+                  ...(typeof write.rawSteps === "number" &&
+                  Number.isFinite(write.rawSteps)
+                    ? { rawSteps: write.rawSteps }
+                    : {}),
+                },
+              });
+            } else {
+              await tx.raceParticipant.update({
+                where: { id: write.participantId },
+                data: { bonusSteps: { decrement: write.amount } },
+              });
+            }
           }
-        }
+        });
 
         // Trail-mine bookkeeping (effect status + feed row) rides the same
         // transaction, so a detonation is all-or-nothing with the totals it
         // adjusted. Fire-once serialization comes free from the fence.
-        for (const write of sideWrites) {
-          if (write.kind === "effectUpdate") {
-            await tx.raceActiveEffect.update({
-              where: { id: write.id },
-              data: write.fields,
-            });
-          } else {
-            await tx.racePowerupEvent.create({ data: write.data });
+        await phaseTimer.measure("sideWrites", async () => {
+          for (const write of sideWrites) {
+            if (write.kind === "effectUpdate") {
+              await tx.raceActiveEffect.update({
+                where: { id: write.id },
+                data: write.fields,
+              });
+            } else {
+              await tx.racePowerupEvent.create({ data: write.data });
+            }
           }
-        }
+        });
 
         // (iii) job row
-        const outcome = await jobModel.recordSuccess(
-          {
-            id: job.id,
-            leaseToken: job.leaseToken,
-            processingGeneration: job.processingGeneration,
-            now: now(),
-          },
-          tx
+        const outcome = await phaseTimer.measure(
+          "recordSuccess",
+          () => jobModel.recordSuccess(
+            {
+              id: job.id,
+              leaseToken: job.leaseToken,
+              processingGeneration: job.processingGeneration,
+              now: now(),
+            },
+            tx
+          )
         );
         if (!outcome.applied) throw new FenceLostError();
         superseded = outcome.superseded;
@@ -1074,7 +1175,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
       // happened outside it), but a large field is still N row updates — give it
       // headroom past Prisma's 5s default so a big race can never be aborted
       // mid-write by a transaction timeout.
-        { timeout: 15_000, maxWait: 10_000 });
+        { timeout: 15_000, maxWait: 10_000 }));
         writeMs += Math.max(0, Date.now() - writeStartedAt);
 
         if (artifactRejectedAtFence) {
@@ -1113,15 +1214,16 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           computeMs,
           writeMs,
           durationMs: Math.max(0, Date.now() - startMs),
+          phaseMs: phaseTimer.snapshot(),
         }));
         return { jobId: job.id, discarded: true };
       }
 
       // ── Post-commit. Everything below is best-effort and holds no lock. ──
       const postStartedAt = Date.now();
-      const postTasksEnabled = await isStrictFlagEnabled(
-        settings,
-        "raceResolutionPostTasksV1Enabled"
+      const postTasksEnabled = await phaseTimer.measure(
+        "postSettings",
+        () => isStrictFlagEnabled(settings, "raceResolutionPostTasksV1Enabled")
       );
       let deferredSnapshotCommand = null;
       const deferredIntents = [];
@@ -1160,6 +1262,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         resolutionPlan === "STEP_SYNC_COMMITTED" ||
         resolutionPlan === "DEPENDENCY_CLOSURE"
       ) {
+        const stopPostCommitHook = phaseTimer.start("postCommitHook");
         try {
           const outcome = await onCommitted({
             raceId: job.raceId,
@@ -1173,6 +1276,8 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           if (Array.isArray(outcome?.intents)) deferredIntentClaims.push(...outcome.intents);
         } catch (error) {
           logger.error("[RACE_RESOLUTION_V2] post-commit hook error:", error);
+        } finally {
+          stopPostCommitHook();
         }
       }
 
@@ -1180,6 +1285,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
       // (§5a item 2) — coalescing must not lose a triggering user's box roll.
       if (result) {
         const boxByUser = result.boxEffectiveStepsByUser || {};
+        const stopPowerupStateSync = phaseTimer.start("powerupStateSync");
         for (const triggerUserId of orderedTriggeringUserIds) {
           try {
             const syncResult = await syncRacePowerupState({
@@ -1206,7 +1312,9 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
             }));
           }
         }
+        stopPowerupStateSync();
 
+        const stopOvertakeNudges = phaseTimer.start("overtakeNudges");
         for (const triggerUserId of orderedTriggeringUserIds) {
           try {
             await nudge({
@@ -1240,12 +1348,14 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
             logger.error("[RACE_RESOLUTION_V2] overtake nudge error:", error);
           }
         }
+        stopOvertakeNudges();
       }
 
       // Creation happens only after every stateful/RNG/recipient decision above
       // has finished. The payload contains only already-claimed immutable
       // transport intents plus the generation-level publication command.
       if (postTasksEnabled && deferredSnapshotCommand) {
+        const stopPostTaskHandoff = phaseTimer.start("postTaskHandoff");
         try {
           const resolveIntents = async (client) => {
             const resolved = [];
@@ -1282,6 +1392,8 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
             operation: "post_task_handoff",
             errorCode: error?.code || "POST_HANDOFF_ERROR",
           }));
+        } finally {
+          stopPostTaskHandoff();
         }
       }
 
@@ -1317,6 +1429,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         closureEscalatedOnMine,
         closureFenceRejections: closureCommittedRejections,
         sqlCount: typeof dependencies.sqlCount === "function" ? dependencies.sqlCount() : null,
+        phaseMs: phaseTimer.snapshot(),
       }));
       return job;
     } catch (error) {
@@ -1327,6 +1440,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           event: "race_resolution_v2",
           outcome: "fence_lost",
           reasonClasses: job.processingDirtyReasons || ["FULL"],
+          phaseMs: phaseTimer.snapshot(),
         }));
         return job;
       }
@@ -1335,6 +1449,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         outcome: "failed",
         reasonClasses: job.processingDirtyReasons || ["FULL"],
         errorCode: error?.code || "WORKER_ERROR",
+        phaseMs: phaseTimer.snapshot(),
         // Diagnosability for raw-query failures (dependency-closure spec,
         // rollout item 7). Under the pg driver adapter (src/db.js) the
         // SQLSTATE lives at meta.driverAdapterError.cause.originalCode —
