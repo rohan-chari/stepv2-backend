@@ -136,7 +136,12 @@ function buildGetRaceMessages(dependencies = {}) {
       kind === "USER" || kind === "SYSTEM" ? kind : null;
     const includeUser = normalizedKind !== "SYSTEM";
     const includeSystem = normalizedKind !== "USER";
-    const race = accessContext || (await raceModel.findById(raceId));
+    const callerSuppliedAccessContext = accessContext != null;
+    const race = accessContext || (
+      typeof raceModel.findMessageAccessContext === "function"
+        ? await raceModel.findMessageAccessContext(raceId, userId)
+        : await raceModel.findById(raceId)
+    );
     if (!race) {
       const error = new Error("Race not found");
       error.statusCode = 404;
@@ -144,16 +149,21 @@ function buildGetRaceMessages(dependencies = {}) {
     }
 
     const myParticipant = race.participants.find((p) => p.userId === userId);
-    if (!accessContext && (!myParticipant || (race.seededBucketId && myParticipant.status !== "ACCEPTED"))) {
+    if (!callerSuppliedAccessContext &&
+        (!myParticipant || (race.seededBucketId && myParticipant.status !== "ACCEPTED"))) {
       // 2026-07-25 §5 — tournament spectating, identical to the relaxation
       // getRaceDetails/getRaceProgress already apply: any ACCEPTED bracket
       // player (INCLUDING eliminated) may READ a sibling matchup's chat.
       // READ ONLY — sendRaceMessage/deleteRaceMessage are untouched. The stealth
       // redaction below is keyed on `targetUserId !== userId`, so a spectator
       // (never the stealthed user) is redacted exactly like any other viewer.
-      const canSpectate =
-        race.tournamentId != null &&
-        (await isTournamentParticipant(race.tournamentId, userId));
+      const embeddedTournamentParticipant =
+        Array.isArray(race.tournament?.participants) &&
+        race.tournament.participants.length > 0;
+      const canSpectate = race.tournamentId != null &&
+        (embeddedTournamentParticipant ||
+          (!race.tournament &&
+            await isTournamentParticipant(race.tournamentId, userId)));
       if (!canSpectate) {
         const error = new Error("You are not a participant in this race");
         error.statusCode = 403;
