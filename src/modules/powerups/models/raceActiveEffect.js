@@ -14,9 +14,14 @@ const RaceActiveEffect = {
     });
   },
 
-  async findActiveByTypeForParticipant(participantId, type) {
+  async findActiveByTypeForParticipant(participantId, type, { expiresAfter } = {}) {
     return prisma.raceActiveEffect.findFirst({
-      where: { targetParticipantId: participantId, type, status: "ACTIVE" },
+      where: {
+        targetParticipantId: participantId,
+        type,
+        status: "ACTIVE",
+        ...(expiresAfter ? { expiresAt: { gt: expiresAfter } } : {}),
+      },
     });
   },
 

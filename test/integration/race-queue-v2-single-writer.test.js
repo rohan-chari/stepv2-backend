@@ -154,6 +154,7 @@ beforeEach(async () => {
   await appSettings.setFlag("raceResolutionBulkWriteV1Enabled", false);
   await appSettings.setFlag("raceResolutionBurstCoalescingV1Enabled", false);
   await appSettings.setFlag("raceResolutionReasonAwareV1Enabled", false);
+  await appSettings.setFlag("raceResolutionQueuedGenerationMergeV1Enabled", false);
   await appSettings.setFlag("raceResolutionPostTasksV1Enabled", false);
 });
 
@@ -500,6 +501,32 @@ describe("5a — one bulk writer per race", () => {
     const job = await RaceResolutionJobV2.findByRaceId(raceId);
     assert.ok(job, "the legacy path enqueued the uploader's active race");
     assert.deepEqual(job.triggeredByUserIds, [alice.userId]);
+  });
+
+  it("queued-generation merge reaches both legacy step upload endpoints", async () => {
+    const alice = await createUser("Legacy merge Alice");
+    const bob = await createUser("Legacy merge Bob");
+    const raceId = await createActiveRace(alice, [bob], "Legacy merge endpoints");
+    await drain(makeWorker());
+    await appSettings.setFlag("raceResolutionQueuedGenerationMergeV1Enabled", true);
+
+    const date = new Date().toISOString().slice(0, 10);
+    assert.equal((await request(server.baseUrl, "POST", "/steps", {
+      body: { steps: 1000, date }, token: alice.token,
+    })).status, 200);
+    const stepsFirst = await RaceResolutionJobV2.findByRaceId(raceId);
+    assert.equal((await request(server.baseUrl, "POST", "/steps", {
+      body: { steps: 1100, date }, token: alice.token,
+    })).status, 200);
+    const stepsSecond = await RaceResolutionJobV2.findByRaceId(raceId);
+    assert.equal(stepsSecond.generation, stepsFirst.generation);
+
+    await drain(makeWorker());
+    assert.equal((await postSamples(alice, [sampleAt(3, 1200)])).status, 200);
+    const samplesFirst = await RaceResolutionJobV2.findByRaceId(raceId);
+    assert.equal((await postSamples(alice, [sampleAt(2, 1300)])).status, 200);
+    const samplesSecond = await RaceResolutionJobV2.findByRaceId(raceId);
+    assert.equal(samplesSecond.generation, samplesFirst.generation);
   });
 
   it("reason-aware legacy POST /steps commits uploader reconciliation before narrow STEP_SYNC becomes claimable", async () => {

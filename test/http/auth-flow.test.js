@@ -35,6 +35,12 @@ test("POST /auth/apple provisions the signed-in user", async () => {
   let receivedPayload;
 
   const server = await startServer({
+    appSettings: {
+      async getFlag() { return undefined; },
+      async getRawFlag(key) {
+        return key === "stepSampleBucketMinutes" ? 5 : undefined;
+      },
+    },
     async verifyAppleIdentityToken(token) {
       assert.equal(token, "apple-token");
 
@@ -60,6 +66,7 @@ test("POST /auth/apple provisions the signed-in user", async () => {
       method: "POST",
       headers: {
         "content-type": "application/json",
+        "x-app-version": "1.7.1",
       },
       body: JSON.stringify({
         identityToken: "apple-token",

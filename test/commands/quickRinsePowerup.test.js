@@ -14,7 +14,8 @@ const {
 // It excludes self-buffs (sourceUserId === targetUserId) and untimed effects
 // (expiresAt == null). With nothing eligible it rejects with 409
 // NO_TIMED_DEBUFFS and does NOT consume the item. Signal Jammer blocks it just
-// like every other powerup including Cleanse (§8.1 — deliberately NOT bypassed).
+// like every other powerup including Cleanse (§8.1). Power Outage is the
+// narrow exception covered through the real HTTP path in powerups5-wave.
 // ---------------------------------------------------------------------------
 
 const NOW = new Date("2026-07-20T12:00:00Z");
@@ -364,7 +365,7 @@ test("QUICK_RINSE returns 409 NO_TIMED_DEBUFFS without consuming inventory", asy
   assert.equal(ctx.updatedPowerup, null, "item retained");
 });
 
-test("QUICK_RINSE is BLOCKED while the user is jammed (inherits Cleanse behavior — no bypass)", async () => {
+test("QUICK_RINSE is blocked by Signal Jammer (same as Cleanse)", async () => {
   const ctx = makeDeps({
     existingEffects: {
       "rp-1": [

@@ -8,7 +8,7 @@ const {
   startCapacityPhase,
 } = require("../../../shared/observability/capacityPhaseMetrics");
 
-function enqueueCounts(rows, at) {
+function enqueueCounts(rows, at, { queuedGenerationMerge = false } = {}) {
   const values = (Array.isArray(rows) ? rows : [rows]).filter(Boolean);
   let maxLagMs = 0;
   for (const row of values) {
@@ -19,13 +19,21 @@ function enqueueCounts(rows, at) {
       );
     }
   }
-  return {
+  const counts = {
     jobs: values.length,
-    generationCreates: values.filter((row) => Number(row.generation) === 1).length,
-    generationBumps: values.filter((row) => Number(row.generation) > 1).length,
-    generationReuses: 0,
     maxLagMs,
   };
+  if (queuedGenerationMerge) {
+    // The public row shape does not carry the conflict branch taken. Never
+    // mislabel a reused generation as a create/bump; exact outcome telemetry
+    // requires a future SQL-returning contract and is intentionally absent.
+    counts.generationOutcomeUnavailable = values.length;
+  } else {
+    counts.generationCreates = values.filter((row) => Number(row.generation) === 1).length;
+    counts.generationBumps = values.filter((row) => Number(row.generation) > 1).length;
+    counts.generationReuses = 0;
+  }
+  return counts;
 }
 
 async function rolloutOptions({
@@ -43,6 +51,10 @@ async function rolloutOptions({
     appSettings,
     "raceResolutionBurstCoalescingV1Enabled"
   );
+  const queuedGenerationMerge = await isStrictFlagEnabled(
+    appSettings,
+    "raceResolutionQueuedGenerationMergeV1Enabled"
+  );
   return {
     dirtyEnvelope: reasonAware
       ? {
@@ -54,6 +66,7 @@ async function rolloutOptions({
         }
       : null,
     burstCoalescing,
+    queuedGenerationMerge,
   };
 }
 
@@ -92,6 +105,7 @@ async function enqueueRaceResolution(
   const capacity = startCapacityPhase("resolution_enqueue");
   let capacityOutcome = "error";
   let result = null;
+  let queuedGenerationMerge = false;
   try {
   const rollout = await capacity.measurePhase("rolloutFlags", () =>
     rolloutOptions({
@@ -102,6 +116,7 @@ async function enqueueRaceResolution(
       priority,
     })
   );
+  queuedGenerationMerge = rollout.queuedGenerationMerge;
   // Artifact reuse is independently rollable and must work with only its own
   // flag enabled. The opaque ref is safe only for a pure display generation,
   // so stamp that closed reason even while broader reason-aware scoping is off.
@@ -143,8 +158,8 @@ async function enqueueRaceResolution(
     return null;
   }
   } finally {
-    capacity.setCounts(enqueueCounts(result, now));
-    capacity.setDimensions({ transactional: tx != null, batch: false });
+    capacity.setCounts(enqueueCounts(result, now, { queuedGenerationMerge }));
+    capacity.setDimensions({ transactional: tx != null, batch: false, queuedGenerationMerge });
     capacity.finish(capacityOutcome);
   }
 }
@@ -165,6 +180,7 @@ async function enqueueRaceResolutionForUser(
   const capacity = startCapacityPhase("resolution_enqueue");
   let capacityOutcome = "error";
   let result = [];
+  let queuedGenerationMerge = false;
   try {
   const load = async () => {
     if (Array.isArray(reconciledRaces)) {
@@ -181,6 +197,7 @@ async function enqueueRaceResolutionForUser(
 
   const buildOptions = async (races) => {
     const rollout = await rolloutOptions({ reason, dirtyUserIds: [userId], priority });
+    queuedGenerationMerge = rollout.queuedGenerationMerge;
     const dirtyEnvelopeByRaceId = new Map();
     if (rollout.dirtyEnvelope) {
       for (const race of races) {
@@ -198,6 +215,7 @@ async function enqueueRaceResolutionForUser(
       raceIds: races.map((race) => race.id),
       dirtyEnvelopeByRaceId,
       burstCoalescing: rollout.burstCoalescing,
+      queuedGenerationMerge: rollout.queuedGenerationMerge,
     };
   };
 
@@ -238,8 +256,8 @@ async function enqueueRaceResolutionForUser(
     return [];
   }
   } finally {
-    capacity.setCounts(enqueueCounts(result, now));
-    capacity.setDimensions({ transactional: tx != null, batch: true });
+    capacity.setCounts(enqueueCounts(result, now, { queuedGenerationMerge }));
+    capacity.setDimensions({ transactional: tx != null, batch: true, queuedGenerationMerge });
     capacity.finish(capacityOutcome);
   }
 }

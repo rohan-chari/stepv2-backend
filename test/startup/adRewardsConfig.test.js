@@ -146,8 +146,8 @@ for (const raw of [
 }
 
 for (const [raw, expected] of [
-  ["1", 1], ["500", 500], ["0", 500], ["-1", 500], ["501", 500],
-  ["3.5", 500], ["bad", 500], ["", 500],
+  ["1", 1], ["100", 100], ["500", 100], ["0", 100], ["-1", 100],
+  ["101", 100], ["3.5", 100], ["bad", 100], ["", 100],
 ]) {
   test(`race payout double cap ${JSON.stringify(raw)} resolves to ${expected}`, () => {
     const config = loadConfig({});

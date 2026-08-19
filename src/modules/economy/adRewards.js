@@ -88,7 +88,8 @@ function normalizeAdUnit(value) {
 
 function racePayoutDoubleMaxBonusCoins() {
   const parsed = Number(process.env.RACE_PAYOUT_DOUBLE_MAX_BONUS_COINS);
-  return Number.isInteger(parsed) && parsed >= 1 && parsed <= 500 ? parsed : 500;
+  // This deploy-time knob may reduce the product limit, never increase it.
+  return Number.isInteger(parsed) && parsed >= 1 && parsed <= 100 ? parsed : 100;
 }
 
 // Kill switch for the reroll endpoint AND for advertising `boxReroll` in

@@ -90,6 +90,9 @@ function startServer({
   // double-create a PENDING race, which has no DB unique to stop it). 15s is
   // far beyond pm2's kill window for the old process. 0 in tests.
   cronStartDelayMs = Number(process.env.CRON_START_DELAY_MS ?? 15_000),
+  // Injected only by the dedicated local capacity entrypoint. Normal startup
+  // never reads an environment variable that can suppress production crons.
+  capacityHttpResolutionOnly = false,
 } = {}) {
   register();
   registerNotifications();
@@ -100,6 +103,11 @@ function startServer({
     // uses the default console logger and records the dark-switch snapshot.
     if (logger === console) logPerformanceFlags(logger);
     const startCrons = () => {
+      if (capacityHttpResolutionOnly) {
+        scheduleRaceResolution();
+        scheduleResolutionPostTasks();
+        return;
+      }
       scheduleRaceExpiry();
       scheduleSeededRenewal();
       scheduleTournamentRenewal();

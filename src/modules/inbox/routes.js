@@ -2,7 +2,19 @@ const { Router } = require("express");
 const { buildRequireAuth } = require("../../middleware/requireAuth");
 const { appSettings } = require("../../shared/config/appSettings");
 const { prisma: defaultPrisma } = require("../../db");
-const { decodeCursor, encodeCursor, parseLimit, beforeCursor, invalidateInboxUnread } = require("./services/inbox");
+const { ValidationError } = require("../../shared/errors/AppError");
+const { asyncHandler } = require("../../shared/http/asyncHandler");
+const {
+  decodeCursor,
+  encodeCursor,
+  parseLimit,
+  beforeCursor,
+} = require("./services/inbox");
+const { getInboxUnreadCounts } = require("./queries/getInboxUnreadCounts");
+const { markInboxAlertRead } = require("./commands/markInboxAlertRead");
+
+const UUID_RE =
+  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 async function enabled(req, settings = appSettings) {
   return req.clientFeatures?.has("inbox_v1") === true && (await settings.getFlag("apiInboxV1Enabled")) === true;
@@ -23,16 +35,16 @@ function createInboxRouter(dependencies = {}) {
       const cursor = decodeCursor(req.query.cursor);
       const now = new Date();
       const where = { userId: req.user.id, expiresAt: { gt: now }, ...(beforeCursor(cursor) || {}) };
-      const [rows, unreadCount] = await Promise.all([
+      const [rows, unreadCounts] = await Promise.all([
         prisma.inboxAlert.findMany({ where, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: limit + 1 }),
-        prisma.inboxAlert.count({ where: { userId: req.user.id, expiresAt: { gt: now }, readAt: null } }),
+        getInboxUnreadCounts({ userId: req.user.id, now, prisma }),
       ]);
       const more = rows.length > limit;
       const alerts = rows.slice(0, limit);
       res.json({
         alerts: alerts.map((row) => ({ id: row.id, type: row.type, title: row.title, body: row.body, destination: row.destination, createdAt: row.createdAt, readAt: row.readAt })),
         nextCursor: more ? encodeCursor(alerts.at(-1)) : null,
-        unreadCount,
+        ...unreadCounts,
       });
     } catch (error) {
       if (error.statusCode === 400) return failure(res, 400, error.message, error.code || "INVALID_REQUEST");
@@ -41,22 +53,24 @@ function createInboxRouter(dependencies = {}) {
     }
   });
 
-  router.post("/alerts/:id/read", async (req, res) => {
-    try {
-      if (!(await enabled(req, settings))) return failure(res, 404, "Inbox is unavailable", "FEATURE_DISABLED");
-      if (!req.params.id) return failure(res, 400, "Invalid alert id", "INVALID_ID");
-      const result = await prisma.inboxAlert.updateMany({
-        where: { id: req.params.id, userId: req.user.id, expiresAt: { gt: new Date() } },
-        data: { readAt: new Date() },
-      });
-      if (result.count !== 1) return failure(res, 404, "Alert not found", "NOT_FOUND");
-      await invalidateInboxUnread(req.user.id);
-      return res.json({ read: true });
-    } catch (error) {
-      console.error("Inbox alert read error:", error);
-      return failure(res, 500, "Internal server error", "INTERNAL_ERROR");
+  // Express 5's brace syntax lets the same handler return the specified 400
+  // for an omitted id (`/alerts/read`) as well as a malformed one. The public
+  // canonical route remains `/alerts/:id/read`.
+  router.post("/alerts{/:id}/read", asyncHandler(async (req, res) => {
+    if (!(await enabled(req, settings))) {
+      return failure(res, 404, "Inbox is unavailable", "FEATURE_DISABLED");
     }
-  });
+    if (typeof req.params.id !== "string" || !UUID_RE.test(req.params.id)) {
+      throw new ValidationError("Invalid alert id", "INVALID_ID");
+    }
+
+    const unreadCounts = await markInboxAlertRead({
+      userId: req.user.id,
+      alertId: req.params.id,
+      prisma,
+    });
+    return res.json({ read: true, ...unreadCounts });
+  }));
   return router;
 }
 

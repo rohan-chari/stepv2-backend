@@ -4,7 +4,8 @@ const cacheKeys = require("../../../shared/cache/cacheKeys");
 
 const RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const DESTINATION_ROUTES = new Set([
-  "home", "dailyReward", "friends", "raceDetail", "tournamentDetail", "supportThread",
+  "home", "dailyReward", "friends", "races", "inbox", "profile",
+  "raceDetail", "tournamentDetail", "supportThread",
 ]);
 
 function expiryFrom(now = new Date()) {

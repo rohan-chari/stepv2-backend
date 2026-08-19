@@ -153,14 +153,14 @@ describe("race payout double rewarded ad", () => {
       offerId: null,
       raceIds: capable.body.payoutDoubleOffer.raceIds,
       baseCoins: 120,
-      bonusCoins: 120,
-      maxBonusCoins: 500,
-      rolling24hRemainingBeforeClaim: 500,
+      bonusCoins: 100,
+      maxBonusCoins: 100,
+      rolling24hRemainingBeforeClaim: 100,
     });
     assert.equal(capable.body.completed.length, 3);
   });
 
-  it("offers the full authoritative rounded base without a coin-cap clip", async () => {
+  it("caps the prospective offer while preserving the authoritative base", async () => {
     const { user, token } = await createTestUser();
     await completedRace(user.id, {
       payoutCoins: 800,
@@ -169,8 +169,214 @@ describe("race payout double rewarded ad", () => {
     });
     const { body } = await list(token);
     assert.equal(body.payoutDoubleOffer.baseCoins, 800);
-    assert.equal(body.payoutDoubleOffer.bonusCoins, 800);
-    assert.equal(body.payoutDoubleOffer.maxBonusCoins, 500);
+    assert.equal(body.payoutDoubleOffer.bonusCoins, 100);
+    assert.equal(body.payoutDoubleOffer.maxBonusCoins, 100);
+  });
+
+  it("caps an oversized payout double at 100 through offer persistence and claim settlement", async () => {
+    const { user, token } = await createTestUser({ coins: 0 });
+    const race = await completedRace(user.id, {
+      payoutCoins: 853,
+      amount: 853,
+      reason: "race_prize_pool_payout",
+    });
+
+    const prospective = await list(token);
+    assert.equal(prospective.body.payoutDoubleOffer.baseCoins, 853);
+    assert.equal(prospective.body.payoutDoubleOffer.bonusCoins, 100);
+    assert.equal(prospective.body.payoutDoubleOffer.maxBonusCoins, 100);
+    assert.equal(
+      prospective.body.payoutDoubleOffer.rolling24hRemainingBeforeClaim,
+      100,
+    );
+
+    const offer = await prepare(token, [race.race.id]);
+    assert.equal(offer.res.status, 201);
+    assert.equal(offer.body.baseCoins, 853);
+    assert.equal(offer.body.bonusCoins, 100);
+    assert.equal(offer.body.maxBonusCoins, 100);
+
+    const claim = await verifyAndClaim({
+      userId: user.id,
+      token,
+      offerId: offer.body.offerId,
+    });
+    assert.equal(claim.response.status, 200);
+    assert.equal(claim.body.bonusCoins, 100);
+    assert.equal(claim.body.coins, 100);
+
+    const [ledger, velocity, receipt, grant] = await Promise.all([
+      prisma.coinTransaction.findFirst({
+        where: {
+          userId: user.id,
+          reason: "race_payout_ad_double",
+          refId: offer.body.offerId,
+        },
+      }),
+      prisma.racePayoutDoubleVelocityGrant.findUnique({
+        where: { offerId: offer.body.offerId },
+      }),
+      prisma.racePayoutDoubleClaimReceipt.findUnique({
+        where: { offerId: offer.body.offerId },
+      }),
+      prisma.adRewardGrant.findFirst({
+        where: {
+          userId: user.id,
+          rewardKind: "race_payout_double",
+          contextId: offer.body.offerId,
+        },
+      }),
+    ]);
+    assert.equal(ledger.amount, 100);
+    assert.equal(velocity.bonusCoins, 100);
+    assert.equal(receipt.bonusCoins, 100);
+    assert.equal(grant.coinAmount, 100);
+  });
+
+  it("re-caps and repairs a legacy persisted offer before issuing any coins", async () => {
+    const { user, token } = await createTestUser({ coins: 0 });
+    const race = await completedRace(user.id, {
+      payoutCoins: 500,
+      amount: 500,
+      reason: "race_prize_pool_payout",
+    });
+    const offer = await prepare(token, [race.race.id]);
+    assert.equal(offer.res.status, 201);
+
+    // Simulate an offer persisted by the briefly deployed uncapped code. The
+    // original database constraint allowed values through 500.
+    await prisma.racePayoutDoubleOffer.update({
+      where: { id: offer.body.offerId },
+      data: {
+        bonusCoins: 500,
+        maxBonusCoins: 500,
+        rolling24hRemainingBeforeClaim: 500,
+      },
+    });
+
+    const retry = await prepare(token, [race.race.id]);
+    assert.equal(retry.res.status, 200);
+    assert.equal(retry.body.offerId, offer.body.offerId);
+    assert.equal(retry.body.baseCoins, 500);
+    assert.equal(retry.body.bonusCoins, 100);
+    assert.equal(retry.body.maxBonusCoins, 100);
+    assert.equal(retry.body.rolling24hRemainingBeforeClaim, 100);
+
+    const recovered = await list(token);
+    assert.equal(recovered.body.payoutDoubleOffer.offerId, offer.body.offerId);
+    assert.equal(recovered.body.payoutDoubleOffer.baseCoins, 500);
+    assert.equal(recovered.body.payoutDoubleOffer.bonusCoins, 100);
+    assert.equal(recovered.body.payoutDoubleOffer.maxBonusCoins, 100);
+
+    const claim = await verifyAndClaim({
+      userId: user.id,
+      token,
+      offerId: offer.body.offerId,
+    });
+    assert.equal(claim.response.status, 200);
+    assert.equal(claim.body.bonusCoins, 100);
+    assert.equal(claim.body.coins, 100);
+
+    const repaired = await prisma.racePayoutDoubleOffer.findUnique({
+      where: { id: offer.body.offerId },
+    });
+    assert.equal(repaired.status, "CLAIMED");
+    assert.equal(repaired.bonusCoins, 100);
+    assert.equal(repaired.maxBonusCoins, 100);
+    assert.equal(repaired.rolling24hRemainingBeforeClaim, 100);
+    assert.equal(await prisma.coinTransaction.count({
+      where: {
+        userId: user.id,
+        reason: "race_payout_ad_double",
+        refId: offer.body.offerId,
+        amount: { gt: 100 },
+      },
+    }), 0);
+  });
+
+  it("recomputes a pending offer against a lowered runtime cap and current rolling usage", async () => {
+    const { user, token } = await createTestUser({ coins: 0 });
+    const race = await completedRace(user.id, {
+      payoutCoins: 100,
+      amount: 100,
+      reason: "race_prize_pool_payout",
+    });
+    const offer = await prepare(token, [race.race.id]);
+    assert.equal(offer.res.status, 201);
+    const persisted = await prisma.racePayoutDoubleOffer.findUnique({
+      where: { id: offer.body.offerId },
+    });
+    const databaseNow = (await prisma.$queryRaw`SELECT NOW() AS now`)[0].now;
+    await prisma.racePayoutDoubleVelocityGrant.create({
+      data: {
+        providerSubHash: persisted.providerSubHash,
+        offerId: crypto.randomUUID(),
+        bonusCoins: 20,
+        // Keep the fixture inside the database-owned half-open window without
+        // risking the application clock landing a few milliseconds after NOW().
+        claimedAt: new Date(databaseNow.getTime() - 1000),
+      },
+    });
+    process.env.RACE_PAYOUT_DOUBLE_MAX_BONUS_COINS = "40";
+    try {
+      const recovered = await list(token);
+      assert.equal(recovered.body.payoutDoubleOffer.bonusCoins, 20);
+      assert.equal(recovered.body.payoutDoubleOffer.maxBonusCoins, 40);
+      assert.equal(
+        recovered.body.payoutDoubleOffer.rolling24hRemainingBeforeClaim,
+        20,
+      );
+      const retry = await prepare(token, [race.race.id]);
+      assert.equal(retry.res.status, 200);
+      assert.equal(retry.body.bonusCoins, 20);
+      assert.equal(retry.body.maxBonusCoins, 40);
+      assert.equal(retry.body.rolling24hRemainingBeforeClaim, 20);
+
+      const claim = await verifyAndClaim({
+        userId: user.id,
+        token,
+        offerId: offer.body.offerId,
+      });
+      assert.equal(claim.response.status, 200);
+      assert.equal(claim.body.bonusCoins, 20);
+      assert.equal(claim.body.maxBonusCoins, 40);
+      assert.equal(claim.body.coins, 20);
+    } finally {
+      process.env.RACE_PAYOUT_DOUBLE_MAX_BONUS_COINS = "500";
+    }
+
+    const [repaired, ledger, velocity, receipt, grant] = await Promise.all([
+      prisma.racePayoutDoubleOffer.findUnique({
+        where: { id: offer.body.offerId },
+      }),
+      prisma.coinTransaction.findFirst({
+        where: {
+          userId: user.id,
+          reason: "race_payout_ad_double",
+          refId: offer.body.offerId,
+        },
+      }),
+      prisma.racePayoutDoubleVelocityGrant.findUnique({
+        where: { offerId: offer.body.offerId },
+      }),
+      prisma.racePayoutDoubleClaimReceipt.findUnique({
+        where: { offerId: offer.body.offerId },
+      }),
+      prisma.adRewardGrant.findFirst({
+        where: {
+          userId: user.id,
+          rewardKind: "race_payout_double",
+          contextId: offer.body.offerId,
+        },
+      }),
+    ]);
+    assert.equal(repaired.bonusCoins, 20);
+    assert.equal(repaired.maxBonusCoins, 40);
+    assert.equal(repaired.rolling24hRemainingBeforeClaim, 20);
+    assert.equal(ledger.amount, 20);
+    assert.equal(velocity.bonusCoins, 20);
+    assert.equal(receipt.bonusCoins, 20);
+    assert.equal(grant.coinAmount, 20);
   });
 
   it("excludes malformed, broad-prefix, buy-in, refund, and unrelated ledger sources", async () => {
@@ -202,7 +408,7 @@ describe("race payout double rewarded ad", () => {
     assert.equal(first.res.status, 201);
     assert.equal(first.body.status, "PENDING");
     assert.equal(first.body.baseCoins, 120);
-    assert.equal(first.body.bonusCoins, 120);
+    assert.equal(first.body.bonusCoins, 100);
     assert.deepEqual(new Set(first.body.raceIds), new Set(ids));
 
     const retry = await prepare(token, [...ids].reverse());
@@ -313,8 +519,8 @@ describe("race payout double rewarded ad", () => {
       alreadyClaimed: false,
       baseCoins: 40,
       bonusCoins: 40,
-      maxBonusCoins: 500,
-      rolling24hRemainingBeforeClaim: 500,
+      maxBonusCoins: 100,
+      rolling24hRemainingBeforeClaim: 100,
       coins: 50,
       raceIds: [a.race.id],
     });
@@ -328,8 +534,8 @@ describe("race payout double rewarded ad", () => {
       alreadyClaimed: true,
       baseCoins: 40,
       bonusCoins: 40,
-      maxBonusCoins: 500,
-      rolling24hRemainingBeforeClaim: 500,
+      maxBonusCoins: 100,
+      rolling24hRemainingBeforeClaim: 100,
       coins: 50,
       raceIds: [a.race.id],
     });
@@ -466,17 +672,17 @@ describe("race payout double rewarded ad", () => {
     assert.equal(await prisma.racePayoutDoubleOffer.count(), 0);
   });
 
-  it("retains velocity telemetry without clipping an approved full-base claim", async () => {
+  it("enforces the durable 100-coin rolling allowance across batches", async () => {
     const { user, token } = await createTestUser();
     const firstRace = await completedRace(user.id, {
-      payoutCoins: 480,
-      amount: 480,
+      payoutCoins: 80,
+      amount: 80,
       reason: "race_prize_pool_payout",
     });
     const firstOffer = await prepare(token, [firstRace.race.id]);
     const firstClaim = await verifyAndClaim({ userId: user.id, token, offerId: firstOffer.body.offerId });
     assert.equal(firstClaim.response.status, 200);
-    assert.equal(firstClaim.body.bonusCoins, 480);
+    assert.equal(firstClaim.body.bonusCoins, 80);
     await request(server.baseUrl, "POST", "/races/results/seen", {
       token, headers: CAPABLE, body: { raceIds: [firstRace.race.id] },
     });
@@ -488,13 +694,13 @@ describe("race payout double rewarded ad", () => {
     });
     const prospective = await list(token);
     assert.equal(prospective.body.payoutDoubleOffer.baseCoins, 100);
-    assert.equal(prospective.body.payoutDoubleOffer.bonusCoins, 100);
+    assert.equal(prospective.body.payoutDoubleOffer.bonusCoins, 20);
     assert.equal(prospective.body.payoutDoubleOffer.rolling24hRemainingBeforeClaim, 20);
     const secondOffer = await prepare(token, [secondRace.race.id]);
-    assert.equal(secondOffer.body.bonusCoins, 100);
+    assert.equal(secondOffer.body.bonusCoins, 20);
     const secondClaim = await verifyAndClaim({ userId: user.id, token, offerId: secondOffer.body.offerId });
     assert.equal(secondClaim.response.status, 200);
-    assert.equal(secondClaim.body.coins, 580);
+    assert.equal(secondClaim.body.coins, 100);
     await request(server.baseUrl, "POST", "/races/results/seen", {
       token, headers: CAPABLE, body: { raceIds: [secondRace.race.id] },
     });
@@ -503,9 +709,8 @@ describe("race payout double rewarded ad", () => {
       amount: 10,
       reason: "race_prize_pool_payout",
     });
-    const stillEligible = await list(token);
-    assert.equal(stillEligible.body.payoutDoubleOffer.baseCoins, 10);
-    assert.equal(stillEligible.body.payoutDoubleOffer.bonusCoins, 10);
+    const exhausted = await list(token);
+    assert.equal(Object.hasOwn(exhausted.body, "payoutDoubleOffer"), false);
   });
 
   it("injects a pending offer's old races beyond the 10-row page only for capable clients", async () => {
@@ -699,6 +904,125 @@ describe("race payout double rewarded ad", () => {
     })();
     assert.equal(result.healthy, false);
     assert.ok(result.metrics.failureCodes.includes("source_equation"));
+  });
+
+  it("reconciliation stops rollout for a self-consistent claim above the hard ceiling", async () => {
+    const { user, token } = await createTestUser();
+    const race = await completedRace(user.id, {
+      payoutCoins: 100,
+      reason: "race_prize_pool_payout",
+    });
+    const offer = await prepare(token, [race.race.id]);
+    const claim = await verifyAndClaim({
+      userId: user.id,
+      token,
+      offerId: offer.body.offerId,
+    });
+    assert.equal(claim.response.status, 200);
+
+    const oversized = 150;
+    await prisma.$transaction([
+      prisma.racePayoutDoubleOffer.update({
+        where: { id: offer.body.offerId },
+        data: {
+          bonusCoins: oversized,
+          maxBonusCoins: oversized,
+          rolling24hRemainingBeforeClaim: oversized,
+        },
+      }),
+      prisma.coinTransaction.updateMany({
+        where: { reason: "race_payout_ad_double", refId: offer.body.offerId },
+        data: { amount: oversized },
+      }),
+      prisma.adRewardGrant.updateMany({
+        where: { contextId: offer.body.offerId },
+        data: { coinAmount: oversized },
+      }),
+      prisma.racePayoutDoubleVelocityGrant.update({
+        where: { offerId: offer.body.offerId },
+        data: { bonusCoins: oversized },
+      }),
+      prisma.racePayoutDoubleClaimReceipt.update({
+        where: { offerId: offer.body.offerId },
+        data: { bonusCoins: oversized },
+      }),
+    ]);
+
+    const stops = [];
+    const result = await buildRacePayoutDoubleReconcile({
+      prisma,
+      now: new Date(Date.now() + 10_000),
+      JobRun: { async claimRun() { return true; } },
+      appSettings: { async setFlag(key, value) { stops.push({ key, value }); } },
+      logger: { info() {} },
+    })();
+    assert.equal(result.healthy, false);
+    assert.ok(result.metrics.failureCodes.includes("hard_cap_equation"));
+    assert.deepEqual(stops.at(-1), {
+      key: "racePayoutDoubleRolloutPercent",
+      value: 0,
+    });
+  });
+
+  it("reconciliation stops rollout when one identity exceeds the rolling hard ceiling", async () => {
+    const { user, token } = await createTestUser();
+    const firstRace = await completedRace(user.id, {
+      payoutCoins: 60,
+      reason: "race_prize_pool_payout",
+    });
+    const firstOffer = await prepare(token, [firstRace.race.id]);
+    assert.equal((await verifyAndClaim({
+      userId: user.id,
+      token,
+      offerId: firstOffer.body.offerId,
+    })).response.status, 200);
+
+    const secondRace = await completedRace(user.id, {
+      payoutCoins: 60,
+      reason: "race_prize_pool_payout",
+    });
+    const secondOffer = await prepare(token, [secondRace.race.id]);
+    assert.equal(secondOffer.body.bonusCoins, 40);
+    assert.equal((await verifyAndClaim({
+      userId: user.id,
+      token,
+      offerId: secondOffer.body.offerId,
+    })).response.status, 200);
+
+    // Simulate two individually valid historical rows whose combined rolling
+    // issuance violates the corrected 100-coin identity ceiling.
+    await prisma.$transaction([
+      prisma.racePayoutDoubleOffer.update({
+        where: { id: secondOffer.body.offerId },
+        data: { bonusCoins: 60 },
+      }),
+      prisma.coinTransaction.updateMany({
+        where: { reason: "race_payout_ad_double", refId: secondOffer.body.offerId },
+        data: { amount: 60 },
+      }),
+      prisma.adRewardGrant.updateMany({
+        where: { contextId: secondOffer.body.offerId },
+        data: { coinAmount: 60 },
+      }),
+      prisma.racePayoutDoubleVelocityGrant.update({
+        where: { offerId: secondOffer.body.offerId },
+        data: { bonusCoins: 60 },
+      }),
+      prisma.racePayoutDoubleClaimReceipt.update({
+        where: { offerId: secondOffer.body.offerId },
+        data: { bonusCoins: 60 },
+      }),
+    ]);
+
+    const result = await buildRacePayoutDoubleReconcile({
+      prisma,
+      now: new Date(Date.now() + 10_000),
+      JobRun: { async claimRun() { return true; } },
+      appSettings: { async setFlag() {} },
+      logger: { info() {} },
+    })();
+    assert.equal(result.healthy, false);
+    assert.ok(result.metrics.failureCodes.includes("rolling_cap_equation"));
   });
 
   it("serializes public HTTP claim against account deletion and reconciles the committed tombstone", async () => {

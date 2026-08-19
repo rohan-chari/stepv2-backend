@@ -15,6 +15,9 @@ const {
   providerSubHash,
   cohortBucket,
   boundedRolloutPercent,
+  boundedRacePayoutDoubleMaxBonus,
+  computeRacePayoutDoubleBonus,
+  normalizedRacePayoutDoubleAmounts,
 } = require("../services/racePayoutDoublePolicy");
 const {
   withRacePayoutDoubleTransaction,
@@ -26,17 +29,13 @@ function sameSet(left, right) {
     left.every((value) => right.includes(value));
 }
 
-function responseFor(offer, created) {
+function responseFor(offer, created, allowance = {}) {
   return {
     created,
     body: {
       offerId: offer.id,
       raceIds: offer.items.map((item) => item.raceIdSnapshot),
-      baseCoins: offer.baseCoins,
-      bonusCoins: offer.bonusCoins,
-      maxBonusCoins: offer.maxBonusCoins,
-      rolling24hRemainingBeforeClaim:
-        offer.rolling24hRemainingBeforeClaim,
+      ...normalizedRacePayoutDoubleAmounts(offer, allowance),
       status: offer.status,
     },
   };
@@ -83,7 +82,9 @@ function buildCreateRacePayoutDoubleOffer(dependencies = {}) {
       );
     }
     const bucket = cohortBucket(hash);
-    const maxBonusCoins = config.racePayoutDoubleMaxBonusCoins();
+    const maxBonusCoins = boundedRacePayoutDoubleMaxBonus(
+      config.racePayoutDoubleMaxBonusCoins(),
+    );
 
     try {
       return await withRacePayoutDoubleTransaction(async (tx) => {
@@ -95,13 +96,36 @@ function buildCreateRacePayoutDoubleOffer(dependencies = {}) {
         await tx.$queryRaw`SELECT provider_sub_hash FROM race_payout_double_identities WHERE provider_sub_hash = ${hash} FOR UPDATE`;
         await tx.$queryRaw`SELECT id FROM users WHERE id = ${userId} FOR UPDATE`;
 
+        const nowRows = await tx.$queryRaw`SELECT NOW() AS now`;
+        const now = nowRows[0].now;
+        const cutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+        const velocity = await tx.racePayoutDoubleVelocityGrant.aggregate({
+          where: { providerSubHash: hash, claimedAt: { gt: cutoff, lte: now } },
+          _sum: { bonusCoins: true },
+        });
+        const rolling24hRemainingBeforeClaim = Math.max(
+          0,
+          maxBonusCoins - (velocity._sum.bonusCoins || 0),
+        );
+
         const pending = await tx.racePayoutDoubleOffer.findFirst({
           where: { userId, status: "PENDING" },
           include: { items: { orderBy: { raceIdSnapshot: "asc" } } },
         });
         if (pending) {
           const pendingIds = pending.items.map((item) => item.raceIdSnapshot);
-          if (sameSet(raceIds, pendingIds)) return responseFor(pending, false);
+          if (sameSet(raceIds, pendingIds)) {
+            if (rolling24hRemainingBeforeClaim <= 0) {
+              throw new ForbiddenError(
+                "Race payout double preparation is disabled",
+                "PREPARATION_DISABLED",
+              );
+            }
+            return responseFor(pending, false, {
+              configuredMaxBonusCoins: maxBonusCoins,
+              rolling24hRemaining: rolling24hRemainingBeforeClaim,
+            });
+          }
           throw new ConflictError("Another offer is pending", "OFFER_PENDING");
         }
 
@@ -117,17 +141,12 @@ function buildCreateRacePayoutDoubleOffer(dependencies = {}) {
           );
         }
 
-        const nowRows = await tx.$queryRaw`SELECT NOW() AS now`;
-        const now = nowRows[0].now;
-        const cutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-        const velocity = await tx.racePayoutDoubleVelocityGrant.aggregate({
-          where: { providerSubHash: hash, claimedAt: { gt: cutoff, lte: now } },
-          _sum: { bonusCoins: true },
-        });
-        const rolling24hRemainingBeforeClaim = Math.max(
-          0,
-          maxBonusCoins - (velocity._sum.bonusCoins || 0),
-        );
+        if (rolling24hRemainingBeforeClaim <= 0) {
+          throw new ForbiddenError(
+            "Race payout double preparation is disabled",
+            "PREPARATION_DISABLED",
+          );
+        }
 
         const completed = await tx.race.findMany({
           where: {
@@ -189,11 +208,11 @@ function buildCreateRacePayoutDoubleOffer(dependencies = {}) {
           throw new ConflictError("Offer snapshot changed", "OFFER_CHANGED");
         }
         const baseCoins = items.reduce((sum, item) => sum + item.eligibleCoins, 0);
-        // §4.15: a verified offer is one full additional copy of its durable,
-        // already-rounded base ledger payout. The historical cap fields remain
-        // serialized for old clients/observability but cannot clip an approved
-        // v1 offer into a partial award.
-        const bonusCoins = baseCoins;
+        const bonusCoins = computeRacePayoutDoubleBonus({
+          baseCoins,
+          configuredMaxBonusCoins: maxBonusCoins,
+          rolling24hRemaining: rolling24hRemainingBeforeClaim,
+        });
         if (baseCoins <= 0 || bonusCoins <= 0) {
           throw new ConflictError("Offer snapshot changed", "OFFER_CHANGED");
         }
@@ -221,7 +240,30 @@ function buildCreateRacePayoutDoubleOffer(dependencies = {}) {
           include: { items: { orderBy: { raceIdSnapshot: "asc" } } },
         });
         if (winner && sameSet(raceIds, winner.items.map((item) => item.raceIdSnapshot))) {
-          return responseFor(winner, false);
+          const nowRows = await db.$queryRaw`SELECT NOW() AS now`;
+          const now = nowRows[0].now;
+          const cutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+          const velocity = await db.racePayoutDoubleVelocityGrant.aggregate({
+            where: {
+              providerSubHash: hash,
+              claimedAt: { gt: cutoff, lte: now },
+            },
+            _sum: { bonusCoins: true },
+          });
+          const rolling24hRemaining = Math.max(
+            0,
+            maxBonusCoins - (velocity._sum.bonusCoins || 0),
+          );
+          if (rolling24hRemaining <= 0) {
+            throw new ForbiddenError(
+              "Race payout double preparation is disabled",
+              "PREPARATION_DISABLED",
+            );
+          }
+          return responseFor(winner, false, {
+            configuredMaxBonusCoins: maxBonusCoins,
+            rolling24hRemaining,
+          });
         }
         throw new ConflictError("Another offer is pending", "OFFER_PENDING");
       }

@@ -296,6 +296,10 @@ const KNOWN_FLAGS = {
   raceResolutionDisplayArtifactReuseV1Enabled: false,
   raceResolutionReasonAwareV1Enabled: false,
   raceResolutionBurstCoalescingV1Enabled: false,
+  // While a race job is still QUEUED and unclaimed, atomically merge another
+  // enqueue into that row while retaining its current generation number.
+  // Default OFF preserves the deployed one-bump-per-enqueue semantics.
+  raceResolutionQueuedGenerationMergeV1Enabled: false,
   raceResolutionBulkWriteV1Enabled: false,
   raceResolutionPostTasksV1Enabled: false,
   // Dependency-closure planner, PHASE 2b SHADOW ONLY. When true the worker

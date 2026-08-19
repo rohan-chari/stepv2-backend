@@ -13,6 +13,8 @@ const {
 } = require("../models/racePayoutDouble");
 const {
   canonicalUuid,
+  boundedRacePayoutDoubleMaxBonus,
+  computeRacePayoutDoubleBonus,
 } = require("../services/racePayoutDoublePolicy");
 const {
   withRacePayoutDoubleTransaction,
@@ -133,6 +135,41 @@ function buildClaimRacePayoutDouble(dependencies = {}) {
           throw new ConflictError("Offer snapshot changed", "OFFER_CHANGED");
         }
 
+        // Recompute the allowance under the durable identity lock. Offer
+        // preparation is not an issuance authority: a stale/oversized row can
+        // never make the ledger, grant, velocity record, or receipt exceed the
+        // server's hard 100-coin ceiling.
+        const maxBonusCoins = boundedRacePayoutDoubleMaxBonus(
+          config.racePayoutDoubleMaxBonusCoins(),
+        );
+        const settledAt = (await tx.$queryRaw`SELECT NOW() AS now`)[0].now;
+        const cutoff = new Date(settledAt.getTime() - 24 * 60 * 60 * 1000);
+        const velocity = await tx.racePayoutDoubleVelocityGrant.aggregate({
+          where: {
+            providerSubHash: offer.providerSubHash,
+            claimedAt: { gt: cutoff, lte: settledAt },
+          },
+          _sum: { bonusCoins: true },
+        });
+        const rolling24hRemainingBeforeClaim = Math.max(
+          0,
+          maxBonusCoins - (velocity._sum.bonusCoins || 0),
+        );
+        const bonusCoins = computeRacePayoutDoubleBonus({
+          baseCoins: Math.min(currentBase, offer.bonusCoins),
+          configuredMaxBonusCoins: maxBonusCoins,
+          rolling24hRemaining: rolling24hRemainingBeforeClaim,
+        });
+        if (bonusCoins <= 0) {
+          throw new ConflictError("Offer is no longer claimable", "OFFER_CHANGED");
+        }
+        const claimableOffer = {
+          ...offer,
+          bonusCoins,
+          maxBonusCoins,
+          rolling24hRemainingBeforeClaim,
+        };
+
         const grant = await tx.adRewardGrant.findFirst({
           where: {
             userId,
@@ -152,14 +189,10 @@ function buildClaimRacePayoutDouble(dependencies = {}) {
         }
         await tx.$queryRaw`SELECT id FROM ad_reward_grants WHERE id = ${grant.id} FOR UPDATE`;
 
-        // One DB-owned timestamp is written to every economic settlement row,
-        // including the canonical coin ledger. This avoids app-clock skew and
-        // makes exact rolling-window reconciliation deterministic.
-        const settledAt = (await tx.$queryRaw`SELECT NOW() AS now`)[0].now;
         const awarded = await award({
           tx,
           userId,
-          amount: offer.bonusCoins,
+          amount: bonusCoins,
           reason: "race_payout_ad_double",
           refId: offerId,
           createdAt: settledAt,
@@ -176,12 +209,18 @@ function buildClaimRacePayoutDouble(dependencies = {}) {
           data: {
             consumedAt: settledAt,
             rewardType: "COINS",
-            coinAmount: offer.bonusCoins,
+            coinAmount: bonusCoins,
           },
         });
         const offerUpdate = await tx.racePayoutDoubleOffer.updateMany({
           where: { id: offerId, status: "PENDING" },
-          data: { status: "CLAIMED", claimedAt: settledAt },
+          data: {
+            status: "CLAIMED",
+            claimedAt: settledAt,
+            bonusCoins,
+            maxBonusCoins,
+            rolling24hRemainingBeforeClaim,
+          },
         });
         if (!awarded.awarded || grantUpdate.count !== 1 || offerUpdate.count !== 1) {
           throw Object.assign(new Error("Concurrent claim"), { code: "40001" });
@@ -190,7 +229,7 @@ function buildClaimRacePayoutDouble(dependencies = {}) {
           data: {
             providerSubHash: offer.providerSubHash,
             offerId,
-            bonusCoins: offer.bonusCoins,
+            bonusCoins,
             claimedAt: settledAt,
           },
         });
@@ -198,11 +237,11 @@ function buildClaimRacePayoutDouble(dependencies = {}) {
           data: {
             offerId,
             providerSubHash: offer.providerSubHash,
-            bonusCoins: offer.bonusCoins,
+            bonusCoins,
             claimedAt: settledAt,
           },
         });
-        return claimBody(offer, offer.items, awarded.coins, false);
+        return claimBody(claimableOffer, offer.items, awarded.coins, false);
       }, { ...dependencies, prisma: db });
     } catch (error) {
       if (error instanceof AppError) throw error;

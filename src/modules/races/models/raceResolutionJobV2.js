@@ -112,8 +112,10 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
     MAX_ATTEMPTS,
     debounceMs,
 
-    // Upsert by raceId: bump `generation` (mark dirty) and APPEND-DISTINCT the
-    // triggering user onto `triggered_by_user_ids`.
+    // Upsert by raceId: mark the row dirty and APPEND-DISTINCT the triggering
+    // user onto `triggered_by_user_ids`. The default path bumps `generation`.
+    // The separately gated queued-merge experiment may retain an unclaimed QUEUED
+    // generation, but makes that decision in this same conflict-row lock.
     //
     // Three deliberate differences from the v1 enqueue:
     //  1. A RUNNING row is left RUNNING. Resetting it to QUEUED would let a
@@ -137,6 +139,7 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
         dirtyEnvelope = null,
         displayArtifact = null,
         burstCoalescing = false,
+        queuedGenerationMerge = false,
       },
       tx = prisma
     ) {
@@ -150,6 +153,7 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
           dirtyEnvelopeByRaceId: new Map([[raceId, dirtyEnvelope]]),
           displayArtifactByRaceId: new Map([[raceId, displayArtifact]]),
           burstCoalescing,
+          queuedGenerationMerge,
         },
         tx
       );
@@ -208,6 +212,7 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
         dirtyEnvelopeByRaceId = null,
         displayArtifactByRaceId = null,
         burstCoalescing = false,
+        queuedGenerationMerge = false,
       },
       tx = prisma
     ) {
@@ -278,7 +283,16 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
         )
         ORDER BY i."raceId"
         ON CONFLICT (race_id) DO UPDATE SET
-          generation = race_resolution_jobs_v2.generation + 1,
+          generation = CASE
+            WHEN $3::boolean
+              AND race_resolution_jobs_v2.state = 'queued'
+              AND (race_resolution_jobs_v2.lease_expires_at IS NULL
+                   OR race_resolution_jobs_v2.lease_expires_at <= $2::timestamp)
+              AND (race_resolution_jobs_v2.processing_generation IS NULL
+                   OR race_resolution_jobs_v2.processing_generation < race_resolution_jobs_v2.generation)
+              THEN race_resolution_jobs_v2.generation
+            ELSE race_resolution_jobs_v2.generation + 1
+          END,
           resolution_time_zone = COALESCE(EXCLUDED.resolution_time_zone, race_resolution_jobs_v2.resolution_time_zone),
           state = CASE
             WHEN race_resolution_jobs_v2.state = 'running' THEN 'running'::"RaceResolutionJobState"
@@ -295,6 +309,26 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
           END,
           retry_at = NULL,
           last_error_code = NULL,
+          lease_expires_at = CASE
+            WHEN $3::boolean
+              AND race_resolution_jobs_v2.state = 'queued'
+              AND (race_resolution_jobs_v2.lease_expires_at IS NULL
+                   OR race_resolution_jobs_v2.lease_expires_at <= $2::timestamp)
+              AND (race_resolution_jobs_v2.processing_generation IS NULL
+                   OR race_resolution_jobs_v2.processing_generation < race_resolution_jobs_v2.generation)
+              THEN NULL
+            ELSE race_resolution_jobs_v2.lease_expires_at
+          END,
+          lease_token = CASE
+            WHEN $3::boolean
+              AND race_resolution_jobs_v2.state = 'queued'
+              AND (race_resolution_jobs_v2.lease_expires_at IS NULL
+                   OR race_resolution_jobs_v2.lease_expires_at <= $2::timestamp)
+              AND (race_resolution_jobs_v2.processing_generation IS NULL
+                   OR race_resolution_jobs_v2.processing_generation < race_resolution_jobs_v2.generation)
+              THEN NULL
+            ELSE race_resolution_jobs_v2.lease_token
+          END,
           triggered_by_user_ids = (
             SELECT COALESCE(jsonb_agg(DISTINCT v), '[]'::jsonb)
             FROM jsonb_array_elements(
@@ -391,14 +425,42 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
           dirty_priority = CASE
             WHEN race_resolution_jobs_v2.dirty_priority = 'IMMEDIATE' OR EXCLUDED.dirty_priority = 'IMMEDIATE'
               THEN 'IMMEDIATE' ELSE 'COALESCE' END,
-          display_artifact_id = CASE WHEN EXCLUDED.dirty_reasons = '["DISPLAY_REFRESH"]'::jsonb THEN EXCLUDED.display_artifact_id ELSE NULL END,
-          display_artifact_digest = CASE WHEN EXCLUDED.dirty_reasons = '["DISPLAY_REFRESH"]'::jsonb THEN EXCLUDED.display_artifact_digest ELSE NULL END,
-          display_artifact_schema = CASE WHEN EXCLUDED.dirty_reasons = '["DISPLAY_REFRESH"]'::jsonb THEN EXCLUDED.display_artifact_schema ELSE NULL END,
+          display_artifact_id = CASE
+            WHEN EXCLUDED.dirty_reasons = '["DISPLAY_REFRESH"]'::jsonb
+              AND (NOT ($3::boolean
+                        AND race_resolution_jobs_v2.state = 'queued'
+                        AND (race_resolution_jobs_v2.lease_expires_at IS NULL
+                             OR race_resolution_jobs_v2.lease_expires_at <= $2::timestamp)
+                        AND (race_resolution_jobs_v2.processing_generation IS NULL
+                             OR race_resolution_jobs_v2.processing_generation < race_resolution_jobs_v2.generation))
+                   OR race_resolution_jobs_v2.dirty_reasons = '["DISPLAY_REFRESH"]'::jsonb)
+              THEN EXCLUDED.display_artifact_id ELSE NULL END,
+          display_artifact_digest = CASE
+            WHEN EXCLUDED.dirty_reasons = '["DISPLAY_REFRESH"]'::jsonb
+              AND (NOT ($3::boolean
+                        AND race_resolution_jobs_v2.state = 'queued'
+                        AND (race_resolution_jobs_v2.lease_expires_at IS NULL
+                             OR race_resolution_jobs_v2.lease_expires_at <= $2::timestamp)
+                        AND (race_resolution_jobs_v2.processing_generation IS NULL
+                             OR race_resolution_jobs_v2.processing_generation < race_resolution_jobs_v2.generation))
+                   OR race_resolution_jobs_v2.dirty_reasons = '["DISPLAY_REFRESH"]'::jsonb)
+              THEN EXCLUDED.display_artifact_digest ELSE NULL END,
+          display_artifact_schema = CASE
+            WHEN EXCLUDED.dirty_reasons = '["DISPLAY_REFRESH"]'::jsonb
+              AND (NOT ($3::boolean
+                        AND race_resolution_jobs_v2.state = 'queued'
+                        AND (race_resolution_jobs_v2.lease_expires_at IS NULL
+                             OR race_resolution_jobs_v2.lease_expires_at <= $2::timestamp)
+                        AND (race_resolution_jobs_v2.processing_generation IS NULL
+                             OR race_resolution_jobs_v2.processing_generation < race_resolution_jobs_v2.generation))
+                   OR race_resolution_jobs_v2.dirty_reasons = '["DISPLAY_REFRESH"]'::jsonb)
+              THEN EXCLUDED.display_artifact_schema ELSE NULL END,
           updated_at = $2::timestamp
         RETURNING ${jobColumns()}
         `,
         JSON.stringify(rowsIn),
-        now
+        now,
+        queuedGenerationMerge === true
       );
 
       // RETURNING order is not guaranteed, and callers depend on the ascending

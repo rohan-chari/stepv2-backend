@@ -33,6 +33,7 @@ const {
 const { prisma: defaultPrisma } = require("../../db");
 const derivedCache = require("../../shared/cache/derivedCache");
 const cacheKeys = require("../../shared/cache/cacheKeys");
+const { getInboxUnreadCount } = require("../inbox");
 
 function createHomeRouter(dependencies = {}) {
   const router = Router();
@@ -264,13 +265,7 @@ function createHomeRouter(dependencies = {}) {
           prefix: cacheKeys.PREFIX.HOME_INBOX_UNREAD,
           ttlSeconds: 60,
           enabled: await isStrictFlagEnabled(settings, "redisCacheHomeInboxUnreadEnabled"),
-          load: async () => {
-            const [alerts, unreadThreads] = await Promise.all([
-              prisma.inboxAlert.count({ where: { userId: req.user.id, readAt: null, expiresAt: { gt: now } } }),
-              prisma.feedbackThread.count({ where: { userId: req.user.id, expiresAt: { gt: now }, userReadAt: null } }),
-            ]);
-            return alerts + unreadThreads;
-          },
+          load: () => getInboxUnreadCount({ userId: req.user.id, now, prisma }),
         });
       }
 

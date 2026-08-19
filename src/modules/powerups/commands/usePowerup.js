@@ -1039,6 +1039,8 @@ function buildUsePowerup(dependencies = {}) {
       return casterStealthedMemo;
     };
 
+    const type = powerup.type;
+
     // Signal Jammer JAM GUARD (the feature's single choke point). If this
     // participant is currently jammed, they cannot USE any powerup — earned,
     // store-redeemed, or upgraded, INCLUDING another Signal Jammer (a jammed
@@ -1048,18 +1050,40 @@ function buildUsePowerup(dependencies = {}) {
     // deliberately NOT gated here. A jam whose expiresAt has already passed (but
     // whose row is still ACTIVE because lazy expiry hasn't run) does not block.
     // §3.6: the jam lookup covers BOTH single-target Signal Jammer and the AoE
-    // Power Outage — either one prevents the participant from firing a powerup.
+    // Power Outage. Cleanse and Quick Rinse are the intentional Power Outage
+    // counters, so they may pass this guard only when the active jam is an
+    // outage. A live Signal Jammer still blocks every powerup, including both
+    // cleansers; when both jam types exist the Signal Jammer lookup wins.
     // Two typed lookups (rather than findActiveForParticipant) so injected fakes
     // that only implement findActiveByTypeForParticipant keep working.
-    const isLiveJam = (e) => e && e.expiresAt && new Date(e.expiresAt) > now();
-    const jammer = await effectModel.findActiveByTypeForParticipant(myParticipant.id, "SIGNAL_JAMMER");
+    const jamCheckAt = now();
+    const isLiveJam = (e) =>
+      e && e.expiresAt && new Date(e.expiresAt) > jamCheckAt;
+    const jammer = await effectModel.findActiveByTypeForParticipant(
+      myParticipant.id,
+      "SIGNAL_JAMMER",
+      { expiresAfter: jamCheckAt }
+    );
     let activeJam = isLiveJam(jammer) ? jammer : null;
     if (!activeJam) {
-      const outage = await effectModel.findActiveByTypeForParticipant(myParticipant.id, "POWER_OUTAGE");
+      const outage = await effectModel.findActiveByTypeForParticipant(
+        myParticipant.id,
+        "POWER_OUTAGE",
+        { expiresAfter: jamCheckAt }
+      );
       if (isLiveJam(outage)) activeJam = outage;
     }
-    if (activeJam && activeJam.expiresAt && new Date(activeJam.expiresAt) > now()) {
-      const remainingMs = new Date(activeJam.expiresAt).getTime() - now().getTime();
+    const canClearPowerOutage =
+      activeJam?.type === "POWER_OUTAGE" &&
+      (type === "CLEANSE" || type === "QUICK_RINSE");
+    if (
+      activeJam &&
+      !canClearPowerOutage &&
+      activeJam.expiresAt &&
+      new Date(activeJam.expiresAt) > jamCheckAt
+    ) {
+      const remainingMs =
+        new Date(activeJam.expiresAt).getTime() - jamCheckAt.getTime();
       const remainingMin = Math.max(1, Math.ceil(remainingMs / (60 * 1000)));
       throw new PowerupUseError(
         `Your powerups are jammed for another ${remainingMin}m!`,
@@ -1074,8 +1098,6 @@ function buildUsePowerup(dependencies = {}) {
     // The user credited as the *source* of an effect. Same as userId normally;
     // on a Mirror reflect it becomes the original target (who reflects it).
     let actingUserId = userId;
-    const type = powerup.type;
-
     if (type !== "QUICKSAND" && targetUserIds !== undefined) {
       throw new PowerupUseError("targetUserIds is only valid for Quicksand", 400, "INVALID_TARGETS");
     }
@@ -2077,9 +2099,9 @@ function buildUsePowerup(dependencies = {}) {
     }
 
     // QUICK_RINSE (§8). Validate BEFORE consumption: with nothing eligible we
-    // reject 409 NO_TIMED_DEBUFFS and the item stays HELD. Note the Signal Jammer
-    // guard at the top of this command already blocked a jammed user — that is
-    // deliberate and matches shipped Cleanse behavior (§8.1); do not add a bypass.
+    // reject 409 NO_TIMED_DEBUFFS and the item stays HELD. The guard above
+    // still blocks Quick Rinse under Signal Jammer; only Power Outage permits
+    // the two intentional cleanser counters through.
     let quickRinseTargets = [];
     if (type === "QUICK_RINSE") {
       // Cooldown first: on cooldown AND holding no debuffs, "wait 12 min" is the

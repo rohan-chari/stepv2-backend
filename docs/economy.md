@@ -4,8 +4,10 @@
 
 `race_payout_ad_double` is a system-funded source credited only through
 `awardCoins`, with the immutable offer UUID as `refId`. Its amount is bounded
-by the authoritative eligible race-ledger sum, the configured batch cap
-(maximum 500), and the durable hashed-identity rolling-24-hour allowance.
+by the authoritative eligible race-ledger sum, a hard 100-coin batch ceiling,
+and the durable hashed-identity 100-coin rolling-24-hour allowance. Offer
+preparation and claim settlement enforce the ceiling independently; claim also
+repairs a legacy persisted oversized offer before issuing coins.
 
 Only exact positive `race_prize_pool_payout` (`<raceId>:<placement>`) and
 `race_finish_reward` (`<raceId>:rank:<placement>`) source rows qualify. Buy-in
@@ -13,15 +15,15 @@ payouts/refunds and every unrelated reason are excluded. Rollout stops disable
 preparation without invalidating pending claims; the claim switch is reserved
 as an exceptional exploit brake.
 
-**Verified 2026-08-16 (prod, read-only):**
+**Historical production snapshot — verified 2026-08-16, superseded by the
+2026-08-18 100-coin correction:**
 
 | Item | Value | Source of truth |
 | --- | ---: | --- |
-| Per-offer / rolling-24h-per-identity cap | **500 coins** | `race_payout_double_offers.max_bonus_coins` = 500 on all prod rows; `RACE_PAYOUT_DOUBLE_MAX_BONUS_COINS` unset → default 500 in `src/modules/economy/adRewards.js:90` |
-| `racePayoutDoubleRolloutPercent` | 0 (feature off) | `app_settings` row |
+| Per-offer / rolling-24h-per-identity cap | **100 coins** | hard ceiling in `racePayoutDoublePolicy.js`; `RACE_PAYOUT_DOUBLE_MAX_BONUS_COINS` may tune downward only |
+| `racePayoutDoubleRolloutPercent` | 0 at snapshot time (later raised to 100%) | `app_settings` row |
 | Lifetime claims | 10 claims / 1,554 bonus coins / 10 distinct identities, all 2026-08-15 | `race_payout_double_offers` where `status='CLAIMED'` |
-| Largest single claim | 500 coins (at cap) | same |
-| Aggregate canary threshold | `bonus > 370` per trailing 24h, cluster-wide | `src/modules/races/jobs/racePayoutDoubleReconcile.js:207` |
+| Historical largest single claim | 500 coins (before the 100-coin correction) | same |
 | Identity key | `hashAppleSub(appleId || googleSub)` | `services/racePayoutDoublePolicy.js` |
 
 Eligible base is the sum of exact positive race prize rows. Prod prize-payout

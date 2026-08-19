@@ -4,6 +4,7 @@ const { appSettings } = require("../../../shared/config/appSettings");
 const {
   safeStructuredEvent,
   ROLLOUT_SETTING,
+  HARD_MAX_RACE_PAYOUT_DOUBLE_BONUS_COINS,
 } = require("../services/racePayoutDoublePolicy");
 const { RACE_PAYOUT_DOUBLE_REWARD_KIND } = require("../../economy/adRewards");
 
@@ -141,6 +142,15 @@ function buildRacePayoutDoubleReconcile(dependencies = {}) {
         const grantRows = grantsByOffer.get(offer.id) || [];
         const velocityRows = velocityByOffer.get(offer.id) || [];
         const receiptRows = receiptByOffer.get(offer.id) || [];
+        if (
+          offer.bonusCoins > HARD_MAX_RACE_PAYOUT_DOUBLE_BONUS_COINS ||
+          offer.maxBonusCoins > HARD_MAX_RACE_PAYOUT_DOUBLE_BONUS_COINS ||
+          offer.rolling24hRemainingBeforeClaim > HARD_MAX_RACE_PAYOUT_DOUBLE_BONUS_COINS ||
+          coinRows.some((row) => row.amount > HARD_MAX_RACE_PAYOUT_DOUBLE_BONUS_COINS) ||
+          grantRows.some((row) => row.coinAmount > HARD_MAX_RACE_PAYOUT_DOUBLE_BONUS_COINS) ||
+          velocityRows.some((row) => row.bonusCoins > HARD_MAX_RACE_PAYOUT_DOUBLE_BONUS_COINS) ||
+          receiptRows.some((row) => row.bonusCoins > HARD_MAX_RACE_PAYOUT_DOUBLE_BONUS_COINS)
+        ) failures.push("hard_cap_equation");
         if (coinRows.length !== 1 || coinRows[0]?.amount !== offer.bonusCoins) {
           failures.push("ledger_equation");
         }
@@ -181,6 +191,18 @@ function buildRacePayoutDoubleReconcile(dependencies = {}) {
       for (const grant of grants) {
         if (!offerById.has(grant.contextId)) failures.push("grant_orphan");
       }
+
+      const rollingBonusByIdentity = new Map();
+      for (const velocity of velocities) {
+        if (!(velocity.claimedAt > cutoff && velocity.claimedAt <= now)) continue;
+        rollingBonusByIdentity.set(
+          velocity.providerSubHash,
+          (rollingBonusByIdentity.get(velocity.providerSubHash) || 0) + velocity.bonusCoins,
+        );
+      }
+      if ([...rollingBonusByIdentity.values()].some(
+        (total) => total > HARD_MAX_RACE_PAYOUT_DOUBLE_BONUS_COINS,
+      )) failures.push("rolling_cap_equation");
 
       const inWindowOfferIds = new Set(offersInWindow.map((row) => row.id));
       const metricOffers = offers.filter((offer) => inWindowOfferIds.has(offer.id));

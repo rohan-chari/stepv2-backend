@@ -333,6 +333,28 @@ describe("powerups5 wave — integration", () => {
 
   // ── 7. Power Outage ─────────────────────────────────────────────────────
   describe("power outage", () => {
+    async function outageOnVictim() {
+      await seedCatalog();
+      const attacker = await createUser("OutageCaster");
+      const victim = await createUser("OutageVictim");
+      await makeFriends(attacker, victim);
+      const raceId = await createActiveRace(attacker, [victim]);
+      const outage = await giveHeld(raceId, attacker.userId, "POWER_OUTAGE");
+      const outageRes = await usePU(attacker.token, raceId, outage.id);
+      assert.equal(outageRes.status, 200);
+      const victimParticipant = await participant(raceId, victim.userId);
+      const outageEffect = await prisma.raceActiveEffect.findFirst({
+        where: {
+          raceId,
+          type: "POWER_OUTAGE",
+          targetParticipantId: victimParticipant.id,
+          status: "ACTIVE",
+        },
+      });
+      assert.ok(outageEffect, "victim has a live Power Outage");
+      return { victim, raceId, outageEffect };
+    }
+
     it("jams all enemies; a jammed enemy can't use powerups; Socks exempt; Umbrella skipped", async () => {
       await seedCatalog();
       const a = await createUser("Outage"); const b = await createUser("Jammed"); const c = await createUser("Socked"); const d = await createUser("Umbrellaed");
@@ -359,6 +381,89 @@ describe("powerups5 wave — integration", () => {
       const shake = await giveHeld(raceId, b.userId, "PROTEIN_SHAKE");
       const blocked = await usePU(b.token, raceId, shake.id, {});
       assert.equal(blocked.status, 409);
+    });
+
+    it("Cleanse bypasses a live Power Outage jam and clears the outage", async () => {
+      const { victim, raceId, outageEffect } = await outageOnVictim();
+      const cleanse = await giveHeld(raceId, victim.userId, "CLEANSE");
+
+      const res = await usePU(victim.token, raceId, cleanse.id);
+
+      assert.equal(res.status, 200);
+      assert.equal((await res.json()).result.cleared, 1);
+      const after = await prisma.raceActiveEffect.findUnique({
+        where: { id: outageEffect.id },
+      });
+      assert.equal(after.status, "EXPIRED");
+      assert.ok(after.expiresAt.getTime() < outageEffect.expiresAt.getTime());
+      const usedCleanse = await prisma.racePowerup.findUnique({
+        where: { id: cleanse.id },
+      });
+      assert.equal(usedCleanse.status, "USED");
+    });
+
+    it("Quick Rinse bypasses a live Power Outage jam and halves the outage", async () => {
+      const { victim, raceId, outageEffect } = await outageOnVictim();
+      const rinse = await giveHeld(raceId, victim.userId, "QUICK_RINSE");
+
+      const beforeUse = Date.now();
+      const res = await usePU(victim.token, raceId, rinse.id);
+      const afterUse = Date.now();
+
+      assert.equal(res.status, 200);
+      assert.equal((await res.json()).result.shortened, 1);
+      const after = await prisma.raceActiveEffect.findUnique({
+        where: { id: outageEffect.id },
+      });
+      assert.equal(after.status, "ACTIVE");
+      const originalExpiry = outageEffect.expiresAt.getTime();
+      const earliestExpected = Math.floor((originalExpiry + beforeUse) / 2) - 1;
+      const latestExpected = Math.ceil((originalExpiry + afterUse) / 2) + 1;
+      assert.ok(
+        after.expiresAt.getTime() >= earliestExpected &&
+          after.expiresAt.getTime() <= latestExpected,
+        "new expiry is the midpoint between the use time and original expiry"
+      );
+      const usedRinse = await prisma.racePowerup.findUnique({
+        where: { id: rinse.id },
+      });
+      assert.equal(usedRinse.status, "USED");
+    });
+
+    it("Signal Jammer still blocks Cleanse when both jam types are live", async () => {
+      const { victim, raceId, outageEffect } = await outageOnVictim();
+      const staleSignalJammer = await giveEffect(
+        raceId,
+        victim.userId,
+        outageEffect.sourceUserId,
+        "SIGNAL_JAMMER",
+        { expiresAt: new Date(Date.now() - HOUR_MS) }
+      );
+      const signalJammer = await giveEffect(
+        raceId,
+        victim.userId,
+        outageEffect.sourceUserId,
+        "SIGNAL_JAMMER",
+        { expiresAt: new Date(Date.now() + HOUR_MS) }
+      );
+      const cleanse = await giveHeld(raceId, victim.userId, "CLEANSE");
+
+      const res = await usePU(victim.token, raceId, cleanse.id);
+
+      assert.equal(res.status, 409);
+      assert.match((await res.json()).error, /jammed/i);
+      const effectsAfter = await prisma.raceActiveEffect.findMany({
+        where: {
+          id: {
+            in: [outageEffect.id, staleSignalJammer.id, signalJammer.id],
+          },
+        },
+      });
+      assert.ok(effectsAfter.every((effect) => effect.status === "ACTIVE"));
+      const heldCleanse = await prisma.racePowerup.findUnique({
+        where: { id: cleanse.id },
+      });
+      assert.equal(heldCleanse.status, "HELD");
     });
   });
 

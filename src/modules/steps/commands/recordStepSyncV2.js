@@ -186,6 +186,14 @@ function buildRecordStepSyncV2(dependencies = {}) {
       }
     }
 
+    // Queued-generation merge is an enqueue-time decision. Read the cached
+    // setting exactly once for this logical enqueue (including crash recovery)
+    // and carry the resolved boolean into the atomic conflict upsert.
+    const queuedGenerationMerge = await isStrictFlagEnabled(
+      appSettings,
+      "raceResolutionQueuedGenerationMergeV1Enabled",
+    );
+
     const { response } = await prisma.$transaction(async (tx) => {
       const requestedAt = now();
       const jobs = await raceResolutionJobModel.enqueueMany(
@@ -196,6 +204,7 @@ function buildRecordStepSyncV2(dependencies = {}) {
           now: requestedAt,
           dirtyEnvelopeByRaceId,
           burstCoalescing,
+          queuedGenerationMerge,
         },
         tx
       );

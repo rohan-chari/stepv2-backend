@@ -5,6 +5,10 @@ const {
   boundedRolloutPercent,
   canonicalUuid,
   safeStructuredEvent,
+  HARD_MAX_RACE_PAYOUT_DOUBLE_BONUS_COINS,
+  boundedRacePayoutDoubleMaxBonus,
+  computeRacePayoutDoubleBonus,
+  normalizedRacePayoutDoubleAmounts,
 } = require("../../src/modules/races/services/racePayoutDoublePolicy");
 
 test("race payout double cohort hashing pins the unsigned-big-endian vectors", () => {
@@ -21,6 +25,50 @@ test("race payout double rollout accepts only integer 0..100", () => {
   for (const bad of [-1, 101, 10.5, "10", null, undefined]) {
     assert.equal(boundedRolloutPercent(bad), 0);
   }
+});
+
+test("race payout double bonus has a non-configurable 100-coin hard ceiling", () => {
+  assert.equal(HARD_MAX_RACE_PAYOUT_DOUBLE_BONUS_COINS, 100);
+  assert.equal(boundedRacePayoutDoubleMaxBonus(40), 40);
+  assert.equal(boundedRacePayoutDoubleMaxBonus(100), 100);
+  assert.equal(boundedRacePayoutDoubleMaxBonus(500), 100);
+  assert.equal(boundedRacePayoutDoubleMaxBonus("100"), 100);
+
+  assert.equal(computeRacePayoutDoubleBonus({
+    baseCoins: 853,
+    configuredMaxBonusCoins: 500,
+    rolling24hRemaining: 500,
+  }), 100);
+  assert.equal(computeRacePayoutDoubleBonus({
+    baseCoins: 80,
+    configuredMaxBonusCoins: 100,
+    rolling24hRemaining: 100,
+  }), 80);
+  assert.equal(computeRacePayoutDoubleBonus({
+    baseCoins: 853,
+    configuredMaxBonusCoins: 100,
+    rolling24hRemaining: 20,
+  }), 20);
+  assert.equal(computeRacePayoutDoubleBonus({
+    baseCoins: 853,
+    configuredMaxBonusCoins: 100,
+    rolling24hRemaining: 0,
+  }), 0);
+
+  assert.deepEqual(normalizedRacePayoutDoubleAmounts({
+    baseCoins: 500,
+    bonusCoins: 500,
+    maxBonusCoins: 500,
+    rolling24hRemainingBeforeClaim: 500,
+  }, {
+    configuredMaxBonusCoins: 40,
+    rolling24hRemaining: 20,
+  }), {
+    baseCoins: 500,
+    bonusCoins: 20,
+    maxBonusCoins: 40,
+    rolling24hRemainingBeforeClaim: 20,
+  });
 });
 
 test("race payout double uses canonical RFC-4122 UUIDs", () => {

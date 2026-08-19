@@ -9,17 +9,19 @@ const {
   providerSubHash,
   cohortBucket,
   boundedRolloutPercent,
+  boundedRacePayoutDoubleMaxBonus,
+  computeRacePayoutDoubleBonus,
+  normalizedRacePayoutDoubleAmounts,
 } = require("../services/racePayoutDoublePolicy");
 
-function serializeOffer(offer) {
+function serializeOffer(offer, allowance = {}) {
+  // Older persisted PENDING rows may predate the restored 100-coin ceiling.
+  // Serialize the claimable amount, never the stale oversized snapshot.
+  const amounts = normalizedRacePayoutDoubleAmounts(offer, allowance);
   return {
     offerId: offer.id,
     raceIds: offer.items.map((item) => item.raceIdSnapshot),
-    baseCoins: offer.baseCoins,
-    bonusCoins: offer.bonusCoins,
-    maxBonusCoins: offer.maxBonusCoins,
-    rolling24hRemainingBeforeClaim:
-      offer.rolling24hRemainingBeforeClaim,
+    ...amounts,
   };
 }
 
@@ -35,7 +37,30 @@ function buildGetRacePayoutDoubleOffer(dependencies = {}) {
     pendingOffer = null,
   }) {
     const pending = pendingOffer || await model.findPending(userId);
-    if (pending) return serializeOffer(pending);
+    if (pending) {
+      const maxBonusCoins = boundedRacePayoutDoubleMaxBonus(
+        config.racePayoutDoubleMaxBonusCoins(),
+      );
+      const nowRows = await db.$queryRaw`SELECT NOW() AS now`;
+      const now = nowRows[0].now;
+      const cutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      const velocity = await db.racePayoutDoubleVelocityGrant.aggregate({
+        where: {
+          providerSubHash: pending.providerSubHash,
+          claimedAt: { gt: cutoff, lte: now },
+        },
+        _sum: { bonusCoins: true },
+      });
+      const rolling24hRemaining = Math.max(
+        0,
+        maxBonusCoins - (velocity._sum.bonusCoins || 0),
+      );
+      const serialized = serializeOffer(pending, {
+        configuredMaxBonusCoins: maxBonusCoins,
+        rolling24hRemaining,
+      });
+      return serialized.bonusCoins > 0 ? serialized : null;
+    }
 
     if (!config.adsRacePayoutDoublePrepareEnabled()) return null;
     if (config.racePayoutDoubleAdUnitIds().length === 0) return null;
@@ -49,7 +74,9 @@ function buildGetRacePayoutDoubleOffer(dependencies = {}) {
     const percent = boundedRolloutPercent(await settings.getFlag(ROLLOUT_SETTING));
     if (cohortBucket(hash) >= percent) return null;
 
-    const maxBonusCoins = config.racePayoutDoubleMaxBonusCoins();
+    const maxBonusCoins = boundedRacePayoutDoubleMaxBonus(
+      config.racePayoutDoubleMaxBonusCoins(),
+    );
     const nowRows = await db.$queryRaw`SELECT NOW() AS now`;
     const now = nowRows[0].now;
     const cutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
@@ -85,9 +112,11 @@ function buildGetRacePayoutDoubleOffer(dependencies = {}) {
     );
     const baseCoins = items.reduce((sum, item) => sum + item.eligibleCoins, 0);
     if (baseCoins <= 0) return null;
-    // A payout double is exact: no displayed/claimable offer may be a capped
-    // partial copy of the authoritative rounded base ledger amount.
-    const bonusCoins = baseCoins;
+    const bonusCoins = computeRacePayoutDoubleBonus({
+      baseCoins,
+      configuredMaxBonusCoins: maxBonusCoins,
+      rolling24hRemaining: rolling24hRemainingBeforeClaim,
+    });
     if (bonusCoins <= 0) return null;
     const completedOrder = new Map(completed.map((race, index) => [race.id, index]));
     items.sort(

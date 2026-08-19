@@ -27,6 +27,9 @@ const {
 
 const uuid = () => crypto.randomUUID();
 const { appSettings } = require("../../src/shared/config/appSettings");
+const {
+  RaceResolutionJobV2,
+} = require("../../src/modules/races/models/raceResolutionJobV2");
 const bodyFor = (steps) => ({ date: "2026-07-17", steps, samples: [] });
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -74,6 +77,7 @@ describe("POST /steps/sync-v2 (integration)", () => {
     await cleanDatabase();
     await appSettings.setFlag("raceResolutionReasonAwareV1Enabled", false);
     await appSettings.setFlag("raceResolutionBurstCoalescingV1Enabled", false);
+    await appSettings.setFlag("raceResolutionQueuedGenerationMergeV1Enabled", false);
   });
 
   it("coalescing uses a fixed five-second window that later syncs cannot extend", async () => {
@@ -373,6 +377,66 @@ describe("POST /steps/sync-v2 (integration)", () => {
     assert.equal(jobs.length, 1); // ONE row per RACE (coalesced)
     assert.equal(jobs[0].generation, 2);
     assert.deepEqual(jobs[0].triggeredByUserIds, [user.id]);
+  });
+
+  it("reuses an unclaimed queued generation when queued-generation merge is enabled", async () => {
+    const { token, user } = await createTestUser();
+    const raceId = await activeRaceWith(user.id, "Queued generation merge race");
+    await appSettings.setFlag("raceResolutionQueuedGenerationMergeV1Enabled", true);
+
+    const first = await request(baseUrl, "POST", "/steps/sync-v2", {
+      token,
+      headers: { "Idempotency-Key": uuid() },
+      body: bodyFor(100),
+    });
+    const second = await request(baseUrl, "POST", "/steps/sync-v2", {
+      token,
+      headers: { "Idempotency-Key": uuid() },
+      body: bodyFor(200),
+    });
+
+    assert.equal(first.status, 202);
+    assert.equal(second.status, 202);
+    const firstJson = await first.json();
+    const secondJson = await second.json();
+    assert.equal(firstJson.raceResolution.jobId, secondJson.raceResolution.jobId);
+    assert.equal(firstJson.raceResolution.generation, 1);
+    assert.equal(secondJson.raceResolution.generation, 1);
+
+    const jobs = await jobsForRace(raceId);
+    assert.equal(jobs.length, 1);
+    assert.equal(jobs[0].generation, 1);
+    assert.equal(jobs[0].state, "queued");
+    assert.deepEqual(jobs[0].triggeredByUserIds, [user.id]);
+  });
+
+  it("bumps a claimed generation and preserves the follow-up when queued-generation merge is enabled", async () => {
+    const { token, user } = await createTestUser();
+    const raceId = await activeRaceWith(user.id, "Claimed generation merge race");
+    await appSettings.setFlag("raceResolutionQueuedGenerationMergeV1Enabled", true);
+
+    const first = await request(baseUrl, "POST", "/steps/sync-v2", {
+      token,
+      headers: { "Idempotency-Key": uuid() },
+      body: bodyFor(100),
+    });
+    assert.equal(first.status, 202);
+    const claimed = await RaceResolutionJobV2.claimNext({ now: new Date() });
+    assert.ok(claimed);
+    assert.equal(claimed.processingGeneration, 1);
+
+    const second = await request(baseUrl, "POST", "/steps/sync-v2", {
+      token,
+      headers: { "Idempotency-Key": uuid() },
+      body: bodyFor(200),
+    });
+    assert.equal(second.status, 202);
+    assert.equal((await second.json()).raceResolution.generation, 2);
+
+    const [job] = await jobsForRace(raceId);
+    assert.equal(job.state, "running");
+    assert.equal(job.generation, 2);
+    assert.deepEqual(job.triggeredByUserIds, [user.id]);
   });
 
   it("a non-UUID idempotency key is rejected 400 INVALID_STEP_SYNC", async () => {

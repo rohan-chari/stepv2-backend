@@ -4,6 +4,9 @@ const { hashAppleSub } = require("../../users/appleSubHash");
 const ROLLOUT_SETTING = "racePayoutDoubleRolloutPercent";
 const CAPABILITY = "race_payout_double";
 const MAX_ROLLOUT = 100;
+// Product-level issuance ceiling. Environment configuration may tune the bonus
+// downward, but no offer or claim path may raise it above 100 coins.
+const HARD_MAX_RACE_PAYOUT_DOUBLE_BONUS_COINS = 100;
 
 function providerSubHash(user) {
   return hashAppleSub(user?.appleId || user?.googleSub || null);
@@ -28,6 +31,57 @@ function boundedRolloutPercent(value) {
     : 0;
 }
 
+function boundedRacePayoutDoubleMaxBonus(value) {
+  return Number.isInteger(value) &&
+    value >= 1 &&
+    value <= HARD_MAX_RACE_PAYOUT_DOUBLE_BONUS_COINS
+    ? value
+    : HARD_MAX_RACE_PAYOUT_DOUBLE_BONUS_COINS;
+}
+
+function nonNegativeWhole(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.max(0, Math.floor(numeric)) : 0;
+}
+
+function computeRacePayoutDoubleBonus({
+  baseCoins,
+  configuredMaxBonusCoins,
+  rolling24hRemaining,
+}) {
+  return Math.min(
+    nonNegativeWhole(baseCoins),
+    boundedRacePayoutDoubleMaxBonus(configuredMaxBonusCoins),
+    nonNegativeWhole(rolling24hRemaining),
+    HARD_MAX_RACE_PAYOUT_DOUBLE_BONUS_COINS,
+  );
+}
+
+function normalizedRacePayoutDoubleAmounts(offer, {
+  configuredMaxBonusCoins = offer?.maxBonusCoins,
+  rolling24hRemaining = offer?.rolling24hRemainingBeforeClaim,
+} = {}) {
+  const maxBonusCoins = boundedRacePayoutDoubleMaxBonus(
+    configuredMaxBonusCoins,
+  );
+  const rolling24hRemainingBeforeClaim = Math.min(
+    maxBonusCoins,
+    nonNegativeWhole(rolling24hRemaining),
+  );
+  const baseCoins = nonNegativeWhole(offer?.baseCoins);
+  const bonusCoins = computeRacePayoutDoubleBonus({
+    baseCoins: Math.min(baseCoins, nonNegativeWhole(offer?.bonusCoins)),
+    configuredMaxBonusCoins: maxBonusCoins,
+    rolling24hRemaining: rolling24hRemainingBeforeClaim,
+  });
+  return {
+    baseCoins,
+    bonusCoins,
+    maxBonusCoins,
+    rolling24hRemainingBeforeClaim,
+  };
+}
+
 function canonicalUuid(value) {
   return typeof value === "string" &&
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value);
@@ -50,9 +104,13 @@ function safeStructuredEvent(logger, event) {
 module.exports = {
   ROLLOUT_SETTING,
   CAPABILITY,
+  HARD_MAX_RACE_PAYOUT_DOUBLE_BONUS_COINS,
   providerSubHash,
   cohortBucket,
   boundedRolloutPercent,
+  boundedRacePayoutDoubleMaxBonus,
+  computeRacePayoutDoubleBonus,
+  normalizedRacePayoutDoubleAmounts,
   canonicalUuid,
   safeStructuredEvent,
 };
