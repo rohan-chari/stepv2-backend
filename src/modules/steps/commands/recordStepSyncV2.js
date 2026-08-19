@@ -394,14 +394,22 @@ function buildRecordStepSyncV2(dependencies = {}) {
         const changed = Boolean(existingStep);
         const dailyScoringChanged = !existingStep ||
           Number(existingStep.steps) !== Number(canonical.steps);
-        const step = existingStep
-          ? await tx.step.update({
-              where: { id: existingStep.id },
-              data: { steps: canonical.steps },
-            })
-          : await tx.step.create({
-              data: { userId, steps: canonical.steps, date: new Date(canonical.date), stepGoal: null },
-            });
+        // Keep the preceding read for exact scoring/no-op classification, but
+        // make the write itself conflict-safe. A legacy /steps request can
+        // insert this daily row after our read; upsert converges instead of
+        // aborting Transaction A with P2002.
+        const step = await tx.step.upsert({
+          where: {
+            userId_date: { userId, date: new Date(canonical.date) },
+          },
+          create: {
+            userId,
+            steps: canonical.steps,
+            date: new Date(canonical.date),
+            stepGoal: null,
+          },
+          update: { steps: canonical.steps },
+        });
         // `lastStepSyncAt` is deliberately NOT stamped here — see the note after
         // this transaction commits.
         if (cleaned.length > 0) {

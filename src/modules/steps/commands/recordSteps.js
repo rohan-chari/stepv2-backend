@@ -229,14 +229,36 @@ function buildRecordSteps(dependencies = {}) {
       await userModel.update(userId, { lastStepSyncAt: now() });
       events.emit("STEPS_UPDATED", { userId, steps, date });
     } else {
-      const persisted = await stepsModel.create(
-        { userId, steps, date, stepGoal: null },
-        { noopSuppression }
-      );
+      let persisted;
+      let created = true;
+      try {
+        persisted = await stepsModel.create(
+          { userId, steps, date, stepGoal: null },
+          { noopSuppression }
+        );
+      } catch (error) {
+        // Two devices can both observe an absent daily row. The unique index is
+        // the admission authority: after the losing create transaction rolls
+        // back, converge through the normal update path instead of returning a
+        // 500. Re-read before handling so unrelated P2002 errors still surface.
+        if (error?.code !== "P2002") throw error;
+        const winner = await stepsModel.findByUserIdAndDate(userId, date);
+        if (!winner) throw error;
+        persisted = await stepsModel.update(
+          winner.id,
+          { steps },
+          { noopSuppression }
+        );
+        created = false;
+      }
       record = persisted?.record || persisted;
       if (noopSuppression) scoringChanged = persisted?.scoringChanged !== false;
       await userModel.update(userId, { lastStepSyncAt: now() });
-      events.emit("STEPS_RECORDED", { userId, steps, date });
+      events.emit(created ? "STEPS_RECORDED" : "STEPS_UPDATED", {
+        userId,
+        steps,
+        date,
+      });
     }
 
     // C4 (spec §5 Phase E): this and `recordStepSyncV2` are the ONLY two writers
