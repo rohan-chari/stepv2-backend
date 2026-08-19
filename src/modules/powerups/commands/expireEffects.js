@@ -7,6 +7,23 @@ const { StepSample } = require("../../steps/models/stepSample");
 const { eventBus } = require("../../../shared/events/eventBus");
 const { POWERUP_NAMES } = require("./rollPowerup");
 const { awardCoins: defaultAwardCoins } = require("../../../shared/economy/awardCoins");
+const { appSettings: defaultAppSettings } = require("../../../shared/config/appSettings");
+const { isStrictFlagEnabled } = require("../../../shared/config/isStrictFlagEnabled");
+const {
+  enqueueRaceResolution: defaultEnqueueRaceResolution,
+} = require("../../races/services/enqueueRaceResolution");
+
+let immediateRaceResolutionWorker = null;
+async function defaultResolveRaceResolution(input) {
+  // Lazy require avoids introducing a module-initialization cycle: the C0
+  // worker's post-commit hook itself loads expireEffects. One process-local
+  // worker is enough; ownership is still the durable race job lease/fence.
+  if (!immediateRaceResolutionWorker) {
+    const { buildRaceResolutionWorkerV2 } = require("../../races/jobs/raceResolutionQueueV2");
+    immediateRaceResolutionWorker = buildRaceResolutionWorkerV2({ bootAt: 0 });
+  }
+  return immediateRaceResolutionWorker.processRace(input);
+}
 
 // Both lists live in a dependency-free constants module so consumers (the
 // race-scoring dependency-closure table) can derive from them without loading
@@ -14,6 +31,7 @@ const { awardCoins: defaultAwardCoins } = require("../../../shared/economy/award
 const {
   SNAPSHOT_AT_EXPIRY_TYPES,
   EXPIRY_CONSEQUENCE_TYPES,
+  ACTIVE_IMPACT_EXPIRY_TYPES,
 } = require("../constants/expiryEffectTypes");
 
 // Compute a participant's steps over [start, end] from samples, falling back to
@@ -36,21 +54,85 @@ function buildExpireEffects(dependencies = {}) {
   const stepSampleModel = dependencies.StepSample || StepSample;
   const awardCoins = dependencies.awardCoins || defaultAwardCoins;
   const events = dependencies.eventBus || eventBus;
+  const settings = dependencies.appSettings || defaultAppSettings;
+  const enqueueRaceResolution = Object.prototype.hasOwnProperty.call(
+    dependencies,
+    "enqueueRaceResolution"
+  )
+    ? dependencies.enqueueRaceResolution
+    : Object.keys(dependencies).length > 0
+      ? async () => null
+      : defaultEnqueueRaceResolution;
+  const resolveRaceResolution = Object.prototype.hasOwnProperty.call(
+    dependencies,
+    "resolveRaceResolution"
+  )
+    ? dependencies.resolveRaceResolution
+    : Object.keys(dependencies).length > 0
+      ? async () => null
+      : defaultResolveRaceResolution;
   const nowFn = dependencies.now || (() => new Date());
 
   return async function expireEffects({ raceId, participantSteps } = {}) {
     const currentTime = nowFn();
+    const activeImpactEnabled =
+      (Object.keys(dependencies).length === 0 || dependencies.appSettings) &&
+      (await isStrictFlagEnabled(settings, "apiActiveImpactNoticesV1Enabled"));
     const expired =
       raceId && typeof effectModel.findExpiredForRace === "function"
         ? await effectModel.findExpiredForRace(raceId, currentTime)
         : await effectModel.findExpired(currentTime);
 
+    // Drill judgement changes authoritative participant steps. It may never run
+    // in this legacy request/post-commit helper: only the race-keyed C0 writer
+    // can atomically commit the penalty, effect metadata/status and durable
+    // active-impact source under the rollout fence. A progress read marks each
+    // affected race dirty and, for the legacy response-timing contract, awaits
+    // that race's C0 generation; it never judges the effect itself. Enqueue is
+    // idempotent/coalescing and a failed enqueue leaves the ACTIVE row due for
+    // the next discovery pass.
+    const dueDrillsByRace = new Map();
+    for (const effect of expired) {
+      if (effect.type !== "DRILL_SERGEANT" || !effect.raceId) continue;
+      if (!dueDrillsByRace.has(effect.raceId)) {
+        dueDrillsByRace.set(effect.raceId, { userIds: new Set(), participantIds: new Set() });
+      }
+      const due = dueDrillsByRace.get(effect.raceId);
+      if (effect.targetUserId) due.userIds.add(effect.targetUserId);
+      if (effect.targetParticipantId) due.participantIds.add(effect.targetParticipantId);
+    }
+    for (const [dueRaceId, due] of dueDrillsByRace) {
+      const job = await enqueueRaceResolution({
+        raceId: dueRaceId,
+        userId: [...due.userIds][0] || null,
+        dirtyUserIds: [...due.userIds],
+        dirtyParticipantIds: [...due.participantIds],
+        powerupTypes: ["DRILL_SERGEANT"],
+        reason: "EFFECT_BOUNDARY",
+        priority: "IMMEDIATE",
+        now: currentTime,
+      });
+      if (job?.id) {
+        await resolveRaceResolution({
+          raceId: dueRaceId,
+          generation: Number(job.generation),
+        });
+      }
+    }
+
     const results = [];
 
     for (const effect of expired) {
       if (raceId && effect.raceId !== raceId) continue;
+      if (effect.type === "DRILL_SERGEANT") continue;
 
       const metadata = effect.metadata || {};
+      if (
+        !activeImpactEnabled &&
+        ACTIVE_IMPACT_EXPIRY_TYPES.includes(effect.type)
+      ) {
+        metadata.activeImpactResolutionSkippedVersion = 1;
+      }
       // Store current steps at expiry for snapshot-based timed modifiers.
       if (SNAPSHOT_AT_EXPIRY_TYPES.includes(effect.type)) {
         const currentStepsForTarget = participantSteps?.[effect.targetParticipantId];
@@ -68,19 +150,6 @@ function buildExpireEffects(dependencies = {}) {
           }
         } catch (e) {
           console.error("Failed to revert Fanny Pack slots:", e);
-        }
-      }
-
-      // ── DRILL_SERGEANT (§3.9): judged at expiry. VOID if the race ended before
-      // the dare's expiry; otherwise penalize the target if they missed the goal.
-      if (effect.type === "DRILL_SERGEANT") {
-        try {
-          await evaluateDrillSergeant({
-            effect, raceModel, participantModel, stepSampleModel, eventModel,
-            participantSteps,
-          });
-        } catch (e) {
-          console.error("Drill Sergeant evaluation failed:", e);
         }
       }
 
@@ -159,7 +228,7 @@ async function evaluateDrillSergeant({ effect, raceModel, participantModel, step
       description: `The Drill Sergeant dare was voided. The race ended first.`,
       metadata: { outcome: "VOID" },
     });
-    return;
+    return { outcome: "VOID", deltaSteps: 0 };
   }
 
   const snapshotSteps = participantSteps?.[effect.targetParticipantId];
@@ -177,7 +246,7 @@ async function evaluateDrillSergeant({ effect, raceModel, participantModel, step
       description: `Dare survived! They walked ${Math.round(windowSteps).toLocaleString()} steps and dodged the Drill Sergeant penalty.`,
       metadata: { outcome: "SURVIVED", windowSteps: Math.round(windowSteps) },
     });
-    return;
+    return { outcome: "SURVIVED", deltaSteps: 0 };
   }
 
   // Missed the goal → instant penalty (Red Card bonus-subtraction, floored at 0).
@@ -191,6 +260,7 @@ async function evaluateDrillSergeant({ effect, raceModel, participantModel, step
     description: `Dare failed! They fell short of ${goalSteps.toLocaleString()} steps and lost ${penaltySteps.toLocaleString()}.`,
     metadata: { outcome: "FAILED", penalty: penaltySteps, windowSteps: Math.round(windowSteps) },
   });
+  return { outcome: "FAILED", deltaSteps: -penaltySteps };
 }
 
 // Piggy Bank mint (shared by expiry + settlement). Window is [startsAt,
@@ -228,4 +298,5 @@ module.exports = {
   mintPiggyBank,
   SNAPSHOT_AT_EXPIRY_TYPES,
   EXPIRY_CONSEQUENCE_TYPES,
+  ACTIVE_IMPACT_EXPIRY_TYPES,
 };

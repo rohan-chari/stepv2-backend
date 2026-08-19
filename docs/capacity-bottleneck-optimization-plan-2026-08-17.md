@@ -7,6 +7,13 @@ capacity investigation. It records measured evidence, separates confirmed
 bottlenecks from hypotheses, and orders the next optimizations so each change
 can be measured independently.
 
+> **Historical harness notice:** The frontend production-mix harness and
+> commands discussed in this investigation were retired in 2026-08. They are
+> retained here only to explain the dated evidence and must not be used as the
+> current capacity workflow. See the frontend repository's `k6/README.md` for
+> the supported smoke/find/confirm/soak workflow. Results from the replacement
+> profile are not directly comparable to this historical profile.
+
 No result in this document authorizes a production deploy or production data
 change. Production requires explicit, in-the-moment approval. Every proposed
 backend change must preserve the behavior expected by frozen older clients.
@@ -52,9 +59,9 @@ claim. Production is never inferred by applying an exact 2x worker multiplier.
 
 ## Harness corrections
 
-The production-mix harness had three correctness defects in race-resolution
-polling. They are corrected locally in the frontend repository's
-`k6/prod-mix-load-test.js`:
+The retired production-mix harness had three correctness defects in
+race-resolution polling. At the time, they were corrected locally in the
+frontend repository's since-deleted `k6/prod-mix-load-test.js`:
 
 1. Idempotency keys are canonical UUIDv4 values accepted by the backend.
 2. Resolution polls include the required generation.

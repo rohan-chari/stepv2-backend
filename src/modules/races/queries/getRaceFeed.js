@@ -55,6 +55,7 @@ async function getRaceFeed(userId, raceId, { cursor, limit = 50, supportsPowerup
     cursor,
     limit,
     excludeWelcomeMysteryBoxEvents: true,
+    excludeHiddenFromFeedEvents: true,
   });
 
   // MYSTERY_BOX_OPENED rows are persisted only for the admin box-opener metric
@@ -70,7 +71,18 @@ async function getRaceFeed(userId, raceId, { cursor, limit = 50, supportsPowerup
     "MYSTERY_BOX_OPENED",
     "POWERUP_REROLLED",
   ]);
-  const events = rawEvents.filter((e) => !HIDDEN_FEED_EVENT_TYPES.has(e.eventType));
+  const events = rawEvents.filter(
+    (e) =>
+      !HIDDEN_FEED_EVENT_TYPES.has(e.eventType) &&
+      e.metadata?.hiddenFromFeed !== true &&
+      // Compatibility for plant rows written before hiddenFromFeed. A
+      // detonation has mineId/penalty metadata and remains visible.
+      !(
+        e.eventType === "POWERUP_USED" &&
+        e.powerupType === "TRAIL_MINE" &&
+        e.metadata?.ownerParticipantId != null
+      )
+  );
 
   return {
     events: events.map((e) => {

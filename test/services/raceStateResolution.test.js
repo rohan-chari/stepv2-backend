@@ -5,6 +5,7 @@ const {
   buildResolveRaceState,
   determineFinishSnapshot,
 } = require("../../src/modules/races/services/raceStateResolution");
+const { GlobalStepEvent } = require("../../src/modules/steps/models/globalStepEvent");
 
 const RACE_START = new Date("2026-04-06T12:00:00Z");
 const NOW = new Date("2026-04-07T12:00:00Z");
@@ -128,6 +129,11 @@ function makeContext(overrides = {}) {
       async findByRaceAsc(raceId) {
         assert.equal(raceId, race.id);
         return powerupEventsByRace;
+      },
+    },
+    GlobalStepEvent: {
+      async findEligibleByRace({ userIds }) {
+        return new Map(userIds.map((userId) => [userId, []]));
       },
     },
     completeRace: async (payload) => {
@@ -324,9 +330,27 @@ test("canonical resolver exposes a bounded pre-mine display capture without chan
   }]);
   assert.deepEqual(result.displayCapture.currentMultiplierByParticipantId, { "rp-1": 1 });
   assert.deepEqual(result.displayCapture.activeEffects, []);
-  assert.deepEqual(result.displayCapture.globalEvents, []);
+  assert.equal(Object.hasOwn(result.displayCapture, "globalEvents"), false);
   assert.equal(result.displayCapture.asOf.toISOString(), NOW.toISOString());
   assert.equal(ctx.participantUpdates.length, 1, "existing canonical write surface is unchanged");
+});
+
+test("canonical resolver capability-checks the default participant event loader with unrelated injected deps", async () => {
+  const alice = makeParticipant("rp-1", "user-1", "Alice");
+  const ctx = makeContext({ participants: [alice] });
+  delete ctx.deps.GlobalStepEvent;
+  let eligibleReads = 0;
+  const original = GlobalStepEvent.findEligibleByRace;
+  GlobalStepEvent.findEligibleByRace = async () => {
+    eligibleReads += 1;
+    return new Map([["user-1", []]]);
+  };
+  try {
+    await buildResolveRaceState(ctx.deps)({ raceId: "race-1" });
+  } finally {
+    GlobalStepEvent.findEligibleByRace = original;
+  }
+  assert.equal(eligibleReads, 1);
 });
 
 test("resolveRaceState ignores same-day steps row delta when no post-start samples exist", async () => {

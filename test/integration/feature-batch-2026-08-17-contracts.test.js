@@ -35,6 +35,7 @@ describe("2026-08-17 additive contracts", () => {
     await cleanDatabase();
     for (const flag of [
       "apiImpactNoticesEnabled",
+      "apiCompletedImpactPopupEnabled",
       "apiImpactSummariesEnabled",
       "apiReviewPromptEnabled",
       "apiInboxV1Enabled",
@@ -44,6 +45,7 @@ describe("2026-08-17 additive contracts", () => {
   afterEach(async () => {
     for (const flag of [
       "apiImpactNoticesEnabled",
+      "apiCompletedImpactPopupEnabled",
       "apiImpactSummariesEnabled",
       "apiReviewPromptEnabled",
       "apiInboxV1Enabled",
@@ -204,6 +206,18 @@ describe("2026-08-17 additive contracts", () => {
     const event = await prisma.globalStepEvent.create({ data: {
       startsAt: new Date(Date.now() - 120_000), endsAt: new Date(Date.now() - 60_000), multiplier: 2,
     } });
+    const mineSummaryRace = await createCompletedRace(user.user.id, "Mine summary race");
+    const foreignSummaryRace = await createCompletedRace(other.user.id, "Foreign summary race");
+    await prisma.globalEventRaceImpact.createMany({ data: [
+      {
+        eventId: event.id, raceId: mineSummaryRace.id, userId: user.user.id,
+        status: "FINAL", deltaSteps: 840, settledAt: new Date(),
+      },
+      {
+        eventId: event.id, raceId: foreignSummaryRace.id, userId: other.user.id,
+        status: "FINAL", deltaSteps: 40, settledAt: new Date(),
+      },
+    ] });
     const mine = await prisma.globalEventUserSummary.create({ data: {
       eventId: event.id, userId: user.user.id, extraRaceSteps: 840, raceCount: 2,
     } });

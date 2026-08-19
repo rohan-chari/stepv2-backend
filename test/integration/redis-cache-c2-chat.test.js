@@ -311,6 +311,73 @@ describe("C2 chat — §8 test 2 parity (cold cache ≡ flag off), both kinds", 
       `stealthed user should see their own name, got: ${asGuest.messages[0].body}`
     );
   });
+
+  it("rebuilds a warm SYSTEM list that contains new or historical trail mine plants", async (t) => {
+    if (skipReason) return t.skip(skipReason);
+    await enableRedis();
+    await setFlag(true);
+
+    const markedPlant = await prisma.racePowerupEvent.create({
+      data: {
+        raceId: race.id,
+        actorUserId: host.userId,
+        eventType: "POWERUP_USED",
+        powerupType: "TRAIL_MINE",
+        description: "HostPerson planted a Trail Mine at 10,000 steps.",
+        metadata: {
+          ownerParticipantId: "host-participant",
+          positionSteps: 10000,
+          hiddenFromFeed: true,
+        },
+      },
+    });
+    const historicalPlant = await prisma.racePowerupEvent.create({
+      data: {
+        raceId: race.id,
+        actorUserId: host.userId,
+        eventType: "POWERUP_USED",
+        powerupType: "TRAIL_MINE",
+        description: "HostPerson planted a Trail Mine at 9,000 steps.",
+        metadata: {
+          ownerParticipantId: "host-participant",
+          positionSteps: 9000,
+        },
+      },
+    });
+    const detonation = await prisma.racePowerupEvent.create({
+      data: {
+        raceId: race.id,
+        actorUserId: host.userId,
+        targetUserId: guest.userId,
+        eventType: "POWERUP_USED",
+        powerupType: "TRAIL_MINE",
+        description: "GuestPerson triggered a Trail Mine and lost 300 steps.",
+        metadata: { mineId: "mine-1", penalty: 300 },
+      },
+    });
+
+    const listKey = `${ENV_PREFIX}v1:race:msgs:${race.id}:SYSTEM`;
+    for (const stalePlant of [markedPlant, historicalPlant]) {
+      await probe.set(
+        listKey,
+        JSON.stringify({ rows: [stalePlant, detonation] })
+      );
+
+      const response = await messages(host.token, race.id, "?kind=SYSTEM");
+      assert.deepEqual(
+        response.messages.map((row) => row.body),
+        [detonation.description],
+        "the stale plant must force a Postgres rebuild while detonation remains"
+      );
+
+      const rebuilt = JSON.parse(await probe.get(listKey));
+      assert.deepEqual(
+        rebuilt.rows.map((row) => row.id),
+        [detonation.id],
+        "the rebuilt cache must not retain either plant-row shape"
+      );
+    }
+  });
 });
 
 describe("C2 chat — §8 test 3 invalidation", () => {

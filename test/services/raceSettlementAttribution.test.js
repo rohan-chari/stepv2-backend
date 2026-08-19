@@ -49,3 +49,35 @@ test("deterministic remainder allocation keeps integer settled vectors exact", a
   });
   assert.deepEqual(vector.effectImpacts.map((row) => [row.effectId, row.deltaSteps]), [["b", 1]]);
 });
+
+test("local attribution emits an impact only for participants eligible for that event", async () => {
+  const event = {
+    id: "local-event", scheduleMode: "LOCAL_ENTITLEMENTS",
+    startsAt: new Date("2026-08-20T12:00:00Z"),
+  };
+  const participants = [
+    { id: "eligible-participant", userId: "eligible-user" },
+    { id: "ineligible-participant", userId: "ineligible-user" },
+  ];
+  const eventsByUserId = new Map([
+    ["eligible-user", [event]],
+    ["ineligible-user", []],
+  ]);
+  const vector = await computeSettlementAttributionVector({
+    participants,
+    effects: [],
+    globalEvents: [event],
+    eventsByUserId,
+    score: async ({ eventsByUserId: selected }) => new Map([
+      ["eligible-participant", selected?.get("eligible-user")?.length ? 200 : 100],
+      ["ineligible-participant", 100],
+    ]),
+  });
+
+  assert.deepEqual(vector.globalImpacts, [{
+    participantId: "eligible-participant",
+    userId: "eligible-user",
+    eventId: "local-event",
+    deltaSteps: 100,
+  }]);
+});

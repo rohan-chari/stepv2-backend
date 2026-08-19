@@ -112,6 +112,8 @@ function buildEnsureGoogleUser(dependencies = {}) {
     // best-effort (see findLinkOpenReferralCode.js).
     fallbackReferralCode,
     nameSetupOnboardingRequired,
+    metricsV2SignupEligible = false,
+    metricsV2SignupEpochId = null,
     emitSignInEvent = false,
   }) {
     let user = await userModel.findByGoogleSub(googleSub);
@@ -123,6 +125,9 @@ function buildEnsureGoogleUser(dependencies = {}) {
         name: name || null,
         ...(nameSetupOnboardingRequired === true
           ? { nameSetupOnboardingRequired: true }
+          : {}),
+        ...(metricsV2SignupEligible === true && metricsV2SignupEpochId
+          ? { metricsV2SignupEligible: true, metricsV2SignupEpochId }
           : {}),
       });
 

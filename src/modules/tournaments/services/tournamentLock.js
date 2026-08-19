@@ -1,5 +1,7 @@
 const { prisma: defaultPrisma } = require("../../../db");
-const { withAdvisoryLock } = require("../../../shared/db/withAdvisoryLock");
+const {
+  acquireGlobalEnrollmentLock,
+} = require("../../steps/services/globalEventEnrollment");
 
 // Serialize every capacity-sensitive tournament mutation (join / accept / leave
 // / kick / invite / cancel / start) on the tournament id, so concurrent joins
@@ -12,8 +14,12 @@ const { withAdvisoryLock } = require("../../../shared/db/withAdvisoryLock");
 // Returns { result, deferred }.
 async function withTournamentLock(tournamentId, fn, { prisma = defaultPrisma } = {}) {
   const deferred = [];
-  const result = await withAdvisoryLock(tournamentId, (tx) => fn(tx, deferred), {
-    prisma,
+  const result = await prisma.$transaction(async (tx) => {
+    // One lock order for every path that can create an ACTIVE matchup:
+    // global enrollment first, then the tournament mutation lock.
+    await acquireGlobalEnrollmentLock(tx);
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${tournamentId}))`;
+    return fn(tx, deferred);
   });
   return { result, deferred };
 }

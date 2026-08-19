@@ -102,7 +102,6 @@ function createNotificationsRouter(dependencies = {}) {
       let metricsEpochId = null;
       if (
         platform === "ios" &&
-        req.user.appleId &&
         req.user.isReviewAccount !== true &&
         req.clientFeatures?.has("admin_metrics_v2") === true &&
         (await settings.getFlag("adminMetricsV2TelemetryEnabled")) === true

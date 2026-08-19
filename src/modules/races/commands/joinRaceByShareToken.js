@@ -93,6 +93,7 @@ function buildJoinRaceByShareToken(dependencies = {}) {
             onboarding,
             team,
             clientFeatures,
+            transactionClient: lockTx,
             deferPostCommit: true,
           })),
           invalidateFriendshipPair: false,
@@ -100,6 +101,8 @@ function buildJoinRaceByShareToken(dependencies = {}) {
       }
 
       const commitDurableJoin = async (tx) => {
+        const { acquireGlobalEnrollmentLock } = require("../../steps/services/globalEventEnrollment");
+        await acquireGlobalEnrollmentLock(tx);
         const joined = await joinRaceCore({
           race,
           userId,

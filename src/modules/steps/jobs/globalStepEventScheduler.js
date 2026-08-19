@@ -15,11 +15,173 @@ const {
 const {
   shouldStartGlobalEvent,
   GLOBAL_EVENT_DURATION_MS,
+  localEventWindowForZone,
 } = require("../globalStepEvent");
+const {
+  materializeEntitlementsForActiveRacers,
+  processDueEntitlementBoundaries,
+} = require("../services/globalStepEventEntitlement");
+const {
+  heartbeatAndCheck: heartbeatCronOwnerAndCheck,
+} = require("../models/globalStepEventCronOwner");
+const {
+  captureOperationalSnapshot: captureDefaultOperationalSnapshot,
+} = require("../services/globalStepEventObservability");
+const {
+  cleanupExpiredEntitlements: cleanupDefaultExpiredEntitlements,
+} = require("../services/globalStepEventRetention");
 
 // The scheduler runs once per minute. The "should an event start now?" decision is the PURE function
 // shouldStartGlobalEvent; this job only does the DB read/write + push fan-out.
 const SCHEDULER_INTERVAL_MS = 60 * 1000; // every minute
+
+function addCivilDays(day, amount) {
+  const date = new Date(`${day}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + amount);
+  return date.toISOString().slice(0, 10);
+}
+
+function firstSafeLocalEventDay(now) {
+  const threshold = new Date(now).getTime() + 24 * 60 * 60 * 1000;
+  let day = new Date(now).toISOString().slice(0, 10);
+  for (let index = 0; index < 7; index += 1) {
+    const earliest = localEventWindowForZone({
+      eventDay: day,
+      localStartMinute: 480,
+      durationMinutes: 30,
+      timeZone: "Pacific/Kiritimati",
+    }).startsAt.getTime();
+    if (earliest >= threshold) return day;
+    day = addCivilDays(day, 1);
+  }
+  throw new Error("unable to select safe local event day");
+}
+
+function buildLocalGlobalStepEventTick(dependencies = {}) {
+  const globalStepEventModel = dependencies.GlobalStepEvent || GlobalStepEvent;
+  const settings = dependencies.appSettings || appSettings;
+  const now = dependencies.now || (() => new Date());
+  const materialize = dependencies.materializeEntitlementsForActiveRacers ||
+    materializeEntitlementsForActiveRacers;
+  const processBoundaries = dependencies.processDueEntitlementBoundaries ||
+    processDueEntitlementBoundaries;
+  const logger = dependencies.logger || console;
+  const cronOwnerGuard = dependencies.cronOwnerGuard || heartbeatCronOwnerAndCheck;
+  const captureOperationalSnapshot = dependencies.captureOperationalSnapshot ||
+    captureDefaultOperationalSnapshot;
+  const cleanupExpiredEntitlements = dependencies.cleanupExpiredEntitlements ||
+    cleanupDefaultExpiredEntitlements;
+  const materializationTickBudgetMs = Math.max(
+    1,
+    Number(dependencies.materializationTickBudgetMs) || 5000
+  );
+  return async function localGlobalStepEventTick() {
+    const current = now();
+    // Maintenance is fail-open with respect to creation switches: once a local
+    // parent exists its entitlements and due edges remain contractual data.
+    // Starts are drained before lower-priority fan-out so a large cohort cannot
+    // make an on-time edge stale while future parents are being prepared.
+    await processBoundaries({ now: current });
+    const materializationStarted = Date.now();
+    async function drainParent(event) {
+      let afterUserId = null;
+      for (;;) {
+        if (Date.now() - materializationStarted >= materializationTickBudgetMs) break;
+        const page = await materialize(event, {
+          now: current,
+          batchSize: 100,
+          afterUserId,
+          returnPage: true,
+        });
+        // Compatibility for narrow injected doubles and old internal callers.
+        if (typeof page === "number") {
+          if (page !== 100) break;
+          continue;
+        }
+        if (!page || page.exhausted) break;
+        if (!page.nextCursor || page.nextCursor === afterUserId) break;
+        afterUserId = page.nextCursor;
+      }
+    }
+    const existingParents =
+      typeof globalStepEventModel.findLocalParentsForMaintenance === "function"
+        ? await globalStepEventModel.findLocalParentsForMaintenance(current)
+        : [];
+    for (const event of existingParents || []) {
+      await drainParent(event);
+      if (Date.now() - materializationStarted >= materializationTickBudgetMs) break;
+    }
+
+    const retentionEnabled =
+      (await settings.getFlag("localGlobalStepEventRetentionEnabled")) === true;
+    let retentionHealthy = retentionEnabled;
+    if (retentionEnabled) {
+      try {
+        const retention = await cleanupExpiredEntitlements({ now: current });
+        retentionHealthy = retention?.healthy === true || typeof retention === "number";
+        if (!retentionHealthy) {
+          logger.error(
+            `[CRON] Local global event retention blocked by ${retention?.blockedEntitlements ?? "unknown"} old lifecycle(s)`
+          );
+        }
+      } catch (error) {
+        retentionHealthy = false;
+        logger.error("[CRON] Local global event retention failed:", error);
+      }
+    }
+
+    let operationalSnapshot = null;
+    try {
+      operationalSnapshot = await captureOperationalSnapshot({ now: current });
+      logger.log(`[CRON] Local global event operations ${JSON.stringify({
+        observedAt: operationalSnapshot.observedAt,
+        dueStarts: operationalSnapshot.dueStarts,
+        dueEnds: operationalSnapshot.dueEnds,
+        stalePendingStarts: operationalSnapshot.stalePendingStarts,
+        invalidLocalParents: operationalSnapshot.invalidLocalParents,
+        activeParents: operationalSnapshot.activeParents,
+        activeEntitlements: operationalSnapshot.activeEntitlements,
+        exposureZeroRaces: operationalSnapshot.exposureZeroRaces,
+        exposureOneRaces: operationalSnapshot.exposureOneRaces,
+        exposureMultipleRaces: operationalSnapshot.exposureMultipleRaces,
+        exposureBuckets: operationalSnapshot.exposureBuckets,
+        entitlementsByOffset: operationalSnapshot.entitlementsByOffset,
+        rolloutCounters: operationalSnapshot.rolloutCounters,
+        healthy: operationalSnapshot.healthy,
+      })}`);
+    } catch (error) {
+      // Observability is an enablement guard, not a reason to abandon durable
+      // maintenance or legacy-global scheduling.
+      logger.error("[CRON] Local global event operational audit failed:", error);
+    }
+
+    const creationEnabled =
+      process.env.LOCAL_GLOBAL_STEP_EVENTS_DISABLED !== "true" &&
+      (await settings.getFlag("localGlobalStepEventsEnabled")) === true;
+    if (!creationEnabled) return false;
+    if (!retentionHealthy) {
+      logger.error("[CRON] Local global event creation rejected: retention is not enabled");
+      return false;
+    }
+    if (operationalSnapshot?.healthy !== true) {
+      logger.error("[CRON] Local global event creation rejected: operational audit is unhealthy");
+      return false;
+    }
+    if (!(await cronOwnerGuard({ now: current }))) {
+      logger.error("[CRON] Local global event creation rejected: cron owners are not all local-aware");
+      return false;
+    }
+    const firstDay = firstSafeLocalEventDay(current);
+    for (const eventDay of [firstDay, addCivilDays(firstDay, 1)]) {
+      const parent = await globalStepEventModel.createLocalParentIfAbsent({ eventDay });
+      if (parent?.event) await drainParent(parent.event);
+      if (parent?.created) {
+        logger.log(`[CRON] Local global step event materialized: ${eventDay}`);
+      }
+    }
+    return true;
+  };
+}
 
 function buildMaybeStartGlobalEvent(dependencies = {}) {
   const globalStepEventModel = dependencies.GlobalStepEvent || GlobalStepEvent;
@@ -84,6 +246,13 @@ function buildMaybeStartGlobalEvent(dependencies = {}) {
   // Returns the created event (or null if nothing started this tick).
   return async function maybeStartGlobalEvent() {
     const currentTime = now();
+
+    const localTick = dependencies.localGlobalStepEventTick ||
+      buildLocalGlobalStepEventTick({ ...dependencies, now: () => currentTime });
+    const localCreated = await localTick();
+    if (localCreated) {
+      return null;
+    }
 
     // A cluster-owned DB cursor coalesces all due event edges through the latest
     // crossing. Its lease is reclaimable after process loss, and the cursor is
@@ -188,4 +357,6 @@ module.exports = {
   scheduleGlobalStepEvents,
   SCHEDULER_INTERVAL_MS,
   GLOBAL_EVENT_DURATION_MS,
+  buildLocalGlobalStepEventTick,
+  firstSafeLocalEventDay,
 };

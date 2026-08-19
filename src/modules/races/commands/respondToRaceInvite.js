@@ -20,8 +20,12 @@ const {
   buildMaybeAutoStartPrivateRace,
 } = require("../jobs/privateRaceAutoStart");
 const {
+  acquireGlobalEnrollmentLock,
   enrollIfGlobalEventActive,
 } = require("../../steps/services/globalEventEnrollment");
+const {
+  invalidateHomeActiveGlobalEvent,
+} = require("../../steps/services/globalStepEventEntitlement");
 
 class RaceInviteResponseError extends Error {
   constructor(message, statusCode, code) {
@@ -206,6 +210,7 @@ function buildRespondToRaceInvite(dependencies = {}) {
     const updated =
       accept && race.status === "ACTIVE" && usesDefaultPersistence
         ? await db.$transaction(async (tx) => {
+            await acquireGlobalEnrollmentLock(tx);
             const claimed = await tx.raceParticipant.updateMany({
               where: {
                 id: participant.id,
@@ -266,6 +271,9 @@ function buildRespondToRaceInvite(dependencies = {}) {
     }
 
     if (accept) {
+      if (race.status === "ACTIVE" && usesDefaultPersistence) {
+        await invalidateHomeActiveGlobalEvent([userId]);
+      }
       events.emit("RACE_INVITE_ACCEPTED", {
         raceId,
         userId,

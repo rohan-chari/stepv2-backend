@@ -65,6 +65,13 @@ const {
 const { POWERUP_COPY_TYPES } = require("../constants/powerupCopySeed");
 const { appSettings: defaultAppSettings } = require("../../../shared/config/appSettings");
 const { isStrictFlagEnabled } = require("../../../shared/config/isStrictFlagEnabled");
+const {
+  ActiveRaceImpact: defaultActiveRaceImpact,
+} = require("../../races/models/activeRaceImpact");
+const {
+  ACTIVE_IMPACT_EXPIRY_TYPES,
+} = require("../constants/expiryEffectTypes");
+const ACTIVE_IMPACT_EXPIRY_TYPE_SET = new Set(ACTIVE_IMPACT_EXPIRY_TYPES);
 
 // SIGNAL_JAMMER is a single-target attack (store-only): it is OFFENSIVE +
 // TARGETED so the shared targeting validation, finished-target rejection, and
@@ -498,7 +505,9 @@ async function applyMysteryPotion(ctx) {
   const {
     userId, raceId, powerupId, myParticipant, myDisplayName,
     acceptedParticipants, isEnemy, isAliveTarget, effectModel, participantModel,
-    eventModel, events, awardCoins, random, now, currentTime, finalize,
+    eventModel, createDirectImpactEvent, resolveTimedEffectBoundary,
+    events, awardCoins, random, now,
+    currentTime, finalize,
     casterStealthed,
   } = ctx;
 
@@ -536,11 +545,17 @@ async function applyMysteryPotion(ctx) {
     result.rolled = "PROTEIN_SHAKE";
     result.bonus = bonus;
     result.fallbackFrom = reason;
-    await eventModel.create({
+    const directImpact = await createDirectImpactEvent({
       raceId, actorUserId: userId, eventType: "POWERUP_USED", powerupType: "MYSTERY_POTION",
       description: `${myDisplayName} drank a Mystery Potion and got a Protein Shake! +${bonus.toLocaleString()} steps.`,
-      metadata: { rolled: "PROTEIN_SHAKE" },
+      metadata: { rolled: "PROTEIN_SHAKE", bonus },
+    }, {
+      powerupType: "PROTEIN_SHAKE",
+      deltas: [{ userId, deltaSteps: bonus }],
     });
+    if (directImpact.activeImpactReceipt) {
+      result.activeImpactReceipt = directImpact.activeImpactReceipt;
+    }
   };
 
   const createOnSelf = async (effectType, metadata) =>
@@ -555,8 +570,14 @@ async function applyMysteryPotion(ctx) {
       const bonus = 1500;
       await participantModel.addBonusSteps(myParticipant.id, bonus);
       result.rolled = "PROTEIN_SHAKE"; result.bonus = bonus;
-      await eventModel.create({ raceId, actorUserId: userId, eventType: "POWERUP_USED", powerupType: "MYSTERY_POTION",
-        description: `${myDisplayName} drank a Mystery Potion and got a Protein Shake! +${bonus.toLocaleString()} steps.`, metadata: { rolled } });
+      const directImpact = await createDirectImpactEvent({ raceId, actorUserId: userId, eventType: "POWERUP_USED", powerupType: "MYSTERY_POTION",
+        description: `${myDisplayName} drank a Mystery Potion and got a Protein Shake! +${bonus.toLocaleString()} steps.`, metadata: { rolled, bonus } }, {
+        powerupType: "PROTEIN_SHAKE",
+        deltas: [{ userId, deltaSteps: bonus }],
+      });
+      if (directImpact.activeImpactReceipt) {
+        result.activeImpactReceipt = directImpact.activeImpactReceipt;
+      }
       break;
     }
     case "RUNNERS_HIGH": {
@@ -624,7 +645,9 @@ async function applyMysteryPotion(ctx) {
         casterStealthed,
         rolled, aliveEnemies, acceptedParticipants, isAliveTarget, isTeamRace,
         userId, myParticipant, myDisplayName, effectModel, participantModel,
-        eventModel, events, random, now, currentTime, raceId, powerupId, result,
+        eventModel, createDirectImpactEvent, resolveTimedEffectBoundary,
+        events, random, now, currentTime,
+        raceId, powerupId, result,
       });
       if (!handled) { await applyProteinFallback(rolled); }
       break;
@@ -682,7 +705,8 @@ async function applyPotionEnemyAttack(a) {
   const {
     rolled, aliveEnemies, acceptedParticipants, isAliveTarget, isTeamRace,
     userId, myParticipant, myDisplayName, effectModel, participantModel,
-    eventModel, events, random, now, currentTime, raceId, powerupId, result,
+    eventModel, createDirectImpactEvent, events, random, now, currentTime,
+    resolveTimedEffectBoundary, raceId, powerupId, result,
   } = a;
   if (aliveEnemies.length === 0) return false;
   let victim = aliveEnemies[Math.floor(random() * aliveEnemies.length)];
@@ -746,9 +770,18 @@ async function applyPotionEnemyAttack(a) {
     const penalty = 750;
     await participantModel.subtractBonusSteps(targetParticipant.id, penalty);
     result.penalty = penalty;
-    await eventModel.create({ raceId, actorUserId: sourceUserId, eventType: "POWERUP_USED", powerupType: "MYSTERY_POTION",
+    const directImpact = await createDirectImpactEvent({ raceId, actorUserId: sourceUserId, eventType: "POWERUP_USED", powerupType: "MYSTERY_POTION",
       targetUserId: resolvedTargetUserId,
-      description: `${sourceName}'s Mystery Potion tossed a Pinecone at ${targetName}! They lost ${penalty.toLocaleString()} steps.`, metadata: { rolled } });
+      description: `${sourceName}'s Mystery Potion tossed a Pinecone at ${targetName}! They lost ${penalty.toLocaleString()} steps.`, metadata: { rolled, penalty } }, {
+      powerupType: "PINECONE_TOSS",
+      deltas: [{
+        userId: resolvedTargetUserId,
+        deltaSteps: -Math.min(penalty, Math.max(0, targetParticipant.totalSteps)),
+      }],
+    });
+    if (directImpact.activeImpactReceipt) {
+      result.activeImpactReceipt = directImpact.activeImpactReceipt;
+    }
   } else if (rolled === "SHORTCUT") {
     const stolen = Math.min(1000, Math.max(0, targetParticipant.totalSteps));
     if (stolen > 0) {
@@ -756,9 +789,18 @@ async function applyPotionEnemyAttack(a) {
       await participantModel.addBonusSteps(myParticipant.id, stolen);
     }
     result.stolen = stolen;
-    await eventModel.create({ raceId, actorUserId: sourceUserId, eventType: "POWERUP_USED", powerupType: "MYSTERY_POTION",
+    const directImpact = await createDirectImpactEvent({ raceId, actorUserId: sourceUserId, eventType: "POWERUP_USED", powerupType: "MYSTERY_POTION",
       targetUserId: resolvedTargetUserId,
-      description: `${sourceName}'s Mystery Potion took a Shortcut, stealing ${stolen.toLocaleString()} steps from ${targetName}!`, metadata: { rolled } });
+      description: `${sourceName}'s Mystery Potion took a Shortcut, stealing ${stolen.toLocaleString()} steps from ${targetName}!`, metadata: { rolled, stolen } }, {
+      powerupType: "SHORTCUT",
+      deltas: [
+        { userId: resolvedTargetUserId, deltaSteps: -stolen },
+        { userId, deltaSteps: stolen },
+      ],
+    });
+    if (directImpact.activeImpactReceipt) {
+      result.activeImpactReceipt = directImpact.activeImpactReceipt;
+    }
   } else if (rolled === "LEG_CRAMP") {
     // Item 14 — on reflect the caster may already hold a cramp. This used to
     // silently do nothing (the reflect was swallowed); it now RESETS to the full
@@ -773,10 +815,7 @@ async function applyPotionEnemyAttack(a) {
         "WRONG_TURN"
       );
       if (conflictingWT) {
-        await effectModel.update(conflictingWT.id, {
-          status: "EXPIRED",
-          expiresAt: currentTime,
-        });
+        await resolveTimedEffectBoundary(conflictingWT, currentTime);
       }
     }
     {
@@ -853,6 +892,7 @@ function buildUsePowerup(dependencies = {}) {
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
   const effectModel = dependencies.RaceActiveEffect || RaceActiveEffect;
   const eventModel = dependencies.RacePowerupEvent || RacePowerupEvent;
+  const activeRaceImpact = dependencies.ActiveRaceImpact || defaultActiveRaceImpact;
   const raceModel = dependencies.Race || Race;
   const settings = dependencies.appSettings || defaultAppSettings;
   const userModel = dependencies.User || User;
@@ -1059,6 +1099,138 @@ function buildUsePowerup(dependencies = {}) {
     };
 
     const type = powerup.type;
+    const activeImpactEnabled =
+      (!hasInjectedDeps || dependencies.appSettings) &&
+      (await isStrictFlagEnabled(settings, "apiActiveImpactNoticesV1Enabled"));
+    const activeImpactCapable = requestHasFeature(
+      clientFeatures,
+      "active_impact_notices_v1"
+    );
+    const createDirectImpactEvent = async (
+      event,
+      { powerupType = type, deltas = [], offerActorReceipt = true } = {}
+    ) => {
+      // A reflected/redirected transfer can legitimately name the same
+      // recipient more than once (for example, -500 and +500 on one actor).
+      // Persist the signed recipient result, not whichever component happened
+      // to appear first, so ZERO remains a real durable outcome.
+      const deltaByUser = new Map();
+      for (const entry of deltas || []) {
+        if (!entry || typeof entry.userId !== "string") continue;
+        deltaByUser.set(
+          entry.userId,
+          (deltaByUser.get(entry.userId) || 0) +
+            Math.round(Number(entry.deltaSteps) || 0)
+        );
+      }
+      const canonicalDeltas = [...deltaByUser].map(([recipientUserId, deltaSteps]) => ({
+        userId: recipientUserId,
+        deltaSteps,
+      }));
+      if (
+        (!hasInjectedDeps || dependencies.ActiveRaceImpact) &&
+        typeof activeRaceImpact.createDirectSource === "function"
+      ) {
+        const actorDelta = canonicalDeltas.find(
+          (entry) => entry.userId === userId && entry.deltaSteps !== 0
+        );
+        const resolved = await activeRaceImpact.createDirectSource({
+          event,
+          powerupType,
+          deltas: canonicalDeltas,
+          receiptRecipientUserId:
+            activeImpactCapable && offerActorReceipt && actorDelta ? userId : null,
+          resolvedAt: now(),
+        });
+        if (resolved?.event && typeof eventModel.invalidateCreated === "function") {
+          await eventModel.invalidateCreated(resolved.event);
+        }
+        const actorWork = (resolved?.work || []).find(
+          (row) => row.recipientUserId === userId && row.inlineReceiptId
+        );
+        return {
+          event: resolved?.event,
+          activeImpactReceipt: actorWork?.inlineReceiptId
+            ? { id: actorWork.inlineReceiptId, raceId }
+            : null,
+        };
+      }
+      if (!activeImpactEnabled) {
+        return { event: await eventModel.create(event), activeImpactReceipt: null };
+      }
+      const row = await eventModel.create({
+        ...event,
+        metadata: {
+          ...(event.metadata || {}),
+          activeImpactCalculationVersion: 1,
+          activeImpactPowerupType: powerupType,
+          activeImpactDeltas: canonicalDeltas,
+        },
+      });
+      const actorDelta = canonicalDeltas.find(
+        (entry) => entry.userId === userId && entry.deltaSteps !== 0
+      );
+      if (!row?.id || !activeImpactCapable || !offerActorReceipt || !actorDelta) {
+        return { event: row, activeImpactReceipt: null };
+      }
+      const work = await activeRaceImpact.createWork({
+        raceId,
+        recipientUserId: userId,
+        sourceKind: "POWERUP_EVENT",
+        sourceId: row.id,
+        powerupType,
+        resolvedAt: row.createdAt || now(),
+        inlineReceipt: true,
+      });
+      return {
+        event: row,
+        activeImpactReceipt: work?.inlineReceiptId
+          ? { id: work.inlineReceiptId, raceId }
+          : null,
+      };
+    };
+    const resolveTimedEffectBoundary = async (effect, resolvedAt) => {
+      if (!effect?.id) return null;
+      const isEligible = ACTIVE_IMPACT_EXPIRY_TYPE_SET.has(effect.type);
+      const metadata = {
+        ...(effect.metadata || {}),
+      };
+      const fields = {
+        status: "EXPIRED",
+        expiresAt: resolvedAt,
+        ...(isEligible ? { metadata } : {}),
+      };
+      const recipientUserIds = effect.type === "HITCHHIKE"
+        ? [effect.sourceUserId]
+        : effect.type === "LEECH"
+          ? [effect.targetUserId, effect.sourceUserId]
+          : [effect.targetUserId];
+      const work = !activeImpactEnabled || !isEligible
+        ? []
+        : [...new Set(recipientUserIds.filter(Boolean))].map((recipientUserId) => ({
+          raceId: effect.raceId || raceId,
+          recipientUserId,
+          sourceKind: "ACTIVE_EFFECT",
+          sourceId: effect.id,
+          powerupType: effect.type,
+          resolvedAt,
+        }));
+      if (
+        (!hasInjectedDeps || dependencies.ActiveRaceImpact) &&
+        typeof activeRaceImpact.resolveEffectBoundary === "function"
+      ) {
+        const result = await activeRaceImpact.resolveEffectBoundary({
+          effectId: effect.id,
+          fields,
+          work,
+          eligible: isEligible,
+        });
+        return result?.effect || result;
+      }
+      const updated = await effectModel.update(effect.id, fields);
+      for (const input of work) await activeRaceImpact.createWork(input);
+      return updated;
+    };
 
     // Signal Jammer JAM GUARD (the feature's single choke point). If this
     // participant is currently jammed, they cannot USE any powerup — earned,
@@ -1613,6 +1785,8 @@ function buildUsePowerup(dependencies = {}) {
         effectModel,
         participantModel,
         eventModel,
+        createDirectImpactEvent,
+        resolveTimedEffectBoundary,
         events,
         powerupModel,
         awardCoins,
@@ -2615,10 +2789,7 @@ function buildUsePowerup(dependencies = {}) {
           "WRONG_TURN"
         );
         if (conflictingWT) {
-          await effectModel.update(conflictingWT.id, {
-            status: "EXPIRED",
-            expiresAt: currentTime,
-          });
+          await resolveTimedEffectBoundary(conflictingWT, currentTime);
         }
         const effect = await effectModel.create({
           raceId,
@@ -2843,7 +3014,7 @@ function buildUsePowerup(dependencies = {}) {
 
         result.penalty = penalty;
 
-        await eventModel.create({
+        await createDirectImpactEvent({
           raceId,
           actorUserId: actingUserId,
           eventType: "POWERUP_USED",
@@ -2851,6 +3022,12 @@ function buildUsePowerup(dependencies = {}) {
           targetUserId: resolvedTargetUserId,
           description: `${myDisplayName} used Red Card on ${targetDisplayName}! They lost ${penalty.toLocaleString()} steps.`,
           metadata: { penalty },
+        }, {
+          deltas: [{
+            userId: resolvedTargetUserId,
+            deltaSteps: -Math.min(penalty, Math.max(0, targetParticipant.totalSteps)),
+          }],
+          offerActorReceipt: false,
         });
         break;
       }
@@ -2867,7 +3044,7 @@ function buildUsePowerup(dependencies = {}) {
 
         result.stolen = stolen;
 
-        await eventModel.create({
+        const directImpact = await createDirectImpactEvent({
           raceId,
           actorUserId: actingUserId,
           eventType: "POWERUP_USED",
@@ -2875,7 +3052,18 @@ function buildUsePowerup(dependencies = {}) {
           targetUserId: resolvedTargetUserId,
           description: `${myDisplayName} stole ${stolen.toLocaleString()} steps from ${targetDisplayName} with ${levelPrefix(upgradeLevel)}Shortcut!`,
           metadata: { stolen },
+        }, {
+          deltas: [
+            { userId: resolvedTargetUserId, deltaSteps: -stolen },
+            // `myParticipant` is rebound to the Mirror holder on reflection;
+            // the durable recipient vector must follow the actual committed
+            // bonus recipient, not the authenticated original caster.
+            { userId: myParticipant.userId, deltaSteps: stolen },
+          ],
         });
+        if (directImpact.activeImpactReceipt) {
+          result.activeImpactReceipt = directImpact.activeImpactReceipt;
+        }
         break;
       }
 
@@ -2949,10 +3137,7 @@ function buildUsePowerup(dependencies = {}) {
           // original (future) expiresAt would keep freezing/reversing steps for
           // the full original duration even after Cleanse. Ending the window
           // here stops the effect at the cleanse moment.
-          await effectModel.update(debuff.id, {
-            status: "EXPIRED",
-            expiresAt: currentTime,
-          });
+          await resolveTimedEffectBoundary(debuff, currentTime);
         }
         result.cleared = opponentDebuffs.length;
 
@@ -3027,6 +3212,30 @@ function buildUsePowerup(dependencies = {}) {
             "UMBRELLA"
           );
           if (victimUmbrella && victimUmbrella.expiresAt && new Date(victimUmbrella.expiresAt) > now()) {
+            // This hidden row is a private scoring intent, not presentation
+            // work. Persist it independently of the delivery flag so the
+            // actual storm-end boundary can decide eligibility against the
+            // durable rollout epoch. Otherwise off-at-cast/on-before-end loses
+            // a legitimate defense notice, while on-at-cast/off-at-end risks a
+            // stale cached decision. Feed/message readers omit hidden rows.
+            await eventModel.create({
+              raceId,
+              actorUserId: userId,
+              eventType: "POWERUP_USED",
+              powerupType: "UMBRELLA",
+              targetUserId: victim.userId,
+              description: `${victimName}'s Umbrella intercepted a Rainstorm.`,
+              metadata: {
+                hiddenFromFeed: true,
+                activeImpactDefenseCalculationVersion: 1,
+                activeImpactDefenseType: "UMBRELLA",
+                activeImpactDefenseTargetUserId: victim.userId,
+                activeImpactDefenseEffectId: victimUmbrella.id,
+                activeImpactDefenseWindowStart: currentTime.toISOString(),
+                activeImpactDefenseWindowEnd: stormEnd.toISOString(),
+                activeImpactDefenseMultiplier: RAINSTORM_MULTIPLIER,
+              },
+            });
             continue;
           }
 
@@ -3098,14 +3307,17 @@ function buildUsePowerup(dependencies = {}) {
         await participantModel.addBonusSteps(myParticipant.id, bonus);
         result.bonus = bonus;
 
-        await eventModel.create({
+        const directImpact = await createDirectImpactEvent({
           raceId,
           actorUserId: userId,
           eventType: "POWERUP_USED",
           powerupType: type,
           description: `${myDisplayName} used a ${levelPrefix(upgradeLevel)}Protein Shake! +${bonus.toLocaleString()} steps.`,
           metadata: { bonus },
-        });
+        }, { deltas: [{ userId, deltaSteps: bonus }] });
+        if (directImpact.activeImpactReceipt) {
+          result.activeImpactReceipt = directImpact.activeImpactReceipt;
+        }
         break;
       }
 
@@ -3146,14 +3358,17 @@ function buildUsePowerup(dependencies = {}) {
         await participantModel.addBonusSteps(myParticipant.id, bonus);
         result.bonus = bonus;
 
-        await eventModel.create({
+        const directImpact = await createDirectImpactEvent({
           raceId,
           actorUserId: userId,
           eventType: "POWERUP_USED",
           powerupType: type,
           description: `${myDisplayName} caught a Second Wind! +${bonus.toLocaleString()} steps.`,
           metadata: { bonus, gap },
-        });
+        }, { deltas: [{ userId, deltaSteps: bonus }] });
+        if (directImpact.activeImpactReceipt) {
+          result.activeImpactReceipt = directImpact.activeImpactReceipt;
+        }
         break;
       }
 
@@ -3199,10 +3414,7 @@ function buildUsePowerup(dependencies = {}) {
           // step resolution reads EXPIRED rows and freezes over
           // [startsAt, expiresAt], so a future expiresAt would keep freezing
           // the target for the cramp's full original duration.
-          await effectModel.update(existingCramp.id, {
-            status: "EXPIRED",
-            expiresAt: currentTime,
-          });
+          await resolveTimedEffectBoundary(existingCramp, currentTime);
         }
 
         const effect = await effectModel.create({
@@ -3263,14 +3475,17 @@ function buildUsePowerup(dependencies = {}) {
         await participantModel.addBonusSteps(myParticipant.id, bonus);
         result.bonus = bonus;
 
-        await eventModel.create({
+        const directImpact = await createDirectImpactEvent({
           raceId,
           actorUserId: userId,
           eventType: "POWERUP_USED",
           powerupType: type,
           description: `${myDisplayName} used ${levelPrefix(upgradeLevel)}Trail Mix! +${bonus.toLocaleString()} steps (${usedTypes.size} unique powerups).`,
           metadata: { bonus, uniqueTypes: usedTypes.size, perType },
-        });
+        }, { deltas: [{ userId, deltaSteps: bonus }] });
+        if (directImpact.activeImpactReceipt) {
+          result.activeImpactReceipt = directImpact.activeImpactReceipt;
+        }
         break;
       }
 
@@ -3480,7 +3695,9 @@ function buildUsePowerup(dependencies = {}) {
           eventType: "POWERUP_USED",
           powerupType: type,
           description: `${myDisplayName} planted a ${levelPrefix(upgradeLevel)}Trail Mine at ${myParticipant.totalSteps.toLocaleString()} steps.`,
-          metadata: effect.metadata,
+          // Keep POWERUP_USED for analytics while marking this specific audit
+          // row as private. Detonation and expiry events do not carry the flag.
+          metadata: { ...effect.metadata, hiddenFromFeed: true },
         });
         break;
       }
@@ -3490,7 +3707,7 @@ function buildUsePowerup(dependencies = {}) {
         await participantModel.subtractBonusSteps(targetParticipant.id, penalty);
         result.penalty = penalty;
 
-        await eventModel.create({
+        await createDirectImpactEvent({
           raceId,
           actorUserId: actingUserId,
           eventType: "POWERUP_USED",
@@ -3498,6 +3715,12 @@ function buildUsePowerup(dependencies = {}) {
           targetUserId: resolvedTargetUserId,
           description: `${myDisplayName} hit ${targetDisplayName} with a ${levelPrefix(upgradeLevel)}Pinecone Toss! They lost ${penalty.toLocaleString()} steps.`,
           metadata: { penalty, direction: targetDirection },
+        }, {
+          deltas: [{
+            userId: resolvedTargetUserId,
+            deltaSteps: -Math.min(penalty, Math.max(0, targetParticipant.totalSteps)),
+          }],
+          offerActorReceipt: false,
         });
         break;
       }

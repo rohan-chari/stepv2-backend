@@ -5,6 +5,11 @@ const { RacePowerupEvent } = require("../../powerups/models/racePowerupEvent");
 const { StepSample } = require("../../steps/models/stepSample");
 const { Steps } = require("../../steps/models/steps");
 const { GlobalStepEvent } = require("../../steps/models/globalStepEvent");
+const { eventsForUser } = require("../../steps/services/globalStepEventEntitlement");
+const {
+  ensureRaceGlobalEventEligibility,
+  invalidateHomeActiveGlobalEvent,
+} = require("../../steps/services/globalStepEventEntitlement");
 const { completeRace } = require("../commands/completeRace");
 const { advanceTournament } = require("../../tournaments/commands/advanceTournament");
 const { prisma } = require("../../../db");
@@ -29,6 +34,8 @@ const { SETTLEMENT_EFFECT_TYPES } = require("../services/raceScoringEffectTypes"
 const {
   computeSettlementAttributionVector,
 } = require("../services/raceSettlementAttribution");
+const derivedCache = require("../../../shared/cache/derivedCache");
+const cacheKeys = require("../../../shared/cache/cacheKeys");
 
 // Settlement acquires the race through the SAME fence-first ownership protocol
 // the resolution worker uses (spec §5a item 6): the write transaction BEGINS by
@@ -131,7 +138,8 @@ async function loadSettlementAttributionEffects({ raceId, participants, raceActi
 }
 
 async function computeSettlementEffectAttribution({
-  race, acceptedParticipants, preLeech, settlementTime, attributionEffects, globalEvents,
+  race, acceptedParticipants, preLeech, settlementTime, attributionEffects,
+  globalEvents, eventsByUserId,
 }) {
   const settledEvents = chronologicalEffects(globalEvents || []);
   const effects = chronologicalEffects([
@@ -143,7 +151,8 @@ async function computeSettlementEffectAttribution({
     .filter((participant) => participant.forfeitedAt || participant.finishedAt)
     .map((participant) => [participant.id, participant.finishTotalSteps ?? participant.totalSteps ?? race.targetSteps]));
 
-  const score = async ({ effectIds, globalEvents: scoringGlobalEvents }) => {
+  const score = async ({ effectIds, globalEvents: scoringGlobalEvents,
+    eventsByUserId: scoringEventsByUserId }) => {
     const effectModel = buildAttributionEffectModel({ ...attributionEffects, includedEffectIds: effectIds });
     const active = [];
     for (const entry of preLeech) {
@@ -155,7 +164,9 @@ async function computeSettlementEffectAttribution({
         hasSampleData: entry.hasSampleData,
         raceActiveEffectModel: effectModel,
         stepSampleModel: StepSample,
-        globalEvents: scoringGlobalEvents,
+        globalEvents: scoringEventsByUserId
+          ? eventsForUser(scoringEventsByUserId, entry.participant.userId)
+          : scoringGlobalEvents,
         now: settlementTime,
       });
       active.push({
@@ -166,6 +177,8 @@ async function computeSettlementEffectAttribution({
     const copies = await collectRaceHitchhikeCopies({
       raceId: race.id, raceEndsAt: settlementTime, participants: acceptedParticipants,
       raceActiveEffectModel: effectModel, stepSampleModel: StepSample, now: settlementTime,
+      globalEvents: scoringGlobalEvents,
+      eventsByUserId: scoringEventsByUserId,
     });
     const finals = applyLeechTransfers(applyHitchhikeCopies(active, copies));
     for (const [participantId, total] of frozenTotals) finals.set(participantId, total);
@@ -173,7 +186,8 @@ async function computeSettlementEffectAttribution({
   };
 
   const vector = await computeSettlementAttributionVector({
-    participants: acceptedParticipants, effects, globalEvents: settledEvents, score,
+    participants: acceptedParticipants, effects, globalEvents: settledEvents,
+    eventsByUserId, score,
   });
   return vector;
 }
@@ -321,11 +335,18 @@ async function resolveExpiredRaces() {
       // event read fails, leave the race ACTIVE so the next cron retries the
       // same canonical scorer rather than completing with a fabricated zero
       // global vector and permanently stranding its PENDING recap rows.
-      const globalEvents =
-        (await GlobalStepEvent.findActiveInRange(
-          race.startedAt,
-          settlementTime
-        )) || [];
+      const eventsByUserId = await ensureRaceGlobalEventEligibility({
+        race,
+        at: settlementTime,
+      });
+      await invalidateHomeActiveGlobalEvent(
+        acceptedParticipants.map((participant) => participant.userId)
+      );
+      const globalEvents = [...new Map(
+        acceptedParticipants.flatMap((participant) =>
+          eventsForUser(eventsByUserId, participant.userId)
+        ).map((event) => [`${event.entitlementId || event.id}:${event.id}`, event])
+      ).values()];
 
       // Seeded races settle in their canonical tz so settled totals match what
       // getRaceProgress showed live; user races keep UTC (legacy).
@@ -376,7 +397,7 @@ async function resolveExpiredRaces() {
             stepSampleModel: StepSample,
             now: settlementTime,
             raceEndsAt: race.endsAt,
-            globalEvents,
+            globalEvents: eventsForUser(eventsByUserId, participant.userId),
           });
 
         const {
@@ -400,7 +421,7 @@ async function resolveExpiredRaces() {
             hasSampleData,
             raceActiveEffectModel: RaceActiveEffect,
             stepSampleModel: StepSample,
-            globalEvents,
+            globalEvents: eventsForUser(eventsByUserId, participant.userId),
             now: settlementTime,
           });
 
@@ -442,6 +463,8 @@ async function resolveExpiredRaces() {
             raceActiveEffectModel: RaceActiveEffect,
             stepSampleModel: StepSample,
             now: settlementTime,
+            globalEvents,
+            eventsByUserId,
           })
         : [];
 
@@ -507,6 +530,7 @@ async function resolveExpiredRaces() {
           settlementTime,
           attributionEffects,
           globalEvents,
+          eventsByUserId,
         });
       } catch (error) {
         console.error(`[CRON] Effect attribution failed for race ${race.id}:`, error);
@@ -560,6 +584,17 @@ async function resolveExpiredRaces() {
           });
         }
       });
+      // The upsert above is also the final-impact repair path. Any previously
+      // cached Home eligibility must be discarded after that transaction
+      // commits; Redis remains best-effort and Postgres remains authoritative.
+      for (const userId of new Set(
+        (effectAttribution?.globalImpacts || []).map((row) => row.userId)
+      )) {
+        await derivedCache.invalidate({
+          keys: [cacheKeys.homeImpactSummary(userId)],
+          prefix: cacheKeys.PREFIX.HOME_IMPACT_SUMMARY,
+        });
+      }
 
       // ── Team settlement (TR-401/402/404) ─────────────────────────────────
       // Team total = sum of member effective totals (forfeited members' frozen

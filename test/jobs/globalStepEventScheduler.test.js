@@ -35,6 +35,7 @@ function makeCtx({ recentEvents = [], participantUserIds = [] } = {}) {
     sinceCalls,
     get participantReads() { return participantReads; },
     deps: {
+      localGlobalStepEventTick: async () => false,
       GlobalStepEvent: {
         async findStartedSince(since) {
           sinceCalls.push(since);
@@ -158,6 +159,7 @@ test("uses the creation transaction's enrollment snapshot for the only fan-out",
   let legacyParticipantRead = 0;
   const run = buildMaybeStartGlobalEvent({
     now: () => now,
+    localGlobalStepEventTick: async () => false,
     GlobalStepEvent: {
       async findStartedSince() { return []; },
       async createIfAbsentWithEnrollments(data) {

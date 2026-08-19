@@ -93,7 +93,7 @@ async function computeLeechEarnedTransfer(effect, stepSampleModel, now) {
 // (zero-sum). Attacker credit lands only on a participant present in `entries`
 // (a finished/absent attacker's credit is dropped, matching the frozen-total rule);
 // the victim is still drained either way.
-function applyLeechTransfers(entries) {
+function applyLeechTransfers(entries, { onTransfer = null } = {}) {
   const remaining = new Map(); // participantId -> drainable balance (pre-leech)
   const credit = new Map(); // userId -> steps credited as attacker
   const participantIdByUser = new Map(); // userId -> participantId (first seen)
@@ -122,6 +122,15 @@ function applyLeechTransfers(entries) {
   for (const t of all) {
     const victimRemaining = remaining.get(t.victimParticipantId) ?? 0;
     const actual = Math.max(0, Math.min(t.earnedTransfer || 0, victimRemaining));
+    if (typeof onTransfer === "function") {
+      onTransfer({
+        effectId: t.effectId,
+        startsAt: t.startsAt,
+        sourceUserId: t.sourceUserId,
+        victimParticipantId: t.victimParticipantId,
+        actualTransfer: actual,
+      });
+    }
     if (actual <= 0) continue;
     remaining.set(t.victimParticipantId, victimRemaining - actual);
     if (t.sourceUserId) {

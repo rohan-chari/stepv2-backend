@@ -10,6 +10,12 @@ const { ensureAppleUser } = require("../modules/users/services/ensureAppleUser")
 const { User } = require("../modules/users/models/user");
 const { prisma: defaultPrisma } = require("../db");
 const { appSettings: defaultAppSettings } = require("../shared/config/appSettings");
+const {
+  globalEventTimezoneMutation,
+} = require("../modules/users/services/globalEventTimezone");
+const {
+  recordOperationalCounters,
+} = require("../modules/steps/services/globalStepEventObservability");
 
 // Batch 2026-08-08 item 9. Byte-identical to the regex the analytics ingestion
 // endpoint uses to bound `appVersion` (src/modules/analytics/routes.js:84).
@@ -62,9 +68,10 @@ function buildRequireAuth(dependencies = {}) {
 
   async function recordAdminMetricsEligibility(req, user) {
     try {
+      // The Flutter client advertises admin_metrics_v2 only on iOS. Do not use
+      // Apple identity as a proxy: Google Sign-In is also supported on iOS.
       if (
-        !user?.appleId ||
-        user.isReviewAccount === true ||
+        user?.isReviewAccount === true ||
         req.clientFeatures?.has("admin_metrics_v2") !== true ||
         typeof userModel.stampMetricsV2Eligibility !== "function" ||
         (await settings.getFlag("adminMetricsV2TelemetryEnabled")) !== true
@@ -141,6 +148,27 @@ function buildRequireAuth(dependencies = {}) {
     }
   }
 
+  async function recordGlobalEventTimezone(req, user) {
+    try {
+      if (!user || typeof userModel.updateGlobalEventTimezoneState !== "function") return;
+      const rawTz = req.headers && req.headers["x-timezone"];
+      if (!rawTz || rawTz !== req.timeZone) return;
+      const mutation = globalEventTimezoneMutation({
+        user,
+        observedTimezone: rawTz,
+        now: new Date(),
+      });
+      if (!mutation) return;
+      await userModel.updateGlobalEventTimezoneState(user.id, mutation);
+      await recordOperationalCounters(prisma, {
+        ...(mutation.globalEventTimezone ? { timezoneCandidatesPromoted: 1 } : {}),
+        ...(mutation.globalEventTimezoneCandidate ? { timezoneCandidatesChanged: 1 } : {}),
+      });
+    } catch {
+      // Stable scheduling metadata is best-effort and cannot fail auth.
+    }
+  }
+
   // Batch 2026-08-08 item 9: sticky-write `users.lastAppVersion` +
   // `users.lastSeenAt` from the X-App-Version header, so admins can see the
   // version spread of the live install base. Third sibling of
@@ -212,6 +240,7 @@ function buildRequireAuth(dependencies = {}) {
         req.user = user;
         await recordClientFeatures(req, user);
         await recordTimezone(req, user);
+        await recordGlobalEventTimezone(req, user);
         await recordAppVersion(req, user);
         await recordAdminMetricsEligibility(req, user);
         return next();
@@ -246,6 +275,7 @@ function buildRequireAuth(dependencies = {}) {
       req.user = user;
       await recordClientFeatures(req, user);
       await recordTimezone(req, user);
+      await recordGlobalEventTimezone(req, user);
       await recordAppVersion(req, user);
       await recordAdminMetricsEligibility(req, user);
 

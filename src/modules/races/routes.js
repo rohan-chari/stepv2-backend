@@ -173,6 +173,17 @@ const {
   resolveRaceImpactAccess: defaultResolveRaceImpactAccess,
   impactTitle,
 } = require("./queries/raceImpactNotices");
+const {
+  getActiveRaceImpactNotices: defaultGetActiveRaceImpactNotices,
+  buildGetActiveRaceImpactNotices,
+} = require("./queries/getActiveRaceImpactNotices");
+const {
+  acknowledgeActiveRaceImpact: defaultAcknowledgeActiveRaceImpact,
+  acknowledgeActiveImpactReceipt: defaultAcknowledgeActiveImpactReceipt,
+  buildAcknowledgeActiveRaceImpact,
+  buildAcknowledgeActiveImpactReceipt,
+} = require("./commands/acknowledgeActiveRaceImpact");
+const { NotFoundError } = require("../../shared/errors/AppError");
 const { decodeCursor, encodeCursor, parseLimit } = require("../inbox/services/inbox");
 const {
   startCapacityPhase,
@@ -354,6 +365,21 @@ function createRacesRouter(dependencies = {}) {
   const getImpactNotices = dependencies.getImpactNotices || defaultGetImpactNotices;
   const acknowledgeImpactNotice = dependencies.acknowledgeImpactNotice || defaultAcknowledgeImpactNotice;
   const resolveRaceImpactAccess = dependencies.resolveRaceImpactAccess || defaultResolveRaceImpactAccess;
+  const getActiveRaceImpactNotices =
+    dependencies.getActiveRaceImpactNotices ||
+    (dependencies.ActiveRaceImpact || dependencies.enqueueRaceResolution
+      ? buildGetActiveRaceImpactNotices(dependencies)
+      : defaultGetActiveRaceImpactNotices);
+  const acknowledgeActiveRaceImpact =
+    dependencies.acknowledgeActiveRaceImpact ||
+    (dependencies.ActiveRaceImpact || dependencies.prisma || dependencies.now
+      ? buildAcknowledgeActiveRaceImpact(dependencies)
+      : defaultAcknowledgeActiveRaceImpact);
+  const acknowledgeActiveImpactReceipt =
+    dependencies.acknowledgeActiveImpactReceipt ||
+    (dependencies.ActiveRaceImpact || dependencies.prisma || dependencies.now
+      ? buildAcknowledgeActiveImpactReceipt(dependencies)
+      : defaultAcknowledgeActiveImpactReceipt);
 
   async function rejectTokenlessBucketDetail(req, res) {
     if (supportsSeededRaceBuckets(req.clientFeatures)) return false;
@@ -1608,13 +1634,67 @@ function createRacesRouter(dependencies = {}) {
     }
   });
 
+  // Recipient-private active synced-step snapshots. These are Postgres-only;
+  // the carrying client owns the bounded resolution-status handoff.
+  router.get("/:raceId/active-impact-notices", asyncHandler(async (req, res) => {
+    const enabled =
+      req.clientFeatures?.has("active_impact_notices_v1") === true &&
+      (await isStrictFlagEnabled(settings, "apiActiveImpactNoticesV1Enabled"));
+    if (!enabled) {
+      throw new NotFoundError("Active impact notices are unavailable", "FEATURE_DISABLED");
+    }
+    const result = await getActiveRaceImpactNotices({
+      raceId: req.params.raceId,
+      userId: req.user.id,
+    });
+    return res.status(result.pending ? 202 : 200).json(
+      result.pending
+        ? { notices: [], resolution: result.resolution }
+        : { notices: result.notices }
+    );
+  }));
+
+  router.post(
+    "/:raceId/active-impact-notices/:noticeId/acknowledge",
+    asyncHandler(async (req, res) => {
+      const enabled =
+        req.clientFeatures?.has("active_impact_notices_v1") === true &&
+        (await isStrictFlagEnabled(settings, "apiActiveImpactNoticesV1Enabled"));
+      if (!enabled) {
+        throw new NotFoundError("Active impact notices are unavailable", "FEATURE_DISABLED");
+      }
+      return res.json(await acknowledgeActiveRaceImpact({
+        raceId: req.params.raceId,
+        userId: req.user.id,
+        noticeId: req.params.noticeId,
+      }));
+    })
+  );
+
+  router.post(
+    "/:raceId/active-impact-receipts/:receiptId/acknowledge",
+    asyncHandler(async (req, res) => {
+      const enabled =
+        req.clientFeatures?.has("active_impact_notices_v1") === true &&
+        (await isStrictFlagEnabled(settings, "apiActiveImpactNoticesV1Enabled"));
+      if (!enabled) {
+        throw new NotFoundError("Active impact notices are unavailable", "FEATURE_DISABLED");
+      }
+      return res.json(await acknowledgeActiveImpactReceipt({
+        raceId: req.params.raceId,
+        userId: req.user.id,
+        receiptId: req.params.receiptId,
+      }));
+    })
+  );
+
   // Recipient-private settled score explanations. These never reuse the shared
   // race-feed cache: a guessed row ID must disclose neither another user's
   // amount nor its existence.
   router.get("/:raceId/impact-notices", async (req, res) => {
     try {
       const enabled = req.clientFeatures?.has("impact_notices") === true &&
-        (await isStrictFlagEnabled(settings, "apiImpactNoticesEnabled"));
+        (await isStrictFlagEnabled(settings, "apiCompletedImpactPopupEnabled"));
       if (!enabled) return res.status(404).json({ error: "Impact notices are unavailable", code: "FEATURE_DISABLED" });
       const notices = await getImpactNotices({ userId: req.user.id, raceId: req.params.raceId });
       return res.json({ notices });
@@ -1628,7 +1708,7 @@ function createRacesRouter(dependencies = {}) {
   router.post("/:raceId/impact-notices/:noticeId/acknowledge", async (req, res) => {
     try {
       const enabled = req.clientFeatures?.has("impact_notices") === true &&
-        (await isStrictFlagEnabled(settings, "apiImpactNoticesEnabled"));
+        (await isStrictFlagEnabled(settings, "apiCompletedImpactPopupEnabled"));
       if (!enabled) return res.status(404).json({ error: "Impact notices are unavailable", code: "FEATURE_DISABLED" });
       if (!req.params.noticeId) return res.status(400).json({ error: "Invalid notice id", code: "INVALID_ID" });
       const acknowledged = await acknowledgeImpactNotice({ userId: req.user.id, raceId: req.params.raceId, noticeId: req.params.noticeId });
@@ -1828,7 +1908,12 @@ function createRacesRouter(dependencies = {}) {
       if (result && result.scan) {
         return res.json({ ok: true, scan: result.scan, result });
       }
-      res.json({ result });
+      res.json({
+        result,
+        ...(result?.activeImpactReceipt
+          ? { activeImpactReceipt: result.activeImpactReceipt }
+          : {}),
+      });
     } catch (error) {
       if (error.name === "PowerupUseError") {
         const status = error.statusCode || 400;

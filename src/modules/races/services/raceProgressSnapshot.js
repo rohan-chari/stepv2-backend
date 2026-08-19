@@ -65,7 +65,6 @@ const SNAPSHOT_FIELDS = [
   "race",
   "participants",
   "teams",
-  "globalEvent",
   "activeEffects",
 ];
 
@@ -192,7 +191,6 @@ function buildSnapshot({
   race,
   participants,
   teams = null,
-  globalEvent = null,
   activeEffects = [],
   scoringTimeZone,
   asOf,
@@ -209,7 +207,6 @@ function buildSnapshot({
       pick(p, SNAPSHOT_PARTICIPANT_FIELDS)
     ),
     teams,
-    globalEvent,
     activeEffects: (activeEffects || []).map((e) =>
       pick(e, SNAPSHOT_EFFECT_FIELDS)
     ),

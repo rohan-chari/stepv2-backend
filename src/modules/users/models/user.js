@@ -165,6 +165,10 @@ const User = {
     return updated;
   },
 
+  async updateGlobalEventTimezoneState(id, data) {
+    return prisma.user.update({ where: { id }, data });
+  },
+
   // Batch 2026-08-08 item 9: stamp `lastSeenAt` (+ `lastAppVersion` when this
   // request carried a valid X-App-Version) for the admin version-spread report.
   //

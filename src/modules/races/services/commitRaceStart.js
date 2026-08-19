@@ -7,8 +7,12 @@ const {
   enqueueRaceResolution,
 } = require("./enqueueRaceResolution");
 const {
+  acquireGlobalEnrollmentLock,
   enrollIfGlobalEventActive,
 } = require("../../steps/services/globalEventEnrollment");
+const {
+  invalidateHomeActiveGlobalEvent,
+} = require("../../steps/services/globalStepEventEntitlement");
 
 class RaceStartTransactionAbort extends Error {
   constructor(result) {
@@ -41,7 +45,8 @@ async function commitRaceStart({
   teamPoolMultBps = null,
 }) {
   try {
-    return await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
+    await acquireGlobalEnrollmentLock(tx);
     // Enqueue first inside the same transaction, then lock the resulting job
     // row before touching participants. A failed/retried start throws below so
     // the generation rolls back with every other attempted mutation.
@@ -140,6 +145,12 @@ async function commitRaceStart({
     }
     return { started: true };
     });
+    if (result.started) {
+      await invalidateHomeActiveGlobalEvent(
+        participantUpdates.map((participant) => participant.userId)
+      );
+    }
+    return result;
   } catch (error) {
     if (error instanceof RaceStartTransactionAbort) return error.result;
     throw error;

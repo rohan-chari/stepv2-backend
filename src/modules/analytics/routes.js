@@ -369,7 +369,6 @@ function createAnalyticsRouter(dependencies = {}) {
       }
       if (
         req.clientFeatures?.has("admin_metrics_v2") !== true ||
-        !req.user?.appleId ||
         req.user.isReviewAccount === true
       ) {
         return res
@@ -486,7 +485,6 @@ function createAnalyticsRouter(dependencies = {}) {
         if (
           METRICS_V2_EVENT_NAMES.has(event.name) &&
           (!metricsEpoch ||
-            !req.user?.appleId ||
             req.user.isReviewAccount === true ||
             event.platform !== "ios")
         ) {

@@ -61,6 +61,13 @@ const {
   runCapacityMetricsEntry,
   startCapacityPhase,
 } = require("../../../shared/observability/capacityPhaseMetrics");
+const {
+  processActiveRaceImpacts: defaultProcessActiveRaceImpacts,
+} = require("../services/processActiveRaceImpacts");
+const {
+  readActiveImpactRolloutFence,
+  sourceResolvedUnderFence,
+} = require("../../../shared/config/activeImpactRolloutFence");
 
 const POLL_INTERVAL_MS = 250;
 const QUEUE_LAG_LOG_INTERVAL_MS = 60 * 1000;
@@ -68,6 +75,55 @@ const QUEUE_LAG_ALARM_MS = 30 * 1000;
 // Best-effort reservation cleanup cadence (never affects correctness). Carried
 // over from the v1 scheduler, which src/index.js no longer starts.
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
+const TARGETED_CLAIM_DISABLED = Symbol("TARGETED_CLAIM_DISABLED");
+
+async function persistExactActiveImpactWork({ tx, raceId, result, fence }) {
+  const capture = result?.activeImpactCapture || {};
+  const impacts = [
+    ...(capture.trailMineImpacts || []),
+    ...(capture.drillSergeantImpacts || []),
+  ].filter((impact) => impact?.effectId && impact?.userId);
+  if (impacts.length === 0) return;
+  for (const impact of impacts) {
+    const eligible = sourceResolvedUnderFence(
+      fence,
+      impact.resolvedAt || capture.asOf,
+    );
+    if (!eligible) {
+      await tx.$executeRawUnsafe(
+        `UPDATE race_active_effects
+            SET metadata = COALESCE(metadata, '{}'::jsonb)
+              || '{"activeImpactResolutionSkippedVersion":1}'::jsonb
+          WHERE id = $1`,
+        impact.effectId
+      );
+      continue;
+    }
+    await tx.activeRaceImpactWork.upsert({
+      where: {
+        raceId_recipientUserId_sourceKind_sourceId_calculationVersion: {
+          raceId,
+          recipientUserId: impact.userId,
+          sourceKind: "ACTIVE_EFFECT",
+          sourceId: impact.effectId,
+          calculationVersion: 1,
+        },
+      },
+      update: {},
+      create: {
+        raceId,
+        recipientUserId: impact.userId,
+        sourceKind: "ACTIVE_EFFECT",
+        sourceId: impact.effectId,
+        powerupType: impact.powerupType,
+        status: "PENDING",
+        resolvedAt: new Date(impact.resolvedAt || capture.asOf),
+        capturedDeltaSteps: Math.round(Number(impact.deltaSteps) || 0),
+        calculationVersion: 1,
+      },
+    });
+  }
+}
 
 function dependencyClosureRaceBucket(raceId) {
   const digest = crypto.createHash("sha256")
@@ -502,6 +558,8 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
     dependencies.stepSyncScopeMatchesFence || defaultStepSyncScopeMatchesFence;
   const deliveryIntents =
     dependencies.raceResolutionDeliveryIntents || defaultDeliveryIntents;
+  const processActiveRaceImpacts =
+    dependencies.processActiveRaceImpacts || defaultProcessActiveRaceImpacts;
   // Phase 2b shadow seam. Injectable so a test can assert the planner is NEVER
   // called with the flag off, and can force a planner failure.
   const buildDependencyClosure =
@@ -613,19 +671,35 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
   // mid-flight on participant rows because the loser is turned away at the
   // job-row lock before its first participant write. The held job-row lock also
   // serializes this against raceExpiry, which acquires the same row.
-  async function processOneUnbudgeted() {
+  async function processOneUnbudgeted({ raceId = null } = {}) {
     const phaseTimer = createRaceResolutionPhaseTimer();
     const currentTime = now();
-    const ready = await phaseTimer.measure("claimReadiness", async () => {
-      if (await claimingDisabled()) return false;
-      return readyToClaim(currentTime);
-    });
+    if (raceId) {
+      // Targeted compatibility work is still C0 claiming. It may bypass the
+      // debounce floor, but never the global drain/emergency switch. Drop the
+      // short idle-worker cache so a progress request cannot reuse a stale
+      // enabled answer after operations has disabled claiming.
+      invalidateClaimingFlagCache();
+      const disabled = await phaseTimer.measure(
+        "claimReadiness",
+        claimingDisabled,
+      );
+      if (disabled) return TARGETED_CLAIM_DISABLED;
+    }
+    const ready = raceId
+      ? true
+      : await phaseTimer.measure("claimReadiness", async () => {
+          if (await claimingDisabled()) return false;
+          return readyToClaim(currentTime);
+        });
     if (!ready) return null;
 
     const job = await phaseTimer.measure("claim", () => jobModel.claimNext({
         now: currentTime,
         leaseMs,
         leaseToken: newLeaseToken(),
+        raceId,
+        force: raceId != null,
       }));
     if (!job) return null;
     // Real work claimed => stop coasting on the cached kill-switch answer (see
@@ -842,6 +916,17 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
       // Aggregate count only — how many times a closure was turned away at the
       // fence for this claim. Never an id, a total, or a reason string.
       let closureCommittedRejections = 0;
+      const activeImpactEnabled = await phaseTimer.measure(
+        "planSettings",
+        () => isStrictFlagEnabled(settings, "apiActiveImpactNoticesV1Enabled")
+      );
+      let activeImpactMetrics = {
+        created: 0,
+        zero: 0,
+        suppressed: 0,
+        failures: 0,
+        durationMs: 0,
+      };
 
       for (;;) {
         let artifactPayload = null;
@@ -943,6 +1028,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
               RaceActiveEffect: capture.effects,
               RacePowerupEvent: capture.events,
               now,
+              activeImpactEnabled,
               recordPhaseTiming: (name, durationMs) =>
                 addPhaseTiming(computePhaseMs, name, durationMs),
             });
@@ -995,6 +1081,13 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           (write) => write.kind === "effectUpdate" || write.kind === "eventCreate"
         );
         stopPrepareWrites();
+
+        // Concurrency-test seam: lets an integration synchronize a real late
+        // HTTP step upload after generation capture but before the C0 fence.
+        // Production never injects it.
+        if (typeof dependencies.beforeWriteTransaction === "function") {
+          await dependencies.beforeWriteTransaction({ job, result });
+        }
 
         // ── Step 3: the ONE write transaction. ─────────────────────────────
         let artifactRejectedAtFence = false;
@@ -1178,6 +1271,57 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
             }
           }
         });
+
+        // Exact consequence sources are part of the authoritative C0 commit,
+        // outside the presentation savepoint. If this durable insert fails the
+        // detonation/judgement rolls back and the next generation safely
+        // replays it; if only materialization fails the PENDING source survives.
+        const activeImpactCommitFence = await readActiveImpactRolloutFence(tx);
+        await persistExactActiveImpactWork({
+          tx,
+          raceId: job.raceId,
+          result,
+          fence: activeImpactCommitFence,
+        });
+
+        // Active-impact presentation work shares the C0 fence but is isolated
+        // behind a savepoint: a notification calculation/write failure leaves
+        // its durable source retryable and can never roll back authoritative
+        // participant totals or the race-resolution generation.
+        if (activeImpactCommitFence.enabled) {
+          const impactStartedAt = Date.now();
+          await tx.$executeRawUnsafe("SAVEPOINT active_impact_materialization");
+          try {
+            activeImpactMetrics = {
+              ...activeImpactMetrics,
+              ...(await processActiveRaceImpacts({
+                tx,
+                raceId: job.raceId,
+                generation: job.processingGeneration,
+                result,
+                enabled: true,
+                rolloutFence: activeImpactCommitFence,
+                // Cheap committed STEP_SYNC generations intentionally omit a
+                // display capture. Their immutable direct-event sources can
+                // still be claimed against this worker's captured claim time;
+                // timed/defense sources remain PENDING until a full capture.
+                generationAsOf: currentTime,
+              })),
+            };
+            await tx.$executeRawUnsafe("RELEASE SAVEPOINT active_impact_materialization");
+          } catch (error) {
+            await tx.$executeRawUnsafe("ROLLBACK TO SAVEPOINT active_impact_materialization");
+            await tx.$executeRawUnsafe("RELEASE SAVEPOINT active_impact_materialization");
+            activeImpactMetrics.failures += 1;
+            logger.error(JSON.stringify({
+              event: "active_race_impact_materialization",
+              outcome: "retryable_failure",
+              errorCode: error?.code || "MATERIALIZATION_ERROR",
+            }));
+          } finally {
+            activeImpactMetrics.durationMs = Math.max(0, Date.now() - impactStartedAt);
+          }
+        }
 
         // (iii) job row
         const outcome = await phaseTimer.measure(
@@ -1456,6 +1600,11 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         fullParticipantCount: result?.race?.participants?.length || 0,
         triggeringUserCount: triggeringUserIds.length,
         changedRows: new Set(participantWrites.map((write) => write.participantId)).size,
+        activeImpactCreated: activeImpactMetrics?.created || 0,
+        activeImpactZero: activeImpactMetrics?.zero || 0,
+        activeImpactSuppressed: activeImpactMetrics?.suppressed || 0,
+        activeImpactFailures: activeImpactMetrics?.failures || 0,
+        activeImpactMs: activeImpactMetrics?.durationMs || 0,
         computeMs,
         writeMs,
         postTaskMs: Math.max(0, Date.now() - postStartedAt),
@@ -1543,7 +1692,48 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
   }
 
   async function processOne() {
-    return workBudget.run("core", processOneUnbudgeted);
+    return workBudget.run("core", () => processOneUnbudgeted());
+  }
+
+  // Compatibility bridge for request paths whose historical contract requires
+  // a due boundary to be committed before the response returns. This still
+  // runs the exact C0 worker and takes the same lease/fence; the only difference
+  // from the scheduler is that it targets one race and bypasses debounce. If a
+  // background worker already owns the row, wait for that generation instead
+  // of claiming unrelated queue work or writing outside C0.
+  async function processRace({ raceId, generation = null } = {}) {
+    if (!raceId) return null;
+    const requestedGeneration = Number.isInteger(Number(generation))
+      ? Number(generation)
+      : null;
+    const deadline = Date.now() + leaseMs + 5_000;
+    while (Date.now() <= deadline) {
+      const processed = await workBudget.run("core", () =>
+        processOneUnbudgeted({ raceId })
+      );
+      if (processed === TARGETED_CLAIM_DISABLED) return null;
+      if (processed) return processed;
+
+      if (typeof jobModel.findByRaceId !== "function") return null;
+      const current = await jobModel.findByRaceId(raceId);
+      if (!current) return null;
+      const processedRequestedGeneration =
+        requestedGeneration == null ||
+        Number(current.processingGeneration) >= requestedGeneration;
+      if (
+        processedRequestedGeneration &&
+        (current.state === "SUCCEEDED" || current.state === "FAILED")
+      ) {
+        return current;
+      }
+
+      // On the first miss another worker normally owns the lease. Poll without
+      // holding a database connection; once it commits or its lease expires,
+      // the next targeted claim either observes completion or safely reclaims.
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    logger.error(`[RACE_RESOLUTION_V2] timed out waiting for race ${raceId}`);
+    return null;
   }
 
   async function tick() {
@@ -1625,7 +1815,15 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
     );
   }
 
-  return { processOne, tick, logQueueLag, readyToClaim, claimingDisabled, FenceLostError };
+  return {
+    processOne,
+    processRace,
+    tick,
+    logQueueLag,
+    readyToClaim,
+    claimingDisabled,
+    FenceLostError,
+  };
 }
 
 function scheduleRaceResolutionWorkerV2(dependencies = {}) {

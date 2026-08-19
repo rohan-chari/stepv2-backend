@@ -16,6 +16,9 @@ const {
 const { computePrizePool } = require("../../../shared/economy/prizePool");
 const { tournamentDurationDays } = require("../queries/serializeTournament");
 const { buildPayoutPlan, payoutRoundingMetadata } = require("../../races/services/payoutRounding");
+const {
+  acquireGlobalEnrollmentLock,
+} = require("../../steps/services/globalEventEnrollment");
 
 // Advance a tournament when its current round is fully settled. Idempotent and
 // concurrency-safe: runs under a tournament FOR UPDATE lock, and the
@@ -38,6 +41,7 @@ function buildAdvanceTournament(dependencies = {}) {
     const deferred = [];
 
     await db.$transaction(async (tx) => {
+      await acquireGlobalEnrollmentLock(tx);
       // FOR UPDATE lock so two settling matchups (or the safety sweep) can't both
       // advance the same round.
       const lockedRows = await tx.$queryRaw`

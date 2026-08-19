@@ -4,6 +4,7 @@ const { Steps } = require("../../steps/models/steps");
 const { StepSample } = require("../../steps/models/stepSample");
 const { RaceActiveEffect } = require("../../powerups/models/raceActiveEffect");
 const { GlobalStepEvent } = require("../../steps/models/globalStepEvent");
+const { eventsForUser } = require("../../steps/services/globalStepEventEntitlement");
 const {
   calculateBaseAdjusted,
   calculateCurrentTotal,
@@ -66,6 +67,27 @@ function buildReconcileUploaderRaces(dependencies = {}) {
   const prefetchUploaderScoringInputs =
     dependencies.prefetchUploaderScoringInputs ||
     defaultPrefetchUploaderScoringInputs;
+  const participantEventQueryEnabled =
+    !hasInjectedDeps || dependencies.GlobalStepEvent != null;
+
+  async function loadEventsForUser(race, userId, at, fallback = null) {
+    if (participantEventQueryEnabled &&
+        typeof globalStepEventModel.findEligibleByRace === "function") {
+      const map = await globalStepEventModel.findEligibleByRace({
+        raceId: race.id,
+        userIds: [userId],
+        rangeStart: race.startedAt,
+        rangeEnd: at,
+      });
+      return eventsForUser(map, userId);
+    }
+    if (fallback) return fallback();
+    try {
+      return (await globalStepEventModel.findActiveInRange(race.startedAt, at)) || [];
+    } catch {
+      return [];
+    }
+  }
 
   async function prefetchEnabled() {
     if (dependencies.legacyUploaderStepSamplePrefetchV1Enabled != null) {
@@ -227,18 +249,11 @@ function buildReconcileUploaderRaces(dependencies = {}) {
         let workingParticipant = participant;
         let expectedGeneration = capturedGeneration;
         let currentTime = prefetched?.asOf || now();
-        let globalEvents = prefetched
-          ? prefetched.globalEventsForRace(workingRace)
-          : await capacity.measurePhase("globalEventLoad", async () => {
-              try {
-                return (await globalStepEventModel.findActiveInRange(
-                  workingRace.startedAt,
-                  currentTime
-                )) || [];
-              } catch {
-                return [];
-              }
-            });
+        let globalEvents = await capacity.measurePhase(
+          "globalEventLoad",
+          () => loadEventsForUser(workingRace, userId, currentTime,
+            prefetched ? () => prefetched.globalEventsForRace(workingRace) : null)
+        );
         let calculation = await calculateUploaderRace({
           capacity,
           race: workingRace,
@@ -297,14 +312,9 @@ function buildReconcileUploaderRaces(dependencies = {}) {
               workingParticipant.forfeitedAt
             ) return;
             currentTime = now();
-            try {
-              globalEvents = (await globalStepEventModel.findActiveInRange(
-                workingRace.startedAt,
-                currentTime
-              )) || [];
-            } catch {
-              globalEvents = [];
-            }
+            globalEvents = await loadEventsForUser(
+              workingRace, userId, currentTime
+            );
             calculation = await calculateUploaderRace({
               capacity,
               race: workingRace,

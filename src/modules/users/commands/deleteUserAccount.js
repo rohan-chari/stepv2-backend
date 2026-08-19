@@ -249,9 +249,12 @@ function buildDeleteUserAccount(dependencies = {}) {
       // Final-score impact rows intentionally use RESTRICT FKs (a race
       // retention job owns their historical lifecycle), so account deletion
       // removes this user's private rows explicitly in its existing transaction.
+      await tx.activeRaceEffectImpact.deleteMany({ where: { userId } });
+      await tx.activeRaceImpactWork.deleteMany({ where: { recipientUserId: userId } });
       await tx.raceEffectImpact.deleteMany({ where: { userId } });
       await tx.globalEventRaceImpact.deleteMany({ where: { userId } });
       await tx.globalEventUserSummary.deleteMany({ where: { userId } });
+      await tx.globalStepEventEntitlement.deleteMany({ where: { userId } });
       await tx.appReviewPromptAttempt.deleteMany({ where: { userId } });
       await tx.inboxAlert.deleteMany({ where: { userId } });
       await tx.feedbackThread.deleteMany({ where: { userId } });
@@ -303,6 +306,8 @@ function buildDeleteUserAccount(dependencies = {}) {
       await require("../../social/services/friendsTopologyCache")
         .invalidateUsersSafe([userId, ...counterpartIds]);
     } catch {}
+    await require("../../steps/services/globalStepEventEntitlement")
+      .invalidateHomeActiveGlobalEvent([userId]);
   };
 }
 

@@ -82,3 +82,49 @@ test("deferred mode finishes stateful decisions and returns only an allowlisted 
     ["raceId", "timeZone"]
   );
 });
+
+test("high-multiplier side effects use each participant's eligible local event set", async () => {
+  const multipliers = new Map();
+  const onCommitted = buildRaceProgressPostCommit({
+    redisStandingsEnabled: true,
+    async expireEffects() {},
+    async evaluateHighMultiplierAlert({ participant, currentMultiplier }) {
+      multipliers.set(participant.userId, currentMultiplier);
+    },
+    RaceActiveEffect: { async findActiveForRace() { return []; } },
+    GlobalStepEventEntitlement: {
+      async findEligibleByRace() {
+        return new Map([
+          ["new-york", [{
+            id: "event-1",
+            startsAt: new Date("2026-08-20T14:00:00.000Z"),
+            endsAt: new Date("2026-08-20T14:30:00.000Z"),
+            multiplier: 2,
+          }]],
+          ["madrid", []],
+        ]);
+      },
+    },
+    now: () => new Date("2026-08-20T14:10:00.000Z"),
+  });
+
+  await onCommitted({
+    raceId: "race-1",
+    superseded: true,
+    result: {
+      race: {
+        id: "race-1",
+        powerupsEnabled: true,
+        startedAt: new Date("2026-08-20T13:00:00.000Z"),
+        participants: [
+          { id: "p-ny", userId: "new-york", status: "ACCEPTED" },
+          { id: "p-mad", userId: "madrid", status: "ACCEPTED" },
+        ],
+      },
+      baseAdjustedByParticipantId: {},
+    },
+  });
+
+  assert.equal(multipliers.get("new-york"), 2);
+  assert.equal(multipliers.get("madrid"), 1);
+});

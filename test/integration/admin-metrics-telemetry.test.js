@@ -6,6 +6,7 @@ const {
   getSharedServer,
   prisma,
   request,
+  startServer,
 } = require("./setup");
 const { appSettings } = require("../../src/shared/config/appSettings");
 const { signSessionToken } = require("../../src/modules/users/services/sessionToken");
@@ -87,14 +88,14 @@ describe("admin metrics v2 telemetry ingestion", () => {
     });
   });
 
-  it("foreground soft-drops non-iOS accounts without eligibility", async () => {
-    await enableTelemetry();
+  it("foreground accepts capable Google Sign-In accounts from the iOS-only client", async () => {
+    const epoch = await enableTelemetry();
     const google = await prisma.user.create({
       data: { googleSub: `google-${Date.now()}`, email: "google@test.com" },
     });
-    const token = signSessionToken({ userId: google.id, googleSub: google.googleSub });
+    const sessionToken = signSessionToken({ userId: google.id, googleSub: google.googleSub });
     const response = await request(server.baseUrl, "POST", "/analytics/foreground", {
-      token,
+      token: sessionToken,
       body: {
         sessionId: "01JGOOGLE.TEST",
         occurredAt: new Date().toISOString(),
@@ -103,12 +104,10 @@ describe("admin metrics v2 telemetry ingestion", () => {
       headers: { "X-Client-Features": "admin_metrics_v2" },
     });
     assert.equal(response.status, 202);
-    assert.deepEqual(await response.json(), {
-      recorded: false,
-      reason: "unsupported_platform",
-    });
+    assert.deepEqual(await response.json(), { recorded: true });
     const stored = await prisma.user.findUnique({ where: { id: google.id } });
-    assert.equal(stored.metricsV2EligibleEpochId, null);
+    assert.equal(stored.metricsV2EligibleEpochId, epoch.id);
+    assert.equal(await prisma.userActivityDay.count({ where: { userId: google.id } }), 1);
   });
 
   it("foreground requires the explicit admin_metrics_v2 capability", async () => {
@@ -333,9 +332,12 @@ describe("admin metrics v2 telemetry ingestion", () => {
     assert.equal(stored.openedAt.toISOString(), firstOpenedAt.toISOString());
   });
 
-  it("accepts the two exact iOS v2 activation events only while collecting", async () => {
+  it("accepts iOS v2 activation events from Google Sign-In accounts", async () => {
     await enableTelemetry();
-    const user = await createTestUser();
+    const google = await prisma.user.create({
+      data: { googleSub: `activation-google-ios-${Date.now()}` },
+    });
+    const sessionToken = signSessionToken({ userId: google.id, googleSub: google.googleSub });
     const raceId = "11111111-1111-4111-8111-111111111111";
     const events = [
       {
@@ -360,7 +362,7 @@ describe("admin metrics v2 telemetry ingestion", () => {
       "POST",
       "/analytics/activation-events",
       {
-        token: user.token,
+        token: sessionToken,
         body: { events },
         headers: { "X-Client-Features": "admin_metrics_v2" },
       }
@@ -434,31 +436,88 @@ describe("admin metrics v2 telemetry ingestion", () => {
     assert.equal(stored.metricsV2SignupEpochId, epoch.id);
   });
 
+  it("stamps immutable signup eligibility for capable Google Sign-In creates", async () => {
+    const epoch = await enableTelemetry();
+    const googleServer = await startServer({
+      verifyGoogleIdentityToken: async (token) => ({
+        sub: token,
+        email: `${token}@example.com`,
+      }),
+    });
+    try {
+      const response = await request(googleServer.baseUrl, "POST", "/auth/google", {
+        headers: { "X-Client-Features": "admin_metrics_v2" },
+        body: { idToken: `metrics-google-signup-${Date.now()}` },
+      });
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      for (const privateKey of [
+        "metricsV2EligibleAt",
+        "metricsV2EligibleEpochId",
+        "metricsV2SignupEligible",
+        "metricsV2SignupEpochId",
+      ]) {
+        assert.equal(privateKey in body.user, false);
+      }
+      const stored = await prisma.user.findUnique({ where: { id: body.user.id } });
+      assert.equal(stored.metricsV2SignupEligible, true);
+      assert.equal(stored.metricsV2SignupEpochId, epoch.id);
+      assert.equal(stored.metricsV2EligibleEpochId, epoch.id);
+      assert.ok(stored.metricsV2EligibleAt);
+    } finally {
+      await googleServer.close();
+    }
+  });
+
   it("stamps only capable iOS device tokens with the current open epoch", async () => {
     const epoch = await enableTelemetry();
-    const user = await createTestUser();
+    const google = await prisma.user.create({
+      data: { googleSub: `device-google-ios-${Date.now()}` },
+    });
+    const token = signSessionToken({ userId: google.id, googleSub: google.googleSub });
     const response = await request(
       server.baseUrl,
       "POST",
       "/notifications/device-token",
       {
-        token: user.token,
+        token,
         headers: { "X-Client-Features": "admin_metrics_v2" },
         body: { deviceToken: "capable-ios-token", platform: "ios" },
       }
     );
     assert.equal(response.status, 200);
-    const token = await prisma.deviceToken.findFirst({
+    const storedToken = await prisma.deviceToken.findFirst({
       where: { token: "capable-ios-token" },
     });
-    assert.equal(token.adminMetricsOpenCapable, true);
-    assert.equal(token.adminMetricsOpenEpochId, epoch.id);
+    assert.equal(storedToken.adminMetricsOpenCapable, true);
+    assert.equal(storedToken.adminMetricsOpenEpochId, epoch.id);
+
+    const androidResponse = await request(
+      server.baseUrl,
+      "POST",
+      "/notifications/device-token",
+      {
+        token,
+        headers: { "X-Client-Features": "admin_metrics_v2" },
+        body: { deviceToken: "google-android-token", platform: "android" },
+      }
+    );
+    assert.equal(androidResponse.status, 200);
+    const androidToken = await prisma.deviceToken.findFirst({
+      where: { token: "google-android-token" },
+    });
+    assert.equal(androidToken.adminMetricsOpenCapable, false);
+    assert.equal(androidToken.adminMetricsOpenEpochId, null);
   });
 
   it("creates one accepted delivery fact for central and special visible direct sends", async () => {
     const epoch = await enableTelemetry();
     const actor = await createTestUser();
-    const recipient = await createTestUser();
+    const recipient = {
+      user: await prisma.user.create({
+        data: { googleSub: `direct-google-ios-${Date.now()}` },
+      }),
+    };
     await prisma.deviceToken.create({
       data: {
         userId: recipient.user.id,
@@ -994,7 +1053,11 @@ describe("admin metrics v2 telemetry ingestion", () => {
 
   it("reuses one accepted delivery fact when the Inbox outbox retries", async () => {
     const epoch = await enableTelemetry();
-    const recipient = await createTestUser();
+    const recipient = {
+      user: await prisma.user.create({
+        data: { googleSub: `inbox-google-ios-${Date.now()}` },
+      }),
+    };
     await prisma.deviceToken.create({
       data: {
         userId: recipient.user.id,

@@ -60,8 +60,12 @@ const {
   invalidateRaceProgress,
 } = require("../services/raceProgressSnapshot");
 const {
+  acquireGlobalEnrollmentLock,
   enrollIfGlobalEventActive,
 } = require("../../steps/services/globalEventEnrollment");
+const {
+  invalidateHomeActiveGlobalEvent,
+} = require("../../steps/services/globalStepEventEntitlement");
 
 function buildJoinRaceCore(dependencies = {}) {
   // C0 (spec §5a item 4): after this command's own small writes, mark the race
@@ -295,6 +299,9 @@ function buildJoinRaceCore(dependencies = {}) {
     }
 
     const createParticipant = async (client) => {
+      if (race.status === "ACTIVE" && client) {
+        await acquireGlobalEnrollmentLock(client);
+      }
       const created = client
         ? await client.raceParticipant.create({
             data: {
@@ -364,6 +371,10 @@ function buildJoinRaceCore(dependencies = {}) {
       }
 
       await invalidateRaceProgress(raceId);
+
+      if (race.status === "ACTIVE" && usesDefaultPersistence) {
+        await invalidateHomeActiveGlobalEvent([userId]);
+      }
 
       await enqueueRaceResolution({
         raceId,

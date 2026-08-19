@@ -419,7 +419,7 @@ function createAuthRouter(dependencies = {}) {
 
   // POST /auth/google
   // Body: { idToken, email?, name?, referralCode? }
-  // Android sign-in. Verifies the Google ID token, keys the account on the
+  // Google sign-in on iOS or Android. Verifies the Google ID token, keys the account on the
   // verified Google `sub` (User.googleSub), and returns the same
   // { user, sessionToken } envelope as /auth/apple. Independent of Apple
   // accounts — never linked by email. See ANDROID.md §G1. referralCode is
@@ -433,6 +433,19 @@ function createAuthRouter(dependencies = {}) {
       }
 
       const googleIdentity = await verifyGoogleToken(idToken);
+
+      let metricsV2SignupEpochId = null;
+      if (
+        req.clientFeatures?.has("admin_metrics_v2") === true &&
+        (await appSettings.getFlag("adminMetricsV2TelemetryEnabled")) === true
+      ) {
+        const epoch = await prisma.adminMetricsCollectionEpoch.findFirst({
+          where: { endedAt: null },
+          orderBy: { startedAt: "desc" },
+          select: { id: true },
+        });
+        metricsV2SignupEpochId = epoch?.id || null;
+      }
 
       const user = await provisionGoogleUser({
         googleSub: googleIdentity.sub,
@@ -450,7 +463,25 @@ function createAuthRouter(dependencies = {}) {
           ? { nameSetupOnboardingRequired: true }
           : {}),
         emitSignInEvent: true,
+        ...(metricsV2SignupEpochId
+          ? {
+              metricsV2SignupEligible: true,
+              metricsV2SignupEpochId,
+            }
+          : {}),
       });
+      if (
+        metricsV2SignupEpochId &&
+        user.metricsV2EligibleEpochId !== metricsV2SignupEpochId
+      ) {
+        await prisma.user.updateMany({
+          where: { id: user.id },
+          data: {
+            metricsV2EligibleAt: new Date(),
+            metricsV2EligibleEpochId: metricsV2SignupEpochId,
+          },
+        });
+      }
 
       const sessionToken = signToken({
         userId: user.id,

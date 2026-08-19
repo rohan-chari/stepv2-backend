@@ -15,6 +15,7 @@
 // totals by passing in the same active events.
 
 const { getTimeZoneParts, zonedDateTimeToUtc } = require("../../shared/time/week");
+const { randomInt: cryptoRandomInt } = require("node:crypto");
 const { etDayKey, ET } = require("../../shared/time/etSchedule");
 const {
   signedMultiplierAt,
@@ -46,6 +47,92 @@ const GLOBAL_EVENT_MULTIPLIER = 2;
 // skip the day's stale event rather than presenting a misleading late 30-minute
 // event and delayed push.
 const GLOBAL_EVENT_CATCH_WINDOW_MS = 2 * 60 * 1000;
+const LOCAL_ENTITLEMENTS = "LOCAL_ENTITLEMENTS";
+const LEGACY_GLOBAL = "LEGACY_GLOBAL";
+const FALLBACK_EVENT_TIMEZONE = "America/New_York";
+
+function parseEventDay(eventDay) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(eventDay || "")) {
+    throw new TypeError("eventDay must be YYYY-MM-DD");
+  }
+  const [year, month, day] = eventDay.split("-").map(Number);
+  const probe = new Date(Date.UTC(year, month - 1, day));
+  if (
+    probe.getUTCFullYear() !== year ||
+    probe.getUTCMonth() + 1 !== month ||
+    probe.getUTCDate() !== day
+  ) throw new RangeError("eventDay is not a valid civil date");
+  return { year, month, day };
+}
+
+function assertLocalSchedule({ localStartMinute, durationMinutes }) {
+  if (!Number.isInteger(localStartMinute) || localStartMinute < 480 || localStartMinute >= 1320) {
+    throw new RangeError("localStartMinute must be an integer in [480, 1320)");
+  }
+  if (!Number.isInteger(durationMinutes) || durationMinutes <= 0) {
+    throw new RangeError("durationMinutes must be a positive integer");
+  }
+}
+
+// Unlike the legacy hash draw, a local logical day is drawn exactly once while
+// its parent row is being created. The winning minute is persisted and reused
+// by every timezone and every retry.
+function chooseLocalStartMinute({ randomInt = cryptoRandomInt } = {}) {
+  return randomInt(480, 1320);
+}
+
+function localEventWindowForZone({
+  eventDay,
+  localStartMinute,
+  durationMinutes = GLOBAL_EVENT_DURATION_MS / 60000,
+  timeZone,
+}) {
+  const day = parseEventDay(eventDay);
+  assertLocalSchedule({ localStartMinute, durationMinutes });
+  if (typeof timeZone !== "string" || !timeZone) {
+    throw new TypeError("timeZone is required");
+  }
+  // Force Intl validation before conversion; zonedDateTimeToUtc otherwise has
+  // no useful distinction between an invalid zone and invalid civil input.
+  new Intl.DateTimeFormat("en-US", { timeZone }).format(new Date(0));
+  const startsAt = zonedDateTimeToUtc({
+    ...day,
+    hour: Math.floor(localStartMinute / 60),
+    minute: localStartMinute % 60,
+  }, timeZone);
+  return {
+    localDate: eventDay,
+    startsAt,
+    endsAt: new Date(startsAt.getTime() + durationMinutes * 60 * 1000),
+  };
+}
+
+function supportedEventTimeZones() {
+  const zones = typeof Intl.supportedValuesOf === "function"
+    ? Intl.supportedValuesOf("timeZone")
+    : [FALLBACK_EVENT_TIMEZONE];
+  // The IANA extremes are valid fixed-offset names but are not included in
+  // Intl.supportedValuesOf on every Node/ICU build.
+  return [...new Set([...zones, "Pacific/Kiritimati", "Etc/GMT+12"])];
+}
+
+function compatibilityEnvelopeForLocalEvent({
+  eventDay,
+  localStartMinute,
+  durationMinutes = GLOBAL_EVENT_DURATION_MS / 60000,
+  timeZones = supportedEventTimeZones(),
+}) {
+  if (!Array.isArray(timeZones) || timeZones.length === 0) {
+    throw new TypeError("timeZones must not be empty");
+  }
+  const windows = timeZones.map((timeZone) => localEventWindowForZone({
+    eventDay, localStartMinute, durationMinutes, timeZone,
+  }));
+  return {
+    startsAt: new Date(Math.min(...windows.map((window) => window.startsAt.getTime()))),
+    endsAt: new Date(Math.max(...windows.map((window) => window.endsAt.getTime()))),
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Step math
@@ -199,4 +286,11 @@ module.exports = {
   GLOBAL_EVENT_DURATION_MS,
   GLOBAL_EVENT_MULTIPLIER,
   GLOBAL_EVENT_CATCH_WINDOW_MS,
+  LOCAL_ENTITLEMENTS,
+  LEGACY_GLOBAL,
+  FALLBACK_EVENT_TIMEZONE,
+  chooseLocalStartMinute,
+  localEventWindowForZone,
+  compatibilityEnvelopeForLocalEvent,
+  supportedEventTimeZones,
 };

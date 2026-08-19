@@ -106,14 +106,26 @@ describe("admin metrics dashboard v2 — Phase A blocks", () => {
     assert.ok(dashboard.summary);
   });
 
-  it("summary counts only retained non-review Apple users and excludes review-created races", async () => {
+  it("counts Google Sign-In accounts in the retained iOS population", async () => {
+    await prisma.user.create({
+      data: {
+        googleSub: `google-ios-${Date.now()}`,
+        email: "google-ios@test.com",
+      },
+    });
+
+    const dashboard = await get("dashboard-summary");
+    assert.equal(dashboard.summary.growth.totalSignups, 2); // admin + Google Sign-In
+  });
+
+  it("summary counts retained non-review accounts and excludes review-created races", async () => {
     const ios = await createTestUser({ appleId: `ios-${Date.now()}` });
     const review = await createTestUser({
       appleId: `review-${Date.now()}`,
       isReviewAccount: true,
     });
     await prisma.user.create({
-      data: { googleSub: `google-${Date.now()}`, email: "android@test.com" },
+      data: { googleSub: `google-ios-${Date.now()}`, email: "google-ios@test.com" },
     });
     await prisma.race.createMany({
       data: [
@@ -134,7 +146,7 @@ describe("admin metrics dashboard v2 — Phase A blocks", () => {
       ],
     });
     const dashboard = await get("dashboard-summary");
-    assert.equal(dashboard.summary.growth.totalSignups, 2); // admin + ios
+    assert.equal(dashboard.summary.growth.totalSignups, 3); // admin + Apple + Google Sign-In
     assert.equal(dashboard.summary.races.activeNonFeaturedRaces, 1);
     assert.equal("money" in dashboard.summary, false);
   });
@@ -176,17 +188,17 @@ describe("admin metrics dashboard v2 — Phase A blocks", () => {
     });
   });
 
-  it("release adoption is iOS-only, non-review, and grouped by version", async () => {
+  it("release adoption includes both iOS sign-in providers and excludes review accounts", async () => {
     await prisma.user.createMany({
       data: [
         { appleId: "ios-version", lastAppVersion: "2.4.0", lastSeenAt: new Date() },
-        { googleSub: "android-version", lastAppVersion: "2.4.0", lastSeenAt: new Date() },
+        { googleSub: "google-ios-version", lastAppVersion: "2.4.0", lastSeenAt: new Date() },
         { appleId: "review-version", isReviewAccount: true, lastAppVersion: "2.4.0", lastSeenAt: new Date() },
       ],
     });
     const dashboard = await get("dashboard-release-adoption");
     const version = dashboard.releaseAdoption.versions.find((row) => row.version === "2.4.0");
-    assert.deepEqual(version, { version: "2.4.0", accountsSeen: 1 });
+    assert.deepEqual(version, { version: "2.4.0", accountsSeen: 2 });
   });
 
   it("returns mature empty retention cohorts as observed zero counts", async () => {
@@ -656,7 +668,7 @@ describe("admin metrics dashboard v2 — Phase A blocks", () => {
     assert.equal(engagement.rankedParticipationUsers, 1);
   });
 
-  it("uses only current-epoch iOS non-review foreground facts and nulls pre-epoch dates", async () => {
+  it("uses current-epoch non-review facts from both iOS sign-in providers", async () => {
     await appSettings.setFlag("adminMetricsV2TelemetryEnabled", true);
     const epoch = await prisma.adminMetricsCollectionEpoch.findFirst({
       where: { endedAt: null },
@@ -681,14 +693,18 @@ describe("admin metrics dashboard v2 — Phase A blocks", () => {
       metricsV2EligibleAt: startedAt,
       metricsV2EligibleEpochId: epoch.id,
     });
-    const android = await prisma.user.create({
-      data: { googleSub: `growth-google-${Date.now()}` },
+    const googleIos = await prisma.user.create({
+      data: {
+        googleSub: `growth-google-ios-${Date.now()}`,
+        metricsV2EligibleAt: startedAt,
+        metricsV2EligibleEpochId: epoch.id,
+      },
     });
     for (const [userId, date] of [
       [capable.user.id, preEpochDate],
       [capable.user.id, observedDate],
       [review.user.id, observedDate],
-      [android.id, observedDate],
+      [googleIos.id, observedDate],
     ]) {
       await prisma.userActivityDay.create({
         data: {
@@ -709,22 +725,22 @@ describe("admin metrics dashboard v2 — Phase A blocks", () => {
     );
     assert.equal(
       daily.find((row) => row.date === observedDate).observedForegroundUsers,
-      1
+      2
     );
   });
 
-  it("filters onboarding sessions to Apple non-review accounts", async () => {
+  it("filters iOS onboarding sessions by review status, not sign-in provider", async () => {
     const occurredAt = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
     const apple = await createTestUser({ appleId: `onboarding-ios-${Date.now()}` });
     const review = await createTestUser({
       appleId: `onboarding-review-${Date.now()}`,
       isReviewAccount: true,
     });
-    const android = await prisma.user.create({
-      data: { googleSub: `onboarding-android-${Date.now()}` },
+    const googleIos = await prisma.user.create({
+      data: { googleSub: `onboarding-google-ios-${Date.now()}` },
     });
     await prisma.activationEvent.createMany({
-      data: [apple.user, review.user, android].flatMap((user, index) => [
+      data: [apple.user, review.user, googleIos].flatMap((user, index) => [
         {
           id: `onboarding-start-${index}-${Date.now()}`,
           userId: user.id,
@@ -751,11 +767,11 @@ describe("admin metrics dashboard v2 — Phase A blocks", () => {
     const funnel = (await get("dashboard-funnels", "7d")).onboardingFunnel;
     assert.equal(
       funnel.stages.find((stage) => stage.key === "onboarding_started").count,
-      1
+      2
     );
     assert.equal(
       funnel.stages.find((stage) => stage.key === "home_reached").count,
-      1
+      2
     );
   });
 

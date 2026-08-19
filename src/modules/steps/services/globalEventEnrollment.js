@@ -1,5 +1,9 @@
 // Durable lifecycle entries for a global event's race impact. These helpers
 // only establish membership; settlement remains the sole score authority.
+const {
+  ensureEntitlementForUser,
+  START_OUTCOMES,
+} = require("./globalStepEventEntitlement");
 
 function uniqueUserIds(userIds = []) {
   return [...new Set(userIds.filter(Boolean))].sort();
@@ -35,6 +39,13 @@ async function createPendingEnrollments(tx, { eventId, raceId, userIds }) {
     data: unique.map((userId) => ({ eventId, raceId, userId, status: "PENDING" })),
     skipDuplicates: true,
   });
+  const duplicates = unique.length - (result.count || 0);
+  if (duplicates > 0) {
+    try {
+      const { recordOperationalCounters } = require("./globalStepEventObservability");
+      await recordOperationalCounters(tx, { duplicateClaimsSuppressed: duplicates });
+    } catch {}
+  }
   return result.count || 0;
 }
 
@@ -46,12 +57,69 @@ async function enrollIfGlobalEventActive(tx, { raceId, userIds, at }) {
   await acquireGlobalEnrollmentLock(tx);
   const current = new Date(at);
   const event = await tx.globalStepEvent.findFirst({
-    where: { startsAt: { lte: current }, endsAt: { gt: current } },
+    where: {
+      scheduleMode: "LEGACY_GLOBAL",
+      startsAt: { lte: current },
+      endsAt: { gt: current },
+    },
     orderBy: { startsAt: "desc" },
   });
-  if (!event) return null;
-  await createPendingEnrollments(tx, { eventId: event.id, raceId, userIds });
-  return event;
+  if (event) {
+    await createPendingEnrollments(tx, { eventId: event.id, raceId, userIds });
+  }
+
+  if (!tx.globalStepEventEntitlement || !tx.user) return event;
+  const localParents = await tx.globalStepEvent.findMany({
+    where: {
+      scheduleMode: "LOCAL_ENTITLEMENTS",
+      endsAt: { gt: current },
+    },
+    orderBy: { eventDay: "asc" },
+  });
+  let activeLocalEvent = null;
+  for (const userId of uniqueUserIds(userIds)) {
+    const user = await tx.user.findUnique({
+      where: { id: userId },
+      select: { id: true, timezone: true, globalEventTimezone: true },
+    });
+    if (!user) continue;
+    for (const parent of localParents) {
+      const before = await tx.globalStepEventEntitlement.findUnique({
+        where: { eventId_userId: { eventId: parent.id, userId } },
+      });
+      const entitlement = before || await ensureEntitlementForUser(tx, {
+        event: parent, user, now: current, allowActive: true,
+      });
+      if (!entitlement) continue;
+      const active = new Date(entitlement.startsAt) <= current &&
+        current < new Date(entitlement.endsAt);
+      if (!active || entitlement.startOutcome === START_OUTCOMES.SKIPPED_STALE) continue;
+
+      let outcome = entitlement.startOutcome;
+      if (!before || outcome === START_OUTCOMES.NO_ACTIVE_RACES) {
+        outcome = START_OUTCOMES.ACTIVATED_LATE_JOIN;
+      } else if (outcome === START_OUTCOMES.PENDING) {
+        const lateness = current.getTime() - new Date(entitlement.startsAt).getTime();
+        if (lateness > 2 * 60 * 1000) {
+          await tx.globalStepEventEntitlement.updateMany({
+            where: { id: entitlement.id, startOutcome: START_OUTCOMES.PENDING },
+            data: { startOutcome: START_OUTCOMES.SKIPPED_STALE, startProcessedAt: current },
+          });
+          continue;
+        }
+        outcome = START_OUTCOMES.ACTIVATED_LATE_JOIN;
+      }
+      await createPendingEnrollments(tx, { eventId: parent.id, raceId, userIds: [userId] });
+      if (outcome !== entitlement.startOutcome) {
+        await tx.globalStepEventEntitlement.updateMany({
+          where: { id: entitlement.id },
+          data: { startOutcome: outcome, startProcessedAt: entitlement.startProcessedAt || current },
+        });
+      }
+      if (!activeLocalEvent) activeLocalEvent = parent;
+    }
+  }
+  return event || activeLocalEvent;
 }
 
 module.exports = {

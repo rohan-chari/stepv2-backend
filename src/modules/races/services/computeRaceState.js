@@ -109,6 +109,9 @@ async function computeRaceState({
     RaceActiveEffect: capture.effects,
     RacePowerupEvent: capture.events,
     ...(dependencies.now ? { now: dependencies.now } : {}),
+    ...(dependencies.activeImpactEnabled === true
+      ? { activeImpactEnabled: true }
+      : {}),
   });
 
   const processed = await resolve({ raceId, userIds, timeZone });

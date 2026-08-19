@@ -1,6 +1,11 @@
 const { prisma: defaultPrisma } = require("../../../db");
 const prisma = defaultPrisma;
 
+async function invalidateCreatedEvent(row) {
+  const raceMessagesCache = require("../../social/services/raceMessagesCache");
+  await raceMessagesCache.invalidateKind(row.raceId, "SYSTEM", row);
+}
+
 function applyCursor(where, cursor) {
   if (!cursor) return;
 
@@ -40,16 +45,22 @@ const RacePowerupEvent = {
     // new one must advance `msgver` and drop the cached SYSTEM list, exactly
     // like a USER post does. Required at the model rather than at each of the
     // many powerup call sites, so a new emitter cannot forget it.
-    const raceMessagesCache = require("../../social/services/raceMessagesCache");
-    await raceMessagesCache.invalidateKind(raceId, "SYSTEM", row);
+    await invalidateCreatedEvent(row);
     return row;
   },
+
+  // Direct active-impact sources are inserted inside the same transaction as
+  // their durable recipient work. Cache invalidation must happen only after
+  // that transaction commits, so the command calls this hook with the returned
+  // row rather than publishing an uncommitted event from inside the model.
+  invalidateCreated: invalidateCreatedEvent,
 
   async findByRace(raceId, {
     cursor,
     limit = 50,
     excludeEventTypes,
     excludeWelcomeMysteryBoxEvents = false,
+    excludeHiddenFromFeedEvents = false,
   } = {}) {
     const where = { raceId };
     applyCursor(where, cursor);
@@ -60,12 +71,25 @@ const RacePowerupEvent = {
     if (Array.isArray(excludeEventTypes) && excludeEventTypes.length > 0) {
       where.eventType = { notIn: excludeEventTypes };
     }
+    const exclusions = [];
     if (excludeWelcomeMysteryBoxEvents) {
-      where.NOT = {
+      exclusions.push({
         eventType: "POWERUP_EARNED",
         powerupType: "MYSTERY_BOX",
         description: { in: ["Welcome gift. A mystery box!", "Welcome gift — a mystery box!"] },
-      };
+      });
+    }
+    if (excludeHiddenFromFeedEvents) {
+      // This description shape covers both new marked rows and historical
+      // plant rows. Trigger/expiry copy never contains "planted a".
+      exclusions.push({
+        eventType: "POWERUP_USED",
+        powerupType: "TRAIL_MINE",
+        description: { contains: " planted a " },
+      });
+    }
+    if (exclusions.length > 0) {
+      where.NOT = exclusions;
     }
     return prisma.racePowerupEvent.findMany({
       where,

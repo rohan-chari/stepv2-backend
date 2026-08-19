@@ -17,34 +17,65 @@ function buildGlobalEventSummaryTick(dependencies = {}) {
     });
     let upserts = 0;
     for (const group of groups) {
+      const jobName = `global_event_summary:${group.eventId}:${group.userId}:v1`;
+      const alreadyProcessed = typeof prisma.jobRun?.findUnique === "function"
+        ? await prisma.jobRun.findUnique({
+            where: { jobName },
+            select: { jobName: true },
+          })
+        : null;
+      if (alreadyProcessed) continue;
       // A user can join/start another race later in a still-open event. Do not
       // mint an immutable recap until that enrollment window has closed.
       const event = await prisma.globalStepEvent.findUnique({
         where: { id: group.eventId },
-        select: { endsAt: true },
+        select: { endsAt: true, scheduleMode: true },
       });
-      if (!event || new Date(event.endsAt).getTime() > now().getTime()) continue;
+      if (!event) continue;
+      let enrollmentEnd = event.endsAt;
+      if (event.scheduleMode === "LOCAL_ENTITLEMENTS") {
+        const entitlement = await prisma.globalStepEventEntitlement.findUnique({
+          where: {
+            eventId_userId: { eventId: group.eventId, userId: group.userId },
+          },
+          select: { endsAt: true, startOutcome: true },
+        });
+        if (!entitlement || entitlement.startOutcome === "PENDING") continue;
+        enrollmentEnd = entitlement.endsAt;
+      }
+      if (new Date(enrollmentEnd).getTime() > now().getTime()) continue;
       const pending = await prisma.globalEventRaceImpact.count({
         where: { eventId: group.eventId, userId: group.userId, status: { not: "FINAL" } },
       });
       if (pending) continue;
+      const nonzero = await prisma.globalEventRaceImpact.count({
+        where: {
+          eventId: group.eventId,
+          userId: group.userId,
+          status: "FINAL",
+          deltaSteps: { not: 0 },
+        },
+      });
       // The job_runs insert and summary upsert share one transaction. A crash
       // rolls BOTH back; a concurrent worker loses the unique job_name claim,
       // so retry/resume cannot double-deliver or strand a partial summary.
-      const jobName = `global_event_summary:${group.eventId}:${group.userId}:v1`;
       let committed = false;
       try {
         await prisma.$transaction(async (tx) => {
-          await tx.jobRun.create({ data: { jobName, lastRanFor: "FINAL" } });
-          await tx.globalEventUserSummary.upsert({
-            where: { eventId_userId: { eventId: group.eventId, userId: group.userId } },
-            update: {},
-            create: {
-              eventId: group.eventId, userId: group.userId,
-              extraRaceSteps: group._sum.deltaSteps || 0, raceCount: group._count._all,
-              settledAt: now(),
-            },
+          await tx.jobRun.create({
+            data: { jobName, lastRanFor: nonzero > 0 ? "FINAL" : "ALL_ZERO" },
           });
+          if (nonzero > 0) {
+            await tx.globalEventUserSummary.upsert({
+              where: { eventId_userId: { eventId: group.eventId, userId: group.userId } },
+              update: {},
+              create: {
+                eventId: group.eventId, userId: group.userId,
+                extraRaceSteps: group._sum.deltaSteps || 0, raceCount: group._count._all,
+                settledAt: now(),
+              },
+            });
+          }
         });
         committed = true;
       } catch (error) {
@@ -55,7 +86,7 @@ function buildGlobalEventSummaryTick(dependencies = {}) {
           keys: [cacheKeys.homeImpactSummary(group.userId)],
           prefix: cacheKeys.PREFIX.HOME_IMPACT_SUMMARY,
         });
-        upserts += 1;
+        if (nonzero > 0) upserts += 1;
       }
     }
     return { upserts };

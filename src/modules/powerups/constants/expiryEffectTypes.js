@@ -18,4 +18,18 @@ const EXPIRY_CONSEQUENCE_TYPES = Object.freeze([
   "FANNY_PACK", "DRILL_SERGEANT", "PIGGY_BANK",
 ]);
 
-module.exports = { SNAPSHOT_AT_EXPIRY_TYPES, EXPIRY_CONSEQUENCE_TYPES };
+// Score-changing windows whose resolution may produce an active-race impact
+// notice. This is shared by the expiry writer and the C0 scanner so a source
+// resolved while the rollout flag is disabled can be durably marked ineligible
+// and never be backfilled after a later enable.
+const ACTIVE_IMPACT_EXPIRY_TYPES = Object.freeze([
+  "LEG_CRAMP", "QUICKSAND", "RUNNERS_HIGH", "WRONG_TURN",
+  "CAMPFIRE_REST", "RAINSTORM", "UPRISING", "RALLY_FLAG", "COIN_FLIP",
+  "GHOST_PEPPER", "DRILL_SERGEANT", "LEECH", "HITCHHIKE",
+]);
+
+module.exports = {
+  SNAPSHOT_AT_EXPIRY_TYPES,
+  EXPIRY_CONSEQUENCE_TYPES,
+  ACTIVE_IMPACT_EXPIRY_TYPES,
+};

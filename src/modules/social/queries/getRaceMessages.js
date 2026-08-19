@@ -21,6 +21,8 @@ const KIND_RANK = { USER: 1, SYSTEM: 0 };
 //   * POWERUP_REROLLED — batch 2026-08-08 item 11; the ad-funded reroll audit
 //     row, which names the new result and so must stay as hidden as the open
 //     it replaces. Mirrored in races/queries/getRaceFeed.js.
+// Trail Mine plants are hidden by metadata rather than event type because
+// detonation and untriggered-expiry rows must remain visible POWERUP_USED rows.
 const HIDDEN_SYSTEM_EVENT_TYPES = [
   "POWERUP_IMPOSTER",
   "MYSTERY_BOX_OPENED",
@@ -37,6 +39,12 @@ const WELCOME_MYSTERY_BOX_DESCRIPTIONS = new Set([
 // still required to keep fresh pages full.
 function isHiddenSystemEvent(event) {
   return HIDDEN_SYSTEM_EVENT_TYPES.includes(event.eventType) ||
+    event.metadata?.hiddenFromFeed === true ||
+    // Compatibility for plant audit rows written before hiddenFromFeed was
+    // added. Trigger rows carry mineId/penalty instead.
+    (event.eventType === "POWERUP_USED" &&
+      event.powerupType === "TRAIL_MINE" &&
+      event.metadata?.ownerParticipantId != null) ||
     (event.eventType === "POWERUP_EARNED" &&
       event.powerupType === "MYSTERY_BOX" &&
       WELCOME_MYSTERY_BOX_DESCRIPTIONS.has(event.description));
@@ -249,6 +257,7 @@ function buildGetRaceMessages(dependencies = {}) {
               // fanny-pack auto-activate audit rows (B1) — audit-only, must never
               // surface what a box contained.
               excludeEventTypes: HIDDEN_SYSTEM_EVENT_TYPES,
+              excludeHiddenFromFeedEvents: true,
               // Welcome grants are onboarding gifts, not race activity. This is
               // query-level so they cannot consume a page slot.
               excludeWelcomeMysteryBoxEvents: true,

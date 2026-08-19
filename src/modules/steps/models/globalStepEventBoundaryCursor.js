@@ -31,9 +31,11 @@ function buildGlobalStepEventBoundaryCursorModel(prisma = defaultPrisma) {
         `WITH boundaries AS (
            SELECT starts_at AS boundary_at, id AS event_id, 'START'::text AS boundary_kind
            FROM global_step_events
+           WHERE schedule_mode = 'LEGACY_GLOBAL'
            UNION ALL
            SELECT ends_at AS boundary_at, id AS event_id, 'END'::text AS boundary_kind
            FROM global_step_events
+           WHERE schedule_mode = 'LEGACY_GLOBAL'
          )
          SELECT (EXTRACT(EPOCH FROM boundary_at) * 1000)::float8 AS "boundaryAtMs",
            event_id AS "eventId",

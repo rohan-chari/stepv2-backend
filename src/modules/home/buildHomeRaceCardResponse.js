@@ -1,6 +1,9 @@
 const derivedCache = require("../../shared/cache/derivedCache");
 const cacheKeys = require("../../shared/cache/cacheKeys");
 const { isStrictFlagEnabled } = require("../../shared/config/isStrictFlagEnabled");
+const {
+  getEligibleGlobalEventSummary,
+} = require("./queries/getEligibleGlobalEventSummary");
 
 async function settle(task, logger, label) {
   try {
@@ -109,9 +112,19 @@ function buildHomeRaceCardResponse(dependencies) {
                 };
           }, logger, "nextRace")
         : Promise.resolve({ ok: true, value: null }),
-      settle(() => typeof GlobalStepEvent.findActiveAtCached === "function"
-        ? GlobalStepEvent.findActiveAtCached(new Date())
-        : GlobalStepEvent.findActiveAt(new Date()), logger, "globalEvent lookup"),
+      settle(async () => {
+        const current = new Date();
+        if (typeof GlobalStepEvent.findViewerActiveHomeCached === "function") {
+          const local = await GlobalStepEvent.findViewerActiveHomeCached({
+            userId: user.id,
+            now: current,
+          });
+          if (local) return local;
+        }
+        return typeof GlobalStepEvent.findActiveAtCached === "function"
+          ? GlobalStepEvent.findActiveAtCached(current)
+          : GlobalStepEvent.findActiveAt(current);
+      }, logger, "globalEvent lookup"),
       localDate
         ? settle(() => getStepMilestonesToday({
             userId: user.id,
@@ -164,17 +177,7 @@ function buildHomeRaceCardResponse(dependencies) {
                 appSettings,
                 "redisCacheHomeImpactSummaryEnabled"
               ),
-              load: () => prisma.globalEventUserSummary.findFirst({
-                where: { userId: user.id, acknowledgedAt: null },
-                orderBy: [{ settledAt: "desc" }, { id: "desc" }],
-                select: {
-                  id: true,
-                  eventId: true,
-                  extraRaceSteps: true,
-                  raceCount: true,
-                  settledAt: true,
-                },
-              }),
+              load: () => getEligibleGlobalEventSummary({ prisma, userId: user.id }),
             });
           })()
         : Promise.resolve(null),

@@ -4,6 +4,9 @@ const { Steps } = require("../../steps/models/steps");
 const {
   enqueueRaceResolution,
 } = require("../../races/services/enqueueRaceResolution");
+const {
+  enrollIfGlobalEventActive,
+} = require("../../steps/services/globalEventEnrollment");
 
 const RACE_NAME_MAX = 50;
 
@@ -91,6 +94,12 @@ async function createRoundRaces({
         },
       });
     }
+
+    await enrollIfGlobalEventActive(tx, {
+      raceId: race.id,
+      userIds: [userA, userB],
+      at: startedAt,
+    });
 
     await enqueueRaceResolution({
       raceId: race.id,

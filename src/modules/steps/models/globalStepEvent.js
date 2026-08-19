@@ -4,6 +4,13 @@ const {
   uniqueUserIds,
   acquireGlobalEnrollmentLock,
 } = require("../services/globalEventEnrollment");
+const { etDayKey } = require("../../../shared/time/etSchedule");
+const {
+  LEGACY_GLOBAL,
+  LOCAL_ENTITLEMENTS,
+  chooseLocalStartMinute,
+  compatibilityEnvelopeForLocalEvent,
+} = require("../globalStepEvent");
 
 async function invalidateGlobalEventCache() {
   const derivedCache = require("../../../shared/cache/derivedCache");
@@ -15,9 +22,11 @@ async function invalidateGlobalEventCache() {
 }
 
 const GlobalStepEvent = {
-  async create({ startsAt, endsAt, multiplier, label }) {
+  async create({ startsAt, endsAt, multiplier, label, eventDay = null,
+    scheduleMode = LEGACY_GLOBAL, localStartMinute = null, durationMinutes = null }) {
     const row = await prisma.globalStepEvent.create({
-      data: { startsAt, endsAt, multiplier, label: label ?? null },
+      data: { startsAt, endsAt, multiplier, label: label ?? null, eventDay,
+        scheduleMode, localStartMinute, durationMinutes },
     });
     // C1 invalidation (spec §5 Phase B): the scheduler that mints a new event
     // must drop the cached not-yet-ended row set, or the "2x STEPS" home banner
@@ -30,7 +39,7 @@ const GlobalStepEvent = {
   // sufficient across pm2 processes. Lock the anchor inside the transaction,
   // re-read it, and return the winner's row without emitting/fanning out from
   // losing ticks. This avoids an unsafe unique migration over historical rows.
-  async createIfAbsent({ startsAt, endsAt, multiplier, label }) {
+  async createIfAbsent({ startsAt, endsAt, multiplier, label, eventDay = null }) {
     const start = new Date(startsAt);
     const result = await prisma.$transaction(async (tx) => {
       await tx.$executeRawUnsafe(
@@ -39,9 +48,25 @@ const GlobalStepEvent = {
       );
       await acquireGlobalEnrollmentLock(tx);
       const existing = await tx.globalStepEvent.findFirst({ where: { startsAt: start } });
-      if (existing) return { event: existing, created: false };
+      const day = eventDay || etDayKey(start);
+      await tx.$executeRawUnsafe(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+        `global-step-event-day:${day}`
+      );
+      const byDay = await tx.globalStepEvent.findUnique({ where: { eventDay: day } });
+      if (byDay) return { event: byDay, created: false };
+      if (existing) {
+        const adopted = existing.eventDay
+          ? existing
+          : await tx.globalStepEvent.update({
+              where: { id: existing.id },
+              data: { eventDay: day, scheduleMode: LEGACY_GLOBAL },
+            });
+        return { event: adopted, created: false };
+      }
       const event = await tx.globalStepEvent.create({
-        data: { startsAt: start, endsAt, multiplier, label: label ?? null },
+        data: { startsAt: start, endsAt, multiplier, label: label ?? null,
+          eventDay: day, scheduleMode: LEGACY_GLOBAL },
       });
       return { event, created: true };
     });
@@ -52,7 +77,7 @@ const GlobalStepEvent = {
   // The event row and its initial PENDING race/user enrollment set are one
   // transaction. A created event can therefore never be visible to settlement
   // without the snapshot of everyone already racing at its start instant.
-  async createIfAbsentWithEnrollments({ startsAt, endsAt, multiplier, label }) {
+  async createIfAbsentWithEnrollments({ startsAt, endsAt, multiplier, label, eventDay = null }) {
     const start = new Date(startsAt);
     const result = await prisma.$transaction(async (tx) => {
       await tx.$executeRawUnsafe(
@@ -61,10 +86,23 @@ const GlobalStepEvent = {
       );
       await acquireGlobalEnrollmentLock(tx);
       const existing = await tx.globalStepEvent.findFirst({ where: { startsAt: start } });
-      if (existing) return { event: existing, created: false, participantUserIds: [] };
+      const day = eventDay || etDayKey(start);
+      await tx.$executeRawUnsafe(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+        `global-step-event-day:${day}`
+      );
+      const byDay = await tx.globalStepEvent.findUnique({ where: { eventDay: day } });
+      if (byDay) return { event: byDay, created: false, participantUserIds: [] };
+      if (existing) {
+        const adopted = existing.eventDay
+          ? existing
+          : await tx.globalStepEvent.update({ where: { id: existing.id }, data: { eventDay: day } });
+        return { event: adopted, created: false, participantUserIds: [] };
+      }
 
       const event = await tx.globalStepEvent.create({
-        data: { startsAt: start, endsAt, multiplier, label: label ?? null },
+        data: { startsAt: start, endsAt, multiplier, label: label ?? null,
+          eventDay: day, scheduleMode: LEGACY_GLOBAL },
       });
       const participants = await tx.raceParticipant.findMany({
         where: {
@@ -96,12 +134,44 @@ const GlobalStepEvent = {
     return result;
   },
 
+  async createLocalParentIfAbsent({ eventDay, multiplier = 2, durationMinutes = 30,
+    label = null, randomInt }) {
+    if (!Number.isFinite(Number(multiplier)) || Number(multiplier) <= 1) {
+      throw new RangeError("local event multiplier must be greater than one");
+    }
+    if (!Number.isInteger(durationMinutes) || durationMinutes <= 0) {
+      throw new RangeError("local event durationMinutes must be positive");
+    }
+    const result = await prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+        `global-step-event-day:${eventDay}`
+      );
+      const existing = await tx.globalStepEvent.findUnique({ where: { eventDay } });
+      if (existing) return { event: existing, created: false };
+      const localStartMinute = chooseLocalStartMinute({ randomInt });
+      const envelope = compatibilityEnvelopeForLocalEvent({
+        eventDay, localStartMinute, durationMinutes,
+      });
+      const event = await tx.globalStepEvent.create({
+        data: {
+          ...envelope, multiplier, durationMinutes, localStartMinute, eventDay,
+          scheduleMode: LOCAL_ENTITLEMENTS, label,
+        },
+      });
+      return { event, created: true };
+    });
+    if (result.created) await invalidateGlobalEventCache();
+    return result;
+  },
+
   // Events whose window overlaps [rangeStart, rangeEnd]. Used by getRaceProgress
   // (rangeStart = race start, rangeEnd = now) and raceExpiry (rangeEnd = end) to
   // fetch the windows relevant to a participant's step samples.
   async findActiveInRange(rangeStart, rangeEnd) {
     return prisma.globalStepEvent.findMany({
       where: {
+        scheduleMode: LEGACY_GLOBAL,
         startsAt: { lt: new Date(rangeEnd) },
         endsAt: { gt: new Date(rangeStart) },
       },
@@ -116,6 +186,7 @@ const GlobalStepEvent = {
     const at = new Date(now);
     return prisma.globalStepEvent.findFirst({
       where: {
+        scheduleMode: LEGACY_GLOBAL,
         startsAt: { lte: at },
         endsAt: { gt: at },
       },
@@ -159,7 +230,7 @@ const GlobalStepEvent = {
       enabled: true,
       load: async () =>
         prisma.globalStepEvent.findMany({
-          where: { endsAt: { gt: new Date() } },
+          where: { scheduleMode: LEGACY_GLOBAL, endsAt: { gt: new Date() } },
           orderBy: { startsAt: "desc" },
           take: 20,
         }),
@@ -187,6 +258,52 @@ const GlobalStepEvent = {
       where: { startsAt: { gte: new Date(since) } },
       orderBy: { startsAt: "asc" },
     });
+  },
+
+  async hasUndrainedLocalEvents(now = new Date()) {
+    const pending = await prisma.globalStepEventEntitlement.findFirst({
+      where: { OR: [{ startProcessedAt: null }, { endProcessedAt: null }] },
+      select: { id: true },
+    });
+    if (pending) return true;
+    return Boolean(await prisma.globalStepEvent.findFirst({
+      where: { scheduleMode: LOCAL_ENTITLEMENTS, endsAt: { gt: new Date(now) } },
+      select: { id: true },
+    }));
+  },
+
+  async findLocalParentsForMaintenance(now = new Date()) {
+    return prisma.globalStepEvent.findMany({
+      where: {
+        scheduleMode: LOCAL_ENTITLEMENTS,
+        OR: [
+          // Future/active compatibility envelopes still need newly joined
+          // racers materialized even when creation has been switched off.
+          { endsAt: { gt: new Date(now) } },
+          // Ended parents stay visible to the worker until both edge claims
+          // have drained; this is the durable kill-switch recovery path.
+          { entitlements: { some: {
+            OR: [{ startProcessedAt: null }, { endProcessedAt: null }],
+          } } },
+        ],
+      },
+      orderBy: { startsAt: "asc" },
+    });
+  },
+
+  async findEligibleByRace(input) {
+    const { findEligibleByRace } = require("./globalStepEventEntitlement");
+    return findEligibleByRace(input);
+  },
+
+  async findViewerActive(input) {
+    const { findViewerActive } = require("./globalStepEventEntitlement");
+    return findViewerActive(input);
+  },
+
+  async findViewerActiveHomeCached(input) {
+    const { findViewerActiveHomeCached } = require("./globalStepEventEntitlement");
+    return findViewerActiveHomeCached(input);
   },
 
 };

@@ -8,6 +8,13 @@
 > Kept only for the measurements in §1 and the disproved theories in §1's
 > "What it is NOT", which remain valid.
 
+> **Historical harness notice:** The frontend production-mix harness and
+> staging-clone workflow used for the measurements below were retired in
+> 2026-08. Commands in this document are archival evidence, not runnable
+> instructions. Use the frontend repository's `k6/README.md` for the supported
+> smoke/find/confirm/soak workflow; its replacement profile is not directly
+> comparable to these results.
+
 # Transaction hold-time reduction — requirements
 
 **Status:** proposed, not approved. No code changed.
@@ -20,8 +27,8 @@ buying hardware.
 ## 1. The problem, measured
 
 Load test against staging on prod-cloned data, 400 distinct user identities,
-driven at the measured prod request mix (harness and method:
-`k6/README.md` in the frontend repo).
+driven at the measured prod request mix using the now-retired frontend k6
+harness.
 
 | Offered load | ok | 5xx | p95 |
 |---|---|---|---|
@@ -254,9 +261,11 @@ separately.
 
 ---
 
-## 5. How to verify a fix
+## 5. Historical verification protocol
 
-The harness already exists and the baseline is recorded.
+The baseline is recorded, but the harness no longer exists. The following
+command is preserved only to identify how the 2026-08-16 comparison was run;
+do not run it as a current capacity test:
 
 ```bash
 cd ~/repos/stepv2-frontend/k6
@@ -280,8 +289,10 @@ Baseline is 13–16 idle-in-transaction of 21 with 0 free. A fix that does not
 move that number has not addressed the cause, whatever it does to the headline
 percentage.
 
-Re-sync staging from prod first (`k6/README.md`) so the comparison is like for
-like, and raise `bara-staging-pool` to 20 for the duration only.
+At the time, a like-for-like comparison required re-syncing staging from prod
+and temporarily raising `bara-staging-pool` to 20. That staging-clone procedure
+is not part of the replacement harness. Follow the frontend `k6/README.md` for
+the current non-production fixture and target-safety contract.
 
 ---
 

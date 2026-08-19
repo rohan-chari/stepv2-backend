@@ -28,6 +28,7 @@
 
 const HOUR_MS = 60 * 60 * 1000;
 const { computeEffectModifiers } = require("../races/services/effectiveStepScoring");
+const { eventsForUser } = require("../steps/services/globalStepEventEntitlement");
 
 // Default copy strength when an effect row carries no (or malformed)
 // `metadata.copyRatio`. Mirrors leechRatio: reading it per-effect makes the copy
@@ -141,6 +142,7 @@ async function collectRaceHitchhikeCopies({
   stepSampleModel,
   now,
   globalEvents = [],
+  eventsByUserId = null,
 }) {
   if (
     !raceActiveEffectModel ||
@@ -180,6 +182,9 @@ async function collectRaceHitchhikeCopies({
         raceId,
         raceActiveEffectModel,
         globalEvents,
+        ...(eventsByUserId
+          ? { globalEvents: eventsForUser(eventsByUserId, effect.targetUserId) }
+          : {}),
       }
     );
     // v2 contributions may be negative (Wrong Turn). Legacy computation above

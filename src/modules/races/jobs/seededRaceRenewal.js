@@ -21,6 +21,13 @@ const {
 const {
   enqueueRaceResolution: defaultEnqueueRaceResolution,
 } = require("../services/enqueueRaceResolution");
+const {
+  acquireGlobalEnrollmentLock,
+  enrollIfGlobalEventActive,
+} = require("../../steps/services/globalEventEnrollment");
+const {
+  RaceResolutionJobV2,
+} = require("../models/raceResolutionJobV2");
 
 // Tight cadence so the midnight promote/settle handoff gap is small: at 00:00 ET
 // the just-expired race is filtered out of Featured while the next race is still
@@ -377,39 +384,70 @@ function buildRenewSeededRaces(dependencies = {}) {
     // One cron worker owns promotion. The compare-and-swap prevents a second
     // process that read the same PENDING row from duplicating box init and
     // RACE_STARTED push fanout.
-    const transition = typeof prisma.race.updateMany === "function"
-      ? await prisma.race.updateMany({
-          where: { id: race.id, status: "PENDING" },
-          data,
-        })
-      : { count: 1, ...(await prisma.race.update({ where: { id: race.id }, data })) };
-    if (transition.count !== 1) return null;
-    // A bucket is a normal seeded Race for scoring/settlement, but its durable
-    // lifecycle record must track the same transition. Keep the legacy global
-    // path byte-for-byte unchanged (it has no seededBucketId).
-    if (race.seededBucketId && prisma.seededRaceBucket) {
-      await prisma.seededRaceBucket.updateMany({
-        where: { id: race.seededBucketId, status: "PENDING" },
-        data: { status: "ACTIVE" },
-      });
-    }
-
-    const accepted = await prisma.raceParticipant.findMany({
-      where: { raceId: race.id, status: "ACCEPTED" },
-      select: { id: true, userId: true, nextBoxAtSteps: true },
-    });
-
-    // Initialize the first powerup-box threshold for opt-ins (idempotent).
-    if (race.powerupsEnabled && race.powerupStepInterval) {
-      for (const p of accepted) {
-        if (!p.nextBoxAtSteps) {
-          await prisma.raceParticipant.update({
-            where: { id: p.id },
-            data: { nextBoxAtSteps: race.powerupStepInterval },
+    const runTransaction = typeof prisma.$transaction === "function"
+      ? (callback) => prisma.$transaction(callback)
+      : (callback) => callback(prisma);
+    const accepted = await runTransaction(async (tx) => {
+      // Shared order for boundary/join/start/settlement: global enrollment,
+      // then the race writer fence, then membership/state writes.
+      await acquireGlobalEnrollmentLock(tx);
+      if (typeof tx.$queryRawUnsafe === "function") {
+        await RaceResolutionJobV2.acquireForWrite(tx, { raceId: race.id, now: startedAt });
+      }
+      const locked = typeof tx.race.findUnique === "function"
+        ? await tx.race.findUnique({
+            where: { id: race.id },
+            select: { status: true },
+          })
+        : await tx.race.findFirst({
+            where: { seedId: race.seedId, status: "PENDING" },
+            orderBy: { scheduledStartAt: "asc" },
           });
+      if (
+        !locked ||
+        locked.status !== "PENDING" ||
+        (locked.id && locked.id !== race.id)
+      ) return null;
+      const transition = typeof tx.race.updateMany === "function"
+        ? await tx.race.updateMany({
+            where: { id: race.id, status: "PENDING" },
+            data,
+          })
+        : { count: 1, ...(await tx.race.update({ where: { id: race.id }, data })) };
+      if (transition.count !== 1) return null;
+      if (race.seededBucketId && tx.seededRaceBucket) {
+        await tx.seededRaceBucket.updateMany({
+          where: { id: race.seededBucketId, status: "PENDING" },
+          data: { status: "ACTIVE" },
+        });
+      }
+      const rows = await tx.raceParticipant.findMany({
+        where: { raceId: race.id, status: "ACCEPTED" },
+        select: { id: true, userId: true, nextBoxAtSteps: true },
+      });
+      if (race.powerupsEnabled && race.powerupStepInterval) {
+        for (const p of rows) {
+          if (!p.nextBoxAtSteps) {
+            await tx.raceParticipant.update({
+              where: { id: p.id },
+              data: { nextBoxAtSteps: race.powerupStepInterval },
+            });
+          }
         }
       }
-    }
+      await enrollIfGlobalEventActive(tx, {
+        raceId: race.id,
+        userIds: rows.map((participant) => participant.userId),
+        at: now(),
+      });
+      await enqueueRaceResolution({
+        raceId: race.id,
+        reason: "RACE_START",
+        priority: "IMMEDIATE",
+      }, tx);
+      return rows;
+    });
+    if (!accepted) return null;
 
     // "Your race started" push to everyone who opted in. creatorUserId null =>
     // the RACE_STARTED handler notifies every accepted participant.
@@ -420,12 +458,6 @@ function buildRenewSeededRaces(dependencies = {}) {
       participantUserIds: accepted.map((p) => p.userId),
       isSeededBucket: Boolean(race.seededBucketId),
     });
-    await enqueueRaceResolution({
-      raceId: race.id,
-      reason: "RACE_START",
-      priority: "IMMEDIATE",
-    });
-
     return {
       id: race.id,
       name: race.name,

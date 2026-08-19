@@ -37,7 +37,7 @@ function makeParticipant(id, userId, steps) {
   };
 }
 
-function makeDeps({ globalEvents = [], participants } = {}) {
+function makeDeps({ globalEvents = [], eventsByUserId = null, viewerEvent = null, participants } = {}) {
   const ps = participants || [
     makeParticipant("rp-1", "user-1", 6000),
     makeParticipant("rp-2", "user-2", 4000),
@@ -117,6 +117,17 @@ function makeDeps({ globalEvents = [], participants } = {}) {
       },
       GlobalStepEvent: {
         async findActiveInRange() { return globalEvents; },
+        async findActiveAt(at) {
+          const instant = new Date(at).getTime();
+          return globalEvents.find((event) =>
+            new Date(event.startsAt).getTime() <= instant &&
+            instant < new Date(event.endsAt).getTime()
+          ) || null;
+        },
+        ...(eventsByUserId ? {
+          async findEligibleByRace() { return eventsByUserId; },
+          async findViewerActive() { return viewerEvent; },
+        } : {}),
       },
       expireEffects: async () => {},
       completeRace: async () => {},
@@ -149,6 +160,33 @@ test("omits globalEvent when no event is active and totals are raw", async () =>
 
   const u1Update = updates.find((u) => u.id === "rp-1");
   assert.equal(u1Update.totalSteps, 6000);
+});
+
+test("participant-specific windows boost only the eligible user and overlay only the viewer banner", async () => {
+  const event = {
+    id: "event-1",
+    entitlementId: "ent-user-1",
+    startsAt: new Date("2026-06-02T12:00:00.000Z"),
+    endsAt: new Date("2026-06-02T13:30:00.000Z"),
+    multiplier: 2,
+  };
+  const { deps } = makeDeps({
+    eventsByUserId: new Map([
+      ["user-1", [event]],
+      ["user-2", []],
+    ]),
+    viewerEvent: {
+      eventId: "event-1",
+      multiplier: 2,
+      endsAt: event.endsAt,
+    },
+  });
+  const result = await buildGetRaceProgress(deps)("user-1", "race-1", TZ);
+  assert.equal(result.participants.find((p) => p.userId === "user-1").totalSteps, 12000);
+  assert.equal(result.participants.find((p) => p.userId === "user-2").totalSteps, 4000);
+  assert.equal(result.participants.find((p) => p.userId === "user-1").currentMultiplier, 2);
+  assert.equal(result.participants.find((p) => p.userId === "user-2").currentMultiplier, 1);
+  assert.equal(result.globalEvent.endsAt, event.endsAt);
 });
 
 test("includes additive globalEvent and boosts in-window steps when active", async () => {

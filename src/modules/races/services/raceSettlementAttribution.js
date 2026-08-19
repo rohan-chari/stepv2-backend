@@ -39,19 +39,28 @@ function allocateIntegerTerms(terms, target) {
   return allocated;
 }
 
-async function computeSettlementAttributionVector({ participants = [], effects = [], globalEvents = [], score }) {
+async function computeSettlementAttributionVector({
+  participants = [], effects = [], globalEvents = [], eventsByUserId = null, score,
+}) {
   if (typeof score !== "function") throw new TypeError("canonical score callback is required");
   const orderedEffects = chronological(effects).filter((effect) => effect?.id);
-  const orderedEvents = chronological(globalEvents).filter((event) => event?.id);
+  const orderedEvents = [...new Map(
+    chronological(globalEvents).filter((event) => event?.id)
+      .map((event) => [event.id, event])
+  ).values()];
   const participantIds = participants.map((participant) => participant.id).filter(Boolean);
-  const baselineTotals = await score({ effectIds: new Set(), globalEvents: [] });
+  const baselineTotals = await score({
+    effectIds: new Set(), globalEvents: [], eventsByUserId: new Map(),
+  });
   let previous = baselineTotals;
   const rawTermsByParticipant = new Map(participantIds.map((id) => [id, []]));
 
   const includedEffects = new Set();
   for (const effect of orderedEffects) {
     includedEffects.add(effect.id);
-    const next = await score({ effectIds: new Set(includedEffects), globalEvents: [] });
+    const next = await score({
+      effectIds: new Set(includedEffects), globalEvents: [], eventsByUserId: new Map(),
+    });
     for (const participant of participants) {
       const id = participant.id;
       const rawDelta = (Number(next.get(id)) || 0) - (Number(previous.get(id)) || 0);
@@ -66,9 +75,34 @@ async function computeSettlementAttributionVector({ participants = [], effects =
   const includedEvents = [];
   for (const event of orderedEvents) {
     includedEvents.push(event);
-    const next = await score({ effectIds: new Set(includedEffects), globalEvents: [...includedEvents] });
+    const includedIds = new Set(includedEvents.map((row) => row.id));
+    const includedByUserId = eventsByUserId
+      ? new Map(participants.map((participant) => {
+          const rows = eventsByUserId instanceof Map
+            ? eventsByUserId.get(participant.userId) || []
+            : eventsByUserId[participant.userId] || [];
+          return [participant.userId, rows.filter((row) => includedIds.has(row.id))];
+        }))
+      : null;
+    const next = await score({
+      effectIds: new Set(includedEffects),
+      globalEvents: [...includedEvents],
+      eventsByUserId: includedByUserId,
+    });
     for (const participant of participants) {
       const id = participant.id;
+      const participantEvents = eventsByUserId
+        ? (eventsByUserId instanceof Map
+          ? eventsByUserId.get(participant.userId) || []
+          : eventsByUserId[participant.userId] || [])
+        : [];
+      const localEligible = event.scheduleMode !== "LOCAL_ENTITLEMENTS" ||
+        participantEvents.some((row) => row?.id === event.id || row?.eventId === event.id);
+      // Legacy-global attribution remains race-wide. Local-mode lifecycle rows
+      // exist only for a participant whose authoritative event map contains
+      // this event; otherwise a zero row would falsely increase raceCount and
+      // keep retention dependencies alive.
+      if (!localEligible) continue;
       const rawDelta = (Number(next.get(id)) || 0) - (Number(previous.get(id)) || 0);
       rawTermsByParticipant.get(id)?.push({
         kind: "global", eventId: event.id, rawDelta, orderKey: `1:${event.id}`,

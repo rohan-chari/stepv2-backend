@@ -54,18 +54,20 @@ function buildAdminMetricsBlockLoader(dependencies = {}) {
   const env = dependencies.env || process.env;
 
   async function coverage(generatedAt, start, end) {
+    // Production is iOS-only, but iOS accounts may use Apple or Google Sign-In.
+    // Authentication provider is never a platform predicate in v2 queries.
     const [row] = await prisma.$queryRaw`
       WITH epoch AS (
         SELECT id,started_at FROM admin_metrics_collection_epochs
         WHERE ended_at IS NULL ORDER BY started_at DESC LIMIT 1
-      ), ios_users AS (
-        SELECT * FROM users WHERE apple_id IS NOT NULL AND is_review_account=false
+      ), retained_users AS (
+        SELECT * FROM users WHERE is_review_account=false
       ), signup_cohorts AS (
         SELECT id,
           (created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date signup_date,
           metrics_v2_signup_eligible=true AND
             metrics_v2_signup_epoch_id=(SELECT id FROM epoch) eligible
-        FROM ios_users
+        FROM retained_users
       ), d1_cohort_dates AS (
         SELECT DISTINCT signup_date FROM signup_cohorts
         WHERE eligible AND signup_date<=CAST(${end} AS date)-2
@@ -82,14 +84,14 @@ function buildAdminMetricsBlockLoader(dependencies = {}) {
         SELECT r.* FROM races r JOIN users c ON c.id=r.creator_id
         WHERE r.seed_id IS NULL AND r.tournament_id IS NULL
           AND r.status<>'cancelled' AND r.powerups_enabled=true
-          AND c.apple_id IS NOT NULL AND c.is_review_account=false
+          AND c.is_review_account=false
           AND (SELECT COUNT(*) FROM race_participants field
             WHERE field.race_id=r.id AND field.status='accepted')>=2
       ), first_power_cohorts AS (
         SELECT rp.user_id,er.id race_id,COALESCE(er.started_at,er.created_at) race_at,
           ROW_NUMBER() OVER (PARTITION BY rp.user_id
             ORDER BY COALESCE(er.started_at,er.created_at),er.id) sequence
-        FROM race_participants rp JOIN ios_users u ON u.id=rp.user_id
+        FROM race_participants rp JOIN retained_users u ON u.id=rp.user_id
           JOIN eligible_races er ON er.id=rp.race_id
         WHERE rp.status='accepted'
       ), selected_first_power AS (
@@ -98,11 +100,11 @@ function buildAdminMetricsBlockLoader(dependencies = {}) {
             BETWEEN CAST(${start} AS date) AND CAST(${end} AS date)
       ), eligible_racers AS (
         SELECT DISTINCT rp.user_id FROM race_participants rp
-          JOIN ios_users u ON u.id=rp.user_id JOIN races r ON r.id=rp.race_id
+          JOIN retained_users u ON u.id=rp.user_id JOIN races r ON r.id=rp.race_id
           JOIN users c ON c.id=r.creator_id
         WHERE rp.status='accepted' AND r.seed_id IS NULL
           AND r.tournament_id IS NULL AND r.status<>'cancelled'
-          AND c.apple_id IS NOT NULL AND c.is_review_account=false
+          AND c.is_review_account=false
       ) SELECT
         (SELECT id FROM epoch) epoch_id,
         (SELECT started_at FROM epoch) epoch_started_at,
@@ -156,18 +158,18 @@ function buildAdminMetricsBlockLoader(dependencies = {}) {
           (CAST(${start} AS date)::timestamp AT TIME ZONE 'America/New_York')
           AT TIME ZONE 'UTC'
         ) FROM epoch) epoch_covers_selected_window,
-        (SELECT COUNT(*) FROM ios_users)::bigint total,
-        (SELECT COUNT(*) FROM ios_users WHERE metrics_v2_eligible_epoch_id=(SELECT id FROM epoch)
+        (SELECT COUNT(*) FROM retained_users)::bigint total,
+        (SELECT COUNT(*) FROM retained_users WHERE metrics_v2_eligible_epoch_id=(SELECT id FROM epoch)
           AND metrics_v2_eligible_at <= (
             (CAST(${end} AS date)::timestamp AT TIME ZONE 'America/New_York')
             AT TIME ZONE 'UTC'
           ))::bigint capable_d1,
-        (SELECT COUNT(*) FROM ios_users WHERE metrics_v2_eligible_epoch_id=(SELECT id FROM epoch)
+        (SELECT COUNT(*) FROM retained_users WHERE metrics_v2_eligible_epoch_id=(SELECT id FROM epoch)
           AND metrics_v2_eligible_at <= (
             ((CAST(${end} AS date)-6)::timestamp AT TIME ZONE 'America/New_York')
             AT TIME ZONE 'UTC'
           ))::bigint capable_d7,
-        (SELECT COUNT(*) FROM ios_users WHERE metrics_v2_eligible_epoch_id=(SELECT id FROM epoch)
+        (SELECT COUNT(*) FROM retained_users WHERE metrics_v2_eligible_epoch_id=(SELECT id FROM epoch)
           AND metrics_v2_eligible_at <= (
             ((CAST(${end} AS date)-29)::timestamp AT TIME ZONE 'America/New_York')
             AT TIME ZONE 'UTC'
@@ -185,14 +187,14 @@ function buildAdminMetricsBlockLoader(dependencies = {}) {
         (SELECT COUNT(*) FROM signup_cohorts WHERE eligible
           AND signup_date IN (SELECT signup_date FROM d30_cohort_dates))::bigint signup_eligible_d30,
         (SELECT COUNT(*) FROM eligible_racers)::bigint leaderboard_total,
-        (SELECT COUNT(*) FROM eligible_racers er JOIN ios_users u ON u.id=er.user_id
+        (SELECT COUNT(*) FROM eligible_racers er JOIN retained_users u ON u.id=er.user_id
           WHERE u.metrics_v2_eligible_epoch_id=(SELECT id FROM epoch)
             AND u.metrics_v2_eligible_at <= (
               (CAST(${start} AS date)::timestamp AT TIME ZONE 'America/New_York')
               AT TIME ZONE 'UTC'
             ))::bigint leaderboard_eligible,
-        (SELECT COUNT(*) FROM ios_users)::bigint notification_total,
-        (SELECT COUNT(DISTINCT u.id) FROM ios_users u JOIN device_tokens t ON t.user_id=u.id
+        (SELECT COUNT(*) FROM retained_users)::bigint notification_total,
+        (SELECT COUNT(DISTINCT u.id) FROM retained_users u JOIN device_tokens t ON t.user_id=u.id
           WHERE t.platform='ios' AND t.admin_metrics_open_capable=true
             AND t.admin_metrics_open_epoch_id=(SELECT id FROM epoch))::bigint notification_eligible,
         (SELECT COUNT(*) FROM selected_first_power)::bigint first_power_total,
@@ -280,7 +282,7 @@ function buildAdminMetricsBlockLoader(dependencies = {}) {
       ), eligible_activity AS (
         SELECT a.*,u.metrics_v2_eligible_at
         FROM user_activity_days a JOIN users u ON u.id=a.user_id
-        WHERE u.apple_id IS NOT NULL AND u.is_review_account=false
+        WHERE u.is_review_account=false
           AND u.metrics_v2_eligible_epoch_id=(SELECT id FROM epoch)
           AND a.activity_date BETWEEN CAST(${start} AS date) AND CAST(${end} AS date)
       )
@@ -316,7 +318,7 @@ function buildAdminMetricsBlockLoader(dependencies = {}) {
         SELECT u.id,
           (u.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date signup_date
         FROM users u
-        WHERE u.apple_id IS NOT NULL AND u.is_review_account=false
+        WHERE u.is_review_account=false
           AND u.metrics_v2_signup_eligible=true
           AND u.metrics_v2_signup_epoch_id=(SELECT id FROM admin_metrics_collection_epochs WHERE ended_at IS NULL ORDER BY started_at DESC LIMIT 1)
       )
@@ -346,25 +348,25 @@ function buildAdminMetricsBlockLoader(dependencies = {}) {
   async function loadSummary({ start, end, coverageData }) {
     const [row] = await prisma.$queryRaw`
       SELECT
-        (SELECT COUNT(*) FROM users u WHERE u.apple_id IS NOT NULL AND u.is_review_account=false)::bigint AS total_signups,
-        (SELECT COUNT(*) FROM users u WHERE u.apple_id IS NOT NULL AND u.is_review_account=false
+        (SELECT COUNT(*) FROM users u WHERE u.is_review_account=false)::bigint AS total_signups,
+        (SELECT COUNT(*) FROM users u WHERE u.is_review_account=false
           AND (u.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date=CAST(${end} AS date))::bigint AS signups_today,
-        (SELECT COUNT(*) FROM users u WHERE u.apple_id IS NOT NULL AND u.is_review_account=false
+        (SELECT COUNT(*) FROM users u WHERE u.is_review_account=false
           AND (u.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date BETWEEN CAST(${end} AS date)-6 AND CAST(${end} AS date))::bigint AS signups_7d,
         (SELECT COUNT(DISTINCT e.actor_user_id) FROM race_powerup_events e JOIN users u ON u.id=e.actor_user_id
-          WHERE e.event_type='MYSTERY_BOX_OPENED' AND u.apple_id IS NOT NULL AND u.is_review_account=false
+          WHERE e.event_type='MYSTERY_BOX_OPENED' AND u.is_review_account=false
           AND (e.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date=CAST(${end} AS date))::bigint AS box_openers,
         (SELECT COUNT(*) FROM races r JOIN users c ON c.id=r.creator_id
           WHERE r.status='active' AND r.seed_id IS NULL AND r.tournament_id IS NULL
-          AND c.apple_id IS NOT NULL AND c.is_review_account=false)::bigint AS active_non_featured,
+          AND c.is_review_account=false)::bigint AS active_non_featured,
         (SELECT COUNT(DISTINCT rp.user_id) FROM race_participants rp JOIN users u ON u.id=rp.user_id
           JOIN races r ON r.id=rp.race_id JOIN users c ON c.id=r.creator_id
           WHERE rp.status='accepted' AND r.status='active' AND r.seed_id IS NULL AND r.tournament_id IS NULL
-          AND u.apple_id IS NOT NULL AND u.is_review_account=false AND c.apple_id IS NOT NULL AND c.is_review_account=false)::bigint AS active_users,
+          AND u.is_review_account=false AND c.is_review_account=false)::bigint AS active_users,
         (SELECT COUNT(*) FROM races r JOIN race_seeds s ON s.id=r.seed_id
           WHERE r.status='active' AND s.cadence='daily')::bigint AS active_daily,
         (SELECT COUNT(*) FROM races r JOIN users c ON c.id=r.creator_id
-          WHERE r.seed_id IS NULL AND r.tournament_id IS NULL AND c.apple_id IS NOT NULL AND c.is_review_account=false
+          WHERE r.seed_id IS NULL AND r.tournament_id IS NULL AND c.is_review_account=false
           AND (r.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date=CAST(${end} AS date))::bigint AS created_today`;
     const forwardAvailable = coverageData.metricCoverage.observedForegroundDau.status === "mature";
     const fg = forwardAvailable ? await foregroundCounts(start, end) : {};
@@ -403,7 +405,7 @@ function buildAdminMetricsBlockLoader(dependencies = {}) {
       ),
       signups AS (
         SELECT (created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date d, COUNT(*)::bigint n
-        FROM users WHERE apple_id IS NOT NULL AND is_review_account=false
+        FROM users WHERE is_review_account=false
           AND created_at >= (
             (CAST(${start} AS date)::timestamp AT TIME ZONE 'America/New_York')
             AT TIME ZONE 'UTC'
@@ -417,7 +419,7 @@ function buildAdminMetricsBlockLoader(dependencies = {}) {
         SELECT a.activity_date d, COUNT(DISTINCT a.user_id)::bigint n
         FROM user_activity_days a JOIN users u ON u.id=a.user_id
         WHERE a.activity_date BETWEEN CAST(${start} AS date) AND CAST(${end} AS date)
-          AND u.apple_id IS NOT NULL AND u.is_review_account=false
+          AND u.is_review_account=false
           AND u.metrics_v2_eligible_epoch_id=(SELECT id FROM epoch)
           AND u.metrics_v2_eligible_at <= (
             (a.activity_date::timestamp AT TIME ZONE 'America/New_York')
@@ -465,7 +467,7 @@ function buildAdminMetricsBlockLoader(dependencies = {}) {
         SELECT operational_at FROM metric_coverage_starts
         WHERE metric=${coverageMetric}
       ), owned_codes AS (
-        SELECT referral_code code FROM users WHERE apple_id IS NOT NULL AND is_review_account=false AND referral_code IS NOT NULL
+        SELECT referral_code code FROM users WHERE is_review_account=false AND referral_code IS NOT NULL
       ), opens AS (
         SELECT lo.*, LAG(lo.created_at) OVER (PARTITION BY lo.code,lo.ip_hash_version,lo.ip_hash ORDER BY lo.created_at) prior
         FROM link_opens lo JOIN owned_codes oc ON oc.code=lo.code
@@ -475,7 +477,7 @@ function buildAdminMetricsBlockLoader(dependencies = {}) {
       ), signup_cohort AS (
         SELECT r.id,r.status,r.referee_id FROM referrals r JOIN users u ON u.id=r.referee_id
         JOIN users owner ON owner.id=r.referrer_id
-        WHERE u.apple_id IS NOT NULL AND u.is_review_account=false AND owner.apple_id IS NOT NULL AND owner.is_review_account=false
+        WHERE u.is_review_account=false AND owner.is_review_account=false
           AND (u.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date BETWEEN CAST(${start} AS date) AND CAST(${end} AS date)
       ) SELECT
         (SELECT operational_at FROM coverage) hmac_operational_at,
@@ -519,7 +521,7 @@ function buildAdminMetricsBlockLoader(dependencies = {}) {
         FROM activation_events e JOIN users u ON u.id=e.user_id
         WHERE e.name='onboarding_started' AND e.platform='ios'
           AND e.onboarding_session_id IS NOT NULL
-          AND u.apple_id IS NOT NULL AND u.is_review_account=false
+          AND u.is_review_account=false
           AND e.occurred_at <= CAST(${generatedAt} AS timestamp)-interval '24 hours'
           AND (e.occurred_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date BETWEEN CAST(${cohortStart} AS date) AND CAST(${end} AS date)
         ORDER BY e.onboarding_session_id,e.occurred_at
@@ -553,10 +555,10 @@ function buildAdminMetricsBlockLoader(dependencies = {}) {
     const rows = await prisma.$queryRaw`
       WITH dates AS (SELECT generate_series(CAST(${start} AS date),CAST(${end} AS date),interval '1 day')::date d), eligible_races AS (
         SELECT r.* FROM races r JOIN users c ON c.id=r.creator_id WHERE r.seed_id IS NULL AND r.tournament_id IS NULL
-          AND r.status<>'cancelled' AND c.apple_id IS NOT NULL AND c.is_review_account=false
+          AND r.status<>'cancelled' AND c.is_review_account=false
       ) SELECT to_char(d.d,'YYYY-MM-DD') date,
         (SELECT COUNT(DISTINCT rp.user_id) FROM eligible_races r JOIN race_participants rp ON rp.race_id=r.id JOIN users u ON u.id=rp.user_id
-          WHERE rp.status='accepted' AND u.apple_id IS NOT NULL AND u.is_review_account=false AND r.started_at IS NOT NULL
+          WHERE rp.status='accepted' AND u.is_review_account=false AND r.started_at IS NOT NULL
           AND (r.started_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York') < d.d+interval '1 day'
           AND COALESCE((r.completed_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York'),
             (CAST(${generatedAt} AS timestamp) AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York'))>d.d)::bigint live,
@@ -564,7 +566,7 @@ function buildAdminMetricsBlockLoader(dependencies = {}) {
         (SELECT COUNT(*) FROM eligible_races r WHERE (r.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date=d.d)::bigint created FROM dates d ORDER BY d.d`;
     const friendRows = await prisma.$queryRaw`
       WITH c AS (SELECT u.id,(SELECT COUNT(*) FROM friendships f WHERE f.status='ACCEPTED' AND (f.requester_id=u.id OR f.addressee_id=u.id)) n
-        FROM users u WHERE u.apple_id IS NOT NULL AND u.is_review_account=false), b AS (
+        FROM users u WHERE u.is_review_account=false), b AS (
         SELECT CASE WHEN n=0 THEN '0' WHEN n=1 THEN '1' WHEN n=2 THEN '2' WHEN n<=5 THEN '3-5' ELSE '6+' END bucket,COUNT(*)::bigint count FROM c GROUP BY 1)
       SELECT * FROM b`;
     const byBucket = Object.fromEntries(friendRows.map((r) => [r.bucket, number(r.count)]));
@@ -576,7 +578,7 @@ function buildAdminMetricsBlockLoader(dependencies = {}) {
       ), mature_signups AS (
         SELECT u.id,u.created_at
         FROM users u
-        WHERE u.apple_id IS NOT NULL AND u.is_review_account=false
+        WHERE u.is_review_account=false
           AND u.metrics_v2_signup_eligible=true
           AND u.metrics_v2_signup_epoch_id=(SELECT id FROM epoch)
           AND (u.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date
@@ -594,7 +596,7 @@ function buildAdminMetricsBlockLoader(dependencies = {}) {
           SELECT 1 FROM races r JOIN users c ON c.id=r.creator_id
           WHERE r.creator_id=mature_signups.id AND r.seed_id IS NULL
             AND r.tournament_id IS NULL AND r.status<>'cancelled'
-            AND c.apple_id IS NOT NULL AND c.is_review_account=false
+            AND c.is_review_account=false
             AND r.created_at>=mature_signups.created_at
             AND r.created_at<=mature_signups.created_at+interval '24 hours'
           UNION ALL
@@ -602,7 +604,7 @@ function buildAdminMetricsBlockLoader(dependencies = {}) {
             JOIN users c ON c.id=r.creator_id
           WHERE rp.user_id=mature_signups.id AND rp.status='accepted'
             AND r.seed_id IS NULL AND r.tournament_id IS NULL
-            AND r.status<>'cancelled' AND c.apple_id IS NOT NULL
+            AND r.status<>'cancelled'
             AND c.is_review_account=false
             AND rp.joined_at>=mature_signups.created_at
             AND rp.joined_at<=mature_signups.created_at+interval '24 hours'
@@ -620,8 +622,8 @@ function buildAdminMetricsBlockLoader(dependencies = {}) {
           ) sequence
         FROM race_participants rp JOIN users u ON u.id=rp.user_id
           JOIN races r ON r.id=rp.race_id JOIN users c ON c.id=r.creator_id
-        WHERE rp.status='accepted' AND u.apple_id IS NOT NULL
-          AND u.is_review_account=false AND c.apple_id IS NOT NULL
+        WHERE rp.status='accepted'
+          AND u.is_review_account=false
           AND c.is_review_account=false AND r.seed_id IS NULL
           AND r.tournament_id IS NULL AND r.status<>'cancelled'
           AND r.powerups_enabled=true
@@ -669,7 +671,7 @@ function buildAdminMetricsBlockLoader(dependencies = {}) {
         FROM race_participants rp JOIN users u ON u.id=rp.user_id JOIN races r ON r.id=rp.race_id JOIN users c ON c.id=r.creator_id
         WHERE rp.status='accepted' AND r.seed_id IS NULL AND r.tournament_id IS NULL
           AND r.status<>'cancelled'
-          AND u.apple_id IS NOT NULL AND u.is_review_account=false AND c.apple_id IS NOT NULL AND c.is_review_account=false
+          AND u.is_review_account=false AND c.is_review_account=false
       ), firsts AS (
         SELECT * FROM ranked WHERE rn=1 AND finished_at IS NOT NULL
           AND forfeited_at IS NULL AND completed_at IS NOT NULL
@@ -680,12 +682,12 @@ function buildAdminMetricsBlockLoader(dependencies = {}) {
           AND (completed_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date BETWEEN CAST(${start} AS date) AND CAST(${end} AS date))::bigint d7_den,
         COUNT(*) FILTER(WHERE completed_at<=CAST(${generatedAt} AS timestamp)-interval '7 days'
           AND (completed_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date BETWEEN CAST(${start} AS date) AND CAST(${end} AS date)
-          AND EXISTS(SELECT 1 FROM race_participants rp JOIN races r ON r.id=rp.race_id JOIN users c ON c.id=r.creator_id WHERE rp.user_id=firsts.user_id AND rp.status='accepted' AND r.id<>firsts.race_id AND r.seed_id IS NULL AND r.tournament_id IS NULL AND r.status<>'cancelled' AND c.apple_id IS NOT NULL AND c.is_review_account=false AND rp.joined_at>firsts.completed_at AND rp.joined_at<=firsts.completed_at+interval '7 days'))::bigint d7_num,
+          AND EXISTS(SELECT 1 FROM race_participants rp JOIN races r ON r.id=rp.race_id JOIN users c ON c.id=r.creator_id WHERE rp.user_id=firsts.user_id AND rp.status='accepted' AND r.id<>firsts.race_id AND r.seed_id IS NULL AND r.tournament_id IS NULL AND r.status<>'cancelled' AND c.is_review_account=false AND rp.joined_at>firsts.completed_at AND rp.joined_at<=firsts.completed_at+interval '7 days'))::bigint d7_num,
         COUNT(*) FILTER(WHERE completed_at<=CAST(${generatedAt} AS timestamp)-interval '30 days'
           AND (completed_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date BETWEEN CAST(${start} AS date) AND CAST(${end} AS date))::bigint d30_den,
         COUNT(*) FILTER(WHERE completed_at<=CAST(${generatedAt} AS timestamp)-interval '30 days'
           AND (completed_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date BETWEEN CAST(${start} AS date) AND CAST(${end} AS date)
-          AND EXISTS(SELECT 1 FROM race_participants rp JOIN races r ON r.id=rp.race_id JOIN users c ON c.id=r.creator_id WHERE rp.user_id=firsts.user_id AND rp.status='accepted' AND r.id<>firsts.race_id AND r.seed_id IS NULL AND r.tournament_id IS NULL AND r.status<>'cancelled' AND c.apple_id IS NOT NULL AND c.is_review_account=false AND rp.joined_at>firsts.completed_at AND rp.joined_at<=firsts.completed_at+interval '30 days'))::bigint d30_num
+          AND EXISTS(SELECT 1 FROM race_participants rp JOIN races r ON r.id=rp.race_id JOIN users c ON c.id=r.creator_id WHERE rp.user_id=firsts.user_id AND rp.status='accepted' AND r.id<>firsts.race_id AND r.seed_id IS NULL AND r.tournament_id IS NULL AND r.status<>'cancelled' AND c.is_review_account=false AND rp.joined_at>firsts.completed_at AND rp.joined_at<=firsts.completed_at+interval '30 days'))::bigint d30_num
       FROM firsts`;
     const rep=repeat[0]||{};
     return { retention: {
@@ -701,12 +703,12 @@ function buildAdminMetricsBlockLoader(dependencies = {}) {
       WITH dates AS (SELECT generate_series(CAST(${start} AS date),CAST(${end} AS date),interval '1 day')::date d), er AS (
         SELECT r.* FROM races r JOIN users c ON c.id=r.creator_id
         WHERE r.seed_id IS NULL AND r.tournament_id IS NULL
-          AND r.status<>'cancelled' AND c.apple_id IS NOT NULL
+          AND r.status<>'cancelled'
           AND c.is_review_account=false
       ), em AS (
         SELECT rp.* FROM race_participants rp JOIN er r ON r.id=rp.race_id
           JOIN users u ON u.id=rp.user_id
-        WHERE rp.status='accepted' AND u.apple_id IS NOT NULL
+        WHERE rp.status='accepted'
           AND u.is_review_account=false
       )
       SELECT to_char(d.d,'YYYY-MM-DD') date,
@@ -715,22 +717,22 @@ function buildAdminMetricsBlockLoader(dependencies = {}) {
         (SELECT COUNT(DISTINCT rp.user_id) FROM em rp WHERE (rp.joined_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date=d.d)::bigint new_participants,
         (SELECT COUNT(DISTINCT rp.user_id) FROM em rp JOIN er r ON r.id=rp.race_id WHERE r.started_at IS NOT NULL AND (r.started_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')<d.d+interval '1 day' AND COALESCE((r.completed_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York'),(CAST(${generatedAt} AS timestamp) AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York'))>d.d)::bigint live,
         (SELECT COUNT(*) FROM race_powerup_events e JOIN em rp ON rp.race_id=e.race_id AND rp.user_id=e.actor_user_id WHERE e.event_type='POWERUP_USED' AND (e.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date=d.d)::bigint powers,
-        (SELECT COALESCE(SUM(GREATEST(ct.amount,0)),0) FROM coin_transactions ct JOIN users u ON u.id=ct.user_id WHERE u.apple_id IS NOT NULL AND u.is_review_account=false AND (ct.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date=d.d)::bigint credits,
-        (SELECT COALESCE(SUM(GREATEST(-ct.amount,0)),0) FROM coin_transactions ct JOIN users u ON u.id=ct.user_id WHERE u.apple_id IS NOT NULL AND u.is_review_account=false AND (ct.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date=d.d)::bigint debits,
-        (SELECT COUNT(*) FROM daily_reward_claims c JOIN users u ON u.id=c.user_id WHERE u.apple_id IS NOT NULL AND u.is_review_account=false AND (c.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date=d.d)::bigint claims,
-        (SELECT COUNT(DISTINCT c.user_id) FROM daily_reward_claims c JOIN users u ON u.id=c.user_id WHERE u.apple_id IS NOT NULL AND u.is_review_account=false AND (c.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date=d.d)::bigint claimers FROM dates d ORDER BY d.d`;
+        (SELECT COALESCE(SUM(GREATEST(ct.amount,0)),0) FROM coin_transactions ct JOIN users u ON u.id=ct.user_id WHERE u.is_review_account=false AND (ct.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date=d.d)::bigint credits,
+        (SELECT COALESCE(SUM(GREATEST(-ct.amount,0)),0) FROM coin_transactions ct JOIN users u ON u.id=ct.user_id WHERE u.is_review_account=false AND (ct.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date=d.d)::bigint debits,
+        (SELECT COUNT(*) FROM daily_reward_claims c JOIN users u ON u.id=c.user_id WHERE u.is_review_account=false AND (c.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date=d.d)::bigint claims,
+        (SELECT COUNT(DISTINCT c.user_id) FROM daily_reward_claims c JOIN users u ON u.id=c.user_id WHERE u.is_review_account=false AND (c.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date=d.d)::bigint claimers FROM dates d ORDER BY d.d`;
     const [stats] = await prisma.$queryRaw`
       WITH er AS (
         SELECT r.* FROM races r JOIN users c ON c.id=r.creator_id
         WHERE r.seed_id IS NULL AND r.tournament_id IS NULL
-          AND r.status<>'cancelled' AND c.apple_id IS NOT NULL
+          AND r.status<>'cancelled'
           AND c.is_review_account=false
       ), em AS (
         SELECT rp.* FROM race_participants rp JOIN er r ON r.id=rp.race_id
           JOIN users u ON u.id=rp.user_id
-        WHERE rp.status='accepted' AND u.apple_id IS NOT NULL
+        WHERE rp.status='accepted'
           AND u.is_review_account=false
-      ), balances AS (SELECT coins::numeric coins FROM users WHERE apple_id IS NOT NULL AND is_review_account=false)
+      ), balances AS (SELECT coins::numeric coins FROM users WHERE is_review_account=false)
       SELECT (SELECT COUNT(*) FROM er WHERE started_at IS NOT NULL
           AND (started_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date BETWEEN CAST(${start} AS date) AND CAST(${end} AS date))::bigint started,
         (SELECT COUNT(*) FROM em rp JOIN er r ON r.id=rp.race_id WHERE r.started_at IS NOT NULL
@@ -755,7 +757,7 @@ function buildAdminMetricsBlockLoader(dependencies = {}) {
         COUNT(DISTINCT d.id) FILTER (WHERE d.opened_at IS NOT NULL)::bigint numerator
       FROM push_deliveries d JOIN users u ON u.id=d.user_id
       WHERE d.open_capable=true AND d.provider_accepted_at IS NOT NULL
-        AND u.apple_id IS NOT NULL AND u.is_review_account=false
+        AND u.is_review_account=false
         AND d.provider_accepted_at >= GREATEST(
           CAST(${generatedAt} AS timestamp)-interval '7 days',
           (SELECT started_at FROM epoch)
@@ -768,25 +770,25 @@ function buildAdminMetricsBlockLoader(dependencies = {}) {
         WHERE ended_at IS NULL ORDER BY started_at DESC LIMIT 1
       ), capable_active AS (
         SELECT DISTINCT u.id FROM users u JOIN user_activity_days a ON a.user_id=u.id
-        WHERE u.apple_id IS NOT NULL AND u.is_review_account=false
+        WHERE u.is_review_account=false
           AND u.metrics_v2_eligible_epoch_id=(SELECT id FROM epoch)
           AND u.metrics_v2_eligible_at<=CAST(${start} AS date)
           AND a.activity_date BETWEEN CAST(${start} AS date) AND CAST(${end} AS date)
       ), capable_racers AS (
         SELECT DISTINCT u.id FROM users u JOIN race_participants rp ON rp.user_id=u.id
           JOIN races r ON r.id=rp.race_id JOIN users c ON c.id=r.creator_id
-        WHERE u.apple_id IS NOT NULL AND u.is_review_account=false
+        WHERE u.is_review_account=false
           AND u.metrics_v2_eligible_epoch_id=(SELECT id FROM epoch)
           AND u.metrics_v2_eligible_at<=CAST(${start} AS date)
           AND rp.status='accepted' AND r.seed_id IS NULL
           AND r.tournament_id IS NULL AND r.status<>'cancelled'
-          AND c.apple_id IS NOT NULL AND c.is_review_account=false
+          AND c.is_review_account=false
       ) SELECT
         (SELECT COUNT(*) FROM capable_active)::bigint active_denominator,
         (SELECT COUNT(*) FROM capable_active a JOIN race_participants rp ON rp.user_id=a.id
           JOIN races r ON r.id=rp.race_id JOIN users c ON c.id=r.creator_id
           WHERE rp.status='accepted' AND r.seed_id IS NULL AND r.tournament_id IS NULL
-            AND r.status<>'cancelled' AND c.apple_id IS NOT NULL AND c.is_review_account=false
+            AND r.status<>'cancelled' AND c.is_review_account=false
             AND r.started_at IS NOT NULL
             AND (r.started_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date<=CAST(${end} AS date)
             AND COALESCE((r.completed_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date,CAST(${end} AS date)+1)>CAST(${start} AS date))::bigint active_memberships,
@@ -810,13 +812,13 @@ function buildAdminMetricsBlockLoader(dependencies = {}) {
       FROM races r JOIN race_seeds s ON s.id=r.seed_id
         JOIN race_participants rp ON rp.race_id=r.id JOIN users u ON u.id=rp.user_id
       WHERE rp.status='accepted' AND r.status<>'cancelled'
-        AND u.apple_id IS NOT NULL AND u.is_review_account=false
+        AND u.is_review_account=false
         AND s.cadence IN ('daily','weekly') GROUP BY s.cadence`;
     const [rankedRow] = await prisma.$queryRaw`
       SELECT COUNT(DISTINCT m.user_id)::bigint users
       FROM ranked_cohort_members m JOIN ranked_weeks w ON w.id=m.week_id
         JOIN users u ON u.id=m.user_id
-      WHERE u.apple_id IS NOT NULL AND u.is_review_account=false
+      WHERE u.is_review_account=false
         AND w.starts_on<CAST(${end} AS date)+1 AND w.ends_on>CAST(${start} AS date)`;
     const pub=number(stats.public_count),vis=number(stats.visibility_total);
     const daily=rows.map(r=>({date:r.date,racesCreated:number(r.created),racesStarted:number(r.started),newParticipants:number(r.new_participants),liveRaceParticipants:number(r.live),powerupsUsed:number(r.powers),grossCoinCredits:number(r.credits),grossCoinDebits:number(r.debits),dailyRewardClaims:number(r.claims),distinctDailyRewardClaimers:number(r.claimers)}));
@@ -852,7 +854,7 @@ function buildAdminMetricsBlockLoader(dependencies = {}) {
       WITH dates AS (SELECT generate_series(CAST(${start} AS date),CAST(${end} AS date),interval '1 day')::date d),base AS (
         SELECT (g.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date d,g.reward_kind,g.user_id
         FROM ad_reward_grants g JOIN users u ON u.id=g.user_id
-        WHERE u.apple_id IS NOT NULL AND u.is_review_account=false
+        WHERE u.is_review_account=false
           AND g.created_at >= (
             (CAST(${start} AS date)::timestamp AT TIME ZONE 'America/New_York')
             AT TIME ZONE 'UTC'
@@ -874,7 +876,7 @@ function buildAdminMetricsBlockLoader(dependencies = {}) {
   async function loadReleaseAdoption() {
     const rows=await prisma.$queryRaw`
       SELECT COALESCE(last_app_version,'unknown') version,COUNT(*)::bigint accounts
-      FROM users WHERE apple_id IS NOT NULL AND is_review_account=false AND last_seen_at>=now()-interval '30 days'
+      FROM users WHERE is_review_account=false AND last_seen_at>=now()-interval '30 days'
       GROUP BY 1 ORDER BY accounts DESC,version`;
     return {releaseAdoption:{windowDays:30,versions:rows.map(r=>({version:r.version,accountsSeen:number(r.accounts)}))}};
   }

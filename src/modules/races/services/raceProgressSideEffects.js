@@ -39,6 +39,12 @@
 const { RaceActiveEffect } = require("../../powerups/models/raceActiveEffect");
 const { GlobalStepEvent } = require("../../steps/models/globalStepEvent");
 const {
+  GlobalStepEventEntitlement,
+} = require("../../steps/models/globalStepEventEntitlement");
+const {
+  eventsForUser,
+} = require("../../steps/services/globalStepEventEntitlement");
+const {
   expireEffects: defaultExpireEffects,
 } = require("../../powerups/commands/expireEffects");
 const {
@@ -56,6 +62,8 @@ const {
 function buildRaceProgressPostCommit(dependencies = {}) {
   const effectModel = dependencies.RaceActiveEffect || RaceActiveEffect;
   const globalStepEventModel = dependencies.GlobalStepEvent || GlobalStepEvent;
+  const entitlementModel =
+    dependencies.GlobalStepEventEntitlement || GlobalStepEventEntitlement;
   const expireEffectsFn = dependencies.expireEffects || defaultExpireEffects;
   const evaluateAlert =
     dependencies.evaluateHighMultiplierAlert || defaultEvaluateHighMultiplierAlert;
@@ -129,20 +137,25 @@ function buildRaceProgressPostCommit(dependencies = {}) {
 
       const nowTime = now();
       const nowMs = nowTime.getTime();
-      let globalEvents = [];
+      let eventsByUserId = new Map(accepted.map((p) => [p.userId, []]));
       try {
-        globalEvents =
-          (await globalStepEventModel.findActiveInRange(race.startedAt, nowTime)) ||
-          [];
+        if (typeof entitlementModel.findEligibleByRace === "function") {
+          eventsByUserId = await entitlementModel.findEligibleByRace({
+            raceId,
+            userIds: accepted.map((p) => p.userId),
+            rangeStart: race.startedAt,
+            rangeEnd: nowTime,
+          });
+        } else {
+          const legacyEvents =
+            (await globalStepEventModel.findActiveInRange(race.startedAt, nowTime)) || [];
+          eventsByUserId = new Map(
+            accepted.map((p) => [p.userId, legacyEvents])
+          );
+        }
       } catch {
-        globalEvents = [];
+        eventsByUserId = new Map(accepted.map((p) => [p.userId, []]));
       }
-      const liveEvent = globalEvents.find((ev) => {
-        const s = new Date(ev.startsAt).getTime();
-        const e = new Date(ev.endsAt).getTime();
-        return s <= nowMs && nowMs < e && Number(ev.multiplier) > 1;
-      });
-      const eventMult = liveEvent ? Number(liveEvent.multiplier) : 1;
 
       const activeForAlert = accepted.filter((p) => !p.finishedAt && !p.forfeitedAt);
       for (const p of accepted) {
@@ -150,6 +163,12 @@ function buildRaceProgressPostCommit(dependencies = {}) {
         const raw = frozen
           ? 1
           : signedMultiplierForEffects(byParticipant.get(p.id) || [], nowMs);
+        const liveEvent = eventsForUser(eventsByUserId, p.userId).find((ev) => {
+          const s = new Date(ev.startsAt).getTime();
+          const e = new Date(ev.endsAt).getTime();
+          return s <= nowMs && nowMs < e && Number(ev.multiplier) > 1;
+        });
+        const eventMult = liveEvent ? Number(liveEvent.multiplier) : 1;
         try {
           const outcome = await evaluateAlert({
             participant: p,

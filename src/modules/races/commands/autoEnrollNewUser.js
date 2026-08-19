@@ -1,6 +1,10 @@
 const { prisma: defaultPrisma } = require("../../../db");
 const { eventBus } = require("../../../shared/events/eventBus");
 const { hashAppleSub } = require("../../users/appleSubHash");
+const {
+  acquireGlobalEnrollmentLock,
+  enrollIfGlobalEventActive,
+} = require("../../steps/services/globalEventEnrollment");
 
 // Signup starter-race enrollment (product decision 2026-07-12): a brand-new
 // account must never land on an empty races list. Called best-effort from the
@@ -32,6 +36,28 @@ function buildAutoEnrollNewUser(dependencies = {}) {
 
   const WELCOME_BOXES = 3;
   const DEFAULT_POWERUP_SLOTS = 3;
+
+  async function createAcceptedParticipant(race, userId) {
+    if (race.status !== "ACTIVE") {
+      return db.raceParticipant.create({
+        data: { raceId: race.id, userId, status: "ACCEPTED" },
+      });
+    }
+    return db.$transaction(async (tx) => {
+      // One lock order for every membership writer: enrollment advisory lock
+      // before participant/event-impact rows.
+      await acquireGlobalEnrollmentLock(tx);
+      const participant = await tx.raceParticipant.create({
+        data: { raceId: race.id, userId, status: "ACCEPTED" },
+      });
+      await enrollIfGlobalEventActive(tx, {
+        raceId: race.id,
+        userIds: [userId],
+        at: new Date(),
+      });
+      return participant;
+    });
+  }
 
   async function remainingCapacity(race) {
     if (race.maxParticipants == null) return Infinity;
@@ -126,9 +152,7 @@ function buildAutoEnrollNewUser(dependencies = {}) {
         const capacity = await remainingCapacity(race);
         if (capacity <= 0) continue;
         try {
-          const participant = await db.raceParticipant.create({
-            data: { raceId: race.id, userId: user.id, status: "ACCEPTED" },
-          });
+          const participant = await createAcceptedParticipant(race, user.id);
           joinedCount += 1;
           if (!welcomeTarget && race.status === "ACTIVE") {
             welcomeTarget = { race, participant };
@@ -152,9 +176,7 @@ function buildAutoEnrollNewUser(dependencies = {}) {
         const fallback = races.find((race) => race.status === "ACTIVE");
         if (fallback) {
           try {
-            const participant = await db.raceParticipant.create({
-              data: { raceId: fallback.id, userId: user.id, status: "ACCEPTED" },
-            });
+            const participant = await createAcceptedParticipant(fallback, user.id);
             joinedCount += 1;
             welcomeTarget = { race: fallback, participant };
             console.warn(

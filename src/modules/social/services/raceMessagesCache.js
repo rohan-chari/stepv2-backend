@@ -108,11 +108,18 @@ async function loadRows(raceId, kind, hiddenSystemEventTypes) {
       ...(hiddenSystemEventTypes && hiddenSystemEventTypes.length > 0
         ? { eventType: { notIn: hiddenSystemEventTypes } }
         : {}),
-      NOT: {
-        eventType: "POWERUP_EARNED",
-        powerupType: "MYSTERY_BOX",
-        description: { in: WELCOME_MYSTERY_BOX_DESCRIPTIONS },
-      },
+      NOT: [
+        {
+          eventType: "POWERUP_EARNED",
+          powerupType: "MYSTERY_BOX",
+          description: { in: WELCOME_MYSTERY_BOX_DESCRIPTIONS },
+        },
+        {
+          eventType: "POWERUP_USED",
+          powerupType: "TRAIL_MINE",
+          description: { contains: " planted a " },
+        },
+      ],
     },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: CACHE_ROW_CAP,
@@ -206,7 +213,18 @@ async function getRows({ raceId, kind, enabled, hiddenSystemEventTypes }) {
 
   const cached = await redisCache.getJSON(listKey);
   if (cached && Array.isArray(cached.rows)) {
-    return { rows: cached.rows, fromCache: true };
+    const containsNewlyHiddenPlant =
+      kind === "SYSTEM" &&
+      cached.rows.some(
+        (row) =>
+          row?.metadata?.hiddenFromFeed === true ||
+          (row?.eventType === "POWERUP_USED" &&
+            row?.powerupType === "TRAIL_MINE" &&
+            row?.metadata?.ownerParticipantId != null)
+      );
+    if (!containsNewlyHiddenPlant) {
+      return { rows: cached.rows, fromCache: true };
+    }
   }
 
   // Cold rebuild under WATCH.

@@ -36,7 +36,7 @@ function buildPushDeliveryAttribution(dependencies = {}) {
         }),
       ]);
       const capable =
-        user?.appleId && user.isReviewAccount !== true && epoch &&
+        user && user.isReviewAccount !== true && epoch &&
         (tokens || []).some((token) =>
           token.platform === "ios" &&
           token.adminMetricsOpenCapable === true &&

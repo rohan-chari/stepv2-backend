@@ -9,10 +9,17 @@ across three load-test runs, then shipped to prod. Both `steps-tracker` and
 section at the bottom for the final state; everything above it is the
 original pre-implementation plan, kept for the reasoning trail.
 
+> **Historical load-test reference:** The frontend
+> `k6/staging-load-test.js` harness cited below was retired in 2026-08. The
+> dated measurements remain evidence for this plan, but the command is not a
+> current capacity workflow. Use the frontend repository's `k6/README.md` for
+> the supported smoke/find/confirm/soak workflow.
+
 ## How we got here
 
-A k6 load test against staging (`k6/staging-load-test.js` in the frontend
-repo) on 2026-08-15 found two stacked bottlenecks on the droplet
+A k6 load test against staging (the since-retired
+`k6/staging-load-test.js` in the frontend repo) on 2026-08-15 found two
+stacked bottlenecks on the droplet
 (`167.172.225.16`, 2 vCPU / 2 GB RAM / 60 GB disk as of today, shared by
 `steps-tracker` (prod) and `steps-tracker-staging` as separate pm2
 processes):

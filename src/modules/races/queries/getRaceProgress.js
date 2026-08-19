@@ -28,6 +28,7 @@ const { rawPositionFor, nextRawSteps } = require("../../powerups/rawPosition");
 const { calculateSubsequentSteps } = require("../raceSteps");
 const { GlobalStepEvent } = require("../../steps/models/globalStepEvent");
 const { computeGlobalEventBoost } = require("../../steps/globalStepEvent");
+const { eventsForUser } = require("../../steps/services/globalStepEventEntitlement");
 const { computeBoxEffectiveSteps } = require("../../powerups/boxSteps");
 const { raceTimeZone } = require("../raceTimeZone");
 // Canonical team H2H block — shared with the list/browser/home surfaces so all
@@ -245,6 +246,8 @@ function buildDropOdds({
 }
 
 function buildGetRaceProgress(deps = {}) {
+  const participantEventQueryEnabled =
+    Object.keys(deps).length === 0 || deps.GlobalStepEvent != null;
   const raceModel = deps.Race || Race;
   const participantModel = deps.RaceParticipant || RaceParticipant;
   const stepsModel = deps.Steps || Steps;
@@ -466,14 +469,33 @@ function buildGetRaceProgress(deps = {}) {
     // GlobalStepEvents overlapping [raceStartedAt, now] — the 2x windows. Read
     // defensively: a missing/empty model just yields no boost.
     let globalEvents = [];
-    try {
-      globalEvents =
-        (await globalStepEventModel.findActiveInRange(raceStartedAt, scoringNow)) ||
-        [];
-    } catch {
-      globalEvents = [];
+    let eventsByUserId = null;
+    if (participantEventQueryEnabled &&
+        typeof globalStepEventModel.findEligibleByRace === "function") {
+      eventsByUserId = await globalStepEventModel.findEligibleByRace({
+        raceId,
+        userIds: acceptedParticipants.map((participant) => participant.userId),
+        rangeStart: raceStartedAt,
+        rangeEnd: scoringNow,
+      });
+      const seen = new Map();
+      for (const participant of acceptedParticipants) {
+        for (const event of eventsForUser(eventsByUserId, participant.userId)) {
+          seen.set(`${event.entitlementId || event.id}:${participant.userId}`, event);
+        }
+      }
+      globalEvents = [...seen.values()];
+    } else {
+      try {
+        globalEvents =
+          (await globalStepEventModel.findActiveInRange(raceStartedAt, scoringNow)) || [];
+      } catch {
+        globalEvents = [];
+      }
+      eventsByUserId = new Map(
+        acceptedParticipants.map((participant) => [participant.userId, globalEvents])
+      );
     }
-    const globalContext = { globalEvents, now: scoringNow };
 
     // Second pass, phase A: per-participant PRE-LEECH total + the leeches
     // targeting each participant.
@@ -525,6 +547,8 @@ function buildGetRaceProgress(deps = {}) {
         }
 
         const allEffects = [...legCramps, ...runnersHighs, ...wrongTurns, ...campfires, ...rainstorms, ...leeches, ...wave5Effects];
+        const participantEvents = eventsForUser(eventsByUserId, participant.userId);
+        const globalContext = { globalEvents: participantEvents, now: scoringNow };
         const { frozenSteps, buffedSteps, reversedSteps, globalBoostedSteps, leechTransfers } = await computeEffectModifiers(allEffects, baseAdjusted, participant.userId, scoringStepSampleModel, hasSampleData, globalContext, scoringNow);
 
         const preLeechTotal = Math.max(0, baseAdjusted - frozenSteps + buffedSteps - 2 * reversedSteps + (globalBoostedSteps || 0) + (race.powerupsEnabled ? (participant.bonusSteps || 0) : 0));
@@ -549,6 +573,7 @@ function buildGetRaceProgress(deps = {}) {
           stepSampleModel: scoringStepSampleModel,
           now: scoringNow,
           globalEvents,
+          eventsByUserId,
         })
       : [];
 
@@ -620,15 +645,16 @@ function buildGetRaceProgress(deps = {}) {
     // folded into the MAGNITUDE (sign preserved).
     const nowTime = scoringNow;
     const nowMsForMult = nowTime.getTime();
-    const activeEventForMult = globalEvents.find((ev) => {
-      const s = new Date(ev.startsAt).getTime();
-      const e = new Date(ev.endsAt).getTime();
-      return s <= nowMsForMult && nowMsForMult < e && Number(ev.multiplier) > 1;
-    });
-    const eventMult = activeEventForMult ? Number(activeEventForMult.multiplier) : 1;
     const multiplierByParticipantId = new Map();
     for (const e of preLeech) {
       const raw = e.frozen ? 1 : (e.currentMultiplierRaw ?? 1);
+      const activeEventForMult = eventsForUser(eventsByUserId, e.participant.userId)
+        .find((ev) => {
+          const s = new Date(ev.startsAt).getTime();
+          const end = new Date(ev.endsAt).getTime();
+          return s <= nowMsForMult && nowMsForMult < end && Number(ev.multiplier) > 1;
+        });
+      const eventMult = activeEventForMult ? Number(activeEventForMult.multiplier) : 1;
       multiplierByParticipantId.set(e.participant.id, raw * eventMult);
     }
 
@@ -757,11 +783,6 @@ function buildGetRaceProgress(deps = {}) {
     );
     const asOf = new Date(capture.asOf);
     if (Number.isNaN(asOf.getTime())) return null;
-    const activeEvent = (capture.globalEvents || []).find((event) => {
-      const startMs = new Date(event.startsAt).getTime();
-      const endMs = new Date(event.endsAt).getTime();
-      return startMs <= asOf.getTime() && asOf.getTime() < endMs;
-    });
     return snapshotStore.buildSnapshot({
       race: {
         raceId: race.id,
@@ -796,13 +817,6 @@ function buildGetRaceProgress(deps = {}) {
         baseAdjusted: result.baseAdjustedByParticipantId?.[participant.id] ?? null,
       })),
       teams: race.isTeamRace ? buildTeamsBlock(race, stepTotals) : null,
-      globalEvent: activeEvent
-        ? {
-            active: true,
-            multiplier: Number(activeEvent.multiplier),
-            endsAt: activeEvent.endsAt,
-          }
-        : null,
       activeEffects: capture.activeEffects || [],
       scoringTimeZone,
       asOf,
@@ -834,25 +848,28 @@ function buildGetRaceProgress(deps = {}) {
       ? await raceActiveEffectModel.findActiveForRace(raceId)
       : [];
 
-    let globalEvents = [];
-    try {
-      globalEvents =
-        (await globalStepEventModel.findActiveInRange(race.startedAt, now())) || [];
-    } catch {
-      globalEvents = [];
-    }
-
     const nowTime = now();
     const nowMs = nowTime.getTime();
-    const activeEvent = globalEvents.find((ev) => {
-      const startMs = new Date(ev.startsAt).getTime();
-      const endMs = new Date(ev.endsAt).getTime();
-      return startMs <= nowMs && nowMs < endMs;
-    });
-    const eventMult =
-      activeEvent && Number(activeEvent.multiplier) > 1
-        ? Number(activeEvent.multiplier)
-        : 1;
+    let eventsByUserId;
+    if (typeof globalStepEventModel.findEligibleByRace === "function") {
+      eventsByUserId = await globalStepEventModel.findEligibleByRace({
+        raceId,
+        userIds: accepted.map((participant) => participant.userId),
+        rangeStart: race.startedAt,
+        rangeEnd: nowTime,
+      });
+    } else {
+      let legacyEvents = [];
+      try {
+        legacyEvents =
+          (await globalStepEventModel.findActiveInRange(race.startedAt, nowTime)) || [];
+      } catch {
+        legacyEvents = [];
+      }
+      eventsByUserId = new Map(
+        accepted.map((participant) => [participant.userId, legacyEvents])
+      );
+    }
 
     const effectsByParticipant = new Map();
     for (const effect of raceActiveEffects) {
@@ -881,6 +898,12 @@ function buildGetRaceProgress(deps = {}) {
         race.powerupsEnabled && !frozen
           ? signedMultiplierForEffects(effectsByParticipant.get(p.id) || [], nowMs)
           : 1;
+      const activeEvent = eventsForUser(eventsByUserId, p.userId).find((event) => {
+        const startMs = new Date(event.startsAt).getTime();
+        const endMs = new Date(event.endsAt).getTime();
+        return startMs <= nowMs && nowMs < endMs && Number(event.multiplier) > 1;
+      });
+      const eventMult = activeEvent ? Number(activeEvent.multiplier) : 1;
       return {
         participantId: p.id,
         userId: p.userId,
@@ -925,13 +948,6 @@ function buildGetRaceProgress(deps = {}) {
             race,
             accepted.map((p) => ({ participant: p, totalSteps: totalFor(p) }))
           )
-        : null,
-      globalEvent: activeEvent
-        ? {
-            active: true,
-            multiplier: Number(activeEvent.multiplier),
-            endsAt: activeEvent.endsAt,
-          }
         : null,
       activeEffects: raceActiveEffects,
       scoringTimeZone,
@@ -1354,9 +1370,45 @@ function buildGetRaceProgress(deps = {}) {
       result.powerupData = powerupData;
     }
 
-    if (snapshot.globalEvent) {
-      result.globalEvent = snapshot.globalEvent;
+    let viewerGlobalEvent = null;
+    let viewerLookupFailed = false;
+    if (typeof globalStepEventModel.findViewerActive === "function") {
+      try {
+        const local = await globalStepEventModel.findViewerActive({
+          userId, raceId, now: nowTime,
+        });
+        if (local) {
+          viewerGlobalEvent = {
+            active: true,
+            multiplier: Number(local.multiplier),
+            endsAt: local.endsAt,
+          };
+        }
+      } catch {
+        // Viewer-specific overlay is optional and fail-soft.
+        viewerLookupFailed = true;
+      }
     }
+    // Legacy-global rows remain viewer-independent, but the response field is
+    // still assembled after authentication so a shared Redis snapshot never
+    // carries one viewer's local entitlement. This preserves the exact old
+    // response shape while the local lookup returns no eligible event.
+    if (!viewerGlobalEvent && !viewerLookupFailed &&
+        typeof globalStepEventModel.findActiveAt === "function") {
+      try {
+        const legacy = await globalStepEventModel.findActiveAt(nowTime);
+        if (legacy) {
+          viewerGlobalEvent = {
+            active: true,
+            multiplier: Number(legacy.multiplier),
+            endsAt: legacy.endsAt,
+          };
+        }
+      } catch {
+        // The optional banner must never fail race progress.
+      }
+    }
+    if (viewerGlobalEvent) result.globalEvent = viewerGlobalEvent;
 
     // Requirements §5.2: paging is defined for ACTIVE races, and the server MAY
     // answer non-ACTIVE ones whole "to avoid regressions". It does: a finished

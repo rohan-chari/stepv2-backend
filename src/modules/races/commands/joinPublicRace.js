@@ -44,7 +44,7 @@ function buildJoinPublicRace(dependencies = {}) {
     if (!resolved) {
       throw new RaceJoinError("Race not found", 404, "RACE_NOT_FOUND");
     }
-    const joinUnderRaceLock = () => withLock(raceId, async () => {
+    const joinUnderRaceLock = () => withLock(raceId, async (lockTx) => {
       const race = await raceModel.findById(raceId);
       if (!race) {
         throw new RaceJoinError("Race not found", 404, "RACE_NOT_FOUND");
@@ -70,9 +70,13 @@ function buildJoinPublicRace(dependencies = {}) {
         );
       }
 
-      return joinRaceCore({ race, userId, onboarding, team, clientFeatures });
+      return joinRaceCore({
+        race, userId, onboarding, team, clientFeatures,
+        transactionClient: lockTx,
+        deferPostCommit: Boolean(lockTx),
+      });
     });
-    const participant =
+    const joined =
       resolved.creationSource === "QUICK_CREATE"
       ? await withQuickMembershipLock(userId, async () => {
           if (
@@ -92,9 +96,10 @@ function buildJoinPublicRace(dependencies = {}) {
     // OUTSIDE the advisory lock, after the participant row has committed.
     // startRace does per-participant step lookups + updates + push fan-out;
     // holding the join lock across that is the 3e6c827 pool-exhaustion shape.
+    if (joined?.runPostCommit) await joined.runPostCommit();
     await maybeAutoStartPrivateRace({ raceId });
 
-    return participant;
+    return joined?.participant || joined;
   };
 }
 

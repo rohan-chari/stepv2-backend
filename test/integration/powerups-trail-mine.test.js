@@ -153,6 +153,26 @@ async function getProgress(token, raceId) {
   return (await res.json()).progress;
 }
 
+async function getMessages(token, raceId, kind) {
+  const suffix = kind ? `?kind=${kind}` : "";
+  const res = await request(
+    server.baseUrl,
+    "GET",
+    `/races/${raceId}/messages${suffix}`,
+    { token }
+  );
+  assert.equal(res.status, 200);
+  return res.json();
+}
+
+async function getFeed(token, raceId) {
+  const res = await request(server.baseUrl, "GET", `/races/${raceId}/feed`, {
+    token,
+  });
+  assert.equal(res.status, 200);
+  return res.json();
+}
+
 function findUser(progress, userId) {
   return progress.participants.find((p) => p.userId === userId);
 }
@@ -196,6 +216,91 @@ describe("trail mine targeting", () => {
   beforeEach(async () => {
     await cleanDatabase();
     nextAppleId = 0;
+  });
+
+  it("planting a trail mine stays hidden from current and legacy activity feeds", async () => {
+    const alice = await createUser("AliceMineHidden");
+    const bob = await createUser("BobMineHiddenAA");
+    await makeFriends(alice, bob);
+    const raceId = await createActiveRace(alice, [bob]);
+
+    await recordSamples(alice.token, [sample(6, 5, 10000)]);
+    await recordSamples(bob.token, [sample(6, 5.5, 1000)]);
+
+    const mine = await giveHeldPowerup(raceId, alice.userId, "TRAIL_MINE", 99901);
+    const useResponse = await usePowerup(alice.token, raceId, mine.id);
+    assert.equal(useResponse.status, 200);
+
+    const systemMessages = await getMessages(alice.token, raceId, "SYSTEM");
+    const mergedMessages = await getMessages(alice.token, raceId);
+    const legacyFeed = await getFeed(alice.token, raceId);
+
+    for (const [surface, rows] of [
+      ["SYSTEM messages", systemMessages.messages],
+      ["merged messages", mergedMessages.messages],
+      ["legacy feed", legacyFeed.events],
+    ]) {
+      assert.ok(
+        !(rows || []).some((row) => row.powerupType === "TRAIL_MINE"),
+        `${surface} must not reveal that a trail mine was planted`
+      );
+    }
+
+    const plantAudit = await prisma.racePowerupEvent.findFirst({
+      where: {
+        raceId,
+        eventType: "POWERUP_USED",
+        powerupType: "TRAIL_MINE",
+        description: { contains: " planted a " },
+      },
+    });
+    assert.ok(plantAudit, "the hidden plant audit row is still retained");
+    assert.equal(plantAudit.metadata.hiddenFromFeed, true);
+
+    // Rows created before this fix had no hidden marker. Their plant metadata
+    // remains a safe discriminator, so old history must also stay private.
+    const { hiddenFromFeed: _hiddenFromFeed, ...legacyMetadata } =
+      plantAudit.metadata;
+    await prisma.racePowerupEvent.update({
+      where: { id: plantAudit.id },
+      data: { metadata: legacyMetadata },
+    });
+    const legacySystem = await getMessages(alice.token, raceId, "SYSTEM");
+    const legacyMerged = await getMessages(alice.token, raceId);
+    const legacyOldFeed = await getFeed(alice.token, raceId);
+    for (const [surface, rows] of [
+      ["SYSTEM messages", legacySystem.messages],
+      ["merged messages", legacyMerged.messages],
+      ["legacy feed", legacyOldFeed.events],
+    ]) {
+      assert.ok(
+        !(rows || []).some((row) =>
+          String(row.body || row.description).includes("planted a")
+        ),
+        `${surface} must also hide pre-fix trail mine plant rows`
+      );
+    }
+
+    await recordSamples(bob.token, [sample(4, 3, 12000)]);
+    await runWorker();
+
+    const triggeredSystem = await getMessages(alice.token, raceId, "SYSTEM");
+    const triggeredMerged = await getMessages(alice.token, raceId);
+    const triggeredLegacy = await getFeed(alice.token, raceId);
+    for (const [surface, rows] of [
+      ["SYSTEM messages", triggeredSystem.messages],
+      ["merged messages", triggeredMerged.messages],
+      ["legacy feed", triggeredLegacy.events],
+    ]) {
+      assert.ok(
+        (rows || []).some(
+          (row) =>
+            row.powerupType === "TRAIL_MINE" &&
+            String(row.body || row.description).includes("triggered a Trail Mine")
+        ),
+        `${surface} must still show the later trail mine detonation`
+      );
+    }
   });
 
   it("the runner whose sync crosses the mine point is hit for 3% of their total", async () => {

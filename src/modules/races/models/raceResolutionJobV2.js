@@ -487,22 +487,27 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
       now = new Date(),
       leaseMs = LEASE_MS,
       leaseToken = newLeaseToken(),
+      raceId = null,
+      force = false,
     } = {}) {
       const rows = await prisma.$queryRawUnsafe(
         `
         WITH candidate AS (
           SELECT id
           FROM race_resolution_jobs_v2
-          WHERE (
-                  state = 'queued'
-                  AND (retry_at IS NULL OR retry_at <= $1)
-                  AND (not_before_at IS NULL OR not_before_at <= $1)
-                )
-             OR (
-                  state = 'running'
-                  AND lease_expires_at IS NOT NULL
-                  AND lease_expires_at <= $1
-                )
+          WHERE ($4::text IS NULL OR race_id = $4)
+            AND (
+              (
+                state = 'queued'
+                AND ($5::boolean OR retry_at IS NULL OR retry_at <= $1)
+                AND ($5::boolean OR not_before_at IS NULL OR not_before_at <= $1)
+              )
+              OR (
+                state = 'running'
+                AND lease_expires_at IS NOT NULL
+                AND lease_expires_at <= $1
+              )
+            )
           ORDER BY requested_at ASC
           LIMIT 1
           FOR UPDATE SKIP LOCKED
@@ -611,7 +616,9 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
         `,
         now,
         new Date(now.getTime() + leaseMs),
-        leaseToken
+        leaseToken,
+        raceId,
+        force === true
       );
       return normalizeRow(rows[0]);
     },

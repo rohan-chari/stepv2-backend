@@ -7,28 +7,28 @@ datasource db {
 }
 
 model User {
-  id                            String                          @id @default(uuid())
+  id                                String                          @id @default(uuid())
   // Auth identity is single-provider per user: Apple (iOS) OR Google (Android).
   // Both are nullable+unique so a pure-Google user has no appleId and vice versa.
   // Postgres unique indexes allow multiple NULLs, so many users can share a null
   // on either column. Existing Apple rows are untouched. See ANDROID.md §G1.
-  appleId                       String?                         @unique @map("apple_id")
-  googleSub                     String?                         @unique @map("google_sub")
-  email                         String?
-  name                          String?
-  displayName                   String?                         @unique @map("display_name")
+  appleId                           String?                         @unique @map("apple_id")
+  googleSub                         String?                         @unique @map("google_sub")
+  email                             String?
+  name                              String?
+  displayName                       String?                         @unique @map("display_name")
   // Explicit discoverable identity. Provider `name` is intentionally not
   // repurposed: these fields are written only after the user reviews the
   // in-product disclosure. All nullable so mixed-version deploys and existing
   // rows are safe. Completion — not field presence — controls disclosure.
-  firstName                     String?                         @map("first_name")
-  lastName                      String?                         @map("last_name")
-  discoverableNameSearch        String?                         @map("discoverable_name_search")
-  nameSetupOnboardingRequired   Boolean                         @default(false) @map("name_setup_onboarding_required")
-  nameSetupCompletedAt          DateTime?                       @map("name_setup_completed_at")
-  profilePhotoUrl               String?                         @map("profile_photo_url")
-  profilePhotoKey               String?                         @map("profile_photo_key")
-  profilePhotoPromptDismissedAt DateTime?                       @map("profile_photo_prompt_dismissed_at")
+  firstName                         String?                         @map("first_name")
+  lastName                          String?                         @map("last_name")
+  discoverableNameSearch            String?                         @map("discoverable_name_search")
+  nameSetupOnboardingRequired       Boolean                         @default(false) @map("name_setup_onboarding_required")
+  nameSetupCompletedAt              DateTime?                       @map("name_setup_completed_at")
+  profilePhotoUrl                   String?                         @map("profile_photo_url")
+  profilePhotoKey                   String?                         @map("profile_photo_key")
+  profilePhotoPromptDismissedAt     DateTime?                       @map("profile_photo_prompt_dismissed_at")
   // Home SETUP section: how many times the "you can rename yourself" chip has
   // been shown to this ACCOUNT, and when the user retired it. Previously lived
   // in device-scoped SharedPreferences, which signOut() wipes — so the chip came
@@ -36,66 +36,66 @@ model User {
   // 0 and nullable timestamp, so old clients (which never read or write these)
   // are unaffected, and no backfill is performed (every existing row starts
   // eligible). See docs/home-setup-section-requirements.md §5.
-  renameChipShownCount          Int                             @default(0) @map("rename_chip_shown_count")
-  renameChipDismissedAt         DateTime?                       @map("rename_chip_dismissed_at")
+  renameChipShownCount              Int                             @default(0) @map("rename_chip_shown_count")
+  renameChipDismissedAt             DateTime?                       @map("rename_chip_dismissed_at")
   // Deprecated: step goals are no longer part of the product. Kept
   // nullable for back-compat with existing rows. New code must not read
   // or write this field.
-  stepGoal                      Int?                            @map("step_goal")
-  lastStepSyncAt                DateTime?                       @map("last_step_sync_at")
+  stepGoal                          Int?                            @map("step_goal")
+  lastStepSyncAt                    DateTime?                       @map("last_step_sync_at")
   // Authoritative, cross-device cooldown stamp for explicitly opt-in Home
   // pull-to-refresh syncs. Nullable/additive: existing users and every frozen
   // client retain the pre-cooldown behavior until a capable client sends the
   // exact intent header.
-  lastHomePullStepSyncAt        DateTime?                       @map("last_home_pull_step_sync_at")
-  lastSilentPushSentAt          DateTime?                       @map("last_silent_push_sent_at")
-  coins                         Int                             @default(0)
-  lastDailyClaimDate            String?                         @map("last_daily_claim_date")
-  dailyStreakDay                Int                             @default(0) @map("daily_streak_day")
+  lastHomePullStepSyncAt            DateTime?                       @map("last_home_pull_step_sync_at")
+  lastSilentPushSentAt              DateTime?                       @map("last_silent_push_sent_at")
+  coins                             Int                             @default(0)
+  lastDailyClaimDate                String?                         @map("last_daily_claim_date")
+  dailyStreakDay                    Int                             @default(0) @map("daily_streak_day")
   // Consecutive-day login streak (unbounded) driving daily-box rarity odds.
   // Additive: dailyStreakDay keeps the legacy 6-day cycle for old app builds;
   // both claim paths maintain both counters.
-  dailyLoginStreak              Int                             @default(0) @map("daily_login_streak")
-  isReviewAccount               Boolean                         @default(false) @map("is_review_account")
+  dailyLoginStreak                  Int                             @default(0) @map("daily_login_streak")
+  isReviewAccount                   Boolean                         @default(false) @map("is_review_account")
   // Global-leaderboard opt-out. When true the user is hidden from OTHER users'
   // global step leaderboard (top list + rank count); they still appear to
   // friends and still see their own global rank. Additive/back-compat: defaults
   // false so existing rows and old clients (which ignore the field) are
   // unaffected. Mirrors isReviewAccount's column style.
-  hiddenFromLeaderboard         Boolean                         @default(false) @map("hidden_from_leaderboard")
+  hiddenFromLeaderboard             Boolean                         @default(false) @map("hidden_from_leaderboard")
   // Auto-join the seeded daily/weekly featured challenges: the renewal cron
   // enrolls opted-in users into each newly created seeded race, and enabling
   // the toggle opts them into the already-pending next race. Additive/back-
   // compat: defaults false. See src/commands/autoJoinFeaturedRaces.js.
-  autoJoinFeaturedRaces         Boolean                         @default(false) @map("auto_join_featured_races")
+  autoJoinFeaturedRaces             Boolean                         @default(false) @map("auto_join_featured_races")
   // True once the user has either joined their first race via the onboarding
   // step or explicitly skipped it. Additive/back-compat: defaults false so
   // existing rows and old clients (which ignore the field) are unaffected.
-  firstRaceOnboardingSeen       Boolean                         @default(false) @map("first_race_onboarding_seen")
+  firstRaceOnboardingSeen           Boolean                         @default(false) @map("first_race_onboarding_seen")
   // True once the user has either completed or explicitly skipped the tutorial
   // step in onboarding. Gates only the onboarding step UI — the one-time 100-coin
   // tutorial reward is protected independently by the CoinTransaction ledger (see
   // awardCoins reason="tutorial_complete"). Additive/back-compat: defaults false;
   // a data migration backfills existing rows to true so they aren't re-onboarded.
-  tutorialOnboardingSeen        Boolean                         @default(false) @map("tutorial_onboarding_seen")
+  tutorialOnboardingSeen            Boolean                         @default(false) @map("tutorial_onboarding_seen")
   // Ranked: denormalized final tier from the most recently settled season, for
   // cheap cross-surface badges (races, leaderboard, profile). Additive/nullable
   // — null means unranked. Set by season settlement; never read by old clients.
-  currentTier                   String?                         @map("current_tier")
-  currentDivision               Int?                            @map("current_division")
+  currentTier                       String?                         @map("current_tier")
+  currentDivision                   Int?                            @map("current_division")
   // Ranked v2 (weekly cohorts): the user's persistent home tier on the 6-tier
   // ladder (BRONZE..LEGEND). Null = never placed (treated as BRONZE). Additive;
   // old clients never see this column — they keep reading currentTier, which v2
   // settlement writes with a legacy-mapped value (PLATINUM/LEGEND -> DIAMOND).
-  rankedTierV2                  String?                         @map("ranked_tier_v2")
-  rankedTierV2Since             DateTime?                       @map("ranked_tier_v2_since")
+  rankedTierV2                      String?                         @map("ranked_tier_v2")
+  rankedTierV2Since                 DateTime?                       @map("ranked_tier_v2_since")
   // ── Referral attribution (all nullable/additive) ─────────────────────────
   // This user's own shareable invite code (BARA-XXXX), minted lazily on first
   // /referrals/link call. The Referral table is the single source of truth for
   // who referred whom; referredByCode is audit-only and never the dedup key.
   // Old clients never read either column. See REFERRAL_FEATURE_RESEARCH.md §4A.
-  referralCode                  String?                         @unique @map("referral_code")
-  referredByCode                String?                         @map("referred_by_code")
+  referralCode                      String?                         @unique @map("referral_code")
+  referredByCode                    String?                         @map("referred_by_code")
   // ── Team races: per-user client capabilities (TR-706) ─────────────────────
   // The union of every `X-Client-Features` token (e.g. ["team_races"]) ever
   // seen on one of this user's authenticated requests. STICKY: tokens are only
@@ -107,46 +107,49 @@ model User {
   // since before this deploy). clientFeaturesAt stamps the last write.
   // Additive/nullable — old app builds neither send nor read these; existing
   // rows default to an empty array.
-  clientFeatures                String[]                        @default([]) @map("client_features")
-  clientFeaturesAt              DateTime?                       @map("client_features_at")
+  clientFeatures                    String[]                        @default([]) @map("client_features")
+  clientFeaturesAt                  DateTime?                       @map("client_features_at")
   // ── Notification reminders (all additive) ─────────────────────────────────
   // The user's last-known IANA timezone, sticky-written from the request-scoped
   // X-Timezone header using the SAME never-on-every-request pattern as
   // clientFeatures/clientFeaturesAt (only written when it changed). Backfilled
   // null; the daily-reward reminder scheduler falls back to America/New_York for
   // a null timezone. First indexed column on this table (@@index below).
-  timezone                      String?                         @map("timezone")
+  timezone                          String?                         @map("timezone")
+  globalEventTimezone               String?                         @map("global_event_timezone")
+  globalEventTimezoneCandidate      String?                         @map("global_event_timezone_candidate")
+  globalEventTimezoneCandidateSince DateTime?                       @map("global_event_timezone_candidate_since")
   // Opt-out for the evening daily-reward reminder pushes (§9.1). Absent/never-set
   // reads as true (the default). Old clients never call the preference endpoints
   // and keep the default. Additive/back-compat.
-  dailyRewardRemindersEnabled   Boolean                         @default(true) @map("daily_reward_reminders_enabled")
+  dailyRewardRemindersEnabled       Boolean                         @default(true) @map("daily_reward_reminders_enabled")
   // Batch 2026-08-08 item 3: opt-out for the 19:00-local "you have uncollected
   // step-milestone coins" push. Same shape and same rationale as the daily-reward
   // pref above: absent/never-set reads as true, old clients never PATCH it and
   // keep the default. The job itself ships dark behind
   // STEP_MILESTONE_REMINDERS_DISABLED, so defaulting true sends nothing on its own.
-  stepMilestoneRemindersEnabled Boolean                         @default(true) @map("step_milestone_reminders_enabled")
+  stepMilestoneRemindersEnabled     Boolean                         @default(true) @map("step_milestone_reminders_enabled")
   // Batch 2026-08-08 item 9: admin visibility into the app-version spread.
   // Sticky-written from X-App-Version in requireAuth, but ONLY when the version
   // changed or the stored lastSeenAt is on an earlier UTC day — never per
   // request (the 3e6c827 write-amplification lesson). Written through a
   // dedicated model method that deliberately skips the /auth/me cache DEL, and
   // NEITHER column is served in the /auth/me payload.
-  lastAppVersion                String?                         @map("last_app_version")
-  lastSeenAt                    DateTime?                       @map("last_seen_at")
-  metricsV2EligibleAt           DateTime?                       @map("metrics_v2_eligible_at")
-  metricsV2EligibleEpochId      String?                         @map("metrics_v2_eligible_epoch_id")
-  metricsV2SignupEligible       Boolean                         @default(false) @map("metrics_v2_signup_eligible")
-  metricsV2SignupEpochId        String?                         @map("metrics_v2_signup_epoch_id")
-  createdAt                     DateTime                        @default(now()) @map("created_at")
-  steps                         Step[]
-  dailyRewardClaims             DailyRewardClaim[]
-  stepMilestoneClaims           StepMilestoneClaim[]
-  sentRequests                  Friendship[]                    @relation("sentRequests")
-  receivedRequests              Friendship[]                    @relation("receivedRequests")
-  autoLinkSuppressionsAsA       FriendshipAutoLinkSuppression[] @relation("AutoLinkSuppressionA")
-  autoLinkSuppressionsAsB       FriendshipAutoLinkSuppression[] @relation("AutoLinkSuppressionB")
-  friendSearchRateWindow        FriendSearchRateWindow?
+  lastAppVersion                    String?                         @map("last_app_version")
+  lastSeenAt                        DateTime?                       @map("last_seen_at")
+  metricsV2EligibleAt               DateTime?                       @map("metrics_v2_eligible_at")
+  metricsV2EligibleEpochId          String?                         @map("metrics_v2_eligible_epoch_id")
+  metricsV2SignupEligible           Boolean                         @default(false) @map("metrics_v2_signup_eligible")
+  metricsV2SignupEpochId            String?                         @map("metrics_v2_signup_epoch_id")
+  createdAt                         DateTime                        @default(now()) @map("created_at")
+  steps                             Step[]
+  dailyRewardClaims                 DailyRewardClaim[]
+  stepMilestoneClaims               StepMilestoneClaim[]
+  sentRequests                      Friendship[]                    @relation("sentRequests")
+  receivedRequests                  Friendship[]                    @relation("receivedRequests")
+  autoLinkSuppressionsAsA           FriendshipAutoLinkSuppression[] @relation("AutoLinkSuppressionA")
+  autoLinkSuppressionsAsB           FriendshipAutoLinkSuppression[] @relation("AutoLinkSuppressionB")
+  friendSearchRateWindow            FriendSearchRateWindow?
 
   challengesAsUserA  ChallengeInstance[] @relation("challengeUserA")
   challengesAsUserB  ChallengeInstance[] @relation("challengeUserB")
@@ -196,8 +199,11 @@ model User {
   // deleteUserAccount's deletion set.
   suggestions                 Suggestion[]
   raceEffectImpacts           RaceEffectImpact[]
+  activeRaceImpactWork        ActiveRaceImpactWork[]
+  activeRaceEffectImpacts     ActiveRaceEffectImpact[]
   globalEventRaceImpacts      GlobalEventRaceImpact[]
   globalEventUserSummaries    GlobalEventUserSummary[]
+  globalStepEventEntitlements GlobalStepEventEntitlement[]
   appReviewPromptAttempts     AppReviewPromptAttempt[]
   inboxAlerts                 InboxAlert[]
   feedbackThreads             FeedbackThread[]
@@ -263,6 +269,66 @@ model RaceEffectImpact {
   @@index([raceId, userId, acknowledgedAt, settledAt(sort: Desc)])
   @@index([userId, settledAt(sort: Desc)])
   @@map("race_effect_impacts")
+}
+
+// Durable, recipient-scoped work for active-race synced-step notifications.
+// This is presentation/retry state only; final settlement continues to use
+// RaceEffectImpact independently.
+model ActiveRaceImpactWork {
+  id                   String    @id @default(uuid())
+  raceId               String    @map("race_id")
+  recipientUserId      String    @map("recipient_user_id")
+  sourceKind           String    @map("source_kind")
+  sourceId             String    @map("source_id")
+  powerupType          String    @map("powerup_type")
+  status               String    @default("PENDING")
+  resolvedAt           DateTime  @map("resolved_at")
+  processedGeneration  Int?      @map("processed_generation")
+  capturedDeltaSteps   Int?      @map("captured_delta_steps")
+  calculationVersion   Int       @default(1) @map("calculation_version")
+  inlineReceiptId      String?   @unique @map("inline_receipt_id")
+  inlineAcknowledgedAt DateTime? @map("inline_acknowledged_at")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+
+  race      Race                    @relation(fields: [raceId], references: [id], onDelete: Cascade)
+  recipient User                    @relation(fields: [recipientUserId], references: [id], onDelete: Cascade)
+  impact    ActiveRaceEffectImpact?
+
+  @@unique([raceId, recipientUserId, sourceKind, sourceId, calculationVersion])
+  @@index([raceId, status, resolvedAt, id])
+  @@index([recipientUserId, status])
+  @@map("active_race_impact_work")
+}
+
+// Immutable active-race presentation snapshots. A later whole-race settlement
+// may differ after delayed device uploads; valueStatus keeps that distinction
+// explicit on the wire.
+model ActiveRaceEffectImpact {
+  id                 String    @id @default(uuid())
+  raceId             String    @map("race_id")
+  userId             String    @map("user_id")
+  workId             String    @unique @map("work_id")
+  sourceKind         String    @map("source_kind")
+  sourceId           String    @map("source_id")
+  powerupType        String    @map("powerup_type")
+  deltaSteps         Int       @map("delta_steps")
+  valueStatus        String    @default("SYNCED_SNAPSHOT") @map("value_status")
+  calculationVersion Int       @default(1) @map("calculation_version")
+  sourceGeneration   Int?      @map("source_generation")
+  resolvedAt         DateTime  @map("resolved_at")
+  acknowledgedAt     DateTime? @map("acknowledged_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  race Race                 @relation(fields: [raceId], references: [id], onDelete: Cascade)
+  user User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  work ActiveRaceImpactWork @relation(fields: [workId], references: [id], onDelete: Cascade)
+
+  @@unique([raceId, userId, sourceKind, sourceId, calculationVersion])
+  @@index([raceId, userId, acknowledgedAt, resolvedAt, id])
+  @@index([userId, resolvedAt])
+  @@map("active_race_effect_impacts")
 }
 
 model GlobalEventRaceImpact {
@@ -1256,6 +1322,8 @@ model Race {
   resolutionPostTasks    RaceResolutionPostTask[]
   seededBucket           SeededRaceBucket?           @relation("SeededBucketRace")
   effectImpacts          RaceEffectImpact[]
+  activeImpactWork       ActiveRaceImpactWork[]
+  activeEffectImpacts    ActiveRaceEffectImpact[]
   globalEventImpacts     GlobalEventRaceImpact[]
   reviewPromptAttempts   AppReviewPromptAttempt[]
 
@@ -2028,31 +2096,108 @@ model RankedCohortMember {
 // agree. Additive, never read by old app binaries (which simply see a higher,
 // correct step total during a window).
 model GlobalStepEvent {
-  id         String   @id @default(uuid())
-  startsAt   DateTime @map("starts_at")
-  endsAt     DateTime @map("ends_at")
-  multiplier Float    @default(2)
-  label      String?
-  createdAt  DateTime @default(now()) @map("created_at")
+  id               String   @id @default(uuid())
+  startsAt         DateTime @map("starts_at")
+  endsAt           DateTime @map("ends_at")
+  multiplier       Float    @default(2)
+  label            String?
+  scheduleMode     String   @default("LEGACY_GLOBAL") @map("schedule_mode")
+  eventDay         String?  @unique @map("event_day")
+  localStartMinute Int?     @map("local_start_minute")
+  durationMinutes  Int?     @map("duration_minutes")
+  createdAt        DateTime @default(now()) @map("created_at")
 
   raceImpacts   GlobalEventRaceImpact[]
   userSummaries GlobalEventUserSummary[]
+  entitlements  GlobalStepEventEntitlement[]
 
   @@index([startsAt, endsAt])
   @@map("global_step_events")
+}
+
+model GlobalStepEventEntitlement {
+  id               String    @id @default(uuid())
+  eventId          String    @map("event_id")
+  userId           String    @map("user_id")
+  timezone         String
+  localDate        String    @map("local_date")
+  startsAt         DateTime  @map("starts_at")
+  endsAt           DateTime  @map("ends_at")
+  startOutcome     String    @default("PENDING") @map("start_outcome")
+  startProcessedAt DateTime? @map("start_processed_at")
+  endProcessedAt   DateTime? @map("end_processed_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  event GlobalStepEvent @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  user  User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, userId])
+  @@index([startsAt, startProcessedAt])
+  @@index([endsAt, endProcessedAt])
+  @@index([userId, startsAt, endsAt])
+  @@map("global_step_event_entitlements")
+}
+
+// Durable mixed-generation scheduler census. Local parent creation is refused
+// unless the configured owner count is alive and every owner advertises the
+// local-aware generation; maintenance of existing parents is never gated.
+model GlobalStepEventCronOwner {
+  ownerId     String   @id @map("owner_id")
+  generation Int
+  localAware Boolean  @default(false) @map("local_aware")
+  heartbeatAt DateTime @map("heartbeat_at")
+  expiresAt   DateTime @map("expires_at")
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@index([expiresAt])
+  @@map("global_step_event_cron_owners")
+}
+
+model GlobalStepEventOperationalSnapshot {
+  id                    String   @id @default(uuid())
+  observedAt            DateTime @map("observed_at")
+  dueStarts             Int      @map("due_starts")
+  dueEnds               Int      @map("due_ends")
+  stalePendingStarts    Int      @map("stale_pending_starts")
+  invalidLocalParents   Int      @map("invalid_local_parents")
+  activeParents         Int      @map("active_parents")
+  activeEntitlements    Int      @map("active_entitlements")
+  exposureZeroRaces     Int      @map("exposure_zero_races")
+  exposureOneRaces      Int      @map("exposure_one_races")
+  exposureMultipleRaces Int      @map("exposure_multiple_races")
+  exposureBuckets       Json     @default("{}") @map("exposure_buckets")
+  entitlementsByOffset  Json     @default("{}") @map("entitlements_by_offset")
+  rolloutCounters       Json     @default("{}") @map("rollout_counters")
+  healthy               Boolean
+  createdAt             DateTime @default(now()) @map("created_at")
+
+  @@index([observedAt(sort: Desc)])
+  @@map("global_step_event_operational_snapshots")
+}
+
+// Monotonic durable counters for rollout events that cannot be reconstructed
+// from current lifecycle rows (candidate promotions, duplicate suppression,
+// and scoring-query latency). Snapshots copy these into aggregate JSON.
+model GlobalStepEventOperationalCounter {
+  metric    String   @id
+  value     BigInt   @default(0)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("global_step_event_operational_counters")
 }
 
 // Cluster-owned durable cursor for global-event start/end boundary delivery.
 // A due boundary remains pending until every active race has a durable FULL
 // enqueue; expired leases are safely reclaimable after process loss.
 model GlobalStepEventBoundaryCursor {
-  key              String    @id
-  boundaryAt       DateTime  @map("boundary_at")
-  eventId          String    @map("event_id")
-  boundaryKind     String    @map("boundary_kind") @db.VarChar(8)
-  leaseExpiresAt   DateTime? @map("lease_expires_at")
-  leaseToken       String?   @map("lease_token")
-  updatedAt        DateTime  @default(now()) @updatedAt @map("updated_at")
+  key            String    @id
+  boundaryAt     DateTime  @map("boundary_at")
+  eventId        String    @map("event_id")
+  boundaryKind   String    @map("boundary_kind") @db.VarChar(8)
+  leaseExpiresAt DateTime? @map("lease_expires_at")
+  leaseToken     String?   @map("lease_token")
+  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at")
 
   @@index([leaseExpiresAt])
   @@map("global_step_event_boundary_cursors")
@@ -2415,11 +2560,11 @@ model RaceResolutionJobV2 {
 }
 
 model UserScoringInputVersion {
-  userId                 String    @id @map("user_id")
-  generation             BigInt    @default(1)
-  scoringWatermark       String?   @map("scoring_watermark") @db.Char(64)
-  nextSampleBoundaryAt   DateTime? @map("next_sample_boundary_at")
-  updatedAt              DateTime  @updatedAt @map("updated_at")
+  userId               String    @id @map("user_id")
+  generation           BigInt    @default(1)
+  scoringWatermark     String?   @map("scoring_watermark") @db.Char(64)
+  nextSampleBoundaryAt DateTime? @map("next_sample_boundary_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 

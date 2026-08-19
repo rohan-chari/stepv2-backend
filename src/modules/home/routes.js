@@ -35,6 +35,9 @@ const derivedCache = require("../../shared/cache/derivedCache");
 const cacheKeys = require("../../shared/cache/cacheKeys");
 const { getInboxUnreadCount } = require("../inbox");
 const { buildHomeRaceCardResponse } = require("./buildHomeRaceCardResponse");
+const {
+  getEligibleGlobalEventSummary,
+} = require("./queries/getEligibleGlobalEventSummary");
 
 function createHomeRouter(dependencies = {}) {
   const router = Router();
@@ -226,10 +229,17 @@ function createHomeRouter(dependencies = {}) {
         // C1: the cached display variant (falls back to findActiveAt when the
         // flag is off, Redis is down, or an injected test model lacks it).
         // Settlement paths keep calling findActiveInRange/findActiveAt directly.
-        const activeEvent =
-          typeof globalStepEventModel.findActiveAtCached === "function"
-            ? await globalStepEventModel.findActiveAtCached(new Date())
-            : await globalStepEventModel.findActiveAt(new Date());
+        const current = new Date();
+        const viewerEvent = typeof globalStepEventModel.findViewerActiveHomeCached === "function"
+          ? await globalStepEventModel.findViewerActiveHomeCached({
+              userId: req.user.id,
+              now: current,
+            })
+          : null;
+        const activeEvent = viewerEvent ||
+          (typeof globalStepEventModel.findActiveAtCached === "function"
+            ? await globalStepEventModel.findActiveAtCached(current)
+            : await globalStepEventModel.findActiveAt(current));
         if (activeEvent) {
           result.globalEvent = {
             active: true,
@@ -297,11 +307,7 @@ function createHomeRouter(dependencies = {}) {
           prefix: cacheKeys.PREFIX.HOME_IMPACT_SUMMARY,
           ttlSeconds: 60,
           enabled: await isStrictFlagEnabled(settings, "redisCacheHomeImpactSummaryEnabled"),
-          load: () => prisma.globalEventUserSummary.findFirst({
-            where: { userId: req.user.id, acknowledgedAt: null },
-            orderBy: [{ settledAt: "desc" }, { id: "desc" }],
-            select: { id: true, eventId: true, extraRaceSteps: true, raceCount: true, settledAt: true },
-          }),
+          load: () => getEligibleGlobalEventSummary({ prisma, userId: req.user.id }),
         });
         if (summary) result.globalEventSummary = summary;
       }

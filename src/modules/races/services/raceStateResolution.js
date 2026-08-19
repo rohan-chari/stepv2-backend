@@ -5,6 +5,7 @@ const { StepSample } = require("../../steps/models/stepSample");
 const { RaceActiveEffect } = require("../../powerups/models/raceActiveEffect");
 const { RacePowerupEvent } = require("../../powerups/models/racePowerupEvent");
 const { GlobalStepEvent } = require("../../steps/models/globalStepEvent");
+const { eventsForUser } = require("../../steps/services/globalStepEventEntitlement");
 const {
   computeEffectModifiers,
   signedMultiplierForEffects,
@@ -37,6 +38,22 @@ const {
 const {
   prefetchRaceScoringModels: defaultPrefetchRaceScoringModels,
 } = require("./raceScoringPrefetch");
+const {
+  computeSettlementAttributionVector,
+} = require("./raceSettlementAttribution");
+
+const ACTIVE_NOTICE_TIMED_TYPES = new Set([
+  "LEG_CRAMP",
+  "QUICKSAND",
+  "RUNNERS_HIGH",
+  "WRONG_TURN",
+  "CAMPFIRE_REST",
+  "RAINSTORM",
+  "UPRISING",
+  "RALLY_FLAG",
+  "COIN_FLIP",
+  "GHOST_PEPPER",
+]);
 
 // Every effect type that calculateCurrentTotal folds into a participant's
 // live total. Shared with prefetch paths (getHomeRaceCard) so a bulk effect
@@ -500,9 +517,11 @@ async function triggerTrailMines({
   participantModel,
   powerupEventModel,
   activeEffects = null,
+  resolvedAt = new Date(),
+  activeImpactEnabled,
 }) {
   if (typeof raceActiveEffectModel.findActiveForRace !== "function") {
-    return;
+    return [];
   }
   const mines = (Array.isArray(activeEffects)
     ? activeEffects
@@ -511,6 +530,7 @@ async function triggerTrailMines({
   );
 
   const isTeamRace = race ? race.isTeamRace === true : false;
+  const impacts = [];
 
   for (const mine of mines) {
     const metadata = mine.metadata || {};
@@ -581,7 +601,17 @@ async function triggerTrailMines({
       victim.totalSteps = Math.max(0, victim.totalSteps - penalty);
     }
 
-    await raceActiveEffectModel.update(mine.id, { status: "EXPIRED" });
+    await raceActiveEffectModel.update(mine.id, {
+      status: "EXPIRED",
+      ...(activeImpactEnabled === undefined ? {} : {
+        metadata: {
+          ...(mine.metadata || {}),
+          ...(!activeImpactEnabled
+            ? { activeImpactResolutionSkippedVersion: 1 }
+            : {}),
+        },
+      }),
+    });
     await powerupEventModel.create({
       raceId,
       actorUserId: mine.sourceUserId,
@@ -599,7 +629,320 @@ async function triggerTrailMines({
         blocked: Boolean(shield),
       },
     });
+    impacts.push({
+      effectId: mine.id,
+      userId: victim.participant.userId,
+      powerupType: "TRAIL_MINE",
+      deltaSteps: shield ? 0 : -penalty,
+      resolvedAt,
+    });
   }
+  return impacts;
+}
+
+async function judgeDrillSergeantEffects({
+  race,
+  stepTotals,
+  activeEffects,
+  participantModel,
+  raceActiveEffectModel,
+  powerupEventModel,
+  stepSampleModel,
+  currentTime,
+  activeImpactEnabled,
+}) {
+  const impacts = [];
+  const totalByParticipant = new Map(
+    stepTotals.map((entry) => [entry.participant.id, entry])
+  );
+  for (const effect of activeEffects || []) {
+    if (
+      effect.type !== "DRILL_SERGEANT" ||
+      !effect.expiresAt ||
+      new Date(effect.expiresAt) > currentTime
+    ) continue;
+    const metadata = effect.metadata || {};
+    const target = totalByParticipant.get(effect.targetParticipantId);
+    const goalSteps = Number(metadata.goalSteps) || 3000;
+    const configuredPenalty = Number(metadata.penaltySteps) || 1500;
+    const windowStart = new Date(effect.startsAt);
+    const windowEnd = new Date(effect.expiresAt);
+    const windowSteps = typeof stepSampleModel.sumClosedStepsInWindow === "function"
+      ? await stepSampleModel.sumClosedStepsInWindow(
+          effect.targetUserId,
+          windowStart,
+          windowEnd,
+          currentTime
+        )
+      : await stepSampleModel.sumStepsInWindow(
+          effect.targetUserId,
+          windowStart,
+          windowEnd
+        );
+    let outcome = "SURVIVED";
+    let deltaSteps = 0;
+    if (windowSteps < goalSteps && target) {
+      outcome = "FAILED";
+      // A progress-triggered legacy boundary can have no retained samples even
+      // though race_participants.total_steps is the last authoritative snapshot
+      // the old endpoint exposed. Preserve that fallback contract while keeping
+      // judgement inside C0: precise generations floor against the freshly
+      // scored total; sample-less generations floor against the greater of the
+      // fresh calculation and the committed snapshot.
+      const availableSteps = target.hasSampleData
+        ? target.totalSteps
+        : Math.max(
+            Math.round(Number(target.totalSteps) || 0),
+            Math.round(Number(target.participant?.totalSteps) || 0)
+          );
+      const actualPenalty = Math.max(
+        0,
+        Math.min(configuredPenalty, availableSteps)
+      );
+      if (actualPenalty > 0) {
+        await participantModel.subtractBonusSteps(effect.targetParticipantId, actualPenalty);
+        target.totalSteps = Math.max(0, target.totalSteps - actualPenalty);
+      }
+      deltaSteps = -actualPenalty;
+    }
+    await raceActiveEffectModel.update(effect.id, {
+      status: "EXPIRED",
+      metadata: {
+        ...metadata,
+        ...(activeImpactEnabled === true
+          ? {
+              activeImpactCalculationVersion: 1,
+              activeImpactDeltaSteps: deltaSteps,
+            }
+          : activeImpactEnabled === false
+            ? { activeImpactResolutionSkippedVersion: 1 }
+            : {}),
+      },
+    });
+    await powerupEventModel.create({
+      raceId: race.id,
+      actorUserId: outcome === "FAILED" ? effect.sourceUserId : effect.targetUserId,
+      eventType: "POWERUP_USED",
+      powerupType: "DRILL_SERGEANT",
+      targetUserId: effect.targetUserId,
+      description: outcome === "FAILED"
+        ? `Dare failed! They fell short of ${goalSteps.toLocaleString()} steps and lost ${Math.abs(deltaSteps).toLocaleString()}.`
+        : `Dare survived! They walked ${Math.round(windowSteps).toLocaleString()} steps and dodged the Drill Sergeant penalty.`,
+      metadata: {
+        outcome,
+        ...(outcome === "FAILED" ? { penalty: Math.abs(deltaSteps) } : {}),
+        windowSteps: Math.round(windowSteps),
+      },
+    });
+    impacts.push({
+      effectId: effect.id,
+      userId: effect.targetUserId,
+      powerupType: "DRILL_SERGEANT",
+      deltaSteps,
+      resolvedAt: effect.expiresAt || currentTime,
+    });
+  }
+  return impacts;
+}
+
+function chronologicalImpactEffects(rows = []) {
+  return [...rows].sort((a, b) => {
+    const time = new Date(a.startsAt || a.createdAt || 0).getTime() -
+      new Date(b.startsAt || b.createdAt || 0).getTime();
+    return time || String(a.id).localeCompare(String(b.id));
+  });
+}
+
+function buildImpactAttributionEffectModel({
+  effectsByParticipant,
+  hitchhikes,
+  includedEffectIds,
+}) {
+  const included = includedEffectIds || new Set();
+  const select = (rows) => chronologicalImpactEffects(
+    (rows || []).filter((row) => included.has(row.id))
+  );
+  return {
+    async findEffectsForRaceByTypes(_raceId, participantId, types) {
+      const byType = Object.fromEntries((types || []).map((type) => [type, []]));
+      for (const row of select(effectsByParticipant.get(participantId))) {
+        if (byType[row.type]) byType[row.type].push(row);
+      }
+      return byType;
+    },
+    async findRaceEffectsByType(_raceId, type) {
+      return type === "HITCHHIKE" ? select(hitchhikes) : [];
+    },
+  };
+}
+
+async function computeActiveTimedImpactCapture({
+  race,
+  participants,
+  preLeech,
+  currentTime,
+  raceActiveEffectModel,
+  stepSampleModel,
+  globalEvents,
+  eventsByUserId = null,
+}) {
+  const effectsByParticipant = new Map();
+  for (const participant of participants) {
+    const byType = await raceActiveEffectModel.findEffectsForRaceByTypes(
+      race.id,
+      participant.id,
+      SETTLEMENT_EFFECT_TYPES
+    );
+    effectsByParticipant.set(
+      participant.id,
+      SETTLEMENT_EFFECT_TYPES.flatMap((type) => byType[type] || [])
+    );
+  }
+  const hitchhikes = typeof raceActiveEffectModel.findRaceEffectsByType === "function"
+    ? await raceActiveEffectModel.findRaceEffectsByType(race.id, "HITCHHIKE")
+    : [];
+  const effects = chronologicalImpactEffects([
+    ...[...effectsByParticipant.values()].flat(),
+    ...(hitchhikes || []),
+  ]);
+  if (effects.length === 0) return { resolved: [], all: [] };
+  const frozenTotals = new Map(
+    participants
+      .filter((participant) => participant.forfeitedAt || participant.finishedAt)
+      .map((participant) => [
+        participant.id,
+        participant.finishTotalSteps ?? participant.totalSteps ?? race.targetSteps,
+      ])
+  );
+  const inputByParticipantId = new Map(
+    preLeech.filter(Boolean).map((entry) => [entry.participant.id, entry])
+  );
+  const score = async ({ effectIds, globalEvents: scoringGlobalEvents }) => {
+    const effectModel = buildImpactAttributionEffectModel({
+      effectsByParticipant,
+      hitchhikes,
+      includedEffectIds: effectIds,
+    });
+    const active = [];
+    for (const participant of participants) {
+      const input = inputByParticipantId.get(participant.id);
+      if (!input || input.frozen) continue;
+      const recomputed = await calculateCurrentTotal({
+        raceId: race.id,
+        racePowerupsEnabled: race.powerupsEnabled,
+        participant,
+        baseAdjusted: input.baseAdjusted,
+        hasSampleData: input.hasSampleData,
+        raceActiveEffectModel: effectModel,
+        stepSampleModel,
+        globalEvents: eventsByUserId
+          ? eventsForUser(eventsByUserId, participant.userId)
+          : scoringGlobalEvents,
+        now: currentTime,
+      });
+      active.push({
+        participantId: participant.id,
+        userId: participant.userId,
+        preLeechTotal: recomputed.total,
+        leechTransfers: recomputed.leechTransfers,
+      });
+    }
+    const copies = await collectRaceHitchhikeCopies({
+      raceId: race.id,
+      raceEndsAt: race.endsAt,
+      participants,
+      raceActiveEffectModel: effectModel,
+      stepSampleModel,
+      now: currentTime,
+      globalEvents: scoringGlobalEvents,
+      eventsByUserId,
+    });
+    const finals = applyLeechTransfers(applyHitchhikeCopies(active, copies));
+    for (const [participantId, total] of frozenTotals) finals.set(participantId, total);
+    return finals;
+  };
+  const vector = await computeSettlementAttributionVector({
+    participants,
+    effects,
+    globalEvents: [],
+    score,
+  });
+  const impactByEffectAndUser = new Map(
+    vector.effectImpacts.map((impact) => [
+      `${impact.effectId}:${impact.userId}`,
+      impact,
+    ])
+  );
+  const all = effects
+    .filter((effect) => ACTIVE_NOTICE_TIMED_TYPES.has(effect.type))
+    .map((effect) => impactByEffectAndUser.get(
+      `${effect.id}:${effect.targetUserId}`
+    ) || {
+      effectId: effect.id,
+      userId: effect.targetUserId,
+      powerupType: effect.type,
+      deltaSteps: 0,
+    })
+    .map((impact) => ({ ...impact, resolvedAt: currentTime }));
+  const dueIds = new Set(effects
+    .filter((effect) =>
+      ACTIVE_NOTICE_TIMED_TYPES.has(effect.type) &&
+      effect.expiresAt &&
+      new Date(effect.expiresAt).getTime() <= currentTime.getTime()
+    )
+    .map((effect) => effect.id));
+  return {
+    all,
+    resolved: all.filter((impact) => dueIds.has(impact.effectId)),
+  };
+}
+
+async function computeActiveDefenseImpactCapture({
+  raceId,
+  powerupEventModel,
+  stepSampleModel,
+  currentTime,
+}) {
+  if (typeof powerupEventModel.findByRaceAsc !== "function") return [];
+  const events = (await powerupEventModel.findByRaceAsc(raceId)) || [];
+  const impacts = [];
+  for (const event of events) {
+    const metadata = event?.metadata || {};
+    const start = new Date(metadata.activeImpactDefenseWindowStart);
+    const end = new Date(metadata.activeImpactDefenseWindowEnd);
+    const multiplier = Number(metadata.activeImpactDefenseMultiplier);
+    if (
+      metadata.activeImpactDefenseCalculationVersion !== 1 ||
+      metadata.activeImpactDefenseType !== "UMBRELLA" ||
+      typeof metadata.activeImpactDefenseTargetUserId !== "string" ||
+      !Number.isFinite(start.getTime()) ||
+      !Number.isFinite(end.getTime()) ||
+      end <= start ||
+      end > currentTime ||
+      !Number.isFinite(multiplier) ||
+      multiplier < 0
+    ) continue;
+    const walked = typeof stepSampleModel.sumClosedStepsInWindow === "function"
+      ? await stepSampleModel.sumClosedStepsInWindow(
+          metadata.activeImpactDefenseTargetUserId,
+          start,
+          end,
+          currentTime
+        )
+      : await stepSampleModel.sumStepsInWindow(
+          metadata.activeImpactDefenseTargetUserId,
+          start,
+          end
+        );
+    impacts.push({
+      sourceId: event.id,
+      userId: metadata.activeImpactDefenseTargetUserId,
+      powerupType: "UMBRELLA",
+      deltaSteps: Math.round(walked - Math.round(walked * multiplier)),
+      resolvedAt: end,
+    });
+  }
+  return impacts;
 }
 
 function buildResolveRaceState(dependencies = {}) {
@@ -646,6 +989,11 @@ function buildResolveRaceState(dependencies = {}) {
   const withRaceResolutionLock =
     dependencies.withRaceResolutionLock || ((_raceId, callback) => callback());
   const now = dependencies.now || (() => new Date());
+  const activeImpactConfigured = Object.prototype.hasOwnProperty.call(
+    dependencies,
+    "activeImpactEnabled",
+  );
+  const activeImpactEnabled = dependencies.activeImpactEnabled === true;
 
   // `userIds` (C0, spec §5a item 2) is ADDITIVE to the long-standing `userId`
   // argument: the race-keyed worker coalesces many uploaders into one resolve,
@@ -793,16 +1141,36 @@ function buildResolveRaceState(dependencies = {}) {
       // hand them to the SHARED math so this path matches getRaceProgress.
       // Read defensively: any failure or missing model => no boost.
       let globalEvents = [];
-      try {
-        globalEvents = (await measureResolutionPhase(
+      let eventsByUserId = null;
+      if (typeof globalStepEventModel.findEligibleByRace === "function") {
+        eventsByUserId = await measureResolutionPhase(
           "globalEvents",
-          () => globalStepEventModel.findActiveInRange(
-            race.startedAt,
-            currentTime
-          )
-        )) || [];
-      } catch {
-        globalEvents = [];
+          () => globalStepEventModel.findEligibleByRace({
+            raceId: race.id,
+            userIds: acceptedParticipants.map((participant) => participant.userId),
+            rangeStart: race.startedAt,
+            rangeEnd: currentTime,
+          })
+        );
+        const seen = new Map();
+        for (const participant of acceptedParticipants) {
+          for (const event of eventsForUser(eventsByUserId, participant.userId)) {
+            seen.set(`${event.entitlementId || event.id}:${participant.userId}`, event);
+          }
+        }
+        globalEvents = [...seen.values()];
+      } else {
+        try {
+          globalEvents = (await measureResolutionPhase(
+            "globalEvents",
+            () => globalStepEventModel.findActiveInRange(race.startedAt, currentTime)
+          )) || [];
+        } catch {
+          globalEvents = [];
+        }
+        eventsByUserId = new Map(
+          acceptedParticipants.map((participant) => [participant.userId, globalEvents])
+        );
       }
 
       // Per-participant compute+write phase. Each iteration reads only this
@@ -881,7 +1249,7 @@ function buildResolveRaceState(dependencies = {}) {
               hasSampleData,
               raceActiveEffectModel: scoringEffectModel,
               stepSampleModel: scoringStepSampleModel,
-              globalEvents,
+              globalEvents: eventsForUser(eventsByUserId, participant.userId),
               now: currentTime,
             });
 
@@ -889,6 +1257,8 @@ function buildResolveRaceState(dependencies = {}) {
           preLeech[index] = {
             participant,
             frozen: false,
+            baseAdjusted,
+            hasSampleData,
             preLeechTotal: total,
             leechTransfers,
             currentMultiplierRaw,
@@ -957,6 +1327,7 @@ function buildResolveRaceState(dependencies = {}) {
               stepSampleModel: scoringStepSampleModel,
               now: currentTime,
               globalEvents,
+              eventsByUserId,
             })
           )
         : [];
@@ -964,7 +1335,9 @@ function buildResolveRaceState(dependencies = {}) {
       // Phase B: resolve all leeches race-wide against real victim availability
       // (zero-sum, deterministic), then persist each active participant's FINAL
       // total. Frozen participants keep their stored total and are never written.
+      let resultLeechResolutions = [];
       await measureResolutionPhase("leechAndCapture", async () => {
+        const leechResolutions = [];
         const leechFinals = applyLeechTransfers(
           applyHitchhikeCopies(
             preLeech
@@ -976,13 +1349,18 @@ function buildResolveRaceState(dependencies = {}) {
                 leechTransfers: e.leechTransfers,
               })),
             hitchhikeCopies
-          )
+          ),
+          { onTransfer: (resolution) => leechResolutions.push(resolution) }
         );
 
         for (let index = 0; index < preLeech.length; index++) {
           const e = preLeech[index];
           if (e.frozen) {
-            stepTotals[index] = { participant: e.participant, totalSteps: e.totalSteps };
+            stepTotals[index] = {
+              participant: e.participant,
+              totalSteps: e.totalSteps,
+              hasSampleData: false,
+            };
             continue;
           }
           const finalTotal = leechFinals.get(e.participant.id) ?? e.preLeechTotal;
@@ -995,18 +1373,51 @@ function buildResolveRaceState(dependencies = {}) {
               baseAdjustedByParticipantId[e.participant.id]
             ),
           });
-          stepTotals[index] = { participant: e.participant, totalSteps: finalTotal };
+          stepTotals[index] = {
+            participant: e.participant,
+            totalSteps: finalTotal,
+            hasSampleData: e.hasSampleData,
+          };
         }
+        // This generation-owned capture is presentation attribution input only.
+        // It is consumed under the worker's existing C0 write fence and never
+        // changes participant totals.
+        resultLeechResolutions = leechResolutions;
       });
 
-      // Freeze the exact pre-detonation standings exposed by the HTTP display
-      // path. Trail Mine then continues against the mutable stepTotals array so
-      // the worker capture carries post-detonation writes only.
-      const preMineStepTotals = stepTotals.map(({ participant, totalSteps }) => ({
-        participantId: participant.id,
-        userId: participant.userId,
-        totalSteps,
-      }));
+      let timedImpactResolutions = [];
+      let freezeTimedImpactResolutions = [];
+      let defenseImpactResolutions = [];
+      if (!scoreScope && race.powerupsEnabled) {
+        try {
+          const [timedCapture, defenseCapture] = await measureResolutionPhase(
+            "activeImpactAttribution",
+            () => Promise.all([computeActiveTimedImpactCapture({
+              race,
+              participants: acceptedParticipants,
+              preLeech,
+              currentTime,
+              raceActiveEffectModel: scoringEffectModel,
+              stepSampleModel: scoringStepSampleModel,
+              globalEvents,
+              eventsByUserId,
+            }), computeActiveDefenseImpactCapture({
+              raceId: race.id,
+              powerupEventModel,
+              stepSampleModel: scoringStepSampleModel,
+              currentTime,
+            })])
+          );
+          timedImpactResolutions = timedCapture.resolved;
+          freezeTimedImpactResolutions = timedCapture.all;
+          defenseImpactResolutions = defenseCapture;
+        } catch (error) {
+          logger.error("[RACE_RESOLUTION] active impact attribution failed", {
+            errorCode: error?.code || "ATTRIBUTION_ERROR",
+          });
+        }
+      }
+
       const activeEffects =
         race.powerupsEnabled && typeof scoringEffectModel.findActiveForRace === "function"
           ? (await measureResolutionPhase(
@@ -1015,8 +1426,37 @@ function buildResolveRaceState(dependencies = {}) {
             )) || []
           : [];
 
+      const drillSergeantImpacts = race.powerupsEnabled
+        ? (await measureResolutionPhase(
+            "activeEffects",
+            () => judgeDrillSergeantEffects({
+              race,
+              stepTotals,
+              activeEffects,
+              participantModel,
+              raceActiveEffectModel: scoringEffectModel,
+              powerupEventModel,
+              stepSampleModel: scoringStepSampleModel,
+              currentTime,
+              activeImpactEnabled: activeImpactConfigured
+                ? activeImpactEnabled
+                : undefined,
+            })
+          )) || []
+        : [];
+
+      // Freeze the exact pre-detonation standings exposed by the HTTP display
+      // path. Drill judgement has already applied; Trail Mine continues against
+      // this mutable array so both consequence commits replay under one fence.
+      const preMineStepTotals = stepTotals.map(({ participant, totalSteps }) => ({
+        participantId: participant.id,
+        userId: participant.userId,
+        totalSteps,
+      }));
+
+      let trailMineImpacts = [];
       if (race.powerupsEnabled) {
-        await measureResolutionPhase(
+        trailMineImpacts = (await measureResolutionPhase(
           "trailMines",
           () => triggerTrailMines({
             raceId: race.id,
@@ -1026,22 +1466,33 @@ function buildResolveRaceState(dependencies = {}) {
             participantModel,
             powerupEventModel,
             activeEffects,
+            resolvedAt: currentTime,
+            activeImpactEnabled: activeImpactConfigured
+              ? activeImpactEnabled
+              : undefined,
           })
-        );
+        )) || [];
       }
 
       const currentMs = currentTime.getTime();
-      const activeGlobalEvent = globalEvents.find((event) => {
-        const startsAt = new Date(event.startsAt).getTime();
-        const endsAt = new Date(event.endsAt).getTime();
-        return startsAt <= currentMs && currentMs < endsAt && Number(event.multiplier) > 1;
-      });
-      const globalMultiplier = activeGlobalEvent ? Number(activeGlobalEvent.multiplier) : 1;
       const currentMultiplierByParticipantId = Object.fromEntries(
-        preLeech.map((entry) => [
-          entry.participant.id,
-          (entry.frozen ? 1 : entry.currentMultiplierRaw ?? 1) * globalMultiplier,
-        ])
+        preLeech.map((entry) => {
+          const activeGlobalEvent = eventsForUser(
+            eventsByUserId,
+            entry.participant.userId
+          ).find((event) => {
+            const startsAt = new Date(event.startsAt).getTime();
+            const endsAt = new Date(event.endsAt).getTime();
+            return startsAt <= currentMs && currentMs < endsAt && Number(event.multiplier) > 1;
+          });
+          const globalMultiplier = activeGlobalEvent
+            ? Number(activeGlobalEvent.multiplier)
+            : 1;
+          return [
+            entry.participant.id,
+            (entry.frozen ? 1 : entry.currentMultiplierRaw ?? 1) * globalMultiplier,
+          ];
+        })
       );
 
       return {
@@ -1057,8 +1508,18 @@ function buildResolveRaceState(dependencies = {}) {
           stepTotals: preMineStepTotals,
           currentMultiplierByParticipantId,
           activeEffects,
-          globalEvents,
           asOf: currentTime,
+        },
+        activeImpactCapture: {
+          asOf: currentTime,
+          sourceEligibilityEnabled: activeImpactEnabled,
+          leechResolutions: resultLeechResolutions,
+          hitchhikeCopies,
+          timedImpacts: timedImpactResolutions,
+          freezeTimedImpacts: freezeTimedImpactResolutions,
+          defenseImpacts: defenseImpactResolutions,
+          trailMineImpacts,
+          drillSergeantImpacts,
         },
         updatedParticipants: stepTotals.length,
         // Retained (always 0) so existing callers reading this keep working.

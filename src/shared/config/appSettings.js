@@ -1,6 +1,10 @@
 const { prisma: defaultPrisma } = require("../../db");
 const derivedCache = require("../cache/derivedCache");
 const cacheKeys = require("../cache/cacheKeys");
+const {
+  ACTIVE_IMPACT_FLAG_KEY,
+  transitionActiveImpactFlag,
+} = require("./activeImpactRolloutFence");
 
 // Every C1 key is a 60s safety net; invalidation is the primary mechanism
 // (spec §3 key table).
@@ -16,6 +20,15 @@ const CATALOG_TTL_SECONDS = 60;
 // add a query per request; an admin PATCH busts the cache immediately in the
 // process that served it, and other processes converge within CACHE_TTL_MS.
 const KNOWN_FLAGS = {
+  // Local-time daily 2x events. Creation-mode switch only: already stamped
+  // parents always drain under their immutable scheduleMode. Default OFF keeps
+  // every deployed client and legacy scorer on the existing global path.
+  localGlobalStepEventsEnabled: false,
+  // Operational precondition for local-event creation. The cleanup worker is
+  // deliberately dark by default; creation refuses to enable until operators
+  // explicitly accept and monitor the 30-day retention lifecycle.
+  localGlobalStepEventRetentionEnabled: false,
+  redisCacheHomeActiveGlobalEventEnabled: false,
   // Admin metrics dashboard v2 (iOS Phase A). Both switches are default-off so
   // the additive endpoint contract and storage can deploy before collection or
   // dashboard work begins for any client.
@@ -304,6 +317,12 @@ const KNOWN_FLAGS = {
   // deployed backend is inert until both the mobile build and operator flag are
   // ready, while old clients simply ignore the additive fields/endpoints.
   apiImpactNoticesEnabled: false,
+  // Active-race synced-step notifications are a new capability-gated surface.
+  // Work creation and delivery both stay inert until explicitly enabled.
+  apiActiveImpactNoticesV1Enabled: false,
+  // Separate kill switch for the legacy 2.3.8 completed-race popup routes.
+  // Private completed Activity remains controlled by apiImpactNoticesEnabled.
+  apiCompletedImpactPopupEnabled: false,
   apiImpactSummariesEnabled: false,
   apiReviewPromptEnabled: false,
   apiInboxV1Enabled: false,
@@ -542,7 +561,11 @@ function buildAppSettings(dependencies = {}) {
         }
       }
     }
-    if (key === "adminMetricsV2TelemetryEnabled") {
+    if (key === ACTIVE_IMPACT_FLAG_KEY) {
+      await prisma.$transaction((tx) =>
+        transitionActiveImpactFlag(tx, value, new Date())
+      );
+    } else if (key === "adminMetricsV2TelemetryEnabled") {
       await prisma.$transaction(async (tx) => {
         const existing = await tx.appSetting.findUnique({ where: { key } });
         const wasEnabled = existing?.value === true;
@@ -597,6 +620,12 @@ function buildAppSettings(dependencies = {}) {
       }
     }
     await prisma.$transaction(async (tx) => {
+      const activeImpactEntry = entries.find(
+        ([key]) => key === ACTIVE_IMPACT_FLAG_KEY
+      );
+      if (activeImpactEntry) {
+        await transitionActiveImpactFlag(tx, activeImpactEntry[1], new Date());
+      }
       const telemetryEntry = entries.find(
         ([key]) => key === "adminMetricsV2TelemetryEnabled"
       );
@@ -618,6 +647,7 @@ function buildAppSettings(dependencies = {}) {
         }
       }
       for (const [key, value] of entries) {
+        if (key === ACTIVE_IMPACT_FLAG_KEY) continue;
         await tx.appSetting.upsert({
           where: { key },
           update: { value },

@@ -41,8 +41,9 @@ const PREFIX = {
   LEADERBOARD_STEPS_FRIENDS: "v1:leaderboard:steps:friends",
   LEADERBOARD_LOCK: "v1:lock:leaderboard",
   FRIEND_SEARCH_RATE: "v1:user:friendsearchrate",
-  HOME_IMPACT_SUMMARY: "v1:home:impact-summary",
+  HOME_IMPACT_SUMMARY: "v2:home:impact-summary",
   HOME_INBOX_UNREAD: "v1:home:inbox-unread",
+  HOME_ACTIVE_GLOBAL_EVENT: "v1:user",
 };
 
 // The only two values `resolveReleaseChannel` can ever produce
@@ -114,6 +115,10 @@ function userCosmetics(userId) {
 
 function userCosmeticsVersion(userId) {
   return `${PREFIX.USER_COSMETICS_VERSION}:${userId}`;
+}
+
+function homeActiveGlobalEvent(userId) {
+  return `${PREFIX.HOME_ACTIVE_GLOBAL_EVENT}:${userId}:active-global-event`;
 }
 
 function userFriends(userId) {
@@ -342,6 +347,7 @@ module.exports = {
   appSettingsKey,
   balanceKey,
   globalEventsKey,
+  homeActiveGlobalEvent,
   userCosmetics,
   userCosmeticsVersion,
   userFriends,

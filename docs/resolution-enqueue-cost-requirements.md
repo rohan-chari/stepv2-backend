@@ -9,6 +9,13 @@
 transaction hold time. Hold time is real but it is a *symptom*: the transactions
 are long because of the statement identified below. Do not implement it.
 
+> **Historical harness notice:** The frontend production-mix, profiling, and
+> database-sampling scripts used for the measurements below were retired in
+> 2026-08. Commands and script names in this document are archival evidence,
+> not current instructions. Use the frontend repository's `k6/README.md` for
+> the supported smoke/find/confirm/soak capacity workflow; its replacement
+> profile is not directly comparable to these results.
+
 ---
 
 ## 1. The finding
@@ -381,10 +388,12 @@ Recorded so nobody re-investigates these. Each was measured and disproved.
 
 ---
 
-## 5. How to verify
+## 5. Historical verification protocol
 
-Baseline, 61 rps against staging (1 worker, `bara-staging-pool` = 20), from
-`k6/README.md` in the frontend repo:
+The baseline was 61 rps against staging (1 worker,
+`bara-staging-pool` = 20). The following retired-harness command is preserved
+only to identify how that measurement was run; do not use it as a current
+capacity test:
 
 ```bash
 cd ~/repos/stepv2-frontend/k6
@@ -415,18 +424,19 @@ Per-request query counts are available by setting
 **Leave it `false` in prod** — the flag adds hot-path work by design, and set it
 the same way in both halves of any before/after comparison.
 
-The tooling for all of the above lives in the **frontend** repo's `k6/`
-directory and is documented in `k6/README.md`:
+The retired tooling used for this historical investigation lived in the
+**frontend** repo's `k6/` directory:
 
-| script | measures |
+| historical script | measured |
 |---|---|
 | `prod-mix-load-test.js` | capacity (prod-weighted mix, arrival-rate rungs) |
 | `profile-worker.js` | which **code** burns CPU (V8 profile via the worker's inspector) |
 | `sample-db-queries.sh` | which **SQL** burns database time |
 | `sample-db-state.sh` | active vs `idle in transaction` vs lock-waiting |
 
-**`pm2 profile:cpu` profiles the pm2 daemon, not the app** — it returns 97.6%
-idle and looks superficially valid. Use `profile-worker.js`.
+**`pm2 profile:cpu` profiles the pm2 daemon, not the app** — it returned 97.6%
+idle and looked superficially valid. The historical investigation instead
+used the now-retired `profile-worker.js`.
 
 ---
 

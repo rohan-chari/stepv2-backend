@@ -94,7 +94,7 @@ function buildInboxDelivery(dependencies = {}) {
           });
           const user = await prisma.user.findUnique({ where: { id: row.alert.userId } });
           if (
-            epoch && user?.appleId && user.isReviewAccount !== true &&
+            epoch && user && user.isReviewAccount !== true &&
             tokens.some((token) => token.platform === "ios" && token.adminMetricsOpenCapable === true && token.adminMetricsOpenEpochId === epoch.id)
           ) {
             const deliveryKey = row.alert.sourceKey?.startsWith("visible:")
