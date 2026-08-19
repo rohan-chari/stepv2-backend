@@ -11,7 +11,10 @@ const {
 } = require("../../shared/config/performanceFlags");
 const { appSettings } = require("../../shared/config/appSettings");
 const { createInboxAlert } = require("../inbox/services/inbox");
-const { createHash } = require("node:crypto");
+const {
+  buildPushDeliveryAttribution,
+  canonicalPushDeliveryKey,
+} = require("./pushDeliveryAttribution");
 
 const CHAT_PUSH_COOLDOWN_MS = 60_000;
 const INBOX_VISIBLE_TYPES = new Set([
@@ -29,6 +32,7 @@ const INBOX_VISIBLE_TYPES = new Set([
 ]);
 
 function registerNotificationHandlers(dependencies = {}) {
+  const db = dependencies.prisma || prisma;
   const events = dependencies.eventBus || eventBus;
   const userModel = dependencies.User || User;
   const deviceTokenModel = dependencies.DeviceToken || DeviceToken;
@@ -42,6 +46,12 @@ function registerNotificationHandlers(dependencies = {}) {
   const createAlert = dependencies.createInboxAlert || createInboxAlert;
   const getPerformanceFlags = dependencies.getPerformanceFlags ||
     (() => readPerformanceFlags());
+  const pushAttribution = buildPushDeliveryAttribution({
+    prisma: db,
+    User: userModel,
+    appSettings: settings,
+    logger,
+  });
 
   // Persist one row per user-facing (visible) notification we send, for audit /
   // debugging (a nightly job prunes rows older than a week). Best-effort: a
@@ -65,7 +75,7 @@ function registerNotificationHandlers(dependencies = {}) {
     }
   }
 
-  async function queueInboxDelivery({ recipientUserId, eventName, title, body, payload }) {
+  async function queueInboxDelivery({ recipientUserId, eventName, title, body, payload, sourceId }) {
     if ((await settings.getFlag("apiInboxV1Enabled")) !== true) return false;
     const raceId = payload?.raceId || payload?.params?.raceId || null;
     const tournamentId = payload?.tournamentId || payload?.params?.tournamentId || null;
@@ -90,13 +100,20 @@ function registerNotificationHandlers(dependencies = {}) {
     // convention still funnel through the durable path using a stable digest of
     // the visible event (never a random retry key), so they cannot bypass Inbox
     // merely because the user has no device token.
-    const domainId = payload?.messageId || payload?.eventId || payload?.id ||
-      payload?.deliveryKey || raceId || tournamentId ||
-      createHash("sha256").update(`${type}\n${title || ""}\n${body || ""}`).digest("hex");
+    const domainId = sourceId || payload?.messageId || payload?.eventId || payload?.id ||
+      payload?.deliveryKey || raceId || tournamentId;
+    if (!domainId) {
+      logger.warn("Inbox alert skipped without a durable source id", {
+        eventName: type,
+        userId: recipientUserId,
+      });
+      return false;
+    }
     try {
       await createAlert({
         userId: recipientUserId, type, title: title || "BARA", body,
-        destination, sourceKey: `legacy:${type}:${recipientUserId}:${domainId}`,
+        destination,
+        sourceKey: canonicalPushDeliveryKey(type, recipientUserId, domainId),
       });
       return true;
     } catch (error) {
@@ -154,6 +171,35 @@ function registerNotificationHandlers(dependencies = {}) {
     return tokenRecord && tokenRecord.platform === "android" ? fcm : apns;
   }
 
+  async function prepareVisibleAttribution({
+    eventName,
+    recipientUserId,
+    title,
+    body,
+    payload,
+    tokens,
+    sourceId,
+  }) {
+    const domainId = sourceId || payload?.messageId || payload?.eventId || payload?.id ||
+      payload?.deliveryKey || payload?.raceId || payload?.params?.raceId ||
+      payload?.tournamentId || payload?.params?.tournamentId;
+    return pushAttribution.prepare({
+      recipientUserId,
+      notificationType: payload?.type || eventName,
+      tokens,
+      deliveryKey: canonicalPushDeliveryKey(
+        payload?.type || eventName,
+        recipientUserId,
+        domainId
+      ),
+      payload,
+    });
+  }
+
+  async function markVisibleAttribution(attribution, tokenRecord, result) {
+    return pushAttribution.markAccepted(attribution, tokenRecord, result);
+  }
+
   async function findActorName(userId) {
     let actorName = "Someone";
 
@@ -175,6 +221,7 @@ function registerNotificationHandlers(dependencies = {}) {
     buildBody,
     payload,
     logContext = {},
+    sourceId,
     // §7: when the caller already wrote the audit row (e.g. the daily-reward
     // scheduler's INSERT-FIRST deliveryKey claim IS the audit row), skip the
     // second recordNotification so there's exactly one row.
@@ -182,7 +229,19 @@ function registerNotificationHandlers(dependencies = {}) {
   }) {
     const actorName = await findActorName(actorUserId);
     const body = buildBody(actorName);
-    const queued = await queueInboxDelivery({ recipientUserId, eventName, title, body, payload });
+    const contextSource = sourceId || payload?.messageId || payload?.eventId ||
+      payload?.deliveryKey || payload?.raceId || payload?.params?.raceId ||
+      payload?.tournamentId || payload?.params?.tournamentId;
+    if (!contextSource) {
+      logger.error("Visible notification missing durable intent id", {
+        eventName,
+        recipientUserId,
+      });
+      return;
+    }
+    const queued = await queueInboxDelivery({
+      recipientUserId, eventName, title, body, payload, sourceId: contextSource,
+    });
     // Once Inbox v1 accepts the command, its outbox is the ONLY delivery path.
     // Sending here as well causes exactly the duplicate-push bug this seam is
     // intended to eliminate. With the rollout flag off, retain legacy delivery.
@@ -190,14 +249,20 @@ function registerNotificationHandlers(dependencies = {}) {
     const tokens = await deviceTokenModel.findByUserId(recipientUserId);
     if (!tokens || tokens.length === 0) return;
 
+    const attribution = await prepareVisibleAttribution({
+      eventName, recipientUserId, title, body, payload, tokens,
+      sourceId: contextSource,
+    });
+
     for (const tokenRecord of tokens) {
       try {
         const result = await pushServiceFor(tokenRecord).sendNotification({
           deviceToken: tokenRecord.token,
           title,
           body,
-          payload,
+          payload: attribution.payload,
         });
+        await markVisibleAttribution(attribution, tokenRecord, result);
 
         if (!result.success && !result.unregistered) {
           logger.warn(`${eventName} push failed`, {
@@ -254,6 +319,7 @@ function registerNotificationHandlers(dependencies = {}) {
           route: "friends",
         },
         logContext: { addresseeId, senderUserId: userId },
+        sourceId: `${userId}:${addresseeId}`,
       });
     } catch (error) {
       logger.error("FRIEND_REQUEST_SENT handler failed", {
@@ -278,6 +344,7 @@ function registerNotificationHandlers(dependencies = {}) {
           route: "friends",
         },
         logContext: { requesterId, friendshipId, acceptedByUserId: userId },
+        sourceId: friendshipId || `${requesterId}:${userId}`,
       });
     } catch (error) {
       logger.error("FRIEND_REQUEST_ACCEPTED handler failed", {
@@ -338,7 +405,7 @@ function registerNotificationHandlers(dependencies = {}) {
   // a failure here never affects the edit (the edit already committed).
   events.on("RACE_BUYIN_CHANGED", async (data) => {
     try {
-      const { raceId, raceName, newBuyIn, affectedUserIds } = data;
+      const { raceId, raceName, newBuyIn, affectedUserIds, notificationIntentId } = data;
       if (!Array.isArray(affectedUserIds) || affectedUserIds.length === 0) return;
       const label = raceName ? `${raceName}'s` : "The race's";
       const body =
@@ -358,6 +425,7 @@ function registerNotificationHandlers(dependencies = {}) {
             params: { raceId },
           },
           logContext: { raceId, recipientUserId },
+          sourceId: notificationIntentId,
         });
       }
     } catch (error) {
@@ -502,7 +570,7 @@ function registerNotificationHandlers(dependencies = {}) {
   // payload deep-links to the daily-reward screen and carries no extra-spin CTA.
   events.on("DAILY_REWARD_REMINDER", async (data) => {
     try {
-      const { userId, slot, title, body } = data || {};
+      const { userId, slot, title, body, localDate } = data || {};
       if (!userId || (slot !== 17 && slot !== 21)) return;
       await sendNotificationToUser({
         eventName: `DAILY_REWARD_REMINDER_${slot}`,
@@ -516,6 +584,7 @@ function registerNotificationHandlers(dependencies = {}) {
           params: {},
         },
         logContext: { userId, slot },
+        sourceId: localDate ? `${userId}:${localDate}:${slot}` : `${userId}:${slot}`,
         skipAudit: true,
       });
     } catch (error) {
@@ -532,7 +601,7 @@ function registerNotificationHandlers(dependencies = {}) {
   // with no deep link (notification_service.dart:439).
   events.on("STEP_MILESTONE_REMINDER", async (data) => {
     try {
-      const { userId, title, body } = data || {};
+      const { userId, title, body, localDate } = data || {};
       if (!userId) return;
       await sendNotificationToUser({
         eventName: "STEP_MILESTONE_REMINDER",
@@ -548,6 +617,7 @@ function registerNotificationHandlers(dependencies = {}) {
           params: {},
         },
         logContext: { userId },
+        sourceId: localDate ? `${userId}:${localDate}` : userId,
         skipAudit: true,
       });
     } catch (error) {
@@ -629,6 +699,7 @@ function registerNotificationHandlers(dependencies = {}) {
         leadingTeamName,
         trailingTeamName,
         memberUserIds,
+        notificationIntentId,
       } = data || {};
       if (!raceId || !memberUserIds || memberUserIds.length === 0) return;
 
@@ -659,6 +730,7 @@ function registerNotificationHandlers(dependencies = {}) {
             params: { raceId },
           },
           logContext: { raceId, recipientUserId },
+          sourceId: notificationIntentId,
         });
       }
     } catch (error) {
@@ -693,6 +765,7 @@ function registerNotificationHandlers(dependencies = {}) {
         endsAt,
         memberUserIds,
         memberTeams,
+        notificationIntentId,
       } = data || {};
       if (!raceId || !memberUserIds || memberUserIds.length === 0) return;
 
@@ -738,6 +811,7 @@ function registerNotificationHandlers(dependencies = {}) {
             params: { raceId },
           },
           logContext: { raceId, recipientUserId },
+          sourceId: notificationIntentId,
         });
       }
     } catch (error) {
@@ -815,6 +889,7 @@ function registerNotificationHandlers(dependencies = {}) {
           route: "home",
         },
         logContext: { referrerId, refereeId, coins },
+        sourceId: `${referrerId}:${refereeId}`,
       });
     } catch (error) {
       logger.error("REFERRAL_REWARDED handler failed", {
@@ -849,7 +924,7 @@ function registerNotificationHandlers(dependencies = {}) {
 
   events.on("GLOBAL_EVENT_STARTED", async (data) => {
     try {
-      const { multiplier, participantUserIds } = data || {};
+      const { eventId, multiplier, participantUserIds } = data || {};
       if (!participantUserIds || participantUserIds.length === 0) return;
 
       const mult = Number(multiplier) || 2;
@@ -866,6 +941,7 @@ function registerNotificationHandlers(dependencies = {}) {
             route: "home",
           },
           logContext: { multiplier: mult, recipientUserId },
+          sourceId: eventId,
         });
       }
     } catch (error) {
@@ -921,7 +997,7 @@ function registerNotificationHandlers(dependencies = {}) {
 
   events.on("POWERUP_USED", async (data) => {
     try {
-      const { raceId, userId, powerupType, targetUserId, upgradeLevel } = data;
+      const { raceId, userId, powerupType, targetUserId, upgradeLevel, notificationIntentId } = data;
       // Batch 2026-08-09 item 11. The in-app feed, race messages and the
       // leaderboard have always redacted a stealthed attacker to "???"; this
       // push did not, so Stealth Mode leaked the one thing it sells.
@@ -991,6 +1067,7 @@ function registerNotificationHandlers(dependencies = {}) {
           params: { raceId },
         },
         logContext: { raceId, targetUserId, powerupType },
+        sourceId: notificationIntentId,
       });
     } catch (error) {
       logger.error("POWERUP_USED handler failed", {
@@ -1042,6 +1119,7 @@ function registerNotificationHandlers(dependencies = {}) {
             title: raceName || "Race chat",
             body: alertBody,
             payload,
+            sourceId: messageId,
           });
           if (queued) {
             try {
@@ -1064,6 +1142,17 @@ function registerNotificationHandlers(dependencies = {}) {
 
         const tokens = await deviceTokenModel.findByUserId(recipient.userId);
         if (!tokens || tokens.length === 0) continue;
+        const attribution = onCooldown
+          ? { delivery: null, payload, epochId: null }
+          : await prepareVisibleAttribution({
+              eventName: "RACE_MESSAGE_SENT",
+              recipientUserId: recipient.userId,
+              title: raceName || "Race chat",
+              body: alertBody,
+              payload,
+              tokens,
+              sourceId: messageId,
+            });
 
         for (const tokenRecord of tokens) {
           try {
@@ -1077,10 +1166,13 @@ function registerNotificationHandlers(dependencies = {}) {
                   deviceToken: tokenRecord.token,
                   title: raceName || "Race chat",
                   body: alertBody,
-                  payload,
+                  payload: attribution.payload,
                   collapseId,
                   threadId: collapseId,
                 });
+            if (!onCooldown) {
+              await markVisibleAttribution(attribution, tokenRecord, result);
+            }
 
             if (!result.success && !result.unregistered) {
               logger.warn("RACE_MESSAGE_SENT push failed", {
@@ -1232,6 +1324,7 @@ function registerNotificationHandlers(dependencies = {}) {
         placement,
         paidPlaces,
         endsAt,
+        notificationIntentId,
       } = data || {};
       if (!userId || placement == null) return;
 
@@ -1346,6 +1439,9 @@ function registerNotificationHandlers(dependencies = {}) {
         title,
         body,
         payload,
+        sourceId: payoutDrop
+          ? `payout-drop:${raceId}:${userId}`
+          : notificationIntentId,
       });
 
       // Inbox alerts deliberately exist even when no device is registered.
@@ -1360,6 +1456,19 @@ function registerNotificationHandlers(dependencies = {}) {
           return;
         }
       }
+      const attribution = sendAlert && !queuedVisible
+        ? await prepareVisibleAttribution({
+            eventName: "PLACEMENT_CHANGED",
+            recipientUserId: userId,
+            title,
+            body,
+            payload,
+            tokens,
+            sourceId: payoutDrop
+              ? `payout-drop:${raceId}:${userId}`
+              : notificationIntentId,
+          })
+        : { delivery: null, payload, epochId: null };
 
       for (const tokenRecord of tokens) {
         perfPushAttempts += 1;
@@ -1370,7 +1479,7 @@ function registerNotificationHandlers(dependencies = {}) {
                 deviceToken: tokenRecord.token,
                 title,
                 body,
-                payload,
+                payload: attribution.payload,
                 collapseId: `placement_${raceId}`,
               })
             : await push.sendSilentNotification({
@@ -1378,6 +1487,9 @@ function registerNotificationHandlers(dependencies = {}) {
                 payload,
               });
 
+          if (sendAlert) {
+            await markVisibleAttribution(attribution, tokenRecord, result);
+          }
           if (!result.success && !result.unregistered) {
             perfFailures += 1;
             logger.warn("PLACEMENT_CHANGED push failed", {
@@ -1448,9 +1560,23 @@ function registerNotificationHandlers(dependencies = {}) {
   // _routeFromType returns null), exactly like PLACEMENT_CHANGED.
   events.on("HIGH_MULTIPLIER_ALERT", async (data) => {
     try {
-      const { raceId, raceName, actorUserId, actorName, multiplier, recipientUserIds } =
-        data || {};
+      const {
+        raceId,
+        raceName,
+        actorUserId,
+        actorName,
+        multiplier,
+        recipientUserIds,
+        notificationIntentId,
+      } = data || {};
       if (!Array.isArray(recipientUserIds) || recipientUserIds.length === 0) return;
+      if (!notificationIntentId) {
+        logger.error("HIGH_MULTIPLIER_ALERT missing durable crossing intent id", {
+          raceId,
+          actorUserId,
+        });
+        return;
+      }
 
       // The SECOND leak (batch 2026-08-09 item 11, architect REQUIRED). This
       // push names the actor to every rival, so a stealthed player who
@@ -1495,6 +1621,7 @@ function registerNotificationHandlers(dependencies = {}) {
           title,
           body,
           payload,
+          sourceId: notificationIntentId,
         });
         if (queued) {
           await recordNotification({
@@ -1508,13 +1635,22 @@ function registerNotificationHandlers(dependencies = {}) {
         }
         const tokens = await deviceTokenModel.findByUserId(recipientUserId);
         if (!tokens || tokens.length === 0) continue;
+        const attribution = await prepareVisibleAttribution({
+          eventName: "HIGH_MULTIPLIER_ALERT",
+          recipientUserId,
+          title,
+          body,
+          payload,
+          tokens,
+          sourceId: notificationIntentId,
+        });
         for (const tokenRecord of tokens) {
           try {
             const result = await pushServiceFor(tokenRecord).sendNotification({
               deviceToken: tokenRecord.token,
               title,
               body,
-              payload,
+              payload: attribution.payload,
               // APNs hard-limits `apns-collapse-id` to 64 BYTES. The original
               // `himult_<raceId>_<actorUserId>` (two full UUIDs, 80 bytes) made
               // APNs 400 InvalidCollapseId on every send — no one ever received
@@ -1522,6 +1658,7 @@ function registerNotificationHandlers(dependencies = {}) {
               // collapse purposes at 25 bytes.
               collapseId: `himult_${String(raceId ?? "").slice(0, 8)}_${String(actorUserId ?? "").slice(0, 8)}`,
             });
+            await markVisibleAttribution(attribution, tokenRecord, result);
             if (!result.success && !result.unregistered) {
               logger.warn("HIGH_MULTIPLIER_ALERT push failed", {
                 raceId,
@@ -1775,7 +1912,7 @@ function registerNotificationHandlers(dependencies = {}) {
   // race a user moved the most in over the last 24h; copy adapts to up vs down.
   events.on("DAILY_MOVER", async (data) => {
     try {
-      const { userId, raceId, raceName, movement, placement } = data || {};
+      const { userId, raceId, raceName, movement, placement, notificationIntentId } = data || {};
       if (!userId || !movement || placement == null) return;
 
       const label = raceName || "your race";
@@ -1799,6 +1936,7 @@ function registerNotificationHandlers(dependencies = {}) {
         title,
         body,
         payload,
+        sourceId: notificationIntentId || `${raceId}:${new Date().toISOString().slice(0, 10)}`,
       });
       if (queued) {
         await recordNotification({ userId, type: "DAILY_MOVER", title, body, raceId });
@@ -1807,6 +1945,15 @@ function registerNotificationHandlers(dependencies = {}) {
 
       const tokens = await deviceTokenModel.findByUserId(userId);
       if (!tokens || tokens.length === 0) return;
+      const attribution = await prepareVisibleAttribution({
+        eventName: "DAILY_MOVER",
+        recipientUserId: userId,
+        title,
+        body,
+        payload,
+        tokens,
+        sourceId: notificationIntentId || `${raceId}:${new Date().toISOString().slice(0, 10)}`,
+      });
 
       for (const tokenRecord of tokens) {
         try {
@@ -1815,9 +1962,10 @@ function registerNotificationHandlers(dependencies = {}) {
             deviceToken: tokenRecord.token,
             title,
             body,
-            payload,
+            payload: attribution.payload,
             collapseId: `daily_mover_${raceId}`,
           });
+          await markVisibleAttribution(attribution, tokenRecord, result);
 
           if (!result.success && !result.unregistered) {
             logger.warn("DAILY_MOVER push failed", {

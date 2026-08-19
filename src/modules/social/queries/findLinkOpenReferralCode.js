@@ -83,9 +83,14 @@ function buildFindLinkOpenReferralCode(dependencies = {}) {
   // One tier's lookup. Reports the open COUNT alongside the verdict because
   // the tier-2 gate keys on "tier 1 saw zero opens", not on "tier 1 returned
   // no code".
-  async function lookupTier({ tier, field, value, maxOpens, since, signupId }) {
+  async function lookupTier({ tier, field, value, versionField, version, maxOpens, since, signupId }) {
     const opens = await db.linkOpen.findMany({
-      where: { kind: "referral", [field]: value, createdAt: { gte: since } },
+      where: {
+        kind: "referral",
+        [field]: value,
+        ...(versionField ? { [versionField]: version } : {}),
+        createdAt: { gte: since },
+      },
       select: { code: true, sourceRaceId: true },
       orderBy: { createdAt: "desc" },
       take: maxOpens + 1,
@@ -117,6 +122,14 @@ function buildFindLinkOpenReferralCode(dependencies = {}) {
   return async function findLinkOpenReferralCode({
     ipHash,
     ipNetHash,
+    ipHashVersion,
+    ipNetHashVersion,
+    previousIpHash,
+    previousIpNetHash,
+    previousIpHashVersion,
+    previousIpNetHashVersion,
+    legacyIpHash,
+    legacyIpNetHash,
     signupId,
   } = {}) {
     const since = new Date(Date.now() - FALLBACK_WINDOW_HOURS * 60 * 60 * 1000);
@@ -127,6 +140,8 @@ function buildFindLinkOpenReferralCode(dependencies = {}) {
         tier: "exact",
         field: "ipHash",
         value: ipHash,
+        versionField: ipHashVersion == null ? null : "ipHashVersion",
+        version: ipHashVersion,
         maxOpens: MAX_OPENS_PER_IP,
         since,
         signupId,
@@ -142,6 +157,51 @@ function buildFindLinkOpenReferralCode(dependencies = {}) {
       if (exact.count > 0) return null;
     }
 
+    // This timestamp is updated whenever the active writer version changes.
+    // It bounds both first-enable legacy reads and rotation previous-version
+    // reads to the same 48-hour compatibility interval.
+    const enabledAt = new Date(process.env.REFERRAL_IP_HMAC_ENABLED_AT || "invalid");
+    const compatibilityReadOpen =
+      !Number.isNaN(enabledAt.getTime()) &&
+      Date.now() >= enabledAt.getTime() &&
+      Date.now() - enabledAt.getTime() <= 48 * 60 * 60 * 1000;
+    if (compatibilityReadOpen && previousIpHash && previousIpHashVersion != null) {
+      const previous = await lookupTier({
+        tier: "exact-previous",
+        field: "ipHash",
+        value: previousIpHash,
+        versionField: "ipHashVersion",
+        version: previousIpHashVersion,
+        maxOpens: MAX_OPENS_PER_IP,
+        since,
+        signupId,
+      });
+      if (previous.code) {
+        return { code: previous.code, tier: "exact", sourceRaceId: previous.sourceRaceId || null };
+      }
+      if (previous.count > 0) return null;
+    }
+    if (ipHashVersion === 1 && compatibilityReadOpen && legacyIpHash) {
+      const legacy = await lookupTier({
+        tier: "exact-legacy",
+        field: "ipHash",
+        value: legacyIpHash,
+        versionField: "ipHashVersion",
+        version: null,
+        maxOpens: MAX_OPENS_PER_IP,
+        since,
+        signupId,
+      });
+      if (legacy.code) {
+        return {
+          code: legacy.code,
+          tier: "exact",
+          sourceRaceId: legacy.sourceRaceId || null,
+        };
+      }
+      if (legacy.count > 0) return null;
+    }
+
     // ── Tier 2: network prefix ──────────────────────────────────────────
     if (!netTierEnabled()) return null;
     // A NULL net hash must skip the tier ENTIRELY. `where: { ipNetHash: null }`
@@ -155,6 +215,8 @@ function buildFindLinkOpenReferralCode(dependencies = {}) {
       tier: "net",
       field: "ipNetHash",
       value: ipNetHash,
+      versionField: ipNetHashVersion == null ? null : "ipNetHashVersion",
+      version: ipNetHashVersion,
       maxOpens: netTierMaxOpens(),
       since,
       signupId,
@@ -165,6 +227,40 @@ function buildFindLinkOpenReferralCode(dependencies = {}) {
         tier: "net",
         sourceRaceId: netMatch.sourceRaceId || null,
       };
+    }
+    if (netMatch.count > 0) return null;
+
+    if (compatibilityReadOpen && previousIpNetHash && previousIpNetHashVersion != null) {
+      const previousNet = await lookupTier({
+        tier: "net-previous",
+        field: "ipNetHash",
+        value: previousIpNetHash,
+        versionField: "ipNetHashVersion",
+        version: previousIpNetHashVersion,
+        maxOpens: netTierMaxOpens(),
+        since,
+        signupId,
+      });
+      if (previousNet.code) {
+        return { code: previousNet.code, tier: "net", sourceRaceId: previousNet.sourceRaceId || null };
+      }
+      if (previousNet.count > 0) return null;
+    }
+
+    if (ipNetHashVersion === 1 && compatibilityReadOpen && legacyIpNetHash) {
+      const legacyNet = await lookupTier({
+        tier: "net-legacy",
+        field: "ipNetHash",
+        value: legacyIpNetHash,
+        versionField: "ipNetHashVersion",
+        version: null,
+        maxOpens: netTierMaxOpens(),
+        since,
+        signupId,
+      });
+      if (legacyNet.code) {
+        return { code: legacyNet.code, tier: "net", sourceRaceId: legacyNet.sourceRaceId || null };
+      }
     }
 
     return null;

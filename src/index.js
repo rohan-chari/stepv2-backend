@@ -29,6 +29,9 @@ const { scheduleNotificationCleanup } = require("./modules/notifications");
 const { scheduleInboxExpiry, scheduleInboxDelivery } = require("./modules/inbox");
 const {
   scheduleActivationEventCleanup,
+  scheduleAdminMetricsActivityCleanup,
+  schedulePushDeliveryCleanup,
+  scheduleReferralLinkOpenCleanup,
 } = require("./modules/analytics");
 const { scheduleDailyMover } = require("./modules/notifications");
 const {
@@ -67,6 +70,12 @@ function startServer({
   scheduleInboxDelivery: scheduleInboxDeliveryJob = scheduleInboxDelivery,
   scheduleActivationEventCleanup:
     scheduleActivationCleanup = scheduleActivationEventCleanup,
+  scheduleAdminMetricsActivityCleanup:
+    scheduleMetricsActivityCleanup = scheduleAdminMetricsActivityCleanup,
+  schedulePushDeliveryCleanup:
+    schedulePushCleanup = schedulePushDeliveryCleanup,
+  scheduleReferralLinkOpenCleanup:
+    scheduleReferralCleanup = scheduleReferralLinkOpenCleanup,
   scheduleDailyMover: scheduleDaily = scheduleDailyMover,
   scheduleDailyRewardReminder:
     scheduleDailyReminder = scheduleDailyRewardReminder,
@@ -138,6 +147,11 @@ function startServer({
       }
       if (process.env.ACTIVATION_EVENT_CLEANUP_DISABLED !== "true") {
         scheduleActivationCleanup();
+      }
+      if (process.env.ADMIN_METRICS_V2_CLEANUP_DISABLED !== "true") {
+        scheduleMetricsActivityCleanup();
+        schedulePushCleanup();
+        scheduleReferralCleanup();
       }
       // step_samples retention prune (3am ET, 45d + unsettled-race guard;
       // Five-Minute Step Samples §4.1). Kill switch: STEP_SAMPLE_RETENTION_DISABLED=true.

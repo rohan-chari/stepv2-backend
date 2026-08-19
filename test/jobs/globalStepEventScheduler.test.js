@@ -104,6 +104,11 @@ test("creates an event and fans out to active-race participants at the chosen ti
 
   assert.equal(ctx.emitted.length, 1);
   assert.equal(ctx.emitted[0].name, "GLOBAL_EVENT_STARTED");
+  assert.equal(
+    ctx.emitted[0].payload.eventId,
+    event.id,
+    "the persisted event id is the durable notification intent"
+  );
   assert.deepEqual(ctx.emitted[0].payload.participantUserIds, [
     "user-1",
     "user-2",

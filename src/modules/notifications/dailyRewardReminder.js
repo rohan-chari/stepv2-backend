@@ -169,6 +169,7 @@ function buildDailyRewardReminder(dependencies = {}) {
             events.emit("DAILY_REWARD_REMINDER", {
               userId: user.id,
               slot,
+              localDate,
               title: REMINDER_TITLE,
               body: REMINDER_BODY,
             });

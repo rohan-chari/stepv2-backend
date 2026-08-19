@@ -16,6 +16,11 @@ const CATALOG_TTL_SECONDS = 60;
 // add a query per request; an admin PATCH busts the cache immediately in the
 // process that served it, and other processes converge within CACHE_TTL_MS.
 const KNOWN_FLAGS = {
+  // Admin metrics dashboard v2 (iOS Phase A). Both switches are default-off so
+  // the additive endpoint contract and storage can deploy before collection or
+  // dashboard work begins for any client.
+  adminMetricsV2DashboardEnabled: false,
+  adminMetricsV2TelemetryEnabled: false,
   // Capacity Milestone 5.0: sampled aggregate-only phase/query telemetry.
   // Default OFF; it changes no response or business behavior. Reads use the
   // existing 30-second settings cache and instrumentation issues no SQL itself.
@@ -507,11 +512,33 @@ function buildAppSettings(dependencies = {}) {
         }
       }
     }
-    await prisma.appSetting.upsert({
-      where: { key },
-      update: { value },
-      create: { key, value },
-    });
+    if (key === "adminMetricsV2TelemetryEnabled") {
+      await prisma.$transaction(async (tx) => {
+        const existing = await tx.appSetting.findUnique({ where: { key } });
+        const wasEnabled = existing?.value === true;
+        if (value === true && !wasEnabled) {
+          await tx.adminMetricsCollectionEpoch.create({
+            data: { startedAt: new Date() },
+          });
+        } else if (value === false && wasEnabled) {
+          await tx.adminMetricsCollectionEpoch.updateMany({
+            where: { endedAt: null },
+            data: { endedAt: new Date() },
+          });
+        }
+        await tx.appSetting.upsert({
+          where: { key },
+          update: { value },
+          create: { key, value },
+        });
+      });
+    } else {
+      await prisma.appSetting.upsert({
+        where: { key },
+        update: { value },
+        create: { key, value },
+      });
+    }
     cache = null; // bust so this process serves the new value immediately
     // C1 invalidation site (spec §5 Phase B): delete the shared copy and tell
     // every peer worker to bust its own in-process copy. Invalidate-only — we
@@ -539,15 +566,35 @@ function buildAppSettings(dependencies = {}) {
         throw err;
       }
     }
-    await prisma.$transaction(
-      entries.map(([key, value]) =>
-        prisma.appSetting.upsert({
+    await prisma.$transaction(async (tx) => {
+      const telemetryEntry = entries.find(
+        ([key]) => key === "adminMetricsV2TelemetryEnabled"
+      );
+      if (telemetryEntry) {
+        const existing = await tx.appSetting.findUnique({
+          where: { key: "adminMetricsV2TelemetryEnabled" },
+        });
+        const wasEnabled = existing?.value === true;
+        const enabled = telemetryEntry[1] === true;
+        if (enabled && !wasEnabled) {
+          await tx.adminMetricsCollectionEpoch.create({
+            data: { startedAt: new Date() },
+          });
+        } else if (!enabled && wasEnabled) {
+          await tx.adminMetricsCollectionEpoch.updateMany({
+            where: { endedAt: null },
+            data: { endedAt: new Date() },
+          });
+        }
+      }
+      for (const [key, value] of entries) {
+        await tx.appSetting.upsert({
           where: { key },
           update: { value },
           create: { key, value },
-        })
-      )
-    );
+        });
+      }
+    });
     cache = null;
     await derivedCache.invalidate({
       keys: [cacheKeys.appSettingsKey],

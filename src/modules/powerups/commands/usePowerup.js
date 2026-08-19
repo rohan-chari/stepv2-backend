@@ -797,7 +797,7 @@ async function applyPotionEnemyAttack(a) {
 
   // `casterStealthed` is threaded in from the caller rather than re-read here:
   // this helper lives at module scope and has no myParticipant memo of its own.
-  events.emit("POWERUP_USED", { raceId, userId: sourceUserId, powerupType: "MYSTERY_POTION", targetUserId: resolvedTargetUserId, upgradeLevel: 0, stealthed: a.casterStealthed === true });
+  events.emit("POWERUP_USED", { notificationIntentId: `powerup:${powerupId}:${resolvedTargetUserId}`, raceId, userId: sourceUserId, powerupType: "MYSTERY_POTION", targetUserId: resolvedTargetUserId, upgradeLevel: 0, stealthed: a.casterStealthed === true });
   return true;
 }
 
@@ -1466,7 +1466,7 @@ function buildUsePowerup(dependencies = {}) {
         description: `${myDisplayName} sparked an Uprising! ${beneficiaries.length} runner${beneficiaries.length === 1 ? "" : "s"} get 2x steps for 1 hour.`,
         metadata: { affected: beneficiaries.length },
       });
-      events.emit("POWERUP_USED", { raceId, userId, powerupType: type, upgradeLevel: 0, stealthed: await casterStealthed() });
+      events.emit("POWERUP_USED", { notificationIntentId: `powerup:${powerupId}`, raceId, userId, powerupType: type, upgradeLevel: 0, stealthed: await casterStealthed() });
       await finalizeSelfContainedUse(null);
       return {
         blocked: false,
@@ -1508,7 +1508,7 @@ function buildUsePowerup(dependencies = {}) {
         description: `${myDisplayName} raised a Rally Flag! The whole team gets 1.25x steps for 1 hour.`,
         metadata: { affected: beneficiaries.length },
       });
-      events.emit("POWERUP_USED", { raceId, userId, powerupType: type, upgradeLevel: 0, stealthed: await casterStealthed() });
+      events.emit("POWERUP_USED", { notificationIntentId: `powerup:${powerupId}`, raceId, userId, powerupType: type, upgradeLevel: 0, stealthed: await casterStealthed() });
       await finalizeSelfContainedUse(null);
       return {
         blocked: false,
@@ -1583,7 +1583,7 @@ function buildUsePowerup(dependencies = {}) {
         metadata: { affected: affected.length, blockedCount },
       });
       for (const uid of affected) {
-        events.emit("POWERUP_USED", { raceId, userId, powerupType: type, targetUserId: uid, upgradeLevel: 0, stealthed: await casterStealthed() });
+        events.emit("POWERUP_USED", { notificationIntentId: `powerup:${powerupId}:${uid}`, raceId, userId, powerupType: type, targetUserId: uid, upgradeLevel: 0, stealthed: await casterStealthed() });
       }
       await finalizeSelfContainedUse(null);
       return {
@@ -3761,6 +3761,7 @@ function buildUsePowerup(dependencies = {}) {
     }
 
     events.emit("POWERUP_USED", {
+      notificationIntentId: `powerup:${powerupId}:${resolvedTargetUserId || "self"}`,
       raceId,
       userId,
       powerupType: type,

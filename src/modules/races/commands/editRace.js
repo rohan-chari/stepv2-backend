@@ -2,6 +2,7 @@ const { Race } = require("../models/race");
 const { RaceParticipant } = require("../models/raceParticipant");
 const { User } = require("../../users");
 const { eventBus } = require("../../../shared/events/eventBus");
+const { randomUUID } = require("node:crypto");
 const { awardCoins } = require("../../../shared/economy/awardCoins");
 const { appSettings } = require("../../../shared/config/appSettings");
 const { withRaceJoinLock } = require("../services/raceJoinLock");
@@ -520,6 +521,9 @@ function buildEditRace(dependencies = {}) {
     // fire-and-forget with its own try/catch.
     if (buyInNotify) {
       events.emit("RACE_BUYIN_CHANGED", {
+        notificationIntentId: `buy-in:${raceId}:${updated.updatedAt
+          ? new Date(updated.updatedAt).toISOString()
+          : randomUUID()}`,
         raceId,
         raceName: updated.name,
         newBuyIn: buyInNotify.newBuyIn,

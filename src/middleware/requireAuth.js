@@ -8,6 +8,8 @@ const {
 } = require("../modules/users/services/appleIdentityToken");
 const { ensureAppleUser } = require("../modules/users/services/ensureAppleUser");
 const { User } = require("../modules/users/models/user");
+const { prisma: defaultPrisma } = require("../db");
+const { appSettings: defaultAppSettings } = require("../shared/config/appSettings");
 
 // Batch 2026-08-08 item 9. Byte-identical to the regex the analytics ingestion
 // endpoint uses to bound `appVersion` (src/modules/analytics/routes.js:84).
@@ -55,6 +57,29 @@ function buildRequireAuth(dependencies = {}) {
   const ensureUser = dependencies.ensureAppleUser || ensureAppleUser;
   const verifySession = dependencies.verifySessionToken || verifySessionToken;
   const userModel = dependencies.User || User;
+  const prisma = dependencies.prisma || defaultPrisma;
+  const settings = dependencies.appSettings || defaultAppSettings;
+
+  async function recordAdminMetricsEligibility(req, user) {
+    try {
+      if (
+        !user?.appleId ||
+        user.isReviewAccount === true ||
+        req.clientFeatures?.has("admin_metrics_v2") !== true ||
+        typeof userModel.stampMetricsV2Eligibility !== "function" ||
+        (await settings.getFlag("adminMetricsV2TelemetryEnabled")) !== true
+      ) return;
+      const epoch = await prisma.adminMetricsCollectionEpoch.findFirst({
+        where: { endedAt: null },
+        orderBy: { startedAt: "desc" },
+        select: { id: true },
+      });
+      if (!epoch || user.metricsV2EligibleEpochId === epoch.id) return;
+      await userModel.stampMetricsV2Eligibility(user.id, epoch.id);
+    } catch {
+      // Analytics eligibility is best-effort and never blocks auth.
+    }
+  }
 
   // TR-706: persist the user's client capability tokens (stamped on
   // req.clientFeatures by extractClientFeatures, which runs before every
@@ -188,6 +213,7 @@ function buildRequireAuth(dependencies = {}) {
         await recordClientFeatures(req, user);
         await recordTimezone(req, user);
         await recordAppVersion(req, user);
+        await recordAdminMetricsEligibility(req, user);
         return next();
       } catch (error) {
         if (error instanceof SessionTokenError) {
@@ -221,6 +247,7 @@ function buildRequireAuth(dependencies = {}) {
       await recordClientFeatures(req, user);
       await recordTimezone(req, user);
       await recordAppVersion(req, user);
+      await recordAdminMetricsEligibility(req, user);
 
       next();
     } catch (error) {

@@ -151,6 +151,7 @@ describe("high-multiplier push — collapse id + once-per-day recipient cap", ()
         actorName: "HiMultAliceA",
         multiplier: 6,
         recipientUserIds: [bob.userId],
+        notificationIntentId: "high-multiplier:collapse-test:2026-08-18T14:00:00.000Z",
       });
 
       await waitFor(() => sent.length === 1);
@@ -176,6 +177,7 @@ describe("high-multiplier push — collapse id + once-per-day recipient cap", ()
           actorName: "Actor",
           multiplier: 5,
           recipientUserIds: [bob.userId],
+          notificationIntentId: `high-multiplier:${raceId}:${actor.userId}`,
         });
 
       // First spike → push sent + one row recorded.

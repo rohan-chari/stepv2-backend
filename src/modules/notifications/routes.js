@@ -4,6 +4,8 @@ const {
   DeviceToken: DefaultDeviceToken,
 } = require("../../shared/push/deviceToken");
 const { User: DefaultUser } = require("../users");
+const { prisma: defaultPrisma } = require("../../db");
+const { appSettings: defaultAppSettings } = require("../../shared/config/appSettings");
 
 function createNotificationsRouter(dependencies = {}) {
   const router = Router();
@@ -11,6 +13,8 @@ function createNotificationsRouter(dependencies = {}) {
     dependencies.requireAuth || buildRequireAuth(dependencies);
   const DeviceToken = dependencies.DeviceToken || DefaultDeviceToken;
   const User = dependencies.User || DefaultUser;
+  const prisma = dependencies.prisma || defaultPrisma;
+  const settings = dependencies.appSettings || defaultAppSettings;
 
   router.use(requireAuth);
 
@@ -95,10 +99,31 @@ function createNotificationsRouter(dependencies = {}) {
           .json({ error: "platform must be 'ios' or 'android'" });
       }
 
+      let metricsEpochId = null;
+      if (
+        platform === "ios" &&
+        req.user.appleId &&
+        req.user.isReviewAccount !== true &&
+        req.clientFeatures?.has("admin_metrics_v2") === true &&
+        (await settings.getFlag("adminMetricsV2TelemetryEnabled")) === true
+      ) {
+        const epoch = await prisma.adminMetricsCollectionEpoch.findFirst({
+          where: { endedAt: null },
+          orderBy: { startedAt: "desc" },
+          select: { id: true },
+        });
+        metricsEpochId = epoch?.id || null;
+      }
       await DeviceToken.saveToken({
         userId: req.user.id,
         token: deviceToken,
         platform,
+        ...(metricsEpochId
+          ? {
+              adminMetricsOpenCapable: true,
+              adminMetricsOpenEpochId: metricsEpochId,
+            }
+          : {}),
       });
 
       res.json({ success: true });

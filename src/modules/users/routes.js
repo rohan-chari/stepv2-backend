@@ -61,7 +61,12 @@ const { isAdminUser, withAdminFlag } = require("../admin");
 const {
   findLinkOpenReferralCode: defaultFindLinkOpenReferralCode,
 } = require("../social/queries/findLinkOpenReferralCode");
-const { hashClientIp, hashClientNet } = require("../../shared/lib/clientIp");
+const {
+  hashClientIp,
+  hashClientNet,
+  hmacClientIpHashes,
+  hmacClientIpHashesForVersion,
+} = require("../../shared/lib/clientIp");
 const { appSettings: defaultAppSettings } = require("../../shared/config/appSettings");
 const authMeCache = require("./services/authMeCache");
 const { prisma } = require("../../db");
@@ -111,12 +116,31 @@ function createAuthRouter(dependencies = {}) {
   // AND a coarser network-prefix hash. Both are computed from the same request;
   // the query decides which tier may answer. `signupId` is supplied by the
   // provisioner so the query can name the account in its [REFERRAL] log lines.
-  const fallbackCodeFor = (req) => (signupId) =>
-    findLinkOpenCode({
-      ipHash: hashClientIp(req),
-      ipNetHash: hashClientNet(req),
+  const fallbackCodeFor = (req) => (signupId) => {
+    const env = dependencies.env || process.env;
+    const active = hmacClientIpHashes(req, {
+      env,
+      logger: dependencies.logger || console,
+    });
+    const previous = active.version > 1
+      ? hmacClientIpHashesForVersion(req, active.version - 1, { env })
+      : { ipHash: null, ipNetHash: null, version: null };
+    return findLinkOpenCode({
+      ipHash: active.ipHash,
+      ipNetHash: active.ipNetHash,
+      ipHashVersion: active.version,
+      ipNetHashVersion: active.version,
+      previousIpHash: previous.ipHash,
+      previousIpNetHash: previous.ipNetHash,
+      previousIpHashVersion: previous.version,
+      previousIpNetHashVersion: previous.version,
+      // Bounded legacy dual-read input; the query decides whether the 48-hour
+      // compatibility interval is still open.
+      legacyIpHash: hashClientIp(req),
+      legacyIpNetHash: hashClientNet(req),
       signupId,
     });
+  };
   const referralSourceRaceIdFor = async (token) => {
     if (typeof token !== "string" || !token) return null;
     try {
@@ -325,6 +349,19 @@ function createAuthRouter(dependencies = {}) {
         return res.status(401).json({ error: "Apple user identifier does not match token subject" });
       }
 
+      let metricsV2SignupEpochId = null;
+      if (
+        req.clientFeatures?.has("admin_metrics_v2") === true &&
+        (await appSettings.getFlag("adminMetricsV2TelemetryEnabled")) === true
+      ) {
+        const epoch = await prisma.adminMetricsCollectionEpoch.findFirst({
+          where: { endedAt: null },
+          orderBy: { startedAt: "desc" },
+          select: { id: true },
+        });
+        metricsV2SignupEpochId = epoch?.id || null;
+      }
+
       const user = await provisionUser({
         appleId: appleIdentity.sub,
         email: email || appleIdentity.email,
@@ -341,7 +378,25 @@ function createAuthRouter(dependencies = {}) {
           ? { nameSetupOnboardingRequired: true }
           : {}),
         emitSignInEvent: true,
+        ...(metricsV2SignupEpochId
+          ? {
+              metricsV2SignupEligible: true,
+              metricsV2SignupEpochId,
+            }
+          : {}),
       });
+      if (
+        metricsV2SignupEpochId &&
+        user.metricsV2EligibleEpochId !== metricsV2SignupEpochId
+      ) {
+        await prisma.user.updateMany({
+          where: { id: user.id },
+          data: {
+            metricsV2EligibleAt: new Date(),
+            metricsV2EligibleEpochId: metricsV2SignupEpochId,
+          },
+        });
+      }
 
       const sessionToken = signToken({
         userId: user.id,

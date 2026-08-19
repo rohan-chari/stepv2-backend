@@ -7,11 +7,19 @@ function serializeAuthenticatedUser(user) {
     discoverableNameSearch,
     lastAppVersion,
     lastSeenAt,
+    metricsV2EligibleAt,
+    metricsV2EligibleEpochId,
+    metricsV2SignupEligible,
+    metricsV2SignupEpochId,
     ...safe
   } = user || {};
   void discoverableNameSearch;
   void lastAppVersion;
   void lastSeenAt;
+  void metricsV2EligibleAt;
+  void metricsV2EligibleEpochId;
+  void metricsV2SignupEligible;
+  void metricsV2SignupEpochId;
   return {
     ...safe,
     firstName: user?.firstName ?? null,

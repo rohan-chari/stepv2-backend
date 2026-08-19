@@ -298,6 +298,7 @@ function buildRecomputePlacements(dependencies = {}) {
         if (mayEmit) {
           const trailingTeam = leadingTeam === "TEAM_A" ? "TEAM_B" : "TEAM_A";
           events.emit("TEAM_LEAD_CHANGED", {
+          notificationIntentId: `team-lead:${race.id}:${previousLeader}->${leadingTeam}:${fiveMinuteBucketKey(currentTime)}`,
           raceId: race.id,
           raceName: race.name,
           leadingTeam,
@@ -325,6 +326,7 @@ function buildRecomputePlacements(dependencies = {}) {
       const activeMembers = members.filter((p) => !p.forfeitedAt);
       if (activeMembers.length > 0) {
         events.emit("TEAM_FINAL_STRETCH", {
+          notificationIntentId: `team-final-stretch:${race.id}:${Math.floor(currentTime.getTime() / (30 * 60 * 1000))}`,
           raceId: race.id,
           raceName: race.name,
           teamAName: race.teamAName,
@@ -824,12 +826,16 @@ function buildRecomputePlacements(dependencies = {}) {
             else baselineCasLosses += 1;
             if (!outcome.won || outcome.kind !== "ordinary") continue;
             const eventStartedAt = monotonicNow();
-            events.emit("PLACEMENT_CHANGED", outcome.change);
+            const change = {
+              ...outcome.change,
+              notificationIntentId: `placement:${outcome.participant.id}:${fiveMinuteBucketKey(currentTime)}:${outcome.participant.lastNotifiedPlacement}->${outcome.liveRank}`,
+            };
+            events.emit("PLACEMENT_CHANGED", change);
             phaseMs.eventDispatch += Math.max(
               0,
               monotonicNow() - eventStartedAt
             );
-            emitted.push(outcome.change);
+            emitted.push(change);
           }
           phaseMs.baselineWrites += Math.max(
             0,
@@ -881,6 +887,7 @@ function buildRecomputePlacements(dependencies = {}) {
           if (participant.lastNotifiedPlacement === liveRank) continue; // no change
 
           const change = {
+            notificationIntentId: `placement:${participant.id}:${fiveMinuteBucketKey(currentTime)}:${participant.lastNotifiedPlacement}->${liveRank}`,
             raceId: race.id,
             raceName: race.name,
             userId: participant.userId,

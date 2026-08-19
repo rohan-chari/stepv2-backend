@@ -10,6 +10,9 @@ const TABLES_IN_ORDER = [
   // table/index; on the local integration DB that turned an empty cleanup into
   // a 20s operation after the feature-batch tables were added.
   "inbox_delivery_outbox",
+  "analytics_cleanup_runs",
+  "metric_coverage_starts",
+  "admin_metrics_collection_epochs",
   "inbox_alerts",
   "feedback_messages",
   "feedback_threads",
@@ -52,6 +55,8 @@ const TABLES_IN_ORDER = [
   "coin_transactions",
   "ad_reward_grants",
   "activation_events",
+  "user_activity_days",
+  "push_deliveries",
   "device_tokens",
   "stakes",
   "challenge_instances",
@@ -67,6 +72,7 @@ const TABLES_IN_ORDER = [
   "referral_reward_grants",
   "referrals",
   "notifications",
+  "link_opens",
   "suggestions",
   "global_step_events",
   "users",
@@ -79,8 +85,8 @@ const TABLES_IN_ORDER = [
 // This is a blast-radius guard, not a test behaviour: `cleanDatabase` deletes
 // the users table and its dependent rows, so pointing DATABASE_URL at the wrong
 // host for one command is unrecoverable. The allowed names are the ones the
-// project already uses for disposable databases: a `*-integration` DB (what
-// `npm run test:integration` creates) or any `*_test` DB.
+// project uses for disposable databases: a `*-integration` legacy DB or any
+// `*_test` DB (what `npm run test:integration` now creates).
 //
 // Deliberately checks the DB NAME rather than the host: a prod URL copied into
 // the environment fails here even if it happens to be reachable locally.
@@ -98,7 +104,7 @@ function assertDisposableDatabase() {
       `cleanDatabase() refused to modify: DATABASE_URL database is "${name || "(unset)"}", ` +
         `which does not end in "-integration" or "_test". ` +
         `Integration tests must never run against a real database — ` +
-        `use \`npm run test:integration\`, which points at steps-tracker-integration.`
+        `use \`npm run test:integration\`, which points at steps-tracker-integration_test.`
     );
   }
 }

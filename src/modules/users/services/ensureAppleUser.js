@@ -106,6 +106,8 @@ function buildEnsureAppleUser(dependencies = {}) {
     // never be fallback-attributed. Best-effort: a failure means organic signup.
     fallbackReferralCode,
     nameSetupOnboardingRequired,
+    metricsV2SignupEligible = false,
+    metricsV2SignupEpochId = null,
     emitSignInEvent = false,
   }) {
     let user = await userModel.findByAppleId(appleId);
@@ -117,6 +119,9 @@ function buildEnsureAppleUser(dependencies = {}) {
         name: name || null,
         ...(nameSetupOnboardingRequired === true
           ? { nameSetupOnboardingRequired: true }
+          : {}),
+        ...(metricsV2SignupEligible === true && metricsV2SignupEpochId
+          ? { metricsV2SignupEligible: true, metricsV2SignupEpochId }
           : {}),
       });
 

@@ -1,11 +1,24 @@
 const { prisma } = require("../../db");
 
 const DeviceToken = {
-  async saveToken({ userId, token, platform }) {
+  async saveToken({ userId, token, platform, adminMetricsOpenCapable = false, adminMetricsOpenEpochId = null }) {
     return prisma.deviceToken.upsert({
       where: { userId_token: { userId, token } },
-      update: { platform },
-      create: { userId, token, platform },
+      update: {
+        platform,
+        ...(adminMetricsOpenCapable
+          ? { adminMetricsOpenCapable: true, adminMetricsOpenEpochId }
+          : {}),
+      },
+      create: {
+        userId,
+        token,
+        platform,
+        adminMetricsOpenCapable,
+        adminMetricsOpenEpochId: adminMetricsOpenCapable
+          ? adminMetricsOpenEpochId
+          : null,
+      },
     });
   },
 

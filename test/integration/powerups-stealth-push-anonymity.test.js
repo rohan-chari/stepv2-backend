@@ -361,6 +361,7 @@ describe("stealthed attacks never name the attacker in a push", () => {
       multiplier: 4,
       recipientUserIds: [victim.userId],
       stealthed: true,
+      notificationIntentId: `high-multiplier:${raceId}:stealthed`,
     });
 
     const push = await waitForPush(multiplierPushTo(victim.userId));
@@ -384,6 +385,7 @@ describe("stealthed attacks never name the attacker in a push", () => {
       actorName: attacker.displayName,
       multiplier: 4,
       recipientUserIds: [victim.userId],
+      notificationIntentId: `high-multiplier:${raceId}:visible`,
     });
 
     const push = await waitForPush(multiplierPushTo(victim.userId));

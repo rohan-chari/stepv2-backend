@@ -55,6 +55,7 @@ test("Inbox-enabled visible writers enqueue exactly one durable alert and never 
   });
   await eventBus.emit("HIGH_MULTIPLIER_ALERT", {
     raceId: "race-multiplier", actorUserId: "actor", actorName: "Alex", multiplier: 5, recipientUserIds: ["recipient"],
+    notificationIntentId: "high-multiplier:participant-1:2026-08-18T14:00:00.000Z",
   });
   await eventBus.emit("DAILY_MOVER", {
     userId: "recipient", raceId: "race-daily", raceName: "Daily race", movement: 1, placement: 2,

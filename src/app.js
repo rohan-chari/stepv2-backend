@@ -54,7 +54,7 @@ const {
   looksLikeReferralCode,
   normalizeReferralCode,
 } = require("./shared/lib/referralCode");
-const { hashClientIp, hashClientNet } = require("./shared/lib/clientIp");
+const { hmacClientIpHashes } = require("./shared/lib/clientIp");
 const { prisma: defaultPrisma, getDbPoolPressure } = require("./db");
 const redisCache = require("./shared/cache/redisCache");
 const { errorMiddleware } = require("./shared/http/errorMiddleware");
@@ -185,6 +185,10 @@ function createApp(dependencies = {}) {
   // codeless signup from the same IP shortly after an open attributes to the
   // opened code (see findLinkOpenReferralCode.js).
   function logLinkOpen(kind, code, req, sourceRaceId = null) {
+    const hashes = hmacClientIpHashes(req, {
+      env: dependencies.env || process.env,
+      logger: dependencies.logger || console,
+    });
     linkOpenDb.linkOpen
       .create({
         data: {
@@ -195,8 +199,10 @@ function createApp(dependencies = {}) {
           // prefix (tier 2). Writing ip_net_hash unconditionally from day one
           // is what lets tier 2 be switched on later without a backfill —
           // rows written before the switch are already matchable.
-          ipHash: hashClientIp(req),
-          ipNetHash: hashClientNet(req),
+          ipHash: hashes.ipHash,
+          ipNetHash: hashes.ipNetHash,
+          ipHashVersion: hashes.version,
+          ipNetHashVersion: hashes.version,
         },
       })
       .catch(() => {});

@@ -141,4 +141,61 @@ function hashClientNet(req) {
   return crypto.createHash("sha256").update(prefix, "utf8").digest("hex");
 }
 
-module.exports = { resolveClientIp, hashClientIp, hashClientNet, networkPrefix };
+function canonicalIpBytes(ip) {
+  if (!ip) return null;
+  let text = String(ip).trim().toLowerCase();
+  if (text.startsWith("[")) {
+    const end = text.indexOf("]");
+    if (end < 0) return null;
+    text = text.slice(1, end);
+  }
+  const zone = text.indexOf("%");
+  if (zone >= 0) text = text.slice(0, zone);
+  if (net.isIPv4(text)) return Buffer.from(text.split(".").map(Number));
+  if (!net.isIPv6(text)) return null;
+  const hextets = expandIpv6(text);
+  if (!hextets) return null;
+  const bytes = Buffer.alloc(16);
+  hextets.forEach((hextet, index) => bytes.writeUInt16BE(parseInt(hextet, 16), index * 2));
+  return bytes;
+}
+
+// Versioned HMAC writer for every new Phase A link_open. Legacy SHA helpers
+// remain exported for the bounded 48-hour attribution compatibility read only;
+// they are never used by the new writer.
+function hmacClientIpHashesForVersion(req, version, { env = process.env } = {}) {
+  const secret = Number.isInteger(version) ? env[`REFERRAL_IP_HMAC_SECRET_V${version}`] : null;
+  if (!Number.isInteger(version) || version < 1 || typeof secret !== "string" || secret.length < 32) {
+    return { ipHash: null, ipNetHash: null, version: null };
+  }
+  const ip = resolveClientIp(req);
+  const exactBytes = canonicalIpBytes(ip);
+  const prefix = networkPrefix(ip);
+  const hmac = (bytes) =>
+    bytes
+      ? crypto.createHmac("sha256", secret).update(bytes).digest("hex")
+      : null;
+  return {
+    ipHash: hmac(exactBytes),
+    ipNetHash: hmac(prefix ? Buffer.from(prefix, "utf8") : null),
+    version,
+  };
+}
+
+function hmacClientIpHashes(req, { env = process.env, logger = console } = {}) {
+  const version = Number(env.REFERRAL_IP_HMAC_ACTIVE_VERSION);
+  const hashes = hmacClientIpHashesForVersion(req, version, { env });
+  if (hashes.version == null) {
+    logger?.error?.("[REFERRAL] active IP HMAC configuration missing or invalid; storing non-deduplicable open");
+  }
+  return hashes;
+}
+
+module.exports = {
+  resolveClientIp,
+  hashClientIp,
+  hashClientNet,
+  networkPrefix,
+  hmacClientIpHashes,
+  hmacClientIpHashesForVersion,
+};

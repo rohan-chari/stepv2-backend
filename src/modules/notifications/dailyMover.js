@@ -134,6 +134,7 @@ function buildDailyMover(dependencies = {}) {
       const chosen = top[Math.floor(random() * top.length)];
 
       const change = {
+        notificationIntentId: `daily-mover:${runKey}:${userId}`,
         userId,
         raceId: chosen.raceId,
         raceName: chosen.raceName,

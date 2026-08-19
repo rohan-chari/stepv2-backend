@@ -6,6 +6,10 @@ const { apnsService } = require("../../../shared/push/apns");
 const { fcmService } = require("../../../shared/push/fcm");
 const { appSettings: defaultAppSettings } = require("../../../shared/config/appSettings");
 const { createInboxAlert: defaultCreateInboxAlert } = require("../../inbox/services/inbox");
+const {
+  buildPushDeliveryAttribution,
+  canonicalPushDeliveryKey,
+} = require("../../notifications/pushDeliveryAttribution");
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
@@ -21,6 +25,13 @@ function buildRaceResolutionDeliveryIntents(dependencies = {}) {
   const createInboxAlert = dependencies.createInboxAlert || defaultCreateInboxAlert;
   const now = dependencies.now || (() => new Date());
   const secret = dependencies.secret || process.env.SESSION_TOKEN_SECRET;
+  const pushAttribution = buildPushDeliveryAttribution({
+    prisma,
+    User: userModel,
+    appSettings,
+    logger: dependencies.logger || console,
+    now,
+  });
 
   function deliveryKeyHash(value) {
     if (typeof secret !== "string" || secret.length < 8) {
@@ -124,7 +135,11 @@ function buildRaceResolutionDeliveryIntents(dependencies = {}) {
             title,
             body,
             destination: { route: "raceDetail", raceId: String(raceId) },
-            sourceKey: candidate.deliveryKey,
+            sourceKey: canonicalPushDeliveryKey(
+              "HIGH_MULTIPLIER_ALERT",
+              candidate.userId,
+              deliveryKeyHash(candidate.deliveryKey)
+            ),
             now: currentTime,
             tx: transaction,
           });
@@ -216,13 +231,27 @@ function buildRaceResolutionDeliveryIntents(dependencies = {}) {
     if (!recipientUserId) return { accepted: false, disposition: "RECIPIENT_DELETED" };
     const tokens = await deviceTokenModel.findByUserId(recipientUserId);
     if (!tokens?.length) return { accepted: false, disposition: "NO_DEVICE_TOKEN" };
+    const visible = !["NUDGE", "STEP_SYNC"].includes(intent.kind);
+    const attribution = visible
+      ? await pushAttribution.prepare({
+          recipientUserId,
+          notificationType: intent.payload?.type || intent.kind,
+          tokens,
+          deliveryKey: canonicalPushDeliveryKey(
+            intent.payload?.type || intent.kind,
+            recipientUserId,
+            intent.deliveryKeyHash
+          ),
+          payload: intent.payload?.pushPayload,
+        })
+      : { delivery: null, payload: intent.payload?.pushPayload, epochId: null };
     let accepted = false;
     let explicitFailures = 0;
     let ambiguousError = null;
     for (const tokenRecord of tokens) {
       const provider = tokenRecord.platform === "android" ? fcm : apns;
       try {
-        const result = ["NUDGE", "STEP_SYNC"].includes(intent.kind)
+        const result = !visible
           ? await provider.sendSilentNotification({
             deviceToken: tokenRecord.token,
             payload: { type: "STEP_SYNC_REQUEST" },
@@ -231,10 +260,13 @@ function buildRaceResolutionDeliveryIntents(dependencies = {}) {
             deviceToken: tokenRecord.token,
             title: intent.payload.title,
             body: intent.payload.body,
-            payload: intent.payload.pushPayload,
+            payload: attribution.payload,
             collapseId: intent.payload.collapseId,
           });
-        if (result?.success) accepted = true;
+        if (result?.success) {
+          accepted = true;
+          await pushAttribution.markAccepted(attribution, tokenRecord, result);
+        }
         else if (result?.unregistered) {
           await deviceTokenModel.deleteToken({
             userId: recipientUserId,

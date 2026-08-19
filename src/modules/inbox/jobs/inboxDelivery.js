@@ -2,6 +2,9 @@ const { prisma: defaultPrisma } = require("../../../db");
 const { DeviceToken: defaultDeviceToken } = require("../../../shared/push/deviceToken");
 const { apnsService: defaultApns } = require("../../../shared/push/apns");
 const { fcmService: defaultFcm } = require("../../../shared/push/fcm");
+const { appSettings: defaultSettings } = require("../../../shared/config/appSettings");
+const { randomUUID } = require("node:crypto");
+const { canonicalPushDeliveryKey } = require("../../notifications/pushDeliveryAttribution");
 
 const LEASE_MS = 30_000;
 const TICK_INTERVAL_MS = 15_000;
@@ -46,6 +49,7 @@ function buildInboxDelivery(dependencies = {}) {
   const now = dependencies.now || (() => new Date());
   const logger = dependencies.logger || console;
   const batchSize = dependencies.batchSize || 25;
+  const settings = dependencies.appSettings || defaultSettings;
   return async function deliverInbox() {
     if (process.env.INBOX_DELIVERY_DISABLED === "true") return null;
     const current = now();
@@ -57,7 +61,11 @@ function buildInboxDelivery(dependencies = {}) {
         ],
       },
       orderBy: { availableAt: "asc" }, take: batchSize,
-      include: { alert: { select: { userId: true, type: true, destination: true } } },
+      include: {
+        alert: {
+          select: { userId: true, type: true, destination: true, sourceKey: true },
+        },
+      },
     });
     let delivered = 0;
     for (const row of candidates) {
@@ -74,6 +82,32 @@ function buildInboxDelivery(dependencies = {}) {
       if (leased.count !== 1) continue;
       try {
         const tokens = await deviceTokens.findByUserId(row.alert.userId);
+        let delivery = null;
+        let deliveryEpochId = null;
+        let payload = pushPayload(row.alert);
+        if (
+          (await settings.getFlag("adminMetricsV2TelemetryEnabled")) === true
+        ) {
+          const epoch = await prisma.adminMetricsCollectionEpoch.findFirst({
+            where: { endedAt: null },
+            orderBy: { startedAt: "desc" },
+          });
+          const user = await prisma.user.findUnique({ where: { id: row.alert.userId } });
+          if (
+            epoch && user?.appleId && user.isReviewAccount !== true &&
+            tokens.some((token) => token.platform === "ios" && token.adminMetricsOpenCapable === true && token.adminMetricsOpenEpochId === epoch.id)
+          ) {
+            const deliveryKey = row.alert.sourceKey?.startsWith("visible:")
+              ? row.alert.sourceKey
+              : canonicalPushDeliveryKey(row.alert.type, row.alert.userId, row.alert.sourceKey || row.id);
+            delivery = await prisma.pushDelivery.upsert({
+              where: { deliveryKey }, update: {},
+              create: { publicId: randomUUID(), deliveryKey, userId: row.alert.userId, notificationType: row.alert.type, openCapable: false },
+            });
+            deliveryEpochId = epoch.id;
+            payload = { ...payload, notificationId: delivery.publicId };
+          }
+        }
         // No device is a successful delivery disposition: the alert is already
         // durable in Inbox and retrying forever cannot create a device.
         let transientFailure = false;
@@ -83,8 +117,11 @@ function buildInboxDelivery(dependencies = {}) {
             deviceToken: token.token,
             title: row.payload.title,
             body: row.payload.body,
-            payload: pushPayload(row.alert),
+            payload,
           });
+          if (delivery && result?.success && token.platform === "ios" && token.adminMetricsOpenCapable === true && token.adminMetricsOpenEpochId === deliveryEpochId) {
+            await prisma.pushDelivery.updateMany({ where: { id: delivery.id, providerAcceptedAt: null }, data: { openCapable: true, providerAcceptedAt: now() } });
+          }
           if (result?.unregistered) {
             await deviceTokens.deleteToken({ userId: row.alert.userId, token: token.token });
           } else if (!result?.success) {

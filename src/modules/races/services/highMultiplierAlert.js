@@ -93,6 +93,11 @@ async function evaluateHighMultiplierAlert({
       multiplier: Math.round(mult),
       recipientUserIds: recipients.map((p) => p.userId),
       stealthed,
+      // The claim timestamp is stored on RaceParticipant before the event is
+      // emitted. Retries of this crossing therefore reuse one identity, while
+      // clearing/re-claiming the field gives a later crossing a new identity.
+      notificationIntentId:
+        `high-multiplier:${participant.id}:${claimedAt.toISOString()}`,
     };
     const deliveryIntents = emitAlert
       ? await emitAlert(alert, {

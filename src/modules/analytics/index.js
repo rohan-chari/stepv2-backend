@@ -7,10 +7,12 @@ const {
   scheduleActivationEventCleanup,
   JOB_NAME,
 } = require("./activationEventCleanup");
+const adminMetricsCleanup = require("./adminMetricsCleanup");
 
 module.exports = {
   createAnalyticsRouter,
   buildCleanupActivationEvents,
   scheduleActivationEventCleanup,
   JOB_NAME,
+  ...adminMetricsCleanup,
 };

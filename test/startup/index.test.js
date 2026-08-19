@@ -47,6 +47,9 @@ test("startServer listens on 0.0.0.0 by default", () => {
     scheduleInboxExpiry: track("inboxExpiry"),
     scheduleInboxDelivery: track("inboxDelivery"),
     scheduleActivationEventCleanup: track("activationEventCleanup"),
+    scheduleAdminMetricsActivityCleanup: track("adminMetricsActivityCleanup"),
+    schedulePushDeliveryCleanup: track("pushDeliveryCleanup"),
+    scheduleReferralLinkOpenCleanup: track("referralLinkOpenCleanup"),
     scheduleDailyMover: track("dailyMover"),
     scheduleRaceResolutionPostTasks() {},
     logger: {
@@ -74,6 +77,9 @@ test("startServer listens on 0.0.0.0 by default", () => {
     inboxExpiry: 1,
     inboxDelivery: 1,
     activationEventCleanup: 1,
+    adminMetricsActivityCleanup: 1,
+    pushDeliveryCleanup: 1,
+    referralLinkOpenCleanup: 1,
     dailyMover: 1,
   });
   assert.deepEqual(logs, ["Steps Tracker API running on 0.0.0.0:3000"]);
@@ -110,6 +116,9 @@ test("cronStartDelayMs defers job scheduling past the reload overlap window", as
     scheduleInboxExpiry: track("inboxExpiry"),
     scheduleInboxDelivery: track("inboxDelivery"),
     scheduleActivationEventCleanup: track("activationEventCleanup"),
+    scheduleAdminMetricsActivityCleanup: track("adminMetricsActivityCleanup"),
+    schedulePushDeliveryCleanup: track("pushDeliveryCleanup"),
+    scheduleReferralLinkOpenCleanup: track("referralLinkOpenCleanup"),
     scheduleDailyMover: track("dailyMover"),
     scheduleRaceResolutionPostTasks() {},
     logger: {

@@ -1,5 +1,10 @@
 const { prisma: defaultPrisma } = require("../../db");
 const { AD_COIN_REWARD_DAILY_CAP } = require("../economy/adRewards");
+const {
+  buildGetAdminMetricsDashboard,
+  classifyAdminStatsRequest,
+} = require("./adminMetricsDashboard");
+const { buildAdminMetricsBlockLoader } = require("./adminMetricsQueries");
 
 // One-shot product-health snapshot for the admin Statistics card. Read-only,
 // admin-gated, and computed entirely in SQL so the numbers are timezone-safe
@@ -84,6 +89,12 @@ const { AD_COIN_REWARD_DAILY_CAP } = require("../economy/adRewards");
 // query is left alone — changing it would restate an existing number.
 function buildGetAdminStats(dependencies = {}) {
   const prisma = dependencies.prisma || defaultPrisma;
+  const getAdminMetricsDashboard = buildGetAdminMetricsDashboard({
+    ...dependencies,
+    loadBlock:
+      dependencies.loadAdminMetricsBlock ||
+      buildAdminMetricsBlockLoader(dependencies),
+  });
 
   const n = (v) => Number(v ?? 0);
   const round1 = (v) => (v == null ? null : Math.round(Number(v) * 10) / 10);
@@ -415,6 +426,10 @@ function buildGetAdminStats(dependencies = {}) {
   }
 
   return async function getAdminStats(options = {}) {
+    const requestMode = classifyAdminStatsRequest(options);
+    if (requestMode.mode === "dashboard") {
+      return getAdminMetricsDashboard(requestMode);
+    }
     const sections = parseSections(options?.sections);
     const [userRows] = await prisma.$queryRaw`
       SELECT

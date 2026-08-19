@@ -1,6 +1,7 @@
 const { Router } = require("express");
 const { prisma: defaultPrisma } = require("../../db");
 const { buildRequireAuth } = require("../../middleware/requireAuth");
+const { appSettings: defaultAppSettings } = require("../../shared/config/appSettings");
 
 const MAX_BATCH_SIZE = 50;
 const MAX_EVENT_AGE_MS = 90 * 24 * 60 * 60 * 1000;
@@ -96,6 +97,13 @@ const ALLOWED_EVENT_NAMES = new Set([
   "extra_spin_ad_not_ready",
   "extra_spin_ad_completed",
   "extra_spin_claim_succeeded",
+  "health_connected",
+  "race_leaderboard_viewed",
+]);
+
+const METRICS_V2_EVENT_NAMES = new Set([
+  "health_connected",
+  "race_leaderboard_viewed",
 ]);
 
 const ALLOWED_CONTEXT = {
@@ -106,6 +114,7 @@ const ALLOWED_CONTEXT = {
     "empty_state",
     "share_link",
     "next_race",
+    "healthkit",
   ]),
   race_state: new Set(["active", "pending"]),
   result: new Set([
@@ -168,6 +177,9 @@ const SAFE_ID = /^[A-Za-z0-9._:-]+$/;
 // suffix plus the explicit client fallback, but not arbitrary free-form text.
 const SAFE_APP_VERSION = /^(?:unknown|\d{1,4}(?:\.\d{1,4}){1,3}(?:[+-][A-Za-z0-9.-]{1,16})?)$/;
 const ALLOWED_PLATFORMS = new Set(["ios", "android", "other"]);
+const FOREGROUND_MAX_AGE_MS = 35 * 24 * 60 * 60 * 1000;
+const SAFE_SESSION_ID = /^[A-Za-z0-9._:-]{1,64}$/;
+const SAFE_NOTIFICATION_ID = /^[A-Za-z0-9._:-]{1,128}$/;
 
 function validationError(message) {
   const error = new Error(message);
@@ -261,11 +273,24 @@ function validateActivationEvent(event, now = new Date()) {
     throw validationError("timestamp is outside the accepted window");
   }
 
+  const context = validateContext(event.context);
+  if (
+    event.name === "health_connected" &&
+    (Object.keys(context).length !== 1 || context.source !== "healthkit")
+  ) {
+    throw validationError("health_connected context is invalid");
+  }
+  if (
+    event.name === "race_leaderboard_viewed" &&
+    (Object.keys(context).length !== 1 || typeof context.race_id !== "string")
+  ) {
+    throw validationError("race_leaderboard_viewed context is invalid");
+  }
   return {
     id,
     onboardingSessionId,
     name: event.name,
-    context: validateContext(event.context),
+    context,
     appVersion: event.appVersion,
     platform: event.platform,
     occurredAt,
@@ -290,8 +315,149 @@ function createAnalyticsRouter(dependencies = {}) {
   const prisma = dependencies.prisma || defaultPrisma;
   const requireAuth = dependencies.requireAuth || buildRequireAuth(dependencies);
   const now = dependencies.now || (() => new Date());
+  const settings = dependencies.appSettings || defaultAppSettings;
+
+  async function currentEpoch() {
+    if (!(await settings.getFlag("adminMetricsV2TelemetryEnabled"))) return null;
+    return prisma.adminMetricsCollectionEpoch.findFirst({
+      where: { endedAt: null },
+      orderBy: { startedAt: "desc" },
+    });
+  }
+
+  function validAppVersion(value) {
+    return (
+      typeof value === "string" &&
+      value.length >= 1 &&
+      value.length <= 32 &&
+      SAFE_APP_VERSION.test(value)
+    );
+  }
+
+  function parseForeground(body, receivedAt) {
+    if (!body || typeof body !== "object" || Array.isArray(body)) return null;
+    if (!SAFE_SESSION_ID.test(body.sessionId || "")) return null;
+    if (!validAppVersion(body.appVersion)) return null;
+    if (typeof body.occurredAt !== "string") return null;
+    const occurredAt = new Date(body.occurredAt);
+    if (Number.isNaN(occurredAt.getTime())) return null;
+    const age = receivedAt.getTime() - occurredAt.getTime();
+    if (age > FOREGROUND_MAX_AGE_MS || age < -MAX_FUTURE_SKEW_MS) return null;
+    if (
+      Object.keys(body).some(
+        (key) => !["sessionId", "occurredAt", "appVersion"].includes(key)
+      )
+    ) return null;
+    return { occurredAt, appVersion: body.appVersion };
+  }
 
   router.use(requireAuth);
+
+  router.post("/foreground", async (req, res) => {
+    const receivedAt = now();
+    const event = parseForeground(req.body, receivedAt);
+    if (!event) {
+      return res.status(400).json({
+        error: "Invalid foreground analytics event",
+        code: "INVALID_ANALYTICS_EVENT",
+      });
+    }
+    try {
+      const epoch = await currentEpoch();
+      if (!epoch) {
+        return res.status(202).json({ recorded: false, reason: "disabled" });
+      }
+      if (
+        req.clientFeatures?.has("admin_metrics_v2") !== true ||
+        !req.user?.appleId ||
+        req.user.isReviewAccount === true
+      ) {
+        return res
+          .status(202)
+          .json({ recorded: false, reason: "unsupported_platform" });
+      }
+      if (event.occurredAt < epoch.startedAt) {
+        return res.status(202).json({ recorded: false, reason: "disabled" });
+      }
+      const activityDateRows = await prisma.$queryRaw`
+        SELECT ((CAST(${event.occurredAt} AS timestamp) AT TIME ZONE 'UTC'
+          AT TIME ZONE 'America/New_York')::date)::text AS activity_date`;
+      const activityDate = activityDateRows[0].activity_date;
+      await prisma.$transaction(async (tx) => {
+        await tx.user.updateMany({
+          where: {
+            id: req.user.id,
+            OR: [
+              { metricsV2EligibleEpochId: null },
+              { metricsV2EligibleEpochId: { not: epoch.id } },
+            ],
+          },
+          data: {
+            metricsV2EligibleAt: receivedAt,
+            metricsV2EligibleEpochId: epoch.id,
+          },
+        });
+        await tx.$executeRaw`
+          INSERT INTO user_activity_days
+            (user_id, activity_date, first_seen_at, last_seen_at,
+             app_version, source, metadata_occurred_at)
+          VALUES
+            (${req.user.id}, CAST(${activityDate} AS date), ${event.occurredAt},
+             ${event.occurredAt}, ${event.appVersion}, 'foreground', ${event.occurredAt})
+          ON CONFLICT (user_id, activity_date) DO UPDATE SET
+            first_seen_at = LEAST(user_activity_days.first_seen_at, EXCLUDED.first_seen_at),
+            last_seen_at = GREATEST(user_activity_days.last_seen_at, EXCLUDED.last_seen_at),
+            app_version = CASE
+              WHEN EXCLUDED.metadata_occurred_at > user_activity_days.metadata_occurred_at
+              THEN EXCLUDED.app_version ELSE user_activity_days.app_version END,
+            metadata_occurred_at = GREATEST(
+              user_activity_days.metadata_occurred_at,
+              EXCLUDED.metadata_occurred_at
+            )`;
+      });
+      return res.status(202).json({ recorded: true });
+    } catch (error) {
+      console.error("Foreground analytics ingestion error:", error);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  router.post("/notification-open", async (req, res) => {
+    const notificationId = req.body?.notificationId;
+    if (
+      typeof notificationId !== "string" ||
+      !SAFE_NOTIFICATION_ID.test(notificationId) ||
+      Object.keys(req.body || {}).some((key) => key !== "notificationId")
+    ) {
+      return res.status(400).json({
+        error: "Invalid notification id",
+        code: "INVALID_NOTIFICATION_ID",
+      });
+    }
+    try {
+      if (!(await currentEpoch())) {
+        return res
+          .status(202)
+          .json({ attributed: false, reason: "disabled" });
+      }
+      const result = await prisma.pushDelivery.updateMany({
+        where: {
+          publicId: notificationId,
+          userId: req.user.id,
+          openedAt: null,
+        },
+        data: { openedAt: now() },
+      });
+      const attributed = result.count > 0 || await prisma.pushDelivery.count({
+        where: { publicId: notificationId, userId: req.user.id },
+      }) > 0;
+      return res.status(202).json({ attributed });
+    } catch (error) {
+      console.error("Notification-open analytics ingestion error:", error);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   router.post("/activation-events", async (req, res) => {
     try {
       const events = req.body?.events;
@@ -306,11 +472,28 @@ function createAnalyticsRouter(dependencies = {}) {
       // else (malformed structure, unknown top-level keys, bad
       // appVersion/platform, disallowed CONTEXT values, out-of-window
       // timestamps) keeps its existing 400.
-      const data = [];
+      const validated = [];
       for (const event of events) {
         if (isDroppableUnknownName(event)) continue;
+        validated.push(validateActivationEvent(event, receivedAt));
+      }
+      const hasMetricsV2Event = validated.some((event) =>
+        METRICS_V2_EVENT_NAMES.has(event.name)
+      );
+      const metricsEpoch = hasMetricsV2Event ? await currentEpoch() : null;
+      const data = [];
+      for (const event of validated) {
+        if (
+          METRICS_V2_EVENT_NAMES.has(event.name) &&
+          (!metricsEpoch ||
+            !req.user?.appleId ||
+            req.user.isReviewAccount === true ||
+            event.platform !== "ios")
+        ) {
+          continue;
+        }
         data.push({
-          ...validateActivationEvent(event, receivedAt),
+          ...event,
           userId: req.user.id,
         });
       }

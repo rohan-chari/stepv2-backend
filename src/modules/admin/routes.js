@@ -459,9 +459,14 @@ function createAdminRouter(dependencies = {}) {
     try {
       const sections = req.query?.sections;
       res.json({
-        stats: await getAdminStats(sections ? { sections } : {}),
+        stats: await getAdminStats(
+          sections ? { sections, window: req.query?.window } : {}
+        ),
       });
     } catch (error) {
+      if (error.statusCode === 400 && error.code) {
+        return res.status(400).json({ error: error.message, code: error.code });
+      }
       console.error("Admin stats error:", error);
       res.status(500).json({ error: "Internal server error" });
     }

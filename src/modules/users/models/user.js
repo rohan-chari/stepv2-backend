@@ -81,6 +81,8 @@ const User = {
     displayName,
     isReviewAccount,
     nameSetupOnboardingRequired,
+    metricsV2SignupEligible,
+    metricsV2SignupEpochId,
   }) {
     // A user is keyed on exactly one provider id (appleId for iOS, googleSub for
     // Android). Only set the one that was supplied so the other stays null.
@@ -100,7 +102,29 @@ const User = {
     if (nameSetupOnboardingRequired !== undefined) {
       data.nameSetupOnboardingRequired = nameSetupOnboardingRequired === true;
     }
+    if (metricsV2SignupEligible === true && metricsV2SignupEpochId) {
+      data.metricsV2SignupEligible = true;
+      data.metricsV2SignupEpochId = metricsV2SignupEpochId;
+      data.metricsV2EligibleAt = new Date();
+      data.metricsV2EligibleEpochId = metricsV2SignupEpochId;
+    }
     return prisma.user.create({ data });
+  },
+
+  async stampMetricsV2Eligibility(id, epochId, eligibleAt = new Date()) {
+    return prisma.user.updateMany({
+      where: {
+        id,
+        OR: [
+          { metricsV2EligibleEpochId: { not: epochId } },
+          { metricsV2EligibleEpochId: null },
+        ],
+      },
+      data: {
+        metricsV2EligibleAt: eligibleAt,
+        metricsV2EligibleEpochId: epochId,
+      },
+    });
   },
 
   async update(id, fields) {
