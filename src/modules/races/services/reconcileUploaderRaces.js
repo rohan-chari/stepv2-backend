@@ -166,6 +166,7 @@ function buildReconcileUploaderRaces(dependencies = {}) {
     userId,
     timeZone = "UTC",
     includeReconciledRaces = false,
+    includeActiveRaces = false,
   }) {
     const capacity = startCapacityPhase("uploader_reconciliation");
     let capacityOutcome = "error";
@@ -373,6 +374,11 @@ function buildReconcileUploaderRaces(dependencies = {}) {
       resolvedRaceCount,
       boxStateCurrent: true,
       ...(includeReconciledRaces ? { reconciledRaces } : {}),
+      // Internal request-path reuse only. sync-v2 has to enqueue these same
+      // races immediately after reconciliation; returning the already-loaded
+      // snapshot avoids repeating the widest query on the endpoint. Keep this
+      // opt-in so every existing caller retains its exact result shape.
+      ...(includeActiveRaces ? { activeRaces: races } : {}),
     };
     } finally {
       capacity.setCounts({

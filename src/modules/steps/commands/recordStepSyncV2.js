@@ -130,6 +130,7 @@ function buildRecordStepSyncV2(dependencies = {}) {
     // Locked uploader reconciliation. On failure, still return DEFERRED — the
     // already-enqueued full job owns recovery.
     let uploaderReconciliation;
+    let reconciledActiveRaces = null;
     if (!inlineUploaderReconciliation()) {
       uploaderReconciliation = {
         state: "DEFERRED",
@@ -138,10 +139,15 @@ function buildRecordStepSyncV2(dependencies = {}) {
       };
     } else {
       try {
-        const { resolvedRaceCount, boxStateCurrent } = await reconcileUploaderRaces({
+        const reconciliation = await reconcileUploaderRaces({
           userId,
           timeZone,
+          includeActiveRaces: true,
         });
+        const { resolvedRaceCount, boxStateCurrent } = reconciliation;
+        if (Array.isArray(reconciliation.activeRaces)) {
+          reconciledActiveRaces = reconciliation.activeRaces;
+        }
         uploaderReconciliation = {
           state: "CURRENT",
           resolvedRaceCount,
@@ -170,7 +176,8 @@ function buildRecordStepSyncV2(dependencies = {}) {
     // no job to report and gets `jobId: null`, which the shipped client already
     // handles (it simply doesn't start the poll; see
     // backend_api_service.dart's nullable `jobId`).
-    const activeRaces = await raceModel.findActiveForUser(userId).catch(() => []);
+    const activeRaces = reconciledActiveRaces ??
+      await raceModel.findActiveForUser(userId).catch(() => []);
     const activeRaceIds = (activeRaces || [])
       .map((race) => race.id)
       .sort((a, b) => String(a).localeCompare(String(b)));
@@ -476,23 +483,21 @@ function buildRecordStepSyncV2(dependencies = {}) {
       // would be far worse than losing it. If it is lost the user looks LESS
       // recently-synced than they are, so at worst they get one extra silent
       // push — the safe direction. No double-counted steps, no missed scoring.
-      try {
-        await prisma.user.update({
-          where: { id: userId },
-          data: { lastStepSyncAt: now() },
-        });
-      } catch {
-        // Intentionally ignored; see above.
-      }
       // C4 (spec §5 Phase E): Transaction A has committed the daily total, so
       // `v1:user:daily:{id}:{date}` — the value every friend of this user reads
       // from `GET /friends/steps` — is now stale. This and `recordSteps` are the
       // only two daily-total writers; both invalidate here rather than at their
       // routes. Swallowed: bookkeeping never fails a sync.
-      await require("../services/dailyStepsCache").invalidateSafe(
-        userId,
-        canonical.date
-      );
+      const dailyStepsCache = require("../services/dailyStepsCache");
+      await Promise.all([
+        prisma.user.update({
+          where: { id: userId },
+          data: { lastStepSyncAt: now() },
+        }).catch(() => {
+          // Intentionally ignored; see above.
+        }),
+        dailyStepsCache.invalidateSafe(userId, canonical.date),
+      ]);
     } catch (error) {
       // A concurrent home-pull winner may have committed Transaction A's
       // reservation while this request waited on the conditional timestamp
