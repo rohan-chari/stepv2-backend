@@ -45,7 +45,16 @@ function buildJoinPublicRace(dependencies = {}) {
       throw new RaceJoinError("Race not found", 404, "RACE_NOT_FOUND");
     }
     const joinUnderRaceLock = () => withLock(raceId, async (lockTx) => {
-      const race = await raceModel.findById(raceId);
+      let race;
+      if (lockTx) {
+        const core = await lockTx.race.findUnique({ where: { id: raceId } });
+        const participants = core
+          ? await lockTx.raceParticipant.findMany({ where: { raceId } })
+          : [];
+        race = core ? { ...core, participants } : null;
+      } else {
+        race = await raceModel.findById(raceId);
+      }
       if (!race) {
         throw new RaceJoinError("Race not found", 404, "RACE_NOT_FOUND");
       }
@@ -75,6 +84,8 @@ function buildJoinPublicRace(dependencies = {}) {
         transactionClient: lockTx,
         deferPostCommit: Boolean(lockTx),
       });
+    }, {
+      fundedExposureUserIds: [userId],
     });
     const joined =
       resolved.creationSource === "QUICK_CREATE"

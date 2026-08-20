@@ -150,6 +150,7 @@ model User {
   autoLinkSuppressionsAsA           FriendshipAutoLinkSuppression[] @relation("AutoLinkSuppressionA")
   autoLinkSuppressionsAsB           FriendshipAutoLinkSuppression[] @relation("AutoLinkSuppressionB")
   friendSearchRateWindow            FriendSearchRateWindow?
+  fundedExposureGuard               FundedExposureGuard?
 
   challengesAsUserA  ChallengeInstance[] @relation("challengeUserA")
   challengesAsUserB  ChallengeInstance[] @relation("challengeUserB")
@@ -1230,19 +1231,30 @@ enum SeededRaceWindowMode {
   BUCKET
 }
 
+// One lock row per user serializes funded-membership admission across races
+// and tournaments. Exposure totals remain derived from stamped participant
+// rows; this table deliberately stores no mutable balance/counter.
+model FundedExposureGuard {
+  userId    String   @id @map("user_id")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("funded_exposure_guards")
+}
+
 model Race {
-  id                     String           @id @default(uuid())
-  creatorId              String?          @map("creator_id")
-  seedId                 String?          @map("seed_id")
-  name                   String
-  targetSteps            Int              @map("target_steps")
-  status                 RaceStatus       @default(PENDING)
+  id                      String           @id @default(uuid())
+  creatorId               String?          @map("creator_id")
+  seedId                  String?          @map("seed_id")
+  name                    String
+  targetSteps             Int              @map("target_steps")
+  status                  RaceStatus       @default(PENDING)
   // maxDurationDays is set on all new races; kept nullable for backward compat
   // with existing rows from the step-goal-only window which have NULL.
-  maxDurationDays        Int?             @map("max_duration_days")
-  buyInAmount            Int              @default(0) @map("buy_in_amount")
-  payoutPreset           RacePayoutPreset @default(WINNER_TAKES_ALL) @map("payout_preset")
-  potCoins               Int              @default(0) @map("pot_coins")
+  maxDurationDays         Int?             @map("max_duration_days")
+  buyInAmount             Int              @default(0) @map("buy_in_amount")
+  payoutPreset            RacePayoutPreset @default(WINNER_TAKES_ALL) @map("payout_preset")
+  potCoins                Int              @default(0) @map("pot_coins")
   // ── App-funded prize pools ─────────────────────────────────────────────────
   // fundedPrize is the discriminator between the two money models and the ONLY
   // authority at settlement (never the fundedPrizePoolsEnabled flag, so a
@@ -1255,15 +1267,18 @@ model Race {
   // never drift when the accepted/eligible count changes afterwards.
   // Additive with safe legacy defaults — no backfill, and old app builds never
   // read either column.
-  fundedPrize            Boolean          @default(false) @map("funded_prize")
-  prizePoolCoins         Int              @default(0) @map("prize_pool_coins")
+  fundedPrize             Boolean          @default(false) @map("funded_prize")
+  prizePoolCoins          Int              @default(0) @map("prize_pool_coins")
+  prizeCoinUnit           Int?             @map("prize_coin_unit")
+  prizePoolMaxCoins       Int?             @map("prize_pool_max_coins")
+  prizeCalculationVersion Int              @default(1) @map("prize_calculation_version")
   // Immutable at creation: 0 preserves the historical payout formula, 1 rounds
   // every final positive recipient award up to a multiple of five.
-  payoutRoundingVersion  Int              @default(0) @map("payout_rounding_version")
-  payoutRoundingMetadata Json?            @map("payout_rounding_metadata")
+  payoutRoundingVersion   Int              @default(0) @map("payout_rounding_version")
+  payoutRoundingMetadata  Json?            @map("payout_rounding_metadata")
   // Default-off, creation-stamped exit policy. Existing races remain false so
   // enabling the rollout setting never changes an already-open competition.
-  exitActionsEnabled     Boolean          @default(false) @map("exit_actions_enabled")
+  exitActionsEnabled      Boolean          @default(false) @map("exit_actions_enabled")
   // How a FUNDED race splits its pool across the paid places of a graded preset
   // (TOP_HALF / ALL_BUT_LAST). Stamped at creation and never rewritten, exactly
   // like fundedPrize: the row is the authority, never the live flag, so an
@@ -1271,28 +1286,28 @@ model Race {
   // underneath it. NULL (every pre-existing row, and every user-created race)
   // = the even split shipped today; "GEOMETRIC" = the top-heavy 0.7 decay.
   // Only createSeededRace ever writes it. Not serialized to clients.
-  payoutCurve            String?          @map("payout_curve")
+  payoutCurve             String?          @map("payout_curve")
   // Next-race quick-create provenance. Both are nullable so every existing
   // race and every frozen client remains on the legacy/manual-start path.
   // Prisma does not model the predicate-specific indexes added by the raw
   // migration; that schema drift is intentional and those indexes must remain.
-  creationSource         String?          @map("creation_source")
-  startPolicy            String?          @map("start_policy")
+  creationSource          String?          @map("creation_source")
+  startPolicy             String?          @map("start_policy")
   // Batch 2026-08-08 item 5: team-race prize-pool multiplier, in basis points,
   // STAMPED AT CREATION from the TEAM_POOL_MULT_* envs and read by BOTH the
   // live projection and settlement so the two can never disagree.
   // NULL = 1.0x = today's formula, which is what every pre-existing race keeps.
   // Because it is stamped, an env edit only affects races created after it —
   // an in-flight race never reprices mid-race.
-  teamPoolMultBps        Int?             @map("team_pool_mult_bps")
-  startedAt              DateTime?        @map("started_at")
-  endsAt                 DateTime?        @map("ends_at")
+  teamPoolMultBps         Int?             @map("team_pool_mult_bps")
+  startedAt               DateTime?        @map("started_at")
+  endsAt                  DateTime?        @map("ends_at")
   // Optional future auto-start time (1.1.7). When set and in the future, the
   // race stays PENDING and the autoStartScheduledRaces cron job starts it once
   // this time passes; manual start is blocked until then. Nullable/additive:
   // legacy races and older app clients (which never send it) behave exactly as
   // before — manual instant start.
-  scheduledStartAt       DateTime?        @map("scheduled_start_at")
+  scheduledStartAt        DateTime?        @map("scheduled_start_at")
   // Optional EXACT end instant chosen by the creator (custom race window). Inert
   // until startRace promotes it: it is NOT `endsAt`, because `endsAt` on a
   // non-COMPLETED race is read everywhere as "this live race's end" (featured
@@ -1303,7 +1318,7 @@ model Race {
   // maxDurationDays from the actual start and this column stays as a record of
   // intent. Nullable/additive with NO backfill: every existing row stays NULL
   // and behaves byte-for-byte as today, and frozen clients never send or read it.
-  scheduledEndAt         DateTime?        @map("scheduled_end_at")
+  scheduledEndAt          DateTime?        @map("scheduled_end_at")
   // Canonical IANA timezone whose calendar-day boundaries define this race's
   // step buckets (e.g. "America/New_York" for seeded daily/weekly challenges).
   // NULL for user-created races, which keep the legacy behavior: live display
@@ -1311,27 +1326,27 @@ model Race {
   // settlement bucket in this tz, so "midnight" means the same instant for every
   // participant and live totals match settled totals. Nullable/additive: old app
   // clients never read it; old rows stay NULL and behave exactly as before.
-  timezone               String?          @map("timezone")
-  completedAt            DateTime?        @map("completed_at")
-  winnerUserId           String?          @map("winner_user_id")
-  powerupsEnabled        Boolean          @default(false) @map("powerups_enabled")
-  powerupStepInterval    Int?             @map("powerup_step_interval")
-  isPublic               Boolean          @default(false) @map("is_public")
+  timezone                String?          @map("timezone")
+  completedAt             DateTime?        @map("completed_at")
+  winnerUserId            String?          @map("winner_user_id")
+  powerupsEnabled         Boolean          @default(false) @map("powerups_enabled")
+  powerupStepInterval     Int?             @map("powerup_step_interval")
+  isPublic                Boolean          @default(false) @map("is_public")
   // Nullable: NULL means "no participant limit" (unlimited). Older app clients
   // always send an integer, and the @default(10) keeps legacy creates that omit
   // the field unchanged. Additive/backward-compatible — relaxing NOT NULL only.
-  maxParticipants        Int?             @default(10) @map("max_participants")
+  maxParticipants         Int?             @default(10) @map("max_participants")
   // When true, the race never finishes on reaching targetSteps; targetSteps is
   // a display-only goal and the winner is decided by step count when ends_at
   // passes (raceExpiry.js). Additive/backward-compatible: defaults false so
   // legacy target races created by older app versions keep finishing on target.
-  timeBased              Boolean          @default(false) @map("time_based")
+  timeBased               Boolean          @default(false) @map("time_based")
   // Opaque, unguessable token backing shareable race links (https://<host>/r/
   // <token>). Nullable: minted lazily the first time a participant shares the
   // race, so legacy races stay NULL until shared. Additive/backward-compatible —
   // older app clients never read or send it. Unique so a token resolves to at
   // most one race; @unique also creates the lookup index used by findByShareToken.
-  shareToken             String?          @unique @map("share_token")
+  shareToken              String?          @unique @map("share_token")
   // ── Team races (TR-100/§12) ────────────────────────────────────────────────
   // isTeamRace flips a race into two-team mode: exactly two sides, team size
   // 1–5, combined team totals, winnerTeam decides. teamSize is the per-side cap
@@ -1340,11 +1355,11 @@ model Race {
   // the settled result (TEAM_A|TEAM_B|null); winnerUserId stays null for team
   // races. All additive/nullable — old app builds never send or read them, and a
   // race with isTeamRace=false renders exactly as an individual race.
-  isTeamRace             Boolean          @default(false) @map("is_team_race")
-  teamSize               Int?             @map("team_size")
-  teamAName              String?          @map("team_a_name")
-  teamBName              String?          @map("team_b_name")
-  winnerTeam             RaceTeam?        @map("winner_team")
+  isTeamRace              Boolean          @default(false) @map("is_team_race")
+  teamSize                Int?             @map("team_size")
+  teamAName               String?          @map("team_a_name")
+  teamBName               String?          @map("team_b_name")
+  winnerTeam              RaceTeam?        @map("winner_team")
   // ── Tournaments (bracket mode) ──────────────────────────────────────────────
   // A matchup race is an ordinary time-based WINNER_TAKES_ALL race that belongs
   // to one tournament round. tournamentId != null flags it as a matchup: it is
@@ -1354,14 +1369,14 @@ model Race {
   // 0-based within the round. The @@unique makes double-advancement a hard DB
   // error (advancement idempotency backstop). All additive/nullable — old app
   // builds never send or read them and old rows stay NULL.
-  tournamentId           String?          @map("tournament_id")
-  tournamentRound        Int?             @map("tournament_round")
-  tournamentMatchIndex   Int?             @map("tournament_match_index")
+  tournamentId            String?          @map("tournament_id")
+  tournamentRound         Int?             @map("tournament_round")
+  tournamentMatchIndex    Int?             @map("tournament_match_index")
   // A private Daily/Weekly bucket's immutable identity. Nullable and unique so
   // all historical/global seeded races continue on the legacy stream.
-  seededBucketId         String?          @unique @map("seeded_bucket_id")
-  createdAt              DateTime         @default(now()) @map("created_at")
-  updatedAt              DateTime         @updatedAt @map("updated_at")
+  seededBucketId          String?          @unique @map("seeded_bucket_id")
+  createdAt               DateTime         @default(now()) @map("created_at")
+  updatedAt               DateTime         @updatedAt @map("updated_at")
 
   creator                User?                       @relation("raceCreator", fields: [creatorId], references: [id])
   seed                   RaceSeed?                   @relation(fields: [seedId], references: [id])
@@ -1459,6 +1474,9 @@ model Tournament {
   // the legacy pot payout and a featured seed's championPrizeCoins.
   fundedPrize                Boolean          @default(false) @map("funded_prize")
   prizePoolCoins             Int              @default(0) @map("prize_pool_coins")
+  prizeCoinUnit              Int?             @map("prize_coin_unit")
+  tournamentChampionMaxCoins Int?             @map("tournament_champion_max_coins")
+  prizeCalculationVersion    Int              @default(1) @map("prize_calculation_version")
   payoutRoundingVersion      Int              @default(0) @map("payout_rounding_version")
   payoutRoundingMetadata     Json?            @map("payout_rounding_metadata")
   powerupsEnabled            Boolean          @default(false) @map("powerups_enabled")
@@ -1509,22 +1527,24 @@ model TournamentSeed {
 }
 
 model TournamentParticipant {
-  id                String                @id @default(uuid())
-  tournamentId      String                @map("tournament_id")
-  userId            String                @map("user_id")
+  id                                 String                @id @default(uuid())
+  tournamentId                       String                @map("tournament_id")
+  userId                             String                @map("user_id")
   // Reuse the race participant status enum (INVITED/ACCEPTED/DECLINED).
-  status            RaceParticipantStatus @default(INVITED)
-  seed              Int? // bracket slot 0..bracketSize-1, assigned at start
-  eliminatedInRound Int?                  @map("eliminated_in_round") // null = still alive (or champion)
-  buyInAmount       Int                   @default(0) @map("buy_in_amount")
+  status                             RaceParticipantStatus @default(INVITED)
+  seed                               Int? // bracket slot 0..bracketSize-1, assigned at start
+  eliminatedInRound                  Int?                  @map("eliminated_in_round") // null = still alive (or champion)
+  buyInAmount                        Int                   @default(0) @map("buy_in_amount")
   // Reuse the race buy-in status enum (NONE/HELD/COMMITTED/REFUNDED).
-  buyInStatus       RaceBuyInStatus       @default(NONE) @map("buy_in_status")
+  buyInStatus                        RaceBuyInStatus       @default(NONE) @map("buy_in_status")
   // Increments on every refund; suffixes ledger refIds so a re-hold after
   // leave->rejoin can never silently no-op against an old ledger row (§7).
-  buyInVersion      Int                   @default(0) @map("buy_in_version")
+  buyInVersion                       Int                   @default(0) @map("buy_in_version")
   // ACCEPT time (updated on re-accept); the D3 exact-tie tiebreak key.
-  joinedAt          DateTime              @default(now()) @map("joined_at")
-  createdAt         DateTime              @default(now()) @map("created_at")
+  joinedAt                           DateTime              @default(now()) @map("joined_at")
+  fundedExposureMillicoins           Int?                  @map("funded_exposure_millicoins")
+  fundedExposureRateMillicoinsPerDay Int?                  @map("funded_exposure_rate_millicoins_per_day")
+  createdAt                          DateTime              @default(now()) @map("created_at")
 
   tournament Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
   user       User       @relation(fields: [userId], references: [id])
@@ -1535,11 +1555,11 @@ model TournamentParticipant {
 }
 
 model RaceParticipant {
-  id                       String                @id @default(uuid())
-  raceId                   String                @map("race_id")
-  userId                   String                @map("user_id")
-  status                   RaceParticipantStatus @default(INVITED)
-  totalSteps               Int                   @default(0) @map("total_steps")
+  id                                 String                @id @default(uuid())
+  raceId                             String                @map("race_id")
+  userId                             String                @map("user_id")
+  status                             RaceParticipantStatus @default(INVITED)
+  totalSteps                         Int                   @default(0) @map("total_steps")
   // When `totalSteps` was last persisted (batch 2026-07-26, item 16). GET /races
   // keeps serving the cheap PERSISTED team totals — no live recompute on the
   // hottest screen — and now surfaces max(totalsUpdatedAt) as `teams.asOf` so the
@@ -1547,7 +1567,7 @@ model RaceParticipant {
   // Additive/nullable: NULL simply means "never written since this deploy", and
   // the client hides the staleness affordance. Written in the same UPDATE that
   // writes totalSteps, so it costs no extra round-trip.
-  totalsUpdatedAt          DateTime?             @map("totals_updated_at")
+  totalsUpdatedAt                    DateTime?             @map("totals_updated_at")
   // RAW WALKED steps (`baseAdjusted`) as of the last persist — the same
   // manipulation-proof quantity box progress uses: no buffs, no debuffs, no
   // bonus steps, so it only ever grows by walking. Written by every writer of
@@ -1571,72 +1591,74 @@ model RaceParticipant {
   // accepted participant of a race is NULL the whole race falls back to
   // `totalSteps`. Additive/nullable, no index (never a query predicate), and
   // never returned by any API — old app versions are unaffected.
-  rawSteps                 Int?                  @map("raw_steps")
-  baselineSteps            Int                   @default(0) @map("baseline_steps")
-  nextBoxAtSteps           Int                   @default(0) @map("next_box_at_steps")
-  bonusSteps               Int                   @default(0) @map("bonus_steps")
-  maxBonusSteps            Int                   @default(0) @map("max_bonus_steps")
+  rawSteps                           Int?                  @map("raw_steps")
+  baselineSteps                      Int                   @default(0) @map("baseline_steps")
+  nextBoxAtSteps                     Int                   @default(0) @map("next_box_at_steps")
+  bonusSteps                         Int                   @default(0) @map("bonus_steps")
+  maxBonusSteps                      Int                   @default(0) @map("max_bonus_steps")
   // DEPRECATED / UNUSED. Was a box-progress high-water anchor meant to make box
   // progress immune to Leg Cramp/Wrong Turn, but it froze the countdown while a
   // player sat below their pre-debuff peak. Product decision: box progress is
   // debuff-sensitive (the bonusSteps high-water still protects bonus-steal). No
   // code reads this column anymore; it is retained (not dropped) to avoid a
   // destructive migration. Safe to remove in a future schema-cleanup release.
-  maxBoxProgressSteps      Int?                  @map("max_box_progress_steps")
-  powerupSlots             Int                   @default(3) @map("powerup_slots")
-  buyInAmount              Int                   @default(0) @map("buy_in_amount")
-  buyInStatus              RaceBuyInStatus       @default(NONE) @map("buy_in_status")
+  maxBoxProgressSteps                Int?                  @map("max_box_progress_steps")
+  powerupSlots                       Int                   @default(3) @map("powerup_slots")
+  buyInAmount                        Int                   @default(0) @map("buy_in_amount")
+  buyInStatus                        RaceBuyInStatus       @default(NONE) @map("buy_in_status")
   // Monotonic per-participant edit counter (Issue 4). Bumped each time the owner
   // reconciles the buy-in on a PENDING race; the versioned value forms a unique
   // coin-ledger refId (`<raceId>:<userId>:v<n>`) so a re-charge after a refund is
   // never silently skipped by awardCoins idempotency. Additive, default 0 — old
   // rows and old app versions are unaffected (nothing reads it client-side).
-  buyInVersion             Int                   @default(0) @map("buy_in_version")
-  payoutCoins              Int                   @default(0) @map("payout_coins")
-  placement                Int?
+  buyInVersion                       Int                   @default(0) @map("buy_in_version")
+  payoutCoins                        Int                   @default(0) @map("payout_coins")
+  placement                          Int?
   // Live placement broadcast (Phase 0): last live rank we pushed to this
   // participant, for idempotent change detection in placementRecompute. NULL =
   // baseline not yet seeded. Additive + nullable; never returned by any API
   // response, so already-shipped app versions are unaffected.
-  lastNotifiedPlacement    Int?                  @map("last_notified_placement")
+  lastNotifiedPlacement              Int?                  @map("last_notified_placement")
   // High-multiplier alert dedup (item 6b): the moment we last emitted a
   // HIGH_MULTIPLIER_ALERT because this participant's current (stacked,
   // event-inclusive) multiplier crossed above the threshold. Set on emit,
   // CLEARED when the multiplier drops back to <= threshold so the alert re-arms
   // for the next spike. Additive + nullable; never returned by any API response,
   // so already-shipped app versions are unaffected.
-  highMultiplierNotifiedAt DateTime?             @map("high_multiplier_notified_at")
-  finishedAt               DateTime?             @map("finished_at")
-  finishTotalSteps         Int?                  @map("finish_total_steps")
-  joinedAt                 DateTime              @default(now()) @map("joined_at")
-  lastReadRaceChatAt       DateTime?             @map("last_read_race_chat_at")
-  lastChatPushAt           DateTime?             @map("last_chat_push_at")
-  chatMuted                Boolean               @default(false) @map("chat_muted")
+  highMultiplierNotifiedAt           DateTime?             @map("high_multiplier_notified_at")
+  finishedAt                         DateTime?             @map("finished_at")
+  finishTotalSteps                   Int?                  @map("finish_total_steps")
+  joinedAt                           DateTime              @default(now()) @map("joined_at")
+  lastReadRaceChatAt                 DateTime?             @map("last_read_race_chat_at")
+  lastChatPushAt                     DateTime?             @map("last_chat_push_at")
+  chatMuted                          Boolean               @default(false) @map("chat_muted")
   // Per-race opt-out for live placement-change pushes (Phase 0). When true, the
   // placementRecompute job keeps this participant's lastNotifiedPlacement baseline
   // in sync but emits no PLACEMENT_CHANGED event, so they get neither the visible
   // alert nor the silent refresh for this race. Additive + default-false: old app
   // versions never set it and behave exactly as before.
-  placementAlertsMuted     Boolean               @default(false) @map("placement_alerts_muted")
+  placementAlertsMuted               Boolean               @default(false) @map("placement_alerts_muted")
   // Daily biggest-mover digest: this participant's live rank captured at the last
   // 4pm-ET digest run, the baseline the next run measures movement against (a
   // rolling 24h window). NULL = not yet seeded; the digest job lazily seeds it and
   // emits nothing for that first partial window. Reset to the current live rank on
   // every run. Additive + nullable; never returned by any API, so already-shipped
   // app versions are unaffected.
-  dayStartPlacement        Int?                  @map("day_start_placement")
-  inviteExpiresAt          DateTime?             @map("invite_expires_at")
-  resultsSeenAt            DateTime?             @map("results_seen_at")
+  dayStartPlacement                  Int?                  @map("day_start_placement")
+  inviteExpiresAt                    DateTime?             @map("invite_expires_at")
+  resultsSeenAt                      DateTime?             @map("results_seen_at")
   // Team-race side (TR-201). Null on individual races and on pre-team-era rows.
   // Set at join/accept for team races; freely switchable while PENDING, locked
   // at start. Additive/nullable — old app builds never read it.
-  team                     RaceTeam?
+  team                               RaceTeam?
   // Mid-race forfeit moment (TR-601, team races only). When set, the member's
   // effective total is FROZEN as-is into totalSteps (active debuffs bite
   // permanently — no re-derivation), they stop accruing, can't use or be
   // targeted by powerups, and get no payout cut even on the winning team.
   // Null = never forfeited. Additive/nullable — old app builds never read it.
-  forfeitedAt              DateTime?             @map("forfeited_at")
+  forfeitedAt                        DateTime?             @map("forfeited_at")
+  fundedExposureMillicoins           Int?                  @map("funded_exposure_millicoins")
+  fundedExposureRateMillicoinsPerDay Int?                  @map("funded_exposure_rate_millicoins_per_day")
 
   race                   Race                        @relation(fields: [raceId], references: [id], onDelete: Cascade)
   user                   User                        @relation(fields: [userId], references: [id])

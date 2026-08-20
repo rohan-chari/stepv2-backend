@@ -3,7 +3,6 @@ const {
   roundLabel,
   totalRoundsFor,
   clampMatchupDuration,
-  MAX_CHAMPION_PRIZE,
 } = require("../constants/tournaments");
 const {
   computePrizePool,
@@ -14,6 +13,9 @@ const {
   isStealthedForViewer,
 } = require("../../races/services/raceIllusions");
 const { buildPayoutPlan } = require("../../races/services/payoutRounding");
+const {
+  resolveTournamentPrizeStamp,
+} = require("../../races/services/fundedExposure");
 
 // Total bracket length in days — the duration band a funded bracket pool is
 // sized on (D9): every round is played back-to-back.
@@ -39,6 +41,7 @@ function tournamentMoneyView(t, acceptedCount) {
     };
   }
   const completed = t.status === "COMPLETED";
+  const prizeStamp = resolveTournamentPrizeStamp(t);
   const playerCount =
     acceptedCount != null
       ? acceptedCount
@@ -49,7 +52,8 @@ function tournamentMoneyView(t, acceptedCount) {
     : computePrizePool({
         playerCount,
         durationDays,
-        max: MAX_CHAMPION_PRIZE,
+        max: prizeStamp.tournamentChampionMaxCoins,
+        unit: prizeStamp.prizeCoinUnit,
       });
   const coins = award(rawCoins);
   return {
@@ -59,7 +63,8 @@ function tournamentMoneyView(t, acceptedCount) {
       durationDays,
       projected: !completed,
       coins,
-      max: MAX_CHAMPION_PRIZE,
+      max: prizeStamp.tournamentChampionMaxCoins,
+      unit: prizeStamp.prizeCoinUnit,
     }),
     buyInAmount: 0,
     potCoins: coins,

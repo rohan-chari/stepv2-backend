@@ -31,6 +31,7 @@ const {
   runCapacityMetricsEntry,
   startCapacityPhase,
 } = require("../../../shared/observability/capacityPhaseMetrics");
+const { userFanoutDisabled } = require("../../../shared/config/operationalControls");
 
 // Team-race slacker nudge (TR-683): gentle, fires only inside the final 12h,
 // to a member contributing < 25% of their team's per-member average (average
@@ -119,7 +120,7 @@ function buildRecomputePlacements(dependencies = {}) {
   // reminder without stopping placement pushes. Injectable for tests.
   const isRaceEndingReminderDisabled =
     dependencies.isRaceEndingReminderDisabled ||
-    (() => process.env.RACE_ENDING_REMINDER_DISABLED === "true");
+    (() => userFanoutDisabled("RACE_ENDING_REMINDER_DISABLED"));
 
   const auditKey = (userId, type, raceId) => `${userId}|${type}|${raceId}`;
 

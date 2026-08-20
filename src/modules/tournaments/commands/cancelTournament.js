@@ -89,7 +89,16 @@ function buildCancelTournament(dependencies = {}) {
           }
         }
       },
-      { prisma: db }
+      {
+        prisma: db,
+        resolveUserIds: async (tx) => {
+          const participants = await tx.tournamentParticipant.findMany({
+            where: { tournamentId },
+            select: { userId: true },
+          });
+          return participants.map((row) => row.userId);
+        },
+      }
     );
 
     for (const payload of deferred) {

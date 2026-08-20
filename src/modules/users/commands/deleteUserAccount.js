@@ -9,6 +9,18 @@ const {
   cohortBucket,
 } = require("../../races/services/racePayoutDoublePolicy");
 const { buildLeaderboardEligibilityEpoch } = require("../../../shared/config/leaderboardEligibilityEpoch");
+const {
+  lockFundedExposureUsers,
+} = require("../../races/services/fundedExposure");
+const {
+  acquireRaceWriteFences,
+  lockCompetitionRows,
+} = require("../../races/services/raceWriteFence");
+const {
+  acquireGlobalEnrollmentLock,
+} = require("../../steps/services/globalEventEnrollment");
+
+const MEMBERSHIP_SCOPE_DRIFT = "MEMBERSHIP_SCOPE_DRIFT";
 
 class DeleteUserAccountError extends Error {
   constructor(message, statusCode) {
@@ -39,6 +51,23 @@ function buildDeleteUserAccount(dependencies = {}) {
   const logger = dependencies.logger || console;
   const eligibilityEpoch = dependencies.leaderboardEligibilityEpoch ||
     buildLeaderboardEligibilityEpoch({ prisma: db });
+
+  async function discoverMembershipScope(userId) {
+    const raceRows = await db.raceParticipant.findMany({
+      where: { userId },
+      select: { raceId: true },
+    });
+    const tournamentRows = await db.tournamentParticipant.findMany({
+      where: { userId },
+      select: { tournamentId: true },
+    });
+    return {
+      raceIds: [...new Set(raceRows.map((row) => row.raceId))].sort(),
+      tournamentIds: [
+        ...new Set(tournamentRows.map((row) => row.tournamentId)),
+      ].sort(),
+    };
+  }
 
   return async function deleteUserAccount({ userId }) {
     if (!userId) {
@@ -72,7 +101,40 @@ function buildDeleteUserAccount(dependencies = {}) {
     }
 
     let counterpartIds = [];
-    await db.$transaction(async (tx) => {
+    let deletionComplete = false;
+    for (let attempt = 0; attempt < 3 && !deletionComplete; attempt += 1) {
+      const scope = await discoverMembershipScope(userId);
+      try {
+        await db.$transaction(async (tx) => {
+      // Universal membership order. The scope is discovered optimistically;
+      // after these locks, an admission into a new competition either precedes
+      // the user guard and is detected by the reread below, or follows deletion.
+      await acquireRaceWriteFences(tx, scope.raceIds);
+      if (scope.raceIds.length > 0) await acquireGlobalEnrollmentLock(tx);
+      await lockFundedExposureUsers(tx, [userId]);
+      await lockCompetitionRows(tx, scope);
+
+      const participations = await tx.raceParticipant.findMany({
+        where: { userId },
+        include: { race: { select: { id: true, status: true } } },
+      });
+      const tournamentEntries = await tx.tournamentParticipant.findMany({
+        where: { userId },
+        include: { tournament: { select: { id: true, status: true } } },
+      });
+      const raceScope = new Set(scope.raceIds);
+      const tournamentScope = new Set(scope.tournamentIds);
+      if (
+        participations.some((row) => !raceScope.has(row.raceId)) ||
+        tournamentEntries.some(
+          (row) => !tournamentScope.has(row.tournamentId),
+        )
+      ) {
+        const drift = new Error("Account membership scope changed; retrying");
+        drift.code = MEMBERSHIP_SCOPE_DRIFT;
+        throw drift;
+      }
+
       // Shared race-payout-double lock order: durable provider identity first,
       // then user. Tombstone receipts before the user cascade removes offers,
       // grants and ledger rows so reconciliation can distinguish deletion from
@@ -102,11 +164,6 @@ function buildDeleteUserAccount(dependencies = {}) {
 
       // 1) Race participations: forfeit any held buy-ins into the pot, then
       //    detach the user from each race depending on race lifecycle.
-      const participations = await tx.raceParticipant.findMany({
-        where: { userId },
-        include: { race: { select: { id: true, status: true } } },
-      });
-
       for (const participant of participations) {
         if (
           participant.buyInStatus === "HELD" &&
@@ -149,11 +206,6 @@ function buildDeleteUserAccount(dependencies = {}) {
       // 1b) Tournament participations: same lifecycle split as races above.
       //     tournament_participants FKs the user with RESTRICT, so an
       //     unhandled row here blocks the whole delete.
-      const tournamentEntries = await tx.tournamentParticipant.findMany({
-        where: { userId },
-        include: { tournament: { select: { id: true, status: true } } },
-      });
-
       for (const entry of tournamentEntries) {
         if (entry.buyInStatus === "HELD" && entry.buyInAmount > 0) {
           await tx.tournament.update({
@@ -281,7 +333,12 @@ function buildDeleteUserAccount(dependencies = {}) {
       //    ShopPurchaseRequest all cascade on user delete.
       await tx.user.delete({ where: { id: userId } });
       await eligibilityEpoch.advance(tx);
-    });
+        }, { timeout: 15_000, maxWait: 10_000 });
+        deletionComplete = true;
+      } catch (error) {
+        if (error?.code !== MEMBERSHIP_SCOPE_DRIFT || attempt === 2) throw error;
+      }
+    }
     // C2 invalidation (spec §3): drop the user's presentation bundle. Note the
     // cached chat lists are NOT invalidated here — that fan-out is unbounded
     // (this delete nulls `race_messages.sender_id` across every race the user

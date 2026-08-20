@@ -14,6 +14,9 @@ const {
 } = require("../services/racePowerupStateSync");
 const { nudgeOvertakenRivals } = require("../../steps/commands/recordSteps");
 const { stepSyncPushService } = require("../../../shared/push/stepSyncPush");
+const {
+  raceResolutionWorkerDisabled,
+} = require("../../../shared/config/operationalControls");
 
 const POLL_INTERVAL_MS = 250;
 // Best-effort reservation cleanup cadence (never affects correctness).
@@ -124,7 +127,7 @@ function buildRaceResolutionWorker(dependencies = {}) {
   // Drain up to `max` eligible jobs in one tick (default 1 concurrent job per
   // process to protect the DB pool; bounded override after staging verification).
   async function tick() {
-    if (process.env.ASYNC_RACE_RESOLUTION_WORKER_DISABLED === "true") return 0;
+    if (raceResolutionWorkerDisabled()) return 0;
     const concurrency = Math.min(
       2,
       Math.max(1, Number(process.env.ASYNC_RACE_RESOLUTION_CONCURRENCY) || 1)

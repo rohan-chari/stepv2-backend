@@ -28,6 +28,19 @@ const {
 } = require("../constants/teamNames");
 const { resolveTeamPoolMultBps } = require("../teamPoolMultiplier");
 const {
+  computeRaceExposureStamp,
+  isFundedPrizeV2Enabled,
+  newRacePrizeStamp,
+  reserveFundedExposure,
+  resolveRacePrizeStamp,
+  lockFundedExposureUsers,
+} = require("../services/fundedExposure");
+const {
+  prisma: defaultPrisma,
+  deferUntilAfterCommit,
+  runInPrismaTransaction,
+} = require("../../../db");
+const {
   supportsNextRace,
   hasAnyQuickMetadata,
   isSupportedQuickConfig,
@@ -35,6 +48,7 @@ const {
   QUICK_SOURCE,
   AUTO_START_POLICY,
 } = require("../services/nextRacePolicy");
+const { acquireRaceWriteFence } = require("../services/raceWriteFence");
 
 class RaceCreationError extends Error {
   constructor(message, statusCode, code) {
@@ -93,8 +107,13 @@ function buildCreateRace(dependencies = {}) {
   const settings = dependencies.appSettings || appSettings;
   const generateTeamNamePair =
     dependencies.generateTeamNamePair || defaultGenerateTeamNamePair;
+  const usesDefaultPersistence =
+    !dependencies.Race &&
+    !dependencies.RaceParticipant &&
+    !dependencies.User &&
+    !dependencies.prisma;
 
-  return async function createRace({
+  const createRaceCore = async function createRace({
     userId,
     name,
     maxDurationDays = 7,
@@ -305,10 +324,10 @@ function buildCreateRace(dependencies = {}) {
     // — never a 400, or every un-updated binary loses the ability to create a
     // race. Coerced BEFORE validation so even an off-band legacy amount (below
     // the old 10-coin minimum) still creates cleanly.
-    const [fundedPrizePools, payoutRoundingV1Enabled] = await Promise.all([
-      settings.getFlag("fundedPrizePoolsEnabled"),
-      settings.getFlag("payoutRoundingV1Enabled"),
-    ]);
+    const fundedPrizePools = await settings.getFlag("fundedPrizePoolsEnabled");
+    const payoutRoundingV1Enabled = await settings.getFlag(
+      "payoutRoundingV1Enabled",
+    );
     // Same creation-time stamping rule as fundedPrize: this setting controls
     // only future races. An in-flight race's capabilities never reprice when a
     // remote flag flips during a phased app rollout.
@@ -330,6 +349,29 @@ function buildCreateRace(dependencies = {}) {
       ErrorClass: RaceCreationError,
     });
 
+    const teamPoolMultBps = resolveTeamPoolMultBps({
+      isTeamRace: !!teamConfig,
+      durationDays: effectiveMaxDurationDays,
+    });
+    const prizeStamp = isFundedPrizeV2Enabled()
+      ? newRacePrizeStamp()
+      : resolveRacePrizeStamp({ prizeCalculationVersion: 1 });
+    const fundedExposureStamp = computeRaceExposureStamp({
+      maxDurationDays: effectiveMaxDurationDays,
+      prizeCoinUnit: prizeStamp.prizeCoinUnit,
+      teamPoolMultBps,
+    });
+    if (usesDefaultPersistence) {
+      await lockFundedExposureUsers(defaultPrisma, [userId]);
+    }
+    if (fundedPrizePools === true && usesDefaultPersistence) {
+      await reserveFundedExposure({
+        tx: defaultPrisma,
+        userId,
+        stamp: fundedExposureStamp,
+      });
+    }
+
     const race = await raceModel.create({
       creatorId: userId,
       name: name.trim(),
@@ -347,6 +389,15 @@ function buildCreateRace(dependencies = {}) {
       // The row-level discriminator: this race's prize is app-minted, and stays
       // app-minted even if the flag is flipped back off mid-race.
       fundedPrize: fundedPrizePools === true,
+      prizeCalculationVersion: prizeStamp.prizeCalculationVersion,
+      prizeCoinUnit:
+        prizeStamp.prizeCalculationVersion >= 2
+          ? prizeStamp.prizeCoinUnit
+          : null,
+      prizePoolMaxCoins:
+        prizeStamp.prizeCalculationVersion >= 2
+          ? prizeStamp.prizePoolMaxCoins
+          : null,
       payoutRoundingVersion: fundedPrizePools === true && payoutRoundingV1Enabled === true ? 1 : 0,
       exitActionsEnabled: exitActionsEnabled === true,
       isPublic: !!isPublic,
@@ -371,14 +422,18 @@ function buildCreateRace(dependencies = {}) {
       // Item 5 (2026-08-08): stamp the team payout buff ONCE, here, from env.
       // Individual races stamp NULL (= 1.0). Read back by every projection and
       // by settlement, so an env retune never reprices an in-flight race.
-      teamPoolMultBps: resolveTeamPoolMultBps({
-        isTeamRace: !!teamConfig,
-        // The SAME derived number persisted as maxDurationDays above (R5).
-        durationDays: effectiveMaxDurationDays,
-      }),
+      teamPoolMultBps,
       creationSource: normalizedQuick ? QUICK_SOURCE : null,
       startPolicy: normalizedQuick ? AUTO_START_POLICY : null,
     });
+
+    // The row is still invisible inside this creation transaction, so no
+    // competing writer can know its id yet. Establish C0 before the first
+    // participant row so every post-commit membership/lifecycle path has the
+    // same durable fence from birth.
+    if (usesDefaultPersistence) {
+      await acquireRaceWriteFence(defaultPrisma, race.id);
+    }
 
     await participantModel.create({
       raceId: race.id,
@@ -388,6 +443,14 @@ function buildCreateRace(dependencies = {}) {
       buyInStatus: buyInConfig.buyInAmount > 0 ? "HELD" : "NONE",
       // TR-104: creator's chosen side (TEAM_A default) on team races.
       team: teamConfig ? teamConfig.creatorTeam : null,
+      ...(fundedPrizePools === true
+        ? {
+            fundedExposureMillicoins:
+              fundedExposureStamp.exposureMillicoins,
+            fundedExposureRateMillicoinsPerDay:
+              fundedExposureStamp.exposureRateMillicoinsPerDay,
+          }
+        : {}),
     });
 
     await reserveRaceBuyIn({
@@ -397,14 +460,25 @@ function buildCreateRace(dependencies = {}) {
       amount: buyInConfig.buyInAmount,
     });
 
-    const fullRace = await raceModel.findById(race.id);
+    await deferUntilAfterCommit(() =>
+      events.emit("RACE_CREATED", {
+        raceId: race.id,
+        creatorUserId: userId,
+      })
+    );
 
-    events.emit("RACE_CREATED", {
-      raceId: race.id,
-      creatorUserId: userId,
+    return usesDefaultPersistence
+      ? { id: race.id }
+      : raceModel.findById(race.id);
+  };
+
+  return async function createRace(args) {
+    if (!usesDefaultPersistence) return createRaceCore(args);
+    const durable = await runInPrismaTransaction(() => createRaceCore(args), {
+      maxWait: 5_000,
+      timeout: 30_000,
     });
-
-    return fullRace;
+    return raceModel.findById(durable.id);
   };
 }
 

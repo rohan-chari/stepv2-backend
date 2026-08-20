@@ -8,6 +8,7 @@ const {
   formatDateString,
   addDaysToDateString,
 } = require("../../shared/time/week");
+const { userFanoutDisabled } = require("../../shared/config/operationalControls");
 
 // Daily-reward reminder scheduler (§7). Backend-scheduled VISIBLE pushes (not
 // local notifications) so the backend owns claim truth, can suppress the 9pm slot
@@ -77,7 +78,7 @@ function buildDailyRewardReminder(dependencies = {}) {
   const logger = dependencies.logger || console;
   const isDisabled =
     dependencies.isDisabled ||
-    (() => process.env.DAILY_REWARD_REMINDERS_DISABLED === "true");
+    (() => userFanoutDisabled("DAILY_REWARD_REMINDERS_DISABLED"));
 
   // Returns the emitted reminders this tick (for tests), or [] when disabled /
   // nothing due.

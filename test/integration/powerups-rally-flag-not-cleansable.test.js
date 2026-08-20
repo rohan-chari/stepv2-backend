@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict");
 const { describe, it, before, beforeEach } = require("node:test");
 const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
+const { appSettings } = require("../../src/shared/config/appSettings");
 
 // ---------------------------------------------------------------------------
 // Batch 2026-08-09 item 7 — Rally Flag and Uprising are BUFFS, not debuffs.
@@ -201,6 +202,7 @@ describe("Rally Flag and Uprising survive Cleanse and Quick Rinse", () => {
   beforeEach(async () => {
     await cleanDatabase();
     nextAppleId = 0;
+    await appSettings.setFlag("teamRacesEnabled", true);
   });
 
   // ── Rally Flag (team race) ────────────────────────────────────────────────

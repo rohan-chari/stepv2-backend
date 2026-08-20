@@ -15,6 +15,11 @@ const { clientSupportsTournaments } = require("../constants/tournaments");
 const {
   serializeTournamentPayload,
 } = require("../queries/serializeTournament");
+const {
+  computeTournamentExposureStamp,
+  reserveFundedExposure,
+  resolveTournamentPrizeStamp,
+} = require("../../races/services/fundedExposure");
 
 // Shared join engine for every entry point (public join, share-link join,
 // invite accept). Resolves the tournament (by id or share token), gates the
@@ -77,10 +82,7 @@ function buildJoinTournamentCore(dependencies = {}) {
 
     const { deferred } = await withTournamentLock(
       resolvedId,
-      async (tx, def) => {
-        const tournament = await tx.tournament.findUnique({
-          where: { id: resolvedId },
-        });
+      async (tx, def, tournament) => {
         if (!tournament) {
           throw new TournamentError("Tournament not found", 404, "TOURNAMENT_NOT_FOUND");
         }
@@ -182,6 +184,29 @@ function buildJoinTournamentCore(dependencies = {}) {
         // not the feature flag, is the authority).
         const buyIn =
           tournament.fundedPrize === true ? 0 : tournament.buyInAmount || 0;
+        const prizeStamp = resolveTournamentPrizeStamp(tournament);
+        const fundedExposureStamp =
+          tournament.fundedPrize === true && !tournament.seedId
+            ? computeTournamentExposureStamp({
+                bracketSize: tournament.bracketSize,
+                totalRounds: tournament.totalRounds,
+                matchupDurationDays: tournament.matchupDurationDays,
+                prizeCoinUnit: prizeStamp.prizeCoinUnit,
+                tournamentChampionMaxCoins:
+                  prizeStamp.tournamentChampionMaxCoins,
+              })
+            : null;
+        if (fundedExposureStamp) {
+          await reserveFundedExposure({
+            tx,
+            userId,
+            stamp: fundedExposureStamp,
+            competition: { tournamentId: resolvedId },
+          });
+          await tx.$queryRaw`
+            SELECT id FROM tournaments WHERE id = ${resolvedId} FOR UPDATE
+          `;
+        }
         const version = existing ? existing.buyInVersion || 0 : 0;
         if (buyIn > 0) {
           await ensureUserCanAfford({
@@ -205,6 +230,14 @@ function buildJoinTournamentCore(dependencies = {}) {
               buyInAmount: buyIn,
               buyInStatus: buyIn > 0 ? "HELD" : "NONE",
               joinedAt: now(),
+              ...(fundedExposureStamp
+                ? {
+                    fundedExposureMillicoins:
+                      fundedExposureStamp.exposureMillicoins,
+                    fundedExposureRateMillicoinsPerDay:
+                      fundedExposureStamp.exposureRateMillicoinsPerDay,
+                  }
+                : {}),
             },
           });
         } else {
@@ -217,6 +250,14 @@ function buildJoinTournamentCore(dependencies = {}) {
               buyInStatus: buyIn > 0 ? "HELD" : "NONE",
               buyInVersion: 0,
               joinedAt: now(),
+              ...(fundedExposureStamp
+                ? {
+                    fundedExposureMillicoins:
+                      fundedExposureStamp.exposureMillicoins,
+                    fundedExposureRateMillicoinsPerDay:
+                      fundedExposureStamp.exposureRateMillicoinsPerDay,
+                  }
+                : {}),
             },
           });
         }
@@ -245,7 +286,16 @@ function buildJoinTournamentCore(dependencies = {}) {
           if (startEvents) def.push(...startEvents);
         }
       },
-      { prisma: db }
+      {
+        prisma: db,
+        resolveUserIds: async (tx) => {
+          const participants = await tx.tournamentParticipant.findMany({
+            where: { tournamentId: resolvedId, status: "ACCEPTED" },
+            select: { userId: true },
+          });
+          return [userId, ...participants.map((row) => row.userId)];
+        },
+      }
     );
 
     for (const payload of deferred) {

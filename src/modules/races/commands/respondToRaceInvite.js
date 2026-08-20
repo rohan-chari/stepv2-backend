@@ -26,6 +26,13 @@ const {
 const {
   invalidateHomeActiveGlobalEvent,
 } = require("../../steps/services/globalStepEventEntitlement");
+const {
+  computeRaceExposureStamp,
+  lockFundedExposureUsers,
+  reserveFundedExposure,
+  resolveRacePrizeStamp,
+} = require("../services/fundedExposure");
+const { acquireRaceWriteFence } = require("../services/raceWriteFence");
 
 class RaceInviteResponseError extends Error {
   constructor(message, statusCode, code) {
@@ -54,7 +61,14 @@ function buildRespondToRaceInvite(dependencies = {}) {
     });
   const events = dependencies.eventBus || eventBus;
   const db = dependencies.prisma || defaultPrisma;
-  const usesDefaultPersistence = !dependencies.RaceParticipant && !dependencies.prisma;
+  const useTransactionalMutation =
+    dependencies.prisma != null || !dependencies.RaceParticipant;
+  const acquireWriteFence =
+    dependencies.acquireRaceWriteFence || acquireRaceWriteFence;
+  const lockUsers = dependencies.lockFundedExposureUsers ||
+    (dependencies.prisma && !dependencies.prisma.fundedExposureGuard
+      ? async () => []
+      : lockFundedExposureUsers);
   // Batch 2026-08-08 item 2 — private-race auto-start hook. Built from the same
   // dependency bag so tests can inject a fake startRace/Race.
   const maybeAutoStartPrivateRace =
@@ -164,6 +178,21 @@ function buildRespondToRaceInvite(dependencies = {}) {
     }
     // App-funded races never charge to enter (see joinRaceCore).
     const buyInAmount = race.fundedPrize === true ? 0 : race.buyInAmount || 0;
+    const prizeStamp = resolveRacePrizeStamp(race);
+    const fundedExposureStamp =
+      accept && race.fundedPrize === true
+        ? computeRaceExposureStamp({
+            maxDurationDays: race.maxDurationDays,
+            prizeCoinUnit: prizeStamp.prizeCoinUnit,
+            teamPoolMultBps: race.teamPoolMultBps,
+          })
+        : null;
+    if (fundedExposureStamp) {
+      updateFields.fundedExposureMillicoins =
+        fundedExposureStamp.exposureMillicoins;
+      updateFields.fundedExposureRateMillicoinsPerDay =
+        fundedExposureStamp.exposureRateMillicoinsPerDay;
+    }
 
     // Late joiner: snapshot current steps so only post-join steps count
     if (accept && race.status === "ACTIVE") {
@@ -208,9 +237,62 @@ function buildRespondToRaceInvite(dependencies = {}) {
     // is the atomic expiry authority described above.
     const inviteResponseNow = new Date();
     const updated =
-      accept && race.status === "ACTIVE" && usesDefaultPersistence
+      accept && useTransactionalMutation
         ? await db.$transaction(async (tx) => {
+            await acquireWriteFence(tx, raceId);
+            // An invite can cross PENDING -> ACTIVE between the optimistic read
+            // and C0. Always acquire the global-event lock before the user and
+            // race guards, then decide from the locked lifecycle reread.
             await acquireGlobalEnrollmentLock(tx);
+            await lockUsers(tx, [userId]);
+            if (fundedExposureStamp) {
+              await reserveFundedExposure({
+                tx,
+                userId,
+                stamp: fundedExposureStamp,
+                competition: { raceId },
+              });
+            }
+            await tx.$queryRaw`
+              SELECT id FROM races WHERE id = ${raceId} FOR UPDATE
+            `;
+            const lockedRace = await tx.race.findUnique({
+              where: { id: raceId },
+              include: { participants: true },
+            });
+            if (
+              !lockedRace ||
+              (lockedRace.status !== "PENDING" && lockedRace.status !== "ACTIVE")
+            ) {
+              throw new RaceInviteResponseError(
+                "This race is no longer accepting responses",
+                400,
+                "RACE_NOT_ACCEPTING",
+              );
+            }
+            const acceptedCount = lockedRace.participants.filter(
+              (entry) => entry.status === "ACCEPTED",
+            ).length;
+            if (
+              lockedRace.maxParticipants != null &&
+              acceptedCount >= lockedRace.maxParticipants
+            ) {
+              throw new RaceInviteResponseError("Race is full", 409, "RACE_FULL");
+            }
+            if (lockedRace.isTeamRace) {
+              if (lockedRace.status !== "PENDING") {
+                throw new RaceInviteResponseError(
+                  "This race has already started",
+                  409,
+                  "RACE_ALREADY_STARTED",
+                );
+              }
+              const lockedTeam = acceptTeam || pickAutoAssignTeam(lockedRace);
+              if (!lockedTeam || isTeamSideFull(lockedRace, lockedTeam)) {
+                throw new RaceInviteResponseError("That team is full", 409, "TEAM_FULL");
+              }
+              updateFields.team = lockedTeam;
+            }
             const claimed = await tx.raceParticipant.updateMany({
               where: {
                 id: participant.id,
@@ -220,12 +302,56 @@ function buildRespondToRaceInvite(dependencies = {}) {
               data: updateFields,
             });
             if (claimed.count !== 1) return null;
-            await enrollIfGlobalEventActive(tx, {
-              raceId, userIds: [userId], at: inviteResponseNow,
-            });
+            if (lockedRace.status === "ACTIVE") {
+              await enrollIfGlobalEventActive(tx, {
+                raceId, userIds: [userId], at: inviteResponseNow,
+              });
+            }
             return tx.raceParticipant.findUnique({
               where: { id: participant.id },
               include: { user: { select: { id: true, displayName: true, profilePhotoUrl: true } } },
+            });
+          })
+        : !accept && useTransactionalMutation
+        ? await db.$transaction(async (tx) => {
+            await acquireWriteFence(tx, raceId);
+            await lockUsers(tx, [userId]);
+            await tx.$queryRaw`
+              SELECT id FROM races WHERE id = ${raceId} FOR UPDATE
+            `;
+            const lockedRace = await tx.race.findUnique({
+              where: { id: raceId },
+              select: { status: true },
+            });
+            if (
+              !lockedRace ||
+              (lockedRace.status !== "PENDING" && lockedRace.status !== "ACTIVE")
+            ) {
+              throw new RaceInviteResponseError(
+                "This race is no longer accepting responses",
+                400,
+                "RACE_NOT_ACCEPTING",
+              );
+            }
+            const claimed = await tx.raceParticipant.updateMany({
+              where: {
+                id: participant.id,
+                status: "INVITED",
+                OR: [
+                  { inviteExpiresAt: null },
+                  { inviteExpiresAt: { gt: inviteResponseNow } },
+                ],
+              },
+              data: updateFields,
+            });
+            if (claimed.count !== 1) return null;
+            return tx.raceParticipant.findUnique({
+              where: { id: participant.id },
+              include: {
+                user: {
+                  select: { id: true, displayName: true, profilePhotoUrl: true },
+                },
+              },
             });
           })
         : typeof participantModel.updateLiveInvite === "function"
@@ -271,7 +397,7 @@ function buildRespondToRaceInvite(dependencies = {}) {
     }
 
     if (accept) {
-      if (race.status === "ACTIVE" && usesDefaultPersistence) {
+      if (race.status === "ACTIVE" && useTransactionalMutation) {
         await invalidateHomeActiveGlobalEvent([userId]);
       }
       events.emit("RACE_INVITE_ACCEPTED", {

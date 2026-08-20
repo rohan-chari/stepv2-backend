@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict");
 const { describe, it, before, beforeEach } = require("node:test");
 const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
+const { appSettings } = require("../../src/shared/config/appSettings");
 // The REAL settlement entry point (the cron job's exported function). Settlement
 // has no HTTP surface, so this IS its public path. Every number asserted below is
 // read back through the API — the scorer is never called directly.
@@ -137,6 +138,7 @@ describe("hitchhike live-vs-settlement parity — integration", () => {
   beforeEach(async () => {
     await cleanDatabase();
     nextAppleId = 0;
+    await appSettings.setFlag("teamRacesEnabled", true);
   });
 
   it("the caster's live total survives settlement unchanged, with hitchhike ordered before leech", async () => {

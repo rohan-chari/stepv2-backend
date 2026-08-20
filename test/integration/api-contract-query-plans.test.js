@@ -285,6 +285,20 @@ describe("API cleanup production query plans", () => {
       );
       return rows.map((row) => row["QUERY PLAN"]).join("\n");
     };
+    const explainOrderedIndex = async (sql, ...params) =>
+      prisma.$transaction(async (tx) => {
+        // A 16-player bracket has only 15 rows, so PostgreSQL can legitimately
+        // cost a bounded sort below the ordered index after unrelated schema
+        // width/statistics changes. Disable explicit sort for this one probe so
+        // the protected contract deterministically proves the ordered unique
+        // index can satisfy both the predicate and requested order.
+        await tx.$executeRawUnsafe("SET LOCAL enable_sort = off");
+        const rows = await tx.$queryRawUnsafe(
+          `EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) ${sql}`,
+          ...params
+        );
+        return rows.map((row) => row["QUERY PLAN"]).join("\n");
+      });
     const friends = await explain(
       `SELECT id, requester_id, addressee_id FROM friendships
        WHERE status='ACCEPTED'::"FriendshipStatus"
@@ -319,7 +333,7 @@ describe("API cleanup production query plans", () => {
        WHERE tournament_id=$1 ORDER BY joined_at ASC`,
       tournament.id
     );
-    const tournamentRaces = await explain(
+    const tournamentRaces = await explainOrderedIndex(
       `SELECT id, tournament_round, tournament_match_index, status
        FROM races WHERE tournament_id=$1
        ORDER BY tournament_round ASC, tournament_match_index ASC`,

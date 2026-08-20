@@ -170,6 +170,7 @@ describe("race details participants pagination", () => {
     await prisma.appSetting.deleteMany({ where: { key: BOOTSTRAP_FLAG } });
     appSettings.bustCache();
     await appSettings.setFlag(BOOTSTRAP_FLAG, true);
+    await appSettings.setFlag("teamRacesEnabled", true);
   });
 
   // ── Backward compatibility ────────────────────────────────────────────────

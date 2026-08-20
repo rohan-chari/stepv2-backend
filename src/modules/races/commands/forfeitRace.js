@@ -62,6 +62,10 @@ const {
 const {
   invalidateRaceProgress,
 } = require("../services/raceProgressSnapshot");
+const {
+  lockFundedExposureUsers,
+} = require("../services/fundedExposure");
+const { acquireRaceWriteFence } = require("../services/raceWriteFence");
 
 function buildForfeitRace(dependencies = {}) {
   // C0 (spec §5a item 4): after this command's own small writes, mark the race
@@ -89,6 +93,8 @@ function buildForfeitRace(dependencies = {}) {
   const now = dependencies.now || (() => new Date());
   const activeImpactEnabled = dependencies.activeImpactEnabled || (async () => true);
   const computeState = dependencies.computeRaceState || computeRaceState;
+  const acquireWriteFence = dependencies.acquireRaceWriteFence ||
+    (Object.keys(dependencies).length > 0 ? async () => null : acquireRaceWriteFence);
 
   function buildFrozenImpactWork({ capture, participant, resolvedAt }) {
     const bySource = new Map();
@@ -312,6 +318,10 @@ function buildForfeitRace(dependencies = {}) {
     // same locked snapshot; no consequence is visible if an event insert fails.
     const transactionStartedAt = process.hrtime.bigint();
     const collapse = await runTransaction(async (tx) => {
+      await acquireWriteFence(tx, raceId);
+      if (race.fundedPrize === true) {
+        await lockFundedExposureUsers(tx, [userId]);
+      }
       // Lock and re-check the lifecycle row inside the same mutation
       // transaction. A completion that wins after our optimistic read makes
       // this a normal RACE_NOT_LEAVABLE conflict, never a late forfeit write.

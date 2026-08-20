@@ -2,6 +2,9 @@ const { prisma: defaultPrisma } = require("../../../db");
 const { JobRun: defaultJobRun } = require("../../../shared/db/jobRun");
 const { dailyRunKey } = require("../../../shared/time/etSchedule");
 const { invalidateInboxUnread } = require("../services/inbox");
+const {
+  destructiveCleanupDisabled,
+} = require("../../../shared/config/operationalControls");
 
 const JOB_NAME = "inbox_expiry";
 const TICK_INTERVAL_MS = 5 * 60 * 1000;
@@ -16,7 +19,7 @@ function buildInboxExpiry(dependencies = {}) {
   const now = dependencies.now || (() => new Date());
   const logger = dependencies.logger || console;
   return async function expireInbox() {
-    if (process.env.INBOX_EXPIRY_DISABLED === "true") return null;
+    if (destructiveCleanupDisabled("INBOX_EXPIRY_DISABLED")) return null;
     const current = now();
     const lastRanFor = await jobRun.lastRanFor(JOB_NAME);
     const runKey = dailyRunKey({ now: current, targetHour: dependencies.targetHour ?? 3, lastRanFor });

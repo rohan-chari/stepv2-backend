@@ -11,14 +11,8 @@
 //     unless the client advertises the `powerups2` X-Client-Features token, so
 //     old binaries never see a powerup type they can't render/target/use.
 //     (Box-prize exclusion now comes from config.storeOnlyTypes — see above.)
-//   * IMPOSTER kill switch — Imposter is being DISABLED for now (Item 3). It is
-//     env-gated by IMPOSTER_ENABLED so we can flip it back on instantly:
-//       - default (env unset / anything but "false") => ENABLED (legacy behavior;
-//         keeps every existing test green and lets us stage the change safely).
-//       - IMPOSTER_ENABLED="false" => DISABLED: the catalog hides it, the
-//         leaderboard slot-swap stops, and new uses are rejected (item kept, not
-//         consumed). Held/owned Imposter inventory is left untouched.
-//     Set IMPOSTER_ENABLED=false in the prod/staging env to actually kill it.
+//   * IMPOSTER is permanently retired. Historical enum/activity parsing stays,
+//     but no environment value can restore catalog, reward, or use behavior.
 
 //   * POWERUPS3_GATED_TYPES — Leech + Hitchhike + Quick Rinse. Same shape and
 //     same purpose one generation on: hidden from the shop catalog unless the
@@ -52,13 +46,13 @@ const POWERUPS5_GATED_TYPES = [
 ];
 
 function imposterEnabled() {
-  return process.env.IMPOSTER_ENABLED !== "false";
+  return false;
 }
 
 // Whether IMPOSTER should be filtered OUT of the shop catalog (the read-path
 // swap + use rejection are gated by imposterEnabled() at their call sites).
 function isImposterDisabledForCatalog(powerupType) {
-  return powerupType === "IMPOSTER" && !imposterEnabled();
+  return powerupType === "IMPOSTER";
 }
 
 // THE single client-visibility rule for a shop powerup (2026-07-28). Both the

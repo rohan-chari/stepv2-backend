@@ -4,6 +4,9 @@ const { Friendship } = require("../../social");
 const { User } = require("../../users");
 const { eventBus } = require("../../../shared/events/eventBus");
 const { TEAM_RACES_FEATURE } = require("../teamRaces");
+const { prisma: defaultPrisma } = require("../../../db");
+const { acquireRaceWriteFence } = require("../services/raceWriteFence");
+const { lockFundedExposureUsers } = require("../services/fundedExposure");
 
 const INVITE_TTL_HOURS = 24;
 
@@ -23,6 +26,17 @@ function buildInviteToRace(dependencies = {}) {
   const friendshipModel = dependencies.Friendship || Friendship;
   const userModel = dependencies.User || User;
   const events = dependencies.eventBus || eventBus;
+  const db = dependencies.prisma || defaultPrisma;
+  const acquireWriteFence = dependencies.acquireRaceWriteFence ||
+    (Object.keys(dependencies).length === 0 || dependencies.prisma
+      ? acquireRaceWriteFence
+      : async () => null);
+  const useTransactionalMutation =
+    Object.keys(dependencies).length === 0 || dependencies.prisma != null;
+  const lockUsers = dependencies.lockFundedExposureUsers ||
+    (dependencies.prisma && !dependencies.prisma.fundedExposureGuard
+      ? async () => []
+      : lockFundedExposureUsers);
 
   return async function inviteToRace({ userId, raceId, inviteeIds }) {
     const race = await raceModel.findById(raceId);
@@ -107,7 +121,73 @@ function buildInviteToRace(dependencies = {}) {
       status: "INVITED",
       inviteExpiresAt: expiresAt,
     }));
-    await participantModel.createMany(records);
+    if (useTransactionalMutation) {
+      await db.$transaction(async (tx) => {
+        await acquireWriteFence(tx, raceId);
+        try {
+          await lockUsers(tx, inviteeIds);
+        } catch (error) {
+          if (error?.code === "FUNDED_EXPOSURE_RETRY") {
+            throw new RaceInviteError(
+              "An invitee account changed while sending invites. Please retry.",
+              409,
+              "MEMBERSHIP_RETRY",
+            );
+          }
+          throw error;
+        }
+        await tx.$queryRawUnsafe(
+          `SELECT id FROM races WHERE id = $1 FOR UPDATE`,
+          raceId,
+        );
+        const lockedRace = await tx.race.findUnique({
+          where: { id: raceId },
+          select: {
+            id: true,
+            creatorId: true,
+            status: true,
+            tournamentId: true,
+            isTeamRace: true,
+            maxParticipants: true,
+          },
+        });
+        if (!lockedRace) throw new RaceInviteError("Race not found", 404);
+        if (lockedRace.tournamentId) {
+          throw new RaceInviteError(
+            "This race is managed by its tournament",
+            400,
+            "TOURNAMENT_RACE_LOCKED",
+          );
+        }
+        if (lockedRace.creatorId !== userId) {
+          throw new RaceInviteError("Only the race creator can send invites", 403);
+        }
+        if (!["PENDING", "ACTIVE"].includes(lockedRace.status)) {
+          throw new RaceInviteError("Cannot invite to a completed or cancelled race", 400);
+        }
+        const lockedParticipants = await tx.raceParticipant.findMany({
+          where: { raceId },
+          select: { userId: true },
+        });
+        const lockedUserIds = new Set(lockedParticipants.map((row) => row.userId));
+        if (inviteeIds.some((inviteeId) => lockedUserIds.has(inviteeId))) {
+          throw new RaceInviteError("User is already a participant", 400);
+        }
+        if (
+          !lockedRace.isTeamRace &&
+          lockedRace.maxParticipants != null &&
+          lockedParticipants.length + inviteeIds.length > lockedRace.maxParticipants
+        ) {
+          throw new RaceInviteError(
+            `A race can have at most ${lockedRace.maxParticipants} participants`,
+            400,
+          );
+        }
+        await tx.raceParticipant.createMany({ data: records, skipDuplicates: true });
+      });
+    } else {
+      await participantModel.createMany(records);
+    }
 
     for (const inviteeId of inviteeIds) {
       events.emit("RACE_INVITE_SENT", {

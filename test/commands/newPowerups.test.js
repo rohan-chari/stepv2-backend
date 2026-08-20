@@ -11,6 +11,9 @@ const {
   upgradedDuration,
   upgradedMagnitude,
 } = require("../../src/modules/powerups/powerupUpgrades");
+const {
+  defaultConfig,
+} = require("../../src/modules/economy/balanceConfig.defaults");
 
 const HOUR = 60 * 60 * 1000;
 
@@ -307,6 +310,14 @@ test("Lucky Horseshoe changes only the next opened mystery box and then expires"
       RacePowerupEvent: { async create() {} },
       eventBus: { emit() {} },
       rollPowerupOdds: () => ({ type: "PROTEIN_SHAKE", rarity: "COMMON" }),
+      // Balance config is operational data and may differ in a developer DB.
+      // Pin the shipped snapshot so this unit test owns the rollout-era
+      // UNCOMMON floor it is specifically asserting.
+      balanceConfig: {
+        async getSnapshot() {
+          return { version: null, config: defaultConfig() };
+        },
+      },
     },
   };
   const open = buildOpenMysteryBox(ctx.deps);

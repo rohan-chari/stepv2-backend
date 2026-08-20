@@ -61,6 +61,9 @@ beforeEach(async () => {
   await appSettings.setFlag("raceResolutionPostTasksV1Enabled", false);
   await appSettings.setFlag(SHADOW_FLAG, false);
   await appSettings.setFlag(WRITE_FLAG, false);
+  // The phase-2 artifact retains the independent cohort control at its dark
+  // default. Tests that explicitly enable writes exercise the enrolled path.
+  await appSettings.setFlag("raceResolutionDependencyClosureV1Percent", 100);
 });
 
 after(async () => {

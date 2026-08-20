@@ -20,9 +20,9 @@ function buildLeaveTournament(dependencies = {}) {
   return async function leaveTournament({ userId, tournamentId, supportsCharacters, supportsRemoteAssets = false }) {
     await withTournamentLock(
       tournamentId,
-      async (tx) => {
+      async (tx, _deferred, lockedTournament) => {
         const tournament = assertFound(
-          await tx.tournament.findUnique({ where: { id: tournamentId } }),
+          lockedTournament,
           () => new TournamentError("Tournament not found", 404, "TOURNAMENT_NOT_FOUND")
         );
         // Inverse of assertCreator (the creator must NOT be the caller) — a
@@ -56,7 +56,7 @@ function buildLeaveTournament(dependencies = {}) {
         }
         await softRemoveAndRefund({ tx, tournamentId, participant, awardCoinsFn });
       },
-      { prisma: db }
+      { prisma: db, userIds: [userId] }
     );
 
     const full = await tournamentModel.findById(tournamentId);

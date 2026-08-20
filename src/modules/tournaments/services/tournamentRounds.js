@@ -7,6 +7,9 @@ const {
 const {
   enrollIfGlobalEventActive,
 } = require("../../steps/services/globalEventEnrollment");
+const {
+  acquireRaceWriteFence,
+} = require("../../races/services/raceWriteFence");
 
 const RACE_NAME_MAX = 50;
 
@@ -69,6 +72,16 @@ async function createRoundRaces({
       },
     });
 
+    // Queue creation is also the first durable write to this new race's C0
+    // row. Do it before membership, then acquire the shared fence without
+    // incrementing generation: the committed start job remains generation 1.
+    await enqueueRaceResolution({
+      raceId: race.id,
+      reason: "RACE_START",
+      priority: "IMMEDIATE",
+    }, tx);
+    await acquireRaceWriteFence(tx, race.id);
+
     for (const userId of [userA, userB]) {
       const baseline = await snapshotBaselineFields({
         participant: { userId },
@@ -100,12 +113,6 @@ async function createRoundRaces({
       userIds: [userA, userB],
       at: startedAt,
     });
-
-    await enqueueRaceResolution({
-      raceId: race.id,
-      reason: "RACE_START",
-      priority: "IMMEDIATE",
-    }, tx);
 
     created.push({
       raceId: race.id,

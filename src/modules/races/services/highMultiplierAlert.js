@@ -1,5 +1,6 @@
 const { eventBus } = require("../../../shared/events/eventBus");
 const { prisma: defaultPrisma } = require("../../../db");
+const { userFanoutDisabled } = require("../../../shared/config/operationalControls");
 
 // Item 6b — high-multiplier push. A single shared evaluator called from BOTH the
 // powerup-use path (immediate self-buff spike) and the progress recompute
@@ -19,7 +20,7 @@ function threshold() {
 
 // Kill switch — ship enabled; can dark-flip without a deploy.
 function disabled() {
-  return process.env.HIGH_MULTIPLIER_PUSH_DISABLED === "true";
+  return userFanoutDisabled("HIGH_MULTIPLIER_PUSH_DISABLED");
 }
 
 async function evaluateHighMultiplierAlert({

@@ -15,6 +15,7 @@ describe("2026-07-22 additive backend contracts", () => {
     // App-funded prize pools now default ON and zero buy-ins at create; the
     // buy-in assertions here belong to the legacy model, so pin the flag OFF.
     await appSettings.setFlag("fundedPrizePoolsEnabled", false);
+    await appSettings.setFlag("redisCacheCatalogsEnabled", false);
   });
 
   it("serves and patches dualBoxBannersEnabled while /auth/me defaults it off", async () => {
@@ -65,6 +66,12 @@ describe("2026-07-22 additive backend contracts", () => {
   });
 
   it("GET /powerups/catalog selects copy and Quicksand by request capabilities", async () => {
+    // Powerup copy is operational data and deliberately survives the shared
+    // database cleanup. Own these rows explicitly so this compatibility test
+    // never inherits a seed written by an earlier suite.
+    await prisma.powerupCopy.deleteMany({
+      where: { powerupType: { in: ["STEALTH_MODE", "HITCHHIKE", "QUICKSAND"] } },
+    });
     await prisma.powerupCopy.createMany({ data: [
       { powerupType: "STEALTH_MODE", name: "Stealth Mode", description: "Hide for 1 hour", upgradeTierLabels: ["Hide 1h", "Hide 2h", "Hide 3h", "Hide 4h"] },
       { powerupType: "HITCHHIKE", name: "Hitchhike", description: "Copy raw steps", upgradeTierLabels: [] },

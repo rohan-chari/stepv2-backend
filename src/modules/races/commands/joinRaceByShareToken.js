@@ -69,7 +69,16 @@ function buildJoinRaceByShareToken(dependencies = {}) {
     const joinUnderRaceLock = () => withLock(resolved.id, async (lockTx) => {
       // Re-read inside the lock for a fresh participant set, so concurrent joins
       // can't both slip past the capacity check (mirrors joinPublicRace).
-      const race = await raceModel.findById(resolved.id);
+      let race;
+      if (lockTx) {
+        const core = await lockTx.race.findUnique({ where: { id: resolved.id } });
+        const participants = core
+          ? await lockTx.raceParticipant.findMany({ where: { raceId: resolved.id } })
+          : [];
+        race = core ? { ...core, participants } : null;
+      } else {
+        race = await raceModel.findById(resolved.id);
+      }
       if (!race) {
         throw new RaceShareJoinError("Race not found", 404);
       }
@@ -126,6 +135,8 @@ function buildJoinRaceByShareToken(dependencies = {}) {
       return lockTx
         ? await commitDurableJoin(lockTx)
         : await db.$transaction(commitDurableJoin);
+    }, {
+      fundedExposureUserIds: [userId],
     });
     // Both advisory helpers own transactions. Bubble the deferred callbacks
     // all the way out of BOTH callbacks so events, cache invalidation, boxes,
