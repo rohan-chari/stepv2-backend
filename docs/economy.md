@@ -74,3 +74,66 @@ frozen clients. Historical production baseline before the 3-to-5 change: a
 read-only aggregate found five active `QUICK_CREATE` races and two users at the
 then-current cap of 3. All five races had `exit_actions_enabled = false`, so the
 membership-limit error could not promise that those users could leave.
+
+## App-funded race and tournament pools
+
+**Live source-of-truth check — verified 2026-08-19.** Production has no
+`app_settings` row for either `fundedPrizePoolsEnabled` or `buyInEditEnabled`,
+so both resolve to their `true` defaults in
+`src/shared/config/appSettings.js`. `PRIZE_COIN_UNIT` and
+`PRIZE_POOL_MAX_COINS` are unset in the production environment, so the live
+values are the code fallbacks **20** and **16,000** from
+`src/shared/economy/prizePool.js`. The team-pool multiplier variables are also
+unset, so newly created team races stamp the 1.0x fallback. User-created
+tournaments retain their code cap of **1,000**.
+
+The funded formula is
+`eligible players x duration points x 20`, with duration points
+`1 / 2 / 4 / 8` for `1 / <=3 / <=7 / >=8` days. Entry is free. At symmetric
+skill, the expected prize per accepted player in an uncapped ordinary race is
+therefore **20 / 40 / 80 / 160 coins**. A full 4-player or 8-player two-day-
+round tournament has symmetric EV **80 coins/player**; a 16-player,
+three-day-round bracket is capped at 1,000, or **62.5 coins/player**.
+
+Production completions in the trailing seven days:
+
+| Competition | Completed | Pool coins | Weighted symmetric EV / accepted player | Median per-race symmetric EV | Source of truth |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Seeded races | 82 | 68,420 | 18.7 | 17.3 | `races.prize_pool_coins` + accepted participant aggregates |
+| User individual races | 40 | 13,980 | 54.8 | 40 | same |
+| User team races | 2 | 640 | 64.0 | 60 | same |
+| User tournament | 1 | 320 | 80.0 | 80 | `tournaments.prize_pool_coins` |
+
+Funded ledger reasons issued **83,360 coins in seven days**, or **11,908.6/day**
+(`race_prize_pool_payout` 83,040 plus
+`tournament_prize_pool_payout` 320). All positive ledger rows totaled
+33,286.3/day and all negative rows sunk 10,344.9/day, so funded pools were
+**35.8% of positive issuance**, exceeded all sinks by 1,563.7 coins/day on
+their own, and contributed to net issuance of 22,941.4/day. Buy-ins are a
+redistribution rather than a durable sink: at equal skill the expected gross
+pot return equals the stake and expected net is zero before powerup spending.
+
+Seven-day per-user-day positive earnings were p10 **1**, median **73**, p90
+**200** (2,114 user-days). Against that median, the legacy race minimum of 10
+costs 0.14 earning-days, the historical median hold of 40 costs 0.55 days, and
+the race maximum of 200 costs 2.74 days. Tournament maxima cost 1.37 days at
+100 coins (4/8 player) and 0.85 days at 62 coins (16 player).
+
+The principal funded-pool exploit is multiplicative membership: the same walk
+scores independently in every joined race while entry is free. Among 683 users
+with a live funded race membership, membership count was p50 **2**, p90 **4**,
+p99 **10**, maximum **17**. Concurrent symmetric prize exposure was p50 **120**,
+p90 **260**, p99 **1,062.8**, maximum **1,732 coins**. The QUICK_CREATE cap of
+five does not cap all other race memberships, so “join every free race” remains
+a dominant strategy outside that one creation source.
+
+Legacy compatibility is row-stamped, not controlled at settlement by the live
+flag. At verification time production had 107 active and 32 pending funded
+races plus one active funded user tournament. It also retained nine active and
+two pending non-funded races; only one pending race still held money (two
+participants, **300 coins HELD**). No live tournament held a buy-in. The
+`funded_prize` discriminator, legacy payout/refund ledger paths, buy-in fields,
+and legacy response aliases must remain until this monetary tail and any
+recovery jobs drain; completed legacy history still needs defensive
+serialization afterward. `buyInEditEnabled` is relevant only to reconciliation
+on that remaining paid legacy lobby once creation is permanently funded.
