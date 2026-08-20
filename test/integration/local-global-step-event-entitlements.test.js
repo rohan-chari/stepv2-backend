@@ -988,6 +988,76 @@ test("HTTP step-sync dependency closure fails closed while that participant's lo
   }
 });
 
+test("enabled dependency closure delivers a due legacy global-event boundary through the real cursor", async () => {
+  const { user } = await createTestUser();
+  const now = new Date("2026-08-20T18:00:00.000Z");
+  const race = await prisma.race.create({ data: {
+    creatorId: user.id,
+    name: "Legacy boundary closure rollout",
+    targetSteps: 0,
+    timeBased: true,
+    maxDurationDays: 1,
+    status: "ACTIVE",
+    startedAt: new Date(now.getTime() - 2 * 60 * 60 * 1000),
+    endsAt: new Date(now.getTime() + 2 * 60 * 60 * 1000),
+  } });
+  await prisma.raceParticipant.create({ data: {
+    raceId: race.id,
+    userId: user.id,
+    status: "ACCEPTED",
+    joinedAt: race.startedAt,
+  } });
+  const event = await prisma.globalStepEvent.create({ data: {
+    eventDay: "2026-08-20",
+    scheduleMode: "LEGACY_GLOBAL",
+    startsAt: new Date(now.getTime() - 30 * 60 * 1000),
+    endsAt: new Date(now.getTime() + 30 * 60 * 1000),
+    multiplier: 2,
+  } });
+  await prisma.globalStepEventBoundaryCursor.upsert({
+    where: { key: "global" },
+    update: {
+      boundaryAt: new Date(0),
+      eventId: "",
+      boundaryKind: "",
+      leaseToken: null,
+      leaseExpiresAt: null,
+    },
+    create: {
+      key: "global",
+      boundaryAt: new Date(0),
+      eventId: "",
+      boundaryKind: "",
+    },
+  });
+  const tick = buildMaybeStartGlobalEvent({
+    now: () => now,
+    localGlobalStepEventTick: async () => {},
+    appSettings: {
+      async getFlag(key) {
+        return key === "raceResolutionDependencyClosureV1Enabled";
+      },
+      async getRawFlagState(key) {
+        assert.equal(key, "raceResolutionDependencyClosureV1Percent");
+        return { available: true, present: true, value: 100 };
+      },
+    },
+  });
+  await tick();
+
+  const job = await prisma.raceResolutionJobV2.findUnique({
+    where: { raceId: race.id },
+  });
+  assert.ok(job, "the boundary must durably enqueue every active race");
+  const cursor = await prisma.globalStepEventBoundaryCursor.findUnique({
+    where: { key: "global" },
+  });
+  assert.equal(cursor?.eventId, event.id);
+  assert.equal(cursor?.boundaryKind, "START");
+  assert.equal(cursor?.boundaryAt.toISOString(), event.startsAt.toISOString());
+  assert.equal(cursor?.leaseToken, null);
+});
+
 test("enabled Home cache is user-isolated, invalidated at end, and progress does not reuse an active boundary", async () => {
   const [{ user: active, token: activeToken }, { user: inactive, token: inactiveToken }] =
     await Promise.all([createTestUser(), createTestUser()]);
