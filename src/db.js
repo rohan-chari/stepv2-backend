@@ -11,9 +11,11 @@ if (!process.env.DATABASE_URL) {
 const dbUrl = process.env.DATABASE_URL;
 const isLocalhost = dbUrl.includes("localhost") || dbUrl.includes("127.0.0.1");
 const {
+  capacityDatabasePoolMax,
   capacityDatabaseSslDisabled,
 } = require("./localCapacitySafety");
 const capacitySslDisabled = capacityDatabaseSslDisabled();
+const databasePoolMax = capacityDatabasePoolMax();
 
 // Strip sslmode from URL to prevent pg from overriding our ssl config
 const connectionString = dbUrl.replace(/[?&]sslmode=[^&]*/g, "");
@@ -26,7 +28,7 @@ pg.defaults.parseInputDatesAsUTC = true;
 
 const pool = new pg.Pool({
   connectionString,
-  max: 20,
+  max: databasePoolMax,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000,
   ...(isLocalhost || capacitySslDisabled
@@ -39,6 +41,7 @@ function getDbPoolPressure() {
     total: pool.totalCount,
     idle: pool.idleCount,
     waiting: pool.waitingCount,
+    max: databasePoolMax,
   };
 }
 

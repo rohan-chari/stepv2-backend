@@ -46,6 +46,7 @@ async function main() {
     databaseHost: safety.database.host,
     databaseName: safety.database.name,
     nodeAppInstance: process.env.NODE_APP_INSTANCE ?? null,
+    databasePoolMax: safety.databasePoolMax,
     commitSha: attestation.commitSha,
     effectiveEnvSha256: attestation.effectiveEnvSha256,
     runtimeFingerprint: attestation.runtimeFingerprint,

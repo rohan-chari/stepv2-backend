@@ -33,6 +33,20 @@ function strictTrue(value) {
   return value === "true" || value === "1";
 }
 
+function capacityDatabasePoolMax(env = process.env) {
+  const productionDefault = 20;
+  if (!strictTrue(env.CAPACITY_MODE)) return productionDefault;
+  const raw = String(env.DB_POOL_MAX || "").trim();
+  if (!raw) return productionDefault;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1 || value > productionDefault) {
+    throw new Error(`DB_POOL_MAX must be an integer from 1 through ${productionDefault} in capacity mode`);
+  }
+  capacityIdentity(env);
+  assertCapacityDatabase(env.DATABASE_URL, env);
+  return value;
+}
+
 function normalizeHostname(hostname) {
   return String(hostname || "")
     .trim()
@@ -339,7 +353,7 @@ function prepareLocalCapacityProcess() {
   process.env.STEP_MILESTONE_REMINDERS_DISABLED = "true";
   process.env.RACE_ENDING_REMINDER_DISABLED = "true";
   const notificationSink = installLocalNotificationSink();
-  return { ...validated, notificationSink };
+  return { ...validated, databasePoolMax: capacityDatabasePoolMax(), notificationSink };
 }
 
 module.exports = {
@@ -351,6 +365,7 @@ module.exports = {
   assertLocalCapacityDatabase,
   assertOutboundDisabled,
   capacityAuthSecret,
+  capacityDatabasePoolMax,
   capacityDatabaseSslDisabled,
   capacityIdentity,
   installLocalNotificationSink,

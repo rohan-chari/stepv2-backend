@@ -30,6 +30,7 @@ const {
   LOOPBACK_HOSTS,
   assertCapacityDatabaseMarker,
   capacityAuthSecret,
+  capacityDatabasePoolMax,
   capacityDatabaseSslDisabled,
   capacityIdentity,
   isPrivateCapacityHost,
@@ -289,7 +290,7 @@ async function inspect() {
           ...validated.database,
           serverAddress: server.serverAddress,
           ...settings.rows[0],
-          applicationPoolPerWorker: 20,
+          applicationPoolPerWorker: capacityDatabasePoolMax(),
           sslMode:
             process.env.CAPACITY_DATABASE_SSL_DISABLED === "true"
               ? "disabled-capacity-only"
