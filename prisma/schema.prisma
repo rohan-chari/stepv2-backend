@@ -1828,6 +1828,11 @@ model RacePowerup {
   rarity        PowerupRarity?
   status        PowerupStatus  @default(HELD)
   earnedAtSteps Int?           @map("earned_at_steps")
+  // Exact provenance for the temporary race row created when an account-wide
+  // inventory item is redeemed. Default false keeps old writers and legacy
+  // rows fail-closed: they can remain HELD, but can never mint an inventory
+  // refund without an explicit redemption stamp.
+  redeemedFromInventory Boolean @default(false) @map("redeemed_from_inventory")
   usedAt        DateTime?      @map("used_at")
   targetUserId  String?        @map("target_user_id")
   upgradeLevel  Int            @default(0) @map("upgrade_level")

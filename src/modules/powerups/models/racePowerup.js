@@ -1,9 +1,27 @@
 const { prisma } = require("../../../db");
 
 const RacePowerup = {
-  async create({ raceId, participantId, userId, type = null, rarity = null, status = "HELD", earnedAtSteps }) {
+  async create({
+    raceId,
+    participantId,
+    userId,
+    type = null,
+    rarity = null,
+    status = "HELD",
+    earnedAtSteps,
+    redeemedFromInventory = false,
+  }) {
     return prisma.racePowerup.create({
-      data: { raceId, participantId, userId, type, rarity, status, earnedAtSteps },
+      data: {
+        raceId,
+        participantId,
+        userId,
+        type,
+        rarity,
+        status,
+        earnedAtSteps,
+        redeemedFromInventory,
+      },
     });
   },
 

@@ -440,10 +440,18 @@ describe("hitchhike / quick rinse — integration", () => {
     const secondBody = await secondRes.json();
     assert.equal(secondBody.code, "QUICK_RINSE_COOLDOWN");
     assert.match(secondBody.error || secondBody.message || "", /once an hour/i);
+    const raceEarnedAfterRejection = await prisma.racePowerup.findUnique({
+      where: { id: second.id },
+    });
     assert.equal(
-      (await prisma.racePowerup.findUnique({ where: { id: second.id } })).status,
+      raceEarnedAfterRejection.status,
       "HELD",
       "the item is retained"
+    );
+    assert.equal(
+      raceEarnedAfterRejection.redeemedFromInventory,
+      false,
+      "a race-earned item is never marked as inventory-redeemed"
     );
 
     // A store item enters the tray only as an intermediate redemption step.
@@ -475,6 +483,11 @@ describe("hitchhike / quick rinse — integration", () => {
     );
     assert.equal(redeemRes.status, 200);
     const redeemed = (await redeemRes.json()).result.powerup;
+    assert.equal(
+      redeemed.redeemedFromInventory,
+      true,
+      "the redeem path stamps exact inventory provenance"
+    );
 
     const redeemedUseRes = await request(
       server.baseUrl,
@@ -542,6 +555,160 @@ describe("hitchhike / quick rinse — integration", () => {
     assert.equal(
       (await prisma.racePowerup.findUnique({ where: { id: second.id } })).status,
       "USED"
+    );
+  });
+
+  it("a concurrent Sneaky Swap transfer cannot refund or discard the thief's item", async () => {
+    const originalOwner = await createUser("RefundRaceOriginal");
+    const thief = await createUser("RefundRaceThief");
+    await makeFriends(originalOwner, thief);
+    const raceId = await createActiveRace(originalOwner, [thief]);
+    const originalParticipant = await participant(raceId, originalOwner.userId);
+    const thiefParticipant = await participant(raceId, thief.userId);
+
+    await prisma.userPowerupItem.create({
+      data: {
+        userId: originalOwner.userId,
+        powerupType: "QUICK_RINSE",
+        quantity: 1,
+      },
+    });
+    const redeemResponse = await request(
+      server.baseUrl,
+      "POST",
+      `/races/${raceId}/powerups/redeem`,
+      {
+        body: { powerupType: "QUICK_RINSE" },
+        token: originalOwner.token,
+        headers: POWERUPS3,
+      }
+    );
+    assert.equal(redeemResponse.status, 200);
+    const redeemed = (await redeemResponse.json()).result.powerup;
+    assert.equal(redeemed.redeemedFromInventory, true);
+
+    let releaseParticipantLock;
+    let markParticipantLocked;
+    const participantLocked = new Promise((resolve) => {
+      markParticipantLocked = resolve;
+    });
+    const holdParticipant = prisma.$transaction(
+      async (tx) => {
+        await tx.$queryRaw`
+          SELECT id
+          FROM race_participants
+          WHERE id = ${originalParticipant.id}
+          FOR UPDATE
+        `;
+        markParticipantLocked();
+        await new Promise((resolve) => {
+          releaseParticipantLock = resolve;
+        });
+      },
+      { timeout: 15_000 }
+    );
+    await participantLocked;
+
+    // The public request locks race -> item -> participants. Holding the final
+    // participant lock pins it after it owns the item row but before the
+    // NO_TIMED_DEBUFFS rejection rolls its transaction back.
+    const rejectedUse = request(
+      server.baseUrl,
+      "POST",
+      `/races/${raceId}/powerups/${redeemed.id}/use`,
+      { token: originalOwner.token, headers: POWERUPS3 }
+    );
+    const useFinishedBeforeTransferQueued = await Promise.race([
+      rejectedUse.then(() => true),
+      new Promise((resolve) => setTimeout(() => resolve(false), 100)),
+    ]);
+    assert.equal(
+      useFinishedBeforeTransferQueued,
+      false,
+      "the public use is pinned on the participant lock"
+    );
+
+    let markTransferred;
+    let releaseTransfer;
+    const transferred = new Promise((resolve) => {
+      markTransferred = resolve;
+    });
+    const keepTransferOpen = new Promise((resolve) => {
+      releaseTransfer = resolve;
+    });
+    const transfer = prisma.$transaction(
+      async (tx) => {
+        // Exact ownership mutation used by stealRandomHeldPowerup. This queues
+        // behind the public use's item lock, then wins before the refund claim.
+        const moved = await tx.racePowerup.updateMany({
+          where: {
+            id: redeemed.id,
+            participantId: originalParticipant.id,
+            status: "HELD",
+          },
+          data: {
+            participantId: thiefParticipant.id,
+            userId: thief.userId,
+            earnedAtSteps: null,
+          },
+        });
+        assert.equal(moved.count, 1);
+        markTransferred();
+        await keepTransferOpen;
+      },
+      { timeout: 15_000 }
+    );
+
+    const transferredBeforeUseReleased = await Promise.race([
+      transferred.then(() => true),
+      new Promise((resolve) => setTimeout(() => resolve(false), 100)),
+    ]);
+    assert.equal(
+      transferredBeforeUseReleased,
+      false,
+      "the transfer is queued behind the public use's item lock"
+    );
+
+    releaseParticipantLock();
+    await holdParticipant;
+    await transferred;
+
+    // While the transfer is uncommitted, the refund pre-read sees the old
+    // committed owner and its subsequent conditional claim queues on this row.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const useFinishedBeforeTransferCommit = await Promise.race([
+      rejectedUse.then(() => true),
+      new Promise((resolve) => setTimeout(() => resolve(false), 50)),
+    ]);
+    assert.equal(useFinishedBeforeTransferCommit, false);
+
+    releaseTransfer();
+    await transfer;
+    const rejectedResponse = await rejectedUse;
+    assert.equal(rejectedResponse.status, 409);
+    assert.equal((await rejectedResponse.json()).code, "NO_TIMED_DEBUFFS");
+
+    const after = await prisma.racePowerup.findUnique({
+      where: { id: redeemed.id },
+    });
+    assert.equal(after.status, "HELD", "the thief keeps the transferred item");
+    assert.equal(after.userId, thief.userId);
+    assert.equal(after.participantId, thiefParticipant.id);
+    assert.equal(after.type, "QUICK_RINSE");
+    assert.equal(after.redeemedFromInventory, true);
+    assert.equal(
+      (
+        await prisma.userPowerupItem.findUnique({
+          where: {
+            userId_powerupType: {
+              userId: originalOwner.userId,
+              powerupType: "QUICK_RINSE",
+            },
+          },
+        })
+      ).quantity,
+      0,
+      "the stale original owner receives no inventory credit"
     );
   });
 

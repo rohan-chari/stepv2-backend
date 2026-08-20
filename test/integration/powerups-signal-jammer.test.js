@@ -289,7 +289,7 @@ describe("signal jammer — integration", () => {
 
   // ── 4. Jam blocks USE (earned + store types) ──────────────────────────
   describe("jam blocks using powerups", () => {
-    it("a jammed target cannot use any held powerup (earned or store), and it stays HELD", async () => {
+    it("a jammed target keeps an earned item HELD and gets a redeemed item back in inventory", async () => {
       await seedStoreCatalog();
       const alice = await createUser("Jammer1", 200);
       const bob = await createUser("Jammed1", 200);
@@ -315,14 +315,28 @@ describe("signal jammer — integration", () => {
       assert.match((await earnedRes.json()).error, /jam/i);
       assert.equal((await prisma.racePowerup.findUnique({ where: { id: earned.id } })).status, "HELD");
 
-      // Bob tries store powerup → 409, stays HELD.
+      // Bob tries store powerup → 409, leaves the race and returns to stash.
       const storeRes = await usePowerup(bob.token, raceId, storePowerupId, {
         targetUserId: alice.userId,
       });
       assert.equal(storeRes.status, 409);
       assert.equal(
         (await prisma.racePowerup.findUnique({ where: { id: storePowerupId } })).status,
-        "HELD"
+        "DISCARDED"
+      );
+      assert.equal(
+        (
+          await prisma.userPowerupItem.findUnique({
+            where: {
+              userId_powerupType: {
+                userId: bob.userId,
+                powerupType: "RAINSTORM",
+              },
+            },
+          })
+        ).quantity,
+        1,
+        "the rejected redeemed Rainstorm is not consumed"
       );
 
       // No IMPOSTER/effects were created by the blocked attempts.
@@ -391,19 +405,33 @@ describe("signal jammer — integration", () => {
       const aliceJammerId = (await aliceRedeem.json()).result.powerup.id;
       await usePowerup(alice.token, raceId, aliceJammerId, { targetUserId: bob.userId });
 
-      // Bob (jammed) tries to jam Carol → 409, his jammer stays HELD.
+      // Bob (jammed) tries to jam Carol → 409, his redeemed jammer returns to
+      // the account-wide stash.
       const res = await usePowerup(bob.token, raceId, bobJammerId, { targetUserId: carol.userId });
       assert.equal(res.status, 409);
       assert.equal(
         (await prisma.racePowerup.findUnique({ where: { id: bobJammerId } })).status,
-        "HELD"
+        "DISCARDED"
+      );
+      assert.equal(
+        (
+          await prisma.userPowerupItem.findUnique({
+            where: {
+              userId_powerupType: {
+                userId: bob.userId,
+                powerupType: "SIGNAL_JAMMER",
+              },
+            },
+          })
+        ).quantity,
+        1
       );
     });
   });
 
   // ── 7. No stacking ─────────────────────────────────────────────────────
   describe("no stacking", () => {
-    it("a second jammer on an already-jammed target is rejected and stays HELD", async () => {
+    it("a second redeemed jammer on an already-jammed target returns to inventory", async () => {
       await seedStoreCatalog();
       const alice = await createUser("Jammer4", 300);
       const bob = await createUser("Jammed4");
@@ -423,8 +451,22 @@ describe("signal jammer — integration", () => {
       const second = await usePowerup(alice.token, raceId, jam2, { targetUserId: bob.userId });
       assert.equal(second.status, 409);
       assert.match((await second.json()).error, /already jammed/i);
-      // Attacker's second jammer NOT consumed.
-      assert.equal((await prisma.racePowerup.findUnique({ where: { id: jam2 } })).status, "HELD");
+      // Attacker's second jammer is not consumed: it exits the race and returns
+      // to the global stash.
+      assert.equal((await prisma.racePowerup.findUnique({ where: { id: jam2 } })).status, "DISCARDED");
+      assert.equal(
+        (
+          await prisma.userPowerupItem.findUnique({
+            where: {
+              userId_powerupType: {
+                userId: alice.userId,
+                powerupType: "SIGNAL_JAMMER",
+              },
+            },
+          })
+        ).quantity,
+        1
+      );
 
       // Only one active jammer effect exists.
       const effects = await prisma.raceActiveEffect.findMany({

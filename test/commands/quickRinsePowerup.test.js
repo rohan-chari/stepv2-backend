@@ -249,8 +249,8 @@ test("QUICK_RINSE is rejected 409 QUICK_RINSE_COOLDOWN within an hour of the las
       err instanceof PowerupUseError &&
       err.statusCode === 409 &&
       err.code === "QUICK_RINSE_COOLDOWN" &&
-      // Transient guard: a REDEEMED item stays in the race rather than being
-      // refunded to the general inventory.
+      // The pure core marks this as transient. The production wrapper uses
+      // exact redemption provenance to decide between HELD and stash refund.
       err.retainHeld === true &&
       /12 minutes/.test(err.message)
   );

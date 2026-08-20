@@ -142,6 +142,9 @@ function buildRedeemPowerupToRace(deps = {}) {
       // Redeemed powerups are not milestone-bound; leave earnedAtSteps null so
       // they don't collide with the (participant, earnedAtSteps) unique index.
       earnedAtSteps: null,
+      // Exact, immutable provenance for rejection refunds. The old null/null
+      // heuristic also matched crafted/legacy race-earned rows.
+      redeemedFromInventory: true,
     });
 
     return { powerup };

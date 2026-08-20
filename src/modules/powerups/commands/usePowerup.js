@@ -386,15 +386,10 @@ class PowerupUseError extends Error {
     if (statusCode) this.statusCode = statusCode;
     // Optional machine-readable code (INVALID_TARGET). Additive.
     if (code) this.code = code;
-    // Item 12 scope: when true, a rejected REDEEMED powerup is NOT refunded to
-    // the general inventory — it stays HELD in the race. Used for TRANSIENT
-    // "not right now / already-active" guards (a jammed caster, your own storm
-    // already active, a target already jammed), where the powerup is still
-    // legitimately usable in THIS race once the condition clears. This
-    // specifically preserves the owner-confirmed jam design (2026-07-21 B3:
-    // jammed players keep their powerup). Genuine "can't be used here"
-    // rejections (TARGET_STEALTHED, invalid target, Red-Card-while-leading,
-    // capability gates) leave it false, so item 12 hands the item back.
+    // Core signal for transient "not right now / already-active" guards. A
+    // race-earned item remains HELD. The outer production wrapper separately
+    // returns an explicitly inventory-redeemed item to the global stash even
+    // when this signal is true.
     if (options && options.retainHeld) this.retainHeld = true;
   }
 }
@@ -845,11 +840,12 @@ async function applyPotionEnemyAttack(a) {
 // Item 12 (BUG): return a REJECTED redeemed powerup to the general inventory
 // instead of stranding it HELD in this race. Called only after usePowerup throws
 // a PowerupUseError — which always happens BEFORE the item is marked USED, so
-// the row is still HELD here. Refunds only REDEEMED powerups (rarity == null &&
-// earnedAtSteps == null, per redeemPowerupToRace.js) — box-earned ones (rarity
-// != null) are legitimately race-bound and stay HELD. Atomic + conditional on
-// still-HELD so a concurrent consume can never double-refund. Best-effort at the
-// call site: a refund failure must never mask the original rejection.
+// the row is still HELD here. Refunds only rows carrying the explicit immutable
+// inventory-redemption stamp; inferred null-field provenance is unsafe because
+// crafted and legacy race-earned rows can have the same shape. Atomic +
+// conditional on still-HELD so a concurrent consume can never double-refund.
+// Best-effort at the call site: a refund failure must never mask the original
+// rejection.
 async function refundRedeemedOnRejection({
   db,
   powerupModel,
@@ -862,13 +858,23 @@ async function refundRedeemedOnRejection({
   if (!powerup) return;
   if (powerup.userId !== userId || powerup.raceId !== raceId) return;
   if (powerup.status !== "HELD") return;
-  const isRedeemed = powerup.rarity == null && powerup.earnedAtSteps == null;
-  if (!isRedeemed) return;
+  if (powerup.redeemedFromInventory !== true) return;
 
   await db.$transaction(async (tx) => {
     // Only the caller that flips HELD -> DISCARDED performs the hand-back.
     const discarded = await tx.racePowerup.updateMany({
-      where: { id: powerupId, status: "HELD" },
+      // Revalidate the full pre-read tuple atomically. Sneaky Swap can transfer
+      // a HELD redeemed row between the read above and this claim; matching only
+      // id/status would discard the thief's item and credit the stale owner.
+      where: {
+        id: powerupId,
+        status: "HELD",
+        userId,
+        raceId,
+        participantId: powerup.participantId,
+        type: powerup.type,
+        redeemedFromInventory: true,
+      },
       data: { status: "DISCARDED" },
     });
     if (discarded.count !== 1) return;
