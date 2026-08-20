@@ -62,12 +62,14 @@ const {
   startCapacityPhase,
 } = require("../../../shared/observability/capacityPhaseMetrics");
 const {
-  processActiveRaceImpacts: defaultProcessActiveRaceImpacts,
-} = require("../services/processActiveRaceImpacts");
+  impactDescription,
+} = require("../models/raceImpactEvent");
 const {
-  readActiveImpactRolloutFence,
-  sourceResolvedUnderFence,
-} = require("../../../shared/config/activeImpactRolloutFence");
+  prorateSamplesIntoWindow,
+} = require("../../steps/models/stepSample");
+const {
+  shouldResolveUmbrellaImpacts,
+} = require("./resolvedImpactBoundaryScheduler");
 
 const POLL_INTERVAL_MS = 250;
 const QUEUE_LAG_LOG_INTERVAL_MS = 60 * 1000;
@@ -80,118 +82,127 @@ const ADAPTIVE_DRAIN_SLICE_JOBS = 16;
 const ADAPTIVE_DRAIN_ERROR_BACKOFF_MS = 1000;
 const TARGETED_CLAIM_DISABLED = Symbol("TARGETED_CLAIM_DISABLED");
 
-async function persistExactActiveImpactWork({ tx, raceId, result, fence }) {
+async function persistResolvedImpactEventsV2({ tx, raceId, result }) {
   const capture = result?.activeImpactCapture || {};
   const impacts = [
+    ...(capture.timedImpacts || []),
     ...(capture.trailMineImpacts || []),
     ...(capture.drillSergeantImpacts || []),
-  ].filter((impact) => impact?.effectId && impact?.userId);
-  if (impacts.length === 0) return;
+  ].filter((impact) =>
+    impact?.effectId &&
+    impact?.userId &&
+    Number.isInteger(impact.deltaSteps) &&
+    impact.deltaSteps !== 0
+  );
+  if (impacts.length === 0) return { sourceCount: 0, insertedCount: 0 };
+  const unique = new Map();
   for (const impact of impacts) {
-    const eligible = sourceResolvedUnderFence(
-      fence,
-      impact.resolvedAt || capture.asOf,
-    );
-    if (!eligible) {
-      await tx.$executeRawUnsafe(
-        `UPDATE race_active_effects
-            SET metadata = COALESCE(metadata, '{}'::jsonb)
-              || '{"activeImpactResolutionSkippedVersion":1}'::jsonb
-          WHERE id = $1`,
-        impact.effectId
-      );
-      continue;
-    }
-    await tx.activeRaceImpactWork.upsert({
-      where: {
-        raceId_recipientUserId_sourceKind_sourceId_calculationVersion: {
-          raceId,
-          recipientUserId: impact.userId,
-          sourceKind: "ACTIVE_EFFECT",
-          sourceId: impact.effectId,
-          calculationVersion: 1,
-        },
-      },
-      update: {},
-      create: {
-        raceId,
-        recipientUserId: impact.userId,
-        sourceKind: "ACTIVE_EFFECT",
-        sourceId: impact.effectId,
-        powerupType: impact.powerupType,
-        status: "PENDING",
-        resolvedAt: new Date(impact.resolvedAt || capture.asOf),
-        capturedDeltaSteps: Math.round(Number(impact.deltaSteps) || 0),
-        calculationVersion: 1,
-      },
-    });
+    const key = `${impact.userId}:${impact.effectId}`;
+    if (!unique.has(key)) unique.set(key, impact);
   }
+  const resultWrite = await tx.raceImpactEvent.createMany({
+    data: [...unique.values()].map((impact) => ({
+      raceId,
+      recipientUserId: impact.userId,
+      sourceKind: "ACTIVE_EFFECT",
+      sourceId: impact.effectId,
+      sourceFeedEventId: impact.sourceFeedEventId || null,
+      powerupType: impact.powerupType,
+      deltaSteps: impact.deltaSteps,
+      description: impactDescription(impact.powerupType, impact.deltaSteps),
+      valueStatus: "SYNCED_SNAPSHOT",
+      calculationVersion: 2,
+      resolvedAt: new Date(impact.resolvedAt || capture.asOf),
+    })),
+    skipDuplicates: true,
+  });
+  return { sourceCount: unique.size, insertedCount: resultWrite.count };
 }
 
-async function persistExactActiveImpactWorkBulk({ tx, raceId, result, fence }) {
-  const capture = result?.activeImpactCapture || {};
-  const impacts = [
-    ...(capture.trailMineImpacts || []),
-    ...(capture.drillSergeantImpacts || []),
-  ].filter((impact) => impact?.effectId && impact?.userId);
-  if (impacts.length === 0) return;
-
-  const skippedEffectIds = new Set();
-  const eligibleByKey = new Map();
-  for (const impact of impacts) {
-    if (!sourceResolvedUnderFence(fence, impact.resolvedAt || capture.asOf)) {
-      skippedEffectIds.add(impact.effectId);
-      continue;
-    }
-    const key = `${impact.userId}:${impact.effectId}`;
-    // Match the existing ordered upsert loop: the first duplicate source wins
-    // and every later duplicate is an ON CONFLICT no-op.
-    if (!eligibleByKey.has(key)) {
-      eligibleByKey.set(key, {
-        recipientUserId: impact.userId,
-        sourceId: impact.effectId,
-        powerupType: impact.powerupType,
-        resolvedAt: new Date(impact.resolvedAt || capture.asOf).toISOString(),
-        capturedDeltaSteps: Math.round(Number(impact.deltaSteps) || 0),
+async function resolveDueUmbrellaInterceptionsV2({
+  tx,
+  raceId,
+  currentTime,
+  limit = 8,
+}) {
+  const due = await tx.raceUmbrellaInterception.findMany({
+    where: {
+      raceId,
+      status: "PENDING",
+      resolvesAt: { lte: currentTime },
+    },
+    orderBy: [{ resolvesAt: "asc" }, { id: "asc" }],
+    take: limit + 1,
+  });
+  const selected = due.slice(0, limit);
+  const race = await tx.race.findUnique({
+    where: { id: raceId },
+    select: { status: true, endsAt: true },
+  });
+  const pastDeadline = race?.endsAt && new Date(race.endsAt) <= currentTime;
+  if (!race || race.status !== "ACTIVE" || pastDeadline) {
+    if (selected.length > 0) {
+      await tx.raceUmbrellaInterception.updateMany({
+        where: { id: { in: selected.map((source) => source.id) }, status: "PENDING" },
+        data: { status: "RESOLVED", resolvedAt: currentTime },
       });
     }
+    return {
+      sourceCount: selected.length,
+      insertedCount: 0,
+      hasMore: due.length > limit,
+    };
   }
-
-  if (skippedEffectIds.size > 0) {
-    await tx.$executeRawUnsafe(
-      `UPDATE race_active_effects
-          SET metadata = COALESCE(metadata, '{}'::jsonb)
-            || '{"activeImpactResolutionSkippedVersion":1}'::jsonb
-        WHERE id = ANY($1::text[])`,
-      [...skippedEffectIds]
+  let insertedCount = 0;
+  for (const source of selected) {
+    const samples = await tx.$queryRawUnsafe(
+      `SELECT period_start AS "start", period_end AS "end", steps
+         FROM step_samples
+        WHERE user_id = $1
+          AND period_end > $2::timestamp
+          AND period_start < $3::timestamp
+          AND period_end <= $4::timestamp`,
+      source.recipientUserId,
+      source.windowStart.toISOString(),
+      source.resolvesAt.toISOString(),
+      currentTime.toISOString(),
     );
+    const walked = prorateSamplesIntoWindow(
+      samples,
+      source.windowStart.getTime(),
+      source.resolvesAt.getTime(),
+    );
+    const deltaSteps = walked - Math.round(
+      walked * Number(source.avoidedMultiplier),
+    );
+    if (deltaSteps !== 0) {
+      const created = await tx.raceImpactEvent.createMany({
+        data: [{
+          raceId,
+          recipientUserId: source.recipientUserId,
+          sourceKind: "UMBRELLA_INTERCEPTION",
+          sourceId: source.id,
+          powerupType: "UMBRELLA",
+          deltaSteps,
+          description: impactDescription("UMBRELLA", deltaSteps),
+          valueStatus: "SYNCED_SNAPSHOT",
+          calculationVersion: 2,
+          resolvedAt: source.resolvesAt,
+        }],
+        skipDuplicates: true,
+      });
+      insertedCount += created.count;
+    }
+    await tx.raceUmbrellaInterception.updateMany({
+      where: { id: source.id, status: "PENDING" },
+      data: { status: "RESOLVED", resolvedAt: currentTime },
+    });
   }
-
-  const rows = [...eligibleByKey.values()];
-  if (rows.length === 0) return;
-  await tx.$executeRawUnsafe(
-    `INSERT INTO active_race_impact_work (
-       id, race_id, recipient_user_id, source_kind, source_id, powerup_type,
-       status, resolved_at, captured_delta_steps, calculation_version,
-       created_at, updated_at
-     )
-     SELECT gen_random_uuid()::text, $1, input."recipientUserId",
-            'ACTIVE_EFFECT', input."sourceId", input."powerupType", 'PENDING',
-            input."resolvedAt", input."capturedDeltaSteps", 1,
-            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-       FROM jsonb_to_recordset($2::jsonb) AS input(
-         "recipientUserId" text,
-         "sourceId" text,
-         "powerupType" text,
-         "resolvedAt" timestamp,
-         "capturedDeltaSteps" integer
-       )
-     ON CONFLICT (
-       race_id, recipient_user_id, source_kind, source_id, calculation_version
-     ) DO NOTHING`,
-    raceId,
-    JSON.stringify(rows)
-  );
+  return {
+    sourceCount: selected.length,
+    insertedCount,
+    hasMore: due.length > limit,
+  };
 }
 
 function dependencyClosureRaceBucket(raceId) {
@@ -233,6 +244,12 @@ const RACE_RESOLUTION_COMPUTE_PHASES = Object.freeze([
   "participantScoring",
   "hitchhikeCopies",
   "leechAndCapture",
+  // Keep the aggregate key stable while exposing the two attribution
+  // subphases. A resolver may emit all three; additive timing fields never
+  // select behavior.
+  "activeImpactAttribution",
+  "activeTimedImpactAttribution",
+  "activeDefenseImpactAttribution",
   "activeEffects",
   "trailMines",
 ]);
@@ -259,6 +276,12 @@ function addPhaseTiming(totals, name, durationMs) {
   if (!Object.hasOwn(totals, name)) return;
   const duration = Number(durationMs);
   if (Number.isFinite(duration)) totals[name] += Math.max(0, duration);
+}
+
+function addPhaseCount(totals, name, count) {
+  if (!Object.hasOwn(totals, name)) return;
+  const numeric = Number(count);
+  if (Number.isFinite(numeric)) totals[name] += Math.max(0, Math.trunc(numeric));
 }
 
 function createRaceResolutionPhaseTimer(monotonicNow = process.hrtime.bigint) {
@@ -627,8 +650,6 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
     dependencies.stepSyncScopeMatchesFence || defaultStepSyncScopeMatchesFence;
   const deliveryIntents =
     dependencies.raceResolutionDeliveryIntents || defaultDeliveryIntents;
-  const processActiveRaceImpacts =
-    dependencies.processActiveRaceImpacts || defaultProcessActiveRaceImpacts;
   // Phase 2b shadow seam. Injectable so a test can assert the planner is NEVER
   // called with the flag off, and can force a planner failure.
   const buildDependencyClosure =
@@ -949,6 +970,11 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
       : [];
     const orderedTriggeringUserIds = [...new Set(triggeringUserIds)].sort();
     const computePhaseMs = emptyPhaseTotals(RACE_RESOLUTION_COMPUTE_PHASES);
+    const computePhaseQueryCaptureEnabled =
+      process.env.PRISMA_QUERY_EVENTS_ENABLED === "true";
+    const computePhaseQueryCount = computePhaseQueryCaptureEnabled
+      ? emptyPhaseTotals(RACE_RESOLUTION_COMPUTE_PHASES)
+      : null;
     const nudgePhaseMs = emptyPhaseTotals(RACE_RESOLUTION_NUDGE_PHASES);
     const postHandoffPhaseMs = emptyPhaseTotals(RACE_RESOLUTION_HANDOFF_PHASES);
     const stepSyncScopePhaseMs = { activeEffects: 0, raceHydration: 0 };
@@ -985,31 +1011,13 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
       // Aggregate count only — how many times a closure was turned away at the
       // fence for this claim. Never an id, a total, or a reason string.
       let closureCommittedRejections = 0;
-      const activeImpactEnabled = await phaseTimer.measure(
-        "planSettings",
-        () => isStrictFlagEnabled(settings, "apiActiveImpactNoticesV1Enabled")
-      );
-      const pendingImpactOnlyEnabled = await phaseTimer.measure(
-        "planSettings",
-        () => isStrictFlagEnabled(
-          settings,
-          "raceResolutionPendingImpactOnlyV1Enabled"
-        )
-      );
-      const narrowDefenseQueryEnabled = await phaseTimer.measure(
-        "planSettings",
-        () => isStrictFlagEnabled(
-          settings,
-          "raceResolutionNarrowDefenseQueryV1Enabled"
-        )
-      );
-      const activeImpactBulkPersistEnabled = await phaseTimer.measure(
-        "planSettings",
-        () => isStrictFlagEnabled(
-          settings,
-          "raceResolutionActiveImpactBulkPersistV1Enabled"
-        )
-      );
+      let activeImpactPersistMs = 0;
+      // Source discovery is boundary work, never ordinary score-generation
+      // work. STEP_SYNC/FULL/POWERUP_MUTATION runs may still score active
+      // effects authoritatively, but they must perform zero v2 materialization
+      // reads unless a real time/source boundary was coalesced into the claim.
+      const resolveTimedActiveImpacts =
+        job.processingDirtyReasons?.includes("EFFECT_BOUNDARY") === true;
       let activeImpactMetrics = {
         created: 0,
         zero: 0,
@@ -1118,11 +1126,18 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
               RaceActiveEffect: capture.effects,
               RacePowerupEvent: capture.events,
               now,
-              activeImpactEnabled,
-              pendingImpactOnlyEnabled,
-              narrowDefenseQueryEnabled,
+              activeImpactEnabled: resolveTimedActiveImpacts,
+              ...(dependencies.prefetchRaceScoringModels
+                ? { prefetchRaceScoringModels: dependencies.prefetchRaceScoringModels }
+                : {}),
               recordPhaseTiming: (name, durationMs) =>
                 addPhaseTiming(computePhaseMs, name, durationMs),
+              ...(computePhaseQueryCaptureEnabled
+                ? {
+                    recordPhaseQueryCount: (name, count) =>
+                      addPhaseCount(computePhaseQueryCount, name, count),
+                  }
+                : {}),
             });
             const processed = await phaseTimer.measure(
               "compute",
@@ -1138,6 +1153,11 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
                   : {}),
               })
             );
+            if (computePhaseQueryCount) {
+              computePhaseQueryCount.activeImpactAttribution =
+                computePhaseQueryCount.activeTimedImpactAttribution +
+                computePhaseQueryCount.activeDefenseImpactAttribution;
+            }
             result = Array.isArray(processed) ? processed[0] : null;
             computeMs += Math.max(0, Date.now() - computeStartedAt);
             // Only after a result actually came back: a null result means the
@@ -1364,59 +1384,36 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           }
         });
 
-        // Exact consequence sources are part of the authoritative C0 commit,
-        // outside the presentation savepoint. If this durable insert fails the
-        // detonation/judgement rolls back and the next generation safely
-        // replays it; if only materialization fails the PENDING source survives.
-        const activeImpactCommitFence = await readActiveImpactRolloutFence(tx);
-        await (activeImpactBulkPersistEnabled
-          ? persistExactActiveImpactWorkBulk
-          : persistExactActiveImpactWork)({
+        // V2 consequence events are part of the authoritative C0 commit. The
+        // source transition, shared feed row, score consequence, and private
+        // event therefore roll back and retry as one unit.
+        const activeImpactPersistStartedAt = process.hrtime.bigint();
+        let impactContinuationNeeded = false;
+        let umbrellaContinuationNeeded = false;
+        try {
+          const persisted = await persistResolvedImpactEventsV2({
             tx,
             raceId: job.raceId,
             result,
-            fence: activeImpactCommitFence,
           });
-
-        // Active-impact presentation work shares the C0 fence but is isolated
-        // behind a savepoint: a notification calculation/write failure leaves
-        // its durable source retryable and can never roll back authoritative
-        // participant totals or the race-resolution generation.
-        if (activeImpactCommitFence.enabled) {
-          const impactStartedAt = Date.now();
-          await tx.$executeRawUnsafe("SAVEPOINT active_impact_materialization");
-          try {
-            activeImpactMetrics = {
-              ...activeImpactMetrics,
-              ...(await processActiveRaceImpacts({
+          activeImpactMetrics.created += persisted.insertedCount;
+          const umbrella = shouldResolveUmbrellaImpacts(job)
+            ? await resolveDueUmbrellaInterceptionsV2({
                 tx,
                 raceId: job.raceId,
-                generation: job.processingGeneration,
-                result,
-                enabled: true,
-                rolloutFence: activeImpactCommitFence,
-                narrowSourceQuery: narrowDefenseQueryEnabled,
-                bulkWorkCreate: activeImpactBulkPersistEnabled,
-                // Cheap committed STEP_SYNC generations intentionally omit a
-                // display capture. Their immutable direct-event sources can
-                // still be claimed against this worker's captured claim time;
-                // timed/defense sources remain PENDING until a full capture.
-                generationAsOf: currentTime,
-              })),
-            };
-            await tx.$executeRawUnsafe("RELEASE SAVEPOINT active_impact_materialization");
-          } catch (error) {
-            await tx.$executeRawUnsafe("ROLLBACK TO SAVEPOINT active_impact_materialization");
-            await tx.$executeRawUnsafe("RELEASE SAVEPOINT active_impact_materialization");
-            activeImpactMetrics.failures += 1;
-            logger.error(JSON.stringify({
-              event: "active_race_impact_materialization",
-              outcome: "retryable_failure",
-              errorCode: error?.code || "MATERIALIZATION_ERROR",
-            }));
-          } finally {
-            activeImpactMetrics.durationMs = Math.max(0, Date.now() - impactStartedAt);
-          }
+                currentTime,
+              })
+            : { sourceCount: 0, insertedCount: 0, hasMore: false };
+          activeImpactMetrics.created += umbrella.insertedCount;
+          umbrellaContinuationNeeded = umbrella.hasMore;
+          impactContinuationNeeded =
+            umbrella.hasMore ||
+            result?.activeImpactCapture?.hasMoreTimedSources === true;
+        } finally {
+          activeImpactPersistMs += Math.max(
+            0,
+            Number(process.hrtime.bigint() - activeImpactPersistStartedAt) / 1e6
+          );
         }
 
         // (iii) job row
@@ -1428,11 +1425,25 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
               leaseToken: job.leaseToken,
               processingGeneration: job.processingGeneration,
               now: now(),
+              ...(impactContinuationNeeded ? { debounceMs: 0 } : {}),
             },
             tx
           )
         );
         if (!outcome.applied) throw new FenceLostError();
+        if (impactContinuationNeeded) {
+          await jobModel.enqueue({
+            raceId: job.raceId,
+            now: now(),
+            dirtyEnvelope: {
+              reason: "EFFECT_BOUNDARY",
+              dirtyUserIds: [],
+              dirtyParticipantIds: [],
+              powerupTypes: umbrellaContinuationNeeded ? ["UMBRELLA"] : [],
+              priority: "IMMEDIATE",
+            },
+          }, tx);
+        }
         superseded = outcome.superseded;
         },
       // Only short writes run inside the fence (the expensive replay already
@@ -1480,6 +1491,8 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           durationMs: Math.max(0, Date.now() - startMs),
           phaseMs: phaseTimer.snapshot(),
           computePhaseMs,
+          computePhaseQueryCaptureEnabled,
+          computePhaseQueryCount,
           nudgePhaseMs,
           postHandoffPhaseMs,
           stepSyncScopeOutcome,
@@ -1531,6 +1544,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
             job,
             result,
             superseded,
+            deferEffectExpiry: !resolveTimedActiveImpacts,
             deferSnapshot: postTasksEnabled,
             deferDelivery: postTasksEnabled,
           });
@@ -1701,6 +1715,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         activeImpactSuppressed: activeImpactMetrics?.suppressed || 0,
         activeImpactFailures: activeImpactMetrics?.failures || 0,
         activeImpactMs: activeImpactMetrics?.durationMs || 0,
+        activeImpactPersistMs,
         computeMs,
         writeMs,
         postTaskMs: Math.max(0, Date.now() - postStartedAt),
@@ -1722,6 +1737,8 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         sqlCount: typeof dependencies.sqlCount === "function" ? dependencies.sqlCount() : null,
         phaseMs: phaseTimer.snapshot(),
         computePhaseMs,
+        computePhaseQueryCaptureEnabled,
+        computePhaseQueryCount,
         nudgePhaseMs,
         postHandoffPhaseMs,
         stepSyncScopeOutcome,
@@ -1739,6 +1756,8 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           reasonClasses: job.processingDirtyReasons || ["FULL"],
           phaseMs: phaseTimer.snapshot(),
           computePhaseMs,
+          computePhaseQueryCaptureEnabled,
+          computePhaseQueryCount,
           nudgePhaseMs,
           postHandoffPhaseMs,
           stepSyncScopeOutcome,
@@ -1754,6 +1773,8 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         errorCode: error?.code || "WORKER_ERROR",
         phaseMs: phaseTimer.snapshot(),
         computePhaseMs,
+        computePhaseQueryCaptureEnabled,
+        computePhaseQueryCount,
         nudgePhaseMs,
         postHandoffPhaseMs,
         stepSyncScopeOutcome,

@@ -43,6 +43,9 @@ test("POST /auth/apple returns a sessionToken alongside user", async () => {
         email: payload.email,
       };
     },
+    // Unit isolation: the default contract is asserted here, independent of a
+    // developer/test database that may intentionally have a remote flag row.
+    appSettings: { async getFlag() { return false; } },
   });
 
   try {

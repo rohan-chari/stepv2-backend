@@ -4,11 +4,11 @@ const { Steps } = require("../../steps/models/steps");
 const { StepSample } = require("../../steps/models/stepSample");
 const { RaceActiveEffect } = require("../../powerups/models/raceActiveEffect");
 const { RacePowerupEvent } = require("../../powerups/models/racePowerupEvent");
-const { ActiveRaceImpact } = require("../models/activeRaceImpact");
 const { GlobalStepEvent } = require("../../steps/models/globalStepEvent");
 const { eventsForUser } = require("../../steps/services/globalStepEventEntitlement");
 const {
   computeEffectModifiers,
+  createIncrementalEffectScoreCapture,
   signedMultiplierForEffects,
   umbrellaAdjustedRainstorms,
 } = require("./effectiveStepScoring");
@@ -26,10 +26,15 @@ const {
 const { calculateSubsequentSteps } = require("../raceSteps");
 const { computeBoxEffectiveSteps } = require("../../powerups/boxSteps");
 const { raceTimeZone } = require("../raceTimeZone");
-const { applyLeechTransfers } = require("../../powerups/leechTransfers");
+const {
+  applyLeechTransfers,
+  computeLeechEarnedTransfer,
+  createIncrementalLeechTransferState,
+} = require("../../powerups/leechTransfers");
 const {
   collectRaceHitchhikeCopies,
   applyHitchhikeCopies,
+  createIncrementalHitchhikeCopyCapture,
 } = require("../../powerups/hitchhikeCopies");
 const { nextRawSteps } = require("../../powerups/rawPosition");
 const {
@@ -40,8 +45,14 @@ const {
   prefetchRaceScoringModels: defaultPrefetchRaceScoringModels,
 } = require("./raceScoringPrefetch");
 const {
-  computeSettlementAttributionVector,
+  computeSelectedPrefixAttributionVector,
 } = require("./raceSettlementAttribution");
+const {
+  runWithPhaseQueryCounter,
+} = require("../../../shared/http/requestQueryCounter");
+const {
+  SNAPSHOT_AT_EXPIRY_TYPES,
+} = require("../../powerups/constants/expiryEffectTypes");
 
 const ACTIVE_NOTICE_TIMED_TYPES = new Set([
   "LEG_CRAMP",
@@ -54,6 +65,8 @@ const ACTIVE_NOTICE_TIMED_TYPES = new Set([
   "RALLY_FLAG",
   "COIN_FLIP",
   "GHOST_PEPPER",
+  "LEECH",
+  "HITCHHIKE",
 ]);
 
 // Every effect type that calculateCurrentTotal folds into a participant's
@@ -604,16 +617,8 @@ async function triggerTrailMines({
 
     await raceActiveEffectModel.update(mine.id, {
       status: "EXPIRED",
-      ...(activeImpactEnabled === undefined ? {} : {
-        metadata: {
-          ...(mine.metadata || {}),
-          ...(!activeImpactEnabled
-            ? { activeImpactResolutionSkippedVersion: 1 }
-            : {}),
-        },
-      }),
     });
-    await powerupEventModel.create({
+    const sourceFeedEvent = await powerupEventModel.create({
       raceId,
       actorUserId: mine.sourceUserId,
       eventType: shield ? "POWERUP_BLOCKED" : "POWERUP_USED",
@@ -636,6 +641,7 @@ async function triggerTrailMines({
       powerupType: "TRAIL_MINE",
       deltaSteps: shield ? 0 : -penalty,
       resolvedAt,
+      sourceFeedEventId: sourceFeedEvent?.id || null,
     });
   }
   return impacts;
@@ -708,19 +714,9 @@ async function judgeDrillSergeantEffects({
     }
     await raceActiveEffectModel.update(effect.id, {
       status: "EXPIRED",
-      metadata: {
-        ...metadata,
-        ...(activeImpactEnabled === true
-          ? {
-              activeImpactCalculationVersion: 1,
-              activeImpactDeltaSteps: deltaSteps,
-            }
-          : activeImpactEnabled === false
-            ? { activeImpactResolutionSkippedVersion: 1 }
-            : {}),
-      },
+      metadata,
     });
-    await powerupEventModel.create({
+    const sourceFeedEvent = await powerupEventModel.create({
       raceId: race.id,
       actorUserId: outcome === "FAILED" ? effect.sourceUserId : effect.targetUserId,
       eventType: "POWERUP_USED",
@@ -741,6 +737,7 @@ async function judgeDrillSergeantEffects({
       powerupType: "DRILL_SERGEANT",
       deltaSteps,
       resolvedAt: effect.expiresAt || currentTime,
+      sourceFeedEventId: sourceFeedEvent?.id || null,
     });
   }
   return impacts;
@@ -754,26 +751,211 @@ function chronologicalImpactEffects(rows = []) {
   });
 }
 
-function buildImpactAttributionEffectModel({
+async function captureIncrementalRacePrefixTerms({
+  race,
+  participants,
+  preLeech,
+  currentTime,
   effectsByParticipant,
   hitchhikes,
-  includedEffectIds,
+  orderedEffects,
+  stepSampleModel,
+  eventsByUserId,
 }) {
-  const included = includedEffectIds || new Set();
-  const select = (rows) => chronologicalImpactEffects(
-    (rows || []).filter((row) => included.has(row.id))
+  const allowedIds = new Set(orderedEffects.map((effect) => effect.id));
+  const prefixEffectsByParticipant = new Map();
+  const participantIdByEffectId = new Map();
+  for (const participant of participants) {
+    const rows = (effectsByParticipant.get(participant.id) || [])
+      .filter((effect) => allowedIds.has(effect.id));
+    prefixEffectsByParticipant.set(participant.id, rows);
+    for (const effect of rows) participantIdByEffectId.set(effect.id, participant.id);
+  }
+  const prefixHitchhikes = (hitchhikes || [])
+    .filter((effect) => allowedIds.has(effect.id));
+  const participantById = new Map(participants.map((row) => [row.id, row]));
+  const participantByUserId = new Map();
+  for (const participant of participants) {
+    if (!participantByUserId.has(participant.userId)) {
+      participantByUserId.set(participant.userId, participant);
+    }
+  }
+  const inputByParticipantId = new Map(
+    preLeech.filter(Boolean).map((entry) => [entry.participant.id, entry]),
   );
-  return {
-    async findEffectsForRaceByTypes(_raceId, participantId, types) {
-      const byType = Object.fromEntries((types || []).map((type) => [type, []]));
-      for (const row of select(effectsByParticipant.get(participantId))) {
-        if (byType[row.type]) byType[row.type].push(row);
+  const frozenTotals = new Map(
+    participants
+      .filter((participant) => participant.forfeitedAt || participant.finishedAt)
+      .map((participant) => [
+        participant.id,
+        participant.finishTotalSteps ?? participant.totalSteps ?? race.targetSteps,
+      ]),
+  );
+
+  const localCaptureByParticipantId = new Map();
+  const activeEntries = [];
+  for (const participant of participants) {
+    const input = inputByParticipantId.get(participant.id);
+    if (!input || input.frozen) continue;
+    const capture = await createIncrementalEffectScoreCapture({
+      effects: prefixEffectsByParticipant.get(participant.id) || [],
+      rawTotal: input.baseAdjusted,
+      bonusSteps: race.powerupsEnabled ? participant.bonusSteps || 0 : 0,
+      userId: participant.userId,
+      stepSampleModel,
+      hasSampleData: input.hasSampleData,
+      now: currentTime,
+      // Global events are separately owned settlement sources. They affect the
+      // authoritative total, but never an individual active-effect marginal.
+      globalEvents: [],
+    });
+    localCaptureByParticipantId.set(participant.id, capture);
+    activeEntries.push({
+      participantId: participant.id,
+      userId: participant.userId,
+      preLeechTotal: capture.getFlooredTotal(),
+    });
+  }
+
+  const hitchCaptureById = new Map();
+  const hitchCapturesByTargetParticipantId = new Map();
+  for (const effect of prefixHitchhikes) {
+    const target = participantById.get(effect.targetParticipantId) ||
+      participantByUserId.get(effect.targetUserId) || null;
+    const capture = await createIncrementalHitchhikeCopyCapture({
+      effect,
+      targetEffects: target
+        ? prefixEffectsByParticipant.get(target.id) || []
+        : [],
+      stepSampleModel,
+      now: currentTime,
+      raceEndsAt: race.endsAt,
+      targetFinishedAt: target?.finishedAt || null,
+      targetForfeitedAt: target?.forfeitedAt || null,
+      targetParticipantId: target?.id || effect.targetParticipantId,
+      raceId: race.id,
+      // Keep global-event ownership out of Hitchhike/effect attribution just as
+      // computeSettlementAttributionVector does for every effect prefix.
+      globalEvents: [],
+    });
+    hitchCaptureById.set(effect.id, capture);
+    const targetParticipantId = target?.id || effect.targetParticipantId;
+    if (targetParticipantId) {
+      if (!hitchCapturesByTargetParticipantId.has(targetParticipantId)) {
+        hitchCapturesByTargetParticipantId.set(targetParticipantId, []);
       }
-      return byType;
-    },
-    async findRaceEffectsByType(_raceId, type) {
-      return type === "HITCHHIKE" ? select(hitchhikes) : [];
-    },
+      hitchCapturesByTargetParticipantId.get(targetParticipantId).push({ effect, capture });
+    }
+  }
+
+  const earnedLeechById = new Map();
+  for (const effect of orderedEffects) {
+    if (effect.type !== "LEECH") continue;
+    earnedLeechById.set(
+      effect.id,
+      await computeLeechEarnedTransfer(effect, stepSampleModel, currentTime),
+    );
+  }
+
+  const leechState = createIncrementalLeechTransferState(activeEntries);
+  const localTotalByParticipantId = new Map(
+    activeEntries.map((entry) => [entry.participantId, entry.preLeechTotal]),
+  );
+  const hitchCreditByParticipantId = new Map();
+  const includedHitchIds = new Set();
+  const rawTermsByParticipant = new Map(
+    participants.map((participant) => [participant.id, []]),
+  );
+  const withFrozenTotals = (totals) => {
+    const result = new Map(totals);
+    for (const [participantId, total] of frozenTotals) result.set(participantId, total);
+    return result;
+  };
+  const baselineTotals = withFrozenTotals(leechState.getFinalTotals());
+  let previousTotals = baselineTotals;
+
+  const adjustHitchCredit = (sourceUserId, delta, affected) => {
+    if (delta === 0) return;
+    const participant = participantByUserId.get(sourceUserId);
+    if (!participant || !localCaptureByParticipantId.has(participant.id)) return;
+    hitchCreditByParticipantId.set(
+      participant.id,
+      (hitchCreditByParticipantId.get(participant.id) || 0) + delta,
+    );
+    affected.add(participant.id);
+  };
+
+  for (const effect of orderedEffects) {
+    const affectedPreLeech = new Set();
+    const localParticipantId = participantIdByEffectId.get(effect.id);
+    if (localParticipantId) {
+      const localCapture = localCaptureByParticipantId.get(localParticipantId);
+      if (localCapture) {
+        localCapture.applyEffect(effect);
+        localTotalByParticipantId.set(
+          localParticipantId,
+          localCapture.getFlooredTotal(),
+        );
+        affectedPreLeech.add(localParticipantId);
+      }
+      for (const hitch of hitchCapturesByTargetParticipantId.get(localParticipantId) || []) {
+        const before = hitch.capture.getCopiedSteps();
+        hitch.capture.applyEffect(effect);
+        const after = hitch.capture.getCopiedSteps();
+        if (includedHitchIds.has(hitch.effect.id)) {
+          adjustHitchCredit(hitch.effect.sourceUserId, after - before, affectedPreLeech);
+        }
+      }
+    }
+
+    if (effect.type === "HITCHHIKE") {
+      const capture = hitchCaptureById.get(effect.id);
+      if (capture) {
+        const copied = capture.getCopiedSteps();
+        includedHitchIds.add(effect.id);
+        adjustHitchCredit(effect.sourceUserId, copied, affectedPreLeech);
+      }
+    }
+
+    for (const participantId of affectedPreLeech) {
+      leechState.setPreLeechTotal(
+        participantId,
+        Math.max(
+          0,
+          (localTotalByParticipantId.get(participantId) || 0) +
+            (hitchCreditByParticipantId.get(participantId) || 0),
+        ),
+      );
+    }
+
+    if (effect.type === "LEECH" && localParticipantId) {
+      leechState.addTransfer({
+        effectId: effect.id,
+        startsAt: effect.startsAt,
+        sourceUserId: effect.sourceUserId,
+        victimParticipantId: localParticipantId,
+        earnedTransfer: earnedLeechById.get(effect.id) || 0,
+      });
+    }
+
+    const nextTotals = withFrozenTotals(leechState.getFinalTotals());
+    for (const participant of participants) {
+      rawTermsByParticipant.get(participant.id).push({
+        kind: "effect",
+        effectId: effect.id,
+        powerupType: effect.type,
+        rawDelta: (Number(nextTotals.get(participant.id)) || 0) -
+          (Number(previousTotals.get(participant.id)) || 0),
+        orderKey: `0:${effect.id}`,
+      });
+    }
+    previousTotals = nextTotals;
+  }
+
+  return {
+    baselineTotals,
+    finalTotals: previousTotals,
+    rawTermsByParticipant,
   };
 }
 
@@ -784,250 +966,160 @@ async function computeActiveTimedImpactCapture({
   currentTime,
   raceActiveEffectModel,
   stepSampleModel,
-  globalEvents,
   eventsByUserId = null,
-  activeRaceImpactModel = null,
-  pendingOnly = false,
+  selectedEffects = [],
 }) {
-  const effectsByParticipant = new Map();
-  for (const participant of participants) {
-    const byType = await raceActiveEffectModel.findEffectsForRaceByTypes(
-      race.id,
-      participant.id,
-      SETTLEMENT_EFFECT_TYPES
-    );
-    effectsByParticipant.set(
-      participant.id,
-      SETTLEMENT_EFFECT_TYPES.flatMap((type) => byType[type] || [])
-    );
-  }
-  const hitchhikes = typeof raceActiveEffectModel.findRaceEffectsByType === "function"
-    ? await raceActiveEffectModel.findRaceEffectsByType(race.id, "HITCHHIKE")
-    : [];
-  const effects = chronologicalImpactEffects([
-    ...[...effectsByParticipant.values()].flat(),
-    ...(hitchhikes || []),
-  ]);
-  if (effects.length === 0) return { resolved: [], all: [] };
-  const dueTimedEffects = effects.filter((effect) =>
-    ACTIVE_NOTICE_TIMED_TYPES.has(effect.type) &&
-    effect.expiresAt &&
-    new Date(effect.expiresAt).getTime() <= currentTime.getTime()
-  );
-  if (pendingOnly && dueTimedEffects.length === 0) {
-    return { resolved: [], all: [] };
-  }
-  if (
-    pendingOnly &&
-    dueTimedEffects.length > 0 &&
-    typeof activeRaceImpactModel?.findSourceWorkStates === "function"
-  ) {
-    try {
-      const work = await activeRaceImpactModel.findSourceWorkStates({
-        raceId: race.id,
-        sourceKind: "ACTIVE_EFFECT",
-        sourceIds: dueTimedEffects.map((effect) => effect.id),
-      });
-      const workBySourceAndRecipient = new Map(work.map((row) => [
-        `${row.sourceId}:${row.recipientUserId}`,
-        row,
-      ]));
-      const hasUnresolvedSource = dueTimedEffects.some((effect) => {
-        const row = workBySourceAndRecipient.get(
-          `${effect.id}:${effect.targetUserId}`
-        );
-        if (row) return row.status === "PENDING";
-        return effect.metadata?.activeImpactResolutionSkippedVersion !== 1;
-      });
-      if (!hasUnresolvedSource) return { resolved: [], all: [] };
-    } catch {
-      // Fail open to the canonical attribution calculation. The optimization
-      // must never turn an uncertain database read into a missing impact.
+  if (selectedEffects.length === 0) return { resolved: [], all: [], scorerCalls: 0 };
+  const participantById = new Map(participants.map((row) => [row.id, row]));
+  const participantByUserId = new Map(participants.map((row) => [row.userId, row]));
+  const selectedIds = new Set(selectedEffects.map((effect) => effect.id));
+  const recipientIds = new Set();
+  for (const effect of selectedEffects) {
+    if (effect.targetParticipantId) recipientIds.add(effect.targetParticipantId);
+    if (effect.type === "LEECH" || effect.type === "HITCHHIKE") {
+      const source = participantByUserId.get(effect.sourceUserId);
+      if (source) recipientIds.add(source.id);
     }
   }
-  const frozenTotals = new Map(
-    participants
-      .filter((participant) => participant.forfeitedAt || participant.finishedAt)
-      .map((participant) => [
-        participant.id,
-        participant.finishTotalSteps ?? participant.totalSteps ?? race.targetSteps,
-      ])
-  );
-  const inputByParticipantId = new Map(
-    preLeech.filter(Boolean).map((entry) => [entry.participant.id, entry])
-  );
-  const score = async ({ effectIds, globalEvents: scoringGlobalEvents }) => {
-    const effectModel = buildImpactAttributionEffectModel({
-      effectsByParticipant,
-      hitchhikes,
-      includedEffectIds: effectIds,
-    });
-    const active = [];
-    for (const participant of participants) {
-      const input = inputByParticipantId.get(participant.id);
-      if (!input || input.frozen) continue;
-      const recomputed = await calculateCurrentTotal({
-        raceId: race.id,
-        racePowerupsEnabled: race.powerupsEnabled,
-        participant,
-        baseAdjusted: input.baseAdjusted,
-        hasSampleData: input.hasSampleData,
-        raceActiveEffectModel: effectModel,
-        stepSampleModel,
-        globalEvents: eventsByUserId
-          ? eventsForUser(eventsByUserId, participant.userId)
-          : scoringGlobalEvents,
-        now: currentTime,
-      });
-      active.push({
-        participantId: participant.id,
-        userId: participant.userId,
-        preLeechTotal: recomputed.total,
-        leechTransfers: recomputed.leechTransfers,
-      });
-    }
-    const copies = await collectRaceHitchhikeCopies({
-      raceId: race.id,
-      raceEndsAt: race.endsAt,
-      participants,
-      raceActiveEffectModel: effectModel,
-      stepSampleModel,
-      now: currentTime,
-      globalEvents: scoringGlobalEvents,
-      eventsByUserId,
-    });
-    const finals = applyLeechTransfers(applyHitchhikeCopies(active, copies));
-    for (const [participantId, total] of frozenTotals) finals.set(participantId, total);
-    return finals;
-  };
-  const vector = await computeSettlementAttributionVector({
-    participants,
-    effects,
-    globalEvents: [],
-    score,
+  const through = new Date(Math.max(
+    ...selectedEffects.map((effect) => new Date(effect.startsAt).getTime()),
+  ));
+  const initialParticipants = [...recipientIds]
+    .map((id) => participantById.get(id))
+    .filter(Boolean);
+  const firstPrefix = await raceActiveEffectModel.findActiveImpactPrefixEffects({
+    raceId: race.id,
+    participantIds: initialParticipants.map((row) => row.id),
+    sourceUserIds: initialParticipants.map((row) => row.userId),
+    types: [...ACTIVE_NOTICE_TIMED_TYPES],
+    through,
   });
-  const impactByEffectAndUser = new Map(
-    vector.effectImpacts.map((impact) => [
-      `${impact.effectId}:${impact.userId}`,
-      impact,
-    ])
+
+  // One bounded expansion covers every cross-recipient dependency: Leech can
+  // credit its source, while Hitchhike needs its target's local modifier
+  // prefix. Neither credit is recursively drainable/copyable, so no graph-wide
+  // or participant-by-participant walk is required.
+  const expandedIds = new Set();
+  for (const effect of firstPrefix) {
+    if (effect.type === "LEECH") {
+      const source = participantByUserId.get(effect.sourceUserId);
+      if (source && !recipientIds.has(source.id)) expandedIds.add(source.id);
+    }
+    if (effect.type === "HITCHHIKE" && effect.targetParticipantId &&
+        !recipientIds.has(effect.targetParticipantId)) {
+      expandedIds.add(effect.targetParticipantId);
+    }
+  }
+  const expandedPrefix = expandedIds.size > 0
+    ? await raceActiveEffectModel.findActiveImpactPrefixEffects({
+        raceId: race.id,
+        participantIds: [...expandedIds],
+        sourceUserIds: [],
+        types: [...ACTIVE_NOTICE_TIMED_TYPES],
+        through,
+      })
+    : [];
+  for (const id of expandedIds) recipientIds.add(id);
+  const byId = new Map();
+  for (const effect of [...firstPrefix, ...expandedPrefix, ...selectedEffects]) {
+    byId.set(effect.id, effect);
+  }
+  const effects = chronologicalImpactEffects([...byId.values()]);
+  const captureParticipants = [...recipientIds]
+    .map((id) => participantById.get(id))
+    .filter(Boolean);
+  const effectsByParticipant = new Map(
+    captureParticipants.map((participant) => [participant.id, []]),
   );
-  const all = effects
-    .filter((effect) => ACTIVE_NOTICE_TIMED_TYPES.has(effect.type))
-    .map((effect) => impactByEffectAndUser.get(
-      `${effect.id}:${effect.targetUserId}`
-    ) || {
-      effectId: effect.id,
-      userId: effect.targetUserId,
-      powerupType: effect.type,
-      deltaSteps: 0,
+  for (const effect of effects) {
+    if (effectsByParticipant.has(effect.targetParticipantId)) {
+      effectsByParticipant.get(effect.targetParticipantId).push(effect);
+    }
+  }
+  const hitchhikes = effects.filter((effect) => effect.type === "HITCHHIKE");
+  const vector = await computeSelectedPrefixAttributionVector({
+    participants: captureParticipants,
+    effects,
+    selectedEffectIds: selectedIds,
+    // This is the canonical scorer's raw-term instrumentation seam. It accepts
+    // the complete chronological prefix once, evaluates the already-prefetched
+    // closure, and returns unrounded marginals. The attribution allocator then
+    // runs exactly once over the complete vector; callers never subtract
+    // independently rounded totals.
+    scoreRawPrefixTerms: async ({ orderedEffects }) => {
+      return captureIncrementalRacePrefixTerms({
+        race,
+        participants: captureParticipants,
+        preLeech: preLeech.filter((entry) => recipientIds.has(entry.participant.id)),
+        currentTime,
+        effectsByParticipant,
+        hitchhikes,
+        orderedEffects,
+        stepSampleModel,
+        eventsByUserId,
+      });
+    },
+  });
+  const effectById = new Map(effects.map((effect) => [effect.id, effect]));
+  const all = vector.effectImpacts
+    .filter((impact) => {
+      const effect = effectById.get(impact.effectId);
+      return effect && ACTIVE_NOTICE_TIMED_TYPES.has(effect.type);
     })
-    .map((impact) => ({ ...impact, resolvedAt: currentTime }));
-  const dueIds = new Set(effects
-    .filter((effect) =>
-      ACTIVE_NOTICE_TIMED_TYPES.has(effect.type) &&
-      effect.expiresAt &&
-      new Date(effect.expiresAt).getTime() <= currentTime.getTime()
-    )
-    .map((effect) => effect.id));
+    .map((impact) => ({
+      ...impact,
+      resolvedAt: effectById.get(impact.effectId)?.expiresAt || currentTime,
+    }));
   return {
     all,
-    resolved: all.filter((impact) => dueIds.has(impact.effectId)),
+    resolved: vector.selectedEffectImpacts.map((impact) => ({
+      ...impact,
+      resolvedAt: effectById.get(impact.effectId)?.expiresAt || currentTime,
+    })),
+    scorerCalls: vector.scorerCalls,
   };
 }
 
-async function computeActiveDefenseImpactCapture({
+async function discoverActiveImpactSources({
   raceId,
-  powerupEventModel,
-  stepSampleModel,
   currentTime,
-  activeRaceImpactModel = null,
-  pendingOnly = false,
-  narrowQuery = false,
+  raceActiveEffectModel,
+  enabled,
+  selectedSourceIds = null,
+  freezeSourceIds = null,
 }) {
-  const narrowAvailable = typeof powerupEventModel.findActiveDefenseCandidates === "function";
-  const broadAvailable = typeof powerupEventModel.findByRaceAsc === "function";
-  if (!narrowAvailable && !broadAvailable) return [];
-  const events = narrowQuery && narrowAvailable
-    ? (await powerupEventModel.findActiveDefenseCandidates(raceId)) || []
-    : (await powerupEventModel.findByRaceAsc(raceId)) || [];
-  const candidates = [];
-  for (const event of events) {
-    const metadata = event?.metadata || {};
-    const start = new Date(metadata.activeImpactDefenseWindowStart);
-    const end = new Date(metadata.activeImpactDefenseWindowEnd);
-    const multiplier = Number(metadata.activeImpactDefenseMultiplier);
-    if (
-      metadata.activeImpactDefenseCalculationVersion !== 1 ||
-      metadata.activeImpactDefenseType !== "UMBRELLA" ||
-      typeof metadata.activeImpactDefenseTargetUserId !== "string" ||
-      !Number.isFinite(start.getTime()) ||
-      !Number.isFinite(end.getTime()) ||
-      end <= start ||
-      end > currentTime ||
-      !Number.isFinite(multiplier) ||
-      multiplier < 0
-    ) continue;
-    candidates.push({
-      event,
-      userId: metadata.activeImpactDefenseTargetUserId,
-      start,
-      end,
-      multiplier,
+  if (!enabled) {
+    return { due: [], freeze: [], hasMore: false };
+  }
+  if (freezeSourceIds || selectedSourceIds) {
+    const ids = [...new Set([
+      ...(freezeSourceIds || []),
+      ...(selectedSourceIds || []),
+    ])];
+    const selected = await raceActiveEffectModel.findActiveImpactSourcesByIds({
+      raceId,
+      sourceIds: ids,
+      types: [...ACTIVE_NOTICE_TIMED_TYPES],
     });
+    return {
+      freeze: freezeSourceIds
+        ? selected.filter((effect) => freezeSourceIds.has(effect.id))
+        : [],
+      due: freezeSourceIds
+        ? []
+        : selected.filter((effect) =>
+            !effect.expiresAt || new Date(effect.expiresAt) <= currentTime
+          ),
+      hasMore: false,
+    };
   }
-  let selected = candidates;
-  if (
-    pendingOnly &&
-    candidates.length > 0 &&
-    typeof activeRaceImpactModel?.findSourceWorkStates === "function"
-  ) {
-    try {
-      const work = await activeRaceImpactModel.findSourceWorkStates({
-        raceId,
-        sourceKind: "DEFENSE_RESOLUTION",
-        sourceIds: candidates.map(({ event }) => event.id),
-      });
-      const workBySourceAndRecipient = new Map(work.map((row) => [
-        `${row.sourceId}:${row.recipientUserId}`,
-        row,
-      ]));
-      selected = candidates.filter(({ event, userId }) => {
-        const row = workBySourceAndRecipient.get(`${event.id}:${userId}`);
-        return !row || row.status === "PENDING";
-      });
-    } catch {
-      // Preserve the full candidate set on any uncertainty.
-    }
-  }
-  const byUser = new Map();
-  for (const candidate of selected) {
-    const rows = byUser.get(candidate.userId) || [];
-    rows.push(candidate);
-    byUser.set(candidate.userId, rows);
-  }
-  const impacts = [];
-  for (const [userId, rows] of byUser) {
-    const windows = rows.map(({ start, end }) => ({ start, end }));
-    const walkedByWindow = typeof stepSampleModel.sumClosedStepsInWindows === "function"
-      ? await stepSampleModel.sumClosedStepsInWindows(userId, windows, currentTime)
-      : await Promise.all(rows.map(({ start, end }) =>
-          typeof stepSampleModel.sumClosedStepsInWindow === "function"
-            ? stepSampleModel.sumClosedStepsInWindow(userId, start, end, currentTime)
-            : stepSampleModel.sumStepsInWindow(userId, start, end)
-        ));
-    rows.forEach(({ event, end, multiplier }, index) => {
-      const walked = Number(walkedByWindow[index]) || 0;
-      impacts.push({
-        sourceId: event.id,
-        userId,
-        powerupType: "UMBRELLA",
-        deltaSteps: Math.round(walked - Math.round(walked * multiplier)),
-        resolvedAt: end,
-      });
-    });
-  }
-  return impacts;
+  const due = await raceActiveEffectModel.findDueActiveImpactSourcesForRace({
+    raceId,
+    now: currentTime,
+    types: [...ACTIVE_NOTICE_TIMED_TYPES],
+    limit: 8,
+  });
+  return { due: due.slice(0, 8), freeze: [], hasMore: due.length > 8 };
 }
 
 function buildResolveRaceState(dependencies = {}) {
@@ -1039,8 +1131,6 @@ function buildResolveRaceState(dependencies = {}) {
     dependencies.RaceActiveEffect || RaceActiveEffect;
   const powerupEventModel =
     dependencies.RacePowerupEvent || RacePowerupEvent;
-  const activeRaceImpactModel =
-    dependencies.ActiveRaceImpact || ActiveRaceImpact;
   const globalStepEventModel =
     dependencies.GlobalStepEvent || GlobalStepEvent;
   const prefetchRaceScoringModels =
@@ -1050,17 +1140,32 @@ function buildResolveRaceState(dependencies = {}) {
     typeof dependencies.recordPhaseTiming === "function"
       ? dependencies.recordPhaseTiming
       : null;
-  async function measureResolutionPhase(name, operation) {
-    if (!recordPhaseTiming) return operation();
+  const recordPhaseQueryCount =
+    process.env.PRISMA_QUERY_EVENTS_ENABLED === "true" &&
+    typeof dependencies.recordPhaseQueryCount === "function"
+      ? dependencies.recordPhaseQueryCount
+      : null;
+  async function measureResolutionPhase(
+    name,
+    operation,
+    { captureQueries = true } = {},
+  ) {
+    if (!recordPhaseTiming && !recordPhaseQueryCount) return operation();
     const startedAt = process.hrtime.bigint();
+    const queryContext = recordPhaseQueryCount && captureQueries
+      ? { count: 0 }
+      : null;
     try {
-      return await operation();
+      return queryContext
+        ? await runWithPhaseQueryCounter(queryContext, operation)
+        : await operation();
     } finally {
       try {
-        recordPhaseTiming(
+        recordPhaseTiming?.(
           name,
-          Math.max(0, Number(process.hrtime.bigint() - startedAt) / 1e6)
+          Math.max(0, Number(process.hrtime.bigint() - startedAt) / 1e6),
         );
+        if (queryContext) recordPhaseQueryCount(name, queryContext.count);
       } catch {}
     }
   }
@@ -1081,8 +1186,12 @@ function buildResolveRaceState(dependencies = {}) {
     "activeImpactEnabled",
   );
   const activeImpactEnabled = dependencies.activeImpactEnabled === true;
-  const pendingImpactOnlyEnabled = dependencies.pendingImpactOnlyEnabled === true;
-  const narrowDefenseQueryEnabled = dependencies.narrowDefenseQueryEnabled === true;
+  const activeImpactSelectedSourceIds = dependencies.activeImpactSelectedSourceIds
+    ? new Set(dependencies.activeImpactSelectedSourceIds)
+    : null;
+  const activeImpactFreezeSourceIds = dependencies.activeImpactFreezeSourceIds
+    ? new Set(dependencies.activeImpactFreezeSourceIds)
+    : null;
 
   // `userIds` (C0, spec §5a item 2) is ADDITIVE to the long-standing `userId`
   // argument: the race-keyed worker coalesces many uploaders into one resolve,
@@ -1158,6 +1267,20 @@ function buildResolveRaceState(dependencies = {}) {
         ? acceptedParticipants.filter((p) => scoreScope.has(p.id))
         : acceptedParticipants;
       const currentTime = now();
+      // Active-impact discovery starts with the exact partial/indexed due key.
+      // No-due generations stop after this bounded selector; they never walk
+      // participant histories merely to discover there is nothing to emit.
+      const impactSources = await discoverActiveImpactSources({
+        raceId: race.id,
+        currentTime,
+        raceActiveEffectModel,
+        enabled: activeImpactEnabled,
+        selectedSourceIds: activeImpactSelectedSourceIds,
+        freezeSourceIds: activeImpactFreezeSourceIds,
+      });
+      const selectedDueImpactEffects = impactSources.due;
+      const selectedFreezeImpactEffects = impactSources.freeze;
+      const hasMoreTimedImpactSources = impactSources.hasMore;
       let prefetched = null;
       try {
         prefetched = await measureResolutionPhase(
@@ -1476,42 +1599,7 @@ function buildResolveRaceState(dependencies = {}) {
 
       let timedImpactResolutions = [];
       let freezeTimedImpactResolutions = [];
-      let defenseImpactResolutions = [];
-      if (!scoreScope && race.powerupsEnabled) {
-        try {
-          const [timedCapture, defenseCapture] = await measureResolutionPhase(
-            "activeImpactAttribution",
-            () => Promise.all([computeActiveTimedImpactCapture({
-              race,
-              participants: acceptedParticipants,
-              preLeech,
-              currentTime,
-              raceActiveEffectModel: scoringEffectModel,
-              stepSampleModel: scoringStepSampleModel,
-              globalEvents,
-              eventsByUserId,
-              activeRaceImpactModel,
-              pendingOnly: pendingImpactOnlyEnabled,
-            }), computeActiveDefenseImpactCapture({
-              raceId: race.id,
-              powerupEventModel,
-              stepSampleModel: scoringStepSampleModel,
-              currentTime,
-              activeRaceImpactModel,
-              pendingOnly: pendingImpactOnlyEnabled,
-              narrowQuery: narrowDefenseQueryEnabled,
-            })])
-          );
-          timedImpactResolutions = timedCapture.resolved;
-          freezeTimedImpactResolutions = timedCapture.all;
-          defenseImpactResolutions = defenseCapture;
-        } catch (error) {
-          logger.error("[RACE_RESOLUTION] active impact attribution failed", {
-            errorCode: error?.code || "ATTRIBUTION_ERROR",
-          });
-        }
-      }
-
+      let timedImpactScorerCalls = 0;
       const activeEffects =
         race.powerupsEnabled && typeof scoringEffectModel.findActiveForRace === "function"
           ? (await measureResolutionPhase(
@@ -1519,6 +1607,75 @@ function buildResolveRaceState(dependencies = {}) {
               () => scoringEffectModel.findActiveForRace(race.id)
             )) || []
           : [];
+      const selectedDueImpactIds = new Set(
+        selectedDueImpactEffects.map((effect) => effect.id),
+      );
+      const selectedCaptureIds = new Set([
+        ...selectedDueImpactIds,
+        ...selectedFreezeImpactEffects.map((effect) => effect.id),
+      ]);
+      if (
+        selectedCaptureIds.size > 0 &&
+        !scoreScope &&
+        race.powerupsEnabled
+      ) {
+        try {
+          const timedCapture = await measureResolutionPhase(
+            "activeImpactAttribution",
+            () => measureResolutionPhase(
+              "activeTimedImpactAttribution",
+              () => computeActiveTimedImpactCapture({
+                race,
+                participants: acceptedParticipants,
+                preLeech,
+                currentTime,
+                raceActiveEffectModel: scoringEffectModel,
+                stepSampleModel: scoringStepSampleModel,
+                eventsByUserId,
+                selectedEffects: [
+                  ...selectedDueImpactEffects,
+                  ...selectedFreezeImpactEffects,
+                ],
+              }),
+            ),
+            { captureQueries: false },
+          );
+          timedImpactResolutions = timedCapture.resolved.filter((impact) =>
+            selectedDueImpactIds.has(impact.effectId)
+          );
+          const freezeSourceIds = new Set(
+            selectedFreezeImpactEffects.map((effect) => effect.id),
+          );
+          freezeTimedImpactResolutions = timedCapture.resolved
+            .filter((impact) => freezeSourceIds.has(impact.effectId))
+            .map((impact) => ({ ...impact, resolvedAt: currentTime }));
+          timedImpactScorerCalls = timedCapture.scorerCalls || 0;
+          if (timedImpactScorerCalls > 2 * selectedCaptureIds.size + 1) {
+            throw new Error("ACTIVE_IMPACT_SCORER_BUDGET_EXCEEDED");
+          }
+          for (const effect of selectedDueImpactEffects) {
+            const metadata = { ...(effect.metadata || {}) };
+            if (SNAPSHOT_AT_EXPIRY_TYPES.includes(effect.type)) {
+              const snapshot = baseAdjustedByParticipantId[effect.targetParticipantId];
+              if (snapshot !== undefined) metadata.stepsAtExpiry = snapshot;
+            }
+            await raceActiveEffectModel.update(effect.id, {
+              status: "EXPIRED",
+              expiresAt: effect.expiresAt,
+              metadata,
+            });
+          }
+        } catch (error) {
+          logger.error("[RACE_RESOLUTION] active impact attribution failed", {
+            errorCode: error?.code || "ATTRIBUTION_ERROR",
+          });
+          // The selected sources must transition atomically with their private
+          // events. Swallowing attribution failure lets the later expiry path
+          // mark them EXPIRED with no durable event and no continuation. Abort
+          // this generation so the queue's normal retry owns eventual delivery.
+          throw error;
+        }
+      }
 
       const drillSergeantImpacts = race.powerupsEnabled
         ? (await measureResolutionPhase(
@@ -1611,9 +1768,10 @@ function buildResolveRaceState(dependencies = {}) {
           hitchhikeCopies,
           timedImpacts: timedImpactResolutions,
           freezeTimedImpacts: freezeTimedImpactResolutions,
-          defenseImpacts: defenseImpactResolutions,
           trailMineImpacts,
           drillSergeantImpacts,
+          hasMoreTimedSources: hasMoreTimedImpactSources,
+          timedScorerCalls: timedImpactScorerCalls,
         },
         updatedParticipants: stepTotals.length,
         // Retained (always 0) so existing callers reading this keep working.
@@ -1654,6 +1812,9 @@ module.exports = {
   calculateBaseAdjusted,
   calculateSubsequentSteps,
   calculateCurrentTotal,
+  captureIncrementalRacePrefixTerms,
+  computeActiveTimedImpactCapture,
+  discoverActiveImpactSources,
   triggerTrailMines,
   buildResolveRaceState,
   determineFinishSnapshot,

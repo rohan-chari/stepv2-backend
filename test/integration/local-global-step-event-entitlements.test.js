@@ -43,6 +43,9 @@ const {
   buildRaceResolutionWorkerV2,
 } = require("../../src/modules/races/jobs/raceResolutionQueueV2");
 const {
+  buildRecomputePlacements,
+} = require("../../src/modules/races/jobs/placementRecompute");
+const {
   createInboxAlert,
 } = require("../../src/modules/inbox/services/inbox");
 const derivedCache = require("../../src/shared/cache/derivedCache");
@@ -812,13 +815,8 @@ test("active-impact capture stacks only the recipient's local entitlement throug
   const sampleStart = new Date(now.getTime() - 60 * 60 * 1000);
   const sampleEnd = new Date(now.getTime() - 50 * 60 * 1000);
   await appSettings.setFlagsAtomically([
-    ["apiActiveImpactNoticesV1Enabled", true],
     ["apiImpactNoticesEnabled", true],
   ]);
-  await prisma.appSetting.update({
-    where: { key: "apiActiveImpactNoticesV1EnabledFrom" },
-    data: { value: "2000-01-01T00:00:00.000Z" },
-  });
   const effects = [];
   for (const participant of participants) {
     const powerup = await prisma.racePowerup.create({ data: {
@@ -845,6 +843,20 @@ test("active-impact capture stacks only the recipient's local entitlement throug
       });
       assert.equal(upload.status, 200);
     }
+    // Exercise the production time-boundary scheduler. STEP_SYNC itself must
+    // not probe v2 sources; placement recompute discovers the naturally due
+    // effect and adds the EFFECT_BOUNDARY envelope consumed by the worker.
+    await buildRecomputePlacements({
+      requestStepSyncForUsers: async () => {},
+      logger: { log() {}, warn() {}, error() {} },
+    })();
+    const scheduled = await prisma.raceResolutionJobV2.findUniqueOrThrow({
+      where: { raceId: race.id },
+    });
+    assert.ok(
+      scheduled.dirtyReasons.includes("EFFECT_BOUNDARY"),
+      `expected a natural EFFECT_BOUNDARY envelope, got ${JSON.stringify(scheduled.dirtyReasons)}`,
+    );
     const worker = buildRaceResolutionWorkerV2({
       bootAt: 0,
       logger: { log() {}, error(error) { throw error; } },
@@ -852,18 +864,32 @@ test("active-impact capture stacks only the recipient's local entitlement throug
     for (let attempt = 0; attempt < 10; attempt += 1) {
       if (!(await worker.processOne())) break;
     }
-    const impacts = await prisma.activeRaceEffectImpact.findMany({
-      where: { raceId: race.id }, orderBy: { userId: "asc" },
+    const impacts = await prisma.raceImpactEvent.findMany({
+      where: { raceId: race.id }, orderBy: { recipientUserId: "asc" },
     });
     assert.equal(impacts.length, 2);
-    const byUser = new Map(impacts.map((impact) => [impact.userId, impact]));
+    const byUser = new Map(impacts.map((impact) => [impact.recipientUserId, impact]));
     assert.equal(byUser.get(eligible.id).sourceId, effects[0].id);
-    assert.equal(byUser.get(eligible.id).deltaSteps, 2000);
+    // V2 owns only the effect's raw marginal: the overlapping local global
+    // event is deliberately not reassigned to RUNNERS_HIGH.
+    assert.equal(byUser.get(eligible.id).deltaSteps, 1000);
     assert.equal(byUser.get(ineligible.id).sourceId, effects[1].id);
     assert.equal(byUser.get(ineligible.id).deltaSteps, 1000);
+    const stored = await prisma.raceParticipant.findMany({
+      where: { raceId: race.id },
+      orderBy: { userId: "asc" },
+    });
+    const totalByUser = new Map(stored.map((participant) => [
+      participant.userId,
+      participant.totalSteps,
+    ]));
+    // Authoritative totals retain participant-specific entitlement stacking:
+    // eligible = raw 1000 + effect 1000 + separately owned global term 2000;
+    // ineligible = raw 1000 + effect 1000.
+    assert.equal(totalByUser.get(eligible.id), 4000);
+    assert.equal(totalByUser.get(ineligible.id), 2000);
   } finally {
     await appSettings.setFlagsAtomically([
-      ["apiActiveImpactNoticesV1Enabled", false],
       ["apiImpactNoticesEnabled", false],
     ]);
   }

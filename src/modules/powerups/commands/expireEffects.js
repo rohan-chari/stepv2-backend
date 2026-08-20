@@ -7,8 +7,6 @@ const { StepSample } = require("../../steps/models/stepSample");
 const { eventBus } = require("../../../shared/events/eventBus");
 const { POWERUP_NAMES } = require("./rollPowerup");
 const { awardCoins: defaultAwardCoins } = require("../../../shared/economy/awardCoins");
-const { appSettings: defaultAppSettings } = require("../../../shared/config/appSettings");
-const { isStrictFlagEnabled } = require("../../../shared/config/isStrictFlagEnabled");
 const {
   enqueueRaceResolution: defaultEnqueueRaceResolution,
 } = require("../../races/services/enqueueRaceResolution");
@@ -54,7 +52,6 @@ function buildExpireEffects(dependencies = {}) {
   const stepSampleModel = dependencies.StepSample || StepSample;
   const awardCoins = dependencies.awardCoins || defaultAwardCoins;
   const events = dependencies.eventBus || eventBus;
-  const settings = dependencies.appSettings || defaultAppSettings;
   const enqueueRaceResolution = Object.prototype.hasOwnProperty.call(
     dependencies,
     "enqueueRaceResolution"
@@ -75,9 +72,7 @@ function buildExpireEffects(dependencies = {}) {
 
   return async function expireEffects({ raceId, participantSteps } = {}) {
     const currentTime = nowFn();
-    const activeImpactEnabled =
-      (Object.keys(dependencies).length === 0 || dependencies.appSettings) &&
-      (await isStrictFlagEnabled(settings, "apiActiveImpactNoticesV1Enabled"));
+    const activeImpactEnabled = true;
     const expired =
       raceId && typeof effectModel.findExpiredForRace === "function"
         ? await effectModel.findExpiredForRace(raceId, currentTime)
@@ -125,14 +120,15 @@ function buildExpireEffects(dependencies = {}) {
     for (const effect of expired) {
       if (raceId && effect.raceId !== raceId) continue;
       if (effect.type === "DRILL_SERGEANT") continue;
+      // Every score-changing v2 boundary is owned by the fenced C0 worker. A
+      // request/post-commit fallback may discover it and enqueue above, but it
+      // must never transition it without the atomic private event.
+      if (
+        activeImpactEnabled &&
+        ACTIVE_IMPACT_EXPIRY_TYPES.includes(effect.type)
+      ) continue;
 
       const metadata = effect.metadata || {};
-      if (
-        !activeImpactEnabled &&
-        ACTIVE_IMPACT_EXPIRY_TYPES.includes(effect.type)
-      ) {
-        metadata.activeImpactResolutionSkippedVersion = 1;
-      }
       // Store current steps at expiry for snapshot-based timed modifiers.
       if (SNAPSHOT_AT_EXPIRY_TYPES.includes(effect.type)) {
         const currentStepsForTarget = participantSteps?.[effect.targetParticipantId];

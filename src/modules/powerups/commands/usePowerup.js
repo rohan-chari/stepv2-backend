@@ -6,7 +6,11 @@ const { Race } = require("../../races/models/race");
 const { User } = require("../../users");
 const { PowerupUpgradeEvent } = require("../models/powerupUpgradeEvent");
 const { eventBus } = require("../../../shared/events/eventBus");
-const { prisma: defaultPrisma } = require("../../../db");
+const {
+  prisma: defaultPrisma,
+  runInPrismaTransaction,
+  deferUntilAfterCommit,
+} = require("../../../db");
 const { balanceConfig } = require("../../economy/balanceConfig");
 const { POWERUP_NAMES } = require("./rollPowerup");
 const {
@@ -16,7 +20,7 @@ const {
 // shared standings snapshot must not outlive the change we just committed. The
 // resolution worker is deliberately NOT in this list: it SETs post-commit.
 const {
-  invalidateRaceProgress,
+  invalidateRaceProgress: defaultInvalidateRaceProgress,
 } = require("../../races/services/raceProgressSnapshot");
 const {
   computeRaceState: defaultComputeRaceState,
@@ -54,7 +58,7 @@ const {
   signedMultiplierForEffects,
 } = require("../../races/services/effectiveStepScoring");
 const {
-  evaluateHighMultiplierAlert,
+  evaluateHighMultiplierAlert: defaultEvaluateHighMultiplierAlert,
 } = require("../../races/services/highMultiplierAlert");
 // The SAME team-total summation the board (getRaceProgress -> teams block) uses,
 // so Uprising's losing-team gate can never disagree with the standings the
@@ -66,8 +70,9 @@ const { POWERUP_COPY_TYPES } = require("../constants/powerupCopySeed");
 const { appSettings: defaultAppSettings } = require("../../../shared/config/appSettings");
 const { isStrictFlagEnabled } = require("../../../shared/config/isStrictFlagEnabled");
 const {
-  ActiveRaceImpact: defaultActiveRaceImpact,
-} = require("../../races/models/activeRaceImpact");
+  impactDescription,
+  RaceImpactEvent: defaultRaceImpactEvent,
+} = require("../../races/models/raceImpactEvent");
 const {
   ACTIVE_IMPACT_EXPIRY_TYPES,
 } = require("../constants/expiryEffectTypes");
@@ -892,13 +897,20 @@ function buildUsePowerup(dependencies = {}) {
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
   const effectModel = dependencies.RaceActiveEffect || RaceActiveEffect;
   const eventModel = dependencies.RacePowerupEvent || RacePowerupEvent;
-  const activeRaceImpact = dependencies.ActiveRaceImpact || defaultActiveRaceImpact;
+  const activeRaceImpact = dependencies.ActiveRaceImpact || defaultRaceImpactEvent;
   const raceModel = dependencies.Race || Race;
   const settings = dependencies.appSettings || defaultAppSettings;
   const userModel = dependencies.User || User;
   const upgradeEventModel = dependencies.PowerupUpgradeEvent || PowerupUpgradeEvent;
   const deductCoinsAtomic = dependencies.deductCoinsAtomic || defaultDeductCoinsAtomic;
-  const events = dependencies.eventBus || eventBus;
+  const immediateEvents = dependencies.eventBus || eventBus;
+  const events = hasInjectedDeps
+    ? immediateEvents
+    : {
+        emit(...args) {
+          return deferUntilAfterCommit(() => immediateEvents.emit(...args));
+        },
+      };
   // C0 (spec §5a item 4): after a powerup's own small writes, ENQUEUE the race
   // rather than bulk-writing every participant row inline. The race-keyed worker
   // owns that write, and the fence serializes it against settlement.
@@ -912,7 +924,7 @@ function buildUsePowerup(dependencies = {}) {
   // order inside resolveRaceState.
   // Injected-deps callers (unit tests) get a no-op unless they pass one: an
   // enqueue here must never turn a pure unit test into a DB test.
-  const enqueueRaceResolution = Object.prototype.hasOwnProperty.call(
+  const immediateEnqueueRaceResolution = Object.prototype.hasOwnProperty.call(
     dependencies,
     "enqueueRaceResolution"
   )
@@ -920,6 +932,11 @@ function buildUsePowerup(dependencies = {}) {
     : hasInjectedDeps
       ? async () => null
       : defaultEnqueueRaceResolution;
+  const enqueueRaceResolution = hasInjectedDeps
+    ? immediateEnqueueRaceResolution
+    : (...args) => deferUntilAfterCommit(
+        () => immediateEnqueueRaceResolution(...args)
+      );
   // As elsewhere in C0: an EXPLICITLY injected resolveRaceState still drives the
   // inline path (it is the seam for exercising it, and the path stays live
   // behind the `inlineRaceResolutionFallback` lever). The production singleton
@@ -940,14 +957,33 @@ function buildUsePowerup(dependencies = {}) {
     : hasInjectedDeps
       ? async () => {}
       : defaultResolveRaceState;
-  const repairRacePowerupInventory = dependencies.repairRacePowerupInventory ||
+  const immediateRepairRacePowerupInventory = dependencies.repairRacePowerupInventory ||
     dependencies.syncRacePowerupState ||
     (hasInjectedDeps
       ? async () => {}
       : defaultRepairRacePowerupInventory);
+  const repairRacePowerupInventory = hasInjectedDeps
+    ? immediateRepairRacePowerupInventory
+    : (...args) => deferUntilAfterCommit(
+        () => immediateRepairRacePowerupInventory(...args)
+      );
+  const immediateInvalidateRaceProgress =
+    dependencies.invalidateRaceProgress || defaultInvalidateRaceProgress;
+  const invalidateRaceProgress = hasInjectedDeps
+    ? immediateInvalidateRaceProgress
+    : (...args) => deferUntilAfterCommit(
+        () => immediateInvalidateRaceProgress(...args)
+      );
   const now = dependencies.now || (() => new Date());
   const random = dependencies.random || Math.random;
   const awardCoins = dependencies.awardCoins || defaultAwardCoins;
+  const immediateEvaluateHighMultiplierAlert =
+    dependencies.evaluateHighMultiplierAlert || defaultEvaluateHighMultiplierAlert;
+  const evaluateHighMultiplierAlert = hasInjectedDeps
+    ? immediateEvaluateHighMultiplierAlert
+    : (...args) => deferUntilAfterCommit(
+        () => immediateEvaluateHighMultiplierAlert(...args)
+      );
   // Imposter kill switch (Item 3). Injectable for tests; defaults to the env
   // reader (enabled unless IMPOSTER_ENABLED="false").
   const imposterEnabled = dependencies.imposterEnabled || defaultImposterEnabled;
@@ -1099,13 +1135,26 @@ function buildUsePowerup(dependencies = {}) {
     };
 
     const type = powerup.type;
-    const activeImpactEnabled =
-      (!hasInjectedDeps || dependencies.appSettings) &&
-      (await isStrictFlagEnabled(settings, "apiActiveImpactNoticesV1Enabled"));
+    const activeImpactEnabled = true;
     const activeImpactCapable = requestHasFeature(
       clientFeatures,
-      "active_impact_notices_v1"
+      "resolved_impact_events_v2"
     );
+    const consumePowerup = async (fields) => {
+      if (hasInjectedDeps) return powerupModel.update(powerupId, fields);
+      const consumed = await db.racePowerup.updateMany({
+        where: { id: powerupId, userId, raceId, status: "HELD" },
+        data: fields,
+      });
+      if (consumed.count !== 1) {
+        throw new PowerupUseError(
+          "This powerup has already been used or discarded",
+          409,
+          "POWERUP_ALREADY_USED"
+        );
+      }
+      return db.racePowerup.findUnique({ where: { id: powerupId } });
+    };
     const createDirectImpactEvent = async (
       event,
       { powerupType = type, deltas = [], offerActorReceipt = true } = {}
@@ -1158,36 +1207,9 @@ function buildUsePowerup(dependencies = {}) {
       if (!activeImpactEnabled) {
         return { event: await eventModel.create(event), activeImpactReceipt: null };
       }
-      const row = await eventModel.create({
-        ...event,
-        metadata: {
-          ...(event.metadata || {}),
-          activeImpactCalculationVersion: 1,
-          activeImpactPowerupType: powerupType,
-          activeImpactDeltas: canonicalDeltas,
-        },
-      });
-      const actorDelta = canonicalDeltas.find(
-        (entry) => entry.userId === userId && entry.deltaSteps !== 0
-      );
-      if (!row?.id || !activeImpactCapable || !offerActorReceipt || !actorDelta) {
-        return { event: row, activeImpactReceipt: null };
-      }
-      const work = await activeRaceImpact.createWork({
-        raceId,
-        recipientUserId: userId,
-        sourceKind: "POWERUP_EVENT",
-        sourceId: row.id,
-        powerupType,
-        resolvedAt: row.createdAt || now(),
-        inlineReceipt: true,
-      });
-      return {
-        event: row,
-        activeImpactReceipt: work?.inlineReceiptId
-          ? { id: work.inlineReceiptId, raceId }
-          : null,
-      };
+      // Injected legacy doubles do not implement the v2 transactional source
+      // writer. Keep their behavior inert rather than stamping v1 metadata.
+      return { event: await eventModel.create(event), activeImpactReceipt: null };
     };
     const resolveTimedEffectBoundary = async (effect, resolvedAt) => {
       if (!effect?.id) return null;
@@ -1200,6 +1222,64 @@ function buildUsePowerup(dependencies = {}) {
         expiresAt: resolvedAt,
         ...(isEligible ? { metadata } : {}),
       };
+      if (activeImpactEnabled && isEligible && !hasInjectedDeps) {
+        // Clamp the concrete source inside the command transaction while it is
+        // still ACTIVE, then ask the canonical scorer for that one real
+        // boundary. The scoped Prisma proxy makes the read see this uncommitted
+        // clamp. Any scorer/event failure rolls the clamp and the consuming
+        // powerup back together.
+        const clamped = await db.raceActiveEffect.updateMany({
+          where: { id: effect.id, status: "ACTIVE" },
+          data: { expiresAt: resolvedAt },
+        });
+        if (clamped.count !== 1) return effectModel.findById(effect.id);
+        const computed = await computeRaceState({
+          raceId: effect.raceId || raceId,
+          timeZone,
+          dependencies: {
+            activeImpactEnabled: true,
+            activeImpactSelectedSourceIds: [effect.id],
+            now: () => resolvedAt,
+          },
+        });
+        const capture = computed?.result?.activeImpactCapture;
+        const impacts = (capture?.timedImpacts || []).filter((impact) =>
+          impact.effectId === effect.id &&
+          impact.userId &&
+          Number.isInteger(impact.deltaSteps) &&
+          impact.deltaSteps !== 0
+        );
+        const capturedEffectUpdate = (computed?.writes || []).find((write) =>
+          write.kind === "effectUpdate" && write.id === effect.id
+        );
+        const updated = await db.raceActiveEffect.update({
+          where: { id: effect.id },
+          data: {
+            ...fields,
+            ...(capturedEffectUpdate?.fields || {}),
+            status: "EXPIRED",
+            expiresAt: resolvedAt,
+          },
+        });
+        if (impacts.length > 0) {
+          await db.raceImpactEvent.createMany({
+            data: impacts.map((impact) => ({
+              raceId: effect.raceId || raceId,
+              recipientUserId: impact.userId,
+              sourceKind: "ACTIVE_EFFECT",
+              sourceId: effect.id,
+              powerupType: effect.type,
+              deltaSteps: impact.deltaSteps,
+              description: impactDescription(effect.type, impact.deltaSteps),
+              valueStatus: "SYNCED_SNAPSHOT",
+              calculationVersion: 2,
+              resolvedAt,
+            })),
+            skipDuplicates: true,
+          });
+        }
+        return updated;
+      }
       const recipientUserIds = effect.type === "HITCHHIKE"
         ? [effect.sourceUserId]
         : effect.type === "LEECH"
@@ -1228,7 +1308,12 @@ function buildUsePowerup(dependencies = {}) {
         return result?.effect || result;
       }
       const updated = await effectModel.update(effect.id, fields);
-      for (const input of work) await activeRaceImpact.createWork(input);
+      // Narrow unit fakes may not model the v2 event repository. Production
+      // always takes resolveEffectBoundary above, which atomically writes the
+      // event; the fallback preserves legacy command-only test seams.
+      if (typeof activeRaceImpact.createWork === "function") {
+        for (const input of work) await activeRaceImpact.createWork(input);
+      }
       return updated;
     };
 
@@ -1491,7 +1576,7 @@ function buildUsePowerup(dependencies = {}) {
     // own effect rows, mark the item USED, and return without touching the
     // single-target Mirror/Socks switch below (they are buffs or AoE jams).
     const finalizeSelfContainedUse = async (resolvedTarget = null) => {
-      await powerupModel.update(powerupId, {
+      await consumePowerup({
         status: "USED",
         usedAt: now(),
         targetUserId: resolvedTarget,
@@ -2527,7 +2612,7 @@ function buildUsePowerup(dependencies = {}) {
         });
         if (!redirect) {
           // Fizzle as a block: consume the item, create no effect.
-          await powerupModel.update(powerupId, {
+          await consumePowerup({
             status: "USED",
             usedAt: now(),
             targetUserId: resolvedTargetUserId,
@@ -2643,7 +2728,7 @@ function buildUsePowerup(dependencies = {}) {
         // Shield blocks the attack. Coins (if any) are already deducted —
         // per design, upgrade cost is forfeit on a blocked attack.
         await effectModel.update(shield.id, { status: "BLOCKED" });
-        await powerupModel.update(powerupId, {
+        await consumePowerup({
           status: "USED",
           usedAt: now(),
           targetUserId: resolvedTargetUserId,
@@ -2720,7 +2805,7 @@ function buildUsePowerup(dependencies = {}) {
       );
       if (shield) {
         await effectModel.update(shield.id, { status: "BLOCKED" });
-        await powerupModel.update(powerupId, {
+        await consumePowerup({
           status: "USED",
           usedAt: now(),
           targetUserId: resolvedTargetUserId,
@@ -3212,30 +3297,30 @@ function buildUsePowerup(dependencies = {}) {
             "UMBRELLA"
           );
           if (victimUmbrella && victimUmbrella.expiresAt && new Date(victimUmbrella.expiresAt) > now()) {
-            // This hidden row is a private scoring intent, not presentation
-            // work. Persist it independently of the delivery flag so the
-            // actual storm-end boundary can decide eligibility against the
-            // durable rollout epoch. Otherwise off-at-cast/on-before-end loses
-            // a legitimate defense notice, while on-at-cast/off-at-end risks a
-            // stale cached decision. Feed/message readers omit hidden rows.
-            await eventModel.create({
-              raceId,
-              actorUserId: userId,
-              eventType: "POWERUP_USED",
-              powerupType: "UMBRELLA",
-              targetUserId: victim.userId,
-              description: `${victimName}'s Umbrella intercepted a Rainstorm.`,
-              metadata: {
-                hiddenFromFeed: true,
-                activeImpactDefenseCalculationVersion: 1,
-                activeImpactDefenseType: "UMBRELLA",
-                activeImpactDefenseTargetUserId: victim.userId,
-                activeImpactDefenseEffectId: victimUmbrella.id,
-                activeImpactDefenseWindowStart: currentTime.toISOString(),
-                activeImpactDefenseWindowEnd: stormEnd.toISOString(),
-                activeImpactDefenseMultiplier: RAINSTORM_MULTIPLIER,
-              },
-            });
+            // V2 owns this as an indexed domain source, not hidden feed JSON.
+            // Source creation is backend-flagged and intentionally independent
+            // of the caster's request capability: a frozen-client caster can
+            // still affect a v2-capable recipient.
+            if (activeImpactEnabled) {
+              await db.raceUmbrellaInterception.upsert({
+                where: {
+                  rainstormPowerupId_recipientUserId: {
+                    rainstormPowerupId: powerupId,
+                    recipientUserId: victim.userId,
+                  },
+                },
+                update: {},
+                create: {
+                  raceId,
+                  recipientUserId: victim.userId,
+                  umbrellaEffectId: victimUmbrella.id,
+                  rainstormPowerupId: powerupId,
+                  windowStart: currentTime,
+                  resolvesAt: stormEnd,
+                  avoidedMultiplier: RAINSTORM_MULTIPLIER,
+                },
+              });
+            }
             continue;
           }
 
@@ -3962,8 +4047,10 @@ function buildUsePowerup(dependencies = {}) {
 
     }
 
-    // Mark powerup as used
-    await powerupModel.update(powerupId, {
+    // The outer command transaction holds this row lock. Keep the state change
+    // conditional as the final concurrency fence: a concurrent/retried request
+    // can never consume the same HELD item twice.
+    await consumePowerup({
       status: "USED",
       usedAt: currentTime,
       targetUserId: resolvedTargetUserId || null,
@@ -4042,7 +4129,31 @@ function buildUsePowerup(dependencies = {}) {
   // never let a refund error replace the original PowerupUseError.
   return async function usePowerup(args) {
     try {
-      return await usePowerupCore(args);
+      if (hasInjectedDeps) return await usePowerupCore(args);
+
+      return await runInPrismaTransaction(async (tx) => {
+        // One stable lock order for every direct consequence command. The race
+        // row prevents terminal-state changes during validation, the item row
+        // serializes duplicate taps, and participant rows are locked in the
+        // required ascending userId order. Locking all accepted rows is a safe
+        // conservative superset for fan-out/reflection paths whose final
+        // recipients are defense-dependent.
+        await tx.$queryRaw`
+          SELECT id FROM races WHERE id = ${args.raceId} FOR UPDATE
+        `;
+        await tx.$queryRaw`
+          SELECT id FROM race_powerups WHERE id = ${args.powerupId} FOR UPDATE
+        `;
+        await tx.$queryRaw`
+          SELECT id
+          FROM race_participants
+          WHERE race_id = ${args.raceId}
+            AND status = 'accepted'::"RaceParticipantStatus"
+          ORDER BY user_id ASC
+          FOR UPDATE
+        `;
+        return usePowerupCore(args);
+      }, { maxWait: 5_000, timeout: 30_000 });
     } catch (err) {
       if (err instanceof PowerupUseError && !err.retainHeld) {
         try {

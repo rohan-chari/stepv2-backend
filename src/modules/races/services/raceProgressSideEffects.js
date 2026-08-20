@@ -234,12 +234,17 @@ function buildRaceProgressPostCommit(dependencies = {}) {
     job,
     result,
     superseded = false,
+    deferEffectExpiry = false,
     deferSnapshot = false,
     deferDelivery = false,
   } = {}) {
     if (!raceId) return;
     if (!(await enabled())) return;
-    await runExpireEffects({ raceId, result });
+    // With v2 event materialization enabled, an ordinary score generation must
+    // not consume a due source before the durable EFFECT_BOUNDARY claim can
+    // calculate and commit its event. The boundary run performs the normal
+    // expiry immediately after its atomic C0 write.
+    if (!deferEffectExpiry) await runExpireEffects({ raceId, result });
     const intentClaims = await runHighMultiplierAlert({
       raceId,
       result,

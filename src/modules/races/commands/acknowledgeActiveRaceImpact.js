@@ -1,25 +1,32 @@
 const { prisma: defaultPrisma } = require("../../../db");
-const { ActiveRaceImpact: defaultModel } = require("../models/activeRaceImpact");
+const {
+  RaceImpactEvent: defaultModel,
+  parsePresentationId,
+} = require("../models/raceImpactEvent");
 const { NotFoundError, ConflictError } = require("../../../shared/errors/AppError");
 
-function buildAcknowledgeActiveRaceImpact(dependencies = {}) {
+function buildAcknowledge(dependencies = {}) {
   const prisma = dependencies.prisma || defaultPrisma;
-  const model = dependencies.ActiveRaceImpact || defaultModel;
+  const model = dependencies.RaceImpactEvent || defaultModel;
   const now = dependencies.now || (() => new Date());
 
-  return async function acknowledgeActiveRaceImpact({ raceId, userId, noticeId }) {
+  return async function acknowledge({ raceId, userId, presentationId }) {
+    const id = parsePresentationId(presentationId);
+    if (!id) throw new NotFoundError("Impact event not found", "NOT_FOUND");
     return prisma.$transaction(async (tx) => {
-      const own = await model.findOwnNotice({ raceId, userId, noticeId }, tx);
-      if (!own) throw new NotFoundError("Impact notice not found", "NOT_FOUND");
+      // Ownership is intentionally checked before race state so malformed,
+      // missing, and foreign IDs all share the same nondisclosing 404.
+      const own = await model.findOwn({ raceId, userId, id }, tx);
+      if (!own) throw new NotFoundError("Impact event not found", "NOT_FOUND");
       const race = await model.getRaceAccess({ raceId, userId }, tx);
       if (!race || race.status !== "ACTIVE") {
         throw new ConflictError("Race is not active", "RACE_NOT_ACTIVE");
       }
-      if (own.acknowledgedAt) return { acknowledged: true };
-      const result = await model.acknowledgeNoticeIfActive({
+      if (own.popupAcknowledgedAt) return { acknowledged: true };
+      const result = await model.acknowledgeIfActive({
         raceId,
         userId,
-        noticeId,
+        id,
         now: now(),
       }, tx);
       if (result.count !== 1) {
@@ -30,43 +37,16 @@ function buildAcknowledgeActiveRaceImpact(dependencies = {}) {
   };
 }
 
-function buildAcknowledgeActiveImpactReceipt(dependencies = {}) {
-  const prisma = dependencies.prisma || defaultPrisma;
-  const model = dependencies.ActiveRaceImpact || defaultModel;
-  const now = dependencies.now || (() => new Date());
+function buildAcknowledgeActiveRaceImpact(dependencies = {}) {
+  const acknowledge = buildAcknowledge(dependencies);
+  return ({ raceId, userId, noticeId }) =>
+    acknowledge({ raceId, userId, presentationId: noticeId });
+}
 
-  return async function acknowledgeActiveImpactReceipt({ raceId, userId, receiptId }) {
-    return prisma.$transaction(async (tx) => {
-      const own = await model.findOwnReceipt({ raceId, userId, receiptId }, tx);
-      if (!own) throw new NotFoundError("Impact receipt not found", "NOT_FOUND");
-      const race = await model.getRaceAccess({ raceId, userId }, tx);
-      if (!race || race.status !== "ACTIVE") {
-        throw new ConflictError("Race is not active", "RACE_NOT_ACTIVE");
-      }
-      const acknowledgedAt = own.inlineAcknowledgedAt || now();
-      if (!own.inlineAcknowledgedAt) {
-        const result = await model.acknowledgeReceiptIfActive({
-          raceId,
-          userId,
-          receiptId,
-          now: acknowledgedAt,
-        }, tx);
-        if (result.count !== 1) {
-          throw new ConflictError("Race is not active", "RACE_NOT_ACTIVE");
-        }
-      }
-      // Materialization may win either side of the receipt dismissal. Updating
-      // both rows in this transaction closes the after-materialization race;
-      // the worker separately copies inlineAcknowledgedAt on the before path.
-      await model.acknowledgeMaterializedImpactForWork({
-        raceId,
-        userId,
-        workId: own.id,
-        acknowledgedAt,
-      }, tx);
-      return { acknowledged: true };
-    });
-  };
+function buildAcknowledgeActiveImpactReceipt(dependencies = {}) {
+  const acknowledge = buildAcknowledge(dependencies);
+  return ({ raceId, userId, receiptId }) =>
+    acknowledge({ raceId, userId, presentationId: receiptId });
 }
 
 const acknowledgeActiveRaceImpact = buildAcknowledgeActiveRaceImpact();

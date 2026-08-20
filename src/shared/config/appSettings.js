@@ -1,10 +1,7 @@
 const { prisma: defaultPrisma } = require("../../db");
 const derivedCache = require("../cache/derivedCache");
 const cacheKeys = require("../cache/cacheKeys");
-const {
-  ACTIVE_IMPACT_FLAG_KEY,
-  transitionActiveImpactFlag,
-} = require("./activeImpactRolloutFence");
+const ACTIVE_IMPACT_FLAG_KEY = "apiActiveImpactNoticesV1Enabled";
 
 // Every C1 key is a 60s safety net; invalidation is the primary mechanism
 // (spec §3 key table).
@@ -317,8 +314,9 @@ const KNOWN_FLAGS = {
   // deployed backend is inert until both the mobile build and operator flag are
   // ready, while old clients simply ignore the additive fields/endpoints.
   apiImpactNoticesEnabled: false,
-  // Active-race synced-step notifications are a new capability-gated surface.
-  // Work creation and delivery both stay inert until explicitly enabled.
+  // Tombstoned after the 2026-08-19 incident. Runtime reads and writes are
+  // forced false below so a historical true row cannot reactivate the v1
+  // scanner during the rollback-schema retention window.
   apiActiveImpactNoticesV1Enabled: false,
   // Separate kill switch for the legacy 2.3.8 completed-race popup routes.
   // Private completed Activity remains controlled by apiImpactNoticesEnabled.
@@ -469,6 +467,7 @@ function buildAppSettings(dependencies = {}) {
   // back to the declared default — callers never need their own try/catch.
   async function getFlag(key) {
     const fallback = KNOWN_FLAGS[key];
+    if (key === ACTIVE_IMPACT_FLAG_KEY) return false;
     try {
       const all = await loadAll();
       const value = all[key];
@@ -515,6 +514,7 @@ function buildAppSettings(dependencies = {}) {
   // degrades to the declared default, never to undefined.
   async function getUncachedFlag(key) {
     const fallback = KNOWN_FLAGS[key];
+    if (key === ACTIVE_IMPACT_FLAG_KEY) return false;
     try {
       const row = await prisma.appSetting.findUnique({ where: { key } });
       const value = row?.value;
@@ -536,6 +536,10 @@ function buildAppSettings(dependencies = {}) {
     for (const row of rows) byKey[row.key] = row.value;
     const out = {};
     for (const [key, fallback] of Object.entries(KNOWN_FLAGS)) {
+      if (key === ACTIVE_IMPACT_FLAG_KEY) {
+        out[key] = false;
+        continue;
+      }
       const value = byKey[key];
       out[key] =
         typeof fallback === "boolean" && typeof value !== "boolean"
@@ -574,9 +578,11 @@ function buildAppSettings(dependencies = {}) {
       }
     }
     if (key === ACTIVE_IMPACT_FLAG_KEY) {
-      await prisma.$transaction((tx) =>
-        transitionActiveImpactFlag(tx, value, new Date())
-      );
+      await prisma.appSetting.upsert({
+        where: { key },
+        update: { value: false },
+        create: { key, value: false },
+      });
     } else if (key === "adminMetricsV2TelemetryEnabled") {
       await prisma.$transaction(async (tx) => {
         const existing = await tx.appSetting.findUnique({ where: { key } });
@@ -636,7 +642,11 @@ function buildAppSettings(dependencies = {}) {
         ([key]) => key === ACTIVE_IMPACT_FLAG_KEY
       );
       if (activeImpactEntry) {
-        await transitionActiveImpactFlag(tx, activeImpactEntry[1], new Date());
+        await tx.appSetting.upsert({
+          where: { key: ACTIVE_IMPACT_FLAG_KEY },
+          update: { value: false },
+          create: { key: ACTIVE_IMPACT_FLAG_KEY, value: false },
+        });
       }
       const telemetryEntry = entries.find(
         ([key]) => key === "adminMetricsV2TelemetryEnabled"

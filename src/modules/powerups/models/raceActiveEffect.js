@@ -1,6 +1,67 @@
 const { prisma } = require("../../../db");
 
+function buildActiveImpactDueReader(client = prisma) {
+  return {
+    async findDueActiveImpactSourcesForRace({ raceId, now, types, limit = 8 }) {
+      return client.raceActiveEffect.findMany({
+        where: {
+          raceId,
+          status: "ACTIVE",
+          expiresAt: { not: null, lte: now },
+          type: { in: types },
+        },
+        orderBy: [{ expiresAt: "asc" }, { id: "asc" }],
+        take: Math.max(1, Number(limit) || 8) + 1,
+      });
+    },
+
+    async findActiveImpactSourcesByIds({ raceId, sourceIds, types }) {
+      const ids = [...new Set(sourceIds || [])].filter(Boolean);
+      if (ids.length === 0) return [];
+      return client.raceActiveEffect.findMany({
+        where: {
+          raceId,
+          id: { in: ids },
+          status: "ACTIVE",
+          type: { in: types },
+        },
+        orderBy: [{ startsAt: "asc" }, { id: "asc" }],
+      });
+    },
+
+    async findActiveImpactPrefixEffects({
+      raceId,
+      participantIds,
+      sourceUserIds = [],
+      types,
+      through,
+    }) {
+      const targets = [...new Set(participantIds || [])].filter(Boolean);
+      const sources = [...new Set(sourceUserIds || [])].filter(Boolean);
+      if (targets.length === 0 && sources.length === 0) return [];
+      return client.raceActiveEffect.findMany({
+        where: {
+          raceId,
+          status: { in: ["ACTIVE", "EXPIRED"] },
+          type: { in: types },
+          startsAt: { lte: through },
+          OR: [
+            ...(targets.length > 0
+              ? [{ targetParticipantId: { in: targets } }]
+              : []),
+            ...(sources.length > 0
+              ? [{ type: "HITCHHIKE", sourceUserId: { in: sources } }]
+              : []),
+          ],
+        },
+        orderBy: [{ startsAt: "asc" }, { id: "asc" }],
+      });
+    },
+  };
+}
+
 const RaceActiveEffect = {
+  ...buildActiveImpactDueReader(),
   async create({ raceId, targetParticipantId, targetUserId, sourceUserId, powerupId, type, startsAt, expiresAt, metadata }) {
     return prisma.raceActiveEffect.create({
       data: { raceId, targetParticipantId, targetUserId, sourceUserId, powerupId, type, status: "ACTIVE", startsAt, expiresAt, metadata },
@@ -196,4 +257,4 @@ const RaceActiveEffect = {
   },
 };
 
-module.exports = { RaceActiveEffect };
+module.exports = { buildActiveImpactDueReader, RaceActiveEffect };

@@ -140,6 +140,7 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
         displayArtifact = null,
         burstCoalescing = false,
         queuedGenerationMerge = false,
+        bypassDebounce = false,
       },
       tx = prisma
     ) {
@@ -154,6 +155,7 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
           displayArtifactByRaceId: new Map([[raceId, displayArtifact]]),
           burstCoalescing,
           queuedGenerationMerge,
+          bypassDebounce,
         },
         tx
       );
@@ -213,6 +215,7 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
         displayArtifactByRaceId = null,
         burstCoalescing = false,
         queuedGenerationMerge = false,
+        bypassDebounce = false,
       },
       tx = prisma
     ) {
@@ -356,7 +359,11 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
                         SELECT DISTINCT value
                         FROM jsonb_array_elements(race_resolution_jobs_v2.dirty_powerup_types || EXCLUDED.dirty_powerup_types)
                       ) scope_check) > 64)
-              THEN '["FULL"]'::jsonb
+              THEN CASE
+                WHEN (race_resolution_jobs_v2.dirty_reasons || EXCLUDED.dirty_reasons) ? 'EFFECT_BOUNDARY'
+                  THEN '["FULL","EFFECT_BOUNDARY"]'::jsonb
+                ELSE '["FULL"]'::jsonb
+              END
             ELSE (
               SELECT COALESCE(jsonb_agg(value ORDER BY first_ordinal), '[]'::jsonb)
               FROM (
@@ -411,7 +418,14 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
                         SELECT DISTINCT value
                         FROM jsonb_array_elements(race_resolution_jobs_v2.dirty_powerup_types || EXCLUDED.dirty_powerup_types)
                       ) scope_check) > 64)
-              THEN '[]'::jsonb
+              THEN CASE
+                WHEN jsonb_typeof(race_resolution_jobs_v2.dirty_powerup_types) = 'array'
+                  AND jsonb_typeof(EXCLUDED.dirty_powerup_types) = 'array'
+                  AND (race_resolution_jobs_v2.dirty_reasons || EXCLUDED.dirty_reasons) ? 'EFFECT_BOUNDARY'
+                  AND (race_resolution_jobs_v2.dirty_powerup_types || EXCLUDED.dirty_powerup_types) ? 'UMBRELLA'
+                  THEN '["UMBRELLA"]'::jsonb
+                ELSE '[]'::jsonb
+              END
             ELSE (
               SELECT COALESCE(jsonb_agg(value ORDER BY first_ordinal), '[]'::jsonb)
               FROM (
@@ -425,6 +439,10 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
           dirty_priority = CASE
             WHEN race_resolution_jobs_v2.dirty_priority = 'IMMEDIATE' OR EXCLUDED.dirty_priority = 'IMMEDIATE'
               THEN 'IMMEDIATE' ELSE 'COALESCE' END,
+          not_before_at = CASE
+            WHEN $4::boolean THEN NULL
+            ELSE race_resolution_jobs_v2.not_before_at
+          END,
           display_artifact_id = CASE
             WHEN EXCLUDED.dirty_reasons = '["DISPLAY_REFRESH"]'::jsonb
               AND (NOT ($3::boolean
@@ -460,7 +478,8 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
         `,
         JSON.stringify(rowsIn),
         now,
-        queuedGenerationMerge === true
+        queuedGenerationMerge === true,
+        bypassDebounce === true
       );
 
       // RETURNING order is not guaranteed, and callers depend on the ascending
@@ -543,7 +562,11 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
                     FROM jsonb_array_elements(j.processing_dirty_participant_ids || j.dirty_participant_ids)) > 1000
                 OR (SELECT COUNT(DISTINCT value)
                     FROM jsonb_array_elements(j.processing_dirty_powerup_types || j.dirty_powerup_types)) > 64
-                THEN '["FULL"]'::jsonb
+                THEN CASE
+                  WHEN (j.processing_dirty_reasons || j.dirty_reasons) ? 'EFFECT_BOUNDARY'
+                    THEN '["FULL","EFFECT_BOUNDARY"]'::jsonb
+                  ELSE '["FULL"]'::jsonb
+                END
               ELSE (
                 SELECT COALESCE(jsonb_agg(value ORDER BY first_ordinal), '[]'::jsonb)
                 FROM (
@@ -583,7 +606,14 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
                 OR jsonb_path_exists(j.processing_dirty_powerup_types || j.dirty_powerup_types, '$[*] ? (@.type() != "string" || @ == "")')
                 OR (SELECT COUNT(DISTINCT value)
                     FROM jsonb_array_elements(j.processing_dirty_powerup_types || j.dirty_powerup_types)) > 64
-                THEN '[]'::jsonb
+                THEN CASE
+                  WHEN jsonb_typeof(j.processing_dirty_powerup_types) = 'array'
+                    AND jsonb_typeof(j.dirty_powerup_types) = 'array'
+                    AND (j.processing_dirty_reasons || j.dirty_reasons) ? 'EFFECT_BOUNDARY'
+                    AND (j.processing_dirty_powerup_types || j.dirty_powerup_types) ? 'UMBRELLA'
+                    THEN '["UMBRELLA"]'::jsonb
+                  ELSE '[]'::jsonb
+                END
               ELSE (
                 SELECT COALESCE(jsonb_agg(value ORDER BY first_ordinal), '[]'::jsonb)
                 FROM (
@@ -730,7 +760,11 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
                WHEN merged.reasons ? 'FULL'
                  OR jsonb_array_length(merged.participants) > 1000
                  OR jsonb_array_length(merged.powerups) > 64
-                 THEN '["FULL"]'::jsonb
+                 THEN CASE
+                   WHEN merged.reasons ? 'EFFECT_BOUNDARY'
+                     THEN '["FULL","EFFECT_BOUNDARY"]'::jsonb
+                   ELSE '["FULL"]'::jsonb
+                 END
                ELSE merged.reasons END,
              dirty_participant_ids = CASE
                WHEN merged.reasons ? 'FULL'
@@ -742,7 +776,12 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
                WHEN merged.reasons ? 'FULL'
                  OR jsonb_array_length(merged.participants) > 1000
                  OR jsonb_array_length(merged.powerups) > 64
-                 THEN '[]'::jsonb
+                 THEN CASE
+                   WHEN merged.reasons ? 'EFFECT_BOUNDARY'
+                     AND merged.powerups ? 'UMBRELLA'
+                     THEN '["UMBRELLA"]'::jsonb
+                   ELSE '[]'::jsonb
+                 END
                ELSE merged.powerups END,
              dirty_priority='COALESCE',
              processing_dirty_reasons='[]'::jsonb,

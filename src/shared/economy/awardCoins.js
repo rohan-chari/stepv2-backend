@@ -1,4 +1,4 @@
-const { prisma } = require("../../db");
+const { prisma, deferUntilAfterCommit } = require("../../db");
 // C5 (spec §5 Phase E2, §9's last acceptance box): this file and
 // deductCoinsAtomic.js are the ONLY two `users.coins` writers, pinned by
 // test/services/coinSeamStructuralGuard.test.js. `coins` is the single most
@@ -7,11 +7,13 @@ const { prisma } = require("../../db");
 // the Redis wrapper, and this file is required from settlement paths that must
 // stay Redis-free at load time.
 async function invalidateAuthMe(userId) {
-  try {
-    await require("../../modules/users/services/authMeCache").invalidateSafe(userId);
-  } catch {
-    // A cache DEL must never fail a ledgered coin write.
-  }
+  await deferUntilAfterCommit(async () => {
+    try {
+      await require("../../modules/users/services/authMeCache").invalidateSafe(userId);
+    } catch {
+      // A cache DEL must never fail a ledgered coin write.
+    }
+  });
 }
 
 /**

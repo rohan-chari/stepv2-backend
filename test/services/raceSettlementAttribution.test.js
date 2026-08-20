@@ -3,6 +3,7 @@ const test = require("node:test");
 
 const {
   computeSettlementAttributionVector,
+  computeSelectedPrefixAttributionVector,
 } = require("../../src/modules/races/services/raceSettlementAttribution");
 
 test("canonical attribution uses ordered marginals through stacked effects, a floor, and a global event", async () => {
@@ -80,4 +81,58 @@ test("local attribution emits an impact only for participants eligible for that 
     eventId: "local-event",
     deltaSteps: 100,
   }]);
+});
+
+test("bounded raw-prefix capture preserves legacy fractional allocation with one instrumented scorer call", async () => {
+  const participants = [{ id: "participant", userId: "user" }];
+  const effects = [
+    { id: "a", type: "RUNNERS_HIGH", startsAt: new Date("2026-08-17T10:00:00Z") },
+    { id: "b", type: "RALLY_FLAG", startsAt: new Date("2026-08-17T10:01:00Z") },
+    { id: "c", type: "WRONG_TURN", startsAt: new Date("2026-08-17T10:02:00Z") },
+  ];
+  const totalFor = (effectIds) => {
+    let total = 100;
+    if (effectIds.has("a")) total += 0.4;
+    if (effectIds.has("b")) total += 0.4;
+    if (effectIds.has("c")) total += 0.4;
+    return total;
+  };
+  const legacy = await computeSettlementAttributionVector({
+    participants,
+    effects,
+    score: async ({ effectIds }) => new Map([["participant", totalFor(effectIds)]]),
+  });
+
+  let instrumentedCalls = 0;
+  const bounded = await computeSelectedPrefixAttributionVector({
+    participants,
+    effects,
+    selectedEffectIds: new Set(["b", "c"]),
+    scoreRawPrefixTerms: async ({ orderedEffects }) => {
+      instrumentedCalls += 1;
+      const included = new Set();
+      const baselineTotals = new Map([["participant", totalFor(included)]]);
+      const rawTermsByParticipant = new Map([["participant", []]]);
+      let previous = baselineTotals;
+      for (const effect of orderedEffects) {
+        included.add(effect.id);
+        const next = new Map([["participant", totalFor(included)]]);
+        rawTermsByParticipant.get("participant").push({
+          kind: "effect",
+          effectId: effect.id,
+          powerupType: effect.type,
+          rawDelta: next.get("participant") - previous.get("participant"),
+          orderKey: `0:${effect.id}`,
+        });
+        previous = next;
+      }
+      return { baselineTotals, finalTotals: previous, rawTermsByParticipant };
+    },
+  });
+
+  assert.equal(instrumentedCalls, 1);
+  assert.deepEqual(bounded.effectImpacts, legacy.effectImpacts);
+  // The one allocated step belongs to the earlier `a` term. The selected due
+  // sources stay zero and therefore create no private event.
+  assert.deepEqual(bounded.selectedEffectImpacts, []);
 });

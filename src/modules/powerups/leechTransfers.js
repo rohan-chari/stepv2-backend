@@ -148,9 +148,96 @@ function applyLeechTransfers(entries, { onTransfer = null } = {}) {
   return finals;
 }
 
+// Incremental form of applyLeechTransfers for chronological attribution. A
+// local/Hitchhike score change can alter the floor allocation of earlier
+// leeches, so only that victim's ordered transfer list is replayed; credits do
+// not recursively become drainable and therefore no graph-wide recompute is
+// required. getFinalTotals is exactly equivalent to applyLeechTransfers over
+// the current state.
+function createIncrementalLeechTransferState(entries = []) {
+  const preLeech = new Map();
+  const participantIdByUser = new Map();
+  const userIdByParticipant = new Map();
+  const transfersByVictim = new Map();
+  const actualByEffect = new Map();
+  const creditByUser = new Map();
+  const drainedByVictim = new Map();
+
+  for (const entry of entries) {
+    preLeech.set(entry.participantId, Number(entry.preLeechTotal) || 0);
+    userIdByParticipant.set(entry.participantId, entry.userId);
+    if (!participantIdByUser.has(entry.userId)) {
+      participantIdByUser.set(entry.userId, entry.participantId);
+    }
+  }
+
+  const addCredit = (userId, delta) => {
+    if (!userId || delta === 0) return;
+    const next = (creditByUser.get(userId) || 0) + delta;
+    if (next === 0) creditByUser.delete(userId);
+    else creditByUser.set(userId, next);
+  };
+
+  const recomputeVictim = (participantId) => {
+    const rows = transfersByVictim.get(participantId) || [];
+    for (const row of rows) {
+      addCredit(row.sourceUserId, -(actualByEffect.get(row.effectId) || 0));
+      actualByEffect.delete(row.effectId);
+    }
+    rows.sort((a, b) => {
+      const at = new Date(a.startsAt).getTime();
+      const bt = new Date(b.startsAt).getTime();
+      if (at !== bt) return at - bt;
+      return String(a.effectId).localeCompare(String(b.effectId));
+    });
+    let remaining = preLeech.get(participantId) || 0;
+    let drained = 0;
+    for (const row of rows) {
+      const actual = Math.max(
+        0,
+        Math.min(Number(row.earnedTransfer) || 0, remaining),
+      );
+      actualByEffect.set(row.effectId, actual);
+      addCredit(row.sourceUserId, actual);
+      remaining -= actual;
+      drained += actual;
+    }
+    drainedByVictim.set(participantId, drained);
+  };
+
+  return {
+    addTransfer(transfer) {
+      const victim = transfer.victimParticipantId;
+      if (!transfersByVictim.has(victim)) transfersByVictim.set(victim, []);
+      transfersByVictim.get(victim).push({ ...transfer });
+      recomputeVictim(victim);
+    },
+    setPreLeechTotal(participantId, total) {
+      preLeech.set(participantId, Number(total) || 0);
+      recomputeVictim(participantId);
+    },
+    getPreLeechTotal(participantId) {
+      return preLeech.get(participantId) || 0;
+    },
+    getFinalTotals() {
+      const totals = new Map();
+      for (const [participantId, total] of preLeech) {
+        const userId = userIdByParticipant.get(participantId);
+        totals.set(
+          participantId,
+          total - (drainedByVictim.get(participantId) || 0) +
+            (creditByUser.get(userId) || 0),
+        );
+      }
+      return totals;
+    },
+  };
+}
+
 module.exports = {
   LEECH_DEFAULT_RATIO,
   leechRatio,
   computeLeechEarnedTransfer,
   applyLeechTransfers,
+  createIncrementalLeechTransferState,
 };

@@ -24,6 +24,8 @@ const TABLES_IN_ORDER = [
   "global_step_event_cron_owners",
   "global_step_event_entitlements",
   "race_effect_impacts",
+  "race_impact_events",
+  "race_umbrella_interceptions",
   "active_race_effect_impacts",
   "active_race_impact_work",
   "race_payout_double_offer_items",

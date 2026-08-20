@@ -1,9 +1,14 @@
-const { prisma: defaultPrisma } = require("../../../db");
+const {
+  prisma: defaultPrisma,
+  deferUntilAfterCommit,
+} = require("../../../db");
 const prisma = defaultPrisma;
 
 async function invalidateCreatedEvent(row) {
-  const raceMessagesCache = require("../../social/services/raceMessagesCache");
-  await raceMessagesCache.invalidateKind(row.raceId, "SYSTEM", row);
+  await deferUntilAfterCommit(async () => {
+    const raceMessagesCache = require("../../social/services/raceMessagesCache");
+    await raceMessagesCache.invalidateKind(row.raceId, "SYSTEM", row);
+  });
 }
 
 function applyCursor(where, cursor) {
@@ -152,24 +157,6 @@ const RacePowerupEvent = {
     });
   },
 
-  // Active-defense attribution needs only hidden Umbrella interception
-  // intents. Keeping this projection narrow avoids hydrating every feed event
-  // in large, long-running races; metadata is still validated defensively by
-  // the resolver because historical rows predate the typed intent contract.
-  async findActiveDefenseCandidates(raceId) {
-    return prisma.$queryRawUnsafe(
-      `SELECT id, metadata, created_at AS "createdAt"
-         FROM race_powerup_events
-        WHERE race_id = $1
-          AND event_type = 'POWERUP_USED'
-          AND metadata @> '{
-            "activeImpactDefenseCalculationVersion": 1,
-            "activeImpactDefenseType": "UMBRELLA"
-          }'::jsonb
-        ORDER BY created_at ASC, id ASC`,
-      raceId,
-    );
-  },
 };
 
 module.exports = { RacePowerupEvent };

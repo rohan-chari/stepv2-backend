@@ -43,12 +43,10 @@ const {
 const {
   scheduleRaceResolutionWorkerV2,
   scheduleRaceResolutionPostTaskRunner,
+  scheduleResolvedImpactBoundaryScheduler,
 } = require("./modules/races");
 const {
   scheduleRacePayoutDoubleReconcile,
-} = require("./modules/races");
-const {
-  scheduleActiveRaceImpactMaintenance,
 } = require("./modules/races");
 function startServer({
   app = createApp(),
@@ -91,10 +89,10 @@ function startServer({
   scheduleRaceResolutionWorker: scheduleRaceResolution = scheduleRaceResolutionWorkerV2,
   scheduleRaceResolutionPostTasks:
     scheduleResolutionPostTasks = scheduleRaceResolutionPostTaskRunner,
+  scheduleResolvedImpactBoundaries:
+    scheduleImpactBoundaries = scheduleResolvedImpactBoundaryScheduler,
   scheduleRacePayoutDoubleReconcile:
     schedulePayoutDoubleReconcile = scheduleRacePayoutDoubleReconcile,
-  scheduleActiveRaceImpactMaintenance:
-    scheduleActiveImpactMaintenance = scheduleActiveRaceImpactMaintenance,
   logger = console,
   // Delay before the cron jobs start ticking. Every scheduler fires an
   // immediate first tick, and under pm2 cluster `reload` the OLD process keeps
@@ -216,6 +214,7 @@ function startServer({
       // Uses its own console (like scheduleTournamentSeedRenewal) rather than the
       // injected startup logger.
       scheduleRaceResolution();
+      scheduleImpactBoundaries();
       // Delivery/publication groups are durable and drain independently of the
       // creation flag. The whole-runner emergency switch is checked here and
       // again on each scheduler tick; disabling it leaves every row untouched.
@@ -224,16 +223,6 @@ function startServer({
       }
       if (process.env.RACE_PAYOUT_DOUBLE_RECONCILE_ENABLED === "true") {
         schedulePayoutDoubleReconcile();
-      }
-      // Always-running boundary fencing prevents effects that finish while the
-      // rollout flag is off from being backfilled when it is later enabled.
-      // Processed active presentation/work is retained for 30 days only; final
-      // settlement impacts live in a separate table and are never pruned here.
-      if (
-        process.env.ACTIVE_RACE_IMPACT_BOUNDARY_SCANNER_DISABLED !== "true" ||
-        process.env.ACTIVE_RACE_IMPACT_RETENTION_DISABLED !== "true"
-      ) {
-        scheduleActiveImpactMaintenance();
       }
     };
     // Cluster-mode guard: pm2 sets NODE_APP_INSTANCE per worker (0, 1, ...).

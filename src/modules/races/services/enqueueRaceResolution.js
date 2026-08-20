@@ -129,6 +129,19 @@ async function enqueueRaceResolution(
       priority: "IMMEDIATE",
     };
   }
+  // EFFECT_BOUNDARY is a correctness/source-consumption envelope, not a
+  // reason-aware scoring optimization. It must survive with that identity even
+  // when the optional reason-aware rollout is off, otherwise it degrades to
+  // FULL and the worker cannot distinguish it from ordinary score generation.
+  if (reason === "EFFECT_BOUNDARY") {
+    rollout.dirtyEnvelope = {
+      reason: "EFFECT_BOUNDARY",
+      dirtyUserIds,
+      dirtyParticipantIds,
+      powerupTypes,
+      priority: "IMMEDIATE",
+    };
+  }
   if (tx) {
     result = await capacity.measurePhase("persist", () =>
       RaceResolutionJobV2.enqueue(

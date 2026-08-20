@@ -27,7 +27,10 @@
 // box progress — no special case is needed or wanted.
 
 const HOUR_MS = 60 * 60 * 1000;
-const { computeEffectModifiers } = require("../races/services/effectiveStepScoring");
+const {
+  computeEffectModifiers,
+  createIncrementalEffectScoreCapture,
+} = require("../races/services/effectiveStepScoring");
 const { eventsForUser } = require("../steps/services/globalStepEventEntitlement");
 
 // Default copy strength when an effect row carries no (or malformed)
@@ -122,6 +125,94 @@ async function computeHitchhikeCopiedSteps(
   const effective = steps - modifiers.frozenSteps + modifiers.buffedSteps -
     2 * modifiers.reversedSteps + (modifiers.globalBoostedSteps || 0);
   return Math.floor(effective * hitchhikeCopyRatio(effect));
+}
+
+// Instrumented form used by active-boundary attribution. It reads the target's
+// Hitchhike window once, then accepts target effects in canonical chronological
+// order and updates the copied artifact without invoking the full scorer for
+// every prefix.
+async function createIncrementalHitchhikeCopyCapture({
+  effect,
+  targetEffects = [],
+  stepSampleModel,
+  now,
+  raceEndsAt = null,
+  targetFinishedAt = null,
+  targetForfeitedAt = null,
+  targetParticipantId = null,
+  raceId = null,
+  globalEvents = [],
+}) {
+  const nowMs = (now instanceof Date ? now : new Date(now)).getTime();
+  const currentHourStart = Math.floor(nowMs / HOUR_MS) * HOUR_MS;
+  const windowStart = toMsOrNull(effect?.startsAt);
+  const ends = [
+    toMsOrNull(effect?.expiresAt) ?? nowMs,
+    toMsOrNull(raceEndsAt),
+    toMsOrNull(targetFinishedAt),
+    toMsOrNull(targetForfeitedAt),
+    currentHourStart,
+  ].filter((ms) => ms != null);
+  const windowEnd = ends.length ? Math.min(...ends) : currentHourStart;
+  if (!effect?.targetUserId || !effect?.sourceUserId || windowStart == null ||
+      !(windowEnd > windowStart)) {
+    return { applyEffect() {}, getCopiedSteps() { return 0; } };
+  }
+
+  const steps = await stepSampleModel.sumStepsInWindow(
+    effect.targetUserId,
+    new Date(windowStart),
+    new Date(windowEnd),
+  );
+  if (!(steps > 0)) {
+    return { applyEffect() {}, getCopiedSteps() { return 0; } };
+  }
+  const ratio = hitchhikeCopyRatio(effect);
+  const scoringVersion = Number(effect.metadata?.scoringVersion) || 1;
+  if (scoringVersion < 2 || !targetParticipantId || !raceId) {
+    const copiedSteps = Math.floor(steps * ratio);
+    return { applyEffect() {}, getCopiedSteps() { return copiedSteps; } };
+  }
+
+  const supported = new Set([
+    "LEG_CRAMP", "QUICKSAND", "RUNNERS_HIGH", "WRONG_TURN",
+    "CAMPFIRE_REST", "RAINSTORM",
+  ]);
+  const scoringEffects = targetEffects.filter((row) => supported.has(row.type));
+  const clippedSamples = {
+    async sumStepsInWindows(userId, windows) {
+      const clipped = windows.map((window) => ({
+        start: new Date(Math.max(new Date(window.start).getTime(), windowStart)),
+        end: new Date(Math.min(new Date(window.end).getTime(), windowEnd)),
+      }));
+      if (typeof stepSampleModel.sumStepsInWindows === "function") {
+        return stepSampleModel.sumStepsInWindows(userId, clipped);
+      }
+      return Promise.all(clipped.map((window) =>
+        window.end > window.start
+          ? stepSampleModel.sumStepsInWindow(userId, window.start, window.end)
+          : 0));
+    },
+  };
+  const modifierCapture = await createIncrementalEffectScoreCapture({
+    effects: scoringEffects,
+    rawTotal: steps,
+    userId: effect.targetUserId,
+    stepSampleModel: clippedSamples,
+    hasSampleData: true,
+    now: new Date(windowEnd),
+    windowStart: new Date(windowStart),
+    windowEnd: new Date(windowEnd),
+    globalEvents,
+  });
+  return {
+    applyEffect(row) {
+      if (supported.has(row.type)) modifierCapture.applyEffect(row);
+    },
+    getCopiedSteps() {
+      return Math.floor(modifierCapture.getRawTotal() * ratio);
+    },
+  };
 }
 
 // Every hitchhike copy in a race, in ONE bulk query.
@@ -242,6 +333,7 @@ module.exports = {
   HITCHHIKE_DEFAULT_COPY_RATIO,
   hitchhikeCopyRatio,
   computeHitchhikeCopiedSteps,
+  createIncrementalHitchhikeCopyCapture,
   collectRaceHitchhikeCopies,
   hitchhikeCreditBySourceUser,
   applyHitchhikeCopies,

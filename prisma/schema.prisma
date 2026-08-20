@@ -199,6 +199,8 @@ model User {
   // deleteUserAccount's deletion set.
   suggestions                 Suggestion[]
   raceEffectImpacts           RaceEffectImpact[]
+  raceImpactEvents            RaceImpactEvent[]
+  umbrellaInterceptions       RaceUmbrellaInterception[]
   activeRaceImpactWork        ActiveRaceImpactWork[]
   activeRaceEffectImpacts     ActiveRaceEffectImpact[]
   globalEventRaceImpacts      GlobalEventRaceImpact[]
@@ -269,6 +271,59 @@ model RaceEffectImpact {
   @@index([raceId, userId, acknowledgedAt, settledAt(sort: Desc)])
   @@index([userId, settledAt(sort: Desc)])
   @@map("race_effect_impacts")
+}
+
+// Immutable, recipient-private active-race score snapshots. The popup and the
+// private Activity projection read this same row; acknowledging popup delivery
+// never mutates or removes the Activity value.
+model RaceImpactEvent {
+  id                  String    @id @default(uuid())
+  raceId              String    @map("race_id")
+  recipientUserId     String    @map("recipient_user_id")
+  sourceKind          String    @map("source_kind")
+  sourceId            String    @map("source_id")
+  sourceFeedEventId   String?   @map("source_feed_event_id")
+  powerupType         String    @map("powerup_type")
+  deltaSteps          Int       @map("delta_steps")
+  description         String
+  valueStatus         String    @default("SYNCED_SNAPSHOT") @map("value_status")
+  calculationVersion  Int       @default(2) @map("calculation_version")
+  resolvedAt          DateTime  @map("resolved_at")
+  popupAcknowledgedAt DateTime? @map("popup_acknowledged_at")
+  createdAt           DateTime  @default(now()) @map("created_at")
+
+  race            Race              @relation(fields: [raceId], references: [id], onDelete: Cascade)
+  recipient       User              @relation(fields: [recipientUserId], references: [id], onDelete: Cascade)
+  sourceFeedEvent RacePowerupEvent? @relation(fields: [sourceFeedEventId], references: [id], onDelete: SetNull)
+
+  @@unique([raceId, recipientUserId, sourceKind, sourceId, calculationVersion])
+  @@index([raceId, recipientUserId, popupAcknowledgedAt, resolvedAt(sort: Desc), id(sort: Desc)])
+  @@index([raceId, recipientUserId, resolvedAt(sort: Desc), id(sort: Desc)])
+  @@map("race_impact_events")
+}
+
+// Durable domain source for an Umbrella interception. Unlike the retired v1
+// hidden feed metadata, this row is indexed by its real resolution boundary.
+model RaceUmbrellaInterception {
+  id                 String    @id @default(uuid())
+  raceId             String    @map("race_id")
+  recipientUserId    String    @map("recipient_user_id")
+  umbrellaEffectId   String    @map("umbrella_effect_id")
+  rainstormPowerupId String    @map("rainstorm_powerup_id")
+  windowStart        DateTime  @map("window_start")
+  resolvesAt         DateTime  @map("resolves_at")
+  avoidedMultiplier  Decimal   @map("avoided_multiplier") @db.Decimal(8, 6)
+  status             String    @default("PENDING")
+  resolvedAt         DateTime? @map("resolved_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  race      Race @relation(fields: [raceId], references: [id], onDelete: Cascade)
+  recipient User @relation(fields: [recipientUserId], references: [id], onDelete: Cascade)
+
+  @@unique([rainstormPowerupId, recipientUserId])
+  @@index([raceId, status, resolvesAt, id])
+  @@map("race_umbrella_interceptions")
 }
 
 // Durable, recipient-scoped work for active-race synced-step notifications.
@@ -1322,6 +1377,8 @@ model Race {
   resolutionPostTasks    RaceResolutionPostTask[]
   seededBucket           SeededRaceBucket?           @relation("SeededBucketRace")
   effectImpacts          RaceEffectImpact[]
+  impactEvents           RaceImpactEvent[]
+  umbrellaInterceptions  RaceUmbrellaInterception[]
   activeImpactWork       ActiveRaceImpactWork[]
   activeEffectImpacts    ActiveRaceEffectImpact[]
   globalEventImpacts     GlobalEventRaceImpact[]
@@ -1832,7 +1889,8 @@ model RacePowerupEvent {
   metadata     Json?
   createdAt    DateTime     @default(now()) @map("created_at")
 
-  race Race @relation(fields: [raceId], references: [id], onDelete: Cascade)
+  race         Race              @relation(fields: [raceId], references: [id], onDelete: Cascade)
+  impactEvents RaceImpactEvent[]
 
   @@index([raceId, createdAt])
   // Batch 2026-08-10 item 1: the seeded-race auto-enroll flip asks "did any of
@@ -2144,8 +2202,8 @@ model GlobalStepEventEntitlement {
 // local-aware generation; maintenance of existing parents is never gated.
 model GlobalStepEventCronOwner {
   ownerId     String   @id @map("owner_id")
-  generation Int
-  localAware Boolean  @default(false) @map("local_aware")
+  generation  Int
+  localAware  Boolean  @default(false) @map("local_aware")
   heartbeatAt DateTime @map("heartbeat_at")
   expiresAt   DateTime @map("expires_at")
   updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")

@@ -9,7 +9,10 @@ const { eventsForUser } = require("../../steps/services/globalStepEventEntitleme
 const {
   invalidateHomeActiveGlobalEvent,
 } = require("../../steps/services/globalStepEventEntitlement");
-const { prisma: defaultPrisma } = require("../../../db");
+const {
+  prisma: defaultPrisma,
+  runInPrismaTransaction: defaultRunInPrismaTransaction,
+} = require("../../../db");
 const { eventBus } = require("../../../shared/events/eventBus");
 const { completeRace: defaultCompleteRace } = require("./completeRace");
 const {
@@ -23,10 +26,7 @@ const {
   applyHitchhikeCopies,
 } = require("../../powerups/hitchhikeCopies");
 const { computeRaceState } = require("../services/computeRaceState");
-const { appSettings } = require("../../../shared/config/appSettings");
-const {
-  isStrictFlagEnabled,
-} = require("../../../shared/config/isStrictFlagEnabled");
+const { impactDescription } = require("../models/raceImpactEvent");
 
 // Mid-race forfeit for TEAM races (TR-601..604).
 //
@@ -79,18 +79,15 @@ function buildForfeitRace(dependencies = {}) {
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
   const powerupEventModel = dependencies.RacePowerupEvent || RacePowerupEvent;
   const db = dependencies.prisma || defaultPrisma;
+  const runTransaction = dependencies.runInPrismaTransaction ||
+    (dependencies.prisma
+      ? (work) => db.$transaction(work)
+      : defaultRunInPrismaTransaction);
   const completeRaceFn = dependencies.completeRace || defaultCompleteRace;
   const events = dependencies.eventBus || eventBus;
+  const logger = dependencies.logger || console;
   const now = dependencies.now || (() => new Date());
-  const activeImpactEnabled = dependencies.activeImpactEnabled || (async () => {
-    // Keep dependency-injected unit commands DB-free. The production singleton
-    // has no injected dependencies and reads the default-off runtime flag.
-    if (Object.keys(dependencies).length > 0 && !dependencies.appSettings) return false;
-    return isStrictFlagEnabled(
-      dependencies.appSettings || appSettings,
-      "apiActiveImpactNoticesV1Enabled",
-    );
-  });
+  const activeImpactEnabled = dependencies.activeImpactEnabled || (async () => true);
   const computeState = dependencies.computeRaceState || computeRaceState;
 
   function buildFrozenImpactWork({ capture, participant, resolvedAt }) {
@@ -111,27 +108,19 @@ function buildForfeitRace(dependencies = {}) {
         add({ sourceId: impact.effectId, powerupType: impact.powerupType, deltaSteps: impact.deltaSteps });
       }
     }
-    for (const resolution of capture?.leechResolutions || []) {
-      if (resolution.victimParticipantId === participant.id) {
-        add({ sourceId: resolution.effectId, powerupType: "LEECH", deltaSteps: -resolution.actualTransfer });
-      }
-      if (resolution.sourceUserId === participant.userId) {
-        add({ sourceId: resolution.effectId, powerupType: "LEECH", deltaSteps: resolution.actualTransfer });
-      }
-    }
-    for (const copy of capture?.hitchhikeCopies || []) {
-      if (copy.sourceUserId === participant.userId) {
-        add({ sourceId: copy.effectId, powerupType: "HITCHHIKE", deltaSteps: copy.copiedSteps });
-      }
-    }
+    // freezeTimedImpacts is the canonical chronological marginal vector for
+    // every selected terminal source, including Leech and Hitchhike. The
+    // specialized arrays are authoritative total-scoring artifacts, but adding
+    // them here as well would count those two source families twice.
     return [...bySource.values()].map(({ deltaSteps, ...work }) => ({
       ...work,
       raceId: participant.raceId,
       recipientUserId: participant.userId,
-      status: "PENDING",
       resolvedAt,
-      capturedDeltaSteps: deltaSteps,
-      calculationVersion: 1,
+      deltaSteps,
+      description: impactDescription(work.powerupType, deltaSteps),
+      valueStatus: "SYNCED_SNAPSHOT",
+      calculationVersion: 2,
     }));
   }
 
@@ -318,33 +307,11 @@ function buildForfeitRace(dependencies = {}) {
     }
 
     const forfeitedAt = now();
-    // Snapshot the effective total BEFORE the transaction (heavy step math has
-    // no business inside a row-lock window; sub-second drift is irrelevant).
-    const frozenTotal = Math.max(
-      0,
-      await computeParticipantEffectiveTotal({
-        race,
-        participant,
-        at: forfeitedAt,
-      })
-    );
-    let frozenImpactWork = [];
-    if (await activeImpactEnabled()) {
-      const computed = await computeState({
-        raceId,
-        timeZone: raceTimeZone(race, "UTC"),
-        userIds: [userId],
-        dependencies: { activeImpactEnabled: true, now: () => forfeitedAt },
-      });
-      frozenImpactWork = buildFrozenImpactWork({
-        capture: computed?.result?.activeImpactCapture,
-        participant,
-        resolvedAt: forfeitedAt,
-      });
-    }
-
-    // Atomic forfeit + collapse evaluation (TR-604).
-    const collapse = await db.$transaction(async (tx) => {
+    // Atomic score freeze + private impact materialization + forfeit. The
+    // transaction-scoped Prisma proxy makes every legacy scoring model read the
+    // same locked snapshot; no consequence is visible if an event insert fails.
+    const transactionStartedAt = process.hrtime.bigint();
+    const collapse = await runTransaction(async (tx) => {
       // Lock and re-check the lifecycle row inside the same mutation
       // transaction. A completion that wins after our optimistic read makes
       // this a normal RACE_NOT_LEAVABLE conflict, never a late forfeit write.
@@ -381,39 +348,91 @@ function buildForfeitRace(dependencies = {}) {
         raceId
       );
 
+      const lockedParticipant = tx.raceParticipant?.findUnique
+        ? await tx.raceParticipant.findUnique({
+            where: { id: participant.id },
+            include: { user: true },
+          })
+        : participant;
+      if (!lockedParticipant || lockedParticipant.forfeitedAt) {
+        return { alreadyForfeited: true };
+      }
+
+      const frozenTotal = Math.max(
+        0,
+        await computeParticipantEffectiveTotal({
+          race,
+          participant: lockedParticipant,
+          at: forfeitedAt,
+        })
+      );
+      let frozenImpactWork = [];
+      let terminalImpactSourceCount = 0;
+      if (await activeImpactEnabled(tx)) {
+        const freezeSourceIds = typeof tx.raceActiveEffect?.findMany === "function"
+          ? (await tx.raceActiveEffect.findMany({
+              where: {
+                raceId,
+                status: "ACTIVE",
+                type: { in: [
+                  "LEG_CRAMP", "QUICKSAND", "RUNNERS_HIGH", "WRONG_TURN",
+                  "CAMPFIRE_REST", "RAINSTORM", "UPRISING", "RALLY_FLAG",
+                  "COIN_FLIP", "GHOST_PEPPER", "LEECH", "HITCHHIKE",
+                ] },
+                OR: [
+                  { targetParticipantId: lockedParticipant.id },
+                  { sourceUserId: lockedParticipant.userId, type: { in: ["LEECH", "HITCHHIKE"] } },
+                ],
+              },
+              select: { id: true },
+              orderBy: [{ startsAt: "asc" }, { id: "asc" }],
+            })).map((effect) => effect.id)
+          : [];
+        terminalImpactSourceCount = freezeSourceIds.length;
+        if (freezeSourceIds.length > 0) {
+          const computed = await computeState({
+            raceId,
+            timeZone: raceTimeZone(race, "UTC"),
+            userIds: [userId],
+            dependencies: {
+              activeImpactEnabled: true,
+              activeImpactFreezeSourceIds: freezeSourceIds,
+              now: () => forfeitedAt,
+            },
+          });
+          frozenImpactWork = buildFrozenImpactWork({
+            capture: computed?.result?.activeImpactCapture,
+            participant: lockedParticipant,
+            resolvedAt: forfeitedAt,
+          });
+        }
+      }
+
       // Conditional write — a concurrent duplicate forfeits nothing.
       const write = await tx.raceParticipant.updateMany({
-        where: { id: participant.id, forfeitedAt: null },
+        where: { id: lockedParticipant.id, forfeitedAt: null },
         data: { forfeitedAt, totalSteps: frozenTotal },
       });
       if (write.count === 0) {
         return { alreadyForfeited: true };
       }
 
-      // The recipient is about to leave canonical live scoring. Freeze every
-      // independently attributable source in the same transaction as the
-      // participant lifecycle write; retryable presentation can materialize
-      // later without ever recomputing against a frozen field.
-      for (const work of frozenImpactWork) {
-        await tx.activeRaceImpactWork.upsert({
-          where: {
-            raceId_recipientUserId_sourceKind_sourceId_calculationVersion: {
-              raceId: work.raceId,
-              recipientUserId: work.recipientUserId,
-              sourceKind: work.sourceKind,
-              sourceId: work.sourceId,
-              calculationVersion: work.calculationVersion,
-            },
-          },
-          update: {},
-          create: work,
+      const nonzeroFrozenImpacts = frozenImpactWork.filter((work) =>
+        Number.isInteger(work.deltaSteps) && work.deltaSteps !== 0
+      );
+      if (nonzeroFrozenImpacts.length > 0) {
+        await tx.raceImpactEvent.createMany({
+          data: nonzeroFrozenImpacts,
+          skipDuplicates: true,
         });
       }
 
       const accepted = await tx.raceParticipant.findMany({
         where: { raceId, status: "ACCEPTED" },
       });
-      if (!race.isTeamRace) return { collapsed: false };
+      if (!race.isTeamRace) {
+        return { collapsed: false, frozenTotal, terminalImpactSourceCount };
+      }
 
       const aliveByTeam = { TEAM_A: 0, TEAM_B: 0 };
       for (const row of accepted) {
@@ -432,10 +451,17 @@ function buildForfeitRace(dependencies = {}) {
           collapsed: true,
           winnerTeam: otherTeam,
           participantUserIds: accepted.map((row) => row.userId),
+          frozenTotal,
+          terminalImpactSourceCount,
         };
       }
-      return { collapsed: false };
+      return { collapsed: false, frozenTotal, terminalImpactSourceCount };
     });
+    const transactionDurationMs = Math.max(
+      0,
+      Number(process.hrtime.bigint() - transactionStartedAt) / 1e6,
+    );
+    const frozenTotal = collapse.frozenTotal;
 
     if (collapse.alreadyForfeited) {
       throw new RaceForfeitError(
@@ -449,6 +475,17 @@ function buildForfeitRace(dependencies = {}) {
         400,
         "RACE_NOT_LEAVABLE"
       );
+    }
+
+    try {
+      logger.log(JSON.stringify({
+        event: "race_forfeit_terminal_impact",
+        sourceCount: collapse.terminalImpactSourceCount || 0,
+        transactionDurationMs,
+      }));
+    } catch {
+      // Aggregate telemetry is post-commit and must never turn a committed
+      // freeze into a client-visible failure.
     }
 
     // Feed row so the race feed narrates the forfeit.

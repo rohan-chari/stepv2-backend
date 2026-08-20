@@ -139,4 +139,90 @@ async function computeSettlementAttributionVector({
   return { attributionVersion: ATTRIBUTION_VERSION, baselineTotals, finalTotals, effectImpacts, globalImpacts };
 }
 
-module.exports = { ATTRIBUTION_VERSION, chronological, allocateIntegerTerms, computeSettlementAttributionVector };
+// Bounded active-boundary attribution consumes one instrumented canonical
+// scorer capture instead of invoking the scorer once for every historical
+// prefix. The capture owns the raw, pre-integer marginal terms for the complete
+// chronological prefix ending at the latest selected source. Integer ownership
+// is then allocated once across that complete vector, exactly like settlement,
+// before the selected due rows are extracted.
+async function computeSelectedPrefixAttributionVector({
+  participants = [],
+  effects = [],
+  selectedEffectIds,
+  scoreRawPrefixTerms,
+}) {
+  if (typeof scoreRawPrefixTerms !== "function") {
+    throw new TypeError("instrumented raw-prefix scorer is required");
+  }
+  const selected = selectedEffectIds instanceof Set
+    ? selectedEffectIds
+    : new Set(selectedEffectIds || []);
+  const ordered = [...new Map(
+    chronological(effects).filter((effect) => effect?.id)
+      .map((effect) => [effect.id, effect])
+  ).values()];
+  let lastSelectedIndex = -1;
+  for (let index = 0; index < ordered.length; index++) {
+    if (selected.has(ordered[index].id)) lastSelectedIndex = index;
+  }
+  if (lastSelectedIndex < 0) {
+    const empty = new Map();
+    return {
+      attributionVersion: ATTRIBUTION_VERSION,
+      baselineTotals: empty,
+      finalTotals: empty,
+      effectImpacts: [],
+      selectedEffectImpacts: [],
+      scorerCalls: 0,
+    };
+  }
+  const orderedEffects = ordered.slice(0, lastSelectedIndex + 1);
+  const capture = await scoreRawPrefixTerms({ orderedEffects });
+  const baselineTotals = capture?.baselineTotals;
+  const finalTotals = capture?.finalTotals;
+  const rawTermsByParticipant = capture?.rawTermsByParticipant;
+  if (
+    !(baselineTotals instanceof Map) ||
+    !(finalTotals instanceof Map) ||
+    !(rawTermsByParticipant instanceof Map)
+  ) {
+    throw new TypeError("invalid raw-prefix scorer capture");
+  }
+
+  const effectImpacts = [];
+  for (const participant of participants) {
+    const participantId = participant.id;
+    const target = (Number(finalTotals.get(participantId)) || 0) -
+      (Number(baselineTotals.get(participantId)) || 0);
+    const allocated = allocateIntegerTerms(
+      rawTermsByParticipant.get(participantId) || [],
+      target,
+    );
+    for (const term of allocated) {
+      if (term.kind !== "effect" || term.deltaSteps === 0) continue;
+      effectImpacts.push({
+        participantId,
+        userId: participant.userId,
+        effectId: term.effectId,
+        powerupType: term.powerupType,
+        deltaSteps: term.deltaSteps,
+      });
+    }
+  }
+  return {
+    attributionVersion: ATTRIBUTION_VERSION,
+    baselineTotals,
+    finalTotals,
+    effectImpacts,
+    selectedEffectImpacts: effectImpacts.filter((row) => selected.has(row.effectId)),
+    scorerCalls: 1,
+  };
+}
+
+module.exports = {
+  ATTRIBUTION_VERSION,
+  chronological,
+  allocateIntegerTerms,
+  computeSettlementAttributionVector,
+  computeSelectedPrefixAttributionVector,
+};

@@ -1,4 +1,4 @@
-const { prisma } = require("../../db");
+const { prisma, deferUntilAfterCommit } = require("../../db");
 
 // C5 (spec §5 Phase E2, §9's last acceptance box): with awardCoins.js, one of
 // the only two `users.coins` writers (pinned by
@@ -11,11 +11,13 @@ const { prisma } = require("../../db");
 // that pass `tx` therefore invalidate AGAIN post-commit; the 10s TTL is the
 // backstop for anything else.
 async function invalidateAuthMe(userId) {
-  try {
-    await require("../../modules/users/services/authMeCache").invalidateSafe(userId);
-  } catch {
-    // A cache DEL must never fail a ledgered coin write.
-  }
+  await deferUntilAfterCommit(async () => {
+    try {
+      await require("../../modules/users/services/authMeCache").invalidateSafe(userId);
+    } catch {
+      // A cache DEL must never fail a ledgered coin write.
+    }
+  });
 }
 
 class InsufficientCoinsError extends Error {

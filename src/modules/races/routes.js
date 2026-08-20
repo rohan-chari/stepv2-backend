@@ -170,8 +170,6 @@ const {
 const {
   getImpactNotices: defaultGetImpactNotices,
   acknowledgeImpactNotice: defaultAcknowledgeImpactNotice,
-  resolveRaceImpactAccess: defaultResolveRaceImpactAccess,
-  impactTitle,
 } = require("./queries/raceImpactNotices");
 const {
   getActiveRaceImpactNotices: defaultGetActiveRaceImpactNotices,
@@ -183,8 +181,11 @@ const {
   buildAcknowledgeActiveRaceImpact,
   buildAcknowledgeActiveImpactReceipt,
 } = require("./commands/acknowledgeActiveRaceImpact");
+const {
+  getPrivateImpactFeed: defaultGetPrivateImpactFeed,
+  buildGetPrivateImpactFeed,
+} = require("./queries/getPrivateImpactFeed");
 const { NotFoundError } = require("../../shared/errors/AppError");
-const { decodeCursor, encodeCursor, parseLimit } = require("../inbox/services/inbox");
 const {
   startCapacityPhase,
 } = require("../../shared/observability/capacityPhaseMetrics");
@@ -364,20 +365,23 @@ function createRacesRouter(dependencies = {}) {
   const raceModel = dependencies.Race || defaultRaceModel;
   const getImpactNotices = dependencies.getImpactNotices || defaultGetImpactNotices;
   const acknowledgeImpactNotice = dependencies.acknowledgeImpactNotice || defaultAcknowledgeImpactNotice;
-  const resolveRaceImpactAccess = dependencies.resolveRaceImpactAccess || defaultResolveRaceImpactAccess;
+  const getPrivateImpactFeed = dependencies.getPrivateImpactFeed ||
+    (dependencies.RaceImpactEvent || dependencies.prisma
+      ? buildGetPrivateImpactFeed(dependencies)
+      : defaultGetPrivateImpactFeed);
   const getActiveRaceImpactNotices =
     dependencies.getActiveRaceImpactNotices ||
-    (dependencies.ActiveRaceImpact || dependencies.enqueueRaceResolution
+    (dependencies.RaceImpactEvent
       ? buildGetActiveRaceImpactNotices(dependencies)
       : defaultGetActiveRaceImpactNotices);
   const acknowledgeActiveRaceImpact =
     dependencies.acknowledgeActiveRaceImpact ||
-    (dependencies.ActiveRaceImpact || dependencies.prisma || dependencies.now
+    (dependencies.RaceImpactEvent || dependencies.prisma || dependencies.now
       ? buildAcknowledgeActiveRaceImpact(dependencies)
       : defaultAcknowledgeActiveRaceImpact);
   const acknowledgeActiveImpactReceipt =
     dependencies.acknowledgeActiveImpactReceipt ||
-    (dependencies.ActiveRaceImpact || dependencies.prisma || dependencies.now
+    (dependencies.RaceImpactEvent || dependencies.prisma || dependencies.now
       ? buildAcknowledgeActiveImpactReceipt(dependencies)
       : defaultAcknowledgeActiveImpactReceipt);
 
@@ -1634,12 +1638,10 @@ function createRacesRouter(dependencies = {}) {
     }
   });
 
-  // Recipient-private active synced-step snapshots. These are Postgres-only;
-  // the carrying client owns the bounded resolution-status handoff.
+  // Recipient-private active synced-step snapshots. Popup reads are presentation
+  // only: one indexed query and no scoring/enqueue handoff.
   router.get("/:raceId/active-impact-notices", asyncHandler(async (req, res) => {
-    const enabled =
-      req.clientFeatures?.has("active_impact_notices_v1") === true &&
-      (await isStrictFlagEnabled(settings, "apiActiveImpactNoticesV1Enabled"));
+    const enabled = req.clientFeatures?.has("resolved_impact_events_v2") === true;
     if (!enabled) {
       throw new NotFoundError("Active impact notices are unavailable", "FEATURE_DISABLED");
     }
@@ -1647,19 +1649,13 @@ function createRacesRouter(dependencies = {}) {
       raceId: req.params.raceId,
       userId: req.user.id,
     });
-    return res.status(result.pending ? 202 : 200).json(
-      result.pending
-        ? { notices: [], resolution: result.resolution }
-        : { notices: result.notices }
-    );
+    return res.json({ notices: result.notices });
   }));
 
   router.post(
     "/:raceId/active-impact-notices/:noticeId/acknowledge",
     asyncHandler(async (req, res) => {
-      const enabled =
-        req.clientFeatures?.has("active_impact_notices_v1") === true &&
-        (await isStrictFlagEnabled(settings, "apiActiveImpactNoticesV1Enabled"));
+      const enabled = req.clientFeatures?.has("resolved_impact_events_v2") === true;
       if (!enabled) {
         throw new NotFoundError("Active impact notices are unavailable", "FEATURE_DISABLED");
       }
@@ -1674,9 +1670,7 @@ function createRacesRouter(dependencies = {}) {
   router.post(
     "/:raceId/active-impact-receipts/:receiptId/acknowledge",
     asyncHandler(async (req, res) => {
-      const enabled =
-        req.clientFeatures?.has("active_impact_notices_v1") === true &&
-        (await isStrictFlagEnabled(settings, "apiActiveImpactNoticesV1Enabled"));
+      const enabled = req.clientFeatures?.has("resolved_impact_events_v2") === true;
       if (!enabled) {
         throw new NotFoundError("Active impact notices are unavailable", "FEATURE_DISABLED");
       }
@@ -1720,43 +1714,23 @@ function createRacesRouter(dependencies = {}) {
     }
   });
 
-  router.get("/:raceId/private-impact-feed", async (req, res) => {
-    try {
-      const enabled = req.clientFeatures?.has("impact_notices") === true &&
-        (await isStrictFlagEnabled(settings, "apiImpactNoticesEnabled"));
-      if (!enabled) return res.status(404).json({ error: "Impact feed is unavailable", code: "FEATURE_DISABLED" });
-      const limit = parseLimit(req.query.limit, 50);
-      const cursor = decodeCursor(req.query.cursor);
-      const access = await resolveRaceImpactAccess({ userId: req.user.id, raceId: req.params.raceId });
-      if (access.spectator) return res.json({ events: [], nextCursor: null });
-      const prisma = require("../../db").prisma;
-      const rows = await prisma.raceEffectImpact.findMany({
-        where: {
-          raceId: req.params.raceId, userId: req.user.id,
-          ...(cursor ? { OR: [
-            { settledAt: { lt: cursor.createdAt } },
-            { settledAt: cursor.createdAt, id: { lt: cursor.id } },
-          ] } : {}),
-        },
-        orderBy: [{ settledAt: "desc" }, { id: "desc" }], take: limit + 1,
-      });
-      const more = rows.length > limit;
-      const page = rows.slice(0, limit);
-      const events = page.map((row) => ({
-        id: `impact:${row.id}`, eventType: "EFFECT_IMPACT", powerupType: row.powerupType,
-        description: row.deltaSteps >= 0
-          ? `You gained ${row.deltaSteps} steps from ${impactTitle(row.powerupType)}.`
-          : `You lost ${Math.abs(row.deltaSteps)} steps to ${impactTitle(row.powerupType)}.`,
-        createdAt: row.settledAt,
-      }));
-      return res.json({ events, nextCursor: more ? encodeCursor({ id: page.at(-1).id, createdAt: page.at(-1).settledAt }) : null });
-    } catch (error) {
-      if (error.statusCode === 400) return res.status(400).json({ error: error.message, code: error.code || "INVALID_REQUEST" });
-      if (error.statusCode) return res.status(error.statusCode).json({ error: error.message, code: error.code || "REQUEST_FAILED" });
-      console.error("Race private impact feed error:", error);
-      return res.status(500).json({ error: "Internal server error", code: "INTERNAL_ERROR" });
+  router.get("/:raceId/private-impact-feed", asyncHandler(async (req, res) => {
+    const completedEnabled =
+      req.clientFeatures?.has("impact_notices") === true &&
+      (await isStrictFlagEnabled(settings, "apiImpactNoticesEnabled"));
+    const v2Enabled = req.clientFeatures?.has("resolved_impact_events_v2") === true;
+    if (!completedEnabled && !v2Enabled) {
+      throw new NotFoundError("Impact feed is unavailable", "FEATURE_DISABLED");
     }
-  });
+    return res.json(await getPrivateImpactFeed({
+      raceId: req.params.raceId,
+      userId: req.user.id,
+      cursorValue: req.query.cursor,
+      limitValue: req.query.limit,
+      v2Enabled,
+      completedEnabled,
+    }));
+  }));
 
   // GET /races/:raceId/powerups/use-context
   // Additive endpoint (new app only): returns full participant rows (active

@@ -41,6 +41,7 @@ function makeDeps({ race, effectiveTotal = 1234 }) {
     forfeitWrites: [],
     completions: [],
     events: [],
+    logs: [],
     lockedLifecycleRaces: [],
     lockedRaces: [],
   };
@@ -99,6 +100,7 @@ function makeDeps({ race, effectiveTotal = 1234 }) {
         },
       },
       eventBus: { emit(event, payload) { state.events.push({ event, payload }); } },
+      logger: { log(line) { state.logs.push(JSON.parse(line)); } },
       now: () => new Date("2026-07-12T12:00:00Z"),
     },
   };
@@ -121,6 +123,21 @@ test("TR-601 forfeit freezes the member's effective total as-is and marks forfei
   assert.equal(ctx.state.forfeitWrites[0].totalSteps, 4321);
   assert.ok(ctx.state.forfeitWrites[0].forfeitedAt instanceof Date);
   assert.equal(ctx.state.completions.length, 0, "no collapse — team A still alive");
+  assert.equal(ctx.state.logs.length, 1);
+  assert.deepEqual(
+    {
+      event: ctx.state.logs[0].event,
+      sourceCount: ctx.state.logs[0].sourceCount,
+      durationIsAggregate: Number.isFinite(ctx.state.logs[0].transactionDurationMs),
+      leaksSourceIds: Object.hasOwn(ctx.state.logs[0], "sourceIds"),
+    },
+    {
+      event: "race_forfeit_terminal_impact",
+      sourceCount: 0,
+      durationIsAggregate: true,
+      leaksSourceIds: false,
+    },
+  );
 });
 
 test("TR-601 forfeit is permanent — a second forfeit fails", async () => {

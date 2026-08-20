@@ -3,6 +3,7 @@ const { RaceParticipant } = require("../models/raceParticipant");
 const { RaceActiveEffect } = require("../../powerups/models/raceActiveEffect");
 const { RacePowerupEvent } = require("../../powerups/models/racePowerupEvent");
 const { buildResolveRaceState } = require("./raceStateResolution");
+const crypto = require("node:crypto");
 
 // READ-ONLY race-state computation (C0, spec §5a).
 //
@@ -68,8 +69,9 @@ function createWriteCapture({ participantModel, effectModel, eventModel }) {
     events: {
       ...eventModel,
       async create(data) {
-        writes.push({ kind: "eventCreate", data });
-        return { id: null, ...data };
+        const row = { id: data.id || crypto.randomUUID(), ...data };
+        writes.push({ kind: "eventCreate", data: row });
+        return row;
       },
     },
   };
@@ -111,6 +113,12 @@ async function computeRaceState({
     ...(dependencies.now ? { now: dependencies.now } : {}),
     ...(dependencies.activeImpactEnabled === true
       ? { activeImpactEnabled: true }
+      : {}),
+    ...(dependencies.activeImpactSelectedSourceIds
+      ? { activeImpactSelectedSourceIds: dependencies.activeImpactSelectedSourceIds }
+      : {}),
+    ...(dependencies.activeImpactFreezeSourceIds
+      ? { activeImpactFreezeSourceIds: dependencies.activeImpactFreezeSourceIds }
       : {}),
   });
 

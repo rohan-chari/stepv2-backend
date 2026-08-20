@@ -10,7 +10,6 @@ const noopSchedulers = {
   scheduleComputeRankedWeeks() {},
   scheduleGlobalStepEvents() {},
   scheduleGlobalEventSummaryTick() {},
-  scheduleActiveRaceImpactMaintenance() {},
   scheduleAutoStartScheduledRaces() {},
   scheduleRecomputePlacements() {},
   scheduleNotificationCleanup() {},

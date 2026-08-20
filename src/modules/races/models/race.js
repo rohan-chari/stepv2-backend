@@ -607,33 +607,14 @@ const Race = {
   },
 
   async update(id, fields) {
-    const terminal = fields?.status && fields.status !== "ACTIVE" && fields.status !== "PENDING";
-    if (!terminal) {
-      return prisma.race.update({
-        where: { id },
-        data: fields,
-        include: {
-          creator: { select: { id: true, displayName: true, profilePhotoUrl: true } },
-          winner: { select: { id: true, displayName: true, profilePhotoUrl: true } },
-          ...participantInclude,
-        },
-      });
-    }
-    return prisma.$transaction(async (tx) => {
-      const race = await tx.race.update({
-        where: { id },
-        data: fields,
-        include: {
-          creator: { select: { id: true, displayName: true, profilePhotoUrl: true } },
-          winner: { select: { id: true, displayName: true, profilePhotoUrl: true } },
-          ...participantInclude,
-        },
-      });
-      await tx.activeRaceImpactWork.updateMany({
-        where: { raceId: id, status: "PENDING" },
-        data: { status: "SUPPRESSED_TERMINAL" },
-      });
-      return race;
+    return prisma.race.update({
+      where: { id },
+      data: fields,
+      include: {
+        creator: { select: { id: true, displayName: true, profilePhotoUrl: true } },
+        winner: { select: { id: true, displayName: true, profilePhotoUrl: true } },
+        ...participantInclude,
+      },
     });
   },
 
@@ -650,25 +631,9 @@ const Race = {
   },
 
   async updateIfActive(id, fields) {
-    const terminal = fields?.status && fields.status !== "ACTIVE";
-    if (!terminal) {
-      return prisma.race.updateMany({
-        where: { id, status: "ACTIVE" },
-        data: fields,
-      });
-    }
-    return prisma.$transaction(async (tx) => {
-      const result = await tx.race.updateMany({
-        where: { id, status: "ACTIVE" },
-        data: fields,
-      });
-      if (result.count === 1) {
-        await tx.activeRaceImpactWork.updateMany({
-          where: { raceId: id, status: "PENDING" },
-          data: { status: "SUPPRESSED_TERMINAL" },
-        });
-      }
-      return result;
+    return prisma.race.updateMany({
+      where: { id, status: "ACTIVE" },
+      data: fields,
     });
   },
 

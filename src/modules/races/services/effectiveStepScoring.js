@@ -212,6 +212,17 @@ async function sumWindows(model, userId, windows, now) {
   );
 }
 
+async function sumOpenWindows(model, userId, windows) {
+  if (windows.length === 0) return [];
+  if (typeof model.sumStepsInWindows === "function") {
+    return model.sumStepsInWindows(userId, windows);
+  }
+  return Promise.all(
+    windows.map((window) =>
+      model.sumStepsInWindow(userId, window.start, window.end)),
+  );
+}
+
 // `globalContext` (optional, additive): { globalEvents: [...], now: Date }. When
 // present, the EXTRA steps from any active GlobalStepEvent windows are returned
 // as `globalBoostedSteps`, scaling the SIGNED per-participant rate (§3): positive
@@ -473,8 +484,286 @@ function signedMultiplierForEffects(effects = [], nowMs = Date.now()) {
   return signedMultiplierAt(nowMs, groups);
 }
 
+function effectTimeMs(value) {
+  return value instanceof Date ? value.getTime() : new Date(value).getTime();
+}
+
+function captureBoundaries(effects, windowStart, windowEnd) {
+  const boundaries = new Set([windowStart, windowEnd]);
+  const add = (value) => {
+    const ms = effectTimeMs(value);
+    if (Number.isFinite(ms) && ms > windowStart && ms < windowEnd) {
+      boundaries.add(ms);
+    }
+  };
+  for (const effect of effects) {
+    add(effect.startsAt);
+    if (effect.expiresAt) add(effect.expiresAt);
+    if (effect.type === "CAMPFIRE_REST") {
+      add(effectTimeMs(effect.startsAt) + (Number(effect.metadata?.freezeMs) || 0));
+    }
+    if (effect.type === "GHOST_PEPPER") {
+      add(effectTimeMs(effect.startsAt) + (Number(effect.metadata?.boostMs) || 0));
+    }
+  }
+  return [...boundaries].sort((a, b) => a - b);
+}
+
+function activeInSegment(effect, segmentStart) {
+  const start = effectTimeMs(effect.startsAt);
+  const end = effect.expiresAt ? effectTimeMs(effect.expiresAt) : Infinity;
+  return start <= segmentStart && segmentStart < end;
+}
+
+function newSegmentMultiplierState() {
+  return {
+    freezeCount: 0,
+    wrongTurnCount: 0,
+    buffCount: 0,
+    buffSum: 0,
+    umbrellaCount: 0,
+    maxRainLostFraction: 0,
+    maxCoinLossFraction: 0,
+  };
+}
+
+function applyEffectToSegmentState(state, effect, segmentStart) {
+  if (!activeInSegment(effect, segmentStart)) return;
+  const metadata = effect.metadata || {};
+  switch (effect.type) {
+    case "LEG_CRAMP":
+    case "QUICKSAND":
+      state.freezeCount += 1;
+      break;
+    case "RUNNERS_HIGH":
+      state.buffCount += 1;
+      state.buffSum += 2;
+      break;
+    case "WRONG_TURN":
+      state.wrongTurnCount += 1;
+      break;
+    case "CAMPFIRE_REST": {
+      const phaseEnd = effectTimeMs(effect.startsAt) + (Number(metadata.freezeMs) || 0);
+      if (segmentStart < phaseEnd) state.freezeCount += 1;
+      else {
+        state.buffCount += 1;
+        state.buffSum += Number(metadata.multiplier) || 1;
+      }
+      break;
+    }
+    case "RAINSTORM":
+      state.maxRainLostFraction = Math.max(
+        state.maxRainLostFraction,
+        rainstormLostFraction(effect),
+      );
+      break;
+    case "UPRISING":
+      state.buffCount += 1;
+      state.buffSum += Number(metadata.multiplier) || 2;
+      break;
+    case "RALLY_FLAG":
+      state.buffCount += 1;
+      state.buffSum += Number(metadata.multiplier) || 1.25;
+      break;
+    case "COIN_FLIP": {
+      const multiplier = Number(metadata.multiplier);
+      if (Number.isFinite(multiplier) && multiplier < 1) {
+        state.maxCoinLossFraction = Math.max(
+          state.maxCoinLossFraction,
+          rainstormLostFraction(effect),
+        );
+      } else if (Number.isFinite(multiplier) && multiplier > 1) {
+        state.buffCount += 1;
+        state.buffSum += multiplier;
+      }
+      break;
+    }
+    case "GHOST_PEPPER": {
+      const boostEnd = effectTimeMs(effect.startsAt) + (Number(metadata.boostMs) || 0);
+      if (segmentStart < boostEnd) {
+        state.buffCount += 1;
+        state.buffSum += Number(metadata.multiplier) || 3;
+      } else {
+        state.freezeCount += 1;
+      }
+      break;
+    }
+    case "UMBRELLA":
+      state.umbrellaCount += 1;
+      break;
+    default:
+      break;
+  }
+}
+
+function multiplierFromSegmentState(state) {
+  if (state.freezeCount > 0) return 0;
+  let multiplier = state.buffCount > 0 ? state.buffSum : 1;
+  let reduced = null;
+  const consider = (candidate) => {
+    reduced = reduced === null ? candidate : Math.min(reduced, candidate);
+  };
+  if (state.umbrellaCount === 0 && state.maxRainLostFraction > 0) {
+    consider(process.env.RAINSTORM_MULTIPLICATIVE_ENABLED === "true"
+      ? multiplier * (1 - state.maxRainLostFraction)
+      : Math.max(0, multiplier - state.maxRainLostFraction));
+  }
+  if (state.maxCoinLossFraction > 0) {
+    consider(Math.max(0, multiplier - state.maxCoinLossFraction));
+  }
+  if (reduced !== null) multiplier = Math.max(0, reduced);
+  return state.wrongTurnCount > 0 ? -multiplier : multiplier;
+}
+
+function snapshotPrefixRawTotal(effects, rawTotal, bonusSteps) {
+  const legCramps = effects.filter((effect) =>
+    effect.type === "LEG_CRAMP" || effect.type === "QUICKSAND");
+  const runnersHighs = effects.filter((effect) => effect.type === "RUNNERS_HIGH");
+  const campfires = effects.filter((effect) => effect.type === "CAMPFIRE_REST");
+  const rainstorms = effects.filter((effect) => effect.type === "RAINSTORM");
+  const uprisings = effects.filter((effect) => effect.type === "UPRISING");
+  const rallyFlags = effects.filter((effect) => effect.type === "RALLY_FLAG");
+  const coinFlips = effects.filter((effect) => effect.type === "COIN_FLIP");
+  const snap = computeEffectModifiersFallback(
+    [...legCramps, ...runnersHighs, ...uprisings, ...rallyFlags, ...coinFlips],
+    rawTotal,
+  );
+  let frozenSteps = snap.frozenSteps;
+  for (const effect of campfires) {
+    const metadata = effect.metadata || {};
+    const start = metadata.stepsAtRestStart || 0;
+    const end = effect.status === "EXPIRED" && metadata.stepsAtExpiry !== undefined
+      ? metadata.stepsAtExpiry
+      : rawTotal;
+    frozenSteps += Math.max(0, end - start);
+  }
+  for (const window of mergeRainstormWindows(rainstorms)) {
+    const startMetadata = window.startEffect.metadata || {};
+    const endMetadata = window.endEffect.metadata || {};
+    const start = startMetadata.stepsAtStart || 0;
+    const end = window.endEffect.status === "EXPIRED" &&
+      endMetadata.stepsAtExpiry !== undefined
+      ? endMetadata.stepsAtExpiry
+      : rawTotal;
+    frozenSteps += Math.round(Math.max(0, end - start) * window.lostFraction);
+  }
+  return rawTotal + bonusSteps - frozenSteps + snap.buffedSteps -
+    2 * snap.reversedSteps;
+}
+
+// Builds one instrumented canonical modifier pass for a complete prefix. The
+// sample context is loaded once, then every chronological effect updates only
+// the atomic segments in its own window. This emits the exact total after each
+// prefix without re-running the scorer (or its database reads) per effect.
+async function createIncrementalEffectScoreCapture({
+  effects = [],
+  rawTotal = 0,
+  bonusSteps = 0,
+  userId,
+  stepSampleModel,
+  hasSampleData = false,
+  now = new Date(),
+  windowStart = null,
+  windowEnd = null,
+  globalEvents = [],
+}) {
+  const completeEffects = effects.filter(Boolean);
+  const prefixEffects = [];
+  let localRawScore = Number(rawTotal) + Number(bonusSteps || 0);
+  let globalRawScore = 0;
+  let segments = [];
+
+  if (hasSampleData || globalEvents.length > 0) {
+    const nowMs = effectTimeMs(windowEnd || now);
+    const starts = [...completeEffects, ...globalEvents]
+      .map((row) => effectTimeMs(row.startsAt))
+      .filter(Number.isFinite);
+    const startMs = windowStart == null
+      ? (starts.length ? Math.min(...starts) : nowMs)
+      : effectTimeMs(windowStart);
+    if (nowMs > startMs) {
+      const boundaries = captureBoundaries(
+        [...completeEffects, ...globalEvents.map((event) => ({
+          ...event,
+          expiresAt: event.endsAt,
+        }))],
+        startMs,
+        nowMs,
+      );
+      segments = boundaries.slice(0, -1).map((start, index) => ({
+        start,
+        end: boundaries[index + 1],
+        state: newSegmentMultiplierState(),
+        multiplier: 1,
+        steps: 0,
+        globalStepCoefficient: 0,
+      }));
+      const windows = segments.map((segment) => ({
+          start: new Date(segment.start),
+          end: new Date(segment.end),
+      }));
+      if (hasSampleData) {
+        const sums = await sumWindows(
+          stepSampleModel,
+          userId,
+          windows,
+          new Date(nowMs),
+        );
+        for (let index = 0; index < segments.length; index++) {
+          segments[index].steps = Number(sums[index]) || 0;
+        }
+      }
+      if (globalEvents.length > 0) {
+        const openSums = await sumOpenWindows(stepSampleModel, userId, windows);
+        for (let index = 0; index < segments.length; index++) {
+          const segment = segments[index];
+          let coefficient = 0;
+          for (const event of globalEvents) {
+            const multiplier = Number(event.multiplier);
+            const start = effectTimeMs(event.startsAt);
+            const end = Math.min(effectTimeMs(event.endsAt), nowMs);
+            if (Number.isFinite(multiplier) && multiplier > 1 &&
+                start <= segment.start && segment.start < end) {
+              coefficient += multiplier - 1;
+            }
+          }
+          segment.globalStepCoefficient =
+            (Number(openSums[index]) || 0) * coefficient;
+          globalRawScore += segment.globalStepCoefficient;
+        }
+      }
+    }
+  }
+
+  return {
+    applyEffect(effect) {
+      prefixEffects.push(effect);
+      if (!hasSampleData) {
+        localRawScore = snapshotPrefixRawTotal(prefixEffects, rawTotal, bonusSteps);
+      }
+      for (const segment of segments) {
+        if (!activeInSegment(effect, segment.start)) continue;
+        const previousMultiplier = segment.multiplier;
+        applyEffectToSegmentState(segment.state, effect, segment.start);
+        segment.multiplier = multiplierFromSegmentState(segment.state);
+        const multiplierDelta = segment.multiplier - previousMultiplier;
+        if (hasSampleData) localRawScore += multiplierDelta * segment.steps;
+        globalRawScore += multiplierDelta * segment.globalStepCoefficient;
+      }
+      return localRawScore + globalRawScore;
+    },
+    getRawTotal() {
+      return localRawScore + globalRawScore;
+    },
+    getFlooredTotal() {
+      return Math.max(0, localRawScore + globalRawScore);
+    },
+  };
+}
+
 module.exports = {
   computeEffectModifiers,
+  createIncrementalEffectScoreCapture,
   signedMultiplierForEffects,
   // Exported for raceStateResolution.calculateCurrentTotal (batch 2026-08-10b
   // item 6 / architect R9): finish-time interpolation must see the SAME

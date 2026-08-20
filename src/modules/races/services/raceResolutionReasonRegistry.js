@@ -152,7 +152,18 @@ function isNormalized(value) {
 function mergeDirtyEnvelopes(left, right) {
   if (!isNormalized(left) || !isNormalized(right)) return fullEnvelope();
   if (left.reasons.includes("FULL") || right.reasons.includes("FULL")) {
-    return fullEnvelope();
+    const merged = [...left.reasons, ...right.reasons];
+    if (!merged.includes("EFFECT_BOUNDARY")) return fullEnvelope();
+    return {
+      ...fullEnvelope(),
+      // FULL owns scoring scope; EFFECT_BOUNDARY and its Umbrella discriminator
+      // are orthogonal durable source-consumption signals.
+      reasons: ["FULL", "EFFECT_BOUNDARY"],
+      powerupTypes:
+        left.powerupTypes.includes("UMBRELLA") || right.powerupTypes.includes("UMBRELLA")
+          ? ["UMBRELLA"]
+          : [],
+    };
   }
   const reasons = mergeStable(left.reasons, right.reasons, DIRTY_REASONS.size);
   const dirtyUserIds = mergeStable(left.dirtyUserIds, right.dirtyUserIds, USER_CAP);
