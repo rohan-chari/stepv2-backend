@@ -7,11 +7,11 @@ const ACTIVE_IMPACT_FLAG_KEY = "apiActiveImpactNoticesV1Enabled";
 // (spec §3 key table).
 const CATALOG_TTL_SECONDS = 60;
 
-// DB-backed runtime feature flags, toggleable from the admin screen without a
-// deploy (unlike the hardcoded constants in src/constants/*). Every readable
-// flag must be declared in KNOWN_FLAGS with its default so a missing row (or a
-// DB hiccup) always resolves to a safe value — flags degrade to their default,
-// never to undefined.
+// DB-backed runtime controls that remain toggleable from the admin screen.
+// Every mutable control must be declared in KNOWN_FLAGS with its default so a
+// missing row (or a DB hiccup) resolves safely. Graduated controls live in
+// PERMANENT_FLAGS below: production ignores stale rows and rejects writes,
+// while a Node-test-only seam preserves historical two-path fixtures.
 //
 // Reads are cached briefly so hot paths (/auth/me on every launch/resume) don't
 // add a query per request; an admin PATCH busts the cache immediately in the
@@ -392,9 +392,69 @@ const KNOWN_FLAGS = {
   raceResolutionDependencyClosureV1Percent: 0,
 };
 
+// Request/projection rollout controls have completed their production soak.
+// Older internal call sites may still ask for these keys, so keep a constant
+// compatibility answer without consulting AppSetting rows or permitting
+// production/admin mutation.
+const PERMANENT_FLAGS = Object.freeze({
+  raceProgressLeanProjectionV1Enabled: true,
+  legacyUploaderStepSamplePrefetchV1Enabled: true,
+  raceMessageLeanAccessV1Enabled: true,
+  raceListSqlSummaryV1Enabled: true,
+  apiRaceListCompactV1Enabled: true,
+  apiRaceBootstrapCompactV1Enabled: true,
+  homeRaceCardLeanLiveV1Enabled: true,
+  homeRaceCardParallelOptionalV1Enabled: true,
+  homeRaceCardSnapshotReuseV1Enabled: true,
+  publicRaceCountSqlV1Enabled: true,
+  apiRaceMessageConditionalV1Enabled: true,
+  apiRacePowerupTargetContextV1Enabled: true,
+  racePowerupLeanUseContextV1Enabled: true,
+  apiLeaderboardCompactV1Enabled: true,
+  apiRaceBootstrapV1Enabled: true,
+  apiRaceProgressCompactV1Enabled: true,
+  apiRaceMessageStreamsV1Enabled: true,
+  apiFriendsSummaryV1Enabled: true,
+  apiAuthShellV1Enabled: true,
+  apiHomeShellV1Enabled: true,
+  apiGetCoinsV1Enabled: true,
+  apiPublicRaceBrowserV1Enabled: true,
+  apiRankedV2CompactV1Enabled: true,
+  apiProfileStatsV1Enabled: true,
+  apiImpactNoticesEnabled: true,
+  apiImpactSummariesEnabled: true,
+  apiReviewPromptEnabled: true,
+  apiInboxV1Enabled: true,
+  apiShopBootstrapV1Enabled: true,
+  apiStaticEtagsV1Enabled: true,
+  apiTournamentDetailV1Enabled: true,
+  apiRaceChatWatermarkCacheV1Enabled: true,
+});
+
+// Protected historical tests still exercise the old dark path. This snapshot
+// exists only for the Node test runner; production never reads stale rows for
+// a permanent key.
+const TEST_LEGACY_DEFAULTS = Object.freeze({ ...KNOWN_FLAGS });
+for (const key of Object.keys(PERMANENT_FLAGS)) delete KNOWN_FLAGS[key];
+
 function buildAppSettings(dependencies = {}) {
   const prisma = dependencies.prisma || defaultPrisma;
   const cacheTtlMs = dependencies.cacheTtlMs ?? 30_000;
+  const allowPermanentOverrides =
+    dependencies.allowPermanentOverrides ??
+    (process.env.NODE_ENV !== "production" &&
+      process.env.NODE_TEST_CONTEXT != null);
+  const permanentOverrides = new Map();
+
+  function permanentFallback(key) {
+    if (
+      allowPermanentOverrides &&
+      Object.prototype.hasOwnProperty.call(TEST_LEGACY_DEFAULTS, key)
+    ) {
+      return TEST_LEGACY_DEFAULTS[key];
+    }
+    return PERMANENT_FLAGS[key];
+  }
 
   let cache = null;
   let cacheAt = 0;
@@ -466,6 +526,18 @@ function buildAppSettings(dependencies = {}) {
   // Resolved value of one known flag. Unknown keys and any read failure fall
   // back to the declared default — callers never need their own try/catch.
   async function getFlag(key) {
+    if (allowPermanentOverrides && permanentOverrides.has(key)) {
+      return permanentOverrides.get(key);
+    }
+    if (Object.prototype.hasOwnProperty.call(PERMANENT_FLAGS, key)) {
+      if (allowPermanentOverrides) {
+        try {
+          const all = await loadAll();
+          if (Object.prototype.hasOwnProperty.call(all, key)) return all[key];
+        } catch {}
+      }
+      return permanentFallback(key);
+    }
     const fallback = KNOWN_FLAGS[key];
     if (key === ACTIVE_IMPACT_FLAG_KEY) return false;
     try {
@@ -485,6 +557,18 @@ function buildAppSettings(dependencies = {}) {
   // shape must distinguish "explicitly stored" from "absent" so the client can
   // apply its own fallback. Degrades to undefined on any read failure.
   async function getRawFlag(key) {
+    if (allowPermanentOverrides && permanentOverrides.has(key)) {
+      return permanentOverrides.get(key);
+    }
+    if (Object.prototype.hasOwnProperty.call(PERMANENT_FLAGS, key)) {
+      if (allowPermanentOverrides) {
+        try {
+          const all = await loadAll();
+          if (Object.prototype.hasOwnProperty.call(all, key)) return all[key];
+        } catch {}
+      }
+      return permanentFallback(key);
+    }
     try {
       const all = await loadAll();
       return all[key];
@@ -497,6 +581,22 @@ function buildAppSettings(dependencies = {}) {
   // intentionally differ from their declared default. `available:false` is a
   // read failure and must never be mistaken for a legacy absent row.
   async function getRawFlagState(key) {
+    if (allowPermanentOverrides && permanentOverrides.has(key)) {
+      return { available: true, present: true, value: permanentOverrides.get(key) };
+    }
+    if (Object.prototype.hasOwnProperty.call(PERMANENT_FLAGS, key)) {
+      if (allowPermanentOverrides) {
+        try {
+          const all = await loadAll();
+          if (Object.prototype.hasOwnProperty.call(all, key)) {
+            return { available: true, present: true, value: all[key] };
+          }
+        } catch {
+          return { available: false, present: false, value: undefined };
+        }
+      }
+      return { available: true, present: true, value: permanentFallback(key) };
+    }
     try {
       const all = await loadAll();
       const present = Object.prototype.hasOwnProperty.call(all, key);
@@ -513,6 +613,18 @@ function buildAppSettings(dependencies = {}) {
   // handoff) is read this way by the v2 worker on EVERY tick. Any read failure
   // degrades to the declared default, never to undefined.
   async function getUncachedFlag(key) {
+    if (allowPermanentOverrides && permanentOverrides.has(key)) {
+      return permanentOverrides.get(key);
+    }
+    if (Object.prototype.hasOwnProperty.call(PERMANENT_FLAGS, key)) {
+      if (allowPermanentOverrides) {
+        try {
+          const row = await prisma.appSetting.findUnique({ where: { key } });
+          if (row) return row.value;
+        } catch {}
+      }
+      return permanentFallback(key);
+    }
     const fallback = KNOWN_FLAGS[key];
     if (key === ACTIVE_IMPACT_FLAG_KEY) return false;
     try {
@@ -546,10 +658,27 @@ function buildAppSettings(dependencies = {}) {
           ? fallback
           : (value ?? fallback);
     }
+    if (allowPermanentOverrides) {
+      for (const [key] of Object.entries(PERMANENT_FLAGS)) {
+        out[key] = permanentOverrides.has(key)
+          ? permanentOverrides.get(key)
+          : (Object.prototype.hasOwnProperty.call(byKey, key)
+              ? byKey[key]
+              : permanentFallback(key));
+      }
+    }
     return out;
   }
 
   async function setFlag(key, value) {
+    if (
+      allowPermanentOverrides &&
+      Object.prototype.hasOwnProperty.call(PERMANENT_FLAGS, key)
+    ) {
+      permanentOverrides.set(key, value);
+      cache = null;
+      return;
+    }
     if (!(key in KNOWN_FLAGS)) {
       const err = new Error(`Unknown setting: ${key}`);
       err.statusCode = 400;
@@ -631,10 +760,31 @@ function buildAppSettings(dependencies = {}) {
       throw err;
     }
     for (const [key] of entries) {
-      if (!(key in KNOWN_FLAGS)) {
+      if (
+        !(key in KNOWN_FLAGS) &&
+        !(
+          allowPermanentOverrides &&
+          Object.prototype.hasOwnProperty.call(PERMANENT_FLAGS, key)
+        )
+      ) {
         const err = new Error(`Unknown setting: ${key}`);
         err.statusCode = 400;
         throw err;
+      }
+    }
+    if (allowPermanentOverrides) {
+      const permanentEntries = entries.filter(([key]) =>
+        Object.prototype.hasOwnProperty.call(PERMANENT_FLAGS, key)
+      );
+      for (const [key, value] of permanentEntries) {
+        permanentOverrides.set(key, value);
+      }
+      entries = entries.filter(([key]) =>
+        !Object.prototype.hasOwnProperty.call(PERMANENT_FLAGS, key)
+      );
+      if (entries.length === 0) {
+        cache = null;
+        return;
       }
     }
     await prisma.$transaction(async (tx) => {
@@ -719,4 +869,4 @@ function buildAppSettings(dependencies = {}) {
 
 const appSettings = buildAppSettings();
 
-module.exports = { buildAppSettings, appSettings, KNOWN_FLAGS };
+module.exports = { buildAppSettings, appSettings, KNOWN_FLAGS, PERMANENT_FLAGS };

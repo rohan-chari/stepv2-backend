@@ -9,7 +9,10 @@ const {
   powerupAssetUrl,
 } = require("../../shared/lib/remoteAssets");
 
-const { appSettings: defaultAppSettings } = require("../../shared/config/appSettings");
+const {
+  appSettings: defaultAppSettings,
+  PERMANENT_FLAGS,
+} = require("../../shared/config/appSettings");
 const {
   getAdminStats: defaultGetAdminStats,
 } = require("./getAdminStats");
@@ -381,6 +384,9 @@ function createAdminRouter(dependencies = {}) {
         return res.status(400).json({ error: "No settings supplied" });
       }
       for (const [key, value] of entries) {
+        if (Object.prototype.hasOwnProperty.call(PERMANENT_FLAGS, key)) {
+          return res.status(400).json({ error: `Unknown setting: ${key}` });
+        }
         if (
           key === "homeServiceBannerEnabled" ||
           key === "homeServiceBannerMessage"

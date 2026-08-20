@@ -12,9 +12,10 @@ const {
 const {
   appSettings,
   KNOWN_FLAGS,
+  PERMANENT_FLAGS,
 } = require("../../src/shared/config/appSettings");
 
-const CLEANUP_FLAGS = [
+const REQUEST_API_FLAGS = [
   "apiRaceBootstrapV1Enabled",
   "apiRaceProgressCompactV1Enabled",
   "apiRaceMessageStreamsV1Enabled",
@@ -29,12 +30,17 @@ const CLEANUP_FLAGS = [
   "apiStaticEtagsV1Enabled",
   "apiTournamentDetailV1Enabled",
   "apiRaceChatWatermarkCacheV1Enabled",
+];
+
+const WORKER_FLAGS = [
   "raceResolutionDisplayArtifactReuseV1Enabled",
   "raceResolutionReasonAwareV1Enabled",
   "raceResolutionBurstCoalescingV1Enabled",
   "raceResolutionBulkWriteV1Enabled",
   "raceResolutionPostTasksV1Enabled",
 ];
+
+const CLEANUP_FLAGS = [...REQUEST_API_FLAGS, ...WORKER_FLAGS];
 
 const CAPABLE_HEADERS = {
   "X-App-Version": "99.0.0",
@@ -138,12 +144,38 @@ describe("API page-payload cleanup — locked additive contracts", () => {
     await setCleanupFlags(false);
   });
 
-  it("declares all nineteen rollout flags with strict false defaults", async () => {
+  it("graduates the request/API controls while retaining worker controls and historical dark fixtures", async () => {
     assert.equal(CLEANUP_FLAGS.length, 19);
-    for (const key of CLEANUP_FLAGS) {
-      assert.equal(KNOWN_FLAGS[key], false, `${key} must be declared default-false`);
-      assert.equal(await appSettings.getFlag(key), false, `${key} missing-row default`);
+    assert.equal(REQUEST_API_FLAGS.length, 14);
+    for (const key of REQUEST_API_FLAGS) {
+      assert.equal(KNOWN_FLAGS[key], undefined, `${key} must not remain mutable`);
+      assert.equal(PERMANENT_FLAGS[key], true, `${key} must be permanently enabled`);
+      assert.equal(
+        await appSettings.getFlag(key),
+        false,
+        `${key} protected legacy fixture starts dark inside Node tests`,
+      );
     }
+    for (const key of WORKER_FLAGS) {
+      assert.equal(KNOWN_FLAGS[key], false, `${key} remains a later deploy family`);
+      assert.equal(PERMANENT_FLAGS[key], undefined, `${key} must not graduate in this release`);
+    }
+  });
+
+  it("rejects retired request/API controls at the public admin boundary", async () => {
+    const { token } = await createTestUser({ email: "request-api-admin@test.com" });
+    const response = await request(server.baseUrl, "PATCH", "/admin/settings", {
+      token,
+      body: { apiAuthShellV1Enabled: false },
+    });
+    assert.equal(response.status, 400);
+    assert.deepEqual(await json(response), {
+      error: "Unknown setting: apiAuthShellV1Enabled",
+    });
+    assert.equal(
+      await prisma.appSetting.count({ where: { key: "apiAuthShellV1Enabled" } }),
+      0,
+    );
   });
 
   it("keeps frozen-client responses legacy and returns 404 only for disabled new endpoints", async () => {

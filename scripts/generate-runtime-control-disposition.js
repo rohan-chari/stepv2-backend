@@ -3,7 +3,10 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const acorn = require("acorn");
-const { KNOWN_FLAGS } = require("../src/shared/config/appSettings");
+const {
+  KNOWN_FLAGS,
+  PERMANENT_FLAGS,
+} = require("../src/shared/config/appSettings");
 
 const ROOT = path.resolve(__dirname, "..");
 const OUTPUT = path.join(ROOT, "docs/runtime-control-disposition.yaml");
@@ -308,6 +311,24 @@ function buildManifest() {
       polarityDefault: fallback, deployFamily: "database_controls",
       rollbackValue: fallback,
       adminExposed: true,
+    });
+  }
+  for (const [name, value] of Object.entries(PERMANENT_FLAGS).sort()) {
+    controls.push({
+      ...entryBase(
+        `retiredAppSetting:${name}`,
+        name,
+        typeof value === "number"
+          ? "numeric_app_setting"
+          : "boolean_app_setting",
+      ),
+      disposition: value === false
+        ? "retired_permanent_off"
+        : "graduated_permanent",
+      permanentValue: value,
+      polarityDefault: value,
+      deployFamily: "request_api",
+      rollbackValue: value,
     });
   }
   const runtimeEnvironmentReads = collectRuntimeEnvironmentReads();

@@ -11,6 +11,7 @@ const {
 } = require("../../scripts/generate-runtime-control-disposition");
 const {
   KNOWN_FLAGS,
+  PERMANENT_FLAGS,
 } = require("../../src/shared/config/appSettings");
 
 test("runtime-control manifest has unique complete control records", () => {
@@ -29,14 +30,8 @@ test("runtime-control manifest has unique complete control records", () => {
   }
 });
 
-test("phase 2 keeps every AppSetting mutable and contains no retired-setting records", () => {
+test("the manifest keeps deferred settings mutable and records graduated request/API controls", () => {
   const manifest = buildManifest();
-  assert.equal(
-    manifest.controls.some((control) =>
-      control.id.startsWith("retiredAppSetting:"),
-    ),
-    false,
-  );
   const byId = new Map(manifest.controls.map((control) => [control.id, control]));
   for (const [name, fallback] of Object.entries(KNOWN_FLAGS)) {
     const control = byId.get(`appSetting:${name}`);
@@ -45,9 +40,18 @@ test("phase 2 keeps every AppSetting mutable and contains no retired-setting rec
     assert.equal(control.polarityDefault, fallback, name);
     assert.equal(control.adminExposed, true, name);
   }
+  assert.equal(Object.keys(PERMANENT_FLAGS).length, 32);
+  for (const [name, value] of Object.entries(PERMANENT_FLAGS)) {
+    const control = byId.get(`retiredAppSetting:${name}`);
+    assert.ok(control, name);
+    assert.equal(control.disposition, "graduated_permanent", name);
+    assert.equal(control.permanentValue, value, name);
+    assert.equal(control.adminExposed, false, name);
+    assert.equal(byId.has(`appSetting:${name}`), false, name);
+  }
 });
 
-test("funded rollout controls are retired while unrelated graduations stay deferred", () => {
+test("funded and request/API controls are retired while unrelated graduations stay deferred", () => {
   const byId = new Map(
     buildManifest().controls.map((control) => [control.id, control]),
   );
@@ -57,8 +61,15 @@ test("funded rollout controls are retired while unrelated graduations stay defer
   ]) {
     assert.equal(byId.has(`env:${name}`), false, name);
   }
+  assert.equal(
+    byId.get("retiredAppSetting:apiRaceListCompactV1Enabled").disposition,
+    "graduated_permanent",
+  );
+  assert.equal(
+    byId.get("retiredAppSetting:apiRaceListCompactV1Enabled").permanentValue,
+    true,
+  );
   for (const id of [
-    "appSetting:apiRaceListCompactV1Enabled",
     "appSetting:redisCacheCatalogsEnabled",
     "appSetting:raceResolutionNoopInputSuppressionV1Enabled",
     "appSetting:tutorialMandatoryEnabled",
