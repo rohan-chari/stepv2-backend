@@ -246,9 +246,7 @@ describe("team race payout buff (item 5)", () => {
 
   // ── 3. the cap binds AFTER multiplication ─────────────────────────────────
 
-  it("5: poolMax clamps the MULTIPLIED pool, not the base pool", async () => {
-    // Base pool 1600 is under the 2000 ceiling; multiplied 3000 is over it, so
-    // a cap applied before the multiplier would leave 1600 x 1.875 = 3000.
+  it("5: a stale poolMax environment value cannot change the stamped v2 pool", async () => {
     await withEnv({ PRIZE_POOL_MAX_COINS: "2000" }, async () => {
       const race = await seedTeamRace({ durationDays: 14, multBps: 18750 });
       const { a } = await addFiveVsFive(race);
@@ -256,8 +254,8 @@ describe("team race payout buff (item 5)", () => {
       await resolveExpiredRaces();
 
       const settled = await prisma.race.findUnique({ where: { id: race.id } });
-      assert.equal(settled.prizePoolCoins, 2000, "clamped to poolMax after x1.875");
-      for (const w of a) assert.equal(await coinsOf(w.userId), 400);
+      assert.equal(settled.prizePoolCoins, 3000, "settles from the immutable stamp");
+      for (const w of a) assert.equal(await coinsOf(w.userId), 600);
     });
   });
 

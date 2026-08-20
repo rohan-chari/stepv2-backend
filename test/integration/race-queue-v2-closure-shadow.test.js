@@ -319,7 +319,7 @@ describe("Phase 2b — dependency-closure planner in shadow mode", () => {
     assert.equal((await RaceResolutionJobV2.findByRaceId(raceId)).state, "SUCCEEDED");
   });
 
-  it("flag on: an unrelated SELF effect selects DEPENDENCY_CLOSURE in shadow while the job still takes its normal plan", async () => {
+  it("a stale flag cannot resurrect shadow planning for an unrelated SELF effect", async () => {
     const { alice, bob, raceId } = await seedRace("Shadow self", { shadow: true });
     // One unrelated SELF row on the OTHER participant. Under the shipped guard
     // this is exactly what forces the whole field through the full resolver.
@@ -328,16 +328,8 @@ describe("Phase 2b — dependency-closure planner in shadow mode", () => {
     const { lines, plannerCalls } = await syncAndClaim(alice, raceId);
     const committed = committedLine(lines);
     assert.ok(committed, JSON.stringify(lines));
-    assert.equal(plannerCalls.length, 1, "the planner runs exactly once per claim");
-
-    assert.equal(committed.shadowClosurePlan, "DEPENDENCY_CLOSURE", JSON.stringify(committed));
-    assert.equal(committed.shadowClosureFallbackReason, null);
-    assert.equal(committed.shadowClosureCount, 1, "only the uploader depends on this sync");
-    assert.equal(committed.shadowSourceCount, 1);
-    assert.equal(committed.shadowRetainedSourceCount, 0);
-    assert.equal(committed.shadowMinesActive, false);
-    assert.equal(committed.shadowWouldEscalateOnMine, null);
-    assert.equal(typeof committed.shadowPlannerMs, "number");
+    assert.deepEqual(plannerCalls, []);
+    for (const field of SHADOW_FIELDS) assert.equal(committed[field], null);
 
     // The shadow changed no decision: the active effect still sends the real
     // job down the FULL resolver, exactly as before this phase.
@@ -352,7 +344,7 @@ describe("Phase 2b — dependency-closure planner in shadow mode", () => {
     }
   });
 
-  it("flag on: the persisted rows are identical to a flag-off control run of an identical fixture", async () => {
+  it("stale flag values leave persisted rows identical across an identical fixture", async () => {
     // TWO structurally identical races between the same pair, so one real
     // STEP_SYNC envelope can be resolved with the shadow ON and the other with
     // it OFF from the same step data — a true control, rather than a re-run of
@@ -380,11 +372,8 @@ describe("Phase 2b — dependency-closure planner in shadow mode", () => {
     const shadowed = makeCapturingWorker();
     const shadowedJob = await shadowed.worker.processOne();
     assert.ok(shadowedJob);
-    assert.equal(
-      committedLine(shadowed.lines)?.shadowClosurePlan,
-      "DEPENDENCY_CLOSURE",
-      JSON.stringify(shadowed.lines)
-    );
+    assert.equal(committedLine(shadowed.lines)?.shadowClosurePlan, null);
+    assert.deepEqual(shadowed.plannerCalls, []);
 
     await appSettings.setFlag(SHADOW_FLAG, false);
     const control = makeCapturingWorker();
@@ -403,7 +392,7 @@ describe("Phase 2b — dependency-closure planner in shadow mode", () => {
     assert.deepEqual(shadowedState, controlState);
   });
 
-  it("flag on: a race-wide effect selects FULL in shadow with the classified fallback reason", async () => {
+  it("a stale flag cannot shadow-plan a race-wide effect", async () => {
     const { alice, bob, raceId } = await seedRace("Shadow veto", { shadow: true });
     // RALLY_FLAG is an explicit RACE_WIDE row in the v1 classification table.
     await plantEffect({ raceId, type: "RALLY_FLAG", targetUser: bob, sourceUser: bob });
@@ -411,17 +400,11 @@ describe("Phase 2b — dependency-closure planner in shadow mode", () => {
     const { lines } = await syncAndClaim(alice, raceId);
     const committed = committedLine(lines);
     assert.ok(committed, JSON.stringify(lines));
-    assert.equal(committed.shadowClosurePlan, "FULL");
-    assert.equal(committed.shadowClosureFallbackReason, "RACE_WIDE_EFFECT_ACTIVE");
-    // A FULL shadow sizes no closure, but the source count is still measured.
-    assert.equal(committed.shadowClosureCount, null);
-    assert.equal(committed.shadowSourceCount, 1);
-    assert.equal(committed.shadowWouldEscalateOnMine, null);
-    assert.equal(typeof committed.shadowPlannerMs, "number");
+    for (const field of SHADOW_FIELDS) assert.equal(committed[field], null);
     assert.equal((await RaceResolutionJobV2.findByRaceId(raceId)).state, "SUCCEEDED");
   });
 
-  it("flag on: an active legacy Trail Mine with a non-closure crosser reports UNKNOWN, not false", async () => {
+  it("a stale flag cannot shadow-plan an active legacy Trail Mine", async () => {
     const { alice, bob, raceId } = await seedRace("Shadow mine", { shadow: true });
     // A LEGACY mine: metadata carries no `aheadParticipantIds`, which is the
     // shape still ACTIVE in production. Alice owns it; Bob is outside the
@@ -443,19 +426,10 @@ describe("Phase 2b — dependency-closure planner in shadow mode", () => {
     const { lines } = await syncAndClaim(alice, raceId);
     const committed = committedLine(lines);
     assert.ok(committed, JSON.stringify(lines));
-    assert.equal(committed.shadowClosurePlan, "DEPENDENCY_CLOSURE");
-    assert.equal(committed.shadowMinesActive, true);
-    // The whole point of the measurement: the honest third state, serialized as
-    // the STRING "UNKNOWN" — never an object, never undefined, never false.
-    assert.equal(committed.shadowWouldEscalateOnMine, "UNKNOWN");
-    assert.equal(
-      JSON.stringify(committed).includes('"shadowWouldEscalateOnMine":"UNKNOWN"'),
-      true,
-      "the tri-state must survive JSON serialization as a string"
-    );
+    for (const field of SHADOW_FIELDS) assert.equal(committed[field], null);
   });
 
-  it("flag on: a throwing planner is logged as a shadow failure and the job completes untouched", async () => {
+  it("a stale flag never invokes an injected shadow planner", async () => {
     const { alice, bob, raceId } = await seedRace("Shadow failure", { shadow: true });
     await plantEffect({ raceId, type: "RUNNERS_HIGH", targetUser: bob, sourceUser: bob });
 
@@ -472,19 +446,13 @@ describe("Phase 2b — dependency-closure planner in shadow mode", () => {
     // The job is entirely unaffected...
     assert.equal(committed.resolutionPlan, "FULL");
     assert.equal((await RaceResolutionJobV2.findByRaceId(raceId)).state, "SUCCEEDED");
-    // ...the shadow dimensions collapse to null (the measured duration stays,
-    // because a slow failure is itself worth seeing)...
-    for (const field of SHADOW_FIELDS.filter((name) => name !== "shadowPlannerMs")) {
-      assert.equal(committed[field], null, `${field} must be null after a planner failure`);
+    for (const field of SHADOW_FIELDS) {
+      assert.equal(committed[field], null, `${field} must remain retired`);
     }
-    assert.equal(typeof committed.shadowPlannerMs, "number");
-    // ...and the failure is visible on its own line, with a code and nothing else.
     const shadowError = lines.find(
       (line) => line.event === "race_resolution_v2_shadow_error"
     );
-    assert.ok(shadowError, JSON.stringify(lines));
-    assert.equal(shadowError.operation, "dependency_closure_planner");
-    assert.equal(shadowError.errorCode, "PLANNER_TEST_FAILURE");
+    assert.equal(shadowError, undefined);
 
     // Same fixture with the flag off produces the same persisted rows.
     const afterFailure = await participantState(raceId);

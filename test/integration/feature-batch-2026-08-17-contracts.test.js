@@ -57,7 +57,7 @@ describe("2026-08-17 additive contracts", () => {
     ]);
   });
 
-  it("keeps private effect notices private and acknowledgement idempotent", async () => {
+  it("retires the popup while keeping completed Activity recipient-private", async () => {
     const owner = await createTestUser({ displayName: "Affected" });
     const teammate = await createTestUser({ displayName: "Other racer" });
     const outsider = await createTestUser();
@@ -74,10 +74,7 @@ describe("2026-08-17 additive contracts", () => {
     const mine = await request(server.baseUrl, "GET", `/races/${race.id}/impact-notices`, {
       token: owner.token, headers: CAPABILITIES,
     });
-    assert.equal(mine.status, 200);
-    assert.deepEqual((await mine.json()).notices.map((notice) => ({
-      id: notice.id, powerupType: notice.powerupType, deltaSteps: notice.deltaSteps,
-    })), [{ id: impact.id, powerupType: "RUNNERS_HIGH", deltaSteps: 426 }]);
+    assert.equal(mine.status, 404);
 
     const privateFeed = await request(server.baseUrl, "GET", `/races/${race.id}/private-impact-feed`, {
       token: owner.token, headers: CAPABILITIES,
@@ -85,13 +82,13 @@ describe("2026-08-17 additive contracts", () => {
     assert.equal(privateFeed.status, 200);
     assert.equal((await privateFeed.json()).events[0].description, "You gained 426 steps from Runner’s High.");
 
-    const other = await request(server.baseUrl, "GET", `/races/${race.id}/impact-notices`, {
+    const other = await request(server.baseUrl, "GET", `/races/${race.id}/private-impact-feed`, {
       token: teammate.token, headers: CAPABILITIES,
     });
     assert.equal(other.status, 200);
-    assert.deepEqual((await other.json()).notices, []);
+    assert.deepEqual((await other.json()).events, []);
 
-    const forbidden = await request(server.baseUrl, "GET", `/races/${race.id}/impact-notices`, {
+    const forbidden = await request(server.baseUrl, "GET", `/races/${race.id}/private-impact-feed`, {
       token: outsider.token, headers: CAPABILITIES,
     });
     assert.equal(forbidden.status, 403);
@@ -99,8 +96,7 @@ describe("2026-08-17 additive contracts", () => {
     const ack = await request(server.baseUrl, "POST", `/races/${race.id}/impact-notices/${impact.id}/acknowledge`, {
       token: owner.token, headers: CAPABILITIES,
     });
-    assert.equal(ack.status, 200);
-    assert.deepEqual(await ack.json(), { acknowledged: true });
+    assert.equal(ack.status, 404);
     const foreignAck = await request(server.baseUrl, "POST", `/races/${race.id}/impact-notices/${impact.id}/acknowledge`, {
       token: teammate.token, headers: CAPABILITIES,
     });

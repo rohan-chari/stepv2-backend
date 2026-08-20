@@ -9,6 +9,21 @@ const {
 const { prorateSamplesIntoWindow } = require("../../steps/models/stepSample");
 const { normalizePowerupConfig } = require("./validateRaceConfig");
 const { filterInactiveUserIds } = require("./seededInactivity");
+const {
+  computeRaceExposureStamp,
+  isFundedPrizeV2Enabled,
+  lockFundedExposureUsers,
+  newRacePrizeStamp,
+  reserveFundedExposures,
+  resolveRacePrizeStamp,
+} = require("./fundedExposure");
+const {
+  acquireRaceWriteFence,
+  lockCompetitionRows,
+} = require("./raceWriteFence");
+const {
+  acquireGlobalEnrollmentLock,
+} = require("../../steps/services/globalEventEnrollment");
 
 const SEED_TIMEZONE = "America/New_York";
 const BUCKET_CAPACITY = 15;
@@ -191,16 +206,14 @@ async function matchStepsForCandidates({ prisma, candidates, seed, windowStart }
   const rangeEnd = new Date(lookbackEnd.getTime() - excludedMs);
   const rangeStart = new Date(rangeEnd.getTime() - days * 86400000);
   const userIds = candidates.map((row) => row.userId);
-  const [samples, daily] = await Promise.all([
-    prisma.stepSample.findMany({
-      where: { userId: { in: userIds }, periodEnd: { gt: rangeStart }, periodStart: { lt: rangeEnd } },
-      select: { userId: true, periodStart: true, periodEnd: true, steps: true },
-    }),
-    prisma.step.findMany({
-      where: { userId: { in: userIds }, date: { gte: new Date(rangeStart.toISOString().slice(0, 10)), lt: new Date(rangeEnd.toISOString().slice(0, 10)) } },
-      select: { userId: true, steps: true },
-    }),
-  ]);
+  const samples = await prisma.stepSample.findMany({
+    where: { userId: { in: userIds }, periodEnd: { gt: rangeStart }, periodStart: { lt: rangeEnd } },
+    select: { userId: true, periodStart: true, periodEnd: true, steps: true },
+  });
+  const daily = await prisma.step.findMany({
+    where: { userId: { in: userIds }, date: { gte: new Date(rangeStart.toISOString().slice(0, 10)), lt: new Date(rangeEnd.toISOString().slice(0, 10)) } },
+    select: { userId: true, steps: true },
+  });
   const sampleTotals = new Map(userIds.map((id) => [id, 0]));
   for (const sample of samples) {
     const normalized = { start: sample.periodStart, end: sample.periodEnd, steps: sample.steps };
@@ -218,6 +231,14 @@ function buildSeededRaceBuckets(dependencies = {}) {
   const prisma = dependencies.prisma || defaultPrisma;
   const now = dependencies.now || (() => new Date());
   const settings = dependencies.appSettings || defaultAppSettings;
+  const acquireWriteFence =
+    dependencies.acquireRaceWriteFence || acquireRaceWriteFence;
+  const lockUsers =
+    dependencies.lockFundedExposureUsers || lockFundedExposureUsers;
+  const lockCompetitions =
+    dependencies.lockCompetitionRows || lockCompetitionRows;
+  const acquireGlobalLock =
+    dependencies.acquireGlobalEnrollmentLock || acquireGlobalEnrollmentLock;
 
   async function automaticCandidates(tx) {
     const users = await tx.user.findMany({
@@ -265,15 +286,36 @@ function buildSeededRaceBuckets(dependencies = {}) {
 
   async function reconcileFeatured({ userId, seed, windowStart, capable, autoJoinFeaturedRaces }) {
     if (!capable || !autoJoinFeaturedRaces || now() >= windowStart) return false;
-    return withSeededWindowLock({ prisma, seedId: seed.id, windowStart, fn: async (tx) => {
+    const candidate = await prisma.raceParticipant.findFirst({
+      where: {
+        userId,
+        status: "ACCEPTED",
+        race: {
+          seedId: seed.id,
+          seededBucketId: null,
+          status: "PENDING",
+          scheduledStartAt: windowStart,
+        },
+      },
+      select: { raceId: true },
+    });
+    if (!candidate) return false;
+    return prisma.$transaction(async (tx) => {
+      await acquireWriteFence(tx, candidate.raceId);
+      await acquireGlobalLock(tx);
+      await lockUsers(tx, [userId]);
+      await lockCompetitions(tx, { raceIds: [candidate.raceId] });
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${windowLockKey(seed.id, windowStart)}))`;
       if (await readWindowMode({ prisma: tx, seedId: seed.id, windowStart }) !== "BUCKET") return false;
       if (now() >= windowStart) return false;
-      const [bucketCount, membership] = await Promise.all([
-        tx.seededRaceBucket.count({ where: { seedId: seed.id, windowStart } }),
-        tx.seededRaceWindowMembership.findUnique({
-          where: { seedId_windowStart_userId: { seedId: seed.id, windowStart, userId } },
-        }),
-      ]);
+      const bucketCount = await tx.seededRaceBucket.count({
+        where: { seedId: seed.id, windowStart },
+      });
+      const membership = await tx.seededRaceWindowMembership.findUnique({
+        where: {
+          seedId_windowStart_userId: { seedId: seed.id, windowStart, userId },
+        },
+      });
       if (bucketCount || membership?.stream === "BUCKET") return false;
       const participant = await tx.raceParticipant.findFirst({
         where: {
@@ -283,14 +325,20 @@ function buildSeededRaceBuckets(dependencies = {}) {
         },
         select: { id: true, raceId: true },
       });
-      if (!participant || membership?.stream !== "LEGACY") return false;
+      if (
+        !participant ||
+        participant.raceId !== candidate.raceId ||
+        membership?.stream !== "LEGACY"
+      ) {
+        return false;
+      }
       await tx.raceParticipant.delete({ where: { id: participant.id } });
       await tx.seededRaceWindowMembership.update({
         where: { seedId_windowStart_userId: { seedId: seed.id, windowStart, userId } },
         data: { stream: "BUCKET", raceId: null },
       });
       return true;
-    }});
+    }, { timeout: 15_000, maxWait: 10_000 });
   }
 
   async function elect({ userId, seedKind, window = "UPCOMING" }) {
@@ -368,11 +416,16 @@ function buildSeededRaceBuckets(dependencies = {}) {
     // These values are stamped exactly as the legacy renewal path stamps
     // them. Bucket matching must never silently alter a seeded race's payout
     // economics merely because its participant field is private.
-    const [fundedPrizePools, geometricPayouts, payoutRoundingV1Enabled] = await Promise.all([
-      settings.getFlag("fundedPrizePoolsEnabled"),
-      settings.getFlag("seededGeometricPayoutsEnabled"),
-      settings.getFlag("payoutRoundingV1Enabled"),
-    ]);
+    const fundedPrizePools = await settings.getFlag("fundedPrizePoolsEnabled");
+    const geometricPayouts = await settings.getFlag(
+      "seededGeometricPayoutsEnabled",
+    );
+    const payoutRoundingV1Enabled = await settings.getFlag(
+      "payoutRoundingV1Enabled",
+    );
+    const prizeStamp = isFundedPrizeV2Enabled()
+      ? newRacePrizeStamp()
+      : resolveRacePrizeStamp({ prizeCalculationVersion: 1 });
     return withSeededWindowLock({ prisma, seedId: seed.id, windowStart, fn: async (tx) => {
       if (await readWindowMode({ prisma: tx, seedId: seed.id, windowStart }) !== "BUCKET") return [];
       const elected = await tx.seededRaceWindowMembership.findMany({
@@ -391,24 +444,67 @@ function buildSeededRaceBuckets(dependencies = {}) {
       const rows = [];
       for (let ordinal = 0; ordinal < plan.length; ordinal += 1) {
         const group = plan[ordinal];
+        const maxDurationDays = seed.cadence === "WEEKLY" ? 7 : 1;
+        const fundedExposureStamp = computeRaceExposureStamp({
+          maxDurationDays,
+          prizeCoinUnit: prizeStamp.prizeCoinUnit,
+          teamPoolMultBps: null,
+        });
         const race = await tx.race.create({
           data: {
             seedId: seed.id, name: seed.name, targetSteps: seed.targetSteps, status: "PENDING", isPublic: false,
             maxParticipants: BUCKET_CAPACITY, powerupsEnabled: seed.powerupsEnabled,
             timeBased: seed.timeBased, timezone: SEED_TIMEZONE, scheduledStartAt: windowStart, endsAt: windowEnd,
-            maxDurationDays: seed.cadence === "WEEKLY" ? 7 : 1, payoutPreset: "TOP_HALF",
+            maxDurationDays, payoutPreset: "TOP_HALF",
             payoutCurve: geometricPayouts === true ? "GEOMETRIC" : null,
             fundedPrize: fundedPrizePools === true,
+            prizeCalculationVersion: prizeStamp.prizeCalculationVersion,
+            prizeCoinUnit:
+              prizeStamp.prizeCalculationVersion >= 2
+                ? prizeStamp.prizeCoinUnit
+                : null,
+            prizePoolMaxCoins:
+              prizeStamp.prizeCalculationVersion >= 2
+                ? prizeStamp.prizePoolMaxCoins
+                : null,
             payoutRoundingVersion: payoutRoundingV1Enabled === true ? 1 : 0,
             powerupStepInterval: normalizePowerupConfig({
               powerupsEnabled: seed.powerupsEnabled ?? false,
             }),
           },
         });
+        const userIds = group.map((candidate) => candidate.userId).sort();
+        await acquireWriteFence(tx, race.id);
+        await acquireGlobalLock(tx);
+        await lockUsers(tx, userIds);
+        if (fundedPrizePools === true) {
+          await reserveFundedExposures({
+            tx,
+            reservations: group.map((candidate) => ({
+              userId: candidate.userId,
+              stamp: fundedExposureStamp,
+              competition: { raceId: race.id },
+            })),
+          });
+        } else {
+          await lockCompetitions(tx, { raceIds: [race.id] });
+        }
         const bucket = await tx.seededRaceBucket.create({ data: { seedId: seed.id, windowStart, windowEnd, raceId: race.id, status: "PENDING" } });
         await tx.race.update({ where: { id: race.id }, data: { seededBucketId: bucket.id } });
         for (const candidate of group) {
-          const participant = await tx.raceParticipant.create({ data: { raceId: race.id, userId: candidate.userId, status: "ACCEPTED" } });
+          const participant = await tx.raceParticipant.create({ data: {
+            raceId: race.id,
+            userId: candidate.userId,
+            status: "ACCEPTED",
+            ...(fundedPrizePools === true
+              ? {
+                  fundedExposureMillicoins:
+                    fundedExposureStamp.exposureMillicoins,
+                  fundedExposureRateMillicoinsPerDay:
+                    fundedExposureStamp.exposureRateMillicoinsPerDay,
+                }
+              : {}),
+          } });
           await tx.seededRaceBucketAssignment.create({ data: { bucketId: bucket.id, userId: candidate.userId, seedId: seed.id, windowStart, raceParticipantId: participant.id, matchSteps: candidate.matchSteps, state: "FINAL" } });
           await tx.seededRaceWindowMembership.update({ where: { seedId_windowStart_userId: { seedId: seed.id, windowStart, userId: candidate.userId } }, data: { raceId: race.id } });
         }
@@ -427,10 +523,16 @@ function buildSeededRaceBuckets(dependencies = {}) {
     for (const seed of seeds) {
       const current = windowFor(seed, now());
       const upcoming = upcomingWindowFor(seed, now());
-      const [currentMode, upcomingMode] = await Promise.all([
-        readWindowMode({ prisma, seedId: seed.id, windowStart: current.windowStart }),
-        readWindowMode({ prisma, seedId: seed.id, windowStart: upcoming.windowStart }),
-      ]);
+      const currentMode = await readWindowMode({
+        prisma,
+        seedId: seed.id,
+        windowStart: current.windowStart,
+      });
+      const upcomingMode = await readWindowMode({
+        prisma,
+        seedId: seed.id,
+        windowStart: upcoming.windowStart,
+      });
       if (currentMode !== "BUCKET" && upcomingMode !== "BUCKET") continue;
       const bucket = await prisma.seededRaceBucket.findFirst({
         // Membership predicate is the privacy boundary: never select another

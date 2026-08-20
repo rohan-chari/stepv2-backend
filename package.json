@@ -21,6 +21,12 @@
     "balance:drift": "node scripts/balance-drift-report.js",
     "powerups:docs": "node scripts/generate-powerups-md.js",
     "powerups:docs:check": "node scripts/generate-powerups-md.js --check",
+    "runtime-controls:generate": "node scripts/generate-runtime-control-disposition.js",
+    "runtime-controls:check": "node scripts/generate-runtime-control-disposition.js --check",
+    "funded-exposure:catch-up": "node scripts/funded-exposure-catch-up.js",
+    "imposter:retire": "node scripts/retire-imposter-inventory.js",
+    "buy-ins:remediate": "node scripts/remediate-legacy-buy-ins.js",
+    "runtime-controls:cleanup-rows": "node scripts/cleanup-retired-app-settings.js",
     "powerups:store": "node scripts/powerup-store.js",
     "powerups:copy:sync": "node scripts/powerup-copy-sync.js",
     "referrals:audit": "node scripts/referral-attribution-audit.js",
@@ -49,5 +55,8 @@
     "ioredis": "^6.0.0",
     "jsonwebtoken": "^9.0.3",
     "prisma": "^7.5.0"
+  },
+  "devDependencies": {
+    "acorn": "^8.18.0"
   }
 }

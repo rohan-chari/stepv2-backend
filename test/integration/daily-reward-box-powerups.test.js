@@ -89,7 +89,7 @@ describe("daily reward box powerup prizes", () => {
 
   it("status exposes powerupPool + rarePrizeMix only to spinpowerups clients", async () => {
     const user = await createUser();
-    await seedPowerup("drbp-imposter", "IMPOSTER");
+    await seedPowerup("drbp-red-card", "RED_CARD");
     await seedPowerup("drbp-rainstorm", "RAINSTORM");
 
     // Flagged client: powerupPool + rarePrizeMix present.
@@ -122,7 +122,7 @@ describe("daily reward box powerup prizes", () => {
     const user = await createUser();
     await seedAccessory("drbp-only-hat", 100);
     await ownAllAccessories(user.userId);
-    await seedPowerup("drbp-imposter2", "IMPOSTER");
+    await seedPowerup("drbp-red-card2", "RED_CARD");
 
     const res = await request(
       server.baseUrl,
@@ -152,7 +152,7 @@ describe("daily reward box powerup prizes", () => {
     const user = await createUser();
     await seedAccessory("drbp-claim-hat", 100);
     await ownAllAccessories(user.userId); // accessory pool empty → RARE = powerup
-    await seedPowerup("drbp-claim-imposter", "IMPOSTER");
+    await seedPowerup("drbp-claim-red-card", "RED_CARD");
 
     // Drive the command directly with a pinned rng to force RARE (0.999) — the
     // empty accessory pool makes the sub-roll resolve to POWERUP deterministically.
@@ -171,14 +171,14 @@ describe("daily reward box powerup prizes", () => {
     assert.equal(result.rarity, "RARE");
     assert.equal(result.rewardType, "POWERUP");
     assert.ok(result.powerup, "result carries the powerup payload");
-    assert.equal(result.powerup.powerupType, "IMPOSTER");
+    assert.equal(result.powerup.powerupType, "RED_CARD");
     assert.equal(result.shopItem, null);
     assert.equal(result.coinAmount, null);
 
     // Inventory incremented.
     const inv = await prisma.userPowerupItem.findUnique({
       where: {
-        userId_powerupType: { userId: user.userId, powerupType: "IMPOSTER" },
+        userId_powerupType: { userId: user.userId, powerupType: "RED_CARD" },
       },
     });
     assert.ok(inv);
@@ -189,7 +189,7 @@ describe("daily reward box powerup prizes", () => {
       where: { userId: user.userId },
     });
     assert.equal(claim.rewardType, "POWERUP");
-    assert.equal(claim.powerupType, "IMPOSTER");
+    assert.equal(claim.powerupType, "RED_CARD");
     assert.equal(claim.shopItemId, null);
 
     // Streak counters still advance.
@@ -253,7 +253,7 @@ describe("daily reward box powerup prizes", () => {
     const user = await createUser();
     await seedAccessory("drbp-guard-hat", 100);
     await ownAllAccessories(user.userId);
-    await seedPowerup("drbp-guard-imposter", "IMPOSTER");
+    await seedPowerup("drbp-guard-red-card", "RED_CARD");
 
     const {
       claimDailyRewardBox,
@@ -278,7 +278,7 @@ describe("daily reward box powerup prizes", () => {
     // Inventory did not double.
     const inv = await prisma.userPowerupItem.findUnique({
       where: {
-        userId_powerupType: { userId: user.userId, powerupType: "IMPOSTER" },
+        userId_powerupType: { userId: user.userId, powerupType: "RED_CARD" },
       },
     });
     assert.equal(inv.quantity, 1);
@@ -326,7 +326,7 @@ describe("daily reward box powerup prizes", () => {
 
   it("status: prod channel hides testOnly powerups from the pool", async () => {
     const user = await createUser();
-    await seedPowerup("drbp-live-imposter", "IMPOSTER", { testOnly: false });
+    await seedPowerup("drbp-live-red-card", "RED_CARD", { testOnly: false });
     await seedPowerup("drbp-test-rainstorm", "RAINSTORM", { testOnly: true });
 
     const res = await request(
@@ -337,7 +337,7 @@ describe("daily reward box powerup prizes", () => {
     );
     const body = await res.json();
     const types = body.box.powerupPool.map((p) => p.powerupType);
-    assert.ok(types.includes("IMPOSTER"));
+    assert.ok(types.includes("RED_CARD"));
     assert.ok(
       !types.includes("RAINSTORM"),
       "testOnly powerup must be hidden from the prod channel"

@@ -15,6 +15,10 @@ const {
 } = require("../services/raceResolutionDeliveryIntents");
 const { appSettings: defaultAppSettings } = require("../../../shared/config/appSettings");
 const { isStrictFlagEnabled } = require("../../../shared/config/isStrictFlagEnabled");
+const {
+  destructiveCleanupDisabled,
+  raceResolutionPostTaskWorkerDisabled,
+} = require("../../../shared/config/operationalControls");
 
 const POLL_INTERVAL_MS = 250;
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
@@ -23,11 +27,14 @@ const ADAPTIVE_DRAIN_SLICE_TASKS = 16;
 const ADAPTIVE_DRAIN_ERROR_BACKOFF_MS = 1000;
 
 function postTaskWorkerDisabled(env = process.env) {
-  return env.RACE_RESOLUTION_POST_TASK_WORKER_DISABLED === "true";
+  return raceResolutionPostTaskWorkerDisabled(env);
 }
 
 function postTaskCleanupDisabled(env = process.env) {
-  return env.RACE_RESOLUTION_POST_TASK_CLEANUP_DISABLED === "true";
+  return destructiveCleanupDisabled(
+    "RACE_RESOLUTION_POST_TASK_CLEANUP_DISABLED",
+    env,
+  );
 }
 
 function buildRaceResolutionPostTaskRunner(dependencies = {}) {

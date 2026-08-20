@@ -64,11 +64,11 @@ test("GET /shop/powerups returns the catalog with coins + owned quantities", asy
           coins: 750,
           items: [
             {
-              sku: "POWERUP_IMPOSTER",
-              name: "Imposter",
+              sku: "POWERUP_RAINSTORM",
+              name: "Rainstorm",
               description: "Swap positions",
               priceCoins: 75,
-              powerupType: "IMPOSTER",
+              powerupType: "RAINSTORM",
               ownedQuantity: 2,
             },
           ],
@@ -80,7 +80,7 @@ test("GET /shop/powerups returns the catalog with coins + owned quantities", asy
     const { status, body } = await getJson(server.baseUrl, "/shop/powerups");
     assert.equal(status, 200);
     assert.equal(body.coins, 750);
-    assert.equal(body.items[0].sku, "POWERUP_IMPOSTER");
+    assert.equal(body.items[0].sku, "POWERUP_RAINSTORM");
     assert.equal(body.items[0].priceCoins, 75);
     assert.equal(body.items[0].ownedQuantity, 2);
   } finally {
@@ -122,11 +122,11 @@ test("POST /shop/powerups/purchase buys a powerup and returns balance + inventor
     depsWithStubAuth({
       purchasePowerupItem: async ({ userId, sku, idempotencyKey }) => {
         assert.equal(userId, ME);
-        assert.equal(sku, "POWERUP_IMPOSTER");
+        assert.equal(sku, "POWERUP_RAINSTORM");
         assert.equal(idempotencyKey, "idem-1");
         return {
           coins: 250,
-          inventory: { powerupType: "IMPOSTER", quantity: 1 },
+          inventory: { powerupType: "RAINSTORM", quantity: 1 },
           purchase: { idempotent: false, coinsSpent: 75 },
         };
       },
@@ -136,7 +136,7 @@ test("POST /shop/powerups/purchase buys a powerup and returns balance + inventor
     const { status, body } = await postJson(
       server.baseUrl,
       "/shop/powerups/purchase",
-      { sku: "POWERUP_IMPOSTER" },
+      { sku: "POWERUP_RAINSTORM" },
       { "Idempotency-Key": "idem-1" }
     );
     assert.equal(status, 200);
@@ -162,7 +162,7 @@ test("POST /shop/powerups/purchase maps PowerupPurchaseError to its status code"
     const { status, body } = await postJson(
       server.baseUrl,
       "/shop/powerups/purchase",
-      { sku: "POWERUP_IMPOSTER" },
+      { sku: "POWERUP_RAINSTORM" },
       { "Idempotency-Key": "idem-2" }
     );
     assert.equal(status, 400);
@@ -177,14 +177,14 @@ test("GET /powerups/inventory returns owned quantities", async () => {
     depsWithStubAuth({
       getPowerupInventory: async (userId) => {
         assert.equal(userId, ME);
-        return { items: [{ powerupType: "IMPOSTER", quantity: 3 }] };
+        return { items: [{ powerupType: "RAINSTORM", quantity: 3 }] };
       },
     })
   );
   try {
     const { status, body } = await getJson(server.baseUrl, "/powerups/inventory");
     assert.equal(status, 200);
-    assert.equal(body.items[0].powerupType, "IMPOSTER");
+    assert.equal(body.items[0].powerupType, "RAINSTORM");
     assert.equal(body.items[0].quantity, 3);
   } finally {
     await server.close();
@@ -197,8 +197,8 @@ test("POST /races/:raceId/powerups/redeem spends a global powerup into the race"
       redeemPowerupToRace: async ({ userId, raceId, powerupType }) => {
         assert.equal(userId, ME);
         assert.equal(raceId, "race-1");
-        assert.equal(powerupType, "IMPOSTER");
-        return { powerup: { id: "rpw-1", type: "IMPOSTER", status: "HELD" } };
+        assert.equal(powerupType, "RAINSTORM");
+        return { powerup: { id: "rpw-1", type: "RAINSTORM", status: "HELD" } };
       },
     })
   );
@@ -206,10 +206,10 @@ test("POST /races/:raceId/powerups/redeem spends a global powerup into the race"
     const { status, body } = await postJson(
       server.baseUrl,
       "/races/race-1/powerups/redeem",
-      { powerupType: "IMPOSTER" }
+      { powerupType: "RAINSTORM" }
     );
     assert.equal(status, 200);
-    assert.equal(body.result.powerup.type, "IMPOSTER");
+    assert.equal(body.result.powerup.type, "RAINSTORM");
     assert.equal(body.result.powerup.status, "HELD");
   } finally {
     await server.close();
@@ -220,7 +220,7 @@ test("POST /races/:raceId/powerups/redeem maps RedeemPowerupError to its status"
   const server = await startServer(
     depsWithStubAuth({
       redeemPowerupToRace: async () => {
-        const err = new Error("You don't own any Imposter");
+        const err = new Error("You don't own any Rainstorm");
         err.name = "RedeemPowerupError";
         err.statusCode = 400;
         throw err;
@@ -231,10 +231,10 @@ test("POST /races/:raceId/powerups/redeem maps RedeemPowerupError to its status"
     const { status, body } = await postJson(
       server.baseUrl,
       "/races/race-1/powerups/redeem",
-      { powerupType: "IMPOSTER" }
+      { powerupType: "RAINSTORM" }
     );
     assert.equal(status, 400);
-    assert.match(body.error, /Imposter/i);
+    assert.match(body.error, /Rainstorm/i);
   } finally {
     await server.close();
   }

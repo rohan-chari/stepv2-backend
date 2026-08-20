@@ -86,9 +86,9 @@ test("rain multiplier defaults to 0.5 when metadata is missing/malformed", async
   );
 });
 
-test("rain + Runner's High stays additive: 1.5x", async () => {
+test("rain + Runner's High uses the permanent multiplicative rule", async () => {
   const effects = [effect("RAINSTORM"), effect("RUNNERS_HIGH")];
-  assert.equal(await totalFor(effects, 6000), 9000);
+  assert.equal(await totalFor(effects, 6000), 6000);
 });
 
 test("rain is suspended during a Leg Cramp: frozen steps stay 0, never negative", async () => {
@@ -192,14 +192,14 @@ test("ON: Rally Flag (1.25) + Ghost Pepper (3) + rainstorm = 2.125x, not 3.75x",
   });
 });
 
-test("OFF (the deploy default): the same case stays subtractive at 3.75x", async () => {
+test("retired OFF env value cannot restore subtractive scoring", async () => {
   await withFlag(undefined, async () => {
     const effects = [RALLY(), PEPPER(), RAIN()];
-    assert.equal(mAt(effects), 3.75, "4.25 − 0.5");
-    assert.equal(await totalFor(effects, 6000), 22500);
+    assert.equal(mAt(effects), 2.125, "4.25 × 0.5");
+    assert.equal(await totalFor(effects, 6000), 12750);
   });
   await withFlag("false", async () => {
-    assert.equal(mAt([RALLY(), PEPPER(), RAIN()]), 3.75);
+    assert.equal(mAt([RALLY(), PEPPER(), RAIN()]), 2.125);
   });
 });
 
@@ -273,7 +273,7 @@ test("ON: Wrong Turn negates the HALVED rate", async () => {
     assert.equal(mAt([RH(), RAIN(), effect("WRONG_TURN")]), -1);
   });
   await withFlag(undefined, async () => {
-    assert.equal(mAt([RH(), RAIN(), effect("WRONG_TURN")]), -1.5);
+    assert.equal(mAt([RH(), RAIN(), effect("WRONG_TURN")]), -1);
   });
 });
 
@@ -304,11 +304,11 @@ test("ON: buffed + rainstorm + partially-overlapping umbrella takes the MULTIPLI
   });
 });
 
-test("OFF: the same umbrella case keeps the old subtractive value", async () => {
+test("retired OFF env value cannot restore old umbrella subtractive scoring", async () => {
   await withFlag(undefined, async () => {
     const effects = umbrellaCase();
     assert.equal(mAt(effects, COVERED), 2);
-    assert.equal(mAt(effects, EXPOSED), 1.5, "2 − 0.5");
+    assert.equal(mAt(effects, EXPOSED), 1, "2 × 0.5");
   });
 });
 

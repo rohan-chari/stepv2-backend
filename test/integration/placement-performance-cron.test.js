@@ -181,7 +181,7 @@ describe("placement performance scheduler integration", () => {
     );
   });
 
-  it("750-row matrix preserves ties, frozen rows, seed/mute/resync/unchanged semantics", async () => {
+  it("750-row matrix preserves ties, frozen rows, seed/mute and unchanged semantics", async () => {
     const count = 750;
     const users = Array.from({ length: count }, (_, index) => ({
       id: `50000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
@@ -227,6 +227,7 @@ describe("placement performance scheduler integration", () => {
       enqueueRaceResolution: async () => false,
       eventBus: { emit(type, payload) { emitted.push({ type, payload }); } },
       logger: { log() {}, warn() {}, error() {} },
+      now: () => new Date("2026-08-13T12:00:00.000Z"),
       getPerformanceFlags: () => ({
         placementDistributedClaimEnabled: false,
         placementLeanBaselineWritesEnabled: true,
@@ -261,24 +262,23 @@ describe("placement performance scheduler integration", () => {
       "finished row emits nothing"
     );
 
-    process.env.PLACEMENT_BASELINE_RESYNC = "true";
-    try {
-      await prisma.raceParticipant.update({
+    await prisma.raceParticipant.update({
+      where: { raceId_userId: { raceId: race.id, userId: users[0].id } },
+      data: { lastNotifiedPlacement: 99 },
+    });
+    emitted.length = 0;
+    await run();
+    assert.equal(
+      (await prisma.raceParticipant.findUnique({
         where: { raceId_userId: { raceId: race.id, userId: users[0].id } },
-        data: { lastNotifiedPlacement: 99 },
-      });
-      emitted.length = 0;
-      await run();
-      assert.equal(
-        (await prisma.raceParticipant.findUnique({
-          where: { raceId_userId: { raceId: race.id, userId: users[0].id } },
-        })).lastNotifiedPlacement,
-        2
-      );
-      assert.equal(emitted.filter((event) => event.type === "PLACEMENT_CHANGED").length, 0);
-    } finally {
-      delete process.env.PLACEMENT_BASELINE_RESYNC;
-    }
+      })).lastNotifiedPlacement,
+      2
+    );
+    assert.equal(
+      emitted.filter((event) => event.type === "PLACEMENT_CHANGED").length,
+      1,
+      "the retired one-tick resync escape hatch can no longer suppress a real move",
+    );
   });
 
   it("recomputes a 750-member team transition and persists the exact team ranks", async () => {

@@ -213,11 +213,7 @@ function buildRecordSteps(dependencies = {}) {
   return async function recordSteps({ userId, steps, date, timeZone, skipRaceResolution = false }) {
     const existing = await stepsModel.findByUserIdAndDate(userId, date);
 
-    let noopSuppression = false;
-    try {
-      noopSuppression =
-        (await settings.getFlag("raceResolutionNoopInputSuppressionV1Enabled")) === true;
-    } catch {}
+    const noopSuppression = false;
 
     let record;
     let scoringChanged = true;

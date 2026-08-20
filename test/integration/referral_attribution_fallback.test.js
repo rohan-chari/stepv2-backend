@@ -266,22 +266,18 @@ describe("IP-fallback tier 2 (network prefix)", () => {
     assert.equal(exact.source, "ip_fallback_exact");
   });
 
-  it("attributes a same-/24 IPv4 open with source=ip_fallback_net when enabled", async () => {
+  it("does not resurrect same-/24 IPv4 attribution from the retired env", async () => {
     setNetEnv({ enabled: "1" });
-    const referrer = await makeReferrer("BARA-NET3");
+    await makeReferrer("BARA-NET3");
     await openLanding("BARA-NET3", "203.0.113.41");
 
     const user = await provision(`sub-fb-${++seq}`, { ip: "203.0.113.42" });
 
     const referral = await referralOf(user.id);
-    assert.ok(referral, "expected a tier-2 Referral row");
-    assert.equal(referral.referrerId, referrer.id);
-    assert.equal(referral.code, "BARA-NET3");
-    assert.equal(referral.status, "PENDING");
-    assert.equal(referral.source, "ip_fallback_net");
+    assert.equal(referral, null);
   });
 
-  it("matches a same-/64 IPv6 pair written in different (compressed vs expanded) forms", async () => {
+  it("does not resurrect same-/64 IPv6 attribution from the retired env", async () => {
     setNetEnv({ enabled: "1" });
     await makeReferrer("BARA-NET4");
     await openLanding("BARA-NET4", "2600:1:2:3:aaaa::1");
@@ -292,11 +288,10 @@ describe("IP-fallback tier 2 (network prefix)", () => {
     });
 
     const referral = await referralOf(user.id);
-    assert.ok(referral, "expanded and compressed IPv6 /64s must agree");
-    assert.equal(referral.source, "ip_fallback_net");
+    assert.equal(referral, null);
   });
 
-  it("hashes an IPv4-mapped IPv6 open as the v4 /24, not a /64 of the mapped range", async () => {
+  it("does not resurrect mapped-IPv6 prefix attribution from the retired env", async () => {
     setNetEnv({ enabled: "1" });
     await makeReferrer("BARA-NET5");
     await openLanding("BARA-NET5", "::ffff:203.0.113.51");
@@ -304,8 +299,7 @@ describe("IP-fallback tier 2 (network prefix)", () => {
     const user = await provision(`sub-fb-${++seq}`, { ip: "203.0.113.52" });
 
     const referral = await referralOf(user.id);
-    assert.ok(referral, "::ffff: v4-mapped must normalize to the v4 /24");
-    assert.equal(referral.source, "ip_fallback_net");
+    assert.equal(referral, null);
   });
 
   it("does NOT attribute across different /24s", async () => {

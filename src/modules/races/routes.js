@@ -650,6 +650,16 @@ function createRacesRouter(dependencies = {}) {
         : await create();
       res.status(201).json({ race });
     } catch (error) {
+      if (
+        error.code === "FUNDED_EXPOSURE_LIMIT" ||
+        error.code === "FUNDED_EXPOSURE_RETRY"
+      ) {
+        return res.status(409).json({
+          error: error.message,
+          code: error.code,
+          ...(error.meta || {}),
+        });
+      }
       if (error.name === "RaceCreationError") {
         const status = error.statusCode || 400;
         // `code` is additive — old clients only read `error`; new clients
@@ -1107,6 +1117,16 @@ function createRacesRouter(dependencies = {}) {
       });
       res.status(201).json({ participant });
     } catch (error) {
+      if (
+        error.code === "FUNDED_EXPOSURE_LIMIT" ||
+        error.code === "FUNDED_EXPOSURE_RETRY"
+      ) {
+        return res.status(409).json({
+          error: error.message,
+          code: error.code,
+          ...(error.meta || {}),
+        });
+      }
       if (error.name === "RaceJoinError") {
         const status = error.statusCode || 400;
         return res
@@ -1165,6 +1185,16 @@ function createRacesRouter(dependencies = {}) {
       });
       res.status(201).json({ participant, raceId: participant.raceId });
     } catch (error) {
+      if (
+        error.code === "FUNDED_EXPOSURE_LIMIT" ||
+        error.code === "FUNDED_EXPOSURE_RETRY"
+      ) {
+        return res.status(409).json({
+          error: error.message,
+          code: error.code,
+          ...(error.meta || {}),
+        });
+      }
       if (
         error.name === "RaceShareJoinError" ||
         error.name === "RaceJoinError"
@@ -1472,6 +1502,16 @@ function createRacesRouter(dependencies = {}) {
       });
       res.json({ participant });
     } catch (error) {
+      if (
+        error.code === "FUNDED_EXPOSURE_LIMIT" ||
+        error.code === "FUNDED_EXPOSURE_RETRY"
+      ) {
+        return res.status(409).json({
+          error: error.message,
+          code: error.code,
+          ...(error.meta || {}),
+        });
+      }
       if (error.name === "RaceInviteResponseError") {
         const status = error.statusCode || 400;
         return res
@@ -1687,11 +1727,7 @@ function createRacesRouter(dependencies = {}) {
   // amount nor its existence.
   router.get("/:raceId/impact-notices", async (req, res) => {
     try {
-      const enabled = req.clientFeatures?.has("impact_notices") === true &&
-        (await isStrictFlagEnabled(settings, "apiCompletedImpactPopupEnabled"));
-      if (!enabled) return res.status(404).json({ error: "Impact notices are unavailable", code: "FEATURE_DISABLED" });
-      const notices = await getImpactNotices({ userId: req.user.id, raceId: req.params.raceId });
-      return res.json({ notices });
+      return res.status(404).json({ error: "Impact notices are unavailable", code: "FEATURE_DISABLED" });
     } catch (error) {
       if (error.statusCode) return res.status(error.statusCode).json({ error: error.message, code: error.code || "REQUEST_FAILED" });
       console.error("Race impact notice read error:", error);
@@ -1701,13 +1737,7 @@ function createRacesRouter(dependencies = {}) {
 
   router.post("/:raceId/impact-notices/:noticeId/acknowledge", async (req, res) => {
     try {
-      const enabled = req.clientFeatures?.has("impact_notices") === true &&
-        (await isStrictFlagEnabled(settings, "apiCompletedImpactPopupEnabled"));
-      if (!enabled) return res.status(404).json({ error: "Impact notices are unavailable", code: "FEATURE_DISABLED" });
-      if (!req.params.noticeId) return res.status(400).json({ error: "Invalid notice id", code: "INVALID_ID" });
-      const acknowledged = await acknowledgeImpactNotice({ userId: req.user.id, raceId: req.params.raceId, noticeId: req.params.noticeId });
-      if (!acknowledged) return res.status(404).json({ error: "Impact notice not found", code: "NOT_FOUND" });
-      return res.json({ acknowledged: true });
+      return res.status(404).json({ error: "Impact notices are unavailable", code: "FEATURE_DISABLED" });
     } catch (error) {
       console.error("Race impact notice acknowledgement error:", error);
       return res.status(500).json({ error: "Internal server error", code: "INTERNAL_ERROR" });
@@ -1832,7 +1862,13 @@ function createRacesRouter(dependencies = {}) {
         const status = error.statusCode || 400;
         return res
           .status(status)
-          .json({ error: error.message, ...(error.code ? { code: error.code } : {}) });
+          .json({
+            error: error.message,
+            ...(error.code ? { code: error.code } : {}),
+            ...(error.powerupType
+              ? { powerupType: error.powerupType }
+              : {}),
+          });
       }
       console.error("Redeem powerup error:", error);
       res.status(500).json({ error: "Internal server error" });
@@ -1893,7 +1929,13 @@ function createRacesRouter(dependencies = {}) {
         const status = error.statusCode || 400;
         return res
           .status(status)
-          .json({ error: error.message, ...(error.code ? { code: error.code } : {}) });
+          .json({
+            error: error.message,
+            ...(error.code ? { code: error.code } : {}),
+            ...(error.powerupType
+              ? { powerupType: error.powerupType }
+              : {}),
+          });
       }
       console.error("Use powerup error:", error);
       res.status(500).json({ error: "Internal server error" });

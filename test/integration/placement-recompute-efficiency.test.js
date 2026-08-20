@@ -315,7 +315,7 @@ describe("placement recompute efficiency", () => {
     );
   });
 
-  it("the worker post-commit path expires only the queued race's due effects", async () => {
+  it("the worker post-commit path leaves resolved-impact expiry to the boundary writer", async () => {
     const { user } = await createTestUser({ appleId: "cron-expiry-scope-user" });
     const queuedRace = await createActiveRace(user.id, "queued-expiry");
     const otherRace = await createActiveRace(user.id, "other-expiry");
@@ -383,7 +383,11 @@ describe("placement recompute efficiency", () => {
       prisma.raceActiveEffect.findUnique({ where: { id: queuedEffect.id } }),
       prisma.raceActiveEffect.findUnique({ where: { id: otherEffect.id } }),
     ]);
-    assert.equal(processed.status, "EXPIRED");
+    assert.equal(
+      processed.status,
+      "ACTIVE",
+      "resolved-impact v2 is the sole expiry writer for snapshot effect types",
+    );
     assert.equal(untouched.status, "ACTIVE");
   });
 });

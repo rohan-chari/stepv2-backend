@@ -227,9 +227,7 @@ function createAuthRouter(dependencies = {}) {
     // hourly. Fail OPEN on absent/garbled versions (compareVersions → null):
     // builds that old predate the reader and ignore the flag entirely.
     const belowFineBucketFloor = isBelowFineBucketFloor(clientAppVersion);
-    const stepSampleBucketMinutes = belowFineBucketFloor
-      ? undefined
-      : await safeNumber("stepSampleBucketMinutes", [5, 10, 15, 30, 60]);
+    const stepSampleBucketMinutes = belowFineBucketFloor ? undefined : 5;
     // Batch 2026-08-08 item 9: server-only bookkeeping columns. EVERY user
     // payload this router emits is built by spreading the raw `users` row
     // (`...req.user` in GET /auth/me, GET /auth/session, PUT /auth/me/step-goal,
@@ -248,40 +246,26 @@ function createAuthRouter(dependencies = {}) {
       featureFlags: {
         bannerAdsEnabled: await safeFlag("bannerAdsEnabled", false),
         dualBoxBannersEnabled: await safeFlag("dualBoxBannersEnabled", false),
-        teamRacesEnabled: await safeFlag("teamRacesEnabled", true),
-        onboardingV2Enabled: await safeFlag("onboardingV2Enabled", false),
+        teamRacesEnabled: true,
+        onboardingV2Enabled: true,
         // Additive (onboarding revamp §6.1). Ungated by app version: shipped
         // binaries read named keys and ignore unknown ones, so this cannot
         // change behavior for anyone until a v3-capable build reads it.
-        onboardingV3Enabled: await safeFlag("onboardingV3Enabled", false),
+        onboardingV3Enabled: true,
         // Kill switch for the onboarding invite-code step. Defaults TRUE (see
         // KNOWN_FLAGS) — it fails open so a settings hiccup cannot silently
         // cost us referrals; flipping it false hides the step instantly across
         // every shipped build with no resubmission.
-        onboardingInviteCodeEnabled: await safeFlag(
-          "onboardingInviteCodeEnabled",
-          true
-        ),
-        openUserRaceDiscoveryEnabled: await safeFlag(
-          "openUserRaceDiscoveryEnabled",
-          false
-        ),
-        quickCreateRaceCtaEnabled: await safeFlag(
-          "quickCreateRaceCtaEnabled",
-          false
-        ),
-        setupInviteCodePromptEnabled: await safeFlag(
-          "setupInviteCodePromptEnabled",
-          false
-        ),
+        onboardingInviteCodeEnabled: false,
+        openUserRaceDiscoveryEnabled: true,
+        quickCreateRaceCtaEnabled: true,
+        setupInviteCodePromptEnabled: true,
+        homeInviteModalEnabled: true,
         // Custom race windows (spec §5.2a). Additive and ungated by app
         // version: frozen binaries read named keys off featureFlags and ignore
         // unknown ones. Fail-CLOSED (false) — the client must not offer a
         // control the backend will reject with 403 FEATURE_DISABLED.
-        customRaceWindowEnabled: await safeFlag(
-          "customRaceWindowEnabled",
-          false
-        ),
+        customRaceWindowEnabled: true,
         racesInviteDecisionGateEnabled: await safeFlag(
           "racesInviteDecisionGateEnabled",
           false
@@ -300,10 +284,7 @@ function createAuthRouter(dependencies = {}) {
         // so serving it is inert until a mandatory-capable build reads it.
         // Default FALSE — the safe side, since `true` is what removes a user's
         // way out of the tutorial.
-        tutorialMandatoryEnabled: await safeFlag(
-          "tutorialMandatoryEnabled",
-          false
-        ),
+        tutorialMandatoryEnabled: true,
         ...(stepSampleBucketMinutes !== undefined
           ? { stepSampleBucketMinutes }
           : {}),

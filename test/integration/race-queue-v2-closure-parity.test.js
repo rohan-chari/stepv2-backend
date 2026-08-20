@@ -1183,7 +1183,7 @@ describe("dependency closure — flags", () => {
     assertNonTrivial(run.state);
   });
 
-  it("shadow flag only: the plan is observed but never selected", async () => {
+  it("the retired shadow flag no longer observes or selects a plan", async () => {
     const { users, raceId } = await seedRace("ShadowOnly", 3);
     const [alice, bob] = users;
     await postSamples(bob, [sampleAt(5, 3000)]);
@@ -1197,8 +1197,8 @@ describe("dependency closure — flags", () => {
     );
     assert.equal(run.line.resolutionPlan, "FULL",
       "the shadow must never select a plan");
-    assert.equal(run.line.shadowClosurePlan, "DEPENDENCY_CLOSURE",
-      "…but must still report what it would have chosen");
+    assert.equal(run.line.shadowClosurePlan, null,
+      "the deleted shadow planner must not run");
     assert.equal(run.line.closureEscalatedOnMine, null,
       "no closure was evaluated for a write, so the escalation field stays null");
   });

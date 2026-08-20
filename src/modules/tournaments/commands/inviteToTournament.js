@@ -6,13 +6,16 @@ const { User } = require("../../users");
 const { TournamentError } = require("../services/tournamentErrors");
 const {
   TOURNAMENTS_FEATURE,
-  MAX_CHAMPION_PRIZE,
 } = require("../constants/tournaments");
 const {
   serializeTournamentPayload,
   tournamentDurationDays,
 } = require("../queries/serializeTournament");
 const { computePrizePool } = require("../../../shared/economy/prizePool");
+const {
+  resolveTournamentPrizeStamp,
+} = require("../../races/services/fundedExposure");
+const { withTournamentLock } = require("../services/tournamentLock");
 
 // Creator-only, PENDING-only lobby invites. Friends of the creator only. Users
 // already ACCEPTED/INVITED are skipped; a previously DECLINED/left user is
@@ -39,6 +42,7 @@ function buildInviteToTournament(dependencies = {}) {
     if (tournament.creatorId !== userId) {
       throw new TournamentError("Only the creator can invite", 403, "NOT_CREATOR");
     }
+    const prizeStamp = resolveTournamentPrizeStamp(tournament);
     if (tournament.status !== "PENDING") {
       throw new TournamentError(
         "This tournament has already started",
@@ -47,23 +51,13 @@ function buildInviteToTournament(dependencies = {}) {
       );
     }
 
-    const existingByUser = new Map(
-      (tournament.participants || []).map((p) => [p.userId, p])
-    );
-
-    const invited = [];
+    const eligible = [];
     const needsUpdate = [];
     const uniqueIds = [...new Set(userIds || [])].filter(
       (id) => id && id !== userId
     );
 
     for (const inviteeId of uniqueIds) {
-      const existing = existingByUser.get(inviteeId);
-      // Already in the lobby (accepted or pending invite) -> skip silently.
-      if (existing && (existing.status === "ACCEPTED" || existing.status === "INVITED")) {
-        continue;
-      }
-
       const friendship = await friendshipModel.findBetweenUsers(userId, inviteeId);
       if (!friendship || friendship.status !== "ACCEPTED") {
         // Not a friend -> skip (don't fail the whole batch).
@@ -77,18 +71,52 @@ function buildInviteToTournament(dependencies = {}) {
         continue;
       }
 
-      if (existing) {
-        // Re-flip a DECLINED/left row back to INVITED.
-        await db.tournamentParticipant.update({
-          where: { id: existing.id },
-          data: { status: "INVITED" },
-        });
-      } else {
-        await db.tournamentParticipant.create({
-          data: { tournamentId, userId: inviteeId, status: "INVITED" },
-        });
-      }
-      invited.push(inviteeId);
+      eligible.push(inviteeId);
+    }
+
+    const invited = [];
+    await withTournamentLock(
+      tournamentId,
+      async (tx, _deferred, lockedTournament) => {
+        if (!lockedTournament) {
+          throw new TournamentError("Tournament not found", 404, "TOURNAMENT_NOT_FOUND");
+        }
+        if (lockedTournament.creatorId !== userId) {
+          throw new TournamentError("Only the creator can invite", 403, "NOT_CREATOR");
+        }
+        if (lockedTournament.status !== "PENDING") {
+          throw new TournamentError(
+            "This tournament has already started",
+            409,
+            "TOURNAMENT_NOT_PENDING",
+          );
+        }
+        for (const inviteeId of eligible) {
+          const existing = await tx.tournamentParticipant.findUnique({
+            where: {
+              tournamentId_userId: { tournamentId, userId: inviteeId },
+            },
+          });
+          if (existing && ["ACCEPTED", "INVITED"].includes(existing.status)) {
+            continue;
+          }
+          if (existing) {
+            await tx.tournamentParticipant.update({
+              where: { id: existing.id },
+              data: { status: "INVITED" },
+            });
+          } else {
+            await tx.tournamentParticipant.create({
+              data: { tournamentId, userId: inviteeId, status: "INVITED" },
+            });
+          }
+          invited.push(inviteeId);
+        }
+      },
+      { prisma: db, userIds: eligible },
+    );
+
+    for (const inviteeId of invited) {
       events.emit("TOURNAMENT_INVITE_SENT", {
         tournamentId,
         tournamentName: tournament.name,
@@ -102,7 +130,8 @@ function buildInviteToTournament(dependencies = {}) {
             ? computePrizePool({
                 playerCount: tournament.bracketSize,
                 durationDays: tournamentDurationDays(tournament),
-                max: MAX_CHAMPION_PRIZE,
+                max: prizeStamp.tournamentChampionMaxCoins,
+                unit: prizeStamp.prizeCoinUnit,
               })
             : tournament.bracketSize * (tournament.buyInAmount || 0),
         buyInAmount: tournament.fundedPrize === true ? 0 : tournament.buyInAmount || 0,

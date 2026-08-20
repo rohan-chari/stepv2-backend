@@ -15,18 +15,21 @@ describe("2026-07-22 additive backend contracts", () => {
     // App-funded prize pools now default ON and zero buy-ins at create; the
     // buy-in assertions here belong to the legacy model, so pin the flag OFF.
     await appSettings.setFlag("fundedPrizePoolsEnabled", false);
+    await appSettings.setFlag("dualBoxBannersEnabled", true);
   });
 
-  it("serves and patches dualBoxBannersEnabled while /auth/me defaults it off", async () => {
+  it("serves dualBoxBannersEnabled permanently on and rejects admin mutation", async () => {
     const { user, token } = await createTestUser({ email: ADMIN_EMAIL });
     const me = await request(server.baseUrl, "GET", "/auth/me", { token });
-    assert.equal((await me.json()).user.featureFlags.dualBoxBannersEnabled, false);
+    assert.equal((await me.json()).user.featureFlags.dualBoxBannersEnabled, true);
 
     const patch = await request(server.baseUrl, "PATCH", "/admin/settings", {
-      token, body: { dualBoxBannersEnabled: true },
+      token, body: { dualBoxBannersEnabled: false },
     });
-    assert.equal(patch.status, 200);
-    assert.equal((await patch.json()).settings.dualBoxBannersEnabled, true);
+    assert.equal(patch.status, 400);
+
+    const after = await request(server.baseUrl, "GET", "/auth/me", { token });
+    assert.equal((await after.json()).user.featureFlags.dualBoxBannersEnabled, true);
     assert.ok(user.id);
   });
 
@@ -84,7 +87,7 @@ describe("2026-07-22 additive backend contracts", () => {
     // labels come straight from the DB row for every client, including ones
     // advertising `stealth_runner_duration` (prod bug 2026-07-29: the override
     // served the dead 60/75/90/120 ladder to exactly the newest builds).
-    assert.deepEqual(next.powerups.find((p) => p.type === "STEALTH_MODE").upgradeTierLabels, ["Hide 1h", "Hide 2h", "Hide 3h", "Hide 4h"]);
+    assert.deepEqual(next.powerups.find((p) => p.type === "STEALTH_MODE").upgradeTierLabels, ["Hide 1h", "Hide 1h 15m", "Hide 1h 30m", "Hide 1h 45m"]);
     assert.match(next.powerups.find((p) => p.type === "HITCHHIKE").description, /boosts and reversals/i);
   });
 });

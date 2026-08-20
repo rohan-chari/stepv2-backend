@@ -1,6 +1,9 @@
 const { Notification } = require("./notification");
 const { JobRun } = require("../../shared/db/jobRun");
 const { dailyRunKey } = require("../../shared/time/etSchedule");
+const {
+  destructiveCleanupDisabled,
+} = require("../../shared/config/operationalControls");
 
 const JOB_NAME = "notification_cleanup";
 const TICK_INTERVAL_MS = 5 * 60 * 1000; // ride the shared 5-minute cadence
@@ -18,10 +21,14 @@ function buildCleanupNotifications(dependencies = {}) {
   const logger = dependencies.logger || console;
   const retentionDays = dependencies.retentionDays || RETENTION_DAYS;
   const targetHour = dependencies.targetHour ?? TARGET_HOUR_ET;
+  const env = dependencies.env || process.env;
 
   // Returns the { count } deleted when it ran this tick, or null when the tick
   // wasn't the daily run.
   return async function cleanupNotifications() {
+    if (destructiveCleanupDisabled("NOTIFICATION_CLEANUP_DISABLED", env)) {
+      return null;
+    }
     const currentTime = now();
 
     const lastRanFor = await jobRunModel.lastRanFor(JOB_NAME);

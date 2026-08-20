@@ -346,17 +346,20 @@ describe("C1 — §8 test 3 invalidation", () => {
   it("an app-settings write busts the settings cache", async (t) => {
     if (skipReason) return t.skip(skipReason);
 
-    const before = await (await authReq("GET", "/auth/me", { token })).json();
-    assert.equal(before.user.featureFlags.bannerAdsEnabled, false);
+    const before = await (await authReq("GET", "/home/race-card", { token })).json();
+    assert.equal(Object.hasOwn(before, "homeServiceBanner"), false);
 
-    const res = await authReq("PATCH", "/admin/settings", {
+    const res = await authReq("PATCH", "/admin/settings/home-service-banner", {
       token: adminToken,
-      body: { bannerAdsEnabled: true },
+      body: { enabled: true, message: "Maintenance window" },
     });
     assert.equal(res.status, 200, await res.text());
 
-    const after = await (await authReq("GET", "/auth/me", { token })).json();
-    assert.equal(after.user.featureFlags.bannerAdsEnabled, true);
+    const after = await (await authReq("GET", "/home/race-card", { token })).json();
+    assert.deepEqual(after.homeServiceBanner, {
+      enabled: true,
+      message: "Maintenance window",
+    });
   });
 });
 
@@ -470,30 +473,30 @@ describe("C1 — §8 test 3 pub/sub coherence across TWO server processes", () =
       // cannot reach that. `appSettings` is exactly that cache (30s TTL, the
       // cluster-incoherence bug in spec §2 item 3): the peer must observe the
       // flip far sooner than 30s, which is only possible via the broadcast.
-      const peerMeBefore = await request(peerBaseUrl, "GET", "/auth/me", {
-        token,
+      const peerMeBefore = await request(peerBaseUrl, "GET", "/admin/settings", {
+        token: adminToken,
         headers: { "X-Client-Features": FEAT },
       });
       assert.equal(
-        (await peerMeBefore.json()).user.featureFlags.dualBoxBannersEnabled,
+        (await peerMeBefore.json()).settings.racePreviewEnabled,
         false,
         "peer should start with the flag off (and now hold it in its in-process cache)"
       );
 
       const flipped = await authReq("PATCH", "/admin/settings", {
         token: adminToken,
-        body: { dualBoxBannersEnabled: true },
+        body: { racePreviewEnabled: true },
       });
       assert.equal(flipped.status, 200, await flipped.text());
 
       const flipStart = Date.now();
       let peerSawFlip = false;
       while (Date.now() - flipStart < 5000) {
-        const res = await request(peerBaseUrl, "GET", "/auth/me", {
-          token,
+        const res = await request(peerBaseUrl, "GET", "/admin/settings", {
+          token: adminToken,
           headers: { "X-Client-Features": FEAT },
         });
-        if ((await res.json()).user.featureFlags.dualBoxBannersEnabled === true) {
+        if ((await res.json()).settings.racePreviewEnabled === true) {
           peerSawFlip = true;
           break;
         }
@@ -537,24 +540,25 @@ describe("C1 — zero behavior change when disabled", () => {
       const res = await s.fetch();
       assert.equal(res.status, 200, `${s.name} status with REDIS_URL unset`);
     }
-    const keys = await probe.keys(`${ENV_PREFIX}v1:*`);
+    const keys = (await probe.keys(`${ENV_PREFIX}v1:*`)).filter(
+      (key) => key !== `${ENV_PREFIX}v1:settings:app`
+    );
     assert.deepEqual(keys, [], `expected no keys written, saw: ${keys.join(", ")}`);
   });
 
-  it("flag OFF with Redis available: nothing is cached", async (t) => {
+  it("the retired OFF row cannot disable the permanent cache", async (t) => {
     if (skipReason) return t.skip(skipReason);
     await enableRedis();
     await setFlag(false);
+    await appSettings.setFlag("redisCacheCatalogsEnabled", true);
 
     for (const s of surfaces(token)) {
       const res = await s.fetch();
       assert.equal(res.status, 200, `${s.name} status with flag off`);
     }
-    const keys = await probe.keys(`${ENV_PREFIX}v1:*`);
-    assert.deepEqual(
-      keys,
-      [],
-      `flag off must write no cache keys, saw: ${keys.join(", ")}`
+    const keys = (await probe.keys(`${ENV_PREFIX}v1:*`)).filter(
+      (key) => key !== `${ENV_PREFIX}v1:settings:app`
     );
+    assert.ok(keys.length > 0, "permanent catalog caching must remain active");
   });
 });

@@ -115,16 +115,16 @@ describe("next-race CTA backend contract", () => {
     });
   });
 
-  it("emits every new app-setting flag default false and round-trips only literal true", async () => {
+  it("serves the launched next-race compatibility fields permanently", async () => {
     const walker = await user();
     const initial = await request(server.baseUrl, "GET", "/auth/me", {
       token: walker.token,
     });
     assert.equal(initial.status, 200);
     const initialFlags = (await initial.json()).user.featureFlags;
-    assert.equal(initialFlags.openUserRaceDiscoveryEnabled, false);
-    assert.equal(initialFlags.quickCreateRaceCtaEnabled, false);
-    assert.equal(initialFlags.setupInviteCodePromptEnabled, false);
+    assert.equal(initialFlags.openUserRaceDiscoveryEnabled, true);
+    assert.equal(initialFlags.quickCreateRaceCtaEnabled, true);
+    assert.equal(initialFlags.setupInviteCodePromptEnabled, true);
 
     await appSettings.setFlag("setupInviteCodePromptEnabled", true);
     const enabled = await request(server.baseUrl, "GET", "/auth/me", {
@@ -588,45 +588,52 @@ describe("next-race CTA backend contract", () => {
   });
 
   it("sizes and pays a two-person quick pool only from 2,000-step walkers", async () => {
-    await appSettings.setFlag("quickCreateRaceCtaEnabled", true);
-    const host = await user("Host");
-    const joiner = await user("Joiner");
-    const raceId = (await (await createQuick(host)).json()).race.id;
-    await request(server.baseUrl, "POST", `/races/${raceId}/join`, {
-      token: joiner.token,
-      headers: CAPABLE,
-    });
-    const participants = await prisma.raceParticipant.findMany({
-      where: { raceId },
-      orderBy: { userId: "asc" },
-    });
-    await prisma.raceParticipant.update({
-      where: { id: participants[0].id },
-      data: { placement: 1, totalSteps: 5000, rawSteps: 5000 },
-    });
-    await prisma.raceParticipant.update({
-      where: { id: participants[1].id },
-      data: { placement: 2, totalSteps: 4000, rawSteps: 4000 },
-    });
-    await completeRace({
-      raceId,
-      winnerUserId: participants[0].userId,
-      participantUserIds: participants.map((p) => p.userId),
-    });
-    const settled = await prisma.race.findUnique({ where: { id: raceId } });
-    const paid = await prisma.raceParticipant.findMany({
-      where: { raceId },
-      orderBy: { placement: "asc" },
-    });
-    assert.equal(settled.prizePoolCoins, 80);
-    assert.deepEqual(paid.map((p) => p.payoutCoins), [56, 16]);
-    assert.equal(
-      await prisma.coinTransaction.aggregate({
-        where: { reason: "race_prize_pool_payout", refId: { startsWith: raceId } },
-        _sum: { amount: true },
-      }).then((x) => x._sum.amount || 0),
-      72
-    );
+    const previousV2 = process.env.FUNDED_PRIZE_V2_ENABLED;
+    process.env.FUNDED_PRIZE_V2_ENABLED = "true";
+    try {
+      await appSettings.setFlag("quickCreateRaceCtaEnabled", true);
+      const host = await user("Host");
+      const joiner = await user("Joiner");
+      const raceId = (await (await createQuick(host)).json()).race.id;
+      await request(server.baseUrl, "POST", `/races/${raceId}/join`, {
+        token: joiner.token,
+        headers: CAPABLE,
+      });
+      const participants = await prisma.raceParticipant.findMany({
+        where: { raceId },
+        orderBy: { userId: "asc" },
+      });
+      await prisma.raceParticipant.update({
+        where: { id: participants[0].id },
+        data: { placement: 1, totalSteps: 5000, rawSteps: 5000 },
+      });
+      await prisma.raceParticipant.update({
+        where: { id: participants[1].id },
+        data: { placement: 2, totalSteps: 4000, rawSteps: 4000 },
+      });
+      await completeRace({
+        raceId,
+        winnerUserId: participants[0].userId,
+        participantUserIds: participants.map((p) => p.userId),
+      });
+      const settled = await prisma.race.findUnique({ where: { id: raceId } });
+      const paid = await prisma.raceParticipant.findMany({
+        where: { raceId },
+        orderBy: { placement: "asc" },
+      });
+      assert.equal(settled.prizePoolCoins, 40);
+      assert.deepEqual(paid.map((p) => p.payoutCoins), [30, 10]);
+      assert.equal(
+        await prisma.coinTransaction.aggregate({
+          where: { reason: "race_prize_pool_payout", refId: { startsWith: raceId } },
+          _sum: { amount: true },
+        }).then((x) => x._sum.amount || 0),
+        40
+      );
+    } finally {
+      if (previousV2 == null) delete process.env.FUNDED_PRIZE_V2_ENABLED;
+      else process.env.FUNDED_PRIZE_V2_ENABLED = previousV2;
+    }
   });
 
   it("mints no quick-race prize when fewer than two accepted walkers qualify", async () => {

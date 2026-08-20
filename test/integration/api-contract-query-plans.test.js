@@ -334,7 +334,15 @@ describe("API cleanup production query plans", () => {
     assert.match(raceAccess, /race_participants_(race_id_user_id_key|user_id_status(?:_invite_expires_at)?_idx)/);
     assert.match(progress, /race_participants_race_id_status_idx/);
     assert.match(tournamentParticipants, /tournament_participants_tournament_id_user_id_key/);
-    assert.match(tournamentRaces, /races_tournament_id_tournament_round_tournament_match_index_key/);
+    // Both production indexes are legitimate for a 16-player bracket's 15
+    // matchup rows. Depending on current row width/statistics, Postgres may
+    // prefer the ordered unique index or the tournament/status bitmap index
+    // followed by a bounded 15-row in-memory sort. Keep this assertion strict
+    // about indexed access while allowing that cost-based choice.
+    assert.match(
+      tournamentRaces,
+      /races_tournament_id_(?:tournament_round_tournament_match_index_key|status_idx)/
+    );
     for (const plan of [
       friends, compactProfiles, stats, raceAccess, progress,
       tournamentParticipants, tournamentRaces,

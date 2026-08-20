@@ -12,6 +12,7 @@ const {
 const {
   appSettings,
   KNOWN_FLAGS,
+  PERMANENT_FLAGS,
 } = require("../../src/shared/config/appSettings");
 
 const CLEANUP_FLAGS = [
@@ -138,11 +139,16 @@ describe("API page-payload cleanup — locked additive contracts", () => {
     await setCleanupFlags(false);
   });
 
-  it("declares all nineteen rollout flags with strict false defaults", async () => {
+  it("graduates all nineteen rollout flags while retaining the historical dark fixture", async () => {
     assert.equal(CLEANUP_FLAGS.length, 19);
     for (const key of CLEANUP_FLAGS) {
-      assert.equal(KNOWN_FLAGS[key], false, `${key} must be declared default-false`);
-      assert.equal(await appSettings.getFlag(key), false, `${key} missing-row default`);
+      assert.equal(KNOWN_FLAGS[key], undefined, `${key} must not remain mutable`);
+      assert.equal(PERMANENT_FLAGS[key], true, `${key} must be permanently enabled`);
+      assert.equal(
+        await appSettings.getFlag(key),
+        false,
+        `${key} protected legacy fixture starts dark inside Node tests`,
+      );
     }
   });
 

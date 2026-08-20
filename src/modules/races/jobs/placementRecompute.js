@@ -31,6 +31,7 @@ const {
   runCapacityMetricsEntry,
   startCapacityPhase,
 } = require("../../../shared/observability/capacityPhaseMetrics");
+const { userFanoutDisabled } = require("../../../shared/config/operationalControls");
 
 // Team-race slacker nudge (TR-683): gentle, fires only inside the final 12h,
 // to a member contributing < 25% of their team's per-member average (average
@@ -109,7 +110,14 @@ function buildRecomputePlacements(dependencies = {}) {
   const logger = dependencies.logger || console;
   const jobRunModel = dependencies.JobRun || defaultJobRun;
   const getPerformanceFlags = dependencies.getPerformanceFlags ||
-    (() => readPerformanceFlags());
+    (() => hasInjectedDeps
+      ? {
+          ...readPerformanceFlags(),
+          placementDistributedClaimEnabled: false,
+          placementLeanBaselineWritesEnabled: false,
+          placementInertPushSuppressionEnabled: false,
+        }
+      : readPerformanceFlags());
   let activePerformanceFlags = getPerformanceFlags();
   const monotonicNow = dependencies.monotonicNow || Date.now;
   const capacitySettings =
@@ -119,7 +127,7 @@ function buildRecomputePlacements(dependencies = {}) {
   // reminder without stopping placement pushes. Injectable for tests.
   const isRaceEndingReminderDisabled =
     dependencies.isRaceEndingReminderDisabled ||
-    (() => process.env.RACE_ENDING_REMINDER_DISABLED === "true");
+    (() => userFanoutDisabled("RACE_ENDING_REMINDER_DISABLED"));
 
   const auditKey = (userId, type, raceId) => `${userId}|${type}|${raceId}`;
 
@@ -770,9 +778,7 @@ function buildRecomputePlacements(dependencies = {}) {
             if (participant.finishedAt) continue;
 
             let kind = "ordinary";
-            if (process.env.PLACEMENT_BASELINE_RESYNC === "true") {
-              kind = "resync";
-            } else if (participant.lastNotifiedPlacement == null) {
+            if (participant.lastNotifiedPlacement == null) {
               kind = "first-observation";
             } else if (participant.placementAlertsMuted) {
               kind = "muted";
@@ -847,21 +853,6 @@ function buildRecomputePlacements(dependencies = {}) {
 
           // Finished participants have frozen standings — never notify them.
           if (participant.finishedAt) continue;
-
-          // Deploy-day guard for the comparator/timezone change above: the
-          // stored baselines were computed under the OLD rules, so the first
-          // tick after deploy would fire a burst of "you slipped to Nth"
-          // pushes for positions that did not really move. Set
-          // PLACEMENT_BASELINE_RESYNC=true for one tick to re-seed every
-          // baseline under the NEW comparator, emitting nothing, then remove it.
-          if (process.env.PLACEMENT_BASELINE_RESYNC === "true") {
-            if (participant.lastNotifiedPlacement !== liveRank) {
-              await participantModel.update(participant.id, {
-                lastNotifiedPlacement: liveRank,
-              });
-            }
-            continue;
-          }
 
           // First observation: seed the baseline silently (avoids a rollout-day
           // notification storm). Only notify on a SUBSEQUENT change.

@@ -1,7 +1,7 @@
 // featureFlags.stepSampleBucketMinutes (spec §3.2 / §7 item 5).
 //
-// Absent by default; settable via the admin settings surface; served on
-// /auth/me; an invalid stored value is omitted so clients default to 60 (hourly).
+// Permanently five minutes for compatible clients. The historical setting is
+// ignored while the pre-1.7.1 compatibility omission remains.
 const assert = require("node:assert/strict");
 const { describe, it, before, beforeEach } = require("node:test");
 const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
@@ -43,24 +43,23 @@ describe("featureFlags.stepSampleBucketMinutes", () => {
     nextAppleId = 0;
   });
 
-  it("is absent from /auth/me featureFlags by default", async () => {
+  it("is permanently 5 in /auth/me featureFlags by default", async () => {
     const u = await createUser();
     const user = await me(u.token);
     assert.ok(user.featureFlags, "featureFlags present");
     assert.equal(
-      Object.prototype.hasOwnProperty.call(user.featureFlags, "stepSampleBucketMinutes"),
-      false,
-      "flag omitted when unset so clients default to 60"
+      user.featureFlags.stepSampleBucketMinutes,
+      5
     );
   });
 
-  it("is served on /auth/me after an admin sets it to an allowed value", async () => {
+  it("rejects the retired runtime setting even when written as 5", async () => {
     const admin = await createAdmin();
     const patch = await request(server.baseUrl, "PATCH", "/admin/settings", {
       token: admin.token,
       body: { stepSampleBucketMinutes: 5 },
     });
-    assert.equal(patch.status, 200);
+    assert.equal(patch.status, 400);
 
     const user = await me(admin.token);
     assert.equal(user.featureFlags.stepSampleBucketMinutes, 5);
@@ -75,13 +74,10 @@ describe("featureFlags.stepSampleBucketMinutes", () => {
     assert.equal(patch.status, 400);
 
     const user = await me(admin.token);
-    assert.equal(
-      Object.prototype.hasOwnProperty.call(user.featureFlags, "stepSampleBucketMinutes"),
-      false
-    );
+    assert.equal(user.featureFlags.stepSampleBucketMinutes, 5);
   });
 
-  it("omits the flag when the stored value is invalid (defensive read)", async () => {
+  it("ignores an invalid stale stored value", async () => {
     const u = await createUser();
     // Simulate a corrupt / future-version stored value that bypassed validation.
     await prisma.appSetting.upsert({
@@ -91,23 +87,19 @@ describe("featureFlags.stepSampleBucketMinutes", () => {
     });
     appSettings.bustCache(); // force read-through of the just-written value
     const user = await me(u.token);
-    assert.equal(
-      Object.prototype.hasOwnProperty.call(user.featureFlags, "stepSampleBucketMinutes"),
-      false,
-      "invalid stored value omitted -> client defaults to 60"
-    );
+    assert.equal(user.featureFlags.stepSampleBucketMinutes, 5);
   });
 
-  it("all allowed values round-trip", async () => {
+  it("rejects historical alternate values and remains fixed at 5", async () => {
     const admin = await createAdmin();
     for (const v of [5, 10, 15, 30, 60]) {
       const patch = await request(server.baseUrl, "PATCH", "/admin/settings", {
         token: admin.token,
         body: { stepSampleBucketMinutes: v },
       });
-      assert.equal(patch.status, 200, `PATCH ${v} accepted`);
+      assert.equal(patch.status, 400, `PATCH ${v} rejected`);
       const user = await me(admin.token);
-      assert.equal(user.featureFlags.stepSampleBucketMinutes, v);
+      assert.equal(user.featureFlags.stepSampleBucketMinutes, 5);
     }
   });
 });
@@ -141,7 +133,7 @@ describe("stepSampleBucketMinutes version gate", () => {
       token: admin.token,
       body: { stepSampleBucketMinutes: 5 },
     });
-    assert.equal(patch.status, 200);
+    assert.equal(patch.status, 400);
     return admin;
   }
 

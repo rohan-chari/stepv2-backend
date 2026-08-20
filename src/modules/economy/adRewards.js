@@ -3,7 +3,9 @@
 // rewarded ad ever see it), so these are the server-side kill switches: flip
 // the env var and restart to turn the feature off for every app version
 // without an App Store cycle. See AD_REWARD_DESIGN.md (frontend repo).
-const ADS_EXTRA_SPIN_ENABLED = process.env.ADS_EXTRA_SPIN_ENABLED !== "false";
+const { adValueEnabled } = require("../../shared/config/operationalControls");
+
+const ADS_EXTRA_SPIN_ENABLED = adValueEnabled("extraSpin");
 
 // Local/staging escape hatch ONLY: accept SSV callbacks without a signature
 // check (AdMob test ads sign with test keys, but local curl testing can't).
@@ -15,7 +17,7 @@ const EXTRA_SPIN_REWARD_KIND = "extra_daily_spin";
 
 // Watch-ad-for-coins (Get Coins hub). Same kill-switch semantics as the extra
 // spin: per-request `ads` client-feature gate plus this env switch.
-const ADS_COIN_REWARD_ENABLED = process.env.ADS_COIN_REWARD_ENABLED !== "false";
+const ADS_COIN_REWARD_ENABLED = adValueEnabled("coinReward");
 
 // rewardKind for coin-reward grants (SSV custom_data "coins:<YYYY-MM-DD>").
 const COIN_REWARD_KIND = "coin_reward";
@@ -47,11 +49,11 @@ const BOX_REROLL_REWARD_KIND = "box_reroll";
 const RACE_PAYOUT_DOUBLE_REWARD_KIND = "race_payout_double";
 
 function adsRacePayoutDoublePrepareEnabled() {
-  return process.env.ADS_RACE_PAYOUT_DOUBLE_PREPARE_ENABLED === "true";
+  return adValueEnabled("payoutPrepare");
 }
 
 function adsRacePayoutDoubleClaimEnabled() {
-  return process.env.ADS_RACE_PAYOUT_DOUBLE_CLAIM_ENABLED === "true";
+  return adValueEnabled("payoutClaim");
 }
 
 // AdMob ad unit IDs have one canonical representation: a 16-digit publisher
@@ -99,7 +101,7 @@ function racePayoutDoubleMaxBonusCoins() {
 // function, not a const) so a prod .env edit + restart flips it for every app
 // version at once, and so an integration test can exercise both sides.
 function adsBoxRerollEnabled() {
-  return process.env.ADS_BOX_REROLL_ENABLED === "true";
+  return adValueEnabled("boxReroll");
 }
 
 // Both ad-unlock kinds, for the shared daily-cap count (D4: ONE ad unlock per

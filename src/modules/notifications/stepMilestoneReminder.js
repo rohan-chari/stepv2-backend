@@ -7,6 +7,7 @@ const { zonesAtSlot } = require("./dailyRewardReminder");
 const {
   STEP_MILESTONE_THRESHOLDS,
 } = require("../steps/constants/stepMilestones");
+const { userFanoutDisabled } = require("../../shared/config/operationalControls");
 
 // Step-milestone evening reminder (batch 2026-08-08 item 3). Same skeleton as
 // dailyRewardReminder.js — see that file's header for why the two guards (a
@@ -49,7 +50,7 @@ function buildStepMilestoneReminder(dependencies = {}) {
   const logger = dependencies.logger || console;
   const isDisabled =
     dependencies.isDisabled ||
-    (() => process.env.STEP_MILESTONE_REMINDERS_DISABLED === "true");
+    (() => userFanoutDisabled("STEP_MILESTONE_REMINDERS_DISABLED"));
 
   // Returns the reminders emitted this tick (for tests), or [] when disabled /
   // nothing due.

@@ -156,7 +156,6 @@ function buildLocalGlobalStepEventTick(dependencies = {}) {
     }
 
     const creationEnabled =
-      process.env.LOCAL_GLOBAL_STEP_EVENTS_DISABLED !== "true" &&
       (await settings.getFlag("localGlobalStepEventsEnabled")) === true;
     if (!creationEnabled) return false;
     if (!retentionHealthy) {

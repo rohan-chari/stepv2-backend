@@ -12,6 +12,9 @@ const {
   buildSeededRaceBuckets,
   upcomingWindowFor,
 } = require("../../src/modules/races/services/seededRaceBuckets");
+const {
+  RaceResolutionJobV2,
+} = require("../../src/modules/races/models/raceResolutionJobV2");
 
 const FEATURES = { "X-Client-Features": "seeded_race_buckets" };
 
@@ -105,7 +108,74 @@ describe("private seeded race buckets (integration)", () => {
     assert.equal((await response.json()).code, "LEGACY_STREAM_ELECTED");
   });
 
+  it("reconcile waits for the legacy race C0 before deleting membership", async () => {
+    const { user, token } = await createTestUser();
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { autoJoinFeaturedRaces: true },
+    });
+    const seed = await prisma.raceSeed.findUnique({ where: { kind: "DAILY_10K" } });
+    const { windowStart, windowEnd } = upcomingWindowFor(seed, new Date());
+    const race = await prisma.race.create({
+      data: {
+        seedId: seed.id,
+        name: "Legacy reconcile",
+        targetSteps: seed.targetSteps,
+        status: "PENDING",
+        isPublic: true,
+        timeBased: true,
+        timezone: "America/New_York",
+        maxParticipants: 100,
+        maxDurationDays: 1,
+        scheduledStartAt: windowStart,
+        endsAt: windowEnd,
+      },
+    });
+    const participant = await prisma.raceParticipant.create({
+      data: { raceId: race.id, userId: user.id, status: "ACCEPTED" },
+    });
+    await prisma.seededRaceWindowMembership.create({
+      data: {
+        seedId: seed.id,
+        windowStart,
+        userId: user.id,
+        stream: "LEGACY",
+        raceId: race.id,
+      },
+    });
+
+    let releaseFence;
+    let markFence;
+    const fenced = new Promise((resolve) => { markFence = resolve; });
+    const release = new Promise((resolve) => { releaseFence = resolve; });
+    const holder = prisma.$transaction(async (tx) => {
+      await RaceResolutionJobV2.acquireForWrite(tx, { raceId: race.id });
+      markFence();
+      await release;
+    }, { timeout: 15_000 });
+    await fenced;
+    const featured = request(baseUrl, "GET", "/races/featured", {
+      token,
+      headers: FEATURES,
+    });
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      assert.equal(
+        await prisma.raceParticipant.count({ where: { id: participant.id } }),
+        1,
+      );
+    } finally {
+      releaseFence();
+      await holder;
+    }
+    assert.equal((await featured).status, 200);
+    assert.equal(await prisma.raceParticipant.count({ where: { id: participant.id } }), 0);
+  });
+
   it("finalizes the next ET window before its boundary and creates no online bucket at or after it", async () => {
+    const previousPrizeV2 = process.env.FUNDED_PRIZE_V2_ENABLED;
+    process.env.FUNDED_PRIZE_V2_ENABLED = "true";
+    await appSettings.setFlag("fundedPrizePoolsEnabled", true);
     const seed = await prisma.raceSeed.findUnique({ where: { kind: "DAILY_10K" } });
     const [alice, bob] = await Promise.all([createTestUser(), createTestUser()]);
     // 23:58 ET: renewal's five-minute pre-boundary pass targets the following
@@ -139,6 +209,18 @@ describe("private seeded race buckets (integration)", () => {
     assert.equal(persisted.race.isPublic, false);
     assert.equal(persisted.race.maxParticipants, 15);
     assert.equal(persisted.assignments.length, 2);
+    assert.equal(persisted.race.prizeCalculationVersion, 2);
+    assert.equal(persisted.race.prizeCoinUnit, 10);
+    assert.equal(persisted.race.prizePoolMaxCoins, 8000);
+    const exposureRows = await prisma.raceParticipant.findMany({
+      where: { raceId: persisted.race.id },
+      orderBy: { userId: "asc" },
+    });
+    assert.equal(exposureRows.length, 2);
+    for (const row of exposureRows) {
+      assert.equal(row.fundedExposureMillicoins, 10_000);
+      assert.equal(row.fundedExposureRateMillicoinsPerDay, 10_000);
+    }
 
     const afterBoundary = buildSeededRaceBuckets({
       prisma,
@@ -150,6 +232,11 @@ describe("private seeded race buckets (integration)", () => {
       [],
       "the boundary never mints an online/late bucket"
     );
+    if (previousPrizeV2 === undefined) {
+      delete process.env.FUNDED_PRIZE_V2_ENABLED;
+    } else {
+      process.env.FUNDED_PRIZE_V2_ENABLED = previousPrizeV2;
+    }
   });
 
   it("keeps capable cards private and never leaks another user's bucket through public browsing", async () => {

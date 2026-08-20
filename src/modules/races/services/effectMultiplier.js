@@ -37,7 +37,7 @@ function reductionLostFraction(effect) {
 // by a pm2 reload rather than a deploy. Ships "false"; flipped on in prod after
 // staging verification (architect R10).
 function rainstormMultiplicativeEnabled() {
-  return process.env.RAINSTORM_MULTIPLICATIVE_ENABLED === "true";
+  return true;
 }
 
 // §3 — the signed effective multiplier at instant `timeMs`.

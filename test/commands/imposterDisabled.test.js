@@ -5,12 +5,11 @@ const { buildUsePowerup, PowerupUseError } = require("../../src/modules/powerups
 const { buildGetRaceProgress } = require("../../src/modules/races/queries/getRaceProgress");
 
 // ---------------------------------------------------------------------------
-// IMPOSTER kill switch (Item 3). When disabled (imposterEnabled() === false):
+// IMPOSTER is permanently retired:
 //   * a use request is REJECTED and the item is NOT consumed (stays HELD), and
 //   * the leaderboard slot-swap is NOT applied in getRaceProgress (existing
 //     held/active Imposters stop swapping rows for everyone).
-// The disable is injected here (defaults to the env reader in prod) so these
-// tests never touch process.env and never disturb the legacy imposter tests.
+// A stale/injected legacy flag cannot reactivate either path.
 // ---------------------------------------------------------------------------
 
 // ── use rejection ──────────────────────────────────────────────────────────
@@ -46,12 +45,16 @@ function makeUseDeps() {
   };
 }
 
-test("IMPOSTER use is rejected when disabled, and the powerup is NOT consumed", async () => {
+test("IMPOSTER use returns the permanent retired contract and is not consumed", async () => {
   const ctx = makeUseDeps();
   const use = buildUsePowerup(ctx.deps);
   await assert.rejects(
     () => use({ userId: "user-1", raceId: "race-1", powerupId: "pw-1", targetUserId: "user-2" }),
-    (err) => err instanceof PowerupUseError && /unavailable/i.test(err.message)
+    (err) =>
+      err instanceof PowerupUseError &&
+      err.statusCode === 410 &&
+      err.code === "POWERUP_RETIRED" &&
+      err.powerupType === "IMPOSTER"
   );
   assert.equal(ctx.updatedPowerup, null, "item stays HELD — never marked USED");
 });

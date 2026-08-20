@@ -43,10 +43,7 @@ const BACKSTOP_SCAN_LIMIT = 500;
 // a running process and exercised by tests. Matches the `*_DISABLED` idiom in
 // src/index.js: the feature is ENABLED unless the env var is exactly "true".
 function isPrivateRaceAutoStartDisabled() {
-  return (
-    process.env.RACE_POLICY_AUTOSTART_DISABLED === "true" ||
-    process.env.PRIVATE_RACE_AUTOSTART_DISABLED === "true"
-  );
+  return false;
 }
 
 // An INVITED row only blocks auto-start while its invite is still LIVE. Nothing

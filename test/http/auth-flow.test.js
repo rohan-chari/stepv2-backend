@@ -90,19 +90,15 @@ test("POST /auth/apple provisions the signed-in user", async () => {
         bannerAdsEnabled: false,
         dualBoxBannersEnabled: false,
         teamRacesEnabled: true,
-        onboardingV2Enabled: false,
-        onboardingV3Enabled: false,
-        // Kill switch, so it defaults ON — unlike the opt-in onboarding flags
-        // above. Pinned here because this deepEqual is the contract test for
-        // the exact featureFlags payload every client receives.
-        onboardingInviteCodeEnabled: true,
-        tutorialMandatoryEnabled: false,
-        openUserRaceDiscoveryEnabled: false,
-        quickCreateRaceCtaEnabled: false,
-        setupInviteCodePromptEnabled: false,
-        // Custom race windows. Fail-closed: the client must not offer a
-        // control the backend will reject with 403 FEATURE_DISABLED.
-        customRaceWindowEnabled: false,
+        onboardingV2Enabled: true,
+        onboardingV3Enabled: true,
+        onboardingInviteCodeEnabled: false,
+        tutorialMandatoryEnabled: true,
+        openUserRaceDiscoveryEnabled: true,
+        quickCreateRaceCtaEnabled: true,
+        setupInviteCodePromptEnabled: true,
+        homeInviteModalEnabled: true,
+        customRaceWindowEnabled: true,
         racesInviteDecisionGateEnabled: false,
         quickRaceShareAutoFriendEnabled: false,
         stepSampleBucketMinutes: 5,

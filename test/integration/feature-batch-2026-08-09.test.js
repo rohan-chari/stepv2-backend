@@ -53,12 +53,12 @@ describe("feature batch 2026-08-09 (backend)", () => {
   // ── Item 9 — tutorialMandatoryEnabled ─────────────────────────────────────
 
   describe("item 9 — tutorialMandatoryEnabled flag", () => {
-    it("is served on /auth/me and defaults to false", async () => {
+    it("is served on /auth/me as permanently mandatory", async () => {
       const { token } = await signUp();
       const res = await request(server.baseUrl, "GET", "/auth/me", { token });
       assert.equal(res.status, 200);
       const body = await res.json();
-      assert.equal(body.user.featureFlags.tutorialMandatoryEnabled, false);
+      assert.equal(body.user.featureFlags.tutorialMandatoryEnabled, true);
     });
 
     it("is additive — the pre-existing flags are still served", async () => {
@@ -83,15 +83,13 @@ describe("feature batch 2026-08-09 (backend)", () => {
       }
     });
 
-    it("PATCH /admin/settings flips it and /auth/me reflects it", async () => {
+    it("rejects admin mutation and keeps /auth/me permanently mandatory", async () => {
       const admin = await signUpAdmin();
       const patch = await request(server.baseUrl, "PATCH", "/admin/settings", {
         token: admin.token,
         body: { tutorialMandatoryEnabled: true },
       });
-      assert.equal(patch.status, 200);
-      const patched = await patch.json();
-      assert.equal(patched.settings.tutorialMandatoryEnabled, true);
+      assert.equal(patch.status, 400);
 
       const { token } = await signUp();
       const me = await request(server.baseUrl, "GET", "/auth/me", { token });
@@ -99,22 +97,18 @@ describe("feature batch 2026-08-09 (backend)", () => {
       assert.equal(body.user.featureFlags.tutorialMandatoryEnabled, true);
     });
 
-    it("can be flipped back OFF — this is the kill switch, not a one-way door", async () => {
+    it("rejects a historical OFF request and retains the compatibility value", async () => {
       const admin = await signUpAdmin();
-      await request(server.baseUrl, "PATCH", "/admin/settings", {
-        token: admin.token,
-        body: { tutorialMandatoryEnabled: true },
-      });
       const off = await request(server.baseUrl, "PATCH", "/admin/settings", {
         token: admin.token,
         body: { tutorialMandatoryEnabled: false },
       });
-      assert.equal(off.status, 200);
+      assert.equal(off.status, 400);
 
       const { token } = await signUp();
       const me = await request(server.baseUrl, "GET", "/auth/me", { token });
       const body = await me.json();
-      assert.equal(body.user.featureFlags.tutorialMandatoryEnabled, false);
+      assert.equal(body.user.featureFlags.tutorialMandatoryEnabled, true);
     });
   });
 

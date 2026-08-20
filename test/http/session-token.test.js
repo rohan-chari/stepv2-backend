@@ -31,7 +31,7 @@ async function startServer(dependencies = {}) {
   };
 }
 
-test("POST /auth/apple returns a sessionToken alongside user", async () => {
+test("POST /auth/apple returns permanent compatibility flags alongside the sessionToken", async () => {
   const server = await startServer({
     async verifyAppleIdentityToken(token) {
       return { sub: "apple-user-123", email: "walker@example.com" };
@@ -58,7 +58,7 @@ test("POST /auth/apple returns a sessionToken alongside user", async () => {
     assert.equal(response.status, 200);
     const body = await response.json();
     assert.equal(body.user.id, "user-1");
-    assert.equal(body.user.featureFlags.onboardingV2Enabled, false);
+    assert.equal(body.user.featureFlags.onboardingV2Enabled, true);
     assert.equal(typeof body.sessionToken, "string");
     assert.ok(body.sessionToken.length > 0);
   } finally {
@@ -66,7 +66,7 @@ test("POST /auth/apple returns a sessionToken alongside user", async () => {
   }
 });
 
-test("POST /auth/apple surfaces the remotely enabled onboarding v2 flag", async () => {
+test("POST /auth/apple keeps onboarding v2 true for frozen-client compatibility", async () => {
   const server = await startServer({
     async verifyAppleIdentityToken() {
       return { sub: "apple-user-flag" };

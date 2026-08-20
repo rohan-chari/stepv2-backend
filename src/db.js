@@ -1,4 +1,18 @@
 require("dotenv").config();
+
+// Query events attach a global listener to every Prisma query. They are useful
+// to local/integration capacity tooling, but enabling them in production adds
+// hot-path work across the entire API. Refuse the process before constructing
+// Prisma so a stale environment entry cannot silently turn them on.
+if (
+  process.env.NODE_ENV === "production" &&
+  process.env.PRISMA_QUERY_EVENTS_ENABLED === "true"
+) {
+  throw new Error(
+    "PRISMA_QUERY_EVENTS_ENABLED must not be true in production",
+  );
+}
+
 const { PrismaClient } = require("@prisma/client");
 const { PrismaPg } = require("@prisma/adapter-pg");
 const { AsyncLocalStorage } = require("node:async_hooks");

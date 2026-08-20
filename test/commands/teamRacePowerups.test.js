@@ -151,7 +151,7 @@ test("TR-651 offensive powerup on an enemy works", async () => {
   assert.equal(ctx.effectsCreated[0].targetUserId, "user-3");
 });
 
-test("TR-651 IMPOSTER on a teammate -> 400 INVALID_TARGET", async () => {
+test("retired IMPOSTER preempts the historical teammate-target rule without mutation", async () => {
   const ctx = makeDeps({ powerupType: "IMPOSTER" });
   const use = buildUsePowerup(ctx.deps);
   await assert.rejects(
@@ -161,12 +161,17 @@ test("TR-651 IMPOSTER on a teammate -> 400 INVALID_TARGET", async () => {
         raceId: "race-1",
         powerupId: "pw-1",
         targetUserId: "user-2",
-      }),
+    }),
     (err) => {
-      assert.equal(err.code, "INVALID_TARGET");
+      assert.equal(err.statusCode, 410);
+      assert.equal(err.code, "POWERUP_RETIRED");
+      assert.equal(err.powerupType, "IMPOSTER");
       return true;
     }
   );
+  assert.equal(ctx.updatedPowerup, null);
+  assert.deepEqual(ctx.effectsCreated, []);
+  assert.deepEqual(ctx.feedEvents, []);
 });
 
 // ── TR-602: forfeited members can't use or be targeted ─────────────────────

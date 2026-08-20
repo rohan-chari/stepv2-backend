@@ -1233,14 +1233,10 @@ async function buildRaceScoringDependencyClosure({
     return fallback(CLOSURE_FALLBACK_REASONS.CLOSURE_CAP_EXCEEDED);
   }
 
-  // Exact expiry compute set. Keep `participantIds` as the dependency graph
-  // component for backwards-compatible diagnostics, and expose the actual
-  // resolver/prefetch set separately. Every active snapshot-at-expiry/Drill
-  // target expands this set regardless of distance, then graph dependencies
-  // are walked again to fixed point. Already-due outside targets retain the
-  // longstanding conservative FULL fallback (safe and regression-compatible).
-  const scoringClosure = new Set(closure);
-  const scoringQueue = [];
+  // A due snapshot/Drill expiry consumes the target's computed value. It may
+  // only ride a closure when that target is already a member; pulling every
+  // future-expiry target into the scoring set would turn unrelated SELF rows
+  // into participant writes and defeat the closure's untouched-row guarantee.
   for (const effect of activeEffects || []) {
     if (!DUE_EXPIRY_VETO_TYPES.has(effect?.type)) continue;
     const targetId = effect?.targetParticipantId;
@@ -1251,28 +1247,13 @@ async function buildRaceScoringDependencyClosure({
     if (expiresAtMs != null && expiresAtMs <= asOfMs && !closure.has(targetId)) {
       return fallback(CLOSURE_FALLBACK_REASONS.DUE_EXPIRY_OUTSIDE_CLOSURE);
     }
-    if (!scoringClosure.has(targetId)) {
-      scoringClosure.add(targetId);
-      scoringQueue.push(targetId);
-    }
-  }
-  while (scoringQueue.length > 0) {
-    const current = scoringQueue.shift();
-    for (const neighbour of adjacency.get(current) || []) {
-      if (scoringClosure.has(neighbour)) continue;
-      scoringClosure.add(neighbour);
-      scoringQueue.push(neighbour);
-    }
-  }
-  if (scoringClosure.size > MAX_DEPENDENCY_CLOSURE_PARTICIPANTS) {
-    return fallback(CLOSURE_FALLBACK_REASONS.CLOSURE_CAP_EXCEEDED);
   }
 
   // --- exclusive validity deadline (spec rule 7) ----------------------------
   const closureRelevant = (activeEffects || []).filter((effect) => {
-    if (scoringClosure.has(effect.targetParticipantId)) return true;
+    if (closure.has(effect.targetParticipantId)) return true;
     const sourceParticipantId = participantIdByUserId.get(effect.sourceUserId);
-    return sourceParticipantId ? scoringClosure.has(sourceParticipantId) : false;
+    return sourceParticipantId ? closure.has(sourceParticipantId) : false;
   });
   if (closureRelevant.some((effect) =>
     !effectBoundaryMetadataIsClassifiable(effect)
@@ -1335,7 +1316,7 @@ async function buildRaceScoringDependencyClosure({
   return {
     plan: "DEPENDENCY_CLOSURE",
     participantIds: [...closure].sort(),
-    scoringParticipantIds: [...scoringClosure].sort(),
+    scoringParticipantIds: [...closure].sort(),
     sourceParticipantIds,
     graphFingerprint: fingerprint.digest,
     asOf,

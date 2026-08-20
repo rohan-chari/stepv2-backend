@@ -5,6 +5,7 @@ const { fcmService: defaultFcm } = require("../../../shared/push/fcm");
 const { appSettings: defaultSettings } = require("../../../shared/config/appSettings");
 const { randomUUID } = require("node:crypto");
 const { canonicalPushDeliveryKey } = require("../../notifications/pushDeliveryAttribution");
+const { userFanoutDisabled } = require("../../../shared/config/operationalControls");
 
 const LEASE_MS = 30_000;
 const TICK_INTERVAL_MS = 15_000;
@@ -51,7 +52,7 @@ function buildInboxDelivery(dependencies = {}) {
   const batchSize = dependencies.batchSize || 25;
   const settings = dependencies.appSettings || defaultSettings;
   return async function deliverInbox() {
-    if (process.env.INBOX_DELIVERY_DISABLED === "true") return null;
+    if (userFanoutDisabled("INBOX_DELIVERY_DISABLED")) return null;
     const current = now();
     const candidates = await prisma.inboxDeliveryOutbox.findMany({
       where: {

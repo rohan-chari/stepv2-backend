@@ -335,15 +335,16 @@ describe("buff stacking (sum) + signed event scoring — integration", () => {
     }
   });
 
-  it("item 6 OFF (deploy default): the same race keeps today's subtractive 3.75", async () => {
-    delete process.env[RAIN_FLAG];
+  it("retired OFF value cannot restore subtractive rain scoring", async () => {
+    process.env[RAIN_FLAG] = "false";
     const a = await createUser("A14"); const b = await createUser("B14");
     await makeFriends(a, b);
     const raceId = await createActiveRace(a, [b]);
     await prodRepro(a, b, raceId);
     const prog = await getProgress(a.token, raceId);
-    // 4.25 − 0.5 = 3.75; × 2 event = 7.5 → 750. This is the bug, shipped OFF.
-    assert.equal(boardSteps(prog, a.userId), 750, "flag off == byte-identical to today");
+    // Permanent rule: 4.25 × 0.5 = 2.125; × 2 event = 4.25 → 425.
+    assert.equal(boardSteps(prog, a.userId), 425, "stale OFF env is ignored");
+    delete process.env[RAIN_FLAG];
   });
 
   it("item 6 ON: settlement matches the live buffed-storm total", async () => {

@@ -27,6 +27,9 @@ const { stepSyncPushService } = require("../../../shared/push/stepSyncPush");
 const { appSettings: defaultAppSettings } = require("../../../shared/config/appSettings");
 const { isStrictFlagEnabled } = require("../../../shared/config/isStrictFlagEnabled");
 const {
+  raceResolutionWorkerDisabled,
+} = require("../../../shared/config/operationalControls");
+const {
   StepSyncRequest: defaultStepSyncRequestModel,
 } = require("../../steps/models/stepSyncRequest");
 const {
@@ -70,6 +73,9 @@ const {
 const {
   shouldResolveUmbrellaImpacts,
 } = require("./resolvedImpactBoundaryScheduler");
+const {
+  SNAPSHOT_AT_EXPIRY_TYPES,
+} = require("../../powerups/constants/expiryEffectTypes");
 
 const POLL_INTERVAL_MS = 250;
 const QUEUE_LAG_LOG_INTERVAL_MS = 60 * 1000;
@@ -81,6 +87,27 @@ const ADAPTIVE_DRAIN_SLICE_MS = 100;
 const ADAPTIVE_DRAIN_SLICE_JOBS = 16;
 const ADAPTIVE_DRAIN_ERROR_BACKOFF_MS = 1000;
 const TARGETED_CLAIM_DISABLED = Symbol("TARGETED_CLAIM_DISABLED");
+const POST_COMMIT_SLACK_MS = 30_000;
+const FENCE_DUE_EXPIRY_VETO_TYPES = Object.freeze(
+  new Set([...SNAPSHOT_AT_EXPIRY_TYPES, "DRILL_SERGEANT"])
+);
+
+function dueExpiryOutsideClosureAtFence(
+  activeEffects,
+  closureParticipantIds,
+  currentTime,
+) {
+  const closure = new Set(closureParticipantIds || []);
+  const horizonMs = currentTime.getTime() + POST_COMMIT_SLACK_MS;
+  for (const effect of activeEffects || []) {
+    if (!FENCE_DUE_EXPIRY_VETO_TYPES.has(effect?.type)) continue;
+    if (closure.has(effect.targetParticipantId)) continue;
+    if (effect.expiresAt == null) continue;
+    const expiresAtMs = new Date(effect.expiresAt).getTime();
+    if (!Number.isFinite(expiresAtMs) || expiresAtMs <= horizonMs) return true;
+  }
+  return false;
+}
 
 async function persistResolvedImpactEventsV2({ tx, raceId, result }) {
   const capture = result?.activeImpactCapture || {};
@@ -839,17 +866,6 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
     let closureEscalatedOnMine = null;
     {
       if (isClosureEligibleReasonSet(job.processingDirtyReasons)) {
-        // Two DISTINCT keys, never conflated. The shadow key means "observe";
-        // the V1 key means "commit subset results". Reading one for the other
-        // would make the Phase 3 deploy flip every environment already running
-        // the measurement straight into writing.
-        const closureShadowEnabled = await phaseTimer.measure(
-          "planSettings",
-          () => isStrictFlagEnabled(
-            settings,
-            "raceResolutionDependencyClosureShadowV1Enabled"
-          )
-        );
         const closureWritesEnabled = await phaseTimer.measure(
           "planSettings",
           () => isStrictFlagEnabled(
@@ -865,7 +881,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           : 0;
         const closureRaceEnrolled = closureWritesEnabled &&
           dependencyClosureRaceBucket(job.raceId) < closurePercent;
-        if (closureShadowEnabled || closureRaceEnrolled) {
+        if (closureRaceEnrolled) {
           const shadowStartedAt = Date.now();
           try {
             const shadowConfig = await balanceConfig.getSnapshot();
@@ -889,13 +905,6 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
               })
             );
             const plannerMs = Math.max(0, Date.now() - shadowStartedAt);
-            if (closureShadowEnabled) {
-              closureShadow = summarizeClosureShadow(
-                shadowResult,
-                plannerMs,
-                wouldTrailMineEscalateProbe
-              );
-            }
             if (
               closureRaceEnrolled &&
               shadowResult &&
@@ -945,12 +954,6 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
             // failure mode worth measuring); every other field stays null. With
             // the write flag on, a planner throw leaves `closurePlan` null, so
             // the job proceeds down the existing FULL path unchanged.
-            if (closureShadowEnabled) {
-              closureShadow = {
-                ...NULL_CLOSURE_SHADOW_FIELDS,
-                shadowPlannerMs: Math.max(0, Date.now() - shadowStartedAt),
-              };
-            }
             logger.error(JSON.stringify({
               event: "race_resolution_v2_shadow_error",
               operation: "dependency_closure_planner",
@@ -1302,6 +1305,11 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
             !Number.isFinite(deadline) ||
             !Number.isFinite(fenceNow.getTime()) ||
             fenceNow.getTime() >= deadline ||
+            dueExpiryOutsideClosureAtFence(
+              fingerprint.activeEffects,
+              closurePlan.participantIds,
+              fenceNow,
+            ) ||
             (fingerprint.globalEvents || []).some((event) => {
               const start = new Date(event.startsAt).getTime();
               const end = new Date(event.endsAt).getTime();
@@ -1647,13 +1655,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
       if (postTasksEnabled && deferredSnapshotCommand) {
         const stopPostTaskHandoff = phaseTimer.start("postTaskHandoff");
         try {
-          const fastHandoff = await phaseTimer.measure(
-            "postSettings",
-            () => isStrictFlagEnabled(
-              settings,
-              "raceResolutionPostTaskFastHandoffV1Enabled"
-            )
-          );
+          const fastHandoff = false;
           const resolveIntents = async (client) => {
             const resolved = [];
             for (const claim of deferredIntentClaims) {
@@ -1854,7 +1856,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
   }
 
   async function tick({ concurrencyOverride = null } = {}) {
-    if (process.env.ASYNC_RACE_RESOLUTION_WORKER_DISABLED === "true") return 0;
+    if (raceResolutionWorkerDisabled()) return 0;
     const concurrency = concurrencyOverride == null
       ? Math.min(
           3,

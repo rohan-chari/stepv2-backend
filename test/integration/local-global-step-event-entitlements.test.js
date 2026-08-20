@@ -1002,8 +1002,8 @@ test("HTTP step-sync dependency closure fails closed while that participant's lo
     assert.ok(await worker.processOne());
     const committed = events.find((entry) => entry.event === "race_resolution_v2");
     assert.equal(committed?.resolutionPlan, "FULL", JSON.stringify(events));
-    assert.equal(committed?.shadowClosurePlan, "FULL", JSON.stringify(events));
-    assert.equal(committed?.shadowClosureFallbackReason, "GLOBAL_EVENT_ACTIVE");
+    assert.equal(committed?.shadowClosurePlan, null, JSON.stringify(events));
+    assert.equal(committed?.shadowClosureFallbackReason, null);
   } finally {
     await appSettings.setFlagsAtomically([
       ["raceResolutionReasonAwareV1Enabled", false],

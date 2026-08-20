@@ -43,7 +43,9 @@ function buildGetPowerupInventory(deps = {}) {
 
     return {
       items: items.filter(
-        (item) => supportsPowerups4 || item.powerupType !== "QUICKSAND"
+        (item) =>
+          item.powerupType !== "IMPOSTER" &&
+          (supportsPowerups4 || item.powerupType !== "QUICKSAND")
       ),
     };
   };
