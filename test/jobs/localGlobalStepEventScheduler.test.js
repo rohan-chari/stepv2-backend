@@ -5,7 +5,7 @@ const {
   buildLocalGlobalStepEventTick,
 } = require("../../src/modules/steps/jobs/globalStepEventScheduler");
 
-test("local scheduler is strict default-off and emergency creation switch wins", async () => {
+test("local scheduler is permanently enabled and retired controls cannot disable it", async () => {
   let creations = 0;
   const base = {
     now: () => new Date("2026-08-19T00:00:00Z"),
@@ -15,10 +15,11 @@ test("local scheduler is strict default-off and emergency creation switch wins",
     processDueEntitlementBoundaries: async () => {},
     captureOperationalSnapshot: async () => ({ healthy: true }),
     cleanupExpiredEntitlements: async () => 0,
+    cronOwnerGuard: async () => true,
     logger: { log() {}, error() {} },
   };
-  assert.equal(await buildLocalGlobalStepEventTick(base)(), false);
-  assert.equal(creations, 0);
+  assert.equal(await buildLocalGlobalStepEventTick(base)(), true);
+  assert.equal(creations, 2);
 
   const prior = process.env.LOCAL_GLOBAL_STEP_EVENTS_DISABLED;
   process.env.LOCAL_GLOBAL_STEP_EVENTS_DISABLED = "true";
@@ -26,8 +27,8 @@ test("local scheduler is strict default-off and emergency creation switch wins",
     assert.equal(await buildLocalGlobalStepEventTick({
       ...base,
       appSettings: { async getFlag() { return true; } },
-    })(), false);
-    assert.equal(creations, 0);
+    })(), true);
+    assert.equal(creations, 4);
   } finally {
     if (prior === undefined) delete process.env.LOCAL_GLOBAL_STEP_EVENTS_DISABLED;
     else process.env.LOCAL_GLOBAL_STEP_EVENTS_DISABLED = prior;
@@ -62,12 +63,13 @@ test("local scheduler materializes exactly two future logical days and their act
   assert.deepEqual(materialized, createdDays.map((day) => `event-${day}`));
 });
 
-test("creation switches never stop maintenance for already-created local parents", async () => {
+test("retired creation switches never stop maintenance or permanent creation", async () => {
   const calls = [];
   const existing = { id: "existing", scheduleMode: "LOCAL_ENTITLEMENTS" };
   const run = buildLocalGlobalStepEventTick({
     now: () => new Date("2026-08-19T00:00:00Z"),
     appSettings: { async getFlag() { return false; } },
+    cronOwnerGuard: async () => true,
     GlobalStepEvent: {
       async findLocalParentsForMaintenance() { calls.push("find"); return [existing]; },
       async createLocalParentIfAbsent() { calls.push("create"); },
@@ -82,8 +84,8 @@ test("creation switches never stop maintenance for already-created local parents
     logger: { log() {}, error() {} },
   });
 
-  assert.equal(await run(), false);
-  assert.deepEqual(calls, ["boundaries", "find", "materialize:existing"]);
+  assert.equal(await run(), true);
+  assert.deepEqual(calls, ["boundaries", "find", "materialize:existing", "create", "create"]);
 });
 
 test("due boundary claims are prioritized before materialization and creation", async () => {
@@ -134,7 +136,7 @@ test("local creation is rejected while any durable cron owner is not local-aware
   assert.equal(creations, 0);
 });
 
-test("local creation fails closed until retention operations are enabled", async () => {
+test("local creation permanently runs retention before creating parents", async () => {
   let creations = 0;
   const run = buildLocalGlobalStepEventTick({
     now: () => new Date("2026-08-19T00:00:00Z"),
@@ -150,8 +152,8 @@ test("local creation fails closed until retention operations are enabled", async
     cleanupExpiredEntitlements: async () => 0,
     logger: { log() {}, error() {} },
   });
-  assert.equal(await run(), false);
-  assert.equal(creations, 0);
+  assert.equal(await run(), true);
+  assert.equal(creations, 2);
 });
 
 test("maintenance drains more than one hundred missing racer entitlements", async () => {

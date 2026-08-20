@@ -1,14 +1,10 @@
 const { prisma } = require("../../../db");
-const { appSettings } = require("../../../shared/config/appSettings");
 const adRewards = require("../../economy/adRewards");
 const {
   RacePayoutDouble,
 } = require("../models/racePayoutDouble");
 const {
-  ROLLOUT_SETTING,
   providerSubHash,
-  cohortBucket,
-  boundedRolloutPercent,
   boundedRacePayoutDoubleMaxBonus,
   computeRacePayoutDoubleBonus,
   normalizedRacePayoutDoubleAmounts,
@@ -27,7 +23,6 @@ function serializeOffer(offer, allowance = {}) {
 
 function buildGetRacePayoutDoubleOffer(dependencies = {}) {
   const db = dependencies.prisma || prisma;
-  const settings = dependencies.appSettings || appSettings;
   const config = dependencies.adRewardsConfig || adRewards;
   const model = dependencies.RacePayoutDouble || RacePayoutDouble;
 
@@ -71,9 +66,6 @@ function buildGetRacePayoutDoubleOffer(dependencies = {}) {
     });
     const hash = providerSubHash(user);
     if (!hash) return null;
-    const percent = boundedRolloutPercent(await settings.getFlag(ROLLOUT_SETTING));
-    if (cohortBucket(hash) >= percent) return null;
-
     const maxBonusCoins = boundedRacePayoutDoubleMaxBonus(
       config.racePayoutDoubleMaxBonusCoins(),
     );

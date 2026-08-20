@@ -148,11 +148,7 @@ function buildRecordStepSamples(dependencies = {}) {
     const normalizedSamples = normalizeSamples(samples);
     const cleaned = removeOverlaps(normalizedSamples);
     let persistence = null;
-    let noopSuppression = false;
-    try {
-      noopSuppression =
-        (await settings.getFlag("raceResolutionNoopInputSuppressionV1Enabled")) === true;
-    } catch {}
+    const noopSuppression = false;
     // Granularity-aware overlap resolution (§3.3). Capability-detected so injected
     // test fakes that predate reconcileBatch still exercise their upsertBatch.
     if (typeof stepSampleModel.reconcileBatch === "function") {

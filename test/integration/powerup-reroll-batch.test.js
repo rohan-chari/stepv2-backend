@@ -191,6 +191,7 @@ describe("Batch 2026-08-10b item 1 — POST /races/:raceId/powerups/reroll-batch
 
   afterEach(() => {
     delete process.env.ADS_BOX_REROLL_ENABLED;
+    delete process.env.OPS_AD_VALUE_ISSUANCE_DISABLED;
   });
 
   after(async () => {
@@ -198,8 +199,8 @@ describe("Batch 2026-08-10b item 1 — POST /races/:raceId/powerups/reroll-batch
   });
 
   // ── 1. Kill switch ───────────────────────────────────────────────────────
-  it("kill switch OFF -> 503 DISABLED and no grant consumed", async () => {
-    delete process.env.ADS_BOX_REROLL_ENABLED;
+  it("consolidated OPS ad-value brake returns 503 and consumes no grant", async () => {
+    process.env.OPS_AD_VALUE_ISSUANCE_DISABLED = "true";
     const p1 = await seedOpenedPowerup(raceId, alice);
     const grant = await seedGrant(alice.userId);
 
@@ -692,13 +693,13 @@ describe("Batch 2026-08-10b item 1 — POST /races/:raceId/powerups/reroll-batch
     assert.equal(body.progress.powerupData.boxReroll, true, "sibling flag unchanged");
   });
 
-  it("boxRerollBatch is ABSENT (not false) when the kill switch is off", async () => {
-    delete process.env.ADS_BOX_REROLL_ENABLED;
+  it("retired OFF env cannot remove permanent reroll advertisements", async () => {
+    process.env.ADS_BOX_REROLL_ENABLED = "false";
     const { body } = await progress(alice.token, raceId, ADS_FEATURES);
     const pd = body.progress.powerupData;
     assert.ok(pd, "powerupData still present");
-    assert.equal("boxRerollBatch" in pd, false);
-    assert.equal("boxReroll" in pd, false);
+    assert.equal(pd.boxRerollBatch, true);
+    assert.equal(pd.boxReroll, true);
   });
 
   it("boxRerollBatch is ABSENT for a client that cannot show ads", async () => {

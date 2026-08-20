@@ -1,8 +1,5 @@
 const crypto = require("node:crypto");
 const { prisma: defaultPrisma, getDbPoolPressure } = require("../../../db");
-const {
-  dependencyClosureRolloutPercent,
-} = require("../services/raceResolutionDependencyClosureRollout");
 const { Race } = require("../models/race");
 const { RaceParticipant } = require("../models/raceParticipant");
 const { RaceActiveEffect } = require("../../powerups/models/raceActiveEffect");
@@ -230,13 +227,6 @@ async function resolveDueUmbrellaInterceptionsV2({
     insertedCount,
     hasMore: due.length > limit,
   };
-}
-
-function dependencyClosureRaceBucket(raceId) {
-  const digest = crypto.createHash("sha256")
-    .update(`race_resolution_dependency_closure:v1:${raceId}`, "utf8")
-    .digest();
-  return digest.readUInt32BE(0) % 100;
 }
 
 // Keep one stable phase schema on every successful job line so production log
@@ -677,10 +667,13 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
     dependencies.stepSyncScopeMatchesFence || defaultStepSyncScopeMatchesFence;
   const deliveryIntents =
     dependencies.raceResolutionDeliveryIntents || defaultDeliveryIntents;
-  // Phase 2b shadow seam. Injectable so a test can assert the planner is NEVER
-  // called with the flag off, and can force a planner failure.
+  // Injectable planner seam for deterministic parity and failure-fallback tests.
   const buildDependencyClosure =
     dependencies.buildRaceScoringDependencyClosure || defaultBuildDependencyClosure;
+  // Production closure planning is permanent. This narrow injection seam keeps
+  // the independent FULL-control parity fixtures possible without restoring a
+  // runtime setting, cohort, environment switch, or admin control.
+  const dependencyClosureEnabled = dependencies.dependencyClosureEnabled ?? true;
   const wouldTrailMineEscalateProbe =
     dependencies.wouldTrailMineEscalate || defaultWouldTrailMineEscalate;
   const now = dependencies.now || (() => new Date());
@@ -823,76 +816,21 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
     // CLAIMING_FLAG_TTL_MS). Only idle ticks are allowed to reuse it.
     invalidateClaimingFlagCache();
 
-    // ── Phase 2b: the dependency-closure planner, in SHADOW MODE. ──────────
-    //
-    // Runs after the claim and strictly BEFORE plan selection, because that
-    // is where Phase 3 will consume it. Nothing below reads `closureShadow`
-    // except the commit log line: it cannot select a plan, change a write,
-    // add or skip a post-task, or fail the job. A planner throw is caught,
-    // logged as a shadow failure, and dropped — the job then proceeds exactly
-    // as it would have with the flag off.
-    //
-    // Sits ABOVE the `startMs` bind so `coreMs` stays comparable across the
-    // flag flip: the shadow's cost is reported ONLY as `shadowPlannerMs`,
-    // never folded into the series the rollout gate reads.
-    //
-    // Ordering note (zero off-flag overhead): the candidate-shape test is a
-    // PURE array comparison against the gatekeeper's own admitted reason sets
-    // and runs FIRST, so a non-candidate envelope does no work at all — not
-    // even a settings read. A candidate envelope with the flag off costs one
-    // `getFlag` against the same warm appSettings cache the four flag reads
-    // below already use, and zero database queries.
-    // ── Phase 3 restructure: the planner runs ONCE per claim. ──────────────
-    //
-    // Phase 2b ran it purely for the log. Phase 3 also needs its verdict to
-    // SELECT a plan, and running it twice would double the planner's cost on
-    // exactly the big races it exists to speed up, and — worse — could produce
-    // two different graph reads for one generation, so the plan committed and
-    // the plan logged would describe different worlds. One call, two consumers.
-    //
-    // The two flags are independent in BOTH directions (spec rollout item 4).
-    // Shadow-only = observe, never select. Write-only = select, and the same
-    // result still fills the `shadow*` log fields so the rollout series does not
-    // go blind the moment the write flag comes on. Both off = the planner is
-    // never constructed and no settings read past the pure reason-set test
-    // happens at all.
-    let closureShadow = NULL_CLOSURE_SHADOW_FIELDS;
-    // `closurePlan` is non-null ONLY when the write flag is on, the planner
-    // returned DEPENDENCY_CLOSURE, and the Trail-Mine escalation cleared. It is
+    // Dependency closure is permanent. Ineligible or failed plans still fall
+    // back to FULL through the existing correctness path.
+    const closureShadow = NULL_CLOSURE_SHADOW_FIELDS;
+    // `closurePlan` is non-null ONLY when the permanent planner returned
+    // DEPENDENCY_CLOSURE and the Trail-Mine escalation cleared. It is
     // the single gate every closure behavior below reads.
     let closurePlan = null;
-    // bool when a closure plan was evaluated, null when none was (the flag is
-    // off, the envelope is not candidate-shaped, or the planner said FULL).
+    // bool when a closure plan was evaluated, null when the envelope is not
+    // candidate-shaped or the planner said FULL.
     let closureEscalatedOnMine = null;
-    {
-      if (isClosureEligibleReasonSet(job.processingDirtyReasons)) {
-        // Two DISTINCT keys, never conflated. The shadow key means "observe";
-        // the V1 key means "commit subset results".
-        const closureShadowEnabled = await phaseTimer.measure(
-          "planSettings",
-          () => isStrictFlagEnabled(
-            settings,
-            "raceResolutionDependencyClosureShadowV1Enabled"
-          )
-        );
-        const closureWritesEnabled = await phaseTimer.measure(
-          "planSettings",
-          () => isStrictFlagEnabled(
-            settings,
-            "raceResolutionDependencyClosureV1Enabled"
-          )
-        );
-        const closurePercent = closureWritesEnabled
-          ? await phaseTimer.measure(
-            "planSettings",
-            () => dependencyClosureRolloutPercent(settings, true)
-          )
-          : 0;
-        const closureRaceEnrolled = closureWritesEnabled &&
-          dependencyClosureRaceBucket(job.raceId) < closurePercent;
-        if (closureShadowEnabled || closureRaceEnrolled) {
-          const shadowStartedAt = Date.now();
-          try {
+    if (
+        dependencyClosureEnabled &&
+        isClosureEligibleReasonSet(job.processingDirtyReasons)
+      ) {
+        try {
             const shadowConfig = await balanceConfig.getSnapshot();
             const shadowResult = await phaseTimer.measure(
               "dependencyClosurePlanner",
@@ -913,16 +851,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
                 buildInputFingerprint,
               })
             );
-            const plannerMs = Math.max(0, Date.now() - shadowStartedAt);
-            if (closureShadowEnabled) {
-              closureShadow = summarizeClosureShadow(
-                shadowResult,
-                plannerMs,
-                wouldTrailMineEscalateProbe
-              );
-            }
             if (
-              closureRaceEnrolled &&
               shadowResult &&
               shadowResult.plan === "DEPENDENCY_CLOSURE"
             ) {
@@ -965,28 +894,20 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
               closureEscalatedOnMine = escalate;
               if (!escalate) closurePlan = shadowResult;
             }
-          } catch (error) {
+        } catch (error) {
             // The duration is still honest and still useful (a timeout is the
             // failure mode worth measuring); every other field stays null. With
-            // the write flag on, a planner throw leaves `closurePlan` null, so
+            // a planner throw leaves `closurePlan` null, so
             // the job proceeds down the existing FULL path unchanged.
-            if (closureShadowEnabled) {
-              closureShadow = {
-                ...NULL_CLOSURE_SHADOW_FIELDS,
-                shadowPlannerMs: Math.max(0, Date.now() - shadowStartedAt),
-              };
-            }
             logger.error(JSON.stringify({
-              event: "race_resolution_v2_shadow_error",
+              event: "race_resolution_v2_dependency_closure_error",
               operation: "dependency_closure_planner",
-              errorCode: String(error?.code || "SHADOW_PLANNER_ERROR"),
+              errorCode: String(error?.code || "DEPENDENCY_CLOSURE_PLANNER_ERROR"),
               // A race id is not user data; without it a failure spike cannot
               // be correlated to the race that provokes it.
               raceId: job.raceId,
             }));
-          }
         }
-      }
     }
 
     const startMs = Date.now();
@@ -1677,13 +1598,6 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
       if (postTasksEnabled && deferredSnapshotCommand) {
         const stopPostTaskHandoff = phaseTimer.start("postTaskHandoff");
         try {
-          const fastHandoff = await phaseTimer.measure(
-            "postSettings",
-            () => isStrictFlagEnabled(
-              settings,
-              "raceResolutionPostTaskFastHandoffV1Enabled"
-            )
-          );
           const resolveIntents = async (client) => {
             const resolved = [];
             for (const claim of deferredIntentClaims) {
@@ -1710,7 +1624,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
             snapshotCommand: deferredSnapshotCommand,
             intents: deferredIntents,
             resolveIntents,
-            fastHandoff,
+            fastHandoff: false,
             recordPhaseTiming: (name, durationMs) =>
               addPhaseTiming(postHandoffPhaseMs, name, durationMs),
           });
@@ -2087,5 +2001,4 @@ module.exports = {
   resolutionPlanForDirtyReasons,
   summarizeClosureShadow,
   NULL_CLOSURE_SHADOW_FIELDS,
-  dependencyClosureRaceBucket,
 };

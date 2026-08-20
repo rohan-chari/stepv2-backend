@@ -44,11 +44,7 @@ function todayNewYork() {
 
 async function setFlags(enabled) {
   for (const key of FLAGS) {
-    await prisma.appSetting.upsert({
-      where: { key },
-      update: { value: enabled },
-      create: { key, value: enabled },
-    });
+    await appSettings.setFlag(key, enabled);
   }
   appSettings.bustCache();
 }
@@ -254,8 +250,9 @@ describe("social read caches preserve the frozen-client HTTP contract", () => {
     assert.equal(unauthorized.status, 401);
   });
 
-  it("generation guard is an enforceable prerequisite for friends and leaderboard", async () => {
+  it("a stale false generation-guard row cannot disable permanent caches", async () => {
     const { alice } = await seedPublicState();
+    await setFlags(true);
     await setFlagValues({
       redisPresentationGenerationGuardEnabled: false,
       redisCacheFriendsEnabled: true,
@@ -263,8 +260,8 @@ describe("social read caches preserve the frozen-client HTTP contract", () => {
     });
     await readPublicSurfaces(alice.token);
     const keys = await probe.keys(`${ENV_PREFIX}v1:*`);
-    assert.equal(keys.some((key) => key.includes(":user:friends:")), false);
-    assert.equal(keys.some((key) => key.includes(":leaderboard:steps:")), false);
+    assert.equal(keys.some((key) => key.includes(":user:friends:")), true);
+    assert.equal(keys.some((key) => key.includes(":leaderboard:steps:")), true);
   });
 
   it("invalidates both users' warm topology immediately after remove", async () => {

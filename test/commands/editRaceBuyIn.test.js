@@ -113,8 +113,30 @@ function member(userId, team, buyInAmount = 0, buyInStatus = "NONE", buyInVersio
   };
 }
 
+async function assertBuyInImmutable(ctx, updates) {
+  const editRace = buildEditRace(ctx.deps);
+  await assert.rejects(
+    () => editRace({ userId: "creator", raceId: "race-1", updates }),
+    (err) => {
+      assert.ok(err instanceof RaceEditError);
+      assert.equal(err.statusCode, 400);
+      assert.equal(err.code, "IMMUTABLE_FIELD");
+      assert.match(err.message, /buy-in/i);
+      return true;
+    },
+  );
+  assert.equal(ctx.state.awards.length, 0, "no coin movement");
+  assert.equal(ctx.state.participantUpdates.length, 0, "no participant mutation");
+  assert.equal(ctx.state.raceUpdate, null, "no race mutation");
+  assert.equal(
+    ctx.state.events.some((event) => event.event === "RACE_BUYIN_CHANGED"),
+    false,
+    "no retired buy-in event",
+  );
+}
+
 // ── Lower the buy-in: refund the delta ──────────────────────────────────────
-test("buy-in lower: charged participants refunded the delta; pot + version updated", async () => {
+test("buy-in lower is retired: historical holds and pot stay unchanged", async () => {
   const ctx = makeDeps({
     race: { buyInAmount: 100, potCoins: 200 },
     participants: [
@@ -123,34 +145,13 @@ test("buy-in lower: charged participants refunded the delta; pot + version updat
     ],
     coins: { creator: 0, bob: 0 },
   });
-  const editRace = buildEditRace(ctx.deps);
-  await editRace({
-    userId: "creator",
-    raceId: "race-1",
-    updates: { buyInAmount: 60 },
-  });
-
-  // Each participant refunded +40.
-  const byUser = Object.fromEntries(ctx.state.awards.map((a) => [a.userId, a]));
-  assert.equal(ctx.state.awards.length, 2);
-  assert.equal(byUser.creator.amount, 40);
-  assert.equal(byUser.bob.amount, 40);
-  assert.equal(byUser.creator.reason, "race_buy_in_adjust");
-  assert.equal(byUser.creator.refId, "race-1:creator:v2");
-  // Participant rows updated to new amount + incremented version + HELD.
-  const upd = Object.fromEntries(
-    ctx.state.participantUpdates.map((u) => [u.id, u.fields])
-  );
-  assert.equal(upd["rp-creator"].buyInAmount, 60);
-  assert.equal(upd["rp-creator"].buyInStatus, "HELD");
-  assert.equal(upd["rp-creator"].buyInVersion, 2);
-  // Pot recomputed: 2 * 60.
-  assert.equal(ctx.state.raceUpdate.buyInAmount, 60);
-  assert.equal(ctx.state.raceUpdate.potCoins, 120);
+  await assertBuyInImmutable(ctx, { buyInAmount: 60 });
+  assert.equal(ctx.state.race.buyInAmount, 100);
+  assert.equal(ctx.state.race.potCoins, 200);
 });
 
 // ── Raise the buy-in (affordable): charge the delta ─────────────────────────
-test("buy-in raise (affordable): participants debited the delta with versioned refId", async () => {
+test("buy-in raise is retired even when every participant can afford it", async () => {
   const ctx = makeDeps({
     race: { buyInAmount: 50, potCoins: 100 },
     participants: [
@@ -159,24 +160,12 @@ test("buy-in raise (affordable): participants debited the delta with versioned r
     ],
     coins: { creator: 500, bob: 500 },
   });
-  const editRace = buildEditRace(ctx.deps);
-  await editRace({
-    userId: "creator",
-    raceId: "race-1",
-    updates: { buyInAmount: 120 },
-  });
-
-  const byUser = Object.fromEntries(ctx.state.awards.map((a) => [a.userId, a]));
-  assert.equal(byUser.creator.amount, -70);
-  assert.equal(byUser.bob.amount, -70);
-  assert.equal(byUser.creator.refId, "race-1:creator:v4");
-  assert.equal(byUser.bob.refId, "race-1:bob:v2");
-  assert.equal(ctx.state.raceUpdate.buyInAmount, 120);
-  assert.equal(ctx.state.raceUpdate.potCoins, 240);
+  await assertBuyInImmutable(ctx, { buyInAmount: 120 });
+  assert.deepEqual(ctx.state.coins, { creator: 500, bob: 500 });
 });
 
 // ── Raise the buy-in (unaffordable): block, mutate nothing ──────────────────
-test("buy-in raise (unaffordable): 400 BUYIN_UNAFFORDABLE naming the player, no mutation", async () => {
+test("retired buy-in raise rejects before affordability inspection and mutates nothing", async () => {
   const ctx = makeDeps({
     race: { buyInAmount: 50, potCoins: 100 },
     participants: [
@@ -185,29 +174,12 @@ test("buy-in raise (unaffordable): 400 BUYIN_UNAFFORDABLE naming the player, no 
     ],
     coins: { creator: 500, Broke: 10 },
   });
-  const editRace = buildEditRace(ctx.deps);
-  await assert.rejects(
-    () =>
-      editRace({
-        userId: "creator",
-        raceId: "race-1",
-        updates: { buyInAmount: 150 },
-      }),
-    (err) => {
-      assert.ok(err instanceof RaceEditError);
-      assert.equal(err.statusCode, 400);
-      assert.equal(err.code, "BUYIN_UNAFFORDABLE");
-      assert.match(err.message, /Broke/);
-      return true;
-    }
-  );
-  assert.equal(ctx.state.awards.length, 0, "no coin movement");
-  assert.equal(ctx.state.participantUpdates.length, 0, "no participant writes");
-  assert.equal(ctx.state.raceUpdate, null, "no race write");
+  await assertBuyInImmutable(ctx, { buyInAmount: 150 });
+  assert.equal(ctx.state.coins.Broke, 10);
 });
 
 // ── Toggle -> free: fully refund everyone ───────────────────────────────────
-test("buy-in toggle -> free (buyInEnabled:false): everyone refunded, REFUNDED, pot 0", async () => {
+test("buy-in toggle to free is retired and cannot refund historical holds", async () => {
   const ctx = makeDeps({
     race: { buyInAmount: 80, potCoins: 160 },
     participants: [
@@ -216,27 +188,13 @@ test("buy-in toggle -> free (buyInEnabled:false): everyone refunded, REFUNDED, p
     ],
     coins: { creator: 0, bob: 0 },
   });
-  const editRace = buildEditRace(ctx.deps);
-  await editRace({
-    userId: "creator",
-    raceId: "race-1",
-    updates: { buyInEnabled: false },
-  });
-
-  const byUser = Object.fromEntries(ctx.state.awards.map((a) => [a.userId, a]));
-  assert.equal(byUser.creator.amount, 80);
-  assert.equal(byUser.bob.amount, 80);
-  const upd = Object.fromEntries(
-    ctx.state.participantUpdates.map((u) => [u.id, u.fields])
-  );
-  assert.equal(upd["rp-creator"].buyInStatus, "REFUNDED");
-  assert.equal(upd["rp-creator"].buyInAmount, 0);
-  assert.equal(ctx.state.raceUpdate.buyInAmount, 0);
-  assert.equal(ctx.state.raceUpdate.potCoins, 0);
+  await assertBuyInImmutable(ctx, { buyInEnabled: false });
+  assert.equal(ctx.state.race.buyInAmount, 80);
+  assert.equal(ctx.state.race.potCoins, 160);
 });
 
 // ── Toggle free -> paid: charge everyone (NONE -> HELD) ─────────────────────
-test("buy-in toggle free -> paid: NONE participants charged and moved to HELD", async () => {
+test("buy-in toggle from free to paid is retired and cannot create holds", async () => {
   const ctx = makeDeps({
     race: { buyInAmount: 0, potCoins: 0 },
     participants: [
@@ -245,27 +203,11 @@ test("buy-in toggle free -> paid: NONE participants charged and moved to HELD", 
     ],
     coins: { creator: 500, bob: 500 },
   });
-  const editRace = buildEditRace(ctx.deps);
-  await editRace({
-    userId: "creator",
-    raceId: "race-1",
-    updates: { buyInEnabled: true, buyInAmount: 40 },
-  });
-
-  const byUser = Object.fromEntries(ctx.state.awards.map((a) => [a.userId, a]));
-  assert.equal(byUser.creator.amount, -40);
-  assert.equal(byUser.bob.amount, -40);
-  const upd = Object.fromEntries(
-    ctx.state.participantUpdates.map((u) => [u.id, u.fields])
-  );
-  assert.equal(upd["rp-creator"].buyInStatus, "HELD");
-  assert.equal(upd["rp-creator"].buyInAmount, 40);
-  assert.equal(upd["rp-creator"].buyInVersion, 1);
-  assert.equal(ctx.state.raceUpdate.buyInAmount, 40);
-  assert.equal(ctx.state.raceUpdate.potCoins, 80);
+  await assertBuyInImmutable(ctx, { buyInEnabled: true, buyInAmount: 40 });
+  assert.deepEqual(ctx.state.coins, { creator: 500, bob: 500 });
 });
 
-test("buy-in toggle free -> paid unaffordable is blocked naming the player", async () => {
+test("retired free-to-paid toggle rejects before affordability inspection", async () => {
   const ctx = makeDeps({
     race: { buyInAmount: 0, potCoins: 0 },
     participants: [
@@ -274,40 +216,20 @@ test("buy-in toggle free -> paid unaffordable is blocked naming the player", asy
     ],
     coins: { creator: 500, Poor: 5 },
   });
-  const editRace = buildEditRace(ctx.deps);
-  await assert.rejects(
-    () =>
-      editRace({
-        userId: "creator",
-        raceId: "race-1",
-        updates: { buyInEnabled: true, buyInAmount: 40 },
-      }),
-    (err) => {
-      assert.equal(err.code, "BUYIN_UNAFFORDABLE");
-      assert.match(err.message, /Poor/);
-      return true;
-    }
-  );
-  assert.equal(ctx.state.awards.length, 0);
+  await assertBuyInImmutable(ctx, { buyInEnabled: true, buyInAmount: 40 });
+  assert.equal(ctx.state.coins.Poor, 5);
 });
 
 // ── Idempotency / refId: two sequential edits to the same amount both apply ──
-test("two sequential edits to the same amount produce distinct versioned refIds", async () => {
+test("repeated retired buy-in edits never mint versioned adjustment refIds", async () => {
   const ctx = makeDeps({
     race: { buyInAmount: 50, potCoins: 100 },
     participants: [member("creator", null, 50, "HELD", 0)],
     coins: { creator: 500 },
   });
-  const editRace = buildEditRace(ctx.deps);
-  // 50 -> 60
-  await editRace({ userId: "creator", raceId: "race-1", updates: { buyInAmount: 60 } });
-  // 60 -> 50
-  await editRace({ userId: "creator", raceId: "race-1", updates: { buyInAmount: 50 } });
-
-  assert.equal(ctx.state.awards.length, 2);
-  assert.equal(ctx.state.awards[0].refId, "race-1:creator:v1");
-  assert.equal(ctx.state.awards[1].refId, "race-1:creator:v2");
-  assert.notEqual(ctx.state.awards[0].refId, ctx.state.awards[1].refId);
+  await assertBuyInImmutable(ctx, { buyInAmount: 60 });
+  await assertBuyInImmutable(ctx, { buyInAmount: 60 });
+  assert.deepEqual(ctx.state.awards, []);
 });
 
 // ── Kill switch off: old hard block ─────────────────────────────────────────
@@ -337,7 +259,7 @@ test("kill switch off: editing a paid buy-in with charged participants is blocke
 });
 
 // ── Notify: affected non-owner participants surfaced for the push ───────────
-test("buy-in change emits RACE_BUYIN_CHANGED for charged non-owner participants", async () => {
+test("retired buy-in changes emit no participant notification", async () => {
   const ctx = makeDeps({
     race: { buyInAmount: 50, potCoins: 100 },
     participants: [
@@ -346,13 +268,11 @@ test("buy-in change emits RACE_BUYIN_CHANGED for charged non-owner participants"
     ],
     coins: { creator: 500, bob: 500 },
   });
-  const editRace = buildEditRace(ctx.deps);
-  await editRace({ userId: "creator", raceId: "race-1", updates: { buyInAmount: 80 } });
-
-  const evt = ctx.state.events.find((e) => e.event === "RACE_BUYIN_CHANGED");
-  assert.ok(evt, "RACE_BUYIN_CHANGED emitted");
-  assert.deepEqual(evt.payload.affectedUserIds, ["bob"]);
-  assert.equal(evt.payload.newBuyIn, 80);
+  await assertBuyInImmutable(ctx, { buyInAmount: 80 });
+  assert.equal(
+    ctx.state.events.find((e) => e.event === "RACE_BUYIN_CHANGED"),
+    undefined,
+  );
 });
 
 // ── Non-owner / non-PENDING guards still intact ─────────────────────────────

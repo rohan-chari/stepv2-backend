@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const acorn = require("acorn");
 const {
+  ADMIN_EXPOSED_FLAGS,
   KNOWN_FLAGS,
   PERMANENT_FLAGS,
 } = require("../src/shared/config/appSettings");
@@ -22,25 +23,7 @@ const deploymentProtocolDb = new Set([
   "raceQueueV2ClaimingDisabled",
   "inlineRaceResolutionFallback",
 ]);
-const deferredClosureDb = new Set([
-  "raceResolutionDependencyClosureShadowV1Enabled",
-  "raceResolutionDependencyClosureV1Enabled",
-  "raceResolutionDependencyClosureV1Percent",
-]);
-const deferredRemediationDb = new Set(["buyInEditEnabled"]);
-const deferredLaunchDb = new Set([
-  "localGlobalStepEventsEnabled",
-  "localGlobalStepEventRetentionEnabled",
-  "adminMetricsV2DashboardEnabled",
-  "adminMetricsV2TelemetryEnabled",
-  "accessoryCompatibilityEnforcement",
-  "openUserRaceDiscoveryEnabled",
-  "setupInviteCodePromptEnabled",
-  "homeInviteModalEnabled",
-  "fundedPrizePoolsEnabled",
-  "raceResolutionActiveImpactBulkPersistV1Enabled",
-]);
-const deferredRequestApiDb = new Set([
+const requestApiDb = new Set([
   "raceProgressLeanProjectionV1Enabled",
   "legacyUploaderStepSamplePrefetchV1Enabled",
   "raceMessageLeanAccessV1Enabled",
@@ -74,7 +57,7 @@ const deferredRequestApiDb = new Set([
   "apiTournamentDetailV1Enabled",
   "apiRaceChatWatermarkCacheV1Enabled",
 ]);
-const deferredRedisDb = new Set([
+const redisDb = new Set([
   "redisCacheCatalogsEnabled",
   "redisCacheMessagesEnabled",
   "redisStandingsEnabled",
@@ -89,7 +72,7 @@ const deferredRedisDb = new Set([
   "redisCacheHomeImpactSummaryEnabled",
   "redisCacheHomeInboxUnreadEnabled",
 ]);
-const deferredWorkerDb = new Set([
+const workerDb = new Set([
   "raceResolutionDisplayArtifactReuseV1Enabled",
   "raceResolutionReasonAwareV1Enabled",
   "raceResolutionBurstCoalescingV1Enabled",
@@ -101,10 +84,11 @@ const deferredWorkerDb = new Set([
   "raceResolutionPostTaskAdaptiveDrainV1Enabled",
   "raceResolutionPendingImpactOnlyV1Enabled",
   "raceResolutionNarrowDefenseQueryV1Enabled",
+  "raceResolutionActiveImpactBulkPersistV1Enabled",
   "raceResolutionPostTaskFastHandoffV1Enabled",
   "raceResolutionNoopInputSuppressionV1Enabled",
 ]);
-const deferredProductDb = new Set([
+const productDb = new Set([
   "teamRacesEnabled",
   "tournamentsEnabled",
   "quickCreateRaceCtaEnabled",
@@ -125,9 +109,19 @@ const deferredProductDb = new Set([
   "dualBoxBannersEnabled",
   "seededGeometricPayoutsEnabled",
   "seededInactivityPruneEnabled",
-  "seededInactivityAutoEnrollOffEnabled",
   "apiActiveImpactNoticesV1Enabled",
   "apiCompletedImpactPopupEnabled",
+  "fundedPrizePoolsEnabled",
+  "buyInEditEnabled",
+  "openUserRaceDiscoveryEnabled",
+  "setupInviteCodePromptEnabled",
+  "homeInviteModalEnabled",
+  "localGlobalStepEventsEnabled",
+  "localGlobalStepEventRetentionEnabled",
+  "adminMetricsV2DashboardEnabled",
+  "adminMetricsV2TelemetryEnabled",
+  "seededInactivityAutoEnrollOffEnabled",
+  "accessoryCompatibilityEnforcement",
 ]);
 
 const envMetadata = {
@@ -148,67 +142,43 @@ const envMetadata = {
   DB_POOL_MAX: ["capacity_local_config", 20, "integer 1..20 overrides the database pool only in validated capacity mode", "capacity_local", 20],
 };
 
-const legacyFanouts = [
-  "LIVE_PLACEMENT_DISABLED", "DAILY_MOVER_DISABLED",
-  "DAILY_REWARD_REMINDERS_DISABLED", "STEP_MILESTONE_REMINDERS_DISABLED",
-  "HIGH_MULTIPLIER_PUSH_DISABLED", "RACE_ENDING_REMINDER_DISABLED",
-  "INBOX_DELIVERY_DISABLED",
-];
-const legacyCleanups = [
-  "ACTIVATION_EVENT_CLEANUP_DISABLED", "ADMIN_METRICS_V2_CLEANUP_DISABLED",
-  "NOTIFICATION_CLEANUP_DISABLED", "INBOX_EXPIRY_DISABLED",
-  "STEP_SAMPLE_RETENTION_DISABLED", "RACE_RESOLUTION_POST_TASK_CLEANUP_DISABLED",
-];
-const legacyWorkers = [
-  "ASYNC_RACE_RESOLUTION_DISABLED", "ASYNC_RACE_RESOLUTION_WORKER_DISABLED",
-  "RACE_RESOLUTION_POST_TASK_WORKER_DISABLED",
-];
-const legacyAds = {
-  ADS_EXTRA_SPIN_ENABLED: "default on; literal false disables",
-  ADS_COIN_REWARD_ENABLED: "default on; literal false disables",
-  ADS_BOX_REROLL_ENABLED: "default off; literal true enables",
-  ADS_RACE_PAYOUT_DOUBLE_PREPARE_ENABLED: "default off; literal true enables",
-  ADS_RACE_PAYOUT_DOUBLE_CLAIM_ENABLED: "default off; literal true enables",
-  RACE_PAYOUT_DOUBLE_RECONCILE_ENABLED: "default off; literal true enables",
-};
-for (const name of [...legacyFanouts, ...legacyCleanups, ...legacyWorkers]) {
-  envMetadata[name] = [
-    "legacy_compatibility", null,
-    "literal true disables; OR-mapped to consolidated brake during rollback window",
-    "operational_brakes", "false",
-  ];
-}
-for (const [name, polarity] of Object.entries(legacyAds)) {
-  envMetadata[name] = ["legacy_compatibility", null, polarity, "operational_brakes", null];
-}
-
-const deferredEnvironmentGraduations = {
-  GLOBAL_EVENT_SUMMARY_DISABLED: ["literal true disables; unset runs", "false"],
-  LOCAL_GLOBAL_STEP_EVENTS_DISABLED: ["literal true disables; unset permits the DB launch gate", "false"],
-  PRIVATE_RACE_AUTOSTART_DISABLED: ["literal true disables private auto-start", "false"],
-  RACE_POLICY_AUTOSTART_DISABLED: ["literal true disables race-policy auto-start", "false"],
-  RAINSTORM_MULTIPLICATIVE_ENABLED: ["literal true selects multiplicative scoring; unset keeps legacy additive scoring", "false"],
-  PLACEMENT_DISTRIBUTED_CLAIM_ENABLED: ["literal true enables distributed claims", "false"],
-  PLACEMENT_INERT_PUSH_SUPPRESSION_ENABLED: ["literal true suppresses inert pushes", "false"],
-  PLACEMENT_LEAN_BASELINE_WRITES_ENABLED: ["literal true enables lean baseline writes", "false"],
-  STEP_SYNC_BULK_ENABLED: ["literal true enables bulk step sync", "false"],
-  APNS_SESSION_REUSE_ENABLED: ["literal true enables APNs session reuse", "false"],
-  SYNC_V2_INLINE_UPLOADER_RECONCILIATION: ["default on; literal false selects deferred reconciliation", "true"],
-  PLACEMENT_BASELINE_RESYNC: ["literal true performs the one-tick silent baseline resync", "false"],
-  REFERRAL_IP_FALLBACK_NET_ENABLED: ["1 or literal true enables network-prefix fallback", "false"],
-};
-for (const [name, [polarity, rollbackValue]] of Object.entries(deferredEnvironmentGraduations)) {
-  envMetadata[name] = [
-    "deferred_graduation",
-    null,
-    polarity,
-    "phase2_runtime_controls",
-    rollbackValue,
-  ];
-}
-
 const retiredEnv = {
+  ACTIVATION_EVENT_CLEANUP_DISABLED: [false, "cleanup runs behind OPS_DESTRUCTIVE_CLEANUPS_DISABLED"],
+  ADMIN_METRICS_V2_CLEANUP_DISABLED: [false, "cleanup runs behind OPS_DESTRUCTIVE_CLEANUPS_DISABLED"],
+  NOTIFICATION_CLEANUP_DISABLED: [false, "cleanup runs behind OPS_DESTRUCTIVE_CLEANUPS_DISABLED"],
+  INBOX_EXPIRY_DISABLED: [false, "cleanup runs behind OPS_DESTRUCTIVE_CLEANUPS_DISABLED"],
+  STEP_SAMPLE_RETENTION_DISABLED: [false, "cleanup runs behind OPS_DESTRUCTIVE_CLEANUPS_DISABLED"],
+  RACE_RESOLUTION_POST_TASK_CLEANUP_DISABLED: [false, "cleanup runs behind OPS_DESTRUCTIVE_CLEANUPS_DISABLED"],
+  ASYNC_RACE_RESOLUTION_DISABLED: [false, "intake runs behind OPS_RACE_RESOLUTION_INTAKE_DISABLED"],
+  ASYNC_RACE_RESOLUTION_WORKER_DISABLED: [false, "worker runs behind OPS_RACE_RESOLUTION_WORKER_DISABLED"],
+  RACE_RESOLUTION_POST_TASK_WORKER_DISABLED: [false, "worker runs behind OPS_RACE_RESOLUTION_POST_TASK_WORKER_DISABLED"],
+  DAILY_MOVER_DISABLED: [false, "fan-out runs behind OPS_USER_FANOUTS_DISABLED"],
+  DAILY_REWARD_REMINDERS_DISABLED: [false, "fan-out runs behind OPS_USER_FANOUTS_DISABLED"],
+  INBOX_DELIVERY_DISABLED: [false, "fan-out runs behind OPS_USER_FANOUTS_DISABLED"],
+  LIVE_PLACEMENT_DISABLED: [false, "fan-out runs behind OPS_USER_FANOUTS_DISABLED"],
+  HIGH_MULTIPLIER_PUSH_DISABLED: [false, "fan-out runs behind OPS_USER_FANOUTS_DISABLED"],
+  RACE_ENDING_REMINDER_DISABLED: [false, "fan-out runs behind OPS_USER_FANOUTS_DISABLED"],
+  STEP_MILESTONE_REMINDERS_DISABLED: [false, "fan-out runs behind OPS_USER_FANOUTS_DISABLED"],
+  GLOBAL_EVENT_SUMMARY_DISABLED: [false, "scheduled job permanently runs"],
+  LOCAL_GLOBAL_STEP_EVENTS_DISABLED: [false, "database launch gate remains authoritative"],
+  PRIVATE_RACE_AUTOSTART_DISABLED: [false, "private auto-start permanently runs"],
+  RACE_POLICY_AUTOSTART_DISABLED: [false, "race-policy auto-start permanently runs"],
   RACE_SCORING_INPUT_BASELINE_DISABLED: [false, "baseline job permanently runs"],
+  ADS_EXTRA_SPIN_ENABLED: [true, "extra-spin value remains available behind OPS_AD_VALUE_ISSUANCE_DISABLED"],
+  ADS_COIN_REWARD_ENABLED: [true, "coin reward remains available behind OPS_AD_VALUE_ISSUANCE_DISABLED"],
+  ADS_BOX_REROLL_ENABLED: [true, "box reroll remains available behind OPS_AD_VALUE_ISSUANCE_DISABLED"],
+  ADS_RACE_PAYOUT_DOUBLE_PREPARE_ENABLED: [true, "payout preparation remains available behind OPS_AD_VALUE_ISSUANCE_DISABLED"],
+  ADS_RACE_PAYOUT_DOUBLE_CLAIM_ENABLED: [true, "payout claim remains available behind OPS_AD_VALUE_ISSUANCE_DISABLED"],
+  RACE_PAYOUT_DOUBLE_RECONCILE_ENABLED: [true, "payout reconciliation permanently runs"],
+  RAINSTORM_MULTIPLICATIVE_ENABLED: [true, "multiplicative scoring permanently runs"],
+  PLACEMENT_DISTRIBUTED_CLAIM_ENABLED: [true, "distributed claims permanently run"],
+  PLACEMENT_INERT_PUSH_SUPPRESSION_ENABLED: [true, "inert pushes are permanently suppressed"],
+  PLACEMENT_LEAN_BASELINE_WRITES_ENABLED: [true, "lean baseline writes permanently run"],
+  STEP_SYNC_BULK_ENABLED: [true, "bulk step sync permanently runs"],
+  APNS_SESSION_REUSE_ENABLED: [true, "APNs sessions are permanently reused"],
+  SYNC_V2_INLINE_UPLOADER_RECONCILIATION: [false, "sync v2 permanently returns DEFERRED"],
+  PLACEMENT_BASELINE_RESYNC: [false, "one-tick migration path retired"],
+  REFERRAL_IP_FALLBACK_NET_ENABLED: [false, "network-prefix referral attribution retired"],
   CHARACTER_POWERS_ENABLED: [false, "character race abilities are retired"],
   TURTLE_SHELL_DISABLED: [true, "character race abilities are retired"],
   ZOOMIES_PUSH_DISABLED: [true, "character race abilities are retired"],
@@ -269,30 +239,31 @@ for (const name of deploymentConfigEnv) {
 
 const compatibilityFields = {
   characterPowersEnabled: false,
-  teamRacesEnabled: KNOWN_FLAGS.teamRacesEnabled,
-  customRaceWindowEnabled: KNOWN_FLAGS.customRaceWindowEnabled,
-  onboardingV2Enabled: KNOWN_FLAGS.onboardingV2Enabled,
-  onboardingV3Enabled: KNOWN_FLAGS.onboardingV3Enabled,
-  onboardingInviteCodeEnabled: KNOWN_FLAGS.onboardingInviteCodeEnabled,
-  openUserRaceDiscoveryEnabled: KNOWN_FLAGS.openUserRaceDiscoveryEnabled,
-  quickCreateRaceCtaEnabled: KNOWN_FLAGS.quickCreateRaceCtaEnabled,
-  setupInviteCodePromptEnabled: KNOWN_FLAGS.setupInviteCodePromptEnabled,
-  homeInviteModalEnabled: KNOWN_FLAGS.homeInviteModalEnabled,
-  tutorialMandatoryEnabled: KNOWN_FLAGS.tutorialMandatoryEnabled,
-  stepSampleBucketMinutes: KNOWN_FLAGS.stepSampleBucketMinutes,
+  teamRacesEnabled: true,
+  customRaceWindowEnabled: true,
+  onboardingV2Enabled: true,
+  onboardingV3Enabled: true,
+  onboardingInviteCodeEnabled: false,
+  openUserRaceDiscoveryEnabled: true,
+  quickCreateRaceCtaEnabled: true,
+  setupInviteCodePromptEnabled: true,
+  homeInviteModalEnabled: true,
+  tutorialMandatoryEnabled: true,
+  stepSampleBucketMinutes: 5,
 };
 
 function dbDisposition(name) {
   if (retainedDb.has(name)) return "retained_operational";
   if (deploymentProtocolDb.has(name)) return "deployment_protocol";
-  if (deferredClosureDb.has(name)) return "deferred_closure_gate";
-  if (deferredRemediationDb.has(name)) return "deferred_remediation";
-  if (deferredLaunchDb.has(name)) return "deferred_launch_or_soak";
-  if (deferredRequestApiDb.has(name)) return "deferred_request_api_graduation";
-  if (deferredRedisDb.has(name)) return "deferred_redis_graduation";
-  if (deferredWorkerDb.has(name)) return "deferred_worker_graduation";
-  if (deferredProductDb.has(name)) return "deferred_product_graduation";
   throw new Error(`Missing disposition for mutable AppSetting ${name}`);
+}
+
+function permanentDeployFamily(name) {
+  if (requestApiDb.has(name)) return "request_api";
+  if (redisDb.has(name)) return "redis_fail_open";
+  if (workerDb.has(name)) return "race_resolution_workers";
+  if (productDb.has(name)) return "product_onboarding";
+  throw new Error(`Missing deploy family for permanent AppSetting ${name}`);
 }
 
 function entryBase(id, name, kind) {
@@ -310,7 +281,7 @@ function buildManifest() {
       disposition: dbDisposition(name), permanentValue: null,
       polarityDefault: fallback, deployFamily: "database_controls",
       rollbackValue: fallback,
-      adminExposed: true,
+      adminExposed: ADMIN_EXPOSED_FLAGS.includes(name),
     });
   }
   for (const [name, value] of Object.entries(PERMANENT_FLAGS).sort()) {
@@ -327,7 +298,7 @@ function buildManifest() {
         : "graduated_permanent",
       permanentValue: value,
       polarityDefault: value,
-      deployFamily: "request_api",
+      deployFamily: permanentDeployFamily(name),
       rollbackValue: value,
     });
   }
@@ -349,7 +320,7 @@ function buildManifest() {
   for (const [name, value] of Object.entries(compatibilityFields).sort()) {
     controls.push({
       ...entryBase(`response:/auth/me.featureFlags.${name}`, name, "compatibility_response_field"),
-      disposition: "retained_compatibility_runtime_controlled", permanentValue: null,
+      disposition: "retained_compatibility_constant", permanentValue: value,
       polarityDefault: value, deployFamily: "auth_contract", rollbackValue: value,
       compatibilityConsumers: ["frozen iOS clients", "frozen Android clients"],
     });

@@ -447,12 +447,10 @@ test("editRace updates isPublic", async () => {
   assert.equal(ctx.updateCall.fields.isPublic, true);
 });
 
-// Issue 4: with the buyInEditEnabled kill switch ON (default) a PENDING race
-// with paid participants ALLOWS the buy-in change and reconciles every ACCEPTED
-// participant's hold (charge the delta on a raise). With the kill switch OFF the
-// old hard block (IMMUTABLE_FIELD) still applies.
-test("editRace reconciles the buy-in when participants have paid; kill switch gates the old block", async () => {
-  function buildCtx({ buyInEditEnabled }) {
+// Buy-in editing is retired. Historical paid rows still settle/refund through
+// their row-stamped state, but no request can reconcile or move a hold.
+test("editRace permanently rejects buy-in changes after the legacy hold drain", async () => {
+  function buildCtx() {
     const awards = [];
     const participantUpdates = [];
     const parts = [
@@ -495,39 +493,15 @@ test("editRace reconciles the buy-in when participants have paid; kill switch ga
       awards.push(payload);
       return { awarded: true, coins: 0 };
     };
-    ctx.deps.appSettings = {
-      async getFlag(key) {
-        return key === "buyInEditEnabled" ? buyInEditEnabled : true;
-      },
-    };
     ctx.deps.withRaceLock = async (_raceId, cb) => cb();
     return { ctx, awards, participantUpdates };
   }
 
-  // Default (enabled): raising 50 -> 100 is allowed and charges the +50 delta.
-  const enabled = buildCtx({ buyInEditEnabled: true });
-  const editRace = buildEditRace(enabled.ctx.deps);
-  await editRace({
-    userId: "user-1",
-    raceId: "race-1",
-    updates: { buyInAmount: 100, payoutPreset: "WINNER_TAKES_ALL" },
-  });
-  assert.equal(enabled.awards.length, 1);
-  assert.equal(enabled.awards[0].amount, -50); // charged the +50 delta
-  assert.equal(enabled.awards[0].reason, "race_buy_in_adjust");
-  assert.equal(enabled.awards[0].refId, "race-1:u2:v2"); // versioned, not the join refId
-  assert.equal(enabled.participantUpdates[0].fields.buyInAmount, 100);
-  assert.equal(enabled.participantUpdates[0].fields.buyInStatus, "HELD");
-  assert.equal(enabled.participantUpdates[0].fields.buyInVersion, 2);
-  assert.equal(enabled.ctx.updateCall.fields.buyInAmount, 100);
-  assert.equal(enabled.ctx.updateCall.fields.potCoins, 100); // 1 * 100
-
-  // Kill switch OFF: the old hard block still rejects with IMMUTABLE_FIELD.
-  const disabled = buildCtx({ buyInEditEnabled: false });
-  const editRaceBlocked = buildEditRace(disabled.ctx.deps);
+  const ctx = buildCtx();
+  const editRace = buildEditRace(ctx.ctx.deps);
   await assert.rejects(
     () =>
-      editRaceBlocked({
+      editRace({
         userId: "user-1",
         raceId: "race-1",
         updates: { buyInAmount: 100, payoutPreset: "WINNER_TAKES_ALL" },
@@ -540,34 +514,39 @@ test("editRace reconciles the buy-in when participants have paid; kill switch ga
       return true;
     }
   );
-  assert.equal(disabled.awards.length, 0, "no coin movement when blocked");
+  assert.equal(ctx.awards.length, 0, "no coin movement when blocked");
+  assert.equal(ctx.participantUpdates.length, 0, "no hold mutation when blocked");
+  assert.equal(ctx.ctx.updateCall, null, "no race mutation when blocked");
 });
 
-test("editRace allows buyInAmount change when no participants have paid", async () => {
+test("editRace rejects buyInAmount change even when no participants have paid", async () => {
   const ctx = makeDeps();
   const editRace = buildEditRace(ctx.deps);
 
-  await editRace({
-    userId: "user-1",
-    raceId: "race-1",
-    updates: { buyInAmount: 50, payoutPreset: "WINNER_TAKES_ALL" },
-  });
-
-  assert.equal(ctx.updateCall.fields.buyInAmount, 50);
-  assert.equal(ctx.updateCall.fields.payoutPreset, "WINNER_TAKES_ALL");
+  await assert.rejects(
+    () => editRace({
+      userId: "user-1",
+      raceId: "race-1",
+      updates: { buyInAmount: 50, payoutPreset: "WINNER_TAKES_ALL" },
+    }),
+    (err) => err instanceof RaceEditError && err.code === "IMMUTABLE_FIELD",
+  );
+  assert.equal(ctx.updateCall, null);
 });
 
-test("editRace allows buyInAmount=0 (no buy-in)", async () => {
+test("editRace rejects toggling a historical paid race to free", async () => {
   const ctx = makeDeps({ raceOverrides: { buyInAmount: 50 } });
   const editRace = buildEditRace(ctx.deps);
 
-  await editRace({
-    userId: "user-1",
-    raceId: "race-1",
-    updates: { buyInAmount: 0 },
-  });
-
-  assert.equal(ctx.updateCall.fields.buyInAmount, 0);
+  await assert.rejects(
+    () => editRace({
+      userId: "user-1",
+      raceId: "race-1",
+      updates: { buyInAmount: 0 },
+    }),
+    (err) => err instanceof RaceEditError && err.code === "IMMUTABLE_FIELD",
+  );
+  assert.equal(ctx.updateCall, null);
 });
 
 test("editRace rejects buyInAmount between 1 and 9", async () => {

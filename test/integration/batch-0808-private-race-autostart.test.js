@@ -524,7 +524,7 @@ describe("batch 2026-08-08 item 2 — private race auto-start", () => {
     assert.equal(race.status, "PENDING", "1 accepted is not a race");
   });
 
-  it("kill switch blocks BOTH the inline hook and the cron backstop", async () => {
+  it("retired kill switch cannot block the permanent inline hook or cron backstop", async () => {
     process.env.PRIVATE_RACE_AUTOSTART_DISABLED = "true";
 
     const alice = await createUser("KillAlice");
@@ -537,14 +537,13 @@ describe("batch 2026-08-08 item 2 — private race auto-start", () => {
     assert.equal(res.status, 200, "the join itself is unaffected by the switch");
 
     let race = await getRace(alice, raceId);
-    assert.equal(race.status, "PENDING", "inline hook must be disabled");
+    assert.equal(race.status, "ACTIVE", "inline hook remains permanently enabled");
 
     await runCron();
     race = await getRace(alice, raceId);
-    assert.equal(race.status, "PENDING", "backstop must be disabled too");
+    assert.equal(race.status, "ACTIVE", "cron is idempotent after inline start");
 
-    // Flip it back off and the very same race starts on the next tick — proves
-    // the env var is read at CALL time, not at module load.
+    // Removing stale deployment residue also leaves the established path on.
     delete process.env.PRIVATE_RACE_AUTOSTART_DISABLED;
     await runCron();
     race = await getRace(alice, raceId);

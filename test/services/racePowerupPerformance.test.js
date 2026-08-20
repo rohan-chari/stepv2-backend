@@ -13,13 +13,13 @@ const {
   buildGetSneakySwapTargets,
 } = require("../../src/modules/races/queries/getSneakySwapTargets");
 
-test("performance rollout switches are positive, dark by default, and concurrency is clamped", () => {
+test("performance rollout paths are permanent while concurrency is clamped", () => {
   const dark = readPerformanceFlags({});
-  assert.equal(dark.placementDistributedClaimEnabled, false);
-  assert.equal(dark.placementLeanBaselineWritesEnabled, false);
-  assert.equal(dark.placementInertPushSuppressionEnabled, false);
-  assert.equal(dark.stepSyncBulkEnabled, false);
-  assert.equal(dark.apnsSessionReuseEnabled, false);
+  assert.equal(dark.placementDistributedClaimEnabled, true);
+  assert.equal(dark.placementLeanBaselineWritesEnabled, true);
+  assert.equal(dark.placementInertPushSuppressionEnabled, true);
+  assert.equal(dark.stepSyncBulkEnabled, true);
+  assert.equal(dark.apnsSessionReuseEnabled, true);
   assert.equal(dark.placementBaselineWriteConcurrency, 4);
   assert.equal(dark.stepSyncPushConcurrency, 8);
 
@@ -30,7 +30,7 @@ test("performance rollout switches are positive, dark by default, and concurrenc
     STEP_SYNC_PUSH_CONCURRENCY: "0",
   });
   assert.equal(enabled.placementDistributedClaimEnabled, true);
-  assert.equal(enabled.placementLeanBaselineWritesEnabled, false);
+  assert.equal(enabled.placementLeanBaselineWritesEnabled, true);
   assert.equal(enabled.placementBaselineWriteConcurrency, 8);
   assert.equal(enabled.stepSyncPushConcurrency, 1);
 });

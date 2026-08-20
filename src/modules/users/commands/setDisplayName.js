@@ -70,7 +70,10 @@ function buildSetDisplayName(dependencies = {}) {
       const updatedUser = await userModel.update(userId, {
         displayName,
         ...(completeDiscoverableNameSetup === true
-          ? { nameSetupCompletedAt: new Date() }
+          ? {
+              nameSetupCompletedAt: new Date(),
+              nameSetupOnboardingRequired: false,
+            }
           : {}),
       });
       // C2 invalidation (spec §3 `v1:user:{id}:cosmetics`): the per-user

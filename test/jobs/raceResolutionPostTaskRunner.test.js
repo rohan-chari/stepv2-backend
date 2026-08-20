@@ -42,15 +42,17 @@ test("runner attempts immutable intents in state/snapshot/nudge order and contin
   assert.equal(completed.find((value) => value.id === "i1").state, "accepted");
 });
 
-test("whole-runner kill switch is exact literal true", () => {
-  assert.equal(postTaskWorkerDisabled({ RACE_RESOLUTION_POST_TASK_WORKER_DISABLED: "true" }), true);
-  assert.equal(postTaskWorkerDisabled({ RACE_RESOLUTION_POST_TASK_WORKER_DISABLED: "TRUE" }), false);
+test("whole-runner consolidated brake is exact literal true", () => {
+  assert.equal(postTaskWorkerDisabled({ OPS_RACE_RESOLUTION_POST_TASK_WORKER_DISABLED: "true" }), true);
+  assert.equal(postTaskWorkerDisabled({ OPS_RACE_RESOLUTION_POST_TASK_WORKER_DISABLED: "TRUE" }), false);
+  assert.equal(postTaskWorkerDisabled({ RACE_RESOLUTION_POST_TASK_WORKER_DISABLED: "true" }), false);
   assert.equal(postTaskWorkerDisabled({}), false);
 });
 
-test("terminal cleanup is bounded, seven-day only, and exact-literal disabled", async () => {
-  assert.equal(postTaskCleanupDisabled({ RACE_RESOLUTION_POST_TASK_CLEANUP_DISABLED: "true" }), true);
-  assert.equal(postTaskCleanupDisabled({ RACE_RESOLUTION_POST_TASK_CLEANUP_DISABLED: "TRUE" }), false);
+test("terminal cleanup is bounded, seven-day only, and uses the consolidated brake", async () => {
+  assert.equal(postTaskCleanupDisabled({ OPS_DESTRUCTIVE_CLEANUPS_DISABLED: "true" }), true);
+  assert.equal(postTaskCleanupDisabled({ OPS_DESTRUCTIVE_CLEANUPS_DISABLED: "TRUE" }), false);
+  assert.equal(postTaskCleanupDisabled({ RACE_RESOLUTION_POST_TASK_CLEANUP_DISABLED: "true" }), false);
   const calls = [];
   const now = new Date("2026-08-13T12:00:00.000Z");
   const runner = buildRaceResolutionPostTaskRunner({
@@ -67,7 +69,7 @@ test("terminal cleanup is bounded, seven-day only, and exact-literal disabled", 
   }]);
 
   const disabled = buildRaceResolutionPostTaskRunner({
-    env: { RACE_RESOLUTION_POST_TASK_CLEANUP_DISABLED: "true" },
+    env: { OPS_DESTRUCTIVE_CLEANUPS_DISABLED: "true" },
     RaceResolutionPostTask: {
       async cleanupTerminal() { throw new Error("must not run"); },
     },

@@ -97,6 +97,7 @@ describe("feature batch 2026-07-24 — currentMultiplier + high-multiplier push"
     alerts = [];
     delete process.env.HIGH_MULTIPLIER_PUSH_DISABLED;
     delete process.env.HIGH_MULTIPLIER_PUSH_THRESHOLD;
+    delete process.env.OPS_USER_FANOUTS_DISABLED;
   });
 
   // ── 6a: currentMultiplier ──────────────────────────────────────────────────
@@ -190,8 +191,8 @@ describe("feature batch 2026-07-24 — currentMultiplier + high-multiplier push"
       assert.equal(alicesAlerts().length, 2);
     });
 
-    it("respects the HIGH_MULTIPLIER_PUSH_DISABLED kill switch", async () => {
-      process.env.HIGH_MULTIPLIER_PUSH_DISABLED = "true";
+    it("respects the consolidated OPS user-fanout brake", async () => {
+      process.env.OPS_USER_FANOUTS_DISABLED = "true";
       const alice = await createUser("AliceMultD");
       const bob = await createUser("BobMultDDDD");
       await makeFriends(alice, bob);
@@ -205,6 +206,7 @@ describe("feature batch 2026-07-24 — currentMultiplier + high-multiplier push"
       assert.equal(alerts.filter((a) => a.actorUserId === alice.userId).length, 0);
       const freshAlice = await participant(raceId, alice.userId);
       assert.equal(freshAlice.highMultiplierNotifiedAt, null);
+      delete process.env.OPS_USER_FANOUTS_DISABLED;
     });
 
     it("shared-tail evaluation fresh-reads a caster finished/forfeited concurrently after consumption", async () => {

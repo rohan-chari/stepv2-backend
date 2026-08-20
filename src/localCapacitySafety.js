@@ -346,12 +346,7 @@ function prepareLocalCapacityProcess() {
   const validated = validateCapacityEnvironment();
   process.env.HOST = "127.0.0.1";
   process.env.APNS_PRODUCTION = "false";
-  process.env.INBOX_DELIVERY_DISABLED = "true";
-  process.env.LIVE_PLACEMENT_DISABLED = "true";
-  process.env.DAILY_MOVER_DISABLED = "true";
-  process.env.DAILY_REWARD_REMINDERS_DISABLED = "true";
-  process.env.STEP_MILESTONE_REMINDERS_DISABLED = "true";
-  process.env.RACE_ENDING_REMINDER_DISABLED = "true";
+  process.env.OPS_USER_FANOUTS_DISABLED = "true";
   const notificationSink = installLocalNotificationSink();
   return { ...validated, databasePoolMax: capacityDatabasePoolMax(), notificationSink };
 }

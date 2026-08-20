@@ -63,8 +63,8 @@ describe("feature-control phase-2 compatibility contract", () => {
     await appSettings.setFlag("redisCacheAuthMeEnabled", false);
   });
 
-  it("serves mutable /auth/me compatibility values from live AppSettings", async () => {
-    const runtimeValues = {
+  it("serves the permanent /auth/me compatibility envelope despite stale retired rows", async () => {
+    const retiredRowOpposites = {
       teamRacesEnabled: false,
       customRaceWindowEnabled: false,
       onboardingV2Enabled: false,
@@ -77,9 +77,14 @@ describe("feature-control phase-2 compatibility contract", () => {
       tutorialMandatoryEnabled: false,
       stepSampleBucketMinutes: 60,
     };
-    for (const [key, value] of Object.entries(runtimeValues)) {
-      await appSettings.setFlag(key, value);
+    for (const [key, value] of Object.entries(retiredRowOpposites)) {
+      await prisma.appSetting.upsert({
+        where: { key },
+        update: { value },
+        create: { key, value },
+      });
     }
+    appSettings.bustCache();
 
     const user = await createUser();
     const response = await request(server.baseUrl, "GET", "/auth/me", {
@@ -105,6 +110,8 @@ describe("feature-control phase-2 compatibility contract", () => {
           body.user.featureFlags.quickCreateRaceCtaEnabled,
         setupInviteCodePromptEnabled:
           body.user.featureFlags.setupInviteCodePromptEnabled,
+        homeInviteModalEnabled:
+          body.user.featureFlags.homeInviteModalEnabled,
         tutorialMandatoryEnabled:
           body.user.featureFlags.tutorialMandatoryEnabled,
         stepSampleBucketMinutes:
@@ -112,22 +119,18 @@ describe("feature-control phase-2 compatibility contract", () => {
       },
       {
         characterPowersEnabled: false,
-        teamRacesEnabled: false,
-        customRaceWindowEnabled: false,
-        onboardingV2Enabled: false,
-        onboardingV3Enabled: false,
-        onboardingInviteCodeEnabled: true,
-        openUserRaceDiscoveryEnabled: false,
-        quickCreateRaceCtaEnabled: false,
-        setupInviteCodePromptEnabled: false,
-        tutorialMandatoryEnabled: false,
-        stepSampleBucketMinutes: 60,
+        teamRacesEnabled: true,
+        customRaceWindowEnabled: true,
+        onboardingV2Enabled: true,
+        onboardingV3Enabled: true,
+        onboardingInviteCodeEnabled: false,
+        openUserRaceDiscoveryEnabled: true,
+        quickCreateRaceCtaEnabled: true,
+        setupInviteCodePromptEnabled: true,
+        homeInviteModalEnabled: true,
+        tutorialMandatoryEnabled: true,
+        stepSampleBucketMinutes: 5,
       },
-    );
-    assert.equal(
-      Object.hasOwn(body.user.featureFlags, "homeInviteModalEnabled"),
-      false,
-      "phase 2 keeps the home invite modal as a request-path setting, not a new /auth/me contract",
     );
   });
 

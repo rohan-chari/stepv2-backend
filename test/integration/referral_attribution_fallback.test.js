@@ -228,14 +228,13 @@ describe("referrals.source stamping at provision", () => {
 //
 // The exact-IP match breaks whenever the landing page and the app egress from
 // different addresses on the same network (IPv4<->IPv6, Wi-Fi<->cellular, NAT
-// churn). Tier 2 matches on a hashed network prefix (IPv4 /24, IPv6 /64)
-// instead — but ONLY when tier 1 found zero opens, and only when the env
-// switch is on (it ships OFF; see the spec's abuse-cost note).
+// churn). That coarse-network fallback was never launched and is now retired;
+// exact-IP matching remains the only attribution path. These tests pin that
+// stale env values cannot resurrect the broader matching behavior.
 // ---------------------------------------------------------------------------
 
 describe("IP-fallback tier 2 (network prefix)", () => {
-  // The tier-2 knobs are read per call (not at module load) precisely so this
-  // suite can exercise both postures against the shared in-process server.
+  // Set the retired knobs to prove production ignores both names.
   function setNetEnv({ enabled, maxOpens } = {}) {
     if (enabled === undefined) delete process.env.REFERRAL_IP_FALLBACK_NET_ENABLED;
     else process.env.REFERRAL_IP_FALLBACK_NET_ENABLED = enabled;
@@ -266,22 +265,17 @@ describe("IP-fallback tier 2 (network prefix)", () => {
     assert.equal(exact.source, "ip_fallback_exact");
   });
 
-  it("attributes a same-/24 IPv4 open with source=ip_fallback_net when enabled", async () => {
+  it("ignores the retired enable env for same-/24 IPv4 opens", async () => {
     setNetEnv({ enabled: "1" });
-    const referrer = await makeReferrer("BARA-NET3");
+    await makeReferrer("BARA-NET3");
     await openLanding("BARA-NET3", "203.0.113.41");
 
     const user = await provision(`sub-fb-${++seq}`, { ip: "203.0.113.42" });
 
-    const referral = await referralOf(user.id);
-    assert.ok(referral, "expected a tier-2 Referral row");
-    assert.equal(referral.referrerId, referrer.id);
-    assert.equal(referral.code, "BARA-NET3");
-    assert.equal(referral.status, "PENDING");
-    assert.equal(referral.source, "ip_fallback_net");
+    assert.equal(await referralOf(user.id), null);
   });
 
-  it("matches a same-/64 IPv6 pair written in different (compressed vs expanded) forms", async () => {
+  it("does not restore same-/64 IPv6 matching when the retired env is true", async () => {
     setNetEnv({ enabled: "1" });
     await makeReferrer("BARA-NET4");
     await openLanding("BARA-NET4", "2600:1:2:3:aaaa::1");
@@ -291,21 +285,17 @@ describe("IP-fallback tier 2 (network prefix)", () => {
       ip: "2600:0001:0002:0003:bbbb::2",
     });
 
-    const referral = await referralOf(user.id);
-    assert.ok(referral, "expanded and compressed IPv6 /64s must agree");
-    assert.equal(referral.source, "ip_fallback_net");
+    assert.equal(await referralOf(user.id), null);
   });
 
-  it("hashes an IPv4-mapped IPv6 open as the v4 /24, not a /64 of the mapped range", async () => {
+  it("does not restore mapped-IPv6 network matching when the retired env is true", async () => {
     setNetEnv({ enabled: "1" });
     await makeReferrer("BARA-NET5");
     await openLanding("BARA-NET5", "::ffff:203.0.113.51");
 
     const user = await provision(`sub-fb-${++seq}`, { ip: "203.0.113.52" });
 
-    const referral = await referralOf(user.id);
-    assert.ok(referral, "::ffff: v4-mapped must normalize to the v4 /24");
-    assert.equal(referral.source, "ip_fallback_net");
+    assert.equal(await referralOf(user.id), null);
   });
 
   it("does NOT attribute across different /24s", async () => {

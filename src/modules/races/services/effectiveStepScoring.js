@@ -604,9 +604,7 @@ function multiplierFromSegmentState(state) {
     reduced = reduced === null ? candidate : Math.min(reduced, candidate);
   };
   if (state.umbrellaCount === 0 && state.maxRainLostFraction > 0) {
-    consider(process.env.RAINSTORM_MULTIPLICATIVE_ENABLED === "true"
-      ? multiplier * (1 - state.maxRainLostFraction)
-      : Math.max(0, multiplier - state.maxRainLostFraction));
+    consider(multiplier * (1 - state.maxRainLostFraction));
   }
   if (state.maxCoinLossFraction > 0) {
     consider(Math.max(0, multiplier - state.maxCoinLossFraction));

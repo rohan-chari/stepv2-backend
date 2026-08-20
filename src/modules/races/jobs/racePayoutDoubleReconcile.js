@@ -1,9 +1,7 @@
 const { prisma } = require("../../../db");
 const { JobRun } = require("../../../shared/db/jobRun");
-const { appSettings } = require("../../../shared/config/appSettings");
 const {
   safeStructuredEvent,
-  ROLLOUT_SETTING,
   HARD_MAX_RACE_PAYOUT_DOUBLE_BONUS_COINS,
 } = require("../services/racePayoutDoublePolicy");
 const { RACE_PAYOUT_DOUBLE_REWARD_KIND } = require("../../economy/adRewards");
@@ -49,7 +47,6 @@ function oneBy(rows, key) {
 function buildRacePayoutDoubleReconcile(dependencies = {}) {
   const db = dependencies.prisma || prisma;
   const jobRun = dependencies.JobRun || JobRun;
-  const settings = dependencies.appSettings || appSettings;
   const logger = dependencies.logger || console;
 
   return async function reconcileRacePayoutDouble() {
@@ -240,9 +237,7 @@ function buildRacePayoutDoubleReconcile(dependencies = {}) {
         failureCodes: [...new Set(failures)],
       };
       safeStructuredEvent(logger, event);
-      if (!healthy) {
-        await settings.setFlag(ROLLOUT_SETTING, 0);
-      } else if (typeof jobRun.markRan === "function") {
+      if (healthy && typeof jobRun.markRan === "function") {
         await jobRun.markRan(HEALTHY_JOB_NAME, bucket);
       }
 
@@ -264,9 +259,6 @@ function buildRacePayoutDoubleReconcile(dependencies = {}) {
         healthy: false,
         failureCodes: ["reconcile_exception"],
       });
-      try {
-        await settings.setFlag(ROLLOUT_SETTING, 0);
-      } catch {}
       throw error;
     }
   };

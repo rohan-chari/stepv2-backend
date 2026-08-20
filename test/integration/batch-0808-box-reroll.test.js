@@ -185,6 +185,7 @@ describe("Batch 2026-08-08 item 11 — rewarded-ad box reroll", () => {
 
   afterEach(() => {
     delete process.env.ADS_BOX_REROLL_ENABLED;
+    delete process.env.OPS_AD_VALUE_ISSUANCE_DISABLED;
   });
 
   after(async () => {
@@ -485,25 +486,25 @@ describe("Batch 2026-08-08 item 11 — rewarded-ad box reroll", () => {
   });
 
   // ── Kill switch + client-feature gating ──────────────────────────────────
-  it("kill switch OFF (default): endpoint refuses and boxReroll is absent", async () => {
-    delete process.env.ADS_BOX_REROLL_ENABLED;
+  it("retired OFF env cannot disable reroll or remove its capable-client field", async () => {
+    process.env.ADS_BOX_REROLL_ENABLED = "false";
     const powerup = await seedOpenedPowerup(raceId, alice);
     const grant = await seedGrant(alice.userId, REROLL_KIND, today());
 
     const { status } = await reroll(alice.token, raceId, powerup.id);
-    assert.ok(status >= 400, `endpoint refuses when disabled (got ${status})`);
+    assert.equal(status, 200, "retired env cannot disable permanent reroll");
 
     const row = await prisma.racePowerup.findUnique({ where: { id: powerup.id } });
-    assert.equal(row.rerolledAt, null);
+    assert.ok(row.rerolledAt);
     const g = await prisma.adRewardGrant.findUnique({ where: { id: grant.id } });
-    assert.equal(g.consumedAt, null);
+    assert.ok(g.consumedAt);
 
     const { body } = await progress(alice.token, raceId, ADS_FEATURES);
     assert.ok(body.progress.powerupData, "powerupData still present");
     assert.equal(
-      "boxReroll" in body.progress.powerupData,
-      false,
-      "boxReroll absent when the kill switch is off"
+      body.progress.powerupData.boxReroll,
+      true,
+      "retired env cannot remove the capable-client advertisement"
     );
   });
 

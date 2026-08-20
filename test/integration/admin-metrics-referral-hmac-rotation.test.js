@@ -82,8 +82,8 @@ describe("Phase A referral HMAC version rotation", () => {
     assert.equal(await prisma.referral.findUnique({ where: { refereeId: user.id } }), null);
   });
 
-  it("dual-reads the previous version's network-prefix hash during rotation", async () => {
-    const referrer = await prisma.user.create({
+  it("does not restore retired network-prefix attribution during HMAC rotation", async () => {
+    await prisma.user.create({
       data: { appleId: "rotation-net-referrer", referralCode: "BARA-ROT3" },
     });
     process.env.REFERRAL_IP_FALLBACK_NET_ENABLED = "true";
@@ -93,7 +93,6 @@ describe("Phase A referral HMAC version rotation", () => {
 
     const user = await provision("rotation-net-signup", "203.0.113.20");
     const referral = await prisma.referral.findUnique({ where: { refereeId: user.id } });
-    assert.equal(referral?.referrerId, referrer.id);
-    assert.equal(referral?.source, "ip_fallback_net");
+    assert.equal(referral, null);
   });
 });

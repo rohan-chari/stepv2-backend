@@ -975,12 +975,7 @@ test("HTTP step-sync dependency closure fails closed while that participant's lo
     expiresAt: new Date(now.getTime() + 30 * 60 * 1000),
     metadata: { multiplier: 2 },
   } });
-  await appSettings.setFlagsAtomically([
-    ["raceResolutionReasonAwareV1Enabled", true],
-    ["raceResolutionDependencyClosureV1Enabled", true],
-    ["raceResolutionDependencyClosureShadowV1Enabled", true],
-    ["raceResolutionDependencyClosureV1Percent", 100],
-  ]);
+  await appSettings.setFlag("raceResolutionReasonAwareV1Enabled", true);
   try {
     const uploaded = await request(server.baseUrl, "POST", "/steps/samples", {
       token,
@@ -1002,15 +997,10 @@ test("HTTP step-sync dependency closure fails closed while that participant's lo
     assert.ok(await worker.processOne());
     const committed = events.find((entry) => entry.event === "race_resolution_v2");
     assert.equal(committed?.resolutionPlan, "FULL", JSON.stringify(events));
-    assert.equal(committed?.shadowClosurePlan, "FULL", JSON.stringify(events));
-    assert.equal(committed?.shadowClosureFallbackReason, "GLOBAL_EVENT_ACTIVE");
+    assert.equal(committed?.shadowClosurePlan, null, JSON.stringify(events));
+    assert.equal(committed?.shadowClosureFallbackReason, null);
   } finally {
-    await appSettings.setFlagsAtomically([
-      ["raceResolutionReasonAwareV1Enabled", false],
-      ["raceResolutionDependencyClosureV1Enabled", false],
-      ["raceResolutionDependencyClosureShadowV1Enabled", false],
-      ["raceResolutionDependencyClosureV1Percent", 0],
-    ]);
+    await appSettings.setFlag("raceResolutionReasonAwareV1Enabled", false);
   }
 });
 
@@ -1059,15 +1049,6 @@ test("enabled dependency closure delivers a due legacy global-event boundary thr
   const tick = buildMaybeStartGlobalEvent({
     now: () => now,
     localGlobalStepEventTick: async () => {},
-    appSettings: {
-      async getFlag(key) {
-        return key === "raceResolutionDependencyClosureV1Enabled";
-      },
-      async getRawFlagState(key) {
-        assert.equal(key, "raceResolutionDependencyClosureV1Percent");
-        return { available: true, present: true, value: 100 };
-      },
-    },
   });
   await tick();
 

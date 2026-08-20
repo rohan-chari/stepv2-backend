@@ -132,19 +132,13 @@ function startServer({
       scheduleRanks();
       scheduleRankedWeeks();
       scheduleGlobalEvents();
-      if (process.env.GLOBAL_EVENT_SUMMARY_DISABLED !== "true") {
-        scheduleGlobalSummary();
-      }
+      scheduleGlobalSummary();
       scheduleAutoStartRaces();
-      // Live placement broadcast (Phase 0). Runs by default like the other jobs. The
-      // env var is an emergency kill switch ONLY (set LIVE_PLACEMENT_DISABLED=true to
-      // stop the per-placement push fan-out without a code deploy) — kept because this
-      // is the one job that can push to the whole user base on a 5-minute cadence.
+      // Established fan-outs share the single operational brake.
       if (!userFanoutDisabled("LIVE_PLACEMENT_DISABLED")) {
         scheduleLivePlacements();
       }
-      // Nightly prune of the notifications audit log (1am ET). Kill switch:
-      // NOTIFICATION_CLEANUP_DISABLED=true.
+      // Nightly prune of the notifications audit log (1am ET).
       if (!destructiveCleanupDisabled("NOTIFICATION_CLEANUP_DISABLED")) {
         scheduleNotifCleanup();
       }
@@ -163,14 +157,7 @@ function startServer({
         scheduleReferralCleanup();
       }
       // step_samples retention prune (3am ET, 45d + unsettled-race guard;
-      // Five-Minute Step Samples §4.1). Kill switch: STEP_SAMPLE_RETENTION_DISABLED=true.
-      //
-      // ROLLOUT (SHIPPED DARK): this MUST be set to "true" in the prod .env on
-      // the initial deploy. The first prod run has to be manually observed (it
-      // logs its delete count) BEFORE the switch is removed — an un-observed
-      // first prune of a mis-computed cutoff is unrecoverable. The build function
-      // ALSO honors the env var, so even if scheduled it no-ops while the switch
-      // is "true". Unset (not "true") => the cron RUNS, so do not forget the .env.
+      // Five-Minute Step Samples §4.1), behind the destructive-jobs brake.
       if (!destructiveCleanupDisabled("STEP_SAMPLE_RETENTION_DISABLED")) {
         scheduleStepRetention();
       }
@@ -195,12 +182,8 @@ function startServer({
         scheduleDailyReminder();
       }
       // Step-milestone evening reminder (7pm local per user timezone; batch
-      // 2026-08-08 item 3). Another whole-base push job, so another kill
-      // switch: STEP_MILESTONE_REMINDERS_DISABLED=true.
-      // ROLLOUT (SHIPS DARK): this MUST be set to "true" in the prod .env on
-      // the initial deploy. Verify on staging first, then remove the switch.
-      // The build function ALSO honors the env var at call time, so even if
-      // scheduled it no-ops while the switch is "true".
+      // 2026-08-08 item 3). The consolidated user-fanout operational brake is
+      // checked both here and by the job at call time.
       //
       // WARNING (same trap as the daily-reward job above): do NOT assume a
       // null-timezone user base makes this inert. stepMilestoneReminder
@@ -208,15 +191,12 @@ function startServer({
       // includeNull:true, which matches EVERY user whose timezone is still
       // null. Unset, this pushes to the whole eligible base at 7pm ET on day
       // one.
-      if (!userFanoutDisabled("STEP_MILESTONE_REMINDERS_DISABLED")) {
+      if (!userFanoutDisabled()) {
         scheduleMilestoneReminder();
       }
       // Durable async race-resolution worker (Home/Races Refresh Performance).
-      // Registered after the cron start delay like the other jobs. Two kill
-      // switches: ASYNC_RACE_RESOLUTION_DISABLED stops new v2 intake at the
-      // route (normal rollback — clients get a definite legacy fallback);
-      // ASYNC_RACE_RESOLUTION_WORKER_DISABLED stops this worker draining the
-      // queue (emergency DB-load control while queued rows are preserved).
+      // Intake and worker claims have independent consolidated operational
+      // brakes; queued rows and leases remain durable while either is set.
       // Uses its own console (like scheduleTournamentSeedRenewal) rather than the
       // injected startup logger.
       scheduleRaceResolution();

@@ -144,10 +144,11 @@ describe("API page-payload cleanup — locked additive contracts", () => {
     await setCleanupFlags(false);
   });
 
-  it("graduates the request/API controls while retaining worker controls and historical dark fixtures", async () => {
+  it("graduates the request/API and worker controls while retaining historical dark fixtures", async () => {
     assert.equal(CLEANUP_FLAGS.length, 19);
     assert.equal(REQUEST_API_FLAGS.length, 14);
-    for (const key of REQUEST_API_FLAGS) {
+    assert.equal(WORKER_FLAGS.length, 5);
+    for (const key of CLEANUP_FLAGS) {
       assert.equal(KNOWN_FLAGS[key], undefined, `${key} must not remain mutable`);
       assert.equal(PERMANENT_FLAGS[key], true, `${key} must be permanently enabled`);
       assert.equal(
@@ -156,14 +157,11 @@ describe("API page-payload cleanup — locked additive contracts", () => {
         `${key} protected legacy fixture starts dark inside Node tests`,
       );
     }
-    for (const key of WORKER_FLAGS) {
-      assert.equal(KNOWN_FLAGS[key], false, `${key} remains a later deploy family`);
-      assert.equal(PERMANENT_FLAGS[key], undefined, `${key} must not graduate in this release`);
-    }
   });
 
   it("rejects retired request/API controls at the public admin boundary", async () => {
-    const { token } = await createTestUser({ email: "request-api-admin@test.com" });
+    const adminEmail = process.env.ADMIN_EMAILS?.split(",")[0]?.trim() || "admin@test.com";
+    const { token } = await createTestUser({ email: adminEmail });
     const response = await request(server.baseUrl, "PATCH", "/admin/settings", {
       token,
       body: { apiAuthShellV1Enabled: false },

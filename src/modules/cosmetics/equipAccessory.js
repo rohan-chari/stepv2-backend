@@ -4,7 +4,6 @@ const {
   CHARACTER_SLOT,
   buildEquipmentMap,
 } = require("./shopCosmetics");
-const { appSettings } = require("../../shared/config/appSettings");
 const { findConflictingEquipment } = require("./accessoryCompatibility");
 
 class AccessoryEquipError extends Error {
@@ -62,19 +61,14 @@ async function equipAccessory({
     throw new AccessoryEquipError("itemId must be a shop item id or null", 400);
   }
 
-  const compatibilityEnforced =
-    (await appSettings.getFlag("accessoryCompatibilityEnforcement")) === true;
-
   const outcome = await prisma.$transaction(async (tx) => {
     // One per-user row lock serializes all cross-slot equip attempts. The slot
     // unique index alone cannot protect a HEAD/FACE conflict because each
     // request writes a different row. Lock before the equipment read, then
     // re-read inside the same transaction so exactly one racing request wins.
-    if (compatibilityEnforced) {
-      await tx.$queryRaw`
-        SELECT 1 FROM "users" WHERE "id" = ${userId} FOR UPDATE
-      `;
-    }
+    await tx.$queryRaw`
+      SELECT 1 FROM "users" WHERE "id" = ${userId} FOR UPDATE
+    `;
     const ownership = await tx.userShopItem.findUnique({
       where: { userId_shopItemId: { userId, shopItemId: itemId } },
       include: { shopItem: true },
@@ -98,7 +92,7 @@ async function equipAccessory({
       throw new AccessoryEquipError("Shop item does not fit this slot", 400);
     }
 
-    if (compatibilityEnforced) {
+    {
       const equippedAccessories = await tx.userEquippedAccessory.findMany({
         where: { userId },
         include: { shopItem: true },

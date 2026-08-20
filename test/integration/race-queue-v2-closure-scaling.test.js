@@ -38,7 +38,6 @@ const {
 } = require("../../src/modules/powerups/models/raceActiveEffect");
 const { appSettings } = require("../../src/shared/config/appSettings");
 
-const WRITE_FLAG = "raceResolutionDependencyClosureV1Enabled";
 const HOUR_MS = 60 * 60 * 1000;
 
 let server;
@@ -57,13 +56,9 @@ beforeEach(async () => {
   await appSettings.setFlag("raceResolutionBurstCoalescingV1Enabled", false);
   await appSettings.setFlag("raceResolutionReasonAwareV1Enabled", false);
   await appSettings.setFlag("raceResolutionPostTasksV1Enabled", false);
-  await appSettings.setFlag("raceResolutionDependencyClosureShadowV1Enabled", false);
-  await appSettings.setFlag(WRITE_FLAG, false);
 });
 
-after(async () => {
-  await appSettings.setFlag(WRITE_FLAG, false);
-});
+after(async () => {});
 
 // ── fixtures ───────────────────────────────────────────────────────────────
 
@@ -284,7 +279,6 @@ async function measureClosureAtSize(size) {
   });
 
   await appSettings.setFlag("raceResolutionReasonAwareV1Enabled", true);
-  await appSettings.setFlag(WRITE_FLAG, true);
 
   const res = await request(server.baseUrl, "POST", "/steps/samples", {
     body: { samples: [sampleAt(3, 9000)] },

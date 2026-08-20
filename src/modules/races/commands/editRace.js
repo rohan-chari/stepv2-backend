@@ -1,11 +1,7 @@
 const { Race } = require("../models/race");
 const { RaceParticipant } = require("../models/raceParticipant");
-const { User } = require("../../users");
 const { eventBus } = require("../../../shared/events/eventBus");
-const { randomUUID } = require("node:crypto");
-const { awardCoins } = require("../../../shared/economy/awardCoins");
 const { appSettings } = require("../../../shared/config/appSettings");
-const { withRaceJoinLock } = require("../services/raceJoinLock");
 const {
   validateRaceName,
   validateDuration,
@@ -46,10 +42,7 @@ const {
 function buildEditRace(dependencies = {}) {
   const raceModel = dependencies.Race || Race;
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
-  const userModel = dependencies.User || User;
-  const awardCoinsFn = dependencies.awardCoins || awardCoins;
   const settings = dependencies.appSettings || appSettings;
-  const withRaceLock = dependencies.withRaceLock || withRaceJoinLock;
   const events = dependencies.eventBus || eventBus;
 
   return async function editRace({ userId, raceId, updates = {} }) {
@@ -335,20 +328,10 @@ function buildEditRace(dependencies = {}) {
       fields.maxParticipants = newMax;
     }
 
-    // ── Buy-in (Issue 4) ─────────────────────────────────────────────────────
-    // `buyInEnabled:false` (or an amount of 0) toggles the race to FREE;
-    // `buyInEnabled:true` + `buyInAmount:N` (or a bare `buyInAmount`) sets the
-    // paid amount. Changing the effective amount on a PENDING race reconciles
-    // every ACCEPTED participant's coin hold (charge the delta on a raise /
-    // free->paid, refund it on a lower / paid->free).
-    //
-    // App-funded races have no buy-in to edit: buyInAmount/buyInEnabled from a
-    // frozen client are accepted and IGNORED (never a 400, never a coin
-    // movement), while payoutPreset edits still apply — the preset is what splits
-    // the funded pool. The reconcile below stays fully reachable for
-    // fundedPrize=false races, so an old client editing an old paid race behaves
-    // exactly as today.
-    let buyInNotify = null;
+    // New competitions are permanently app-funded. Frozen clients may continue
+    // to echo buy-in fields; funded races accept and ignore them. Historical
+    // non-funded races retain their stamped settlement state, but that state is
+    // immutable now that the production HELD remediation is complete.
     if (race.fundedPrize === true) {
       if (hasField(updates, "payoutPreset")) {
         const presetConfig = validateRaceBuyInConfig({
@@ -385,120 +368,15 @@ function buildEditRace(dependencies = {}) {
         fields.payoutPreset = buyInConfig.payoutPreset;
       }
 
-      const newBuyIn = buyInConfig.buyInAmount;
       const buyInChanged =
         (hasField(updates, "buyInAmount") || hasField(updates, "buyInEnabled")) &&
-        newBuyIn !== race.buyInAmount;
-
+        buyInConfig.buyInAmount !== race.buyInAmount;
       if (buyInChanged) {
-        // How much each ACCEPTED participant's hold moves: HELD/COMMITTED
-        // participants hold their `buyInAmount`; everyone else (NONE/REFUNDED)
-        // holds 0. `delta` > 0 charges, < 0 refunds.
-        const oldHeldAmount = (p) =>
-          p.buyInStatus === "HELD" || p.buyInStatus === "COMMITTED"
-            ? p.buyInAmount || 0
-            : 0;
-
-        // Peek the accepted set to decide whether any money actually moves. When
-        // nobody is affected (e.g. an empty lobby, or the amount is unchanged for
-        // everyone) the change is trivially applied, exactly like the pre-Issue-4
-        // "no charged participants" path — no lock, no flag read.
-        const peek =
-          typeof participantModel.findAcceptedByRace === "function"
-            ? await participantModel.findAcceptedByRace(raceId)
-            : [];
-        const anyoneAffected = peek.some((p) => newBuyIn - oldHeldAmount(p) !== 0);
-
-        if (!anyoneAffected) {
-          fields.buyInAmount = newBuyIn;
-          if (peek.length > 0) {
-            fields.potCoins = newBuyIn === 0 ? 0 : peek.length * newBuyIn;
-          }
-        } else {
-          // Kill switch: when disabled, keep the old hard block.
-          const enabled = await settings.getFlag("buyInEditEnabled");
-          if (!enabled) {
-            throw new RaceEditError(
-              "Cannot edit buy-in after a participant has accepted and paid in",
-              400,
-              "IMMUTABLE_FIELD"
-            );
-          }
-
-          const reconcile = await withRaceLock(raceId, async () => {
-            // Re-read the accepted set inside the lock so a concurrent join is
-            // fully seen (the join core holds the same per-race lock).
-            const accepted = await participantModel.findAcceptedByRace(raceId);
-
-            // Affordability precheck: any participant who must PAY a positive
-            // delta they can't cover blocks the whole edit. Mutate nothing.
-            const unaffordable = [];
-            for (const p of accepted) {
-              const delta = newBuyIn - oldHeldAmount(p);
-              if (delta <= 0) continue;
-              const u = await userModel.findById(p.userId);
-              const coins = u && typeof u.coins === "number" ? u.coins : 0;
-              if (coins < delta) {
-                unaffordable.push(
-                  (p.user && p.user.displayName) ||
-                    (u && u.displayName) ||
-                    "A player"
-                );
-              }
-            }
-            if (unaffordable.length > 0) {
-              const names = unaffordable.join(", ");
-              const verb = unaffordable.length === 1 ? "doesn't" : "don't";
-              throw new RaceEditError(
-                `${names} ${verb} have enough coins for the new buy-in.`,
-                400,
-                "BUYIN_UNAFFORDABLE"
-              );
-            }
-
-            // Apply. Each movement is idempotent on (userId, reason, refId); the
-            // versioned refId guarantees a fresh key per edit so a re-charge after
-            // a refund is never silently skipped.
-            const affectedUserIds = [];
-            for (const p of accepted) {
-              const delta = newBuyIn - oldHeldAmount(p);
-              if (delta === 0) continue;
-              const newVersion = (p.buyInVersion || 0) + 1;
-              await awardCoinsFn({
-                userId: p.userId,
-                amount: -delta, // negative charges, positive refunds
-                reason: "race_buy_in_adjust",
-                refId: `${raceId}:${p.userId}:v${newVersion}`,
-              });
-              const newStatus =
-                newBuyIn === 0
-                  ? "REFUNDED"
-                  : p.buyInStatus === "NONE" || p.buyInStatus === "REFUNDED"
-                    ? "HELD"
-                    : p.buyInStatus;
-              await participantModel.update(p.id, {
-                buyInAmount: newBuyIn,
-                buyInStatus: newStatus,
-                buyInVersion: newVersion,
-              });
-              if (p.userId !== race.creatorId) affectedUserIds.push(p.userId);
-            }
-
-            // Every ACCEPTED participant ends HELD when paid (each was charged up
-            // to newBuyIn), or REFUNDED when free.
-            const potCoins = newBuyIn === 0 ? 0 : accepted.length * newBuyIn;
-            return { potCoins, affectedUserIds };
-          });
-
-          fields.buyInAmount = newBuyIn;
-          fields.potCoins = reconcile.potCoins;
-          if (reconcile.affectedUserIds.length > 0) {
-            buyInNotify = {
-              affectedUserIds: reconcile.affectedUserIds,
-              newBuyIn,
-            };
-          }
-        }
+        throw new RaceEditError(
+          "Buy-in settings are immutable",
+          400,
+          "IMMUTABLE_FIELD"
+        );
       }
     }
 
@@ -515,21 +393,6 @@ function buildEditRace(dependencies = {}) {
       creatorUserId: userId,
       updatedFields: Object.keys(fields),
     });
-
-    // Best-effort push to charged non-owner participants whose buy-in moved
-    // (Issue 4). A push failure must never fail the edit — the handler is
-    // fire-and-forget with its own try/catch.
-    if (buyInNotify) {
-      events.emit("RACE_BUYIN_CHANGED", {
-        notificationIntentId: `buy-in:${raceId}:${updated.updatedAt
-          ? new Date(updated.updatedAt).toISOString()
-          : randomUUID()}`,
-        raceId,
-        raceName: updated.name,
-        newBuyIn: buyInNotify.newBuyIn,
-        affectedUserIds: buyInNotify.affectedUserIds,
-      });
-    }
 
     await invalidateRaceProgress(raceId);
 

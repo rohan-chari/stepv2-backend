@@ -11,10 +11,8 @@ const {
   eligibleItemsForParticipants,
 } = require("../models/racePayoutDouble");
 const {
-  ROLLOUT_SETTING,
   providerSubHash,
   cohortBucket,
-  boundedRolloutPercent,
   boundedRacePayoutDoubleMaxBonus,
   computeRacePayoutDoubleBonus,
   normalizedRacePayoutDoubleAmounts,
@@ -127,18 +125,6 @@ function buildCreateRacePayoutDoubleOffer(dependencies = {}) {
             });
           }
           throw new ConflictError("Another offer is pending", "OFFER_PENDING");
-        }
-
-        const rollout = await tx.appSetting.findUnique({
-          where: { key: ROLLOUT_SETTING },
-          select: { value: true },
-        });
-        const percent = boundedRolloutPercent(rollout?.value);
-        if (bucket >= percent) {
-          throw new ForbiddenError(
-            "Race payout double preparation is disabled",
-            "PREPARATION_DISABLED",
-          );
         }
 
         if (rolling24hRemainingBeforeClaim <= 0) {

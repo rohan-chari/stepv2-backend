@@ -67,8 +67,8 @@ test("§3 truth table — the worked-example rows", () => {
   assert.equal(signedMultiplierAt(AT, { rainstorms: [rain(0.5)] }), 0.5, "rainstorm 0.5 → 0.5");
   assert.equal(
     signedMultiplierAt(AT, { rainstorms: [rain(0.5)], runnersHighs: [rh()] }),
-    1.5,
-    "RH + rainstorm → 1.5"
+    1,
+    "RH + rainstorm → 1 (permanent multiplicative rule)"
   );
 });
 
@@ -107,11 +107,11 @@ test("reductions clamp at a single 0.5 across overlapping storms / storm+coinfli
   assert.equal(signedMultiplierAt(AT, { coinFlipLoses: [coinLose(0.5)] }), 0.5, "coin-flip lose alone → 0.5");
 });
 
-test("Wrong Turn negates the reduced rate, and buffs+reductions together", () => {
-  // RH(2) − rain(0.5) = 1.5, WT negates → −1.5.
+test("Wrong Turn negates the permanently multiplicative reduced rate", () => {
+  // RH(2) × rain(0.5) = 1, WT negates → −1.
   assert.equal(
     signedMultiplierAt(AT, { runnersHighs: [rh()], rainstorms: [rain(0.5)], wrongTurns: [wt()] }),
-    -1.5
+    -1
   );
 });
 

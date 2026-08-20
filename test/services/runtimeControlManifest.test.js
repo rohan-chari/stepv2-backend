@@ -10,6 +10,7 @@ const {
   verifyRuntimeEnvInventory,
 } = require("../../scripts/generate-runtime-control-disposition");
 const {
+  ADMIN_EXPOSED_FLAGS,
   KNOWN_FLAGS,
   PERMANENT_FLAGS,
 } = require("../../src/shared/config/appSettings");
@@ -30,7 +31,7 @@ test("runtime-control manifest has unique complete control records", () => {
   }
 });
 
-test("the manifest keeps deferred settings mutable and records graduated request/API controls", () => {
+test("the manifest keeps operational settings mutable and records graduated controls", () => {
   const manifest = buildManifest();
   const byId = new Map(manifest.controls.map((control) => [control.id, control]));
   for (const [name, fallback] of Object.entries(KNOWN_FLAGS)) {
@@ -38,20 +39,24 @@ test("the manifest keeps deferred settings mutable and records graduated request
     assert.ok(control, name);
     assert.equal(control.permanentValue, null, name);
     assert.equal(control.polarityDefault, fallback, name);
-    assert.equal(control.adminExposed, true, name);
+    assert.equal(control.adminExposed, ADMIN_EXPOSED_FLAGS.includes(name), name);
   }
-  assert.equal(Object.keys(PERMANENT_FLAGS).length, 32);
+  assert.equal(Object.keys(PERMANENT_FLAGS).length, 92);
   for (const [name, value] of Object.entries(PERMANENT_FLAGS)) {
     const control = byId.get(`retiredAppSetting:${name}`);
     assert.ok(control, name);
-    assert.equal(control.disposition, "graduated_permanent", name);
+    assert.equal(
+      control.disposition,
+      value === false ? "retired_permanent_off" : "graduated_permanent",
+      name,
+    );
     assert.equal(control.permanentValue, value, name);
     assert.equal(control.adminExposed, false, name);
     assert.equal(byId.has(`appSetting:${name}`), false, name);
   }
 });
 
-test("funded and request/API controls are retired while unrelated graduations stay deferred", () => {
+test("eligible and explicitly approved recent families are permanent", () => {
   const byId = new Map(
     buildManifest().controls.map((control) => [control.id, control]),
   );
@@ -69,15 +74,34 @@ test("funded and request/API controls are retired while unrelated graduations st
     byId.get("retiredAppSetting:apiRaceListCompactV1Enabled").permanentValue,
     true,
   );
-  for (const id of [
-    "appSetting:redisCacheCatalogsEnabled",
-    "appSetting:raceResolutionNoopInputSuppressionV1Enabled",
-    "appSetting:tutorialMandatoryEnabled",
-    "env:PLACEMENT_DISTRIBUTED_CLAIM_ENABLED",
-    "env:GLOBAL_EVENT_SUMMARY_DISABLED",
+  for (const [id, value] of [
+    ["retiredAppSetting:redisCacheCatalogsEnabled", true],
+    ["retiredAppSetting:raceResolutionNoopInputSuppressionV1Enabled", false],
+    ["retiredAppSetting:tutorialMandatoryEnabled", true],
+    ["env:PLACEMENT_DISTRIBUTED_CLAIM_ENABLED", true],
+    ["env:GLOBAL_EVENT_SUMMARY_DISABLED", false],
   ]) {
-    assert.match(byId.get(id).disposition, /^deferred_/i, id);
-    assert.equal(byId.get(id).permanentValue, null, id);
+    assert.match(byId.get(id).disposition, /^(?:graduated_permanent|retired_permanent_off|retired_env)$/i, id);
+    assert.equal(byId.get(id).permanentValue, value, id);
+  }
+  for (const [id, value] of [
+    ["retiredAppSetting:localGlobalStepEventsEnabled", true],
+    ["retiredAppSetting:adminMetricsV2DashboardEnabled", true],
+    ["retiredAppSetting:accessoryCompatibilityEnforcement", true],
+    ["retiredAppSetting:seededInactivityAutoEnrollOffEnabled", true],
+    ["env:STEP_MILESTONE_REMINDERS_DISABLED", false],
+  ]) {
+    assert.match(byId.get(id).disposition, /^(?:graduated_permanent|retired_env)$/i, id);
+    assert.equal(byId.get(id).permanentValue, value, id);
+  }
+  assert.equal(byId.has("appSetting:raceResolutionDependencyClosureV1Enabled"), false);
+  assert.equal(byId.has("appSetting:raceResolutionDependencyClosureV1Percent"), false);
+  for (const id of [
+    "appSetting:raceQueueV2ClaimingDisabled",
+    "appSetting:inlineRaceResolutionFallback",
+  ]) {
+    assert.equal(byId.get(id).disposition, "deployment_protocol", id);
+    assert.equal(byId.get(id).adminExposed, false, id);
   }
 });
 
@@ -91,10 +115,10 @@ test("source inventory independently covers bracket, helper, string, and numeric
     "S3_PUBLIC_BASE_URL",
     "S3_AVATAR_PREFIX",
     "S3_PRESIGNED_URL_EXPIRES_SECONDS",
-    "GLOBAL_EVENT_SUMMARY_DISABLED",
-    "PLACEMENT_DISTRIBUTED_CLAIM_ENABLED",
-    "SYNC_V2_INLINE_UPLOADER_RECONCILIATION",
-    "REFERRAL_IP_FALLBACK_NET_ENABLED",
+    "OPS_USER_FANOUTS_DISABLED",
+    "OPS_DESTRUCTIVE_CLEANUPS_DISABLED",
+    "OPS_RACE_RESOLUTION_WORKER_DISABLED",
+    "OPS_AD_VALUE_ISSUANCE_DISABLED",
   ]) {
     assert.equal(inventory.has(name), true, name);
   }
@@ -114,6 +138,15 @@ test("source inventory independently covers bracket, helper, string, and numeric
     manifestByName.get("SESSION_TOKEN_SECRET").kind,
     "string_environment",
   );
+  for (const retiredName of [
+    "GLOBAL_EVENT_SUMMARY_DISABLED",
+    "PLACEMENT_DISTRIBUTED_CLAIM_ENABLED",
+    "SYNC_V2_INLINE_UPLOADER_RECONCILIATION",
+    "REFERRAL_IP_FALLBACK_NET_ENABLED",
+  ]) {
+    assert.equal(inventory.has(retiredName), false, retiredName);
+    assert.equal(manifestByName.get(retiredName).disposition, "retired_env", retiredName);
+  }
 });
 
 test("a newly discovered env read fails until it has explicit metadata", () => {

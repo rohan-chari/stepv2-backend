@@ -278,7 +278,11 @@ describe("placement performance scheduler integration", () => {
         })).lastNotifiedPlacement,
         2
       );
-      assert.equal(emitted.filter((event) => event.type === "PLACEMENT_CHANGED").length, 0);
+      assert.equal(
+        emitted.filter((event) => event.type === "PLACEMENT_CHANGED").length,
+        1,
+        "retired resync env cannot silently suppress a real placement transition"
+      );
     } finally {
       delete process.env.PLACEMENT_BASELINE_RESYNC;
     }

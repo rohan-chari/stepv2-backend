@@ -14,7 +14,7 @@ const {
   KNOWN_FLAGS,
 } = require("../../src/shared/config/appSettings");
 
-test("user fan-outs honor the consolidated brake and their legacy brake", () => {
+test("established user fan-outs ignore retired legacy brakes and honor the consolidated brake", () => {
   assert.equal(userFanoutDisabled("LIVE_PLACEMENT_DISABLED", {}), false);
   assert.equal(
     userFanoutDisabled("LIVE_PLACEMENT_DISABLED", {
@@ -28,11 +28,26 @@ test("user fan-outs honor the consolidated brake and their legacy brake", () => 
       OPS_USER_FANOUTS_DISABLED: "false",
       LIVE_PLACEMENT_DISABLED: "true",
     }),
+    false,
+  );
+});
+
+test("the milestone reminder ignores its retired brake and honors the consolidated brake", () => {
+  assert.equal(
+    userFanoutDisabled(null, {
+      STEP_MILESTONE_REMINDERS_DISABLED: "true",
+    }),
+    false,
+  );
+  assert.equal(
+    userFanoutDisabled(null, {
+      OPS_USER_FANOUTS_DISABLED: "true",
+    }),
     true,
   );
 });
 
-test("destructive cleanups honor the consolidated brake and their legacy brake", () => {
+test("destructive cleanups ignore retired legacy brakes and honor the consolidated brake", () => {
   assert.equal(
     destructiveCleanupDisabled("STEP_SAMPLE_RETENTION_DISABLED", {}),
     false,
@@ -47,7 +62,7 @@ test("destructive cleanups honor the consolidated brake and their legacy brake",
     destructiveCleanupDisabled("STEP_SAMPLE_RETENTION_DISABLED", {
       STEP_SAMPLE_RETENTION_DISABLED: "true",
     }),
-    true,
+    false,
   );
 });
 
@@ -55,7 +70,7 @@ test("resolution intake, core worker, and post-task worker have independent brak
   assert.equal(raceResolutionIntakeDisabled({}), false);
   assert.equal(
     raceResolutionIntakeDisabled({ ASYNC_RACE_RESOLUTION_DISABLED: "true" }),
-    true,
+    false,
   );
   assert.equal(
     raceResolutionIntakeDisabled({
@@ -73,13 +88,13 @@ test("resolution intake, core worker, and post-task worker have independent brak
     raceResolutionWorkerDisabled({
       ASYNC_RACE_RESOLUTION_WORKER_DISABLED: "true",
     }),
-    true,
+    false,
   );
   assert.equal(
     raceResolutionPostTaskWorkerDisabled({
       RACE_RESOLUTION_POST_TASK_WORKER_DISABLED: "true",
     }),
-    true,
+    false,
   );
   assert.equal(
     raceResolutionPostTaskWorkerDisabled({
@@ -89,16 +104,16 @@ test("resolution intake, core worker, and post-task worker have independent brak
   );
 });
 
-test("ad-value master brake wins while legacy switches keep their exact polarity", () => {
+test("ad-value behavior is permanently live behind only the master brake", () => {
   assert.equal(adValueEnabled("extraSpin", {}), true);
   assert.equal(adValueEnabled("coinReward", {}), true);
-  assert.equal(adValueEnabled("boxReroll", {}), false);
-  assert.equal(adValueEnabled("payoutPrepare", {}), false);
-  assert.equal(adValueEnabled("payoutClaim", {}), false);
-  assert.equal(adValueEnabled("payoutReconcile", {}), false);
+  assert.equal(adValueEnabled("boxReroll", {}), true);
+  assert.equal(adValueEnabled("payoutPrepare", {}), true);
+  assert.equal(adValueEnabled("payoutClaim", {}), true);
+  assert.equal(adValueEnabled("payoutReconcile", {}), true);
 
-  assert.equal(adValueEnabled("extraSpin", { ADS_EXTRA_SPIN_ENABLED: "false" }), false);
-  assert.equal(adValueEnabled("coinReward", { ADS_COIN_REWARD_ENABLED: "false" }), false);
+  assert.equal(adValueEnabled("extraSpin", { ADS_EXTRA_SPIN_ENABLED: "false" }), true);
+  assert.equal(adValueEnabled("coinReward", { ADS_COIN_REWARD_ENABLED: "false" }), true);
   assert.equal(adValueEnabled("boxReroll", { ADS_BOX_REROLL_ENABLED: "true" }), true);
   assert.equal(
     adValueEnabled("payoutPrepare", {
@@ -151,7 +166,7 @@ test("unknown legacy ownership or ad kind is rejected", () => {
   assert.throws(() => adValueEnabled("typo", {}), /Unknown ad-value kind/);
 });
 
-test("phase-two keeps product and worker controls mutable in admin settings", async () => {
+test("graduated controls reject writes while retained controls stay in admin settings", async () => {
   const writes = [];
   const prisma = {
     appSetting: {
@@ -162,16 +177,17 @@ test("phase-two keeps product and worker controls mutable in admin settings", as
       },
     },
   };
-  const settings = buildAppSettings({ prisma });
+  const settings = buildAppSettings({ prisma, allowPermanentOverrides: false });
 
-  const toggledValue = !KNOWN_FLAGS.teamRacesEnabled;
-  await settings.setFlag("teamRacesEnabled", toggledValue);
-  assert.equal(writes.length, 1);
-  assert.equal(writes[0].create.value, toggledValue);
+  await assert.rejects(
+    settings.setFlag("teamRacesEnabled", false),
+    /Unknown setting/,
+  );
+  assert.equal(writes.length, 0);
   const adminSettings = await settings.getAllFlags();
-  assert.equal("teamRacesEnabled" in adminSettings, true);
-  assert.equal("raceQueueV2ClaimingDisabled" in adminSettings, true);
-  assert.equal("inlineRaceResolutionFallback" in adminSettings, true);
+  assert.equal("teamRacesEnabled" in adminSettings, false);
+  assert.equal("raceQueueV2ClaimingDisabled" in adminSettings, false);
+  assert.equal("inlineRaceResolutionFallback" in adminSettings, false);
   assert.equal(adminSettings.capacityPhaseMetricsV1Enabled, false);
   assert.equal(adminSettings.racePreviewEnabled, false);
   assert.equal(adminSettings.homeServiceBannerEnabled, false);

@@ -20,17 +20,13 @@ const KNOWN_FLAGS = {
   // Local-time daily 2x events. Creation-mode switch only: already stamped
   // parents always drain under their immutable scheduleMode. Default OFF keeps
   // every deployed client and legacy scorer on the existing global path.
-  localGlobalStepEventsEnabled: false,
   // Operational precondition for local-event creation. The cleanup worker is
   // deliberately dark by default; creation refuses to enable until operators
   // explicitly accept and monitor the 30-day retention lifecycle.
-  localGlobalStepEventRetentionEnabled: false,
   redisCacheHomeActiveGlobalEventEnabled: false,
   // Admin metrics dashboard v2 (iOS Phase A). Both switches are default-off so
   // the additive endpoint contract and storage can deploy before collection or
   // dashboard work begins for any client.
-  adminMetricsV2DashboardEnabled: false,
-  adminMetricsV2TelemetryEnabled: false,
   // Capacity Milestone 5.0: sampled aggregate-only phase/query telemetry.
   // Default OFF; it changes no response or business behavior. Reads use the
   // existing 30-second settings cache and instrumentation issues no SQL itself.
@@ -233,7 +229,6 @@ const KNOWN_FLAGS = {
   // above gates it too. Default OFF = zero behavior change at deploy time.
   // Rollback is the toggle; already-flipped users stay off (they can re-enable
   // from the settings screen at any time).
-  seededInactivityAutoEnrollOffEnabled: false,
   // C0 rollback lever (i) — Redis derived-data spec §5a item 1 "reverse
   // handoff". While TRUE the race-keyed v2 worker takes no new claims, so the
   // v2 table drains to zero unexpired RUNNING leases within the 30s lease
@@ -363,33 +358,6 @@ const KNOWN_FLAGS = {
   raceResolutionNarrowDefenseQueryV1Enabled: false,
   raceResolutionActiveImpactBulkPersistV1Enabled: false,
   raceResolutionNoopInputSuppressionV1Enabled: false,
-  // Dependency-closure planner, PHASE 2b SHADOW ONLY. When true the worker
-  // computes the closure plan for a closure-candidate envelope and logs it as
-  // aggregate `shadow*` fields on the existing race_resolution_v2 line. It
-  // selects no plan, writes nothing, and changes no post-commit work — a
-  // planner failure is logged and dropped.
-  //
-  // Deliberately a SEPARATE key from `raceResolutionDependencyClosureV1Enabled`
-  // (Phase 3), which will mean "closure WRITES". Reusing one key would silently
-  // change its meaning at the Phase 3 deploy: every environment already running
-  // the measurement would start writing subset results the moment the new
-  // binary rolled, with no separate go/no-go. Shadow code must never read the
-  // Phase 3 key, and the Phase 3 key stays undeclared until it exists.
-  raceResolutionDependencyClosureShadowV1Enabled: false,
-  // Dependency-closure PHASE 3 — closure WRITES. A subset resolution is
-  // committed only when BOTH this flag is on AND the planner returns
-  // DEPENDENCY_CLOSURE; either alone leaves the job on the existing full path.
-  //
-  // Independent of the shadow key above, in both directions (spec rollout item
-  // 4: "do not flip all resolver flags together"). Turning this on with the
-  // shadow off is the normal Phase 3 state — the planner then runs ONCE and
-  // serves both the plan decision and the log line. Turning it off mid-queue is
-  // the rollback: the next claim takes FULL and nothing is stranded, because a
-  // closure generation is only ever committed whole inside the existing fence.
-  raceResolutionDependencyClosureV1Enabled: false,
-  // Stable race-id cohort for dependency-closure WRITES. The boolean above is
-  // the master kill switch; zero keeps writes dark even when it is enabled.
-  raceResolutionDependencyClosureV1Percent: 0,
 };
 
 // Request/projection rollout controls have completed their production soak.
@@ -429,6 +397,77 @@ const PERMANENT_FLAGS = Object.freeze({
   apiStaticEtagsV1Enabled: true,
   apiTournamentDetailV1Enabled: true,
   apiRaceChatWatermarkCacheV1Enabled: true,
+
+  // Redis is a permanently fail-open accelerator: every caller retains its
+  // PostgreSQL loader and an unavailable cache can only cost latency.
+  redisCacheCatalogsEnabled: true,
+  redisCacheMessagesEnabled: true,
+  redisStandingsEnabled: true,
+  redisCacheUserBitsEnabled: true,
+  redisCacheAuthMeEnabled: true,
+  redisCacheDiscardCapEnabled: true,
+  redisPresentationGenerationGuardEnabled: true,
+  redisCacheLeaderboardEnabled: true,
+  redisCacheFriendsEnabled: true,
+  redisFriendSearchRateLimitEnabled: true,
+  redisCacheHomeActiveGlobalEventEnabled: true,
+  redisCacheHomeImpactSummaryEnabled: true,
+  redisCacheHomeInboxUnreadEnabled: true,
+
+  // Established durable-resolution behavior. Correctness fallbacks remain in
+  // the algorithms; stale rows can no longer select the retired rollout paths.
+  raceResolutionDisplayArtifactReuseV1Enabled: true,
+  raceResolutionReasonAwareV1Enabled: true,
+  raceResolutionBurstCoalescingV1Enabled: true,
+  raceResolutionQueuedGenerationMergeV1Enabled: true,
+  raceResolutionBulkWriteV1Enabled: true,
+  raceResolutionPostTasksV1Enabled: true,
+  raceResolutionNudgeBatchV1Enabled: true,
+  raceResolutionAdaptiveDrainV1Enabled: true,
+  raceResolutionPostTaskAdaptiveDrainV1Enabled: true,
+  raceResolutionPendingImpactOnlyV1Enabled: true,
+  raceResolutionNarrowDefenseQueryV1Enabled: true,
+  // Resolved-impact v2 owns persistence; the superseded active-impact bulk
+  // writer, no-op suppression, shadow planner, and fast handoff stay retired.
+  raceResolutionActiveImpactBulkPersistV1Enabled: false,
+  raceResolutionPostTaskFastHandoffV1Enabled: false,
+  raceResolutionNoopInputSuppressionV1Enabled: false,
+
+  teamRacesEnabled: true,
+  tournamentsEnabled: true,
+  fundedPrizePoolsEnabled: true,
+  quickCreateRaceCtaEnabled: true,
+  customRaceWindowEnabled: true,
+  discoverableIdentityOnboardingEnrollmentEnabled: true,
+  racesInviteDecisionGateEnabled: true,
+  quickRaceShareAutoFriendEnabled: true,
+  seededRaceBucketsEnabled: true,
+  racePayoutDoubleRolloutPercent: 100,
+  payoutRoundingV1Enabled: true,
+  raceExitActionsEnabled: true,
+  stepSampleBucketMinutes: 5,
+  // V2 remains true only in /auth/me's frozen-client compatibility envelope;
+  // new server-side onboarding creation follows V3 exclusively.
+  onboardingV2Enabled: false,
+  onboardingV3Enabled: true,
+  onboardingInviteCodeEnabled: false,
+  tutorialMandatoryEnabled: true,
+  bannerAdsEnabled: true,
+  dualBoxBannersEnabled: true,
+  seededGeometricPayoutsEnabled: true,
+  seededInactivityPruneEnabled: true,
+  apiActiveImpactNoticesV1Enabled: false,
+  apiCompletedImpactPopupEnabled: false,
+  buyInEditEnabled: false,
+  openUserRaceDiscoveryEnabled: true,
+  setupInviteCodePromptEnabled: true,
+  homeInviteModalEnabled: true,
+  localGlobalStepEventsEnabled: true,
+  localGlobalStepEventRetentionEnabled: true,
+  adminMetricsV2DashboardEnabled: true,
+  adminMetricsV2TelemetryEnabled: true,
+  seededInactivityAutoEnrollOffEnabled: true,
+  accessoryCompatibilityEnforcement: true,
 });
 
 // Protected historical tests still exercise the old dark path. This snapshot
@@ -436,6 +475,16 @@ const PERMANENT_FLAGS = Object.freeze({
 // a permanent key.
 const TEST_LEGACY_DEFAULTS = Object.freeze({ ...KNOWN_FLAGS });
 for (const key of Object.keys(PERMANENT_FLAGS)) delete KNOWN_FLAGS[key];
+
+// Mixed-binary queue handoff remains operationally mutable, but these are
+// deployment protocol controls rather than product settings.
+const ADMIN_HIDDEN_FLAGS = new Set([
+  "raceQueueV2ClaimingDisabled",
+  "inlineRaceResolutionFallback",
+]);
+const ADMIN_EXPOSED_FLAGS = Object.freeze(
+  Object.keys(KNOWN_FLAGS).filter((key) => !ADMIN_HIDDEN_FLAGS.has(key)),
+);
 
 function buildAppSettings(dependencies = {}) {
   const prisma = dependencies.prisma || defaultPrisma;
@@ -487,9 +536,9 @@ function buildAppSettings(dependencies = {}) {
     const now = Date.now();
     if (cache && now - cacheAt < cacheTtlMs) return cache;
 
-    const lastKnownEnabled = cache
-      ? cache.redisCacheCatalogsEnabled === true
-      : false;
+    const lastKnownEnabled =
+      PERMANENT_FLAGS.redisCacheCatalogsEnabled === true ||
+      (cache ? cache.redisCacheCatalogsEnabled === true : false);
 
     let byKey;
     if (lastKnownEnabled) {
@@ -506,7 +555,10 @@ function buildAppSettings(dependencies = {}) {
       // load of a process, or the load right after a bust). Populate the shared
       // copy now so peers and our own next read are served from Redis rather
       // than each re-discovering the flag from Postgres.
-      if (byKey.redisCacheCatalogsEnabled === true) {
+      if (
+        PERMANENT_FLAGS.redisCacheCatalogsEnabled === true ||
+        byKey.redisCacheCatalogsEnabled === true
+      ) {
         const populated = byKey;
         await derivedCache.cachedRead({
           key: cacheKeys.appSettingsKey,
@@ -647,7 +699,8 @@ function buildAppSettings(dependencies = {}) {
     const byKey = {};
     for (const row of rows) byKey[row.key] = row.value;
     const out = {};
-    for (const [key, fallback] of Object.entries(KNOWN_FLAGS)) {
+    for (const key of ADMIN_EXPOSED_FLAGS) {
+      const fallback = KNOWN_FLAGS[key];
       if (key === ACTIVE_IMPACT_FLAG_KEY) {
         out[key] = false;
         continue;
@@ -683,28 +736,6 @@ function buildAppSettings(dependencies = {}) {
       const err = new Error(`Unknown setting: ${key}`);
       err.statusCode = 400;
       throw err;
-    }
-    if (
-      key === "racePayoutDoubleRolloutPercent" ||
-      key === "raceResolutionDependencyClosureV1Percent"
-    ) {
-      if (!Number.isInteger(value) || value < 0 || value > 100) {
-        const err = new Error(`${key} must be an integer from 0 to 100`);
-        err.statusCode = 400;
-        throw err;
-      }
-      if (key === "racePayoutDoubleRolloutPercent" && value > 0) {
-        const healthy = await prisma.jobRun.findUnique({
-          where: { jobName: "race-payout-double-reconcile-healthy" },
-        });
-        if (!healthy) {
-          const err = new Error(
-            "Race payout double rollout requires one healthy reconciliation run",
-          );
-          err.statusCode = 409;
-          throw err;
-        }
-      }
     }
     if (key === ACTIVE_IMPACT_FLAG_KEY) {
       await prisma.appSetting.upsert({
@@ -869,4 +900,10 @@ function buildAppSettings(dependencies = {}) {
 
 const appSettings = buildAppSettings();
 
-module.exports = { buildAppSettings, appSettings, KNOWN_FLAGS, PERMANENT_FLAGS };
+module.exports = {
+  buildAppSettings,
+  appSettings,
+  KNOWN_FLAGS,
+  PERMANENT_FLAGS,
+  ADMIN_EXPOSED_FLAGS,
+};

@@ -22,8 +22,8 @@ const { userFanoutDisabled } = require("../../shared/config/operationalControls"
 //   * Bias-to-silence is expressed in that same query — ANY milestone claim on
 //     localDate-1/localDate/localDate+1 suppresses.
 //
-// Kill switch: STEP_MILESTONE_REMINDERS_DISABLED=true (read at call time, so
-// the job no-ops even if it was scheduled). Missed slots are skipped — a 30
+// The consolidated OPS_USER_FANOUTS_DISABLED brake is read at call time, so
+// the job no-ops when all user fan-out is paused. Missed slots are skipped — a 30
 // minute catch-up window only; we never fire a 7pm reminder at 11pm.
 
 const TICK_INTERVAL_MS = 5 * 60 * 1000;
@@ -50,7 +50,7 @@ function buildStepMilestoneReminder(dependencies = {}) {
   const logger = dependencies.logger || console;
   const isDisabled =
     dependencies.isDisabled ||
-    (() => userFanoutDisabled("STEP_MILESTONE_REMINDERS_DISABLED"));
+    (() => userFanoutDisabled());
 
   // Returns the reminders emitted this tick (for tests), or [] when disabled /
   // nothing due.

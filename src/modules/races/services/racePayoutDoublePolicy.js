@@ -1,7 +1,6 @@
 const crypto = require("node:crypto");
 const { hashAppleSub } = require("../../users/appleSubHash");
 
-const ROLLOUT_SETTING = "racePayoutDoubleRolloutPercent";
 const CAPABILITY = "race_payout_double";
 const MAX_ROLLOUT = 100;
 // Product-level issuance ceiling. Environment configuration may tune the bonus
@@ -102,7 +101,6 @@ function safeStructuredEvent(logger, event) {
 }
 
 module.exports = {
-  ROLLOUT_SETTING,
   CAPABILITY,
   HARD_MAX_RACE_PAYOUT_DOUBLE_BONUS_COINS,
   providerSubHash,

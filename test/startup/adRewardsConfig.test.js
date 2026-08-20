@@ -60,14 +60,14 @@ for (const bad of ["", "unlimited", "3.5", "-1", "0", "1e3x"]) {
   });
 }
 
-test("race payout double switches default off and allowlist defaults empty", () => {
+test("race payout double is permanently live while its allowlist defaults empty", () => {
   const config = loadConfig({
     ADS_RACE_PAYOUT_DOUBLE_PREPARE_ENABLED: undefined,
     ADS_RACE_PAYOUT_DOUBLE_CLAIM_ENABLED: undefined,
     ADMOB_RACE_PAYOUT_DOUBLE_AD_UNIT_IDS: undefined,
   });
-  assert.equal(config.adsRacePayoutDoublePrepareEnabled(), false);
-  assert.equal(config.adsRacePayoutDoubleClaimEnabled(), false);
+  assert.equal(config.adsRacePayoutDoublePrepareEnabled(), true);
+  assert.equal(config.adsRacePayoutDoubleClaimEnabled(), true);
   assert.deepEqual(config.racePayoutDoubleAdUnitIds(), []);
 });
 

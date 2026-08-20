@@ -298,10 +298,9 @@ describe("buff stacking (sum) + signed event scoring — integration", () => {
 
   // ── Batch 2026-08-10b item 6 — RAINSTORM is MULTIPLICATIVE ──────────────
   //
-  // Behind RAINSTORM_MULTIPLICATIVE_ENABLED (default "false", read at call
-  // time). Scenario 10 above pins the unbuffed case, which is bit-identical in
-  // both flag states; these pin the buffed case end-to-end through the HTTP
-  // response a client actually receives.
+  // Rainstorm multiplication is permanent. Scenario 10 above pins the
+  // unbuffed case; these pin the buffed case end-to-end through the HTTP
+  // response a client actually receives, including the retired env name.
   const RAIN_FLAG = "RAINSTORM_MULTIPLICATIVE_ENABLED";
 
   async function prodRepro(a, b, raceId) {
@@ -335,15 +334,19 @@ describe("buff stacking (sum) + signed event scoring — integration", () => {
     }
   });
 
-  it("item 6 OFF (deploy default): the same race keeps today's subtractive 3.75", async () => {
-    delete process.env[RAIN_FLAG];
-    const a = await createUser("A14"); const b = await createUser("B14");
-    await makeFriends(a, b);
-    const raceId = await createActiveRace(a, [b]);
-    await prodRepro(a, b, raceId);
-    const prog = await getProgress(a.token, raceId);
-    // 4.25 − 0.5 = 3.75; × 2 event = 7.5 → 750. This is the bug, shipped OFF.
-    assert.equal(boardSteps(prog, a.userId), 750, "flag off == byte-identical to today");
+  it("retired OFF env cannot restore subtractive rainstorm scoring", async () => {
+    process.env[RAIN_FLAG] = "false";
+    try {
+      const a = await createUser("A14"); const b = await createUser("B14");
+      await makeFriends(a, b);
+      const raceId = await createActiveRace(a, [b]);
+      await prodRepro(a, b, raceId);
+      const prog = await getProgress(a.token, raceId);
+      // Permanent: 4.25 × 0.5 × 2 event → 425, regardless of stale env.
+      assert.equal(boardSteps(prog, a.userId), 425, "retired env cannot disable multiplication");
+    } finally {
+      delete process.env[RAIN_FLAG];
+    }
   });
 
   it("item 6 ON: settlement matches the live buffed-storm total", async () => {

@@ -439,18 +439,18 @@ describe("referredByCode on the auth payload", () => {
 // ---------------------------------------------------------------------------
 
 describe("featureFlags.onboardingInviteCodeEnabled", () => {
-  it("defaults to TRUE on the provision response and /auth/me", async () => {
+  it("is permanently FALSE on the provision response and /auth/me", async () => {
     const { user, token } = await provision(`sub-inv-${++seq}`);
-    assert.equal(user.featureFlags.onboardingInviteCodeEnabled, true);
+    assert.equal(user.featureFlags.onboardingInviteCodeEnabled, false);
 
     const me = await request(getBaseUrl(), "GET", "/auth/me", { token });
     assert.equal(
       (await me.json()).user.featureFlags.onboardingInviteCodeEnabled,
-      true
+      false
     );
   });
 
-  it("is FALSE once the app-setting override is stored", async () => {
+  it("rejects an admin override and remains permanently FALSE", async () => {
     // Flip it the way ops actually does — through the admin endpoint — rather
     // than by writing app_settings directly, which would bypass the in-process
     // flag cache and prove nothing about the real kill-switch path.
@@ -461,10 +461,9 @@ describe("featureFlags.onboardingInviteCodeEnabled", () => {
     });
     const patch = await request(getBaseUrl(), "PATCH", "/admin/settings", {
       token: admin.token,
-      body: { onboardingInviteCodeEnabled: false },
+      body: { onboardingInviteCodeEnabled: true },
     });
-    assert.equal(patch.status, 200);
-    assert.equal((await patch.json()).settings.onboardingInviteCodeEnabled, false);
+    assert.equal(patch.status, 400);
 
     const { token } = await provision(`sub-inv-${++seq}`);
     const me = await request(getBaseUrl(), "GET", "/auth/me", { token });
@@ -473,12 +472,6 @@ describe("featureFlags.onboardingInviteCodeEnabled", () => {
       false
     );
 
-    // Restore: the flag cache is per-process and the integration DB is shared,
-    // so leaving it false could leak into a later suite.
-    await request(getBaseUrl(), "PATCH", "/admin/settings", {
-      token: admin.token,
-      body: { onboardingInviteCodeEnabled: true },
-    });
   });
 });
 

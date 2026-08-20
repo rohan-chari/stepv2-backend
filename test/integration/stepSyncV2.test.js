@@ -179,7 +179,7 @@ describe("POST /steps/sync-v2 (integration)", () => {
     assert.equal(job.dirtyPriority, "COALESCE");
   });
 
-  it("persists steps, returns 202 CURRENT, and completes the reservation", async () => {
+  it("persists steps, returns 202 DEFERRED, and completes the reservation", async () => {
     const { token, user } = await createTestUser();
     const key = uuid();
     const res = await request(baseUrl, "POST", "/steps/sync-v2", {
@@ -191,8 +191,9 @@ describe("POST /steps/sync-v2 (integration)", () => {
     const json = await res.json();
     assert.equal(json.record.steps, 12345);
     assert.equal(json.record.stepGoal, 5000); // 1.1.4 compat default
-    assert.equal(json.uploaderReconciliation.state, "CURRENT");
+    assert.equal(json.uploaderReconciliation.state, "DEFERRED");
     assert.equal(json.uploaderReconciliation.resolvedRaceCount, 0); // no active races
+    assert.equal(json.uploaderReconciliation.boxStateCurrent, false);
 
     const step = await prisma.step.findUnique({
       where: { userId_date: { userId: user.id, date: new Date("2026-07-17") } },

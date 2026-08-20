@@ -905,11 +905,11 @@ describe("custom race windows (§9 tests 1-10b, 21)", () => {
     assert.equal(plain.status, 201);
   });
 
-  it("21b: /auth/me carries customRaceWindowEnabled, defaulting false", async () => {
+  it("21b: /auth/me carries customRaceWindowEnabled permanently enabled", async () => {
     await appSettings.setFlag(FLAG, false);
     const user = await makeUser();
     const off = await (await req("GET", "/auth/me", { token: user.token })).json();
-    assert.equal(off.user.featureFlags.customRaceWindowEnabled, false);
+    assert.equal(off.user.featureFlags.customRaceWindowEnabled, true);
 
     await appSettings.setFlag(FLAG, true);
     const user2 = await makeUser();

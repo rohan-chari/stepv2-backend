@@ -9,7 +9,6 @@ function buildGlobalEventSummaryTick(dependencies = {}) {
   const prisma = dependencies.prisma || defaultPrisma;
   const now = dependencies.now || (() => new Date());
   return async function globalEventSummaryTick() {
-    if (process.env.GLOBAL_EVENT_SUMMARY_DISABLED === "true") return null;
     const groups = await prisma.globalEventRaceImpact.groupBy({
       by: ["eventId", "userId"],
       _sum: { deltaSteps: true }, _count: { _all: true },

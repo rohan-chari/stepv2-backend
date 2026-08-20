@@ -119,22 +119,26 @@ describe("next-race CTA backend contract", () => {
     });
   });
 
-  it("emits every new app-setting flag default false and round-trips only literal true", async () => {
+  it("serves the launched next-race compatibility fields permanently", async () => {
     const walker = await user();
     const initial = await request(server.baseUrl, "GET", "/auth/me", {
       token: walker.token,
     });
     assert.equal(initial.status, 200);
     const initialFlags = (await initial.json()).user.featureFlags;
-    assert.equal(initialFlags.openUserRaceDiscoveryEnabled, false);
-    assert.equal(initialFlags.quickCreateRaceCtaEnabled, false);
-    assert.equal(initialFlags.setupInviteCodePromptEnabled, false);
+    assert.equal(initialFlags.openUserRaceDiscoveryEnabled, true);
+    assert.equal(initialFlags.quickCreateRaceCtaEnabled, true);
+    assert.equal(initialFlags.setupInviteCodePromptEnabled, true);
 
-    await appSettings.setFlag("setupInviteCodePromptEnabled", true);
-    const enabled = await request(server.baseUrl, "GET", "/auth/me", {
+    await appSettings.setFlag("setupInviteCodePromptEnabled", false);
+    const staleDisabled = await request(server.baseUrl, "GET", "/auth/me", {
       token: walker.token,
     });
-    assert.equal((await enabled.json()).user.featureFlags.setupInviteCodePromptEnabled, true);
+    assert.equal(
+      (await staleDisabled.json()).user.featureFlags.setupInviteCodePromptEnabled,
+      true,
+      "the exact /auth/me compatibility envelope ignores stale rollout state"
+    );
   });
 
   it("validates and persists the exact quick-create provenance pair", async () => {

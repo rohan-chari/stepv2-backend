@@ -113,6 +113,7 @@ describe("race payout double rewarded ad", () => {
     delete process.env.ADS_RACE_PAYOUT_DOUBLE_CLAIM_ENABLED;
     delete process.env.ADMOB_RACE_PAYOUT_DOUBLE_AD_UNIT_IDS;
     delete process.env.RACE_PAYOUT_DOUBLE_MAX_BONUS_COINS;
+    delete process.env.OPS_AD_VALUE_ISSUANCE_DISABLED;
   });
 
   beforeEach(async () => {
@@ -653,23 +654,35 @@ describe("race payout double rewarded ad", () => {
     assert.equal(recovery.body.completed.some((race) => race.id === oldRace.race.id), true);
   });
 
-  it("default-off switches, missing capability, and empty allowlist create nothing", async () => {
+  it("ignores retired prepare switch while capability, allowlist, and OPS brake remain fail-closed", async () => {
     const { user, token } = await createTestUser();
     const a = await completedRace(user.id, { payoutCoins: 40, reason: "race_prize_pool_payout" });
     process.env.ADS_RACE_PAYOUT_DOUBLE_PREPARE_ENABLED = "false";
     let attempt = await prepare(token, [a.race.id]);
+    assert.equal(attempt.res.status, 201, "retired switch cannot disable permanent preparation");
+
+    const opsUser = await createTestUser();
+    const opsRace = await completedRace(opsUser.user.id, { payoutCoins: 40, reason: "race_prize_pool_payout" });
+    process.env.OPS_AD_VALUE_ISSUANCE_DISABLED = "true";
+    attempt = await prepare(opsUser.token, [opsRace.race.id]);
     assert.equal(attempt.res.status, 403);
     assert.equal(attempt.body.code, "PREPARATION_DISABLED");
-    process.env.ADS_RACE_PAYOUT_DOUBLE_PREPARE_ENABLED = "true";
-    attempt = await prepare(token, [a.race.id], {});
+    delete process.env.OPS_AD_VALUE_ISSUANCE_DISABLED;
+
+    const incapableUser = await createTestUser();
+    const incapableRace = await completedRace(incapableUser.user.id, { payoutCoins: 40, reason: "race_prize_pool_payout" });
+    attempt = await prepare(incapableUser.token, [incapableRace.race.id], {});
     assert.equal(attempt.res.status, 403);
     assert.equal(attempt.body.code, "PREPARATION_DISABLED");
+
+    const unconfiguredUser = await createTestUser();
+    const unconfiguredRace = await completedRace(unconfiguredUser.user.id, { payoutCoins: 40, reason: "race_prize_pool_payout" });
     process.env.ADMOB_RACE_PAYOUT_DOUBLE_AD_UNIT_IDS = "";
-    attempt = await prepare(token, [a.race.id]);
+    attempt = await prepare(unconfiguredUser.token, [unconfiguredRace.race.id]);
     assert.equal(attempt.res.status, 403);
     assert.equal(attempt.body.code, "PREPARATION_DISABLED");
     process.env.ADMOB_RACE_PAYOUT_DOUBLE_AD_UNIT_IDS = ALLOWED_UNIT;
-    assert.equal(await prisma.racePayoutDoubleOffer.count(), 0);
+    assert.equal(await prisma.racePayoutDoubleOffer.count(), 1);
   });
 
   it("enforces the durable 100-coin rolling allowance across batches", async () => {
@@ -737,7 +750,7 @@ describe("race payout double rewarded ad", () => {
     assert.equal(capable.body.completed.some((race) => race.id === old.race.id), true);
   });
 
-  it("claim switch blocks pending settlement but claimed replay ignores later switches", async () => {
+  it("retired claim switch cannot block settlement and claimed replay remains idempotent", async () => {
     const { user, token } = await createTestUser();
     const race = await completedRace(user.id, { payoutCoins: 40, reason: "race_prize_pool_payout" });
     const offer = await prepare(token, [race.race.id]);
@@ -755,13 +768,7 @@ describe("race payout double rewarded ad", () => {
     let response = await request(server.baseUrl, "POST", `/races/results/double-payout/${offer.body.offerId}/claim`, {
       token, headers: CAPABLE, body: {},
     });
-    assert.equal(response.status, 403);
-    assert.equal((await response.json()).code, "CLAIMS_DISABLED");
-    process.env.ADS_RACE_PAYOUT_DOUBLE_CLAIM_ENABLED = "true";
-    response = await request(server.baseUrl, "POST", `/races/results/double-payout/${offer.body.offerId}/claim`, {
-      token, headers: CAPABLE, body: {},
-    });
-    assert.equal(response.status, 200);
+    assert.equal(response.status, 200, "retired switch cannot disable permanent claiming");
     process.env.ADS_RACE_PAYOUT_DOUBLE_CLAIM_ENABLED = "false";
     process.env.ADMOB_RACE_PAYOUT_DOUBLE_AD_UNIT_IDS = "";
     response = await request(server.baseUrl, "POST", `/races/results/double-payout/${offer.body.offerId}/claim`, {
@@ -906,7 +913,7 @@ describe("race payout double rewarded ad", () => {
     assert.ok(result.metrics.failureCodes.includes("source_equation"));
   });
 
-  it("reconciliation stops rollout for a self-consistent claim above the hard ceiling", async () => {
+  it("reconciliation reports a hard-ceiling breach without recreating a retired rollout control", async () => {
     const { user, token } = await createTestUser();
     const race = await completedRace(user.id, {
       payoutCoins: 100,
@@ -958,10 +965,7 @@ describe("race payout double rewarded ad", () => {
     })();
     assert.equal(result.healthy, false);
     assert.ok(result.metrics.failureCodes.includes("hard_cap_equation"));
-    assert.deepEqual(stops.at(-1), {
-      key: "racePayoutDoubleRolloutPercent",
-      value: 0,
-    });
+    assert.deepEqual(stops, []);
   });
 
   it("reconciliation stops rollout when one identity exceeds the rolling hard ceiling", async () => {
@@ -1098,7 +1102,7 @@ describe("race payout double rewarded ad", () => {
     assert.equal(result.healthy, true);
   });
 
-  it("reconciliation accepts deletion-tombstoned settlement and stops rollout for an unexplained orphan", async () => {
+  it("reconciliation accepts deletion tombstones and reports unexplained orphans without a retired rollout write", async () => {
     const claims = [];
     const stops = [];
     const run = buildRacePayoutDoubleReconcile({
@@ -1133,7 +1137,7 @@ describe("race payout double rewarded ad", () => {
     });
     result = await run();
     assert.equal(result.healthy, false);
-    assert.deepEqual(stops.at(-1), { key: "racePayoutDoubleRolloutPercent", value: 0 });
+    assert.deepEqual(stops, []);
     await prisma.racePayoutDoubleClaimReceipt.update({
       where: { offerId: orphanId },
       data: { accountDeletedAt: new Date() },

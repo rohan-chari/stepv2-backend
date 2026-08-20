@@ -10,17 +10,11 @@ function boundedInteger(value, fallback, min, max) {
 
 function readPerformanceFlags(env = process.env) {
   return {
-    placementDistributedClaimEnabled: positiveFlag(
-      env.PLACEMENT_DISTRIBUTED_CLAIM_ENABLED
-    ),
-    placementInertPushSuppressionEnabled: positiveFlag(
-      env.PLACEMENT_INERT_PUSH_SUPPRESSION_ENABLED
-    ),
-    placementLeanBaselineWritesEnabled: positiveFlag(
-      env.PLACEMENT_LEAN_BASELINE_WRITES_ENABLED
-    ),
-    stepSyncBulkEnabled: positiveFlag(env.STEP_SYNC_BULK_ENABLED),
-    apnsSessionReuseEnabled: positiveFlag(env.APNS_SESSION_REUSE_ENABLED),
+    placementDistributedClaimEnabled: true,
+    placementInertPushSuppressionEnabled: true,
+    placementLeanBaselineWritesEnabled: true,
+    stepSyncBulkEnabled: true,
+    apnsSessionReuseEnabled: true,
     placementBaselineWriteConcurrency: boundedInteger(
       env.PLACEMENT_BASELINE_WRITE_CONCURRENCY,
       4,

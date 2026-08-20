@@ -73,10 +73,10 @@ describe("admin metrics fenced retention cleanup", () => {
     assert.equal(await prisma.pushDelivery.count(), 0);
   });
 
-  it("environment kill switch prevents every destructive job", async () => {
+  it("consolidated OPS brake prevents every destructive job", async () => {
     const user = await createTestUser();
     await prisma.pushDelivery.create({ data: { publicId: "kill-push", deliveryKey: "kill-push", userId: user.user.id, notificationType: "test", openCapable: false, createdAt: new Date("2020-01-01T00:00:00Z") } });
-    const result = await buildPushDeliveryCleanup({ prisma, env: { ADMIN_METRICS_V2_CLEANUP_DISABLED: "true" } })();
+    const result = await buildPushDeliveryCleanup({ prisma, env: { OPS_DESTRUCTIVE_CLEANUPS_DISABLED: "true" } })();
     assert.deepEqual(result, { skipped: "disabled", deleted: 0 });
     assert.equal(await prisma.pushDelivery.count(), 1);
   });

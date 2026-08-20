@@ -95,7 +95,7 @@ function buildRecordStepSyncV2(dependencies = {}) {
   // reload is an immediate, reversible rollout/rollback.
   const inlineUploaderReconciliation =
     dependencies.inlineUploaderReconciliation ||
-    (() => process.env.SYNC_V2_INLINE_UPLOADER_RECONCILIATION !== "false");
+    (() => false);
   const events = dependencies.eventBus || defaultEventBus;
   const appSettings = dependencies.appSettings || defaultAppSettings;
   const now = dependencies.now || (() => new Date());
@@ -355,10 +355,7 @@ function buildRecordStepSyncV2(dependencies = {}) {
       appSettings,
       "raceResolutionBurstCoalescingV1Enabled"
     );
-    const noopSuppression = await isStrictFlagEnabled(
-      appSettings,
-      "raceResolutionNoopInputSuppressionV1Enabled"
-    );
+    const noopSuppression = false;
 
     // ── Transaction A: persist steps/samples + create the reservation. ──
     let reservation;

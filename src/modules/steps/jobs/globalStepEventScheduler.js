@@ -4,11 +4,6 @@ const {
 } = require("../models/globalStepEventBoundaryCursor");
 const { Race } = require("../../races/models/race");
 const { eventBus } = require("../../../shared/events/eventBus");
-const { appSettings } = require("../../../shared/config/appSettings");
-const { isStrictFlagEnabled } = require("../../../shared/config/isStrictFlagEnabled");
-const {
-  dependencyClosureRolloutPercent,
-} = require("../../races/services/raceResolutionDependencyClosureRollout");
 const {
   enqueueRaceResolution,
 } = require("../../races/services/enqueueRaceResolution");
@@ -59,7 +54,6 @@ function firstSafeLocalEventDay(now) {
 
 function buildLocalGlobalStepEventTick(dependencies = {}) {
   const globalStepEventModel = dependencies.GlobalStepEvent || GlobalStepEvent;
-  const settings = dependencies.appSettings || appSettings;
   const now = dependencies.now || (() => new Date());
   const materialize = dependencies.materializeEntitlementsForActiveRacers ||
     materializeEntitlementsForActiveRacers;
@@ -112,8 +106,7 @@ function buildLocalGlobalStepEventTick(dependencies = {}) {
       if (Date.now() - materializationStarted >= materializationTickBudgetMs) break;
     }
 
-    const retentionEnabled =
-      (await settings.getFlag("localGlobalStepEventRetentionEnabled")) === true;
+    const retentionEnabled = true;
     let retentionHealthy = retentionEnabled;
     if (retentionEnabled) {
       try {
@@ -155,10 +148,6 @@ function buildLocalGlobalStepEventTick(dependencies = {}) {
       logger.error("[CRON] Local global event operational audit failed:", error);
     }
 
-    const creationEnabled =
-      process.env.LOCAL_GLOBAL_STEP_EVENTS_DISABLED !== "true" &&
-      (await settings.getFlag("localGlobalStepEventsEnabled")) === true;
-    if (!creationEnabled) return false;
     if (!retentionHealthy) {
       logger.error("[CRON] Local global event creation rejected: retention is not enabled");
       return false;
@@ -189,19 +178,11 @@ function buildMaybeStartGlobalEvent(dependencies = {}) {
   const events = dependencies.eventBus || eventBus;
   const now = dependencies.now || (() => new Date());
   const logger = dependencies.logger || console;
-  const settings = dependencies.appSettings || appSettings;
   const enqueue = dependencies.enqueueRaceResolution || enqueueRaceResolution;
   const boundaryCursor = dependencies.GlobalStepEventBoundaryCursor ||
     GlobalStepEventBoundaryCursor;
 
-  async function boundarySchedulingEnabled() {
-    const enabled = await isStrictFlagEnabled(
-      settings,
-      "raceResolutionDependencyClosureV1Enabled"
-    );
-    if (!enabled) return false;
-    return (await dependencyClosureRolloutPercent(settings, true)) > 0;
-  }
+  async function boundarySchedulingEnabled() { return true; }
 
   async function enqueueBoundaryForActiveRaces(at) {
     const races = typeof raceModel.findActiveIds === "function"

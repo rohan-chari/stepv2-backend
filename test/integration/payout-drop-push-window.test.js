@@ -223,7 +223,7 @@ describe("payout-drop push — time gate + durable once-per-race cap", () => {
     return result;
   }
 
-  it("1: a drop with 17h left sends NO visible push (silent sync still goes)", async () => {
+  it("1: a drop with 17h left is permanently classified as inert", async () => {
     const { race, subject } = await seedDroppingRace({
       endsAt: new Date(Date.now() + 17 * HOUR_MS),
     });
@@ -239,8 +239,8 @@ describe("payout-drop push — time gate + durable once-per-race cap", () => {
     );
     assert.equal(
       placementPushesFor(silent, subject).length,
-      1,
-      "the silent placement sync still fires"
+      0,
+      "permanent inert-push suppression avoids a token lookup and silent push"
     );
     assert.deepEqual(await claimRows(race.id, subject), [], "no claim burned");
 

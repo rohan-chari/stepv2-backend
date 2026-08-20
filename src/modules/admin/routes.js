@@ -64,9 +64,6 @@ async function invalidatePowerupShopCaches() {
   });
 }
 
-// Allowed values for the numeric stepSampleBucketMinutes setting (§3.2).
-const STEP_SAMPLE_BUCKET_MINUTES = new Set([5, 10, 15, 30, 60]);
-
 function staffInboxEnabled(req, settings) {
   return req.clientFeatures?.has("inbox_v1") === true && settings.getFlag("apiInboxV1Enabled");
 }
@@ -394,19 +391,6 @@ function createAdminRouter(dependencies = {}) {
           return res.status(400).json({
             error: "Use PATCH /admin/settings/home-service-banner for banner settings",
           });
-        }
-        if (key === "stepSampleBucketMinutes") {
-          if (!Number.isInteger(value) || !STEP_SAMPLE_BUCKET_MINUTES.has(value)) {
-            return res.status(400).json({
-              error: "stepSampleBucketMinutes must be one of 5, 10, 15, 30, 60",
-            });
-          }
-          await settings.setFlag(key, value);
-          continue;
-        }
-        if (key === "raceResolutionDependencyClosureV1Percent") {
-          await settings.setFlag(key, value);
-          continue;
         }
         if (typeof value !== "boolean") {
           return res.status(400).json({ error: `${key} must be a boolean` });

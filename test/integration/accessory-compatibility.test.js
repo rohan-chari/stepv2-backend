@@ -1,13 +1,11 @@
 const assert = require("node:assert/strict");
 const { describe, it, before, beforeEach } = require("node:test");
 
-const { appSettings } = require("../../src/shared/config/appSettings");
 const {
   cleanupAccessoryCompatibility,
 } = require("../../src/modules/cosmetics/cleanupAccessoryCompatibility");
 const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
 
-const FLAG = "accessoryCompatibilityEnforcement";
 let server;
 let nextAppleId = 0;
 
@@ -47,7 +45,6 @@ describe("accessory compatibility enforcement", () => {
   beforeEach(async () => {
     await cleanDatabase();
     nextAppleId = 0;
-    await appSettings.setFlag(FLAG, false);
   });
 
   it("rejects a conflicting cross-slot equip with an additive 409 body and preserves the old loadout", async () => {
@@ -68,7 +65,6 @@ describe("accessory compatibility enforcement", () => {
     });
 
     assert.equal((await equip(user.token, "HEAD", helmet.id)).status, 200);
-    await appSettings.setFlag(FLAG, true);
 
     const conflict = await equip(user.token, "FACE", glasses.id);
     assert.equal(conflict.status, 409);
@@ -86,7 +82,7 @@ describe("accessory compatibility enforcement", () => {
     assert.deepEqual(rows.map((row) => [row.slot, row.shopItemId]), [["HEAD", helmet.id]]);
   });
 
-  it("keeps the old cross-slot behavior while the rollout flag is off, and serializes compatible multi-slot equipment", async () => {
+  it("permanently rejects conflicting cross-slot equipment and accepts compatible equipment", async () => {
     const user = await createUser();
     const helmet = await createOwnedItem(user.userId, {
       sku: "flag_off_helmet",
@@ -111,10 +107,10 @@ describe("accessory compatibility enforcement", () => {
     });
 
     assert.equal((await equip(user.token, "HEAD", helmet.id)).status, 200);
-    assert.equal((await equip(user.token, "FACE", glasses.id)).status, 200);
+    assert.equal((await equip(user.token, "FACE", glasses.id)).status, 409);
     const compatible = await equip(user.token, "NECK", chain.id);
     assert.equal(compatible.status, 200);
-    assert.deepEqual(Object.keys((await compatible.json()).equipped).sort(), ["FACE", "HEAD", "NECK"]);
+    assert.deepEqual(Object.keys((await compatible.json()).equipped).sort(), ["HEAD", "NECK"]);
   });
 
   it("serializes racing cross-slot equips so exactly one conflicting request succeeds", async () => {
@@ -133,7 +129,6 @@ describe("accessory compatibility enforcement", () => {
       assetKey: "racing_glasses_3d",
       compatibility: { tags: ["eyewear"] },
     });
-    await appSettings.setFlag(FLAG, true);
 
     const results = await Promise.all([
       equip(user.token, "HEAD", helmet.id),

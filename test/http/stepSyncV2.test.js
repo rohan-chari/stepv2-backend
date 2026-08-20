@@ -53,8 +53,8 @@ test("POST /steps/sync-v2 returns 202 with the exact contract shape", async () =
   });
 });
 
-test("ASYNC_RACE_RESOLUTION_DISABLED returns 503 ASYNC_DISABLED before any work", async () => {
-  process.env.ASYNC_RACE_RESOLUTION_DISABLED = "true";
+test("the consolidated intake brake returns 503 ASYNC_DISABLED before any work", async () => {
+  process.env.OPS_RACE_RESOLUTION_INTAKE_DISABLED = "true";
   let called = false;
   try {
     await withServer(
@@ -71,7 +71,7 @@ test("ASYNC_RACE_RESOLUTION_DISABLED returns 503 ASYNC_DISABLED before any work"
       }
     );
   } finally {
-    delete process.env.ASYNC_RACE_RESOLUTION_DISABLED;
+    delete process.env.OPS_RACE_RESOLUTION_INTAKE_DISABLED;
   }
   assert.equal(called, false, "command must not run when disabled");
 });

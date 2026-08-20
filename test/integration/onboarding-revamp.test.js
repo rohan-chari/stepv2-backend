@@ -120,12 +120,12 @@ describe("onboarding revamp", () => {
 
   // ── §5.1 / §6.1 / §6.2 — the onboardingV3Enabled flag ─────────────────────
 
-  it("1. GET /auth/me serves featureFlags.onboardingV3Enabled=false by default", async () => {
+  it("1. GET /auth/me serves onboarding V3 permanently enabled", async () => {
     const { token } = await signUp();
     const res = await request(server.baseUrl, "GET", "/auth/me", { token });
     assert.equal(res.status, 200);
     const body = await res.json();
-    assert.equal(body.user.featureFlags.onboardingV3Enabled, false);
+    assert.equal(body.user.featureFlags.onboardingV3Enabled, true);
     // Additive only — the pre-existing envelope keys must survive. Their VALUES
     // are not asserted: app_settings is shared with every other suite, so
     // another suite may legitimately have flipped one.
@@ -143,15 +143,13 @@ describe("onboarding revamp", () => {
     }
   });
 
-  it("2. PATCH /admin/settings {onboardingV3Enabled:true} is reflected on /auth/me", async () => {
+  it("2. PATCH /admin/settings cannot change permanently enabled onboarding V3", async () => {
     const admin = await signUpAdmin();
     const patch = await request(server.baseUrl, "PATCH", "/admin/settings", {
       token: admin.token,
-      body: { onboardingV3Enabled: true },
+      body: { onboardingV3Enabled: false },
     });
-    assert.equal(patch.status, 200);
-    const patched = await patch.json();
-    assert.equal(patched.settings.onboardingV3Enabled, true);
+    assert.equal(patch.status, 400);
 
     const { token } = await signUp();
     const me = await request(server.baseUrl, "GET", "/auth/me", { token });

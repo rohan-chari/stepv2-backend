@@ -175,9 +175,17 @@ describe("race experience + discoverable identity — locked HTTP contract", () 
     await setFlag("racesInviteDecisionGateEnabled", false);
     await setFlag("quickRaceShareAutoFriendEnabled", false);
     await setFlag("redisCacheAuthMeEnabled", false);
+    // Keep historical false rows as stale-row fixtures while the test-only
+    // seam models the production constants for public HTTP assertions.
+    await appSettings.setFlag(
+      "discoverableIdentityOnboardingEnrollmentEnabled",
+      true
+    );
+    await appSettings.setFlag("racesInviteDecisionGateEnabled", true);
+    await appSettings.setFlag("quickRaceShareAutoFriendEnabled", true);
   });
 
-  it("declares all three rollout flags with false defaults", async () => {
+  it("serves all three graduated identity behaviors permanently", async () => {
     await prisma.appSetting.deleteMany({
       where: {
         key: {
@@ -199,15 +207,15 @@ describe("race experience + discoverable identity — locked HTTP contract", () 
     );
     const settings = (await settingsResponse.json()).settings;
     assert.equal(settingsResponse.status, 200);
-    assert.equal(settings.discoverableIdentityOnboardingEnrollmentEnabled, false);
-    assert.equal(settings.racesInviteDecisionGateEnabled, false);
-    assert.equal(settings.quickRaceShareAutoFriendEnabled, false);
+    assert.equal(settings.discoverableIdentityOnboardingEnrollmentEnabled, true);
+    assert.equal(settings.racesInviteDecisionGateEnabled, true);
+    assert.equal(settings.quickRaceShareAutoFriendEnabled, true);
 
     const me = await request(server.baseUrl, "GET", "/auth/me", {
       token: user.token,
     });
     const flags = (await me.json()).user.featureFlags;
-    assert.equal(flags.racesInviteDecisionGateEnabled, false);
+    assert.equal(flags.racesInviteDecisionGateEnabled, true);
 
     const patch = await request(server.baseUrl, "PATCH", "/admin/settings", {
       token: user.token,
@@ -218,13 +226,10 @@ describe("race experience + discoverable identity — locked HTTP contract", () 
       },
     });
     const patched = await patch.json();
-    assert.equal(patch.status, 200, JSON.stringify(patched));
-    assert.equal(patched.settings.discoverableIdentityOnboardingEnrollmentEnabled, true);
-    assert.equal(patched.settings.racesInviteDecisionGateEnabled, true);
-    assert.equal(patched.settings.quickRaceShareAutoFriendEnabled, true);
+    assert.equal(patch.status, 400, JSON.stringify(patched));
   });
 
-  it("stamps required only for capable, flag-on Apple and Google create branches", async () => {
+  it("stamps required for every capable Apple and Google create branch", async () => {
     for (const provider of ["apple", "google"]) {
       for (const enabled of [false, true]) {
         for (const capable of [false, true]) {
@@ -234,7 +239,7 @@ describe("race experience + discoverable identity — locked HTTP contract", () 
           );
           const created = await provision({ provider, capable });
           assertIdentityEnvelope(created.user, {
-            nameSetupOnboardingRequired: enabled && capable,
+            nameSetupOnboardingRequired: capable,
             nameSetupCompletedAt: null,
           });
         }
@@ -327,7 +332,7 @@ describe("race experience + discoverable identity — locked HTTP contract", () 
     assert.equal(body.user.firstName, "José María");
     assert.equal(body.user.lastName, "D'Ávila");
     assert.equal(body.user.nameSetupCompletedAt, null);
-    assert.equal(body.user.nameSetupOnboardingRequired, false);
+    assert.equal(body.user.nameSetupOnboardingRequired, true);
     assert.match(body.suggestedDisplayName, /^[A-Za-z0-9_]{4,30}$/);
 
     const availability = await request(

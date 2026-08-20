@@ -6,11 +6,11 @@
 //
 // The shape of every parity assertion is the same three-step comparison:
 //
-//   1. seed the race and resolve it once with every flag off (the FULL
+//   1. seed the race and resolve it once through the independent FULL test
 //      baseline), so no row is at its default value and a comparison against
 //      "nothing happened" cannot pass by accident;
-//   2. sync, and resolve THAT generation with the closure write flag on;
-//   3. requeue the same race, resolve it again with the flag off — a real FULL
+//   2. sync, and resolve THAT generation with permanent dependency closure;
+//   3. resolve an identical fixture through the FULL test seam — a real FULL
 //      run over unchanged inputs — and require the closure's persisted
 //      score-bearing columns to equal the FULL control's, byte for byte, for
 //      every closure participant.
@@ -39,8 +39,6 @@ const {
   buildRaceScoringDependencyClosure,
 } = require("../../src/modules/races/services/raceScoringDependencyClosure");
 
-const WRITE_FLAG = "raceResolutionDependencyClosureV1Enabled";
-const SHADOW_FLAG = "raceResolutionDependencyClosureShadowV1Enabled";
 
 let server;
 let nextAppleId = 0;
@@ -59,17 +57,9 @@ beforeEach(async () => {
   await appSettings.setFlag("raceResolutionBurstCoalescingV1Enabled", false);
   await appSettings.setFlag("raceResolutionReasonAwareV1Enabled", false);
   await appSettings.setFlag("raceResolutionPostTasksV1Enabled", false);
-  await appSettings.setFlag(SHADOW_FLAG, false);
-  await appSettings.setFlag(WRITE_FLAG, false);
-  // The phase-2 artifact retains the independent cohort control at its dark
-  // default. Tests that explicitly enable writes exercise the enrolled path.
-  await appSettings.setFlag("raceResolutionDependencyClosureV1Percent", 100);
 });
 
-after(async () => {
-  await appSettings.setFlag(WRITE_FLAG, false);
-  await appSettings.setFlag(SHADOW_FLAG, false);
-});
+after(async () => {});
 
 // ── fixtures ───────────────────────────────────────────────────────────────
 
@@ -153,6 +143,12 @@ function sampleAt(hoursAgo, steps) {
   };
 }
 
+function alignedHoursAgo(hoursAgo) {
+  return new Date(
+    Math.floor((Date.now() - hoursAgo * HOUR_MS) / HOUR_MS) * HOUR_MS
+  );
+}
+
 async function postSamples(user, samples) {
   return request(server.baseUrl, "POST", "/steps/samples", {
     body: { samples },
@@ -168,7 +164,7 @@ async function plantEffect({
   type,
   targetUser,
   sourceUser,
-  startsAt = new Date(Date.now() - 6 * HOUR_MS),
+  startsAt = alignedHoursAgo(6),
   expiresAt = new Date(Date.now() + HOUR_MS),
   metadata = undefined,
   status = "ACTIVE",
@@ -327,7 +323,7 @@ async function seedRace(name, userCount) {
 // own seeding traffic has drained, so the seed stays on the shipped path.
 async function armClosureFixture({ write = true } = {}) {
   await appSettings.setFlag("raceResolutionReasonAwareV1Enabled", true);
-  await appSettings.setFlag(WRITE_FLAG, write);
+  return write;
 }
 
 // Drops the pending resolution job WITHOUT resolving it.
@@ -384,7 +380,10 @@ async function runScenarioOnce({
   );
 
   const versionsBefore = await participantVersions(raceId);
-  const capture = makeCapturingWorker(overrides);
+  const capture = makeCapturingWorker({
+    dependencyClosureEnabled: closureWrites,
+    ...(overrides || {}),
+  });
   assert.ok(await capture.worker.processOne(), "the worker must claim the job");
 
   return {
@@ -749,7 +748,9 @@ describe("dependency closure — Trail Mine escalation", () => {
     await armClosureFixture({ write: closureWrites });
     const versionsBefore = await participantVersions(raceId);
     assert.equal((await postSamples(alice, [sampleAt(3, 9000)])).status, 200);
-    const { worker, lines } = makeCapturingWorker();
+    const { worker, lines } = makeCapturingWorker({
+      dependencyClosureEnabled: closureWrites,
+    });
     assert.ok(await worker.processOne());
 
     return {
@@ -845,7 +846,6 @@ describe("dependency closure — Trail Mine escalation", () => {
       "the fixture must reach the closure generation with the mine unfired");
 
     const versionsBefore = await participantVersions(raceId);
-    await appSettings.setFlag(WRITE_FLAG, true);
     assert.equal((await postSamples(alice, [sampleAt(3, 400)])).status, 200);
     const { worker, lines } = makeCapturingWorker();
     assert.ok(await worker.processOne());
@@ -944,7 +944,6 @@ describe("dependency closure — Trail Mine escalation", () => {
     assert.equal(mineStillActive.status, "ACTIVE",
       "the fixture must reach the closure generation with the mine unfired");
 
-    await appSettings.setFlag(WRITE_FLAG, true);
     // A deliberately tiny upload: alice must stay BELOW the mine so the victim
     // choice is genuinely between the in-closure and out-of-closure crossers.
     assert.equal((await postSamples(alice, [sampleAt(3, 200)])).status, 200);
@@ -1154,21 +1153,18 @@ describe("dependency closure — fence", () => {
   });
 });
 
-// ── 4. flag controls and rollback ──────────────────────────────────────────
+// ── 4. permanent selection and correctness fallback ───────────────────────
 
-describe("dependency closure — flags", () => {
-  async function resolveOnceWith(flags, raceId, uploader) {
+describe("dependency closure — permanent selection", () => {
+  async function resolveOnceWith(dependencyClosureEnabled, raceId, uploader) {
     await appSettings.setFlag("raceResolutionReasonAwareV1Enabled", true);
-    for (const [key, value] of Object.entries(flags)) {
-      await appSettings.setFlag(key, value);
-    }
     assert.equal((await postSamples(uploader, [sampleAt(3, 7000)])).status, 200);
-    const { worker, lines } = makeCapturingWorker();
+    const { worker, lines } = makeCapturingWorker({ dependencyClosureEnabled });
     assert.ok(await worker.processOne());
     return { line: committedLine(lines), state: await participantState(raceId) };
   }
 
-  it("both flags off: behavior is unchanged", async () => {
+  it("the independent FULL control preserves full-resolution behavior", async () => {
     const { users, raceId } = await seedRace("FlagsOff", 3);
     const [alice, bob] = users;
     await postSamples(bob, [sampleAt(5, 3000)]);
@@ -1176,7 +1172,7 @@ describe("dependency closure — flags", () => {
     await plantEffect({ raceId, type: "LEECH", targetUser: alice, sourceUser: bob });
 
     const run = await resolveOnceWith(
-      { [WRITE_FLAG]: false, [SHADOW_FLAG]: false },
+      false,
       raceId,
       alice
     );
@@ -1186,7 +1182,7 @@ describe("dependency closure — flags", () => {
     assertNonTrivial(run.state);
   });
 
-  it("shadow flag only: the plan is observed but never selected", async () => {
+  it("the retired shadow path cannot observe or select a plan", async () => {
     const { users, raceId } = await seedRace("ShadowOnly", 3);
     const [alice, bob] = users;
     await postSamples(bob, [sampleAt(5, 3000)]);
@@ -1194,14 +1190,14 @@ describe("dependency closure — flags", () => {
     await plantEffect({ raceId, type: "LEECH", targetUser: alice, sourceUser: bob });
 
     const run = await resolveOnceWith(
-      { [WRITE_FLAG]: false, [SHADOW_FLAG]: true },
+      false,
       raceId,
       alice
     );
     assert.equal(run.line.resolutionPlan, "FULL",
       "the shadow must never select a plan");
-    assert.equal(run.line.shadowClosurePlan, "DEPENDENCY_CLOSURE",
-      "…but must still report what it would have chosen");
+    assert.equal(run.line.shadowClosurePlan, null,
+      "the deleted shadow planner must not run");
     assert.equal(run.line.closureEscalatedOnMine, null,
       "no closure was evaluated for a write, so the escalation field stays null");
   });
@@ -1267,10 +1263,9 @@ describe("dependency closure — flags", () => {
     assert.ok(await first.worker.processOne());
     assert.equal(committedLine(first.lines).resolutionPlan, "DEPENDENCY_CLOSURE");
 
-    // Flip off with more work already queued.
-    await appSettings.setFlag(WRITE_FLAG, false);
+    // Exercise the structurally retained FULL fallback with more work queued.
     assert.equal((await postSamples(alice, [sampleAt(2, 5000)])).status, 200);
-    const second = makeCapturingWorker();
+    const second = makeCapturingWorker({ dependencyClosureEnabled: false });
     assert.ok(await second.worker.processOne());
     assert.equal(committedLine(second.lines).resolutionPlan, "FULL",
       "the very next claim must return to the full resolver");

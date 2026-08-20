@@ -1,8 +1,6 @@
-// Ad-reward feature switches. The rewarded-ad extra daily spin is additionally
-// gated per-request on `ads` in X-Client-Features (only builds that can show a
-// rewarded ad ever see it), so these are the server-side kill switches: flip
-// the env var and restart to turn the feature off for every app version
-// without an App Store cycle. See AD_REWARD_DESIGN.md (frontend repo).
+// Rewarded-ad value is permanently available to capable clients behind the
+// single OPS_AD_VALUE_ISSUANCE_DISABLED emergency brake. Provider validation,
+// allowlists, idempotency, and per-user caps remain mandatory.
 const { adValueEnabled } = require("../../shared/config/operationalControls");
 
 const ADS_EXTRA_SPIN_ENABLED = adValueEnabled("extraSpin");
@@ -43,9 +41,8 @@ const SHOP_UNLOCK_REWARD_KIND = "shop_unlock";
 // credits and the two features would silently consume each other's grants.
 const BOX_REROLL_REWARD_KIND = "box_reroll";
 
-// Race-results payout double. Both switches deliberately default OFF. Prepare
-// controls only new offers; claim is an independent emergency brake so rollout
-// can stop without invalidating already-prepared entitlements.
+// Race-results payout double is permanently available at 100%; the global
+// ad-value brake independently stops every value-issuing ad path.
 const RACE_PAYOUT_DOUBLE_REWARD_KIND = "race_payout_double";
 
 function adsRacePayoutDoublePrepareEnabled() {
