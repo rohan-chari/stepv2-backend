@@ -37,15 +37,18 @@ function buildGlobalStepEventBoundaryCursorModel(prisma = defaultPrisma) {
            FROM global_step_events
            WHERE schedule_mode = 'LEGACY_GLOBAL'
          )
-         SELECT (EXTRACT(EPOCH FROM boundary_at) * 1000)::float8 AS "boundaryAtMs",
-           event_id AS "eventId",
-           boundary_kind AS "boundaryKind"
-         FROM boundaries, global_step_event_boundary_cursors cursor
+         SELECT (EXTRACT(EPOCH FROM boundary.boundary_at) * 1000)::float8 AS "boundaryAtMs",
+           boundary.event_id AS "eventId",
+           boundary.boundary_kind AS "boundaryKind"
+         FROM boundaries boundary
+         CROSS JOIN global_step_event_boundary_cursors cursor
          WHERE cursor.key=$2 AND cursor.lease_token=$3
-           AND boundary_at <= (to_timestamp($1::float8 / 1000) AT TIME ZONE 'UTC')
-           AND (boundary_at, event_id, boundary_kind) >
+           AND boundary.boundary_at <= (to_timestamp($1::float8 / 1000) AT TIME ZONE 'UTC')
+           AND (boundary.boundary_at, boundary.event_id, boundary.boundary_kind) >
              (cursor.boundary_at, cursor.event_id, cursor.boundary_kind)
-         ORDER BY boundary_at DESC, event_id DESC, boundary_kind DESC
+         ORDER BY boundary.boundary_at DESC,
+           boundary.event_id DESC,
+           boundary.boundary_kind DESC
          LIMIT 1`,
         now.getTime(),
         CURSOR_KEY,
