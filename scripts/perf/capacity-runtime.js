@@ -1099,10 +1099,16 @@ async function pgbouncerSnapshot() {
     const configuredMaxConnections = sumRows(databases, "max_connections");
     const currentConnections = sumRows(databases, "current_connections");
     const defaultPoolSize = Number(config.default_pool_size) || null;
+    const defaultReservePoolSize = Number(config.reserve_pool_size) || 0;
+    const databasePoolSize = sumRows(databases, "pool_size") || defaultPoolSize;
+    const databaseReservePoolSize = sumRows(databases, "reserve_pool") || defaultReservePoolSize;
     const maxClientConnections = Number(config.max_client_conn) || null;
-    const effectiveServerLimit = configuredMaxConnections > 0
-      ? configuredMaxConnections
-      : defaultPoolSize;
+    const configuredPoolCapacity = databasePoolSize
+      ? databasePoolSize + databaseReservePoolSize
+      : null;
+    const effectiveServerLimit = configuredMaxConnections > 0 && configuredPoolCapacity
+      ? Math.min(configuredMaxConnections, configuredPoolCapacity)
+      : configuredMaxConnections || configuredPoolCapacity;
     const serverConnectionsInUse = serversActive + serversUsed + serversTested + serversLogin;
     const serverUtilizationRatio = effectiveServerLimit
       ? serverConnectionsInUse / effectiveServerLimit
@@ -1138,6 +1144,8 @@ async function pgbouncerSnapshot() {
         serverUtilizationRatio,
         clientUtilizationRatio,
         effectiveServerLimit,
+        databasePoolSize,
+        databaseReservePoolSize,
         maxClientConnections,
       },
       // Flat aliases are retained for report compatibility and simple jq use.
