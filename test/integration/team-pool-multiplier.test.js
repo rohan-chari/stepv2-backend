@@ -279,8 +279,10 @@ describe("team race payout buff (item 5)", () => {
     assert.equal(soloRow.teamPoolMultBps, null, "solo races stamp NULL");
 
     for (const [days, bps] of [[3, 10000], [7, 15000], [14, 18750]]) {
+      const teamCreator = await makeUser();
+      await req("GET", "/auth/me", { token: teamCreator.token, headers: TEAM_HEADERS });
       const res = await req("POST", "/races", {
-        token: creator.token,
+        token: teamCreator.token,
         headers: TEAM_HEADERS,
         body: {
           name: `Team ${days}`,
@@ -540,8 +542,8 @@ describe("team race payout buff (item 5)", () => {
         });
         const body = await detail.json();
         const t = body.tournament || body;
-        // 4 players x durationPoints(4)=4 x 20 = 320 — the pre-change figure.
-        assert.equal(t.prizePool.coins, 320, "tournament pool unmultiplied");
+        // 4 players x durationPoints(4)=4 x the permanent v2 unit 10 = 160.
+        assert.equal(t.prizePool.coins, 160, "tournament pool unmultiplied");
 
         // ...and the matchup races the bracket created carry no stamp.
         const matchups = await prisma.race.findMany({

@@ -73,8 +73,8 @@ test("unique entitlement snapshot and race/viewer eligibility are participant-sp
     endsAt: new Date("2026-08-21T14:00:00.000Z"),
   } });
   await prisma.raceParticipant.createMany({ data: [
-    { raceId: race.id, userId: ny.id, status: "ACCEPTED" },
-    { raceId: race.id, userId: madrid.id, status: "ACCEPTED" },
+    { raceId: race.id, userId: ny.id, status: "ACCEPTED", joinedAt: race.startedAt },
+    { raceId: race.id, userId: madrid.id, status: "ACCEPTED", joinedAt: race.startedAt },
   ] });
   const event = await prisma.globalStepEvent.create({ data: {
     eventDay: "2026-08-20",

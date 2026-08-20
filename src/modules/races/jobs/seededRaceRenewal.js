@@ -26,10 +26,8 @@ const {
   enrollIfGlobalEventActive,
 } = require("../../steps/services/globalEventEnrollment");
 const {
-  isFundedPrizeV2Enabled,
   lockFundedExposureUsers,
   newRacePrizeStamp,
-  resolveRacePrizeStamp,
 } = require("../services/fundedExposure");
 const {
   acquireRaceWriteFence,
@@ -135,9 +133,7 @@ function buildRenewSeededRaces(dependencies = {}) {
     const geometricPayouts = await settings.getFlag(
       "seededGeometricPayoutsEnabled"
     );
-    const prizeStamp = isFundedPrizeV2Enabled()
-      ? newRacePrizeStamp()
-      : resolveRacePrizeStamp({ prizeCalculationVersion: 1 });
+    const prizeStamp = newRacePrizeStamp();
     // NOTE (batch 2026-08-08 item 5): this path bypasses raceModel.create, so
     // it does NOT stamp team_pool_mult_bps — correct, because a seeded
     // Daily/Weekly is never a team race (isTeamRace stays at the schema default

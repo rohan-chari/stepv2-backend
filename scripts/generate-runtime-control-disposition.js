@@ -137,8 +137,6 @@ const envMetadata = {
   OPS_RACE_RESOLUTION_WORKER_DISABLED: ["retained_operational", null, "literal true stops core durable claims", "operational_brakes", "false"],
   OPS_RACE_RESOLUTION_POST_TASK_WORKER_DISABLED: ["retained_operational", null, "literal true stops post-task claims", "operational_brakes", "false"],
   OPS_AD_VALUE_ISSUANCE_DISABLED: ["retained_operational", null, "literal true disables every ad-value issuance path", "operational_brakes", "false"],
-  FUNDED_EXPOSURE_ENFORCEMENT_ENABLED: ["temporary_rollout", null, "literal true enforces; unset dual-writes only", "funded_exposure", "false"],
-  FUNDED_PRIZE_V2_ENABLED: ["temporary_rollout", null, "literal true stamps v2 issuance; unset stamps v1", "funded_exposure", "false"],
   ADMOB_SSV_SKIP_VERIFY: ["retained_nonproduction_security", false, "literal true skips verification; forbidden in production", "ad_security", false],
   APNS_PRODUCTION: ["deployment_config", null, "literal true selects APNs production", "push_config", null],
   CAPACITY_MODE: ["capacity_local_config", null, "literal true enables isolated capacity entrypoint", "capacity_local", false],

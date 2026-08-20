@@ -47,7 +47,7 @@ test("phase 2 keeps every AppSetting mutable and contains no retired-setting rec
   }
 });
 
-test("phase 2 retains funded rollout gates dark and defers unrelated graduations", () => {
+test("funded rollout controls are retired while unrelated graduations stay deferred", () => {
   const byId = new Map(
     buildManifest().controls.map((control) => [control.id, control]),
   );
@@ -55,9 +55,7 @@ test("phase 2 retains funded rollout gates dark and defers unrelated graduations
     "FUNDED_EXPOSURE_ENFORCEMENT_ENABLED",
     "FUNDED_PRIZE_V2_ENABLED",
   ]) {
-    const control = byId.get(`env:${name}`);
-    assert.equal(control.permanentValue, null, name);
-    assert.equal(control.rollbackValue, "false", name);
+    assert.equal(byId.has(`env:${name}`), false, name);
   }
   for (const id of [
     "appSetting:apiRaceListCompactV1Enabled",

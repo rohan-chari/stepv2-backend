@@ -78,8 +78,8 @@ describe("funded exposure admission", () => {
     identity = 0;
     await appSettings.setFlag("fundedPrizePoolsEnabled", true);
     await appSettings.setFlag("raceExitActionsEnabled", true);
-    process.env.FUNDED_EXPOSURE_ENFORCEMENT_ENABLED = "true";
-    process.env.FUNDED_PRIZE_V2_ENABLED = "true";
+    delete process.env.FUNDED_EXPOSURE_ENFORCEMENT_ENABLED;
+    delete process.env.FUNDED_PRIZE_V2_ENABLED;
   });
 
   it("dual-writes immutable v2 race and creator exposure stamps through POST /races", async () => {
@@ -134,6 +134,27 @@ describe("funded exposure admission", () => {
     assert.equal(await prisma.race.count(), 4);
     assert.equal(await prisma.raceParticipant.count(), 4);
   });
+
+  for (const [label, value] of [
+    ["false", "false"],
+    ["spoofed", "enabled"],
+  ]) {
+    it(`enforces funded exposure when the legacy control is ${label}`, async () => {
+      process.env.FUNDED_EXPOSURE_ENFORCEMENT_ENABLED = value;
+      const user = await createUser();
+      for (let index = 0; index < 4; index += 1) {
+        assert.equal(
+          (await createFundedRace(user, `${label} allowed ${index}`)).status,
+          201,
+        );
+      }
+      const rejected = await createFundedRace(user, `${label} rejected fifth`);
+      assert.equal(rejected.status, 409);
+      assert.equal((await rejected.json()).code, "FUNDED_EXPOSURE_LIMIT");
+      assert.equal(await prisma.race.count(), 4);
+      assert.equal(await prisma.raceParticipant.count(), 4);
+    });
+  }
 
   it("serializes concurrent boundary creates with the per-user guard", async () => {
     const user = await createUser();
@@ -262,7 +283,7 @@ describe("funded exposure admission", () => {
     );
   });
 
-  it("dual-writes legacy v1 exposure while enforcement and v2 issuance are dark", async () => {
+  it("ignores false legacy funded controls and still stamps v2 exposure", async () => {
     process.env.FUNDED_EXPOSURE_ENFORCEMENT_ENABLED = "false";
     process.env.FUNDED_PRIZE_V2_ENABLED = "false";
     const user = await createUser();
@@ -274,14 +295,32 @@ describe("funded exposure admission", () => {
     const participant = await prisma.raceParticipant.findUnique({
       where: { raceId_userId: { raceId, userId: user.id } },
     });
-    assert.equal(race.prizeCalculationVersion, 1);
-    assert.equal(race.prizeCoinUnit, null);
-    assert.equal(race.prizePoolMaxCoins, null);
-    assert.equal(participant.fundedExposureMillicoins, 20_000);
-    assert.equal(participant.fundedExposureRateMillicoinsPerDay, 20_000);
+    assert.equal(race.prizeCalculationVersion, 2);
+    assert.equal(race.prizeCoinUnit, 10);
+    assert.equal(race.prizePoolMaxCoins, 8_000);
+    assert.equal(participant.fundedExposureMillicoins, 10_000);
+    assert.equal(participant.fundedExposureRateMillicoinsPerDay, 10_000);
   });
 
-  it("enforcement-off admission still waits for the target competition row before dual-write", async () => {
+  it("ignores spoofed legacy funded controls and still stamps v2 exposure", async () => {
+    process.env.FUNDED_EXPOSURE_ENFORCEMENT_ENABLED = "TRUE";
+    process.env.FUNDED_PRIZE_V2_ENABLED = "enabled";
+    const user = await createUser();
+    const response = await createFundedRace(user, "Spoofed controls", 1);
+    assert.equal(response.status, 201);
+    const raceId = (await response.json()).race.id;
+    const race = await prisma.race.findUnique({ where: { id: raceId } });
+    const participant = await prisma.raceParticipant.findUnique({
+      where: { raceId_userId: { raceId, userId: user.id } },
+    });
+    assert.equal(race.prizeCalculationVersion, 2);
+    assert.equal(race.prizeCoinUnit, 10);
+    assert.equal(race.prizePoolMaxCoins, 8_000);
+    assert.equal(participant.fundedExposureMillicoins, 10_000);
+    assert.equal(participant.fundedExposureRateMillicoinsPerDay, 10_000);
+  });
+
+  it("a false legacy enforcement control cannot bypass target-row serialization", async () => {
     process.env.FUNDED_EXPOSURE_ENFORCEMENT_ENABLED = "false";
     const creator = await createUser();
     const joiner = await createUser();
@@ -467,7 +506,7 @@ describe("funded exposure admission", () => {
     assert.equal(legacyMembership.fundedExposureMillicoins, null);
   });
 
-  it("settles from the immutable v2 race stamp after the launch environment flips", async () => {
+  it("settles an existing immutable v1 race with v1 issuance after permanent v2 launch", async () => {
     const creator = await createUser();
     const joiner = await createUser();
     const created = await createFundedRace(creator, "Immutable settlement");
@@ -519,16 +558,19 @@ describe("funded exposure admission", () => {
         status: "ACTIVE",
         startedAt: settlementStartedAt,
         endsAt: settlementEndedAt,
+        prizeCalculationVersion: 1,
+        prizeCoinUnit: null,
+        prizePoolMaxCoins: null,
       },
     });
 
-    process.env.FUNDED_PRIZE_V2_ENABLED = "false";
+    process.env.FUNDED_PRIZE_V2_ENABLED = "true";
     await resolveExpiredRaces();
     const settled = await prisma.race.findUnique({ where: { id: raceId } });
-    assert.equal(settled.prizeCalculationVersion, 2);
-    assert.equal(settled.prizeCoinUnit, 10);
-    assert.equal(settled.prizePoolMaxCoins, 8_000);
-    assert.equal(settled.prizePoolCoins, 20);
+    assert.equal(settled.prizeCalculationVersion, 1);
+    assert.equal(settled.prizeCoinUnit, null);
+    assert.equal(settled.prizePoolMaxCoins, null);
+    assert.equal(settled.prizePoolCoins, 40);
   });
 
   it("stamps a user tournament and its creator reservation through POST /tournaments", async () => {
@@ -566,6 +608,118 @@ describe("funded exposure admission", () => {
     assert.equal(participant.fundedExposureRateMillicoinsPerDay, 10_000);
     assert.equal(created.prizePool.coinUnit, 10);
     assert.equal(created.prizePool.maxCoins, 500);
+  });
+
+  for (const [label, value] of [
+    ["false", "false"],
+    ["spoofed", "enabled"],
+  ]) {
+    it(`ignores ${label} legacy funded controls when stamping a new tournament`, async () => {
+      process.env.FUNDED_EXPOSURE_ENFORCEMENT_ENABLED = value;
+      process.env.FUNDED_PRIZE_V2_ENABLED = value;
+      const user = await createUser();
+      const response = await tournamentRequest(
+        "POST",
+        "/tournaments",
+        user,
+        {
+          name: `${label} controls bracket`,
+          bracketSize: 4,
+          matchupDurationDays: 2,
+          isPublic: true,
+        },
+      );
+      assert.equal(response.status, 201);
+      const created = (await response.json()).tournament;
+      const tournament = await prisma.tournament.findUnique({
+        where: { id: created.id },
+      });
+      assert.equal(tournament.prizeCalculationVersion, 2);
+      assert.equal(tournament.prizeCoinUnit, 10);
+      assert.equal(tournament.tournamentChampionMaxCoins, 500);
+      assert.equal(created.prizePool.coinUnit, 10);
+      assert.equal(created.prizePool.maxCoins, 500);
+    });
+  }
+
+  it("settles an existing immutable v1 tournament with v1 issuance after permanent v2 launch", async () => {
+    const users = [];
+    for (let index = 0; index < 4; index += 1) users.push(await createUser());
+    const response = await tournamentRequest("POST", "/tournaments", users[0], {
+      name: "Historical v1 bracket",
+      bracketSize: 4,
+      matchupDurationDays: 2,
+      isPublic: true,
+    });
+    assert.equal(response.status, 201);
+    const tournamentId = (await response.json()).tournament.id;
+    await prisma.tournament.update({
+      where: { id: tournamentId },
+      data: {
+        prizeCalculationVersion: 1,
+        prizeCoinUnit: null,
+        tournamentChampionMaxCoins: null,
+      },
+    });
+    for (const user of users.slice(1)) {
+      assert.equal(
+        (await tournamentRequest(
+          "POST",
+          `/tournaments/${tournamentId}/join`,
+          user,
+        )).status,
+        201,
+      );
+    }
+
+    for (let round = 0; round < 3; round += 1) {
+      const tournament = await prisma.tournament.findUnique({
+        where: { id: tournamentId },
+      });
+      if (tournament.status === "COMPLETED") break;
+      const races = await prisma.race.findMany({
+        where: { tournamentId, status: "ACTIVE" },
+        include: { participants: { where: { status: "ACCEPTED" } } },
+      });
+      assert.ok(races.length > 0, `round ${round + 1} has active matchups`);
+      for (const race of races) {
+        const startedAt = new Date(Date.now() - 2 * 60 * 60 * 1_000);
+        const endsAt = new Date(Date.now() - 60_000);
+        await prisma.race.update({
+          where: { id: race.id },
+          data: { startedAt, endsAt },
+        });
+        for (const [index, participant] of race.participants.entries()) {
+          await prisma.stepSample.create({
+            data: {
+              userId: participant.userId,
+              periodStart: new Date(startedAt.getTime() + 10 * 60 * 1_000),
+              periodEnd: new Date(startedAt.getTime() + 20 * 60 * 1_000),
+              steps: 5_000 - index * 1_000,
+              sourceName: `historical-v1-round-${round}`,
+            },
+          });
+        }
+      }
+      await resolveExpiredRaces();
+    }
+
+    const settled = await prisma.tournament.findUnique({
+      where: { id: tournamentId },
+    });
+    assert.equal(settled.status, "COMPLETED");
+    assert.equal(settled.prizeCalculationVersion, 1);
+    assert.equal(settled.prizeCoinUnit, null);
+    assert.equal(settled.tournamentChampionMaxCoins, null);
+    assert.equal(settled.prizePoolCoins, 320);
+    const payouts = await prisma.coinTransaction.findMany({
+      where: {
+        reason: "tournament_prize_pool_payout",
+        refId: { startsWith: `${tournamentId}:` },
+      },
+    });
+    assert.equal(payouts.length, 1);
+    assert.equal(payouts[0].amount, 320);
   });
 
   it("applies the same 409 contract to funded tournament admission", async () => {

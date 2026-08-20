@@ -29,10 +29,8 @@ const {
 const { resolveTeamPoolMultBps } = require("../teamPoolMultiplier");
 const {
   computeRaceExposureStamp,
-  isFundedPrizeV2Enabled,
   newRacePrizeStamp,
   reserveFundedExposure,
-  resolveRacePrizeStamp,
   lockFundedExposureUsers,
 } = require("../services/fundedExposure");
 const {
@@ -353,9 +351,7 @@ function buildCreateRace(dependencies = {}) {
       isTeamRace: !!teamConfig,
       durationDays: effectiveMaxDurationDays,
     });
-    const prizeStamp = isFundedPrizeV2Enabled()
-      ? newRacePrizeStamp()
-      : resolveRacePrizeStamp({ prizeCalculationVersion: 1 });
+    const prizeStamp = newRacePrizeStamp();
     const fundedExposureStamp = computeRaceExposureStamp({
       maxDurationDays: effectiveMaxDurationDays,
       prizeCoinUnit: prizeStamp.prizeCoinUnit,

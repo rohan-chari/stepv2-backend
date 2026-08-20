@@ -156,14 +156,6 @@ function fundedExposureConflict({
   );
 }
 
-function isExposureEnforcementEnabled(env = process.env) {
-  return env.FUNDED_EXPOSURE_ENFORCEMENT_ENABLED === "true";
-}
-
-function isFundedPrizeV2Enabled(env = process.env) {
-  return env.FUNDED_PRIZE_V2_ENABLED === "true";
-}
-
 async function lockUserGuard(tx, userId) {
   try {
     await tx.fundedExposureGuard.upsert({
@@ -816,7 +808,6 @@ async function reserveFundedExposure({
   userId,
   stamp,
   competition = null,
-  enforce = isExposureEnforcementEnabled(),
 }) {
   if (!tx || !userId || !stamp) {
     throw new TypeError("tx, userId, and stamp are required");
@@ -824,7 +815,6 @@ async function reserveFundedExposure({
   await reserveFundedExposures({
     tx,
     reservations: [{ userId, stamp, competition }],
-    enforce,
   });
   return stamp;
 }
@@ -832,7 +822,6 @@ async function reserveFundedExposure({
 async function reserveFundedExposures({
   tx,
   reservations,
-  enforce = isExposureEnforcementEnabled(),
 }) {
   if (!tx || !Array.isArray(reservations)) {
     throw new TypeError("tx and reservations are required");
@@ -841,15 +830,6 @@ async function reserveFundedExposures({
     .filter((entry) => entry?.userId && entry?.stamp)
     .sort((a, b) => a.userId.localeCompare(b.userId));
   await lockFundedExposureUsers(tx, ordered.map(({ userId }) => userId));
-  if (!enforce) {
-    await lockCompetitionRows(tx, {
-      raceIds: ordered.map((entry) => entry.competition?.raceId),
-      tournamentIds: ordered.map(
-        (entry) => entry.competition?.tournamentId,
-      ),
-    });
-    return ordered.map(({ stamp }) => stamp);
-  }
   const currentByUser = await loadAndHealCurrentExposureCohort(
     tx,
     ordered.map(({ userId }) => userId),
@@ -905,8 +885,6 @@ module.exports = {
   computeRaceExposureStamp,
   computeTournamentExposureStamp,
   fundedExposureConflict,
-  isExposureEnforcementEnabled,
-  isFundedPrizeV2Enabled,
   loadAndHealCurrentExposure,
   loadAndHealCurrentExposureCohort,
   lockFundedExposureUsers,

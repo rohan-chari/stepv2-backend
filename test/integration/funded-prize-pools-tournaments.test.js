@@ -163,9 +163,9 @@ describe("app-funded prize pools — tournaments", () => {
   // ── 14. the bracket fixtures ─────────────────────────────────────────────
 
   const FIXTURES = [
-    { bracketSize: 4, matchupDurationDays: 2, totalDays: 4, pool: 320, atMax: false },
-    { bracketSize: 8, matchupDurationDays: 2, totalDays: 6, pool: 640, atMax: false },
-    { bracketSize: 16, matchupDurationDays: 3, totalDays: 12, pool: 1000, atMax: true },
+    { bracketSize: 4, matchupDurationDays: 2, totalDays: 4, pool: 160, atMax: false },
+    { bracketSize: 8, matchupDurationDays: 2, totalDays: 6, pool: 320, atMax: false },
+    { bracketSize: 16, matchupDurationDays: 3, totalDays: 12, pool: 500, atMax: true },
   ];
 
   for (const fixture of FIXTURES) {
@@ -202,8 +202,8 @@ describe("app-funded prize pools — tournaments", () => {
         playerCount: fixture.bracketSize,
         durationDays: fixture.totalDays,
         durationPoints: fixture.totalDays >= 8 ? 8 : fixture.totalDays >= 4 ? 4 : 2,
-        coinUnit: 20,
-        maxCoins: 1000,
+        coinUnit: 10,
+        maxCoins: 500,
         funded: true,
       });
       assert.equal(t.buyInAmount, 0);

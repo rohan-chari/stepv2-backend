@@ -2092,32 +2092,6 @@
       "rollbackValue": null
     },
     {
-      "id": "env:FUNDED_EXPOSURE_ENFORCEMENT_ENABLED",
-      "name": "FUNDED_EXPOSURE_ENFORCEMENT_ENABLED",
-      "kind": "boolean_environment",
-      "evidenceTimestamp": "2026-08-20T04:23:00Z",
-      "compatibilityConsumers": [],
-      "adminExposed": false,
-      "disposition": "temporary_rollout",
-      "permanentValue": null,
-      "polarityDefault": "literal true enforces; unset dual-writes only",
-      "deployFamily": "funded_exposure",
-      "rollbackValue": "false"
-    },
-    {
-      "id": "env:FUNDED_PRIZE_V2_ENABLED",
-      "name": "FUNDED_PRIZE_V2_ENABLED",
-      "kind": "boolean_environment",
-      "evidenceTimestamp": "2026-08-20T04:23:00Z",
-      "compatibilityConsumers": [],
-      "adminExposed": false,
-      "disposition": "temporary_rollout",
-      "permanentValue": null,
-      "polarityDefault": "literal true stamps v2 issuance; unset stamps v1",
-      "deployFamily": "funded_exposure",
-      "rollbackValue": "false"
-    },
-    {
       "id": "env:GLOBAL_EVENT_SUMMARY_DISABLED",
       "name": "GLOBAL_EVENT_SUMMARY_DISABLED",
       "kind": "boolean_environment",

@@ -12,11 +12,9 @@ const { normalizePowerupConfig } = require("./validateRaceConfig");
 const { filterInactiveUserIds } = require("./seededInactivity");
 const {
   computeRaceExposureStamp,
-  isFundedPrizeV2Enabled,
   lockFundedExposureUsers,
   newRacePrizeStamp,
   reserveFundedExposures,
-  resolveRacePrizeStamp,
 } = require("./fundedExposure");
 const {
   acquireRaceWriteFence,
@@ -439,9 +437,7 @@ function buildSeededRaceBuckets(dependencies = {}) {
     const payoutRoundingV1Enabled = await settings.getFlag(
       "payoutRoundingV1Enabled",
     );
-    const prizeStamp = isFundedPrizeV2Enabled()
-      ? newRacePrizeStamp()
-      : resolveRacePrizeStamp({ prizeCalculationVersion: 1 });
+    const prizeStamp = newRacePrizeStamp();
 
     const alreadyFinalized = await prisma.seededRaceBucket.findMany({
       where: { seedId: seed.id, windowStart },

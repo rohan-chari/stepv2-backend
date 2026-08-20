@@ -268,8 +268,8 @@ describe("app-funded prize pools — races", () => {
       playerCount: 1,
       durationDays: 3,
       durationPoints: 2,
-      coinUnit: 20,
-      maxCoins: 16000,
+      coinUnit: 10,
+      maxCoins: 8000,
       funded: true,
     });
     assert.equal(body.buyInAmount, 0);
@@ -297,14 +297,14 @@ describe("app-funded prize pools — races", () => {
       0
     );
 
-    // The pool grows with the field: 2 players x 3 days x 20 = 80.
+    // The v2 pool grows with the field: 2 players x 2 duration points x 10 = 40.
     const detail = await req("GET", `/races/${race.id}`, { token: joiner.token });
     const body = await detail.json();
-    assert.equal(body.prizePool.coins, 80);
+    assert.equal(body.prizePool.coins, 40);
     assert.equal(body.prizePool.playerCount, 2);
-    assert.equal(body.projectedPotCoins, 80, "frozen builds read the pool as POT");
-    assert.deepEqual(body.payoutTiers, [{ placement: 1, amount: 80 }]);
-    assert.deepEqual(body.payouts, { first: 80, second: 0, third: 0 });
+    assert.equal(body.projectedPotCoins, 40, "frozen builds read the pool as POT");
+    assert.deepEqual(body.payoutTiers, [{ placement: 1, amount: 40 }]);
+    assert.deepEqual(body.payouts, { first: 40, second: 0, third: 0 });
   });
 
   it("2b: invite accept is free too", async () => {
@@ -883,11 +883,11 @@ describe("app-funded prize pools — races", () => {
       (r) => r.id === race.id
     );
     assert.ok(summary, "race present in the list");
-    assert.equal(summary.prizePool.coins, 160, "2 x 7 days (4 points) x 20");
+    assert.equal(summary.prizePool.coins, 80, "2 x 7 days (4 points) x 10");
     assert.equal(summary.prizePool.durationPoints, 4);
     assert.equal(summary.buyInAmount, 0);
     assert.equal(summary.potCoins, 0);
-    assert.equal(summary.projectedPotCoins, 160);
+    assert.equal(summary.projectedPotCoins, 80);
     assert.equal(summary.finishReward, null);
     assert.equal(summary.myBuyInStatus, "NONE");
 
@@ -896,9 +896,9 @@ describe("app-funded prize pools — races", () => {
     const publicBody = await publicRes.json();
     const card = (publicBody.races || publicBody).find((r) => r.id === race.id);
     assert.ok(card, "race present in the public browser");
-    assert.equal(card.prizePool.coins, 160);
+    assert.equal(card.prizePool.coins, 80);
     assert.equal(card.buyInAmount, 0);
-    assert.equal(card.projectedPotCoins, 160);
+    assert.equal(card.projectedPotCoins, 80);
 
     // Share preview (unauthenticated) also exposes the pool.
     const linkRes = await req("POST", `/races/${race.id}/share-link`, {
@@ -911,6 +911,6 @@ describe("app-funded prize pools — races", () => {
     const previewBody = await preview.json();
     const previewRace = previewBody.race || previewBody;
     assert.equal(previewRace.buyInAmount, 0);
-    assert.equal(previewRace.prizePool.coins, 160);
+    assert.equal(previewRace.prizePool.coins, 80);
   });
 });

@@ -270,8 +270,6 @@ describe("private seeded race buckets (integration)", () => {
   });
 
   it("finalizes the next ET window before its boundary and creates no online bucket at or after it", async () => {
-    const previousPrizeV2 = process.env.FUNDED_PRIZE_V2_ENABLED;
-    process.env.FUNDED_PRIZE_V2_ENABLED = "true";
     await appSettings.setFlag("fundedPrizePoolsEnabled", true);
     const seed = await prisma.raceSeed.findUnique({ where: { kind: "DAILY_10K" } });
     const [alice, bob] = await Promise.all([createTestUser(), createTestUser()]);
@@ -329,20 +327,11 @@ describe("private seeded race buckets (integration)", () => {
       [],
       "the boundary never mints an online/late bucket"
     );
-    if (previousPrizeV2 === undefined) {
-      delete process.env.FUNDED_PRIZE_V2_ENABLED;
-    } else {
-      process.env.FUNDED_PRIZE_V2_ENABLED = previousPrizeV2;
-    }
   });
 
   it("finalizes a production-sized 450-user funded cohort inside the 5s budget without concurrent-query warnings", async () => {
-    const previousPrizeV2 = process.env.FUNDED_PRIZE_V2_ENABLED;
-    const previousEnforcement = process.env.FUNDED_EXPOSURE_ENFORCEMENT_ENABLED;
     const warnings = [];
     const onWarning = (warning) => warnings.push(warning);
-    process.env.FUNDED_PRIZE_V2_ENABLED = "true";
-    process.env.FUNDED_EXPOSURE_ENFORCEMENT_ENABLED = "true";
     process.on("warning", onWarning);
     try {
       await appSettings.setFlag("fundedPrizePoolsEnabled", true);
@@ -398,13 +387,6 @@ describe("private seeded race buckets (integration)", () => {
       );
     } finally {
       process.off("warning", onWarning);
-      if (previousPrizeV2 === undefined) delete process.env.FUNDED_PRIZE_V2_ENABLED;
-      else process.env.FUNDED_PRIZE_V2_ENABLED = previousPrizeV2;
-      if (previousEnforcement === undefined) {
-        delete process.env.FUNDED_EXPOSURE_ENFORCEMENT_ENABLED;
-      } else {
-        process.env.FUNDED_EXPOSURE_ENFORCEMENT_ENABLED = previousEnforcement;
-      }
     }
   });
 

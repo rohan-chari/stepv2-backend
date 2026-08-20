@@ -162,22 +162,7 @@ test("staging-shaped funded finalization uses real C0 and exposure helpers withi
   const windowStart = new Date("2026-08-20T04:00:00.000Z");
   const windowEnd = new Date("2026-08-21T04:00:00.000Z");
 
-  const previousPrizeV2 = process.env.FUNDED_PRIZE_V2_ENABLED;
-  const previousEnforcement = process.env.FUNDED_EXPOSURE_ENFORCEMENT_ENABLED;
-  process.env.FUNDED_PRIZE_V2_ENABLED = "true";
-  process.env.FUNDED_EXPOSURE_ENFORCEMENT_ENABLED = "true";
-  let buckets;
-  try {
-    buckets = await matcher.finalise({ seed, windowStart, windowEnd });
-  } finally {
-    if (previousPrizeV2 === undefined) delete process.env.FUNDED_PRIZE_V2_ENABLED;
-    else process.env.FUNDED_PRIZE_V2_ENABLED = previousPrizeV2;
-    if (previousEnforcement === undefined) {
-      delete process.env.FUNDED_EXPOSURE_ENFORCEMENT_ENABLED;
-    } else {
-      process.env.FUNDED_EXPOSURE_ENFORCEMENT_ENABLED = previousEnforcement;
-    }
-  }
+  const buckets = await matcher.finalise({ seed, windowStart, windowEnd });
 
   assert.equal(buckets.length, 30);
   assert.ok(transactionCalls <= 240, `used ${transactionCalls} transaction round trips`);

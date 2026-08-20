@@ -625,8 +625,8 @@ describe("custom race windows (§9 tests 1-10b, 21)", () => {
 
     await req("POST", `/races/${raceId}/start`, { token: creator.token });
     await settle(raceId);
-    // 2 walkers × durationPoints(1) × 20 = 40.
-    assert.equal(await poolPayoutTotal(raceId), 2 * 1 * 20);
+    // 2 walkers × durationPoints(1) × the permanent v2 unit 10 = 20.
+    assert.equal(await poolPayoutTotal(raceId), 2 * 1 * 10);
 
     // Team: teamPoolMultBps is stamped at CREATE from the derived duration and
     // read back by settlement (architect R5).
@@ -687,11 +687,11 @@ describe("custom race windows (§9 tests 1-10b, 21)", () => {
     );
 
     await settle(raceId);
-    // 2 walkers × durationPoints(1) × 20 = 40 coins. Without the re-derivation
-    // this pays 2 × 8 × 20 = 320 — an 8x mint for a one-day race.
-    assert.equal(await poolPayoutTotal(raceId), 40);
-    assert.notEqual(await poolPayoutTotal(raceId), 320);
-    assert.equal((await row(raceId)).prizePoolCoins, 40);
+    // 2 walkers × durationPoints(1) × 10 = 20 coins. Without the re-derivation
+    // this pays 2 × 8 × 10 = 160 — an 8x mint for a one-day race.
+    assert.equal(await poolPayoutTotal(raceId), 20);
+    assert.notEqual(await poolPayoutTotal(raceId), 160);
+    assert.equal((await row(raceId)).prizePoolCoins, 20);
   });
 
   it("9c: the TEAM anti-exploit lock — a 14-day team window started with 25h left settles at 1.0x, not 1.875x", async () => {
@@ -718,11 +718,10 @@ describe("custom race windows (§9 tests 1-10b, 21)", () => {
     );
 
     await settle(raceId);
-    // 2 walkers × durationPoints(1) × 20 × 1.0 = 40. With the stale 1.875x
-    // multiplier this pays 75 — 37.5 coins per player-day against a stated
-    // ceiling of 20.
-    assert.equal(await poolPayoutTotal(raceId), 40);
-    assert.equal((await row(raceId)).prizePoolCoins, 40);
+    // 2 walkers × durationPoints(1) × 10 × 1.0 = 20. With the stale 1.875x
+    // multiplier this pays 40 after payout rounding, breaching the v2 rate.
+    assert.equal(await poolPayoutTotal(raceId), 20);
+    assert.equal((await row(raceId)).prizePoolCoins, 20);
   });
 
   it("7f: PATCHing a TEAM race's window re-stamps teamPoolMultBps in the same write", async () => {

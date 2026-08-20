@@ -459,6 +459,7 @@ describe("next-race CTA backend contract", () => {
 
   it("caps a walker at five live quick-race memberships", async () => {
     await appSettings.setFlag("quickCreateRaceCtaEnabled", true);
+    await appSettings.setFlag("fundedPrizePoolsEnabled", false);
     const walker = await user("Walker");
     const raceIds = [];
     const hosts = [];
@@ -499,6 +500,7 @@ describe("next-race CTA backend contract", () => {
 
   it("serializes public and share-token joins when one quick-race slot remains", async () => {
     await appSettings.setFlag("quickCreateRaceCtaEnabled", true);
+    await appSettings.setFlag("fundedPrizePoolsEnabled", false);
     const walker = await user("ConcurrentWalker");
     const races = [];
     const hosts = [];
@@ -559,6 +561,7 @@ describe("next-race CTA backend contract", () => {
 
   it("enforces the persisted quick-membership cap for a frozen client too", async () => {
     await appSettings.setFlag("quickCreateRaceCtaEnabled", true);
+    await appSettings.setFlag("fundedPrizePoolsEnabled", false);
     const walker = await user("FrozenWalker");
     for (let i = 0; i < 6; i++) {
       const host = await user(`Host${i}`);
@@ -622,14 +625,14 @@ describe("next-race CTA backend contract", () => {
       where: { raceId },
       orderBy: { placement: "asc" },
     });
-    assert.equal(settled.prizePoolCoins, 80);
-    assert.deepEqual(paid.map((p) => p.payoutCoins), [60, 20]);
+    assert.equal(settled.prizePoolCoins, 40);
+    assert.deepEqual(paid.map((p) => p.payoutCoins), [30, 10]);
     assert.equal(
       await prisma.coinTransaction.aggregate({
         where: { reason: "race_prize_pool_payout", refId: { startsWith: raceId } },
         _sum: { amount: true },
       }).then((x) => x._sum.amount || 0),
-      80
+      40
     );
   });
 
@@ -728,7 +731,7 @@ describe("next-race CTA backend contract", () => {
       orderBy: { rawSteps: "desc" },
     });
     assert.deepEqual(participants.map((p) => p.rawSteps), [5000, 4000]);
-    assert.equal((await prisma.race.findUnique({ where: { id: raceId } })).prizePoolCoins, 80);
+    assert.equal((await prisma.race.findUnique({ where: { id: raceId } })).prizePoolCoins, 40);
     const referral = await prisma.referral.findUnique({ where: { refereeId: joiner.id } });
     assert.equal(referral.status, "REWARDED");
     assert.ok(await prisma.activationEvent.findUnique({

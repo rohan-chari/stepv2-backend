@@ -32,10 +32,8 @@ const {
 } = require("../queries/serializeTournament");
 const {
   computeTournamentExposureStamp,
-  isFundedPrizeV2Enabled,
   newTournamentPrizeStamp,
   reserveFundedExposure,
-  resolveTournamentPrizeStamp,
   lockFundedExposureUsers,
 } = require("../../races/services/fundedExposure");
 
@@ -125,9 +123,7 @@ function buildCreateTournament(dependencies = {}) {
       powerupsEnabled,
     });
     const totalRounds = totalRoundsFor(size);
-    const prizeStamp = isFundedPrizeV2Enabled()
-      ? newTournamentPrizeStamp()
-      : resolveTournamentPrizeStamp({ prizeCalculationVersion: 1 });
+    const prizeStamp = newTournamentPrizeStamp();
     const fundedExposureStamp = computeTournamentExposureStamp({
       bracketSize: size,
       totalRounds,

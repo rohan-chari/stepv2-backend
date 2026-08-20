@@ -108,7 +108,7 @@ describe("feature batch 2026-07-27 — backend", () => {
 
   // ── item 7: the prize-pool ceiling ────────────────────────────────────────
 
-  it("7: a 100-player 14-day race pays the full 16,000 and reports atMax", async () => {
+  it("7: a 100-player 14-day v2 race pays the full 8,000 and reports atMax", async () => {
     const { creator, raceId } = await createFundedRace({
       players: 100,
       maxDurationDays: 14,
@@ -118,17 +118,17 @@ describe("feature batch 2026-07-27 — backend", () => {
     assert.equal(detail.status, 200);
     const body = await detail.json();
 
-    assert.equal(body.prizePool.coins, 16000, "100 x 8 points x 20");
-    assert.equal(body.prizePool.atMax, true, "16,000 is the ceiling");
-    assert.equal(body.prizePool.maxCoins, 16000);
+    assert.equal(body.prizePool.coins, 8000, "100 x 8 points x 10");
+    assert.equal(body.prizePool.atMax, true, "8,000 is the v2 ceiling");
+    assert.equal(body.prizePool.maxCoins, 8000);
     assert.equal(body.prizePool.playerCount, 100);
     assert.equal(body.prizePool.durationPoints, 8);
-    assert.equal(body.prizePool.coinUnit, 20);
+    assert.equal(body.prizePool.coinUnit, 10);
     // Frozen builds read the pool as the pot; it must carry the same figure.
-    assert.equal(body.projectedPotCoins, 16000);
+    assert.equal(body.projectedPotCoins, 8000);
   });
 
-  it("7: the duration band is flat above 7 days — 100 x 30 days is also 16,000", async () => {
+  it("7: the duration band is flat above 7 days — 100 x 30 days is also 8,000", async () => {
     const { creator, raceId } = await createFundedRace({
       players: 100,
       maxDurationDays: 30,
@@ -136,13 +136,13 @@ describe("feature batch 2026-07-27 — backend", () => {
 
     const detail = await req("GET", `/races/${raceId}`, { token: creator.token });
     const body = await detail.json();
-    assert.equal(body.prizePool.coins, 16000);
+    assert.equal(body.prizePool.coins, 8000);
     assert.equal(body.prizePool.durationPoints, 8);
-    assert.equal(body.prizePool.maxCoins, 16000);
+    assert.equal(body.prizePool.maxCoins, 8000);
     assert.equal(body.prizePool.atMax, true);
   });
 
-  it("7: small fields are UNCHANGED — 4 players x 1 day is still 80", async () => {
+  it("7: a small v2 field uses the permanent 10-coin unit", async () => {
     const { creator, raceId } = await createFundedRace({
       players: 4,
       maxDurationDays: 1,
@@ -150,14 +150,14 @@ describe("feature batch 2026-07-27 — backend", () => {
 
     const detail = await req("GET", `/races/${raceId}`, { token: creator.token });
     const body = await detail.json();
-    assert.equal(body.prizePool.coins, 80, "4 x 1 point x 20 — the raise is a ceiling only");
+    assert.equal(body.prizePool.coins, 40, "4 x 1 point x 10");
     assert.equal(body.prizePool.atMax, false);
-    assert.equal(body.prizePool.maxCoins, 16000);
+    assert.equal(body.prizePool.maxCoins, 8000);
   });
 
   it("7: tournaments keep their own tighter MAX_CHAMPION_PRIZE ceiling", async () => {
-    // 16 players x (4 rounds x 3 days = 12 days -> 8 points) x 20 = 2,560, well
-    // over MAX_CHAMPION_PRIZE, so the bracket must still clamp at 1,000 — proof
+    // 16 players x (4 rounds x 3 days = 12 days -> 8 points) x 10 = 1,280, well
+    // over the v2 MAX_CHAMPION_PRIZE, so the bracket clamps at 500 — proof
     // the race ceiling raise did not leak into the bracket path.
     const users = [];
     for (let i = 0; i < 16; i++) {
@@ -202,8 +202,8 @@ describe("feature batch 2026-07-27 — backend", () => {
     assert.equal(detail.status, 200);
     const body = await detail.json();
     const t = body.tournament || body;
-    assert.equal(t.prizePool.maxCoins, 1000, "MAX_CHAMPION_PRIZE, untouched");
-    assert.equal(t.prizePool.coins, 1000, "still clamped to the bracket ceiling");
+    assert.equal(t.prizePool.maxCoins, 500, "v2 MAX_CHAMPION_PRIZE");
+    assert.equal(t.prizePool.coins, 500, "still clamped to the bracket ceiling");
     assert.equal(t.prizePool.atMax, true);
   });
 

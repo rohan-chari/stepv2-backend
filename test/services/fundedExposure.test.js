@@ -7,22 +7,25 @@ const {
   computeRaceExposureStamp,
   computeTournamentExposureStamp,
   fundedExposureConflict,
-  isExposureEnforcementEnabled,
-  isFundedPrizeV2Enabled,
   loadAndHealCurrentExposure,
   loadAndHealCurrentExposureCohort,
   lockFundedExposureUsers,
+  newRacePrizeStamp,
+  newTournamentPrizeStamp,
   reserveFundedExposures,
 } = require("../../src/modules/races/services/fundedExposure");
 
-test("phase-2 funded enforcement and v2 issuance default off", () => {
-  assert.equal(isExposureEnforcementEnabled({}), false);
-  assert.equal(isFundedPrizeV2Enabled({}), false);
-  assert.equal(
-    isExposureEnforcementEnabled({ FUNDED_EXPOSURE_ENFORCEMENT_ENABLED: "true" }),
-    true,
-  );
-  assert.equal(isFundedPrizeV2Enabled({ FUNDED_PRIZE_V2_ENABLED: "true" }), true);
+test("new funded competitions permanently use immutable v2 prize stamps", () => {
+  assert.deepEqual(newRacePrizeStamp(), {
+    prizeCalculationVersion: 2,
+    prizeCoinUnit: 10,
+    prizePoolMaxCoins: 8_000,
+  });
+  assert.deepEqual(newTournamentPrizeStamp(), {
+    prizeCalculationVersion: 2,
+    prizeCoinUnit: 10,
+    tournamentChampionMaxCoins: 500,
+  });
 });
 
 test("race exposure uses unit 10, duration points, and the stamped team multiplier", () => {
@@ -146,16 +149,25 @@ test("mixed-null healing fails closed when the reread contains an unlocked old-w
   );
 });
 
-test("enforcement-off reservations still take user guards then every target competition lock", async () => {
+test("obsolete caller input cannot bypass enforcement or target competition locks", async () => {
   const calls = [];
   const tx = {
     fundedExposureGuard: {
       async upsert({ where }) { calls.push(`guard:${where.userId}`); },
     },
+    raceParticipant: {
+      async findMany() { return []; },
+      async updateMany() { return { count: 0 }; },
+    },
+    tournamentParticipant: {
+      async findMany() { return []; },
+      async updateMany() { return { count: 0 }; },
+    },
     async $queryRaw() { calls.push("guard-row"); return []; },
-    async $queryRawUnsafe(sql, id) {
-      calls.push(`${sql.includes("tournaments") ? "tournament" : "race"}:${id}`);
-      return [{ id }];
+    async $queryRawUnsafe(sql, ids) {
+      const type = sql.includes("tournaments") ? "tournament" : "race";
+      for (const id of ids) calls.push(`${type}:${id}`);
+      return ids.map((id) => ({ id }));
     },
   };
 
@@ -254,7 +266,7 @@ test("enforced exposure validates a 450-user cohort with bounded bulk reads and 
     competition: { raceId: `race-${String(index % 30).padStart(2, "0")}` },
   }));
 
-  await reserveFundedExposures({ tx, reservations, enforce: true });
+  await reserveFundedExposures({ tx, reservations });
 
   assert.equal(guardInserts, 1);
   assert.ok(membershipReads <= 6, `used ${membershipReads} membership reads`);

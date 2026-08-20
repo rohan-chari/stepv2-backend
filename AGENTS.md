@@ -15,6 +15,18 @@ deploys and prod data changes are the high-risk, hard-to-reverse step.
 - Staging is fine to deploy to without asking; **prod is not**.
 - This also covers one-off prod DB scripts/`UPDATE`s and running seeds on prod.
 
+## Permanent behavior over release flags and kill switches
+
+Release flags, feature flags, and kill switches are prohibited by default.
+Implement permanent behavior as the default and use immutable version stamps
+when old and new behavior must coexist for compatibility.
+
+If a runtime control is truly unavoidable for mixed-version, migration, or
+operational safety, stop before adding it. Explain why permanent behavior and
+version-stamped compatibility are insufficient, obtain the user's explicit
+approval, and document the control's owner, default, rollout plan, and concrete
+deadline or removal condition.
+
 ## Core principle: never break users on older app versions
 
 This backend serves the **live iOS app**, whose binary is frozen per release.

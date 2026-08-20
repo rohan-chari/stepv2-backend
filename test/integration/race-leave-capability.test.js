@@ -263,7 +263,7 @@ describe("race leave capability (integration)", () => {
       token: leaver.token,
       headers: EXIT_HEADERS,
     });
-    assert.equal((await before.json()).prizePool.coins, 40);
+    assert.equal((await before.json()).prizePool.coins, 20);
 
     const left = await request(server.baseUrl, "POST", `/races/${race.id}/leave`, {
       token: leaver.token,
@@ -343,7 +343,7 @@ describe("race leave capability (integration)", () => {
     const body = await forfeited.json();
     assert.equal(body.success, true);
     assert.equal(body.action, "FORFEITED");
-    assert.equal(body.prizePool.coins, 40, "positive forfeiter remains in the active funded pool");
+    assert.equal(body.prizePool.coins, 20, "positive forfeiter remains in the active funded pool");
 
     const frozen = await prisma.raceParticipant.findUnique({
       where: { raceId_userId: { raceId: race.id, userId: forfeiter.userId } },
@@ -360,10 +360,10 @@ describe("race leave capability (integration)", () => {
       where: { id: race.id },
       include: { participants: true },
     });
-    assert.equal(settled.prizePoolCoins, 40);
+    assert.equal(settled.prizePoolCoins, 20);
     const byUser = Object.fromEntries(settled.participants.map((p) => [p.userId, p]));
     assert.equal(byUser[forfeiter.userId].payoutCoins, 0);
-    assert.equal(byUser[creator.userId].payoutCoins, 40);
+    assert.equal(byUser[creator.userId].payoutCoins, 20);
   });
 
   it("an active zero-step forfeiter is frozen but immediately removed from the funded pool projection", async () => {
@@ -452,9 +452,9 @@ describe("race leave capability (integration)", () => {
       include: { participants: true },
     });
     const byUser = Object.fromEntries(settled.participants.map((p) => [p.userId, p]));
-    assert.equal(settled.prizePoolCoins, 85);
-    assert.equal(byUser[creator.userId].payoutCoins, 65);
-    assert.equal(byUser[runner.userId].payoutCoins, 20);
+    assert.equal(settled.prizePoolCoins, 45);
+    assert.equal(byUser[creator.userId].payoutCoins, 35);
+    assert.equal(byUser[runner.userId].payoutCoins, 10);
     assert.equal(byUser[forfeiterA.userId].payoutCoins, 0);
     assert.equal(byUser[forfeiterB.userId].payoutCoins, 0);
     assert.equal(
@@ -492,8 +492,8 @@ describe("race leave capability (integration)", () => {
       include: { participants: true },
     });
     const byUser = Object.fromEntries(settled.participants.map((p) => [p.userId, p]));
-    assert.equal(settled.prizePoolCoins, 40);
-    assert.equal(byUser[creator.userId].payoutCoins, 40);
+    assert.equal(settled.prizePoolCoins, 20);
+    assert.equal(byUser[creator.userId].payoutCoins, 20);
     assert.equal(byUser[runner.userId].payoutCoins, 0);
     assert.equal(byUser[noShowA.userId].payoutCoins, 0);
     assert.equal(byUser[noShowB.userId].payoutCoins, 0);
