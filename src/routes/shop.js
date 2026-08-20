@@ -26,6 +26,10 @@ const { prisma } = require("../db");
 const {
   POWERUPS5_GATED_TYPES,
 } = require("../modules/powerups/constants/powerupGating");
+const {
+  isRetiredPowerupRequest,
+  retiredPowerupBody,
+} = require("../modules/powerups/powerupRetirement");
 
 // SKUs of the Wave 5 store-only powerups (POWERUP_<TYPE>). Kept alongside the
 // type list so the purchase guard can reject by either sku or powerupType.
@@ -92,6 +96,9 @@ function createShopRouter(dependencies = {}) {
   // POST /shop/powerups/purchase — buy a powerup (idempotent via Idempotency-Key).
   router.post("/powerups/purchase", async (req, res) => {
     try {
+      if (isRetiredPowerupRequest(req.body)) {
+        return res.status(410).json(retiredPowerupBody("IMPOSTER"));
+      }
       if (req.body?.powerupType === "QUICKSAND" && !req.clientFeatures.has("powerups4")) {
         return res.status(404).json({ error: "Powerup not found" });
       }
@@ -131,6 +138,9 @@ function createShopRouter(dependencies = {}) {
   // powerup. Additive; only the new app calls it. Ships dark-safe.
   router.post("/powerups/unlock-with-ads", async (req, res) => {
     try {
+      if (isRetiredPowerupRequest(req.body)) {
+        return res.status(410).json(retiredPowerupBody("IMPOSTER"));
+      }
       const result = await unlockPowerupWithAds({
         userId: req.user.id,
         sku: req.body.sku,

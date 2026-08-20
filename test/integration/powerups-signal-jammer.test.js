@@ -173,7 +173,7 @@ describe("signal jammer — integration", () => {
       assert.equal(jammerRes.status, 200);
       const jammerBody = await jammerRes.json();
       const byType = Object.fromEntries(jammerBody.items.map((i) => [i.powerupType, i]));
-      assert.equal(byType.IMPOSTER.priceCoins, 75);
+      assert.equal(byType.IMPOSTER, undefined);
       assert.equal(byType.RAINSTORM.priceCoins, 75);
       assert.ok(byType.SIGNAL_JAMMER, "jammer visible to jammer-capable client");
       assert.equal(byType.SIGNAL_JAMMER.priceCoins, 75);
@@ -184,7 +184,7 @@ describe("signal jammer — integration", () => {
       });
       const oldBody = await oldRes.json();
       const oldTypes = oldBody.items.map((i) => i.powerupType);
-      assert.ok(oldTypes.includes("IMPOSTER"), "imposter visible to all");
+      assert.equal(oldTypes.includes("IMPOSTER"), false, "retired imposter omitted");
       assert.ok(oldTypes.includes("RAINSTORM"), "rainstorm visible to all");
       assert.ok(!oldTypes.includes("SIGNAL_JAMMER"), "jammer hidden from old client");
 
@@ -298,8 +298,8 @@ describe("signal jammer — integration", () => {
 
       // Bob holds an EARNED powerup and a STORE-redeemed powerup.
       const earned = await giveHeldPowerup(raceId, bob.userId, "PROTEIN_SHAKE", 5000, "COMMON");
-      await purchase(bob.token, "POWERUP_IMPOSTER", "bob-imp-1");
-      const storeRedeem = await redeem(bob.token, raceId, "IMPOSTER");
+      await purchase(bob.token, "POWERUP_RAINSTORM", "bob-rain-1");
+      const storeRedeem = await redeem(bob.token, raceId, "RAINSTORM");
       const storePowerupId = (await storeRedeem.json()).result.powerup.id;
 
       // Alice jams Bob.

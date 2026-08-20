@@ -227,6 +227,9 @@ describe("placement performance scheduler integration", () => {
       enqueueRaceResolution: async () => false,
       eventBus: { emit(type, payload) { emitted.push({ type, payload }); } },
       logger: { log() {}, warn() {}, error() {} },
+      // Keep this production-scale fixture inside its active window. Its
+      // original wall-clock dependency crossed endsAt on 2026-08-20.
+      now: () => new Date("2026-08-13T12:00:00.000Z"),
       getPerformanceFlags: () => ({
         placementDistributedClaimEnabled: false,
         placementLeanBaselineWritesEnabled: true,

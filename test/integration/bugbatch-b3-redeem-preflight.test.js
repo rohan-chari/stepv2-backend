@@ -16,7 +16,7 @@ let server;
 let nextAppleId = 0;
 
 const STORE_POWERUPS = [
-  { sku: "POWERUP_IMPOSTER", name: "Imposter", powerupType: "IMPOSTER", priceCoins: 75, sortOrder: 0 },
+  { sku: "POWERUP_RED_CARD", name: "Red Card", powerupType: "RED_CARD", priceCoins: 75, sortOrder: 0 },
   { sku: "POWERUP_RAINSTORM", name: "Rainstorm", powerupType: "RAINSTORM", priceCoins: 75, sortOrder: 1 },
   { sku: "POWERUP_SIGNAL_JAMMER", name: "Signal Jammer", powerupType: "SIGNAL_JAMMER", priceCoins: 75, sortOrder: 2 },
 ];
@@ -197,17 +197,18 @@ describe("B3 — redeem pre-flight rejections do not strand inventory", () => {
       200
     );
 
-    // Alice (jammed) buys an Imposter and tries to redeem it.
-    await purchase(alice.token, "POWERUP_IMPOSTER", "b3-jam-alice");
-    assert.equal(await inventoryQty(alice.userId, "IMPOSTER"), 1);
+    // Alice (jammed) buys a live Red Card and tries to redeem it. Imposter is
+    // independently tombstoned and cannot be used as a jam preflight fixture.
+    await purchase(alice.token, "POWERUP_RED_CARD", "b3-jam-alice");
+    assert.equal(await inventoryQty(alice.userId, "RED_CARD"), 1);
 
-    const res = await redeem(alice.token, raceId, "IMPOSTER");
+    const res = await redeem(alice.token, raceId, "RED_CARD");
     assert.equal(res.status, 409);
     const body = await res.json();
     assert.equal(body.code, "SIGNAL_JAMMED");
 
-    assert.equal(await inventoryQty(alice.userId, "IMPOSTER"), 1, "inventory not spent");
-    assert.equal((await heldRows(raceId, alice.userId, "IMPOSTER")).length, 0, "no HELD row minted");
+    assert.equal(await inventoryQty(alice.userId, "RED_CARD"), 1, "inventory not spent");
+    assert.equal((await heldRows(raceId, alice.userId, "RED_CARD")).length, 0, "no HELD row minted");
   });
 
   it("redeeming a RAINSTORM with no eligible targets → 400 NO_ELIGIBLE_TARGETS, no inventory spent", async () => {

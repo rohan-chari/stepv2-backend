@@ -1,6 +1,9 @@
 const { prisma: defaultPrisma } = require("../../db");
 const { JobRun: defaultJobRun } = require("../../shared/db/jobRun");
 const { dailyRunKey } = require("../../shared/time/etSchedule");
+const {
+  destructiveCleanupDisabled,
+} = require("../../shared/config/operationalControls");
 
 const JOB_NAME = "activation_event_cleanup";
 const TICK_INTERVAL_MS = 5 * 60 * 1000;
@@ -13,8 +16,12 @@ function buildCleanupActivationEvents(dependencies = {}) {
   const now = dependencies.now || (() => new Date());
   const logger = dependencies.logger || console;
   const retentionDays = dependencies.retentionDays || RETENTION_DAYS;
+  const env = dependencies.env || process.env;
 
   return async function cleanupActivationEvents() {
+    if (destructiveCleanupDisabled("ACTIVATION_EVENT_CLEANUP_DISABLED", env)) {
+      return null;
+    }
     const currentTime = now();
     const lastRanFor = await jobRunModel.lastRanFor(JOB_NAME);
     const runKey = dailyRunKey({

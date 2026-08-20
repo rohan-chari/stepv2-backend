@@ -27,9 +27,7 @@ const {
 const { mintPiggyBank } = require("../../powerups/commands/expireEffects");
 const { awardCoins } = require("../../../shared/economy/awardCoins");
 const { nextRawSteps } = require("../../powerups/rawPosition");
-const {
-  RaceResolutionJobV2,
-} = require("../models/raceResolutionJobV2");
+const { withRaceWriteFence } = require("../services/raceWriteFence");
 const { SETTLEMENT_EFFECT_TYPES } = require("../services/raceScoringEffectTypes");
 const {
   computeSettlementAttributionVector,
@@ -51,13 +49,7 @@ const cacheKeys = require("../../../shared/cache/cacheKeys");
 async function withSettlementFence(raceId, write) {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      return await prisma.$transaction(
-        async (tx) => {
-          await RaceResolutionJobV2.acquireForWrite(tx, { raceId });
-          return write(tx);
-        },
-        { timeout: 15_000, maxWait: 10_000 }
-      );
+      return await withRaceWriteFence(raceId, write);
     } catch (error) {
       if (error && error.code === "40P01" && attempt === 0) {
         console.warn(`[CRON] settlement deadlock on race ${raceId}; retrying once`);
@@ -539,7 +531,18 @@ async function resolveExpiredRaces() {
       // Fenced write #1 — settled totals. Fence acquired FIRST, then rows in
       // ascending userId order.
       finalTotals.sort(byUserIdAsc);
-      await withSettlementFence(race.id, async (tx) => {
+      const settledTotalsWritten = await withSettlementFence(race.id, async (tx) => {
+        const lockedParticipants = await tx.raceParticipant.findMany({
+          where: { raceId: race.id, status: "ACCEPTED" },
+          select: { id: true },
+        });
+        const lockedIds = new Set(lockedParticipants.map((row) => row.id));
+        if (
+          lockedIds.size !== acceptedParticipants.length ||
+          acceptedParticipants.some((row) => !lockedIds.has(row.id))
+        ) {
+          return false;
+        }
         for (const row of finalTotals) {
           await tx.raceParticipant.update({
             where: { id: row.participant.id },
@@ -583,7 +586,14 @@ async function resolveExpiredRaces() {
             },
           });
         }
+        return true;
       });
+      if (!settledTotalsWritten) {
+        console.log(
+          `[CRON] Race ${race.id} membership changed before settlement; retrying next tick`,
+        );
+        continue;
+      }
       // The upsert above is also the final-impact repair path. Any previously
       // cached Home eligibility must be discarded after that transaction
       // commits; Redis remains best-effort and Postgres remains authoritative.
@@ -662,14 +672,32 @@ async function resolveExpiredRaces() {
         placement: index + 1,
       }));
       placements.sort(byUserIdAsc);
-      await withSettlementFence(race.id, async (tx) => {
+      const placementsWritten = await withSettlementFence(race.id, async (tx) => {
+        const lockedParticipants = await tx.raceParticipant.findMany({
+          where: { raceId: race.id, status: "ACCEPTED" },
+          select: { id: true },
+        });
+        const lockedIds = new Set(lockedParticipants.map((row) => row.id));
+        if (
+          lockedIds.size !== acceptedParticipants.length ||
+          acceptedParticipants.some((row) => !lockedIds.has(row.id))
+        ) {
+          return false;
+        }
         for (const row of placements) {
           await tx.raceParticipant.update({
             where: { id: row.participant.id },
             data: { placement: row.placement },
           });
         }
+        return true;
       });
+      if (!placementsWritten) {
+        console.log(
+          `[CRON] Race ${race.id} membership changed before placements; retrying next tick`,
+        );
+        continue;
+      }
 
       // §3.10 / §3.11: Piggy Bank mint + Bounty payout, using the just-sorted
       // standings for placement. Idempotent via awardCoins refId.

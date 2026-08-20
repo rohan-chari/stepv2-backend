@@ -6,6 +6,9 @@ const {
   renewTournamentSeeds,
 } = require("../../src/modules/tournaments/jobs/tournamentSeedRenewal");
 const { appSettings } = require("../../src/shared/config/appSettings");
+const {
+  RaceResolutionJobV2,
+} = require("../../src/modules/races/models/raceResolutionJobV2");
 
 let server;
 let nextAppleId = 0;
@@ -326,6 +329,78 @@ describe("tournaments — integration", () => {
     assert.equal(inviteeAfter.coins, 50);
   });
 
+  it("tournament invite, decline, and start serialize against account deletion", async () => {
+    const creator = await createUser("Serialization Host");
+    const invitee = await createUser("Invite Delete");
+    await prisma.friendship.create({
+      data: {
+        requesterId: creator.userId,
+        addresseeId: invitee.userId,
+        status: "ACCEPTED",
+      },
+    });
+    const created = await createTournament(creator.token, {
+      name: "Serialized lobby",
+      bracketSize: 4,
+      isPublic: false,
+    });
+    const tournamentId = (await created.json()).tournament.id;
+    const [deletedInvitee, invited] = await Promise.all([
+      request(server.baseUrl, "DELETE", "/auth/account", { token: invitee.token }),
+      authReq("POST", `/tournaments/${tournamentId}/invite`, {
+        token: creator.token,
+        body: { userIds: [invitee.userId] },
+      }),
+    ]);
+    assert.equal(deletedInvitee.status, 204);
+    assert.ok([200, 400, 404, 409].includes(invited.status));
+    assert.equal(
+      await prisma.tournamentParticipant.count({ where: { userId: invitee.userId } }),
+      0,
+    );
+
+    const decliner = await createUser("Decline Delete");
+    await prisma.tournamentParticipant.create({
+      data: { tournamentId, userId: decliner.userId, status: "INVITED" },
+    });
+    const [deletedDecliner, declined] = await Promise.all([
+      request(server.baseUrl, "DELETE", "/auth/account", { token: decliner.token }),
+      authReq("PUT", `/tournaments/${tournamentId}/respond`, {
+        token: decliner.token,
+        body: { accept: false },
+      }),
+    ]);
+    assert.equal(deletedDecliner.status, 204);
+    assert.ok([200, 401, 403, 404, 409].includes(declined.status));
+    assert.equal(
+      await prisma.tournamentParticipant.count({ where: { userId: decliner.userId } }),
+      0,
+    );
+
+    const starters = await Promise.all([
+      createUser("Start One"),
+      createUser("Start Two"),
+      createUser("Start Delete"),
+    ]);
+    await prisma.tournamentParticipant.createMany({
+      data: starters.map((entry) => ({
+        tournamentId,
+        userId: entry.userId,
+        status: "ACCEPTED",
+      })),
+    });
+    const deletedStarter = starters[2];
+    const [deleted, started] = await Promise.all([
+      request(server.baseUrl, "DELETE", "/auth/account", { token: deletedStarter.token }),
+      authReq("POST", `/tournaments/${tournamentId}/start`, { token: creator.token }),
+    ]);
+    assert.equal(deleted.status, 204);
+    assert.ok([200, 409].includes(started.status));
+    assert.equal(await prisma.user.count({ where: { id: deletedStarter.userId } }), 0);
+    assert.equal(await prisma.tournamentParticipant.count({ where: { userId: deletedStarter.userId } }), 0);
+    assert.equal(await prisma.raceParticipant.count({ where: { userId: deletedStarter.userId } }), 0);
+  });
+
   it("every race-level mutation on a matchup race returns TOURNAMENT_RACE_LOCKED", async () => {
     const { users, tournamentId } = await fillFourBracket();
     const matchup = await prisma.race.findFirst({
@@ -436,6 +511,142 @@ describe("tournaments — integration", () => {
     });
     assert.equal(again.status, 409);
     assert.equal((await again.json()).code, "NO_LIVE_MATCHUP");
+  });
+
+  it("tournament forfeit writes forfeitedAt only inside the matchup C0 fence", async () => {
+    const { users, tournamentId } = await fillFourBracket();
+    const matchup = await prisma.race.findFirst({
+      where: { tournamentId, tournamentRound: 1 },
+      include: { participants: true },
+    });
+    const [forfeiter] = matchup.participants.filter((p) => p.status === "ACCEPTED");
+    const tokenByUser = {
+      [users.a.userId]: users.a.token,
+      [users.b.userId]: users.b.token,
+      [users.c.userId]: users.c.token,
+      [users.d.userId]: users.d.token,
+    };
+
+    let releaseFence;
+    let markFence;
+    const fenced = new Promise((resolve) => { markFence = resolve; });
+    const release = new Promise((resolve) => { releaseFence = resolve; });
+    const holder = prisma.$transaction(async (tx) => {
+      await RaceResolutionJobV2.acquireForWrite(tx, { raceId: matchup.id });
+      markFence();
+      await release;
+    }, { timeout: 15_000 });
+    await fenced;
+    const responsePromise = authReq("POST", `/tournaments/${tournamentId}/forfeit`, {
+      token: tokenByUser[forfeiter.userId],
+    });
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const whileFenced = await prisma.raceParticipant.findUnique({
+        where: { id: forfeiter.id },
+        select: { forfeitedAt: true },
+      });
+      assert.equal(
+        whileFenced.forfeitedAt,
+        null,
+        "forfeitedAt cannot commit before the C0 settlement fence",
+      );
+    } finally {
+      releaseFence();
+      await holder;
+    }
+    assert.equal((await responsePromise).status, 200);
+    const settled = await prisma.race.findUnique({ where: { id: matchup.id } });
+    assert.equal(settled.status, "COMPLETED");
+  });
+
+  it("non-funded round advancement guards every winner before creating the next matchup", async () => {
+    const { users, tournamentId } = await fillFourBracket();
+    const roundOne = await prisma.race.findMany({
+      where: { tournamentId, tournamentRound: 1 },
+      include: { participants: true },
+      orderBy: { tournamentMatchIndex: "asc" },
+    });
+    const [firstWinner, firstLoser] = roundOne[0].participants.filter(
+      (participant) => participant.status === "ACCEPTED",
+    );
+    await settleMatchup(roundOne[0].id, {
+      [firstWinner.userId]: 5_000,
+      [firstLoser.userId]: 100,
+    });
+
+    const [forfeiter] = roundOne[1].participants.filter(
+      (participant) => participant.status === "ACCEPTED",
+    );
+    const tokenByUser = {
+      [users.a.userId]: users.a.token,
+      [users.b.userId]: users.b.token,
+      [users.c.userId]: users.c.token,
+      [users.d.userId]: users.d.token,
+    };
+
+    let releaseGuard;
+    let markGuard;
+    const guardHeld = new Promise((resolve) => { markGuard = resolve; });
+    const release = new Promise((resolve) => { releaseGuard = resolve; });
+    const holder = prisma.$transaction(async (tx) => {
+      await tx.fundedExposureGuard.upsert({
+        where: { userId: firstWinner.userId },
+        create: { userId: firstWinner.userId },
+        update: {},
+      });
+      await tx.$queryRaw`
+        SELECT user_id
+        FROM funded_exposure_guards
+        WHERE user_id = ${firstWinner.userId}
+        FOR UPDATE
+      `;
+      markGuard();
+      await release;
+    }, { timeout: 15_000 });
+    await guardHeld;
+
+    const forfeitPromise = authReq(
+      "POST",
+      `/tournaments/${tournamentId}/forfeit`,
+      { token: tokenByUser[forfeiter.userId] },
+    );
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      assert.equal(
+        await prisma.race.count({
+          where: { tournamentId, tournamentRound: 2 },
+        }),
+        0,
+        "next-round membership cannot be created before every winner guard",
+      );
+    } finally {
+      releaseGuard();
+      await holder;
+    }
+
+    assert.equal((await forfeitPromise).status, 200);
+    const final = await prisma.race.findFirst({
+      where: { tournamentId, tournamentRound: 2 },
+      include: { participants: true },
+    });
+    assert.ok(final);
+    assert.deepEqual(
+      final.participants
+        .filter((participant) => participant.status === "ACCEPTED")
+        .map((participant) => participant.userId)
+        .sort(),
+      [
+        firstWinner.userId,
+        ...roundOne[1].participants
+          .filter(
+            (participant) =>
+              participant.status === "ACCEPTED" &&
+              participant.userId !== forfeiter.userId,
+          )
+          .map((participant) => participant.userId),
+      ].sort(),
+    );
   });
 
   it("cancel refunds all held buy-ins; leave->rejoin re-charges under a bumped version", async () => {

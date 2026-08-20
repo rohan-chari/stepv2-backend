@@ -28,6 +28,9 @@ const { appSettings: defaultAppSettings } = require("../../../shared/config/appS
 const {
   isStrictFlagEnabled,
 } = require("../../../shared/config/isStrictFlagEnabled");
+const {
+  raceResolutionIntakeDisabled,
+} = require("../../../shared/config/operationalControls");
 
 // 64 KiB cap on the encoded sync-v2 body (§6.4). The app-wide express.json outer
 // limit is unchanged; this is the tighter v2-specific bound.
@@ -111,7 +114,7 @@ function createStepsRouter(dependencies = {}) {
   router.post("/sync-v2", async (req, res) => {
     // Kill switch: return 503 BEFORE any step/sample/idempotency/queue write so
     // the client can safely run legacy sync without duplicating a v2 persist.
-    if (process.env.ASYNC_RACE_RESOLUTION_DISABLED === "true") {
+    if (raceResolutionIntakeDisabled()) {
       return res.status(503).json({
         error: "Step sync temporarily unavailable",
         code: "ASYNC_DISABLED",

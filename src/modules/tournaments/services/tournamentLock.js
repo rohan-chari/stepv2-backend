@@ -2,6 +2,12 @@ const { prisma: defaultPrisma } = require("../../../db");
 const {
   acquireGlobalEnrollmentLock,
 } = require("../../steps/services/globalEventEnrollment");
+const {
+  lockFundedExposureUsers,
+} = require("../../races/services/fundedExposure");
+const {
+  lockCompetitionRows,
+} = require("../../races/services/raceWriteFence");
 
 // Serialize every capacity-sensitive tournament mutation (join / accept / leave
 // / kick / invite / cancel / start) on the tournament id, so concurrent joins
@@ -12,14 +18,30 @@ const {
 // `fn(tx, deferred)` runs inside the transaction; push event payloads onto
 // `deferred` and they are emitted AFTER the transaction commits (settled state).
 // Returns { result, deferred }.
-async function withTournamentLock(tournamentId, fn, { prisma = defaultPrisma } = {}) {
+async function withTournamentLock(
+  tournamentId,
+  fn,
+  {
+    prisma = defaultPrisma,
+    userIds = [],
+    resolveUserIds = null,
+  } = {},
+) {
   const deferred = [];
   const result = await prisma.$transaction(async (tx) => {
     // One lock order for every path that can create an ACTIVE matchup:
     // global enrollment first, then the tournament mutation lock.
     await acquireGlobalEnrollmentLock(tx);
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${tournamentId}))`;
-    return fn(tx, deferred);
+    const resolvedUserIds = resolveUserIds
+      ? await resolveUserIds(tx)
+      : userIds;
+    await lockFundedExposureUsers(tx, resolvedUserIds || []);
+    await lockCompetitionRows(tx, { tournamentIds: [tournamentId] });
+    const lockedTournament = await tx.tournament.findUnique({
+      where: { id: tournamentId },
+    });
+    return fn(tx, deferred, lockedTournament);
   });
   return { result, deferred };
 }

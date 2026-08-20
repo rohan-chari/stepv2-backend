@@ -26,8 +26,15 @@ const {
   enrollIfGlobalEventActive,
 } = require("../../steps/services/globalEventEnrollment");
 const {
-  RaceResolutionJobV2,
-} = require("../models/raceResolutionJobV2");
+  isFundedPrizeV2Enabled,
+  lockFundedExposureUsers,
+  newRacePrizeStamp,
+  resolveRacePrizeStamp,
+} = require("../services/fundedExposure");
+const {
+  acquireRaceWriteFence,
+  lockCompetitionRows,
+} = require("../services/raceWriteFence");
 
 // Tight cadence so the midnight promote/settle handoff gap is small: at 00:00 ET
 // the just-expired race is filtered out of Featured while the next race is still
@@ -61,6 +68,37 @@ function buildRenewSeededRaces(dependencies = {}) {
   // stream as this job's, not on the default console.
   const { enrollAutoJoinUsers } = buildAutoJoinFeaturedRaces({ prisma, logger });
   const seededBuckets = buildSeededRaceBuckets({ prisma, now });
+  const acquireWriteFence =
+    dependencies.acquireRaceWriteFence || (async (tx, raceId) => (
+      typeof tx.$queryRawUnsafe === "function"
+        ? acquireRaceWriteFence(tx, raceId)
+        : null
+    ));
+  const lockUsers =
+    dependencies.lockFundedExposureUsers || (async (tx, userIds) => (
+      tx.fundedExposureGuard
+        ? lockFundedExposureUsers(tx, userIds)
+        : userIds
+    ));
+  const lockCompetitions =
+    dependencies.lockCompetitionRows || (async (tx, competitionIds) => (
+      typeof tx.$queryRawUnsafe === "function"
+        ? lockCompetitionRows(tx, competitionIds)
+        : []
+    ));
+
+  function runTransaction(callback) {
+    return typeof prisma.$transaction === "function"
+      ? prisma.$transaction(callback, { timeout: 15_000, maxWait: 10_000 })
+      : callback(prisma);
+  }
+
+  async function acquireMembershipLocks(tx, raceId, userIds, at = now()) {
+    await acquireWriteFence(tx, raceId, at);
+    await acquireGlobalEnrollmentLock(tx);
+    await lockUsers(tx, [...new Set(userIds.filter(Boolean))].sort());
+    await lockCompetitions(tx, { raceIds: [raceId] });
+  }
 
   // The [start, end) UTC instants of the calendar period containing `fromDate`
   // in the seed's cadence: a single ET day (daily) or Mon 00:00 -> Mon 00:00 ET
@@ -87,16 +125,19 @@ function buildRenewSeededRaces(dependencies = {}) {
     // DB default is WINNER_TAKES_ALL). Gated on the kill switch: while it is off
     // the races stay legacy (fundedPrize false) and keep minting today's graded
     // raceFinishReward.
-    const [fundedPrizePools, payoutRoundingV1Enabled] = await Promise.all([
-      settings.getFlag("fundedPrizePoolsEnabled"),
-      settings.getFlag("payoutRoundingV1Enabled"),
-    ]);
+    const fundedPrizePools = await settings.getFlag("fundedPrizePoolsEnabled");
+    const payoutRoundingV1Enabled = await settings.getFlag(
+      "payoutRoundingV1Enabled",
+    );
     // Top-heavy payouts are STAMPED here and nowhere else: read paths and
     // settlement consult the column, so flipping the flag later can only change
     // what FUTURE races advertise, never an in-flight or historical one.
     const geometricPayouts = await settings.getFlag(
       "seededGeometricPayoutsEnabled"
     );
+    const prizeStamp = isFundedPrizeV2Enabled()
+      ? newRacePrizeStamp()
+      : resolveRacePrizeStamp({ prizeCalculationVersion: 1 });
     // NOTE (batch 2026-08-08 item 5): this path bypasses raceModel.create, so
     // it does NOT stamp team_pool_mult_bps — correct, because a seeded
     // Daily/Weekly is never a team race (isTeamRace stays at the schema default
@@ -108,6 +149,15 @@ function buildRenewSeededRaces(dependencies = {}) {
         payoutPreset: "TOP_HALF",
         payoutCurve: geometricPayouts === true ? "GEOMETRIC" : null,
         fundedPrize: fundedPrizePools === true,
+        prizeCalculationVersion: prizeStamp.prizeCalculationVersion,
+        prizeCoinUnit:
+          prizeStamp.prizeCalculationVersion >= 2
+            ? prizeStamp.prizeCoinUnit
+            : null,
+        prizePoolMaxCoins:
+          prizeStamp.prizeCalculationVersion >= 2
+            ? prizeStamp.prizePoolMaxCoins
+            : null,
         payoutRoundingVersion: payoutRoundingV1Enabled === true ? 1 : 0,
         seedId: seed.id,
         creatorId: null,
@@ -143,6 +193,11 @@ function buildRenewSeededRaces(dependencies = {}) {
         scheduledStartAt: true,
         powerupsEnabled: true,
         powerupStepInterval: true,
+        fundedPrize: true,
+        maxDurationDays: true,
+        prizeCoinUnit: true,
+        prizePoolMaxCoins: true,
+        prizeCalculationVersion: true,
       },
     });
   }
@@ -214,35 +269,47 @@ function buildRenewSeededRaces(dependencies = {}) {
       });
       if (inactive.size === 0) return 0;
 
-      const participantWhere = {
-        raceId: race.id,
-        status: "ACCEPTED",
-        userId: { in: [...inactive] },
-      };
-      // Assignment rows intentionally retain their exact participant pointer
-      // as the audit of the immutable plan. A private bucket therefore prunes
-      // by revoking the participant instead of deleting it (the FK stays valid
-      // and the row no longer occupies an ACCEPTED slot); legacy races retain
-      // their historical delete semantics.
-      let count;
-      if (race.seededBucketId) {
-        await prisma.seededRaceBucketAssignment.updateMany({
-          where: { bucketId: race.seededBucketId, userId: { in: [...inactive] } },
-          data: { state: "PRUNED" },
+      const inactiveIds = [...inactive].sort();
+      const count = await runTransaction(async (tx) => {
+        await acquireMembershipLocks(tx, race.id, inactiveIds);
+        const lockedRace = await tx.race.findUnique({
+          where: { id: race.id },
+          select: { status: true, seededBucketId: true },
         });
-        ({ count } = await prisma.raceParticipant.updateMany({
+        if (!lockedRace || lockedRace.status !== "PENDING") return 0;
+        const participantWhere = {
+          raceId: race.id,
+          status: "ACCEPTED",
+          userId: { in: inactiveIds },
+        };
+        // Assignment rows intentionally retain their exact participant pointer
+        // as the audit of the immutable plan. A private bucket therefore prunes
+        // by revoking the participant instead of deleting it (the FK stays valid
+        // and the row no longer occupies an ACCEPTED slot); legacy races retain
+        // their historical delete semantics.
+        if (lockedRace.seededBucketId) {
+          await tx.seededRaceBucketAssignment.updateMany({
+            where: {
+              bucketId: lockedRace.seededBucketId,
+              userId: { in: inactiveIds },
+            },
+            data: { state: "PRUNED" },
+          });
+          return (await tx.raceParticipant.updateMany({
+            where: participantWhere,
+            data: { status: "DECLINED" },
+          })).count;
+        }
+        return (await tx.raceParticipant.deleteMany({
           where: participantWhere,
-          data: { status: "DECLINED" },
-        }));
-      } else {
-        ({ count } = await prisma.raceParticipant.deleteMany({ where: participantWhere }));
-      }
+        })).count;
+      });
       if (count > 0) {
         logger.log(
           `[CRON] Pruned ${count} inactive participant(s) from seeded race ${race.id}`
         );
       }
-      await flipAutoEnroll([...inactive], now(), "promotion prune");
+      await flipAutoEnroll(inactiveIds, now(), "promotion prune");
       return count;
     } catch (error) {
       logger.error(`[CRON] Inactivity prune failed for race ${race.id}:`, error);
@@ -305,12 +372,18 @@ function buildRenewSeededRaces(dependencies = {}) {
         // so the cascade travels via the caster's powerup rows).
         const remaining = [...inactive].filter((id) => !walked.has(id));
         if (remaining.length === 0) return 0;
-        const [powerups, effects] = await Promise.all([
-          prisma.racePowerup.findMany({
+        const count = await runTransaction(async (tx) => {
+          await acquireMembershipLocks(tx, race.id, remaining, nowDate);
+          const lockedRace = await tx.race.findUnique({
+            where: { id: race.id },
+            select: { status: true, seededBucketId: true },
+          });
+          if (!lockedRace || lockedRace.status !== "ACTIVE") return 0;
+          const powerups = await tx.racePowerup.findMany({
             where: { raceId: race.id, userId: { in: remaining } },
             select: { userId: true },
-          }),
-          prisma.raceActiveEffect.findMany({
+          });
+          const effects = await tx.raceActiveEffect.findMany({
             where: {
               raceId: race.id,
               OR: [
@@ -319,35 +392,36 @@ function buildRenewSeededRaces(dependencies = {}) {
               ],
             },
             select: { targetUserId: true, sourceUserId: true },
-          }),
-        ]);
-        const entangled = new Set(powerups.map((p) => p.userId));
-        for (const effect of effects) {
-          entangled.add(effect.targetUserId);
-          entangled.add(effect.sourceUserId);
-        }
-
-        const doomed = remaining.filter((id) => !entangled.has(id));
-        if (doomed.length === 0) return 0;
-
-        const participantWhere = {
-          raceId: race.id,
-          status: "ACCEPTED",
-          userId: { in: doomed },
-        };
-        let count;
-        if (race.seededBucketId) {
-          await prisma.seededRaceBucketAssignment.updateMany({
-            where: { bucketId: race.seededBucketId, userId: { in: doomed } },
-            data: { state: "PRUNED" },
           });
-          ({ count } = await prisma.raceParticipant.updateMany({
+          const entangled = new Set(powerups.map((p) => p.userId));
+          for (const effect of effects) {
+            entangled.add(effect.targetUserId);
+            entangled.add(effect.sourceUserId);
+          }
+          const doomed = remaining.filter((id) => !entangled.has(id));
+          if (doomed.length === 0) return 0;
+          const participantWhere = {
+            raceId: race.id,
+            status: "ACCEPTED",
+            userId: { in: doomed },
+          };
+          if (lockedRace.seededBucketId) {
+            await tx.seededRaceBucketAssignment.updateMany({
+              where: {
+                bucketId: lockedRace.seededBucketId,
+                userId: { in: doomed },
+              },
+              data: { state: "PRUNED" },
+            });
+            return (await tx.raceParticipant.updateMany({
+              where: participantWhere,
+              data: { status: "DECLINED" },
+            })).count;
+          }
+          return (await tx.raceParticipant.deleteMany({
             where: participantWhere,
-            data: { status: "DECLINED" },
-          }));
-        } else {
-          ({ count } = await prisma.raceParticipant.deleteMany({ where: participantWhere }));
-        }
+          })).count;
+        });
         if (count > 0) {
           logger.log(
             `[CRON] Weekly sweep removed ${count} ghost(s) from race ${race.id}`
@@ -384,16 +458,21 @@ function buildRenewSeededRaces(dependencies = {}) {
     // One cron worker owns promotion. The compare-and-swap prevents a second
     // process that read the same PENDING row from duplicating box init and
     // RACE_STARTED push fanout.
-    const runTransaction = typeof prisma.$transaction === "function"
-      ? (callback) => prisma.$transaction(callback)
-      : (callback) => callback(prisma);
     const accepted = await runTransaction(async (tx) => {
-      // Shared order for boundary/join/start/settlement: global enrollment,
-      // then the race writer fence, then membership/state writes.
+      // Universal membership/lifecycle order: C0, global event, sorted user
+      // guards, then the competition row. The optimistic user discovery is
+      // stable after C0 because every membership writer shares that fence.
+      await acquireWriteFence(tx, race.id, startedAt);
       await acquireGlobalEnrollmentLock(tx);
-      if (typeof tx.$queryRawUnsafe === "function") {
-        await RaceResolutionJobV2.acquireForWrite(tx, { raceId: race.id, now: startedAt });
-      }
+      const discoveredParticipants = await tx.raceParticipant.findMany({
+        where: { raceId: race.id, status: "ACCEPTED" },
+        select: { userId: true },
+      });
+      await lockUsers(
+        tx,
+        discoveredParticipants.map((participant) => participant.userId),
+      );
+      await lockCompetitions(tx, { raceIds: [race.id] });
       const locked = typeof tx.race.findUnique === "function"
         ? await tx.race.findUnique({
             where: { id: race.id },

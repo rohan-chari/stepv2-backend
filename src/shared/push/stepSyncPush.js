@@ -113,7 +113,11 @@ function buildStepSyncPushService(dependencies = {}) {
     const uniqueUserIds = [...new Set(userIds.filter(Boolean))];
 
     const flags = getPerformanceFlags();
-    if (flags.stepSyncBulkEnabled) {
+    if (
+      flags.stepSyncBulkEnabled &&
+      typeof userModel.findStepSyncCandidates === "function" &&
+      typeof deviceTokenModel.findByUserIds === "function"
+    ) {
       return requestStepSyncForUsersBulk(
         uniqueUserIds,
         options,

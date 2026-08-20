@@ -28,9 +28,9 @@ function makeInventoryDeps(rows) {
 
 test("inventory returns correct per-type quantities", async () => {
   const deps = makeInventoryDeps([
-    { userId: "user-1", powerupType: "IMPOSTER", quantity: 3 },
+    { userId: "user-1", powerupType: "RAINSTORM", quantity: 3 },
     { userId: "user-1", powerupType: "MIRROR", quantity: 1 },
-    { userId: "user-2", powerupType: "IMPOSTER", quantity: 99 },
+    { userId: "user-2", powerupType: "RAINSTORM", quantity: 99 },
   ]);
   const getInventory = buildGetPowerupInventory(deps);
 
@@ -39,14 +39,14 @@ test("inventory returns correct per-type quantities", async () => {
   const byType = Object.fromEntries(
     result.items.map((i) => [i.powerupType, i.quantity])
   );
-  assert.equal(byType.IMPOSTER, 3);
+  assert.equal(byType.RAINSTORM, 3);
   assert.equal(byType.MIRROR, 1);
   assert.equal(result.items.length, 2, "only this user's rows");
 });
 
 test("inventory omits zero-quantity rows", async () => {
   const deps = makeInventoryDeps([
-    { userId: "user-1", powerupType: "IMPOSTER", quantity: 0 },
+    { userId: "user-1", powerupType: "RAINSTORM", quantity: 0 },
     { userId: "user-1", powerupType: "MIRROR", quantity: 2 },
   ]);
   const getInventory = buildGetPowerupInventory(deps);
@@ -93,14 +93,14 @@ test("powerup catalog lists active items with price + coin balance + owned qty",
     items: [
       {
         id: "psi-1",
-        sku: "POWERUP_IMPOSTER",
-        name: "Imposter",
+        sku: "POWERUP_RAINSTORM",
+        name: "Rainstorm",
         description: "Swap positions",
         priceCoins: 75,
-        powerupType: "IMPOSTER",
+        powerupType: "RAINSTORM",
       },
     ],
-    inventory: [{ powerupType: "IMPOSTER", quantity: 2 }],
+    inventory: [{ powerupType: "RAINSTORM", quantity: 2 }],
   });
   const getCatalog = buildGetPowerupShopCatalog(deps);
 
@@ -109,10 +109,10 @@ test("powerup catalog lists active items with price + coin balance + owned qty",
   assert.equal(result.coins, 750);
   assert.equal(result.items.length, 1);
   const item = result.items[0];
-  assert.equal(item.sku, "POWERUP_IMPOSTER");
-  assert.equal(item.name, "Imposter");
+  assert.equal(item.sku, "POWERUP_RAINSTORM");
+  assert.equal(item.name, "Rainstorm");
   assert.equal(item.priceCoins, 75);
-  assert.equal(item.powerupType, "IMPOSTER");
+  assert.equal(item.powerupType, "RAINSTORM");
   assert.equal(item.ownedQuantity, 2, "shows how many the user owns");
 });
 
@@ -122,10 +122,10 @@ test("powerup catalog reports ownedQuantity 0 for unowned types", async () => {
     items: [
       {
         id: "psi-1",
-        sku: "POWERUP_IMPOSTER",
-        name: "Imposter",
+        sku: "POWERUP_RAINSTORM",
+        name: "Rainstorm",
         priceCoins: 75,
-        powerupType: "IMPOSTER",
+        powerupType: "RAINSTORM",
       },
     ],
     inventory: [],

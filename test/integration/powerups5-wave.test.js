@@ -147,11 +147,12 @@ describe("powerups5 wave — integration", () => {
 
   // ── 1. Gating matrix ────────────────────────────────────────────────────
   describe("gating", () => {
-    it("catalog exposes the 11 only with powerups5; identical without it", async () => {
+    it("catalog exposes wave 5 only to capable clients and omits retired Imposter", async () => {
       await seedCatalog();
       const u = await createUser("Cat", 1000);
       const withP5 = await (await request(server.baseUrl, "GET", "/shop/powerups", { token: u.token, headers: P5 })).json();
       const types = withP5.items.map((i) => i.powerupType);
+      assert.equal(types.includes("IMPOSTER"), false);
       for (const w of WAVE5) assert.ok(types.includes(w.powerupType), `${w.powerupType} visible with powerups5`);
       const byType = Object.fromEntries(withP5.items.map((i) => [i.powerupType, i]));
       assert.equal(byType.UPRISING.priceCoins, 300);
@@ -161,7 +162,7 @@ describe("powerups5 wave — integration", () => {
       const withoutP5 = await (await request(server.baseUrl, "GET", "/shop/powerups", { token: u.token, headers: OLD })).json();
       const oldTypes = withoutP5.items.map((i) => i.powerupType);
       for (const w of WAVE5) assert.ok(!oldTypes.includes(w.powerupType), `${w.powerupType} hidden from old client`);
-      assert.ok(oldTypes.includes("IMPOSTER"), "base catalog unchanged");
+      assert.equal(oldTypes.includes("IMPOSTER"), false);
     });
 
     it("purchase guard: wave-5 purchase from old client → 404", async () => {

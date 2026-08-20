@@ -5,6 +5,16 @@ const {
   acquireGlobalEnrollmentLock,
   enrollIfGlobalEventActive,
 } = require("../../steps/services/globalEventEnrollment");
+const {
+  computeRaceExposureStamp,
+  lockFundedExposureUsers,
+  reserveFundedExposure,
+  resolveRacePrizeStamp,
+} = require("../services/fundedExposure");
+const {
+  acquireRaceWriteFence,
+  lockCompetitionRows,
+} = require("../services/raceWriteFence");
 
 // Signup starter-race enrollment (product decision 2026-07-12): a brand-new
 // account must never land on an empty races list. Called best-effort from the
@@ -33,28 +43,85 @@ function buildAutoEnrollNewUser(dependencies = {}) {
   const db = dependencies.prisma || defaultPrisma;
   const events = dependencies.eventBus || eventBus;
   const hashSub = dependencies.hashAppleSub || hashAppleSub;
+  const acquireWriteFence =
+    dependencies.acquireRaceWriteFence || acquireRaceWriteFence;
+  const lockUsers =
+    dependencies.lockFundedExposureUsers || lockFundedExposureUsers;
+  const lockCompetitions =
+    dependencies.lockCompetitionRows || lockCompetitionRows;
 
   const WELCOME_BOXES = 3;
   const DEFAULT_POWERUP_SLOTS = 3;
 
-  async function createAcceptedParticipant(race, userId) {
-    if (race.status !== "ACTIVE") {
-      return db.raceParticipant.create({
-        data: { raceId: race.id, userId, status: "ACCEPTED" },
-      });
-    }
+  async function createAcceptedParticipant(race, userId, { allowOverCapacity = false } = {}) {
     return db.$transaction(async (tx) => {
-      // One lock order for every membership writer: enrollment advisory lock
-      // before participant/event-impact rows.
+      await acquireWriteFence(tx, race.id);
+      // The selection read above is optimistic: the race may have started
+      // before C0 was acquired. Take the global-event lock unconditionally so
+      // the authoritative lifecycle reread below can safely choose the ACTIVE
+      // enrollment path without relying on stale status.
       await acquireGlobalEnrollmentLock(tx);
+      await lockUsers(tx, [userId]);
+      let exposureStamp = null;
+      if (race.fundedPrize === true) {
+        const prizeStamp = resolveRacePrizeStamp(race);
+        exposureStamp = computeRaceExposureStamp({
+          maxDurationDays: race.maxDurationDays,
+          prizeCoinUnit: prizeStamp.prizeCoinUnit,
+          teamPoolMultBps: race.teamPoolMultBps,
+        });
+        await reserveFundedExposure({
+          tx,
+          userId,
+          stamp: exposureStamp,
+          competition: { raceId: race.id },
+        });
+      } else {
+        await lockCompetitions(tx, { raceIds: [race.id] });
+      }
+      const lockedRace = await tx.race.findUnique({
+        where: { id: race.id },
+        select: { status: true, maxParticipants: true },
+      });
+      if (!lockedRace || !["ACTIVE", "PENDING"].includes(lockedRace.status)) {
+        const error = new Error("Race is no longer joinable");
+        error.code = "RACE_NOT_JOINABLE";
+        throw error;
+      }
+      const acceptedCount = await tx.raceParticipant.count({
+        where: { raceId: race.id, status: "ACCEPTED" },
+      });
+      if (
+        !allowOverCapacity &&
+        lockedRace.maxParticipants != null &&
+        acceptedCount >= lockedRace.maxParticipants
+      ) {
+        const error = new Error("Race is full");
+        error.code = "RACE_FULL";
+        throw error;
+      }
       const participant = await tx.raceParticipant.create({
-        data: { raceId: race.id, userId, status: "ACCEPTED" },
+        data: {
+          raceId: race.id,
+          userId,
+          status: "ACCEPTED",
+          ...(exposureStamp
+            ? {
+                fundedExposureMillicoins:
+                  exposureStamp.exposureMillicoins,
+                fundedExposureRateMillicoinsPerDay:
+                  exposureStamp.exposureRateMillicoinsPerDay,
+              }
+            : {}),
+        },
       });
-      await enrollIfGlobalEventActive(tx, {
-        raceId: race.id,
-        userIds: [userId],
-        at: new Date(),
-      });
+      if (lockedRace.status === "ACTIVE") {
+        await enrollIfGlobalEventActive(tx, {
+          raceId: race.id,
+          userIds: [userId],
+          at: new Date(),
+        });
+      }
       return participant;
     });
   }
@@ -158,6 +225,7 @@ function buildAutoEnrollNewUser(dependencies = {}) {
             welcomeTarget = { race, participant };
           }
         } catch (error) {
+          if (error?.code === "FUNDED_EXPOSURE_LIMIT") continue;
           if (!error || error.code !== "P2002") throw error;
         }
       }
@@ -176,15 +244,19 @@ function buildAutoEnrollNewUser(dependencies = {}) {
         const fallback = races.find((race) => race.status === "ACTIVE");
         if (fallback) {
           try {
-            const participant = await createAcceptedParticipant(fallback, user.id);
+            const participant = await createAcceptedParticipant(fallback, user.id, {
+              allowOverCapacity: true,
+            });
             joinedCount += 1;
             welcomeTarget = { race: fallback, participant };
             console.warn(
               `AUTO_ENROLL_OVER_CAPACITY: every seeded race was full; enrolled user=${user.id} into race=${fallback.id} over its ${fallback.maxParticipants} cap`
             );
           } catch (error) {
-            if (!error || error.code !== "P2002") throw error;
-            joinedCount += 1;
+            if (error?.code !== "FUNDED_EXPOSURE_LIMIT") {
+              if (!error || error.code !== "P2002") throw error;
+              joinedCount += 1;
+            }
           }
         }
       }

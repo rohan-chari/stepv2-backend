@@ -34,7 +34,7 @@ test("returns the full active catalog for a jammer-capable client", async () => 
   });
   assert.deepEqual(
     pool.map((p) => p.powerupType),
-    ["IMPOSTER", "RAINSTORM", "SIGNAL_JAMMER"]
+    ["RAINSTORM", "SIGNAL_JAMMER"]
   );
 });
 
@@ -47,7 +47,7 @@ test("filters out the Signal Jammer for a client without the jammer feature", as
   });
   assert.deepEqual(
     pool.map((p) => p.powerupType),
-    ["IMPOSTER", "RAINSTORM"]
+    ["RAINSTORM"]
   );
   assert.ok(!pool.some((p) => p.powerupType === "SIGNAL_JAMMER"));
 });

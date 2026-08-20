@@ -11,6 +11,10 @@ const {
   assertStatusIn,
   refundHeldBuyIn,
 } = require("../../../shared/competition/lifecycle");
+const {
+  lockFundedExposureUsers,
+} = require("../services/fundedExposure");
+const { acquireRaceWriteFence } = require("../services/raceWriteFence");
 
 // TR-205: leaving a PENDING team race is free — the HELD buy-in is released and
 // the participant row is deleted, so a later re-join is a fresh join (either
@@ -41,6 +45,8 @@ function buildLeaveRace(dependencies = {}) {
   const events = dependencies.eventBus || eventBus;
   const forfeitRace = dependencies.forfeitRace || defaultForfeitRace;
   const db = dependencies.prisma || defaultPrisma;
+  const acquireWriteFence = dependencies.acquireRaceWriteFence ||
+    (Object.keys(dependencies).length > 0 ? async () => null : acquireRaceWriteFence);
   // Injected command doubles deliberately omit Prisma. Do not silently route
   // those tests through the process-wide database connection.
   const useTransactionalMutation =
@@ -123,6 +129,8 @@ function buildLeaveRace(dependencies = {}) {
     // from turning a valid lobby leave into an active-row deletion/refund.
     if (useTransactionalMutation && typeof db.$transaction === "function") {
       participant = await db.$transaction(async (tx) => {
+        await acquireWriteFence(tx, raceId);
+        await lockFundedExposureUsers(tx, [userId]);
         await tx.$queryRawUnsafe(
           `SELECT id FROM races WHERE id = $1 FOR UPDATE`,
           raceId

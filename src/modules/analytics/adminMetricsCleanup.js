@@ -1,6 +1,9 @@
 const { randomUUID } = require("node:crypto");
 const { Prisma } = require("@prisma/client");
 const { prisma: defaultPrisma } = require("../../db");
+const {
+  destructiveCleanupDisabled,
+} = require("../../shared/config/operationalControls");
 
 const TICK_MS = 5 * 60 * 1000;
 const DEFINITIONS = {
@@ -48,7 +51,7 @@ function buildFencedCleanup(definition, dependencies = {}) {
   const cutoffColumn = Prisma.raw(`"${definition.cutoffColumn}"`);
 
   return async function cleanup() {
-    if (env.ADMIN_METRICS_V2_CLEANUP_DISABLED === "true") {
+    if (destructiveCleanupDisabled("ADMIN_METRICS_V2_CLEANUP_DISABLED", env)) {
       return { skipped: "disabled", deleted: 0 };
     }
     const current = now();

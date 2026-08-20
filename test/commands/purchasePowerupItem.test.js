@@ -7,7 +7,7 @@ const {
 } = require("../../src/modules/powerups/commands/purchasePowerupItem");
 
 // ---------------------------------------------------------------------------
-// Coin-purchasable powerup store. Buying a PowerupShopItem (e.g. Imposter, 500
+// Coin-purchasable powerup store. Buying a PowerupShopItem (e.g. Rainstorm, 500
 // coins):
 //   - debits User.coins by priceCoins
 //   - increments UserPowerupItem.quantity for that powerupType (creating the row
@@ -29,11 +29,11 @@ function makeDeps(overrides = {}) {
       ? null
       : {
           id: "psi-1",
-          sku: overrides.sku ?? "POWERUP_IMPOSTER",
-          name: overrides.name ?? "Imposter",
+          sku: overrides.sku ?? "POWERUP_RAINSTORM",
+          name: overrides.name ?? "Rainstorm",
           description: overrides.description ?? "Swap positions",
           priceCoins: overrides.priceCoins ?? 500,
-          powerupType: overrides.powerupType ?? "IMPOSTER",
+          powerupType: overrides.powerupType ?? "RAINSTORM",
           active: overrides.itemActive ?? true,
         },
     // existing inventory quantity for the purchased type
@@ -123,7 +123,7 @@ test("purchase debits coins and increments inventory quantity", async () => {
 
   const result = await purchase({
     userId: "user-1",
-    sku: "POWERUP_IMPOSTER",
+    sku: "POWERUP_RAINSTORM",
     idempotencyKey: "key-1",
   });
 
@@ -131,7 +131,7 @@ test("purchase debits coins and increments inventory quantity", async () => {
   assert.equal(deps.calls.coinDebits[0], 500);
   assert.equal(result.coins, 500, "returns updated balance");
   assert.equal(result.inventory.quantity, 1, "owned quantity is now 1");
-  assert.equal(result.inventory.powerupType, "IMPOSTER");
+  assert.equal(result.inventory.powerupType, "RAINSTORM");
 });
 
 test("purchase is re-buyable: a second buy increments quantity again", async () => {
@@ -140,7 +140,7 @@ test("purchase is re-buyable: a second buy increments quantity again", async () 
 
   const result = await purchase({
     userId: "user-1",
-    sku: "POWERUP_IMPOSTER",
+    sku: "POWERUP_RAINSTORM",
     idempotencyKey: "key-rebuy",
   });
 
@@ -156,7 +156,7 @@ test("insufficient coins is rejected and does NOT debit", async () => {
     () =>
       purchase({
         userId: "user-1",
-        sku: "POWERUP_IMPOSTER",
+        sku: "POWERUP_RAINSTORM",
         idempotencyKey: "key-poor",
       }),
     (err) => {
@@ -179,7 +179,7 @@ test("inactive / missing item is rejected", async () => {
     () =>
       purchase({
         userId: "user-1",
-        sku: "POWERUP_IMPOSTER",
+        sku: "POWERUP_RAINSTORM",
         idempotencyKey: "key-missing",
       }),
     (err) => err instanceof PowerupPurchaseError
@@ -192,14 +192,14 @@ test("idempotent: replaying the same key returns the prior result and does not d
 
   const first = await purchase({
     userId: "user-1",
-    sku: "POWERUP_IMPOSTER",
+    sku: "POWERUP_RAINSTORM",
     idempotencyKey: "dup-key",
   });
   assert.equal(deps.state.user.coins, 500);
 
   const second = await purchase({
     userId: "user-1",
-    sku: "POWERUP_IMPOSTER",
+    sku: "POWERUP_RAINSTORM",
     idempotencyKey: "dup-key",
   });
 
@@ -240,7 +240,7 @@ test("missing idempotency key is rejected", async () => {
   const purchase = buildPurchasePowerupItem(deps);
 
   await assert.rejects(
-    () => purchase({ userId: "user-1", sku: "POWERUP_IMPOSTER" }),
+    () => purchase({ userId: "user-1", sku: "POWERUP_RAINSTORM" }),
     (err) => err instanceof PowerupPurchaseError
   );
 });

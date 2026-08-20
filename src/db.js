@@ -1,4 +1,35 @@
 require("dotenv").config();
+
+// Query events attach a global listener to every Prisma query. They are useful
+// to local/integration capacity tooling, but enabling them in production adds
+// hot-path work across the entire API. The staging process intentionally runs
+// with NODE_ENV=production, so its existing port AND parsed database identity
+// must both match the deployed staging topology. Anything ambiguous fails
+// before constructing Prisma.
+function isExplicitStagingRuntime(env = process.env) {
+  if (env.PORT !== "3003" || typeof env.DATABASE_URL !== "string") {
+    return false;
+  }
+  try {
+    const parsed = new URL(env.DATABASE_URL);
+    if (!["postgres:", "postgresql:"].includes(parsed.protocol)) return false;
+    const databaseName = decodeURIComponent(parsed.pathname.slice(1));
+    return databaseName === "bara-staging-pool";
+  } catch {
+    return false;
+  }
+}
+
+if (
+  process.env.NODE_ENV === "production" &&
+  process.env.PRISMA_QUERY_EVENTS_ENABLED === "true" &&
+  !isExplicitStagingRuntime()
+) {
+  throw new Error(
+    "PRISMA_QUERY_EVENTS_ENABLED is allowed only for the explicit staging runtime (PORT=3003 and database bara-staging-pool)",
+  );
+}
+
 const { PrismaClient } = require("@prisma/client");
 const { PrismaPg } = require("@prisma/adapter-pg");
 const { AsyncLocalStorage } = require("node:async_hooks");

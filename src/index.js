@@ -3,6 +3,12 @@ const { apnsService } = require("./shared/push/apns");
 const {
   logPerformanceFlags,
 } = require("./shared/config/performanceFlags");
+const {
+  adValueEnabled,
+  destructiveCleanupDisabled,
+  raceResolutionPostTaskWorkerDisabled,
+  userFanoutDisabled,
+} = require("./shared/config/operationalControls");
 
 const { createApp } = require("./app");
 const {
@@ -134,24 +140,24 @@ function startServer({
       // env var is an emergency kill switch ONLY (set LIVE_PLACEMENT_DISABLED=true to
       // stop the per-placement push fan-out without a code deploy) — kept because this
       // is the one job that can push to the whole user base on a 5-minute cadence.
-      if (process.env.LIVE_PLACEMENT_DISABLED !== "true") {
+      if (!userFanoutDisabled("LIVE_PLACEMENT_DISABLED")) {
         scheduleLivePlacements();
       }
       // Nightly prune of the notifications audit log (1am ET). Kill switch:
       // NOTIFICATION_CLEANUP_DISABLED=true.
-      if (process.env.NOTIFICATION_CLEANUP_DISABLED !== "true") {
+      if (!destructiveCleanupDisabled("NOTIFICATION_CLEANUP_DISABLED")) {
         scheduleNotifCleanup();
       }
-      if (process.env.INBOX_EXPIRY_DISABLED !== "true") {
+      if (!destructiveCleanupDisabled("INBOX_EXPIRY_DISABLED")) {
         scheduleInboxExpiryJob();
       }
-      if (process.env.INBOX_DELIVERY_DISABLED !== "true") {
+      if (!userFanoutDisabled("INBOX_DELIVERY_DISABLED")) {
         scheduleInboxDeliveryJob();
       }
-      if (process.env.ACTIVATION_EVENT_CLEANUP_DISABLED !== "true") {
+      if (!destructiveCleanupDisabled("ACTIVATION_EVENT_CLEANUP_DISABLED")) {
         scheduleActivationCleanup();
       }
-      if (process.env.ADMIN_METRICS_V2_CLEANUP_DISABLED !== "true") {
+      if (!destructiveCleanupDisabled("ADMIN_METRICS_V2_CLEANUP_DISABLED")) {
         scheduleMetricsActivityCleanup();
         schedulePushCleanup();
         scheduleReferralCleanup();
@@ -165,13 +171,13 @@ function startServer({
       // first prune of a mis-computed cutoff is unrecoverable. The build function
       // ALSO honors the env var, so even if scheduled it no-ops while the switch
       // is "true". Unset (not "true") => the cron RUNS, so do not forget the .env.
-      if (process.env.STEP_SAMPLE_RETENTION_DISABLED !== "true") {
+      if (!destructiveCleanupDisabled("STEP_SAMPLE_RETENTION_DISABLED")) {
         scheduleStepRetention();
       }
       // Daily biggest-mover digest (4pm ET) — like live placement, this can push to
       // the whole active-racer base, so it gets its own kill switch:
       // DAILY_MOVER_DISABLED=true.
-      if (process.env.DAILY_MOVER_DISABLED !== "true") {
+      if (!userFanoutDisabled("DAILY_MOVER_DISABLED")) {
         scheduleDaily();
       }
       // Daily-reward reminder (5pm & 9pm local per user timezone). Like the other
@@ -185,7 +191,7 @@ function startServer({
       // unconditionally adds the DEFAULT_ZONE candidate and queries it with
       // includeNull:true, which matches EVERY user whose timezone is still null.
       // Unset, this pushes to the entire base at 5pm/9pm ET on day one.
-      if (process.env.DAILY_REWARD_REMINDERS_DISABLED !== "true") {
+      if (!userFanoutDisabled("DAILY_REWARD_REMINDERS_DISABLED")) {
         scheduleDailyReminder();
       }
       // Step-milestone evening reminder (7pm local per user timezone; batch
@@ -202,7 +208,7 @@ function startServer({
       // includeNull:true, which matches EVERY user whose timezone is still
       // null. Unset, this pushes to the whole eligible base at 7pm ET on day
       // one.
-      if (process.env.STEP_MILESTONE_REMINDERS_DISABLED !== "true") {
+      if (!userFanoutDisabled("STEP_MILESTONE_REMINDERS_DISABLED")) {
         scheduleMilestoneReminder();
       }
       // Durable async race-resolution worker (Home/Races Refresh Performance).
@@ -218,10 +224,10 @@ function startServer({
       // Delivery/publication groups are durable and drain independently of the
       // creation flag. The whole-runner emergency switch is checked here and
       // again on each scheduler tick; disabling it leaves every row untouched.
-      if (process.env.RACE_RESOLUTION_POST_TASK_WORKER_DISABLED !== "true") {
+      if (!raceResolutionPostTaskWorkerDisabled()) {
         scheduleResolutionPostTasks();
       }
-      if (process.env.RACE_PAYOUT_DOUBLE_RECONCILE_ENABLED === "true") {
+      if (adValueEnabled("payoutReconcile")) {
         schedulePayoutDoubleReconcile();
       }
     };

@@ -66,6 +66,11 @@ const {
 const {
   invalidateHomeActiveGlobalEvent,
 } = require("../../steps/services/globalStepEventEntitlement");
+const {
+  computeRaceExposureStamp,
+  reserveFundedExposure,
+  resolveRacePrizeStamp,
+} = require("../services/fundedExposure");
 
 function buildJoinRaceCore(dependencies = {}) {
   // C0 (spec §5a item 4): after this command's own small writes, mark the race
@@ -281,6 +286,57 @@ function buildJoinRaceCore(dependencies = {}) {
     // already carries buyInAmount 0, and the row's fundedPrize flag (not the
     // feature flag) is what makes that permanent.
     const buyInAmount = race.fundedPrize === true ? 0 : race.buyInAmount || 0;
+    const racePrizeStamp = resolveRacePrizeStamp(race);
+    const fundedExposureStamp =
+      race.fundedPrize === true
+        ? computeRaceExposureStamp({
+            maxDurationDays: race.maxDurationDays,
+            prizeCoinUnit: racePrizeStamp.prizeCoinUnit,
+            teamPoolMultBps: race.teamPoolMultBps,
+          })
+        : null;
+    if (fundedExposureStamp && transactionClient) {
+      await reserveFundedExposure({
+        tx: transactionClient,
+        userId,
+        stamp: fundedExposureStamp,
+        competition: { raceId },
+      });
+      // Global exposure guards are locked before the competition row. The
+      // surrounding race advisory lock serializes capacity; this row lock
+      // closes mixed-writer admission against settlement/release seams.
+      await transactionClient.$queryRaw`
+        SELECT id FROM races WHERE id = ${raceId} FOR UPDATE
+      `;
+      const lockedRace = await transactionClient.race.findUnique({
+        where: { id: raceId },
+        include: { participants: true },
+      });
+      if (
+        !lockedRace ||
+        (lockedRace.status !== "PENDING" && lockedRace.status !== "ACTIVE")
+      ) {
+        throw new RaceJoinError("This race is no longer accepting participants", 409, "RACE_NOT_JOINABLE");
+      }
+      const lockedExisting = lockedRace.participants.find(
+        (entry) => entry.userId === userId,
+      );
+      if (lockedExisting) {
+        throw new RaceJoinError("You are already in this race", 400, "ALREADY_RESPONDED");
+      }
+      const lockedAcceptedCount = lockedRace.participants.filter(
+        (entry) => entry.status === "ACCEPTED",
+      ).length;
+      if (
+        lockedRace.maxParticipants != null &&
+        lockedAcceptedCount >= lockedRace.maxParticipants
+      ) {
+        throw new RaceJoinError("This race is full", 400);
+      }
+      if (lockedRace.isTeamRace && (!joinTeam || isTeamSideFull(lockedRace, joinTeam))) {
+        throw new RaceJoinError("That team is full", 409, "TEAM_FULL");
+      }
+    }
     if (buyInAmount > 0) {
       await ensureUserCanAfford({
         userModel,
@@ -311,6 +367,14 @@ function buildJoinRaceCore(dependencies = {}) {
               buyInAmount,
               buyInStatus: buyInAmount > 0 ? "HELD" : "NONE",
               team: joinTeam,
+              ...(fundedExposureStamp
+                ? {
+                    fundedExposureMillicoins:
+                      fundedExposureStamp.exposureMillicoins,
+                    fundedExposureRateMillicoinsPerDay:
+                      fundedExposureStamp.exposureRateMillicoinsPerDay,
+                  }
+                : {}),
             },
             include: {
               user: {
@@ -321,6 +385,14 @@ function buildJoinRaceCore(dependencies = {}) {
         : await participantModel.create({
             raceId, userId, status: "ACCEPTED", buyInAmount,
             buyInStatus: buyInAmount > 0 ? "HELD" : "NONE", team: joinTeam,
+            ...(fundedExposureStamp
+              ? {
+                  fundedExposureMillicoins:
+                    fundedExposureStamp.exposureMillicoins,
+                  fundedExposureRateMillicoinsPerDay:
+                    fundedExposureStamp.exposureRateMillicoinsPerDay,
+                }
+              : {}),
           });
       if (race.status === "ACTIVE" && client) {
         await enrollIfGlobalEventActive(client, { raceId, userIds: [userId], at: new Date() });

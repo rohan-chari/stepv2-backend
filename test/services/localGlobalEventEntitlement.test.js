@@ -198,7 +198,7 @@ test("settlement eligibility repair inserts a missing impact before loading the 
   });
 
   assert.equal(fenceClaims, 1);
-  assert.deepEqual(lockOrder.slice(0, 2), ["global-enrollment", "race-fence"]);
+  assert.deepEqual(lockOrder.slice(0, 2), ["race-fence", "global-enrollment"]);
   assert.deepEqual(writes, [{
     eventId: "event-1",
     raceId: "race-1",

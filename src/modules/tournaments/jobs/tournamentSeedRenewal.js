@@ -42,10 +42,7 @@ function buildRenewTournamentSeeds(dependencies = {}) {
 
       const { deferred } = await withTournamentLock(
         p.id,
-        async (tx, def) => {
-          const tournament = await tx.tournament.findUnique({
-            where: { id: p.id },
-          });
+        async (tx, def, tournament) => {
           if (!tournament || tournament.status !== "PENDING") return;
           const startEvents = await runTournamentStart({
             tx,
@@ -56,7 +53,16 @@ function buildRenewTournamentSeeds(dependencies = {}) {
           });
           if (startEvents) def.push(...startEvents);
         },
-        { prisma }
+        {
+          prisma,
+          resolveUserIds: async (tx) => {
+            const participants = await tx.tournamentParticipant.findMany({
+              where: { tournamentId: p.id, status: "ACCEPTED" },
+              select: { userId: true },
+            });
+            return participants.map((row) => row.userId);
+          },
+        }
       );
       for (const payload of deferred) events.emit(payload.type, payload);
       logger.log(`[CRON] Backup-promoted featured tournament ${p.id} (${seed.kind})`);
