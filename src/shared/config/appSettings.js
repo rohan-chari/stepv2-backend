@@ -352,6 +352,18 @@ const KNOWN_FLAGS = {
   // shipped paths; none of these flags changes a public API contract.
   raceResolutionNudgeBatchV1Enabled: false,
   raceResolutionPostTaskFastHandoffV1Enabled: false,
+  // Queue workers normally wake every 250ms and process one bounded claim.
+  // These independent switches let the core and post-task owners immediately
+  // continue draining after a successful claim while retaining the idle poll
+  // and the existing ownership/lease protocols as their rollback path.
+  raceResolutionAdaptiveDrainV1Enabled: false,
+  raceResolutionPostTaskAdaptiveDrainV1Enabled: false,
+  // Active-impact compute/persistence optimizations are independently
+  // reversible. Missing rows always preserve the current full-scan and
+  // per-source upsert behavior.
+  raceResolutionPendingImpactOnlyV1Enabled: false,
+  raceResolutionNarrowDefenseQueryV1Enabled: false,
+  raceResolutionActiveImpactBulkPersistV1Enabled: false,
   raceResolutionNoopInputSuppressionV1Enabled: false,
   // Dependency-closure planner, PHASE 2b SHADOW ONLY. When true the worker
   // computes the closure plan for a closure-candidate envelope and logs it as

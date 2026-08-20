@@ -13,9 +13,14 @@ const {
 const {
   raceResolutionDeliveryIntents: defaultDeliveryIntents,
 } = require("../services/raceResolutionDeliveryIntents");
+const { appSettings: defaultAppSettings } = require("../../../shared/config/appSettings");
+const { isStrictFlagEnabled } = require("../../../shared/config/isStrictFlagEnabled");
 
 const POLL_INTERVAL_MS = 250;
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
+const ADAPTIVE_DRAIN_SLICE_MS = 100;
+const ADAPTIVE_DRAIN_SLICE_TASKS = 16;
+const ADAPTIVE_DRAIN_ERROR_BACKOFF_MS = 1000;
 
 function postTaskWorkerDisabled(env = process.env) {
   return env.RACE_RESOLUTION_POST_TASK_WORKER_DISABLED === "true";
@@ -211,17 +216,79 @@ function scheduleRaceResolutionPostTaskRunner(dependencies = {}) {
   const runner = Object.keys(dependencies).length === 0
     ? raceResolutionPostTaskRunner
     : buildRaceResolutionPostTaskRunner(dependencies);
+  const settings = dependencies.appSettings || defaultAppSettings;
+  const yieldToEventLoop = dependencies.yieldToEventLoop ||
+    (() => new Promise((resolve) => setImmediate(resolve)));
+  const drainSliceMs = Math.max(
+    1,
+    Number(dependencies.adaptiveDrainSliceMs) || ADAPTIVE_DRAIN_SLICE_MS
+  );
+  const drainSliceTasks = Math.max(
+    1,
+    Number(dependencies.adaptiveDrainSliceTasks) || ADAPTIVE_DRAIN_SLICE_TASKS
+  );
+  const errorBackoffMs = Math.max(
+    POLL_INTERVAL_MS,
+    Number(dependencies.adaptiveDrainErrorBackoffMs) ||
+      ADAPTIVE_DRAIN_ERROR_BACKOFF_MS
+  );
   let running = false;
-  const interval = setInterval(async () => {
+  let backoffUntilMs = 0;
+  const adaptiveDrainEnabled = () => isStrictFlagEnabled(
+    settings,
+    "raceResolutionPostTaskAdaptiveDrainV1Enabled"
+  );
+  async function runScheduledWork() {
     if (running || postTaskWorkerDisabled(env)) return;
     running = true;
+    let adaptive = false;
     try {
-      await runner.tick();
+      adaptive = await adaptiveDrainEnabled();
+      if (adaptive && Date.now() < backoffUntilMs) return;
+      if (!adaptive) {
+        await runner.tick();
+        return;
+      }
+
+      let sliceStartedAt = Date.now();
+      let sliceTasks = 0;
+      for (;;) {
+        if (postTaskWorkerDisabled(env)) return;
+        const processed = await runner.tick();
+        if (!processed) return;
+        sliceTasks += 1;
+        if (
+          sliceTasks >= drainSliceTasks ||
+          Date.now() - sliceStartedAt >= drainSliceMs
+        ) {
+          await yieldToEventLoop();
+          if (
+            postTaskWorkerDisabled(env) ||
+            !(await adaptiveDrainEnabled())
+          ) return;
+          sliceStartedAt = Date.now();
+          sliceTasks = 0;
+        }
+      }
     } catch (error) {
-      (dependencies.logger || console).error("[RACE_RESOLUTION_POST_TASK] tick failed:", error);
+      if (adaptive) {
+        backoffUntilMs = Date.now() + errorBackoffMs;
+        (dependencies.logger || console).error(
+          "[RACE_RESOLUTION_POST_TASK] adaptive tick failed:",
+          error
+        );
+      } else {
+        (dependencies.logger || console).error(
+          "[RACE_RESOLUTION_POST_TASK] tick failed:",
+          error
+        );
+      }
     } finally {
       running = false;
     }
+  }
+  const interval = setInterval(async () => {
+    await runScheduledWork();
   }, dependencies.pollIntervalMs || POLL_INTERVAL_MS);
   interval.unref?.();
   const cleanup = setInterval(() => {

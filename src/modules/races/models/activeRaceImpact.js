@@ -83,6 +83,29 @@ function buildActiveRaceImpactModel(prisma = defaultPrisma) {
       });
     },
 
+    async findSourceWorkStates({
+      raceId,
+      sourceKind,
+      sourceIds,
+      calculationVersion = CALCULATION_VERSION,
+    }, client = prisma) {
+      const ids = [...new Set((sourceIds || []).filter(Boolean))];
+      if (!raceId || !sourceKind || ids.length === 0) return [];
+      return client.activeRaceImpactWork.findMany({
+        where: {
+          raceId,
+          sourceKind,
+          sourceId: { in: ids },
+          calculationVersion,
+        },
+        select: {
+          recipientUserId: true,
+          sourceId: true,
+          status: true,
+        },
+      });
+    },
+
     async suppressPendingForTerminalRace(raceId, client = prisma) {
       return client.activeRaceImpactWork.updateMany({
         where: { raceId, status: "PENDING", race: { status: { not: "ACTIVE" } } },

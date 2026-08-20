@@ -75,6 +75,9 @@ const QUEUE_LAG_ALARM_MS = 30 * 1000;
 // Best-effort reservation cleanup cadence (never affects correctness). Carried
 // over from the v1 scheduler, which src/index.js no longer starts.
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
+const ADAPTIVE_DRAIN_SLICE_MS = 100;
+const ADAPTIVE_DRAIN_SLICE_JOBS = 16;
+const ADAPTIVE_DRAIN_ERROR_BACKOFF_MS = 1000;
 const TARGETED_CLAIM_DISABLED = Symbol("TARGETED_CLAIM_DISABLED");
 
 async function persistExactActiveImpactWork({ tx, raceId, result, fence }) {
@@ -123,6 +126,72 @@ async function persistExactActiveImpactWork({ tx, raceId, result, fence }) {
       },
     });
   }
+}
+
+async function persistExactActiveImpactWorkBulk({ tx, raceId, result, fence }) {
+  const capture = result?.activeImpactCapture || {};
+  const impacts = [
+    ...(capture.trailMineImpacts || []),
+    ...(capture.drillSergeantImpacts || []),
+  ].filter((impact) => impact?.effectId && impact?.userId);
+  if (impacts.length === 0) return;
+
+  const skippedEffectIds = new Set();
+  const eligibleByKey = new Map();
+  for (const impact of impacts) {
+    if (!sourceResolvedUnderFence(fence, impact.resolvedAt || capture.asOf)) {
+      skippedEffectIds.add(impact.effectId);
+      continue;
+    }
+    const key = `${impact.userId}:${impact.effectId}`;
+    // Match the existing ordered upsert loop: the first duplicate source wins
+    // and every later duplicate is an ON CONFLICT no-op.
+    if (!eligibleByKey.has(key)) {
+      eligibleByKey.set(key, {
+        recipientUserId: impact.userId,
+        sourceId: impact.effectId,
+        powerupType: impact.powerupType,
+        resolvedAt: new Date(impact.resolvedAt || capture.asOf).toISOString(),
+        capturedDeltaSteps: Math.round(Number(impact.deltaSteps) || 0),
+      });
+    }
+  }
+
+  if (skippedEffectIds.size > 0) {
+    await tx.$executeRawUnsafe(
+      `UPDATE race_active_effects
+          SET metadata = COALESCE(metadata, '{}'::jsonb)
+            || '{"activeImpactResolutionSkippedVersion":1}'::jsonb
+        WHERE id = ANY($1::text[])`,
+      [...skippedEffectIds]
+    );
+  }
+
+  const rows = [...eligibleByKey.values()];
+  if (rows.length === 0) return;
+  await tx.$executeRawUnsafe(
+    `INSERT INTO active_race_impact_work (
+       id, race_id, recipient_user_id, source_kind, source_id, powerup_type,
+       status, resolved_at, captured_delta_steps, calculation_version,
+       created_at, updated_at
+     )
+     SELECT gen_random_uuid()::text, $1, input."recipientUserId",
+            'ACTIVE_EFFECT', input."sourceId", input."powerupType", 'PENDING',
+            input."resolvedAt", input."capturedDeltaSteps", 1,
+            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+       FROM jsonb_to_recordset($2::jsonb) AS input(
+         "recipientUserId" text,
+         "sourceId" text,
+         "powerupType" text,
+         "resolvedAt" timestamp,
+         "capturedDeltaSteps" integer
+       )
+     ON CONFLICT (
+       race_id, recipient_user_id, source_kind, source_id, calculation_version
+     ) DO NOTHING`,
+    raceId,
+    JSON.stringify(rows)
+  );
 }
 
 function dependencyClosureRaceBucket(raceId) {
@@ -920,6 +989,27 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         "planSettings",
         () => isStrictFlagEnabled(settings, "apiActiveImpactNoticesV1Enabled")
       );
+      const pendingImpactOnlyEnabled = await phaseTimer.measure(
+        "planSettings",
+        () => isStrictFlagEnabled(
+          settings,
+          "raceResolutionPendingImpactOnlyV1Enabled"
+        )
+      );
+      const narrowDefenseQueryEnabled = await phaseTimer.measure(
+        "planSettings",
+        () => isStrictFlagEnabled(
+          settings,
+          "raceResolutionNarrowDefenseQueryV1Enabled"
+        )
+      );
+      const activeImpactBulkPersistEnabled = await phaseTimer.measure(
+        "planSettings",
+        () => isStrictFlagEnabled(
+          settings,
+          "raceResolutionActiveImpactBulkPersistV1Enabled"
+        )
+      );
       let activeImpactMetrics = {
         created: 0,
         zero: 0,
@@ -1029,6 +1119,8 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
               RacePowerupEvent: capture.events,
               now,
               activeImpactEnabled,
+              pendingImpactOnlyEnabled,
+              narrowDefenseQueryEnabled,
               recordPhaseTiming: (name, durationMs) =>
                 addPhaseTiming(computePhaseMs, name, durationMs),
             });
@@ -1277,12 +1369,14 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         // detonation/judgement rolls back and the next generation safely
         // replays it; if only materialization fails the PENDING source survives.
         const activeImpactCommitFence = await readActiveImpactRolloutFence(tx);
-        await persistExactActiveImpactWork({
-          tx,
-          raceId: job.raceId,
-          result,
-          fence: activeImpactCommitFence,
-        });
+        await (activeImpactBulkPersistEnabled
+          ? persistExactActiveImpactWorkBulk
+          : persistExactActiveImpactWork)({
+            tx,
+            raceId: job.raceId,
+            result,
+            fence: activeImpactCommitFence,
+          });
 
         // Active-impact presentation work shares the C0 fence but is isolated
         // behind a savepoint: a notification calculation/write failure leaves
@@ -1301,6 +1395,8 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
                 result,
                 enabled: true,
                 rolloutFence: activeImpactCommitFence,
+                narrowSourceQuery: narrowDefenseQueryEnabled,
+                bulkWorkCreate: activeImpactBulkPersistEnabled,
                 // Cheap committed STEP_SYNC generations intentionally omit a
                 // display capture. Their immutable direct-event sources can
                 // still be claimed against this worker's captured claim time;
@@ -1736,12 +1832,14 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
     return null;
   }
 
-  async function tick() {
+  async function tick({ concurrencyOverride = null } = {}) {
     if (process.env.ASYNC_RACE_RESOLUTION_WORKER_DISABLED === "true") return 0;
-    const concurrency = Math.min(
-      3,
-      Math.max(1, Number(process.env.ASYNC_RACE_RESOLUTION_CONCURRENCY) || 1)
-    );
+    const concurrency = concurrencyOverride == null
+      ? Math.min(
+          3,
+          Math.max(1, Number(process.env.ASYNC_RACE_RESOLUTION_CONCURRENCY) || 1)
+        )
+      : Math.min(3, Math.max(1, Number(concurrencyOverride) || 1));
     return runBoundedRaceResolutionJobs(concurrency, processOne);
   }
 
@@ -1829,18 +1927,75 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
 function scheduleRaceResolutionWorkerV2(dependencies = {}) {
   const logger = dependencies.logger || console;
   const worker = buildRaceResolutionWorkerV2(dependencies);
+  const settings = dependencies.appSettings || defaultAppSettings;
+  const yieldToEventLoop = dependencies.yieldToEventLoop ||
+    (() => new Promise((resolve) => setImmediate(resolve)));
+  const drainSliceMs = Math.max(
+    1,
+    Number(dependencies.adaptiveDrainSliceMs) || ADAPTIVE_DRAIN_SLICE_MS
+  );
+  const drainSliceJobs = Math.max(
+    1,
+    Number(dependencies.adaptiveDrainSliceJobs) || ADAPTIVE_DRAIN_SLICE_JOBS
+  );
+  const errorBackoffMs = Math.max(
+    POLL_INTERVAL_MS,
+    Number(dependencies.adaptiveDrainErrorBackoffMs) ||
+      ADAPTIVE_DRAIN_ERROR_BACKOFF_MS
+  );
 
   let running = false;
-  const interval = setInterval(async () => {
+  let backoffUntilMs = 0;
+  const adaptiveDrainEnabled = () => isStrictFlagEnabled(
+    settings,
+    "raceResolutionAdaptiveDrainV1Enabled"
+  );
+  async function runScheduledWork() {
     if (running) return;
     running = true;
+    let adaptive = false;
     try {
-      await worker.tick();
+      adaptive = await adaptiveDrainEnabled();
+      if (adaptive && Date.now() < backoffUntilMs) return;
+      if (!adaptive) {
+        await worker.tick();
+        return;
+      }
+
+      let sliceStartedAt = Date.now();
+      let sliceJobs = 0;
+      for (;;) {
+        // Adaptive mode preserves the configured bounded concurrency. It
+        // removes only the idle 250ms gap; leases, fencing, the shared work
+        // budget, and DB ownership remain the ordinary scheduler path.
+        const processed = await worker.tick();
+        if (processed === 0) return;
+        sliceJobs += processed;
+        if (
+          sliceJobs >= drainSliceJobs ||
+          Date.now() - sliceStartedAt >= drainSliceMs
+        ) {
+          await yieldToEventLoop();
+          // Bound flag rollback latency during a continuously non-empty queue.
+          // The emergency claiming switch is still checked by every job.
+          if (!(await adaptiveDrainEnabled())) return;
+          sliceStartedAt = Date.now();
+          sliceJobs = 0;
+        }
+      }
     } catch (error) {
-      logger.error("[RACE_RESOLUTION_V2] tick error:", error);
+      if (adaptive) {
+        backoffUntilMs = Date.now() + errorBackoffMs;
+        logger.error("[RACE_RESOLUTION_V2] adaptive tick error:", error);
+      } else {
+        logger.error("[RACE_RESOLUTION_V2] tick error:", error);
+      }
     } finally {
       running = false;
     }
+  }
+  const interval = setInterval(async () => {
+    await runScheduledWork();
   }, POLL_INTERVAL_MS);
   if (interval.unref) interval.unref();
 

@@ -21,6 +21,8 @@ function buildProcessActiveRaceImpacts() {
     enabled,
     generationAsOf = null,
     rolloutFence = null,
+    narrowSourceQuery = false,
+    bulkWorkCreate = false,
   }) {
     if (!enabled || !tx || !raceId || !result) {
       return { created: 0, zero: 0, suppressed: 0, failures: 0 };
@@ -47,7 +49,7 @@ function buildProcessActiveRaceImpacts() {
       return { created: 0, zero: 0, suppressed: 0, failures: 1 };
     }
     const fence = rolloutFence || { enabled: true, enabledFrom: null };
-    const [effects, participants, directEvents, existingWork] = await Promise.all([
+    const [effects, participants, existingWork, broadDirectEvents] = await Promise.all([
       tx.raceActiveEffect.findMany({
         where: {
           raceId,
@@ -66,10 +68,6 @@ function buildProcessActiveRaceImpacts() {
           forfeitedAt: true,
         },
       }),
-      tx.racePowerupEvent.findMany({
-        where: { raceId, eventType: "POWERUP_USED" },
-        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-      }),
       tx.activeRaceImpactWork.findMany({
         where: { raceId },
         select: {
@@ -79,7 +77,31 @@ function buildProcessActiveRaceImpacts() {
           calculationVersion: true,
         },
       }),
+      narrowSourceQuery
+        ? Promise.resolve(null)
+        : tx.racePowerupEvent.findMany({
+            where: { raceId, eventType: "POWERUP_USED" },
+            orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+          }),
     ]);
+    const directEvents = broadDirectEvents || await tx.$queryRawUnsafe(
+      `SELECT id, metadata, created_at AS "createdAt"
+         FROM race_powerup_events
+        WHERE race_id = $1
+          AND event_type = 'POWERUP_USED'
+          AND (
+            (
+              metadata @> '{"activeImpactCalculationVersion":1}'::jsonb
+              AND jsonb_typeof(metadata->'activeImpactDeltas') = 'array'
+            )
+            OR metadata @> '{
+              "activeImpactDefenseCalculationVersion":1,
+              "activeImpactDefenseType":"UMBRELLA"
+            }'::jsonb
+          )
+        ORDER BY created_at ASC, id ASC`,
+      raceId,
+    );
     const existingWorkKeys = new Set(existingWork.map((row) =>
       `${row.recipientUserId}:${row.sourceKind}:${row.sourceId}:${row.calculationVersion}`
     ));
@@ -123,6 +145,30 @@ function buildProcessActiveRaceImpacts() {
       )
     );
 
+    const workToCreate = [];
+    const queueWork = async (row) => {
+      const key = `${row.recipientUserId}:${row.sourceKind}:${row.sourceId}:${row.calculationVersion}`;
+      if (existingWorkKeys.has(key)) return;
+      existingWorkKeys.add(key);
+      if (bulkWorkCreate) {
+        workToCreate.push(row);
+        return;
+      }
+      await tx.activeRaceImpactWork.upsert({
+        where: {
+          raceId_recipientUserId_sourceKind_sourceId_calculationVersion: {
+            raceId: row.raceId,
+            recipientUserId: row.recipientUserId,
+            sourceKind: row.sourceKind,
+            sourceId: row.sourceId,
+            calculationVersion: row.calculationVersion,
+          },
+        },
+        update: {},
+        create: row,
+      });
+    };
+
     for (const effect of eligibleEffects) {
       const recipients = [];
       if (effect.type === "LEECH") {
@@ -144,27 +190,15 @@ function buildProcessActiveRaceImpacts() {
             !sourceResolvedUnderFence(fence, effect.expiresAt)
           )
         ) continue;
-        await tx.activeRaceImpactWork.upsert({
-          where: {
-            raceId_recipientUserId_sourceKind_sourceId_calculationVersion: {
-              raceId,
-              recipientUserId,
-              sourceKind: "ACTIVE_EFFECT",
-              sourceId: effect.id,
-              calculationVersion: 1,
-            },
-          },
-          update: {},
-          create: {
-            raceId,
-            recipientUserId,
-            sourceKind: "ACTIVE_EFFECT",
-            sourceId: effect.id,
-            powerupType: effect.type,
-            status: "PENDING",
-            resolvedAt: effect.expiresAt,
-            calculationVersion: 1,
-          },
+        await queueWork({
+          raceId,
+          recipientUserId,
+          sourceKind: "ACTIVE_EFFECT",
+          sourceId: effect.id,
+          powerupType: effect.type,
+          status: "PENDING",
+          resolvedAt: effect.expiresAt,
+          calculationVersion: 1,
         });
       }
     }
@@ -177,27 +211,15 @@ function buildProcessActiveRaceImpacts() {
           impact.resolvedAt || result.activeImpactCapture?.asOf,
         )
       ) continue;
-      await tx.activeRaceImpactWork.upsert({
-        where: {
-          raceId_recipientUserId_sourceKind_sourceId_calculationVersion: {
-            raceId,
-            recipientUserId: impact.userId,
-            sourceKind: "ACTIVE_EFFECT",
-            sourceId: impact.effectId,
-            calculationVersion: 1,
-          },
-        },
-        update: {},
-        create: {
-          raceId,
-          recipientUserId: impact.userId,
-          sourceKind: "ACTIVE_EFFECT",
-          sourceId: impact.effectId,
-          powerupType: "TRAIL_MINE",
-          status: "PENDING",
-          resolvedAt: impact.resolvedAt || asOf,
-          calculationVersion: 1,
-        },
+      await queueWork({
+        raceId,
+        recipientUserId: impact.userId,
+        sourceKind: "ACTIVE_EFFECT",
+        sourceId: impact.effectId,
+        powerupType: "TRAIL_MINE",
+        status: "PENDING",
+        resolvedAt: impact.resolvedAt || asOf,
+        calculationVersion: 1,
       });
     }
 
@@ -234,27 +256,15 @@ function buildProcessActiveRaceImpacts() {
         ) &&
         !sourceResolvedUnderFence(fence, metadata.activeImpactDefenseWindowEnd)
       ) continue;
-      await tx.activeRaceImpactWork.upsert({
-        where: {
-          raceId_recipientUserId_sourceKind_sourceId_calculationVersion: {
-            raceId,
-            recipientUserId: metadata.activeImpactDefenseTargetUserId,
-            sourceKind: "DEFENSE_RESOLUTION",
-            sourceId: event.id,
-            calculationVersion: 1,
-          },
-        },
-        update: {},
-        create: {
-          raceId,
-          recipientUserId: metadata.activeImpactDefenseTargetUserId,
-          sourceKind: "DEFENSE_RESOLUTION",
-          sourceId: event.id,
-          powerupType: "UMBRELLA",
-          status: "PENDING",
-          resolvedAt: new Date(metadata.activeImpactDefenseWindowEnd),
-          calculationVersion: 1,
-        },
+      await queueWork({
+        raceId,
+        recipientUserId: metadata.activeImpactDefenseTargetUserId,
+        sourceKind: "DEFENSE_RESOLUTION",
+        sourceId: event.id,
+        powerupType: "UMBRELLA",
+        status: "PENDING",
+        resolvedAt: new Date(metadata.activeImpactDefenseWindowEnd),
+        calculationVersion: 1,
       });
     }
     for (const event of stampedEvents) {
@@ -266,29 +276,24 @@ function buildProcessActiveRaceImpacts() {
           !resolvedInCurrentEpoch &&
           !hasWork(delta.userId, "POWERUP_EVENT", event.id)
         ) continue;
-        await tx.activeRaceImpactWork.upsert({
-          where: {
-            raceId_recipientUserId_sourceKind_sourceId_calculationVersion: {
-              raceId,
-              recipientUserId: delta.userId,
-              sourceKind: "POWERUP_EVENT",
-              sourceId: event.id,
-              calculationVersion: 1,
-            },
-          },
-          update: {},
-          create: {
-            raceId,
-            recipientUserId: delta.userId,
-            sourceKind: "POWERUP_EVENT",
-            sourceId: event.id,
-            powerupType: metadata.activeImpactPowerupType,
-            status: "PENDING",
-            resolvedAt: event.createdAt,
-            calculationVersion: 1,
-          },
+        await queueWork({
+          raceId,
+          recipientUserId: delta.userId,
+          sourceKind: "POWERUP_EVENT",
+          sourceId: event.id,
+          powerupType: metadata.activeImpactPowerupType,
+          status: "PENDING",
+          resolvedAt: event.createdAt,
+          calculationVersion: 1,
         });
       }
+    }
+
+    if (bulkWorkCreate && workToCreate.length > 0) {
+      await tx.activeRaceImpactWork.createMany({
+        data: workToCreate,
+        skipDuplicates: true,
+      });
     }
 
     const effectById = new Map(eligibleEffects.map((row) => [row.id, row]));

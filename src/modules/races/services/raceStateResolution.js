@@ -4,6 +4,7 @@ const { Steps } = require("../../steps/models/steps");
 const { StepSample } = require("../../steps/models/stepSample");
 const { RaceActiveEffect } = require("../../powerups/models/raceActiveEffect");
 const { RacePowerupEvent } = require("../../powerups/models/racePowerupEvent");
+const { ActiveRaceImpact } = require("../models/activeRaceImpact");
 const { GlobalStepEvent } = require("../../steps/models/globalStepEvent");
 const { eventsForUser } = require("../../steps/services/globalStepEventEntitlement");
 const {
@@ -785,6 +786,8 @@ async function computeActiveTimedImpactCapture({
   stepSampleModel,
   globalEvents,
   eventsByUserId = null,
+  activeRaceImpactModel = null,
+  pendingOnly = false,
 }) {
   const effectsByParticipant = new Map();
   for (const participant of participants) {
@@ -806,6 +809,42 @@ async function computeActiveTimedImpactCapture({
     ...(hitchhikes || []),
   ]);
   if (effects.length === 0) return { resolved: [], all: [] };
+  const dueTimedEffects = effects.filter((effect) =>
+    ACTIVE_NOTICE_TIMED_TYPES.has(effect.type) &&
+    effect.expiresAt &&
+    new Date(effect.expiresAt).getTime() <= currentTime.getTime()
+  );
+  if (pendingOnly && dueTimedEffects.length === 0) {
+    return { resolved: [], all: [] };
+  }
+  if (
+    pendingOnly &&
+    dueTimedEffects.length > 0 &&
+    typeof activeRaceImpactModel?.findSourceWorkStates === "function"
+  ) {
+    try {
+      const work = await activeRaceImpactModel.findSourceWorkStates({
+        raceId: race.id,
+        sourceKind: "ACTIVE_EFFECT",
+        sourceIds: dueTimedEffects.map((effect) => effect.id),
+      });
+      const workBySourceAndRecipient = new Map(work.map((row) => [
+        `${row.sourceId}:${row.recipientUserId}`,
+        row,
+      ]));
+      const hasUnresolvedSource = dueTimedEffects.some((effect) => {
+        const row = workBySourceAndRecipient.get(
+          `${effect.id}:${effect.targetUserId}`
+        );
+        if (row) return row.status === "PENDING";
+        return effect.metadata?.activeImpactResolutionSkippedVersion !== 1;
+      });
+      if (!hasUnresolvedSource) return { resolved: [], all: [] };
+    } catch {
+      // Fail open to the canonical attribution calculation. The optimization
+      // must never turn an uncertain database read into a missing impact.
+    }
+  }
   const frozenTotals = new Map(
     participants
       .filter((participant) => participant.forfeitedAt || participant.finishedAt)
@@ -902,10 +941,17 @@ async function computeActiveDefenseImpactCapture({
   powerupEventModel,
   stepSampleModel,
   currentTime,
+  activeRaceImpactModel = null,
+  pendingOnly = false,
+  narrowQuery = false,
 }) {
-  if (typeof powerupEventModel.findByRaceAsc !== "function") return [];
-  const events = (await powerupEventModel.findByRaceAsc(raceId)) || [];
-  const impacts = [];
+  const narrowAvailable = typeof powerupEventModel.findActiveDefenseCandidates === "function";
+  const broadAvailable = typeof powerupEventModel.findByRaceAsc === "function";
+  if (!narrowAvailable && !broadAvailable) return [];
+  const events = narrowQuery && narrowAvailable
+    ? (await powerupEventModel.findActiveDefenseCandidates(raceId)) || []
+    : (await powerupEventModel.findByRaceAsc(raceId)) || [];
+  const candidates = [];
   for (const event of events) {
     const metadata = event?.metadata || {};
     const start = new Date(metadata.activeImpactDefenseWindowStart);
@@ -922,24 +968,63 @@ async function computeActiveDefenseImpactCapture({
       !Number.isFinite(multiplier) ||
       multiplier < 0
     ) continue;
-    const walked = typeof stepSampleModel.sumClosedStepsInWindow === "function"
-      ? await stepSampleModel.sumClosedStepsInWindow(
-          metadata.activeImpactDefenseTargetUserId,
-          start,
-          end,
-          currentTime
-        )
-      : await stepSampleModel.sumStepsInWindow(
-          metadata.activeImpactDefenseTargetUserId,
-          start,
-          end
-        );
-    impacts.push({
-      sourceId: event.id,
+    candidates.push({
+      event,
       userId: metadata.activeImpactDefenseTargetUserId,
-      powerupType: "UMBRELLA",
-      deltaSteps: Math.round(walked - Math.round(walked * multiplier)),
-      resolvedAt: end,
+      start,
+      end,
+      multiplier,
+    });
+  }
+  let selected = candidates;
+  if (
+    pendingOnly &&
+    candidates.length > 0 &&
+    typeof activeRaceImpactModel?.findSourceWorkStates === "function"
+  ) {
+    try {
+      const work = await activeRaceImpactModel.findSourceWorkStates({
+        raceId,
+        sourceKind: "DEFENSE_RESOLUTION",
+        sourceIds: candidates.map(({ event }) => event.id),
+      });
+      const workBySourceAndRecipient = new Map(work.map((row) => [
+        `${row.sourceId}:${row.recipientUserId}`,
+        row,
+      ]));
+      selected = candidates.filter(({ event, userId }) => {
+        const row = workBySourceAndRecipient.get(`${event.id}:${userId}`);
+        return !row || row.status === "PENDING";
+      });
+    } catch {
+      // Preserve the full candidate set on any uncertainty.
+    }
+  }
+  const byUser = new Map();
+  for (const candidate of selected) {
+    const rows = byUser.get(candidate.userId) || [];
+    rows.push(candidate);
+    byUser.set(candidate.userId, rows);
+  }
+  const impacts = [];
+  for (const [userId, rows] of byUser) {
+    const windows = rows.map(({ start, end }) => ({ start, end }));
+    const walkedByWindow = typeof stepSampleModel.sumClosedStepsInWindows === "function"
+      ? await stepSampleModel.sumClosedStepsInWindows(userId, windows, currentTime)
+      : await Promise.all(rows.map(({ start, end }) =>
+          typeof stepSampleModel.sumClosedStepsInWindow === "function"
+            ? stepSampleModel.sumClosedStepsInWindow(userId, start, end, currentTime)
+            : stepSampleModel.sumStepsInWindow(userId, start, end)
+        ));
+    rows.forEach(({ event, end, multiplier }, index) => {
+      const walked = Number(walkedByWindow[index]) || 0;
+      impacts.push({
+        sourceId: event.id,
+        userId,
+        powerupType: "UMBRELLA",
+        deltaSteps: Math.round(walked - Math.round(walked * multiplier)),
+        resolvedAt: end,
+      });
     });
   }
   return impacts;
@@ -954,6 +1039,8 @@ function buildResolveRaceState(dependencies = {}) {
     dependencies.RaceActiveEffect || RaceActiveEffect;
   const powerupEventModel =
     dependencies.RacePowerupEvent || RacePowerupEvent;
+  const activeRaceImpactModel =
+    dependencies.ActiveRaceImpact || ActiveRaceImpact;
   const globalStepEventModel =
     dependencies.GlobalStepEvent || GlobalStepEvent;
   const prefetchRaceScoringModels =
@@ -994,6 +1081,8 @@ function buildResolveRaceState(dependencies = {}) {
     "activeImpactEnabled",
   );
   const activeImpactEnabled = dependencies.activeImpactEnabled === true;
+  const pendingImpactOnlyEnabled = dependencies.pendingImpactOnlyEnabled === true;
+  const narrowDefenseQueryEnabled = dependencies.narrowDefenseQueryEnabled === true;
 
   // `userIds` (C0, spec §5a item 2) is ADDITIVE to the long-standing `userId`
   // argument: the race-keyed worker coalesces many uploaders into one resolve,
@@ -1401,11 +1490,16 @@ function buildResolveRaceState(dependencies = {}) {
               stepSampleModel: scoringStepSampleModel,
               globalEvents,
               eventsByUserId,
+              activeRaceImpactModel,
+              pendingOnly: pendingImpactOnlyEnabled,
             }), computeActiveDefenseImpactCapture({
               raceId: race.id,
               powerupEventModel,
               stepSampleModel: scoringStepSampleModel,
               currentTime,
+              activeRaceImpactModel,
+              pendingOnly: pendingImpactOnlyEnabled,
+              narrowQuery: narrowDefenseQueryEnabled,
             })])
           );
           timedImpactResolutions = timedCapture.resolved;
