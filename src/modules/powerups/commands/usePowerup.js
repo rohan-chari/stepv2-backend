@@ -1369,7 +1369,10 @@ function buildUsePowerup(dependencies = {}) {
         `Your powerups are jammed for another ${remainingMin}m!`,
         409,
         undefined,
-        { retainHeld: true } // transient jam — keep the powerup for later (item 12 scope)
+        // A race-earned item remains HELD for this transient condition; a
+        // redeemed stash item is returned to its global inventory by the
+        // wrapper below.
+        { retainHeld: true }
       );
     }
 
@@ -1901,7 +1904,7 @@ function buildUsePowerup(dependencies = {}) {
           "Your Rainstorm is already active in this race",
           400,
           undefined,
-          { retainHeld: true } // transient self-limit — keep for later (item 12 scope)
+          { retainHeld: true }
         );
       }
       const otherRunners = acceptedParticipants.filter(
@@ -2130,7 +2133,8 @@ function buildUsePowerup(dependencies = {}) {
     // so their creation sites cancel the conflicting effect instead — the
     // invariant holds either way. Messages are user-facing: frozen clients
     // render them verbatim (powerupUseErrorCopy falls through for unknown
-    // codes). retainHeld: transient target-state, usable once it expires.
+    // codes). A race-earned item remains HELD for this transient target state;
+    // a redeemed stash item is returned to global inventory by the wrapper.
     if (type === "LEG_CRAMP" && targetParticipant) {
       const conflictingWT = await effectModel.findActiveByTypeForParticipant(
         targetParticipant.id,
@@ -2173,7 +2177,7 @@ function buildUsePowerup(dependencies = {}) {
           "That player is already jammed",
           409,
           undefined,
-          { retainHeld: true } // transient target-limit — keep for later (item 12 scope)
+          { retainHeld: true }
         );
       }
     }
@@ -2249,10 +2253,9 @@ function buildUsePowerup(dependencies = {}) {
     // short-circuits to 0 before the buff sum). The check covers the whole
     // boost+burnout window because the effect row spans both phases.
     //
-    // retainHeld: Ghost Pepper is a store-bought wave-5 item paid for in coins,
-    // and this is a TRANSIENT limit — the pepper is perfectly usable in this
-    // race once the current one ends, so it stays HELD instead of being eaten
-    // by the rejection (same treatment as Rainstorm / Hitchhike / Piggy Bank).
+    // This transient guard retains race-earned peppers. A redeemed store pepper
+    // returns to global inventory, where it remains usable in another race or
+    // after this pepper ends.
     if (type === "GHOST_PEPPER") {
       const existingPepper = await effectModel.findActiveByTypeForParticipant(
         myParticipant.id,
@@ -2382,8 +2385,8 @@ function buildUsePowerup(dependencies = {}) {
     let quickRinseTargets = [];
     if (type === "QUICK_RINSE") {
       // Cooldown first: on cooldown AND holding no debuffs, "wait 12 min" is the
-      // actionable message, not "nothing to rinse". Transient, so retainHeld
-      // keeps a REDEEMED item in the race instead of refunding it to inventory.
+      // actionable message, not "nothing to rinse". `retainHeld` preserves a
+      // race-earned item; the rejection wrapper returns a redeemed stash item.
       const lastUsedAt = await eventModel.findLastPowerupUseAt({
         raceId,
         actorUserId: userId,
@@ -4122,10 +4125,15 @@ function buildUsePowerup(dependencies = {}) {
     return result;
   };
 
-  // Item 12 wrapper: on a rejected use, hand a REDEEMED powerup back to the
-  // general inventory (see refundRedeemedOnRejection). The core always throws
-  // before mark-USED, so the row is still HELD and safe to refund. Best-effort —
-  // never let a refund error replace the original PowerupUseError.
+  // Item 12 wrapper: on ANY rejected use, hand a REDEEMED powerup back to the
+  // general inventory (see refundRedeemedOnRejection). `retainHeld` is correct
+  // for a box-earned, race-bound item: it stays in that race until the transient
+  // condition clears. A redeemed store item, however, only visits the tray as
+  // the implementation detail between stash redemption and immediate use.
+  // Leaving it there on a cooldown/jam rejection strands the purchase in one
+  // race, so refund it regardless of `retainHeld`. The core always throws before
+  // mark-USED, so the row is still HELD and safe to refund. Best-effort — never
+  // let a refund error replace the original PowerupUseError.
   return async function usePowerup(args) {
     try {
       if (hasInjectedDeps) return await usePowerupCore(args);
@@ -4154,7 +4162,7 @@ function buildUsePowerup(dependencies = {}) {
         return usePowerupCore(args);
       }, { maxWait: 5_000, timeout: 30_000 });
     } catch (err) {
-      if (err instanceof PowerupUseError && !err.retainHeld) {
+      if (err instanceof PowerupUseError) {
         try {
           await refundRedeemedOnRejection({
             db,

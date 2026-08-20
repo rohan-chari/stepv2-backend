@@ -446,6 +446,64 @@ describe("hitchhike / quick rinse — integration", () => {
       "the item is retained"
     );
 
+    // A store item enters the tray only as an intermediate redemption step.
+    // If that immediate use is rejected by the same cooldown, it must return
+    // to the account-wide stash rather than becoming stuck in this race.
+    await prisma.userPowerupItem.upsert({
+      where: {
+        userId_powerupType: {
+          userId: bob.userId,
+          powerupType: "QUICK_RINSE",
+        },
+      },
+      create: {
+        userId: bob.userId,
+        powerupType: "QUICK_RINSE",
+        quantity: 1,
+      },
+      update: { quantity: { increment: 1 } },
+    });
+    const redeemRes = await request(
+      server.baseUrl,
+      "POST",
+      `/races/${raceId}/powerups/redeem`,
+      {
+        body: { powerupType: "QUICK_RINSE" },
+        token: bob.token,
+        headers: POWERUPS3,
+      }
+    );
+    assert.equal(redeemRes.status, 200);
+    const redeemed = (await redeemRes.json()).result.powerup;
+
+    const redeemedUseRes = await request(
+      server.baseUrl,
+      "POST",
+      `/races/${raceId}/powerups/${redeemed.id}/use`,
+      { token: bob.token, headers: POWERUPS3 }
+    );
+    assert.equal(redeemedUseRes.status, 409);
+    assert.equal((await redeemedUseRes.json()).code, "QUICK_RINSE_COOLDOWN");
+    assert.equal(
+      (await prisma.racePowerup.findUnique({ where: { id: redeemed.id } })).status,
+      "DISCARDED",
+      "a rejected redeemed item leaves the race tray"
+    );
+    assert.equal(
+      (
+        await prisma.userPowerupItem.findUnique({
+          where: {
+            userId_powerupType: {
+              userId: bob.userId,
+              powerupType: "QUICK_RINSE",
+            },
+          },
+        })
+      ).quantity,
+      1,
+      "the rejected redeemed item returns to the global stash"
+    );
+
     // A rinse in a DIFFERENT race is unaffected by this race's cooldown.
     const otherRaceId = await createActiveRace(alice, [bob]);
     const otherCramp = await giveHeld(otherRaceId, alice.userId, "LEG_CRAMP");
