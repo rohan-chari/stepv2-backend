@@ -8,6 +8,7 @@ const {
 test("featured final pays the lobby prize snapshot instead of a later seed edit", async () => {
   const awards = [];
   const events = [];
+  const guardedUsers = [];
   const tournament = {
     id: "tournament-8",
     name: "8 Racer Tourney",
@@ -48,11 +49,13 @@ test("featured final pays the lobby prize snapshot instead of a later seed edit"
     prisma: { $transaction: async (callback) => callback(tx) },
     now: () => new Date("2026-08-12T00:00:00.000Z"),
     awardCoins: async (entry) => awards.push(entry),
+    lockFundedExposureUsers: async (_tx, userIds) => guardedUsers.push(userIds),
     eventBus: { emit: (type, payload) => events.push({ type, payload }) },
   });
 
   await advance({ tournamentId: tournament.id });
 
+  assert.deepEqual(guardedUsers, [["runner-up", "winner"]]);
   assert.deepEqual(awards, [
     {
       userId: "winner",

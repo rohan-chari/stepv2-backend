@@ -1,5 +1,9 @@
 const { Race } = require("../models/race");
 const { RaceParticipant } = require("../models/raceParticipant");
+const {
+  prisma: defaultPrisma,
+  runInPrismaTransaction: defaultRunInPrismaTransaction,
+} = require("../../../db");
 const { awardCoins } = require("../../../shared/economy/awardCoins");
 const { eventBus } = require("../../../shared/events/eventBus");
 const { refundRaceBuyIn } = require("../services/raceBuyIns");
@@ -25,14 +29,27 @@ class RaceCancelError extends Error {
 const {
   invalidateRaceProgress,
 } = require("../services/raceProgressSnapshot");
+const {
+  lockFundedExposureUsers,
+} = require("../services/fundedExposure");
+const { acquireRaceWriteFence } = require("../services/raceWriteFence");
 
 function buildCancelRace(dependencies = {}) {
   const raceModel = dependencies.Race || Race;
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
   const awardCoinsFn = dependencies.awardCoins || awardCoins;
   const events = dependencies.eventBus || eventBus;
+  const usesDefaultPersistence =
+    !dependencies.Race &&
+    !dependencies.RaceParticipant &&
+    !dependencies.awardCoins;
+  const runTransaction =
+    dependencies.runInPrismaTransaction || defaultRunInPrismaTransaction;
 
-  return async function cancelRace({ userId, raceId }) {
+  async function cancelRaceCore({ userId, raceId }) {
+    if (usesDefaultPersistence) {
+      await acquireRaceWriteFence(defaultPrisma, raceId);
+    }
     const race = assertFound(
       await raceModel.findById(raceId),
       () => new RaceCancelError("Race not found", 404)
@@ -62,6 +79,28 @@ function buildCancelRace(dependencies = {}) {
       () => new RaceCancelError("Race is already cancelled", 400)
     );
 
+    if (usesDefaultPersistence) {
+      const accepted = await participantModel.findAcceptedByRace(raceId);
+      if (race.fundedPrize === true) {
+        await lockFundedExposureUsers(
+          defaultPrisma,
+          accepted.map((participant) => participant.userId),
+        );
+      }
+      await defaultPrisma.$queryRaw`
+        SELECT id FROM races WHERE id = ${raceId} FOR UPDATE
+      `;
+      const locked = await defaultPrisma.race.findUnique({
+        where: { id: raceId },
+        select: { status: true },
+      });
+      assertStatusIn(
+        locked,
+        ["PENDING", "ACTIVE"],
+        () => new RaceCancelError("Race can no longer be cancelled", 409)
+      );
+    }
+
     // ACTIVE races are cancellable, so charged rows may be COMMITTED, not just
     // HELD (findChargedByRace returns both) — widen the refundable window.
     const chargedParticipants = await participantModel.findChargedByRace(raceId);
@@ -87,18 +126,28 @@ function buildCancelRace(dependencies = {}) {
       .map((p) => p.userId)
       .filter((id) => id !== userId);
 
-    events.emit("RACE_CANCELLED", {
+    const eventPayload = {
       raceId,
       raceName: race.name,
       creatorUserId: userId,
       participantUserIds,
-    });
-
-    await invalidateRaceProgress(raceId);
+    };
 
     // The race is already CANCELLED; the ACTIVE-only worker would no-op.
 
-    return updated;
+    return { updated, eventPayload };
+  }
+
+  return async function cancelRace(args) {
+    const outcome = usesDefaultPersistence
+      ? await runTransaction(() => cancelRaceCore(args), {
+          timeout: 15_000,
+          maxWait: 5_000,
+        })
+      : await cancelRaceCore(args);
+    events.emit("RACE_CANCELLED", outcome.eventPayload);
+    await invalidateRaceProgress(args.raceId);
+    return outcome.updated;
   };
 }
 

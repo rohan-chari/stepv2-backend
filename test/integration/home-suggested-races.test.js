@@ -795,10 +795,15 @@ describe("GET /home/suggested-races", () => {
     });
     await createTournament({
       id: "featured-alive-other-lobby",
-      seedId: aliveSeed.id,
-      creatorId: null,
+      creatorId: owner.id,
       createdAt: new Date("2026-08-14T00:00:00.000Z"),
     });
+    await addTournamentParticipant(
+      "featured-alive-other-lobby",
+      user.id,
+      "ACCEPTED",
+      { eliminatedInRound: null },
+    );
 
     const response = await fetchSuggestions(token);
     assert.equal(response.status, 200);

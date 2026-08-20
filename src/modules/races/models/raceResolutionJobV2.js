@@ -844,13 +844,21 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
     async acquireForWrite(tx, { raceId = null, id = null, expectedLeaseToken = null, now = new Date() }) {
       if (!id && !raceId) return null;
       if (!id && raceId) {
-        // Ensure a row exists to lock. Bare INSERT ... ON CONFLICT DO NOTHING so
-        // this never bumps a generation (an expiry acquisition is not a request
-        // for another resolve).
+        // Ensure an INERT row exists to lock. A membership-only C0 acquisition
+        // is not a resolution request: generation 0 + SUCCEEDED keeps workers
+        // asleep. The first real enqueue advances it to the established
+        // generation 1 QUEUED contract; an existing job remains untouched.
         await tx.$queryRawUnsafe(
           `
-          INSERT INTO race_resolution_jobs_v2 (id, race_id, requested_at, created_at, updated_at)
-          VALUES (gen_random_uuid()::text, $1, $2, $2, $2)
+          INSERT INTO race_resolution_jobs_v2 (
+            id, race_id, generation, state, requested_at,
+            completed_at, last_completed_at, created_at, updated_at
+          )
+          VALUES (
+            gen_random_uuid()::text, $1, 0,
+            'succeeded'::"RaceResolutionJobState", $2,
+            $2, $2, $2, $2
+          )
           ON CONFLICT (race_id) DO NOTHING
           `,
           raceId,

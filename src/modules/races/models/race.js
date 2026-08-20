@@ -42,7 +42,11 @@ const participantInclude = {
     include: {
       user: participantCosmeticUserSelect,
     },
-    orderBy: { joinedAt: "asc" },
+    // `joinedAt` is not unique (bulk enrollment and fast sequential joins can
+    // share the same database timestamp). Keep every legacy/full progress read
+    // on the same deterministic order as the paged projection so OFFSET pages
+    // cannot reshuffle tied participants between polls.
+    orderBy: [{ joinedAt: "asc" }, { id: "asc" }],
   },
 };
 
@@ -329,7 +333,7 @@ const Race = {
     return prisma.race.findUnique({
       where: { id },
       include: {
-        participants: { orderBy: { joinedAt: "asc" } },
+        participants: { orderBy: detailsParticipantOrder },
         tournament: { select: { id: true, name: true, bracketSize: true } },
       },
     });
@@ -543,6 +547,9 @@ const Race = {
     // App-funded prize pool discriminator. Defaults false so every legacy caller
     // (and every existing row) keeps the buy-in model.
     fundedPrize = false,
+    prizeCoinUnit = null,
+    prizePoolMaxCoins = null,
+    prizeCalculationVersion = 1,
     payoutRoundingVersion = 0,
     // Creation-stamped exit protocol. Defaults false so all direct/legacy
     // callers preserve their existing race lifecycle.
@@ -583,6 +590,9 @@ const Race = {
         payoutPreset,
         potCoins,
         fundedPrize,
+        prizeCoinUnit,
+        prizePoolMaxCoins,
+        prizeCalculationVersion,
         payoutRoundingVersion,
         exitActionsEnabled,
         isPublic,
@@ -1079,6 +1089,9 @@ const Race = {
         r.funded_prize AS "fundedPrize",
         r.payout_rounding_version AS "payoutRoundingVersion",
         r.prize_pool_coins AS "prizePoolCoins",
+        r.prize_coin_unit AS "prizeCoinUnit",
+        r.prize_pool_max_coins AS "prizePoolMaxCoins",
+        r.prize_calculation_version AS "prizeCalculationVersion",
         r.payout_curve AS "payoutCurve",
         r.powerups_enabled AS "powerupsEnabled",
         r.powerup_step_interval AS "powerupStepInterval",
@@ -1448,6 +1461,9 @@ const Race = {
           r.funded_prize AS "fundedPrize",
           r.payout_rounding_version AS "payoutRoundingVersion",
           r.prize_pool_coins AS "prizePoolCoins",
+          r.prize_coin_unit AS "prizeCoinUnit",
+          r.prize_pool_max_coins AS "prizePoolMaxCoins",
+          r.prize_calculation_version AS "prizeCalculationVersion",
           r.payout_curve AS "payoutCurve",
           r.powerups_enabled AS "powerupsEnabled",
           r.max_participants AS "maxParticipants",

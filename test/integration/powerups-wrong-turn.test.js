@@ -1,9 +1,27 @@
 const assert = require("node:assert/strict");
 const { describe, it, before, after, beforeEach } = require("node:test");
 const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
+const {
+  buildRaceResolutionWorkerV2,
+} = require("../../src/modules/races/jobs/raceResolutionQueueV2");
+const {
+  buildRecomputePlacements,
+} = require("../../src/modules/races/jobs/placementRecompute");
 
 let server;
 let nextAppleId = 0;
+
+async function drainRaceResolution() {
+  await buildRecomputePlacements({
+    requestStepSyncForUsers: async () => {},
+    logger: { log() {}, warn() {}, error(error) { throw error; } },
+  })();
+  const worker = buildRaceResolutionWorkerV2({
+    bootAt: 0,
+    logger: { log() {}, error(error) { throw error; } },
+  });
+  while (await worker.processOne()) {}
+}
 
 function authOverrides() {
   return {
@@ -636,7 +654,11 @@ describe("wrong turn", () => {
         where: { id: effect.id },
         data: { expiresAt: minutesAgo(1) },
       });
-      await getProgress(alice.token, raceId);
+      await request(server.baseUrl, "POST", "/steps", {
+        body: { steps: 1, date: new Date().toISOString().slice(0, 10) },
+        token: alice.token,
+      });
+      await drainRaceResolution();
 
       const feedRes = await request(server.baseUrl, "GET", `/races/${raceId}/feed`, { token: alice.token });
       const feedBody = await feedRes.json();

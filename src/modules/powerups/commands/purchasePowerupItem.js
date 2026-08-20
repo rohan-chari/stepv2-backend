@@ -2,6 +2,10 @@ const { Prisma } = require("@prisma/client");
 const { prisma } = require("../../../db");
 const { testOnlyFilter } = require("../../../shared/middleware/releaseChannel");
 const { deductCoinsAtomic } = require("../../../shared/economy/deductCoinsAtomic");
+const {
+  isRetiredPowerupRequest,
+  markRetiredPowerupError,
+} = require("../powerupRetirement");
 
 class PowerupPurchaseError extends Error {
   constructor(message, statusCode = 400) {
@@ -60,6 +64,11 @@ function buildPurchasePowerupItem(dependencies = {}) {
       }));
 
   return async function purchasePowerupItem({ userId, sku, powerupType, idempotencyKey, channel = "prod" }) {
+    if (isRetiredPowerupRequest({ sku, powerupType })) {
+      throw markRetiredPowerupError(
+        new PowerupPurchaseError("This powerup has been retired.", 410),
+      );
+    }
     if (!idempotencyKey || typeof idempotencyKey !== "string") {
       throw new PowerupPurchaseError("Idempotency-Key is required", 400);
     }

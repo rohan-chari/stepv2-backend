@@ -650,6 +650,16 @@ function createRacesRouter(dependencies = {}) {
         : await create();
       res.status(201).json({ race });
     } catch (error) {
+      if (
+        error.code === "FUNDED_EXPOSURE_LIMIT" ||
+        error.code === "FUNDED_EXPOSURE_RETRY"
+      ) {
+        return res.status(409).json({
+          error: error.message,
+          code: error.code,
+          ...(error.meta || {}),
+        });
+      }
       if (error.name === "RaceCreationError") {
         const status = error.statusCode || 400;
         // `code` is additive — old clients only read `error`; new clients
@@ -1107,6 +1117,16 @@ function createRacesRouter(dependencies = {}) {
       });
       res.status(201).json({ participant });
     } catch (error) {
+      if (
+        error.code === "FUNDED_EXPOSURE_LIMIT" ||
+        error.code === "FUNDED_EXPOSURE_RETRY"
+      ) {
+        return res.status(409).json({
+          error: error.message,
+          code: error.code,
+          ...(error.meta || {}),
+        });
+      }
       if (error.name === "RaceJoinError") {
         const status = error.statusCode || 400;
         return res
@@ -1165,6 +1185,16 @@ function createRacesRouter(dependencies = {}) {
       });
       res.status(201).json({ participant, raceId: participant.raceId });
     } catch (error) {
+      if (
+        error.code === "FUNDED_EXPOSURE_LIMIT" ||
+        error.code === "FUNDED_EXPOSURE_RETRY"
+      ) {
+        return res.status(409).json({
+          error: error.message,
+          code: error.code,
+          ...(error.meta || {}),
+        });
+      }
       if (
         error.name === "RaceShareJoinError" ||
         error.name === "RaceJoinError"
@@ -1472,6 +1502,16 @@ function createRacesRouter(dependencies = {}) {
       });
       res.json({ participant });
     } catch (error) {
+      if (
+        error.code === "FUNDED_EXPOSURE_LIMIT" ||
+        error.code === "FUNDED_EXPOSURE_RETRY"
+      ) {
+        return res.status(409).json({
+          error: error.message,
+          code: error.code,
+          ...(error.meta || {}),
+        });
+      }
       if (error.name === "RaceInviteResponseError") {
         const status = error.statusCode || 400;
         return res
@@ -1832,7 +1872,13 @@ function createRacesRouter(dependencies = {}) {
         const status = error.statusCode || 400;
         return res
           .status(status)
-          .json({ error: error.message, ...(error.code ? { code: error.code } : {}) });
+          .json({
+            error: error.message,
+            ...(error.code ? { code: error.code } : {}),
+            ...(error.powerupType
+              ? { powerupType: error.powerupType }
+              : {}),
+          });
       }
       console.error("Redeem powerup error:", error);
       res.status(500).json({ error: "Internal server error" });
@@ -1893,7 +1939,13 @@ function createRacesRouter(dependencies = {}) {
         const status = error.statusCode || 400;
         return res
           .status(status)
-          .json({ error: error.message, ...(error.code ? { code: error.code } : {}) });
+          .json({
+            error: error.message,
+            ...(error.code ? { code: error.code } : {}),
+            ...(error.powerupType
+              ? { powerupType: error.powerupType }
+              : {}),
+          });
       }
       console.error("Use powerup error:", error);
       res.status(500).json({ error: "Internal server error" });

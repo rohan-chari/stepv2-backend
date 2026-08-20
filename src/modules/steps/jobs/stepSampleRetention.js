@@ -4,6 +4,9 @@ const {
 } = require("../services/scoringInputVersion");
 const { JobRun: defaultJobRun } = require("../../../shared/db/jobRun");
 const { dailyRunKey } = require("../../../shared/time/etSchedule");
+const {
+  destructiveCleanupDisabled,
+} = require("../../../shared/config/operationalControls");
 
 // step_samples retention cron (Five-Minute Step Samples §4.1). Finer buckets
 // grow row counts ~5x; prune rows nothing can ever read again.
@@ -31,7 +34,8 @@ function buildCleanupStepSamples(dependencies = {}) {
   const retentionDays = dependencies.retentionDays || RETENTION_DAYS;
   const batchSize = dependencies.batchSize || BATCH_SIZE;
   const disabled =
-    dependencies.disabled ?? process.env.STEP_SAMPLE_RETENTION_DISABLED === "true";
+    dependencies.disabled ??
+    destructiveCleanupDisabled("STEP_SAMPLE_RETENTION_DISABLED");
 
   return async function cleanupStepSamples() {
     // Kill switch (§4.1). Checked before the claim so a disabled job never even

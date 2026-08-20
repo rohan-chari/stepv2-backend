@@ -62,10 +62,12 @@ function computePrizePool({
   durationDays,
   max = poolMax(),
   multBps = null,
+  unit = coinUnit(),
 }) {
   const players = Math.max(0, Math.floor(Number(playerCount) || 0));
   if (players < 2) return 0;
-  const raw = players * durationPoints(durationDays) * coinUnit();
+  const normalizedUnit = Math.max(0, Math.floor(Number(unit) || 0));
+  const raw = players * durationPoints(durationDays) * normalizedUnit;
   const multiplied = Math.floor(raw * multiplierFromBps(multBps));
   return Math.min(multiplied, Math.max(0, Math.floor(Number(max) || 0)));
 }
@@ -85,6 +87,7 @@ function buildPrizePoolPayload({
   coins = null,
   max = poolMax(),
   multBps = null,
+  unit = coinUnit(),
 }) {
   if (!funded) return null;
   const ceiling = Math.max(0, Math.floor(Number(max) || 0));
@@ -93,6 +96,7 @@ function buildPrizePoolPayload({
     durationDays,
     max: ceiling,
     multBps,
+    unit,
   });
   const value = coins == null ? computed : Math.max(0, Math.floor(coins));
   return {
@@ -102,7 +106,7 @@ function buildPrizePoolPayload({
     playerCount: Math.max(0, Math.floor(Number(playerCount) || 0)),
     durationDays: Math.max(0, Math.floor(Number(durationDays) || 0)),
     durationPoints: durationPoints(durationDays),
-    coinUnit: coinUnit(),
+    coinUnit: Math.max(0, Math.floor(Number(unit) || 0)),
     maxCoins: ceiling,
     funded: true,
   };

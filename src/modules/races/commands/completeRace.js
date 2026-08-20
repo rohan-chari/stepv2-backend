@@ -36,6 +36,10 @@ const {
   buildPayoutPlan,
   payoutRoundingMetadata,
 } = require("../services/payoutRounding");
+const {
+  lockFundedExposureUsers,
+} = require("../services/fundedExposure");
+const { acquireRaceWriteFence } = require("../services/raceWriteFence");
 
 function buildCompleteRace(dependencies = {}) {
   const raceModel = dependencies.Race || Race;
@@ -48,6 +52,7 @@ function buildCompleteRace(dependencies = {}) {
   const events = dependencies.eventBus || eventBus;
   const now = dependencies.now || (() => new Date());
   const db = dependencies.prisma || defaultPrisma;
+  const usesDefaultPersistence = !dependencies.Race && !dependencies.prisma;
   const advanceTournamentFn =
     dependencies.advanceTournament || defaultAdvanceTournament;
   const createReviewOpportunity =
@@ -96,15 +101,13 @@ function buildCompleteRace(dependencies = {}) {
         (paidByUser.get(credit.userId) || 0) + Math.max(0, credit.amount || 0)
       );
     }
-    await Promise.all(
-      (race.participants || []).map((participant) => {
-        const payoutCoins = paidByUser.get(participant.userId) || 0;
-        return db.raceParticipant.updateMany({
+    for (const participant of race.participants || []) {
+      const payoutCoins = paidByUser.get(participant.userId) || 0;
+      await db.raceParticipant.updateMany({
           where: { id: participant.id },
           data: { payoutCoins },
-        });
-      })
-    );
+      });
+    }
 
     const totals = awards.reduce(
       (summary, award) => ({
@@ -154,12 +157,48 @@ function buildCompleteRace(dependencies = {}) {
     tie = false,
   }) {
     const isTeamSettlement = Boolean(winnerTeam) || tie === true;
-    const result = await raceModel.updateIfActive(raceId, {
+    const completionData = {
       status: "COMPLETED",
       completedAt: now(),
       winnerUserId: isTeamSettlement ? null : winnerUserId,
       ...(isTeamSettlement ? { winnerTeam: winnerTeam || null } : {}),
-    });
+    };
+    const result = usesDefaultPersistence
+      ? await db.$transaction(async (tx) => {
+          await acquireRaceWriteFence(tx, raceId);
+          const exposureRace = await tx.race.findUnique({
+            where: { id: raceId },
+            select: { fundedPrize: true },
+          });
+          if (exposureRace?.fundedPrize === true) {
+            const accepted = await tx.raceParticipant.findMany({
+              where: { raceId, status: "ACCEPTED" },
+              select: { userId: true },
+            });
+            // The locked membership snapshot, not the worker's optimistic
+            // pre-fence list, is authoritative for funded settlement.
+            participantUserIds = accepted.map((participant) => participant.userId);
+            await lockFundedExposureUsers(
+              tx,
+              accepted.map((participant) => participant.userId),
+            );
+          }
+          await tx.$queryRaw`
+            SELECT id FROM races WHERE id = ${raceId} FOR UPDATE
+          `;
+          const lockedRace = await tx.race.findUnique({
+            where: { id: raceId },
+            select: { status: true },
+          });
+          if (!lockedRace || lockedRace.status !== "ACTIVE") {
+            return { count: 0 };
+          }
+          return tx.race.updateMany({
+            where: { id: raceId, status: "ACTIVE" },
+            data: completionData,
+          });
+        })
+      : await raceModel.updateIfActive(raceId, completionData);
 
     // A v1 retry must resume after the active->completed fence: a previous
     // process may have committed a ledger row just before dying.  Legacy rows
@@ -238,10 +277,31 @@ function buildCompleteRace(dependencies = {}) {
       if (loserUserId) {
         const loserTp = tpByUser.get(loserUserId);
         if (loserTp && loserTp.eliminatedInRound == null) {
-          await db.tournamentParticipant.update({
-            where: { id: loserTp.id },
-            data: { eliminatedInRound: race.tournamentRound },
-          });
+          if (usesDefaultPersistence) {
+            await db.$transaction(async (tx) => {
+              const tournament = await tx.tournament.findUnique({
+                where: { id: race.tournamentId },
+                select: { fundedPrize: true },
+              });
+              if (tournament?.fundedPrize === true) {
+                await lockFundedExposureUsers(tx, [loserUserId]);
+              }
+              await tx.$queryRaw`
+                SELECT id FROM tournaments
+                WHERE id = ${race.tournamentId}
+                FOR UPDATE
+              `;
+              await tx.tournamentParticipant.update({
+                where: { id: loserTp.id },
+                data: { eliminatedInRound: race.tournamentRound },
+              });
+            });
+          } else {
+            await db.tournamentParticipant.update({
+              where: { id: loserTp.id },
+              data: { eliminatedInRound: race.tournamentRound },
+            });
+          }
         }
       }
 

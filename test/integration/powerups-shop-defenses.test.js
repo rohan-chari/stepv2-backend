@@ -235,7 +235,7 @@ describe("shop-powerup defenses — integration", () => {
   });
 
   // ── IMPOSTER vs COMPRESSION SOCKS ──────────────────────────────────────
-  it("IMPOSTER is blocked by the target's Compression Socks — no swap, socks consumed", async () => {
+  it("retired IMPOSTER purchase is a 410 and does not consume Compression Socks", async () => {
     const alice = await createUser("ImpAttacker1", 200);
     const bob = await createUser("ImpSocks1");
     await makeFriends(alice, bob);
@@ -247,14 +247,14 @@ describe("shop-powerup defenses — integration", () => {
       new Date(Date.now() + 60 * 60 * 1000)
     );
 
-    await purchase(alice.token, "POWERUP_IMPOSTER", "imp-socks-1");
-    const r = await redeem(alice.token, raceId, "IMPOSTER");
-    const impId = (await r.json()).result.powerup.id;
-    const res = await usePowerup(alice.token, raceId, impId, { targetUserId: bob.userId });
-    assert.equal(res.status, 200);
-    const body = await res.json();
-    assert.equal(body.result.blocked, true);
-    assert.equal(body.result.blockedBy, "COMPRESSION_SOCKS");
+    const beforeCoins = (await prisma.user.findUnique({ where: { id: alice.userId } })).coins;
+    const res = await purchase(alice.token, "POWERUP_IMPOSTER", "imp-socks-1");
+    assert.equal(res.status, 410);
+    assert.deepEqual(await res.json(), {
+      error: "This powerup has been retired.",
+      code: "POWERUP_RETIRED",
+      powerupType: "IMPOSTER",
+    });
 
     // No IMPOSTER effect created; socks consumed; imposter powerup USED.
     const impEffect = await prisma.raceActiveEffect.findFirst({
@@ -262,16 +262,13 @@ describe("shop-powerup defenses — integration", () => {
     });
     assert.equal(impEffect, null, "no display-swap effect created");
     const shieldNow = await prisma.raceActiveEffect.findUnique({ where: { id: shield.id } });
-    assert.equal(shieldNow.status, "BLOCKED", "socks consumed");
-    assert.equal((await prisma.racePowerup.findUnique({ where: { id: impId } })).status, "USED");
-    const blocked = await prisma.racePowerupEvent.findFirst({
-      where: { raceId, eventType: "POWERUP_BLOCKED", powerupType: "IMPOSTER" },
-    });
-    assert.ok(blocked, "writes POWERUP_BLOCKED");
+    assert.equal(shieldNow.status, "ACTIVE", "socks remain intact");
+    assert.equal((await prisma.user.findUnique({ where: { id: alice.userId } })).coins, beforeCoins);
+    assert.equal(await prisma.userPowerupItem.count({ where: { userId: alice.userId, powerupType: "IMPOSTER" } }), 0);
   });
 
   // ── IMPOSTER vs MIRROR ─────────────────────────────────────────────────
-  it("IMPOSTER is NOT reflected by a Mirror — the swap applies and the Mirror stays intact", async () => {
+  it("a legacy HELD IMPOSTER use is a 410 and leaves both it and Mirror intact", async () => {
     const alice = await createUser("ImpAttacker2", 200);
     const bob = await createUser("ImpMirror2");
     await makeFriends(alice, bob);
@@ -283,22 +280,23 @@ describe("shop-powerup defenses — integration", () => {
       new Date(Date.now() + 60 * 60 * 1000)
     );
 
-    await purchase(alice.token, "POWERUP_IMPOSTER", "imp-mirror-2");
-    const r = await redeem(alice.token, raceId, "IMPOSTER");
-    const impId = (await r.json()).result.powerup.id;
+    const imp = await giveHeldPowerup(raceId, alice.userId, "IMPOSTER", 3999);
+    const impId = imp.id;
     const res = await usePowerup(alice.token, raceId, impId, { targetUserId: bob.userId });
-    assert.equal(res.status, 200);
-    const body = await res.json();
-    assert.notEqual(body.result.blocked, true);
-    assert.notEqual(body.result.reflected, true);
+    assert.equal(res.status, 410);
+    assert.deepEqual(await res.json(), {
+      error: "This powerup has been retired.",
+      code: "POWERUP_RETIRED",
+      powerupType: "IMPOSTER",
+    });
 
     // Self-applied IMPOSTER effect on the caster records the swap target.
     const aliceP = await participant(raceId, alice.userId);
     const impEffect = await prisma.raceActiveEffect.findFirst({
       where: { raceId, type: "IMPOSTER", targetParticipantId: aliceP.id, status: "ACTIVE" },
     });
-    assert.ok(impEffect, "imposter effect applied on caster");
-    assert.equal(impEffect.metadata.swapWithUserId, bob.userId);
+    assert.equal(impEffect, null);
+    assert.equal((await prisma.racePowerup.findUnique({ where: { id: impId } })).status, "HELD");
     // Mirror is NOT consumed.
     const mirrorNow = await prisma.raceActiveEffect.findUnique({ where: { id: mirror.id } });
     assert.equal(mirrorNow.status, "ACTIVE", "mirror not consumed by imposter");

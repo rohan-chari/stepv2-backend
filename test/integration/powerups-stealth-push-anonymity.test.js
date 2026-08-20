@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict");
 const { describe, it, before, after, beforeEach } = require("node:test");
 const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
+const { appSettings } = require("../../src/shared/config/appSettings");
 const {
   registerNotificationHandlers,
 } = require("../../src/modules/notifications/notificationHandlers");
@@ -196,6 +197,7 @@ describe("stealthed attacks never name the attacker in a push", () => {
   beforeEach(async () => {
     await cleanDatabase();
     nextAppleId = 0;
+    await appSettings.setFlag("teamRacesEnabled", true);
     captured.length = 0;
     tokenOwner.clear();
   });

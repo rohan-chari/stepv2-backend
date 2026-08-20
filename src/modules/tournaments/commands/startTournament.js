@@ -23,10 +23,7 @@ function buildStartTournament(dependencies = {}) {
   return async function startTournament({ userId, tournamentId, supportsCharacters, supportsRemoteAssets = false }) {
     const { deferred } = await withTournamentLock(
       tournamentId,
-      async (tx, def) => {
-        const tournament = await tx.tournament.findUnique({
-          where: { id: tournamentId },
-        });
+      async (tx, def, tournament) => {
         if (!tournament) {
           throw new TournamentError("Tournament not found", 404, "TOURNAMENT_NOT_FOUND");
         }
@@ -60,7 +57,16 @@ function buildStartTournament(dependencies = {}) {
         });
         if (startEvents) def.push(...startEvents);
       },
-      { prisma: db }
+      {
+        prisma: db,
+        resolveUserIds: async (tx) => {
+          const participants = await tx.tournamentParticipant.findMany({
+            where: { tournamentId, status: "ACCEPTED" },
+            select: { userId: true },
+          });
+          return participants.map((row) => row.userId);
+        },
+      }
     );
 
     for (const payload of deferred) {

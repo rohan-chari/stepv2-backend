@@ -126,38 +126,36 @@ function imposter(ownerUserId, swapWithUserId, expiresAt) {
   };
 }
 
-test("active IMPOSTER swaps the two users' DISPLAYED positions for everyone", async () => {
+test("historical active IMPOSTER rows no longer swap displayed positions", async () => {
   // user-1 (1st, 30k) plays IMPOSTER swapping display with user-3 (3rd, 10k).
   const effects = [imposter("user-1", "user-3", FUTURE)];
 
-  // Viewer is a third party (user-2) — the swap is visible to ALL viewers.
+  // Viewer is a third party; retired illusion rows are ignored.
   const deps = makeDeps(effects);
   const result = await buildGetRaceProgress(deps)("user-2", "race-1", TZ);
 
   const order = result.participants.map((p) => p.userId);
-  // Without imposter, order is [user-1, user-2, user-3]. After swapping the
-  // DISPLAY slots of user-1 and user-3: [user-3, user-2, user-1].
-  assert.deepEqual(order, ["user-3", "user-2", "user-1"]);
+  assert.deepEqual(order, ["user-1", "user-2", "user-3"]);
 
   // Each keeps their OWN name + real steps, just shown at the other's slot.
   const first = result.participants[0];
-  assert.equal(first.userId, "user-3");
-  assert.equal(first.displayName, "user-3");
-  assert.equal(first.totalSteps, 10000, "user-3 still shows their real steps");
+  assert.equal(first.userId, "user-1");
+  assert.equal(first.displayName, "user-1");
+  assert.equal(first.totalSteps, 30000, "natural leader keeps their real steps");
 
   const last = result.participants[2];
-  assert.equal(last.userId, "user-1");
-  assert.equal(last.displayName, "user-1");
-  assert.equal(last.totalSteps, 30000, "user-1 still shows their real steps");
+  assert.equal(last.userId, "user-3");
+  assert.equal(last.displayName, "user-3");
+  assert.equal(last.totalSteps, 10000, "last place keeps their real steps");
 });
 
-test("the IMPOSTER owner ALSO sees the swap (visible to all viewers)", async () => {
+test("the historical IMPOSTER owner also sees natural ordering", async () => {
   const effects = [imposter("user-1", "user-3", FUTURE)];
   const deps = makeDeps(effects);
   const result = await buildGetRaceProgress(deps)("user-1", "race-1", TZ);
 
   const order = result.participants.map((p) => p.userId);
-  assert.deepEqual(order, ["user-3", "user-2", "user-1"]);
+  assert.deepEqual(order, ["user-1", "user-2", "user-3"]);
 });
 
 test("an EXPIRED imposter does NOT swap positions", async () => {

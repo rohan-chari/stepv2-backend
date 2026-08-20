@@ -82,6 +82,36 @@ test("accepting a PENDING race does not set baseline steps", async () => {
   assert.equal(updates[0].fields.baselineSteps, undefined);
 });
 
+test("production decline is written inside the race C0 transaction", async () => {
+  const calls = [];
+  const race = {
+    id: "race-1", creatorId: "creator-1", status: "PENDING",
+    name: "Test Race", buyInAmount: 0, participants: [],
+  };
+  const participant = { id: "rp-1", userId: "friend-1", status: "INVITED" };
+  const tx = {
+    async $queryRaw() { calls.push("competition"); return [{ id: race.id }]; },
+    race: { async findUnique() { return race; } },
+    raceParticipant: {
+      async updateMany() { calls.push("update"); return { count: 1 }; },
+      async findUnique() { return { ...participant, status: "DECLINED" }; },
+    },
+  };
+  const respond = buildRespondToRaceInvite({
+    Race: { async findById() { return race; } },
+    RaceParticipant: { async findByRaceAndUser() { return participant; } },
+    User: { async findById(id) { return { id, coins: 0 }; } },
+    Steps: { async findByUserIdAndDate() { return null; } },
+    eventBus: { emit() {} },
+    prisma: { async $transaction(callback) { calls.push("tx"); return callback(tx); } },
+    async acquireRaceWriteFence() { calls.push("c0"); },
+    maybeAutoStartPrivateRace: async () => null,
+  });
+
+  await respond({ userId: participant.userId, raceId: race.id, accept: false });
+  assert.deepEqual(calls.slice(0, 4), ["tx", "c0", "competition", "update"]);
+});
+
 test("accepting an ACTIVE race sets baseline steps to current steps today", async () => {
   const { deps, updates } = makeDeps({
     Race: {

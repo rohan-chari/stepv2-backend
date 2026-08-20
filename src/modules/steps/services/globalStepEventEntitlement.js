@@ -7,6 +7,9 @@ const { isValidIanaTimeZone } = require("../../users/services/globalEventTimezon
 const { prisma: defaultPrisma } = require("../../../db");
 const { createInboxAlert: defaultCreateInboxAlert } = require("../../inbox/services/inbox");
 const { enqueueRaceResolution: defaultEnqueueRaceResolution } = require("../../races/services/enqueueRaceResolution");
+const {
+  acquireRaceWriteFences,
+} = require("../../races/services/raceWriteFence");
 
 const START_OUTCOMES = Object.freeze({
   PENDING: "PENDING",
@@ -231,7 +234,6 @@ async function processDueEntitlementBoundaries({
   do {
   startPageSize = 0;
   await prisma.$transaction(async (tx) => {
-    await acquireGlobalEnrollmentLock(tx);
     const due = await findDueEntitlementsForUpdate(tx, {
       boundary: "start",
       now: current,
@@ -239,16 +241,13 @@ async function processDueEntitlementBoundaries({
       includeEvent: true,
     });
     startPageSize = due.length;
+    const startRaceIdsByEntitlement = new Map();
     for (const entitlement of due) {
-      if (Date.now() - started >= tickBudgetMs) break;
-      if (entitlement.event.scheduleMode !== LOCAL_ENTITLEMENTS) continue;
-      if (current.getTime() - new Date(entitlement.startsAt).getTime() > 2 * 60 * 1000) {
-        await tx.globalStepEventEntitlement.updateMany({
-          where: { id: entitlement.id, startProcessedAt: null },
-          data: { startOutcome: START_OUTCOMES.SKIPPED_STALE, startProcessedAt: current },
-        });
-        result.stale += 1;
-        transitionedUserIds.add(entitlement.userId);
+      if (
+        entitlement.event.scheduleMode !== LOCAL_ENTITLEMENTS ||
+        current.getTime() - new Date(entitlement.startsAt).getTime() > 2 * 60 * 1000
+      ) {
+        startRaceIdsByEntitlement.set(entitlement.id, []);
         continue;
       }
       const participants = await tx.raceParticipant.findMany({
@@ -266,7 +265,29 @@ async function processDueEntitlementBoundaries({
         },
         select: { raceId: true },
       });
-      const raceIds = [...new Set(participants.map((row) => row.raceId))].sort();
+      startRaceIdsByEntitlement.set(
+        entitlement.id,
+        [...new Set(participants.map((row) => row.raceId))].sort(),
+      );
+    }
+    const startRaceIds = [...new Set(
+      [...startRaceIdsByEntitlement.values()].flat(),
+    )].sort();
+    await acquireRaceWriteFences(tx, startRaceIds);
+    await acquireGlobalEnrollmentLock(tx);
+    for (const entitlement of due) {
+      if (Date.now() - started >= tickBudgetMs) break;
+      if (entitlement.event.scheduleMode !== LOCAL_ENTITLEMENTS) continue;
+      if (current.getTime() - new Date(entitlement.startsAt).getTime() > 2 * 60 * 1000) {
+        await tx.globalStepEventEntitlement.updateMany({
+          where: { id: entitlement.id, startProcessedAt: null },
+          data: { startOutcome: START_OUTCOMES.SKIPPED_STALE, startProcessedAt: current },
+        });
+        result.stale += 1;
+        transitionedUserIds.add(entitlement.userId);
+        continue;
+      }
+      const raceIds = startRaceIdsByEntitlement.get(entitlement.id) || [];
       for (const raceId of raceIds) {
         await createPendingEnrollments(tx, {
           eventId: entitlement.eventId,
@@ -314,20 +335,31 @@ async function processDueEntitlementBoundaries({
     do {
     endPageSize = 0;
     await prisma.$transaction(async (tx) => {
-      await acquireGlobalEnrollmentLock(tx);
       const due = await findDueEntitlementsForUpdate(tx, {
         boundary: "end",
         now: current,
         take: batchSize,
       });
       endPageSize = due.length;
+      const endRaceIdsByEntitlement = new Map();
       for (const entitlement of due) {
-        if (Date.now() - started >= tickBudgetMs) break;
         const impacts = await tx.globalEventRaceImpact.findMany({
           where: { eventId: entitlement.eventId, userId: entitlement.userId },
           select: { raceId: true },
         });
-        for (const raceId of [...new Set(impacts.map((row) => row.raceId))].sort()) {
+        endRaceIdsByEntitlement.set(
+          entitlement.id,
+          [...new Set(impacts.map((row) => row.raceId))].sort(),
+        );
+      }
+      const endRaceIds = [...new Set(
+        [...endRaceIdsByEntitlement.values()].flat(),
+      )].sort();
+      await acquireRaceWriteFences(tx, endRaceIds);
+      await acquireGlobalEnrollmentLock(tx);
+      for (const entitlement of due) {
+        if (Date.now() - started >= tickBudgetMs) break;
+        for (const raceId of endRaceIdsByEntitlement.get(entitlement.id) || []) {
           await enqueueRaceResolution({
             raceId,
             userId: entitlement.userId,
@@ -379,15 +411,15 @@ async function ensureRaceGlobalEventEligibility({
   await prisma.$transaction(async (tx) => {
     const { acquireGlobalEnrollmentLock, createPendingEnrollments } =
       require("./globalEventEnrollment");
-    await acquireGlobalEnrollmentLock(tx);
     const fence = acquireRaceFence || (async (client, input) => {
       const { RaceResolutionJobV2 } = require("../../races/models/raceResolutionJobV2");
       return RaceResolutionJobV2.acquireForWrite(client, input);
     });
-    // Shared lock order: global enrollment advisory, then race writer fence.
+    // Universal order: race writer fence first, then global enrollment.
     // This proves/repairs membership
     // before any canonical settlement scorer is allowed to consume the map.
     await fence(tx, { raceId: race.id, now: current });
+    await acquireGlobalEnrollmentLock(tx);
     if (typeof tx.race?.findUnique === "function") {
       const lockedRace = await tx.race.findUnique({
         where: { id: race.id },

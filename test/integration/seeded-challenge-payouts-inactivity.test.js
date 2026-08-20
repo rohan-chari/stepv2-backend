@@ -21,6 +21,9 @@ const {
   autoEnrollNewUser,
 } = require("../../src/modules/races/commands/autoEnrollNewUser");
 const {
+  RaceResolutionJobV2,
+} = require("../../src/modules/races/models/raceResolutionJobV2");
+const {
   getTimeZoneParts,
   formatDateString,
   addDaysToDateString,
@@ -1060,6 +1063,48 @@ describe("seeded challenge payouts + inactivity pruning", () => {
       await autoJoinFlagOf(ghost.userId),
       false,
       "auto-enroll flipped off so the cron stops re-enrolling them"
+    );
+  });
+
+  it("16a: promotion prune cannot mutate membership outside the race C0 fence", async () => {
+    await appSettings.setFlag(PRUNE_FLAG, true);
+    const ghost = await makeUser({ autoJoinFeaturedRaces: true });
+    const race = await duePendingDaily();
+    await prisma.raceParticipant.create({
+      data: { raceId: race.id, userId: ghost.userId, status: "ACCEPTED" },
+    });
+
+    let releaseFence;
+    let markFence;
+    const fenced = new Promise((resolve) => { markFence = resolve; });
+    const release = new Promise((resolve) => { releaseFence = resolve; });
+    const holder = prisma.$transaction(async (tx) => {
+      await RaceResolutionJobV2.acquireForWrite(tx, { raceId: race.id });
+      markFence();
+      await release;
+    }, { timeout: 15_000 });
+    await fenced;
+    const renewal = buildRenewSeededRaces({
+      prisma,
+      logger: { log() {}, error() {} },
+    })();
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      assert.equal(
+        await prisma.raceParticipant.count({
+          where: { raceId: race.id, userId: ghost.userId, status: "ACCEPTED" },
+        }),
+        1,
+        "prune waits behind C0 before deleting or declining membership",
+      );
+    } finally {
+      releaseFence();
+      await holder;
+    }
+    await renewal;
+    assert.equal(
+      await prisma.raceParticipant.count({ where: { raceId: race.id, userId: ghost.userId } }),
+      0,
     );
   });
 

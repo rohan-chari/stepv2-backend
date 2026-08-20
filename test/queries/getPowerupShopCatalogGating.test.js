@@ -7,13 +7,11 @@ const {
 
 // ---------------------------------------------------------------------------
 // GET /shop/powerups gating (Items 2 + 3):
-//   * IMPOSTER is filtered out when the kill switch is on (IMPOSTER_ENABLED=
-//     "false") — no app version is offered it (Item 3).
+//   * IMPOSTER is permanently filtered out — no app version is offered it.
 //   * Leech + X-Ray (DEFENSE_SCAN) are hidden unless the client advertises the
 //     `powerups2` feature (Item 2).
 //   * Signal Jammer stays behind the `jammer` feature (unchanged).
-// The Imposter kill switch is env-driven, so this test sets + restores
-// IMPOSTER_ENABLED around each assertion.
+// A stale IMPOSTER_ENABLED value must not reactivate the retired item.
 // ---------------------------------------------------------------------------
 
 const CATALOG = [
@@ -89,12 +87,12 @@ test("Signal Jammer stays gated behind the jammer feature", async () => {
   assert.ok(!withoutJammer.includes("SIGNAL_JAMMER"));
 });
 
-test("IMPOSTER stays in the catalog by default (kill switch off)", async () => {
+test("IMPOSTER stays retired when the legacy environment switch is absent", async () => {
   const types = await typesFor({ supportsJammer: true, supportsPowerups2: true });
-  assert.ok(types.includes("IMPOSTER"), "default (env unset) keeps Imposter visible");
+  assert.ok(!types.includes("IMPOSTER"));
 });
 
-test("IMPOSTER is filtered out when IMPOSTER_ENABLED=false (Item 3)", async () => {
+test("IMPOSTER stays retired when the legacy environment switch is false", async () => {
   const types = await typesFor({ supportsJammer: true, supportsPowerups2: true }, { imposterEnabledEnv: false });
   assert.ok(!types.includes("IMPOSTER"), "kill switch removes Imposter for every client version");
   // The rest of the catalog is unaffected.

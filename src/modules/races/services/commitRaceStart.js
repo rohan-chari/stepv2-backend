@@ -1,7 +1,9 @@
 const { prisma } = require("../../../db");
 const {
-  RaceResolutionJobV2,
-} = require("../models/raceResolutionJobV2");
+  acquireRaceWriteFence,
+  lockCompetitionRows,
+} = require("./raceWriteFence");
+const { lockFundedExposureUsers } = require("./fundedExposure");
 const { recordServerActivationEvent } = require("../../analytics/serverActivationEvents");
 const {
   enqueueRaceResolution,
@@ -46,10 +48,11 @@ async function commitRaceStart({
 }) {
   try {
     const result = await prisma.$transaction(async (tx) => {
+    // Universal membership/lifecycle order: race C0 first, then the global
+    // enrollment lock. acquireRaceWriteFence creates the guard row when this
+    // race has never been queued, so enqueue can safely follow both locks.
+    await acquireRaceWriteFence(tx, raceId);
     await acquireGlobalEnrollmentLock(tx);
-    // Enqueue first inside the same transaction, then lock the resulting job
-    // row before touching participants. A failed/retried start throws below so
-    // the generation rolls back with every other attempted mutation.
     await enqueueRaceResolution({
       raceId,
       userId: actorUserId,
@@ -57,7 +60,15 @@ async function commitRaceStart({
       priority: "IMMEDIATE",
       now: startedAt,
     }, tx);
-    await RaceResolutionJobV2.acquireForWrite(tx, { raceId });
+    const discovered = await tx.raceParticipant.findMany({
+      where: { raceId, status: "ACCEPTED" },
+      select: { userId: true },
+    });
+    await lockFundedExposureUsers(
+      tx,
+      discovered.map((participant) => participant.userId),
+    );
+    await lockCompetitionRows(tx, { raceIds: [raceId] });
     const race = await tx.race.findUnique({
       where: { id: raceId },
       select: { status: true, creationSource: true, startPolicy: true, createdAt: true },

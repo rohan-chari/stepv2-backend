@@ -45,9 +45,6 @@ const {
   InsufficientCoinsError,
 } = require("../../../shared/economy/deductCoinsAtomic");
 const {
-  imposterEnabled: defaultImposterEnabled,
-} = require("../constants/powerupGating");
-const {
   isDrillSergeantQuietHours,
 } = require("../constants/quietHours");
 const { awardCoins: defaultAwardCoins } = require("../../../shared/economy/awardCoins");
@@ -984,9 +981,6 @@ function buildUsePowerup(dependencies = {}) {
     : (...args) => deferUntilAfterCommit(
         () => immediateEvaluateHighMultiplierAlert(...args)
       );
-  // Imposter kill switch (Item 3). Injectable for tests; defaults to the env
-  // reader (enabled unless IMPOSTER_ENABLED="false").
-  const imposterEnabled = dependencies.imposterEnabled || defaultImposterEnabled;
   const usePowerupCore = async function usePowerup({
     userId,
     raceId,
@@ -1013,6 +1007,16 @@ function buildUsePowerup(dependencies = {}) {
     }
     if (powerup.userId !== userId || powerup.raceId !== raceId) {
       throw new PowerupUseError("This powerup does not belong to you", 403);
+    }
+    if (powerup.type === "IMPOSTER") {
+      const error = new PowerupUseError(
+        "This powerup has been retired.",
+        410,
+        "POWERUP_RETIRED",
+        { retainHeld: true },
+      );
+      error.powerupType = "IMPOSTER";
+      throw error;
     }
     if (powerup.status !== "HELD") {
       throw new PowerupUseError("This powerup has already been used or discarded", 400);
@@ -1378,15 +1382,10 @@ function buildUsePowerup(dependencies = {}) {
       throw new PowerupUseError("targetUserIds is only valid for Quicksand", 400, "INVALID_TARGETS");
     }
 
-    // Imposter is DISABLED for now (Item 3). Reject the use with a friendly
+    // Imposter is permanently retired. Reject the use with a stable response
     // message and — crucially — do NOT consume the item (this runs before coin
     // deduction and the mark-USED step, so the powerup stays HELD). Old clients
-    // may still render a "use" affordance; this keeps them safe. Re-enabling is a
-    // single env flip (IMPOSTER_ENABLED).
-    if (type === "IMPOSTER" && !imposterEnabled()) {
-      throw new PowerupUseError("Imposter is temporarily unavailable", 400);
-    }
-
+    // may still render a "use" affordance; this keeps them safe.
     // Wave 5 gate (§4.1): a wave-5 held item used from a client that does not
     // advertise `powerups5` is rejected with UPDATE_REQUIRED. This runs before
     // coin deduction and the mark-USED step, so the item stays HELD. A frozen

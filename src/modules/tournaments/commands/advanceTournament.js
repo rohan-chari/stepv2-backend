@@ -11,7 +11,6 @@ const {
   totalRoundsFor,
   nextRoundPairings,
   roundLabel,
-  MAX_CHAMPION_PRIZE,
 } = require("../constants/tournaments");
 const { computePrizePool } = require("../../../shared/economy/prizePool");
 const { tournamentDurationDays } = require("../queries/serializeTournament");
@@ -19,6 +18,10 @@ const { buildPayoutPlan, payoutRoundingMetadata } = require("../../races/service
 const {
   acquireGlobalEnrollmentLock,
 } = require("../../steps/services/globalEventEnrollment");
+const {
+  resolveTournamentPrizeStamp,
+  lockFundedExposureUsers,
+} = require("../../races/services/fundedExposure");
 
 // Advance a tournament when its current round is fully settled. Idempotent and
 // concurrency-safe: runs under a tournament FOR UPDATE lock, and the
@@ -33,6 +36,8 @@ function buildAdvanceTournament(dependencies = {}) {
   const db = dependencies.prisma || defaultPrisma;
   const events = dependencies.eventBus || eventBus;
   const awardCoinsFn = dependencies.awardCoins || awardCoins;
+  const lockFundedExposureUsersFn =
+    dependencies.lockFundedExposureUsers || lockFundedExposureUsers;
   const now = dependencies.now || (() => new Date());
   const stepsModel = dependencies.Steps; // undefined -> createRoundRaces default
 
@@ -42,6 +47,43 @@ function buildAdvanceTournament(dependencies = {}) {
 
     await db.$transaction(async (tx) => {
       await acquireGlobalEnrollmentLock(tx);
+      // Discovery happens before the tournament row lock because the universal
+      // order is global-event -> sorted user guards -> competition row. Guard
+      // every survivor (and every already-recorded winner) for funded and
+      // non-funded brackets alike: createRoundRaces writes ACCEPTED race
+      // memberships, so account deletion must not pass between discovery and
+      // that write.
+      const advancementSnapshot = await tx.tournament.findUnique({
+        where: { id: tournamentId },
+        select: { status: true, currentRound: true },
+      });
+      if (advancementSnapshot?.status !== "ACTIVE") return;
+      const discoveredAliveParticipants =
+        await tx.tournamentParticipant.findMany({
+          where: {
+            tournamentId,
+            status: "ACCEPTED",
+            eliminatedInRound: null,
+          },
+          select: { userId: true },
+        });
+      const discoveredRoundWinners = advancementSnapshot.currentRound
+        ? await tx.race.findMany({
+            where: {
+              tournamentId,
+              tournamentRound: advancementSnapshot.currentRound,
+              winnerUserId: { not: null },
+            },
+            select: { winnerUserId: true },
+          })
+        : [];
+      const discoveredAdvancementUserIds = [
+        ...new Set([
+          ...discoveredAliveParticipants.map((participant) => participant.userId),
+          ...discoveredRoundWinners.map((race) => race.winnerUserId),
+        ].filter(Boolean)),
+      ].sort();
+      await lockFundedExposureUsersFn(tx, discoveredAdvancementUserIds);
       // FOR UPDATE lock so two settling matchups (or the safety sweep) can't both
       // advance the same round.
       const lockedRows = await tx.$queryRaw`
@@ -57,6 +99,27 @@ function buildAdvanceTournament(dependencies = {}) {
 
       const round = tournament.currentRound;
       if (!round || round < 1) return;
+
+      // Admission, settlement, or account deletion may have won between the
+      // optimistic discovery and the row lock. Reread under both lock classes
+      // and fail closed if any survivor/winner was not guarded; the safety
+      // sweep can retry from a fresh snapshot without creating an unguarded
+      // matchup membership.
+      const lockedAdvancementParticipants =
+        await tx.tournamentParticipant.findMany({
+          where: {
+            tournamentId,
+            status: "ACCEPTED",
+            eliminatedInRound: null,
+          },
+          select: { userId: true },
+        });
+      const guardedAdvancementUsers = new Set(discoveredAdvancementUserIds);
+      if (
+        lockedAdvancementParticipants.some(
+          (participant) => !guardedAdvancementUsers.has(participant.userId),
+        )
+      ) return;
 
       const roundRaces = await tx.race.findMany({
         where: { tournamentId, tournamentRound: round },
@@ -83,6 +146,17 @@ function buildAdvanceTournament(dependencies = {}) {
 
       // Winners in match order.
       const winners = roundRaces.map((r) => r.winnerUserId);
+      const lockedAliveUsers = new Set(
+        lockedAdvancementParticipants.map((participant) => participant.userId),
+      );
+      if (
+        winners.some(
+          (winnerUserId) =>
+            !winnerUserId ||
+            !guardedAdvancementUsers.has(winnerUserId) ||
+            !lockedAliveUsers.has(winnerUserId),
+        )
+      ) return;
       const losers = roundRaces.map((r) => {
         const loser = r.participants.find((p) => p.userId !== r.winnerUserId);
         return loser ? loser.userId : null;
@@ -158,10 +232,12 @@ function buildAdvanceTournament(dependencies = {}) {
               : {}),
           });
         } else if (tournament.fundedPrize === true) {
+          const prizeStamp = resolveTournamentPrizeStamp(tournament);
           const rawPrizeAmount = computePrizePool({
             playerCount: allParticipants.length,
             durationDays: tournamentDurationDays(tournament),
-            max: MAX_CHAMPION_PRIZE,
+            max: prizeStamp.tournamentChampionMaxCoins,
+            unit: prizeStamp.prizeCoinUnit,
           });
           payoutPlan = buildPayoutPlan({
             payoutRoundingVersion: tournament.payoutRoundingVersion,

@@ -53,6 +53,7 @@ const {
 const {
   SNAPSHOT_AT_EXPIRY_TYPES,
 } = require("../../powerups/constants/expiryEffectTypes");
+const { POWERUP_NAMES } = require("../../powerups/commands/rollPowerup");
 
 const ACTIVE_NOTICE_TIMED_TYPES = new Set([
   "LEG_CRAMP",
@@ -1663,6 +1664,18 @@ function buildResolveRaceState(dependencies = {}) {
               status: "EXPIRED",
               expiresAt: effect.expiresAt,
               metadata,
+            });
+            // Frozen clients still render the ordinary race feed. Resolved-
+            // impact v2 owns the expiry transition, but it must preserve the
+            // historical public EFFECT_EXPIRED row atomically with that
+            // transition; otherwise those clients see an activation that
+            // never wears off even though the private impact ledger resolves.
+            await powerupEventModel.create({
+              raceId: race.id,
+              actorUserId: effect.targetUserId,
+              eventType: "EFFECT_EXPIRED",
+              powerupType: effect.type,
+              description: `${POWERUP_NAMES[effect.type] || effect.type} wore off.`,
             });
           }
         } catch (error) {

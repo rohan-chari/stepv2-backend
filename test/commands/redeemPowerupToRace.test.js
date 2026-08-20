@@ -72,17 +72,17 @@ test("redeem decrements global inventory and creates a HELD RacePowerup", async 
   const result = await redeem({
     userId: "user-1",
     raceId: "race-1",
-    powerupType: "IMPOSTER",
+    powerupType: "HITCHHIKE",
   });
 
   assert.equal(deps.state.quantity, 1, "quantity 2 -> 1");
   assert.equal(deps.calls.created.length, 1);
   const created = deps.calls.created[0];
-  assert.equal(created.type, "IMPOSTER");
+  assert.equal(created.type, "HITCHHIKE");
   assert.equal(created.status, "HELD");
   assert.equal(created.userId, "user-1");
   assert.equal(created.participantId, "rp-1");
-  assert.equal(result.powerup.type, "IMPOSTER");
+  assert.equal(result.powerup.type, "HITCHHIKE");
   assert.equal(result.powerup.status, "HELD");
 });
 
@@ -92,7 +92,7 @@ test("redeem rejects when the user owns 0 and does NOT create a RacePowerup", as
 
   await assert.rejects(
     () =>
-      redeem({ userId: "user-1", raceId: "race-1", powerupType: "IMPOSTER" }),
+      redeem({ userId: "user-1", raceId: "race-1", powerupType: "HITCHHIKE" }),
     (err) => err instanceof RedeemPowerupError
   );
 
@@ -105,7 +105,7 @@ test("redeem rejects when the race is not ACTIVE", async () => {
 
   await assert.rejects(
     () =>
-      redeem({ userId: "user-1", raceId: "race-1", powerupType: "IMPOSTER" }),
+      redeem({ userId: "user-1", raceId: "race-1", powerupType: "HITCHHIKE" }),
     (err) => err instanceof RedeemPowerupError
   );
   assert.equal(deps.state.quantity, 1, "inventory not spent on a closed race");
@@ -120,7 +120,7 @@ test("redeem rejects when the user is not an accepted participant", async () => 
 
   await assert.rejects(
     () =>
-      redeem({ userId: "user-1", raceId: "race-1", powerupType: "IMPOSTER" }),
+      redeem({ userId: "user-1", raceId: "race-1", powerupType: "HITCHHIKE" }),
     (err) => err instanceof RedeemPowerupError
   );
   assert.equal(deps.calls.created.length, 0);

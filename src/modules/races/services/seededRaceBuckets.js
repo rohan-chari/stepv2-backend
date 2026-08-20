@@ -1,4 +1,5 @@
 const { prisma: defaultPrisma } = require("../../../db");
+const { randomUUID } = require("node:crypto");
 const { appSettings: defaultAppSettings } = require("../../../shared/config/appSettings");
 const {
   startOfDayNewYork,
@@ -9,6 +10,22 @@ const {
 const { prorateSamplesIntoWindow } = require("../../steps/models/stepSample");
 const { normalizePowerupConfig } = require("./validateRaceConfig");
 const { filterInactiveUserIds } = require("./seededInactivity");
+const {
+  computeRaceExposureStamp,
+  isFundedPrizeV2Enabled,
+  lockFundedExposureUsers,
+  newRacePrizeStamp,
+  reserveFundedExposures,
+  resolveRacePrizeStamp,
+} = require("./fundedExposure");
+const {
+  acquireRaceWriteFence,
+  acquireRaceWriteFences,
+  lockCompetitionRows,
+} = require("./raceWriteFence");
+const {
+  acquireGlobalEnrollmentLock,
+} = require("../../steps/services/globalEventEnrollment");
 
 const SEED_TIMEZONE = "America/New_York";
 const BUCKET_CAPACITY = 15;
@@ -45,12 +62,17 @@ function windowLockKey(seedId, windowStart) {
   return `seeded-bucket:${seedId}:${new Date(windowStart).toISOString()}`;
 }
 
-// Lock ordering is intentional and shared by every cross-stream operation:
-// take the window advisory lock before touching a race/participant row, then
-// re-read durable policy and membership while that lock is held.
+async function acquireSeededWindowLock(tx, seedId, windowStart) {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${windowLockKey(seedId, windowStart)}))`;
+}
+
+// Ledger-only operations take this window lock directly. Operations that also
+// mutate race/tournament membership must first take the universal sequence
+// (C0 -> global event -> sorted users -> sorted competitions), then this lock,
+// and re-read durable window policy and membership while all locks are held.
 async function withSeededWindowLock({ prisma, seedId, windowStart, fn }) {
   return prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${windowLockKey(seedId, windowStart)}))`;
+    await acquireSeededWindowLock(tx, seedId, windowStart);
     return fn(tx);
   });
 }
@@ -191,16 +213,14 @@ async function matchStepsForCandidates({ prisma, candidates, seed, windowStart }
   const rangeEnd = new Date(lookbackEnd.getTime() - excludedMs);
   const rangeStart = new Date(rangeEnd.getTime() - days * 86400000);
   const userIds = candidates.map((row) => row.userId);
-  const [samples, daily] = await Promise.all([
-    prisma.stepSample.findMany({
-      where: { userId: { in: userIds }, periodEnd: { gt: rangeStart }, periodStart: { lt: rangeEnd } },
-      select: { userId: true, periodStart: true, periodEnd: true, steps: true },
-    }),
-    prisma.step.findMany({
-      where: { userId: { in: userIds }, date: { gte: new Date(rangeStart.toISOString().slice(0, 10)), lt: new Date(rangeEnd.toISOString().slice(0, 10)) } },
-      select: { userId: true, steps: true },
-    }),
-  ]);
+  const samples = await prisma.stepSample.findMany({
+    where: { userId: { in: userIds }, periodEnd: { gt: rangeStart }, periodStart: { lt: rangeEnd } },
+    select: { userId: true, periodStart: true, periodEnd: true, steps: true },
+  });
+  const daily = await prisma.step.findMany({
+    where: { userId: { in: userIds }, date: { gte: new Date(rangeStart.toISOString().slice(0, 10)), lt: new Date(rangeEnd.toISOString().slice(0, 10)) } },
+    select: { userId: true, steps: true },
+  });
   const sampleTotals = new Map(userIds.map((id) => [id, 0]));
   for (const sample of samples) {
     const normalized = { start: sample.periodStart, end: sample.periodEnd, steps: sample.steps };
@@ -218,6 +238,23 @@ function buildSeededRaceBuckets(dependencies = {}) {
   const prisma = dependencies.prisma || defaultPrisma;
   const now = dependencies.now || (() => new Date());
   const settings = dependencies.appSettings || defaultAppSettings;
+  const acquireWriteFence =
+    dependencies.acquireRaceWriteFence || acquireRaceWriteFence;
+  const acquireWriteFences =
+    dependencies.acquireRaceWriteFences ||
+    (dependencies.acquireRaceWriteFence
+      ? async (tx, raceIds) => {
+          const ordered = [...new Set(raceIds)].sort();
+          for (const raceId of ordered) await acquireWriteFence(tx, raceId);
+          return ordered;
+        }
+      : acquireRaceWriteFences);
+  const lockUsers =
+    dependencies.lockFundedExposureUsers || lockFundedExposureUsers;
+  const lockCompetitions =
+    dependencies.lockCompetitionRows || lockCompetitionRows;
+  const acquireGlobalLock =
+    dependencies.acquireGlobalEnrollmentLock || acquireGlobalEnrollmentLock;
 
   async function automaticCandidates(tx) {
     const users = await tx.user.findMany({
@@ -265,15 +302,36 @@ function buildSeededRaceBuckets(dependencies = {}) {
 
   async function reconcileFeatured({ userId, seed, windowStart, capable, autoJoinFeaturedRaces }) {
     if (!capable || !autoJoinFeaturedRaces || now() >= windowStart) return false;
-    return withSeededWindowLock({ prisma, seedId: seed.id, windowStart, fn: async (tx) => {
+    const candidate = await prisma.raceParticipant.findFirst({
+      where: {
+        userId,
+        status: "ACCEPTED",
+        race: {
+          seedId: seed.id,
+          seededBucketId: null,
+          status: "PENDING",
+          scheduledStartAt: windowStart,
+        },
+      },
+      select: { raceId: true },
+    });
+    if (!candidate) return false;
+    return prisma.$transaction(async (tx) => {
+      await acquireWriteFence(tx, candidate.raceId);
+      await acquireGlobalLock(tx);
+      await lockUsers(tx, [userId]);
+      await lockCompetitions(tx, { raceIds: [candidate.raceId] });
+      await acquireSeededWindowLock(tx, seed.id, windowStart);
       if (await readWindowMode({ prisma: tx, seedId: seed.id, windowStart }) !== "BUCKET") return false;
       if (now() >= windowStart) return false;
-      const [bucketCount, membership] = await Promise.all([
-        tx.seededRaceBucket.count({ where: { seedId: seed.id, windowStart } }),
-        tx.seededRaceWindowMembership.findUnique({
-          where: { seedId_windowStart_userId: { seedId: seed.id, windowStart, userId } },
-        }),
-      ]);
+      const bucketCount = await tx.seededRaceBucket.count({
+        where: { seedId: seed.id, windowStart },
+      });
+      const membership = await tx.seededRaceWindowMembership.findUnique({
+        where: {
+          seedId_windowStart_userId: { seedId: seed.id, windowStart, userId },
+        },
+      });
       if (bucketCount || membership?.stream === "BUCKET") return false;
       const participant = await tx.raceParticipant.findFirst({
         where: {
@@ -283,14 +341,20 @@ function buildSeededRaceBuckets(dependencies = {}) {
         },
         select: { id: true, raceId: true },
       });
-      if (!participant || membership?.stream !== "LEGACY") return false;
+      if (
+        !participant ||
+        participant.raceId !== candidate.raceId ||
+        membership?.stream !== "LEGACY"
+      ) {
+        return false;
+      }
       await tx.raceParticipant.delete({ where: { id: participant.id } });
       await tx.seededRaceWindowMembership.update({
         where: { seedId_windowStart_userId: { seedId: seed.id, windowStart, userId } },
         data: { stream: "BUCKET", raceId: null },
       });
       return true;
-    }});
+    }, { timeout: 15_000, maxWait: 10_000 });
   }
 
   async function elect({ userId, seedKind, window = "UPCOMING" }) {
@@ -368,54 +432,257 @@ function buildSeededRaceBuckets(dependencies = {}) {
     // These values are stamped exactly as the legacy renewal path stamps
     // them. Bucket matching must never silently alter a seeded race's payout
     // economics merely because its participant field is private.
-    const [fundedPrizePools, geometricPayouts, payoutRoundingV1Enabled] = await Promise.all([
-      settings.getFlag("fundedPrizePoolsEnabled"),
-      settings.getFlag("seededGeometricPayoutsEnabled"),
-      settings.getFlag("payoutRoundingV1Enabled"),
-    ]);
-    return withSeededWindowLock({ prisma, seedId: seed.id, windowStart, fn: async (tx) => {
-      if (await readWindowMode({ prisma: tx, seedId: seed.id, windowStart }) !== "BUCKET") return [];
-      const elected = await tx.seededRaceWindowMembership.findMany({
+    const fundedPrizePools = await settings.getFlag("fundedPrizePoolsEnabled");
+    const geometricPayouts = await settings.getFlag(
+      "seededGeometricPayoutsEnabled",
+    );
+    const payoutRoundingV1Enabled = await settings.getFlag(
+      "payoutRoundingV1Enabled",
+    );
+    const prizeStamp = isFundedPrizeV2Enabled()
+      ? newRacePrizeStamp()
+      : resolveRacePrizeStamp({ prizeCalculationVersion: 1 });
+
+    const alreadyFinalized = await prisma.seededRaceBucket.findMany({
+      where: { seedId: seed.id, windowStart },
+    });
+    if (alreadyFinalized.length) return alreadyFinalized;
+
+    // Matching history and friendship reads are immutable inputs for this
+    // window but can be large. Build the plan outside the lock-holding write
+    // transaction, then compare the elected-user snapshot under the window
+    // advisory lock. A concurrent election causes one fresh-plan retry rather
+    // than extending the transaction or committing a stale plan.
+    async function snapshotPlan() {
+      const elected = await prisma.seededRaceWindowMembership.findMany({
         where: { seedId: seed.id, windowStart, stream: "BUCKET" },
         select: { userId: true }, orderBy: { userId: "asc" },
       });
-      if (!elected.length) return [];
-      const existing = await tx.seededRaceBucket.findMany({ where: { seedId: seed.id, windowStart }, include: { assignments: true } });
-      if (existing.length) return existing;
-      const candidates = await matchStepsForCandidates({ prisma: tx, candidates: elected, seed, windowStart });
-      const friendships = await tx.friendship.findMany({
+      if (!elected.length) return { elected, plan: [] };
+      const candidates = await matchStepsForCandidates({
+        prisma,
+        candidates: elected,
+        seed,
+        windowStart,
+      });
+      const friendships = await prisma.friendship.findMany({
         where: { status: "ACCEPTED", OR: [{ requesterId: { in: elected.map((e) => e.userId) } }, { addresseeId: { in: elected.map((e) => e.userId) } }] },
         select: { requesterId: true, addresseeId: true },
       });
-      const plan = planBuckets(candidates, friendships.map((row) => ({ userAId: row.requesterId, userBId: row.addresseeId })));
-      const rows = [];
-      for (let ordinal = 0; ordinal < plan.length; ordinal += 1) {
-        const group = plan[ordinal];
-        const race = await tx.race.create({
-          data: {
-            seedId: seed.id, name: seed.name, targetSteps: seed.targetSteps, status: "PENDING", isPublic: false,
-            maxParticipants: BUCKET_CAPACITY, powerupsEnabled: seed.powerupsEnabled,
-            timeBased: seed.timeBased, timezone: SEED_TIMEZONE, scheduledStartAt: windowStart, endsAt: windowEnd,
-            maxDurationDays: seed.cadence === "WEEKLY" ? 7 : 1, payoutPreset: "TOP_HALF",
-            payoutCurve: geometricPayouts === true ? "GEOMETRIC" : null,
-            fundedPrize: fundedPrizePools === true,
-            payoutRoundingVersion: payoutRoundingV1Enabled === true ? 1 : 0,
-            powerupStepInterval: normalizePowerupConfig({
-              powerupsEnabled: seed.powerupsEnabled ?? false,
-            }),
-          },
+      return {
+        elected,
+        plan: planBuckets(
+          candidates,
+          friendships.map((row) => ({
+            userAId: row.requesterId,
+            userBId: row.addresseeId,
+          })),
+        ),
+      };
+    }
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const snapshot = await snapshotPlan();
+      if (!snapshot.elected.length) return [];
+      try {
+        const outcome = await prisma.$transaction(async (tx) => {
+          const maxDurationDays = seed.cadence === "WEEKLY" ? 7 : 1;
+          const fundedExposureStamp = computeRaceExposureStamp({
+            maxDurationDays,
+            prizeCoinUnit: prizeStamp.prizeCoinUnit,
+            teamPoolMultBps: null,
+          });
+          const rows = snapshot.plan.map((group) => ({
+            id: randomUUID(),
+            raceId: randomUUID(),
+            seedId: seed.id,
+            windowStart,
+            windowEnd,
+            status: "PENDING",
+            group,
+          }));
+
+          // Create the empty competitions first, then take the universal lock
+          // sequence once for the whole deterministic cohort: every race C0 in
+          // lexical order, global-event lock, sorted users, sorted competition
+          // rows. Participant membership is not written until all are held.
+          await tx.race.createMany({
+            data: rows.map(({ raceId }) => ({
+              id: raceId,
+              seedId: seed.id,
+              name: seed.name,
+              targetSteps: seed.targetSteps,
+              status: "PENDING",
+              isPublic: false,
+              maxParticipants: BUCKET_CAPACITY,
+              powerupsEnabled: seed.powerupsEnabled,
+              timeBased: seed.timeBased,
+              timezone: SEED_TIMEZONE,
+              scheduledStartAt: windowStart,
+              endsAt: windowEnd,
+              maxDurationDays,
+              payoutPreset: "TOP_HALF",
+              payoutCurve: geometricPayouts === true ? "GEOMETRIC" : null,
+              fundedPrize: fundedPrizePools === true,
+              prizeCalculationVersion: prizeStamp.prizeCalculationVersion,
+              prizeCoinUnit:
+                prizeStamp.prizeCalculationVersion >= 2
+                  ? prizeStamp.prizeCoinUnit
+                  : null,
+              prizePoolMaxCoins:
+                prizeStamp.prizeCalculationVersion >= 2
+                  ? prizeStamp.prizePoolMaxCoins
+                  : null,
+              payoutRoundingVersion:
+                payoutRoundingV1Enabled === true ? 1 : 0,
+              powerupStepInterval: normalizePowerupConfig({
+                powerupsEnabled: seed.powerupsEnabled ?? false,
+              }),
+            })),
+          });
+          await acquireWriteFences(
+            tx,
+            rows.map((row) => row.raceId),
+          );
+          await acquireGlobalLock(tx);
+          const userIds = snapshot.elected.map((row) => row.userId);
+          if (fundedPrizePools === true) {
+            await reserveFundedExposures({
+              tx,
+              reservations: rows.flatMap((row) =>
+                row.group.map((candidate) => ({
+                  userId: candidate.userId,
+                  stamp: fundedExposureStamp,
+                  competition: { raceId: row.raceId },
+                })),
+              ),
+            });
+          } else {
+            await lockUsers(tx, userIds);
+            await lockCompetitions(tx, {
+              raceIds: rows.map((row) => row.raceId),
+            });
+          }
+
+          // Window arbitration comes only AFTER the universal membership lock
+          // sequence. reconcileFeatured takes C0 -> global -> user ->
+          // competition -> window; taking window first here deadlocked the two
+          // paths on staging. Empty races and any exposure heals above remain
+          // uncommitted until this recheck passes. A stale/existing outcome is
+          // signalled by throwing so the whole transaction rolls back.
+          await acquireSeededWindowLock(tx, seed.id, windowStart);
+          if (
+            (await readWindowMode({ prisma: tx, seedId: seed.id, windowStart })) !==
+            "BUCKET"
+          ) {
+            const error = new Error("Seeded bucket mode changed");
+            error.seededFinalizationOutcome = "MODE_CHANGED";
+            throw error;
+          }
+          const existing = await tx.seededRaceBucket.findMany({
+            where: { seedId: seed.id, windowStart },
+          });
+          if (existing.length) {
+            const error = new Error("Seeded buckets already finalized");
+            error.seededFinalizationOutcome = "EXISTING";
+            error.rows = existing;
+            throw error;
+          }
+          const lockedElected = await tx.seededRaceWindowMembership.findMany({
+            where: { seedId: seed.id, windowStart, stream: "BUCKET" },
+            select: { userId: true },
+            orderBy: { userId: "asc" },
+          });
+          if (
+            lockedElected.length !== snapshot.elected.length ||
+            lockedElected.some(
+              (row, index) => row.userId !== snapshot.elected[index].userId,
+            )
+          ) {
+            const error = new Error("Seeded bucket election changed");
+            error.seededFinalizationOutcome = "RETRY";
+            throw error;
+          }
+
+          await tx.seededRaceBucket.createMany({
+            data: rows.map(({ id, raceId }) => ({
+              id,
+              seedId: seed.id,
+              windowStart,
+              windowEnd,
+              raceId,
+              status: "PENDING",
+            })),
+          });
+          for (const row of rows) {
+            await tx.race.update({
+              where: { id: row.raceId },
+              data: { seededBucketId: row.id },
+            });
+          }
+
+          const participantRows = rows.flatMap((row) =>
+            row.group.map((candidate) => ({
+              id: randomUUID(),
+              raceId: row.raceId,
+              userId: candidate.userId,
+              status: "ACCEPTED",
+              ...(fundedPrizePools === true
+                ? {
+                    fundedExposureMillicoins:
+                      fundedExposureStamp.exposureMillicoins,
+                    fundedExposureRateMillicoinsPerDay:
+                      fundedExposureStamp.exposureRateMillicoinsPerDay,
+                  }
+                : {}),
+              bucketId: row.id,
+              matchSteps: candidate.matchSteps,
+            })),
+          );
+          await tx.raceParticipant.createMany({
+            data: participantRows.map(
+              ({ bucketId: _bucketId, matchSteps: _matchSteps, ...row }) => row,
+            ),
+          });
+          await tx.seededRaceBucketAssignment.createMany({
+            data: participantRows.map((participant) => ({
+              bucketId: participant.bucketId,
+              userId: participant.userId,
+              seedId: seed.id,
+              windowStart,
+              raceParticipantId: participant.id,
+              matchSteps: participant.matchSteps,
+              state: "FINAL",
+            })),
+          });
+          for (const row of rows) {
+            const updated = await tx.seededRaceWindowMembership.updateMany({
+              where: {
+                seedId: seed.id,
+                windowStart,
+                stream: "BUCKET",
+                userId: { in: row.group.map((candidate) => candidate.userId) },
+                raceId: null,
+              },
+              data: { raceId: row.raceId },
+            });
+            if (updated.count !== row.group.length) {
+              throw new Error("Seeded bucket membership snapshot changed during finalization");
+            }
+          }
+          return {
+            rows: rows.map(({ group: _group, ...row }) => row),
+          };
         });
-        const bucket = await tx.seededRaceBucket.create({ data: { seedId: seed.id, windowStart, windowEnd, raceId: race.id, status: "PENDING" } });
-        await tx.race.update({ where: { id: race.id }, data: { seededBucketId: bucket.id } });
-        for (const candidate of group) {
-          const participant = await tx.raceParticipant.create({ data: { raceId: race.id, userId: candidate.userId, status: "ACCEPTED" } });
-          await tx.seededRaceBucketAssignment.create({ data: { bucketId: bucket.id, userId: candidate.userId, seedId: seed.id, windowStart, raceParticipantId: participant.id, matchSteps: candidate.matchSteps, state: "FINAL" } });
-          await tx.seededRaceWindowMembership.update({ where: { seedId_windowStart_userId: { seedId: seed.id, windowStart, userId: candidate.userId } }, data: { raceId: race.id } });
-        }
-        rows.push(bucket);
+        return outcome.rows;
+      } catch (error) {
+        if (error?.seededFinalizationOutcome === "EXISTING") return error.rows;
+        if (error?.seededFinalizationOutcome === "MODE_CHANGED") return [];
+        if (error?.seededFinalizationOutcome !== "RETRY") throw error;
+        if (now() >= windowStart) return [];
       }
-      return rows;
-    }});
+    }
+    return [];
   }
 
   async function featuredCards(userId) {
@@ -427,10 +694,16 @@ function buildSeededRaceBuckets(dependencies = {}) {
     for (const seed of seeds) {
       const current = windowFor(seed, now());
       const upcoming = upcomingWindowFor(seed, now());
-      const [currentMode, upcomingMode] = await Promise.all([
-        readWindowMode({ prisma, seedId: seed.id, windowStart: current.windowStart }),
-        readWindowMode({ prisma, seedId: seed.id, windowStart: upcoming.windowStart }),
-      ]);
+      const currentMode = await readWindowMode({
+        prisma,
+        seedId: seed.id,
+        windowStart: current.windowStart,
+      });
+      const upcomingMode = await readWindowMode({
+        prisma,
+        seedId: seed.id,
+        windowStart: upcoming.windowStart,
+      });
       if (currentMode !== "BUCKET" && upcomingMode !== "BUCKET") continue;
       const bucket = await prisma.seededRaceBucket.findFirst({
         // Membership predicate is the privacy boundary: never select another
@@ -531,4 +804,4 @@ function buildSeededRaceBuckets(dependencies = {}) {
   return { elect, electAutomatic, finalise, featuredCards, reconcileFeatured, reconcileFeaturedUser, selectedBucketSeedKinds, bucketModeWindowKeys };
 }
 
-module.exports = { buildSeededRaceBuckets, SeededBucketError, windowFor, upcomingWindowFor, supportsBuckets, claimLegacyStream, planBuckets, matchStepsForCandidates, BUCKET_CAPACITY, BUCKET_FEATURE, withSeededWindowLock, readWindowMode, stampWindowMode };
+module.exports = { buildSeededRaceBuckets, SeededBucketError, windowFor, upcomingWindowFor, supportsBuckets, claimLegacyStream, planBuckets, matchStepsForCandidates, BUCKET_CAPACITY, BUCKET_FEATURE, acquireSeededWindowLock, withSeededWindowLock, readWindowMode, stampWindowMode };

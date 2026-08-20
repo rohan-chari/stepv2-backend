@@ -133,3 +133,29 @@ test("kickRaceParticipant rejects when race is completed", async () => {
     }
   );
 });
+
+test("production kick deletes through the same C0 transaction", async () => {
+  const race = makeRace();
+  const calls = [];
+  const target = race.participants[1];
+  const tx = {
+    async $queryRaw() { calls.push("competition"); return [{ id: race.id }]; },
+    race: { async findUnique() { return race; } },
+    raceParticipant: {
+      async findUnique() { return target; },
+      async delete() { calls.push("delete"); },
+    },
+  };
+  const kick = buildKickRaceParticipant({
+    Race: { async findById() { return race; } },
+    RaceParticipant: { async findByRaceAndUser() { return target; } },
+    awardCoins: async () => null,
+    eventBus: { emit() {} },
+    prisma: { async $transaction(callback) { calls.push("tx"); return callback(tx); } },
+    async acquireRaceWriteFence() { calls.push("c0"); },
+    enqueueRaceResolution: async () => null,
+  });
+
+  await kick({ userId: race.creatorId, raceId: race.id, targetUserId: target.userId });
+  assert.deepEqual(calls.slice(0, 4), ["tx", "c0", "competition", "delete"]);
+});

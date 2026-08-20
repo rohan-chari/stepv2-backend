@@ -2,6 +2,10 @@ const { Race } = require("../models/race");
 const { RaceParticipant } = require("../models/raceParticipant");
 const { awardCoins } = require("../../../shared/economy/awardCoins");
 const { eventBus } = require("../../../shared/events/eventBus");
+const {
+  prisma: defaultPrisma,
+  runInPrismaTransaction: defaultRunInPrismaTransaction,
+} = require("../../../db");
 const { refundRaceBuyIn } = require("../services/raceBuyIns");
 const {
   assertCreator,
@@ -28,6 +32,8 @@ const {
 const {
   invalidateRaceProgress,
 } = require("../services/raceProgressSnapshot");
+const { lockFundedExposureUsers } = require("../services/fundedExposure");
+const { acquireRaceWriteFence } = require("../services/raceWriteFence");
 
 function buildKickRaceParticipant(dependencies = {}) {
   // C0 (spec §5a item 4): after this command's own small writes, mark the race
@@ -45,6 +51,18 @@ function buildKickRaceParticipant(dependencies = {}) {
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
   const awardCoinsFn = dependencies.awardCoins || awardCoins;
   const events = dependencies.eventBus || eventBus;
+  const db = dependencies.prisma || defaultPrisma;
+  const useTransactionalMutation = dependencies.prisma != null ||
+    (!dependencies.Race && !dependencies.RaceParticipant && !dependencies.awardCoins);
+  const runTransaction = dependencies.runInPrismaTransaction ||
+    (dependencies.prisma
+      ? (callback, options) => db.$transaction(callback, options)
+      : defaultRunInPrismaTransaction);
+  const acquireWriteFence = dependencies.acquireRaceWriteFence || acquireRaceWriteFence;
+  const lockUsers = dependencies.lockFundedExposureUsers ||
+    (dependencies.prisma && !dependencies.prisma.fundedExposureGuard
+      ? async () => []
+      : lockFundedExposureUsers);
 
   return async function kickRaceParticipant({ userId, raceId, targetUserId }) {
     const race = assertFound(
@@ -77,14 +95,57 @@ function buildKickRaceParticipant(dependencies = {}) {
       throw new RaceKickError("That user is not in this race", 404);
     }
 
-    await refundHeldBuyIn({
-      participant: target,
-      awardCoinsFn,
-      refundFn: ({ awardCoinsFn: fn, userId: uid, amount }) =>
-        refundRaceBuyIn({ awardCoinsFn: fn, userId: uid, raceId, amount }),
-    });
+    const removeTarget = async (tx = null) => {
+      let currentTarget = target;
+      if (tx) {
+        await acquireWriteFence(tx, raceId);
+        await lockUsers(tx, [targetUserId]);
+        await tx.$queryRaw`
+          SELECT id FROM races WHERE id = ${raceId} FOR UPDATE
+        `;
+        const lockedRace = await tx.race.findUnique({
+          where: { id: raceId },
+          select: { status: true, creatorId: true },
+        });
+        if (
+          !lockedRace || lockedRace.creatorId !== userId ||
+          !["PENDING", "ACTIVE"].includes(lockedRace.status)
+        ) {
+          throw new RaceKickError("Cannot modify a completed or cancelled race", 409);
+        }
+        currentTarget = await tx.raceParticipant.findUnique({
+          where: { raceId_userId: { raceId, userId: targetUserId } },
+        });
+        if (!currentTarget) throw new RaceKickError("That user is not in this race", 404);
+        if (
+          (currentTarget.buyInAmount || 0) > 0 &&
+          currentTarget.buyInStatus === "HELD"
+        ) {
+          await awardCoinsFn({
+            userId: currentTarget.userId,
+            amount: currentTarget.buyInAmount,
+            reason: "race_buy_in_refund",
+            refId: `${raceId}:${currentTarget.userId}`,
+            tx,
+          });
+        }
+        await tx.raceParticipant.delete({ where: { id: currentTarget.id } });
+      } else {
+        await refundHeldBuyIn({
+          participant: currentTarget,
+          awardCoinsFn,
+          refundFn: ({ awardCoinsFn: fn, userId: uid, amount }) =>
+            refundRaceBuyIn({ awardCoinsFn: fn, userId: uid, raceId, amount }),
+        });
+        await participantModel.delete(currentTarget.id);
+      }
+    };
 
-    await participantModel.delete(target.id);
+    if (useTransactionalMutation) {
+      await runTransaction(removeTarget, { timeout: 15_000, maxWait: 5_000 });
+    } else {
+      await removeTarget();
+    }
 
     events.emit("RACE_PARTICIPANT_KICKED", {
       raceId,

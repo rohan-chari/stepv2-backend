@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict");
 const { describe, it, before, beforeEach } = require("node:test");
 const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
+const { appSettings } = require("../../src/shared/config/appSettings");
 const { balanceConfig } = require("../../src/modules/economy/balanceConfig");
 const { defaultConfig } = require("../../src/modules/economy/balanceConfig.defaults");
 
@@ -212,6 +213,7 @@ describe("position-aware mystery-box drops", () => {
     await cleanDatabase();
     await prisma.balanceConfig.deleteMany({});
     balanceConfig.bustCache();
+    await appSettings.setFlag("teamRacesEnabled", true);
   });
 
   // Test 1

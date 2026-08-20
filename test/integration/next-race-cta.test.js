@@ -66,6 +66,8 @@ describe("next-race CTA backend contract", () => {
     await appSettings.setFlag("openUserRaceDiscoveryEnabled", false);
     await appSettings.setFlag("quickCreateRaceCtaEnabled", false);
     await appSettings.setFlag("fundedPrizePoolsEnabled", true);
+    await appSettings.setFlag("payoutRoundingV1Enabled", true);
+    await appSettings.setFlag("raceExitActionsEnabled", false);
     await appSettings.setFlag("setupInviteCodePromptEnabled", false);
   });
 
@@ -80,6 +82,8 @@ describe("next-race CTA backend contract", () => {
     await appSettings.setFlag("openUserRaceDiscoveryEnabled", false);
     await appSettings.setFlag("quickCreateRaceCtaEnabled", false);
     await appSettings.setFlag("fundedPrizePoolsEnabled", true);
+    await appSettings.setFlag("payoutRoundingV1Enabled", true);
+    await appSettings.setFlag("raceExitActionsEnabled", false);
     await appSettings.setFlag("setupInviteCodePromptEnabled", false);
   });
 
@@ -619,13 +623,13 @@ describe("next-race CTA backend contract", () => {
       orderBy: { placement: "asc" },
     });
     assert.equal(settled.prizePoolCoins, 80);
-    assert.deepEqual(paid.map((p) => p.payoutCoins), [56, 16]);
+    assert.deepEqual(paid.map((p) => p.payoutCoins), [60, 20]);
     assert.equal(
       await prisma.coinTransaction.aggregate({
         where: { reason: "race_prize_pool_payout", refId: { startsWith: raceId } },
         _sum: { amount: true },
       }).then((x) => x._sum.amount || 0),
-      72
+      80
     );
   });
 

@@ -5,6 +5,20 @@ const {
   disableAutoEnrollForInactive,
 } = require("../services/seededInactivity");
 const { claimLegacyStream, readWindowMode, BUCKET_FEATURE } = require("../services/seededRaceBuckets");
+const {
+  computeRaceExposureStamp,
+  lockFundedExposureUsers,
+  reserveFundedExposure,
+  resolveRacePrizeStamp,
+} = require("../services/fundedExposure");
+const {
+  acquireRaceWriteFence,
+  lockCompetitionRows,
+} = require("../services/raceWriteFence");
+const {
+  acquireGlobalEnrollmentLock,
+  enrollIfGlobalEventActive,
+} = require("../../steps/services/globalEventEnrollment");
 
 // Auto-join for the seeded daily/weekly featured challenges
 // (users.auto_join_featured_races). Two entry points share the same
@@ -27,6 +41,16 @@ function buildAutoJoinFeaturedRaces(dependencies = {}) {
   const prisma = dependencies.prisma || defaultPrisma;
   const settings = dependencies.appSettings || defaultAppSettings;
   const logger = dependencies.logger || console;
+  const acquireWriteFence =
+    dependencies.acquireRaceWriteFence || acquireRaceWriteFence;
+  const lockUsers =
+    dependencies.lockFundedExposureUsers || lockFundedExposureUsers;
+  const lockCompetitions =
+    dependencies.lockCompetitionRows || lockCompetitionRows;
+  const acquireGlobalLock =
+    dependencies.acquireGlobalEnrollmentLock || acquireGlobalEnrollmentLock;
+  const enrollGlobalEvent =
+    dependencies.enrollIfGlobalEventActive || enrollIfGlobalEventActive;
 
   // How many more ACCEPTED participants `race` can take. null max => unlimited.
   async function remainingCapacity(race) {
@@ -47,15 +71,90 @@ function buildAutoJoinFeaturedRaces(dependencies = {}) {
       if (await claimLegacyStream({ prisma, race, userId })) toAdd.push(userId);
     }
     if (toAdd.length === 0) return 0;
-    const result = await prisma.raceParticipant.createMany({
-      data: toAdd.map((userId) => ({
-        raceId: race.id,
-        userId,
-        status: "ACCEPTED",
-      })),
-      skipDuplicates: true,
+    const exposureStamp = race.fundedPrize === true
+      ? computeRaceExposureStamp({
+          maxDurationDays: race.maxDurationDays,
+          prizeCoinUnit: resolveRacePrizeStamp(race).prizeCoinUnit,
+          teamPoolMultBps: race.teamPoolMultBps,
+        })
+      : null;
+    const participantData = (userId) => ({
+      raceId: race.id,
+      userId,
+      status: "ACCEPTED",
+      ...(exposureStamp
+        ? {
+            fundedExposureMillicoins: exposureStamp.exposureMillicoins,
+            fundedExposureRateMillicoinsPerDay:
+              exposureStamp.exposureRateMillicoinsPerDay,
+          }
+        : {}),
     });
-    return result.count;
+    let joined = 0;
+    for (const userId of [...toAdd].sort()) {
+      try {
+        joined += await prisma.$transaction(async (tx) => {
+          await acquireWriteFence(tx, race.id);
+          await acquireGlobalLock(tx);
+          await lockUsers(tx, [userId]);
+          if (!exposureStamp) {
+            await lockCompetitions(tx, { raceIds: [race.id] });
+          }
+          const lockedRace = await tx.race.findUnique({
+            where: { id: race.id },
+            select: { status: true, maxParticipants: true },
+          });
+          if (!lockedRace || !["ACTIVE", "PENDING"].includes(lockedRace.status)) {
+            return 0;
+          }
+          const existing = await tx.raceParticipant.findUnique({
+            where: { raceId_userId: { raceId: race.id, userId } },
+            select: { id: true },
+          });
+          if (existing) return 0;
+          const acceptedCount = await tx.raceParticipant.count({
+            where: { raceId: race.id, status: "ACCEPTED" },
+          });
+          if (
+            lockedRace.maxParticipants != null &&
+            acceptedCount >= lockedRace.maxParticipants
+          ) {
+            return 0;
+          }
+          if (exposureStamp) {
+            await reserveFundedExposure({
+              tx,
+              userId,
+              stamp: exposureStamp,
+              competition: { raceId: race.id },
+            });
+          }
+          const created = await tx.raceParticipant.createMany({
+            data: [participantData(userId)],
+            skipDuplicates: true,
+          });
+          if (created.count > 0 && lockedRace.status === "ACTIVE") {
+            await enrollGlobalEvent(tx, {
+              raceId: race.id,
+              userIds: [userId],
+              at: new Date(),
+            });
+          }
+          return created.count;
+        });
+      } catch (error) {
+        if (
+          error?.code !== "FUNDED_EXPOSURE_LIMIT" &&
+          error?.code !== "FUNDED_EXPOSURE_RETRY"
+        ) {
+          throw error;
+        }
+        logger.warn(
+          `[CRON] Funded exposure skipped seeded auto-enrollment user=${userId} race=${race.id}`,
+        );
+      }
+    }
+    return joined;
   }
 
   // Cron path: enroll every opted-in user into a just-created seeded race.
@@ -137,6 +236,12 @@ function buildAutoJoinFeaturedRaces(dependencies = {}) {
         startedAt: true,
         scheduledStartAt: true,
         maxParticipants: true,
+        fundedPrize: true,
+        maxDurationDays: true,
+        teamPoolMultBps: true,
+        prizeCoinUnit: true,
+        prizePoolMaxCoins: true,
+        prizeCalculationVersion: true,
       },
     });
     let joined = 0;

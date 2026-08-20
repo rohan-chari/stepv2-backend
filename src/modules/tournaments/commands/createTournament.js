@@ -1,4 +1,8 @@
-const { prisma: defaultPrisma } = require("../../../db");
+const {
+  prisma: defaultPrisma,
+  deferUntilAfterCommit,
+  runInPrismaTransaction,
+} = require("../../../db");
 const { Tournament } = require("../models/tournament");
 const { Friendship } = require("../../social");
 const { User } = require("../../users");
@@ -21,12 +25,19 @@ const {
   totalRoundsFor,
   clientSupportsTournaments,
   TOURNAMENTS_FEATURE,
-  MAX_CHAMPION_PRIZE,
 } = require("../constants/tournaments");
 const { computePrizePool } = require("../../../shared/economy/prizePool");
 const {
   serializeTournamentPayload,
 } = require("../queries/serializeTournament");
+const {
+  computeTournamentExposureStamp,
+  isFundedPrizeV2Enabled,
+  newTournamentPrizeStamp,
+  reserveFundedExposure,
+  resolveTournamentPrizeStamp,
+  lockFundedExposureUsers,
+} = require("../../races/services/fundedExposure");
 
 function normalizeTimeZone(value) {
   if (!value || typeof value !== "string") return null;
@@ -52,8 +63,12 @@ function buildCreateTournament(dependencies = {}) {
   const events = dependencies.eventBus || eventBus;
   const settings = dependencies.appSettings || appSettings;
   const mintToken = dependencies.generateShareToken || generateShareToken;
+  const usesDefaultPersistence =
+    !dependencies.prisma &&
+    !dependencies.Tournament &&
+    !dependencies.User;
 
-  return async function createTournament({
+  const createTournamentCore = async function createTournament({
     userId,
     name,
     bracketSize,
@@ -94,10 +109,10 @@ function buildCreateTournament(dependencies = {}) {
     // client's buyInAmount is accepted and IGNORED (coerced to 0 BEFORE
     // validation, so an amount above the legacy per-bracket ceiling can't 400 an
     // un-updated binary out of creating a bracket).
-    const [fundedPrizePools, payoutRoundingV1Enabled] = await Promise.all([
-      settings.getFlag("fundedPrizePoolsEnabled"),
-      settings.getFlag("payoutRoundingV1Enabled"),
-    ]);
+    const fundedPrizePools = await settings.getFlag("fundedPrizePoolsEnabled");
+    const payoutRoundingV1Enabled = await settings.getFlag(
+      "payoutRoundingV1Enabled",
+    );
     const buyIn = validateTournamentBuyIn({
       bracketSize: size,
       buyInAmount: fundedPrizePools ? 0 : buyInAmount,
@@ -108,6 +123,18 @@ function buildCreateTournament(dependencies = {}) {
     // races copy this value in tournamentRounds.js, so they inherit it too.
     const normalizedPowerupStepInterval = normalizePowerupConfig({
       powerupsEnabled,
+    });
+    const totalRounds = totalRoundsFor(size);
+    const prizeStamp = isFundedPrizeV2Enabled()
+      ? newTournamentPrizeStamp()
+      : resolveTournamentPrizeStamp({ prizeCalculationVersion: 1 });
+    const fundedExposureStamp = computeTournamentExposureStamp({
+      bracketSize: size,
+      totalRounds,
+      matchupDurationDays: durationDays,
+      prizeCoinUnit: prizeStamp.prizeCoinUnit,
+      tournamentChampionMaxCoins:
+        prizeStamp.tournamentChampionMaxCoins,
     });
 
     await ensureUserCanAfford({
@@ -148,7 +175,18 @@ function buildCreateTournament(dependencies = {}) {
       }
     }
 
-    const tournament = await tournamentModel.create({
+    if (usesDefaultPersistence) {
+      await lockFundedExposureUsers(db, [userId, ...uniqueInvitees]);
+    }
+    if (fundedPrizePools === true && usesDefaultPersistence) {
+      await reserveFundedExposure({
+        tx: db,
+        userId,
+        stamp: fundedExposureStamp,
+      });
+    }
+
+    const tournamentData = {
       creatorId: userId,
       name: trimmedName,
       status: "PENDING",
@@ -159,6 +197,15 @@ function buildCreateTournament(dependencies = {}) {
       // Row-level discriminator: this bracket's champion prize is app-minted and
       // stays that way even if the flag is flipped back off mid-bracket.
       fundedPrize: fundedPrizePools === true,
+      prizeCalculationVersion: prizeStamp.prizeCalculationVersion,
+      prizeCoinUnit:
+        prizeStamp.prizeCalculationVersion >= 2
+          ? prizeStamp.prizeCoinUnit
+          : null,
+      tournamentChampionMaxCoins:
+        prizeStamp.prizeCalculationVersion >= 2
+          ? prizeStamp.tournamentChampionMaxCoins
+          : null,
       payoutRoundingVersion: fundedPrizePools === true && payoutRoundingV1Enabled === true ? 1 : 0,
       powerupsEnabled: !!powerupsEnabled,
       powerupStepInterval: normalizedPowerupStepInterval,
@@ -166,7 +213,7 @@ function buildCreateTournament(dependencies = {}) {
       shareToken: mintToken(),
       timezone: normalizeTimeZone(timeZone),
       currentRound: 0,
-      totalRounds: totalRoundsFor(size),
+      totalRounds,
       // Creator inserted ACCEPTED with the buy-in held.
       participants: {
         create: {
@@ -176,9 +223,27 @@ function buildCreateTournament(dependencies = {}) {
           buyInStatus: buyIn > 0 ? "HELD" : "NONE",
           buyInVersion: 0,
           joinedAt: new Date(),
+          ...(fundedPrizePools === true
+            ? {
+                fundedExposureMillicoins:
+                  fundedExposureStamp.exposureMillicoins,
+                fundedExposureRateMillicoinsPerDay:
+                  fundedExposureStamp.exposureRateMillicoinsPerDay,
+              }
+            : {}),
         },
       },
-    });
+    };
+    // The model's legacy create seam hydrates every relation. Inside an
+    // interactive adapter-pg transaction Prisma fans those relation reads out
+    // concurrently on one client. Production only needs the durable id/name
+    // until commit; the public payload is hydrated below after the transaction.
+    const tournament = usesDefaultPersistence
+      ? await db.tournament.create({
+          data: tournamentData,
+          select: { id: true, name: true },
+        })
+      : await tournamentModel.create(tournamentData);
 
     await reserveTournamentBuyIn({
       awardCoinsFn: holdCoinsFn,
@@ -198,30 +263,47 @@ function buildCreateTournament(dependencies = {}) {
         skipDuplicates: true,
       });
       for (const inviteeId of uniqueInvitees) {
-        events.emit("TOURNAMENT_INVITE_SENT", {
-          tournamentId: tournament.id,
-          tournamentName: tournament.name,
-          creatorUserId: userId,
-          userId: inviteeId,
-          bracketSize: size,
-          // Funded brackets quote the pool a full bracket mints (see
-          // inviteToTournament); paid brackets quote size x buy-in as before.
-          potCoins: fundedPrizePools
-            ? computePrizePool({
-                playerCount: size,
-                durationDays: totalRoundsFor(size) * durationDays,
-                max: MAX_CHAMPION_PRIZE,
-              })
-            : size * buyIn,
-          buyInAmount: buyIn,
-        });
+        await deferUntilAfterCommit(() =>
+          events.emit("TOURNAMENT_INVITE_SENT", {
+            tournamentId: tournament.id,
+            tournamentName: tournament.name,
+            creatorUserId: userId,
+            userId: inviteeId,
+            bracketSize: size,
+            // Funded brackets quote the pool a full bracket mints (see
+            // inviteToTournament); paid brackets quote size x buy-in as before.
+            potCoins: fundedPrizePools
+              ? computePrizePool({
+                  playerCount: size,
+                  durationDays: totalRounds * durationDays,
+                  max: prizeStamp.tournamentChampionMaxCoins,
+                  unit: prizeStamp.prizeCoinUnit,
+                })
+              : size * buyIn,
+            buyInAmount: buyIn,
+          })
+        );
       }
     }
 
+    if (usesDefaultPersistence) return { id: tournament.id };
     const full = await tournamentModel.findById(tournament.id);
     return serializeTournamentPayload(full, userId, {
       supportsCharacters,
       supportsRemoteAssets,
+    });
+  };
+
+  return async function createTournament(args) {
+    if (!usesDefaultPersistence) return createTournamentCore(args);
+    const durable = await runInPrismaTransaction(() => createTournamentCore(args), {
+      maxWait: 5_000,
+      timeout: 30_000,
+    });
+    const full = await tournamentModel.findById(durable.id);
+    return serializeTournamentPayload(full, args.userId, {
+      supportsCharacters: args.supportsCharacters,
+      supportsRemoteAssets: args.supportsRemoteAssets,
     });
   };
 }

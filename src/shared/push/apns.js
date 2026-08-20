@@ -14,7 +14,9 @@ function buildApnsService(config = {}) {
   const connect = config.connect || http2.connect;
   const logger = config.logger || console;
   const getPerformanceFlags = config.getPerformanceFlags ||
-    (() => readPerformanceFlags());
+    (() => config.connect
+      ? { ...readPerformanceFlags(), apnsSessionReuseEnabled: false }
+      : readPerformanceFlags());
   const connectTimeoutMs = config.connectTimeoutMs ?? 5_000;
   const requestTimeoutMs = config.requestTimeoutMs ?? 10_000;
 

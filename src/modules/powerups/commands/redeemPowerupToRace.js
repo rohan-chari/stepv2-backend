@@ -3,6 +3,10 @@ const { RacePowerup } = require("../models/racePowerup");
 const { UserPowerupItem } = require("../models/userPowerupItem");
 const { RaceActiveEffect } = require("../models/raceActiveEffect");
 const { POWERUP_NAMES } = require("./rollPowerup");
+const {
+  isRetiredPowerupType,
+  markRetiredPowerupError,
+} = require("../powerupRetirement");
 
 class RedeemPowerupError extends Error {
   constructor(message, statusCode = 400, code) {
@@ -30,6 +34,12 @@ function buildRedeemPowerupToRace(deps = {}) {
   return async function redeemPowerupToRace({ userId, raceId, powerupType }) {
     if (!powerupType || typeof powerupType !== "string") {
       throw new RedeemPowerupError("powerupType is required", 400);
+    }
+    if (isRetiredPowerupType(powerupType)) {
+      throw markRetiredPowerupError(
+        new RedeemPowerupError("This powerup has been retired.", 410),
+        powerupType,
+      );
     }
 
     const race = await raceModel.findById(raceId);
