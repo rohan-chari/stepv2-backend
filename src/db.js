@@ -10,6 +10,10 @@ if (!process.env.DATABASE_URL) {
 
 const dbUrl = process.env.DATABASE_URL;
 const isLocalhost = dbUrl.includes("localhost") || dbUrl.includes("127.0.0.1");
+const {
+  capacityDatabaseSslDisabled,
+} = require("./localCapacitySafety");
+const capacitySslDisabled = capacityDatabaseSslDisabled();
 
 // Strip sslmode from URL to prevent pg from overriding our ssl config
 const connectionString = dbUrl.replace(/[?&]sslmode=[^&]*/g, "");
@@ -25,7 +29,9 @@ const pool = new pg.Pool({
   max: 20,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000,
-  ...(isLocalhost ? {} : { ssl: { rejectUnauthorized: false } }),
+  ...(isLocalhost || capacitySslDisabled
+    ? {}
+    : { ssl: { rejectUnauthorized: false } }),
 });
 
 function getDbPoolPressure() {
