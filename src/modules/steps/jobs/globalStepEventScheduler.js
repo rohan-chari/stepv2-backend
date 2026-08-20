@@ -249,10 +249,13 @@ function buildMaybeStartGlobalEvent(dependencies = {}) {
 
     const localTick = dependencies.localGlobalStepEventTick ||
       buildLocalGlobalStepEventTick({ ...dependencies, now: () => currentTime });
-    const localCreated = await localTick();
-    if (localCreated) {
-      return null;
-    }
+    await localTick();
+
+    // Local mode materializes a safely future horizon. Until that horizon's
+    // first event day arrives, the intervening days still need their legacy
+    // global event. Always continue to the legacy decision: the event-day
+    // advisory lock in createIfAbsentWithEnrollments is the authoritative
+    // mode fence and returns created=false once a local parent owns the day.
 
     // A cluster-owned DB cursor coalesces all due event edges through the latest
     // crossing. Its lease is reclaimable after process loss, and the cursor is

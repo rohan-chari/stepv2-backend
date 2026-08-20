@@ -47,8 +47,10 @@ const GlobalStepEvent = {
         `global-step-event:${start.toISOString()}`
       );
       await acquireGlobalEnrollmentLock(tx);
-      const existing = await tx.globalStepEvent.findFirst({ where: { startsAt: start } });
       const day = eventDay || etDayKey(start);
+      const existing = await tx.globalStepEvent.findFirst({
+        where: { startsAt: start, OR: [{ eventDay: null }, { eventDay: day }] },
+      });
       await tx.$executeRawUnsafe(
         "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
         `global-step-event-day:${day}`
@@ -85,8 +87,10 @@ const GlobalStepEvent = {
         `global-step-event:${start.toISOString()}`
       );
       await acquireGlobalEnrollmentLock(tx);
-      const existing = await tx.globalStepEvent.findFirst({ where: { startsAt: start } });
       const day = eventDay || etDayKey(start);
+      const existing = await tx.globalStepEvent.findFirst({
+        where: { startsAt: start, OR: [{ eventDay: null }, { eventDay: day }] },
+      });
       await tx.$executeRawUnsafe(
         "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
         `global-step-event-day:${day}`
@@ -255,7 +259,10 @@ const GlobalStepEvent = {
   // next tick can straddle UTC midnight, which UTC-day buckets would split.
   async findStartedSince(since) {
     return prisma.globalStepEvent.findMany({
-      where: { startsAt: { gte: new Date(since) } },
+      where: {
+        scheduleMode: LEGACY_GLOBAL,
+        startsAt: { gte: new Date(since) },
+      },
       orderBy: { startsAt: "asc" },
     });
   },

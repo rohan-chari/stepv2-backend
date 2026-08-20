@@ -118,6 +118,29 @@ test("creates an event and fans out to active-race participants at the chosen ti
   assert.equal(ctx.emitted[0].payload.multiplier, GLOBAL_EVENT_MULTIPLIER);
 });
 
+test("local future-horizon maintenance does not suppress an unfenced legacy day", async () => {
+  const now = chosenNow();
+  const ctx = makeCtx({
+    recentEvents: [],
+    participantUserIds: ["user-1"],
+  });
+
+  const run = buildMaybeStartGlobalEvent({
+    ...ctx.deps,
+    now: () => now,
+    // Local mode can be healthy while its first parent is still days away.
+    // The event-day creation fence, not this maintenance result, decides
+    // whether today's legacy event has already been claimed by local mode.
+    localGlobalStepEventTick: async () => true,
+  });
+
+  const event = await run();
+
+  assert.ok(event, "the still-unclaimed day receives its legacy event");
+  assert.equal(ctx.created.length, 1);
+  assert.equal(ctx.emitted.length, 1);
+});
+
 test("idempotent: does not create a second event when one already exists for the chosen time", async () => {
   const now = chosenNow();
   const ctx = makeCtx({

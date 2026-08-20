@@ -34,6 +34,12 @@ const {
   buildGlobalEventSummaryTick,
 } = require("../../src/modules/steps/jobs/globalEventSummary");
 const {
+  buildMaybeStartGlobalEvent,
+} = require("../../src/modules/steps/jobs/globalStepEventScheduler");
+const {
+  chooseEventStartForEtDay,
+} = require("../../src/modules/steps/globalStepEvent");
+const {
   buildRaceResolutionWorkerV2,
 } = require("../../src/modules/races/jobs/raceResolutionQueueV2");
 const {
@@ -152,6 +158,91 @@ test("legacy creation adopts an old-worker exact-start row with a null event day
   assert.equal(result.event.id, oldWorkerRow.id);
   assert.equal(result.event.eventDay, "2026-08-20");
   assert.equal(await prisma.globalStepEvent.count({ where: { startsAt } }), 1);
+});
+
+test("future local maintenance leaves an unfenced intervening day on the legacy path", async () => {
+  const dayProbe = new Date("2026-08-20T16:00:00.000Z");
+  const now = chooseEventStartForEtDay(dayProbe);
+  const emitted = [];
+  const run = buildMaybeStartGlobalEvent({
+    now: () => now,
+    localGlobalStepEventTick: async () => true,
+    GlobalStepEvent,
+    appSettings: { async getFlag() { return false; } },
+    Race: { async findActiveParticipantUserIds() { return []; } },
+    eventBus: { emit(name, payload) { emitted.push({ name, payload }); } },
+    logger: { log() {}, error() {} },
+  });
+
+  const event = await run();
+
+  assert.ok(event);
+  assert.equal(event.scheduleMode, "LEGACY_GLOBAL");
+  assert.equal(event.eventDay, "2026-08-20");
+  assert.equal(await prisma.globalStepEvent.count({
+    where: { eventDay: "2026-08-20" },
+  }), 1);
+  assert.equal(emitted.length, 1);
+});
+
+test("a future local envelope timestamp collision cannot claim the prior legacy day", async () => {
+  const dayProbe = new Date("2026-08-21T16:00:00.000Z");
+  const now = chooseEventStartForEtDay(dayProbe);
+  const futureLocal = await prisma.globalStepEvent.create({ data: {
+    eventDay: "2026-08-22",
+    scheduleMode: "LOCAL_ENTITLEMENTS",
+    localStartMinute: 642,
+    durationMinutes: 30,
+    startsAt: now,
+    endsAt: new Date(now.getTime() + 26 * 60 * 60 * 1000),
+    multiplier: 2,
+  } });
+  const run = buildMaybeStartGlobalEvent({
+    now: () => now,
+    localGlobalStepEventTick: async () => true,
+    GlobalStepEvent,
+    appSettings: { async getFlag() { return false; } },
+    Race: { async findActiveParticipantUserIds() { return []; } },
+    eventBus: { emit() {} },
+    logger: { log() {}, error() {} },
+  });
+
+  const legacy = await run();
+
+  assert.ok(legacy);
+  assert.notEqual(legacy.id, futureLocal.id);
+  assert.equal(legacy.eventDay, "2026-08-21");
+  assert.equal(legacy.scheduleMode, "LEGACY_GLOBAL");
+  assert.equal(await prisma.globalStepEvent.count({ where: { startsAt: now } }), 2);
+});
+
+test("a same-day local parent fences the legacy scheduler", async () => {
+  const dayProbe = new Date("2026-08-21T16:00:00.000Z");
+  const now = chooseEventStartForEtDay(dayProbe);
+  const local = await prisma.globalStepEvent.create({ data: {
+    eventDay: "2026-08-21",
+    scheduleMode: "LOCAL_ENTITLEMENTS",
+    localStartMinute: 900,
+    durationMinutes: 30,
+    startsAt: new Date(now.getTime() + 6 * 60 * 60 * 1000),
+    endsAt: new Date(now.getTime() + 32 * 60 * 60 * 1000),
+    multiplier: 2,
+  } });
+  const run = buildMaybeStartGlobalEvent({
+    now: () => now,
+    localGlobalStepEventTick: async () => true,
+    GlobalStepEvent,
+    appSettings: { async getFlag() { return false; } },
+    Race: { async findActiveParticipantUserIds() { return []; } },
+    eventBus: { emit() { assert.fail("same-day local parent must suppress legacy fan-out"); } },
+    logger: { log() {}, error() {} },
+  });
+
+  assert.equal(await run(), null);
+  assert.equal(await prisma.globalStepEvent.count({ where: { eventDay: "2026-08-21" } }), 1);
+  assert.equal((await prisma.globalStepEvent.findUnique({
+    where: { eventDay: "2026-08-21" },
+  })).id, local.id);
 });
 
 test("authenticated uploads and progress keep two local zones isolated and old clients compatible", async () => {
