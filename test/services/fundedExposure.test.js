@@ -8,6 +8,8 @@ const {
   computeTournamentExposureStamp,
   fundedExposureConflict,
   loadAndHealCurrentExposure,
+  loadAndHealCurrentExposureCohort,
+  lockFundedExposureUsers,
   reserveFundedExposures,
 } = require("../../src/modules/races/services/fundedExposure");
 
@@ -166,4 +168,196 @@ test("enforcement-off reservations still take user guards then every target comp
     "race:race-b",
     "tournament:tournament-a",
   ]);
+});
+
+test("production Prisma locks a sorted user cohort with one guard insert and one row lock", async () => {
+  const calls = [];
+  const tx = {
+    fundedExposureGuard: {
+      async createMany({ data, skipDuplicates }) {
+        calls.push({ type: "insert", ids: data.map((row) => row.userId), skipDuplicates });
+      },
+    },
+    async $queryRawUnsafe(sql, ids) {
+      calls.push({ type: "lock", sql, ids: [...ids] });
+      return ids.map((userId) => ({ user_id: userId }));
+    },
+  };
+
+  await lockFundedExposureUsers(tx, ["user-c", "user-a", "user-b", "user-a"]);
+
+  assert.deepEqual(calls.map((call) => call.type), ["insert", "lock"]);
+  assert.deepEqual(calls[0].ids, ["user-a", "user-b", "user-c"]);
+  assert.equal(calls[0].skipDuplicates, true);
+  assert.deepEqual(calls[1].ids, ["user-a", "user-b", "user-c"]);
+  assert.match(calls[1].sql, /ORDER BY user_id\s+FOR UPDATE/);
+});
+
+test("bulk user guarding fails closed when account deletion removes a requested guard", async () => {
+  const tx = {
+    fundedExposureGuard: { async createMany() {} },
+    async $queryRawUnsafe() {
+      return [{ user_id: "user-a" }];
+    },
+  };
+
+  await assert.rejects(
+    lockFundedExposureUsers(tx, ["user-a", "user-deleted"]),
+    (error) => error?.code === "FUNDED_EXPOSURE_RETRY",
+  );
+});
+
+test("enforced exposure validates a 450-user cohort with bounded bulk reads and locks", async () => {
+  let guardInserts = 0;
+  let membershipReads = 0;
+  let competitionLocks = 0;
+  const tx = {
+    fundedExposureGuard: {
+      async createMany() { guardInserts += 1; },
+    },
+    raceParticipant: {
+      async findMany() { membershipReads += 1; return []; },
+      async updateMany() {},
+    },
+    tournamentParticipant: {
+      async findMany() { membershipReads += 1; return []; },
+      async updateMany() {},
+    },
+    race: { async findMany() { return []; } },
+    tournament: { async findMany() { return []; } },
+    async $queryRawUnsafe(sql, ids) {
+      if (/funded_exposure_guards/.test(sql)) {
+        return ids.map((user_id) => ({ user_id }));
+      }
+      if (/FROM races|FROM tournaments/.test(sql)) competitionLocks += 1;
+      return ids.map((id) => ({ id }));
+    },
+  };
+  const reservations = Array.from({ length: 450 }, (_, index) => ({
+    userId: `user-${String(index).padStart(3, "0")}`,
+    stamp: {
+      exposureMillicoins: 10_000,
+      exposureRateMillicoinsPerDay: 10_000,
+    },
+    competition: { raceId: `race-${String(index % 30).padStart(2, "0")}` },
+  }));
+
+  await reserveFundedExposures({ tx, reservations, enforce: true });
+
+  assert.equal(guardInserts, 1);
+  assert.ok(membershipReads <= 6, `used ${membershipReads} membership reads`);
+  assert.ok(competitionLocks <= 2, `used ${competitionLocks} competition locks`);
+});
+
+test("cohort healing rejects per-user drift into a competition already locked for another user", async () => {
+  let raceRead = 0;
+  const initial = [
+    {
+      id: "participant-a-r1",
+      userId: "user-a",
+      raceId: "race-1",
+      fundedExposureMillicoins: 10_000,
+      fundedExposureRateMillicoinsPerDay: 10_000,
+    },
+    {
+      id: "participant-b-r2",
+      userId: "user-b",
+      raceId: "race-2",
+      fundedExposureMillicoins: 10_000,
+      fundedExposureRateMillicoinsPerDay: 10_000,
+    },
+  ];
+  const drifted = [
+    ...initial,
+    {
+      id: "old-worker-a-r2",
+      userId: "user-a",
+      raceId: "race-2",
+      fundedExposureMillicoins: 10_000,
+      fundedExposureRateMillicoinsPerDay: 10_000,
+    },
+  ];
+  const tx = {
+    raceParticipant: {
+      async findMany() {
+        raceRead += 1;
+        if (raceRead === 1) {
+          return initial.map(({ userId, raceId }) => ({ userId, raceId }));
+        }
+        return raceRead === 2 ? initial : drifted.map(({ userId, raceId }) => ({ userId, raceId }));
+      },
+      async updateMany() { return { count: 0 }; },
+    },
+    tournamentParticipant: {
+      async findMany() { return []; },
+      async updateMany() { return { count: 0 }; },
+    },
+    race: {
+      async findMany() {
+        return ["race-1", "race-2"].map((id) => ({
+          id,
+          maxDurationDays: 1,
+          teamPoolMultBps: null,
+          prizeCoinUnit: 10,
+          prizePoolMaxCoins: 8_000,
+          prizeCalculationVersion: 2,
+        }));
+      },
+    },
+    tournament: { async findMany() { return []; } },
+    async $queryRawUnsafe(_sql, ids) {
+      return ids.map((id) => ({ id }));
+    },
+  };
+
+  await assert.rejects(
+    loadAndHealCurrentExposureCohort(tx, ["user-a", "user-b"]),
+    (error) => error?.code === "FUNDED_EXPOSURE_RETRY",
+  );
+});
+
+test("cohort null healing fails closed when a bulk heal misses any discovered row", async () => {
+  let raceRead = 0;
+  const nullRow = {
+    id: "participant-a-r1",
+    userId: "user-a",
+    raceId: "race-1",
+    fundedExposureMillicoins: null,
+    fundedExposureRateMillicoinsPerDay: null,
+  };
+  const tx = {
+    raceParticipant: {
+      async findMany() {
+        raceRead += 1;
+        if (raceRead === 1) return [{ userId: "user-a", raceId: "race-1" }];
+        return raceRead === 2 ? [nullRow] : [{ userId: "user-a", raceId: "race-1" }];
+      },
+      async updateMany() { return { count: 0 }; },
+    },
+    tournamentParticipant: {
+      async findMany() { return []; },
+      async updateMany() { return { count: 0 }; },
+    },
+    race: {
+      async findMany() {
+        return [{
+          id: "race-1",
+          maxDurationDays: 1,
+          teamPoolMultBps: null,
+          prizeCoinUnit: 10,
+          prizePoolMaxCoins: 8_000,
+          prizeCalculationVersion: 2,
+        }];
+      },
+    },
+    tournament: { async findMany() { return []; } },
+    async $queryRawUnsafe(_sql, ids) {
+      return ids.map((id) => ({ id }));
+    },
+  };
+
+  await assert.rejects(
+    loadAndHealCurrentExposureCohort(tx, ["user-a"]),
+    (error) => error?.code === "FUNDED_EXPOSURE_RETRY",
+  );
 });

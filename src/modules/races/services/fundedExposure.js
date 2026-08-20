@@ -177,6 +177,37 @@ async function lockFundedExposureUsers(tx, userIds) {
     throw new TypeError("tx and userIds are required");
   }
   const ordered = [...new Set(userIds.filter(Boolean))].sort();
+  if (ordered.length === 0) return ordered;
+
+  // Production Prisma exposes createMany. Ensure missing guard rows in one
+  // ordered insert, then acquire the whole cohort in one ORDER BY ... FOR
+  // UPDATE statement. The former per-user upsert + select cost two network
+  // round trips per participant (and seeded finalization calls this for fields
+  // measured in hundreds), which exhausted Prisma's 5s interactive transaction
+  // budget on staging. The ordered array and ordered row lock preserve the
+  // universal deadlock-avoidance contract. Narrow unit doubles without
+  // createMany retain the legacy loop below.
+  if (typeof tx.fundedExposureGuard?.createMany === "function") {
+    try {
+      await tx.fundedExposureGuard.createMany({
+        data: ordered.map((userId) => ({ userId })),
+        skipDuplicates: true,
+      });
+    } catch (error) {
+      if (error?.code === "P2003") throw fundedExposureDriftConflict();
+      throw error;
+    }
+    const locked = await tx.$queryRawUnsafe(
+      `SELECT user_id
+       FROM funded_exposure_guards
+       WHERE user_id = ANY($1::text[])
+       ORDER BY user_id
+       FOR UPDATE`,
+      ordered,
+    );
+    if (locked.length !== ordered.length) throw fundedExposureDriftConflict();
+    return ordered;
+  }
   for (const userId of ordered) await lockUserGuard(tx, userId);
   return ordered;
 }
@@ -418,6 +449,279 @@ async function loadAndHealCurrentExposure(
   return { exposureMillicoins, exposureRateMillicoinsPerDay };
 }
 
+async function loadAndHealCurrentExposureCohort(
+  tx,
+  userIds,
+  { targetRaceIds = [], targetTournamentIds = [] } = {},
+) {
+  const orderedUsers = [...new Set(userIds.filter(Boolean))].sort();
+  const totals = new Map(
+    orderedUsers.map((userId) => [
+      userId,
+      { exposureMillicoins: 0, exposureRateMillicoinsPerDay: 0 },
+    ]),
+  );
+  if (orderedUsers.length === 0) return totals;
+
+  // One discovery pair for the whole guarded cohort. This is the same
+  // old-writer/null-heal protocol as loadAndHealCurrentExposure, but avoids
+  // repeating six membership reads and competition locks for every seeded
+  // participant in a production-sized field.
+  const discoveredRaceRows = await tx.raceParticipant.findMany({
+    where: {
+      userId: { in: orderedUsers },
+      status: "ACCEPTED",
+      finishedAt: null,
+      forfeitedAt: null,
+      race: { fundedPrize: true, status: { in: ["PENDING", "ACTIVE"] } },
+    },
+    select: { userId: true, raceId: true },
+  });
+  const discoveredTournamentRows = await tx.tournamentParticipant.findMany({
+    where: {
+      userId: { in: orderedUsers },
+      status: "ACCEPTED",
+      eliminatedInRound: null,
+      tournament: {
+        fundedPrize: true,
+        status: { in: ["PENDING", "ACTIVE"] },
+        seedId: null,
+      },
+    },
+    select: { userId: true, tournamentId: true },
+  });
+  const raceIds = [...new Set([
+    ...targetRaceIds,
+    ...discoveredRaceRows.map((row) => row.raceId),
+  ].filter(Boolean))].sort();
+  const tournamentIds = [...new Set([
+    ...targetTournamentIds,
+    ...discoveredTournamentRows.map((row) => row.tournamentId),
+  ].filter(Boolean))].sort();
+
+  // `race:` sorts before `tournament:` in the universal competition key, so
+  // these two ordered statements preserve the exact global lock order while
+  // reducing hundreds of target-row round trips to at most two.
+  if (raceIds.length > 0) {
+    const locked = await tx.$queryRawUnsafe(
+      "SELECT id FROM races WHERE id = ANY($1::text[]) ORDER BY id FOR UPDATE",
+      raceIds,
+    );
+    if (locked.length !== raceIds.length) throw fundedExposureDriftConflict();
+  }
+  if (tournamentIds.length > 0) {
+    const locked = await tx.$queryRawUnsafe(
+      "SELECT id FROM tournaments WHERE id = ANY($1::text[]) ORDER BY id FOR UPDATE",
+      tournamentIds,
+    );
+    if (locked.length !== tournamentIds.length) {
+      throw fundedExposureDriftConflict();
+    }
+  }
+
+  const raceRows = await tx.raceParticipant.findMany({
+    where: {
+      userId: { in: orderedUsers },
+      status: "ACCEPTED",
+      finishedAt: null,
+      forfeitedAt: null,
+      race: { fundedPrize: true, status: { in: ["PENDING", "ACTIVE"] } },
+    },
+    select: {
+      id: true,
+      userId: true,
+      raceId: true,
+      fundedExposureMillicoins: true,
+      fundedExposureRateMillicoinsPerDay: true,
+    },
+  });
+  const tournamentRows = await tx.tournamentParticipant.findMany({
+    where: {
+      userId: { in: orderedUsers },
+      status: "ACCEPTED",
+      eliminatedInRound: null,
+      tournament: {
+        fundedPrize: true,
+        status: { in: ["PENDING", "ACTIVE"] },
+        seedId: null,
+      },
+    },
+    select: {
+      id: true,
+      userId: true,
+      tournamentId: true,
+      fundedExposureMillicoins: true,
+      fundedExposureRateMillicoinsPerDay: true,
+    },
+  });
+  const lockedRaceIds = new Set(raceIds);
+  const lockedTournamentIds = new Set(tournamentIds);
+  if (
+    raceRows.some((row) => !lockedRaceIds.has(row.raceId)) ||
+    tournamentRows.some((row) => !lockedTournamentIds.has(row.tournamentId))
+  ) {
+    throw fundedExposureDriftConflict();
+  }
+
+  const membershipRaceIds = [...new Set(raceRows.map((row) => row.raceId))];
+  const membershipTournamentIds = [
+    ...new Set(tournamentRows.map((row) => row.tournamentId)),
+  ];
+  const races = membershipRaceIds.length === 0
+    ? []
+    : await tx.race.findMany({
+        where: { id: { in: membershipRaceIds } },
+        select: {
+          id: true,
+          maxDurationDays: true,
+          teamPoolMultBps: true,
+          prizeCoinUnit: true,
+          prizePoolMaxCoins: true,
+          prizeCalculationVersion: true,
+        },
+      });
+  const tournaments = membershipTournamentIds.length === 0
+    ? []
+    : await tx.tournament.findMany({
+        where: { id: { in: membershipTournamentIds } },
+        select: {
+          id: true,
+          bracketSize: true,
+          totalRounds: true,
+          matchupDurationDays: true,
+          prizeCoinUnit: true,
+          tournamentChampionMaxCoins: true,
+          prizeCalculationVersion: true,
+        },
+      });
+  const racesById = new Map(races.map((race) => [race.id, race]));
+  const tournamentsById = new Map(
+    tournaments.map((tournament) => [tournament.id, tournament]),
+  );
+  if (
+    membershipRaceIds.some((id) => !racesById.has(id)) ||
+    membershipTournamentIds.some((id) => !tournamentsById.has(id))
+  ) {
+    throw fundedExposureDriftConflict();
+  }
+
+  const raceHealGroups = new Map();
+  const tournamentHealGroups = new Map();
+  function addHeal(groups, stamp, id) {
+    const key = `${stamp.exposureMillicoins}:${stamp.exposureRateMillicoinsPerDay}`;
+    if (!groups.has(key)) groups.set(key, { stamp, ids: [] });
+    groups.get(key).ids.push(id);
+  }
+  function addTotal(userId, stamp) {
+    const total = totals.get(userId);
+    if (!total) throw fundedExposureDriftConflict();
+    total.exposureMillicoins += stamp.exposureMillicoins;
+    total.exposureRateMillicoinsPerDay +=
+      stamp.exposureRateMillicoinsPerDay;
+  }
+
+  for (const row of raceRows) {
+    const needsHeal =
+      row.fundedExposureMillicoins == null ||
+      row.fundedExposureRateMillicoinsPerDay == null;
+    const stamp = needsHeal
+      ? raceStampForRow({ ...row, race: racesById.get(row.raceId) })
+      : {
+          exposureMillicoins: row.fundedExposureMillicoins,
+          exposureRateMillicoinsPerDay:
+            row.fundedExposureRateMillicoinsPerDay,
+        };
+    if (needsHeal) addHeal(raceHealGroups, stamp, row.id);
+    addTotal(row.userId, stamp);
+  }
+  for (const row of tournamentRows) {
+    const needsHeal =
+      row.fundedExposureMillicoins == null ||
+      row.fundedExposureRateMillicoinsPerDay == null;
+    const stamp = needsHeal
+      ? tournamentStampForRow({
+          ...row,
+          tournament: tournamentsById.get(row.tournamentId),
+        })
+      : {
+          exposureMillicoins: row.fundedExposureMillicoins,
+          exposureRateMillicoinsPerDay:
+            row.fundedExposureRateMillicoinsPerDay,
+        };
+    if (needsHeal) addHeal(tournamentHealGroups, stamp, row.id);
+    addTotal(row.userId, stamp);
+  }
+  for (const { stamp, ids } of raceHealGroups.values()) {
+    const healed = await tx.raceParticipant.updateMany({
+      where: { id: { in: ids } },
+      data: {
+        fundedExposureMillicoins: stamp.exposureMillicoins,
+        fundedExposureRateMillicoinsPerDay:
+          stamp.exposureRateMillicoinsPerDay,
+      },
+    });
+    if (healed.count !== ids.length) throw fundedExposureDriftConflict();
+  }
+  for (const { stamp, ids } of tournamentHealGroups.values()) {
+    const healed = await tx.tournamentParticipant.updateMany({
+      where: { id: { in: ids } },
+      data: {
+        fundedExposureMillicoins: stamp.exposureMillicoins,
+        fundedExposureRateMillicoinsPerDay:
+          stamp.exposureRateMillicoinsPerDay,
+      },
+    });
+    if (healed.count !== ids.length) throw fundedExposureDriftConflict();
+  }
+
+  const finalRaceRows = await tx.raceParticipant.findMany({
+    where: {
+      userId: { in: orderedUsers },
+      status: "ACCEPTED",
+      finishedAt: null,
+      forfeitedAt: null,
+      race: { fundedPrize: true, status: { in: ["PENDING", "ACTIVE"] } },
+    },
+    select: { userId: true, raceId: true },
+  });
+  const finalTournamentRows = await tx.tournamentParticipant.findMany({
+    where: {
+      userId: { in: orderedUsers },
+      status: "ACCEPTED",
+      eliminatedInRound: null,
+      tournament: {
+        fundedPrize: true,
+        status: { in: ["PENDING", "ACTIVE"] },
+        seedId: null,
+      },
+    },
+    select: { userId: true, tournamentId: true },
+  });
+  const initialMembershipKeys = [
+    ...raceRows.map((row) => `${row.userId}\u0000race\u0000${row.raceId}`),
+    ...tournamentRows.map(
+      (row) => `${row.userId}\u0000tournament\u0000${row.tournamentId}`,
+    ),
+  ].sort();
+  const finalMembershipKeys = [
+    ...finalRaceRows.map(
+      (row) => `${row.userId}\u0000race\u0000${row.raceId}`,
+    ),
+    ...finalTournamentRows.map(
+      (row) => `${row.userId}\u0000tournament\u0000${row.tournamentId}`,
+    ),
+  ].sort();
+  if (
+    initialMembershipKeys.length !== finalMembershipKeys.length ||
+    initialMembershipKeys.some(
+      (key, index) => key !== finalMembershipKeys[index],
+    )
+  ) {
+    throw fundedExposureDriftConflict();
+  }
+  return totals;
+}
+
 async function auditLiveFundedExposure(prisma) {
   const raceNulls = await prisma.raceParticipant.count({
       where: {
@@ -532,28 +836,43 @@ async function reserveFundedExposures({
     });
     return ordered.map(({ stamp }) => stamp);
   }
-  for (const { userId, stamp } of ordered) {
-    const owned = ordered.filter((entry) => entry.userId === userId);
-    const current = await loadAndHealCurrentExposure(tx, userId, {
-      targetRaceIds: owned.map((entry) => entry.competition?.raceId),
-      targetTournamentIds: owned.map(
+  const currentByUser = await loadAndHealCurrentExposureCohort(
+    tx,
+    ordered.map(({ userId }) => userId),
+    {
+      targetRaceIds: ordered.map((entry) => entry.competition?.raceId),
+      targetTournamentIds: ordered.map(
         (entry) => entry.competition?.tournamentId,
       ),
-    });
+    },
+  );
+  const requestedByUser = new Map();
+  for (const { userId, stamp } of ordered) {
+    const requested = requestedByUser.get(userId) || {
+      exposureMillicoins: 0,
+      exposureRateMillicoinsPerDay: 0,
+    };
+    requested.exposureMillicoins += stamp.exposureMillicoins;
+    requested.exposureRateMillicoinsPerDay +=
+      stamp.exposureRateMillicoinsPerDay;
+    requestedByUser.set(userId, requested);
+  }
+  for (const [userId, requested] of requestedByUser) {
+    const current = currentByUser.get(userId);
     const exceedsRaw =
-      current.exposureMillicoins + stamp.exposureMillicoins >
+      current.exposureMillicoins + requested.exposureMillicoins >
       FUNDED_EXPOSURE_LIMIT_MILLICOINS;
     const exceedsRate =
       current.exposureRateMillicoinsPerDay +
-        stamp.exposureRateMillicoinsPerDay >
+        requested.exposureRateMillicoinsPerDay >
       FUNDED_EXPOSURE_RATE_LIMIT_MILLICOINS_PER_DAY;
     if (exceedsRaw || exceedsRate) {
       throw fundedExposureConflict({
         currentExposureMillicoins: current.exposureMillicoins,
-        requestedExposureMillicoins: stamp.exposureMillicoins,
+        requestedExposureMillicoins: requested.exposureMillicoins,
         currentRateMillicoinsPerDay: current.exposureRateMillicoinsPerDay,
         requestedRateMillicoinsPerDay:
-          stamp.exposureRateMillicoinsPerDay,
+          requested.exposureRateMillicoinsPerDay,
       });
     }
   }
@@ -575,6 +894,7 @@ module.exports = {
   isExposureEnforcementEnabled,
   isFundedPrizeV2Enabled,
   loadAndHealCurrentExposure,
+  loadAndHealCurrentExposureCohort,
   lockFundedExposureUsers,
   newRacePrizeStamp,
   newTournamentPrizeStamp,

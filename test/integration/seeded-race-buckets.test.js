@@ -1,5 +1,6 @@
 const { describe, it, before, beforeEach } = require("node:test");
 const assert = require("node:assert/strict");
+const { randomUUID } = require("node:crypto");
 const {
   cleanDatabase,
   createTestUser,
@@ -15,6 +16,12 @@ const {
 const {
   RaceResolutionJobV2,
 } = require("../../src/modules/races/models/raceResolutionJobV2");
+const {
+  acquireGlobalEnrollmentLock,
+} = require("../../src/modules/steps/services/globalEventEnrollment");
+const {
+  acquireRaceWriteFences,
+} = require("../../src/modules/races/services/raceWriteFence");
 
 const FEATURES = { "X-Client-Features": "seeded_race_buckets" };
 
@@ -172,6 +179,96 @@ describe("private seeded race buckets (integration)", () => {
     assert.equal(await prisma.raceParticipant.count({ where: { id: participant.id } }), 0);
   });
 
+  it("finalization cannot deadlock with legacy reconciliation at the window lock", async () => {
+    const legacy = await createTestUser({ autoJoinFeaturedRaces: true });
+    const bucketUsers = await Promise.all([createTestUser(), createTestUser()]);
+    const seed = await prisma.raceSeed.findUnique({ where: { kind: "DAILY_10K" } });
+    const { windowStart, windowEnd } = upcomingWindowFor(seed, new Date());
+    const legacyRace = await prisma.race.create({
+      data: {
+        seedId: seed.id,
+        name: "Legacy reconcile lock-order fixture",
+        targetSteps: seed.targetSteps,
+        status: "PENDING",
+        isPublic: true,
+        timeBased: true,
+        timezone: "America/New_York",
+        maxParticipants: 100,
+        maxDurationDays: 1,
+        scheduledStartAt: windowStart,
+        endsAt: windowEnd,
+      },
+    });
+    await prisma.raceParticipant.create({
+      data: { raceId: legacyRace.id, userId: legacy.user.id, status: "ACCEPTED" },
+    });
+    await prisma.seededRaceWindowMembership.createMany({
+      data: [
+        {
+          seedId: seed.id,
+          windowStart,
+          userId: legacy.user.id,
+          stream: "LEGACY",
+          raceId: legacyRace.id,
+        },
+        ...bucketUsers.map(({ user }) => ({
+          seedId: seed.id,
+          windowStart,
+          userId: user.id,
+          stream: "BUCKET",
+        })),
+      ],
+    });
+
+    let signalGlobalHeld;
+    let releaseGlobal;
+    const globalHeld = new Promise((resolve) => { signalGlobalHeld = resolve; });
+    const release = new Promise((resolve) => { releaseGlobal = resolve; });
+    let signalFencesHeld;
+    const fencesHeld = new Promise((resolve) => { signalFencesHeld = resolve; });
+    const reconciler = buildSeededRaceBuckets({
+      prisma,
+      appSettings,
+      acquireGlobalEnrollmentLock: async (tx) => {
+        await acquireGlobalEnrollmentLock(tx);
+        signalGlobalHeld();
+        await release;
+      },
+    });
+    const finalizer = buildSeededRaceBuckets({
+      prisma,
+      now: () => new Date(windowStart.getTime() - 2 * 60 * 1000),
+      appSettings,
+      acquireRaceWriteFences: async (tx, raceIds) => {
+        const locked = await acquireRaceWriteFences(tx, raceIds);
+        signalFencesHeld();
+        return locked;
+      },
+    });
+
+    const reconciling = reconciler.reconcileFeatured({
+      userId: legacy.user.id,
+      seed,
+      windowStart,
+      capable: true,
+      autoJoinFeaturedRaces: true,
+    });
+    await globalHeld;
+    const finalizing = finalizer.finalise({ seed, windowStart, windowEnd });
+    await fencesHeld;
+    releaseGlobal();
+
+    const timeout = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error("finalise/reconcile lock-order timeout")), 4_000);
+    });
+    const [reconciled, buckets] = await Promise.race([
+      Promise.all([reconciling, finalizing]),
+      timeout,
+    ]);
+    assert.equal(reconciled, true);
+    assert.ok(buckets.length > 0);
+  });
+
   it("finalizes the next ET window before its boundary and creates no online bucket at or after it", async () => {
     const previousPrizeV2 = process.env.FUNDED_PRIZE_V2_ENABLED;
     process.env.FUNDED_PRIZE_V2_ENABLED = "true";
@@ -236,6 +333,78 @@ describe("private seeded race buckets (integration)", () => {
       delete process.env.FUNDED_PRIZE_V2_ENABLED;
     } else {
       process.env.FUNDED_PRIZE_V2_ENABLED = previousPrizeV2;
+    }
+  });
+
+  it("finalizes a production-sized 450-user funded cohort inside the 5s budget without concurrent-query warnings", async () => {
+    const previousPrizeV2 = process.env.FUNDED_PRIZE_V2_ENABLED;
+    const previousEnforcement = process.env.FUNDED_EXPOSURE_ENFORCEMENT_ENABLED;
+    const warnings = [];
+    const onWarning = (warning) => warnings.push(warning);
+    process.env.FUNDED_PRIZE_V2_ENABLED = "true";
+    process.env.FUNDED_EXPOSURE_ENFORCEMENT_ENABLED = "true";
+    process.on("warning", onWarning);
+    try {
+      await appSettings.setFlag("fundedPrizePoolsEnabled", true);
+      const seed = await prisma.raceSeed.findUnique({
+        where: { kind: "DAILY_10K" },
+      });
+      const { windowStart, windowEnd } = upcomingWindowFor(seed, new Date());
+      const userIds = Array.from({ length: 450 }, () => randomUUID());
+      await prisma.user.createMany({
+        data: userIds.map((id, index) => ({
+          id,
+          appleId: `seeded-finalise-scale-${index}`,
+          autoJoinFeaturedRaces: true,
+          clientFeatures: ["seeded_race_buckets"],
+        })),
+      });
+      await prisma.seededRaceWindowMembership.createMany({
+        data: userIds.map((userId) => ({
+          seedId: seed.id,
+          windowStart,
+          userId,
+          stream: "BUCKET",
+        })),
+      });
+      const matcher = buildSeededRaceBuckets({
+        prisma,
+        now: () => new Date(windowStart.getTime() - 2 * 60 * 1000),
+        appSettings,
+      });
+
+      const startedAt = performance.now();
+      const buckets = await matcher.finalise({ seed, windowStart, windowEnd });
+      const durationMs = performance.now() - startedAt;
+      await new Promise((resolve) => setImmediate(resolve));
+
+      assert.equal(buckets.length, 30);
+      assert.equal(
+        await prisma.raceParticipant.count({
+          where: { raceId: { in: buckets.map((bucket) => bucket.raceId) } },
+        }),
+        450,
+      );
+      assert.ok(
+        durationMs < 5_000,
+        `production-sized finalization took ${durationMs.toFixed(1)}ms`,
+      );
+      assert.equal(
+        warnings.some((warning) =>
+          /already executing a query|Client\.query/i.test(warning.message),
+        ),
+        false,
+        `unexpected Prisma/pg warning: ${warnings.map((warning) => warning.stack).join("\n")}`,
+      );
+    } finally {
+      process.off("warning", onWarning);
+      if (previousPrizeV2 === undefined) delete process.env.FUNDED_PRIZE_V2_ENABLED;
+      else process.env.FUNDED_PRIZE_V2_ENABLED = previousPrizeV2;
+      if (previousEnforcement === undefined) {
+        delete process.env.FUNDED_EXPOSURE_ENFORCEMENT_ENABLED;
+      } else {
+        process.env.FUNDED_EXPOSURE_ENFORCEMENT_ENABLED = previousEnforcement;
+      }
     }
   });
 
