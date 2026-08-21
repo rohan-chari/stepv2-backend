@@ -261,8 +261,11 @@ async function loadAndHealCurrentExposure(
         forfeitedAt: null,
         race: {
           fundedPrize: true,
-          seedId: null,
           status: { in: ["PENDING", "ACTIVE"] },
+          OR: [
+            { seedId: null },
+            { seed: { kind: { notIn: ["DAILY_10K", "WEEKLY_50K"] } } },
+          ],
         },
       },
       select: {
@@ -313,8 +316,11 @@ async function loadAndHealCurrentExposure(
         forfeitedAt: null,
         race: {
           fundedPrize: true,
-          seedId: null,
           status: { in: ["PENDING", "ACTIVE"] },
+          OR: [
+            { seedId: null },
+            { seed: { kind: { notIn: ["DAILY_10K", "WEEKLY_50K"] } } },
+          ],
         },
       },
       select: {
@@ -437,8 +443,11 @@ async function loadAndHealCurrentExposure(
       forfeitedAt: null,
       race: {
         fundedPrize: true,
-        seedId: null,
         status: { in: ["PENDING", "ACTIVE"] },
+        OR: [
+          { seedId: null },
+          { seed: { kind: { notIn: ["DAILY_10K", "WEEKLY_50K"] } } },
+        ],
       },
     },
     select: { raceId: true },
@@ -493,8 +502,11 @@ async function loadAndHealCurrentExposureCohort(
       forfeitedAt: null,
       race: {
         fundedPrize: true,
-        seedId: null,
         status: { in: ["PENDING", "ACTIVE"] },
+        OR: [
+          { seedId: null },
+          { seed: { kind: { notIn: ["DAILY_10K", "WEEKLY_50K"] } } },
+        ],
       },
     },
     select: { userId: true, raceId: true },
@@ -549,8 +561,11 @@ async function loadAndHealCurrentExposureCohort(
       forfeitedAt: null,
       race: {
         fundedPrize: true,
-        seedId: null,
         status: { in: ["PENDING", "ACTIVE"] },
+        OR: [
+          { seedId: null },
+          { seed: { kind: { notIn: ["DAILY_10K", "WEEKLY_50K"] } } },
+        ],
       },
     },
     select: {
@@ -708,8 +723,11 @@ async function loadAndHealCurrentExposureCohort(
       forfeitedAt: null,
       race: {
         fundedPrize: true,
-        seedId: null,
         status: { in: ["PENDING", "ACTIVE"] },
+        OR: [
+          { seedId: null },
+          { seed: { kind: { notIn: ["DAILY_10K", "WEEKLY_50K"] } } },
+        ],
       },
     },
     select: { userId: true, raceId: true },

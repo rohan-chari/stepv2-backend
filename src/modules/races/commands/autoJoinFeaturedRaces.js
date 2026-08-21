@@ -71,6 +71,7 @@ function buildAutoJoinFeaturedRaces(dependencies = {}) {
       if (await claimLegacyStream({ prisma, race, userId })) toAdd.push(userId);
     }
     if (toAdd.length === 0) return 0;
+    const seededChallenge = ["DAILY_10K", "WEEKLY_50K"].includes(race.seedKind);
     const exposureStamp = race.fundedPrize === true
       ? computeRaceExposureStamp({
           maxDurationDays: race.maxDurationDays,
@@ -127,7 +128,7 @@ function buildAutoJoinFeaturedRaces(dependencies = {}) {
               userId,
               stamp: exposureStamp,
               competition: { raceId: race.id },
-              enforceLimits: false,
+              enforceLimits: !seededChallenge,
             });
           }
           const created = await tx.raceParticipant.createMany({
@@ -243,6 +244,7 @@ function buildAutoJoinFeaturedRaces(dependencies = {}) {
         prizeCoinUnit: true,
         prizePoolMaxCoins: true,
         prizeCalculationVersion: true,
+        seed: { select: { kind: true } },
       },
     });
     let joined = 0;
@@ -252,7 +254,10 @@ function buildAutoJoinFeaturedRaces(dependencies = {}) {
         select: { id: true },
       });
       if (existing) continue;
-      joined += await enroll(race, [userId]);
+      joined += await enroll({
+        ...race,
+        seedKind: race.seed?.kind,
+      }, [userId]);
     }
     return joined;
   }

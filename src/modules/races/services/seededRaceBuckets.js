@@ -539,6 +539,7 @@ function buildSeededRaceBuckets(dependencies = {}) {
 
   async function finalise({ seed, windowStart, windowEnd }) {
     if (now() >= windowStart) return [];
+    const seededChallenge = ["DAILY_10K", "WEEKLY_50K"].includes(seed.kind);
     // These values are stamped exactly as the legacy renewal path stamps
     // them. Bucket matching must never silently alter a seeded race's payout
     // economics merely because its participant field is private.
@@ -669,7 +670,7 @@ function buildSeededRaceBuckets(dependencies = {}) {
                   competition: { raceId: row.raceId },
                 })),
               ),
-              enforceLimits: false,
+              enforceLimits: !seededChallenge,
             });
           } else {
             await lockUsers(tx, userIds);

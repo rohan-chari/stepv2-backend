@@ -208,6 +208,7 @@ function buildRenewSeededRaces(dependencies = {}) {
         id: race.id,
         maxParticipants: seed.maxParticipants,
         seedId: race.seedId,
+        seedKind: seed.kind,
         startedAt: race.startedAt,
         scheduledStartAt: race.scheduledStartAt,
       });
