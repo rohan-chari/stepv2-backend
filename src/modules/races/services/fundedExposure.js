@@ -885,6 +885,8 @@ module.exports = {
   computeRaceExposureStamp,
   computeTournamentExposureStamp,
   fundedExposureConflict,
+  resolveRacePrizeStamp,
+  resolveTournamentPrizeStamp,
   loadAndHealCurrentExposure,
   loadAndHealCurrentExposureCohort,
   lockFundedExposureUsers,

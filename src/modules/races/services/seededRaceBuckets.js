@@ -19,6 +19,8 @@ const {
   lockFundedExposureUsers,
   newRacePrizeStamp,
   reserveFundedExposures,
+  resolveRacePrizeStamp,
+  resolveTournamentPrizeStamp,
 } = require("./fundedExposure");
 const {
   acquireRaceWriteFence,
@@ -115,7 +117,7 @@ async function readFundedExposureCohort(prisma, userIds) {
       ? row
       : computeRaceExposureStamp({
           maxDurationDays: row.race.maxDurationDays,
-          prizeCoinUnit: row.race.prizeCoinUnit || 10,
+          prizeCoinUnit: resolveRacePrizeStamp(row.race).prizeCoinUnit,
           teamPoolMultBps: row.race.teamPoolMultBps,
         });
     const total = totals.get(row.userId);
@@ -130,8 +132,8 @@ async function readFundedExposureCohort(prisma, userIds) {
           bracketSize: row.tournament.bracketSize,
           totalRounds: row.tournament.totalRounds,
           matchupDurationDays: row.tournament.matchupDurationDays,
-          prizeCoinUnit: row.tournament.prizeCoinUnit || 10,
-          tournamentChampionMaxCoins: row.tournament.tournamentChampionMaxCoins || 500,
+          prizeCoinUnit: resolveTournamentPrizeStamp(row.tournament).prizeCoinUnit,
+          tournamentChampionMaxCoins: resolveTournamentPrizeStamp(row.tournament).tournamentChampionMaxCoins,
         });
     const total = totals.get(row.userId);
     total.exposureMillicoins += stamp.fundedExposureMillicoins ?? stamp.exposureMillicoins;
@@ -588,23 +590,7 @@ function buildSeededRaceBuckets(dependencies = {}) {
           exposureStamp,
         ));
       }
-      if (!eligible.length) {
-        await withSeededWindowLock({
-          prisma,
-          seedId: seed.id,
-          windowStart,
-          fn: async (tx) => tx.seededRaceWindowMembership.deleteMany({
-            where: {
-              seedId: seed.id,
-              windowStart,
-              stream: "BUCKET",
-              raceId: null,
-              userId: { in: skippedUserIds },
-            },
-          }),
-        });
-        return { elected: eligible, allElected: elected, skippedUserIds, plan: [] };
-      }
+      if (!eligible.length) return { elected: eligible, allElected: elected, skippedUserIds, plan: [] };
       const candidates = await matchStepsForCandidates({
         prisma,
         candidates: eligible,
@@ -631,7 +617,37 @@ function buildSeededRaceBuckets(dependencies = {}) {
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const snapshot = await snapshotPlan();
-      if (!snapshot.elected.length) return [];
+      if (!snapshot.elected.length) {
+        const allUserIds = snapshot.allElected?.map((row) => row.userId) || [];
+        const cleaned = await prisma.$transaction(async (tx) => {
+          await acquireGlobalLock(tx);
+          await lockUsers(tx, allUserIds);
+          const lockedTotals = await loadExposure(tx, allUserIds);
+          const lockedSplit = splitFundedExposureCandidates(
+            snapshot.allElected || [],
+            lockedTotals,
+            computeRaceExposureStamp({
+              maxDurationDays: seed.cadence === "WEEKLY" ? 7 : 1,
+              prizeCoinUnit: prizeStamp.prizeCoinUnit,
+              teamPoolMultBps: null,
+            }),
+          );
+          if (lockedSplit.eligible.length > 0) return false;
+          await acquireSeededWindowLock(tx, seed.id, windowStart);
+          await tx.seededRaceWindowMembership.deleteMany({
+            where: {
+              seedId: seed.id,
+              windowStart,
+              stream: "BUCKET",
+              raceId: null,
+              userId: { in: snapshot.skippedUserIds || allUserIds },
+            },
+          });
+          return true;
+        });
+        if (cleaned) return [];
+        continue;
+      }
       try {
         const outcome = await prisma.$transaction(async (tx) => {
           const maxDurationDays = seed.cadence === "WEEKLY" ? 7 : 1;
