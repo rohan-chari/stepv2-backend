@@ -120,3 +120,58 @@ test("persisted fallback computes currentMultiplier from participant-specific ev
   assert.equal(snapshot.participants.find((row) => row.userId === "ny").currentMultiplier, 2);
   assert.equal(snapshot.participants.find((row) => row.userId === "mad").currentMultiplier, 1);
 });
+
+test("persisted snapshot hydrates lean participants through the presentation cache", async () => {
+  let presentationIds = null;
+  const race = {
+    id: "race-1", status: "ACTIVE",
+    startedAt: new Date("2026-08-20T13:00:00Z"),
+    endsAt: new Date("2026-08-21T13:00:00Z"),
+    timezone: "UTC", targetSteps: 0, isTeamRace: false,
+    powerupsEnabled: false, powerupStepInterval: null,
+    participants: [
+      {
+        id: "p-1", userId: "user-1", status: "ACCEPTED", totalSteps: 321,
+        joinedAt: new Date("2026-08-20T13:00:00Z"), user: undefined,
+      },
+    ],
+  };
+  const query = buildGetRaceProgress({
+    Race: {
+      async findProgressScoringContext() { return race; },
+    },
+    RaceActiveEffect: { async findActiveForRace() { return []; } },
+    GlobalStepEvent: { async findEligibleByRace() { return new Map(); } },
+    userPresentationCache: {
+      async getMany(ids) {
+        presentationIds = ids;
+        return new Map([["user-1", {
+          id: "user-1",
+          displayName: "Cached Runner",
+          profilePhotoUrl: null,
+          equippedAccessories: [{ shopItem: {
+            id: "item-1", sku: "hat", name: "Hat", slot: "HEAD",
+            assetKey: "hat", renderMetadata: {}, bobble: false,
+            testOnly: false, remoteOnly: false, assetVersion: "1",
+          } }],
+          clientFeatures: [],
+          isReviewAccount: false,
+          hiddenFromLeaderboard: false,
+        }]]);
+      },
+    },
+    raceProgressSnapshot: snapshotStore,
+    now: () => new Date("2026-08-20T14:10:00Z"),
+  });
+
+  const snapshot = await query.computePersistedSnapshot({
+    raceId: race.id,
+    timeZone: "UTC",
+  });
+
+  assert.deepEqual(presentationIds, ["user-1"]);
+  assert.equal(
+    snapshot.participants[0].presentation["prod:1:0"].accessories[0].assetKey,
+    "hat",
+  );
+});

@@ -13,6 +13,7 @@ const {
 } = require("../racePrizePool");
 const { getRaceLeaveAction } = require("../services/raceLeaveAction");
 const { canReadRacePreview } = require("../services/canReadRacePreview");
+const userPresentationCache = require("../../social/services/userPresentationCache");
 
 // The JS twin of the model's `detailsParticipantOrder` ([joinedAt asc, id asc]).
 // Used only when a page is sliced out of a preloaded race instead of taken by
@@ -61,7 +62,14 @@ async function getRaceDetails(
   //                         the query layer. It only ENABLES the public-preview
   //                         carve-out below — the flag and the race's own
   //                         public/non-tournament shape still have to agree.
-  { pagination = null, previewViewer = false } = {}
+  {
+    pagination = null,
+    previewViewer = false,
+    // Additive bootstrap-only projection. It preserves the historical detail
+    // shape while replacing the all-participant cosmetic join with scalar
+    // summaries plus the shared presentation cache.
+    leanActive = false,
+  } = {}
 ) {
   const pagingCapable = pagination?.capable === true;
   const pagingRequested =
@@ -92,7 +100,39 @@ async function getRaceDetails(
   // is the real win.
   const sliceFromPreload = pagingRequested && preloadedRace != null;
 
-  if (pagingRequested && !sliceFromPreload) {
+  if (leanActive && !pagingRequested && !sliceFromPreload) {
+    race = await Race.findDetailsCore(raceId);
+    if (!race) throw notFound();
+    if (race.seededBucketId && !supportsBuckets) {
+      const error = notFound();
+      error.code = "RACE_NOT_FOUND";
+      throw error;
+    }
+    const summaries = await Race.findDetailsParticipantSummaries(raceId);
+    let presentations = new Map();
+    try {
+      presentations = await userPresentationCache.getMany(
+        summaries.map((participant) => participant.userId),
+        true,
+      );
+    } catch {
+      // The response remains structurally valid with a safe naked fallback if
+      // Redis and the presentation loader are both unavailable.
+    }
+    summaryRows = summaries.map((participant) => ({
+      ...participant,
+      user: presentations.get(participant.userId) || {
+        id: participant.userId,
+        displayName: null,
+        profilePhotoUrl: null,
+        equippedAccessories: [],
+        clientFeatures: [],
+        isReviewAccount: false,
+        hiddenFromLeaderboard: false,
+      },
+    }));
+    myParticipant = summaryRows.find((p) => p.userId === userId);
+  } else if (pagingRequested && !sliceFromPreload) {
     race = await Race.findDetailsCore(raceId);
     if (!race) throw notFound();
     if (race.seededBucketId && !supportsBuckets) {

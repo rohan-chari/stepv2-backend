@@ -1309,7 +1309,10 @@ function createRacesRouter(dependencies = {}) {
           resolvedContext.race?._leanProgressProjection
             ? null
             : resolvedContext.race || null,
-          detailPaging
+          {
+            ...detailPaging,
+            leanActive: access.race.status === "ACTIVE",
+          }
         ),
       );
       capacityOutcome = "success";

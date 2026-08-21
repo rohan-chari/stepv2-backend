@@ -95,6 +95,10 @@ const detailsParticipantSummarySelect = {
   forfeitedAt: true,
   buyInAmount: true,
   buyInStatus: true,
+  payoutCoins: true,
+  chatMuted: true,
+  placementAlertsMuted: true,
+  lastReadRaceChatAt: true,
   joinedAt: true,
 };
 

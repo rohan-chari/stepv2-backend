@@ -39,10 +39,15 @@ function buildGetRacePowerupTargetContext(dependencies = {}) {
   }) {
     if (!TARGETED_TYPES.has(powerupType)) return null;
 
-    // Bounty is the sole picker that needs calculated totals. Reuse the public
-    // progress seam so its Redis snapshot/fallback and canonical scoring rules
-    // remain the authority; this endpoint only downcasts its wire shape.
-    if (powerupType === "BOUNTY") {
+    // Keep a compatibility fallback for injected/older model seams, but the
+    // production model has a narrow persisted target-context query. Bounty does
+    // not need the full progress payload here: persisted participant totals,
+    // active illusions, and the viewer's inventory are sufficient to build the
+    // action-time picker. This avoids loading the full progress/accessory graph.
+    if (
+      powerupType === "BOUNTY" &&
+      typeof raceModel.findPowerupTargetContext !== "function"
+    ) {
       const progress = await loadBountyProgress();
       if (progress?.status !== "ACTIVE") {
         throw domainError("Race is not active", 400, "RACE_NOT_ACTIVE");
@@ -125,6 +130,7 @@ function buildGetRacePowerupTargetContext(dependencies = {}) {
           profilePhotoUrl: stealthed
             ? null
             : participant.user?.profilePhotoUrl ?? null,
+          totalSteps: participant.totalSteps ?? 0,
           team: participant.team ?? null,
           forfeitedAt: participant.forfeitedAt ?? null,
           stealthed,

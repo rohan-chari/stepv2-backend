@@ -859,6 +859,20 @@ function buildGetRaceProgress(deps = {}) {
   }) {
     snapshotStore.__bump("persistedFallbacks");
     const accepted = race.participants.filter((p) => p.status === "ACCEPTED");
+    let presentations = new Map();
+    try {
+      presentations = await presentationCache.getMany(
+        accepted.map((participant) => participant.userId),
+        true,
+      );
+    } catch (error) {
+      // Persisted totals remain useful if the optional presentation cache is
+      // unavailable. Legacy full reads still carry `participant.user`, while
+      // lean reads safely fall back to a presentation-free row.
+      logger.warn?.("Race progress presentation cache unavailable", {
+        error: error?.message,
+      });
+    }
     const raceActiveEffects = race.powerupsEnabled
       ? await raceActiveEffectModel.findActiveForRace(raceId)
       : [];
@@ -919,14 +933,15 @@ function buildGetRaceProgress(deps = {}) {
         return startMs <= nowMs && nowMs < endMs && Number(event.multiplier) > 1;
       });
       const eventMult = activeEvent ? Number(activeEvent.multiplier) : 1;
+      const presentation = presentations.get(p.userId) || p.user || null;
       return {
         participantId: p.id,
         userId: p.userId,
-        ...(p.user
+        ...(presentation
           ? {
-              displayName: p.user.displayName,
-              profilePhotoUrl: p.user.profilePhotoUrl,
-              presentation: buildPresentationVariants(p.user),
+              displayName: presentation.displayName,
+              profilePhotoUrl: presentation.profilePhotoUrl,
+              presentation: buildPresentationVariants(presentation),
             }
           : {}),
         totalSteps: totalFor(p),
@@ -1021,9 +1036,10 @@ function buildGetRaceProgress(deps = {}) {
     // the response. This preserves powerup correctness without replaying or
     // writing the entire race on every poll.
     if (
-      !snapshot.source ||
-      snapshot.source === "persisted" ||
-      snapshot.source === "worker-persisted"
+      legacyReplayForTests &&
+      (!snapshot.source ||
+        snapshot.source === "persisted" ||
+        snapshot.source === "worker-persisted")
     ) {
       const viewerEntry = entries.find((entry) => entry.userId === userId);
       if (viewerEntry && myParticipant && !myParticipant.finishedAt) {
@@ -1646,13 +1662,14 @@ function buildGetRaceProgress(deps = {}) {
     // fat race read during a Redis-disabled capacity run, even though the
     // projection is independently safe and backed by Postgres.
     const leanProjectionEnabled =
-      (participantsView === "participants-v1" || leanScoringContext === true) &&
       typeof raceModel.findProgressScoringContext === "function" &&
       (leanScoringContext === true ||
-        (await isStrictFlagEnabled(
-          settings,
-          "raceProgressLeanProjectionV1Enabled"
-        )));
+        !legacyReplayForTests ||
+        (participantsView === "participants-v1" &&
+          (await isStrictFlagEnabled(
+            settings,
+            "raceProgressLeanProjectionV1Enabled"
+          ))));
     let race = leanProjectionEnabled
       ? await raceModel.findProgressScoringContext(raceId)
       : await raceModel.findById(raceId);
@@ -2017,7 +2034,10 @@ function buildGetRaceProgress(deps = {}) {
     timeZone = "UTC",
     baseAdjustedByParticipantId = null,
   }) => {
-    const race = await raceModel.findById(raceId);
+    const race =
+      typeof raceModel.findProgressScoringContext === "function"
+        ? await raceModel.findProgressScoringContext(raceId)
+        : await raceModel.findById(raceId);
     if (!race || race.status !== "ACTIVE") return null;
     const snapshot = await loadPersistedState({
       race,
