@@ -127,6 +127,7 @@ function buildAutoJoinFeaturedRaces(dependencies = {}) {
               userId,
               stamp: exposureStamp,
               competition: { raceId: race.id },
+              enforceLimits: false,
             });
           }
           const created = await tx.raceParticipant.createMany({

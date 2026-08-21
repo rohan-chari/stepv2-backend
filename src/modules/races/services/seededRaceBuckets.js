@@ -15,7 +15,6 @@ const {
   computeTournamentExposureStamp,
   FUNDED_EXPOSURE_LIMIT_MILLICOINS,
   FUNDED_EXPOSURE_RATE_LIMIT_MILLICOINS_PER_DAY,
-  loadAndHealCurrentExposureCohort,
   lockFundedExposureUsers,
   newRacePrizeStamp,
   reserveFundedExposures,
@@ -366,10 +365,6 @@ function buildSeededRaceBuckets(dependencies = {}) {
     dependencies.lockCompetitionRows || lockCompetitionRows;
   const acquireGlobalLock =
     dependencies.acquireGlobalEnrollmentLock || acquireGlobalEnrollmentLock;
-  const loadExposure =
-    dependencies.loadAndHealCurrentExposureCohort ||
-    loadAndHealCurrentExposureCohort;
-  const readExposure = dependencies.readFundedExposureCohort || readFundedExposureCohort;
 
   async function automaticCandidates(tx) {
     const users = await tx.user.findMany({
@@ -572,25 +567,10 @@ function buildSeededRaceBuckets(dependencies = {}) {
         select: { userId: true }, orderBy: { userId: "asc" },
       });
       if (!elected.length) return { elected, allElected: elected, plan: [] };
-      let eligible = elected;
-      let skippedUserIds = [];
-      if (fundedPrizePools === true) {
-        const exposureStamp = computeRaceExposureStamp({
-          maxDurationDays: seed.cadence === "WEEKLY" ? 7 : 1,
-          prizeCoinUnit: prizeStamp.prizeCoinUnit,
-          teamPoolMultBps: null,
-        });
-        const totals = await readExposure(
-          prisma,
-          elected.map((row) => row.userId),
-        );
-        ({ eligible, skippedUserIds } = splitFundedExposureCandidates(
-          elected,
-          totals,
-          exposureStamp,
-        ));
-      }
-      if (!eligible.length) return { elected: eligible, allElected: elected, skippedUserIds, plan: [] };
+      // Seeded daily/weekly challenges are guaranteed featured benefits. The
+      // funded-exposure caps apply to user-created funded races only.
+      const eligible = elected;
+      if (!eligible.length) return { elected, allElected: elected, plan: [] };
       const candidates = await matchStepsForCandidates({
         prisma,
         candidates: eligible,
@@ -604,7 +584,6 @@ function buildSeededRaceBuckets(dependencies = {}) {
       return {
         elected: eligible,
         allElected: elected,
-        skippedUserIds,
         plan: planBuckets(
           candidates,
           friendships.map((row) => ({
@@ -617,37 +596,7 @@ function buildSeededRaceBuckets(dependencies = {}) {
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const snapshot = await snapshotPlan();
-      if (!snapshot.elected.length) {
-        const allUserIds = snapshot.allElected?.map((row) => row.userId) || [];
-        const cleaned = await prisma.$transaction(async (tx) => {
-          await acquireGlobalLock(tx);
-          await lockUsers(tx, allUserIds);
-          const lockedTotals = await loadExposure(tx, allUserIds);
-          const lockedSplit = splitFundedExposureCandidates(
-            snapshot.allElected || [],
-            lockedTotals,
-            computeRaceExposureStamp({
-              maxDurationDays: seed.cadence === "WEEKLY" ? 7 : 1,
-              prizeCoinUnit: prizeStamp.prizeCoinUnit,
-              teamPoolMultBps: null,
-            }),
-          );
-          if (lockedSplit.eligible.length > 0) return false;
-          await acquireSeededWindowLock(tx, seed.id, windowStart);
-          await tx.seededRaceWindowMembership.deleteMany({
-            where: {
-              seedId: seed.id,
-              windowStart,
-              stream: "BUCKET",
-              raceId: null,
-              userId: { in: snapshot.skippedUserIds || allUserIds },
-            },
-          });
-          return true;
-        });
-        if (cleaned) return [];
-        continue;
-      }
+      if (!snapshot.elected.length) return [];
       try {
         const outcome = await prisma.$transaction(async (tx) => {
           const maxDurationDays = seed.cadence === "WEEKLY" ? 7 : 1;
@@ -709,28 +658,6 @@ function buildSeededRaceBuckets(dependencies = {}) {
             rows.map((row) => row.raceId),
           );
           await acquireGlobalLock(tx);
-          if (fundedPrizePools === true) {
-            // Re-read under the universal user/competition lock sequence. The
-            // root-client preflight only avoids doing the expensive match plan
-            // for obviously ineligible users; it is never authoritative.
-            const allUserIds = snapshot.allElected.map((row) => row.userId);
-            await lockUsers(tx, allUserIds);
-            const lockedTotals = await loadExposure(tx, allUserIds, {
-              targetRaceIds: rows.map((row) => row.raceId),
-            });
-            const lockedSplit = splitFundedExposureCandidates(
-              snapshot.allElected,
-              lockedTotals,
-              fundedExposureStamp,
-            );
-            const lockedIds = lockedSplit.eligible.map((row) => row.userId);
-            const snapshotIds = snapshot.elected.map((row) => row.userId);
-            if (lockedIds.length !== snapshotIds.length || lockedIds.some((id, index) => id !== snapshotIds[index])) {
-              const error = new Error("Seeded bucket exposure changed");
-              error.seededFinalizationOutcome = "RETRY";
-              throw error;
-            }
-          }
           const userIds = snapshot.elected.map((row) => row.userId);
           if (fundedPrizePools === true) {
             await reserveFundedExposures({
@@ -742,6 +669,7 @@ function buildSeededRaceBuckets(dependencies = {}) {
                   competition: { raceId: row.raceId },
                 })),
               ),
+              enforceLimits: false,
             });
           } else {
             await lockUsers(tx, userIds);
@@ -779,23 +707,7 @@ function buildSeededRaceBuckets(dependencies = {}) {
             select: { userId: true },
             orderBy: { userId: "asc" },
           });
-          // Release elected users who no longer fit the funded-exposure cap.
-          // Leaving one stale BUCKET claim behind would make the all-or-nothing
-          // snapshot check abort every retry for the whole cohort.
-          if (snapshot.skippedUserIds?.length) {
-            await tx.seededRaceWindowMembership.deleteMany({
-              where: {
-                seedId: seed.id,
-                windowStart,
-                stream: "BUCKET",
-                raceId: null,
-                userId: { in: snapshot.skippedUserIds },
-              },
-            });
-          }
-          const remainingElected = lockedElected.filter(
-            (row) => !snapshot.skippedUserIds?.includes(row.userId),
-          );
+          const remainingElected = lockedElected;
           if (
             remainingElected.length !== snapshot.elected.length ||
             remainingElected.some(

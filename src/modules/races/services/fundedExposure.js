@@ -259,7 +259,11 @@ async function loadAndHealCurrentExposure(
         status: "ACCEPTED",
         finishedAt: null,
         forfeitedAt: null,
-        race: { fundedPrize: true, status: { in: ["PENDING", "ACTIVE"] } },
+        race: {
+          fundedPrize: true,
+          seedId: null,
+          status: { in: ["PENDING", "ACTIVE"] },
+        },
       },
       select: {
         raceId: true,
@@ -307,7 +311,11 @@ async function loadAndHealCurrentExposure(
         status: "ACCEPTED",
         finishedAt: null,
         forfeitedAt: null,
-        race: { fundedPrize: true, status: { in: ["PENDING", "ACTIVE"] } },
+        race: {
+          fundedPrize: true,
+          seedId: null,
+          status: { in: ["PENDING", "ACTIVE"] },
+        },
       },
       select: {
         id: true,
@@ -427,7 +435,11 @@ async function loadAndHealCurrentExposure(
       status: "ACCEPTED",
       finishedAt: null,
       forfeitedAt: null,
-      race: { fundedPrize: true, status: { in: ["PENDING", "ACTIVE"] } },
+      race: {
+        fundedPrize: true,
+        seedId: null,
+        status: { in: ["PENDING", "ACTIVE"] },
+      },
     },
     select: { raceId: true },
   });
@@ -479,7 +491,11 @@ async function loadAndHealCurrentExposureCohort(
       status: "ACCEPTED",
       finishedAt: null,
       forfeitedAt: null,
-      race: { fundedPrize: true, status: { in: ["PENDING", "ACTIVE"] } },
+      race: {
+        fundedPrize: true,
+        seedId: null,
+        status: { in: ["PENDING", "ACTIVE"] },
+      },
     },
     select: { userId: true, raceId: true },
   });
@@ -531,7 +547,11 @@ async function loadAndHealCurrentExposureCohort(
       status: "ACCEPTED",
       finishedAt: null,
       forfeitedAt: null,
-      race: { fundedPrize: true, status: { in: ["PENDING", "ACTIVE"] } },
+      race: {
+        fundedPrize: true,
+        seedId: null,
+        status: { in: ["PENDING", "ACTIVE"] },
+      },
     },
     select: {
       id: true,
@@ -686,7 +706,11 @@ async function loadAndHealCurrentExposureCohort(
       status: "ACCEPTED",
       finishedAt: null,
       forfeitedAt: null,
-      race: { fundedPrize: true, status: { in: ["PENDING", "ACTIVE"] } },
+      race: {
+        fundedPrize: true,
+        seedId: null,
+        status: { in: ["PENDING", "ACTIVE"] },
+      },
     },
     select: { userId: true, raceId: true },
   });
@@ -808,6 +832,7 @@ async function reserveFundedExposure({
   userId,
   stamp,
   competition = null,
+  enforceLimits = true,
 }) {
   if (!tx || !userId || !stamp) {
     throw new TypeError("tx, userId, and stamp are required");
@@ -815,6 +840,7 @@ async function reserveFundedExposure({
   await reserveFundedExposures({
     tx,
     reservations: [{ userId, stamp, competition }],
+    enforceLimits,
   });
   return stamp;
 }
@@ -822,6 +848,7 @@ async function reserveFundedExposure({
 async function reserveFundedExposures({
   tx,
   reservations,
+  enforceLimits = true,
 }) {
   if (!tx || !Array.isArray(reservations)) {
     throw new TypeError("tx and reservations are required");
@@ -853,21 +880,23 @@ async function reserveFundedExposures({
   }
   for (const [userId, requested] of requestedByUser) {
     const current = currentByUser.get(userId);
-    const exceedsRaw =
-      current.exposureMillicoins + requested.exposureMillicoins >
-      FUNDED_EXPOSURE_LIMIT_MILLICOINS;
-    const exceedsRate =
-      current.exposureRateMillicoinsPerDay +
-        requested.exposureRateMillicoinsPerDay >
-      FUNDED_EXPOSURE_RATE_LIMIT_MILLICOINS_PER_DAY;
-    if (exceedsRaw || exceedsRate) {
-      throw fundedExposureConflict({
-        currentExposureMillicoins: current.exposureMillicoins,
-        requestedExposureMillicoins: requested.exposureMillicoins,
-        currentRateMillicoinsPerDay: current.exposureRateMillicoinsPerDay,
-        requestedRateMillicoinsPerDay:
-          requested.exposureRateMillicoinsPerDay,
-      });
+    if (enforceLimits) {
+      const exceedsRaw =
+        current.exposureMillicoins + requested.exposureMillicoins >
+        FUNDED_EXPOSURE_LIMIT_MILLICOINS;
+      const exceedsRate =
+        current.exposureRateMillicoinsPerDay +
+          requested.exposureRateMillicoinsPerDay >
+        FUNDED_EXPOSURE_RATE_LIMIT_MILLICOINS_PER_DAY;
+      if (exceedsRaw || exceedsRate) {
+        throw fundedExposureConflict({
+          currentExposureMillicoins: current.exposureMillicoins,
+          requestedExposureMillicoins: requested.exposureMillicoins,
+          currentRateMillicoinsPerDay: current.exposureRateMillicoinsPerDay,
+          requestedRateMillicoinsPerDay:
+            requested.exposureRateMillicoinsPerDay,
+        });
+      }
     }
   }
   return ordered.map(({ stamp }) => stamp);
