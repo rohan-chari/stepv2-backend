@@ -413,6 +413,7 @@ const PERMANENT_FLAGS = Object.freeze({
   redisCacheHomeActiveGlobalEventEnabled: true,
   redisCacheHomeImpactSummaryEnabled: true,
   redisCacheHomeInboxUnreadEnabled: true,
+  redisCacheRaceListEnabled: true,
 
   // Established durable-resolution behavior. Correctness fallbacks remain in
   // the algorithms; stale rows can no longer select the retired rollout paths.

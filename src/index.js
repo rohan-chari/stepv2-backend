@@ -54,12 +54,16 @@ const {
 const {
   scheduleRacePayoutDoubleReconcile,
 } = require("./modules/races");
+const {
+  registerRaceListCacheInvalidation,
+} = require("./modules/races");
 function startServer({
   app = createApp(),
   port = Number(process.env.PORT || 3000),
   host = process.env.HOST || "0.0.0.0",
   registerEventHandlers: register = registerEventHandlers,
   registerNotificationHandlers: registerNotifications = registerNotificationHandlers,
+  registerRaceListCacheInvalidation: registerRaceListCache = registerRaceListCacheInvalidation,
   scheduleRaceExpiryCheck: scheduleRaceExpiry = scheduleRaceExpiryCheck,
   scheduleSeededRaceRenewal: scheduleSeededRenewal = scheduleSeededRaceRenewal,
   scheduleTournamentSeedRenewal:
@@ -115,6 +119,7 @@ function startServer({
 } = {}) {
   register();
   registerNotifications();
+  registerRaceListCache();
 
   return app.listen(port, host, () => {
     logger.log(`Steps Tracker API running on ${host}:${port}`);

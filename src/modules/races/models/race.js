@@ -50,6 +50,58 @@ const participantInclude = {
   },
 };
 
+// Stable, display-safe projection for the split GET /races cache. Participant
+// rows, offers, inventory, effects, placements, and step totals are intentionally
+// absent: those are viewer-specific or live and are re-read after this fragment
+// is loaded. Keep this list aligned with raceListCache.FIELD_CLASSIFICATION.
+const raceListStableSelect = {
+  id: true,
+  creatorId: true,
+  seedId: true,
+  name: true,
+  targetSteps: true,
+  status: true,
+  maxDurationDays: true,
+  buyInAmount: true,
+  payoutPreset: true,
+  potCoins: true,
+  fundedPrize: true,
+  prizePoolCoins: true,
+  prizeCoinUnit: true,
+  prizePoolMaxCoins: true,
+  prizeCalculationVersion: true,
+  payoutRoundingVersion: true,
+  payoutCurve: true,
+  creationSource: true,
+  startPolicy: true,
+  teamPoolMultBps: true,
+  startedAt: true,
+  endsAt: true,
+  scheduledStartAt: true,
+  scheduledEndAt: true,
+  timezone: true,
+  completedAt: true,
+  winnerUserId: true,
+  powerupsEnabled: true,
+  powerupStepInterval: true,
+  isPublic: true,
+  maxParticipants: true,
+  timeBased: true,
+  isTeamRace: true,
+  teamSize: true,
+  teamAName: true,
+  teamBName: true,
+  winnerTeam: true,
+  tournamentId: true,
+  tournamentRound: true,
+  tournamentMatchIndex: true,
+  seededBucketId: true,
+  createdAt: true,
+  updatedAt: true,
+  creator: { select: { id: true, displayName: true, profilePhotoUrl: true } },
+  winner: { select: { id: true, displayName: true, profilePhotoUrl: true } },
+};
+
 // ── Paged race-detail read plan ───────────────────────────────────────────────
 // Used ONLY when a client both advertises `race_participants_paging` and asks
 // for `view=participants-v1`. Every other caller keeps `findById` verbatim.
@@ -701,6 +753,46 @@ const Race = {
     );
   },
 
+  // Stable candidate rows for the split GET /races cache. Membership is still
+  // scoped by user in SQL; only the resulting race metadata is eligible for
+  // Redis. The viewer participant and all live roster state are loaded by the
+  // summary query after this projection is read.
+  async findRaceListStableForUser(userId, extraCompletedRaceIds = []) {
+    const participantFilter = {
+      participants: { some: { userId, status: { not: "DECLINED" } } },
+    };
+    const [current, completed, injectedCompleted] = await Promise.all([
+      prisma.race.findMany({
+        where: { ...participantFilter, status: { not: "COMPLETED" } },
+        select: raceListStableSelect,
+        orderBy: { updatedAt: "desc" },
+      }),
+      prisma.race.findMany({
+        where: { ...participantFilter, status: "COMPLETED" },
+        select: raceListStableSelect,
+        orderBy: { completedAt: "desc" },
+        take: 10,
+      }),
+      extraCompletedRaceIds.length > 0
+        ? prisma.race.findMany({
+            where: {
+              ...participantFilter,
+              status: "COMPLETED",
+              id: { in: extraCompletedRaceIds },
+            },
+            select: raceListStableSelect,
+            orderBy: { completedAt: "desc" },
+          })
+        : Promise.resolve([]),
+    ]);
+    const completedById = new Map(
+      [...completed, ...injectedCompleted].map((race) => [race.id, race]),
+    );
+    return [...current, ...completedById.values()].sort(
+      (a, b) => new Date(b.updatedAt) - new Date(a.updatedAt),
+    );
+  },
+
   // Lean variant of findForUser for the GET /races list summaries (Phase B1).
   // Same where clauses, ordering, and completed-cap as findForUser, but the
   // participant select drops the deep user/equipped-accessory/shop-item relations
@@ -774,7 +866,11 @@ const Race = {
     );
   },
 
-  async findSqlSummariesForUser(userId, extraCompletedRaceIds = []) {
+  async findSqlSummariesForUser(
+    userId,
+    extraCompletedRaceIds = [],
+    { stableRaces = null, stableSource = null } = {},
+  ) {
     const participantFilter = {
       participants: { some: { userId, status: { not: "DECLINED" } } },
     };
@@ -782,14 +878,40 @@ const Race = {
       creator: { select: { id: true, displayName: true, profilePhotoUrl: true } },
       winner: { select: { id: true, displayName: true, profilePhotoUrl: true } },
     };
+    const stableRaceIds = Array.isArray(stableRaces)
+      ? stableRaces.map((race) => race?.id).filter(Boolean)
+      : null;
+    const stableWhere = stableRaceIds
+      ? { id: { in: stableRaceIds } }
+      : {};
+    const stableMembership = Array.isArray(stableRaces) && stableSource !== "postgres"
+      ? await prisma.race.findMany({
+          where: { ...participantFilter, ...stableWhere },
+          select: { id: true, status: true },
+        })
+      : null;
+    const stableStatusById = new Map(
+      (stableMembership || []).map((race) => [race.id, race.status]),
+    );
     const [current, completed, injectedCompleted] = await Promise.all([
-      prisma.race.findMany({
-        where: { ...participantFilter, status: { not: "COMPLETED" } },
+      Array.isArray(stableRaces)
+        ? Promise.resolve(stableRaces.filter((race) =>
+            (stableMembership == null || stableStatusById.get(race?.id) != null) &&
+            (stableMembership == null || stableStatusById.get(race.id) !== "COMPLETED")
+          ))
+        : prisma.race.findMany({
+        where: { ...participantFilter, ...stableWhere, status: { not: "COMPLETED" } },
         include: relations,
         orderBy: { updatedAt: "desc" },
       }),
-      prisma.race.findMany({
-        where: { ...participantFilter, status: "COMPLETED" },
+      Array.isArray(stableRaces)
+        ? Promise.resolve(stableRaces.filter((race) =>
+            stableMembership == null
+              ? race?.status === "COMPLETED"
+              : stableStatusById.get(race?.id) === "COMPLETED"
+          ))
+        : prisma.race.findMany({
+        where: { ...participantFilter, ...stableWhere, status: "COMPLETED" },
         include: relations,
         orderBy: { completedAt: "desc" },
         take: 10,

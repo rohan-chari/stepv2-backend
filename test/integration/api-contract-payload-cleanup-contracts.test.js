@@ -19,6 +19,7 @@ const REQUEST_API_FLAGS = [
   "apiRaceBootstrapV1Enabled",
   "apiRaceProgressCompactV1Enabled",
   "apiRaceMessageStreamsV1Enabled",
+  "apiRaceMessageConditionalV1Enabled",
   "apiFriendsSummaryV1Enabled",
   "apiAuthShellV1Enabled",
   "apiHomeShellV1Enabled",
@@ -145,8 +146,8 @@ describe("API page-payload cleanup — locked additive contracts", () => {
   });
 
   it("graduates the request/API and worker controls while retaining historical dark fixtures", async () => {
-    assert.equal(CLEANUP_FLAGS.length, 19);
-    assert.equal(REQUEST_API_FLAGS.length, 14);
+    assert.equal(CLEANUP_FLAGS.length, 20);
+    assert.equal(REQUEST_API_FLAGS.length, 15);
     assert.equal(WORKER_FLAGS.length, 5);
     for (const key of CLEANUP_FLAGS) {
       assert.equal(KNOWN_FLAGS[key], undefined, `${key} must not remain mutable`);
@@ -354,6 +355,30 @@ describe("API page-payload cleanup — locked additive contracts", () => {
     });
     assert.deepEqual(streams.errors, { USER: null, SYSTEM: null });
     assert.equal(streams.watermarkError, null);
+
+    const conditionalHeaders = {
+      ...CAPABLE_HEADERS,
+      "X-Client-Features": `${CAPABLE_HEADERS["X-Client-Features"]},api_payload_compact_v1`,
+    };
+    const conditionalPath =
+      `/races/${race.id}/message-streams?view=conditional-v1&limit=0&includeUser=false`;
+    const conditionalResponse = await request(server.baseUrl, "GET", conditionalPath, {
+      token,
+      headers: conditionalHeaders,
+    });
+    assert.equal(conditionalResponse.status, 200);
+    const conditional = await json(conditionalResponse);
+    assert.equal(conditional.contract, "race-message-streams-conditional-v1");
+    assert.match(conditionalResponse.headers.get("etag") || "", /^"[a-f0-9]{64}"$/);
+    const notModified = await request(server.baseUrl, "GET", conditionalPath, {
+      token,
+      headers: {
+        ...conditionalHeaders,
+        "If-None-Match": `W/${conditionalResponse.headers.get("etag")}, "other"`,
+      },
+    });
+    assert.equal(notModified.status, 304);
+    assert.equal(await notModified.text(), "");
 
     const second = await createTestUser({ displayName: "Race Contract Two" });
     const join = await request(

@@ -41,6 +41,7 @@ Object.assign(module.exports, require("./services/validateRaceConfig"));
 Object.assign(module.exports, require("./services/racePayoutDoublePolicy"));
 Object.assign(module.exports, require("./services/reviewPrompt"));
 Object.assign(module.exports, require("./services/withRacePayoutDoubleTransaction"));
+Object.assign(module.exports, require("./services/raceListCache"));
 
 Object.assign(module.exports, require("./queries/getRaceProgress"));
 Object.assign(module.exports, require("./queries/getRaces"));

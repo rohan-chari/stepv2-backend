@@ -44,6 +44,7 @@ const PREFIX = {
   HOME_IMPACT_SUMMARY: "v2:home:impact-summary",
   HOME_INBOX_UNREAD: "v1:home:inbox-unread",
   HOME_ACTIVE_GLOBAL_EVENT: "v1:user",
+  RACE_LIST: "v1:user:races",
 };
 
 // The only two values `resolveReleaseChannel` can ever produce
@@ -177,6 +178,25 @@ function friendSearchRate(userId, utcMinuteEpoch) {
 
 function homeImpactSummary(userId) { return `${PREFIX.HOME_IMPACT_SUMMARY}:${userId}`; }
 function homeInboxUnread(userId) { return `${PREFIX.HOME_INBOX_UNREAD}:${userId}`; }
+
+// `/races` is split into a user-scoped membership snapshot and two bounded
+// status fragments. The generation is deliberately separate from the variant
+// key: invalidation advances one small marker instead of enumerating every
+// capability combination a user may have requested.
+function raceListGeneration(userId) {
+  return `${PREFIX.RACE_LIST}:generation:${userId}`;
+}
+
+function raceListMembership(userId) {
+  return `${PREFIX.RACE_LIST}:membership:${userId}`;
+}
+
+function raceListFragment(kind, userId, generation, variant) {
+  if (!/^(?:completed|pending)$/.test(kind)) {
+    throw new TypeError("invalid race list fragment kind");
+  }
+  return `${PREFIX.RACE_LIST}:${kind}:${userId}:${generation}:${variant}`;
+}
 
 // ── C2: race chat lists + their durable version marker ──────────────────────
 function raceMessages(raceId, kind) {
@@ -359,6 +379,9 @@ module.exports = {
   friendSearchRate,
   homeImpactSummary,
   homeInboxUnread,
+  raceListGeneration,
+  raceListMembership,
+  raceListFragment,
   raceMessages,
   raceMessagesVersion,
   raceMessageWatermark,

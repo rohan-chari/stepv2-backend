@@ -40,8 +40,8 @@ test("direct accepted friends co-locate only when their step totals fit the skil
 test("funded cohort finalization releases over-limit elected users instead of aborting the cohort", () => {
   const elected = [{ userId: "eligible" }, { userId: "over-limit" }];
   const totals = new Map([
-    ["eligible", { exposureMillicoins: 290_000, exposureRateMillicoinsPerDay: 30_000 }],
-    ["over-limit", { exposureMillicoins: 300_000, exposureRateMillicoinsPerDay: 40_000 }],
+    ["eligible", { exposureMillicoins: 590_000, exposureRateMillicoinsPerDay: 70_000 }],
+    ["over-limit", { exposureMillicoins: 600_000, exposureRateMillicoinsPerDay: 80_000 }],
   ]);
 
   assert.deepEqual(

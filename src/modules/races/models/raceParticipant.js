@@ -10,6 +10,16 @@ const { prisma } = require("../../../db");
 const PODIUM_PLACEMENTS = [1, 2, 3];
 
 const RaceParticipant = {
+  async findUserIdsByRace(raceId) {
+    if (!raceId) return [];
+    const rows = await prisma.raceParticipant.findMany({
+      where: { raceId },
+      select: { userId: true },
+      distinct: ["userId"],
+    });
+    return rows.map((row) => row.userId).filter(Boolean);
+  },
+
   // One presentation row per computed list leader, fetched after the lean race
   // summaries establish rank. Bounded by race count rather than participant
   // count, so the hot GET /races query does not materialize every racer's gear.

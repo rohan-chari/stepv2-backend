@@ -41,7 +41,7 @@ test("the manifest keeps operational settings mutable and records graduated cont
     assert.equal(control.polarityDefault, fallback, name);
     assert.equal(control.adminExposed, ADMIN_EXPOSED_FLAGS.includes(name), name);
   }
-  assert.equal(Object.keys(PERMANENT_FLAGS).length, 92);
+  assert.equal(Object.keys(PERMANENT_FLAGS).length, 93);
   for (const [name, value] of Object.entries(PERMANENT_FLAGS)) {
     const control = byId.get(`retiredAppSetting:${name}`);
     assert.ok(control, name);

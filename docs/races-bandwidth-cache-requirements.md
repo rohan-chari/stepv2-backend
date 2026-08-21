@@ -113,8 +113,9 @@ directly as the final `/races` JSON without this classification.
 The cache is display-only. Settlement, payout, coin holds, and all other
 authoritative writers/readers remain PostgreSQL-only and never trust Redis.
 
-Add a dedicated `redisCacheRaceListEnabled` setting with safe default-off
-behavior during implementation. Define exact TTLs, payload bounds, malformed
+The implementation adds `redisCacheRaceListEnabled` as a graduated permanent
+setting with value `true`; Redis remains fail-open, so the setting never makes
+Redis a correctness dependency. Define exact TTLs, payload bounds, malformed
 entry validation, and env-prefixed keys. Reuse `cacheKeys.js`, `redisCache.js`,
 and `derivedCache.js`; do not create a second Redis protocol.
 

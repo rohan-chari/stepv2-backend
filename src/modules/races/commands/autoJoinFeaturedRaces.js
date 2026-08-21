@@ -19,6 +19,9 @@ const {
   acquireGlobalEnrollmentLock,
   enrollIfGlobalEventActive,
 } = require("../../steps/services/globalEventEnrollment");
+const {
+  invalidateUser: invalidateRaceListUser,
+} = require("../services/raceListCache");
 
 // Auto-join for the seeded daily/weekly featured challenges
 // (users.auto_join_featured_races). Two entry points share the same
@@ -51,6 +54,8 @@ function buildAutoJoinFeaturedRaces(dependencies = {}) {
     dependencies.acquireGlobalEnrollmentLock || acquireGlobalEnrollmentLock;
   const enrollGlobalEvent =
     dependencies.enrollIfGlobalEventActive || enrollIfGlobalEventActive;
+  const invalidateRaceList =
+    dependencies.invalidateRaceListUser || invalidateRaceListUser;
 
   // How many more ACCEPTED participants `race` can take. null max => unlimited.
   async function remainingCapacity(race) {
@@ -94,7 +99,7 @@ function buildAutoJoinFeaturedRaces(dependencies = {}) {
     let joined = 0;
     for (const userId of [...toAdd].sort()) {
       try {
-        joined += await prisma.$transaction(async (tx) => {
+        const added = await prisma.$transaction(async (tx) => {
           await acquireWriteFence(tx, race.id);
           await acquireGlobalLock(tx);
           await lockUsers(tx, [userId]);
@@ -144,6 +149,14 @@ function buildAutoJoinFeaturedRaces(dependencies = {}) {
           }
           return created.count;
         });
+        joined += added;
+        if (added > 0) {
+          try {
+            await invalidateRaceList(userId);
+          } catch (error) {
+            logger.warn(`[CRON] Race-list cache invalidation failed for user=${userId}: ${error?.message || error}`);
+          }
+        }
       } catch (error) {
         if (
           error?.code !== "FUNDED_EXPOSURE_LIMIT" &&

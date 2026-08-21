@@ -731,6 +731,19 @@
       "rollbackValue": null
     },
     {
+      "id": "env:CAPACITY_REDIS_ENABLED",
+      "name": "CAPACITY_REDIS_ENABLED",
+      "kind": "boolean_environment",
+      "evidenceTimestamp": "2026-08-20T04:23:00Z",
+      "compatibilityConsumers": [],
+      "adminExposed": false,
+      "disposition": "capacity_local_config",
+      "permanentValue": false,
+      "polarityDefault": "literal true enables Redis for isolated capacity runs",
+      "deployFamily": "capacity_local",
+      "rollbackValue": false
+    },
+    {
       "id": "env:CAPACITY_REDIS_HOST_ALLOWLIST",
       "name": "CAPACITY_REDIS_HOST_ALLOWLIST",
       "kind": "string_environment",
@@ -3421,6 +3434,19 @@
     {
       "id": "retiredAppSetting:redisCacheMessagesEnabled",
       "name": "redisCacheMessagesEnabled",
+      "kind": "boolean_app_setting",
+      "evidenceTimestamp": "2026-08-20T04:23:00Z",
+      "compatibilityConsumers": [],
+      "adminExposed": false,
+      "disposition": "graduated_permanent",
+      "permanentValue": true,
+      "polarityDefault": true,
+      "deployFamily": "redis_fail_open",
+      "rollbackValue": true
+    },
+    {
+      "id": "retiredAppSetting:redisCacheRaceListEnabled",
+      "name": "redisCacheRaceListEnabled",
       "kind": "boolean_app_setting",
       "evidenceTimestamp": "2026-08-20T04:23:00Z",
       "compatibilityConsumers": [],

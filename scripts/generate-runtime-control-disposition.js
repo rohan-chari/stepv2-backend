@@ -71,6 +71,7 @@ const redisDb = new Set([
   "redisCacheHomeActiveGlobalEventEnabled",
   "redisCacheHomeImpactSummaryEnabled",
   "redisCacheHomeInboxUnreadEnabled",
+  "redisCacheRaceListEnabled",
 ]);
 const workerDb = new Set([
   "raceResolutionDisplayArtifactReuseV1Enabled",
@@ -137,6 +138,7 @@ const envMetadata = {
   ADMOB_SSV_SKIP_VERIFY: ["retained_nonproduction_security", false, "literal true skips verification; forbidden in production", "ad_security", false],
   APNS_PRODUCTION: ["deployment_config", null, "literal true selects APNs production", "push_config", null],
   CAPACITY_MODE: ["capacity_local_config", null, "literal true enables isolated capacity entrypoint", "capacity_local", false],
+  CAPACITY_REDIS_ENABLED: ["capacity_local_config", false, "literal true enables Redis for isolated capacity runs", "capacity_local", false],
   CAPACITY_OUTBOUND_DISABLED: ["capacity_local_config", null, "capacity mode requires literal true", "capacity_local", true],
   CAPACITY_DATABASE_SSL_DISABLED: ["capacity_local_config", false, "literal true disables database TLS only after the run-bound capacity environment validates", "capacity_local", false],
   CAPACITY_EXPECTED_COMMIT_SHA: ["capacity_local_config", null, "capacity load reports must identify the expected checked-out commit", "capacity_local", null],

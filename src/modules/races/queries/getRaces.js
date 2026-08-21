@@ -14,6 +14,7 @@ const {
   isStealthedForViewer,
 } = require("../services/raceIllusions");
 const { getRaceLeaveAction } = require("../services/raceLeaveAction");
+const defaultRaceListCache = require("../services/raceListCache");
 
 function getActivePlacement(participants, userId) {
   const acceptedParticipants = participants
@@ -135,7 +136,34 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
   // fakes that only provide the legacy method (capability detection, matching
   // the bulk-or-fallback pattern used across this codebase).
   let races;
-  if (
+  const useRaceListCache =
+    options.raceListCacheEnabled === true &&
+    typeof Race.findRaceListStableForUser === "function" &&
+    typeof Race.findSqlSummariesForUser === "function" &&
+    (typeof options.raceListCache?.isEnabled !== "function" ||
+      options.raceListCache.isEnabled());
+  if (useRaceListCache) {
+    const cache = options.raceListCache || defaultRaceListCache;
+    const stable = await cache.getStableMembership({
+      userId,
+      variant: options.raceListVariant || "legacy",
+      load: () => Race.findRaceListStableForUser(
+        userId,
+        options.extraCompletedRaceIds || [],
+      ),
+    });
+    const sqlResult = await Race.findSqlSummariesForUser(
+      userId,
+      options.extraCompletedRaceIds || [],
+      { stableRaces: stable.races, stableSource: stable.source },
+    );
+    // The legacy comparator has one anomalous duplicate-finisher case that no
+    // total SQL order can reproduce. This is the sole deliberate dual-read
+    // fallback; SQL errors are allowed to fail the request and never retry.
+    races = sqlResult?.ambiguousFinisherOrder === true
+      ? await Race.findSummariesForUser(userId, options.extraCompletedRaceIds || [])
+      : sqlResult.races;
+  } else if (
     options.sqlSummaryEnabled === true &&
     typeof Race.findSqlSummariesForUser === "function"
   ) {

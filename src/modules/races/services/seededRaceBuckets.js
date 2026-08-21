@@ -29,6 +29,7 @@ const {
 const {
   acquireGlobalEnrollmentLock,
 } = require("../../steps/services/globalEventEnrollment");
+const { invalidateUser: invalidateRaceListUser } = require("./raceListCache");
 
 const SEED_TIMEZONE = "America/New_York";
 const BUCKET_CAPACITY = 15;
@@ -790,7 +791,17 @@ function buildSeededRaceBuckets(dependencies = {}) {
             rows: rows.map(({ group: _group, ...row }) => row),
           };
         });
-        return outcome.rows;
+        const finalizedRows = outcome.rows;
+        // This worker writes race and participant rows inside its own
+        // transaction, so no command event is emitted for the new members.
+        // Invalidate only after commit to prevent a cache refresh from racing
+        // the transaction and caching an incomplete membership set.
+        await Promise.all(
+          snapshot.elected.map((candidate) =>
+            invalidateRaceListUser(candidate.userId).catch(() => false)
+          ),
+        );
+        return finalizedRows;
       } catch (error) {
         if (error?.seededFinalizationOutcome === "EXISTING") return error.rows;
         if (error?.seededFinalizationOutcome === "MODE_CHANGED") return [];

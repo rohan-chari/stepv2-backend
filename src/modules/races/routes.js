@@ -195,6 +195,10 @@ const {
   messageStreamsRevision,
   quotedEtag,
 } = require("../../shared/http/requestPathPayloadContracts");
+const { ifNoneMatchMatches } = require("../../shared/http/representationEtag");
+const {
+  canonicalRaceListVariant,
+} = require("./services/raceListCache");
 
 // A powerup is STEALABLE via Sneaky Swap only if it is currently HELD and its
 // type is neither SNEAKY_SWAP (not stealable in either direction) nor
@@ -280,6 +284,7 @@ function createRacesRouter(dependencies = {}) {
   const generateTeamNamePair =
     dependencies.generateTeamNamePair || defaultGenerateTeamNamePair;
   const getRaces = dependencies.getRaces || defaultGetRaces;
+  const raceListCache = dependencies.raceListCache || require("./services/raceListCache");
   const getRaceInvitePreflight =
     dependencies.getRaceInvitePreflight || defaultGetRaceInvitePreflight;
   const settings = dependencies.appSettings || appSettings;
@@ -702,6 +707,10 @@ function createRacesRouter(dependencies = {}) {
         hasCompactCapability(req.clientFeatures) &&
         req.query.view === "compact-v1" &&
         (await isStrictFlagEnabled(settings, "apiRaceListCompactV1Enabled"));
+      const raceListCacheEnabled = await isStrictFlagEnabled(
+        settings,
+        "redisCacheRaceListEnabled",
+      );
       const sqlSummaryEnabled = await isStrictFlagEnabled(
         settings,
         "raceListSqlSummaryV1Enabled"
@@ -736,6 +745,13 @@ function createRacesRouter(dependencies = {}) {
             ? pendingPayoutDoubleOffer.items.map((item) => item.raceIdSnapshot)
             : [],
           sqlSummaryEnabled,
+          raceListCacheEnabled,
+          raceListCache,
+          raceListVariant: canonicalRaceListVariant({
+            clientFeatures: req.clientFeatures,
+            compact: compactRaceListEnabled,
+            releaseChannel: req.releaseChannel,
+          }),
         }),
         supportsTournaments
           ? getTournamentsForUser(req.user.id, {
@@ -1405,7 +1421,9 @@ function createRacesRouter(dependencies = {}) {
         "Cache-Control": "private, no-cache",
         Vary: "Authorization, X-Client-Features",
       });
-      if (req.get("If-None-Match") === etag) return res.status(304).end();
+      if (ifNoneMatchMatches(req.get("If-None-Match"), etag)) {
+        return res.status(304).end();
+      }
       res.json({
         ...result,
         contract: "race-message-streams-conditional-v1",
