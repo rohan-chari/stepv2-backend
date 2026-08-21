@@ -210,12 +210,25 @@ function createStepsRouter(dependencies = {}) {
         v2Job = null;
       }
       if (v2Job) {
-        const participants = await raceParticipantModel.findAcceptedByRace(
-          v2Job.raceId
-        );
-        const isParticipant = (participants || []).some(
-          (p) => p.userId === req.user.id
-        );
+        let isParticipant;
+        if (
+          typeof raceParticipantModel.existsAcceptedByRaceAndUser ===
+          "function"
+        ) {
+          isParticipant = await raceParticipantModel.existsAcceptedByRaceAndUser(
+            v2Job.raceId,
+            req.user.id
+          );
+        } else {
+          // Compatibility for older injected/model implementations during a
+          // rolling deploy. Production uses the narrow indexed query above.
+          const participants = await raceParticipantModel.findAcceptedByRace(
+            v2Job.raceId
+          );
+          isParticipant = (participants || []).some(
+            (p) => p.userId === req.user.id
+          );
+        }
         if (!isParticipant) {
           return res.status(404).json({ error: "Race resolution job not found" });
         }

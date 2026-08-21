@@ -209,6 +209,17 @@ const RaceParticipant = {
     });
   },
 
+  // Ownership checks must not hydrate the complete race roster or any user
+  // presentation fields. This is used by the race-resolution status poll,
+  // which can be called repeatedly while a worker is draining a job.
+  async existsAcceptedByRaceAndUser(raceId, userId) {
+    const participant = await prisma.raceParticipant.findFirst({
+      where: { raceId, userId, status: "ACCEPTED" },
+      select: { id: true },
+    });
+    return participant != null;
+  },
+
   // Placement-recompute's five-minute notification scan needs the same lean
   // persisted standings for every active race. Fetch them in one round-trip
   // instead of issuing one query per race. No presentation relations are
@@ -377,14 +388,23 @@ const RaceParticipant = {
   async addBonusSteps(id, amount) {
     return prisma.raceParticipant.update({
       where: { id },
-      data: { bonusSteps: { increment: amount } },
+      // Keep the cheap persisted display total aligned with the participant's
+      // bonus delta immediately. The worker still recomputes the authoritative
+      // full score (including timed effects) on its next resolution.
+      data: {
+        bonusSteps: { increment: amount },
+        totalSteps: { increment: amount },
+      },
     });
   },
 
   async subtractBonusSteps(id, amount) {
     return prisma.raceParticipant.update({
       where: { id },
-      data: { bonusSteps: { decrement: amount } },
+      data: {
+        bonusSteps: { decrement: amount },
+        totalSteps: { decrement: amount },
+      },
     });
   },
 
