@@ -674,6 +674,7 @@ function buildRecomputePlacements(dependencies = {}) {
               ? "EFFECT_BOUNDARY"
               : "RECOVERY",
             priority: "IMMEDIATE",
+            queuePriority: "RECOVERY",
           });
           if (queued) {
             if (dueEffectRaceIds.has(race.id)) dueEffectEnqueues += 1;

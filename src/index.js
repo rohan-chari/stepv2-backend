@@ -111,6 +111,7 @@ function startServer({
   // Injected only by the dedicated local capacity entrypoint. Normal startup
   // never reads an environment variable that can suppress production crons.
   capacityHttpResolutionOnly = false,
+  processRole = process.env.STEPS_PROCESS_ROLE || "all",
 } = {}) {
   register();
   registerNotifications();
@@ -121,6 +122,18 @@ function startServer({
     // uses the default console logger and records the dark-switch snapshot.
     if (logger === console) logPerformanceFlags(logger);
     const startCrons = () => {
+      // Production uses separate HTTP, resolution, and cron processes. Keep
+      // the historical "all" role for local development and injected startup
+      // tests, but never let HTTP workers claim durable resolution work.
+      if (processRole === "http") return;
+      if (processRole === "resolution") {
+        scheduleRaceResolution();
+        scheduleImpactBoundaries();
+        if (!raceResolutionPostTaskWorkerDisabled()) {
+          scheduleResolutionPostTasks();
+        }
+        return;
+      }
       if (capacityHttpResolutionOnly) {
         scheduleRaceResolution();
         scheduleResolutionPostTasks();
@@ -199,12 +212,14 @@ function startServer({
       // brakes; queued rows and leases remain durable while either is set.
       // Uses its own console (like scheduleTournamentSeedRenewal) rather than the
       // injected startup logger.
-      scheduleRaceResolution();
-      scheduleImpactBoundaries();
+      if (processRole !== "cron") {
+        scheduleRaceResolution();
+        scheduleImpactBoundaries();
+      }
       // Delivery/publication groups are durable and drain independently of the
       // creation flag. The whole-runner emergency switch is checked here and
       // again on each scheduler tick; disabling it leaves every row untouched.
-      if (!raceResolutionPostTaskWorkerDisabled()) {
+      if (processRole !== "cron" && !raceResolutionPostTaskWorkerDisabled()) {
         scheduleResolutionPostTasks();
       }
       if (adValueEnabled("payoutReconcile")) {

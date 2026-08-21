@@ -1966,6 +1966,19 @@
       "rollbackValue": 8
     },
     {
+      "id": "env:STEPS_PROCESS_ROLE",
+      "name": "STEPS_PROCESS_ROLE",
+      "kind": "string_environment",
+      "evidenceTimestamp": "2026-08-20T04:23:00Z",
+      "compatibilityConsumers": [],
+      "adminExposed": false,
+      "disposition": "deployment_config",
+      "permanentValue": null,
+      "polarityDefault": "runtime value; see source consumers",
+      "deployFamily": "runtime_configuration",
+      "rollbackValue": null
+    },
+    {
       "id": "env:SYNC_V2_INLINE_UPLOADER_RECONCILIATION",
       "name": "SYNC_V2_INLINE_UPLOADER_RECONCILIATION",
       "kind": "boolean_environment",

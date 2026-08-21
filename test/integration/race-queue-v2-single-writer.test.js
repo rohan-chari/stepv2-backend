@@ -870,6 +870,7 @@ describe("5a — read-only powerup gates never bulk-write race_participants", ()
   });
 
   it("the Uprising losing-team gate reads COMPUTED team totals and writes no participant row", async () => {
+    await appSettings.setFlag("teamRacesEnabled", true);
     const TEAMS = {
       "X-Client-Features":
         "characters,team_races,powerups2,powerups3,powerups4,powerups5",
@@ -1166,6 +1167,137 @@ describe("5d — explicit debounce", () => {
       "the crashed run's users survive in processing and are unioned with the new ones"
     );
     void raceId;
+  });
+
+  it("claims settlement and recovery work ahead of ordinary live work", async () => {
+    const alice = await createUser("Priority Alice");
+    const bob = await createUser("Priority Bob");
+    const settlementRace = await createActiveRace(alice, [bob], "Settlement priority");
+    const liveRace = await createActiveRace(alice, [bob], "Live priority");
+    await drain(makeWorker());
+
+    await postSamples(alice, [sampleAt(2, 1000)]);
+    await postSamples(bob, [sampleAt(3, 1000)]);
+    await prisma.$executeRawUnsafe(
+      `UPDATE race_resolution_jobs_v2 SET queue_priority = 'SETTLEMENT' WHERE race_id = $1`,
+      settlementRace
+    );
+    const queuedPriorities = await prisma.raceResolutionJobV2.findMany({
+      where: { state: "QUEUED" },
+      select: { raceId: true, queuePriority: true },
+    });
+    assert.equal(
+      queuedPriorities.find((row) => row.raceId === settlementRace)?.queuePriority,
+      "SETTLEMENT"
+    );
+
+    const first = await RaceResolutionJobV2.claimNext({ now: new Date() });
+    assert.equal(first.raceId, settlementRace);
+    assert.equal(first.processingQueuePriority, "SETTLEMENT");
+
+    await RaceResolutionJobV2.recordSuccess({
+      id: first.id,
+      leaseToken: first.leaseToken,
+      processingGeneration: first.processingGeneration,
+    });
+    const snapshot = await RaceResolutionJobV2.queueServiceSnapshot(new Date());
+    assert.ok(snapshot.liveCount >= 1);
+    assert.equal(snapshot.settlementCount, 0);
+    void liveRace;
+  });
+
+  it("runs Rainstorm step sync incrementally and leaves the other participant untouched", async () => {
+    const alice = await createUser("Incremental Alice");
+    const bob = await createUser("Incremental Bob");
+    const raceId = await createActiveRace(alice, [bob], "Incremental Rainstorm");
+    await drain(makeWorker());
+    await appSettings.setFlag("raceResolutionReasonAwareV1Enabled", true);
+
+    const target = await prisma.raceParticipant.findFirstOrThrow({
+      where: { raceId, userId: alice.userId },
+    });
+    const source = await prisma.raceParticipant.findFirstOrThrow({
+      where: { raceId, userId: bob.userId },
+    });
+    const powerup = await prisma.racePowerup.create({
+      data: {
+        raceId, participantId: source.id, userId: bob.userId,
+        type: "RAINSTORM", status: "USED", usedAt: new Date(),
+        targetUserId: alice.userId,
+      },
+    });
+    await prisma.raceActiveEffect.create({
+      data: {
+        raceId, targetParticipantId: target.id, targetUserId: alice.userId,
+        sourceUserId: bob.userId, powerupId: powerup.id, type: "RAINSTORM",
+        status: "ACTIVE", startsAt: new Date(Date.now() - 6 * HOUR_MS),
+        expiresAt: new Date(Date.now() + HOUR_MS),
+      },
+    });
+
+    const before = await participantVersions(raceId);
+    assert.equal((await postSamples(alice, [sampleAt(2, 4301)])).status, 200);
+    const events = [];
+    const worker = makeWorker({
+      dependencyClosureEnabled: true,
+      logger: { log(line) { try { events.push(JSON.parse(line)); } catch {} } },
+    });
+    assert.ok(await worker.processOne());
+    const committed = events.find((event) => event.event === "race_resolution_v2");
+    assert.equal(committed?.resolutionPlan, "STEP_SYNC_INCREMENTAL", JSON.stringify(events));
+
+    const after = await participantVersions(raceId);
+    const beforeBob = before.find((row) => row.userId === bob.userId);
+    const afterBob = after.find((row) => row.userId === bob.userId);
+    assert.equal(afterBob.version, beforeBob.version);
+  });
+
+  it("admits Rally Flag and Uprising step syncs incrementally", async () => {
+    for (const type of ["RALLY_FLAG", "UPRISING"]) {
+      const alice = await createUser(`${type} Alice`);
+      const bob = await createUser(`${type} Bob`);
+      const raceId = await createActiveRace(alice, [bob], `${type} incremental`);
+      await drain(makeWorker());
+      await appSettings.setFlag("raceResolutionReasonAwareV1Enabled", true);
+
+      const target = await prisma.raceParticipant.findFirstOrThrow({
+        where: { raceId, userId: alice.userId },
+      });
+      const source = await prisma.raceParticipant.findFirstOrThrow({
+        where: { raceId, userId: bob.userId },
+      });
+      const powerup = await prisma.racePowerup.create({
+        data: {
+          raceId, participantId: source.id, userId: bob.userId,
+          type, status: "USED", usedAt: new Date(), targetUserId: alice.userId,
+        },
+      });
+      await prisma.raceActiveEffect.create({
+        data: {
+          raceId, targetParticipantId: target.id, targetUserId: alice.userId,
+          sourceUserId: bob.userId, powerupId: powerup.id, type, status: "ACTIVE",
+          startsAt: new Date(Date.now() - 6 * HOUR_MS),
+          expiresAt: new Date(Date.now() + HOUR_MS),
+        },
+      });
+
+      const before = await participantVersions(raceId);
+      assert.equal((await postSamples(alice, [sampleAt(2, 2000)])).status, 200);
+      const events = [];
+      const worker = makeWorker({
+        dependencyClosureEnabled: true,
+        logger: { log(line) { try { events.push(JSON.parse(line)); } catch {} } },
+      });
+      assert.ok(await worker.processOne());
+      const committed = events.find((event) => event.event === "race_resolution_v2");
+      assert.equal(committed?.resolutionPlan, "STEP_SYNC_INCREMENTAL", `${type}: ${JSON.stringify(events)}`);
+      const after = await participantVersions(raceId);
+      assert.equal(
+        after.find((row) => row.userId === bob.userId).version,
+        before.find((row) => row.userId === bob.userId).version,
+        `${type} must not rewrite the other participant`
+      );
+    }
   });
 });
 

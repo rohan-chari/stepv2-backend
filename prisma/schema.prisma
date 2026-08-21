@@ -2622,10 +2622,16 @@ model RaceResolutionJobV2 {
   dirtyParticipantIds             Json                   @default("[]") @map("dirty_participant_ids")
   dirtyPowerupTypes               Json                   @default("[]") @map("dirty_powerup_types")
   dirtyPriority                   String                 @default("IMMEDIATE") @map("dirty_priority") @db.VarChar(16)
+  // Durable queue priority is separate from the legacy dirty-priority field.
+  // The latter remains COALESCE/IMMEDIATE for old workers and diagnostics;
+  // this field orders the race-keyed queue across live, recovery, settlement,
+  // and maintenance work.
+  queuePriority                   String                 @default("LIVE") @map("queue_priority") @db.VarChar(16)
   processingDirtyReasons          Json                   @default("[]") @map("processing_dirty_reasons")
   processingDirtyParticipantIds   Json                   @default("[]") @map("processing_dirty_participant_ids")
   processingDirtyPowerupTypes     Json                   @default("[]") @map("processing_dirty_powerup_types")
   processingDirtyPriority         String                 @default("IMMEDIATE") @map("processing_dirty_priority") @db.VarChar(16)
+  processingQueuePriority         String                 @default("LIVE") @map("processing_queue_priority") @db.VarChar(16)
   displayArtifactId               String?                @map("display_artifact_id")
   displayArtifactDigest           String?                @map("display_artifact_digest") @db.VarChar(64)
   displayArtifactSchema           Int?                   @map("display_artifact_schema")
@@ -2640,6 +2646,7 @@ model RaceResolutionJobV2 {
   @@index([state, retryAt])
   @@index([leaseExpiresAt])
   @@index([state, notBeforeAt])
+  @@index([state, queuePriority, requestedAt])
   @@index([requestedAt])
   @@map("race_resolution_jobs_v2")
 }

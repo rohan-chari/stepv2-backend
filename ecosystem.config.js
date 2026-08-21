@@ -35,13 +35,15 @@ const STAGING_DIR = "/var/www/step-tracker-backend-staging";
  * repo pm2 reads it from; always pair it with `--only <name>` so a prod deploy
  * cannot touch staging (or vice versa).
  */
-function app(name, cwd, instances) {
+function app(name, cwd, instances, env = {}, options = {}) {
   return {
     name,
     cwd,
     script: `${cwd}/src/index.js`,
     exec_mode: "cluster",
     instances,
+    env,
+    ...options,
     // RAM, not CPU, is what caps the worker count on this box. Each worker
     // holds its own V8 heap (~340-400 MB at rest, 590 MB observed under load)
     // and the droplet has 1.97 GB with NO SWAP — so the kernel OOM-killer, not
@@ -63,7 +65,25 @@ function app(name, cwd, instances) {
 module.exports = {
   apps: [
     // Prod gets both cores: 2 workers, matching the 2 vCPUs.
-    app("steps-tracker", PROD_DIR, 2),
+    app("steps-tracker", PROD_DIR, 2, {
+      STEPS_PROCESS_ROLE: "http",
+      PORT: 3002,
+    }),
+    // The queue owns participant projection writes and is intentionally kept
+    // out of the HTTP workers. It is one fork: the queue itself provides
+    // cross-process serialization with Postgres leases.
+    app("steps-tracker-resolution", PROD_DIR, 1, {
+      STEPS_PROCESS_ROLE: "resolution",
+      PORT: 3010,
+      HOST: "127.0.0.1",
+    }, { exec_mode: "fork" }),
+    // Expiry/cron is a single owner. It shares the database fence with the
+    // resolution process, so settlement and live work cannot interleave.
+    app("steps-tracker-cron", PROD_DIR, 1, {
+      STEPS_PROCESS_ROLE: "cron",
+      PORT: 3011,
+      HOST: "127.0.0.1",
+    }, { exec_mode: "fork" }),
     // Staging gets ONE, and the reason is memory, not CPU. Four workers'
     // heaps do not fit in 1.97 GB — running 2+2 on 2026-08-16 got a node
     // process OOM-killed twice inside 40 minutes, and the victim can just as
@@ -74,6 +94,8 @@ module.exports = {
     // run and put it back afterwards — do not make 2 the committed default:
     //   pm2 scale steps-tracker-staging 2   # then `pm2 scale … 1` when done
     // and watch `free -m` while it runs.
-    app("steps-tracker-staging", STAGING_DIR, 1),
+    app("steps-tracker-staging", STAGING_DIR, 1, {
+      STEPS_PROCESS_ROLE: "all",
+    }, { autostart: false }),
   ],
 };

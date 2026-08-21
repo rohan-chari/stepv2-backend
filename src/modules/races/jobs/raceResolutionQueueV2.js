@@ -1028,12 +1028,21 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           resolutionPlan = baseResolutionPlan;
           capture = createWriteCapture({ participantModel, effectModel, eventModel });
           result = null;
-          if (!forceFull && reasonAwareEnabled && resolutionPlan === "FULL") {
+          if (
+            !forceFull &&
+            reasonAwareEnabled &&
+            resolutionPlan === "FULL"
+          ) {
             stepSyncScope = await phaseTimer.measure(
               "stepSyncScope",
               () => buildStepSyncScope(job, {
                 Race: raceModel,
                 RaceActiveEffect: effectModel,
+                // The independent FULL-control seam intentionally disables
+                // all optimized planners. Production keeps this true because
+                // dependency closure and incremental STEP_SYNC are both
+                // permanent correctness-preserving paths.
+                allowIncrementalEffects: dependencyClosureEnabled === true,
                 recordDiagnostics: (diagnostics) => {
                   stepSyncScopeOutcome = diagnostics?.outcome || "unknown";
                   stepSyncScopeActiveEffectCount = Math.max(
@@ -1051,8 +1060,34 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
             );
           }
           if (stepSyncScope) {
-            resolutionPlan = stepSyncScope.plan;
-            result = stepSyncScope.result;
+            if (stepSyncScope.plan === "STEP_SYNC_INCREMENTAL") {
+              const computeStartedAt = Date.now();
+              const computeResolve = buildResolveRaceState({
+                Race: raceModel,
+                RaceParticipant: capture.participants,
+                RaceActiveEffect: capture.effects,
+                RacePowerupEvent: capture.events,
+                now,
+                activeImpactEnabled: resolveTimedActiveImpacts,
+                recordPhaseTiming: (name, durationMs) =>
+                  addPhaseTiming(computePhaseMs, name, durationMs),
+              });
+              const processed = await phaseTimer.measure(
+                "compute",
+                () => computeResolve({
+                  raceId: job.raceId,
+                  userIds: triggeringUserIds,
+                  timeZone: job.processingTimeZone || "UTC",
+                  scoreParticipantIds: stepSyncScope.scoreParticipantIds,
+                })
+              );
+              result = Array.isArray(processed) ? processed[0] : null;
+              computeMs += Math.max(0, Date.now() - computeStartedAt);
+              resolutionPlan = "STEP_SYNC_INCREMENTAL";
+            } else {
+              resolutionPlan = stepSyncScope.plan;
+              result = stepSyncScope.result;
+            }
           } else if (resolutionPlan === "FULL") {
             // Precedence (spec rule 1): artifact → cheap committed scope →
             // closure → FULL. `forceFull` (the retry loop's second pass, and the
@@ -1486,6 +1521,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         resolutionPlan === "FULL" ||
         resolutionPlan === "ARTIFACT_REUSE" ||
         resolutionPlan === "STEP_SYNC_COMMITTED" ||
+        resolutionPlan === "STEP_SYNC_INCREMENTAL" ||
         resolutionPlan === "DEPENDENCY_CLOSURE"
       ) {
         const stopPostCommitHook = phaseTimer.start("postCommitHook");
@@ -1837,6 +1873,10 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           claimableCount: service.claimableCount,
           oldestClaimableAgeMs: claimableLagMs,
           runningCount: service.runningCount,
+          settlementCount: service.settlementCount,
+          recoveryCount: service.recoveryCount,
+          liveCount: service.liveCount,
+          maintenanceCount: service.maintenanceCount,
           workLaneActive: lanes.active,
           workLaneQueuedCore: lanes.queuedCore,
           workLaneQueuedPost: lanes.queuedPost,
@@ -1848,6 +1888,10 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         claimableCount: service.claimableCount,
         claimableLagMs,
         runningCount: service.runningCount,
+        settlementCount: service.settlementCount,
+        recoveryCount: service.recoveryCount,
+        liveCount: service.liveCount,
+        maintenanceCount: service.maintenanceCount,
         workLaneActive: lanes.active,
         workLaneQueuedCore: lanes.queuedCore,
         workLaneQueuedPost: lanes.queuedPost,

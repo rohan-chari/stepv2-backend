@@ -24,15 +24,21 @@ and at most 10% rollout during a staffed window. Normal rollback is rollout 0
 plus preparation false while claims stay true. Staging must use staging-routed
 units, never production callback/allowlist wiring.
 
-Two pm2 apps running on the same DigitalOcean droplet, each from its own git checkout against its own Postgres database. Both track different branches. **Always address pm2 processes by name, never by id — ids get reassigned across restarts/scaling (see incidents in DEPLOY_RUNBOOK.md).**
+Production runs two HTTP workers plus one dedicated resolution worker and one
+dedicated cron/settlement worker. Staging remains stopped by default. **Always
+address pm2 processes by name, never by id — ids get reassigned across
+restarts/scaling (see incidents in DEPLOY_RUNBOOK.md).**
 
 | Env     | Checkout path                            | pm2 name                | Port | Database               | Branch       | APNS host  |
 | ------- | ---------------------------------------- | ----------------------- | ---- | ---------------------- | ------------ | ---------- |
-| prod    | `/var/www/step-tracker-backend`          | `steps-tracker` | 3002 | `step-tracker`         | `main`       | production |
+| prod    | `/var/www/step-tracker-backend`          | `steps-tracker` (2 HTTP workers) | 3002 | `step-tracker`         | `main`       | production |
 | staging | `/var/www/step-tracker-backend-staging`  | `steps-tracker-staging` | 3003 | `step-tracker-staging` | release branch (`1.1.5`, `1.1.6`, …) | sandbox |
 
-**Both run 2 pm2 cluster instances as of 2026-08-15** (commit `d23ec2e`,
-matching the droplet's 2 vCPUs). This is safe *only* because
+The production queue/cron companions are `steps-tracker-resolution` (fork,
+internal port 3010) and `steps-tracker-cron` (fork, internal port 3011). They
+are not public API listeners and must never be added to the HTTP worker count.
+The HTTP app runs exactly 2 pm2 cluster instances, matching the droplet's 2
+vCPUs. This is safe *only* because
 `src/index.js`'s `startCrons()` call is gated behind
 `process.env.NODE_APP_INSTANCE === "0"` — pm2 sets that env var per cluster
 worker, and without the guard, scaling past 1 instance would double-run
@@ -235,6 +241,20 @@ Migrations are the one thing that's hard to undo. Rules:
 2. **Never `prisma db push` against prod.** It bypasses migration history. Always `prisma migrate deploy`.
 3. **For destructive migrations (DROP TABLE, DROP COLUMN), separate them into their own release.** Don't combine schema cleanup with feature work.
 4. **Once a migration is in `prisma/migrations/` and committed, do not edit it.** If you need to change it, write a follow-up migration instead. Editing already-applied migrations corrupts the migration history.
+
+### Race-resolution queue expand/cutover
+
+For the queue-priority migration, use this order during a staffed window:
+
+1. Apply the additive migration and verify `npx prisma migrate status` is clean.
+2. Keep the existing workers serving while the new columns default every row to
+   `LIVE`; old workers ignore the extra columns safely.
+3. Stop new v2 claims, let existing leases finish or expire, and verify there
+   are no unexpired old leases before changing PM2 topology.
+4. Start the dedicated resolution and cron processes, then reload the two HTTP
+   workers. Confirm each process has the intended `STEPS_PROCESS_ROLE`.
+5. If rollback is required, disable v2 claiming, drain unexpired leases, and
+   restore the previous process topology. Do not roll back the applied schema.
 
 ---
 

@@ -2,6 +2,17 @@ const { Race } = require("../models/race");
 const { RaceActiveEffect } = require("../../powerups/models/raceActiveEffect");
 const { computeBoxEffectiveSteps } = require("../../powerups/boxSteps");
 
+// These effects are materialized per affected participant. Their presence does
+// not change an unrelated participant's score, so a step sync can score the
+// uploader (and only the uploader) while preserving the canonical scorer.
+// Cross-participant effects remain fail-closed and use the dependency/full
+// resolver path below.
+const INCREMENTAL_EFFECT_TYPES = Object.freeze(new Set([
+  "RAINSTORM",
+  "RALLY_FLAG",
+  "UPRISING",
+]));
+
 // The only reason sets this cheap plan may serve (dependency-closure spec
 // rule 1, merged-reason carve-out). A coalesced STEP_SYNC + DISPLAY_REFRESH
 // envelope is admitted because watched races enqueue DISPLAY_REFRESH on a ~15s
@@ -67,6 +78,7 @@ async function buildRaceResolutionStepSyncScope(job, dependencies = {}) {
   }
   const raceModel = dependencies.Race || Race;
   const effectModel = dependencies.RaceActiveEffect || RaceActiveEffect;
+  const allowIncrementalEffects = dependencies.allowIncrementalEffects === true;
   try {
     // SEQUENCED, not parallel — deliberately. This scope is admissible ONLY on
     // a race with zero active effects, and in prod ~79% of jobs have at least
@@ -77,12 +89,17 @@ async function buildRaceResolutionStepSyncScope(job, dependencies = {}) {
     // one that short-circuits, so checking it FIRST costs the surviving 21% one
     // serialized round trip and saves the other 79% an entire race hydration.
     // Losing the parallelism is the intended trade.
-    const activeEffects = await measure(
+    const activeEffects = (await measure(
       "activeEffects",
       () => effectModel.findActiveForRace(job.raceId)
-    );
-    diagnostics.activeEffectCount = (activeEffects || []).length;
-    if ((activeEffects || []).length > 0) {
+    )) || [];
+    diagnostics.activeEffectCount = activeEffects.length;
+    const triggeringUsers = new Set(job.processingTriggeredByUserIds);
+    const unsupportedAffectsDirty = activeEffects.length > 0 &&
+      (!allowIncrementalEffects || activeEffects.some((effect) =>
+        !INCREMENTAL_EFFECT_TYPES.has(effect?.type)
+      ));
+    if (unsupportedAffectsDirty) {
       emitDiagnostics("active_effects");
       return null;
     }
@@ -96,7 +113,6 @@ async function buildRaceResolutionStepSyncScope(job, dependencies = {}) {
       return null;
     }
     const byId = new Map((race.participants || []).map((row) => [row.id, row]));
-    const triggeringUsers = new Set(job.processingTriggeredByUserIds);
     const participantTokens = {};
     const participantUserIds = {};
     const boxEffectiveStepsByUser = {};
@@ -124,8 +140,11 @@ async function buildRaceResolutionStepSyncScope(job, dependencies = {}) {
         maxBonusSteps: participant.maxBonusSteps || 0,
       });
     }
+    const incremental = allowIncrementalEffects &&
+      (activeEffects.length > 0 || race.isTeamRace === true);
     const scope = {
-      plan: "STEP_SYNC_COMMITTED",
+      plan: incremental ? "STEP_SYNC_INCREMENTAL" : "STEP_SYNC_COMMITTED",
+      scoreParticipantIds: [...new Set(Object.keys(participantTokens))].sort(),
       participantTokens,
       participantUserIds,
       result: {

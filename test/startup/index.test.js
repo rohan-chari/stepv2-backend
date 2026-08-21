@@ -138,6 +138,33 @@ test("cronStartDelayMs defers job scheduling past the reload overlap window", as
   assert.equal(scheduleCalls.dailyMover, 1);
 });
 
+test("http and resolution process roles do not start the wrong schedulers", () => {
+  const start = (processRole, calls) => startServer({
+    app: {
+      listen(...args) {
+        args[2]();
+        return { close() {} };
+      },
+    },
+    processRole,
+    cronStartDelayMs: 0,
+    registerEventHandlers() {},
+    registerNotificationHandlers() {},
+    scheduleRaceResolutionWorker: () => calls.push("resolution"),
+    scheduleResolvedImpactBoundaries: () => calls.push("impact"),
+    scheduleRaceResolutionPostTasks: () => calls.push("postTasks"),
+    logger: { log() {} },
+  });
+
+  const httpCalls = [];
+  start("http", httpCalls);
+  assert.deepEqual(httpCalls, []);
+
+  const resolutionCalls = [];
+  start("resolution", resolutionCalls);
+  assert.deepEqual(resolutionCalls, ["resolution", "impact", "postTasks"]);
+});
+
 for (const signal of ["SIGINT", "SIGTERM"]) {
   test(`${signal} production wiring closes HTTP then APNs and exits once`, async () => {
     const processObject = new EventEmitter();

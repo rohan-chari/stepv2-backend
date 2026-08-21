@@ -94,3 +94,43 @@ test("mixed reason, missing/stale token, membership mismatch, or active effect f
     RaceActiveEffect: { async findActiveForRace() { return [{ type: "LEECH" }]; } },
   })), null);
 });
+
+test("supported active effects use incremental scoring for only the dirty participant", async () => {
+  const scope = await buildRaceResolutionStepSyncScope(job, dependencies({
+    allowIncrementalEffects: true,
+    RaceActiveEffect: {
+      async findActiveForRace() { return [{ type: "RAINSTORM", targetParticipantId: "p1" }]; },
+    },
+  }));
+  assert.equal(scope.plan, "STEP_SYNC_INCREMENTAL");
+  assert.deepEqual(scope.scoreParticipantIds, ["p1"]);
+});
+
+test("team races use incremental scoring without expanding to every participant", async () => {
+  const scope = await buildRaceResolutionStepSyncScope(job, dependencies({
+    allowIncrementalEffects: true,
+    Race: {
+      async findForStepSyncScope() {
+        return {
+          id: "r1", status: "ACTIVE", isTeamRace: true,
+          participants: [{
+            id: "p1", userId: "u1", status: "ACCEPTED", rawSteps: 45,
+            bonusSteps: 5, maxBonusSteps: 5,
+            totalsUpdatedAt: new Date("2026-08-13T12:00:04.000Z"),
+          }],
+        };
+      },
+    },
+  }));
+  assert.equal(scope.plan, "STEP_SYNC_INCREMENTAL");
+  assert.deepEqual(scope.scoreParticipantIds, ["p1"]);
+});
+
+test("unsupported active effects remain fail-closed", async () => {
+  const scope = await buildRaceResolutionStepSyncScope(job, dependencies({
+    RaceActiveEffect: {
+      async findActiveForRace() { return [{ type: "LEECH", targetParticipantId: "p1" }]; },
+    },
+  }));
+  assert.equal(scope, null);
+});

@@ -724,15 +724,20 @@ function buildAppSettings(dependencies = {}) {
   }
 
   async function setFlag(key, value) {
-    if (
+    const permanentTestOverride =
       allowPermanentOverrides &&
-      Object.prototype.hasOwnProperty.call(PERMANENT_FLAGS, key)
-    ) {
+      Object.prototype.hasOwnProperty.call(PERMANENT_FLAGS, key);
+    if (permanentTestOverride) {
       permanentOverrides.set(key, value);
+    }
+    // The telemetry flag is permanently enabled in production, but its
+    // test-only override must still execute the epoch open/close transaction
+    // below so telemetry integration tests exercise the real lifecycle.
+    if (permanentTestOverride && key !== "adminMetricsV2TelemetryEnabled") {
       cache = null;
       return;
     }
-    if (!(key in KNOWN_FLAGS)) {
+    if (!(key in KNOWN_FLAGS) && !permanentTestOverride) {
       const err = new Error(`Unknown setting: ${key}`);
       err.statusCode = 400;
       throw err;

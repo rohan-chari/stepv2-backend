@@ -213,7 +213,10 @@ function buildRecordSteps(dependencies = {}) {
   return async function recordSteps({ userId, steps, date, timeZone, skipRaceResolution = false }) {
     const existing = await stepsModel.findByUserIdAndDate(userId, date);
 
-    const noopSuppression = false;
+    // Equivalent daily inputs do not change the canonical scoring input. Keep
+    // the scoring-version fence authoritative so a repeated home sync can
+    // still refresh lastStepSyncAt without creating another race generation.
+    const noopSuppression = true;
 
     let record;
     let scoringChanged = true;

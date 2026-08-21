@@ -42,6 +42,7 @@ async function rolloutOptions({
   dirtyParticipantIds = [],
   powerupTypes = [],
   priority = "IMMEDIATE",
+  queuePriority = null,
 } = {}) {
   const reasonAware = await isStrictFlagEnabled(
     appSettings,
@@ -67,6 +68,7 @@ async function rolloutOptions({
       : null,
     burstCoalescing,
     queuedGenerationMerge,
+    queuePriority: queuePriority || (priority === "COALESCE" ? "MAINTENANCE" : "LIVE"),
   };
 }
 
@@ -97,6 +99,7 @@ async function enqueueRaceResolution(
     dirtyParticipantIds = [],
     powerupTypes = [],
     priority = "IMMEDIATE",
+    queuePriority = null,
     displayArtifact = null,
   },
   tx = null
@@ -114,6 +117,7 @@ async function enqueueRaceResolution(
       dirtyParticipantIds,
       powerupTypes,
       priority,
+      queuePriority,
     })
   );
   queuedGenerationMerge = rollout.queuedGenerationMerge;
@@ -185,6 +189,7 @@ async function enqueueRaceResolutionForUser(
     raceModel = Race,
     reason = null,
     priority = "IMMEDIATE",
+    queuePriority = null,
     reconciledRaces = null,
   },
   tx = null
@@ -209,7 +214,12 @@ async function enqueueRaceResolutionForUser(
   };
 
   const buildOptions = async (races) => {
-    const rollout = await rolloutOptions({ reason, dirtyUserIds: [userId], priority });
+    const rollout = await rolloutOptions({
+      reason,
+      dirtyUserIds: [userId],
+      priority,
+      queuePriority,
+    });
     queuedGenerationMerge = rollout.queuedGenerationMerge;
     const dirtyEnvelopeByRaceId = new Map();
     if (rollout.dirtyEnvelope) {
@@ -229,6 +239,7 @@ async function enqueueRaceResolutionForUser(
       dirtyEnvelopeByRaceId,
       burstCoalescing: rollout.burstCoalescing,
       queuedGenerationMerge: rollout.queuedGenerationMerge,
+      queuePriority: rollout.queuePriority,
     };
   };
 

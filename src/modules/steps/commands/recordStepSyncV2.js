@@ -355,7 +355,10 @@ function buildRecordStepSyncV2(dependencies = {}) {
       appSettings,
       "raceResolutionBurstCoalescingV1Enabled"
     );
-    const noopSuppression = false;
+    // The canonical watermark makes equivalent samples/daily totals a no-op
+    // for race scoring while preserving the HTTP response and idempotency
+    // contract for every shipped client.
+    const noopSuppression = true;
 
     // ── Transaction A: persist steps/samples + create the reservation. ──
     let reservation;

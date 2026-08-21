@@ -16,6 +16,12 @@ const { prisma: defaultPrisma } = require("../../../db");
 const LEASE_MS = 30 * 1000;
 const RETRY_BACKOFF_MS = [1000, 5000, 30000];
 const MAX_ATTEMPTS = 3;
+const QUEUE_PRIORITIES = Object.freeze([
+  "SETTLEMENT",
+  "RECOVERY",
+  "LIVE",
+  "MAINTENANCE",
+]);
 const DEFAULT_DEBOUNCE_MS = 5000;
 const DEFAULT_RECOVERY_STALE_MS = 60 * 60 * 1000;
 const {
@@ -33,6 +39,10 @@ function debounceMs() {
 
 function newLeaseToken() {
   return crypto.randomUUID();
+}
+
+function normalizeQueuePriority(value) {
+  return QUEUE_PRIORITIES.includes(value) ? value : "LIVE";
 }
 
 // Postgres returns snake_case from $queryRaw unless aliased; every raw read
@@ -61,10 +71,12 @@ const jobColumns = (q = "") => `
   ${q}dirty_participant_ids              AS "dirtyParticipantIds",
   ${q}dirty_powerup_types                 AS "dirtyPowerupTypes",
   ${q}dirty_priority                      AS "dirtyPriority",
+  ${q}queue_priority                      AS "queuePriority",
   ${q}processing_dirty_reasons            AS "processingDirtyReasons",
   ${q}processing_dirty_participant_ids    AS "processingDirtyParticipantIds",
   ${q}processing_dirty_powerup_types      AS "processingDirtyPowerupTypes",
   ${q}processing_dirty_priority           AS "processingDirtyPriority",
+  ${q}processing_queue_priority           AS "processingQueuePriority",
   ${q}display_artifact_id                 AS "displayArtifactId",
   ${q}display_artifact_digest             AS "displayArtifactDigest",
   ${q}display_artifact_schema             AS "displayArtifactSchema",
@@ -94,6 +106,7 @@ function normalizeRow(row) {
     dirtyPowerupTypes: Array.isArray(row.dirtyPowerupTypes)
       ? row.dirtyPowerupTypes
       : [],
+    queuePriority: normalizeQueuePriority(row.queuePriority),
     processingDirtyReasons: Array.isArray(row.processingDirtyReasons)
       ? row.processingDirtyReasons
       : [],
@@ -103,6 +116,7 @@ function normalizeRow(row) {
     processingDirtyPowerupTypes: Array.isArray(row.processingDirtyPowerupTypes)
       ? row.processingDirtyPowerupTypes
       : [],
+    processingQueuePriority: normalizeQueuePriority(row.processingQueuePriority),
   };
 }
 
@@ -141,6 +155,7 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
         burstCoalescing = false,
         queuedGenerationMerge = false,
         bypassDebounce = false,
+        queuePriority = "LIVE",
       },
       tx = prisma
     ) {
@@ -156,6 +171,7 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
           burstCoalescing,
           queuedGenerationMerge,
           bypassDebounce,
+          queuePriority,
         },
         tx
       );
@@ -216,6 +232,7 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
         burstCoalescing = false,
         queuedGenerationMerge = false,
         bypassDebounce = false,
+        queuePriority = "LIVE",
       },
       tx = prisma
     ) {
@@ -246,6 +263,7 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
           dirtyParticipantIds: dirty?.dirtyParticipantIds || [],
           dirtyPowerupTypes: dirty?.powerupTypes || [],
           dirtyPriority: priority,
+          queuePriority: normalizeQueuePriority(queuePriority),
           artifactId: artifact?.id || null,
           artifactDigest: artifact?.digest || null,
           artifactSchema: artifact?.schema || null,
@@ -262,6 +280,7 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
           id, race_id, generation, resolution_time_zone, state, attempts,
           requested_at, not_before_at, triggered_by_user_ids, processing_triggered_by_user_ids,
           dirty_reasons, dirty_participant_ids, dirty_powerup_types, dirty_priority,
+          queue_priority,
           display_artifact_id, display_artifact_digest, display_artifact_schema,
           created_at, updated_at
         )
@@ -269,6 +288,7 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
           gen_random_uuid()::text, i."raceId", 1, i."resolutionTimeZone", 'queued', 0,
           $2::timestamp, i."notBeforeAt", i."triggered", '[]'::jsonb,
           i."dirtyReasons", i."dirtyParticipantIds", i."dirtyPowerupTypes", i."dirtyPriority",
+          i."queuePriority",
           i."artifactId", i."artifactDigest", i."artifactSchema",
           $2::timestamp, $2::timestamp
         FROM jsonb_to_recordset($1::jsonb) AS i(
@@ -279,6 +299,7 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
           "dirtyParticipantIds" jsonb,
           "dirtyPowerupTypes" jsonb,
           "dirtyPriority" text,
+          "queuePriority" text,
           "artifactId" text,
           "artifactDigest" text,
           "artifactSchema" integer,
@@ -439,6 +460,11 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
           dirty_priority = CASE
             WHEN race_resolution_jobs_v2.dirty_priority = 'IMMEDIATE' OR EXCLUDED.dirty_priority = 'IMMEDIATE'
               THEN 'IMMEDIATE' ELSE 'COALESCE' END,
+          queue_priority = CASE
+            WHEN race_resolution_jobs_v2.queue_priority = 'SETTLEMENT' OR EXCLUDED.queue_priority = 'SETTLEMENT' THEN 'SETTLEMENT'
+            WHEN race_resolution_jobs_v2.queue_priority = 'RECOVERY' OR EXCLUDED.queue_priority = 'RECOVERY' THEN 'RECOVERY'
+            WHEN race_resolution_jobs_v2.queue_priority = 'LIVE' OR EXCLUDED.queue_priority = 'LIVE' THEN 'LIVE'
+            ELSE 'MAINTENANCE' END,
           not_before_at = CASE
             WHEN $4::boolean THEN NULL
             ELSE race_resolution_jobs_v2.not_before_at
@@ -527,7 +553,13 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
                 AND lease_expires_at <= $1
               )
             )
-          ORDER BY requested_at ASC
+            ORDER BY CASE queue_priority
+              WHEN 'SETTLEMENT' THEN 0
+              WHEN 'RECOVERY' THEN 1
+              WHEN 'LIVE' THEN 2
+              ELSE 3 END,
+              requested_at ASC,
+              race_id ASC
           LIMIT 1
           FOR UPDATE SKIP LOCKED
         )
@@ -628,6 +660,7 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
               WHEN j.processing_dirty_reasons = '[]'::jsonb THEN j.dirty_priority
               WHEN j.processing_dirty_priority = 'IMMEDIATE' OR j.dirty_priority = 'IMMEDIATE'
                 THEN 'IMMEDIATE' ELSE 'COALESCE' END,
+            processing_queue_priority = j.queue_priority,
             processing_display_artifact_id = j.display_artifact_id,
             processing_display_artifact_digest = j.display_artifact_digest,
             processing_display_artifact_schema = j.display_artifact_schema,
@@ -636,6 +669,7 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
             dirty_participant_ids = '[]'::jsonb,
             dirty_powerup_types = '[]'::jsonb,
             dirty_priority = 'IMMEDIATE',
+            queue_priority = 'LIVE',
             display_artifact_id = NULL,
             display_artifact_digest = NULL,
             display_artifact_schema = NULL,
@@ -692,6 +726,7 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
             processing_dirty_participant_ids = '[]'::jsonb,
             processing_dirty_powerup_types = '[]'::jsonb,
             processing_dirty_priority = 'IMMEDIATE',
+            processing_queue_priority = 'LIVE',
             processing_display_artifact_id = NULL,
             processing_display_artifact_digest = NULL,
             processing_display_artifact_schema = NULL,
@@ -788,6 +823,7 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
              processing_dirty_participant_ids='[]'::jsonb,
              processing_dirty_powerup_types='[]'::jsonb,
              processing_dirty_priority='IMMEDIATE',
+             processing_queue_priority='LIVE',
              triggered_by_user_ids = merged.triggers,
              processing_triggered_by_user_ids='[]'::jsonb,
              lease_expires_at=NULL, lease_token=NULL, updated_at=$3
@@ -998,7 +1034,11 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
                 AND (not_before_at IS NULL OR not_before_at <= $1))
                OR (state='running' AND lease_expires_at IS NOT NULL
                    AND lease_expires_at <= $1)), 0)::float8 AS "oldestClaimableAgeMs",
-           COUNT(*) FILTER (WHERE state='running')::int AS "runningCount"
+           COUNT(*) FILTER (WHERE state='running')::int AS "runningCount",
+           COUNT(*) FILTER (WHERE queue_priority='SETTLEMENT')::int AS "settlementCount",
+           COUNT(*) FILTER (WHERE queue_priority='RECOVERY')::int AS "recoveryCount",
+           COUNT(*) FILTER (WHERE queue_priority='LIVE')::int AS "liveCount",
+           COUNT(*) FILTER (WHERE queue_priority='MAINTENANCE')::int AS "maintenanceCount"
          FROM race_resolution_jobs_v2
          WHERE state IN ('queued','running')`,
         now
@@ -1013,6 +1053,10 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
         claimableCount: Math.max(0, Number(row.claimableCount || 0)),
         oldestClaimableAgeMs: safeMs(row.oldestClaimableAgeMs),
         runningCount: Math.max(0, Number(row.runningCount || 0)),
+        settlementCount: Math.max(0, Number(row.settlementCount || 0)),
+        recoveryCount: Math.max(0, Number(row.recoveryCount || 0)),
+        liveCount: Math.max(0, Number(row.liveCount || 0)),
+        maintenanceCount: Math.max(0, Number(row.maintenanceCount || 0)),
       };
     },
 
@@ -1044,6 +1088,8 @@ module.exports = {
   LEASE_MS,
   MAX_ATTEMPTS,
   RETRY_BACKOFF_MS,
+  QUEUE_PRIORITIES,
+  normalizeQueuePriority,
   DEFAULT_DEBOUNCE_MS,
   DEFAULT_RECOVERY_STALE_MS,
 };
