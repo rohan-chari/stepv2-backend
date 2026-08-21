@@ -12,6 +12,7 @@ const { normalizePowerupConfig } = require("./validateRaceConfig");
 const { filterInactiveUserIds } = require("./seededInactivity");
 const {
   computeRaceExposureStamp,
+  computeTournamentExposureStamp,
   FUNDED_EXPOSURE_LIMIT_MILLICOINS,
   FUNDED_EXPOSURE_RATE_LIMIT_MILLICOINS_PER_DAY,
   loadAndHealCurrentExposureCohort,
@@ -50,6 +51,93 @@ function splitFundedExposureCandidates(elected, totals, stamp) {
     else skippedUserIds.push(row.userId);
   }
   return { eligible, skippedUserIds };
+}
+
+async function readFundedExposureCohort(prisma, userIds) {
+  const ordered = [...new Set(userIds.filter(Boolean))].sort();
+  const totals = new Map(
+    ordered.map((userId) => [userId, {
+      exposureMillicoins: 0,
+      exposureRateMillicoinsPerDay: 0,
+    }]),
+  );
+  if (!ordered.length) return totals;
+
+  const [races, tournaments] = await Promise.all([
+    prisma.raceParticipant.findMany({
+      where: {
+        userId: { in: ordered }, status: "ACCEPTED", finishedAt: null, forfeitedAt: null,
+        race: { fundedPrize: true, status: { in: ["PENDING", "ACTIVE"] } },
+      },
+      select: {
+        userId: true,
+        fundedExposureMillicoins: true,
+        fundedExposureRateMillicoinsPerDay: true,
+        race: {
+          select: {
+            maxDurationDays: true,
+            teamPoolMultBps: true,
+            prizeCoinUnit: true,
+            prizePoolMaxCoins: true,
+            prizeCalculationVersion: true,
+          },
+        },
+      },
+    }),
+    prisma.tournamentParticipant.findMany({
+      where: {
+        userId: { in: ordered }, status: "ACCEPTED", eliminatedInRound: null,
+        tournament: {
+          fundedPrize: true, seedId: null, status: { in: ["PENDING", "ACTIVE"] },
+        },
+      },
+      select: {
+        userId: true,
+        fundedExposureMillicoins: true,
+        fundedExposureRateMillicoinsPerDay: true,
+        tournament: {
+          select: {
+            bracketSize: true,
+            totalRounds: true,
+            matchupDurationDays: true,
+            prizeCoinUnit: true,
+            tournamentChampionMaxCoins: true,
+            prizeCalculationVersion: true,
+          },
+        },
+      },
+    }),
+  ]);
+
+  for (const row of races) {
+    const stamp = row.fundedExposureMillicoins != null &&
+        row.fundedExposureRateMillicoinsPerDay != null
+      ? row
+      : computeRaceExposureStamp({
+          maxDurationDays: row.race.maxDurationDays,
+          prizeCoinUnit: row.race.prizeCoinUnit || 10,
+          teamPoolMultBps: row.race.teamPoolMultBps,
+        });
+    const total = totals.get(row.userId);
+    total.exposureMillicoins += stamp.fundedExposureMillicoins ?? stamp.exposureMillicoins;
+    total.exposureRateMillicoinsPerDay += stamp.fundedExposureRateMillicoinsPerDay ?? stamp.exposureRateMillicoinsPerDay;
+  }
+  for (const row of tournaments) {
+    const stamp = row.fundedExposureMillicoins != null &&
+        row.fundedExposureRateMillicoinsPerDay != null
+      ? row
+      : computeTournamentExposureStamp({
+          bracketSize: row.tournament.bracketSize,
+          totalRounds: row.tournament.totalRounds,
+          matchupDurationDays: row.tournament.matchupDurationDays,
+          prizeCoinUnit: row.tournament.prizeCoinUnit || 10,
+          tournamentChampionMaxCoins: row.tournament.tournamentChampionMaxCoins || 500,
+        });
+    const total = totals.get(row.userId);
+    total.exposureMillicoins += stamp.fundedExposureMillicoins ?? stamp.exposureMillicoins;
+    total.exposureRateMillicoinsPerDay += stamp.fundedExposureRateMillicoinsPerDay ?? stamp.exposureRateMillicoinsPerDay;
+  }
+  return totals;
 }
 
 class SeededBucketError extends Error {
@@ -279,6 +367,7 @@ function buildSeededRaceBuckets(dependencies = {}) {
   const loadExposure =
     dependencies.loadAndHealCurrentExposureCohort ||
     loadAndHealCurrentExposureCohort;
+  const readExposure = dependencies.readFundedExposureCohort || readFundedExposureCohort;
 
   async function automaticCandidates(tx) {
     const users = await tx.user.findMany({
@@ -480,7 +569,7 @@ function buildSeededRaceBuckets(dependencies = {}) {
         where: { seedId: seed.id, windowStart, stream: "BUCKET" },
         select: { userId: true }, orderBy: { userId: "asc" },
       });
-      if (!elected.length) return { elected, plan: [] };
+      if (!elected.length) return { elected, allElected: elected, plan: [] };
       let eligible = elected;
       let skippedUserIds = [];
       if (fundedPrizePools === true) {
@@ -489,7 +578,7 @@ function buildSeededRaceBuckets(dependencies = {}) {
           prizeCoinUnit: prizeStamp.prizeCoinUnit,
           teamPoolMultBps: null,
         });
-        const totals = await loadExposure(
+        const totals = await readExposure(
           prisma,
           elected.map((row) => row.userId),
         );
@@ -499,7 +588,23 @@ function buildSeededRaceBuckets(dependencies = {}) {
           exposureStamp,
         ));
       }
-      if (!eligible.length) return { elected: eligible, skippedUserIds, plan: [] };
+      if (!eligible.length) {
+        await withSeededWindowLock({
+          prisma,
+          seedId: seed.id,
+          windowStart,
+          fn: async (tx) => tx.seededRaceWindowMembership.deleteMany({
+            where: {
+              seedId: seed.id,
+              windowStart,
+              stream: "BUCKET",
+              raceId: null,
+              userId: { in: skippedUserIds },
+            },
+          }),
+        });
+        return { elected: eligible, allElected: elected, skippedUserIds, plan: [] };
+      }
       const candidates = await matchStepsForCandidates({
         prisma,
         candidates: eligible,
@@ -512,6 +617,7 @@ function buildSeededRaceBuckets(dependencies = {}) {
       });
       return {
         elected: eligible,
+        allElected: elected,
         skippedUserIds,
         plan: planBuckets(
           candidates,
@@ -587,6 +693,28 @@ function buildSeededRaceBuckets(dependencies = {}) {
             rows.map((row) => row.raceId),
           );
           await acquireGlobalLock(tx);
+          if (fundedPrizePools === true) {
+            // Re-read under the universal user/competition lock sequence. The
+            // root-client preflight only avoids doing the expensive match plan
+            // for obviously ineligible users; it is never authoritative.
+            const allUserIds = snapshot.allElected.map((row) => row.userId);
+            await lockUsers(tx, allUserIds);
+            const lockedTotals = await loadExposure(tx, allUserIds, {
+              targetRaceIds: rows.map((row) => row.raceId),
+            });
+            const lockedSplit = splitFundedExposureCandidates(
+              snapshot.allElected,
+              lockedTotals,
+              fundedExposureStamp,
+            );
+            const lockedIds = lockedSplit.eligible.map((row) => row.userId);
+            const snapshotIds = snapshot.elected.map((row) => row.userId);
+            if (lockedIds.length !== snapshotIds.length || lockedIds.some((id, index) => id !== snapshotIds[index])) {
+              const error = new Error("Seeded bucket exposure changed");
+              error.seededFinalizationOutcome = "RETRY";
+              throw error;
+            }
+          }
           const userIds = snapshot.elected.map((row) => row.userId);
           if (fundedPrizePools === true) {
             await reserveFundedExposures({

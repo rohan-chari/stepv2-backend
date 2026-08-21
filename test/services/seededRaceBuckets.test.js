@@ -188,6 +188,6 @@ test("staging-shaped funded finalization uses real C0 and exposure helpers withi
   assert.equal(calls.get("membership.update") || 0, 0);
   assert.equal(calls.get("participant.createMany"), 1);
   assert.equal(calls.get("assignment.createMany"), 1);
-  assert.equal(calls.get("guard.createMany"), 1);
+  assert.equal(calls.get("guard.createMany"), 2, "preflight revalidation locks the same user guards under the transaction");
   assert.ok((calls.get("$queryRawUnsafe") || 0) >= 62, "all 30 real C0 fences ran");
 });
