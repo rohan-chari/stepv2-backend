@@ -12,6 +12,9 @@ const { normalizePowerupConfig } = require("./validateRaceConfig");
 const { filterInactiveUserIds } = require("./seededInactivity");
 const {
   computeRaceExposureStamp,
+  FUNDED_EXPOSURE_LIMIT_MILLICOINS,
+  FUNDED_EXPOSURE_RATE_LIMIT_MILLICOINS_PER_DAY,
+  loadAndHealCurrentExposureCohort,
   lockFundedExposureUsers,
   newRacePrizeStamp,
   reserveFundedExposures,
@@ -28,6 +31,26 @@ const {
 const SEED_TIMEZONE = "America/New_York";
 const BUCKET_CAPACITY = 15;
 const BUCKET_FEATURE = "seeded_race_buckets";
+
+function splitFundedExposureCandidates(elected, totals, stamp) {
+  const eligible = [];
+  const skippedUserIds = [];
+  for (const row of elected) {
+    const current = totals.get(row.userId) || {
+      exposureMillicoins: 0,
+      exposureRateMillicoinsPerDay: 0,
+    };
+    const fits =
+      current.exposureMillicoins + stamp.exposureMillicoins <=
+        FUNDED_EXPOSURE_LIMIT_MILLICOINS &&
+      current.exposureRateMillicoinsPerDay +
+        stamp.exposureRateMillicoinsPerDay <=
+        FUNDED_EXPOSURE_RATE_LIMIT_MILLICOINS_PER_DAY;
+    if (fits) eligible.push(row);
+    else skippedUserIds.push(row.userId);
+  }
+  return { eligible, skippedUserIds };
+}
 
 class SeededBucketError extends Error {
   constructor(message, statusCode, code) {
@@ -253,6 +276,9 @@ function buildSeededRaceBuckets(dependencies = {}) {
     dependencies.lockCompetitionRows || lockCompetitionRows;
   const acquireGlobalLock =
     dependencies.acquireGlobalEnrollmentLock || acquireGlobalEnrollmentLock;
+  const loadExposure =
+    dependencies.loadAndHealCurrentExposureCohort ||
+    loadAndHealCurrentExposureCohort;
 
   async function automaticCandidates(tx) {
     const users = await tx.user.findMany({
@@ -455,18 +481,38 @@ function buildSeededRaceBuckets(dependencies = {}) {
         select: { userId: true }, orderBy: { userId: "asc" },
       });
       if (!elected.length) return { elected, plan: [] };
+      let eligible = elected;
+      let skippedUserIds = [];
+      if (fundedPrizePools === true) {
+        const exposureStamp = computeRaceExposureStamp({
+          maxDurationDays: seed.cadence === "WEEKLY" ? 7 : 1,
+          prizeCoinUnit: prizeStamp.prizeCoinUnit,
+          teamPoolMultBps: null,
+        });
+        const totals = await loadExposure(
+          prisma,
+          elected.map((row) => row.userId),
+        );
+        ({ eligible, skippedUserIds } = splitFundedExposureCandidates(
+          elected,
+          totals,
+          exposureStamp,
+        ));
+      }
+      if (!eligible.length) return { elected: eligible, skippedUserIds, plan: [] };
       const candidates = await matchStepsForCandidates({
         prisma,
-        candidates: elected,
+        candidates: eligible,
         seed,
         windowStart,
       });
       const friendships = await prisma.friendship.findMany({
-        where: { status: "ACCEPTED", OR: [{ requesterId: { in: elected.map((e) => e.userId) } }, { addresseeId: { in: elected.map((e) => e.userId) } }] },
+        where: { status: "ACCEPTED", OR: [{ requesterId: { in: eligible.map((e) => e.userId) } }, { addresseeId: { in: eligible.map((e) => e.userId) } }] },
         select: { requesterId: true, addresseeId: true },
       });
       return {
-        elected,
+        elected: eligible,
+        skippedUserIds,
         plan: planBuckets(
           candidates,
           friendships.map((row) => ({
@@ -589,9 +635,26 @@ function buildSeededRaceBuckets(dependencies = {}) {
             select: { userId: true },
             orderBy: { userId: "asc" },
           });
+          // Release elected users who no longer fit the funded-exposure cap.
+          // Leaving one stale BUCKET claim behind would make the all-or-nothing
+          // snapshot check abort every retry for the whole cohort.
+          if (snapshot.skippedUserIds?.length) {
+            await tx.seededRaceWindowMembership.deleteMany({
+              where: {
+                seedId: seed.id,
+                windowStart,
+                stream: "BUCKET",
+                raceId: null,
+                userId: { in: snapshot.skippedUserIds },
+              },
+            });
+          }
+          const remainingElected = lockedElected.filter(
+            (row) => !snapshot.skippedUserIds?.includes(row.userId),
+          );
           if (
-            lockedElected.length !== snapshot.elected.length ||
-            lockedElected.some(
+            remainingElected.length !== snapshot.elected.length ||
+            remainingElected.some(
               (row, index) => row.userId !== snapshot.elected[index].userId,
             )
           ) {
@@ -674,6 +737,7 @@ function buildSeededRaceBuckets(dependencies = {}) {
       } catch (error) {
         if (error?.seededFinalizationOutcome === "EXISTING") return error.rows;
         if (error?.seededFinalizationOutcome === "MODE_CHANGED") return [];
+        if (error?.code === "FUNDED_EXPOSURE_LIMIT") continue;
         if (error?.seededFinalizationOutcome !== "RETRY") throw error;
         if (now() >= windowStart) return [];
       }
@@ -800,4 +864,4 @@ function buildSeededRaceBuckets(dependencies = {}) {
   return { elect, electAutomatic, finalise, featuredCards, reconcileFeatured, reconcileFeaturedUser, selectedBucketSeedKinds, bucketModeWindowKeys };
 }
 
-module.exports = { buildSeededRaceBuckets, SeededBucketError, windowFor, upcomingWindowFor, supportsBuckets, claimLegacyStream, planBuckets, matchStepsForCandidates, BUCKET_CAPACITY, BUCKET_FEATURE, acquireSeededWindowLock, withSeededWindowLock, readWindowMode, stampWindowMode };
+module.exports = { buildSeededRaceBuckets, SeededBucketError, windowFor, upcomingWindowFor, supportsBuckets, claimLegacyStream, planBuckets, matchStepsForCandidates, BUCKET_CAPACITY, BUCKET_FEATURE, acquireSeededWindowLock, withSeededWindowLock, readWindowMode, stampWindowMode, splitFundedExposureCandidates };
