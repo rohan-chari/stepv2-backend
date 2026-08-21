@@ -156,7 +156,7 @@ function buildRecordStepSamples(dependencies = {}) {
         userId,
         cleaned,
         Date.now(),
-        { noopSuppression }
+        { noopSuppression, lockScoringInput: true }
       );
     } else {
       await stepSampleModel.upsertBatch(userId, cleaned);

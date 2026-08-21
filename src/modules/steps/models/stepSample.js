@@ -73,14 +73,18 @@ const StepSample = {
   async reconcileBatchOn(client, userId, samples, nowMs = Date.now(), {
     noopSuppression = false,
     manageScoringVersion = true,
+    lockScoringInput = false,
   } = {}) {
     if (!samples || samples.length === 0) {
       return { storageChanged: false, scoringChanged: false };
     }
+    if (lockScoringInput && !(noopSuppression && manageScoringVersion)) {
+      await lockScoringInputState(client, userId);
+    }
     const state = noopSuppression && manageScoringVersion
       ? await lockScoringInputState(client, userId)
       : null;
-    const beforeCanonical = state
+    const beforeCanonical = noopSuppression && state
       ? await readCanonicalSampleInput(client, userId, state.dbNow)
       : null;
 

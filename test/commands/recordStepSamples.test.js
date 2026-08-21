@@ -5,9 +5,13 @@ const { buildRecordStepSamples, StepSampleError } = require("../../src/modules/s
 
 test("reason-aware samples reconcile before enqueueing a claimable STEP_SYNC", async () => {
   const calls = [];
+  let reconcileOptions;
   const record = buildRecordStepSamples({
     StepSample: {
-      async reconcileBatch() { calls.push("samples"); },
+      async reconcileBatch(_userId, _samples, _now, options) {
+        reconcileOptions = options;
+        calls.push("samples");
+      },
     },
     appSettings: {
       async getFlag(key) {
@@ -41,6 +45,7 @@ test("reason-aware samples reconcile before enqueueing a claimable STEP_SYNC", a
   });
 
   assert.deepEqual(calls, ["samples", "reconcile", "enqueue"]);
+  assert.equal(reconcileOptions.lockScoringInput, true);
 });
 
 function makeDeps() {
