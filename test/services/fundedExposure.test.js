@@ -72,9 +72,9 @@ test("tournament exposure preserves fractional EV in millicoins", () => {
   );
 });
 
-test("conflict metadata uses independent 300 raw and 40/day ceilings", () => {
-  assert.equal(FUNDED_EXPOSURE_LIMIT_MILLICOINS, 300000);
-  assert.equal(FUNDED_EXPOSURE_RATE_LIMIT_MILLICOINS_PER_DAY, 40000);
+test("conflict metadata uses independent 600 raw and 80/day ceilings", () => {
+  assert.equal(FUNDED_EXPOSURE_LIMIT_MILLICOINS, 600000);
+  assert.equal(FUNDED_EXPOSURE_RATE_LIMIT_MILLICOINS_PER_DAY, 80000);
   const error = fundedExposureConflict({
     currentExposureMillicoins: 280000,
     requestedExposureMillicoins: 40000,
@@ -84,8 +84,8 @@ test("conflict metadata uses independent 300 raw and 40/day ceilings", () => {
   assert.equal(error.statusCode, 409);
   assert.equal(error.code, "FUNDED_EXPOSURE_LIMIT");
   assert.deepEqual(error.meta, {
-    limitCoins: 300,
-    dailyRateLimitCoins: 40,
+    limitCoins: 600,
+    dailyRateLimitCoins: 80,
     currentCoins: 280,
     requestedCoins: 40,
     currentDailyRateCoins: 34,

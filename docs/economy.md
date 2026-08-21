@@ -66,6 +66,11 @@ can still reuse the same walking across five free, app-funded races, but cannot
 scale that loop with every available quick race. Monitor quick-race payouts,
 boxes per user-day, discard coins, and concentration among users at the cap.
 
+The cross-competition funded-exposure guard was doubled on 2026-08-21: the
+raw exposure ceiling is 600 coins and the daily-rate ceiling is 80 coins/day.
+These are admission ceilings; each membership keeps the exposure stamp it was
+created with, so changing the limits does not rewrite existing memberships.
+
 **Source-of-truth check (2026-08-13):**
 `src/modules/races/services/nextRacePolicy.js` sets the shared
 `MAX_LIVE_QUICK_MEMBERSHIPS` constant to 5. Both the public-ID and share-token

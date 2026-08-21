@@ -112,27 +112,27 @@ describe("funded exposure admission", () => {
     assert.equal(participant.fundedExposureRateMillicoinsPerDay, 5_715);
   });
 
-  it("returns the exact 409 contract and leaves no partial fifth race", async () => {
+  it("returns the exact 409 contract and leaves no partial ninth race", async () => {
     const user = await createUser();
-    for (let index = 0; index < 4; index += 1) {
+    for (let index = 0; index < 8; index += 1) {
       const response = await createFundedRace(user, `Allowed ${index}`);
       assert.equal(response.status, 201);
     }
 
-    const rejected = await createFundedRace(user, "Rejected fifth");
+    const rejected = await createFundedRace(user, "Rejected ninth");
     assert.equal(rejected.status, 409);
     assert.deepEqual(await rejected.json(), {
       error: "Finish or leave another funded race before joining this one.",
       code: "FUNDED_EXPOSURE_LIMIT",
-      limitCoins: 300,
-      dailyRateLimitCoins: 40,
-      currentCoins: 40,
+      limitCoins: 600,
+      dailyRateLimitCoins: 80,
+      currentCoins: 80,
       requestedCoins: 10,
-      currentDailyRateCoins: 40,
+      currentDailyRateCoins: 80,
       requestedDailyRateCoins: 10,
     });
-    assert.equal(await prisma.race.count(), 4);
-    assert.equal(await prisma.raceParticipant.count(), 4);
+    assert.equal(await prisma.race.count(), 8);
+    assert.equal(await prisma.raceParticipant.count(), 8);
   });
 
   for (const [label, value] of [
@@ -142,23 +142,23 @@ describe("funded exposure admission", () => {
     it(`enforces funded exposure when the legacy control is ${label}`, async () => {
       process.env.FUNDED_EXPOSURE_ENFORCEMENT_ENABLED = value;
       const user = await createUser();
-      for (let index = 0; index < 4; index += 1) {
+      for (let index = 0; index < 8; index += 1) {
         assert.equal(
           (await createFundedRace(user, `${label} allowed ${index}`)).status,
           201,
         );
       }
-      const rejected = await createFundedRace(user, `${label} rejected fifth`);
+      const rejected = await createFundedRace(user, `${label} rejected ninth`);
       assert.equal(rejected.status, 409);
       assert.equal((await rejected.json()).code, "FUNDED_EXPOSURE_LIMIT");
-      assert.equal(await prisma.race.count(), 4);
-      assert.equal(await prisma.raceParticipant.count(), 4);
+      assert.equal(await prisma.race.count(), 8);
+      assert.equal(await prisma.raceParticipant.count(), 8);
     });
   }
 
   it("serializes concurrent boundary creates with the per-user guard", async () => {
     const user = await createUser();
-    for (let index = 0; index < 3; index += 1) {
+    for (let index = 0; index < 7; index += 1) {
       const response = await createFundedRace(user, `Existing ${index}`);
       assert.equal(response.status, 201);
     }
@@ -171,13 +171,13 @@ describe("funded exposure admission", () => {
       responses.map((response) => response.status).sort(),
       [201, 409],
     );
-    assert.equal(await prisma.race.count(), 4);
-    assert.equal(await prisma.raceParticipant.count(), 4);
+    assert.equal(await prisma.race.count(), 8);
+    assert.equal(await prisma.raceParticipant.count(), 8);
   });
 
   it("serializes opposing cross-race admissions at the exposure boundary", async () => {
     const joiner = await createUser();
-    for (let index = 0; index < 3; index += 1) {
+    for (let index = 0; index < 7; index += 1) {
       assert.equal(
         (await createFundedRace(joiner, `Cross-race existing ${index}`)).status,
         201,
@@ -442,7 +442,7 @@ describe("funded exposure admission", () => {
   it("heals a mixed-worker null stamp under the guard before admitting the next race", async () => {
     const user = await createUser();
     const raceIds = [];
-    for (let index = 0; index < 3; index += 1) {
+    for (let index = 0; index < 7; index += 1) {
       const response = await createFundedRace(user, `Mixed null ${index}`);
       assert.equal(response.status, 201);
       raceIds.push((await response.json()).race.id);
@@ -490,7 +490,7 @@ describe("funded exposure admission", () => {
         status: "ACCEPTED",
       },
     });
-    for (let index = 0; index < 4; index += 1) {
+    for (let index = 0; index < 8; index += 1) {
       assert.equal(
         (await createFundedRace(user, `Funded beside legacy ${index}`)).status,
         201,
@@ -724,7 +724,7 @@ describe("funded exposure admission", () => {
 
   it("applies the same 409 contract to funded tournament admission", async () => {
     const joiner = await createUser();
-    for (let index = 0; index < 4; index += 1) {
+    for (let index = 0; index < 8; index += 1) {
       assert.equal(
         (await createFundedRace(joiner, `Joiner exposure ${index}`)).status,
         201,
@@ -754,18 +754,18 @@ describe("funded exposure admission", () => {
     assert.deepEqual(await rejected.json(), {
       error: "Finish or leave another funded race before joining this one.",
       code: "FUNDED_EXPOSURE_LIMIT",
-      limitCoins: 300,
-      dailyRateLimitCoins: 40,
-      currentCoins: 40,
+      limitCoins: 600,
+      dailyRateLimitCoins: 80,
+      currentCoins: 80,
       requestedCoins: 40,
-      currentDailyRateCoins: 40,
+      currentDailyRateCoins: 80,
       requestedDailyRateCoins: 10,
     });
   });
 
   it("applies the cap to public race joins without creating a participant", async () => {
     const joiner = await createUser();
-    for (let index = 0; index < 4; index += 1) {
+    for (let index = 0; index < 8; index += 1) {
       assert.equal(
         (await createFundedRace(joiner, `Public exposure ${index}`)).status,
         201,
@@ -792,7 +792,7 @@ describe("funded exposure admission", () => {
 
   it("applies the cap to invite acceptance and keeps the invite pending", async () => {
     const invitee = await createUser();
-    for (let index = 0; index < 4; index += 1) {
+    for (let index = 0; index < 8; index += 1) {
       assert.equal(
         (await createFundedRace(invitee, `Invite exposure ${index}`)).status,
         201,
@@ -1006,7 +1006,7 @@ describe("funded exposure admission", () => {
   it("serializes mixed-null healing against a funded release", async () => {
     const joiner = await createUser();
     const raceIds = [];
-    for (let index = 0; index < 5; index += 1) {
+    for (let index = 0; index < 9; index += 1) {
       const creator = await createUser();
       const created = await createFundedRace(creator, `Heal/release ${index}`);
       raceIds.push((await created.json()).race.id);
@@ -1056,7 +1056,7 @@ describe("funded exposure admission", () => {
   it("serializes mixed-null healing against funded settlement", async () => {
     const joiner = await createUser();
     const raceIds = [];
-    for (let index = 0; index < 5; index += 1) {
+    for (let index = 0; index < 9; index += 1) {
       const creator = await createUser();
       const created = await createFundedRace(creator, `Heal/settle ${index}`);
       raceIds.push((await created.json()).race.id);
@@ -1103,7 +1103,7 @@ describe("funded exposure admission", () => {
 
   it("applies the cap to race share-link joins", async () => {
     const joiner = await createUser();
-    for (let index = 0; index < 4; index += 1) {
+    for (let index = 0; index < 8; index += 1) {
       assert.equal((await createFundedRace(joiner, `Share exposure ${index}`)).status, 201);
     }
     const creator = await createUser();
@@ -1120,7 +1120,7 @@ describe("funded exposure admission", () => {
 
   it("applies the cap to tournament share-link joins", async () => {
     const joiner = await createUser();
-    for (let index = 0; index < 4; index += 1) {
+    for (let index = 0; index < 8; index += 1) {
       assert.equal((await createFundedRace(joiner, `Bracket share exposure ${index}`)).status, 201);
     }
     const creator = await createUser();
@@ -1140,30 +1140,30 @@ describe("funded exposure admission", () => {
   it("releases exposure after leaving a pending ordinary race", async () => {
     const joiner = await createUser();
     const memberships = [];
-    for (let index = 0; index < 5; index += 1) {
+    for (let index = 0; index < 9; index += 1) {
       const creator = await createUser();
       const created = await createFundedRace(creator, `Release target ${index}`);
       memberships.push((await created.json()).race.id);
     }
-    for (const raceId of memberships.slice(0, 4)) {
+    for (const raceId of memberships.slice(0, 8)) {
       const joined = await request(server.baseUrl, "POST", `/races/${raceId}/join`, { token: joiner.token });
       assert.equal(joined.status, 201);
     }
-    const blocked = await request(server.baseUrl, "POST", `/races/${memberships[4]}/join`, { token: joiner.token });
+    const blocked = await request(server.baseUrl, "POST", `/races/${memberships[8]}/join`, { token: joiner.token });
     assert.equal(blocked.status, 409);
     const left = await request(server.baseUrl, "POST", `/races/${memberships[0]}/leave`, {
       token: joiner.token,
       headers: { "X-Client-Features": "race_leave" },
     });
     assert.equal(left.status, 200);
-    const admitted = await request(server.baseUrl, "POST", `/races/${memberships[4]}/join`, { token: joiner.token });
+    const admitted = await request(server.baseUrl, "POST", `/races/${memberships[8]}/join`, { token: joiner.token });
     assert.equal(admitted.status, 201);
   });
 
   it("releases tournament exposure after leaving a pending bracket", async () => {
     const joiner = await createUser();
     const tournamentIds = [];
-    for (let index = 0; index < 5; index += 1) {
+    for (let index = 0; index < 9; index += 1) {
       const creator = await createUser();
       const created = await tournamentRequest("POST", "/tournaments", creator, {
         name: `Bracket release ${index}`,
@@ -1174,7 +1174,7 @@ describe("funded exposure admission", () => {
       assert.equal(created.status, 201);
       tournamentIds.push((await created.json()).tournament.id);
     }
-    for (const tournamentId of tournamentIds.slice(0, 4)) {
+    for (const tournamentId of tournamentIds.slice(0, 8)) {
       assert.equal(
         (await tournamentRequest(
           "POST",
@@ -1187,7 +1187,7 @@ describe("funded exposure admission", () => {
     assert.equal(
       (await tournamentRequest(
         "POST",
-        `/tournaments/${tournamentIds[4]}/join`,
+        `/tournaments/${tournamentIds[8]}/join`,
         joiner,
       )).status,
       409,
@@ -1203,7 +1203,7 @@ describe("funded exposure admission", () => {
     assert.equal(
       (await tournamentRequest(
         "POST",
-        `/tournaments/${tournamentIds[4]}/join`,
+        `/tournaments/${tournamentIds[8]}/join`,
         joiner,
       )).status,
       201,

@@ -2,8 +2,11 @@ const { ConflictError } = require("../../../shared/errors/AppError");
 const { durationPoints } = require("../../../shared/economy/prizePool");
 const { lockCompetitionRows } = require("./raceWriteFence");
 
-const FUNDED_EXPOSURE_LIMIT_MILLICOINS = 300_000;
-const FUNDED_EXPOSURE_RATE_LIMIT_MILLICOINS_PER_DAY = 40_000;
+// Keep the abuse guard, but allow twice the previously approved concurrent
+// funded-race exposure. These values are stamped into conflict metadata only;
+// existing memberships retain their original exposure reservations.
+const FUNDED_EXPOSURE_LIMIT_MILLICOINS = 600_000;
+const FUNDED_EXPOSURE_RATE_LIMIT_MILLICOINS_PER_DAY = 80_000;
 const PRIZE_CALCULATION_VERSION_V2 = 2;
 const PRIZE_COIN_UNIT_V1 = 20;
 const PRIZE_COIN_UNIT_V2 = 10;
