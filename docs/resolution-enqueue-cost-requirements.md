@@ -12,9 +12,7 @@ are long because of the statement identified below. Do not implement it.
 > **Historical harness notice:** The frontend production-mix, profiling, and
 > database-sampling scripts used for the measurements below were retired in
 > 2026-08. Commands and script names in this document are archival evidence,
-> not current instructions. Use the frontend repository's `k6/README.md` for
-> the supported smoke/find/confirm/soak capacity workflow; its replacement
-> profile is not directly comparable to these results.
+> not current instructions; no current capacity workflow is maintained here.
 
 ---
 
@@ -395,11 +393,8 @@ The baseline was 61 rps against staging (1 worker,
 only to identify how that measurement was run; do not use it as a current
 capacity test:
 
-```bash
-cd ~/repos/stepv2-frontend/k6
-k6 run -e FAST=1 -e TARGET_ONLY=dau_5000 -e DURATION_OVERRIDE=90s \
-  --out csv=/tmp/after.csv prod-mix-load-test.js
-```
+The original command is intentionally omitted because the retired harness is
+no longer part of either repository.
 
 | metric | baseline | target |
 |---|---|---|
@@ -425,7 +420,7 @@ Per-request query counts are available by setting
 the same way in both halves of any before/after comparison.
 
 The retired tooling used for this historical investigation lived in the
-**frontend** repo's `k6/` directory:
+**frontend** repository:
 
 | historical script | measured |
 |---|---|

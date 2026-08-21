@@ -10,9 +10,8 @@ can be measured independently.
 > **Historical harness notice:** The frontend production-mix harness and
 > commands discussed in this investigation were retired in 2026-08. They are
 > retained here only to explain the dated evidence and must not be used as the
-> current capacity workflow. See the frontend repository's `k6/README.md` for
-> the supported smoke/find/confirm/soak workflow. Results from the replacement
-> profile are not directly comparable to this historical profile.
+> current capacity workflow. Results from any replacement profile are not
+> directly comparable to this historical profile.
 
 No result in this document authorizes a production deploy or production data
 change. Production requires explicit, in-the-moment approval. Every proposed
@@ -21,7 +20,7 @@ backend change must preserve the behavior expected by frozen older clients.
 Tested revisions:
 
 - Backend staging checkout: `f86dd81`
-- Frontend checkout: `17ca1a8`, plus uncommitted k6 harness corrections
+- Frontend checkout: `17ca1a8`, plus uncommitted harness corrections
 - Topology: one staging PM2 worker; production remained at two workers, with
   cron ownership on production instance 0
 - Staging PgBouncer pool: temporarily 20 during measured load; verified restored
@@ -35,7 +34,7 @@ authorize any proposed code change below.
 
 ## Capacity conversion
 
-The old k6 scenario names (`dau_1250`, `dau_2500`, and so on) are stale and
+The old scenario names (`dau_1250`, `dau_2500`, and so on) are stale and
 must not be quoted as current DAU capacity. Production traffic measured on
 2026-08-17 was:
 
@@ -61,7 +60,7 @@ claim. Production is never inferred by applying an exact 2x worker multiplier.
 
 The retired production-mix harness had three correctness defects in
 race-resolution polling. At the time, they were corrected locally in the
-frontend repository's since-deleted `k6/prod-mix-load-test.js`:
+frontend repository's since-deleted load-test script:
 
 1. Idempotency keys are canonical UUIDv4 values accepted by the backend.
 2. Resolution polls include the required generation.
@@ -124,7 +123,7 @@ integration test and preserves the existing response shape.
 | 15 rps for 90s | 1,351 (15.003/s) | 0 | 0 | 3.40s | 11.17s max |
 | 31 rps for 30s | 882 (23.17/s effective) | 1 timeout | 49 | 14.23s | 29.96s max |
 
-The generic k6 `http_req_failed` values are not capacity failures by
+The generic request-failure values are not capacity failures by
 themselves. They include the expected legacy `/challenges/current` 404s and two
 participant-access 403s. The custom hard-failure metric counts status 0 and
 5xx responses.
@@ -329,8 +328,9 @@ contract.
 #### Evidence
 
 The conservative staging test intentionally uses one PM2 process. Instance 0
-serves HTTP and runs all schedulers. At 31 rps, k6 expanded to 173 VUs, completed
-only 23.17 requests/second, dropped 49 scheduled arrivals, and took about eight
+serves HTTP and runs all schedulers. At 31 rps, the load generator expanded to
+173 virtual users, completed only 23.17 requests/second, dropped 49 scheduled
+arrivals, and took about eight
 seconds after offered load stopped to drain. Staging RSS reached about 451 MB;
 the shared host fell to 183 MB available until staging was gracefully reloaded.
 

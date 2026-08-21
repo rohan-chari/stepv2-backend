@@ -1,7 +1,7 @@
 # pm2 cluster scaling plan
 
 Status: **IMPLEMENTED AND LIVE IN PROD, 2026-08-15, commit `d23ec2e`.**
-Written earlier the same day after a k6 load test against staging exposed
+Written earlier the same day after a load test against staging exposed
 the ceiling this plan addresses; validated on a staging clone of prod data
 across three load-test runs, then shipped to prod. Both `steps-tracker` and
 `steps-tracker-staging` now run 2 pm2 cluster instances with the
@@ -9,16 +9,14 @@ across three load-test runs, then shipped to prod. Both `steps-tracker` and
 section at the bottom for the final state; everything above it is the
 original pre-implementation plan, kept for the reasoning trail.
 
-> **Historical load-test reference:** The frontend
-> `k6/staging-load-test.js` harness cited below was retired in 2026-08. The
-> dated measurements remain evidence for this plan, but the command is not a
-> current capacity workflow. Use the frontend repository's `k6/README.md` for
-> the supported smoke/find/confirm/soak workflow.
+> **Historical load-test reference:** The frontend harness cited below was
+> retired in 2026-08. The dated measurements remain evidence for this plan,
+> but the command is not a current capacity workflow.
 
 ## How we got here
 
-A k6 load test against staging (the since-retired
-`k6/staging-load-test.js` in the frontend repo) on 2026-08-15 found two
+A load test against staging (using the since-retired frontend harness) on
+2026-08-15 found two
 stacked bottlenecks on the droplet
 (`167.172.225.16`, 2 vCPU / 2 GB RAM / 60 GB disk as of today, shared by
 `steps-tracker` (prod) and `steps-tracker-staging` as separate pm2
@@ -108,8 +106,9 @@ logs, run it through a normal day, then repeat for prod.
 2. Bump staging to `instances: 2`. Watch for a day: cron logs fire once per
    tick, no duplicate race resolutions/pushes, memory stays within budget.
 3. Repeat for prod once staging has soaked cleanly.
-4. Re-run the k6 harness against 2-instance staging to find the new ceiling
-   (this current plan doesn't itself promise the ceiling — it just removes
+4. Future capacity measurements require a separately maintained load generator
+   against 2-instance staging to find the new ceiling (this current plan doesn't
+   itself promise the ceiling — it just removes
    the single-process cap; CPU/RAM/DB connection limits could be the next
    wall).
 

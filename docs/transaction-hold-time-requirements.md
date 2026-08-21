@@ -11,9 +11,7 @@
 > **Historical harness notice:** The frontend production-mix harness and
 > staging-clone workflow used for the measurements below were retired in
 > 2026-08. Commands in this document are archival evidence, not runnable
-> instructions. Use the frontend repository's `k6/README.md` for the supported
-> smoke/find/confirm/soak workflow; its replacement profile is not directly
-> comparable to these results.
+> instructions; no current capacity workflow is maintained here.
 
 # Transaction hold-time reduction — requirements
 
@@ -27,8 +25,7 @@ buying hardware.
 ## 1. The problem, measured
 
 Load test against staging on prod-cloned data, 400 distinct user identities,
-driven at the measured prod request mix using the now-retired frontend k6
-harness.
+driven at the measured prod request mix using the now-retired frontend harness.
 
 | Offered load | ok | 5xx | p95 |
 |---|---|---|---|
@@ -267,11 +264,8 @@ The baseline is recorded, but the harness no longer exists. The following
 command is preserved only to identify how the 2026-08-16 comparison was run;
 do not run it as a current capacity test:
 
-```bash
-cd ~/repos/stepv2-frontend/k6
-k6 run -e FAST=1 -e TARGET_ONLY=dau_5000 -e DURATION_OVERRIDE=1m \
-  --out csv=/tmp/after.csv prod-mix-load-test.js
-```
+The original command is intentionally omitted because the retired harness is
+no longer part of either repository.
 
 Compare against the 2026-08-16 baseline at 61 rps: **52.6% ok / 19.2% 5xx /
 p95 30 s**.
@@ -291,8 +285,7 @@ percentage.
 
 At the time, a like-for-like comparison required re-syncing staging from prod
 and temporarily raising `bara-staging-pool` to 20. That staging-clone procedure
-is not part of the replacement harness. Follow the frontend `k6/README.md` for
-the current non-production fixture and target-safety contract.
+is archival and is not a current capacity workflow.
 
 ---
 
