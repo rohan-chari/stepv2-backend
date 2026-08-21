@@ -67,12 +67,43 @@ const pool = new pg.Pool({
     : { ssl: { rejectUnauthorized: false } }),
 });
 
+let poolWaitMsTotal = 0;
+let poolWaitCount = 0;
+let poolWaitMsMax = 0;
+const originalPoolConnect = pool.connect.bind(pool);
+pool.connect = (callback) => {
+  const started = process.hrtime.bigint();
+  const record = () => {
+    const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6;
+    poolWaitMsTotal += elapsedMs;
+    poolWaitCount += 1;
+    poolWaitMsMax = Math.max(poolWaitMsMax, elapsedMs);
+  };
+  if (typeof callback === "function") {
+    return originalPoolConnect((error, client, release) => {
+      record();
+      callback(error, client, release);
+    });
+  }
+  return originalPoolConnect().then((client) => {
+    record();
+    return client;
+  }, (error) => {
+    record();
+    throw error;
+  });
+};
+
 function getDbPoolPressure() {
   return {
     total: pool.totalCount,
     idle: pool.idleCount,
     waiting: pool.waitingCount,
     max: databasePoolMax,
+    waitMsTotal: poolWaitMsTotal,
+    waitCount: poolWaitCount,
+    waitMsMax: poolWaitMsMax,
+    waitMsAverage: poolWaitCount ? poolWaitMsTotal / poolWaitCount : 0,
   };
 }
 

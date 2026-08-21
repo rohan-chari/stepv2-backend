@@ -1,0 +1,6 @@
+run=load-20260821m target=capacity-vm profile=full-app@1.0.0
+coverageRequests=27
+offered=5/s achieved=16.33/s requests=5392 errorRate=0.00%
+latency p50/p95/p99=22.60475/77.755292/100.49125ms stop=completed
+worstP95=GET /races/:raceId/powerups/use-context (461.022041ms)
+worstErrors=GET /health (0)

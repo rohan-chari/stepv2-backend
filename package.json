@@ -33,7 +33,10 @@
     "reset-review": "node scripts/reset-app-review.js",
     "seed": "node prisma/seed.js",
     "perf:fixtures": "node scripts/perf/generateFixtures.js",
-    "perf:benchmark": "node scripts/perf/benchmark.js"
+    "perf:benchmark": "node scripts/perf/benchmark.js",
+    "capacity": "node scripts/capacity.js",
+    "capacity:db": "node scripts/capacity-db.js",
+    "load-test": "node scripts/load-test.js"
   },
   "prisma": {
     "seed": "node prisma/seed.js"

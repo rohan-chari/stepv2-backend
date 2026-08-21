@@ -1,0 +1,4011 @@
+{
+  "schema": "capacity-metrics-v1",
+  "summary": {
+    "samples": 56,
+    "backend": {
+      "cpuPercent": [
+        0,
+        0,
+        0.01,
+        0,
+        87.43,
+        4.87,
+        25.52,
+        16.64,
+        25.07,
+        16.5,
+        34.3,
+        21.39,
+        31.14,
+        7.83,
+        33.88,
+        24.81,
+        23.37,
+        25.19,
+        29.52,
+        4.37,
+        39.51,
+        29.43,
+        29.42,
+        17.82,
+        24.65,
+        27.26,
+        30.37,
+        62.34,
+        14.55,
+        16.59,
+        28.28,
+        8.26,
+        25.65,
+        28.77,
+        0.04,
+        13.34,
+        9.19,
+        14.99,
+        13.19,
+        14.5,
+        15.26,
+        7.7,
+        20.48,
+        13.21,
+        11.67,
+        20.38,
+        20.09,
+        11.95,
+        11.66,
+        16.67,
+        0.33,
+        0,
+        0.03,
+        0,
+        0.02,
+        0
+      ],
+      "memoryRaw": [
+        388.1,
+        388.5,
+        388.7,
+        388.7,
+        762.3,
+        910.4,
+        915.5,
+        1013,
+        954.1,
+        986.8,
+        1.014,
+        1.034,
+        1.134,
+        1.135,
+        1.126,
+        1.128,
+        1.15,
+        1.146,
+        1.145,
+        1.145,
+        1.156,
+        1.151,
+        1.115,
+        1.117,
+        1.118,
+        1.115,
+        1.116,
+        1.139,
+        1.139,
+        1.131,
+        1.134,
+        1.13,
+        1.132,
+        1.132,
+        1.131,
+        1.131,
+        1.132,
+        1.132,
+        1.132,
+        1.13,
+        1.13,
+        1.13,
+        1.127,
+        1.127,
+        1.127,
+        1.127,
+        1.127,
+        1.127,
+        1.127,
+        1.127,
+        1.127,
+        1.127,
+        1.126,
+        1.126,
+        1.127,
+        1.127
+      ]
+    },
+    "database": {
+      "cpuPercent": [
+        102.97,
+        20.22,
+        21.7,
+        24.11,
+        12.06,
+        0.95,
+        8.5,
+        3.96,
+        11.46,
+        5.75,
+        7.12,
+        7.27,
+        7.4,
+        4.05,
+        6.26,
+        6.67,
+        8.39,
+        5.96,
+        5.07,
+        1.98,
+        6.38,
+        9.07,
+        7.46,
+        4.23,
+        4.23,
+        7.68,
+        23.32,
+        18.96,
+        4.15,
+        5.09,
+        6.22,
+        5.19,
+        6.32,
+        6.92,
+        0.03,
+        3.87,
+        3.92,
+        3.86,
+        3.12,
+        4.63,
+        4.05,
+        2.79,
+        3.51,
+        4.01,
+        3.78,
+        4,
+        4.39,
+        3.94,
+        3.65,
+        4.89,
+        88.41,
+        98.7,
+        94.68,
+        0.1,
+        0.66,
+        0.03
+      ],
+      "memoryRaw": [
+        229,
+        214.9,
+        215.4,
+        215.7,
+        270.7,
+        287.7,
+        288.5,
+        287.2,
+        288.4,
+        288.4,
+        288.4,
+        289.1,
+        291.4,
+        292.2,
+        294,
+        294,
+        294.9,
+        296.2,
+        286.3,
+        286.4,
+        298.5,
+        300.2,
+        300,
+        300.6,
+        300.9,
+        301.9,
+        301,
+        299.8,
+        299.7,
+        300,
+        299.7,
+        300.3,
+        301.2,
+        301.1,
+        301.7,
+        306.7,
+        311.8,
+        312,
+        311.6,
+        311.8,
+        312,
+        311.9,
+        311.6,
+        311.6,
+        311.9,
+        311.6,
+        311.9,
+        312,
+        311.8,
+        311.8,
+        313.3,
+        313.2,
+        336.5,
+        313.9,
+        313.8,
+        313.8
+      ]
+    },
+    "redis": {
+      "cpuPercent": [
+        0.05,
+        0.06,
+        0.06,
+        0.05,
+        27.38,
+        0.23,
+        0.62,
+        0.18,
+        0.46,
+        0.36,
+        0.59,
+        0.44,
+        0.21,
+        0.26,
+        0.64,
+        0.41,
+        0.31,
+        0.3,
+        0.63,
+        0.34,
+        0.8,
+        0.81,
+        0.21,
+        0.39,
+        0.62,
+        0.17,
+        0.39,
+        1.2,
+        0.46,
+        0.19,
+        0.7,
+        0.24,
+        0.42,
+        0.62,
+        0.26,
+        1.01,
+        0.25,
+        0.21,
+        0.23,
+        0.26,
+        0.25,
+        0.2,
+        0.25,
+        0.25,
+        0.21,
+        0.23,
+        0.23,
+        0.23,
+        0.3,
+        0.24,
+        0.07,
+        0.06,
+        0.08,
+        0.26,
+        0.26,
+        0.23
+      ],
+      "memoryRaw": [
+        3.812,
+        4.07,
+        4.066,
+        4.059,
+        12.9,
+        15.89,
+        15.98,
+        16.17,
+        16.12,
+        12.03,
+        14.66,
+        14.6,
+        15,
+        15.72,
+        13.82,
+        14.61,
+        14.68,
+        14.98,
+        14.76,
+        13.27,
+        15.07,
+        14.93,
+        15.1,
+        14.92,
+        14.15,
+        14.14,
+        14.41,
+        14.69,
+        14.95,
+        13.29,
+        14.4,
+        14.35,
+        14.1,
+        14.1,
+        12.2,
+        12.2,
+        12.2,
+        12.19,
+        12.18,
+        11.93,
+        11.81,
+        12.05,
+        12.04,
+        12.04,
+        12.04,
+        12.03,
+        12.03,
+        12.03,
+        12.02,
+        12.02,
+        12.02,
+        12.02,
+        11.73,
+        12.22,
+        12.21,
+        12.21
+      ]
+    },
+    "dbPool": {
+      "max": 20,
+      "peakTotal": 7,
+      "peakWaiting": 0,
+      "utilizationPercentPeak": 35,
+      "waitMsAverage": 0.045855307132867146,
+      "waitMsMax": 19.670836,
+      "waitCount": 3575
+    }
+  },
+  "samples": [
+    {
+      "at": "2026-08-21T19:27:30.646Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 1,
+            "idle": 1,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 7.831083,
+            "waitCount": 1,
+            "waitMsMax": 7.831083,
+            "waitMsAverage": 7.831083
+          },
+          "memory": {
+            "rss": 214511616,
+            "heapTotal": 49262592,
+            "heapUsed": 46679952,
+            "external": 6716628,
+            "arrayBuffers": 20093
+          },
+          "cpu": {
+            "user": 666093,
+            "system": 153713
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "0.00%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "6.32%",
+          "MemUsage": "388.1MiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "40"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.05%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "2.98%",
+          "MemUsage": "3.812MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "138MB / 7.01GB",
+          "CPUPerc": "102.97%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "11.18%",
+          "MemUsage": "229MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "321MB / 454kB",
+          "PIDs": "13"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:27:32.826Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 1,
+            "idle": 1,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 7.831083,
+            "waitCount": 1,
+            "waitMsMax": 7.831083,
+            "waitMsAverage": 7.831083
+          },
+          "memory": {
+            "rss": 214642688,
+            "heapTotal": 49262592,
+            "heapUsed": 46801872,
+            "external": 6716635,
+            "arrayBuffers": 20100
+          },
+          "cpu": {
+            "user": 668261,
+            "system": 153713
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "0.00%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "6.32%",
+          "MemUsage": "388.5MiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "40"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.06%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "3.18%",
+          "MemUsage": "4.07MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "138MB / 7.05GB",
+          "CPUPerc": "20.22%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "10.49%",
+          "MemUsage": "214.9MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "330MB / 7.52MB",
+          "PIDs": "11"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:27:34.830Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 1,
+            "idle": 1,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 7.831083,
+            "waitCount": 1,
+            "waitMsMax": 7.831083,
+            "waitMsAverage": 7.831083
+          },
+          "memory": {
+            "rss": 214773760,
+            "heapTotal": 49262592,
+            "heapUsed": 46906872,
+            "external": 6716642,
+            "arrayBuffers": 20107
+          },
+          "cpu": {
+            "user": 669416,
+            "system": 153770
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "0.01%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "6.33%",
+          "MemUsage": "388.7MiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "40"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.06%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "3.18%",
+          "MemUsage": "4.066MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "140MB / 7.08GB",
+          "CPUPerc": "21.70%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "10.52%",
+          "MemUsage": "215.4MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "339MB / 14.2MB",
+          "PIDs": "11"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:27:36.835Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 1,
+            "idle": 1,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 7.831083,
+            "waitCount": 1,
+            "waitMsMax": 7.831083,
+            "waitMsAverage": 7.831083
+          },
+          "memory": {
+            "rss": 214773760,
+            "heapTotal": 49262592,
+            "heapUsed": 46992856,
+            "external": 6716649,
+            "arrayBuffers": 20114
+          },
+          "cpu": {
+            "user": 670578,
+            "system": 153802
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "0.00%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "6.33%",
+          "MemUsage": "388.7MiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "40"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.05%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "3.17%",
+          "MemUsage": "4.059MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "140MB / 7.12GB",
+          "CPUPerc": "24.11%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "10.53%",
+          "MemUsage": "215.7MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "349MB / 20.7MB",
+          "PIDs": "11"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:27:38.840Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 1,
+            "idle": 1,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 7.831083,
+            "waitCount": 1,
+            "waitMsMax": 7.831083,
+            "waitMsAverage": 7.831083
+          },
+          "memory": {
+            "rss": 214904832,
+            "heapTotal": 49262592,
+            "heapUsed": 47087176,
+            "external": 6716656,
+            "arrayBuffers": 20121
+          },
+          "cpu": {
+            "user": 671822,
+            "system": 153852
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "87.43%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "12.41%",
+          "MemUsage": "762.3MiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "27.38%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "10.08%",
+          "MemUsage": "12.9MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "151MB / 7.13GB",
+          "CPUPerc": "12.06%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "13.22%",
+          "MemUsage": "270.7MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "353MB / 38.7MB",
+          "PIDs": "18"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:27:40.850Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 4,
+            "idle": 4,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 44.93528999999999,
+            "waitCount": 135,
+            "waitMsMax": 7.831083,
+            "waitMsAverage": 0.3328539999999999
+          },
+          "memory": {
+            "rss": 378908672,
+            "heapTotal": 165462016,
+            "heapUsed": 139921656,
+            "external": 7274235,
+            "arrayBuffers": 575652
+          },
+          "cpu": {
+            "user": 1809128,
+            "system": 204353
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "4.87%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "14.82%",
+          "MemUsage": "910.4MiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.23%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "12.41%",
+          "MemUsage": "15.89MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "151MB / 7.13GB",
+          "CPUPerc": "0.95%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "14.05%",
+          "MemUsage": "287.7MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "355MB / 49.7MB",
+          "PIDs": "20"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:27:42.866Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 5,
+            "idle": 5,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 59.14808299999996,
+            "waitCount": 227,
+            "waitMsMax": 10.781811,
+            "waitMsAverage": 0.2605642422907487
+          },
+          "memory": {
+            "rss": 469643264,
+            "heapTotal": 180015104,
+            "heapUsed": 113754984,
+            "external": 6800069,
+            "arrayBuffers": 105129
+          },
+          "cpu": {
+            "user": 2270206,
+            "system": 246324
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "25.52%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "14.90%",
+          "MemUsage": "915.5MiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.62%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "12.49%",
+          "MemUsage": "15.98MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "151MB / 7.13GB",
+          "CPUPerc": "8.50%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "14.09%",
+          "MemUsage": "288.5MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "355MB / 57.3MB",
+          "PIDs": "20"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:27:44.868Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 5,
+            "idle": 5,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 63.529744999999956,
+            "waitCount": 351,
+            "waitMsMax": 10.781811,
+            "waitMsAverage": 0.18099642450142436
+          },
+          "memory": {
+            "rss": 476262400,
+            "heapTotal": 239054848,
+            "heapUsed": 213248040,
+            "external": 9686224,
+            "arrayBuffers": 2991284
+          },
+          "cpu": {
+            "user": 2656766,
+            "system": 256944
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "16.64%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "16.49%",
+          "MemUsage": "1013MiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.18%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "12.63%",
+          "MemUsage": "16.17MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "151MB / 7.14GB",
+          "CPUPerc": "3.96%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "14.02%",
+          "MemUsage": "287.2MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "357MB / 64.7MB",
+          "PIDs": "20"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:27:46.883Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 5,
+            "idle": 5,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 67.13191100000002,
+            "waitCount": 415,
+            "waitMsMax": 10.781811,
+            "waitMsAverage": 0.16176364096385545
+          },
+          "memory": {
+            "rss": 573390848,
+            "heapTotal": 173068288,
+            "heapUsed": 52418472,
+            "external": 8829025,
+            "arrayBuffers": 2134085
+          },
+          "cpu": {
+            "user": 3022069,
+            "system": 319119
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "25.07%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "15.53%",
+          "MemUsage": "954.1MiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.46%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "12.60%",
+          "MemUsage": "16.12MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "151MB / 7.14GB",
+          "CPUPerc": "11.46%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "14.08%",
+          "MemUsage": "288.4MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "357MB / 71.2MB",
+          "PIDs": "20"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:27:48.889Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 5,
+            "idle": 4,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 70.72494100000007,
+            "waitCount": 486,
+            "waitMsMax": 10.781811,
+            "waitMsAverage": 0.14552456995884788
+          },
+          "memory": {
+            "rss": 574570496,
+            "heapTotal": 174198784,
+            "heapUsed": 77669744,
+            "external": 8854946,
+            "arrayBuffers": 2160006
+          },
+          "cpu": {
+            "user": 3141489,
+            "system": 323699
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "16.50%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "16.06%",
+          "MemUsage": "986.8MiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.36%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "9.40%",
+          "MemUsage": "12.03MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "151MB / 7.14GB",
+          "CPUPerc": "5.75%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "14.08%",
+          "MemUsage": "288.4MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "359MB / 79.6MB",
+          "PIDs": "20"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:27:50.913Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 5,
+            "idle": 5,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 71.81473700000005,
+            "waitCount": 539,
+            "waitMsMax": 10.781811,
+            "waitMsAverage": 0.13323698886827468
+          },
+          "memory": {
+            "rss": 576786432,
+            "heapTotal": 204607488,
+            "heapUsed": 170524968,
+            "external": 10457316,
+            "arrayBuffers": 3762376
+          },
+          "cpu": {
+            "user": 3368591,
+            "system": 335953
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "34.30%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "16.90%",
+          "MemUsage": "1.014GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.59%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "11.46%",
+          "MemUsage": "14.66MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "151MB / 7.14GB",
+          "CPUPerc": "7.12%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "14.08%",
+          "MemUsage": "288.4MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "361MB / 94MB",
+          "PIDs": "20"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:27:52.912Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 5,
+            "idle": 5,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 73.54707100000003,
+            "waitCount": 605,
+            "waitMsMax": 10.781811,
+            "waitMsAverage": 0.1215654066115703
+          },
+          "memory": {
+            "rss": 575520768,
+            "heapTotal": 205860864,
+            "heapUsed": 114365736,
+            "external": 8227401,
+            "arrayBuffers": 1532461
+          },
+          "cpu": {
+            "user": 3687053,
+            "system": 346792
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "21.39%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "17.23%",
+          "MemUsage": "1.034GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.44%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "11.41%",
+          "MemUsage": "14.6MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "151MB / 7.14GB",
+          "CPUPerc": "7.27%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "14.12%",
+          "MemUsage": "289.1MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "363MB / 103MB",
+          "PIDs": "20"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:27:54.920Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 5,
+            "idle": 5,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 76.35840100000004,
+            "waitCount": 685,
+            "waitMsMax": 10.781811,
+            "waitMsAverage": 0.11147211824817524
+          },
+          "memory": {
+            "rss": 577019904,
+            "heapTotal": 213749760,
+            "heapUsed": 187722864,
+            "external": 6955447,
+            "arrayBuffers": 260507
+          },
+          "cpu": {
+            "user": 3939584,
+            "system": 358692
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "31.14%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "18.90%",
+          "MemUsage": "1.134GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.21%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "11.72%",
+          "MemUsage": "15MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "151MB / 7.14GB",
+          "CPUPerc": "7.40%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "14.23%",
+          "MemUsage": "291.4MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "367MB / 122MB",
+          "PIDs": "20"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:27:56.926Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 5,
+            "idle": 5,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 87.09857700000002,
+            "waitCount": 725,
+            "waitMsMax": 10.781811,
+            "waitMsAverage": 0.12013596827586209
+          },
+          "memory": {
+            "rss": 588681216,
+            "heapTotal": 301338624,
+            "heapUsed": 266965208,
+            "external": 8549336,
+            "arrayBuffers": 1854396
+          },
+          "cpu": {
+            "user": 4298618,
+            "system": 366844
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "7.83%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "18.92%",
+          "MemUsage": "1.135GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.26%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "12.28%",
+          "MemUsage": "15.72MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "151MB / 7.14GB",
+          "CPUPerc": "4.05%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "14.27%",
+          "MemUsage": "292.2MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "368MB / 131MB",
+          "PIDs": "20"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:27:58.933Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 5,
+            "idle": 5,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 87.35749100000002,
+            "waitCount": 744,
+            "waitMsMax": 10.781811,
+            "waitMsAverage": 0.11741598252688175
+          },
+          "memory": {
+            "rss": 587132928,
+            "heapTotal": 327798784,
+            "heapUsed": 290673512,
+            "external": 8581657,
+            "arrayBuffers": 1886717
+          },
+          "cpu": {
+            "user": 4363729,
+            "system": 369091
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "33.88%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "18.76%",
+          "MemUsage": "1.126GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.64%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "10.80%",
+          "MemUsage": "13.82MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "152MB / 7.15GB",
+          "CPUPerc": "6.26%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "14.35%",
+          "MemUsage": "294MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "370MB / 144MB",
+          "PIDs": "20"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:28:00.952Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 5,
+            "idle": 5,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 88.28069200000004,
+            "waitCount": 792,
+            "waitMsMax": 10.781811,
+            "waitMsAverage": 0.11146552020202026
+          },
+          "memory": {
+            "rss": 581976064,
+            "heapTotal": 210661376,
+            "heapUsed": 75058128,
+            "external": 10524340,
+            "arrayBuffers": 3829400
+          },
+          "cpu": {
+            "user": 4556297,
+            "system": 375248
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "24.81%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "18.81%",
+          "MemUsage": "1.128GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.41%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "11.42%",
+          "MemUsage": "14.61MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "152MB / 7.15GB",
+          "CPUPerc": "6.67%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "14.36%",
+          "MemUsage": "294MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "372MB / 155MB",
+          "PIDs": "20"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:28:02.959Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 5,
+            "idle": 5,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 92.02785600000011,
+            "waitCount": 893,
+            "waitMsMax": 10.781811,
+            "waitMsAverage": 0.1030547099664055
+          },
+          "memory": {
+            "rss": 583438336,
+            "heapTotal": 226103296,
+            "heapUsed": 190906488,
+            "external": 9131319,
+            "arrayBuffers": 2436379
+          },
+          "cpu": {
+            "user": 4893391,
+            "system": 383065
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "23.37%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "19.17%",
+          "MemUsage": "1.15GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.31%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "11.47%",
+          "MemUsage": "14.68MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "152MB / 7.15GB",
+          "CPUPerc": "8.39%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "14.40%",
+          "MemUsage": "294.9MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "372MB / 161MB",
+          "PIDs": "20"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:28:04.981Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 5,
+            "idle": 5,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 94.08716000000005,
+            "waitCount": 963,
+            "waitMsMax": 10.781811,
+            "waitMsAverage": 0.09770213914849435
+          },
+          "memory": {
+            "rss": 584540160,
+            "heapTotal": 261050368,
+            "heapUsed": 227671096,
+            "external": 10795456,
+            "arrayBuffers": 4100516
+          },
+          "cpu": {
+            "user": 5053526,
+            "system": 388732
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "25.19%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "19.11%",
+          "MemUsage": "1.146GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.30%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "11.71%",
+          "MemUsage": "14.98MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "152MB / 7.15GB",
+          "CPUPerc": "5.96%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "14.47%",
+          "MemUsage": "296.2MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "373MB / 166MB",
+          "PIDs": "20"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:28:06.989Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 5,
+            "idle": 5,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 98.85718700000002,
+            "waitCount": 1091,
+            "waitMsMax": 10.781811,
+            "waitMsAverage": 0.09061153712190653
+          },
+          "memory": {
+            "rss": 580734976,
+            "heapTotal": 201117696,
+            "heapUsed": 83741848,
+            "external": 8228759,
+            "arrayBuffers": 1533819
+          },
+          "cpu": {
+            "user": 5336033,
+            "system": 401107
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "29.52%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "19.09%",
+          "MemUsage": "1.145GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.63%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "11.53%",
+          "MemUsage": "14.76MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "152MB / 7.15GB",
+          "CPUPerc": "5.07%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "13.98%",
+          "MemUsage": "286.3MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "374MB / 174MB",
+          "PIDs": "19"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:28:09.010Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 5,
+            "idle": 5,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 102.66903699999999,
+            "waitCount": 1220,
+            "waitMsMax": 10.781811,
+            "waitMsAverage": 0.08415494836065573
+          },
+          "memory": {
+            "rss": 583163904,
+            "heapTotal": 205737984,
+            "heapUsed": 172918616,
+            "external": 9957725,
+            "arrayBuffers": 3262785
+          },
+          "cpu": {
+            "user": 5628454,
+            "system": 414685
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "4.37%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "19.08%",
+          "MemUsage": "1.145GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.34%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "10.37%",
+          "MemUsage": "13.27MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "152MB / 7.15GB",
+          "CPUPerc": "1.98%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "13.98%",
+          "MemUsage": "286.4MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "375MB / 181MB",
+          "PIDs": "19"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:28:11.018Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 5,
+            "idle": 4,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 107.26556000000002,
+            "waitCount": 1350,
+            "waitMsMax": 10.781811,
+            "waitMsAverage": 0.07945597037037039
+          },
+          "memory": {
+            "rss": 582414336,
+            "heapTotal": 216821760,
+            "heapUsed": 94848128,
+            "external": 7278179,
+            "arrayBuffers": 583239
+          },
+          "cpu": {
+            "user": 5954471,
+            "system": 425104
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "39.51%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "19.26%",
+          "MemUsage": "1.156GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.80%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "11.77%",
+          "MemUsage": "15.07MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "152MB / 7.15GB",
+          "CPUPerc": "6.38%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "14.58%",
+          "MemUsage": "298.5MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "377MB / 197MB",
+          "PIDs": "19"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:28:13.023Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 5,
+            "idle": 5,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 117.37840700000004,
+            "waitCount": 1436,
+            "waitMsMax": 10.781811,
+            "waitMsAverage": 0.08173983774373261
+          },
+          "memory": {
+            "rss": 594661376,
+            "heapTotal": 267149312,
+            "heapUsed": 235634376,
+            "external": 8552746,
+            "arrayBuffers": 1857806
+          },
+          "cpu": {
+            "user": 6476430,
+            "system": 437990
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "29.43%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "19.18%",
+          "MemUsage": "1.151GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.81%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "11.66%",
+          "MemUsage": "14.93MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "152MB / 7.15GB",
+          "CPUPerc": "9.07%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "14.66%",
+          "MemUsage": "300.2MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "378MB / 207MB",
+          "PIDs": "19"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:28:15.031Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 5,
+            "idle": 5,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 118.84924200000005,
+            "waitCount": 1496,
+            "waitMsMax": 10.781811,
+            "waitMsAverage": 0.07944468048128345
+          },
+          "memory": {
+            "rss": 583651328,
+            "heapTotal": 225898496,
+            "heapUsed": 105855256,
+            "external": 10645053,
+            "arrayBuffers": 3950113
+          },
+          "cpu": {
+            "user": 6741605,
+            "system": 445427
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "29.42%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "18.58%",
+          "MemUsage": "1.115GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.21%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "11.80%",
+          "MemUsage": "15.1MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "152MB / 7.15GB",
+          "CPUPerc": "7.46%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "14.65%",
+          "MemUsage": "300MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "379MB / 216MB",
+          "PIDs": "19"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:28:17.038Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 5,
+            "idle": 5,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 119.09827800000005,
+            "waitCount": 1515,
+            "waitMsMax": 10.781811,
+            "waitMsAverage": 0.07861272475247529
+          },
+          "memory": {
+            "rss": 584769536,
+            "heapTotal": 227028992,
+            "heapUsed": 131055760,
+            "external": 10686650,
+            "arrayBuffers": 3991710
+          },
+          "cpu": {
+            "user": 6810583,
+            "system": 448421
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "17.82%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "18.61%",
+          "MemUsage": "1.117GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.39%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "11.65%",
+          "MemUsage": "14.92MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "152MB / 7.15GB",
+          "CPUPerc": "4.23%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "14.68%",
+          "MemUsage": "300.6MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "380MB / 222MB",
+          "PIDs": "19"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:28:19.058Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 5,
+            "idle": 5,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 122.16469000000004,
+            "waitCount": 1592,
+            "waitMsMax": 10.781811,
+            "waitMsAverage": 0.07673661432160807
+          },
+          "memory": {
+            "rss": 585265152,
+            "heapTotal": 217788416,
+            "heapUsed": 74092592,
+            "external": 10490633,
+            "arrayBuffers": 3795693
+          },
+          "cpu": {
+            "user": 7089717,
+            "system": 466217
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "24.65%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "18.63%",
+          "MemUsage": "1.118GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.62%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "11.06%",
+          "MemUsage": "14.15MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "153MB / 7.15GB",
+          "CPUPerc": "4.23%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "14.69%",
+          "MemUsage": "300.9MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "381MB / 228MB",
+          "PIDs": "19"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:28:21.067Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 5,
+            "idle": 5,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 123.27845400000011,
+            "waitCount": 1627,
+            "waitMsMax": 10.781811,
+            "waitMsAverage": 0.07577040811309164
+          },
+          "memory": {
+            "rss": 585240576,
+            "heapTotal": 217796608,
+            "heapUsed": 101625312,
+            "external": 10594833,
+            "arrayBuffers": 3899893
+          },
+          "cpu": {
+            "user": 7192392,
+            "system": 468435
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "27.26%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "18.58%",
+          "MemUsage": "1.115GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.17%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "11.04%",
+          "MemUsage": "14.14MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "153MB / 7.15GB",
+          "CPUPerc": "7.68%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "14.74%",
+          "MemUsage": "301.9MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "384MB / 239MB",
+          "PIDs": "19"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:28:23.069Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 5,
+            "idle": 5,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 127.80648500000017,
+            "waitCount": 1730,
+            "waitMsMax": 10.781811,
+            "waitMsAverage": 0.07387658092485559
+          },
+          "memory": {
+            "rss": 581607424,
+            "heapTotal": 203419648,
+            "heapUsed": 162505272,
+            "external": 6807914,
+            "arrayBuffers": 112974
+          },
+          "cpu": {
+            "user": 7660892,
+            "system": 487282
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "30.37%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "18.60%",
+          "MemUsage": "1.116GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.39%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "11.26%",
+          "MemUsage": "14.41MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "153MB / 7.15GB",
+          "CPUPerc": "23.32%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "14.70%",
+          "MemUsage": "301MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "386MB / 252MB",
+          "PIDs": "19"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:28:25.084Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 5,
+            "idle": 5,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 129.4629190000001,
+            "waitCount": 1803,
+            "waitMsMax": 10.781811,
+            "waitMsAverage": 0.07180417027176933
+          },
+          "memory": {
+            "rss": 585539584,
+            "heapTotal": 312545280,
+            "heapUsed": 280246512,
+            "external": 8432326,
+            "arrayBuffers": 1737386
+          },
+          "cpu": {
+            "user": 7953344,
+            "system": 500918
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "62.34%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "18.98%",
+          "MemUsage": "1.139GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "1.20%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "11.48%",
+          "MemUsage": "14.69MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "153MB / 7.15GB",
+          "CPUPerc": "18.96%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "14.64%",
+          "MemUsage": "299.8MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "390MB / 269MB",
+          "PIDs": "19"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:28:27.091Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 5,
+            "idle": 5,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 138.38256800000013,
+            "waitCount": 1861,
+            "waitMsMax": 10.781811,
+            "waitMsAverage": 0.07435925201504574
+          },
+          "memory": {
+            "rss": 604954624,
+            "heapTotal": 228552704,
+            "heapUsed": 124906584,
+            "external": 8283708,
+            "arrayBuffers": 1588768
+          },
+          "cpu": {
+            "user": 8403510,
+            "system": 510732
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "14.55%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "18.98%",
+          "MemUsage": "1.139GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.46%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "11.68%",
+          "MemUsage": "14.95MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "153MB / 7.15GB",
+          "CPUPerc": "4.15%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "14.63%",
+          "MemUsage": "299.7MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "390MB / 274MB",
+          "PIDs": "19"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:28:29.110Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 5,
+            "idle": 5,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 140.65997900000016,
+            "waitCount": 1937,
+            "waitMsMax": 10.781811,
+            "waitMsAverage": 0.07261743882292213
+          },
+          "memory": {
+            "rss": 605204480,
+            "heapTotal": 228560896,
+            "heapUsed": 191517824,
+            "external": 8397323,
+            "arrayBuffers": 1702383
+          },
+          "cpu": {
+            "user": 8624364,
+            "system": 519890
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "16.59%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "18.86%",
+          "MemUsage": "1.131GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.19%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "10.39%",
+          "MemUsage": "13.29MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "153MB / 7.15GB",
+          "CPUPerc": "5.09%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "14.65%",
+          "MemUsage": "300MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "392MB / 284MB",
+          "PIDs": "19"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:28:31.118Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 5,
+            "idle": 5,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 144.07206700000023,
+            "waitCount": 2041,
+            "waitMsMax": 10.781811,
+            "waitMsAverage": 0.07058895982361599
+          },
+          "memory": {
+            "rss": 597123072,
+            "heapTotal": 195817472,
+            "heapUsed": 105747840,
+            "external": 6782642,
+            "arrayBuffers": 87702
+          },
+          "cpu": {
+            "user": 8937563,
+            "system": 530645
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "28.28%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "18.90%",
+          "MemUsage": "1.134GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.70%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "11.25%",
+          "MemUsage": "14.4MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "153MB / 7.15GB",
+          "CPUPerc": "6.22%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "14.63%",
+          "MemUsage": "299.7MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "393MB / 296MB",
+          "PIDs": "19"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:28:33.128Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 5,
+            "idle": 5,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 146.98329400000023,
+            "waitCount": 2204,
+            "waitMsMax": 10.781811,
+            "waitMsAverage": 0.06668933484573514
+          },
+          "memory": {
+            "rss": 599195648,
+            "heapTotal": 212791296,
+            "heapUsed": 96937760,
+            "external": 10581971,
+            "arrayBuffers": 3887031
+          },
+          "cpu": {
+            "user": 9515461,
+            "system": 548968
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "8.26%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "18.83%",
+          "MemUsage": "1.13GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.24%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "11.21%",
+          "MemUsage": "14.35MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "153MB / 7.15GB",
+          "CPUPerc": "5.19%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "14.66%",
+          "MemUsage": "300.3MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "394MB / 302MB",
+          "PIDs": "19"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:28:35.148Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 5,
+            "idle": 5,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 146.98329400000023,
+            "waitCount": 2204,
+            "waitMsMax": 10.781811,
+            "waitMsAverage": 0.06668933484573514
+          },
+          "memory": {
+            "rss": 599195648,
+            "heapTotal": 212791296,
+            "heapUsed": 97023472,
+            "external": 10582764,
+            "arrayBuffers": 3887824
+          },
+          "cpu": {
+            "user": 9518301,
+            "system": 548968
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "25.65%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "18.87%",
+          "MemUsage": "1.132GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.42%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "11.01%",
+          "MemUsage": "14.1MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "153MB / 7.15GB",
+          "CPUPerc": "6.32%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "14.71%",
+          "MemUsage": "301.2MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "395MB / 315MB",
+          "PIDs": "19"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:28:37.154Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 5,
+            "idle": 5,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 146.98329400000023,
+            "waitCount": 2204,
+            "waitMsMax": 10.781811,
+            "waitMsAverage": 0.06668933484573514
+          },
+          "memory": {
+            "rss": 599195648,
+            "heapTotal": 212791296,
+            "heapUsed": 97132632,
+            "external": 10592859,
+            "arrayBuffers": 3897919
+          },
+          "cpu": {
+            "user": 9520163,
+            "system": 549897
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "28.77%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "18.87%",
+          "MemUsage": "1.132GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.62%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "11.01%",
+          "MemUsage": "14.1MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "154MB / 7.15GB",
+          "CPUPerc": "6.92%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "14.70%",
+          "MemUsage": "301.1MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "396MB / 328MB",
+          "PIDs": "19"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:28:39.168Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 5,
+            "idle": 5,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 149.84738900000022,
+            "waitCount": 2360,
+            "waitMsMax": 10.781811,
+            "waitMsAverage": 0.0634946563559323
+          },
+          "memory": {
+            "rss": 599166976,
+            "heapTotal": 183660544,
+            "heapUsed": 148705760,
+            "external": 8389235,
+            "arrayBuffers": 1694295
+          },
+          "cpu": {
+            "user": 9996663,
+            "system": 572443
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "0.04%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "18.85%",
+          "MemUsage": "1.131GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.26%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "9.53%",
+          "MemUsage": "12.2MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "154MB / 7.15GB",
+          "CPUPerc": "0.03%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "14.73%",
+          "MemUsage": "301.7MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "397MB / 330MB",
+          "PIDs": "19"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:28:41.189Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 5,
+            "idle": 5,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 150.43972000000025,
+            "waitCount": 2388,
+            "waitMsMax": 10.781811,
+            "waitMsAverage": 0.06299820770519274
+          },
+          "memory": {
+            "rss": 600346624,
+            "heapTotal": 210743296,
+            "heapUsed": 175222856,
+            "external": 8482515,
+            "arrayBuffers": 1787575
+          },
+          "cpu": {
+            "user": 10073366,
+            "system": 576826
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "13.34%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "18.86%",
+          "MemUsage": "1.131GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "1.01%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "9.53%",
+          "MemUsage": "12.2MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "154MB / 7.15GB",
+          "CPUPerc": "3.87%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "14.98%",
+          "MemUsage": "306.7MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "397MB / 330MB",
+          "PIDs": "21"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:28:43.207Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 5,
+            "idle": 5,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 152.5536350000002,
+            "waitCount": 2490,
+            "waitMsMax": 10.781811,
+            "waitMsAverage": 0.06126652008032137
+          },
+          "memory": {
+            "rss": 600608768,
+            "heapTotal": 214151168,
+            "heapUsed": 182168064,
+            "external": 7106734,
+            "arrayBuffers": 411794
+          },
+          "cpu": {
+            "user": 10179346,
+            "system": 584892
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "9.19%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "18.86%",
+          "MemUsage": "1.132GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.25%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "9.53%",
+          "MemUsage": "12.2MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "154MB / 7.15GB",
+          "CPUPerc": "3.92%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "15.22%",
+          "MemUsage": "311.8MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "397MB / 331MB",
+          "PIDs": "23"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:28:45.228Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 7,
+            "idle": 7,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 193.15572800000044,
+            "waitCount": 2631,
+            "waitMsMax": 19.670836,
+            "waitMsAverage": 0.07341532801216284
+          },
+          "memory": {
+            "rss": 600739840,
+            "heapTotal": 216510464,
+            "heapUsed": 186720104,
+            "external": 7147338,
+            "arrayBuffers": 452334
+          },
+          "cpu": {
+            "user": 10323683,
+            "system": 596814
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "14.99%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "18.86%",
+          "MemUsage": "1.132GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.21%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "9.52%",
+          "MemUsage": "12.19MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "154MB / 7.15GB",
+          "CPUPerc": "3.86%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "15.23%",
+          "MemUsage": "312MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "398MB / 332MB",
+          "PIDs": "23"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:28:47.245Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 7,
+            "idle": 7,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 195.9517350000006,
+            "waitCount": 2799,
+            "waitMsMax": 19.670836,
+            "waitMsAverage": 0.07000776527331211
+          },
+          "memory": {
+            "rss": 600739840,
+            "heapTotal": 219394048,
+            "heapUsed": 188792496,
+            "external": 7096659,
+            "arrayBuffers": 401655
+          },
+          "cpu": {
+            "user": 10451384,
+            "system": 603969
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "13.19%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "18.86%",
+          "MemUsage": "1.132GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.23%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "9.52%",
+          "MemUsage": "12.18MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "154MB / 7.15GB",
+          "CPUPerc": "3.12%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "15.21%",
+          "MemUsage": "311.6MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "398MB / 332MB",
+          "PIDs": "23"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:28:49.254Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 7,
+            "idle": 7,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 198.16620100000063,
+            "waitCount": 2946,
+            "waitMsMax": 19.670836,
+            "waitMsAverage": 0.06726619178547204
+          },
+          "memory": {
+            "rss": 600739840,
+            "heapTotal": 222277632,
+            "heapUsed": 185066592,
+            "external": 6988339,
+            "arrayBuffers": 293335
+          },
+          "cpu": {
+            "user": 10597066,
+            "system": 608530
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "14.50%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "18.84%",
+          "MemUsage": "1.13GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.26%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "9.32%",
+          "MemUsage": "11.93MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "154MB / 7.15GB",
+          "CPUPerc": "4.63%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "15.22%",
+          "MemUsage": "311.8MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "399MB / 333MB",
+          "PIDs": "23"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:28:51.271Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 7,
+            "idle": 7,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 201.88741600000066,
+            "waitCount": 3114,
+            "waitMsMax": 19.670836,
+            "waitMsAverage": 0.06483218240205545
+          },
+          "memory": {
+            "rss": 600739840,
+            "heapTotal": 225685504,
+            "heapUsed": 187955648,
+            "external": 6988339,
+            "arrayBuffers": 293335
+          },
+          "cpu": {
+            "user": 10768985,
+            "system": 620418
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "15.26%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "18.84%",
+          "MemUsage": "1.13GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.25%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "9.23%",
+          "MemUsage": "11.81MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "154MB / 7.15GB",
+          "CPUPerc": "4.05%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "15.23%",
+          "MemUsage": "312MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "399MB / 333MB",
+          "PIDs": "23"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:28:53.286Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 7,
+            "idle": 7,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 204.19294200000058,
+            "waitCount": 3261,
+            "waitMsMax": 19.670836,
+            "waitMsAverage": 0.06261666421343164
+          },
+          "memory": {
+            "rss": 600870912,
+            "heapTotal": 228306944,
+            "heapUsed": 196657552,
+            "external": 7096134,
+            "arrayBuffers": 401130
+          },
+          "cpu": {
+            "user": 10902466,
+            "system": 632288
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "7.70%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "18.84%",
+          "MemUsage": "1.13GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.20%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "9.42%",
+          "MemUsage": "12.05MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "154MB / 7.15GB",
+          "CPUPerc": "2.79%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "15.23%",
+          "MemUsage": "311.9MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "400MB / 334MB",
+          "PIDs": "23"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:28:55.300Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 7,
+            "idle": 7,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 206.18379100000058,
+            "waitCount": 3429,
+            "waitMsMax": 19.670836,
+            "waitMsAverage": 0.06012942286380886
+          },
+          "memory": {
+            "rss": 600870912,
+            "heapTotal": 230666240,
+            "heapUsed": 199576720,
+            "external": 7107990,
+            "arrayBuffers": 412986
+          },
+          "cpu": {
+            "user": 10993113,
+            "system": 638154
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "20.48%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "18.79%",
+          "MemUsage": "1.127GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.25%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "9.41%",
+          "MemUsage": "12.04MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "154MB / 7.15GB",
+          "CPUPerc": "3.51%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "15.22%",
+          "MemUsage": "311.6MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "400MB / 334MB",
+          "PIDs": "23"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:28:57.323Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 7,
+            "idle": 7,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 208.12335600000043,
+            "waitCount": 3576,
+            "waitMsMax": 19.670836,
+            "waitMsAverage": 0.058200043624161195
+          },
+          "memory": {
+            "rss": 597340160,
+            "heapTotal": 125882368,
+            "heapUsed": 63977144,
+            "external": 6947299,
+            "arrayBuffers": 252359
+          },
+          "cpu": {
+            "user": 11188581,
+            "system": 646709
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "13.21%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "18.78%",
+          "MemUsage": "1.127GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.25%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "9.41%",
+          "MemUsage": "12.04MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "154MB / 7.15GB",
+          "CPUPerc": "4.01%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "15.22%",
+          "MemUsage": "311.6MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "401MB / 335MB",
+          "PIDs": "23"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:28:59.338Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 7,
+            "idle": 7,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 210.64444400000036,
+            "waitCount": 3744,
+            "waitMsMax": 19.670836,
+            "waitMsAverage": 0.05626187072649582
+          },
+          "memory": {
+            "rss": 597471232,
+            "heapTotal": 125882368,
+            "heapUsed": 61147520,
+            "external": 6875492,
+            "arrayBuffers": 180552
+          },
+          "cpu": {
+            "user": 11318079,
+            "system": 653853
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "11.67%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "18.79%",
+          "MemUsage": "1.127GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.21%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "9.41%",
+          "MemUsage": "12.04MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "154MB / 7.15GB",
+          "CPUPerc": "3.78%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "15.23%",
+          "MemUsage": "311.9MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "401MB / 336MB",
+          "PIDs": "23"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:29:01.355Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 7,
+            "idle": 7,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 212.8942110000005,
+            "waitCount": 3891,
+            "waitMsMax": 19.670836,
+            "waitMsAverage": 0.05471452351580583
+          },
+          "memory": {
+            "rss": 597471232,
+            "heapTotal": 126144512,
+            "heapUsed": 57156256,
+            "external": 6740216,
+            "arrayBuffers": 45276
+          },
+          "cpu": {
+            "user": 11477582,
+            "system": 660818
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "20.38%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "18.79%",
+          "MemUsage": "1.127GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.23%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "9.40%",
+          "MemUsage": "12.03MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "154MB / 7.15GB",
+          "CPUPerc": "4.00%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "15.22%",
+          "MemUsage": "311.6MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "402MB / 336MB",
+          "PIDs": "23"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:29:03.366Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 7,
+            "idle": 7,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 215.1355150000003,
+            "waitCount": 4059,
+            "waitMsMax": 19.670836,
+            "waitMsAverage": 0.05300209780734179
+          },
+          "memory": {
+            "rss": 597471232,
+            "heapTotal": 95997952,
+            "heapUsed": 50675120,
+            "external": 6723097,
+            "arrayBuffers": 28157
+          },
+          "cpu": {
+            "user": 11678762,
+            "system": 668933
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "20.09%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "18.79%",
+          "MemUsage": "1.127GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.23%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "9.40%",
+          "MemUsage": "12.03MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "154MB / 7.15GB",
+          "CPUPerc": "4.39%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "15.23%",
+          "MemUsage": "311.9MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "402MB / 337MB",
+          "PIDs": "23"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:29:05.383Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 7,
+            "idle": 7,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 217.00710000000032,
+            "waitCount": 4206,
+            "waitMsMax": 19.670836,
+            "waitMsAverage": 0.05159465049928681
+          },
+          "memory": {
+            "rss": 597471232,
+            "heapTotal": 95997952,
+            "heapUsed": 54249056,
+            "external": 6786262,
+            "arrayBuffers": 91322
+          },
+          "cpu": {
+            "user": 11821672,
+            "system": 675696
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "11.95%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "18.79%",
+          "MemUsage": "1.127GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.23%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "9.40%",
+          "MemUsage": "12.03MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "154MB / 7.15GB",
+          "CPUPerc": "3.94%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "15.24%",
+          "MemUsage": "312MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "402MB / 337MB",
+          "PIDs": "23"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:29:07.400Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 7,
+            "idle": 7,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 219.16535100000038,
+            "waitCount": 4374,
+            "waitMsMax": 19.670836,
+            "waitMsAverage": 0.05010639026063109
+          },
+          "memory": {
+            "rss": 597471232,
+            "heapTotal": 95997952,
+            "heapUsed": 56279496,
+            "external": 6735373,
+            "arrayBuffers": 40433
+          },
+          "cpu": {
+            "user": 11943450,
+            "system": 684343
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "11.66%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "18.79%",
+          "MemUsage": "1.127GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.30%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "9.39%",
+          "MemUsage": "12.02MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "154MB / 7.15GB",
+          "CPUPerc": "3.65%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "15.22%",
+          "MemUsage": "311.8MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "403MB / 338MB",
+          "PIDs": "23"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:29:09.419Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 7,
+            "idle": 7,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 221.53197000000048,
+            "waitCount": 4521,
+            "waitMsMax": 19.670836,
+            "waitMsAverage": 0.04900065693430668
+          },
+          "memory": {
+            "rss": 597471232,
+            "heapTotal": 95997952,
+            "heapUsed": 64707880,
+            "external": 6847486,
+            "arrayBuffers": 152546
+          },
+          "cpu": {
+            "user": 12057498,
+            "system": 689228
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "16.67%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "18.79%",
+          "MemUsage": "1.127GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.24%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "9.39%",
+          "MemUsage": "12.02MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "154MB / 7.15GB",
+          "CPUPerc": "4.89%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "15.22%",
+          "MemUsage": "311.8MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "403MB / 338MB",
+          "PIDs": "23"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:29:11.437Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 7,
+            "idle": 7,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 224.4645730000006,
+            "waitCount": 4689,
+            "waitMsMax": 19.670836,
+            "waitMsAverage": 0.04787045702708479
+          },
+          "memory": {
+            "rss": 597471232,
+            "heapTotal": 95473664,
+            "heapUsed": 53794960,
+            "external": 6791219,
+            "arrayBuffers": 96279
+          },
+          "cpu": {
+            "user": 12278344,
+            "system": 703165
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "0.33%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "18.79%",
+          "MemUsage": "1.127GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.07%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "9.39%",
+          "MemUsage": "12.02MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "210MB / 7.16GB",
+          "CPUPerc": "88.41%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "15.30%",
+          "MemUsage": "313.3MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "420MB / 338MB",
+          "PIDs": "22"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:29:13.446Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 7,
+            "idle": 7,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 224.53074800000059,
+            "waitCount": 4690,
+            "waitMsMax": 19.670836,
+            "waitMsAverage": 0.047874359914712276
+          },
+          "memory": {
+            "rss": 597471232,
+            "heapTotal": 95473664,
+            "heapUsed": 53921288,
+            "external": 6791771,
+            "arrayBuffers": 96831
+          },
+          "cpu": {
+            "user": 12283096,
+            "system": 703207
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "0.00%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "18.79%",
+          "MemUsage": "1.127GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.06%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "9.39%",
+          "MemUsage": "12.02MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "213MB / 7.16GB",
+          "CPUPerc": "98.70%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "15.29%",
+          "MemUsage": "313.2MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "420MB / 338MB",
+          "PIDs": "22"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:29:15.446Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 7,
+            "idle": 7,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 224.53074800000059,
+            "waitCount": 4690,
+            "waitMsMax": 19.670836,
+            "waitMsAverage": 0.047874359914712276
+          },
+          "memory": {
+            "rss": 597471232,
+            "heapTotal": 95473664,
+            "heapUsed": 54004344,
+            "external": 6791778,
+            "arrayBuffers": 96838
+          },
+          "cpu": {
+            "user": 12285872,
+            "system": 703252
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "0.03%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "18.77%",
+          "MemUsage": "1.126GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.08%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "9.16%",
+          "MemUsage": "11.73MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "213MB / 7.16GB",
+          "CPUPerc": "94.68%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "16.43%",
+          "MemUsage": "336.5MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "420MB / 338MB",
+          "PIDs": "24"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:29:17.455Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 7,
+            "idle": 7,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 224.53074800000059,
+            "waitCount": 4690,
+            "waitMsMax": 19.670836,
+            "waitMsAverage": 0.047874359914712276
+          },
+          "memory": {
+            "rss": 597471232,
+            "heapTotal": 95473664,
+            "heapUsed": 54070416,
+            "external": 6799977,
+            "arrayBuffers": 105037
+          },
+          "cpu": {
+            "user": 12286999,
+            "system": 703252
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "0.00%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "18.77%",
+          "MemUsage": "1.126GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.26%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "9.55%",
+          "MemUsage": "12.22MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "219MB / 7.16GB",
+          "CPUPerc": "0.10%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "15.33%",
+          "MemUsage": "313.9MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "429MB / 338MB",
+          "PIDs": "22"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:29:19.483Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 7,
+            "idle": 7,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 224.53074800000059,
+            "waitCount": 4690,
+            "waitMsMax": 19.670836,
+            "waitMsAverage": 0.047874359914712276
+          },
+          "memory": {
+            "rss": 597471232,
+            "heapTotal": 95473664,
+            "heapUsed": 54136096,
+            "external": 6799984,
+            "arrayBuffers": 105044
+          },
+          "cpu": {
+            "user": 12288107,
+            "system": 704209
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "0.02%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "18.78%",
+          "MemUsage": "1.127GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.26%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "9.54%",
+          "MemUsage": "12.21MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "219MB / 7.16GB",
+          "CPUPerc": "0.66%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "15.32%",
+          "MemUsage": "313.8MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "429MB / 338MB",
+          "PIDs": "22"
+        }
+      ]
+    },
+    {
+      "at": "2026-08-21T19:29:21.505Z",
+      "health": {
+        "status": "ok",
+        "redis": "ok",
+        "capacity": {
+          "dbPool": {
+            "total": 5,
+            "idle": 5,
+            "waiting": 0,
+            "max": 20,
+            "waitMsTotal": 163.93272300000004,
+            "waitCount": 3575,
+            "waitMsMax": 19.086215,
+            "waitMsAverage": 0.045855307132867146
+          },
+          "memory": {
+            "rss": 537231360,
+            "heapTotal": 94425088,
+            "heapUsed": 63744360,
+            "external": 6949048,
+            "arrayBuffers": 254108
+          },
+          "cpu": {
+            "user": 9173344,
+            "system": 726694
+          }
+        }
+      },
+      "containers": [
+        {
+          "BlockIO": "115kB / 575MB",
+          "CPUPerc": "0.00%",
+          "Container": "f6ef33fc773b99c064605286a2a8adec6a42b3eceab7fe7af40b6cbe39d547ae",
+          "ID": "f6ef33fc773b",
+          "MemPerc": "18.78%",
+          "MemUsage": "1.127GiB / 6GiB",
+          "Name": "step-capacity-backend",
+          "NetIO": "0B / 0B",
+          "PIDs": "44"
+        },
+        {
+          "BlockIO": "0B / 0B",
+          "CPUPerc": "0.23%",
+          "Container": "656372101fba681975775840f5362d69cac9b44422ed2267a322bdc535f040eb",
+          "ID": "656372101fba",
+          "MemPerc": "9.54%",
+          "MemUsage": "12.21MiB / 128MiB",
+          "Name": "step-capacity-redis",
+          "NetIO": "0B / 0B",
+          "PIDs": "5"
+        },
+        {
+          "BlockIO": "219MB / 7.16GB",
+          "CPUPerc": "0.03%",
+          "Container": "3ef4bd753aa841bc8efd563bceaec522c4c35f37ef34c99499ecc57fd36473ed",
+          "ID": "3ef4bd753aa8",
+          "MemPerc": "15.32%",
+          "MemUsage": "313.8MiB / 2GiB",
+          "Name": "step-capacity-postgres",
+          "NetIO": "429MB / 338MB",
+          "PIDs": "22"
+        }
+      ]
+    }
+  ]
+}

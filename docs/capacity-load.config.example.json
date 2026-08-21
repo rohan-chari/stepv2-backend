@@ -1,0 +1,35 @@
+{
+  "provider": "lima",
+  "snapshot": "/absolute/path/to/scrub-source.dump",
+  "directory": "results/capacity",
+  "run_id": "load-20260821",
+  "profile": "full-app",
+  "target": "capacity-vm",
+  "base_url": "http://127.0.0.1:3000",
+  "health_url": "http://127.0.0.1:3000/health",
+  "repository": "/absolute/path/to/stepv2-backend",
+  "lima_instance": "step-capacity",
+  "db_host_port": 55433,
+  "db_name": "steps_tracker_capacity",
+  "db_user": "capacity",
+  "users": 650,
+  "arrival_rate": 25,
+  "duration": "5m",
+  "timeout_ms": 5000,
+  "concurrency": 650,
+  "vps_specs": {
+    "plan": "Basic",
+    "vcpu": 4,
+    "ram_gb": 8,
+    "disk_gb": 160
+  },
+  "database_specs": {
+    "plan": "Basic",
+    "vcpu": 1,
+    "ram_gb": 2,
+    "disk_gib": 30,
+    "connection_limit": 47,
+    "storage_autoscale_gib": 10,
+    "storage_autoscale_threshold_percent": 80
+  }
+}

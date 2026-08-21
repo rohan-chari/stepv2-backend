@@ -614,6 +614,45 @@
       "rollbackValue": null
     },
     {
+      "id": "env:CAPACITY_DESTROY_HOOK",
+      "name": "CAPACITY_DESTROY_HOOK",
+      "kind": "string_environment",
+      "evidenceTimestamp": "2026-08-20T04:23:00Z",
+      "compatibilityConsumers": [],
+      "adminExposed": false,
+      "disposition": "capacity_local_config",
+      "permanentValue": null,
+      "polarityDefault": "operator-owned capacity destroy hook",
+      "deployFamily": "capacity_local",
+      "rollbackValue": null
+    },
+    {
+      "id": "env:CAPACITY_EXPECTED_COMMIT_SHA",
+      "name": "CAPACITY_EXPECTED_COMMIT_SHA",
+      "kind": "string_environment",
+      "evidenceTimestamp": "2026-08-20T04:23:00Z",
+      "compatibilityConsumers": [],
+      "adminExposed": false,
+      "disposition": "capacity_local_config",
+      "permanentValue": null,
+      "polarityDefault": "capacity load reports must identify the expected checked-out commit",
+      "deployFamily": "capacity_local",
+      "rollbackValue": null
+    },
+    {
+      "id": "env:CAPACITY_HEALTH_URL",
+      "name": "CAPACITY_HEALTH_URL",
+      "kind": "string_environment",
+      "evidenceTimestamp": "2026-08-20T04:23:00Z",
+      "compatibilityConsumers": [],
+      "adminExposed": false,
+      "disposition": "capacity_local_config",
+      "permanentValue": null,
+      "polarityDefault": "private health URL probed after capacity start",
+      "deployFamily": "capacity_local",
+      "rollbackValue": null
+    },
+    {
       "id": "env:CAPACITY_JWT_SECRET",
       "name": "CAPACITY_JWT_SECRET",
       "kind": "string_environment",
@@ -624,6 +663,19 @@
       "permanentValue": null,
       "polarityDefault": "runtime value; see source consumers",
       "deployFamily": "runtime_configuration",
+      "rollbackValue": null
+    },
+    {
+      "id": "env:CAPACITY_LIVE_MANIFEST_PATH",
+      "name": "CAPACITY_LIVE_MANIFEST_PATH",
+      "kind": "string_environment",
+      "evidenceTimestamp": "2026-08-20T04:23:00Z",
+      "compatibilityConsumers": [],
+      "adminExposed": false,
+      "disposition": "capacity_local_config",
+      "permanentValue": null,
+      "polarityDefault": "absolute path to the live capacity manifest used for start drift checks",
+      "deployFamily": "capacity_local",
       "rollbackValue": null
     },
     {
@@ -692,6 +744,19 @@
       "rollbackValue": null
     },
     {
+      "id": "env:CAPACITY_RESTORE_HOOK",
+      "name": "CAPACITY_RESTORE_HOOK",
+      "kind": "string_environment",
+      "evidenceTimestamp": "2026-08-20T04:23:00Z",
+      "compatibilityConsumers": [],
+      "adminExposed": false,
+      "disposition": "capacity_local_config",
+      "permanentValue": null,
+      "polarityDefault": "operator-owned capacity database restore hook",
+      "deployFamily": "capacity_local",
+      "rollbackValue": null
+    },
+    {
       "id": "env:CAPACITY_RUN_ID",
       "name": "CAPACITY_RUN_ID",
       "kind": "string_environment",
@@ -702,6 +767,97 @@
       "permanentValue": null,
       "polarityDefault": "runtime value; see source consumers",
       "deployFamily": "runtime_configuration",
+      "rollbackValue": null
+    },
+    {
+      "id": "env:CAPACITY_SCRUB_ATTESTATION_HASH",
+      "name": "CAPACITY_SCRUB_ATTESTATION_HASH",
+      "kind": "string_environment",
+      "evidenceTimestamp": "2026-08-20T04:23:00Z",
+      "compatibilityConsumers": [],
+      "adminExposed": false,
+      "disposition": "capacity_local_config",
+      "permanentValue": null,
+      "polarityDefault": "hash of the snapshot-bound scrub attestation",
+      "deployFamily": "capacity_local",
+      "rollbackValue": null
+    },
+    {
+      "id": "env:CAPACITY_SCRUB_ATTESTATION_SECRET",
+      "name": "CAPACITY_SCRUB_ATTESTATION_SECRET",
+      "kind": "string_environment",
+      "evidenceTimestamp": "2026-08-20T04:23:00Z",
+      "compatibilityConsumers": [],
+      "adminExposed": false,
+      "disposition": "capacity_local_secret",
+      "permanentValue": null,
+      "polarityDefault": "run-only secret used to verify the scrub attestation",
+      "deployFamily": "capacity_local",
+      "rollbackValue": null
+    },
+    {
+      "id": "env:CAPACITY_SCRUB_HOOK",
+      "name": "CAPACITY_SCRUB_HOOK",
+      "kind": "string_environment",
+      "evidenceTimestamp": "2026-08-20T04:23:00Z",
+      "compatibilityConsumers": [],
+      "adminExposed": false,
+      "disposition": "capacity_local_config",
+      "permanentValue": null,
+      "polarityDefault": "operator-owned capacity database scrub and attestation hook",
+      "deployFamily": "capacity_local",
+      "rollbackValue": null
+    },
+    {
+      "id": "env:CAPACITY_SNAPSHOT_HASH",
+      "name": "CAPACITY_SNAPSHOT_HASH",
+      "kind": "string_environment",
+      "evidenceTimestamp": "2026-08-20T04:23:00Z",
+      "compatibilityConsumers": [],
+      "adminExposed": false,
+      "disposition": "capacity_local_config",
+      "permanentValue": null,
+      "polarityDefault": "hash of the approved scrubbed capacity snapshot",
+      "deployFamily": "capacity_local",
+      "rollbackValue": null
+    },
+    {
+      "id": "env:CAPACITY_START_HOOK",
+      "name": "CAPACITY_START_HOOK",
+      "kind": "string_environment",
+      "evidenceTimestamp": "2026-08-20T04:23:00Z",
+      "compatibilityConsumers": [],
+      "adminExposed": false,
+      "disposition": "capacity_local_config",
+      "permanentValue": null,
+      "polarityDefault": "operator-owned capacity start hook",
+      "deployFamily": "capacity_local",
+      "rollbackValue": null
+    },
+    {
+      "id": "env:CAPACITY_STATE_DIR",
+      "name": "CAPACITY_STATE_DIR",
+      "kind": "string_environment",
+      "evidenceTimestamp": "2026-08-20T04:23:00Z",
+      "compatibilityConsumers": [],
+      "adminExposed": false,
+      "disposition": "capacity_local_config",
+      "permanentValue": null,
+      "polarityDefault": "absolute state directory for disposable capacity runs",
+      "deployFamily": "capacity_local",
+      "rollbackValue": null
+    },
+    {
+      "id": "env:CAPACITY_STOP_HOOK",
+      "name": "CAPACITY_STOP_HOOK",
+      "kind": "string_environment",
+      "evidenceTimestamp": "2026-08-20T04:23:00Z",
+      "compatibilityConsumers": [],
+      "adminExposed": false,
+      "disposition": "capacity_local_config",
+      "permanentValue": null,
+      "polarityDefault": "operator-owned capacity stop hook",
+      "deployFamily": "capacity_local",
       "rollbackValue": null
     },
     {

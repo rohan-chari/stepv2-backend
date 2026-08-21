@@ -1,0 +1,6 @@
+run=load-20260821e target=capacity-vm profile=full-app@1.0.0
+coverageRequests=27
+offered=25/s achieved=17.65/s requests=5828 errorRate=0.00%
+latency p50/p95/p99=226.565209/434.673917/472.650375ms stop=completed
+worstP95=GET /steps/race-resolution/:jobId (449.799292ms)
+worstErrors=GET /health (0)

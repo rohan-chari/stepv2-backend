@@ -1,0 +1,30 @@
+{
+  "vps": {
+    "plan": "Basic",
+    "cpuCount": 4,
+    "ramMb": 8192,
+    "disk": { "sizeGb": 160 }
+  },
+  "database": {
+    "plan": "Basic",
+    "vcpu": 1,
+    "ramMb": 2048,
+    "disk": { "sizeGb": 30 },
+    "maxConnections": 47,
+    "storageAutoscaleGib": 10,
+    "storageAutoscaleThresholdPercent": 80
+  },
+  "redis": {
+    "mode": "local-redis-7.0.15",
+    "bind": "127.0.0.1/::1",
+    "maxMemoryMb": 100,
+    "evictionPolicy": "allkeys-lru",
+    "persistence": "disabled"
+  },
+  "network": { "api": "127.0.0.1:3000", "database": "127.0.0.1:55433" },
+  "backend": { "branch": "main", "provider": "lima" },
+  "queue": {
+    "mode": "postgres-backed-dedicated-resolution-process",
+    "cron": "dedicated-process"
+  }
+}

@@ -1,0 +1,445 @@
+{
+  "schema": "load-test-result-v1",
+  "runId": "load-20260821g",
+  "target": "capacity-vm",
+  "baseUrl": "http://127.0.0.1:3000",
+  "commit": null,
+  "profile": "full-app",
+  "profileVersion": "1.0.0",
+  "startedAt": "2026-08-21T16:37:06.063Z",
+  "endedAt": "2026-08-21T16:42:36.253Z",
+  "parameters": {
+    "profile": "full-app",
+    "users": 1000,
+    "arrivalRatePerSecond": 12,
+    "durationSeconds": 300,
+    "timeoutMs": 5000,
+    "concurrency": 1000,
+    "coverageRequests": 27
+  },
+  "summary": {
+    "requests": 4273,
+    "throughputPerSecond": 12.941033950149913,
+    "errorRate": 0,
+    "latencyMs": {
+      "p50": 160.011834,
+      "p95": 448.730708,
+      "p99": 495.258791
+    },
+    "stopReason": "completed"
+  },
+  "personas": {
+    "legacy": 204,
+    "current": 4069
+  },
+  "queue": {
+    "enqueued": 49,
+    "completed": 0,
+    "lagMs": {
+      "p95": 0
+    },
+    "drainSeconds": 30.164,
+    "drainCompleted": false
+  },
+  "infrastructure": {
+    "cpu": {},
+    "memory": {},
+    "db": {},
+    "redis": {
+      "mode": "unset",
+      "fallbackMode": "postgres"
+    }
+  },
+  "endpoints": {
+    "GET /health": {
+      "requests": 14,
+      "status": {
+        "2xx": 14,
+        "3xx": 0,
+        "4xx": 0,
+        "5xx": 0,
+        "timeout": 0,
+        "unexpected": 0
+      },
+      "latencyMs": {
+        "p50": 1.4705,
+        "p95": 13.893709,
+        "p99": 13.893709
+      }
+    },
+    "GET /home/race-card": {
+      "requests": 199,
+      "status": {
+        "2xx": 199,
+        "3xx": 0,
+        "4xx": 0,
+        "5xx": 0,
+        "timeout": 0,
+        "unexpected": 0
+      },
+      "latencyMs": {
+        "p50": 26.401917,
+        "p95": 34.92475,
+        "p99": 72.084667
+      }
+    },
+    "GET /races": {
+      "requests": 298,
+      "status": {
+        "2xx": 298,
+        "3xx": 0,
+        "4xx": 0,
+        "5xx": 0,
+        "timeout": 0,
+        "unexpected": 0
+      },
+      "latencyMs": {
+        "p50": 11.764792,
+        "p95": 17.760916,
+        "p99": 22.54825
+      }
+    },
+    "GET /friends": {
+      "requests": 125,
+      "status": {
+        "2xx": 125,
+        "3xx": 0,
+        "4xx": 0,
+        "5xx": 0,
+        "timeout": 0,
+        "unexpected": 0
+      },
+      "latencyMs": {
+        "p50": 4.623166,
+        "p95": 8.138917,
+        "p99": 10.953
+      }
+    },
+    "GET /friends/steps": {
+      "requests": 55,
+      "status": {
+        "2xx": 55,
+        "3xx": 0,
+        "4xx": 0,
+        "5xx": 0,
+        "timeout": 0,
+        "unexpected": 0
+      },
+      "latencyMs": {
+        "p50": 4.631792,
+        "p95": 10.614625,
+        "p99": 11.405208
+      }
+    },
+    "GET /auth/me": {
+      "requests": 35,
+      "status": {
+        "2xx": 35,
+        "3xx": 0,
+        "4xx": 0,
+        "5xx": 0,
+        "timeout": 0,
+        "unexpected": 0
+      },
+      "latencyMs": {
+        "p50": 5.323,
+        "p95": 9.088583,
+        "p99": 9.502125
+      }
+    },
+    "GET /steps": {
+      "requests": 43,
+      "status": {
+        "2xx": 43,
+        "3xx": 0,
+        "4xx": 0,
+        "5xx": 0,
+        "timeout": 0,
+        "unexpected": 0
+      },
+      "latencyMs": {
+        "p50": 3.885625,
+        "p95": 8.147166,
+        "p99": 13.270209
+      }
+    },
+    "POST /steps/sync-v2": {
+      "requests": 47,
+      "status": {
+        "2xx": 46,
+        "3xx": 0,
+        "4xx": 1,
+        "5xx": 0,
+        "timeout": 0,
+        "unexpected": 0
+      },
+      "latencyMs": {
+        "p50": 25.108916,
+        "p95": 33.739458,
+        "p99": 56.801916
+      }
+    },
+    "POST /steps": {
+      "requests": 36,
+      "status": {
+        "2xx": 36,
+        "3xx": 0,
+        "4xx": 0,
+        "5xx": 0,
+        "timeout": 0,
+        "unexpected": 0
+      },
+      "latencyMs": {
+        "p50": 20.991375,
+        "p95": 35.463458,
+        "p99": 36.892
+      }
+    },
+    "POST /steps/samples": {
+      "requests": 14,
+      "status": {
+        "2xx": 14,
+        "3xx": 0,
+        "4xx": 0,
+        "5xx": 0,
+        "timeout": 0,
+        "unexpected": 0
+      },
+      "latencyMs": {
+        "p50": 25.49075,
+        "p95": 35.264917,
+        "p99": 35.264917
+      }
+    },
+    "GET /races/discovery-summary": {
+      "requests": 96,
+      "status": {
+        "2xx": 96,
+        "3xx": 0,
+        "4xx": 0,
+        "5xx": 0,
+        "timeout": 0,
+        "unexpected": 0
+      },
+      "latencyMs": {
+        "p50": 23.092625,
+        "p95": 31.27975,
+        "p99": 41.586917
+      }
+    },
+    "GET /home/suggested-races": {
+      "requests": 49,
+      "status": {
+        "2xx": 49,
+        "3xx": 0,
+        "4xx": 0,
+        "5xx": 0,
+        "timeout": 0,
+        "unexpected": 0
+      },
+      "latencyMs": {
+        "p50": 6.927584,
+        "p95": 10.223875,
+        "p99": 14.278916
+      }
+    },
+    "GET /races/:raceId/bootstrap": {
+      "requests": 138,
+      "status": {
+        "2xx": 138,
+        "3xx": 0,
+        "4xx": 0,
+        "5xx": 0,
+        "timeout": 0,
+        "unexpected": 0
+      },
+      "latencyMs": {
+        "p50": 454.996625,
+        "p95": 520.873125,
+        "p99": 588.615125
+      }
+    },
+    "GET /races/:raceId/progress": {
+      "requests": 189,
+      "status": {
+        "2xx": 189,
+        "3xx": 0,
+        "4xx": 0,
+        "5xx": 0,
+        "timeout": 0,
+        "unexpected": 0
+      },
+      "latencyMs": {
+        "p50": 449.961625,
+        "p95": 508.933792,
+        "p99": 564.941584
+      }
+    },
+    "GET /races/:raceId/message-streams": {
+      "requests": 44,
+      "status": {
+        "2xx": 44,
+        "3xx": 0,
+        "4xx": 0,
+        "5xx": 0,
+        "timeout": 0,
+        "unexpected": 0
+      },
+      "latencyMs": {
+        "p50": 8.868125,
+        "p95": 13.073166,
+        "p99": 15.137
+      }
+    },
+    "GET /races/:raceId/inventory": {
+      "requests": 52,
+      "status": {
+        "2xx": 52,
+        "3xx": 0,
+        "4xx": 0,
+        "5xx": 0,
+        "timeout": 0,
+        "unexpected": 0
+      },
+      "latencyMs": {
+        "p50": 20.852375,
+        "p95": 32.608959,
+        "p99": 34.203
+      }
+    },
+    "GET /races/:raceId/powerups/use-context": {
+      "requests": 34,
+      "status": {
+        "2xx": 34,
+        "3xx": 0,
+        "4xx": 0,
+        "5xx": 0,
+        "timeout": 0,
+        "unexpected": 0
+      },
+      "latencyMs": {
+        "p50": 464.276042,
+        "p95": 538.860125,
+        "p99": 603.393291
+      }
+    },
+    "GET /races/:raceId/feed": {
+      "requests": 39,
+      "status": {
+        "2xx": 39,
+        "3xx": 0,
+        "4xx": 0,
+        "5xx": 0,
+        "timeout": 0,
+        "unexpected": 0
+      },
+      "latencyMs": {
+        "p50": 21.88175,
+        "p95": 27.683708,
+        "p99": 32.433
+      }
+    },
+    "GET /races/:raceId/messages": {
+      "requests": 49,
+      "status": {
+        "2xx": 49,
+        "3xx": 0,
+        "4xx": 0,
+        "5xx": 0,
+        "timeout": 0,
+        "unexpected": 0
+      },
+      "latencyMs": {
+        "p50": 6.623125,
+        "p95": 12.175541,
+        "p99": 21.532375
+      }
+    },
+    "GET /races/:raceId/active-impact-notices": {
+      "requests": 37,
+      "status": {
+        "2xx": 0,
+        "3xx": 0,
+        "4xx": 37,
+        "5xx": 0,
+        "timeout": 0,
+        "unexpected": 0
+      },
+      "latencyMs": {
+        "p50": 4.245958,
+        "p95": 6.805917,
+        "p99": 7.07325
+      }
+    },
+    "GET /races/:raceId/impact-notices": {
+      "requests": 35,
+      "status": {
+        "2xx": 0,
+        "3xx": 0,
+        "4xx": 35,
+        "5xx": 0,
+        "timeout": 0,
+        "unexpected": 0
+      },
+      "latencyMs": {
+        "p50": 4.747417,
+        "p95": 6.280375,
+        "p99": 7.406708
+      }
+    },
+    "GET /races/:raceId/private-impact-feed": {
+      "requests": 35,
+      "status": {
+        "2xx": 0,
+        "3xx": 0,
+        "4xx": 35,
+        "5xx": 0,
+        "timeout": 0,
+        "unexpected": 0
+      },
+      "latencyMs": {
+        "p50": 4.246375,
+        "p95": 6.71125,
+        "p99": 7.796542
+      }
+    },
+    "GET /races/:raceId": {
+      "requests": 31,
+      "status": {
+        "2xx": 31,
+        "3xx": 0,
+        "4xx": 0,
+        "5xx": 0,
+        "timeout": 0,
+        "unexpected": 0
+      },
+      "latencyMs": {
+        "p50": 24.445458,
+        "p95": 30.168625,
+        "p99": 30.249542
+      }
+    },
+    "GET /steps/race-resolution/:jobId": {
+      "requests": 2579,
+      "status": {
+        "2xx": 2579,
+        "3xx": 0,
+        "4xx": 0,
+        "5xx": 0,
+        "timeout": 0,
+        "unexpected": 0
+      },
+      "latencyMs": {
+        "p50": 195.792417,
+        "p95": 276.413083,
+        "p99": 297.29125
+      }
+    }
+  },
+  "safety": {
+    "targetConfirmed": true,
+    "databaseCheck": "scrub-attested",
+    "snapshotHash": "d4148b8b3a1eab1e3a1f8403b1fd42b113fb2a308957f3d9589a20482407d35a",
+    "scrubAttestationHash": "357120ec2e42eaab9e9e4a8714709e723e16610e9803cb8462f954a52e44e403"
+  }
+}

@@ -139,6 +139,18 @@ const envMetadata = {
   CAPACITY_MODE: ["capacity_local_config", null, "literal true enables isolated capacity entrypoint", "capacity_local", false],
   CAPACITY_OUTBOUND_DISABLED: ["capacity_local_config", null, "capacity mode requires literal true", "capacity_local", true],
   CAPACITY_DATABASE_SSL_DISABLED: ["capacity_local_config", false, "literal true disables database TLS only after the run-bound capacity environment validates", "capacity_local", false],
+  CAPACITY_EXPECTED_COMMIT_SHA: ["capacity_local_config", null, "capacity load reports must identify the expected checked-out commit", "capacity_local", null],
+  CAPACITY_LIVE_MANIFEST_PATH: ["capacity_local_config", null, "absolute path to the live capacity manifest used for start drift checks", "capacity_local", null],
+  CAPACITY_SCRUB_ATTESTATION_HASH: ["capacity_local_config", null, "hash of the snapshot-bound scrub attestation", "capacity_local", null],
+  CAPACITY_SCRUB_ATTESTATION_SECRET: ["capacity_local_secret", null, "run-only secret used to verify the scrub attestation", "capacity_local", null],
+  CAPACITY_SNAPSHOT_HASH: ["capacity_local_config", null, "hash of the approved scrubbed capacity snapshot", "capacity_local", null],
+  CAPACITY_STATE_DIR: ["capacity_local_config", null, "absolute state directory for disposable capacity runs", "capacity_local", null],
+  CAPACITY_START_HOOK: ["capacity_local_config", null, "operator-owned capacity start hook", "capacity_local", null],
+  CAPACITY_RESTORE_HOOK: ["capacity_local_config", null, "operator-owned capacity database restore hook", "capacity_local", null],
+  CAPACITY_SCRUB_HOOK: ["capacity_local_config", null, "operator-owned capacity database scrub and attestation hook", "capacity_local", null],
+  CAPACITY_STOP_HOOK: ["capacity_local_config", null, "operator-owned capacity stop hook", "capacity_local", null],
+  CAPACITY_DESTROY_HOOK: ["capacity_local_config", null, "operator-owned capacity destroy hook", "capacity_local", null],
+  CAPACITY_HEALTH_URL: ["capacity_local_config", null, "private health URL probed after capacity start", "capacity_local", null],
   DB_POOL_MAX: ["capacity_local_config", 20, "integer 1..20 overrides the database pool only in validated capacity mode", "capacity_local", 20],
 };
 

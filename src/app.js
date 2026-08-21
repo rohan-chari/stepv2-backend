@@ -156,7 +156,15 @@ function createApp(dependencies = {}) {
     } catch {
       redis = "down";
     }
-    res.json({ status: "ok", redis });
+    const response = { status: "ok", redis };
+    if (process.env.CAPACITY_MODE === "true" || process.env.CAPACITY_MODE === "1") {
+      response.capacity = {
+        dbPool: getDbPoolPressure(),
+        memory: process.memoryUsage(),
+        cpu: process.cpuUsage(),
+      };
+    }
+    res.json(response);
   });
 
   // ---- Shareable race links (deep-link verification + web landing page) ----
