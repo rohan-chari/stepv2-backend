@@ -1860,7 +1860,7 @@ function buildGetRaceProgress(deps = {}) {
         let displayArtifactRef = null;
         // Miss or soft-expiry. Exactly ONE request rebuilds; the lock
         // self-expires (PX) so a crashed winner cannot wedge it.
-        const rebuilt = await snapshotStore.withRebuildLock(raceId, async () => {
+        const rebuildPromise = snapshotStore.withRebuildLock(raceId, async () => {
           snapshotStore.__bump("requestReplays");
           let fresh = null;
           let artifactEnabled = false;
@@ -1941,46 +1941,65 @@ function buildGetRaceProgress(deps = {}) {
           return fresh;
         });
 
-        if (rebuilt) {
-          snapshot = rebuilt;
-          // Phase D step 8: progress polls keep persisted totals converging for
-          // a watched race by enqueueing ITS race-keyed job — on snapshot
-          // EXPIRY, not on every poll, so the watch-driven cadence is 15s
-          // (§5a item 3). Best-effort by contract.
-          await enqueueRaceResolutionFn({
-            raceId,
-            userId,
-            timeZone: scoringTimeZone,
-            reason: "DISPLAY_REFRESH",
-            priority: "IMMEDIATE",
-            displayArtifact: displayArtifactRef,
-          });
-        } else if (usable) {
-          // Lock loser with a stale-but-present snapshot: serve it. This is why
-          // the key physically lives 60s past its 15s soft freshness.
+        if (usable) {
+          // Serve stale-while-revalidate: the valid snapshot is immediately
+          // usable, while the lock owner refreshes it in the background.
           snapshotStore.__bump("staleServes");
           snapshot = usable;
+          void rebuildPromise
+            .then(async (rebuilt) => {
+              if (!rebuilt) return;
+              await enqueueRaceResolutionFn({
+                raceId,
+                userId,
+                timeZone: scoringTimeZone,
+                reason: "DISPLAY_REFRESH",
+                priority: "IMMEDIATE",
+                displayArtifact: displayArtifactRef,
+              });
+            })
+            .catch((error) => {
+              logger.warn?.("Race progress background refresh failed", {
+                raceId,
+                error: error?.message || "unknown",
+              });
+            });
         } else {
-          // True cold start. Wait on REDIS ONLY for at most 1s — zero pooled
-          // Postgres connections are held, which is the explicit
-          // anti-recurrence guard for the 2026-07-18 advisory-lock pool drain.
-          // Skipped entirely when Redis is unreachable (no snapshot can appear),
-          // so a Redis outage costs a PING, not a second, per request.
-          let waited = null;
-          if ((await redisCache.healthStatus()) === "ok") {
-            waited = await snapshotStore.waitForSnapshot(
+          const rebuilt = await rebuildPromise;
+          if (rebuilt) {
+            snapshot = rebuilt;
+            // Phase D step 8: progress polls keep persisted totals converging
+            // for a watched race by enqueueing its race-keyed job on expiry.
+            await enqueueRaceResolutionFn({
               raceId,
-              scoringTimeZone,
-              undefined,
-              snapshotSchemaVersion
-            );
-          }
-          if (waited) {
-            snapshotStore.__bump("staleServes");
-            snapshot = waited;
+              userId,
+              timeZone: scoringTimeZone,
+              reason: "DISPLAY_REFRESH",
+              priority: "IMMEDIATE",
+              displayArtifact: displayArtifactRef,
+            });
           } else {
-            // Losers NEVER fall through to the replay.
-            snapshot = await loadPersistedState({ race, raceId, scoringTimeZone });
+            // True cold start. Wait on REDIS ONLY for at most 1s — zero pooled
+            // Postgres connections are held, which is the explicit
+            // anti-recurrence guard for the 2026-07-18 advisory-lock pool drain.
+            // Skipped entirely when Redis is unreachable (no snapshot can appear),
+            // so a Redis outage costs a PING, not a second, per request.
+            let waited = null;
+            if ((await redisCache.healthStatus()) === "ok") {
+              waited = await snapshotStore.waitForSnapshot(
+                raceId,
+                scoringTimeZone,
+                undefined,
+                snapshotSchemaVersion
+              );
+            }
+            if (waited) {
+              snapshotStore.__bump("staleServes");
+              snapshot = waited;
+            } else {
+              // Losers NEVER fall through to the replay.
+              snapshot = await loadPersistedState({ race, raceId, scoringTimeZone });
+            }
           }
         }
       }

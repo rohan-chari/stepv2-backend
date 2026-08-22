@@ -906,6 +906,50 @@ describe("C3 standings — §8 test 5 (stampede)", () => {
     );
     assert.equal(c.writeBacks, 0);
   });
+
+  it("serves a stale snapshot immediately while one background refresh runs", async (t) => {
+    if (skipReason) return t.skip(skipReason);
+
+    await enableRedis();
+    await setFlag(true);
+
+    const alice = await createUser("StaleRefreshAlice");
+    const bob = await createUser("StaleRefreshBob");
+    const raceId = await createActiveRace(alice, [bob], "StaleRefresh");
+    await postSamples(alice, [sampleAt(6, 2600)]);
+    await postSamples(bob, [sampleAt(6, 1200)]);
+    await drain();
+
+    await progress(alice, raceId);
+    const key = `${ENV_PREFIX}${cacheKeys.raceProgress(raceId)}`;
+    const stale = await rawSnapshot(raceId);
+    assert.ok(stale);
+    stale.asOf = new Date(Date.now() - snapshotStore.SOFT_TTL_MS - 1000).toISOString();
+    await probe.set(key, JSON.stringify(stale), "EX", 60);
+    snapshotStore.__resetCounters();
+
+    const startedAt = Date.now();
+    const response = await progressRes(alice, raceId);
+    const elapsedMs = Date.now() - startedAt;
+    assert.equal(response.status, 200, await response.text());
+    assert.ok(elapsedMs < 1000, `stale response waited ${elapsedMs}ms`);
+    assert.ok(snapshotStore.__counters.staleServes >= 1);
+
+    const deadline = Date.now() + 5000;
+    let refreshed = null;
+    while (Date.now() < deadline) {
+      refreshed = await rawSnapshot(raceId);
+      if (
+        snapshotStore.__counters.requestReplays >= 1 &&
+        refreshed &&
+        Date.parse(refreshed.asOf) > Date.parse(stale.asOf)
+      ) break;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    assert.equal(snapshotStore.__counters.requestReplays, 1);
+    assert.ok(refreshed);
+    assert.ok(Date.parse(refreshed.asOf) > Date.parse(stale.asOf));
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
