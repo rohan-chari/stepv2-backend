@@ -748,7 +748,7 @@ function buildGetRaceProgress(deps = {}) {
       participants: stepTotals.map(({ participant, totalSteps }) => ({
         participantId: participant.id,
         userId: participant.userId,
-        ...(participant.user
+        ...(participant.user && !race._leanProgressProjection
           ? {
               displayName: participant.user.displayName,
               profilePhotoUrl: participant.user.profilePhotoUrl,
@@ -859,19 +859,22 @@ function buildGetRaceProgress(deps = {}) {
   }) {
     snapshotStore.__bump("persistedFallbacks");
     const accepted = race.participants.filter((p) => p.status === "ACCEPTED");
+    const leanSnapshot = race._leanProgressProjection === true;
     let presentations = new Map();
-    try {
-      presentations = await presentationCache.getMany(
-        accepted.map((participant) => participant.userId),
-        true,
-      );
-    } catch (error) {
-      // Persisted totals remain useful if the optional presentation cache is
-      // unavailable. Legacy full reads still carry `participant.user`, while
-      // lean reads safely fall back to a presentation-free row.
-      logger.warn?.("Race progress presentation cache unavailable", {
-        error: error?.message,
-      });
+    if (!leanSnapshot) {
+      try {
+        presentations = await presentationCache.getMany(
+          accepted.map((participant) => participant.userId),
+          true,
+        );
+      } catch (error) {
+        // Persisted totals remain useful if the optional presentation cache is
+        // unavailable. Legacy full reads still carry `participant.user`, while
+        // lean reads safely fall back to a presentation-free row.
+        logger.warn?.("Race progress presentation cache unavailable", {
+          error: error?.message,
+        });
+      }
     }
     const raceActiveEffects = race.powerupsEnabled
       ? await raceActiveEffectModel.findActiveForRace(raceId)
@@ -933,7 +936,9 @@ function buildGetRaceProgress(deps = {}) {
         return startMs <= nowMs && nowMs < endMs && Number(event.multiplier) > 1;
       });
       const eventMult = activeEvent ? Number(activeEvent.multiplier) : 1;
-      const presentation = presentations.get(p.userId) || p.user || null;
+      const presentation = leanSnapshot
+        ? null
+        : presentations.get(p.userId) || p.user || null;
       return {
         participantId: p.id,
         userId: p.userId,
@@ -2016,8 +2021,17 @@ function buildGetRaceProgress(deps = {}) {
   // there is no second snapshot shape to keep in lockstep — and it is
   // `persist: false`, so the publish itself writes nothing to Postgres.
   query.computeSharedSnapshot = async ({ raceId, timeZone = "UTC" }) => {
-    const race = await raceModel.findById(raceId);
+    const race =
+      typeof raceModel.findProgressScoringContext === "function"
+        ? await raceModel.findProgressScoringContext(raceId)
+        : await raceModel.findById(raceId);
     if (!race || race.status !== "ACTIVE") return null;
+    if (typeof raceModel.findProgressScoringContext === "function") {
+      Object.defineProperty(race, "_leanProgressProjection", {
+        value: true,
+        enumerable: false,
+      });
+    }
     return computeSharedState({
       race,
       raceId,
@@ -2039,6 +2053,12 @@ function buildGetRaceProgress(deps = {}) {
         ? await raceModel.findProgressScoringContext(raceId)
         : await raceModel.findById(raceId);
     if (!race || race.status !== "ACTIVE") return null;
+    if (typeof raceModel.findProgressScoringContext === "function") {
+      Object.defineProperty(race, "_leanProgressProjection", {
+        value: true,
+        enumerable: false,
+      });
+    }
     const snapshot = await loadPersistedState({
       race,
       raceId,

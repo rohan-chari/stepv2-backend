@@ -121,7 +121,7 @@ test("persisted fallback computes currentMultiplier from participant-specific ev
   assert.equal(snapshot.participants.find((row) => row.userId === "mad").currentMultiplier, 1);
 });
 
-test("persisted snapshot hydrates lean participants through the presentation cache", async () => {
+test("legacy persisted snapshot hydrates participants through the presentation cache", async () => {
   let presentationIds = null;
   const race = {
     id: "race-1", status: "ACTIVE",
@@ -137,9 +137,7 @@ test("persisted snapshot hydrates lean participants through the presentation cac
     ],
   };
   const query = buildGetRaceProgress({
-    Race: {
-      async findProgressScoringContext() { return race; },
-    },
+    Race: { async findById() { return race; } },
     RaceActiveEffect: { async findActiveForRace() { return []; } },
     GlobalStepEvent: { async findEligibleByRace() { return new Map(); } },
     userPresentationCache: {
@@ -174,4 +172,61 @@ test("persisted snapshot hydrates lean participants through the presentation cac
     snapshot.participants[0].presentation["prod:1:0"].accessories[0].assetKey,
     "hat",
   );
+  assert.equal(snapshot.v, snapshotStore.SCHEMA_VERSION);
+});
+
+test("worker persisted snapshots use the lean schema consumed by paged progress", async () => {
+  let legacyReads = 0;
+  let leanReads = 0;
+  const race = {
+    id: "race-lean-worker",
+    status: "ACTIVE",
+    startedAt: new Date("2026-08-20T13:00:00Z"),
+    endsAt: new Date("2026-08-21T13:00:00Z"),
+    timezone: "UTC",
+    targetSteps: 0,
+    isTeamRace: false,
+    powerupsEnabled: false,
+    powerupStepInterval: null,
+    participants: [
+      {
+        id: "p-lean-worker",
+        userId: "user-lean-worker",
+        status: "ACCEPTED",
+        totalSteps: 321,
+        joinedAt: new Date("2026-08-20T13:00:00Z"),
+      },
+    ],
+  };
+  const query = buildGetRaceProgress({
+    Race: {
+      async findById() {
+        legacyReads += 1;
+        return assert.fail("worker must not load the legacy race graph");
+      },
+      async findProgressScoringContext() {
+        leanReads += 1;
+        return race;
+      },
+    },
+    RaceActiveEffect: { async findActiveForRace() { return []; } },
+    GlobalStepEvent: { async findEligibleByRace() { return new Map(); } },
+    userPresentationCache: {
+      async getMany() {
+        return assert.fail("lean worker snapshots must not hydrate presentations");
+      },
+    },
+    raceProgressSnapshot: snapshotStore,
+    now: () => new Date("2026-08-20T14:10:00Z"),
+  });
+
+  const snapshot = await query.computePersistedSnapshot({
+    raceId: race.id,
+    timeZone: "UTC",
+  });
+
+  assert.equal(legacyReads, 0);
+  assert.equal(leanReads, 1);
+  assert.equal(snapshot.v, snapshotStore.LEAN_SCHEMA_VERSION);
+  assert.equal(snapshot.participants[0].presentation, undefined);
 });

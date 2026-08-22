@@ -1151,6 +1151,14 @@ describe("C3 standings — invalidation hooks", () => {
     const stored = await rawSnapshot(raceId);
     assert.ok(stored, "the worker's post-commit hook must SET the snapshot");
     assert.equal(stored.source, "worker");
+    assert.equal(stored.v, snapshotStore.LEAN_SCHEMA_VERSION);
+    assert.equal(
+      stored.participants.some((participant) =>
+        Object.hasOwn(participant, "presentation")
+      ),
+      false,
+      "worker snapshots must not hydrate presentation for the full roster"
+    );
     snapshotStore.assertAllowlisted(stored);
   });
 });

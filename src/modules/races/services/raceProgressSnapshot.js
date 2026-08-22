@@ -143,7 +143,9 @@ const FORBIDDEN_SNAPSHOT_FIELDS = [
 
 function pick(source, fields) {
   const out = {};
-  for (const field of fields) out[field] = source ? source[field] : undefined;
+  for (const field of fields) {
+    if (source && source[field] !== undefined) out[field] = source[field];
+  }
   return out;
 }
 
