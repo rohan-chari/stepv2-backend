@@ -33,6 +33,16 @@ end
 return 0
 `;
 
+// Keep a long-running rebuild owned by the original caller. The token check
+// prevents an old owner from extending a lock acquired by a newer owner after
+// an expiry.
+const RENEW_LOCK_LUA = `
+if redis.call("get", KEYS[1]) == ARGV[1] then
+  return redis.call("pexpire", KEYS[1], ARGV[2])
+end
+return 0
+`;
+
 let state = null;
 const errorLogTimestamps = new Map();
 
@@ -272,9 +282,18 @@ async function withLockStatus(key, ttlMs, fn) {
     return { status: "error", value: null };
   }
 
+  const leaseMs = Math.max(1, Math.ceil(ttlMs));
+  const renewEveryMs = Math.max(100, Math.floor(leaseMs / 3));
+  const renewTimer = setInterval(() => {
+    client
+      .eval(RENEW_LOCK_LUA, 1, prefixed(key), token, leaseMs)
+      .catch((error) => logOnce("withLock-renew", error));
+  }, renewEveryMs);
+  renewTimer.unref?.();
   try {
     return { status: "acquired", value: await fn() };
   } finally {
+    clearInterval(renewTimer);
     try {
       await client.eval(RELEASE_LOCK_LUA, 1, prefixed(key), token);
     } catch (error) {

@@ -212,6 +212,25 @@ describe("redisCache — live Redis", () => {
     });
   });
 
+  it("renews a long critical section so a second owner cannot start after TTL", async (t) => {
+    if (skipReason) return t.skip(skipReason);
+    await withEnabledCache(async () => {
+      const first = cache.withLock("v1:lock:renew", 150, async () => {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        return "first";
+      });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      const second = await cache.withLock(
+        "v1:lock:renew",
+        150,
+        async () => "second"
+      );
+
+      assert.equal(second, null, "the renewed lease must remain owned");
+      assert.equal(await first, "first");
+    });
+  });
+
   it("releases the lock after the critical section and only its own token", async (t) => {
     if (skipReason) return t.skip(skipReason);
     await withEnabledCache(async (probe) => {

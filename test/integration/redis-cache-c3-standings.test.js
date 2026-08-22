@@ -931,9 +931,28 @@ describe("C3 standings — §8 test 5 (stampede)", () => {
     const startedAt = Date.now();
     const response = await progressRes(alice, raceId);
     const elapsedMs = Date.now() - startedAt;
-    assert.equal(response.status, 200, await response.text());
+    const staleText = await response.text();
+    assert.equal(response.status, 200, staleText);
+    const staleBody = JSON.parse(staleText);
+    assert.equal(staleBody.progress.raceId, raceId);
+    assert.equal(staleBody.progress.myPlacement, 1);
     assert.ok(elapsedMs < 1000, `stale response waited ${elapsedMs}ms`);
     assert.ok(snapshotStore.__counters.staleServes >= 1);
+
+    const bobResponse = await progressRes(bob, raceId);
+    const bobBody = await bobResponse.json();
+    assert.equal(bobResponse.status, 200, JSON.stringify(bobBody));
+    assert.equal(bobBody.progress.myPlacement, 2);
+
+    const legacyResponse = await request(
+      server.baseUrl,
+      "GET",
+      `/races/${raceId}/progress`,
+      { token: alice.token, headers: { "X-Timezone": "UTC" } }
+    );
+    const legacyBody = await legacyResponse.json();
+    assert.equal(legacyResponse.status, 200, JSON.stringify(legacyBody));
+    assert.equal(legacyBody.progress.participants.length, 2);
 
     const deadline = Date.now() + 5000;
     let refreshed = null;
