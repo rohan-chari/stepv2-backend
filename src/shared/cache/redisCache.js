@@ -283,8 +283,13 @@ async function withLockStatus(key, ttlMs, fn) {
   }
 
   const leaseMs = Math.max(1, Math.ceil(ttlMs));
-  const renewEveryMs = Math.max(100, Math.floor(leaseMs / 3));
+  const renewEveryMs = Math.max(10, Math.floor(leaseMs / 3));
+  const renewalDeadline = Date.now() + Math.max(leaseMs, 60_000);
   const renewTimer = setInterval(() => {
+    if (Date.now() >= renewalDeadline) {
+      clearInterval(renewTimer);
+      return;
+    }
     client
       .eval(RENEW_LOCK_LUA, 1, prefixed(key), token, leaseMs)
       .catch((error) => logOnce("withLock-renew", error));
