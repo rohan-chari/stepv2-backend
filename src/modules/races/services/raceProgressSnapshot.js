@@ -42,8 +42,8 @@ const cacheKeys = require("../../../shared/cache/cacheKeys");
 // contain a `remoteOnly` accessory from before server-side filtering existed.
 const SCHEMA_VERSION = 2;
 // v3 removes participant presentation from the inner snapshot. It is written
-// only by the default-off lean projection. A mixed-version v2 process rejects
-// it instead of accepting a presentation-free roster it cannot hydrate.
+// by the permanent lean projection. A mixed-version v2 process rejects it
+// instead of accepting a presentation-free roster it cannot hydrate.
 const LEAN_SCHEMA_VERSION = 3;
 const SOFT_TTL_MS = 15_000;
 const PHYSICAL_TTL_SECONDS = 60;

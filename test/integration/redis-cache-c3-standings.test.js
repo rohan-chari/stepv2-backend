@@ -1160,6 +1160,33 @@ describe("C3 standings — invalidation hooks", () => {
       "worker snapshots must not hydrate presentation for the full roster"
     );
     snapshotStore.assertAllowlisted(stored);
+
+    const legacyResponse = await progressRes(alice, raceId);
+    const legacyBody = await legacyResponse.json();
+    assert.equal(legacyResponse.status, 200, JSON.stringify(legacyBody));
+    assert.equal(legacyBody.progress.participants.length, 2);
+    assert.ok(
+      legacyBody.progress.participants.every((participant) =>
+        typeof participant.displayName === "string"
+      ),
+      "legacy readers must hydrate the full roster from a presentation-free snapshot"
+    );
+
+    const pagedResponse = await request(
+      server.baseUrl,
+      "GET",
+      `/races/${raceId}/progress?view=participants-v1&offset=0&limit=1`,
+      {
+        token: alice.token,
+        headers: {
+          "X-Client-Features": `${FEAT},race_participants_paging`,
+          "X-Timezone": "UTC",
+        },
+      }
+    );
+    const pagedBody = await pagedResponse.json();
+    assert.equal(pagedResponse.status, 200, JSON.stringify(pagedBody));
+    assert.equal(pagedBody.progress.participants.length, 1);
   });
 });
 
