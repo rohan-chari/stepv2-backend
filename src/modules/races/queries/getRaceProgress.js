@@ -1864,7 +1864,7 @@ function buildGetRaceProgress(deps = {}) {
         let displayArtifactRef = null;
         // Miss or soft-expiry. Exactly ONE request rebuilds; the lock
         // self-expires (PX) so a crashed winner cannot wedge it.
-        const rebuildPromise = snapshotStore.withRebuildLock(raceId, async () => {
+        const startRebuild = () => snapshotStore.withRebuildLock(raceId, async () => {
           snapshotStore.__bump("requestReplays");
           let fresh = null;
           let artifactEnabled = false;
@@ -1950,7 +1950,7 @@ function buildGetRaceProgress(deps = {}) {
           // usable, while the lock owner refreshes it in the background.
           snapshotStore.__bump("staleServes");
           snapshot = usable;
-          void rebuildPromise
+          void startRebuild()
             .then(async (rebuilt) => {
               if (!rebuilt) return;
               await enqueueRaceResolutionFn({
@@ -1974,26 +1974,19 @@ function buildGetRaceProgress(deps = {}) {
           // the canonical replay remains owned by the background refresh and
           // will publish the exact live-effect ranking for subsequent reads.
           snapshot = await loadPersistedState({ race, raceId, scoringTimeZone });
-          void rebuildPromise
-            .then(async (rebuilt) => {
-              if (!rebuilt) return;
-              await enqueueRaceResolutionFn({
-                raceId,
-                userId,
-                timeZone: scoringTimeZone,
-                reason: "DISPLAY_REFRESH",
-                priority: "IMMEDIATE",
-                displayArtifact: displayArtifactRef,
-              });
-            })
-            .catch((error) => {
-              logger.warn?.("Race progress cold page refresh failed", {
-                raceId,
-                error: error?.message || "unknown",
-              });
-            });
+          // Queue the canonical refresh; do not start the replay in this
+          // request. The resolution worker owns the expensive race-wide
+          // calculation and coalesces concurrent DISPLAY_REFRESH requests.
+          await enqueueRaceResolutionFn({
+            raceId,
+            userId,
+            timeZone: scoringTimeZone,
+            reason: "DISPLAY_REFRESH",
+            priority: "IMMEDIATE",
+            displayArtifact: displayArtifactRef,
+          });
         } else {
-          const rebuilt = await rebuildPromise;
+          const rebuilt = await startRebuild();
           if (rebuilt) {
             snapshot = rebuilt;
             // Phase D step 8: progress polls keep persisted totals converging

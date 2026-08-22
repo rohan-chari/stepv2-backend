@@ -995,11 +995,11 @@ describe("C3 standings — §8 test 5 (stampede)", () => {
     assert.equal(body.progress.participants.length, 1);
     assert.equal(body.progress.pagination.total, 2);
     assert.ok(elapsedMs < 1000, `cold page waited ${elapsedMs}ms`);
-    const deadline = Date.now() + 5000;
-    while (Date.now() < deadline && snapshotStore.__counters.requestReplays < 1) {
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
-    assert.equal(snapshotStore.__counters.requestReplays, 1);
+    assert.equal(
+      snapshotStore.__counters.requestReplays,
+      0,
+      "cold paged GET must not start a race-wide replay"
+    );
   });
 });
 
