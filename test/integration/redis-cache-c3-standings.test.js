@@ -293,8 +293,9 @@ async function postSamples(user, samples) {
   });
 }
 
-async function progressRes(user, raceId) {
-  return request(server.baseUrl, "GET", `/races/${raceId}/progress`, {
+async function progressRes(user, raceId, { query = "" } = {}) {
+  const suffix = query ? `?${query}` : "";
+  return request(server.baseUrl, "GET", `/races/${raceId}/progress${suffix}`, {
     token: user.token,
     headers: { "X-Client-Features": FEAT, "X-Timezone": "UTC" },
   });
@@ -968,6 +969,37 @@ describe("C3 standings — §8 test 5 (stampede)", () => {
     assert.equal(snapshotStore.__counters.requestReplays, 1);
     assert.ok(refreshed);
     assert.ok(Date.parse(refreshed.asOf) > Date.parse(stale.asOf));
+  });
+
+  it("serves a cold paged request from persisted state while replay refreshes in background", async (t) => {
+    if (skipReason) return t.skip(skipReason);
+
+    await enableRedis();
+    await setFlag(true);
+    const alice = await createUser("ColdPageAlice");
+    const bob = await createUser("ColdPageBob");
+    const raceId = await createActiveRace(alice, [bob], "ColdPage");
+    await postSamples(alice, [sampleAt(6, 2600)]);
+    await postSamples(bob, [sampleAt(6, 1200)]);
+    await drain();
+    await probe.del(`${ENV_PREFIX}${cacheKeys.raceProgress(raceId)}`);
+    snapshotStore.__resetCounters();
+
+    const startedAt = Date.now();
+    const response = await progressRes(alice, raceId, {
+      query: "view=participants-v1&offset=0&limit=1",
+    });
+    const elapsedMs = Date.now() - startedAt;
+    const body = await response.json();
+    assert.equal(response.status, 200, JSON.stringify(body));
+    assert.equal(body.progress.participants.length, 1);
+    assert.equal(body.progress.pagination.total, 2);
+    assert.ok(elapsedMs < 1000, `cold page waited ${elapsedMs}ms`);
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline && snapshotStore.__counters.requestReplays < 1) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    assert.equal(snapshotStore.__counters.requestReplays, 1);
   });
 });
 

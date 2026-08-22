@@ -1783,6 +1783,10 @@ function buildGetRaceProgress(deps = {}) {
     const snapshotSchemaVersion = usingLeanProjection
       ? snapshotStore.LEAN_SCHEMA_VERSION
       : snapshotStore.SCHEMA_VERSION;
+    const pageScopedRequest =
+      participantsView === "participants-v1" &&
+      race.status === "ACTIVE" &&
+      race.isTeamRace !== true;
     let snapshot;
     if (isPublicPreview) {
       // ── STRICTLY READ-ONLY PREVIEW PATH ───────────────────────────────────
@@ -1960,6 +1964,30 @@ function buildGetRaceProgress(deps = {}) {
             })
             .catch((error) => {
               logger.warn?.("Race progress background refresh failed", {
+                raceId,
+                error: error?.message || "unknown",
+              });
+            });
+        } else if (pageScopedRequest) {
+          // A cold paged request must not wait for the race-wide replay. The
+          // persisted projection is safe for an immediate page response;
+          // the canonical replay remains owned by the background refresh and
+          // will publish the exact live-effect ranking for subsequent reads.
+          snapshot = await loadPersistedState({ race, raceId, scoringTimeZone });
+          void rebuildPromise
+            .then(async (rebuilt) => {
+              if (!rebuilt) return;
+              await enqueueRaceResolutionFn({
+                raceId,
+                userId,
+                timeZone: scoringTimeZone,
+                reason: "DISPLAY_REFRESH",
+                priority: "IMMEDIATE",
+                displayArtifact: displayArtifactRef,
+              });
+            })
+            .catch((error) => {
+              logger.warn?.("Race progress cold page refresh failed", {
                 raceId,
                 error: error?.message || "unknown",
               });
