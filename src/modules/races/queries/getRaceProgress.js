@@ -1460,7 +1460,7 @@ function buildGetRaceProgress(deps = {}) {
 
     // §5.3 — additive `dropOdds`, derived from the SAME helpers the roll uses
     // and the SAME true step totals openMysteryBox ranks on.
-    if (powerupData && balanceConfigSnapshot) {
+    if (powerupData && balanceConfigSnapshot && !race._pageProjection) {
       const dropOdds = buildDropOdds({
         race,
         userId,
@@ -1830,9 +1830,10 @@ function buildGetRaceProgress(deps = {}) {
       const cachedProjection = cacheOn
         ? await pageProjection.readRaceProgressPageProjection({
             raceId,
-            offset: participantsOffset,
-            limit: participantsLimit,
-            requesterUserId: myParticipant ? userId : null,
+          offset: participantsOffset,
+          limit: participantsLimit,
+          requesterUserId: myParticipant ? userId : null,
+          scoringTimeZone,
           })
         : null;
       let projectionRows = cachedProjection?.rows || null;
@@ -1879,7 +1880,7 @@ function buildGetRaceProgress(deps = {}) {
           hasMore,
           nextOffset,
         };
-        projectionAsOf = now().toISOString();
+        projectionAsOf = race.updatedAt || race.startedAt || null;
         projectionRace = {
           raceId: race.id,
           status: race.status,
@@ -1936,15 +1937,10 @@ function buildGetRaceProgress(deps = {}) {
         source: projectionSource,
         schemaVersion: snapshotStore.LEAN_SCHEMA_VERSION,
       });
-      if (Array.isArray(cachedProjection?.index?.rankingRows)) {
-        Object.defineProperty(race, "_projectionParticipants", {
-          value: cachedProjection.index.rankingRows.map((row) => ({
-            ...row,
-            status: "ACCEPTED",
-          })),
-          enumerable: false,
-        });
-      }
+      Object.defineProperty(race, "_pageProjection", {
+        value: true,
+        enumerable: false,
+      });
       projectionMetadata = {
         projectionGeneration,
         asOf: projectionAsOf,

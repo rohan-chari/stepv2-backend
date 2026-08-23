@@ -94,8 +94,6 @@ function buildRaceProgressPageProjection({
     totalCount: rows.length,
     chunkSize: CHUNK_SIZE,
     chunkCount: chunks.length,
-    participantUserIds: rows.map((row) => row.userId),
-    rankingRows: rows,
     // Chunk descriptors are the ordered ranking index. The request path reads
     // only the descriptors needed for its page, never a presentation roster.
     chunks: chunks.map((_, chunk) => chunk),
@@ -178,6 +176,7 @@ async function readRaceProgressPageProjection({
   offset = 0,
   limit = 15,
   requesterUserId = null,
+  scoringTimeZone = null,
 }) {
   if (!raceId || !redisCache.isEnabled()) return null;
   if (derivedCache.isBypassed(cacheKeys.PREFIX.RACE_PROGRESS)) return null;
@@ -189,7 +188,8 @@ async function readRaceProgressPageProjection({
     !generation ||
     typeof index.asOf !== "string" ||
     !Number.isSafeInteger(index.totalCount) ||
-    index.chunkSize !== CHUNK_SIZE
+    index.chunkSize !== CHUNK_SIZE ||
+    (scoringTimeZone && index.scoringTimeZone !== scoringTimeZone)
   ) return null;
 
   const total = index.totalCount;
@@ -246,9 +246,6 @@ async function invalidateRaceProgressPageProjection(raceId) {
   if (generation) {
     for (let chunk = 0; chunk < Number(index.chunkCount || 0); chunk += 1) {
       keys.push(cacheKeys.raceProgressPage(raceId, generation, chunk));
-    }
-    for (const userId of index.participantUserIds || []) {
-      keys.push(cacheKeys.raceProgressParticipant(raceId, generation, userId));
     }
   }
   return derivedCache.invalidate({
