@@ -86,6 +86,22 @@ const RaceActiveEffect = {
     });
   },
 
+  // A live effect is authoritative only while its ACTIVE row has not expired.
+  // Callers that need this race/user uniqueness check run inside the command's
+  // transaction, so the proxy resolves this query against the same Postgres
+  // transaction that owns the race/participant locks.
+  async findLiveActiveByTypeForParticipant(participantId, type, expiresAfter = new Date()) {
+    return prisma.raceActiveEffect.findFirst({
+      where: {
+        targetParticipantId: participantId,
+        type,
+        status: "ACTIVE",
+        expiresAt: { gt: expiresAfter },
+      },
+      orderBy: [{ expiresAt: "desc" }, { createdAt: "asc" }],
+    });
+  },
+
   // Bulk variant of findActiveByTypeForParticipant across many participants
   // (Phase B2): one query for a single effect type over a set of participant ids,
   // for the GET /races Detour-masking prefetch. Returns the matching ACTIVE

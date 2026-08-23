@@ -124,20 +124,9 @@ const POWERUPS5_TYPES = [
 // unopened Mystery Boxes, and every wave-5 store purchase (owner decision D6 —
 // expensive buys can't be sniped). Mirrors the isStealable helper in routes/races.js.
 const UNSTEALABLE_TYPES = ["SNEAKY_SWAP", "MYSTERY_BOX", ...POWERUPS5_TYPES];
-// AoE attacks (Rainstorm, Power Outage, Quicksand) are NOT redirected by a
-// Decoy — they resolve per-victim, so a Decoy holder caught in one is hit
-// normally and the Decoy is neither consumed nor triggered. That is deliberate;
-// the intended counters to an AoE are Umbrella (immune) and Compression Socks
-// (blocks).
-//
-// COMMENT CORRECTED, no behavior change (batch 2026-08-09 item 4 — an
-// investigation-only item). This constant is DEAD CODE: the live Decoy gate
-// tests bare `OFFENSIVE_TYPES`, so IMPOSTER is NOT actually Decoy-redirectable
-// despite what this line has claimed since it was written. The comment used to
-// assert the opposite and was the only documentation of the rule, so it was
-// actively misleading. Making IMPOSTER genuinely redirectable is a separate
-// product decision; until someone takes it, this constant describes an intent
-// that was never wired up and must not be read as describing live behavior.
+// AoE attacks resolve Decoy interception per victim. Rainstorm and Power
+// Outage use the same one-hop destination pool as targeted attacks; Quicksand
+// remains an explicitly selected-target operation and is unchanged here.
 const DECOY_REDIRECTABLE_TYPES = [...OFFENSIVE_TYPES, "IMPOSTER"];
 // Wave-5 durations.
 // §3.4 duration standardization: non-upgradeable action windows standardize to
@@ -490,6 +479,63 @@ function pickDecoyRedirectVictim({
   return pool[Math.floor(random() * pool.length)];
 }
 
+// Resolve every AoE victim's Decoy slot before applying any final landing
+// effect. This makes the semantics explicit: each original victim is handled
+// once, each live Decoy is consumed once, and a selected destination is never
+// consulted for a second Decoy hop. Multiple slots may select the same final
+// destination; the caller de-duplicates the actual effect write.
+async function resolveAoEDecoySlots({
+  victims,
+  acceptedParticipants,
+  attackerUserId,
+  isAliveTarget,
+  isTeamRace,
+  effectModel,
+  random,
+  now,
+}) {
+  const resolvedAt = now();
+  const slots = [];
+  let decoyBlockedCount = 0;
+  const redirectedToUserIds = new Set();
+
+  for (const victim of victims) {
+    const decoy = await effectModel.findActiveByTypeForParticipant(
+      victim.id,
+      "DECOY",
+      { expiresAfter: resolvedAt },
+    );
+    if (!decoy) {
+      slots.push({ victim, landing: victim, redirected: false });
+      continue;
+    }
+
+    await effectModel.update(decoy.id, { status: "EXPIRED" });
+    const redirect = pickDecoyRedirectVictim({
+      acceptedParticipants,
+      isAliveTarget,
+      attackerUserId,
+      holderParticipant: victim,
+      isTeamRace,
+      random,
+    });
+    if (!redirect) {
+      decoyBlockedCount += 1;
+      slots.push({ victim, landing: null, redirected: false });
+      continue;
+    }
+
+    redirectedToUserIds.add(redirect.userId);
+    slots.push({ victim, landing: redirect, redirected: true });
+  }
+
+  return {
+    slots,
+    decoyBlockedCount,
+    redirectedToUserIds: [...redirectedToUserIds].sort((a, b) => String(a).localeCompare(String(b))),
+  };
+}
+
 // Mystery Potion (§3.4): roll a weighted outcome and route it through the normal
 // apply path for that outcome. Self-contained (returns a full use result). A
 // potion may never fail after consumption: any invalid roll (no eligible enemy,
@@ -733,7 +779,11 @@ async function applyPotionEnemyAttack(a) {
     result.reflected = true; result.reflectedBy = "MIRROR";
   } else {
     // Decoy redirect (one hop, no chaining).
-    const decoy = await effectModel.findActiveByTypeForParticipant(victim.id, "DECOY");
+  const decoy = await effectModel.findActiveByTypeForParticipant(
+    victim.id,
+    "DECOY",
+    { expiresAfter: now() },
+  );
     if (decoy) {
       await effectModel.update(decoy.id, { status: "EXPIRED" });
       const redirect = pickDecoyRedirectVictim({
@@ -1391,6 +1441,34 @@ function buildUsePowerup(dependencies = {}) {
       throw new PowerupUseError("targetUserIds is only valid for Quicksand", 400, "INVALID_TARGETS");
     }
 
+    // Decoy is unique per race/user. This read is deliberately inside the
+    // command transaction (the production model uses the scoped Prisma proxy)
+    // after the race and participant locks have been acquired by the wrapper.
+    // `expiresAt > now` is part of the authority check: an expired historical
+    // ACTIVE row remains untouched and cannot block a new Decoy.
+    if (type === "DECOY") {
+      const decoyCheckAt = now();
+      const activeDecoy = typeof effectModel.findLiveActiveByTypeForParticipant === "function"
+        ? await effectModel.findLiveActiveByTypeForParticipant(
+          myParticipant.id,
+          "DECOY",
+          decoyCheckAt,
+        )
+        : await effectModel.findActiveByTypeForParticipant(
+          myParticipant.id,
+          "DECOY",
+          { expiresAfter: decoyCheckAt },
+        );
+      if (activeDecoy) {
+        throw new PowerupUseError(
+          "You already have an active Decoy in this race",
+          409,
+          "DECOY_ACTIVE",
+          { retainHeld: true },
+        );
+      }
+    }
+
     // Imposter is permanently retired. Reject the use with a stable response
     // message and — crucially — do NOT consume the item (this runs before coin
     // deduction and the mark-USED step, so the powerup stays HELD). Old clients
@@ -1790,38 +1868,54 @@ function buildUsePowerup(dependencies = {}) {
       // AoE jam: one POWER_OUTAGE row per alive enemy, 30 min. Umbrella holders
       // are skipped (immune, not consumed); Socks holders are skipped with the
       // shield consumed (blockedCount); already-jammed victims are skipped.
-      const victims = acceptedParticipants.filter(
-        (p) => p.userId !== userId && isAliveTarget(p) && isEnemy(p)
-      );
-      const outageEnd = new Date(now().getTime() + POWER_OUTAGE_DURATION_MS);
-      const affected = [];
+      const currentTime = now();
+      const victims = acceptedParticipants
+        .filter((p) => p.userId !== userId && isAliveTarget(p) && isEnemy(p))
+        .sort((a, b) => String(a.userId).localeCompare(String(b.userId)));
+      const outageEnd = new Date(currentTime.getTime() + POWER_OUTAGE_DURATION_MS);
+      const decoyResolution = await resolveAoEDecoySlots({
+        victims,
+        acceptedParticipants,
+        attackerUserId: userId,
+        isAliveTarget,
+        isTeamRace,
+        effectModel,
+        random,
+        now: () => currentTime,
+      });
+      const affected = new Set();
+      const processedLandingIds = new Set();
       let blockedCount = 0;
-      for (const victim of victims) {
-        const victimEffects = await effectModel.findActiveForParticipant(victim.id);
+      for (const { landing } of decoyResolution.slots) {
+        if (!landing || processedLandingIds.has(landing.id)) continue;
+        processedLandingIds.add(landing.id);
+        const victimEffects = await effectModel.findActiveForParticipant(landing.id);
         const umbrella = victimEffects.find(
-          (e) => e.type === "UMBRELLA" && e.expiresAt && new Date(e.expiresAt) > now()
+          (e) => e.type === "UMBRELLA" && e.expiresAt && new Date(e.expiresAt) > currentTime
         );
         if (umbrella) continue; // immune, shield not consumed
         const alreadyJammed = victimEffects.find(
-          (e) => e.type === "POWER_OUTAGE" && e.expiresAt && new Date(e.expiresAt) > now()
+          (e) => e.type === "POWER_OUTAGE" && e.expiresAt && new Date(e.expiresAt) > currentTime
         );
         if (alreadyJammed) continue;
-        const socks = victimEffects.find((e) => e.type === "COMPRESSION_SOCKS");
+        const socks = victimEffects.find(
+          (e) => e.type === "COMPRESSION_SOCKS" && e.expiresAt && new Date(e.expiresAt) > currentTime,
+        );
         if (socks) {
           await effectModel.update(socks.id, { status: "BLOCKED" });
           blockedCount += 1;
           await eventModel.create({
             raceId,
-            actorUserId: victim.userId,
+            actorUserId: landing.userId,
             eventType: "POWERUP_BLOCKED",
             powerupType: type,
             targetUserId: userId,
-            description: `${victim.user?.displayName || "A runner"}'s Compression Socks kept the lights on through ${myDisplayName}'s Power Outage!`,
+            description: `${landing.user?.displayName || "A runner"}'s Compression Socks kept the lights on through ${myDisplayName}'s Power Outage!`,
           });
           events.emit("POWERUP_BLOCKED", {
             raceId,
             attackerUserId: userId,
-            defenderUserId: victim.userId,
+            defenderUserId: landing.userId,
             blockedType: type,
             upgradeLevel: 0,
           });
@@ -1829,37 +1923,48 @@ function buildUsePowerup(dependencies = {}) {
         }
         await effectModel.create({
           raceId,
-          targetParticipantId: victim.id,
-          targetUserId: victim.userId,
+          targetParticipantId: landing.id,
+          targetUserId: landing.userId,
           sourceUserId: userId,
           powerupId,
           type: "POWER_OUTAGE",
-          startsAt: now(),
+          startsAt: currentTime,
           expiresAt: outageEnd,
         });
-        affected.push(victim.userId);
+        affected.add(landing.userId);
       }
       await eventModel.create({
         raceId,
         actorUserId: userId,
         eventType: "POWERUP_USED",
         powerupType: type,
-        description: `${myDisplayName} triggered a Power Outage! ${affected.length} rival${affected.length === 1 ? "" : "s"} can't use powerups for 30 minutes.`,
-        metadata: { affected: affected.length, blockedCount },
+        description: `${myDisplayName} triggered a Power Outage! ${affected.size} rival${affected.size === 1 ? "" : "s"} can't use powerups for 30 minutes.`,
+        metadata: { affected: affected.size, blockedCount },
       });
       for (const uid of affected) {
         events.emit("POWERUP_USED", { notificationIntentId: `powerup:${powerupId}:${uid}`, raceId, userId, powerupType: type, targetUserId: uid, upgradeLevel: 0, stealthed: await casterStealthed() });
       }
       await finalizeSelfContainedUse(null);
-      return {
-        blocked: affected.length === 0,
+      const redirectedToUserIds = decoyResolution.redirectedToUserIds;
+      const result = {
+        blocked: affected.size === 0,
         upgradeLevel: 0,
         coinsSpent: 0,
-        outcome: affected.length === 0 ? "BLOCKED" : "APPLIED",
-        affected: affected.length,
+        outcome: affected.size === 0 ? "BLOCKED" : "APPLIED",
+        affected: affected.size,
         blockedCount,
+        decoyBlockedCount: decoyResolution.decoyBlockedCount,
+        redirectedToUserIds,
         durationMs: POWER_OUTAGE_DURATION_MS,
       };
+      if (redirectedToUserIds.length > 0) {
+        result.redirected = true;
+        result.redirectedBy = "DECOY";
+        if (redirectedToUserIds.length === 1) {
+          result.redirectedToUserId = redirectedToUserIds[0];
+        }
+      }
+      return result;
     }
 
     if (type === "MYSTERY_POTION") {
@@ -1903,7 +2008,9 @@ function buildUsePowerup(dependencies = {}) {
       // exempt them from being a normal victim of someone else's storm.
       const raceEffects = await effectModel.findActiveForRace(raceId);
       const activeStorm = raceEffects.find(
-        (e) => e.type === "RAINSTORM" && e.sourceUserId === userId
+        (e) => e.type === "RAINSTORM" &&
+          e.sourceUserId === userId &&
+          e.expiresAt && new Date(e.expiresAt) > now()
       );
       if (activeStorm) {
         throw new PowerupUseError(
@@ -2605,7 +2712,8 @@ function buildUsePowerup(dependencies = {}) {
     if (!reflected && OFFENSIVE_TYPES.includes(type) && targetParticipant) {
       const decoy = await effectModel.findActiveByTypeForParticipant(
         targetParticipant.id,
-        "DECOY"
+        "DECOY",
+        { expiresAfter: now() },
       );
       if (decoy) {
         await effectModel.update(decoy.id, { status: "EXPIRED" });
@@ -3292,19 +3400,33 @@ function buildUsePowerup(dependencies = {}) {
         const victims = acceptedParticipants
           .filter((p) => p.userId !== userId && isAliveTarget(p) && isEnemy(p))
           .sort((a, b) => String(a.userId).localeCompare(String(b.userId)));
-        const affected = [];
+        const decoyResolution = await resolveAoEDecoySlots({
+          victims,
+          acceptedParticipants,
+          attackerUserId: userId,
+          isAliveTarget,
+          isTeamRace,
+          effectModel,
+          random,
+          now: () => currentTime,
+        });
+        const affected = new Set();
         const blockedNames = [];
+        const processedLandingIds = new Set();
 
-        for (const victim of victims) {
-          const victimName = victim.user?.displayName || "A runner";
+        for (const { landing } of decoyResolution.slots) {
+          if (!landing || processedLandingIds.has(landing.id)) continue;
+          processedLandingIds.add(landing.id);
+          const victimName = landing.user?.displayName || "A runner";
 
           // §3.7: an Umbrella holder is immune to the AoE rain — skipped before
           // the Socks check, and the Umbrella (a timed aura) is NOT consumed.
           const victimUmbrella = await effectModel.findActiveByTypeForParticipant(
-            victim.id,
-            "UMBRELLA"
+            landing.id,
+            "UMBRELLA",
+            { expiresAfter: currentTime },
           );
-          if (victimUmbrella && victimUmbrella.expiresAt && new Date(victimUmbrella.expiresAt) > now()) {
+          if (victimUmbrella) {
             // V2 owns this as an indexed domain source, not hidden feed JSON.
             // Source creation is backend-flagged and intentionally independent
             // of the caster's request capability: a frozen-client caster can
@@ -3314,13 +3436,13 @@ function buildUsePowerup(dependencies = {}) {
                 where: {
                   rainstormPowerupId_recipientUserId: {
                     rainstormPowerupId: powerupId,
-                    recipientUserId: victim.userId,
+                    recipientUserId: landing.userId,
                   },
                 },
                 update: {},
                 create: {
                   raceId,
-                  recipientUserId: victim.userId,
+                  recipientUserId: landing.userId,
                   umbrellaEffectId: victimUmbrella.id,
                   rainstormPowerupId: powerupId,
                   windowStart: currentTime,
@@ -3333,15 +3455,16 @@ function buildUsePowerup(dependencies = {}) {
           }
 
           const victimShield = await effectModel.findActiveByTypeForParticipant(
-            victim.id,
-            "COMPRESSION_SOCKS"
+            landing.id,
+            "COMPRESSION_SOCKS",
+            { expiresAfter: currentTime },
           );
           if (victimShield) {
             await effectModel.update(victimShield.id, { status: "BLOCKED" });
             blockedNames.push(victimName);
             await eventModel.create({
               raceId,
-              actorUserId: victim.userId,
+              actorUserId: landing.userId,
               eventType: "POWERUP_BLOCKED",
               powerupType: type,
               targetUserId: userId,
@@ -3350,7 +3473,7 @@ function buildUsePowerup(dependencies = {}) {
             events.emit("POWERUP_BLOCKED", {
               raceId,
               attackerUserId: userId,
-              defenderUserId: victim.userId,
+              defenderUserId: landing.userId,
               blockedType: type,
               upgradeLevel,
             });
@@ -3359,8 +3482,8 @@ function buildUsePowerup(dependencies = {}) {
 
           await effectModel.create({
             raceId,
-            targetParticipantId: victim.id,
-            targetUserId: victim.userId,
+            targetParticipantId: landing.id,
+            targetUserId: landing.userId,
             sourceUserId: userId,
             powerupId,
             type: "RAINSTORM",
@@ -3368,14 +3491,23 @@ function buildUsePowerup(dependencies = {}) {
             expiresAt: stormEnd,
             metadata: {
               multiplier: RAINSTORM_MULTIPLIER,
-              stepsAtStart: victim.totalSteps,
+              stepsAtStart: landing.totalSteps,
             },
           });
-          affected.push(victim.userId);
+          affected.add(landing.userId);
         }
 
-        result.affected = affected.length;
+        result.affected = affected.size;
         result.blockedCount = blockedNames.length;
+        result.decoyBlockedCount = decoyResolution.decoyBlockedCount;
+        result.redirectedToUserIds = decoyResolution.redirectedToUserIds;
+        if (result.redirectedToUserIds.length > 0) {
+          result.redirected = true;
+          result.redirectedBy = "DECOY";
+          if (result.redirectedToUserIds.length === 1) {
+            result.redirectedToUserId = result.redirectedToUserIds[0];
+          }
+        }
         // Kept for wire-shape compatibility with clients that read this field;
         // Rainstorm can no longer be reflected, so it is always false now.
         result.reflectedOntoCaster = false;
@@ -3387,7 +3519,7 @@ function buildUsePowerup(dependencies = {}) {
           powerupType: type,
           description: `${myDisplayName} summoned a Rainstorm! Everyone else's steps count for half for 1 hour.`,
           metadata: {
-            affectedCount: affected.length,
+            affectedCount: affected.size,
             blockedCount: blockedNames.length,
             reflectedOntoCaster: false,
           },

@@ -181,7 +181,13 @@ test("RAINSTORM skips finished participants", async () => {
 test("RAINSTORM rejects when the caster already has an active storm", async () => {
   const ctx = makeDeps({
     raceEffects: [
-      { id: "eff-old", type: "RAINSTORM", status: "ACTIVE", sourceUserId: "user-1" },
+      {
+        id: "eff-old",
+        type: "RAINSTORM",
+        status: "ACTIVE",
+        sourceUserId: "user-1",
+        expiresAt: new Date(NOW.getTime() + ONE_HOUR_MS),
+      },
     ],
   });
   const use = buildUsePowerup(ctx.deps);
