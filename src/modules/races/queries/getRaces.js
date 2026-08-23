@@ -183,6 +183,16 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
       : await Race.findForUser(userId);
   }
 
+  // A race can arrive from both the normal completed page and an injected
+  // recovery/payout-offer path. The model layer usually deduplicates those
+  // sources, but keep the API boundary defensive so a repeated race ID can
+  // never render as two result cards on the client.
+  const racesById = new Map();
+  for (const race of races) {
+    if (race?.id && !racesById.has(race.id)) racesById.set(race.id, race);
+  }
+  races = [...racesById.values()];
+
   const active = [];
   const pending = [];
   const completed = [];

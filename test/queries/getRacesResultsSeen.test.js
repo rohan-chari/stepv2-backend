@@ -6,12 +6,20 @@ const test = require("node:test");
 // we can assert the completed-bucket myResultsSeen flag without a real DB.
 function withMockedRaces(races, fn) {
   const raceModule = require("../../src/modules/races/models/race");
+  const participantModule = require("../../src/modules/races/models/raceParticipant");
   const powerupModule = require("../../src/modules/powerups/models/racePowerup");
   const originalRace = raceModule.Race;
+  const originalParticipant = participantModule.RaceParticipant;
   const originalPowerup = powerupModule.RacePowerup;
 
   Object.assign(raceModule, {
     Race: { async findForUser() { return races; } },
+  });
+  Object.assign(participantModule, {
+    RaceParticipant: {
+      async findPresentationsByUserIds() { return []; },
+      async findPodiumForRaces() { return []; },
+    },
   });
   Object.assign(powerupModule, {
     RacePowerup: { async countQueuedByParticipant() { return 0; } },
@@ -23,6 +31,7 @@ function withMockedRaces(races, fn) {
     return fn(mod);
   } finally {
     Object.assign(raceModule, { Race: originalRace });
+    Object.assign(participantModule, { RaceParticipant: originalParticipant });
     Object.assign(powerupModule, { RacePowerup: originalPowerup });
     delete require.cache[require.resolve("../../src/modules/races/queries/getRaces")];
   }
@@ -87,5 +96,14 @@ test("getRaces: myResultsSeen=false when the field is absent (older backend row)
   await withMockedRaces([race], async ({ getRaces }) => {
     const result = await getRaces("user-1");
     assert.equal(result.completed[0].myResultsSeen, false);
+  });
+});
+
+test("getRaces: duplicate race IDs are returned once", async () => {
+  const race = completedRace(null);
+  await withMockedRaces([race, { ...race }], async ({ getRaces }) => {
+    const result = await getRaces("user-1");
+    assert.equal(result.completed.length, 1);
+    assert.equal(result.completed[0].id, "race-1");
   });
 });
