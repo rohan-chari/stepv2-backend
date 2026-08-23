@@ -1754,6 +1754,10 @@ model RacePayoutDoubleOffer {
   maxBonusCoins                  Int       @map("max_bonus_coins")
   rolling24hRemainingBeforeClaim Int       @map("rolling_24h_remaining_before_claim")
   providerSubHash                String    @map("provider_sub_hash")
+  // Additive mode discriminator. Rows created before flat-50 was deployed
+  // default to the legacy payout-doubling semantics and retain their stored
+  // amount through retry and claim.
+  rewardMode                     String    @default("legacy_double") @map("reward_mode")
   status                         String    @default("PENDING")
   claimedAt                      DateTime? @map("claimed_at")
   forfeitedAt                    DateTime? @map("forfeited_at")

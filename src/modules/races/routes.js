@@ -724,7 +724,8 @@ function createRacesRouter(dependencies = {}) {
       // them serially (Phase B4). Old clients pass null and get byte-identical
       // JSON (§4/§6.3).
       const supportsPayoutDouble =
-        req.clientFeatures?.has("race_payout_double") ?? false;
+        req.clientFeatures?.has("race_payout_double") ||
+        req.clientFeatures?.has("race_payout_flat_50") || false;
       let pendingPayoutDoubleOffer = null;
       if (supportsPayoutDouble) {
         try {
@@ -868,7 +869,8 @@ function createRacesRouter(dependencies = {}) {
         userId: req.user.id,
         raceIds,
         racePayoutDoubleCapability:
-          req.clientFeatures?.has("race_payout_double") ?? false,
+          (req.clientFeatures?.has("race_payout_double") ||
+            req.clientFeatures?.has("race_payout_flat_50")) ?? false,
       });
       res.json({ success: true });
     } catch (error) {

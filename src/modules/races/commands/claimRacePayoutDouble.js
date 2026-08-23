@@ -15,6 +15,8 @@ const {
   canonicalUuid,
   boundedRacePayoutDoubleMaxBonus,
   computeRacePayoutDoubleBonus,
+  FLAT_50_REWARD_MODE,
+  FLAT_50_COINS_PER_RACE,
 } = require("../services/racePayoutDoublePolicy");
 const {
   withRacePayoutDoubleTransaction,
@@ -29,6 +31,7 @@ function claimBody(offer, items, coins, alreadyClaimed) {
     maxBonusCoins: offer.maxBonusCoins,
     rolling24hRemainingBeforeClaim:
       offer.rolling24hRemainingBeforeClaim,
+    rewardMode: offer.rewardMode || "legacy_double",
     coins,
     raceIds: items.map((item) => item.raceIdSnapshot),
   };
@@ -70,7 +73,8 @@ function buildClaimRacePayoutDouble(dependencies = {}) {
           throw new ConflictError("Offer was forfeited", "OFFER_FORFEITED");
         }
         if (
-          !clientFeatures?.has("race_payout_double") ||
+          !clientFeatures?.has("race_payout_double") &&
+          !clientFeatures?.has("race_payout_flat_50") ||
           !config.adsRacePayoutDoubleClaimEnabled() ||
           config.racePayoutDoubleAdUnitIds().length === 0
         ) {
@@ -139,27 +143,21 @@ function buildClaimRacePayoutDouble(dependencies = {}) {
         // preparation is not an issuance authority: a stale/oversized row can
         // never make the ledger, grant, velocity record, or receipt exceed the
         // server's hard 100-coin ceiling.
-        const maxBonusCoins = boundedRacePayoutDoubleMaxBonus(
-          config.racePayoutDoubleMaxBonusCoins(),
-        );
         const settledAt = (await tx.$queryRaw`SELECT NOW() AS now`)[0].now;
-        const cutoff = new Date(settledAt.getTime() - 24 * 60 * 60 * 1000);
-        const velocity = await tx.racePayoutDoubleVelocityGrant.aggregate({
-          where: {
-            providerSubHash: offer.providerSubHash,
-            claimedAt: { gt: cutoff, lte: settledAt },
-          },
-          _sum: { bonusCoins: true },
-        });
-        const rolling24hRemainingBeforeClaim = Math.max(
-          0,
-          maxBonusCoins - (velocity._sum.bonusCoins || 0),
-        );
-        const bonusCoins = computeRacePayoutDoubleBonus({
-          baseCoins: Math.min(currentBase, offer.bonusCoins),
-          configuredMaxBonusCoins: maxBonusCoins,
-          rolling24hRemaining: rolling24hRemainingBeforeClaim,
-        });
+        const isFlat = offer.rewardMode === FLAT_50_REWARD_MODE;
+        if (isFlat && offer.bonusCoins !== FLAT_50_COINS_PER_RACE * offer.items.length) {
+          throw new ConflictError("Offer snapshot changed", "OFFER_CHANGED");
+        }
+        let maxBonusCoins = offer.bonusCoins;
+        let rolling24hRemainingBeforeClaim = offer.bonusCoins;
+        let bonusCoins = offer.bonusCoins;
+        if (!isFlat) {
+          // Legacy offers are immutable economic snapshots. Their stored
+          // amount and compatibility metadata survive config/cap changes.
+          maxBonusCoins = offer.maxBonusCoins;
+          rolling24hRemainingBeforeClaim = offer.rolling24hRemainingBeforeClaim;
+          bonusCoins = offer.bonusCoins;
+        }
         if (bonusCoins <= 0) {
           throw new ConflictError("Offer is no longer claimable", "OFFER_CHANGED");
         }
@@ -220,6 +218,7 @@ function buildClaimRacePayoutDouble(dependencies = {}) {
             bonusCoins,
             maxBonusCoins,
             rolling24hRemainingBeforeClaim,
+            rewardMode: offer.rewardMode || "legacy_double",
           },
         });
         if (!awarded.awarded || grantUpdate.count !== 1 || offerUpdate.count !== 1) {

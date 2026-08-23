@@ -16,6 +16,8 @@ const {
   boundedRacePayoutDoubleMaxBonus,
   computeRacePayoutDoubleBonus,
   normalizedRacePayoutDoubleAmounts,
+  FLAT_50_REWARD_MODE,
+  FLAT_50_COINS_PER_RACE,
 } = require("../services/racePayoutDoublePolicy");
 const {
   withRacePayoutDoubleTransaction,
@@ -58,7 +60,8 @@ function buildCreateRacePayoutDoubleOffer(dependencies = {}) {
       throw new ValidationError("Invalid raceIds", "INVALID_REQUEST");
     }
     if (
-      !clientFeatures?.has("race_payout_double") ||
+      !clientFeatures?.has("race_payout_double") &&
+      !clientFeatures?.has("race_payout_flat_50") ||
       !config.adsRacePayoutDoublePrepareEnabled() ||
       config.racePayoutDoubleAdUnitIds().length === 0
     ) {
@@ -113,7 +116,7 @@ function buildCreateRacePayoutDoubleOffer(dependencies = {}) {
         if (pending) {
           const pendingIds = pending.items.map((item) => item.raceIdSnapshot);
           if (sameSet(raceIds, pendingIds)) {
-            if (rolling24hRemainingBeforeClaim <= 0) {
+            if (pending.rewardMode !== FLAT_50_REWARD_MODE && rolling24hRemainingBeforeClaim <= 0) {
               throw new ForbiddenError(
                 "Race payout double preparation is disabled",
                 "PREPARATION_DISABLED",
@@ -125,13 +128,6 @@ function buildCreateRacePayoutDoubleOffer(dependencies = {}) {
             });
           }
           throw new ConflictError("Another offer is pending", "OFFER_PENDING");
-        }
-
-        if (rolling24hRemainingBeforeClaim <= 0) {
-          throw new ForbiddenError(
-            "Race payout double preparation is disabled",
-            "PREPARATION_DISABLED",
-          );
         }
 
         const completed = await tx.race.findMany({
@@ -194,14 +190,7 @@ function buildCreateRacePayoutDoubleOffer(dependencies = {}) {
           throw new ConflictError("Offer snapshot changed", "OFFER_CHANGED");
         }
         const baseCoins = items.reduce((sum, item) => sum + item.eligibleCoins, 0);
-        const bonusCoins = computeRacePayoutDoubleBonus({
-          baseCoins,
-          configuredMaxBonusCoins: maxBonusCoins,
-          rolling24hRemaining: rolling24hRemainingBeforeClaim,
-        });
-        if (baseCoins <= 0 || bonusCoins <= 0) {
-          throw new ConflictError("Offer snapshot changed", "OFFER_CHANGED");
-        }
+        const bonusCoins = FLAT_50_COINS_PER_RACE * items.length;
         items.sort((left, right) => raceIds.indexOf(left.raceId) - raceIds.indexOf(right.raceId));
         const offer = await tx.racePayoutDoubleOffer.create({
           data: {
@@ -209,9 +198,10 @@ function buildCreateRacePayoutDoubleOffer(dependencies = {}) {
             userId,
             baseCoins,
             bonusCoins,
-            maxBonusCoins,
-            rolling24hRemainingBeforeClaim,
+            maxBonusCoins: bonusCoins,
+            rolling24hRemainingBeforeClaim: bonusCoins,
             providerSubHash: hash,
+            rewardMode: FLAT_50_REWARD_MODE,
             items: { create: items },
           },
           include: { items: { orderBy: { raceIdSnapshot: "asc" } } },

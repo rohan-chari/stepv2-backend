@@ -8,6 +8,8 @@ const {
   boundedRacePayoutDoubleMaxBonus,
   computeRacePayoutDoubleBonus,
   normalizedRacePayoutDoubleAmounts,
+  FLAT_50_REWARD_MODE,
+  FLAT_50_COINS_PER_RACE,
 } = require("../services/racePayoutDoublePolicy");
 
 function serializeOffer(offer, allowance = {}) {
@@ -36,6 +38,10 @@ function buildGetRacePayoutDoubleOffer(dependencies = {}) {
       const maxBonusCoins = boundedRacePayoutDoubleMaxBonus(
         config.racePayoutDoubleMaxBonusCoins(),
       );
+      if (pending.rewardMode === FLAT_50_REWARD_MODE) {
+        const serialized = serializeOffer(pending);
+        return serialized.bonusCoins > 0 ? serialized : null;
+      }
       const nowRows = await db.$queryRaw`SELECT NOW() AS now`;
       const now = nowRows[0].now;
       const cutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
@@ -103,12 +109,7 @@ function buildGetRacePayoutDoubleOffer(dependencies = {}) {
       participants.filter((participant) => !offeredIds.has(participant.id)),
     );
     const baseCoins = items.reduce((sum, item) => sum + item.eligibleCoins, 0);
-    if (baseCoins <= 0) return null;
-    const bonusCoins = computeRacePayoutDoubleBonus({
-      baseCoins,
-      configuredMaxBonusCoins: maxBonusCoins,
-      rolling24hRemaining: rolling24hRemainingBeforeClaim,
-    });
+    const bonusCoins = FLAT_50_COINS_PER_RACE * items.length;
     if (bonusCoins <= 0) return null;
     const completedOrder = new Map(completed.map((race, index) => [race.id, index]));
     items.sort(
@@ -119,8 +120,9 @@ function buildGetRacePayoutDoubleOffer(dependencies = {}) {
       raceIds: items.map((item) => item.raceId),
       baseCoins,
       bonusCoins,
-      maxBonusCoins,
-      rolling24hRemainingBeforeClaim,
+      maxBonusCoins: bonusCoins,
+      rolling24hRemainingBeforeClaim: bonusCoins,
+      rewardMode: FLAT_50_REWARD_MODE,
     };
   };
 }

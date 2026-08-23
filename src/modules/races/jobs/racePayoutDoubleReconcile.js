@@ -3,6 +3,8 @@ const { JobRun } = require("../../../shared/db/jobRun");
 const {
   safeStructuredEvent,
   HARD_MAX_RACE_PAYOUT_DOUBLE_BONUS_COINS,
+  FLAT_50_REWARD_MODE,
+  FLAT_50_COINS_PER_RACE,
 } = require("../services/racePayoutDoublePolicy");
 const { RACE_PAYOUT_DOUBLE_REWARD_KIND } = require("../../economy/adRewards");
 
@@ -140,13 +142,14 @@ function buildRacePayoutDoubleReconcile(dependencies = {}) {
         const velocityRows = velocityByOffer.get(offer.id) || [];
         const receiptRows = receiptByOffer.get(offer.id) || [];
         if (
-          offer.bonusCoins > HARD_MAX_RACE_PAYOUT_DOUBLE_BONUS_COINS ||
+          (offer.rewardMode !== FLAT_50_REWARD_MODE &&
+          (offer.bonusCoins > HARD_MAX_RACE_PAYOUT_DOUBLE_BONUS_COINS ||
           offer.maxBonusCoins > HARD_MAX_RACE_PAYOUT_DOUBLE_BONUS_COINS ||
-          offer.rolling24hRemainingBeforeClaim > HARD_MAX_RACE_PAYOUT_DOUBLE_BONUS_COINS ||
-          coinRows.some((row) => row.amount > HARD_MAX_RACE_PAYOUT_DOUBLE_BONUS_COINS) ||
-          grantRows.some((row) => row.coinAmount > HARD_MAX_RACE_PAYOUT_DOUBLE_BONUS_COINS) ||
-          velocityRows.some((row) => row.bonusCoins > HARD_MAX_RACE_PAYOUT_DOUBLE_BONUS_COINS) ||
-          receiptRows.some((row) => row.bonusCoins > HARD_MAX_RACE_PAYOUT_DOUBLE_BONUS_COINS)
+          offer.rolling24hRemainingBeforeClaim > HARD_MAX_RACE_PAYOUT_DOUBLE_BONUS_COINS)) ||
+          (offer.rewardMode !== FLAT_50_REWARD_MODE && coinRows.some((row) => row.amount > HARD_MAX_RACE_PAYOUT_DOUBLE_BONUS_COINS)) ||
+          (offer.rewardMode !== FLAT_50_REWARD_MODE && grantRows.some((row) => row.coinAmount > HARD_MAX_RACE_PAYOUT_DOUBLE_BONUS_COINS)) ||
+          (offer.rewardMode !== FLAT_50_REWARD_MODE && velocityRows.some((row) => row.bonusCoins > HARD_MAX_RACE_PAYOUT_DOUBLE_BONUS_COINS)) ||
+          (offer.rewardMode !== FLAT_50_REWARD_MODE && receiptRows.some((row) => row.bonusCoins > HARD_MAX_RACE_PAYOUT_DOUBLE_BONUS_COINS))
         ) failures.push("hard_cap_equation");
         if (coinRows.length !== 1 || coinRows[0]?.amount !== offer.bonusCoins) {
           failures.push("ledger_equation");
@@ -166,6 +169,11 @@ function buildRacePayoutDoubleReconcile(dependencies = {}) {
         if (itemSum !== offer.baseCoins || offer.items.some((item) => !sourceIsExact(item))) {
           failures.push("source_equation");
         }
+        if (offer.rewardMode === FLAT_50_REWARD_MODE && (
+          offer.bonusCoins !== FLAT_50_COINS_PER_RACE * offer.items.length ||
+          offer.maxBonusCoins !== offer.bonusCoins ||
+          offer.rolling24hRemainingBeforeClaim !== offer.bonusCoins
+        )) failures.push("flat_reward_equation");
       }
 
       for (const velocity of velocities) {
@@ -192,6 +200,8 @@ function buildRacePayoutDoubleReconcile(dependencies = {}) {
       const rollingBonusByIdentity = new Map();
       for (const velocity of velocities) {
         if (!(velocity.claimedAt > cutoff && velocity.claimedAt <= now)) continue;
+        const velocityOffer = offerById.get(velocity.offerId);
+        if (velocityOffer?.rewardMode === FLAT_50_REWARD_MODE) continue;
         rollingBonusByIdentity.set(
           velocity.providerSubHash,
           (rollingBonusByIdentity.get(velocity.providerSubHash) || 0) + velocity.bonusCoins,
@@ -208,8 +218,8 @@ function buildRacePayoutDoubleReconcile(dependencies = {}) {
       const batchesPerIdentity = identityCount > 0 ? metricOffers.length / identityCount : 0;
       const capHits = metricOffers.filter(
         (offer) =>
-          offer.bonusCoins === offer.maxBonusCoins ||
-          offer.bonusCoins === offer.rolling24hRemainingBeforeClaim,
+          offer.rewardMode !== FLAT_50_REWARD_MODE && (offer.bonusCoins === offer.maxBonusCoins ||
+          offer.bonusCoins === offer.rolling24hRemainingBeforeClaim),
       ).length;
       const reasons = {};
       for (const offer of metricOffers) {

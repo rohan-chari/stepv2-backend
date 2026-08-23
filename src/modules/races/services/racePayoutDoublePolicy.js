@@ -2,6 +2,12 @@ const crypto = require("node:crypto");
 const { hashAppleSub } = require("../../users/appleSubHash");
 
 const CAPABILITY = "race_payout_double";
+// New clients advertise this token so an old backend worker rejects the
+// request instead of claiming a flat-mode offer with legacy math.
+const FLAT_CAPABILITY = "race_payout_flat_50";
+const LEGACY_REWARD_MODE = "legacy_double";
+const FLAT_50_REWARD_MODE = "flat_50";
+const FLAT_50_COINS_PER_RACE = 50;
 const MAX_ROLLOUT = 100;
 // Product-level issuance ceiling. Environment configuration may tune the bonus
 // downward, but no offer or claim path may raise it above 100 coins.
@@ -60,6 +66,30 @@ function normalizedRacePayoutDoubleAmounts(offer, {
   configuredMaxBonusCoins = offer?.maxBonusCoins,
   rolling24hRemaining = offer?.rolling24hRemainingBeforeClaim,
 } = {}) {
+  // Amounts on a persisted offer are an immutable economic snapshot. In
+  // particular, a legacy pending offer must not be rewritten from baseCoins,
+  // a later runtime cap, or rolling usage. The optional allowance arguments
+  // remain accepted for callers compiled against the old policy.
+  if (offer?.rewardMode === LEGACY_REWARD_MODE) {
+    return {
+      baseCoins: offer?.baseCoins,
+      bonusCoins: offer?.bonusCoins,
+      maxBonusCoins: offer?.maxBonusCoins,
+      rolling24hRemainingBeforeClaim: offer?.rolling24hRemainingBeforeClaim,
+      rewardMode: LEGACY_REWARD_MODE,
+    };
+  }
+  if (offer?.rewardMode === FLAT_50_REWARD_MODE) {
+    return {
+      baseCoins: nonNegativeWhole(offer?.baseCoins),
+      bonusCoins: nonNegativeWhole(offer?.bonusCoins),
+      // Numeric compatibility fields mirror the batch total so frozen
+      // clients' legacy `bonusCoins <= maxBonusCoins` parser accepts it.
+      maxBonusCoins: nonNegativeWhole(offer?.bonusCoins),
+      rolling24hRemainingBeforeClaim: nonNegativeWhole(offer?.bonusCoins),
+      rewardMode: FLAT_50_REWARD_MODE,
+    };
+  }
   const maxBonusCoins = boundedRacePayoutDoubleMaxBonus(
     configuredMaxBonusCoins,
   );
@@ -102,6 +132,10 @@ function safeStructuredEvent(logger, event) {
 
 module.exports = {
   CAPABILITY,
+  FLAT_CAPABILITY,
+  LEGACY_REWARD_MODE,
+  FLAT_50_REWARD_MODE,
+  FLAT_50_COINS_PER_RACE,
   HARD_MAX_RACE_PAYOUT_DOUBLE_BONUS_COINS,
   providerSubHash,
   cohortBucket,
