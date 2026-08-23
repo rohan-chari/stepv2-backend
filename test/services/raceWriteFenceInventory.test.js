@@ -119,6 +119,7 @@ test("tournament advancement guards every surviving user before the tournament r
 // a scalar-only projection update). This is intentionally separate from the
 // production helpers so the guard cannot satisfy itself.
 const EXPECTED_PARTICIPANT_MUTATIONS = {
+  "src/modules/loadTesting/fixtures.js": ["raceParticipant.create", "raceParticipant.deleteMany"],
   "src/modules/notifications/dailyMover.js": ["participantModel.update"],
   "src/modules/powerups/commands/openMysteryBox.js": ["participantModel.update"],
   "src/modules/powerups/commands/rollPowerup.js": ["raceParticipant.update", "raceParticipant.update"],
@@ -366,6 +367,7 @@ const INDIRECT_MEMBERSHIP_LOCK_OWNERS = {
 };
 
 const NON_MEMBERSHIP_PARTICIPANT_WRITERS = new Set([
+  "src/modules/loadTesting/fixtures.js",
   "src/modules/notifications/dailyMover.js",
   "src/modules/powerups/commands/openMysteryBox.js",
   "src/modules/powerups/commands/rollPowerup.js",

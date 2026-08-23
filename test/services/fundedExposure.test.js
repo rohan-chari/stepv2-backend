@@ -93,6 +93,86 @@ test("conflict metadata uses independent 600 raw and 80/day ceilings", () => {
   });
 });
 
+function reservationTxWithCurrentExposure() {
+  const currentRace = {
+    id: "participant-current",
+    userId: "user-1",
+    raceId: "race-current",
+    fundedExposureMillicoins: 600_000,
+    fundedExposureRateMillicoinsPerDay: 80_000,
+  };
+  return {
+    fundedExposureGuard: {
+      async createMany() {},
+    },
+    raceParticipant: {
+      async findMany({ select }) {
+        if (select?.fundedExposureMillicoins) {
+          return [{
+            ...currentRace,
+            race: {
+              maxDurationDays: 1,
+              teamPoolMultBps: null,
+              prizeCoinUnit: 10,
+              prizePoolMaxCoins: 8_000,
+              prizeCalculationVersion: 2,
+            },
+          }];
+        }
+        return [{ userId: currentRace.userId, raceId: currentRace.raceId }];
+      },
+      async updateMany() { return { count: 0 }; },
+    },
+    tournamentParticipant: {
+      async findMany() { return []; },
+      async updateMany() { return { count: 0 }; },
+    },
+    race: {
+      async findMany() {
+        return [{
+          id: currentRace.raceId,
+          maxDurationDays: 1,
+          teamPoolMultBps: null,
+          prizeCoinUnit: 10,
+          prizePoolMaxCoins: 8_000,
+          prizeCalculationVersion: 2,
+        }];
+      },
+    },
+    tournament: {
+      async findMany() { return []; },
+    },
+    async $queryRawUnsafe(_sql, ids) {
+      return ids.map((id) => ({ id, user_id: id }));
+    },
+  };
+}
+
+test("non-seeded callers can bypass admission ceilings while explicit seeded enforcement remains", async () => {
+  const reservation = {
+    userId: "user-1",
+    stamp: {
+      exposureMillicoins: 10_000,
+      exposureRateMillicoinsPerDay: 10_000,
+    },
+    competition: { raceId: "race-target" },
+  };
+
+  await assert.doesNotReject(() => reserveFundedExposures({
+    tx: reservationTxWithCurrentExposure(),
+    reservations: [reservation],
+    enforceLimits: false,
+  }));
+  await assert.rejects(
+    reserveFundedExposures({
+      tx: reservationTxWithCurrentExposure(),
+      reservations: [reservation],
+      enforceLimits: true,
+    }),
+    (error) => error?.code === "FUNDED_EXPOSURE_LIMIT",
+  );
+});
+
 function healingTx({ rereadRaceIds = ["race-a"] } = {}) {
   let raceReads = 0;
   const lockedRaceIdSets = [];

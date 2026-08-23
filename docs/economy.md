@@ -46,13 +46,12 @@ is stricter: a user already participating in any live human-created race cannot
 create another quick race, so multi-race exposure mainly comes from joining
 races hosted by other users.
 
-The cap bounds reuse of one walking stream. The same raw steps independently
-count toward placement and the 2,000-step mystery-box thresholds in every race,
-and every qualifying membership contributes to an app-funded prize pool. At
-fields of at least three qualifying walkers, symmetric prize EV is 40 coins per
-participant for a 2-day quick race and 80 for a 7-day quick race. Moving the cap
-from 3 to 5 therefore changes maximum concurrent exposure by `5 / 3 = 1.667`,
-or **+66.7%**:
+The former cross-competition cap bounded reuse of one walking stream. The same
+raw steps independently count toward placement and the 2,000-step mystery-box
+thresholds in every race, and every qualifying membership contributes to an
+app-funded prize pool. At fields of at least three qualifying walkers,
+symmetric prize EV is 40 coins per participant for a 2-day quick race and 80
+for a 7-day quick race. The separate `QUICK_CREATE` cap remains bounded:
 
 | Exposure at the membership ceiling | Cap 3 | Cap 5 | Delta |
 | --- | ---: | ---: | ---: |
@@ -61,15 +60,42 @@ or **+66.7%**:
 | 7-day symmetric prize EV | 240 coins | 400 coins | +160 |
 | Nominal box thresholds | `3 × rawSteps / 2,000` | `5 × rawSteps / 2,000` | +66.7% |
 
-This is a bounded tradeoff, not a removal of the abuse guard: colluding users
-can still reuse the same walking across five free, app-funded races, but cannot
-scale that loop with every available quick race. Monitor quick-race payouts,
-boxes per user-day, discard coins, and concentration among users at the cap.
+That source-specific cap is still a bounded tradeoff: colluding users can reuse
+the same walking across five free, app-funded quick-created races, but cannot
+scale that creation path with every available quick race.
 
-The cross-competition funded-exposure guard was doubled on 2026-08-21: the
-raw exposure ceiling is 600 coins and the daily-rate ceiling is 80 coins/day.
-These are admission ceilings; each membership keeps the exposure stamp it was
-created with, so changing the limits does not rewrite existing memberships.
+The cross-competition funded-exposure admission guard was removed for
+non-seeded user-created races and funded user tournaments on 2026-08-23. This
+is an exceptional unlimited-admission release after the economy review marked
+the option `UNSOUND`; the accepted risk is that one walk can be reused across
+every available free funded competition. The old 600-coin raw and 80-coin/day
+values remain historical conflict metadata and explicit legacy seeded callers
+may still enforce them. Daily/weekly seeded challenges retain their existing
+exemption, while seeded-bucket capacity and same-seed alive-user guards remain
+independent.
+
+The production-backed review estimated that one additional one-day, two-player
+funded race adds 20 minted coins and 2.89 median-player boxes per day. If 372
+live funded users each add one such membership, net issuance was estimated to
+rise from approximately 8,728 to 16,168 coins/day. Monitor these concrete
+signals after release:
+
+- alert Rohan (backend/economy owner and rollback authority) when funded-pool payout issuance exceeds
+  16,168 coins/day for two consecutive UTC days; page immediately above
+  20,000/day;
+- alert when the median funded boxes per live participant-day rises by at least
+  2.89 over the seven-day pre-release baseline, and page at +5.78;
+- alert when p90 live funded memberships per user exceeds 10 or the maximum
+  exceeds 17, the observed pre-release p99/maximum reference points;
+- report funded payout coins, boxes opened, distinct active walkers, active
+  funded memberships, and the membership-to-distinct-walker ratio daily, with
+  separate seeded and non-seeded dimensions.
+
+These are monitoring safeguards, not runtime controls. Code-only rollback is
+to redeploy the prior admission implementation (or a follow-up that restores
+the explicit non-seeded ceiling); it must not rewrite exposure stamps or
+membership history. The backend/economy owner decides rollback from the page
+thresholds above, and the release has no feature flag or kill switch.
 
 **Source-of-truth check (2026-08-13):**
 `src/modules/races/services/nextRacePolicy.js` sets the shared

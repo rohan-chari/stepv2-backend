@@ -202,6 +202,8 @@ function buildJoinTournamentCore(dependencies = {}) {
             userId,
             stamp: fundedExposureStamp,
             competition: { tournamentId: resolvedId },
+            // This branch only runs for non-seeded user-funded tournaments.
+            enforceLimits: false,
           });
           await tx.$queryRaw`
             SELECT id FROM tournaments WHERE id = ${resolvedId} FOR UPDATE

@@ -179,6 +179,9 @@ function buildCreateTournament(dependencies = {}) {
         tx: db,
         userId,
         stamp: fundedExposureStamp,
+        // User-created funded tournaments have no aggregate exposure cap.
+        // Seeded tournament callers retain their own admission policy.
+        enforceLimits: false,
       });
     }
 

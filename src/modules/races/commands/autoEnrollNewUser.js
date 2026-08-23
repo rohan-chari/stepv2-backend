@@ -75,6 +75,9 @@ function buildAutoEnrollNewUser(dependencies = {}) {
           userId,
           stamp: exposureStamp,
           competition: { raceId: race.id },
+          // This is a seeded enrollment caller. Keep its historical exposure
+          // policy explicit while user-created admission is unlimited.
+          enforceLimits: true,
         });
       } else {
         await lockCompetitions(tx, { raceIds: [race.id] });

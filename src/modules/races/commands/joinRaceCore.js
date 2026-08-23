@@ -301,6 +301,9 @@ function buildJoinRaceCore(dependencies = {}) {
         userId,
         stamp: fundedExposureStamp,
         competition: { raceId },
+        // Direct joins historically enforced the guard for every seeded race;
+        // preserve that policy while making non-seeded user races unlimited.
+        enforceLimits: Boolean(race.seedId),
       });
       // Global exposure guards are locked before the competition row. The
       // surrounding race advisory lock serializes capacity; this row lock

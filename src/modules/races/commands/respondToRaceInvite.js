@@ -251,6 +251,9 @@ function buildRespondToRaceInvite(dependencies = {}) {
                 userId,
                 stamp: fundedExposureStamp,
                 competition: { raceId },
+                // Preserve the historical seeded invite policy while removing
+                // the cap from non-seeded user-funded invite acceptance.
+                enforceLimits: Boolean(race.seedId),
               });
             }
             await tx.$queryRaw`
