@@ -49,3 +49,53 @@ test("Bounty target context uses the narrow persisted roster instead of full pro
   assert.equal(result.participants[0].totalSteps, 100);
   assert.equal(result.powerupData.inventory[0].id, "powerup-1");
 });
+
+test("Detour hides every opponent in the target context", async () => {
+  const getContext = buildGetRacePowerupTargetContext({
+    Race: {
+      async findPowerupTargetContext() {
+        return {
+          id: "race-1", status: "ACTIVE", powerupsEnabled: true,
+          participants: [
+            { id: "p-me", userId: "me", totalSteps: 10, finishedAt: null,
+              placement: 2, forfeitedAt: null, team: null, powerupSlots: 3,
+              user: { displayName: "Me", profilePhotoUrl: "me.png" } },
+            { id: "p-rival", userId: "rival", totalSteps: 20, finishedAt: null,
+              placement: 1, forfeitedAt: null, team: null,
+              user: { displayName: "Rival", profilePhotoUrl: "rival.png" } },
+          ],
+        };
+      },
+    },
+    RaceActiveEffect: {
+      async findActiveForRace() {
+        return [{ type: "DETOUR_SIGN", targetUserId: "me", expiresAt: new Date("2026-08-20T15:00:00Z") }];
+      },
+    },
+    RacePowerup: { async findInventoryForParticipants() { return []; } },
+    now: () => new Date("2026-08-20T14:00:00Z"),
+  });
+
+  const result = await getContext({ userId: "me", raceId: "race-1", powerupType: "DETOUR_SIGN" });
+  const rival = result.participants.find((p) => p.userId === "rival");
+  assert.equal(rival.displayName, "???");
+  assert.equal(rival.profilePhotoUrl, null);
+  assert.equal(rival.totalSteps, null);
+  assert.equal(rival.placement, null);
+  assert.equal(rival.stealthed, true);
+});
+
+test("target context returns participants in placement order", async () => {
+  const getContext = buildGetRacePowerupTargetContext({
+    Race: { async findPowerupTargetContext() {
+      return { status: "ACTIVE", powerupsEnabled: true, participants: [
+        { id: "p-2", userId: "u2", placement: 2, finishedAt: null, user: { displayName: "Two" } },
+        { id: "p-1", userId: "u1", placement: 1, finishedAt: null, user: { displayName: "One" } },
+      ] };
+    } },
+    RaceActiveEffect: { async findActiveForRace() { return []; } },
+    RacePowerup: { async findInventoryForParticipants() { return []; } },
+  });
+  const result = await getContext({ userId: "u2", raceId: "r", powerupType: "DETOUR_SIGN" });
+  assert.deepEqual(result.participants.map((p) => p.userId), ["u1", "u2"]);
+});

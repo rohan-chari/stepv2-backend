@@ -70,7 +70,7 @@ function buildGetRacePowerupTargetContext(dependencies = {}) {
           team: participant.team ?? null,
           forfeitedAt: participant.forfeitedAt ?? null,
           stealthed: participant.stealthed === true,
-          totalSteps: participant.totalSteps ?? 0,
+          totalSteps: stealthed ? null : participant.totalSteps ?? 0,
         })),
         powerupData: {
           powerupSlots: progress.powerupData.powerupSlots ?? 3,
@@ -104,7 +104,7 @@ function buildGetRacePowerupTargetContext(dependencies = {}) {
         ["HELD", "MYSTERY_BOX", "QUEUED"]
       ),
     ]);
-    const { stealthedUserIds } = collectRaceIllusions(
+    const { stealthedUserIds, viewerIsDetoured } = collectRaceIllusions(
       effects,
       userId,
       now().getTime()
@@ -117,11 +117,11 @@ function buildGetRacePowerupTargetContext(dependencies = {}) {
 
     return {
       contract: "race-powerup-target-context-v1",
-      participants: race.participants.map((participant) => {
+      participants: ordered.map((participant) => {
         const stealthed =
           participant.userId !== userId &&
           participant.finishedAt == null &&
-          stealthedUserIds.has(participant.userId);
+          (viewerIsDetoured || stealthedUserIds.has(participant.userId));
         return {
           userId: participant.userId,
           displayName: stealthed
@@ -130,7 +130,8 @@ function buildGetRacePowerupTargetContext(dependencies = {}) {
           profilePhotoUrl: stealthed
             ? null
             : participant.user?.profilePhotoUrl ?? null,
-          totalSteps: participant.totalSteps ?? 0,
+          totalSteps: stealthed ? null : participant.totalSteps ?? 0,
+          placement: stealthed ? null : participant.placement ?? null,
           team: participant.team ?? null,
           forfeitedAt: participant.forfeitedAt ?? null,
           stealthed,

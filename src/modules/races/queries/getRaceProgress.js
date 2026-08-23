@@ -1371,7 +1371,9 @@ function buildGetRaceProgress(deps = {}) {
             animal: null,
             totalSteps: null,
             finishedAt: entry.finishedAt,
-            stealthed: false,
+            // The picker uses this shared mask marker to exclude hidden
+            // opponents from offensive target pools as well as the board.
+            stealthed: true,
             currentMultiplier: null,
             // Detour Sign masks every total, so it must mask every rank too.
             placement: null,
