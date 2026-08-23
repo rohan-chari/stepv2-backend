@@ -8,6 +8,7 @@
 const redisCache = require("../../../shared/cache/redisCache");
 const derivedCache = require("../../../shared/cache/derivedCache");
 const cacheKeys = require("../../../shared/cache/cacheKeys");
+const { compareParticipantsForPlacement } = require("../placementOrder");
 
 const SCHEMA_VERSION = 1;
 const CHUNK_SIZE = 50;
@@ -75,6 +76,7 @@ function buildRaceProgressPageProjection({
   const rows = participants
     .map((participant) => normalizeRow(participant, sourceById.get(participant.participantId)))
     .filter(Boolean);
+  rows.sort(compareParticipantsForPlacement);
   const chunks = [];
   for (let offset = 0; offset < rows.length; offset += CHUNK_SIZE) {
     chunks.push({

@@ -119,7 +119,9 @@ async function projectionFixture(raceId, users, generation = 1) {
       powerupsEnabled: false,
       powerupStepInterval: null,
     },
-    participants: sourceParticipants.map((participant) => ({
+    // Deliberately mirror the production race read's joinedAt ordering. The
+    // projection producer must re-establish canonical placement order itself.
+    participants: sourceParticipants.slice().reverse().map((participant) => ({
       participantId: participant.id,
       userId: participant.userId,
       totalSteps: participant.totalSteps,
