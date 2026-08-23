@@ -229,7 +229,7 @@ function createAuthRouter(dependencies = {}) {
     return {
       ...clientSafeUser,
       featureFlags: {
-        bannerAdsEnabled: await safeFlag("bannerAdsEnabled", false),
+        bannerAdsEnabled: await safeFlag("bannerAdsEnabled", true),
         dualBoxBannersEnabled: await safeFlag("dualBoxBannersEnabled", false),
         teamRacesEnabled: true,
         // Frozen pre-v3 clients ignore the v3 key and still need their best

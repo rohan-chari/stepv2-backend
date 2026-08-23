@@ -14,6 +14,7 @@ const OUTPUT = path.join(ROOT, "docs/runtime-control-disposition.yaml");
 const EVIDENCE_AT = "2026-08-20T04:23:00Z";
 
 const retainedDb = new Set([
+  "bannerAdsEnabled",
   "capacityPhaseMetricsV1Enabled",
   "homeServiceBannerEnabled",
   "homeServiceBannerMessage",
@@ -106,7 +107,6 @@ const productDb = new Set([
   "onboardingV3Enabled",
   "onboardingInviteCodeEnabled",
   "tutorialMandatoryEnabled",
-  "bannerAdsEnabled",
   "dualBoxBannersEnabled",
   "seededGeometricPayoutsEnabled",
   "seededInactivityPruneEnabled",

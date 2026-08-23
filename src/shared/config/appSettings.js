@@ -153,9 +153,10 @@ const KNOWN_FLAGS = {
   tutorialMandatoryEnabled: false,
   // iOS banner ads (AdBannerSlot / AdInlineCard). The app also needs the
   // ADMOB_BANNER_AD_UNIT_ID dart-define baked into the build; this flag is the
-  // remote kill switch layered on top. Default OFF (product decision 2026-07-12:
-  // banners removed at 70 DAU; rewarded placements are unaffected).
-  bannerAdsEnabled: false,
+  // remote kill switch layered on top. Default ON so a missing or malformed
+  // row preserves the current shipped behavior; rewarded placements are
+  // unaffected.
+  bannerAdsEnabled: true,
   // Adds a dedicated top banner to box-opening routes. Kept separate from the
   // master banner switch so it can be rolled back independently.
   dualBoxBannersEnabled: false,
@@ -453,7 +454,6 @@ const PERMANENT_FLAGS = Object.freeze({
   onboardingV3Enabled: true,
   onboardingInviteCodeEnabled: false,
   tutorialMandatoryEnabled: true,
-  bannerAdsEnabled: true,
   dualBoxBannersEnabled: true,
   seededGeometricPayoutsEnabled: true,
   seededInactivityPruneEnabled: true,

@@ -56,7 +56,6 @@ const NEW_PERMANENT_VALUES = Object.freeze({
   onboardingV3Enabled: true,
   onboardingInviteCodeEnabled: false,
   tutorialMandatoryEnabled: true,
-  bannerAdsEnabled: true,
   dualBoxBannersEnabled: true,
   seededGeometricPayoutsEnabled: true,
   seededInactivityPruneEnabled: true,
@@ -82,10 +81,11 @@ const RETAINED_MUTABLE_VALUES = Object.freeze({
   inlineRaceResolutionFallback: false,
   homeServiceBannerEnabled: false,
   homeServiceBannerMessage: "",
+  bannerAdsEnabled: true,
 });
 
 test("remaining eligible AppSettings are permanent and only approved gates stay mutable", () => {
-  assert.equal(Object.keys(PERMANENT_FLAGS).length, 93);
+  assert.equal(Object.keys(PERMANENT_FLAGS).length, 92);
   for (const [key, value] of Object.entries(NEW_PERMANENT_VALUES)) {
     assert.equal(PERMANENT_FLAGS[key], value, key);
     assert.equal(Object.hasOwn(KNOWN_FLAGS, key), false, key);
