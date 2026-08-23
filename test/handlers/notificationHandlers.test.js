@@ -374,6 +374,8 @@ test("RACE_MESSAGE_SENT notifies accepted unmuted participants and updates coold
     params: { raceId: "race-1" },
     raceId: "race-1",
     messageId: "msg-1",
+    collapseId: "race_chat_race-1",
+    threadId: "race_chat_race-1",
   });
   assert.equal(updates.length, 1);
   assert.equal(updates[0].where.id, "rp-2");

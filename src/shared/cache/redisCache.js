@@ -22,6 +22,7 @@
 // rebuildable from Postgres.
 
 const CHANNEL_SUFFIX = "cache:invalidate";
+const NOTIFICATION_WAKE_CHANNEL_SUFFIX = "notification:wake";
 const ERROR_LOG_INTERVAL_MS = 60_000;
 
 // Lua: release a lock only if we still hold it (token compare-and-delete), so a
@@ -85,6 +86,10 @@ function prefixed(key) {
 
 function channelName() {
   return `${keyPrefix()}${CHANNEL_SUFFIX}`;
+}
+
+function notificationWakeChannelName() {
+  return `${keyPrefix()}${NOTIFICATION_WAKE_CHANNEL_SUFFIX}`;
 }
 
 function buildClient(role) {
@@ -342,10 +347,24 @@ function getSubscriber() {
   if (!s.subscriber) {
     s.subscriber = buildClient("subscriber");
     s.subscriberHandlers = new Set();
+    s.notificationWakeHandlers = new Set();
     s.reconnectHandlers = new Set();
     s.subscriberReady = attachReadyGate(s.subscriber);
 
     s.subscriber.on("message", (channel, raw) => {
+      if (channel === notificationWakeChannelName()) {
+        let message;
+        try { message = JSON.parse(raw); } catch (error) {
+          logOnce("notification-wake-parse", error);
+          return;
+        }
+        if (!message || typeof message !== "object" || message.kind !== "DUE_SCAN") return;
+        for (const handler of s.notificationWakeHandlers) {
+          try { handler({ kind: message.kind }); }
+          catch (error) { logOnce("notification-wake-handler", error); }
+        }
+        return;
+      }
       if (channel !== channelName()) return;
       let message;
       try {
@@ -380,6 +399,9 @@ function getSubscriber() {
     s.subscriber.on("ready", () => {
       s.subscriber.subscribe(channelName()).catch((error) => {
         logOnce("subscribe", error);
+      });
+      s.subscriber.subscribe(notificationWakeChannelName()).catch((error) => {
+        logOnce("notification-wake-subscribe", error);
       });
       for (const onReconnect of s.reconnectHandlers) {
         try {
@@ -422,6 +444,39 @@ async function subscribe(handler, options = {}) {
   return async () => {
     if (typeof handler === "function") s.subscriberHandlers.delete(handler);
     if (typeof onReconnect === "function") s.reconnectHandlers.delete(onReconnect);
+  };
+}
+
+/**
+ * Best-effort notification wake-up. The message is deliberately only a scan
+ * hint; Postgres owns the durable intent and the worker's bounded scan is the
+ * recovery path for every lost publication.
+ */
+async function publishNotificationWakeup() {
+  try {
+    const client = await readyClient();
+    if (!client) return false;
+    await client.publish(notificationWakeChannelName(), JSON.stringify({ kind: "DUE_SCAN" }));
+    return true;
+  } catch (error) {
+    logOnce("publishNotificationWakeup", error);
+    return false;
+  }
+}
+
+async function subscribeNotificationWakeup(handler) {
+  const s = ensureState();
+  if (!s.config.enabled) return async () => {};
+  const subscriber = getSubscriber();
+  if (typeof handler === "function") s.notificationWakeHandlers.add(handler);
+  try {
+    await s.subscriberReady;
+    await subscriber.subscribe(notificationWakeChannelName());
+  } catch (error) {
+    logOnce("notification-wake-subscribe", error);
+  }
+  return async () => {
+    if (typeof handler === "function") s.notificationWakeHandlers.delete(handler);
   };
 }
 
@@ -630,7 +685,9 @@ module.exports = {
   evalLua,
   withWatch,
   publishInvalidate,
+  publishNotificationWakeup,
   subscribe,
+  subscribeNotificationWakeup,
   healthStatus,
   diagnostics,
   close,

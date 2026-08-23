@@ -4,8 +4,13 @@ const {
   localEventWindowForZone,
 } = require("../globalStepEvent");
 const { isValidIanaTimeZone } = require("../../users/services/globalEventTimezone");
-const { prisma: defaultPrisma } = require("../../../db");
+const {
+  prisma: defaultPrisma,
+  deferUntilAfterCommit,
+  runInPrismaTransaction,
+} = require("../../../db");
 const { createInboxAlert: defaultCreateInboxAlert } = require("../../inbox/services/inbox");
+const { notificationIntentService: defaultNotificationIntentService } = require("../../notifications/services/notificationDelivery");
 const { enqueueRaceResolution: defaultEnqueueRaceResolution } = require("../../races/services/enqueueRaceResolution");
 const {
   acquireRaceWriteFences,
@@ -95,6 +100,35 @@ async function ensureEntitlementForUser(tx, {
       startOutcome: START_OUTCOMES.PENDING,
     },
   });
+  // Future local starts are durable notification intents, not pre-created
+  // Inbox alerts. The due-boundary transaction releases this schedule only
+  // after it proves the recipient still has an eligible active race.
+  if (tx.notificationSchedule && window.startsAt > current) {
+    await defaultNotificationIntentService.submit({
+      recipientUserId: user.id,
+      type: "GLOBAL_EVENT_STARTED",
+      title: "2x STEPS EVENT",
+      body: "Double steps are LIVE for 30 minutes. Every step counts 2x in your races! Go!",
+      payload: {
+        type: "GLOBAL_EVENT_STARTED",
+        route: "home",
+        params: {},
+        multiplier: event.multiplier,
+        eventId: event.id,
+        entitlementId: entitlement.id,
+      },
+      deliveryKey: `visible:GLOBAL_EVENT_STARTED:${user.id}:${event.id}`,
+      availableAt: window.startsAt,
+      expiresAt: window.endsAt,
+      sourceRef: entitlement.id,
+    }, { tx, now: current });
+    // A future schedule is durable before this callback runs. When the caller
+    // uses the shared Prisma transaction wrapper this wake is deferred until
+    // commit; the timer/scan remains the correctness fallback.
+    await deferUntilAfterCommit(() =>
+      defaultNotificationIntentService.wake({ recipientUserId: user.id })
+    );
+  }
   try {
     const { recordOperationalCounters } = require("./globalStepEventObservability");
     await recordOperationalCounters(tx, {
@@ -150,8 +184,15 @@ async function materializeEntitlementsForActiveRacers(event, {
       where: { eventId_userId: { eventId: event.id, userId: user.id } },
       select: { id: true },
     });
-    const row = await ensureEntitlementForUser(prisma, { event, user, now });
-    if (!before && row) created += 1;
+    const write = async (tx) => ensureEntitlementForUser(tx, { event, user, now });
+    const row = prisma === defaultPrisma && typeof runInPrismaTransaction === "function"
+      ? await runInPrismaTransaction(write)
+      : typeof prisma.$transaction === "function"
+        ? await prisma.$transaction(write)
+        : await write(prisma);
+    if (!before && row) {
+      created += 1;
+    }
   }
   if (!returnPage) return created;
   return {
@@ -218,6 +259,7 @@ async function processDueEntitlementBoundaries({
   tickBudgetMs = 5000,
   createInboxAlert = defaultCreateInboxAlert,
   enqueueRaceResolution = defaultEnqueueRaceResolution,
+  notificationIntentService = defaultNotificationIntentService,
 } = {}) {
   const started = Date.now();
   const result = { starts: 0, ends: 0, stale: 0 };
@@ -302,14 +344,60 @@ async function processDueEntitlementBoundaries({
           priority: "IMMEDIATE",
         }, tx);
       }
-      if (raceIds.length > 0) {
+      const deliveryKey = `visible:GLOBAL_EVENT_STARTED:${entitlement.userId}:${entitlement.eventId}`;
+      if (tx.notificationSchedule) {
+        const released = await notificationIntentService.releaseOneDue({
+          tx,
+          recipientUserId: entitlement.userId,
+          deliveryKey,
+          now: current,
+          eligible: raceIds.length > 0,
+        });
+        if (released?.released) alertedUserIds.add(entitlement.userId);
+        else if (released === null && raceIds.length > 0) {
+          // Rows created before the additive schedule table have no schedule
+          // to release. Materialize their already-due boundary once through
+          // the same Inbox/outbox creation seam, preserving mixed-version
+          // behavior without precreating future alerts.
+          await createInboxAlert({
+            userId: entitlement.userId,
+            type: "GLOBAL_EVENT_STARTED",
+            title: "2x STEPS EVENT",
+            body: "Double steps are LIVE for 30 minutes. Every step counts 2x in your races! Go!",
+            destination: { route: "home" },
+            sourceKey: deliveryKey,
+            payload: {
+              type: "GLOBAL_EVENT_STARTED",
+              route: "home",
+              params: {},
+              multiplier: entitlement.event.multiplier,
+              eventId: entitlement.eventId,
+              entitlementId: entitlement.id,
+            },
+            now: current,
+            tx,
+          });
+          alertedUserIds.add(entitlement.userId);
+        }
+      } else if (raceIds.length > 0) {
+        // Narrow legacy test doubles and pre-migration callers retain the
+        // historical path; production Prisma transactions always expose the
+        // additive schedule model above.
         await createInboxAlert({
           userId: entitlement.userId,
           type: "GLOBAL_EVENT_STARTED",
           title: "2x STEPS EVENT",
           body: "Double steps are LIVE for 30 minutes. Every step counts 2x in your races! Go!",
           destination: { route: "home" },
-          sourceKey: `visible:GLOBAL_EVENT_STARTED:${entitlement.userId}:${entitlement.eventId}`,
+          sourceKey: deliveryKey,
+          payload: {
+            type: "GLOBAL_EVENT_STARTED",
+            route: "home",
+            params: {},
+            multiplier: entitlement.event.multiplier,
+            eventId: entitlement.eventId,
+            entitlementId: entitlement.id,
+          },
           now: current,
           tx,
         });
@@ -383,6 +471,9 @@ async function processDueEntitlementBoundaries({
     const { invalidateInboxUnread } = require("../../inbox/services/inbox");
     await Promise.all([...alertedUserIds].map((userId) =>
       invalidateInboxUnread(userId).catch(() => null)
+    ));
+    await Promise.all([...alertedUserIds].map((recipientUserId) =>
+      notificationIntentService.wake({ recipientUserId }).catch(() => null)
     ));
   }
   try {

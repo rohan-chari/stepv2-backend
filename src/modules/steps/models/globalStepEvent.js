@@ -1,4 +1,4 @@
-const { prisma } = require("../../../db");
+const { prisma, runInPrismaTransaction } = require("../../../db");
 const {
   createPendingEnrollments,
   uniqueUserIds,
@@ -11,6 +11,7 @@ const {
   chooseLocalStartMinute,
   compatibilityEnvelopeForLocalEvent,
 } = require("../globalStepEvent");
+const { notificationIntentService } = require("../../notifications/services/notificationDelivery");
 
 async function invalidateGlobalEventCache() {
   const derivedCache = require("../../../shared/cache/derivedCache");
@@ -41,7 +42,7 @@ const GlobalStepEvent = {
   // losing ticks. This avoids an unsafe unique migration over historical rows.
   async createIfAbsent({ startsAt, endsAt, multiplier, label, eventDay = null }) {
     const start = new Date(startsAt);
-    const result = await prisma.$transaction(async (tx) => {
+    const result = await runInPrismaTransaction(async (tx) => {
       await tx.$executeRawUnsafe(
         "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
         `global-step-event:${start.toISOString()}`
@@ -81,7 +82,7 @@ const GlobalStepEvent = {
   // without the snapshot of everyone already racing at its start instant.
   async createIfAbsentWithEnrollments({ startsAt, endsAt, multiplier, label, eventDay = null }) {
     const start = new Date(startsAt);
-    const result = await prisma.$transaction(async (tx) => {
+    const result = await runInPrismaTransaction(async (tx) => {
       await tx.$executeRawUnsafe(
         "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
         `global-step-event:${start.toISOString()}`
@@ -128,6 +129,28 @@ const GlobalStepEvent = {
       for (const [raceId, userIds] of byRace) {
         await createPendingEnrollments(tx, { eventId: event.id, raceId, userIds });
       }
+      // Persist the visible start intent in the same transaction as the
+      // legacy event/enrollment snapshot. The event bus remains a compatible
+      // wake/fallback path, never the only durable producer.
+      for (const userId of uniqueUserIds(participants.map((participant) => participant.userId))) {
+        await notificationIntentService.submit({
+          recipientUserId: userId,
+          type: "GLOBAL_EVENT_STARTED",
+          title: `${multiplier}x STEPS EVENT`,
+          body: `Double steps are LIVE for 30 minutes. Every step counts ${multiplier}x in your races! Go!`,
+          payload: {
+            type: "GLOBAL_EVENT_STARTED",
+            route: "home",
+            params: {},
+            multiplier,
+            eventId: event.id,
+          },
+          deliveryKey: `visible:GLOBAL_EVENT_STARTED:${userId}:${event.id}`,
+          availableAt: start,
+          expiresAt: endsAt,
+          sourceRef: event.id,
+        }, { tx, now: new Date() });
+      }
       return {
         event,
         created: true,
@@ -135,6 +158,11 @@ const GlobalStepEvent = {
       };
     });
     if (result.created) await invalidateGlobalEventCache();
+    if (result.created) {
+      await Promise.all((result.participantUserIds || []).map((recipientUserId) =>
+        notificationIntentService.wake({ recipientUserId }).catch(() => null)
+      ));
+    }
     return result;
   },
 
@@ -146,7 +174,7 @@ const GlobalStepEvent = {
     if (!Number.isInteger(durationMinutes) || durationMinutes <= 0) {
       throw new RangeError("local event durationMinutes must be positive");
     }
-    const result = await prisma.$transaction(async (tx) => {
+    const result = await runInPrismaTransaction(async (tx) => {
       await tx.$executeRawUnsafe(
         "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
         `global-step-event-day:${eventDay}`

@@ -1,7 +1,7 @@
 const { Router } = require("express");
 const { buildRequireAuth } = require("../../middleware/requireAuth");
 const { buildRequireAdmin } = require("./requireAdmin");
-const { prisma } = require("../../db");
+const { prisma, runInPrismaTransaction } = require("../../db");
 const { serializeShopItem, mirrorShopItemToPeer } = require("../cosmetics");
 const { sanitizeCompatibility } = require("../cosmetics/accessoryCompatibility");
 const {
@@ -26,13 +26,13 @@ const { serializeBounds } = require("../economy/balanceConfig.defaults");
 const derivedCache = require("../../shared/cache/derivedCache");
 const cacheKeys = require("../../shared/cache/cacheKeys");
 const {
-  createInboxAlert,
   decodeCursor,
   encodeCursor,
   parseLimit,
   beforeCursor,
   invalidateInboxUnread,
 } = require("../inbox/services/inbox");
+const { buildNotificationIntentService } = require("../notifications/services/notificationDelivery");
 
 // C1 invalidation (spec §5 Phase B). Every shop_items / powerup_shop_items
 // mutation below must drop the derived catalog + manifest copies and broadcast
@@ -223,6 +223,11 @@ function persistentRenderMetadata(raw) {
 
 function createAdminRouter(dependencies = {}) {
   const router = Router();
+  const db = dependencies.prisma || prisma;
+  const transaction = dependencies.transaction ||
+    (dependencies.prisma ? (work) => db.$transaction(work) : runInPrismaTransaction);
+  const notificationIntentService = dependencies.notificationIntentService ||
+    buildNotificationIntentService({ prisma: db });
   const requireAuth =
     dependencies.requireAuth || buildRequireAuth(dependencies);
   const requireAdmin = buildRequireAdmin(dependencies);
@@ -340,16 +345,25 @@ function createAdminRouter(dependencies = {}) {
       const hourAgo = new Date(now.getTime() - 60 * 60 * 1000);
       const recent = await prisma.feedbackMessage.count({ where: { senderKind: "STAFF", createdAt: { gte: hourAgo } } });
       if (recent >= 60) return res.status(429).json({ error: "Too many support replies", code: "RATE_LIMITED" });
-      const message = await prisma.$transaction(async (tx) => {
+      const message = await transaction(async (tx) => {
         const created = await tx.feedbackMessage.create({ data: { threadId: thread.id, senderKind: "STAFF", text, idempotencyKey } });
         await tx.feedbackThread.update({ where: { id: thread.id }, data: { lastMessageAt: now, expiresAt: staffThreadExpiry(now), staffReadAt: now, userReadAt: null } });
-        await createInboxAlert({
-          userId: thread.userId, type: "SUPPORT_REPLY", title: "BARA SUPPORT",
-          body: text, destination: { route: "supportThread", threadId: thread.id }, sourceKey: `support-reply:${created.id}`,
-          now, tx,
-        });
+        await notificationIntentService.submit({
+          recipientUserId: thread.userId,
+          type: "SUPPORT_REPLY",
+          title: "BARA SUPPORT",
+          body: text,
+          payload: {
+            type: "SUPPORT_REPLY",
+            route: "support_thread",
+            params: { threadId: thread.id },
+          },
+          deliveryKey: `support-reply:${created.id}`,
+          availableAt: now,
+        }, { tx, now });
         return created;
       });
+      await notificationIntentService.wake({ recipientUserId: thread.userId }).catch(() => null);
       await invalidateInboxUnread(thread.userId);
       return res.status(201).json({ message: { id: message.id, senderKind: message.senderKind, text: message.text, createdAt: message.createdAt } });
     } catch (error) {

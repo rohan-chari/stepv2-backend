@@ -54,7 +54,7 @@ function validateDestination(destination) {
 // to the original row instead of minting another alert.
 async function createInboxAlert({
   userId, type, title, body, destination, sourceKey, now = new Date(),
-  prisma = defaultPrisma, tx = null,
+  payload = null, prisma = defaultPrisma, tx = null,
 }) {
   if (!userId || typeof type !== "string" || !type || typeof title !== "string" ||
       typeof body !== "string" || !body || typeof sourceKey !== "string" || !sourceKey) {
@@ -76,7 +76,16 @@ async function createInboxAlert({
       update: {},
       create: {
         alertId: alert.id,
-        payload: { title, body, destination: safeDestination },
+        payload: {
+          title,
+          body,
+          destination: safeDestination,
+          ...(payload && typeof payload === "object" ? { payload } : {}),
+        },
+        // Preserve the producer's transaction time. Scheduled intents are
+        // materialized exactly at their boundary; using the database clock
+        // here can make a newly-created due row appear to be in the future.
+        availableAt: now,
       },
     });
     return alert;

@@ -33,6 +33,8 @@ const {
 const { scheduleRecomputePlacements } = require("./modules/races");
 const { scheduleNotificationCleanup } = require("./modules/notifications");
 const { scheduleInboxExpiry, scheduleInboxDelivery } = require("./modules/inbox");
+const { subscribeNotificationWakeup } = require("./shared/cache/redisCache");
+const { notificationIntentService } = require("./modules/notifications/services/notificationDelivery");
 const {
   scheduleActivationEventCleanup,
   scheduleAdminMetricsActivityCleanup,
@@ -164,7 +166,12 @@ function startServer({
         scheduleInboxExpiryJob();
       }
       if (!userFanoutDisabled("INBOX_DELIVERY_DISABLED")) {
-        scheduleInboxDeliveryJob();
+        // The cron owner is the only process that subscribes to the ephemeral
+        // wake channel. Postgres polling remains the durable recovery path.
+        scheduleInboxDeliveryJob({
+          releaseDue: notificationIntentService.releaseDue,
+          subscribeNotificationWakeup,
+        });
       }
       if (!destructiveCleanupDisabled("ACTIVATION_EVENT_CLEANUP_DISABLED")) {
         scheduleActivationCleanup();

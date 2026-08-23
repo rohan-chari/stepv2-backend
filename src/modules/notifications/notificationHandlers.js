@@ -11,10 +11,10 @@ const {
 } = require("../../shared/config/performanceFlags");
 const { appSettings } = require("../../shared/config/appSettings");
 const { createInboxAlert } = require("../inbox/services/inbox");
+const { canonicalPushDeliveryKey } = require("./pushDeliveryAttribution");
 const {
-  buildPushDeliveryAttribution,
-  canonicalPushDeliveryKey,
-} = require("./pushDeliveryAttribution");
+  buildNotificationIntentService,
+} = require("./services/notificationDelivery");
 
 const CHAT_PUSH_COOLDOWN_MS = 60_000;
 const INBOX_VISIBLE_TYPES = new Set([
@@ -44,14 +44,25 @@ function registerNotificationHandlers(dependencies = {}) {
   const logger = dependencies.logger || console;
   const settings = dependencies.appSettings || appSettings;
   const createAlert = dependencies.createInboxAlert || createInboxAlert;
+  const compatibilityProviderFallback = dependencies.compatibilityProviderFallback === true || (
+    !dependencies.prisma &&
+    !dependencies.createInboxAlert &&
+    !dependencies.notificationIntentService &&
+    (dependencies.apnsService || dependencies.fcmService)
+  );
+  const notificationService = dependencies.notificationIntentService ||
+    buildNotificationIntentService({
+      prisma: db,
+      createInboxAlert: createAlert,
+      ...(dependencies.createInboxAlert ? { transaction: async (work) => work({}) } : {}),
+      publishWakeup: dependencies.publishWakeup,
+      DeviceToken: deviceTokenModel,
+      apnsService: apns,
+      fcmService: fcm,
+      logger,
+    });
   const getPerformanceFlags = dependencies.getPerformanceFlags ||
     (() => readPerformanceFlags());
-  const pushAttribution = buildPushDeliveryAttribution({
-    prisma: db,
-    User: userModel,
-    appSettings: settings,
-    logger,
-  });
 
   // Persist one row per user-facing (visible) notification we send, for audit /
   // debugging (a nightly job prunes rows older than a week). Best-effort: a
@@ -75,8 +86,7 @@ function registerNotificationHandlers(dependencies = {}) {
     }
   }
 
-  async function queueInboxDelivery({ recipientUserId, eventName, title, body, payload, sourceId }) {
-    if ((await settings.getFlag("apiInboxV1Enabled")) !== true) return false;
+  async function queueInboxDelivery({ recipientUserId, eventName, title, body, payload, sourceId, compatibilityMetrics = null }) {
     const raceId = payload?.raceId || payload?.params?.raceId || null;
     const tournamentId = payload?.tournamentId || payload?.params?.tournamentId || null;
     // Preserve the wire type used by shipped push clients. `eventName` is the
@@ -109,17 +119,63 @@ function registerNotificationHandlers(dependencies = {}) {
       });
       return false;
     }
+    // Narrow legacy/injected callers do not expose the durable DB seam. Keep
+    // their established provider behavior through the shared compatibility
+    // adapter; production startup does not select this branch.
+    if (compatibilityProviderFallback) {
+      try {
+        const result = await notificationService.legacyImmediate({
+          recipientUserId,
+          title: title || "BARA",
+          body,
+          payload,
+          metrics: compatibilityMetrics,
+        });
+        return result?.sent === true;
+      } catch (error) {
+        logger.error("legacy visible notification failed", {
+          eventName: type,
+          userId: recipientUserId,
+          error: error?.message || String(error),
+        });
+        return false;
+      }
+    }
     try {
-      await createAlert({
-        userId: recipientUserId, type, title: title || "BARA", body,
-        destination,
-        sourceKey: canonicalPushDeliveryKey(type, recipientUserId, domainId),
+      await notificationService.submit({
+        recipientUserId,
+        type,
+        title: title || "BARA",
+        body,
+        payload,
+        deliveryKey: canonicalPushDeliveryKey(type, recipientUserId, domainId),
+        availableAt: payload?.availableAt || new Date(),
+        ...(payload?.expiresAt ? { expiresAt: payload.expiresAt } : {}),
       });
       return true;
     } catch (error) {
       logger.error("Inbox alert creation failed", { eventName: type, userId: recipientUserId, error: error?.message || String(error) });
       // Preserve the long-shipped immediate push on an Inbox write failure.
-      return false;
+      // This compatibility seam also covers callers that intentionally run
+      // without the Inbox capability during a mixed-version rollout.
+      if (!compatibilityProviderFallback) return false;
+      try {
+        const result = await notificationService.legacyImmediate({
+          recipientUserId,
+          title: title || "BARA",
+          body,
+          payload,
+          metrics: compatibilityMetrics,
+        });
+        return result?.sent === true;
+      } catch (legacyError) {
+        logger.error("legacy visible notification failed", {
+          eventName: type,
+          userId: recipientUserId,
+          error: legacyError?.message || String(legacyError),
+        });
+        return false;
+      }
     }
   }
 
@@ -171,35 +227,6 @@ function registerNotificationHandlers(dependencies = {}) {
     return tokenRecord && tokenRecord.platform === "android" ? fcm : apns;
   }
 
-  async function prepareVisibleAttribution({
-    eventName,
-    recipientUserId,
-    title,
-    body,
-    payload,
-    tokens,
-    sourceId,
-  }) {
-    const domainId = sourceId || payload?.messageId || payload?.eventId || payload?.id ||
-      payload?.deliveryKey || payload?.raceId || payload?.params?.raceId ||
-      payload?.tournamentId || payload?.params?.tournamentId;
-    return pushAttribution.prepare({
-      recipientUserId,
-      notificationType: payload?.type || eventName,
-      tokens,
-      deliveryKey: canonicalPushDeliveryKey(
-        payload?.type || eventName,
-        recipientUserId,
-        domainId
-      ),
-      payload,
-    });
-  }
-
-  async function markVisibleAttribution(attribution, tokenRecord, result) {
-    return pushAttribution.markAccepted(attribution, tokenRecord, result);
-  }
-
   async function findActorName(userId) {
     let actorName = "Someone";
 
@@ -242,50 +269,9 @@ function registerNotificationHandlers(dependencies = {}) {
     const queued = await queueInboxDelivery({
       recipientUserId, eventName, title, body, payload, sourceId: contextSource,
     });
-    // Once Inbox v1 accepts the command, its outbox is the ONLY delivery path.
-    // Sending here as well causes exactly the duplicate-push bug this seam is
-    // intended to eliminate. With the rollout flag off, retain legacy delivery.
-    if (queued) return;
-    const tokens = await deviceTokenModel.findByUserId(recipientUserId);
-    if (!tokens || tokens.length === 0) return;
-
-    const attribution = await prepareVisibleAttribution({
-      eventName, recipientUserId, title, body, payload, tokens,
-      sourceId: contextSource,
-    });
-
-    for (const tokenRecord of tokens) {
-      try {
-        const result = await pushServiceFor(tokenRecord).sendNotification({
-          deviceToken: tokenRecord.token,
-          title,
-          body,
-          payload: attribution.payload,
-        });
-        await markVisibleAttribution(attribution, tokenRecord, result);
-
-        if (!result.success && !result.unregistered) {
-          logger.warn(`${eventName} push failed`, {
-            ...logContext,
-            deviceTokenSuffix: deviceTokenSuffix(tokenRecord.token),
-            statusCode: result.statusCode,
-            reason: result.reason,
-          });
-        }
-
-        if (result.unregistered) {
-          await deviceTokenModel.deleteToken({
-            userId: recipientUserId,
-            token: tokenRecord.token,
-          });
-        }
-      } catch (error) {
-        logger.error(`${eventName} push threw`, {
-          ...logContext,
-          deviceTokenSuffix: deviceTokenSuffix(tokenRecord.token),
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
+    if (!queued) {
+      logger.error(`${eventName} notification intent was not persisted`, logContext);
+      return;
     }
 
     // One audit row per recipient (the user had tokens, so we dispatched) —
@@ -1107,6 +1093,8 @@ function registerNotificationHandlers(dependencies = {}) {
           params: { raceId },
           raceId,
           messageId,
+          collapseId,
+          threadId: collapseId,
         };
 
         // A chat alert that is not on its cooldown is user-visible. Persist it
@@ -1136,43 +1124,18 @@ function registerNotificationHandlers(dependencies = {}) {
               userId: recipient.userId, type: "race_message",
               title: raceName || "Race chat", body: alertBody, raceId,
             });
-            continue;
           }
+          if (!queued) logger.error("RACE_MESSAGE_SENT visible intent was not persisted", { raceId, recipientUserId: recipient.userId });
+          continue;
         }
 
         const tokens = await deviceTokenModel.findByUserId(recipient.userId);
         if (!tokens || tokens.length === 0) continue;
-        const attribution = onCooldown
-          ? { delivery: null, payload, epochId: null }
-          : await prepareVisibleAttribution({
-              eventName: "RACE_MESSAGE_SENT",
-              recipientUserId: recipient.userId,
-              title: raceName || "Race chat",
-              body: alertBody,
-              payload,
-              tokens,
-              sourceId: messageId,
-            });
 
         for (const tokenRecord of tokens) {
           try {
             const push = pushServiceFor(tokenRecord);
-            const result = onCooldown
-              ? await push.sendSilentNotification({
-                  deviceToken: tokenRecord.token,
-                  payload,
-                })
-              : await push.sendNotification({
-                  deviceToken: tokenRecord.token,
-                  title: raceName || "Race chat",
-                  body: alertBody,
-                  payload: attribution.payload,
-                  collapseId,
-                  threadId: collapseId,
-                });
-            if (!onCooldown) {
-              await markVisibleAttribution(attribution, tokenRecord, result);
-            }
+            const result = await push.sendSilentNotification({ deviceToken: tokenRecord.token, payload });
 
             if (!result.success && !result.unregistered) {
               logger.warn("RACE_MESSAGE_SENT push failed", {
@@ -1429,110 +1392,67 @@ function registerNotificationHandlers(dependencies = {}) {
         route: "race_detail",
         params: { raceId },
         placement,
+        collapseId: `placement_${raceId}`,
       };
 
-      // Visible placement changes use the Inbox outbox as their only visible
-      // delivery path. Silent refreshes intentionally remain immediate.
-      const queuedVisible = sendAlert && await queueInboxDelivery({
-        recipientUserId: userId,
-        eventName: "PLACEMENT_CHANGED",
-        title,
-        body,
-        payload,
-        sourceId: payoutDrop
-          ? `payout-drop:${raceId}:${userId}`
-          : notificationIntentId,
-      });
-
-      // Inbox alerts deliberately exist even when no device is registered.
-      // The remaining immediate path is only a legacy fallback or a silent
-      // refresh, both of which need a device token.
-      let tokens = [];
-      if (!queuedVisible) {
+      // Visible placement changes use the shared durable intent path. Silent
+      // refreshes remain immediate and are intentionally outside this workflow.
+      if (sendAlert) {
+        const queuedVisible = await queueInboxDelivery({
+          recipientUserId: userId,
+          eventName: "PLACEMENT_CHANGED",
+          title,
+          body,
+          payload,
+          sourceId: payoutDrop
+            ? `payout-drop:${raceId}:${userId}`
+            : notificationIntentId,
+        });
+        if (compatibilityProviderFallback) {
+          perfTokenReads += 1;
+          if (queuedVisible) {
+            perfPushAttempts += 1;
+            perfPushSuccesses += 1;
+          }
+        }
+        if (queuedVisible && !payoutDrop) {
+          await recordNotification({ userId, type: "PLACEMENT_CHANGED", title, body, raceId });
+        }
+        perfOutcome = queuedVisible
+          ? (compatibilityProviderFallback ? "alert-sent" : "alert-queued")
+          : "intent-failed";
+      } else {
+        const tokens = await deviceTokenModel.findByUserId(userId);
         perfTokenReads += 1;
-        tokens = await deviceTokenModel.findByUserId(userId);
         if (!tokens || tokens.length === 0) {
           perfOutcome = "no-tokens";
           return;
         }
-      }
-      const attribution = sendAlert && !queuedVisible
-        ? await prepareVisibleAttribution({
-            eventName: "PLACEMENT_CHANGED",
-            recipientUserId: userId,
-            title,
-            body,
-            payload,
-            tokens,
-            sourceId: payoutDrop
-              ? `payout-drop:${raceId}:${userId}`
-              : notificationIntentId,
-          })
-        : { delivery: null, payload, epochId: null };
-
-      for (const tokenRecord of tokens) {
-        perfPushAttempts += 1;
-        try {
-          const push = pushServiceFor(tokenRecord);
-          const result = sendAlert
-            ? await push.sendNotification({
-                deviceToken: tokenRecord.token,
-                title,
-                body,
-                payload: attribution.payload,
-                collapseId: `placement_${raceId}`,
-              })
-            : await push.sendSilentNotification({
-                deviceToken: tokenRecord.token,
-                payload,
-              });
-
-          if (sendAlert) {
-            await markVisibleAttribution(attribution, tokenRecord, result);
-          }
-          if (!result.success && !result.unregistered) {
+        for (const tokenRecord of tokens) {
+          perfPushAttempts += 1;
+          try {
+            const result = await pushServiceFor(tokenRecord).sendSilentNotification({
+              deviceToken: tokenRecord.token,
+              payload,
+            });
+            if (!result.success && !result.unregistered) perfFailures += 1;
+            if (result.unregistered) {
+              perfUnregistered += 1;
+              await deviceTokenModel.deleteToken({ userId, token: tokenRecord.token });
+            }
+            if (result.success) perfPushSuccesses += 1;
+          } catch (error) {
             perfFailures += 1;
-            logger.warn("PLACEMENT_CHANGED push failed", {
+            logger.error("PLACEMENT_CHANGED silent push threw", {
               raceId,
               recipientUserId: userId,
               deviceTokenSuffix: deviceTokenSuffix(tokenRecord.token),
-              statusCode: result.statusCode,
-              reason: result.reason,
+              error: error instanceof Error ? error.message : String(error),
             });
           }
-          if (result.unregistered) {
-            perfUnregistered += 1;
-            await deviceTokenModel.deleteToken({
-              userId,
-              token: tokenRecord.token,
-            });
-          }
-          if (result.success) perfPushSuccesses += 1;
-        } catch (error) {
-          perfFailures += 1;
-          logger.error("PLACEMENT_CHANGED push threw", {
-            raceId,
-            recipientUserId: userId,
-            deviceTokenSuffix: deviceTokenSuffix(tokenRecord.token),
-            error: error instanceof Error ? error.message : String(error),
-          });
         }
+        perfOutcome = "silent-sent";
       }
-
-      // Record only the visible alert; the silent refresh push is not
-      // user-facing. The payout-drop variant already wrote its row as the
-      // insert-first claim (§7 skipAudit pattern), so recording again here
-      // would double it.
-      if (sendAlert && !payoutDrop) {
-        await recordNotification({
-          userId,
-          type: "PLACEMENT_CHANGED",
-          title,
-          body,
-          raceId,
-        });
-      }
-      perfOutcome = sendAlert ? (queuedVisible ? "alert-queued" : "alert-sent") : "silent-sent";
     } catch (error) {
       perfOutcome = "handler-error";
       logger.error("PLACEMENT_CHANGED handler failed", {
@@ -1631,62 +1551,8 @@ function registerNotificationHandlers(dependencies = {}) {
             body,
             raceId,
           });
-          continue;
         }
-        const tokens = await deviceTokenModel.findByUserId(recipientUserId);
-        if (!tokens || tokens.length === 0) continue;
-        const attribution = await prepareVisibleAttribution({
-          eventName: "HIGH_MULTIPLIER_ALERT",
-          recipientUserId,
-          title,
-          body,
-          payload,
-          tokens,
-          sourceId: notificationIntentId,
-        });
-        for (const tokenRecord of tokens) {
-          try {
-            const result = await pushServiceFor(tokenRecord).sendNotification({
-              deviceToken: tokenRecord.token,
-              title,
-              body,
-              payload: attribution.payload,
-              // APNs hard-limits `apns-collapse-id` to 64 BYTES. The original
-              // `himult_<raceId>_<actorUserId>` (two full UUIDs, 80 bytes) made
-              // APNs 400 InvalidCollapseId on every send — no one ever received
-              // this push. 8-char UUID prefixes keep it unique enough for
-              // collapse purposes at 25 bytes.
-              collapseId: `himult_${String(raceId ?? "").slice(0, 8)}_${String(actorUserId ?? "").slice(0, 8)}`,
-            });
-            await markVisibleAttribution(attribution, tokenRecord, result);
-            if (!result.success && !result.unregistered) {
-              logger.warn("HIGH_MULTIPLIER_ALERT push failed", {
-                raceId,
-                recipientUserId,
-                deviceTokenSuffix: deviceTokenSuffix(tokenRecord.token),
-                statusCode: result.statusCode,
-                reason: result.reason,
-              });
-            }
-            if (result.unregistered) {
-              await deviceTokenModel.deleteToken({ userId: recipientUserId, token: tokenRecord.token });
-            }
-          } catch (error) {
-            logger.error("HIGH_MULTIPLIER_ALERT push threw", {
-              raceId,
-              recipientUserId,
-              deviceTokenSuffix: deviceTokenSuffix(tokenRecord.token),
-              error: error instanceof Error ? error.message : String(error),
-            });
-          }
-        }
-        await recordNotification({
-          userId: recipientUserId,
-          type: "HIGH_MULTIPLIER_ALERT",
-          title,
-          body,
-          raceId,
-        });
+        if (!queued) logger.error("HIGH_MULTIPLIER_ALERT visible intent was not persisted", { raceId, recipientUserId });
       }
     } catch (error) {
       logger.error("HIGH_MULTIPLIER_ALERT handler failed", {
@@ -1928,6 +1794,7 @@ function registerNotificationHandlers(dependencies = {}) {
         route: "race_detail",
         params: { raceId },
         placement,
+        collapseId: `daily_mover_${raceId}`,
       };
 
       const queued = await queueInboxDelivery({
@@ -1940,62 +1807,8 @@ function registerNotificationHandlers(dependencies = {}) {
       });
       if (queued) {
         await recordNotification({ userId, type: "DAILY_MOVER", title, body, raceId });
-        return;
       }
-
-      const tokens = await deviceTokenModel.findByUserId(userId);
-      if (!tokens || tokens.length === 0) return;
-      const attribution = await prepareVisibleAttribution({
-        eventName: "DAILY_MOVER",
-        recipientUserId: userId,
-        title,
-        body,
-        payload,
-        tokens,
-        sourceId: notificationIntentId || `${raceId}:${new Date().toISOString().slice(0, 10)}`,
-      });
-
-      for (const tokenRecord of tokens) {
-        try {
-          const push = pushServiceFor(tokenRecord);
-          const result = await push.sendNotification({
-            deviceToken: tokenRecord.token,
-            title,
-            body,
-            payload: attribution.payload,
-            collapseId: `daily_mover_${raceId}`,
-          });
-          await markVisibleAttribution(attribution, tokenRecord, result);
-
-          if (!result.success && !result.unregistered) {
-            logger.warn("DAILY_MOVER push failed", {
-              raceId,
-              recipientUserId: userId,
-              deviceTokenSuffix: deviceTokenSuffix(tokenRecord.token),
-              statusCode: result.statusCode,
-              reason: result.reason,
-            });
-          }
-          if (result.unregistered) {
-            await deviceTokenModel.deleteToken({ userId, token: tokenRecord.token });
-          }
-        } catch (error) {
-          logger.error("DAILY_MOVER push threw", {
-            raceId,
-            recipientUserId: userId,
-            deviceTokenSuffix: deviceTokenSuffix(tokenRecord.token),
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
-      }
-
-      await recordNotification({
-        userId,
-        type: "DAILY_MOVER",
-        title,
-        body,
-        raceId,
-      });
+      if (!queued) logger.error("DAILY_MOVER visible intent was not persisted", { raceId, recipientUserId: userId });
     } catch (error) {
       logger.error("DAILY_MOVER handler failed", {
         error: error instanceof Error ? error.message : String(error),
