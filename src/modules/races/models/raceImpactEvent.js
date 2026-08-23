@@ -144,13 +144,16 @@ function buildRaceImpactEventModel(prisma = defaultPrisma) {
       });
     },
 
-    async listUnacknowledged({ raceId, userId, limit = 20 }, client = prisma) {
+    async listUnacknowledged({ raceId, userId, limit = 20, resolvedAfter = null }, client = prisma) {
       return client.raceImpactEvent.findMany({
         where: {
           raceId,
           recipientUserId: userId,
           popupAcknowledgedAt: null,
           calculationVersion: CALCULATION_VERSION,
+          ...(resolvedAfter instanceof Date && Number.isFinite(resolvedAfter.getTime())
+            ? { resolvedAt: { gt: resolvedAfter } }
+            : {}),
         },
         orderBy: [{ resolvedAt: "asc" }, { id: "asc" }],
         take: Math.min(20, Math.max(1, Number(limit) || 20)),

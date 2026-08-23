@@ -1708,11 +1708,22 @@ function createRacesRouter(dependencies = {}) {
     if (!enabled) {
       throw new NotFoundError("Active impact notices are unavailable", "FEATURE_DISABLED");
     }
+    const resolvedAfter = req.query.resolvedAfter
+      ? new Date(req.query.resolvedAfter)
+      : null;
+    if (req.query.resolvedAfter &&
+        (!(resolvedAfter instanceof Date) || !Number.isFinite(resolvedAfter.getTime()))) {
+      return res.status(400).json({ error: "Invalid resolvedAfter", code: "INVALID_QUERY" });
+    }
     const result = await getActiveRaceImpactNotices({
       raceId: req.params.raceId,
       userId: req.user.id,
+      resolvedAfter,
     });
-    return res.json({ notices: result.notices });
+    return res.json({
+      notices: result.notices,
+      resolvedAfterApplied: Boolean(req.query.resolvedAfter),
+    });
   }));
 
   router.post(

@@ -245,6 +245,7 @@ describe("resolved impact events v2 HTTP contract", () => {
         valueStatus: "SYNCED_SNAPSHOT",
         resolvedAt: "2026-08-19T16:30:00.000Z",
       }],
+      resolvedAfterApplied: false,
     });
 
     const feedBefore = await request(
@@ -276,7 +277,10 @@ describe("resolved impact events v2 HTTP contract", () => {
       `/races/${race.id}/active-impact-notices`,
       { token: owner.token, headers: V2_HEADERS },
     );
-    assert.deepEqual(await popupAfter.json(), { notices: [] });
+    assert.deepEqual(await popupAfter.json(), {
+      notices: [],
+      resolvedAfterApplied: false,
+    });
 
     const feedAfter = await request(
       server.baseUrl,
@@ -285,6 +289,44 @@ describe("resolved impact events v2 HTTP contract", () => {
       { token: owner.token, headers: V2_HEADERS },
     );
     assert.equal((await feedAfter.json()).events.length, 1);
+  });
+
+  it("filters active popup rows by the additive resolvedAfter cursor", async () => {
+    const owner = await createTestUser();
+    const race = await createRaceWithParticipants([owner]);
+    await createResolvedImpact({
+      race,
+      recipient: owner,
+      sourceId: "old-cutoff-row",
+      resolvedAt: new Date("2026-08-19T16:30:00.000Z"),
+    });
+    const newRow = await createResolvedImpact({
+      race,
+      recipient: owner,
+      sourceId: "new-cutoff-row",
+      resolvedAt: new Date("2026-08-24T16:30:00.000Z"),
+    });
+
+    const filtered = await request(
+      server.baseUrl,
+      "GET",
+      `/races/${race.id}/active-impact-notices?resolvedAfter=2026-08-23T00%3A00%3A00.000Z`,
+      { token: owner.token, headers: V2_HEADERS },
+    );
+    assert.equal(filtered.status, 200);
+    assert.deepEqual(
+      (await filtered.json()).notices.map((notice) => notice.id),
+      [`impact:${newRow.id}`],
+    );
+
+    const invalid = await request(
+      server.baseUrl,
+      "GET",
+      `/races/${race.id}/active-impact-notices?resolvedAfter=not-a-date`,
+      { token: owner.token, headers: V2_HEADERS },
+    );
+    assert.equal(invalid.status, 400);
+    assert.equal((await invalid.json()).code, "INVALID_QUERY");
   });
 
   it("serves active v2 Activity when the legacy impact gate is off and keeps terminal Activity behind it", async () => {
@@ -488,7 +530,10 @@ describe("resolved impact events v2 HTTP contract", () => {
       `/races/${race.id}/active-impact-notices`,
       { token: owner.token, headers: V2_HEADERS },
     );
-    assert.deepEqual(await terminalRead.json(), { notices: [] });
+    assert.deepEqual(await terminalRead.json(), {
+      notices: [],
+      resolvedAfterApplied: false,
+    });
 
     const terminalAck = await request(
       server.baseUrl,

@@ -8,7 +8,7 @@ const { NotFoundError, ForbiddenError } = require("../../../shared/errors/AppErr
 function buildGetActiveRaceImpactNotices(dependencies = {}) {
   const model = dependencies.RaceImpactEvent || defaultModel;
 
-  return async function getActiveRaceImpactNotices({ raceId, userId }) {
+  return async function getActiveRaceImpactNotices({ raceId, userId, resolvedAfter = null }) {
     const race = await model.getRaceAccess({ raceId, userId });
     if (!race) throw new NotFoundError("Race not found", "NOT_FOUND");
     if (!Array.isArray(race.participants) || race.participants.length === 0) {
@@ -19,7 +19,12 @@ function buildGetActiveRaceImpactNotices(dependencies = {}) {
     }
     if (race.status !== "ACTIVE") return { notices: [] };
 
-    const rows = await model.listUnacknowledged({ raceId, userId, limit: 20 });
+    const rows = await model.listUnacknowledged({
+      raceId,
+      userId,
+      limit: 20,
+      resolvedAfter,
+    });
     return {
       notices: (rows || [])
         .filter(isValidEvent)
