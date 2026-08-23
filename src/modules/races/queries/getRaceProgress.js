@@ -87,6 +87,7 @@ const {
 } = require("../services/raceResolutionInputFingerprint");
 const { isStrictFlagEnabled } = require("../../../shared/config/isStrictFlagEnabled");
 const userPresentationCache = require("../../social/services/userPresentationCache");
+const defaultPageProjection = require("../services/raceProgressPageProjection");
 
 // The (releaseChannel × supportsCharacters × supportsRemoteAssets) combinations
 // `characterPresentation` can produce. Closed set: `resolveReleaseChannel` only
@@ -292,6 +293,7 @@ function buildGetRaceProgress(deps = {}) {
 
   // ── C3 wiring (spec §5 Phase D). All of it is inert unless the flag is on. ──
   const snapshotStore = deps.raceProgressSnapshot || defaultSnapshotStore;
+  const pageProjection = deps.raceProgressPageProjection || defaultPageProjection;
   const settings = deps.appSettings || defaultAppSettings;
   const enqueueRaceResolutionFn =
     deps.enqueueRaceResolution || defaultEnqueueRaceResolution;
@@ -1029,11 +1031,18 @@ function buildGetRaceProgress(deps = {}) {
     participantsOffset = 0,
     participantsLimit = 10,
     hydratePresentation = false,
+    requesterEntry = null,
+    projectionPagination = null,
+    projectionMetadata = null,
   }) {
     const snapRace = snapshot.race || {};
     const entries = snapshot.participants || [];
     const raceActiveEffects = snapshot.activeEffects || [];
     const nowTime = now();
+    const viewerEntries = requesterEntry &&
+      !entries.some((entry) => entry.userId === requesterEntry.userId)
+      ? [...entries, requesterEntry]
+      : entries;
 
     // Redis-disabled progress serves the cheap persisted roster snapshot. The
     // persisted total can lag a just-used powerup (bonusSteps/penalties are
@@ -1046,7 +1055,7 @@ function buildGetRaceProgress(deps = {}) {
         snapshot.source === "persisted" ||
         snapshot.source === "worker-persisted")
     ) {
-      const viewerEntry = entries.find((entry) => entry.userId === userId);
+      const viewerEntry = viewerEntries.find((entry) => entry.userId === userId);
       if (viewerEntry && myParticipant && !myParticipant.finishedAt) {
         try {
           const scoringParticipant =
@@ -1131,7 +1140,7 @@ function buildGetRaceProgress(deps = {}) {
       // THIS USER ONLY. Lazy require breaks the getRaceProgress <->
       // raceStateResolution import cycle.
       const boxTz = raceTimeZone(race, "UTC");
-      const myEntry = entries.find((e) => e.participantId === myParticipant.id);
+      const myEntry = viewerEntries.find((e) => e.participantId === myParticipant.id);
       const reusedLeaderboardBase = myEntry ? myEntry.baseAdjusted : null;
       let myBoxBaseAdjusted;
       if (scoringTimeZone === boxTz && reusedLeaderboardBase != null) {
@@ -1421,7 +1430,7 @@ function buildGetRaceProgress(deps = {}) {
       }
     }
 
-    const myPlacementEntry = entries.find((e) => e.userId === userId);
+    const myPlacementEntry = viewerEntries.find((e) => e.userId === userId);
 
     const result = {
       raceId: snapRace.raceId,
@@ -1457,12 +1466,12 @@ function buildGetRaceProgress(deps = {}) {
         userId,
         // ctx inputs: the SAME true (never illusion-masked) effective totals the
         // roll builds its exclusion predicates from.
-        stepTotals: entries.map((e) => ({
+        stepTotals: viewerEntries.map((e) => ({
           participant: { userId: e.userId, team: e.team ?? null },
           totalSteps: e.totalSteps,
         })),
         // Position input: the PERSISTED rows, which is what the roll ranks on.
-        persistedParticipants: race.participants.filter(
+        persistedParticipants: (race._projectionParticipants || race.participants).filter(
           (p) => p.status === "ACCEPTED"
         ),
         snapshot: balanceConfigSnapshot,
@@ -1536,7 +1545,9 @@ function buildGetRaceProgress(deps = {}) {
     // reveal them.
     const pagingRequested = participantsView === "participants-v1";
     const pageableShape = result.status === "ACTIVE" && !result.isTeamRace;
-    if (pagingRequested && !pageableShape) {
+    if (projectionPagination) {
+      result.pagination = projectionPagination;
+    } else if (pagingRequested && !pageableShape) {
       const totalParticipants = result.participants.length;
       result.pagination = {
         offset: 0,
@@ -1603,6 +1614,10 @@ function buildGetRaceProgress(deps = {}) {
       });
     }
 
+    if (projectionMetadata && pagingRequested) {
+      Object.assign(result, projectionMetadata);
+    }
+
     return result;
   }
 
@@ -1662,6 +1677,9 @@ function buildGetRaceProgress(deps = {}) {
     const cacheOn = hasInjectedDependencies
       ? false
       : await standingsCacheEnabled();
+    const requestedPage =
+      participantsView === "participants-v1" &&
+      typeof raceModel.findProgressPageContext === "function";
     // Lean scoring is a projection optimization, not a Redis requirement.
     // Keeping it behind cacheOn made every paged bootstrap fall back to the
     // fat race read during a Redis-disabled capacity run, even though the
@@ -1675,9 +1693,12 @@ function buildGetRaceProgress(deps = {}) {
             settings,
             "raceProgressLeanProjectionV1Enabled"
           ))));
-    let race = leanProjectionEnabled
-      ? await raceModel.findProgressScoringContext(raceId)
-      : await raceModel.findById(raceId);
+    let pageScopedContext = false;
+    let race = requestedPage
+      ? await raceModel.findProgressPageContext(raceId, userId)
+      : (leanProjectionEnabled
+        ? await raceModel.findProgressScoringContext(raceId)
+        : await raceModel.findById(raceId));
     if (!race) {
       const error = new Error("Race not found");
       error.statusCode = 404;
@@ -1686,8 +1707,22 @@ function buildGetRaceProgress(deps = {}) {
     // Lobby/result serializers still require their legacy full graph. ACTIVE
     // solo and team serializers use only scoring rows plus bounded visible
     // presentation, so both can take the lean context.
+    pageScopedContext = Boolean(
+      requestedPage &&
+      race.status === "ACTIVE" &&
+      race.isTeamRace !== true &&
+      typeof race.timezone === "string" &&
+      race.timezone.length > 0
+    );
+    if (requestedPage && !pageScopedContext) {
+      // Null-timezone races score in the requester timezone and therefore
+      // cannot share a page projection. Keep their established full path.
+      race = leanProjectionEnabled
+        ? await raceModel.findProgressScoringContext(raceId)
+        : await raceModel.findById(raceId);
+    }
     let usingLeanProjection =
-      leanProjectionEnabled &&
+      (leanProjectionEnabled && !requestedPage || pageScopedContext) &&
       race.status === "ACTIVE";
     if (leanProjectionEnabled && !usingLeanProjection) {
       race = await raceModel.findById(raceId);
@@ -1788,7 +1823,143 @@ function buildGetRaceProgress(deps = {}) {
       race.status === "ACTIVE" &&
       race.isTeamRace !== true;
     let snapshot;
-    if (isPublicPreview) {
+    let projectionRequesterEntry = null;
+    let projectionPagination = null;
+    let projectionMetadata = null;
+    if (pageScopedContext) {
+      const cachedProjection = cacheOn
+        ? await pageProjection.readRaceProgressPageProjection({
+            raceId,
+            offset: participantsOffset,
+            limit: participantsLimit,
+            requesterUserId: myParticipant ? userId : null,
+          })
+        : null;
+      let projectionRows = cachedProjection?.rows || null;
+      let projectionAsOf = cachedProjection?.asOf || null;
+      let projectionGeneration = cachedProjection?.generation || null;
+      let projectionSource = "authoritative";
+      let projectionTotal = cachedProjection?.total || null;
+      let projectionRace = cachedProjection?.index?.race || null;
+
+      if (!projectionRows) {
+        projectionSource = "stale-fallback";
+        const persisted = typeof participantModel.findPersistedProgressPage === "function"
+          ? await participantModel.findPersistedProgressPage(raceId, {
+              offset: participantsOffset,
+              limit: participantsLimit,
+            })
+          : [];
+        projectionTotal = Number(persisted[0]?.totalCount || 0);
+        const { start, safeLimit, hasMore, nextOffset } = clampOffsetLimit({
+          offset: participantsOffset,
+          limit: participantsLimit,
+          total: projectionTotal,
+        });
+        // The SQL read is already bounded. Its rows carry their persisted rank;
+        // no page-local replay or all-participant hydration occurs here.
+        projectionRows = persisted.map((row) => ({
+          participantId: row.participantId,
+          userId: row.userId,
+          totalSteps: Number(row.totalSteps || 0),
+          finishedAt: row.finishedAt,
+          forfeitedAt: row.forfeitedAt,
+          team: row.team,
+          placement: Number(row.computedPlacement || 0) || null,
+          currentMultiplier: 1,
+          baseAdjusted: row.rawSteps ?? null,
+          joinedAt: row.joinedAt,
+          rawSteps: row.rawSteps,
+          finishTotalSteps: row.finishTotalSteps,
+        }));
+        projectionPagination = {
+          offset: start,
+          limit: safeLimit,
+          total: projectionTotal,
+          hasMore,
+          nextOffset,
+        };
+        projectionAsOf = now().toISOString();
+        projectionRace = {
+          raceId: race.id,
+          status: race.status,
+          endsAt: race.endsAt,
+          maxDurationDays: race.maxDurationDays,
+          targetSteps: race.targetSteps,
+          isTeamRace: race.isTeamRace,
+          teamSize: race.teamSize ?? null,
+          winnerTeam: race.winnerTeam ?? null,
+          powerupsEnabled: race.powerupsEnabled,
+          powerupStepInterval: race.powerupStepInterval,
+          ...tournamentFields(race),
+        };
+        if (myParticipant && !projectionRows.some((row) => row.userId === userId)) {
+          const viewer = persisted.find((row) => row.userId === userId) || myParticipant;
+          projectionRequesterEntry = {
+            participantId: viewer.participantId || viewer.id,
+            userId,
+            totalSteps: Number(viewer.totalSteps || 0),
+            finishedAt: viewer.finishedAt ?? null,
+            forfeitedAt: viewer.forfeitedAt ?? null,
+            team: viewer.team ?? null,
+            placement: Number(viewer.computedPlacement || viewer.placement || 0) || null,
+            currentMultiplier: 1,
+            baseAdjusted: viewer.rawSteps ?? null,
+          };
+        }
+      } else {
+        projectionPagination = clampOffsetLimit({
+          offset: participantsOffset,
+          limit: participantsLimit,
+          total: cachedProjection.total,
+        });
+        projectionPagination = {
+          offset: projectionPagination.start,
+          limit: projectionPagination.safeLimit,
+          total: cachedProjection.total,
+          hasMore: projectionPagination.hasMore,
+          nextOffset: projectionPagination.nextOffset,
+        };
+        projectionRequesterEntry = cachedProjection.requesterRow;
+      }
+
+      const activeEffects = race.powerupsEnabled
+        ? await raceActiveEffectModel.findActiveForRace(raceId)
+        : [];
+      snapshot = snapshotStore.buildSnapshot({
+        race: projectionRace,
+        participants: projectionRows,
+        teams: null,
+        activeEffects,
+        scoringTimeZone,
+        asOf: projectionAsOf,
+        source: projectionSource,
+        schemaVersion: snapshotStore.LEAN_SCHEMA_VERSION,
+      });
+      if (Array.isArray(cachedProjection?.index?.rankingRows)) {
+        Object.defineProperty(race, "_projectionParticipants", {
+          value: cachedProjection.index.rankingRows.map((row) => ({
+            ...row,
+            status: "ACCEPTED",
+          })),
+          enumerable: false,
+        });
+      }
+      projectionMetadata = {
+        projectionGeneration,
+        asOf: projectionAsOf,
+        projectionSource,
+      };
+      if (projectionSource !== "authoritative") {
+        await enqueueRaceResolutionFn({
+          raceId,
+          userId,
+          timeZone: scoringTimeZone,
+          reason: "DISPLAY_REFRESH",
+          priority: "IMMEDIATE",
+        });
+      }
+    } else if (isPublicPreview) {
       // ── STRICTLY READ-ONLY PREVIEW PATH ───────────────────────────────────
       // A stranger browsing the public list must never be able to mutate a race
       // they have no relationship to. Without this branch a single preview tap
@@ -2026,6 +2197,9 @@ function buildGetRaceProgress(deps = {}) {
       }
     }
 
+    if (participantsView === "participants-v1" && !projectionMetadata) {
+      projectionMetadata = { projectionSource: "legacy" };
+    }
     return buildViewerResponse({
       snapshot,
       race,
@@ -2051,6 +2225,9 @@ function buildGetRaceProgress(deps = {}) {
       participantsOffset,
       participantsLimit,
       hydratePresentation: usingLeanProjection,
+      requesterEntry: projectionRequesterEntry,
+      projectionPagination,
+      projectionMetadata,
     });
   };
 

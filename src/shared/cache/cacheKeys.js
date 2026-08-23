@@ -25,6 +25,9 @@ const PREFIX = {
   USER_COSMETICS: "v1:user:cosmetics",
   RACE_MESSAGES: "v1:race:msgs",
   RACE_PROGRESS: "v1:race:progress",
+  RACE_PROGRESS_INDEX: "v1:race:progress:index",
+  RACE_PROGRESS_PAGE: "v1:race:progress:page",
+  RACE_PROGRESS_PARTICIPANT: "v1:race:progress:participant",
   RACE_RESOLUTION_ARTIFACT: "v1:race:resolution-artifact",
   // C4 (spec §3): per-user derived bits.
   USER_DAILY: "v1:user:daily",
@@ -244,6 +247,18 @@ function raceProgressLock(raceId) {
   return `v1:lock:progress:${raceId}`;
 }
 
+function raceProgressIndex(raceId) {
+  return `${PREFIX.RACE_PROGRESS_INDEX}:${raceId}`;
+}
+
+function raceProgressPage(raceId, generation, chunk) {
+  return `${PREFIX.RACE_PROGRESS_PAGE}:${raceId}:${generation}:${chunk}`;
+}
+
+function raceProgressParticipant(raceId, generation, userId) {
+  return `${PREFIX.RACE_PROGRESS_PARTICIPANT}:${raceId}:${generation}:${userId}`;
+}
+
 // ── C4: a user's daily step total, per DATE ─────────────────────────────────
 // The date is part of the key because `/friends/steps` is a per-date query
 // (`?date=YYYY-MM-DD`, defaulting to today's UTC date). A date-blind key would
@@ -358,6 +373,9 @@ module.exports = {
   userAuthMeVariants,
   raceProgress,
   raceProgressLock,
+  raceProgressIndex,
+  raceProgressPage,
+  raceProgressParticipant,
   shopCatalog,
   shopCatalogVariants,
   powerupCatalog,

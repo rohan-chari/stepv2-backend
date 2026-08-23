@@ -43,7 +43,7 @@ function buildRaceResolutionPostTaskRunner(dependencies = {}) {
     dependencies.deliverIntent || ((intent) => defaultDeliveryIntents.deliver(intent));
   const publishSnapshot =
     dependencies.publishSnapshot ||
-    ((command) => raceProgressPostCommit.publishSnapshotCommand(command));
+    ((command, task) => raceProgressPostCommit.publishSnapshotCommand(command, task));
   const jobModel = dependencies.RaceResolutionJobV2 || defaultJobModel;
   const isSuperseded =
     dependencies.isSuperseded ||

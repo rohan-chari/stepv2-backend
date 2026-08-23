@@ -297,6 +297,11 @@ async function writeSnapshot(raceId, snapshot) {
 async function invalidateRaceProgress(raceId) {
   if (!raceId) return true;
   try {
+    // The page projection shares this prefix but has generation-specific chunk
+    // keys. Invalidate its known generation before deleting the legacy C3
+    // snapshot so a mutation cannot leave a paged reader on old standings.
+    const pageProjection = require("./raceProgressPageProjection");
+    await pageProjection.invalidateRaceProgressPageProjection(raceId);
     return await derivedCache.invalidate({
       keys: [cacheKeys.raceProgress(raceId)],
       prefix: cacheKeys.PREFIX.RACE_PROGRESS,

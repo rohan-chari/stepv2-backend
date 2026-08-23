@@ -219,6 +219,50 @@ const RaceParticipant = {
     });
   },
 
+  // Persisted, bounded fallback for a page projection miss/outage. The
+  // ranking order mirrors compareParticipantsForPlacement and computes the
+  // total/placement in SQL without materializing the race roster in Node.
+  async findPersistedProgressPage(raceId, { offset = 0, limit = 15 } = {}) {
+    const safeOffset = Math.max(0, Math.floor(Number(offset) || 0));
+    const safeLimit = Math.max(1, Math.min(50, Math.floor(Number(limit) || 1)));
+    return prisma.$queryRawUnsafe(
+      `
+      WITH ranked AS (
+        SELECT
+          rp.id AS "participantId",
+          rp.user_id AS "userId",
+          rp.total_steps AS "totalSteps",
+          rp.raw_steps AS "rawSteps",
+          rp.finished_at AS "finishedAt",
+          rp.finish_total_steps AS "finishTotalSteps",
+          rp.forfeited_at AS "forfeitedAt",
+          rp.team,
+          rp.placement,
+          rp.joined_at AS "joinedAt",
+          ROW_NUMBER() OVER (
+            ORDER BY
+              CASE WHEN rp.finished_at IS NOT NULL THEN 0 ELSE 1 END,
+              CASE WHEN rp.finished_at IS NOT NULL THEN rp.placement END ASC NULLS LAST,
+              CASE WHEN rp.finished_at IS NOT NULL THEN rp.finished_at END ASC NULLS LAST,
+              CASE WHEN rp.finished_at IS NULL THEN rp.total_steps END DESC NULLS LAST,
+              rp.joined_at ASC,
+              rp.user_id ASC
+          )::int AS "computedPlacement",
+          COUNT(*) OVER ()::int AS "totalCount"
+        FROM race_participants rp
+        WHERE rp.race_id = $1
+          AND rp.status = 'accepted'::"RaceParticipantStatus"
+      )
+      SELECT * FROM ranked
+      ORDER BY "computedPlacement"
+      OFFSET $2 LIMIT $3
+      `,
+      raceId,
+      safeOffset,
+      safeLimit,
+    );
+  },
+
   // Ownership checks must not hydrate the complete race roster or any user
   // presentation fields. This is used by the race-resolution status poll,
   // which can be called repeatedly while a worker is draining a job.

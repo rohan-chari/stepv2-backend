@@ -395,6 +395,22 @@ const Race = {
     });
   },
 
+  // Page-scoped progress context. Unlike findProgressScoringContext this never
+  // hydrates the race-wide participant relation: the request path only needs
+  // race metadata and the authenticated viewer's membership row.
+  async findProgressPageContext(id, userId) {
+    return prisma.race.findUnique({
+      where: { id },
+      include: {
+        participants: {
+          where: { userId },
+          take: 1,
+        },
+        tournament: { select: { id: true, name: true, bracketSize: true } },
+      },
+    });
+  },
+
   async findProgressStatus(id) {
     return prisma.race.findUnique({
       where: { id },

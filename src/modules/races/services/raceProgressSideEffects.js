@@ -58,6 +58,11 @@ const { eventBus } = require("../../../shared/events/eventBus");
 const {
   raceResolutionDeliveryIntents: defaultDeliveryIntents,
 } = require("./raceResolutionDeliveryIntents");
+const {
+  buildRaceProgressPageProjection,
+  publishRaceProgressPageProjection,
+} = require("./raceProgressPageProjection");
+const { RaceResolutionJobV2: defaultRaceResolutionJobV2 } = require("../models/raceResolutionJobV2");
 
 function buildRaceProgressPostCommit(dependencies = {}) {
   const effectModel = dependencies.RaceActiveEffect || RaceActiveEffect;
@@ -74,6 +79,8 @@ function buildRaceProgressPostCommit(dependencies = {}) {
     dependencies.raceResolutionDeliveryIntents || defaultDeliveryIntents;
   const events = dependencies.eventBus || eventBus;
   const now = dependencies.now || (() => new Date());
+  const raceResolutionJobModel =
+    dependencies.RaceResolutionJobV2 || defaultRaceResolutionJobV2;
 
   // Same two-condition gate the endpoint uses. With the flag off the worker
   // publishes nothing and runs no relocated side effect, so the endpoint (which
@@ -201,8 +208,12 @@ function buildRaceProgressPostCommit(dependencies = {}) {
   }
 
   /** SET (never DEL) the race's shared standings snapshot. */
-  async function publishSnapshot({ raceId, timeZone, result }) {
+  async function publishSnapshot({ raceId, timeZone, result, sourceGeneration = null }) {
     try {
+      if (sourceGeneration != null && typeof raceResolutionJobModel.findByRaceId === "function") {
+        const current = await raceResolutionJobModel.findByRaceId(raceId);
+        if (!current || Number(current.generation) !== Number(sourceGeneration)) return false;
+      }
       // Lazy require: getRaceProgress pulls in most of the race module, and the
       // worker is constructed at process start.
       const getRaceProgress =
@@ -216,6 +227,26 @@ function buildRaceProgressPostCommit(dependencies = {}) {
       });
       if (!snapshot) return false;
       snapshot.source = "worker";
+      if (sourceGeneration != null) {
+        const projection = buildRaceProgressPageProjection({
+          raceId,
+          generation: sourceGeneration,
+          scoringTimeZone: snapshot.scoringTimeZone || timeZone || "UTC",
+          asOf: snapshot.asOf,
+          race: snapshot.race,
+          participants: snapshot.participants,
+          sourceParticipants: result?.race?.participants || [],
+        });
+        await publishRaceProgressPageProjection({
+          raceId,
+          generation: sourceGeneration,
+          snapshot: projection,
+          currentGeneration: async () => {
+            const current = await raceResolutionJobModel.findByRaceId(raceId);
+            return current?.generation;
+          },
+        });
+      }
       return await snapshotStore.writeSnapshot(raceId, snapshot);
     } catch (error) {
       // Logged and ignored by contract: the previous snapshot ages out of
@@ -262,13 +293,17 @@ function buildRaceProgressPostCommit(dependencies = {}) {
       return deferDelivery ? { snapshotCommand, intentClaims } : { snapshotCommand };
     }
     if (superseded) return { snapshotCommand: null, intentClaims: [] };
-    await publishSnapshot({ ...snapshotCommand, result });
+    await publishSnapshot({
+      ...snapshotCommand,
+      result,
+      sourceGeneration: job?.processingGeneration ?? null,
+    });
     return { snapshotCommand: null, intentClaims: [] };
   }
 
   // The durable post-task runner receives only the allowlisted command. It
   // re-reads committed rows and never re-enters scoring/RNG/recipient logic.
-  onCommitted.publishSnapshotCommand = async function publishSnapshotCommand(command) {
+  onCommitted.publishSnapshotCommand = async function publishSnapshotCommand(command, task = null) {
     if (
       !command ||
       typeof command.raceId !== "string" ||
@@ -276,7 +311,10 @@ function buildRaceProgressPostCommit(dependencies = {}) {
     ) {
       return false;
     }
-    return publishSnapshot(command);
+    return publishSnapshot({
+      ...command,
+      sourceGeneration: task?.sourceGeneration ?? null,
+    });
   };
 
   return onCommitted;
