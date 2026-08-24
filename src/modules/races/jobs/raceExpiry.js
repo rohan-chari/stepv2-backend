@@ -529,6 +529,12 @@ async function resolveExpiredRaces() {
       // is an expensive read (samples + the full powerup event log), and holding
       // the settlement fence across it would pin the race's job row for the whole
       // replay. Writes are batched into the fenced transaction below.
+      const settlementPowerupEvents = await RacePowerupEvent.findByRaceAsc(race.id);
+      const settlementPowerupEventModel = {
+        async findByRaceAsc() {
+          return settlementPowerupEvents;
+        },
+      };
       const finalTotals = [];
       for (let finalIndex = 0; finalIndex < preLeech.length; finalIndex++) {
         const e = preLeech[finalIndex];
@@ -540,7 +546,7 @@ async function resolveExpiredRaces() {
           effectiveStart: e.effectiveStart,
           effectGroups: e.effectGroups,
           stepSampleModel: StepSample,
-          powerupEventModel: RacePowerupEvent,
+          powerupEventModel: settlementPowerupEventModel,
           raceId: race.id,
           now: settlementTime,
         });
