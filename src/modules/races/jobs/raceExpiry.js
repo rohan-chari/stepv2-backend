@@ -119,11 +119,24 @@ function buildAttributionEffectModel({ effectsByParticipant, hitchhikes, include
 
 async function loadSettlementAttributionEffects({ raceId, participants, raceActiveEffectModel }) {
   const effectsByParticipant = new Map();
+  if (typeof raceActiveEffectModel.findEffectsForRaceParticipantsByTypes === "function") {
+    const bulk = await raceActiveEffectModel.findEffectsForRaceParticipantsByTypes(
+      [raceId], participants.map((participant) => participant.id), SETTLEMENT_EFFECT_TYPES
+    );
+    for (const participant of participants) {
+      const byType = bulk[participant.id] || {};
+      effectsByParticipant.set(
+        participant.id,
+        SETTLEMENT_EFFECT_TYPES.flatMap((type) => byType[type] || [])
+      );
+    }
+  } else {
   for (const participant of participants) {
     const byType = await raceActiveEffectModel.findEffectsForRaceByTypes(
       raceId, participant.id, SETTLEMENT_EFFECT_TYPES
     );
     effectsByParticipant.set(participant.id, SETTLEMENT_EFFECT_TYPES.flatMap((type) => byType[type] || []));
+  }
   }
   const hitchhikes = await raceActiveEffectModel.findRaceEffectsByType(raceId, "HITCHHIKE");
   return { effectsByParticipant, hitchhikes: chronologicalEffects(hitchhikes) };
@@ -541,6 +554,8 @@ async function resolveExpiredRaces() {
       // settlement untouched and produces no fabricated explanation rows.
       let effectAttribution = null;
       try {
+        const attributionStartedAt = Date.now();
+        trace("attribution-begin", attributionStartedAt, { participants: acceptedParticipants.length });
         const attributionEffects = await loadSettlementAttributionEffects({
           raceId: race.id,
           participants: acceptedParticipants,
@@ -554,6 +569,10 @@ async function resolveExpiredRaces() {
           attributionEffects,
           globalEvents,
           eventsByUserId,
+        });
+        trace("attribution-complete", attributionStartedAt, {
+          effectRows: [...attributionEffects.effectsByParticipant.values()].reduce((count, rows) => count + rows.length, 0),
+          hitchhikes: attributionEffects.hitchhikes.length,
         });
       } catch (error) {
         console.error(`[CRON] Effect attribution failed for race ${race.id}:`, error);
