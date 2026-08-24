@@ -376,7 +376,10 @@ async function resolveExpiredRaces() {
       const globalEvents = [...new Map(
         acceptedParticipants.flatMap((participant) =>
           eventsForUser(eventsByUserId, participant.userId)
-        ).map((event) => [`${event.entitlementId || event.id}:${event.id}`, event])
+        // One canonical event row is enough for the race-wide scorer. Local
+        // entitlement differences remain represented by eventsByUserId, which
+        // the scorer uses to decide whether each participant is eligible.
+        ).map((event) => [event.id, event])
       ).values()];
 
       // Seeded races settle in their canonical tz so settled totals match what
