@@ -836,6 +836,10 @@ function scheduleRaceExpiryCheck() {
   }
 
   setInterval(run, INTERVAL);
+  // Temporary recovery behavior: execute the first expiry pass immediately
+  // after the normal startup delay, then continue on the five-minute cadence.
+  // This is intentionally removed once the stranded weekly race is settled.
+  void run();
   console.log("[CRON] Race expiry check scheduled (hourly)");
 }
 
