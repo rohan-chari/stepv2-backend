@@ -52,6 +52,32 @@ test("friendship components stay together, with a deterministic merge for imposs
   assert.equal(new Set(planned[0].map((row) => row.userId)).size, 30);
 });
 
+test("weekly cohort sizing uses 50 as its minimum while Daily remains 15-based", () => {
+  assert.deepEqual(planBuckets([], [], 50), []);
+  assert.deepEqual(planBuckets(candidates(49), [], 50).map((bucket) => bucket.length), [49]);
+  assert.deepEqual(planBuckets(candidates(50), [], 50).map((bucket) => bucket.length), [50]);
+  assert.deepEqual(planBuckets(candidates(51), [], 50).map((bucket) => bucket.length), [51]);
+  assert.deepEqual(planBuckets(candidates(99), [], 50).map((bucket) => bucket.length), [99]);
+  assert.deepEqual(planBuckets(candidates(100), [], 50).map((bucket) => bucket.length), [50, 50]);
+  assert.deepEqual(planBuckets(candidates(101), [], 50).map((bucket) => bucket.length), [51, 50]);
+  assert.deepEqual(planBuckets(candidates(15), []).map((bucket) => bucket.length), [15]);
+});
+
+test("weekly packing preserves friendship components and merges a short trailing component", () => {
+  const people = candidates(101);
+  const friendships = Array.from({ length: 4 }, (_, offset) => ({
+    userAId: people[97 + offset].userId,
+    userBId: people[97 + offset + 1]?.userId,
+  })).filter((edge) => edge.userBId);
+  const planned = planBuckets(people, friendships, 50);
+  assert.deepEqual(planned.map((bucket) => bucket.length), [51, 50]);
+  const friendshipComponent = new Set(people.slice(97).map((row) => row.userId));
+  assert.ok(planned.some((bucket) =>
+    [...friendshipComponent].every((userId) => bucket.some((row) => row.userId === userId))
+  ));
+  assert.equal(new Set(planned.flat().map((row) => row.userId)).size, 101);
+});
+
 test("direct accepted friends co-locate only when their step totals fit the skill band", () => {
   const people = [
     { userId: "a", matchSteps: 1000 },

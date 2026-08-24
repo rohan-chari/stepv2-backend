@@ -33,11 +33,16 @@ const { invalidateUser: invalidateRaceListUser } = require("./raceListCache");
 
 const SEED_TIMEZONE = "America/New_York";
 const BUCKET_CAPACITY = 15;
+const WEEKLY_COHORT_MINIMUM = 50;
 const BUCKET_FEATURE = "seeded_race_buckets";
 
-function cohortCountForSize(size) {
+function cohortMinimumForSeed(seed) {
+  return seed?.cadence === "WEEKLY" ? WEEKLY_COHORT_MINIMUM : BUCKET_CAPACITY;
+}
+
+function cohortCountForSize(size, minimum = BUCKET_CAPACITY) {
   if (size <= 0) return 0;
-  return size < BUCKET_CAPACITY ? 1 : Math.floor(size / BUCKET_CAPACITY);
+  return size < minimum ? 1 : Math.floor(size / minimum);
 }
 
 function splitFundedExposureCandidates(elected, totals, stamp) {
@@ -241,7 +246,7 @@ function skillBand(a, b) {
 // Deterministic, batch-only clustering. It starts with qualifying friendship
 // components, packs them in stable skill order, and merges only an impossible
 // undersized trailing component remainder.
-function planBuckets(candidates, friendships = []) {
+function planBuckets(candidates, friendships = [], minimum = BUCKET_CAPACITY) {
   const sorted = [...candidates].sort(
     (a, b) => a.matchSteps - b.matchSteps || String(a.userId).localeCompare(String(b.userId))
   );
@@ -279,7 +284,7 @@ function planBuckets(candidates, friendships = []) {
   groups.sort((a, b) =>
     a[0].matchSteps - b[0].matchSteps || String(a[0].userId).localeCompare(String(b[0].userId))
   );
-  const bucketCount = cohortCountForSize(sorted.length);
+  const bucketCount = cohortCountForSize(sorted.length, minimum);
   const targetSizes = Array.from({ length: bucketCount }, (_, index) =>
     Math.floor(sorted.length / bucketCount) + (index < sorted.length % bucketCount ? 1 : 0));
   const buckets = [];
@@ -289,7 +294,7 @@ function planBuckets(candidates, friendships = []) {
   for (const group of groups) {
     let bucket = buckets.at(-1);
     const targetSize = targetSizes[buckets.length - 1] ?? targetSizes.at(-1);
-    if (!bucket || (bucket.length >= BUCKET_CAPACITY && bucket.length + group.length > targetSize)) {
+    if (!bucket || (bucket.length >= minimum && bucket.length + group.length > targetSize)) {
       bucket = [];
       buckets.push(bucket);
     }
@@ -299,7 +304,7 @@ function planBuckets(candidates, friendships = []) {
   // (for example, three 10-person components). Merge it into the nearest
   // skill-adjacent cohort rather than creating an undersized field.
   while (buckets.length > 1) {
-    const undersizedIndex = buckets.findIndex((bucket) => bucket.length < BUCKET_CAPACITY);
+    const undersizedIndex = buckets.findIndex((bucket) => bucket.length < minimum);
     if (undersizedIndex < 0) break;
     const targetIndex = undersizedIndex === 0 ? 1 : undersizedIndex - 1;
     buckets[targetIndex].push(...buckets[undersizedIndex]);
@@ -579,12 +584,13 @@ function buildSeededRaceBuckets(dependencies = {}) {
       return {
         elected: eligible,
         allElected: elected,
-        plan: planBuckets(
+          plan: planBuckets(
           candidates,
           friendships.map((row) => ({
             userAId: row.requesterId,
             userBId: row.addresseeId,
           })),
+          cohortMinimumForSeed(seed),
         ),
       };
     }
@@ -848,7 +854,7 @@ function buildSeededRaceBuckets(dependencies = {}) {
         name: seed.name,
         endsAt: race?.endsAt ?? current.windowEnd,
         participantCount: mine ? await prisma.raceParticipant.count({ where: { raceId: race.id, status: "ACCEPTED" } }) : 0,
-        maxParticipants: race?.maxParticipants ?? BUCKET_CAPACITY,
+        maxParticipants: race?.maxParticipants ?? cohortMinimumForSeed(seed),
         isFull: false,
         myStatus: mine?.status ?? (elected?.stream === "BUCKET" ? "ELECTED" : null),
         bucketPrivate: true,
@@ -857,8 +863,8 @@ function buildSeededRaceBuckets(dependencies = {}) {
           scheduledStartAt: upcoming.windowStart,
           participantCount: 0,
           maxParticipants: race?.status === "PENDING"
-            ? (race.maxParticipants ?? BUCKET_CAPACITY)
-            : BUCKET_CAPACITY,
+            ? (race.maxParticipants ?? cohortMinimumForSeed(seed))
+            : cohortMinimumForSeed(seed),
           isFull: false,
           myStatus: elected?.stream === "BUCKET" ? "ELECTED" : null,
           bucketPrivate: true,

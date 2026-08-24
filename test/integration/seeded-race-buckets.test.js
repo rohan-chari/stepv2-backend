@@ -13,6 +13,7 @@ const {
   buildSeededRaceBuckets,
   upcomingWindowFor,
 } = require("../../src/modules/races/services/seededRaceBuckets");
+const { buildRenewSeededRaces } = require("../../src/modules/races/jobs/seededRaceRenewal");
 const {
   RaceResolutionJobV2,
 } = require("../../src/modules/races/models/raceResolutionJobV2");
@@ -360,6 +361,54 @@ describe("private seeded race buckets (integration)", () => {
     });
     assert.equal(persisted.race.maxParticipants, 16);
     assert.equal(persisted.assignments.length, 16);
+  });
+
+  it("uses a 50-person minimum for weekly cohorts", async () => {
+    const seed = await prisma.raceSeed.findUnique({ where: { kind: "WEEKLY_50K" } });
+    const beforeBoundary = new Date("2026-08-10T03:58:00.000Z");
+    const { windowStart, windowEnd } = upcomingWindowFor(seed, beforeBoundary);
+    await prisma.seededRaceWindowModeRecord.upsert({
+      where: { seedId_windowStart: { seedId: seed.id, windowStart } },
+      create: { seedId: seed.id, windowStart, windowEnd, mode: "BUCKET" },
+      update: {},
+    });
+    const users = await Promise.all(Array.from({ length: 101 }, () => createTestUser()));
+    await prisma.seededRaceWindowMembership.createMany({
+      data: users.map(({ user }) => ({
+        seedId: seed.id,
+        windowStart,
+        userId: user.id,
+        stream: "BUCKET",
+      })),
+    });
+    const renew = buildRenewSeededRaces({
+      prisma,
+      now: () => beforeBoundary,
+      appSettings,
+      logger: { log() {}, error() {} },
+    });
+    const renewalResults = await renew();
+    assert.equal(
+      renewalResults.filter(({ action, seedKind }) => action === "finalized-buckets" && seedKind === "WEEKLY_50K").length,
+      1
+    );
+    const buckets = await prisma.seededRaceBucket.findMany({
+      where: { seedId: seed.id, windowStart },
+      select: { id: true },
+    });
+    assert.equal(buckets.length, 2);
+    const persisted = await prisma.seededRaceBucket.findMany({
+      where: { id: { in: buckets.map(({ id }) => id) } },
+      include: { race: true, assignments: true },
+      orderBy: { race: { createdAt: "asc" } },
+    });
+    assert.deepEqual(persisted.map(({ race }) => race.maxParticipants), [51, 50]);
+    assert.deepEqual(persisted.map(({ assignments }) => assignments.length), [51, 50]);
+    await renew();
+    assert.equal(
+      await prisma.seededRaceBucket.count({ where: { seedId: seed.id, windowStart } }),
+      2
+    );
   });
 
   it("finalizes a production-sized 450-user funded cohort inside the 5s budget without concurrent-query warnings", async () => {

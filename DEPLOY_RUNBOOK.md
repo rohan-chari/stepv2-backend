@@ -86,7 +86,7 @@ cd /var/www/step-tracker-backend \
   && npx prisma migrate deploy \
   && npx prisma generate \
   && npm run powerups:copy:sync -- --apply \
-  && pm2 startOrReload ecosystem.config.js --only steps-tracker \
+  && pm2 startOrReload ecosystem.config.js --only steps-tracker,steps-tracker-resolution,steps-tracker-cron \
   && pm2 save
 ```
 
