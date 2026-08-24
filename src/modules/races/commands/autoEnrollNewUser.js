@@ -201,24 +201,48 @@ function buildAutoEnrollNewUser(dependencies = {}) {
         data: { autoJoinFeaturedRaces: true },
       });
 
-      // seededBucketId: null excludes private bucket cohorts. A bucket is
-      // skill/friendship-matched by the election+finalise flow; a brand-new
-      // signup dropped straight in bypasses that matching and the cohort's
-      // privacy boundary entirely (confirmed in prod 2026-08-15: two signups
-      // landed in a 3-person private cohort seconds after account creation).
-      // Legacy/global seeded races have no such invariant to protect.
+      // New signups must see the currently running Daily/Weekly challenge.
+      // Active bucket races are already finalized cohorts, so adding a
+      // newcomer does not change bucket identity or repack existing members;
+      // it is the required late-onboarding path. Keep future PENDING bucket
+      // races excluded: those users must enter through the next-window
+      // election so skill/friendship matching remains intact.
       const races = await db.race.findMany({
         where: {
           seedId: { not: null },
-          seededBucketId: null,
-          status: { in: ["ACTIVE", "PENDING"] },
+          OR: [
+            // The current private cohort is the only active target. Legacy
+            // global seeded races must not receive cohort onboarding users.
+            { status: "ACTIVE", seededBucketId: { not: null } },
+            { status: "PENDING", seededBucketId: null },
+          ],
         },
         orderBy: { startedAt: "desc" },
+        include: { seed: { select: { kind: true, cadence: true } } },
       });
+
+      // A signup gets exactly one race for each cadence. Prefer the newest
+      // active private cohort; if none exists, use the newest pending race as
+      // the next-window fallback. Never walk every seeded race: that would
+      // enroll one user into multiple Daily or Weekly cohorts.
+      const selectedRaces = [];
+      // Keep dependency-injected callers that return the historical compact
+      // race shape working; real Prisma rows always include `seed` above.
+      if (!races.some((race) => race.seed?.cadence)) selectedRaces.push(...races);
+      for (const cadence of ["DAILY", "WEEKLY"]) {
+        const candidates = races.filter((race) => race.seed?.cadence === cadence);
+        const active = candidates.find(
+          (race) => race.status === "ACTIVE" && race.seededBucketId != null,
+        );
+        const pending = candidates.find(
+          (race) => race.status === "PENDING" && race.seededBucketId == null,
+        );
+        if (active || pending) selectedRaces.push(active || pending);
+      }
 
       let welcomeTarget = null;
       let joinedCount = 0;
-      for (const race of races) {
+      for (const race of selectedRaces) {
         const capacity = await remainingCapacity(race);
         if (capacity <= 0) continue;
         try {
@@ -244,7 +268,7 @@ function buildAutoEnrollNewUser(dependencies = {}) {
       // misconfiguration would then create unbounded races. If there is no
       // ACTIVE seeded race at all we log and leave the user in nothing.
       if (joinedCount === 0) {
-        const fallback = races.find((race) => race.status === "ACTIVE");
+        const fallback = selectedRaces.find((race) => race.status === "ACTIVE");
         if (fallback) {
           try {
             const participant = await createAcceptedParticipant(fallback, user.id, {

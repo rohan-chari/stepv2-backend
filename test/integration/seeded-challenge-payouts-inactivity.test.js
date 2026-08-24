@@ -790,7 +790,7 @@ describe("seeded challenge payouts + inactivity pruning", () => {
     assert.equal(await coinsSpent(ghost.userId), 0);
   });
 
-  it("13: signup auto-enroll is untouched with both flags ON", async () => {
+  it("13: signup auto-enroll only targets cohort-compatible seeded races", async () => {
     await appSettings.setFlag(PRUNE_FLAG, true);
     await appSettings.setFlag(CURVE_FLAG, true);
 
@@ -829,13 +829,14 @@ describe("seeded challenge payouts + inactivity pruning", () => {
       user: await prisma.user.findUnique({ where: { id: fresh.userId } }),
     });
 
-    assert.deepEqual(await participantUserIds(active.id), [fresh.userId]);
+    // This is a legacy/global active race, not a private finalized cohort.
+    assert.deepEqual(await participantUserIds(active.id), []);
     assert.deepEqual(await participantUserIds(pending.id), [fresh.userId]);
     const row = await prisma.user.findUnique({ where: { id: fresh.userId } });
     assert.equal(row.autoJoinFeaturedRaces, true);
   });
 
-  it("13b: signup auto-enroll never lands in a private bucket cohort (prod 2026-08-15 regression)", async () => {
+  it("13b: signup auto-enroll joins the current private bucket cohort", async () => {
     const legacyActive = await prisma.race.create({
       data: {
         seedId: dailySeed.id,
@@ -850,9 +851,8 @@ describe("seeded challenge payouts + inactivity pruning", () => {
         endsAt: new Date(Date.now() + 23 * 60 * 60 * 1000),
       },
     });
-    // A finalized private bucket: isPublic false, seededBucketId set, matched
-    // by the election flow. A brand-new signup was never a candidate in that
-    // match, so it must never be auto-joined into it.
+    // A finalized private bucket: a brand-new signup must still be able to
+    // enter the currently running Daily challenge during onboarding.
     const bucketActive = await prisma.race.create({
       data: {
         seedId: dailySeed.id,
@@ -874,8 +874,48 @@ describe("seeded challenge payouts + inactivity pruning", () => {
       user: await prisma.user.findUnique({ where: { id: fresh.userId } }),
     });
 
-    assert.deepEqual(await participantUserIds(legacyActive.id), [fresh.userId]);
-    assert.deepEqual(await participantUserIds(bucketActive.id), []);
+    assert.deepEqual(await participantUserIds(legacyActive.id), []);
+    assert.deepEqual(await participantUserIds(bucketActive.id), [fresh.userId]);
+  });
+
+  it("13c: signup auto-enroll chooses one race per Daily/Weekly cadence", async () => {
+    const newerDaily = await prisma.race.create({
+      data: {
+        seedId: dailySeed.id,
+        name: "Newer Daily cohort",
+        targetSteps: 0,
+        status: "ACTIVE",
+        isPublic: false,
+        seededBucketId: require("node:crypto").randomUUID(),
+        timeBased: true,
+        maxParticipants: 15,
+        maxDurationDays: 1,
+        startedAt: new Date(Date.now() - 30 * 60 * 1000),
+        endsAt: new Date(Date.now() + 23 * 60 * 60 * 1000),
+      },
+    });
+    const olderDaily = await prisma.race.create({
+      data: {
+        seedId: dailySeed.id,
+        name: "Older Daily cohort",
+        targetSteps: 0,
+        status: "ACTIVE",
+        isPublic: false,
+        seededBucketId: require("node:crypto").randomUUID(),
+        timeBased: true,
+        maxParticipants: 15,
+        maxDurationDays: 1,
+        startedAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
+        endsAt: new Date(Date.now() + 22 * 60 * 60 * 1000),
+      },
+    });
+    const fresh = await makeUser({ createdAt: new Date() });
+    await autoEnrollNewUser({
+      user: await prisma.user.findUnique({ where: { id: fresh.userId } }),
+    });
+
+    assert.deepEqual(await participantUserIds(newerDaily.id), [fresh.userId]);
+    assert.deepEqual(await participantUserIds(olderDaily.id), []);
   });
 
   it("14: a user whose only activity is a future-dated daily row is never pruned", async () => {
