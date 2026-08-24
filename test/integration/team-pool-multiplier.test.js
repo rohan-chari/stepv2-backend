@@ -84,6 +84,7 @@ async function seedTeamRace({
   funded = true,
   expired = true,
   teamSize = 5,
+  payoutRoundingVersion = 0,
   potCoins = 0,
   buyInAmount = 0,
 }) {
@@ -106,6 +107,7 @@ async function seedTeamRace({
       teamAName: "Reds",
       teamBName: "Blues",
       teamPoolMultBps: multBps === undefined ? null : multBps,
+      payoutRoundingVersion,
       startedAt: new Date(Date.now() - durationDays * 24 * 60 * 60 * 1000),
       endsAt: expired
         ? new Date(Date.now() - 60 * 60 * 1000)
@@ -408,6 +410,26 @@ describe("team race payout buff (item 5)", () => {
     const afterBody = await after.json();
     assert.equal(afterBody.prizePool.coins, 3000);
     assert.equal(afterBody.prizePool.projected, false);
+  });
+
+  it("9a: an active v1 team race still advertises its projected pool", async () => {
+    const race = await seedTeamRace({
+      durationDays: 14,
+      multBps: 18750,
+      payoutRoundingVersion: 1,
+      expired: false,
+    });
+    const { a } = await addFiveVsFive(race);
+
+    const detail = await req("GET", `/races/${race.id}`, {
+      token: a[0].token,
+      headers: TEAM_HEADERS,
+    });
+    assert.equal(detail.status, 200);
+    const body = await detail.json();
+    assert.equal(body.prizePool.coins, 3000);
+    assert.equal(body.prizePool.projected, true);
+    assert.equal(body.projectedPotCoins, 3000);
   });
 
   // ── 6. tie: mint and split across BOTH teams ──────────────────────────────

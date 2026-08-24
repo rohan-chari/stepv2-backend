@@ -119,13 +119,6 @@ function buildRaceMoneyView({ race, participants, acceptedCount }) {
     ? quickSettlementParticipants(race, rows)
     : null;
   const payoutVersion = race?.payoutRoundingVersion ?? 0;
-  // Before a team winner (and therefore the eligible recipient count) is
-  // known, there is no honest single rounded total.  In particular, rounding a
-  // winner's eventual split is not the same as rounding the whole projected
-  // pool.  v1 consequently withholds the legacy scalar projection; completed
-  // team races below always expose the actual credited total.
-  const withholdTeamProjection =
-    payoutVersion === 1 && race?.isTeamRace === true && !completed;
   const finalAwards = (rawPayouts) => buildPayoutPlan({
     payoutRoundingVersion: payoutVersion,
     awards: (rawPayouts || []).map((rawAwardCoins, index) => ({
@@ -247,19 +240,6 @@ function buildRaceMoneyView({ race, participants, acceptedCount }) {
     : null;
   const visiblePayouts = completedV1Payouts || payoutPlan.awards.map((award) => award.awardCoins);
   const visibleTotal = visiblePayouts.reduce((sum, amount) => sum + amount, 0);
-  if (withholdTeamProjection) {
-    return {
-      prizePool: null,
-      buyInAmount: 0,
-      potCoins: 0,
-      heldPotCoins: 0,
-      // Undefined is intentional: JSON serializers omit the old scalar rather
-      // than publishing a false authoritative v1 total.
-      projectedPotCoins: undefined,
-      payouts: [],
-      finishReward: null,
-    };
-  }
   return {
     prizePool: buildPrizePoolPayload({
       funded: true,
