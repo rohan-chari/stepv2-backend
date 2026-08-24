@@ -135,6 +135,14 @@ function buildGetRacePowerupTargetContext(dependencies = {}) {
           team: participant.team ?? null,
           forfeitedAt: participant.forfeitedAt ?? null,
           stealthed,
+          // Additive targeting metadata. Older clients ignore this field;
+          // newer clients can avoid presenting a target that the use endpoint
+          // would reject for an already-active Leg Cramp.
+          legCramped: effects.some(
+            (effect) =>
+              effect.targetParticipantId === participant.id &&
+              effect.type === "LEG_CRAMP"
+          ),
         };
       }),
       powerupData: {

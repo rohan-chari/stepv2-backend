@@ -553,7 +553,11 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
       });
     }
 
-    if (race.status === "ACTIVE") {
+    // A forfeited membership is no longer an actionable race for this user.
+    // Keep the durable race/participant rows for settlement and history, but
+    // omit it from the live races list so a refresh cannot reopen a race whose
+    // powerups are already server-rejected.
+    if (race.status === "ACTIVE" && !summary.myForfeited) {
       active.push(summary);
     } else if (race.status === "PENDING") {
       pending.push(summary);

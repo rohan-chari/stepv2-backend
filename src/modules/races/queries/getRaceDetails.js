@@ -166,6 +166,12 @@ async function getRaceDetails(
     }
     myParticipant = summaryRows.find((p) => p.userId === userId);
   }
+  // An ACTIVE race is no longer readable as an actionable detail route after
+  // this viewer forfeits. Completed races remain readable for settlement and
+  // history; the live route must not expose powerup controls or a stale board.
+  if (race.status === "ACTIVE" && myParticipant?.forfeitedAt != null) {
+    throw notFound();
+  }
   // Always the whole field until (and unless) the paging block below replaces it
   // with a page, so there is exactly one place that can truncate the response.
   serializedRows = summaryRows;
