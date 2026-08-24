@@ -169,6 +169,74 @@ describe("2026-08-17 additive contracts", () => {
     assert.equal(replyAgain.status, 200);
   });
 
+  it("includes the feedback thread user's displayName in the admin list", async () => {
+    const namedUser = await createTestUser({ displayName: "Named Feedback User" });
+    const admin = await createTestUser({ email: ADMIN_EMAIL });
+    const submit = await request(server.baseUrl, "POST", "/feedback/suggestions", {
+      token: namedUser.token, body: { text: "A named feedback thread." }, headers: CAPABILITIES,
+    });
+    assert.equal(submit.status, 201);
+
+    const thread = await prisma.feedbackThread.findFirstOrThrow({
+      where: { userId: namedUser.user.id },
+    });
+    const list = await request(server.baseUrl, "GET", "/admin/feedback/threads", {
+      token: admin.token, headers: CAPABILITIES,
+    });
+    assert.equal(list.status, 200);
+    const listed = (await list.json()).threads.find((row) => row.id === thread.id);
+    assert.equal(listed.displayName, "Named Feedback User");
+  });
+
+  it("returns null for an admin feedback thread whose user has no displayName", async () => {
+    const unnamedUser = await createTestUser({ displayName: null });
+    const admin = await createTestUser({ email: ADMIN_EMAIL });
+    const submit = await request(server.baseUrl, "POST", "/feedback/suggestions", {
+      token: unnamedUser.token, body: { text: "An unnamed feedback thread." }, headers: CAPABILITIES,
+    });
+    assert.equal(submit.status, 201);
+
+    const thread = await prisma.feedbackThread.findFirstOrThrow({
+      where: { userId: unnamedUser.user.id },
+    });
+    const list = await request(server.baseUrl, "GET", "/admin/feedback/threads", {
+      token: admin.token, headers: CAPABILITIES,
+    });
+    assert.equal(list.status, 200);
+    const listed = (await list.json()).threads.find((row) => row.id === thread.id);
+    assert.equal(listed.displayName, null);
+  });
+
+  it("returns the user's current displayName without leaking email or profile fields", async () => {
+    const user = await createTestUser({ displayName: "OriginalName" });
+    const admin = await createTestUser({ email: ADMIN_EMAIL });
+    const submit = await request(server.baseUrl, "POST", "/feedback/suggestions", {
+      token: user.token, body: { text: "A renamed feedback thread." }, headers: CAPABILITIES,
+    });
+    assert.equal(submit.status, 201);
+
+    const thread = await prisma.feedbackThread.findFirstOrThrow({
+      where: { userId: user.user.id },
+    });
+    const rename = await request(server.baseUrl, "PUT", "/auth/me/display-name", {
+      token: user.token, body: { displayName: "RenamedName" },
+    });
+    assert.equal(rename.status, 200);
+
+    const list = await request(server.baseUrl, "GET", "/admin/feedback/threads", {
+      token: admin.token, headers: CAPABILITIES,
+    });
+    assert.equal(list.status, 200);
+    const listed = (await list.json()).threads.find((row) => row.id === thread.id);
+    assert.equal(listed.displayName, "RenamedName");
+    assert.deepEqual(Object.keys(listed).sort(), [
+      "displayName", "id", "lastMessageAt", "preview", "suggestionId", "userUnread",
+    ]);
+    assert.equal("email" in listed, false);
+    assert.equal("profilePhotoUrl" in listed, false);
+    assert.equal("profilePhotoKey" in listed, false);
+  });
+
   it("adds podium records and an operator-controlled Home service banner without changing legacy shapes", async () => {
     const user = await createTestUser({ email: ADMIN_EMAIL });
     const competitor = await createTestUser();

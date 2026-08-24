@@ -13,11 +13,13 @@ const {
   listSuggestions,
   SuggestionQueryError,
 } = require("./queries/listSuggestions");
+const { listFeedbackThreads } = require("./queries/listFeedbackThreads");
 
 module.exports = {
   createFeedbackRouter,
   createSuggestion,
   listSuggestions,
+  listFeedbackThreads,
   SuggestionError,
   SuggestionQueryError,
   MAX_TEXT_LENGTH,

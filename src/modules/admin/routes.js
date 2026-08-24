@@ -21,6 +21,7 @@ const {
 } = require("../economy/balanceConfig");
 const {
   listSuggestions: defaultListSuggestions,
+  listFeedbackThreads: defaultListFeedbackThreads,
 } = require("../feedback");
 const { serializeBounds } = require("../economy/balanceConfig.defaults");
 const derivedCache = require("../../shared/cache/derivedCache");
@@ -239,6 +240,8 @@ function createAdminRouter(dependencies = {}) {
   const balance = dependencies.balanceConfig || defaultBalanceConfig;
   const listSuggestions =
     dependencies.listSuggestions || defaultListSuggestions;
+  const listFeedbackThreads =
+    dependencies.listFeedbackThreads || defaultListFeedbackThreads;
 
   // Batch 2026-08-08 item 7 — in-app suggestion box, admin read side.
   // Newest first, keyset-paged: ?limit=50&before=<ISO createdAt>. `nextBefore`
@@ -262,36 +265,19 @@ function createAdminRouter(dependencies = {}) {
     }
   });
 
-  // Inbox v1 staff surface. This deliberately exposes thread content only — no
-  // profile, email, device, or administrator identity is serialized.
+  // Inbox v1 staff surface. This exposes thread content plus the submitter's
+  // minimal current display name — never email, device, or staff identity.
   router.get("/feedback/threads", async (req, res) => {
     try {
       if (!(await staffInboxEnabled(req, settings))) {
         return res.status(404).json({ error: "Inbox is unavailable", code: "FEATURE_DISABLED" });
       }
-      const limit = parseLimit(req.query.limit);
-      const cursor = decodeCursor(req.query.cursor);
-      const where = {
-        expiresAt: { gt: new Date() },
-        ...(cursor ? { OR: [
-          { lastMessageAt: { lt: cursor.createdAt } },
-          { lastMessageAt: cursor.createdAt, id: { lt: cursor.id } },
-        ] } : {}),
-      };
-      const rows = await prisma.feedbackThread.findMany({
-        where, take: limit + 1, orderBy: [{ lastMessageAt: "desc" }, { id: "desc" }],
-        include: { messages: { orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 1 } },
+      const page = await listFeedbackThreads({
+        limit: req.query.limit,
+        cursor: req.query.cursor,
+        prisma: db,
       });
-      const more = rows.length > limit;
-      const threads = rows.slice(0, limit);
-      return res.json({
-        threads: threads.map((thread) => ({
-          id: thread.id, suggestionId: thread.suggestionId,
-          preview: thread.messages[0]?.text || "", lastMessageAt: thread.lastMessageAt,
-          userUnread: thread.staffReadAt == null,
-        })),
-        nextCursor: more ? encodeCursor({ id: threads.at(-1).id, createdAt: threads.at(-1).lastMessageAt }) : null,
-      });
+      return res.json(page);
     } catch (error) {
       if (error.statusCode === 400) return res.status(400).json({ error: error.message, code: error.code || "INVALID_REQUEST" });
       console.error("Admin feedback thread list error:", error);
