@@ -75,6 +75,32 @@ const {
 } = require("../constants/expiryEffectTypes");
 const ACTIVE_IMPACT_EXPIRY_TYPE_SET = new Set(ACTIVE_IMPACT_EXPIRY_TYPES);
 
+async function lockPowerupUseParticipants(tx, { raceId, powerupId }) {
+  const [powerupLock] = await tx.$queryRaw`
+    SELECT participant_id, type
+    FROM race_powerups
+    WHERE id = ${powerupId}
+    FOR UPDATE
+  `;
+  if (powerupLock?.type === "PINECONE_TOSS") {
+    await tx.$queryRaw`
+      SELECT id
+      FROM race_participants
+      WHERE id = ${powerupLock.participant_id}
+      FOR UPDATE
+    `;
+    return;
+  }
+  await tx.$queryRaw`
+    SELECT id
+    FROM race_participants
+    WHERE race_id = ${raceId}
+      AND status = 'accepted'::"RaceParticipantStatus"
+    ORDER BY user_id ASC
+    FOR UPDATE
+  `;
+}
+
 // SIGNAL_JAMMER is a single-target attack (store-only): it is OFFENSIVE +
 // TARGETED so the shared targeting validation, finished-target rejection, and
 // the COMPRESSION_SOCKS-block pre-check apply to it exactly like LEG_CRAMP. It
@@ -4286,17 +4312,17 @@ function buildUsePowerup(dependencies = {}) {
         await tx.$queryRaw`
           SELECT id FROM races WHERE id = ${args.raceId} FOR UPDATE
         `;
-        await tx.$queryRaw`
-          SELECT id FROM race_powerups WHERE id = ${args.powerupId} FOR UPDATE
-        `;
-        await tx.$queryRaw`
-          SELECT id
-          FROM race_participants
-          WHERE race_id = ${args.raceId}
-            AND status = 'accepted'::"RaceParticipantStatus"
-          ORDER BY user_id ASC
-          FOR UPDATE
-        `;
+        // Pinecone resolves its target from the current race snapshot, so the
+        // target participant is not known at the transaction boundary. The
+        // target's conditional UPDATE below acquires that row lock when the
+        // penalty is applied. Locking every participant here made a simple
+        // single-target toss wait behind unrelated step/resolution writes.
+        // Keep the caster locked up front, and retain the conservative cohort
+        // lock for branches whose validation/reflection can touch many rows.
+        await lockPowerupUseParticipants(tx, {
+          raceId: args.raceId,
+          powerupId: args.powerupId,
+        });
         return usePowerupCore(args);
       }, { maxWait: 5_000, timeout: 30_000 });
     } catch (err) {
@@ -4320,4 +4346,10 @@ function buildUsePowerup(dependencies = {}) {
 
 const usePowerup = buildUsePowerup();
 
-module.exports = { buildUsePowerup, usePowerup, PowerupUseError, luckyMinRarity };
+module.exports = {
+  buildUsePowerup,
+  usePowerup,
+  PowerupUseError,
+  luckyMinRarity,
+  lockPowerupUseParticipants,
+};

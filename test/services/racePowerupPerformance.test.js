@@ -12,6 +12,44 @@ const {
 const {
   buildGetSneakySwapTargets,
 } = require("../../src/modules/races/queries/getSneakySwapTargets");
+const {
+  lockPowerupUseParticipants,
+} = require("../../src/modules/powerups/commands/usePowerup");
+
+test("Pinecone use locks only its caster while other powerups retain the cohort lock", async () => {
+  const queries = [];
+  const tx = {
+    async $queryRaw(strings) {
+      const query = strings.join("?");
+      queries.push(query);
+      if (/race_powerups/i.test(query)) {
+        return [{ participant_id: "caster-row", type: "PINECONE_TOSS" }];
+      }
+      return [];
+    },
+  };
+
+  await lockPowerupUseParticipants(tx, { raceId: "race-1", powerupId: "power-1" });
+  assert.equal(queries.length, 2);
+  assert.match(queries[1], /WHERE id/);
+  assert.doesNotMatch(queries[1], /race_id/);
+  assert.match(queries[1], /FOR UPDATE/);
+
+  queries.length = 0;
+  tx.$queryRaw = async (strings) => {
+    const query = strings.join("?");
+    queries.push(query);
+    if (/race_powerups/i.test(query)) {
+      return [{ participant_id: "caster-row", type: "SNEAKY_SWAP" }];
+    }
+    return [];
+  };
+  await lockPowerupUseParticipants(tx, { raceId: "race-1", powerupId: "power-2" });
+  assert.match(queries[1], /race_id/);
+  assert.match(queries[1], /status = 'accepted'/i);
+  assert.match(queries[1], /ORDER BY user_id ASC/);
+  assert.match(queries[1], /FOR UPDATE/);
+});
 
 test("performance rollout paths are permanent while concurrency is clamped", () => {
   const dark = readPerformanceFlags({});
