@@ -316,10 +316,19 @@ async function resolveExpiredRaces() {
 
   for (const race of expiredRaces) {
     try {
+      const settlementStartedAt = Date.now();
+      const trace = (phase, startedAt = settlementStartedAt, extra = {}) => {
+        console.log(`[CRON] Settlement ${race.id} phase=${phase} elapsedMs=${Date.now() - settlementStartedAt} phaseMs=${Date.now() - startedAt}`, extra);
+      };
       const acceptedParticipants = race.participants.filter(
         (p) => p.status === "ACCEPTED"
       );
       const settlementTime = race.endsAt || now;
+      trace("begin", settlementStartedAt, {
+        name: race.name,
+        participants: acceptedParticipants.length,
+        endsAt: settlementTime.toISOString(),
+      });
 
       // GlobalStepEvents overlapping the race window. Passed into the SHARED
       // resolution so the settled standings match what getRaceProgress showed.
@@ -327,9 +336,13 @@ async function resolveExpiredRaces() {
       // event read fails, leave the race ACTIVE so the next cron retries the
       // same canonical scorer rather than completing with a fabricated zero
       // global vector and permanently stranding its PENDING recap rows.
+      let phaseStartedAt = Date.now();
       const eventsByUserId = await ensureRaceGlobalEventEligibility({
         race,
         at: settlementTime,
+      });
+      trace("eligibility-complete", phaseStartedAt, {
+        usersWithEvents: eventsByUserId.size,
       });
       await invalidateHomeActiveGlobalEvent(
         acceptedParticipants.map((participant) => participant.userId)
@@ -345,6 +358,7 @@ async function resolveExpiredRaces() {
       const settlementTz = raceTimeZone(race, "UTC");
 
       const standings = [];
+      trace("scoring-begin", phaseStartedAt, { participants: acceptedParticipants.length });
 
       // Phase A: per-participant PRE-LEECH totals + the leeches targeting each.
       // Leech is a cross-participant zero-sum transfer, resolved race-wide in
@@ -588,6 +602,7 @@ async function resolveExpiredRaces() {
         }
         return true;
       });
+      trace("totals-written", phaseStartedAt, { settledTotalsWritten });
       if (!settledTotalsWritten) {
         console.log(
           `[CRON] Race ${race.id} membership changed before settlement; retrying next tick`,
@@ -692,6 +707,7 @@ async function resolveExpiredRaces() {
         }
         return true;
       });
+      trace("placements-written", phaseStartedAt, { placementsWritten, standings: standings.length });
       if (!placementsWritten) {
         console.log(
           `[CRON] Race ${race.id} membership changed before placements; retrying next tick`,
@@ -703,6 +719,7 @@ async function resolveExpiredRaces() {
       // standings for placement. Idempotent via awardCoins refId.
       await settleWave5Economy({ race, standings, settlementTime });
       await announceUntriggeredTrailMines({ race });
+      trace("economy-complete", phaseStartedAt);
 
       const participantUserIds = acceptedParticipants.map((p) => p.userId);
       const topUserId = standings[0]?.participant.userId || null;
@@ -714,6 +731,10 @@ async function resolveExpiredRaces() {
         participantUserIds,
       });
       await markSeededBucketCompleted(race);
+      trace("complete", phaseStartedAt, {
+        winnerUserId: topUserId,
+        totalElapsedMs: Date.now() - settlementStartedAt,
+      });
 
       console.log(
         `[CRON] Race ${race.id} ("${race.name}") expired. Winner: ${topUserId || "none"} with ${topSteps} steps`
