@@ -499,6 +499,9 @@ async function ensureRaceGlobalEventEligibility({
   }
   const current = new Date(at);
   let accepted = race.participants.filter((row) => row.status === "ACCEPTED");
+  // Settlement repairs can legitimately touch hundreds of participants at the
+  // weekly boundary. Keep the repair atomic, but do not let Prisma's 5-second
+  // interactive-transaction default strand the race before settlement starts.
   await prisma.$transaction(async (tx) => {
     const { acquireGlobalEnrollmentLock, createPendingEnrollments } =
       require("./globalEventEnrollment");
@@ -565,7 +568,7 @@ async function ensureRaceGlobalEventEligibility({
         });
       }
     }
-  });
+  }, { timeout: 30_000, maxWait: 10_000 });
   const { findEligibleByRace } = require("../models/globalStepEventEntitlement");
   return findEligibleByRace({
     raceId: race.id,

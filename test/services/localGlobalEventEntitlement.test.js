@@ -208,6 +208,35 @@ test("settlement eligibility repair inserts a missing impact before loading the 
   assert.equal(eventsForUser(result, "user-1").length, 1);
 });
 
+test("settlement eligibility repair uses a long enough transaction timeout for weekly fields", async () => {
+  let options;
+  const client = {
+    async $transaction(callback, transactionOptions) {
+      options = transactionOptions;
+      return callback({
+        async $executeRawUnsafe() {},
+        globalStepEventEntitlement: { async findMany() { return []; } },
+      });
+    },
+    globalStepEvent: { async findMany() { return []; } },
+    globalEventRaceImpact: { async findMany() { return []; } },
+    globalStepEventEntitlement: { async findMany() { return []; } },
+  };
+
+  await ensureRaceGlobalEventEligibility({
+    race: {
+      id: "weekly-race",
+      startedAt: new Date("2026-08-17T04:00:00.000Z"),
+      participants: [{ userId: "user-1", status: "ACCEPTED" }],
+    },
+    at: new Date("2026-08-24T04:00:00.000Z"),
+    prisma: client,
+    async acquireRaceFence() {},
+  });
+
+  assert.deepEqual(options, { timeout: 30_000, maxWait: 10_000 });
+});
+
 test("boundary workers claim due entitlement ids with SKIP LOCKED", async () => {
   const sql = [];
   const tx = {
