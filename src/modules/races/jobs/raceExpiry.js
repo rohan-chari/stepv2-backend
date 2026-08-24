@@ -344,6 +344,7 @@ async function resolveExpiredRaces() {
       trace("eligibility-complete", phaseStartedAt, {
         usersWithEvents: eventsByUserId.size,
       });
+      phaseStartedAt = Date.now();
       await invalidateHomeActiveGlobalEvent(
         acceptedParticipants.map((participant) => participant.userId)
       );
@@ -366,7 +367,8 @@ async function resolveExpiredRaces() {
       // (finished/forfeited) participants keep their stored totals and take no
       // part in the transfer, but still count toward the team total below.
       const preLeech = [];
-      for (const participant of acceptedParticipants) {
+      for (let participantIndex = 0; participantIndex < acceptedParticipants.length; participantIndex++) {
+        const participant = acceptedParticipants[participantIndex];
         // TR-601: a forfeited team-race member's total is FROZEN at the value
         // snapshotted by the forfeit command — never recomputed (an active
         // debuff at forfeit time bites permanently). It still counts toward
@@ -452,6 +454,13 @@ async function resolveExpiredRaces() {
             ghostPeppers,
           },
         });
+        if ((participantIndex + 1) % 25 === 0 || participantIndex + 1 === acceptedParticipants.length) {
+          trace("scoring-progress", phaseStartedAt, {
+            phase: "pre-leech",
+            processed: participantIndex + 1,
+            total: acceptedParticipants.length,
+          });
+        }
       }
 
       // Phase A2 — HITCHHIKE (§7.3). The SAME insertion as the live display path
@@ -493,7 +502,8 @@ async function resolveExpiredRaces() {
       // the settlement fence across it would pin the race's job row for the whole
       // replay. Writes are batched into the fenced transaction below.
       const finalTotals = [];
-      for (const e of preLeech) {
+      for (let finalIndex = 0; finalIndex < preLeech.length; finalIndex++) {
+        const e = preLeech[finalIndex];
         const total = leechFinals.get(e.participant.id) ?? e.preLeechTotal;
         const reachedSnapshot = await determineFinishSnapshot({
           participant: e.participant,
@@ -517,6 +527,13 @@ async function resolveExpiredRaces() {
           totalSteps: total,
           reachedAt: reachedSnapshot?.finishedAt || settlementTime,
         });
+        if ((finalIndex + 1) % 25 === 0 || finalIndex + 1 === preLeech.length) {
+          trace("scoring-progress", phaseStartedAt, {
+            phase: "finish-snapshots",
+            processed: finalIndex + 1,
+            total: preLeech.length,
+          });
+        }
       }
 
       // Re-run only the existing whole-race scorer under ordered subsets of
@@ -766,6 +783,23 @@ async function resolveExpiredRaces() {
   }
 }
 
+function buildRaceExpiryRunner({ resolve = resolveExpiredRaces, logger = console } = {}) {
+  let inFlight = false;
+  return async function runRaceExpiry() {
+    if (inFlight) {
+      logger.log("[CRON] Race expiry check skipped: previous settlement pass still running");
+      return { skipped: true };
+    }
+    inFlight = true;
+    try {
+      await resolve();
+      return { skipped: false };
+    } finally {
+      inFlight = false;
+    }
+  };
+}
+
 function scheduleRaceExpiryCheck() {
   // Every 5 minutes — matches the seeded-race renewal cadence so a finished
   // daily/weekly race is settled promptly and the next one spins up within
@@ -773,9 +807,10 @@ function scheduleRaceExpiryCheck() {
   // gap). The check is idempotent (completeRace early-returns on non-ACTIVE).
   const INTERVAL = 5 * 60 * 1000; // every 5 minutes
 
+  const runRaceExpiry = buildRaceExpiryRunner();
   async function run() {
     try {
-      await resolveExpiredRaces();
+      await runRaceExpiry();
     } catch (error) {
       console.error("[CRON] Race expiry check error:", error);
     }
@@ -787,6 +822,7 @@ function scheduleRaceExpiryCheck() {
 
 module.exports = {
   resolveExpiredRaces,
+  buildRaceExpiryRunner,
   scheduleRaceExpiryCheck,
   completeRaceUnderSettlementFence,
 };
