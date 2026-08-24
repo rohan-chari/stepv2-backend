@@ -646,7 +646,8 @@ function stepSyncScopeModule() {
 }
 
 function reasonSetIsClosureEligible(reasons) {
-  return stepSyncScopeModule().isClosureEligibleReasonSet(reasons);
+  return stepSyncScopeModule().isClosureEligibleReasonSet(reasons) ||
+    stepSyncScopeModule().isSourceInputClosureEligibleReasonSet(reasons);
 }
 
 // The dirty-row ceiling is the gatekeeper's, imported rather than re-stated:
@@ -1077,6 +1078,10 @@ async function buildRaceScoringDependencyClosure({
   // Coherent committed uploader snapshot (spec rule 1) — the same conditions
   // raceResolutionStepSyncScope enforces, re-checked here because that scope
   // returns null the moment the race has any active effect.
+  const sourceInputPending =
+    stepSyncScopeModule().isSourceInputClosureEligibleReasonSet(
+      job.processingDirtyReasons
+    );
   const triggeringUsers = new Set(job.processingTriggeredByUserIds);
   for (const participantId of sourceParticipantIds) {
     const participant = acceptedById.get(participantId);
@@ -1084,13 +1089,12 @@ async function buildRaceScoringDependencyClosure({
     if (
       !participant ||
       !triggeringUsers.has(participant.userId) ||
-      // Stricter than the STEP_SYNC_COMMITTED scope, deliberately: that plan
-      // grandfathers a null token into the epoch, but a closure has to PROVE
-      // the uploader's committed snapshot predates the claim.
-      participant.totalsUpdatedAt == null ||
-      Number.isNaN(token.getTime()) ||
-      token.getTime() > claimStartedAt.getTime() ||
-      !Number.isFinite(participant.rawSteps)
+      (!sourceInputPending && (
+        participant.totalsUpdatedAt == null ||
+        Number.isNaN(token.getTime()) ||
+        token.getTime() > claimStartedAt.getTime() ||
+        !Number.isFinite(participant.rawSteps)
+      ))
     ) {
       return fallback(CLOSURE_FALLBACK_REASONS.UPLOADER_SNAPSHOT_INCOHERENT);
     }
@@ -1319,6 +1323,7 @@ async function buildRaceScoringDependencyClosure({
     scoringParticipantIds: [...closure].sort(),
     sourceParticipantIds,
     graphFingerprint: fingerprint.digest,
+    balanceConfigVersion,
     asOf,
     fallbackReason: null,
     // EXCLUSIVE, and a NECESSARY condition only: it asserts that no boundary

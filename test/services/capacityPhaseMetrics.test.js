@@ -53,7 +53,13 @@ test("capacity phase metrics stay inert while off and emit aggregate sampled fie
       const span = startCapacityPhase("unit_surface");
       await span.measurePhase("work", async () => {});
       span.setCounts({ items: 4, userId: 9, messageBodies: 2 });
-      span.setDimensions({ mode: "warm", token: "secret", enabled: true });
+      span.setDimensions({
+        mode: "warm",
+        token: "secret",
+        sourceName: "sensitive",
+        sourceOutcome: "changed",
+        enabled: true,
+      });
       span.finish("success");
     },
   );
@@ -70,7 +76,11 @@ test("capacity phase metrics stay inert while off and emit aggregate sampled fie
   assert.equal(typeof logs[0].fields.phaseMs.work, "number");
   assert.equal(logs[0].fields.phaseQueryCount.work, 0);
   assert.deepEqual(logs[0].fields.counts, { items: 4 });
-  assert.deepEqual(logs[0].fields.dimensions, { mode: "warm", enabled: true });
+  assert.deepEqual(logs[0].fields.dimensions, {
+    mode: "warm",
+    sourceOutcome: "changed",
+    enabled: true,
+  });
   assert.deepEqual(logs[0].fields.dbPoolPressure, {
     total: 3,
     idle: 2,

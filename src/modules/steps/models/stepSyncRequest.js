@@ -1,9 +1,9 @@
 const { prisma: defaultPrisma } = require("../../../db");
 
 // Server-side idempotency reservation for one POST /steps/sync-v2 attempt group
-// (§6.4 / §7). Keyed by (userId, idempotencyKey). Transaction A creates the row
-// PROCESSING (with the validated timezone + request hash); Transaction B
-// finalizes it to COMPLETE with the stored canonical response. A same-hash replay
+// (§6.4 / §7). Keyed by (userId, idempotencyKey). The canonical intake
+// transaction creates the row PROCESSING, persists source + queue ownership,
+// and finalizes it to COMPLETE with the stored canonical response. A same-hash replay
 // reads the stored response; a different-hash reuse of the key is a 409 conflict.
 // Rows retain seven days.
 
@@ -19,8 +19,8 @@ function buildStepSyncRequestModel(prisma = defaultPrisma) {
       });
     },
 
-    // Create the PROCESSING reservation. Runs inside the caller's transaction
-    // (Transaction A) when `tx` is supplied so the steps/samples upsert and the
+    // Create the PROCESSING reservation. Runs inside the caller's canonical
+    // intake transaction when `tx` is supplied so the steps/samples upsert and the
     // reservation commit atomically.
     async createReservation(
       {
@@ -60,12 +60,13 @@ function buildStepSyncRequestModel(prisma = defaultPrisma) {
     },
 
     // Finalize the reservation to COMPLETE with the stored canonical response.
-    async finalize({ id, responseJson, now = new Date() }, tx = prisma) {
+    async finalize({ id, responseJson, dailyExisted, now = new Date() }, tx = prisma) {
       return tx.stepSyncRequest.update({
         where: { id },
         data: {
           state: "COMPLETE",
           responseJson,
+          dailyExisted,
           leaseExpiresAt: null,
           updatedAt: now,
         },

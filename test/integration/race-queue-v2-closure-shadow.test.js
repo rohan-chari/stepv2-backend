@@ -252,9 +252,9 @@ async function plantEffect({
 }
 
 // The full fixture every case starts from: a started two-person race with the
-// creation work already drained, reason-aware envelopes on (that is what stamps
-// the STEP_SYNC reason and dirty participant ids the closure gates on), and the
-// shadow flag in the requested position.
+// creation work already drained and reason-aware envelopes on. The cases below
+// explicitly model an already-committed STEP_SYNC generation because current
+// public source intake correctly emits STEP_INPUT_CHANGED instead.
 async function seedRace(name, { shadow: _retiredShadowValue }) {
   const alice = await createUser(`${name} Alice`);
   const bob = await createUser(`${name} Bob`);
@@ -264,20 +264,49 @@ async function seedRace(name, { shadow: _retiredShadowValue }) {
   return { alice, bob, raceId };
 }
 
+async function modelCommittedStepSync(alice, raceId) {
+  const uploader = await prisma.raceParticipant.findFirstOrThrow({
+    where: { raceId, userId: alice.userId },
+  });
+  await prisma.raceParticipant.update({
+    where: { id: uploader.id },
+    data: {
+      rawSteps: 4300,
+      totalSteps: 4300,
+      totalsUpdatedAt: new Date(),
+    },
+  });
+  await prisma.$executeRawUnsafe(
+    `DELETE FROM race_resolution_jobs_v2 WHERE race_id = $1`,
+    raceId
+  );
+  await RaceResolutionJobV2.enqueue({
+    raceId,
+    userId: alice.userId,
+    dirtyEnvelope: {
+      reason: "STEP_SYNC",
+      dirtyUserIds: [alice.userId],
+      dirtyParticipantIds: [uploader.id],
+      powerupTypes: [],
+      priority: "COALESCE",
+    },
+  });
+  return uploader;
+}
+
 async function syncAndClaim(alice, raceId, overrides = {}) {
   assert.equal((await postSamples(alice, [sampleAt(3, 4300)])).status, 200);
+  const uploader = await modelCommittedStepSync(alice, raceId);
   const job = await RaceResolutionJobV2.findByRaceId(raceId);
   assert.deepEqual(
     job.dirtyReasons,
     ["STEP_SYNC"],
     "the fixture must produce a closure-CANDIDATE envelope, else nothing is asserted"
   );
-  const uploader = await prisma.raceParticipant.findFirstOrThrow({
-    where: { raceId, userId: alice.userId },
-  });
   assert.ok(
-    uploader.totalsUpdatedAt,
-    "the inline uploader reconcile must have committed a snapshot token"
+    (await prisma.raceParticipant.findUniqueOrThrow({ where: { id: uploader.id } }))
+      .totalsUpdatedAt,
+    "the mixed-version fixture must carry a committed snapshot token"
   );
   const capture = makeCapturingWorker(overrides);
   assert.ok(await capture.worker.processOne(), "the worker must claim the job");
@@ -360,9 +389,12 @@ describe("Phase 2b — dependency-closure planner in shadow mode", () => {
       await plantEffect({ raceId, type: "RUNNERS_HIGH", targetUser: bob, sourceUser: bob });
     }
 
-    // One upload dirties BOTH races with the same steps and the same envelope.
+    // One upload changes canonical source for BOTH races. Replace each source
+    // job with an explicit mixed-version committed STEP_SYNC fixture so this
+    // retired-shadow test continues to exercise its original reason class.
     assert.equal((await postSamples(alice, [sampleAt(3, 4300)])).status, 200);
     for (const raceId of [shadowRaceId, controlRaceId]) {
+      await modelCommittedStepSync(alice, raceId);
       assert.deepEqual((await RaceResolutionJobV2.findByRaceId(raceId)).dirtyReasons, [
         "STEP_SYNC",
       ]);

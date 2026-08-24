@@ -13,9 +13,9 @@
 // wholesale because one entry was cold.
 //
 // INVALIDATION: the daily total has exactly two writers — `recordSteps` (the
-// legacy `POST /steps` path) and `recordStepSyncV2` (Transaction A of
-// `POST /steps/sync-v2`). Both call `invalidate` after their write. `POST
-// /steps/samples` does NOT write the daily row (it only persists samples), so
+// legacy `POST /steps` path) and `recordStepSyncV2` (the canonical intake
+// `POST /steps/sync-v2`). Both call `invalidate` after their write. POST
+// `/steps/samples` does NOT write the daily row (it only persists samples), so
 // it has nothing to invalidate. Account deletion drops the rows, but also the
 // user, so their key is unreachable and expires on its own.
 const { Steps } = require("../models/steps");

@@ -3,184 +3,99 @@ const test = require("node:test");
 
 const { buildRecordSteps } = require("../../src/modules/steps/commands/recordSteps");
 
-test("recordSteps stamps lastStepSyncAt when creating a daily record", async () => {
+function harness({ existing = null } = {}) {
   const updates = [];
   const events = [];
-  const now = new Date("2026-03-19T15:30:00.000Z");
-
+  const intakes = [];
+  const now = new Date("2026-08-24T15:00:00.000Z");
+  let reconcileCalled = false;
+  let resolveCalled = false;
   const recordSteps = buildRecordSteps({
-    Steps: {
-      async findByUserIdAndDate(userId, date) {
-        assert.equal(userId, "user-1");
-        assert.equal(date, "2026-03-19");
-        return null;
-      },
-      async create(payload) {
-        return { id: "step-1", ...payload };
-      },
+    prisma: {
+      step: { async findUnique() { throw new Error("pre-lock lookup is forbidden"); } },
     },
-    User: {
-      async update(id, fields) {
-        updates.push({ id, fields });
-      },
-      async findById() {
-        return { id: "user-1", stepGoal: 5000 };
-      },
-    },
-    eventBus: {
-      emit(event, payload) {
-        events.push({ event, payload });
-      },
-    },
-    awardCoins: async () => {},
-    resolveRaceState: async () => {},
-    now: () => now,
-  });
-
-  const result = await recordSteps({
-    userId: "user-1",
-    steps: 8765,
-    date: "2026-03-19",
-  });
-
-  assert.equal(result.id, "step-1");
-  assert.deepEqual(updates, [
-    {
-      id: "user-1",
-      fields: { lastStepSyncAt: now },
-    },
-  ]);
-  assert.deepEqual(events, [
-    {
-      event: "STEPS_RECORDED",
-      payload: { userId: "user-1", steps: 8765, date: "2026-03-19" },
-    },
-  ]);
-});
-
-test("recordSteps stamps lastStepSyncAt when updating an existing daily record", async () => {
-  const updates = [];
-  const events = [];
-  const now = new Date("2026-03-19T16:00:00.000Z");
-
-  const recordSteps = buildRecordSteps({
-    Steps: {
-      async findByUserIdAndDate() {
-        return { id: "step-1", userId: "user-1", steps: 5000 };
-      },
-      async update(id, fields) {
-        assert.equal(id, "step-1");
-        assert.deepEqual(fields, { steps: 9000 });
-        return { id, ...fields };
-      },
-    },
-    User: {
-      async update(id, fields) {
-        updates.push({ id, fields });
-      },
-    },
-    eventBus: {
-      emit(event, payload) {
-        events.push({ event, payload });
-      },
-    },
-    awardCoins: async () => {},
-    resolveRaceState: async () => {},
-    now: () => now,
-  });
-
-  const result = await recordSteps({
-    userId: "user-1",
-    steps: 9000,
-    date: "2026-03-19",
-  });
-
-  assert.equal(result.id, "step-1");
-  assert.deepEqual(updates, [
-    {
-      id: "user-1",
-      fields: { lastStepSyncAt: now },
-    },
-  ]);
-  assert.deepEqual(events, [
-    {
-      event: "STEPS_UPDATED",
-      payload: { userId: "user-1", steps: 9000, date: "2026-03-19" },
-    },
-  ]);
-});
-
-test("recordSteps resolves active race state after writing steps", async () => {
-  let resolved = null;
-
-  const recordSteps = buildRecordSteps({
-    Steps: {
-      async findByUserIdAndDate() {
-        return null;
-      },
-      async create(payload) {
-        return { id: "step-1", ...payload };
-      },
-    },
-    User: {
-      async update() {},
-      async findById() {
-        return { id: "user-1", stepGoal: 5000 };
-      },
-    },
-    eventBus: { emit() {} },
-    awardCoins: async () => {},
-    resolveRaceState: async (payload) => {
-      resolved = payload;
-    },
-  });
-
-  await recordSteps({
-    userId: "user-1",
-    steps: 8765,
-    date: "2026-03-19",
-  });
-
-  assert.deepEqual(resolved, { userId: "user-1", timeZone: undefined });
-});
-
-test("reason-aware recordSteps reconciles before enqueueing a claimable STEP_SYNC", async () => {
-  const calls = [];
-  const recordSteps = buildRecordSteps({
-    Steps: {
-      async findByUserIdAndDate() { return null; },
-      async create(payload) { return { id: "step-1", ...payload }; },
-    },
-    User: { async update() {} },
-    eventBus: { emit() {} },
-    appSettings: {
-      async getFlag(key) {
-        return key === "raceResolutionReasonAwareV1Enabled";
-      },
-    },
-    reconcileUploaderRaces: async () => {
-      calls.push("reconcile");
+    stepInputIntake: async (input) => {
+      intakes.push(input);
       return {
-        resolvedRaceCount: 1,
-        reconciledRaces: [{ raceId: "race-1", participantId: "participant-1" }],
+        dailyExisted: Boolean(existing),
+        record: {
+          id: "step-1",
+          userId: input.userId,
+          date: new Date(input.daily.date),
+          steps: input.daily.steps,
+          stepGoal: null,
+          createdAt: now,
+        },
       };
     },
-    enqueueRaceResolutionForUser: async (payload) => {
-      calls.push("enqueue");
-      assert.equal(payload.reason, "STEP_SYNC");
-      assert.deepEqual(payload.reconciledRaces, [
-        { raceId: "race-1", participantId: "participant-1" },
-      ]);
-      return [];
-    },
+    User: { async update(id, fields) { updates.push({ id, fields }); } },
+    eventBus: { emit(event, payload) { events.push({ event, payload }); } },
+    appSettings: { async getFlag() { return false; } },
+    reconcileUploaderRaces: async () => { reconcileCalled = true; },
+    resolveRaceState: async () => { resolveCalled = true; },
+    now: () => now,
   });
+  return {
+    recordSteps,
+    updates,
+    events,
+    intakes,
+    now,
+    inlineCalled: () => reconcileCalled || resolveCalled,
+  };
+}
 
-  await recordSteps({
+test("recordSteps delegates one queue-only atomic intake and preserves create side effects", async () => {
+  const ctx = harness();
+  const result = await ctx.recordSteps({
     userId: "user-1",
-    steps: 100,
-    date: "2026-08-13",
-    timeZone: "UTC",
+    steps: 8765,
+    date: "2026-08-24",
+    timeZone: "America/New_York",
   });
+  assert.equal(result.id, "step-1");
+  assert.equal(result.stepGoal, 5000);
+  assert.equal(ctx.intakes.length, 1);
+  assert.deepEqual(ctx.intakes[0].daily, { date: "2026-08-24", steps: 8765 });
+  assert.equal(ctx.intakes[0].endpoint, "steps");
+  assert.deepEqual(ctx.updates, [{
+    id: "user-1",
+    fields: { lastStepSyncAt: ctx.now },
+  }]);
+  assert.deepEqual(ctx.events, [{
+    event: "STEPS_RECORDED",
+    payload: { userId: "user-1", steps: 8765, date: "2026-08-24" },
+  }]);
+  assert.equal(ctx.inlineCalled(), false);
+});
 
-  assert.deepEqual(calls, ["reconcile", "enqueue"]);
+test("recordSteps preserves update event and makes skipRaceResolution a scheduling no-op", async () => {
+  const ctx = harness({ existing: { id: "step-1" } });
+  await ctx.recordSteps({
+    userId: "user-1",
+    steps: 9000,
+    date: "2026-08-24",
+    skipRaceResolution: true,
+  });
+  assert.equal(ctx.intakes.length, 1);
+  assert.equal(ctx.events[0].event, "STEPS_UPDATED");
+  assert.equal(ctx.inlineCalled(), false);
+});
+
+test("recordSteps does not turn a best-effort timestamp failure into intake failure", async () => {
+  const ctx = harness();
+  ctx.recordSteps = buildRecordSteps({
+    prisma: { step: { async findUnique() { throw new Error("pre-lock lookup is forbidden"); } } },
+    stepInputIntake: async (input) => ({
+      dailyExisted: false,
+      record: { id: "step-1", userId: input.userId, date: new Date(input.daily.date), steps: input.daily.steps },
+    }),
+    User: { async update() { throw new Error("stamp unavailable"); } },
+    eventBus: { emit() {} },
+    appSettings: { async getFlag() { return false; } },
+  });
+  const result = await ctx.recordSteps({
+    userId: "user-1", steps: 1, date: "2026-08-24",
+  });
+  assert.equal(result.id, "step-1");
 });

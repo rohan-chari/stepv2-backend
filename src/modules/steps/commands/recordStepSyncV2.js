@@ -1,12 +1,6 @@
 const { prisma: defaultPrisma } = require("../../../db");
 const { StepSyncRequest: defaultStepSyncRequestModel } = require("../models/stepSyncRequest");
-const {
-  RaceResolutionJobV2: defaultRaceResolutionJobModel,
-} = require("../../races/models/raceResolutionJobV2");
-const { Race: defaultRaceModel } = require("../../races/models/race");
-const {
-  reconcileUploaderRaces: defaultReconcileUploaderRaces,
-} = require("../../races/services/reconcileUploaderRaces");
+const { stepInputIntake: defaultStepInputIntake } = require("../services/stepInputIntake");
 const { eventBus: defaultEventBus } = require("../../../shared/events/eventBus");
 const {
   canonicalizeStepSyncRequest,
@@ -16,19 +10,13 @@ const {
 const { normalizeSamples, removeOverlaps } = require("./recordStepSamples");
 const { appSettings: defaultAppSettings } = require("../../../shared/config/appSettings");
 const { isStrictFlagEnabled } = require("../../../shared/config/isStrictFlagEnabled");
-const {
-  bumpScoringInputVersion,
-  lockScoringInputState,
-  readCanonicalSampleInput,
-  scoringBoundaryIsSafe,
-  persistScoringInputState,
-} = require("../services/scoringInputVersion");
 
 const COMPAT_STEP_GOAL = 5000;
 const RECONCILE_LEASE_MS = 30 * 1000;
 const DEFAULT_MAX_WAIT_MS = 5000;
 const DEFAULT_POLL_MS = 150;
 const HOME_PULL_COOLDOWN_SECONDS = 30;
+const STEP_INTAKE_SEMANTICS = "CANONICAL_SOURCE_QUEUE_V1";
 
 class StepSyncCooldownError extends Error {
   constructor(retryAfterSeconds) {
@@ -43,8 +31,6 @@ class StepSyncCooldownError extends Error {
   }
 }
 
-// 409: the idempotency key was reused with a DIFFERENT canonical request. The
-// server may already have persisted the first request's data.
 class StepSyncConflictError extends Error {
   constructor() {
     super("Idempotency key already used");
@@ -66,266 +52,208 @@ function serializeRecord(step) {
   };
 }
 
-function leaseExpired(row, nowMs) {
-  return !row.leaseExpiresAt || new Date(row.leaseExpiresAt).getTime() <= nowMs;
+function buildResponse({ record, sampleCount, jobs, requestedAt }) {
+  const reported = (jobs || []).find(Boolean) || null;
+  return {
+    record: serializeRecord(record),
+    sampleCount,
+    uploaderReconciliation: {
+      state: "DEFERRED",
+      resolvedRaceCount: 0,
+      boxStateCurrent: false,
+    },
+    raceResolution: {
+      jobId: reported ? reported.id : null,
+      generation: reported ? reported.generation : null,
+      state: "QUEUED",
+      requestedAt: reported ? reported.requestedAt : requestedAt,
+    },
+    stepIntakeSemantics: STEP_INTAKE_SEMANTICS,
+  };
 }
 
-// POST /steps/sync-v2 command (§6.4). Two-stage protocol so the durable worker
-// can never race ahead of the uploader pass:
-//   A. upsert daily steps/samples + create the PROCESSING idempotency reservation
-//      (with the validated timezone). No queue write yet.
-//   B. after commit: emit step events once, run locked uploader reconciliation,
-//      then upsert the queue generation and finalize the reservation to COMPLETE
-//      with the stored response — only now can the full worker claim the job.
 function buildRecordStepSyncV2(dependencies = {}) {
   const prisma = dependencies.prisma || defaultPrisma;
-  const stepSyncRequestModel =
-    dependencies.StepSyncRequest || defaultStepSyncRequestModel;
-  const raceResolutionJobModel =
-    dependencies.RaceResolutionJobV2 ||
-    dependencies.RaceResolutionJob ||
-    defaultRaceResolutionJobModel;
-  const raceModel = dependencies.Race || defaultRaceModel;
-  const reconcileUploaderRaces =
-    dependencies.reconcileUploaderRaces || defaultReconcileUploaderRaces;
-  // The race-keyed worker is the authoritative full-field reconciler. Keeping
-  // this on by default preserves the established response behavior, while a
-  // runtime flag lets production return after durable enqueue when inline
-  // reconciliation makes a step upload slow. Read at request time so a PM2
-  // reload is an immediate, reversible rollout/rollback.
-  const inlineUploaderReconciliation =
-    dependencies.inlineUploaderReconciliation ||
-    (() => false);
+  const stepSyncRequestModel = dependencies.StepSyncRequest || defaultStepSyncRequestModel;
+  const stepInputIntake = dependencies.stepInputIntake || defaultStepInputIntake;
   const events = dependencies.eventBus || defaultEventBus;
   const appSettings = dependencies.appSettings || defaultAppSettings;
   const now = dependencies.now || (() => new Date());
   const maxWaitMs = dependencies.maxWaitMs ?? DEFAULT_MAX_WAIT_MS;
   const pollMs = dependencies.pollMs ?? DEFAULT_POLL_MS;
 
-  // Stage B: emit events once, reconcile the uploader (CURRENT/DEFERRED), then
-  // enqueue + finalize. Shared by the fresh path and expired-lease recovery.
-  async function finalizeReservation({
+  async function queueOptions() {
+    const [burstCoalescing, queuedGenerationMerge] = await Promise.all([
+      isStrictFlagEnabled(appSettings, "raceResolutionBurstCoalescingV1Enabled"),
+      isStrictFlagEnabled(appSettings, "raceResolutionQueuedGenerationMergeV1Enabled"),
+    ]);
+    return { burstCoalescing, queuedGenerationMerge };
+  }
+
+  async function stampAfterCommit({ userId, date }) {
+    try {
+      await prisma.user.update({
+        where: { id: userId },
+        data: { lastStepSyncAt: now() },
+      });
+    } catch (error) {
+      console.error("sync-v2 lastStepSyncAt update failed:", error);
+    }
+    try {
+      await require("../services/dailyStepsCache").invalidateSafe(userId, date);
+    } catch (error) {
+      console.error("sync-v2 daily cache invalidation failed:", error);
+    }
+  }
+
+  async function emitEventOnce(reservationId, payload) {
+    try {
+      if (await stepSyncRequestModel.claimEventsEmission(reservationId, now())) {
+        events.emit(payload.dailyExisted ? "STEPS_UPDATED" : "STEPS_RECORDED", {
+          userId: payload.userId,
+          steps: payload.steps,
+          date: payload.date,
+        });
+      }
+    } catch (error) {
+      console.error("sync-v2 step event emission failed:", error);
+    }
+  }
+
+  async function runIntakeInTransaction({
+    tx,
     reservation,
     userId,
     timeZone,
-    record,
-    sampleCount,
-    stepsChanged,
-    eventDate,
-    eventSteps,
-    reasonAware,
-    burstCoalescing,
-    scoringChanged = true,
+    canonical,
+    cleaned,
+    options,
   }) {
-    // One-time step-event emission, guarded by the reservation claim.
-    const claimed = await stepSyncRequestModel.claimEventsEmission(reservation.id, now());
-    if (claimed) {
-      events.emit(stepsChanged ? "STEPS_UPDATED" : "STEPS_RECORDED", {
-        userId,
-        steps: eventSteps,
-        date: eventDate,
-      });
-    }
-
-    // Locked uploader reconciliation. On failure, still return DEFERRED — the
-    // already-enqueued full job owns recovery.
-    let uploaderReconciliation;
-    let reconciledActiveRaces = null;
-    if (!inlineUploaderReconciliation()) {
-      uploaderReconciliation = {
-        state: "DEFERRED",
-        resolvedRaceCount: 0,
-        boxStateCurrent: false,
-      };
-    } else {
-      try {
-        const reconciliation = await reconcileUploaderRaces({
-          userId,
-          timeZone,
-          includeActiveRaces: true,
-        });
-        const { resolvedRaceCount, boxStateCurrent } = reconciliation;
-        if (Array.isArray(reconciliation.activeRaces)) {
-          reconciledActiveRaces = reconciliation.activeRaces;
-        }
-        uploaderReconciliation = {
-          state: "CURRENT",
-          resolvedRaceCount,
-          boxStateCurrent,
-        };
-      } catch (error) {
-        // Logged + counted against SLO metrics by the worker/metrics layer.
-        console.error("sync-v2 uploader reconciliation failed:", error);
-        uploaderReconciliation = {
-          state: "DEFERRED",
-          resolvedRaceCount: 0,
-          boxStateCurrent: false,
-        };
-      }
-    }
-
-    // Transaction B: enqueue the queue generation(s) + finalize the reservation.
-    //
-    // C0 (spec §5a item 4): the queue is RACE-keyed now, so one upload enqueues
-    // EVERY active race of the uploader, each with this user appended to the
-    // job's `triggeredByUserIds` so the worker computes their box state.
-    //
-    // Wire-shape compat for frozen clients: `raceResolution` still reports ONE
-    // job — the uploader's lexicographically-first active race, which is the one
-    // `GET /steps/race-resolution/:jobId` polls. A user with no active races has
-    // no job to report and gets `jobId: null`, which the shipped client already
-    // handles (it simply doesn't start the poll; see
-    // backend_api_service.dart's nullable `jobId`).
-    const activeRaces = reconciledActiveRaces ??
-      await raceModel.findActiveForUser(userId).catch(() => []);
-    const activeRaceIds = (activeRaces || [])
-      .map((race) => race.id)
-      .sort((a, b) => String(a).localeCompare(String(b)));
-    const dirtyEnvelopeByRaceId = new Map();
-    if (reasonAware) {
-      for (const race of activeRaces || []) {
-        const uploader = (race.participants || []).find(
-          (participant) =>
-            participant.userId === userId && participant.status === "ACCEPTED"
-        );
-        dirtyEnvelopeByRaceId.set(race.id, {
-          reason: "STEP_SYNC",
-          dirtyUserIds: [userId],
-          dirtyParticipantIds: uploader ? [uploader.id] : [],
-          powerupTypes: [],
-          priority: uploader ? "COALESCE" : "IMMEDIATE",
-        });
-      }
-    }
-
-    // Queued-generation merge is an enqueue-time decision. Read the cached
-    // setting exactly once for this logical enqueue (including crash recovery)
-    // and carry the resolved boolean into the atomic conflict upsert.
-    const queuedGenerationMerge = await isStrictFlagEnabled(
-      appSettings,
-      "raceResolutionQueuedGenerationMergeV1Enabled",
-    );
-
-    const { response } = await prisma.$transaction(async (tx) => {
-      const requestedAt = now();
-      let jobs = [];
-      if (scoringChanged === false && activeRaceIds.length > 0 &&
-          typeof raceResolutionJobModel.findByRaceIds === "function") {
-        jobs = await raceResolutionJobModel.findByRaceIds(activeRaceIds, tx);
-      }
-      // Missing durable ownership is uncertainty, so preserve today's enqueue.
-      if (scoringChanged !== false || jobs.length !== activeRaceIds.length) {
-        jobs = await raceResolutionJobModel.enqueueMany(
-          {
-            raceIds: activeRaceIds,
-            userId,
-            resolutionTimeZone: timeZone,
-            now: requestedAt,
-            dirtyEnvelopeByRaceId,
-            burstCoalescing,
-            queuedGenerationMerge,
-          },
-          tx
-        );
-      }
-      const reported = jobs.find(Boolean) || null;
-      const built = {
-        record,
-        sampleCount,
-        uploaderReconciliation,
-        raceResolution: {
-          jobId: reported ? reported.id : null,
-          generation: reported ? reported.generation : null,
-          state: "QUEUED",
-          requestedAt: reported ? reported.requestedAt : requestedAt,
-        },
-      };
-      await stepSyncRequestModel.finalize(
-        { id: reservation.id, responseJson: built, now: requestedAt },
-        tx
-      );
-      return { response: built };
-    });
-
-    return response;
-  }
-
-  // Resume a PROCESSING reservation whose lease expired (crash between A and B).
-  // Steps/samples are already persisted; re-run the idempotent uploader pass and
-  // Transaction B. Extends the lease first so only one recoverer proceeds.
-  async function recover({ reservation, userId, timeZone, canonical }) {
-    const claim = await prisma.stepSyncRequest.updateMany({
-      where: {
-        id: reservation.id,
-        state: "PROCESSING",
-        OR: [
-          { leaseExpiresAt: null },
-          { leaseExpiresAt: { lte: now() } },
-        ],
-      },
-      data: { leaseExpiresAt: new Date(now().getTime() + RECONCILE_LEASE_MS) },
-    });
-    if (claim.count !== 1) {
-      // Someone else took it; re-read for the (likely COMPLETE) result.
-      const row = await stepSyncRequestModel.findByKey(userId, reservation.idempotencyKey);
-      if (row && row.state === "COMPLETE") return row.responseJson;
-    }
-
-    const date = canonical.date;
-    const cleaned = removeOverlaps(normalizeSamples(canonical.samples));
-    const step = await prisma.step.findUnique({
-      where: { userId_date: { userId, date: new Date(date) } },
-    });
-    const record = step
-      ? serializeRecord(step)
-      : { id: null, userId, date: new Date(date), steps: canonical.steps, stepGoal: COMPAT_STEP_GOAL };
-
-    const [reasonAware, burstCoalescing] = await Promise.all([
-      isStrictFlagEnabled(appSettings, "raceResolutionReasonAwareV1Enabled"),
-      isStrictFlagEnabled(appSettings, "raceResolutionBurstCoalescingV1Enabled"),
-    ]);
-    return finalizeReservation({
-      reservation,
+    const requestedAt = now();
+    const intake = await stepInputIntake({
       userId,
+      daily: { date: canonical.date, steps: canonical.steps },
+      samples: cleaned,
       timeZone,
-      record,
+      requestTimestamp: requestedAt,
+      endpoint: "sync-v2",
+      ...options,
+    }, tx);
+    const response = buildResponse({
+      record: intake.record,
       sampleCount: cleaned.length,
-      stepsChanged: true,
-      eventDate: date,
-      eventSteps: canonical.steps,
-      reasonAware,
-      burstCoalescing,
-      // Null/missing is an old or in-flight reservation: fail closed to enqueue.
-      scoringChanged: reservation.scoringChanged === false ? false : true,
+      jobs: intake.jobs,
+      requestedAt,
+    });
+    await stepSyncRequestModel.finalize(
+      {
+        id: reservation.id,
+        responseJson: response,
+        dailyExisted: intake.dailyExisted,
+        now: requestedAt,
+      },
+      tx
+    );
+    return {
+      response,
+      reservationId: reservation.id,
+      dailyExisted: intake.dailyExisted,
+    };
+  }
+
+  async function afterCommit(result, { userId, canonical }) {
+    await stampAfterCommit({ userId, date: canonical.date });
+    await emitEventOnce(result.reservationId, {
+      userId,
+      date: canonical.date,
+      steps: canonical.steps,
+      dailyExisted: result.dailyExisted,
     });
   }
 
-  // Same-key resolution is deliberately shared by the initial read and the
-  // post-admission-loss read. In particular, two concurrent home pulls can
-  // both miss the first lookup: the loser must replay/recover the winner's
-  // reservation, not turn the winner's committed cooldown stamp into a 429.
-  async function replayExisting({ reservation, userId, idempotencyKey, timeZone, canonical, hash }) {
+  async function recover({ reservation, userId, timeZone, canonical, cleaned }) {
+    const options = await queueOptions();
+    const result = await prisma.$transaction(async (tx) => {
+      const claimed = await tx.stepSyncRequest.updateMany({
+        where: {
+          id: reservation.id,
+          state: "PROCESSING",
+          OR: [{ leaseExpiresAt: null }, { leaseExpiresAt: { lte: now() } }],
+        },
+        data: { leaseExpiresAt: new Date(now().getTime() + RECONCILE_LEASE_MS) },
+      });
+      if (claimed.count !== 1) return null;
+      return runIntakeInTransaction({
+        tx,
+        reservation,
+        userId,
+        timeZone: reservation.resolutionTimeZone || timeZone,
+        canonical,
+        cleaned,
+        options,
+      });
+    }, { timeout: 15_000, maxWait: 10_000 });
+    if (!result) return null;
+    await afterCommit(result, { userId, canonical });
+    return result.response;
+  }
+
+  async function replayExisting({
+    reservation,
+    userId,
+    idempotencyKey,
+    timeZone,
+    canonical,
+    cleaned,
+    hash,
+  }) {
     if (reservation.requestHash !== hash) throw new StepSyncConflictError();
-    if (reservation.state === "COMPLETE") return reservation.responseJson;
+    if (reservation.state === "COMPLETE") {
+      if (typeof reservation.dailyExisted === "boolean") {
+        await emitEventOnce(reservation.id, {
+          userId,
+          date: canonical.date,
+          steps: canonical.steps,
+          dailyExisted: reservation.dailyExisted,
+        });
+      }
+      return reservation.responseJson;
+    }
     const deadline = now().getTime() + maxWaitMs;
     let current = reservation;
     while (now().getTime() < deadline) {
-      if (leaseExpired(current, now().getTime())) {
-        return recover({ reservation: current, userId, timeZone, canonical });
+      if (!current.leaseExpiresAt ||
+          new Date(current.leaseExpiresAt).getTime() <= now().getTime()) {
+        const recovered = await recover({
+          reservation: current, userId, timeZone, canonical, cleaned,
+        });
+        if (recovered) return recovered;
       }
       await sleep(pollMs);
-      const row = await stepSyncRequestModel.findByKey(userId, idempotencyKey);
-      if (!row) break;
-      if (row.state === "COMPLETE") return row.responseJson;
-      current = row;
+      current = await stepSyncRequestModel.findByKey(userId, idempotencyKey);
+      if (!current) return null;
+      if (current.state === "COMPLETE") {
+        return replayExisting({
+          reservation: current, userId, idempotencyKey, timeZone,
+          canonical, cleaned, hash,
+        });
+      }
     }
-    const row = await stepSyncRequestModel.findByKey(userId, idempotencyKey);
-    if (row && row.state === "COMPLETE") return row.responseJson;
-    if (row) return recover({ reservation: row, userId, timeZone, canonical });
+    const recovered = await recover({
+      reservation: current, userId, timeZone, canonical, cleaned,
+    });
+    if (recovered) return recovered;
+    const final = await stepSyncRequestModel.findByKey(userId, idempotencyKey);
+    if (final?.state === "COMPLETE") {
+      return replayExisting({
+        reservation: final, userId, idempotencyKey, timeZone,
+        canonical, cleaned, hash,
+      });
+    }
     return null;
   }
 
-    return async function recordStepSyncV2({
+  return async function recordStepSyncV2({
     userId,
     body,
     idempotencyKey,
@@ -334,51 +262,40 @@ function buildRecordStepSyncV2(dependencies = {}) {
   }) {
     validateIdempotencyKey(idempotencyKey);
     const { canonical, hash } = canonicalizeStepSyncRequest(body);
-    // Enforce manual-sample rejection / recordingMethod rules (400) up front.
-    const normalized = normalizeSamples(canonical.samples);
-    const cleaned = removeOverlaps(normalized);
+    const cleaned = removeOverlaps(normalizeSamples(canonical.samples));
 
-    // Idempotency: inspect any existing reservation for this (user, key).
     const existing = await stepSyncRequestModel.findByKey(userId, idempotencyKey);
     if (existing) {
       const replay = await replayExisting({
-        reservation: existing, userId, idempotencyKey, timeZone, canonical, hash,
+        reservation: existing, userId, idempotencyKey, timeZone,
+        canonical, cleaned, hash,
       });
       if (replay) return replay;
     }
 
-    const reasonAware = await isStrictFlagEnabled(
-      appSettings,
-      "raceResolutionReasonAwareV1Enabled"
-    );
-    const burstCoalescing = await isStrictFlagEnabled(
-      appSettings,
-      "raceResolutionBurstCoalescingV1Enabled"
-    );
-    // The canonical watermark makes equivalent samples/daily totals a no-op
-    // for race scoring while preserving the HTTP response and idempotency
-    // contract for every shipped client.
-    const noopSuppression = true;
-
-    // ── Transaction A: persist steps/samples + create the reservation. ──
-    let reservation;
-    let record;
-    let stepsChanged;
+    const options = await queueOptions();
+    let result;
     try {
-      const result = await prisma.$transaction(async (tx) => {
-        // This conditional UPDATE is deliberately first inside Transaction A:
-        // PostgreSQL's CURRENT_TIMESTAMP is the authority, so simultaneous
-        // devices cannot both enter. Idempotency replay/recovery above happens
-        // before reaching here, so a lost successful response still replays.
+      result = await prisma.$transaction(async (tx) => {
+        // First transactional write: a same-key loser cannot perform source
+        // work before the reservation's unique constraint turns it away.
+        const reservation = await stepSyncRequestModel.createReservation({
+          userId,
+          idempotencyKey,
+          requestHash: hash,
+          resolutionTimeZone: timeZone,
+          leaseMs: RECONCILE_LEASE_MS,
+          now: now(),
+        }, tx);
+
         if (homePull) {
           const stamped = await tx.$queryRaw`
             UPDATE "users"
-            SET "last_home_pull_step_sync_at" = CURRENT_TIMESTAMP
-            WHERE "id" = ${userId}
-              AND (
-                "last_home_pull_step_sync_at" IS NULL
-                OR "last_home_pull_step_sync_at" <= CURRENT_TIMESTAMP - INTERVAL '30 seconds'
-              )
+               SET "last_home_pull_step_sync_at" = CURRENT_TIMESTAMP
+             WHERE "id" = ${userId}
+               AND ("last_home_pull_step_sync_at" IS NULL OR
+                    "last_home_pull_step_sync_at" <=
+                      CURRENT_TIMESTAMP - INTERVAL '30 seconds')
             RETURNING "last_home_pull_step_sync_at" AS "lastHomePullStepSyncAt"
           `;
           if (stamped.length !== 1) {
@@ -386,170 +303,30 @@ function buildRecordStepSyncV2(dependencies = {}) {
               SELECT CEIL(EXTRACT(EPOCH FROM (
                 "last_home_pull_step_sync_at" + INTERVAL '30 seconds' - CURRENT_TIMESTAMP
               )))::int AS "retryAfterSeconds"
-              FROM "users"
-              WHERE "id" = ${userId}
+                FROM "users" WHERE "id" = ${userId}
             `;
             throw new StepSyncCooldownError(cooldown[0]?.retryAfterSeconds);
           }
         }
-        const scoringState = noopSuppression
-          ? await lockScoringInputState(tx, userId)
-          : null;
-        const existingStep = await tx.step.findUnique({
-          where: { userId_date: { userId, date: new Date(canonical.date) } },
+
+        return runIntakeInTransaction({
+          tx, reservation, userId, timeZone, canonical, cleaned, options,
         });
-        const changed = Boolean(existingStep);
-        const dailyScoringChanged = !existingStep ||
-          Number(existingStep.steps) !== Number(canonical.steps);
-        // Keep the preceding read for exact scoring/no-op classification, but
-        // make the write itself conflict-safe. A legacy /steps request can
-        // insert this daily row after our read; upsert converges instead of
-        // aborting Transaction A with P2002.
-        const step = await tx.step.upsert({
-          where: {
-            userId_date: { userId, date: new Date(canonical.date) },
-          },
-          create: {
-            userId,
-            steps: canonical.steps,
-            date: new Date(canonical.date),
-            stepGoal: null,
-          },
-          update: { steps: canonical.steps },
-        });
-        // `lastStepSyncAt` is deliberately NOT stamped here — see the note after
-        // this transaction commits.
-        if (cleaned.length > 0) {
-          const { StepSample } = require("../models/stepSample");
-          // §3.3 overlap resolution inside Transaction A (same tx as steps +
-          // reservation), so mixed hourly/5-min data never double-counts.
-          await StepSample.reconcileBatchOn(tx, userId, cleaned, Date.now(), {
-            noopSuppression,
-            // sync-v2 owns the one transaction-level generation decision below.
-            manageScoringVersion: false,
-          });
-        }
-        let transactionScoringChanged = true;
-        if (noopSuppression) {
-          const nextInput = await readCanonicalSampleInput(tx, userId);
-          const decisionState = { ...scoringState, dbNow: nextInput.dbNow };
-          transactionScoringChanged = dailyScoringChanged ||
-            !scoringBoundaryIsSafe(decisionState) ||
-            scoringState.scoringWatermark !== nextInput.scoringWatermark;
-          await persistScoringInputState(
-            tx,
-            userId,
-            scoringState,
-            nextInput,
-            transactionScoringChanged
-          );
-        } else {
-          await bumpScoringInputVersion(tx, userId);
-        }
-        const res = await stepSyncRequestModel.createReservation(
-          {
-            userId,
-            idempotencyKey,
-            requestHash: hash,
-            resolutionTimeZone: timeZone,
-            scoringChanged: noopSuppression ? transactionScoringChanged : null,
-            leaseMs: RECONCILE_LEASE_MS,
-            now: now(),
-          },
-          tx
-        );
-        return { step, changed, res, scoringChanged: transactionScoringChanged };
-      });
-      reservation = result.res;
-      record = serializeRecord(result.step);
-      stepsChanged = result.changed;
-      // PERFORMANCE (2026-08-17, transaction-hold-time §2.3a): this stamp used
-      // to live inside Transaction A. It is a timestamp, but writing it there
-      // took a row lock on `users` and HELD it for the rest of the transaction —
-      // across the sample reconcile, the scoring-input bump and the reservation
-      // insert. On the highest-traffic endpoint in the backend that is a long
-      // hold on a row every one of this user's requests contends for, and it
-      // bought nothing: nothing in the transaction reads it back.
-      //
-      // Safe to move because it is not a correctness gate. All three readers are
-      // push-suppression heuristics — stepSyncPush.js (twice) and the batch
-      // eligibility SQL in raceResolutionDeliveryIntents.js — plus the auth/me
-      // payload, which annotates it "bookkeeping; not read by the client". The
-      // v1 path (`recordSteps`) already stamps it outside any transaction, so
-      // non-atomic stamping is existing behaviour rather than a new risk.
-      //
-      // Swallowed for the same reason the cache invalidation below is: the steps
-      // are already committed, and failing the sync over a bookkeeping stamp
-      // would be far worse than losing it. If it is lost the user looks LESS
-      // recently-synced than they are, so at worst they get one extra silent
-      // push — the safe direction. No double-counted steps, no missed scoring.
-      // C4 (spec §5 Phase E): Transaction A has committed the daily total, so
-      // `v1:user:daily:{id}:{date}` — the value every friend of this user reads
-      // from `GET /friends/steps` — is now stale. This and `recordSteps` are the
-      // only two daily-total writers; both invalidate here rather than at their
-      // routes. Swallowed: bookkeeping never fails a sync.
-      const dailyStepsCache = require("../services/dailyStepsCache");
-      await Promise.all([
-        prisma.user.update({
-          where: { id: userId },
-          data: { lastStepSyncAt: now() },
-        }).catch(() => {
-          // Intentionally ignored; see above.
-        }),
-        dailyStepsCache.invalidateSafe(userId, canonical.date),
-      ]);
+      }, { timeout: 15_000, maxWait: 10_000 });
     } catch (error) {
-      // A concurrent home-pull winner may have committed Transaction A's
-      // reservation while this request waited on the conditional timestamp
-      // stamp. Re-read before surfacing the cooldown: same-key retries always
-      // replay/recover the winner's result first.
-      if (error?.code === "STEP_SYNC_COOLDOWN") {
-        const row = await stepSyncRequestModel.findByKey(userId, idempotencyKey);
-        if (row) {
-          const replay = await replayExisting({
-            reservation: row, userId, idempotencyKey, timeZone, canonical, hash,
-          });
-          if (replay) return replay;
-        }
-      }
-      // Unique-violation on the reservation => a concurrent request with the
-      // same key created it first. Re-read and treat as a same-hash replay.
-      if (error && error.code === "P2002") {
-        const row = await stepSyncRequestModel.findByKey(userId, idempotencyKey);
-        if (row) {
-          if (row.requestHash !== hash) throw new StepSyncConflictError();
-          if (row.state === "COMPLETE") return row.responseJson;
-          // The winner is reconciling; wait briefly then read its result.
-          const deadline = now().getTime() + maxWaitMs;
-          while (now().getTime() < deadline) {
-            await sleep(pollMs);
-            const r = await stepSyncRequestModel.findByKey(userId, idempotencyKey);
-            if (r && r.state === "COMPLETE") return r.responseJson;
-            if (r && leaseExpired(r, now().getTime())) {
-              return recover({ reservation: r, userId, timeZone, canonical });
-            }
-          }
-          const r = await stepSyncRequestModel.findByKey(userId, idempotencyKey);
-          if (r && r.state === "COMPLETE") return r.responseJson;
-          if (r) return recover({ reservation: r, userId, timeZone, canonical });
-        }
-      }
-      throw error;
+      if (error?.code !== "P2002") throw error;
+      const winner = await stepSyncRequestModel.findByKey(userId, idempotencyKey);
+      if (!winner) throw error;
+      const replay = await replayExisting({
+        reservation: winner, userId, idempotencyKey, timeZone,
+        canonical, cleaned, hash,
+      });
+      if (!replay) throw error;
+      return replay;
     }
 
-    return finalizeReservation({
-      reservation,
-      userId,
-      timeZone,
-      record,
-      sampleCount: cleaned.length,
-      stepsChanged,
-      eventDate: canonical.date,
-      eventSteps: canonical.steps,
-      reasonAware,
-      burstCoalescing,
-      scoringChanged: reservation.scoringChanged === false ? false : true,
-    });
+    await afterCommit(result, { userId, canonical });
+    return result.response;
   };
 }
 
@@ -558,7 +335,9 @@ const recordStepSyncV2 = buildRecordStepSyncV2();
 module.exports = {
   buildRecordStepSyncV2,
   recordStepSyncV2,
+  StepSyncValidationError,
   StepSyncConflictError,
   StepSyncCooldownError,
-  StepSyncValidationError,
+  STEP_INTAKE_SEMANTICS,
+  HOME_PULL_COOLDOWN_SECONDS,
 };

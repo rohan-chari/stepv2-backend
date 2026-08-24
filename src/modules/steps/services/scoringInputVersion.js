@@ -74,7 +74,9 @@ async function lockScoringInputState(client, userId) {
     userId
   );
   const rows = await client.$queryRawUnsafe(
-    `SELECT generation, scoring_watermark AS "scoringWatermark",
+    `SELECT generation,
+       source_queue_semantics_generation AS "sourceQueueSemanticsGeneration",
+       scoring_watermark AS "scoringWatermark",
        next_sample_boundary_at AS "nextSampleBoundaryAt",
        (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::float8 AS "dbNowMs"
      FROM user_scoring_input_versions WHERE user_id=$1 FOR UPDATE`,
@@ -154,6 +156,17 @@ async function persistScoringInputState(client, userId, state, next, scoringChan
   );
 }
 
+async function stampSourceQueueSemanticsGeneration(client, userId, generation) {
+  await client.$executeRawUnsafe(
+    `UPDATE user_scoring_input_versions
+     SET source_queue_semantics_generation=$2::bigint,
+         updated_at=CURRENT_TIMESTAMP
+     WHERE user_id=$1`,
+    userId,
+    String(generation)
+  );
+}
+
 module.exports = {
   bumpScoringInputVersion,
   bumpManyScoringInputVersions,
@@ -162,4 +175,5 @@ module.exports = {
   readCanonicalSampleInput,
   scoringBoundaryIsSafe,
   persistScoringInputState,
+  stampSourceQueueSemanticsGeneration,
 };

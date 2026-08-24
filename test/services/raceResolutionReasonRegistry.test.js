@@ -21,6 +21,7 @@ test("the resolution reason registry is closed and defaults unsafe input to FULL
     "POWERUP_MUTATION",
     "RACE_START",
     "RECOVERY",
+    "STEP_INPUT_CHANGED",
     "STEP_SYNC",
   ]);
   assert.deepEqual([...PRIORITIES].sort(), ["COALESCE", "IMMEDIATE"]);

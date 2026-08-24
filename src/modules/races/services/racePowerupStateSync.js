@@ -2,6 +2,7 @@ const { Race } = require("../models/race");
 const { RacePowerup } = require("../../powerups/models/racePowerup");
 const { RaceParticipant } = require("../models/raceParticipant");
 const { rollPowerup: defaultRollPowerup } = require("../../powerups/commands/rollPowerup");
+const { prisma: defaultPrisma } = require("../../../db");
 
 function getCurrentSteps(participant) {
   if (!participant) return 0;
@@ -27,14 +28,28 @@ function buildSyncRacePowerupState(dependencies = {}) {
   const powerupModel = dependencies.RacePowerup || RacePowerup;
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
   const rollPowerup = dependencies.rollPowerup || defaultRollPowerup;
+  const prisma = dependencies.prisma || defaultPrisma;
 
-  return async function syncRacePowerupState({ raceId, userId, race: providedRace, boxEffectiveSteps }) {
+  return async function syncRacePowerupState({
+    raceId,
+    userId,
+    race: providedRace,
+    boxEffectiveSteps,
+    tx = null,
+    advisoryLockHeld = false,
+    pendingEvents = null,
+  }) {
     // Callers that already have a hydrated race (e.g. recordSteps after
     // resolveRaceState) can pass it in to avoid a duplicate findById round
     // trip. The lean Race.findActiveForUser shape happens to satisfy every
     // field this function reads (id/status/powerupsEnabled/
     // powerupStepInterval + participants.[fields]+user.displayName).
-    const race = providedRace || (await raceModel.findById(raceId));
+    const race = providedRace || (tx
+      ? await tx.race.findUnique({
+          where: { id: raceId },
+          include: { participants: { include: { user: { select: { displayName: true } } } } },
+        })
+      : await raceModel.findById(raceId));
     if (
       !race ||
       race.status !== "ACTIVE" ||
@@ -74,7 +89,14 @@ function buildSyncRacePowerupState(dependencies = {}) {
     const bonus = participant.bonusSteps || 0;
     const maxBonus = participant.maxBonusSteps || 0;
     if (bonus > maxBonus && typeof participantModel.updateMaxBonusSteps === "function") {
-      await participantModel.updateMaxBonusSteps(participant.id, bonus);
+      if (tx) {
+        await tx.raceParticipant.update({
+          where: { id: participant.id },
+          data: { maxBonusSteps: bonus },
+        });
+      } else {
+        await participantModel.updateMaxBonusSteps(participant.id, bonus);
+      }
     }
 
     // Self-heal an UN-ARMED box gate. startRace and respondToRaceInvite
@@ -98,10 +120,17 @@ function buildSyncRacePowerupState(dependencies = {}) {
         (Math.floor(boxEffectiveSteps / interval) + 1) * interval;
       // Invariant: strictly above current box-effective => 0 immediate mint.
       if (armedThreshold > boxEffectiveSteps) {
-        await participantModel.updateNextBoxAtSteps(
-          participant.id,
-          armedThreshold
-        );
+        if (tx) {
+          await tx.raceParticipant.update({
+            where: { id: participant.id },
+            data: { nextBoxAtSteps: armedThreshold },
+          });
+        } else {
+          await participantModel.updateNextBoxAtSteps(
+            participant.id,
+            armedThreshold
+          );
+        }
         participant.nextBoxAtSteps = armedThreshold;
       }
     }
@@ -129,9 +158,17 @@ function buildSyncRacePowerupState(dependencies = {}) {
         powerupStepInterval: race.powerupStepInterval,
         displayName: participant.user?.displayName,
         powerupSlots: participant.powerupSlots || 3,
+        tx,
+        advisoryLockHeld,
+        pendingEvents,
       });
 
-      const refreshedRace = await raceModel.findById(raceId);
+      const refreshedRace = tx
+        ? await tx.race.findUnique({
+            where: { id: raceId },
+            include: { participants: true },
+          })
+        : await raceModel.findById(raceId);
       participant = refreshedRace?.participants.find(
         (entry) => entry.userId === userId
       );
@@ -148,7 +185,28 @@ function buildSyncRacePowerupState(dependencies = {}) {
     }
 
     let queuedBoxCount;
-    if (typeof powerupModel.findInventoryForParticipants === "function") {
+    if (tx) {
+      const inventory = await tx.racePowerup.findMany({
+        where: {
+          participantId: participant.id,
+          status: { in: ["HELD", "MYSTERY_BOX", "QUEUED"] },
+        },
+        orderBy: { createdAt: "asc" },
+      });
+      const occupiedCount = inventory.filter(
+        (box) => box.status === "HELD" || box.status === "MYSTERY_BOX"
+      ).length;
+      const queuedBoxes = inventory.filter((box) => box.status === "QUEUED");
+      const openSlots = Math.max(0, (participant.powerupSlots || 3) - occupiedCount);
+      const toPromote = queuedBoxes.slice(0, openSlots);
+      if (toPromote.length > 0) {
+        await tx.racePowerup.updateMany({
+          where: { id: { in: toPromote.map((box) => box.id) } },
+          data: { status: "MYSTERY_BOX" },
+        });
+      }
+      queuedBoxCount = queuedBoxes.length - toPromote.length;
+    } else if (typeof powerupModel.findInventoryForParticipants === "function") {
       // One current-state read replaces occupied-count + queued-list + final
       // queued-count. QUEUED inventory is capped and promotions are selected in
       // the same createdAt order as the legacy methods, so the observable box

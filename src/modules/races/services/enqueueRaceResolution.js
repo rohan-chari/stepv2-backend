@@ -85,7 +85,7 @@ async function rolloutOptions({
 // Both are BEST-EFFORT when called outside a transaction: a queue write must
 // never fail a user's request. placementRecompute retains a bounded recovery
 // backstop for missing/failed/hour-old rows instead of replaying every race.
-// Inside a caller-supplied `tx` (sync-v2 Transaction B) errors DO propagate —
+// Inside a caller-supplied canonical-intake transaction errors DO propagate —
 // there the enqueue is part of the atomic unit the caller is building.
 
 async function enqueueRaceResolution(

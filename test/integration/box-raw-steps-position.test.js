@@ -45,6 +45,9 @@ const {
 const {
   defaultConfig,
 } = require("../../src/modules/economy/balanceConfig.defaults");
+const {
+  buildRaceResolutionWorkerV2,
+} = require("../../src/modules/races/jobs/raceResolutionQueueV2");
 
 const HOUR_MS = 60 * 60 * 1000;
 const FEATURES = {
@@ -165,6 +168,10 @@ async function progress(user, raceId, base = server.baseUrl) {
   // The route answers `{ progress: {...} }`.
   const payload = await res.json();
   return { status: res.status, body: payload.progress || payload };
+}
+
+async function processQueuedRace(raceId) {
+  return buildRaceResolutionWorkerV2({ bootAt: 0 }).processRace({ raceId });
 }
 
 async function rows(raceId) {
@@ -553,23 +560,28 @@ describe("mystery-box odds position from raw walked steps", () => {
     assert.equal(state[bob.userId].rawSteps, 7000);
   });
 
-  it("6c. the step-upload reconcile writes the uploader's raw_steps", async () => {
+  it("6c. step upload queues raw_steps reconciliation for the canonical worker", async () => {
     const alice = await createUser("AliceW3");
     const bob = await createUser("BobW3");
     const raceId = await createActiveRace(alice, [bob], "Writer reconcile");
 
     await postSamples(alice, [sampleAt(2, 5500)]);
 
+    const inline = await rows(raceId);
+    assert.equal(inline[alice.userId].rawSteps, null, "intake never writes raw_steps inline");
+    assert.equal(inline[bob.userId].rawSteps, null);
+    assert.ok(await processQueuedRace(raceId));
+
     const state = await rows(raceId);
     assert.equal(
       state[alice.userId].rawSteps,
       5500,
-      "sync-v2's uploader reconcile is a raw_steps writer"
+      "the canonical worker writes the uploader's raw_steps"
     );
     assert.equal(
       state[bob.userId].rawSteps,
-      null,
-      "…and writes ONLY the uploader's row"
+      0,
+      "a coalesced FULL generation writes the canonical zero for participants without source"
     );
   });
 
@@ -579,10 +591,18 @@ describe("mystery-box odds position from raw walked steps", () => {
     const raceId = await createActiveRace(alice, [bob], "Monotonic");
 
     await postSamples(alice, [sampleAt(2, 9000)]);
+    assert.equal((await rows(raceId))[alice.userId].rawSteps, null);
+    assert.ok(await processQueuedRace(raceId));
     assert.equal((await rows(raceId))[alice.userId].rawSteps, 9000);
 
     // A re-sync that REWRITES the same bucket downward (device re-report).
     await postSamples(alice, [sampleAt(2, 100)]);
+    assert.equal(
+      (await rows(raceId))[alice.userId].rawSteps,
+      9000,
+      "the intake request leaves the committed participant unchanged"
+    );
+    assert.ok(await processQueuedRace(raceId));
     assert.equal(
       (await rows(raceId))[alice.userId].rawSteps,
       9000,

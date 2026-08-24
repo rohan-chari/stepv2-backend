@@ -453,7 +453,7 @@ describe("5a — one bulk writer per race", () => {
 
     // A fresh sync makes the race dirty again, then a worker claims with a
     // zero-length lease so the row is immediately re-claimable.
-    await postSamples(alice, [sampleAt(3, 50000)]);
+    await postSamples(alice, [sampleAt(1, 50000)]);
     const stale = makeWorker({ leaseMs: 0 });
 
     // Claim by hand so we can steal the lease before the write transaction runs.
@@ -529,7 +529,7 @@ describe("5a — one bulk writer per race", () => {
     assert.equal(samplesSecond.generation, samplesFirst.generation);
   });
 
-  it("reason-aware legacy POST /steps commits uploader reconciliation before narrow STEP_SYNC becomes claimable", async () => {
+  it("reason-aware legacy POST /steps atomically queues source work without reconciling inline", async () => {
     const alice = await createUser("Reason Alice");
     const bob = await createUser("Reason Bob");
     const raceId = await createActiveRace(alice, [bob], "Reason-aware ordering");
@@ -538,6 +538,7 @@ describe("5a — one bulk writer per race", () => {
     // clean successful row is the point from which narrow work is safe.
     await drain(makeWorker());
     await appSettings.setFlag("raceResolutionReasonAwareV1Enabled", true);
+    const before = await participantVersions(raceId);
 
     const response = await request(server.baseUrl, "POST", "/steps", {
       body: { steps: 8123, date: new Date().toISOString().slice(0, 10) },
@@ -555,17 +556,29 @@ describe("5a — one bulk writer per race", () => {
         where: { userId: alice.userId },
       }),
     ]);
-    assert.deepEqual(job.dirtyReasons, ["STEP_SYNC"]);
+    assert.deepEqual(job.dirtyReasons, ["STEP_INPUT_CHANGED"]);
     assert.deepEqual(job.dirtyParticipantIds, [participant.id]);
-    assert.ok(participant.totalsUpdatedAt, "uploader total was committed");
-    assert.ok(
-      participant.totalsUpdatedAt.getTime() <= job.requestedAt.getTime(),
-      "claimable generation cannot predate uploader reconciliation"
-    );
     assert.ok(token && token.generation >= 1n);
+    assert.equal(
+      token.sourceQueueSemanticsGeneration,
+      token.generation,
+      "the source-generation stamp and queue enqueue commit atomically"
+    );
+    assert.deepEqual(
+      await participantVersions(raceId),
+      before,
+      "the HTTP request must not rewrite any participant row"
+    );
+
+    const events = [];
+    assert.ok(await makeWorker({
+      logger: { log(line) { try { events.push(JSON.parse(line)); } catch {} } },
+    }).processOne());
+    const committed = events.find((event) => event.event === "race_resolution_v2");
+    assert.notEqual(committed?.resolutionPlan, "STEP_SYNC_COMMITTED");
   });
 
-  it("reason-aware POST /steps with skipRaceResolution stamps a coalescable STEP_SYNC envelope, never FULL/IMMEDIATE", async () => {
+  it("reason-aware POST /steps treats skipRaceResolution as a compat no-op and queues source work", async () => {
     const alice = await createUser("Backstop Alice");
     const bob = await createUser("Backstop Bob");
     const raceId = await createActiveRace(alice, [bob], "Backstop envelope");
@@ -591,20 +604,13 @@ describe("5a — one bulk writer per race", () => {
         where: { raceId_userId: { raceId, userId: alice.userId } },
       }),
     ]);
-    // The backstop enqueue must not poison the coalesced job: a null reason
-    // normalizes to a sticky FULL envelope and every later STEP_SYNC merged
-    // into the row inherits it, forcing an IMMEDIATE full-field recompute of
-    // large races on every sync cycle. (dirty_priority is NOT asserted here:
-    // the merge keeps IMMEDIATE from the row's pre-drain creation history,
-    // and priority only affects the debounce floor of a fresh insert — the
-    // fresh-insert case is asserted below.)
-    assert.deepEqual(job.dirtyReasons, ["STEP_SYNC"]);
+    // Frozen clients still send skipRaceResolution. It remains accepted, but
+    // cannot skip the durable canonical-source queue handoff.
+    assert.deepEqual(job.dirtyReasons, ["STEP_INPUT_CHANGED"]);
     assert.deepEqual(job.dirtyParticipantIds, [participant.id]);
     assert.deepEqual(job.triggeredByUserIds, [alice.userId]);
 
-    // Fresh-insert path: with the row gone, the backstop enqueue must create a
-    // COALESCE-priority STEP_SYNC row (the shape that lets burst coalescing
-    // set a debounce floor), not an IMMEDIATE FULL row.
+    // Fresh-insert path preserves the same coalescable source envelope.
     await prisma.$executeRawUnsafe(
       `DELETE FROM race_resolution_jobs_v2 WHERE race_id = $1`,
       raceId
@@ -620,16 +626,14 @@ describe("5a — one bulk writer per race", () => {
     });
     assert.equal(fresh.status, 200);
     const freshJob = await RaceResolutionJobV2.findByRaceId(raceId);
-    assert.deepEqual(freshJob.dirtyReasons, ["STEP_SYNC"]);
+    assert.deepEqual(freshJob.dirtyReasons, ["STEP_INPUT_CHANGED"]);
     assert.equal(freshJob.dirtyPriority, "COALESCE");
 
-    // The real follow-up — the /steps/samples call this backstop covers for —
-    // reconciles and merges its own narrow STEP_SYNC without escalating the
-    // row to FULL.
+    // The samples endpoint merges the same source reason without escalation.
     const samplesRes = await postSamples(alice, [sampleAt(2, 3100)]);
     assert.equal(samplesRes.status, 200);
     const merged = await RaceResolutionJobV2.findByRaceId(raceId);
-    assert.deepEqual(merged.dirtyReasons, ["STEP_SYNC"]);
+    assert.deepEqual(merged.dirtyReasons, ["STEP_INPUT_CHANGED"]);
     assert.deepEqual(merged.dirtyParticipantIds, [participant.id]);
   });
 
@@ -640,8 +644,32 @@ describe("5a — one bulk writer per race", () => {
     await drain(makeWorker());
     await appSettings.setFlag("raceResolutionReasonAwareV1Enabled", true);
 
-    const response = await postSamples(alice, [sampleAt(3, 2468)]);
-    assert.equal(response.status, 200);
+    const participant = await prisma.raceParticipant.findFirstOrThrow({
+      where: { raceId, userId: alice.userId },
+    });
+    await prisma.userScoringInputVersion.upsert({
+      where: { userId: alice.userId },
+      create: {
+        userId: alice.userId,
+        generation: 1n,
+        sourceQueueSemanticsGeneration: 1n,
+      },
+      update: {
+        generation: { set: 1n },
+        sourceQueueSemanticsGeneration: { set: 1n },
+      },
+    });
+    await RaceResolutionJobV2.enqueue({
+      raceId,
+      userId: alice.userId,
+      dirtyEnvelope: {
+        reason: "STEP_SYNC",
+        dirtyUserIds: [alice.userId],
+        dirtyParticipantIds: [participant.id],
+        powerupTypes: [],
+        priority: "COALESCE",
+      },
+    });
     const before = await participantVersions(raceId);
     const events = [];
     const worker = makeWorker({
@@ -697,6 +725,83 @@ describe("5a — one bulk writer per race", () => {
     assert.equal(committed?.resolutionPlan, "FULL", JSON.stringify(events));
     const totals = await totalsByUser(raceId);
     assert.ok(totals[alice.userId] >= 2000, "both public mutations survive the fallback");
+  });
+
+  it("re-fences every force-FULL retry and refreshes a second lower correction in the same claim", async () => {
+    const alice = await createUser("Double Fence Alice");
+    const bob = await createUser("Double Fence Bob");
+    const raceId = await createActiveRace(alice, [bob], "Double source fence");
+    await drain(makeWorker());
+    await appSettings.setFlag("raceResolutionReasonAwareV1Enabled", true);
+    const target = await prisma.raceParticipant.findFirstOrThrow({
+      where: { raceId, userId: alice.userId },
+    });
+    const source = await prisma.raceParticipant.findFirstOrThrow({
+      where: { raceId, userId: bob.userId },
+    });
+    const powerup = await prisma.racePowerup.create({
+      data: {
+        raceId, participantId: source.id, userId: bob.userId,
+        type: "RAINSTORM", status: "USED", usedAt: new Date(),
+        targetUserId: alice.userId,
+      },
+    });
+    await prisma.raceActiveEffect.create({
+      data: {
+        raceId, targetParticipantId: target.id, targetUserId: alice.userId,
+        sourceUserId: bob.userId, powerupId: powerup.id, type: "RAINSTORM",
+        status: "ACTIVE", startsAt: new Date(Date.now() - 6 * HOUR_MS),
+        expiresAt: new Date(Date.now() + HOUR_MS),
+      },
+    });
+    assert.equal((await postSamples(alice, [sampleAt(5, 5000)])).status, 200);
+
+    let fenceAttempt = 0;
+    const worker = makeWorker({
+      async beforeWriteTransaction() {
+        fenceAttempt += 1;
+        if (fenceAttempt === 1) {
+          assert.equal((await postSamples(alice, [sampleAt(5, 3000)])).status, 200);
+        } else if (fenceAttempt === 2) {
+          assert.equal((await postSamples(alice, [sampleAt(5, 1000)])).status, 200);
+        }
+      },
+    });
+    assert.ok(await worker.processOne());
+    assert.ok(fenceAttempt >= 3, "both newer generations must reject stale work");
+    const corrected = await prisma.raceParticipant.findUniqueOrThrow({
+      where: { id: target.id },
+    });
+    assert.equal(corrected.rawSteps, 1000);
+    assert.equal((await RaceResolutionJobV2.findByRaceId(raceId)).state, "SUCCEEDED");
+  });
+
+  it("settles source-input work without a retry loop for ended, cancelled, forfeited, and expired targets", async () => {
+    for (const terminalCase of ["ended", "cancelled", "forfeited", "expired"]) {
+      const alice = await createUser(`${terminalCase} Alice`);
+      const bob = await createUser(`${terminalCase} Bob`);
+      const raceId = await createActiveRace(alice, [bob], `${terminalCase} source target`);
+      await drain(makeWorker());
+      assert.equal((await postSamples(alice, [sampleAt(3, 900)])).status, 200);
+      if (terminalCase === "ended") {
+        await prisma.race.update({ where: { id: raceId }, data: { status: "COMPLETED" } });
+      } else if (terminalCase === "cancelled") {
+        await prisma.race.update({ where: { id: raceId }, data: { status: "CANCELLED" } });
+      } else if (terminalCase === "forfeited") {
+        await prisma.raceParticipant.update({
+          where: { raceId_userId: { raceId, userId: alice.userId } },
+          data: { forfeitedAt: new Date() },
+        });
+      } else {
+        await prisma.race.update({
+          where: { id: raceId }, data: { endsAt: new Date(Date.now() - 1000) },
+        });
+      }
+      assert.ok(await makeWorker().processOne(), terminalCase);
+      const settled = await RaceResolutionJobV2.findByRaceId(raceId);
+      assert.equal(settled.state, "SUCCEEDED", terminalCase);
+      assert.equal(Number(settled.generation), Number(settled.processingGeneration), terminalCase);
+    }
   });
 
   it("malformed mixed-version dirty metadata atomically becomes FULL instead of losing the enqueue", async () => {
@@ -767,6 +872,59 @@ describe("5a — one bulk writer per race", () => {
       coalesced[alice.userId] > coalesced[bob.userId],
       "Alice walked more per bucket, so she must lead"
     );
+  });
+
+  it("a box failure rolls back participant totals and retries one durable threshold crossing", async () => {
+    const alice = await createUser("Atomic box Alice");
+    const bob = await createUser("Atomic box Bob");
+    const raceId = await createActiveRace(alice, [bob], "Atomic box");
+    await drain(makeWorker());
+
+    const participant = await prisma.raceParticipant.findFirstOrThrow({
+      where: { raceId, userId: alice.userId },
+    });
+    assert.equal(participant.nextBoxAtSteps, 2000);
+    assert.equal((await postSamples(alice, [sampleAt(2, 2500)])).status, 200);
+    const before = await participantVersions(raceId);
+
+    const failed = makeWorker({
+      syncRacePowerupState: async () => {
+        const error = new Error("induced box transaction failure");
+        error.code = "BOX_TEST_FAILURE";
+        throw error;
+      },
+    });
+    assert.ok(await failed.processOne());
+    assert.deepEqual(
+      await participantVersions(raceId),
+      before,
+      "participant scoring writes must roll back with the failed box consequence"
+    );
+    assert.equal(
+      await prisma.racePowerup.count({ where: { participantId: participant.id } }),
+      0,
+      "no partial mystery box may survive the failed transaction"
+    );
+    assert.equal((await RaceResolutionJobV2.findByRaceId(raceId)).state, "QUEUED");
+
+    await prisma.$executeRawUnsafe(
+      `UPDATE race_resolution_jobs_v2
+       SET retry_at = NULL, not_before_at = NULL
+       WHERE race_id = $1`,
+      raceId
+    );
+    assert.ok(await makeWorker().processOne());
+    const after = await prisma.raceParticipant.findFirstOrThrow({
+      where: { id: participant.id },
+    });
+    assert.ok(after.totalSteps >= 2500);
+    assert.equal(after.nextBoxAtSteps, 4000);
+    assert.equal(
+      await prisma.racePowerup.count({ where: { participantId: participant.id } }),
+      1,
+      "the retried generation mints exactly one mystery box"
+    );
+    assert.equal((await RaceResolutionJobV2.findByRaceId(raceId)).state, "SUCCEEDED");
   });
 });
 
@@ -1206,7 +1364,7 @@ describe("5d — explicit debounce", () => {
     void liveRace;
   });
 
-  it("runs Rainstorm step sync incrementally and leaves the other participant untouched", async () => {
+  it("runs Rainstorm source changes through a non-committed plan and leaves the other participant untouched", async () => {
     const alice = await createUser("Incremental Alice");
     const bob = await createUser("Incremental Bob");
     const raceId = await createActiveRace(alice, [bob], "Incremental Rainstorm");
@@ -1244,7 +1402,7 @@ describe("5d — explicit debounce", () => {
     });
     assert.ok(await worker.processOne());
     const committed = events.find((event) => event.event === "race_resolution_v2");
-    assert.equal(committed?.resolutionPlan, "STEP_SYNC_INCREMENTAL", JSON.stringify(events));
+    assert.notEqual(committed?.resolutionPlan, "STEP_SYNC_COMMITTED", JSON.stringify(events));
 
     const after = await participantVersions(raceId);
     const beforeBob = before.find((row) => row.userId === bob.userId);
@@ -1252,7 +1410,69 @@ describe("5d — explicit debounce", () => {
     assert.equal(afterBob.version, beforeBob.version);
   });
 
-  it("admits Rally Flag and Uprising step syncs incrementally", async () => {
+  for (const type of ["RAINSTORM", "RALLY_FLAG", "UPRISING"]) {
+    it(`uses exact STEP_SYNC_INCREMENTAL for a committed STEP_SYNC with ${type}`, async () => {
+      const alice = await createUser(`${type} committed Alice`);
+      const bob = await createUser(`${type} committed Bob`);
+      const raceId = await createActiveRace(alice, [bob], `${type} committed incremental`);
+      await drain(makeWorker());
+      await appSettings.setFlag("raceResolutionReasonAwareV1Enabled", true);
+      assert.equal((await postSamples(alice, [sampleAt(2, 2400)])).status, 200);
+      await drain(makeWorker());
+
+      const target = await prisma.raceParticipant.findFirstOrThrow({
+        where: { raceId, userId: alice.userId },
+      });
+      const source = await prisma.raceParticipant.findFirstOrThrow({
+        where: { raceId, userId: bob.userId },
+      });
+      const powerup = await prisma.racePowerup.create({
+        data: {
+          raceId, participantId: source.id, userId: bob.userId,
+          type, status: "USED", usedAt: new Date(), targetUserId: alice.userId,
+        },
+      });
+      await prisma.raceActiveEffect.create({
+        data: {
+          raceId, targetParticipantId: target.id, targetUserId: alice.userId,
+          sourceUserId: bob.userId, powerupId: powerup.id, type, status: "ACTIVE",
+          startsAt: new Date(Date.now() - 6 * HOUR_MS),
+          expiresAt: new Date(Date.now() + HOUR_MS),
+        },
+      });
+      await RaceResolutionJobV2.enqueue({
+        raceId,
+        userId: alice.userId,
+        dirtyEnvelope: {
+          reason: "STEP_SYNC",
+          dirtyUserIds: [alice.userId],
+          dirtyParticipantIds: [target.id],
+          powerupTypes: [],
+          priority: "COALESCE",
+        },
+      });
+      const before = await participantVersions(raceId);
+      const events = [];
+      assert.ok(await makeWorker({
+        dependencyClosureEnabled: true,
+        logger: { log(line) { try { events.push(JSON.parse(line)); } catch {} } },
+      }).processOne());
+      const committed = events.find((event) => event.event === "race_resolution_v2");
+      assert.equal(
+        committed?.resolutionPlan,
+        "STEP_SYNC_INCREMENTAL",
+        `${type}: ${JSON.stringify(events)}`
+      );
+      const after = await participantVersions(raceId);
+      assert.equal(
+        after.find((row) => row.userId === bob.userId).version,
+        before.find((row) => row.userId === bob.userId).version,
+        `${type} must not rewrite the other participant`
+      );
+    });
+  }
+
+  it("admits Rally Flag and Uprising source changes without using committed-step optimization", async () => {
     for (const type of ["RALLY_FLAG", "UPRISING"]) {
       const alice = await createUser(`${type} Alice`);
       const bob = await createUser(`${type} Bob`);
@@ -1290,7 +1510,7 @@ describe("5d — explicit debounce", () => {
       });
       assert.ok(await worker.processOne());
       const committed = events.find((event) => event.event === "race_resolution_v2");
-      assert.equal(committed?.resolutionPlan, "STEP_SYNC_INCREMENTAL", `${type}: ${JSON.stringify(events)}`);
+      assert.notEqual(committed?.resolutionPlan, "STEP_SYNC_COMMITTED", `${type}: ${JSON.stringify(events)}`);
       const after = await participantVersions(raceId);
       assert.equal(
         after.find((row) => row.userId === bob.userId).version,

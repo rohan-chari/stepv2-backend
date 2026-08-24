@@ -1,6 +1,8 @@
 const { describe, it, before, beforeEach } = require("node:test");
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
+process.env.RACE_QUEUE_V2_QUIET_PERIOD_MS = "0";
+process.env.RACE_RESOLVE_DEBOUNCE_MS = "0";
 const {
   getSharedServer,
   cleanDatabase,
@@ -27,12 +29,17 @@ const {
 
 const uuid = () => crypto.randomUUID();
 const { appSettings } = require("../../src/shared/config/appSettings");
+const { eventBus } = require("../../src/shared/events/eventBus");
 const {
   RaceResolutionJobV2,
 } = require("../../src/modules/races/models/raceResolutionJobV2");
+const {
+  buildRaceResolutionWorkerV2,
+} = require("../../src/modules/races/jobs/raceResolutionQueueV2");
 const bodyFor = (steps) => ({ date: "2026-07-17", steps, samples: [] });
 
 const HOUR_MS = 60 * 60 * 1000;
+const STEP_INTAKE_SEMANTICS = "CANONICAL_SOURCE_QUEUE_V1";
 
 async function activeRaceWith(userId, name) {
   const startedAt = new Date(Date.now() - 3 * HOUR_MS);
@@ -145,7 +152,7 @@ describe("POST /steps/sync-v2 (integration)", () => {
     );
   });
 
-  it("reason-aware sync atomically bumps the scoring token and enqueues bounded STEP_SYNC scope", async () => {
+  it("sync atomically bumps the scoring token and enqueues bounded STEP_INPUT_CHANGED scope", async () => {
     const { token, user } = await createTestUser();
     const raceId = await activeRaceWith(user.id, "Reason-aware sync race");
     await appSettings.setFlag("raceResolutionReasonAwareV1Enabled", true);
@@ -174,7 +181,7 @@ describe("POST /steps/sync-v2 (integration)", () => {
       where: { raceId_userId: { raceId, userId: user.id } },
       select: { id: true },
     });
-    assert.deepEqual(job.dirtyReasons, ["STEP_SYNC"]);
+    assert.deepEqual(job.dirtyReasons, ["STEP_INPUT_CHANGED"]);
     assert.deepEqual(job.dirtyParticipantIds, [participant.id]);
     assert.equal(job.dirtyPriority, "COALESCE");
   });
@@ -194,6 +201,7 @@ describe("POST /steps/sync-v2 (integration)", () => {
     assert.equal(json.uploaderReconciliation.state, "DEFERRED");
     assert.equal(json.uploaderReconciliation.resolvedRaceCount, 0); // no active races
     assert.equal(json.uploaderReconciliation.boxStateCurrent, false);
+    assert.equal(json.stepIntakeSemantics, STEP_INTAKE_SEMANTICS);
 
     const step = await prisma.step.findUnique({
       where: { userId_date: { userId: user.id, date: new Date("2026-07-17") } },
@@ -205,6 +213,77 @@ describe("POST /steps/sync-v2 (integration)", () => {
     });
     assert.equal(reservation.state, "COMPLETE");
     assert.equal(reservation.resolutionTimeZone, "America/New_York"); // default tz
+    assert.equal(
+      reservation.responseJson.stepIntakeSemantics,
+      STEP_INTAKE_SEMANTICS,
+      "the capability marker is part of the durable replay response"
+    );
+  });
+
+  it("classifies concurrent different-key creates under the intake lock", async () => {
+    const { token, user } = await createTestUser();
+    const keys = [uuid(), uuid()];
+    const recorded = [];
+    const updated = [];
+    eventBus.on("STEPS_RECORDED", (payload) => {
+      if (payload.userId === user.id) recorded.push(payload);
+    });
+    eventBus.on("STEPS_UPDATED", (payload) => {
+      if (payload.userId === user.id) updated.push(payload);
+    });
+
+    const responses = await Promise.all([
+      request(baseUrl, "POST", "/steps/sync-v2", {
+        token, headers: { "Idempotency-Key": keys[0] }, body: bodyFor(1200),
+      }),
+      request(baseUrl, "POST", "/steps/sync-v2", {
+        token, headers: { "Idempotency-Key": keys[1] }, body: bodyFor(1300),
+      }),
+    ]);
+    assert.deepEqual(responses.map((response) => response.status), [202, 202]);
+    assert.equal(recorded.length, 1, "only the locked creator emits STEPS_RECORDED");
+    assert.equal(updated.length, 1, "the serialized second intake emits STEPS_UPDATED");
+    const intents = await prisma.stepSyncRequest.findMany({
+      where: { userId: user.id, idempotencyKey: { in: keys } },
+      select: { dailyExisted: true },
+    });
+    assert.deepEqual(
+      intents.map((intent) => intent.dailyExisted).sort(),
+      [false, true],
+      "the durable classification comes from the serialized intake read"
+    );
+  });
+
+  it("a COMPLETE replay claims a durable event intent whose emission stamp is null", async () => {
+    const { token, user } = await createTestUser();
+    const key = uuid();
+    const recoveredEvents = [];
+    eventBus.on("STEPS_RECORDED", (payload) => {
+      if (payload.userId === user.id) recoveredEvents.push(payload);
+    });
+    const first = await request(baseUrl, "POST", "/steps/sync-v2", {
+      token, headers: { "Idempotency-Key": key }, body: bodyFor(1400),
+    });
+    assert.equal(first.status, 202);
+    recoveredEvents.length = 0;
+    await prisma.stepSyncRequest.update({
+      where: { userId_idempotencyKey: { userId: user.id, idempotencyKey: key } },
+      data: { eventsEmittedAt: null },
+    });
+
+    const replay = await request(baseUrl, "POST", "/steps/sync-v2", {
+      token, headers: { "Idempotency-Key": key }, body: bodyFor(1400),
+    });
+    assert.equal(replay.status, 202);
+    const reservation = await prisma.stepSyncRequest.findUniqueOrThrow({
+      where: { userId_idempotencyKey: { userId: user.id, idempotencyKey: key } },
+    });
+    assert.ok(reservation.eventsEmittedAt, "COMPLETE replay recovers the unclaimed intent");
+    const secondReplay = await request(baseUrl, "POST", "/steps/sync-v2", {
+      token, headers: { "Idempotency-Key": key }, body: bodyFor(1400),
+    });
+    assert.equal(secondReplay.status, 202);
+    assert.equal(recoveredEvents.length, 1, "the durable intent is claimed once");
   });
 
   it("with NO active races: enqueues nothing and returns a frozen-client-safe raceResolution with jobId null", async () => {
@@ -315,6 +394,129 @@ describe("POST /steps/sync-v2 (integration)", () => {
     }
   });
 
+  it("deferred zero-effect intake stays stale inline, then scores canonical source without STEP_SYNC_COMMITTED", async () => {
+    const { token, user } = await createTestUser();
+    const raceId = await activeRaceWith(user.id, "Deferred source regression");
+    await appSettings.setFlag("raceQueueV2ClaimingDisabled", false);
+    await appSettings.setFlag("raceResolutionReasonAwareV1Enabled", true);
+    await appSettings.setFlag("raceResolutionBulkWriteV1Enabled", false);
+    await appSettings.setFlag("raceResolutionPostTasksV1Enabled", false);
+    const end = new Date(Date.now() - HOUR_MS);
+    const start = new Date(end.getTime() - HOUR_MS);
+    const response = await request(baseUrl, "POST", "/steps/sync-v2", {
+      token,
+      headers: { "Idempotency-Key": uuid(), "X-Timezone": "UTC" },
+      body: {
+        date: new Date().toISOString().slice(0, 10),
+        steps: 2468,
+        samples: [{
+          periodStart: start.toISOString(),
+          periodEnd: end.toISOString(),
+          steps: 2468,
+          recordingMethod: "automatic",
+        }],
+      },
+    });
+    assert.equal(response.status, 202);
+
+    const before = await prisma.raceParticipant.findUniqueOrThrow({
+      where: { raceId_userId: { raceId, userId: user.id } },
+    });
+    assert.equal(before.totalSteps, 0, "intake must not reconcile participant inline");
+    const queued = await RaceResolutionJobV2.findByRaceId(raceId);
+    assert.deepEqual(queued.dirtyReasons, ["STEP_INPUT_CHANGED"]);
+
+    const events = [];
+    const worker = buildRaceResolutionWorkerV2({
+      bootAt: 0,
+      logger: {
+        log(line) { try { events.push(JSON.parse(line)); } catch {} },
+        error(line) { events.push({ error: String(line) }); },
+      },
+    });
+    assert.ok(await worker.processOne({ raceId }));
+    const after = await prisma.raceParticipant.findUniqueOrThrow({
+      where: { raceId_userId: { raceId, userId: user.id } },
+    });
+    assert.ok(after.totalSteps > 0, "worker must score the persisted source");
+    const committed = events.find((event) => event.event === "race_resolution_v2");
+    assert.notEqual(committed?.resolutionPlan, "STEP_SYNC_COMMITTED");
+  });
+
+  it("reason-only old-worker promotion survives a same-claim fingerprint retry without another intake", async () => {
+    const { user } = await createTestUser();
+    const raceId = await activeRaceWith(user.id, "Mixed worker promotion");
+    await appSettings.setFlag("raceQueueV2ClaimingDisabled", false);
+    await appSettings.setFlag("raceResolutionReasonAwareV1Enabled", true);
+    await appSettings.setFlag("raceResolutionBulkWriteV1Enabled", false);
+    await appSettings.setFlag("raceResolutionPostTasksV1Enabled", false);
+    const participant = await prisma.raceParticipant.findUniqueOrThrow({
+      where: { raceId_userId: { raceId, userId: user.id } },
+    });
+    const end = new Date(Date.now() - HOUR_MS);
+    const start = new Date(end.getTime() - HOUR_MS);
+    await prisma.stepSample.create({
+      data: {
+        userId: user.id,
+        periodStart: start,
+        periodEnd: end,
+        steps: 1357,
+        recordingMethod: "automatic",
+      },
+    });
+    await prisma.userScoringInputVersion.create({
+      data: {
+        userId: user.id,
+        generation: 2n,
+        sourceQueueSemanticsGeneration: 1n,
+      },
+    });
+    await RaceResolutionJobV2.enqueue({
+      raceId,
+      userId: user.id,
+      resolutionTimeZone: "UTC",
+      now: new Date(),
+      dirtyEnvelope: {
+        reason: "STEP_SYNC",
+        dirtyUserIds: [user.id],
+        dirtyParticipantIds: [participant.id],
+        powerupTypes: [],
+        priority: "COALESCE",
+      },
+    });
+
+    const events = [];
+    let bumpedDuringClaim = false;
+    const worker = buildRaceResolutionWorkerV2({
+      bootAt: 0,
+      async beforeWriteTransaction() {
+        if (bumpedDuringClaim) return;
+        bumpedDuringClaim = true;
+        await prisma.userScoringInputVersion.update({
+          where: { userId: user.id },
+          data: { generation: 3n },
+        });
+      },
+      logger: {
+        log(line) { try { events.push(JSON.parse(line)); } catch {} },
+        error(line) { events.push({ error: String(line) }); },
+      },
+    });
+    assert.ok(await worker.processOne({ raceId }));
+    const after = await prisma.raceParticipant.findUniqueOrThrow({
+      where: { id: participant.id },
+    });
+    assert.ok(after.totalSteps > 0);
+    const committed = events.find((event) => event.event === "race_resolution_v2");
+    assert.notEqual(committed?.resolutionPlan, "STEP_SYNC_COMMITTED");
+    assert.deepEqual(committed?.reasonClasses, ["STEP_INPUT_CHANGED"]);
+    assert.ok(
+      Number(committed?.closureFenceRejections || 0) +
+        Number(committed?.sourceInputFenceRejections || 0) >= 1,
+      JSON.stringify(events)
+    );
+  });
+
   it("same-key replay with equivalent input returns the stored response and does not bump the generation", async () => {
     const { token, user } = await createTestUser();
     const raceId = await activeRaceWith(user.id, "Replay race");
@@ -335,9 +537,46 @@ describe("POST /steps/sync-v2 (integration)", () => {
     assert.equal(replay.status, 202);
     const replayJson = await replay.json();
     assert.deepEqual(replayJson, first);
+    assert.equal(replayJson.stepIntakeSemantics, STEP_INTAKE_SEMANTICS);
 
     const [job] = await jobsForRace(raceId);
     assert.equal(job.generation, 1); // NOT incremented by a replay
+  });
+
+  it("a fresh-key scoring-equivalent upload neither bumps scoring nor queue generation once ownership is stamped", async () => {
+    const { token, user } = await createTestUser();
+    const raceId = await activeRaceWith(user.id, "Canonical noop race");
+    const first = await request(baseUrl, "POST", "/steps/sync-v2", {
+      token,
+      headers: { "Idempotency-Key": uuid() },
+      body: bodyFor(500),
+    });
+    assert.equal(first.status, 202);
+    const beforeJob = await RaceResolutionJobV2.findByRaceId(raceId);
+    const beforeVersion = await prisma.userScoringInputVersion.findUniqueOrThrow({
+      where: { userId: user.id },
+    });
+    assert.equal(
+      beforeVersion.sourceQueueSemanticsGeneration,
+      beforeVersion.generation
+    );
+
+    const second = await request(baseUrl, "POST", "/steps/sync-v2", {
+      token,
+      headers: { "Idempotency-Key": uuid() },
+      body: bodyFor(500),
+    });
+    assert.equal(second.status, 202);
+    const afterJob = await RaceResolutionJobV2.findByRaceId(raceId);
+    const afterVersion = await prisma.userScoringInputVersion.findUniqueOrThrow({
+      where: { userId: user.id },
+    });
+    assert.equal(afterJob.generation, beforeJob.generation);
+    assert.equal(afterVersion.generation, beforeVersion.generation);
+    assert.equal(
+      afterVersion.sourceQueueSemanticsGeneration,
+      afterVersion.generation
+    );
   });
 
   it("same key with different canonical input returns 409 IDEMPOTENCY_CONFLICT", async () => {

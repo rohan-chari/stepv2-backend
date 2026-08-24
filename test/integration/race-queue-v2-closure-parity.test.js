@@ -316,26 +316,24 @@ async function seedRace(name, userCount) {
   return { users, raceId };
 }
 
-// Reason-aware enqueue is what stamps STEP_SYNC on the job envelope
-// (recordStepSamples.js reads this flag). Without it every sync produces a
-// reasonless FULL envelope, the closure is never candidate-shaped, and every
-// scenario here would silently assert nothing. Armed only once the fixture's
-// own seeding traffic has drained, so the seed stays on the shipped path.
+// Source intake stamps STEP_INPUT_CHANGED on the job envelope. The reason is
+// deliberately distinct from already-committed STEP_SYNC so the worker always
+// derives the uploader from canonical source before admitting closure.
 async function armClosureFixture({ write = true } = {}) {
   await appSettings.setFlag("raceResolutionReasonAwareV1Enabled", true);
   return write;
 }
 
-// Drops the pending resolution job WITHOUT resolving it.
-//
-// Needed wherever a fixture must advance a participant's PERSISTED total
-// without a worker generation observing it — which is exactly the production
-// mechanism the Trail Mine escalation exists for: `reconcileUploaderRaces`
-// persists a syncing user's own row inline, outside the worker. Draining
-// instead would run a FULL resolution that detonates the mine before the
-// scenario begins; leaving the job queued would coalesce that user into the
-// next envelope's dirty set and put them INSIDE the closure.
-async function dropPendingJob(raceId) {
+// Models participant state already committed by the pre-queue uploader path
+// while preserving canonical samples for the next FULL computation. This is a
+// mixed-version fixture, not an assertion about the new public intake path:
+// current intake is queue-only, but STEP_SYNC still supports committed state
+// produced before/during a rolling deployment.
+async function modelPreviouslyCommittedUploader({ raceId, userId, totalSteps }) {
+  await prisma.raceParticipant.updateMany({
+    where: { raceId, userId },
+    data: { rawSteps: totalSteps, totalSteps },
+  });
   await prisma.$executeRawUnsafe(
     `DELETE FROM race_resolution_jobs_v2 WHERE race_id = $1`,
     raceId
@@ -375,7 +373,7 @@ async function runScenarioOnce({
   const job = await RaceResolutionJobV2.findByRaceId(raceId);
   assert.deepEqual(
     job.dirtyReasons,
-    ["STEP_SYNC"],
+    ["STEP_INPUT_CHANGED"],
     "the fixture must produce a closure-CANDIDATE envelope, else the scenario asserts nothing"
   );
 
@@ -825,20 +823,23 @@ describe("dependency closure — Trail Mine escalation", () => {
       raceId, owner: alice, positionSteps: 5000, aheadParticipantIds: [],
     });
 
-    // carol is NOT in alice's closure. She is advanced past the mine by the
-    // INLINE uploader reconcile on her own sync — the exact mechanism the spec
-    // names: recordSteps persists a syncing user's own total outside the
-    // worker, so a participant absent from this dirty set can have crossed a
-    // threshold since the last full run.
+    // carol is NOT in alice's closure. Her canonical source advances past the
+    // mine, and the persisted participant fixture models state committed by a
+    // pre-queue/mixed-version uploader path. She is intentionally absent from
+    // the next dirty set so the closure must detect the outside crosser.
     await armClosureFixture({ write: false });
     assert.equal((await postSamples(carol, [sampleAt(2, 12000)])).status, 200);
-    await dropPendingJob(raceId);
+    await modelPreviouslyCommittedUploader({
+      raceId,
+      userId: carol.userId,
+      totalSteps: 12000,
+    });
 
     const carolRow = await prisma.raceParticipant.findFirstOrThrow({
       where: { raceId, userId: carol.userId },
     });
     assert.ok(carolRow.totalSteps >= 5000,
-      "the inline reconcile must have persisted carol past the mine, else nothing escalates");
+      "the mixed-version fixture must persist carol past the mine, else nothing escalates");
     const mineBefore = await prisma.raceActiveEffect.findFirstOrThrow({
       where: { raceId, type: "TRAIL_MINE" },
     });
@@ -927,16 +928,25 @@ describe("dependency closure — Trail Mine escalation", () => {
       raceId, owner: dave, positionSteps: 1200, aheadParticipantIds: [],
     });
 
-    // BOTH cross the mine, via the inline reconcile, with carol the LOWER of
-    // the two. `candidates[0]` is the lowest-total crosser, so a closure that
-    // scored only {alice, bob} would detonate on bob — the wrong player — and
-    // then EXPIRE the mine, which is unrecoverable. Escalating and re-running
-    // FULL must pick carol.
+    // BOTH canonical sources cross the mine. Persisted participant fixtures
+    // model pre-queue/mixed-version committed uploader state, with carol the
+    // LOWER of the two. `candidates[0]` is the lowest-total crosser, so a
+    // closure that scored only {alice, bob} would detonate on bob — the wrong
+    // player — and then EXPIRE the mine, which is unrecoverable. Escalating
+    // and re-running FULL must pick carol.
     await armClosureFixture({ write: false });
     assert.equal((await postSamples(carol, [sampleAt(5, 1400)])).status, 200);
-    await dropPendingJob(raceId);
+    await modelPreviouslyCommittedUploader({
+      raceId,
+      userId: carol.userId,
+      totalSteps: 1400,
+    });
     assert.equal((await postSamples(bob, [sampleAt(5, 9000)])).status, 200);
-    await dropPendingJob(raceId);
+    await modelPreviouslyCommittedUploader({
+      raceId,
+      userId: bob.userId,
+      totalSteps: 9000,
+    });
 
     const mineStillActive = await prisma.raceActiveEffect.findFirstOrThrow({
       where: { raceId, type: "TRAIL_MINE" },

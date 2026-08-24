@@ -24,6 +24,14 @@ const CLOSURE_ELIGIBLE_REASON_SETS = Object.freeze([
   Object.freeze(["DISPLAY_REFRESH", "STEP_SYNC"]),
 ]);
 
+// Source-input work is deliberately separate from the committed STEP_SYNC
+// shortcut above. These sets may enter dependency-closure scoring, but can
+// never enter buildRaceResolutionStepSyncScope/STEP_SYNC_COMMITTED.
+const SOURCE_INPUT_CLOSURE_ELIGIBLE_REASON_SETS = Object.freeze([
+  Object.freeze(["STEP_INPUT_CHANGED"]),
+  Object.freeze(["DISPLAY_REFRESH", "STEP_INPUT_CHANGED"]),
+]);
+
 // The dirty-row ceiling for a step-sync envelope. Exported because the
 // dependency-closure planner gates on the SAME number: a second copy could
 // drift and let the closure admit an envelope this scope would refuse.
@@ -33,6 +41,16 @@ function isClosureEligibleReasonSet(reasons) {
   if (!Array.isArray(reasons) || reasons.length === 0) return false;
   const unique = [...new Set(reasons)].sort();
   return CLOSURE_ELIGIBLE_REASON_SETS.some(
+    (candidate) =>
+      candidate.length === unique.length &&
+      candidate.every((reason, index) => reason === unique[index])
+  );
+}
+
+function isSourceInputClosureEligibleReasonSet(reasons) {
+  if (!Array.isArray(reasons) || reasons.length === 0) return false;
+  const unique = [...new Set(reasons)].sort();
+  return SOURCE_INPUT_CLOSURE_ELIGIBLE_REASON_SETS.some(
     (candidate) =>
       candidate.length === unique.length &&
       candidate.every((reason, index) => reason === unique[index])
@@ -194,8 +212,10 @@ async function stepSyncScopeMatchesFence(scope, tx, raceId) {
 
 module.exports = {
   CLOSURE_ELIGIBLE_REASON_SETS,
+  SOURCE_INPUT_CLOSURE_ELIGIBLE_REASON_SETS,
   MAX_STEP_SYNC_DIRTY_PARTICIPANTS,
   isClosureEligibleReasonSet,
+  isSourceInputClosureEligibleReasonSet,
   buildRaceResolutionStepSyncScope,
   stepSyncScopeMatchesFence,
 };

@@ -214,6 +214,7 @@ async function buildRaceResolutionInputFingerprint({
   };
   return {
     digest: digestPayload(payload),
+    race: raceRow.race,
     participantCount: raceRow.participants.length,
     nextSampleBoundary,
     activeEffects,

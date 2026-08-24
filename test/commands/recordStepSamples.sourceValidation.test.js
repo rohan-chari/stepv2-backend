@@ -12,12 +12,10 @@ function makeDeps() {
   return {
     saved,
     deps: {
-      StepSample: {
-        async upsertBatch(userId, samples) {
-          saved.push(...samples.map((sample) => ({ userId, ...sample })));
-        },
+      stepInputIntake: async ({ userId, samples }) => {
+        saved.push(...samples.map((sample) => ({ userId, ...sample })));
       },
-      resolveRaceState: async () => {},
+      appSettings: { async getFlag() { return false; } },
     },
   };
 }

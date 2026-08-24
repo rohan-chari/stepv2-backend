@@ -88,20 +88,25 @@ function buildRollPowerup(dependencies = {}) {
     powerupStepInterval,
     displayName,
     powerupSlots,
+    tx: callerTx = null,
+    advisoryLockHeld = false,
+    pendingEvents: callerPendingEvents = null,
   }) {
     const maxSlots = powerupSlots || DEFAULT_POWERUP_SLOTS;
     const stepsForThreshold = effectiveSteps != null ? effectiveSteps : currentSteps;
     const results = [];
-    const pendingEvents = [];
+    const pendingEvents = callerPendingEvents || [];
 
-    await db.$transaction(async (tx) => {
+    const run = async (tx) => {
       // Serialize concurrent rolls for the same participant. Released at COMMIT/ROLLBACK.
       // Doesn't block other participants or other writers of race_participants.
       // Use $executeRaw — pg_advisory_xact_lock returns Postgres `void` and the
       // pg driver adapter can't deserialize that via $queryRaw (P2010).
-      await tx.$executeRaw(
-        Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${participantId})::bigint)`
-      );
+      if (!advisoryLockHeld) {
+        await tx.$executeRaw(
+          Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${participantId})::bigint)`
+        );
+      }
 
       // Re-read threshold inside the lock — caller's value is stale under contention.
       const fresh = await tx.raceParticipant.findUnique({
@@ -244,10 +249,18 @@ function buildRollPowerup(dependencies = {}) {
           },
         });
       }
-    });
+    };
 
-    for (const payload of pendingEvents) {
-      events.emit("POWERUP_EARNED", payload);
+    if (callerTx) {
+      await run(callerTx);
+    } else {
+      await db.$transaction(run);
+    }
+
+    if (!callerTx) {
+      for (const payload of pendingEvents) {
+        events.emit("POWERUP_EARNED", payload);
+      }
     }
 
     return results;

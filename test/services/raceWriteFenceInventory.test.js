@@ -148,6 +148,7 @@ const EXPECTED_PARTICIPANT_MUTATIONS = {
   "src/modules/races/services/fundedExposure.js": ["raceParticipant.update", "raceParticipant.updateMany", "tournamentParticipant.update", "tournamentParticipant.updateMany"],
   "src/modules/races/services/highMultiplierAlert.js": ["raceParticipant.updateMany", "raceParticipant.updateMany"],
   "src/modules/races/services/legacyBuyInRemediation.js": ["raceParticipant.update", "raceParticipant.updateMany"],
+  "src/modules/races/services/racePowerupStateSync.js": ["raceParticipant.update", "raceParticipant.update"],
   "src/modules/races/services/raceResolutionDeliveryIntents.js": ["raceParticipant.updateMany"],
   "src/modules/races/services/seededRaceBuckets.js": ["raceParticipant.createMany", "raceParticipant.delete"],
   "src/modules/tournaments/commands/cancelTournament.js": ["tournamentParticipant.update"],
@@ -384,9 +385,21 @@ const NON_MEMBERSHIP_PARTICIPANT_WRITERS = new Set([
   "src/modules/races/services/fundedExposure.js",
   "src/modules/races/services/highMultiplierAlert.js",
   "src/modules/races/services/legacyBuyInRemediation.js",
+  "src/modules/races/services/racePowerupStateSync.js",
   "src/modules/races/services/raceResolutionDeliveryIntents.js",
   "src/modules/tournaments/commands/cancelTournament.js",
 ]);
+
+test("worker-owned box scalar writes require caller tx after advisory locks and before job success", () => {
+  const worker = source("src/modules/races/jobs/raceResolutionQueueV2.js");
+  const advisory = worker.indexOf("pg_advisory_xact_lock");
+  const boxSync = worker.indexOf("advisoryLockHeld: true");
+  const success = worker.indexOf('"recordSuccess"', boxSync);
+  assert.ok(advisory >= 0 && boxSync > advisory && success > boxSync);
+  const service = source("src/modules/races/services/racePowerupStateSync.js");
+  assert.match(service, /tx = null/);
+  assert.match(service, /await tx\.raceParticipant\.update/);
+});
 
 test("every inventoried mutation is explicitly classified and membership writers name their lock owner", () => {
   const classified = new Set([

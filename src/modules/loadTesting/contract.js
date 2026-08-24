@@ -33,8 +33,8 @@ function buildProfiles() {
     entry("GET", "/auth/me", { fixturePrerequisites: ["synthetic-user"], weight: 3 }),
     entry("GET", "/steps", { query: "date={{today}}", fixturePrerequisites: ["synthetic-user"], weight: 4 }),
     entry("POST", "/steps/sync-v2", { fixturePrerequisites: ["synthetic-user", "active-race"], headers: { "X-Step-Sync-Intent": "home-pull" }, payloadShape: { steps: "integer", samples: "bounded-array", clientRequestId: "deterministic" }, allowedStatuses: [202, 400, 409, 429, 503], weight: 4, readOnly: false, disposableWrite: true, persona: "current", queue: true }),
-    entry("POST", "/steps", { fixturePrerequisites: ["synthetic-user", "active-race"], headers: { "X-App-Version": "1.1.0" }, payloadShape: { steps: "integer", date: "YYYY-MM-DD", skipRaceResolution: true }, allowedStatuses: [200, 400, 429, 500], weight: 2, readOnly: false, disposableWrite: true, persona: "legacy", queue: true }),
-    entry("POST", "/steps/samples", { fixturePrerequisites: ["synthetic-user"], headers: { "X-App-Version": "1.1.0" }, payloadShape: { samples: "bounded-realistic-window" }, allowedStatuses: [200, 400, 429, 500], weight: 2, readOnly: false, disposableWrite: true, persona: "legacy" }),
+    entry("POST", "/steps", { fixturePrerequisites: ["synthetic-user", "active-race"], headers: { "X-App-Version": "1.1.0" }, payloadShape: { steps: "integer", date: "YYYY-MM-DD", skipRaceResolution: true }, allowedStatuses: [200, 400, 429], weight: 2, readOnly: false, disposableWrite: true, persona: "legacy", queue: true }),
+    entry("POST", "/steps/samples", { fixturePrerequisites: ["synthetic-user"], headers: { "X-App-Version": "1.1.0" }, payloadShape: { samples: "bounded-realistic-window" }, allowedStatuses: [200, 400, 429], weight: 2, readOnly: false, disposableWrite: true, persona: "legacy" }),
   ];
   const races = [
     entry("GET", "/races/discovery-summary", { fixturePrerequisites: ["synthetic-user"], weight: 9 }),
@@ -62,13 +62,21 @@ function buildProfiles() {
   ];
   const contention = [
     entry("POST", "/steps/sync-v2", { fixturePrerequisites: ["synthetic-user", "active-race"], payloadShape: { steps: "integer", samples: "bounded-array", clientRequestId: "deterministic" }, allowedStatuses: [202, 400, 409, 429, 503], weight: 5, readOnly: false, disposableWrite: true, persona: "current", queue: true }),
-    entry("POST", "/steps", { fixturePrerequisites: ["synthetic-user", "active-race"], payloadShape: { steps: "integer", date: "YYYY-MM-DD", skipRaceResolution: true }, allowedStatuses: [200, 400, 429, 500], weight: 3, readOnly: false, disposableWrite: true, persona: "legacy", queue: true }),
-    entry("POST", "/steps/samples", { fixturePrerequisites: ["synthetic-user"], payloadShape: { samples: "bounded-realistic-window" }, allowedStatuses: [200, 400, 429, 500], weight: 2, readOnly: false, disposableWrite: true, persona: "legacy" }),
+    entry("POST", "/steps", { fixturePrerequisites: ["synthetic-user", "active-race"], payloadShape: { steps: "integer", date: "YYYY-MM-DD", skipRaceResolution: true }, allowedStatuses: [200, 400, 429], weight: 3, readOnly: false, disposableWrite: true, persona: "legacy", queue: true }),
+    entry("POST", "/steps/samples", { fixturePrerequisites: ["synthetic-user"], payloadShape: { samples: "bounded-realistic-window" }, allowedStatuses: [200, 400, 429], weight: 2, readOnly: false, disposableWrite: true, persona: "legacy" }),
   ];
   const profile = (name, entries, limits = {}) => Object.freeze({
     schema: PROFILE_SCHEMA,
     version: "1.0.0",
     name,
+    fixtureRaces: limits.fixtureRaces || 1,
+    ambiguousRetryEvery: limits.ambiguousRetryEvery || null,
+    defaults: Object.freeze({
+      users: limits.defaultUsers || (name === "smoke" ? 1 : 25),
+      duration: limits.defaultDuration || "300s",
+      arrivalRatePerSecond: limits.defaultArrivalRatePerSecond || 10,
+      concurrency: limits.defaultConcurrency || null,
+    }),
     limits: Object.freeze({ maxUsers: limits.maxUsers || 5000, maxDurationSeconds: limits.maxDurationSeconds || 3600, maxArrivalRatePerSecond: limits.maxArrivalRatePerSecond || 500 }),
     entries: Object.freeze(entries),
     queue: Object.freeze({ arrivalRatePerSecond: 2, payloadDistribution: "1-8 samples per sync", retrySameKey: "one deterministic duplicate only", workerServiceRatePerSecond: 2, lagThresholdMs: 30000, drainCriteria: "queued=0 and running=0", ...(limits.queue || {}) }),
@@ -80,11 +88,49 @@ function buildProfiles() {
     "race-details": profile("race-details", details),
     "full-app": profile("full-app", [health, ...home, ...races, ...details, ...queue]),
     contention: profile("contention", contention, { maxUsers: 100, maxDurationSeconds: 600, maxArrivalRatePerSecond: 100, queue: { workerServiceRatePerSecond: 5 } }),
+    "frozen-step-sync-burst": profile(
+      "frozen-step-sync-burst",
+      [
+        entry("POST", "/steps", { fixturePrerequisites: ["synthetic-user", "active-race"], headers: { "X-App-Version": "1.1.0" }, payloadShape: { steps: "integer", date: "YYYY-MM-DD", skipRaceResolution: true }, allowedStatuses: [200, 400, 429], weight: 1, readOnly: false, disposableWrite: true, persona: "legacy", queue: true }),
+        entry("POST", "/steps/samples", { fixturePrerequisites: ["synthetic-user", "active-race"], headers: { "X-App-Version": "1.1.0" }, payloadShape: { samples: "bounded-realistic-window" }, allowedStatuses: [200, 400, 429], weight: 1, readOnly: false, disposableWrite: true, persona: "legacy", queue: true }),
+      ],
+      {
+        fixtureRaces: 3,
+        defaultUsers: 100,
+        defaultDuration: "60s",
+        defaultArrivalRatePerSecond: 15.2,
+        defaultConcurrency: 100,
+        maxUsers: 500,
+        maxDurationSeconds: 120,
+        maxArrivalRatePerSecond: 50,
+        queue: { payloadDistribution: "456 paired legacy cycles in one minute", workerServiceRatePerSecond: 5 },
+      }
+    ),
+    "current-step-sync-burst": profile(
+      "current-step-sync-burst",
+      [
+        entry("POST", "/steps/sync-v2", { fixturePrerequisites: ["synthetic-user", "active-race"], payloadShape: { steps: "integer", samples: "bounded-array", clientRequestId: "deterministic" }, allowedStatuses: [202, 400, 409, 429, 503], weight: 1, readOnly: false, disposableWrite: true, persona: "current", queue: true }),
+      ],
+      {
+        fixtureRaces: 3,
+        ambiguousRetryEvery: 20,
+        defaultUsers: 100,
+        defaultDuration: "60s",
+        // 480 total writes = approximately 456 logical cycles plus 5% exact
+        // same-key/body ambiguous replays.
+        defaultArrivalRatePerSecond: 8,
+        defaultConcurrency: 100,
+        maxUsers: 500,
+        maxDurationSeconds: 120,
+        maxArrivalRatePerSecond: 50,
+        queue: { retrySameKey: "every twentieth request exactly replays the previous same-user key/body", workerServiceRatePerSecond: 5 },
+      }
+    ),
   };
 }
 
 function validateProfileRegistry(registry = PROFILES) {
-  const names = ["smoke", "home", "races", "race-details", "full-app", "contention"];
+  const names = ["smoke", "home", "races", "race-details", "full-app", "contention", "frozen-step-sync-burst", "current-step-sync-burst"];
   for (const name of names) {
     const profile = registry[name];
     if (!profile || profile.schema !== PROFILE_SCHEMA || profile.version !== "1.0.0" || profile.name !== name || !profile.entries.length) throw new Error(`invalid load profile: ${name}`);
@@ -99,8 +145,8 @@ function validateProfileRegistry(registry = PROFILES) {
   return true;
 }
 
-function parseDuration(value) {
-  const match = String(value ?? "300s").trim().match(/^(\d+(?:\.\d+)?)(s|m|h)$/i);
+function parseDuration(value, fallback = "300s") {
+  const match = String(value ?? fallback).trim().match(/^(\d+(?:\.\d+)?)(s|m|h)$/i);
   if (!match) throw new Error("duration must use Ns, Nm, or Nh");
   const seconds = Number(match[1]) * ({ s: 1, m: 60, h: 3600 }[match[2].toLowerCase()]);
   if (!Number.isFinite(seconds) || seconds < 1 || seconds > 3600) throw new Error("duration must be between 1 second and 1 hour");
@@ -117,13 +163,13 @@ function parseLoadParameters(options = {}) {
   const profile = String(options.profile || "");
   if (!PROFILES[profile]) throw new Error(`unknown profile: ${profile || "(missing)"}`);
   const config = PROFILES[profile];
-  const users = boundedInt(options.users, "users", 1, config.limits.maxUsers, profile === "smoke" ? 1 : 25);
-  const durationSeconds = parseDuration(options.duration);
+  const users = boundedInt(options.users, "users", 1, config.limits.maxUsers, config.defaults.users);
+  const durationSeconds = parseDuration(options.duration, config.defaults.duration);
   if (durationSeconds > config.limits.maxDurationSeconds) throw new Error(`duration exceeds ${profile} profile limit`);
-  const arrivalRatePerSecond = Number(options.arrivalRate === undefined ? 10 : options.arrivalRate);
+  const arrivalRatePerSecond = Number(options.arrivalRate === undefined ? config.defaults.arrivalRatePerSecond : options.arrivalRate);
   if (!Number.isFinite(arrivalRatePerSecond) || arrivalRatePerSecond <= 0 || arrivalRatePerSecond > config.limits.maxArrivalRatePerSecond) throw new Error(`arrivalRate must be greater than 0 and at most ${config.limits.maxArrivalRatePerSecond}`);
   const timeoutMs = boundedInt(options.timeoutMs, "timeoutMs", 100, 30000, 5000);
-  const concurrency = boundedInt(options.concurrency, "concurrency", 1, Math.min(1000, config.limits.maxUsers), Math.min(users, 25));
+  const concurrency = boundedInt(options.concurrency, "concurrency", 1, Math.min(1000, config.limits.maxUsers), config.defaults.concurrency || Math.min(users, 25));
   return { profile, users, arrivalRatePerSecond, durationSeconds, timeoutMs, concurrency };
 }
 

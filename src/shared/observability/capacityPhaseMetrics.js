@@ -65,6 +65,10 @@ function safePoolPressure(readPressure) {
 
 function sensitiveMetricKey(key) {
   const normalized = String(key || "").toLowerCase();
+  // This exact bounded enum is an aggregate intake classification, not a
+  // HealthKit/source identity. Keep the broader `source*` protection below for
+  // source names, IDs, devices, and payload-derived values.
+  if (normalized === "sourceoutcome") return false;
   return normalized.includes("token") ||
     normalized.includes("body") ||
     normalized.includes("bodies") ||

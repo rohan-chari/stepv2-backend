@@ -3,34 +3,18 @@ const test = require("node:test");
 
 const { buildRecordStepSamples, StepSampleError } = require("../../src/modules/steps/commands/recordStepSamples");
 
-test("reason-aware samples reconcile before enqueueing a claimable STEP_SYNC", async () => {
+test("samples delegates one atomic STEP_INPUT_CHANGED intake and never reconciles inline", async () => {
   const calls = [];
-  let reconcileOptions;
+  let intakeInput;
   const record = buildRecordStepSamples({
-    StepSample: {
-      async reconcileBatch(_userId, _samples, _now, options) {
-        reconcileOptions = options;
-        calls.push("samples");
-      },
-    },
+    stepInputIntake: async (input) => { intakeInput = input; calls.push("intake"); },
     appSettings: {
       async getFlag(key) {
         return key === "raceResolutionReasonAwareV1Enabled";
       },
     },
-    reconcileUploaderRaces: async () => {
-      calls.push("reconcile");
-      return {
-        reconciledRaces: [{ raceId: "race-1", participantId: "participant-1" }],
-      };
-    },
-    enqueueRaceResolutionForUser: async (payload) => {
-      calls.push("enqueue");
-      assert.deepEqual(payload.reconciledRaces, [
-        { raceId: "race-1", participantId: "participant-1" },
-      ]);
-      return [];
-    },
+    reconcileUploaderRaces: async () => calls.push("inline-reconcile"),
+    resolveRaceState: async () => calls.push("inline-resolve"),
   });
 
   await record({
@@ -44,8 +28,9 @@ test("reason-aware samples reconcile before enqueueing a claimable STEP_SYNC", a
     }],
   });
 
-  assert.deepEqual(calls, ["samples", "reconcile", "enqueue"]);
-  assert.equal(reconcileOptions.lockScoringInput, true);
+  assert.deepEqual(calls, ["intake"]);
+  assert.equal(intakeInput.endpoint, "samples");
+  assert.equal(intakeInput.samples.length, 1);
 });
 
 function makeDeps() {
@@ -54,12 +39,10 @@ function makeDeps() {
   return {
     saved,
     deps: {
-      StepSample: {
-        async upsertBatch(userId, samples) {
-          saved.push(...samples.map((s) => ({ userId, ...s })));
-        },
+      stepInputIntake: async ({ userId, samples }) => {
+        saved.push(...samples.map((s) => ({ userId, ...s })));
       },
-      resolveRaceState: async () => {},
+      appSettings: { async getFlag() { return false; } },
     },
   };
 }
@@ -182,7 +165,7 @@ test("rejects sample missing periodStart", async () => {
   );
 });
 
-test("resolves active race state after saving samples", async () => {
+test("does not resolve active race state inline after saving samples", async () => {
   const ctx = makeDeps();
   let resolved = null;
   const record = buildRecordStepSamples({
@@ -203,5 +186,5 @@ test("resolves active race state after saving samples", async () => {
     ],
   });
 
-  assert.deepEqual(resolved, { userId: "user-1", timeZone: undefined });
+  assert.equal(resolved, null);
 });

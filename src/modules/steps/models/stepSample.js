@@ -68,7 +68,7 @@ const StepSample = {
   },
 
   // Same reconciliation, run against a caller-provided transaction client so
-  // sync-v2's Transaction A can persist steps, samples, and the idempotency
+  // sync-v2's canonical transaction can persist steps, samples, and idempotency
   // reservation atomically.
   async reconcileBatchOn(client, userId, samples, nowMs = Date.now(), {
     noopSuppression = false,

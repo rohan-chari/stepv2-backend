@@ -2576,13 +2576,17 @@ model StepSyncRequest {
   resolutionTimeZone String               @map("resolution_time_zone") @db.VarChar(255)
   state              StepSyncRequestState @default(PROCESSING)
   responseJson       Json?                @map("response_json")
-  // Non-null while an owner is performing the uploader reconciliation between
-  // Transaction A and B; an expired lease is reclaimable for idempotent recovery.
+  // Non-null while an owner is performing canonical source intake; an expired
+  // lease is reclaimable for idempotent recovery.
   leaseExpiresAt     DateTime?            @map("lease_expires_at")
   // Set exactly once, under a conditional `eventsEmittedAt IS NULL` claim, so a
   // replay/recovery can never re-emit STEPS_RECORDED/STEPS_UPDATED.
   eventsEmittedAt    DateTime?            @map("events_emitted_at")
-  // Transaction A's crash-safe no-op classification. Null is the mixed-version
+  // Locked classification captured by canonical intake. Together with a null
+  // eventsEmittedAt this is the durable STEPS_* event intent a COMPLETE replay
+  // can safely claim after a process crash between commit and after-commit work.
+  dailyExisted       Boolean?             @map("daily_existed")
+  // Canonical intake's crash-safe no-op classification. Null is the mixed-version
   // fail-closed value and always means "enqueue".
   scoringChanged     Boolean?             @map("scoring_changed")
   createdAt          DateTime             @default(now()) @map("created_at")
@@ -2713,11 +2717,12 @@ model RaceResolutionJobV2 {
 }
 
 model UserScoringInputVersion {
-  userId               String    @id @map("user_id")
-  generation           BigInt    @default(1)
-  scoringWatermark     String?   @map("scoring_watermark") @db.Char(64)
-  nextSampleBoundaryAt DateTime? @map("next_sample_boundary_at")
-  updatedAt            DateTime  @updatedAt @map("updated_at")
+  userId                         String    @id @map("user_id")
+  generation                     BigInt    @default(1)
+  sourceQueueSemanticsGeneration BigInt?   @map("source_queue_semantics_generation")
+  scoringWatermark               String?   @map("scoring_watermark") @db.Char(64)
+  nextSampleBoundaryAt           DateTime? @map("next_sample_boundary_at")
+  updatedAt                      DateTime  @updatedAt @map("updated_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 

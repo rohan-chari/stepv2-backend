@@ -4,7 +4,7 @@ require("dotenv").config();
 
 const fs = require("node:fs");
 const path = require("node:path");
-const { spawn } = require("node:child_process");
+const { execFileSync, spawn } = require("node:child_process");
 const { parseLoadParameters } = require("../src/modules/loadTesting/contract");
 const { runLoad } = require("../src/modules/loadTesting/runner");
 const { preflight: capacityPreflight } = require("../src/modules/loadTesting/lifecycle");
@@ -58,6 +58,25 @@ function applyProvider(config, configPathValue) {
     const password = encodeURIComponent(process.env.CAPACITY_DB_PASSWORD);
     process.env.DATABASE_URL = `postgresql://${user}:${password}@127.0.0.1:${config.db_host_port || 55433}/${config.db_name || "steps_tracker_capacity"}`;
   }
+}
+
+function limaTelemetryReader(config) {
+  if (config.provider !== "lima") return null;
+  const instance = String(config.lima_instance || "");
+  const container = String(config.backend_container || "step-capacity-backend");
+  if (!/^[a-zA-Z0-9._-]+$/.test(instance) || !/^[a-zA-Z0-9._-]+$/.test(container)) {
+    throw new Error("capacity telemetry requires safe Lima instance/container names");
+  }
+  return async ({ startedAt }) => {
+    const raw = execFileSync("limactl", [
+      "shell", instance, "--", "docker", "logs", "--since", startedAt,
+      container,
+    ], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+    return raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+      .flatMap((line) => {
+        try { return [JSON.parse(line)]; } catch { return []; }
+      });
+  };
 }
 
 async function main() {
@@ -119,12 +138,14 @@ async function main() {
     timeoutMs: value("timeout_ms"),
     concurrency: value("concurrency"),
     runId: value("run_id"),
+    capacityRepeat: value("repeat", "1"),
     capacityStateDirectory: value("capacity_state_dir", config.directory || process.env.CAPACITY_STATE_DIR),
     confirmCapacityVm: args.confirm_capacity_vm === true || args.dry_run !== true,
     dryRun: args.dry_run === true,
     prisma,
     outputDir,
     signal: controller.signal,
+    readCapacityTelemetry: limaTelemetryReader(config),
   });
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   } finally {

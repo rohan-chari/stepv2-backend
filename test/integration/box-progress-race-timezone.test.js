@@ -8,15 +8,18 @@ const {
   parseDateString,
   zonedDateTimeToUtc,
 } = require("../../src/shared/time/week");
+const {
+  buildRaceResolutionWorkerV2,
+} = require("../../src/modules/races/jobs/raceResolutionQueueV2");
 
 // Regression test for the box-progress TIMEZONE SPLIT incident ("summer
 // solstice", Jul 2026: countdown pegged flat at one interval while mystery
 // boxes kept arriving).
 //
 // A race with a persisted `timezone` must bucket box progress in THAT timezone
-// on every path. The bug: the live step-sync path (recordSteps /
-// recordStepSamples -> resolveRaceState) reads races via Race.findActiveForUser,
-// whose lean select omitted `timezone`. raceTimeZone(race, "UTC") then fell back
+// on every path. The bug: the canonical queue worker reads the active race
+// projection used for scoring and box consequences. When that projection
+// omitted `timezone`, raceTimeZone(race, "UTC") fell back
 // to UTC, so the sync path computed box-effective steps with UTC day-bucketing
 // while the display path (getRaceProgress -> findById, which includes
 // `timezone`) bucketed in the race tz.
@@ -161,9 +164,8 @@ describe("race with persisted timezone buckets box progress in that tz on the st
       },
     });
 
-    // ONE live sync (a tiny fresh sample), exercising recordStepSamples ->
-    // resolveRaceState -> syncRacePowerupState — the exact path that minted off
-    // the wrong basis in the incident. Device tz header matches the race tz.
+    // ONE live sync (a tiny fresh sample), then the canonical queue worker that
+    // owns both score and durable box consequences. Device tz matches race tz.
     const syncRes = await request(server.baseUrl, "POST", "/steps/samples", {
       body: {
         samples: [
@@ -181,6 +183,12 @@ describe("race with persisted timezone buckets box progress in that tz on the st
       syncRes.status >= 200 && syncRes.status < 300,
       `step sync failed: ${syncRes.status}`
     );
+    assert.equal(
+      await prisma.racePowerup.count({ where: { raceId, userId: walker.userId } }),
+      0,
+      "the HTTP intake must not mint a box inline"
+    );
+    assert.ok(await buildRaceResolutionWorkerV2({ bootAt: 0 }).processRace({ raceId }));
 
     // Race-tz box basis is 3000 + 120 = 3120: exactly ONE milestone crossed.
     // The bug computes a UTC basis of 6120 and mints 2000/4000/6000.

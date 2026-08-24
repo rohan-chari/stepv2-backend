@@ -24,6 +24,7 @@ Object.assign(module.exports, require("./queries/getStepMilestonesToday"));
 Object.assign(module.exports, require("./commands/recordSteps"));
 Object.assign(module.exports, require("./commands/recordStepSamples"));
 Object.assign(module.exports, require("./commands/recordStepSyncV2"));
+Object.assign(module.exports, require("./services/stepInputIntake"));
 Object.assign(module.exports, require("./commands/claimStepMilestone"));
 
 Object.assign(module.exports, require("./jobs/globalStepEventScheduler"));

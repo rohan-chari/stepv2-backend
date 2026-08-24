@@ -123,6 +123,7 @@ function startBackend(settings) {
     `-e REDIS_URL=${JSON.stringify(`redis://:${encodeURIComponent(redisPassword())}@127.0.0.1:6379/0`)}`,
     `-e CACHE_ENV_PREFIX=${JSON.stringify(`capacity:${settings.run_id}:`)}`,
     `-e DB_POOL_MAX=20`,
+    `-e PRISMA_QUERY_EVENTS_ENABLED=true`,
     `-e CAPACITY_AUTH_SECRET=${JSON.stringify(required(process.env.CAPACITY_AUTH_SECRET, "CAPACITY_AUTH_SECRET"))}`,
     `-e SESSION_TOKEN_SECRET=${JSON.stringify(required(process.env.CAPACITY_AUTH_SECRET, "CAPACITY_AUTH_SECRET"))}`,
     `-e PORT=3000`, `-e NODE_ENV=production`,

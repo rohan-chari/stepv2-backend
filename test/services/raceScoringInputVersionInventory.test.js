@@ -13,12 +13,12 @@ test("all step/sample mutation owners name the scoring-input token seam", () => 
   for (const file of [
     "src/modules/steps/models/steps.js",
     "src/modules/steps/models/stepSample.js",
-    "src/modules/steps/commands/recordStepSyncV2.js",
+    "src/modules/steps/services/stepInputIntake.js",
     "src/modules/steps/jobs/stepSampleRetention.js",
   ]) {
     assert.match(
       read(file),
-      /bumpScoringInputVersion|bumpManyScoringInputVersions/,
+      /bumpScoringInputVersion|bumpManyScoringInputVersions|persistScoringInputState/,
       `${file} has scoring-source writes and must bump tokens atomically`
     );
   }

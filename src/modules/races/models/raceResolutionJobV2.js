@@ -26,6 +26,8 @@ const DEFAULT_DEBOUNCE_MS = 5000;
 const DEFAULT_RECOVERY_STALE_MS = 60 * 60 * 1000;
 const {
   normalizeDirtyEnvelope,
+  DIRTY_REASONS,
+  POWERUP_SCOPE_BY_TYPE,
 } = require("../services/raceResolutionReasonRegistry");
 
 // §5a item 3: the work cap is an explicit rule, not an emergent property.
@@ -43,6 +45,44 @@ function newLeaseToken() {
 
 function normalizeQueuePriority(value) {
   return QUEUE_PRIORITIES.includes(value) ? value : "LIVE";
+}
+
+function mergeClaimDirty(locked, promotedProcessingReasons = null) {
+  const stable = (left, right, cap) => {
+    const values = [...(Array.isArray(left) ? left : []), ...(Array.isArray(right) ? right : [])];
+    if (values.some((value) => typeof value !== "string" || !value)) return null;
+    const merged = [...new Set(values)];
+    return merged.length <= cap ? merged : null;
+  };
+  let processingReasons = stable(
+    locked.processingDirtyReasons,
+    promotedProcessingReasons,
+    DIRTY_REASONS.size
+  );
+  if (processingReasons?.includes("STEP_INPUT_CHANGED")) {
+    processingReasons = processingReasons.filter((reason) => reason !== "STEP_SYNC");
+  }
+  const reasons = stable(processingReasons, locked.dirtyReasons, DIRTY_REASONS.size);
+  const dirtyUserIds = stable(locked.processingTriggeredByUserIds, locked.triggeredByUserIds, 1000);
+  const dirtyParticipantIds = stable(locked.processingDirtyParticipantIds, locked.dirtyParticipantIds, 1000);
+  const powerupTypes = stable(locked.processingDirtyPowerupTypes, locked.dirtyPowerupTypes, 64);
+  const invalid = !reasons || reasons.length === 0 ||
+    reasons.includes("FULL") || reasons.some((reason) => !DIRTY_REASONS.has(reason)) ||
+    !dirtyUserIds || !dirtyParticipantIds || !powerupTypes ||
+    powerupTypes.some((type) => !POWERUP_SCOPE_BY_TYPE[type]);
+  if (invalid) {
+    return {
+      reasons: reasons?.includes("EFFECT_BOUNDARY")
+        ? ["FULL", "EFFECT_BOUNDARY"]
+        : ["FULL"],
+      dirtyUserIds: [], dirtyParticipantIds: [], powerupTypes: [], priority: "IMMEDIATE",
+    };
+  }
+  return {
+    reasons, dirtyUserIds, dirtyParticipantIds, powerupTypes,
+    priority: locked.processingDirtyPriority === "IMMEDIATE" ||
+      locked.dirtyPriority === "IMMEDIATE" ? "IMMEDIATE" : "COALESCE",
+  };
 }
 
 // Postgres returns snake_case from $queryRaw unless aliased; every raw read
@@ -361,13 +401,13 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
           ),
           dirty_reasons = CASE
             WHEN jsonb_typeof(race_resolution_jobs_v2.dirty_reasons) IS DISTINCT FROM 'array'
-              OR NOT race_resolution_jobs_v2.dirty_reasons <@ '["DISPLAY_REFRESH","STEP_SYNC","POWERUP_MUTATION","BOX_OPEN","JOIN_LEAVE_KICK","FORFEIT_TEAM","RACE_START","EFFECT_BOUNDARY","GLOBAL_EVENT_BOUNDARY","RECOVERY","DAILY_MOVER","FULL"]'::jsonb
+              OR NOT race_resolution_jobs_v2.dirty_reasons <@ '["DISPLAY_REFRESH","STEP_SYNC","STEP_INPUT_CHANGED","POWERUP_MUTATION","BOX_OPEN","JOIN_LEAVE_KICK","FORFEIT_TEAM","RACE_START","EFFECT_BOUNDARY","GLOBAL_EVENT_BOUNDARY","RECOVERY","DAILY_MOVER","FULL"]'::jsonb
               OR jsonb_typeof(race_resolution_jobs_v2.dirty_participant_ids) IS DISTINCT FROM 'array'
               OR jsonb_path_exists(race_resolution_jobs_v2.dirty_participant_ids, '$[*] ? (@.type() != "string" || @ == "")')
               OR jsonb_typeof(race_resolution_jobs_v2.dirty_powerup_types) IS DISTINCT FROM 'array'
               OR jsonb_path_exists(race_resolution_jobs_v2.dirty_powerup_types, '$[*] ? (@.type() != "string" || @ == "")')
               OR (race_resolution_jobs_v2.dirty_reasons = '[]'::jsonb
-                  AND race_resolution_jobs_v2.state <> 'succeeded')
+                  AND race_resolution_jobs_v2.state NOT IN ('succeeded', 'running'))
               OR race_resolution_jobs_v2.dirty_reasons ? 'FULL'
               OR EXCLUDED.dirty_reasons ? 'FULL'
               OR (jsonb_array_length(race_resolution_jobs_v2.dirty_participant_ids || EXCLUDED.dirty_participant_ids) > 1000
@@ -397,7 +437,7 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
           END,
           dirty_participant_ids = CASE
             WHEN jsonb_typeof(race_resolution_jobs_v2.dirty_reasons) IS DISTINCT FROM 'array'
-              OR NOT race_resolution_jobs_v2.dirty_reasons <@ '["DISPLAY_REFRESH","STEP_SYNC","POWERUP_MUTATION","BOX_OPEN","JOIN_LEAVE_KICK","FORFEIT_TEAM","RACE_START","EFFECT_BOUNDARY","GLOBAL_EVENT_BOUNDARY","RECOVERY","DAILY_MOVER","FULL"]'::jsonb
+              OR NOT race_resolution_jobs_v2.dirty_reasons <@ '["DISPLAY_REFRESH","STEP_SYNC","STEP_INPUT_CHANGED","POWERUP_MUTATION","BOX_OPEN","JOIN_LEAVE_KICK","FORFEIT_TEAM","RACE_START","EFFECT_BOUNDARY","GLOBAL_EVENT_BOUNDARY","RECOVERY","DAILY_MOVER","FULL"]'::jsonb
               OR jsonb_typeof(race_resolution_jobs_v2.dirty_participant_ids) IS DISTINCT FROM 'array'
               OR jsonb_path_exists(race_resolution_jobs_v2.dirty_participant_ids, '$[*] ? (@.type() != "string" || @ == "")')
               OR jsonb_typeof(race_resolution_jobs_v2.dirty_powerup_types) IS DISTINCT FROM 'array'
@@ -425,7 +465,7 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
           END,
           dirty_powerup_types = CASE
             WHEN jsonb_typeof(race_resolution_jobs_v2.dirty_reasons) IS DISTINCT FROM 'array'
-              OR NOT race_resolution_jobs_v2.dirty_reasons <@ '["DISPLAY_REFRESH","STEP_SYNC","POWERUP_MUTATION","BOX_OPEN","JOIN_LEAVE_KICK","FORFEIT_TEAM","RACE_START","EFFECT_BOUNDARY","GLOBAL_EVENT_BOUNDARY","RECOVERY","DAILY_MOVER","FULL"]'::jsonb
+              OR NOT race_resolution_jobs_v2.dirty_reasons <@ '["DISPLAY_REFRESH","STEP_SYNC","STEP_INPUT_CHANGED","POWERUP_MUTATION","BOX_OPEN","JOIN_LEAVE_KICK","FORFEIT_TEAM","RACE_START","EFFECT_BOUNDARY","GLOBAL_EVENT_BOUNDARY","RECOVERY","DAILY_MOVER","FULL"]'::jsonb
               OR jsonb_typeof(race_resolution_jobs_v2.dirty_participant_ids) IS DISTINCT FROM 'array'
               OR jsonb_path_exists(race_resolution_jobs_v2.dirty_participant_ids, '$[*] ? (@.type() != "string" || @ == "")')
               OR jsonb_typeof(race_resolution_jobs_v2.dirty_powerup_types) IS DISTINCT FROM 'array'
@@ -580,7 +620,7 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
             processing_dirty_reasons = CASE
               WHEN jsonb_typeof(j.processing_dirty_reasons) IS DISTINCT FROM 'array'
                 OR jsonb_typeof(j.dirty_reasons) IS DISTINCT FROM 'array'
-                OR NOT (j.processing_dirty_reasons || j.dirty_reasons) <@ '["DISPLAY_REFRESH","STEP_SYNC","POWERUP_MUTATION","BOX_OPEN","JOIN_LEAVE_KICK","FORFEIT_TEAM","RACE_START","EFFECT_BOUNDARY","GLOBAL_EVENT_BOUNDARY","RECOVERY","DAILY_MOVER","FULL"]'::jsonb
+                OR NOT (j.processing_dirty_reasons || j.dirty_reasons) <@ '["DISPLAY_REFRESH","STEP_SYNC","STEP_INPUT_CHANGED","POWERUP_MUTATION","BOX_OPEN","JOIN_LEAVE_KICK","FORFEIT_TEAM","RACE_START","EFFECT_BOUNDARY","GLOBAL_EVENT_BOUNDARY","RECOVERY","DAILY_MOVER","FULL"]'::jsonb
                 OR jsonb_typeof(j.processing_dirty_participant_ids) IS DISTINCT FROM 'array'
                 OR jsonb_typeof(j.dirty_participant_ids) IS DISTINCT FROM 'array'
                 OR jsonb_path_exists(j.processing_dirty_participant_ids || j.dirty_participant_ids, '$[*] ? (@.type() != "string" || @ == "")')
@@ -866,6 +906,70 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
         now
       );
       return { state: terminal ? "FAILED" : "QUEUED", applied: rows.length > 0 };
+    },
+
+    // A source-input fence can discover a newer generation after computation.
+    // Keep the lease, fold every pending reason/scope into this claim, and move
+    // processingGeneration forward before the same worker recomputes. This is
+    // the same ownership transition as claimNext, without releasing a RUNNING
+    // row for another worker to race.
+    async refreshClaim({
+      id,
+      leaseToken,
+      processingDirtyReasons = null,
+      now = new Date(),
+    }) {
+      return prisma.$transaction(async (tx) => {
+        const locked = await this.acquireForWrite(tx, {
+          id,
+          expectedLeaseToken: leaseToken,
+          now,
+        });
+        if (!locked || locked.state !== "RUNNING") return null;
+        const merged = mergeClaimDirty(locked, processingDirtyReasons);
+        const priorityRank = (value) => QUEUE_PRIORITIES.indexOf(
+          normalizeQueuePriority(value)
+        );
+        const processingQueuePriority = priorityRank(locked.queuePriority) <
+          priorityRank(locked.processingQueuePriority)
+          ? normalizeQueuePriority(locked.queuePriority)
+          : normalizeQueuePriority(locked.processingQueuePriority);
+        const rows = await tx.$queryRawUnsafe(
+          `UPDATE race_resolution_jobs_v2
+              SET processing_generation=generation,
+                  processing_time_zone=COALESCE(resolution_time_zone, processing_time_zone),
+                  processing_triggered_by_user_ids=$3::jsonb,
+                  processing_dirty_reasons=$4::jsonb,
+                  processing_dirty_participant_ids=$5::jsonb,
+                  processing_dirty_powerup_types=$6::jsonb,
+                  processing_dirty_priority=$7,
+                  processing_queue_priority=$8,
+                  processing_display_artifact_id=NULL,
+                  processing_display_artifact_digest=NULL,
+                  processing_display_artifact_schema=NULL,
+                  triggered_by_user_ids='[]'::jsonb,
+                  dirty_reasons='[]'::jsonb,
+                  dirty_participant_ids='[]'::jsonb,
+                  dirty_powerup_types='[]'::jsonb,
+                  dirty_priority='COALESCE',
+                  display_artifact_id=NULL,
+                  display_artifact_digest=NULL,
+                  display_artifact_schema=NULL,
+                  updated_at=$9
+            WHERE id=$1 AND lease_token=$2 AND state='running'
+            RETURNING ${jobColumns()}`,
+          id,
+          leaseToken,
+          JSON.stringify(merged.dirtyUserIds),
+          JSON.stringify(merged.reasons),
+          JSON.stringify(merged.dirtyParticipantIds),
+          JSON.stringify(merged.powerupTypes),
+          merged.priority,
+          processingQueuePriority,
+          now
+        );
+        return normalizeRow(rows[0]);
+      }, { timeout: 15_000, maxWait: 10_000 });
     },
 
     // Fence acquisition (§5a item 5(i) / item 6). Takes the row lock on the job

@@ -5,6 +5,7 @@
 const DIRTY_REASONS = Object.freeze(new Set([
   "DISPLAY_REFRESH",
   "STEP_SYNC",
+  "STEP_INPUT_CHANGED",
   "POWERUP_MUTATION",
   "BOX_OPEN",
   "JOIN_LEAVE_KICK",

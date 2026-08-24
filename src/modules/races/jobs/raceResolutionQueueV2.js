@@ -38,15 +38,18 @@ const {
 const {
   raceResolutionDisplayArtifact: defaultDisplayArtifactStore,
   artifactMatchesClaim,
+  computeArtifactReuseDeadline,
 } = require("../services/raceResolutionDisplayArtifact");
 const {
   buildRaceResolutionInputFingerprint: defaultBuildInputFingerprint,
 } = require("../services/raceResolutionInputFingerprint");
 const { balanceConfig: defaultBalanceConfig } = require("../../economy/balanceConfig");
+const { eventBus: defaultEventBus } = require("../../../shared/events/eventBus");
 const {
   buildRaceResolutionStepSyncScope: defaultBuildStepSyncScope,
   stepSyncScopeMatchesFence: defaultStepSyncScopeMatchesFence,
   isClosureEligibleReasonSet,
+  isSourceInputClosureEligibleReasonSet,
 } = require("../services/raceResolutionStepSyncScope");
 const {
   buildRaceScoringDependencyClosure: defaultBuildDependencyClosure,
@@ -88,6 +91,63 @@ const POST_COMMIT_SLACK_MS = 30_000;
 const FENCE_DUE_EXPIRY_VETO_TYPES = Object.freeze(
   new Set([...SNAPSHOT_AT_EXPIRY_TYPES, "DRILL_SERGEANT"])
 );
+
+function containsSourceInputWork(reasons) {
+  return Array.isArray(reasons) && reasons.includes("STEP_INPUT_CHANGED");
+}
+
+function sourceInputTargetIsTerminal(fingerprint, triggeringUserIds, at) {
+  const race = fingerprint?.race;
+  if (!race) return false;
+  if (race.status !== "ACTIVE") return true;
+  const endsAt = race.endsAt == null ? null : new Date(race.endsAt).getTime();
+  if (Number.isFinite(endsAt) && endsAt <= new Date(at).getTime()) return true;
+  const triggering = new Set(triggeringUserIds || []);
+  const targets = (fingerprint.participants || []).filter((participant) =>
+    triggering.has(participant.userId)
+  );
+  return targets.length > 0 && targets.every((participant) =>
+    participant.status !== "ACCEPTED" ||
+    participant.finishedAt != null ||
+    participant.forfeitedAt != null
+  );
+}
+
+async function promoteMismatchedCommittedStepSync(job, prisma) {
+  const reasons = Array.isArray(job?.processingDirtyReasons)
+    ? job.processingDirtyReasons
+    : [];
+  if (!reasons.includes("STEP_SYNC") || containsSourceInputWork(reasons)) {
+    return false;
+  }
+  const userIds = [...new Set(
+    (job.processingTriggeredByUserIds || []).filter(
+      (value) => typeof value === "string" && value.length > 0
+    )
+  )].sort();
+  if (userIds.length === 0) return false;
+  const rows = await prisma.$queryRawUnsafe(
+    `SELECT user_id AS "userId", generation,
+            source_queue_semantics_generation AS "sourceQueueSemanticsGeneration"
+       FROM user_scoring_input_versions
+      WHERE user_id = ANY($1::text[])
+      ORDER BY user_id`,
+    userIds
+  );
+  const byUser = new Map(rows.map((row) => [row.userId, row]));
+  const mismatch = userIds.some((userId) => {
+    const row = byUser.get(userId);
+    return !row || row.sourceQueueSemanticsGeneration == null ||
+      BigInt(row.generation) !== BigInt(row.sourceQueueSemanticsGeneration);
+  });
+  if (!mismatch) return false;
+  job.processingDirtyReasons = [...new Set(
+    reasons.map((reason) =>
+      reason === "STEP_SYNC" ? "STEP_INPUT_CHANGED" : reason
+    )
+  )];
+  return true;
+}
 
 function dueExpiryOutsideClosureAtFence(
   activeEffects,
@@ -247,6 +307,7 @@ const RACE_RESOLUTION_PHASES = Object.freeze([
   "discardSuperseded",
   "participantWrites",
   "sideWrites",
+  "boxConsequences",
   "recordSuccess",
   "postSettings",
   "postCommitHook",
@@ -661,6 +722,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
   const buildInputFingerprint =
     dependencies.buildRaceResolutionInputFingerprint || defaultBuildInputFingerprint;
   const balanceConfig = dependencies.balanceConfig || defaultBalanceConfig;
+  const events = dependencies.eventBus || defaultEventBus;
   const buildStepSyncScope =
     dependencies.buildRaceResolutionStepSyncScope || defaultBuildStepSyncScope;
   const stepSyncScopeMatchesFence =
@@ -816,6 +878,12 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
     // CLAIMING_FLAG_TTL_MS). Only idle ticks are allowed to reuse it.
     invalidateClaimingFlagCache();
 
+    // Mixed-worker safety: old intake advances the scoring generation and
+    // enqueues STEP_SYNC without the new ownership stamp. Promote that already
+    // queued claim in memory before any committed-scope admission; intake alone
+    // owns the stamp, avoiding the scoring-row/queue-row lock inversion.
+    await promoteMismatchedCommittedStepSync(job, prisma);
+
     // Dependency closure is permanent. Ineligible or failed plans still fall
     // back to FULL through the existing correctness path.
     const closureShadow = NULL_CLOSURE_SHADOW_FIELDS;
@@ -828,7 +896,8 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
     let closureEscalatedOnMine = null;
     if (
         dependencyClosureEnabled &&
-        isClosureEligibleReasonSet(job.processingDirtyReasons)
+        (isClosureEligibleReasonSet(job.processingDirtyReasons) ||
+          isSourceInputClosureEligibleReasonSet(job.processingDirtyReasons))
       ) {
         try {
             const shadowConfig = await balanceConfig.getSnapshot();
@@ -933,7 +1002,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         "planSettings",
         () => isStrictFlagEnabled(settings, "raceResolutionReasonAwareV1Enabled")
       );
-      const baseResolutionPlan = reasonAwareEnabled
+      let baseResolutionPlan = reasonAwareEnabled
         ? resolutionPlanForDirtyReasons(job.processingDirtyReasons)
         : "FULL";
       let result = null;
@@ -957,12 +1026,13 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
       // Aggregate count only — how many times a closure was turned away at the
       // fence for this claim. Never an id, a total, or a reason string.
       let closureCommittedRejections = 0;
+      let sourceInputFenceRejections = 0;
       let activeImpactPersistMs = 0;
       // Source discovery is boundary work, never ordinary score-generation
       // work. STEP_SYNC/FULL/POWERUP_MUTATION runs may still score active
       // effects authoritatively, but they must perform zero v2 materialization
       // reads unless a real time/source boundary was coalesced into the claim.
-      const resolveTimedActiveImpacts =
+      let resolveTimedActiveImpacts =
         job.processingDirtyReasons?.includes("EFFECT_BOUNDARY") === true;
       let activeImpactMetrics = {
         created: 0,
@@ -971,11 +1041,63 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         failures: 0,
         durationMs: 0,
       };
+      let committedBoxSyncResults = [];
+      let committedPowerupEvents = [];
 
       for (;;) {
         let artifactPayload = null;
         let stepSyncScope = null;
         let capture = null;
+        let sourceInputFingerprint = null;
+        let sourceInputTerminal = false;
+        const sourceInputWork = containsSourceInputWork(
+          job.processingDirtyReasons
+        );
+        if (sourceInputWork) {
+          if (!forceFull && closurePlan?.graphFingerprint && closurePlan?.validUntil) {
+            // The closure planner already captured the exact canonical input
+            // fingerprint. Source-input fencing intentionally shares it so a
+            // closure claim has one candidate read and one fence revalidation.
+            sourceInputFingerprint = {
+              digest: closurePlan.graphFingerprint,
+              plannedAgainstGeneration: Number(job.processingGeneration),
+              validUntil: closurePlan.validUntil,
+              balanceConfigVersion: closurePlan.balanceConfigVersion,
+            };
+          } else {
+            const config = await balanceConfig.getSnapshot();
+            const capturedAt = now();
+            const fingerprint = await buildInputFingerprint({
+              raceId: job.raceId,
+              now: capturedAt,
+              balanceConfigVersion: config.version,
+            });
+            const validUntil = fingerprint && computeArtifactReuseDeadline({
+              asOf: capturedAt,
+              timeZone: fingerprint.race?.timezone || job.processingTimeZone || "UTC",
+              raceEndsAt: fingerprint.race?.endsAt || null,
+              nextSampleBoundary: fingerprint.nextSampleBoundary,
+              activeEffects: fingerprint.activeEffects,
+              globalEvents: fingerprint.globalEvents,
+            });
+            sourceInputTerminal = sourceInputTargetIsTerminal(
+              fingerprint,
+              job.processingTriggeredByUserIds,
+              capturedAt
+            );
+            sourceInputFingerprint = fingerprint?.digest && (validUntil || sourceInputTerminal) ? {
+                digest: fingerprint.digest,
+                plannedAgainstGeneration: Number(job.processingGeneration),
+                validUntil,
+                balanceConfigVersion: config.version,
+              } : null;
+          }
+          if (!sourceInputFingerprint?.digest) {
+            const error = new Error("source-input fingerprint unavailable");
+            error.code = "SOURCE_INPUT_SNAPSHOT_UNAVAILABLE";
+            throw error;
+          }
+        }
         const artifactEnabled = !forceFull && await phaseTimer.measure(
           "planSettings",
           () => isStrictFlagEnabled(
@@ -1186,8 +1308,11 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         let artifactRejectedAtFence = false;
         let stepSyncRejectedAtFence = false;
         let closureRejectedAtFence = false;
+        let sourceInputRejectedAtFence = false;
         const closureCommitting = resolutionPlan === "DEPENDENCY_CLOSURE";
         const writeStartedAt = Date.now();
+        const attemptedBoxSyncResults = [];
+        const attemptedPowerupEvents = [];
         await phaseTimer.measure("transaction", () => prisma.$transaction(async (tx) => {
         // (i) fence
         const fenced = await phaseTimer.measure(
@@ -1201,6 +1326,40 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
 
         const stopFenceValidation = phaseTimer.start("fenceValidation");
         try {
+        let sourceFenceNow = null;
+        let sourceFenceConfig = null;
+        let sourceFenceFingerprint = null;
+        if (sourceInputWork && !closureCommitting) {
+          const dbClock = await tx.$queryRawUnsafe(
+            `SELECT (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::float8
+               AS "dbNowMs"`
+          );
+          sourceFenceNow = new Date(Number(dbClock[0]?.dbNowMs));
+          sourceFenceConfig = await balanceConfig.getSnapshot();
+          sourceFenceFingerprint = await buildInputFingerprint({
+            raceId: job.raceId,
+            now: sourceFenceNow,
+            balanceConfigVersion: sourceFenceConfig.version,
+            client: tx,
+          });
+          const deadline = sourceInputFingerprint?.validUntil
+            ? new Date(sourceInputFingerprint.validUntil).getTime()
+            : null;
+          if (
+            !sourceInputFingerprint ||
+            !sourceFenceFingerprint ||
+            sourceFenceFingerprint.digest !== sourceInputFingerprint.digest ||
+            Number(fenced.generation) !==
+              Number(sourceInputFingerprint.plannedAgainstGeneration) ||
+            String(sourceFenceConfig.version ?? "code-default") !==
+              String(sourceInputFingerprint.balanceConfigVersion ?? "code-default") ||
+            (deadline != null &&
+              (!Number.isFinite(deadline) || sourceFenceNow.getTime() >= deadline))
+          ) {
+            sourceInputRejectedAtFence = true;
+            return;
+          }
+        }
         if (artifactPayload) {
           const currentConfig = await balanceConfig.getSnapshot();
           const fingerprint = await buildInputFingerprint({
@@ -1259,18 +1418,21 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         //   * durable global-boundary delivery is current. A missing cursor or
         //     any due-but-undelivered start/end edge forces FULL.
         if (closureCommitting) {
-          const dbClock = await tx.$queryRawUnsafe(
+          const dbClock = sourceFenceNow ? null : await tx.$queryRawUnsafe(
             `SELECT (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::float8
                AS "dbNowMs"`
           );
-          const fenceNow = new Date(Number(dbClock[0]?.dbNowMs));
-          const currentConfig = await balanceConfig.getSnapshot();
-          const fingerprint = await buildInputFingerprint({
-            raceId: job.raceId,
-            now: fenceNow,
-            balanceConfigVersion: currentConfig.version,
-            client: tx,
-          });
+          const fenceNow = sourceFenceNow ||
+            new Date(Number(dbClock[0]?.dbNowMs));
+          const currentConfig = sourceFenceConfig ||
+            await balanceConfig.getSnapshot();
+          const fingerprint = sourceFenceFingerprint ||
+            await buildInputFingerprint({
+              raceId: job.raceId,
+              now: fenceNow,
+              balanceConfigVersion: currentConfig.version,
+              client: tx,
+            });
           const deadline = closurePlan.validUntil
             ? new Date(closurePlan.validUntil).getTime()
             : null;
@@ -1320,6 +1482,29 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
             discarded = true;
             return;
           }
+        }
+
+        // Acquire every triggering participant advisory lock in the same
+        // user-id/participant-id order used by standalone rollPowerup, before
+        // the first participant-row write. This removes the worker/standalone
+        // lock inversion and makes box consequences part of the race fence.
+        const triggeringParticipants = orderedTriggeringUserIds.length > 0
+          ? await tx.raceParticipant.findMany({
+              where: {
+                raceId: job.raceId,
+                userId: { in: orderedTriggeringUserIds },
+                status: "ACCEPTED",
+                race: { status: "ACTIVE" },
+              },
+              select: { id: true, userId: true },
+              orderBy: [{ userId: "asc" }, { id: "asc" }],
+            })
+          : [];
+        for (const participant of triggeringParticipants) {
+          await tx.$executeRawUnsafe(
+            "SELECT pg_advisory_xact_lock(hashtext($1)::bigint)",
+            participant.id
+          );
         }
 
         // (ii) participant rows, ascending userId
@@ -1402,6 +1587,30 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           );
         }
 
+        // Durable box consequences happen before job success in the same
+        // transaction. A box failure therefore rolls back participant totals,
+        // effect writes, box rows, thresholds, feed rows, and recordSuccess.
+        await phaseTimer.measure("boxConsequences", async () => {
+          if (result) {
+            const boxByUser = result.boxEffectiveStepsByUser || {};
+            for (const participant of triggeringParticipants) {
+              const syncResult = await syncRacePowerupState({
+                raceId: result.raceId,
+                userId: participant.userId,
+                race: result.race,
+                boxEffectiveSteps: boxByUser[participant.userId] ?? null,
+                tx,
+                advisoryLockHeld: true,
+                pendingEvents: attemptedPowerupEvents,
+              });
+              attemptedBoxSyncResults.push({
+                userId: participant.userId,
+                syncResult,
+              });
+            }
+          }
+        });
+
         // (iii) job row
         const outcome = await phaseTimer.measure(
           "recordSuccess",
@@ -1431,6 +1640,8 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           }, tx);
         }
         superseded = outcome.superseded;
+        committedBoxSyncResults = attemptedBoxSyncResults;
+        committedPowerupEvents = attemptedPowerupEvents;
         },
       // Only short writes run inside the fence (the expensive replay already
       // happened outside it), but a large field is still N row updates — give it
@@ -1455,6 +1666,48 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           // returned before the first participant UPDATE). Retry the SAME
           // generation as FULL, which commits the current full state.
           closureCommittedRejections += 1;
+          const refreshed = typeof jobModel.refreshClaim === "function"
+            ? await jobModel.refreshClaim({
+                id: job.id,
+                leaseToken: job.leaseToken,
+                processingDirtyReasons: job.processingDirtyReasons,
+                now: now(),
+              })
+            : null;
+          if (!refreshed) throw new FenceLostError();
+          Object.assign(job, refreshed);
+          baseResolutionPlan = reasonAwareEnabled
+            ? resolutionPlanForDirtyReasons(job.processingDirtyReasons)
+            : "FULL";
+          resolveTimedActiveImpacts =
+            job.processingDirtyReasons?.includes("EFFECT_BOUNDARY") === true;
+          closurePlan = null;
+          forceFull = true;
+          continue;
+        }
+        if (sourceInputRejectedAtFence) {
+          sourceInputFenceRejections += 1;
+          if (sourceInputFenceRejections > 3) {
+            const error = new Error("source-input fence did not stabilize");
+            error.code = "SOURCE_INPUT_FENCE_UNSTABLE";
+            throw error;
+          }
+          const refreshed = typeof jobModel.refreshClaim === "function"
+            ? await jobModel.refreshClaim({
+                id: job.id,
+                leaseToken: job.leaseToken,
+                processingDirtyReasons: job.processingDirtyReasons,
+                now: now(),
+              })
+            : null;
+          if (!refreshed) throw new FenceLostError();
+          Object.assign(job, refreshed);
+          baseResolutionPlan = reasonAwareEnabled
+            ? resolutionPlanForDirtyReasons(job.processingDirtyReasons)
+            : "FULL";
+          resolveTimedActiveImpacts =
+            job.processingDirtyReasons?.includes("EFFECT_BOUNDARY") === true;
+          closurePlan = null;
           forceFull = true;
           continue;
         }
@@ -1544,24 +1797,12 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         }
       }
 
-      // Box state / powerup-slot sync for EVERY user in the processing snapshot
-      // (§5a item 2) — coalescing must not lose a triggering user's box roll.
+      // PostgreSQL is already committed. Only rebuildable toast/event
+      // projections remain here; they can never determine whether a box exists.
       if (result) {
-        const boxByUser = result.boxEffectiveStepsByUser || {};
         const stopPowerupStateSync = phaseTimer.start("powerupStateSync");
-        for (const triggerUserId of orderedTriggeringUserIds) {
+        for (const { userId: triggerUserId, syncResult } of committedBoxSyncResults) {
           try {
-            const syncResult = await syncRacePowerupState({
-              raceId: result.raceId,
-              userId: triggerUserId,
-              race: result.race,
-              boxEffectiveSteps: boxByUser[triggerUserId] ?? null,
-            });
-            // C3 / spec v9 item 2: this is the ONLY place an in-race box is
-            // minted once Phase D is on, so it is the only place that can tell
-            // the viewer's next `/progress` poll a box appeared. Record it for
-            // the toast; the overlay consumes it. Best-effort and flag-gated —
-            // a Redis hiccup costs a celebration, never a box.
             await recentBoxMints.record({
               userId: triggerUserId,
               raceId: result.raceId,
@@ -1571,6 +1812,17 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
             logger.error(JSON.stringify({
               event: "race_resolution_v2_post_error",
               operation: "powerup_state_sync",
+              errorCode: error?.code || "POST_WORK_ERROR",
+            }));
+          }
+        }
+        for (const payload of committedPowerupEvents) {
+          try {
+            events.emit("POWERUP_EARNED", payload);
+          } catch (error) {
+            logger.error(JSON.stringify({
+              event: "race_resolution_v2_post_error",
+              operation: "powerup_event_publish",
               errorCode: error?.code || "POST_WORK_ERROR",
             }));
           }
@@ -1714,6 +1966,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         // write; `false` when a closure ran with the mine question answered no.
         closureEscalatedOnMine,
         closureFenceRejections: closureCommittedRejections,
+        sourceInputFenceRejections,
         sqlCount: typeof dependencies.sqlCount === "function" ? dependencies.sqlCount() : null,
         phaseMs: phaseTimer.snapshot(),
         computePhaseMs,

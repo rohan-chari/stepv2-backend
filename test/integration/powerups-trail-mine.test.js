@@ -482,6 +482,7 @@ describe("trail mine targeting", () => {
     // Stored totals: Alice 2,000, Bob 1,000
     await recordSamples(alice.token, [sample(6, 5.5, 2000)]);
     await recordSamples(bob.token, [sample(6, 5.5, 1000)]);
+    await runWorker();
 
     // Alice has really walked 10,000 but her phone hasn't synced the last 8,000
     await insertSamplesDirect(alice.userId, [sample(5, 4, 8000)]);
