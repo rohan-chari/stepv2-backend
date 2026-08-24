@@ -160,7 +160,9 @@ async function computeSettlementEffectAttribution({
     eventsByUserId: scoringEventsByUserId }) => {
     const effectModel = buildAttributionEffectModel({ ...attributionEffects, includedEffectIds: effectIds });
     const active = [];
+    const selectedIds = new Set(acceptedParticipants.map((participant) => participant.id));
     for (const entry of preLeech) {
+      if (!selectedIds.has(entry.participant.id)) continue;
       const recomputed = await calculateCurrentTotal({
         raceId: race.id,
         racePowerupsEnabled: race.powerupsEnabled,
@@ -195,6 +197,16 @@ async function computeSettlementEffectAttribution({
     eventsByUserId, score,
   });
   return vector;
+}
+
+function settlementAttributionParticipants(race, standings) {
+  const count = standings.length;
+  const paid = race.payoutPreset === "TOP_HALF"
+    ? standings.slice(0, Math.ceil(count / 2))
+    : race.payoutPreset === "ALL_BUT_LAST"
+      ? standings.slice(0, Math.max(0, count - 1))
+      : standings.slice(0, Math.min(race.payoutPreset === "WINNER_TAKES_ALL" ? 1 : 3, count));
+  return paid.map((standing) => standing.participant);
 }
 
 // Env-tunable Bounty payout (§3.11). Frozen into each Bounty's metadata at
@@ -549,37 +561,9 @@ async function resolveExpiredRaces() {
         }
       }
 
-      // Re-run only the existing whole-race scorer under ordered subsets of
-      // already-settled effect rows. Any attribution failure leaves canonical
-      // settlement untouched and produces no fabricated explanation rows.
-      let effectAttribution = null;
-      try {
-        const attributionStartedAt = Date.now();
-        trace("attribution-begin", attributionStartedAt, { participants: acceptedParticipants.length });
-        const attributionEffects = await loadSettlementAttributionEffects({
-          raceId: race.id,
-          participants: acceptedParticipants,
-          raceActiveEffectModel: RaceActiveEffect,
-        });
-        effectAttribution = await computeSettlementEffectAttribution({
-          race,
-          acceptedParticipants,
-          preLeech,
-          settlementTime,
-          attributionEffects,
-          globalEvents,
-          eventsByUserId,
-        });
-        trace("attribution-complete", attributionStartedAt, {
-          effectRows: [...attributionEffects.effectsByParticipant.values()].reduce((count, rows) => count + rows.length, 0),
-          hitchhikes: attributionEffects.hitchhikes.length,
-        });
-      } catch (error) {
-        console.error(`[CRON] Effect attribution failed for race ${race.id}:`, error);
-      }
-
       // Fenced write #1 — settled totals. Fence acquired FIRST, then rows in
       // ascending userId order.
+      let effectAttribution = null;
       finalTotals.sort(byUserIdAsc);
       const settledTotalsWritten = await withSettlementFence(race.id, async (tx) => {
         const lockedParticipants = await tx.raceParticipant.findMany({
@@ -603,39 +587,11 @@ async function resolveExpiredRaces() {
             },
           });
         }
-        for (const row of effectAttribution?.effectImpacts || []) {
-          await tx.raceEffectImpact.upsert({
-            where: { raceId_userId_effectId: { raceId: race.id, userId: row.userId, effectId: row.effectId } },
-            update: {},
-            create: {
-              raceId: race.id, userId: row.userId, effectId: row.effectId,
-              powerupType: row.powerupType, deltaSteps: row.deltaSteps,
-              attributionVersion: effectAttribution.attributionVersion,
-              settledAt: settlementTime,
-            },
-          });
-        }
         // PENDING is normally written at event start/race start/late join.
         // Upserting the final canonical vector here is also the repair fence
         // for a previously interrupted enrollment write: it never derives any
         // score itself, and the recap worker still waits for event close plus
         // every enrolled race/user to be FINAL.
-        for (const row of effectAttribution?.globalImpacts || []) {
-          await tx.globalEventRaceImpact.upsert({
-            where: { eventId_raceId_userId: { eventId: row.eventId, raceId: race.id, userId: row.userId } },
-            update: {
-              status: "FINAL", deltaSteps: row.deltaSteps,
-              attributionVersion: effectAttribution.attributionVersion,
-              settledAt: settlementTime,
-            },
-            create: {
-              eventId: row.eventId, raceId: race.id, userId: row.userId,
-              status: "FINAL", deltaSteps: row.deltaSteps,
-              attributionVersion: effectAttribution.attributionVersion,
-              settledAt: settlementTime,
-            },
-          });
-        }
         return true;
       });
       trace("totals-written", phaseStartedAt, { settledTotalsWritten });
@@ -713,6 +669,77 @@ async function resolveExpiredRaces() {
 
         return (a.participant.userId || "").localeCompare(b.participant.userId || "");
       });
+
+      // Attribution is explanatory metadata for payout recipients, not part of
+      // canonical scoring. Restrict its counterfactual replays to paid places;
+      // non-recipients still receive their authoritative final total and DNP
+      // payout, while avoiding thousands of unnecessary scorer outputs.
+      try {
+        const attributionStartedAt = Date.now();
+        const attributionParticipants = settlementAttributionParticipants(race, standings);
+        trace("attribution-begin", attributionStartedAt, {
+          participants: attributionParticipants.length,
+          fieldSize: acceptedParticipants.length,
+        });
+        const attributionEffects = await loadSettlementAttributionEffects({
+          raceId: race.id,
+          participants: attributionParticipants,
+          raceActiveEffectModel: RaceActiveEffect,
+        });
+        effectAttribution = await computeSettlementEffectAttribution({
+          race,
+          acceptedParticipants: attributionParticipants,
+          preLeech,
+          settlementTime,
+          attributionEffects,
+          globalEvents,
+          eventsByUserId,
+        });
+        // Global-event impacts are lifecycle data for every enrolled runner,
+        // including DNP/non-prize runners. Keep that vector complete while the
+        // expensive effect replay above remains bounded to paid places.
+        const globalAttribution = await computeSettlementEffectAttribution({
+          race,
+          acceptedParticipants,
+          preLeech,
+          settlementTime,
+          attributionEffects: { effectsByParticipant: new Map(), hitchhikes: [] },
+          globalEvents,
+          eventsByUserId,
+        });
+        if (effectAttribution) effectAttribution.globalImpacts = globalAttribution?.globalImpacts || [];
+        else effectAttribution = globalAttribution;
+        trace("attribution-complete", attributionStartedAt, {
+          effectRows: [...attributionEffects.effectsByParticipant.values()].reduce((count, rows) => count + rows.length, 0),
+          hitchhikes: attributionEffects.hitchhikes.length,
+        });
+      } catch (error) {
+        console.error(`[CRON] Effect attribution failed for race ${race.id}:`, error);
+      }
+
+      if (effectAttribution) {
+        await withSettlementFence(race.id, async (tx) => {
+          for (const row of effectAttribution.effectImpacts || []) {
+            await tx.raceEffectImpact.upsert({
+              where: { raceId_userId_effectId: { raceId: race.id, userId: row.userId, effectId: row.effectId } },
+              update: {},
+              create: { raceId: race.id, userId: row.userId, effectId: row.effectId,
+                powerupType: row.powerupType, deltaSteps: row.deltaSteps,
+                attributionVersion: effectAttribution.attributionVersion, settledAt: settlementTime },
+            });
+          }
+          for (const row of effectAttribution.globalImpacts || []) {
+            await tx.globalEventRaceImpact.upsert({
+              where: { eventId_raceId_userId: { eventId: row.eventId, raceId: race.id, userId: row.userId } },
+              update: { status: "FINAL", deltaSteps: row.deltaSteps,
+                attributionVersion: effectAttribution.attributionVersion, settledAt: settlementTime },
+              create: { eventId: row.eventId, raceId: race.id, userId: row.userId, status: "FINAL",
+                deltaSteps: row.deltaSteps, attributionVersion: effectAttribution.attributionVersion,
+                settledAt: settlementTime },
+            });
+          }
+        });
+      }
 
       // Fenced write #2 — final placements. Same protocol: fence first, then the
       // rows in ascending userId order (the placement each row gets comes from
