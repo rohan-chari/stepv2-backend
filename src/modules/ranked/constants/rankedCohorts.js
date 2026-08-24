@@ -31,7 +31,10 @@ const DEFAULT_TIER = "BRONZE"; // users never placed compete as Bronze
 
 const COHORT_TARGET_SIZE = 30;
 // Soft ceiling for mid-week joins; beyond this a fresh cohort opens instead.
-const COHORT_MAX_SIZE = 35;
+// Future weekly challenge cohorts must never exceed 100 participants. The
+// target remains 30 so large populations still split into balanced cohorts;
+// this is the hard ceiling for late-week placement.
+const COHORT_MAX_SIZE = 100;
 
 // How long after a week opens we still rebalance a tier when newcomers arrive,
 // rather than just backfilling. Early in the week nobody has a meaningful

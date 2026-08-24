@@ -1622,6 +1622,16 @@ function createRacesRouter(dependencies = {}) {
       res.json({ race });
     } catch (error) {
       if (error.name === "RaceStartError") {
+        if (error.code === "RACE_ALREADY_STARTED") {
+          const current = await raceModel.findById(req.params.raceId);
+          if (
+            current?.status === "ACTIVE" &&
+            current.isTeamRace === true &&
+            current.creatorId === req.user.id
+          ) {
+            return res.json({ race: current });
+          }
+        }
         const status = error.statusCode || 400;
         return res
           .status(status)

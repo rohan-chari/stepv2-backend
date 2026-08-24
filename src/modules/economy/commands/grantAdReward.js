@@ -2,6 +2,7 @@ const { prisma } = require("../../../db");
 const {
   EXTRA_SPIN_REWARD_KIND,
   COIN_REWARD_KIND,
+  randomAdCoinRewardAmount,
   POWERUP_UNLOCK_REWARD_KIND,
   SHOP_UNLOCK_REWARD_KIND,
   BOX_REROLL_REWARD_KIND,
@@ -160,6 +161,7 @@ function buildGrantAdReward(dependencies = {}) {
           grantedDate,
           shopItemId,
           contextId,
+          coinAmount: kind === COIN_REWARD_KIND ? randomAdCoinRewardAmount() : null,
         },
       });
     } catch (error) {

@@ -64,7 +64,12 @@ function buildStartRace(dependencies = {}) {
       throw new RaceStartError("Only the race creator can start the race", 403);
     }
     if (race.status !== "PENDING") {
-      throw new RaceStartError("Race has already been started or is no longer active", 400);
+      const error = new RaceStartError(
+        "Race has already been started or is no longer active",
+        400,
+        race.status === "ACTIVE" ? "RACE_ALREADY_STARTED" : "RACE_NOT_PENDING",
+      );
+      throw error;
     }
 
     // 1.1.7: block early manual start of a scheduled race. Applies to ALL

@@ -172,7 +172,7 @@ function buildJoinRaceByShareToken(dependencies = {}) {
 
     // OUTSIDE the advisory lock, after the participant row has committed —
     // startRace must never run while the join lock is held (3e6c827).
-    await maybeAutoStartPrivateRace({ raceId: resolved.id });
+    await maybeAutoStartPrivateRace({ raceId: resolved.id, fromInvite: false });
 
     return deferred.participant;
   };

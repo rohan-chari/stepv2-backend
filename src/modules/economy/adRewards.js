@@ -128,14 +128,17 @@ function positiveIntEnv(raw, fallback) {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-const AD_COIN_REWARD_AMOUNT = positiveIntEnv(
-  process.env.AD_COIN_REWARD_AMOUNT,
-  25
-);
-const AD_COIN_REWARD_DAILY_CAP = positiveIntEnv(
-  process.env.AD_COIN_REWARD_DAILY_CAP,
-  3
-);
+const AD_COIN_REWARD_MIN = 25;
+const AD_COIN_REWARD_MAX = 50;
+const AD_COIN_REWARD_AMOUNT = AD_COIN_REWARD_MIN;
+const AD_COIN_REWARD_DAILY_CAP = 5;
+
+function randomAdCoinRewardAmount(random = Math.random) {
+  return (
+    AD_COIN_REWARD_MIN +
+    Math.floor(random() * (AD_COIN_REWARD_MAX - AD_COIN_REWARD_MIN + 1))
+  );
+}
 
 // ── Ad-unlock tunables (2026-07-25 §7) ──────────────────────────────────────
 // Read at CALL TIME, not module load, so both are true kill switches: a prod
@@ -184,7 +187,10 @@ module.exports = {
   ADS_COIN_REWARD_ENABLED,
   COIN_REWARD_KIND,
   AD_COIN_REWARD_AMOUNT,
+  AD_COIN_REWARD_MIN,
+  AD_COIN_REWARD_MAX,
   AD_COIN_REWARD_DAILY_CAP,
+  randomAdCoinRewardAmount,
   POWERUP_UNLOCK_REWARD_KIND,
   POWERUP_UNLOCK_COINS_PER_AD,
   POWERUP_UNLOCK_MAX_ADS,

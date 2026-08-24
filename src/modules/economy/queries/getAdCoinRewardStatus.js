@@ -25,16 +25,19 @@ function buildGetAdCoinRewardStatus(dependencies = {}) {
         rewardKind: COIN_REWARD_KIND,
         grantedDate: localDate,
       },
-      select: { consumedAt: true },
+      select: { consumedAt: true, coinAmount: true },
     });
     const consumed = grants.filter((g) => g.consumedAt != null).length;
     const remainingToday = Math.max(0, AD_COIN_REWARD_DAILY_CAP - consumed);
+    const pending = grants.find((g) => g.consumedAt == null);
     return {
       available: remainingToday > 0,
-      pendingGrant:
-        remainingToday > 0 && grants.some((g) => g.consumedAt == null),
+      pendingGrant: remainingToday > 0 && pending != null,
       remainingToday,
-      coinAmount: AD_COIN_REWARD_AMOUNT,
+      // Before SSV creates a grant there is no per-watch amount yet; expose
+      // the lower bound as stable preview copy. Once a grant exists, return
+      // its persisted random amount.
+      coinAmount: pending?.coinAmount ?? AD_COIN_REWARD_AMOUNT,
       dailyCap: AD_COIN_REWARD_DAILY_CAP,
     };
   };

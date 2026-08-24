@@ -11,8 +11,8 @@ const { buildRaceMoneyView } = require("../../src/modules/races/racePrizePool");
 describe("payout rounding v1 — canonical award plan", () => {
   it("keeps zero at zero and rounds every positive recipient award exactly once", () => {
     assert.equal(roundUpToFive(0), 0);
-    assert.equal(roundUpToFive(1), 5);
-    assert.equal(roundUpToFive(5), 5);
+    assert.equal(roundUpToFive(1), 10);
+    assert.equal(roundUpToFive(5), 10);
     assert.equal(roundUpToFive(6), 10);
     assert.equal(roundUpToFive(10), 10);
   });
@@ -30,14 +30,14 @@ describe("payout rounding v1 — canonical award plan", () => {
 
     assert.deepEqual(plan.awards, [
       { recipientId: "first", placement: 1, rawAwardCoins: 7, awardCoins: 10, roundingSubsidyCoins: 3 },
-      { recipientId: "second", placement: 2, rawAwardCoins: 2, awardCoins: 5, roundingSubsidyCoins: 3 },
-      { recipientId: "third", placement: 3, rawAwardCoins: 1, awardCoins: 5, roundingSubsidyCoins: 4 },
+      { recipientId: "second", placement: 2, rawAwardCoins: 2, awardCoins: 10, roundingSubsidyCoins: 8 },
+      { recipientId: "third", placement: 3, rawAwardCoins: 1, awardCoins: 10, roundingSubsidyCoins: 9 },
       { recipientId: "zero", placement: 4, rawAwardCoins: 0, awardCoins: 0, roundingSubsidyCoins: 0 },
     ]);
     assert.deepEqual(plan.totals, {
       rawAwardCoins: 10,
-      awardCoins: 20,
-      roundingSubsidyCoins: 10,
+      awardCoins: 30,
+      roundingSubsidyCoins: 20,
       recipientCount: 3,
       smallAwardRecipientCount: 2,
     });

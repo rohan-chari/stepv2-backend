@@ -696,6 +696,7 @@ describe("custom race windows (§9 tests 1-10b, 21)", () => {
 
   it("9c: the TEAM anti-exploit lock — a 14-day team window started with 25h left settles at 1.0x, not 1.875x", async () => {
     const { creator, raceId } = await createTeamRaceWithField({
+      teamSize: 2,
       maxDurationDays: 14,
       scheduledEndAt: new Date(Date.now() + 14 * DAY).toISOString(),
     });
@@ -726,6 +727,7 @@ describe("custom race windows (§9 tests 1-10b, 21)", () => {
 
   it("7f: PATCHing a TEAM race's window re-stamps teamPoolMultBps in the same write", async () => {
     const { creator, raceId } = await createTeamRaceWithField({
+      teamSize: 2,
       maxDurationDays: 14,
       scheduledEndAt: new Date(Date.now() + 14 * DAY).toISOString(),
     });

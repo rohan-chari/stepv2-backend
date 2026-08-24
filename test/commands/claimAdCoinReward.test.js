@@ -76,7 +76,7 @@ test("claimAdCoinReward: consumes the oldest grant and mints the coin reward", a
     grants: [{ id: "g-old" }, { id: "g-new", createdAt: new Date(2027, 0, 1) }],
   });
   const awardCoins = mockAwardCoins();
-  const claim = buildClaimAdCoinReward({ prisma: db, awardCoins });
+  const claim = buildClaimAdCoinReward({ prisma: db, awardCoins, random: () => 0 });
 
   const result = await claim({ userId: "user-1", localDate: todayLocal() });
 

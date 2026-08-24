@@ -28,24 +28,26 @@ function withRuntimeEnv(env, fn) {
   }
 }
 
-test("adRewards — defaults to 25 coins x 3 watches when unset", () => {
+test("adRewards — uses the bounded 25–50 coin range and five-watch cap", () => {
   const config = loadConfig({
     AD_COIN_REWARD_AMOUNT: undefined,
     AD_COIN_REWARD_DAILY_CAP: undefined,
   });
 
   assert.equal(config.AD_COIN_REWARD_AMOUNT, 25);
-  assert.equal(config.AD_COIN_REWARD_DAILY_CAP, 3);
+  assert.equal(config.AD_COIN_REWARD_DAILY_CAP, 5);
+  assert.equal(config.randomAdCoinRewardAmount(() => 0), 25);
+  assert.equal(config.randomAdCoinRewardAmount(() => 0.999999), 50);
 });
 
-test("adRewards — env overrides retune the amount and cap", () => {
+test("adRewards — ignores legacy amount/cap overrides", () => {
   const config = loadConfig({
     AD_COIN_REWARD_AMOUNT: "10",
     AD_COIN_REWARD_DAILY_CAP: "8",
   });
 
-  assert.equal(config.AD_COIN_REWARD_AMOUNT, 10);
-  assert.equal(config.AD_COIN_REWARD_DAILY_CAP, 8);
+  assert.equal(config.AD_COIN_REWARD_AMOUNT, 25);
+  assert.equal(config.AD_COIN_REWARD_DAILY_CAP, 5);
 });
 
 // A NaN cap would make `consumed >= cap` false forever — unlimited coins from a
@@ -56,7 +58,7 @@ for (const bad of ["", "unlimited", "3.5", "-1", "0", "1e3x"]) {
   )}`, () => {
     const config = loadConfig({ AD_COIN_REWARD_DAILY_CAP: bad });
 
-    assert.equal(config.AD_COIN_REWARD_DAILY_CAP, 3);
+    assert.equal(config.AD_COIN_REWARD_DAILY_CAP, 5);
   });
 }
 

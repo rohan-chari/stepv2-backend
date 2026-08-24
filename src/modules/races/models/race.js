@@ -1506,6 +1506,7 @@ const Race = {
         id: true,
         status: true,
         isPublic: true,
+        isTeamRace: true,
         creationSource: true,
         startPolicy: true,
       },

@@ -423,7 +423,7 @@ function buildRespondToRaceInvite(dependencies = {}) {
     // response below is byte-identical whether or not the race started. A
     // DECLINE can also unblock a start (the decliner was the last holdout), so
     // this is deliberately not gated on `accept`.
-    await maybeAutoStartPrivateRace({ raceId });
+    await maybeAutoStartPrivateRace({ raceId, fromInvite: true });
 
     return updated;
   };

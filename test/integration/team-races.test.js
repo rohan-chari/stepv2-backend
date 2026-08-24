@@ -96,11 +96,23 @@ async function startedTwoVTwo(alice, bob, carol, dave, overrides = {}) {
     });
     assert.equal(res.status, 200, `accept for ${team} should succeed`);
   }
-  const startRes = await request(server.baseUrl, "POST", `/races/${race.id}/start`, {
+  // Full invited team rosters now start during the final acceptance. Preserve
+  // the manual-start path assertion only when this fixture is still pending.
+  const detail = await request(server.baseUrl, "GET", `/races/${race.id}`, {
     token: alice.token,
     headers: TEAM_HEADERS,
   });
-  assert.equal(startRes.status, 200);
+  assert.equal(detail.status, 200);
+  const current = await detail.json();
+  if (current.status === "PENDING") {
+    const startRes = await request(server.baseUrl, "POST", `/races/${race.id}/start`, {
+      token: alice.token,
+      headers: TEAM_HEADERS,
+    });
+    assert.equal(startRes.status, 200);
+  } else {
+    assert.equal(current.status, "ACTIVE");
+  }
   return race.id;
 }
 

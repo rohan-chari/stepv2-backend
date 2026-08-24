@@ -9,6 +9,7 @@ const {
   COIN_REWARD_KIND,
   AD_COIN_REWARD_AMOUNT,
   AD_COIN_REWARD_DAILY_CAP,
+  randomAdCoinRewardAmount,
 } = require("../adRewards");
 
 // Watch-ad-for-coins (Get Coins hub). Consumes an unconsumed coin_reward
@@ -21,6 +22,7 @@ const {
 function buildClaimAdCoinReward(dependencies = {}) {
   const db = dependencies.prisma || prisma;
   const awardCoinsFn = dependencies.awardCoins || awardCoins;
+  const random = dependencies.random || Math.random;
 
   return async function claimAdCoinReward({ userId, localDate }) {
     if (!isValidLocalDate(localDate)) {
@@ -55,7 +57,7 @@ function buildClaimAdCoinReward(dependencies = {}) {
         consumedAt: null,
       },
       orderBy: { createdAt: "asc" },
-      select: { id: true },
+      select: { id: true, coinAmount: true },
     });
     if (!grant) {
       const err = new DailyRewardError(
@@ -80,20 +82,21 @@ function buildClaimAdCoinReward(dependencies = {}) {
       throw err;
     }
 
+    const coinAmount = grant.coinAmount ?? randomAdCoinRewardAmount(random);
     const result = await awardCoinsFn({
       userId,
-      amount: AD_COIN_REWARD_AMOUNT,
+      amount: coinAmount,
       reason: "ad_coin_reward",
       refId: grant.id,
     });
 
     await db.adRewardGrant.update({
       where: { id: grant.id },
-      data: { rewardType: "COINS", coinAmount: AD_COIN_REWARD_AMOUNT },
+      data: { rewardType: "COINS", coinAmount },
     });
 
     return {
-      coinAmount: AD_COIN_REWARD_AMOUNT,
+      coinAmount,
       coins: result.coins,
       remainingToday: Math.max(
         0,

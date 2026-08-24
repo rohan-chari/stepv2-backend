@@ -22,7 +22,7 @@ function nonNegativeWhole(value) {
 function roundUpToFive(amount) {
   const whole = nonNegativeWhole(amount);
   if (whole === 0) return 0;
-  return Math.max(5, Math.ceil(whole / 5) * 5);
+  return Math.max(10, Math.ceil(whole / 5) * 5);
 }
 
 function buildPayoutPlan({ payoutRoundingVersion, awards = [] } = {}) {

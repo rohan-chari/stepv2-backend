@@ -108,7 +108,7 @@ function buildJoinPublicRace(dependencies = {}) {
     // startRace does per-participant step lookups + updates + push fan-out;
     // holding the join lock across that is the 3e6c827 pool-exhaustion shape.
     if (joined?.runPostCommit) await joined.runPostCommit();
-    await maybeAutoStartPrivateRace({ raceId });
+    await maybeAutoStartPrivateRace({ raceId, fromInvite: false });
 
     return joined?.participant || joined;
   };

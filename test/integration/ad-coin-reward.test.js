@@ -71,9 +71,9 @@ describe("ad coin reward (Get Coins hub)", () => {
     assert.deepEqual(withAds.adCoinReward, {
       available: true,
       pendingGrant: false,
-      remainingToday: 3,
+      remainingToday: 5,
       coinAmount: 25,
-      dailyCap: 3,
+      dailyCap: 5,
     });
 
     const res = await request(
@@ -93,16 +93,18 @@ describe("ad coin reward (Get Coins hub)", () => {
       select: { coins: true },
     })).coins;
 
-    for (let i = 0; i < 4; i++) await seedGrant(user.userId, i);
+    for (let i = 0; i < 6; i++) await seedGrant(user.userId, i);
 
     let pending = await getStatus(user.token);
     assert.equal(pending.adCoinReward.pendingGrant, true);
 
-    for (let i = 0; i < 3; i++) {
+    let totalAwarded = 0;
+    for (let i = 0; i < 5; i++) {
       const res = await claim(user.token);
       assert.equal(res.status, 200, JSON.stringify(res.body));
-      assert.equal(res.body.coinAmount, 25);
-      assert.equal(res.body.remainingToday, 2 - i);
+      assert.ok(res.body.coinAmount >= 25 && res.body.coinAmount <= 50);
+      assert.equal(res.body.remainingToday, 4 - i);
+      totalAwarded += res.body.coinAmount;
     }
 
     // 4th grant exists but the cap is spent.
@@ -118,13 +120,13 @@ describe("ad coin reward (Get Coins hub)", () => {
       where: { id: user.userId },
       select: { coins: true },
     });
-    assert.equal(userRow.coins, startCoins + 75);
+    assert.equal(userRow.coins, startCoins + totalAwarded);
 
     const ledger = await prisma.coinTransaction.findMany({
       where: { userId: user.userId, reason: "ad_coin_reward" },
     });
-    assert.equal(ledger.length, 3);
-    assert.ok(ledger.every((t) => t.amount === 25));
+    assert.equal(ledger.length, 5);
+    assert.ok(ledger.every((t) => t.amount >= 25 && t.amount <= 50));
   });
 
   it("claim without a verified grant is 409 AD_NOT_VERIFIED", async () => {

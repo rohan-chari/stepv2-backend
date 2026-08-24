@@ -68,7 +68,11 @@ function shouldAutoStartPrivateRace({ race, now = new Date() }) {
     race.startPolicy === "ON_MINIMUM_PARTICIPANTS";
   // Legacy auto-start remains private-only. Public races require the explicit
   // persisted quick pair; never infer policy from free/public configuration.
-  if (!quickPolicy && race.isPublic !== false) return false;
+  // Team invite races are explicitly rostered: once the invited roster is
+  // accepted and the configured capacity is full, start immediately even if
+  // the race was created through the public/team discovery surface.
+  const invitedTeamRace = race.isTeamRace === true && race.isPublic !== false;
+  if (!invitedTeamRace && !quickPolicy && race.isPublic !== false) return false;
   // Seeded challenges renew/start via seededRaceRenewal; tournament matchups
   // are owned by the tournament engine's lifecycle.
   if (race.seedId) return false;
@@ -88,6 +92,13 @@ function shouldAutoStartPrivateRace({ race, now = new Date() }) {
 
   const acceptedCount = participants.filter((p) => p.status === "ACCEPTED").length;
   if (acceptedCount < 2) return false;
+  if (invitedTeamRace) {
+    if (race.maxParticipants == null || acceptedCount < race.maxParticipants) return false;
+    const accepted = participants.filter((p) => p.status === "ACCEPTED");
+    const teamA = accepted.filter((p) => p.team === "TEAM_A").length;
+    const teamB = accepted.filter((p) => p.team === "TEAM_B").length;
+    if (teamA < 1 || teamA !== teamB) return false;
+  }
 
   // Team races: same evenness rule startRace enforces (TEAMS_UNEVEN), evaluated
   // with the very same helper. Uneven -> stay PENDING, silently: the accepter
@@ -113,7 +124,7 @@ function buildMaybeAutoStartPrivateRace(dependencies = {}) {
   const logger = dependencies.logger || console;
   const now = dependencies.now || (() => new Date());
 
-  return async function maybeAutoStartPrivateRace({ raceId }) {
+  return async function maybeAutoStartPrivateRace({ raceId, fromInvite = false }) {
     if (isPrivateRaceAutoStartDisabled()) return false;
     if (!raceId) return false;
 
@@ -129,7 +140,10 @@ function buildMaybeAutoStartPrivateRace(dependencies = {}) {
         const quickGate =
           gate.creationSource === "QUICK_CREATE" &&
           gate.startPolicy === "ON_MINIMUM_PARTICIPANTS";
-        if (gate.status !== "PENDING" || (gate.isPublic !== false && !quickGate)) return false;
+        if (
+          gate.status !== "PENDING" ||
+          (gate.isPublic !== false && (!fromInvite || gate.isTeamRace !== true) && !quickGate)
+        ) return false;
       }
 
       // Fresh read: the caller's copy predates the participant write.
@@ -139,6 +153,7 @@ function buildMaybeAutoStartPrivateRace(dependencies = {}) {
         // Too big to start on the request path — the backstop tick will get it.
         return false;
       }
+      if (race.isTeamRace === true && race.isPublic !== false && !fromInvite) return false;
       if (!shouldAutoStartPrivateRace({ race, now: now() })) return false;
 
       await startRace({ raceId, userId: race.creatorId });

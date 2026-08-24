@@ -151,11 +151,21 @@ async function createTeamRace(creator, teamA, teamB) {
     });
     assert.equal(res.status, 200, `respond failed: ${res.status}`);
   }
-  const startRes = await request(server.baseUrl, "POST", `/races/${raceId}/start`, {
+  const detail = await request(server.baseUrl, "GET", `/races/${raceId}`, {
     token: creator.token,
     headers: P5_HEADERS,
   });
-  assert.equal(startRes.status, 200, `team race start failed: ${startRes.status}`);
+  assert.equal(detail.status, 200);
+  const current = await detail.json();
+  if (current.status === "PENDING") {
+    const startRes = await request(server.baseUrl, "POST", `/races/${raceId}/start`, {
+      token: creator.token,
+      headers: P5_HEADERS,
+    });
+    assert.equal(startRes.status, 200, `team race start failed: ${startRes.status}`);
+  } else {
+    assert.equal(current.status, "ACTIVE");
+  }
   await backdate(raceId);
   return raceId;
 }
