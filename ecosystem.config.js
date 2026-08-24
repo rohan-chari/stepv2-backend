@@ -51,7 +51,7 @@ function app(name, cwd, instances, env = {}, options = {}) {
     // workers killed a node process twice in 40 minutes
     // (`dmesg -T | grep oom-kill`). Restart a worker before it can take the box
     // down with it; 600 MB is above normal peak but under the OOM threshold.
-    max_memory_restart: "1000M",
+    max_memory_restart: "600M",
     // `reload` cycles workers one at a time for zero downtime. `restart` kills
     // them all at once and caused a ~10s outage with user-visible 502s the one
     // time it was used on prod (2026-07-12).
