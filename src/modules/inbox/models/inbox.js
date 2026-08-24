@@ -31,9 +31,33 @@ async function markUnreadAlertRead({ userId, alertId, now, prisma = defaultPrism
   });
 }
 
+async function markUnreadAlertsRead({ userId, now, prisma = defaultPrisma }) {
+  return prisma.inboxAlert.updateMany({
+    where: {
+      userId,
+      expiresAt: { gt: now },
+      readAt: null,
+    },
+    data: { readAt: now },
+  });
+}
+
+async function markUnreadSupportThreadsRead({ userId, now, prisma = defaultPrisma }) {
+  return prisma.feedbackThread.updateMany({
+    where: {
+      userId,
+      expiresAt: { gt: now },
+      userReadAt: null,
+    },
+    data: { userReadAt: now },
+  });
+}
+
 module.exports = {
   countUnreadAlerts,
   countUnreadSupportThreads,
   findOwnedActiveAlert,
   markUnreadAlertRead,
+  markUnreadAlertsRead,
+  markUnreadSupportThreadsRead,
 };

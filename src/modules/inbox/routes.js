@@ -2,7 +2,7 @@ const { Router } = require("express");
 const { buildRequireAuth } = require("../../middleware/requireAuth");
 const { appSettings } = require("../../shared/config/appSettings");
 const { prisma: defaultPrisma } = require("../../db");
-const { ValidationError } = require("../../shared/errors/AppError");
+const { AppError, ValidationError } = require("../../shared/errors/AppError");
 const { asyncHandler } = require("../../shared/http/asyncHandler");
 const {
   decodeCursor,
@@ -12,6 +12,7 @@ const {
 } = require("./services/inbox");
 const { getInboxUnreadCounts } = require("./queries/getInboxUnreadCounts");
 const { markInboxAlertRead } = require("./commands/markInboxAlertRead");
+const { markInboxReadAll: defaultMarkInboxReadAll } = require("./commands/markInboxReadAll");
 
 const UUID_RE =
   /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
@@ -26,7 +27,29 @@ function createInboxRouter(dependencies = {}) {
   const requireAuth = dependencies.requireAuth || buildRequireAuth(dependencies);
   const prisma = dependencies.prisma || defaultPrisma;
   const settings = dependencies.appSettings || appSettings;
+  const markInboxReadAll = dependencies.markInboxReadAll || defaultMarkInboxReadAll;
   router.use(requireAuth);
+
+  router.post("/read-all", asyncHandler(async (req, res) => {
+    try {
+      if (!(await enabled(req, settings))) {
+        return failure(res, 404, "Inbox is unavailable", "FEATURE_DISABLED");
+      }
+      if (req.body === null ||
+          (req.body !== undefined &&
+          (typeof req.body !== "object" || Array.isArray(req.body)))) {
+        return failure(res, 400, "Invalid request body", "INVALID_BODY");
+      }
+      const result = await markInboxReadAll({
+        userId: req.user.id,
+        prisma,
+      });
+      return res.json(result);
+    } catch (error) {
+      console.error("Inbox read-all error:", error);
+      throw new AppError("Internal server error", "INTERNAL_ERROR", 500);
+    }
+  }));
 
   router.get("/alerts", async (req, res) => {
     try {

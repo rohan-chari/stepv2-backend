@@ -325,13 +325,21 @@ function createApp(dependencies = {}) {
     }
   });
 
-  // JSON body-parser error handler (§6.4 / Phase A5). An oversized body makes
-  // express.json throw `entity.too.large`; without this, Express answers with its
-  // default HTML 413. Return the JSON 413 contract instead so clients (notably
-  // POST /steps/sync-v2) get a consistent machine-readable response. Only
-  // entity.too.large is handled here; every other error passes through unchanged,
-  // so normal-size JSON routes are byte-for-byte identical.
+  // JSON body-parser error handler (§6.4 / Phase A5). Oversized and malformed
+  // JSON bodies get explicit machine-readable contracts; every other error
+  // passes through unchanged, so normal-size valid JSON routes are byte-for-byte
+  // identical.
   app.use((err, req, res, next) => {
+    if (
+      err &&
+      err.type === "entity.parse.failed" &&
+      req.path === "/inbox/read-all"
+    ) {
+      return res.status(400).json({
+        error: "Invalid request body",
+        code: "INVALID_BODY",
+      });
+    }
     if (
       err &&
       (err.type === "entity.too.large" || err.statusCode === 413 || err.status === 413)
