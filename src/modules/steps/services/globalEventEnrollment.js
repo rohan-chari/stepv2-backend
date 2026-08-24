@@ -49,6 +49,25 @@ async function createPendingEnrollments(tx, { eventId, raceId, userIds }) {
   return result.count || 0;
 }
 
+async function createPendingEnrollmentsBatch(tx, { raceId, enrollments }) {
+  const rows = (enrollments || []).flatMap(({ eventId, userIds }) =>
+    uniqueUserIds(userIds).map((userId) => ({ eventId, raceId, userId, status: "PENDING" }))
+  ).filter((row) => row.eventId && row.raceId && row.userId);
+  if (rows.length === 0) return 0;
+  const result = await tx.globalEventRaceImpact.createMany({
+    data: rows,
+    skipDuplicates: true,
+  });
+  const duplicates = rows.length - (result.count || 0);
+  if (duplicates > 0) {
+    try {
+      const { recordOperationalCounters } = require("./globalStepEventObservability");
+      await recordOperationalCounters(tx, { duplicateClaimsSuppressed: duplicates });
+    } catch {}
+  }
+  return result.count || 0;
+}
+
 // Call inside the transaction that makes a participant/race ACTIVE. Doing this
 // in the same commit closes the race-start/late-join gap without making a
 // second best-effort write part of a user-visible response.
@@ -126,5 +145,6 @@ module.exports = {
   uniqueUserIds,
   acquireGlobalEnrollmentLock,
   createPendingEnrollments,
+  createPendingEnrollmentsBatch,
   enrollIfGlobalEventActive,
 };

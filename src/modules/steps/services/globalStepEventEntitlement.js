@@ -503,7 +503,7 @@ async function ensureRaceGlobalEventEligibility({
   // weekly boundary. Keep the repair atomic, but do not let Prisma's 5-second
   // interactive-transaction default strand the race before settlement starts.
   await prisma.$transaction(async (tx) => {
-    const { acquireGlobalEnrollmentLock, createPendingEnrollments } =
+    const { acquireGlobalEnrollmentLock, createPendingEnrollmentsBatch } =
       require("./globalEventEnrollment");
     const fence = acquireRaceFence || (async (client, input) => {
       const { RaceResolutionJobV2 } = require("../../races/models/raceResolutionJobV2");
@@ -534,6 +534,7 @@ async function ensureRaceGlobalEventEligibility({
       },
     });
     const participantByUser = new Map(accepted.map((row) => [row.userId, row]));
+    const pendingEnrollments = [];
     for (const entitlement of entitlements) {
       const participant = participantByUser.get(entitlement.userId);
       if (!participant) continue;
@@ -556,7 +557,7 @@ async function ensureRaceGlobalEventEligibility({
       } else if (outcome === START_OUTCOMES.NO_ACTIVE_RACES) {
         outcome = START_OUTCOMES.ACTIVATED_LATE_JOIN;
       }
-      await createPendingEnrollments(tx, {
+      pendingEnrollments.push({
         eventId: entitlement.eventId,
         raceId: race.id,
         userIds: [entitlement.userId],
@@ -568,6 +569,7 @@ async function ensureRaceGlobalEventEligibility({
         });
       }
     }
+    await createPendingEnrollmentsBatch(tx, { raceId: race.id, enrollments: pendingEnrollments });
   }, { timeout: 30_000, maxWait: 10_000 });
   const { findEligibleByRace } = require("../models/globalStepEventEntitlement");
   return findEligibleByRace({
