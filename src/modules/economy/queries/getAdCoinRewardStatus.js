@@ -2,6 +2,8 @@ const { prisma } = require("../../../db");
 const {
   COIN_REWARD_KIND,
   AD_COIN_REWARD_AMOUNT,
+  AD_COIN_REWARD_MIN,
+  AD_COIN_REWARD_MAX,
   AD_COIN_REWARD_DAILY_CAP,
 } = require("../adRewards");
 
@@ -38,6 +40,8 @@ function buildGetAdCoinRewardStatus(dependencies = {}) {
       // the lower bound as stable preview copy. Once a grant exists, return
       // its persisted random amount.
       coinAmount: pending?.coinAmount ?? AD_COIN_REWARD_AMOUNT,
+      coinRewardMin: AD_COIN_REWARD_MIN,
+      coinRewardMax: AD_COIN_REWARD_MAX,
       dailyCap: AD_COIN_REWARD_DAILY_CAP,
     };
   };

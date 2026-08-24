@@ -73,6 +73,8 @@ describe("ad coin reward (Get Coins hub)", () => {
       pendingGrant: false,
       remainingToday: 5,
       coinAmount: 25,
+      coinRewardMin: 25,
+      coinRewardMax: 50,
       dailyCap: 5,
     });
 
