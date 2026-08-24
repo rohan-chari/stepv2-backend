@@ -20,6 +20,21 @@ const stakes = [
   { name: "Venmo $5", description: "Loser sends the winner $5", category: "digital", relationshipTags: ["friend", "coworker", "sibling"], format: "VIRTUAL" },
 ];
 
+// Featured tournament seeds are idempotent. These fields are owned by the
+// featured product configuration and are reconciled on every seed run.
+const featuredTournamentSeeds = [
+  {
+    id: "seed-tournament-weekly-showdown",
+    kind: "WEEKLY_SHOWDOWN",
+    name: "8 Racer Tourney",
+    bracketSize: 8,
+    matchupDurationDays: 2,
+    powerupsEnabled: false,
+    championPrizeCoins: 150,
+    active: true,
+  },
+];
+
 // Flipping `active` on challenge/stake rows is OPT-IN (`--deactivate-removed`).
 //
 // It used to run on every deploy, which meant this file silently owned the
@@ -29,6 +44,28 @@ const stakes = [
 // never needs either sweep — there is nothing to deactivate — so the default is
 // now the non-destructive path and the sweep is something you ask for.
 const DEACTIVATE_REMOVED = process.argv.includes("--deactivate-removed");
+
+async function seedFeaturedTournamentSeeds(db = prisma) {
+  let tournamentSeedsCreated = 0;
+  for (const seed of featuredTournamentSeeds) {
+    const result = await db.tournamentSeed.upsert({
+      where: { id: seed.id },
+      create: seed,
+      update: {
+        kind: seed.kind,
+        name: seed.name,
+        bracketSize: seed.bracketSize,
+        matchupDurationDays: seed.matchupDurationDays,
+        powerupsEnabled: seed.powerupsEnabled,
+        powerupStepInterval: null,
+        championPrizeCoins: seed.championPrizeCoins,
+        active: seed.active,
+      },
+    });
+    if (result.createdAt.getTime() === result.updatedAt.getTime()) tournamentSeedsCreated++;
+  }
+  return tournamentSeedsCreated;
+}
 
 async function seed() {
   const activeTitles = new Set(challenges.map((c) => c.title));
@@ -107,6 +144,13 @@ async function seed() {
     }
   }
   console.log(`Created ${stakesCreated} stakes (${stakes.length - stakesCreated} already existed)`);
+
+  console.log("Seeding featured tournament seeds...");
+  const tournamentSeedsCreated = await seedFeaturedTournamentSeeds();
+  console.log(
+    `Created ${tournamentSeedsCreated} featured tournament seed(s) ` +
+      `(${featuredTournamentSeeds.length - tournamentSeedsCreated} already existed)`,
+  );
 
   // NOTE: cosmetics are intentionally NOT seeded here at all. The DB is the
   // single source of truth: new items are born via POST /admin/shop/items
@@ -494,9 +538,13 @@ async function seed() {
   console.log("Seed complete!");
 }
 
-seed()
-  .then(() => process.exit(0))
-  .catch((err) => {
-    console.error("Seed failed:", err);
-    process.exit(1);
-  });
+if (require.main === module) {
+  seed()
+    .then(() => process.exit(0))
+    .catch((err) => {
+      console.error("Seed failed:", err);
+      process.exit(1);
+    });
+}
+
+module.exports = { seedFeaturedTournamentSeeds };

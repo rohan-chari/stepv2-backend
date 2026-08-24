@@ -9,6 +9,7 @@ const { appSettings } = require("../../src/shared/config/appSettings");
 const {
   RaceResolutionJobV2,
 } = require("../../src/modules/races/models/raceResolutionJobV2");
+const { seedFeaturedTournamentSeeds } = require("../../prisma/seed");
 
 let server;
 let nextAppleId = 0;
@@ -773,6 +774,138 @@ describe("tournaments — integration", () => {
       where: { reason: "tournament_payout" },
     });
     assert.equal(potPay, 0); // free -> minted only, never pot
+  });
+
+  it("inline-starts the canonical 8-person seed after eight public joins, renews one replacement, and pays one champion reward", async () => {
+    await seedFeaturedTournamentSeeds(prisma);
+
+    await renewTournamentSeeds();
+    let lobbies = await prisma.tournament.findMany({
+      where: { seedId: "seed-tournament-weekly-showdown", status: "PENDING" },
+    });
+    assert.equal(lobbies.length, 1);
+    assert.equal(lobbies[0].name, "8 Racer Tourney");
+    assert.equal(lobbies[0].bracketSize, 8);
+    assert.equal(lobbies[0].matchupDurationDays, 2);
+    assert.equal(lobbies[0].powerupsEnabled, false);
+    assert.equal(lobbies[0].powerupStepInterval, null);
+    assert.equal(lobbies[0].championPrizeCoinsSnapshot, 150);
+
+    const users = await Promise.all(
+      ["Eight A", "Eight B", "Eight C", "Eight D", "Eight E", "Eight F", "Eight G", "Eight H"].map(
+        (name) => createUser(name),
+      ),
+    );
+    for (const user of users) {
+      const join = await authReq("POST", `/tournaments/${lobbies[0].id}/join`, {
+        token: user.token,
+      });
+      assert.equal(join.status, 201);
+    }
+
+    const started = await prisma.tournament.findUnique({
+      where: { id: lobbies[0].id },
+    });
+    assert.equal(started.status, "ACTIVE");
+    assert.equal(
+      await prisma.tournamentParticipant.count({
+        where: { tournamentId: started.id, status: "ACCEPTED" },
+      }),
+      8,
+    );
+
+    // Concurrent renewal ticks must observe the promoted bracket and mint one
+    // replacement, never one replacement per worker.
+    await Promise.all([
+      renewTournamentSeeds(),
+      renewTournamentSeeds(),
+      renewTournamentSeeds(),
+    ]);
+    lobbies = await prisma.tournament.findMany({
+      where: { seedId: "seed-tournament-weekly-showdown", status: "PENDING" },
+    });
+    assert.equal(lobbies.length, 1);
+    assert.notEqual(lobbies[0].id, started.id);
+    assert.equal(
+      await prisma.tournament.count({
+        where: { seedId: "seed-tournament-weekly-showdown", status: "PENDING" },
+      }),
+      1,
+    );
+
+    const round1 = await prisma.race.findMany({
+      where: { tournamentId: started.id, tournamentRound: 1 },
+      include: { participants: true },
+      orderBy: { tournamentMatchIndex: "asc" },
+    });
+    assert.equal(round1.length, 4);
+    for (const race of round1) {
+      const participants = race.participants.filter((p) => p.status === "ACCEPTED");
+      await settleMatchup(race.id, {
+        [participants[0].userId]: 7000,
+        [participants[1].userId]: 100,
+      });
+    }
+    const round2 = await prisma.race.findMany({
+      where: { tournamentId: started.id, tournamentRound: 2 },
+      include: { participants: true },
+      orderBy: { tournamentMatchIndex: "asc" },
+    });
+    assert.equal(round2.length, 2);
+    for (const race of round2) {
+      const participants = race.participants.filter((p) => p.status === "ACCEPTED");
+      await settleMatchup(race.id, {
+        [participants[0].userId]: 7000,
+        [participants[1].userId]: 100,
+      });
+    }
+    const finalRace = await prisma.race.findFirst({
+      where: { tournamentId: started.id, tournamentRound: 3 },
+      include: { participants: true },
+    });
+    const finalParticipants = finalRace.participants.filter((p) => p.status === "ACCEPTED");
+    await settleMatchup(finalRace.id, {
+      [finalParticipants[0].userId]: 7000,
+      [finalParticipants[1].userId]: 100,
+    });
+    const rewards = await prisma.coinTransaction.findMany({
+      where: { reason: "tournament_champion_reward" },
+    });
+    assert.equal(rewards.length, 1);
+    assert.equal(rewards[0].amount, 150);
+  });
+
+  it("backup-promotes a full canonical 8-person pending lobby and leaves one replacement", async () => {
+    await seedFeaturedTournamentSeeds(prisma);
+    await renewTournamentSeeds();
+    const lobby = await prisma.tournament.findFirst({
+      where: { seedId: "seed-tournament-weekly-showdown", status: "PENDING" },
+    });
+    const users = await Promise.all(
+      ["Backup A", "Backup B", "Backup C", "Backup D", "Backup E", "Backup F", "Backup G", "Backup H"].map(
+        (name) => createUser(name),
+      ),
+    );
+    await prisma.tournamentParticipant.createMany({
+      data: users.map((user) => ({
+        tournamentId: lobby.id,
+        userId: user.userId,
+        status: "ACCEPTED",
+      })),
+    });
+
+    await renewTournamentSeeds();
+    const promoted = await prisma.tournament.findUnique({ where: { id: lobby.id } });
+    assert.equal(promoted.status, "ACTIVE");
+    assert.equal(
+      await prisma.race.count({ where: { tournamentId: lobby.id, tournamentRound: 1 } }),
+      4,
+    );
+    const replacements = await prisma.tournament.findMany({
+      where: { seedId: "seed-tournament-weekly-showdown", status: "PENDING" },
+    });
+    assert.equal(replacements.length, 1);
+    assert.notEqual(replacements[0].id, lobby.id);
   });
 
   it("inactive seed cancels its open lobby and stops respawns", async () => {
