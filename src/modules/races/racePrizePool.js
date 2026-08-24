@@ -119,6 +119,8 @@ function buildRaceMoneyView({ race, participants, acceptedCount }) {
     ? quickSettlementParticipants(race, rows)
     : null;
   const payoutVersion = race?.payoutRoundingVersion ?? 0;
+  const withholdTeamProjection =
+    payoutVersion === 1 && race?.isTeamRace === true && !completed;
   const finalAwards = (rawPayouts) => buildPayoutPlan({
     payoutRoundingVersion: payoutVersion,
     awards: (rawPayouts || []).map((rawAwardCoins, index) => ({
@@ -240,6 +242,17 @@ function buildRaceMoneyView({ race, participants, acceptedCount }) {
     : null;
   const visiblePayouts = completedV1Payouts || payoutPlan.awards.map((award) => award.awardCoins);
   const visibleTotal = visiblePayouts.reduce((sum, amount) => sum + amount, 0);
+  if (withholdTeamProjection) {
+    return {
+      prizePool: null,
+      buyInAmount: 0,
+      potCoins: 0,
+      heldPotCoins: 0,
+      projectedPotCoins: undefined,
+      payouts: [],
+      finishReward: null,
+    };
+  }
   return {
     prizePool: buildPrizePoolPayload({
       funded: true,

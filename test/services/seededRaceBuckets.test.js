@@ -13,12 +13,43 @@ function candidates(count) {
   }));
 }
 
-test("bucket plan is permutation-independent, capped, and rebalances a trailing singleton", () => {
+test("bucket plan is permutation-independent and keeps every sizeable cohort at least 15", () => {
   const people = candidates(16);
   const forward = planBuckets(people, []).map((bucket) => bucket.map((row) => row.userId));
   const reverse = planBuckets([...people].reverse(), []).map((bucket) => bucket.map((row) => row.userId));
   assert.deepEqual(reverse, forward);
-  assert.deepEqual(forward.map((bucket) => bucket.length), [8, 8]);
+  assert.deepEqual(forward.map((bucket) => bucket.length), [16]);
+});
+
+test("cohort sizing uses the fewest groups while keeping groups at least 15", () => {
+  assert.deepEqual(planBuckets(candidates(14), []).map((bucket) => bucket.length), [14]);
+  assert.deepEqual(planBuckets(candidates(15), []).map((bucket) => bucket.length), [15]);
+  assert.deepEqual(planBuckets(candidates(23), []).map((bucket) => bucket.length), [23]);
+  assert.deepEqual(planBuckets(candidates(30), []).map((bucket) => bucket.length), [15, 15]);
+  assert.deepEqual(planBuckets(candidates(31), []).map((bucket) => bucket.length), [16, 15]);
+  const ordered31 = planBuckets(candidates(31), []);
+  assert.deepEqual(ordered31[0].map((row) => row.userId), candidates(16).map((row) => row.userId));
+  assert.deepEqual(planBuckets(candidates(46), []).map((bucket) => bucket.length), [16, 15, 15]);
+  const large = planBuckets(candidates(616), []).map((bucket) => bucket.length);
+  assert.equal(large.length, 41);
+  assert.equal(large.filter((size) => size === 15).length, 40);
+  assert.equal(large.filter((size) => size === 16).length, 1);
+});
+
+test("friendship components stay together, with a deterministic merge for impossible short remainders", () => {
+  const people = candidates(30).map((row, index) => ({
+    ...row,
+    matchSteps: Math.floor(index / 10) * 10_000 + (index % 10) * 100,
+  }));
+  const friendships = Array.from({ length: 3 }, (_, block) =>
+    Array.from({ length: 9 }, (_, offset) => ({
+      userAId: people[block * 10 + offset].userId,
+      userBId: people[block * 10 + offset + 1].userId,
+    }))
+  ).flat();
+  const planned = planBuckets(people, friendships);
+  assert.deepEqual(planned.map((bucket) => bucket.length), [30]);
+  assert.equal(new Set(planned[0].map((row) => row.userId)).size, 30);
 });
 
 test("direct accepted friends co-locate only when their step totals fit the skill band", () => {

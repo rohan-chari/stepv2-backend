@@ -35,6 +35,11 @@ const SEED_TIMEZONE = "America/New_York";
 const BUCKET_CAPACITY = 15;
 const BUCKET_FEATURE = "seeded_race_buckets";
 
+function cohortCountForSize(size) {
+  if (size <= 0) return 0;
+  return size < BUCKET_CAPACITY ? 1 : Math.floor(size / BUCKET_CAPACITY);
+}
+
 function splitFundedExposureCandidates(elected, totals, stamp) {
   const eligible = [];
   const skippedUserIds = [];
@@ -234,8 +239,8 @@ function skillBand(a, b) {
 }
 
 // Deterministic, batch-only clustering. It starts with qualifying friendship
-// components, packs those in stable order, then uses nearest median for the
-// remaining groups. The final singleton rebalance is deterministic too.
+// components, packs them in stable skill order, and merges only an impossible
+// undersized trailing component remainder.
 function planBuckets(candidates, friendships = []) {
   const sorted = [...candidates].sort(
     (a, b) => a.matchSteps - b.matchSteps || String(a.userId).localeCompare(String(b.userId))
@@ -269,48 +274,36 @@ function planBuckets(candidates, friendships = []) {
       }
     }
     group.sort((a, b) => a.matchSteps - b.matchSteps || String(a.userId).localeCompare(String(b.userId)));
-    // Oversized friend components cannot be preserved under the hard cap. Split
-    // at deterministic adjacent skill order; all retained edges were legal.
-    for (let index = 0; index < group.length; index += BUCKET_CAPACITY) {
-      groups.push(group.slice(index, index + BUCKET_CAPACITY));
-    }
+    groups.push(group);
   }
   groups.sort((a, b) =>
     a[0].matchSteps - b[0].matchSteps || String(a[0].userId).localeCompare(String(b[0].userId))
   );
+  const bucketCount = cohortCountForSize(sorted.length);
+  const targetSizes = Array.from({ length: bucketCount }, (_, index) =>
+    Math.floor(sorted.length / bucketCount) + (index < sorted.length % bucketCount ? 1 : 0));
   const buckets = [];
+  // Pack whole friendship components in skill order. Singleton components
+  // therefore remain contiguous skill bands; a component is allowed to make a
+  // bucket slightly larger than target when splitting it would be worse.
   for (const group of groups) {
-    let remaining = [...group];
-    while (remaining.length) {
-      let bucket = buckets.find((existing) => existing.length + remaining.length <= BUCKET_CAPACITY);
-      if (!bucket) bucket = [];
-      const capacity = BUCKET_CAPACITY - bucket.length;
-      bucket.push(...remaining.splice(0, capacity));
-      if (!buckets.includes(bucket)) buckets.push(bucket);
+    let bucket = buckets.at(-1);
+    const targetSize = targetSizes[buckets.length - 1] ?? targetSizes.at(-1);
+    if (!bucket || (bucket.length >= BUCKET_CAPACITY && bucket.length + group.length > targetSize)) {
+      bucket = [];
+      buckets.push(bucket);
     }
+    bucket.push(...group);
   }
-  if (sorted.length > 1 && buckets.length > 1 && buckets.at(-1).length === 1) {
-    const lone = buckets.at(-1)[0];
-    const choices = buckets.slice(0, -1).filter((bucket) => bucket.length < BUCKET_CAPACITY);
-    if (choices.length) {
-      choices.sort((left, right) => {
-        const median = (bucket) => bucket[Math.floor(bucket.length / 2)].matchSteps;
-        return Math.abs(lone.matchSteps - median(left)) - Math.abs(lone.matchSteps - median(right)) ||
-          String(left[0].userId).localeCompare(String(right[0].userId));
-      });
-      choices[0].push(lone);
-      buckets.pop();
-    } else {
-      // Every earlier bucket is full (e.g. 16 eligible candidates). Rebalance
-      // the closest full bucket with the singleton; this is the only legal way
-      // to honour both max-15 and the no-singleton rule.
-      const previous = buckets[buckets.length - 2];
-      const combined = [...previous, lone].sort(
-        (a, b) => a.matchSteps - b.matchSteps || String(a.userId).localeCompare(String(b.userId))
-      );
-      const midpoint = Math.ceil(combined.length / 2);
-      buckets.splice(buckets.length - 2, 2, combined.slice(0, midpoint), combined.slice(midpoint));
-    }
+  // An indivisible friendship component can leave a short trailing remainder
+  // (for example, three 10-person components). Merge it into the nearest
+  // skill-adjacent cohort rather than creating an undersized field.
+  while (buckets.length > 1) {
+    const undersizedIndex = buckets.findIndex((bucket) => bucket.length < BUCKET_CAPACITY);
+    if (undersizedIndex < 0) break;
+    const targetIndex = undersizedIndex === 0 ? 1 : undersizedIndex - 1;
+    buckets[targetIndex].push(...buckets[undersizedIndex]);
+    buckets.splice(undersizedIndex, 1);
   }
   return buckets;
 }
@@ -622,14 +615,14 @@ function buildSeededRaceBuckets(dependencies = {}) {
           // lexical order, global-event lock, sorted users, sorted competition
           // rows. Participant membership is not written until all are held.
           await tx.race.createMany({
-            data: rows.map(({ raceId }) => ({
+            data: rows.map(({ raceId, group }) => ({
               id: raceId,
               seedId: seed.id,
               name: seed.name,
               targetSteps: seed.targetSteps,
               status: "PENDING",
               isPublic: false,
-              maxParticipants: BUCKET_CAPACITY,
+              maxParticipants: group.length,
               powerupsEnabled: seed.powerupsEnabled,
               timeBased: seed.timeBased,
               timezone: SEED_TIMEZONE,
@@ -855,7 +848,7 @@ function buildSeededRaceBuckets(dependencies = {}) {
         name: seed.name,
         endsAt: race?.endsAt ?? current.windowEnd,
         participantCount: mine ? await prisma.raceParticipant.count({ where: { raceId: race.id, status: "ACCEPTED" } }) : 0,
-        maxParticipants: BUCKET_CAPACITY,
+        maxParticipants: race?.maxParticipants ?? BUCKET_CAPACITY,
         isFull: false,
         myStatus: mine?.status ?? (elected?.stream === "BUCKET" ? "ELECTED" : null),
         bucketPrivate: true,
@@ -863,7 +856,9 @@ function buildSeededRaceBuckets(dependencies = {}) {
           raceId: race?.status === "PENDING" ? race.id : null,
           scheduledStartAt: upcoming.windowStart,
           participantCount: 0,
-          maxParticipants: BUCKET_CAPACITY,
+          maxParticipants: race?.status === "PENDING"
+            ? (race.maxParticipants ?? BUCKET_CAPACITY)
+            : BUCKET_CAPACITY,
           isFull: false,
           myStatus: elected?.stream === "BUCKET" ? "ELECTED" : null,
           bucketPrivate: true,

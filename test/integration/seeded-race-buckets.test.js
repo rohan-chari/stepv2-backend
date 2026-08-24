@@ -302,7 +302,7 @@ describe("private seeded race buckets (integration)", () => {
       include: { race: true, assignments: true },
     });
     assert.equal(persisted.race.isPublic, false);
-    assert.equal(persisted.race.maxParticipants, 15);
+    assert.equal(persisted.race.maxParticipants, 2);
     assert.equal(persisted.assignments.length, 2);
     assert.equal(persisted.race.prizeCalculationVersion, 2);
     assert.equal(persisted.race.prizeCoinUnit, 10);
@@ -327,6 +327,39 @@ describe("private seeded race buckets (integration)", () => {
       [],
       "the boundary never mints an online/late bucket"
     );
+  });
+
+  it("persists capacity for a 16-person cohort instead of capping it at 15", async () => {
+    const seed = await prisma.raceSeed.findUnique({ where: { kind: "DAILY_10K" } });
+    const beforeBoundary = new Date("2026-08-12T03:58:00.000Z");
+    const { windowStart, windowEnd } = upcomingWindowFor(seed, beforeBoundary);
+    await prisma.seededRaceWindowModeRecord.upsert({
+      where: { seedId_windowStart: { seedId: seed.id, windowStart } },
+      create: { seedId: seed.id, windowStart, windowEnd, mode: "BUCKET" },
+      update: {},
+    });
+    const users = await Promise.all(Array.from({ length: 16 }, () => createTestUser()));
+    await prisma.seededRaceWindowMembership.createMany({
+      data: users.map(({ user }) => ({
+        seedId: seed.id,
+        windowStart,
+        userId: user.id,
+        stream: "BUCKET",
+      })),
+    });
+    const matcher = buildSeededRaceBuckets({
+      prisma,
+      now: () => beforeBoundary,
+      appSettings,
+    });
+    const buckets = await matcher.finalise({ seed, windowStart, windowEnd });
+    assert.equal(buckets.length, 1);
+    const persisted = await prisma.seededRaceBucket.findUnique({
+      where: { raceId: buckets[0].raceId },
+      include: { race: true, assignments: true },
+    });
+    assert.equal(persisted.race.maxParticipants, 16);
+    assert.equal(persisted.assignments.length, 16);
   });
 
   it("finalizes a production-sized 450-user funded cohort inside the 5s budget without concurrent-query warnings", async () => {
