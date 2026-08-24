@@ -37,6 +37,9 @@ const {
   SearchRateLimitError,
 } = require("../services/searchFriendsByIdentity");
 const { asyncHandler } = require("../../../shared/http/asyncHandler");
+const {
+  getPublicProfile: defaultGetPublicProfile,
+} = require("../queries/getPublicProfile");
 
 function todayDateString() {
   return new Date().toISOString().slice(0, 10);
@@ -89,6 +92,8 @@ function createFriendsRouter(dependencies = {}) {
     dependencies.requestStepSyncForUsers ||
     stepSyncPushService.requestStepSyncForUsers;
   const logger = dependencies.logger || console;
+  const getPublicProfile =
+    dependencies.getPublicProfile || defaultGetPublicProfile;
 
   router.use(requireAuth);
 
@@ -172,6 +177,30 @@ function createFriendsRouter(dependencies = {}) {
       res.json(page);
     } catch (error) {
       console.error("Friends list error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // GET /friends/:userId/profile
+  // Additive public social surface. A missing or non-discoverable identity is
+  // deliberately indistinguishable from an unknown id.
+  router.get("/:userId/profile", async (req, res) => {
+    try {
+      res.set("Cache-Control", "private, no-cache");
+      res.set("Vary", "Authorization, X-Client-Features, X-Release-Channel");
+      const profile = await getPublicProfile({
+        userId: req.params.userId,
+        supportsCharacters: req.clientFeatures?.has("characters") ?? false,
+        releaseChannel: req.releaseChannel || "prod",
+        supportsRemoteAssets:
+          req.clientFeatures?.has("remote_assets") ?? false,
+      });
+      if (!profile) {
+        return res.status(404).json({ error: "Profile not found" });
+      }
+      res.json(profile);
+    } catch (error) {
+      console.error("Public profile error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });

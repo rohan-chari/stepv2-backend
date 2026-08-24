@@ -16,6 +16,7 @@ Object.assign(module.exports, require("./queries/getFriends"));
 Object.assign(module.exports, require("./queries/getFriendsSummary"));
 Object.assign(module.exports, require("./queries/searchUsers"));
 Object.assign(module.exports, require("./queries/searchDiscoverableUsers"));
+Object.assign(module.exports, require("./queries/getPublicProfile"));
 Object.assign(module.exports, require("./services/searchFriendsByIdentity"));
 Object.assign(module.exports, require("./services/friendSearchRateLimiter"));
 Object.assign(module.exports, require("./services/automaticFriendship"));
