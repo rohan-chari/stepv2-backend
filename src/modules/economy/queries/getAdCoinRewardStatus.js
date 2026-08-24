@@ -20,7 +20,12 @@ const {
 function buildGetAdCoinRewardStatus(dependencies = {}) {
   const db = dependencies.prisma || prisma;
 
-  return async function getAdCoinRewardStatus({ userId, localDate }) {
+  return async function getAdCoinRewardStatus({
+    userId,
+    localDate,
+    supportsRandomAdCoins = true,
+  }) {
+    const dailyCap = supportsRandomAdCoins ? AD_COIN_REWARD_DAILY_CAP : 3;
     const grants = await db.adRewardGrant.findMany({
       where: {
         userId,
@@ -30,7 +35,7 @@ function buildGetAdCoinRewardStatus(dependencies = {}) {
       select: { consumedAt: true, coinAmount: true },
     });
     const consumed = grants.filter((g) => g.consumedAt != null).length;
-    const remainingToday = Math.max(0, AD_COIN_REWARD_DAILY_CAP - consumed);
+    const remainingToday = Math.max(0, dailyCap - consumed);
     const pending = grants.find((g) => g.consumedAt == null);
     return {
       available: remainingToday > 0,
@@ -40,9 +45,13 @@ function buildGetAdCoinRewardStatus(dependencies = {}) {
       // the lower bound as stable preview copy. Once a grant exists, return
       // its persisted random amount.
       coinAmount: pending?.coinAmount ?? AD_COIN_REWARD_AMOUNT,
-      coinRewardMin: AD_COIN_REWARD_MIN,
-      coinRewardMax: AD_COIN_REWARD_MAX,
-      dailyCap: AD_COIN_REWARD_DAILY_CAP,
+      ...(supportsRandomAdCoins
+        ? {
+            coinRewardMin: AD_COIN_REWARD_MIN,
+            coinRewardMax: AD_COIN_REWARD_MAX,
+          }
+        : {}),
+      dailyCap,
     };
   };
 }

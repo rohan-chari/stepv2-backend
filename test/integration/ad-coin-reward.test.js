@@ -9,7 +9,7 @@ const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
 let server;
 let nextAppleId = 0;
 
-const ADS_HEADERS = { "X-Client-Features": "characters,ads" };
+const ADS_HEADERS = { "X-Client-Features": "characters,ads,ad_coin_random" };
 
 async function createUser() {
   const appleId = `apple-acr-${++nextAppleId}`;
@@ -86,6 +86,19 @@ describe("ad coin reward (Get Coins hub)", () => {
     );
     const withoutAds = await res.json();
     assert.equal("adCoinReward" in withoutAds, false);
+  });
+
+  it("keeps the legacy three-watch presentation for older ad clients", async () => {
+    const user = await createUser();
+    const res = await request(
+      server.baseUrl,
+      "GET",
+      `/daily-reward/status?localDate=${todayLocal()}`,
+      { token: user.token, headers: { "X-Client-Features": "characters,ads" } }
+    );
+    assert.equal(res.status, 200);
+    assert.equal(res.body.adCoinReward.dailyCap, 3);
+    assert.equal("coinRewardMin" in res.body.adCoinReward, false);
   });
 
   it("claims up to the daily cap, then 409s; coins and ledger add up", async () => {

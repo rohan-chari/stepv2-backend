@@ -38,6 +38,9 @@ function mockDb({ grants = [] } = {}) {
 
   return {
     rows,
+    async $transaction(callback) {
+      return callback(this);
+    },
     adRewardGrant: {
       count: async ({ where }) => rows.filter((r) => matches(r, where)).length,
       findFirst: async ({ where, orderBy }) => {
@@ -76,12 +79,12 @@ test("claimAdCoinReward: consumes the oldest grant and mints the coin reward", a
     grants: [{ id: "g-old" }, { id: "g-new", createdAt: new Date(2027, 0, 1) }],
   });
   const awardCoins = mockAwardCoins();
-  const claim = buildClaimAdCoinReward({ prisma: db, awardCoins, random: () => 0 });
+  const claim = buildClaimAdCoinReward({ prisma: db, awardCoins, random: () => 0.99 });
 
   const result = await claim({ userId: "user-1", localDate: todayLocal() });
 
-  assert.equal(result.coinAmount, AD_COIN_REWARD_AMOUNT);
-  assert.equal(result.coins, 500 + AD_COIN_REWARD_AMOUNT);
+  assert.equal(result.coinAmount, 50);
+  assert.equal(result.coins, 550);
   assert.equal(result.remainingToday, AD_COIN_REWARD_DAILY_CAP - 1);
   assert.equal(awardCoins.calls.length, 1);
   assert.equal(awardCoins.calls[0].reason, "ad_coin_reward");
@@ -89,7 +92,7 @@ test("claimAdCoinReward: consumes the oldest grant and mints the coin reward", a
   const consumed = db.rows.find((r) => r.id === "g-old");
   assert.ok(consumed.consumedAt instanceof Date);
   assert.equal(consumed.rewardType, "COINS");
-  assert.equal(consumed.coinAmount, AD_COIN_REWARD_AMOUNT);
+  assert.equal(consumed.coinAmount, 50);
   const untouched = db.rows.find((r) => r.id === "g-new");
   assert.equal(untouched.consumedAt, null);
 });
@@ -139,19 +142,18 @@ test("claimAdCoinReward: grants from another day never count toward today", asyn
 
 test("claimAdCoinReward: concurrent double-consume loses the conditional update", async () => {
   const db = mockDb({ grants: [{ id: "g-1" }] });
-  // Simulate the race: another request consumed the grant between findFirst
-  // and updateMany.
-  const realUpdateMany = db.adRewardGrant.updateMany;
-  db.adRewardGrant.updateMany = async (args) => {
+  // Simulate a serializable transaction retry observing the other claim first.
+  const realTransaction = db.$transaction;
+  db.$transaction = async (callback) => {
     db.rows[0].consumedAt = new Date();
-    return realUpdateMany(args);
+    return realTransaction.call(db, callback);
   };
   const awardCoins = mockAwardCoins();
   const claim = buildClaimAdCoinReward({ prisma: db, awardCoins });
 
   await assert.rejects(
     claim({ userId: "user-1", localDate: todayLocal() }),
-    (err) => err.statusCode === 409
+    (err) => err.statusCode === 409 && err.code === "AD_NOT_VERIFIED"
   );
   assert.equal(awardCoins.calls.length, 0);
 });

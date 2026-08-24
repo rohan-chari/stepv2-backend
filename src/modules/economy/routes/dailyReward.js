@@ -98,6 +98,7 @@ function createDailyRewardRouter(dependencies = {}) {
           status.adCoinReward = await getAdCoinRewardStatus({
             userId: req.user.id,
             localDate,
+            supportsRandomAdCoins: req.clientFeatures?.has("ad_coin_random") === true,
           });
         }
         return res.json(status);
@@ -128,6 +129,7 @@ function createDailyRewardRouter(dependencies = {}) {
         status.adCoinReward = await getAdCoinRewardStatus({
           userId: req.user.id,
           localDate,
+          supportsRandomAdCoins: req.clientFeatures?.has("ad_coin_random") === true,
         });
       }
       res.json(status);
