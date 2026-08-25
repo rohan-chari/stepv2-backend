@@ -27,6 +27,11 @@ const {
 const sharing = require("./sharing");
 const { createWaitlistRouter } = require("./waitlist/router");
 const { createReviewsRouter } = require("./reviews/router");
+const {
+  renderLanding: renderGiveawayLandingPage,
+  renderNoContest: renderNoGiveawayPage,
+  renderRules: renderGiveawayRulesPage,
+} = require("../giveaways/services/html");
 
 module.exports = {
   createWaitlistRouter,
@@ -40,4 +45,7 @@ module.exports = {
   renderTournamentLandingPage,
   renderTournamentNotFoundPage,
   sharing,
+  renderGiveawayLandingPage,
+  renderNoGiveawayPage,
+  renderGiveawayRulesPage,
 };

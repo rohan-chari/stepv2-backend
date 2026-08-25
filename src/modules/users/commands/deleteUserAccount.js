@@ -310,6 +310,17 @@ function buildDeleteUserAccount(dependencies = {}) {
       await tx.appReviewPromptAttempt.deleteMany({ where: { userId } });
       await tx.inboxAlert.deleteMany({ where: { userId } });
       await tx.feedbackThread.deleteMany({ where: { userId } });
+      // Referral contests retain only the versioned pseudonymous acceptance /
+      // abuse key. Remove the public snapshot immediately and make the entry
+      // permanently non-participating before the user FK is set null.
+      await tx.giveawayEntrant.updateMany({
+        where: { userId },
+        data: {
+          status: "WITHDRAWN",
+          displayNameSnapshot: null,
+          withdrawnAt: new Date(),
+        },
+      });
       // Free-text feedback (batch 2026-08-08 item 7). The FK is ON DELETE
       // CASCADE so this is not required for correctness, but deleting it
       // explicitly keeps the row removal inside this transaction — and inside

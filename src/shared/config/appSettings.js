@@ -324,6 +324,7 @@ const KNOWN_FLAGS = {
   redisCacheHomeInboxUnreadEnabled: false,
   homeServiceBannerEnabled: false,
   homeServiceBannerMessage: "",
+  homeServiceBannerContestSlug: "",
   apiShopBootstrapV1Enabled: false,
   apiStaticEtagsV1Enabled: false,
   apiTournamentDetailV1Enabled: false,

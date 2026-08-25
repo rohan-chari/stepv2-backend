@@ -4,6 +4,7 @@ const { isStrictFlagEnabled } = require("../../shared/config/isStrictFlagEnabled
 const {
   getEligibleGlobalEventSummary,
 } = require("./queries/getEligibleGlobalEventSummary");
+const { buildServiceBanner } = require("./services/buildServiceBanner");
 
 async function settle(task, logger, label) {
   try {
@@ -42,6 +43,7 @@ function buildHomeRaceCardResponse(dependencies) {
       supportsAds,
       supportsImpactSummaries,
       supportsInbox,
+      supportsReferralContest,
       compactShell,
       homeActiveRaces,
       homePersistedTotals,
@@ -211,16 +213,12 @@ function buildHomeRaceCardResponse(dependencies) {
     }
 
     // Wave 4: service settings and assembly of already-settled results.
-    const [bannerEnabled, bannerMessage] = await Promise.all([
-      appSettings.getFlag("homeServiceBannerEnabled"),
-      appSettings.getFlag("homeServiceBannerMessage"),
-    ]);
-    if (bannerEnabled === true && typeof bannerMessage === "string") {
-      const message = bannerMessage.trim();
-      if (message.length >= 1 && message.length <= 240) {
-        result.homeServiceBanner = { enabled: true, message };
-      }
-    }
+    const serviceBanner = await buildServiceBanner({
+      settings: appSettings,
+      prisma,
+      supportsReferralContest,
+    });
+    if (serviceBanner) result.homeServiceBanner = serviceBanner;
     if (compactShell) {
       result.contract = "home-shell-v1";
       result.resolved = {

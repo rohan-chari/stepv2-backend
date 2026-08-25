@@ -34,6 +34,9 @@ Object.assign(module.exports, require("./commands/getOrCreateReferralCode"));
 Object.assign(module.exports, require("./commands/recordReferral"));
 Object.assign(module.exports, require("./commands/redeemReferralCode"));
 Object.assign(module.exports, require("./commands/grantReferralReward"));
+Object.assign(module.exports, require("./commands/processReferralQualificationIntents"));
+Object.assign(module.exports, require("./queries/getGiveawayReferralFacts"));
+Object.assign(module.exports, require("./services/referralQualification"));
 Object.assign(module.exports, require("./commands/sendRaceMessage"));
 Object.assign(module.exports, require("./commands/deleteRaceMessage"));
 Object.assign(module.exports, require("./routes/friends")); // createFriendsRouter

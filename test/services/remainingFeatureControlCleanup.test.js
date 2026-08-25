@@ -81,6 +81,7 @@ const RETAINED_MUTABLE_VALUES = Object.freeze({
   inlineRaceResolutionFallback: false,
   homeServiceBannerEnabled: false,
   homeServiceBannerMessage: "",
+  homeServiceBannerContestSlug: "",
   bannerAdsEnabled: true,
 });
 

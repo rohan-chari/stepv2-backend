@@ -6,6 +6,13 @@ const { awardCoins } = require("../../../shared/economy/awardCoins");
 const {
   grantReferralRewardsForRace,
 } = require("../../social/commands/grantReferralReward");
+const {
+  createReferralQualificationIntents,
+} = require("../../social/commands/processReferralQualificationIntents");
+const {
+  acquireReferralQualificationFence,
+  isReferralQualifyingRace,
+} = require("../../social/services/referralQualification");
 const { eventBus } = require("../../../shared/events/eventBus");
 const {
   computeRacePayouts,
@@ -168,7 +175,7 @@ function buildCompleteRace(dependencies = {}) {
           await acquireRaceWriteFence(tx, raceId);
           const exposureRace = await tx.race.findUnique({
             where: { id: raceId },
-            select: { fundedPrize: true },
+            select: { fundedPrize: true, seedId: true, tournamentId: true },
           });
           if (exposureRace?.fundedPrize === true) {
             const accepted = await tx.raceParticipant.findMany({
@@ -193,10 +200,38 @@ function buildCompleteRace(dependencies = {}) {
           if (!lockedRace || lockedRace.status !== "ACTIVE") {
             return { count: 0 };
           }
-          return tx.race.updateMany({
+          const updated = await tx.race.updateMany({
             where: { id: raceId, status: "ACTIVE" },
             data: completionData,
           });
+          if (updated.count === 1) {
+            const walkers = await tx.raceParticipant.findMany({
+              where: {
+                raceId,
+                status: "ACCEPTED",
+                rawSteps: { gte: 2000 },
+                userId: { in: participantUserIds || [] },
+              },
+              select: { userId: true },
+            });
+            const qualificationProjection = {
+              seedId: exposureRace?.seedId,
+              tournamentId: exposureRace?.tournamentId,
+              participants: walkers.map((row) => ({ status: "ACCEPTED", rawSteps: 2000 })),
+            };
+            if (isReferralQualifyingRace(qualificationProjection)) {
+              await acquireReferralQualificationFence(tx);
+              await createReferralQualificationIntents({
+                tx,
+                raceId,
+                qualifiedAt: completionData.completedAt,
+                participantUserIds: walkers.map((row) => row.userId),
+                seedId: exposureRace.seedId,
+                tournamentId: exposureRace.tournamentId,
+              });
+            }
+          }
+          return updated;
         })
       : await raceModel.updateIfActive(raceId, completionData);
 

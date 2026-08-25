@@ -386,7 +386,8 @@ function createAdminRouter(dependencies = {}) {
         }
         if (
           key === "homeServiceBannerEnabled" ||
-          key === "homeServiceBannerMessage"
+          key === "homeServiceBannerMessage" ||
+          key === "homeServiceBannerContestSlug"
         ) {
           return res.status(400).json({
             error: "Use PATCH /admin/settings/home-service-banner for banner settings",
@@ -412,14 +413,33 @@ function createAdminRouter(dependencies = {}) {
   // generic PATCH /settings remains boolean-only for its historical contract.
   router.patch("/settings/home-service-banner", async (req, res) => {
     try {
-      const { enabled, message } = req.body || {};
+      const allowed = new Set(["enabled", "message", "contestSlug"]);
+      if (!req.body || typeof req.body !== "object" || Array.isArray(req.body) || Object.keys(req.body).some((key) => !allowed.has(key))) {
+        return res.status(400).json({ error: "invalid banner settings body" });
+      }
+      const { enabled, message } = req.body;
+      const suppliedContestSlug = Object.prototype.hasOwnProperty.call(req.body, "contestSlug");
+      const [storedSlug, storedEnabled] = await Promise.all([
+        db.appSetting.findUnique({ where: { key: "homeServiceBannerContestSlug" } }),
+        db.appSetting.findUnique({ where: { key: "homeServiceBannerEnabled" } }),
+      ]);
+      const existingFlags = {
+        homeServiceBannerContestSlug: typeof storedSlug?.value === "string" ? storedSlug.value : "",
+        homeServiceBannerEnabled: storedEnabled?.value === true,
+      };
+      const contestSlug = suppliedContestSlug
+        ? req.body.contestSlug
+        : (enabled ? existingFlags.homeServiceBannerContestSlug || "" : "");
       if (typeof enabled !== "boolean" || typeof message !== "string") {
         return res.status(400).json({ error: "enabled and message are required" });
       }
       const cleanMessage = message.trim();
+      const cleanSlug = typeof contestSlug === "string" ? contestSlug.trim() : null;
       if (
         (enabled && (cleanMessage.length < 1 || cleanMessage.length > 240)) ||
-        (!enabled && cleanMessage.length > 0)
+        (!enabled && (cleanMessage.length > 0 || cleanSlug)) ||
+        cleanSlug == null ||
+        (cleanSlug && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(cleanSlug))
       ) {
         return res.status(400).json({
           error: enabled
@@ -427,10 +447,51 @@ function createAdminRouter(dependencies = {}) {
             : "message must be empty when disabled",
         });
       }
-      await settings.setFlagsAtomically([
-        ["homeServiceBannerEnabled", enabled],
-        ["homeServiceBannerMessage", enabled ? cleanMessage : ""],
-      ]);
+      const auditedSlug = cleanSlug || (!enabled ? existingFlags.homeServiceBannerContestSlug || "" : "");
+      if (auditedSlug) {
+        await transaction(async (tx) => {
+          const locked = await tx.$queryRaw`
+            SELECT id FROM giveaway_contests WHERE slug = ${auditedSlug} FOR UPDATE
+          `;
+          if (!locked.length) {
+            const error = new Error("contestSlug must identify a published contest");
+            error.statusCode = 400;
+            throw error;
+          }
+          const contest = await tx.giveawayContest.findUnique({ where: { slug: auditedSlug } });
+          if (enabled && (contest.lifecycleStatus !== "PUBLISHED" || cleanMessage !== contest.bannerMessage)) {
+            const error = new Error(contest.lifecycleStatus !== "PUBLISHED"
+              ? "contestSlug must identify a published contest"
+              : "message must match the contest's frozen banner message");
+            error.statusCode = 400;
+            throw error;
+          }
+          for (const [key, value] of [
+            ["homeServiceBannerEnabled", enabled],
+            ["homeServiceBannerMessage", enabled ? cleanMessage : ""],
+            ["homeServiceBannerContestSlug", enabled ? cleanSlug : ""],
+          ]) {
+            await tx.appSetting.upsert({ where: { key }, update: { value }, create: { key, value } });
+          }
+          await tx.giveawayAuditEvent.create({ data: {
+            contestId: contest.id,
+            actorId: req.user.id,
+            method: "PATCH:home-service-banner",
+            action: enabled ? "BANNER_ACTIVATED" : "BANNER_DISABLED",
+            requestBody: { enabled, contestSlug: auditedSlug },
+            oldState: contest.lifecycleStatus,
+            newState: contest.lifecycleStatus,
+          } });
+        });
+        settings.bustCache?.();
+        await derivedCache.invalidate({ keys: [cacheKeys.appSettingsKey], prefix: cacheKeys.PREFIX.APP_SETTINGS });
+      } else {
+        await settings.setFlagsAtomically([
+          ["homeServiceBannerEnabled", enabled],
+          ["homeServiceBannerMessage", enabled ? cleanMessage : ""],
+          ["homeServiceBannerContestSlug", enabled ? cleanSlug : ""],
+        ]);
+      }
       // Preserve the established settings mutation envelope so the admin
       // client needs no endpoint-specific response parser.
       res.json({ settings: await settings.getAllFlags() });

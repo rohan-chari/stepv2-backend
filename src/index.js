@@ -59,6 +59,7 @@ const {
 const {
   registerRaceListCacheInvalidation,
 } = require("./modules/races");
+const { scheduleGiveawayRetention } = require("./modules/giveaways");
 function startServer({
   app = createApp(),
   port = Number(process.env.PORT || 3000),
@@ -89,6 +90,8 @@ function startServer({
     schedulePushCleanup = schedulePushDeliveryCleanup,
   scheduleReferralLinkOpenCleanup:
     scheduleReferralCleanup = scheduleReferralLinkOpenCleanup,
+  scheduleGiveawayRetention:
+    scheduleGiveawayRetentionJob = scheduleGiveawayRetention,
   scheduleDailyMover: scheduleDaily = scheduleDailyMover,
   scheduleDailyRewardReminder:
     scheduleDailyReminder = scheduleDailyRewardReminder,
@@ -180,6 +183,9 @@ function startServer({
         scheduleMetricsActivityCleanup();
         schedulePushCleanup();
         scheduleReferralCleanup();
+      }
+      if (!destructiveCleanupDisabled("GIVEAWAY_RETENTION_DISABLED")) {
+        scheduleGiveawayRetentionJob();
       }
       // step_samples retention prune (3am ET, 45d + unsettled-race guard;
       // Five-Minute Step Samples §4.1), behind the destructive-jobs brake.

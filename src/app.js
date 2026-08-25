@@ -7,6 +7,10 @@ const { createAuthRouter } = require("./modules/users");
 const { createStepsRouter } = require("./modules/steps");
 const { createFriendsRouter } = require("./modules/social");
 const { createAdminRouter } = require("./modules/admin");
+const {
+  createGiveawayAdminRouter,
+  createGiveawayPublicRouter,
+} = require("./modules/giveaways");
 const { createNotificationsRouter } = require("./modules/notifications");
 const { createLeaderboardRouter } = require("./modules/leaderboard");
 const { createRankedRouter } = require("./modules/ranked");
@@ -90,6 +94,10 @@ function createApp(dependencies = {}) {
   // transparently (Dart HttpClient autoUncompress; undici/URLSession likewise).
   // Placed early so it wraps every downstream JSON response.
   app.use(compression({ threshold: 1024 }));
+  // Giveaway admin/entry payloads are legally sensitive, small structured
+  // documents. Parse them with the contract's tighter bound before the
+  // application-wide parser; body-parser skips an already-consumed request.
+  app.use(["/giveaways", "/admin/giveaways"], express.json({ limit: "32kb" }));
   app.use(express.json());
   app.use(extractTimezone);
   // Capability gating (X-Client-Features) is read app-wide: social surfaces
@@ -119,6 +127,7 @@ function createApp(dependencies = {}) {
   app.use("/auth", createAuthRouter(dependencies));
   app.use("/steps", createStepsRouter(dependencies));
   app.use("/friends", createFriendsRouter(dependencies));
+  app.use("/admin/giveaways", createGiveawayAdminRouter(dependencies));
   app.use("/admin", createAdminRouter(dependencies));
   app.use("/notifications", createNotificationsRouter(dependencies));
   app.use("/leaderboard", createLeaderboardRouter(dependencies));
@@ -145,6 +154,10 @@ function createApp(dependencies = {}) {
   // Unauthenticated by design: Google's AdMob SSV callback, trusted via its
   // ECDSA signature (see modules/economy/routes/ads.js).
   app.use("/ads", createAdsRouter(dependencies));
+  // Public JSON/member APIs and canonical server-rendered contest pages. This
+  // explicit mount precedes static marketing handlers so historical rules URLs
+  // remain durable across web-bundle deployments.
+  app.use("/giveaways", createGiveawayPublicRouter(dependencies));
 
   // `redis` is additive and internal-only (spec §3): old clients ignore it, and
   // `status` keeps its exact previous meaning/value. "disabled" = REDIS_URL
@@ -344,6 +357,15 @@ function createApp(dependencies = {}) {
       err &&
       (err.type === "entity.too.large" || err.statusCode === 413 || err.status === 413)
     ) {
+      if (
+        req.originalUrl?.startsWith("/giveaways") ||
+        req.originalUrl?.startsWith("/admin/giveaways")
+      ) {
+        return res.status(413).json({
+          error: "Giveaway request body too large",
+          code: "GIVEAWAY_BODY_TOO_LARGE",
+        });
+      }
       return res.status(413).json({
         error: "Step sync request too large",
         code: "STEP_SYNC_TOO_LARGE",

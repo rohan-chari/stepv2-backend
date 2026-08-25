@@ -38,6 +38,7 @@ const { buildHomeRaceCardResponse } = require("./buildHomeRaceCardResponse");
 const {
   getEligibleGlobalEventSummary,
 } = require("./queries/getEligibleGlobalEventSummary");
+const { buildServiceBanner } = require("./services/buildServiceBanner");
 
 function createHomeRouter(dependencies = {}) {
   const router = Router();
@@ -140,6 +141,8 @@ function createHomeRouter(dependencies = {}) {
           supportsImpactSummaries:
             req.clientFeatures?.has("impact_summaries") ?? false,
           supportsInbox: req.clientFeatures?.has("inbox_v1") ?? false,
+          supportsReferralContest:
+            req.clientFeatures?.has("referral_contest_v1") ?? false,
           compactShell: compact,
           homeActiveRaces,
           homePersistedTotals,
@@ -326,16 +329,13 @@ function createHomeRouter(dependencies = {}) {
         });
       }
 
-      const [bannerEnabled, bannerMessage] = await Promise.all([
-        settings.getFlag("homeServiceBannerEnabled"),
-        settings.getFlag("homeServiceBannerMessage"),
-      ]);
-      if (bannerEnabled === true && typeof bannerMessage === "string") {
-        const message = bannerMessage.trim();
-        if (message.length >= 1 && message.length <= 240) {
-          result.homeServiceBanner = { enabled: true, message };
-        }
-      }
+      const serviceBanner = await buildServiceBanner({
+        settings,
+        prisma,
+        supportsReferralContest:
+          req.clientFeatures?.has("referral_contest_v1") ?? false,
+      });
+      if (serviceBanner) result.homeServiceBanner = serviceBanner;
 
       if (optionalShellPromises) {
         const [presentation, friends] = await Promise.allSettled(

@@ -19,6 +19,9 @@ const {
   destructiveCleanupDisabled,
   raceResolutionPostTaskWorkerDisabled,
 } = require("../../../shared/config/operationalControls");
+const {
+  recoverReferralQualificationIntents,
+} = require("../../giveaways/jobs/qualificationIntentRecovery");
 
 const POLL_INTERVAL_MS = 250;
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
@@ -59,6 +62,11 @@ function buildRaceResolutionPostTaskRunner(dependencies = {}) {
   const logger = dependencies.logger || console;
   const env = dependencies.env || process.env;
   const workBudget = dependencies.raceResolutionWorkBudget || defaultWorkBudget;
+  const recoverQualificationIntents =
+    dependencies.recoverReferralQualificationIntents ||
+    (dependencies.RaceResolutionPostTask
+      ? async () => ({ processed: 0, remaining: 0 })
+      : () => recoverReferralQualificationIntents());
   let lastSuccessfulClaimProbeAt = null;
   let positiveReadinessCachedUntilMs = 0;
 
@@ -160,6 +168,7 @@ function buildRaceResolutionPostTaskRunner(dependencies = {}) {
       if (postTaskWorkerDisabled(env)) return null;
       try {
         return await workBudget.run("post", async () => {
+          await recoverQualificationIntents();
           const task = await model.claimNext({ now: now() });
           lastSuccessfulClaimProbeAt = now();
           return processClaimedTask(task);

@@ -177,11 +177,12 @@ model User {
   notifications           Notification[]
 
   // Referral back-relations. Referral is the single source of truth for who→whom.
-  referralsMade          Referral[]              @relation("ReferralsMade")
-  referralReceived       Referral?               @relation("ReferralReceived")
-  referralRewardGrants   ReferralRewardGrant[]
-  adRewardGrants         AdRewardGrant[]
-  racePayoutDoubleOffers RacePayoutDoubleOffer[]
+  referralsMade              Referral[]                  @relation("ReferralsMade")
+  referralReceived           Referral?                   @relation("ReferralReceived")
+  referralQualificationFacts ReferralQualificationFact[] @relation("ReferralQualificationFactReferrer")
+  referralRewardGrants       ReferralRewardGrant[]
+  adRewardGrants             AdRewardGrant[]
+  racePayoutDoubleOffers     RacePayoutDoubleOffer[]
 
   // ── Tournaments (bracket mode) — all additive back-relations. Old app builds
   // never see these; existing rows are unaffected (no columns added to users).
@@ -213,6 +214,7 @@ model User {
   feedbackThreads             FeedbackThread[]
   seededBucketAssignments     SeededRaceBucketAssignment[]
   seededRaceWindowMemberships SeededRaceWindowMembership[]
+  giveawayEntrants            GiveawayEntrant[]
 
   // First index on this table. Backs the daily-reward reminder scheduler, which
   // selects users by IANA zone: findMany({ where: { timezone: { in: zonesAtSlot } } }).
@@ -470,25 +472,25 @@ model InboxAlert {
 }
 
 model InboxDeliveryOutbox {
-  id           String    @id @default(uuid())
-  alertId      String    @map("alert_id")
-  kind         String    @default("PUSH")
-  payload      Json
-  status       String    @default("PENDING")
-  attemptCount Int       @default(0) @map("attempt_count")
-  availableAt  DateTime  @default(now()) @map("available_at")
-  claimedAt    DateTime? @map("claimed_at")
-  leaseUntil   DateTime? @map("lease_until")
-  leaseToken   String?   @map("lease_token")
+  id                 String    @id @default(uuid())
+  alertId            String    @map("alert_id")
+  kind               String    @default("PUSH")
+  payload            Json
+  status             String    @default("PENDING")
+  attemptCount       Int       @default(0) @map("attempt_count")
+  availableAt        DateTime  @default(now()) @map("available_at")
+  claimedAt          DateTime? @map("claimed_at")
+  leaseUntil         DateTime? @map("lease_until")
+  leaseToken         String?   @map("lease_token")
   providerAcceptedAt DateTime? @map("provider_accepted_at")
-  acceptedTokens Json      @default("[]") @map("accepted_tokens")
-  retryAt      DateTime? @map("retry_at")
-  lastErrorCode String?  @map("last_error_code")
-  deliveredAt  DateTime? @map("delivered_at")
-  createdAt    DateTime  @default(now()) @map("created_at")
-  updatedAt    DateTime  @updatedAt @map("updated_at")
+  acceptedTokens     Json      @default("[]") @map("accepted_tokens")
+  retryAt            DateTime? @map("retry_at")
+  lastErrorCode      String?   @map("last_error_code")
+  deliveredAt        DateTime? @map("delivered_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
 
-  alert InboxAlert @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  alert          InboxAlert                   @relation(fields: [alertId], references: [id], onDelete: Cascade)
   deviceAttempts InboxDeliveryDeviceAttempt[]
 
   @@unique([alertId, kind])
@@ -497,14 +499,14 @@ model InboxDeliveryOutbox {
 }
 
 model InboxDeliveryDeviceAttempt {
-  id            String   @id @default(uuid())
-  outboxId      String   @map("outbox_id")
-  tokenHash     String   @map("token_hash")
+  id            String    @id @default(uuid())
+  outboxId      String    @map("outbox_id")
+  tokenHash     String    @map("token_hash")
   disposition   String
-  attemptCount  Int      @default(1) @map("attempt_count")
-  lastErrorCode String?  @map("last_error_code")
+  attemptCount  Int       @default(1) @map("attempt_count")
+  lastErrorCode String?   @map("last_error_code")
   acceptedAt    DateTime? @map("accepted_at")
-  updatedAt     DateTime @default(now()) @updatedAt @map("updated_at")
+  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at")
 
   outbox InboxDeliveryOutbox @relation(fields: [outboxId], references: [id], onDelete: Cascade)
 
@@ -1435,26 +1437,28 @@ model Race {
   createdAt               DateTime         @default(now()) @map("created_at")
   updatedAt               DateTime         @updatedAt @map("updated_at")
 
-  creator                User?                       @relation("raceCreator", fields: [creatorId], references: [id])
-  seed                   RaceSeed?                   @relation(fields: [seedId], references: [id])
-  winner                 User?                       @relation("raceWinner", fields: [winnerUserId], references: [id])
-  tournament             Tournament?                 @relation(fields: [tournamentId], references: [id])
-  participants           RaceParticipant[]
-  powerups               RacePowerup[]
-  activeEffects          RaceActiveEffect[]
-  powerupEvents          RacePowerupEvent[]
-  messages               RaceMessage[]
-  payoutDoubleOfferItems RacePayoutDoubleOfferItem[]
-  resolutionJob          RaceResolutionJobV2?
-  resolutionPostTasks    RaceResolutionPostTask[]
-  seededBucket           SeededRaceBucket?           @relation("SeededBucketRace")
-  effectImpacts          RaceEffectImpact[]
-  impactEvents           RaceImpactEvent[]
-  umbrellaInterceptions  RaceUmbrellaInterception[]
-  activeImpactWork       ActiveRaceImpactWork[]
-  activeEffectImpacts    ActiveRaceEffectImpact[]
-  globalEventImpacts     GlobalEventRaceImpact[]
-  reviewPromptAttempts   AppReviewPromptAttempt[]
+  creator                      User?                         @relation("raceCreator", fields: [creatorId], references: [id])
+  seed                         RaceSeed?                     @relation(fields: [seedId], references: [id])
+  winner                       User?                         @relation("raceWinner", fields: [winnerUserId], references: [id])
+  tournament                   Tournament?                   @relation(fields: [tournamentId], references: [id])
+  participants                 RaceParticipant[]
+  powerups                     RacePowerup[]
+  activeEffects                RaceActiveEffect[]
+  powerupEvents                RacePowerupEvent[]
+  messages                     RaceMessage[]
+  payoutDoubleOfferItems       RacePayoutDoubleOfferItem[]
+  resolutionJob                RaceResolutionJobV2?
+  resolutionPostTasks          RaceResolutionPostTask[]
+  seededBucket                 SeededRaceBucket?             @relation("SeededBucketRace")
+  effectImpacts                RaceEffectImpact[]
+  impactEvents                 RaceImpactEvent[]
+  umbrellaInterceptions        RaceUmbrellaInterception[]
+  activeImpactWork             ActiveRaceImpactWork[]
+  activeEffectImpacts          ActiveRaceEffectImpact[]
+  globalEventImpacts           GlobalEventRaceImpact[]
+  reviewPromptAttempts         AppReviewPromptAttempt[]
+  referralQualifications       Referral[]                    @relation("ReferralQualifyingRace")
+  referralQualificationIntents ReferralQualificationIntent[] @relation("ReferralQualificationIntentRace")
 
   @@unique([tournamentId, tournamentRound, tournamentMatchIndex])
   @@index([creatorId])
@@ -1881,35 +1885,35 @@ model RacePayoutDoubleClaimReceipt {
 }
 
 model RacePowerup {
-  id            String         @id @default(uuid())
-  raceId        String         @map("race_id")
-  participantId String         @map("participant_id")
-  userId        String         @map("user_id")
-  type          PowerupType?
-  rarity        PowerupRarity?
-  status        PowerupStatus  @default(HELD)
-  earnedAtSteps Int?           @map("earned_at_steps")
+  id                    String         @id @default(uuid())
+  raceId                String         @map("race_id")
+  participantId         String         @map("participant_id")
+  userId                String         @map("user_id")
+  type                  PowerupType?
+  rarity                PowerupRarity?
+  status                PowerupStatus  @default(HELD)
+  earnedAtSteps         Int?           @map("earned_at_steps")
   // Exact provenance for the temporary race row created when an account-wide
   // inventory item is redeemed. Default false keeps old writers and legacy
   // rows fail-closed: they can remain HELD, but can never mint an inventory
   // refund without an explicit redemption stamp.
-  redeemedFromInventory Boolean @default(false) @map("redeemed_from_inventory")
-  usedAt        DateTime?      @map("used_at")
-  targetUserId  String?        @map("target_user_id")
-  upgradeLevel  Int            @default(0) @map("upgrade_level")
+  redeemedFromInventory Boolean        @default(false) @map("redeemed_from_inventory")
+  usedAt                DateTime?      @map("used_at")
+  targetUserId          String?        @map("target_user_id")
+  upgradeLevel          Int            @default(0) @map("upgrade_level")
   // Balance-config version that produced this roll (D9 provenance). Nullable and
   // additive: rows created before balance config shipped stay NULL, and a roll
   // that happens while the config table is unreadable (code-defaults fallback)
   // also stays NULL. Stamped only where rarity is actually decided —
   // openMysteryBox / openMysteryBoxBatch — never in rollPowerup, which mints
   // unopened MYSTERY_BOX rows and rolls nothing.
-  configVersion Int?           @map("config_version")
+  configVersion         Int?           @map("config_version")
   // Batch 2026-08-08 item 11: when this rolled powerup was rerolled via a
   // rewarded ad. NULL = never rerolled (true of every pre-existing row), which
   // is what the once-per-roll guard tests. Additive/nullable.
-  rerolledAt    DateTime?      @map("rerolled_at")
-  createdAt     DateTime       @default(now()) @map("created_at")
-  updatedAt     DateTime       @updatedAt @map("updated_at")
+  rerolledAt            DateTime?      @map("rerolled_at")
+  createdAt             DateTime       @default(now()) @map("created_at")
+  updatedAt             DateTime       @updatedAt @map("updated_at")
 
   race          Race               @relation(fields: [raceId], references: [id], onDelete: Cascade)
   participant   RaceParticipant    @relation(fields: [participantId], references: [id], onDelete: Cascade)
@@ -2036,12 +2040,12 @@ model OnboardingBoxGrant {
 // deleting their account never destroys the attribution row or the referee's
 // pending reward (the grant code tolerates a null referrer). See §4B.
 model Referral {
-  id             String   @id @default(uuid())
-  referrerId     String?  @map("referrer_id") // nullable: SetNull on referrer delete
-  refereeId      String   @unique @map("referee_id")
-  refereeSubHash String   @unique @map("referee_sub_hash") // hashAppleSub(referee appleId||googleSub)
-  code           String? // code used at signup, if any
-  status         String   @default("PENDING") // PENDING -> QUALIFIED -> REWARDED -> EXPIRED
+  id               String    @id @default(uuid())
+  referrerId       String?   @map("referrer_id") // nullable: SetNull on referrer delete
+  refereeId        String    @unique @map("referee_id")
+  refereeSubHash   String    @unique @map("referee_sub_hash") // hashAppleSub(referee appleId||googleSub)
+  code             String? // code used at signup, if any
+  status           String    @default("PENDING") // PENDING -> QUALIFIED -> REWARDED -> EXPIRED
   // WHICH MECHANISM attributed this referral (invite-code onboarding spec, part
   // B). Plain string, not an enum, to match `status` in this same table and to
   // keep adding a mechanism a code-only change. Values and their SINGLE write
@@ -2055,16 +2059,259 @@ model Referral {
   // Load-bearing beyond observability: redeemReferralCode reads it to decide
   // whether an explicit manual redeem may REPLACE a weak `ip_fallback_net`
   // guess (see that command) — so a wrong tier-2 match can never be permanent.
-  source         String?
-  sourceRaceId   String?  @map("source_race_id")
-  createdAt      DateTime @default(now()) @map("created_at")
+  source           String?
+  sourceRaceId     String?   @map("source_race_id")
+  qualifiedAt      DateTime? @map("qualified_at")
+  qualifyingRaceId String?   @map("qualifying_race_id")
+  createdAt        DateTime  @default(now()) @map("created_at")
 
-  referrer     User?                 @relation("ReferralsMade", fields: [referrerId], references: [id], onDelete: SetNull)
-  referee      User                  @relation("ReferralReceived", fields: [refereeId], references: [id], onDelete: Cascade)
-  rewardGrants ReferralRewardGrant[]
+  referrer             User?                         @relation("ReferralsMade", fields: [referrerId], references: [id], onDelete: SetNull)
+  referee              User                          @relation("ReferralReceived", fields: [refereeId], references: [id], onDelete: Cascade)
+  rewardGrants         ReferralRewardGrant[]
+  qualificationIntents ReferralQualificationIntent[]
+  qualifyingRace       Race?                         @relation("ReferralQualifyingRace", fields: [qualifyingRaceId], references: [id], onDelete: SetNull)
 
   @@index([referrerId])
+  @@index([referrerId, qualifiedAt])
   @@map("referrals")
+}
+
+// Durable qualification ownership is created in the race-settlement commit.
+// Reward/review processing may retry later without changing the original fact.
+model ReferralQualificationIntent {
+  id                 String    @id @default(uuid())
+  referralId         String?   @map("referral_id")
+  referralFactId     String    @map("referral_fact_id")
+  referrerIdSnapshot String?   @map("referrer_id_snapshot")
+  qualifyingRaceId   String    @map("qualifying_race_id")
+  qualifiedAt        DateTime  @map("qualified_at")
+  processedAt        DateTime? @map("processed_at")
+  attemptedAt        DateTime? @map("attempted_at")
+  attemptCount       Int       @default(0) @map("attempt_count")
+  lastError          String?   @map("last_error")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+  referral           Referral? @relation(fields: [referralId], references: [id], onDelete: SetNull)
+  qualifyingRace     Race      @relation("ReferralQualificationIntentRace", fields: [qualifyingRaceId], references: [id], onDelete: Restrict)
+
+  @@unique([referralFactId, qualifyingRaceId])
+  @@index([referrerIdSnapshot, processedAt, qualifiedAt])
+  @@index([processedAt, qualifiedAt])
+  @@map("referral_qualification_intents")
+}
+
+// Privacy-minimized immutable qualification ledger. It deliberately has no
+// referee FK: ordinary Referral rows keep their shipped CASCADE deletion
+// behavior while a settled contest fact survives as a provider HMAC plus the
+// referrer's internal account link. No raw provider/network/device value is
+// copied here.
+model ReferralQualificationFact {
+  id                  String   @id @default(uuid())
+  referralFactId      String   @unique @map("referral_fact_id")
+  referrerId          String?  @map("referrer_id")
+  refereeIdentityHash String   @map("referee_identity_hash")
+  attributionSource   String?  @map("attribution_source")
+  qualifyingRaceId    String?  @map("qualifying_race_id")
+  qualifiedAt         DateTime @map("qualified_at")
+  referralCreatedAt   DateTime @default(now()) @map("referral_created_at")
+  referrerWasReview   Boolean  @default(false) @map("referrer_was_review")
+  refereeWasReview    Boolean  @default(false) @map("referee_was_review")
+  status              String
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+  referrer            User?    @relation("ReferralQualificationFactReferrer", fields: [referrerId], references: [id], onDelete: SetNull)
+
+  @@unique([refereeIdentityHash])
+  @@index([referrerId, qualifiedAt])
+  @@index([qualifyingRaceId])
+  @@map("referral_qualification_facts")
+}
+
+model GiveawayContest {
+  id                  String                @id @default(uuid())
+  slug                String                @unique
+  title               String
+  lifecycleStatus     String                @default("DRAFT") @map("lifecycle_status")
+  revision            Int                   @default(1)
+  governingTimeZone   String                @map("governing_time_zone")
+  startsAt            DateTime              @map("starts_at")
+  endsAt              DateTime              @map("ends_at")
+  cashCurrency        String                @default("USD") @map("cash_currency")
+  cashMinor           Int                   @default(5000) @map("cash_minor")
+  coinPrize           Int                   @default(5000) @map("coin_prize")
+  minimumAge          Int                   @default(18) @map("minimum_age")
+  eligibleCountries   Json                  @default("[\"US\"]") @map("eligible_countries")
+  eligibleRegions     Json                  @map("eligible_regions")
+  sponsor             Json
+  rulesVersion        String                @map("rules_version")
+  rulesSections       Json                  @map("rules_sections")
+  rulesHash           String                @map("rules_hash")
+  socialLinks         Json                  @default("[]") @map("social_links")
+  bannerMessage       String                @map("banner_message")
+  publicReason        String?               @map("public_reason")
+  amendedRulesVersion String?               @map("amended_rules_version")
+  publishedAt         DateTime?             @map("published_at")
+  frozenAt            DateTime?             @map("frozen_at")
+  finalizedAt         DateTime?             @map("finalized_at")
+  cancelledAt         DateTime?             @map("cancelled_at")
+  archivedAt          DateTime?             @map("archived_at")
+  createdAt           DateTime              @default(now()) @map("created_at")
+  updatedAt           DateTime              @updatedAt @map("updated_at")
+  entrants            GiveawayEntrant[]
+  pointReviews        GiveawayPointReview[]
+  auditEvents         GiveawayAuditEvent[]
+
+  @@index([lifecycleStatus, startsAt, endsAt])
+  @@index([createdAt, id])
+  @@map("giveaway_contests")
+}
+
+model GiveawayEntrant {
+  id                     String               @id @default(uuid())
+  contestId              String               @map("contest_id")
+  userId                 String?              @map("user_id")
+  entrantIdentityHash    String               @map("entrant_identity_hash")
+  identityHashVersion    Int                  @default(1) @map("identity_hash_version")
+  status                 String               @default("ELIGIBLE")
+  country                String
+  region                 String
+  ageConfirmedAt         DateTime             @map("age_confirmed_at")
+  residencyConfirmedAt   DateTime             @map("residency_confirmed_at")
+  rulesAcceptedAt        DateTime             @map("rules_accepted_at")
+  acceptedRulesVersion   String               @map("accepted_rules_version")
+  acceptedRulesHash      String               @map("accepted_rules_hash")
+  displayNameSnapshot    String?              @map("display_name_snapshot")
+  displayNameConsentedAt DateTime             @map("display_name_consented_at")
+  disqualifiedReason     String?              @map("disqualified_reason")
+  withdrawnAt            DateTime?            @map("withdrawn_at")
+  createdAt              DateTime             @default(now()) @map("created_at")
+  updatedAt              DateTime             @updatedAt @map("updated_at")
+  contest                GiveawayContest      @relation(fields: [contestId], references: [id], onDelete: Cascade)
+  user                   User?                @relation(fields: [userId], references: [id], onDelete: SetNull)
+  result                 GiveawayResult?
+  fulfillment            GiveawayFulfillment?
+
+  @@unique([contestId, userId])
+  @@unique([contestId, entrantIdentityHash])
+  @@index([contestId, status])
+  @@map("giveaway_entrants")
+}
+
+model GiveawayPointReview {
+  id                       String          @id @default(uuid())
+  contestId                String          @map("contest_id")
+  referralFactId           String          @map("referral_fact_id")
+  qualifiedAtSnapshot      DateTime        @map("qualified_at_snapshot")
+  qualifyingRaceIdSnapshot String?         @map("qualifying_race_id_snapshot")
+  referralStatusSnapshot   String          @map("referral_status_snapshot")
+  decision                 String
+  reasonCode               String          @map("reason_code")
+  privateNote              String?         @map("private_note")
+  actorId                  String          @map("actor_id")
+  decidedAt                DateTime        @default(now()) @map("decided_at")
+  createdAt                DateTime        @default(now()) @map("created_at")
+  updatedAt                DateTime        @updatedAt @map("updated_at")
+  contest                  GiveawayContest @relation(fields: [contestId], references: [id], onDelete: Cascade)
+
+  @@unique([contestId, referralFactId])
+  @@index([contestId, decision])
+  @@map("giveaway_point_reviews")
+}
+
+// Receipts are independent of contest existence so an idempotency key keeps
+// its meaning across create, archive, and retention. The unique actor/key pair
+// deliberately spans every giveaway admin mutation.
+model GiveawayIdempotencyReceipt {
+  id             String   @id @default(uuid())
+  actorId        String   @map("actor_id")
+  idempotencyKey String   @map("idempotency_key")
+  method         String
+  contestId      String?  @map("contest_id")
+  requestHash    String   @map("request_hash")
+  responseBody   Json?    @map("response_body")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@unique([actorId, idempotencyKey])
+  @@index([createdAt])
+  @@map("giveaway_idempotency_receipts")
+}
+
+model GiveawayResult {
+  id             String          @id @default(uuid())
+  entrantId      String          @unique @map("entrant_id")
+  frozenCount    Int             @map("frozen_count")
+  reachedCountAt DateTime?       @map("reached_count_at")
+  finalRank      Int             @map("final_rank")
+  status         String          @default("RANKED")
+  decisionReason String?         @map("decision_reason")
+  selectedAt     DateTime?       @map("selected_at")
+  verifiedAt     DateTime?       @map("verified_at")
+  rejectedAt     DateTime?       @map("rejected_at")
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @updatedAt @map("updated_at")
+  entrant        GiveawayEntrant @relation(fields: [entrantId], references: [id], onDelete: Cascade)
+
+  @@index([finalRank])
+  @@index([status])
+  @@map("giveaway_results")
+}
+
+model GiveawayFulfillment {
+  id                String          @id @default(uuid())
+  entrantId         String          @unique @map("entrant_id")
+  cashStatus        String          @default("UNCLAIMED") @map("cash_status")
+  cashProvider      String?         @map("cash_provider")
+  providerReference String?         @map("provider_reference")
+  cashSentMinor     Int?            @map("cash_sent_minor")
+  cashSentCurrency  String?         @map("cash_sent_currency")
+  cashSentAt        DateTime?       @map("cash_sent_at")
+  cashDeliveredAt   DateTime?       @map("cash_delivered_at")
+  coinTransactionId String?         @unique @map("coin_transaction_id")
+  coinsAwardedAt    DateTime?       @map("coins_awarded_at")
+  claimedAt         DateTime?       @map("claimed_at")
+  fulfilledAt       DateTime?       @map("fulfilled_at")
+  createdAt         DateTime        @default(now()) @map("created_at")
+  updatedAt         DateTime        @updatedAt @map("updated_at")
+  entrant           GiveawayEntrant @relation(fields: [entrantId], references: [id], onDelete: Restrict)
+
+  @@map("giveaway_fulfillments")
+}
+
+model GiveawayAuditEvent {
+  id             String          @id @default(uuid())
+  contestId      String          @map("contest_id")
+  actorId        String          @map("actor_id")
+  method         String
+  action         String
+  idempotencyKey String?         @map("idempotency_key")
+  requestHash    String?         @map("request_hash")
+  requestBody    Json?           @map("request_body")
+  responseBody   Json?           @map("response_body")
+  oldState       String?         @map("old_state")
+  newState       String?         @map("new_state")
+  reason         String?
+  createdAt      DateTime        @default(now()) @map("created_at")
+  contest        GiveawayContest @relation(fields: [contestId], references: [id], onDelete: Cascade)
+
+  @@unique([actorId, method, contestId, idempotencyKey])
+  @@index([contestId, createdAt])
+  @@map("giveaway_audit_events")
+}
+
+// Cross-worker rate windows for public contest reads and authenticated entry
+// attempts. keyHash is either a versioned network HMAC or a one-way user-id
+// digest; raw network addresses are never stored.
+model GiveawayRateWindow {
+  kind        String
+  keyHash     String   @map("key_hash")
+  windowStart DateTime @map("window_start")
+  count       Int
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@id([kind, keyHash])
+  @@index([updatedAt])
+  @@map("giveaway_rate_windows")
 }
 
 // Payout ledger: which side was paid. Minted at the referee's first qualifying
@@ -2082,13 +2329,14 @@ model Referral {
 // referralId is likewise nullable so a SetNull'd/Cascade-deleted referral keeps
 // this audit row. See §4C.
 model ReferralRewardGrant {
-  id             String   @id @default(uuid())
-  referralId     String?  @map("referral_id")
-  userId         String?  @map("user_id") // who received the reward (null after that account is deleted)
-  role           String // "REFERRER" | "REFEREE"
-  refereeSubHash String   @map("referee_sub_hash") // abuse key: provider-sub hash of the REFEREE
-  coins          Int?
-  grantedAt      DateTime @default(now()) @map("granted_at")
+  id                  String    @id @default(uuid())
+  referralId          String?   @map("referral_id")
+  userId              String?   @map("user_id") // who received the reward (null after that account is deleted)
+  role                String // "REFERRER" | "REFEREE"
+  refereeSubHash      String    @map("referee_sub_hash") // abuse key: provider-sub hash of the REFEREE
+  coins               Int?
+  grantedAt           DateTime  @default(now()) @map("granted_at")
+  qualifiedAtSnapshot DateTime? @map("qualified_at_snapshot")
 
   referral Referral? @relation(fields: [referralId], references: [id], onDelete: SetNull)
   user     User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
@@ -2096,6 +2344,7 @@ model ReferralRewardGrant {
   @@unique([refereeSubHash, role]) // EXACTLY-ONCE PER HUMAN PER ROLE — primary anti-farming guard
   @@index([refereeSubHash])
   @@index([userId])
+  @@index([userId, role, qualifiedAtSnapshot])
   @@map("referral_reward_grants")
 }
 

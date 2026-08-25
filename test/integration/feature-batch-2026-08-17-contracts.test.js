@@ -54,6 +54,7 @@ describe("2026-08-17 additive contracts", () => {
     await appSettings.setFlagsAtomically([
       ["homeServiceBannerEnabled", false],
       ["homeServiceBannerMessage", ""],
+      ["homeServiceBannerContestSlug", ""],
     ]);
   });
 
