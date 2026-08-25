@@ -17,9 +17,13 @@ function shell(title, body, canonicalPath = "/giveaways") {
 function renderRules(contest) {
   const sections = (contest.rulesSections || []).map((section) => `<section class="card"><h2>${escapeHtml(section.heading)}</h2><p>${escapeHtml(section.body).replaceAll("\n", "<br>")}</p></section>`).join("");
   const sponsor = contest.sponsor || {};
+  const global = contest.eligibilityMode === "BARA_ACCOUNT";
+  const materialTerms = global
+    ? `<section class="card"><h2>Material terms</h2><p><strong>Sponsor:</strong> Bara</p><p><strong>Contest period:</strong> ${escapeHtml(contest.startsAt)} through ${escapeHtml(contest.endsAt)} (UTC).</p><p><strong>Prize:</strong> ${escapeHtml(contest.coinPrize)} Bara coins to one winner.</p><p>No purchase necessary. Open to signed-in Bara users permitted under Bara's Terms. Optional social follows provide no advantage.</p><p>The eligible entrant with the most verified completed referrals wins. Ties go to whoever reached the final verified count first, then stable entrant ID. If nobody has a verified completed referral, there is no winner. Apple and Google are not sponsors or involved.</p></section>`
+    : `<section class="card"><h2>Material terms</h2><p><strong>Sponsor:</strong> ${escapeHtml(sponsor.legalName)} · ${escapeHtml(sponsor.mailingAddress)}</p><p><strong>Contest period:</strong> ${escapeHtml(contest.startsAt)} through ${escapeHtml(contest.endsAt)} (${escapeHtml(contest.governingTimeZone)}).</p><p><strong>Prize:</strong> ${escapeHtml(formatPrizeSummary(contest, { joiner: " and " }))} to one winner.</p><p>No purchase necessary. Open to legal residents of the 50 United States and D.C., age 18 or older. Social follows are optional and provide no advantage.</p><p>The eligible entrant with the most verified completed referrals wins. Ties go to whoever reached the final verified referral count first. Apple and Google are not sponsors or involved.</p></section>`;
   return shell(
     `${contest.title} — Official Rules`,
-    `<h1>${escapeHtml(contest.title)} — Official Rules</h1><p class="muted">Version ${escapeHtml(contest.rulesVersion)} · ${escapeHtml(contest.rulesHash)}</p><section class="card"><h2>Material terms</h2><p><strong>Sponsor:</strong> ${escapeHtml(sponsor.legalName)} · ${escapeHtml(sponsor.mailingAddress)}</p><p><strong>Contest period:</strong> ${escapeHtml(contest.startsAt)} through ${escapeHtml(contest.endsAt)} (${escapeHtml(contest.governingTimeZone)}).</p><p><strong>Prize:</strong> ${escapeHtml(formatPrizeSummary(contest, { joiner: " and " }))} to one winner.</p><p>No purchase necessary. Open to legal residents of the 50 United States and D.C., age 18 or older. Social follows are optional and provide no advantage.</p><p>The eligible entrant with the most verified completed referrals wins. Ties go to whoever reached the final verified referral count first. Apple and Google are not sponsors or involved.</p></section>${sections}`,
+    `<h1>${escapeHtml(contest.title)} — Official Rules</h1><p class="muted">Version ${escapeHtml(contest.rulesVersion)} · ${escapeHtml(contest.rulesHash)}</p>${materialTerms}${sections}`,
     `/giveaways/${encodeURIComponent(contest.slug)}/rules`,
   );
 }
@@ -44,13 +48,14 @@ function renderLanding(data) {
   const provisional = ["SCHEDULED", "ACTIVE", "VERIFYING"].includes(data.contest.status)
     ? `<p class="muted">Provisional—positions may change after fraud review.</p>` : "";
   const sponsor = data.contest.sponsor || {};
+  const global = data.contest.eligibility?.mode === "BARA_ACCOUNT";
   const prize = formatPrizeSummary({
     cashMinor: data.contest.prize?.cashMinor || 0,
     coinPrize: data.contest.prize?.coins || 0,
   });
   return shell(
     data.contest.title,
-    `<h1>${escapeHtml(data.contest.title)}</h1><p><strong>${escapeHtml(lifecycle)}</strong></p><div class="card"><h2>Win ${escapeHtml(prize)}</h2><p>Sponsored by ${escapeHtml(sponsor.legalName)}. Open to legal residents of the 50 United States and D.C., age 18+. No purchase necessary.</p><p>Runs ${escapeHtml(data.contest.startsAt)} through ${escapeHtml(data.contest.endsAt)} (${escapeHtml(data.contest.governingTimeZone)}).</p><p>The entrant with the most verified completed referrals wins. Ties go to whoever reached the final count first.</p>${winner}${noWinner}</div>${reason}<h2>Leaderboard</h2><table><thead><tr><th>Rank</th><th>Display name</th><th>Completed referrals</th></tr></thead><tbody>${rows}</tbody></table>${provisional}${social}<p><a href="/giveaways/${encodeURIComponent(data.contest.slug)}/rules">Official Rules</a> · Social follows are optional and provide no advantage. Apple and Google are not sponsors or involved.</p>`,
+    `<h1>${escapeHtml(data.contest.title)}</h1><p><strong>${escapeHtml(lifecycle)}</strong></p><div class="card"><h2>Win ${escapeHtml(prize)}</h2>${global ? `<p>Sponsored by Bara. Open to signed-in Bara users permitted under Bara's Terms. No purchase necessary.</p>` : `<p>Sponsored by ${escapeHtml(sponsor.legalName)}. Open to legal residents of the 50 United States and D.C., age 18+. No purchase necessary.</p>`}<p>Runs ${escapeHtml(data.contest.startsAt)} through ${escapeHtml(data.contest.endsAt)} (${escapeHtml(data.contest.governingTimeZone)}).</p><p>The entrant with the most verified completed referrals wins. Ties go to whoever reached the final count first${global ? ", then stable entrant ID. If nobody has a verified completed referral, there is no winner" : ""}.</p>${winner}${noWinner}</div>${reason}<h2>Leaderboard</h2><table><thead><tr><th>Rank</th><th>Display name</th><th>Completed referrals</th></tr></thead><tbody>${rows}</tbody></table>${provisional}${social}<p><a href="/giveaways/${encodeURIComponent(data.contest.slug)}/rules">Official Rules</a> · Social follows are optional and provide no advantage. Apple and Google are not sponsors or involved.</p>`,
     `/giveaways/${encodeURIComponent(data.contest.slug)}`,
   );
 }

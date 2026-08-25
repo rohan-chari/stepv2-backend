@@ -2139,9 +2139,10 @@ model GiveawayContest {
   cashCurrency        String                @default("USD") @map("cash_currency")
   cashMinor           Int                   @default(5000) @map("cash_minor")
   coinPrize           Int                   @default(5000) @map("coin_prize")
-  minimumAge          Int                   @default(18) @map("minimum_age")
-  eligibleCountries   Json                  @default("[\"US\"]") @map("eligible_countries")
-  eligibleRegions     Json                  @map("eligible_regions")
+  eligibilityMode     String                @default("US_18") @map("eligibility_mode")
+  minimumAge          Int?                  @map("minimum_age")
+  eligibleCountries   Json?                 @map("eligible_countries")
+  eligibleRegions     Json?                 @map("eligible_regions")
   sponsor             Json
   rulesVersion        String                @map("rules_version")
   rulesSections       Json                  @map("rules_sections")
@@ -2173,10 +2174,10 @@ model GiveawayEntrant {
   entrantIdentityHash    String               @map("entrant_identity_hash")
   identityHashVersion    Int                  @default(1) @map("identity_hash_version")
   status                 String               @default("ELIGIBLE")
-  country                String
-  region                 String
-  ageConfirmedAt         DateTime             @map("age_confirmed_at")
-  residencyConfirmedAt   DateTime             @map("residency_confirmed_at")
+  country                String?
+  region                 String?
+  ageConfirmedAt         DateTime?            @map("age_confirmed_at")
+  residencyConfirmedAt   DateTime?            @map("residency_confirmed_at")
   rulesAcceptedAt        DateTime             @map("rules_accepted_at")
   acceptedRulesVersion   String               @map("accepted_rules_version")
   acceptedRulesHash      String               @map("accepted_rules_hash")

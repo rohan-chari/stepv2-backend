@@ -12,16 +12,14 @@ const { isAllowedBannerMessage, normalizeContestInput, publishValidationFields }
 const { hasEnabledPrize } = require("./prize");
 const { appSettings: defaultAppSettings } = require("../../../shared/config/appSettings");
 const { invalidateActiveContestBannerCache } = require("../queries/activeContestBanner");
+const { validateDisplayName } = require("../../../shared/lib/displayNameValidator");
+const { buildDeleteDraftContest } = require("../commands/deleteDraftContest");
+const { createGiveawayIdempotency, UUID_V4 } = require("./idempotency");
+const { GLOBAL_ELIGIBILITY_MODE, generateStandardRules } = require("./standardRules");
+const { implicatedFactsForEntrant, unresolvedGlobalOutcomeFacts } = require("./globalOutcomeReview");
 
-const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-function hashJson(value) {
-  const stable = (input) => {
-    if (Array.isArray(input)) return input.map(stable);
-    if (input && typeof input === "object") return Object.fromEntries(Object.keys(input).sort().map((key) => [key, stable(input[key])]));
-    return input;
-  };
-  return crypto.createHash("sha256").update(JSON.stringify(stable(value))).digest("hex");
+function supportsGlobalContest(clientFeatures) {
+  return clientFeatures?.has?.("referral_contest_global_v1") === true;
 }
 
 function identityHash(user, env = process.env) {
@@ -154,10 +152,12 @@ function buildGiveawayService(dependencies = {}) {
   const env = dependencies.env || process.env;
   const award = dependencies.awardCoins || awardCoins;
   const appSettings = dependencies.appSettings || defaultAppSettings;
+  const { withIdempotency } = createGiveawayIdempotency({ db, env });
+  const deleteDraftContest = buildDeleteDraftContest({ db, withIdempotency });
 
-  async function contestById(id) {
+  async function contestById(id, clientFeatures = null) {
     const contest = await db.giveawayContest.findUnique({ where: { id } });
-    if (!contest) throw new NotFoundError("Contest not found", "CONTEST_NOT_FOUND");
+    if (!contest || (contest.eligibilityMode === GLOBAL_ELIGIBILITY_MODE && !supportsGlobalContest(clientFeatures))) throw new NotFoundError("Contest not found", "CONTEST_NOT_FOUND");
     return contest;
   }
   async function publicBySlug(slug) {
@@ -182,9 +182,12 @@ function buildGiveawayService(dependencies = {}) {
     };
   }
 
-  async function memberCurrent(user, limitValue = 25) {
+  async function memberCurrent(user, limitValue = 25, clientFeatures = null) {
     const contest = await current();
     if (!contest) return { contest: null, leaderboard: [], entry: null, standing: null, share: null };
+    if (contest.eligibilityMode === GLOBAL_ELIGIBILITY_MODE && !supportsGlobalContest(clientFeatures)) {
+      return { contest: null, leaderboard: [], entry: null, standing: null, share: null };
+    }
     const rows = contest.lifecycleStatus === "FINAL" ? await getFinalStandings(contest, { db }) : await getContestStandings(contest, { db });
     const identities = identityHashes(user, env);
     let entry = await db.giveawayEntrant.findUnique({ where: { contestId_userId: { contestId: contest.id, userId: user.id } } });
@@ -218,77 +221,67 @@ function buildGiveawayService(dependencies = {}) {
     };
   }
 
-  async function enter(slug, user, body) {
-    const allowed = new Set(["rulesVersion", "country", "region", "ageConfirmed", "residencyConfirmed", "rulesAccepted"]);
-    if (!body || typeof body !== "object" || Object.keys(body).some((key) => !allowed.has(key))) throw new ValidationError("Invalid entry body", "INVALID_BODY");
+  async function enter(slug, user, body, clientFeatures = null) {
     const contest = await publicBySlug(slug);
-    const account = await db.user.findUnique({ where: { id: user.id }, select: { isReviewAccount: true } });
+    if (contest.eligibilityMode === GLOBAL_ELIGIBILITY_MODE && !supportsGlobalContest(clientFeatures)) {
+      throw new NotFoundError("Contest not found", "CONTEST_NOT_FOUND");
+    }
+    const account = await db.user.findUnique({ where: { id: user.id }, select: { isReviewAccount: true, displayName: true } });
     if (account?.isReviewAccount) throw new ConflictError("Review accounts cannot enter contests", "ENTRY_INELIGIBLE");
     const identities = identityHashes(user, env);
     const identity = identities.active;
     const existing = await db.giveawayEntrant.findFirst({ where: { contestId: contest.id, OR: [{ userId: user.id }, { entrantIdentityHash: { in: identities.all.map((candidate) => candidate.hash) } }] } });
-    const exact = existing && existing.status === "ELIGIBLE" && body.rulesVersion === existing.acceptedRulesVersion && body.country === existing.country && body.region === existing.region && body.ageConfirmed === true && body.residencyConfirmed === true && body.rulesAccepted === true;
-    if (exact) return { created: false, entry: serializeEntry(existing) };
+    const global = contest.eligibilityMode === GLOBAL_ELIGIBILITY_MODE;
+    const allowed = new Set(global
+      ? ["rulesVersion", "rulesAccepted"]
+      : ["rulesVersion", "country", "region", "ageConfirmed", "residencyConfirmed", "rulesAccepted"]);
+    if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).some((key) => !allowed.has(key))) throw new ValidationError("Invalid entry body", "INVALID_BODY");
+    const exact = existing && existing.status === "ELIGIBLE" && body.rulesVersion === existing.acceptedRulesVersion && body.rulesAccepted === true && (global || (body.country === existing.country && body.region === existing.region && body.ageConfirmed === true && body.residencyConfirmed === true));
+    if (exact) return { created: false, entry: serializeEntry(existing, global) };
     if (existing) throw new ConflictError("Contest entry is immutable", "ENTRY_IMMUTABLE");
     if (deriveContestStatus(contest, nowFn()) !== "ACTIVE") throw new ConflictError("Contest is not open", "CONTEST_NOT_OPEN");
     if (body.rulesVersion !== contest.rulesVersion) throw new ConflictError("Official Rules changed", "RULES_CHANGED", { currentRulesVersion: contest.rulesVersion });
-    if (body.ageConfirmed !== true) throw new ValidationError("Age confirmation is required", "AGE_CONFIRMATION_REQUIRED");
-    if (body.residencyConfirmed !== true || body.country !== "US") throw new ValidationError("U.S. residency confirmation is required", "RESIDENCY_CONFIRMATION_REQUIRED");
     if (body.rulesAccepted !== true) throw new ValidationError("Rules acceptance is required", "RULES_ACCEPTANCE_REQUIRED");
-    if (!Array.isArray(contest.eligibleRegions) || !contest.eligibleRegions.includes(body.region)) throw new ValidationError("Region is not eligible", "INVALID_REGION");
-    const displayName = typeof user.displayName === "string" ? user.displayName.trim() : "";
-    if (!displayName || displayName.length > 50) throw new ValidationError("A valid Bara display name is required", "INVALID_DISPLAY_NAME");
+    if (!global) {
+      if (body.ageConfirmed !== true) throw new ValidationError("Age confirmation is required", "AGE_CONFIRMATION_REQUIRED");
+      if (body.residencyConfirmed !== true || body.country !== "US") throw new ValidationError("U.S. residency confirmation is required", "RESIDENCY_CONFIRMATION_REQUIRED");
+      if (!Array.isArray(contest.eligibleRegions) || !contest.eligibleRegions.includes(body.region)) throw new ValidationError("Region is not eligible", "INVALID_REGION");
+    }
+    const displayValidation = global ? validateDisplayName(account?.displayName) : null;
+    if (global && !displayValidation.isValid) throw new ConflictError("A valid Bara display name is required", "DISPLAY_NAME_REQUIRED");
+    const displayName = global
+      ? displayValidation.normalized
+      : (typeof user.displayName === "string" ? user.displayName.trim() : "");
+    if (!global && (!displayName || displayName.length > 50)) throw new ValidationError("A valid Bara display name is required", "INVALID_DISPLAY_NAME");
     const at = nowFn();
+    let lostCreateRace = false;
     const entry = await db.giveawayEntrant.create({ data: {
       contestId: contest.id, userId: user.id, entrantIdentityHash: identity.hash, identityHashVersion: identity.version,
-      status: "ELIGIBLE", country: "US", region: body.region,
-      ageConfirmedAt: at, residencyConfirmedAt: at, rulesAcceptedAt: at,
+      status: "ELIGIBLE", country: global ? null : "US", region: global ? null : body.region,
+      ageConfirmedAt: global ? null : at, residencyConfirmedAt: global ? null : at, rulesAcceptedAt: at,
       acceptedRulesVersion: contest.rulesVersion, acceptedRulesHash: contest.rulesHash,
       displayNameSnapshot: displayName, displayNameConsentedAt: at,
-    } });
-    return { created: true, entry: serializeEntry(entry) };
-  }
-
-  function serializeEntry(entry) {
-    return { status: entry.status, acceptedAt: iso(entry.rulesAcceptedAt), country: entry.country, region: entry.region, displayName: entry.displayNameSnapshot, rulesVersion: entry.acceptedRulesVersion };
-  }
-
-  function requireKey(key) {
-    if (!UUID_V4.test(String(key || ""))) throw new ValidationError("A UUIDv4 Idempotency-Key is required", "INVALID_IDEMPOTENCY_KEY");
-  }
-  async function withIdempotency({ actorId, method, contestId = null, key, body }, work) {
-    requireKey(key);
-    let bodyForHash = body || {};
-    if (typeof body?.providerReference === "string") {
-      const secret = env.GIVEAWAY_PROVIDER_REFERENCE_HMAC_SECRET;
-      if (!secret) throw new AppError("Provider reference protection unavailable", "INTERNAL_ERROR", 500);
-      bodyForHash = {
-        ...body,
-        providerReference: `hmac:${crypto.createHmac("sha256", secret).update(body.providerReference).digest("hex")}`,
-      };
-    }
-    const requestHash = hashJson({ method, contestId, body: bodyForHash });
-    return db.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`giveaway-idempotency:${actorId}:${key}`}))`;
-      const existing = await tx.giveawayIdempotencyReceipt.findUnique({
-        where: { actorId_idempotencyKey: { actorId, idempotencyKey: key } },
-      });
-      if (existing) {
-        if (existing.requestHash !== requestHash) {
-          throw new ConflictError("Idempotency key was used for another request", "IDEMPOTENCY_CONFLICT");
-        }
-        if (existing.responseBody == null) throw new ConflictError("Request is still processing", "IDEMPOTENCY_IN_PROGRESS");
-        return existing.responseBody;
-      }
-      const receipt = await tx.giveawayIdempotencyReceipt.create({ data: {
-        actorId, idempotencyKey: key, method, contestId, requestHash,
-      } });
-      const response = await work(tx, requestHash);
-      await tx.giveawayIdempotencyReceipt.update({
-        where: { id: receipt.id }, data: { responseBody: response },
-      });
-      return response;
+    } }).catch(async (error) => {
+      if (error?.code !== "P2002") throw error;
+      lostCreateRace = true;
+      const raced = await db.giveawayEntrant.findFirst({ where: { contestId: contest.id, OR: [{ userId: user.id }, { entrantIdentityHash: { in: identities.all.map((candidate) => candidate.hash) } }] } });
+      const racedExact = raced && raced.status === "ELIGIBLE" && raced.acceptedRulesVersion === contest.rulesVersion && raced.acceptedRulesHash === contest.rulesHash && raced.displayNameSnapshot === displayName && (global
+        ? raced.country === null && raced.region === null && raced.ageConfirmedAt === null && raced.residencyConfirmedAt === null
+        : raced.country === "US" && raced.region === body.region && raced.ageConfirmedAt && raced.residencyConfirmedAt);
+      if (racedExact) return raced;
+      throw new ConflictError("Contest entry is immutable", "ENTRY_IMMUTABLE");
     });
+    return { created: !lostCreateRace, entry: serializeEntry(entry, global) };
+  }
+
+  function serializeEntry(entry, global = false) {
+    return {
+      status: entry.status,
+      acceptedAt: iso(entry.rulesAcceptedAt),
+      ...(!global ? { country: entry.country, region: entry.region } : {}),
+      displayName: entry.displayNameSnapshot,
+      rulesVersion: entry.acceptedRulesVersion,
+    };
   }
   async function audit({ tx = db, contestId, actorId, method, action, key = null, requestHash = null, body = null, response, oldState, newState, reason = null }) {
     await tx.giveawayAuditEvent.create({ data: { contestId, actorId, method, action, idempotencyKey: key, requestHash, requestBody: normalizedAuditBody(action, body), responseBody: response, oldState, newState, reason } });
@@ -297,8 +290,12 @@ function buildGiveawayService(dependencies = {}) {
     if (!Number.isInteger(revision) || revision !== contest.revision) throw new ConflictError("Contest revision changed", "REVISION_CONFLICT", { currentRevision: contest.revision });
   }
 
-  async function createDraft(actor, key, body) {
+  async function createDraft(actor, key, body, clientFeatures = null) {
+    if (body?.eligibilityMode === GLOBAL_ELIGIBILITY_MODE && !supportsGlobalContest(clientFeatures)) throw new NotFoundError("Contest not found", "CONTEST_NOT_FOUND");
     const data = normalizeContestInput(body);
+    if (supportsGlobalContest(clientFeatures) && data.cashMinor > 0) {
+      throw new ValidationError("New contests must be coin-only", "INVALID_PRIZE");
+    }
     try {
       return await withIdempotency({ actorId: actor.id, method: "POST:create", key, body }, async (tx, createHash) => {
         const contest = await tx.giveawayContest.create({ data });
@@ -312,18 +309,25 @@ function buildGiveawayService(dependencies = {}) {
     }
   }
 
-  async function patchDraft(actor, id, body) {
+  async function patchDraft(actor, id, body, clientFeatures = null) {
     exactBody(body, ["revision", "patch"]);
-    const patch = normalizeContestInput(body?.patch, { partial: true });
     return db.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM giveaway_contests WHERE id = ${id} FOR UPDATE`;
       const contest = await tx.giveawayContest.findUnique({ where: { id } });
-      if (!contest) throw new NotFoundError("Contest not found", "CONTEST_NOT_FOUND");
+      if (!contest || (contest.eligibilityMode === GLOBAL_ELIGIBILITY_MODE && !supportsGlobalContest(clientFeatures))) throw new NotFoundError("Contest not found", "CONTEST_NOT_FOUND");
+      const patch = normalizeContestInput(body?.patch, { partial: true, eligibilityMode: contest.eligibilityMode });
       assertRevision(contest, body?.revision);
       if (contest.lifecycleStatus !== "DRAFT") throw new ConflictError("Published contests are immutable", "CONTEST_IMMUTABLE");
       const merged = { ...contest, ...patch };
       if (new Date(merged.startsAt) >= new Date(merged.endsAt)) throw new ValidationError("Contest start must precede end", "INVALID_DATE_RANGE");
       if (!hasEnabledPrize(merged)) throw new ValidationError("At least one prize must be enabled", "INVALID_PRIZE");
+      if (supportsGlobalContest(clientFeatures) && merged.cashMinor > 0) {
+        throw new ValidationError("New contests must be coin-only", "INVALID_PRIZE");
+      }
+      if (contest.eligibilityMode === GLOBAL_ELIGIBILITY_MODE) {
+        const rules = generateStandardRules(merged);
+        Object.assign(patch, { rulesVersion: rules.version, rulesSections: rules.sections, rulesHash: rules.hash });
+      }
       const changed = await tx.giveawayContest.updateMany({
         where: { id, revision: body.revision, lifecycleStatus: "DRAFT" },
         data: { ...patch, revision: { increment: 1 } },
@@ -356,12 +360,13 @@ function buildGiveawayService(dependencies = {}) {
     });
   }
 
-  async function publish(actor, id, key, body) {
+  async function publish(actor, id, key, body, clientFeatures = null) {
     exactBody(body, ["revision"]);
     try {
       const response = await mutation(actor, id, "PUBLISH", key, body, async (tx, contest) => {
         if (contest.lifecycleStatus !== "DRAFT") throw new ConflictError("Contest is immutable", "CONTEST_IMMUTABLE");
-        const fields = publishValidationFields(contest);
+        const fields = publishValidationFields(contest, nowFn());
+        if (supportsGlobalContest(clientFeatures) && contest.cashMinor > 0 && !fields.includes("prize")) fields.push("prize");
         if (fields.length) throw new ValidationError("Contest is not ready to publish", "PUBLISH_VALIDATION_FAILED", { fields });
         const conflict = await tx.giveawayContest.findFirst({
           where: { id: { not: id }, lifecycleStatus: "PUBLISHED" },
@@ -450,6 +455,14 @@ function buildGiveawayService(dependencies = {}) {
         db: tx,
       })) throw new ConflictError("Referral qualification processing is pending", "QUALIFICATION_PROCESSING_PENDING");
       const standings = await getContestStandings(contest, { db: tx });
+      if (contest.eligibilityMode === GLOBAL_ELIGIBILITY_MODE) {
+        const unresolved = await unresolvedGlobalOutcomeFacts({ contest, standings, db: tx });
+        if (unresolved.length) {
+          throw new ConflictError("Outcome-changing referral review is required", "OUTCOME_REVIEW_REQUIRED", {
+            referralFactIds: unresolved,
+          });
+        }
+      }
       const leader = standings.find((row) => row.verifiedCount > 0) || null;
       const outcomeChanging = standings.some((row) => {
         if (!row.reviewableCount || row.entrantId === leader?.entrantId) return false;
@@ -624,19 +637,21 @@ function buildGiveawayService(dependencies = {}) {
       return { contest: updated, reason: body.reason.trim() };
     });
     appSettings.bustCache?.();
+    await invalidateActiveContestBannerCache();
     return response;
   }
 
-  async function listAdmin(cursorValue, limitValue) {
+  async function listAdmin(cursorValue, limitValue, clientFeatures = null) {
     const limit = parseLimit(limitValue, { fallback: 25, max: 100 }); const cursor = decodeCursor(cursorValue);
-    const where = cursor ? { OR: [{ createdAt: { lt: new Date(cursor.createdAt) } }, { createdAt: new Date(cursor.createdAt), id: { lt: cursor.id } }] } : {};
+    const pagination = cursor ? { OR: [{ createdAt: { lt: new Date(cursor.createdAt) } }, { createdAt: new Date(cursor.createdAt), id: { lt: cursor.id } }] } : {};
+    const where = supportsGlobalContest(clientFeatures) ? pagination : { AND: [pagination, { eligibilityMode: "US_18" }] };
     const records = await db.giveawayContest.findMany({ where, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: limit + 1 });
     const page = records.slice(0, limit);
     return { records: await Promise.all(page.map((contest) => fullAdminContest(db, contest, nowFn()))), nextCursor: records.length > limit ? encodeCursor({ createdAt: page[page.length - 1].createdAt.toISOString(), id: page[page.length - 1].id }) : null };
   }
 
-  async function candidates(id, cursorValue, limitValue) {
-    const contest = await contestById(id); const limit = parseLimit(limitValue, { fallback: 25, max: 100 }); const cursor = decodeCursor(cursorValue);
+  async function candidates(id, cursorValue, limitValue, clientFeatures = null) {
+    const contest = await contestById(id, clientFeatures); const limit = parseLimit(limitValue, { fallback: 25, max: 100 }); const cursor = decodeCursor(cursorValue);
     const canonicalDate = (value, nullable = false) => {
       if (nullable && value === null) return null;
       if (typeof value !== "string") throw new ValidationError("Invalid cursor", "INVALID_CURSOR");
@@ -723,6 +738,16 @@ function buildGiveawayService(dependencies = {}) {
       if (sharedDeviceCount > 0) flags.push("SHARED_DEVICE_SOURCE");
       if (sharedNetworkHashCount > 0) flags.push("SHARED_NETWORK_SOURCE");
       if (synchronizedStepWindowCount > 0) flags.push("SYNCHRONIZED_STEPS");
+      let candidateReviewFactIds = row.reviewableFactIds;
+      if (contest.eligibilityMode === GLOBAL_ELIGIBILITY_MODE) {
+        const implicated = await implicatedFactsForEntrant({ contest, row, db });
+        const decided = implicated.size ? await db.giveawayPointReview.findMany({
+          where: { contestId: contest.id, referralFactId: { in: [...implicated] } },
+          select: { referralFactId: true },
+        }) : [];
+        const decidedIds = new Set(decided.map((review) => review.referralFactId));
+        candidateReviewFactIds = [...implicated].filter((id) => !decidedIds.has(id)).sort();
+      }
       records.push({
         entrantId: row.entrantId, displayName: row.displayName, status: row.entryStatus,
         verifiedCount: row.verifiedCount, reviewableCount: row.reviewableCount,
@@ -737,15 +762,15 @@ function buildGiveawayService(dependencies = {}) {
           synchronizedSteps: { matchingWindowCount: synchronizedStepWindowCount },
           velocity: { maxInHour: maxWithin(60 * 60 * 1000), maxInDay: maxWithin(24 * 60 * 60 * 1000) },
         },
-        reviewFacts: row.reviewableFactIds.slice(0, 100).map((referralFactId) => ({ referralFactId, status: "FLAGGED" })),
+        reviewFacts: candidateReviewFactIds.slice(0, 100).map((referralFactId) => ({ referralFactId, status: "FLAGGED" })),
         auditFacts: facts.map((fact) => ({ referralFactId: fact.id, status: fact.status })),
       });
     }
     return { records, nextCursor: rows.length > limit ? encodeCursor({ asOf: asOf.toISOString(), verifiedCount: page[page.length - 1].verifiedCount, reachedCountAt: iso(page[page.length - 1].reachedCountAt), entrantId: page[page.length - 1].entrantId }) : null };
   }
 
-  async function adminDetail(id) {
-    const contest = await contestById(id);
+  async function adminDetail(id, clientFeatures = null) {
+    const contest = await contestById(id, clientFeatures);
     const fulfillment = await db.giveawayFulfillment.findFirst({
       where: { entrant: { contestId: id } },
       orderBy: { createdAt: "desc" },
@@ -757,7 +782,7 @@ function buildGiveawayService(dependencies = {}) {
     };
   }
 
-  return { adminDetail, archive, awardWinnerCoins, bannerCorrection, cancel, candidates, contestById, createDraft, current, enter, fulfillment, listAdmin, memberCurrent, patchDraft, publicBySlug, publicData, publish, review, selectNext, finalize, winner };
+  return { adminDetail, archive, awardWinnerCoins, bannerCorrection, cancel, candidates, contestById, createDraft, current, deleteDraftContest, enter, fulfillment, listAdmin, memberCurrent, patchDraft, publicBySlug, publicData, publish, review, selectNext, finalize, winner };
 }
 
 module.exports = { buildGiveawayService, fulfillmentPayload, identityHash, identityHashes };

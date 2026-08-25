@@ -7,6 +7,11 @@ const {
   isCashMinor,
   isCoinPrize,
 } = require("./prize");
+const {
+  GLOBAL_ELIGIBILITY_MODE,
+  generateStandardRules,
+  standardRulesAreCurrent,
+} = require("./standardRules");
 
 const US_REGIONS = new Set([
   "US-AL", "US-AK", "US-AZ", "US-AR", "US-CA", "US-CO", "US-CT", "US-DE", "US-DC",
@@ -29,12 +34,20 @@ const GENERIC_BANNER_TEMPLATE = new RegExp(
   `^${BANNER_PREFIX}(?:US\\$[0-9][0-9,]*(?:\\.[0-9]{2})?|[1-9][0-9,]* (?:Bara )?coins|US\\$[0-9][0-9,]*(?:\\.[0-9]{2})? (?:\\+|and) [1-9][0-9,]* (?:Bara )?coins)${BANNER_SUFFIX}$`,
   "i",
 );
+const REAL_WORLD_VALUE_CLAIM = /(?:\$|\busd\b|\bdollars?\b|\bbucks?\b|\bcash\b|\bmoney\b|\bfiat\b|\bcurrenc(?:y|ies)\b|\bvenmo\b|\bpaypal\b|\bcash\s*app\b|\bgift\s*(?:card|certificate)s?\b|\bstore\s*credits?\b|\bvouchers?\b|\bcrypto(?:currenc(?:y|ies))?\b|\bbitcoin\b|\bethereum\b|\bmerch(?:andise)?\b|\bphysical\s+(?:goods?|items?|prizes?)\b|\breal[-\s]*world\s+value\b|\bmarket\s+value\b|\bwithdraw\w*\b|\bredeem\w*\b|\bconvert\w*\b|\bexchange\w*\b|\btradeable\b|\btradable\b|\bresell\w*\b)/iu;
 
 function escapeRegex(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function isAllowedBannerMessage(value, contest = null) {
+  if (contest?.eligibilityMode === GLOBAL_ELIGIBILITY_MODE) {
+    if (typeof value !== "string") return false;
+    const message = value.normalize("NFKC").trim();
+    const length = [...message].length;
+    if (length < 12 || length > 96 || /[\u0000-\u001f\u007f-\u009f]/u.test(message)) return false;
+    return !REAL_WORLD_VALUE_CLAIM.test(message);
+  }
   if (typeof value !== "string" || value.length > 240) return false;
   const message = value.trim();
   if (!contest) return GENERIC_BANNER_TEMPLATE.test(message);
@@ -46,6 +59,66 @@ function isAllowedBannerMessage(value, contest = null) {
   else if (cash) prize = cash;
   else prize = coins.replace(" coins", " (?:Bara )?coins");
   return new RegExp(`^${BANNER_PREFIX}${prize}${BANNER_SUFFIX}$`, "i").test(message);
+}
+
+function normalizeGlobalContestInput(input, { partial = false } = {}) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) invalid("Invalid contest body", "INVALID_BODY");
+  const allowed = new Set(partial
+    ? ["slug", "title", "startsAt", "endsAt", "coinPrize", "bannerMessage"]
+    : ["slug", "title", "startsAt", "endsAt", "coinPrize", "bannerMessage", "eligibilityMode"]);
+  if (!exactKeys(input, allowed)) invalid("Invalid contest body", "INVALID_BODY");
+  if (!partial && input.eligibilityMode !== GLOBAL_ELIGIBILITY_MODE) invalid("Invalid eligibility mode", "INVALID_ELIGIBILITY_MODE");
+  const out = {};
+  const required = (key, fallback) => {
+    if (input[key] === undefined && !partial && fallback === undefined) invalid(`${key} is required`, "INVALID_CONTEST");
+    return input[key] === undefined ? fallback : input[key];
+  };
+  const slug = required("slug");
+  if (slug !== undefined) {
+    if (typeof slug !== "string" || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) || slug.length > 80) invalid("Invalid slug", "INVALID_SLUG");
+    out.slug = slug;
+  }
+  const title = required("title");
+  if (title !== undefined) {
+    if (typeof title !== "string" || title.trim().length < 1 || title.trim().length > 120) invalid("Invalid title", "INVALID_TITLE");
+    out.title = title.trim();
+  }
+  for (const key of ["startsAt", "endsAt"]) {
+    const value = required(key);
+    if (value !== undefined) {
+      const date = new Date(value);
+      if (!Number.isFinite(date.getTime())) invalid(`Invalid ${key}`, "INVALID_DATE");
+      out[key] = date;
+    }
+  }
+  const coinPrize = required("coinPrize", partial ? undefined : 5000);
+  if (coinPrize !== undefined) {
+    if (!Number.isInteger(coinPrize) || coinPrize < 1 || coinPrize > 25000) invalid("coinPrize must be an integer from 1 through 25000", "INVALID_PRIZE");
+    out.coinPrize = coinPrize;
+  }
+  const bannerMessage = required("bannerMessage");
+  if (bannerMessage !== undefined) {
+    const normalized = typeof bannerMessage === "string" ? bannerMessage.normalize("NFKC").trim() : bannerMessage;
+    if (!isAllowedBannerMessage(normalized, { eligibilityMode: GLOBAL_ELIGIBILITY_MODE })) invalid("Invalid banner message", "INVALID_BANNER");
+    out.bannerMessage = normalized;
+  }
+  if (out.startsAt && out.endsAt && out.startsAt >= out.endsAt) invalid("Contest start must precede end", "INVALID_DATE_RANGE");
+  if (!partial) {
+    Object.assign(out, {
+      eligibilityMode: GLOBAL_ELIGIBILITY_MODE,
+      governingTimeZone: "UTC",
+      cashCurrency: "USD",
+      cashMinor: 0,
+      minimumAge: null,
+      eligibleCountries: null,
+      eligibleRegions: null,
+      sponsor: { name: "Bara" },
+      socialLinks: [],
+    });
+    const rules = generateStandardRules(out);
+    Object.assign(out, { rulesVersion: rules.version, rulesSections: rules.sections, rulesHash: rules.hash });
+  }
+  return out;
 }
 
 function canonicalJson(value) {
@@ -69,7 +142,10 @@ function exactKeys(value, allowed) {
     Object.keys(value).every((key) => allowed.has(key));
 }
 
-function normalizeContestInput(input, { partial = false } = {}) {
+function normalizeContestInput(input, { partial = false, eligibilityMode = null } = {}) {
+  if (eligibilityMode === GLOBAL_ELIGIBILITY_MODE || (!partial && input?.eligibilityMode === GLOBAL_ELIGIBILITY_MODE)) {
+    return normalizeGlobalContestInput(input, { partial });
+  }
   if (!input || typeof input !== "object" || Array.isArray(input)) invalid("Invalid contest body", "INVALID_BODY");
   const contestKeys = new Set([
     "slug", "title", "governingTimeZone", "startsAt", "endsAt",
@@ -164,8 +240,18 @@ function normalizeContestInput(input, { partial = false } = {}) {
   return out;
 }
 
-function publishValidationFields(contest) {
+function publishValidationFields(contest, now = new Date()) {
   const fields = [];
+  if (contest.eligibilityMode === GLOBAL_ELIGIBILITY_MODE) {
+    if (contest.cashMinor !== 0 || contest.cashCurrency !== "USD" || !Number.isInteger(contest.coinPrize) || contest.coinPrize < 1 || contest.coinPrize > 25000) fields.push("prize");
+    if (contest.minimumAge !== null || contest.eligibleCountries !== null || contest.eligibleRegions !== null) fields.push("eligibility");
+    if (contest.sponsor?.name !== "Bara" || Object.keys(contest.sponsor || {}).length !== 1) fields.push("sponsor");
+    if (!Array.isArray(contest.socialLinks) || contest.socialLinks.length !== 0) fields.push("socialLinks");
+    if (!standardRulesAreCurrent(contest)) fields.push("rules");
+    if (!isAllowedBannerMessage(contest.bannerMessage, contest)) fields.push("bannerMessage");
+    if (!(new Date(contest.endsAt) > now)) fields.push("endsAt");
+    return fields.slice(0, 10);
+  }
   const sponsorText = `${contest.sponsor?.legalName || ""} ${contest.sponsor?.mailingAddress || ""}`;
   if (!contest.sponsor?.legalName || !contest.sponsor?.mailingAddress || /placeholder/i.test(sponsorText)) fields.push("sponsor");
   const copy = (contest.rulesSections || []).map((section) => `${section.heading} ${section.body}`).join(" ").toLowerCase();
@@ -177,4 +263,4 @@ function publishValidationFields(contest) {
   return fields.slice(0, 10);
 }
 
-module.exports = { US_REGIONS, isAllowedBannerMessage, normalizeContestInput, publishValidationFields, rulesHash };
+module.exports = { US_REGIONS, isAllowedBannerMessage, normalizeContestInput, normalizeGlobalContestInput, publishValidationFields, rulesHash };

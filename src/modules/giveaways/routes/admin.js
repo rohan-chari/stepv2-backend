@@ -14,11 +14,20 @@ function createGiveawayAdminRouter(dependencies = {}) {
     return next();
   }, requireAuth, requireAdmin);
 
-  router.get("/", asyncHandler(async (req, res) => res.json(await service.listAdmin(req.query.cursor, req.query.limit))));
-  router.post("/", asyncHandler(async (req, res) => res.status(201).json(await service.createDraft(req.user, req.headers["idempotency-key"], req.body))));
-  router.patch("/:id", asyncHandler(async (req, res) => res.json(await service.patchDraft(req.user, req.params.id, req.body))));
-  router.get("/:id/candidates", asyncHandler(async (req, res) => res.json(await service.candidates(req.params.id, req.query.cursor, req.query.limit))));
-  router.get("/:id", asyncHandler(async (req, res) => res.json(await service.adminDetail(req.params.id))));
+  router.get("/", asyncHandler(async (req, res) => res.json(await service.listAdmin(req.query.cursor, req.query.limit, req.clientFeatures))));
+  router.post("/", asyncHandler(async (req, res) => res.status(201).json(await service.createDraft(req.user, req.headers["idempotency-key"], req.body, req.clientFeatures))));
+  router.patch("/:id", asyncHandler(async (req, res) => res.json(await service.patchDraft(req.user, req.params.id, req.body, req.clientFeatures))));
+  router.delete("/:id", asyncHandler(async (req, res) => {
+    res.json(await service.deleteDraftContest({
+      actorId: req.user.id,
+      contestId: req.params.id,
+      idempotencyKey: req.headers["idempotency-key"],
+      body: req.body,
+      supportsGlobal: req.clientFeatures?.has("referral_contest_global_v1") === true,
+    }));
+  }));
+  router.get("/:id/candidates", asyncHandler(async (req, res) => res.json(await service.candidates(req.params.id, req.query.cursor, req.query.limit, req.clientFeatures))));
+  router.get("/:id", asyncHandler(async (req, res) => res.json(await service.adminDetail(req.params.id, req.clientFeatures))));
 
   const mutations = {
     publish: "publish", cancel: "cancel", reviews: "review", finalize: "finalize",
@@ -28,7 +37,8 @@ function createGiveawayAdminRouter(dependencies = {}) {
   };
   for (const [path, method] of Object.entries(mutations)) {
     router.post(`/:id/${path}`, asyncHandler(async (req, res) => {
-      const payload = await service[method](req.user, req.params.id, req.headers["idempotency-key"], req.body);
+      await service.contestById(req.params.id, req.clientFeatures);
+      const payload = await service[method](req.user, req.params.id, req.headers["idempotency-key"], req.body, req.clientFeatures);
       res.json(payload);
     }));
   }

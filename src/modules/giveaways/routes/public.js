@@ -24,13 +24,13 @@ function createGiveawayPublicRouter(dependencies = {}) {
 
   router.get("/current/me", requireAuth, asyncHandler(async (req, res) => {
     res.set("Cache-Control", "private, no-store");
-    res.json(await service.memberCurrent(req.user, req.query.limit));
+    res.json(await service.memberCurrent(req.user, req.query.limit, req.clientFeatures));
   }));
 
   router.post("/:slug/entries", requireAuth, asyncHandler(async (req, res) => {
     res.set("Cache-Control", "private, no-store");
     await rateWindow.consumeEntry(req.user.id);
-    const result = await service.enter(req.params.slug, req.user, req.body);
+    const result = await service.enter(req.params.slug, req.user, req.body, req.clientFeatures);
     res.status(result.created ? 201 : 200).json({ entry: result.entry });
   }));
 

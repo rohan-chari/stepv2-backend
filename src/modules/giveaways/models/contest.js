@@ -21,6 +21,7 @@ function publicContest(contest, now = new Date(), { includeRulesUrl = false } = 
       ? { url: `https://barastep.com/giveaways/${encodeURIComponent(contest.slug)}/rules` }
       : {}),
   };
+  const global = contest.eligibilityMode === "BARA_ACCOUNT";
   return {
     slug: contest.slug,
     title: contest.title,
@@ -32,9 +33,13 @@ function publicContest(contest, now = new Date(), { includeRulesUrl = false } = 
       ...(contest.cashMinor > 0 ? { cashCurrency: contest.cashCurrency, cashMinor: contest.cashMinor } : {}),
       ...(contest.coinPrize > 0 ? { coins: contest.coinPrize } : {}),
     },
-    minimumAge: contest.minimumAge,
-    eligibleCountries: Array.isArray(contest.eligibleCountries) ? contest.eligibleCountries : ["US"],
-    eligibleRegions: Array.isArray(contest.eligibleRegions) ? contest.eligibleRegions : [],
+    ...(global ? {
+      eligibility: { mode: "BARA_ACCOUNT", summary: "Open to signed-in Bara users." },
+    } : {
+      minimumAge: contest.minimumAge,
+      eligibleCountries: Array.isArray(contest.eligibleCountries) ? contest.eligibleCountries : ["US"],
+      eligibleRegions: Array.isArray(contest.eligibleRegions) ? contest.eligibleRegions : [],
+    }),
     sponsor: contest.sponsor && typeof contest.sponsor === "object" ? contest.sponsor : null,
     rules,
     socialLinks: Array.isArray(contest.socialLinks) ? contest.socialLinks : [],
@@ -43,6 +48,7 @@ function publicContest(contest, now = new Date(), { includeRulesUrl = false } = 
 }
 
 function adminContest(contest, now = new Date(), counts = {}) {
+  const global = contest.eligibilityMode === "BARA_ACCOUNT";
   return {
     id: contest.id,
     revision: contest.revision,
@@ -56,9 +62,10 @@ function adminContest(contest, now = new Date(), counts = {}) {
     cashCurrency: contest.cashCurrency,
     cashMinor: contest.cashMinor,
     coinPrize: contest.coinPrize,
-    minimumAge: contest.minimumAge,
-    eligibleCountries: Array.isArray(contest.eligibleCountries) ? contest.eligibleCountries : ["US"],
-    eligibleRegions: Array.isArray(contest.eligibleRegions) ? contest.eligibleRegions : [],
+    eligibilityMode: global ? "BARA_ACCOUNT" : "US_18",
+    minimumAge: global ? null : contest.minimumAge,
+    eligibleCountries: global ? null : (Array.isArray(contest.eligibleCountries) ? contest.eligibleCountries : ["US"]),
+    eligibleRegions: global ? null : (Array.isArray(contest.eligibleRegions) ? contest.eligibleRegions : []),
     sponsor: contest.sponsor,
     rules: {
       version: contest.rulesVersion,

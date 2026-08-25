@@ -48,6 +48,7 @@ function buildHomeRaceCardResponse(dependencies) {
       supportsImpactSummaries,
       supportsInbox,
       supportsReferralContest,
+      supportsGlobalReferralContest,
       compactShell,
       homeActiveRaces,
       homePersistedTotals,
@@ -219,9 +220,10 @@ function buildHomeRaceCardResponse(dependencies) {
 
     // Wave 4: service settings and assembly of already-settled results.
     const automaticBanner = supportsReferralContest
-      ? await resolveActiveContestBanner({ prisma, now })
+      ? await resolveActiveContestBanner({ prisma, now, includeEligibilityMode: true })
       : null;
-    if (automaticBanner) {
+    if (automaticBanner && (automaticBanner.eligibilityMode !== "BARA_ACCOUNT" || supportsGlobalReferralContest)) {
+      delete automaticBanner.eligibilityMode;
       result.homeGiveawayBanner = automaticBanner;
     }
     const serviceBanner = await buildServiceBanner({

@@ -151,6 +151,8 @@ function createHomeRouter(dependencies = {}) {
           supportsInbox: req.clientFeatures?.has("inbox_v1") ?? false,
           supportsReferralContest:
             req.clientFeatures?.has("referral_contest_v1") ?? false,
+          supportsGlobalReferralContest:
+            req.clientFeatures?.has("referral_contest_global_v1") ?? false,
           compactShell: compact,
           homeActiveRaces,
           homePersistedTotals,
@@ -340,9 +342,10 @@ function createHomeRouter(dependencies = {}) {
       const supportsReferralContest =
         req.clientFeatures?.has("referral_contest_v1") ?? false;
       const automaticBanner = supportsReferralContest
-        ? await resolveActiveContestBanner({ prisma, now: current })
+        ? await resolveActiveContestBanner({ prisma, now: current, includeEligibilityMode: true })
         : null;
-      if (automaticBanner) {
+      if (automaticBanner && (automaticBanner.eligibilityMode !== "BARA_ACCOUNT" || req.clientFeatures?.has("referral_contest_global_v1") === true)) {
+        delete automaticBanner.eligibilityMode;
         result.homeGiveawayBanner = automaticBanner;
       }
       const serviceBanner = await buildServiceBanner({
