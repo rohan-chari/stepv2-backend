@@ -39,6 +39,9 @@ const {
   getEligibleGlobalEventSummary,
 } = require("./queries/getEligibleGlobalEventSummary");
 const { buildServiceBanner } = require("./services/buildServiceBanner");
+const {
+  resolveActiveContestBanner: defaultResolveActiveContestBanner,
+} = require("../giveaways");
 
 function createHomeRouter(dependencies = {}) {
   const router = Router();
@@ -68,6 +71,9 @@ function createHomeRouter(dependencies = {}) {
     dependencies.getFriendsSummary || defaultGetFriendsSummary;
   const settings = dependencies.appSettings || appSettings;
   const prisma = dependencies.prisma || defaultPrisma;
+  const nowFn = dependencies.now || (() => new Date());
+  const resolveActiveContestBanner =
+    dependencies.resolveActiveContestBanner || defaultResolveActiveContestBanner;
   const assembleHomeRaceCard = dependencies.buildHomeRaceCardResponse ||
     buildHomeRaceCardResponse({
       getHomeRaceCard,
@@ -81,6 +87,7 @@ function createHomeRouter(dependencies = {}) {
       adRewardsConfig,
       appSettings: settings,
       prisma,
+      resolveActiveContestBanner,
       logger: dependencies.logger || console,
     });
 
@@ -122,6 +129,7 @@ function createHomeRouter(dependencies = {}) {
         isStrictFlagEnabled(settings, "homeRaceCardLeanLiveV1Enabled"),
         isStrictFlagEnabled(settings, "homeRaceCardSnapshotReuseV1Enabled"),
       ]);
+      const current = nowFn();
       if (
         await isStrictFlagEnabled(
           settings,
@@ -149,6 +157,7 @@ function createHomeRouter(dependencies = {}) {
           localDate: req.query.localDate,
           leanLiveEnabled,
           snapshotReuseEnabled,
+          now: current,
         });
         return res.json(result);
       }
@@ -232,7 +241,6 @@ function createHomeRouter(dependencies = {}) {
         // C1: the cached display variant (falls back to findActiveAt when the
         // flag is off, Redis is down, or an injected test model lacks it).
         // Settlement paths keep calling findActiveInRange/findActiveAt directly.
-        const current = new Date();
         const viewerEvent = typeof globalStepEventModel.findViewerActiveHomeCached === "function"
           ? await globalStepEventModel.findViewerActiveHomeCached({
               userId: req.user.id,
@@ -319,7 +327,7 @@ function createHomeRouter(dependencies = {}) {
         req.clientFeatures?.has("inbox_v1") === true &&
         (await isStrictFlagEnabled(settings, "apiInboxV1Enabled"))
       ) {
-        const now = new Date();
+        const now = current;
         result.inboxUnreadCount = await derivedCache.cachedRead({
           key: cacheKeys.homeInboxUnread(req.user.id),
           prefix: cacheKeys.PREFIX.HOME_INBOX_UNREAD,
@@ -329,11 +337,19 @@ function createHomeRouter(dependencies = {}) {
         });
       }
 
+      const supportsReferralContest =
+        req.clientFeatures?.has("referral_contest_v1") ?? false;
+      const automaticBanner = supportsReferralContest
+        ? await resolveActiveContestBanner({ prisma, now: current })
+        : null;
+      if (automaticBanner) {
+        result.homeGiveawayBanner = automaticBanner;
+      }
       const serviceBanner = await buildServiceBanner({
         settings,
         prisma,
-        supportsReferralContest:
-          req.clientFeatures?.has("referral_contest_v1") ?? false,
+        supportsReferralContest,
+        now: current,
       });
       if (serviceBanner) result.homeServiceBanner = serviceBanner;
 

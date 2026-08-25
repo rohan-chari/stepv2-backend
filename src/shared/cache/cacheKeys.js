@@ -46,6 +46,7 @@ const PREFIX = {
   FRIEND_SEARCH_RATE: "v1:user:friendsearchrate",
   HOME_IMPACT_SUMMARY: "v2:home:impact-summary",
   HOME_INBOX_UNREAD: "v1:home:inbox-unread",
+  HOME_GIVEAWAY_BANNER: "v1:home:giveaway-banner",
   HOME_ACTIVE_GLOBAL_EVENT: "v1:user",
   RACE_LIST: "v1:user:races",
 };
@@ -181,6 +182,7 @@ function friendSearchRate(userId, utcMinuteEpoch) {
 
 function homeImpactSummary(userId) { return `${PREFIX.HOME_IMPACT_SUMMARY}:${userId}`; }
 function homeInboxUnread(userId) { return `${PREFIX.HOME_INBOX_UNREAD}:${userId}`; }
+function homeGiveawayBanner() { return `${PREFIX.HOME_GIVEAWAY_BANNER}:active`; }
 
 // `/races` is split into a user-scoped membership snapshot and two bounded
 // status fragments. The generation is deliberately separate from the variant
@@ -397,6 +399,7 @@ module.exports = {
   friendSearchRate,
   homeImpactSummary,
   homeInboxUnread,
+  homeGiveawayBanner,
   raceListGeneration,
   raceListMembership,
   raceListFragment,

@@ -11,6 +11,7 @@ const { getCurrentContest } = require("../queries/getCurrentContest");
 const { isAllowedBannerMessage, normalizeContestInput, publishValidationFields } = require("./validation");
 const { hasEnabledPrize } = require("./prize");
 const { appSettings: defaultAppSettings } = require("../../../shared/config/appSettings");
+const { invalidateActiveContestBannerCache } = require("../queries/activeContestBanner");
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -357,22 +358,26 @@ function buildGiveawayService(dependencies = {}) {
 
   async function publish(actor, id, key, body) {
     exactBody(body, ["revision"]);
-    try { return await mutation(actor, id, "PUBLISH", key, body, async (tx, contest) => {
-      if (contest.lifecycleStatus !== "DRAFT") throw new ConflictError("Contest is immutable", "CONTEST_IMMUTABLE");
-      const fields = publishValidationFields(contest);
-      if (fields.length) throw new ValidationError("Contest is not ready to publish", "PUBLISH_VALIDATION_FAILED", { fields });
-      const conflict = await tx.giveawayContest.findFirst({
-        where: { id: { not: id }, lifecycleStatus: "PUBLISHED" },
+    try {
+      const response = await mutation(actor, id, "PUBLISH", key, body, async (tx, contest) => {
+        if (contest.lifecycleStatus !== "DRAFT") throw new ConflictError("Contest is immutable", "CONTEST_IMMUTABLE");
+        const fields = publishValidationFields(contest);
+        if (fields.length) throw new ValidationError("Contest is not ready to publish", "PUBLISH_VALIDATION_FAILED", { fields });
+        const conflict = await tx.giveawayContest.findFirst({
+          where: { id: { not: id }, lifecycleStatus: "PUBLISHED" },
+        });
+        if (conflict) throw new ConflictError("Contest window conflicts with another published contest", "CONTEST_WINDOW_CONFLICT");
+        const archiveable = await tx.giveawayContest.findMany({ where: { id: { not: id }, lifecycleStatus: { in: ["FINAL", "CANCELLED"] } } });
+        for (const old of archiveable) {
+          const archived = await tx.giveawayContest.update({ where: { id: old.id }, data: { lifecycleStatus: "ARCHIVED", archivedAt: nowFn(), revision: { increment: 1 } } });
+          await audit({ tx, contestId: old.id, actorId: actor.id, method: "POST:publish", action: "AUTO_ARCHIVE", body: { replacementContestId: id }, response: { contestId: old.id, lifecycleStatus: archived.lifecycleStatus }, oldState: old.lifecycleStatus, newState: "ARCHIVED" });
+        }
+        const updated = await tx.giveawayContest.update({ where: { id }, data: { lifecycleStatus: "PUBLISHED", publishedAt: nowFn(), frozenAt: nowFn(), revision: { increment: 1 } } });
+        return { contest: updated };
       });
-      if (conflict) throw new ConflictError("Contest window conflicts with another published contest", "CONTEST_WINDOW_CONFLICT");
-      const archiveable = await tx.giveawayContest.findMany({ where: { id: { not: id }, lifecycleStatus: { in: ["FINAL", "CANCELLED"] } } });
-      for (const old of archiveable) {
-        const archived = await tx.giveawayContest.update({ where: { id: old.id }, data: { lifecycleStatus: "ARCHIVED", archivedAt: nowFn(), revision: { increment: 1 } } });
-        await audit({ tx, contestId: old.id, actorId: actor.id, method: "POST:publish", action: "AUTO_ARCHIVE", body: { replacementContestId: id }, response: { contestId: old.id, lifecycleStatus: archived.lifecycleStatus }, oldState: old.lifecycleStatus, newState: "ARCHIVED" });
-      }
-      const updated = await tx.giveawayContest.update({ where: { id }, data: { lifecycleStatus: "PUBLISHED", publishedAt: nowFn(), frozenAt: nowFn(), revision: { increment: 1 } } });
-      return { contest: updated };
-    }); } catch (error) {
+      await invalidateActiveContestBannerCache();
+      return response;
+    } catch (error) {
       if (error?.code === "P2002") throw new ConflictError("Contest window conflicts with another published contest", "CONTEST_WINDOW_CONFLICT");
       throw error;
     }
@@ -380,12 +385,14 @@ function buildGiveawayService(dependencies = {}) {
 
   async function cancel(actor, id, key, body) {
     exactBody(body, ["revision", "publicReason", "amendedRulesVersion"]);
-    return mutation(actor, id, "CANCEL", key, body, async (tx, contest) => {
+    const response = await mutation(actor, id, "CANCEL", key, body, async (tx, contest) => {
       if (contest.lifecycleStatus !== "PUBLISHED" || contest.finalizedAt) throw new ConflictError("Contest cannot be cancelled", "INVALID_TRANSITION");
       if (typeof body.publicReason !== "string" || body.publicReason.trim().length < 10 || typeof body.amendedRulesVersion !== "string" || !body.amendedRulesVersion.trim()) throw new ValidationError("Cancellation reason and amended rules version are required", "INVALID_CANCEL");
       const updated = await tx.giveawayContest.update({ where: { id }, data: { lifecycleStatus: "CANCELLED", publicReason: body.publicReason.trim().slice(0, 500), amendedRulesVersion: body.amendedRulesVersion.trim(), cancelledAt: nowFn(), revision: { increment: 1 } } });
       return { contest: updated, reason: body.publicReason };
     });
+    await invalidateActiveContestBannerCache();
+    return response;
   }
 
   async function review(actor, id, key, body) {
@@ -420,7 +427,7 @@ function buildGiveawayService(dependencies = {}) {
 
   async function finalize(actor, id, key, body) {
     exactBody(body, ["revision"]);
-    return mutation(actor, id, "FINALIZE", key, body, async (tx, contest) => {
+    const response = await mutation(actor, id, "FINALIZE", key, body, async (tx, contest) => {
       if (contest.lifecycleStatus !== "PUBLISHED" || contest.finalizedAt || deriveContestStatus(contest, nowFn()) !== "VERIFYING") throw new ConflictError("Contest is not ready to finalize", "INVALID_TRANSITION");
       await acquireReferralQualificationFence(tx);
       const entrants = await tx.giveawayEntrant.findMany({
@@ -464,6 +471,8 @@ function buildGiveawayService(dependencies = {}) {
       const updated = await tx.giveawayContest.update({ where: { id }, data: { lifecycleStatus: noWinner ? "FINAL" : "PUBLISHED", finalizedAt: nowFn(), revision: { increment: 1 } } });
       return { contest: updated, result: { rankedCount: ranked.length, noWinner, potentialWinner: ranked[0] ? { entrantId: ranked[0].entrantId, displayName: ranked[0].displayName, originalRank: 1 } : null, verifiedWinner: null } };
     });
+    await invalidateActiveContestBannerCache();
+    return response;
   }
 
   async function winner(actor, id, key, body) {
@@ -588,11 +597,13 @@ function buildGiveawayService(dependencies = {}) {
 
   async function archive(actor, id, key, body) {
     exactBody(body, ["revision"]);
-    return mutation(actor, id, "ARCHIVE", key, body, async (tx, contest) => {
+    const response = await mutation(actor, id, "ARCHIVE", key, body, async (tx, contest) => {
       if (!["FINAL", "CANCELLED"].includes(contest.lifecycleStatus)) throw new ConflictError("Contest cannot be archived", "INVALID_TRANSITION");
       const updated = await tx.giveawayContest.update({ where: { id }, data: { lifecycleStatus: "ARCHIVED", archivedAt: nowFn(), revision: { increment: 1 } } });
       return { contest: updated };
     });
+    await invalidateActiveContestBannerCache();
+    return response;
   }
 
   async function bannerCorrection(actor, id, key, body) {

@@ -5,6 +5,9 @@ const {
   getEligibleGlobalEventSummary,
 } = require("./queries/getEligibleGlobalEventSummary");
 const { buildServiceBanner } = require("./services/buildServiceBanner");
+const {
+  resolveActiveContestBanner: defaultResolveActiveContestBanner,
+} = require("../giveaways");
 
 async function settle(task, logger, label) {
   try {
@@ -28,6 +31,7 @@ function buildHomeRaceCardResponse(dependencies) {
     adRewardsConfig,
     appSettings,
     prisma,
+    resolveActiveContestBanner = defaultResolveActiveContestBanner,
     logger = console,
   } = dependencies;
 
@@ -50,6 +54,7 @@ function buildHomeRaceCardResponse(dependencies) {
       localDate,
       leanLiveEnabled,
       snapshotReuseEnabled,
+      now = new Date(),
     } = params;
 
     // Wave 1: the core card and the two optional shell branches. At most three
@@ -213,10 +218,17 @@ function buildHomeRaceCardResponse(dependencies) {
     }
 
     // Wave 4: service settings and assembly of already-settled results.
+    const automaticBanner = supportsReferralContest
+      ? await resolveActiveContestBanner({ prisma, now })
+      : null;
+    if (automaticBanner) {
+      result.homeGiveawayBanner = automaticBanner;
+    }
     const serviceBanner = await buildServiceBanner({
       settings: appSettings,
       prisma,
       supportsReferralContest,
+      now,
     });
     if (serviceBanner) result.homeServiceBanner = serviceBanner;
     if (compactShell) {

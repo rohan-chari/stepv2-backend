@@ -6,6 +6,10 @@ const {
   buildGiveawayRetention,
   scheduleGiveawayRetention,
 } = require("./jobs/retention");
+const {
+  invalidateActiveContestBannerCache,
+  resolveActiveContestBanner,
+} = require("./queries/activeContestBanner");
 
 async function resolveContestBanner({ prisma, slug, now = new Date() }) {
   if (!slug || typeof slug !== "string") return null;
@@ -21,6 +25,8 @@ module.exports = {
   buildGiveawayRetention,
   createGiveawayAdminRouter,
   createGiveawayPublicRouter,
+  invalidateActiveContestBannerCache,
+  resolveActiveContestBanner,
   resolveContestBanner,
   scheduleGiveawayRetention,
 };
