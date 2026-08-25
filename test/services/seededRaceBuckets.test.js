@@ -2,6 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
   buildSeededRaceBuckets,
+  cohortMinimumForSeed,
   planBuckets,
   splitFundedExposureCandidates,
 } = require("../../src/modules/races/services/seededRaceBuckets");
@@ -36,6 +37,55 @@ test("cohort sizing uses the fewest groups while keeping groups at least 15", ()
   assert.equal(large.filter((size) => size === 16).length, 1);
 });
 
+test("Daily cohort sizing uses 30 while preserving the generic planner default", () => {
+  assert.equal(cohortMinimumForSeed({ kind: "DAILY_10K", cadence: "DAILY" }), 30);
+  assert.equal(cohortMinimumForSeed({ kind: "WEEKLY_50K", cadence: "WEEKLY" }), 50);
+  assert.equal(cohortMinimumForSeed({ kind: "OTHER", cadence: "DAILY" }), 15);
+
+  assert.deepEqual(planBuckets([], [], 30), []);
+  assert.deepEqual(planBuckets(candidates(1), [], 30).map((bucket) => bucket.length), [1]);
+  assert.deepEqual(planBuckets(candidates(29), [], 30).map((bucket) => bucket.length), [29]);
+  assert.deepEqual(planBuckets(candidates(30), [], 30).map((bucket) => bucket.length), [30]);
+  assert.deepEqual(planBuckets(candidates(31), [], 30).map((bucket) => bucket.length), [31]);
+  assert.deepEqual(planBuckets(candidates(59), [], 30).map((bucket) => bucket.length), [59]);
+  assert.deepEqual(planBuckets(candidates(60), [], 30).map((bucket) => bucket.length), [30, 30]);
+  assert.deepEqual(planBuckets(candidates(61), [], 30).map((bucket) => bucket.length), [31, 30]);
+  assert.deepEqual(planBuckets(candidates(89), [], 30).map((bucket) => bucket.length), [45, 44]);
+  assert.deepEqual(planBuckets(candidates(90), [], 30).map((bucket) => bucket.length), [30, 30, 30]);
+  assert.deepEqual(planBuckets(candidates(91), [], 30).map((bucket) => bucket.length), [31, 30, 30]);
+
+  const large = planBuckets(candidates(616), [], 30).map((bucket) => bucket.length);
+  assert.deepEqual(large, [...Array(16).fill(31), ...Array(4).fill(30)]);
+  assert.deepEqual(
+    planBuckets(candidates(61), [], 30).map((bucket) => bucket.map((row) => row.userId)),
+    planBuckets(candidates(61).reverse(), [], 30).map((bucket) => bucket.map((row) => row.userId)),
+  );
+});
+
+test("Daily friendship components stay whole across a large component and trailing remainder", () => {
+  const people = candidates(61).map((row, index) => ({
+    ...row,
+    matchSteps: index < 31 ? index * 100 : 10_000 + (index - 31) * 100,
+  }));
+  const friendships = [
+    ...Array.from({ length: 30 }, (_, index) => ({
+      userAId: people[index].userId,
+      userBId: people[index + 1].userId,
+    })),
+    ...Array.from({ length: 29 }, (_, index) => ({
+      userAId: people[31 + index].userId,
+      userBId: people[31 + index + 1].userId,
+    })),
+  ];
+
+  const planned = planBuckets(people, friendships, 30);
+  assert.deepEqual(planned.map((bucket) => bucket.length), [31, 30]);
+  assert.ok(planned.some((bucket) =>
+    people.slice(0, 31).every((person) => bucket.some((row) => row.userId === person.userId))
+  ));
+  assert.equal(new Set(planned.flat().map((row) => row.userId)).size, 61);
+});
+
 test("friendship components stay together, with a deterministic merge for impossible short remainders", () => {
   const people = candidates(30).map((row, index) => ({
     ...row,
@@ -52,7 +102,7 @@ test("friendship components stay together, with a deterministic merge for imposs
   assert.equal(new Set(planned[0].map((row) => row.userId)).size, 30);
 });
 
-test("weekly cohort sizing uses 50 as its minimum while Daily remains 15-based", () => {
+test("weekly cohort sizing uses 50 as its minimum while direct generic planning remains 15-based", () => {
   assert.deepEqual(planBuckets([], [], 50), []);
   assert.deepEqual(planBuckets(candidates(49), [], 50).map((bucket) => bucket.length), [49]);
   assert.deepEqual(planBuckets(candidates(50), [], 50).map((bucket) => bucket.length), [50]);

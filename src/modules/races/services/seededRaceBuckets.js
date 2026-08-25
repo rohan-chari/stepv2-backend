@@ -33,10 +33,12 @@ const { invalidateUser: invalidateRaceListUser } = require("./raceListCache");
 
 const SEED_TIMEZONE = "America/New_York";
 const BUCKET_CAPACITY = 15;
+const DAILY_COHORT_MINIMUM = 30;
 const WEEKLY_COHORT_MINIMUM = 50;
 const BUCKET_FEATURE = "seeded_race_buckets";
 
 function cohortMinimumForSeed(seed) {
+  if (seed?.kind === "DAILY_10K") return DAILY_COHORT_MINIMUM;
   return seed?.cadence === "WEEKLY" ? WEEKLY_COHORT_MINIMUM : BUCKET_CAPACITY;
 }
 
@@ -832,21 +834,54 @@ function buildSeededRaceBuckets(dependencies = {}) {
         windowStart: upcoming.windowStart,
       });
       if (currentMode !== "BUCKET" && upcomingMode !== "BUCKET") continue;
-      const bucket = await prisma.seededRaceBucket.findFirst({
-        // Membership predicate is the privacy boundary: never select another
-        // player's bucket merely to discover that this viewer has no row.
-        where: {
-          seedId: seed.id,
-          windowStart: { in: [current.windowStart, upcoming.windowStart] },
-          assignments: { some: { userId } },
+      // Membership predicate is the privacy boundary: never select another
+      // player's bucket merely to discover that this viewer has no row. Read
+      // each window independently; combining them and ordering by windowStart
+      // can incorrectly reuse the current race for the upcoming projection
+      // when the viewer belongs to both windows.
+      const bucketInclude = {
+        race: {
+          include: {
+            participants: { where: { userId }, select: { status: true } },
+          },
         },
-        orderBy: { windowStart: "asc" },
-        include: { race: { include: { participants: { where: { userId }, select: { status: true } } } } },
-      });
+      };
+      const [currentBucket, upcomingBucket] = await Promise.all([
+        currentMode === "BUCKET"
+          ? prisma.seededRaceBucket.findFirst({
+              where: {
+                seedId: seed.id,
+                windowStart: current.windowStart,
+                OR: [
+                  { assignments: { some: { userId } } },
+                  {
+                    race: {
+                      participants: {
+                        some: { userId, status: "ACCEPTED" },
+                      },
+                    },
+                  },
+                ],
+              },
+              include: bucketInclude,
+            })
+          : null,
+        upcomingMode === "BUCKET"
+          ? prisma.seededRaceBucket.findFirst({
+              where: {
+                seedId: seed.id,
+                windowStart: upcoming.windowStart,
+                assignments: { some: { userId } },
+              },
+              include: bucketInclude,
+            })
+          : null,
+      ]);
       const elected = await prisma.seededRaceWindowMembership.findUnique({
         where: { seedId_windowStart_userId: { seedId: seed.id, windowStart: upcoming.windowStart, userId } },
       });
-      const race = bucket?.race || null;
+      const race = currentBucket?.race || null;
+      const upcomingRace = upcomingBucket?.race || null;
       const mine = race?.participants?.[0] || null;
       cards.push({
         raceId: race?.id ?? null,
@@ -859,11 +894,11 @@ function buildSeededRaceBuckets(dependencies = {}) {
         myStatus: mine?.status ?? (elected?.stream === "BUCKET" ? "ELECTED" : null),
         bucketPrivate: true,
         upcoming: {
-          raceId: race?.status === "PENDING" ? race.id : null,
+          raceId: upcomingRace?.status === "PENDING" ? upcomingRace.id : null,
           scheduledStartAt: upcoming.windowStart,
           participantCount: 0,
-          maxParticipants: race?.status === "PENDING"
-            ? (race.maxParticipants ?? cohortMinimumForSeed(seed))
+          maxParticipants: upcomingRace?.status === "PENDING"
+            ? (upcomingRace.maxParticipants ?? cohortMinimumForSeed(seed))
             : cohortMinimumForSeed(seed),
           isFull: false,
           myStatus: elected?.stream === "BUCKET" ? "ELECTED" : null,
@@ -933,4 +968,4 @@ function buildSeededRaceBuckets(dependencies = {}) {
   return { elect, electAutomatic, finalise, featuredCards, reconcileFeatured, reconcileFeaturedUser, selectedBucketSeedKinds, bucketModeWindowKeys };
 }
 
-module.exports = { buildSeededRaceBuckets, SeededBucketError, windowFor, upcomingWindowFor, supportsBuckets, claimLegacyStream, planBuckets, matchStepsForCandidates, BUCKET_CAPACITY, BUCKET_FEATURE, acquireSeededWindowLock, withSeededWindowLock, readWindowMode, stampWindowMode, splitFundedExposureCandidates };
+module.exports = { buildSeededRaceBuckets, SeededBucketError, windowFor, upcomingWindowFor, supportsBuckets, claimLegacyStream, planBuckets, matchStepsForCandidates, BUCKET_CAPACITY, DAILY_COHORT_MINIMUM, WEEKLY_COHORT_MINIMUM, cohortMinimumForSeed, BUCKET_FEATURE, acquireSeededWindowLock, withSeededWindowLock, readWindowMode, stampWindowMode, splitFundedExposureCandidates };

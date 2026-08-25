@@ -3,16 +3,18 @@
 ## Summary & user story
 
 Daily Challenge private cohorts should avoid small fields. A player joining a
-Daily Challenge must be placed into an existing cohort that can grow beyond the
-15-person target before a new undersized cohort is created. For a daily roster
-of 16, the desired result is one cohort of 16; for 31, two cohorts of 15 and 16.
+Daily Challenge must be placed into the fewest balanced cohorts targeting at
+least 30 people before a new undersized cohort is created. For a daily roster
+of 30, the result is one cohort of 30; for 61, two cohorts of 31 and 30.
 
 ## Scope / non-goals
 
 In scope:
 
-- Change private seeded Daily/Weekly cohort planning to use 15 as a minimum
+- Change only private seeded Daily cohort planning to use 30 as a minimum
   target rather than a hard maximum.
+- Keep the existing weekly minimum target of 50 and the generic planner's
+  default minimum of 15 for unrelated callers.
 - Preserve deterministic ordering, friendship components, skill matching, and
   the durable per-window membership ledger.
 - Keep late joiners in an existing cohort where possible.
@@ -28,7 +30,8 @@ Out of scope:
 ## Current implementation and exact implementation path
 
 - `src/modules/races/services/seededRaceBuckets.js` owns `BUCKET_CAPACITY`,
-  `planBuckets`, late assignment, and finalization.
+  the cadence-specific minimum selector, `planBuckets`, late assignment, and
+  finalization.
 - `planBuckets` currently caps every bucket at 15 and rebalances a trailing
   singleton, which produces 8/8 for 16–? edge cases such as the currently
   observed 8-person cohorts.
@@ -39,12 +42,15 @@ Out of scope:
 
 Implementation:
 
-1. Add a pure deterministic sizing helper in `seededRaceBuckets.js`.
-2. Define the exact planner formula: `cohortCount = 1` for 1–14 users;
-   otherwise `cohortCount = floor(userCount / 15)`. Distribute users as evenly
-   as possible across that count, with the first `userCount % cohortCount`
-   groups receiving one extra user. Thus 16/23 remain one group, 31 is 16/15,
-   46 is 16/15/15, and 616 is 40×15 plus 1×16 across 41 groups.
+1. Define explicit minimums in `seededRaceBuckets.js`: `DAILY_10K` uses 30,
+   weekly uses 50, and direct generic `planBuckets()` callers retain the
+   default of 15.
+2. Preserve the exact planner formula: `cohortCount = 1` when the roster is
+   smaller than its selected minimum; otherwise `cohortCount = floor(userCount /
+   minimum)`. Distribute users as evenly as possible across that count, with
+   the first `userCount % cohortCount` groups receiving one extra user. Thus
+   Daily 30/31/59/60/61 produce 30, 31, 59, 30/30, and 31/30; Daily 616
+   produces sixteen 31-person groups and four 30-person groups.
 3. Permit the resulting cohort size to exceed 15 and stamp each generated
    `Race.maxParticipants` to that group’s exact planned size. Leaving it at 15
    would make a planned 16-person cohort impossible to populate.
@@ -88,9 +94,11 @@ to newly finalized windows and future late assignments only.
 Tests are written before implementation in `test/services/seededRaceBuckets.test.js`:
 
 - Pure planner sizing and deterministic/permutation-independent output.
-- No cohort below 15 when the roster has at least 15 people.
-- A 16-person roster remains one cohort of 16.
-- A 31-person roster becomes 15/16, and a 46-person roster becomes 15/15/16.
+- No Daily cohort below 30 when the roster has at least 30 people; weekly
+  remains at least 50.
+- Daily 30/31/59/60/61 rosters become 30/31/59/30+30/31+30.
+- A Daily 616-person roster becomes twenty cohorts: sixteen of 31 and four of
+  30.
 - Existing friendship and skill-band behavior remains intact.
 - Finalization/pre-finalization reconciliation does not create a new undersized
   cohort, and each generated race has capacity for its full planned group.
@@ -99,11 +107,11 @@ Tests are written before implementation in `test/services/seededRaceBuckets.test
 
 ## Acceptance criteria / definition of done
 
-- No newly planned Daily/Weekly cohort is below 15 when at least 15 eligible
-  users exist.
-- 16 eligible users produce one 16-person cohort.
-- 616 eligible users produce 41 cohorts: 40 of 15 and 1 of 16, rather than 42
-  cohorts containing 8-person groups.
+- No newly planned Daily cohort is below 30 when at least 30 eligible users
+  exist; weekly remains at least 50.
+- Daily 30/31/59/60/61 eligible users produce 30/31/59/30+30/31+30.
+- Daily 616 eligible users produce twenty cohorts: sixteen of 31 and four of
+  30.
 - Each generated race’s `maxParticipants` equals its planned group size.
 - Existing active/finalized cohorts remain unchanged; post-finalization joins
   retain the existing immutable-window behavior.
