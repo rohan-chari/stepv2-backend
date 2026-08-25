@@ -36,6 +36,7 @@ const STAGING_DIR = "/var/www/step-tracker-backend-staging";
  * cannot touch staging (or vice versa).
  */
 function app(name, cwd, instances, env = {}, options = {}) {
+  const { maxMemoryRestart = "600M", ...pm2Options } = options;
   return {
     name,
     cwd,
@@ -43,15 +44,8 @@ function app(name, cwd, instances, env = {}, options = {}) {
     exec_mode: "cluster",
     instances,
     env,
-    ...options,
-    // RAM, not CPU, is what caps the worker count on this box. Each worker
-    // holds its own V8 heap (~340-400 MB at rest, 590 MB observed under load)
-    // and the droplet has 1.97 GB with NO SWAP — so the kernel OOM-killer, not
-    // a scheduler, is what enforces the limit. On 2026-08-16 running 2+2
-    // workers killed a node process twice in 40 minutes
-    // (`dmesg -T | grep oom-kill`). Restart a worker before it can take the box
-    // down with it; 600 MB is above normal peak but under the OOM threshold.
-    max_memory_restart: "600M",
+    ...pm2Options,
+    ...(maxMemoryRestart ? { max_memory_restart: maxMemoryRestart } : {}),
     // `reload` cycles workers one at a time for zero downtime. `restart` kills
     // them all at once and caused a ~10s outage with user-visible 502s the one
     // time it was used on prod (2026-07-12).
@@ -68,6 +62,15 @@ module.exports = {
     app("steps-tracker", PROD_DIR, 2, {
       STEPS_PROCESS_ROLE: "http",
       PORT: 3002,
+    }, {
+      // PM2 6.0.14 can orphan a clustered worker when automatic reloads
+      // overlap (PM2 #6129). The old 600 MB ceiling caused 490 such reloads
+      // in five days. The topology watchdog enforces a 1200 MB ceiling by
+      // restarting at most one registered HTTP instance at a time.
+      // PM2 merges reload config, so omitting this field would preserve the
+      // old 600M value. Zero is not disabled in PM2 6.0.14 (every RSS is > 0),
+      // therefore use an unreachable sentinel that the watchdog verifies.
+      maxMemoryRestart: "100G",
     }),
     // The queue owns participant projection writes and is intentionally kept
     // out of the HTTP workers. It is one fork: the queue itself provides
@@ -84,11 +87,9 @@ module.exports = {
       PORT: 3011,
       HOST: "127.0.0.1",
     }, { exec_mode: "fork" }),
-    // Staging gets ONE, and the reason is memory, not CPU. Four workers'
-    // heaps do not fit in 1.97 GB — running 2+2 on 2026-08-16 got a node
-    // process OOM-killed twice inside 40 minutes, and the victim can just as
-    // easily be a PROD worker as a staging one. Staging serves ~no traffic, so
-    // its second worker buys nothing at rest and risks prod under load.
+    // Staging stays at ONE because it serves essentially no traffic. This was
+    // originally required by the former 2 GB host; keeping it at one on the
+    // replacement 8 GB host preserves capacity for production and load spikes.
     //
     // For a load test that needs prod-matching topology, scale it up for the
     // run and put it back afterwards — do not make 2 the committed default:

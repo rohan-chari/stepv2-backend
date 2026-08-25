@@ -23,6 +23,8 @@
     "powerups:docs:check": "node scripts/generate-powerups-md.js --check",
     "runtime-controls:generate": "node scripts/generate-runtime-control-disposition.js",
     "runtime-controls:check": "node scripts/generate-runtime-control-disposition.js --check",
+    "pm2:topology:check": "node scripts/pm2-topology-guard.js",
+    "pm2:topology:watchdog": "node scripts/pm2-topology-guard.js --remediate",
     "funded-exposure:catch-up": "node scripts/funded-exposure-catch-up.js",
     "imposter:retire": "node scripts/retire-imposter-inventory.js",
     "buy-ins:remediate": "node scripts/remediate-legacy-buy-ins.js",

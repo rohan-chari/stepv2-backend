@@ -1,0 +1,10 @@
+[Unit]
+Description=Verify and repair the steps-tracker PM2 production topology
+After=network.target
+
+[Service]
+Type=oneshot
+User=root
+Environment=PM2_HOME=/root/.pm2
+WorkingDirectory=/var/www/step-tracker-backend
+ExecStart=/usr/bin/flock -n -E 0 /run/steps-tracker-pm2.lock /usr/bin/node /var/www/step-tracker-backend/scripts/pm2-topology-guard.js --remediate --verify-live-config

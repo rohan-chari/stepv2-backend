@@ -153,12 +153,39 @@ npx prisma migrate deploy
 npx prisma generate
 npm run powerups:copy:sync -- --apply   # user-facing powerup copy; NOT the seed
 npm run balance:drift      # reports (never blocks) balance config drift vs git
-pm2 reload steps-tracker
+./scripts/pm2-safe-prod-reload.sh
 ```
 
-`pm2 reload` (not `restart` — see the staging deploy note above), addressed
-by **name**, not id. Prod runs 2 cluster instances; reload cycles them one at
-a time with zero downtime.
+The wrapper holds `/run/steps-tracker-pm2.lock`, verifies the OS process tree
+against PM2 before and after the reload, reapplies `ecosystem.config.js` for
+all three production roles, and saves only a healthy topology. It applies and
+verifies the HTTP memory sentinel before touching resolution or cron. Prod runs
+2 cluster instances; reload cycles them one at a time with zero downtime. Do
+not bypass the wrapper with a direct mutating PM2 command.
+
+The replacement production host has 8 GB RAM and 4 GB persistent swap. The old
+600 MB `max_memory_restart` setting caused 490 HTTP reloads in five days and
+triggered PM2's overlapping-reload orphan bug. HTTP memory enforcement now
+lives in `scripts/pm2-topology-guard.js`: it uses a 1200 MB ceiling and restarts
+only one registered PM2 instance at a time. PM2 retains a verified 100 GB
+sentinel because omitting the setting does not clear a previously merged value,
+while `0` would make every positive RSS exceed the limit. A systemd timer also compares PM2's
+registry with direct Node children of the PM2 daemon every minute. A process is
+eligible for cleanup only when its executable, parent PID, working directory,
+and exact production script all match, it remains absent from PM2 after a
+30-second stabilization period, and it is still the same process immediately
+before signaling.
+
+Install or refresh the watchdog after deploying a change to its files:
+
+```bash
+install -m 0644 ops/systemd/steps-pm2-topology-watchdog.service /etc/systemd/system/
+install -m 0644 ops/systemd/steps-pm2-topology-watchdog.timer /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now steps-pm2-topology-watchdog.timer
+systemctl start steps-pm2-topology-watchdog.service
+systemctl status steps-pm2-topology-watchdog.timer --no-pager
+```
 
 `prisma/seed.js` is **not** part of a deploy any more. It is the bootstrap for a
 *fresh* database (local dev, the integration DB, a rebuilt staging), and running
@@ -199,7 +226,9 @@ does not return, so keep the two in step when you change wording.
 ### 4. Smoke test
 
 ```bash
-pm2 logs 3 --lines 50
+pm2 logs steps-tracker --lines 50
+pm2 logs steps-tracker-resolution --lines 30
+pm2 logs steps-tracker-cron --lines 30
 curl https://steptracker-api.org/health    # prod (also: localhost:3002/health)
 ```
 
@@ -221,11 +250,25 @@ If prod is broken and you need to revert:
 ```bash
 ssh <droplet>
 cd /var/www/step-tracker-backend
+PM2_SAFETY_DIR="$(mktemp -d /root/steps-pm2-safety.XXXXXX)"
+mkdir -p "$PM2_SAFETY_DIR/scripts"
+install -m 0644 ecosystem.config.js "$PM2_SAFETY_DIR/ecosystem.config.js"
+install -m 0755 scripts/pm2-topology-guard.js "$PM2_SAFETY_DIR/scripts/pm2-topology-guard.js"
+install -m 0755 scripts/pm2-safe-prod-reload.sh "$PM2_SAFETY_DIR/scripts/pm2-safe-prod-reload.sh"
 git checkout pre-1.1.5
 npm install                        # in case dependencies changed
 npx prisma generate                # in case Prisma client needs regen
-pm2 reload steps-tracker
+install -m 0644 "$PM2_SAFETY_DIR/ecosystem.config.js" ecosystem.config.js
+install -m 0755 "$PM2_SAFETY_DIR/scripts/pm2-topology-guard.js" scripts/pm2-topology-guard.js
+install -m 0755 "$PM2_SAFETY_DIR/scripts/pm2-safe-prod-reload.sh" scripts/pm2-safe-prod-reload.sh
+./scripts/pm2-safe-prod-reload.sh
 ```
+
+The three safety files are restored from the pre-checkout snapshot, not the
+rollback revision. This prevents an older ecosystem file from restoring the
+defective 600 MB cluster reload setting and keeps the systemd watchdog target
+present. The checkout remains dirty only for these operational safety files;
+retain them until rolling forward again.
 
 **Do NOT run `prisma migrate deploy` during rollback.** Migrations are forward-only. If a migration was applied as part of 1.1.5, the schema stays migrated. The reverted code must be compatible with the new schema, OR you need to write a new "down" migration (rare; usually means redesigning the change).
 
