@@ -321,7 +321,12 @@ function buildGiveawayService(dependencies = {}) {
       const merged = { ...contest, ...patch };
       if (new Date(merged.startsAt) >= new Date(merged.endsAt)) throw new ValidationError("Contest start must precede end", "INVALID_DATE_RANGE");
       if (!hasEnabledPrize(merged)) throw new ValidationError("At least one prize must be enabled", "INVALID_PRIZE");
-      if (supportsGlobalContest(clientFeatures) && merged.cashMinor > 0) {
+      const refreshedLegacyCashChange = supportsGlobalContest(clientFeatures) &&
+        contest.eligibilityMode !== GLOBAL_ELIGIBILITY_MODE && (
+          (Object.hasOwn(patch, "cashMinor") && patch.cashMinor !== contest.cashMinor) ||
+          (Object.hasOwn(patch, "cashCurrency") && patch.cashCurrency !== contest.cashCurrency)
+        );
+      if (refreshedLegacyCashChange) {
         throw new ValidationError("New contests must be coin-only", "INVALID_PRIZE");
       }
       if (contest.eligibilityMode === GLOBAL_ELIGIBILITY_MODE) {

@@ -157,7 +157,7 @@ describe("global coin-only referral contest HTTP contract", () => {
     }
   });
 
-  it("prevents refreshed clients from creating or publishing a legacy cash draft", async () => {
+  it("lets refreshed clients edit legacy cash drafts only when cash/legal fields round-trip unchanged", async () => {
     const create = await read(await request(server.baseUrl, "POST", "/admin/giveaways", {
       token: admin.token,
       headers: { ...GLOBAL_FEATURES, "Idempotency-Key": crypto.randomUUID() },
@@ -186,10 +186,45 @@ describe("global coin-only referral contest HTTP contract", () => {
       socialLinks: [],
       bannerMessage: legacy.bannerMessage,
     } });
+
+    const preserved = await read(await request(server.baseUrl, "PATCH", `/admin/giveaways/${historicalDraft.id}`, {
+      token: admin.token,
+      headers: GLOBAL_FEATURES,
+      body: { revision: historicalDraft.revision, patch: {
+        title: "Legacy Cash Contest Renamed",
+        cashCurrency: legacy.cashCurrency,
+        cashMinor: legacy.cashMinor,
+        minimumAge: legacy.minimumAge,
+        eligibleRegions: legacy.eligibleRegions,
+        sponsor: legacy.sponsor,
+        rules: legacy.rules,
+        socialLinks: legacy.socialLinks,
+        bannerMessage: legacy.bannerMessage,
+      } },
+    }));
+    assert.equal(preserved.status, 200);
+    assert.equal(preserved.body.contest.title, "Legacy Cash Contest Renamed");
+    assert.equal(preserved.body.contest.cashCurrency, "USD");
+    assert.equal(preserved.body.contest.cashMinor, 5000);
+
+    for (const patch of [
+      { cashMinor: 4999 },
+      { cashMinor: 5001 },
+      { cashCurrency: "EUR" },
+      { eligibilityMode: "BARA_ACCOUNT" },
+    ]) {
+      const changed = await read(await request(server.baseUrl, "PATCH", `/admin/giveaways/${historicalDraft.id}`, {
+        token: admin.token,
+        headers: GLOBAL_FEATURES,
+        body: { revision: preserved.body.contest.revision, patch },
+      }));
+      assert.equal(changed.status, 400);
+    }
+
     const publish = await read(await request(server.baseUrl, "POST", `/admin/giveaways/${historicalDraft.id}/publish`, {
       token: admin.token,
       headers: { ...GLOBAL_FEATURES, "Idempotency-Key": crypto.randomUUID() },
-      body: { revision: historicalDraft.revision },
+      body: { revision: preserved.body.contest.revision },
     }));
     assert.equal(publish.status, 400);
     assert.equal(publish.body.code, "PUBLISH_VALIDATION_FAILED");
