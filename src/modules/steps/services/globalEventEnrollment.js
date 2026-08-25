@@ -112,20 +112,15 @@ async function enrollIfGlobalEventActive(tx, { raceId, userIds, at }) {
       if (!entitlement) continue;
       const active = new Date(entitlement.startsAt) <= current &&
         current < new Date(entitlement.endsAt);
-      if (!active || entitlement.startOutcome === START_OUTCOMES.SKIPPED_STALE) continue;
+      if (
+        !active ||
+        entitlement.startOutcome === START_OUTCOMES.SKIPPED_STALE
+      ) continue;
 
       let outcome = entitlement.startOutcome;
       if (!before || outcome === START_OUTCOMES.NO_ACTIVE_RACES) {
         outcome = START_OUTCOMES.ACTIVATED_LATE_JOIN;
       } else if (outcome === START_OUTCOMES.PENDING) {
-        const lateness = current.getTime() - new Date(entitlement.startsAt).getTime();
-        if (lateness > 2 * 60 * 1000) {
-          await tx.globalStepEventEntitlement.updateMany({
-            where: { id: entitlement.id, startOutcome: START_OUTCOMES.PENDING },
-            data: { startOutcome: START_OUTCOMES.SKIPPED_STALE, startProcessedAt: current },
-          });
-          continue;
-        }
         outcome = START_OUTCOMES.ACTIVATED_LATE_JOIN;
       }
       await createPendingEnrollments(tx, { eventId: parent.id, raceId, userIds: [userId] });

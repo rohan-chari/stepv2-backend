@@ -419,7 +419,7 @@ test("concurrent HTTP late join and local boundary produce one durable enrollmen
     raceId: race.id, userId: creator.id, status: "ACCEPTED",
     joinedAt: race.startedAt,
   } });
-  const startsAt = new Date(now.getTime() - 30 * 1000);
+  const startsAt = new Date(now.getTime() - 3 * 60 * 1000);
   const event = await prisma.globalStepEvent.create({ data: {
     eventDay: "2098-08-21",
     scheduleMode: "LOCAL_ENTITLEMENTS",
@@ -450,6 +450,106 @@ test("concurrent HTTP late join and local boundary produce one durable enrollmen
     where: { eventId_userId: { eventId: event.id, userId: joiner.id } },
   });
   assert.notEqual(entitlement.startOutcome, "SKIPPED_STALE");
+});
+
+test("a boundary processed more than two minutes late still activates the live event and releases its notification", async () => {
+  const { user } = await createTestUser({ globalEventTimezone: "UTC" });
+  const now = new Date("2098-08-22T12:03:00.000Z");
+  const startsAt = new Date("2098-08-22T12:00:00.000Z");
+  const endsAt = new Date("2098-08-22T12:30:00.000Z");
+  const race = await prisma.race.create({ data: {
+    creatorId: user.id, name: "Late local boundary", targetSteps: 0,
+    timeBased: true, maxDurationDays: 1, status: "ACTIVE",
+    startedAt: new Date("2098-08-22T11:00:00.000Z"), endsAt: endsAt,
+  } });
+  await prisma.raceParticipant.create({ data: {
+    raceId: race.id, userId: user.id, status: "ACCEPTED",
+    joinedAt: race.startedAt,
+  } });
+  const event = await prisma.globalStepEvent.create({ data: {
+    eventDay: "2098-08-22", scheduleMode: "LOCAL_ENTITLEMENTS",
+    localStartMinute: 720, durationMinutes: 30,
+    startsAt: new Date("2098-08-22T00:00:00.000Z"),
+    endsAt: new Date("2098-08-23T00:00:00.000Z"), multiplier: 2,
+  } });
+  const entitlement = await prisma.globalStepEventEntitlement.create({ data: {
+    eventId: event.id, userId: user.id, timezone: "UTC", localDate: "2098-08-22",
+    startsAt, endsAt,
+  } });
+  const deliveryKey = `visible:GLOBAL_EVENT_STARTED:${user.id}:${event.id}`;
+  await prisma.notificationSchedule.create({ data: {
+    recipientUserId: user.id, type: "GLOBAL_EVENT_STARTED",
+    title: "2x STEPS EVENT", body: "Double steps are LIVE.",
+    payload: { type: "GLOBAL_EVENT_STARTED", route: "home", eventId: event.id },
+    deliveryKey, availableAt: startsAt, expiresAt: endsAt,
+    sourceRef: entitlement.id,
+  } });
+
+  await processDueEntitlementBoundaries({ prisma, now });
+
+  const processed = await prisma.globalStepEventEntitlement.findUniqueOrThrow({
+    where: { id: entitlement.id },
+  });
+  assert.equal(processed.startOutcome, "ACTIVATED_ON_TIME");
+  assert.equal(await prisma.globalEventRaceImpact.count({
+    where: { eventId: event.id, raceId: race.id, userId: user.id },
+  }), 1);
+  assert.equal(await prisma.inboxAlert.count({
+    where: { userId: user.id, type: "GLOBAL_EVENT_STARTED" },
+  }), 1);
+  assert.equal((await prisma.notificationSchedule.findUniqueOrThrow({
+    where: { recipientUserId_deliveryKey: { recipientUserId: user.id, deliveryKey } },
+  })).status, "MATERIALIZED");
+});
+
+test("a boundary processed after the event window expires without activating or notifying", async () => {
+  const { user } = await createTestUser({ globalEventTimezone: "UTC" });
+  const now = new Date("2098-08-22T12:33:00.000Z");
+  const startsAt = new Date("2098-08-22T12:00:00.000Z");
+  const endsAt = new Date("2098-08-22T12:30:00.000Z");
+  const race = await prisma.race.create({ data: {
+    creatorId: user.id, name: "Expired local boundary", targetSteps: 0,
+    timeBased: true, maxDurationDays: 1, status: "ACTIVE",
+    startedAt: new Date("2098-08-22T11:00:00.000Z"), endsAt: now,
+  } });
+  await prisma.raceParticipant.create({ data: {
+    raceId: race.id, userId: user.id, status: "ACCEPTED",
+    joinedAt: race.startedAt,
+  } });
+  const event = await prisma.globalStepEvent.create({ data: {
+    eventDay: "2098-08-22", scheduleMode: "LOCAL_ENTITLEMENTS",
+    localStartMinute: 720, durationMinutes: 30,
+    startsAt: new Date("2098-08-22T00:00:00.000Z"),
+    endsAt: new Date("2098-08-23T00:00:00.000Z"), multiplier: 2,
+  } });
+  const entitlement = await prisma.globalStepEventEntitlement.create({ data: {
+    eventId: event.id, userId: user.id, timezone: "UTC", localDate: "2098-08-22",
+    startsAt, endsAt,
+  } });
+  const deliveryKey = `visible:GLOBAL_EVENT_STARTED:${user.id}:${event.id}`;
+  await prisma.notificationSchedule.create({ data: {
+    recipientUserId: user.id, type: "GLOBAL_EVENT_STARTED",
+    title: "2x STEPS EVENT", body: "Double steps are LIVE.",
+    payload: { type: "GLOBAL_EVENT_STARTED", route: "home", eventId: event.id },
+    deliveryKey, availableAt: startsAt, expiresAt: endsAt,
+    sourceRef: entitlement.id,
+  } });
+
+  await processDueEntitlementBoundaries({ prisma, now });
+
+  const processed = await prisma.globalStepEventEntitlement.findUniqueOrThrow({
+    where: { id: entitlement.id },
+  });
+  assert.equal(processed.startOutcome, "SKIPPED_STALE");
+  assert.equal(await prisma.globalEventRaceImpact.count({
+    where: { eventId: event.id, raceId: race.id, userId: user.id },
+  }), 0);
+  assert.equal(await prisma.inboxAlert.count({
+    where: { userId: user.id, type: "GLOBAL_EVENT_STARTED" },
+  }), 0);
+  assert.equal((await prisma.notificationSchedule.findUniqueOrThrow({
+    where: { recipientUserId_deliveryKey: { recipientUserId: user.id, deliveryKey } },
+  })).status, "EXPIRED");
 });
 
 test("Redis-down cold HTTP progress uses participant-specific PostgreSQL local events", async () => {

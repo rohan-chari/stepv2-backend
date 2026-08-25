@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict");
 const { describe, it, before, after, beforeEach } = require("node:test");
 const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
+const { appSettings } = require("../../src/shared/config/appSettings");
 
 let server;
 let nextAppleId = 0;
@@ -156,6 +157,86 @@ describe("friend request flow", () => {
     assert.equal(bobBody.pending.incoming.length, 1);
     assert.equal(bobBody.pending.incoming[0].user.id, alice.userId);
     assert.equal(bobBody.friends.length, 0);
+  });
+
+  it("summary-v1 preserves stable friendship IDs and pending directions", async () => {
+    const alice = await createUser("AliceWalker");
+    const bob = await createUser("BobRunner");
+    const carol = await createUser("CarolJogger");
+    const dave = await createUser("DaveSteps");
+
+    const acceptedSend = await request(server.baseUrl, "POST", "/friends/request", {
+      body: { addresseeId: bob.userId },
+      token: alice.token,
+    });
+    const acceptedFriendship = (await acceptedSend.json()).friendship;
+    const accepted = await request(
+      server.baseUrl,
+      "PUT",
+      `/friends/request/${acceptedFriendship.id}`,
+      { body: { accept: true }, token: bob.token }
+    );
+    assert.equal(accepted.status, 200);
+
+    const outgoingSend = await request(server.baseUrl, "POST", "/friends/request", {
+      body: { addresseeId: carol.userId },
+      token: alice.token,
+    });
+    const outgoingFriendship = (await outgoingSend.json()).friendship;
+
+    const incomingSend = await request(server.baseUrl, "POST", "/friends/request", {
+      body: { addresseeId: alice.userId },
+      token: dave.token,
+    });
+    const incomingFriendship = (await incomingSend.json()).friendship;
+
+    await appSettings.setFlag("apiFriendsSummaryV1Enabled", true);
+    try {
+      const summaryResponse = await request(
+        server.baseUrl,
+        "GET",
+        "/friends?view=summary-v1",
+        { token: alice.token }
+      );
+      assert.equal(summaryResponse.status, 200);
+      assert.deepEqual(await summaryResponse.json(), {
+        contract: "friends-summary-v1",
+        incomingFriendRequests: 1,
+        friends: [
+          {
+            id: bob.userId,
+            displayName: "BobRunner",
+            profilePhotoUrl: null,
+            friendshipId: acceptedFriendship.id,
+            teamRaceEligible: false,
+          },
+        ],
+        pending: {
+          incoming: [
+            {
+              friendshipId: incomingFriendship.id,
+              user: {
+                id: dave.userId,
+                displayName: "DaveSteps",
+                profilePhotoUrl: null,
+              },
+            },
+          ],
+          outgoing: [
+            {
+              friendshipId: outgoingFriendship.id,
+              user: {
+                id: carol.userId,
+                displayName: "CarolJogger",
+                profilePhotoUrl: null,
+              },
+            },
+          ],
+        },
+      });
+    } finally {
+      await appSettings.setFlag("apiFriendsSummaryV1Enabled", false);
+    }
   });
 
   it("cannot send request to yourself", async () => {

@@ -287,7 +287,7 @@ async function processDueEntitlementBoundaries({
     for (const entitlement of due) {
       if (
         entitlement.event.scheduleMode !== LOCAL_ENTITLEMENTS ||
-        current.getTime() - new Date(entitlement.startsAt).getTime() > 2 * 60 * 1000
+        new Date(entitlement.endsAt) <= current
       ) {
         startRaceIdsByEntitlement.set(entitlement.id, []);
         continue;
@@ -320,11 +320,23 @@ async function processDueEntitlementBoundaries({
     for (const entitlement of due) {
       if (Date.now() - started >= tickBudgetMs) break;
       if (entitlement.event.scheduleMode !== LOCAL_ENTITLEMENTS) continue;
-      if (current.getTime() - new Date(entitlement.startsAt).getTime() > 2 * 60 * 1000) {
+      // Scheduler lateness does not invalidate a still-live event. The
+      // durable notification schedule and the active window are the
+      // correctness boundaries; only an already-expired window is terminal.
+      if (new Date(entitlement.endsAt) <= current) {
         await tx.globalStepEventEntitlement.updateMany({
           where: { id: entitlement.id, startProcessedAt: null },
           data: { startOutcome: START_OUTCOMES.SKIPPED_STALE, startProcessedAt: current },
         });
+        if (tx.notificationSchedule) {
+          await notificationIntentService.releaseOneDue({
+            tx,
+            recipientUserId: entitlement.userId,
+            deliveryKey: `visible:GLOBAL_EVENT_STARTED:${entitlement.userId}:${entitlement.eventId}`,
+            now: current,
+            eligible: false,
+          });
+        }
         result.stale += 1;
         transitionedUserIds.add(entitlement.userId);
         continue;
@@ -543,13 +555,6 @@ async function ensureRaceGlobalEventEligibility({
       let outcome = entitlement.startOutcome;
       if (outcome === START_OUTCOMES.SKIPPED_STALE) continue;
       if (outcome === START_OUTCOMES.PENDING) {
-        if (current.getTime() - new Date(entitlement.startsAt).getTime() > 2 * 60 * 1000) {
-          await tx.globalStepEventEntitlement.updateMany({
-            where: { id: entitlement.id, startOutcome: START_OUTCOMES.PENDING },
-            data: { startOutcome: START_OUTCOMES.SKIPPED_STALE, startProcessedAt: current },
-          });
-          continue;
-        }
         outcome = joinedAt <= new Date(entitlement.startsAt) &&
           new Date(race.startedAt) <= new Date(entitlement.startsAt)
           ? START_OUTCOMES.ACTIVATED_ON_TIME
