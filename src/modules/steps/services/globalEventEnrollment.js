@@ -68,6 +68,31 @@ async function createPendingEnrollmentsBatch(tx, { raceId, enrollments }) {
   return result.count || 0;
 }
 
+// Boundary processing commonly has one user and several active races. Keep
+// that fan-out in one INSERT so the boundary transaction does not pay one
+// round trip per race.
+async function createPendingEnrollmentsForRaces(tx, { eventId, raceIds, userId }) {
+  const uniqueRaceIds = [...new Set((raceIds || []).filter(Boolean))].sort();
+  if (!eventId || !userId || uniqueRaceIds.length === 0) return 0;
+  const result = await tx.globalEventRaceImpact.createMany({
+    data: uniqueRaceIds.map((raceId) => ({
+      eventId,
+      raceId,
+      userId,
+      status: "PENDING",
+    })),
+    skipDuplicates: true,
+  });
+  const duplicates = uniqueRaceIds.length - (result.count || 0);
+  if (duplicates > 0) {
+    try {
+      const { recordOperationalCounters } = require("./globalStepEventObservability");
+      await recordOperationalCounters(tx, { duplicateClaimsSuppressed: duplicates });
+    } catch {}
+  }
+  return result.count || 0;
+}
+
 // Call inside the transaction that makes a participant/race ACTIVE. Doing this
 // in the same commit closes the race-start/late-join gap without making a
 // second best-effort write part of a user-visible response.
@@ -141,5 +166,6 @@ module.exports = {
   acquireGlobalEnrollmentLock,
   createPendingEnrollments,
   createPendingEnrollmentsBatch,
+  createPendingEnrollmentsForRaces,
   enrollIfGlobalEventActive,
 };

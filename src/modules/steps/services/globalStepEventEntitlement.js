@@ -11,7 +11,9 @@ const {
 } = require("../../../db");
 const { createInboxAlert: defaultCreateInboxAlert } = require("../../inbox/services/inbox");
 const { notificationIntentService: defaultNotificationIntentService } = require("../../notifications/services/notificationDelivery");
-const { enqueueRaceResolution: defaultEnqueueRaceResolution } = require("../../races/services/enqueueRaceResolution");
+const {
+  enqueueRaceResolutionForUser: defaultEnqueueRaceResolutionForUser,
+} = require("../../races/services/enqueueRaceResolution");
 const {
   acquireRaceWriteFences,
 } = require("../../races/services/raceWriteFence");
@@ -208,6 +210,7 @@ async function findDueEntitlementsForUpdate(tx, {
   now,
   take,
   includeEvent = false,
+  excludeIds = [],
 }) {
   if (boundary !== "start" && boundary !== "end") {
     throw new TypeError("boundary must be start or end");
@@ -224,23 +227,33 @@ async function findDueEntitlementsForUpdate(tx, {
 
   if (typeof tx.$queryRawUnsafe !== "function") {
     return tx.globalStepEventEntitlement.findMany({
-      where: { [prismaProcessed]: null, [prismaTimestamp]: { lte: new Date(now) } },
+      where: {
+        [prismaProcessed]: null,
+        [prismaTimestamp]: { lte: new Date(now) },
+        ...(excludeIds.length > 0 ? { id: { notIn: excludeIds } } : {}),
+      },
       orderBy: { [prismaTimestamp]: "asc" },
       take: limit,
       ...(includeEvent ? { include: { event: true } } : {}),
     });
   }
 
+  const exclusion = excludeIds.length > 0
+    ? `\n        AND "id" <> ALL($3::text[])`
+    : "";
   const claimed = await tx.$queryRawUnsafe(
     `SELECT "id"
        FROM "global_step_event_entitlements"
       WHERE "${processedColumn}" IS NULL
-        AND "${timestampColumn}" <= $1
+        AND "${timestampColumn}" <= $1${exclusion}
       ORDER BY "${timestampColumn}" ASC, "id" ASC
       LIMIT $2
       FOR UPDATE SKIP LOCKED`,
-    new Date(now),
-    limit
+    ...(
+      excludeIds.length > 0
+        ? [new Date(now), limit, excludeIds]
+        : [new Date(now), limit]
+    )
   );
   const ids = claimed.map((row) => row.id);
   if (ids.length === 0) return [];
@@ -258,119 +271,151 @@ async function processDueEntitlementBoundaries({
   batchSize = 100,
   tickBudgetMs = 5000,
   createInboxAlert = defaultCreateInboxAlert,
-  enqueueRaceResolution = defaultEnqueueRaceResolution,
+  enqueueRaceResolution = null,
   notificationIntentService = defaultNotificationIntentService,
+  logger = console,
 } = {}) {
   const started = Date.now();
-  const result = { starts: 0, ends: 0, stale: 0 };
+  const result = { starts: 0, ends: 0, stale: 0, failures: 0 };
   const current = new Date(now);
   const transitionedUserIds = new Set();
   const alertedUserIds = new Set();
+  const failureCounts = { start: 0, end: 0 };
   const {
     acquireGlobalEnrollmentLock,
-    createPendingEnrollments,
+    createPendingEnrollmentsForRaces,
   } = require("./globalEventEnrollment");
-
   const limit = Math.min(100, Math.max(1, Number(batchSize) || 100));
-  let startPageSize = 0;
-  do {
-  startPageSize = 0;
-  await prisma.$transaction(async (tx) => {
-    const due = await findDueEntitlementsForUpdate(tx, {
-      boundary: "start",
-      now: current,
-      take: batchSize,
-      includeEvent: true,
-    });
-    startPageSize = due.length;
-    const startRaceIdsByEntitlement = new Map();
-    for (const entitlement of due) {
-      if (
-        entitlement.event.scheduleMode !== LOCAL_ENTITLEMENTS ||
-        new Date(entitlement.endsAt) <= current
-      ) {
-        startRaceIdsByEntitlement.set(entitlement.id, []);
-        continue;
-      }
-      const participants = await tx.raceParticipant.findMany({
-        where: {
-          userId: entitlement.userId,
-          status: "ACCEPTED",
-          forfeitedAt: null,
-          finishedAt: null,
-          joinedAt: { lte: entitlement.startsAt },
-          race: {
-            status: "ACTIVE",
-            startedAt: { lte: entitlement.startsAt },
-            OR: [{ endsAt: null }, { endsAt: { gt: entitlement.startsAt } }],
-          },
-        },
-        select: { raceId: true },
-      });
-      startRaceIdsByEntitlement.set(
-        entitlement.id,
-        [...new Set(participants.map((row) => row.raceId))].sort(),
-      );
+  const transactionOptions = { timeout: 15_000, maxWait: 10_000 };
+
+  // Production uses the existing batch enqueue contract. A caller-supplied
+  // single-race seam remains available for narrow tests and legacy doubles.
+  const enqueueRaces = async (tx, entitlement, raceIds) => {
+    if (raceIds.length === 0) return;
+    if (!enqueueRaceResolution) {
+      await defaultEnqueueRaceResolutionForUser({
+        userId: entitlement.userId,
+        timeZone: entitlement.timezone,
+        now: current,
+        reason: "GLOBAL_EVENT_BOUNDARY",
+        priority: "IMMEDIATE",
+        reconciledRaces: raceIds.map((raceId) => ({ raceId })),
+      }, tx);
+      return;
     }
-    const startRaceIds = [...new Set(
-      [...startRaceIdsByEntitlement.values()].flat(),
-    )].sort();
-    await acquireRaceWriteFences(tx, startRaceIds);
-    await acquireGlobalEnrollmentLock(tx);
-    for (const entitlement of due) {
-      if (Date.now() - started >= tickBudgetMs) break;
-      if (entitlement.event.scheduleMode !== LOCAL_ENTITLEMENTS) continue;
-      // Scheduler lateness does not invalidate a still-live event. The
-      // durable notification schedule and the active window are the
-      // correctness boundaries; only an already-expired window is terminal.
-      if (new Date(entitlement.endsAt) <= current) {
-        await tx.globalStepEventEntitlement.updateMany({
-          where: { id: entitlement.id, startProcessedAt: null },
-          data: { startOutcome: START_OUTCOMES.SKIPPED_STALE, startProcessedAt: current },
+    for (const raceId of raceIds) {
+      await enqueueRaceResolution({
+        raceId,
+        userId: entitlement.userId,
+        timeZone: entitlement.timezone,
+        now: current,
+        reason: "GLOBAL_EVENT_BOUNDARY",
+        priority: "IMMEDIATE",
+      }, tx);
+    }
+  };
+
+  const processOneStart = async (excludedIds) => {
+    let entitlementId = null;
+    try {
+      return await prisma.$transaction(async (tx) => {
+        const [entitlement] = await findDueEntitlementsForUpdate(tx, {
+          boundary: "start",
+          now: current,
+          take: 1,
+          includeEvent: true,
+          excludeIds: [...excludedIds],
         });
+        if (!entitlement) return null;
+        entitlementId = entitlement.id;
+        if (entitlement.event?.scheduleMode !== LOCAL_ENTITLEMENTS) {
+          return { id: entitlement.id, ignored: true };
+        }
+        const deliveryKey = `visible:GLOBAL_EVENT_STARTED:${entitlement.userId}:${entitlement.eventId}`;
+        if (new Date(entitlement.endsAt) <= current) {
+          await tx.globalStepEventEntitlement.updateMany({
+            where: { id: entitlement.id, startProcessedAt: null },
+            data: { startOutcome: START_OUTCOMES.SKIPPED_STALE, startProcessedAt: current },
+          });
+          if (tx.notificationSchedule) {
+            await notificationIntentService.releaseOneDue({
+              tx,
+              recipientUserId: entitlement.userId,
+              deliveryKey,
+              now: current,
+              eligible: false,
+            });
+          }
+          return { id: entitlement.id, userId: entitlement.userId, stale: true };
+        }
+
+        // Fence every active race the user currently belongs to before taking
+        // the eligibility snapshot. Writers use the same C0 -> global-lock
+        // order; after both locks are held this reread cannot observe a
+        // membership mutation halfway through the boundary.
+        const racesToFence = await tx.raceParticipant.findMany({
+          where: {
+            userId: entitlement.userId,
+            status: "ACCEPTED",
+            race: { status: "ACTIVE" },
+          },
+          select: { raceId: true },
+        });
+        await acquireRaceWriteFences(tx, [...new Set(racesToFence.map((row) => row.raceId))].sort());
+        await acquireGlobalEnrollmentLock(tx);
+
+        const participants = await tx.raceParticipant.findMany({
+          where: {
+            userId: entitlement.userId,
+            status: "ACCEPTED",
+            forfeitedAt: null,
+            finishedAt: null,
+            joinedAt: { lte: entitlement.startsAt },
+            race: {
+              status: "ACTIVE",
+              startedAt: { lte: entitlement.startsAt },
+              OR: [{ endsAt: null }, { endsAt: { gt: entitlement.startsAt } }],
+            },
+          },
+          select: { raceId: true },
+        });
+        const raceIds = [...new Set(participants.map((row) => row.raceId))].sort();
+        await createPendingEnrollmentsForRaces(tx, {
+          eventId: entitlement.eventId,
+          raceIds,
+          userId: entitlement.userId,
+        });
+        await enqueueRaces(tx, entitlement, raceIds);
+
+        let alerted = false;
         if (tx.notificationSchedule) {
-          await notificationIntentService.releaseOneDue({
+          const released = await notificationIntentService.releaseOneDue({
             tx,
             recipientUserId: entitlement.userId,
-            deliveryKey: `visible:GLOBAL_EVENT_STARTED:${entitlement.userId}:${entitlement.eventId}`,
+            deliveryKey,
             now: current,
-            eligible: false,
+            eligible: raceIds.length > 0,
           });
-        }
-        result.stale += 1;
-        transitionedUserIds.add(entitlement.userId);
-        continue;
-      }
-      const raceIds = startRaceIdsByEntitlement.get(entitlement.id) || [];
-      for (const raceId of raceIds) {
-        await createPendingEnrollments(tx, {
-          eventId: entitlement.eventId,
-          raceId,
-          userIds: [entitlement.userId],
-        });
-        await enqueueRaceResolution({
-          raceId,
-          userId: entitlement.userId,
-          now: current,
-          reason: "GLOBAL_EVENT_BOUNDARY",
-          priority: "IMMEDIATE",
-        }, tx);
-      }
-      const deliveryKey = `visible:GLOBAL_EVENT_STARTED:${entitlement.userId}:${entitlement.eventId}`;
-      if (tx.notificationSchedule) {
-        const released = await notificationIntentService.releaseOneDue({
-          tx,
-          recipientUserId: entitlement.userId,
-          deliveryKey,
-          now: current,
-          eligible: raceIds.length > 0,
-        });
-        if (released?.released) alertedUserIds.add(entitlement.userId);
-        else if (released === null && raceIds.length > 0) {
-          // Rows created before the additive schedule table have no schedule
-          // to release. Materialize their already-due boundary once through
-          // the same Inbox/outbox creation seam, preserving mixed-version
-          // behavior without precreating future alerts.
+          if (released?.released) alerted = true;
+          else if (released === null && raceIds.length > 0) {
+            await createInboxAlert({
+              userId: entitlement.userId,
+              type: "GLOBAL_EVENT_STARTED",
+              title: "2x STEPS EVENT",
+              body: "Double steps are LIVE for 30 minutes. Every step counts 2x in your races! Go!",
+              destination: { route: "home" },
+              sourceKey: deliveryKey,
+              payload: {
+                type: "GLOBAL_EVENT_STARTED", route: "home", params: {},
+                multiplier: entitlement.event.multiplier,
+                eventId: entitlement.eventId, entitlementId: entitlement.id,
+              },
+              now: current,
+              tx,
+            });
+            alerted = true;
+          }
+        } else if (raceIds.length > 0) {
           await createInboxAlert({
             userId: entitlement.userId,
             type: "GLOBAL_EVENT_STARTED",
@@ -379,105 +424,107 @@ async function processDueEntitlementBoundaries({
             destination: { route: "home" },
             sourceKey: deliveryKey,
             payload: {
-              type: "GLOBAL_EVENT_STARTED",
-              route: "home",
-              params: {},
+              type: "GLOBAL_EVENT_STARTED", route: "home", params: {},
               multiplier: entitlement.event.multiplier,
-              eventId: entitlement.eventId,
-              entitlementId: entitlement.id,
+              eventId: entitlement.eventId, entitlementId: entitlement.id,
             },
             now: current,
             tx,
           });
-          alertedUserIds.add(entitlement.userId);
+          alerted = true;
         }
-      } else if (raceIds.length > 0) {
-        // Narrow legacy test doubles and pre-migration callers retain the
-        // historical path; production Prisma transactions always expose the
-        // additive schedule model above.
-        await createInboxAlert({
-          userId: entitlement.userId,
-          type: "GLOBAL_EVENT_STARTED",
-          title: "2x STEPS EVENT",
-          body: "Double steps are LIVE for 30 minutes. Every step counts 2x in your races! Go!",
-          destination: { route: "home" },
-          sourceKey: deliveryKey,
-          payload: {
-            type: "GLOBAL_EVENT_STARTED",
-            route: "home",
-            params: {},
-            multiplier: entitlement.event.multiplier,
-            eventId: entitlement.eventId,
-            entitlementId: entitlement.id,
+        await tx.globalStepEventEntitlement.updateMany({
+          where: { id: entitlement.id, startProcessedAt: null },
+          data: {
+            startOutcome: raceIds.length > 0
+              ? START_OUTCOMES.ACTIVATED_ON_TIME
+              : START_OUTCOMES.NO_ACTIVE_RACES,
+            startProcessedAt: current,
           },
-          now: current,
-          tx,
         });
-        alertedUserIds.add(entitlement.userId);
-      }
-      await tx.globalStepEventEntitlement.updateMany({
-        where: { id: entitlement.id, startProcessedAt: null },
-        data: {
-          startOutcome: raceIds.length > 0
-            ? START_OUTCOMES.ACTIVATED_ON_TIME
-            : START_OUTCOMES.NO_ACTIVE_RACES,
-          startProcessedAt: current,
-        },
-      });
-      result.starts += 1;
-      transitionedUserIds.add(entitlement.userId);
+        return { id: entitlement.id, userId: entitlement.userId, alerted };
+      }, transactionOptions);
+    } catch (error) {
+      if (entitlementId) error.entitlementId = entitlementId;
+      throw error;
     }
-  });
-  } while (startPageSize === limit && Date.now() - started < tickBudgetMs);
+  };
 
-  if (Date.now() - started < tickBudgetMs) {
-    let endPageSize = 0;
-    do {
-    endPageSize = 0;
-    await prisma.$transaction(async (tx) => {
-      const due = await findDueEntitlementsForUpdate(tx, {
-        boundary: "end",
-        now: current,
-        take: batchSize,
-      });
-      endPageSize = due.length;
-      const endRaceIdsByEntitlement = new Map();
-      for (const entitlement of due) {
+  const processOneEnd = async (excludedIds) => {
+    let entitlementId = null;
+    try {
+      return await prisma.$transaction(async (tx) => {
+        const [entitlement] = await findDueEntitlementsForUpdate(tx, {
+          boundary: "end",
+          now: current,
+          take: 1,
+          excludeIds: [...excludedIds],
+        });
+        if (!entitlement) return null;
+        entitlementId = entitlement.id;
         const impacts = await tx.globalEventRaceImpact.findMany({
           where: { eventId: entitlement.eventId, userId: entitlement.userId },
           select: { raceId: true },
         });
-        endRaceIdsByEntitlement.set(
-          entitlement.id,
-          [...new Set(impacts.map((row) => row.raceId))].sort(),
-        );
-      }
-      const endRaceIds = [...new Set(
-        [...endRaceIdsByEntitlement.values()].flat(),
-      )].sort();
-      await acquireRaceWriteFences(tx, endRaceIds);
-      await acquireGlobalEnrollmentLock(tx);
-      for (const entitlement of due) {
-        if (Date.now() - started >= tickBudgetMs) break;
-        for (const raceId of endRaceIdsByEntitlement.get(entitlement.id) || []) {
-          await enqueueRaceResolution({
-            raceId,
-            userId: entitlement.userId,
-            now: current,
-            reason: "GLOBAL_EVENT_BOUNDARY",
-            priority: "IMMEDIATE",
-          }, tx);
-        }
+        const raceIds = [...new Set(impacts.map((row) => row.raceId))].sort();
+        await acquireRaceWriteFences(tx, raceIds);
+        await acquireGlobalEnrollmentLock(tx);
+        await enqueueRaces(tx, entitlement, raceIds);
         await tx.globalStepEventEntitlement.updateMany({
           where: { id: entitlement.id, endProcessedAt: null },
           data: { endProcessedAt: current },
         });
-        result.ends += 1;
-        transitionedUserIds.add(entitlement.userId);
+        return { id: entitlement.id, userId: entitlement.userId };
+      }, transactionOptions);
+    } catch (error) {
+      if (entitlementId) error.entitlementId = entitlementId;
+      throw error;
+    }
+  };
+
+  const drain = async (boundary, processor) => {
+    const excludedIds = new Set();
+    let attempts = 0;
+    while (attempts < limit && Date.now() - started < tickBudgetMs) {
+      let outcome;
+      try {
+        outcome = await processor(excludedIds);
+      } catch (error) {
+        attempts += 1;
+        if (!error.entitlementId) {
+          result.failures += 1;
+          failureCounts[boundary] += 1;
+          logger.error(`[GLOBAL_EVENT_BOUNDARY] ${boundary} tick failed before an entitlement was claimed`, error);
+          break;
+        }
+        excludedIds.add(error.entitlementId);
+        result.failures += 1;
+        failureCounts[boundary] += 1;
+        logger.error(`[GLOBAL_EVENT_BOUNDARY] ${boundary} entitlement failed; continuing`, {
+          entitlementId: error.entitlementId,
+          error,
+        });
+        continue;
       }
-    });
-    } while (endPageSize === limit && Date.now() - started < tickBudgetMs);
-  }
+      if (!outcome) break;
+      attempts += 1;
+      if (outcome.ignored) {
+        excludedIds.add(outcome.id);
+        continue;
+      }
+      if (boundary === "start") {
+        result.starts += 1;
+        if (outcome.stale) result.stale += 1;
+      } else {
+        result.ends += 1;
+      }
+      if (outcome.userId) transitionedUserIds.add(outcome.userId);
+      if (outcome.alerted) alertedUserIds.add(outcome.userId);
+    }
+  };
+
+  await drain("start", processOneStart);
+  if (Date.now() - started < tickBudgetMs) await drain("end", processOneEnd);
   await invalidateHomeActiveGlobalEvent([...transitionedUserIds]);
   if (alertedUserIds.size > 0) {
     const { invalidateInboxUnread } = require("../../inbox/services/inbox");
@@ -492,8 +539,9 @@ async function processDueEntitlementBoundaries({
     const { recordOperationalCounters } = require("./globalStepEventObservability");
     await recordOperationalCounters(prisma, {
       startBoundaryClaims: result.starts,
-      startBoundaryFailures: result.stale,
+      startBoundaryFailures: failureCounts.start,
       endBoundaryClaims: result.ends,
+      endBoundaryFailures: failureCounts.end,
       pushesCreated: alertedUserIds.size,
     });
   } catch {}

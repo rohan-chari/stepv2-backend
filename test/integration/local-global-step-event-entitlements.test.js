@@ -48,6 +48,9 @@ const {
 const {
   createInboxAlert,
 } = require("../../src/modules/inbox/services/inbox");
+const {
+  notificationIntentService,
+} = require("../../src/modules/notifications/services/notificationDelivery");
 const derivedCache = require("../../src/shared/cache/derivedCache");
 const cacheKeys = require("../../src/shared/cache/cacheKeys");
 
@@ -995,6 +998,76 @@ test("active-impact capture stacks only the recipient's local entitlement throug
   }
 });
 
+test("one failed boundary rolls back only itself and later entitlements continue", async () => {
+  const [{ user: firstUser }, { user: secondUser }] = await Promise.all([
+    createTestUser({ globalEventTimezone: "UTC" }),
+    createTestUser({ globalEventTimezone: "UTC" }),
+  ]);
+  const now = new Date();
+  const event = await prisma.globalStepEvent.create({ data: {
+    eventDay: "2098-11-01", scheduleMode: "LOCAL_ENTITLEMENTS",
+    localStartMinute: 720, durationMinutes: 30, multiplier: 2,
+    startsAt: new Date(now.getTime() - 60 * 60 * 1000),
+    endsAt: new Date(now.getTime() + 60 * 60 * 1000),
+  } });
+  const entitlements = await Promise.all([firstUser, secondUser].map((user) =>
+    prisma.globalStepEventEntitlement.create({ data: {
+      eventId: event.id, userId: user.id, timezone: "UTC", localDate: "2098-11-01",
+      startsAt: new Date(now.getTime() - 30 * 1000),
+      endsAt: new Date(now.getTime() + 29 * 60 * 1000),
+    } })
+  ));
+  const races = await Promise.all([firstUser, secondUser].map((user, index) =>
+    prisma.race.create({ data: {
+      creatorId: user.id, name: `Boundary isolation ${index}`, targetSteps: 0,
+      timeBased: true, maxDurationDays: 1, status: "ACTIVE",
+      startedAt: new Date(now.getTime() - 60 * 60 * 1000),
+      endsAt: new Date(now.getTime() + 60 * 60 * 1000),
+    } })
+  ));
+  await prisma.raceParticipant.createMany({ data: races.map((race, index) => ({
+    raceId: race.id, userId: [firstUser, secondUser][index].id,
+    status: "ACCEPTED", joinedAt: race.startedAt,
+  })) });
+  await prisma.notificationSchedule.createMany({ data: [firstUser, secondUser].map((user) => ({
+    recipientUserId: user.id,
+    type: "GLOBAL_EVENT_STARTED",
+    title: "2x STEPS EVENT",
+    body: "Double steps are LIVE.",
+    payload: { type: "GLOBAL_EVENT_STARTED", route: "home", eventId: event.id },
+    deliveryKey: `visible:GLOBAL_EVENT_STARTED:${user.id}:${event.id}`,
+    availableAt: new Date(now.getTime() - 1000),
+    expiresAt: new Date(now.getTime() + 29 * 60 * 1000),
+  })) });
+
+  const result = await processDueEntitlementBoundaries({
+    prisma, now, batchSize: 2,
+    notificationIntentService: {
+      releaseOneDue: async (input) => {
+        if (input.recipientUserId === firstUser.id) throw new Error("injected boundary failure");
+        return notificationIntentService.releaseOneDue(input);
+      },
+      wake: async () => {},
+    },
+  });
+
+  assert.equal(result.starts, 1);
+  assert.equal(result.failures, 1);
+  const first = await prisma.globalStepEventEntitlement.findUnique({ where: { id: entitlements[0].id } });
+  const second = await prisma.globalStepEventEntitlement.findUnique({ where: { id: entitlements[1].id } });
+  assert.equal(first.startProcessedAt, null);
+  assert.ok(second.startProcessedAt);
+  assert.equal(await prisma.globalEventRaceImpact.count(), 1);
+  assert.equal(await prisma.inboxAlert.count({ where: { type: "GLOBAL_EVENT_STARTED" } }), 1);
+  assert.equal(await prisma.inboxDeliveryOutbox.count(), 1);
+  assert.equal((await prisma.notificationSchedule.findUniqueOrThrow({
+    where: { recipientUserId_deliveryKey: {
+      recipientUserId: firstUser.id,
+      deliveryKey: `visible:GLOBAL_EVENT_STARTED:${firstUser.id}:${event.id}`,
+    } },
+  })).status, "PENDING");
+});
+
 test("boundary transaction crash rolls back impact and outbox, then retry creates each exactly once", async () => {
   const { user } = await createTestUser({ globalEventTimezone: "UTC" });
   const now = new Date();
@@ -1019,13 +1092,14 @@ test("boundary transaction crash rolls back impact and outbox, then retry create
     startsAt: new Date(now.getTime() - 30 * 1000),
     endsAt: new Date(now.getTime() + 29 * 60 * 1000),
   } });
-  await assert.rejects(processDueEntitlementBoundaries({
+  const failed = await processDueEntitlementBoundaries({
     prisma, now,
     createInboxAlert: async (input) => {
       await createInboxAlert(input);
       throw new Error("injected crash after durable outbox write");
     },
-  }), /injected crash/);
+  });
+  assert.equal(failed.failures, 1);
   assert.equal(await prisma.globalEventRaceImpact.count(), 0);
   assert.equal(await prisma.inboxAlert.count(), 0);
   assert.equal((await prisma.globalStepEventEntitlement.findUnique({ where: { id: entitlement.id } })).startProcessedAt, null);
