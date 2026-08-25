@@ -8,6 +8,7 @@ const DASHBOARD_SECTIONS = new Set([
   "dashboard-activation",
   "dashboard-retention",
   "dashboard-engagement",
+  "dashboard-dau-engagement",
   "dashboard-virality",
   "dashboard-revenue",
   "dashboard-release-adoption",

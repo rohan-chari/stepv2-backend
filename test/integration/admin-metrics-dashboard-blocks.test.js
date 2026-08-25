@@ -435,6 +435,32 @@ describe("admin metrics dashboard v2 — Phase A blocks", () => {
     });
   });
 
+  it("reports today's distinct box openers before the historical window matures", async () => {
+    const opener = await createTestUser({ appleId: `box-opener-${Date.now()}` });
+    const race = await prisma.race.create({
+      data: {
+        creatorId: admin.user.id,
+        name: "Today's box race",
+        targetSteps: 1000,
+        status: "ACTIVE",
+        powerupsEnabled: true,
+        startedAt: new Date(),
+      },
+    });
+    await prisma.racePowerupEvent.create({
+      data: {
+        raceId: race.id,
+        actorUserId: opener.user.id,
+        eventType: "MYSTERY_BOX_OPENED",
+        description: "opened a mystery box",
+        createdAt: new Date(),
+      },
+    });
+
+    const dashboard = await get("dashboard-summary", "30d");
+    assert.equal(dashboard.summary.growth.engagedBoxOpenersToday, 1);
+  });
+
   it("keeps today's incomplete exact-day retention target null", async () => {
     await appSettings.setFlag("adminMetricsV2TelemetryEnabled", true);
     const epoch = await prisma.adminMetricsCollectionEpoch.findFirst({

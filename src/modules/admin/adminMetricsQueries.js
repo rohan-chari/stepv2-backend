@@ -377,7 +377,9 @@ function buildAdminMetricsBlockLoader(dependencies = {}) {
           totalSignups: number(row.total_signups),
           signupsToday: number(row.signups_today),
           signupsLast7Days: number(row.signups_7d),
-          engagedBoxOpenersToday: coverageData.metricCoverage.boxOpen.status === "mature" ? number(row.box_openers) : null,
+          // Today's distinct durable event count is complete for the current
+          // ET day even while the historical coverage window is collecting.
+          engagedBoxOpenersToday: number(row.box_openers),
           observedForegroundDau: forwardAvailable ? number(fg.dau) : null,
           observedForegroundWau: coverageData.metricCoverage.observedForegroundWau.status === "mature" ? number(fg.wau) : null,
         },
@@ -835,6 +837,214 @@ function buildAdminMetricsBlockLoader(dependencies = {}) {
     return { raceEngagement:{ daily,averageRunnersPerStartedRace:average(stats.runners,stats.started).average,visibility:{public:ratio(pub,vis),private:ratio(vis-pub,vis)},racesPerObservedActiveUser:foregroundAvailable?average(observedRow.active_memberships,observedRow.active_denominator):average(null,null,false),leaderboardViewsPerCapableRacer:leaderboardAvailable?average(observedRow.leaderboard_views,observedRow.racer_denominator):average(null,null,false),powerupsPerRace:average(stats.powers,stats.power_races),coinBalance:{populationCount:number(stats.pop),total:number(stats.total),average:round1(stats.avg),median:round1(stats.median),p90:round1(stats.p90),asOf:generatedAt},featuredParticipation:{daily:featuredByCadence.daily||{...emptyFeatured},weekly:featuredByCadence.weekly||{...emptyFeatured}},rankedParticipationUsers:number(rankedRow.users),notificationOpenRate:{windowDays:7,...notificationRatio,breakdown:notificationAvailable?notificationRows.map(row=>({notificationType:row.notification_type,ratio:ratio(row.numerator,row.denominator)})):[]} } };
   }
 
+  async function loadDauEngagement({ start, end, generatedAt }) {
+    const priorDate = new Date(`${end}T00:00:00Z`);
+    priorDate.setUTCDate(priorDate.getUTCDate() - 1);
+    // Keep enough bounded daily history for the first-release week/month
+    // comparisons. Six-month/year comparisons remain explicitly gathering
+    // data until the durable rollup job has complete coverage.
+    const historyStart = new Date(`${end}T00:00:00Z`);
+    historyStart.setUTCDate(historyStart.getUTCDate() - 60);
+    const historyStartString = historyStart.toISOString().slice(0, 10);
+    const rows = await prisma.$queryRaw`
+      WITH action_events AS (
+        SELECT 'raceParticipation' action_id, rp.user_id,
+          rp.joined_at occurred_at, 1 event_count
+        FROM race_participants rp JOIN races r ON r.id=rp.race_id
+          JOIN users u ON u.id=rp.user_id
+        WHERE rp.status='accepted' AND u.is_review_account=false
+          AND r.seed_id IS NULL AND r.tournament_id IS NULL AND r.status<>'cancelled'
+        UNION ALL
+        SELECT 'boxOpen', e.actor_user_id, e.created_at, 1
+        FROM race_powerup_events e JOIN users u ON u.id=e.actor_user_id
+        WHERE e.event_type='MYSTERY_BOX_OPENED' AND u.is_review_account=false
+        UNION ALL
+        SELECT 'powerupUse', e.actor_user_id, e.created_at, 1
+        FROM race_powerup_events e JOIN users u ON u.id=e.actor_user_id
+        WHERE e.event_type='POWERUP_USED' AND u.is_review_account=false
+        UNION ALL
+        SELECT 'dailyRewardClaim', c.user_id, c.created_at, 1
+        FROM daily_reward_claims c JOIN users u ON u.id=c.user_id
+        WHERE u.is_review_account=false
+        UNION ALL
+        SELECT 'notificationOpen', d.user_id, d.opened_at, 1
+        FROM push_deliveries d JOIN users u ON u.id=d.user_id
+        WHERE d.opened_at IS NOT NULL AND d.provider_accepted_at IS NOT NULL
+          AND u.is_review_account=false
+        UNION ALL
+        SELECT 'rewardedAd', g.user_id, g.created_at, 1
+        FROM ad_reward_grants g JOIN users u ON u.id=g.user_id
+        WHERE u.is_review_account=false
+        UNION ALL
+        SELECT 'leaderboardView', e.user_id, e.occurred_at, 1
+        FROM activation_events e JOIN users u ON u.id=e.user_id
+        WHERE e.name='race_leaderboard_viewed' AND u.is_review_account=false
+        UNION ALL
+        SELECT 'raceCreated', r.creator_id, r.created_at, 1
+        FROM races r JOIN users u ON u.id=r.creator_id
+        WHERE r.creator_id IS NOT NULL AND u.is_review_account=false
+          AND r.seed_id IS NULL AND r.tournament_id IS NULL
+        UNION ALL
+        SELECT 'raceCompleted', rp.user_id, rp.finished_at, 1
+        FROM race_participants rp JOIN races r ON r.id=rp.race_id
+          JOIN users u ON u.id=rp.user_id
+        WHERE rp.finished_at IS NOT NULL AND r.status='completed'
+          AND r.seed_id IS NULL AND r.tournament_id IS NULL
+          AND u.is_review_account=false
+      ), dated AS (
+        SELECT action_id, user_id,
+          (occurred_at AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date action_date,
+          event_count
+        FROM action_events
+        WHERE occurred_at >= (
+            (CAST(${historyStartString} AS date)::timestamp AT TIME ZONE 'America/New_York')
+            AT TIME ZONE 'UTC'
+          )
+          AND occurred_at < (
+            ((CAST(${end} AS date)+1)::timestamp AT TIME ZONE 'America/New_York')
+            AT TIME ZONE 'UTC'
+          )
+      ), dates AS (
+        SELECT generate_series(CAST(${historyStartString} AS date), CAST(${end} AS date), interval '1 day')::date action_date
+      ), action_ids AS (
+        SELECT unnest(ARRAY['raceParticipation','boxOpen','powerupUse','dailyRewardClaim','notificationOpen','rewardedAd','leaderboardView','raceCreated','raceCompleted']) action_id
+      ), daily_action AS (
+        SELECT dt.action_date, a.action_id,
+          COUNT(DISTINCT d.user_id)::bigint users, COALESCE(SUM(d.event_count),0)::bigint events
+        FROM dates dt CROSS JOIN action_ids a LEFT JOIN dated d
+          ON d.action_date=dt.action_date AND d.action_id=a.action_id
+        GROUP BY dt.action_date, a.action_id
+      ), daily AS (
+        SELECT da.action_date,
+          SUM(users)::bigint total_users,
+          ROUND(AVG(users)::numeric,1)::float average_users,
+          COUNT(DISTINCT d.user_id)::bigint union_users,
+          jsonb_object_agg(da.action_id, jsonb_build_object('users',users,'events',events)) actions
+        FROM daily_action da LEFT JOIN dated d
+          ON d.action_date=da.action_date AND d.action_id=da.action_id
+        GROUP BY da.action_date
+      )
+      SELECT action_date, total_users, average_users, union_users, actions
+      FROM daily ORDER BY action_date`;
+    const dateKey = (value) => value instanceof Date
+      ? value.toISOString().slice(0, 10)
+      : String(value).slice(0, 10);
+    const byDate = new Map((rows || []).map((row) => [dateKey(row.action_date), row]));
+    const todayRow = byDate.get(end) || { total_users: 0, average_users: 0, union_users: 0, actions: {} };
+    const numeric = (value) => Number(value ?? 0);
+    const actions = {};
+    for (const actionId of [
+      'raceParticipation', 'boxOpen', 'powerupUse', 'dailyRewardClaim',
+      'notificationOpen', 'rewardedAd', 'leaderboardView', 'raceCreated',
+      'raceCompleted',
+    ]) {
+      const action = todayRow.actions?.[actionId] || {};
+      actions[actionId] = { users: numeric(action.users), events: numeric(action.events) };
+    }
+    const allDaily = (rows || []).map((row) => ({
+        date: dateKey(row.action_date),
+        actionBasedDau: numeric(row.union_users),
+        averageActionReach: numeric(row.average_users),
+        usersWithAnyAction: numeric(row.union_users),
+      }));
+    const prior = byDate.get(priorDate.toISOString().slice(0, 10));
+    const emptyComparison = () => ({ current: null, prior: null, absoluteChange: null, percentChange: null, status: 'gathering_data', currentStart: null, currentEnd: null, priorStart: null, priorEnd: null });
+    const comparisonFor = (current, prior, currentStart, currentEnd, priorStart, priorEnd) => {
+      const currentValue = current == null ? null : Math.round(current * 10) / 10;
+      const priorValue = prior == null ? null : Math.round(prior * 10) / 10;
+      if (currentValue == null || priorValue == null || priorValue === 0) {
+        return { ...emptyComparison(), currentStart, currentEnd, priorStart, priorEnd };
+      }
+      const absoluteChange = Math.round((currentValue - priorValue) * 10) / 10;
+      return {
+        current: currentValue,
+        prior: priorValue,
+        absoluteChange,
+        percentChange: Math.round((absoluteChange / priorValue) * 1000) / 10,
+        status: 'available', currentStart, currentEnd, priorStart, priorEnd,
+      };
+    };
+    const dailyMap = new Map(allDaily.map((row) => [row.date, row]));
+    const averageFor = (from, to, field) => {
+      const values = [];
+      const cursor = new Date(`${from}T00:00:00Z`);
+      const finish = new Date(`${to}T00:00:00Z`);
+      while (cursor <= finish) {
+        const row = dailyMap.get(cursor.toISOString().slice(0, 10));
+        if (!row || row[field] == null) return null;
+        values.push(Number(row[field]));
+        cursor.setUTCDate(cursor.getUTCDate() + 1);
+      }
+      return values.length === 0 ? null : values.reduce((sum, value) => sum + value, 0) / values.length;
+    };
+    const shift = (date, amount) => {
+      const value = new Date(`${date}T00:00:00Z`);
+      value.setUTCDate(value.getUTCDate() + amount);
+      return value.toISOString().slice(0, 10);
+    };
+    const period = (currentStart, currentEnd, priorStart, priorEnd) => {
+      const result = {
+        actionBasedDau: comparisonFor(averageFor(currentStart, currentEnd, 'actionBasedDau'), averageFor(priorStart, priorEnd, 'actionBasedDau'), currentStart, currentEnd, priorStart, priorEnd),
+        averageActionReach: comparisonFor(averageFor(currentStart, currentEnd, 'averageActionReach'), averageFor(priorStart, priorEnd, 'averageActionReach'), currentStart, currentEnd, priorStart, priorEnd),
+        usersWithAnyAction: comparisonFor(averageFor(currentStart, currentEnd, 'usersWithAnyAction'), averageFor(priorStart, priorEnd, 'usersWithAnyAction'), currentStart, currentEnd, priorStart, priorEnd),
+        actions: {},
+      };
+      for (const actionId of [
+        'raceParticipation', 'boxOpen', 'powerupUse', 'dailyRewardClaim',
+        'notificationOpen', 'rewardedAd', 'leaderboardView', 'raceCreated',
+        'raceCompleted',
+      ]) {
+        const field = `action_${actionId}`;
+        result.actions[actionId] = comparisonFor(
+          averageFor(currentStart, currentEnd, field),
+          averageFor(priorStart, priorEnd, field),
+          currentStart, currentEnd, priorStart, priorEnd,
+        );
+      }
+      return result;
+    };
+    // Add per-action daily fields to the local series without changing the
+    // public daily contract.
+    for (const row of allDaily) {
+      const raw = byDate.get(row.date);
+      for (const actionId of [
+        'raceParticipation', 'boxOpen', 'powerupUse', 'dailyRewardClaim',
+        'notificationOpen', 'rewardedAd', 'leaderboardView', 'raceCreated',
+        'raceCompleted',
+      ]) row[`action_${actionId}`] = numeric(raw?.actions?.[actionId]?.users);
+    }
+    const dayStart = end;
+    const dayPrior = shift(end, -1);
+    const weekStart = shift(end, -6);
+    const weekPriorEnd = shift(end, -7);
+    const weekPriorStart = shift(end, -13);
+    const monthStart = shift(end, -29);
+    const monthPriorEnd = shift(end, -30);
+    const monthPriorStart = shift(end, -59);
+    const comparisons = {
+      dayOverDay: period(dayStart, end, dayPrior, dayPrior),
+      weekOverWeek: period(weekStart, end, weekPriorStart, weekPriorEnd),
+      monthOverMonth: period(monthStart, end, monthPriorStart, monthPriorEnd),
+      sixMonthsOverSixMonths: emptyComparison(),
+      yearOverYear: emptyComparison(),
+    };
+    // Preserve the original compact headline shape while exposing the full
+    // comparison properties additively underneath each period.
+    for (const key of ['dayOverDay', 'weekOverWeek', 'monthOverMonth']) {
+      const headline = comparisons[key].actionBasedDau;
+      comparisons[key] = { ...headline, ...comparisons[key] };
+    }
+    const daily = allDaily.filter((row) => row.date >= start);
+    return { dauEngagement: {
+      asOf: generatedAt,
+      timeZone: 'America/New_York',
+      actionBasedDau: { users: numeric(todayRow.union_users), status: 'available' },
+      today: { date: end, actions, averageActionReach: numeric(todayRow.average_users), usersWithAnyAction: numeric(todayRow.union_users) },
+      comparisons,
+      daily,
+    } };
+  }
+
   async function loadVirality({ start,end,coverageData }) {
     const row=await inviteCounts(start,end);
     const signups=number(row.signups);
@@ -892,6 +1102,7 @@ function buildAdminMetricsBlockLoader(dependencies = {}) {
     else if(section==="dashboard-activation")block=await loadActivation(args);
     else if(section==="dashboard-retention")block=await loadRetention(args);
     else if(section==="dashboard-engagement")block=await loadEngagement(args);
+    else if(section==="dashboard-dau-engagement")block=await loadDauEngagement(args);
     else if(section==="dashboard-virality")block=await loadVirality(args);
     else if(section==="dashboard-revenue")block=await loadRevenue(args);
     else block=await loadReleaseAdoption(args);
