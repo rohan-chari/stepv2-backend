@@ -1,5 +1,12 @@
 const crypto = require("node:crypto");
 const { ValidationError } = require("../../../shared/errors/AppError");
+const {
+  formatCoins,
+  formatUsd,
+  hasEnabledPrize,
+  isCashMinor,
+  isCoinPrize,
+} = require("./prize");
 
 const US_REGIONS = new Set([
   "US-AL", "US-AK", "US-AZ", "US-AR", "US-CA", "US-CO", "US-CT", "US-DE", "US-DC",
@@ -16,10 +23,29 @@ const SOCIAL_HOSTS = {
   facebook: new Set(["facebook.com", "www.facebook.com"]),
   youtube: new Set(["youtube.com", "www.youtube.com"]),
 };
-const BANNER_TEMPLATE = /^Bara(?: Referral)? (?:Contest|Giveaway): win US\$50 (?:\+|and) 5,000 (?:Bara )?coins\.(?: Ends [A-Za-z0-9 ,.-]{1,80}\.)?$/i;
+const BANNER_PREFIX = "Bara(?: Referral)? (?:Contest|Giveaway): win ";
+const BANNER_SUFFIX = "\\.(?: Ends [A-Za-z0-9 ,.-]{1,80}\\.)?";
+const GENERIC_BANNER_TEMPLATE = new RegExp(
+  `^${BANNER_PREFIX}(?:US\\$[0-9][0-9,]*(?:\\.[0-9]{2})?|[1-9][0-9,]* (?:Bara )?coins|US\\$[0-9][0-9,]*(?:\\.[0-9]{2})? (?:\\+|and) [1-9][0-9,]* (?:Bara )?coins)${BANNER_SUFFIX}$`,
+  "i",
+);
 
-function isAllowedBannerMessage(value) {
-  return typeof value === "string" && value.length <= 240 && BANNER_TEMPLATE.test(value.trim());
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function isAllowedBannerMessage(value, contest = null) {
+  if (typeof value !== "string" || value.length > 240) return false;
+  const message = value.trim();
+  if (!contest) return GENERIC_BANNER_TEMPLATE.test(message);
+  if (!hasEnabledPrize(contest) || contest.cashCurrency !== "USD") return false;
+  const cash = contest.cashMinor > 0 ? escapeRegex(formatUsd(contest.cashMinor)) : null;
+  const coins = contest.coinPrize > 0 ? escapeRegex(formatCoins(contest.coinPrize, { bara: false })) : null;
+  let prize;
+  if (cash && coins) prize = `${cash} (?:\\+|and) ${coins.replace(" coins", " (?:Bara )?coins")}`;
+  else if (cash) prize = cash;
+  else prize = coins.replace(" coins", " (?:Bara )?coins");
+  return new RegExp(`^${BANNER_PREFIX}${prize}${BANNER_SUFFIX}$`, "i").test(message);
 }
 
 function canonicalJson(value) {
@@ -82,9 +108,10 @@ function normalizeContestInput(input, { partial = false } = {}) {
   const cashCurrency = required("cashCurrency");
   if (cashCurrency !== undefined) { if (cashCurrency !== "USD") invalid("V1 prize currency must be USD", "INVALID_PRIZE"); out.cashCurrency = cashCurrency; }
   const cashMinor = required("cashMinor");
-  if (cashMinor !== undefined) { if (cashMinor !== 5000) invalid("V1 cash prize must be 5000 minor units", "INVALID_PRIZE"); out.cashMinor = cashMinor; }
+  if (cashMinor !== undefined) { if (!isCashMinor(cashMinor)) invalid("cashMinor must be an integer from 0 through 2147483647", "INVALID_PRIZE"); out.cashMinor = cashMinor; }
   const coinPrize = required("coinPrize");
-  if (coinPrize !== undefined) { if (coinPrize !== 5000) invalid("V1 coin prize must be 5000", "INVALID_PRIZE"); out.coinPrize = coinPrize; }
+  if (coinPrize !== undefined) { if (!isCoinPrize(coinPrize)) invalid("coinPrize must be an integer from 0 through 1000000", "INVALID_PRIZE"); out.coinPrize = coinPrize; }
+  if (cashMinor === 0 && coinPrize === 0) invalid("At least one prize must be enabled", "INVALID_PRIZE");
   const minimumAge = required("minimumAge");
   if (minimumAge !== undefined) { if (minimumAge !== 18) invalid("V1 minimum age must be 18", "INVALID_MINIMUM_AGE"); out.minimumAge = minimumAge; }
   const eligibleRegions = required("eligibleRegions");
@@ -145,7 +172,8 @@ function publishValidationFields(contest) {
   if (!copy.includes("no purchase necessary")) fields.push("rules.noPurchase");
   if (!copy.includes("apple")) fields.push("rules.appleDisclaimer");
   if (!copy.includes("google")) fields.push("rules.googleDisclaimer");
-  if (!isAllowedBannerMessage(contest.bannerMessage)) fields.push("bannerMessage");
+  if (!hasEnabledPrize(contest) || contest.cashCurrency !== "USD") fields.push("prize");
+  if (!isAllowedBannerMessage(contest.bannerMessage, contest)) fields.push("bannerMessage");
   return fields.slice(0, 10);
 }
 

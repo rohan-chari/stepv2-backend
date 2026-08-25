@@ -29,9 +29,8 @@ function publicContest(contest, now = new Date(), { includeRulesUrl = false } = 
     endsAt: iso(contest.endsAt),
     governingTimeZone: contest.governingTimeZone,
     prize: {
-      cashCurrency: contest.cashCurrency,
-      cashMinor: contest.cashMinor,
-      coins: contest.coinPrize,
+      ...(contest.cashMinor > 0 ? { cashCurrency: contest.cashCurrency, cashMinor: contest.cashMinor } : {}),
+      ...(contest.coinPrize > 0 ? { coins: contest.coinPrize } : {}),
     },
     minimumAge: contest.minimumAge,
     eligibleCountries: Array.isArray(contest.eligibleCountries) ? contest.eligibleCountries : ["US"],

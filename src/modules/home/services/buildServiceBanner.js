@@ -17,8 +17,10 @@ async function buildServiceBanner({ settings, prisma, supportsReferralContest, n
   if (supportsReferralContest !== true) return null;
   const action = await resolveContestBanner({ prisma, slug, now });
   if (!action) return null;
-  const contest = await prisma.giveawayContest.findUnique({ where: { slug }, select: { bannerMessage: true } });
-  return contest?.bannerMessage === message && isAllowedBannerMessage(message)
+  const contest = await prisma.giveawayContest.findUnique({
+    where: { slug }, select: { bannerMessage: true, cashCurrency: true, cashMinor: true, coinPrize: true },
+  });
+  return contest?.bannerMessage === message && isAllowedBannerMessage(message, contest)
     ? { enabled: true, message, action } : null;
 }
 

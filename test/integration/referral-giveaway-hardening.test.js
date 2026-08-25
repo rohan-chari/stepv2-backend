@@ -146,6 +146,25 @@ describe("referral giveaway hardening", () => {
     return { user, entrant };
   }
 
+  async function seedFinalWinner(contest, displayName) {
+    const user = await createTestUser({ displayName });
+    const entrant = await prisma.giveawayEntrant.create({ data: {
+      contestId: contest.id, userId: user.user.id, entrantIdentityHash: `v2:${uuid()}`, identityHashVersion: 2,
+      status: "ELIGIBLE", country: "US", region: "US-NY", ageConfirmedAt: clock,
+      residencyConfirmedAt: clock, rulesAcceptedAt: clock, acceptedRulesVersion: "hardening-v1",
+      acceptedRulesHash: contest.rules.sha256, displayNameSnapshot: displayName, displayNameConsentedAt: clock,
+    } });
+    await prisma.giveawayResult.create({ data: {
+      entrantId: entrant.id, frozenCount: 1, finalRank: 1, status: "VERIFIED", verifiedAt: clock,
+    } });
+    await prisma.giveawayFulfillment.create({ data: { entrantId: entrant.id } });
+    await prisma.giveawayContest.update({
+      where: { id: contest.id },
+      data: { lifecycleStatus: "FINAL", finalizedAt: clock },
+    });
+    return { user, entrant };
+  }
+
   it("uses real HTTP attribution and race lifecycle, then the real expiry worker settles qualification and rewards exactly once", async () => {
     const contest = await createAndPublish();
     const referrer = await createTestUser({ displayName: "Real Referrer" });
@@ -314,6 +333,192 @@ describe("referral giveaway hardening", () => {
     }));
     assert.equal(out.response.status, 400);
     assert.equal(out.payload.code, "INVALID_BODY");
+  });
+
+  it("accepts a cash-only prize and renders only its dynamic USD amount", async () => {
+    const contest = await createAndPublish({
+      slug: "cash-only-prize",
+      cashMinor: 12550,
+      coinPrize: 0,
+      bannerMessage: "Bara Giveaway: win US$125.50.",
+    });
+    assert.equal(contest.cashCurrency, "USD");
+    assert.equal(contest.cashMinor, 12550);
+    assert.equal(contest.coinPrize, 0);
+    const data = await (await request(server.baseUrl, "GET", `/giveaways/${contest.slug}/data`)).json();
+    assert.deepEqual(data.contest.prize, { cashCurrency: "USD", cashMinor: 12550 });
+    const landing = await (await request(server.baseUrl, "GET", `/giveaways/${contest.slug}`)).text();
+    assert.match(landing, /Win US\$125\.50/);
+    assert.doesNotMatch(landing, /Bara coins/);
+    const rules = await (await request(server.baseUrl, "GET", `/giveaways/${contest.slug}/rules`)).text();
+    assert.match(rules, /<strong>Prize:<\/strong> US\$125\.50 to one winner\./);
+    assert.doesNotMatch(rules, /Bara coins to one winner/);
+  });
+
+  it("accepts a coins-only prize and rejects disabled, fractional, negative, and oversized prize combinations", async () => {
+    const contest = await createAndPublish({
+      slug: "coins-only-prize",
+      cashMinor: 0,
+      coinPrize: 12345,
+      bannerMessage: "Bara Referral Contest: win 12,345 coins.",
+    });
+    const data = await (await request(server.baseUrl, "GET", `/giveaways/${contest.slug}/data`)).json();
+    assert.deepEqual(data.contest.prize, { coins: 12345 });
+    const landing = await (await request(server.baseUrl, "GET", `/giveaways/${contest.slug}`)).text();
+    assert.match(landing, /Win 12,345 Bara coins/);
+    assert.doesNotMatch(landing, /US\$/);
+
+    for (const [suffix, prizes] of [
+      ["both-zero", { cashMinor: 0, coinPrize: 0 }],
+      ["negative", { cashMinor: -1, coinPrize: 100 }],
+      ["fractional", { cashMinor: 100, coinPrize: 1.5 }],
+      ["oversized", { cashMinor: 2147483648, coinPrize: 0 }],
+      ["coin-over-limit", { cashMinor: 0, coinPrize: 1000001 }],
+    ]) {
+      const out = await read(await request(server.baseUrl, "POST", "/admin/giveaways", {
+        token: admin.token,
+        headers: { "Idempotency-Key": uuid() },
+        body: contestBody({ slug: `invalid-prize-${suffix}`, ...prizes }),
+      }));
+      assert.equal(out.response.status, 400, `${suffix}: ${JSON.stringify(out.payload)}`);
+      assert.equal(out.payload.code, "INVALID_PRIZE");
+    }
+
+    const draftOut = await read(await request(server.baseUrl, "POST", "/admin/giveaways", {
+      token: admin.token,
+      headers: { "Idempotency-Key": uuid() },
+      body: contestBody({ slug: "partial-prize-patch" }),
+    }));
+    assert.equal(draftOut.response.status, 201, JSON.stringify(draftOut.payload));
+    let patched = await read(await request(server.baseUrl, "PATCH", `/admin/giveaways/${draftOut.payload.contest.id}`, {
+      token: admin.token,
+      body: { revision: draftOut.payload.contest.revision, patch: { cashMinor: 0 } },
+    }));
+    assert.equal(patched.response.status, 200, JSON.stringify(patched.payload));
+    patched = await read(await request(server.baseUrl, "PATCH", `/admin/giveaways/${draftOut.payload.contest.id}`, {
+      token: admin.token,
+      body: { revision: patched.payload.contest.revision, patch: { coinPrize: 0 } },
+    }));
+    assert.equal(patched.response.status, 400);
+    assert.equal(patched.payload.code, "INVALID_PRIZE");
+
+    const mismatched = await read(await request(server.baseUrl, "POST", "/admin/giveaways", {
+      token: admin.token,
+      headers: { "Idempotency-Key": uuid() },
+      body: contestBody({ slug: "mismatched-dynamic-banner", cashMinor: 0, coinPrize: 999 }),
+    }));
+    assert.equal(mismatched.response.status, 201, JSON.stringify(mismatched.payload));
+    const rejectedPublish = await read(await request(server.baseUrl, "POST", `/admin/giveaways/${mismatched.payload.contest.id}/publish`, {
+      token: admin.token, headers: { "Idempotency-Key": uuid() },
+      body: { revision: mismatched.payload.contest.revision },
+    }));
+    assert.equal(rejectedPublish.response.status, 400);
+    assert.equal(rejectedPublish.payload.code, "PUBLISH_VALIDATION_FAILED");
+    assert.ok(rejectedPublish.payload.fields.includes("bannerMessage"));
+  });
+
+  it("awards a coin-only winner immediately after verification without a cash transition", async () => {
+    const contest = await createAndPublish({
+      slug: "coin-only-fulfillment", cashMinor: 0, coinPrize: 777,
+      bannerMessage: "Bara Giveaway: win 777 coins.",
+    });
+    const { user } = await seedFinalWinner(contest, "Coin Only Winner");
+    const before = (await prisma.user.findUnique({ where: { id: user.user.id } })).coins;
+
+    let out = await read(await request(server.baseUrl, "POST", `/admin/giveaways/${contest.id}/fulfillment`, {
+      token: admin.token, headers: { "Idempotency-Key": uuid() },
+      body: { revision: contest.revision, transition: "CLAIMED" },
+    }));
+    assert.equal(out.response.status, 409);
+    assert.equal(out.payload.code, "INVALID_TRANSITION");
+
+    const awardKey = uuid();
+    out = await read(await request(server.baseUrl, "POST", `/admin/giveaways/${contest.id}/award-coins`, {
+      token: admin.token, headers: { "Idempotency-Key": awardKey }, body: { revision: contest.revision },
+    }));
+    assert.equal(out.response.status, 200, JSON.stringify(out.payload));
+    assert.equal(out.payload.fulfillment.status, "COINS_AWARDED");
+    assert.ok(out.payload.fulfillment.fulfilledAt);
+    assert.equal((await prisma.user.findUnique({ where: { id: user.user.id } })).coins, before + 777);
+    assert.equal(await prisma.coinTransaction.count({ where: { reason: "giveaway_winner" } }), 1);
+
+    const replay = await read(await request(server.baseUrl, "POST", `/admin/giveaways/${contest.id}/award-coins`, {
+      token: admin.token, headers: { "Idempotency-Key": awardKey }, body: { revision: contest.revision },
+    }));
+    assert.equal(replay.response.status, 200);
+    assert.deepEqual(replay.payload, out.payload);
+    assert.equal(await prisma.coinTransaction.count({ where: { reason: "giveaway_winner" } }), 1);
+  });
+
+  it("awards the 1,000,000-coin maximum to a nonzero wallet and leaves an overflowing wallet retryable", async () => {
+    let contest = await createAndPublish({
+      slug: "maximum-coin-fulfillment", cashMinor: 0, coinPrize: 1000000,
+      bannerMessage: "Bara Giveaway: win 1,000,000 coins.",
+    });
+    let seeded = await seedFinalWinner(contest, "Maximum Coin Winner");
+    await prisma.user.update({ where: { id: seeded.user.user.id }, data: { coins: 123 } });
+    let out = await read(await request(server.baseUrl, "POST", `/admin/giveaways/${contest.id}/award-coins`, {
+      token: admin.token, headers: { "Idempotency-Key": uuid() }, body: { revision: contest.revision },
+    }));
+    assert.equal(out.response.status, 200, JSON.stringify(out.payload));
+    assert.equal((await prisma.user.findUnique({ where: { id: seeded.user.user.id } })).coins, 1000123);
+    assert.equal((await prisma.coinTransaction.findFirst({ where: { reason: "giveaway_winner" } })).amount, 1000000);
+
+    await prisma.giveawayContest.update({ where: { id: contest.id }, data: { lifecycleStatus: "ARCHIVED", archivedAt: clock } });
+    contest = await createAndPublish({
+      slug: "overflowing-coin-fulfillment", cashMinor: 0, coinPrize: 1000000,
+      bannerMessage: "Bara Giveaway: win 1,000,000 coins.",
+    });
+    seeded = await seedFinalWinner(contest, "Overflow Coin Winner");
+    await prisma.user.update({ where: { id: seeded.user.user.id }, data: { coins: 2146483648 } });
+    const retryKey = uuid();
+    out = await read(await request(server.baseUrl, "POST", `/admin/giveaways/${contest.id}/award-coins`, {
+      token: admin.token, headers: { "Idempotency-Key": retryKey }, body: { revision: contest.revision },
+    }));
+    assert.equal(out.response.status, 409);
+    assert.equal(out.payload.code, "COIN_BALANCE_LIMIT");
+    assert.equal(out.payload.maximumBalanceBeforeAward, 2146483647);
+    assert.equal(await prisma.coinTransaction.count({ where: { reason: "giveaway_winner", userId: seeded.user.user.id } }), 0);
+    assert.equal((await prisma.giveawayFulfillment.findUnique({ where: { entrantId: seeded.entrant.id } })).cashStatus, "UNCLAIMED");
+
+    await prisma.user.update({ where: { id: seeded.user.user.id }, data: { coins: 25 } });
+    out = await read(await request(server.baseUrl, "POST", `/admin/giveaways/${contest.id}/award-coins`, {
+      token: admin.token, headers: { "Idempotency-Key": retryKey }, body: { revision: contest.revision },
+    }));
+    assert.equal(out.response.status, 200, JSON.stringify(out.payload));
+    assert.equal((await prisma.user.findUnique({ where: { id: seeded.user.user.id } })).coins, 1000025);
+    assert.equal(await prisma.coinTransaction.count({ where: { reason: "giveaway_winner", userId: seeded.user.user.id } }), 1);
+  });
+
+  it("completes a cash-only winner at cash delivery and never creates a coin award", async () => {
+    const contest = await createAndPublish({
+      slug: "cash-only-fulfillment", cashMinor: 7500, coinPrize: 0,
+      bannerMessage: "Bara Contest: win US$75.",
+    });
+    await seedFinalWinner(contest, "Cash Only Winner");
+    let revision = contest.revision;
+    let out;
+    for (const [transition, provider, providerReference] of [
+      ["CLAIMED", null, null],
+      ["CASH_SENT", "ACH", "cash-only-sent"],
+      ["CASH_DELIVERED", "ACH", "cash-only-delivered"],
+    ]) {
+      out = await read(await request(server.baseUrl, "POST", `/admin/giveaways/${contest.id}/fulfillment`, {
+        token: admin.token, headers: { "Idempotency-Key": uuid() },
+        body: { revision, transition, ...(provider ? { provider, providerReference } : {}) },
+      }));
+      assert.equal(out.response.status, 200, JSON.stringify(out.payload));
+      revision = out.payload.contest.revision;
+    }
+    assert.equal(out.payload.fulfillment.status, "CASH_DELIVERED");
+    assert.ok(out.payload.fulfillment.fulfilledAt);
+
+    out = await read(await request(server.baseUrl, "POST", `/admin/giveaways/${contest.id}/award-coins`, {
+      token: admin.token, headers: { "Idempotency-Key": uuid() }, body: { revision },
+    }));
+    assert.equal(out.response.status, 409);
+    assert.equal(out.payload.code, "INVALID_TRANSITION");
+    assert.equal(await prisma.coinTransaction.count({ where: { reason: "giveaway_winner" } }), 0);
   });
 
   it("matches retained entrant HMAC versions after account deletion and key rotation", async () => {

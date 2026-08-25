@@ -9,6 +9,7 @@ const { adminContest, deriveContestStatus, iso, publicContest } = require("../mo
 const { getContestStandings, getFinalStandings } = require("../queries/getContestStandings");
 const { getCurrentContest } = require("../queries/getCurrentContest");
 const { isAllowedBannerMessage, normalizeContestInput, publishValidationFields } = require("./validation");
+const { hasEnabledPrize } = require("./prize");
 const { appSettings: defaultAppSettings } = require("../../../shared/config/appSettings");
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -321,6 +322,7 @@ function buildGiveawayService(dependencies = {}) {
       if (contest.lifecycleStatus !== "DRAFT") throw new ConflictError("Published contests are immutable", "CONTEST_IMMUTABLE");
       const merged = { ...contest, ...patch };
       if (new Date(merged.startsAt) >= new Date(merged.endsAt)) throw new ValidationError("Contest start must precede end", "INVALID_DATE_RANGE");
+      if (!hasEnabledPrize(merged)) throw new ValidationError("At least one prize must be enabled", "INVALID_PRIZE");
       const changed = await tx.giveawayContest.updateMany({
         where: { id, revision: body.revision, lifecycleStatus: "DRAFT" },
         data: { ...patch, revision: { increment: 1 } },
@@ -521,6 +523,7 @@ function buildGiveawayService(dependencies = {}) {
     exactBody(body, ["revision", "transition", "provider", "providerReference"]);
     return mutation(actor, id, "FULFILLMENT", key, body, async (tx, contest) => {
       if (contest.lifecycleStatus !== "FINAL") throw new ConflictError("Contest is not final", "INVALID_TRANSITION");
+      if (contest.cashMinor === 0) throw new ConflictError("Contest has no cash prize", "INVALID_TRANSITION");
       const verified = await tx.giveawayResult.findFirst({ where: { entrant: { contestId: id }, status: "VERIFIED" } });
       if (!verified) throw new ConflictError("Winner is not verified", "INVALID_TRANSITION");
       const currentRow = await tx.giveawayFulfillment.findUnique({ where: { entrantId: verified.entrantId } });
@@ -540,7 +543,10 @@ function buildGiveawayService(dependencies = {}) {
         cashStatus: body.transition,
         ...(body.transition === "CLAIMED" ? { claimedAt: at } : {}),
         ...(body.transition === "CASH_SENT" ? { cashProvider: body.provider, providerReference: providerDigest, cashSentMinor: contest.cashMinor, cashSentCurrency: contest.cashCurrency, cashSentAt: at } : {}),
-        ...(body.transition === "CASH_DELIVERED" ? { cashProvider: body.provider, providerReference: providerDigest, cashDeliveredAt: at } : {}),
+        ...(body.transition === "CASH_DELIVERED" ? {
+          cashProvider: body.provider, providerReference: providerDigest, cashDeliveredAt: at,
+          ...(contest.coinPrize === 0 ? { fulfilledAt: at } : {}),
+        } : {}),
       } });
       const updated = await tx.giveawayContest.update({ where: { id }, data: { revision: { increment: 1 } } });
       return { contest: updated, fulfillment: fulfillmentPayload(row) };
@@ -551,13 +557,29 @@ function buildGiveawayService(dependencies = {}) {
     exactBody(body, ["revision"]);
     return mutation(actor, id, "AWARD_COINS", key, body, async (tx, contest) => {
       await tx.$queryRaw`SELECT id FROM giveaway_contests WHERE id = ${id} FOR UPDATE`;
+      if (contest.coinPrize === 0) throw new ConflictError("Contest has no coin prize", "INVALID_TRANSITION");
       const verified = await tx.giveawayResult.findFirst({ where: { entrant: { contestId: id }, status: "VERIFIED" }, include: { entrant: true } });
       if (!verified?.entrant.userId) throw new ConflictError("Verified winner account is unavailable", "INVALID_TRANSITION");
       let row = await tx.giveawayFulfillment.findUnique({ where: { entrantId: verified.entrantId } });
-      if (!row || !["CASH_DELIVERED", "COINS_AWARDED"].includes(row.cashStatus)) throw new ConflictError("Cash delivery must be confirmed first", "INVALID_TRANSITION");
+      const readyStatuses = contest.cashMinor === 0
+        ? ["UNCLAIMED", "COINS_AWARDED"]
+        : ["CASH_DELIVERED", "COINS_AWARDED"];
+      if (!row || !readyStatuses.includes(row.cashStatus)) throw new ConflictError("Cash delivery must be confirmed first", "INVALID_TRANSITION");
       const refId = `giveaway:${id}:${verified.entrantId}`;
+      const priorLedger = await tx.coinTransaction.findUnique({
+        where: { userId_reason_refId: { userId: verified.entrant.userId, reason: "giveaway_winner", refId } },
+      });
+      if (!priorLedger) {
+        const balances = await tx.$queryRaw`SELECT coins FROM users WHERE id = ${verified.entrant.userId} FOR UPDATE`;
+        const currentCoins = Number(balances[0]?.coins);
+        if (!Number.isSafeInteger(currentCoins) || currentCoins > 2147483647 - contest.coinPrize) {
+          throw new ConflictError("Winner must reduce their coin balance before this prize can be awarded", "COIN_BALANCE_LIMIT", {
+            maximumBalanceBeforeAward: 2147483647 - contest.coinPrize,
+          });
+        }
+      }
       const credit = await award({ tx, userId: verified.entrant.userId, amount: contest.coinPrize, reason: "giveaway_winner", refId });
-      const ledger = await tx.coinTransaction.findUnique({ where: { userId_reason_refId: { userId: verified.entrant.userId, reason: "giveaway_winner", refId } } });
+      const ledger = priorLedger || await tx.coinTransaction.findUnique({ where: { userId_reason_refId: { userId: verified.entrant.userId, reason: "giveaway_winner", refId } } });
       row = await tx.giveawayFulfillment.update({ where: { entrantId: verified.entrantId }, data: { cashStatus: "COINS_AWARDED", coinTransactionId: ledger.id, coinsAwardedAt: row.coinsAwardedAt || nowFn(), fulfilledAt: row.fulfilledAt || nowFn() } });
       const updated = credit.awarded === false && row.cashStatus === "COINS_AWARDED" ? contest : await tx.giveawayContest.update({ where: { id }, data: { revision: { increment: 1 } } });
       return { contest: updated, fulfillment: fulfillmentPayload(row) };
@@ -577,7 +599,7 @@ function buildGiveawayService(dependencies = {}) {
     exactBody(body, ["revision", "bannerMessage", "reason"]);
     const response = await mutation(actor, id, "BANNER_CORRECTION", key, body, async (tx, contest) => {
       const corrected = typeof body.bannerMessage === "string" ? body.bannerMessage.trim() : "";
-      if (contest.lifecycleStatus !== "PUBLISHED" || !isAllowedBannerMessage(corrected) || typeof body.reason !== "string" || body.reason.trim().length < 10 || body.reason.length > 500) {
+      if (contest.lifecycleStatus !== "PUBLISHED" || !isAllowedBannerMessage(corrected, contest) || typeof body.reason !== "string" || body.reason.trim().length < 10 || body.reason.length > 500) {
         throw new ValidationError("Invalid banner correction", "INVALID_BANNER_CORRECTION");
       }
       const updated = await tx.giveawayContest.update({ where: { id }, data: {
