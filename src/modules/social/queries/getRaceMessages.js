@@ -121,7 +121,7 @@ function buildGetRaceMessages(dependencies = {}) {
   return async function getRaceMessages(
     userId,
     raceId,
-    { cursor, limit = 50, kind, accessContext = null } = {}
+    { cursor, limit = 50, kind, accessContext = null, timelineV1 = false } = {}
   ) {
     // Flag read is defensive: a settings failure must degrade to "no cache",
     // never to a 500 on the busiest endpoint in the product.
@@ -219,8 +219,10 @@ function buildGetRaceMessages(dependencies = {}) {
     // C2 (spec §5 Phase C): only the exact default shape may be served from the
     // cache. A cursor, a non-50 limit, or the merged (no-`kind`) feed bypasses
     // entirely — caching unbounded query variants was explicitly rejected.
-    const cacheable =
-      cacheEnabled && raceMessagesCache.isCacheableShape({ cursor, limit, kind });
+    const cacheable = cacheEnabled && (
+      raceMessagesCache.isCacheableShape({ cursor, limit, kind }) ||
+      (timelineV1 === true && !cursor && normalizedKind == null)
+    );
 
     const fetchLimit = pageLimit + 1;
     const [userMessages, powerupEvents] = await Promise.all([

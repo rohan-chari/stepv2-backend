@@ -13,6 +13,8 @@ const {
 const { getInboxUnreadCounts } = require("./queries/getInboxUnreadCounts");
 const { markInboxAlertRead } = require("./commands/markInboxAlertRead");
 const { markInboxReadAll: defaultMarkInboxReadAll } = require("./commands/markInboxReadAll");
+const { markUnreadAlertsRead } = require("./models/inbox");
+const { invalidateInboxUnread } = require("./services/inbox");
 
 const UUID_RE =
   /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
@@ -21,6 +23,42 @@ async function enabled(req, settings = appSettings) {
   return req.clientFeatures?.has("inbox_v1") === true && (await settings.getFlag("apiInboxV1Enabled")) === true;
 }
 function failure(res, status, error, code) { return res.status(status).json({ error, code }); }
+
+function serializeAlert(row) {
+  const base = {
+    id: row.id,
+    type: row.type,
+    title: row.title,
+    body: row.body,
+    createdAt: row.createdAt,
+    readAt: row.readAt,
+  };
+  const nested = row.destination;
+  if (row.type === "PRIVATE_RACE_JOIN_APPROVAL" &&
+      nested?.route === "raceJoinRequest") {
+    return {
+      ...base,
+      destination: "RACE_JOIN_REQUEST",
+      raceId: nested.raceId,
+      requestId: nested.requestId,
+      // Additive migration seam for clients already built against the nested
+      // navigation object while the production UI consumes the flat intent.
+      destinationDetails: nested,
+    };
+  }
+  if (row.type === "PRIVATE_RACE_JOIN_RESULT" &&
+      nested?.route === "raceDetail") {
+    return {
+      ...base,
+      destination: "RACE",
+      raceId: nested.raceId,
+      requestId: nested.requestId,
+      status: nested.status,
+      destinationDetails: nested,
+    };
+  }
+  return { ...base, destination: nested };
+}
 
 function createInboxRouter(dependencies = {}) {
   const router = Router();
@@ -51,6 +89,27 @@ function createInboxRouter(dependencies = {}) {
     }
   }));
 
+  // Capable clients clear only ordinary alerts. Staff-reply prominence is
+  // owned by opening the corresponding feedback thread; the legacy read-all
+  // endpoint above intentionally retains its shipped all-content behavior.
+  router.post("/read-alerts", asyncHandler(async (req, res) => {
+    if (!(await enabled(req, settings))) {
+      return failure(res, 404, "Inbox is unavailable", "FEATURE_DISABLED");
+    }
+    if (req.body === null ||
+        (req.body !== undefined &&
+        (typeof req.body !== "object" || Array.isArray(req.body)))) {
+      return failure(res, 400, "Invalid request body", "INVALID_BODY");
+    }
+    await markUnreadAlertsRead({ userId: req.user.id, now: new Date(), prisma });
+    try {
+      await invalidateInboxUnread(req.user.id);
+    } catch (error) {
+      console.error("Inbox read-alerts cache invalidation failed:", error);
+    }
+    return res.status(204).end();
+  }));
+
   router.get("/alerts", async (req, res) => {
     try {
       if (!(await enabled(req, settings))) return failure(res, 404, "Inbox is unavailable", "FEATURE_DISABLED");
@@ -65,7 +124,7 @@ function createInboxRouter(dependencies = {}) {
       const more = rows.length > limit;
       const alerts = rows.slice(0, limit);
       res.json({
-        alerts: alerts.map((row) => ({ id: row.id, type: row.type, title: row.title, body: row.body, destination: row.destination, createdAt: row.createdAt, readAt: row.readAt })),
+        alerts: alerts.map(serializeAlert),
         nextCursor: more ? encodeCursor(alerts.at(-1)) : null,
         ...unreadCounts,
       });
@@ -97,4 +156,4 @@ function createInboxRouter(dependencies = {}) {
   return router;
 }
 
-module.exports = { createInboxRouter, enabled };
+module.exports = { createInboxRouter, enabled, serializeAlert };

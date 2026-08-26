@@ -9,6 +9,10 @@ const {
 } = require("./racePayoutPresets");
 const { buildPayoutPlan } = require("./services/payoutRounding");
 const {
+  buildTeamPayoutPlan,
+  projectedTeamRecipientCount,
+} = require("./services/teamPayoutPlan");
+const {
   computeFinishRewardPool,
   computeFinishRewardPlaces,
 } = require("./constants/raceFinishReward");
@@ -109,7 +113,13 @@ function computeSettledRacePool({ race, participants, isTeamRace = false }) {
 // The money block every race read path serializes. `acceptedCount` is the
 // caller's already-computed ACCEPTED count (all four read paths derive it for
 // other fields too).
-function buildRaceMoneyView({ race, participants, acceptedCount }) {
+function buildRaceMoneyView({
+  race,
+  participants,
+  acceptedCount,
+  teamPayoutRecipientCount = null,
+  completedTeamPayouts = null,
+}) {
   const rows = participants || race?.participants || [];
   const funded = race?.fundedPrize === true;
   const completed = race?.status === "COMPLETED";
@@ -119,8 +129,6 @@ function buildRaceMoneyView({ race, participants, acceptedCount }) {
     ? quickSettlementParticipants(race, rows)
     : null;
   const payoutVersion = race?.payoutRoundingVersion ?? 0;
-  const withholdTeamProjection =
-    payoutVersion === 1 && race?.isTeamRace === true && !completed;
   const finalAwards = (rawPayouts) => buildPayoutPlan({
     payoutRoundingVersion: payoutVersion,
     awards: (rawPayouts || []).map((rawAwardCoins, index) => ({
@@ -226,33 +234,55 @@ function buildRaceMoneyView({ race, participants, acceptedCount }) {
         max: prizeStamp.prizePoolMaxCoins,
       });
 
-  const rawPayouts = computeFundedPayouts({
-    preset: race?.payoutPreset,
-    poolCoins: coins,
-    participantCount: playerCount,
-    eligibleRecipientCount: exitEligibleRecipientCount,
-    curve: race?.payoutCurve ?? null,
-  });
-  const payoutPlan = finalAwards(rawPayouts);
-  const completedV1Payouts = payoutVersion === 1 && completed
-    ? rows
-      .filter((p) => p.placement != null && (p.payoutCoins || 0) > 0)
-      .sort((a, b) => a.placement - b.placement)
-      .map((p) => p.payoutCoins)
-    : null;
-  const visiblePayouts = completedV1Payouts || payoutPlan.awards.map((award) => award.awardCoins);
-  const visibleTotal = visiblePayouts.reduce((sum, amount) => sum + amount, 0);
-  if (withholdTeamProjection) {
-    return {
-      prizePool: null,
-      buyInAmount: 0,
-      potCoins: 0,
-      heldPotCoins: 0,
-      projectedPotCoins: undefined,
-      payouts: [],
-      finishReward: null,
-    };
+  let visiblePayouts;
+  if (race?.isTeamRace === true) {
+    if (completed) {
+      // Settlement persists the actual per-recipient award. Team winners all
+      // have placement 1, so amount-desc is the stable tier representation and
+      // keeps the top-stepper remainder first.
+      visiblePayouts = Array.isArray(completedTeamPayouts)
+        ? completedTeamPayouts.filter((amount) => (amount || 0) > 0)
+        : rows
+          .filter((participant) => (participant.payoutCoins || 0) > 0)
+          .sort((left, right) =>
+            (right.payoutCoins || 0) - (left.payoutCoins || 0) ||
+            String(left.userId || "").localeCompare(String(right.userId || ""))
+          )
+          .map((participant) => participant.payoutCoins);
+    } else {
+      visiblePayouts = buildTeamPayoutPlan({
+        // Real HTTP projections carry the accepted roster and therefore use
+        // the exact winning-side count. Lean/legacy callers that only supply
+        // acceptedCount retain their historical single-liability fallback.
+        recipientCount: teamPayoutRecipientCount != null
+          ? teamPayoutRecipientCount
+          : rows.length > 0
+            ? projectedTeamRecipientCount(rows)
+            : acceptedCount > 0
+              ? 1
+              : 0,
+        prizeCoins: coins,
+        payoutRoundingVersion: payoutVersion,
+      }).awards.map((award) => award.awardCoins);
+    }
+  } else {
+    const rawPayouts = computeFundedPayouts({
+      preset: race?.payoutPreset,
+      poolCoins: coins,
+      participantCount: playerCount,
+      eligibleRecipientCount: exitEligibleRecipientCount,
+      curve: race?.payoutCurve ?? null,
+    });
+    const payoutPlan = finalAwards(rawPayouts);
+    const completedV1Payouts = payoutVersion === 1 && completed
+      ? rows
+        .filter((p) => p.placement != null && (p.payoutCoins || 0) > 0)
+        .sort((a, b) => a.placement - b.placement)
+        .map((p) => p.payoutCoins)
+      : null;
+    visiblePayouts = completedV1Payouts || payoutPlan.awards.map((award) => award.awardCoins);
   }
+  const visibleTotal = visiblePayouts.reduce((sum, amount) => sum + amount, 0);
   return {
     prizePool: buildPrizePoolPayload({
       funded: true,

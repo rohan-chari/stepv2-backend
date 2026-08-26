@@ -59,6 +59,8 @@ function buildSendStaffReply(dependencies = {}) {
         where: { id: threadId },
         data: {
           lastMessageAt: now,
+          lastStaffReplyAt: message.createdAt || now,
+          lastStaffReplyMessageId: message.id,
           expiresAt: new Date(now.getTime() + THREAD_RETENTION_MS),
           staffReadAt: now,
           userReadAt: null,

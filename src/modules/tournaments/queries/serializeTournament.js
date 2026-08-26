@@ -198,7 +198,7 @@ function buildRounds(t, viewerUserId, nowMs) {
             }));
         return {
           userId: p.userId,
-          totalSteps: masked ? null : p.totalSteps || 0,
+          totalSteps: masked ? null : Math.max(0, Number(p.totalSteps) || 0),
           forfeited: p.forfeitedAt != null,
           // Item 11: emit the masked flag (parallel to the race leaderboard's
           // `stealthed`) so the bracket renders "???" instead of a blank/0 for a

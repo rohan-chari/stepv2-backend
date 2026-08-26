@@ -27,6 +27,7 @@ const {
 const sharing = require("./sharing");
 const { createWaitlistRouter } = require("./waitlist/router");
 const { createReviewsRouter } = require("./reviews/router");
+const { renderWebsiteNotFoundPage } = require("./websiteNotFoundPage");
 const {
   renderLanding: renderGiveawayLandingPage,
   renderNoContest: renderNoGiveawayPage,
@@ -48,4 +49,5 @@ module.exports = {
   renderGiveawayLandingPage,
   renderNoGiveawayPage,
   renderGiveawayRulesPage,
+  renderWebsiteNotFoundPage,
 };

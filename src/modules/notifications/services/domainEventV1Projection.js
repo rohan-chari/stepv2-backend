@@ -150,6 +150,40 @@ const V1_PROJECTOR_HANDLERS = Object.freeze({
       { type: `DAILY_REWARD_REMINDER_${p.slot}`, route: "daily_reward", params: {} },
       { audit: false });
   },
+  async UNCLAIMED_REWARD_REMINDER_V1({ p }) {
+    const mystery = p.rewardType === "MYSTERY_BOX" && typeof p.raceId === "string";
+    const fallbackCopy = mystery
+      ? {
+          title: "Your mystery box is waiting",
+          body: "Open it before your race ends.",
+        }
+      : {
+          title: "Your daily reward is waiting",
+          body: "Claim today's reward before midnight.",
+        };
+    return intent(
+      "UNCLAIMED_REWARD",
+      p.title || fallbackCopy.title,
+      p.body || fallbackCopy.body,
+      mystery
+        ? {
+            type: "UNCLAIMED_REWARD",
+            rewardType: "MYSTERY_BOX",
+            destination: "RACE",
+            raceId: p.raceId,
+            route: "race_detail",
+            params: { raceId: p.raceId },
+          }
+        : {
+            type: "UNCLAIMED_REWARD",
+            rewardType: "DAILY_REWARD",
+            destination: "DAILY_REWARD",
+            route: "daily_reward",
+            params: {},
+          },
+      { audit: false },
+    );
+  },
   async STEP_MILESTONE_REMINDER_V1({ p }) {
     return intent("STEP_MILESTONE_REMINDER", p.title || "Coins waiting! 🪙",
       p.body || "You crossed a step milestone today. Collect your coins before midnight.",

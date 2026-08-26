@@ -25,6 +25,43 @@ function cleanThreadText(value) {
 }
 function threadExpiry(now) { return new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000); }
 
+function decodePriorityCursor(value) {
+  if (value == null || value === "") return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
+    if (!parsed || (parsed.priority !== 0 && parsed.priority !== 1) ||
+        typeof parsed.id !== "string" || typeof parsed.sortAt !== "string" ||
+        Number.isNaN(Date.parse(parsed.sortAt))) {
+      throw new Error("invalid");
+    }
+    return { priority: parsed.priority, id: parsed.id, sortAt: new Date(parsed.sortAt) };
+  } catch {
+    const error = new Error("Invalid cursor");
+    error.statusCode = 400;
+    error.code = "INVALID_CURSOR";
+    throw error;
+  }
+}
+
+function encodePriorityCursor(row) {
+  if (!row) return null;
+  return Buffer.from(JSON.stringify({
+    priority: row.priority,
+    sortAt: row.sortAt.toISOString(),
+    id: row.id,
+  })).toString("base64url");
+}
+
+function beforeSortCursor(cursor, field) {
+  if (!cursor) return {};
+  return {
+    OR: [
+      { [field]: { lt: cursor.sortAt } },
+      { [field]: cursor.sortAt, id: { lt: cursor.id } },
+    ],
+  };
+}
+
 function createFeedbackRouter(dependencies = {}) {
   const router = Router();
   const prisma = dependencies.prisma || defaultPrisma;
@@ -64,27 +101,76 @@ function createFeedbackRouter(dependencies = {}) {
     try {
       if (!(await inboxEnabled(req, settings))) return threadFailure(res, 404, "Inbox is unavailable", "FEATURE_DISABLED");
       const limit = parseLimit(req.query.limit);
-      const cursor = decodeCursor(req.query.cursor);
-      const where = {
-        userId: req.user.id,
-        expiresAt: { gt: new Date() },
-        ...(cursor ? { OR: [
-          { lastMessageAt: { lt: cursor.createdAt } },
-          { lastMessageAt: cursor.createdAt, id: { lt: cursor.id } },
-        ] } : {}),
+      const cursor = decodePriorityCursor(req.query.cursor);
+      const now = new Date();
+      const unreadPredicate = {
+        lastStaffReplyAt: { not: null },
+        OR: [
+          { userReadAt: null },
+          { userReadAt: { lt: prisma.feedbackThread.fields.lastStaffReplyAt } },
+        ],
       };
-      const rows = await prisma.feedbackThread.findMany({
-        where, take: limit + 1, orderBy: [{ lastMessageAt: "desc" }, { id: "desc" }],
-        include: { messages: { orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 1 } },
-      });
+      const ordinaryPredicate = {
+        OR: [
+          { lastStaffReplyAt: null },
+          { userReadAt: { gte: prisma.feedbackThread.fields.lastStaffReplyAt } },
+        ],
+      };
+      const include = {
+        messages: {
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          take: 1,
+        },
+      };
+      const rows = [];
+      if (!cursor || cursor.priority === 1) {
+        const unread = await prisma.feedbackThread.findMany({
+          where: {
+            userId: req.user.id,
+            expiresAt: { gt: now },
+            AND: [
+              unreadPredicate,
+              beforeSortCursor(cursor, "lastStaffReplyAt"),
+            ],
+          },
+          take: limit + 1,
+          orderBy: [{ lastStaffReplyAt: "desc" }, { id: "desc" }],
+          include,
+        });
+        rows.push(...unread.map((row) => ({ ...row, priority: 1, sortAt: row.lastStaffReplyAt })));
+      }
+      if (rows.length < limit + 1) {
+        const ordinaryCursor = cursor?.priority === 0 ? cursor : null;
+        const ordinary = await prisma.feedbackThread.findMany({
+          where: {
+            userId: req.user.id,
+            expiresAt: { gt: now },
+            AND: [
+              ordinaryPredicate,
+              beforeSortCursor(ordinaryCursor, "lastMessageAt"),
+            ],
+          },
+          take: limit + 1 - rows.length,
+          orderBy: [{ lastMessageAt: "desc" }, { id: "desc" }],
+          include,
+        });
+        rows.push(...ordinary.map((row) => ({ ...row, priority: 0, sortAt: row.lastMessageAt })));
+      }
       const more = rows.length > limit;
       const threads = rows.slice(0, limit);
       return res.json({
         threads: threads.map((row) => ({
-          id: row.id, preview: row.messages[0]?.text || "", lastMessageAt: row.lastMessageAt,
+          id: row.id,
+          preview: row.messages[0]?.text || "",
+          createdAt: row.createdAt,
+          lastMessageAt: row.lastMessageAt,
+          lastStaffReplyAt: row.lastStaffReplyAt ?? null,
+          hasUnreadStaffReply: row.priority === 1,
+          priority: row.priority,
+          sortAt: row.sortAt,
           unread: row.userReadAt == null,
         })),
-        nextCursor: more ? encodeCursor({ id: threads.at(-1).id, createdAt: threads.at(-1).lastMessageAt }) : null,
+        nextCursor: more ? encodePriorityCursor(threads.at(-1)) : null,
       });
     } catch (error) {
       if (error.statusCode === 400) return threadFailure(res, 400, error.message, error.code || "INVALID_REQUEST");

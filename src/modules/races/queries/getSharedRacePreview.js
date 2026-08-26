@@ -1,5 +1,6 @@
 const { Race } = require("../models/race");
 const { buildRaceMoneyView } = require("../racePrizePool");
+const { RaceShareLink } = require("../models/raceShareLink");
 
 // Public, UNAUTHENTICATED preview of a shared race, used by both the web
 // landing page (GET /r/:token) and the app's pre-join screen
@@ -9,9 +10,23 @@ const { buildRaceMoneyView } = require("../racePrizePool");
 // so the caller renders a 404.
 function buildGetSharedRacePreview(dependencies = {}) {
   const raceModel = dependencies.Race || Race;
+  const raceShareLinkModel = dependencies.RaceShareLink ||
+    (dependencies.Race
+      ? { findByRawToken: async () => null }
+      : RaceShareLink);
 
   return async function getSharedRacePreview({ token }) {
-    const race = await raceModel.findByShareToken(token);
+    const capableLink = await raceShareLinkModel.findByRawToken(token);
+    if (capableLink?.revokedAt != null ||
+        (capableLink?.expiresAt != null && capableLink.expiresAt <= new Date())) {
+      const error = new Error("Share link expired");
+      error.statusCode = 410;
+      error.code = "SHARE_LINK_EXPIRED";
+      throw error;
+    }
+    const race = capableLink
+      ? await raceModel.findById(capableLink.raceId)
+      : await raceModel.findByShareToken(token);
     if (!race) {
       return null;
     }
@@ -37,7 +52,7 @@ function buildGetSharedRacePreview(dependencies = {}) {
       acceptedCount: participantCount,
     });
 
-    return {
+    const preview = {
       id: race.id,
       name: race.name,
       status: race.status,
@@ -63,6 +78,13 @@ function buildGetSharedRacePreview(dependencies = {}) {
         : null,
       isJoinable: isOpen && !isFull,
     };
+    if (capableLink) {
+      Object.defineProperties(preview, {
+        _approvalRequired: { value: true, enumerable: false },
+        _approvalExpiresAt: { value: capableLink.expiresAt ?? null, enumerable: false },
+      });
+    }
+    return preview;
   };
 }
 

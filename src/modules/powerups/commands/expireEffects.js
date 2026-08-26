@@ -246,17 +246,23 @@ async function evaluateDrillSergeant({ effect, raceModel, participantModel, step
   }
 
   // Missed the goal → instant penalty (Red Card bonus-subtraction, floored at 0).
-  await participantModel.subtractBonusSteps(effect.targetParticipantId, penaltySteps);
+  const applied = await participantModel.subtractBonusSteps(
+    effect.targetParticipantId,
+    penaltySteps,
+  );
+  const actualPenalty = Number.isFinite(Number(applied?.actualPenalty))
+    ? Math.max(0, Number(applied.actualPenalty))
+    : penaltySteps;
   await eventModel.create({
     raceId: effect.raceId,
     actorUserId: effect.sourceUserId,
     eventType: "POWERUP_USED",
     powerupType: "DRILL_SERGEANT",
     targetUserId: effect.targetUserId,
-    description: `Dare failed! They fell short of ${goalSteps.toLocaleString()} steps and lost ${penaltySteps.toLocaleString()}.`,
-    metadata: { outcome: "FAILED", penalty: penaltySteps, windowSteps: Math.round(windowSteps) },
+    description: `Dare failed! They fell short of ${goalSteps.toLocaleString()} steps and lost ${actualPenalty.toLocaleString()}.`,
+    metadata: { outcome: "FAILED", penalty: actualPenalty, windowSteps: Math.round(windowSteps) },
   });
-  return { outcome: "FAILED", deltaSteps: -penaltySteps };
+  return { outcome: "FAILED", deltaSteps: -actualPenalty };
 }
 
 // Piggy Bank mint (shared by expiry + settlement). Window is [startsAt,

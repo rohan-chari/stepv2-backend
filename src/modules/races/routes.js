@@ -19,6 +19,18 @@ const {
   createRaceShareLink: defaultCreateRaceShareLink,
 } = require("./commands/createRaceShareLink");
 const {
+  createRaceJoinRequest: defaultCreateRaceJoinRequest,
+  buildCreateRaceJoinRequest,
+} = require("./commands/createRaceJoinRequest");
+const {
+  respondRaceJoinRequest: defaultRespondRaceJoinRequest,
+  buildRespondRaceJoinRequest,
+} = require("./commands/respondRaceJoinRequest");
+const {
+  listRaceJoinRequests: defaultListRaceJoinRequests,
+} = require("./queries/listRaceJoinRequests");
+const { RaceJoinRequestError } = require("./services/raceJoinRequests");
+const {
   getSharedRacePreview: defaultGetSharedRacePreview,
 } = require("./queries/getSharedRacePreview");
 const { buildShareUrl } = require("../web").sharing;
@@ -263,6 +275,18 @@ function createRacesRouter(dependencies = {}) {
       : defaultJoinRaceByShareToken);
   const createRaceShareLink =
     dependencies.createRaceShareLink || defaultCreateRaceShareLink;
+  const createRaceJoinRequest =
+    dependencies.createRaceJoinRequest ||
+    (dependencies.prisma || dependencies.createInboxAlert
+      ? buildCreateRaceJoinRequest(dependencies)
+      : defaultCreateRaceJoinRequest);
+  const respondRaceJoinRequest =
+    dependencies.respondRaceJoinRequest ||
+    (dependencies.prisma || dependencies.createInboxAlert || dependencies.joinRaceCore
+      ? buildRespondRaceJoinRequest(dependencies)
+      : defaultRespondRaceJoinRequest);
+  const listRaceJoinRequests =
+    dependencies.listRaceJoinRequests || defaultListRaceJoinRequests;
   const getSharedRacePreview =
     dependencies.getSharedRacePreview || defaultGetSharedRacePreview;
   const kickRaceParticipant =
@@ -587,14 +611,54 @@ function createRacesRouter(dependencies = {}) {
       if (!preview) {
         return res.status(404).json({ error: "Race not found" });
       }
-      res.json({ race: preview });
+      res.json({
+        race: preview,
+        ...(preview._approvalRequired === true
+          ? {
+              approvalRequired: true,
+              expiresAt: preview._approvalExpiresAt,
+            }
+          : {}),
+      });
     } catch (error) {
+      if (error.statusCode === 410) {
+        return res.status(410).json({
+          error: error.message,
+          code: error.code || "SHARE_LINK_EXPIRED",
+        });
+      }
       console.error("Get shared race preview error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });
 
   router.use(requireAuth);
+
+  function sendJoinRequestError(res, error) {
+    if (!(error instanceof RaceJoinRequestError) &&
+        error?.name !== "RaceJoinRequestError") return false;
+    res.status(error.statusCode || 400).json({
+      error: error.message,
+      ...(error.code ? { code: error.code } : {}),
+      ...(error.meta || {}),
+    });
+    return true;
+  }
+
+  router.post("/share/:token/join-requests", async (req, res) => {
+    try {
+      const result = await createRaceJoinRequest({
+        rawToken: req.params.token,
+        requesterUserId: req.user.id,
+        team: req.body?.team ?? null,
+      });
+      res.status(202).json({ joinRequest: result.joinRequest });
+    } catch (error) {
+      if (sendJoinRequestError(res, error)) return;
+      console.error("Create race join request error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
 
   // POST /races
   router.post("/", async (req, res) => {
@@ -1161,10 +1225,12 @@ function createRacesRouter(dependencies = {}) {
   // participates in. Idempotent. Returns { shareToken, url }.
   router.post("/:raceId/share-link", async (req, res) => {
     try {
-      const { shareToken } = await createRaceShareLink({
+      const share = await createRaceShareLink({
         userId: req.user.id,
         raceId: req.params.raceId,
+        clientFeatures: req.clientFeatures,
       });
+      const { shareToken } = share;
       let url = buildShareUrl(shareToken);
       try {
         const referralCode = await getOrCreateReferralCode({ userId: req.user.id });
@@ -1174,7 +1240,16 @@ function createRacesRouter(dependencies = {}) {
       } catch (error) {
         logger.error("Referral lookup for race share failed:", error);
       }
-      res.status(201).json({ shareToken, url });
+      res.status(201).json({
+        shareToken,
+        url,
+        ...(share.approvalRequired === true
+          ? {
+              approvalRequired: true,
+              expiresAt: share.expiresAt,
+            }
+          : {}),
+      });
     } catch (error) {
       if (error.name === "RaceShareLinkError") {
         const status = error.statusCode || 400;
@@ -1183,6 +1258,41 @@ function createRacesRouter(dependencies = {}) {
           .json({ error: error.message, ...(error.code ? { code: error.code } : {}) });
       }
       console.error("Create race share link error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  router.get("/:raceId/join-requests", async (req, res) => {
+    try {
+      const result = await listRaceJoinRequests({
+        raceId: req.params.raceId,
+        creatorUserId: req.user.id,
+        status: req.query.status,
+        cursor: req.query.cursor,
+        limit: req.query.limit,
+        prisma: dependencies.prisma,
+      });
+      res.json(result);
+    } catch (error) {
+      if (sendJoinRequestError(res, error)) return;
+      console.error("List race join requests error:", error);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  router.post("/:raceId/join-requests/:requestId/respond", async (req, res) => {
+    try {
+      const result = await respondRaceJoinRequest({
+        raceId: req.params.raceId,
+        requestId: req.params.requestId,
+        creatorUserId: req.user.id,
+        action: req.body?.action,
+        clientFeatures: req.clientFeatures,
+      });
+      res.json(result);
+    } catch (error) {
+      if (sendJoinRequestError(res, error)) return;
+      console.error("Respond to race join request error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });
@@ -2300,8 +2410,11 @@ function createRacesRouter(dependencies = {}) {
     let capacityOutcome = "error";
     let returnedItems = 0;
     try {
-      const { cursor, limit, kind } = req.query;
-      const parsedLimit = limit ? Math.min(Number(limit) || 50, 100) : 50;
+      const { cursor, limit, kind, view } = req.query;
+      const timelineV1 = view === "timeline-v1";
+      const parsedLimit = timelineV1
+        ? (limit ? Math.min(Math.max(Number(limit) || 30, 1), 50) : 30)
+        : (limit ? Math.min(Number(limit) || 50, 100) : 50);
       // Backward compatible: omit kind => merged feed (legacy clients).
       const parsedKind = kind === "USER" || kind === "SYSTEM" ? kind : undefined;
       const result = await capacity.measurePhase(
@@ -2310,13 +2423,14 @@ function createRacesRouter(dependencies = {}) {
           cursor,
           limit: parsedLimit,
           kind: parsedKind,
+          timelineV1,
         }),
       );
       returnedItems =
         (Array.isArray(result?.messages) ? result.messages.length : 0) +
         (Array.isArray(result?.activity) ? result.activity.length : 0);
       capacityOutcome = "success";
-      res.json(result);
+      res.json(timelineV1 ? { ...result, timelineVersion: 1 } : result);
     } catch (error) {
       if (error.statusCode) {
         return res.status(error.statusCode).json({ error: error.message });

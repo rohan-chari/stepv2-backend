@@ -338,7 +338,7 @@ const RaceParticipant = {
       // same UPDATE (no extra round-trip), so GET /races can serve `teams.asOf`
       // without recomputing live totals on the most-frequently-polled screen.
       data: {
-        totalSteps,
+        totalSteps: Math.max(0, Math.round(Number(totalSteps) || 0)),
         totalsUpdatedAt: new Date(),
         ...(typeof rawSteps === "number" && Number.isFinite(rawSteps)
           ? { rawSteps: Math.max(0, Math.round(rawSteps)) }
@@ -426,9 +426,18 @@ const RaceParticipant = {
   },
 
   async markFinished(id, finishedAt, finishTotalSteps) {
+    const safeFinishTotalSteps = Math.max(
+      0,
+      Math.round(Number(finishTotalSteps) || 0),
+    );
     return prisma.raceParticipant.update({
       where: { id },
-      data: { finishedAt, finishTotalSteps, totalSteps: finishTotalSteps, status: "ACCEPTED" },
+      data: {
+        finishedAt,
+        finishTotalSteps: safeFinishTotalSteps,
+        totalSteps: safeFinishTotalSteps,
+        status: "ACCEPTED",
+      },
     });
   },
 
@@ -452,14 +461,54 @@ const RaceParticipant = {
     });
   },
 
+  // The sole immediate negative-bonus write seam. The one SQL statement both
+  // locks and mutates the participant row, so two attacks that pre-read the
+  // same score cannot overdraw it. It also repairs legacy negative aggregates
+  // without preserving the historical overkill in bonus_steps.
+  async applyPenaltyAtomic(id, nominalPenalty) {
+    const safeNominal = Math.max(
+      0,
+      Math.round(Number(nominalPenalty) || 0),
+    );
+    const rows = await prisma.$queryRaw`
+      WITH locked AS (
+        SELECT id, total_steps, bonus_steps
+        FROM race_participants
+        WHERE id = ${id}
+        FOR UPDATE
+      ), penalty AS (
+        SELECT
+          id,
+          LEAST(${safeNominal}, GREATEST(0, total_steps))::int AS actual_penalty,
+          GREATEST(0, -total_steps)::int AS legacy_overkill,
+          total_steps,
+          bonus_steps
+        FROM locked
+      )
+      UPDATE race_participants AS participant
+      SET
+        total_steps = GREATEST(0, penalty.total_steps) - penalty.actual_penalty,
+        bonus_steps = penalty.bonus_steps + penalty.legacy_overkill - penalty.actual_penalty,
+        totals_updated_at = CURRENT_TIMESTAMP
+      FROM penalty
+      WHERE participant.id = penalty.id
+      RETURNING
+        participant.id,
+        participant.total_steps AS "totalSteps",
+        participant.bonus_steps AS "bonusSteps",
+        penalty.actual_penalty AS "actualPenalty"
+    `;
+    const updated = rows[0];
+    if (!updated) {
+      const error = new Error("Race participant not found");
+      error.code = "P2025";
+      throw error;
+    }
+    return updated;
+  },
+
   async subtractBonusSteps(id, amount) {
-    return prisma.raceParticipant.update({
-      where: { id },
-      data: {
-        bonusSteps: { decrement: amount },
-        totalSteps: { decrement: amount },
-      },
-    });
+    return RaceParticipant.applyPenaltyAtomic(id, amount);
   },
 
   async updatePowerupSlots(id, powerupSlots) {

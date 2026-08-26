@@ -77,6 +77,31 @@ const {
 } = require("../constants/expiryEffectTypes");
 const ACTIVE_IMPACT_EXPIRY_TYPE_SET = new Set(ACTIVE_IMPACT_EXPIRY_TYPES);
 
+async function applyImmediatePenalty(
+  participantModel,
+  participant,
+  nominalPenalty,
+) {
+  const safeNominal = Math.max(0, Math.round(Number(nominalPenalty) || 0));
+  if (typeof participantModel.applyPenaltyAtomic === "function") {
+    const applied = await participantModel.applyPenaltyAtomic(
+      participant.id,
+      safeNominal,
+    );
+    return Math.max(0, Number(applied?.actualPenalty) || 0);
+  }
+  // Injected legacy/unit collaborators may not expose the new command yet.
+  // Preserve their public behavior while still discarding nominal overkill.
+  const actualPenalty = Math.min(
+    safeNominal,
+    Math.max(0, Math.round(Number(participant.totalSteps) || 0)),
+  );
+  if (actualPenalty > 0) {
+    await participantModel.subtractBonusSteps(participant.id, actualPenalty);
+  }
+  return actualPenalty;
+}
+
 async function lockPowerupUseParticipants(tx, { raceId, powerupId }) {
   const [powerupLock] = await tx.$queryRaw`
     SELECT participant_id, type
@@ -794,6 +819,7 @@ async function applyPotionEnemyAttack(a) {
   }
 
   let targetParticipant = victim;
+  let shortcutBeneficiaryParticipant = myParticipant;
   let sourceUserId = userId;
   let sourceName = myDisplayName;
 
@@ -802,6 +828,7 @@ async function applyPotionEnemyAttack(a) {
   if (mirror) {
     await effectModel.update(mirror.id, { status: "EXPIRED" });
     targetParticipant = myParticipant; // reflect onto the caster
+    shortcutBeneficiaryParticipant = victim; // the Mirror holder owns the reflected steal
     sourceUserId = victim.userId;
     sourceName = victim.user?.displayName || "A runner";
     result.reflected = true; result.reflectedBy = "MIRROR";
@@ -842,8 +869,11 @@ async function applyPotionEnemyAttack(a) {
   result.rolled = rolled;
 
   if (rolled === "PINECONE_TOSS") {
-    const penalty = 750;
-    await participantModel.subtractBonusSteps(targetParticipant.id, penalty);
+    const penalty = await applyImmediatePenalty(
+      participantModel,
+      targetParticipant,
+      750,
+    );
     result.penalty = penalty;
     const directImpact = await createDirectImpactEvent({ raceId, actorUserId: sourceUserId, eventType: "POWERUP_USED", powerupType: "MYSTERY_POTION",
       targetUserId: resolvedTargetUserId,
@@ -851,17 +881,26 @@ async function applyPotionEnemyAttack(a) {
       powerupType: "PINECONE_TOSS",
       deltas: [{
         userId: resolvedTargetUserId,
-        deltaSteps: -Math.min(penalty, Math.max(0, targetParticipant.totalSteps)),
+        deltaSteps: -penalty,
       }],
     });
     if (directImpact.activeImpactReceipt) {
       result.activeImpactReceipt = directImpact.activeImpactReceipt;
     }
   } else if (rolled === "SHORTCUT") {
-    const stolen = Math.min(1000, Math.max(0, targetParticipant.totalSteps));
+    const nominalStolen = Math.min(1000, Math.max(0, targetParticipant.totalSteps));
+    const stolen = nominalStolen > 0
+      ? await applyImmediatePenalty(
+          participantModel,
+          targetParticipant,
+          nominalStolen,
+        )
+      : 0;
     if (stolen > 0) {
-      await participantModel.subtractBonusSteps(targetParticipant.id, stolen);
-      await participantModel.addBonusSteps(myParticipant.id, stolen);
+      await participantModel.addBonusSteps(
+        shortcutBeneficiaryParticipant.id,
+        stolen,
+      );
     }
     result.stolen = stolen;
     const directImpact = await createDirectImpactEvent({ raceId, actorUserId: sourceUserId, eventType: "POWERUP_USED", powerupType: "MYSTERY_POTION",
@@ -870,7 +909,7 @@ async function applyPotionEnemyAttack(a) {
       powerupType: "SHORTCUT",
       deltas: [
         { userId: resolvedTargetUserId, deltaSteps: -stolen },
-        { userId, deltaSteps: stolen },
+        { userId: shortcutBeneficiaryParticipant.userId, deltaSteps: stolen },
       ],
     });
     if (directImpact.activeImpactReceipt) {
@@ -3281,9 +3320,11 @@ function buildUsePowerup(dependencies = {}) {
 
       case "RED_CARD": {
         const leaderSteps = targetParticipant.totalSteps;
-        const penalty = Math.round(leaderSteps * RED_CARD_PERCENT);
-
-        await participantModel.subtractBonusSteps(targetParticipant.id, penalty);
+        const penalty = await applyImmediatePenalty(
+          participantModel,
+          targetParticipant,
+          Math.round(leaderSteps * RED_CARD_PERCENT),
+        );
 
         result.penalty = penalty;
 
@@ -3298,7 +3339,7 @@ function buildUsePowerup(dependencies = {}) {
         }, {
           deltas: [{
             userId: resolvedTargetUserId,
-            deltaSteps: -Math.min(penalty, Math.max(0, targetParticipant.totalSteps)),
+            deltaSteps: -penalty,
           }],
           offerActorReceipt: false,
         });
@@ -3308,10 +3349,16 @@ function buildUsePowerup(dependencies = {}) {
       case "SHORTCUT": {
         const targetEffective = Math.max(0, targetParticipant.totalSteps);
         const stealCap = upgradedMagnitude("SHORTCUT", upgradeLevel);
-        const stolen = Math.min(stealCap, targetEffective);
+        const nominalStolen = Math.min(stealCap, targetEffective);
+        const stolen = nominalStolen > 0
+          ? await applyImmediatePenalty(
+              participantModel,
+              targetParticipant,
+              nominalStolen,
+            )
+          : 0;
 
         if (stolen > 0) {
-          await participantModel.subtractBonusSteps(targetParticipant.id, stolen);
           await participantModel.addBonusSteps(myParticipant.id, stolen);
         }
 
@@ -4000,8 +4047,11 @@ function buildUsePowerup(dependencies = {}) {
       }
 
       case "PINECONE_TOSS": {
-        const penalty = upgradedMagnitude("PINECONE_TOSS", upgradeLevel);
-        await participantModel.subtractBonusSteps(targetParticipant.id, penalty);
+        const penalty = await applyImmediatePenalty(
+          participantModel,
+          targetParticipant,
+          upgradedMagnitude("PINECONE_TOSS", upgradeLevel),
+        );
         result.penalty = penalty;
 
         await createDirectImpactEvent({
@@ -4015,7 +4065,7 @@ function buildUsePowerup(dependencies = {}) {
         }, {
           deltas: [{
             userId: resolvedTargetUserId,
-            deltaSteps: -Math.min(penalty, Math.max(0, targetParticipant.totalSteps)),
+            deltaSteps: -penalty,
           }],
           offerActorReceipt: false,
         });
@@ -4399,4 +4449,5 @@ module.exports = {
   PowerupUseError,
   luckyMinRarity,
   lockPowerupUseParticipants,
+  applyPotionEnemyAttack,
 };

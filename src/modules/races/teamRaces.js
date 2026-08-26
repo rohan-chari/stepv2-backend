@@ -75,7 +75,7 @@ function buildTeamsBlock(race, entries) {
   for (const { participant, totalSteps } of entries) {
     const side = sides[participant.team];
     if (!side) continue;
-    side.totalSteps += totalSteps || 0;
+    side.totalSteps += Math.max(0, Number(totalSteps) || 0);
     side.memberCount += 1;
   }
   return { teamA: sides.TEAM_A, teamB: sides.TEAM_B };
@@ -90,7 +90,7 @@ function buildTeamsBlockFromParticipants(race, participants = []) {
     race,
     accepted.map((participant) => ({
       participant,
-      totalSteps: participant.totalSteps || 0,
+      totalSteps: Math.max(0, Number(participant.totalSteps) || 0),
     }))
   );
   // Item 16 (batch 2026-07-26) — bounded staleness, made VISIBLE.

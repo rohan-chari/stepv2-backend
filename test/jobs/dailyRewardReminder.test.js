@@ -117,10 +117,15 @@ test("sends once at the 5pm slot for an unclaimed, enabled, tokened user", async
   assert.equal(emitted.length, 1);
   assert.equal(state.emitted[0].userId, "u1");
   assert.equal(state.emitted[0].slot, 17);
-  assert.ok(state.deliveryKeys.has("daily-reward:u1:2026-07-19:17"));
+  assert.equal(state.emitted[0].title, "Your daily reward is waiting");
+  assert.equal(
+    state.emitted[0].body,
+    "Claim today's reward before midnight.",
+  );
+  assert.ok(state.deliveryKeys.has("unclaimed-reward:u1:2026-07-19"));
 });
 
-test("sends at the 9pm slot too", async () => {
+test("does not send at the removed 9pm slot", async () => {
   const { deps, state } = makeDeps({
     distinctZones: ["America/New_York"],
     usersByZone: { "America/New_York": [{ id: "u1", timezone: "America/New_York", lastDailyClaimDate: null }] },
@@ -128,9 +133,34 @@ test("sends at the 9pm slot too", async () => {
     now: NY_2115,
   });
   await buildDailyRewardReminder(deps)();
+  assert.equal(state.emitted.length, 0);
+  assert.equal(state.deliveryKeys.size, 0);
+});
+
+test("an unopened active-race mystery box wins over the daily reward", async () => {
+  const { deps, state } = makeDeps({
+    distinctZones: ["America/New_York"],
+    usersByZone: {
+      "America/New_York": [{
+        id: "u1",
+        timezone: "America/New_York",
+        lastDailyClaimDate: null,
+        mysteryBoxRaceId: "race-1",
+      }],
+    },
+    tokensByUser: { u1: TOKEN },
+    now: NY_1715,
+  });
+  await buildDailyRewardReminder(deps)();
   assert.equal(state.emitted.length, 1);
-  assert.equal(state.emitted[0].slot, 21);
-  assert.ok(state.deliveryKeys.has("daily-reward:u1:2026-07-19:21"));
+  assert.equal(state.emitted[0].rewardType, "MYSTERY_BOX");
+  assert.equal(state.emitted[0].raceId, "race-1");
+  assert.equal(state.emitted[0].title, "Your mystery box is waiting");
+  assert.equal(
+    state.emitted[0].body,
+    "Open it before your race ends.",
+  );
+  assert.ok(state.deliveryKeys.has("unclaimed-reward:u1:2026-07-19"));
 });
 
 test("does NOT send when the box was already claimed today", async () => {
@@ -208,7 +238,7 @@ test("non-hour-offset zone (Asia/Kolkata) resolves correctly", async () => {
   });
   await buildDailyRewardReminder(deps)();
   assert.equal(state.emitted.length, 1);
-  assert.ok(state.deliveryKeys.has("daily-reward:u1:2026-07-19:17"));
+  assert.ok(state.deliveryKeys.has("unclaimed-reward:u1:2026-07-19"));
 });
 
 test("null-timezone users fall back to America/New_York", async () => {

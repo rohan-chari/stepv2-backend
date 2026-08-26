@@ -347,7 +347,7 @@ async function getRaceDetails(
         supportsRemoteAssets
       ),
       status: p.status,
-      totalSteps: p.totalSteps,
+      totalSteps: Math.max(0, Number(p.totalSteps) || 0),
       finishedAt: p.finishedAt,
       joinedAt: p.joinedAt,
       // Financial redaction for a public-preview viewer. These three are the

@@ -34,9 +34,21 @@ function todayLocal() {
   return new Date().toISOString().slice(0, 10);
 }
 
-async function seedPowerup(sku, powerupType, { active = true, testOnly = false } = {}) {
+async function seedPowerup(
+  sku,
+  powerupType,
+  { active = true, testOnly = false, dailyRewardEligible = true } = {},
+) {
   return prisma.powerupShopItem.create({
-    data: { sku, name: sku, priceCoins: 75, powerupType, active, testOnly },
+    data: {
+      sku,
+      name: sku,
+      priceCoins: 75,
+      powerupType,
+      active,
+      testOnly,
+      dailyRewardEligible,
+    },
   });
 }
 
@@ -110,6 +122,18 @@ describe("daily spin ⟺ shop parity", () => {
 
     assert.deepEqual(await shopTypes(user, FULL_HEADER), []);
     assert.deepEqual(await spinPoolTypes(user, FULL_HEADER), []);
+  });
+
+  it("keeps an active Hitchhike in the capable shop but out of the daily pool", async () => {
+    const user = await createUser();
+    await seedPowerup("POWERUP_HITCHHIKE", "HITCHHIKE", {
+      dailyRewardEligible: false,
+    });
+    await seedPowerup("par-rainstorm", "RAINSTORM");
+
+    assert.deepEqual(await shopTypes(user, FULL_HEADER), ["HITCHHIKE", "RAINSTORM"]);
+    assert.deepEqual(await spinPoolTypes(user, FULL_HEADER), ["RAINSTORM"]);
+    assert.deepEqual(await shopTypes(user, NO_W5_HEADER), ["RAINSTORM"]);
   });
 
   it("a stored config still carrying the old dailyBoxExcludedTypes key has no effect", async () => {

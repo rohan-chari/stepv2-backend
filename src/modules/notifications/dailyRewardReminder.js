@@ -1,6 +1,7 @@
 const { User } = require("../users");
 const { JobRun } = require("../../shared/db/jobRun");
 const { prisma: defaultPrisma } = require("../../db");
+const { Prisma } = require("@prisma/client");
 const { appendDomainEvent: defaultAppendDomainEvent } = require("../domainEvents");
 const {
   getTimeZoneParts,
@@ -31,15 +32,56 @@ const { userFanoutDisabled } = require("../../shared/config/operationalControls"
 
 const TICK_INTERVAL_MS = 5 * 60 * 1000;
 // Slots (local hour) and the 30-minute catch-up window.
-const SLOTS = [17, 21];
+const SLOTS = [17];
 const CATCH_UP_MINUTES = 30;
 // Users with no recorded timezone fall back to this zone (§7 / extractTimezone).
 // It is always a candidate zone so null-timezone users are still remindable at
 // its local slot times until their real zone is captured.
 const DEFAULT_ZONE = "America/New_York";
 
-const REMINDER_TITLE = "Your daily box is waiting";
-const REMINDER_BODY = "Your mystery box has been sitting here all day. Awkward.";
+const REMINDER_COPY = Object.freeze({
+  MYSTERY_BOX: Object.freeze({
+    title: "Your mystery box is waiting",
+    body: "Open it before your race ends.",
+  }),
+  DAILY_REWARD: Object.freeze({
+    title: "Your daily reward is waiting",
+    body: "Claim today's reward before midnight.",
+  }),
+});
+
+async function findReminderCandidates(db, zone, { includeNull, currentTime }) {
+  const zoneFilter = includeNull
+    ? Prisma.sql`(u."timezone" = ${zone} OR u."timezone" IS NULL)`
+    : Prisma.sql`u."timezone" = ${zone}`;
+  return db.$queryRaw(Prisma.sql`
+    SELECT u."id",
+           u."last_daily_claim_date" AS "lastDailyClaimDate",
+           mystery."raceId" AS "mysteryBoxRaceId"
+      FROM "users" u
+      LEFT JOIN LATERAL (
+        SELECT rpup."race_id" AS "raceId"
+          FROM "race_powerups" rpup
+          JOIN "race_participants" participant
+            ON participant."id" = rpup."participant_id"
+           AND participant."user_id" = u."id"
+           AND participant."status" = 'accepted'::"RaceParticipantStatus"
+          JOIN "races" race
+            ON race."id" = rpup."race_id"
+           AND race."status" = 'active'::"RaceStatus"
+           AND race."ends_at" > ${currentTime}
+         WHERE rpup."user_id" = u."id"
+           AND rpup."status" = 'mystery_box'::"PowerupStatus"
+           AND rpup."type" IS NULL
+         ORDER BY race."ends_at" ASC, rpup."id" ASC
+         LIMIT 1
+      ) mystery ON TRUE
+     WHERE u."daily_reward_reminders_enabled" = TRUE
+       AND u."is_review_account" = FALSE
+       AND ${zoneFilter}
+     ORDER BY u."id" ASC
+  `);
+}
 
 // A tick "at the slot" is one whose local time is in [slot:00, slot:30).
 function zonesAtSlot(now, slot, zones, getParts) {
@@ -143,9 +185,14 @@ function buildDailyRewardReminder(dependencies = {}) {
         let users;
         try {
           // Only the default zone bucket also picks up null-timezone users.
-          users = await userModel.findRemindableInZones([zone], {
-            includeNull: zone === DEFAULT_ZONE,
-          });
+          users = durable && typeof db.$queryRaw === "function"
+            ? await findReminderCandidates(db, zone, {
+                includeNull: zone === DEFAULT_ZONE,
+                currentTime,
+              })
+            : await userModel.findRemindableInZones([zone], {
+                includeNull: zone === DEFAULT_ZONE,
+              });
         } catch (error) {
           logger.error(
             `[CRON] dailyRewardReminder: findRemindableInZones failed for ${zone}:`,
@@ -166,23 +213,35 @@ function buildDailyRewardReminder(dependencies = {}) {
         for (const user of users || []) {
           try {
             // Re-check the claim-date suppression per user.
-            if (claimSuppresses(user.lastDailyClaimDate, localDate)) continue;
+            const rewardType = user.mysteryBoxRaceId ? "MYSTERY_BOX" : "DAILY_REWARD";
+            const copy = REMINDER_COPY[rewardType];
+            if (rewardType === "DAILY_REWARD" &&
+                claimSuppresses(user.lastDailyClaimDate, localDate)) continue;
 
             const reminder = {
               userId: user.id,
               slot,
               localDate,
-              title: REMINDER_TITLE,
-              body: REMINDER_BODY,
+              title: copy.title,
+              body: copy.body,
+              rewardType,
+              ...(user.mysteryBoxRaceId ? { raceId: user.mysteryBoxRaceId } : {}),
             };
             if (durable) {
-              const sourceId = `daily-reward:${user.id}:${localDate}:${slot}`;
               await db.$transaction((tx) => appendDomainEvent(tx, {
-                eventKey: `DAILY_REWARD_REMINDER_V1:${sourceId}`,
-                eventType: "DAILY_REWARD_REMINDER_V1", schemaVersion: 1,
+                eventKey: `UNCLAIMED_REWARD:${user.id}:${localDate}`,
+                eventType: "UNCLAIMED_REWARD_REMINDER_V1", schemaVersion: 1,
                 aggregateType: "USER", aggregateId: user.id,
                 occurredAt: occurrenceAt,
-                payload: { userId: user.id, slot, title: REMINDER_TITLE, body: REMINDER_BODY, localDate },
+                payload: {
+                  userId: user.id,
+                  slot,
+                  title: copy.title,
+                  body: copy.body,
+                  localDate,
+                  rewardType,
+                  ...(user.mysteryBoxRaceId ? { raceId: user.mysteryBoxRaceId } : {}),
+                },
                 audience: [{ recipientId: user.id, facts: {
                   timeZone: zone,
                   expiresAt,
@@ -202,10 +261,10 @@ function buildDailyRewardReminder(dependencies = {}) {
                 try {
                   await compatibilityNotifications.create({
                     userId: user.id,
-                    type: `DAILY_REWARD_REMINDER_${slot}`,
-                    title: REMINDER_TITLE,
-                    body: REMINDER_BODY,
-                    deliveryKey: `daily-reward:${user.id}:${localDate}:${slot}`,
+                    type: "UNCLAIMED_REWARD",
+                    title: copy.title,
+                    body: copy.body,
+                    deliveryKey: `unclaimed-reward:${user.id}:${localDate}`,
                   });
                 } catch (error) {
                   if (error?.code === "P2002") continue;
@@ -214,7 +273,13 @@ function buildDailyRewardReminder(dependencies = {}) {
               }
               compatibilityEvents?.emit("DAILY_REWARD_REMINDER", reminder);
             }
-            emitted.push({ userId: user.id, slot, localDate });
+            emitted.push({
+              userId: user.id,
+              slot,
+              localDate,
+              rewardType,
+              ...(user.mysteryBoxRaceId ? { raceId: user.mysteryBoxRaceId } : {}),
+            });
           } catch (error) {
             fanoutComplete = false;
             logger.error(
@@ -259,7 +324,7 @@ function scheduleDailyRewardReminder(dependencies = {}) {
 
   tick(); // run once shortly after boot (no-op unless a zone is at a slot)
   setInterval(tick, interval);
-  logger.log("[CRON] Daily-reward reminder scheduled (5pm & 9pm local)");
+  logger.log("[CRON] Unclaimed-reward reminder scheduled (5pm local)");
 }
 
 module.exports = {
@@ -267,4 +332,5 @@ module.exports = {
   scheduleDailyRewardReminder,
   claimSuppresses,
   zonesAtSlot,
+  findReminderCandidates,
 };

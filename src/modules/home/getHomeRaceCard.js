@@ -24,6 +24,10 @@ const defaultRaceProgressSnapshot = require("../races/services/raceProgressSnaps
 const {
   RaceResolutionJobV2: defaultRaceResolutionJobV2,
 } = require("../races/models/raceResolutionJobV2");
+const {
+  buildRaceMoneyView,
+  serializePayouts,
+} = require("../races/racePrizePool");
 
 // The effect types the home card must prefetch. LEECH is included (§5): once
 // leech MINTS steps to the attacker, omitting it here made the home-card total
@@ -49,6 +53,26 @@ function raceDurationHours(race) {
     if (Number.isFinite(ms) && ms > 0) return Math.round(ms / (60 * 60 * 1000));
   }
   return race?.maxDurationDays ? race.maxDurationDays * 24 : null;
+}
+
+function homeMoneyView(race, participants) {
+  const rows = participants || [];
+  const money = buildRaceMoneyView({
+    race,
+    participants: rows,
+    acceptedCount: rows.filter((row) => row.status === "ACCEPTED").length,
+  });
+  const { payouts, payoutTiers } = serializePayouts(money.payouts);
+  return {
+    buyInAmount: money.buyInAmount,
+    potCoins: money.potCoins,
+    heldPotCoins: money.heldPotCoins,
+    projectedPotCoins: money.projectedPotCoins,
+    prizePool: money.prizePool,
+    payouts,
+    payoutTiers,
+    finishReward: money.finishReward,
+  };
 }
 
 const USER_SELECT = {
@@ -234,7 +258,7 @@ async function checkActiveRace(
   function buildEntry(p) {
     return {
       rank: sorted.indexOf(p) + 1,
-      totalSteps: p.totalSteps,
+      totalSteps: Math.max(0, Number(p.totalSteps) || 0),
       ...serializeUser(
         p.user,
         supportsCharacters,
@@ -253,6 +277,7 @@ async function checkActiveRace(
       me: me ? buildEntry(me) : null,
       leader: leader ? buildEntry(leader) : null,
       others: others.map(buildEntry),
+      ...homeMoneyView(race, sorted),
       // ── Team races (TR-809) — additive. The Home rail draws a compact
       // rope-knot scoreline ("Swift Capys 12,340 — 11,900 Turbo Beavers") from
       // the same canonical `teams` block the list + progress surfaces use.
@@ -575,6 +600,20 @@ async function checkActiveRacesFromSnapshots(prisma, userId, options = {}) {
           powerupsEnabled: true,
           isTeamRace: true,
           teamSize: true,
+          fundedPrize: true,
+          payoutRoundingVersion: true,
+          payoutPreset: true,
+          payoutCurve: true,
+          potCoins: true,
+          buyInAmount: true,
+          maxDurationDays: true,
+          prizeCoinUnit: true,
+          prizePoolMaxCoins: true,
+          teamPoolMultBps: true,
+          creationSource: true,
+          startPolicy: true,
+          exitActionsEnabled: true,
+          status: true,
         },
       },
     },
@@ -674,7 +713,9 @@ async function checkActiveRacesFromSnapshots(prisma, userId, options = {}) {
               );
               return { equippedAccessories: accessories, animal };
             })()),
-        totalSteps: isStealthed ? null : participant.totalSteps,
+        totalSteps: isStealthed
+          ? null
+          : Math.max(0, Number(participant.totalSteps) || 0),
         isStealthed,
       };
     });
@@ -687,6 +728,13 @@ async function checkActiveRacesFromSnapshots(prisma, userId, options = {}) {
       userPlacement: viewerIsDetoured || myIndex < 0 ? null : myIndex + 1,
       userPlacementHidden: viewerIsDetoured,
       participantCount: ranked.length,
+      ...homeMoneyView(
+        race,
+        ranked.map((participant) => ({
+          ...participant,
+          status: "ACCEPTED",
+        })),
+      ),
       ...(race.isTeamRace && supportsTeamRaces
         ? {
             isTeamRace: true,
@@ -947,7 +995,7 @@ async function checkActiveRaces(prisma, userId, options = {}) {
               );
               return { equippedAccessories: accessories, animal };
             })()),
-        totalSteps: isStealthed ? null : p.totalSteps,
+        totalSteps: isStealthed ? null : Math.max(0, Number(p.totalSteps) || 0),
         isStealthed,
       };
     });
@@ -966,6 +1014,7 @@ async function checkActiveRaces(prisma, userId, options = {}) {
       // rule everywhere. Frozen clients ignore it and just see no chip.
       userPlacementHidden: viewerIsDetoured,
       participantCount: ranked.length,
+      ...homeMoneyView(race, liveParticipants),
       // B-12d: the canonical team block, from the LIVE totals this entry
       // already computed (so it matches the ticket's own numbers), built by the
       // same shared builder every other surface uses.
@@ -979,7 +1028,10 @@ async function checkActiveRaces(prisma, userId, options = {}) {
               race,
               liveParticipants
                 .filter((p) => p.status === "ACCEPTED")
-                .map((p) => ({ participant: p, totalSteps: p.totalSteps || 0 }))
+                .map((p) => ({
+                  participant: p,
+                  totalSteps: Math.max(0, Number(p.totalSteps) || 0),
+                }))
             ),
           }
         : {}),
@@ -1063,7 +1115,7 @@ async function checkFriendRacing(
       ),
       participants: race.participants.map((p, idx) => ({
         rank: idx + 1,
-        totalSteps: p.totalSteps,
+        totalSteps: Math.max(0, Number(p.totalSteps) || 0),
         ...serializeUser(
           p.user,
           supportsCharacters,

@@ -22,6 +22,9 @@ async function getEligiblePowerupPool({
 } = {}) {
   const items = await powerupShopItemModel.findActive({ channel });
   return items.filter((item) =>
+    // Old model doubles and mixed-version row projections do not carry the
+    // additive column. Only an explicit false opts an item out.
+    item.dailyRewardEligible !== false &&
     isPowerupVisibleToClient(item.powerupType, {
       supportsJammer,
       supportsPowerups2,

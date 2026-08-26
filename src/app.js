@@ -14,7 +14,10 @@ const {
 const { createNotificationsRouter } = require("./modules/notifications");
 const { createLeaderboardRouter } = require("./modules/leaderboard");
 const { createRankedRouter } = require("./modules/ranked");
-const { createRacesRouter } = require("./modules/races");
+const {
+  createRacesRouter,
+  createRaceJoinRequestsRouter,
+} = require("./modules/races");
 const { createTournamentsRouter } = require("./modules/tournaments");
 const { createReferralsRouter } = require("./modules/social");
 const { createShopRouter } = require("./routes/shop");
@@ -44,6 +47,7 @@ const {
   renderReferralNotFoundPage,
   renderTournamentLandingPage,
   renderTournamentNotFoundPage,
+  renderWebsiteNotFoundPage,
   createWaitlistRouter,
   createReviewsRouter,
   sharing,
@@ -133,6 +137,7 @@ function createApp(dependencies = {}) {
   app.use("/leaderboard", createLeaderboardRouter(dependencies));
   app.use("/ranked", createRankedRouter(dependencies));
   app.use("/races", createRacesRouter(dependencies));
+  app.use("/race-join-requests", createRaceJoinRequestsRouter(dependencies));
   app.use("/tournaments", createTournamentsRouter(dependencies));
   app.use("/referrals", createReferralsRouter(dependencies));
   app.use("/shop", createShopBootstrapRouter(dependencies));
@@ -474,6 +479,28 @@ function createApp(dependencies = {}) {
   app.get("/app-ads.txt", (req, res) =>
     res.type("text/plain").sendFile(path.join(publicDir, "app-ads.txt"))
   );
+
+  // Mounted application prefixes always speak JSON, even when a browser asks
+  // for HTML. This classifier runs only after every real API route, so it is a
+  // final not-found envelope rather than a competing router.
+  const apiPrefixes = new Set([
+    "auth", "steps", "friends", "admin", "notifications", "leaderboard",
+    "ranked", "races", "race-join-requests", "tournaments", "referrals",
+    "shop", "powerups", "daily-reward", "coins", "users", "tutorial",
+    "onboarding", "analytics", "feedback", "home", "inbox", "app-version",
+    "ads", "giveaways", "waitlist", "reviews", "health",
+  ]);
+  app.use((req, res, next) => {
+    const firstSegment = req.path.split("/").filter(Boolean)[0];
+    if (!apiPrefixes.has(firstSegment)) return next();
+    return res.status(404).json({ error: "Not found", code: "NOT_FOUND" });
+  });
+
+  app.use((req, res, next) => {
+    if ((req.method !== "GET" && req.method !== "HEAD") ||
+        !req.accepts("html")) return next();
+    return res.status(404).type("html").send(renderWebsiteNotFoundPage());
+  });
 
   // Central error handler — must be mounted LAST so every route/middleware
   // above can rely on next(err) (see shared/http/errorMiddleware.js).

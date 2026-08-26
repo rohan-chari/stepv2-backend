@@ -395,6 +395,30 @@ const Race = {
     });
   },
 
+  // Payout projection context for a participant-paged progress request. The
+  // page access query intentionally carries only the viewer row, while money
+  // math must use the complete accepted field. This second read stays scalar
+  // and Postgres-owned; no user/cosmetic graph or Redis snapshot participates.
+  async findProgressMoneyContext(id) {
+    return prisma.race.findUnique({
+      where: { id },
+      include: {
+        participants: {
+          select: {
+            id: true,
+            userId: true,
+            status: true,
+            totalSteps: true,
+            placement: true,
+            payoutCoins: true,
+            forfeitedAt: true,
+            rawSteps: true,
+          },
+        },
+      },
+    });
+  },
+
   // Page-scoped progress context. Unlike findProgressScoringContext this never
   // hydrates the race-wide participant relation: the request path only needs
   // race metadata and the authenticated viewer's membership row.
@@ -982,6 +1006,19 @@ const Race = {
           COUNT(*)::int AS accepted_count,
           COUNT(*) FILTER (WHERE team = 'team_a'::"RaceTeam")::int AS team_a_count,
           COUNT(*) FILTER (WHERE team = 'team_b'::"RaceTeam")::int AS team_b_count,
+          COUNT(*) FILTER (
+            WHERE team = 'team_a'::"RaceTeam" AND forfeited_at IS NULL
+          )::int AS team_a_payout_recipient_count,
+          COUNT(*) FILTER (
+            WHERE team = 'team_b'::"RaceTeam" AND forfeited_at IS NULL
+          )::int AS team_b_payout_recipient_count,
+          COALESCE(
+            ARRAY_AGG(
+              payout_coins
+              ORDER BY payout_coins DESC, user_id COLLATE "C" ASC
+            ) FILTER (WHERE payout_coins > 0),
+            ARRAY[]::integer[]
+          ) AS completed_payouts,
           COALESCE(SUM(total_steps) FILTER (WHERE team = 'team_a'::"RaceTeam"), 0)::bigint AS team_a_steps,
           COALESCE(SUM(total_steps) FILTER (WHERE team = 'team_b'::"RaceTeam"), 0)::bigint AS team_b_steps,
           MAX(totals_updated_at) AS totals_as_of,
@@ -994,6 +1031,9 @@ const Race = {
         COALESCE(a.accepted_count, 0)::int AS "acceptedCount",
         COALESCE(a.team_a_count, 0)::int AS "teamACount",
         COALESCE(a.team_b_count, 0)::int AS "teamBCount",
+        COALESCE(a.team_a_payout_recipient_count, 0)::int AS "teamAPayoutRecipientCount",
+        COALESCE(a.team_b_payout_recipient_count, 0)::int AS "teamBPayoutRecipientCount",
+        COALESCE(a.completed_payouts, ARRAY[]::integer[]) AS "completedPayouts",
         COALESCE(a.team_a_steps, 0)::text AS "teamASteps",
         COALESCE(a.team_b_steps, 0)::text AS "teamBSteps",
         a.totals_as_of AS "totalsAsOf",
@@ -1077,6 +1117,18 @@ const Race = {
               memberCount: Number(row.teamBCount || 0),
               totalSteps: Number(row.teamBSteps || 0),
             },
+            // Internal money facts for the production SQL-summary path. Its
+            // public participant list intentionally contains only viewer +
+            // leader, which is insufficient to derive a team split. Carry the
+            // full-roster counts and persisted completed awards without
+            // widening the public participant payload.
+            teamPayoutRecipientCount: Math.max(
+              Number(row.teamAPayoutRecipientCount || 0),
+              Number(row.teamBPayoutRecipientCount || 0),
+            ),
+            completedPayouts: Array.isArray(row.completedPayouts)
+              ? row.completedPayouts.map((amount) => Number(amount || 0))
+              : [],
             totalsAsOf: row.totalsAsOf || null,
           },
         };

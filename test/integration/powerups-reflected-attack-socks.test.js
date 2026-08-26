@@ -1,6 +1,18 @@
 const assert = require("node:assert/strict");
 const { describe, it, before, after, beforeEach } = require("node:test");
-const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
+const {
+  cleanDatabase,
+  prisma,
+  request,
+  getSharedServer,
+  startServer,
+} = require("./setup");
+const {
+  buildUsePowerup,
+} = require("../../src/modules/powerups/commands/usePowerup");
+const {
+  RaceImpactEvent,
+} = require("../../src/modules/races/models/raceImpactEvent");
 
 // ---------------------------------------------------------------------------
 // REFLECTED ATTACK vs THE ATTACKER'S OWN COMPRESSION SOCKS
@@ -338,5 +350,81 @@ describe("reflected attack blocked by the attacker's own compression socks", () 
 
     assert.equal(await shieldStatus(raceId, bob.userId, "MIRROR"), "EXPIRED");
     assert.equal(await shieldStatus(raceId, alice.userId, "COMPRESSION_SOCKS"), "BLOCKED");
+  });
+
+  it("a reflected Mystery Potion Shortcut conserves steps and credits the Mirror holder", async () => {
+    const alice = await createUser("AlicePotionShortcut");
+    const bob = await createUser("BobPotionMirror");
+    await makeFriends(alice, bob);
+    const raceId = await createActiveRace(alice, [bob]);
+    await giveBonusSteps(raceId, alice.userId, 400);
+    await giveBonusSteps(raceId, bob.userId, 5000);
+    await activateShield(raceId, bob, "MIRROR", 99701);
+
+    const potion = await giveHeldPowerup(
+      raceId,
+      alice.userId,
+      "MYSTERY_POTION",
+      99702,
+    );
+    // 0.72 deterministically selects SHORTCUT from the canonical potion pool.
+    // Use a real HTTP server/handler chain while injecting only the random seam.
+    const deterministicServer = await startServer({
+      usePowerup: buildUsePowerup({
+        random: () => 0.72,
+        ActiveRaceImpact: RaceImpactEvent,
+      }),
+    });
+    try {
+      const before = await prisma.raceParticipant.findMany({
+        where: { raceId, userId: { in: [alice.userId, bob.userId] } },
+        orderBy: { userId: "asc" },
+      });
+      const beforeSum = before.reduce((sum, participant) => sum + participant.totalSteps, 0);
+
+      const response = await request(
+        deterministicServer.baseUrl,
+        "POST",
+        `/races/${raceId}/powerups/${potion.id}/use`,
+        { token: alice.token, headers: FEATURES, body: {} },
+      );
+      assert.equal(response.status, 200);
+      const { result } = await response.json();
+      assert.equal(result.rolled, "SHORTCUT");
+      assert.equal(result.reflected, true);
+      assert.equal(result.reflectedBy, "MIRROR");
+      assert.equal(result.stolen, 400, "the returned amount is the actual clamped debit");
+
+      const after = await prisma.raceParticipant.findMany({
+        where: { raceId, userId: { in: [alice.userId, bob.userId] } },
+        orderBy: { userId: "asc" },
+      });
+      const byUser = new Map(after.map((participant) => [participant.userId, participant]));
+      assert.equal(byUser.get(alice.userId).totalSteps, 0);
+      assert.equal(byUser.get(bob.userId).totalSteps, 5400);
+      assert.equal(
+        after.reduce((sum, participant) => sum + participant.totalSteps, 0),
+        beforeSum,
+        "a reflected Shortcut transfers rather than mints or destroys steps",
+      );
+
+      const impacts = await prisma.raceImpactEvent.findMany({
+        where: { raceId, powerupType: "SHORTCUT" },
+        orderBy: { deltaSteps: "asc" },
+      });
+      assert.deepEqual(
+        impacts.map((impact) => [impact.recipientUserId, impact.deltaSteps]),
+        [[alice.userId, -400], [bob.userId, 400]],
+      );
+      const sourceEvent = await prisma.racePowerupEvent.findFirstOrThrow({
+        where: { raceId, powerupType: "MYSTERY_POTION", eventType: "POWERUP_USED" },
+        orderBy: { createdAt: "desc" },
+      });
+      assert.equal(sourceEvent.actorUserId, bob.userId);
+      assert.equal(sourceEvent.targetUserId, alice.userId);
+      assert.deepEqual(sourceEvent.metadata, { rolled: "SHORTCUT", stolen: 400 });
+    } finally {
+      await deterministicServer.close();
+    }
   });
 });

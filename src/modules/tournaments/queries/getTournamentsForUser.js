@@ -4,6 +4,10 @@ const { RacePowerup } = require("../../powerups/models/racePowerup");
 const { RaceActiveEffect } = require("../../powerups/models/raceActiveEffect");
 const { characterPresentation } = require("../../cosmetics");
 const { serializeTournamentSummary } = require("./serializeTournament");
+const {
+  buildRaceMoneyView,
+  serializePayouts,
+} = require("../../races/racePrizePool");
 
 // Live-matchup placement uses the SAME ordering rule the ordinary active-race
 // summaries use (steps desc, then joinedAt, then userId) so a tournament row and
@@ -113,13 +117,34 @@ function buildGetTournamentsForUser(dependencies = {}) {
           tournamentId: true,
           endsAt: true,
           powerupsEnabled: true,
+          creationSource: true,
+          startPolicy: true,
+          exitActionsEnabled: true,
+          isTeamRace: true,
+          fundedPrize: true,
+          maxDurationDays: true,
+          payoutRoundingVersion: true,
+          prizePoolCoins: true,
+          teamPoolMultBps: true,
+          prizeCoinUnit: true,
+          prizePoolMaxCoins: true,
+          payoutPreset: true,
+          payoutCurve: true,
+          potCoins: true,
+          buyInAmount: true,
           participants: {
             select: {
               id: true,
               userId: true,
               status: true,
               totalSteps: true,
+              rawSteps: true,
               joinedAt: true,
+              placement: true,
+              forfeitedAt: true,
+              payoutCoins: true,
+              buyInAmount: true,
+              buyInStatus: true,
             },
           },
         },
@@ -176,6 +201,12 @@ function buildGetTournamentsForUser(dependencies = {}) {
         const accepted = (m.participants || [])
           .filter((p) => p.status === "ACCEPTED")
           .sort(compareForPlacement);
+        const money = buildRaceMoneyView({
+          race: m,
+          participants: m.participants || [],
+          acceptedCount: accepted.length,
+        });
+        const serializedMoney = serializePayouts(money.payouts);
         const index = accepted.findIndex((p) => p.userId === userId);
         let myPlacement = index >= 0 ? index + 1 : null;
         let myPlacementHidden = false;
@@ -206,6 +237,10 @@ function buildGetTournamentsForUser(dependencies = {}) {
           mysteryBoxCount: slotItems.filter((p) => p.status === "MYSTERY_BOX")
             .length,
           slotItems,
+          prizePool: money.prizePool,
+          projectedPotCoins: money.projectedPotCoins,
+          payouts: serializedMoney.payouts,
+          payoutTiers: serializedMoney.payoutTiers,
         });
       }
     }

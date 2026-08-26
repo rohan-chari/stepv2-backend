@@ -24,10 +24,52 @@ function pushPayload(alert, storedPayload = null) {
     return storedPayload;
   }
   const destination = alert.destination || {};
+  if (alert.type === "PRIVATE_RACE_JOIN_APPROVAL" &&
+      destination.route === "raceJoinRequest") {
+    return {
+      type: alert.type,
+      destination: "RACE_JOIN_REQUEST",
+      raceId: destination.raceId,
+      requestId: destination.requestId,
+      destinationDetails: destination,
+      route: "race_join_request",
+      params: {
+        raceId: destination.raceId,
+        requestId: destination.requestId,
+      },
+    };
+  }
+  if (alert.type === "PRIVATE_RACE_JOIN_RESULT" &&
+      destination.route === "raceDetail") {
+    return {
+      type: alert.type,
+      destination: "RACE",
+      raceId: destination.raceId,
+      requestId: destination.requestId,
+      status: destination.status,
+      destinationDetails: destination,
+      route: "race_detail",
+      params: {
+        raceId: destination.raceId,
+        ...(destination.requestId ? { requestId: destination.requestId } : {}),
+        ...(destination.status ? { status: destination.status } : {}),
+      },
+    };
+  }
   const payload = { type: alert.type, destination };
   if (destination.route === "raceDetail") {
     payload.route = "race_detail";
-    payload.params = { raceId: destination.raceId };
+    payload.params = {
+      raceId: destination.raceId,
+      ...(destination.requestId ? { requestId: destination.requestId } : {}),
+      ...(destination.status ? { status: destination.status } : {}),
+    };
+  } else if (destination.route === "raceJoinRequest") {
+    payload.route = "race_join_request";
+    payload.params = {
+      raceId: destination.raceId,
+      requestId: destination.requestId,
+    };
   } else if (destination.route === "tournamentDetail") {
     payload.route = "tournament_detail";
     payload.params = { tournamentId: destination.tournamentId };

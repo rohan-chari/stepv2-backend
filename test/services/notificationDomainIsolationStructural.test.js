@@ -55,7 +55,11 @@ test("every active producer row is named by real integration-path coverage", () 
     .filter((name) => name.endsWith(".test.js"))
     .map((name) => fs.readFileSync(path.join(integrationRoot, name), "utf8"))
     .join("\n");
-  const dormant = new Set(["RACE_BUYIN_CHANGED_V1", "TOURNAMENT_COMPLETED_V1"]);
+  const dormant = new Set([
+    "RACE_BUYIN_CHANGED_V1",
+    "DAILY_REWARD_REMINDER_V1",
+    "TOURNAMENT_COMPLETED_V1",
+  ]);
   for (const row of Object.values(PRODUCER_MATRIX)) {
     if (dormant.has(row.eventType)) {
       assert.equal(row.producerStatus, "DORMANT_COMPATIBILITY_ONLY");
@@ -96,7 +100,11 @@ test("literal V1 fixtures lock every canonical visible delivery key", () => {
         fixture.eventType,
       );
       const producer = PRODUCER_MATRIX[fixture.eventType];
-      if (["RACE_BUYIN_CHANGED_V1", "TOURNAMENT_COMPLETED_V1"].includes(fixture.eventType)) {
+      if ([
+        "RACE_BUYIN_CHANGED_V1",
+        "DAILY_REWARD_REMINDER_V1",
+        "TOURNAMENT_COMPLETED_V1",
+      ].includes(fixture.eventType)) {
         assert.deepEqual(
           {
             producerStatus: producer.producerStatus,

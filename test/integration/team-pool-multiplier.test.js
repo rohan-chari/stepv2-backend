@@ -85,6 +85,7 @@ async function seedTeamRace({
   expired = true,
   teamSize = 5,
   payoutRoundingVersion = 0,
+  prizePoolMaxCoins = null,
   potCoins = 0,
   buyInAmount = 0,
 }) {
@@ -108,6 +109,7 @@ async function seedTeamRace({
       teamBName: "Blues",
       teamPoolMultBps: multBps === undefined ? null : multBps,
       payoutRoundingVersion,
+      prizePoolMaxCoins,
       startedAt: new Date(Date.now() - durationDays * 24 * 60 * 60 * 1000),
       endsAt: expired
         ? new Date(Date.now() - 60 * 60 * 1000)
@@ -167,6 +169,7 @@ describe("team race payout buff (item 5)", () => {
 
   after(async () => {
     await appSettings.setFlag(FUNDED_FLAG, false);
+    await appSettings.setFlag("raceListSqlSummaryV1Enabled", false);
   });
 
   // ── 1. the three duration bands ──────────────────────────────────────────
@@ -413,6 +416,7 @@ describe("team race payout buff (item 5)", () => {
   });
 
   it("9a: an active v1 team race still advertises its projected pool", async () => {
+    await appSettings.setFlag("raceListSqlSummaryV1Enabled", true);
     const race = await seedTeamRace({
       durationDays: 14,
       multBps: 18750,
@@ -430,6 +434,215 @@ describe("team race payout buff (item 5)", () => {
     assert.equal(body.prizePool.coins, 3000);
     assert.equal(body.prizePool.projected, true);
     assert.equal(body.projectedPotCoins, 3000);
+    const expectedPayouts = { first: 600, second: 600, third: 600 };
+    const expectedPayoutTiers = Array.from({ length: 5 }, (_, index) => ({
+      placement: index + 1,
+      amount: 600,
+    }));
+    assert.deepEqual(body.payouts, expectedPayouts);
+    assert.deepEqual(body.payoutTiers, expectedPayoutTiers);
+
+    const list = await req("GET", "/races", {
+      token: a[0].token,
+      headers: TEAM_HEADERS,
+    });
+    const listBody = await list.json();
+    const listed = (listBody.active || []).find((entry) => entry.id === race.id);
+    assert.equal(listed.prizePool.coins, 3000);
+    assert.equal(listed.projectedPotCoins, 3000);
+    assert.deepEqual(listed.payouts, expectedPayouts);
+    assert.deepEqual(listed.payoutTiers, expectedPayoutTiers);
+
+    const progress = await req("GET", `/races/${race.id}/progress`, {
+      token: a[0].token,
+      headers: TEAM_HEADERS,
+    });
+    const progressBody = (await progress.json()).progress;
+    assert.equal(progressBody.prizePool.coins, 3000);
+    assert.equal(progressBody.projectedPotCoins, 3000);
+    assert.deepEqual(progressBody.payouts, expectedPayouts);
+    assert.deepEqual(progressBody.payoutTiers, expectedPayoutTiers);
+
+    const home = await req("GET", "/home/race-card", {
+      token: a[0].token,
+      headers: TEAM_HEADERS,
+    });
+    const homeBody = await home.json();
+    assert.equal(homeBody.state, "ACTIVE_RACE");
+    assert.equal(homeBody.data.prizePool.coins, 3000);
+    assert.equal(homeBody.data.projectedPotCoins, 3000);
+    assert.deepEqual(homeBody.data.payouts, expectedPayouts);
+    assert.deepEqual(homeBody.data.payoutTiers, expectedPayoutTiers);
+
+    await prisma.race.update({
+      where: { id: race.id },
+      data: { endsAt: new Date(Date.now() - 60_000) },
+    });
+    await resolveExpiredRaces();
+    const completed = await req("GET", `/races/${race.id}`, {
+      token: a[0].token,
+      headers: TEAM_HEADERS,
+    });
+    const completedBody = await completed.json();
+    assert.deepEqual(completedBody.payouts, expectedPayouts);
+    assert.deepEqual(completedBody.payoutTiers, expectedPayoutTiers);
+    const completedListBody = await (await req("GET", "/races", {
+      token: a[0].token,
+      headers: TEAM_HEADERS,
+    })).json();
+    const completedListed = completedListBody.completed.find(
+      (entry) => entry.id === race.id,
+    );
+    assert.deepEqual(completedListed.payouts, expectedPayouts);
+    assert.deepEqual(completedListed.payoutTiers, expectedPayoutTiers);
+  });
+
+  it("9b: every active 2v2 surface projects the same two 40-coin team awards settlement pays", async () => {
+    // Production permanently uses the SQL summary path. Node tests retain a
+    // legacy override for protected comparator coverage, so enable the real
+    // production path explicitly for this public-contract regression.
+    await appSettings.setFlag("raceListSqlSummaryV1Enabled", true);
+    const race = await seedTeamRace({
+      durationDays: 1,
+      multBps: 10000,
+      teamSize: 2,
+      payoutRoundingVersion: 1,
+      expired: false,
+    });
+    const users = await addMembers(race, [
+      { team: "TEAM_A", steps: 9000 },
+      { team: "TEAM_A", steps: 8000 },
+      { team: "TEAM_B", steps: 3000 },
+      { team: "TEAM_B", steps: 2000 },
+    ]);
+    const expectedPayouts = { first: 40, second: 40, third: 0 };
+    const expectedPayoutTiers = [
+      { placement: 1, amount: 40 },
+      { placement: 2, amount: 40 },
+    ];
+
+    const detail = await req("GET", `/races/${race.id}`, {
+      token: users[0].token,
+      headers: TEAM_HEADERS,
+    });
+    const detailBody = await detail.json();
+    assert.equal(detailBody.prizePool.coins, 80);
+    assert.deepEqual(detailBody.payouts, expectedPayouts);
+    assert.deepEqual(detailBody.payoutTiers, expectedPayoutTiers);
+
+    const listBody = await (await req("GET", "/races", {
+      token: users[0].token,
+      headers: TEAM_HEADERS,
+    })).json();
+    const listed = listBody.active.find((entry) => entry.id === race.id);
+    assert.deepEqual(listed.payouts, expectedPayouts);
+    assert.deepEqual(listed.payoutTiers, expectedPayoutTiers);
+
+    const progressBody = (await (await req("GET", `/races/${race.id}/progress`, {
+      token: users[0].token,
+      headers: TEAM_HEADERS,
+    })).json()).progress;
+    assert.deepEqual(progressBody.payouts, expectedPayouts);
+    assert.deepEqual(progressBody.payoutTiers, expectedPayoutTiers);
+
+    const homeBody = await (await req("GET", "/home/race-card", {
+      token: users[0].token,
+      headers: TEAM_HEADERS,
+    })).json();
+    assert.deepEqual(homeBody.data.payouts, expectedPayouts);
+    assert.deepEqual(homeBody.data.payoutTiers, expectedPayoutTiers);
+
+    await prisma.race.update({
+      where: { id: race.id },
+      data: { endsAt: new Date(Date.now() - 60_000) },
+    });
+    await resolveExpiredRaces();
+    const completedBody = await (await req("GET", `/races/${race.id}`, {
+      token: users[0].token,
+      headers: TEAM_HEADERS,
+    })).json();
+    assert.deepEqual(completedBody.payouts, expectedPayouts);
+    assert.deepEqual(completedBody.payoutTiers, expectedPayoutTiers);
+    const completedListBody = await (await req("GET", "/races", {
+      token: users[0].token,
+      headers: TEAM_HEADERS,
+    })).json();
+    const completedListed = completedListBody.completed.find(
+      (entry) => entry.id === race.id,
+    );
+    assert.deepEqual(completedListed.payouts, expectedPayouts);
+    assert.deepEqual(completedListed.payoutTiers, expectedPayoutTiers);
+    assert.deepEqual(
+      (await txns(race.id, POOL_REASON)).map((row) => row.amount).sort((a, b) => a - b),
+      [40, 40],
+    );
+  });
+
+  it("9c: active v1 projection includes the exact per-recipient rounding liability", async () => {
+    await appSettings.setFlag("raceListSqlSummaryV1Enabled", true);
+    const race = await seedTeamRace({
+      durationDays: 1,
+      multBps: 10000,
+      teamSize: 2,
+      payoutRoundingVersion: 1,
+      prizePoolMaxCoins: 43,
+      expired: false,
+    });
+    const users = await addMembers(race, [
+      { team: "TEAM_A", steps: 9000 },
+      { team: "TEAM_A", steps: 8000 },
+      { team: "TEAM_B", steps: 3000 },
+      { team: "TEAM_B", steps: 2000 },
+    ]);
+    const projectedBody = await (await req("GET", `/races/${race.id}`, {
+      token: users[0].token,
+      headers: TEAM_HEADERS,
+    })).json();
+    assert.equal(projectedBody.prizePool.coins, 50, "43 raw becomes two rounded 25 awards");
+    assert.equal(projectedBody.projectedPotCoins, 50);
+    assert.deepEqual(projectedBody.payouts, { first: 25, second: 25, third: 0 });
+    assert.deepEqual(projectedBody.payoutTiers, [
+      { placement: 1, amount: 25 },
+      { placement: 2, amount: 25 },
+    ]);
+    const projectedListBody = await (await req("GET", "/races", {
+      token: users[0].token,
+      headers: TEAM_HEADERS,
+    })).json();
+    const projectedListed = projectedListBody.active.find(
+      (entry) => entry.id === race.id,
+    );
+    assert.deepEqual(projectedListed.payouts, projectedBody.payouts);
+    assert.deepEqual(projectedListed.payoutTiers, projectedBody.payoutTiers);
+
+    await prisma.race.update({
+      where: { id: race.id },
+      data: { endsAt: new Date(Date.now() - 60_000) },
+    });
+    await resolveExpiredRaces();
+    const settled = await prisma.race.findUnique({ where: { id: race.id } });
+    assert.equal(settled.prizePoolCoins, 50);
+    assert.deepEqual(settled.payoutRoundingMetadata, {
+      payoutRoundingVersion: 1,
+      rawAwardCoins: 43,
+      roundedAwardCoins: 50,
+      roundingSubsidyCoins: 7,
+      recipientCount: 2,
+      smallAwardRecipientCount: 0,
+    });
+    const settledListBody = await (await req("GET", "/races", {
+      token: users[0].token,
+      headers: TEAM_HEADERS,
+    })).json();
+    const settledListed = settledListBody.completed.find(
+      (entry) => entry.id === race.id,
+    );
+    assert.deepEqual(settledListed.payouts, projectedBody.payouts);
+    assert.deepEqual(settledListed.payoutTiers, projectedBody.payoutTiers);
+    assert.deepEqual(
+      (await txns(race.id, POOL_REASON)).map((row) => row.amount).sort((a, b) => a - b),
+      [25, 25],
+    );
   });
 
   // ── 6. tie: mint and split across BOTH teams ──────────────────────────────

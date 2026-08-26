@@ -404,7 +404,7 @@ async function resolveExpiredRaces() {
         if (participant.forfeitedAt) {
           standings.push({
             participant,
-            totalSteps: participant.totalSteps || 0,
+            totalSteps: Math.max(0, Number(participant.totalSteps) || 0),
             reachedAt: new Date(participant.forfeitedAt),
           });
           continue;
@@ -590,7 +590,7 @@ async function resolveExpiredRaces() {
           await tx.raceParticipant.update({
             where: { id: row.participant.id },
             data: {
-              totalSteps: row.totalSteps,
+              totalSteps: Math.max(0, Number(row.totalSteps) || 0),
               rawSteps: row.rawSteps,
               totalsUpdatedAt: new Date(),
             },

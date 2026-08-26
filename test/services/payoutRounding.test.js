@@ -56,7 +56,7 @@ describe("payout rounding v1 — canonical award plan", () => {
     }
   });
 
-  it("does not publish a false single v1 team projection before recipients are known", () => {
+  it("publishes the v1 team projection from acceptedCount when compact recipients are unavailable", () => {
     const money = buildRaceMoneyView({
       race: {
         status: "ACTIVE",
@@ -69,8 +69,28 @@ describe("payout rounding v1 — canonical award plan", () => {
       participants: [],
     });
 
-    assert.equal(money.projectedPotCoins, undefined);
-    assert.equal(money.prizePool, null);
+    assert.equal(money.projectedPotCoins, 80);
+    assert.equal(money.prizePool.coins, 80);
+    assert.equal(money.prizePool.projected, true);
+    assert.deepEqual(money.payouts, [80]);
+  });
+
+  it("keeps an explicit funded payout representation for a zero-player forming race", () => {
+    const money = buildRaceMoneyView({
+      race: {
+        status: "PENDING",
+        fundedPrize: true,
+        payoutRoundingVersion: PAYOUT_ROUNDING_V1,
+        isTeamRace: true,
+        maxDurationDays: 1,
+      },
+      acceptedCount: 0,
+      participants: [],
+    });
+
+    assert.equal(money.projectedPotCoins, 0);
+    assert.equal(money.prizePool.coins, 0);
+    assert.equal(money.prizePool.projected, true);
     assert.deepEqual(money.payouts, []);
   });
 });

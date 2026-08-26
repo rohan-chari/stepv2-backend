@@ -457,7 +457,7 @@ function buildRecomputePlacements(dependencies = {}) {
             teamName: team === "TEAM_A" ? race.teamAName : race.teamBName,
             endsAt: race.endsAt,
             occurredAt: new Date(new Date(race.endsAt).getTime() - SLACKER_WINDOW_MS),
-            totalSteps: p.totalSteps || 0,
+            totalSteps: Math.max(0, Number(p.totalSteps) || 0),
             teamAverage: Math.round(average),
             notificationClaimed:
               typeof notificationModel?.claimDelivery === "function",

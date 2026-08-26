@@ -674,14 +674,40 @@ async function writeParticipantsBulk(tx, writes, totalsUpdatedAt) {
          "hasRaw" boolean,
          "bonusDecrement" integer
        )
-     )
+       ), resolved AS (
+         SELECT participant.id,
+                input."totalSteps",
+                input."hasTotal",
+                input."rawSteps",
+                input."hasRaw",
+                GREATEST(
+                  0,
+                  CASE WHEN input."hasTotal"
+                    THEN input."totalSteps"
+                    ELSE participant.total_steps
+                  END
+                ) AS base_total,
+                GREATEST(0, -participant.total_steps) AS legacy_overkill,
+                LEAST(
+                  input."bonusDecrement",
+                  GREATEST(
+                    0,
+                    CASE WHEN input."hasTotal"
+                      THEN input."totalSteps"
+                      ELSE participant.total_steps
+                    END
+                  )
+                ) AS actual_penalty
+           FROM race_participants participant
+           JOIN input ON input."participantId" = participant.id
+       )
      UPDATE race_participants participant
-     SET total_steps = CASE WHEN input."hasTotal" THEN input."totalSteps" ELSE participant.total_steps END,
-         raw_steps = CASE WHEN input."hasRaw" THEN input."rawSteps" ELSE participant.raw_steps END,
-         bonus_steps = participant.bonus_steps - input."bonusDecrement",
-         totals_updated_at = CASE WHEN input."hasTotal" THEN $2 ELSE participant.totals_updated_at END
-     FROM input
-     WHERE participant.id = input."participantId"
+     SET total_steps = resolved.base_total - resolved.actual_penalty,
+         raw_steps = CASE WHEN resolved."hasRaw" THEN resolved."rawSteps" ELSE participant.raw_steps END,
+         bonus_steps = participant.bonus_steps + resolved.legacy_overkill - resolved.actual_penalty,
+         totals_updated_at = CASE WHEN resolved."hasTotal" THEN $2 ELSE participant.totals_updated_at END
+     FROM resolved
+     WHERE participant.id = resolved.id
      RETURNING participant.id`,
     JSON.stringify(rows),
     totalsUpdatedAt
@@ -1516,7 +1542,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
               await tx.raceParticipant.update({
                 where: { id: write.participantId },
                 data: {
-                  totalSteps: write.totalSteps,
+                  totalSteps: Math.max(0, write.totalSteps),
                   totalsUpdatedAt: now(),
                   // The RAW walked total (2026-08-09). Same row, same UPDATE,
                   // same fence, same ascending-userId ordering — no new writer
@@ -1531,10 +1557,26 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
                 },
               });
             } else {
-              await tx.raceParticipant.update({
-                where: { id: write.participantId },
-                data: { bonusSteps: { decrement: write.amount } },
-              });
+              await tx.$executeRaw`
+                WITH current AS (
+                  SELECT id,
+                         GREATEST(0, total_steps) AS repaired_total,
+                         GREATEST(0, -total_steps) AS overkill
+                    FROM race_participants
+                   WHERE id = ${write.participantId}
+                   FOR UPDATE
+                ), penalty AS (
+                  SELECT id, repaired_total, overkill,
+                         LEAST(${write.amount}, repaired_total) AS actual_penalty
+                    FROM current
+                )
+                UPDATE race_participants participant
+                   SET total_steps = penalty.repaired_total - penalty.actual_penalty,
+                       bonus_steps = participant.bonus_steps + penalty.overkill - penalty.actual_penalty,
+                       totals_updated_at = ${now()}
+                  FROM penalty
+                 WHERE participant.id = penalty.id
+              `;
             }
           }
         });

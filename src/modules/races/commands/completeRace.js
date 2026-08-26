@@ -44,6 +44,10 @@ const {
   payoutRoundingMetadata,
 } = require("../services/payoutRounding");
 const {
+  buildTeamPayoutPlan,
+  teamPayoutRecipients,
+} = require("../services/teamPayoutPlan");
+const {
   lockFundedExposureUsers,
 } = require("../services/fundedExposure");
 const { acquireRaceWriteFence } = require("../services/raceWriteFence");
@@ -306,7 +310,7 @@ function buildCompleteRace(dependencies = {}) {
 
       const players = accepted.map((p) => ({
         userId: p.userId,
-        totalSteps: p.totalSteps || 0,
+        totalSteps: Math.max(0, Number(p.totalSteps) || 0),
         forfeited: p.forfeitedAt != null,
         tournamentJoinedAt: tpByUser.get(p.userId)?.joinedAt || p.joinedAt,
       }));
@@ -389,33 +393,14 @@ function buildCompleteRace(dependencies = {}) {
         await participantModel.setPlacement(participant.id, placement);
       }
 
-      // The one ordering both money branches use: highest total, then earliest
-      // join, then userId. Deterministic — same inputs, same payout rows — and
-      // shared so the tie branch's "remainder to the top stepper" can never
-      // drift from the win branch's.
-      const byTopStepper = (a, b) => {
-        const stepDiff = (b.totalSteps || 0) - (a.totalSteps || 0);
-        if (stepDiff !== 0) return stepDiff;
-        const joinDiff =
-          new Date(a.joinedAt).getTime() - new Date(b.joinedAt).getTime();
-        if (joinDiff !== 0) return joinDiff;
-        return (a.userId || "").localeCompare(b.userId || "");
-      };
-
-      // floor(prize / n) to each recipient, the remainder to recipients[0]
-      // (already sorted by byTopStepper), so the whole pool is always paid out
-      // and nothing is minted twice.
-      const splitEvenly = async (recipients, prize, payFn) => {
+      // The shared planner owns recipient ordering, even splitting, remainder
+      // assignment, and payout-v1 rounding for both projection and settlement.
+      const payTeamPayout = async (recipients, prize, payFn) => {
         if (recipients.length === 0 || prize <= 0) return;
-        const share = Math.floor(prize / recipients.length);
-        const remainder = prize - share * recipients.length;
-        const plan = buildPayoutPlan({
+        const plan = buildTeamPayoutPlan({
+          recipients,
+          prizeCoins: prize,
           payoutRoundingVersion: race.payoutRoundingVersion,
-          awards: recipients.map((recipient, index) => ({
-            recipientId: recipient.id,
-            placement: 1,
-            rawAwardCoins: share + (index === 0 ? remainder : 0),
-          })),
         });
         for (let index = 0; index < recipients.length; index++) {
           const award = plan.awards[index];
@@ -476,10 +461,11 @@ function buildCompleteRace(dependencies = {}) {
             participants: accepted,
             isTeamRace: true,
           });
-          const sharers = accepted
-            .filter((p) => !p.forfeitedAt)
-            .sort(byTopStepper);
-          const plan = await splitEvenly(sharers, prize, payoutRacePrizePool);
+          const sharers = teamPayoutRecipients({
+            participants: accepted,
+            tie: true,
+          });
+          const plan = await payTeamPayout(sharers, prize, payoutRacePrizePool);
           await raceModel.update(raceId, {
             prizePoolCoins: plan?.totals.awardCoins ?? prize,
             potCoins: plan?.totals.awardCoins ?? prize,
@@ -496,9 +482,10 @@ function buildCompleteRace(dependencies = {}) {
         // pot. Deterministic: same inputs, same payout rows. TR-507 guarantees
         // winners >= 1 (a full-team forfeit collapses in the OTHER team's
         // favor before any settlement can crown this one).
-        const winners = accepted
-          .filter((p) => p.team === winnerTeam && !p.forfeitedAt)
-          .sort(byTopStepper);
+        const winners = teamPayoutRecipients({
+          participants: accepted,
+          winnerTeam,
+        });
 
         // Funded team race: the prize is MINTED from the settled field instead of
         // being a committed pot. Mutually exclusive with the pot — fundedPrize on
@@ -513,7 +500,7 @@ function buildCompleteRace(dependencies = {}) {
             })
           : race.potCoins;
 
-        const plan = await splitEvenly(
+        const plan = await payTeamPayout(
           winners,
           prize,
           funded ? payoutRacePrizePool : payoutRaceCoins

@@ -35,6 +35,10 @@ const { computeGlobalEventBoost } = require("../../steps/globalStepEvent");
 const { eventsForUser } = require("../../steps/services/globalStepEventEntitlement");
 const { computeBoxEffectiveSteps } = require("../../powerups/boxSteps");
 const { raceTimeZone } = require("../raceTimeZone");
+const {
+  buildRaceMoneyView,
+  serializePayouts,
+} = require("../racePrizePool");
 // Canonical team H2H block — shared with the list/browser/home surfaces so all
 // of them emit an identical shape (TR-401/806/809).
 const { buildTeamsBlock } = require("../teamRaces");
@@ -316,6 +320,21 @@ function buildGetRaceProgress(deps = {}) {
   const presentationCache =
     deps.userPresentationCache || userPresentationCache;
 
+  function buildProgressMoney(race) {
+    const participants = race?.participants || [];
+    const acceptedCount = participants.filter(
+      (participant) => participant.status === "ACCEPTED",
+    ).length;
+    const money = buildRaceMoneyView({ race, participants, acceptedCount });
+    const { payouts, payoutTiers } = serializePayouts(money.payouts);
+    return {
+      prizePool: money.prizePool,
+      projectedPotCoins: money.projectedPotCoins,
+      payouts,
+      payoutTiers,
+    };
+  }
+
   async function displayArtifactReuseEnabled() {
     if (deps.raceResolutionDisplayArtifactReuseV1Enabled != null) {
       return deps.raceResolutionDisplayArtifactReuseV1Enabled === true;
@@ -530,14 +549,17 @@ function buildGetRaceProgress(deps = {}) {
           return {
             participant,
             frozen: true,
-            totalSteps: participant.totalSteps || 0,
+            totalSteps: Math.max(0, Number(participant.totalSteps) || 0),
           };
         }
         if (participant.finishedAt) {
           return {
             participant,
             frozen: true,
-            totalSteps: participant.finishTotalSteps ?? participant.totalSteps,
+            totalSteps: Math.max(
+              0,
+              Number(participant.finishTotalSteps ?? participant.totalSteps) || 0,
+            ),
           };
         }
 
@@ -618,7 +640,10 @@ function buildGetRaceProgress(deps = {}) {
 
     const stepTotals = preLeech.map((e) => {
       if (e.frozen) {
-        return { participant: e.participant, totalSteps: e.totalSteps };
+        return {
+          participant: e.participant,
+          totalSteps: Math.max(0, Number(e.totalSteps) || 0),
+        };
       }
       return {
         participant: e.participant,
@@ -802,7 +827,7 @@ function buildGetRaceProgress(deps = {}) {
     );
     const stepTotals = capture.stepTotals.map((row) => ({
       participant: participantById.get(row.participantId),
-      totalSteps: row.totalSteps,
+      totalSteps: Math.max(0, Number(row.totalSteps) || 0),
     }));
     if (stepTotals.some((row) => !row.participant)) return null;
     const placementByUserId = placementsByUserId(
@@ -1123,7 +1148,7 @@ function buildGetRaceProgress(deps = {}) {
             const placementByUserId = placementsByUserId(
               entries.map((entry) => ({
                 userId: entry.userId,
-                totalSteps: entry.totalSteps,
+                totalSteps: Math.max(0, Number(entry.totalSteps) || 0),
                 finishedAt: entry.finishedAt,
                 placement: entry.placement,
                 joinedAt: entry.joinedAt,
@@ -1422,7 +1447,9 @@ function buildGetRaceProgress(deps = {}) {
                 supportsCharacters,
                 supportsRemoteAssets
               )),
-          totalSteps: isStealthed ? null : entry.totalSteps,
+          totalSteps: isStealthed
+            ? null
+            : Math.max(0, Number(entry.totalSteps) || 0),
           finishedAt: entry.finishedAt,
           stealthed: isStealthed,
           // A stealthed rival's steps are nulled, so their rank must be too.
@@ -1495,7 +1522,7 @@ function buildGetRaceProgress(deps = {}) {
         // roll builds its exclusion predicates from.
         stepTotals: viewerEntries.map((e) => ({
           participant: { userId: e.userId, team: e.team ?? null },
-          totalSteps: e.totalSteps,
+          totalSteps: Math.max(0, Number(e.totalSteps) || 0),
         })),
         // Position input: the PERSISTED rows, which is what the roll ranks on.
         persistedParticipants: (race._projectionParticipants || race.participants).filter(
@@ -1798,6 +1825,7 @@ function buildGetRaceProgress(deps = {}) {
 
     if (race.status !== "ACTIVE") {
       const acceptedParticipants = race.participants.filter((p) => p.status === "ACCEPTED");
+      const progressMoney = buildProgressMoney(race);
       const nonActiveResult = {
         raceId: race.id,
         status: race.status,
@@ -1814,12 +1842,13 @@ function buildGetRaceProgress(deps = {}) {
             releaseChannel,
             supportsRemoteAssets
           ),
-          totalSteps: p.totalSteps,
+          totalSteps: Math.max(0, Number(p.totalSteps) || 0),
           finishedAt: p.finishedAt,
           // Team races (additive; null on individual races).
           team: p.team ?? null,
           forfeitedAt: p.forfeitedAt ?? null,
         })),
+        ...progressMoney,
         ...tournamentFields(race),
       };
       // Team block for the lobby (PENDING sides) and results (COMPLETED
@@ -1827,7 +1856,7 @@ function buildGetRaceProgress(deps = {}) {
       if (race.isTeamRace) {
         nonActiveResult.teams = buildTeamsBlock(race, acceptedParticipants.map((p) => ({
           participant: p,
-          totalSteps: p.totalSteps || 0,
+          totalSteps: Math.max(0, Number(p.totalSteps) || 0),
         })));
         nonActiveResult.winnerTeam = race.winnerTeam ?? null;
         nonActiveResult.isTeamRace = true;
@@ -1889,7 +1918,7 @@ function buildGetRaceProgress(deps = {}) {
         projectionRows = persisted.map((row) => ({
           participantId: row.participantId,
           userId: row.userId,
-          totalSteps: Number(row.totalSteps || 0),
+          totalSteps: Math.max(0, Number(row.totalSteps || 0)),
           finishedAt: row.finishedAt,
           forfeitedAt: row.forfeitedAt,
           team: row.team,
@@ -1926,7 +1955,7 @@ function buildGetRaceProgress(deps = {}) {
           projectionRequesterEntry = {
             participantId: viewer.participantId || viewer.id,
             userId,
-            totalSteps: Number(viewer.totalSteps || 0),
+            totalSteps: Math.max(0, Number(viewer.totalSteps || 0)),
             finishedAt: viewer.finishedAt ?? null,
             forfeitedAt: viewer.forfeitedAt ?? null,
             team: viewer.team ?? null,
@@ -2223,7 +2252,15 @@ function buildGetRaceProgress(deps = {}) {
     if (participantsView === "participants-v1" && !projectionMetadata) {
       projectionMetadata = { projectionSource: "legacy" };
     }
-    return buildViewerResponse({
+    let moneyRace = race;
+    if (
+      pageScopedContext &&
+      typeof raceModel.findProgressMoneyContext === "function"
+    ) {
+      moneyRace = (await raceModel.findProgressMoneyContext(raceId)) || race;
+    }
+    const progressMoney = buildProgressMoney(moneyRace);
+    const response = await buildViewerResponse({
       snapshot,
       race,
       raceId,
@@ -2252,6 +2289,7 @@ function buildGetRaceProgress(deps = {}) {
       projectionPagination,
       projectionMetadata,
     });
+    return { ...response, ...progressMoney };
   };
 
   // C3 — the OTHER caller of the one allowlist builder (spec §5 Phase D item 4

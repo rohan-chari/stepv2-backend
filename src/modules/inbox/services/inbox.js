@@ -6,6 +6,7 @@ const RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const DESTINATION_ROUTES = new Set([
   "home", "dailyReward", "friends", "races", "inbox", "profile",
   "raceDetail", "tournamentDetail", "supportThread",
+  "raceJoinRequest",
 ]);
 
 function expiryFrom(now = new Date()) {
@@ -21,7 +22,9 @@ function validateDestination(destination) {
   }
   // Prevent arbitrary data becoming an app navigation instruction. Existing
   // route IDs are opaque strings and all other arbitrary JSON is rejected.
-  const allowed = new Set(["route", "raceId", "tournamentId", "threadId"]);
+  const allowed = new Set([
+    "route", "raceId", "tournamentId", "threadId", "requestId", "status",
+  ]);
   for (const [key, value] of Object.entries(destination)) {
     if (!allowed.has(key) || (key !== "route" && (typeof value !== "string" || !value))) {
       throw new TypeError("Inbox destination is invalid");
@@ -30,7 +33,8 @@ function validateDestination(destination) {
   if (destination.route === "raceDetail" && typeof destination.raceId !== "string") {
     throw new TypeError("Inbox race destination requires raceId");
   }
-  if (destination.route !== "raceDetail" && "raceId" in destination) {
+  if (!["raceDetail", "raceJoinRequest"].includes(destination.route) &&
+      "raceId" in destination) {
     throw new TypeError("Inbox destination is invalid");
   }
   if (destination.route === "tournamentDetail" && typeof destination.tournamentId !== "string") {
@@ -43,6 +47,20 @@ function validateDestination(destination) {
     throw new TypeError("Inbox support-thread destination requires threadId");
   }
   if (destination.route !== "supportThread" && "threadId" in destination) {
+    throw new TypeError("Inbox destination is invalid");
+  }
+  if (destination.route === "raceJoinRequest" &&
+      (typeof destination.raceId !== "string" ||
+       typeof destination.requestId !== "string")) {
+    throw new TypeError("Inbox race-join-request destination is invalid");
+  }
+  if (!["raceJoinRequest", "raceDetail"].includes(destination.route) &&
+      "requestId" in destination) {
+    throw new TypeError("Inbox destination is invalid");
+  }
+  if ("status" in destination &&
+      (destination.route !== "raceDetail" ||
+       !["ACCEPTED", "DECLINED"].includes(destination.status))) {
     throw new TypeError("Inbox destination is invalid");
   }
   return destination;

@@ -41,7 +41,8 @@
     "perf:benchmark": "node scripts/perf/benchmark.js",
     "capacity": "node scripts/capacity.js",
     "capacity:db": "node scripts/capacity-db.js",
-    "load-test": "node scripts/load-test.js"
+    "load-test": "node scripts/load-test.js",
+    "cohort:repair": "node scripts/repair-signup-seeded-cohort.js"
   },
   "prisma": {
     "seed": "node prisma/seed.js"

@@ -52,6 +52,7 @@ const {
   scheduleRaceResolutionWorkerV2,
   scheduleRaceResolutionPostTaskRunner,
   scheduleResolvedImpactBoundaryScheduler,
+  scheduleRaceAdminCommandRunner,
 } = require("./modules/races");
 const {
   scheduleRacePayoutDoubleReconcile,
@@ -112,6 +113,8 @@ function startServer({
     scheduleResolutionPostTasks = scheduleRaceResolutionPostTaskRunner,
   scheduleResolvedImpactBoundaries:
     scheduleImpactBoundaries = scheduleResolvedImpactBoundaryScheduler,
+  scheduleRaceAdminCommands:
+    scheduleAdminCommands = scheduleRaceAdminCommandRunner,
   scheduleRacePayoutDoubleReconcile:
     schedulePayoutDoubleReconcile = scheduleRacePayoutDoubleReconcile,
   logger = console,
@@ -144,6 +147,7 @@ function startServer({
       if (processRole === "http") return;
       if (processRole === "resolution") {
         scheduleRaceResolution();
+        scheduleAdminCommands();
         scheduleImpactBoundaries();
         if (!raceResolutionPostTaskWorkerDisabled()) {
           scheduleResolutionPostTasks();
@@ -152,6 +156,7 @@ function startServer({
       }
       if (capacityHttpResolutionOnly) {
         scheduleRaceResolution();
+        scheduleAdminCommands();
         scheduleResolutionPostTasks();
         return;
       }
@@ -240,6 +245,7 @@ function startServer({
       // injected startup logger.
       if (processRole !== "cron") {
         scheduleRaceResolution();
+        scheduleAdminCommands();
         scheduleImpactBoundaries();
       }
       // Delivery/publication groups are durable and drain independently of the

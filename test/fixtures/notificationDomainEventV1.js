@@ -11,6 +11,7 @@ const rows = [
   ["RACE_STARTED_V1", "RACE_STARTED", { raceId: "race-1" }, {}, "visible:RACE_STARTED:user-1:race-1"],
   ["RACE_ENDING_SOON_V1", "RACE_ENDING_SOON", { raceId: "race-1" }, {}, "visible:RACE_ENDING_SOON:user-1:race-1"],
   ["DAILY_REWARD_REMINDER_V1", "DAILY_REWARD_REMINDER", { userId: "user-1", localDate: "2026-08-25", slot: 17 }, {}, "visible:DAILY_REWARD_REMINDER_17:user-1:user-1:2026-08-25:17"],
+  ["UNCLAIMED_REWARD_REMINDER_V1", null, { userId: "user-1", localDate: "2026-08-25", slot: 17, rewardType: "DAILY_REWARD" }, {}, "visible:UNCLAIMED_REWARD:user-1:user-1:2026-08-25"],
   ["STEP_MILESTONE_REMINDER_V1", "STEP_MILESTONE_REMINDER", { userId: "user-1", localDate: "2026-08-25" }, {}, "visible:STEP_MILESTONE_REMINDER:user-1:user-1:2026-08-25"],
   ["RACE_COMPLETED_V1", "RACE_COMPLETED", { raceId: "race-1" }, {}, "visible:RACE_COMPLETED:user-1:race-1"],
   ["TEAM_LEAD_CHANGED_V1", "TEAM_LEAD_CHANGED", { transitionId: "team-lead:race-1:A->B:1" }, {}, "visible:TEAM_LEAD_CHANGE:user-1:team-lead:race-1:A->B:1"],
@@ -45,6 +46,7 @@ const COPY = {
   RACE_STARTED_V1: ["Race Started", "The race \"Fixture race\" has started! Go!", "RACE_STARTED", "race_detail"],
   RACE_ENDING_SOON_V1: ["Race ending soon", "Fixture race ends in about 2 hours. Time for a final push.", "RACE_ENDING_SOON", "race_detail"],
   DAILY_REWARD_REMINDER_V1: ["Your daily box is waiting", "Your mystery box has been sitting here all day. Awkward.", "DAILY_REWARD_REMINDER_17", "daily_reward"],
+  UNCLAIMED_REWARD_REMINDER_V1: ["Your daily reward is waiting", "Claim today's reward before midnight.", "UNCLAIMED_REWARD", "daily_reward"],
   STEP_MILESTONE_REMINDER_V1: ["Coins waiting! 🪙", "You crossed a step milestone today. Collect your coins before midnight.", "STEP_MILESTONE_REMINDER", "home"],
   RACE_COMPLETED_V1: ["Race Finished", "Actor won the race!", "RACE_COMPLETED", "race_detail"],
   TEAM_LEAD_CHANGED_V1: ["Team lead change!", "A just took the lead over B in Fixture race!", "TEAM_LEAD_CHANGE", "race_detail"],
@@ -123,8 +125,14 @@ function expectedPayload(eventType, publicType, route) {
   const payload = { type: publicType, route };
   if (route === "race_detail") payload.params = { raceId: "race-1" };
   if (route === "tournament_detail") payload.params = { tournamentId: "tournament-1" };
-  if (["DAILY_REWARD_REMINDER_V1", "STEP_MILESTONE_REMINDER_V1"].includes(eventType)) {
+  if (["DAILY_REWARD_REMINDER_V1", "UNCLAIMED_REWARD_REMINDER_V1", "STEP_MILESTONE_REMINDER_V1"].includes(eventType)) {
     payload.params = {};
+  }
+  if (eventType === "UNCLAIMED_REWARD_REMINDER_V1") {
+    Object.assign(payload, {
+      rewardType: "DAILY_REWARD",
+      destination: "DAILY_REWARD",
+    });
   }
   if (eventType === "GLOBAL_STEP_EVENT_ACTIVATED_V1") {
     payload.eventId = "event-1";

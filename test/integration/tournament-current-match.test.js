@@ -128,6 +128,10 @@ describe("tournament myCurrentMatch — integration", () => {
     );
     const { progress } = await progressRes.json();
     assert.equal(progress.powerupData.queuedBoxCount, match.queuedBoxCount);
+    assert.deepEqual(match.prizePool, progress.prizePool);
+    assert.equal(match.projectedPotCoins, progress.projectedPotCoins);
+    assert.deepEqual(match.payouts, progress.payouts);
+    assert.deepEqual(match.payoutTiers, progress.payoutTiers);
     assert.deepEqual(
       progress.powerupData.inventory.map((i) => i.id).sort(),
       match.slotItems.map((i) => i.id).sort(),

@@ -32,6 +32,7 @@ const crypto = require("node:crypto");
 // test/integration/race-queue-v2-single-writer.test.js are the guard.
 function createWriteCapture({ participantModel, effectModel, eventModel }) {
   const writes = [];
+  const capturedTotals = new Map();
   return {
     writes,
     participants: {
@@ -42,6 +43,7 @@ function createWriteCapture({ participantModel, effectModel, eventModel }) {
       // read-only guarantee, and the v2 worker is the PROD writer — miss it and
       // `raw_steps` stays NULL forever in production.
       async updateStepTotals(id, { totalSteps, rawSteps } = {}) {
+        capturedTotals.set(id, Math.max(0, Math.round(Number(totalSteps) || 0)));
         writes.push({
           kind: "participantTotal",
           participantId: id,
@@ -51,12 +53,23 @@ function createWriteCapture({ participantModel, effectModel, eventModel }) {
         return { id, totalSteps, rawSteps };
       },
       async updateTotalSteps(id, totalSteps) {
+        capturedTotals.set(id, Math.max(0, Math.round(Number(totalSteps) || 0)));
         writes.push({ kind: "participantTotal", participantId: id, totalSteps });
         return { id, totalSteps };
       },
       async subtractBonusSteps(id, amount) {
-        writes.push({ kind: "participantBonus", participantId: id, amount });
-        return { id };
+        const nominal = Math.max(0, Math.round(Number(amount) || 0));
+        const available = capturedTotals.has(id)
+          ? capturedTotals.get(id)
+          : nominal;
+        const actualPenalty = Math.min(nominal, available);
+        capturedTotals.set(id, Math.max(0, available - actualPenalty));
+        writes.push({
+          kind: "participantBonus",
+          participantId: id,
+          amount: actualPenalty,
+        });
+        return { id, actualPenalty };
       },
     },
     effects: {

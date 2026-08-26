@@ -795,13 +795,16 @@ describe("notification domain isolation", () => {
         logger: quietLogger,
       })();
       const events = await prisma.domainEventOutbox.findMany({
-        where: { eventType: { in: ["DAILY_REWARD_REMINDER_V1", "STEP_MILESTONE_REMINDER_V1"] } },
+        where: { eventType: { in: ["UNCLAIMED_REWARD_REMINDER_V1", "STEP_MILESTONE_REMINDER_V1"] } },
       });
       assert.deepEqual(events.map((row) => row.eventType).sort(), [
-        "DAILY_REWARD_REMINDER_V1",
         "STEP_MILESTONE_REMINDER_V1",
+        "UNCLAIMED_REWARD_REMINDER_V1",
       ]);
-      await buildDomainEventProjectionJob({ logger: quietLogger })();
+      await buildDomainEventProjectionJob({
+        logger: quietLogger,
+        now: () => new Date("2026-08-25T23:15:00.000Z"),
+      })();
       assert.equal(await prisma.inboxAlert.count({ where: { userId: user.user.id } }), 2);
     } finally {
       if (previousRedisUrl === undefined) delete process.env.REDIS_URL;
@@ -845,7 +848,10 @@ describe("notification domain isolation", () => {
     });
     assert.equal(removed.status, 204);
 
-    const project = buildDomainEventProjectionJob({ logger: quietLogger });
+    const project = buildDomainEventProjectionJob({
+      logger: quietLogger,
+      now: () => current,
+    });
     await project();
     const projections = await prisma.domainEventNotificationProjection.findMany({
       where: { event: { eventType: "DAILY_MOVER_V1" } },
@@ -917,7 +923,7 @@ describe("notification domain isolation", () => {
 
     await exercise({
       build: buildDailyRewardReminder,
-      eventType: "DAILY_REWARD_REMINDER_V1",
+      eventType: "UNCLAIMED_REWARD_REMINDER_V1",
       firstNow: new Date("2026-08-25T21:15:00.000Z"),
       retryNow: new Date("2026-08-25T21:20:00.000Z"),
       userMethod: "findRemindableInZones",
@@ -928,6 +934,62 @@ describe("notification domain isolation", () => {
       firstNow: new Date("2026-08-25T23:15:00.000Z"),
       retryNow: new Date("2026-08-25T23:20:00.000Z"),
       userMethod: "findStepMilestoneRemindable",
+    });
+  });
+
+  it("projects missing-copy mystery-box reminders with race fallback copy and destination", async () => {
+    const recipient = await createTestUser({ displayName: "Mystery Reminder Recipient" });
+    const creator = await createTestUser({ displayName: "Mystery Reminder Creator" });
+    const race = await prisma.race.create({
+      data: {
+        name: "Reminder Race",
+        creatorId: creator.user.id,
+        targetSteps: 10_000,
+        maxDurationDays: 1,
+        status: "ACTIVE",
+        startedAt: new Date(),
+        endsAt: new Date(Date.now() + 60 * 60_000),
+      },
+    });
+    const occurredAt = new Date();
+    await appendDomainEvent(prisma, {
+      eventKey: `UNCLAIMED_REWARD_REMINDER_V1:mystery-fallback:${recipient.user.id}`,
+      eventType: "UNCLAIMED_REWARD_REMINDER_V1",
+      schemaVersion: 1,
+      aggregateType: "USER",
+      aggregateId: recipient.user.id,
+      occurredAt,
+      payload: {
+        userId: recipient.user.id,
+        localDate: "2026-08-25",
+        rewardType: "MYSTERY_BOX",
+        raceId: race.id,
+      },
+      audience: [{ recipientId: recipient.user.id, facts: {} }],
+    });
+
+    const project = buildDomainEventProjectionJob({ logger: quietLogger });
+    await project();
+    const alert = await prisma.inboxAlert.findFirstOrThrow({
+      where: { userId: recipient.user.id, type: "UNCLAIMED_REWARD" },
+      include: { outbox: true },
+    });
+    assert.equal(alert.title, "Your mystery box is waiting");
+    assert.equal(alert.body, "Open it before your race ends.");
+    assert.deepEqual(alert.destination, { route: "raceDetail", raceId: race.id });
+    assert.equal(alert.outbox.length, 1);
+    assert.deepEqual(alert.outbox[0].payload, {
+      title: "Your mystery box is waiting",
+      body: "Open it before your race ends.",
+      payload: {
+        type: "UNCLAIMED_REWARD",
+        rewardType: "MYSTERY_BOX",
+        destination: "RACE",
+        raceId: race.id,
+        route: "race_detail",
+        params: { raceId: race.id },
+      },
+      destination: { route: "raceDetail", raceId: race.id },
     });
   });
 

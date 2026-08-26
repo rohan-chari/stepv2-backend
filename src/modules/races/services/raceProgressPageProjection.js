@@ -38,7 +38,9 @@ function normalizeRow(row, sourceParticipant = null) {
   return {
     participantId: row.participantId,
     userId: row.userId,
-    totalSteps: Number.isFinite(Number(row.totalSteps)) ? Number(row.totalSteps) : 0,
+    totalSteps: Number.isFinite(Number(row.totalSteps))
+      ? Math.max(0, Number(row.totalSteps))
+      : 0,
     finishedAt: row.finishedAt ?? null,
     forfeitedAt: row.forfeitedAt ?? null,
     team: row.team ?? null,

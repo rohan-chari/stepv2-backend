@@ -348,7 +348,7 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
           releaseChannel,
           supportsRemoteAssets
         ),
-        totalSteps: row.totalSteps,
+        totalSteps: Math.max(0, Number(row.totalSteps) || 0),
         placement: row.placement,
         payoutCoins: row.payoutCoins,
       });
@@ -361,7 +361,14 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
     const acceptedCount = race._listSummary?.acceptedCount ??
       race.participants.filter((p) => p.status === "ACCEPTED").length;
     // Legacy buy-in pot OR app-funded prize pool (race.fundedPrize decides).
-    const money = buildRaceMoneyView({ race, acceptedCount });
+    const money = buildRaceMoneyView({
+      race,
+      acceptedCount,
+      teamPayoutRecipientCount:
+        race._listSummary?.teamPayoutRecipientCount ?? null,
+      completedTeamPayouts:
+        race._listSummary?.completedPayouts ?? null,
+    });
     const { payouts: legacyPayouts, payoutTiers } = serializePayouts(money.payouts);
     let myPlacement =
       race.status === "COMPLETED"

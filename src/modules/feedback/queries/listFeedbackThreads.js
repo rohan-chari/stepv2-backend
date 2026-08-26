@@ -39,6 +39,11 @@ async function listFeedbackThreads({
       suggestionId: thread.suggestionId,
       preview: thread.messages[0]?.text || "",
       lastMessageAt: thread.lastMessageAt,
+      createdAt: thread.createdAt,
+      lastStaffReplyAt: thread.lastStaffReplyAt ?? null,
+      hasUnreadStaffReply:
+        thread.lastStaffReplyAt != null &&
+        (thread.userReadAt == null || thread.userReadAt < thread.lastStaffReplyAt),
       userUnread: thread.staffReadAt == null,
       displayName: thread.user?.displayName ?? null,
     })),

@@ -5,6 +5,9 @@ const {
   assertFound,
   reuseOrMintShareToken,
 } = require("../../../shared/competition/lifecycle");
+const { RaceShareLink } = require("../models/raceShareLink");
+
+const CAPABLE_LINK_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 class RaceShareLinkError extends Error {
   constructor(message, statusCode, code) {
@@ -25,9 +28,10 @@ class RaceShareLinkError extends Error {
 // reusing it leaks nothing the first link didn't already.
 function buildCreateRaceShareLink(dependencies = {}) {
   const raceModel = dependencies.Race || Race;
+  const raceShareLinkModel = dependencies.RaceShareLink || RaceShareLink;
   const mintToken = dependencies.generateShareToken || generateShareToken;
 
-  return async function createRaceShareLink({ userId, raceId }) {
+  return async function createRaceShareLink({ userId, raceId, clientFeatures = null, now = new Date() }) {
     const race = assertFound(
       await raceModel.findById(raceId),
       () => new RaceShareLinkError("Race not found", 404)
@@ -49,6 +53,28 @@ function buildCreateRaceShareLink(dependencies = {}) {
       () => new RaceShareLinkError("Only a participant can share this race", 403)
     );
 
+    const supportsApproval =
+      clientFeatures?.has?.("privatejoinapproval") === true;
+    if (supportsApproval && race.isPublic !== true) {
+      const rawToken = mintToken();
+      const sharer = race.participants.find(
+        (participant) => participant.userId === userId,
+      );
+      const expiresAt = new Date(now.getTime() + CAPABLE_LINK_TTL_MS);
+      await raceShareLinkModel.create({
+        raceId,
+        sharedByUserId: userId,
+        sharedByDisplayName: sharer?.user?.displayName ?? null,
+        rawToken,
+        expiresAt,
+      });
+      return {
+        shareToken: rawToken,
+        approvalRequired: true,
+        expiresAt,
+      };
+    }
+
     return reuseOrMintShareToken({
       entity: race,
       mintToken,
@@ -63,4 +89,5 @@ module.exports = {
   buildCreateRaceShareLink,
   createRaceShareLink,
   RaceShareLinkError,
+  CAPABLE_LINK_TTL_MS,
 };

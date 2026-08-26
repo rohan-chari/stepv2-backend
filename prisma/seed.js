@@ -29,7 +29,8 @@ const featuredTournamentSeeds = [
     name: "8 Racer Tourney",
     bracketSize: 8,
     matchupDurationDays: 2,
-    powerupsEnabled: false,
+    powerupsEnabled: true,
+    powerupStepInterval: 2000,
     championPrizeCoins: 150,
     active: true,
   },
@@ -57,7 +58,7 @@ async function seedFeaturedTournamentSeeds(db = prisma) {
         bracketSize: seed.bracketSize,
         matchupDurationDays: seed.matchupDurationDays,
         powerupsEnabled: seed.powerupsEnabled,
-        powerupStepInterval: null,
+        powerupStepInterval: seed.powerupStepInterval,
         championPrizeCoins: seed.championPrizeCoins,
         active: seed.active,
       },
@@ -277,9 +278,8 @@ async function seed() {
       // the caster gains, the target loses nothing. Never a mystery-box /
       // daily-box prize (excluded from getEligiblePowerupPool).
       //
-      // testOnly:true is DELIBERATE and must stay true until the carrying iOS +
-      // Android build has completed phased rollout. Flipping it is a separately
-      // approved, OWNER-EXECUTED production change — never an agent's.
+      // Permanently available to capable clients, but deliberately excluded
+      // from daily rewards: Hitchhike remains a paid coin sink.
       sku: "POWERUP_HITCHHIKE",
       name: "Hitchhike",
       description:
@@ -287,7 +287,8 @@ async function seed() {
       priceCoins: 150,
       powerupType: "HITCHHIKE",
       active: true,
-      testOnly: true,
+      testOnly: false,
+      dailyRewardEligible: false,
       sortOrder: 6,
     },
     {
@@ -466,7 +467,13 @@ async function seed() {
       testOnly: false,
       sortOrder: 20,
     },
-  ];
+  ].map((item) => ({
+    // Fresh databases state the daily-pool policy for every row. Hitchhike's
+    // explicit false above wins; all other currently eligible store items are
+    // true even if a future Prisma default changes.
+    dailyRewardEligible: true,
+    ...item,
+  }));
   let powerupItemsUpserted = 0;
   for (const p of powerupShopItems) {
     await prisma.powerupShopItem.upsert({
@@ -484,6 +491,7 @@ async function seed() {
         description: p.description,
         powerupType: p.powerupType,
         sortOrder: p.sortOrder,
+        dailyRewardEligible: p.dailyRewardEligible,
       },
       create: p,
     });

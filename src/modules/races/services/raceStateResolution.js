@@ -607,13 +607,20 @@ async function triggerTrailMines({
       victim.participant.id,
       "COMPRESSION_SOCKS"
     );
-    const penalty = Math.round(victim.totalSteps * penaltyPercent);
+    const nominalPenalty = Math.round(victim.totalSteps * penaltyPercent);
+    let actualPenalty = 0;
 
     if (shield) {
       await raceActiveEffectModel.update(shield.id, { status: "BLOCKED" });
-    } else if (penalty > 0) {
-      await participantModel.subtractBonusSteps(victim.participant.id, penalty);
-      victim.totalSteps = Math.max(0, victim.totalSteps - penalty);
+    } else if (nominalPenalty > 0) {
+      const applied = await participantModel.subtractBonusSteps(
+        victim.participant.id,
+        nominalPenalty,
+      );
+      actualPenalty = Number.isFinite(Number(applied?.actualPenalty))
+        ? Math.max(0, Number(applied.actualPenalty))
+        : nominalPenalty;
+      victim.totalSteps = Math.max(0, victim.totalSteps - actualPenalty);
     }
 
     await raceActiveEffectModel.update(mine.id, {
@@ -627,10 +634,10 @@ async function triggerTrailMines({
       targetUserId: victim.participant.userId,
       description: shield
         ? `${victim.participant.user?.displayName || "A runner"} blocked a Trail Mine with Compression Socks!`
-        : `${victim.participant.user?.displayName || "A runner"} triggered a Trail Mine and lost ${penalty.toLocaleString()} steps.`,
+        : `${victim.participant.user?.displayName || "A runner"} triggered a Trail Mine and lost ${actualPenalty.toLocaleString()} steps.`,
       metadata: {
         mineId: mine.id,
-        penalty,
+        penalty: actualPenalty,
         penaltyPercent,
         positionSteps,
         blocked: Boolean(shield),
@@ -640,7 +647,7 @@ async function triggerTrailMines({
       effectId: mine.id,
       userId: victim.participant.userId,
       powerupType: "TRAIL_MINE",
-      deltaSteps: shield ? 0 : -penalty,
+      deltaSteps: shield ? 0 : -actualPenalty,
       resolvedAt,
       sourceFeedEventId: sourceFeedEvent?.id || null,
     });
@@ -703,12 +710,19 @@ async function judgeDrillSergeantEffects({
             Math.round(Number(target.totalSteps) || 0),
             Math.round(Number(target.participant?.totalSteps) || 0)
           );
-      const actualPenalty = Math.max(
+      const nominalPenalty = Math.max(
         0,
         Math.min(configuredPenalty, availableSteps)
       );
-      if (actualPenalty > 0) {
-        await participantModel.subtractBonusSteps(effect.targetParticipantId, actualPenalty);
+      let actualPenalty = 0;
+      if (nominalPenalty > 0) {
+        const applied = await participantModel.subtractBonusSteps(
+          effect.targetParticipantId,
+          nominalPenalty,
+        );
+        actualPenalty = Number.isFinite(Number(applied?.actualPenalty))
+          ? Math.max(0, Number(applied.actualPenalty))
+          : nominalPenalty;
         target.totalSteps = Math.max(0, target.totalSteps - actualPenalty);
       }
       deltaSteps = -actualPenalty;
@@ -1423,7 +1437,7 @@ function buildResolveRaceState(dependencies = {}) {
             preLeech[index] = {
               participant,
               frozen: true,
-              totalSteps: participant.totalSteps || 0,
+              totalSteps: Math.max(0, Number(participant.totalSteps) || 0),
             };
             return;
           }
@@ -1571,7 +1585,7 @@ function buildResolveRaceState(dependencies = {}) {
           if (e.frozen) {
             stepTotals[index] = {
               participant: e.participant,
-              totalSteps: e.totalSteps,
+              totalSteps: Math.max(0, Number(e.totalSteps) || 0),
               hasSampleData: false,
             };
             continue;

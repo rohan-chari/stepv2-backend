@@ -15,7 +15,13 @@ const ROWS = [
   ["RACE_SCHEDULED_TEAMS_UNEVEN_V1", "RACE_SCHEDULED_TEAMS_UNEVEN", "races/jobs/autoStartScheduledRaces", "RACE"],
   ["RACE_STARTED_V1", "RACE_STARTED", "races/commands/startRace", "RACE"],
   ["RACE_ENDING_SOON_V1", "RACE_ENDING_SOON", "races/jobs/placementRecompute", "RACE"],
-  ["DAILY_REWARD_REMINDER_V1", "DAILY_REWARD_REMINDER", "notifications/dailyRewardReminder", "USER"],
+  // Producer retired in favor of UNCLAIMED_REWARD_REMINDER_V1. Keep this row
+  // replay-only so durable events written by an older worker can still finish.
+  ["DAILY_REWARD_REMINDER_V1", "DAILY_REWARD_REMINDER", null, "USER", {
+    producerStatus: "DORMANT_COMPATIBILITY_ONLY",
+    durableSource: null,
+  }],
+  ["UNCLAIMED_REWARD_REMINDER_V1", null, "notifications/dailyRewardReminder", "USER"],
   ["STEP_MILESTONE_REMINDER_V1", "STEP_MILESTONE_REMINDER", "notifications/stepMilestoneReminder", "USER"],
   ["RACE_COMPLETED_V1", "RACE_COMPLETED", "races/commands/completeRace", "RACE"],
   ["TEAM_LEAD_CHANGED_V1", "TEAM_LEAD_CHANGED", "races/jobs/placementRecompute", "RACE"],
@@ -77,6 +83,7 @@ function publicTypeAndSource(event, audience) {
     case "RACE_STARTED_V1": return ["RACE_STARTED", p.raceId];
     case "RACE_ENDING_SOON_V1": return ["RACE_ENDING_SOON", p.raceId];
     case "DAILY_REWARD_REMINDER_V1": return [`DAILY_REWARD_REMINDER_${p.slot}`, `${p.userId}:${p.localDate}:${p.slot}`];
+    case "UNCLAIMED_REWARD_REMINDER_V1": return ["UNCLAIMED_REWARD", `${p.userId}:${p.localDate}`];
     case "STEP_MILESTONE_REMINDER_V1": return ["STEP_MILESTONE_REMINDER", `${p.userId}:${p.localDate}`];
     case "RACE_COMPLETED_V1": return ["RACE_COMPLETED", p.raceId];
     case "TEAM_LEAD_CHANGED_V1": return ["TEAM_LEAD_CHANGE", p.transitionId];
@@ -140,6 +147,7 @@ function legacyPayloadForRecipient(event, audience) {
     case "RACE_STARTED_V1": return { ...p, participantUserIds: [recipient] };
     case "RACE_ENDING_SOON_V1": return { ...p, userId: recipient, notificationClaimed: true };
     case "DAILY_REWARD_REMINDER_V1":
+    case "UNCLAIMED_REWARD_REMINDER_V1":
     case "STEP_MILESTONE_REMINDER_V1": return { ...p, userId: recipient };
     case "RACE_COMPLETED_V1": return { ...p, participantUserIds: [recipient], memberTeams: { [recipient]: facts.memberTeam ?? null } };
     case "TEAM_LEAD_CHANGED_V1": return { ...p, memberUserIds: [recipient], notificationIntentId: p.transitionId };
