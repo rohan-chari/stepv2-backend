@@ -1,4 +1,5 @@
 const assert = require("node:assert/strict");
+const crypto = require("node:crypto");
 const { before, beforeEach, describe, it } = require("node:test");
 const {
   cleanDatabase,
@@ -765,6 +766,109 @@ describe("notification domain isolation", () => {
     assert.equal(byRecipient.get(poison.user.id).status, "RETRY");
     assert.equal(byRecipient.get(healthy.user.id).status, "COMPLETED");
     assert.equal(byRecipient.get(later.user.id).status, "COMPLETED");
+  });
+
+  it("concurrent projector jobs repair stranded terminal parents before later aggregate work", async () => {
+    const [claimIndex] = await prisma.$queryRawUnsafe(
+      `SELECT index_row.indisvalid AS "isValid", index_row.indisready AS "isReady",
+              pg_get_expr(index_row.indpred, index_row.indrelid) AS predicate
+         FROM pg_index index_row
+         JOIN pg_class index_class ON index_class.oid=index_row.indexrelid
+        WHERE index_class.relname='domain_event_outbox_active_aggregate_order_idx'`,
+    );
+    assert.deepEqual(
+      { isValid: claimIndex?.isValid, isReady: claimIndex?.isReady },
+      { isValid: true, isReady: true },
+      "the migrated partial claim index is usable, not a failed concurrent-index shell",
+    );
+    assert.match(claimIndex.predicate, /COMPLETED.*SUPPRESSED.*FAILED_TERMINAL/);
+
+    const recipient = await createTestUser({ displayName: "Stranded Projection Recipient" });
+    const occurredAt = new Date("2026-08-26T18:43:38.916Z");
+    const createProjectedEvent = async ({ aggregateId, suffix, offsetMs, projectionStatus }) => {
+      const event = await prisma.domainEventOutbox.create({
+        data: {
+          eventKey: `PLACEMENT_CHANGED_V1:stranded:${suffix}`,
+          eventType: "PLACEMENT_CHANGED_V1",
+          schemaVersion: 1,
+          aggregateType: "RACE",
+          aggregateId,
+          payload: { raceId: aggregateId, placement: 1 },
+          occurredAt: new Date(occurredAt.getTime() + offsetMs),
+          availableAt: occurredAt,
+          status: "PROJECTING",
+          expansionCompletedAt: occurredAt,
+          audience: {
+            create: [{ recipientId: recipient.user.id, ordinal: 0, facts: {} }],
+          },
+          projections: {
+            create: [{
+              recipientUserId: recipient.user.id,
+              deliveryKey: `stranded:${suffix}`,
+              projectionKind: "VISIBLE",
+              availableAt: occurredAt,
+              status: projectionStatus,
+              ...(["COMPLETED", "FAILED_TERMINAL"].includes(projectionStatus)
+                ? { completedAt: occurredAt }
+                : {}),
+            }],
+          },
+        },
+        include: { projections: true },
+      });
+      return event;
+    };
+
+    const fixtures = [];
+    for (const terminalStatus of ["COMPLETED", "FAILED_TERMINAL"]) {
+      const aggregateId = crypto.randomUUID();
+      const label = terminalStatus.toLowerCase();
+      fixtures.push({
+        terminalStatus,
+        stranded: await createProjectedEvent({
+          aggregateId, suffix: `${label}:older`, offsetMs: 0,
+          projectionStatus: terminalStatus,
+        }),
+        later: await createProjectedEvent({
+          aggregateId, suffix: `${label}:later`, offsetMs: 1,
+          projectionStatus: "PENDING",
+        }),
+      });
+    }
+
+    const projectedEventIds = [];
+    const projectorDependencies = {
+      prisma,
+      now: () => new Date(occurredAt.getTime() + 1_000),
+      logger: quietLogger,
+      typedProjection: async ({ event }) => {
+        projectedEventIds.push(event.id);
+        return { status: "COMPLETED" };
+      },
+    };
+    await Promise.all([
+      buildNotificationProjector(projectorDependencies).run(),
+      buildNotificationProjector(projectorDependencies).run(),
+    ]);
+
+    assert.deepEqual(
+      projectedEventIds.sort(),
+      fixtures.map(({ later }) => later.id).sort(),
+      "concurrent real projector paths claim only the later work once",
+    );
+    for (const { stranded, terminalStatus, later } of fixtures) {
+      assert.equal(
+        (await prisma.domainEventOutbox.findUnique({ where: { id: stranded.id } })).status,
+        terminalStatus,
+        "the claimant heals the parent state left behind by a timed-out finalization",
+      );
+      assert.equal(
+        (await prisma.domainEventNotificationProjection.findUnique({
+          where: { id: later.projections[0].id },
+        })).status,
+        "COMPLETED",
+      );
+    }
   });
 
   it("recovers durable daily-reward and milestone reminders without Redis", async () => {

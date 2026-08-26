@@ -173,7 +173,34 @@ async function claimProjections({
   const leaseUntil = new Date(now.getTime() + leaseMs);
   return prisma.$transaction(async (tx) => {
     const rows = await tx.$queryRawUnsafe(
-      `WITH candidates AS (
+      `WITH stranded_candidates AS MATERIALIZED (
+         SELECT stranded.id
+           FROM domain_event_outbox stranded
+          WHERE stranded.status='PROJECTING'
+            AND stranded.expansion_completed_at IS NOT NULL
+            AND NOT EXISTS (
+              SELECT 1
+                FROM domain_event_notification_projections remaining
+               WHERE remaining.domain_event_id=stranded.id
+                 AND remaining.status NOT IN ('COMPLETED','SUPPRESSED','FAILED_TERMINAL')
+            )
+          ORDER BY stranded.occurred_at, stranded.id
+          LIMIT 50
+          FOR UPDATE OF stranded SKIP LOCKED
+       ), repaired_events AS MATERIALIZED (
+         UPDATE domain_event_outbox AS stranded
+            SET status=CASE WHEN EXISTS (
+                  SELECT 1
+                    FROM domain_event_notification_projections failed
+                   WHERE failed.domain_event_id=stranded.id
+                     AND failed.status='FAILED_TERMINAL'
+                ) THEN 'FAILED_TERMINAL' ELSE 'COMPLETED' END,
+                completed_at=$1, lease_token=NULL, lease_until=NULL,
+                updated_at=$1
+           FROM stranded_candidates candidate
+          WHERE stranded.id=candidate.id
+         RETURNING stranded.id
+       ), candidates AS (
          SELECT p.id, p.status
            FROM domain_event_notification_projections p
            JOIN domain_event_outbox e ON e.id=p.domain_event_id
@@ -186,6 +213,14 @@ async function claimProjections({
                WHERE older.aggregate_type=e.aggregate_type
                  AND older.aggregate_id=e.aggregate_id
                  AND older.status NOT IN ('COMPLETED','SUPPRESSED','FAILED_TERMINAL')
+                 AND (
+                   older.expansion_completed_at IS NULL OR EXISTS (
+                     SELECT 1
+                       FROM domain_event_notification_projections older_projection
+                      WHERE older_projection.domain_event_id=older.id
+                        AND older_projection.status NOT IN ('COMPLETED','SUPPRESSED','FAILED_TERMINAL')
+                   )
+                 )
                  AND (
                    older.occurred_at < e.occurred_at OR
                    (older.occurred_at=e.occurred_at AND older.id < e.id)
