@@ -176,7 +176,6 @@ npm run referral-contest:catch-up
 ```
 
 The apply pass uses ownership-safe `INSERT ... SELECT ... ON CONFLICT DO
-<<<<<<< ours
 NOTHING` for referral race activity. It fills null point-review ownership from
 the durable qualification fact first, then from a live terminal/reviewable
 referral when no durable fact exists; mutable `PENDING` attribution is never
