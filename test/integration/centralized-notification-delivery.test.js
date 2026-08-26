@@ -13,7 +13,13 @@ const {
 const { createInboxAlert } = require("../../src/modules/inbox/services/inbox");
 const { buildInboxDelivery } = require("../../src/modules/inbox/jobs/inboxDelivery");
 const { GlobalStepEvent } = require("../../src/modules/steps/models/globalStepEvent");
-const { ensureEntitlementForUser } = require("../../src/modules/steps/services/globalStepEventEntitlement");
+const {
+  ensureEntitlementForUser,
+  processDueEntitlementBoundaries,
+} = require("../../src/modules/steps/services/globalStepEventEntitlement");
+const {
+  buildNotificationProjector,
+} = require("../../src/modules/domainEvents/services/notificationProjector");
 
 const NOW = new Date("2026-08-23T15:00:00.000Z");
 
@@ -177,7 +183,7 @@ describe("centralized notification delivery", () => {
     assert.equal(await prisma.inboxDeliveryOutbox.count({ where: { status: "DELIVERED" } }), 2);
   });
 
-  it("legacy global start persists the visible intent with the event transaction", async () => {
+  it("legacy global start commits an event, then projection persists the visible intent", async () => {
     await cleanDatabase();
     const { user } = await createTestUser();
     const testNow = new Date();
@@ -206,14 +212,21 @@ describe("centralized notification delivery", () => {
 
     assert.equal(created.created, true);
     assert.equal(await prisma.notificationSchedule.count({ where: { recipientUserId: user.id } }), 0);
+    assert.equal(await prisma.inboxAlert.count({ where: { userId: user.id } }), 0);
+    await buildNotificationProjector({ prisma, now: () => testNow }).run();
     const alert = await prisma.inboxAlert.findFirstOrThrow({ where: { userId: user.id } });
     const outbox = await prisma.inboxDeliveryOutbox.findFirstOrThrow({ where: { alertId: alert.id } });
     assert.equal(alert.sourceKey, `visible:GLOBAL_EVENT_STARTED:${user.id}:${created.event.id}`);
     assert.ok(outbox.availableAt >= NOW);
-    assert.equal(outbox.payload.payload.eventId, created.event.id);
+    assert.deepEqual(outbox.payload.payload, {
+      type: "GLOBAL_EVENT_STARTED",
+      route: "home",
+      eventId: created.event.id,
+      multiplier: 2,
+    });
   });
 
-  it("local event start is scheduled durably and materialized only at its boundary", async () => {
+  it("local provisioning stays notification-free and boundary activation projects durably", async () => {
     await cleanDatabase();
     const { user } = await createTestUser({ globalEventTimezone: "America/New_York" });
     const startsAt = new Date("2026-08-24T14:00:00.000Z");
@@ -251,11 +264,36 @@ describe("centralized notification delivery", () => {
       now: NOW,
     }));
     assert.equal(await prisma.inboxAlert.count({ where: { userId: user.id } }), 0);
-    assert.equal(await prisma.notificationSchedule.count({ where: { recipientUserId: user.id, status: "PENDING" } }), 1);
+    assert.equal(await prisma.notificationSchedule.count({ where: { recipientUserId: user.id } }), 0);
+    assert.equal(await prisma.domainEventOutbox.count({}), 0);
 
-    await buildNotificationIntentService({ prisma, publishWakeup: async () => false })
-      .releaseDue({ now: startsAt });
+    const boundary = await processDueEntitlementBoundaries({
+      prisma,
+      now: startsAt,
+      enqueueRaceResolution: async () => {},
+      logger: { log() {}, error() {} },
+    });
+    assert.equal(boundary.starts, 1);
+    assert.equal(await prisma.domainEventOutbox.count({
+      where: { eventType: "GLOBAL_STEP_EVENT_ACTIVATED_V1" },
+    }), 1);
+    assert.equal(await prisma.inboxAlert.count({ where: { userId: user.id } }), 0);
+
+    await buildNotificationProjector({ prisma, now: () => startsAt }).run();
     assert.equal(await prisma.inboxAlert.count({ where: { userId: user.id } }), 1);
-    assert.equal(await prisma.notificationSchedule.count({ where: { recipientUserId: user.id, status: "MATERIALIZED" } }), 1);
+    assert.equal(await prisma.notificationSchedule.count({ where: { recipientUserId: user.id } }), 0);
+    const entitlement = await prisma.globalStepEventEntitlement.findUniqueOrThrow({
+      where: { eventId_userId: { eventId: event.id, userId: user.id } },
+    });
+    const localOutbox = await prisma.inboxDeliveryOutbox.findFirstOrThrow({
+      where: { alert: { userId: user.id, type: "GLOBAL_EVENT_STARTED" } },
+    });
+    assert.deepEqual(localOutbox.payload.payload, {
+      type: "GLOBAL_EVENT_STARTED",
+      route: "home",
+      eventId: event.id,
+      entitlementId: entitlement.id,
+      multiplier: 2,
+    });
   });
 });

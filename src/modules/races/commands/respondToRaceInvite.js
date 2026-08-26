@@ -3,7 +3,7 @@ const { RaceParticipant } = require("../models/raceParticipant");
 const { Steps } = require("../../steps/models/steps");
 const { User } = require("../../users");
 const { awardCoins } = require("../../../shared/economy/awardCoins");
-const { eventBus } = require("../../../shared/events/eventBus");
+const { appendDomainEvent: defaultAppendDomainEvent } = require("../../domainEvents");
 const { prisma: defaultPrisma } = require("../../../db");
 const {
   buildAtomicHoldFn,
@@ -62,7 +62,9 @@ function buildRespondToRaceInvite(dependencies = {}) {
       ErrorClass: RaceInviteResponseError,
       code: "INSUFFICIENT_COINS",
     });
-  const events = dependencies.eventBus || eventBus;
+  const compatibilityEvents = dependencies.eventBus || null;
+  const appendDomainEvent = dependencies.appendDomainEvent ||
+    (Object.keys(dependencies).length > 0 ? async () => null : defaultAppendDomainEvent);
   const db = dependencies.prisma || defaultPrisma;
   const useTransactionalMutation =
     dependencies.prisma != null || !dependencies.RaceParticipant;
@@ -331,6 +333,18 @@ function buildRespondToRaceInvite(dependencies = {}) {
               refereeId: userId,
               occurredAt: inviteResponseNow,
             });
+            const creatorUserId = lockedRace.creatorId || race.creatorId;
+            await appendDomainEvent(tx, {
+              eventKey: `RACE_INVITE_ACCEPTED_V1:${participant.id}`,
+              eventType: "RACE_INVITE_ACCEPTED_V1", schemaVersion: 1,
+              aggregateType: "RACE", aggregateId: raceId,
+              occurredAt: acceptedParticipant?.updatedAt || inviteResponseNow,
+              payload: {
+                raceId, raceName: lockedRace.name || race.name,
+                participantId: participant.id, userId, creatorUserId,
+              },
+              audience: [{ recipientId: creatorUserId, facts: {} }],
+            });
             return acceptedParticipant;
           })
         : !accept && useTransactionalMutation
@@ -421,18 +435,11 @@ function buildRespondToRaceInvite(dependencies = {}) {
       if (race.status === "ACTIVE" && useTransactionalMutation) {
         await invalidateHomeActiveGlobalEvent([userId]);
       }
-      events.emit("RACE_INVITE_ACCEPTED", {
-        raceId,
-        userId,
-        creatorUserId: race.creatorId,
-        raceName: race.name,
+      if (!useTransactionalMutation) compatibilityEvents?.emit("RACE_INVITE_ACCEPTED", {
+        raceId, userId, creatorUserId: race.creatorId, raceName: race.name,
       });
-    } else {
-      events.emit("RACE_INVITE_DECLINED", {
-        raceId,
-        userId,
-        creatorUserId: race.creatorId,
-      });
+    } else if (!useTransactionalMutation) {
+      compatibilityEvents?.emit("RACE_INVITE_DECLINED", { raceId, userId, creatorUserId: race.creatorId });
     }
 
     // Batch 2026-08-08 item 2: a private race whose invites are now all

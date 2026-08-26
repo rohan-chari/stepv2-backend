@@ -10,6 +10,8 @@ const {
 const {
   autoStartScheduledRaces,
 } = require("../../src/modules/races/jobs/autoStartScheduledRaces");
+const { buildDomainEventProjectionJob } = require("../../src/modules/domainEvents");
+const { appSettings } = require("../../src/shared/config/appSettings");
 
 // Regression for the "@rohitrohit / Fam Steps" bug (2026-06-30): a user-created
 // scheduled race sat PENDING for days because it lacked 2 accepted participants
@@ -101,6 +103,13 @@ async function buildPendingScheduledRace({ scheduledAgoMs, interval = 3000 }) {
       powerupStepInterval: interval,
     },
   });
+  // Accepting the final invite auto-starts and now durably records that first
+  // occurrence. This fixture deliberately rewinds the race to PENDING, so it
+  // must also rewind the additive notification handoff to remain a coherent
+  // pre-start fixture.
+  await prisma.domainEventOutbox.deleteMany({
+    where: { aggregateType: "RACE", aggregateId: raceId },
+  });
 
   return { alice, bob, raceId, scheduledStartAt };
 }
@@ -112,6 +121,7 @@ describe("scheduled race auto-start anchoring", () => {
 
   beforeEach(async () => {
     await cleanDatabase();
+    await appSettings.setFlag("apiInboxV1Enabled", true);
   });
 
   it("does NOT backdate a race that auto-starts days after its scheduledStartAt", async () => {
@@ -212,5 +222,46 @@ describe("scheduled race auto-start anchoring", () => {
       Math.abs(race.startedAt.getTime() - scheduledStartAt.getTime()) < MINUTE,
       `within grace, startedAt should anchor to scheduledStartAt, got ${race.startedAt.toISOString()}`
     );
+  });
+
+  it("a real uneven scheduled-team job appends and projects its one-shot Inbox intent", async () => {
+    const creator = await createUser("UnevenCreator");
+    const teammate = await createUser("UnevenTeammate");
+    const opponent = await createUser("UnevenOpponent");
+    const scheduledStartAt = new Date(Date.now() - MINUTE);
+    const race = await prisma.race.create({
+      data: {
+        creatorId: creator.userId,
+        name: "Uneven scheduled producer",
+        status: "PENDING",
+        targetSteps: 10_000,
+        timeBased: true,
+        maxDurationDays: 1,
+        isTeamRace: true,
+        teamSize: 2,
+        teamAName: "A",
+        teamBName: "B",
+        scheduledStartAt,
+      },
+    });
+    await prisma.raceParticipant.createMany({
+      data: [
+        { raceId: race.id, userId: creator.userId, status: "ACCEPTED", team: "TEAM_A" },
+        { raceId: race.id, userId: teammate.userId, status: "ACCEPTED", team: "TEAM_A" },
+        { raceId: race.id, userId: opponent.userId, status: "ACCEPTED", team: "TEAM_B" },
+      ],
+    });
+
+    await autoStartScheduledRaces();
+    const event = await prisma.domainEventOutbox.findFirstOrThrow({
+      where: { eventType: "RACE_SCHEDULED_TEAMS_UNEVEN_V1", aggregateId: race.id },
+    });
+    assert.equal(event.occurredAt.toISOString(), scheduledStartAt.toISOString());
+    await buildDomainEventProjectionJob({
+      logger: { log() {}, warn() {}, error() {} },
+    })();
+    assert.equal(await prisma.inboxAlert.count({
+      where: { userId: creator.userId, type: "TEAM_RACE_SCHEDULED_UNEVEN" },
+    }), 1);
   });
 });

@@ -46,11 +46,12 @@ const {
   buildRecomputePlacements,
 } = require("../../src/modules/races/jobs/placementRecompute");
 const {
-  createInboxAlert,
-} = require("../../src/modules/inbox/services/inbox");
-const {
   notificationIntentService,
 } = require("../../src/modules/notifications/services/notificationDelivery");
+const {
+  appendDomainEvent,
+  buildDomainEventProjectionJob,
+} = require("../../src/modules/domainEvents");
 const derivedCache = require("../../src/shared/cache/derivedCache");
 const cacheKeys = require("../../src/shared/cache/cacheKeys");
 
@@ -489,6 +490,7 @@ test("a boundary processed more than two minutes late still activates the live e
   } });
 
   await processDueEntitlementBoundaries({ prisma, now });
+  await notificationIntentService.releaseDue({ now });
 
   const processed = await prisma.globalStepEventEntitlement.findUniqueOrThrow({
     where: { id: entitlement.id },
@@ -539,6 +541,7 @@ test("a boundary processed after the event window expires without activating or 
   } });
 
   await processDueEntitlementBoundaries({ prisma, now });
+  await notificationIntentService.releaseDue({ now });
 
   const processed = await prisma.globalStepEventEntitlement.findUniqueOrThrow({
     where: { id: entitlement.id },
@@ -998,7 +1001,7 @@ test("active-impact capture stacks only the recipient's local entitlement throug
   }
 });
 
-test("one failed boundary rolls back only itself and later entitlements continue", async () => {
+test("notification projection failure cannot roll back any gameplay boundary", async () => {
   const [{ user: firstUser }, { user: secondUser }] = await Promise.all([
     createTestUser({ globalEventTimezone: "UTC" }),
     createTestUser({ globalEventTimezone: "UTC" }),
@@ -1051,15 +1054,20 @@ test("one failed boundary rolls back only itself and later entitlements continue
     },
   });
 
-  assert.equal(result.starts, 1);
-  assert.equal(result.failures, 1);
+  assert.equal(result.starts, 2);
+  assert.equal(result.failures, 0);
   const first = await prisma.globalStepEventEntitlement.findUnique({ where: { id: entitlements[0].id } });
   const second = await prisma.globalStepEventEntitlement.findUnique({ where: { id: entitlements[1].id } });
-  assert.equal(first.startProcessedAt, null);
+  assert.ok(first.startProcessedAt);
   assert.ok(second.startProcessedAt);
-  assert.equal(await prisma.globalEventRaceImpact.count(), 1);
-  assert.equal(await prisma.inboxAlert.count({ where: { type: "GLOBAL_EVENT_STARTED" } }), 1);
-  assert.equal(await prisma.inboxDeliveryOutbox.count(), 1);
+  assert.equal(await prisma.globalEventRaceImpact.count(), 2);
+  assert.equal(await prisma.domainEventOutbox.count({
+    where: { eventType: "GLOBAL_STEP_EVENT_ACTIVATED_V1" },
+  }), 2);
+  // Notification materialization is downstream. The gameplay command does not
+  // create Inbox/provider work and therefore cannot fail because it is down.
+  assert.equal(await prisma.inboxAlert.count({ where: { type: "GLOBAL_EVENT_STARTED" } }), 0);
+  assert.equal(await prisma.inboxDeliveryOutbox.count(), 0);
   assert.equal((await prisma.notificationSchedule.findUniqueOrThrow({
     where: { recipientUserId_deliveryKey: {
       recipientUserId: firstUser.id,
@@ -1094,8 +1102,8 @@ test("boundary transaction crash rolls back impact and outbox, then retry create
   } });
   const failed = await processDueEntitlementBoundaries({
     prisma, now,
-    createInboxAlert: async (input) => {
-      await createInboxAlert(input);
+    appendDomainEvent: async (tx, input) => {
+      await appendDomainEvent(tx, input);
       throw new Error("injected crash after durable outbox write");
     },
   });
@@ -1106,6 +1114,8 @@ test("boundary transaction crash rolls back impact and outbox, then retry create
 
   await processDueEntitlementBoundaries({ prisma, now });
   await processDueEntitlementBoundaries({ prisma, now });
+  const project = buildDomainEventProjectionJob({ logger: { log() {}, warn() {}, error() {} } });
+  await project();
   assert.equal(await prisma.globalEventRaceImpact.count(), 1);
   assert.equal(await prisma.inboxAlert.count({ where: { type: "GLOBAL_EVENT_STARTED" } }), 1);
   assert.equal(await prisma.inboxDeliveryOutbox.count(), 1);
@@ -1268,7 +1278,7 @@ test("enabled Home cache is user-isolated, invalidated at end, and progress does
     eventId: event.id, raceId: race.id, userId: active.id, status: "PENDING",
   } });
   const previousRedisUrl = process.env.REDIS_URL;
-  process.env.REDIS_URL = "redis://127.0.0.1:6379/15";
+  process.env.REDIS_URL = process.env.LOCAL_REDIS_TEST_URL || "redis://127.0.0.1:6379/15";
   await redisCache.close();
   derivedCache.reset();
   await appSettings.setFlag("redisCacheHomeActiveGlobalEventEnabled", true);
@@ -1333,7 +1343,7 @@ test("HTTP display artifact cannot cross a participant's local entitlement end f
   } });
 
   const previousRedisUrl = process.env.REDIS_URL;
-  process.env.REDIS_URL = "redis://127.0.0.1:6379/15";
+  process.env.REDIS_URL = process.env.LOCAL_REDIS_TEST_URL || "redis://127.0.0.1:6379/15";
   await redisCache.close();
   derivedCache.reset();
   await appSettings.setFlagsAtomically([

@@ -22,6 +22,7 @@ const {
   resolveTournamentPrizeStamp,
   lockFundedExposureUsers,
 } = require("../../races/services/fundedExposure");
+const { buildAppendTournamentDomainEvent } = require("../services/appendTournamentDomainEvent");
 
 // Advance a tournament when its current round is fully settled. Idempotent and
 // concurrency-safe: runs under a tournament FOR UPDATE lock, and the
@@ -34,7 +35,9 @@ const {
 // champion crowning) plus the grouped pushes.
 function buildAdvanceTournament(dependencies = {}) {
   const db = dependencies.prisma || defaultPrisma;
-  const events = dependencies.eventBus || eventBus;
+  const compatibilityEvents = dependencies.eventBus || eventBus;
+  const appendTournamentDomainEvent = dependencies.appendTournamentDomainEvent ||
+    buildAppendTournamentDomainEvent(dependencies);
   const awardCoinsFn = dependencies.awardCoins || awardCoins;
   const lockFundedExposureUsersFn =
     dependencies.lockFundedExposureUsers || lockFundedExposureUsers;
@@ -280,6 +283,7 @@ function buildAdvanceTournament(dependencies = {}) {
         deferred.push({
           type: "TOURNAMENT_CHAMPION",
           tournamentId,
+          completionId: `${tournamentId}:completion`,
           tournamentName: tournament.name,
           userId: championUserId,
           prizeCoins: prizeAmount,
@@ -303,6 +307,7 @@ function buildAdvanceTournament(dependencies = {}) {
           deferred.push({
             type: "TOURNAMENT_ELIMINATED",
             tournamentId,
+            matchupId: roundRaces[0].id,
             tournamentName: tournament.name,
             userId: runnerUpUserId,
             label,
@@ -314,6 +319,9 @@ function buildAdvanceTournament(dependencies = {}) {
         // place: nothing emits it now, so it is inert, and removing it would be
         // a behaviour change for any future emitter. Old clients simply receive
         // one fewer push; their `tournament_completed` route case goes unused.
+        for (const payload of deferred) {
+          await appendTournamentDomainEvent(tx, payload);
+        }
         return;
       }
 
@@ -340,10 +348,12 @@ function buildAdvanceTournament(dependencies = {}) {
       const nextLabel = roundLabel(tournament.bracketSize, nextRound);
 
       // Grouped pushes: winners advanced, losers knocked out this round.
-      for (const winnerId of winners) {
+      for (let winnerIndex = 0; winnerIndex < winners.length; winnerIndex += 1) {
+        const winnerId = winners[winnerIndex];
         deferred.push({
           type: "TOURNAMENT_MATCHUP_WON",
           tournamentId,
+          matchupId: roundRaces[winnerIndex].id,
           tournamentName: tournament.name,
           userId: winnerId,
           nextLabel,
@@ -355,6 +365,7 @@ function buildAdvanceTournament(dependencies = {}) {
         deferred.push({
           type: "TOURNAMENT_ELIMINATED",
           tournamentId,
+          matchupId: roundRaces[i].id,
           tournamentName: tournament.name,
           userId: loserId,
           label,
@@ -367,6 +378,7 @@ function buildAdvanceTournament(dependencies = {}) {
         deferred.push({
           type: "TOURNAMENT_ROUND_STARTED",
           tournamentId,
+          roundId: `${tournamentId}:round:${nextRound}`,
           tournamentName: tournament.name,
           userId: a,
           raceId: created.raceId,
@@ -377,6 +389,7 @@ function buildAdvanceTournament(dependencies = {}) {
         deferred.push({
           type: "TOURNAMENT_ROUND_STARTED",
           tournamentId,
+          roundId: `${tournamentId}:round:${nextRound}`,
           tournamentName: tournament.name,
           userId: b,
           raceId: created.raceId,
@@ -385,10 +398,13 @@ function buildAdvanceTournament(dependencies = {}) {
           days: tournament.matchupDurationDays,
         });
       }
+      for (const payload of deferred) {
+        await appendTournamentDomainEvent(tx, payload);
+      }
     });
 
     for (const payload of deferred) {
-      events.emit(payload.type, payload);
+      compatibilityEvents?.emit(payload.type, payload);
     }
 
     return deferred;

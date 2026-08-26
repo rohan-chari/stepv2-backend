@@ -1,12 +1,14 @@
 const { User } = require("../users");
-const { DeviceToken } = require("../../shared/push/deviceToken");
 const { JobRun } = require("../../shared/db/jobRun");
-const { Notification } = require("./notification");
-const { eventBus } = require("../../shared/events/eventBus");
+const { prisma: defaultPrisma } = require("../../db");
+const { appendDomainEvent: defaultAppendDomainEvent } = require("../domainEvents");
 const {
   getTimeZoneParts,
   formatDateString,
   addDaysToDateString,
+  nextMidnightNewYork,
+  parseDateString,
+  zonedDateTimeToUtc,
 } = require("../../shared/time/week");
 const { userFanoutDisabled } = require("../../shared/config/operationalControls");
 
@@ -69,10 +71,13 @@ function claimSuppresses(lastDailyClaimDate, localDate) {
 
 function buildDailyRewardReminder(dependencies = {}) {
   const userModel = dependencies.User || User;
-  const deviceTokenModel = dependencies.DeviceToken || DeviceToken;
   const jobRunModel = dependencies.JobRun || JobRun;
-  const notificationModel = dependencies.Notification || Notification;
-  const events = dependencies.eventBus || eventBus;
+  const db = dependencies.prisma || defaultPrisma;
+  const compatibilityEvents = dependencies.eventBus || null;
+  const compatibilityDeviceTokens = dependencies.DeviceToken || null;
+  const compatibilityNotifications = dependencies.Notification || null;
+  const appendDomainEvent = dependencies.appendDomainEvent || defaultAppendDomainEvent;
+  const durable = !dependencies.eventBus && !dependencies.Notification && !dependencies.DeviceToken;
   const getParts = dependencies.getTimeZoneParts || getTimeZoneParts;
   const now = dependencies.now || (() => new Date());
   const logger = dependencies.logger || console;
@@ -114,10 +119,18 @@ function buildDailyRewardReminder(dependencies = {}) {
         }
         const jobName = `daily_reward_${slot}:${zone}`;
 
-        // Per-zone CAS: only one worker per (zone, slot, local-day) scans users.
+        // Durable fan-out marks completion only after every deterministic
+        // per-user append has succeeded. A crash before or midway leaves the
+        // day open; replay safely confirms already-appended event keys and
+        // resumes the rest. Legacy injected delivery keeps its historical
+        // insert-first zone claim.
         let claimedZone = false;
         try {
-          claimedZone = await jobRunModel.claimRun(jobName, localDate);
+          if (durable) {
+            claimedZone = (await jobRunModel.lastRanFor(jobName)) !== localDate;
+          } else {
+            claimedZone = await jobRunModel.claimRun(jobName, localDate);
+          }
         } catch (error) {
           logger.error(
             `[CRON] dailyRewardReminder: claimRun failed for ${jobName}:`,
@@ -141,45 +154,82 @@ function buildDailyRewardReminder(dependencies = {}) {
           continue;
         }
 
+        let fanoutComplete = true;
+        const localDay = parseDateString(localDate);
+        const occurrenceAt = zonedDateTimeToUtc({
+          ...localDay,
+          hour: slot,
+          minute: 0,
+          second: 0,
+        }, zone);
+        const expiresAt = nextMidnightNewYork(occurrenceAt, zone);
         for (const user of users || []) {
           try {
             // Re-check the claim-date suppression per user.
             if (claimSuppresses(user.lastDailyClaimDate, localDate)) continue;
 
-            // Re-check ≥1 valid device token before claiming/sending.
-            const tokens = await deviceTokenModel.findByUserId(user.id);
-            if (!tokens || tokens.length === 0) continue;
-
-            // INSERT-FIRST atomic per-user claim. This row IS the audit row; the
-            // send handler skips writing a second one. A unique-violation means
-            // another worker/tick already sent this slot today -> skip.
-            const deliveryKey = `daily-reward:${user.id}:${localDate}:${slot}`;
-            try {
-              await notificationModel.create({
-                userId: user.id,
-                type: `DAILY_REWARD_REMINDER_${slot}`,
-                title: REMINDER_TITLE,
-                body: REMINDER_BODY,
-                deliveryKey,
-              });
-            } catch (error) {
-              if (error && error.code === "P2002") continue; // already claimed
-              throw error;
-            }
-
-            events.emit("DAILY_REWARD_REMINDER", {
+            const reminder = {
               userId: user.id,
               slot,
               localDate,
               title: REMINDER_TITLE,
               body: REMINDER_BODY,
-            });
+            };
+            if (durable) {
+              const sourceId = `daily-reward:${user.id}:${localDate}:${slot}`;
+              await db.$transaction((tx) => appendDomainEvent(tx, {
+                eventKey: `DAILY_REWARD_REMINDER_V1:${sourceId}`,
+                eventType: "DAILY_REWARD_REMINDER_V1", schemaVersion: 1,
+                aggregateType: "USER", aggregateId: user.id,
+                occurredAt: occurrenceAt,
+                payload: { userId: user.id, slot, title: REMINDER_TITLE, body: REMINDER_BODY, localDate },
+                audience: [{ recipientId: user.id, facts: {
+                  timeZone: zone,
+                  expiresAt,
+                } }],
+              }));
+            } else {
+              // Explicitly injected legacy collaborators are retained for old
+              // internal callers and narrow unit doubles. Production never
+              // enters this branch: notification delivery is projected from
+              // the durable domain event and token presence is irrelevant to
+              // whether the Inbox intent exists.
+              if (compatibilityDeviceTokens) {
+                const tokens = await compatibilityDeviceTokens.findByUserId(user.id);
+                if (!tokens?.length) continue;
+              }
+              if (compatibilityNotifications) {
+                try {
+                  await compatibilityNotifications.create({
+                    userId: user.id,
+                    type: `DAILY_REWARD_REMINDER_${slot}`,
+                    title: REMINDER_TITLE,
+                    body: REMINDER_BODY,
+                    deliveryKey: `daily-reward:${user.id}:${localDate}:${slot}`,
+                  });
+                } catch (error) {
+                  if (error?.code === "P2002") continue;
+                  throw error;
+                }
+              }
+              compatibilityEvents?.emit("DAILY_REWARD_REMINDER", reminder);
+            }
             emitted.push({ userId: user.id, slot, localDate });
           } catch (error) {
+            fanoutComplete = false;
             logger.error(
               `[CRON] dailyRewardReminder: user ${user.id} slot ${slot} failed:`,
               error
             );
+          }
+        }
+        if (durable && fanoutComplete) {
+          try {
+            await jobRunModel.markRan(jobName, localDate);
+          } catch (error) {
+            // All event keys are deterministic, so a marker failure is safe:
+            // the next tick re-confirms them before retrying this completion.
+            logger.error(`[CRON] dailyRewardReminder: markRan failed for ${jobName}:`, error);
           }
         }
       }

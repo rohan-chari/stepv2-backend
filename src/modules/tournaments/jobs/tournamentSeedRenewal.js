@@ -1,5 +1,6 @@
 const { prisma: defaultPrisma } = require("../../../db");
 const { eventBus } = require("../../../shared/events/eventBus");
+const { buildAppendTournamentDomainEvent } = require("../services/appendTournamentDomainEvent");
 const { appSettings } = require("../../../shared/config/appSettings");
 const { generateShareToken } = require("../../../shared/lib/shareToken");
 const { withTournamentLock } = require("../services/tournamentLock");
@@ -21,7 +22,9 @@ function buildRenewTournamentSeeds(dependencies = {}) {
   const prisma = dependencies.prisma || defaultPrisma;
   const now = dependencies.now || (() => new Date());
   const logger = dependencies.logger || console;
-  const events = dependencies.eventBus || eventBus;
+  const compatibilityEvents = dependencies.eventBus || eventBus;
+  const appendTournamentDomainEvent = dependencies.appendTournamentDomainEvent ||
+    buildAppendTournamentDomainEvent(dependencies);
   const settings = dependencies.appSettings || appSettings;
   const mintToken = dependencies.generateShareToken || generateShareToken;
   const rng = dependencies.rng;
@@ -64,7 +67,7 @@ function buildRenewTournamentSeeds(dependencies = {}) {
           },
         }
       );
-      for (const payload of deferred) events.emit(payload.type, payload);
+      for (const payload of deferred) compatibilityEvents?.emit(payload.type, payload);
       logger.log(`[CRON] Backup-promoted featured tournament ${p.id} (${seed.kind})`);
     }
   }
@@ -131,20 +134,26 @@ function buildRenewTournamentSeeds(dependencies = {}) {
       include: { participants: true },
     });
     for (const t of pendings) {
-      await prisma.tournament.update({
-        where: { id: t.id },
-        data: { status: "CANCELLED", completedAt: now() },
-      });
-      for (const p of t.participants) {
-        if (p.status === "ACCEPTED" || p.status === "INVITED") {
-          events.emit("TOURNAMENT_CANCELLED", {
-            tournamentId: t.id,
-            tournamentName: t.name,
-            userId: p.userId,
-            buyInAmount: 0,
-          });
+      const cancelledAt = now();
+      await prisma.$transaction(async (tx) => {
+        await tx.tournament.update({
+          where: { id: t.id },
+          data: { status: "CANCELLED", completedAt: cancelledAt },
+        });
+        for (const p of t.participants) {
+          if (p.status === "ACCEPTED" || p.status === "INVITED") {
+            const payload = {
+              tournamentId: t.id,
+              cancellationId: t.id,
+              tournamentName: t.name,
+              userId: p.userId,
+              buyInAmount: 0,
+            };
+            await appendTournamentDomainEvent(tx, { type: "TOURNAMENT_CANCELLED", ...payload }, { occurredAt: cancelledAt });
+            compatibilityEvents?.emit("TOURNAMENT_CANCELLED", payload);
+          }
         }
-      }
+      });
       logger.log(`[CRON] Cancelled inactive-seed lobby ${t.id} (${seed.kind})`);
     }
   }

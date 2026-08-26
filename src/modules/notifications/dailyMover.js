@@ -1,12 +1,14 @@
 const { Race } = require("../races/models/race");
 const { RaceParticipant } = require("../races/models/raceParticipant");
 const { JobRun } = require("../../shared/db/jobRun");
-const { eventBus } = require("../../shared/events/eventBus");
+const { prisma: defaultPrisma, runInPrismaTransaction } = require("../../db");
+const { appendDomainEvent: defaultAppendDomainEvent } = require("../domainEvents");
 const { resolveRaceState } = require("../races/services/raceStateResolution");
 const {
   enqueueRaceResolution: defaultEnqueueRaceResolution,
 } = require("../races/services/enqueueRaceResolution");
 const { dailyRunKey } = require("../../shared/time/etSchedule");
+const { nextMidnightNewYork } = require("../../shared/time/week");
 
 const JOB_NAME = "daily_mover";
 const TICK_INTERVAL_MS = 5 * 60 * 1000; // ride the shared 5-minute cadence
@@ -29,7 +31,10 @@ function buildDailyMover(dependencies = {}) {
   const raceModel = dependencies.Race || Race;
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
   const jobRunModel = dependencies.JobRun || JobRun;
-  const events = dependencies.eventBus || eventBus;
+  const compatibilityEvents = dependencies.eventBus || null;
+  const db = dependencies.prisma || defaultPrisma;
+  const appendDomainEvent = dependencies.appendDomainEvent || defaultAppendDomainEvent;
+  const durable = !dependencies.eventBus && !dependencies.RaceParticipant;
   // C0 (spec §5a): this daily digest used to be a fourth bulk writer of
   // race_participants. It now ENQUEUES and reads the persisted totals the
   // race-keyed worker maintains — at most one worker cycle stale, against a
@@ -42,10 +47,13 @@ function buildDailyMover(dependencies = {}) {
   const resolve = dependencies.resolveRaceState || resolveRaceState;
   const enqueue = dependencies.enqueueRaceResolution || defaultEnqueueRaceResolution;
   const now = dependencies.now || (() => new Date());
-  const random = dependencies.random || Math.random;
   const logger = dependencies.logger || console;
   const targetHour = dependencies.targetHour ?? TARGET_HOUR_ET;
   const minMove = dependencies.minMove ?? MIN_MOVE;
+  const updateBaseline = (update) => participantModel.update(
+    update.participantId,
+    { dayStartPlacement: update.liveRank }
+  );
 
   // Returns the array of emitted DAILY_MOVER changes when it ran this tick, or
   // null when the tick wasn't the daily run.
@@ -59,6 +67,7 @@ function buildDailyMover(dependencies = {}) {
     // candidatesByUser: userId -> [{ raceId, raceName, movement, absMovement,
     // placement }] across all of the user's races, for the per-user pick below.
     const candidatesByUser = new Map();
+    const baselineUpdates = [];
 
     let races;
     try {
@@ -98,9 +107,7 @@ function buildDailyMover(dependencies = {}) {
           // the next run measures the following 24h. Done for muted/unseeded
           // participants too, so the window stays aligned for everyone.
           if (prior !== liveRank) {
-            await participantModel.update(participant.id, {
-              dayStartPlacement: liveRank,
-            });
+            baselineUpdates.push({ participantId: participant.id, liveRank });
           }
 
           // First partial window (no prior snapshot) or muted -> seed/sync only.
@@ -126,14 +133,17 @@ function buildDailyMover(dependencies = {}) {
       }
     }
 
-    // Per user, pick the single biggest move; random tiebreak among equal maxima.
+    // Per user, pick the single biggest move. Equal maxima use the lowest race
+    // ID so a crash/replay cannot choose a different digest payload.
     const emitted = [];
     for (const [userId, candidates] of candidatesByUser) {
       const max = Math.max(...candidates.map((c) => c.absMovement));
-      const top = candidates.filter((c) => c.absMovement === max);
-      const chosen = top[Math.floor(random() * top.length)];
+      const chosen = candidates
+        .filter((c) => c.absMovement === max)
+        .sort((a, b) => String(a.raceId).localeCompare(String(b.raceId)))[0];
 
       const change = {
+        digestId: `daily-mover:${runKey}:${userId}`,
         notificationIntentId: `daily-mover:${runKey}:${userId}`,
         userId,
         raceId: chosen.raceId,
@@ -141,11 +151,46 @@ function buildDailyMover(dependencies = {}) {
         movement: chosen.movement,
         placement: chosen.placement,
       };
-      events.emit("DAILY_MOVER", change);
       emitted.push(change);
     }
-
-    await jobRunModel.markRan(JOB_NAME, runKey);
+    if (durable) {
+      await runInPrismaTransaction(async (tx) => {
+        for (const update of baselineUpdates) {
+          // The model uses the transaction-scoped Prisma proxy, which keeps
+          // this write atomic with the event and JobRun while preserving the
+          // single race-participant write surface audited by structural tests.
+          await updateBaseline(update);
+        }
+        for (const change of emitted) {
+          await appendDomainEvent(tx, {
+            eventKey: `DAILY_MOVER_V1:${change.digestId}`,
+            eventType: "DAILY_MOVER_V1", schemaVersion: 1,
+            aggregateType: "USER", aggregateId: change.userId,
+            occurredAt: currentTime,
+            payload: {
+              digestId: change.digestId, userId: change.userId,
+              raceId: change.raceId, raceName: change.raceName,
+              movement: change.movement, placement: change.placement,
+              localDate: runKey,
+            },
+            audience: [{ recipientId: change.userId, facts: {
+              expiresAt: nextMidnightNewYork(currentTime, "America/New_York"),
+            } }],
+          });
+        }
+        await tx.jobRun.upsert({
+          where: { jobName: JOB_NAME },
+          create: { jobName: JOB_NAME, lastRanFor: runKey },
+          update: { lastRanFor: runKey },
+        });
+      });
+    } else {
+      for (const update of baselineUpdates) {
+        await updateBaseline(update);
+      }
+      for (const change of emitted) compatibilityEvents?.emit("DAILY_MOVER", change);
+      await jobRunModel.markRan(JOB_NAME, runKey);
+    }
     logger.log(
       `[CRON] Daily mover: sent ${emitted.length} digests (run for ${runKey})`
     );

@@ -55,8 +55,11 @@ const {
 } = require("../../powerups/hitchhikeCopies");
 const { computeEffectModifiers, signedMultiplierForEffects } = require("../services/effectiveStepScoring");
 const {
-  evaluateHighMultiplierAlert,
+  evaluateHighMultiplierAlert: defaultEvaluateHighMultiplierAlert,
 } = require("../services/highMultiplierAlert");
+const {
+  raceResolutionDeliveryIntents: defaultRaceResolutionDeliveryIntents,
+} = require("../services/raceResolutionDeliveryIntents");
 // C3 (spec §5 Phase D). Everything below is INERT unless `redisStandingsEnabled`
 // is on AND `REDIS_URL` is set — see the `standingsCacheEnabled()` gate.
 const redisCache = require("../../../shared/cache/redisCache");
@@ -302,6 +305,10 @@ function buildGetRaceProgress(deps = {}) {
     deps.prefetchRaceScoringModels || defaultPrefetchRaceScoringModels;
   const logger = deps.logger || console;
   const computeRaceState = deps.computeRaceState || defaultComputeRaceState;
+  const evaluateHighMultiplierAlert = deps.evaluateHighMultiplierAlert ||
+    defaultEvaluateHighMultiplierAlert;
+  const raceResolutionDeliveryIntents = deps.raceResolutionDeliveryIntents ||
+    defaultRaceResolutionDeliveryIntents;
   const displayArtifactStore =
     deps.raceResolutionDisplayArtifact || defaultDisplayArtifactStore;
   const buildInputFingerprint =
@@ -675,23 +682,32 @@ function buildGetRaceProgress(deps = {}) {
       multiplierByParticipantId.set(e.participant.id, raw * eventMult);
     }
 
-    // §6b — high-multiplier alert. Phase D step 8 moves this CLAIM (it writes
-    // race_participants.highMultiplierNotifiedAt) to the worker.
+    // Compatibility drain for the long-shipped GET /progress crossing seam.
+    // It uses the SAME participant claim + DomainEventOutbox transaction as
+    // race resolution; the event-bus notification is only a post-commit hint.
+    // A concurrent worker and this request serialize on the conditional
+    // participant marker, so only one durable crossing can win.
     if (persist && race.powerupsEnabled) {
       const activeForAlert = acceptedParticipants.filter(
-        (p) => !p.finishedAt && !p.forfeitedAt
+        (participant) => !participant.finishedAt && !participant.forfeitedAt,
       );
-      for (const p of acceptedParticipants) {
+      for (const participant of acceptedParticipants) {
         try {
           await evaluateHighMultiplierAlert({
-            participant: p,
-            currentMultiplier: multiplierByParticipantId.get(p.id) ?? 1,
+            participant,
+            currentMultiplier: multiplierByParticipantId.get(participant.id) ?? 1,
             race,
             otherParticipants: activeForAlert,
             now: () => scoringNow,
+            deferClaim: true,
+            emitAlert: (alert, participantClaim) =>
+              raceResolutionDeliveryIntents.claimHighMultiplier(alert, {
+                sourceGeneration: `progress-compat:${participantClaim.claimedAt.toISOString()}`,
+                participantClaim,
+              }),
           });
-        } catch (err) {
-          console.error("high-multiplier alert eval failed:", err);
+        } catch (error) {
+          logger.error("high-multiplier compatibility projection failed", error);
         }
       }
     }
@@ -1094,7 +1110,16 @@ function buildGetRaceProgress(deps = {}) {
           });
           if (Number.isFinite(scored.total)) {
             viewerEntry.totalSteps = scored.total;
-            viewerEntry.currentMultiplier = scored.currentMultiplierRaw ?? 1;
+            const activeGlobalEvent = globalEvents.find((event) => {
+              const startsAt = new Date(event.startsAt).getTime();
+              const endsAt = new Date(event.endsAt).getTime();
+              return startsAt <= nowTime.getTime() &&
+                nowTime.getTime() < endsAt &&
+                Number(event.multiplier) > 1;
+            });
+            viewerEntry.currentMultiplier =
+              (scored.currentMultiplierRaw ?? 1) *
+              (activeGlobalEvent ? Number(activeGlobalEvent.multiplier) : 1);
             const placementByUserId = placementsByUserId(
               entries.map((entry) => ({
                 userId: entry.userId,

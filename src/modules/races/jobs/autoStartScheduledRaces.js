@@ -1,7 +1,8 @@
 const { Race } = require("../models/race");
 const { startRace: defaultStartRace } = require("../commands/startRace");
-const { Notification } = require("../../notifications");
 const { eventBus } = require("../../../shared/events/eventBus");
+const { prisma: defaultPrisma, runInPrismaTransaction } = require("../../../db");
+const { appendDomainEvent: defaultAppendDomainEvent } = require("../../domainEvents");
 const {
   buildAutoStartUnscheduledPrivateRaces,
 } = require("./privateRaceAutoStart");
@@ -48,12 +49,14 @@ function selectRacesToAutoStart({ races = [], now }) {
 }
 
 function buildAutoStartScheduledRaces(dependencies = {}) {
+  const hasInjectedDeps = Object.keys(dependencies).length > 0;
   const raceModel = dependencies.Race || Race;
   const startRace = dependencies.startRace || defaultStartRace;
   const now = dependencies.now || (() => new Date());
   const logger = dependencies.logger || console;
-  const notificationModel = dependencies.Notification || Notification;
-  const events = dependencies.eventBus || eventBus;
+  const notificationModel = dependencies.Notification || null;
+  const immediateEvents = dependencies.eventBus || eventBus;
+  const appendDomainEvent = dependencies.appendDomainEvent || defaultAppendDomainEvent;
   // Batch 2026-08-08 item 2: the UNSCHEDULED private-race backstop shares this
   // 5-minute tick. It is a separate DB read (findScheduledDue structurally
   // cannot return unscheduled races) and its own kill switch.
@@ -108,17 +111,33 @@ function buildAutoStartScheduledRaces(dependencies = {}) {
         // key, so process restarts never re-send.
         if (error && error.code === "TEAMS_UNEVEN" && race.creatorId) {
           try {
-            const alreadySent = await notificationModel.findFirstByUserTypeRace(
-              race.creatorId,
-              TEAMS_UNEVEN_PUSH_TYPE,
-              race.id
-            );
+            const alreadySent = notificationModel
+              ? await notificationModel.findFirstByUserTypeRace(
+                  race.creatorId,
+                  TEAMS_UNEVEN_PUSH_TYPE,
+                  race.id
+                )
+              : null;
             if (!alreadySent) {
-              events.emit("RACE_SCHEDULED_TEAMS_UNEVEN", {
+              const data = {
                 raceId: race.id,
                 creatorUserId: race.creatorId,
                 message: error.message,
-              });
+                occurredAt: new Date(race.scheduledStartAt),
+              };
+              if (hasInjectedDeps) {
+                await immediateEvents.emit("RACE_SCHEDULED_TEAMS_UNEVEN", data);
+              } else {
+                const sourceId = `cron:TEAM_RACE_SCHEDULED_UNEVEN:${race.id}:${race.creatorId}`;
+                await runInPrismaTransaction((tx) => appendDomainEvent(tx || defaultPrisma, {
+                  eventKey: `RACE_SCHEDULED_TEAMS_UNEVEN_V1:${sourceId}`,
+                  eventType: "RACE_SCHEDULED_TEAMS_UNEVEN_V1", schemaVersion: 1,
+                  aggregateType: "RACE", aggregateId: race.id,
+                  occurredAt: data.occurredAt,
+                  payload: { raceId: race.id, creatorUserId: race.creatorId, attemptKey: sourceId },
+                  audience: [{ recipientId: race.creatorId, facts: {} }],
+                }));
+              }
             }
           } catch (notifyError) {
             logger.error(

@@ -9,6 +9,9 @@ const TABLES_IN_ORDER = [
   // the whole FK graph and takes AccessExclusive locks on every discovered
   // table/index; on the local integration DB that turned an empty cleanup into
   // a 20s operation after the feature-batch tables were added.
+  "domain_event_notification_projections",
+  "domain_event_audiences",
+  "domain_event_outbox",
   "inbox_delivery_outbox",
   "analytics_cleanup_runs",
   "metric_coverage_starts",

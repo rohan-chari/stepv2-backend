@@ -183,9 +183,9 @@ function buildRaceProgressPostCommit(dependencies = {}) {
             race,
             otherParticipants: activeForAlert,
             now,
-            ...(deferDelivery ? {
-              deferClaim: true,
-              emitAlert: async (alert, participantClaim) => {
+            deferClaim: true,
+            emitAlert: async (alert, participantClaim) => {
+              if (deferDelivery) {
                 intentClaims.push({
                   kind: "HIGH_MULTIPLIER",
                   data: alert,
@@ -193,8 +193,12 @@ function buildRaceProgressPostCommit(dependencies = {}) {
                   sourceGeneration,
                 });
                 return [];
-              },
-            } : {}),
+              }
+              return deliveryIntents.claimHighMultiplier(alert, {
+                sourceGeneration: sourceGeneration ?? participantClaim.claimedAt.toISOString(),
+                participantClaim,
+              });
+            },
           });
           void outcome;
         } catch (error) {

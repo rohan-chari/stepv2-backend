@@ -64,6 +64,16 @@ const Notification = {
     });
   },
 
+  // Most recent `type` row for this user/race on or after `since`. Placement
+  // alert cooldowns are race-scoped: activity in one race must not suppress a
+  // meaningful lead/payout change in another race.
+  async findFirstByUserTypeRaceSince(userId, type, raceId, since) {
+    return prisma.notification.findFirst({
+      where: { userId, type, raceId, createdAt: { gte: since } },
+      orderBy: { createdAt: "desc" },
+    });
+  },
+
   // Nightly-cleanup primitive: delete everything older than `cutoff`. Returns the
   // Prisma batch-payload ({ count }). Idempotent — re-running deletes nothing more.
   async deleteOlderThan(cutoff) {

@@ -6,6 +6,7 @@ const { Race } = require("../../races/models/race");
 const { User } = require("../../users");
 const { PowerupUpgradeEvent } = require("../models/powerupUpgradeEvent");
 const { eventBus } = require("../../../shared/events/eventBus");
+const { appendDomainEvent: defaultAppendDomainEvent } = require("../../domainEvents");
 const {
   prisma: defaultPrisma,
   runInPrismaTransaction,
@@ -56,6 +57,7 @@ const {
 } = require("../../races/services/effectiveStepScoring");
 const {
   evaluateHighMultiplierAlert: defaultEvaluateHighMultiplierAlert,
+  threshold: highMultiplierThreshold,
 } = require("../../races/services/highMultiplierAlert");
 // The SAME team-total summation the board (getRaceProgress -> teams block) uses,
 // so Uprising's losing-team gate can never disagree with the standings the
@@ -909,7 +911,7 @@ async function applyPotionEnemyAttack(a) {
 
   // `casterStealthed` is threaded in from the caller rather than re-read here:
   // this helper lives at module scope and has no myParticipant memo of its own.
-  events.emit("POWERUP_USED", { notificationIntentId: `powerup:${powerupId}:${resolvedTargetUserId}`, raceId, userId: sourceUserId, powerupType: "MYSTERY_POTION", targetUserId: resolvedTargetUserId, upgradeLevel: 0, stealthed: a.casterStealthed === true });
+  await events.emit("POWERUP_USED", { powerupId, notificationIntentId: `powerup:${powerupId}:${resolvedTargetUserId}`, raceId, userId: sourceUserId, powerupType: "MYSTERY_POTION", targetUserId: resolvedTargetUserId, upgradeLevel: 0, stealthed: a.casterStealthed === true });
   return true;
 }
 
@@ -983,11 +985,36 @@ function buildUsePowerup(dependencies = {}) {
   const upgradeEventModel = dependencies.PowerupUpgradeEvent || PowerupUpgradeEvent;
   const deductCoinsAtomic = dependencies.deductCoinsAtomic || defaultDeductCoinsAtomic;
   const immediateEvents = dependencies.eventBus || eventBus;
+  const appendDomainEvent = dependencies.appendDomainEvent || defaultAppendDomainEvent;
   const events = hasInjectedDeps
     ? immediateEvents
     : {
-        emit(...args) {
-          return deferUntilAfterCommit(() => immediateEvents.emit(...args));
+        async emit(eventName, data) {
+          if (eventName === "POWERUP_USED") {
+            const occurredAt = new Date();
+            const targetId = data.targetUserId || "self";
+            await appendDomainEvent(defaultPrisma, {
+              eventKey: `POWERUP_USED_V1:${data.powerupId}:${targetId}`,
+              eventType: "POWERUP_USED_V1", schemaVersion: 1,
+              aggregateType: "POWERUP", aggregateId: data.powerupId,
+              occurredAt,
+              payload: {
+                powerupId: data.powerupId, raceId: data.raceId,
+                actorUserId: data.userId, powerupType: data.powerupType,
+                targetUserId: data.targetUserId ?? null,
+                upgradeLevel: data.upgradeLevel || 0,
+                stealthed: data.stealthed === true, occurredAt,
+                notificationIntentId: data.notificationIntentId,
+              },
+              audience: data.targetUserId && data.targetUserId !== data.userId
+                ? [{ recipientId: data.targetUserId, facts: {} }]
+                : [],
+            });
+          }
+          // Mixed-version compatibility only. The durable event above is the
+          // correctness source; this post-commit hint preserves old in-process
+          // handlers without allowing them to affect the powerup transaction.
+          return deferUntilAfterCommit(() => immediateEvents.emit(eventName, data));
         },
       };
   // C0 (spec §5a item 4): after a powerup's own small writes, ENQUEUE the race
@@ -1056,8 +1083,27 @@ function buildUsePowerup(dependencies = {}) {
   const now = dependencies.now || (() => new Date());
   const random = dependencies.random || Math.random;
   const awardCoins = dependencies.awardCoins || defaultAwardCoins;
-  const immediateEvaluateHighMultiplierAlert =
-    dependencies.evaluateHighMultiplierAlert || defaultEvaluateHighMultiplierAlert;
+  const immediateEvaluateHighMultiplierAlert = Object.prototype.hasOwnProperty.call(
+    dependencies,
+    "evaluateHighMultiplierAlert",
+  )
+    ? dependencies.evaluateHighMultiplierAlert
+    : hasInjectedDeps
+      ? defaultEvaluateHighMultiplierAlert
+      : async (input) => {
+          // A cast that lowers the caster back under the threshold must re-arm
+          // the durable crossing marker immediately, as it did before the
+          // producer migration. New crossings remain worker-owned so the
+          // participant claim and domain-event append commit atomically.
+          const mult = Number(input?.currentMultiplier);
+          if (
+            input?.participant?.highMultiplierNotifiedAt != null &&
+            (!Number.isFinite(mult) || mult <= highMultiplierThreshold())
+          ) {
+            return defaultEvaluateHighMultiplierAlert(input);
+          }
+          return { emitted: false, reason: "race_resolution_worker_owned" };
+        };
   const evaluateHighMultiplierAlert = hasInjectedDeps
     ? immediateEvaluateHighMultiplierAlert
     : (...args) => deferUntilAfterCommit(
@@ -1666,8 +1712,8 @@ function buildUsePowerup(dependencies = {}) {
         return targetUserIds.map((id) => byUser.get(id)).filter(Boolean);
       });
       for (const targetResult of targetResults) {
-        events.emit(targetResult.outcome === "APPLIED" ? "POWERUP_USED" : "POWERUP_BLOCKED", targetResult.outcome === "APPLIED"
-          ? { raceId, userId, powerupType: type, targetUserId: targetResult.targetUserId, upgradeLevel: 0, stealthed: await casterStealthed() }
+        await events.emit(targetResult.outcome === "APPLIED" ? "POWERUP_USED" : "POWERUP_BLOCKED", targetResult.outcome === "APPLIED"
+          ? { powerupId, notificationIntentId: `powerup:${powerupId}:${targetResult.targetUserId}`, raceId, userId, powerupType: type, targetUserId: targetResult.targetUserId, upgradeLevel: 0, stealthed: await casterStealthed() }
           : { raceId, attackerUserId: userId, defenderUserId: targetResult.targetUserId, blockedType: type, upgradeLevel: 0 });
       }
       await invalidateRaceProgress(raceId);
@@ -1835,7 +1881,7 @@ function buildUsePowerup(dependencies = {}) {
         description: `${myDisplayName} sparked an Uprising! ${beneficiaries.length} runner${beneficiaries.length === 1 ? "" : "s"} get 2x steps for 1 hour.`,
         metadata: { affected: beneficiaries.length },
       });
-      events.emit("POWERUP_USED", { notificationIntentId: `powerup:${powerupId}`, raceId, userId, powerupType: type, upgradeLevel: 0, stealthed: await casterStealthed() });
+      await events.emit("POWERUP_USED", { powerupId, notificationIntentId: `powerup:${powerupId}`, raceId, userId, powerupType: type, upgradeLevel: 0, stealthed: await casterStealthed() });
       await finalizeSelfContainedUse(null);
       return {
         blocked: false,
@@ -1877,7 +1923,7 @@ function buildUsePowerup(dependencies = {}) {
         description: `${myDisplayName} raised a Rally Flag! The whole team gets 1.25x steps for 1 hour.`,
         metadata: { affected: beneficiaries.length },
       });
-      events.emit("POWERUP_USED", { notificationIntentId: `powerup:${powerupId}`, raceId, userId, powerupType: type, upgradeLevel: 0, stealthed: await casterStealthed() });
+      await events.emit("POWERUP_USED", { powerupId, notificationIntentId: `powerup:${powerupId}`, raceId, userId, powerupType: type, upgradeLevel: 0, stealthed: await casterStealthed() });
       await finalizeSelfContainedUse(null);
       return {
         blocked: false,
@@ -1968,7 +2014,7 @@ function buildUsePowerup(dependencies = {}) {
         metadata: { affected: affected.size, blockedCount },
       });
       for (const uid of affected) {
-        events.emit("POWERUP_USED", { notificationIntentId: `powerup:${powerupId}:${uid}`, raceId, userId, powerupType: type, targetUserId: uid, upgradeLevel: 0, stealthed: await casterStealthed() });
+        await events.emit("POWERUP_USED", { powerupId, notificationIntentId: `powerup:${powerupId}:${uid}`, raceId, userId, powerupType: type, targetUserId: uid, upgradeLevel: 0, stealthed: await casterStealthed() });
       }
       await finalizeSelfContainedUse(null);
       const redirectedToUserIds = decoyResolution.redirectedToUserIds;
@@ -4236,7 +4282,8 @@ function buildUsePowerup(dependencies = {}) {
       });
     }
 
-    events.emit("POWERUP_USED", {
+    await events.emit("POWERUP_USED", {
+      powerupId,
       notificationIntentId: `powerup:${powerupId}:${resolvedTargetUserId || "self"}`,
       raceId,
       userId,

@@ -527,13 +527,18 @@ function buildRenewSeededRaces(dependencies = {}) {
 
     // "Your race started" push to everyone who opted in. creatorUserId null =>
     // the RACE_STARTED handler notifies every accepted participant.
-    events.emit("RACE_STARTED", {
-      raceId: race.id,
-      raceName: race.name,
-      creatorUserId: null,
-      participantUserIds: accepted.map((p) => p.userId),
-      isSeededBucket: Boolean(race.seededBucketId),
-    });
+    // Seeded bucket starts are intentionally excluded from visible
+    // notifications. Keep the injected event seam for legacy focused tests,
+    // but production suppresses before durable append as required.
+    if (dependencies.eventBus) {
+      events.emit("RACE_STARTED", {
+        raceId: race.id,
+        raceName: race.name,
+        creatorUserId: null,
+        participantUserIds: accepted.map((p) => p.userId),
+        isSeededBucket: Boolean(race.seededBucketId),
+      });
+    }
     return {
       id: race.id,
       name: race.name,

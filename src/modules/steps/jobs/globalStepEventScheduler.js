@@ -3,7 +3,6 @@ const {
   GlobalStepEventBoundaryCursor,
 } = require("../models/globalStepEventBoundaryCursor");
 const { Race } = require("../../races/models/race");
-const { eventBus } = require("../../../shared/events/eventBus");
 const {
   enqueueRaceResolution,
 } = require("../../races/services/enqueueRaceResolution");
@@ -175,12 +174,12 @@ function buildLocalGlobalStepEventTick(dependencies = {}) {
 function buildMaybeStartGlobalEvent(dependencies = {}) {
   const globalStepEventModel = dependencies.GlobalStepEvent || GlobalStepEvent;
   const raceModel = dependencies.Race || Race;
-  const events = dependencies.eventBus || eventBus;
   const now = dependencies.now || (() => new Date());
   const logger = dependencies.logger || console;
   const enqueue = dependencies.enqueueRaceResolution || enqueueRaceResolution;
   const boundaryCursor = dependencies.GlobalStepEventBoundaryCursor ||
     GlobalStepEventBoundaryCursor;
+  const compatibilityEvents = dependencies.eventBus || null;
 
   async function boundarySchedulingEnabled() { return true; }
 
@@ -286,26 +285,27 @@ function buildMaybeStartGlobalEvent(dependencies = {}) {
         `${decision.startsAt.toISOString()} -> ${decision.endsAt.toISOString()}`
     );
 
-    // Fan-out target set: every distinct user currently in an ACTIVE race.
-    let participantUserIds = created.participantUserIds || [];
-    if (!Array.isArray(created.participantUserIds)) {
-      try {
-        participantUserIds =
-          (await raceModel.findActiveParticipantUserIds()) || [];
-      } catch (error) {
-        logger.error("[CRON] Global event participant lookup failed:", error);
+    // Compatibility-only adapter for injected legacy callers. The production
+    // model appends GLOBAL_STEP_EVENT_ACTIVATED_V1 in the creation transaction;
+    // the scheduler itself has no notification dependency.
+    if (compatibilityEvents) {
+      let participantUserIds = created.participantUserIds || [];
+      if (!Array.isArray(created.participantUserIds)) {
+        try {
+          participantUserIds =
+            (await raceModel.findActiveParticipantUserIds()) || [];
+        } catch (error) {
+          logger.error("[CRON] Global event participant lookup failed:", error);
+        }
       }
+      compatibilityEvents.emit("GLOBAL_EVENT_STARTED", {
+        eventId: event?.id,
+        multiplier: decision.multiplier,
+        startsAt: decision.startsAt,
+        endsAt: decision.endsAt,
+        participantUserIds,
+      });
     }
-
-    // Emit on the shared event bus; notificationHandlers.js handles the actual
-    // APNs push. Kept additive — old handlers ignore the unknown event.
-    events.emit("GLOBAL_EVENT_STARTED", {
-      eventId: event?.id,
-      multiplier: decision.multiplier,
-      startsAt: decision.startsAt,
-      endsAt: decision.endsAt,
-      participantUserIds,
-    });
 
     return event;
   };

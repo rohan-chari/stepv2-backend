@@ -11,7 +11,7 @@ const {
   chooseLocalStartMinute,
   compatibilityEnvelopeForLocalEvent,
 } = require("../globalStepEvent");
-const { notificationIntentService } = require("../../notifications/services/notificationDelivery");
+const { appendDomainEvent } = require("../../domainEvents");
 
 async function invalidateGlobalEventCache() {
   const derivedCache = require("../../../shared/cache/derivedCache");
@@ -129,40 +129,25 @@ const GlobalStepEvent = {
       for (const [raceId, userIds] of byRace) {
         await createPendingEnrollments(tx, { eventId: event.id, raceId, userIds });
       }
-      // Persist the visible start intent in the same transaction as the
-      // legacy event/enrollment snapshot. The event bus remains a compatible
-      // wake/fallback path, never the only durable producer.
-      for (const userId of uniqueUserIds(participants.map((participant) => participant.userId))) {
-        await notificationIntentService.submit({
-          recipientUserId: userId,
-          type: "GLOBAL_EVENT_STARTED",
-          title: `${multiplier}x STEPS EVENT`,
-          body: `Double steps are LIVE for 30 minutes. Every step counts ${multiplier}x in your races! Go!`,
-          payload: {
-            type: "GLOBAL_EVENT_STARTED",
-            route: "home",
-            params: {},
-            multiplier,
-            eventId: event.id,
-          },
-          deliveryKey: `visible:GLOBAL_EVENT_STARTED:${userId}:${event.id}`,
-          availableAt: start,
-          expiresAt: endsAt,
-          sourceRef: event.id,
-        }, { tx, now: new Date() });
-      }
+      const participantUserIds = uniqueUserIds(participants.map((participant) => participant.userId));
+      await appendDomainEvent(tx, {
+        eventKey: `GLOBAL_STEP_EVENT_ACTIVATED_V1:${event.id}`,
+        eventType: "GLOBAL_STEP_EVENT_ACTIVATED_V1",
+        schemaVersion: 1,
+        aggregateType: "GLOBAL_STEP_EVENT",
+        aggregateId: event.id,
+        occurredAt: start,
+        availableAt: start,
+        payload: { eventId: event.id, multiplier, startsAt: start, endsAt },
+        audience: participantUserIds.map((recipientId) => ({ recipientId, facts: {} })),
+      });
       return {
         event,
         created: true,
-        participantUserIds: uniqueUserIds(participants.map((participant) => participant.userId)),
+        participantUserIds,
       };
     });
     if (result.created) await invalidateGlobalEventCache();
-    if (result.created) {
-      await Promise.all((result.participantUserIds || []).map((recipientUserId) =>
-        notificationIntentService.wake({ recipientUserId }).catch(() => null)
-      ));
-    }
     return result;
   },
 

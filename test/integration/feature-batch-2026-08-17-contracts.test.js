@@ -9,6 +9,7 @@ const {
 } = require("./setup");
 const { appSettings } = require("../../src/shared/config/appSettings");
 const { buildGlobalEventSummaryTick } = require("../../src/modules/steps/jobs/globalEventSummary");
+const { buildDomainEventProjectionJob } = require("../../src/modules/domainEvents");
 
 const ADMIN_EMAIL = process.env.ADMIN_EMAILS?.split(",")[0]?.trim() || "admin@test.com";
 const CAPABILITIES = {
@@ -156,6 +157,9 @@ describe("2026-08-17 additive contracts", () => {
       body: { text: "Thanks — we are looking into it.", idempotencyKey: "4f4e3840-f74d-4d44-aec9-5fabb0cc4344" },
     });
     assert.equal(reply.status, 201);
+    await buildDomainEventProjectionJob({
+      logger: { log() {}, warn() {}, error() {} },
+    })();
     const replyAlert = await prisma.inboxAlert.findFirst({
       where: { userId: user.user.id, type: "SUPPORT_REPLY" },
       include: { outbox: true },

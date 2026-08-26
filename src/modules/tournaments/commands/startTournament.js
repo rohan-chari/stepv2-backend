@@ -15,7 +15,7 @@ const {
 function buildStartTournament(dependencies = {}) {
   const db = dependencies.prisma || defaultPrisma;
   const tournamentModel = dependencies.Tournament || Tournament;
-  const events = dependencies.eventBus || eventBus;
+  const compatibilityEvents = dependencies.eventBus || eventBus;
   const now = dependencies.now || (() => new Date());
   const rng = dependencies.rng;
   const stepsModel = dependencies.Steps;
@@ -70,7 +70,7 @@ function buildStartTournament(dependencies = {}) {
     );
 
     for (const payload of deferred) {
-      events.emit(payload.type, payload);
+      compatibilityEvents?.emit(payload.type, payload);
     }
     const full = await tournamentModel.findById(tournamentId);
     return serializeTournamentPayload(full, userId, {

@@ -6,11 +6,9 @@ const {
 const { isValidIanaTimeZone } = require("../../users/services/globalEventTimezone");
 const {
   prisma: defaultPrisma,
-  deferUntilAfterCommit,
   runInPrismaTransaction,
 } = require("../../../db");
-const { createInboxAlert: defaultCreateInboxAlert } = require("../../inbox/services/inbox");
-const { notificationIntentService: defaultNotificationIntentService } = require("../../notifications/services/notificationDelivery");
+const { appendDomainEvent: defaultAppendDomainEvent } = require("../../domainEvents");
 const {
   enqueueRaceResolutionForUser: defaultEnqueueRaceResolutionForUser,
 } = require("../../races/services/enqueueRaceResolution");
@@ -102,35 +100,6 @@ async function ensureEntitlementForUser(tx, {
       startOutcome: START_OUTCOMES.PENDING,
     },
   });
-  // Future local starts are durable notification intents, not pre-created
-  // Inbox alerts. The due-boundary transaction releases this schedule only
-  // after it proves the recipient still has an eligible active race.
-  if (tx.notificationSchedule && window.startsAt > current) {
-    await defaultNotificationIntentService.submit({
-      recipientUserId: user.id,
-      type: "GLOBAL_EVENT_STARTED",
-      title: "2x STEPS EVENT",
-      body: "Double steps are LIVE for 30 minutes. Every step counts 2x in your races! Go!",
-      payload: {
-        type: "GLOBAL_EVENT_STARTED",
-        route: "home",
-        params: {},
-        multiplier: event.multiplier,
-        eventId: event.id,
-        entitlementId: entitlement.id,
-      },
-      deliveryKey: `visible:GLOBAL_EVENT_STARTED:${user.id}:${event.id}`,
-      availableAt: window.startsAt,
-      expiresAt: window.endsAt,
-      sourceRef: entitlement.id,
-    }, { tx, now: current });
-    // A future schedule is durable before this callback runs. When the caller
-    // uses the shared Prisma transaction wrapper this wake is deferred until
-    // commit; the timer/scan remains the correctness fallback.
-    await deferUntilAfterCommit(() =>
-      defaultNotificationIntentService.wake({ recipientUserId: user.id })
-    );
-  }
   try {
     const { recordOperationalCounters } = require("./globalStepEventObservability");
     await recordOperationalCounters(tx, {
@@ -270,16 +239,14 @@ async function processDueEntitlementBoundaries({
   now = new Date(),
   batchSize = 100,
   tickBudgetMs = 5000,
-  createInboxAlert = defaultCreateInboxAlert,
   enqueueRaceResolution = null,
-  notificationIntentService = defaultNotificationIntentService,
+  appendDomainEvent = defaultAppendDomainEvent,
   logger = console,
 } = {}) {
   const started = Date.now();
   const result = { starts: 0, ends: 0, stale: 0, failures: 0 };
   const current = new Date(now);
   const transitionedUserIds = new Set();
-  const alertedUserIds = new Set();
   const failureCounts = { start: 0, end: 0 };
   const {
     acquireGlobalEnrollmentLock,
@@ -331,21 +298,11 @@ async function processDueEntitlementBoundaries({
         if (entitlement.event?.scheduleMode !== LOCAL_ENTITLEMENTS) {
           return { id: entitlement.id, ignored: true };
         }
-        const deliveryKey = `visible:GLOBAL_EVENT_STARTED:${entitlement.userId}:${entitlement.eventId}`;
         if (new Date(entitlement.endsAt) <= current) {
           await tx.globalStepEventEntitlement.updateMany({
             where: { id: entitlement.id, startProcessedAt: null },
             data: { startOutcome: START_OUTCOMES.SKIPPED_STALE, startProcessedAt: current },
           });
-          if (tx.notificationSchedule) {
-            await notificationIntentService.releaseOneDue({
-              tx,
-              recipientUserId: entitlement.userId,
-              deliveryKey,
-              now: current,
-              eligible: false,
-            });
-          }
           return { id: entitlement.id, userId: entitlement.userId, stale: true };
         }
 
@@ -387,51 +344,24 @@ async function processDueEntitlementBoundaries({
         });
         await enqueueRaces(tx, entitlement, raceIds);
 
-        let alerted = false;
-        if (tx.notificationSchedule) {
-          const released = await notificationIntentService.releaseOneDue({
-            tx,
-            recipientUserId: entitlement.userId,
-            deliveryKey,
-            now: current,
-            eligible: raceIds.length > 0,
-          });
-          if (released?.released) alerted = true;
-          else if (released === null && raceIds.length > 0) {
-            await createInboxAlert({
-              userId: entitlement.userId,
-              type: "GLOBAL_EVENT_STARTED",
-              title: "2x STEPS EVENT",
-              body: "Double steps are LIVE for 30 minutes. Every step counts 2x in your races! Go!",
-              destination: { route: "home" },
-              sourceKey: deliveryKey,
-              payload: {
-                type: "GLOBAL_EVENT_STARTED", route: "home", params: {},
-                multiplier: entitlement.event.multiplier,
-                eventId: entitlement.eventId, entitlementId: entitlement.id,
-              },
-              now: current,
-              tx,
-            });
-            alerted = true;
-          }
-        } else if (raceIds.length > 0) {
-          await createInboxAlert({
-            userId: entitlement.userId,
-            type: "GLOBAL_EVENT_STARTED",
-            title: "2x STEPS EVENT",
-            body: "Double steps are LIVE for 30 minutes. Every step counts 2x in your races! Go!",
-            destination: { route: "home" },
-            sourceKey: deliveryKey,
+        if (raceIds.length > 0) {
+          await appendDomainEvent(tx, {
+            eventKey: `GLOBAL_STEP_EVENT_ACTIVATED_V1:${entitlement.id}`,
+            eventType: "GLOBAL_STEP_EVENT_ACTIVATED_V1",
+            schemaVersion: 1,
+            aggregateType: "GLOBAL_STEP_EVENT_ENTITLEMENT",
+            aggregateId: entitlement.id,
+            occurredAt: current,
+            availableAt: current,
             payload: {
-              type: "GLOBAL_EVENT_STARTED", route: "home", params: {},
+              eventId: entitlement.eventId,
+              entitlementId: entitlement.id,
               multiplier: entitlement.event.multiplier,
-              eventId: entitlement.eventId, entitlementId: entitlement.id,
+              startsAt: entitlement.startsAt,
+              endsAt: entitlement.endsAt,
             },
-            now: current,
-            tx,
+            audience: [{ recipientId: entitlement.userId, facts: {} }],
           });
-          alerted = true;
         }
         await tx.globalStepEventEntitlement.updateMany({
           where: { id: entitlement.id, startProcessedAt: null },
@@ -442,7 +372,7 @@ async function processDueEntitlementBoundaries({
             startProcessedAt: current,
           },
         });
-        return { id: entitlement.id, userId: entitlement.userId, alerted };
+        return { id: entitlement.id, userId: entitlement.userId };
       }, transactionOptions);
     } catch (error) {
       if (entitlementId) error.entitlementId = entitlementId;
@@ -519,22 +449,12 @@ async function processDueEntitlementBoundaries({
         result.ends += 1;
       }
       if (outcome.userId) transitionedUserIds.add(outcome.userId);
-      if (outcome.alerted) alertedUserIds.add(outcome.userId);
     }
   };
 
   await drain("start", processOneStart);
   if (Date.now() - started < tickBudgetMs) await drain("end", processOneEnd);
   await invalidateHomeActiveGlobalEvent([...transitionedUserIds]);
-  if (alertedUserIds.size > 0) {
-    const { invalidateInboxUnread } = require("../../inbox/services/inbox");
-    await Promise.all([...alertedUserIds].map((userId) =>
-      invalidateInboxUnread(userId).catch(() => null)
-    ));
-    await Promise.all([...alertedUserIds].map((recipientUserId) =>
-      notificationIntentService.wake({ recipientUserId }).catch(() => null)
-    ));
-  }
   try {
     const { recordOperationalCounters } = require("./globalStepEventObservability");
     await recordOperationalCounters(prisma, {
@@ -542,7 +462,7 @@ async function processDueEntitlementBoundaries({
       startBoundaryFailures: failureCounts.start,
       endBoundaryClaims: result.ends,
       endBoundaryFailures: failureCounts.end,
-      pushesCreated: alertedUserIds.size,
+      pushesCreated: 0,
     });
   } catch {}
   return result;

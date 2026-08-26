@@ -35,7 +35,7 @@ function buildJoinTournamentCore(dependencies = {}) {
   const holdCoinsFn =
     dependencies.awardCoins ||
     buildAtomicHoldFn({ ErrorClass: TournamentError, code: "INSUFFICIENT_COINS" });
-  const events = dependencies.eventBus || eventBus;
+  const compatibilityEvents = dependencies.eventBus || eventBus;
   const settings = dependencies.appSettings || appSettings;
   const now = dependencies.now || (() => new Date());
   const rng = dependencies.rng;
@@ -301,7 +301,7 @@ function buildJoinTournamentCore(dependencies = {}) {
     );
 
     for (const payload of deferred) {
-      events.emit(payload.type, payload);
+      compatibilityEvents?.emit(payload.type, payload);
     }
 
     const full = await tournamentModel.findById(resolvedId);

@@ -19,6 +19,9 @@ const {
 const {
   evaluateHighMultiplierAlert,
 } = require("../../src/modules/races/services/highMultiplierAlert");
+const {
+  buildNotificationProjector,
+} = require("../../src/modules/domainEvents/services/notificationProjector");
 
 function asyncEventBus() {
   const handlers = new Map();
@@ -55,6 +58,16 @@ describe("admin metrics v2 telemetry ingestion", () => {
     });
     assert.ok(epoch, "enabling telemetry creates one open epoch");
     return epoch;
+  }
+
+  function deliverVisible({ settings, apns, logger = { log() {}, warn() {}, error() {} } }) {
+    return buildInboxDelivery({
+      prisma,
+      appSettings: settings,
+      apnsService: apns,
+      fcmService: apns,
+      logger,
+    })();
   }
 
   it("foreground returns the exact disabled envelope without a write", async () => {
@@ -554,6 +567,10 @@ describe("admin metrics v2 telemetry ingestion", () => {
       movement: 4,
       placement: 2,
     });
+    await deliverVisible({
+      settings: { async getFlag(name) { return name === "adminMetricsV2TelemetryEnabled"; } },
+      apns: { async sendNotification(input) { sent.push(input); return { success: true }; } },
+    });
 
     const deliveries = await prisma.pushDelivery.findMany({ orderBy: { notificationType: "asc" } });
     assert.equal(deliveries.length, 2);
@@ -644,6 +661,10 @@ describe("admin metrics v2 telemetry ingestion", () => {
       movement: 2,
       placement: 2,
     });
+    await deliverVisible({
+      settings: { async getFlag(name) { return name === "adminMetricsV2TelemetryEnabled"; } },
+      apns: { async sendNotification(input) { sent.push(input); return { success: true }; } },
+    });
 
     const deliveries = await prisma.pushDelivery.findMany();
     assert.deepEqual(
@@ -673,43 +694,36 @@ describe("admin metrics v2 telemetry ingestion", () => {
       },
     });
     const sent = [];
+    const occurrenceAt = new Date("2026-08-18T14:00:00.000Z");
     const delivery = buildRaceResolutionDeliveryIntents({
       prisma,
-      appSettings: {
-        async getFlag(name) { return name === "adminMetricsV2TelemetryEnabled"; },
-      },
-      apnsService: {
-        async sendNotification(input) { sent.push(input); return { success: true }; },
-      },
+      now: () => occurrenceAt,
     });
-    const intent = {
-      kind: "STATE_NOTIFICATION",
-      recipientUserId: recipient.user.id,
-      deliveryKeyHash: "durable-resolution-source",
-      payload: {
-        type: "HIGH_MULTIPLIER_ALERT",
-        title: "Heating up",
-        body: "A runner is heating up",
-        pushPayload: {
-          type: "HIGH_MULTIPLIER_ALERT",
-          route: "race_detail",
-          params: { raceId: "resolution-race" },
-        },
-      },
+    const actor = await createTestUser();
+    const event = {
+      raceId: "resolution-race",
+      raceName: "Resolution race",
+      actorUserId: actor.user.id,
+      actorName: actor.user.displayName,
+      multiplier: 5,
+      recipientUserIds: [recipient.user.id],
     };
-    await delivery.deliver(intent);
-    await delivery.deliver(intent);
+    await delivery.claimHighMultiplier(event, { sourceGeneration: "generation-1" });
+    await delivery.claimHighMultiplier(event, { sourceGeneration: "generation-1" });
+    await buildNotificationProjector({ prisma, logger: { log() {}, warn() {}, error() {} } }).run();
+    await deliverVisible({
+      settings: { async getFlag(name) { return name === "adminMetricsV2TelemetryEnabled"; } },
+      apns: { async sendNotification(input) { sent.push(input); return { success: true }; } },
+    });
 
     const facts = await prisma.pushDelivery.findMany();
     assert.equal(facts.length, 1);
-    assert.equal(
-      facts[0].deliveryKey,
-      `visible:HIGH_MULTIPLIER_ALERT:${recipient.user.id}:durable-resolution-source`
-    );
+    assert.ok(facts[0].deliveryKey.startsWith(
+      `visible:HIGH_MULTIPLIER_ALERT:${recipient.user.id}:`
+    ));
     assert.ok(facts[0].providerAcceptedAt);
-    assert.equal(sent.length, 2);
+    assert.equal(sent.length, 1);
     assert.equal(sent[0].payload.notificationId, facts[0].publicId);
-    assert.equal(sent[1].payload.notificationId, facts[0].publicId);
   });
 
   it("uses one canonical delivery identity across Inbox and direct retries", async () => {
@@ -724,11 +738,9 @@ describe("admin metrics v2 telemetry ingestion", () => {
         adminMetricsOpenEpochId: epoch.id,
       },
     });
-    let inboxEnabled = true;
     const settings = {
       async getFlag(name) {
         if (name === "adminMetricsV2TelemetryEnabled") return true;
-        if (name === "apiInboxV1Enabled") return inboxEnabled;
         return false;
       },
     };
@@ -760,7 +772,6 @@ describe("admin metrics v2 telemetry ingestion", () => {
       apnsService: apns,
       logger: { log() {}, warn() {}, error() {} },
     })();
-    inboxEnabled = false;
     await bus.emit("RACE_BUYIN_CHANGED", intent);
 
     const facts = await prisma.pushDelivery.findMany();
@@ -769,9 +780,8 @@ describe("admin metrics v2 telemetry ingestion", () => {
       facts[0].deliveryKey,
       `visible:RACE_BUYIN_CHANGED:${recipient.user.id}:buyin-intent-1`
     );
-    assert.equal(sent.length, 2);
+    assert.equal(sent.length, 1);
     assert.equal(sent[0].payload.notificationId, facts[0].publicId);
-    assert.equal(sent[1].payload.notificationId, facts[0].publicId);
   });
 
   it("uses the persisted global-event id across Inbox, direct path-switch, and retry", async () => {
@@ -793,11 +803,9 @@ describe("admin metrics v2 telemetry ingestion", () => {
         multiplier: 2,
       },
     });
-    let inboxEnabled = true;
     const settings = {
       async getFlag(name) {
         if (name === "adminMetricsV2TelemetryEnabled") return true;
-        if (name === "apiInboxV1Enabled") return inboxEnabled;
         return false;
       },
     };
@@ -824,7 +832,6 @@ describe("admin metrics v2 telemetry ingestion", () => {
       logger: { log() {}, warn() {}, error() {} },
     })();
 
-    inboxEnabled = false;
     const directBus = asyncEventBus();
     registerNotificationHandlers({
       eventBus: directBus, prisma, appSettings: settings, apnsService: apns,
@@ -840,7 +847,7 @@ describe("admin metrics v2 telemetry ingestion", () => {
       facts[0].deliveryKey,
       `visible:GLOBAL_EVENT_STARTED:${recipient.user.id}:${event.id}`
     );
-    assert.equal(sent.length, 3);
+    assert.equal(sent.length, 1);
     assert.ok(sent.every((call) => call.payload.notificationId === facts[0].publicId));
   });
 
@@ -925,6 +932,10 @@ describe("admin metrics v2 telemetry ingestion", () => {
       participant: await participantFor(), currentMultiplier: 5, race,
       otherParticipants: [rival], prisma, emitAlert, now: () => secondAt,
     });
+    await deliverVisible({
+      settings: { async getFlag(name) { return name === "adminMetricsV2TelemetryEnabled"; } },
+      apns: { async sendNotification(input) { sent.push(input); return { success: true }; } },
+    });
 
     const facts = await prisma.pushDelivery.findMany({ orderBy: { deliveryKey: "asc" } });
     assert.equal(facts.length, 2, "retry reuses the first crossing; re-armed crossing is distinct");
@@ -935,9 +946,8 @@ describe("admin metrics v2 telemetry ingestion", () => {
           `visible:HIGH_MULTIPLIER_ALERT:${recipient.user.id}:high-multiplier:${actorParticipant.id}:${at.toISOString()}`
       ).sort()
     );
-    assert.equal(sent.length, 3);
-    assert.equal(sent[0].payload.notificationId, sent[1].payload.notificationId);
-    assert.notEqual(sent[1].payload.notificationId, sent[2].payload.notificationId);
+    assert.equal(sent.length, 2);
+    assert.notEqual(sent[0].payload.notificationId, sent[1].payload.notificationId);
   });
 
   it("keeps distinct identical-context special notification intents separate", async () => {
@@ -976,6 +986,10 @@ describe("admin metrics v2 telemetry ingestion", () => {
     await bus.emit("DAILY_MOVER", { ...base, notificationIntentId: "mover-intent-a" });
     await bus.emit("DAILY_MOVER", { ...base, notificationIntentId: "mover-intent-a" });
     await bus.emit("DAILY_MOVER", { ...base, notificationIntentId: "mover-intent-b" });
+    await deliverVisible({
+      settings: { async getFlag(name) { return name === "adminMetricsV2TelemetryEnabled"; } },
+      apns: { async sendNotification(input) { sent.push(input); return { success: true }; } },
+    });
 
     const facts = await prisma.pushDelivery.findMany({ orderBy: { deliveryKey: "asc" } });
     assert.equal(facts.length, 2);
@@ -986,9 +1000,8 @@ describe("admin metrics v2 telemetry ingestion", () => {
         `visible:DAILY_MOVER:${recipient.user.id}:mover-intent-b`,
       ]
     );
-    assert.equal(sent.length, 3);
-    assert.equal(sent[0].payload.notificationId, sent[1].payload.notificationId);
-    assert.notEqual(sent[1].payload.notificationId, sent[2].payload.notificationId);
+    assert.equal(sent.length, 2);
+    assert.notEqual(sent[0].payload.notificationId, sent[1].payload.notificationId);
   });
 
   it("canonicalizes differing internal and wire notification type names", async () => {
@@ -1003,11 +1016,9 @@ describe("admin metrics v2 telemetry ingestion", () => {
         adminMetricsOpenEpochId: epoch.id,
       },
     });
-    let inboxEnabled = true;
     const settings = {
       async getFlag(name) {
-        return name === "adminMetricsV2TelemetryEnabled" ||
-          (name === "apiInboxV1Enabled" && inboxEnabled);
+        return name === "adminMetricsV2TelemetryEnabled";
       },
     };
     const sent = [];
@@ -1033,7 +1044,6 @@ describe("admin metrics v2 telemetry ingestion", () => {
       prisma, appSettings: settings, apnsService: apns,
       logger: { log() {}, warn() {}, error() {} },
     })();
-    inboxEnabled = false;
     const directBus = asyncEventBus();
     registerNotificationHandlers({
       eventBus: directBus, prisma, appSettings: settings, apnsService: apns,
@@ -1048,7 +1058,8 @@ describe("admin metrics v2 telemetry ingestion", () => {
       facts[0].deliveryKey,
       `visible:TEAM_LEAD_CHANGE:${recipient.user.id}:team-lead-intent-1`
     );
-    assert.equal(sent[0].payload.notificationId, sent[1].payload.notificationId);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].payload.notificationId, facts[0].publicId);
   });
 
   it("reuses one accepted delivery fact when the Inbox outbox retries", async () => {
@@ -1092,8 +1103,7 @@ describe("admin metrics v2 telemetry ingestion", () => {
     const deliveries = await prisma.pushDelivery.findMany();
     assert.equal(deliveries.length, 1);
     assert.ok(deliveries[0].openCapable && deliveries[0].providerAcceptedAt);
-    assert.equal(sent.length, 2);
+    assert.equal(sent.length, 1);
     assert.equal(sent[0].payload.notificationId, deliveries[0].publicId);
-    assert.equal(sent[1].payload.notificationId, deliveries[0].publicId);
   });
 });

@@ -4,6 +4,19 @@ const { EventEmitter } = require("node:events");
 const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
 const { eventBus } = require("../../src/shared/events/eventBus");
 const { registerNotificationHandlers } = require("../../src/modules/notifications/notificationHandlers");
+const {
+  buildRaceResolutionWorkerV2,
+} = require("../../src/modules/races/jobs/raceResolutionQueueV2");
+const {
+  buildRaceProgressPostCommit,
+} = require("../../src/modules/races/services/raceProgressSideEffects");
+const {
+  buildRaceResolutionDeliveryIntents,
+} = require("../../src/modules/races/services/raceResolutionDeliveryIntents");
+const {
+  buildNotificationProjector,
+} = require("../../src/modules/domainEvents/services/notificationProjector");
+const { buildInboxDelivery } = require("../../src/modules/inbox/jobs/inboxDelivery");
 
 // High-multiplier push hardening (2026-08-07):
 // 1. The APNs collapse id was `himult_<raceId>_<actorUserId>` — two full UUIDs,
@@ -202,23 +215,64 @@ describe("high-multiplier push — collapse id + once-per-day recipient cap", ()
     });
   });
 
-  // ── End-to-end: two real races through the public progress path ───────────
-  // The prod entrypoint (src/index.js) registers the notification handlers on
-  // the global event bus; the integration test server (createApp) does not. To
-  // exercise the REAL chain — progress request → evaluator → event bus →
-  // handler → cap → recorded row — register the real handlers on the real bus
-  // here, faking only the push transport (the alternative is Apple's live API).
-  // Each test file runs in its own process, so this registration can't leak.
+  // ── End-to-end: two real races through resolution → durable event → Inbox ─
   it("E2E: spikes in two races on the same day yield exactly one push + one recorded alert for the rival", async () => {
     // Other real handlers (race invite/start, etc.) also push to Bob's token —
     // capture only this feature's sends.
     const allSent = [];
     const sent = { get length() { return allSent.filter((a) => a.payload?.type === "HIGH_MULTIPLIER_ALERT").length; }, at(i) { return allSent.filter((a) => a.payload?.type === "HIGH_MULTIPLIER_ALERT")[i]; } };
+    const provider = {
+      sendNotification: async (args) => { allSent.push(args); return { success: true }; },
+    };
+    const logger = { log() {}, error() {}, warn() {} };
+    const compatibilityHandlers = new Map();
+    let compatibilityHintCount = 0;
+    let failCompatibilityHint = false;
+    const compatibilityBus = {
+      on(name, handler) {
+        const handlers = compatibilityHandlers.get(name) || [];
+        handlers.push(handler);
+        compatibilityHandlers.set(name, handlers);
+      },
+      async emit(name, data) {
+        compatibilityHintCount += 1;
+        if (failCompatibilityHint) throw new Error("injected compatibility hint outage");
+        for (const handler of compatibilityHandlers.get(name) || []) await handler(data);
+      },
+    };
     registerNotificationHandlers({
-      apnsService: { sendNotification: async (args) => { allSent.push(args); return { success: true }; } },
-      fcmService: { sendNotification: async () => ({ success: true }) },
-      logger: { error() {}, warn() {} },
+      eventBus: compatibilityBus,
+      prisma,
+      logger,
     });
+    const deliveryIntents = buildRaceResolutionDeliveryIntents({
+      eventBus: compatibilityBus,
+    });
+    const onCommitted = buildRaceProgressPostCommit({
+      redisStandingsEnabled: true,
+      raceResolutionDeliveryIntents: deliveryIntents,
+      logger,
+    });
+    const resolutionWorker = buildRaceResolutionWorkerV2({
+      bootAt: 0,
+      onCommitted,
+      logger,
+    });
+    const projector = buildNotificationProjector({ prisma, logger });
+    const deliverInbox = () => buildInboxDelivery({
+      prisma,
+      apnsService: provider,
+      fcmService: provider,
+      logger,
+      appSettings: { async getFlag() { return false; } },
+      userFanoutDisabled: () => false,
+    })();
+    const resolveAndDeliver = async (raceId, beforeProject = null) => {
+      await resolutionWorker.processRace({ raceId });
+      if (beforeProject) await beforeProject();
+      await projector.run();
+      await deliverInbox();
+    };
 
     const alice = await createUser("HiMultAliceC");
     const bob = await createUser("HiMultBobCCC");
@@ -231,11 +285,18 @@ describe("high-multiplier push — collapse id + once-per-day recipient cap", ()
     const race1 = await createActiveRace(alice, bob);
     const race2 = await createActiveRace(alice, bob);
 
-    // Race 1 spike → evaluator emits, the REAL handler records one row for Bob
-    // (no device tokens exist in test, so only the record side is observable).
+    // Race 1 spike → resolution appends, the projector materializes, and the
+    // normal Inbox delivery worker reaches the fake provider boundary.
     await spike(race1, alice.userId);
-    await getProgress(bob.token, race1);
-    assert.equal(alerts.filter((a) => a.raceId === race1).length, 1);
+    await resolveAndDeliver(race1, async () => {
+      assert.equal(compatibilityHintCount, 1, "the post-commit compatibility hint ran");
+      assert.equal(await prisma.inboxAlert.count({
+        where: { userId: bob.userId, type: "HIGH_MULTIPLIER_ALERT" },
+      }), 1, "the hint durably queued the legacy-compatible delivery");
+    });
+    assert.equal(await prisma.domainEventOutbox.count({
+      where: { eventType: "HIGH_MULTIPLIER_ALERT_V1", aggregateId: race1 },
+    }), 1);
     await waitFor(async () => (await bobRows(bob.userId)).length === 1);
     assert.equal(sent.length, 1, "one push through the real chain");
     assert.ok(Buffer.byteLength(sent.at(0).collapseId, "utf8") <= 64);
@@ -243,8 +304,10 @@ describe("high-multiplier push — collapse id + once-per-day recipient cap", ()
     // Race 2 spike the same day → the evaluator still emits (its once-per-spike
     // state is per race), but the daily cap swallows the notification.
     await spike(race2, alice.userId);
-    await getProgress(bob.token, race2);
-    assert.equal(alerts.filter((a) => a.raceId === race2).length, 1);
+    await resolveAndDeliver(race2);
+    assert.equal(await prisma.domainEventOutbox.count({
+      where: { eventType: "HIGH_MULTIPLIER_ALERT_V1", aggregateId: race2 },
+    }), 1);
     await sleep(500);
     assert.equal((await bobRows(bob.userId)).length, 1, "same-day second race must not add a row");
     assert.equal(sent.length, 1, "same-day second race must not push");
@@ -256,7 +319,9 @@ describe("high-multiplier push — collapse id + once-per-day recipient cap", ()
     });
     const race3 = await createActiveRace(alice, bob);
     await spike(race3, alice.userId);
-    await getProgress(bob.token, race3);
+    failCompatibilityHint = true;
+    await resolveAndDeliver(race3);
+    assert.equal(compatibilityHintCount, 3, "a failed hint was attempted after commit");
     await waitFor(async () => (await bobRows(bob.userId)).length === 2);
   });
 });

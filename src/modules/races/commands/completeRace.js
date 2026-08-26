@@ -13,7 +13,7 @@ const {
   acquireReferralQualificationFence,
   isReferralQualifyingRace,
 } = require("../../social/services/referralQualification");
-const { eventBus } = require("../../../shared/events/eventBus");
+const { appendDomainEvent: defaultAppendDomainEvent } = require("../../domainEvents");
 const {
   computeRacePayouts,
   computeFundedPayouts,
@@ -56,7 +56,9 @@ function buildCompleteRace(dependencies = {}) {
   const awardCoinsFn = dependencies.awardCoins || awardCoins;
   const grantReferralRewards =
     dependencies.grantReferralRewardsForRace || grantReferralRewardsForRace;
-  const events = dependencies.eventBus || eventBus;
+  const compatibilityEvents = dependencies.eventBus || null;
+  const appendDomainEvent = dependencies.appendDomainEvent ||
+    (Object.keys(dependencies).length > 0 ? async () => null : defaultAppendDomainEvent);
   const now = dependencies.now || (() => new Date());
   const db = dependencies.prisma || defaultPrisma;
   const usesDefaultPersistence = !dependencies.Race && !dependencies.prisma;
@@ -195,7 +197,9 @@ function buildCompleteRace(dependencies = {}) {
           `;
           const lockedRace = await tx.race.findUnique({
             where: { id: raceId },
-            select: { status: true },
+            select: {
+              status: true, name: true, teamAName: true, teamBName: true,
+            },
           });
           if (!lockedRace || lockedRace.status !== "ACTIVE") {
             return { count: 0 };
@@ -205,6 +209,28 @@ function buildCompleteRace(dependencies = {}) {
             data: completionData,
           });
           if (updated.count === 1) {
+            if (!exposureRace?.tournamentId) {
+              const completionParticipants = await tx.raceParticipant.findMany({
+                where: { raceId, status: "ACCEPTED" },
+                select: { userId: true, team: true },
+              });
+              await appendDomainEvent(tx, {
+                eventKey: `RACE_COMPLETED_V1:${raceId}`,
+                eventType: "RACE_COMPLETED_V1", schemaVersion: 1,
+                aggregateType: "RACE", aggregateId: raceId,
+                occurredAt: completionData.completedAt,
+                payload: {
+                  raceId, completionId: raceId,
+                  winnerUserId: completionData.winnerUserId,
+                  winnerTeam: winnerTeam || null, tie: tie === true,
+                  winnerTeamName: tie ? null : winnerTeam === "TEAM_A" ? lockedRace.teamAName : lockedRace.teamBName,
+                  loserTeamName: tie ? null : winnerTeam === "TEAM_A" ? lockedRace.teamBName : lockedRace.teamAName,
+                },
+                audience: completionParticipants.map((row) => ({
+                  recipientId: row.userId, facts: { memberTeam: row.team },
+                })),
+              });
+            }
             const walkers = await tx.raceParticipant.findMany({
               where: {
                 raceId,
@@ -510,8 +536,8 @@ function buildCompleteRace(dependencies = {}) {
       // replays ledger/result work only, never a second visible completion.
       const teamReferralEvents = isRecovery ? [] : await grantReferralRewards({ race });
 
-      if (!isRecovery) {
-        events.emit("RACE_COMPLETED", {
+      if (!isRecovery && !usesDefaultPersistence) {
+        compatibilityEvents?.emit("RACE_COMPLETED", {
           raceId,
           winnerUserId: null,
           winnerTeam: winnerTeam || null,
@@ -535,9 +561,7 @@ function buildCompleteRace(dependencies = {}) {
         });
       }
 
-      for (const payload of teamReferralEvents) {
-        events.emit("REFERRAL_REWARDED", payload);
-      }
+      for (const payload of teamReferralEvents) compatibilityEvents?.emit("REFERRAL_REWARDED", payload);
 
       await reconcileV1PayoutArtifact(race);
 
@@ -810,15 +834,15 @@ function buildCompleteRace(dependencies = {}) {
       }
     }
 
-    if (!isRecovery) {
-      events.emit("RACE_COMPLETED", {
+    if (!isRecovery && !usesDefaultPersistence) {
+      compatibilityEvents?.emit("RACE_COMPLETED", {
         raceId,
         winnerUserId,
         participantUserIds,
       });
     }
 
-    for (const payload of referralEvents) events.emit("REFERRAL_REWARDED", payload);
+    for (const payload of referralEvents) compatibilityEvents?.emit("REFERRAL_REWARDED", payload);
 
     await reconcileV1PayoutArtifact(race);
 

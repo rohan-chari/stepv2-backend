@@ -2,6 +2,7 @@ const { prisma } = require("../../../db");
 const { awardCoins } = require("../../../shared/economy/awardCoins");
 const { withAdvisoryLock } = require("../../../shared/db/withAdvisoryLock");
 const { recordServerActivationEvent } = require("../../analytics/serverActivationEvents");
+const { appendDomainEvent: defaultAppendDomainEvent } = require("../../domainEvents");
 const {
   REFERRER_REWARD_COINS,
   REFEREE_REWARD_COINS,
@@ -37,6 +38,8 @@ async function countEarlierEligiblePendingFacts(store, referrerId, at, referralF
 function buildGrantQualifiedReferralReward(dependencies = {}) {
   const rootDb = dependencies.prisma || prisma;
   const award = dependencies.awardCoins || awardCoins;
+  const appendDomainEvent = dependencies.appendDomainEvent ||
+    (Object.keys(dependencies).length > 0 ? async () => null : defaultAppendDomainEvent);
   const nowFn = dependencies.now || (() => new Date());
 
   async function grantRole(store, { referralId, userId, role, refereeSubHash, coins, qualifiedAtSnapshot }) {
@@ -141,6 +144,30 @@ function buildGrantQualifiedReferralReward(dependencies = {}) {
         ].sort((a, b) => String(a.userId).localeCompare(String(b.userId)));
         for (const grant of grants) {
           if (await grantRole(tx, grant) && grant.role === "REFERRER") {
+            const rewardTransaction = await tx.coinTransaction.findFirst({
+              where: {
+                userId: referral.referrerId,
+                reason: "referral_reward",
+                refId: `referral:${referral.id}:REFERRER`,
+              },
+              select: { id: true, createdAt: true },
+            });
+            if (!rewardTransaction?.id) {
+              throw new Error("referral reward transaction missing after committed grant");
+            }
+            await appendDomainEvent(tx, {
+              eventKey: `REFERRAL_REWARDED_V1:${rewardTransaction.id}`,
+              eventType: "REFERRAL_REWARDED_V1", schemaVersion: 1,
+              aggregateType: "REFERRAL", aggregateId: rewardTransaction.id,
+              occurredAt: rewardTransaction.createdAt || qualificationTime,
+              payload: {
+                rewardTransactionId: rewardTransaction.id,
+                referrerId: referral.referrerId,
+                refereeId: referral.refereeId,
+                coins: REFERRER_REWARD_COINS,
+              },
+              audience: [{ recipientId: referral.referrerId, facts: {} }],
+            });
             events.push({
               referrerId: referral.referrerId,
               refereeId: referral.refereeId,

@@ -151,7 +151,7 @@ test("picks the single biggest move across a user's races (either direction)", a
   assert.equal(u1.movement, -7);
 });
 
-test("random tiebreak when two races have equal-magnitude moves", async () => {
+test("deterministic lowest-race-id tiebreak when two races have equal-magnitude moves", async () => {
   const fixtures = () => ({
     races: [{ id: "r1", name: "Race 1" }, { id: "r2", name: "Race 2" }],
     participantsByRace: {
@@ -171,7 +171,7 @@ test("random tiebreak when two races have equal-magnitude moves", async () => {
 
   const high = makeDeps({ ...fixtures(), random: () => 0.99 });
   await buildDailyMover(high.deps)();
-  assert.equal(high.emitted.find((e) => e.data.userId === "u1").data.raceId, "r2");
+  assert.equal(high.emitted.find((e) => e.data.userId === "u1").data.raceId, "r1");
 });
 
 test("before 4pm ET: does no work and does not mark the run", async () => {

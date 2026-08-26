@@ -14,6 +14,10 @@ const {
   SuggestionQueryError,
 } = require("./queries/listSuggestions");
 const { listFeedbackThreads } = require("./queries/listFeedbackThreads");
+const {
+  buildSendStaffReply,
+  StaffReplyError,
+} = require("./commands/sendStaffReply");
 
 module.exports = {
   createFeedbackRouter,
@@ -24,4 +28,6 @@ module.exports = {
   SuggestionQueryError,
   MAX_TEXT_LENGTH,
   DAILY_SUBMISSION_LIMIT,
+  buildSendStaffReply,
+  StaffReplyError,
 };

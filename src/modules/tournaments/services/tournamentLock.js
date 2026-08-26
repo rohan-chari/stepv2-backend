@@ -8,6 +8,10 @@ const {
 const {
   lockCompetitionRows,
 } = require("../../races/services/raceWriteFence");
+const {
+  buildAppendTournamentDomainEvent,
+} = require("./appendTournamentDomainEvent");
+const appendTournamentDomainEvent = buildAppendTournamentDomainEvent();
 
 // Serialize every capacity-sensitive tournament mutation (join / accept / leave
 // / kick / invite / cancel / start) on the tournament id, so concurrent joins
@@ -41,7 +45,13 @@ async function withTournamentLock(
     const lockedTournament = await tx.tournament.findUnique({
       where: { id: tournamentId },
     });
-    return fn(tx, deferred, lockedTournament);
+    const value = await fn(tx, deferred, lockedTournament);
+    if (tx.domainEventOutbox) {
+      for (const payload of deferred) {
+        await appendTournamentDomainEvent(tx, payload);
+      }
+    }
+    return value;
   });
   return { result, deferred };
 }

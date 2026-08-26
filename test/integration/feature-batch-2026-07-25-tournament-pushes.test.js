@@ -13,6 +13,7 @@ const assert = require("node:assert/strict");
 const { describe, it, before, beforeEach } = require("node:test");
 const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
 const { completeRace } = require("../../src/modules/races/commands/completeRace");
+const { buildDomainEventProjectionJob } = require("../../src/modules/domainEvents");
 const {
   registerNotificationHandlers,
 } = require("../../src/modules/notifications");
@@ -104,6 +105,7 @@ describe("feature batch 2026-07-25 — §1 tournament end-of-run pushes", () => 
     await prisma.notification.deleteMany({});
     nextAppleId = 0;
     await appSettings.setFlag("tournamentsEnabled", true);
+    await appSettings.setFlag("apiInboxV1Enabled", true);
   });
 
   it("a 4-bracket run to completion sends TOURNAMENT_CHAMPION to the winner and TOURNAMENT_COMPLETED to nobody", async () => {
@@ -126,6 +128,18 @@ describe("feature batch 2026-07-25 — §1 tournament end-of-run pushes", () => 
     });
     const { tournament } = await createRes.json();
     const tournamentId = tournament.id;
+    await prisma.friendship.createMany({
+      data: [b, c, d].map((user) => ({
+        requesterId: a.userId,
+        addresseeId: user.userId,
+        status: "ACCEPTED",
+      })),
+    });
+    const invite = await authReq("POST", `/tournaments/${tournamentId}/invite`, {
+      token: a.token,
+      body: { userIds: [b.userId, c.userId, d.userId] },
+    });
+    assert.equal(invite.status, 200);
     for (const u of [b, c, d]) {
       await authReq("POST", `/tournaments/${tournamentId}/join`, { token: u.token });
     }
@@ -153,6 +167,24 @@ describe("feature batch 2026-07-25 — §1 tournament end-of-run pushes", () => 
     assert.equal(t.status, "COMPLETED");
     assert.equal(t.championUserId, f0.userId);
 
+    const produced = await prisma.domainEventOutbox.groupBy({
+      by: ["eventType"],
+      where: { aggregateId: tournamentId },
+      _count: { _all: true },
+    });
+    const producedCounts = Object.fromEntries(
+      produced.map((row) => [row.eventType, row._count._all]),
+    );
+    assert.deepEqual(producedCounts, {
+      TOURNAMENT_CHAMPION_V1: 1,
+      TOURNAMENT_ELIMINATED_V1: 3,
+      TOURNAMENT_INVITE_SENT_V1: 3,
+      TOURNAMENT_MATCHUP_WON_V1: 2,
+      TOURNAMENT_ROUND_STARTED_V1: 2,
+      TOURNAMENT_STARTED_V1: 4,
+    });
+    assert.equal(producedCounts.TOURNAMENT_COMPLETED_V1, undefined,
+      "retired tournament completion fan-out remains compatibility-only");
     // The champion push still lands.
     const champion = await notificationsOfType("TOURNAMENT_CHAMPION", { expect: 1 });
     assert.equal(champion.length, 1, "exactly one champion push");
@@ -215,5 +247,83 @@ describe("feature batch 2026-07-25 — §1 tournament end-of-run pushes", () => 
       ["TOURNAMENT_ELIMINATED"],
       "the runner-up gets exactly one end-of-run push: their own knockout"
     );
+
+    const project = buildDomainEventProjectionJob({ logger: quietLogger });
+    await project();
+    await project();
+    for (const type of [
+      "TOURNAMENT_CHAMPION",
+      "TOURNAMENT_ELIMINATED",
+      "TOURNAMENT_INVITE_SENT",
+      "TOURNAMENT_MATCHUP_WON",
+      "TOURNAMENT_ROUND_STARTED",
+      "TOURNAMENT_STARTED",
+    ]) {
+      assert.ok(
+        await prisma.inboxAlert.count({ where: { type } }),
+        `${type} reaches Inbox from its real tournament command path`,
+      );
+    }
+  });
+
+  it("projects real tournament cancellation/invite commands and suppresses a deleted occurrence recipient", async () => {
+    const creator = await createUser("CancelCreator");
+    const eligible = await createUser("CancelEligible");
+    const deleted = await createUser("CancelDeleted");
+    await prisma.friendship.createMany({
+      data: [eligible, deleted].map((user) => ({
+        requesterId: creator.userId,
+        addresseeId: user.userId,
+        status: "ACCEPTED",
+      })),
+    });
+    const created = await authReq("POST", "/tournaments", {
+      token: creator.token,
+      body: {
+        name: "Cancellation coverage cup",
+        bracketSize: 4,
+        matchupDurationDays: 1,
+        buyInAmount: 0,
+        isPublic: true,
+        powerupsEnabled: false,
+        inviteeIds: [],
+      },
+    });
+    assert.equal(created.status, 201);
+    const tournamentId = (await created.json()).tournament.id;
+    const invited = await authReq("POST", `/tournaments/${tournamentId}/invite`, {
+      token: creator.token,
+      body: { userIds: [eligible.userId, deleted.userId] },
+    });
+    assert.equal(invited.status, 200);
+    const cancelled = await authReq("DELETE", `/tournaments/${tournamentId}`, {
+      token: creator.token,
+    });
+    assert.equal(cancelled.status, 200);
+    const removed = await request(server.baseUrl, "DELETE", "/auth/account", {
+      token: deleted.token,
+    });
+    assert.equal(removed.status, 204);
+
+    const project = buildDomainEventProjectionJob({ logger: quietLogger });
+    await project();
+    await project();
+    const cancellationEvents = await prisma.domainEventOutbox.findMany({
+      where: { aggregateId: tournamentId, eventType: "TOURNAMENT_CANCELLED_V1" },
+      include: { projections: true },
+    });
+    assert.equal(cancellationEvents.length, 3);
+    const projections = cancellationEvents.flatMap((event) => event.projections);
+    assert.equal(projections.filter((row) => row.status === "COMPLETED").length, 2);
+    assert.equal(projections.filter((row) => row.status === "SUPPRESSED").length, 1);
+    assert.equal(
+      projections.find((row) => row.recipientUserId === deleted.userId).lastErrorCode,
+      "RECIPIENT_DELETED",
+    );
+    assert.equal(await prisma.inboxAlert.count({ where: {
+      type: "TOURNAMENT_CANCELLED",
+      userId: { in: [creator.userId, eligible.userId] },
+    } }), 2);
+    assert.equal(await prisma.inboxAlert.count({ where: { userId: deleted.userId } }), 0);
   });
 });

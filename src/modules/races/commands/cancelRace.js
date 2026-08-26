@@ -5,7 +5,7 @@ const {
   runInPrismaTransaction: defaultRunInPrismaTransaction,
 } = require("../../../db");
 const { awardCoins } = require("../../../shared/economy/awardCoins");
-const { eventBus } = require("../../../shared/events/eventBus");
+const { appendDomainEvent: defaultAppendDomainEvent } = require("../../domainEvents");
 const { refundRaceBuyIn } = require("../services/raceBuyIns");
 const {
   assertCreator,
@@ -38,7 +38,9 @@ function buildCancelRace(dependencies = {}) {
   const raceModel = dependencies.Race || Race;
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
   const awardCoinsFn = dependencies.awardCoins || awardCoins;
-  const events = dependencies.eventBus || eventBus;
+  const compatibilityEvents = dependencies.eventBus || null;
+  const appendDomainEvent = dependencies.appendDomainEvent ||
+    (Object.keys(dependencies).length > 0 ? async () => null : defaultAppendDomainEvent);
   const usesDefaultPersistence =
     !dependencies.Race &&
     !dependencies.RaceParticipant &&
@@ -129,9 +131,23 @@ function buildCancelRace(dependencies = {}) {
     const eventPayload = {
       raceId,
       raceName: race.name,
+      cancellationId: raceId,
       creatorUserId: userId,
       participantUserIds,
     };
+
+    if (usesDefaultPersistence) {
+      await appendDomainEvent(defaultPrisma, {
+        eventKey: `RACE_CANCELLED_V1:${raceId}`,
+        eventType: "RACE_CANCELLED_V1", schemaVersion: 1,
+        aggregateType: "RACE", aggregateId: raceId,
+        occurredAt: updated?.updatedAt || new Date(),
+        payload: {
+          raceId, raceName: race.name, cancellationId: raceId, creatorUserId: userId,
+        },
+        audience: participantUserIds.map((recipientId) => ({ recipientId, facts: {} })),
+      });
+    }
 
     // The race is already CANCELLED; the ACTIVE-only worker would no-op.
 
@@ -145,7 +161,7 @@ function buildCancelRace(dependencies = {}) {
           maxWait: 5_000,
         })
       : await cancelRaceCore(args);
-    events.emit("RACE_CANCELLED", outcome.eventPayload);
+    if (!usesDefaultPersistence) compatibilityEvents?.emit("RACE_CANCELLED", outcome.eventPayload);
     await invalidateRaceProgress(args.raceId);
     return outcome.updated;
   };

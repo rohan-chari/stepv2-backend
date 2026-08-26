@@ -2,7 +2,7 @@ const { Race } = require("../models/race");
 const { RaceParticipant } = require("../models/raceParticipant");
 const { RacePowerupEvent } = require("../../powerups/models/racePowerupEvent");
 const { Steps } = require("../../steps/models/steps");
-const { eventBus } = require("../../../shared/events/eventBus");
+const { appendDomainEvent: defaultAppendDomainEvent } = require("../../domainEvents");
 const { isRacePayoutPresetCompatible } = require("../racePayoutPresets");
 
 const { acceptedTeamCounts } = require("../teamRaces");
@@ -32,7 +32,9 @@ function buildStartRace(dependencies = {}) {
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
   const stepsModel = dependencies.Steps || Steps;
   const eventModel = dependencies.RacePowerupEvent || RacePowerupEvent;
-  const events = dependencies.eventBus || eventBus;
+  const compatibilityEvents = dependencies.eventBus || null;
+  const appendDomainEvent = dependencies.appendDomainEvent ||
+    (Object.keys(dependencies).length > 0 ? async () => null : defaultAppendDomainEvent);
   const commitRaceStartFn = dependencies.commitRaceStart || commitRaceStart;
   const beforeCommitRaceStart = dependencies.beforeCommitRaceStart;
   const beforeRaceStartedRecord = dependencies.beforeRaceStartedRecord;
@@ -224,7 +226,24 @@ function buildStartRace(dependencies = {}) {
         teamPoolMultBps: pricedTeamPoolMultBps,
         potCoins: (race.potCoins || 0) + heldPot,
         participantUpdates,
-        beforeRaceStartedRecord,
+        beforeRaceStartedRecord: async (context) => {
+          if (beforeRaceStartedRecord) await beforeRaceStartedRecord(context);
+          await appendDomainEvent(context.tx, {
+            eventKey: `RACE_STARTED_V1:${raceId}`,
+            eventType: "RACE_STARTED_V1", schemaVersion: 1,
+            aggregateType: "RACE", aggregateId: raceId,
+            occurredAt: startedAt,
+            payload: {
+              raceId, raceName: race.name, creatorUserId: userId,
+              isTeamRace: race.isTeamRace === true,
+              teamAName: race.teamAName ?? null, teamBName: race.teamBName ?? null,
+              isSeededBucket: false,
+            },
+            audience: participantUpdates
+              .filter((entry) => entry.userId !== userId)
+              .map((entry) => ({ recipientId: entry.userId, facts: {} })),
+          });
+        },
       });
       if (committed.participantChanged) {
         // A join committed while baselines were being read. Retry from a fresh
@@ -234,15 +253,6 @@ function buildStartRace(dependencies = {}) {
       if (!committed.started) return raceModel.findById(raceId);
 
       const participantUserIds = participantUpdates.map((p) => p.userId);
-      events.emit("RACE_STARTED", {
-        raceId,
-        raceName: race.name,
-        creatorUserId: userId,
-        participantUserIds,
-        isTeamRace: race.isTeamRace === true,
-        teamAName: race.teamAName ?? null,
-        teamBName: race.teamBName ?? null,
-      });
       try {
         await require("../../social/services/raceMessagesCache").invalidateKind(
           raceId,
@@ -293,7 +303,7 @@ function buildStartRace(dependencies = {}) {
       description: "Race started!",
     });
 
-    events.emit("RACE_STARTED", {
+    compatibilityEvents?.emit("RACE_STARTED", {
       raceId,
       raceName: race.name,
       creatorUserId: userId,

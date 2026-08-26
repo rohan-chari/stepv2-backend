@@ -22,6 +22,8 @@ const {
 const {
   listSuggestions: defaultListSuggestions,
   listFeedbackThreads: defaultListFeedbackThreads,
+  buildSendStaffReply,
+  StaffReplyError,
 } = require("../feedback");
 const { serializeBounds } = require("../economy/balanceConfig.defaults");
 const derivedCache = require("../../shared/cache/derivedCache");
@@ -31,9 +33,7 @@ const {
   encodeCursor,
   parseLimit,
   beforeCursor,
-  invalidateInboxUnread,
 } = require("../inbox/services/inbox");
-const { buildNotificationIntentService } = require("../notifications/services/notificationDelivery");
 
 // C1 invalidation (spec §5 Phase B). Every shop_items / powerup_shop_items
 // mutation below must drop the derived catalog + manifest copies and broadcast
@@ -76,8 +76,6 @@ function cleanStaffThreadText(value) {
   const text = value.trim();
   return text.length >= 1 && text.length <= 2000 ? text : null;
 }
-function staffThreadExpiry(now) { return new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000); }
-
 // Shared validator for the `assetVersion` body field on both shop admin
 // surfaces. `undefined` means "not supplied, leave alone"; `null` means
 // "detach — the art is bundled again". Anything else must be a hex digest
@@ -227,8 +225,11 @@ function createAdminRouter(dependencies = {}) {
   const db = dependencies.prisma || prisma;
   const transaction = dependencies.transaction ||
     (dependencies.prisma ? (work) => db.$transaction(work) : runInPrismaTransaction);
-  const notificationIntentService = dependencies.notificationIntentService ||
-    buildNotificationIntentService({ prisma: db });
+  const sendStaffReply = dependencies.sendStaffReply || buildSendStaffReply({
+    prisma: db,
+    transaction,
+    appendDomainEvent: dependencies.appendDomainEvent,
+  });
   const requireAuth =
     dependencies.requireAuth || buildRequireAuth(dependencies);
   const requireAdmin = buildRequireAdmin(dependencies);
@@ -323,36 +324,25 @@ function createAdminRouter(dependencies = {}) {
       if (!text || !validThreadIdempotencyKey(idempotencyKey)) {
         return res.status(400).json({ error: "Invalid message payload", code: "INVALID_BODY" });
       }
-      const now = new Date();
-      const thread = await prisma.feedbackThread.findFirst({ where: { id: req.params.id, expiresAt: { gt: now } } });
-      if (!thread) return res.status(404).json({ error: "Thread not found", code: "NOT_FOUND" });
-      const existing = await prisma.feedbackMessage.findUnique({ where: { threadId_idempotencyKey: { threadId: thread.id, idempotencyKey } } });
-      if (existing) return res.status(200).json({ message: { id: existing.id, senderKind: existing.senderKind, text: existing.text, createdAt: existing.createdAt } });
-      const hourAgo = new Date(now.getTime() - 60 * 60 * 1000);
-      const recent = await prisma.feedbackMessage.count({ where: { senderKind: "STAFF", createdAt: { gte: hourAgo } } });
-      if (recent >= 60) return res.status(429).json({ error: "Too many support replies", code: "RATE_LIMITED" });
-      const message = await transaction(async (tx) => {
-        const created = await tx.feedbackMessage.create({ data: { threadId: thread.id, senderKind: "STAFF", text, idempotencyKey } });
-        await tx.feedbackThread.update({ where: { id: thread.id }, data: { lastMessageAt: now, expiresAt: staffThreadExpiry(now), staffReadAt: now, userReadAt: null } });
-        await notificationIntentService.submit({
-          recipientUserId: thread.userId,
-          type: "SUPPORT_REPLY",
-          title: "BARA SUPPORT",
-          body: text,
-          payload: {
-            type: "SUPPORT_REPLY",
-            route: "support_thread",
-            params: { threadId: thread.id },
-          },
-          deliveryKey: `support-reply:${created.id}`,
-          availableAt: now,
-        }, { tx, now });
-        return created;
+      const outcome = await sendStaffReply({
+        threadId: req.params.id,
+        text,
+        idempotencyKey,
+        now: new Date(),
       });
-      await notificationIntentService.wake({ recipientUserId: thread.userId }).catch(() => null);
-      await invalidateInboxUnread(thread.userId);
-      return res.status(201).json({ message: { id: message.id, senderKind: message.senderKind, text: message.text, createdAt: message.createdAt } });
+      const message = outcome.message;
+      return res.status(outcome.created ? 201 : 200).json({
+        message: {
+          id: message.id,
+          senderKind: message.senderKind,
+          text: message.text,
+          createdAt: message.createdAt,
+        },
+      });
     } catch (error) {
+      if (error instanceof StaffReplyError) {
+        return res.status(error.statusCode).json({ error: error.message, code: error.code });
+      }
       console.error("Admin feedback reply error:", error);
       return res.status(500).json({ error: "Internal server error", code: "INTERNAL_ERROR" });
     }

@@ -15,6 +15,9 @@ const SCHEDULE_CLAIMED = "CLAIMED";
 const SCHEDULE_MATERIALIZED = "MATERIALIZED";
 const SCHEDULE_EXPIRED = "EXPIRED";
 const SCHEDULE_CANCELED = "CANCELLED";
+const GLOBAL_EVENT_ELIGIBLE = "ELIGIBLE";
+const GLOBAL_EVENT_PENDING_ACTIVATION = "PENDING_ACTIVATION";
+const GLOBAL_EVENT_INELIGIBLE_TERMINAL = "INELIGIBLE_TERMINAL";
 
 function asDate(value, field, { optional = false } = {}) {
   if (value == null && optional) return null;
@@ -77,28 +80,44 @@ function destinationForPayload(payload = {}) {
 }
 
 async function globalEventStillEligible(tx, row, current) {
-  if (row.type !== "GLOBAL_EVENT_STARTED") return true;
-  if (!row.sourceRef || !tx.globalStepEventEntitlement || !tx.raceParticipant) return true;
+  if (row.type !== "GLOBAL_EVENT_STARTED") return GLOBAL_EVENT_ELIGIBLE;
+  if (!row.sourceRef || !tx.globalStepEventEntitlement) return GLOBAL_EVENT_ELIGIBLE;
   const entitlement = await tx.globalStepEventEntitlement.findUnique({
     where: { id: row.sourceRef },
-    select: { userId: true, startsAt: true, eventId: true },
-  });
-  if (!entitlement || new Date(entitlement.startsAt) > current) return false;
-  const active = await tx.raceParticipant.count({
-    where: {
-      userId: entitlement.userId,
-      status: "ACCEPTED",
-      forfeitedAt: null,
-      finishedAt: null,
-      joinedAt: { lte: entitlement.startsAt },
-      race: {
-        status: "ACTIVE",
-        startedAt: { lte: entitlement.startsAt },
-        OR: [{ endsAt: null }, { endsAt: { gt: entitlement.startsAt } }],
-      },
+    select: {
+      userId: true, startsAt: true, endsAt: true, eventId: true,
+      startOutcome: true, startProcessedAt: true,
     },
   });
-  return active > 0;
+  // Legacy-global schedules used event IDs as sourceRef. They were normally
+  // materialized immediately, but a mixed-version crash can leave one behind.
+  if (!entitlement && tx.globalStepEvent) {
+    const event = await tx.globalStepEvent.findUnique({
+      where: { id: row.sourceRef }, select: { startsAt: true, endsAt: true },
+    });
+    if (!event || new Date(event.endsAt) <= current) return GLOBAL_EVENT_INELIGIBLE_TERMINAL;
+    if (new Date(event.startsAt) > current) return GLOBAL_EVENT_PENDING_ACTIVATION;
+    const impacts = tx.globalEventRaceImpact
+      ? await tx.globalEventRaceImpact.count({ where: { eventId: row.sourceRef, userId: row.recipientUserId } })
+      : 1;
+    return impacts > 0 ? GLOBAL_EVENT_ELIGIBLE : GLOBAL_EVENT_PENDING_ACTIVATION;
+  }
+  if (!entitlement || new Date(entitlement.endsAt) <= current) {
+    return GLOBAL_EVENT_INELIGIBLE_TERMINAL;
+  }
+  if (new Date(entitlement.startsAt) > current ||
+      (!entitlement.startProcessedAt && entitlement.startOutcome === "PENDING")) {
+    return GLOBAL_EVENT_PENDING_ACTIVATION;
+  }
+  if (["NO_ACTIVE_RACES", "SKIPPED_STALE"].includes(entitlement.startOutcome)) {
+    return GLOBAL_EVENT_INELIGIBLE_TERMINAL;
+  }
+  const impacts = tx.globalEventRaceImpact
+    ? await tx.globalEventRaceImpact.count({
+        where: { eventId: entitlement.eventId, userId: entitlement.userId },
+      })
+    : 1;
+  return impacts > 0 ? GLOBAL_EVENT_ELIGIBLE : GLOBAL_EVENT_INELIGIBLE_TERMINAL;
 }
 
 function scanHint(intent) {
@@ -123,6 +142,8 @@ function buildLegacyImmediateDelivery(dependencies = {}) {
         title,
         body,
         payload,
+        ...(payload?.collapseId ? { collapseId: payload.collapseId } : {}),
+        ...(payload?.threadId ? { threadId: payload.threadId } : {}),
       });
       if (result?.success) {
         accepted += 1;
@@ -276,8 +297,19 @@ function buildNotificationIntentService(dependencies = {}) {
           expired += 1;
           continue;
         }
-        const boundaryEligible = await globalEventStillEligible(tx, row, current);
-        if (!boundaryEligible || (typeof eligibility === "function" && !(await eligibility(row, tx, current)))) {
+        const boundaryEligibility = await globalEventStillEligible(tx, row, current);
+        if (boundaryEligibility === GLOBAL_EVENT_PENDING_ACTIVATION) {
+          // The gameplay boundary may be committing concurrently. Keep this
+          // legacy schedule pending and move its next scan a bounded distance;
+          // notification reconciliation never decides gameplay eligibility.
+          await tx.notificationSchedule.updateMany({
+            where: { id: row.id, status: SCHEDULE_PENDING },
+            data: { availableAt: new Date(current.getTime() + 5_000) },
+          });
+          continue;
+        }
+        if (boundaryEligibility === GLOBAL_EVENT_INELIGIBLE_TERMINAL ||
+            (typeof eligibility === "function" && !(await eligibility(row, tx, current)))) {
           await tx.notificationSchedule.updateMany({
             where: { id: row.id, status: SCHEDULE_PENDING },
             data: { status: SCHEDULE_CANCELED, claimedAt: current, canceledAt: current, cancellationReason: "INELIGIBLE_AT_BOUNDARY" },
@@ -422,6 +454,10 @@ module.exports = {
   SCHEDULE_MATERIALIZED,
   SCHEDULE_EXPIRED,
   SCHEDULE_CANCELED,
+  GLOBAL_EVENT_ELIGIBLE,
+  GLOBAL_EVENT_PENDING_ACTIVATION,
+  GLOBAL_EVENT_INELIGIBLE_TERMINAL,
+  globalEventStillEligible,
   normalizeNotificationIntent,
   destinationForPayload,
   buildNotificationIntentService,

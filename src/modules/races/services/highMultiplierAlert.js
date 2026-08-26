@@ -89,6 +89,7 @@ async function evaluateHighMultiplierAlert({
     const alert = {
       raceId: race?.id ?? participant.raceId ?? null,
       raceName: race?.name ?? null,
+      endsAt: race?.endsAt ?? null,
       actorUserId: participant.userId,
       actorName: participant.user?.displayName ?? null,
       multiplier: Math.round(mult),

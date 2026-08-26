@@ -60,6 +60,10 @@ const {
   registerRaceListCacheInvalidation,
 } = require("./modules/races");
 const { scheduleGiveawayRetention } = require("./modules/giveaways");
+const {
+  scheduleDomainEventProjection,
+  scheduleDomainEventRetention,
+} = require("./modules/domainEvents");
 function startServer({
   app = createApp(),
   port = Number(process.env.PORT || 3000),
@@ -82,6 +86,8 @@ function startServer({
   scheduleNotificationCleanup: scheduleNotifCleanup = scheduleNotificationCleanup,
   scheduleInboxExpiry: scheduleInboxExpiryJob = scheduleInboxExpiry,
   scheduleInboxDelivery: scheduleInboxDeliveryJob = scheduleInboxDelivery,
+  scheduleDomainEventProjection: scheduleDomainEventProjectionJob = scheduleDomainEventProjection,
+  scheduleDomainEventRetention: scheduleDomainEventRetentionJob = scheduleDomainEventRetention,
   scheduleActivationEventCleanup:
     scheduleActivationCleanup = scheduleActivationEventCleanup,
   scheduleAdminMetricsActivityCleanup:
@@ -169,6 +175,7 @@ function startServer({
         scheduleInboxExpiryJob();
       }
       if (!userFanoutDisabled("INBOX_DELIVERY_DISABLED")) {
+        scheduleDomainEventProjectionJob();
         // The cron owner is the only process that subscribes to the ephemeral
         // wake channel. Postgres polling remains the durable recovery path.
         scheduleInboxDeliveryJob({
@@ -176,6 +183,7 @@ function startServer({
           subscribeNotificationWakeup,
         });
       }
+      scheduleDomainEventRetentionJob();
       if (!destructiveCleanupDisabled("ACTIVATION_EVENT_CLEANUP_DISABLED")) {
         scheduleActivationCleanup();
       }

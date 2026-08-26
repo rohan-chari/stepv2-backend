@@ -2,7 +2,7 @@ const { Race } = require("../models/race");
 const { RaceParticipant } = require("../models/raceParticipant");
 const { Friendship } = require("../../social");
 const { User } = require("../../users");
-const { eventBus } = require("../../../shared/events/eventBus");
+const { appendDomainEvent: defaultAppendDomainEvent } = require("../../domainEvents");
 const { TEAM_RACES_FEATURE } = require("../teamRaces");
 const { prisma: defaultPrisma } = require("../../../db");
 const { acquireRaceWriteFence } = require("../services/raceWriteFence");
@@ -25,7 +25,9 @@ function buildInviteToRace(dependencies = {}) {
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
   const friendshipModel = dependencies.Friendship || Friendship;
   const userModel = dependencies.User || User;
-  const events = dependencies.eventBus || eventBus;
+  const compatibilityEvents = dependencies.eventBus || null;
+  const appendDomainEvent = dependencies.appendDomainEvent ||
+    (Object.keys(dependencies).length > 0 ? async () => null : defaultAppendDomainEvent);
   const db = dependencies.prisma || defaultPrisma;
   const acquireWriteFence = dependencies.acquireRaceWriteFence ||
     (Object.keys(dependencies).length === 0 || dependencies.prisma
@@ -184,17 +186,29 @@ function buildInviteToRace(dependencies = {}) {
           );
         }
         await tx.raceParticipant.createMany({ data: records, skipDuplicates: true });
+        const createdInvites = await tx.raceParticipant.findMany({
+          where: { raceId, userId: { in: inviteeIds }, status: "INVITED" },
+          select: { id: true, userId: true },
+        });
+        const byUser = new Map(createdInvites.map((row) => [row.userId, row.id]));
+        for (const inviteeUserId of inviteeIds) {
+          const inviteId = byUser.get(inviteeUserId);
+          await appendDomainEvent(tx, {
+            eventKey: `RACE_INVITE_SENT_V1:${inviteId}`,
+            eventType: "RACE_INVITE_SENT_V1", schemaVersion: 1,
+            aggregateType: "RACE", aggregateId: raceId,
+            occurredAt: new Date(),
+            payload: { raceId, raceName: race.name, creatorUserId: userId, inviteId },
+            audience: [{ recipientId: inviteeUserId, facts: {} }],
+          });
+        }
       });
     } else {
       await participantModel.createMany(records);
-    }
-
-    for (const inviteeId of inviteeIds) {
-      events.emit("RACE_INVITE_SENT", {
-        raceId,
-        raceName: race.name,
-        creatorUserId: userId,
-        inviteeUserId: inviteeId,
+      // Narrow injected unit-test compatibility. Production always uses the
+      // transaction above and never relies on this process-local callback.
+      for (const inviteeUserId of inviteeIds) compatibilityEvents?.emit("RACE_INVITE_SENT", {
+        raceId, raceName: race.name, creatorUserId: userId, inviteeUserId,
       });
     }
 

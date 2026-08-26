@@ -1,6 +1,8 @@
 const assert = require("node:assert/strict");
 const { describe, it, before, beforeEach } = require("node:test");
 const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
+const { buildDomainEventProjectionJob } = require("../../src/modules/domainEvents");
+const { appSettings } = require("../../src/shared/config/appSettings");
 
 // Integration coverage for the 2026-07-17 backend batch:
 //   * Item 1 — POST /races/:id/powerups/open-batch ("Open All Boxes")
@@ -102,7 +104,10 @@ async function giveActiveEffect(raceId, targetUserId, type) {
 
 describe("open-batch / leech / x-ray — integration", () => {
   before(async () => { server = await getSharedServer(); });
-  beforeEach(async () => { await cleanDatabase(); });
+  beforeEach(async () => {
+    await cleanDatabase();
+    await appSettings.setFlag("apiInboxV1Enabled", true);
+  });
 
   it("open-batch opens all slot boxes + queued overflow in one call", async () => {
     const alice = await createUser("Alice");
@@ -188,6 +193,17 @@ describe("open-batch / leech / x-ray — integration", () => {
     const feedRes = await request(server.baseUrl, "GET", `/races/${raceId}/feed`, { token: bob.token });
     const feed = await feedRes.json();
     assert.ok(feed.events.find((e) => e.eventType === "POWERUP_USED" && e.powerupType === "LEECH"));
+
+    assert.equal(await prisma.domainEventOutbox.count({
+      where: { eventType: "POWERUP_USED_V1", aggregateId: leech.id },
+    }), 1, "the real HTTP powerup command commits its durable notification event");
+    await buildDomainEventProjectionJob({
+      logger: { log() {}, warn() {}, error() {} },
+    })();
+    const alert = await prisma.inboxAlert.findFirstOrThrow({
+      where: { userId: bob.userId, type: "POWERUP_USED" },
+    });
+    assert.deepEqual(alert.destination, { route: "raceDetail", raceId });
   });
 
   it("X-Ray (DEFENSE_SCAN) use returns each opponent's active defenses at the top level", async () => {

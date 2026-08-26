@@ -26,7 +26,7 @@ function buildInviteToTournament(dependencies = {}) {
   const tournamentModel = dependencies.Tournament || Tournament;
   const friendshipModel = dependencies.Friendship || Friendship;
   const userModel = dependencies.User || User;
-  const events = dependencies.eventBus || eventBus;
+  const compatibilityEvents = dependencies.eventBus || eventBus;
 
   return async function inviteToTournament({
     userId,
@@ -77,7 +77,7 @@ function buildInviteToTournament(dependencies = {}) {
     const invited = [];
     await withTournamentLock(
       tournamentId,
-      async (tx, _deferred, lockedTournament) => {
+      async (tx, deferred, lockedTournament) => {
         if (!lockedTournament) {
           throw new TournamentError("Tournament not found", 404, "TOURNAMENT_NOT_FOUND");
         }
@@ -100,24 +100,46 @@ function buildInviteToTournament(dependencies = {}) {
           if (existing && ["ACCEPTED", "INVITED"].includes(existing.status)) {
             continue;
           }
+          let invite;
           if (existing) {
-            await tx.tournamentParticipant.update({
+            invite = await tx.tournamentParticipant.update({
               where: { id: existing.id },
-              data: { status: "INVITED" },
+              data: { status: "INVITED", inviteVersion: { increment: 1 } },
             });
           } else {
-            await tx.tournamentParticipant.create({
+            invite = await tx.tournamentParticipant.create({
               data: { tournamentId, userId: inviteeId, status: "INVITED" },
             });
           }
           invited.push(inviteeId);
+          deferred.push({
+            type: "TOURNAMENT_INVITE_SENT",
+            inviteId: invite.id,
+            eventOccurrenceId: existing
+              ? `${invite.id}:reopened:${invite.inviteVersion}`
+              : invite.id,
+            tournamentId,
+            tournamentName: tournament.name,
+            creatorUserId: userId,
+            userId: inviteeId,
+            bracketSize: tournament.bracketSize,
+            potCoins: tournament.fundedPrize === true
+              ? computePrizePool({
+                  playerCount: tournament.bracketSize,
+                  durationDays: tournamentDurationDays(tournament),
+                  max: prizeStamp.tournamentChampionMaxCoins,
+                  unit: prizeStamp.prizeCoinUnit,
+                })
+              : tournament.bracketSize * (tournament.buyInAmount || 0),
+            buyInAmount: tournament.fundedPrize === true ? 0 : tournament.buyInAmount || 0,
+          });
         }
       },
       { prisma: db, userIds: eligible },
     );
 
     for (const inviteeId of invited) {
-      events.emit("TOURNAMENT_INVITE_SENT", {
+      compatibilityEvents?.emit("TOURNAMENT_INVITE_SENT", {
         tournamentId,
         tournamentName: tournament.name,
         creatorUserId: userId,

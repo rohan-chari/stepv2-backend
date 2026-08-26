@@ -1,8 +1,14 @@
 const { User } = require("../users");
 const { JobRun } = require("../../shared/db/jobRun");
-const { Notification } = require("./notification");
-const { eventBus } = require("../../shared/events/eventBus");
-const { getTimeZoneParts, formatDateString } = require("../../shared/time/week");
+const { prisma: defaultPrisma } = require("../../db");
+const { appendDomainEvent: defaultAppendDomainEvent } = require("../domainEvents");
+const {
+  getTimeZoneParts,
+  formatDateString,
+  nextMidnightNewYork,
+  parseDateString,
+  zonedDateTimeToUtc,
+} = require("../../shared/time/week");
 const { zonesAtSlot } = require("./dailyRewardReminder");
 const {
   STEP_MILESTONE_THRESHOLDS,
@@ -43,8 +49,12 @@ const THRESHOLD_STEPS = STEP_MILESTONE_THRESHOLDS.map((t) => t.steps);
 function buildStepMilestoneReminder(dependencies = {}) {
   const userModel = dependencies.User || User;
   const jobRunModel = dependencies.JobRun || JobRun;
-  const notificationModel = dependencies.Notification || Notification;
-  const events = dependencies.eventBus || eventBus;
+  const db = dependencies.prisma || defaultPrisma;
+  const compatibilityEvents = dependencies.eventBus || null;
+  const compatibilityNotificationModel = dependencies.Notification ||
+    (dependencies.eventBus ? require("./notification").Notification : null);
+  const appendDomainEvent = dependencies.appendDomainEvent || defaultAppendDomainEvent;
+  const durable = !dependencies.eventBus && !dependencies.Notification;
   const getParts = dependencies.getTimeZoneParts || getTimeZoneParts;
   const now = dependencies.now || (() => new Date());
   const logger = dependencies.logger || console;
@@ -86,10 +96,16 @@ function buildStepMilestoneReminder(dependencies = {}) {
       }
       const jobName = `step-milestone-reminder:${zone}`;
 
-      // Per-zone CAS: only one worker per (zone, local-day) scans users.
+      // Durable fan-out is completion-marked, not pre-claimed: deterministic
+      // event keys make immediate and midway crash replay resumable. The legacy
+      // injected notifier retains its historical claimRun behavior.
       let claimedZone = false;
       try {
-        claimedZone = await jobRunModel.claimRun(jobName, localDate);
+        if (durable) {
+          claimedZone = (await jobRunModel.lastRanFor(jobName)) !== localDate;
+        } else {
+          claimedZone = await jobRunModel.claimRun(jobName, localDate);
+        }
       } catch (error) {
         logger.error(
           `[CRON] stepMilestoneReminder: claimRun failed for ${jobName}:`,
@@ -114,37 +130,68 @@ function buildStepMilestoneReminder(dependencies = {}) {
         continue;
       }
 
+      let fanoutComplete = true;
+      const localDay = parseDateString(localDate);
+      const occurrenceAt = zonedDateTimeToUtc({
+        ...localDay,
+        hour: SLOT,
+        minute: 0,
+        second: 0,
+      }, zone);
+      const expiresAt = nextMidnightNewYork(occurrenceAt, zone);
       for (const user of users || []) {
         try {
-          // INSERT-FIRST atomic per-user claim. This row IS the audit row; the
-          // send handler skips writing a second one. A unique violation means
-          // another worker/tick already sent today -> skip.
-          const deliveryKey = `step-milestone:${user.id}:${localDate}`;
-          try {
-            await notificationModel.create({
-              userId: user.id,
-              type: NOTIFICATION_TYPE,
-              title: REMINDER_TITLE,
-              body: REMINDER_BODY,
-              deliveryKey,
-            });
-          } catch (error) {
-            if (error && error.code === "P2002") continue; // already claimed
-            throw error;
-          }
-
-          events.emit(NOTIFICATION_TYPE, {
+          const reminder = {
             userId: user.id,
             title: REMINDER_TITLE,
             body: REMINDER_BODY,
             localDate,
-          });
+          };
+          if (durable) {
+            const sourceId = `step-milestone:${user.id}:${localDate}`;
+            await db.$transaction((tx) => appendDomainEvent(tx, {
+              eventKey: `STEP_MILESTONE_REMINDER_V1:${sourceId}`,
+              eventType: "STEP_MILESTONE_REMINDER_V1", schemaVersion: 1,
+              aggregateType: "USER", aggregateId: user.id,
+              occurredAt: occurrenceAt,
+              payload: { userId: user.id, title: REMINDER_TITLE, body: REMINDER_BODY, localDate },
+              audience: [{ recipientId: user.id, facts: {
+                timeZone: zone,
+                expiresAt,
+              } }],
+            }));
+          } else {
+            // Explicit legacy collaborators keep the pre-migration audit/emit
+            // contract for mixed-version callers. Production has neither
+            // collaborator and records only the atomic durable event here.
+            try {
+              await compatibilityNotificationModel.create({
+                userId: user.id,
+                type: NOTIFICATION_TYPE,
+                title: REMINDER_TITLE,
+                body: REMINDER_BODY,
+                deliveryKey: `step-milestone:${user.id}:${localDate}`,
+              });
+            } catch (error) {
+              if (error?.code === "P2002") continue;
+              throw error;
+            }
+            compatibilityEvents?.emit(NOTIFICATION_TYPE, reminder);
+          }
           emitted.push({ userId: user.id, localDate });
         } catch (error) {
+          fanoutComplete = false;
           logger.error(
             `[CRON] stepMilestoneReminder: user ${user.id} failed:`,
             error
           );
+        }
+      }
+      if (durable && fanoutComplete) {
+        try {
+          await jobRunModel.markRan(jobName, localDate);
+        } catch (error) {
+          logger.error(`[CRON] stepMilestoneReminder: markRan failed for ${jobName}:`, error);
         }
       }
     }

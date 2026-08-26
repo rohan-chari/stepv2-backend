@@ -15,6 +15,8 @@ const noopSchedulers = {
   scheduleNotificationCleanup() {},
   scheduleInboxExpiry() {},
   scheduleInboxDelivery() {},
+  scheduleDomainEventProjection() {},
+  scheduleDomainEventRetention() {},
   scheduleActivationEventCleanup() {},
   scheduleDailyMover() {},
   scheduleRaceResolutionPostTasks() {},

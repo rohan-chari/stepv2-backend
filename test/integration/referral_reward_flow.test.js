@@ -36,7 +36,9 @@ const { redeemReferralCode } = require("../../src/modules/social/commands/redeem
 const {
   grantReferralRewardsForRace,
 } = require("../../src/modules/social/commands/grantReferralReward");
-const { buildCompleteRace } = require("../../src/modules/races/commands/completeRace");
+const { buildCompleteRace, completeRace } = require("../../src/modules/races/commands/completeRace");
+const { buildDomainEventProjectionJob } = require("../../src/modules/domainEvents");
+const { appSettings } = require("../../src/shared/config/appSettings");
 const { getReferralPreview } = require("../../src/modules/social/queries/getReferralPreview");
 const { getReferralStatus } = require("../../src/modules/social/queries/getReferralStatus");
 
@@ -124,6 +126,7 @@ before(async () => {
 
 beforeEach(async () => {
   await cleanDatabase();
+  await appSettings.setFlag("apiInboxV1Enabled", true);
   // race_seeds is NOT in cleanDatabase's TRUNCATE list (it has no FK to users).
   // Scope the cleanup to ONLY the seed this file creates ("test-referral-seed")
   // so reruns keep its `kind`/`id` unique — never `deleteMany({})`, which would
@@ -320,6 +323,33 @@ describe("Step 2 — reward on first qualifying race (happy path)", () => {
       refereeId: referee.id,
       coins: REFERRER_REWARD_COINS,
     });
+  });
+
+  it("the default completion command projects its committed referral reward into Inbox", async () => {
+    const { referrer, referee } = await attributedReferee();
+    const opponent = await makeUser();
+    const race = await seedRace({
+      participants: [
+        { user: referee, placement: 2, totalSteps: 5000 },
+        { user: opponent, placement: 1, totalSteps: 8000 },
+      ],
+    });
+    await completeRace({
+      raceId: race.id,
+      winnerUserId: opponent.id,
+      participantUserIds: [referee.id, opponent.id],
+    });
+    const event = await prisma.domainEventOutbox.findFirstOrThrow({
+      where: { eventType: "REFERRAL_REWARDED_V1" },
+      include: { audience: true },
+    });
+    assert.deepEqual(event.audience.map((row) => row.recipientId), [referrer.id]);
+    await buildDomainEventProjectionJob({
+      logger: { log() {}, warn() {}, error() {} },
+    })();
+    assert.equal(await prisma.inboxAlert.count({
+      where: { userId: referrer.id, type: "REFERRAL_REWARDED" },
+    }), 1);
   });
 
   it("durably records race-share qualification with bounded provenance", async () => {

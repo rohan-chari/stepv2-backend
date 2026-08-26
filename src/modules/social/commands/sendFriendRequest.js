@@ -1,6 +1,6 @@
 const { User } = require("../../users");
 const { prisma: defaultPrisma } = require("../../../db");
-const { eventBus: defaultEventBus } = require("../../../shared/events/eventBus");
+const { appendDomainEvent: defaultAppendDomainEvent } = require("../../domainEvents");
 const {
   withFriendshipPairLock,
 } = require("../services/friendshipPairLock");
@@ -15,7 +15,8 @@ class FriendRequestError extends Error {
 function buildSendFriendRequest(dependencies = {}) {
   const db = dependencies.prisma || defaultPrisma;
   const userModel = dependencies.User || User;
-  const events = dependencies.eventBus || defaultEventBus;
+  const appendDomainEvent = dependencies.appendDomainEvent ||
+    (Object.keys(dependencies).length > 0 ? async () => null : defaultAppendDomainEvent);
   const beforeWrite = dependencies.beforeFriendshipWrite || (async () => {});
 
   return async function sendFriendRequest({ userId, addresseeId }) {
@@ -56,41 +57,58 @@ function buildSendFriendRequest(dependencies = {}) {
         if (existing?.status === "PENDING") {
           if (existing.requesterId === addresseeId) {
             await beforeWrite({ existing, status: "ACCEPTED", prisma: tx });
-            return {
-              friendship: await tx.friendship.update({
+            const friendship = await tx.friendship.update({
                 where: { id: existing.id },
                 data: { status: "ACCEPTED" },
-              }),
-              event: "FRIEND_REQUEST_ACCEPTED",
-              eventPayload: {
-                userId,
-                friendshipId: existing.id,
-                requesterId: addresseeId,
-              },
-            };
+              });
+            await appendDomainEvent(tx, {
+              eventKey: `FRIEND_REQUEST_ACCEPTED_V1:${existing.id}`,
+              eventType: "FRIEND_REQUEST_ACCEPTED_V1", schemaVersion: 1,
+              aggregateType: "FRIENDSHIP", aggregateId: existing.id,
+              occurredAt: friendship.updatedAt || new Date(),
+              payload: { friendshipId: existing.id, accepterId: userId, requesterId: addresseeId },
+              audience: [{ recipientId: addresseeId, facts: {} }],
+            });
+            return { friendship };
           }
           throw new FriendRequestError("A friend request already exists");
         }
         if (existing?.status === "DECLINED") {
           await beforeWrite({ existing, status: "PENDING", prisma: tx });
-          return {
-            friendship: await tx.friendship.update({
+          const friendship = await tx.friendship.update({
               where: { id: existing.id },
               data: { status: "PENDING" },
-            }),
-            event: "FRIEND_REQUEST_SENT",
-            eventPayload: { userId, addresseeId },
-          };
+            });
+          // A friendship row can be declined and opened again. The initial
+          // occurrence owns the base V1 key, so a later legitimate request
+          // needs an occurrence identity rather than reusing and conflicting
+          // with that immutable event. `updatedAt` is committed with this
+          // transition and therefore also keeps transaction retries stable.
+          const reopenedOccurrenceId = friendship.updatedAt.toISOString();
+          await appendDomainEvent(tx, {
+            eventKey: `FRIEND_REQUEST_SENT_V1:${existing.id}:reopened:${reopenedOccurrenceId}`,
+            eventType: "FRIEND_REQUEST_SENT_V1", schemaVersion: 1,
+            aggregateType: "FRIENDSHIP", aggregateId: existing.id,
+            occurredAt: friendship.updatedAt || new Date(),
+            payload: { friendshipId: existing.id, requesterId: userId, addresseeId },
+            audience: [{ recipientId: addresseeId, facts: {} }],
+          });
+          return { friendship };
         }
 
         await beforeWrite({ existing: null, status: "PENDING", prisma: tx });
-        return {
-          friendship: await tx.friendship.create({
+        const friendship = await tx.friendship.create({
             data: { requesterId: userId, addresseeId },
-          }),
-          event: "FRIEND_REQUEST_SENT",
-          eventPayload: { userId, addresseeId },
-        };
+          });
+        await appendDomainEvent(tx, {
+          eventKey: `FRIEND_REQUEST_SENT_V1:${friendship.id}`,
+          eventType: "FRIEND_REQUEST_SENT_V1", schemaVersion: 1,
+          aggregateType: "FRIENDSHIP", aggregateId: friendship.id,
+          occurredAt: friendship.createdAt || new Date(),
+          payload: { friendshipId: friendship.id, requesterId: userId, addresseeId },
+          audience: [{ recipientId: addresseeId, facts: {} }],
+        });
+        return { friendship };
       },
       { prisma: db }
     );
@@ -103,7 +121,6 @@ function buildSendFriendRequest(dependencies = {}) {
       userId,
       addresseeId
     );
-    events.emit(result.event, result.eventPayload);
     return result.friendship;
   };
 }

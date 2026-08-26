@@ -1,5 +1,6 @@
 const { prisma: defaultPrisma } = require("../../../db");
 const { eventBus } = require("../../../shared/events/eventBus");
+const { appendDomainEvent: defaultAppendDomainEvent } = require("../../domainEvents");
 const {
   buildFriendshipAutoLinkSuppression,
 } = require("../models/friendshipAutoLinkSuppression");
@@ -21,6 +22,8 @@ function buildRespondToFriendRequest(dependencies = {}) {
     buildFriendshipAutoLinkSuppression({ prisma: db });
   const beforeSuppressionWrite =
     dependencies.beforeAutoLinkSuppressionWrite || (async () => {});
+  const appendDomainEvent = dependencies.appendDomainEvent ||
+    (Object.keys(dependencies).length > 0 ? async () => null : defaultAppendDomainEvent);
 
   return async function respondToFriendRequest({
     userId,
@@ -65,6 +68,15 @@ function buildRespondToFriendRequest(dependencies = {}) {
             "DECLINED",
             tx
           );
+        } else {
+          await appendDomainEvent(tx, {
+            eventKey: `FRIEND_REQUEST_ACCEPTED_V1:${result.id}`,
+            eventType: "FRIEND_REQUEST_ACCEPTED_V1", schemaVersion: 1,
+            aggregateType: "FRIENDSHIP", aggregateId: result.id,
+            occurredAt: result.updatedAt || new Date(),
+            payload: { friendshipId: result.id, accepterId: userId, requesterId: current.requesterId },
+            audience: [{ recipientId: current.requesterId, facts: {} }],
+          });
         }
         return result;
       },
@@ -80,12 +92,14 @@ function buildRespondToFriendRequest(dependencies = {}) {
       updated.addresseeId
     );
 
-    const event = accept ? "FRIEND_REQUEST_ACCEPTED" : "FRIEND_REQUEST_DECLINED";
-    eventBus.emit(event, {
-      userId,
-      friendshipId,
-      requesterId: friendship.requesterId,
-    });
+    if (!accept || dependencies.eventBus) {
+      const event = accept ? "FRIEND_REQUEST_ACCEPTED" : "FRIEND_REQUEST_DECLINED";
+      (dependencies.eventBus || eventBus).emit(event, {
+        userId,
+        friendshipId,
+        requesterId: friendship.requesterId,
+      });
+    }
 
     return updated;
   };

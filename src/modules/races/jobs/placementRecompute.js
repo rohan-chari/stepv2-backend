@@ -26,7 +26,13 @@ const {
 } = require("../../../shared/config/performanceFlags");
 const { runBounded } = require("../../../shared/lib/runBounded");
 const { appSettings: defaultAppSettings } = require("../../../shared/config/appSettings");
-const { getDbPoolPressure } = require("../../../db");
+const {
+  getDbPoolPressure,
+  prisma: defaultPrisma,
+  runInPrismaTransaction,
+  deferUntilAfterCommit,
+} = require("../../../db");
+const { appendDomainEvent: defaultAppendDomainEvent } = require("../../domainEvents");
 const {
   runCapacityMetricsEntry,
   startCapacityPhase,
@@ -42,7 +48,6 @@ const SLACKER_PUSH_TYPE = "TEAM_SLACKER_NUDGE";
 
 const RECOMPUTE_INTERVAL_MS = 5 * 60 * 1000; // every 5 minutes
 const RECOVERY_RACE_LIMIT = 2;
-
 function fiveMinuteBucketKey(date) {
   const bucketMs =
     Math.floor(new Date(date).getTime() / RECOMPUTE_INTERVAL_MS) *
@@ -76,7 +81,53 @@ function buildRecomputePlacements(dependencies = {}) {
   const hasInjectedDeps = Object.keys(dependencies).length > 0;
   const raceModel = dependencies.Race || Race;
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
-  const events = dependencies.eventBus || eventBus;
+  const appendDomainEvent = dependencies.appendDomainEvent || defaultAppendDomainEvent;
+  const immediateEvents = dependencies.eventBus || eventBus;
+  const events = hasInjectedDeps
+    ? immediateEvents
+    : {
+        async emit(eventName, data) {
+          const occurredAt = data?.occurredAt || now();
+          let eventType;
+          let sourceId;
+          let payload;
+          let audience;
+          if (eventName === "RACE_ENDING_SOON") {
+            eventType = "RACE_ENDING_SOON_V1";
+            sourceId = `cron:RACE_ENDING_SOON:${data.raceId}:${data.userId}`;
+            payload = { raceId: data.raceId, raceName: data.raceName, endsAt: data.endsAt, observationKey: sourceId };
+            audience = [{ recipientId: data.userId, facts: {} }];
+          } else if (eventName === "TEAM_LEAD_CHANGED") {
+            eventType = "TEAM_LEAD_CHANGED_V1"; sourceId = data.notificationIntentId;
+            payload = { raceId: data.raceId, raceName: data.raceName, leadingTeamName: data.leadingTeamName, trailingTeamName: data.trailingTeamName, transitionId: sourceId, endsAt: data.endsAt ?? null };
+            audience = data.memberUserIds.map((recipientId) => ({ recipientId, facts: {} }));
+          } else if (eventName === "TEAM_FINAL_STRETCH") {
+            eventType = "TEAM_FINAL_STRETCH_V1"; sourceId = data.notificationIntentId;
+            payload = { raceId: data.raceId, raceName: data.raceName, teamATotal: data.teamATotal, teamBTotal: data.teamBTotal, endsAt: data.endsAt, transitionId: sourceId };
+            audience = data.memberUserIds.map((recipientId) => ({ recipientId, facts: { memberTeam: data.memberTeams?.[recipientId] ?? null } }));
+          } else if (eventName === "TEAM_SLACKER_NUDGE") {
+            eventType = "TEAM_SLACKER_NUDGE_V1";
+            sourceId = `cron:TEAM_SLACKER_NUDGE:${data.raceId}:${data.userId}`;
+            payload = { raceId: data.raceId, raceName: data.raceName, teamName: data.teamName, observationKey: sourceId, endsAt: data.endsAt ?? null };
+            audience = [{ recipientId: data.userId, facts: {} }];
+          } else if (eventName === "PLACEMENT_CHANGED") {
+            eventType = "PLACEMENT_CHANGED_V1"; sourceId = data.notificationIntentId;
+            payload = { transitionId: sourceId, raceId: data.raceId, raceName: data.raceName, userId: data.userId, previousPlacement: data.previousPlacement, placement: data.placement, paidPlaces: data.paidPlaces, endsAt: data.endsAt ?? null };
+            audience = [{ recipientId: data.userId, facts: {} }];
+          } else {
+            throw new Error(`unsupported placement domain event ${eventName}`);
+          }
+          await appendDomainEvent(defaultPrisma, {
+            eventKey: `${eventType}:${sourceId}`, eventType, schemaVersion: 1,
+            aggregateType: "RACE", aggregateId: data.raceId,
+            occurredAt, payload, audience,
+          });
+          // Compatibility hint for old workers/handlers during the additive
+          // drain. It is post-commit and cannot make the observation claim or
+          // durable append fail.
+          return deferUntilAfterCommit(() => immediateEvents.emit(eventName, data));
+        },
+      };
   const resolve = dependencies.resolveRaceState || resolveRaceState;
   // C0 (spec §5a item 4): real mutations enqueue at their write seams. This
   // cron evaluates notifications from persisted standings and only enqueues a
@@ -102,11 +153,25 @@ function buildRecomputePlacements(dependencies = {}) {
   const resolutionJobModel =
     dependencies.RaceResolutionJobV2 || defaultRaceResolutionJobV2;
   const effectModel = dependencies.RaceActiveEffect || defaultRaceActiveEffect;
-  const notificationModel = dependencies.Notification || Notification;
+  // Production owns reminder/placement claims in the domain-event projector.
+  // Keep the established injected-command seam on the legacy durable audit
+  // model so older workers and focused callers still serialize concurrent
+  // reminder observations during the additive compatibility drain.
+  const notificationModel = Object.prototype.hasOwnProperty.call(
+    dependencies,
+    "Notification",
+  )
+    ? dependencies.Notification
+    : hasInjectedDeps
+      ? Notification
+      : null;
   const requestStepSync =
     dependencies.requestStepSyncForUsers ||
     stepSyncPushService.requestStepSyncForUsers;
   const now = dependencies.now || (() => new Date());
+  const withDomainTransaction = hasInjectedDeps
+    ? async (work) => work()
+    : runInPrismaTransaction;
   const logger = dependencies.logger || console;
   const jobRunModel = dependencies.JobRun || defaultJobRun;
   const getPerformanceFlags = dependencies.getPerformanceFlags ||
@@ -137,6 +202,7 @@ function buildRecomputePlacements(dependencies = {}) {
     raceId,
     existingNotificationKeys
   ) {
+    if (!notificationModel) return true;
     const key = auditKey(userId, type, raceId);
     if (existingNotificationKeys?.has(key)) return false;
 
@@ -231,13 +297,14 @@ function buildRecomputePlacements(dependencies = {}) {
         existingNotificationKeys
       );
       if (!claimed) continue;
-      events.emit("RACE_ENDING_SOON", {
+      await events.emit("RACE_ENDING_SOON", {
         raceId: race.id,
         raceName: race.name,
         endsAt: race.endsAt,
         userId: p.userId,
+        occurredAt: new Date(new Date(race.endsAt).getTime() - RACE_ENDING_SOON_WINDOW_MS),
         notificationClaimed:
-          typeof notificationModel.claimDelivery === "function",
+          typeof notificationModel?.claimDelivery === "function",
       });
     }
   }
@@ -305,7 +372,7 @@ function buildRecomputePlacements(dependencies = {}) {
         }
         if (mayEmit) {
           const trailingTeam = leadingTeam === "TEAM_A" ? "TEAM_B" : "TEAM_A";
-          events.emit("TEAM_LEAD_CHANGED", {
+          await events.emit("TEAM_LEAD_CHANGED", {
           notificationIntentId: `team-lead:${race.id}:${previousLeader}->${leadingTeam}:${fiveMinuteBucketKey(currentTime)}`,
           raceId: race.id,
           raceName: race.name,
@@ -316,10 +383,12 @@ function buildRecomputePlacements(dependencies = {}) {
             trailingTeam === "TEAM_A" ? race.teamAName : race.teamBName,
           leadingTotal: totals[leadingTeam],
           trailingTotal: totals[trailingTeam],
+          endsAt: race.endsAt ?? null,
           memberUserIds: members.map((p) => p.userId),
           memberTeams: Object.fromEntries(
             members.map((p) => [p.userId, p.team])
           ),
+          occurredAt: new Date(fiveMinuteBucketKey(currentTime)),
           });
         }
       }
@@ -333,8 +402,13 @@ function buildRecomputePlacements(dependencies = {}) {
     if (msLeft != null && msLeft > 0 && msLeft <= FINAL_STRETCH_WINDOW_MS) {
       const activeMembers = members.filter((p) => !p.forfeitedAt);
       if (activeMembers.length > 0) {
-        events.emit("TEAM_FINAL_STRETCH", {
-          notificationIntentId: `team-final-stretch:${race.id}:${Math.floor(currentTime.getTime() / (30 * 60 * 1000))}`,
+        const finalStretchBucket = Math.floor(currentTime.getTime() / (30 * 60 * 1000));
+        const mayEmit = hasInjectedDeps || await jobRunModel.claimRun(
+          `team-final-stretch-event:${race.id}`,
+          String(finalStretchBucket),
+        );
+        if (mayEmit) await events.emit("TEAM_FINAL_STRETCH", {
+          notificationIntentId: `team-final-stretch:${race.id}:${finalStretchBucket}`,
           raceId: race.id,
           raceName: race.name,
           teamAName: race.teamAName,
@@ -346,6 +420,7 @@ function buildRecomputePlacements(dependencies = {}) {
           memberTeams: Object.fromEntries(
             activeMembers.map((p) => [p.userId, p.team])
           ),
+          occurredAt: new Date(finalStretchBucket * 30 * 60 * 1000),
         });
       }
     }
@@ -375,15 +450,17 @@ function buildRecomputePlacements(dependencies = {}) {
             existingNotificationKeys
           );
           if (!claimed) continue;
-          events.emit("TEAM_SLACKER_NUDGE", {
+          await events.emit("TEAM_SLACKER_NUDGE", {
             raceId: race.id,
             raceName: race.name,
             userId: p.userId,
             teamName: team === "TEAM_A" ? race.teamAName : race.teamBName,
+            endsAt: race.endsAt,
+            occurredAt: new Date(new Date(race.endsAt).getTime() - SLACKER_WINDOW_MS),
             totalSteps: p.totalSteps || 0,
             teamAverage: Math.round(average),
             notificationClaimed:
-              typeof notificationModel.claimDelivery === "function",
+              typeof notificationModel?.claimDelivery === "function",
           });
         }
       }
@@ -588,6 +665,7 @@ function buildRecomputePlacements(dependencies = {}) {
     let existingNotificationKeys = null;
     if (
       participantsByRace &&
+      notificationModel &&
       typeof notificationModel.findExistingByUserTypeRaceKeys === "function"
     ) {
       const keys = [];
@@ -657,6 +735,7 @@ function buildRecomputePlacements(dependencies = {}) {
     // Sequential over races bounds notification writes and preserves ordering.
     for (const race of races) {
       try {
+        await withDomainTransaction(async () => {
         // B-12b — the cron used to call resolve() with NO timeZone, which
         // falls through to UTC inside raceStateResolution while every live
         // surface resolves raceTimeZone(race, viewerTz). For a user-created
@@ -696,7 +775,7 @@ function buildRecomputePlacements(dependencies = {}) {
               );
               return rows;
             })();
-        if (!participants || participants.length === 0) continue;
+        if (!participants || participants.length === 0) return;
         participantCount += participants.length;
 
         // Collect for the step-sync "pull" below. A time-based race ending within
@@ -726,7 +805,7 @@ function buildRecomputePlacements(dependencies = {}) {
             currentTime,
             existingNotificationKeys,
           });
-          continue;
+          return;
         }
 
         // B-12a — the SHARED comparator (finishers first, then steps desc,
@@ -837,7 +916,7 @@ function buildRecomputePlacements(dependencies = {}) {
               ...outcome.change,
               notificationIntentId: `placement:${outcome.participant.id}:${fiveMinuteBucketKey(currentTime)}:${outcome.participant.lastNotifiedPlacement}->${outcome.liveRank}`,
             };
-            events.emit("PLACEMENT_CHANGED", change);
+            await events.emit("PLACEMENT_CHANGED", change);
             phaseMs.eventDispatch += Math.max(
               0,
               monotonicNow() - eventStartedAt
@@ -894,7 +973,7 @@ function buildRecomputePlacements(dependencies = {}) {
             endsAt: race.endsAt || null,
           };
           const eventStartedAt = monotonicNow();
-          events.emit("PLACEMENT_CHANGED", change);
+          await events.emit("PLACEMENT_CHANGED", change);
           phaseMs.eventDispatch += Math.max(
             0,
             monotonicNow() - eventStartedAt
@@ -905,6 +984,7 @@ function buildRecomputePlacements(dependencies = {}) {
             lastNotifiedPlacement: liveRank,
           });
         }
+        });
       } catch (error) {
         logger.error(`[CRON] placementRecompute: race ${race.id} failed:`, error);
         // continue with the next race

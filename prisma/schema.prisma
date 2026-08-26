@@ -1602,6 +1602,10 @@ model TournamentParticipant {
   // Increments on every refund; suffixes ledger refIds so a re-hold after
   // leave->rejoin can never silently no-op against an old ledger row (§7).
   buyInVersion                       Int                   @default(0) @map("buy_in_version")
+  // Monotonic occurrence identity for a declined invitation that is sent
+  // again on the same participant row. The durable event key uses this value
+  // so each legitimate invite remains immutable and retry-safe.
+  inviteVersion                      Int                   @default(0) @map("invite_version")
   // ACCEPT time (updated on re-accept); the D3 exact-tie tiebreak key.
   joinedAt                           DateTime              @default(now()) @map("joined_at")
   fundedExposureMillicoins           Int?                  @map("funded_exposure_millicoins")
@@ -3065,4 +3069,79 @@ model RaceResolutionDeliveryIntent {
   @@index([taskId, state, ordinal])
   @@index([state, attemptedAt])
   @@map("race_resolution_delivery_intents")
+}
+
+// Generic, append-only durable handoff from committed domain facts to
+// independently retryable notification projection. Domain producers write
+// only this envelope and occurrence-time audience facts; notification code
+// owns every mutable projection/delivery concern downstream.
+model DomainEventOutbox {
+  id                   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  eventKey             String    @unique @map("event_key") @db.VarChar(255)
+  eventType            String    @map("event_type") @db.VarChar(96)
+  schemaVersion        Int       @default(1) @map("schema_version")
+  aggregateType        String    @map("aggregate_type") @db.VarChar(64)
+  aggregateId          String    @map("aggregate_id") @db.VarChar(191)
+  payload              Json
+  occurredAt           DateTime  @map("occurred_at")
+  availableAt          DateTime  @map("available_at")
+  status               String    @default("PENDING") @db.VarChar(32)
+  expansionCursor      String?   @map("expansion_cursor") @db.VarChar(191)
+  expansionCompletedAt DateTime? @map("expansion_completed_at")
+  leaseToken           String?   @map("lease_token") @db.VarChar(64)
+  leaseUntil           DateTime? @map("lease_until")
+  attemptCount         Int       @default(0) @map("attempt_count")
+  lastErrorCode        String?   @map("last_error_code") @db.VarChar(128)
+  lastErrorAt          DateTime? @map("last_error_at")
+  completedAt          DateTime? @map("completed_at")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  audience    DomainEventAudience[]
+  projections DomainEventNotificationProjection[]
+
+  @@index([status, availableAt, occurredAt])
+  @@index([aggregateType, aggregateId, occurredAt])
+  @@index([leaseToken])
+  @@map("domain_event_outbox")
+}
+
+model DomainEventAudience {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  domainEventId String   @map("domain_event_id") @db.Uuid
+  recipientId   String   @map("recipient_id") @db.VarChar(191)
+  ordinal       Int
+  facts         Json     @default("{}")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  event DomainEventOutbox @relation(fields: [domainEventId], references: [id], onDelete: Cascade)
+
+  @@unique([domainEventId, recipientId])
+  @@unique([domainEventId, ordinal])
+  @@index([domainEventId, ordinal])
+  @@map("domain_event_audiences")
+}
+
+model DomainEventNotificationProjection {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  domainEventId   String    @map("domain_event_id") @db.Uuid
+  recipientUserId String    @map("recipient_user_id") @db.VarChar(191)
+  deliveryKey     String    @map("delivery_key") @db.VarChar(255)
+  projectionKind  String    @map("projection_kind") @db.VarChar(32)
+  status          String    @default("PENDING") @db.VarChar(32)
+  availableAt     DateTime  @map("available_at")
+  leaseToken      String?   @map("lease_token") @db.VarChar(64)
+  leaseUntil      DateTime? @map("lease_until")
+  attemptCount    Int       @default(0) @map("attempt_count")
+  lastErrorCode   String?   @map("last_error_code") @db.VarChar(128)
+  completedAt     DateTime? @map("completed_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  event DomainEventOutbox @relation(fields: [domainEventId], references: [id], onDelete: Cascade)
+
+  @@unique([domainEventId, recipientUserId, deliveryKey, projectionKind], map: "domain_event_notification_projections_event_recipient_delivery_")
+  @@index([status, availableAt, id], map: "domain_event_notification_projections_status_available_at_id_id")
+  @@index([leaseToken])
+  @@map("domain_event_notification_projections")
 }

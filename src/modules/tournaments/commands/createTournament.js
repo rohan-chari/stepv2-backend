@@ -1,13 +1,13 @@
 const {
   prisma: defaultPrisma,
-  deferUntilAfterCommit,
   runInPrismaTransaction,
 } = require("../../../db");
+const { eventBus } = require("../../../shared/events/eventBus");
 const { Tournament } = require("../models/tournament");
 const { Friendship } = require("../../social");
 const { User } = require("../../users");
 const { awardCoins } = require("../../../shared/economy/awardCoins");
-const { eventBus } = require("../../../shared/events/eventBus");
+const { buildAppendTournamentDomainEvent } = require("../services/appendTournamentDomainEvent");
 const { appSettings } = require("../../../shared/config/appSettings");
 const { generateShareToken } = require("../../../shared/lib/shareToken");
 const { TournamentError } = require("../services/tournamentErrors");
@@ -58,7 +58,9 @@ function buildCreateTournament(dependencies = {}) {
   const holdCoinsFn =
     dependencies.awardCoins ||
     buildAtomicHoldFn({ ErrorClass: TournamentError, code: "INSUFFICIENT_COINS" });
-  const events = dependencies.eventBus || eventBus;
+  const compatibilityEvents = dependencies.eventBus || eventBus;
+  const appendTournamentDomainEvent = dependencies.appendTournamentDomainEvent ||
+    buildAppendTournamentDomainEvent(dependencies);
   const settings = dependencies.appSettings || appSettings;
   const mintToken = dependencies.generateShareToken || generateShareToken;
   const usesDefaultPersistence =
@@ -261,13 +263,20 @@ function buildCreateTournament(dependencies = {}) {
         })),
         skipDuplicates: true,
       });
+      const inviteRows = usesDefaultPersistence
+        ? await db.tournamentParticipant.findMany({
+            where: { tournamentId: tournament.id, userId: { in: uniqueInvitees }, status: "INVITED" },
+            select: { id: true, userId: true },
+          })
+        : [];
+      const inviteIdByUser = new Map(inviteRows.map((row) => [row.userId, row.id]));
       for (const inviteeId of uniqueInvitees) {
-        await deferUntilAfterCommit(() =>
-          events.emit("TOURNAMENT_INVITE_SENT", {
+        const payload = {
             tournamentId: tournament.id,
             tournamentName: tournament.name,
             creatorUserId: userId,
             userId: inviteeId,
+            inviteId: inviteIdByUser.get(inviteeId),
             bracketSize: size,
             // Funded brackets quote the pool a full bracket mints (see
             // inviteToTournament); paid brackets quote size x buy-in as before.
@@ -280,8 +289,12 @@ function buildCreateTournament(dependencies = {}) {
                 })
               : size * buyIn,
             buyInAmount: buyIn,
-          })
-        );
+          };
+        if (usesDefaultPersistence) {
+          await appendTournamentDomainEvent(db, { type: "TOURNAMENT_INVITE_SENT", ...payload });
+        } else {
+          compatibilityEvents?.emit("TOURNAMENT_INVITE_SENT", payload);
+        }
       }
     }
 

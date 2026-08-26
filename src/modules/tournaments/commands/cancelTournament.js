@@ -1,6 +1,6 @@
 const { prisma: defaultPrisma } = require("../../../db");
-const { awardCoins } = require("../../../shared/economy/awardCoins");
 const { eventBus } = require("../../../shared/events/eventBus");
+const { awardCoins } = require("../../../shared/economy/awardCoins");
 const { Tournament } = require("../models/tournament");
 const { TournamentError } = require("../services/tournamentErrors");
 const { withTournamentLock } = require("../services/tournamentLock");
@@ -18,7 +18,7 @@ const {
 function buildCancelTournament(dependencies = {}) {
   const db = dependencies.prisma || defaultPrisma;
   const awardCoinsFn = dependencies.awardCoins || awardCoins;
-  const events = dependencies.eventBus || eventBus;
+  const compatibilityEvents = dependencies.eventBus || eventBus;
   const now = dependencies.now || (() => new Date());
 
   return async function cancelTournament({ userId, tournamentId }) {
@@ -82,6 +82,7 @@ function buildCancelTournament(dependencies = {}) {
             def.push({
               type: "TOURNAMENT_CANCELLED",
               tournamentId,
+              cancellationId: tournamentId,
               tournamentName: tournament.name,
               userId: p.userId,
               buyInAmount: tournament.buyInAmount || 0,
@@ -102,7 +103,7 @@ function buildCancelTournament(dependencies = {}) {
     );
 
     for (const payload of deferred) {
-      events.emit(payload.type, payload);
+      compatibilityEvents?.emit(payload.type, payload);
     }
     return { success: true };
   };

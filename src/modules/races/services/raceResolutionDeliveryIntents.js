@@ -1,17 +1,17 @@
 const crypto = require("node:crypto");
-const { prisma: defaultPrisma } = require("../../../db");
+const {
+  prisma: defaultPrisma,
+  deferUntilAfterCommit,
+} = require("../../../db");
+const { eventBus: defaultEventBus } = require("../../../shared/events/eventBus");
 const { User } = require("../../users");
 const { DeviceToken } = require("../../../shared/push/deviceToken");
 const { apnsService: defaultApns } = require("../../../shared/push/apns");
 const { fcmService: defaultFcm } = require("../../../shared/push/fcm");
-const { createInboxAlert: defaultCreateInboxAlert } = require("../../inbox/services/inbox");
-const {
-  buildNotificationIntentService,
-} = require("../../notifications/services/notificationDelivery");
-const { canonicalPushDeliveryKey } = require("../../notifications/pushDeliveryAttribution");
+const { appendDomainEvent: defaultAppendDomainEvent } = require("../../domainEvents");
 
-const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
 const MIN_INTERVAL_FLOOR_MS = 15 * 60 * 1000;
 
 function buildRaceResolutionDeliveryIntents(dependencies = {}) {
@@ -20,15 +20,15 @@ function buildRaceResolutionDeliveryIntents(dependencies = {}) {
   const deviceTokenModel = dependencies.DeviceToken || DeviceToken;
   const apns = dependencies.apnsService || defaultApns;
   const fcm = dependencies.fcmService || defaultFcm;
-  const createInboxAlert = dependencies.createInboxAlert || defaultCreateInboxAlert;
   const now = dependencies.now || (() => new Date());
+  const compatibilityEvents = dependencies.eventBus || defaultEventBus;
+  const logger = dependencies.logger || console;
   const secret = dependencies.secret || process.env.SESSION_TOKEN_SECRET;
-  const notificationIntentService = dependencies.notificationIntentService ||
-    buildNotificationIntentService({ prisma, createInboxAlert });
+  const appendDomainEvent = dependencies.appendDomainEvent || defaultAppendDomainEvent;
   // The production Prisma proxy exposes the additive model. Legacy narrow
   // doubles retain their old serializable return shape for compatibility tests;
   // they never execute a provider call from this module.
-  const centralized = Boolean(dependencies.notificationIntentService || prisma.notificationSchedule);
+  const centralized = Boolean(dependencies.appendDomainEvent || prisma.domainEventOutbox);
 
   function deliveryKeyHash(value) {
     if (typeof secret !== "string" || secret.length < 8) {
@@ -53,8 +53,6 @@ function buildRaceResolutionDeliveryIntents(dependencies = {}) {
     }
     actorName ||= "Someone";
     const multiplier = Number.isFinite(Number(data?.multiplier)) ? Number(data.multiplier) : null;
-    const title = "🔥 Someone's heating up";
-    const body = `${actorName}'s multiplier is stacked at ${multiplier != null ? `${multiplier}x` : "a high multiplier"}. Slow them down or catch up!`;
     const currentTime = now();
     const candidates = recipients.map((userId, ordinal) => ({
       id: crypto.randomUUID(),
@@ -70,75 +68,84 @@ function buildRaceResolutionDeliveryIntents(dependencies = {}) {
         });
         if (claimed.count !== 1) return [];
       }
-      await transaction.$queryRawUnsafe(
-        `SELECT input."userId", pg_advisory_xact_lock(
-           hashtextextended('race-resolution-high-multiplier:' || input."userId", 0)
-         )::text AS "lockResult"
-           FROM jsonb_to_recordset($1::jsonb) AS input("userId" text)
-          ORDER BY input."userId"`,
-        JSON.stringify(candidates)
-      );
-      return transaction.$queryRawUnsafe(
-        `WITH input AS (
-           SELECT * FROM jsonb_to_recordset($1::jsonb) AS row(
-             id text, "userId" text, ordinal integer, "deliveryKey" text
+      if (!centralized) {
+        // Compatibility-only path for old internal callers and narrow doubles.
+        // Production appends a domain event below and performs this cooldown
+        // claim in the projector, isolated from gameplay/race resolution.
+        await transaction.$queryRawUnsafe(
+          `SELECT input."userId", pg_advisory_xact_lock(
+             hashtextextended('race-resolution-high-multiplier:' || input."userId", 0)
+           )::text AS "lockResult"
+             FROM jsonb_to_recordset($1::jsonb) AS input("userId" text)
+            ORDER BY input."userId"`,
+          JSON.stringify(candidates)
+        );
+        return transaction.$queryRawUnsafe(
+          `WITH input AS (
+             SELECT * FROM jsonb_to_recordset($1::jsonb) AS row(
+               id text, "userId" text, ordinal integer, "deliveryKey" text
+             )
            )
-         )
-         INSERT INTO notifications (id, user_id, type, title, body, race_id, delivery_key, created_at)
-         SELECT input.id, input."userId", 'HIGH_MULTIPLIER_ALERT', $3, $4, $5,
-                input."deliveryKey", $6
-           FROM input
-          WHERE NOT EXISTS (
-            SELECT 1 FROM notifications existing
-             WHERE existing.user_id=input."userId"
-               AND existing.type='HIGH_MULTIPLIER_ALERT'
-               AND existing.created_at >= $2
-          )
-         ON CONFLICT (delivery_key) WHERE delivery_key IS NOT NULL DO NOTHING
-         RETURNING user_id AS "userId"`,
-        JSON.stringify(candidates),
-        new Date(currentTime.getTime() - DAY_MS),
-        title,
-        body,
-        raceId,
-        currentTime,
-      );
-    };
-    const commitClaims = async (transaction) => {
-      const rows = await claimRows(transaction);
-      if (!centralized) return rows;
-      const byUserId = new Map(candidates.map((candidate) => [candidate.userId, candidate]));
-      for (const row of rows) {
-        const candidate = byUserId.get(row.userId);
-        if (!candidate) continue;
-        await notificationIntentService.submit({
-          recipientUserId: candidate.userId,
-          type: "HIGH_MULTIPLIER_ALERT",
-          title,
-          body,
-          payload: {
-            type: "HIGH_MULTIPLIER_ALERT",
-            route: "race_detail",
-            params: { raceId },
-            multiplier,
-            collapseId: `himult_${String(raceId).slice(0, 8)}_${String(actorUserId).slice(0, 8)}`,
-          },
-          deliveryKey: canonicalPushDeliveryKey(
-            "HIGH_MULTIPLIER_ALERT",
-            candidate.userId,
-            deliveryKeyHash(candidate.deliveryKey),
-          ),
-          availableAt: currentTime,
-        }, { tx: transaction });
+           INSERT INTO notifications (id, user_id, type, title, body, race_id, delivery_key, created_at)
+           SELECT input.id, input."userId", 'HIGH_MULTIPLIER_ALERT', $3, $4, $5,
+                  input."deliveryKey", $6
+             FROM input
+            WHERE NOT EXISTS (
+              SELECT 1 FROM notifications existing
+               WHERE existing.user_id=input."userId"
+                 AND existing.type='HIGH_MULTIPLIER_ALERT'
+                 AND existing.created_at >= $2
+            )
+           ON CONFLICT (delivery_key) WHERE delivery_key IS NOT NULL DO NOTHING
+           RETURNING user_id AS "userId"`,
+          JSON.stringify(candidates),
+          new Date(currentTime.getTime() - DAY_MS),
+          "🔥 Someone's heating up",
+          `${actorName}'s multiplier is stacked at ${multiplier != null ? `${multiplier}x` : "a high multiplier"}. Slow them down or catch up!`,
+          raceId,
+          currentTime,
+        );
       }
-      return rows;
+      const sourceId = `race-resolution:${raceId}:${sourceGeneration}:${actorUserId}`;
+      await appendDomainEvent(transaction, {
+        eventKey: `HIGH_MULTIPLIER_ALERT_V1:${sourceId}`,
+        eventType: "HIGH_MULTIPLIER_ALERT_V1", schemaVersion: 1,
+        aggregateType: "RACE", aggregateId: raceId,
+        occurredAt: currentTime,
+        payload: {
+          raceId, raceName: data?.raceName ?? null, sourceGeneration,
+          actorUserId, actorName, multiplier, stealthed: data?.stealthed === true,
+          endsAt: data?.endsAt ?? null,
+        },
+        audience: candidates.map((candidate) => ({ recipientId: candidate.userId, facts: {} })),
+      });
+      return candidates.map(({ userId }) => ({ userId }));
     };
-    const rows = client ? await commitClaims(client) : await prisma.$transaction(commitClaims);
+    const rows = client ? await claimRows(client) : await prisma.$transaction(claimRows);
     const claimed = new Set(rows.map((row) => row.userId));
     if (centralized) {
-      await Promise.all([...claimed].map((recipientUserId) =>
-        notificationIntentService.wake({ recipientUserId }).catch(() => null)
-      ));
+      const recipientDeliverySourceIds = Object.fromEntries(
+        candidates
+          .filter((candidate) => claimed.has(candidate.userId))
+          .map((candidate) => [candidate.userId, deliveryKeyHash(candidate.deliveryKey)]),
+      );
+      await deferUntilAfterCommit(async () => {
+        try {
+          await compatibilityEvents.emit("HIGH_MULTIPLIER_ALERT", {
+            ...data,
+            actorName,
+            multiplier,
+            recipientUserIds: [...claimed],
+            recipientDeliverySourceIds,
+          });
+        } catch (error) {
+          logger.warn?.("HIGH_MULTIPLIER_ALERT compatibility hint failed", {
+            raceId,
+            actorUserId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      });
       return [];
     }
     return candidates.filter((candidate) => claimed.has(candidate.userId)).map((candidate) => ({
@@ -146,8 +153,8 @@ function buildRaceResolutionDeliveryIntents(dependencies = {}) {
       recipientUserId: candidate.userId,
       payload: {
         type: "HIGH_MULTIPLIER_ALERT",
-        title,
-        body,
+        title: "🔥 Someone's heating up",
+        body: `${actorName}'s multiplier is stacked at ${multiplier != null ? `${multiplier}x` : "a high multiplier"}. Slow them down or catch up!`,
         pushPayload: { type: "HIGH_MULTIPLIER_ALERT", route: "race_detail", params: { raceId }, multiplier },
         collapseId: `himult_${String(raceId).slice(0, 8)}_${String(actorUserId).slice(0, 8)}`,
       },
@@ -207,13 +214,7 @@ function buildRaceResolutionDeliveryIntents(dependencies = {}) {
     const tokens = await deviceTokenModel.findByUserId(recipientUserId);
     if (!tokens?.length) return { accepted: false, disposition: "NO_DEVICE_TOKEN" };
     if (!["NUDGE", "STEP_SYNC"].includes(intent.kind)) {
-      if (centralized) return { accepted: false, disposition: "CENTRALIZED_REQUIRED" };
-      return notificationIntentService.legacyImmediate({
-        recipientUserId,
-        title: intent.title || "BARA",
-        body: intent.body || "",
-        payload: intent.payload?.pushPayload || intent.payload || {},
-      });
+      return { accepted: false, disposition: "CENTRALIZED_REQUIRED" };
     }
     let accepted = false;
     let explicitFailures = 0;
