@@ -165,6 +165,7 @@ model User {
   racesCreated            Race[]                   @relation("raceCreator")
   racesWon                Race[]                   @relation("raceWinner")
   raceParticipations      RaceParticipant[]
+  referralRaceActivities  ReferralRaceActivity[]   @relation("ReferralRaceActivityReferrer")
   raceMessages            RaceMessage[]
   stepSamples             StepSample[]
   shopItems               UserShopItem[]
@@ -1727,6 +1728,7 @@ model RaceParticipant {
   activeEffectsReceived  RaceActiveEffect[]
   payoutDoubleOfferItem  RacePayoutDoubleOfferItem?
   seededBucketAssignment SeededRaceBucketAssignment?
+  referralRaceActivity   ReferralRaceActivity?
 
   @@unique([raceId, userId])
   @@index([userId, status])
@@ -2069,11 +2071,33 @@ model Referral {
   referee              User                          @relation("ReferralReceived", fields: [refereeId], references: [id], onDelete: Cascade)
   rewardGrants         ReferralRewardGrant[]
   qualificationIntents ReferralQualificationIntent[]
+  raceActivities       ReferralRaceActivity[]
   qualifyingRace       Race?                         @relation("ReferralQualifyingRace", fields: [qualifyingRaceId], references: [id], onDelete: SetNull)
 
   @@index([referrerId])
+  @@index([referrerId, createdAt])
+  @@index([referrerId, createdAt, id])
   @@index([referrerId, qualifiedAt])
   @@map("referrals")
+}
+
+// Exact event-time ownership for referral activity shown by the joined contest
+// dashboard. A row is written only when a live referred user becomes ACCEPTED
+// in a user-created race; later attribution changes never transfer it.
+model ReferralRaceActivity {
+  id                String   @id @default(uuid())
+  referralId        String   @map("referral_id")
+  referrerId        String?  @map("referrer_id")
+  raceParticipantId String   @unique @map("race_participant_id")
+  occurredAt        DateTime @map("occurred_at")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  referral        Referral        @relation(fields: [referralId], references: [id], onDelete: Cascade)
+  referrer        User?           @relation("ReferralRaceActivityReferrer", fields: [referrerId], references: [id], onDelete: SetNull)
+  raceParticipant RaceParticipant @relation(fields: [raceParticipantId], references: [id], onDelete: Cascade)
+
+  @@index([referrerId, occurredAt, id])
+  @@map("referral_race_activities")
 }
 
 // Durable qualification ownership is created in the race-settlement commit.
@@ -2202,6 +2226,7 @@ model GiveawayPointReview {
   id                       String          @id @default(uuid())
   contestId                String          @map("contest_id")
   referralFactId           String          @map("referral_fact_id")
+  referrerIdSnapshot       String?         @map("referrer_id_snapshot")
   qualifiedAtSnapshot      DateTime        @map("qualified_at_snapshot")
   qualifyingRaceIdSnapshot String?         @map("qualifying_race_id_snapshot")
   referralStatusSnapshot   String          @map("referral_status_snapshot")
@@ -2216,6 +2241,7 @@ model GiveawayPointReview {
 
   @@unique([contestId, referralFactId])
   @@index([contestId, decision])
+  @@index([contestId, referrerIdSnapshot, decidedAt, id], map: "giveaway_reviews_referrer_recent_idx")
   @@map("giveaway_point_reviews")
 }
 

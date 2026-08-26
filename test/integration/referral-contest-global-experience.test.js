@@ -465,6 +465,14 @@ describe("global coin-only referral contest HTTP contract", () => {
       assert.equal(reviewed.status, 200);
       revision = reviewed.body.contest.revision;
     }
+    const storedReviews = await prisma.giveawayPointReview.findMany({
+      where: { contestId: contest.id, referralFactId: { in: facts.map((fact) => fact.id) } },
+      select: { referrerIdSnapshot: true },
+    });
+    assert.deepEqual(
+      storedReviews.map((review) => review.referrerIdSnapshot),
+      [entrant.user.id, entrant.user.id],
+    );
     const finalized = await read(await request(server.baseUrl, "POST", `/admin/giveaways/${contest.id}/finalize`, {
       token: admin.token,
       headers: { ...GLOBAL_FEATURES, "Idempotency-Key": crypto.randomUUID() },

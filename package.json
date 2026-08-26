@@ -26,6 +26,7 @@
     "pm2:topology:check": "node scripts/pm2-topology-guard.js",
     "pm2:topology:watchdog": "node scripts/pm2-topology-guard.js --remediate",
     "funded-exposure:catch-up": "node scripts/funded-exposure-catch-up.js",
+    "referral-contest:catch-up": "node scripts/referral-contest-ledger-catch-up.js",
     "imposter:retire": "node scripts/retire-imposter-inventory.js",
     "buy-ins:remediate": "node scripts/remediate-legacy-buy-ins.js",
     "powerups:store": "node scripts/powerup-store.js",

@@ -1,5 +1,6 @@
 const { prisma } = require("../../../db");
 const { getGiveawayReferralFacts } = require("../../social");
+const { classifyReferralFact } = require("../models/referralFactState");
 
 function compareRows(a, b) {
   if (b.verifiedCount !== a.verifiedCount) return b.verifiedCount - a.verifiedCount;
@@ -40,10 +41,10 @@ async function getContestStandings(contest, { db = prisma, asOf = null } = {}) {
     let reviewableCount = 0;
     for (const fact of relevant) {
       const review = reviewByFact.get(fact.id);
-      if (review?.decision === "REJECT") continue;
-      if (["REWARDED", "QUALIFIED"].includes(fact.status) || (fact.status === "FLAGGED" && review?.decision === "APPROVE")) {
+      const state = classifyReferralFact(fact, review);
+      if (state === "VERIFIED") {
         verified.push(fact);
-      } else if (fact.status === "FLAGGED" && !review) {
+      } else if (state === "REVIEWABLE") {
         reviewableCount += 1;
       }
     }
@@ -57,9 +58,11 @@ async function getContestStandings(contest, { db = prisma, asOf = null } = {}) {
       reviewableCount,
       reachedCountAt: verified.length ? verified[verified.length - 1].qualifiedAt : null,
       verifiedFactIds: verified.map((fact) => fact.id),
-      reviewableFactIds: relevant.filter((fact) => fact.status === "FLAGGED" && !reviewByFact.has(fact.id)).map((fact) => fact.id),
+      reviewableFactIds: relevant
+        .filter((fact) => classifyReferralFact(fact, reviewByFact.get(fact.id)) === "REVIEWABLE")
+        .map((fact) => fact.id),
       reviewableFacts: relevant
-        .filter((fact) => fact.status === "FLAGGED" && !reviewByFact.has(fact.id))
+        .filter((fact) => classifyReferralFact(fact, reviewByFact.get(fact.id)) === "REVIEWABLE")
         .map((fact) => ({ id: fact.id, qualifiedAt: fact.qualifiedAt, qualifyingRaceId: fact.qualifyingRaceId })),
       auditFacts: relevant
         .map((fact) => ({

@@ -33,6 +33,9 @@ const {
   resolveRacePrizeStamp,
 } = require("../services/fundedExposure");
 const { acquireRaceWriteFence } = require("../services/raceWriteFence");
+const {
+  recordReferralRaceActivity: defaultRecordReferralRaceActivity,
+} = require("../../social/commands/recordReferralRaceActivity");
 
 class RaceInviteResponseError extends Error {
   constructor(message, statusCode, code) {
@@ -74,6 +77,14 @@ function buildRespondToRaceInvite(dependencies = {}) {
   const maybeAutoStartPrivateRace =
     dependencies.maybeAutoStartPrivateRace ||
     buildMaybeAutoStartPrivateRace(dependencies);
+  const recordReferralRaceActivity = Object.prototype.hasOwnProperty.call(
+    dependencies,
+    "recordReferralRaceActivity",
+  )
+    ? dependencies.recordReferralRaceActivity
+    : Object.keys(dependencies).length > 0
+      ? async () => null
+      : defaultRecordReferralRaceActivity;
 
   // Team races (TR-200s): accepting requires a `team` side, only while the race
   // is still PENDING, and only from a client declaring team_races support.
@@ -310,10 +321,17 @@ function buildRespondToRaceInvite(dependencies = {}) {
                 raceId, userIds: [userId], at: inviteResponseNow,
               });
             }
-            return tx.raceParticipant.findUnique({
+            const acceptedParticipant = await tx.raceParticipant.findUnique({
               where: { id: participant.id },
               include: { user: { select: { id: true, displayName: true, profilePhotoUrl: true } } },
             });
+            await recordReferralRaceActivity({
+              tx,
+              raceParticipantId: participant.id,
+              refereeId: userId,
+              occurredAt: inviteResponseNow,
+            });
+            return acceptedParticipant;
           })
         : !accept && useTransactionalMutation
         ? await db.$transaction(async (tx) => {

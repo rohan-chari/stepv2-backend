@@ -156,6 +156,33 @@ pm2 logs steps-tracker --lines 200 --nostream | grep -E "\[CRON\]"
 # fix before walking away; duplicate race resolution and duplicate pushes follow.
 ```
 
+### 3b. Converge referral-contest ledgers after BOTH workers are new
+
+Run this only after `startOrReload` has completed and section 3a confirms both
+`steps-tracker` workers are online on the new release. During a rolling reload,
+an old worker can still accept a race participant or write a point review
+without the new ownership columns; running catch-up earlier would leave a new
+gap behind it.
+
+```bash
+# Read-only audit first. It prints only host/database identity and missing-row counts.
+npm run referral-contest:catch-up
+
+# Idempotent apply after reviewing the target and counts.
+npm run referral-contest:catch-up -- --apply
+
+# Required convergence check: both counts must now be zero.
+npm run referral-contest:catch-up
+```
+
+The apply pass uses ownership-safe `INSERT ... SELECT ... ON CONFLICT DO
+NOTHING` for referral race activity. It fills null point-review ownership from
+the durable qualification fact first, then from a live terminal/reviewable
+referral when no durable fact exists; mutable `PENDING` attribution is never
+backfilled. Do not consider the joined-contest recent activity reader converged
+until the final dry-run reports zero for both `raceActivities` and
+`reviewOwnership`.
+
 > **Known live drift, 2026-08-16.** Both apps were found running a *single*
 > instance despite the above, i.e. the `pm2 scale` had been lost since
 > 2026-08-15. Crons were unaffected (the sole worker is `NODE_APP_INSTANCE=0`,

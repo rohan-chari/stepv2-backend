@@ -5,6 +5,7 @@ const { AppError, ConflictError, NotFoundError, ValidationError } = require("../
 const { getOrCreateReferralCode } = require("../../social");
 const { hasPendingReferralQualificationIntents } = require("../../social");
 const { acquireReferralQualificationFence, approveFlaggedReferralReward } = require("../../social");
+const { getRecentGiveawayReferralCandidates } = require("../../social");
 const { adminContest, deriveContestStatus, iso, publicContest } = require("../models/contest");
 const { getContestStandings, getFinalStandings } = require("../queries/getContestStandings");
 const { getCurrentContest } = require("../queries/getCurrentContest");
@@ -17,6 +18,8 @@ const { buildDeleteDraftContest } = require("../commands/deleteDraftContest");
 const { createGiveawayIdempotency, UUID_V4 } = require("./idempotency");
 const { GLOBAL_ELIGIBILITY_MODE, generateStandardRules } = require("./standardRules");
 const { implicatedFactsForEntrant, unresolvedGlobalOutcomeFacts } = require("./globalOutcomeReview");
+const { buildRecentReferrals, getRecentPointReviewCandidates } = require("./recentReferrals");
+const { deriveStandingContext } = require("../models/standingContext");
 
 function supportsGlobalContest(clientFeatures) {
   return clientFeatures?.has?.("referral_contest_global_v1") === true;
@@ -150,8 +153,11 @@ function buildGiveawayService(dependencies = {}) {
   const db = dependencies.prisma || prisma;
   const nowFn = dependencies.now || (() => new Date());
   const env = dependencies.env || process.env;
+  const logger = dependencies.logger || console;
   const award = dependencies.awardCoins || awardCoins;
   const appSettings = dependencies.appSettings || defaultAppSettings;
+  const recentReferralCandidates = dependencies.getRecentGiveawayReferralCandidates ||
+    getRecentGiveawayReferralCandidates;
   const { withIdempotency } = createGiveawayIdempotency({ db, env });
   const deleteDraftContest = buildDeleteDraftContest({ db, withIdempotency });
 
@@ -183,10 +189,12 @@ function buildGiveawayService(dependencies = {}) {
   }
 
   async function memberCurrent(user, limitValue = 25, clientFeatures = null) {
+    const capable = supportsGlobalContest(clientFeatures);
+    const empty = { contest: null, leaderboard: [], entry: null, standing: null, share: null };
     const contest = await current();
-    if (!contest) return { contest: null, leaderboard: [], entry: null, standing: null, share: null };
-    if (contest.eligibilityMode === GLOBAL_ELIGIBILITY_MODE && !supportsGlobalContest(clientFeatures)) {
-      return { contest: null, leaderboard: [], entry: null, standing: null, share: null };
+    if (!contest) return capable ? { ...empty, recentReferrals: [] } : empty;
+    if (contest.eligibilityMode === GLOBAL_ELIGIBILITY_MODE && !capable) {
+      return empty;
     }
     const rows = contest.lifecycleStatus === "FINAL" ? await getFinalStandings(contest, { db }) : await getContestStandings(contest, { db });
     const identities = identityHashes(user, env);
@@ -198,6 +206,58 @@ function buildGiveawayService(dependencies = {}) {
       const code = await getOrCreateReferralCode({ userId: user.id });
       share = { code, url: `https://barastep.com/r/${encodeURIComponent(code)}` };
     }
+    let recentReferrals = [];
+    if (capable && contest.eligibilityMode === GLOBAL_ELIGIBILITY_MODE &&
+        ["ELIGIBLE", "UNDER_REVIEW"].includes(entry?.status)) {
+      try {
+        const [socialCandidates, reviewSource] = await Promise.all([
+          recentReferralCandidates({
+            referrerId: user.id,
+            startsAt: contest.startsAt,
+            endsAt: contest.endsAt,
+            acceptedAt: entry.rulesAcceptedAt,
+            db,
+          }),
+          getRecentPointReviewCandidates({
+            db,
+            contestId: contest.id,
+            referrerId: user.id,
+            startsAt: contest.startsAt,
+            endsAt: contest.endsAt,
+            acceptedAt: entry.rulesAcceptedAt,
+          }),
+        ]);
+        const candidateById = new Map();
+        for (const candidate of [...socialCandidates, ...reviewSource.candidates]) {
+          candidateById.set(candidate.id, { ...candidateById.get(candidate.id), ...candidate });
+        }
+        const candidates = [...candidateById.values()];
+        const factIds = [...new Set(candidates.map((candidate) => candidate.referralFactId).filter(Boolean))];
+        const loadedReviews = factIds.length === 0 ? [] : await db.giveawayPointReview.findMany({
+          where: { contestId: contest.id, referralFactId: { in: factIds } },
+          select: { referralFactId: true, decision: true, decidedAt: true },
+        });
+        const reviews = [...loadedReviews, ...reviewSource.reviews];
+        recentReferrals = buildRecentReferrals(candidates, reviews);
+      } catch (error) {
+        logger.error?.("[Giveaways] recent referral activity unavailable", {
+          contestId: contest.id,
+          userId: user.id,
+          errorName: error?.name || "Error",
+          errorCode: error?.code || null,
+        });
+        recentReferrals = [];
+      }
+    }
+    const standing = entry?.status === "WITHDRAWN" ? null : {
+      verifiedCount: row?.verifiedCount || 0,
+      reviewableCount: contest.lifecycleStatus === "FINAL" ? 0 : (row?.reviewableCount || 0),
+      provisionalRank: row?.finalRank || row?.provisionalRank || null,
+      reachedCountAt: iso(row?.reachedCountAt),
+      ...(capable && contest.eligibilityMode === GLOBAL_ELIGIBILITY_MODE
+        ? deriveStandingContext(rows, row)
+        : {}),
+    };
     return {
       contest: publicContest(contest, nowFn()),
       leaderboard: leaderboardRows(rows, parseLimit(limitValue, { fallback: 25, max: 50 })),
@@ -211,13 +271,9 @@ function buildGiveawayService(dependencies = {}) {
         status: "ACTION_REQUIRED", acceptedAt: null, region: null,
         displayName: user.displayName || "",
       },
-      standing: entry?.status === "WITHDRAWN" ? null : {
-        verifiedCount: row?.verifiedCount || 0,
-        reviewableCount: contest.lifecycleStatus === "FINAL" ? 0 : (row?.reviewableCount || 0),
-        provisionalRank: row?.finalRank || row?.provisionalRank || null,
-        reachedCountAt: iso(row?.reachedCountAt),
-      },
+      standing,
       share: entry?.status === "WITHDRAWN" ? null : share,
+      ...(capable ? { recentReferrals } : {}),
     };
   }
 
@@ -425,7 +481,26 @@ function buildGiveawayService(dependencies = {}) {
       const existing = await tx.giveawayPointReview.findUnique({ where: { contestId_referralFactId: { contestId: id, referralFactId: fact.id } } });
       if (existing && existing.decision !== body.decision) throw new ConflictError("Referral review already has a different decision", "REVIEW_CONFLICT");
       if (body.privateNote !== undefined && (typeof body.privateNote !== "string" || body.privateNote.length > 1000)) throw new ValidationError("Invalid private note", "INVALID_REVIEW");
-      const pointReview = existing || await tx.giveawayPointReview.create({ data: { contestId: id, referralFactId: fact.id, qualifiedAtSnapshot: fact.qualifiedAt, qualifyingRaceIdSnapshot: fact.qualifyingRaceId, referralStatusSnapshot: fact.status, decision: body.decision, reasonCode: body.reasonCode, privateNote: body.privateNote || null, actorId: actor.id, decidedAt: nowFn() } });
+      const pointReview = existing
+        ? existing.referrerIdSnapshot == null && fact.referrerId
+          ? await tx.giveawayPointReview.update({
+              where: { id: existing.id },
+              data: { referrerIdSnapshot: fact.referrerId },
+            })
+          : existing
+        : await tx.giveawayPointReview.create({ data: {
+            contestId: id,
+            referralFactId: fact.id,
+            referrerIdSnapshot: fact.referrerId || null,
+            qualifiedAtSnapshot: fact.qualifiedAt,
+            qualifyingRaceIdSnapshot: fact.qualifyingRaceId,
+            referralStatusSnapshot: fact.status,
+            decision: body.decision,
+            reasonCode: body.reasonCode,
+            privateNote: body.privateNote || null,
+            actorId: actor.id,
+            decidedAt: nowFn(),
+          } });
       if (!existing && body.decision === "APPROVE" && liveReferral?.status === "FLAGGED") {
         const grant = await approveFlaggedReferralReward({ referralId: fact.id, db: tx, now: nowFn });
         if (grant.status !== "REWARDED") throw new ConflictError("Referral is no longer reward eligible", "INVALID_TRANSITION");

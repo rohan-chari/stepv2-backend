@@ -71,6 +71,9 @@ const {
   reserveFundedExposure,
   resolveRacePrizeStamp,
 } = require("../services/fundedExposure");
+const {
+  recordReferralRaceActivity: defaultRecordReferralRaceActivity,
+} = require("../../social/commands/recordReferralRaceActivity");
 
 function buildJoinRaceCore(dependencies = {}) {
   // C0 (spec §5a item 4): after this command's own small writes, mark the race
@@ -98,6 +101,14 @@ function buildJoinRaceCore(dependencies = {}) {
   // default-prisma transaction underneath those fakes. Production uses the
   // default persistence pair and takes the atomic late-join path.
   const usesDefaultPersistence = !dependencies.RaceParticipant && !dependencies.prisma;
+  const recordReferralRaceActivity = Object.prototype.hasOwnProperty.call(
+    dependencies,
+    "recordReferralRaceActivity",
+  )
+    ? dependencies.recordReferralRaceActivity
+    : Object.keys(dependencies).length > 0
+      ? async () => null
+      : defaultRecordReferralRaceActivity;
   const hashSub = dependencies.hashAppleSub || hashAppleSub;
 
   // Best-effort, server-enforced one-time grant of bonus mystery boxes for the
@@ -400,13 +411,19 @@ function buildJoinRaceCore(dependencies = {}) {
       if (race.status === "ACTIVE" && client) {
         await enrollIfGlobalEventActive(client, { raceId, userIds: [userId], at: new Date() });
       }
+      await recordReferralRaceActivity({
+        tx: client || db,
+        raceParticipantId: created.id,
+        refereeId: userId,
+        occurredAt: created.joinedAt || new Date(),
+      });
       return created;
     };
     let participant;
     try {
       participant = transactionClient
         ? await createParticipant(transactionClient)
-        : race.status === "ACTIVE" && usesDefaultPersistence && typeof db.$transaction === "function"
+        : usesDefaultPersistence && typeof db.$transaction === "function"
           ? await db.$transaction((tx) => createParticipant(tx))
           : await createParticipant(null);
     } catch (error) {

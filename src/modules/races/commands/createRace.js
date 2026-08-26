@@ -47,6 +47,9 @@ const {
   AUTO_START_POLICY,
 } = require("../services/nextRacePolicy");
 const { acquireRaceWriteFence } = require("../services/raceWriteFence");
+const {
+  recordReferralRaceActivity: defaultRecordReferralRaceActivity,
+} = require("../../social/commands/recordReferralRaceActivity");
 
 class RaceCreationError extends Error {
   constructor(message, statusCode, code) {
@@ -110,6 +113,14 @@ function buildCreateRace(dependencies = {}) {
     !dependencies.RaceParticipant &&
     !dependencies.User &&
     !dependencies.prisma;
+  const recordReferralRaceActivity = Object.prototype.hasOwnProperty.call(
+    dependencies,
+    "recordReferralRaceActivity",
+  )
+    ? dependencies.recordReferralRaceActivity
+    : Object.keys(dependencies).length > 0
+      ? async () => null
+      : defaultRecordReferralRaceActivity;
 
   const createRaceCore = async function createRace({
     userId,
@@ -434,7 +445,7 @@ function buildCreateRace(dependencies = {}) {
       await acquireRaceWriteFence(defaultPrisma, race.id);
     }
 
-    await participantModel.create({
+    const creatorParticipant = await participantModel.create({
       raceId: race.id,
       userId,
       status: "ACCEPTED",
@@ -450,6 +461,13 @@ function buildCreateRace(dependencies = {}) {
               fundedExposureStamp.exposureRateMillicoinsPerDay,
           }
         : {}),
+    });
+
+    await recordReferralRaceActivity({
+      tx: dependencies.prisma || defaultPrisma,
+      raceParticipantId: creatorParticipant.id,
+      refereeId: userId,
+      occurredAt: creatorParticipant.joinedAt || new Date(),
     });
 
     await reserveRaceBuyIn({
