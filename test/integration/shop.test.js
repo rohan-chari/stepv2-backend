@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const { describe, it, before, beforeEach } = require("node:test");
 
 const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
+const { appSettings } = require("../../src/shared/config/appSettings");
 
 let server;
 let nextAppleId = 0;
@@ -330,6 +331,122 @@ describe("shop", () => {
     assert.equal(clear.status, 200);
     body = await clear.json();
     assert.deepEqual(body.equipped, {});
+  });
+
+  it("returns a complete equipment map and a consistent bootstrap after replacing a slot", async () => {
+    await appSettings.setFlag("apiShopBootstrapV1Enabled", true);
+    const user = await createUser("DressingRoomEquip", 125);
+    const bunny = await createShopItem({
+      sku: "bunny_ears",
+      name: "Bunny Ears",
+      assetKey: "bunny_ears",
+      sortOrder: 1,
+    });
+    const cowboy = await createShopItem({
+      sku: "cowboy_hat",
+      name: "Cowboy Hat",
+      assetKey: "cowboy_hat",
+      sortOrder: 2,
+    });
+    const scarf = await createShopItem({
+      sku: "red_scarf",
+      name: "Red Scarf",
+      slot: "NECK",
+      assetKey: "red_scarf",
+      sortOrder: 3,
+    });
+
+    await prisma.userShopItem.createMany({
+      data: [bunny, cowboy, scarf].map((item) => ({
+        userId: user.userId,
+        shopItemId: item.id,
+      })),
+    });
+    await prisma.userEquippedAccessory.createMany({
+      data: [
+        { userId: user.userId, shopItemId: bunny.id, slot: "HEAD" },
+        { userId: user.userId, shopItemId: scarf.id, slot: "NECK" },
+      ],
+    });
+
+    const before = await request(
+      server.baseUrl,
+      "GET",
+      "/shop/bootstrap?localDate=2026-08-27",
+      { token: user.token }
+    );
+    assert.equal(before.status, 200);
+    const beforeBody = await before.json();
+    assert.equal(beforeBody.contract, "shop-bootstrap-v1");
+    assert.deepEqual(
+      Object.fromEntries(
+        Object.entries(beforeBody.cosmetics.equipped).map(([slot, item]) => [
+          slot,
+          item.id,
+        ])
+      ),
+      { HEAD: bunny.id, NECK: scarf.id }
+    );
+    assert.equal(
+      beforeBody.cosmetics.items.find((item) => item.id === bunny.id).equipped,
+      true
+    );
+    assert.equal(
+      beforeBody.cosmetics.items.find((item) => item.id === cowboy.id).equipped,
+      false
+    );
+
+    const equip = await request(
+      server.baseUrl,
+      "PUT",
+      "/shop/equipment/HEAD",
+      {
+        body: { itemId: cowboy.id },
+        token: user.token,
+      }
+    );
+    assert.equal(equip.status, 200);
+    const equipBody = await equip.json();
+    assert.deepEqual(
+      Object.fromEntries(
+        Object.entries(equipBody.equipped).map(([slot, item]) => [
+          slot,
+          item.id,
+        ])
+      ),
+      { HEAD: cowboy.id, NECK: scarf.id },
+      "equip must return the complete map, including unchanged slots"
+    );
+
+    const after = await request(
+      server.baseUrl,
+      "GET",
+      "/shop/bootstrap?localDate=2026-08-27",
+      { token: user.token }
+    );
+    assert.equal(after.status, 200);
+    const afterBody = await after.json();
+    assert.deepEqual(
+      Object.fromEntries(
+        Object.entries(afterBody.cosmetics.equipped).map(([slot, item]) => [
+          slot,
+          item.id,
+        ])
+      ),
+      { HEAD: cowboy.id, NECK: scarf.id }
+    );
+    assert.equal(
+      afterBody.cosmetics.items.find((item) => item.id === bunny.id).equipped,
+      false
+    );
+    assert.equal(
+      afterBody.cosmetics.items.find((item) => item.id === cowboy.id).equipped,
+      true
+    );
+    assert.equal(
+      afterBody.cosmetics.items.find((item) => item.id === scarf.id).equipped,
+      true
+    );
   });
 
   it("rejects equipping an unowned accessory", async () => {

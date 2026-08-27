@@ -297,6 +297,110 @@ describe("C1 catalogs/config — §8 test 2 parity (cold cache ≡ flag off)", (
       bodyB.items.map((i) => i.sku)
     );
   });
+
+  it("keeps bootstrap equipment consistent after a same-slot replacement with Redis enabled", async (t) => {
+    if (skipReason) return t.skip(skipReason);
+    await enableRedis();
+    await setFlag(true);
+    await appSettings.setFlag("apiShopBootstrapV1Enabled", true);
+
+    const user = await createUser("Cached Dressing Room");
+    const cowboy = await prisma.shopItem.findUnique({
+      where: { sku: "c1-hat" },
+    });
+    const bunny = await prisma.shopItem.create({
+      data: {
+        sku: "c1-bunny-ears",
+        name: "C1 Bunny Ears",
+        description: "bunny ears",
+        slot: "HEAD",
+        priceCoins: 75,
+        assetKey: "c1_bunny_ears",
+        active: true,
+        testOnly: false,
+        sortOrder: 2,
+      },
+    });
+    const scarf = await prisma.shopItem.create({
+      data: {
+        sku: "c1-scarf",
+        name: "C1 Scarf",
+        description: "a scarf",
+        slot: "NECK",
+        priceCoins: 75,
+        assetKey: "c1_scarf",
+        active: true,
+        testOnly: false,
+        sortOrder: 3,
+      },
+    });
+    await prisma.userShopItem.createMany({
+      data: [cowboy, bunny, scarf].map((item) => ({
+        userId: user.userId,
+        shopItemId: item.id,
+      })),
+    });
+    await prisma.userEquippedAccessory.createMany({
+      data: [
+        { userId: user.userId, shopItemId: bunny.id, slot: "HEAD" },
+        { userId: user.userId, shopItemId: scarf.id, slot: "NECK" },
+      ],
+    });
+
+    const beforeResponse = await authReq(
+      "GET",
+      "/shop/bootstrap?localDate=2026-08-27",
+      { token: user.token }
+    );
+    assert.equal(beforeResponse.status, 200);
+    const before = await beforeResponse.json();
+    assert.equal(before.cosmetics.equipped.HEAD.id, bunny.id);
+    assert.equal(
+      before.cosmetics.items.find((item) => item.id === bunny.id).equipped,
+      true
+    );
+    assert.equal(
+      before.cosmetics.items.find((item) => item.id === cowboy.id).equipped,
+      false
+    );
+
+    const equipResponse = await authReq("PUT", "/shop/equipment/HEAD", {
+      token: user.token,
+      body: { itemId: cowboy.id },
+    });
+    assert.equal(equipResponse.status, 200);
+    const equip = await equipResponse.json();
+    assert.deepEqual(
+      Object.fromEntries(
+        Object.entries(equip.equipped).map(([slot, item]) => [slot, item.id])
+      ),
+      { HEAD: cowboy.id, NECK: scarf.id }
+    );
+
+    const afterResponse = await authReq(
+      "GET",
+      "/shop/bootstrap?localDate=2026-08-27",
+      { token: user.token }
+    );
+    assert.equal(afterResponse.status, 200);
+    const after = await afterResponse.json();
+    assert.equal(after.cosmetics.equipped.HEAD.id, cowboy.id);
+    assert.equal(after.cosmetics.equipped.NECK.id, scarf.id);
+    assert.equal(
+      after.cosmetics.items.find((item) => item.id === bunny.id).equipped,
+      false
+    );
+    assert.equal(
+      after.cosmetics.items.find((item) => item.id === cowboy.id).equipped,
+      true
+    );
+
+    const keys = await probe.keys(`${ENV_PREFIX}v1:catalog:shop:*`);
+    assert.ok(
+      keys.length > 0,
+      "the assertion must exercise the Redis catalog path"
+    );
+  });
 });
 
 describe("C1 — §8 test 3 invalidation", () => {
