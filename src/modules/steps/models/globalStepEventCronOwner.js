@@ -20,6 +20,14 @@ async function heartbeatAndCheck({
   ownerId = defaultOwnerId(),
   expectedOwners = configuredExpectedOwners(),
 } = {}) {
+  // Once the expand schema is present, generation-two's exact per-boot census
+  // is the sole creation gate. Do not refresh the legacy environment-keyed
+  // owner row as well: that extra null-logical-owner lease would permanently
+  // prevent the exact census from becoming usable.
+  if (client?.globalStepEventGenerationState?.findUnique &&
+      client?.globalStepEventCronOwner?.findMany) {
+    return isGenerationUsable({ client, now });
+  }
   if (expectedOwners == null) {
     return isGenerationUsable({ client, now });
   }
