@@ -70,7 +70,9 @@ function buildGetRacePowerupTargetContext(dependencies = {}) {
           team: participant.team ?? null,
           forfeitedAt: participant.forfeitedAt ?? null,
           stealthed: participant.stealthed === true,
-          totalSteps: stealthed ? null : participant.totalSteps ?? 0,
+          totalSteps: participant.stealthed === true
+            ? null
+            : participant.totalSteps ?? 0,
         })),
         powerupData: {
           powerupSlots: progress.powerupData.powerupSlots ?? 3,
@@ -118,23 +120,31 @@ function buildGetRacePowerupTargetContext(dependencies = {}) {
     return {
       contract: "race-powerup-target-context-v1",
       participants: ordered.map((participant) => {
-        const stealthed =
+        const actuallyStealthed =
           participant.userId !== userId &&
           participant.finishedAt == null &&
-          (viewerIsDetoured || stealthedUserIds.has(participant.userId));
+          stealthedUserIds.has(participant.userId);
+        const masked = viewerIsDetoured || actuallyStealthed;
         return {
           userId: participant.userId,
-          displayName: stealthed
+          displayName: masked
             ? "???"
             : participant.user?.displayName ?? null,
-          profilePhotoUrl: stealthed
+          profilePhotoUrl: masked
             ? null
             : participant.user?.profilePhotoUrl ?? null,
-          totalSteps: stealthed ? null : participant.totalSteps ?? 0,
-          placement: stealthed ? null : participant.placement ?? null,
+          ...(powerupType === "BOUNTY"
+            ? { totalSteps: masked ? null : participant.totalSteps ?? 0 }
+            : {}),
+          placement: masked ? null : participant.placement ?? null,
           team: participant.team ?? null,
           forfeitedAt: participant.forfeitedAt ?? null,
-          stealthed,
+          // Keep the existing presentation/privacy guard for Detour while
+          // exposing offensive eligibility through a separate additive field.
+          stealthed: masked,
+          ...(viewerIsDetoured && !actuallyStealthed
+            ? { targetable: true }
+            : {}),
           // Additive targeting metadata. Older clients ignore this field;
           // newer clients can avoid presenting a target that the use endpoint
           // would reject for an already-active Leg Cramp.

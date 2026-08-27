@@ -50,7 +50,7 @@ test("Bounty target context uses the narrow persisted roster instead of full pro
   assert.equal(result.powerupData.inventory[0].id, "powerup-1");
 });
 
-test("Detour hides every opponent in the target context", async () => {
+test("Detour keeps profiles masked while separately allowing offensive targeting", async () => {
   const getContext = buildGetRacePowerupTargetContext({
     Race: {
       async findPowerupTargetContext() {
@@ -80,9 +80,40 @@ test("Detour hides every opponent in the target context", async () => {
   const rival = result.participants.find((p) => p.userId === "rival");
   assert.equal(rival.displayName, "???");
   assert.equal(rival.profilePhotoUrl, null);
-  assert.equal(rival.totalSteps, null);
+  assert.equal(Object.hasOwn(rival, "totalSteps"), false);
   assert.equal(rival.placement, null);
   assert.equal(rival.stealthed, true);
+  assert.equal(rival.targetable, true);
+});
+
+test("target context still excludes a genuinely stealthed rival while the viewer is detoured", async () => {
+  const getContext = buildGetRacePowerupTargetContext({
+    Race: { async findPowerupTargetContext() {
+      return {
+        id: "race-1", status: "ACTIVE", powerupsEnabled: true,
+        participants: [
+          { id: "p-me", userId: "me", finishedAt: null, powerupSlots: 3,
+            user: { displayName: "Me" } },
+          { id: "p-rival", userId: "rival", finishedAt: null,
+            user: { displayName: "Rival" } },
+        ],
+      };
+    } },
+    RaceActiveEffect: { async findActiveForRace() {
+      return [
+        { type: "DETOUR_SIGN", targetUserId: "me", expiresAt: new Date("2026-08-20T15:00:00Z") },
+        { type: "STEALTH_MODE", targetUserId: "rival", expiresAt: new Date("2026-08-20T15:00:00Z") },
+      ];
+    } },
+    RacePowerup: { async findInventoryForParticipants() { return []; } },
+    now: () => new Date("2026-08-20T14:00:00Z"),
+  });
+
+  const result = await getContext({ userId: "me", raceId: "race-1", powerupType: "LEG_CRAMP" });
+  const rival = result.participants.find((p) => p.userId === "rival");
+  assert.equal(rival.displayName, "???");
+  assert.equal(rival.stealthed, true);
+  assert.equal(Object.hasOwn(rival, "targetable"), false);
 });
 
 test("target context returns participants in placement order", async () => {

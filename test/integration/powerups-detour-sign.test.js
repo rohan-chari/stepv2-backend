@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict");
 const { describe, it, before, after, beforeEach } = require("node:test");
 const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
+const { appSettings } = require("../../src/shared/config/appSettings");
 
 let server;
 let nextAppleId = 0;
@@ -112,6 +113,7 @@ function hoursAgo(h) {
 
 describe("detour sign", () => {
   before(async () => {
+    await appSettings.setFlag("apiRacePowerupTargetContextV1Enabled", true);
     server = await getSharedServer();
   });
 
@@ -222,6 +224,77 @@ describe("detour sign", () => {
       const shake = await giveHeldPowerup(raceId, bob.userId, "PROTEIN_SHAKE", 99902);
       const res = await usePowerup(bob.token, raceId, shake.id);
       assert.equal(res.status, 200);
+    });
+
+    it("keeps anonymous rivals targetable by offensive powerups while the viewer is detoured", async () => {
+      const alice = await createUser("AliceDetourTarget");
+      const bob = await createUser("BobDetourTarget");
+      await makeFriends(alice, bob);
+      const raceId = await createActiveRace(alice, bob);
+
+      const detour = await giveHeldPowerup(raceId, alice.userId, "DETOUR_SIGN", 99901);
+      assert.equal((await usePowerup(alice.token, raceId, detour.id, bob.userId)).status, 200);
+
+      const progress = await getProgress(bob.token, raceId);
+      const anonymousAlice = findUser(progress, alice.userId);
+      assert.equal(anonymousAlice.displayName, "???");
+      assert.equal(anonymousAlice.totalSteps, null);
+      assert.equal(
+        anonymousAlice.stealthed,
+        true,
+        "Detour must keep frozen-client profile taps disabled"
+      );
+      assert.equal(anonymousAlice.targetable, true);
+
+      const contextResponse = await request(
+        server.baseUrl,
+        "GET",
+        `/races/${raceId}/powerups/use-context?view=targets-v1&powerupType=LEG_CRAMP`,
+        {
+          token: bob.token,
+          headers: { "X-Client-Features": "api_payload_compact_v1" },
+        }
+      );
+      assert.equal(contextResponse.status, 200);
+      const context = await contextResponse.json();
+      assert.equal(context.contract, "race-powerup-target-context-v1");
+      const contextAlice = context.participants.find((p) => p.userId === alice.userId);
+      assert.equal(contextAlice.displayName, "???");
+      assert.equal(contextAlice.stealthed, true);
+      assert.equal(contextAlice.targetable, true);
+      assert.equal(
+        Object.hasOwn(contextAlice, "totalSteps"),
+        false,
+        "non-Bounty target contexts must match the mobile normalization contract"
+      );
+
+      const legCramp = await giveHeldPowerup(raceId, bob.userId, "LEG_CRAMP", 99902);
+      const attack = await usePowerup(bob.token, raceId, legCramp.id, alice.userId);
+      assert.equal(attack.status, 200);
+    });
+
+    it("keeps genuine Stealth Mode protection while every identity is hidden by Detour", async () => {
+      const alice = await createUser("AliceDetourMixed");
+      const bob = await createUser("BobDetourMixed");
+      const charlie = await createUser("CharlieDetourMixed");
+      await makeFriends(alice, bob);
+      await makeFriends(alice, charlie);
+      const raceId = await createActiveRace(alice, bob, { charlie });
+
+      const detour = await giveHeldPowerup(raceId, alice.userId, "DETOUR_SIGN", 99901);
+      assert.equal((await usePowerup(alice.token, raceId, detour.id, bob.userId)).status, 200);
+      const stealth = await giveHeldPowerup(raceId, charlie.userId, "STEALTH_MODE", 99902);
+      assert.equal((await usePowerup(charlie.token, raceId, stealth.id)).status, 200);
+
+      const progress = await getProgress(bob.token, raceId);
+      const anonymousAlice = findUser(progress, alice.userId);
+      const anonymousCharlie = findUser(progress, charlie.userId);
+      assert.equal(anonymousAlice.displayName, "???");
+      assert.equal(anonymousAlice.stealthed, true);
+      assert.equal(anonymousAlice.targetable, true);
+      assert.equal(anonymousCharlie.displayName, "???");
+      assert.equal(anonymousCharlie.stealthed, true);
+      assert.equal(Object.hasOwn(anonymousCharlie, "targetable"), false);
     });
   });
 
