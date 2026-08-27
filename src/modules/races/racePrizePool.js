@@ -18,6 +18,9 @@ const {
 } = require("./constants/raceFinishReward");
 const { raceTeamPoolMultBps } = require("./teamPoolMultiplier");
 const { resolveRacePrizeStamp } = require("./services/fundedExposure");
+const {
+  resolveFixedTeamPayoutStamp,
+} = require("./services/teamWinnerReward");
 
 // One place that decides what a race's money looks like, for every read path AND
 // for settlement. Two mutually exclusive models, discriminated by the row's
@@ -224,15 +227,34 @@ function buildRaceMoneyView({
   // (list, detail, featured, public, share preview) projects the buffed pool.
   const multBps = raceTeamPoolMultBps(race);
   const prizeStamp = resolveRacePrizeStamp(race);
+  const fixedTeamStamp = resolveFixedTeamPayoutStamp(race);
+  const projectedFixedRecipientCount = !completed && fixedTeamStamp
+    ? teamPayoutRecipientCount != null
+      ? teamPayoutRecipientCount
+      : rows.length > 0
+        ? projectedTeamRecipientCount(rows)
+        : acceptedCount > 0
+          ? 1
+          : 0
+    : null;
+  const projectedFixedPlan = projectedFixedRecipientCount == null
+    ? null
+    : buildTeamPayoutPlan({
+        recipientCount: projectedFixedRecipientCount,
+        fixedWinnerRewardCoins: fixedTeamStamp.teamWinnerRewardCoins,
+        payoutRoundingVersion: payoutVersion,
+      });
   const coins = completed
     ? race?.prizePoolCoins || 0
-    : computePrizePool({
-        playerCount,
-        durationDays: raceDurationDays(race),
-        multBps,
-        unit: prizeStamp.prizeCoinUnit,
-        max: prizeStamp.prizePoolMaxCoins,
-      });
+    : projectedFixedPlan
+      ? projectedFixedPlan.totals.awardCoins
+      : computePrizePool({
+          playerCount,
+          durationDays: raceDurationDays(race),
+          multBps,
+          unit: prizeStamp.prizeCoinUnit,
+          max: prizeStamp.prizePoolMaxCoins,
+        });
 
   let visiblePayouts;
   if (race?.isTeamRace === true) {
@@ -250,7 +272,7 @@ function buildRaceMoneyView({
           )
           .map((participant) => participant.payoutCoins);
     } else {
-      visiblePayouts = buildTeamPayoutPlan({
+      visiblePayouts = (projectedFixedPlan || buildTeamPayoutPlan({
         // Real HTTP projections carry the accepted roster and therefore use
         // the exact winning-side count. Lean/legacy callers that only supply
         // acceptedCount retain their historical single-liability fallback.
@@ -263,7 +285,7 @@ function buildRaceMoneyView({
               : 0,
         prizeCoins: coins,
         payoutRoundingVersion: payoutVersion,
-      }).awards.map((award) => award.awardCoins);
+      })).awards.map((award) => award.awardCoins);
     }
   } else {
     const rawPayouts = computeFundedPayouts({
@@ -289,7 +311,7 @@ function buildRaceMoneyView({
       playerCount,
       durationDays: raceDurationDays(race),
       projected: !completed,
-      coins: payoutVersion === 1 ? visibleTotal : coins,
+      coins: fixedTeamStamp || payoutVersion === 1 ? visibleTotal : coins,
       multBps,
       unit: prizeStamp.prizeCoinUnit,
       max: prizeStamp.prizePoolMaxCoins,
@@ -298,9 +320,12 @@ function buildRaceMoneyView({
     // projectedPotCoins as POT — so a funded race reports 0 and the pool there,
     // and an un-updated binary shows the right prize while charging nothing.
     buyInAmount: 0,
-    potCoins: completed ? (payoutVersion === 1 ? visibleTotal : coins) : 0,
+    potCoins: completed
+      ? (fixedTeamStamp || payoutVersion === 1 ? visibleTotal : coins)
+      : 0,
     heldPotCoins: 0,
-    projectedPotCoins: payoutVersion === 1 ? visibleTotal : coins,
+    projectedPotCoins:
+      fixedTeamStamp || payoutVersion === 1 ? visibleTotal : coins,
     payouts: visiblePayouts,
     // Retired as a pool source for funded races (spec §4.3). No client reads it.
     finishReward: null,

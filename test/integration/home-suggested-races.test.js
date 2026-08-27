@@ -32,6 +32,8 @@ const FEATURED_KEYS = [
   "prizePool",
   "seedKind",
   "status",
+  "teamPayoutVersion",
+  "teamWinnerRewardCoins",
 ].sort();
 
 const PUBLIC_KEYS = [
@@ -53,7 +55,9 @@ const PUBLIC_KEYS = [
   "status",
   "teamAName",
   "teamBName",
+  "teamPayoutVersion",
   "teamSize",
+  "teamWinnerRewardCoins",
   "teams",
 ].sort();
 
@@ -250,6 +254,8 @@ function assertFeaturedContract(entry) {
   assert.ok(
     entry.finishReward === null || typeof entry.finishReward === "object"
   );
+  assert.equal(entry.teamPayoutVersion, null);
+  assert.equal(entry.teamWinnerRewardCoins, null);
   assert.equal(entry.joinAction, "JOIN");
 }
 
@@ -283,6 +289,8 @@ function assertPublicContract(entry) {
   assert.ok(entry.teamAName === null || typeof entry.teamAName === "string");
   assert.ok(entry.teamBName === null || typeof entry.teamBName === "string");
   assert.ok(entry.teams === null || typeof entry.teams === "object");
+  assert.equal(entry.teamPayoutVersion, null);
+  assert.equal(entry.teamWinnerRewardCoins, null);
   assert.equal(entry.joinAction, "JOIN");
 }
 

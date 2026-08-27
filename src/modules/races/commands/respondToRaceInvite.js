@@ -264,9 +264,13 @@ function buildRespondToRaceInvite(dependencies = {}) {
                 userId,
                 stamp: fundedExposureStamp,
                 competition: { raceId },
-                // Preserve the historical seeded invite policy while removing
-                // the cap from non-seeded user-funded invite acceptance.
+                // Keep the seeded economic policy; user-made funded invites
+                // use the permanent cross-competition membership count cap.
                 enforceLimits: Boolean(race.seedId),
+                enforceMembershipLimit:
+                  race.seedId == null &&
+                  race.tournamentId == null &&
+                  race.creatorId != null,
               });
             }
             await tx.$queryRaw`

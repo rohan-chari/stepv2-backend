@@ -77,6 +77,9 @@ const {
 } = require("../powerups");
 const { getRaces: defaultGetRaces } = require("./queries/getRaces");
 const {
+  serializeTeamPayoutStamp,
+} = require("./services/teamWinnerReward");
+const {
   getRaceInvitePreflight: defaultGetRaceInvitePreflight,
 } = require("./queries/getRaceInvitePreflight");
 const {
@@ -248,6 +251,11 @@ function logRacePerformance(logger, endpoint, performance, fields = {}) {
       : {}),
     ...fields,
   });
+}
+
+function serializeMutationRace(race) {
+  if (!race) return race;
+  return { ...race, ...serializeTeamPayoutStamp(race) };
 }
 
 function createRacesRouter(dependencies = {}) {
@@ -717,7 +725,7 @@ function createRacesRouter(dependencies = {}) {
         hasAnyQuickMetadata({ creationSource, startPolicy })
         ? await withQuickMembershipLock(req.user.id, create)
         : await create();
-      res.status(201).json({ race });
+      res.status(201).json({ race: serializeMutationRace(race) });
     } catch (error) {
       if (
         error.code === "FUNDED_EXPOSURE_LIMIT" ||
@@ -1608,7 +1616,7 @@ function createRacesRouter(dependencies = {}) {
         raceId: req.params.raceId,
         inviteeIds,
       });
-      res.json({ race });
+      res.json({ race: serializeMutationRace(race) });
     } catch (error) {
       if (error.name === "RaceInviteError") {
         const status = error.statusCode || 400;
@@ -1729,7 +1737,7 @@ function createRacesRouter(dependencies = {}) {
         userId: req.user.id,
         raceId: req.params.raceId,
       });
-      res.json({ race });
+      res.json({ race: serializeMutationRace(race) });
     } catch (error) {
       if (error.name === "RaceStartError") {
         if (error.code === "RACE_ALREADY_STARTED") {
@@ -1739,7 +1747,7 @@ function createRacesRouter(dependencies = {}) {
             current.isTeamRace === true &&
             current.creatorId === req.user.id
           ) {
-            return res.json({ race: current });
+            return res.json({ race: serializeMutationRace(current) });
           }
         }
         const status = error.statusCode || 400;
@@ -2607,7 +2615,7 @@ function createRacesRouter(dependencies = {}) {
         raceId: req.params.raceId,
         updates,
       });
-      res.json({ race });
+      res.json({ race: serializeMutationRace(race) });
     } catch (error) {
       if (error.name === "RaceEditError") {
         const status = error.statusCode || 400;

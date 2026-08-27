@@ -47,9 +47,9 @@ function createFundedRace(user, name, maxDurationDays = 1, maxParticipants = 10)
 
 async function createHighExposureUser() {
   const user = await createUser();
-  // Sixteen seven-day memberships exceed both the former 300-coin ceiling and
-  // the current 600-coin ceiling, as well as the 40/80 coins-per-day limits.
-  for (let index = 0; index < 16; index += 1) {
+  // Five seven-day memberships are below the retired raw/rate ceilings but at
+  // the permanent cross-race/tournament membership ceiling.
+  for (let index = 0; index < 5; index += 1) {
     assert.equal(
       (await createFundedRace(user, `High exposure ${index}`, 7)).status,
       201,
@@ -125,16 +125,12 @@ describe("funded exposure admission", () => {
     assert.equal(participant.fundedExposureRateMillicoinsPerDay, 5_715);
   });
 
-  it("admits funded race creation above both historical exposure ceilings", async () => {
+  it("rejects funded race creation at the permanent five-membership ceiling", async () => {
     const user = await createHighExposureUser();
     const admitted = await createFundedRace(user, "Unlimited funded create", 7);
-    assert.equal(admitted.status, 201);
-    const raceId = (await admitted.json()).race.id;
-    assert.equal(await prisma.race.count(), 17);
-    assert.equal(
-      await prisma.raceParticipant.count({ where: { raceId, userId: user.id } }),
-      1,
-    );
+    assert.equal(admitted.status, 409);
+    assert.equal((await admitted.json()).code, "FUNDED_EXPOSURE_LIMIT");
+    assert.equal(await prisma.race.count(), 5);
   });
 
   for (const [label, value] of [
@@ -145,14 +141,15 @@ describe("funded exposure admission", () => {
       process.env.FUNDED_EXPOSURE_ENFORCEMENT_ENABLED = value;
       const user = await createHighExposureUser();
       const admitted = await createFundedRace(user, `${label} unlimited`, 7);
-      assert.equal(admitted.status, 201);
-      assert.equal(await prisma.race.count(), 17);
+      assert.equal(admitted.status, 409);
+      assert.equal((await admitted.json()).code, "FUNDED_EXPOSURE_LIMIT");
+      assert.equal(await prisma.race.count(), 5);
     });
   }
 
   it("serializes concurrent boundary creates with the per-user guard", async () => {
     const user = await createUser();
-    for (let index = 0; index < 7; index += 1) {
+    for (let index = 0; index < 4; index += 1) {
       const response = await createFundedRace(user, `Existing ${index}`);
       assert.equal(response.status, 201);
     }
@@ -163,15 +160,15 @@ describe("funded exposure admission", () => {
     ]);
     assert.deepEqual(
       responses.map((response) => response.status).sort(),
-      [201, 201],
+      [201, 409],
     );
-    assert.equal(await prisma.race.count(), 9);
-    assert.equal(await prisma.raceParticipant.count(), 9);
+    assert.equal(await prisma.race.count(), 5);
+    assert.equal(await prisma.raceParticipant.count(), 5);
   });
 
   it("serializes opposing cross-race admissions at the exposure boundary", async () => {
     const joiner = await createUser();
-    for (let index = 0; index < 7; index += 1) {
+    for (let index = 0; index < 4; index += 1) {
       assert.equal(
         (await createFundedRace(joiner, `Cross-race existing ${index}`)).status,
         201,
@@ -194,13 +191,13 @@ describe("funded exposure admission", () => {
     ]);
     assert.deepEqual(
       responses.map((response) => response.status).sort(),
-      [201, 201],
+      [201, 409],
     );
     assert.equal(
       await prisma.raceParticipant.count({
         where: { userId: joiner.id, raceId: { in: [targetAId, targetBId] } },
       }),
-      2,
+      1,
     );
   });
 
@@ -442,7 +439,7 @@ describe("funded exposure admission", () => {
   it("heals a mixed-worker null stamp under the guard before admitting the next race", async () => {
     const user = await createUser();
     const raceIds = [];
-    for (let index = 0; index < 7; index += 1) {
+    for (let index = 0; index < 4; index += 1) {
       const response = await createFundedRace(user, `Mixed null ${index}`);
       assert.equal(response.status, 201);
       raceIds.push((await response.json()).race.id);
@@ -468,7 +465,7 @@ describe("funded exposure admission", () => {
     assert.equal(healed.fundedExposureRateMillicoinsPerDay, 10_000);
     assert.equal(
       (await createFundedRace(user, "Mixed null remains admitted")).status,
-      201,
+      409,
     );
   });
 
@@ -490,15 +487,15 @@ describe("funded exposure admission", () => {
         status: "ACCEPTED",
       },
     });
-    for (let index = 0; index < 8; index += 1) {
+    for (let index = 0; index < 5; index += 1) {
       assert.equal(
         (await createFundedRace(user, `Funded beside legacy ${index}`)).status,
         201,
       );
     }
     assert.equal(
-      (await createFundedRace(user, "Funded admission remains unlimited")).status,
-      201,
+      (await createFundedRace(user, "Funded admission reaches the cap")).status,
+      409,
     );
     const legacyMembership = await prisma.raceParticipant.findUnique({
       where: { raceId_userId: { raceId: legacy.id, userId: user.id } },
@@ -722,7 +719,7 @@ describe("funded exposure admission", () => {
     assert.equal(payouts[0].amount, 320);
   });
 
-  it("admits funded tournament creation and public join above exposure ceilings", async () => {
+  it("rejects a funded tournament join at the five-membership ceiling", async () => {
     const joiner = await createHighExposureUser();
     const creator = await createUser();
     const createResponse = await tournamentRequest(
@@ -744,16 +741,17 @@ describe("funded exposure admission", () => {
       `/tournaments/${tournamentId}/join`,
       joiner,
     );
-    assert.equal(rejected.status, 201);
+    assert.equal(rejected.status, 409);
+    assert.equal((await rejected.json()).code, "FUNDED_EXPOSURE_LIMIT");
     assert.equal(
       await prisma.tournamentParticipant.count({
         where: { tournamentId, userId: joiner.id, status: "ACCEPTED" },
       }),
-      1,
+      0,
     );
   });
 
-  it("admits funded public race joins above exposure ceilings", async () => {
+  it("rejects a funded public race join at the five-membership ceiling", async () => {
     const joiner = await createHighExposureUser();
     const creator = await createUser();
     const created = await createFundedRace(creator, "Public unlimited target", 7);
@@ -764,16 +762,17 @@ describe("funded exposure admission", () => {
       `/races/${raceId}/join`,
       { token: joiner.token },
     );
-    assert.equal(admitted.status, 201);
+    assert.equal(admitted.status, 409);
+    assert.equal((await admitted.json()).code, "FUNDED_EXPOSURE_LIMIT");
     assert.equal(
       await prisma.raceParticipant.count({
         where: { raceId, userId: joiner.id },
       }),
-      1,
+      0,
     );
   });
 
-  it("admits funded race invite acceptance above exposure ceilings", async () => {
+  it("rejects funded race invite acceptance at the five-membership ceiling", async () => {
     const invitee = await createHighExposureUser();
     const creator = await createUser();
     const created = await createFundedRace(creator, "Invite unlimited target", 7);
@@ -788,12 +787,13 @@ describe("funded exposure admission", () => {
       `/races/${raceId}/respond`,
       { token: invitee.token, body: { accept: true } },
     );
-    assert.equal(admitted.status, 200);
+    assert.equal(admitted.status, 409);
+    assert.equal((await admitted.json()).code, "FUNDED_EXPOSURE_LIMIT");
     const invite = await prisma.raceParticipant.findUnique({
       where: { raceId_userId: { raceId, userId: invitee.id } },
     });
-    assert.equal(invite.status, "ACCEPTED");
-    assert.equal(invite.fundedExposureMillicoins, 40_000);
+    assert.equal(invite.status, "INVITED");
+    assert.equal(invite.fundedExposureMillicoins, null);
   });
 
   it("serializes the last public slot against invite acceptance", async () => {
@@ -1077,7 +1077,7 @@ describe("funded exposure admission", () => {
     }
   });
 
-  it("admits funded race share-link joins above exposure ceilings", async () => {
+  it("rejects funded race share-link joins at the membership ceiling", async () => {
     const joiner = await createHighExposureUser();
     const creator = await createUser();
     const created = await createFundedRace(creator, "Shared unlimited target", 7);
@@ -1086,11 +1086,12 @@ describe("funded exposure admission", () => {
     assert.equal(link.status, 201);
     const { shareToken } = await link.json();
     const admitted = await request(server.baseUrl, "POST", `/races/share/${shareToken}/join`, { token: joiner.token });
-    assert.equal(admitted.status, 201);
-    assert.equal(await prisma.raceParticipant.count({ where: { raceId, userId: joiner.id } }), 1);
+    assert.equal(admitted.status, 409);
+    assert.equal((await admitted.json()).code, "FUNDED_EXPOSURE_LIMIT");
+    assert.equal(await prisma.raceParticipant.count({ where: { raceId, userId: joiner.id } }), 0);
   });
 
-  it("admits funded tournament share-link joins above exposure ceilings", async () => {
+  it("rejects funded tournament share-link joins at the membership ceiling", async () => {
     const joiner = await createHighExposureUser();
     const creator = await createUser();
     const created = await tournamentRequest("POST", "/tournaments", creator, {
@@ -1104,16 +1105,17 @@ describe("funded exposure admission", () => {
     assert.equal(link.status, 201);
     const { shareToken } = await link.json();
     const admitted = await tournamentRequest("POST", `/tournaments/share/${shareToken}/join`, joiner);
-    assert.equal(admitted.status, 201);
+    assert.equal(admitted.status, 409);
+    assert.equal((await admitted.json()).code, "FUNDED_EXPOSURE_LIMIT");
     assert.equal(
       await prisma.tournamentParticipant.count({
         where: { tournamentId, userId: joiner.id, status: "ACCEPTED" },
       }),
-      1,
+      0,
     );
   });
 
-  it("admits funded tournament invite acceptance above exposure ceilings", async () => {
+  it("rejects funded tournament invite acceptance at the membership ceiling", async () => {
     const invitee = await createHighExposureUser();
     const creator = await createUser();
     const created = await tournamentRequest("POST", "/tournaments", creator, {
@@ -1132,16 +1134,17 @@ describe("funded exposure admission", () => {
       invitee,
       { accept: true },
     );
-    assert.equal(admitted.status, 200);
+    assert.equal(admitted.status, 409);
+    assert.equal((await admitted.json()).code, "FUNDED_EXPOSURE_LIMIT");
     assert.equal(
       await prisma.tournamentParticipant.count({
-        where: { tournamentId, userId: invitee.id, status: "ACCEPTED" },
+        where: { tournamentId, userId: invitee.id, status: "INVITED" },
       }),
       1,
     );
   });
 
-  it("keeps ordinary race leave behavior after unlimited funded admission", async () => {
+  it("releases an ordinary race membership slot on leave", async () => {
     const joiner = await createUser();
     const memberships = [];
     for (let index = 0; index < 10; index += 1) {
@@ -1149,26 +1152,32 @@ describe("funded exposure admission", () => {
       const created = await createFundedRace(creator, `Release target ${index}`);
       memberships.push((await created.json()).race.id);
     }
-    for (const raceId of memberships.slice(0, 8)) {
+    for (const raceId of memberships.slice(0, 5)) {
       const joined = await request(server.baseUrl, "POST", `/races/${raceId}/join`, { token: joiner.token });
       assert.equal(joined.status, 201);
     }
     const admitted = await request(server.baseUrl, "POST", `/races/${memberships[9]}/join`, { token: joiner.token });
-    assert.equal(admitted.status, 201);
+    assert.equal(admitted.status, 409);
     const left = await request(server.baseUrl, "POST", `/races/${memberships[0]}/leave`, {
       token: joiner.token,
       headers: { "X-Client-Features": "race_leave" },
     });
     assert.equal(left.status, 200);
     assert.equal(
+      (await request(server.baseUrl, "POST", `/races/${memberships[9]}/join`, {
+        token: joiner.token,
+      })).status,
+      201,
+    );
+    assert.equal(
       await prisma.raceParticipant.count({
         where: { userId: joiner.id, status: "ACCEPTED" },
       }),
-      8,
+      5,
     );
   });
 
-  it("keeps tournament leave behavior after unlimited funded admission", async () => {
+  it("releases a tournament membership slot on leave", async () => {
     const joiner = await createUser();
     const tournamentIds = [];
     for (let index = 0; index < 10; index += 1) {
@@ -1182,7 +1191,7 @@ describe("funded exposure admission", () => {
       assert.equal(created.status, 201);
       tournamentIds.push((await created.json()).tournament.id);
     }
-    for (const tournamentId of tournamentIds.slice(0, 8)) {
+    for (const tournamentId of tournamentIds.slice(0, 5)) {
       assert.equal(
         (await tournamentRequest(
           "POST",
@@ -1198,7 +1207,7 @@ describe("funded exposure admission", () => {
         `/tournaments/${tournamentIds[9]}/join`,
         joiner,
       )).status,
-      201,
+      409,
     );
     assert.equal(
       (await tournamentRequest(
@@ -1209,10 +1218,18 @@ describe("funded exposure admission", () => {
       200,
     );
     assert.equal(
+      (await tournamentRequest(
+        "POST",
+        `/tournaments/${tournamentIds[9]}/join`,
+        joiner,
+      )).status,
+      201,
+    );
+    assert.equal(
       await prisma.tournamentParticipant.count({
         where: { userId: joiner.id, status: "ACCEPTED" },
       }),
-      8,
+      5,
     );
   });
 });

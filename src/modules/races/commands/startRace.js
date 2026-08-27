@@ -14,6 +14,9 @@ const {
 } = require("../services/validateRaceConfig");
 const { resolveTeamPoolMultBps } = require("../teamPoolMultiplier");
 const {
+  repriceExistingTeamPayoutStamp,
+} = require("../services/teamWinnerReward");
+const {
   enqueueRaceResolution: defaultEnqueueRaceResolution,
 } = require("../services/enqueueRaceResolution");
 
@@ -174,6 +177,10 @@ function buildStartRace(dependencies = {}) {
             durationDays: pricedDurationDays,
           })
         : null;
+    const pricedTeamPayoutStamp =
+      pricedDurationDays != null && race.isTeamRace === true
+        ? repriceExistingTeamPayoutStamp(race, pricedDurationDays)
+        : null;
     const startFields =
       pricedDurationDays != null
         ? {
@@ -181,6 +188,7 @@ function buildStartRace(dependencies = {}) {
             ...(pricedTeamPoolMultBps != null
               ? { teamPoolMultBps: pricedTeamPoolMultBps }
               : {}),
+            ...(pricedTeamPayoutStamp || {}),
           }
         : {};
     const acceptedParticipants = await participantModel.findAcceptedByRace(raceId);
@@ -224,6 +232,9 @@ function buildStartRace(dependencies = {}) {
         // the legacy path).
         maxDurationDays: pricedDurationDays,
         teamPoolMultBps: pricedTeamPoolMultBps,
+        teamPayoutVersion: pricedTeamPayoutStamp?.teamPayoutVersion ?? null,
+        teamWinnerRewardCoins:
+          pricedTeamPayoutStamp?.teamWinnerRewardCoins ?? null,
         potCoins: (race.potCoins || 0) + heldPot,
         participantUpdates,
         beforeRaceStartedRecord: async (context) => {

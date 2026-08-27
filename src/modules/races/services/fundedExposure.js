@@ -14,6 +14,7 @@ const RACE_POOL_MAX_V1 = 16_000;
 const RACE_POOL_MAX_V2 = 8_000;
 const TOURNAMENT_CHAMPION_MAX_V1 = 1_000;
 const TOURNAMENT_CHAMPION_MAX_V2 = 500;
+const MAX_FUNDED_COMPETITION_MEMBERSHIPS = 5;
 
 function positiveInteger(value, fallback) {
   const parsed = Number(value);
@@ -143,7 +144,7 @@ function fundedExposureConflict({
   requestedRateMillicoinsPerDay,
 }) {
   return new ConflictError(
-    "Finish or leave another funded race before joining this one.",
+    "Finish or leave another funded competition before joining this one.",
     "FUNDED_EXPOSURE_LIMIT",
     {
       limitCoins: FUNDED_EXPOSURE_LIMIT_MILLICOINS / 1_000,
@@ -157,6 +158,60 @@ function fundedExposureConflict({
       ),
     },
   );
+}
+
+function fundedMembershipConflict() {
+  return new ConflictError(
+    "Finish or leave another funded competition before joining this one.",
+    "FUNDED_EXPOSURE_LIMIT",
+  );
+}
+
+async function loadUserCreatedFundedMembershipCounts(tx, userIds) {
+  const ordered = [...new Set((userIds || []).filter(Boolean))].sort();
+  const counts = new Map(ordered.map((userId) => [userId, 0]));
+  if (ordered.length === 0) return counts;
+  const raceRows = await tx.raceParticipant.findMany({
+    where: {
+      userId: { in: ordered },
+      status: "ACCEPTED",
+      finishedAt: null,
+      forfeitedAt: null,
+      race: {
+        fundedPrize: true,
+        creatorId: { not: null },
+        seedId: null,
+        tournamentId: null,
+        status: { in: ["PENDING", "ACTIVE"] },
+      },
+    },
+    select: { userId: true, raceId: true },
+  });
+  const tournamentRows = await tx.tournamentParticipant.findMany({
+      where: {
+        userId: { in: ordered },
+        status: "ACCEPTED",
+        eliminatedInRound: null,
+        tournament: {
+          fundedPrize: true,
+          creatorId: { not: null },
+          seedId: null,
+          status: { in: ["PENDING", "ACTIVE"] },
+        },
+      },
+      select: { userId: true, tournamentId: true },
+    });
+  const keys = new Set([
+    ...raceRows.map((row) => `${row.userId}\u0000race\u0000${row.raceId}`),
+    ...tournamentRows.map(
+      (row) => `${row.userId}\u0000tournament\u0000${row.tournamentId}`,
+    ),
+  ]);
+  for (const key of keys) {
+    const userId = key.split("\u0000", 1)[0];
+    counts.set(userId, (counts.get(userId) || 0) + 1);
+  }
+  return counts;
 }
 
 async function lockUserGuard(tx, userId) {
@@ -854,13 +909,21 @@ async function reserveFundedExposure({
   stamp,
   competition = null,
   enforceLimits = true,
+  enforceMembershipLimit = false,
 }) {
   if (!tx || !userId || !stamp) {
     throw new TypeError("tx, userId, and stamp are required");
   }
   await reserveFundedExposures({
     tx,
-    reservations: [{ userId, stamp, competition }],
+    reservations: [
+      {
+        userId,
+        stamp,
+        competition,
+        enforceMembershipLimit,
+      },
+    ],
     enforceLimits,
   });
   return stamp;
@@ -899,6 +962,30 @@ async function reserveFundedExposures({
       stamp.exposureRateMillicoinsPerDay;
     requestedByUser.set(userId, requested);
   }
+  const membershipReservations = ordered.filter(
+    (entry) => entry.enforceMembershipLimit === true,
+  );
+  if (membershipReservations.length > 0) {
+    const membershipCounts = await loadUserCreatedFundedMembershipCounts(
+      tx,
+      membershipReservations.map((entry) => entry.userId),
+    );
+    const requestedMemberships = new Map();
+    for (const entry of membershipReservations) {
+      requestedMemberships.set(
+        entry.userId,
+        (requestedMemberships.get(entry.userId) || 0) + 1,
+      );
+    }
+    for (const [userId, requestedCount] of requestedMemberships) {
+      if (
+        (membershipCounts.get(userId) || 0) + requestedCount >
+        MAX_FUNDED_COMPETITION_MEMBERSHIPS
+      ) {
+        throw fundedMembershipConflict();
+      }
+    }
+  }
   for (const [userId, requested] of requestedByUser) {
     const current = currentByUser.get(userId);
     if (enforceLimits) {
@@ -926,6 +1013,7 @@ async function reserveFundedExposures({
 module.exports = {
   FUNDED_EXPOSURE_LIMIT_MILLICOINS,
   FUNDED_EXPOSURE_RATE_LIMIT_MILLICOINS_PER_DAY,
+  MAX_FUNDED_COMPETITION_MEMBERSHIPS,
   PRIZE_CALCULATION_VERSION_V2,
   PRIZE_COIN_UNIT_V2,
   RACE_POOL_MAX_V2,
@@ -935,6 +1023,8 @@ module.exports = {
   computeRaceExposureStamp,
   computeTournamentExposureStamp,
   fundedExposureConflict,
+  fundedMembershipConflict,
+  loadUserCreatedFundedMembershipCounts,
   resolveRacePrizeStamp,
   resolveTournamentPrizeStamp,
   loadAndHealCurrentExposure,

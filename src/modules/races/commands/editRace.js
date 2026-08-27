@@ -16,6 +16,9 @@ const {
   durationDaysFromWindow,
 } = require("../services/validateRaceConfig");
 const { resolveTeamPoolMultBps } = require("../teamPoolMultiplier");
+const {
+  repriceExistingTeamPayoutStamp,
+} = require("../services/teamWinnerReward");
 
 class RaceEditError extends Error {
   constructor(message, statusCode, code) {
@@ -276,6 +279,16 @@ function buildEditRace(dependencies = {}) {
           durationDays: fields.maxDurationDays,
         });
       }
+    }
+
+    // Deployment A mixed-worker compatibility: keep NULL/invalid legacy rows
+    // unchanged, but if a B worker already stamped this row, move its canonical
+    // duration and valid V1 reward in the same PATCH write.
+    if (race.isTeamRace === true && hasField(fields, "maxDurationDays")) {
+      Object.assign(
+        fields,
+        repriceExistingTeamPayoutStamp(race, fields.maxDurationDays) || {},
+      );
     }
 
     // `updates.powerupStepInterval` is deliberately DROPPED ON THE FLOOR here:

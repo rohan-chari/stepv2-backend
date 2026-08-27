@@ -1,6 +1,9 @@
 const { Race } = require("../models/race");
 const { buildRaceMoneyView } = require("../racePrizePool");
 const { buildSeededRaceBuckets } = require("../services/seededRaceBuckets");
+const {
+  serializeTeamPayoutStamp,
+} = require("../services/teamWinnerReward");
 
 // Ordering for the featured strip: daily first, then weekly, then anything else.
 const SEED_RANK = { DAILY_10K: 0, WEEKLY_50K: 1 };
@@ -47,6 +50,7 @@ function buildGetFeaturedRaces(dependencies = {}) {
           isFull: max != null && acceptedCount >= max,
           powerupsEnabled: race.powerupsEnabled === true,
           payoutRoundingVersion: race.payoutRoundingVersion ?? 0,
+          ...serializeTeamPayoutStamp(race),
           finishReward: money.finishReward,
           prizePool: money.prizePool,
           myStatus: null,
@@ -110,6 +114,7 @@ function buildGetFeaturedRaces(dependencies = {}) {
       const max = race.maxParticipants ?? null; // null = unlimited
       return {
         raceId: race.id,
+        ...serializeTeamPayoutStamp(race),
         scheduledStartAt: race.scheduledStartAt,
         scheduledEndAt: race.scheduledEndAt ?? null,
         endsAt: race.endsAt,
@@ -144,6 +149,7 @@ function buildGetFeaturedRaces(dependencies = {}) {
         isFull: max != null && acceptedCount >= max,
         powerupsEnabled: race.powerupsEnabled || false,
         payoutRoundingVersion: race.payoutRoundingVersion ?? 0,
+        ...serializeTeamPayoutStamp(race),
         // Minted reward projection for seeded races. `paidPlaces` replaces the
         // old fixed `topFraction`: newer clients render "Top N split <pool>";
         // older clients read only `pool` (and show their hardcoded copy).
@@ -168,7 +174,12 @@ function buildGetFeaturedRaces(dependencies = {}) {
 
     if (!bucketCards.length) return featured.filter((card) => !hiddenSeedKinds.has(card.seedKind));
     const bucketKinds = new Set(bucketCards.map((card) => card.seedKind));
-    return [...featured.filter((card) => !bucketKinds.has(card.seedKind) && !hiddenSeedKinds.has(card.seedKind)), ...bucketCards]
+    const normalizedBucketCards = bucketCards.map((card) => ({
+      ...card,
+      teamPayoutVersion: null,
+      teamWinnerRewardCoins: null,
+    }));
+    return [...featured.filter((card) => !bucketKinds.has(card.seedKind) && !hiddenSeedKinds.has(card.seedKind)), ...normalizedBucketCards]
       .sort((a, b) => (SEED_RANK[a.seedKind] ?? 2) - (SEED_RANK[b.seedKind] ?? 2));
   };
 }

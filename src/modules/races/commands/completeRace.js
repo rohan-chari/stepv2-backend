@@ -51,6 +51,9 @@ const {
   lockFundedExposureUsers,
 } = require("../services/fundedExposure");
 const { acquireRaceWriteFence } = require("../services/raceWriteFence");
+const {
+  resolveFixedTeamPayoutStamp,
+} = require("../services/teamWinnerReward");
 
 function buildCompleteRace(dependencies = {}) {
   const raceModel = dependencies.Race || Race;
@@ -395,12 +398,24 @@ function buildCompleteRace(dependencies = {}) {
 
       // The shared planner owns recipient ordering, even splitting, remainder
       // assignment, and payout-v1 rounding for both projection and settlement.
-      const payTeamPayout = async (recipients, prize, payFn) => {
-        if (recipients.length === 0 || prize <= 0) return;
+      const fixedTeamStamp = resolveFixedTeamPayoutStamp(race);
+      const payTeamPayout = async (
+        recipients,
+        prize,
+        payFn,
+        { tieAward = false } = {},
+      ) => {
+        if (
+          recipients.length === 0 ||
+          (fixedTeamStamp == null && prize <= 0)
+        ) return;
         const plan = buildTeamPayoutPlan({
           recipients,
           prizeCoins: prize,
           payoutRoundingVersion: race.payoutRoundingVersion,
+          fixedWinnerRewardCoins:
+            fixedTeamStamp?.teamWinnerRewardCoins ?? null,
+          tie: tieAward,
         });
         for (let index = 0; index < recipients.length; index++) {
           const award = plan.awards[index];
@@ -456,16 +471,23 @@ function buildCompleteRace(dependencies = {}) {
         // prizePoolCoins, so a completed funded tie read as pool 0 on every
         // read path (buildRaceMoneyView reads the stamp once COMPLETED).
         if (race.fundedPrize === true) {
-          const prize = computeSettledRacePool({
-            race,
-            participants: accepted,
-            isTeamRace: true,
-          });
+          const prize = fixedTeamStamp
+            ? 0
+            : computeSettledRacePool({
+                race,
+                participants: accepted,
+                isTeamRace: true,
+              });
           const sharers = teamPayoutRecipients({
             participants: accepted,
             tie: true,
           });
-          const plan = await payTeamPayout(sharers, prize, payoutRacePrizePool);
+          const plan = await payTeamPayout(
+            sharers,
+            prize,
+            payoutRacePrizePool,
+            { tieAward: true },
+          );
           await raceModel.update(raceId, {
             prizePoolCoins: plan?.totals.awardCoins ?? prize,
             potCoins: plan?.totals.awardCoins ?? prize,
@@ -493,11 +515,13 @@ function buildCompleteRace(dependencies = {}) {
         // flip can neither strand nor duplicate a prize.
         const funded = race.fundedPrize === true;
         const prize = funded
-          ? computeSettledRacePool({
-              race,
-              participants: accepted,
-              isTeamRace: true,
-            })
+          ? fixedTeamStamp
+            ? 0
+            : computeSettledRacePool({
+                race,
+                participants: accepted,
+                isTeamRace: true,
+              })
           : race.potCoins;
 
         const plan = await payTeamPayout(

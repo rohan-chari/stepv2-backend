@@ -45,6 +45,8 @@ async function commitRaceStart({
   // a re-priced duration carrying a stale multiplier pays a long-race buff on a
   // short race. null for individual races and every legacy start.
   teamPoolMultBps = null,
+  teamPayoutVersion = null,
+  teamWinnerRewardCoins = null,
 }) {
   try {
     const result = await prisma.$transaction(async (tx) => {
@@ -104,6 +106,8 @@ async function commitRaceStart({
         potCoins,
         ...(maxDurationDays != null ? { maxDurationDays } : {}),
         ...(teamPoolMultBps != null ? { teamPoolMultBps } : {}),
+        ...(teamPayoutVersion != null ? { teamPayoutVersion } : {}),
+        ...(teamWinnerRewardCoins != null ? { teamWinnerRewardCoins } : {}),
       },
     });
     if (flip.count !== 1) throw new RaceStartTransactionAbort({ started: false });

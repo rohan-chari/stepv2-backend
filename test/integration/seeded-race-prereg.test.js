@@ -101,8 +101,12 @@ describe("seeded race pre-registration compat", () => {
     );
 
     const dailyCard = featured.find((c) => c.raceId === active.id);
+    assert.equal(dailyCard.teamPayoutVersion, null);
+    assert.equal(dailyCard.teamWinnerRewardCoins, null);
     assert.ok(dailyCard.upcoming, "featured card should carry upcoming");
     assert.equal(dailyCard.upcoming.raceId, upcoming.id);
+    assert.equal(dailyCard.upcoming.teamPayoutVersion, null);
+    assert.equal(dailyCard.upcoming.teamWinnerRewardCoins, null);
     assert.equal(dailyCard.upcoming.myStatus, null); // not opted in -> "Opt in"
   });
 });

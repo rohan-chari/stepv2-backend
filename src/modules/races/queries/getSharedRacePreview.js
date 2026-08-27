@@ -1,6 +1,9 @@
 const { Race } = require("../models/race");
 const { buildRaceMoneyView } = require("../racePrizePool");
 const { RaceShareLink } = require("../models/raceShareLink");
+const {
+  serializeTeamPayoutStamp,
+} = require("../services/teamWinnerReward");
 
 // Public, UNAUTHENTICATED preview of a shared race, used by both the web
 // landing page (GET /r/:token) and the app's pre-join screen
@@ -59,6 +62,7 @@ function buildGetSharedRacePreview(dependencies = {}) {
       powerupsEnabled: race.powerupsEnabled === true,
       buyInAmount: money.buyInAmount,
       prizePool: money.prizePool,
+      ...serializeTeamPayoutStamp(race),
       maxParticipants: race.maxParticipants ?? null,
       participantCount,
       // Timing (spec §5.7). Four additive, display-only fields so a link pasted

@@ -15,6 +15,9 @@ const {
 } = require("../services/raceIllusions");
 const { getRaceLeaveAction } = require("../services/raceLeaveAction");
 const defaultRaceListCache = require("../services/raceListCache");
+const {
+  serializeTeamPayoutStamp,
+} = require("../services/teamWinnerReward");
 
 function getActivePlacement(participants, userId) {
   const acceptedParticipants = participants
@@ -495,6 +498,7 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
       // ── Team races (TR-806/807) — additive; old clients ignore them and
       // never receive a team race anyway (filtered above).
       isTeamRace: race.isTeamRace === true,
+      ...serializeTeamPayoutStamp(race),
       teamSize: race.teamSize ?? null,
       teamAName: race.teamAName ?? null,
       teamBName: race.teamBName ?? null,

@@ -50,6 +50,9 @@ const { roundLabel } = require("../../tournaments/constants/tournaments");
 const { isTournamentParticipant } = require("../../tournaments/services/tournamentAccess");
 const { canReadRacePreview } = require("../services/canReadRacePreview");
 const {
+  serializeTeamPayoutStamp,
+} = require("../services/teamWinnerReward");
+const {
   computeLeechEarnedTransfer,
   applyLeechTransfers,
 } = require("../../powerups/leechTransfers");
@@ -328,6 +331,7 @@ function buildGetRaceProgress(deps = {}) {
     const money = buildRaceMoneyView({ race, participants, acceptedCount });
     const { payouts, payoutTiers } = serializePayouts(money.payouts);
     return {
+      ...serializeTeamPayoutStamp(race),
       prizePool: money.prizePool,
       projectedPotCoins: money.projectedPotCoins,
       payouts,

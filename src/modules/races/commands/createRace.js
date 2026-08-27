@@ -376,9 +376,10 @@ function buildCreateRace(dependencies = {}) {
         tx: defaultPrisma,
         userId,
         stamp: fundedExposureStamp,
-        // User-created funded races are intentionally unlimited across
-        // competitions. Seeded enrollment keeps its caller-owned policy.
+        // Coin/rate limits remain retired. The permanent five-membership cap
+        // is enforced independently across user-created races/tournaments.
         enforceLimits: false,
+        enforceMembershipLimit: true,
       });
     }
 

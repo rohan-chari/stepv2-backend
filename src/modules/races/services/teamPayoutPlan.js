@@ -45,14 +45,34 @@ function buildTeamPayoutPlan({
   recipientCount = null,
   prizeCoins = 0,
   payoutRoundingVersion = 0,
+  fixedWinnerRewardCoins = null,
+  tie = false,
 } = {}) {
   const concreteRecipients = Array.isArray(recipients) ? recipients : null;
   const count = concreteRecipients
     ? concreteRecipients.length
     : Math.max(0, Math.floor(Number(recipientCount) || 0));
+  const fixedReward = Number.isInteger(Number(fixedWinnerRewardCoins)) &&
+      Number(fixedWinnerRewardCoins) > 0
+    ? Number(fixedWinnerRewardCoins)
+    : null;
   const prize = Math.max(0, Math.floor(Number(prizeCoins) || 0));
-  if (count === 0 || prize === 0) {
+  if (count === 0 || (fixedReward == null && prize === 0)) {
     return buildPayoutPlan({ payoutRoundingVersion, awards: [] });
+  }
+  if (fixedReward != null) {
+    // Ties deliberately use half the immutable winner stamp. The shared payout
+    // planner floors fractional coins before applying V1's per-recipient
+    // round-up, matching every other race payout path.
+    const rawAwardCoins = tie === true ? fixedReward / 2 : fixedReward;
+    return buildPayoutPlan({
+      payoutRoundingVersion,
+      awards: Array.from({ length: count }, (_, index) => ({
+        recipientId: concreteRecipients?.[index]?.id || `team-award:${index + 1}`,
+        placement: 1,
+        rawAwardCoins,
+      })),
+    });
   }
   const share = Math.floor(prize / count);
   const remainder = prize - share * count;

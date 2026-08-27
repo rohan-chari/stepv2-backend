@@ -1469,6 +1469,12 @@ model Race {
   // Because it is stamped, an env edit only affects races created after it —
   // an in-flight race never reprices mid-race.
   teamPoolMultBps         Int?             @map("team_pool_mult_bps")
+  // Fixed per-eligible-winner funded-team payout stamp. Both fields must be a
+  // valid V1 pair before readers/settlement use them; NULL, partial, or malformed
+  // pairs stay on the legacy divisible-pool formula. Nullable so Deployment A
+  // can coexist with old workers and every existing race remains unchanged.
+  teamPayoutVersion       Int?             @map("team_payout_version")
+  teamWinnerRewardCoins   Int?             @map("team_winner_reward_coins")
   startedAt               DateTime?        @map("started_at")
   endsAt                  DateTime?        @map("ends_at")
   // Optional future auto-start time (1.1.7). When set and in the future, the

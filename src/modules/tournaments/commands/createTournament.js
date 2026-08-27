@@ -181,9 +181,10 @@ function buildCreateTournament(dependencies = {}) {
         tx: db,
         userId,
         stamp: fundedExposureStamp,
-        // User-created funded tournaments have no aggregate exposure cap.
-        // Seeded tournament callers retain their own admission policy.
+        // User-created funded tournaments use the permanent membership count
+        // cap, while seeded callers retain their own economic admission policy.
         enforceLimits: false,
+        enforceMembershipLimit: true,
       });
     }
 

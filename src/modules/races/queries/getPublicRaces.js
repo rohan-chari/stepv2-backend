@@ -4,6 +4,9 @@ const {
   serializePayouts,
 } = require("../racePrizePool");
 const { buildTeamsBlockFromParticipants } = require("../teamRaces");
+const {
+  serializeTeamPayoutStamp,
+} = require("../services/teamWinnerReward");
 
 // Shared visibility predicate for a browsable public race, applied over the
 // rows findPublicPending returns. Reused by getPublicRaceCount so the count and
@@ -81,6 +84,7 @@ function buildGetPublicRaces(dependencies = {}) {
           powerupsEnabled: race.powerupsEnabled === true,
           prizePool: money.prizePool,
           isTeamRace: race.isTeamRace === true,
+          ...serializeTeamPayoutStamp(race),
           teamSize: race.teamSize ?? null,
           teamAName: race.teamAName ?? null,
           teamBName: race.teamBName ?? null,
@@ -147,6 +151,7 @@ function buildGetPublicRaces(dependencies = {}) {
         // filter above drops team races for everyone else). Open-slot counts
         // let the card render "2v2 · 1 slot left on Blue".
         isTeamRace: race.isTeamRace === true,
+        ...serializeTeamPayoutStamp(race),
         teamSize: race.teamSize ?? null,
         teamAName: race.teamAName ?? null,
         teamBName: race.teamBName ?? null,

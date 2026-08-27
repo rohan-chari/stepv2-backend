@@ -14,6 +14,9 @@ const {
 const { getRaceLeaveAction } = require("../services/raceLeaveAction");
 const { canReadRacePreview } = require("../services/canReadRacePreview");
 const userPresentationCache = require("../../social/services/userPresentationCache");
+const {
+  serializeTeamPayoutStamp,
+} = require("../services/teamWinnerReward");
 
 // The JS twin of the model's `detailsParticipantOrder` ([joinedAt asc, id asc]).
 // Used only when a page is sliced out of a preloaded race instead of taken by
@@ -369,6 +372,7 @@ async function getRaceDetails(
     // ── Team races (TR-101/402; additive — old clients ignore these and never
     // receive a team race in their lists anyway).
     isTeamRace: race.isTeamRace === true,
+    ...serializeTeamPayoutStamp(race),
     teamSize: race.teamSize ?? null,
     teamAName: race.teamAName ?? null,
     teamBName: race.teamBName ?? null,

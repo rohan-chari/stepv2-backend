@@ -28,6 +28,9 @@ const {
   buildRaceMoneyView,
   serializePayouts,
 } = require("../races/racePrizePool");
+const {
+  serializeTeamPayoutStamp,
+} = require("../races/services/teamWinnerReward");
 
 // The effect types the home card must prefetch. LEECH is included (§5): once
 // leech MINTS steps to the attacker, omitting it here made the home-card total
@@ -64,6 +67,7 @@ function homeMoneyView(race, participants) {
   });
   const { payouts, payoutTiers } = serializePayouts(money.payouts);
   return {
+    ...serializeTeamPayoutStamp(race),
     buyInAmount: money.buyInAmount,
     potCoins: money.potCoins,
     heldPotCoins: money.heldPotCoins,
@@ -610,6 +614,8 @@ async function checkActiveRacesFromSnapshots(prisma, userId, options = {}) {
           prizeCoinUnit: true,
           prizePoolMaxCoins: true,
           teamPoolMultBps: true,
+          teamPayoutVersion: true,
+          teamWinnerRewardCoins: true,
           creationSource: true,
           startPolicy: true,
           exitActionsEnabled: true,
