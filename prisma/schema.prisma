@@ -204,6 +204,7 @@ model User {
   // account (see the FK on Suggestion) and explicitly listed in
   // deleteUserAccount's deletion set.
   suggestions                 Suggestion[]
+  feedbackEmailAttempts       FeedbackEmailAttempt[]
   raceEffectImpacts           RaceEffectImpact[]
   raceImpactEvents            RaceImpactEvent[]
   umbrellaInterceptions       RaceUmbrellaInterception[]
@@ -263,6 +264,32 @@ model Suggestion {
   // Backs the admin list (newest first, keyset-paged on createdAt).
   @@index([createdAt])
   @@map("suggestions")
+}
+
+enum FeedbackEmailAttemptState {
+  RESERVED
+  ACCEPTED
+  FAILED
+}
+
+// Content-free delivery/quota metadata. Feedback text, category, reply address,
+// and display name are deliberately never persisted here.
+model FeedbackEmailAttempt {
+  id            String                    @id @default(uuid()) @db.Uuid
+  userId        String                    @map("user_id")
+  utcDay        DateTime                  @map("utc_day")
+  state         FeedbackEmailAttemptState @default(RESERVED)
+  messageId     String                    @map("message_id")
+  lastErrorCode String?                   @map("last_error_code")
+  createdAt     DateTime                  @default(now()) @map("created_at")
+  updatedAt     DateTime                  @default(now()) @updatedAt @map("updated_at")
+  expiresAt     DateTime                  @map("expires_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, utcDay, state])
+  @@index([expiresAt])
+  @@map("feedback_email_attempts")
 }
 
 // Immutable, recipient-private components of a frozen race score. The effect

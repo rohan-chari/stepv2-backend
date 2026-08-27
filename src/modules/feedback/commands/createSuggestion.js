@@ -25,6 +25,17 @@ function startOfUtcDay(now) {
   return new Date(`${now.toISOString().slice(0, 10)}T00:00:00.000Z`);
 }
 
+function feedbackQuotaLockKey(userId, utcDay) {
+  return `feedback-quota:${userId}:${utcDay.toISOString().slice(0, 10)}`;
+}
+
+async function lockFeedbackQuota(tx, userId, utcDay) {
+  await tx.$executeRawUnsafe(
+    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+    feedbackQuotaLockKey(userId, utcDay)
+  );
+}
+
 function validateText(value) {
   if (typeof value !== "string") {
     throw new SuggestionError("text is required", 400, "INVALID_TEXT");
@@ -77,26 +88,36 @@ async function createSuggestion({
   const cleanText = validateText(text);
   const cleanCategory = validateCategory(category);
 
-  // Per-user, per-UTC-day count in Postgres rather than middleware, so it holds
-  // across workers and restarts (same shape as claimAdCoinReward). Count-then-
-  // insert is not atomic; two simultaneous submissions could both pass at the
-  // boundary. That is acceptable for an abuse limit on a free-text form — the
-  // cost of a rare 6th row is nil.
-  const submittedToday = await prisma.suggestion.count({
-    where: { userId, createdAt: { gte: startOfUtcDay(now) } },
-  });
-  if (submittedToday >= DAILY_SUBMISSION_LIMIT) {
-    throw new SuggestionError(
-      `You can send up to ${DAILY_SUBMISSION_LIMIT} suggestions per day. Try again tomorrow.`,
-      429,
-      "DAILY_LIMIT_REACHED"
-    );
-  }
-
   // A suggestion and its first support-message are one durable unit. Older
   // clients still receive the historical `{ok:true}` response; the thread is
-  // additive server state for inbox-capable builds only.
+  // additive server state for inbox-capable builds only. The transaction-scoped
+  // advisory lock and quota domain are shared with the Stage A1 email-attempt
+  // reservation so an A0 worker and an A1 worker cannot both consume the fifth
+  // daily slot during a rolling reload. The additive attempt table therefore
+  // must be migrated before this A0 command is deployed.
   await prisma.$transaction(async (tx) => {
+    const utcDay = startOfUtcDay(now);
+    const nextUtcDay = new Date(utcDay.getTime() + 24 * 60 * 60 * 1000);
+    await lockFeedbackQuota(tx, userId, utcDay);
+    const [legacyCount, emailAttemptCount] = await Promise.all([
+      tx.suggestion.count({
+        where: { userId, createdAt: { gte: utcDay, lt: nextUtcDay } },
+      }),
+      tx.feedbackEmailAttempt.count({
+        where: {
+          userId,
+          utcDay,
+          state: { in: ["RESERVED", "ACCEPTED"] },
+        },
+      }),
+    ]);
+    if (legacyCount + emailAttemptCount >= DAILY_SUBMISSION_LIMIT) {
+      throw new SuggestionError(
+        `You can send up to ${DAILY_SUBMISSION_LIMIT} suggestions per day. Try again tomorrow.`,
+        429,
+        "DAILY_LIMIT_REACHED"
+      );
+    }
     const suggestion = await tx.suggestion.create({
       data: {
         userId,
@@ -132,4 +153,7 @@ module.exports = {
   MAX_CATEGORY_LENGTH,
   DAILY_SUBMISSION_LIMIT,
   THREAD_RETENTION_MS,
+  startOfUtcDay,
+  feedbackQuotaLockKey,
+  lockFeedbackQuota,
 };
