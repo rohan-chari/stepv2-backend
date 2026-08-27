@@ -127,6 +127,7 @@ const productDb = new Set([
 ]);
 
 const envMetadata = {
+  GOOGLE_WORKSPACE_FEEDBACK_OAUTH_FILE: ["deployment_config", null, "absolute path to the root-readable Gmail send-only OAuth secret", "feedback_delivery", null],
   PRISMA_QUERY_EVENTS_ENABLED: ["retained_diagnostic", false, "literal true enables outside production; production true fails startup", "diagnostics", false],
   PLACEMENT_BASELINE_WRITE_CONCURRENCY: ["retained_numeric", 4, "integer clamped to 1..8", "performance", 4],
   STEP_SYNC_PUSH_CONCURRENCY: ["retained_numeric", 8, "integer clamped to 1..16", "performance", 8],

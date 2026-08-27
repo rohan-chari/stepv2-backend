@@ -1,148 +1,274 @@
-const nodemailer = require("nodemailer");
+const fs = require("node:fs/promises");
+const path = require("node:path");
+const { OAuth2Client } = require("google-auth-library");
+const addressparser = require("nodemailer/lib/addressparser");
+const MailComposer = require("nodemailer/lib/mail-composer");
 
-const SMTP_HOST = "smtp-relay.gmail.com";
-const SMTP_PORT = 587;
 const SUPPORT_ADDRESS = "support@barastep.com";
 const VISIBLE_FROM = "Bara Support <support@barastep.com>";
-const BOUNCE_ADDRESS = "feedback-bounces@barastep.com";
 const SUBJECT_PREFIX = "USER FEEDBACK";
+const GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send";
+const GMAIL_SEND_URL =
+  "https://gmail.googleapis.com/gmail/v1/users/support%40barastep.com/messages/send";
+const OAUTH_TIMEOUT_MS = 10_000;
+const GMAIL_TIMEOUT_MS = 15_000;
+const MAX_OAUTH_FILE_BYTES = 16 * 1024;
 
 function buildFeedbackSubject(messageId) {
   const match = /^<([0-9a-f]{8})[0-9a-f-]*@barastep\.com>$/i.exec(messageId || "");
-  if (!match) throw new FeedbackTransportError("unavailable");
+  if (!match) throw new FeedbackTransportError("unavailable", "invalid_message_id");
   return `${SUBJECT_PREFIX} • ${match[1].toUpperCase()}`;
 }
 
-const PRE_DATA_COMMANDS = new Set([
-  "CONN",
-  "EHLO",
-  "HELO",
-  "STARTTLS",
-  "AUTH",
-  "MAIL FROM",
-  "RCPT TO",
-]);
-
 class FeedbackTransportError extends Error {
-  constructor(kind, cause) {
-    super(kind === "uncertain" ? "Email delivery could not be confirmed" : "Email delivery is unavailable");
+  constructor(kind, safeCode = null, safeStatusClass = null) {
+    super(kind === "uncertain"
+      ? "Email delivery could not be confirmed"
+      : "Email delivery is unavailable");
     this.name = "FeedbackTransportError";
     this.feedbackDelivery = kind;
-    this.cause = cause;
+    if (safeCode) this.safeCode = safeCode;
+    if (safeStatusClass) this.safeStatusClass = safeStatusClass;
   }
 }
 
-function classifyTransportFailure(error, deliveryStage = {}) {
-  const responseCode = Number(error?.responseCode);
-  if (Number.isInteger(responseCode) && responseCode >= 400) return "unavailable";
-  if (deliveryStage.dataStarted === true) return "uncertain";
-  const command = typeof error?.command === "string" ? error.command.toUpperCase() : "";
-  if (PRE_DATA_COMMANDS.has(command)) return "unavailable";
-  // A DATA-stage socket loss may have happened after the terminating dot but
-  // before Google's final 250 reached us. Unknown post-dispatch failures are
-  // conservatively uncertain so their reserved quota slot is never released.
+function classifyGmailResponse(status) {
+  if (Number.isInteger(status) && status >= 200 && status < 300) return "accepted";
+  if (Number.isInteger(status) && status >= 400 && status < 500 && status !== 408) {
+    return "unavailable";
+  }
   return "uncertain";
 }
 
-function createSmtpStageTracker() {
-  let awaitingDataResponse = false;
-  let dataStarted = false;
-  const noOp = () => false;
-  const logger = {
-    trace: noOp,
-    info: noOp,
-    warn: noOp,
-    error: noOp,
-    fatal: noOp,
-    debug(data, message) {
-      const transaction = data?.tnx;
-      const line = typeof message === "string" ? message.trim() : "";
-      if (transaction === "client" && /^DATA$/i.test(line)) {
-        awaitingDataResponse = true;
-        return;
-      }
-      if (transaction === "server" && awaitingDataResponse) {
-        // DATA has begun only after the relay accepts the DATA command. From
-        // this point until sendMail resolves with the final 250, a socket loss
-        // is ambiguous even when Nodemailer labels the error command `CONN`.
-        dataStarted = /^[23]/.test(line);
-        awaitingDataResponse = false;
-      }
-    },
-  };
-  return {
-    logger,
-    get dataStarted() { return dataStarted; },
-  };
+function statusClass(status) {
+  if (Number.isInteger(status) && status >= 100 && status <= 999) {
+    return `${Math.floor(status / 100)}xx`;
+  }
+  return "unexpected";
 }
 
-function createNodemailerTransport(factory = nodemailer, stageTracker = createSmtpStageTracker()) {
-  return factory.createTransport({
-    host: SMTP_HOST,
-    port: SMTP_PORT,
-    secure: false,
-    requireTLS: true,
-    pool: false,
-    connectionTimeout: 10_000,
-    greetingTimeout: 10_000,
-    socketTimeout: 15_000,
-    tls: { servername: SMTP_HOST },
-    // Transaction logging is consumed by the no-output stage tracker above.
-    // It logs SMTP commands/responses only, never message bytes (`debug:false`).
-    transactionLog: true,
-    logger: stageTracker.logger,
+function validateSecretShape(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const clientId = typeof value.clientId === "string" ? value.clientId.trim() : "";
+  const clientSecret = typeof value.clientSecret === "string" ? value.clientSecret.trim() : "";
+  const refreshToken = typeof value.refreshToken === "string" ? value.refreshToken.trim() : "";
+  if (
+    !clientId || clientId.length > 512 ||
+    !clientSecret || clientSecret.length > 2048 ||
+    !refreshToken || refreshToken.length > 4096 ||
+    /[\x00-\x1f\x7f]/.test(clientId) ||
+    /[\x00-\x1f\x7f]/.test(clientSecret) ||
+    /[\x00-\x1f\x7f]/.test(refreshToken)
+  ) return null;
+  return { clientId, clientSecret, refreshToken };
+}
+
+function defaultOAuthClientFactory({ clientId, clientSecret, timeout }) {
+  return new OAuth2Client({
+    clientId,
+    clientSecret,
+    transporterOptions: {
+      timeout,
+      retry: false,
+    },
+  });
+}
+
+async function withTimeout(promise, timeoutMs) {
+  let timeout;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(new Error("operation timed out")), timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function buildMime(message) {
+  if (typeof message?.text !== "string") {
+    throw new FeedbackTransportError("unavailable", "invalid_message");
+  }
+  if (message.replyTo !== undefined) {
+    const parsed = typeof message.replyTo === "string"
+      ? addressparser(message.replyTo)
+      : [];
+    if (
+      /[\x00-\x20\x7f,;<>()[\]:"\\]/.test(message.replyTo || "") ||
+      parsed.length !== 1 ||
+      parsed[0].name ||
+      parsed[0].address !== message.replyTo
+    ) {
+      throw new FeedbackTransportError("unavailable", "invalid_reply_to");
+    }
+  }
+  const subject = buildFeedbackSubject(message.messageId);
+  const composer = new MailComposer({
+    from: VISIBLE_FROM,
+    to: SUPPORT_ADDRESS,
+    subject,
+    text: message.text,
+    messageId: message.messageId,
+    ...(message.replyTo ? { replyTo: message.replyTo } : {}),
+    disableFileAccess: true,
+    disableUrlAccess: true,
+  });
+  return new Promise((resolve, reject) => {
+    composer.compile().build((error, bytes) => {
+      if (error) reject(error);
+      else resolve(bytes);
+    });
   });
 }
 
 function buildGoogleWorkspaceFeedbackTransport(dependencies = {}) {
-  const injectedTransporter = dependencies.transporter || null;
-  const factory = dependencies.nodemailer || nodemailer;
+  const oauthFile = dependencies.oauthFile ?? process.env.GOOGLE_WORKSPACE_FEEDBACK_OAUTH_FILE;
+  const readFile = dependencies.readFile || fs.readFile;
+  const stat = dependencies.stat || fs.stat;
+  const oauthClientFactory = dependencies.oauthClientFactory || defaultOAuthClientFactory;
+  const fetchImplementation = dependencies.fetch || globalThis.fetch;
+  const oauthTimeoutMs = dependencies.oauthTimeoutMs || OAUTH_TIMEOUT_MS;
+  const gmailTimeoutMs = dependencies.gmailTimeoutMs || GMAIL_TIMEOUT_MS;
+  let authContextPromise;
+
+  async function loadAuthContext() {
+    if (typeof oauthFile !== "string" || !path.isAbsolute(oauthFile)) {
+      throw new FeedbackTransportError("unavailable", "oauth_config");
+    }
+    const metadata = await stat(oauthFile);
+    if (
+      !metadata.isFile() ||
+      (Number.isInteger(metadata.uid) && metadata.uid !== 0) ||
+      (metadata.mode & 0o077) !== 0 ||
+      (Number.isFinite(metadata.size) && metadata.size > MAX_OAUTH_FILE_BYTES)
+    ) {
+      throw new FeedbackTransportError("unavailable", "oauth_config");
+    }
+    const serialized = await readFile(oauthFile, "utf8");
+    if (Buffer.byteLength(serialized, "utf8") > MAX_OAUTH_FILE_BYTES) {
+      throw new FeedbackTransportError("unavailable", "oauth_config");
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(serialized);
+    } catch {
+      throw new FeedbackTransportError("unavailable", "oauth_config");
+    }
+    const config = validateSecretShape(parsed);
+    if (!config) throw new FeedbackTransportError("unavailable", "oauth_config");
+
+    const client = oauthClientFactory({
+      clientId: config.clientId,
+      clientSecret: config.clientSecret,
+      timeout: oauthTimeoutMs,
+    });
+    if (
+      !client ||
+      typeof client.setCredentials !== "function" ||
+      typeof client.getAccessToken !== "function" ||
+      typeof client.getTokenInfo !== "function"
+    ) {
+      throw new FeedbackTransportError("unavailable", "oauth_config");
+    }
+    client.setCredentials({ refresh_token: config.refreshToken });
+    return { client, clientId: config.clientId };
+  }
+
+  async function accessToken() {
+    try {
+      authContextPromise ||= loadAuthContext();
+      const { client, clientId } = await authContextPromise;
+      const result = await withTimeout(client.getAccessToken(), oauthTimeoutMs);
+      const token = typeof result?.token === "string" ? result.token.trim() : "";
+      if (!token) throw new Error("missing token");
+      const info = await withTimeout(client.getTokenInfo(token), oauthTimeoutMs);
+      const scopes = Array.isArray(info?.scopes) ? [...info.scopes].sort() : [];
+      if (
+        info?.aud !== clientId ||
+        scopes.length !== 1 ||
+        scopes[0] !== GMAIL_SEND_SCOPE
+      ) {
+        throw new Error("unexpected token identity");
+      }
+      return token;
+    } catch {
+      // Discard the cached rejection so corrected/rotated credentials can be
+      // picked up by a later request without restarting unrelated API paths.
+      authContextPromise = undefined;
+      throw new FeedbackTransportError("unavailable", "oauth_unavailable");
+    }
+  }
 
   return {
     async send(message) {
-      const stageTracker = createSmtpStageTracker();
-      let transporter = injectedTransporter;
-      if (!transporter) {
-        try {
-          // A tracker is scoped to exactly one non-pooled send, so concurrent
-          // feedback requests cannot contaminate each other's SMTP stage.
-          transporter = createNodemailerTransport(factory, stageTracker);
-        } catch (error) {
-          throw new FeedbackTransportError("unavailable", error);
-        }
-      }
+      let raw;
+      let token;
       try {
-        const info = await transporter.sendMail({
-          from: VISIBLE_FROM,
-          to: SUPPORT_ADDRESS,
-          subject: buildFeedbackSubject(message.messageId),
-          text: message.text,
-          ...(message.replyTo ? { replyTo: message.replyTo } : {}),
-          messageId: message.messageId,
-          envelope: {
-            from: BOUNCE_ADDRESS,
-            to: [SUPPORT_ADDRESS],
-          },
-          // No HTML alternative, tracking headers, or user-built raw headers.
-          disableFileAccess: true,
-          disableUrlAccess: true,
-        });
-        const accepted = Array.isArray(info?.accepted) ? info.accepted : [];
-        const rejected = Array.isArray(info?.rejected) ? info.rejected : [];
-        if (
-          accepted.length !== 1 ||
-          String(accepted[0]).toLowerCase() !== SUPPORT_ADDRESS ||
-          rejected.length !== 0
-        ) {
-          throw new FeedbackTransportError("unavailable");
-        }
-        return { accepted: [SUPPORT_ADDRESS], rejected: [] };
+        const bytes = await buildMime(message);
+        raw = bytes.toString("base64url");
+        token = await accessToken();
       } catch (error) {
         if (error instanceof FeedbackTransportError) throw error;
-        throw new FeedbackTransportError(
-          classifyTransportFailure(error, { dataStarted: stageTracker.dataStarted }),
-          error
-        );
+        throw new FeedbackTransportError("unavailable", "message_build");
+      }
+
+      if (typeof fetchImplementation !== "function") {
+        throw new FeedbackTransportError("unavailable", "https_config");
+      }
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), gmailTimeoutMs);
+      try {
+        let response;
+        try {
+          // This is the sole Gmail send invocation. It is deliberately not
+          // retried: a lost response may still mean Google created the message.
+          response = await fetchImplementation(GMAIL_SEND_URL, {
+            method: "POST",
+            redirect: "manual",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ raw }),
+            signal: controller.signal,
+          });
+        } catch {
+          throw new FeedbackTransportError("uncertain", "https_network", "network");
+        }
+
+        const classification = classifyGmailResponse(response?.status);
+        if (classification !== "accepted") {
+          throw new FeedbackTransportError(
+            classification,
+            classification === "unavailable" ? "gmail_rejected" : "gmail_uncertain",
+            statusClass(response?.status)
+          );
+        }
+
+        let result;
+        try {
+          result = await response.json();
+        } catch {
+          throw new FeedbackTransportError(
+            "uncertain",
+            controller.signal.aborted ? "https_timeout" : "gmail_malformed",
+            "2xx"
+          );
+        }
+        if (typeof result?.id !== "string" || result.id.trim().length === 0) {
+          throw new FeedbackTransportError("uncertain", "gmail_malformed", "2xx");
+        }
+
+        // Gmail's mailbox message/thread IDs are intentionally discarded. Only
+        // Bara's pre-generated RFC Message-ID remains in durable metadata.
+        return { accepted: [SUPPORT_ADDRESS], rejected: [] };
+      } finally {
+        // The deadline covers both receiving response headers and consuming the
+        // bounded 2xx body needed to prove Gmail returned a non-empty ID.
+        clearTimeout(timeout);
       }
     },
   };
@@ -151,16 +277,16 @@ function buildGoogleWorkspaceFeedbackTransport(dependencies = {}) {
 const googleWorkspaceFeedbackTransport = buildGoogleWorkspaceFeedbackTransport();
 
 module.exports = {
-  BOUNCE_ADDRESS,
   FeedbackTransportError,
-  SMTP_HOST,
-  SMTP_PORT,
+  GMAIL_SEND_SCOPE,
+  GMAIL_SEND_URL,
+  GMAIL_TIMEOUT_MS,
+  OAUTH_TIMEOUT_MS,
   SUBJECT_PREFIX,
   SUPPORT_ADDRESS,
   VISIBLE_FROM,
   buildFeedbackSubject,
   buildGoogleWorkspaceFeedbackTransport,
-  classifyTransportFailure,
-  createSmtpStageTracker,
+  classifyGmailResponse,
   googleWorkspaceFeedbackTransport,
 };

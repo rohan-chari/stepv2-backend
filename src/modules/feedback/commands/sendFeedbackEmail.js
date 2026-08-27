@@ -10,7 +10,6 @@ const {
   googleWorkspaceFeedbackTransport: defaultTransport,
   SUPPORT_ADDRESS,
   VISIBLE_FROM,
-  BOUNCE_ADDRESS,
   buildFeedbackSubject,
 } = require("../services/googleWorkspaceFeedbackTransport");
 
@@ -172,7 +171,6 @@ function buildSendFeedbackEmail(dependencies = {}) {
       to: SUPPORT_ADDRESS,
       subject: buildFeedbackSubject(messageId),
       ...(replyTo ? { replyTo } : {}),
-      envelope: { from: BOUNCE_ADDRESS, to: [SUPPORT_ADDRESS] },
       messageId,
       text: buildPlainTextBody({
         text,
@@ -194,7 +192,7 @@ function buildSendFeedbackEmail(dependencies = {}) {
         String(accepted[0]).toLowerCase() !== SUPPORT_ADDRESS ||
         rejected.length !== 0
       ) {
-        const error = new Error("SMTP recipient was not accepted exactly");
+        const error = new Error("Gmail API acceptance was not confirmed");
         error.feedbackDelivery = "unavailable";
         throw error;
       }

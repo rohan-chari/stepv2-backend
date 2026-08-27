@@ -8,6 +8,9 @@ const {
   request,
   startServer,
 } = require("./setup");
+const {
+  buildGoogleWorkspaceFeedbackTransport,
+} = require("../../src/modules/feedback/services/googleWorkspaceFeedbackTransport");
 
 function fakeTransport() {
   const sent = [];
@@ -55,7 +58,7 @@ describe("feedback email delivery", () => {
     });
   }
 
-  it("emails the locked envelope and stores content-free ACCEPTED metadata only", async () => {
+  it("emails the locked Gmail message and stores content-free ACCEPTED metadata only", async () => {
     const { user, token } = await createTestUser({
       email: "stored@example.com",
       displayName: "Trail Walker",
@@ -79,10 +82,7 @@ describe("feedback email delivery", () => {
     assert.equal(message.to, "support@barastep.com");
     assert.match(message.subject, /^USER FEEDBACK • [0-9A-F]{8}$/);
     assert.equal(message.replyTo, "person@example.com");
-    assert.deepEqual(message.envelope, {
-      from: "feedback-bounces@barastep.com",
-      to: ["support@barastep.com"],
-    });
+    assert.equal("envelope" in message, false);
     assert.match(message.messageId, /^<[0-9a-f-]+@barastep\.com>$/);
     assert.match(message.text, /Please add a trail map/);
     assert.match(message.text, /Category: feature/);
@@ -252,6 +252,32 @@ describe("feedback email delivery", () => {
     assert.equal((await submit(token, { text: "over quota" })).status, 429);
   });
 
+  it("returns unavailable through real HTTP when the OAuth secret is not configured", async () => {
+    const missingConfigServer = await startServer({
+      feedbackTransport: buildGoogleWorkspaceFeedbackTransport({ oauthFile: "" }),
+    });
+    try {
+      const { user, token } = await createTestUser();
+      const response = await request(
+        missingConfigServer.baseUrl,
+        "POST",
+        "/feedback/suggestions",
+        { token, body: { text: "No provider configuration" } }
+      );
+      assert.equal(response.status, 503);
+      assert.deepEqual(await response.json(), {
+        error: "Email delivery is unavailable",
+        code: "EMAIL_DELIVERY_UNAVAILABLE",
+      });
+      assert.equal(
+        await prisma.feedbackEmailAttempt.count({ where: { userId: user.id, state: "FAILED" } }),
+        1
+      );
+    } finally {
+      await missingConfigServer.close();
+    }
+  });
+
   it("keeps the uncertain 503 when best-effort ambiguity metadata cannot persist", async () => {
     const uncertainTransport = fakeTransport();
     uncertainTransport.failures.push(deliveryError("uncertain"));
@@ -320,7 +346,7 @@ describe("feedback email delivery", () => {
     );
   });
 
-  it("returns 201 after known SMTP acceptance even when ACCEPTED finalization exhausts retries", async () => {
+  it("returns 201 after known Gmail API acceptance even when ACCEPTED finalization exhausts retries", async () => {
     const acceptedTransport = fakeTransport();
     const logs = [];
     const faultingAttemptDelegate = new Proxy(prisma.feedbackEmailAttempt, {

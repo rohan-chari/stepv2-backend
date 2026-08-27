@@ -424,17 +424,22 @@ links fall through to the browser landing page (the `bara://` "Open in app" butt
 still works). The deep-link files' *content* is host-agnostic, so the same app
 serves valid `/.well-known/*` on both hosts automatically.
 
-### Google Workspace feedback SMTP relay
+### Google Workspace feedback Gmail API
 
-Feedback email uses fixed application constants: `smtp-relay.gmail.com:587`,
-STARTTLS required, visible From/To `support@barastep.com`, and envelope sender
-`feedback-bounces@barastep.com`. Each independent submission has a server-built
-subject `USER FEEDBACK • <8 hex characters>` derived from its random Message-ID;
-the unique suffix prevents unrelated submissions from becoming one Gmail
-conversation. There is no Gmail password, app password, OAuth secret, feature
-flag, or SMTP environment variable. Workspace authorizes only the production
-server's explicit static IP; the application still starts when relay delivery
-is unavailable and only feedback submission returns 503.
+Feedback email uses the Gmail API over HTTPS, not SMTP. The endpoint and visible
+From/To are fixed to the licensed primary Workspace mailbox
+`support@barastep.com`. Each submission has a server-built subject
+`USER FEEDBACK • <8 hex characters>` derived from its random Message-ID so
+unrelated submissions do not become one Gmail conversation. The Gmail API owns
+the SMTP envelope and Return-Path. The application never stores Google's
+mailbox message/thread IDs and never reads provider response bodies on errors.
+
+Authentication is a one-user OAuth grant by `support@barastep.com` with exactly
+`https://www.googleapis.com/auth/gmail.send`. Do not use a service account,
+domain-wide delegation, Gmail password/app password, additional Workspace user,
+or broad mailbox scopes. There is no feature flag or delivery toggle. Missing
+or invalid credentials affect only feedback submission; the rest of the server
+still starts.
 
 Release ordering is mandatory:
 
@@ -453,36 +458,64 @@ Release ordering is mandatory:
    domain, so they cannot jointly admit a sixth submission.
 4. Only after A1 is healthy, release the matching iOS and Android clients.
 
-Before A1 production deployment, complete and record all of these Workspace
-checks (provider/DNS changes require separate, in-the-moment authorization):
+Before A1 production deployment, complete and record all of these Google and
+mailbox checks (provider/DNS changes require separate, in-the-moment
+authorization):
 
-- Configure Gmail SMTP relay for the production static IP only, require TLS,
-  and select **Only addresses in my domains** for Allowed senders. Do not select
-  **Only registered Apps users in my domains**: the controlled envelope sender
-  is intentionally unprovisioned.
-- Leave `feedback-bounces@barastep.com` unprovisioned: it is a controlled
-  same-domain SMTP envelope sender only, not a Workspace user, alias, or Group.
-  Delivery-status notices are intentionally discarded. Confirm no domain
-  catch-all or routing rule redirects that address into the support mailbox.
+- In a Bara-owned Google Cloud project, enable Gmail API. Configure the OAuth
+  consent screen as **Internal**, and create a dedicated OAuth client with a
+  fixed localhost redirect URI containing an explicit port (for example
+  `http://127.0.0.1:53682/oauth2callback`).
+- Download that OAuth client JSON locally. While signed in as exactly
+  `support@barastep.com`, authorize the single send scope and write the secret
+  without printing tokens:
+
+  ```bash
+  npm run feedback:oauth:authorize -- \
+    --client=/absolute/path/downloaded-oauth-client.json \
+    --output=/absolute/path/feedback-gmail-oauth.json
+  ```
+
+  The helper uses PKCE and `consent select_account` so the operator explicitly
+  chooses the support account. With the intentionally narrow `gmail.send`
+  scope, Google's token-info response exposes the OAuth client audience and
+  granted scopes but not the mailbox email. It therefore does not prove mailbox
+  identity. The required live preflight against the fixed
+  `users/support%40barastep.com` send endpoint is that proof: another user's
+  token cannot send for that user and must fail before A1 workers are reloaded.
+
+- Transfer the generated file directly to the production host without chat,
+  email, Git, or an issue tracker. Install it outside the checkout as owner
+  `root`, mode `0600`, and set only its absolute path in production `.env`:
+  `GOOGLE_WORKSPACE_FEEDBACK_OAUTH_FILE=/etc/bara/feedback-gmail-oauth.json`.
+  Never place the client secret or refresh token in `.env`, PM2 configuration,
+  command output, application logs, or a client build.
 - No dedicated Workspace retention policy is required. Support and feedback
   mail follows the mailbox's normal retention and may remain until a support
   operator deletes it; public copy must not promise automatic deletion after a
   fixed number of days.
 - Disable vacation/automatic replies on the support mailbox. Confirm no
-  forwarding rule sends support mail back to itself and no catch-all/routing
-  rule redirects the unprovisioned bounce identity into support.
+  forwarding rule sends support mail back to itself.
 - Register the Bara sender with Apple's private-email relay before relying on
   replies to Apple relay addresses.
-- Send preflight messages covering explicit Reply-To, stored-email Reply-To,
-  absent Reply-To, bounce, and forwarding. Inspect delivered headers: Google
-  DKIM must use `d=barastep.com`, DMARC must pass for From
-  `support@barastep.com`, and the actual Return-Path rewrite must remain
-  controlled. A1 is not production-ready without this evidence.
+- With A0 workers still loaded, pull/install reviewed A1 under fresh production
+  approval and run `npm run feedback:gmail:preflight`. This sends one unique,
+  no-user-data message. Confirm its Inbox and Sent placement and inspect its
+  From, To, Message-ID, Return-Path, SPF, Google DKIM (`d=barastep.com`), and
+  DMARC pass before reloading any PM2 process. Then separately test the real
+  endpoint's entered Reply-To, stored Reply-To, and absent Reply-To cases.
+- If authorization or preflight fails, do not reload PM2. Restore the A0
+  checkout while its already-loaded workers continue serving. If credentials
+  are exposed, revoke the app grant/refresh token, remove the production secret,
+  reload all HTTP workers to clear cached access tokens, and rotate/revoke the
+  OAuth client secret as appropriate. A stolen short-lived access token can
+  remain usable until it expires.
 
-After deploy, monitor aggregate attempt states and error classes only. Never
-log feedback text, category, reply address, display name, or SMTP response
-content. A `RESERVED` attempt after an uncertain timeout consumes quota by
-design; users may create an occasional duplicate by retrying.
+After deploy, monitor aggregate attempt states, latency, safe HTTP status class,
+and error class only. Never log feedback text, MIME, category, reply address,
+display name, OAuth credentials/access tokens, Authorization headers, or
+provider response bodies. A `RESERVED` attempt after an uncertain timeout
+consumes quota by design; users may create an occasional duplicate by retrying.
 
 ### Before shipping an app version that uses share links — prod must be ready first
 

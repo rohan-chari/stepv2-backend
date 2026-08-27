@@ -1173,6 +1173,19 @@
       "rollbackValue": null
     },
     {
+      "id": "env:GOOGLE_WORKSPACE_FEEDBACK_OAUTH_FILE",
+      "name": "GOOGLE_WORKSPACE_FEEDBACK_OAUTH_FILE",
+      "kind": "string_environment",
+      "evidenceTimestamp": "2026-08-20T04:23:00Z",
+      "compatibilityConsumers": [],
+      "adminExposed": false,
+      "disposition": "deployment_config",
+      "permanentValue": null,
+      "polarityDefault": "absolute path to the root-readable Gmail send-only OAuth secret",
+      "deployFamily": "feedback_delivery",
+      "rollbackValue": null
+    },
+    {
       "id": "env:HIGH_MULTIPLIER_PUSH_DISABLED",
       "name": "HIGH_MULTIPLIER_PUSH_DISABLED",
       "kind": "boolean_environment",
