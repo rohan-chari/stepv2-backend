@@ -93,6 +93,7 @@ Object.assign(module.exports, require("./jobs/placementRecompute"));
 Object.assign(module.exports, require("./jobs/seededRaceRenewal"));
 Object.assign(module.exports, require("./jobs/racePayoutDoubleReconcile"));
 Object.assign(module.exports, require("./jobs/raceAdminCommandRunner"));
+Object.assign(module.exports, require("./jobs/fixedTeamPayoutMonitoring"));
 
 Object.assign(module.exports, require("./routes"));
 Object.assign(module.exports, require("./joinRequestRoutes"));

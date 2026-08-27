@@ -35,10 +35,24 @@ Proceed only after every production worker is verified on Deployment A.
 3. Verify 2–3, 4–7, and 8+ day creations stamp `200`, `500`, and `1000`.
 4. Reconfirm the five-membership ceiling remains enforced across race and
    tournament paths.
+5. Verify the cron process emits a fresh
+   `fixed_team_payout_economy_monitor_v1` structured event containing all
+   daily/7-day dimensions. Confirm the log alert sink routes `severity=warn`
+   to the backend/economy owner and `severity=page` to the immediate page path.
+   Cap-limit responses must emit `funded_exposure_limit_v1` for churn counts.
 
 Rolling application code back from B to A is compatible: A honors races that
 B already stamped and stops creating new stamps. Leave the additive columns in
 place. Do not roll back the migration destructively.
+
+## Frontend release
+
+Release the verified iOS and Android builds only after both production workers
+are confirmed on Deployment B. A newer app pointed at A or an older backend is
+safe—it falls back to generic team-payout copy when the additive marker pair is
+missing/null—but backend-first ordering ensures the fixed per-winner fact is
+authoritative when users first see it. Keep iOS/Android version and backend URL
+configuration in lockstep under the frontend release runbook.
 
 ## Separately authorized open-race repair
 
@@ -47,9 +61,11 @@ part of either deployment.
 
 1. With a separately authorized production environment, run the default dry
    report: `npm run team-payouts:repair`.
-2. Review every `upward` row and every `skippedNonUpward` row. The candidate
-   query excludes completed/cancelled, seeded, tournament, buy-in, already
-   stamped, and partial-stamp races.
+2. Review every `upward`, `skippedNonUpward`, and
+   `skippedPartialOrMalformed` row. The write-candidate cohort excludes
+   completed/cancelled, seeded, tournament, buy-in, already-valid stamped, and
+   partial/malformed-stamp races; the last group remains visible in the report
+   for manual investigation.
    Record the emitted `reportDigest`; it binds the IDs, duration/reward, current
    and repaired projections, and both side liabilities to the review.
 3. Obtain separate enqueue authorization for that exact report, then run
@@ -62,6 +78,13 @@ part of either deployment.
    re-reads and fences the race, refuses any no-longer-open/out-of-scope or
    non-upward row, uses a compare-and-set stamp write, and invalidates progress
    plus participant race-list caches.
+   Query the completed command rows and require `last_error IS NULL`. The worker
+   retries every cache invalidation three times; a remaining failure is durably
+   recorded as `CACHE_INVALIDATION_FAILED:<surfaces>` and logged. In that case,
+   do not call verification complete: wait through the five-minute completed
+   race-list cache TTL, re-read detail/progress/list for every affected user,
+   and verify all projections from Postgres before proceeding. The repair stamp
+   itself is committed and must never be cleared or lowered.
 6. Re-run the dry report. Repaired rows must be absent and replaying an already
    completed command must not mint coins or change a race again.
 

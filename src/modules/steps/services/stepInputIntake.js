@@ -166,6 +166,8 @@ function buildStepInputIntake(dependencies = {}) {
       scoringChanged,
       repairRequired,
       generation,
+      canonicalCoverageThrough: afterSamples.canonicalCoverageThrough,
+      completedAt: afterSamples.dbNow,
       jobs,
       activeRaceCount,
     };

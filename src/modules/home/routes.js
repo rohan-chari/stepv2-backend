@@ -38,6 +38,9 @@ const { buildHomeRaceCardResponse } = require("./buildHomeRaceCardResponse");
 const {
   getEligibleGlobalEventSummary,
 } = require("./queries/getEligibleGlobalEventSummary");
+const {
+  getCachedGlobalEventSummary,
+} = require("./services/globalEventSummaryCache");
 const { buildServiceBanner } = require("./services/buildServiceBanner");
 const {
   resolveActiveContestBanner: defaultResolveActiveContestBanner,
@@ -147,7 +150,8 @@ function createHomeRouter(dependencies = {}) {
           supportsNextRace: supportsNextRace(req.clientFeatures),
           supportsAds: req.clientFeatures?.has("ads") ?? false,
           supportsImpactSummaries:
-            req.clientFeatures?.has("impact_summaries") ?? false,
+            req.clientFeatures?.has("impact_summaries") === true &&
+            req.clientFeatures?.has("impact_summary_expiry_v1") === true,
           supportsInbox: req.clientFeatures?.has("inbox_v1") ?? false,
           supportsReferralContest:
             req.clientFeatures?.has("referral_contest_v1") ?? false,
@@ -313,16 +317,19 @@ function createHomeRouter(dependencies = {}) {
       // absence is the old-backend downgrade path for a carrying app build.
       if (
         req.clientFeatures?.has("impact_summaries") === true &&
+        req.clientFeatures?.has("impact_summary_expiry_v1") === true &&
         (await isStrictFlagEnabled(settings, "apiImpactSummariesEnabled"))
       ) {
-        const summary = await derivedCache.cachedRead({
-          key: cacheKeys.homeImpactSummary(req.user.id),
-          prefix: cacheKeys.PREFIX.HOME_IMPACT_SUMMARY,
-          ttlSeconds: 60,
-          enabled: await isStrictFlagEnabled(settings, "redisCacheHomeImpactSummaryEnabled"),
-          load: () => getEligibleGlobalEventSummary({ prisma, userId: req.user.id }),
-        });
-        if (summary) result.globalEventSummary = summary;
+        try {
+          const summary = await getCachedGlobalEventSummary({
+            key: cacheKeys.homeImpactSummary(req.user.id),
+            enabled: await isStrictFlagEnabled(settings, "redisCacheHomeImpactSummaryEnabled"),
+            load: () => getEligibleGlobalEventSummary({ prisma, userId: req.user.id }),
+          });
+          if (summary) result.globalEventSummary = summary;
+        } catch (summaryError) {
+          console.error("Home race-card globalEventSummary lookup error:", summaryError);
+        }
       }
 
       if (
@@ -375,6 +382,43 @@ function createHomeRouter(dependencies = {}) {
       res.status(500).json({ error: "Internal server error" });
     }
   });
+
+  router.get("/global-event-summary-work/:id", asyncHandler(async (req, res) => {
+    const capable =
+      req.clientFeatures?.has("impact_summaries") === true &&
+      req.clientFeatures?.has("impact_summary_expiry_v1") === true;
+    if (!capable) {
+      return res.status(404).json({ error: "Summary work not found", code: "NOT_FOUND" });
+    }
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(req.params.id)) {
+      return res.status(400).json({ error: "Invalid work id", code: "INVALID_ID" });
+    }
+    let work;
+    if (typeof prisma.$queryRawUnsafe === "function") {
+      [work] = await prisma.$queryRawUnsafe(
+        `SELECT status, expires_at AS "expiresAt",
+                expires_at <= (statement_timestamp() AT TIME ZONE 'UTC') AS expired
+           FROM global_event_summary_work
+          WHERE id = $1 AND user_id = $2
+          LIMIT 1`,
+        req.params.id,
+        req.user.id,
+      );
+    } else {
+      work = await prisma.globalEventSummaryWork.findFirst({
+        where: { id: req.params.id, userId: req.user.id },
+        select: { status: true, expiresAt: true },
+      });
+    }
+    if (!work) {
+      return res.status(404).json({ error: "Summary work not found", code: "NOT_FOUND" });
+    }
+    const activeStates = new Set(["WAITING_SYNC", "QUEUED", "PROCESSING", "WAITING_RACES"]);
+    const state = work.expired === true && activeStates.has(work.status)
+      ? "EXPIRED_UNDELIVERED"
+      : work.status;
+    return res.json({ state, expiresAt: work.expiresAt });
+  }));
 
   router.post("/global-event-summaries/:id/acknowledge", asyncHandler(async (req, res) => {
     const enabled = req.clientFeatures?.has("impact_summaries") === true &&

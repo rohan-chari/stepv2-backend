@@ -304,6 +304,8 @@ function buildDeleteUserAccount(dependencies = {}) {
       await tx.activeRaceEffectImpact.deleteMany({ where: { userId } });
       await tx.activeRaceImpactWork.deleteMany({ where: { recipientUserId: userId } });
       await tx.raceEffectImpact.deleteMany({ where: { userId } });
+      await tx.globalEventCaptureArtifact.deleteMany({ where: { userId } });
+      await tx.globalEventSummaryWork.deleteMany({ where: { userId } });
       await tx.globalEventRaceImpact.deleteMany({ where: { userId } });
       await tx.globalEventUserSummary.deleteMany({ where: { userId } });
       await tx.globalStepEventEntitlement.deleteMany({ where: { userId } });

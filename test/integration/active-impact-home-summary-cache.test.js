@@ -37,8 +37,8 @@ async function home(user, shell = false) {
     token: user.token,
     headers: {
       "X-Client-Features": shell
-        ? "impact_summaries,home_shell_v1"
-        : "impact_summaries",
+        ? "impact_summaries,impact_summary_expiry_v1,home_shell_v1"
+        : "impact_summaries,impact_summary_expiry_v1",
     },
   });
 }
@@ -66,18 +66,33 @@ async function createEndedEvent() {
     startsAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
     endsAt: new Date(Date.now() - 60 * 60 * 1000),
     multiplier: 2,
+    summaryAttributionVersion: 2,
   } });
 }
 
 async function addFinal(event, race, user, deltaSteps) {
-  return prisma.globalEventRaceImpact.create({ data: {
+  const impact = await prisma.globalEventRaceImpact.create({ data: {
     eventId: event.id,
     raceId: race.id,
     userId: user.user.id,
     status: "FINAL",
     deltaSteps,
     settledAt: new Date(),
+    attributionVersion: 2,
   } });
+  await prisma.globalEventSummaryWork.upsert({
+    where: { eventId_userId: { eventId: event.id, userId: user.user.id } },
+    update: { requiredRaceCount: { increment: 1 } },
+    create: {
+      eventId: event.id,
+      userId: user.user.id,
+      status: "WAITING_RACES",
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      requiredRaceCount: 1,
+      finalRaceCount: 1,
+    },
+  });
+  return impact;
 }
 
 describe("active impact Home summary Postgres + Redis matrix", () => {
@@ -114,7 +129,7 @@ describe("active impact Home summary Postgres + Redis matrix", () => {
     assert.deepEqual(await tick(), { upserts: 0 });
     assert.equal(await prisma.globalEventUserSummary.count(), 0);
     const run = await prisma.jobRun.findUnique({
-      where: { jobName: `global_event_summary:${event.id}:${user.user.id}:v1` },
+      where: { jobName: `global_event_summary:${event.id}:${user.user.id}:v2` },
     });
     assert.equal(run.lastRanFor, "ALL_ZERO");
     for (const shell of [false, true]) {
@@ -205,5 +220,41 @@ describe("active impact Home summary Postgres + Redis matrix", () => {
     assert.equal((await (await home(user, true)).json()).globalEventSummary.id, summaryId);
     await selectRedis(null);
     assert.equal((await (await home(user)).json()).globalEventSummary.id, summaryId);
+  });
+
+  it("bypasses specialized summary cache reads and writes after forced DEL failure in both Home builders", async (t) => {
+    if (!live) return t.skip("local Redis unavailable");
+    await selectRedis(live.url);
+    const user = await createTestUser();
+    const event = await createEndedEvent();
+    const race = await createCompletedRace(user, "delete-breaker");
+    await addFinal(event, race, user, 125);
+    await buildGlobalEventSummaryTick({ prisma })();
+    assert.equal((await (await home(user)).json()).globalEventSummary.extraRaceSteps, 125);
+
+    await prisma.globalEventUserSummary.updateMany({
+      where: { eventId: event.id, userId: user.user.id },
+      data: { extraRaceSteps: 777 },
+    });
+    const originalDel = redisCache.del;
+    redisCache.del = async () => false;
+    try {
+      assert.equal(await derivedCache.invalidate({
+        keys: [cacheKeys.homeImpactSummary(user.user.id)],
+        prefix: cacheKeys.PREFIX.HOME_IMPACT_SUMMARY,
+      }), false);
+      assert.equal(derivedCache.isBypassed(cacheKeys.PREFIX.HOME_IMPACT_SUMMARY), true);
+      for (const shell of [false, true]) {
+        const response = await home(user, shell);
+        assert.equal(response.status, 200);
+        assert.equal((await response.json()).globalEventSummary.extraRaceSteps, 777);
+      }
+      const physical = JSON.parse(await probe.get(`t:${cacheKeys.homeImpactSummary(user.user.id)}`));
+      assert.equal(physical.extraRaceSteps, 125,
+        "bypass must not rewrite the specialized key while invalidation is unresolved");
+    } finally {
+      redisCache.del = originalDel;
+      derivedCache.reset();
+    }
   });
 });

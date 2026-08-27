@@ -44,7 +44,7 @@ const PREFIX = {
   LEADERBOARD_STEPS_FRIENDS: "v1:leaderboard:steps:friends",
   LEADERBOARD_LOCK: "v1:lock:leaderboard",
   FRIEND_SEARCH_RATE: "v1:user:friendsearchrate",
-  HOME_IMPACT_SUMMARY: "v2:home:impact-summary",
+  HOME_IMPACT_SUMMARY: "v3:home:impact-summary",
   HOME_INBOX_UNREAD: "v1:home:inbox-unread",
   HOME_GIVEAWAY_BANNER: "v1:home:giveaway-banner",
   HOME_ACTIVE_GLOBAL_EVENT: "v1:user",

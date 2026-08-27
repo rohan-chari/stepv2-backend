@@ -60,6 +60,7 @@ function normalizedEntitlementEvent(event, entitlement, impact = null) {
     endsAt: entitlement.endsAt,
     multiplier: event.multiplier,
     scheduleMode: LOCAL_ENTITLEMENTS,
+    summaryAttributionVersion: event.summaryAttributionVersion,
   };
 }
 
@@ -671,6 +672,7 @@ async function processDueEntitlementBoundaries({
           eventId: entitlement.eventId,
           raceIds,
           userId: entitlement.userId,
+          attributionVersion: entitlement.event?.summaryAttributionVersion,
         });
         await enqueueRaces(tx, entitlement, raceIds);
 
@@ -718,6 +720,7 @@ async function processDueEntitlementBoundaries({
           boundary: "end",
           now: current,
           take: 1,
+          includeEvent: true,
           excludeIds: [...excludedIds],
         });
         if (!entitlement) return null;
@@ -730,6 +733,10 @@ async function processDueEntitlementBoundaries({
         await acquireRaceWriteFences(tx, raceIds);
         await acquireGlobalEnrollmentLock(tx);
         await enqueueRaces(tx, entitlement, raceIds);
+        const {
+          createSummaryWorkForEntitlement,
+        } = require("./globalEventSummaryLifecycle");
+        await createSummaryWorkForEntitlement(tx, entitlement, current);
         await tx.globalStepEventEntitlement.updateMany({
           where: { id: entitlement.id, endProcessedAt: null },
           data: { endProcessedAt: current },
@@ -912,6 +919,9 @@ async function processDueStartMicroBatch({ prisma = defaultPrisma, ids, now = ne
           raceId: row.raceId,
           userId: entitlement.userId,
           status: "PENDING",
+          ...(Number(entitlement.event?.summaryAttributionVersion) === 2
+            ? { attributionVersion: 2 }
+            : {}),
         });
       }
       (eligible.length ? activeIds : noRaceIds).push(entitlement.id);
@@ -973,7 +983,7 @@ async function ensureRaceGlobalEventEligibility({
   // Settlement repairs can legitimately touch hundreds of participants at the
   // weekly boundary. Keep the repair atomic, but do not let Prisma's 5-second
   // interactive-transaction default strand the race before settlement starts.
-  await prisma.$transaction(async (tx) => {
+  const scoringWithoutImpactKeys = await prisma.$transaction(async (tx) => {
     const { acquireGlobalEnrollmentLock, createPendingEnrollmentsBatch } =
       require("./globalEventEnrollment");
     const fence = acquireRaceFence || (async (client, input) => {
@@ -1026,6 +1036,7 @@ async function ensureRaceGlobalEventEligibility({
         eventId: entitlement.eventId,
         raceId: race.id,
         userIds: [entitlement.userId],
+        attributionVersion: entitlement.event?.summaryAttributionVersion,
       });
       if (outcome !== entitlement.startOutcome) {
         await tx.globalStepEventEntitlement.update({
@@ -1041,7 +1052,76 @@ async function ensureRaceGlobalEventEligibility({
         }
       }
     }
-    await createPendingEnrollmentsBatch(tx, { raceId: race.id, enrollments: pendingEnrollments });
+    if (pendingEnrollments.length === 0) return [];
+
+    // ON CONFLICT/skipDuplicates does not protect this path: PostgreSQL runs
+    // the permanent BEFORE INSERT group-fence trigger before it discovers the
+    // unique-key conflict. Preflight the complete all-version vectors and work
+    // groups while C0 + the enrollment advisory lock are held, then write only
+    // genuinely pre-capture membership. A work row is durable proof that the
+    // v2 vector boundary has begun, so a missing race row is scoring-eligible
+    // for this settlement repair but must never be appended to that vector.
+    const eventIds = [...new Set(pendingEnrollments.map((row) => row.eventId))];
+    const userIds = [...new Set(pendingEnrollments.flatMap((row) => row.userIds))];
+    // C0 is already held. Lock matching work groups next, in stable order, so
+    // expiry/capture cannot change the fence state between this preflight and
+    // the insert decision. The trigger's same-row UPDATE is re-entrant here.
+    const workGroups = typeof tx.$queryRawUnsafe === "function"
+      ? await tx.$queryRawUnsafe(
+          `SELECT event_id AS "eventId", user_id AS "userId", status,
+                  expires_at AS "expiresAt"
+             FROM global_event_summary_work
+            WHERE event_id = ANY($1::text[])
+              AND user_id = ANY($2::text[])
+            ORDER BY event_id ASC, user_id ASC
+            FOR UPDATE`,
+          eventIds,
+          userIds,
+        )
+      : await tx.globalEventSummaryWork.findMany({
+        where: {
+          eventId: { in: eventIds },
+          userId: { in: userIds },
+        },
+        select: { eventId: true, userId: true, status: true, expiresAt: true },
+      });
+    const impactVector = await tx.globalEventRaceImpact.findMany({
+      where: {
+        eventId: { in: eventIds },
+        userId: { in: userIds },
+      },
+      select: {
+        eventId: true,
+        raceId: true,
+        userId: true,
+        attributionVersion: true,
+        status: true,
+      },
+    });
+    const groupKey = (eventId, userId) => `${eventId}:${userId}`;
+    const exactImpactGroups = new Set(impactVector
+      .filter((impact) => impact.raceId === race.id)
+      .map((impact) => groupKey(impact.eventId, impact.userId)));
+    const fencedWorkGroups = new Set(workGroups
+      .filter((work) => work.status !== "WAITING_SYNC" ||
+        (work.expiresAt && new Date(work.expiresAt) <= current))
+      .map((work) => groupKey(work.eventId, work.userId)));
+    const missingFencedGroups = new Set();
+    const safeEnrollments = pendingEnrollments.filter((enrollment) => {
+      const userId = enrollment.userIds[0];
+      const key = groupKey(enrollment.eventId, userId);
+      if (exactImpactGroups.has(key)) return false;
+      if (Number(enrollment.attributionVersion) === 2 && fencedWorkGroups.has(key)) {
+        missingFencedGroups.add(key);
+        return false;
+      }
+      return true;
+    });
+    await createPendingEnrollmentsBatch(tx, {
+      raceId: race.id,
+      enrollments: safeEnrollments,
+    });
+    return [...missingFencedGroups];
   }, { timeout: 30_000, maxWait: 10_000 });
   const { findEligibleByRace } = require("../models/globalStepEventEntitlement");
   return findEligibleByRace({
@@ -1050,6 +1130,7 @@ async function ensureRaceGlobalEventEligibility({
     rangeStart: race.startedAt,
     rangeEnd: current,
     client: prisma,
+    allowMissingImpactEventUserKeys: new Set(scoringWithoutImpactKeys),
   });
 }
 

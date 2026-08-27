@@ -79,8 +79,13 @@ function buildCompleteRace(dependencies = {}) {
   // deliberately fed only from the immutable v1 ledger artifacts, never from a
   // recalculated pool, so a retry after a process crash cannot mint a second
   // rounding subsidy or drift the displayed total.
-  async function reconcileV1PayoutArtifact(race) {
-    if (!race || race.payoutRoundingVersion !== 1 || !db?.coinTransaction) {
+  async function reconcileDurablePayoutArtifact(race) {
+    const fixedTeamStamp = resolveFixedTeamPayoutStamp(race);
+    if (
+      !race ||
+      (race.payoutRoundingVersion !== 1 && fixedTeamStamp == null) ||
+      !db?.coinTransaction
+    ) {
       return null;
     }
     const credits = await db.coinTransaction.findMany({
@@ -144,22 +149,23 @@ function buildCompleteRace(dependencies = {}) {
         smallAwardRecipientCount: 0,
       }
     );
-    const data = {
-      payoutRoundingMetadata: {
+    const payoutMetadata = {
         payoutRoundingVersion: 1,
         rawAwardCoins: totals.rawAwardCoins,
         roundedAwardCoins: totals.awardCoins,
         roundingSubsidyCoins: totals.roundingSubsidyCoins,
         recipientCount: totals.recipientCount,
         smallAwardRecipientCount: totals.smallAwardRecipientCount,
-      },
     };
+    const data = race.payoutRoundingVersion === 1
+      ? { payoutRoundingMetadata: payoutMetadata }
+      : {};
     if (race.fundedPrize === true) {
       data.prizePoolCoins = totals.awardCoins;
       data.potCoins = totals.awardCoins;
     }
     await db.race.update({ where: { id: race.id }, data });
-    return data.payoutRoundingMetadata;
+    return data.payoutRoundingMetadata || null;
   }
 
   // Team races (TR-400s/500s): callers pass `winnerTeam` (TEAM_A|TEAM_B) or
@@ -268,7 +274,7 @@ function buildCompleteRace(dependencies = {}) {
         })
       : await raceModel.updateIfActive(raceId, completionData);
 
-    // A v1 retry must resume after the active->completed fence: a previous
+    // A payout-artifact retry must resume after the active->completed fence: a previous
     // process may have committed a ledger row just before dying.  Legacy rows
     // preserve their long-standing early-return behavior byte-for-byte.
     let isRecovery = false;
@@ -277,7 +283,8 @@ function buildCompleteRace(dependencies = {}) {
       if (
         !completedRace ||
         completedRace.status !== "COMPLETED" ||
-        completedRace.payoutRoundingVersion !== 1
+        completedRace.payoutRoundingVersion !== 1 &&
+          resolveFixedTeamPayoutStamp(completedRace) == null
       ) {
         return null;
       }
@@ -574,7 +581,7 @@ function buildCompleteRace(dependencies = {}) {
 
       for (const payload of teamReferralEvents) compatibilityEvents?.emit("REFERRAL_REWARDED", payload);
 
-      await reconcileV1PayoutArtifact(race);
+      await reconcileDurablePayoutArtifact(race);
 
       return race;
     }
@@ -855,7 +862,7 @@ function buildCompleteRace(dependencies = {}) {
 
     for (const payload of referralEvents) compatibilityEvents?.emit("REFERRAL_REWARDED", payload);
 
-    await reconcileV1PayoutArtifact(race);
+    await reconcileDurablePayoutArtifact(race);
 
     return race;
   };

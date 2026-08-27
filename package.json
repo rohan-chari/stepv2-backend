@@ -42,7 +42,8 @@
     "capacity": "node scripts/capacity.js",
     "capacity:db": "node scripts/capacity-db.js",
     "load-test": "node scripts/load-test.js",
-    "cohort:repair": "node scripts/repair-signup-seeded-cohort.js"
+    "cohort:repair": "node scripts/repair-signup-seeded-cohort.js",
+    "team-payouts:repair": "node scripts/repair-open-fixed-team-payouts.js"
   },
   "prisma": {
     "seed": "node prisma/seed.js"

@@ -76,6 +76,9 @@ const {
 const {
   SNAPSHOT_AT_EXPIRY_TYPES,
 } = require("../../powerups/constants/expiryEffectTypes");
+const {
+  persistCapturedSummaryImpactsForRace,
+} = require("../../steps/services/globalEventSummaryCapture");
 
 const POLL_INTERVAL_MS = 250;
 const QUEUE_LAG_LOG_INTERVAL_MS = 60 * 1000;
@@ -1627,6 +1630,11 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           impactContinuationNeeded =
             umbrella.hasMore ||
             result?.activeImpactCapture?.hasMoreTimedSources === true;
+          await persistCapturedSummaryImpactsForRace(tx, {
+            raceId: job.raceId,
+            sourceResolutionGeneration: job.processingGeneration,
+            now: currentTime,
+          });
         } finally {
           activeImpactPersistMs += Math.max(
             0,

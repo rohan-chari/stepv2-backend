@@ -14,6 +14,7 @@ function lifecycleCandidateSql() {
          SELECT 1 FROM global_event_race_impacts i
           WHERE i.event_id = e.event_id AND i.user_id = e.user_id
             AND i.status <> 'FINAL'
+            AND i.status NOT IN ('UNSCORABLE', 'EXPIRED_UNDELIVERED')
        )
        AND NOT EXISTS (
          SELECT 1
@@ -42,6 +43,11 @@ function lifecycleCandidateSql() {
                SELECT 1 FROM job_runs j
                 WHERE j.job_name = 'global_event_summary:' || e.event_id || ':' || e.user_id || ':v1'
              )
+             OR EXISTS (
+               SELECT 1 FROM global_event_summary_work work
+                WHERE work.event_id = e.event_id AND work.user_id = e.user_id
+                  AND work.status IN ('CREATED', 'ALL_ZERO', 'UNSCORABLE', 'EXPIRED_UNDELIVERED')
+             )
            )
          )
        )
@@ -62,13 +68,30 @@ async function cleanupExpiredEntitlements({
     const candidates = await tx.$queryRawUnsafe(lifecycleCandidateSql(), cutoff, limit);
     const ids = candidates.map((row) => row.id);
     const pairs = candidates.map((row) => ({ eventId: row.event_id, userId: row.user_id }));
-    const jobNames = pairs.map(({ eventId, userId }) =>
-      `global_event_summary:${eventId}:${userId}:v1`
-    );
+    const jobNames = pairs.flatMap(({ eventId, userId }) => [
+      `global_event_summary:${eventId}:${userId}:v1`,
+      `global_event_summary:${eventId}:${userId}:v2`,
+    ]);
     let deletedSummaries = 0;
     let deletedImpacts = 0;
     let deletedEntitlements = 0;
     if (pairs.length > 0) {
+      const workRows = tx.globalEventSummaryWork
+        ? await tx.globalEventSummaryWork.findMany({
+          where: { OR: pairs },
+          select: { id: true },
+        })
+        : [];
+      if (workRows.length > 0) {
+        if (tx.globalEventCaptureArtifact) {
+          await tx.globalEventCaptureArtifact.deleteMany({
+            where: { workId: { in: workRows.map((row) => row.id) } },
+          });
+        }
+        await tx.globalEventSummaryWork.deleteMany({
+          where: { id: { in: workRows.map((row) => row.id) } },
+        });
+      }
       deletedSummaries = (await tx.globalEventUserSummary.deleteMany({
         where: { OR: pairs },
       })).count;

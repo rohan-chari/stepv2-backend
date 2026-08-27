@@ -27,6 +27,8 @@ const TABLES_IN_ORDER = [
   "race_join_requests",
   "race_share_links",
   "app_review_prompt_attempts",
+  "global_event_capture_artifacts",
+  "global_event_summary_work",
   "global_event_user_summaries",
   "global_event_race_impacts",
   "global_step_event_operational_snapshots",

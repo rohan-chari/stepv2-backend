@@ -27,7 +27,8 @@ const GlobalStepEvent = {
     scheduleMode = LEGACY_GLOBAL, localStartMinute = null, durationMinutes = null }) {
     const row = await prisma.globalStepEvent.create({
       data: { startsAt, endsAt, multiplier, label: label ?? null, eventDay,
-        scheduleMode, localStartMinute, durationMinutes },
+        scheduleMode, localStartMinute, durationMinutes,
+        summaryAttributionVersion: 2 },
     });
     // C1 invalidation (spec §5 Phase B): the scheduler that mints a new event
     // must drop the cached not-yet-ended row set, or the "2x STEPS" home banner
@@ -69,7 +70,8 @@ const GlobalStepEvent = {
       }
       const event = await tx.globalStepEvent.create({
         data: { startsAt: start, endsAt, multiplier, label: label ?? null,
-          eventDay: day, scheduleMode: LEGACY_GLOBAL },
+          eventDay: day, scheduleMode: LEGACY_GLOBAL,
+          summaryAttributionVersion: 2 },
       });
       return { event, created: true };
     });
@@ -107,7 +109,8 @@ const GlobalStepEvent = {
 
       const event = await tx.globalStepEvent.create({
         data: { startsAt: start, endsAt, multiplier, label: label ?? null,
-          eventDay: day, scheduleMode: LEGACY_GLOBAL },
+          eventDay: day, scheduleMode: LEGACY_GLOBAL,
+          summaryAttributionVersion: 2 },
       });
       const participants = await tx.raceParticipant.findMany({
         where: {
@@ -127,7 +130,12 @@ const GlobalStepEvent = {
         byRace.set(participant.raceId, userIds);
       }
       for (const [raceId, userIds] of byRace) {
-        await createPendingEnrollments(tx, { eventId: event.id, raceId, userIds });
+        await createPendingEnrollments(tx, {
+          eventId: event.id,
+          raceId,
+          userIds,
+          attributionVersion: 2,
+        });
       }
       const participantUserIds = uniqueUserIds(participants.map((participant) => participant.userId));
       await appendDomainEvent(tx, {
@@ -173,7 +181,7 @@ const GlobalStepEvent = {
       const event = await tx.globalStepEvent.create({
         data: {
           ...envelope, multiplier, durationMinutes, localStartMinute, eventDay,
-          scheduleMode: LOCAL_ENTITLEMENTS, label,
+          scheduleMode: LOCAL_ENTITLEMENTS, label, summaryAttributionVersion: 2,
         },
       });
       return { event, created: true };

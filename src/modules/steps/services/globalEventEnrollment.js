@@ -32,11 +32,20 @@ async function acquireGlobalEnrollmentLock(tx) {
   );
 }
 
-async function createPendingEnrollments(tx, { eventId, raceId, userIds }) {
+async function createPendingEnrollments(tx, {
+  eventId, raceId, userIds, attributionVersion = 1,
+}) {
   const unique = uniqueUserIds(userIds);
   if (!eventId || !raceId || unique.length === 0) return 0;
+  const rows = unique.map((userId) => ({
+      eventId,
+      raceId,
+      userId,
+      status: "PENDING",
+      ...(Number(attributionVersion) === 2 ? { attributionVersion: 2 } : {}),
+    }));
   const result = await tx.globalEventRaceImpact.createMany({
-    data: unique.map((userId) => ({ eventId, raceId, userId, status: "PENDING" })),
+    data: rows,
     skipDuplicates: true,
   });
   const duplicates = unique.length - (result.count || 0);
@@ -50,8 +59,16 @@ async function createPendingEnrollments(tx, { eventId, raceId, userIds }) {
 }
 
 async function createPendingEnrollmentsBatch(tx, { raceId, enrollments }) {
-  const rows = (enrollments || []).flatMap(({ eventId, userIds }) =>
-    uniqueUserIds(userIds).map((userId) => ({ eventId, raceId, userId, status: "PENDING" }))
+  const rows = (enrollments || []).flatMap(({
+    eventId, userIds, attributionVersion = 1,
+  }) =>
+    uniqueUserIds(userIds).map((userId) => ({
+      eventId,
+      raceId,
+      userId,
+      status: "PENDING",
+      ...(Number(attributionVersion) === 2 ? { attributionVersion: 2 } : {}),
+    }))
   ).filter((row) => row.eventId && row.raceId && row.userId);
   if (rows.length === 0) return 0;
   const result = await tx.globalEventRaceImpact.createMany({
@@ -71,16 +88,20 @@ async function createPendingEnrollmentsBatch(tx, { raceId, enrollments }) {
 // Boundary processing commonly has one user and several active races. Keep
 // that fan-out in one INSERT so the boundary transaction does not pay one
 // round trip per race.
-async function createPendingEnrollmentsForRaces(tx, { eventId, raceIds, userId }) {
+async function createPendingEnrollmentsForRaces(tx, {
+  eventId, raceIds, userId, attributionVersion = 1,
+}) {
   const uniqueRaceIds = [...new Set((raceIds || []).filter(Boolean))].sort();
   if (!eventId || !userId || uniqueRaceIds.length === 0) return 0;
-  const result = await tx.globalEventRaceImpact.createMany({
-    data: uniqueRaceIds.map((raceId) => ({
+  const rows = uniqueRaceIds.map((raceId) => ({
       eventId,
       raceId,
       userId,
       status: "PENDING",
-    })),
+      ...(Number(attributionVersion) === 2 ? { attributionVersion: 2 } : {}),
+    }));
+  const result = await tx.globalEventRaceImpact.createMany({
+    data: rows,
     skipDuplicates: true,
   });
   const duplicates = uniqueRaceIds.length - (result.count || 0);
@@ -109,7 +130,12 @@ async function enrollIfGlobalEventActive(tx, { raceId, userIds, at }) {
     orderBy: { startsAt: "desc" },
   });
   if (event) {
-    await createPendingEnrollments(tx, { eventId: event.id, raceId, userIds });
+    await createPendingEnrollments(tx, {
+      eventId: event.id,
+      raceId,
+      userIds,
+      attributionVersion: event.summaryAttributionVersion,
+    });
   }
 
   if (!tx.globalStepEventEntitlement || !tx.user) return event;
@@ -148,7 +174,12 @@ async function enrollIfGlobalEventActive(tx, { raceId, userIds, at }) {
       } else if (outcome === START_OUTCOMES.PENDING) {
         outcome = START_OUTCOMES.ACTIVATED_LATE_JOIN;
       }
-      await createPendingEnrollments(tx, { eventId: parent.id, raceId, userIds: [userId] });
+      await createPendingEnrollments(tx, {
+        eventId: parent.id,
+        raceId,
+        userIds: [userId],
+        attributionVersion: parent.summaryAttributionVersion,
+      });
       if (outcome !== entitlement.startOutcome) {
         await tx.globalStepEventEntitlement.updateMany({
           where: { id: entitlement.id },

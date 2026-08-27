@@ -50,6 +50,9 @@ const { acquireRaceWriteFence } = require("../services/raceWriteFence");
 const {
   recordReferralRaceActivity: defaultRecordReferralRaceActivity,
 } = require("../../social/commands/recordReferralRaceActivity");
+const {
+  newTeamPayoutStamp,
+} = require("../services/teamWinnerReward");
 
 class RaceCreationError extends Error {
   constructor(message, statusCode, code) {
@@ -362,6 +365,11 @@ function buildCreateRace(dependencies = {}) {
       isTeamRace: !!teamConfig,
       durationDays: effectiveMaxDurationDays,
     });
+    const teamPayoutStamp = newTeamPayoutStamp({
+      fundedPrize: fundedPrizePools === true,
+      isTeamRace: !!teamConfig,
+      durationDays: effectiveMaxDurationDays,
+    });
     const prizeStamp = newRacePrizeStamp();
     const fundedExposureStamp = computeRaceExposureStamp({
       maxDurationDays: effectiveMaxDurationDays,
@@ -434,6 +442,7 @@ function buildCreateRace(dependencies = {}) {
       // Individual races stamp NULL (= 1.0). Read back by every projection and
       // by settlement, so an env retune never reprices an in-flight race.
       teamPoolMultBps,
+      ...teamPayoutStamp,
       creationSource: normalizedQuick ? QUICK_SOURCE : null,
       startPolicy: normalizedQuick ? AUTO_START_POLICY : null,
     });

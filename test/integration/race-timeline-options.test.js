@@ -188,11 +188,15 @@ describe("custom race windows (§9 tests 1-10b, 21)", () => {
     // meaningless unless the funded model is on (its KNOWN_FLAGS default, and
     // prod's setting), so pin it rather than inherit whatever ran last.
     await appSettings.setFlag(FUNDED_FLAG, true);
+    // The team-window cases below must not inherit this persistent flag from a
+    // prior integration file's cleanup.
+    await appSettings.setFlag("teamRacesEnabled", true);
   });
 
   after(async () => {
     await appSettings.setFlag(FLAG, false);
     await appSettings.setFlag(FUNDED_FLAG, true);
+    await appSettings.setFlag("teamRacesEnabled", true);
   });
 
   // ── 1 ─────────────────────────────────────────────────────────────────────
@@ -694,7 +698,7 @@ describe("custom race windows (§9 tests 1-10b, 21)", () => {
     assert.equal((await row(raceId)).prizePoolCoins, 20);
   });
 
-  it("9c: the TEAM anti-exploit lock — a 14-day team window started with 25h left settles at 1.0x, not 1.875x", async () => {
+  it("9c: the TEAM anti-exploit lock — a 14-day team window started with 25h left atomically re-stamps the fixed 1-day reward", async () => {
     const { creator, raceId } = await createTeamRaceWithField({
       teamSize: 2,
       maxDurationDays: 14,
@@ -703,6 +707,8 @@ describe("custom race windows (§9 tests 1-10b, 21)", () => {
     const atCreate = await row(raceId);
     assert.equal(atCreate.maxDurationDays, 13, "floor(14d - request latency)");
     assert.equal(atCreate.teamPoolMultBps, 18750, "the 1.875x LONG band at create");
+    assert.equal(atCreate.teamPayoutVersion, 1);
+    assert.equal(atCreate.teamWinnerRewardCoins, 1000);
 
     // The teams sat uneven for 13 days; the window now has 25 hours left.
     const end = new Date(Date.now() + 25 * HOUR);
@@ -717,12 +723,20 @@ describe("custom race windows (§9 tests 1-10b, 21)", () => {
       10000,
       "the multiplier MUST move with the duration — settlement reads this column back"
     );
+    assert.equal(started.teamPayoutVersion, 1);
+    assert.equal(
+      started.teamWinnerRewardCoins,
+      100,
+      "the immutable fixed reward MUST move to the same canonical 1-day band",
+    );
 
     await settle(raceId);
-    // 2 walkers × durationPoints(1) × 10 × 1.0 = 20. With the stale 1.875x
-    // multiplier this pays 40 after payout rounding, breaching the v2 rate.
-    assert.equal(await poolPayoutTotal(raceId), 20);
-    assert.equal((await row(raceId)).prizePoolCoins, 20);
+    // One eligible winner receives the fixed 1-day reward. A stale 14-day
+    // stamp would mint 1000, so this still pins the original anti-exploit
+    // invariant while asserting the approved replacement payout design.
+    assert.equal(await poolPayoutTotal(raceId), 100);
+    assert.notEqual(await poolPayoutTotal(raceId), 1000);
+    assert.equal((await row(raceId)).prizePoolCoins, 100);
   });
 
   it("7f: PATCHing a TEAM race's window re-stamps teamPoolMultBps in the same write", async () => {

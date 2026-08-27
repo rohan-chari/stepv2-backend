@@ -162,6 +162,28 @@ async function getJSON(key) {
   }
 }
 
+// Atomic value + remaining-lifetime read. The summary-expiry surface must not
+// perform GET and PTTL separately because expiry between those commands could
+// decorate a stale value with a new/invalid lifetime.
+async function getJSONWithPttl(key) {
+  try {
+    const client = await readyClient();
+    if (!client) return null;
+    const result = await client.eval(
+      "return {redis.call('GET', KEYS[1]), redis.call('PTTL', KEYS[1])}",
+      1,
+      prefixed(key),
+    );
+    if (!Array.isArray(result) || result.length !== 2 || result[0] == null) return null;
+    const pttlMs = Number(result[1]);
+    if (!Number.isSafeInteger(pttlMs) || pttlMs <= 0) return null;
+    return { value: JSON.parse(result[0]), pttlMs };
+  } catch (error) {
+    logOnce("getJSONWithPttl", error);
+    return null;
+  }
+}
+
 /**
  * @param {string} key
  * @param {any} value JSON-serializable
@@ -181,6 +203,20 @@ async function setJSON(key, value, ttlSeconds) {
     return true;
   } catch (error) {
     logOnce("setJSON", error);
+    return false;
+  }
+}
+
+async function setJSONWithTtlMs(key, value, ttlMs) {
+  try {
+    const lifetime = Math.floor(Number(ttlMs));
+    if (!Number.isSafeInteger(lifetime) || lifetime <= 0) return false;
+    const client = await readyClient();
+    if (!client) return false;
+    await client.set(prefixed(key), JSON.stringify(value), "PX", lifetime);
+    return true;
+  } catch (error) {
+    logOnce("setJSONWithTtlMs", error);
     return false;
   }
 }
@@ -676,8 +712,10 @@ async function close() {
 module.exports = {
   isEnabled,
   getJSON,
+  getJSONWithPttl,
   getManyJSON,
   setJSON,
+  setJSONWithTtlMs,
   setManyJSON,
   del,
   withLock,

@@ -211,6 +211,8 @@ model User {
   activeRaceEffectImpacts     ActiveRaceEffectImpact[]
   globalEventRaceImpacts      GlobalEventRaceImpact[]
   globalEventUserSummaries    GlobalEventUserSummary[]
+  globalEventSummaryWork      GlobalEventSummaryWork[]
+  globalEventCaptureArtifacts GlobalEventCaptureArtifact[]
   globalStepEventEntitlements GlobalStepEventEntitlement[]
   appReviewPromptAttempts     AppReviewPromptAttempt[]
   inboxAlerts                 InboxAlert[]
@@ -400,16 +402,24 @@ model ActiveRaceEffectImpact {
 }
 
 model GlobalEventRaceImpact {
-  id                 String    @id @default(uuid())
-  eventId            String    @map("event_id")
-  raceId             String    @map("race_id")
-  userId             String    @map("user_id")
-  status             String    @default("PENDING")
-  deltaSteps         Int?      @map("delta_steps")
-  attributionVersion Int       @default(1) @map("attribution_version")
-  settledAt          DateTime? @map("settled_at")
-  createdAt          DateTime  @default(now()) @map("created_at")
-  updatedAt          DateTime  @updatedAt @map("updated_at")
+  id                           String    @id @default(uuid())
+  eventId                      String    @map("event_id")
+  raceId                       String    @map("race_id")
+  userId                       String    @map("user_id")
+  status                       String    @default("PENDING")
+  deltaSteps                   Int?      @map("delta_steps")
+  attributionVersion           Int       @default(1) @map("attribution_version")
+  captureKind                  String?   @map("capture_kind")
+  captureSyncRequestId         String?   @map("capture_sync_request_id")
+  captureCompletedAt           DateTime? @map("capture_completed_at")
+  captureCoverageThrough       DateTime? @map("capture_coverage_through")
+  sourceScoringInputGeneration BigInt?   @map("source_scoring_input_generation")
+  sourceResolutionGeneration   Int?      @map("source_resolution_generation")
+  terminalReason               String?   @map("terminal_reason")
+  terminalAt                   DateTime? @map("terminal_at")
+  settledAt                    DateTime? @map("settled_at")
+  createdAt                    DateTime  @default(now()) @map("created_at")
+  updatedAt                    DateTime  @updatedAt @map("updated_at")
 
   event GlobalStepEvent @relation(fields: [eventId], references: [id], onDelete: Restrict)
   race  Race            @relation(fields: [raceId], references: [id], onDelete: Restrict)
@@ -430,13 +440,74 @@ model GlobalEventUserSummary {
   attributionVersion Int       @default(1) @map("attribution_version")
   settledAt          DateTime  @default(now()) @map("settled_at")
   acknowledgedAt     DateTime? @map("acknowledged_at")
+  expiresAt          DateTime? @map("expires_at")
 
   event GlobalStepEvent @relation(fields: [eventId], references: [id], onDelete: Restrict)
   user  User            @relation(fields: [userId], references: [id], onDelete: Restrict)
 
   @@unique([eventId, userId])
   @@index([userId, acknowledgedAt, settledAt(sort: Desc)])
+  @@index([userId, acknowledgedAt, expiresAt, settledAt(sort: Desc)])
   @@map("global_event_user_summaries")
+}
+
+model GlobalEventSummaryWork {
+  id                           String    @id @default(uuid())
+  eventId                      String    @map("event_id")
+  userId                       String    @map("user_id")
+  status                       String    @default("WAITING_SYNC")
+  expiresAt                    DateTime  @map("expires_at")
+  captureSyncRequestId         String?   @map("capture_sync_request_id")
+  captureCompletedAt           DateTime? @map("capture_completed_at")
+  captureCoverageThrough       DateTime? @map("capture_coverage_through")
+  sourceScoringInputGeneration BigInt?   @map("source_scoring_input_generation")
+  requiredRaceCount            Int       @default(0) @map("required_race_count")
+  finalRaceCount               Int       @default(0) @map("final_race_count")
+  raceReconciledAt             DateTime? @map("race_reconciled_at")
+  availableAt                  DateTime  @default(now()) @map("available_at")
+  leaseUntil                   DateTime? @map("lease_until")
+  leaseToken                   String?   @map("lease_token")
+  attemptCount                 Int       @default(0) @map("attempt_count")
+  lastErrorCode                String?   @map("last_error_code")
+  createdAt                    DateTime  @default(now()) @map("created_at")
+  updatedAt                    DateTime  @updatedAt @map("updated_at")
+
+  event     GlobalStepEvent              @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  user      User                         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  artifacts GlobalEventCaptureArtifact[]
+
+  @@unique([eventId, userId])
+  @@index([status, availableAt, leaseUntil])
+  @@index([status, raceReconciledAt, id])
+  @@index([userId, status, expiresAt])
+  @@map("global_event_summary_work")
+}
+
+model GlobalEventCaptureArtifact {
+  id                           String   @id @default(uuid())
+  workId                       String   @map("work_id")
+  eventId                      String   @map("event_id")
+  raceId                       String   @map("race_id")
+  userId                       String   @map("user_id")
+  captureSyncRequestId         String   @map("capture_sync_request_id")
+  captureCompletedAt           DateTime @map("capture_completed_at")
+  captureCoverageThrough       DateTime @map("capture_coverage_through")
+  sourceScoringInputGeneration BigInt   @map("source_scoring_input_generation")
+  payload                      Json
+  payloadDigest                String   @map("payload_digest") @db.Char(64)
+  schemaVersion                Int      @default(1) @map("schema_version")
+  createdAt                    DateTime @default(now()) @map("created_at")
+  updatedAt                    DateTime @updatedAt @map("updated_at")
+
+  work  GlobalEventSummaryWork @relation(fields: [workId], references: [id], onDelete: Cascade)
+  event GlobalStepEvent        @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  race  Race                   @relation(fields: [raceId], references: [id], onDelete: Restrict)
+  user  User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workId, raceId])
+  @@index([eventId, userId])
+  @@index([raceId, workId])
+  @@map("global_event_capture_artifacts")
 }
 
 model AppReviewPromptAttempt {
@@ -734,7 +805,7 @@ model InterstitialAdPermit {
   cancelledAt      DateTime?               @map("cancelled_at")
   confirmedAt      DateTime?               @map("confirmed_at")
 
-  user       User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user       User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
   impression InterstitialAdImpression?
 
   @@index([userId, reservationUntil])
@@ -744,20 +815,20 @@ model InterstitialAdPermit {
 }
 
 model InterstitialAdImpression {
-  id          String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  eventId     String                  @unique @map("event_id") @db.Uuid
-  permitId    String                  @unique @map("permit_id") @db.Uuid
-  userId      String                  @map("user_id")
-  placement   InterstitialAdPlacement
-  capDate     DateTime                @map("cap_date") @db.Date
-  timeZone    String                  @map("time_zone") @db.VarChar(128)
-  sessionId   String                  @map("session_id") @db.Uuid
-  occurredAt  DateTime                @map("occurred_at")
-  receivedAt  DateTime                @default(now()) @map("received_at")
-  appVersion  String                  @map("app_version") @db.VarChar(32)
-  platform    InterstitialAdPlatform
+  id         String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  eventId    String                  @unique @map("event_id") @db.Uuid
+  permitId   String                  @unique @map("permit_id") @db.Uuid
+  userId     String                  @map("user_id")
+  placement  InterstitialAdPlacement
+  capDate    DateTime                @map("cap_date") @db.Date
+  timeZone   String                  @map("time_zone") @db.VarChar(128)
+  sessionId  String                  @map("session_id") @db.Uuid
+  occurredAt DateTime                @map("occurred_at")
+  receivedAt DateTime                @default(now()) @map("received_at")
+  appVersion String                  @map("app_version") @db.VarChar(32)
+  platform   InterstitialAdPlatform
 
-  user   User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user   User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   permit InterstitialAdPermit @relation(fields: [permitId], references: [id], onDelete: Cascade)
 
   @@index([userId, receivedAt])
@@ -1412,18 +1483,18 @@ model FundedExposureGuard {
 }
 
 model Race {
-  id                      String           @id @default(uuid())
-  creatorId               String?          @map("creator_id")
-  seedId                  String?          @map("seed_id")
-  name                    String
-  targetSteps             Int              @map("target_steps")
-  status                  RaceStatus       @default(PENDING)
+  id                            String           @id @default(uuid())
+  creatorId                     String?          @map("creator_id")
+  seedId                        String?          @map("seed_id")
+  name                          String
+  targetSteps                   Int              @map("target_steps")
+  status                        RaceStatus       @default(PENDING)
   // maxDurationDays is set on all new races; kept nullable for backward compat
   // with existing rows from the step-goal-only window which have NULL.
-  maxDurationDays         Int?             @map("max_duration_days")
-  buyInAmount             Int              @default(0) @map("buy_in_amount")
-  payoutPreset            RacePayoutPreset @default(WINNER_TAKES_ALL) @map("payout_preset")
-  potCoins                Int              @default(0) @map("pot_coins")
+  maxDurationDays               Int?             @map("max_duration_days")
+  buyInAmount                   Int              @default(0) @map("buy_in_amount")
+  payoutPreset                  RacePayoutPreset @default(WINNER_TAKES_ALL) @map("payout_preset")
+  potCoins                      Int              @default(0) @map("pot_coins")
   // ── App-funded prize pools ─────────────────────────────────────────────────
   // fundedPrize is the discriminator between the two money models and the ONLY
   // authority at settlement (never the fundedPrizePoolsEnabled flag, so a
@@ -1436,18 +1507,18 @@ model Race {
   // never drift when the accepted/eligible count changes afterwards.
   // Additive with safe legacy defaults — no backfill, and old app builds never
   // read either column.
-  fundedPrize             Boolean          @default(false) @map("funded_prize")
-  prizePoolCoins          Int              @default(0) @map("prize_pool_coins")
-  prizeCoinUnit           Int?             @map("prize_coin_unit")
-  prizePoolMaxCoins       Int?             @map("prize_pool_max_coins")
-  prizeCalculationVersion Int              @default(1) @map("prize_calculation_version")
+  fundedPrize                   Boolean          @default(false) @map("funded_prize")
+  prizePoolCoins                Int              @default(0) @map("prize_pool_coins")
+  prizeCoinUnit                 Int?             @map("prize_coin_unit")
+  prizePoolMaxCoins             Int?             @map("prize_pool_max_coins")
+  prizeCalculationVersion       Int              @default(1) @map("prize_calculation_version")
   // Immutable at creation: 0 preserves the historical payout formula, 1 rounds
   // every final positive recipient award up to a multiple of five.
-  payoutRoundingVersion   Int              @default(0) @map("payout_rounding_version")
-  payoutRoundingMetadata  Json?            @map("payout_rounding_metadata")
+  payoutRoundingVersion         Int              @default(0) @map("payout_rounding_version")
+  payoutRoundingMetadata        Json?            @map("payout_rounding_metadata")
   // Default-off, creation-stamped exit policy. Existing races remain false so
   // enabling the rollout setting never changes an already-open competition.
-  exitActionsEnabled      Boolean          @default(false) @map("exit_actions_enabled")
+  exitActionsEnabled            Boolean          @default(false) @map("exit_actions_enabled")
   // How a FUNDED race splits its pool across the paid places of a graded preset
   // (TOP_HALF / ALL_BUT_LAST). Stamped at creation and never rewritten, exactly
   // like fundedPrize: the row is the authority, never the live flag, so an
@@ -1455,34 +1526,34 @@ model Race {
   // underneath it. NULL (every pre-existing row, and every user-created race)
   // = the even split shipped today; "GEOMETRIC" = the top-heavy 0.7 decay.
   // Only createSeededRace ever writes it. Not serialized to clients.
-  payoutCurve             String?          @map("payout_curve")
+  payoutCurve                   String?          @map("payout_curve")
   // Next-race quick-create provenance. Both are nullable so every existing
   // race and every frozen client remains on the legacy/manual-start path.
   // Prisma does not model the predicate-specific indexes added by the raw
   // migration; that schema drift is intentional and those indexes must remain.
-  creationSource          String?          @map("creation_source")
-  startPolicy             String?          @map("start_policy")
+  creationSource                String?          @map("creation_source")
+  startPolicy                   String?          @map("start_policy")
   // Batch 2026-08-08 item 5: team-race prize-pool multiplier, in basis points,
   // STAMPED AT CREATION from the TEAM_POOL_MULT_* envs and read by BOTH the
   // live projection and settlement so the two can never disagree.
   // NULL = 1.0x = today's formula, which is what every pre-existing race keeps.
   // Because it is stamped, an env edit only affects races created after it —
   // an in-flight race never reprices mid-race.
-  teamPoolMultBps         Int?             @map("team_pool_mult_bps")
+  teamPoolMultBps               Int?             @map("team_pool_mult_bps")
   // Fixed per-eligible-winner funded-team payout stamp. Both fields must be a
   // valid V1 pair before readers/settlement use them; NULL, partial, or malformed
   // pairs stay on the legacy divisible-pool formula. Nullable so Deployment A
   // can coexist with old workers and every existing race remains unchanged.
-  teamPayoutVersion       Int?             @map("team_payout_version")
-  teamWinnerRewardCoins   Int?             @map("team_winner_reward_coins")
-  startedAt               DateTime?        @map("started_at")
-  endsAt                  DateTime?        @map("ends_at")
+  teamPayoutVersion             Int?             @map("team_payout_version")
+  teamWinnerRewardCoins         Int?             @map("team_winner_reward_coins")
+  startedAt                     DateTime?        @map("started_at")
+  endsAt                        DateTime?        @map("ends_at")
   // Optional future auto-start time (1.1.7). When set and in the future, the
   // race stays PENDING and the autoStartScheduledRaces cron job starts it once
   // this time passes; manual start is blocked until then. Nullable/additive:
   // legacy races and older app clients (which never send it) behave exactly as
   // before — manual instant start.
-  scheduledStartAt        DateTime?        @map("scheduled_start_at")
+  scheduledStartAt              DateTime?        @map("scheduled_start_at")
   // Optional EXACT end instant chosen by the creator (custom race window). Inert
   // until startRace promotes it: it is NOT `endsAt`, because `endsAt` on a
   // non-COMPLETED race is read everywhere as "this live race's end" (featured
@@ -1493,7 +1564,7 @@ model Race {
   // maxDurationDays from the actual start and this column stays as a record of
   // intent. Nullable/additive with NO backfill: every existing row stays NULL
   // and behaves byte-for-byte as today, and frozen clients never send or read it.
-  scheduledEndAt          DateTime?        @map("scheduled_end_at")
+  scheduledEndAt                DateTime?        @map("scheduled_end_at")
   // Canonical IANA timezone whose calendar-day boundaries define this race's
   // step buckets (e.g. "America/New_York" for seeded daily/weekly challenges).
   // NULL for user-created races, which keep the legacy behavior: live display
@@ -1501,27 +1572,27 @@ model Race {
   // settlement bucket in this tz, so "midnight" means the same instant for every
   // participant and live totals match settled totals. Nullable/additive: old app
   // clients never read it; old rows stay NULL and behave exactly as before.
-  timezone                String?          @map("timezone")
-  completedAt             DateTime?        @map("completed_at")
-  winnerUserId            String?          @map("winner_user_id")
-  powerupsEnabled         Boolean          @default(false) @map("powerups_enabled")
-  powerupStepInterval     Int?             @map("powerup_step_interval")
-  isPublic                Boolean          @default(false) @map("is_public")
+  timezone                      String?          @map("timezone")
+  completedAt                   DateTime?        @map("completed_at")
+  winnerUserId                  String?          @map("winner_user_id")
+  powerupsEnabled               Boolean          @default(false) @map("powerups_enabled")
+  powerupStepInterval           Int?             @map("powerup_step_interval")
+  isPublic                      Boolean          @default(false) @map("is_public")
   // Nullable: NULL means "no participant limit" (unlimited). Older app clients
   // always send an integer, and the @default(10) keeps legacy creates that omit
   // the field unchanged. Additive/backward-compatible — relaxing NOT NULL only.
-  maxParticipants         Int?             @default(10) @map("max_participants")
+  maxParticipants               Int?             @default(10) @map("max_participants")
   // When true, the race never finishes on reaching targetSteps; targetSteps is
   // a display-only goal and the winner is decided by step count when ends_at
   // passes (raceExpiry.js). Additive/backward-compatible: defaults false so
   // legacy target races created by older app versions keep finishing on target.
-  timeBased               Boolean          @default(false) @map("time_based")
+  timeBased                     Boolean          @default(false) @map("time_based")
   // Opaque, unguessable token backing shareable race links (https://<host>/r/
   // <token>). Nullable: minted lazily the first time a participant shares the
   // race, so legacy races stay NULL until shared. Additive/backward-compatible —
   // older app clients never read or send it. Unique so a token resolves to at
   // most one race; @unique also creates the lookup index used by findByShareToken.
-  shareToken              String?          @unique @map("share_token")
+  shareToken                    String?          @unique @map("share_token")
   // ── Team races (TR-100/§12) ────────────────────────────────────────────────
   // isTeamRace flips a race into two-team mode: exactly two sides, team size
   // 1–5, combined team totals, winnerTeam decides. teamSize is the per-side cap
@@ -1530,11 +1601,11 @@ model Race {
   // the settled result (TEAM_A|TEAM_B|null); winnerUserId stays null for team
   // races. All additive/nullable — old app builds never send or read them, and a
   // race with isTeamRace=false renders exactly as an individual race.
-  isTeamRace              Boolean          @default(false) @map("is_team_race")
-  teamSize                Int?             @map("team_size")
-  teamAName               String?          @map("team_a_name")
-  teamBName               String?          @map("team_b_name")
-  winnerTeam              RaceTeam?        @map("winner_team")
+  isTeamRace                    Boolean          @default(false) @map("is_team_race")
+  teamSize                      Int?             @map("team_size")
+  teamAName                     String?          @map("team_a_name")
+  teamBName                     String?          @map("team_b_name")
+  winnerTeam                    RaceTeam?        @map("winner_team")
   // ── Tournaments (bracket mode) ──────────────────────────────────────────────
   // A matchup race is an ordinary time-based WINNER_TAKES_ALL race that belongs
   // to one tournament round. tournamentId != null flags it as a matchup: it is
@@ -1544,18 +1615,18 @@ model Race {
   // 0-based within the round. The @@unique makes double-advancement a hard DB
   // error (advancement idempotency backstop). All additive/nullable — old app
   // builds never send or read them and old rows stay NULL.
-  tournamentId            String?          @map("tournament_id")
-  tournamentRound         Int?             @map("tournament_round")
-  tournamentMatchIndex    Int?             @map("tournament_match_index")
+  tournamentId                  String?          @map("tournament_id")
+  tournamentRound               Int?             @map("tournament_round")
+  tournamentMatchIndex          Int?             @map("tournament_match_index")
   // Durable identity for the one prospective mid-match tournament powerup
   // activation. Nullable for every legacy/non-matchup race. The C0 worker
   // compares this stamp before touching participant baselines on a replay.
-  tournamentPowerupsActivatedAt DateTime?  @map("tournament_powerups_activated_at") @db.Timestamptz(3)
+  tournamentPowerupsActivatedAt DateTime?        @map("tournament_powerups_activated_at") @db.Timestamptz(3)
   // A private Daily/Weekly bucket's immutable identity. Nullable and unique so
   // all historical/global seeded races continue on the legacy stream.
-  seededBucketId          String?          @unique @map("seeded_bucket_id")
-  createdAt               DateTime         @default(now()) @map("created_at")
-  updatedAt               DateTime         @updatedAt @map("updated_at")
+  seededBucketId                String?          @unique @map("seeded_bucket_id")
+  createdAt                     DateTime         @default(now()) @map("created_at")
+  updatedAt                     DateTime         @updatedAt @map("updated_at")
 
   creator                      User?                         @relation("raceCreator", fields: [creatorId], references: [id])
   seed                         RaceSeed?                     @relation(fields: [seedId], references: [id])
@@ -1579,6 +1650,7 @@ model Race {
   activeImpactWork             ActiveRaceImpactWork[]
   activeEffectImpacts          ActiveRaceEffectImpact[]
   globalEventImpacts           GlobalEventRaceImpact[]
+  globalEventCaptureArtifacts  GlobalEventCaptureArtifact[]
   reviewPromptAttempts         AppReviewPromptAttempt[]
   referralQualifications       Referral[]                    @relation("ReferralQualifyingRace")
   referralQualificationIntents ReferralQualificationIntent[] @relation("ReferralQualificationIntentRace")
@@ -2715,20 +2787,23 @@ model RankedCohortMember {
 // agree. Additive, never read by old app binaries (which simply see a higher,
 // correct step total during a window).
 model GlobalStepEvent {
-  id               String   @id @default(uuid())
-  startsAt         DateTime @map("starts_at")
-  endsAt           DateTime @map("ends_at")
-  multiplier       Float    @default(2)
-  label            String?
-  scheduleMode     String   @default("LEGACY_GLOBAL") @map("schedule_mode")
-  eventDay         String?  @unique @map("event_day")
-  localStartMinute Int?     @map("local_start_minute")
-  durationMinutes  Int?     @map("duration_minutes")
-  createdAt        DateTime @default(now()) @map("created_at")
+  id                        String   @id @default(uuid())
+  startsAt                  DateTime @map("starts_at")
+  endsAt                    DateTime @map("ends_at")
+  multiplier                Float    @default(2)
+  label                     String?
+  scheduleMode              String   @default("LEGACY_GLOBAL") @map("schedule_mode")
+  eventDay                  String?  @unique @map("event_day")
+  localStartMinute          Int?     @map("local_start_minute")
+  durationMinutes           Int?     @map("duration_minutes")
+  summaryAttributionVersion Int      @default(1) @map("summary_attribution_version")
+  createdAt                 DateTime @default(now()) @map("created_at")
 
-  raceImpacts   GlobalEventRaceImpact[]
-  userSummaries GlobalEventUserSummary[]
-  entitlements  GlobalStepEventEntitlement[]
+  raceImpacts      GlobalEventRaceImpact[]
+  userSummaries    GlobalEventUserSummary[]
+  entitlements     GlobalStepEventEntitlement[]
+  summaryWork      GlobalEventSummaryWork[]
+  captureArtifacts GlobalEventCaptureArtifact[]
 
   @@index([startsAt, endsAt])
   @@map("global_step_events")
@@ -3067,29 +3142,32 @@ enum StepSyncRequestState {
 }
 
 model StepSyncRequest {
-  id                 String               @id @default(uuid())
-  userId             String               @map("user_id")
-  idempotencyKey     String               @map("idempotency_key") @db.VarChar(36)
-  requestHash        String               @map("request_hash") @db.Char(64)
-  resolutionTimeZone String               @map("resolution_time_zone") @db.VarChar(255)
-  state              StepSyncRequestState @default(PROCESSING)
-  responseJson       Json?                @map("response_json")
+  id                       String               @id @default(uuid())
+  userId                   String               @map("user_id")
+  idempotencyKey           String               @map("idempotency_key") @db.VarChar(36)
+  requestHash              String               @map("request_hash") @db.Char(64)
+  resolutionTimeZone       String               @map("resolution_time_zone") @db.VarChar(255)
+  state                    StepSyncRequestState @default(PROCESSING)
+  responseJson             Json?                @map("response_json")
   // Non-null while an owner is performing canonical source intake; an expired
   // lease is reclaimable for idempotent recovery.
-  leaseExpiresAt     DateTime?            @map("lease_expires_at")
+  leaseExpiresAt           DateTime?            @map("lease_expires_at")
   // Set exactly once, under a conditional `eventsEmittedAt IS NULL` claim, so a
   // replay/recovery can never re-emit STEPS_RECORDED/STEPS_UPDATED.
-  eventsEmittedAt    DateTime?            @map("events_emitted_at")
+  eventsEmittedAt          DateTime?            @map("events_emitted_at")
   // Locked classification captured by canonical intake. Together with a null
   // eventsEmittedAt this is the durable STEPS_* event intent a COMPLETE replay
   // can safely claim after a process crash between commit and after-commit work.
-  dailyExisted       Boolean?             @map("daily_existed")
+  dailyExisted             Boolean?             @map("daily_existed")
   // Canonical intake's crash-safe no-op classification. Null is the mixed-version
   // fail-closed value and always means "enqueue".
-  scoringChanged     Boolean?             @map("scoring_changed")
-  createdAt          DateTime             @default(now()) @map("created_at")
-  updatedAt          DateTime             @updatedAt @map("updated_at")
-  expiresAt          DateTime             @map("expires_at")
+  scoringChanged           Boolean?             @map("scoring_changed")
+  completedAt              DateTime?            @map("completed_at")
+  canonicalCoverageThrough DateTime?            @map("canonical_coverage_through")
+  scoringInputGeneration   BigInt?              @map("scoring_input_generation")
+  createdAt                DateTime             @default(now()) @map("created_at")
+  updatedAt                DateTime             @updatedAt @map("updated_at")
+  expiresAt                DateTime             @map("expires_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 

@@ -982,6 +982,12 @@ async function reserveFundedExposures({
         (membershipCounts.get(userId) || 0) + requestedCount >
         MAX_FUNDED_COMPETITION_MEMBERSHIPS
       ) {
+        console.warn(JSON.stringify({
+          event: "funded_exposure_limit_v1",
+          currentMemberships: membershipCounts.get(userId) || 0,
+          requestedMemberships: requestedCount,
+          limit: MAX_FUNDED_COMPETITION_MEMBERSHIPS,
+        }));
         throw fundedMembershipConflict();
       }
     }

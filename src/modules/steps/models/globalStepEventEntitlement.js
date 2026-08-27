@@ -15,6 +15,7 @@ async function findEligibleByRace({
   rangeStart,
   rangeEnd,
   client = prisma,
+  allowMissingImpactEventUserKeys = null,
 }) {
   const queryStartedAt = Date.now();
   const ids = [...new Set((userIds || []).filter(Boolean))];
@@ -61,8 +62,9 @@ async function findEligibleByRace({
     orderBy: { startsAt: "asc" },
   });
   for (const entitlement of entitlements) {
-    const impact = impactByEventUser.get(`${entitlement.eventId}:${entitlement.userId}`);
-    if (!impact) continue;
+    const eventUserKey = `${entitlement.eventId}:${entitlement.userId}`;
+    const impact = impactByEventUser.get(eventUserKey);
+    if (!impact && !allowMissingImpactEventUserKeys?.has(eventUserKey)) continue;
     const normalized = normalizedEntitlementEvent(entitlement.event, entitlement, impact);
     normalized.startsAt = new Date(Math.max(
       new Date(normalized.startsAt).getTime(),

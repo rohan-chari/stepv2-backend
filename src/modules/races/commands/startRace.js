@@ -14,7 +14,7 @@ const {
 } = require("../services/validateRaceConfig");
 const { resolveTeamPoolMultBps } = require("../teamPoolMultiplier");
 const {
-  repriceExistingTeamPayoutStamp,
+  newTeamPayoutStamp,
 } = require("../services/teamWinnerReward");
 const {
   enqueueRaceResolution: defaultEnqueueRaceResolution,
@@ -179,7 +179,11 @@ function buildStartRace(dependencies = {}) {
         : null;
     const pricedTeamPayoutStamp =
       pricedDurationDays != null && race.isTeamRace === true
-        ? repriceExistingTeamPayoutStamp(race, pricedDurationDays)
+        ? newTeamPayoutStamp({
+            fundedPrize: race.fundedPrize === true,
+            isTeamRace: true,
+            durationDays: pricedDurationDays,
+          })
         : null;
     const startFields =
       pricedDurationDays != null

@@ -117,7 +117,7 @@ describe("fixed team payout Deployment A compatibility", () => {
     assert.equal(stored.teamWinnerRewardCoins, 100);
   });
 
-  it("keeps legacy null and partial rows unstamped during Deployment A", async () => {
+  it("Deployment B activates legacy null and partial rows on duration edit", async () => {
     const creator = await makeUser();
     for (const [version, reward] of [[null, null], [1, null]]) {
       const race = await pendingTeamRace({
@@ -132,11 +132,11 @@ describe("fixed team payout Deployment A compatibility", () => {
       });
       assert.equal(edit.status, 200);
       const stored = await prisma.race.findUnique({ where: { id: race.id } });
-      assert.equal(stored.teamPayoutVersion, version);
-      assert.equal(stored.teamWinnerRewardCoins, reward);
+      assert.equal(stored.teamPayoutVersion, 1);
+      assert.equal(stored.teamWinnerRewardCoins, 500);
       const payload = (await edit.json()).race;
-      assert.equal(payload.teamPayoutVersion, null);
-      assert.equal(payload.teamWinnerRewardCoins, null);
+      assert.equal(payload.teamPayoutVersion, 1);
+      assert.equal(payload.teamWinnerRewardCoins, 500);
     }
   });
 });

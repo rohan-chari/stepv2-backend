@@ -278,27 +278,30 @@ describe("2026-08-17 additive contracts", () => {
     const other = await createTestUser();
     const event = await prisma.globalStepEvent.create({ data: {
       startsAt: new Date(Date.now() - 120_000), endsAt: new Date(Date.now() - 60_000), multiplier: 2,
+      summaryAttributionVersion: 2,
     } });
     const mineSummaryRace = await createCompletedRace(user.user.id, "Mine summary race");
     const foreignSummaryRace = await createCompletedRace(other.user.id, "Foreign summary race");
     await prisma.globalEventRaceImpact.createMany({ data: [
       {
         eventId: event.id, raceId: mineSummaryRace.id, userId: user.user.id,
-        status: "FINAL", deltaSteps: 840, settledAt: new Date(),
+        status: "FINAL", deltaSteps: 840, settledAt: new Date(), attributionVersion: 2,
       },
       {
         eventId: event.id, raceId: foreignSummaryRace.id, userId: other.user.id,
-        status: "FINAL", deltaSteps: 40, settledAt: new Date(),
+        status: "FINAL", deltaSteps: 40, settledAt: new Date(), attributionVersion: 2,
       },
     ] });
     const mine = await prisma.globalEventUserSummary.create({ data: {
       eventId: event.id, userId: user.user.id, extraRaceSteps: 840, raceCount: 2,
+      attributionVersion: 2, expiresAt: new Date(Date.now() + 60_000),
     } });
     const foreign = await prisma.globalEventUserSummary.create({ data: {
       eventId: event.id, userId: other.user.id, extraRaceSteps: 40, raceCount: 1,
+      attributionVersion: 2, expiresAt: new Date(Date.now() + 60_000),
     } });
     const mineHome = await request(server.baseUrl, "GET", "/home/race-card", {
-      token: user.token, headers: { "X-Client-Features": "impact_summaries" },
+      token: user.token, headers: { "X-Client-Features": "impact_summaries,impact_summary_expiry_v1" },
     });
     assert.equal(mineHome.status, 200);
     assert.equal((await mineHome.json()).globalEventSummary.id, mine.id);

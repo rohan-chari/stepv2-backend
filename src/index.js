@@ -66,6 +66,7 @@ const {
 } = require("./modules/races");
 const {
   scheduleRacePayoutDoubleReconcile,
+  scheduleFixedTeamPayoutMonitoring,
 } = require("./modules/races");
 const {
   registerRaceListCacheInvalidation,
@@ -136,6 +137,8 @@ function startServer({
     scheduleAdminCommands = scheduleRaceAdminCommandRunner,
   scheduleRacePayoutDoubleReconcile:
     schedulePayoutDoubleReconcile = scheduleRacePayoutDoubleReconcile,
+  scheduleFixedTeamPayoutMonitoring:
+    scheduleFixedTeamPayoutMonitor = scheduleFixedTeamPayoutMonitoring,
   logger = console,
   // Delay before the cron jobs start ticking. Every scheduler fires an
   // immediate first tick, and under pm2 cluster `reload` the OLD process keeps
@@ -308,6 +311,7 @@ function startServer({
       if (adValueEnabled("payoutReconcile")) {
         schedulePayoutDoubleReconcile();
       }
+      retainStopHandle(scheduleFixedTeamPayoutMonitor());
     };
     // Cluster-mode guard: pm2 sets NODE_APP_INSTANCE per worker (0, 1, ...).
     // Only worker 0 schedules crons -- every scheduler above runs unguarded,

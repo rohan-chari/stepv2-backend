@@ -60,13 +60,24 @@ function buildStepSyncRequestModel(prisma = defaultPrisma) {
     },
 
     // Finalize the reservation to COMPLETE with the stored canonical response.
-    async finalize({ id, responseJson, dailyExisted, now = new Date() }, tx = prisma) {
+    async finalize({
+      id,
+      responseJson,
+      dailyExisted,
+      completedAt = new Date(),
+      canonicalCoverageThrough = null,
+      scoringInputGeneration = null,
+      now = completedAt,
+    }, tx = prisma) {
       return tx.stepSyncRequest.update({
         where: { id },
         data: {
           state: "COMPLETE",
           responseJson,
           dailyExisted,
+          completedAt,
+          canonicalCoverageThrough,
+          scoringInputGeneration,
           leaseExpiresAt: null,
           updatedAt: now,
         },

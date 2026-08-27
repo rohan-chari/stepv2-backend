@@ -129,6 +129,9 @@ async function readCanonicalSampleInput(client, userId, dbNow = null) {
     nextSampleBoundaryAt: futureEnds.length
       ? new Date(Math.min(...futureEnds))
       : null,
+    canonicalCoverageThrough: scoringRows.length
+      ? new Date(Math.max(...scoringRows.map((row) => new Date(row.periodEnd).getTime())))
+      : null,
     dbNow: decisionTime,
   };
 }

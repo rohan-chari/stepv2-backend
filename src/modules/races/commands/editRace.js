@@ -17,7 +17,7 @@ const {
 } = require("../services/validateRaceConfig");
 const { resolveTeamPoolMultBps } = require("../teamPoolMultiplier");
 const {
-  repriceExistingTeamPayoutStamp,
+  newTeamPayoutStamp,
 } = require("../services/teamWinnerReward");
 
 class RaceEditError extends Error {
@@ -281,14 +281,16 @@ function buildEditRace(dependencies = {}) {
       }
     }
 
-    // Deployment A mixed-worker compatibility: keep NULL/invalid legacy rows
-    // unchanged, but if a B worker already stamped this row, move its canonical
-    // duration and valid V1 reward in the same PATCH write.
+    // Deployment B activation: duration is the only pricing input. Move the
+    // canonical duration and both fixed-team stamp fields in the same PATCH.
+    // This upgrades a legacy pending funded team race only when its duration is
+    // explicitly edited; unrelated edits never reprice it.
     if (race.isTeamRace === true && hasField(fields, "maxDurationDays")) {
-      Object.assign(
-        fields,
-        repriceExistingTeamPayoutStamp(race, fields.maxDurationDays) || {},
-      );
+      Object.assign(fields, newTeamPayoutStamp({
+        fundedPrize: race.fundedPrize === true,
+        isTeamRace: true,
+        durationDays: fields.maxDurationDays,
+      }));
     }
 
     // `updates.powerupStepInterval` is deliberately DROPPED ON THE FLOOR here:

@@ -1,5 +1,105 @@
 # Backend economy ledger
 
+## Fixed funded-team winner rewards (V1)
+
+**Approved 2026-08-26; implementation pending the two-stage production
+rollout.** User-created, app-funded team races stamp an immutable
+`team_payout_version = 1` and `team_winner_reward_coins` selected from the
+canonical priced duration:
+
+| Duration | Winner reward | Tie reward | Equal-skill EV/day |
+| --- | ---: | ---: | ---: |
+| 1 day | 100 | 50 | 50.0 |
+| 2–3 days | 200 | 100 | 33.3 at 3 days |
+| 4–7 days | 500 | 250 | 35.7 at 7 days |
+| 8+ days | 1,000 | 500 | 35.7 at 14 days |
+
+Every accepted, non-forfeited member of the winning team receives the full
+stamped reward. In a tie, every accepted, non-forfeited member of both teams
+receives half. There is deliberately no personal-step requirement. A forfeited
+member receives nothing and their missing award is not redistributed, so total
+issuance is the sum of the actual recipient awards. Pending/active liability is
+the larger non-forfeited team count times the reward. Completed totals are
+persisted in the race and participant payout stamps and paid through the
+idempotent coin ledger.
+
+The product owner explicitly accepted an `UNSOUND` economy verdict: two
+colluding accounts can use five one-day 1v1 races to mint 250 coins/account/day
+from zero-step ties, or 500/day on the designated token-step winner. The
+one-day duration has higher EV/day than every longer band, repeated cohorts can
+reuse the same walking stream, and account/Sybil farming remains possible. This
+accepted risk preserves the 100/200/500/1,000 ladder and the no-activity-gate
+decision; it does not relax the permanent admission ceiling or monitoring.
+
+The former unlimited non-seeded admission policy is superseded. Each account
+may hold at most **five** simultaneous user-created funded competitions,
+counting accepted, non-forfeited/unfinished memberships in `PENDING|ACTIVE`
+races and accepted, non-eliminated memberships in `PENDING|ACTIVE`
+tournaments. Tournament matchups, seeded competitions, invitations, and
+non-funded competitions do not count. The existing funded-exposure user row
+lock serializes cross-race/tournament admissions. Accounts already above five
+are grandfathered but cannot add another membership until below five.
+
+The cron owner runs `fixed_team_payout_economy_monitor_v1` hourly and emits a
+structured seven-day snapshot for the backend/economy owner. It reports
+fixed-team payout coins, total positive issuance,
+sinks, live membership p50/p90/p99, cap rejections/churn, zero-step paid
+recipients, tie and one-day share, forfeits, repeated cohorts, hashed provider
+concentration, and identities receiving more than 1,000 team coins in seven
+days. Warn the backend/economy owner when fixed-team payouts exceed **2,000
+coins/day for two consecutive UTC days** and page immediately above **4,000
+coins/day**. Cap rejections emit the separate structured event
+`funded_exposure_limit_v1`; the reporting sink counts that event as cap churn
+beside the live at-cap/above-cap membership snapshot. These are alerts, not
+runtime payout controls. Deployment verification must find one fresh monitor
+event from the cron process and exercise the warning/page routing in the log
+alert sink; an absent event is a failed Deployment B verification.
+
+Reference monitoring queries (read-only; run against the reporting replica or
+production only with the normal read-only authorization):
+
+```sql
+-- Fixed-team coins by UTC day and share of all positive issuance.
+WITH daily AS (
+  SELECT date_trunc('day', ct.created_at) AS day,
+         sum(ct.amount) FILTER (
+           WHERE ct.reason = 'race_prize_pool_payout'
+             AND r.team_payout_version = 1
+         ) AS fixed_team_coins,
+         sum(ct.amount) FILTER (WHERE ct.amount > 0) AS positive_coins,
+         -sum(ct.amount) FILTER (WHERE ct.amount < 0) AS sink_coins
+    FROM coin_transactions ct
+    LEFT JOIN races r ON ct.ref_id LIKE r.id || ':%'
+   WHERE ct.created_at >= now() - interval '7 days'
+   GROUP BY 1
+)
+SELECT *, fixed_team_coins / nullif(positive_coins, 0)::numeric AS issuance_share
+  FROM daily ORDER BY day DESC;
+
+-- Paid zero-step recipients, one-day/tie share, forfeits and high earners.
+SELECT r.id, r.max_duration_days, r.winner_team,
+       count(*) FILTER (WHERE rp.payout_coins > 0) AS paid_recipients,
+       count(*) FILTER (WHERE rp.payout_coins > 0 AND rp.raw_steps = 0)
+         AS paid_zero_step_recipients,
+       count(*) FILTER (WHERE rp.forfeited_at IS NOT NULL) AS forfeits,
+       sum(rp.payout_coins) AS coins
+  FROM races r
+  JOIN race_participants rp ON rp.race_id = r.id
+ WHERE r.team_payout_version = 1
+   AND r.completed_at >= now() - interval '7 days'
+ GROUP BY r.id;
+```
+
+Rollout is immutable-stamp based, never flag based. Deployment A adds nullable
+columns and makes all readers, settlement, and cache paths understand valid V1
+pairs. Creation and null/partial/malformed rows remain unstamped; edit/start
+conditionally reprice already-valid V1 rows so an A worker cannot damage a
+B-created race during a rolling deployment. Deployment B permanently activates
+creation/edit/custom-start stamping and ships the repair tooling only after both
+production PM2 workers are verified on A. Open-race repair is a separately authorized,
+upward-only admin-command process after B; completed/cancelled, buy-in, seeded,
+tournament, partial-stamp, and non-increasing rows are never changed.
+
 ## Race payout rewarded-ad double
 
 `race_payout_ad_double` is a system-funded source credited only through

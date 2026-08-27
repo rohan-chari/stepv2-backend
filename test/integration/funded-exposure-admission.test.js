@@ -66,6 +66,71 @@ function tournamentRequest(method, path, user, body) {
   });
 }
 
+async function seedRaceMembership(userId, {
+  fundedPrize = true,
+  status = "PENDING",
+  participantStatus = "ACCEPTED",
+  forfeitedAt = null,
+  finishedAt = null,
+  seedId = null,
+  tournamentId = null,
+} = {}) {
+  const race = await prisma.race.create({
+    data: {
+      creatorId: userId,
+      name: `Counted race ${++identity}`,
+      targetSteps: 0,
+      status,
+      isPublic: true,
+      timeBased: true,
+      maxParticipants: 10,
+      maxDurationDays: 1,
+      payoutPreset: "WINNER_TAKES_ALL",
+      fundedPrize,
+      seedId,
+      tournamentId,
+    },
+  });
+  const participant = await prisma.raceParticipant.create({
+    data: {
+      raceId: race.id,
+      userId,
+      status: participantStatus,
+      forfeitedAt,
+      finishedAt,
+    },
+  });
+  return { race, participant };
+}
+
+async function seedTournamentMembership(userId, {
+  status = "PENDING",
+  participantStatus = "ACCEPTED",
+  eliminatedInRound = null,
+} = {}) {
+  const tournament = await prisma.tournament.create({
+    data: {
+      creatorId: userId,
+      name: `Counted tournament ${++identity}`,
+      status,
+      bracketSize: 4,
+      matchupDurationDays: 1,
+      totalRounds: 2,
+      fundedPrize: true,
+      isPublic: true,
+    },
+  });
+  const participant = await prisma.tournamentParticipant.create({
+    data: {
+      tournamentId: tournament.id,
+      userId,
+      status: participantStatus,
+      eliminatedInRound,
+    },
+  });
+  return { tournament, participant };
+}
+
 describe("funded exposure admission", () => {
   before(async () => {
     server = await getSharedServer();
@@ -131,6 +196,125 @@ describe("funded exposure admission", () => {
     assert.equal(admitted.status, 409);
     assert.equal((await admitted.json()).code, "FUNDED_EXPOSURE_LIMIT");
     assert.equal(await prisma.race.count(), 5);
+  });
+
+  it("rejects funded tournament creation at the same five-membership ceiling", async () => {
+    const user = await createHighExposureUser();
+    const response = await tournamentRequest("POST", "/tournaments", user, {
+      name: "Sixth bracket",
+      bracketSize: 4,
+      matchupDurationDays: 1,
+      isPublic: true,
+    });
+    assert.equal(response.status, 409);
+    assert.equal((await response.json()).code, "FUNDED_EXPOSURE_LIMIT");
+  });
+
+  it("grandfathers accounts above five but blocks additions until below five", async () => {
+    const user = await createUser();
+    const memberships = [];
+    for (let index = 0; index < 6; index += 1) {
+      memberships.push(await seedRaceMembership(user.id));
+    }
+    assert.equal(
+      (await createFundedRace(user, "Still above ceiling")).status,
+      409,
+    );
+    await prisma.race.updateMany({
+      where: { id: { in: memberships.slice(0, 2).map(({ race }) => race.id) } },
+      data: { status: "COMPLETED" },
+    });
+    assert.equal(
+      (await createFundedRace(user, "Below ceiling again")).status,
+      201,
+    );
+  });
+
+  it("does not count invitations, non-funded, seeded, or tournament-matchup rows", async () => {
+    const user = await createUser();
+    await seedRaceMembership(user.id, {
+      fundedPrize: false,
+    });
+    await seedRaceMembership(user.id, {
+      participantStatus: "INVITED",
+    });
+    const seed = await prisma.raceSeed.create({
+      data: {
+        id: `cap-exclusion-seed-${user.id}`,
+        kind: `CAP_EXCLUSION_${user.id}`,
+        name: "Cap exclusion seed",
+        targetSteps: 1000,
+        durationHours: 24,
+        cadence: "DAILY",
+      },
+    });
+    await seedRaceMembership(user.id, { seedId: seed.id });
+    const bracket = await seedTournamentMembership(user.id);
+    await seedRaceMembership(user.id, {
+      tournamentId: bracket.tournament.id,
+    });
+
+    for (let index = 0; index < 4; index += 1) {
+      assert.equal(
+        (await createFundedRace(user, `Counted after exclusions ${index}`)).status,
+        201,
+      );
+    }
+    assert.equal(
+      (await createFundedRace(user, "Fifth after exclusions")).status,
+      409,
+      "the ordinary tournament membership is the fifth counted competition",
+    );
+  });
+
+  it("rejects private-request approval at the cap and keeps request replay idempotent", async () => {
+    const requester = await createHighExposureUser();
+    const creator = await createUser();
+    const created = await request(server.baseUrl, "POST", "/races", {
+      token: creator.token,
+      body: {
+        name: "Private approval target",
+        maxDurationDays: 1,
+        maxParticipants: 4,
+        isPublic: false,
+      },
+    });
+    assert.equal(created.status, 201);
+    const raceId = (await created.json()).race.id;
+    const headers = { "X-Client-Features": "privateJoinApproval" };
+    const link = await request(
+      server.baseUrl,
+      "POST",
+      `/races/${raceId}/share-link`,
+      { token: creator.token, headers },
+    );
+    assert.equal(link.status, 201);
+    const shareToken = (await link.json()).shareToken;
+    const requestPath = `/races/share/${shareToken}/join-requests`;
+    const first = await request(server.baseUrl, "POST", requestPath, {
+      token: requester.token,
+    });
+    const replay = await request(server.baseUrl, "POST", requestPath, {
+      token: requester.token,
+    });
+    assert.equal(first.status, 202);
+    assert.equal(replay.status, 202);
+    const requestId = (await first.json()).joinRequest.id;
+    assert.equal((await replay.json()).joinRequest.id, requestId);
+    const approval = await request(
+      server.baseUrl,
+      "POST",
+      `/races/${raceId}/join-requests/${requestId}/respond`,
+      { token: creator.token, body: { action: "ACCEPT" } },
+    );
+    assert.equal(approval.status, 409);
+    assert.equal((await approval.json()).code, "FUNDED_EXPOSURE_LIMIT");
+    assert.equal(
+      await prisma.raceParticipant.count({
+        where: { raceId, userId: requester.id },
+      }),
+      0,
+    );
   });
 
   for (const [label, value] of [
@@ -1231,5 +1415,77 @@ describe("funded exposure admission", () => {
       }),
       5,
     );
+  });
+
+  it("releases cap slots across every terminal race and tournament state", async () => {
+    const cases = [
+      ["race forfeit", "race", async ({ participant }) => {
+        await prisma.raceParticipant.update({
+          where: { id: participant.id },
+          data: { forfeitedAt: new Date() },
+        });
+      }],
+      ["race finish", "race", async ({ participant }) => {
+        await prisma.raceParticipant.update({
+          where: { id: participant.id },
+          data: { finishedAt: new Date() },
+        });
+      }],
+      ["race kick", "race", async ({ participant }) => {
+        await prisma.raceParticipant.delete({ where: { id: participant.id } });
+      }],
+      ["race cancellation", "race", async ({ race }) => {
+        await prisma.race.update({
+          where: { id: race.id },
+          data: { status: "CANCELLED" },
+        });
+      }],
+      ["race completion", "race", async ({ race }) => {
+        await prisma.race.update({
+          where: { id: race.id },
+          data: { status: "COMPLETED" },
+        });
+      }],
+      ["tournament elimination", "tournament", async ({ participant }) => {
+        await prisma.tournamentParticipant.update({
+          where: { id: participant.id },
+          data: { eliminatedInRound: 1 },
+        });
+      }],
+      ["tournament cancellation", "tournament", async ({ tournament }) => {
+        await prisma.tournament.update({
+          where: { id: tournament.id },
+          data: { status: "CANCELLED" },
+        });
+      }],
+      ["tournament completion", "tournament", async ({ tournament }) => {
+        await prisma.tournament.update({
+          where: { id: tournament.id },
+          data: { status: "COMPLETED" },
+        });
+      }],
+    ];
+
+    for (const [label, kind, release] of cases) {
+      await cleanDatabase();
+      identity = 0;
+      const user = await createUser();
+      const released = kind === "race"
+        ? await seedRaceMembership(user.id)
+        : await seedTournamentMembership(user.id);
+      for (let index = 0; index < 4; index += 1) {
+        await seedRaceMembership(user.id);
+      }
+      assert.equal(
+        (await createFundedRace(user, `${label} blocked before release`)).status,
+        409,
+      );
+      await release(released);
+      assert.equal(
+        (await createFundedRace(user, `${label} opens one slot`)).status,
+        201,
+        label,
+      );
+    }
   });
 });

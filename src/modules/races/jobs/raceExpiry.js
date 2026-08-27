@@ -32,6 +32,10 @@ const { SETTLEMENT_EFFECT_TYPES } = require("../services/raceScoringEffectTypes"
 const {
   computeSettlementAttributionVector,
 } = require("../services/raceSettlementAttribution");
+const {
+  chronologicalAttributionRows,
+  scoreWholeRaceTotals,
+} = require("../services/wholeRaceAttributionScoring");
 const derivedCache = require("../../../shared/cache/derivedCache");
 const cacheKeys = require("../../../shared/cache/cacheKeys");
 
@@ -90,12 +94,7 @@ const byUserIdAsc = (a, b) =>
   String(a.participant.userId || "").localeCompare(String(b.participant.userId || ""));
 
 function chronologicalEffects(rows) {
-  return [...rows].sort((a, b) => {
-    const at = new Date(a.startsAt || 0).getTime();
-    const bt = new Date(b.startsAt || 0).getTime();
-    if (at !== bt) return at - bt;
-    return String(a.id).localeCompare(String(b.id));
-  });
+  return chronologicalAttributionRows(rows);
 }
 
 // A read-only adapter over the exact settled effect rows. Attribution changes
@@ -159,37 +158,20 @@ async function computeSettlementEffectAttribution({
   const score = async ({ effectIds, globalEvents: scoringGlobalEvents,
     eventsByUserId: scoringEventsByUserId }) => {
     const effectModel = buildAttributionEffectModel({ ...attributionEffects, includedEffectIds: effectIds });
-    const active = [];
     const selectedIds = new Set(acceptedParticipants.map((participant) => participant.id));
-    for (const entry of preLeech) {
-      if (!selectedIds.has(entry.participant.id)) continue;
-      const recomputed = await calculateCurrentTotal({
-        raceId: race.id,
-        racePowerupsEnabled: race.powerupsEnabled,
-        participant: entry.participant,
-        baseAdjusted: entry.baseAdjusted,
-        hasSampleData: entry.hasSampleData,
-        raceActiveEffectModel: effectModel,
-        stepSampleModel: StepSample,
-        globalEvents: scoringEventsByUserId
-          ? eventsForUser(scoringEventsByUserId, entry.participant.userId)
-          : scoringGlobalEvents,
-        now: settlementTime,
-      });
-      active.push({
-        participantId: entry.participant.id, userId: entry.participant.userId,
-        preLeechTotal: recomputed.total, leechTransfers: recomputed.leechTransfers,
-      });
-    }
-    const copies = await collectRaceHitchhikeCopies({
-      raceId: race.id, raceEndsAt: settlementTime, participants: acceptedParticipants,
-      raceActiveEffectModel: effectModel, stepSampleModel: StepSample, now: settlementTime,
+    return scoreWholeRaceTotals({
+      raceId: race.id,
+      raceEndsAt: settlementTime,
+      racePowerupsEnabled: race.powerupsEnabled,
+      participants: acceptedParticipants,
+      entries: preLeech.filter((entry) => selectedIds.has(entry.participant.id)),
+      raceActiveEffectModel: effectModel,
+      stepSampleModel: StepSample,
       globalEvents: scoringGlobalEvents,
       eventsByUserId: scoringEventsByUserId,
+      now: settlementTime,
+      frozenTotals,
     });
-    const finals = applyLeechTransfers(applyHitchhikeCopies(active, copies));
-    for (const [participantId, total] of frozenTotals) finals.set(participantId, total);
-    return finals;
   };
 
   const vector = await computeSettlementAttributionVector({
@@ -381,6 +363,14 @@ async function resolveExpiredRaces() {
         // the scorer uses to decide whether each participant is eligible.
         ).map((event) => [event.id, event])
       ).values()];
+      // Version-2 events are finalized only by fenced boundary capture. Filter
+      // them before opening a settlement transaction so the permanent group
+      // trigger remains a last-resort rolling-old-binary guard, not control
+      // flow inside an already-aborted transaction. Missing metadata is v1 for
+      // compatibility with legacy normalized event shapes.
+      const legacySummaryEventIds = new Set(globalEvents
+        .filter((event) => Number(event.summaryAttributionVersion || 1) !== 2)
+        .map((event) => event.id));
 
       // Seeded races settle in their canonical tz so settled totals match what
       // getRaceProgress showed live; user races keep UTC (legacy).
@@ -727,6 +717,8 @@ async function resolveExpiredRaces() {
       }
 
       if (effectAttribution) {
+        const settlementGlobalImpacts = (effectAttribution.globalImpacts || [])
+          .filter((row) => legacySummaryEventIds.has(row.eventId));
         await withSettlementFence(race.id, async (tx) => {
           for (const row of effectAttribution.effectImpacts || []) {
             await tx.raceEffectImpact.upsert({
@@ -737,15 +729,49 @@ async function resolveExpiredRaces() {
                 attributionVersion: effectAttribution.attributionVersion, settledAt: settlementTime },
             });
           }
-          for (const row of effectAttribution.globalImpacts || []) {
-            await tx.globalEventRaceImpact.upsert({
-              where: { eventId_raceId_userId: { eventId: row.eventId, raceId: race.id, userId: row.userId } },
-              update: { status: "FINAL", deltaSteps: row.deltaSteps,
-                attributionVersion: effectAttribution.attributionVersion, settledAt: settlementTime },
-              create: { eventId: row.eventId, raceId: race.id, userId: row.userId, status: "FINAL",
-                deltaSteps: row.deltaSteps, attributionVersion: effectAttribution.attributionVersion,
-                settledAt: settlementTime },
+          for (const row of settlementGlobalImpacts) {
+            const existing = await tx.globalEventRaceImpact.findUnique({
+              where: {
+                eventId_raceId_userId: {
+                  eventId: row.eventId,
+                  raceId: race.id,
+                  userId: row.userId,
+                },
+              },
+              select: { attributionVersion: true, status: true },
             });
+            // Version-2 lifecycle belongs to the immutable post-boundary
+            // capture path. Settlement may neither manufacture missing v2
+            // provenance nor overwrite an already-terminal boundary result.
+            if (existing?.attributionVersion === 2) continue;
+            if (existing) {
+              await tx.globalEventRaceImpact.updateMany({
+                where: {
+                  eventId: row.eventId,
+                  raceId: race.id,
+                  userId: row.userId,
+                  attributionVersion: 1,
+                  status: "PENDING",
+                },
+                data: {
+                  status: "FINAL",
+                  deltaSteps: row.deltaSteps,
+                  settledAt: settlementTime,
+                },
+              });
+            } else {
+              await tx.globalEventRaceImpact.create({
+                data: {
+                  eventId: row.eventId,
+                  raceId: race.id,
+                  userId: row.userId,
+                  status: "FINAL",
+                  deltaSteps: row.deltaSteps,
+                  attributionVersion: effectAttribution.attributionVersion,
+                  settledAt: settlementTime,
+                },
+              });
+            }
           }
         });
       }

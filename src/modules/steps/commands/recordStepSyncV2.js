@@ -17,6 +17,20 @@ const DEFAULT_MAX_WAIT_MS = 5000;
 const DEFAULT_POLL_MS = 150;
 const HOME_PULL_COOLDOWN_SECONDS = 30;
 const STEP_INTAKE_SEMANTICS = "CANONICAL_SOURCE_QUEUE_V1";
+const SERIALIZATION_RETRIES = 3;
+
+function isSerializationConflict(error) {
+  const codes = [
+    error?.code,
+    error?.meta?.code,
+    error?.meta?.driverAdapterError?.cause?.originalCode,
+    error?.meta?.driverAdapterError?.cause?.code,
+    error?.cause?.originalCode,
+    error?.cause?.code,
+  ];
+  return codes.includes("40001") ||
+    String(error?.message || "").includes("could not serialize access");
+}
 
 class StepSyncCooldownError extends Error {
   constructor(retryAfterSeconds) {
@@ -52,7 +66,7 @@ function serializeRecord(step) {
   };
 }
 
-function buildResponse({ record, sampleCount, jobs, requestedAt }) {
+function buildResponse({ record, sampleCount, jobs, requestedAt, globalEventSummaryWork = null }) {
   const reported = (jobs || []).find(Boolean) || null;
   return {
     record: serializeRecord(record),
@@ -69,6 +83,7 @@ function buildResponse({ record, sampleCount, jobs, requestedAt }) {
       requestedAt: reported ? reported.requestedAt : requestedAt,
     },
     stepIntakeSemantics: STEP_INTAKE_SEMANTICS,
+    ...(globalEventSummaryWork ? { globalEventSummaryWork } : {}),
   };
 }
 
@@ -130,6 +145,11 @@ function buildRecordStepSyncV2(dependencies = {}) {
     options,
   }) {
     const requestedAt = now();
+    await require("../services/globalEventSummaryCapture")
+      .lockEligibleSummaryCaptureDependencies(tx, {
+        userId,
+        at: requestedAt,
+      });
     const intake = await stepInputIntake({
       userId,
       daily: { date: canonical.date, steps: canonical.steps },
@@ -139,18 +159,31 @@ function buildRecordStepSyncV2(dependencies = {}) {
       endpoint: "sync-v2",
       ...options,
     }, tx);
+    const completedAt = intake.completedAt || requestedAt;
+    const globalEventSummaryWork = await require("../services/globalEventSummaryCapture")
+      .claimEligibleSummaryWork(tx, {
+        userId,
+        captureSyncRequestId: reservation.id,
+        captureCompletedAt: completedAt,
+        captureCoverageThrough: intake.canonicalCoverageThrough,
+        sourceScoringInputGeneration: intake.generation,
+      });
     const response = buildResponse({
       record: intake.record,
       sampleCount: cleaned.length,
       jobs: intake.jobs,
       requestedAt,
+      globalEventSummaryWork,
     });
     await stepSyncRequestModel.finalize(
       {
         id: reservation.id,
         responseJson: response,
         dailyExisted: intake.dailyExisted,
-        now: requestedAt,
+        completedAt,
+        canonicalCoverageThrough: intake.canonicalCoverageThrough,
+        scoringInputGeneration: intake.generation,
+        now: completedAt,
       },
       tx
     );
@@ -192,7 +225,7 @@ function buildRecordStepSyncV2(dependencies = {}) {
         cleaned,
         options,
       });
-    }, { timeout: 15_000, maxWait: 10_000 });
+    }, { timeout: 15_000, maxWait: 10_000, isolationLevel: "RepeatableRead" });
     if (!result) return null;
     await afterCommit(result, { userId, canonical });
     return result.response;
@@ -276,43 +309,52 @@ function buildRecordStepSyncV2(dependencies = {}) {
     const options = await queueOptions();
     let result;
     try {
-      result = await prisma.$transaction(async (tx) => {
-        // First transactional write: a same-key loser cannot perform source
-        // work before the reservation's unique constraint turns it away.
-        const reservation = await stepSyncRequestModel.createReservation({
-          userId,
-          idempotencyKey,
-          requestHash: hash,
-          resolutionTimeZone: timeZone,
-          leaseMs: RECONCILE_LEASE_MS,
-          now: now(),
-        }, tx);
+      for (let attempt = 0; attempt < SERIALIZATION_RETRIES; attempt += 1) {
+        try {
+          result = await prisma.$transaction(async (tx) => {
+            // First transactional write: a same-key loser cannot perform source
+            // work before the reservation's unique constraint turns it away.
+            const reservation = await stepSyncRequestModel.createReservation({
+              userId,
+              idempotencyKey,
+              requestHash: hash,
+              resolutionTimeZone: timeZone,
+              leaseMs: RECONCILE_LEASE_MS,
+              now: now(),
+            }, tx);
 
-        if (homePull) {
-          const stamped = await tx.$queryRaw`
-            UPDATE "users"
-               SET "last_home_pull_step_sync_at" = CURRENT_TIMESTAMP
-             WHERE "id" = ${userId}
-               AND ("last_home_pull_step_sync_at" IS NULL OR
-                    "last_home_pull_step_sync_at" <=
-                      CURRENT_TIMESTAMP - INTERVAL '30 seconds')
-            RETURNING "last_home_pull_step_sync_at" AS "lastHomePullStepSyncAt"
-          `;
-          if (stamped.length !== 1) {
-            const cooldown = await tx.$queryRaw`
-              SELECT CEIL(EXTRACT(EPOCH FROM (
-                "last_home_pull_step_sync_at" + INTERVAL '30 seconds' - CURRENT_TIMESTAMP
-              )))::int AS "retryAfterSeconds"
-                FROM "users" WHERE "id" = ${userId}
-            `;
-            throw new StepSyncCooldownError(cooldown[0]?.retryAfterSeconds);
+            if (homePull) {
+              const stamped = await tx.$queryRaw`
+                UPDATE "users"
+                   SET "last_home_pull_step_sync_at" = CURRENT_TIMESTAMP
+                 WHERE "id" = ${userId}
+                   AND ("last_home_pull_step_sync_at" IS NULL OR
+                        "last_home_pull_step_sync_at" <=
+                          CURRENT_TIMESTAMP - INTERVAL '30 seconds')
+                RETURNING "last_home_pull_step_sync_at" AS "lastHomePullStepSyncAt"
+              `;
+              if (stamped.length !== 1) {
+                const cooldown = await tx.$queryRaw`
+                  SELECT CEIL(EXTRACT(EPOCH FROM (
+                    "last_home_pull_step_sync_at" + INTERVAL '30 seconds' - CURRENT_TIMESTAMP
+                  )))::int AS "retryAfterSeconds"
+                    FROM "users" WHERE "id" = ${userId}
+                `;
+                throw new StepSyncCooldownError(cooldown[0]?.retryAfterSeconds);
+              }
+            }
+
+            return runIntakeInTransaction({
+              tx, reservation, userId, timeZone, canonical, cleaned, options,
+            });
+          }, { timeout: 15_000, maxWait: 10_000, isolationLevel: "RepeatableRead" });
+          break;
+        } catch (error) {
+          if (!isSerializationConflict(error) || attempt === SERIALIZATION_RETRIES - 1) {
+            throw error;
           }
         }
-
-        return runIntakeInTransaction({
-          tx, reservation, userId, timeZone, canonical, cleaned, options,
-        });
-      }, { timeout: 15_000, maxWait: 10_000 });
+      }
     } catch (error) {
       if (error?.code !== "P2002") throw error;
       const winner = await stepSyncRequestModel.findByKey(userId, idempotencyKey);

@@ -4,6 +4,9 @@ const { isStrictFlagEnabled } = require("../../shared/config/isStrictFlagEnabled
 const {
   getEligibleGlobalEventSummary,
 } = require("./queries/getEligibleGlobalEventSummary");
+const {
+  getCachedGlobalEventSummary,
+} = require("./services/globalEventSummaryCache");
 const { buildServiceBanner } = require("./services/buildServiceBanner");
 const {
   resolveActiveContestBanner: defaultResolveActiveContestBanner,
@@ -173,22 +176,20 @@ function buildHomeRaceCardResponse(dependencies) {
           }), logger, "adExtraSpin lookup")
         : Promise.resolve({ ok: true, value: null }),
       supportsImpactSummaries
-        ? (async () => {
+        ? settle(async () => {
             if (!(await isStrictFlagEnabled(appSettings, "apiImpactSummariesEnabled"))) {
               return null;
             }
-            return derivedCache.cachedRead({
+            return getCachedGlobalEventSummary({
               key: cacheKeys.homeImpactSummary(user.id),
-              prefix: cacheKeys.PREFIX.HOME_IMPACT_SUMMARY,
-              ttlSeconds: 60,
               enabled: await isStrictFlagEnabled(
                 appSettings,
                 "redisCacheHomeImpactSummaryEnabled"
               ),
               load: () => getEligibleGlobalEventSummary({ prisma, userId: user.id }),
             });
-          })()
-        : Promise.resolve(null),
+          }, logger, "globalEventSummary lookup")
+        : Promise.resolve({ ok: true, value: null }),
       supportsInbox
         ? (async () => {
             if (!(await isStrictFlagEnabled(appSettings, "apiInboxV1Enabled"))) {
@@ -211,8 +212,8 @@ function buildHomeRaceCardResponse(dependencies) {
     if (dailyReward && adStatus.ok && adStatus.value != null) {
       dailyReward.adExtraSpin = adStatus.value;
     }
-    if (impactSummary) {
-      result.globalEventSummary = impactSummary;
+    if (impactSummary.ok && impactSummary.value) {
+      result.globalEventSummary = impactSummary.value;
     }
     if (typeof inboxCount === "number") {
       result.inboxUnreadCount = inboxCount;

@@ -172,7 +172,11 @@ test("settlement eligibility repair inserts a missing impact before loading the 
           async update() { assert.fail("an activated entitlement is immutable"); },
         },
         globalEventRaceImpact: {
+          async findMany() { return []; },
           async createMany({ data }) { writes.push(...data); return { count: data.length }; },
+        },
+        globalEventSummaryWork: {
+          async findMany() { return []; },
         },
       });
     },
@@ -217,6 +221,78 @@ test("settlement eligibility repair inserts a missing impact before loading the 
     raceId: "race-1",
     userId: "user-1",
     status: "PENDING",
+  }]);
+  assert.equal(eventsForUser(result, "user-1").length, 1);
+});
+
+test("settlement eligibility repair still enrolls v2 membership before WAITING_SYNC capture", async () => {
+  const writes = [];
+  const event = { ...EVENT, summaryAttributionVersion: 2 };
+  const entitlement = {
+    id: "ent-v2",
+    eventId: event.id,
+    userId: "user-1",
+    startsAt: new Date("2026-08-20T14:00:00.000Z"),
+    endsAt: new Date("2026-08-20T14:30:00.000Z"),
+    startOutcome: "ACTIVATED_ON_TIME",
+    startProcessedAt: new Date("2026-08-20T14:00:10.000Z"),
+    event,
+  };
+  const client = {
+    async $transaction(callback) {
+      return callback({
+        async $executeRawUnsafe() {},
+        globalStepEventEntitlement: {
+          async findMany() { return [entitlement]; },
+          async update() { assert.fail("an activated entitlement is immutable"); },
+        },
+        globalEventRaceImpact: {
+          async findMany() { return []; },
+          async createMany({ data }) { writes.push(...data); return { count: data.length }; },
+        },
+        globalEventSummaryWork: {
+          async findMany() {
+            return [{
+              eventId: event.id,
+              userId: "user-1",
+              status: "WAITING_SYNC",
+            }];
+          },
+        },
+      });
+    },
+    globalStepEvent: { async findMany() { return []; } },
+    globalEventRaceImpact: {
+      async findMany() {
+        return writes.map((row) => ({ id: "impact-v2", status: "PENDING", ...row }));
+      },
+    },
+    globalStepEventEntitlement: {
+      async findMany() { return [entitlement]; },
+    },
+  };
+
+  const result = await ensureRaceGlobalEventEligibility({
+    race: {
+      id: "race-1",
+      startedAt: new Date("2026-08-20T13:00:00.000Z"),
+      participants: [{
+        userId: "user-1",
+        status: "ACCEPTED",
+        joinedAt: new Date("2026-08-20T13:00:00.000Z"),
+      }],
+    },
+    at: new Date("2026-08-20T14:30:00.000Z"),
+    prisma: client,
+    async acquireRaceFence() {},
+  });
+
+  assert.deepEqual(writes, [{
+    eventId: event.id,
+    raceId: "race-1",
+    userId: "user-1",
+    status: "PENDING",
+    attributionVersion: 2,
   }]);
   assert.equal(eventsForUser(result, "user-1").length, 1);
 });

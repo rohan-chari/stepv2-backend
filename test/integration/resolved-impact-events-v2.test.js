@@ -2377,6 +2377,7 @@ describe("resolved impact events v2 HTTP contract", () => {
         startsAt: new Date(Date.now() - 120_000),
         endsAt: new Date(Date.now() - 60_000),
         multiplier: 2,
+        summaryAttributionVersion: 2,
       } });
       const raceA = await createRaceWithParticipants([user], "COMPLETED");
       await prisma.globalEventRaceImpact.create({ data: {
@@ -2385,6 +2386,7 @@ describe("resolved impact events v2 HTTP contract", () => {
         userId: user.user.id,
         status: "FINAL",
         deltaSteps: 0,
+        attributionVersion: 2,
         settledAt: new Date(),
       } });
       const summary = await prisma.globalEventUserSummary.create({ data: {
@@ -2392,8 +2394,13 @@ describe("resolved impact events v2 HTTP contract", () => {
         userId: user.user.id,
         extraRaceSteps: 0,
         raceCount: 1,
+        attributionVersion: 2,
+        expiresAt: new Date(Date.now() + 60_000),
       } });
-      for (const features of ["impact_summaries", "impact_summaries,home_shell_v1"]) {
+      for (const features of [
+        "impact_summaries,impact_summary_expiry_v1",
+        "impact_summaries,impact_summary_expiry_v1,home_shell_v1",
+      ]) {
         const response = await request(server.baseUrl, "GET", "/home/race-card", {
           token: user.token,
           headers: { "X-Client-Features": features },
@@ -2418,11 +2425,12 @@ describe("resolved impact events v2 HTTP contract", () => {
         userId: user.user.id,
         status: "FINAL",
         deltaSteps: -100,
+        attributionVersion: 2,
         settledAt: new Date(),
       } });
       const eligible = await request(server.baseUrl, "GET", "/home/race-card", {
         token: user.token,
-        headers: { "X-Client-Features": "impact_summaries" },
+        headers: { "X-Client-Features": "impact_summaries,impact_summary_expiry_v1" },
       });
       assert.equal(eligible.status, 200);
       assert.equal((await eligible.json()).globalEventSummary.id, summary.id);

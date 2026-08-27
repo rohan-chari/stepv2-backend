@@ -147,6 +147,14 @@ function createStepsRouter(dependencies = {}) {
         // the legacy unrestricted sync contract.
         homePull: req.get("X-Step-Sync-Intent") === "home-pull",
       });
+      if (
+        req.clientFeatures?.has("impact_summaries") !== true ||
+        req.clientFeatures?.has("impact_summary_expiry_v1") !== true
+      ) {
+        const legacyResponse = { ...response };
+        delete legacyResponse.globalEventSummaryWork;
+        return res.status(202).json(legacyResponse);
+      }
       res.status(202).json(response);
     } catch (error) {
       // Validation (bad shape) and manual-sample rejection both → 400.
