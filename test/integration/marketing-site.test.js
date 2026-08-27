@@ -265,6 +265,11 @@ describe("marketing site + static routes still serve", () => {
     const adsRes = await fetch(`${server.baseUrl}/app-ads.txt`);
     assert.equal(adsRes.status, 200);
     assert.match(adsRes.headers.get("content-type") || "", /text\/plain/);
+    assert.match(
+      await adsRes.text(),
+      /^vungle\.com, 6a8fa2a9a58d1846183babbd, DIRECT, c107d686becd2d77$/m,
+      "Liftoff Monetize must remain authorized for Bara's ad inventory"
+    );
 
     const cardRes = await fetch(`${server.baseUrl}/share-card.png`);
     assert.equal(cardRes.status, 200);
