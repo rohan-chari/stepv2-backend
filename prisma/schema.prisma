@@ -2823,6 +2823,7 @@ model GlobalStepEvent {
   eventDay                  String?  @unique @map("event_day")
   localStartMinute          Int?     @map("local_start_minute")
   durationMinutes           Int?     @map("duration_minutes")
+  schedulePolicyVersion     Int?     @map("schedule_policy_version")
   summaryAttributionVersion Int      @default(1) @map("summary_attribution_version")
   createdAt                 DateTime @default(now()) @map("created_at")
 

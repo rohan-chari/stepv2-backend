@@ -60,6 +60,166 @@ before(async () => { server = await startServer(); });
 beforeEach(async () => cleanDatabase());
 after(async () => { await server.close(); await disconnectDatabase(); });
 
+test("new local parents persist the weighted boundary minute and policy version 2", async () => {
+  let draws = 0;
+  const result = await GlobalStepEvent.createLocalParentIfAbsent({
+    eventDay: "2098-12-01",
+    randomInt(min, max) {
+      draws += 1;
+      assert.deepEqual([min, max], [0, 72000]);
+      return 66960;
+    },
+  });
+
+  assert.equal(result.created, true);
+  assert.equal(draws, 1);
+  assert.equal(result.event.eventDay, "2098-12-01");
+  assert.equal(result.event.scheduleMode, "LOCAL_ENTITLEMENTS");
+  assert.equal(result.event.localStartMinute, 1260);
+  assert.equal(result.event.durationMinutes, 30);
+  assert.equal(result.event.schedulePolicyVersion, 2);
+  assert.equal(
+    result.event.endsAt.getTime() - result.event.startsAt.getTime(),
+    26.5 * 60 * 60 * 1000
+  );
+});
+
+test("an existing local parent is authoritative and is never redrawn or restamped", async () => {
+  const first = await GlobalStepEvent.createLocalParentIfAbsent({
+    eventDay: "2098-12-02",
+    randomInt: () => 0,
+  });
+  let secondDraws = 0;
+  const second = await GlobalStepEvent.createLocalParentIfAbsent({
+    eventDay: "2098-12-02",
+    randomInt: () => {
+      secondDraws += 1;
+      return 71999;
+    },
+  });
+
+  assert.equal(first.created, true);
+  assert.equal(second.created, false);
+  assert.equal(secondDraws, 0);
+  assert.equal(second.event.id, first.event.id);
+  assert.equal(second.event.localStartMinute, 480);
+  assert.equal(second.event.schedulePolicyVersion, 2);
+  assert.equal(await prisma.globalStepEvent.count({ where: { eventDay: "2098-12-02" } }), 1);
+});
+
+test("concurrent same-day local creation persists exactly one weighted draw", async () => {
+  let firstDraws = 0;
+  let secondDraws = 0;
+  const [first, second] = await Promise.all([
+    GlobalStepEvent.createLocalParentIfAbsent({
+      eventDay: "2098-12-03",
+      randomInt: () => {
+        firstDraws += 1;
+        return 0;
+      },
+    }),
+    GlobalStepEvent.createLocalParentIfAbsent({
+      eventDay: "2098-12-03",
+      randomInt: () => {
+        secondDraws += 1;
+        return 66960;
+      },
+    }),
+  ]);
+
+  assert.equal(firstDraws + secondDraws, 1);
+  assert.equal(Number(first.created) + Number(second.created), 1);
+  assert.equal(first.event.id, second.event.id);
+  assert.ok([480, 1260].includes(first.event.localStartMinute));
+  assert.equal(first.event.schedulePolicyVersion, 2);
+  assert.equal(await prisma.globalStepEvent.count({ where: { eventDay: "2098-12-03" } }), 1);
+});
+
+test("a migration-backfilled version-1 parent remains immutable under v2 code", async () => {
+  const existing = await prisma.globalStepEvent.create({ data: {
+    eventDay: "2098-12-04",
+    scheduleMode: "LOCAL_ENTITLEMENTS",
+    localStartMinute: 777,
+    durationMinutes: 30,
+    schedulePolicyVersion: 1,
+    startsAt: new Date("2098-12-03T18:57:00.000Z"),
+    endsAt: new Date("2098-12-04T21:27:00.000Z"),
+    multiplier: 2,
+  } });
+  let draws = 0;
+  const result = await GlobalStepEvent.createLocalParentIfAbsent({
+    eventDay: existing.eventDay,
+    randomInt: () => {
+      draws += 1;
+      return 71999;
+    },
+  });
+
+  assert.equal(result.created, false);
+  assert.equal(draws, 0);
+  assert.equal(result.event.id, existing.id);
+  assert.equal(result.event.localStartMinute, 777);
+  assert.equal(result.event.schedulePolicyVersion, 1);
+});
+
+test("HTTP Home active-event contract remains exactly backward compatible", async () => {
+  const { user, token } = await createTestUser();
+  const now = new Date();
+  const race = await prisma.race.create({ data: {
+    creatorId: user.id,
+    name: "Weighted policy API contract",
+    targetSteps: 0,
+    timeBased: true,
+    maxDurationDays: 1,
+    status: "ACTIVE",
+    startedAt: new Date(now.getTime() - 60 * 60 * 1000),
+    endsAt: new Date(now.getTime() + 60 * 60 * 1000),
+  } });
+  await prisma.raceParticipant.create({ data: {
+    raceId: race.id,
+    userId: user.id,
+    status: "ACCEPTED",
+    joinedAt: race.startedAt,
+  } });
+  const event = await prisma.globalStepEvent.create({ data: {
+    eventDay: "2098-12-05",
+    scheduleMode: "LOCAL_ENTITLEMENTS",
+    localStartMinute: 1020,
+    durationMinutes: 30,
+    schedulePolicyVersion: 2,
+    startsAt: new Date(now.getTime() - 13 * 60 * 60 * 1000),
+    endsAt: new Date(now.getTime() + 13 * 60 * 60 * 1000),
+    multiplier: 2,
+  } });
+  const entitlementEndsAt = new Date(now.getTime() + 25 * 60 * 1000);
+  await prisma.globalStepEventEntitlement.create({ data: {
+    eventId: event.id,
+    userId: user.id,
+    timezone: "UTC",
+    localDate: "2098-12-05",
+    startsAt: new Date(now.getTime() - 5 * 60 * 1000),
+    endsAt: entitlementEndsAt,
+    startOutcome: "ACTIVATED_ON_TIME",
+    startProcessedAt: now,
+  } });
+  await prisma.globalEventRaceImpact.create({ data: {
+    eventId: event.id,
+    raceId: race.id,
+    userId: user.id,
+    status: "PENDING",
+  } });
+
+  const response = await request(server.baseUrl, "GET", "/home/race-card", { token });
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.deepEqual(Object.keys(body.globalEvent).sort(), ["active", "endsAt", "multiplier"]);
+  assert.deepEqual(body.globalEvent, {
+    active: true,
+    multiplier: 2,
+    endsAt: entitlementEndsAt.toISOString(),
+  });
+});
+
 test("unique entitlement snapshot and race/viewer eligibility are participant-specific", async () => {
   const [{ user: ny }, { user: madrid }] = await Promise.all([
     createTestUser({ globalEventTimezone: "America/New_York" }),
@@ -1310,7 +1470,12 @@ test("enabled Home cache is user-isolated, invalidated at end, and progress does
       request(server.baseUrl, "GET", "/home/race-card", { token: inactiveToken }),
       request(server.baseUrl, "GET", `/races/${race.id}/progress`, { token: activeToken }),
     ]);
-    assert.equal((await activeHome.json()).globalEvent.multiplier, 2);
+    const activeHomeBody = await activeHome.json();
+    assert.deepEqual(Object.keys(activeHomeBody.globalEvent).sort(), [
+      "active", "endsAt", "multiplier",
+    ]);
+    assert.equal(activeHomeBody.globalEvent.multiplier, 2);
+    assert.equal("schedulePolicyVersion" in activeHomeBody.globalEvent, false);
     assert.equal("globalEvent" in await inactiveHome.json(), false);
     assert.equal((await activeProgress.json()).progress.participants
       .find((row) => row.userId === active.id).currentMultiplier, 2);

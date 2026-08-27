@@ -8,6 +8,7 @@ const { etDayKey } = require("../../../shared/time/etSchedule");
 const {
   LEGACY_GLOBAL,
   LOCAL_ENTITLEMENTS,
+  LOCAL_EVENT_SCHEDULE_POLICY_VERSION,
   chooseLocalStartMinute,
   compatibilityEnvelopeForLocalEvent,
 } = require("../globalStepEvent");
@@ -181,7 +182,10 @@ const GlobalStepEvent = {
       const event = await tx.globalStepEvent.create({
         data: {
           ...envelope, multiplier, durationMinutes, localStartMinute, eventDay,
-          scheduleMode: LOCAL_ENTITLEMENTS, label, summaryAttributionVersion: 2,
+          scheduleMode: LOCAL_ENTITLEMENTS,
+          schedulePolicyVersion: LOCAL_EVENT_SCHEDULE_POLICY_VERSION,
+          label,
+          summaryAttributionVersion: 2,
         },
       });
       return { event, created: true };

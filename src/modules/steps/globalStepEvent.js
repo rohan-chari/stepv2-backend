@@ -51,6 +51,97 @@ const LOCAL_ENTITLEMENTS = "LOCAL_ENTITLEMENTS";
 const LEGACY_GLOBAL = "LEGACY_GLOBAL";
 const FALLBACK_EVENT_TIMEZONE = "America/New_York";
 
+const LOCAL_EVENT_SCHEDULE_POLICY_VERSION = 2;
+const LOCAL_EVENT_SCHEDULE_V2_TOTAL_TICKETS = 72000;
+const LOCAL_EVENT_SCHEDULE_V2_BANDS = Object.freeze([
+  Object.freeze({
+    startMinute: 480,
+    endMinute: 720,
+    probabilityPercent: 15,
+    ticketsPerMinute: 45,
+    ticketCount: 10800,
+  }),
+  Object.freeze({
+    startMinute: 720,
+    endMinute: 900,
+    probabilityPercent: 18,
+    ticketsPerMinute: 72,
+    ticketCount: 12960,
+  }),
+  Object.freeze({
+    startMinute: 900,
+    endMinute: 1020,
+    probabilityPercent: 18,
+    ticketsPerMinute: 108,
+    ticketCount: 12960,
+  }),
+  Object.freeze({
+    startMinute: 1020,
+    endMinute: 1140,
+    probabilityPercent: 21,
+    ticketsPerMinute: 126,
+    ticketCount: 15120,
+  }),
+  Object.freeze({
+    startMinute: 1140,
+    endMinute: 1260,
+    probabilityPercent: 21,
+    ticketsPerMinute: 126,
+    ticketCount: 15120,
+  }),
+  Object.freeze({
+    startMinute: 1260,
+    endMinute: 1320,
+    probabilityPercent: 7,
+    ticketsPerMinute: 84,
+    ticketCount: 5040,
+  }),
+]);
+
+function validateLocalEventScheduleV2() {
+  let nextMinute = 480;
+  let probabilityPercent = 0;
+  let ticketCount = 0;
+  for (const band of LOCAL_EVENT_SCHEDULE_V2_BANDS) {
+    if (
+      !Number.isInteger(band.startMinute) ||
+      !Number.isInteger(band.endMinute) ||
+      band.startMinute !== nextMinute ||
+      band.endMinute <= band.startMinute
+    ) {
+      throw new Error("local event schedule v2 bands must be ordered and contiguous");
+    }
+    const minuteCount = band.endMinute - band.startMinute;
+    if (
+      !Number.isInteger(band.ticketsPerMinute) ||
+      band.ticketsPerMinute <= 0 ||
+      band.ticketCount !== minuteCount * band.ticketsPerMinute
+    ) {
+      throw new Error("local event schedule v2 bands must have integer per-minute tickets");
+    }
+    if (
+      !Number.isInteger(band.probabilityPercent) ||
+      band.probabilityPercent <= 0 ||
+      band.ticketCount * 100 !==
+        LOCAL_EVENT_SCHEDULE_V2_TOTAL_TICKETS * band.probabilityPercent
+    ) {
+      throw new Error("local event schedule v2 band probabilities must match ticket counts");
+    }
+    nextMinute = band.endMinute;
+    probabilityPercent += band.probabilityPercent;
+    ticketCount += band.ticketCount;
+  }
+  if (
+    nextMinute !== 1320 ||
+    probabilityPercent !== 100 ||
+    ticketCount !== LOCAL_EVENT_SCHEDULE_V2_TOTAL_TICKETS
+  ) {
+    throw new Error("local event schedule v2 must cover [480, 1320) and total 100%");
+  }
+}
+
+validateLocalEventScheduleV2();
+
 function parseEventDay(eventDay) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(eventDay || "")) {
     throw new TypeError("eventDay must be YYYY-MM-DD");
@@ -78,7 +169,25 @@ function assertLocalSchedule({ localStartMinute, durationMinutes }) {
 // its parent row is being created. The winning minute is persisted and reused
 // by every timezone and every retry.
 function chooseLocalStartMinute({ randomInt = cryptoRandomInt } = {}) {
-  return randomInt(480, 1320);
+  const ticket = randomInt(0, LOCAL_EVENT_SCHEDULE_V2_TOTAL_TICKETS);
+  if (
+    !Number.isInteger(ticket) ||
+    ticket < 0 ||
+    ticket >= LOCAL_EVENT_SCHEDULE_V2_TOTAL_TICKETS
+  ) {
+    throw new RangeError(
+      `local schedule ticket must be an integer in [0, ${LOCAL_EVENT_SCHEDULE_V2_TOTAL_TICKETS})`
+    );
+  }
+
+  let residual = ticket;
+  for (const band of LOCAL_EVENT_SCHEDULE_V2_BANDS) {
+    if (residual < band.ticketCount) {
+      return band.startMinute + Math.floor(residual / band.ticketsPerMinute);
+    }
+    residual -= band.ticketCount;
+  }
+  throw new Error("local event schedule v2 ticket mapping is incomplete");
 }
 
 function localEventWindowForZone({
@@ -289,6 +398,9 @@ module.exports = {
   LOCAL_ENTITLEMENTS,
   LEGACY_GLOBAL,
   FALLBACK_EVENT_TIMEZONE,
+  LOCAL_EVENT_SCHEDULE_POLICY_VERSION,
+  LOCAL_EVENT_SCHEDULE_V2_TOTAL_TICKETS,
+  LOCAL_EVENT_SCHEDULE_V2_BANDS,
   chooseLocalStartMinute,
   localEventWindowForZone,
   compatibilityEnvelopeForLocalEvent,

@@ -11,15 +11,27 @@ test("local global-event schema is additive and default-safe", async () => {
       FROM information_schema.columns
      WHERE table_schema = 'public'
        AND table_name = 'global_step_events'
-       AND column_name IN ('schedule_mode', 'event_day', 'local_start_minute', 'duration_minutes')
+       AND column_name IN (
+         'schedule_mode',
+         'event_day',
+         'local_start_minute',
+         'duration_minutes',
+         'schedule_policy_version'
+       )
      ORDER BY column_name
   `);
   assert.deepEqual(parentColumns.map((row) => row.column_name), [
     "duration_minutes", "event_day", "local_start_minute", "schedule_mode",
+    "schedule_policy_version",
   ]);
   const scheduleMode = parentColumns.find((row) => row.column_name === "schedule_mode");
   assert.equal(scheduleMode.is_nullable, "NO");
   assert.match(scheduleMode.column_default || "", /LEGACY_GLOBAL/);
+  const schedulePolicyVersion = parentColumns.find(
+    (row) => row.column_name === "schedule_policy_version"
+  );
+  assert.equal(schedulePolicyVersion.is_nullable, "YES");
+  assert.equal(schedulePolicyVersion.column_default, null);
 
   const userColumns = await prisma.$queryRawUnsafe(`
     SELECT column_name, is_nullable
