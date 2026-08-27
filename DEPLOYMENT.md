@@ -500,10 +500,15 @@ authorization):
   replies to Apple relay addresses.
 - With A0 workers still loaded, pull/install reviewed A1 under fresh production
   approval and run `npm run feedback:gmail:preflight`. This sends one unique,
-  no-user-data message. Confirm its Inbox and Sent placement and inspect its
-  From, To, Message-ID, Return-Path, SPF, Google DKIM (`d=barastep.com`), and
-  DMARC pass before reloading any PM2 process. Then separately test the real
-  endpoint's entered Reply-To, stored Reply-To, and absent Reply-To cases.
+  no-user-data message. Confirm its Inbox and Sent placement, locked
+  From/To/unique subject, and raw `Received` path through
+  `gmailapi.google.com` with `HTTPREST` before reloading any PM2 process. This
+  self-to-self message stays inside Gmail: Google may replace the supplied RFC
+  Message-ID and omit SPF/DKIM/DMARC results because it never crosses an
+  external SMTP boundary. That is not a preflight failure; existing Workspace
+  domain authentication still governs later external support replies. Then
+  separately test the real endpoint's entered Reply-To, stored Reply-To, and
+  absent Reply-To cases.
 - If authorization or preflight fails, do not reload PM2. Restore the A0
   checkout while its already-loaded workers continue serving. If credentials
   are exposed, revoke the app grant/refresh token, remove the production secret,
