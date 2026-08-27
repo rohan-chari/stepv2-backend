@@ -183,6 +183,9 @@ model User {
   referralQualificationFacts ReferralQualificationFact[] @relation("ReferralQualificationFactReferrer")
   referralRewardGrants       ReferralRewardGrant[]
   adRewardGrants             AdRewardGrant[]
+  interstitialAdCap          InterstitialAdCap?
+  interstitialAdPermits      InterstitialAdPermit[]
+  interstitialAdImpressions  InterstitialAdImpression[]
   racePayoutDoubleOffers     RacePayoutDoubleOffer[]
 
   // ── Tournaments (bracket mode) — all additive back-relations. Old app builds
@@ -691,6 +694,77 @@ model AdRewardGrant {
   @@index([userId, grantedDate])
   @@index([rewardKind, consumedAt])
   @@map("ad_reward_grants")
+}
+
+enum InterstitialAdPlacement {
+  race_detail_exit
+  race_results_exit
+}
+
+enum InterstitialAdPlatform {
+  ios
+  android
+}
+
+// One row per account. This is deliberately data-light: its only correctness
+// role is to provide the stable row locked during permit admission and
+// impression confirmation across all backend workers.
+model InterstitialAdCap {
+  userId    String   @id @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("interstitial_ad_caps")
+}
+
+model InterstitialAdPermit {
+  id               String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId           String                  @map("user_id")
+  placement        InterstitialAdPlacement
+  sessionId        String                  @map("session_id") @db.Uuid
+  capDate          DateTime                @map("cap_date") @db.Date
+  timeZone         String                  @map("time_zone") @db.VarChar(128)
+  appVersion       String                  @map("app_version") @db.VarChar(32)
+  platform         InterstitialAdPlatform
+  createdAt        DateTime                @default(now()) @map("created_at")
+  showBy           DateTime                @map("show_by")
+  reservationUntil DateTime                @map("reservation_until")
+  cancelledAt      DateTime?               @map("cancelled_at")
+  confirmedAt      DateTime?               @map("confirmed_at")
+
+  user       User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  impression InterstitialAdImpression?
+
+  @@index([userId, reservationUntil])
+  @@index([userId, capDate])
+  @@index([userId, sessionId])
+  @@map("interstitial_ad_permits")
+}
+
+model InterstitialAdImpression {
+  id          String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  eventId     String                  @unique @map("event_id") @db.Uuid
+  permitId    String                  @unique @map("permit_id") @db.Uuid
+  userId      String                  @map("user_id")
+  placement   InterstitialAdPlacement
+  capDate     DateTime                @map("cap_date") @db.Date
+  timeZone    String                  @map("time_zone") @db.VarChar(128)
+  sessionId   String                  @map("session_id") @db.Uuid
+  occurredAt  DateTime                @map("occurred_at")
+  receivedAt  DateTime                @default(now()) @map("received_at")
+  appVersion  String                  @map("app_version") @db.VarChar(32)
+  platform    InterstitialAdPlatform
+
+  user   User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permit InterstitialAdPermit @relation(fields: [permitId], references: [id], onDelete: Cascade)
+
+  @@index([userId, receivedAt])
+  @@index([userId, capDate])
+  @@index([userId, sessionId])
+  @@index([placement, receivedAt])
+  @@map("interstitial_ad_impressions")
 }
 
 model Friendship {

@@ -1,4 +1,6 @@
 const { Router } = require("express");
+const { buildRequireAuth } = require("../../../middleware/requireAuth");
+const { asyncHandler } = require("../../../shared/http/asyncHandler");
 const {
   parseSsvQuery,
   verifySsvSignature,
@@ -12,6 +14,29 @@ const defaultAdRewardsConfig = require("../adRewards");
 const {
   safeStructuredEvent,
 } = require("../../races/services/racePayoutDoublePolicy");
+const {
+  parseEligibilityQuery,
+  parsePermitBody,
+  parseImpressionBody,
+  parsePermitId,
+} = require("../validation/interstitialAds");
+const {
+  buildGetInterstitialEligibility,
+} = require("../queries/getInterstitialEligibility");
+const {
+  buildIssueInterstitialPermit,
+} = require("../commands/issueInterstitialPermit");
+const {
+  buildConfirmInterstitialImpression,
+} = require("../commands/confirmInterstitialImpression");
+const {
+  buildCancelInterstitialPermit,
+} = require("../commands/cancelInterstitialPermit");
+
+function rawInterstitialTimeZone(req) {
+  const raw = req.headers && req.headers["x-timezone"];
+  return typeof raw === "string" && raw === req.timeZone ? raw : null;
+}
 
 // AdMob server-side verification callback. Unauthenticated — GOOGLE calls it
 // (configured on the ad unit in the AdMob console), and its trust comes from
@@ -20,6 +45,24 @@ const {
 // ad".
 function createAdsRouter(dependencies = {}) {
   const router = Router();
+  const requireAuth =
+    dependencies.requireAuth || buildRequireAuth(dependencies);
+  const now = dependencies.now || (() => new Date());
+  const getInterstitialEligibility =
+    dependencies.getInterstitialEligibility ||
+    buildGetInterstitialEligibility(dependencies);
+  const issueInterstitialPermit =
+    dependencies.issueInterstitialPermit ||
+    buildIssueInterstitialPermit({
+      ...dependencies,
+      getInterstitialEligibility,
+    });
+  const confirmInterstitialImpression =
+    dependencies.confirmInterstitialImpression ||
+    buildConfirmInterstitialImpression(dependencies);
+  const cancelInterstitialPermit =
+    dependencies.cancelInterstitialPermit ||
+    buildCancelInterstitialPermit(dependencies);
   const grantAdReward =
     dependencies.grantAdReward ||
     (dependencies.prisma || dependencies.logger
@@ -77,7 +120,72 @@ function createAdsRouter(dependencies = {}) {
     }
   });
 
+  // These routes are authenticated individually. Never put requireAuth on the
+  // router itself: /ssv above is called by Google and must remain public.
+  router.get(
+    "/interstitial/eligibility",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      const receivedAt = now();
+      const input = parseEligibilityQuery(req, receivedAt);
+      const body = await getInterstitialEligibility({
+        userId: req.user.id,
+        userCreatedAt: req.user.createdAt,
+        ...input,
+        timeZone: rawInterstitialTimeZone(req),
+        now: receivedAt,
+      });
+      res.status(200).json(body);
+    }),
+  );
+
+  router.post(
+    "/interstitial/permits",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      const receivedAt = now();
+      const input = parsePermitBody(req.body, receivedAt);
+      const result = await issueInterstitialPermit({
+        userId: req.user.id,
+        userCreatedAt: req.user.createdAt,
+        ...input,
+        timeZone: rawInterstitialTimeZone(req),
+        now: receivedAt,
+      });
+      res.status(result.status).json(result.body);
+    }),
+  );
+
+  router.post(
+    "/interstitial/impressions",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      const receivedAt = now();
+      const input = parseImpressionBody(req.body, receivedAt);
+      const body = await confirmInterstitialImpression({
+        userId: req.user.id,
+        ...input,
+        now: receivedAt,
+      });
+      res.status(202).json(body);
+    }),
+  );
+
+  router.post(
+    "/interstitial/permits/:permitId/cancel",
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      const permitId = parsePermitId(req.params.permitId);
+      const body = await cancelInterstitialPermit({
+        userId: req.user.id,
+        permitId,
+        now: now(),
+      });
+      res.status(202).json(body);
+    }),
+  );
+
   return router;
 }
 
-module.exports = { createAdsRouter };
+module.exports = { createAdsRouter, rawInterstitialTimeZone };

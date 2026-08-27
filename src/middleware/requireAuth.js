@@ -23,16 +23,11 @@ const {
   invalidateHomeActiveGlobalEvent,
 } = require("../modules/steps/services/globalStepEventEntitlement");
 const authMeCache = require("../modules/users/services/authMeCache");
+const { SAFE_APP_VERSION } = require("../shared/validation/appVersion");
 
-// Batch 2026-08-08 item 9. Byte-identical to the regex the analytics ingestion
-// endpoint uses to bound `appVersion` (src/modules/analytics/routes.js:84).
-// It is a `const` local to that router and not exported, and this change does
-// not own that file, so it is duplicated here rather than re-exported. If one
-// side is ever loosened the other must follow — both bound the SAME untrusted
-// X-App-Version header from the SAME client field (PackageInfo.version), and
-// the whole point is that admin reporting groups on values from both.
-const SAFE_APP_VERSION =
-  /^(?:unknown|\d{1,4}(?:\.\d{1,4}){1,3}(?:[+-][A-Za-z0-9.-]{1,16})?)$/;
+// Keep the legacy sticky-version match byte-compatible: unlike analytics and
+// new interstitial ingestion, this older path did not add a separate length
+// check around the shared regex.
 
 // UTC calendar date ("2026-08-08") of a Date. The sticky write is rate-limited
 // to once per UTC day; UTC (not the user's zone) is deliberate — it is a write

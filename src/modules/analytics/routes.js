@@ -2,6 +2,7 @@ const { Router } = require("express");
 const { prisma: defaultPrisma } = require("../../db");
 const { buildRequireAuth } = require("../../middleware/requireAuth");
 const { appSettings: defaultAppSettings } = require("../../shared/config/appSettings");
+const { isSafeAppVersion } = require("../../shared/validation/appVersion");
 
 const MAX_BATCH_SIZE = 50;
 const MAX_EVENT_AGE_MS = 90 * 24 * 60 * 60 * 1000;
@@ -99,11 +100,48 @@ const ALLOWED_EVENT_NAMES = new Set([
   "extra_spin_claim_succeeded",
   "health_connected",
   "race_leaderboard_viewed",
+  // Natural-exit interstitial funnel and Race Detail visit distribution.
+  // Unknown names soft-drop on older backends, preserving mixed-version
+  // compatibility while these additive names land on the current backend.
+  "interstitial_opportunity",
+  "interstitial_skipped",
+  "interstitial_show_attempted",
+  "interstitial_load_succeeded",
+  "interstitial_load_failed",
+  "interstitial_dismissed",
+  "interstitial_show_failed",
+  "race_detail_visit_started",
+  "race_detail_visit_ended",
+  "race_detail_back_exit",
+  "race_detail_exit_eligible",
 ]);
 
 const METRICS_V2_EVENT_NAMES = new Set([
   "health_connected",
   "race_leaderboard_viewed",
+]);
+
+const INTERSTITIAL_EVENT_NAMES = new Set([
+  "interstitial_opportunity",
+  "interstitial_skipped",
+  "interstitial_show_attempted",
+  "interstitial_load_succeeded",
+  "interstitial_load_failed",
+  "interstitial_dismissed",
+  "interstitial_show_failed",
+]);
+const RACE_DETAIL_VISIT_EVENT_NAMES = new Set([
+  "race_detail_visit_started",
+  "race_detail_visit_ended",
+  "race_detail_back_exit",
+  "race_detail_exit_eligible",
+]);
+const INTERSTITIAL_CONTEXT_KEYS = new Set(["placement", "reason", "result"]);
+const RACE_DETAIL_VISIT_CONTEXT_KEYS = new Set([
+  "entry_surface",
+  "exit_kind",
+  "scope_result",
+  "dwell_bucket",
 ]);
 
 const ALLOWED_CONTEXT = {
@@ -126,6 +164,15 @@ const ALLOWED_CONTEXT = {
     // Extra-spin CTA funnel: a bounded ad-load failure reason. `dismissed`
     // and `unsupported` above were already admissible and stay unchanged.
     "load_failed",
+    "completed",
+    "failed",
+    "empty",
+    "abandoned",
+    "back_exit",
+    "forward_exit",
+    "short_visit",
+    "ineligible_race",
+    "rewarded_shown",
   ]),
   mode: new Set(["solo", "team", "tournament"]),
   surface: new Set(["home", "results"]),
@@ -140,6 +187,35 @@ const ALLOWED_CONTEXT = {
     "QUICK_RACE_MEMBERSHIP_LIMIT",
     "NETWORK",
     "UNKNOWN",
+  ]),
+  placement: new Set(["race_detail_exit", "race_results_exit"]),
+  entry_surface: new Set(["home", "races", "public_races", "tournament"]),
+  exit_kind: new Set(["back", "forward", "state_change", "auth_replace"]),
+  scope_result: new Set(["active_accepted", "ineligible"]),
+  dwell_bucket: new Set([
+    "under_5s",
+    "5_9s",
+    "10_59s",
+    "60_179s",
+    "180s_plus",
+  ]),
+  reason: new Set([
+    "unauthenticated",
+    "unconfigured",
+    "excluded_flow",
+    "recent_fullscreen",
+    "invalid_timezone",
+    "acquisition_grace",
+    "session_grace",
+    "permit_active",
+    "session_cap",
+    "cooldown",
+    "daily_cap",
+    "backend_unsupported",
+    "backend_unavailable",
+    "not_ready",
+    "show_failed",
+    "account_changed",
   ]),
 };
 
@@ -173,9 +249,6 @@ const ALLOWED_PATTERN_CONTEXT = {
 };
 
 const SAFE_ID = /^[A-Za-z0-9._:-]+$/;
-// PackageInfo.version is numeric/dotted. Permit a bounded build/prerelease
-// suffix plus the explicit client fallback, but not arbitrary free-form text.
-const SAFE_APP_VERSION = /^(?:unknown|\d{1,4}(?:\.\d{1,4}){1,3}(?:[+-][A-Za-z0-9.-]{1,16})?)$/;
 const ALLOWED_PLATFORMS = new Set(["ios", "android", "other"]);
 const FOREGROUND_MAX_AGE_MS = 35 * 24 * 60 * 60 * 1000;
 const SAFE_SESSION_ID = /^[A-Za-z0-9._:-]{1,64}$/;
@@ -257,7 +330,7 @@ function validateActivationEvent(event, now = new Date()) {
     typeof event.appVersion !== "string" ||
     event.appVersion.length < 1 ||
     event.appVersion.length > 32 ||
-    !SAFE_APP_VERSION.test(event.appVersion)
+    !isSafeAppVersion(event.appVersion)
   ) {
     throw validationError("appVersion is invalid");
   }
@@ -274,6 +347,18 @@ function validateActivationEvent(event, now = new Date()) {
   }
 
   const context = validateContext(event.context);
+  if (
+    INTERSTITIAL_EVENT_NAMES.has(event.name) &&
+    Object.keys(context).some((key) => !INTERSTITIAL_CONTEXT_KEYS.has(key))
+  ) {
+    throw validationError("interstitial context is invalid");
+  }
+  if (
+    RACE_DETAIL_VISIT_EVENT_NAMES.has(event.name) &&
+    Object.keys(context).some((key) => !RACE_DETAIL_VISIT_CONTEXT_KEYS.has(key))
+  ) {
+    throw validationError("race detail visit context is invalid");
+  }
   if (
     event.name === "health_connected" &&
     (Object.keys(context).length !== 1 || context.source !== "healthkit")
@@ -326,12 +411,7 @@ function createAnalyticsRouter(dependencies = {}) {
   }
 
   function validAppVersion(value) {
-    return (
-      typeof value === "string" &&
-      value.length >= 1 &&
-      value.length <= 32 &&
-      SAFE_APP_VERSION.test(value)
-    );
+    return isSafeAppVersion(value);
   }
 
   function parseForeground(body, receivedAt) {

@@ -19,6 +19,14 @@ Object.assign(module.exports, require("./commands/claimDailyRewardBox"));
 Object.assign(module.exports, require("./commands/claimExtraDailyRewardBox"));
 Object.assign(module.exports, require("./commands/claimAdCoinReward"));
 Object.assign(module.exports, require("./commands/grantAdReward"));
+Object.assign(module.exports, require("./constants/interstitialAds"));
+Object.assign(module.exports, require("./errors/interstitialAds"));
+Object.assign(module.exports, require("./validation/interstitialAds"));
+Object.assign(module.exports, require("./models/interstitialAdState"));
+Object.assign(module.exports, require("./queries/getInterstitialEligibility"));
+Object.assign(module.exports, require("./commands/issueInterstitialPermit"));
+Object.assign(module.exports, require("./commands/confirmInterstitialImpression"));
+Object.assign(module.exports, require("./commands/cancelInterstitialPermit"));
 Object.assign(module.exports, require("./routes/coins")); // createCoinsRouter
 Object.assign(module.exports, require("./routes/dailyReward")); // createDailyRewardRouter
 Object.assign(module.exports, require("./routes/ads")); // createAdsRouter
