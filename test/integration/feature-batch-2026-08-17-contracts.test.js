@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const { afterEach, before, beforeEach, describe, it } = require("node:test");
 const {
   cleanDatabase,
+  createLegacyFeedbackThread,
   createTestUser,
   getSharedServer,
   prisma,
@@ -137,16 +138,17 @@ describe("2026-08-17 additive contracts", () => {
     });
     assert.equal(read.status, 200);
 
-    const submit = await request(server.baseUrl, "POST", "/feedback/suggestions", {
-      token: user.token, body: { text: "Please improve sync." }, headers: CAPABILITIES,
+    const seededThread = await createLegacyFeedbackThread({
+      userId: user.user.id,
+      text: "Please improve sync.",
     });
-    assert.equal(submit.status, 201);
     const threads = await request(server.baseUrl, "GET", "/feedback/threads", {
       token: user.token, headers: CAPABILITIES,
     });
     assert.equal(threads.status, 200);
     const thread = (await threads.json()).threads[0];
     assert.ok(thread.id);
+    assert.equal(thread.id, seededThread.id);
 
     const noAdmin = await request(server.baseUrl, "GET", "/admin/feedback/threads", {
       token: user.token, headers: CAPABILITIES,
@@ -177,13 +179,9 @@ describe("2026-08-17 additive contracts", () => {
   it("includes the feedback thread user's displayName in the admin list", async () => {
     const namedUser = await createTestUser({ displayName: "Named Feedback User" });
     const admin = await createTestUser({ email: ADMIN_EMAIL });
-    const submit = await request(server.baseUrl, "POST", "/feedback/suggestions", {
-      token: namedUser.token, body: { text: "A named feedback thread." }, headers: CAPABILITIES,
-    });
-    assert.equal(submit.status, 201);
-
-    const thread = await prisma.feedbackThread.findFirstOrThrow({
-      where: { userId: namedUser.user.id },
+    const thread = await createLegacyFeedbackThread({
+      userId: namedUser.user.id,
+      text: "A named feedback thread.",
     });
     const list = await request(server.baseUrl, "GET", "/admin/feedback/threads", {
       token: admin.token, headers: CAPABILITIES,
@@ -196,13 +194,9 @@ describe("2026-08-17 additive contracts", () => {
   it("returns null for an admin feedback thread whose user has no displayName", async () => {
     const unnamedUser = await createTestUser({ displayName: null });
     const admin = await createTestUser({ email: ADMIN_EMAIL });
-    const submit = await request(server.baseUrl, "POST", "/feedback/suggestions", {
-      token: unnamedUser.token, body: { text: "An unnamed feedback thread." }, headers: CAPABILITIES,
-    });
-    assert.equal(submit.status, 201);
-
-    const thread = await prisma.feedbackThread.findFirstOrThrow({
-      where: { userId: unnamedUser.user.id },
+    const thread = await createLegacyFeedbackThread({
+      userId: unnamedUser.user.id,
+      text: "An unnamed feedback thread.",
     });
     const list = await request(server.baseUrl, "GET", "/admin/feedback/threads", {
       token: admin.token, headers: CAPABILITIES,
@@ -215,13 +209,9 @@ describe("2026-08-17 additive contracts", () => {
   it("returns the user's current displayName without leaking email or profile fields", async () => {
     const user = await createTestUser({ displayName: "OriginalName" });
     const admin = await createTestUser({ email: ADMIN_EMAIL });
-    const submit = await request(server.baseUrl, "POST", "/feedback/suggestions", {
-      token: user.token, body: { text: "A renamed feedback thread." }, headers: CAPABILITIES,
-    });
-    assert.equal(submit.status, 201);
-
-    const thread = await prisma.feedbackThread.findFirstOrThrow({
-      where: { userId: user.user.id },
+    const thread = await createLegacyFeedbackThread({
+      userId: user.user.id,
+      text: "A renamed feedback thread.",
     });
     const rename = await request(server.baseUrl, "PUT", "/auth/me/display-name", {
       token: user.token, body: { displayName: "RenamedName" },

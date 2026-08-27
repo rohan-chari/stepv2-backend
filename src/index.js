@@ -72,6 +72,7 @@ const {
   registerRaceListCacheInvalidation,
 } = require("./modules/races");
 const { scheduleGiveawayRetention } = require("./modules/giveaways");
+const { scheduleFeedbackEmailAttemptExpiry } = require("./modules/feedback");
 const {
   scheduleDomainEventProjection,
   scheduleDomainEventRetention,
@@ -119,6 +120,8 @@ function startServer({
     scheduleReferralCleanup = scheduleReferralLinkOpenCleanup,
   scheduleGiveawayRetention:
     scheduleGiveawayRetentionJob = scheduleGiveawayRetention,
+  scheduleFeedbackEmailAttemptExpiry:
+    scheduleFeedbackEmailAttemptExpiryJob = scheduleFeedbackEmailAttemptExpiry,
   scheduleDailyMover: scheduleDaily = scheduleDailyMover,
   scheduleDailyRewardReminder:
     scheduleDailyReminder = scheduleDailyRewardReminder,
@@ -254,6 +257,7 @@ function startServer({
       if (!destructiveCleanupDisabled("GIVEAWAY_RETENTION_DISABLED")) {
         scheduleGiveawayRetentionJob();
       }
+      retainStopHandle(scheduleFeedbackEmailAttemptExpiryJob());
       // step_samples retention prune (3am ET, 45d + unsettled-race guard;
       // Five-Minute Step Samples §4.1), behind the destructive-jobs brake.
       if (!destructiveCleanupDisabled("STEP_SAMPLE_RETENTION_DISABLED")) {

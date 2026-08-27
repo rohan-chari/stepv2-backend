@@ -55,7 +55,7 @@ describe("feedback suggestions", () => {
 
   // === POST /feedback/suggestions ===
 
-  it("stores a suggestion and returns 201 { ok: true }", async () => {
+  it("reserves an accepted email attempt and returns its delivery discriminator", async () => {
     const user = await createUser();
 
     const res = await submit(user.token, {
@@ -64,15 +64,15 @@ describe("feedback suggestions", () => {
     });
 
     assert.equal(res.status, 201);
-    assert.deepEqual(await res.json(), { ok: true });
+    assert.deepEqual(await res.json(), { ok: true, delivery: "email" });
 
-    const rows = await prisma.suggestion.findMany({
+    const rows = await prisma.feedbackEmailAttempt.findMany({
       where: { userId: user.userId },
     });
     assert.equal(rows.length, 1);
     assert.equal(rows[0].userId, user.userId);
-    assert.equal(rows[0].text, "Please add a dark mode for the race screen");
-    assert.equal(rows[0].category, "feature");
+    assert.equal(rows[0].state, "ACCEPTED");
+    assert.equal(await prisma.suggestion.count(), 0);
   });
 
   it("requires authentication", async () => {
@@ -83,15 +83,13 @@ describe("feedback suggestions", () => {
     assert.equal(await prisma.suggestion.count(), 0);
   });
 
-  it("accepts a suggestion with no category", async () => {
+  it("accepts feedback with no category", async () => {
     const user = await createUser();
     const res = await submit(user.token, { text: "no category here" });
     assert.equal(res.status, 201);
 
-    const row = await prisma.suggestion.findFirst({
-      where: { userId: user.userId },
-    });
-    assert.equal(row.category, null);
+    assert.equal(await prisma.feedbackEmailAttempt.count({ where: { userId: user.userId } }), 1);
+    assert.equal(await prisma.suggestion.count(), 0);
   });
 
   // === Validation ===
@@ -106,7 +104,7 @@ describe("feedback suggestions", () => {
       assert.ok(payload.error, "400 responses carry an error message");
     }
 
-    assert.equal(await prisma.suggestion.count(), 0);
+    assert.equal(await prisma.feedbackEmailAttempt.count(), 0);
   });
 
   it("rejects text over 2000 chars but accepts exactly 2000", async () => {
@@ -115,14 +113,11 @@ describe("feedback suggestions", () => {
 
     const over = await submit(overLimit.token, { text: "x".repeat(2001) });
     assert.equal(over.status, 400);
-    assert.equal(await prisma.suggestion.count({ where: { userId: overLimit.userId } }), 0);
+    assert.equal(await prisma.feedbackEmailAttempt.count({ where: { userId: overLimit.userId } }), 0);
 
     const exact = await submit(atLimit.token, { text: "y".repeat(2000) });
     assert.equal(exact.status, 201);
-    const row = await prisma.suggestion.findFirst({
-      where: { userId: atLimit.userId },
-    });
-    assert.equal(row.text.length, 2000);
+    assert.equal(await prisma.feedbackEmailAttempt.count({ where: { userId: atLimit.userId } }), 1);
   });
 
   it("rejects a non-string or over-long category with 400", async () => {
@@ -137,12 +132,12 @@ describe("feedback suggestions", () => {
     });
     assert.equal(tooLong.status, 400);
 
-    assert.equal(await prisma.suggestion.count(), 0);
+    assert.equal(await prisma.feedbackEmailAttempt.count(), 0);
   });
 
   // === Provenance headers ===
 
-  it("persists X-App-Version and X-Platform onto the row", async () => {
+  it("accepts bounded X-App-Version and X-Platform provenance", async () => {
     const user = await createUser();
 
     const res = await submit(
@@ -152,24 +147,16 @@ describe("feedback suggestions", () => {
     );
     assert.equal(res.status, 201);
 
-    const row = await prisma.suggestion.findFirst({
-      where: { userId: user.userId },
-    });
-    assert.equal(row.appVersion, "2.1.3");
-    assert.equal(row.platform, "ios");
+    assert.equal(await prisma.feedbackEmailAttempt.count({ where: { userId: user.userId } }), 1);
   });
 
-  it("still succeeds with null provenance when the headers are absent", async () => {
+  it("still succeeds when provenance headers are absent", async () => {
     const user = await createUser();
 
     const res = await submit(user.token, { text: "no headers at all" });
     assert.equal(res.status, 201);
 
-    const row = await prisma.suggestion.findFirst({
-      where: { userId: user.userId },
-    });
-    assert.equal(row.appVersion, null);
-    assert.equal(row.platform, null);
+    assert.equal(await prisma.feedbackEmailAttempt.count({ where: { userId: user.userId } }), 1);
   });
 
   it("never rejects a submission for a garbage provenance header", async () => {
@@ -182,10 +169,7 @@ describe("feedback suggestions", () => {
     );
     assert.equal(res.status, 201);
 
-    const row = await prisma.suggestion.findFirst({
-      where: { userId: user.userId },
-    });
-    assert.equal(row.text, "weird client");
+    assert.equal(await prisma.feedbackEmailAttempt.count({ where: { userId: user.userId } }), 1);
   });
 
   // === Rate limit: 5 per user per UTC day ===
@@ -204,9 +188,31 @@ describe("feedback suggestions", () => {
     assert.ok(payload.error, "429 carries an error message");
 
     assert.equal(
-      await prisma.suggestion.count({ where: { userId: user.userId } }),
+      await prisma.feedbackEmailAttempt.count({ where: { userId: user.userId } }),
       5,
       "the rejected submission is not stored"
+    );
+  });
+
+  it("serializes simultaneous email submissions at the fifth-slot boundary", async () => {
+    const user = await createUser();
+    for (let i = 0; i < 4; i += 1) {
+      const res = await submit(user.token, { text: `reserved legacy slot ${i}` });
+      assert.equal(res.status, 201);
+    }
+
+    const responses = await Promise.all([
+      submit(user.token, { text: "simultaneous legacy A" }),
+      submit(user.token, { text: "simultaneous legacy B" }),
+    ]);
+
+    assert.deepEqual(
+      responses.map((response) => response.status).sort(),
+      [201, 429]
+    );
+    assert.equal(
+      await prisma.feedbackEmailAttempt.count({ where: { userId: user.userId } }),
+      5
     );
   });
 
@@ -411,7 +417,7 @@ describe("feedback suggestions", () => {
 
   // === Account deletion (protects the 5s transaction invariant) ===
 
-  it("deletes a user's suggestions with their account", async () => {
+  it("deletes a user's email attempts with their account", async () => {
     const user = await createUser();
 
     for (let i = 0; i < 3; i += 1) {
@@ -419,7 +425,7 @@ describe("feedback suggestions", () => {
       assert.equal(res.status, 201);
     }
     assert.equal(
-      await prisma.suggestion.count({ where: { userId: user.userId } }),
+      await prisma.feedbackEmailAttempt.count({ where: { userId: user.userId } }),
       3
     );
 
@@ -429,7 +435,7 @@ describe("feedback suggestions", () => {
     assert.equal(res.status, 204);
 
     assert.equal(
-      await prisma.suggestion.count({ where: { userId: user.userId } }),
+      await prisma.feedbackEmailAttempt.count({ where: { userId: user.userId } }),
       0
     );
     assert.equal(

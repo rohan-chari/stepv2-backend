@@ -3,6 +3,7 @@ const crypto = require("node:crypto");
 const { before, beforeEach, describe, it } = require("node:test");
 const {
   cleanDatabase,
+  createLegacyFeedbackThread,
   createTestUser,
   getSharedServer,
   prisma,
@@ -185,14 +186,9 @@ describe("notification domain isolation", () => {
   it("a support projection failure cannot roll back the committed staff message and later retries", async () => {
     const user = await createTestUser();
     const admin = await createTestUser({ email: ADMIN_EMAIL });
-    const submission = await request(server.baseUrl, "POST", "/feedback/suggestions", {
-      token: user.token,
-      headers: INBOX_HEADERS,
-      body: { text: "Please investigate this notification." },
-    });
-    assert.equal(submission.status, 201);
-    const thread = await prisma.feedbackThread.findFirstOrThrow({
-      where: { userId: user.user.id },
+    const thread = await createLegacyFeedbackThread({
+      userId: user.user.id,
+      text: "Please investigate this notification.",
     });
 
     const reply = await request(

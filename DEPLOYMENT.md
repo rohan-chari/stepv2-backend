@@ -405,9 +405,9 @@ Design tokens for the site AND the server-rendered share-link landing pages
 `src/modules/web/theme.js`. `npm run build` regenerates the site's CSS from it;
 the landing pages `require` it at runtime. Change a colour there and every
 surface moves together — do not hand-edit `web/src/styles/tokens.css`.
-- Email: Cloudflare Email Routing forwards `support@barastep.com` → your inbox
-  (the static pages now use that address). Set this up BEFORE deploying the pages
-  or the mail bounces.
+- Email: `support@barastep.com` is hosted in Google Workspace. The app's
+  feedback relay configuration and retention preflight are documented below;
+  do not leave a conflicting Cloudflare Email Routing rule active.
 
 | Env var | staging | prod | What it controls |
 |---|---|---|---|
@@ -423,6 +423,66 @@ installed binary claims. The build now claims **`barastep.com`** (and keeps
 links fall through to the browser landing page (the `bara://` "Open in app" button
 still works). The deep-link files' *content* is host-agnostic, so the same app
 serves valid `/.well-known/*` on both hosts automatically.
+
+### Google Workspace feedback SMTP relay
+
+Feedback email uses fixed application constants: `smtp-relay.gmail.com:587`,
+STARTTLS required, visible From/To `support@barastep.com`, and envelope sender
+`feedback-bounces@barastep.com`. Each independent submission has a server-built
+subject `USER FEEDBACK • <8 hex characters>` derived from its random Message-ID;
+the unique suffix prevents unrelated submissions from becoming one Gmail
+conversation. There is no Gmail password, app password, OAuth secret, feature
+flag, or SMTP environment variable. Workspace authorizes only the production
+server's explicit static IP; the application still starts when relay delivery
+is unavailable and only feedback submission returns 503.
+
+Release ordering is mandatory:
+
+1. Apply the additive `feedback_email_attempts` migration while the current
+   legacy backend is still running. The existing code does not query the new
+   table, so this schema-only step is backward compatible. Verify the table,
+   enum, indexes, and User cascade before changing either HTTP worker.
+2. Deploy **A0 alone** to both production HTTP workers. A0 places legacy
+   Suggestion quota count/writes under the shared Postgres advisory transaction
+   lock and counts both legacy Suggestions and `RESERVED|ACCEPTED` email
+   attempts. Do not deploy this A0 build before step 1: it intentionally queries
+   the additive table. Verify both PM2 workers run A0 before continuing.
+3. Deploy **A1** backend-first. A1 reserves the same lock and stops writing new
+   feedback content to legacy tables. Keep all legacy thread/read/reply jobs and
+   APIs. During the rolling reload, A0 and A1 workers count the same quota
+   domain, so they cannot jointly admit a sixth submission.
+4. Only after A1 is healthy, release the matching iOS and Android clients.
+
+Before A1 production deployment, complete and record all of these Workspace
+checks (provider/DNS changes require separate, in-the-moment authorization):
+
+- Configure Gmail SMTP relay for the production static IP only, require TLS,
+  and select **Only addresses in my domains** for Allowed senders. Do not select
+  **Only registered Apps users in my domains**: the controlled envelope sender
+  is intentionally unprovisioned.
+- Leave `feedback-bounces@barastep.com` unprovisioned: it is a controlled
+  same-domain SMTP envelope sender only, not a Workspace user, alias, or Group.
+  Delivery-status notices are intentionally discarded. Confirm no domain
+  catch-all or routing rule redirects that address into the support mailbox.
+- No dedicated Workspace retention policy is required. Support and feedback
+  mail follows the mailbox's normal retention and may remain until a support
+  operator deletes it; public copy must not promise automatic deletion after a
+  fixed number of days.
+- Disable vacation/automatic replies on the support mailbox. Confirm no
+  forwarding rule sends support mail back to itself and no catch-all/routing
+  rule redirects the unprovisioned bounce identity into support.
+- Register the Bara sender with Apple's private-email relay before relying on
+  replies to Apple relay addresses.
+- Send preflight messages covering explicit Reply-To, stored-email Reply-To,
+  absent Reply-To, bounce, and forwarding. Inspect delivered headers: Google
+  DKIM must use `d=barastep.com`, DMARC must pass for From
+  `support@barastep.com`, and the actual Return-Path rewrite must remain
+  controlled. A1 is not production-ready without this evidence.
+
+After deploy, monitor aggregate attempt states and error classes only. Never
+log feedback text, category, reply address, display name, or SMTP response
+content. A `RESERVED` attempt after an uncertain timeout consumes quota by
+design; users may create an occasional duplicate by retrying.
 
 ### Before shipping an app version that uses share links — prod must be ready first
 

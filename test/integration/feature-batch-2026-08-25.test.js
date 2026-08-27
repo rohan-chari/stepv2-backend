@@ -15,6 +15,7 @@ const {
   prisma,
   request,
   getSharedServer,
+  createLegacyFeedbackThread,
   createTestUser,
 } = require("./setup");
 
@@ -371,19 +372,9 @@ describe("feature batch 2026-08-25 — backend public contracts", () => {
     });
     await appSettings.setFlag("apiInboxV1Enabled", true);
 
-    const submitted = await request(
-      server.baseUrl,
-      "POST",
-      "/feedback/suggestions",
-      {
-        token: user.token,
-        headers: { "X-Client-Features": "inbox_v1" },
-        body: { text: "Please reply clearly." },
-      },
-    );
-    assert.equal(submitted.status, 201);
-    const thread = await prisma.feedbackThread.findFirstOrThrow({
-      where: { userId: user.user.id },
+    const thread = await createLegacyFeedbackThread({
+      userId: user.user.id,
+      text: "Please reply clearly.",
     });
 
     const replied = await request(

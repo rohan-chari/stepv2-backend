@@ -1,9 +1,9 @@
 const { Router } = require("express");
 const { prisma: defaultPrisma } = require("../../db");
 const { buildRequireAuth } = require("../../middleware/requireAuth");
-const {
-  createSuggestion: defaultCreateSuggestion,
-} = require("./commands/createSuggestion");
+const { buildSendFeedbackEmail } = require("./commands/sendFeedbackEmail");
+const { asyncHandler } = require("../../shared/http/asyncHandler");
+const { AppError } = require("../../shared/errors/AppError");
 const { appSettings } = require("../../shared/config/appSettings");
 const {
   decodeCursor, encodeCursor, parseLimit, beforeCursor, invalidateInboxUnread,
@@ -66,36 +66,35 @@ function createFeedbackRouter(dependencies = {}) {
   const router = Router();
   const prisma = dependencies.prisma || defaultPrisma;
   const requireAuth = dependencies.requireAuth || buildRequireAuth(dependencies);
-  const createSuggestion =
-    dependencies.createSuggestion || defaultCreateSuggestion;
+  const sendFeedbackEmail = dependencies.sendFeedbackEmail ||
+    buildSendFeedbackEmail({ ...dependencies, prisma });
   const settings = dependencies.appSettings || appSettings;
 
   router.use(requireAuth);
 
-  // POST /feedback/suggestions -> 201 { ok: true }
-  // 400 invalid/missing/over-long text, 429 past 5 per user per UTC day.
-  router.post("/suggestions", async (req, res) => {
+  // POST /feedback/suggestions -> 201 { ok: true, delivery: "email" }
+  // Validation/quota/provider failures use the locked coded error envelope.
+  router.post("/suggestions", asyncHandler(async (req, res) => {
+    const body = req.body || {};
     try {
-      const body = req.body || {};
-      const result = await createSuggestion({
+      const result = await sendFeedbackEmail({
         userId: req.user.id,
         text: body.text,
         category: body.category,
-        // Provenance only — read from headers, never required, never a reason
-        // to reject. See sanitizeProvenance.
+        replyToEmail: body.replyToEmail,
+        storedEmail: req.user.email,
+        displayName: req.user.displayName,
+        // Provenance only. Validation/canonicalization belongs to the command;
+        // the route never constructs provider headers.
         appVersion: req.headers["x-app-version"],
         platform: req.headers["x-platform"],
-        prisma,
       });
       return res.status(201).json(result);
     } catch (error) {
-      if (error.statusCode === 400 || error.statusCode === 429) {
-        return res.status(error.statusCode).json({ error: error.message });
-      }
-      console.error("Suggestion submit error:", error);
-      return res.status(500).json({ error: "Internal server error" });
+      if (error instanceof AppError || Number.isInteger(error?.statusCode)) throw error;
+      throw new AppError("Internal server error", "INTERNAL_ERROR", 500);
     }
-  });
+  }));
 
   router.get("/threads", async (req, res) => {
     try {

@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const { afterEach, before, beforeEach, describe, it } = require("node:test");
 const {
   cleanDatabase,
+  createLegacyFeedbackThread,
   createTestUser,
   getSharedServer,
   prisma,
@@ -31,15 +32,9 @@ async function createAlert(userId, overrides = {}) {
 }
 
 async function createSupportThread(user) {
-  const response = await request(server.baseUrl, "POST", "/feedback/suggestions", {
-    token: user.token,
-    headers: INBOX_FEATURES,
-    body: { text: "A read-all support thread." },
-  });
-  assert.equal(response.status, 201);
-  return prisma.feedbackThread.findFirstOrThrow({
-    where: { userId: user.user.id },
-    orderBy: { createdAt: "desc" },
+  return createLegacyFeedbackThread({
+    userId: user.user.id,
+    text: "A read-all support thread.",
   });
 }
 

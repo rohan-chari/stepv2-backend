@@ -24,6 +24,7 @@ const TABLES_IN_ORDER = [
   "inbox_alerts",
   "feedback_messages",
   "feedback_threads",
+  "feedback_email_attempts",
   "race_join_requests",
   "race_share_links",
   "app_review_prompt_attempts",
@@ -204,6 +205,43 @@ async function createTestUser(overrides = {}) {
   return { user, token };
 }
 
+// Stage A keeps pre-cutover support conversations readable/replyable while new
+// submissions go to email. Legacy-thread integration tests seed that retained
+// state explicitly; POST /feedback/suggestions must never recreate it.
+async function createLegacyFeedbackThread({
+  userId,
+  text = "Legacy support message",
+  category = null,
+  createdAt = new Date(),
+  expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+} = {}) {
+  return prisma.$transaction(async (tx) => {
+    const suggestion = await tx.suggestion.create({
+      data: { userId, text, category, createdAt },
+    });
+    const thread = await tx.feedbackThread.create({
+      data: {
+        suggestionId: suggestion.id,
+        userId,
+        lastMessageAt: createdAt,
+        expiresAt,
+        staffReadAt: null,
+        createdAt,
+      },
+    });
+    await tx.feedbackMessage.create({
+      data: {
+        threadId: thread.id,
+        senderKind: "USER",
+        text,
+        idempotencyKey: `initial:${suggestion.id}`,
+        createdAt,
+      },
+    });
+    return thread;
+  });
+}
+
 function request(baseUrl, method, path, { body, token, headers } = {}) {
   return fetch(`${baseUrl}${path}`, {
     method,
@@ -230,6 +268,14 @@ async function getSharedServer() {
         sub: token,
         email: `${token}@example.com`,
       }),
+      // Feedback delivery must never reach the live Workspace relay from the
+      // integration suite. Tests that inspect messages start their own server
+      // with a capturing transport.
+      feedbackTransport: {
+        async send() {
+          return { accepted: ["support@barastep.com"], rejected: [] };
+        },
+      },
     });
 
   }
@@ -246,6 +292,7 @@ module.exports = {
   disconnectDatabase,
   startServer,
   createTestUser,
+  createLegacyFeedbackThread,
   request,
   getBaseUrl,
   getSharedServer,

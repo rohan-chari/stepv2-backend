@@ -33,7 +33,7 @@ const questions = [
   },
   {
     q: "Want your account deleted?",
-    html: 'Email <a href="mailto:support@barastep.com?subject=Delete%20my%20Bara%20account">support@barastep.com</a> and we\'ll remove your account and all of its data within 30 days. See the <a href="/privacy">Privacy Policy</a> for what we store.',
+    html: 'Email <a href="mailto:support@barastep.com?subject=Delete%20my%20Bara%20account">support@barastep.com</a> and we\'ll remove your account data from Bara\'s app servers within 30 days. Support email already sent through Google Workspace cannot be recalled and may remain in the support mailbox until manually deleted. See the <a href="/privacy">Privacy Policy</a> for details.',
   },
 ];
 </script>
@@ -58,6 +58,10 @@ const questions = [
           >support@barastep.com</a
         >
         and we'll get back to you as soon as we can.
+      </p>
+      <p class="-mt-7 mb-12 font-body text-sm leading-relaxed text-[var(--paper-muted)]">
+        App feedback is delivered through Google Workspace and may remain in
+        the support mailbox until it is manually deleted.
       </p>
 
       <div class="prose-bara">

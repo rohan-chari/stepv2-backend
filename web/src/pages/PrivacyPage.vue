@@ -5,7 +5,7 @@ import SiteFooter from "@/components/SiteFooter.vue";
 // Copy is carried over verbatim from the previous public/privacy.html. This is
 // a legal document: the rebuild changes how it reads, never what it says.
 // Effective date must be bumped here (and only here) when the policy changes.
-const EFFECTIVE_DATE = "August 11, 2026";
+const EFFECTIVE_DATE = "August 27, 2026";
 
 const collected = [
   {
@@ -23,6 +23,10 @@ const collected = [
   {
     term: "Email address",
     def: "Received from Sign in with Apple or Google Sign-In if you choose to share it (Apple's “Hide My Email” relay addresses are supported). Used for account support and never shown to other users.",
+  },
+  {
+    term: "Feedback and reply email (optional)",
+    def: "When you send feedback in Bara, your message and any optional reply email are emailed to Bara Support through Google Workspace. A valid account email may be used as the reply address when you do not enter one. Support email may remain in the support mailbox until it is manually deleted.",
   },
   {
     term: "Profile photo (optional)",
@@ -146,8 +150,9 @@ const collected = [
           you're in a head-to-head challenge, your opponent can see your step
           progress for that week. We do not sell or rent your personal data, and
           outside of the advertising partner described in the "Advertising"
-          section below, we do not share your personal data with any third
-          parties for their own use. We do not use third-party analytics SDKs.
+          section below and Google Workspace processing feedback email for Bara
+          Support, we do not share your personal data with any third parties for
+          their own use. We do not use third-party analytics SDKs.
         </p>
 
         <h2>Advertising</h2>
@@ -182,16 +187,25 @@ const collected = [
           your display name and step goal using the device's local storage (iOS
           and Android).
         </p>
+        <p>
+          Feedback submitted in the app is transferred to Google Workspace for
+          delivery to Bara Support. Feedback, replies, general support messages,
+          and account-deletion requests may remain in the support mailbox until
+          a support operator manually deletes them. Access is limited to support
+          operators.
+        </p>
 
         <h2>Data Deletion</h2>
         <p>
           You can sign out at any time from the Settings tab, which clears your
           local session data and unregisters your device from push
-          notifications. To request complete deletion of your account and all
-          data from our servers, including your discoverable-name fields and
-          their private normalized search value, email
+          notifications. To request deletion of your account and its data from
+          our app servers, including your discoverable-name fields and their
+          private normalized search value, email
           <a href="mailto:support@barastep.com">support@barastep.com</a>. We
-          will process deletion requests within 30 days.
+          will process deletion requests within 30 days. Account deletion cannot
+          recall support email already sent to Google Workspace; those copies
+          may remain in the support mailbox until manually deleted.
         </p>
 
         <h2>Children's Privacy</h2>

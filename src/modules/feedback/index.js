@@ -18,6 +18,22 @@ const {
   buildSendStaffReply,
   StaffReplyError,
 } = require("./commands/sendStaffReply");
+const {
+  buildSendFeedbackEmail,
+  sendFeedbackEmail,
+} = require("./commands/sendFeedbackEmail");
+const {
+  FeedbackEmailAttempt,
+  buildFeedbackEmailAttemptModel,
+} = require("./models/feedbackEmailAttempt");
+const {
+  buildGoogleWorkspaceFeedbackTransport,
+  googleWorkspaceFeedbackTransport,
+} = require("./services/googleWorkspaceFeedbackTransport");
+const {
+  buildFeedbackEmailAttemptExpiry,
+  scheduleFeedbackEmailAttemptExpiry,
+} = require("./jobs/feedbackEmailAttemptExpiry");
 
 module.exports = {
   createFeedbackRouter,
@@ -30,4 +46,12 @@ module.exports = {
   DAILY_SUBMISSION_LIMIT,
   buildSendStaffReply,
   StaffReplyError,
+  buildSendFeedbackEmail,
+  sendFeedbackEmail,
+  FeedbackEmailAttempt,
+  buildFeedbackEmailAttemptModel,
+  buildGoogleWorkspaceFeedbackTransport,
+  googleWorkspaceFeedbackTransport,
+  buildFeedbackEmailAttemptExpiry,
+  scheduleFeedbackEmailAttemptExpiry,
 };
