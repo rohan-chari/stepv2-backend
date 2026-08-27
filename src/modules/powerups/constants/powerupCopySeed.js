@@ -242,7 +242,7 @@ const POWERUP_COPY_SEED = [
   },
   {
     powerupType: "SNEAKY_SWAP",
-    name: "Sneaky Swap",
+    name: "Pickpocket",
     description: "Steal a random powerup from a rival",
     shortDescription: null,
     upgradeTierLabels: [],

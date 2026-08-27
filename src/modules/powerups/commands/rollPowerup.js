@@ -36,7 +36,8 @@ const POWERUP_NAMES = {
   POCKET_WATCH: "Pocket Watch",
   TRAIL_MINE: "Trail Mine",
   PINECONE_TOSS: "Pinecone Toss",
-  SNEAKY_SWAP: "Sneaky Swap",
+  // Frozen database/API identifier; Pickpocket is the current display name.
+  SNEAKY_SWAP: "Pickpocket",
   MIRROR: "Mirror",
   CLEANSE: "Cleanse",
   // IMPOSTER is purchase-only (coin store), never rolled from a mystery box, so

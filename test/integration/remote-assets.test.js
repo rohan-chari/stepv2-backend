@@ -28,6 +28,7 @@ const ASSET_BASE = process.env.ASSET_BASE_URL || "https://steptracker-api.org";
 const HAT_VERSION = "4ff6ab670a58";
 const PANDA_VERSION = "619b0e8b0c87";
 const BOOST_VERSION = "6a34118ba2e0";
+const PICKPOCKET_VERSION = "541847d09c24";
 
 async function invalidateRemoteAssetReadCaches() {
   await Promise.all([
@@ -85,6 +86,7 @@ describe("GET /assets/* (static, immutable)", () => {
     for (const p of [
       `/assets/characters/fixture_panda@${PANDA_VERSION}.png`,
       `/assets/powerups/fixture_boost@${BOOST_VERSION}.png`,
+      `/assets/powerups/sneaky_swap@${PICKPOCKET_VERSION}.png`,
     ]) {
       const res = await get(p);
       assert.equal(res.status, 200, p);
@@ -212,6 +214,17 @@ describe("GET /assets/manifest", () => {
           testOnly: false,
           sortOrder: 2,
         },
+        {
+          sku: "POWERUP_SNEAKY_SWAP",
+          name: "Pickpocket",
+          description: "Steal a random powerup from a rival",
+          priceCoins: 195,
+          powerupType: "SNEAKY_SWAP",
+          assetVersion: PICKPOCKET_VERSION,
+          active: true,
+          testOnly: false,
+          sortOrder: 3,
+        },
         // Inactive (drop-pool only) rows must STILL appear in the manifest —
         // that's the whole reason the manifest exists beside the catalogs.
         {
@@ -271,6 +284,10 @@ describe("GET /assets/manifest", () => {
     assert.equal(
       body.powerups.SHORTCUT.url,
       `${ASSET_BASE}/assets/powerups/shortcut@${BOOST_VERSION}.png`
+    );
+    assert.equal(
+      body.powerups.SNEAKY_SWAP.url,
+      `${ASSET_BASE}/assets/powerups/sneaky_swap@${PICKPOCKET_VERSION}.png`
     );
     // Drop-pool-only (active:false) powerup art is still registered.
     assert.ok(body.powerups.RALLY_FLAG);

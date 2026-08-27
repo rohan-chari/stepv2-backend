@@ -126,7 +126,7 @@ const RacePowerup = {
     return results.map((r) => r.type);
   },
 
-  // Sneaky Swap steal: move ONE random stealable HELD powerup from
+  // Pickpocket steal: move ONE random stealable HELD powerup from
   // `fromParticipantId` to `toParticipantId`/`toUserId`. Returns the updated
   // row, or null when the victim holds nothing stealable (validated by the
   // caller, but re-checked here — the shelf can change between the read and

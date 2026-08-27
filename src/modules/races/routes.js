@@ -215,7 +215,7 @@ const {
   canonicalRaceListVariant,
 } = require("./services/raceListCache");
 
-// A powerup is STEALABLE via Sneaky Swap only if it is currently HELD and its
+// A powerup is STEALABLE via Pickpocket only if it is currently HELD and its
 // type is neither SNEAKY_SWAP (not stealable in either direction) nor
 // MYSTERY_BOX (an unopened box isn't stealable). Callers that pass already-held
 // rows can rely on type alone; we still guard on status defensively.
@@ -2366,26 +2366,26 @@ function createRacesRouter(dependencies = {}) {
       ]);
       const sneakySwap = ownPowerups.find((p) => p.type === "SNEAKY_SWAP");
       if (!sneakySwap) {
-        return res.status(400).json({ error: "Sneaky Swap is required" });
+        return res.status(400).json({ error: "Pickpocket is required" });
       }
 
       res.json({
         ownPowerups: ownPowerups.filter((p) => p.type !== "SNEAKY_SWAP"),
         // A held powerup is only stealable if it is NOT a SNEAKY_SWAP and NOT a
         // MYSTERY_BOX (an unopened box isn't stealable). Filtering here keeps the
-        // second stage from ever offering a sneaky swap to steal. Existing
+        // second stage from ever offering a Pickpocket to steal. Existing
         // 400/validation behavior and overall response shape are unchanged.
         targetPowerups: targetPowerups.filter((p) => isStealable(p)),
       });
     } catch (error) {
-      console.error("Sneaky swap options error:", error);
+      console.error("Pickpocket options error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
   });
 
   // GET /races/:raceId/powerups/sneaky-swap-targets
   // Additive endpoint (new app only): returns the participants the requesting
-  // user could sneaky-swap with right now — i.e. participants who are NOT the
+  // user could Pickpocket right now — i.e. participants who are NOT the
   // requester, NOT stealthed, NOT finished, and who hold >=1 STEALABLE powerup
   // (HELD, type not SNEAKY_SWAP and not MYSTERY_BOX). Old apps never call this
   // and keep using the per-target options endpoint.

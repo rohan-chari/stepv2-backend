@@ -215,6 +215,35 @@ describe("feature batch 2026-08-09 (backend)", () => {
       assert.equal(after.coins, before.coins, "a retired upgrade must cost nothing");
     });
 
+    it("GET /powerups/catalog presents the one-way steal as Pickpocket", async () => {
+      const {
+        POWERUP_COPY_SEED,
+      } = require("../../src/modules/powerups/constants/powerupCopySeed");
+      const row = POWERUP_COPY_SEED.find(
+        (entry) => entry.powerupType === "SNEAKY_SWAP"
+      );
+      assert.ok(row, "SNEAKY_SWAP remains the frozen wire identifier");
+      await prisma.powerupCopy.upsert({
+        where: { powerupType: row.powerupType },
+        update: {
+          name: row.name,
+          description: row.description,
+          shortDescription: row.shortDescription,
+          upgradeTierLabels: row.upgradeTierLabels,
+        },
+        create: row,
+      });
+
+      const res = await request(server.baseUrl, "GET", "/powerups/catalog");
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      const pickpocket = body.powerups.find(
+        (powerup) => powerup.type === "SNEAKY_SWAP"
+      );
+      assert.equal(pickpocket.name, "Pickpocket");
+      assert.match(pickpocket.description, /steal/i);
+    });
+
     // THE contract the new frontend build hides its upgrade UI on. The served
     // catalog snapshot WINS over the client's bundled fallback, so if this ships
     // four tier labels a new build renders a free, inert upgrade UI for a ladder

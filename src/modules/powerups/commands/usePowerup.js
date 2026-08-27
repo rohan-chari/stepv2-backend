@@ -173,7 +173,7 @@ const POWERUPS5_TYPES = [
   "UPRISING", "GHOST_PEPPER", "COIN_FLIP", "MYSTERY_POTION", "DECOY",
   "POWER_OUTAGE", "UMBRELLA", "RALLY_FLAG", "DRILL_SERGEANT", "PIGGY_BANK", "BOUNTY",
 ];
-// Types Sneaky Swap can never steal: another Sneaky Swap (no steal chains),
+// Types Pickpocket can never steal: another Pickpocket (no steal chains),
 // unopened Mystery Boxes, and every wave-5 store purchase (owner decision D6 —
 // expensive buys can't be sniped). Mirrors the isStealable helper in routes/races.js.
 const UNSTEALABLE_TYPES = ["SNEAKY_SWAP", "MYSTERY_BOX", ...POWERUPS5_TYPES];
@@ -980,7 +980,7 @@ async function refundRedeemedOnRejection({
   await db.$transaction(async (tx) => {
     // Only the caller that flips HELD -> DISCARDED performs the hand-back.
     const discarded = await tx.racePowerup.updateMany({
-      // Revalidate the full pre-read tuple atomically. Sneaky Swap can transfer
+      // Revalidate the full pre-read tuple atomically. Pickpocket can transfer
       // a HELD redeemed row between the read above and this claim; matching only
       // id/status would discard the thief's item and credit the stale owner.
       where: {
@@ -4078,7 +4078,7 @@ function buildUsePowerup(dependencies = {}) {
         // set is re-read (and the row conditionally claimed) inside the
         // model's transaction, so concurrent steals can't double-take a row.
         // A reflected steal can come up empty (the original attacker may hold
-        // nothing stealable) — the sneaky swap is still consumed.
+        // nothing stealable) — the Pickpocket is still consumed.
         const stolen = await powerupModel.stealRandomHeldPowerup({
           fromParticipantId: targetParticipant.id,
           toParticipantId: myParticipant.id,
@@ -4098,8 +4098,8 @@ function buildUsePowerup(dependencies = {}) {
           powerupType: type,
           targetUserId: resolvedTargetUserId,
           description: stolen
-            ? `${myDisplayName} used Sneaky Swap on ${targetDisplayName} and stole a ${POWERUP_NAMES[stolen.type] || stolen.type}!`
-            : `${myDisplayName} used Sneaky Swap on ${targetDisplayName}, but found nothing to steal!`,
+            ? `${myDisplayName} used Pickpocket on ${targetDisplayName} and stole a ${POWERUP_NAMES[stolen.type] || stolen.type}!`
+            : `${myDisplayName} used Pickpocket on ${targetDisplayName}, but found nothing to steal!`,
           metadata: stolen
             ? { stolenPowerupId: stolen.id, stolenType: stolen.type }
             : {},

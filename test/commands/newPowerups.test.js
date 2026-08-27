@@ -5,6 +5,7 @@ const { buildOpenMysteryBox } = require("../../src/modules/powerups/commands/ope
 const { buildUsePowerup, PowerupUseError } = require("../../src/modules/powerups/commands/usePowerup");
 const { buildResolveRaceState } = require("../../src/modules/races/services/raceStateResolution");
 const { RARITY_TIERS } = require("../../src/modules/powerups/powerupOdds");
+const { POWERUP_NAMES } = require("../../src/modules/powerups/commands/rollPowerup");
 const {
   isUpgradeable,
   upgradeCost,
@@ -532,6 +533,9 @@ test("Sneaky Swap steals one random powerup from the target without giving one u
 
   // Feed event names the theft.
   const feed = ctx.feedEvents.find((e) => e.powerupType === "SNEAKY_SWAP");
+  assert.equal(POWERUP_NAMES.SNEAKY_SWAP, "Pickpocket");
+  assert.match(feed.description, /Pickpocket/);
+  assert.doesNotMatch(feed.description, /Sneaky Swap/);
   assert.ok(feed.description.includes("stole"));
 });
 
