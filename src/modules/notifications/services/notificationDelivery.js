@@ -18,6 +18,7 @@ const SCHEDULE_CANCELED = "CANCELLED";
 const GLOBAL_EVENT_ELIGIBLE = "ELIGIBLE";
 const GLOBAL_EVENT_PENDING_ACTIVATION = "PENDING_ACTIVATION";
 const GLOBAL_EVENT_INELIGIBLE_TERMINAL = "INELIGIBLE_TERMINAL";
+const GLOBAL_EVENT_NO_ACTIVE_RACES = "NO_ACTIVE_RACES";
 
 function asDate(value, field, { optional = false } = {}) {
   if (value == null && optional) return null;
@@ -53,6 +54,9 @@ function normalizeNotificationIntent(input = {}) {
     availableAt,
     expiresAt,
     sourceRef: typeof input.sourceRef === "string" ? input.sourceRef : null,
+    sourceRevision: Number.isInteger(input.sourceRevision) && input.sourceRevision >= 0
+      ? input.sourceRevision
+      : 0,
   };
 }
 
@@ -110,7 +114,9 @@ async function globalEventStillEligible(tx, row, current) {
     return GLOBAL_EVENT_PENDING_ACTIVATION;
   }
   if (["NO_ACTIVE_RACES", "SKIPPED_STALE"].includes(entitlement.startOutcome)) {
-    return GLOBAL_EVENT_INELIGIBLE_TERMINAL;
+    return entitlement.startOutcome === "NO_ACTIVE_RACES"
+      ? GLOBAL_EVENT_NO_ACTIVE_RACES
+      : GLOBAL_EVENT_INELIGIBLE_TERMINAL;
   }
   const impacts = tx.globalEventRaceImpact
     ? await tx.globalEventRaceImpact.count({
@@ -194,7 +200,9 @@ function buildNotificationIntentService(dependencies = {}) {
   const scheduleModel = dependencies.notificationSchedule || prisma.notificationSchedule;
 
   async function writeIntent(intent, tx, current) {
-    if (intent.availableAt <= current) {
+    // Source-backed global-event intents must always cross the boundary
+    // eligibility gate, including when projection itself is late.
+    if (intent.availableAt <= current && !intent.sourceRef) {
       const alert = await createInboxAlert({
         userId: intent.recipientUserId,
         type: intent.type,
@@ -205,20 +213,59 @@ function buildNotificationIntentService(dependencies = {}) {
         payload: intent.payload,
         now: current,
         tx,
+        ...(intent.expiresAt ? { expiresAt: intent.expiresAt } : {}),
       });
       return { kind: "IMMEDIATE", alertId: alert?.id || null };
     }
 
     const scheduleStore = tx.notificationSchedule || scheduleModel;
     if (!scheduleStore?.upsert) throw new Error("notification schedule store is unavailable");
-    const schedule = await scheduleStore.upsert({
+    let schedule;
+    if (typeof tx.$queryRawUnsafe === "function") {
+      const rows = await tx.$queryRawUnsafe(
+        `INSERT INTO notification_schedules
+          (id, recipient_user_id, type, title, body, payload, delivery_key,
+           available_at, expires_at, status, source_ref, source_revision,
+           created_at, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,'PENDING',$10,$11,$12,$12)
+         ON CONFLICT (recipient_user_id, delivery_key) DO UPDATE
+           SET available_at=EXCLUDED.available_at,
+               expires_at=EXCLUDED.expires_at,
+               payload=EXCLUDED.payload,
+               title=EXCLUDED.title,
+               body=EXCLUDED.body,
+               type=EXCLUDED.type,
+               source_ref=EXCLUDED.source_ref,
+               source_revision=EXCLUDED.source_revision,
+               updated_at=EXCLUDED.updated_at
+         WHERE notification_schedules.status='PENDING'
+           AND notification_schedules.source_revision < EXCLUDED.source_revision
+         RETURNING id`,
+        crypto.randomUUID(), intent.recipientUserId, intent.type, intent.title,
+        intent.body, JSON.stringify(intent.payload), intent.deliveryKey,
+        intent.availableAt, intent.expiresAt, intent.sourceRef,
+        intent.sourceRevision, current,
+      );
+      schedule = rows[0] || await scheduleStore.findUnique({
+        where: { recipientUserId_deliveryKey: {
+          recipientUserId: intent.recipientUserId,
+          deliveryKey: intent.deliveryKey,
+        } },
+      });
+    } else schedule = await scheduleStore.upsert({
       where: {
         recipientUserId_deliveryKey: {
           recipientUserId: intent.recipientUserId,
           deliveryKey: intent.deliveryKey,
         },
       },
-      update: {},
+      update: intent.sourceRevision > 0 ? {
+        availableAt: intent.availableAt,
+        expiresAt: intent.expiresAt,
+        payload: intent.payload,
+        sourceRef: intent.sourceRef,
+        sourceRevision: intent.sourceRevision,
+      } : {},
       create: {
         recipientUserId: intent.recipientUserId,
         type: intent.type,
@@ -229,6 +276,7 @@ function buildNotificationIntentService(dependencies = {}) {
         availableAt: intent.availableAt,
         expiresAt: intent.expiresAt,
         sourceRef: intent.sourceRef,
+        sourceRevision: intent.sourceRevision,
       },
     });
     return { kind: "SCHEDULED", scheduleId: schedule?.id || null };
@@ -264,7 +312,7 @@ function buildNotificationIntentService(dependencies = {}) {
 
   async function releaseDue({ now: suppliedNow = null, batchSize = 100, eligibility = null } = {}) {
     const current = suppliedNow ? asDate(suppliedNow, "now") : asDate(now(), "now");
-    const limit = Math.min(100, Math.max(1, Number(batchSize) || 100));
+    const limit = Math.min(500, Math.max(1, Number(batchSize) || 100));
     const recipients = new Set();
     const result = await runTransaction(async (tx) => {
       const rows = typeof tx.$queryRawUnsafe === "function"
@@ -284,73 +332,174 @@ function buildNotificationIntentService(dependencies = {}) {
           orderBy: [{ availableAt: "asc" }, { id: "asc" }],
           take: limit,
         });
-      let released = 0;
-      let expired = 0;
-      let canceled = 0;
+      const globalRows = rows.filter((row) => row.type === "GLOBAL_EVENT_STARTED" && row.sourceRef);
+      const sourceRefs = [...new Set(globalRows.map((row) => row.sourceRef))];
+      const entitlements = sourceRefs.length ? await tx.globalStepEventEntitlement.findMany({
+        where: { id: { in: sourceRefs } },
+        select: {
+          id: true, userId: true, eventId: true, startsAt: true, endsAt: true,
+          startOutcome: true, startProcessedAt: true,
+        },
+      }) : [];
+      const entitlementById = new Map(entitlements.map((row) => [row.id, row]));
+      const legacyRefs = sourceRefs.filter((id) => !entitlementById.has(id));
+      const legacyEvents = legacyRefs.length ? await tx.globalStepEvent.findMany({
+        where: { id: { in: legacyRefs } },
+        select: { id: true, startsAt: true, endsAt: true },
+      }) : [];
+      const legacyById = new Map(legacyEvents.map((row) => [row.id, row]));
+      const eventIds = [...new Set([
+        ...entitlements.map((row) => row.eventId),
+        ...legacyEvents.map((row) => row.id),
+      ])];
+      const recipientIds = [...new Set(globalRows.map((row) => row.recipientUserId))];
+      const impactRows = eventIds.length && recipientIds.length
+        ? await tx.globalEventRaceImpact.findMany({
+            where: { eventId: { in: eventIds }, userId: { in: recipientIds } },
+            select: { eventId: true, userId: true },
+          })
+        : [];
+      const impactKeys = new Set(impactRows.map((row) => `${row.eventId}\u0000${row.userId}`));
+      const categories = {
+        expired: [], pending: [], dormant: [], canceled: [], eligible: [],
+      };
       for (const row of rows) {
         const expiresAt = row.expiresAt ? new Date(row.expiresAt) : null;
         if (expiresAt && expiresAt <= current) {
-          await tx.notificationSchedule.updateMany({
-            where: { id: row.id, status: SCHEDULE_PENDING },
-            data: { status: SCHEDULE_EXPIRED, claimedAt: current, canceledAt: current, cancellationReason: "EXPIRED" },
-          });
-          expired += 1;
+          categories.expired.push(row);
           continue;
         }
-        const boundaryEligibility = await globalEventStillEligible(tx, row, current);
-        if (boundaryEligibility === GLOBAL_EVENT_PENDING_ACTIVATION) {
-          // The gameplay boundary may be committing concurrently. Keep this
-          // legacy schedule pending and move its next scan a bounded distance;
-          // notification reconciliation never decides gameplay eligibility.
-          await tx.notificationSchedule.updateMany({
-            where: { id: row.id, status: SCHEDULE_PENDING },
-            data: { availableAt: new Date(current.getTime() + 5_000) },
-          });
-          continue;
+        let boundaryEligibility = GLOBAL_EVENT_ELIGIBLE;
+        if (row.type === "GLOBAL_EVENT_STARTED" && row.sourceRef) {
+          const entitlement = entitlementById.get(row.sourceRef);
+          if (entitlement) {
+            if (new Date(entitlement.endsAt) <= current) {
+              boundaryEligibility = GLOBAL_EVENT_INELIGIBLE_TERMINAL;
+            } else if (new Date(entitlement.startsAt) > current ||
+                (!entitlement.startProcessedAt && entitlement.startOutcome === "PENDING")) {
+              boundaryEligibility = GLOBAL_EVENT_PENDING_ACTIVATION;
+            } else if (entitlement.startOutcome === "NO_ACTIVE_RACES") {
+              boundaryEligibility = GLOBAL_EVENT_NO_ACTIVE_RACES;
+            } else if (entitlement.startOutcome === "SKIPPED_STALE") {
+              boundaryEligibility = GLOBAL_EVENT_INELIGIBLE_TERMINAL;
+            } else {
+              boundaryEligibility = impactKeys.has(`${entitlement.eventId}\u0000${entitlement.userId}`)
+                ? GLOBAL_EVENT_ELIGIBLE
+                : GLOBAL_EVENT_INELIGIBLE_TERMINAL;
+            }
+          } else {
+            const event = legacyById.get(row.sourceRef);
+            if (!event || new Date(event.endsAt) <= current) {
+              boundaryEligibility = GLOBAL_EVENT_INELIGIBLE_TERMINAL;
+            } else if (new Date(event.startsAt) > current) {
+              boundaryEligibility = GLOBAL_EVENT_PENDING_ACTIVATION;
+            } else {
+              boundaryEligibility = impactKeys.has(`${event.id}\u0000${row.recipientUserId}`)
+                ? GLOBAL_EVENT_ELIGIBLE
+                : GLOBAL_EVENT_PENDING_ACTIVATION;
+            }
+          }
         }
-        if (boundaryEligibility === GLOBAL_EVENT_INELIGIBLE_TERMINAL ||
+        if (boundaryEligibility === GLOBAL_EVENT_PENDING_ACTIVATION) categories.pending.push(row);
+        else if (boundaryEligibility === GLOBAL_EVENT_NO_ACTIVE_RACES) categories.dormant.push(row);
+        else if (boundaryEligibility === GLOBAL_EVENT_INELIGIBLE_TERMINAL ||
             (typeof eligibility === "function" && !(await eligibility(row, tx, current)))) {
-          await tx.notificationSchedule.updateMany({
-            where: { id: row.id, status: SCHEDULE_PENDING },
-            data: { status: SCHEDULE_CANCELED, claimedAt: current, canceledAt: current, cancellationReason: "INELIGIBLE_AT_BOUNDARY" },
-          });
-          canceled += 1;
-          continue;
-        }
-        const claimed = await tx.notificationSchedule.updateMany({
-          where: { id: row.id, status: SCHEDULE_PENDING },
-          data: { status: SCHEDULE_CLAIMED, claimedAt: current },
-        });
-        if (claimed.count !== 1) continue;
-        const alert = await createInboxAlert({
-          userId: row.recipientUserId,
-          type: row.type,
-          title: row.title,
-          body: row.body,
-          destination: destinationForPayload(row.payload),
-          sourceKey: row.deliveryKey,
-          payload: row.payload,
-          now: current,
-          tx,
-        });
-        const materialized = await tx.notificationSchedule.updateMany({
-          where: { id: row.id, status: SCHEDULE_CLAIMED },
-          data: { status: SCHEDULE_MATERIALIZED, releasedAt: current },
-        });
-        if (materialized.count === 1) {
-          recipients.add(row.recipientUserId);
-          released += 1;
-        } else if (alert?.id) {
-          // A row locked in this transaction should always update successfully.
-          // If a narrow test double violates that invariant, surface it rather
-          // than leaving a visible alert without a terminal schedule state.
-          throw new Error(`notification schedule claim lost for ${row.id}`);
-        }
+          categories.canceled.push(row);
+        } else categories.eligible.push(row);
       }
-      return { released, expired, canceled };
+      const ids = (name) => categories[name].map((row) => row.id);
+      if (categories.expired.length) await tx.notificationSchedule.updateMany({
+        where: { id: { in: ids("expired") }, status: SCHEDULE_PENDING },
+        data: { status: SCHEDULE_EXPIRED, claimedAt: current, canceledAt: current, cancellationReason: "EXPIRED" },
+      });
+      if (categories.pending.length) await tx.notificationSchedule.updateMany({
+        where: { id: { in: ids("pending") }, status: SCHEDULE_PENDING },
+        data: { availableAt: new Date(current.getTime() + 250) },
+      });
+      if (categories.dormant.length) await tx.notificationSchedule.updateMany({
+        where: { id: { in: ids("dormant") }, status: SCHEDULE_PENDING },
+        data: { status: "CANCELLED_NO_ACTIVE_RACE", claimedAt: current, canceledAt: current, cancellationReason: "NO_ACTIVE_RACES" },
+      });
+      if (categories.canceled.length) await tx.notificationSchedule.updateMany({
+        where: { id: { in: ids("canceled") }, status: SCHEDULE_PENDING },
+        data: { status: SCHEDULE_CANCELED, claimedAt: current, canceledAt: current, cancellationReason: "INELIGIBLE_AT_BOUNDARY" },
+      });
+      if (categories.eligible.length) {
+        const inboxExpiry = new Date(current.getTime() + 30 * 24 * 60 * 60_000);
+        const materialization = categories.eligible.map((row) => {
+          const destination = destinationForPayload(row.payload);
+          return {
+            id: row.id,
+            recipientUserId: row.recipientUserId,
+            type: row.type,
+            title: row.title,
+            body: row.body,
+            destination,
+            deliveryKey: row.deliveryKey,
+            outboxPayload: {
+              title: row.title,
+              body: row.body,
+              destination,
+              payload: row.payload,
+            },
+            expiresAt: row.expiresAt ? new Date(row.expiresAt).toISOString() : null,
+          };
+        });
+        await tx.$executeRawUnsafe(
+          `WITH input AS (
+             SELECT * FROM jsonb_to_recordset($1::jsonb) AS value(
+               id text,"recipientUserId" text,type text,title text,body text,
+               destination jsonb,"deliveryKey" text,"outboxPayload" jsonb,"expiresAt" timestamp
+             )
+           ), inserted_alerts AS (
+             INSERT INTO inbox_alerts (
+               id,user_id,type,destination,title,body,source_key,created_at,expires_at
+             )
+             SELECT gen_random_uuid(),input."recipientUserId",input.type,input.destination,
+                    input.title,input.body,input."deliveryKey",$2,$3
+               FROM input ON CONFLICT (user_id,source_key) DO NOTHING
+             RETURNING id,user_id,source_key
+           ), all_alerts AS (
+             SELECT id,user_id,source_key FROM inserted_alerts
+             UNION ALL
+             SELECT alert.id,alert.user_id,alert.source_key
+               FROM inbox_alerts alert JOIN input
+                 ON alert.user_id=input."recipientUserId"
+                AND alert.source_key=input."deliveryKey"
+              WHERE NOT EXISTS (
+                SELECT 1 FROM inserted_alerts inserted WHERE inserted.id=alert.id
+              )
+           ), inserted_outbox AS (
+             INSERT INTO inbox_delivery_outbox (
+               id,alert_id,kind,payload,status,attempt_count,available_at,
+               accepted_tokens,created_at,updated_at,expires_at
+             )
+             SELECT gen_random_uuid(),alert.id,'PUSH',input."outboxPayload",'PENDING',0,$2,
+                    '[]'::jsonb,$2,$2,input."expiresAt"
+               FROM all_alerts alert JOIN input
+                 ON alert.user_id=input."recipientUserId"
+                AND alert.source_key=input."deliveryKey"
+             ON CONFLICT (alert_id,kind) DO UPDATE
+               SET expires_at=COALESCE(inbox_delivery_outbox.expires_at,EXCLUDED.expires_at)
+           )
+           UPDATE notification_schedules schedule
+              SET status='MATERIALIZED',claimed_at=COALESCE(schedule.claimed_at,$2),
+                  released_at=$2,updated_at=$2
+             FROM input WHERE schedule.id=input.id AND schedule.status='PENDING'`,
+          JSON.stringify(materialization), current, inboxExpiry,
+        );
+        for (const row of categories.eligible) recipients.add(row.recipientUserId);
+      }
+      return {
+        released: categories.eligible.length,
+        expired: categories.expired.length,
+        canceled: categories.dormant.length + categories.canceled.length,
+        examined: rows.length,
+      };
     });
     for (const recipientUserId of recipients) {
       await safeWake(publishWakeup, { recipientUserId }, logger);
+      await invalidateInboxUnread(recipientUserId).catch(() => {});
     }
     return result;
   }
@@ -409,6 +558,7 @@ function buildNotificationIntentService(dependencies = {}) {
       payload: row.payload,
       now: current,
       tx,
+      expiresAt: row.expiresAt,
     });
     const materialized = await store.updateMany({
       where: { id: row.id, status: SCHEDULE_CLAIMED },
@@ -457,6 +607,7 @@ module.exports = {
   GLOBAL_EVENT_ELIGIBLE,
   GLOBAL_EVENT_PENDING_ACTIVATION,
   GLOBAL_EVENT_INELIGIBLE_TERMINAL,
+  GLOBAL_EVENT_NO_ACTIVE_RACES,
   globalEventStillEligible,
   normalizeNotificationIntent,
   destinationForPayload,

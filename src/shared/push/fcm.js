@@ -13,6 +13,7 @@ function buildFcmService(config = {}) {
   let messaging = config.messaging || null;
   let initialized = Boolean(config.messaging);
   let initError = null;
+  const now = config.now || (() => new Date());
 
   // firebase-admin v14 is modular-only: the legacy `require("firebase-admin")`
   // namespace (admin.credential / admin.messaging()) no longer exists. Pull the
@@ -80,21 +81,39 @@ function buildFcmService(config = {}) {
     const unregistered =
       code === "messaging/registration-token-not-registered" ||
       code === "messaging/invalid-registration-token";
+    const throttled = code === "messaging/quota-exceeded" ||
+      code === "messaging/device-message-rate-exceeded" ||
+      code === "messaging/topics-message-rate-exceeded";
+    const transient = throttled || code === "messaging/server-unavailable" ||
+      code === "messaging/internal-error" || code === "messaging/unknown-error";
+    const permanentApplicationError = [
+      "messaging/mismatched-credential",
+      "messaging/invalid-package-name",
+      "messaging/authentication-error",
+    ].includes(code);
+    const retryAfterMs = Number(error?.retryAfterMs);
     return {
       success: false,
       unregistered,
+      invalidToken: unregistered,
+      permanent: unregistered || permanentApplicationError,
+      statusCode: throttled ? 429 : transient ? 503 : null,
       reason: code || (error && error.message) || "Unknown",
+      ...(Number.isFinite(retryAfterMs) && retryAfterMs >= 0 ? { retryAfterMs } : {}),
+      environment: null,
     };
   }
 
-  async function send(message) {
+  async function send(message, { captureMetadata = false } = {}) {
     const m = getMessaging();
     if (!m) {
       return { success: false, reason: initError || "FCM not configured" };
     }
     try {
-      await m.send(message);
-      return { success: true };
+      const providerMessageId = await m.send(message);
+      return captureMetadata
+        ? { success: true, providerMessageId, environment: null }
+        : { success: true };
     } catch (error) {
       return mapError(error);
     }
@@ -107,7 +126,12 @@ function buildFcmService(config = {}) {
     body,
     payload = {},
     collapseId,
+    expiresAt,
   } = {}) {
+    const ttl = expiresAt == null
+      ? null
+      : Math.max(0, Math.min(28 * 24 * 60 * 60_000,
+          new Date(expiresAt).getTime() - now().getTime()));
     return send({
       token: deviceToken,
       notification: { title, body },
@@ -115,11 +139,12 @@ function buildFcmService(config = {}) {
       android: {
         priority: "high",
         ...(collapseId ? { collapseKey: collapseId } : {}),
+        ...(ttl != null ? { ttl } : {}),
         // Match the channel the Android client creates so backgrounded tray
         // notifications land on the right (high-importance) channel.
         notification: { channelId: "bara_default" },
       },
-    });
+    }, { captureMetadata: expiresAt != null });
   }
 
   // Data-only message: no system tray notification; the Android background

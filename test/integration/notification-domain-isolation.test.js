@@ -624,6 +624,94 @@ describe("notification domain isolation", () => {
     assert.ok(stretchSecond.every((row) => row.lastErrorCode === "TEAM_FINAL_STRETCH_COOLDOWN"));
   });
 
+  it("completes a no-device placement backlog in bounded set-based pages", async () => {
+    const recipient = await createTestUser({ displayName: "No Device Placement" });
+    const now = new Date();
+    const events = Array.from({ length: 120 }, (_, index) => ({
+      id: crypto.randomUUID(),
+      eventKey: `PLACEMENT_CHANGED_V1:no-device:${index}`,
+      eventType: "PLACEMENT_CHANGED_V1",
+      schemaVersion: 1,
+      aggregateType: "RACE",
+      aggregateId: "no-device-race",
+      payload: { raceId: "no-device-race", placement: 2 },
+      occurredAt: now,
+      availableAt: now,
+      status: "PROJECTING",
+      expansionCompletedAt: now,
+    }));
+    await prisma.$transaction(async (tx) => {
+      await tx.domainEventOutbox.createMany({ data: events });
+      await tx.domainEventAudience.createMany({ data: events.map((event) => ({
+        domainEventId: event.id,
+        recipientId: recipient.user.id,
+        ordinal: 0,
+        facts: {},
+      })) });
+      await tx.domainEventNotificationProjection.createMany({ data: events.map((event) => ({
+        domainEventId: event.id,
+        recipientUserId: recipient.user.id,
+        deliveryKey: `silent:no-device:${event.id}`,
+        projectionKind: "SILENT_REFRESH",
+        availableAt: now,
+      })) });
+    });
+
+    const result = await buildNotificationProjector({ logger: quietLogger }).run();
+    assert.equal(result.noDeviceSilentProjected, 120);
+    assert.equal(await prisma.domainEventNotificationProjection.count({
+      where: { domainEventId: { in: events.map((event) => event.id) }, status: "COMPLETED" },
+    }), 120);
+    assert.equal(await prisma.domainEventOutbox.count({
+      where: { id: { in: events.map((event) => event.id) }, status: "COMPLETED" },
+    }), 120);
+  });
+
+  it("expands pure silent placement events in bounded set-based pages", async () => {
+    const recipient = await createTestUser({ displayName: "Silent Placement Expansion" });
+    const now = new Date();
+    const events = Array.from({ length: 120 }, (_, index) => ({
+      id: crypto.randomUUID(),
+      eventKey: `PLACEMENT_CHANGED_V1:silent-expansion:${index}`,
+      eventType: "PLACEMENT_CHANGED_V1",
+      schemaVersion: 1,
+      aggregateType: "RACE",
+      aggregateId: `silent-expansion-race-${index}`,
+      payload: {
+        transitionId: `silent-expansion-${index}`,
+        raceId: `silent-expansion-race-${index}`,
+        previousPlacement: 3,
+        placement: 2,
+        paidPlaces: 1,
+      },
+      occurredAt: now,
+      availableAt: now,
+    }));
+    await prisma.$transaction(async (tx) => {
+      await tx.domainEventOutbox.createMany({ data: events });
+      await tx.domainEventAudience.createMany({ data: events.map((event) => ({
+        domainEventId: event.id,
+        recipientId: recipient.user.id,
+        ordinal: 0,
+        facts: {},
+      })) });
+    });
+
+    const result = await buildNotificationProjector({ logger: quietLogger }).run();
+    assert.equal(result.placementSilentEventsExpanded, 120);
+    assert.equal(result.noDeviceSilentProjected, 120);
+    assert.equal(await prisma.domainEventNotificationProjection.count({
+      where: {
+        domainEventId: { in: events.map((event) => event.id) },
+        projectionKind: "SILENT_REFRESH",
+        status: "COMPLETED",
+      },
+    }), 120);
+    assert.equal(await prisma.domainEventOutbox.count({
+      where: { id: { in: events.map((event) => event.id) }, status: "COMPLETED" },
+    }), 120);
+  });
+
   it("projects the real placement job's ending, team, slacker, and placement producers", async () => {
     const members = await Promise.all([
       createTestUser({ displayName: "Team A Lead" }),

@@ -47,6 +47,14 @@ function dbUrl(settings) {
   return `postgresql://${user}:${password}@127.0.0.1:${port}/${settings.db_name || "steps_tracker_capacity"}`;
 }
 
+function globalEventProfile(settings, environment = process.env) {
+  return environment.CAPACITY_GLOBAL_EVENT_PROFILE || settings.profile || "";
+}
+
+function capacityRunId(settings, environment = process.env) {
+  return required(environment.CAPACITY_RUN_ID || settings.run_id, "run_id");
+}
+
 function isPresent(name) {
   return output("limactl", ["list", "-q"]).split(/\r?\n/).filter(Boolean).includes(name);
 }
@@ -61,6 +69,7 @@ function startVm(settings) {
     "start", "--yes", `--name=${name}`, `--cpus=${settings.vps_specs.vcpu}`,
     `--memory=${settings.vps_specs.ram_gb}`, `--disk=${settings.vps_specs.disk_gb}`,
     `--mount=${repo(settings)}:w`, "--port-forward=3000:3000",
+    "--port-forward=3010:3010", "--port-forward=3011:3011",
     `--port-forward=${settings.db_host_port || 55433}:5432`, "template:docker",
   ]);
 }
@@ -112,18 +121,21 @@ function runCapacityDb(settings, command, extra = []) {
 function startBackend(settings) {
   const name = `${limaName(settings)}-backend`;
   const databaseUrl = dbUrl({ ...settings, db_host_port: 5432 }).replace("127.0.0.1:55433", "127.0.0.1:5432");
+  const capacityProfile = globalEventProfile(settings);
+  const runId = capacityRunId(settings);
   const env = [
     `-e DATABASE_URL=${JSON.stringify(databaseUrl)}`,
     `-e CAPACITY_MODE=true`, `-e CAPACITY_OUTBOUND_DISABLED=true`,
-    `-e CAPACITY_RUN_ID=${JSON.stringify(settings.run_id)}`,
+    `-e CAPACITY_RUN_ID=${JSON.stringify(runId)}`,
     `-e CAPACITY_DB_NAME=${JSON.stringify(settings.db_name || "steps_tracker_capacity")}`,
     `-e CAPACITY_DB_HOST_ALLOWLIST=127.0.0.1`,
     `-e CAPACITY_DB_MARKER=${JSON.stringify(required(process.env.CAPACITY_DB_MARKER, "CAPACITY_DB_MARKER"))}`,
     `-e CAPACITY_REDIS_HOST_ALLOWLIST=127.0.0.1`,
     `-e REDIS_URL=${JSON.stringify(`redis://:${encodeURIComponent(redisPassword())}@127.0.0.1:6379/0`)}`,
-    `-e CACHE_ENV_PREFIX=${JSON.stringify(`capacity:${settings.run_id}:`)}`,
+    `-e CACHE_ENV_PREFIX=${JSON.stringify(`capacity:${runId}:`)}`,
+    `-e CAPACITY_GLOBAL_EVENT_PROFILE=${JSON.stringify(capacityProfile)}`,
+    `-e CAPACITY_PROVIDER_ATTEMPT_COUNT=12000`,
     `-e DB_POOL_MAX=20`,
-    `-e PRISMA_QUERY_EVENTS_ENABLED=true`,
     `-e CAPACITY_AUTH_SECRET=${JSON.stringify(required(process.env.CAPACITY_AUTH_SECRET, "CAPACITY_AUTH_SECRET"))}`,
     `-e SESSION_TOKEN_SECRET=${JSON.stringify(required(process.env.CAPACITY_AUTH_SECRET, "CAPACITY_AUTH_SECRET"))}`,
     `-e PORT=3000`, `-e NODE_ENV=production`,
@@ -133,7 +145,9 @@ function startBackend(settings) {
     `-e S3_BUCKET=`, `-e S3_ACCESS_KEY_ID=`, `-e S3_SECRET_ACCESS_KEY=`, `-e S3_SESSION_TOKEN=`,
   ].join(" ");
   const root = repo(settings);
-  shell(settings, `if docker inspect -f '{{.State.Running}}' ${name} 2>/dev/null | grep -qx true; then true; else docker rm -f ${name} >/dev/null 2>&1 || true && docker volume create ${name}-node-modules >/dev/null && docker run -d --name ${name} --restart unless-stopped --network host --cpus=3 --memory=6g -v ${JSON.stringify(root)}:/workspace:ro -v ${name}-node-modules:/workspace/node_modules -w /workspace ${env} node:22 bash -lc 'npm ci --ignore-scripts && npx prisma generate && npx prisma migrate deploy && node scripts/capacity-cluster.js'; fi && for attempt in $(seq 1 120); do curl -fsS --max-time 2 http://127.0.0.1:3000/health >/dev/null 2>&1 && exit 0; sleep 1; done; exit 1`);
+  // Recreate on every guarded start. Reusing a same-profile container could
+  // preserve a prior CAPACITY_RUN_ID while lifecycle state names a new run.
+  shell(settings, `docker rm -f ${name} >/dev/null 2>&1 || true && docker volume create ${name}-node-modules >/dev/null && docker run -d --name ${name} --restart unless-stopped --network host --cpus=3 --memory=6g -v ${JSON.stringify(root)}:/workspace:ro -v ${name}-node-modules:/workspace/node_modules -w /workspace ${env} node:22 bash -lc 'npm ci --ignore-scripts && npx prisma generate && npx prisma migrate deploy && node scripts/capacity-cluster.js' && for attempt in $(seq 1 120); do curl -fsS --max-time 2 http://127.0.0.1:3000/health >/dev/null 2>&1 && exit 0; sleep 1; done; exit 1`);
 }
 
 function stopBackend(settings) {
@@ -155,4 +169,8 @@ function main() {
   throw new Error("usage: node scripts/lima-capacity.js <restore|scrub|start|stop|destroy> --config <file>");
 }
 
-try { main(); } catch (error) { process.stderr.write(`${error.stack || error.message}\n`); process.exitCode = 1; }
+if (require.main === module) {
+  try { main(); } catch (error) { process.stderr.write(`${error.stack || error.message}\n`); process.exitCode = 1; }
+}
+
+module.exports = { capacityRunId, globalEventProfile };

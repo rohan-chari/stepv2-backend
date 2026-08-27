@@ -20,6 +20,11 @@ const rows = [
   ["REFERRAL_REWARDED_V1", "REFERRAL_REWARDED", { referrerId: "user-1", refereeId: "referee-1" }, {}, "visible:REFERRAL_REWARDED:user-1:user-1:referee-1"],
   ["RACE_CANCELLED_V1", "RACE_CANCELLED", { raceId: "race-1" }, {}, "visible:RACE_CANCELLED:user-1:race-1"],
   ["GLOBAL_STEP_EVENT_ACTIVATED_V1", "GLOBAL_EVENT_STARTED", { eventId: "event-1" }, {}, "visible:GLOBAL_EVENT_STARTED:user-1:event-1"],
+  ["GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1", null, {
+    eventId: "event-1", entitlementId: "entitlement-1", multiplier: 2,
+    startsAt: "2098-08-26T10:00:00.000Z", endsAt: "2098-08-26T10:30:00.000Z",
+    scheduleRevision: 0, timezone: "America/New_York",
+  }, {}, "visible:GLOBAL_EVENT_STARTED:user-1:event-1"],
   ["POWERUP_USED_V1", "POWERUP_USED", { powerupId: "powerup-1", targetUserId: "user-1" }, {}, "visible:POWERUP_USED:user-1:powerup:powerup-1:user-1"],
   ["RACE_MESSAGE_SENT_V1", "RACE_MESSAGE_SENT", { messageId: "message-1" }, {}, "visible:race_message:user-1:message-1"],
   ["PLACEMENT_CHANGED_V1", "PLACEMENT_CHANGED", { raceId: "race-1", transitionId: "placement:p1:1:2->3" }, {}, "visible:PLACEMENT_CHANGED:user-1:placement:p1:1:2->3"],
@@ -55,6 +60,7 @@ const COPY = {
   REFERRAL_REWARDED_V1: ["You earned coins!", "Actor finished their first race with friends. You earned 25 coins!", "REFERRAL_REWARDED", "home"],
   RACE_CANCELLED_V1: ["Race Cancelled", "The race \"Fixture race\" was cancelled", "RACE_CANCELLED", "races"],
   GLOBAL_STEP_EVENT_ACTIVATED_V1: ["2x STEPS EVENT", "Double steps are LIVE for 30 minutes. Every step counts 2x in your races! Go!", "GLOBAL_EVENT_STARTED", "home"],
+  GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1: ["2x STEPS EVENT", "Double steps are LIVE for 30 minutes. Every step counts 2x in your races! Go!", "GLOBAL_EVENT_STARTED", "home"],
   POWERUP_USED_V1: ["Powerup Attack!", "Actor used Leg Cramp on you! Your steps are frozen for 1 hour. Race: Fixture race.", "POWERUP_USED", "race_detail"],
   RACE_MESSAGE_SENT_V1: ["Fixture race", "Actor: Fixture message", "race_message", "race_detail"],
   PLACEMENT_CHANGED_V1: ["You're in the lead!", "You took 1st in Fixture race.", "PLACEMENT_CHANGED", "race_detail"],
@@ -134,9 +140,12 @@ function expectedPayload(eventType, publicType, route) {
       destination: "DAILY_REWARD",
     });
   }
-  if (eventType === "GLOBAL_STEP_EVENT_ACTIVATED_V1") {
+  if (["GLOBAL_STEP_EVENT_ACTIVATED_V1", "GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1"].includes(eventType)) {
     payload.eventId = "event-1";
     payload.multiplier = 2;
+  }
+  if (eventType === "GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1") {
+    payload.entitlementId = "entitlement-1";
   }
   if (eventType === "RACE_MESSAGE_SENT_V1") {
     Object.assign(payload, {

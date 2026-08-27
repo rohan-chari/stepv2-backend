@@ -12,4 +12,7 @@ Object.assign(module.exports, require("./notificationCleanup"));
 Object.assign(module.exports, require("./dailyRewardReminder"));
 Object.assign(module.exports, require("./stepMilestoneReminder"));
 Object.assign(module.exports, require("./dailyMover"));
+Object.assign(module.exports, require("./jobs/notificationScheduleRelease"));
+Object.assign(module.exports, require("./jobs/notificationCompletenessReconciler"));
+Object.assign(module.exports, require("./jobs/deviceTokenCleanup"));
 Object.assign(module.exports, require("./routes"));

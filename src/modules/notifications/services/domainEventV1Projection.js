@@ -250,6 +250,16 @@ const V1_PROJECTOR_HANDLERS = Object.freeze({
         ...(p.entitlementId ? { entitlementId: p.entitlementId } : {}),
       });
   },
+  async GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1({ p }) {
+    const multiplier = Number(p.multiplier) || 2;
+    return intent("GLOBAL_EVENT_STARTED", `${multiplier}x STEPS EVENT`,
+      `Double steps are LIVE for 30 minutes. Every step counts ${multiplier}x in your races! Go!`,
+      {
+        type: "GLOBAL_EVENT_STARTED", route: "home", eventId: p.eventId, multiplier,
+        entitlementId: p.entitlementId,
+      },
+      { audit: false });
+  },
   async POWERUP_USED_V1({ p, actorName, loadRace, current }) {
     if (!p.targetUserId || p.targetUserId === p.actorUserId || !POWERUP_ATTACK_MESSAGES[p.powerupType]) {
       return { suppressed: "HANDLER_INELIGIBLE" };
@@ -434,7 +444,10 @@ function buildTypedV1Projection(dependencies = {}) {
       throw error;
     }
     if (result.suppressed) return { status: "SUPPRESSED", reason: result.suppressed };
-    const availableAt = event.availableAt || event.occurredAt || current;
+    const scheduledEntitlement = event.eventType === "GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1";
+    const availableAt = scheduledEntitlement
+      ? new Date(p.startsAt)
+      : event.availableAt || event.occurredAt || current;
     const endsAt = p.endsAt ? new Date(p.endsAt) : null;
     await notificationService.submit({
       recipientUserId: audience.recipientId,
@@ -445,6 +458,10 @@ function buildTypedV1Projection(dependencies = {}) {
       deliveryKey: projection.deliveryKey,
       availableAt,
       ...(endsAt && endsAt > new Date(availableAt) ? { expiresAt: endsAt } : {}),
+      ...(scheduledEntitlement ? {
+        sourceRef: p.entitlementId,
+        sourceRevision: Number.isInteger(p.scheduleRevision) ? p.scheduleRevision : 0,
+      } : {}),
     });
     await createAudit(result, audience.recipientId, p, projection);
     return { status: "COMPLETED" };

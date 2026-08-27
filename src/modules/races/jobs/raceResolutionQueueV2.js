@@ -1350,6 +1350,29 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         );
         if (!fenced) throw new FenceLostError();
 
+        // A newer all-COALESCE generation already owns the follow-up work. If
+        // this race completed recently, discard the stale claim before any
+        // narrow-scope/artifact/source fence can demote it to a full replay.
+        // No participant write has occurred yet, and discardSuperseded merges
+        // the claimed scope back into the queued generation atomically.
+        if (
+          burstCoalescingEnabled &&
+          supersededRunMayDiscard(fenced, now()) &&
+          typeof jobModel.discardSuperseded === "function"
+        ) {
+          const outcome = await phaseTimer.measure(
+            "discardSuperseded",
+            () => jobModel.discardSuperseded(
+              { id: job.id, leaseToken: job.leaseToken, now: now() },
+              tx
+            )
+          );
+          if (outcome.applied) {
+            discarded = true;
+            return;
+          }
+        }
+
         const stopFenceValidation = phaseTimer.start("fenceValidation");
         try {
         let sourceFenceNow = null;
@@ -1490,24 +1513,6 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
 
         } finally {
           stopFenceValidation();
-        }
-
-        if (
-          burstCoalescingEnabled &&
-          supersededRunMayDiscard(fenced, now()) &&
-          typeof jobModel.discardSuperseded === "function"
-        ) {
-          const outcome = await phaseTimer.measure(
-            "discardSuperseded",
-            () => jobModel.discardSuperseded(
-              { id: job.id, leaseToken: job.leaseToken, now: now() },
-              tx
-            )
-          );
-          if (outcome.applied) {
-            discarded = true;
-            return;
-          }
         }
 
         // Acquire every triggering participant advisory lock in the same
@@ -1765,6 +1770,7 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           event: "race_resolution_v2",
           outcome: "superseded_discard",
           reasonClasses: job.processingDirtyReasons || ["FULL"],
+          resolutionPlan,
           dirtyParticipantCount: job.processingDirtyParticipantIds?.length || 0,
           changedRows: 0,
           computeMs,

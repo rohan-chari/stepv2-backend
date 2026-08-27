@@ -57,6 +57,13 @@ async function withRunLock(runId, directory, operation) {
 function loadState(runId, directory) { safeRunId(runId); const file = statePath(runId, directory); if (!fs.existsSync(file)) throw new Error(`capacity run ${runId} does not exist`); return readJson(file); }
 function saveState(state, directory) { writeJson(statePath(state.runId, directory), state); return state; }
 
+function assertCapacityRunProfile(state, expectedProfile) {
+  if (!expectedProfile || state?.profile !== expectedProfile) {
+    throw new Error(`capacity run profile mismatch: ${state?.profile || "missing"} started, ${expectedProfile || "missing"} requested`);
+  }
+  return true;
+}
+
 async function preflight({ snapshotPath, profile, target = "capacity-vm", directory, runId }) {
   if (target !== "capacity-vm") throw new Error("capacity preflight requires target capacity-vm");
   safeRunId(runId);
@@ -110,14 +117,24 @@ async function runHook(name, env = process.env, extraEnv = {}, required = false)
   return { hookConfigured: true, completed: true };
 }
 
-async function probeHealth(url, timeoutMs = 10000) {
+async function probeHealth(url, timeoutMs = 10000, expected = {}) {
   if (!url) throw new Error("CAPACITY_HEALTH_URL is required for capacity start health verification");
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(url, { signal: controller.signal, headers: { Accept: "application/json" } });
     if (!response.ok) throw new Error(`capacity health probe returned HTTP ${response.status}`);
-    return { url: new URL(url).origin, status: response.status };
+    const body = await response.json();
+    if (body?.capacity?.runId !== expected.runId ||
+        body?.capacity?.globalEventProfile !== expected.profile) {
+      throw new Error("capacity health identity does not match the guarded run id/profile");
+    }
+    return {
+      url: new URL(url).origin,
+      status: response.status,
+      runId: body.capacity.runId,
+      profile: body.capacity.globalEventProfile,
+    };
   } finally { clearTimeout(timer); }
 }
 
@@ -134,7 +151,10 @@ async function start({ runId, directory, env = process.env, input, interactive =
     const confirmation = confirmCapacityStart({ runId, snapshotHash: state.snapshotHash, manifest: state.approvedManifest, input, interactive });
     const hook = await runHook("start", env);
     if (!hook.hookConfigured) throw new Error("capacity start requires CAPACITY_START_HOOK to start the VM/application");
-    const health = await probeHealth(env.CAPACITY_HEALTH_URL);
+    const health = await probeHealth(env.CAPACITY_HEALTH_URL, 10000, {
+      runId,
+      profile: state.profile,
+    });
     const next = { ...state, state: "started", startedAt: new Date().toISOString(), liveManifestPath, scrubAttestationHash: attestation.attestationHash, startHook: hook, health, reconfirmedAt: state.state === "started" ? new Date().toISOString() : undefined };
     return saveState(next, directory);
   });
@@ -174,4 +194,4 @@ function assertStartedRun({ runId, directory, env = process.env }) {
   return state;
 }
 
-module.exports = { DEFAULT_STATE_DIR, assertStartedRun, destroy, loadState, preflight, readSnapshot, restore, start, stateDir, status, stop, withRunLock };
+module.exports = { DEFAULT_STATE_DIR, assertCapacityRunProfile, assertStartedRun, destroy, loadState, preflight, readSnapshot, restore, start, stateDir, status, stop, withRunLock };

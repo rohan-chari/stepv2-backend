@@ -666,6 +666,32 @@
       "rollbackValue": null
     },
     {
+      "id": "env:CAPACITY_GLOBAL_EVENT_INFRASTRUCTURE_PATH",
+      "name": "CAPACITY_GLOBAL_EVENT_INFRASTRUCTURE_PATH",
+      "kind": "string_environment",
+      "evidenceTimestamp": "2026-08-20T04:23:00Z",
+      "compatibilityConsumers": [],
+      "adminExposed": false,
+      "disposition": "capacity_local_config",
+      "permanentValue": null,
+      "polarityDefault": "absolute path to independently measured global-event infrastructure evidence",
+      "deployFamily": "capacity_local",
+      "rollbackValue": null
+    },
+    {
+      "id": "env:CAPACITY_GLOBAL_EVENT_PROFILE",
+      "name": "CAPACITY_GLOBAL_EVENT_PROFILE",
+      "kind": "string_environment",
+      "evidenceTimestamp": "2026-08-20T04:23:00Z",
+      "compatibilityConsumers": [],
+      "adminExposed": false,
+      "disposition": "capacity_local_config",
+      "permanentValue": null,
+      "polarityDefault": "names the isolated global-event capacity profile for deterministic local wiring",
+      "deployFamily": "capacity_local",
+      "rollbackValue": null
+    },
+    {
       "id": "env:CAPACITY_HEALTH_URL",
       "name": "CAPACITY_HEALTH_URL",
       "kind": "string_environment",
@@ -755,6 +781,19 @@
       "polarityDefault": "runtime value; see source consumers",
       "deployFamily": "runtime_configuration",
       "rollbackValue": null
+    },
+    {
+      "id": "env:CAPACITY_PROVIDER_ATTEMPT_COUNT",
+      "name": "CAPACITY_PROVIDER_ATTEMPT_COUNT",
+      "kind": "string_environment",
+      "evidenceTimestamp": "2026-08-20T04:23:00Z",
+      "compatibilityConsumers": [],
+      "adminExposed": false,
+      "disposition": "capacity_local_config",
+      "permanentValue": 12000,
+      "polarityDefault": "exact deterministic provider-attempt census for the approved fixture",
+      "deployFamily": "capacity_local",
+      "rollbackValue": 12000
     },
     {
       "id": "env:CAPACITY_REDIS_ENABLED",

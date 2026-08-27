@@ -3,6 +3,21 @@ const fs = require("node:fs");
 const jwt = require("jsonwebtoken");
 const { readPerformanceFlags } = require("../config/performanceFlags");
 
+function retryAfterMilliseconds(value, now = Date.now()) {
+  if (value == null) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+  const at = Date.parse(String(value));
+  return Number.isFinite(at) ? Math.max(0, at - now) : undefined;
+}
+
+const DEVICE_TOKEN_FAILURE_REASONS = new Set([
+  "Unregistered",
+  "BadDeviceToken",
+  "DeviceTokenNotForTopic",
+]);
+const REFRESHABLE_PROVIDER_TOKEN_REASONS = new Set(["ExpiredProviderToken"]);
+
 function buildApnsService(config = {}) {
   const keyPath = config.keyPath || process.env.APNS_KEY_PATH;
   const signingKey = config.signingKey || process.env.APNS_SIGNING_KEY;
@@ -63,6 +78,7 @@ function buildApnsService(config = {}) {
     pushType,
     priority,
     collapseId,
+    expiresAt,
   }) {
     return new Promise((resolve) => {
       let client;
@@ -88,13 +104,18 @@ function buildApnsService(config = {}) {
       if (collapseId) {
         headers["apns-collapse-id"] = collapseId;
       }
+      if (expiresAt) headers["apns-expiration"] = String(Math.floor(new Date(expiresAt).getTime() / 1000));
       const req = client.request(headers);
 
       let responseData = "";
       let statusCode;
+      let providerMessageId;
+      let retryAfterMs;
 
       req.on("response", (headers) => {
         statusCode = headers[":status"];
+        providerMessageId = headers["apns-id"] || null;
+        retryAfterMs = retryAfterMilliseconds(headers["retry-after"]);
       });
 
       req.on("data", (chunk) => {
@@ -105,7 +126,7 @@ function buildApnsService(config = {}) {
         client.close();
 
         if (statusCode === 200) {
-          return resolve({ success: true });
+          return resolve({ success: true, ...(providerMessageId ? { providerMessageId } : {}) });
         }
 
         let reason = "Unknown";
@@ -116,7 +137,11 @@ function buildApnsService(config = {}) {
 
         const unregistered = statusCode === 410;
 
-        resolve({ success: false, reason, statusCode, unregistered });
+        resolve({
+          success: false, reason, statusCode, unregistered,
+          ...(providerMessageId ? { providerMessageId } : {}),
+          ...(retryAfterMs != null ? { retryAfterMs } : {}),
+        });
       });
 
       req.on("error", (err) => {
@@ -254,6 +279,7 @@ function buildApnsService(config = {}) {
     pushType,
     priority,
     collapseId,
+    expiresAt,
   }) {
     let client;
     try {
@@ -268,6 +294,8 @@ function buildApnsService(config = {}) {
       let req;
       let responseData = "";
       let statusCode;
+      let providerMessageId;
+      let retryAfterMs;
       const finish = (result, { evict = false } = {}) => {
         if (settled) return;
         settled = true;
@@ -304,13 +332,16 @@ function buildApnsService(config = {}) {
           "content-type": "application/json",
         };
         if (collapseId) headers["apns-collapse-id"] = collapseId;
+        if (expiresAt) headers["apns-expiration"] = String(Math.floor(new Date(expiresAt).getTime() / 1000));
         req = client.request(headers);
         req.on("response", (headers) => {
           statusCode = headers[":status"];
+          providerMessageId = headers["apns-id"] || null;
+          retryAfterMs = retryAfterMilliseconds(headers["retry-after"]);
         });
         req.on("data", (chunk) => { responseData += chunk; });
         req.on("end", () => {
-          if (statusCode === 200) return finish({ success: true });
+          if (statusCode === 200) return finish({ success: true, ...(providerMessageId ? { providerMessageId } : {}) });
           let reason = "Unknown";
           try { reason = JSON.parse(responseData).reason || reason; } catch {}
           finish({
@@ -318,6 +349,8 @@ function buildApnsService(config = {}) {
             reason,
             statusCode,
             unregistered: statusCode === 410,
+            ...(providerMessageId ? { providerMessageId } : {}),
+            ...(retryAfterMs != null ? { retryAfterMs } : {}),
           });
         });
         req.on("error", (error) =>
@@ -359,6 +392,7 @@ function buildApnsService(config = {}) {
     payload = {},
     collapseId,
     threadId,
+    expiresAt,
   }) {
     const aps = { alert: { title, body }, sound: "default" };
     if (threadId) aps["thread-id"] = threadId;
@@ -369,6 +403,7 @@ function buildApnsService(config = {}) {
       pushType: "alert",
       priority: "10",
       collapseId,
+      expiresAt,
       apnsPayload: JSON.stringify({
         aps,
         ...payload,
@@ -395,7 +430,24 @@ function buildApnsService(config = {}) {
     });
   }
 
-  async function sendWithBadDeviceTokenFallback({ deviceToken, sendRequest }) {
+  async function sendWithProviderAuthRefresh({ host, authToken, deviceToken, sendRequest }) {
+    let activeAuthToken = authToken;
+    let result = await sendRequest({ host, authToken: activeAuthToken, deviceToken });
+    if (!REFRESHABLE_PROVIDER_TOKEN_REASONS.has(result.reason)) {
+      return { result, authToken: activeAuthToken };
+    }
+    cachedToken = null;
+    cachedTokenTimestamp = 0;
+    try {
+      activeAuthToken = getAuthToken();
+      result = await sendRequest({ host, authToken: activeAuthToken, deviceToken });
+    } catch (error) {
+      result = { success: false, reason: error?.message || String(error) };
+    }
+    return { result, authToken: activeAuthToken };
+  }
+
+  async function sendWithBadDeviceTokenFallback({ deviceToken, sendRequest, captureEnvironment = false }) {
     let authToken;
     try {
       authToken = getAuthToken();
@@ -406,24 +458,33 @@ function buildApnsService(config = {}) {
       };
     }
 
-    const primaryResult = await sendRequest({
+    const primary = await sendWithProviderAuthRefresh({
       host: primaryHost,
       authToken,
       deviceToken,
+      sendRequest,
     });
+    const primaryResult = primary.result;
+    authToken = primary.authToken;
 
     if (primaryResult.reason !== "BadDeviceToken") {
-      return primaryResult;
+      return captureEnvironment
+        ? { ...primaryResult, environment: production ? "production" : "sandbox" }
+        : primaryResult;
     }
 
-    const retryResult = await sendRequest({
+    const retry = await sendWithProviderAuthRefresh({
       host: fallbackHost,
       authToken,
       deviceToken,
+      sendRequest,
     });
+    const retryResult = retry.result;
 
     if (retryResult.success) {
-      return retryResult;
+      return captureEnvironment
+        ? { ...retryResult, environment: production ? "sandbox" : "production" }
+        : retryResult;
     }
 
     if (retryResult.reason === "BadDeviceToken") {
@@ -440,9 +501,39 @@ function buildApnsService(config = {}) {
     payload = {},
     collapseId,
     threadId,
+    expiresAt,
+    expectedEnvironment = null,
   }) {
+    if (expectedEnvironment === "sandbox" || expectedEnvironment === "production") {
+      let authToken;
+      try { authToken = getAuthToken(); }
+      catch (error) { return { success: false, reason: error?.message || String(error), environment: expectedEnvironment }; }
+      const host = expectedEnvironment === "production"
+        ? "https://api.push.apple.com"
+        : "https://api.sandbox.push.apple.com";
+      const { result } = await sendWithProviderAuthRefresh({
+        host, authToken, deviceToken,
+        sendRequest: ({ host: requestHost, authToken: requestAuthToken, deviceToken: requestDeviceToken }) =>
+          sendAlertNotificationRequest({
+            host: requestHost, authToken: requestAuthToken, deviceToken: requestDeviceToken,
+            title, body, payload, collapseId, threadId, expiresAt,
+          }),
+      });
+      const invalidToken = result.unregistered === true ||
+        DEVICE_TOKEN_FAILURE_REASONS.has(result.reason);
+      const refreshableProviderAuth = REFRESHABLE_PROVIDER_TOKEN_REASONS.has(result.reason);
+      return {
+        ...result,
+        environment: expectedEnvironment,
+        invalidToken,
+        permanent: invalidToken || (!refreshableProviderAuth &&
+          Number(result.statusCode) >= 400 && Number(result.statusCode) < 500 &&
+          Number(result.statusCode) !== 429),
+      };
+    }
     return sendWithBadDeviceTokenFallback({
       deviceToken,
+      captureEnvironment: Boolean(expiresAt),
       sendRequest: ({ host, authToken, deviceToken }) =>
         sendAlertNotificationRequest({
           host,
@@ -453,8 +544,18 @@ function buildApnsService(config = {}) {
           payload,
           collapseId,
           threadId,
+          expiresAt,
         }),
-    });
+    }).then((result) => ({
+      ...result,
+      ...(expiresAt ? {
+        invalidToken: result.unregistered === true || DEVICE_TOKEN_FAILURE_REASONS.has(result.reason),
+        permanent: result.unregistered === true || DEVICE_TOKEN_FAILURE_REASONS.has(result.reason) ||
+          (!REFRESHABLE_PROVIDER_TOKEN_REASONS.has(result.reason) &&
+            Number(result.statusCode) >= 400 && Number(result.statusCode) < 500 &&
+            Number(result.statusCode) !== 429),
+      } : {}),
+    }));
   }
 
   async function sendSilentNotification({ deviceToken, payload = {} }) {
@@ -492,4 +593,4 @@ const apnsService = {
   close: () => defaultApnsService?.close() || Promise.resolve(),
 };
 
-module.exports = { buildApnsService, apnsService };
+module.exports = { buildApnsService, apnsService, retryAfterMilliseconds };

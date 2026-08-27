@@ -1,5 +1,6 @@
 const os = require("node:os");
 const { prisma: defaultPrisma } = require("../../../db");
+const { isGenerationUsable } = require("./globalStepEventGeneration");
 
 const LOCAL_AWARE_GENERATION = 2;
 const OWNER_TTL_MS = 3 * 60 * 1000;
@@ -19,6 +20,9 @@ async function heartbeatAndCheck({
   ownerId = defaultOwnerId(),
   expectedOwners = configuredExpectedOwners(),
 } = {}) {
+  if (expectedOwners == null) {
+    return isGenerationUsable({ client, now });
+  }
   // Explicit topology is an enablement precondition. Guessing one owner would
   // let a freshly deployed worker enable while an old worker is still alive.
   if (!expectedOwners) return false;

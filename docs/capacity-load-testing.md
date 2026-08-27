@@ -14,6 +14,12 @@ With `provider: "lima"`, these commands create one local Lima VM and a Postgres 
 
 The `full-app` profile exercises Home, Races, Race Details, current and legacy step sync, and durable queue polling. The Lima target also runs Redis 7.0.15 plus dedicated resolution and cron processes to match production. Increase `users`, `arrival_rate`, and `duration` in the config for the next run. Reports are written to `results/`.
 
+For the global-event deployment gate, follow the dedicated section in
+`docs/capacity-load-runbook.md`. It requires three repetitions of each
+`event_provisioning_10000`, `event_boundary_10000`, and
+`event_provider_outage_10000`; a generic `full-app` run is not substitute
+evidence.
+
 Required environment for the capacity VM:
 
 ```sh

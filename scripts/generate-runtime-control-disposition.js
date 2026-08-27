@@ -154,6 +154,9 @@ const envMetadata = {
   CAPACITY_STOP_HOOK: ["capacity_local_config", null, "operator-owned capacity stop hook", "capacity_local", null],
   CAPACITY_DESTROY_HOOK: ["capacity_local_config", null, "operator-owned capacity destroy hook", "capacity_local", null],
   CAPACITY_HEALTH_URL: ["capacity_local_config", null, "private health URL probed after capacity start", "capacity_local", null],
+  CAPACITY_GLOBAL_EVENT_INFRASTRUCTURE_PATH: ["capacity_local_config", null, "absolute path to independently measured global-event infrastructure evidence", "capacity_local", null],
+  CAPACITY_GLOBAL_EVENT_PROFILE: ["capacity_local_config", null, "names the isolated global-event capacity profile for deterministic local wiring", "capacity_local", null],
+  CAPACITY_PROVIDER_ATTEMPT_COUNT: ["capacity_local_config", 12000, "exact deterministic provider-attempt census for the approved fixture", "capacity_local", 12000],
   DB_POOL_MAX: ["capacity_local_config", 20, "integer 1..20 overrides the database pool only in validated capacity mode", "capacity_local", 20],
 };
 

@@ -61,6 +61,35 @@ test("a projector tick never claims more rows than it finishes after its budget 
   assert.deepEqual(finished.sort(), claimed.slice(0, PROJECTION_CONCURRENCY).map((row) => row.id).sort());
 });
 
+test("a projector tick drains bounded scheduled-entitlement pages before generic per-recipient work", async () => {
+  const pages = [
+    { processed: 100 },
+    { processed: 37 },
+    { processed: 0 },
+  ];
+  let genericClaims = 0;
+  const projector = buildNotificationProjector({
+    prisma: {},
+    repository: {},
+    projectScheduledEntitlementEventsBatch: async ({ batchSize }) => {
+      assert.equal(batchSize, 100);
+      return pages.shift();
+    },
+    claimDomainEvents: async () => [],
+    claimNotificationProjections: async () => {
+      genericClaims += 1;
+      return [];
+    },
+    monotonicNow: () => 0,
+    logger: { log() {}, error() {} },
+  });
+
+  const result = await projector.run({ budgetMs: 1 });
+  assert.equal(result.scheduledEventsProjected, 137);
+  assert.equal(result.scheduledEventBatches, 2);
+  assert.equal(genericClaims, 1, "unrelated projection work remains reachable in the same tick");
+});
+
 test("typed V1 handlers propagate infrastructure failures instead of suppressing them", async () => {
   const project = buildTypedV1Projection({
     prisma: {},

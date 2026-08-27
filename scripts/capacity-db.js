@@ -9,8 +9,9 @@ const path = require("node:path");
 const { execFile } = require("node:child_process");
 const { promisify } = require("node:util");
 const { Client } = require("pg");
-const { assertCapacityDatabase, assertOutboundDisabled } = require("../src/localCapacitySafety");
+const { assertCapacityDatabase, assertOutboundDisabled, capacityIdentity } = require("../src/localCapacitySafety");
 const { createScrubAttestation } = require("../src/modules/loadTesting/safety");
+const { writeCapacityOperatorMarker } = require("../src/modules/loadTesting/capacityDatabaseMarker");
 
 const execFileAsync = promisify(execFile);
 const SCRIPT_PATH = path.resolve(__filename);
@@ -65,7 +66,7 @@ async function withClient(work) {
   try { return await work(client); } finally { await client.end(); }
 }
 
-async function scrub(client) {
+async function scrub(client, identity) {
   await client.query("BEGIN");
   try {
     await client.query('DELETE FROM "device_tokens"');
@@ -87,6 +88,7 @@ async function scrub(client) {
       const value = column.column_name === "email" ? `${seed} || '@capacity.invalid'` : seed;
       await client.query(`UPDATE ${table} SET ${name} = ${value}`);
     }
+    await writeCapacityOperatorMarker(client, identity);
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
@@ -114,17 +116,37 @@ async function verify(client) {
   return { deviceTokens: 0, sensitiveColumnsVerified: columns.length };
 }
 
+function postgresRestoreTarget(databaseUrl, parentEnv = process.env) {
+  const target = new URL(databaseUrl);
+  const database = decodeURIComponent(target.pathname.slice(1));
+  if (!database) throw new Error("DATABASE_URL must include a database name");
+  const { DATABASE_URL: _databaseUrl, ...childEnv } = parentEnv;
+  return {
+    database,
+    env: {
+      ...childEnv,
+      PGHOST: target.hostname.replace(/^\[|\]$/g, ""),
+      PGPORT: target.port || "5432",
+      PGUSER: decodeURIComponent(target.username),
+      PGPASSWORD: decodeURIComponent(target.password),
+      PGDATABASE: database,
+    },
+  };
+}
+
 async function restore(input) {
   assertTarget();
   const snapshot = path.resolve(required(input.snapshot, "snapshot"));
   if (!fs.existsSync(snapshot)) throw new Error(`snapshot does not exist: ${snapshot}`);
   const databaseUrl = required(process.env.DATABASE_URL, "DATABASE_URL");
+  const target = postgresRestoreTarget(databaseUrl);
+  const options = { timeout: 600000, env: target.env };
   const extension = path.extname(snapshot).toLowerCase();
   if ([".dump", ".backup", ".tar"].includes(extension)) {
-    await execFileAsync("pg_restore", ["--clean", "--if-exists", "--no-owner", "--exit-on-error", "--dbname", databaseUrl, snapshot], { timeout: 600000 });
+    await execFileAsync("pg_restore", ["--clean", "--if-exists", "--no-owner", "--exit-on-error", "--dbname", target.database, snapshot], options);
   } else {
-    await execFileAsync("psql", ["--dbname", databaseUrl, "--command", "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"], { timeout: 600000 });
-    await execFileAsync("psql", ["--dbname", databaseUrl, "--file", snapshot, "--single-transaction"], { timeout: 600000 });
+    await execFileAsync("psql", ["--dbname", target.database, "--command", "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"], options);
+    await execFileAsync("psql", ["--dbname", target.database, "--file", snapshot, "--single-transaction"], options);
   }
   return { restored: true, snapshot, snapshotSha256: sha256File(snapshot) };
 }
@@ -133,8 +155,9 @@ async function scrubAndAttest(input) {
   const snapshot = path.resolve(required(input.snapshot, "snapshot"));
   const attestationPath = path.resolve(required(input.attestation, "attestation"));
   const secret = required(process.env.CAPACITY_SCRUB_ATTESTATION_SECRET, "CAPACITY_SCRUB_ATTESTATION_SECRET");
+  const identity = capacityIdentity(process.env);
   const result = await withClient(async (client) => {
-    await scrub(client);
+    await scrub(client, identity);
     const verification = await verify(client);
     return { verification };
   });

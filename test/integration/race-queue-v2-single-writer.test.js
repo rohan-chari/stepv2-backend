@@ -18,6 +18,7 @@ process.env.RACE_RESOLVE_DEBOUNCE_MS = "0";
 const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
 const {
   buildRaceResolutionWorkerV2,
+  supersededRunMayDiscard,
 } = require("../../src/modules/races/jobs/raceResolutionQueueV2");
 const {
   RaceResolutionJobV2,
@@ -685,6 +686,73 @@ describe("5a — one bulk writer per race", () => {
     assert.equal(committed?.changedRows, 0);
     assert.deepEqual(await participantVersions(raceId), before);
     assert.equal((await RaceResolutionJobV2.findByRaceId(raceId)).state, "SUCCEEDED");
+  });
+
+  it("discards a superseded committed STEP_SYNC before retrying it as FULL", async () => {
+    const alice = await createUser("Superseded Sync Alice");
+    const bob = await createUser("Superseded Sync Bob");
+    const raceId = await createActiveRace(alice, [bob], "Superseded scoped sync");
+    await drain(makeWorker());
+    await appSettings.setFlag("raceResolutionReasonAwareV1Enabled", true);
+    await appSettings.setFlag("raceResolutionBurstCoalescingV1Enabled", true);
+
+    const participant = await prisma.raceParticipant.findFirstOrThrow({
+      where: { raceId, userId: alice.userId },
+    });
+    await prisma.raceResolutionJobV2.update({
+      where: { raceId },
+      data: { lastCompletedAt: new Date() },
+    });
+    await prisma.userScoringInputVersion.upsert({
+      where: { userId: alice.userId },
+      create: { userId: alice.userId, generation: 1n, sourceQueueSemanticsGeneration: 1n },
+      update: { generation: { set: 1n }, sourceQueueSemanticsGeneration: { set: 1n } },
+    });
+    const enqueue = () => RaceResolutionJobV2.enqueue({
+      raceId,
+      userId: alice.userId,
+      dirtyEnvelope: {
+        reason: "STEP_SYNC",
+        dirtyUserIds: [alice.userId],
+        dirtyParticipantIds: [participant.id],
+        powerupTypes: [],
+        priority: "COALESCE",
+      },
+    });
+    await enqueue();
+
+    let injected = false;
+    let supersededSnapshot = null;
+    const events = [];
+    const worker = makeWorker({
+      async beforeWriteTransaction() {
+        if (injected) return;
+        injected = true;
+        await enqueue();
+        supersededSnapshot = await RaceResolutionJobV2.findByRaceId(raceId);
+      },
+      logger: {
+        log(line) { try { events.push(JSON.parse(line)); } catch {} },
+        error(line) { events.push({ error: String(line) }); },
+      },
+    });
+    assert.ok(await worker.processOne());
+    assert.equal(
+      supersededRunMayDiscard(supersededSnapshot, new Date()),
+      true,
+      `generation=${supersededSnapshot.generation} processing=${supersededSnapshot.processingGeneration} ` +
+        `dirty=${supersededSnapshot.dirtyPriority} ` +
+        `processingDirty=${supersededSnapshot.processingDirtyPriority} ` +
+        `lastCompletedAt=${supersededSnapshot.lastCompletedAt?.toISOString()}`,
+    );
+
+    const committed = events.find((event) => event.event === "race_resolution_v2");
+    assert.equal(committed?.resolutionPlan, "STEP_SYNC_COMMITTED", JSON.stringify(events));
+    assert.equal(committed?.changedRows, 0);
+    const queued = await RaceResolutionJobV2.findByRaceId(raceId);
+    assert.equal(queued.state, "QUEUED");
+    assert.deepEqual(queued.dirtyReasons, ["STEP_SYNC"]);
+    assert.deepEqual(queued.dirtyParticipantIds, [participant.id]);
   });
 
   it("a public step mutation before the STEP_SYNC fence falls back to FULL in the same run", async () => {

@@ -3,13 +3,135 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { buildResult, classifyTarget, parseLoadParameters, PROFILES } = require("./contract");
 const { createSyntheticFixtures, cleanupSyntheticRun } = require("./fixtures");
-const { assertStartedRun } = require("./lifecycle");
+const {
+  cleanupSyntheticRun: cleanupGlobalEventReliabilityRun,
+  createGlobalEventReliabilityFixtures,
+} = require("./globalEventReliabilityFixtures");
+const { assertCapacityRunProfile, assertStartedRun } = require("./lifecycle");
+const { collectGlobalEventCapacityEvidence } = require("./globalEventReliabilityEvidence");
+const {
+  aggregateGlobalEventCapacityEvidence,
+  assertGlobalEventCapacityGates,
+  assertSustainedBackgroundLoad,
+} = require("./globalEventReliabilityProfiles");
+
+async function runPacedBackgroundProducer({
+  rate,
+  durationSeconds,
+  startedAtMs,
+  runOne,
+  signal,
+  maxInFlight = Number.POSITIVE_INFINITY,
+  clock = Date.now,
+  wait = sleep,
+} = {}) {
+  const buckets = Array.from({ length: durationSeconds }, (_, second) => ({
+    second, offered: 0, completedSuccessful: 0, failed: 0,
+  }));
+  const active = new Set();
+  let sequence = 0;
+  for (let second = 0; second < durationSeconds; second += 1) {
+    const bucket = buckets[second];
+    const bucketEndMs = startedAtMs + (second + 1) * 1000;
+    for (let slot = 0; slot < rate; slot += 1) {
+      if (signal?.aborted) throw new Error("load run interrupted");
+      const scheduledAtMs = startedAtMs + second * 1000 + slot * (1000 / rate);
+      const delay = scheduledAtMs - clock();
+      if (delay > 0) await wait(delay, signal);
+      while (active.size >= maxInFlight && clock() < bucketEndMs) await Promise.race(active);
+      if (clock() >= bucketEndMs) break;
+      const offeredSequence = sequence++;
+      bucket.offered += 1;
+      let task;
+      task = Promise.resolve()
+        .then(() => runOne({ sequence: offeredSequence, second }))
+        .then((successful) => {
+          if (successful === true) bucket.completedSuccessful += 1;
+          else bucket.failed += 1;
+        }, () => { bucket.failed += 1; })
+        .finally(() => active.delete(task));
+      active.add(task);
+    }
+  }
+  await Promise.all(active);
+  return {
+    offered: buckets.reduce((sum, bucket) => sum + bucket.offered, 0),
+    completedSuccessful: buckets.reduce((sum, bucket) => sum + bucket.completedSuccessful, 0),
+    failed: buckets.reduce((sum, bucket) => sum + bucket.failed, 0),
+    buckets,
+  };
+}
+
+function selectSyntheticFixtureLifecycle({
+  eventReliability,
+  fixtureFactory,
+  cleanup,
+} = {}) {
+  return {
+    fixtureFactory: eventReliability && fixtureFactory === createSyntheticFixtures
+      ? createGlobalEventReliabilityFixtures
+      : fixtureFactory,
+    cleanup: eventReliability && cleanup === cleanupSyntheticRun
+      ? cleanupGlobalEventReliabilityRun
+      : cleanup,
+  };
+}
 
 function uuidFor(runId, userIndex, sequence) {
   const hex = crypto.createHash("sha256").update(`${runId}:${userIndex}:${sequence}`).digest("hex").slice(0, 32);
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20)}`;
 }
 function sleep(ms, signal) { return new Promise((resolve, reject) => { const timer = setTimeout(resolve, ms); if (signal) { if (signal.aborted) { clearTimeout(timer); reject(new Error("load run interrupted")); } else signal.addEventListener("abort", () => { clearTimeout(timer); reject(new Error("load run interrupted")); }, { once: true }); } }); }
+function writeImmutableArtifact(file, contents) {
+  if (fs.existsSync(file)) throw new Error(`capacity artifact already exists: ${file}`);
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const temporary = `${file}.tmp-${process.pid}-${crypto.randomUUID()}`;
+  fs.writeFileSync(temporary, contents, { mode: 0o600, flag: "wx" });
+  try {
+    fs.linkSync(temporary, file);
+  } finally {
+    fs.unlinkSync(temporary);
+  }
+}
+function assertGlobalEventArtifactSet({ outputDir, runId, profile } = {}) {
+  const requiredJson = (file) => {
+    if (!fs.existsSync(file)) {
+      throw new Error(`global-event aggregate requires complete artifact set: ${file}`);
+    }
+    try {
+      return JSON.parse(fs.readFileSync(file, "utf8"));
+    } catch {
+      throw new Error(`global-event aggregate requires valid JSON artifact: ${file}`);
+    }
+  };
+  return [1, 2, 3].map((repeat) => {
+    const evidence = requiredJson(path.join(outputDir, `${runId}.event-repeat-${repeat}.json`));
+    const metrics = requiredJson(path.join(outputDir, `${runId}.repeat-${repeat}.metrics.json`));
+    const report = requiredJson(path.join(outputDir, `${runId}.repeat-${repeat}.json`));
+    const textPath = path.join(outputDir, `${runId}.repeat-${repeat}.txt`);
+    if (!fs.existsSync(textPath)) {
+      throw new Error(`global-event aggregate requires complete artifact set: ${textPath}`);
+    }
+    const reportText = fs.readFileSync(textPath, "utf8");
+    const provenanceMatches = evidence.runId === runId && evidence.profile === profile &&
+      Number(evidence.repeat) === repeat && metrics.schema === "capacity-metrics-v2" &&
+      metrics.runId === runId && metrics.profile === profile && Number(metrics.repeat) === repeat &&
+      report.runId === runId && report.profile === profile &&
+      Number(report.eventReliability?.repeat) === repeat &&
+      report.eventReliability?.evidence?.runId === runId &&
+      report.eventReliability?.evidence?.profile === profile &&
+      Number(report.eventReliability?.evidence?.repeat) === repeat &&
+      evidence.infrastructure?.metricsProvenance?.runId === runId &&
+      evidence.infrastructure?.metricsProvenance?.profile === profile &&
+      Number(evidence.infrastructure?.metricsProvenance?.repeat) === repeat &&
+      reportText.includes(`run=${runId} `) && reportText.includes(`profile=${profile}@`) &&
+      reportText.includes(` repeat=${repeat}\n`);
+    if (!provenanceMatches) {
+      throw new Error(`global-event aggregate artifact provenance mismatch for repeat ${repeat}`);
+    }
+    return evidence;
+  });
+}
 function replaceTemplate(value, context) { return value.replace(/:raceId/g, context.raceId || "missing-race").replace(/:jobId/g, context.jobId || "missing-job").replace(/:userId/g, context.userId || "missing-user").replace(/\{\{today\}\}/g, context.today).replace(/\{\{generation\}\}/g, String(context.generation || 1)); }
 function weightedChoice(entries, random) { const eligible = entries.filter((item) => item.weight > 0); const total = eligible.reduce((sum, item) => sum + item.weight, 0); let needle = random() * total; for (const item of eligible) { needle -= item.weight; if (needle <= 0) return item; } return eligible[eligible.length - 1]; }
 function textReport(result) {
@@ -17,7 +139,7 @@ function textReport(result) {
   const worstLatency = endpoints.sort(([, left], [, right]) => right.latencyMs.p95 - left.latencyMs.p95)[0];
   const worstErrors = Object.entries(result.endpoints || {}).sort(([, left], [, right]) => (right.status["5xx"] + right.status.timeout) - (left.status["5xx"] + left.status.timeout))[0];
   return [
-    `run=${result.runId} target=${result.target} profile=${result.profile}@${result.profileVersion}`,
+    `run=${result.runId} target=${result.target} profile=${result.profile}@${result.profileVersion} repeat=${result.eventReliability?.repeat ?? "n/a"}`,
     `coverageRequests=${result.parameters.coverageRequests || 0}`,
     `offered=${result.parameters.arrivalRatePerSecond}/s achieved=${Number(result.summary.throughputPerSecond).toFixed(2)}/s requests=${result.summary.requests} errorRate=${(result.summary.errorRate * 100).toFixed(2)}%`,
     `latency p50/p95/p99=${result.summary.latencyMs.p50}/${result.summary.latencyMs.p95}/${result.summary.latencyMs.p99}ms stop=${result.summary.stopReason}`,
@@ -343,18 +465,34 @@ async function oneRequest({ fetchImpl, baseUrl, entry, context, sequence, reques
   } finally { clearTimeout(timer); }
 }
 
-async function runLoad({ target = "capacity-vm", baseUrl, databaseUrl, profile, users, arrivalRate, duration, timeoutMs, concurrency, runId, capacityRepeat = "1", capacityStateDirectory, confirmCapacityVm = false, dryRun = false, fetchImpl = globalThis.fetch, prisma, fixtureFactory = createSyntheticFixtures, cleanup = cleanupSyntheticRun, outputDir = path.resolve("results"), now = () => new Date(), signal, max5xxRate = 0.05, maxTimeoutRate = 0.05, random = Math.random, environment = process.env, readCapacityTelemetry = null }) {
+async function runLoad({ target = "capacity-vm", baseUrl, databaseUrl, profile, users, arrivalRate, duration, timeoutMs, concurrency, runId, capacityRepeat = "1", capacityStateDirectory, confirmCapacityVm = false, dryRun = false, fetchImpl = globalThis.fetch, prisma, fixtureFactory = createSyntheticFixtures, cleanup = cleanupSyntheticRun, outputDir = path.resolve("results"), now = () => new Date(), signal, max5xxRate = 0.05, maxTimeoutRate = 0.05, random = Math.random, environment = process.env, readCapacityTelemetry = null, readGlobalEventInfrastructure = null, enqueueResolutionJobs = null }) {
   const targetInfo = classifyTarget({ target, baseUrl, databaseUrl });
   if (!confirmCapacityVm && dryRun) throw new Error("dry-run capacity plans require --confirm-capacity-vm");
   if (!dryRun && (!runId || !capacityStateDirectory)) throw new Error("load runs require --run-id and --capacity-state-dir after a verified capacity start");
-  const capacityState = !dryRun ? assertStartedRun({ runId, directory: capacityStateDirectory, env: environment }) : null;
   const params = parseLoadParameters({ profile, users, arrivalRate, duration, timeoutMs, concurrency });
+  const capacityState = !dryRun ? assertStartedRun({ runId, directory: capacityStateDirectory, env: environment }) : null;
+  if (capacityState) assertCapacityRunProfile(capacityState, params.profile);
   if (!/^[123]$/.test(String(capacityRepeat))) {
     throw new Error("capacity repeat must be 1, 2, or 3");
   }
   let startedAt;
   const profileConfig = PROFILES[params.profile];
-  if (dryRun) return { schema: "load-test-plan-v1", target: targetInfo.kind, baseUrl: targetInfo.baseUrl, profile: params.profile, profileVersion: profileConfig.version, fixtureRaces: profileConfig.fixtureRaces, ambiguousRetryEvery: profileConfig.ambiguousRetryEvery, parameters: params, entries: profileConfig.entries.map(({ method, path: requestPath, query, headers, payloadShape, fixturePrerequisites, allowedStatuses, weight, persona, readOnly, disposableWrite }) => ({ method, path: requestPath, query, headers, payloadShape, fixturePrerequisites, allowedStatuses, weight, persona, readOnly, disposableWrite })) };
+  const eventReportName = profileConfig.eventReliability
+    ? `${runId}.repeat-${capacityRepeat}`
+    : null;
+  if (eventReportName) {
+    const requiredNewArtifacts = [
+      path.join(outputDir, `${runId}.event-repeat-${capacityRepeat}.json`),
+      path.join(outputDir, `${eventReportName}.json`),
+      path.join(outputDir, `${eventReportName}.txt`),
+      ...(String(capacityRepeat) === "3"
+        ? [path.join(outputDir, `${runId}.event-aggregate.json`)]
+        : []),
+    ];
+    const existing = requiredNewArtifacts.find((file) => fs.existsSync(file));
+    if (existing) throw new Error(`capacity artifact already exists: ${existing}`);
+  }
+  if (dryRun) return { schema: "load-test-plan-v1", target: targetInfo.kind, baseUrl: targetInfo.baseUrl, profile: params.profile, profileVersion: profileConfig.version, fixtureRaces: profileConfig.fixtureRaces, ambiguousRetryEvery: profileConfig.ambiguousRetryEvery, ...(profileConfig.eventReliability ? { eventReliability: profileConfig.eventReliability } : {}), parameters: params, entries: profileConfig.entries.map(({ method, path: requestPath, query, headers, payloadShape, fixturePrerequisites, allowedStatuses, weight, persona, readOnly, disposableWrite }) => ({ method, path: requestPath, query, headers, payloadShape, fixturePrerequisites, allowedStatuses, weight, persona, readOnly, disposableWrite })) };
   if (!prisma) throw new Error("load run requires an injected Prisma client for synthetic fixture setup");
   let fixture = null;
   const samples = [];
@@ -370,11 +508,24 @@ async function runLoad({ target = "capacity-vm", baseUrl, databaseUrl, profile, 
   let stopSettlementMonitor = false;
   let settlementMonitor = null;
   let phaseEvidence = null;
+  let eventBackground = null;
     let stopReason = "completed";
   let sequence = 0;
   const coverageEntries = profileConfig.entries.filter((entry) => !entry.path.includes(":jobId"));
+  const fixtureLifecycle = selectSyntheticFixtureLifecycle({
+    eventReliability: profileConfig.eventReliability,
+    fixtureFactory,
+    cleanup,
+  });
   try {
-    fixture = await fixtureFactory({ prisma, runId, users: params.users, races: profileConfig.fixtureRaces, env: environment });
+    fixture = await fixtureLifecycle.fixtureFactory({
+      prisma,
+      runId,
+      profile: params.profile,
+      users: params.users,
+      races: profileConfig.fixtureRaces,
+      env: environment,
+    });
     const latestRaceStartMs = Math.max(...fixture.races.map((race) => new Date(race.startedAt).getTime()));
     const sampleStart = new Date(latestRaceStartMs + 10 * 60 * 1000).toISOString();
     const sampleEnd = new Date(latestRaceStartMs + 20 * 60 * 1000).toISOString();
@@ -445,6 +596,56 @@ async function runLoad({ target = "capacity-vm", baseUrl, databaseUrl, profile, 
     const launchIntervalMs = 1000 / params.arrivalRatePerSecond;
     let nextLaunchAt = sustainedStartedMs;
     let active = new Set();
+    if (profileConfig.eventReliability) {
+      const authEntry = profileConfig.entries.find((entry) => entry.method === "GET" && entry.path === "/auth/me");
+      const enqueue = enqueueResolutionJobs || (async ({ raceId, userId, at, dirtyEnvelope }) =>
+        require("../races/models/raceResolutionJobV2").RaceResolutionJobV2.enqueueMany({
+          raceIds: [raceId], userId, now: at,
+          dirtyEnvelopeByRaceId: new Map([[raceId, dirtyEnvelope]]),
+        }));
+      const httpRate = profileConfig.eventReliability.background.authenticatedHttpPerSecond;
+      const resolutionRate = profileConfig.eventReliability.background.resolutionJobsPerSecond;
+      const [authenticatedHttp, resolutionJobs] = await Promise.all([
+        runPacedBackgroundProducer({
+          rate: httpRate,
+          durationSeconds: params.durationSeconds,
+          startedAtMs: sustainedStartedMs,
+          signal,
+          maxInFlight: params.concurrency,
+          runOne: async ({ sequence: offered }) => {
+            const context = contexts[offered % contexts.length];
+            const sample = await oneRequest({ fetchImpl, baseUrl: targetInfo.baseUrl, entry: authEntry,
+              context, sequence: offered, timeoutMs: params.timeoutMs });
+            samples.push(sample);
+            return sample.status >= 200 && sample.status < 300 && sample.timeout !== true;
+          },
+        }),
+        runPacedBackgroundProducer({
+          rate: resolutionRate,
+          durationSeconds: params.durationSeconds,
+          startedAtMs: sustainedStartedMs,
+          signal,
+          maxInFlight: params.concurrency,
+          runOne: async ({ sequence: offered }) => {
+            try {
+              const input = capacityResolutionJobInput({ fixture, sequence: offered, at: new Date() });
+              await enqueue({ ...input, sequence: offered });
+              return true;
+            } catch (error) {
+              samples.push({ endpoint: "HARNESS resolution enqueue", status: 0, latencyMs: 0,
+                completedAtMs: Date.now(), unexpectedStatus: true, timeout: false,
+                errorDiagnostic: String(error?.code || error?.message || "resolution enqueue failed").slice(0, 120) });
+              return false;
+            }
+          },
+        }),
+      ]);
+      eventBackground = {
+        authenticatedHttp,
+        resolutionJobs,
+      };
+      assertSustainedBackgroundLoad(eventBackground, params.durationSeconds);
+    } else {
     while (Date.now() < endAt || active.size > 0) {
       if (signal?.aborted) { stopReason = "operator"; break; }
       const fiveHundreds = samples.filter((item) => item.status >= 500).length;
@@ -479,6 +680,7 @@ async function runLoad({ target = "capacity-vm", baseUrl, databaseUrl, profile, 
         continue;
       }
       if (active.size) await Promise.race(active); else await sleep(Math.max(1, Math.floor(1000 / params.arrivalRatePerSecond)), signal);
+    }
     }
     await Promise.all(active);
     const queueStartedAt = Date.now();
@@ -671,10 +873,52 @@ async function runLoad({ target = "capacity-vm", baseUrl, databaseUrl, profile, 
       phaseEvidence = phaseEvidenceFromTelemetry(telemetry, { runId });
     }
     const endedAt = now().toISOString();
+    let eventReliabilityEvidence = null;
+    if (profileConfig.eventReliability) {
+      let infrastructure = null;
+      if (typeof readGlobalEventInfrastructure === "function") {
+        infrastructure = await readGlobalEventInfrastructure({
+          runId,
+          repeat: String(capacityRepeat),
+          profile: params.profile,
+          startedAt,
+          endedAt,
+          eventStartsAt: fixture.eventStartsAt,
+          samples,
+        });
+      } else if (environment.CAPACITY_GLOBAL_EVENT_INFRASTRUCTURE_PATH) {
+        infrastructure = JSON.parse(fs.readFileSync(
+          path.resolve(environment.CAPACITY_GLOBAL_EVENT_INFRASTRUCTURE_PATH),
+          "utf8",
+        ));
+      }
+      eventReliabilityEvidence = await collectGlobalEventCapacityEvidence({
+        prisma,
+        fixture,
+        profile: params.profile,
+        infrastructure,
+        now: now(),
+      });
+      eventReliabilityEvidence.runId = runId;
+      eventReliabilityEvidence.repeat = Number(capacityRepeat);
+      eventReliabilityEvidence.background = eventBackground;
+      // Every individual repetition must pass; labeling the isolated evidence
+      // as a three-repeat aggregate here only satisfies the shared gate's
+      // census precondition and does not create aggregate evidence.
+      assertGlobalEventCapacityGates({ ...eventReliabilityEvidence, repetitions: 3 });
+      writeImmutableArtifact(
+        path.join(outputDir, `${runId}.event-repeat-${capacityRepeat}.json`),
+        `${JSON.stringify(eventReliabilityEvidence, null, 2)}\n`,
+      );
+    }
     const queueP95 = queueLatencies.length ? queueLatencies.sort((a, b) => a - b)[Math.min(queueLatencies.length - 1, Math.ceil(queueLatencies.length * 0.95) - 1)] : 0;
     const redisConfigured = Boolean(environment.REDIS_URL || environment.CAPACITY_REDIS_ENABLED === "true");
     const result = buildResult({ runId, target: targetInfo.kind, baseUrl: targetInfo.baseUrl, commit: environment.CAPACITY_EXPECTED_COMMIT_SHA || capacityState?.approvedManifest?.backend?.commit || null, profile: params.profile, profileVersion: profileConfig.version, startedAt, endedAt, parameters: { ...params, coverageRequests }, samples, queue: { enqueued: jobs.length, completed: queueCompleted, drainCompleted: queueDrainCompleted, lagMs: { p95: queueP95 }, drainSeconds: (Date.now() - queueStartedAt) / 1000 }, infrastructure: { redis: { mode: redisConfigured ? "configured" : "unset", fallbackMode: redisConfigured ? "cache" : "postgres" }, queue: { mode: redisConfigured ? "postgres-backed-dedicated-resolution-process" : "in-process-local-capacity" } }, safety: { targetConfirmed: true, databaseCheck: "scrub-attested", snapshotHash: capacityState?.snapshotHash || environment.CAPACITY_SNAPSHOT_HASH, scrubAttestationHash: capacityState?.scrubAttestationHash || environment.CAPACITY_SCRUB_ATTESTATION_HASH } });
     result.summary.stopReason = stopReason;
+    if (eventReliabilityEvidence) {
+      result.eventReliability = { repeat: Number(capacityRepeat), evidence: eventReliabilityEvidence };
+      result.eventReliability.background = eventBackground;
+    }
     if (["frozen-step-sync-burst", "current-step-sync-burst"].includes(params.profile)) {
       assertBurstCapacityGates({
         samples,
@@ -694,14 +938,62 @@ async function runLoad({ target = "capacity-vm", baseUrl, databaseUrl, profile, 
       };
     }
     fs.mkdirSync(outputDir, { recursive: true, mode: 0o700 });
-    fs.writeFileSync(path.join(outputDir, `${runId}.json`), `${JSON.stringify(result, null, 2)}\n`, { mode: 0o600 });
-    fs.writeFileSync(path.join(outputDir, `${runId}.txt`), textReport(result), { mode: 0o600 });
+    const reportName = eventReportName || runId;
+    if (eventReportName) {
+      writeImmutableArtifact(path.join(outputDir, `${reportName}.json`), `${JSON.stringify(result, null, 2)}\n`);
+      writeImmutableArtifact(path.join(outputDir, `${reportName}.txt`), textReport(result));
+    } else {
+      fs.writeFileSync(path.join(outputDir, `${reportName}.json`), `${JSON.stringify(result, null, 2)}\n`, { mode: 0o600 });
+      fs.writeFileSync(path.join(outputDir, `${reportName}.txt`), textReport(result), { mode: 0o600 });
+    }
+    if (eventReliabilityEvidence && String(capacityRepeat) === "3") {
+      const repetitions = assertGlobalEventArtifactSet({ outputDir, runId, profile: params.profile });
+      const aggregate = aggregateGlobalEventCapacityEvidence(repetitions);
+      assertGlobalEventCapacityGates(aggregate);
+      writeImmutableArtifact(
+        path.join(outputDir, `${runId}.event-aggregate.json`),
+        `${JSON.stringify(aggregate, null, 2)}\n`,
+      );
+      result.eventReliability.aggregate = aggregate;
+    }
     return result;
   } finally {
     stopSettlementMonitor = true;
     if (settlementMonitor) await settlementMonitor.catch(() => {});
-    if (fixture) await cleanup({ prisma, manifest: fixture.manifest });
+    if (fixture) await fixtureLifecycle.cleanup({ prisma, manifest: fixture.manifest });
   }
 }
 
-module.exports = { assertBurstCapacityGates, assertChangedUploadSettlement, assertFixtureParity, oneRequest, payloadFor, phaseEvidenceFromTelemetry, requestUrl, runLoad, uuidFor, weightedChoice };
+function capacityResolutionJobInput({ fixture, sequence, at = new Date() } = {}) {
+  const groups = fixture?.resolutionTargetGroups;
+  if (!Array.isArray(groups) || groups.length === 0 ||
+      groups.some((group) => !Array.isArray(group) || group.length === 0)) {
+    throw new Error("global-event capacity fixture has no resolution targets");
+  }
+  const index = Number(sequence);
+  if (!Number.isInteger(index) || index < 0) {
+    throw new Error("capacity resolution sequence must be a non-negative integer");
+  }
+  const groupIndex = index % groups.length;
+  const group = groups[groupIndex];
+  const target = group[Math.floor(index / groups.length) % group.length];
+  if (![target?.raceId, target?.userId, target?.participantId]
+    .every((value) => typeof value === "string" && value.length > 0)) {
+    throw new Error("global-event capacity fixture has an invalid resolution target");
+  }
+  return {
+    raceId: target.raceId,
+    userId: target.userId,
+    participantId: target.participantId,
+    at,
+    dirtyEnvelope: {
+      reason: "STEP_SYNC",
+      dirtyUserIds: [target.userId],
+      dirtyParticipantIds: [target.participantId],
+      powerupTypes: [],
+      priority: "COALESCE",
+    },
+  };
+}
+
+module.exports = { assertBurstCapacityGates, assertChangedUploadSettlement, assertFixtureParity, assertGlobalEventArtifactSet, capacityResolutionJobInput, oneRequest, payloadFor, phaseEvidenceFromTelemetry, requestUrl, runLoad, runPacedBackgroundProducer, selectSyntheticFixtureLifecycle, uuidFor, weightedChoice, writeImmutableArtifact };

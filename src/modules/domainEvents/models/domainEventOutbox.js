@@ -246,6 +246,336 @@ async function claimProjections({
   });
 }
 
+// The daily global-event planner creates one single-recipient event per future
+// entitlement. Running those records through the generic per-event expansion
+// and per-recipient projection loop creates avoidable queue amplification at a
+// timezone boundary. This bounded fast path preserves the same durable event,
+// projection, and schedule records, but commits a page in one transaction.
+// Events that do not match the exact trusted V1 envelope remain untouched and
+// continue through the generic isolated/retryable projector.
+async function projectScheduledEntitlementEventsBatch({
+  prisma = defaultPrisma,
+  now = new Date(),
+  batchSize = 100,
+} = {}) {
+  const limit = Math.min(100, Math.max(1, Number(batchSize) || 100));
+  const rows = await prisma.$transaction((tx) => tx.$queryRawUnsafe(
+    `WITH candidate_ids AS MATERIALIZED (
+       SELECT event.id
+         FROM domain_event_outbox event
+        WHERE event.event_type='GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1'
+          AND event.schema_version=1
+          AND event.status IN ('PENDING','RETRY','EXPANDING')
+          AND event.available_at <= $1
+          AND (event.lease_until IS NULL OR event.lease_until <= $1)
+          AND event.payload ?& ARRAY[
+            'eventId','entitlementId','userId','startsAt','endsAt','scheduleRevision'
+          ]
+          AND jsonb_typeof(event.payload->'eventId')='string'
+          AND jsonb_typeof(event.payload->'entitlementId')='string'
+          AND jsonb_typeof(event.payload->'userId')='string'
+          AND jsonb_typeof(event.payload->'startsAt')='string'
+          AND jsonb_typeof(event.payload->'endsAt')='string'
+          AND (event.payload->>'startsAt') ~
+            '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$'
+          AND (event.payload->>'endsAt') ~
+            '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$'
+          AND (event.payload->>'endsAt')::timestamp > $1
+          AND event.aggregate_id=event.payload->>'entitlementId'
+          AND EXISTS (
+            SELECT 1
+              FROM domain_event_audiences audience
+              JOIN users recipient ON recipient.id=audience.recipient_id
+             WHERE audience.domain_event_id=event.id
+               AND audience.recipient_id=event.payload->>'userId'
+             GROUP BY audience.domain_event_id
+            HAVING count(*)=1
+          )
+          AND NOT EXISTS (
+            SELECT 1
+              FROM domain_event_outbox older
+             WHERE older.aggregate_type=event.aggregate_type
+               AND older.aggregate_id=event.aggregate_id
+               AND older.status NOT IN ('COMPLETED','SUPPRESSED','FAILED_TERMINAL')
+               AND (older.occurred_at < event.occurred_at OR
+                    (older.occurred_at=event.occurred_at AND older.id < event.id))
+          )
+        ORDER BY event.available_at ASC,event.occurred_at ASC,event.id ASC
+        LIMIT $2
+        FOR UPDATE SKIP LOCKED
+     ), records AS MATERIALIZED (
+       SELECT event.id AS event_id,event.available_at,event.payload,
+              audience.recipient_id,
+              CASE
+                WHEN jsonb_typeof(event.payload->'multiplier')='number'
+                  THEN (event.payload->>'multiplier')::numeric
+                ELSE 2::numeric
+              END AS multiplier,
+              CASE
+                WHEN jsonb_typeof(event.payload->'scheduleRevision')='number'
+                  THEN (event.payload->>'scheduleRevision')::int
+                ELSE 0
+              END AS source_revision
+         FROM candidate_ids candidate
+         JOIN domain_event_outbox event ON event.id=candidate.id
+         JOIN domain_event_audiences audience
+           ON audience.domain_event_id=event.id
+          AND audience.recipient_id=event.payload->>'userId'
+     ), inserted_projections AS (
+       INSERT INTO domain_event_notification_projections (
+         id,domain_event_id,recipient_user_id,delivery_key,projection_kind,
+         status,available_at,completed_at,created_at,updated_at
+       )
+       SELECT gen_random_uuid(),record.event_id,record.recipient_id,
+              'visible:GLOBAL_EVENT_STARTED:' || record.recipient_id || ':' ||
+                (record.payload->>'eventId'),
+              'VISIBLE','COMPLETED',record.available_at,$1,$1,$1
+         FROM records record
+       ON CONFLICT (domain_event_id,recipient_user_id,delivery_key,projection_kind)
+       DO NOTHING
+       RETURNING domain_event_id
+     ), upserted_schedules AS (
+       INSERT INTO notification_schedules (
+         id,recipient_user_id,type,title,body,payload,delivery_key,
+         available_at,expires_at,status,source_ref,source_revision,created_at,updated_at
+       )
+       SELECT gen_random_uuid()::text,record.recipient_id,'GLOBAL_EVENT_STARTED',
+              record.multiplier::text || 'x STEPS EVENT',
+              'Double steps are LIVE for 30 minutes. Every step counts ' ||
+                record.multiplier::text || 'x in your races! Go!',
+              jsonb_build_object(
+                'type','GLOBAL_EVENT_STARTED','route','home',
+                'eventId',record.payload->>'eventId','multiplier',record.multiplier,
+                'entitlementId',record.payload->>'entitlementId'
+              ),
+              'visible:GLOBAL_EVENT_STARTED:' || record.recipient_id || ':' ||
+                (record.payload->>'eventId'),
+              (record.payload->>'startsAt')::timestamp,
+              (record.payload->>'endsAt')::timestamp,
+              'PENDING',record.payload->>'entitlementId',record.source_revision,$1,$1
+         FROM records record
+       ON CONFLICT (recipient_user_id,delivery_key) DO UPDATE
+         SET available_at=EXCLUDED.available_at,
+             expires_at=EXCLUDED.expires_at,
+             payload=EXCLUDED.payload,
+             title=EXCLUDED.title,
+             body=EXCLUDED.body,
+             type=EXCLUDED.type,
+             source_ref=EXCLUDED.source_ref,
+             source_revision=EXCLUDED.source_revision,
+             updated_at=EXCLUDED.updated_at
+       WHERE notification_schedules.status='PENDING'
+         AND notification_schedules.source_revision < EXCLUDED.source_revision
+       RETURNING id
+     ), completed_events AS (
+       UPDATE domain_event_outbox event
+          SET status='COMPLETED',expansion_cursor='0',expansion_completed_at=$1,
+              completed_at=$1,lease_token=NULL,lease_until=NULL,
+              last_error_code=NULL,last_error_at=NULL,updated_at=$1
+         FROM candidate_ids candidate
+        WHERE event.id=candidate.id
+       RETURNING event.id
+     )
+     SELECT count(*)::int AS processed FROM completed_events`,
+    now, limit,
+  ));
+  return { processed: Number(rows[0]?.processed || 0) };
+}
+
+// A restored or restarted worker can inherit a large placement-refresh backlog.
+// Recipients without an eligible device have no provider side effect, so finish
+// those projections in one bounded statement instead of paying the generic
+// per-recipient Prisma/query cost. Rows with a usable device remain on the
+// ordinary isolated/retryable provider path.
+async function completeNoDevicePlacementProjectionsBatch({
+  prisma = defaultPrisma,
+  now = new Date(),
+  batchSize = 100,
+} = {}) {
+  const limit = Math.min(100, Math.max(1, Number(batchSize) || 100));
+  const [row = {}] = await prisma.$transaction((tx) => tx.$queryRawUnsafe(
+    `WITH candidate_ids AS MATERIALIZED (
+       SELECT projection.id
+         FROM domain_event_notification_projections projection
+         JOIN domain_event_outbox event ON event.id=projection.domain_event_id
+         JOIN domain_event_audiences audience
+           ON audience.domain_event_id=event.id
+          AND audience.recipient_id=projection.recipient_user_id
+        WHERE event.event_type='PLACEMENT_CHANGED_V1'
+          AND event.schema_version=1
+          AND event.expansion_completed_at IS NOT NULL
+          AND projection.projection_kind='SILENT_REFRESH'
+          AND projection.status IN ('PENDING','RETRY','PROCESSING')
+          AND projection.available_at <= $1
+          AND (projection.lease_until IS NULL OR projection.lease_until <= $1)
+          AND (
+            NOT (event.payload ? 'endsAt') OR
+            (jsonb_typeof(event.payload->'endsAt')='string' AND
+             (event.payload->>'endsAt') ~
+               '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$')
+          )
+          AND (
+            NOT (audience.facts ? 'expiresAt') OR
+            (jsonb_typeof(audience.facts->'expiresAt')='string' AND
+             (audience.facts->>'expiresAt') ~
+               '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$')
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM device_tokens token
+             WHERE token.user_id=projection.recipient_user_id
+               AND (
+                 token.status='ACTIVE' OR
+                 (token.status IS NULL AND NOT EXISTS (
+                   SELECT 1 FROM global_step_event_generation_state generation
+                    WHERE generation.id=1 AND generation.quarantine_started_at IS NOT NULL
+                 ))
+               )
+          )
+        ORDER BY projection.available_at,event.occurred_at,projection.id
+        LIMIT $2
+        FOR UPDATE OF projection SKIP LOCKED
+     ), records AS MATERIALIZED (
+       SELECT projection.id,projection.domain_event_id,
+              recipient.id IS NOT NULL AS recipient_exists,
+              CASE WHEN event.payload ? 'endsAt'
+                THEN (event.payload->>'endsAt')::timestamptz <= $1 ELSE false END
+                AS event_expired,
+              CASE WHEN audience.facts ? 'expiresAt'
+                THEN (audience.facts->>'expiresAt')::timestamptz <= $1 ELSE false END
+                AS audience_expired
+         FROM candidate_ids candidate
+         JOIN domain_event_notification_projections projection ON projection.id=candidate.id
+         JOIN domain_event_outbox event ON event.id=projection.domain_event_id
+         JOIN domain_event_audiences audience
+           ON audience.domain_event_id=event.id
+          AND audience.recipient_id=projection.recipient_user_id
+         LEFT JOIN users recipient ON recipient.id=projection.recipient_user_id
+     ), completed_projections AS (
+       UPDATE domain_event_notification_projections projection
+          SET status=CASE WHEN NOT record.recipient_exists OR
+                                    record.event_expired OR record.audience_expired
+                          THEN 'SUPPRESSED' ELSE 'COMPLETED' END,
+              last_error_code=CASE WHEN NOT record.recipient_exists
+                                     THEN 'RECIPIENT_DELETED'
+                                   WHEN record.event_expired OR record.audience_expired
+                                     THEN 'EVENT_EXPIRED'
+                                   ELSE NULL END,
+              lease_token=NULL,lease_until=NULL,completed_at=$1,updated_at=$1
+         FROM records record
+        WHERE projection.id=record.id
+       RETURNING projection.id,projection.domain_event_id
+     ), candidate_parents AS MATERIALIZED (
+       SELECT DISTINCT domain_event_id FROM completed_projections
+     ), completed_events AS (
+       UPDATE domain_event_outbox event
+          SET status=CASE WHEN EXISTS (
+                SELECT 1 FROM domain_event_notification_projections failed
+                 WHERE failed.domain_event_id=event.id
+                   AND failed.status='FAILED_TERMINAL'
+              ) THEN 'FAILED_TERMINAL' ELSE 'COMPLETED' END,
+              completed_at=$1,lease_token=NULL,lease_until=NULL,updated_at=$1
+         FROM candidate_parents parent
+        WHERE event.id=parent.domain_event_id
+          AND event.expansion_completed_at IS NOT NULL
+          AND event.status NOT IN ('COMPLETED','SUPPRESSED','FAILED_TERMINAL')
+          AND NOT EXISTS (
+            SELECT 1 FROM domain_event_notification_projections remaining
+             WHERE remaining.domain_event_id=event.id
+               AND remaining.status NOT IN ('COMPLETED','SUPPRESSED','FAILED_TERMINAL')
+               AND NOT EXISTS (
+                 SELECT 1 FROM completed_projections completed
+                  WHERE completed.id=remaining.id
+               )
+          )
+       RETURNING event.id
+     )
+     SELECT count(*)::int AS processed FROM completed_projections`,
+    now,
+    limit,
+  ));
+  return { processed: Number(row.processed || 0) };
+}
+
+// Mid-pack placement transitions have a pure SILENT_REFRESH classification:
+// they neither claim a cooldown nor create a notification audit row. Expand
+// that exact subset set-wise so a restart backlog does not allocate through
+// thousands of generic Prisma transactions. First-place and possible payout
+// transitions remain on the generic classifier path.
+async function expandPureSilentPlacementEventsBatch({
+  prisma = defaultPrisma,
+  now = new Date(),
+  batchSize = 100,
+} = {}) {
+  const limit = Math.min(100, Math.max(1, Number(batchSize) || 100));
+  const [row = {}] = await prisma.$transaction((tx) => tx.$queryRawUnsafe(
+    `WITH candidate_ids AS MATERIALIZED (
+       SELECT event.id
+         FROM domain_event_outbox event
+        WHERE event.event_type='PLACEMENT_CHANGED_V1'
+          AND event.schema_version=1
+          AND event.status IN ('PENDING','RETRY','EXPANDING')
+          AND event.available_at <= $1
+          AND (event.lease_until IS NULL OR event.lease_until <= $1)
+          AND event.expansion_cursor IS NULL
+          AND event.expansion_completed_at IS NULL
+          AND jsonb_typeof(event.payload->'transitionId')='string'
+          AND jsonb_typeof(event.payload->'raceId')='string'
+          AND jsonb_typeof(event.payload->'previousPlacement')='number'
+          AND jsonb_typeof(event.payload->'placement')='number'
+          AND (event.payload->>'previousPlacement')::numeric > 1
+          AND (event.payload->>'placement')::numeric > 1
+          AND (
+            COALESCE(jsonb_typeof(event.payload->'paidPlaces') <> 'number',true)
+            OR (event.payload->>'paidPlaces')::numeric <= 0
+            OR (event.payload->>'previousPlacement')::numeric >
+               (event.payload->>'paidPlaces')::numeric
+            OR (event.payload->>'placement')::numeric <=
+               (event.payload->>'paidPlaces')::numeric
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM domain_event_notification_projections projection
+             WHERE projection.domain_event_id=event.id
+          )
+          AND 1=(SELECT count(*) FROM domain_event_audiences audience
+                  WHERE audience.domain_event_id=event.id)
+        ORDER BY event.available_at,event.occurred_at,event.id
+        LIMIT $2
+        FOR UPDATE OF event SKIP LOCKED
+     ), records AS MATERIALIZED (
+       SELECT event.id AS event_id,event.available_at,event.payload,
+              audience.recipient_id,audience.ordinal
+         FROM candidate_ids candidate
+         JOIN domain_event_outbox event ON event.id=candidate.id
+         JOIN domain_event_audiences audience ON audience.domain_event_id=event.id
+     ), inserted_projections AS (
+       INSERT INTO domain_event_notification_projections (
+         id,domain_event_id,recipient_user_id,delivery_key,projection_kind,
+         status,available_at,created_at,updated_at
+       )
+       SELECT gen_random_uuid(),record.event_id,record.recipient_id,
+              'silent:PLACEMENT_CHANGED:' || (record.payload->>'transitionId') || ':' ||
+                record.recipient_id,
+              'SILENT_REFRESH','PENDING',record.available_at,$1,$1
+         FROM records record
+       RETURNING domain_event_id
+     ), expanded_events AS (
+       UPDATE domain_event_outbox event
+          SET status='PROJECTING',
+              expansion_cursor=record.ordinal::text,
+              expansion_completed_at=$1,
+              lease_token=NULL,lease_until=NULL,last_error_code=NULL,last_error_at=NULL,
+              updated_at=$1
+         FROM records record
+        WHERE event.id=record.event_id
+       RETURNING event.id
+     )
+     SELECT count(*)::int AS processed FROM expanded_events`,
+    now,
+    limit,
+  ));
+  return { processed: Number(row.processed || 0) };
+}
+
 async function loadProjectionContext(prisma, projectionId) {
   return prisma.domainEventNotificationProjection.findUnique({
     where: { id: projectionId },
@@ -439,7 +769,11 @@ async function countActiveDownstream(prisma = defaultPrisma, deliveryKeys = []) 
     prisma.inboxDeliveryDeviceAttempt.count({
       where: {
         outbox: { alert: { sourceKey: { in: deliveryKeys } } },
-        disposition: { notIn: ["ACCEPTED", "UNREGISTERED", "PERMANENT_FAIL", "EXHAUSTED", "NO_DEVICE"] },
+        disposition: { notIn: [
+          "ACCEPTED", "UNREGISTERED", "INVALID", "QUARANTINED",
+          "SUPERSEDED", "OWNERSHIP_CHANGED", "PERMANENT_FAIL",
+          "EXHAUSTED", "NO_DEVICE",
+        ] },
       },
     }),
   ]);
@@ -552,6 +886,9 @@ module.exports = {
   loadAudiencePage,
   persistExpansionPage,
   claimProjections,
+  projectScheduledEntitlementEventsBatch,
+  expandPureSilentPlacementEventsBatch,
+  completeNoDevicePlacementProjectionsBatch,
   loadProjectionContext,
   finishProjection,
   finishEventIfTerminal,

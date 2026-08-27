@@ -28,6 +28,7 @@ const {
 // The scheduler runs once per minute. The "should an event start now?" decision is the PURE function
 // shouldStartGlobalEvent; this job only does the DB read/write + push fan-out.
 const SCHEDULER_INTERVAL_MS = 60 * 1000; // every minute
+const MATERIALIZATION_BATCH_SIZE = 500;
 
 function addCivilDays(day, amount) {
   const date = new Date(`${day}T00:00:00.000Z`);
@@ -36,7 +37,7 @@ function addCivilDays(day, amount) {
 }
 
 function firstSafeLocalEventDay(now) {
-  const threshold = new Date(now).getTime() + 24 * 60 * 60 * 1000;
+  const threshold = new Date(now).getTime() + 36 * 60 * 60 * 1000;
   let day = new Date(now).toISOString().slice(0, 10);
   for (let index = 0; index < 7; index += 1) {
     const earliest = localEventWindowForZone({
@@ -74,7 +75,9 @@ function buildLocalGlobalStepEventTick(dependencies = {}) {
     // parent exists its entitlements and due edges remain contractual data.
     // Starts are drained before lower-priority fan-out so a large cohort cannot
     // make an on-time edge stale while future parents are being prepared.
-    await processBoundaries({ now: current });
+    // Start edges are owned by the continuous set-based boundary drain. This
+    // legacy scheduler retains end-edge compatibility processing only.
+    await processBoundaries({ now: current, processStarts: false });
     const materializationStarted = Date.now();
     async function drainParent(event) {
       let afterUserId = null;
@@ -82,13 +85,13 @@ function buildLocalGlobalStepEventTick(dependencies = {}) {
         if (Date.now() - materializationStarted >= materializationTickBudgetMs) break;
         const page = await materialize(event, {
           now: current,
-          batchSize: 100,
+          batchSize: MATERIALIZATION_BATCH_SIZE,
           afterUserId,
           returnPage: true,
         });
         // Compatibility for narrow injected doubles and old internal callers.
         if (typeof page === "number") {
-          if (page !== 100) break;
+          if (page !== MATERIALIZATION_BATCH_SIZE) break;
           continue;
         }
         if (!page || page.exhausted) break;
@@ -319,12 +322,19 @@ function scheduleGlobalStepEvents(dependencies = {}) {
   const runFn = dependencies.maybeStartGlobalEvent || maybeStartGlobalEvent;
   const schedule = dependencies.setInterval || setInterval;
 
+  let stopped = false;
+  let running = null;
   async function run() {
+    if (stopped) return null;
+    if (running) return running;
+    running = (async () => {
     try {
       await runFn();
     } catch (error) {
       logger.error("[CRON] Global step event scheduler error:", error);
     }
+    })().finally(() => { running = null; });
+    return running;
   }
 
   run();
@@ -333,6 +343,15 @@ function scheduleGlobalStepEvents(dependencies = {}) {
   logger.log(
     `[CRON] Global step event scheduler scheduled (every ${interval / 1000}s)`
   );
+  return {
+    tick: run,
+    async stop() {
+      if (stopped) return;
+      stopped = true;
+      clearInterval(timer);
+      await running;
+    },
+  };
 }
 
 module.exports = {
@@ -343,4 +362,5 @@ module.exports = {
   GLOBAL_EVENT_DURATION_MS,
   buildLocalGlobalStepEventTick,
   firstSafeLocalEventDay,
+  MATERIALIZATION_BATCH_SIZE,
 };

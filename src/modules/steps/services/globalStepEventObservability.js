@@ -23,7 +23,13 @@ async function captureOperationalSnapshot({ client = defaultPrisma, now = new Da
   const current = new Date(now);
   const staleBefore = new Date(current.getTime() - 2 * 60 * 1000);
   const [row = {}] = await client.$queryRawUnsafe(`
-    WITH participant_races AS (
+    WITH timezone_safe_entitlements AS (
+      SELECT entitlement.*,
+             COALESCE(known_timezone.name, 'America/New_York') AS effective_timezone
+        FROM global_step_event_entitlements entitlement
+        LEFT JOIN pg_timezone_names known_timezone
+          ON known_timezone.name=entitlement.timezone
+    ), participant_races AS (
       SELECT rp.race_id, rp.user_id, r.started_at,
              COALESCE(r.ends_at, $1) AS race_end,
              GREATEST(r.started_at, COALESCE(rp.joined_at, r.started_at)) AS membership_start,
@@ -51,11 +57,11 @@ async function captureOperationalSnapshot({ client = defaultPrisma, now = new Da
       SELECT pr.race_id, pr.user_id, pr.duration_bucket, e.event_id,
              CASE WHEN e.id IS NULL THEN NULL ELSE
                EXTRACT(EPOCH FROM (
-                 ((e.starts_at AT TIME ZONE 'UTC') AT TIME ZONE e.timezone) - e.starts_at
+                 ((e.starts_at AT TIME ZONE 'UTC') AT TIME ZONE e.effective_timezone) - e.starts_at
                )) / 60
              END AS offset_minutes
         FROM participant_races pr
-        LEFT JOIN global_step_event_entitlements e
+        LEFT JOIN timezone_safe_entitlements e
           ON e.user_id = pr.user_id
          AND e.starts_at < pr.membership_end
          AND e.ends_at > pr.membership_start
@@ -92,9 +98,9 @@ async function captureOperationalSnapshot({ client = defaultPrisma, now = new Da
              COUNT(*) AS count
         FROM (
           SELECT EXTRACT(EPOCH FROM (
-                   ((e.starts_at AT TIME ZONE 'UTC') AT TIME ZONE e.timezone) - e.starts_at
+                   ((e.starts_at AT TIME ZONE 'UTC') AT TIME ZONE e.effective_timezone) - e.starts_at
                  )) / 60 AS offset_minutes
-            FROM global_step_event_entitlements e
+            FROM timezone_safe_entitlements e
         ) offsets
        GROUP BY 1
     ), durable_counters AS (

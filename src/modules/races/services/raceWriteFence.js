@@ -23,6 +23,35 @@ async function acquireRaceWriteFences(tx, raceIds) {
   return ordered;
 }
 
+async function acquireRaceWriteFencesSetBased(tx, raceIds, now = new Date()) {
+  if (!tx || !Array.isArray(raceIds)) {
+    throw new TypeError("tx and raceIds are required");
+  }
+  const ordered = [...new Set(raceIds.filter(Boolean))].sort();
+  if (!ordered.length) return [];
+  await tx.$executeRawUnsafe(
+    `INSERT INTO race_resolution_jobs_v2 (
+       id, race_id, generation, state, requested_at, completed_at,
+       last_completed_at, created_at, updated_at
+     )
+     SELECT gen_random_uuid()::text, race_id, 0,
+            'succeeded'::"RaceResolutionJobState", $2, $2, $2, $2, $2
+       FROM unnest($1::text[]) AS race_id
+     ON CONFLICT (race_id) DO NOTHING`,
+    ordered,
+    now,
+  );
+  await tx.$queryRawUnsafe(
+    `SELECT race_id
+       FROM race_resolution_jobs_v2
+      WHERE race_id = ANY($1::text[])
+      ORDER BY race_id
+      FOR UPDATE`,
+    ordered,
+  );
+  return ordered;
+}
+
 async function acquireFundedMembershipRaceWriteFences(
   tx,
   { userIds = [], targetRaceIds = [] } = {},
@@ -96,6 +125,7 @@ async function withRaceWriteFence(
 module.exports = {
   acquireRaceWriteFence,
   acquireRaceWriteFences,
+  acquireRaceWriteFencesSetBased,
   acquireFundedMembershipRaceWriteFences,
   lockCompetitionRows,
   withRaceWriteFence,

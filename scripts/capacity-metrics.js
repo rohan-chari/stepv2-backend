@@ -2,70 +2,160 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
-const { execFileSync } = require("node:child_process");
+const crypto = require("node:crypto");
+const { execFile } = require("node:child_process");
+const { promisify } = require("node:util");
+const { Pool } = require("pg");
+
+const execFileAsync = promisify(execFile);
 
 function parseArgs(argv) {
   const result = {};
-  for (let i = 0; i < argv.length; i += 1) {
-    if (!argv[i].startsWith("--")) continue;
-    const key = argv[i].slice(2).replaceAll("-", "_");
-    result[key] = argv[i + 1] && !argv[i + 1].startsWith("--") ? argv[++i] : true;
+  for (let index = 0; index < argv.length; index += 1) {
+    if (!argv[index].startsWith("--")) continue;
+    const key = argv[index].slice(2).replaceAll("-", "_");
+    result[key] = argv[index + 1] && !argv[index + 1].startsWith("--") ? argv[++index] : true;
   }
   return result;
 }
 
-const args = parseArgs(process.argv.slice(2));
-const config = JSON.parse(fs.readFileSync(path.resolve(args.config), "utf8"));
-const output = path.resolve(args.output);
-const samples = [];
-let stopping = false;
+function roleUrls(config) {
+  const base = new URL(config.base_url);
+  const atPort = (port) => {
+    const value = new URL(base);
+    value.port = String(port);
+    value.pathname = "/health";
+    value.search = "";
+    return value.toString();
+  };
+  return { http: atPort(3000), resolution: atPort(3010), cron: atPort(3011) };
+}
 
-function dockerStats() {
+async function dockerStats(config) {
   try {
-    const raw = execFileSync("limactl", ["shell", config.lima_instance, "--", "bash", "-lc", "docker stats --no-stream --format '{{json .}}'"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    const { stdout: raw } = await execFileAsync("limactl", ["shell", config.lima_instance, "--", "bash", "-lc", "docker stats --no-stream --format '{{json .}}'"], {
+      encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
+    });
     return raw.split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
   } catch {
     return [];
   }
 }
 
-async function sample() {
-  let health = null;
+async function fetchHealth(url) {
   try {
-    const response = await fetch(config.health_url || `${config.base_url}/health`);
-    health = response.ok ? await response.json() : { status: response.status };
+    // A fresh connection lets the HTTP health census observe both cluster
+    // workers instead of remaining pinned to one keep-alive socket.
+    const response = await fetch(url, { headers: { Connection: "close" } });
+    return response.ok ? await response.json() : { status: response.status };
   } catch (error) {
-    health = { error: error.message };
+    return { error: error.message };
   }
-  samples.push({ at: new Date().toISOString(), health, containers: dockerStats() });
 }
 
-async function finish() {
-  await sample();
-  fs.mkdirSync(path.dirname(output), { recursive: true, mode: 0o700 });
-  const numeric = (values) => values.filter((value) => Number.isFinite(value));
-  const cpu = (name) => numeric(samples.flatMap((s) => s.containers.filter((c) => c.Name === name).map((c) => Number.parseFloat(String(c.CPUPerc || "").replace("%", "")))));
-  const memory = (name) => numeric(samples.flatMap((s) => s.containers.filter((c) => c.Name === name).map((c) => Number.parseFloat(String(c.MemUsage || "").split("/")[0]))));
-  const pool = samples.map((s) => s.health?.capacity?.dbPool).filter(Boolean);
-  const summary = {
-    samples: samples.length,
-    backend: { cpuPercent: cpu("step-capacity-backend"), memoryRaw: memory("step-capacity-backend") },
-    database: { cpuPercent: cpu("step-capacity-postgres"), memoryRaw: memory("step-capacity-postgres") },
-    redis: { cpuPercent: cpu("step-capacity-redis"), memoryRaw: memory("step-capacity-redis") },
-    dbPool: {
-      max: Math.max(0, ...pool.map((p) => Number(p.max) || 0)),
-      peakTotal: Math.max(0, ...pool.map((p) => Number(p.total) || 0)),
-      peakWaiting: Math.max(0, ...pool.map((p) => Number(p.waiting) || 0)),
-      utilizationPercentPeak: Math.max(0, ...pool.map((p) => p.max ? (Number(p.total) / Number(p.max)) * 100 : 0)),
-      waitMsAverage: pool.length ? pool.at(-1).waitMsAverage : 0,
-      waitMsMax: Math.max(0, ...pool.map((p) => Number(p.waitMsMax) || 0)),
-      waitCount: pool.length ? pool.at(-1).waitCount : 0,
-    },
-  };
-  fs.writeFileSync(output, `${JSON.stringify({ schema: "capacity-metrics-v1", summary, samples }, null, 2)}\n`, { mode: 0o600 });
+function writeImmutable(file, value) {
+  if (fs.existsSync(file)) throw new Error(`capacity metrics artifact already exists: ${file}`);
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const temporary = `${file}.tmp-${process.pid}-${crypto.randomUUID()}`;
+  fs.writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600, flag: "wx" });
+  try {
+    fs.linkSync(temporary, file);
+  } finally {
+    fs.unlinkSync(temporary);
+  }
 }
 
-const timer = setInterval(() => { sample().catch(() => {}); }, 1000);
-sample().catch(() => {});
-process.once("SIGTERM", async () => { if (stopping) return; stopping = true; clearInterval(timer); await finish(); process.exit(0); });
-process.once("SIGINT", async () => { if (stopping) return; stopping = true; clearInterval(timer); await finish(); process.exit(0); });
+function createCollector({
+  config,
+  output,
+  databaseUrl = process.env.DATABASE_URL,
+  provenance = {
+    runId: process.env.CAPACITY_RUN_ID,
+    profile: process.env.CAPACITY_GLOBAL_EVENT_PROFILE,
+    repeat: process.env.CAPACITY_REPEAT,
+  },
+} = {}) {
+  const urls = roleUrls(config);
+  const samples = [];
+  const pool = databaseUrl ? new Pool({ connectionString: databaseUrl, max: 1 }) : null;
+  let timer = null;
+  let stopping = false;
+  const inFlight = new Set();
+
+  async function databaseSample() {
+    if (!pool) return { lockWaitMs: [], resolutionQueueLagMs: Number.NaN };
+    try {
+      const [locks, queue] = await Promise.all([
+        pool.query(`SELECT extract(epoch FROM (clock_timestamp()-query_start))*1000 AS ms
+          FROM pg_stat_activity
+          WHERE datname=current_database() AND wait_event_type='Lock'`),
+        pool.query(`SELECT coalesce(max(extract(epoch FROM (clock_timestamp()-updated_at))*1000),0) AS ms
+          FROM race_resolution_jobs_v2 WHERE state IN ('queued','running')`),
+      ]);
+      return {
+        lockWaitMs: locks.rows.map((row) => Number(row.ms)).filter(Number.isFinite),
+        resolutionQueueLagMs: Number(queue.rows[0]?.ms || 0),
+      };
+    } catch (error) {
+      return { lockWaitMs: [], resolutionQueueLagMs: Number.NaN, databaseError: error.message };
+    }
+  }
+
+  async function sample() {
+    const [http, resolution, cron, database, containers] = await Promise.all([
+      fetchHealth(urls.http), fetchHealth(urls.resolution), fetchHealth(urls.cron),
+      databaseSample(), dockerStats(config),
+    ]);
+    samples.push({
+      at: new Date().toISOString(), health: { http, resolution, cron },
+      containers, ...database,
+    });
+  }
+
+  function scheduleSample() {
+    if (stopping) return;
+    const pending = sample().catch(() => {}).finally(() => inFlight.delete(pending));
+    inFlight.add(pending);
+  }
+
+  async function finish() {
+    if (stopping) return;
+    stopping = true;
+    if (timer) clearInterval(timer);
+    await Promise.allSettled([...inFlight]);
+    await sample();
+    if (pool) await pool.end();
+    writeImmutable(output, {
+      schema: "capacity-metrics-v2",
+      runId: provenance.runId,
+      profile: provenance.profile,
+      repeat: Number(provenance.repeat),
+      samples,
+    });
+  }
+
+  function start() {
+    if (timer) return;
+    if (fs.existsSync(output)) throw new Error(`capacity metrics artifact already exists: ${output}`);
+    timer = setInterval(scheduleSample, 1_000);
+    scheduleSample();
+  }
+  return { finish, sample, samples, start };
+}
+
+async function main() {
+  const args = parseArgs(process.argv.slice(2));
+  const config = JSON.parse(fs.readFileSync(path.resolve(args.config), "utf8"));
+  const collector = createCollector({ config, output: path.resolve(args.output) });
+  collector.start();
+  const stop = async () => { await collector.finish(); process.exit(0); };
+  process.once("SIGTERM", stop);
+  process.once("SIGINT", stop);
+}
+
+if (require.main === module) main().catch((error) => {
+  process.stderr.write(`${error.stack || error.message}\n`);
+  process.exitCode = 1;
+});
+
+module.exports = { createCollector, roleUrls, writeImmutable };

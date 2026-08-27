@@ -30,6 +30,7 @@ const ROWS = [
   ["REFERRAL_REWARDED_V1", "REFERRAL_REWARDED", "races/commands/completeRace", "REFERRAL"],
   ["RACE_CANCELLED_V1", "RACE_CANCELLED", "races/commands/cancelRace", "RACE"],
   ["GLOBAL_STEP_EVENT_ACTIVATED_V1", "GLOBAL_EVENT_STARTED", "steps/global-event-boundary", "GLOBAL_STEP_EVENT"],
+  ["GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1", null, "steps/global-event-entitlement", "GLOBAL_STEP_EVENT_ENTITLEMENT"],
   ["POWERUP_USED_V1", "POWERUP_USED", "powerups/commands/usePowerup", "POWERUP"],
   ["RACE_MESSAGE_SENT_V1", "RACE_MESSAGE_SENT", "social/commands/sendRaceMessage", "RACE_MESSAGE"],
   ["PLACEMENT_CHANGED_V1", "PLACEMENT_CHANGED", "races/jobs/placementRecompute", "RACE"],
@@ -92,6 +93,7 @@ function publicTypeAndSource(event, audience) {
     case "REFERRAL_REWARDED_V1": return ["REFERRAL_REWARDED", `${p.referrerId}:${p.refereeId}`];
     case "RACE_CANCELLED_V1": return ["RACE_CANCELLED", p.raceId];
     case "GLOBAL_STEP_EVENT_ACTIVATED_V1": return ["GLOBAL_EVENT_STARTED", p.eventId];
+    case "GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1": return ["GLOBAL_EVENT_STARTED", p.eventId];
     case "POWERUP_USED_V1": return ["POWERUP_USED", p.notificationIntentId || `powerup:${p.powerupId}${p.targetUserId ? `:${p.targetUserId}` : ""}`];
     case "RACE_MESSAGE_SENT_V1": return ["race_message", p.messageId];
     case "PLACEMENT_CHANGED_V1": return ["PLACEMENT_CHANGED", audience.facts?.payoutDrop === true ? `payout-drop:${p.raceId}:${userId}` : p.transitionId];
@@ -156,6 +158,7 @@ function legacyPayloadForRecipient(event, audience) {
     case "REFERRAL_REWARDED_V1": return { ...p, userId: recipient };
     case "RACE_CANCELLED_V1": return { ...p, participantUserIds: [recipient] };
     case "GLOBAL_STEP_EVENT_ACTIVATED_V1": return { ...p, participantUserIds: [recipient] };
+    case "GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1": return { ...p, participantUserIds: [recipient] };
     case "POWERUP_USED_V1": return { ...p, userId: p.actorUserId, targetUserId: recipient, notificationIntentId: publicTypeAndSource(event, audience)[1] };
     case "RACE_MESSAGE_SENT_V1": return {
       ...p,

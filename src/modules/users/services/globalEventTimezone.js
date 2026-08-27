@@ -1,24 +1,36 @@
 const STABILITY_MS = 48 * 60 * 60 * 1000;
 
 function isValidIanaTimeZone(timeZone) {
-  if (typeof timeZone !== "string" || timeZone.length === 0) return false;
+  return canonicalIanaTimeZone(timeZone) !== null;
+}
+
+function canonicalIanaTimeZone(timeZone) {
+  if (typeof timeZone !== "string" || timeZone.length === 0) return null;
   try {
-    new Intl.DateTimeFormat("en-US", { timeZone }).format(new Date(0));
-    return true;
+    return new Intl.DateTimeFormat("en-US", { timeZone })
+      .resolvedOptions().timeZone;
   } catch {
-    return false;
+    return null;
   }
 }
 
 // Returns the smallest write needed for the stable event-timezone state, or
 // null for the steady-state hot path. This never mutates users.timezone.
 function globalEventTimezoneMutation({ user, observedTimezone, now = new Date() }) {
-  if (!user || !isValidIanaTimeZone(observedTimezone)) return null;
-  const stable = user.globalEventTimezone || null;
-  const candidate = user.globalEventTimezoneCandidate || null;
+  const observed = canonicalIanaTimeZone(observedTimezone);
+  if (!user || !observed) return null;
+  const stable = canonicalIanaTimeZone(user.globalEventTimezone);
+  const candidate = canonicalIanaTimeZone(user.globalEventTimezoneCandidate);
   const at = new Date(now);
 
-  if (observedTimezone === stable) {
+  if (observed === stable) {
+    if (user.globalEventTimezone !== observed) {
+      return {
+        globalEventTimezone: observed,
+        globalEventTimezoneCandidate: null,
+        globalEventTimezoneCandidateSince: null,
+      };
+    }
     if (!candidate && !user.globalEventTimezoneCandidateSince) return null;
     return {
       globalEventTimezoneCandidate: null,
@@ -26,9 +38,9 @@ function globalEventTimezoneMutation({ user, observedTimezone, now = new Date() 
     };
   }
 
-  if (candidate !== observedTimezone) {
+  if (candidate !== observed) {
     return {
-      globalEventTimezoneCandidate: observedTimezone,
+      globalEventTimezoneCandidate: observed,
       globalEventTimezoneCandidateSince: at,
     };
   }
@@ -41,7 +53,7 @@ function globalEventTimezoneMutation({ user, observedTimezone, now = new Date() 
   }
   if (at.getTime() - since.getTime() < STABILITY_MS) return null;
   return {
-    globalEventTimezone: observedTimezone,
+    globalEventTimezone: observed,
     globalEventTimezoneCandidate: null,
     globalEventTimezoneCandidateSince: null,
   };
@@ -49,6 +61,7 @@ function globalEventTimezoneMutation({ user, observedTimezone, now = new Date() 
 
 module.exports = {
   STABILITY_MS,
+  canonicalIanaTimeZone,
   isValidIanaTimeZone,
   globalEventTimezoneMutation,
 };

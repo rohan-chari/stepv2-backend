@@ -7,10 +7,29 @@ const path = require("node:path");
 const { execFileSync, spawn } = require("node:child_process");
 const { parseLoadParameters } = require("../src/modules/loadTesting/contract");
 const { runLoad } = require("../src/modules/loadTesting/runner");
+const { normalizeGlobalEventInfrastructure } = require("../src/modules/loadTesting/globalEventInfrastructure");
+const { observeChildExit } = require("../src/modules/loadTesting/metricsProcess");
+const { capacityLoadParameter } = require("../src/modules/loadTesting/profileParameters");
 const { preflight: capacityPreflight } = require("../src/modules/loadTesting/lifecycle");
 const { destroy: destroyCapacity, stop: stopCapacity } = require("../src/modules/loadTesting/lifecycle");
 let prisma;
 let metricsProcess;
+let metricsExit;
+let metricsFinished = false;
+
+async function finishMetricsAndRead(metricsPath) {
+  if (!metricsProcess) throw new Error("global-event capacity metrics collector is not running");
+  const child = metricsProcess;
+  if (child.exitCode == null && child.signalCode == null && !child.killed) child.kill("SIGTERM");
+  const outcome = await metricsExit;
+  if (outcome.error) throw outcome.error;
+  if (outcome.code !== 0) {
+    throw new Error(`capacity metrics exited ${outcome.code ?? outcome.signal ?? "without status"}`);
+  }
+  metricsFinished = true;
+  metricsProcess = undefined;
+  return JSON.parse(fs.readFileSync(metricsPath, "utf8"));
+}
 
 function parseArgs(argv) {
   const result = {};
@@ -49,6 +68,7 @@ function applyProvider(config, configPathValue) {
   process.env.CAPACITY_MODE = "true";
   process.env.CAPACITY_OUTBOUND_DISABLED = "true";
   process.env.CAPACITY_RUN_ID = config.run_id;
+  process.env.CAPACITY_GLOBAL_EVENT_PROFILE = config.profile || "";
   process.env.CAPACITY_DB_NAME = config.db_name || "steps_tracker_capacity";
   process.env.CAPACITY_DB_HOST_ALLOWLIST = "127.0.0.1";
   process.env.CAPACITY_REDIS_ENABLED = "true";
@@ -83,14 +103,38 @@ async function main() {
   const [command] = process.argv.slice(2);
   const args = parseArgs(process.argv.slice(3));
   const config = loadConfig(args);
+  if (args.profile) config.profile = args.profile;
+  if (args.run_id) config.run_id = args.run_id;
   const argsConfigPath = args.config;
   applyProvider(config, args.config);
   prisma = require("../src/db").prisma;
   const value = (name, fallback) => args[name] ?? config[name] ?? fallback;
+  const selectedProfile = value("profile");
+  const loadValue = (name) => capacityLoadParameter({
+    args, config, profile: selectedProfile, name,
+  });
   const outputDir = value("output_dir") ? path.resolve(value("output_dir")) : path.resolve("results");
-  const metricsPath = path.join(outputDir, `${value("run_id")}.metrics.json`);
+  const eventRepeatSuffix = String(value("profile") || "").startsWith("event_")
+    ? `.repeat-${value("repeat", "1")}`
+    : "";
+  const metricsPath = path.join(outputDir, `${value("run_id")}${eventRepeatSuffix}.metrics.json`);
+  process.env.CAPACITY_REPEAT = String(value("repeat", "1"));
+  if (eventRepeatSuffix && command === "run" && args.dry_run !== true) {
+    const runId = value("run_id");
+    const repeat = String(value("repeat", "1"));
+    const requiredNewArtifacts = [
+      metricsPath,
+      path.join(outputDir, `${runId}.event-repeat-${repeat}.json`),
+      path.join(outputDir, `${runId}.repeat-${repeat}.json`),
+      path.join(outputDir, `${runId}.repeat-${repeat}.txt`),
+      ...(repeat === "3" ? [path.join(outputDir, `${runId}.event-aggregate.json`)] : []),
+    ];
+    const existing = requiredNewArtifacts.find((file) => fs.existsSync(file));
+    if (existing) throw new Error(`capacity artifact already exists: ${existing}`);
+  }
   if (config.provider === "lima" && command === "run" && args.dry_run !== true) {
     metricsProcess = spawn(process.execPath, [path.resolve(__dirname, "capacity-metrics.js"), "--config", path.resolve(args.config), "--output", metricsPath], { stdio: "ignore", env: process.env });
+    metricsExit = observeChildExit(metricsProcess);
   }
   if (command === "preflight") {
     const params = parseLoadParameters({
@@ -131,12 +175,12 @@ async function main() {
     target: value("target", "capacity-vm"),
     baseUrl: required({ base_url: value("base_url") }, "base_url"),
     databaseUrl: args.dry_run === true ? undefined : process.env.DATABASE_URL,
-    profile: value("profile"),
-    users: value("users"),
-    arrivalRate: value("arrival_rate"),
-    duration: value("duration"),
-    timeoutMs: value("timeout_ms"),
-    concurrency: value("concurrency"),
+    profile: selectedProfile,
+    users: loadValue("users"),
+    arrivalRate: loadValue("arrival_rate"),
+    duration: loadValue("duration"),
+    timeoutMs: loadValue("timeout_ms"),
+    concurrency: loadValue("concurrency"),
     runId: value("run_id"),
     capacityRepeat: value("repeat", "1"),
     capacityStateDirectory: value("capacity_state_dir", config.directory || process.env.CAPACITY_STATE_DIR),
@@ -146,10 +190,22 @@ async function main() {
     outputDir,
     signal: controller.signal,
     readCapacityTelemetry: limaTelemetryReader(config),
+    readGlobalEventInfrastructure: config.provider === "lima"
+      ? async ({ samples, eventStartsAt, startedAt, profile: eventProfile, runId: eventRunId, repeat }) => normalizeGlobalEventInfrastructure({
+          metrics: await finishMetricsAndRead(metricsPath),
+          requestSamples: samples,
+          expectedProfile: eventProfile,
+          expectedRunId: eventRunId,
+          expectedRepeat: repeat,
+          eventStartsAt: eventProfile === "event_provisioning_10000"
+            ? new Date(new Date(startedAt).getTime() + 120_000)
+            : eventStartsAt,
+        })
+      : null,
   });
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   } finally {
-    if (metricsProcess) {
+    if (metricsProcess && !metricsFinished) {
       metricsProcess.kill("SIGTERM");
       metricsProcess = undefined;
     }

@@ -1,5 +1,15 @@
 const { prisma } = require("../../db");
 
+async function activeStatusFilter(client = prisma) {
+  const state = await client.globalStepEventGenerationState.findUnique({
+    where: { id: 1 },
+    select: { quarantineStartedAt: true },
+  });
+  return state?.quarantineStartedAt
+    ? { status: "ACTIVE" }
+    : { OR: [{ status: "ACTIVE" }, { status: null }] };
+}
+
 const DeviceToken = {
   async saveToken({ userId, token, platform, adminMetricsOpenCapable = false, adminMetricsOpenEpochId = null }) {
     return prisma.deviceToken.upsert({
@@ -27,13 +37,21 @@ const DeviceToken = {
   },
 
   async findByUserId(userId) {
-    return prisma.deviceToken.findMany({ where: { userId } });
+    const status = await activeStatusFilter();
+    return prisma.deviceToken.findMany({
+      where: { userId, ...status },
+      orderBy: [{ lastRegisteredAt: "desc" }, { updatedAt: "desc" }, { id: "desc" }],
+      take: 10,
+    });
   },
 
   async findByUserIds(userIds) {
     const ids = [...new Set(userIds || [])].filter(Boolean);
     if (ids.length === 0) return [];
-    return prisma.deviceToken.findMany({ where: { userId: { in: ids } } });
+    const status = await activeStatusFilter();
+    return prisma.deviceToken.findMany({
+      where: { userId: { in: ids }, ...status },
+    });
   },
 
   async deleteTokensExact(pairs, chunkSize = 500) {
@@ -62,4 +80,4 @@ const DeviceToken = {
   },
 };
 
-module.exports = { DeviceToken };
+module.exports = { DeviceToken, activeStatusFilter };

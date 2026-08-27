@@ -10,6 +10,7 @@ const {
 } = require("../../src/modules/steps/services/globalStepEventEntitlement");
 const {
   globalEventTimezoneMutation,
+  canonicalIanaTimeZone,
 } = require("../../src/modules/users/services/globalEventTimezone");
 const {
   findEligibleByRace,
@@ -133,6 +134,18 @@ test("stable timezone candidate promotes only after 48 hours of matching observa
     globalEventTimezone: "Europe/Madrid",
     globalEventTimezoneCandidate: null,
     globalEventTimezoneCandidateSince: null,
+  });
+});
+
+test("legacy IANA aliases are canonicalized before becoming durable event timezones", () => {
+  assert.equal(canonicalIanaTimeZone("US/Central"), "America/Chicago");
+  assert.deepEqual(globalEventTimezoneMutation({
+    user: { globalEventTimezone: "America/New_York" },
+    observedTimezone: "US/Central",
+    now: new Date("2026-08-18T10:00:00Z"),
+  }), {
+    globalEventTimezoneCandidate: "America/Chicago",
+    globalEventTimezoneCandidateSince: new Date("2026-08-18T10:00:00Z"),
   });
 });
 
@@ -365,4 +378,93 @@ test("materialization cursor advances past a full page of ended timezone candida
     candidates: 50, created: 40, nextCursor: "user-149", exhausted: true,
   });
   assert.deepEqual(created, users.slice(110).map((user) => user.id));
+});
+
+test("production materialization writes one bounded entitlement/event page instead of per-user transactions", async () => {
+  const users = Array.from({ length: 100 }, (_, index) => ({
+    id: `batch-user-${String(index).padStart(3, "0")}`,
+    timezone: "America/New_York",
+    globalEventTimezone: "America/New_York",
+  }));
+  const entitlements = [];
+  const domainEvents = [];
+  const audiences = [];
+  const tx = {
+    globalStepEventEntitlement: {
+      async createMany({ data }) {
+        entitlements.push(...data.map((row, index) => ({
+          id: `entitlement-${index}`, scheduleRevision: 0, ...row,
+        })));
+        return { count: data.length };
+      },
+      async findMany() { return entitlements; },
+    },
+    domainEventOutbox: {
+      async createMany({ data }) {
+        domainEvents.push(...data.map((row, index) => ({ id: `event-${index}`, ...row })));
+        return { count: data.length };
+      },
+      async findMany() { return domainEvents; },
+    },
+    domainEventAudience: {
+      async createMany({ data }) { audiences.push(...data); return { count: data.length }; },
+    },
+  };
+  const client = {
+    raceParticipant: { async findMany() { return users.map((user) => ({ user })); } },
+    globalStepEventEntitlement: tx.globalStepEventEntitlement,
+    async $transaction(work) { return work(tx); },
+  };
+  const page = await materializeEntitlementsForActiveRacers({
+    ...EVENT, eventDay: "2098-08-26", localStartMinute: 600,
+  }, {
+    prisma: client, now: new Date("2098-08-25T10:00:00.000Z"),
+    batchSize: 100, returnPage: true,
+    generationUsable: async () => true,
+    recordCounters: async () => {},
+  });
+  assert.equal(entitlements.length, 100);
+  assert.equal(domainEvents.length, 100);
+  assert.equal(audiences.length, 100);
+  assert.equal(page.created, 100);
+  assert.equal(page.nextCursor, "batch-user-099");
+  assert.equal(page.exhausted, false);
+});
+
+test("production materialization persists a 500-user page with one set-based statement", async () => {
+  const users = Array.from({ length: 500 }, (_, index) => ({
+    id: `set-user-${String(index).padStart(3, "0")}`,
+    timezone: "America/New_York",
+    globalEventTimezone: "America/New_York",
+  }));
+  let statements = 0;
+  const tx = {
+    async $queryRawUnsafe(_sql, preparedJson) {
+      statements += 1;
+      assert.equal(JSON.parse(preparedJson).length, 500);
+      return [{ created: 500, selected: 500, events: 500, conflicts: 0 }];
+    },
+    globalStepEventEntitlement: {
+      async createMany() { throw new Error("set-based path must not call createMany"); },
+    },
+  };
+  const client = {
+    raceParticipant: { async findMany() { return users.map((user) => ({ user })); } },
+    globalStepEventEntitlement: tx.globalStepEventEntitlement,
+    async $transaction(work) { return work(tx); },
+  };
+
+  const page = await materializeEntitlementsForActiveRacers({
+    ...EVENT, eventDay: "2098-08-26", localStartMinute: 600,
+  }, {
+    prisma: client, now: new Date("2098-08-25T10:00:00.000Z"),
+    batchSize: 500, returnPage: true,
+    generationUsable: async () => true,
+    recordCounters: async () => {},
+  });
+
+  assert.equal(statements, 1);
+  assert.equal(page.created, 500);
+  assert.equal(page.nextCursor, "set-user-499");
+  assert.equal(page.exhausted, false);
 });

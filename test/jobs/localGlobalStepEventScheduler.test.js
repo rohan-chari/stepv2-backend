@@ -157,15 +157,17 @@ test("local creation permanently runs retention before creating parents", async 
 });
 
 test("maintenance drains more than one hundred missing racer entitlements", async () => {
-  const batches = [100, 100, 37, 0];
+  const batches = [500, 500, 237, 0];
   let materialized = 0;
   const run = buildLocalGlobalStepEventTick({
     now: () => new Date("2026-08-19T00:00:00Z"),
+    cronOwnerGuard: async () => true,
     appSettings: { async getFlag() { return false; } },
     GlobalStepEvent: {
       async findLocalParentsForMaintenance() {
         return [{ id: "existing", scheduleMode: "LOCAL_ENTITLEMENTS" }];
       },
+      async createLocalParentIfAbsent() { return null; },
     },
     materializeEntitlementsForActiveRacers: async () => {
       const count = batches.shift();
@@ -179,7 +181,7 @@ test("maintenance drains more than one hundred missing racer entitlements", asyn
   });
 
   await run();
-  assert.equal(materialized, 237);
+  assert.equal(materialized, 1237);
   assert.deepEqual(batches, [0]);
 });
 
@@ -191,13 +193,16 @@ test("maintenance advances a candidate cursor when a full page creates nothing",
   ];
   const run = buildLocalGlobalStepEventTick({
     now: () => new Date("2026-08-19T00:00:00Z"),
+    cronOwnerGuard: async () => true,
     appSettings: { async getFlag() { return false; } },
     GlobalStepEvent: {
       async findLocalParentsForMaintenance() {
         return [{ id: "existing", scheduleMode: "LOCAL_ENTITLEMENTS" }];
       },
+      async createLocalParentIfAbsent() { return null; },
     },
     materializeEntitlementsForActiveRacers: async (_event, options) => {
+      assert.equal(options.batchSize, 500);
       cursors.push(options.afterUserId || null);
       return pages.shift();
     },

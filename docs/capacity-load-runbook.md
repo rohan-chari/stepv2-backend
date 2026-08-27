@@ -103,6 +103,58 @@ destroys the environment.
 - Do not increase the application pool solely because it waits. Check Postgres
   CPU, slow queries, lock/wait data, and query plans first.
 
+## Global-event deployment gate
+
+The global-event reliability release uses three isolated profiles, not
+`full-app`. Each profile must start a newly restored/scrubbed environment with
+its own run id, then complete repeats 1, 2, and 3 against that same started
+environment. Command-line `--profile` and `--run-id` values are authoritative:
+the start path passes both into every Lima process, health telemetry proves the
+running profile, and the load path refuses a profile that differs from the
+started capacity state.
+
+For each profile below, replace `<run-id>` with a unique lowercase safe id:
+
+```sh
+npm run capacity -- start --config docs/capacity-load.config.json \
+  --profile <profile> --run-id <run-id>
+
+for repeat in 1 2 3; do
+  npm run load-test -- run --config docs/capacity-load.config.json \
+    --profile <profile> --run-id <run-id> --repeat "$repeat"
+done
+
+npm run capacity -- destroy --config docs/capacity-load.config.json \
+  --profile <profile> --run-id <run-id>
+```
+
+Run that sequence for:
+
+1. `event_provisioning_10000`
+2. `event_boundary_10000`
+3. `event_provider_outage_10000`
+
+Do not reuse a running environment across profiles. Retain, for every run id,
+all `repeat-{1,2,3}.{json,txt,metrics.json}` files, all three
+`event-repeat-{1,2,3}.json` files, and `event-aggregate.json`. Deployment is
+blocked unless every individual repeat and each aggregate gate passes. A
+missing percentile, missing eligible schedule/alert/outbox, eligible
+cancellation, incomplete target/provider census, failed one-second background
+bucket, process/profile mismatch, or missing infrastructure sample fails
+closed.
+
+Artifacts are immutable. If any repeat fails after producing an artifact, do
+not delete or overwrite it and do not rerun under the same run id. Destroy the
+environment, choose a new run id, and repeat all three repetitions for that
+profile. Every metrics/evidence file is stamped with run id, profile, and
+repeat; aggregation rejects mixed provenance.
+
+Creating the source production snapshot is a production operation and requires
+fresh authorization. The dump is restored only into the disposable private
+capacity database, scrubbed before the backend starts, never used as a test
+target directly, and removed with the capacity environment after evidence is
+retained.
+
 ## Current findings from today
 
 - A single worker at 40 offered RPS only achieved about 13.25 RPS, with the

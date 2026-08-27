@@ -2,6 +2,12 @@ const path = require("path");
 const cors = require("cors");
 const express = require("express");
 const compression = require("compression");
+const { monitorEventLoopDelay } = require("node:perf_hooks");
+
+const capacityEventLoopDelay = (process.env.CAPACITY_MODE === "true" || process.env.CAPACITY_MODE === "1")
+  ? monitorEventLoopDelay({ resolution: 10 })
+  : null;
+capacityEventLoopDelay?.enable();
 
 const { createAuthRouter } = require("./modules/users");
 const { createStepsRouter } = require("./modules/steps");
@@ -71,6 +77,7 @@ const {
   createCapacityPhaseMetricsMiddleware,
 } = require("./shared/observability/capacityPhaseMetrics");
 const { appSettings } = require("./shared/config/appSettings");
+const { readCapacityProviderCensus } = require("./localCapacitySafety");
 
 function createApp(dependencies = {}) {
   const app = express();
@@ -176,10 +183,24 @@ function createApp(dependencies = {}) {
     }
     const response = { status: "ok", redis };
     if (process.env.CAPACITY_MODE === "true" || process.env.CAPACITY_MODE === "1") {
+      const eventLoop = {
+        p99Ms: capacityEventLoopDelay ? capacityEventLoopDelay.percentile(99) / 1e6 : 0,
+        maxMs: capacityEventLoopDelay ? capacityEventLoopDelay.max / 1e6 : 0,
+      };
+      capacityEventLoopDelay?.reset();
       response.capacity = {
+        process: {
+          pid: process.pid,
+          role: process.env.STEPS_PROCESS_ROLE || "all",
+          instance: process.env.NODE_APP_INSTANCE == null ? "0" : String(process.env.NODE_APP_INSTANCE),
+        },
+        globalEventProfile: process.env.CAPACITY_GLOBAL_EVENT_PROFILE || null,
+        runId: process.env.CAPACITY_RUN_ID || null,
         dbPool: getDbPoolPressure(),
         memory: process.memoryUsage(),
         cpu: process.cpuUsage(),
+        eventLoop,
+        providerCensus: readCapacityProviderCensus(),
       };
     }
     res.json(response);

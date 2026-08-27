@@ -28,6 +28,7 @@
 
 const PROD_DIR = "/var/www/step-tracker-backend";
 const STAGING_DIR = "/var/www/step-tracker-backend-staging";
+const BACKGROUND_NODE_ARGS = "--max-old-space-size=320 --max-semi-space-size=8";
 
 /**
  * Both apps are identical apart from their directory — same repo, deployed
@@ -79,14 +80,14 @@ module.exports = {
       STEPS_PROCESS_ROLE: "resolution",
       PORT: 3010,
       HOST: "127.0.0.1",
-    }, { exec_mode: "fork" }),
+    }, { exec_mode: "fork", node_args: BACKGROUND_NODE_ARGS }),
     // Expiry/cron is a single owner. It shares the database fence with the
     // resolution process, so settlement and live work cannot interleave.
     app("steps-tracker-cron", PROD_DIR, 1, {
       STEPS_PROCESS_ROLE: "cron",
       PORT: 3011,
       HOST: "127.0.0.1",
-    }, { exec_mode: "fork" }),
+    }, { exec_mode: "fork", node_args: BACKGROUND_NODE_ARGS }),
     // Staging stays at ONE because it serves essentially no traffic. This was
     // originally required by the former 2 GB host; keeping it at one on the
     // replacement 8 GB host preserves capacity for production and load spikes.

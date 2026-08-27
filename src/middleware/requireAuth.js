@@ -16,6 +16,13 @@ const {
 const {
   recordOperationalCounters,
 } = require("../modules/steps/services/globalStepEventObservability");
+const {
+  buildGlobalEventTimezoneReconciliation,
+} = require("../modules/steps/services/globalEventTimezoneReconciliation");
+const {
+  invalidateHomeActiveGlobalEvent,
+} = require("../modules/steps/services/globalStepEventEntitlement");
+const authMeCache = require("../modules/users/services/authMeCache");
 
 // Batch 2026-08-08 item 9. Byte-identical to the regex the analytics ingestion
 // endpoint uses to bound `appVersion` (src/modules/analytics/routes.js:84).
@@ -65,6 +72,11 @@ function buildRequireAuth(dependencies = {}) {
   const userModel = dependencies.User || User;
   const prisma = dependencies.prisma || defaultPrisma;
   const settings = dependencies.appSettings || defaultAppSettings;
+  const timezoneReconciliation =
+    dependencies.reconcileGlobalEventTimezone ||
+    (dependencies.User
+      ? null
+      : buildGlobalEventTimezoneReconciliation({ ...dependencies, prisma }));
 
   async function recordAdminMetricsEligibility(req, user) {
     try {
@@ -169,6 +181,34 @@ function buildRequireAuth(dependencies = {}) {
     }
   }
 
+  async function reconcileTimezone(req, user) {
+    const rawTz = req.headers && req.headers["x-timezone"];
+    if (!rawTz || rawTz !== req.timeZone) return;
+    if (!timezoneReconciliation) {
+      await recordTimezone(req, user);
+      await recordGlobalEventTimezone(req, user);
+      return;
+    }
+    try {
+      const result = await timezoneReconciliation({
+        user,
+        observedTimezone: rawTz,
+      });
+      if (result?.user) {
+        req.user = { ...req.user, ...result.user };
+        await Promise.allSettled([
+          authMeCache.invalidateSafe(user.id),
+          result.relocated?.length
+            ? invalidateHomeActiveGlobalEvent([user.id])
+            : Promise.resolve(),
+        ]);
+      }
+    } catch {
+      // The requested endpoint always fails open; unchanged users.timezone is
+      // the durable marker that makes the next authenticated request retry.
+    }
+  }
+
   // Batch 2026-08-08 item 9: sticky-write `users.lastAppVersion` +
   // `users.lastSeenAt` from the X-App-Version header, so admins can see the
   // version spread of the live install base. Third sibling of
@@ -239,8 +279,7 @@ function buildRequireAuth(dependencies = {}) {
 
         req.user = user;
         await recordClientFeatures(req, user);
-        await recordTimezone(req, user);
-        await recordGlobalEventTimezone(req, user);
+        await reconcileTimezone(req, user);
         await recordAppVersion(req, user);
         await recordAdminMetricsEligibility(req, user);
         return next();
@@ -274,8 +313,7 @@ function buildRequireAuth(dependencies = {}) {
       req.appleIdentity = appleIdentity;
       req.user = user;
       await recordClientFeatures(req, user);
-      await recordTimezone(req, user);
-      await recordGlobalEventTimezone(req, user);
+      await reconcileTimezone(req, user);
       await recordAppVersion(req, user);
       await recordAdminMetricsEligibility(req, user);
 

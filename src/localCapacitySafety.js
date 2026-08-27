@@ -28,6 +28,13 @@ const EXTERNAL_DATABASE_URL_KEYS = Object.freeze([
   "PROD_DATABASE_URL",
   "STAGING_DATABASE_URL",
 ]);
+let capacityProviderCensus = null;
+
+function readCapacityProviderCensus() {
+  return capacityProviderCensus == null
+    ? null
+    : JSON.parse(JSON.stringify(capacityProviderCensus));
+}
 
 function strictTrue(value) {
   return value === "true" || value === "1";
@@ -213,12 +220,55 @@ function assertOutboundDisabled(env = process.env) {
   };
 }
 
-function installLocalNotificationSink() {
+function installLocalNotificationSink(env = process.env) {
+  const profile = String(env.CAPACITY_GLOBAL_EVENT_PROFILE || "");
+  if (["event_boundary_10000", "event_provider_outage_10000"].includes(profile)) {
+    const { buildCapacityProviderSender } = require("./modules/loadTesting/globalEventReliabilityProfiles");
+    let firstAttemptAt = null;
+    const attemptCount = Number(env.CAPACITY_PROVIDER_ATTEMPT_COUNT) || 12_000;
+    capacityProviderCensus = {
+      profile,
+      attemptCount,
+      totalCalls: 0,
+      initialCycle: { total: 0, accepted: 0, throttled: 0, transient: 0, invalid: 0 },
+    };
+    const sender = buildCapacityProviderSender({
+      profile,
+      attemptCount,
+      elapsedMs: () => firstAttemptAt == null ? 0 : Date.now() - firstAttemptAt,
+      nextAttemptIndex: (() => {
+        let index = 0;
+        return () => {
+          if (firstAttemptAt == null) firstAttemptAt = Date.now();
+          return index++;
+        };
+      })(),
+      observeResult: ({ attemptIndex, result }) => {
+        capacityProviderCensus.totalCalls += 1;
+        if (attemptIndex >= attemptCount) return;
+        capacityProviderCensus.initialCycle.total += 1;
+        capacityProviderCensus.initialCycle[result.kind.toLowerCase()] += 1;
+      },
+    });
+    const { apnsService } = require("./shared/push/apns");
+    const { fcmService } = require("./shared/push/fcm");
+    apnsService.sendNotification = sender;
+    apnsService.sendSilentNotification = sender;
+    apnsService.close = async () => {};
+    fcmService.sendNotification = sender;
+    fcmService.sendSilentNotification = sender;
+    return Object.freeze({
+      localCapacitySink: true,
+      deterministicProvider: true,
+      profile,
+    });
+  }
   const sinkResult = Object.freeze({
     success: true,
     localCapacitySink: true,
     providerDisposition: "capacity_sink",
   });
+  capacityProviderCensus = null;
   const sink = async () => sinkResult;
 
   // Patch the shared singleton objects before application modules destructure
@@ -347,7 +397,7 @@ function prepareLocalCapacityProcess() {
   process.env.HOST = "127.0.0.1";
   process.env.APNS_PRODUCTION = "false";
   process.env.OPS_USER_FANOUTS_DISABLED = "true";
-  const notificationSink = installLocalNotificationSink();
+  const notificationSink = installLocalNotificationSink(process.env);
   return { ...validated, databasePoolMax: capacityDatabasePoolMax(), notificationSink };
 }
 
@@ -368,6 +418,7 @@ module.exports = {
   normalizeHostname,
   parsePostgresTarget,
   prepareLocalCapacityProcess,
+  readCapacityProviderCensus,
   secureLocalRedis,
   strictTrue,
   validateCapacityPgBouncer,

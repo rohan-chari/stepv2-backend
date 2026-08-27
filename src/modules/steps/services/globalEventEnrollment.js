@@ -154,6 +154,14 @@ async function enrollIfGlobalEventActive(tx, { raceId, userIds, at }) {
           where: { id: entitlement.id },
           data: { startOutcome: outcome, startProcessedAt: entitlement.startProcessedAt || current },
         });
+        if (outcome === START_OUTCOMES.ACTIVATED_LATE_JOIN) {
+          const { appendLateActivationEvent } = require("./globalStepEventEntitlement");
+          await appendLateActivationEvent(tx, {
+            event: parent,
+            entitlement,
+            occurredAt: current,
+          });
+        }
       }
       if (!activeLocalEvent) activeLocalEvent = parent;
     }

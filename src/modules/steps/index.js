@@ -11,6 +11,7 @@ Object.assign(module.exports, require("./models/steps"));
 Object.assign(module.exports, require("./models/stepSample"));
 Object.assign(module.exports, require("./models/stepSyncRequest"));
 Object.assign(module.exports, require("./models/globalStepEvent"));
+Object.assign(module.exports, require("./models/globalStepEventGeneration"));
 
 Object.assign(module.exports, require("./streak"));
 Object.assign(module.exports, require("./stepSyncCanonical"));
@@ -28,6 +29,8 @@ Object.assign(module.exports, require("./services/stepInputIntake"));
 Object.assign(module.exports, require("./commands/claimStepMilestone"));
 
 Object.assign(module.exports, require("./jobs/globalStepEventScheduler"));
+Object.assign(module.exports, require("./jobs/globalEventBoundaryDrain"));
+Object.assign(module.exports, require("./jobs/globalEventEntitlementEventReconciler"));
 Object.assign(module.exports, require("./jobs/globalEventSummary"));
 Object.assign(module.exports, require("./jobs/stepSampleRetention"));
 

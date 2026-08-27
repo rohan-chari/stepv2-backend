@@ -70,6 +70,8 @@ const pool = new pg.Pool({
 let poolWaitMsTotal = 0;
 let poolWaitCount = 0;
 let poolWaitMsMax = 0;
+let poolConnectFailures = 0;
+const poolWaitSamples = [];
 const originalPoolConnect = pool.connect.bind(pool);
 pool.connect = (callback) => {
   const started = process.hrtime.bigint();
@@ -78,10 +80,17 @@ pool.connect = (callback) => {
     poolWaitMsTotal += elapsedMs;
     poolWaitCount += 1;
     poolWaitMsMax = Math.max(poolWaitMsMax, elapsedMs);
+    if (process.env.CAPACITY_MODE === "true" || process.env.CAPACITY_MODE === "1") {
+      poolWaitSamples.push(elapsedMs);
+      if (poolWaitSamples.length > 100_000) {
+        poolWaitSamples.splice(0, poolWaitSamples.length - 100_000);
+      }
+    }
   };
   if (typeof callback === "function") {
     return originalPoolConnect((error, client, release) => {
       record();
+      if (error) poolConnectFailures += 1;
       callback(error, client, release);
     });
   }
@@ -90,11 +99,16 @@ pool.connect = (callback) => {
     return client;
   }, (error) => {
     record();
+    poolConnectFailures += 1;
     throw error;
   });
 };
 
 function getDbPoolPressure() {
+  const sortedWaits = [...poolWaitSamples].sort((left, right) => left - right);
+  const waitMsP99 = sortedWaits.length
+    ? sortedWaits[Math.min(sortedWaits.length - 1, Math.ceil(sortedWaits.length * 0.99) - 1)]
+    : 0;
   return {
     total: pool.totalCount,
     idle: pool.idleCount,
@@ -103,7 +117,9 @@ function getDbPoolPressure() {
     waitMsTotal: poolWaitMsTotal,
     waitCount: poolWaitCount,
     waitMsMax: poolWaitMsMax,
+    waitMsP99,
     waitMsAverage: poolWaitCount ? poolWaitMsTotal / poolWaitCount : 0,
+    connectionFailures: poolConnectFailures,
   };
 }
 

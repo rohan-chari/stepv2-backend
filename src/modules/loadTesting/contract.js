@@ -80,7 +80,25 @@ function buildProfiles() {
     limits: Object.freeze({ maxUsers: limits.maxUsers || 5000, maxDurationSeconds: limits.maxDurationSeconds || 3600, maxArrivalRatePerSecond: limits.maxArrivalRatePerSecond || 500 }),
     entries: Object.freeze(entries),
     queue: Object.freeze({ arrivalRatePerSecond: 2, payloadDistribution: "1-8 samples per sync", retrySameKey: "one deterministic duplicate only", workerServiceRatePerSecond: 2, lagThresholdMs: 30000, drainCriteria: "queued=0 and running=0", ...(limits.queue || {}) }),
+    ...(limits.eventReliability ? {
+      eventReliability: Object.freeze({
+        fixtureUsers: 10_000,
+        warmupSeconds: 120,
+        measurementSeconds: 600,
+        repetitions: 3,
+        background: Object.freeze({
+          authenticatedHttpPerSecond: 25,
+          resolutionJobsPerSecond: 50,
+        }),
+        ...limits.eventReliability,
+      }),
+    } : {}),
   });
+  const eventTraffic = [
+    entry("GET", "/auth/me", {
+      fixturePrerequisites: ["synthetic-user"], weight: 1,
+    }),
+  ];
   return {
     smoke: profile("smoke", [health, authMe, home[0], races[1]], { maxUsers: 2, maxDurationSeconds: 60, maxArrivalRatePerSecond: 10 }),
     home: profile("home", home),
@@ -126,11 +144,62 @@ function buildProfiles() {
         queue: { retrySameKey: "every twentieth request exactly replays the previous same-user key/body", workerServiceRatePerSecond: 5 },
       }
     ),
+    event_provisioning_10000: profile(
+      "event_provisioning_10000",
+      eventTraffic,
+      {
+        defaultUsers: 10_000,
+        defaultDuration: "720s",
+        defaultArrivalRatePerSecond: 75,
+        defaultConcurrency: 100,
+        fixtureRaces: 3,
+        maxUsers: 10_000,
+        maxDurationSeconds: 720,
+        maxArrivalRatePerSecond: 100,
+        eventReliability: {
+          kind: "PROVISIONING",
+          deadlineSeconds: 600,
+          projectionDeadlineSeconds: 300,
+          minimumLeadSeconds: 12 * 60 * 60,
+          planningHorizonSeconds: 36 * 60 * 60,
+        },
+      },
+    ),
+    event_boundary_10000: profile(
+      "event_boundary_10000",
+      eventTraffic,
+      {
+        defaultUsers: 10_000,
+        defaultDuration: "720s",
+        defaultArrivalRatePerSecond: 75,
+        defaultConcurrency: 1000,
+        fixtureRaces: 3,
+        maxUsers: 10_000,
+        maxDurationSeconds: 720,
+        maxArrivalRatePerSecond: 100,
+        eventReliability: { kind: "HEALTHY_BOUNDARY" },
+      },
+    ),
+    event_provider_outage_10000: profile(
+      "event_provider_outage_10000",
+      eventTraffic,
+      {
+        defaultUsers: 10_000,
+        defaultDuration: "720s",
+        defaultArrivalRatePerSecond: 75,
+        defaultConcurrency: 100,
+        fixtureRaces: 3,
+        maxUsers: 10_000,
+        maxDurationSeconds: 720,
+        maxArrivalRatePerSecond: 100,
+        eventReliability: { kind: "PROVIDER_OUTAGE", outageSeconds: 60 },
+      },
+    ),
   };
 }
 
 function validateProfileRegistry(registry = PROFILES) {
-  const names = ["smoke", "home", "races", "race-details", "full-app", "contention", "frozen-step-sync-burst", "current-step-sync-burst"];
+  const names = ["smoke", "home", "races", "race-details", "full-app", "contention", "frozen-step-sync-burst", "current-step-sync-burst", "event_provisioning_10000", "event_boundary_10000", "event_provider_outage_10000"];
   for (const name of names) {
     const profile = registry[name];
     if (!profile || profile.schema !== PROFILE_SCHEMA || profile.version !== "1.0.0" || profile.name !== name || !profile.entries.length) throw new Error(`invalid load profile: ${name}`);
@@ -140,6 +209,15 @@ function validateProfileRegistry(registry = PROFILES) {
       if (!Array.isArray(item.allowedStatuses) || item.allowedStatuses.some((status) => !Number.isInteger(status))) throw new Error(`invalid load profile statuses: ${name}`);
       if (!["legacy", "current"].includes(item.persona)) throw new Error(`invalid load profile persona: ${name}`);
       if (!item.readOnly && !item.disposableWrite) throw new Error(`non-disposable write in load profile: ${name}`);
+    }
+    if (profile.eventReliability) {
+      const event = profile.eventReliability;
+      if (event.fixtureUsers !== 10_000 || event.warmupSeconds !== 120 ||
+          event.measurementSeconds !== 600 || event.repetitions !== 3 ||
+          event.background?.authenticatedHttpPerSecond !== 25 ||
+          event.background?.resolutionJobsPerSecond !== 50) {
+        throw new Error(`invalid global-event capacity contract: ${name}`);
+      }
     }
   }
   return true;

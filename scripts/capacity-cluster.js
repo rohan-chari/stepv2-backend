@@ -8,8 +8,24 @@ const { fork } = require("node:child_process");
 const path = require("node:path");
 
 const workerCount = 2;
-const backendEntry = path.resolve(__dirname, "../src/index.js");
+const backendEntry = path.resolve(__dirname, "capacity-process.js");
+const BACKGROUND_NODE_EXEC_ARGV = Object.freeze([
+  "--max-old-space-size=320",
+  "--max-semi-space-size=8",
+]);
 
+function roleChildEnvironment(baseEnv, role, port) {
+  return {
+    ...baseEnv,
+    NODE_APP_INSTANCE: "0",
+    STEPS_PROCESS_ROLE: role,
+    PORT: port,
+    HOST: "127.0.0.1",
+    DB_POOL_MAX: "20",
+  };
+}
+
+function main() {
 if (cluster.isPrimary) {
   for (let instance = 0; instance < workerCount; instance += 1) {
     cluster.fork({
@@ -24,14 +40,8 @@ if (cluster.isPrimary) {
     ["resolution", "3010"],
     ["cron", "3011"],
   ].map(([role, port]) => fork(backendEntry, [], {
-    env: {
-      ...process.env,
-      NODE_APP_INSTANCE: "",
-      STEPS_PROCESS_ROLE: role,
-      PORT: port,
-      HOST: "127.0.0.1",
-      DB_POOL_MAX: "20",
-    },
+    env: roleChildEnvironment(process.env, role, port),
+    execArgv: BACKGROUND_NODE_EXEC_ARGV,
   }));
 
   let shuttingDown = false;
@@ -59,7 +69,18 @@ if (cluster.isPrimary) {
     process.kill(process.pid, "SIGTERM");
   });
 } else {
-  const { startServer, installProductionShutdownHandlers } = require("../src/index");
-  const server = startServer();
-  installProductionShutdownHandlers({ server });
+  require("./capacity-process").main().catch((error) => {
+    process.stderr.write(`${error.stack || error.message}\n`);
+    process.exitCode = 1;
+  });
 }
+}
+
+if (require.main === module) main();
+
+module.exports = {
+  BACKGROUND_NODE_EXEC_ARGV,
+  main,
+  roleChildEnvironment,
+  workerCount,
+};

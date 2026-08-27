@@ -495,6 +495,7 @@ model InboxDeliveryOutbox {
   deliveredAt        DateTime? @map("delivered_at")
   createdAt          DateTime  @default(now()) @map("created_at")
   updatedAt          DateTime  @updatedAt @map("updated_at")
+  expiresAt          DateTime? @map("expires_at")
 
   alert          InboxAlert                   @relation(fields: [alertId], references: [id], onDelete: Cascade)
   deviceAttempts InboxDeliveryDeviceAttempt[]
@@ -505,19 +506,32 @@ model InboxDeliveryOutbox {
 }
 
 model InboxDeliveryDeviceAttempt {
-  id            String    @id @default(uuid())
-  outboxId      String    @map("outbox_id")
-  tokenHash     String    @map("token_hash")
-  disposition   String
-  attemptCount  Int       @default(1) @map("attempt_count")
-  lastErrorCode String?   @map("last_error_code")
-  acceptedAt    DateTime? @map("accepted_at")
-  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at")
+  id                  String    @id @default(uuid())
+  outboxId            String    @map("outbox_id")
+  tokenHash           String    @map("token_hash")
+  disposition         String
+  attemptCount        Int       @default(1) @map("attempt_count")
+  lastErrorCode       String?   @map("last_error_code")
+  acceptedAt          DateTime? @map("accepted_at")
+  updatedAt           DateTime  @default(now()) @updatedAt @map("updated_at")
+  deviceTokenId       String?   @map("device_token_id")
+  recipientUserId     String?   @map("recipient_user_id")
+  installationId      String?   @map("installation_id")
+  ownershipGeneration Int?      @map("ownership_generation")
+  platform            String?
+  providerEnvironment String?   @map("provider_environment")
+  nextAttemptAt       DateTime? @map("next_attempt_at")
+  providerMessageId   String?   @map("provider_message_id")
+  firstAttemptedAt    DateTime? @map("first_attempted_at")
+  providerRespondedAt DateTime? @map("provider_responded_at")
 
-  outbox InboxDeliveryOutbox @relation(fields: [outboxId], references: [id], onDelete: Cascade)
+  outbox      InboxDeliveryOutbox @relation(fields: [outboxId], references: [id], onDelete: Cascade)
+  deviceToken DeviceToken?        @relation(fields: [deviceTokenId], references: [id], onDelete: SetNull)
 
   @@unique([outboxId, tokenHash])
-  @@index([outboxId, disposition])
+  @@index([outboxId, disposition, id])
+  @@index([disposition, nextAttemptAt, id])
+  @@index([deviceTokenId, ownershipGeneration, disposition])
   @@map("inbox_delivery_device_attempts")
 }
 
@@ -542,11 +556,12 @@ model NotificationSchedule {
   cancellationReason String?   @map("cancellation_reason")
   createdAt          DateTime  @default(now()) @map("created_at")
   updatedAt          DateTime  @default(now()) @updatedAt @map("updated_at")
+  sourceRevision     Int       @default(0) @map("source_revision")
 
   user User @relation(fields: [recipientUserId], references: [id], onDelete: Cascade)
 
   @@unique([recipientUserId, deliveryKey])
-  @@index([status, availableAt])
+  @@index([status, availableAt, id])
   @@index([recipientUserId, createdAt])
   @@map("notification_schedules")
 }
@@ -862,18 +877,29 @@ model Stake {
 }
 
 model DeviceToken {
-  id                      String   @id @default(uuid())
-  userId                  String   @map("user_id")
+  id                      String                       @id @default(uuid())
+  userId                  String                       @map("user_id")
   token                   String
   platform                String
-  createdAt               DateTime @default(now()) @map("created_at")
-  updatedAt               DateTime @updatedAt @map("updated_at")
-  adminMetricsOpenCapable Boolean  @default(false) @map("admin_metrics_open_capable")
-  adminMetricsOpenEpochId String?  @map("admin_metrics_open_epoch_id")
-  user                    User     @relation(fields: [userId], references: [id])
+  createdAt               DateTime                     @default(now()) @map("created_at")
+  updatedAt               DateTime                     @updatedAt @map("updated_at")
+  adminMetricsOpenCapable Boolean                      @default(false) @map("admin_metrics_open_capable")
+  adminMetricsOpenEpochId String?                      @map("admin_metrics_open_epoch_id")
+  installationId          String?                      @map("installation_id")
+  lastRegisteredAt        DateTime?                    @map("last_registered_at")
+  lastProviderAcceptedAt  DateTime?                    @map("last_provider_accepted_at")
+  status                  String?
+  statusReason            String?                      @map("status_reason")
+  statusChangedAt         DateTime?                    @map("status_changed_at")
+  ownershipGeneration     Int                          @default(1) @map("ownership_generation")
+  providerEnvironment     String?                      @map("provider_environment")
+  user                    User                         @relation(fields: [userId], references: [id])
+  deliveryAttempts        InboxDeliveryDeviceAttempt[]
 
   @@unique([userId, token])
   @@index([userId])
+  @@index([userId, status, lastRegisteredAt, id])
+  @@index([status, statusChangedAt, id])
   @@map("device_tokens")
 }
 
@@ -2629,24 +2655,33 @@ model GlobalStepEvent {
 }
 
 model GlobalStepEventEntitlement {
-  id               String    @id @default(uuid())
-  eventId          String    @map("event_id")
-  userId           String    @map("user_id")
-  timezone         String
-  localDate        String    @map("local_date")
-  startsAt         DateTime  @map("starts_at")
-  endsAt           DateTime  @map("ends_at")
-  startOutcome     String    @default("PENDING") @map("start_outcome")
-  startProcessedAt DateTime? @map("start_processed_at")
-  endProcessedAt   DateTime? @map("end_processed_at")
-  createdAt        DateTime  @default(now()) @map("created_at")
-  updatedAt        DateTime  @default(now()) @updatedAt @map("updated_at")
+  id                    String    @id @default(uuid())
+  eventId               String    @map("event_id")
+  userId                String    @map("user_id")
+  timezone              String
+  localDate             String    @map("local_date")
+  startsAt              DateTime  @map("starts_at")
+  endsAt                DateTime  @map("ends_at")
+  startOutcome          String    @default("PENDING") @map("start_outcome")
+  startProcessedAt      DateTime? @map("start_processed_at")
+  endProcessedAt        DateTime? @map("end_processed_at")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @default(now()) @updatedAt @map("updated_at")
+  timezoneRelocatedAt   DateTime? @map("timezone_relocated_at")
+  timezoneRelocatedFrom String?   @map("timezone_relocated_from")
+  scheduleRevision      Int       @default(0) @map("schedule_revision")
+  startAttemptCount     Int       @default(0) @map("start_attempt_count")
+  startNextAttemptAt    DateTime? @map("start_next_attempt_at")
+  startLastErrorCode    String?   @map("start_last_error_code")
+  startFailedAt         DateTime? @map("start_failed_at")
 
   event GlobalStepEvent @relation(fields: [eventId], references: [id], onDelete: Restrict)
   user  User            @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([eventId, userId])
   @@index([startsAt, startProcessedAt])
+  @@index([startsAt, id], map: "global_step_event_entitlements_due_start_idx")
+  @@index([startNextAttemptAt, startsAt, id], map: "global_step_event_entitlements_retry_start_idx")
   @@index([endsAt, endProcessedAt])
   @@index([userId, startsAt, endsAt])
   @@map("global_step_event_entitlements")
@@ -2656,15 +2691,31 @@ model GlobalStepEventEntitlement {
 // unless the configured owner count is alive and every owner advertises the
 // local-aware generation; maintenance of existing parents is never gated.
 model GlobalStepEventCronOwner {
-  ownerId     String   @id @map("owner_id")
-  generation  Int
-  localAware  Boolean  @default(false) @map("local_aware")
-  heartbeatAt DateTime @map("heartbeat_at")
-  expiresAt   DateTime @map("expires_at")
-  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
+  ownerId        String   @id @map("owner_id")
+  generation     Int
+  localAware     Boolean  @default(false) @map("local_aware")
+  heartbeatAt    DateTime @map("heartbeat_at")
+  expiresAt      DateTime @map("expires_at")
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at")
+  logicalOwnerId String?  @map("logical_owner_id")
+  bootId         String?  @map("boot_id")
+  role           String?
+  capabilities   Json     @default("[]")
 
+  @@unique([logicalOwnerId, bootId])
   @@index([expiresAt])
+  @@index([generation, expiresAt, logicalOwnerId, bootId])
   @@map("global_step_event_cron_owners")
+}
+
+model GlobalStepEventGenerationState {
+  id                  Int       @id @default(1)
+  requiredGeneration  Int       @default(2) @map("required_generation")
+  readySince          DateTime? @map("ready_since")
+  quarantineStartedAt DateTime? @map("quarantine_started_at")
+  updatedAt           DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  @@map("global_step_event_generation_state")
 }
 
 model GlobalStepEventOperationalSnapshot {

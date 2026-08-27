@@ -46,6 +46,22 @@ test("sendNotification builds notification + stringified data and succeeds", asy
   assert.equal(msg.android.notification.channelId, "bara_default");
 });
 
+test("event push clips FCM TTL and returns the provider message name", async () => {
+  const messaging = mockMessaging();
+  const now = new Date("2098-08-26T10:00:00.000Z");
+  const fcm = buildFcmService({ messaging, now: () => now });
+  const result = await fcm.sendNotification({
+    deviceToken: "event-token",
+    title: "2x STEPS EVENT",
+    body: "Go!",
+    expiresAt: new Date(now.getTime() + 90_500),
+    collapseId: "event:bounded-hash",
+  });
+  assert.equal(messaging.sent[0].android.ttl, 90_500);
+  assert.equal(result.providerMessageId, "projects/x/messages/1");
+  assert.equal(result.success, true);
+});
+
 test("sendSilentNotification sends data-only (no notification block)", async () => {
   const messaging = mockMessaging();
   const fcm = buildFcmService({ messaging });
@@ -98,6 +114,24 @@ test("generic send errors are not treated as unregistered", async () => {
   const result = await fcm.sendNotification({ deviceToken: "t" });
   assert.equal(result.success, false);
   assert.equal(result.unregistered, false);
+});
+
+test("normalizes FCM throttling metadata without invalidating the token", async () => {
+  const fcm = buildFcmService({
+    messaging: {
+      async send() {
+        const error = new Error("quota exceeded");
+        error.errorInfo = { code: "messaging/quota-exceeded" };
+        error.retryAfterMs = 250;
+        throw error;
+      },
+    },
+  });
+  const result = await fcm.sendNotification({ deviceToken: "live-token" });
+  assert.equal(result.invalidToken, false);
+  assert.equal(result.permanent, false);
+  assert.equal(result.statusCode, 429);
+  assert.equal(result.retryAfterMs, 250);
 });
 
 test("fail-soft: never throws when firebase-admin init fails", async () => {

@@ -37,19 +37,21 @@ function loadConfig(args) {
   return JSON.parse(fs.readFileSync(path.resolve(args.config), "utf8"));
 }
 
-function applyProvider(config) {
+function applyProvider(config, configPathValue, environment = process.env) {
   if (config.provider !== "lima") return;
   const script = path.resolve(__dirname, "lima-capacity.js");
-  const configPath = path.resolve(process.argv.includes("--config") ? process.argv[process.argv.indexOf("--config") + 1] : "");
-  if (!configPath) throw new Error("Lima provider requires --config");
-  process.env.CAPACITY_RESTORE_HOOK = `node ${JSON.stringify(script)} restore --config ${JSON.stringify(configPath)}`;
-  process.env.CAPACITY_SCRUB_HOOK = `node ${JSON.stringify(script)} scrub --config ${JSON.stringify(configPath)}`;
-  process.env.CAPACITY_START_HOOK = `node ${JSON.stringify(script)} start --config ${JSON.stringify(configPath)}`;
-  process.env.CAPACITY_STOP_HOOK = `node ${JSON.stringify(script)} stop --config ${JSON.stringify(configPath)}`;
-  process.env.CAPACITY_DESTROY_HOOK = `node ${JSON.stringify(script)} destroy --config ${JSON.stringify(configPath)}`;
-  process.env.CAPACITY_HEALTH_URL = config.health_url || `${config.base_url}/health`;
-  process.env.CAPACITY_LIVE_MANIFEST_PATH = path.resolve(config.live_manifest || "");
-  process.env.DATABASE_URL = config.database_url || "";
+  if (!configPathValue) throw new Error("Lima provider requires --config");
+  const configPath = path.resolve(configPathValue);
+  environment.CAPACITY_RESTORE_HOOK = `node ${JSON.stringify(script)} restore --config ${JSON.stringify(configPath)}`;
+  environment.CAPACITY_SCRUB_HOOK = `node ${JSON.stringify(script)} scrub --config ${JSON.stringify(configPath)}`;
+  environment.CAPACITY_START_HOOK = `node ${JSON.stringify(script)} start --config ${JSON.stringify(configPath)}`;
+  environment.CAPACITY_STOP_HOOK = `node ${JSON.stringify(script)} stop --config ${JSON.stringify(configPath)}`;
+  environment.CAPACITY_DESTROY_HOOK = `node ${JSON.stringify(script)} destroy --config ${JSON.stringify(configPath)}`;
+  environment.CAPACITY_HEALTH_URL = config.health_url || `${config.base_url}/health`;
+  environment.CAPACITY_LIVE_MANIFEST_PATH = path.resolve(config.live_manifest || "");
+  environment.CAPACITY_GLOBAL_EVENT_PROFILE = config.profile || "";
+  environment.CAPACITY_RUN_ID = config.run_id || "";
+  environment.DATABASE_URL = config.database_url || "";
 }
 
 function validateSpecs(config, manifest) {
@@ -99,7 +101,9 @@ async function main() {
   const [command] = process.argv.slice(2);
   const args = parseArgs(process.argv.slice(3));
   const config = loadConfig(args);
-  applyProvider(config);
+  if (args.profile) config.profile = args.profile;
+  if (args.run_id) config.run_id = args.run_id;
+  applyProvider(config, args.config);
   const value = (name, fallback) => args[name] ?? config[name] ?? fallback;
   const directory = value("directory", process.env.CAPACITY_STATE_DIR);
   let result;
@@ -137,7 +141,11 @@ async function main() {
   print(result);
 }
 
-main().catch((error) => {
-  process.stderr.write(`${error.message}\n`);
-  process.exitCode = 1;
-});
+if (require.main === module) {
+  main().catch((error) => {
+    process.stderr.write(`${error.message}\n`);
+    process.exitCode = 1;
+  });
+}
+
+module.exports = { applyProvider };

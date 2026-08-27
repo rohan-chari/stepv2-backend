@@ -762,6 +762,28 @@ test("durable exposure counts participant-race zero/one/two-plus opportunities w
   assert.ok(snapshot.entitlementsByOffset);
 });
 
+test("operational snapshots tolerate PostgreSQL-unknown legacy timezone aliases", async () => {
+  const { user } = await createTestUser({ globalEventTimezone: "US/Central" });
+  const now = new Date("2026-08-20T18:00:00.000Z");
+  const event = await prisma.globalStepEvent.create({ data: {
+    eventDay: "2026-08-20", scheduleMode: "LOCAL_ENTITLEMENTS",
+    localStartMinute: 720, durationMinutes: 30, multiplier: 2,
+    startsAt: new Date("2026-08-20T00:00:00.000Z"),
+    endsAt: new Date("2026-08-21T00:00:00.000Z"),
+  } });
+  await prisma.globalStepEventEntitlement.create({ data: {
+    eventId: event.id, userId: user.id, timezone: "US/Central",
+    localDate: "2026-08-20",
+    startsAt: new Date("2026-08-20T17:00:00.000Z"),
+    endsAt: new Date("2026-08-20T17:30:00.000Z"),
+    startOutcome: "ACTIVATED_ON_TIME", startProcessedAt: now,
+  } });
+
+  const snapshot = await captureOperationalSnapshot({ client: prisma, now });
+  assert.equal(snapshot.healthy, true);
+  assert.equal(snapshot.entitlementsByOffset.utc_minus_6_to_0, 1);
+});
+
 test("retention deletes complete 30-day lifecycle dependents but keeps active-race and unsettled-summary rows", async () => {
   const accounts = await Promise.all(Array.from({ length: 3 }, () => createTestUser()));
   const now = new Date();

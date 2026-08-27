@@ -153,10 +153,16 @@ test("production config delegates clustered HTTP memory enforcement to the watch
   const config = require("../../ecosystem.config");
   const http = config.apps.find(({ name }) => name === "steps-tracker");
   const resolution = config.apps.find(({ name }) => name === "steps-tracker-resolution");
+  const cron = config.apps.find(({ name }) => name === "steps-tracker-cron");
 
   assert.equal(http.instances, 2);
   assert.equal(http.max_memory_restart, "100G");
   assert.equal(resolution.max_memory_restart, "600M");
+  assert.equal(
+    resolution.node_args,
+    "--max-old-space-size=320 --max-semi-space-size=8",
+  );
+  assert.equal(cron.node_args, resolution.node_args);
 });
 
 test("the production reload wrapper serializes and reapplies ecosystem config", () => {

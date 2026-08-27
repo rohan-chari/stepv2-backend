@@ -52,7 +52,7 @@ function integrationIntentService() {
   });
 }
 
-describe("centralized notification delivery", () => {
+describe("centralized notification delivery", { concurrency: 1 }, () => {
   let server;
 
   before(async () => {
@@ -108,7 +108,18 @@ describe("centralized notification delivery", () => {
     await cleanDatabase();
     const users = await Promise.all(Array.from({ length: 5 }, () => createTestUser()));
     const service = integrationIntentService();
-    for (const { user } of users) await service.submit(intent(user.id, { deliveryKey: `race:${user.id}` }));
+    for (const { user } of users) {
+      await prisma.deviceToken.create({
+        data: {
+          userId: user.id,
+          token: `token-${user.id}`,
+          platform: "ios",
+          status: null,
+          lastRegisteredAt: NOW,
+        },
+      });
+      await service.submit(intent(user.id, { deliveryKey: `race:${user.id}` }));
+    }
 
     let active = 0;
     let maxActive = 0;
@@ -125,10 +136,8 @@ describe("centralized notification delivery", () => {
         return { success: true };
       },
     };
-    const DeviceToken = { async findByUserId(userId) { return [{ token: `token-${userId}`, platform: "ios" }]; }, async deleteToken() {} };
     const worker = () => buildInboxDelivery({
       prisma,
-      DeviceToken,
       apnsService: provider,
       fcmService: provider,
       now: () => NOW,
@@ -156,21 +165,30 @@ describe("centralized notification delivery", () => {
     await service.submit(intent(noDevice.user.id, { deliveryKey: `outcome:no-device:${noDevice.user.id}` }));
     await service.submit(intent(permanent.user.id, { deliveryKey: `outcome:permanent:${permanent.user.id}` }));
     await service.submit(intent(transient.user.id, { deliveryKey: `outcome:transient:${transient.user.id}` }));
+    await prisma.deviceToken.createMany({ data: [
+      {
+        userId: permanent.user.id,
+        token: "permanent",
+        platform: "ios",
+        status: null,
+        lastRegisteredAt: NOW,
+      },
+      {
+        userId: transient.user.id,
+        token: "transient",
+        platform: "ios",
+        status: null,
+        lastRegisteredAt: NOW,
+      },
+    ] });
     const provider = {
       async sendNotification({ deviceToken }) {
         if (deviceToken === "permanent") return { success: false, permanent: true, reason: "INVALID_PAYLOAD" };
         return { success: false, reason: "TEMPORARY_UNAVAILABLE" };
       },
     };
-    const DeviceToken = {
-      async findByUserId(userId) {
-        if (userId === noDevice.user.id) return [];
-        return [{ token: userId === permanent.user.id ? "permanent" : "transient", platform: "ios" }];
-      },
-      async deleteToken() {},
-    };
     await buildInboxDelivery({
-      prisma, DeviceToken, apnsService: provider, fcmService: provider,
+      prisma, apnsService: provider, fcmService: provider,
       now: () => NOW, batchSize: 10, concurrency: 2,
       appSettings: { async getFlag() { return false; } },
       userFanoutDisabled: () => false,

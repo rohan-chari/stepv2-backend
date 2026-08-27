@@ -80,7 +80,11 @@ test("POST /notifications/device-token registers token", async () => {
 
     assert.equal(response.status, 200);
     const body = await response.json();
-    assert.deepEqual(body, { success: true });
+    assert.deepEqual(body, {
+      success: true,
+      registrationVersion: 2,
+      installationAccepted: false,
+    });
     assert.deepEqual(savedArgs, {
       userId: "user-1",
       token: "abc123",
@@ -210,7 +214,7 @@ test("DELETE /notifications/device-token removes token", async () => {
 
     assert.equal(response.status, 200);
     const body = await response.json();
-    assert.deepEqual(body, { success: true });
+    assert.deepEqual(body, { success: true, removed: 1 });
     assert.deepEqual(deletedArgs, {
       userId: "user-1",
       token: "abc123",
@@ -238,7 +242,8 @@ test("DELETE /notifications/device-token returns 400 without deviceToken", async
 
     assert.equal(response.status, 400);
     const body = await response.json();
-    assert.equal(body.error, "deviceToken is required");
+    assert.equal(body.error, "deviceToken or installationId is required");
+    assert.equal(body.code, "DEVICE_REGISTRATION_IDENTIFIER_REQUIRED");
   } finally {
     await server.close();
   }

@@ -24,7 +24,12 @@ const {
   scheduleComputeRanks,
   scheduleComputeRankedWeeks,
 } = require("./modules/ranked");
-const { scheduleGlobalStepEvents } = require("./modules/steps");
+const {
+  scheduleGlobalStepEvents,
+  scheduleGenerationHeartbeat,
+  scheduleGlobalEventBoundaryDrain,
+  scheduleGlobalEventEntitlementEventReconciler,
+} = require("./modules/steps");
 const { scheduleGlobalEventSummaryTick } = require("./modules/steps");
 const { scheduleStepSampleRetention } = require("./modules/steps");
 const {
@@ -32,6 +37,11 @@ const {
 } = require("./modules/races");
 const { scheduleRecomputePlacements } = require("./modules/races");
 const { scheduleNotificationCleanup } = require("./modules/notifications");
+const {
+  scheduleNotificationScheduleRelease,
+  scheduleNotificationCompletenessReconciler,
+  scheduleDeviceTokenCleanup,
+} = require("./modules/notifications");
 const { scheduleInboxExpiry, scheduleInboxDelivery } = require("./modules/inbox");
 const { subscribeNotificationWakeup } = require("./shared/cache/redisCache");
 const { notificationIntentService } = require("./modules/notifications/services/notificationDelivery");
@@ -79,6 +89,10 @@ function startServer({
   scheduleComputeRanks: scheduleRanks = scheduleComputeRanks,
   scheduleComputeRankedWeeks: scheduleRankedWeeks = scheduleComputeRankedWeeks,
   scheduleGlobalStepEvents: scheduleGlobalEvents = scheduleGlobalStepEvents,
+  scheduleGenerationHeartbeat: scheduleGenerationHeartbeatJob = scheduleGenerationHeartbeat,
+  scheduleGlobalEventBoundaryDrain: scheduleGlobalEventBoundaryDrainJob = scheduleGlobalEventBoundaryDrain,
+  scheduleGlobalEventEntitlementEventReconciler:
+    scheduleGlobalEventEntitlementEventReconcilerJob = scheduleGlobalEventEntitlementEventReconciler,
   scheduleGlobalEventSummaryTick: scheduleGlobalSummary = scheduleGlobalEventSummaryTick,
   scheduleStepSampleRetention: scheduleStepRetention = scheduleStepSampleRetention,
   scheduleAutoStartScheduledRaces:
@@ -89,6 +103,11 @@ function startServer({
   scheduleInboxDelivery: scheduleInboxDeliveryJob = scheduleInboxDelivery,
   scheduleDomainEventProjection: scheduleDomainEventProjectionJob = scheduleDomainEventProjection,
   scheduleDomainEventRetention: scheduleDomainEventRetentionJob = scheduleDomainEventRetention,
+  scheduleNotificationScheduleRelease:
+    scheduleNotificationScheduleReleaseJob = scheduleNotificationScheduleRelease,
+  scheduleNotificationCompletenessReconciler:
+    scheduleNotificationCompletenessReconcilerJob = scheduleNotificationCompletenessReconciler,
+  scheduleDeviceTokenCleanup: scheduleDeviceTokenCleanupJob = scheduleDeviceTokenCleanup,
   scheduleActivationEventCleanup:
     scheduleActivationCleanup = scheduleActivationEventCleanup,
   scheduleAdminMetricsActivityCleanup:
@@ -129,17 +148,29 @@ function startServer({
   // Injected only by the dedicated local capacity entrypoint. Normal startup
   // never reads an environment variable that can suppress production crons.
   capacityHttpResolutionOnly = false,
+  // Capacity-only event profile. This is an injected dependency, never a
+  // production environment switch: it runs the complete event notification
+  // path while excluding unrelated whole-base jobs from the measurement.
+  capacityGlobalEventOnly = false,
   processRole = process.env.STEPS_PROCESS_ROLE || "all",
 } = {}) {
+  const jobStopHandles = [];
+  const retainStopHandle = (handle) => {
+    if (handle && typeof handle.stop === "function") jobStopHandles.push(handle);
+    return handle;
+  };
   register();
   registerNotifications();
   registerRaceListCache();
 
-  return app.listen(port, host, () => {
+  const server = app.listen(port, host, () => {
     logger.log(`Steps Tracker API running on ${host}:${port}`);
     // Keep dependency-injected startup probes byte-for-byte stable; production
     // uses the default console logger and records the dark-switch snapshot.
     if (logger === console) logPerformanceFlags(logger);
+    // Every process advertises its per-boot generation outside all cron/PM2
+    // ownership guards. Extra overlapping boots intentionally block readiness.
+    retainStopHandle(scheduleGenerationHeartbeatJob());
     const startCrons = () => {
       // Production uses separate HTTP, resolution, and cron processes. Keep
       // the historical "all" role for local development and injected startup
@@ -160,12 +191,30 @@ function startServer({
         scheduleResolutionPostTasks();
         return;
       }
+      if (capacityGlobalEventOnly) {
+        retainStopHandle(scheduleGlobalEvents());
+        retainStopHandle(scheduleGlobalEventBoundaryDrainJob());
+        retainStopHandle(scheduleGlobalEventEntitlementEventReconcilerJob());
+        retainStopHandle(scheduleDomainEventProjectionJob());
+        retainStopHandle(scheduleNotificationScheduleReleaseJob());
+        retainStopHandle(scheduleNotificationCompletenessReconcilerJob());
+        retainStopHandle(scheduleInboxDeliveryJob({
+          subscribeNotificationWakeup,
+          // The protected local capacity process disables ordinary fan-outs.
+          // This injected override keeps the one pipeline under measurement live.
+          userFanoutDisabled: () => false,
+        }));
+        retainStopHandle(scheduleDeviceTokenCleanupJob());
+        return;
+      }
       scheduleRaceExpiry();
       scheduleSeededRenewal();
       scheduleTournamentRenewal();
       scheduleRanks();
       scheduleRankedWeeks();
-      scheduleGlobalEvents();
+      retainStopHandle(scheduleGlobalEvents());
+      retainStopHandle(scheduleGlobalEventBoundaryDrainJob());
+      retainStopHandle(scheduleGlobalEventEntitlementEventReconcilerJob());
       scheduleGlobalSummary();
       scheduleAutoStartRaces();
       // Established fan-outs share the single operational brake.
@@ -180,13 +229,15 @@ function startServer({
         scheduleInboxExpiryJob();
       }
       if (!userFanoutDisabled("INBOX_DELIVERY_DISABLED")) {
-        scheduleDomainEventProjectionJob();
+        retainStopHandle(scheduleDomainEventProjectionJob());
+        retainStopHandle(scheduleNotificationScheduleReleaseJob());
+        retainStopHandle(scheduleNotificationCompletenessReconcilerJob());
         // The cron owner is the only process that subscribes to the ephemeral
         // wake channel. Postgres polling remains the durable recovery path.
-        scheduleInboxDeliveryJob({
-          releaseDue: notificationIntentService.releaseDue,
+        retainStopHandle(scheduleInboxDeliveryJob({
           subscribeNotificationWakeup,
-        });
+        }));
+        retainStopHandle(scheduleDeviceTokenCleanupJob());
       }
       scheduleDomainEventRetentionJob();
       if (!destructiveCleanupDisabled("ACTIVATION_EVENT_CLEANUP_DISABLED")) {
@@ -279,6 +330,8 @@ function startServer({
       logger.log(`[CRON] Skipping cron scheduling on NODE_APP_INSTANCE=${process.env.NODE_APP_INSTANCE}`);
     }
   });
+  server.jobStopHandles = jobStopHandles;
+  return server;
 }
 
 function installProductionShutdownHandlers({
@@ -288,6 +341,8 @@ function installProductionShutdownHandlers({
   setTimer = setTimeout,
   clearTimer = clearTimeout,
   hardExitMs = 5000,
+  stopHandles = server?.jobStopHandles || [],
+  drainMs = 4000,
 } = {}) {
   let shuttingDown = false;
   let hardExitTimer = null;
@@ -296,9 +351,24 @@ function installProductionShutdownHandlers({
     shuttingDown = true;
     hardExitTimer = setTimer(() => processObject.exit(0), hardExitMs);
     hardExitTimer?.unref?.();
+    // Calling stop() synchronously flips each scheduler's claim/timer guard
+    // before the HTTP listener begins draining. The returned promises represent
+    // only already-in-flight work and are bounded by the four-second race below.
+    const stoppingJobs = Promise.allSettled(stopHandles.map((handle) => {
+      try { return Promise.resolve(handle.stop()); }
+      catch (error) { return Promise.reject(error); }
+    }));
     server.close(async () => {
       try {
-        await apns.close();
+        let drainTimer;
+        await Promise.race([
+          Promise.all([stoppingJobs, apns.close()]),
+          new Promise((resolve) => {
+            drainTimer = setTimer(resolve, Math.min(drainMs, hardExitMs - 1));
+            drainTimer?.unref?.();
+          }),
+        ]);
+        if (drainTimer) clearTimer(drainTimer);
       } finally {
         if (hardExitTimer) clearTimer(hardExitTimer);
         processObject.exit(0);

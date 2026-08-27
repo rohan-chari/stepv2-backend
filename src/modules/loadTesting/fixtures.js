@@ -94,8 +94,21 @@ async function cleanupSyntheticRun({ prisma, manifest }) {
   const safeIds = (value) => (Array.isArray(value) ? value : []).filter((id) => /^[0-9a-f-]{36}$/i.test(id));
   const userIds = safeIds(ids.users);
   const raceIds = safeIds(ids.races);
+  const globalEventIds = safeIds(ids.globalEvents);
   const sqlArray = (value) => `ARRAY[${value.map((id) => `'${id}'`).join(",")}]::text[]`;
   await prisma.$transaction(async (tx) => {
+    if (userIds.length) {
+      await tx.$executeRawUnsafe(
+        `DELETE FROM domain_event_outbox WHERE payload->>'userId' = ANY($1::text[])`,
+        userIds,
+      );
+    }
+    if (globalEventIds.length) {
+      await tx.$executeRawUnsafe(
+        `DELETE FROM domain_event_outbox WHERE payload->>'eventId' = ANY($1::text[])`,
+        globalEventIds,
+      );
+    }
     const userWhere = inList(ids.users);
     if (userWhere) {
       if (tx.stepSyncRequest) await tx.stepSyncRequest.deleteMany({ where: { userId: userWhere } });
@@ -142,8 +155,11 @@ async function cleanupSyntheticRun({ prisma, manifest }) {
     }
     if (inList(ids.raceParticipants)) await tx.raceParticipant.deleteMany({ where: { id: inList(ids.raceParticipants) } });
     if (inList(ids.races)) await tx.race.deleteMany({ where: { id: inList(ids.races) } });
+    if (globalEventIds.length) {
+      await tx.globalStepEvent.deleteMany({ where: { id: { in: globalEventIds } } });
+    }
     if (inList(ids.users)) await tx.user.deleteMany({ where: { id: inList(ids.users) } });
-  });
+  }, { maxWait: 5_000, timeout: 60_000 });
   const after = await baselineIntegrity(prisma);
   await assertNoSyntheticRows(prisma, ids);
   if (JSON.stringify(after) !== JSON.stringify(manifest.baseline)) throw new Error("baseline integrity changed during synthetic cleanup");

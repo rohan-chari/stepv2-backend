@@ -26,6 +26,7 @@ const EXPANSION_BATCH_SIZE = 100;
 const PROJECTION_BATCH_SIZE = 50;
 const PROJECTION_CONCURRENCY = 4;
 const PROJECTOR_TICK_BUDGET_MS = 5_000;
+const SCHEDULED_EVENT_BATCH_SIZE = 100;
 const MAX_ATTEMPTS = 12;
 const BASE_BACKOFF_MS = 1_000;
 const MAX_BACKOFF_MS = 15 * 60_000;
@@ -84,6 +85,21 @@ function buildNotificationProjector(dependencies = {}) {
   const typedProjection = dependencies.typedProjection || buildTypedV1Projection(dependencies);
   const notificationService = dependencies.notificationIntentService || defaultNotificationIntentService;
   const classifyProjection = dependencies.classifyProjection || buildProjectionClassifier(dependencies);
+  const projectScheduledEntitlementEventsBatch =
+    dependencies.projectScheduledEntitlementEventsBatch ||
+    (typeof repo.projectScheduledEntitlementEventsBatch === "function"
+      ? (options) => repo.projectScheduledEntitlementEventsBatch({ prisma, ...options })
+      : null);
+  const completeNoDevicePlacementProjectionsBatch =
+    dependencies.completeNoDevicePlacementProjectionsBatch ||
+    (typeof repo.completeNoDevicePlacementProjectionsBatch === "function"
+      ? (options) => repo.completeNoDevicePlacementProjectionsBatch({ prisma, ...options })
+      : null);
+  const expandPureSilentPlacementEventsBatch =
+    dependencies.expandPureSilentPlacementEventsBatch ||
+    (typeof repo.expandPureSilentPlacementEventsBatch === "function"
+      ? (options) => repo.expandPureSilentPlacementEventsBatch({ prisma, ...options })
+      : null);
 
   async function expandOne(claim) {
     const current = now();
@@ -327,7 +343,56 @@ function buildNotificationProjector(dependencies = {}) {
 
   async function run({ budgetMs = PROJECTOR_TICK_BUDGET_MS } = {}) {
     const started = monotonicNow();
-    const stats = { expanded: 0, projected: 0, retries: 0 };
+    const stats = {
+      expanded: 0,
+      projected: 0,
+      retries: 0,
+      scheduledEventBatches: 0,
+      scheduledEventsProjected: 0,
+      noDeviceSilentBatches: 0,
+      noDeviceSilentProjected: 0,
+      placementSilentEventBatches: 0,
+      placementSilentEventsExpanded: 0,
+    };
+    if (projectScheduledEntitlementEventsBatch) {
+      while (monotonicNow() - started < budgetMs) {
+        const result = await projectScheduledEntitlementEventsBatch({
+          now: now(),
+          batchSize: SCHEDULED_EVENT_BATCH_SIZE,
+        });
+        const processed = Number(result?.processed || 0);
+        if (processed === 0) break;
+        stats.scheduledEventBatches += 1;
+        stats.scheduledEventsProjected += processed;
+        if (processed < SCHEDULED_EVENT_BATCH_SIZE) break;
+      }
+    }
+    if (expandPureSilentPlacementEventsBatch) {
+      while (monotonicNow() - started < budgetMs) {
+        const result = await expandPureSilentPlacementEventsBatch({
+          now: now(),
+          batchSize: SCHEDULED_EVENT_BATCH_SIZE,
+        });
+        const processed = Number(result?.processed || 0);
+        if (processed === 0) break;
+        stats.placementSilentEventBatches += 1;
+        stats.placementSilentEventsExpanded += processed;
+        if (processed < SCHEDULED_EVENT_BATCH_SIZE) break;
+      }
+    }
+    if (completeNoDevicePlacementProjectionsBatch) {
+      while (monotonicNow() - started < budgetMs) {
+        const result = await completeNoDevicePlacementProjectionsBatch({
+          now: now(),
+          batchSize: SCHEDULED_EVENT_BATCH_SIZE,
+        });
+        const processed = Number(result?.processed || 0);
+        if (processed === 0) break;
+        stats.noDeviceSilentBatches += 1;
+        stats.noDeviceSilentProjected += processed;
+        if (processed < SCHEDULED_EVENT_BATCH_SIZE) break;
+      }
+    }
     while (monotonicNow() - started < budgetMs) {
       const events = await claimDomainEvents({ now: now(), batchSize: 1 });
       if (!events.length) break;
@@ -357,6 +422,7 @@ module.exports = {
   PROJECTION_BATCH_SIZE,
   PROJECTION_CONCURRENCY,
   PROJECTOR_TICK_BUDGET_MS,
+  SCHEDULED_EVENT_BATCH_SIZE,
   MAX_ATTEMPTS,
   boundedErrorCode,
   retryAt,

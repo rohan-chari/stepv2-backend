@@ -73,6 +73,7 @@ function validateDestination(destination) {
 async function createInboxAlert({
   userId, type, title, body, destination, sourceKey, now = new Date(),
   payload = null, prisma = defaultPrisma, tx = null,
+  expiresAt = null,
 }) {
   if (!userId || typeof type !== "string" || !type || typeof title !== "string" ||
       typeof body !== "string" || !body || typeof sourceKey !== "string" || !sourceKey) {
@@ -91,7 +92,7 @@ async function createInboxAlert({
     });
     await client.inboxDeliveryOutbox.upsert({
       where: { alertId_kind: { alertId: alert.id, kind: "PUSH" } },
-      update: {},
+      update: expiresAt ? { expiresAt } : {},
       create: {
         alertId: alert.id,
         payload: {
@@ -104,6 +105,7 @@ async function createInboxAlert({
         // materialized exactly at their boundary; using the database clock
         // here can make a newly-created due row appear to be in the future.
         availableAt: now,
+        expiresAt,
       },
     });
     return alert;

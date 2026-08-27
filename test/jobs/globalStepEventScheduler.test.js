@@ -235,3 +235,24 @@ test("uses a one-minute default interval", async () => {
   assert.equal(scheduledMs, 60 * 1000);
   assert.equal(runs, 1, "the scheduler still executes an immediate lightweight tick");
 });
+
+test("stop prevents queued ticks and waits for the active scheduler run", async () => {
+  let release;
+  let runs = 0;
+  const active = new Promise((resolve) => { release = resolve; });
+  let intervalTick;
+  const scheduler = scheduleGlobalStepEvents({
+    maybeStartGlobalEvent: async () => { runs += 1; await active; },
+    setInterval(fn) { intervalTick = fn; return { unref() {} }; },
+    logger: { log() {}, error() {} },
+  });
+  const stopping = scheduler.stop();
+  let stopped = false;
+  stopping.then(() => { stopped = true; });
+  await Promise.resolve();
+  assert.equal(stopped, false);
+  assert.equal(await intervalTick(), null);
+  release();
+  await stopping;
+  assert.equal(runs, 1);
+});

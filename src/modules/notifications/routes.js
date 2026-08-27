@@ -6,6 +6,9 @@ const {
 const { User: DefaultUser } = require("../users");
 const { prisma: defaultPrisma } = require("../../db");
 const { appSettings: defaultAppSettings } = require("../../shared/config/appSettings");
+const { asyncHandler } = require("../../shared/http/asyncHandler");
+const { buildRegisterDeviceToken } = require("./commands/registerDeviceToken");
+const { buildRemoveDeviceToken } = require("./commands/removeDeviceToken");
 
 function createNotificationsRouter(dependencies = {}) {
   const router = Router();
@@ -15,6 +18,37 @@ function createNotificationsRouter(dependencies = {}) {
   const User = dependencies.User || DefaultUser;
   const prisma = dependencies.prisma || defaultPrisma;
   const settings = dependencies.appSettings || defaultAppSettings;
+  // Preserve the long-standing DeviceToken injection seam used by narrow
+  // router callers while production uses the installation-aware model.
+  const legacyRegistrationAdapter = !dependencies.DeviceRegistration && dependencies.DeviceToken
+    ? {
+        async register({
+          userId, token, platform, adminMetricsOpenCapable,
+          adminMetricsOpenEpochId,
+        }) {
+          await dependencies.DeviceToken.saveToken({
+            userId,
+            token,
+            platform,
+            ...(adminMetricsOpenCapable
+              ? { adminMetricsOpenCapable, adminMetricsOpenEpochId }
+              : {}),
+          });
+        },
+        async remove({ userId, token, installationId }) {
+          if (!token || installationId) return { mismatch: false, removed: 0 };
+          await dependencies.DeviceToken.deleteToken({ userId, token });
+          return { mismatch: false, removed: 1 };
+        },
+      }
+    : null;
+  const commandDependencies = legacyRegistrationAdapter
+    ? { ...dependencies, DeviceRegistration: legacyRegistrationAdapter }
+    : dependencies;
+  const registerDeviceToken = dependencies.registerDeviceToken ||
+    buildRegisterDeviceToken(commandDependencies);
+  const removeDeviceToken = dependencies.removeDeviceToken ||
+    buildRemoveDeviceToken(commandDependencies);
 
   router.use(requireAuth);
 
@@ -85,20 +119,8 @@ function createNotificationsRouter(dependencies = {}) {
   });
 
   // POST /notifications/device-token
-  router.post("/device-token", async (req, res) => {
-    try {
-      const { deviceToken, platform } = req.body;
-
-      if (!deviceToken || typeof deviceToken !== "string") {
-        return res.status(400).json({ error: "deviceToken is required" });
-      }
-
-      if (!["ios", "android"].includes(platform)) {
-        return res
-          .status(400)
-          .json({ error: "platform must be 'ios' or 'android'" });
-      }
-
+  router.post("/device-token", asyncHandler(async (req, res) => {
+      const { platform } = req.body || {};
       let metricsEpochId = null;
       if (
         platform === "ios" &&
@@ -113,45 +135,23 @@ function createNotificationsRouter(dependencies = {}) {
         });
         metricsEpochId = epoch?.id || null;
       }
-      await DeviceToken.saveToken({
+      const result = await registerDeviceToken({
         userId: req.user.id,
-        token: deviceToken,
-        platform,
-        ...(metricsEpochId
+        body: req.body,
+        metrics: metricsEpochId
           ? {
               adminMetricsOpenCapable: true,
               adminMetricsOpenEpochId: metricsEpochId,
             }
-          : {}),
+          : {},
       });
-
-      res.json({ success: true });
-    } catch (error) {
-      console.error("Device token registration error:", error);
-      res.status(500).json({ error: "Internal server error" });
-    }
-  });
+      res.json(result);
+  }));
 
   // DELETE /notifications/device-token
-  router.delete("/device-token", async (req, res) => {
-    try {
-      const { deviceToken } = req.body;
-
-      if (!deviceToken || typeof deviceToken !== "string") {
-        return res.status(400).json({ error: "deviceToken is required" });
-      }
-
-      await DeviceToken.deleteToken({
-        userId: req.user.id,
-        token: deviceToken,
-      });
-
-      res.json({ success: true });
-    } catch (error) {
-      console.error("Device token removal error:", error);
-      res.status(500).json({ error: "Internal server error" });
-    }
-  });
+  router.delete("/device-token", asyncHandler(async (req, res) => {
+    res.json(await removeDeviceToken({ userId: req.user.id, body: req.body }));
+  }));
 
   return router;
 }
