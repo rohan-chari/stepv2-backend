@@ -253,7 +253,7 @@ const LEECH_MAX_PER_VICTIM = 2;
 // zero-sum, so concurrent links would compound.
 const HITCHHIKE_DURATION_MS = 60 * 60 * 1000;
 const HITCHHIKE_COPY_RATIO = 1;
-const HITCHHIKE_EFFECTIVE_SCORING_VERSION = 2;
+const HITCHHIKE_EFFECTIVE_SCORING_VERSION = 3;
 const HITCHHIKE_MAX_PER_TARGET = 1;
 // QUICK_RINSE (§8): store-only, SELF-ONLY, instantaneous. Halves the REMAINING
 // duration of every active timed opponent-inflicted effect on the user. Never
@@ -3279,10 +3279,9 @@ function buildUsePowerup(dependencies = {}) {
           expiresAt: new Date(currentTime.getTime() + HITCHHIKE_DURATION_MS),
           metadata: {
             copyRatio: HITCHHIKE_COPY_RATIO,
-            // Release A of Hitchhike v3 is read-compatible only. Every new
-            // cast remains on the already-shipped v2 interpretation regardless
-            // of client age; release B is the separately authorized change
-            // that will begin stamping v3.
+            // Release B stamps new casts onto the durable v3 attribution path.
+            // Existing v1/v2 effects remain readable through their versioned
+            // scoring paths for frozen-client and in-flight-race compatibility.
             scoringVersion: HITCHHIKE_EFFECTIVE_SCORING_VERSION,
           },
         });

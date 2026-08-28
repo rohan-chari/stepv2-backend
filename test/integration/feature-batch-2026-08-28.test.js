@@ -691,7 +691,7 @@ describe("feature batch 2026-08-28 backend contracts", () => {
     const effect = await prisma.raceActiveEffect.findFirstOrThrow({
       where: { raceId, type: "HITCHHIKE" },
     });
-    assert.equal(effect.metadata.scoringVersion, 2);
+    assert.equal(effect.metadata.scoringVersion, 3);
     const startsAt = new Date(Date.now() - 56 * 60 * 1000);
     await prisma.raceActiveEffect.update({
       where: { id: effect.id },
