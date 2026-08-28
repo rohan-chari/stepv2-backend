@@ -36,6 +36,7 @@
     "powerups:store": "node scripts/powerup-store.js",
     "powerups:copy:sync": "node scripts/powerup-copy-sync.js",
     "referrals:audit": "node scripts/referral-attribution-audit.js",
+    "global-event-v1:audit": "node scripts/audit-v1-pending-impacts.js",
     "seed:app-review-demo": "node scripts/seed-app-review-demo.js",
     "reset-review": "node scripts/reset-app-review.js",
     "seed": "node prisma/seed.js",

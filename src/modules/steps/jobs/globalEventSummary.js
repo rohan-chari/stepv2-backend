@@ -18,6 +18,10 @@ const RACE_RECONCILE_STATES = ["WAITING_RACES", "UNSCORABLE", "EXPIRED_UNDELIVER
 const DEFAULT_LEASE_MS = 15_000;
 const DEFAULT_RETRY_MS = 1_000;
 const DEFAULT_TICK_BUDGET_MS = 750;
+const V1_BATCH_SIZE = 100;
+const V1_BUSY_DELAY_MS = 250;
+const V1_IDLE_DELAY_MS = 60_000;
+const EMPTY_TICK_LOG_INTERVAL_MS = 60_000;
 
 async function invalidateUser(userId) {
   await invalidate({
@@ -390,7 +394,7 @@ async function releaseWorkLease(prisma, work, current, retryMs, errorCode = null
 
 async function runV2(prisma, current, batchSize = 100, options = {}) {
   if (!prisma.globalEventSummaryWork || !prisma.globalEventCaptureArtifact) {
-    return { created: 0, expired: 0 };
+    return { created: 0, expired: 0, candidatesSelected: 0, retries: 0 };
   }
   const candidateIds = await prisma.$queryRawUnsafe(
     `SELECT e.id
@@ -455,7 +459,12 @@ async function runV2(prisma, current, batchSize = 100, options = {}) {
   const tickBudgetMs = options.tickBudgetMs || DEFAULT_TICK_BUDGET_MS;
   const startedAtMs = Date.now();
   const works = await claimActiveWork(prisma, current, batchSize, leaseMs);
-  const result = { created: 0, expired: 0 };
+  const result = {
+    created: 0,
+    expired: 0,
+    candidatesSelected: candidateIds.length + legacyGroups.length + works.length,
+    retries: 0,
+  };
   for (let work of works) {
     if (Date.now() - startedAtMs >= tickBudgetMs) {
       await releaseWorkLease(prisma, work, current, retryMs);
@@ -477,6 +486,7 @@ async function runV2(prisma, current, batchSize = 100, options = {}) {
       }
       await releaseWorkLease(prisma, work, current, retryMs);
     } catch (error) {
+      result.retries += 1;
       await releaseWorkLease(prisma, work, current, retryMs, error?.code || "RETRYABLE_ERROR");
       options.logger?.error?.("[CRON] global event summary work retryable error", {
         workId: work.id,
@@ -490,54 +500,53 @@ async function runV2(prisma, current, batchSize = 100, options = {}) {
   return result;
 }
 
-async function runV1(prisma, current) {
-  const groups = await prisma.globalEventRaceImpact.groupBy({
-    by: ["eventId", "userId"],
-    _sum: { deltaSteps: true },
-    _count: { _all: true },
-    where: { status: "FINAL", attributionVersion: 1 },
-  });
-  let upserts = 0;
+async function runV1(prisma, current, batchSize = 100) {
+  const limit = Math.min(V1_BATCH_SIZE, Math.max(1, Number(batchSize) || V1_BATCH_SIZE));
+  const groups = await prisma.$queryRawUnsafe(
+    `SELECT impact.event_id AS "eventId",
+            impact.user_id AS "userId",
+            COALESCE(SUM(impact.delta_steps), 0)::bigint AS "deltaSteps",
+            COUNT(*)::bigint AS "raceCount",
+            COUNT(*) FILTER (WHERE impact.delta_steps <> 0)::bigint AS "nonzeroCount"
+       FROM global_event_race_impacts impact
+       JOIN global_step_events event ON event.id=impact.event_id
+       LEFT JOIN global_step_event_entitlements entitlement
+         ON entitlement.event_id=impact.event_id
+        AND entitlement.user_id=impact.user_id
+      WHERE impact.attribution_version=1
+        AND event.summary_attribution_version=1
+        AND (
+          (event.schedule_mode='LEGACY_GLOBAL' AND event.ends_at <= $1::timestamp)
+          OR
+          (event.schedule_mode='LOCAL_ENTITLEMENTS'
+            AND entitlement.id IS NOT NULL
+            AND entitlement.start_outcome <> 'PENDING'
+            AND entitlement.ends_at <= $1::timestamp)
+        )
+        AND NOT EXISTS (
+          SELECT 1
+            FROM job_runs completed
+           WHERE completed.job_name=(
+             'global_event_summary:' || impact.event_id || ':' || impact.user_id || ':v1'
+           )
+        )
+      GROUP BY impact.event_id, impact.user_id
+     HAVING COUNT(*) FILTER (WHERE impact.status <> 'FINAL')=0
+      ORDER BY impact.event_id, impact.user_id
+      LIMIT $2`,
+    current.toISOString(),
+    limit,
+  );
+  const result = {
+    candidatesSelected: groups.length,
+    summariesCommitted: 0,
+    allZeroFenced: 0,
+    conflicts: 0,
+    batchLimitSaturated: groups.length === limit,
+  };
   for (const group of groups) {
     const jobName = `global_event_summary:${group.eventId}:${group.userId}:v1`;
-    const alreadyProcessed = typeof prisma.jobRun?.findUnique === "function"
-      ? await prisma.jobRun.findUnique({ where: { jobName }, select: { jobName: true } })
-      : null;
-    if (alreadyProcessed) continue;
-    const event = await prisma.globalStepEvent.findUnique({
-      where: { id: group.eventId },
-      select: { endsAt: true, scheduleMode: true, summaryAttributionVersion: true },
-    });
-    if (!event) continue;
-    if (event.summaryAttributionVersion === 2) continue;
-    let enrollmentEnd = event.endsAt;
-    if (event.scheduleMode === "LOCAL_ENTITLEMENTS") {
-      const entitlement = await prisma.globalStepEventEntitlement.findUnique({
-        where: { eventId_userId: { eventId: group.eventId, userId: group.userId } },
-        select: { endsAt: true, startOutcome: true },
-      });
-      if (!entitlement || entitlement.startOutcome === "PENDING") continue;
-      enrollmentEnd = entitlement.endsAt;
-    }
-    if (new Date(enrollmentEnd).getTime() > current.getTime()) continue;
-    const pending = await prisma.globalEventRaceImpact.count({
-      where: {
-        eventId: group.eventId,
-        userId: group.userId,
-        attributionVersion: 1,
-        status: { not: "FINAL" },
-      },
-    });
-    if (pending) continue;
-    const nonzero = await prisma.globalEventRaceImpact.count({
-      where: {
-        eventId: group.eventId,
-        userId: group.userId,
-        attributionVersion: 1,
-        status: "FINAL",
-        deltaSteps: { not: 0 },
-      },
-    });
+    const nonzero = Number(group.nonzeroCount);
     let committed = false;
     try {
       await prisma.$transaction(async (tx) => {
@@ -551,8 +560,8 @@ async function runV1(prisma, current) {
             create: {
               eventId: group.eventId,
               userId: group.userId,
-              extraRaceSteps: group._sum.deltaSteps || 0,
-              raceCount: group._count._all,
+              extraRaceSteps: Number(group.deltaSteps),
+              raceCount: Number(group.raceCount),
               settledAt: current,
             },
           });
@@ -561,21 +570,24 @@ async function runV1(prisma, current) {
       committed = true;
     } catch (error) {
       if (error?.code !== "P2002") throw error;
+      result.conflicts += 1;
     }
     if (committed) {
       await invalidateUser(group.userId);
-      if (nonzero > 0) upserts += 1;
+      if (nonzero > 0) result.summariesCommitted += 1;
+      else result.allZeroFenced += 1;
     }
   }
-  return upserts;
+  return result;
 }
 
-function buildGlobalEventSummaryTick(dependencies = {}) {
+function buildGlobalEventSummaryV2Tick(dependencies = {}) {
   const prisma = dependencies.prisma || defaultPrisma;
   const now = dependencies.now || (() => new Date());
-  return async function globalEventSummaryTick() {
+  return async function globalEventSummaryV2Tick() {
+    const startedAt = Date.now();
     const current = new Date(now());
-    const v2 = await runV2(prisma, current, dependencies.batchSize || 100, {
+    const result = await runV2(prisma, current, dependencies.batchSize || 100, {
       leaseMs: dependencies.leaseMs,
       retryMs: dependencies.retryMs,
       tickBudgetMs: dependencies.tickBudgetMs,
@@ -584,35 +596,161 @@ function buildGlobalEventSummaryTick(dependencies = {}) {
       afterSummaryWorkTransition: dependencies.afterSummaryWorkTransition,
       afterSummaryRaceEnqueue: dependencies.afterSummaryRaceEnqueue,
     });
-    const v1 = await runV1(prisma, current);
-    return { upserts: v1 + v2.created };
+    return { ...result, durationMs: Date.now() - startedAt };
+  };
+}
+
+function buildGlobalEventSummaryV1Tick(dependencies = {}) {
+  const prisma = dependencies.prisma || defaultPrisma;
+  const now = dependencies.now || (() => new Date());
+  return async function globalEventSummaryV1Tick() {
+    const startedAt = Date.now();
+    const result = await runV1(
+      prisma,
+      new Date(now()),
+      dependencies.v1BatchSize || V1_BATCH_SIZE,
+    );
+    return { ...result, durationMs: Date.now() - startedAt };
+  };
+}
+
+function buildGlobalEventSummaryTick(dependencies = {}) {
+  const runV2Tick = buildGlobalEventSummaryV2Tick(dependencies);
+  const runV1Tick = buildGlobalEventSummaryV1Tick(dependencies);
+  return async function globalEventSummaryTick() {
+    const v2 = await runV2Tick();
+    const v1 = await runV1Tick();
+    return { upserts: v1.summariesCommitted + v2.created };
+  };
+}
+
+function tickIsActive(result = {}) {
+  return Number(result.candidatesSelected) > 0 ||
+    Number(result.created) > 0 ||
+    Number(result.summariesCommitted) > 0 ||
+    Number(result.allZeroFenced) > 0 ||
+    Number(result.retries) > 0 ||
+    Number(result.conflicts) > 0;
+}
+
+function summaryTickFields(phase, result, nextV1DelayMs = null) {
+  return {
+    event: "global_event_summary_tick",
+    phase,
+    durationMs: Math.max(0, Number(result?.durationMs) || 0),
+    candidatesSelected: Math.max(0, Number(result?.candidatesSelected) || 0),
+    summariesCommitted: Math.max(
+      0,
+      Number(result?.summariesCommitted ?? result?.created) || 0,
+    ),
+    allZeroFenced: Math.max(0, Number(result?.allZeroFenced) || 0),
+    retries: Math.max(0, Number(result?.retries) || 0),
+    conflicts: Math.max(0, Number(result?.conflicts) || 0),
+    batchLimitSaturated: result?.batchLimitSaturated === true,
+    ...(nextV1DelayMs == null ? {} : { nextV1DelayMs }),
   };
 }
 
 function scheduleGlobalEventSummaryTick(dependencies = {}) {
-  const run = buildGlobalEventSummaryTick(dependencies);
+  const runV1Tick = dependencies.runV1Tick || buildGlobalEventSummaryV1Tick(dependencies);
+  const runV2Tick = dependencies.runV2Tick || buildGlobalEventSummaryV2Tick(dependencies);
   const logger = dependencies.logger || console;
-  let running = false;
-  const tick = async () => {
-    if (running) return;
-    running = true;
-    try {
-      await run();
-    } catch (error) {
-      logger.error("[CRON] globalEventSummary tick error:", error);
-    } finally {
-      running = false;
+  const setIntervalFn = dependencies.setInterval || setInterval;
+  const clearIntervalFn = dependencies.clearInterval || clearInterval;
+  const setTimeoutFn = dependencies.setTimeout || setTimeout;
+  const clearTimeoutFn = dependencies.clearTimeout || clearTimeout;
+  const nowMs = dependencies.nowMs || Date.now;
+  const v1BusyDelayMs = dependencies.v1BusyDelayMs || V1_BUSY_DELAY_MS;
+  const v1IdleDelayMs = dependencies.v1IdleDelayMs || V1_IDLE_DELAY_MS;
+  const emptyLogIntervalMs = dependencies.emptyLogIntervalMs || EMPTY_TICK_LOG_INTERVAL_MS;
+  let stopped = false;
+  let v1InFlight = null;
+  let v2InFlight = null;
+  let v1Timer = null;
+  let lastV1EmptyLogAt = 0;
+  let lastV2EmptyLogAt = 0;
+
+  const logResult = (phase, result, nextDelay = null) => {
+    const active = tickIsActive(result);
+    const lastEmpty = phase === "v1" ? lastV1EmptyLogAt : lastV2EmptyLogAt;
+    const currentMs = nowMs();
+    if (!active && currentMs - lastEmpty < emptyLogIntervalMs) return;
+    if (!active) {
+      if (phase === "v1") lastV1EmptyLogAt = currentMs;
+      else lastV2EmptyLogAt = currentMs;
     }
+    const fields = summaryTickFields(phase, result, nextDelay);
+    logger.log(JSON.stringify({ message: "[CRON] Global event summary tick", ...fields }));
   };
-  tick();
-  const interval = setInterval(tick, dependencies.intervalMs || 1000);
+
+  const logError = (phase, error, startedAt, nextDelay = null) => {
+    logger.error(JSON.stringify({
+      message: "[CRON] Global event summary tick error",
+      ...summaryTickFields(phase, { durationMs: nowMs() - startedAt }, nextDelay),
+      errorCode: error?.code || "SUMMARY_TICK_FAILED",
+    }));
+  };
+
+  const tickV2 = () => {
+    if (stopped || v2InFlight) return v2InFlight;
+    const startedAt = nowMs();
+    v2InFlight = (async () => {
+      try {
+        logResult("v2", await runV2Tick());
+      } catch (error) {
+        logError("v2", error, startedAt);
+      }
+    })().finally(() => { v2InFlight = null; });
+    return v2InFlight;
+  };
+
+  const armV1 = (delay) => {
+    if (stopped) return;
+    v1Timer = setTimeoutFn(tickV1, delay);
+    v1Timer?.unref?.();
+  };
+  const tickV1 = () => {
+    if (stopped || v1InFlight) return v1InFlight;
+    const startedAt = nowMs();
+    let nextDelay = v1IdleDelayMs;
+    v1InFlight = (async () => {
+      try {
+        const result = await runV1Tick();
+        nextDelay = result.batchLimitSaturated ? v1BusyDelayMs : v1IdleDelayMs;
+        logResult("v1", result, nextDelay);
+      } catch (error) {
+        logError("v1", error, startedAt, nextDelay);
+      }
+    })().finally(() => {
+      v1InFlight = null;
+      armV1(nextDelay);
+    });
+    return v1InFlight;
+  };
+
+  tickV2();
+  tickV1();
+  const interval = setIntervalFn(tickV2, dependencies.intervalMs || 1000);
   interval.unref?.();
   logger.log("[CRON] Global event summary scheduled");
-  return { stop: () => clearInterval(interval) };
+  return {
+    tickV1,
+    tickV2,
+    async stop() {
+      stopped = true;
+      clearIntervalFn(interval);
+      if (v1Timer) clearTimeoutFn(v1Timer);
+      await Promise.allSettled([v1InFlight, v2InFlight].filter(Boolean));
+    },
+  };
 }
 
 module.exports = {
+  buildGlobalEventSummaryV1Tick,
+  buildGlobalEventSummaryV2Tick,
   buildGlobalEventSummaryTick,
+  runV1,
   scheduleGlobalEventSummaryTick,
   runV2,
+  summaryTickFields,
 };

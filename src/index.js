@@ -226,7 +226,7 @@ function startServer({
       retainStopHandle(scheduleGlobalEvents());
       retainStopHandle(scheduleGlobalEventBoundaryDrainJob());
       retainStopHandle(scheduleGlobalEventEntitlementEventReconcilerJob());
-      scheduleGlobalSummary();
+      retainStopHandle(scheduleGlobalSummary());
       scheduleAutoStartRaces();
       // Established fan-outs share the single operational brake.
       if (!userFanoutDisabled("LIVE_PLACEMENT_DISABLED")) {
