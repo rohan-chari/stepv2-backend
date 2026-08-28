@@ -32,6 +32,9 @@ const {
   buildRaceResolutionWorkerV2,
 } = require("../../src/modules/races/jobs/raceResolutionQueueV2");
 const {
+  buildRacePlacementTransitionWorker,
+} = require("../../src/modules/races/jobs/racePlacementTransitionWorker");
+const {
   RaceResolutionJobV2,
 } = require("../../src/modules/races/models/raceResolutionJobV2");
 const { appSettings } = require("../../src/shared/config/appSettings");
@@ -604,6 +607,37 @@ describe("dependency closure — byte parity with the full resolver", () => {
     const { compared, untouched } = assertParity(runs, [0, 1, 2]);
     assert.equal(compared, 3);
     assert.equal(untouched, 1);
+
+    // Score computation may safely write only the dependency closure, but a
+    // placement transition is global: the durable handoff must rank the full
+    // canonical roster. Give every participant an intentionally stale
+    // baseline, then prove all four (including the untouched score row) are
+    // projected from this closure generation.
+    await prisma.raceParticipant.updateMany({
+      where: { raceId: runs.closureRun.raceId },
+      data: { lastNotifiedPlacement: 99 },
+    });
+    await prisma.$executeRawUnsafe(
+      `UPDATE race_placement_transition_jobs
+          SET not_before_at = CURRENT_TIMESTAMP - INTERVAL '1 second'
+        WHERE race_id = $1`,
+      runs.closureRun.raceId,
+    );
+    const placement = buildRacePlacementTransitionWorker();
+    const result = await placement.processOne();
+    assert.ok(result, "the closure generation must leave a placement handoff");
+    assert.equal(result.job.raceId, runs.closureRun.raceId);
+    assert.equal(result.metrics.placementProposed, 4);
+    assert.equal(result.metrics.placementEventInserts, 4);
+    const projected = await prisma.raceParticipant.findMany({
+      where: { raceId: runs.closureRun.raceId },
+      select: { lastNotifiedPlacement: true },
+    });
+    assert.deepEqual(
+      projected.map((row) => row.lastNotifiedPlacement).sort((a, b) => a - b),
+      [1, 2, 3, 4],
+      "the placement worker must rank the full race rather than the score closure",
+    );
   });
 
   it("frozen Leech source still drains its victim and receives no credit", async () => {

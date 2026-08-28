@@ -95,6 +95,83 @@ describe("placement performance scheduler integration", () => {
     assert.equal(await JobRun.claimRun(jobName, "TEAM_A->TEAM_B"), true);
   });
 
+  it("rolls back a team final-stretch reminder claim when its durable event append fails", async () => {
+    const first = await createTestUser({ displayName: "Final stretch A" });
+    const second = await createTestUser({ displayName: "Final stretch B" });
+    const at = new Date("2026-08-28T12:00:00.000Z");
+    const race = await prisma.race.create({
+      data: {
+        creatorId: first.user.id,
+        name: "Atomic final stretch",
+        targetSteps: 100000,
+        status: "ACTIVE",
+        isTeamRace: true,
+        teamSize: 1,
+        teamAName: "A",
+        teamBName: "B",
+        startedAt: new Date(at.getTime() - 24 * 60 * 60 * 1000),
+        endsAt: new Date(at.getTime() + 30 * 60 * 1000),
+      },
+    });
+    await prisma.raceParticipant.createMany({
+      data: [
+        {
+          raceId: race.id,
+          userId: first.user.id,
+          status: "ACCEPTED",
+          team: "TEAM_A",
+          totalSteps: 100,
+        },
+        {
+          raceId: race.id,
+          userId: second.user.id,
+          status: "ACCEPTED",
+          team: "TEAM_B",
+          totalSteps: 50,
+        },
+      ],
+    });
+
+    const jobName = `team-final-stretch-event:${race.id}`;
+    const eventKey = `TEAM_FINAL_STRETCH_V1:team-final-stretch:${race.id}:${Math.floor(at.getTime() / (30 * 60 * 1000))}`;
+    const build = (afterFinalStretchClaim) => buildRecomputePlacements({
+      prisma,
+      durableEvents: true,
+      produceScoreDrivenPlacements: false,
+      Race,
+      RaceParticipant,
+      JobRun,
+      RaceActiveEffect: { async findDueRaceIds() { return []; } },
+      RaceResolutionJobV2: { async findRecoveryRaceIds() { return []; } },
+      Notification: {
+        async findExistingByUserTypeRaceKeys() { return []; },
+        async claimDelivery() { return false; },
+      },
+      requestStepSyncForUsers: async () => {},
+      enqueueRaceResolution: async () => false,
+      eventBus: { async emit() {} },
+      afterFinalStretchClaim,
+      now: () => at,
+      logger: { log() {}, warn() {}, error() {} },
+      getPerformanceFlags: () => ({
+        placementDistributedClaimEnabled: false,
+        placementLeanBaselineWritesEnabled: false,
+        placementInertPushSuppressionEnabled: false,
+      }),
+    });
+
+    await build(async () => { throw new Error("injected append-stage crash"); })();
+    assert.equal(await prisma.jobRun.count({ where: { jobName } }), 0);
+    assert.equal(await prisma.domainEventOutbox.count({ where: { eventKey } }), 0);
+
+    await build(undefined)();
+    assert.equal(await prisma.jobRun.count({ where: { jobName } }), 1);
+    assert.equal(await prisma.domainEventOutbox.count({ where: { eventKey } }), 1);
+    assert.equal(await prisma.domainEventAudience.count({
+      where: { event: { eventKey } },
+    }), 2);
+  });
+
   it("recomputes 750 participants with bounded lean CAS and visible events", async () => {
     const count = 750;
     const users = Array.from({ length: count }, (_, index) => ({

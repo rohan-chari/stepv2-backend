@@ -11,6 +11,7 @@
     "feedback:gmail:preflight": "node scripts/preflight-google-workspace-feedback.js",
     "test": "node --test",
     "test:unit": "node --test --test-concurrency=1 --test-force-exit 'test/commands/**/*.test.js' 'test/handlers/**/*.test.js' 'test/http/**/*.test.js' 'test/jobs/**/*.test.js' 'test/lib/**/*.test.js' 'test/modules/**/*.test.js' 'test/queries/**/*.test.js' 'test/services/**/*.test.js' 'test/startup/**/*.test.js' 'test/utils/**/*.test.js'",
+    "race-placement:catch-up": "node scripts/catch-up-race-placement-transition-jobs.js",
     "test:integration": "DATABASE_URL=postgresql://rohan@localhost:5432/steps-tracker-integration_test REFERRAL_IP_HMAC_ACTIVE_VERSION=1 REFERRAL_IP_HMAC_SECRET_V1=integration-test-only-referral-hmac-secret-material sh -c 'createdb steps-tracker-integration_test 2>/dev/null; npx prisma migrate deploy && npm run identity-search-indexes:apply && node --test --test-concurrency=1 --test-force-exit test/integration/**/*.test.js'",
     "identity-search-indexes:apply": "psql \"$DATABASE_URL\" --set=ON_ERROR_STOP=1 --file=scripts/race-experience-identity-search-indexes.sql",
     "migrate": "npx prisma migrate dev",

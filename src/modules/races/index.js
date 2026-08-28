@@ -15,6 +15,8 @@ Object.assign(module.exports, require("./models/raceParticipant"));
 Object.assign(module.exports, require("./models/racePayoutDouble"));
 Object.assign(module.exports, require("./models/raceResolutionJob"));
 Object.assign(module.exports, require("./models/raceResolutionJobV2"));
+Object.assign(module.exports, require("./models/racePlacementTransitionJob"));
+Object.assign(module.exports, require("./models/racePlacementBaseline"));
 Object.assign(module.exports, require("./models/raceResolutionPostTask"));
 Object.assign(module.exports, require("./models/raceImpactEvent"));
 
@@ -42,6 +44,7 @@ Object.assign(module.exports, require("./services/racePayoutDoublePolicy"));
 Object.assign(module.exports, require("./services/reviewPrompt"));
 Object.assign(module.exports, require("./services/withRacePayoutDoubleTransaction"));
 Object.assign(module.exports, require("./services/raceListCache"));
+Object.assign(module.exports, require("./services/racePlacementTransitions"));
 
 Object.assign(module.exports, require("./queries/getRaceProgress"));
 Object.assign(module.exports, require("./queries/getRaces"));
@@ -86,6 +89,7 @@ Object.assign(module.exports, require("./jobs/raceResolutionQueue"));
 // C0: the race-keyed worker. The v1 worker above stays exported (and its code
 // present) for the reverse-handoff rollback, but src/index.js schedules ONLY v2.
 Object.assign(module.exports, require("./jobs/raceResolutionQueueV2"));
+Object.assign(module.exports, require("./jobs/racePlacementTransitionWorker"));
 Object.assign(module.exports, require("./jobs/raceResolutionPostTaskRunner"));
 Object.assign(module.exports, require("./jobs/resolvedImpactBoundaryScheduler"));
 Object.assign(module.exports, require("./jobs/autoStartScheduledRaces"));

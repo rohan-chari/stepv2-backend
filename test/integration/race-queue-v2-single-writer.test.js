@@ -27,6 +27,12 @@ const { appSettings } = require("../../src/shared/config/appSettings");
 const {
   buildRaceResolutionPostTaskHandoff,
 } = require("../../src/modules/races/services/raceResolutionPostTaskHandoff");
+const {
+  buildRacePlacementTransitionWorker,
+} = require("../../src/modules/races/jobs/racePlacementTransitionWorker");
+const {
+  RacePlacementTransitionJob,
+} = require("../../src/modules/races/models/racePlacementTransitionJob");
 
 let server;
 let nextAppleId = 0;
@@ -144,6 +150,13 @@ async function totalsByUser(raceId) {
   return Object.fromEntries(rows.map((r) => [r.userId, r.totalSteps]));
 }
 
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+  return { promise, resolve, reject };
+}
+
 before(async () => {
   server = await getSharedServer();
 });
@@ -165,6 +178,131 @@ after(async () => {
 });
 
 describe("5a — one bulk writer per race", () => {
+  it("rolls score success back when its constant-size placement handoff fails", async () => {
+    const alice = await createUser("Handoff Alice");
+    const bob = await createUser("Handoff Bob");
+    const raceId = await createActiveRace(alice, [bob], "Atomic placement handoff");
+    await drain(makeWorker());
+    await prisma.racePlacementTransitionJob.deleteMany({ where: { raceId } });
+    await prisma.raceParticipant.updateMany({
+      where: { raceId, userId: alice.userId },
+      data: { totalSteps: 0, lastNotifiedPlacement: 2 },
+    });
+    await prisma.raceParticipant.updateMany({
+      where: { raceId, userId: bob.userId },
+      data: { totalSteps: 0, lastNotifiedPlacement: 1 },
+    });
+    assert.equal((await postSamples(alice, [sampleAt(2, 3100)])).status, 200);
+
+    const claimed = await makeWorker({
+      RacePlacementTransitionJob: {
+        async enqueueCurrentGeneration() {
+          throw Object.assign(new Error("injected handoff failure"), {
+            code: "INJECTED_HANDOFF_FAILURE",
+          });
+        },
+      },
+      logger: { log() {}, warn() {}, error() {} },
+    }).processOne();
+    assert.ok(claimed);
+    assert.equal((await totalsByUser(raceId))[alice.userId], 0);
+    assert.equal(await prisma.racePlacementTransitionJob.count({ where: { raceId } }), 0);
+    assert.equal((await RaceResolutionJobV2.findByRaceId(raceId)).state, "QUEUED");
+
+    await prisma.raceResolutionJobV2.update({
+      where: { raceId }, data: { retryAt: new Date(0) },
+    });
+    assert.ok(await makeWorker().processOne());
+    const handoff = await prisma.racePlacementTransitionJob.findUnique({
+      where: { raceId },
+    });
+    assert.equal(handoff.requestedGeneration, handoff.processingGeneration ?? handoff.requestedGeneration);
+    assert.equal(handoff.state, "QUEUED");
+
+    const placementWorker = buildRacePlacementTransitionWorker({
+      now: () => new Date(Date.now() + 2_000),
+    });
+    assert.ok(await placementWorker.processOne());
+    assert.equal((await prisma.racePlacementTransitionJob.findUnique({
+      where: { raceId },
+    })).state, "SUCCEEDED");
+  });
+
+  it("uses resolution-first locks when G+1 score commit overlaps G placement persistence", async () => {
+    const alice = await createUser("Lock Order Alice");
+    const bob = await createUser("Lock Order Bob");
+    const raceId = await createActiveRace(alice, [bob], "Placement lock order");
+    await drain(makeWorker());
+    await prisma.racePlacementTransitionJob.deleteMany({ where: { raceId } });
+    await prisma.domainEventOutbox.deleteMany({ where: { aggregateId: raceId } });
+    await prisma.raceParticipant.updateMany({
+      where: { raceId, userId: alice.userId },
+      data: { totalSteps: 0, lastNotifiedPlacement: 2 },
+    });
+    await prisma.raceParticipant.updateMany({
+      where: { raceId, userId: bob.userId },
+      data: { totalSteps: 0, lastNotifiedPlacement: 1 },
+    });
+
+    assert.equal((await postSamples(alice, [sampleAt(3, 3_100)])).status, 200);
+    assert.ok(await makeWorker().processOne());
+    await prisma.racePlacementTransitionJob.update({
+      where: { raceId }, data: { notBeforeAt: new Date(0) },
+    });
+
+    const placementPlanned = deferred();
+    const allowPlacementFence = deferred();
+    const placementRun = buildRacePlacementTransitionWorker({
+      async beforePersist() {
+        placementPlanned.resolve();
+        await allowPlacementFence.promise;
+      },
+      logger: { log() {}, warn() {}, error() {} },
+    }).processOne();
+    await placementPlanned.promise;
+
+    assert.equal((await postSamples(bob, [sampleAt(2, 6_200)])).status, 200);
+    const scoreAtHandoff = deferred();
+    const allowScoreHandoff = deferred();
+    const scoreRun = makeWorker({
+      RacePlacementTransitionJob: {
+        ...RacePlacementTransitionJob,
+        async enqueueCurrentGeneration(args, tx) {
+          scoreAtHandoff.resolve();
+          await allowScoreHandoff.promise;
+          return RacePlacementTransitionJob.enqueueCurrentGeneration(args, tx);
+        },
+      },
+      logger: { log() {}, warn() {}, error() {} },
+    }).processOne();
+    await scoreAtHandoff.promise;
+    allowPlacementFence.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    allowScoreHandoff.resolve();
+
+    const [scoreResult, placementResult] = await Promise.race([
+      Promise.all([scoreRun, placementRun]),
+      new Promise((_, reject) => setTimeout(
+        () => reject(new Error("score/placement lock order deadlocked")),
+        2_000,
+      )),
+    ]);
+    assert.ok(scoreResult);
+    assert.equal(placementResult.metrics.placementOutcome, "superseded_skip");
+    assert.equal(await prisma.domainEventOutbox.count({
+      where: { aggregateId: raceId, eventType: "PLACEMENT_CHANGED_V1" },
+    }), 0, "G must not emit after G+1 owns the resolution row");
+
+    await prisma.racePlacementTransitionJob.update({
+      where: { raceId }, data: { notBeforeAt: new Date(0) },
+    });
+    const followup = await buildRacePlacementTransitionWorker().processOne();
+    assert.equal(followup.metrics.placementOutcome, "committed");
+    const events = await prisma.domainEventOutbox.findMany({
+      where: { aggregateId: raceId, eventType: "PLACEMENT_CHANGED_V1" },
+    });
+    assert.ok(events.every((event) => event.eventKey.includes(":resolution:3:")));
+  });
   it("public mutation durably reserves an exact nudge intent before queued handoff", async () => {
     const alice = await createUser("Intent Alice");
     const bob = await createUser("Intent Bob");
@@ -877,6 +1015,7 @@ describe("5a — one bulk writer per race", () => {
     const bob = await createUser("Malformed Bob");
     const raceId = await createActiveRace(alice, [bob], "Malformed envelope");
     await drain(makeWorker());
+    await prisma.racePlacementTransitionJob.deleteMany({ where: { raceId } });
     await prisma.$executeRawUnsafe(
       `UPDATE race_resolution_jobs_v2
        SET dirty_reasons='{}'::jsonb
@@ -894,6 +1033,18 @@ describe("5a — one bulk writer per race", () => {
     const job = await RaceResolutionJobV2.findByRaceId(raceId);
     assert.deepEqual(job.dirtyReasons, ["FULL"]);
     assert.equal(job.state, "QUEUED");
+    assert.ok(await makeWorker().processOne());
+    await prisma.raceParticipant.updateMany({
+      where: { raceId }, data: { lastNotifiedPlacement: 99 },
+    });
+    await prisma.racePlacementTransitionJob.update({
+      where: { raceId }, data: { notBeforeAt: new Date(0) },
+    });
+    const placement = await buildRacePlacementTransitionWorker().processOne();
+    assert.equal(placement.metrics.placementOutcome, "committed");
+    assert.equal(await prisma.domainEventOutbox.count({
+      where: { aggregateId: raceId, eventType: "PLACEMENT_CHANGED_V1" },
+    }), 2);
   });
 
   it("N rapid syncs coalesce to <= 2 worker runs with correct totals, and EVERY triggering user's box state is processed", async () => {

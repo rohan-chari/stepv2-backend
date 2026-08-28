@@ -49,6 +49,7 @@ const TABLES_IN_ORDER = [
   "race_payout_double_identities",
   "race_resolution_delivery_intents",
   "race_resolution_post_tasks",
+  "race_placement_transition_jobs",
   "race_resolution_jobs_v2",
   "race_resolution_jobs",
   "race_admin_commands",

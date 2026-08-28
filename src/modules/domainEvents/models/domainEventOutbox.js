@@ -55,6 +55,77 @@ async function insertEventIfAbsent(tx, event) {
   return { event: stored, inserted: inserted.length === 1 };
 }
 
+async function insertEventsIfAbsent(tx, events) {
+  if (!Array.isArray(events) || events.length === 0) {
+    return { rows: [], insertedEventKeys: new Set(), statementCount: 0 };
+  }
+  const prepared = events.map((event) => ({
+    id: crypto.randomUUID(),
+    eventKey: event.eventKey,
+    eventType: event.eventType,
+    schemaVersion: event.schemaVersion,
+    aggregateType: event.aggregateType,
+    aggregateId: event.aggregateId,
+    payload: event.payload,
+    occurredAt: event.occurredAt.toISOString(),
+    availableAt: event.availableAt.toISOString(),
+  }));
+  const inserted = await tx.$queryRawUnsafe(
+    `INSERT INTO domain_event_outbox (
+       id, event_key, event_type, schema_version, aggregate_type, aggregate_id,
+       payload, occurred_at, available_at, status, created_at, updated_at
+     )
+     SELECT i.id::uuid, i."eventKey", i."eventType", i."schemaVersion",
+            i."aggregateType", i."aggregateId", i.payload,
+            i."occurredAt"::timestamp, i."availableAt"::timestamp,
+            'PENDING', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+       FROM jsonb_to_recordset($1::jsonb) AS i(
+         id text, "eventKey" text, "eventType" text, "schemaVersion" integer,
+         "aggregateType" text, "aggregateId" text, payload jsonb,
+         "occurredAt" text, "availableAt" text
+       )
+      ORDER BY i."eventKey"
+     ON CONFLICT (event_key) DO NOTHING
+     RETURNING id, event_key AS "eventKey"`,
+    JSON.stringify(prepared),
+  );
+  const insertedByKey = new Map(inserted.map((row) => [row.eventKey, row.id]));
+  const audiences = events.flatMap((event) => {
+    const domainEventId = insertedByKey.get(event.eventKey);
+    if (!domainEventId) return [];
+    return event.audience.map(({ recipientId, ordinal, facts }) => ({
+      domainEventId,
+      recipientId,
+      ordinal,
+      facts,
+    }));
+  });
+  if (audiences.length > 0) {
+    await tx.$executeRawUnsafe(
+      `INSERT INTO domain_event_audiences (
+         id, domain_event_id, recipient_id, ordinal, facts, created_at
+       )
+       SELECT gen_random_uuid(), a."domainEventId"::uuid, a."recipientId",
+              a.ordinal, a.facts, CURRENT_TIMESTAMP
+         FROM jsonb_to_recordset($1::jsonb) AS a(
+           "domainEventId" text, "recipientId" text, ordinal integer, facts jsonb
+         )
+        ORDER BY a."domainEventId", a.ordinal`,
+      JSON.stringify(audiences),
+    );
+  }
+  const rows = await tx.domainEventOutbox.findMany({
+    where: { eventKey: { in: events.map((event) => event.eventKey) } },
+    include: { audience: { orderBy: { ordinal: "asc" } } },
+    orderBy: { eventKey: "asc" },
+  });
+  return {
+    rows,
+    insertedEventKeys: new Set(insertedByKey.keys()),
+    statementCount: 2 + (audiences.length > 0 ? 1 : 0),
+  };
+}
+
 async function findByEventKey(tx, eventKey) {
   return tx.domainEventOutbox.findUnique({
     where: { eventKey },
@@ -880,6 +951,7 @@ module.exports = {
   PROJECTION_TERMINAL,
   createEvent,
   insertEventIfAbsent,
+  insertEventsIfAbsent,
   findByEventKey,
   claimEvents,
   loadEventContext,

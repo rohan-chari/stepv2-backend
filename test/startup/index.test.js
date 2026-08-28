@@ -62,6 +62,7 @@ test("startServer listens on 0.0.0.0 by default", () => {
     scheduleFixedTeamPayoutMonitoring: track("fixedTeamPayoutMonitoring"),
     scheduleFeedbackEmailAttemptExpiry: track("feedbackEmailAttemptExpiry"),
     scheduleRaceResolutionPostTasks() {},
+    scheduleRacePlacementTransitions: track("placementTransitions"),
     logger: {
       log(message) {
         logs.push(message);
@@ -101,6 +102,7 @@ test("startServer listens on 0.0.0.0 by default", () => {
     dailyMover: 1,
     fixedTeamPayoutMonitoring: 1,
     feedbackEmailAttemptExpiry: 1,
+    placementTransitions: 1,
   });
   assert.deepEqual(logs, ["Steps Tracker API running on 0.0.0.0:3000"]);
 });
@@ -151,6 +153,7 @@ test("cronStartDelayMs defers job scheduling past the reload overlap window", as
     scheduleFixedTeamPayoutMonitoring: track("fixedTeamPayoutMonitoring"),
     scheduleFeedbackEmailAttemptExpiry: track("feedbackEmailAttemptExpiry"),
     scheduleRaceResolutionPostTasks() {},
+    scheduleRacePlacementTransitions: track("placementTransitions"),
     logger: {
       log(message) {
         logs.push(message);
@@ -182,6 +185,7 @@ test("http and resolution process roles do not start the wrong schedulers", () =
     registerNotificationHandlers() {},
     scheduleGenerationHeartbeat: () => calls.push("heartbeat"),
     scheduleRaceResolutionWorker: () => calls.push("resolution"),
+    scheduleRacePlacementTransitions: () => calls.push("placement"),
     scheduleResolvedImpactBoundaries: () => calls.push("impact"),
     scheduleRaceResolutionPostTasks: () => calls.push("postTasks"),
     logger: { log() {} },
@@ -193,7 +197,9 @@ test("http and resolution process roles do not start the wrong schedulers", () =
 
   const resolutionCalls = [];
   start("resolution", resolutionCalls);
-  assert.deepEqual(resolutionCalls, ["heartbeat", "resolution", "impact", "postTasks"]);
+  assert.deepEqual(resolutionCalls, [
+    "heartbeat", "resolution", "placement", "impact", "postTasks",
+  ]);
 });
 
 test("capacity event-only cron starts the event and delivery pipeline without unrelated fan-outs", () => {

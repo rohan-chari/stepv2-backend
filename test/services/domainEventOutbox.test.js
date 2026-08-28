@@ -6,6 +6,7 @@ const {
   appendDomainEvent,
   canonicalJson,
   normalizeDomainEvent,
+  buildBulkAppendDomainEvents,
 } = require("../../src/modules/domainEvents");
 
 describe("durable domain-event append contract", () => {
@@ -77,5 +78,34 @@ describe("durable domain-event append contract", () => {
       }),
       (error) => error?.code === "DOMAIN_EVENT_INVARIANT_VIOLATION",
     );
+  });
+
+  it("bulk append validates every envelope before its first repository write", async () => {
+    let touched = false;
+    const bulkAppend = buildBulkAppendDomainEvents({
+      repository: {
+        async insertEventsIfAbsent() {
+          touched = true;
+          return { rows: [], insertedEventKeys: new Set() };
+        },
+      },
+    });
+    const base = {
+      eventType: "TEST_V1",
+      schemaVersion: 1,
+      aggregateType: "TEST",
+      aggregateId: "one",
+      occurredAt: new Date("2026-08-25T12:00:00.000Z"),
+      payload: { value: 1 },
+      audience: [],
+    };
+    await assert.rejects(
+      bulkAppend({}, [
+        { ...base, eventKey: "TEST_V1:one" },
+        { ...base, eventKey: "" },
+      ]),
+      /eventKey/,
+    );
+    assert.equal(touched, false);
   });
 });

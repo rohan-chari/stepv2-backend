@@ -1666,6 +1666,7 @@ model Race {
   messages                     RaceMessage[]
   payoutDoubleOfferItems       RacePayoutDoubleOfferItem[]
   resolutionJob                RaceResolutionJobV2?
+  placementTransitionJob       RacePlacementTransitionJob?
   resolutionPostTasks          RaceResolutionPostTask[]
   shareLinks                   RaceShareLink[]
   joinRequests                 RaceJoinRequest[]
@@ -3218,6 +3219,13 @@ enum RaceResolutionJobState {
   FAILED    @map("failed")
 }
 
+enum RacePlacementTransitionJobState {
+  QUEUED    @map("queued")
+  RUNNING   @map("running")
+  RETRY     @map("retry")
+  SUCCEEDED @map("succeeded")
+}
+
 model RaceResolutionJob {
   id                   String                 @id @default(uuid())
   userId               String                 @unique @map("user_id")
@@ -3318,6 +3326,38 @@ model RaceResolutionJobV2 {
   @@index([state, queuePriority, requestedAt])
   @@index([requestedAt])
   @@map("race_resolution_jobs_v2")
+}
+
+// Constant-size, durable handoff from one committed race-resolution generation
+// to independently retryable placement/event materialization. One row per
+// race coalesces newer generations while retaining the current lease owner.
+model RacePlacementTransitionJob {
+  id                   String                          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  raceId               String                          @unique @map("race_id")
+  requestedGeneration  Int                             @map("requested_generation")
+  processingGeneration Int?                            @map("processing_generation")
+  completedGeneration  Int?                            @map("completed_generation")
+  state                RacePlacementTransitionJobState @default(QUEUED)
+  requestedAt          DateTime                        @map("requested_at")
+  observedAt           DateTime                        @map("observed_at")
+  processingObservedAt DateTime?                       @map("processing_observed_at")
+  notBeforeAt          DateTime                        @map("not_before_at")
+  attempts             Int                             @default(0)
+  retryAt              DateTime?                       @map("retry_at")
+  startedAt            DateTime?                       @map("started_at")
+  completedAt          DateTime?                       @map("completed_at")
+  lastCompletedAt      DateTime?                       @map("last_completed_at")
+  leaseToken           String?                         @map("lease_token") @db.VarChar(64)
+  leaseExpiresAt       DateTime?                       @map("lease_expires_at")
+  lastErrorCode        String?                         @map("last_error_code") @db.VarChar(128)
+  createdAt            DateTime                        @default(now()) @map("created_at")
+  updatedAt            DateTime                        @default(now()) @updatedAt @map("updated_at")
+
+  race Race @relation(fields: [raceId], references: [id], onDelete: Cascade)
+
+  @@index([state, notBeforeAt, retryAt, requestedAt, raceId], map: "race_placement_transition_jobs_claim_idx")
+  @@index([state, leaseExpiresAt], map: "race_placement_transition_jobs_expired_lease_idx")
+  @@map("race_placement_transition_jobs")
 }
 
 model UserScoringInputVersion {

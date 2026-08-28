@@ -20,6 +20,7 @@ const noopSchedulers = {
   scheduleActivationEventCleanup() {},
   scheduleDailyMover() {},
   scheduleRaceResolutionPostTasks() {},
+  scheduleRacePlacementTransitions() {},
 };
 
 function fakeApp() {
@@ -85,11 +86,15 @@ test("capacity HTTP+resolution mode schedules only resolution workers", () => {
     scheduleRaceResolutionWorker() {
       calls.push("scheduleRaceResolutionWorker");
     },
+    scheduleRacePlacementTransitions() {
+      calls.push("scheduleRacePlacementTransitions");
+    },
     logger: { log() {} },
   });
 
   assert.deepEqual(calls, [
     "scheduleRaceResolutionWorker",
+    "scheduleRacePlacementTransitions",
     "scheduleRaceResolutionPostTasks",
   ]);
 });

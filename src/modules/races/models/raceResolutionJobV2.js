@@ -1070,6 +1070,7 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
         where: { raceId: { in: ids } },
         select: {
           raceId: true,
+          generation: true,
           state: true,
           requestedAt: true,
           lastCompletedAt: true,
@@ -1082,6 +1083,12 @@ function buildRaceResolutionJobV2Model(prisma = defaultPrisma) {
         .map((raceId) => {
           const job = byRaceId.get(raceId);
           if (!job) return { raceId, priority: 0, age: 0 };
+          // acquireForWrite's generation-zero SUCCEEDED row is only a lock
+          // anchor, never a standings result. Recovery must promote it into a
+          // real resolution generation without waiting for the stale window.
+          if (job.generation === 0) {
+            return { raceId, priority: 0, age: 0 };
+          }
           if (job.state === "FAILED") {
             return {
               raceId,

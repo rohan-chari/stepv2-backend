@@ -3,9 +3,11 @@ const {
   canonicalJson,
   normalizeDomainEvent,
   buildAppendDomainEvent,
+  buildBulkAppendDomainEvents,
 } = require("./commands/appendDomainEvent");
 
 const appendDomainEvent = buildAppendDomainEvent();
+const bulkAppendDomainEvents = buildBulkAppendDomainEvents();
 
 // Publish the domain-only append surface before loading projector/cron modules.
 // Notification handlers depend on domain commands that import this index; an
@@ -16,7 +18,9 @@ module.exports = {
   canonicalJson,
   normalizeDomainEvent,
   buildAppendDomainEvent,
+  buildBulkAppendDomainEvents,
   appendDomainEvent,
+  bulkAppendDomainEvents,
 };
 
 // Producers import this module for the append surface while several legacy

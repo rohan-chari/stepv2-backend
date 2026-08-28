@@ -160,10 +160,48 @@ function buildAppendDomainEvent(dependencies = {}) {
   };
 }
 
+function buildBulkAppendDomainEvents(dependencies = {}) {
+  const repository = dependencies.repository || require("../models/domainEventOutbox");
+  return async function bulkAppendDomainEvents(tx, inputs) {
+    if (!tx || typeof tx !== "object") throw new TypeError("transaction client is required");
+    if (!Array.isArray(inputs)) throw new TypeError("events must be an array");
+    // All envelopes are normalized before the first SQL write. A malformed
+    // event can therefore never leave an earlier event/baseline committed.
+    const events = inputs.map(normalizeDomainEvent);
+    const keys = new Set();
+    for (const event of events) {
+      if (keys.has(event.eventKey)) {
+        throw new DomainEventInvariantError(`duplicate eventKey ${event.eventKey} in bulk append`);
+      }
+      keys.add(event.eventKey);
+    }
+    if (events.length === 0) {
+      return { inserted: 0, replayed: 0, statementCount: 0 };
+    }
+    const result = await repository.insertEventsIfAbsent(tx, events);
+    const storedByKey = new Map(result.rows.map((row) => [row.eventKey, row]));
+    for (const event of events) {
+      const stored = storedByKey.get(event.eventKey);
+      if (!sameImmutableEvent(stored, event) ||
+          !sameAudience(stored?.audience || [], event.audience)) {
+        throw new DomainEventInvariantError(
+          `eventKey ${event.eventKey} was reused with different immutable facts`,
+        );
+      }
+    }
+    return {
+      inserted: result.insertedEventKeys.size,
+      replayed: events.length - result.insertedEventKeys.size,
+      statementCount: result.statementCount || 0,
+    };
+  };
+}
+
 module.exports = {
   MAX_PAYLOAD_BYTES,
   DomainEventInvariantError,
   canonicalJson,
   normalizeDomainEvent,
   buildAppendDomainEvent,
+  buildBulkAppendDomainEvents,
 };

@@ -60,6 +60,7 @@ const {
 } = require("./modules/notifications");
 const {
   scheduleRaceResolutionWorkerV2,
+  scheduleRacePlacementTransitionWorker,
   scheduleRaceResolutionPostTaskRunner,
   scheduleResolvedImpactBoundaryScheduler,
   scheduleRaceAdminCommandRunner,
@@ -132,6 +133,8 @@ function startServer({
   // the reverse-handoff rollback target — but this binary never schedules it, so
   // only one bulk writer per race exists at a time.
   scheduleRaceResolutionWorker: scheduleRaceResolution = scheduleRaceResolutionWorkerV2,
+  scheduleRacePlacementTransitions:
+    schedulePlacementTransitions = scheduleRacePlacementTransitionWorker,
   scheduleRaceResolutionPostTasks:
     scheduleResolutionPostTasks = scheduleRaceResolutionPostTaskRunner,
   scheduleResolvedImpactBoundaries:
@@ -184,6 +187,7 @@ function startServer({
       if (processRole === "http") return;
       if (processRole === "resolution") {
         scheduleRaceResolution();
+        schedulePlacementTransitions();
         scheduleAdminCommands();
         scheduleImpactBoundaries();
         if (!raceResolutionPostTaskWorkerDisabled()) {
@@ -193,6 +197,7 @@ function startServer({
       }
       if (capacityHttpResolutionOnly) {
         scheduleRaceResolution();
+        schedulePlacementTransitions();
         scheduleAdminCommands();
         scheduleResolutionPostTasks();
         return;
@@ -303,6 +308,7 @@ function startServer({
       // injected startup logger.
       if (processRole !== "cron") {
         scheduleRaceResolution();
+        schedulePlacementTransitions();
         scheduleAdminCommands();
         scheduleImpactBoundaries();
       }

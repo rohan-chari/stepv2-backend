@@ -10,6 +10,9 @@ const {
   LEASE_MS,
 } = require("../models/raceResolutionJobV2");
 const {
+  RacePlacementTransitionJob: defaultPlacementJobModel,
+} = require("../models/racePlacementTransitionJob");
+const {
   buildResolveRaceState,
 } = require("../services/raceStateResolution");
 const { createWriteCapture } = require("../services/computeRaceState");
@@ -312,6 +315,7 @@ const RACE_RESOLUTION_PHASES = Object.freeze([
   "sideWrites",
   "boxConsequences",
   "recordSuccess",
+  "placementHandoff",
   "postSettings",
   "postCommitHook",
   "powerupStateSync",
@@ -734,6 +738,8 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
   const effectModel = dependencies.RaceActiveEffect || RaceActiveEffect;
   const eventModel = dependencies.RacePowerupEvent || RacePowerupEvent;
   const jobModel = dependencies.RaceResolutionJobV2 || defaultJobModel;
+  const placementJobModel = dependencies.RacePlacementTransitionJob ||
+    defaultPlacementJobModel;
   const syncRacePowerupState =
     dependencies.syncRacePowerupState || defaultSyncRacePowerupState;
   const recentBoxMints = dependencies.recentBoxMints || defaultRecentBoxMints;
@@ -1045,6 +1051,8 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         () => isStrictFlagEnabled(settings, "raceResolutionBurstCoalescingV1Enabled")
       );
       let superseded = false;
+      let placementHandoffGeneration = null;
+      let placementHandoffOutcome = "not_applicable";
       let discarded = false;
       let writeMs = 0;
       let participantWrites = [];
@@ -1681,6 +1689,29 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
           )
         );
         if (!outcome.applied) throw new FenceLostError();
+        if (!outcome.superseded) {
+          const placementJob = await phaseTimer.measure(
+            "placementHandoff",
+            () => placementJobModel.enqueueCurrentGeneration({
+              raceId: job.raceId,
+              generation: job.processingGeneration,
+              observedAt: currentTime,
+              now: now(),
+            }, tx),
+          );
+          if (!placementJob) {
+            const handoffError = new Error("placement handoff was not persisted");
+            handoffError.code = "PLACEMENT_HANDOFF_FAILED";
+            throw handoffError;
+          }
+          placementHandoffGeneration = job.processingGeneration;
+          placementHandoffOutcome =
+            placementJob.requestedGeneration === job.processingGeneration
+              ? "queued"
+              : "merged";
+        } else {
+          placementHandoffOutcome = "superseded_skip";
+        }
         if (impactContinuationNeeded) {
           await jobModel.enqueue({
             raceId: job.raceId,
@@ -2022,6 +2053,8 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         // write; `false` when a closure ran with the mine question answered no.
         closureEscalatedOnMine,
         closureFenceRejections: closureCommittedRejections,
+        placementHandoffGeneration,
+        placementHandoffOutcome,
         sourceInputFenceRejections,
         sqlCount: typeof dependencies.sqlCount === "function" ? dependencies.sqlCount() : null,
         phaseMs: phaseTimer.snapshot(),

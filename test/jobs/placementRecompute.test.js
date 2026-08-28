@@ -51,6 +51,23 @@ function makeDeps({ races = [], participantsByRace = {}, resolveThrowsFor = [] }
 // Participant fixture: totalSteps already reflect what resolveRaceState persisted.
 const P = (o) => ({ finishedAt: null, lastNotifiedPlacement: null, ...o });
 
+test("normal five-minute ownership does not produce score-driven placement", async () => {
+  const { deps, emitted, updates, pullCalls } = makeDeps({
+    races: [{ id: "r1", name: "Race 1" }],
+    participantsByRace: {
+      r1: [
+        P({ id: "p1", userId: "u1", totalSteps: 9, lastNotifiedPlacement: 1 }),
+        P({ id: "p2", userId: "u2", totalSteps: 10, lastNotifiedPlacement: 2 }),
+      ],
+    },
+  });
+  deps.produceScoreDrivenPlacements = false;
+  await buildRecomputePlacements(deps)();
+  assert.equal(emitted.some((event) => event.event === "PLACEMENT_CHANGED"), false);
+  assert.deepEqual(updates, []);
+  assert.equal(pullCalls.length, 1, "clock-driven step-sync pulls remain active");
+});
+
 test("emits PLACEMENT_CHANGED only for participants whose live rank changed", async () => {
   const { deps, emitted } = makeDeps({
     races: [{ id: "r1", name: "Race 1" }],

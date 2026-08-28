@@ -10,6 +10,9 @@ const {
   RaceResolutionJobV2: defaultRaceResolutionJobV2,
 } = require("../models/raceResolutionJobV2");
 const {
+  RacePlacementTransitionJob: defaultRacePlacementTransitionJob,
+} = require("../models/racePlacementTransitionJob");
+const {
   RaceActiveEffect: defaultRaceActiveEffect,
 } = require("../../powerups/models/raceActiveEffect");
 const { stepSyncPushService } = require("../../../shared/push/stepSyncPush");
@@ -29,7 +32,6 @@ const { appSettings: defaultAppSettings } = require("../../../shared/config/appS
 const {
   getDbPoolPressure,
   prisma: defaultPrisma,
-  runInPrismaTransaction,
   deferUntilAfterCommit,
 } = require("../../../db");
 const { appendDomainEvent: defaultAppendDomainEvent } = require("../../domainEvents");
@@ -63,29 +65,32 @@ const RACE_ENDING_SOON_WINDOW_MS = 2 * 60 * 60 * 1000; // fire when <= 2h remain
 const RACE_ENDING_SOON_PUSH_TYPE = "RACE_ENDING_SOON";
 
 // Races ending within this window are the "final stretch": we want their
-// participants' steps to be as fresh as possible for the last few recomputes, so
-// they get a tighter push throttle (below) than the default hourly cooldown.
+// participants' steps fresh for the remaining reminder/recovery ticks, so they
+// get a tighter push throttle (below) than the default hourly cooldown.
 const FINAL_STRETCH_WINDOW_MS = 60 * 60 * 1000; // ends within the next hour
 const FINAL_STRETCH_MIN_INTERVAL_MS = 30 * 60 * 1000; // push at most every 30 min
 
-// Live placement broadcast (Phase 0). Reads persisted standings for every
-// ACTIVE, not-yet-expired race and emits PLACEMENT_CHANGED when a participant's
-// live rank changes, so users see standings update without opening the race.
-// Backend-only: works for every shipped app version (the fan-out is server-side).
-//
-// Mutation paths keep these rows fresh through the race-keyed resolution queue.
-// This scan derives a transient "live rank" from the persisted totals (the
-// settlement `placement` column stays null until the race ends). Idempotent: a
-// participant whose rank is unchanged is not re-notified.
+// Five-minute race reminder and recovery sweep. Normal production ownership is
+// limited to clock-driven reminders, step-sync pulls, due-effect recovery, and
+// bounded repair of missing/stale resolution or placement handoffs. Score-driven
+// placement and team-lead transitions are owned by the durable placement worker.
+// Explicitly injected callers below retain the old score-driven path solely for
+// rollback, parity, and rolling-version compatibility tests.
 function buildRecomputePlacements(dependencies = {}) {
   const hasInjectedDeps = Object.keys(dependencies).length > 0;
+  const durableEvents = dependencies.durableEvents ?? !hasInjectedDeps;
+  const prisma = dependencies.prisma || defaultPrisma;
+  // Production's normal five-minute tick owns clock reminders and bounded
+  // recovery only. Explicitly injected callers retain the legacy score-driven
+  // seam for rollback/semantic parity tests during the additive rollout.
+  const produceScoreDrivenPlacements =
+    dependencies.produceScoreDrivenPlacements ?? hasInjectedDeps;
   const raceModel = dependencies.Race || Race;
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
   const appendDomainEvent = dependencies.appendDomainEvent || defaultAppendDomainEvent;
   const immediateEvents = dependencies.eventBus || eventBus;
-  const events = hasInjectedDeps
-    ? immediateEvents
-    : {
+  const events = durableEvents
+    ? {
         async emit(eventName, data) {
           const occurredAt = data?.occurredAt || now();
           let eventType;
@@ -117,29 +122,29 @@ function buildRecomputePlacements(dependencies = {}) {
           } else {
             throw new Error(`unsupported placement domain event ${eventName}`);
           }
-          await appendDomainEvent(defaultPrisma, {
-            eventKey: `${eventType}:${sourceId}`, eventType, schemaVersion: 1,
-            aggregateType: "RACE", aggregateId: data.raceId,
-            occurredAt, payload, audience,
+          await prisma.$transaction(async (tx) => {
+            await appendDomainEvent(tx, {
+              eventKey: `${eventType}:${sourceId}`, eventType, schemaVersion: 1,
+              aggregateType: "RACE", aggregateId: data.raceId,
+              occurredAt, payload, audience,
+            });
+            await dependencies.afterDurableEventAppend?.({ eventName, data });
           });
           // Compatibility hint for old workers/handlers during the additive
           // drain. It is post-commit and cannot make the observation claim or
           // durable append fail.
           return deferUntilAfterCommit(() => immediateEvents.emit(eventName, data));
         },
-      };
+      }
+    : immediateEvents;
   const resolve = dependencies.resolveRaceState || resolveRaceState;
   // C0 (spec §5a item 4): real mutations enqueue at their write seams. This
   // cron evaluates notifications from persisted standings and only enqueues a
   // bounded recovery set for missing/failed/hour-old job rows.
   //
-  // The notification evaluation below stays here, reading the persisted rows the
-  // worker keeps fresh. Deliberate: moving it into the worker's post-commit hook
-  // would re-evaluate every placement push at the worker's cadence (up to once
-  // per race per 5s) instead of once per 5 minutes, changing push volume and the
-  // meaning of `lastNotifiedPlacement`'s "last live rank" baseline. Its inputs
-  // (totalSteps) are at most one worker cycle stale, which is the D-3 bound this
-  // cron already lived with.
+  // Score-driven placement/team-lead evaluation now belongs to the durable
+  // placement worker. This sweep retains only clock-driven reminders, sync
+  // pulls, due-effect recovery, and bounded queue/handoff repair.
   //
   // An EXPLICITLY injected `resolveRaceState` still runs inline: that dependency
   // is the seam callers use to drive the recompute directly, and the inline path
@@ -152,6 +157,11 @@ function buildRecomputePlacements(dependencies = {}) {
   const enqueue = dependencies.enqueueRaceResolution || defaultEnqueueRaceResolution;
   const resolutionJobModel =
     dependencies.RaceResolutionJobV2 || defaultRaceResolutionJobV2;
+  const placementJobModel = dependencies.RacePlacementTransitionJob ||
+    (hasInjectedDeps ? {
+      async findMissingHandoffRaceIds() { return []; },
+      async recoverSucceededGenerations() { return { placementJobs: 0, resolutionJobs: 0 }; },
+    } : defaultRacePlacementTransitionJob);
   const effectModel = dependencies.RaceActiveEffect || defaultRaceActiveEffect;
   // Production owns reminder/placement claims in the domain-event projector.
   // Keep the established injected-command seam on the legacy durable audit
@@ -169,9 +179,10 @@ function buildRecomputePlacements(dependencies = {}) {
     dependencies.requestStepSyncForUsers ||
     stepSyncPushService.requestStepSyncForUsers;
   const now = dependencies.now || (() => new Date());
-  const withDomainTransaction = hasInjectedDeps
-    ? async (work) => work()
-    : runInPrismaTransaction;
+  // Placement fan-out no longer shares one race-wide interactive transaction.
+  // Individual durable event families own their own short claim/append units.
+  const withDomainTransaction = dependencies.withDomainTransaction ||
+    (async (work) => work());
   const logger = dependencies.logger || console;
   const jobRunModel = dependencies.JobRun || defaultJobRun;
   const getPerformanceFlags = dependencies.getPerformanceFlags ||
@@ -342,7 +353,7 @@ function buildRecomputePlacements(dependencies = {}) {
     // teams > 0 — kills the day-one "first to sync leads over 0" false
     // positive). While unarmed, baselines still advance silently so the armed
     // flip fires exactly once when it becomes real.
-    if (!tie && leadingTeam) {
+    if (produceScoreDrivenPlacements && !tie && leadingTeam) {
       const rankFor = (p) => (p.team === leadingTeam ? 1 : 2);
       const storedRanks = members
         .map((p) => p.lastNotifiedPlacement)
@@ -403,11 +414,7 @@ function buildRecomputePlacements(dependencies = {}) {
       const activeMembers = members.filter((p) => !p.forfeitedAt);
       if (activeMembers.length > 0) {
         const finalStretchBucket = Math.floor(currentTime.getTime() / (30 * 60 * 1000));
-        const mayEmit = hasInjectedDeps || await jobRunModel.claimRun(
-          `team-final-stretch-event:${race.id}`,
-          String(finalStretchBucket),
-        );
-        if (mayEmit) await events.emit("TEAM_FINAL_STRETCH", {
+        const data = {
           notificationIntentId: `team-final-stretch:${race.id}:${finalStretchBucket}`,
           raceId: race.id,
           raceName: race.name,
@@ -421,7 +428,54 @@ function buildRecomputePlacements(dependencies = {}) {
             activeMembers.map((p) => [p.userId, p.team])
           ),
           occurredAt: new Date(finalStretchBucket * 30 * 60 * 1000),
-        });
+        };
+        if (!durableEvents) {
+          await events.emit("TEAM_FINAL_STRETCH", data);
+        } else {
+          // The reminder's transition claim and generic event are one short
+          // unit. A crash/failure after the claim rolls both back, so retry can
+          // still publish the bucket exactly once.
+          await prisma.$transaction(async (tx) => {
+            const claimed = await tx.$queryRawUnsafe(
+              `INSERT INTO job_runs (job_name, last_ran_for, updated_at)
+               VALUES ($1, $2, CURRENT_TIMESTAMP)
+               ON CONFLICT (job_name) DO UPDATE
+                 SET last_ran_for=EXCLUDED.last_ran_for,
+                     updated_at=CURRENT_TIMESTAMP
+               WHERE job_runs.last_ran_for <> EXCLUDED.last_ran_for
+               RETURNING job_name`,
+              `team-final-stretch-event:${race.id}`,
+              String(finalStretchBucket),
+            );
+            if (!claimed.length) return;
+            await dependencies.afterFinalStretchClaim?.({
+              tx,
+              race,
+              finalStretchBucket,
+              data,
+            });
+            await appendDomainEvent(tx, {
+              eventKey: `TEAM_FINAL_STRETCH_V1:${data.notificationIntentId}`,
+              eventType: "TEAM_FINAL_STRETCH_V1",
+              schemaVersion: 1,
+              aggregateType: "RACE",
+              aggregateId: race.id,
+              occurredAt: data.occurredAt,
+              payload: {
+                raceId: race.id,
+                raceName: race.name,
+                teamATotal: data.teamATotal,
+                teamBTotal: data.teamBTotal,
+                endsAt: race.endsAt,
+                transitionId: data.notificationIntentId,
+              },
+              audience: activeMembers.map((participant) => ({
+                recipientId: participant.userId,
+                facts: { memberTeam: participant.team ?? null },
+              })),
+            });
+          });
+        }
       }
     }
 
@@ -626,6 +680,25 @@ function buildRecomputePlacements(dependencies = {}) {
       }
     }
 
+    if (!inlineResolveInjected &&
+        typeof placementJobModel.findMissingHandoffRaceIds === "function") {
+      try {
+        const missing = await placementJobModel.findMissingHandoffRaceIds({
+          raceIds: races.map((race) => race.id),
+          limit: RECOVERY_RACE_LIMIT,
+        });
+        await placementJobModel.recoverSucceededGenerations({
+          raceIds: missing,
+          now: currentTime,
+        });
+      } catch (error) {
+        logger.error(
+          "[CRON] placementRecompute: failed to repair placement handoffs:",
+          error,
+        );
+      }
+    }
+
     // The production path fetches every accepted participant in one lean query.
     // Inline resolution must retain the per-race read-after-write behavior used
     // by tests and the rollback lever.
@@ -807,6 +880,8 @@ function buildRecomputePlacements(dependencies = {}) {
           });
           return;
         }
+
+        if (!produceScoreDrivenPlacements) return;
 
         // B-12a — the SHARED comparator (finishers first, then steps desc,
         // then joinedAt, then userId). The old local sort was steps-desc only,
@@ -1061,7 +1136,7 @@ function buildRecomputePlacements(dependencies = {}) {
           dependencies.getDbPoolPressure || getDbPoolPressure,
         // This tick occurs only every five minutes. Always retain it once the
         // operator enables telemetry; otherwise a deliberately triggered heavy
-        // placement cohort could have no placement sample at all.
+        // reminder/recovery cohort could have no scheduler sample at all.
         forceSample: true,
       },
       recomputePlacementsMeasured,
@@ -1078,7 +1153,7 @@ function scheduleRecomputePlacements(dependencies = {}) {
   async function tick() {
     if (running) {
       const message =
-        "[CRON] placementRecompute skipped overlapping five-minute tick";
+        "[CRON] race reminder/recovery sweep skipped overlapping five-minute tick";
       if (typeof logger.warn === "function") logger.warn(message);
       else logger.log(message);
       return;
@@ -1087,7 +1162,7 @@ function scheduleRecomputePlacements(dependencies = {}) {
     try {
       await run();
     } catch (error) {
-      logger.error("[CRON] placementRecompute tick error:", error);
+      logger.error("[CRON] race reminder/recovery sweep tick error:", error);
     } finally {
       running = false;
     }
@@ -1095,7 +1170,9 @@ function scheduleRecomputePlacements(dependencies = {}) {
 
   tick(); // run once shortly after boot
   const interval = setIntervalFn(tick, RECOMPUTE_INTERVAL_MS);
-  logger.log("[CRON] Live placement recompute scheduled (every 5 minutes)");
+  logger.log(
+    "[CRON] Race reminders, step-sync pulls, and bounded recovery scheduled (every 5 minutes)",
+  );
   return { tick, interval };
 }
 
