@@ -55,7 +55,7 @@ const {
 // shared standings snapshot must not outlive the change we just committed. The
 // resolution worker is deliberately NOT in this list: it SETs post-commit.
 const {
-  invalidateRaceProgress,
+  invalidateRaceProgress: defaultInvalidateRaceProgress,
 } = require("../../races/services/raceProgressSnapshot");
 
 function buildOpenMysteryBox(dependencies = {}) {
@@ -92,6 +92,14 @@ function buildOpenMysteryBox(dependencies = {}) {
     : hasInjectedDeps
       ? async () => {}
       : defaultRepairRacePowerupInventory;
+  const invalidateRaceProgress = Object.prototype.hasOwnProperty.call(
+    dependencies,
+    "invalidateRaceProgress"
+  )
+    ? dependencies.invalidateRaceProgress
+    : hasInjectedDeps
+      ? async () => true
+      : defaultInvalidateRaceProgress;
 
   // `supportsPowerups5` (2026-07-26) is OPTIONAL and defaults to false — the
   // safe side of a compatibility gate. Threaded from the route's
@@ -157,7 +165,6 @@ function buildOpenMysteryBox(dependencies = {}) {
     }
 
     const maxSlots = participant.powerupSlots || DEFAULT_POWERUP_SLOTS;
-    const occupiedCount = await powerupModel.countOccupiedSlots(participant.id);
 
     // Current position for odds, from RAW WALKED steps (2026-08-09,
     // docs/box-raw-steps-position-and-option-h-requirements.md). Raw steps only
@@ -288,11 +295,21 @@ function buildOpenMysteryBox(dependencies = {}) {
       rarity: canonicalRarityFor(rolled.type, rolled.rarity, config, minRarity),
     };
 
+    // Slot occupancy only matters for the legacy/forced Fanny Pack result.
+    // Every currently obtainable result transforms this box in place, so an
+    // eager COUNT added latency to every open without changing its outcome.
+    const occupiedCount = rolled.type === "FANNY_PACK"
+      ? await powerupModel.countOccupiedSlots(participant.id)
+      : null;
+
+    // Do not consume the one-shot guarantee until every fallible read needed
+    // to persist this roll has succeeded. In particular, a failed Fanny Pack
+    // slot count must leave both the unopened box and Lucky Horseshoe intact.
     if (luckyEffect) {
       await effectModel.update(luckyEffect.id, { status: "EXPIRED" });
     }
 
-    // Fanny Pack auto-activates when inventory is full
+    // Fanny Pack auto-activates when inventory is full.
     if (rolled.type === "FANNY_PACK" && occupiedCount >= maxSlots) {
       await participantModel.update(participant.id, { powerupSlots: maxSlots + 1 });
       participant.powerupSlots = maxSlots + 1;
@@ -320,7 +337,9 @@ function buildOpenMysteryBox(dependencies = {}) {
       });
 
       await repairRacePowerupInventory({ raceId, userId, race, participant });
-      await invalidateRaceProgress(raceId);
+      // Inventory and slot counts are requester overlays, not shared snapshot
+      // fields. Only an expired Lucky Horseshoe changes cached activeEffects.
+      if (luckyEffect) await invalidateRaceProgress(raceId);
       await enqueueRaceResolution({
         raceId,
         userId,
@@ -356,8 +375,10 @@ function buildOpenMysteryBox(dependencies = {}) {
       autoActivated: false,
     });
 
-    await repairRacePowerupInventory({ raceId, userId, race, participant });
-    await invalidateRaceProgress(raceId);
+    // MYSTERY_BOX -> HELD occupies the same slot, so it cannot promote queued
+    // inventory. The shared progress snapshot also excludes inventory; only a
+    // consumed Lucky Horseshoe makes its cached activeEffects stale.
+    if (luckyEffect) await invalidateRaceProgress(raceId);
 
     return { id: powerup.id, type: rolled.type, rarity: rolled.rarity, autoActivated: false };
   };

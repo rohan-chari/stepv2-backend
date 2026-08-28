@@ -2191,7 +2191,7 @@ function createRacesRouter(dependencies = {}) {
       });
       perfOutcome = result.alreadyOpened ? "replay" : "opened";
       perfType = result.type || null;
-      perfPostRepair = !result.alreadyOpened;
+      perfPostRepair = result.autoActivated === true;
       res.json({ result });
     } catch (error) {
       if (error.name === "MysteryBoxOpenError") {

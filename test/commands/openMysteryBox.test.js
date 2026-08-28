@@ -7,6 +7,11 @@ function makeDeps(overrides = {}) {
   const feedEvents = [];
   const updates = [];
   let participantUpdates = [];
+  const calls = {
+    countOccupiedSlots: 0,
+    repairInventory: 0,
+    invalidateProgress: 0,
+  };
 
   const mysteryBoxPowerup = {
     id: "pw-1",
@@ -24,6 +29,7 @@ function makeDeps(overrides = {}) {
     feedEvents,
     updates,
     participantUpdates,
+    calls,
     mysteryBoxPowerup,
     deps: {
       RacePowerup: {
@@ -39,6 +45,7 @@ function makeDeps(overrides = {}) {
           return overrides.heldCount !== undefined ? overrides.heldCount : 0;
         },
         async countOccupiedSlots() {
+          calls.countOccupiedSlots += 1;
           return overrides.heldCount !== undefined ? overrides.heldCount : 0;
         },
         ...overrides.RacePowerup,
@@ -76,10 +83,17 @@ function makeDeps(overrides = {}) {
         },
         ...overrides.RacePowerupEvent,
       },
+      RaceActiveEffect: overrides.RaceActiveEffect,
       eventBus: {
         emit(event, payload) {
           events.push({ event, payload });
         },
+      },
+      repairRacePowerupInventory: async () => {
+        calls.repairInventory += 1;
+      },
+      invalidateRaceProgress: async () => {
+        calls.invalidateProgress += 1;
       },
       rollPowerupOdds: overrides.rollPowerupOdds || (() => ({ type: "PROTEIN_SHAKE", rarity: "COMMON" })),
     },
@@ -106,6 +120,9 @@ test("opens a mystery box — rolls type at open time and transitions to HELD", 
   assert.equal(ctx.updates[0].fields.status, "HELD");
   assert.equal(ctx.updates[0].fields.type, "PROTEIN_SHAKE");
   assert.equal(ctx.updates[0].fields.rarity, "COMMON");
+  assert.equal(ctx.calls.countOccupiedSlots, 0, "ordinary rolls do not inspect slot occupancy");
+  assert.equal(ctx.calls.repairInventory, 0, "an in-place box-to-held transition frees no slot");
+  assert.equal(ctx.calls.invalidateProgress, 0, "inventory is not stored in the shared progress snapshot");
 });
 
 // 2026-08-10: an already-rolled id resolves idempotently (the batch endpoint's
@@ -231,6 +248,8 @@ test("auto-activates Fanny Pack when inventory is full", async () => {
   // Should create feed event
   assert.equal(ctx.feedEvents.length, 1);
   assert.ok(ctx.feedEvents[0].description.includes("Auto-activated"));
+  assert.equal(ctx.calls.countOccupiedSlots, 1);
+  assert.equal(ctx.calls.repairInventory, 1);
 });
 
 test("allows opening with 2 HELD powerups", async () => {
@@ -245,6 +264,70 @@ test("allows opening with 2 HELD powerups", async () => {
 
   assert.equal(result.autoActivated, false);
   assert.equal(ctx.updates[0].fields.status, "HELD");
+});
+
+test("consuming Lucky Horseshoe invalidates the shared active-effects snapshot", async () => {
+  const effectUpdates = [];
+  const ctx = makeDeps({
+    RaceActiveEffect: {
+      async findActiveByTypeForParticipant() {
+        return {
+          id: "lucky-1",
+          metadata: { minRarity: "UNCOMMON" },
+        };
+      },
+      async update(id, fields) {
+        effectUpdates.push({ id, fields });
+      },
+    },
+    rollPowerupOdds: () => ({ type: "TRAIL_MIX", rarity: "UNCOMMON" }),
+  });
+  const open = buildOpenMysteryBox(ctx.deps);
+
+  await open({
+    userId: "user-1",
+    raceId: "race-1",
+    powerupId: "pw-1",
+  });
+
+  assert.deepEqual(effectUpdates, [
+    { id: "lucky-1", fields: { status: "EXPIRED" } },
+  ]);
+  assert.equal(ctx.calls.invalidateProgress, 1);
+  assert.equal(ctx.calls.repairInventory, 0);
+  assert.equal(ctx.calls.countOccupiedSlots, 0);
+});
+
+test("does not consume Lucky Horseshoe when Fanny Pack slot inspection fails", async () => {
+  const effectUpdates = [];
+  const ctx = makeDeps({
+    RaceActiveEffect: {
+      async findActiveByTypeForParticipant() {
+        return {
+          id: "lucky-1",
+          metadata: { minRarity: "RARE" },
+        };
+      },
+      async update(id, fields) {
+        effectUpdates.push({ id, fields });
+      },
+    },
+    RacePowerup: {
+      async countOccupiedSlots() {
+        throw new Error("slot count unavailable");
+      },
+    },
+    rollPowerupOdds: () => ({ type: "FANNY_PACK", rarity: "RARE" }),
+  });
+  const open = buildOpenMysteryBox(ctx.deps);
+
+  await assert.rejects(
+    () => open({ userId: "user-1", raceId: "race-1", powerupId: "pw-1" }),
+    /slot count unavailable/,
+  );
+
+  assert.deepEqual(effectUpdates, []);
+  assert.equal(ctx.updates.length, 0);
 });
 
 test("emits MYSTERY_BOX_OPENED event with rolled type", async () => {
