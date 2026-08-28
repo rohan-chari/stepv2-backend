@@ -1,8 +1,10 @@
 const { Race } = require("../races/models/race");
 const { RaceParticipant } = require("../races/models/raceParticipant");
 const { JobRun } = require("../../shared/db/jobRun");
-const { prisma: defaultPrisma, runInPrismaTransaction } = require("../../db");
-const { appendDomainEvent: defaultAppendDomainEvent } = require("../domainEvents");
+const { runInPrismaTransaction } = require("../../db");
+const {
+  bulkAppendDomainEvents: defaultBulkAppendDomainEvents,
+} = require("../domainEvents");
 const { resolveRaceState } = require("../races/services/raceStateResolution");
 const {
   enqueueRaceResolution: defaultEnqueueRaceResolution,
@@ -14,6 +16,25 @@ const JOB_NAME = "daily_mover";
 const TICK_INTERVAL_MS = 5 * 60 * 1000; // ride the shared 5-minute cadence
 const TARGET_HOUR_ET = 16; // 4pm ET
 const MIN_MOVE = 3; // must move MORE than 3 places (i.e. >= 4) to notify
+const DAILY_MOVER_TRANSACTION_OPTIONS = Object.freeze({
+  timeout: 30_000,
+  maxWait: 10_000,
+});
+
+async function persistDailyMoverBaselines(tx, updates) {
+  if (!Array.isArray(updates) || updates.length === 0) return 0;
+  const participantIds = updates.map((update) => update.participantId);
+  const liveRanks = updates.map((update) => update.liveRank);
+  return tx.$executeRawUnsafe(
+    `UPDATE race_participants AS participant
+        SET day_start_placement = input.live_rank
+       FROM unnest($1::text[], $2::int[]) AS input(participant_id, live_rank)
+      WHERE participant.id = input.participant_id
+        AND participant.day_start_placement IS DISTINCT FROM input.live_rank`,
+    participantIds,
+    liveRanks,
+  );
+}
 
 // Daily biggest-mover digest. Once per ET day at 4pm, send each active racer ONE
 // notification for the race in which their live rank moved the most over the last
@@ -32,9 +53,12 @@ function buildDailyMover(dependencies = {}) {
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
   const jobRunModel = dependencies.JobRun || JobRun;
   const compatibilityEvents = dependencies.eventBus || null;
-  const db = dependencies.prisma || defaultPrisma;
-  const appendDomainEvent = dependencies.appendDomainEvent || defaultAppendDomainEvent;
-  const durable = !dependencies.eventBus && !dependencies.RaceParticipant;
+  const bulkAppendDomainEvents = dependencies.bulkAppendDomainEvents ||
+    defaultBulkAppendDomainEvents;
+  const runTransaction = dependencies.runInPrismaTransaction ||
+    runInPrismaTransaction;
+  const durable = dependencies.durable ??
+    (!dependencies.eventBus && !dependencies.RaceParticipant);
   // C0 (spec §5a): this daily digest used to be a fourth bulk writer of
   // race_participants. It now ENQUEUES and reads the persisted totals the
   // race-keyed worker maintains — at most one worker cycle stale, against a
@@ -54,6 +78,12 @@ function buildDailyMover(dependencies = {}) {
     update.participantId,
     { dayStartPlacement: update.liveRank }
   );
+  const persistBaselineUpdates = dependencies.persistBaselineUpdates ||
+    (durable
+      ? (updates, tx) => persistDailyMoverBaselines(tx, updates)
+      : async (updates) => {
+          for (const update of updates) await updateBaseline(update);
+        });
 
   // Returns the array of emitted DAILY_MOVER changes when it ran this tick, or
   // null when the tick wasn't the daily run.
@@ -154,40 +184,35 @@ function buildDailyMover(dependencies = {}) {
       emitted.push(change);
     }
     if (durable) {
-      await runInPrismaTransaction(async (tx) => {
-        for (const update of baselineUpdates) {
-          // The model uses the transaction-scoped Prisma proxy, which keeps
-          // this write atomic with the event and JobRun while preserving the
-          // single race-participant write surface audited by structural tests.
-          await updateBaseline(update);
-        }
-        for (const change of emitted) {
-          await appendDomainEvent(tx, {
-            eventKey: `DAILY_MOVER_V1:${change.digestId}`,
-            eventType: "DAILY_MOVER_V1", schemaVersion: 1,
-            aggregateType: "USER", aggregateId: change.userId,
-            occurredAt: currentTime,
-            payload: {
-              digestId: change.digestId, userId: change.userId,
-              raceId: change.raceId, raceName: change.raceName,
-              movement: change.movement, placement: change.placement,
-              localDate: runKey,
-            },
-            audience: [{ recipientId: change.userId, facts: {
-              expiresAt: nextMidnightNewYork(currentTime, "America/New_York"),
-            } }],
-          });
-        }
+      await runTransaction(async (tx) => {
+        // This fan-out can cover thousands of participants. One parameterized
+        // UPDATE keeps the baseline reset, event append, and completion marker
+        // atomic without spending the entire transaction budget on per-row
+        // Prisma round trips.
+        await persistBaselineUpdates(baselineUpdates, tx);
+        await bulkAppendDomainEvents(tx, emitted.map((change) => ({
+          eventKey: `DAILY_MOVER_V1:${change.digestId}`,
+          eventType: "DAILY_MOVER_V1", schemaVersion: 1,
+          aggregateType: "USER", aggregateId: change.userId,
+          occurredAt: currentTime,
+          payload: {
+            digestId: change.digestId, userId: change.userId,
+            raceId: change.raceId, raceName: change.raceName,
+            movement: change.movement, placement: change.placement,
+            localDate: runKey,
+          },
+          audience: [{ recipientId: change.userId, facts: {
+            expiresAt: nextMidnightNewYork(currentTime, "America/New_York"),
+          } }],
+        })));
         await tx.jobRun.upsert({
           where: { jobName: JOB_NAME },
           create: { jobName: JOB_NAME, lastRanFor: runKey },
           update: { lastRanFor: runKey },
         });
-      });
+      }, DAILY_MOVER_TRANSACTION_OPTIONS);
     } else {
-      for (const update of baselineUpdates) {
-        await updateBaseline(update);
-      }
+      await persistBaselineUpdates(baselineUpdates);
       for (const change of emitted) compatibilityEvents?.emit("DAILY_MOVER", change);
       await jobRunModel.markRan(JOB_NAME, runKey);
     }
@@ -216,4 +241,9 @@ function scheduleDailyMover(dependencies = {}) {
   logger.log("[CRON] Daily mover digest scheduled (4pm ET)");
 }
 
-module.exports = { buildDailyMover, scheduleDailyMover, JOB_NAME };
+module.exports = {
+  buildDailyMover,
+  scheduleDailyMover,
+  persistDailyMoverBaselines,
+  JOB_NAME,
+};

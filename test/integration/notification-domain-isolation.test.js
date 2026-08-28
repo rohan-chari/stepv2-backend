@@ -1030,6 +1030,19 @@ describe("notification domain isolation", () => {
       logger: quietLogger,
     })();
     assert.equal(emitted.length, 2);
+    assert.deepEqual(
+      (await prisma.raceParticipant.findMany({
+        where: { raceId: race.id },
+        orderBy: { totalSteps: "desc" },
+        select: { dayStartPlacement: true },
+      })).map((participant) => participant.dayStartPlacement),
+      [1, 2, 3, 4, 5, 6],
+      "the durable job resets all baselines through the real database path",
+    );
+    assert.equal(
+      (await prisma.jobRun.findUnique({ where: { jobName: "daily_mover" } })).lastRanFor,
+      "2026-08-25",
+    );
     assert.equal(await prisma.domainEventOutbox.count({ where: { eventType: "DAILY_MOVER_V1" } }), 2);
     const removed = await request(server.baseUrl, "DELETE", "/auth/account", {
       token: racers[1].token,

@@ -120,7 +120,7 @@ test("tournament advancement guards every surviving user before the tournament r
 // production helpers so the guard cannot satisfy itself.
 const EXPECTED_PARTICIPANT_MUTATIONS = {
   "src/modules/loadTesting/fixtures.js": ["raceParticipant.create", "raceParticipant.deleteMany"],
-  "src/modules/notifications/dailyMover.js": ["participantModel.update"],
+  "src/modules/notifications/dailyMover.js": ["participantModel.update", "raw.race_participants.update"],
   "src/modules/powerups/commands/openMysteryBox.js": ["participantModel.update"],
   "src/modules/powerups/commands/rollPowerup.js": ["raceParticipant.update", "raceParticipant.update"],
   "src/modules/races/commands/autoEnrollNewUser.js": [
@@ -145,9 +145,10 @@ const EXPECTED_PARTICIPANT_MUTATIONS = {
   "src/modules/races/jobs/placementRecompute.js": ["participantModel.update", "participantModel.update", "participantModel.update", "participantModel.update"],
   "src/modules/races/jobs/raceAdminCommandRunner.js": ["raceParticipant.create", "raceParticipant.update"],
   "src/modules/races/jobs/raceExpiry.js": ["raceParticipant.update", "raceParticipant.update"],
-  "src/modules/races/jobs/raceResolutionQueueV2.js": ["raceParticipant.update"],
+  "src/modules/races/jobs/raceResolutionQueueV2.js": ["raceParticipant.update", "raw.race_participants.update", "raw.race_participants.update"],
   "src/modules/races/jobs/seededRaceRenewal.js": ["raceParticipant.deleteMany", "raceParticipant.deleteMany", "raceParticipant.update", "raceParticipant.updateMany", "raceParticipant.updateMany"],
-  "src/modules/races/models/raceParticipant.js": ["raceParticipant.create", "raceParticipant.createMany", "raceParticipant.delete", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.updateMany", "raceParticipant.updateMany", "raceParticipant.updateMany", "raceParticipant.updateMany"],
+  "src/modules/races/models/raceParticipant.js": ["raceParticipant.create", "raceParticipant.createMany", "raceParticipant.delete", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.updateMany", "raceParticipant.updateMany", "raceParticipant.updateMany", "raceParticipant.updateMany", "raw.race_participants.update", "raw.race_participants.update"],
+  "src/modules/races/models/racePlacementBaseline.js": ["raw.race_participants.update"],
   "src/modules/races/services/commitRaceStart.js": ["raceParticipant.update"],
   "src/modules/races/services/fundedExposure.js": ["raceParticipant.update", "raceParticipant.updateMany", "tournamentParticipant.update", "tournamentParticipant.updateMany"],
   "src/modules/races/services/highMultiplierAlert.js": ["raceParticipant.updateMany", "raceParticipant.updateMany"],
@@ -186,6 +187,30 @@ const PARTICIPANT_MUTATION_METHODS = new Set([
   "upsert",
   "updateLiveInvite",
 ]);
+const RAW_QUERY_METHODS = new Set([
+  "$executeRaw",
+  "$executeRawUnsafe",
+  "$queryRaw",
+  "$queryRawUnsafe",
+]);
+
+function memberMethod(node) {
+  if (node?.type !== "MemberExpression") return null;
+  return node.computed ? node.property.value : node.property.name;
+}
+
+function sqlText(node) {
+  if (node?.type === "TemplateLiteral") {
+    return node.quasis.map((quasi) => quasi.value.raw).join("");
+  }
+  return node?.type === "Literal" && typeof node.value === "string"
+    ? node.value
+    : "";
+}
+
+function isRawParticipantUpdate(node) {
+  return /\bUPDATE\s+"?race_participants"?\b/i.test(sqlText(node));
+}
 
 function participantMutationsInText(text) {
   const ast = acorn.parse(text, {
@@ -196,9 +221,7 @@ function participantMutationsInText(text) {
   function walk(node) {
     if (!node || typeof node !== "object") return;
     if (node.type === "CallExpression" && node.callee?.type === "MemberExpression") {
-      const method = node.callee.computed
-        ? node.callee.property.value
-        : node.callee.property.name;
+      const method = memberMethod(node.callee);
       const object = node.callee.object;
       let delegate = null;
       if (object?.type === "MemberExpression") {
@@ -212,6 +235,14 @@ function participantMutationsInText(text) {
       ) {
         found.push(`${delegate}.${method}`);
       }
+      if (RAW_QUERY_METHODS.has(method) && isRawParticipantUpdate(node.arguments?.[0])) {
+        found.push("raw.race_participants.update");
+      }
+    }
+    if (node.type === "TaggedTemplateExpression" &&
+        RAW_QUERY_METHODS.has(memberMethod(node.tag)) &&
+        isRawParticipantUpdate(node.quasi)) {
+      found.push("raw.race_participants.update");
     }
     if (node.type === "Property") {
       const relation = node.computed
@@ -246,10 +277,12 @@ test("AST inventory detects direct delegates, nested relation writes, and non-ra
   const fixture = `
     tx.raceParticipant.update({ where: { id: "p" }, data: { status: "ACCEPTED" } });
     tx.tournament.create({ data: { participants: { create: { userId: "u" } } } });
+    tx.$executeRawUnsafe(\`UPDATE race_participants SET total_steps=0\`);
   `;
   assert.deepEqual(participantMutationsInText(fixture), [
     "nested.participants.create",
     "raceParticipant.update",
+    "raw.race_participants.update",
   ]);
   assert.deepEqual(
     participantMutations("src/modules/powerups/commands/rollPowerup.js"),
@@ -387,6 +420,7 @@ const NON_MEMBERSHIP_PARTICIPANT_WRITERS = new Set([
   "src/modules/races/jobs/raceExpiry.js",
   "src/modules/races/jobs/raceResolutionQueueV2.js",
   "src/modules/races/models/raceParticipant.js",
+  "src/modules/races/models/racePlacementBaseline.js",
   "src/modules/races/services/fundedExposure.js",
   "src/modules/races/services/highMultiplierAlert.js",
   "src/modules/races/services/legacyBuyInRemediation.js",

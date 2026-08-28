@@ -21,6 +21,7 @@ function makeDeps({
   const updates = [];
   const marks = [];
   const resolvedRaceIds = [];
+  const enqueuedRaceIds = [];
   const deps = {
     now: () => now,
     random,
@@ -33,6 +34,9 @@ function makeDeps({
     resolveRaceState: async ({ raceId }) => {
       resolvedRaceIds.push(raceId);
       if (resolveThrowsFor.includes(raceId)) throw new Error(`resolve failed ${raceId}`);
+    },
+    enqueueRaceResolution: async ({ raceId }) => {
+      enqueuedRaceIds.push(raceId);
     },
     Race: {
       async findActiveInProgress() {
@@ -57,7 +61,7 @@ function makeDeps({
       },
     },
   };
-  return { deps, emitted, updates, marks, resolvedRaceIds };
+  return { deps, emitted, updates, marks, resolvedRaceIds, enqueuedRaceIds };
 }
 
 test("a climb of more than 3 places emits one DAILY_MOVER and resets the baseline", async () => {
@@ -76,6 +80,78 @@ test("a climb of more than 3 places emits one DAILY_MOVER and resets the baselin
   assert.deepEqual(updates, [{ id: "p1", fields: { dayStartPlacement: 1 } }]);
   assert.deepEqual(marks, [{ jobName: "daily_mover", dayKey: "2026-06-25" }]);
   assert.equal(result.length, 1);
+});
+
+test("persists all daily-mover baselines through one bounded batch", async () => {
+  const { deps, updates } = makeDeps({
+    races: [{ id: "r1", name: "Race 1" }],
+    participantsByRace: {
+      r1: [
+        P({ id: "p1", userId: "u1", totalSteps: 9_000, dayStartPlacement: 4 }),
+        P({ id: "p2", userId: "u2", totalSteps: 8_000, dayStartPlacement: 1 }),
+      ],
+    },
+  });
+  const batches = [];
+  deps.persistBaselineUpdates = async (baselineUpdates) => {
+    batches.push(baselineUpdates);
+  };
+
+  await buildDailyMover(deps)();
+
+  assert.deepEqual(updates, [], "the batch path must replace per-row updates");
+  assert.deepEqual(batches, [[
+    { participantId: "p1", liveRank: 1 },
+    { participantId: "p2", liveRank: 2 },
+  ]]);
+});
+
+test("durable large fan-out uses one baseline write and one bulk event append", async () => {
+  const participantCount = 1_000;
+  const participants = Array.from({ length: participantCount }, (_, index) => P({
+    id: `p${index}`,
+    userId: `u${index}`,
+    totalSteps: participantCount - index,
+    dayStartPlacement: participantCount - index,
+  }));
+  const { deps } = makeDeps({
+    races: [{ id: "r1", name: "Race 1" }],
+    participantsByRace: { r1: participants },
+  });
+  const baselineBatches = [];
+  const eventBatches = [];
+  const markers = [];
+  const transactionOptions = [];
+  const tx = {
+    jobRun: {
+      async upsert(input) {
+        markers.push(input);
+      },
+    },
+  };
+  deps.durable = true;
+  deps.persistBaselineUpdates = async (updates, receivedTx) => {
+    assert.equal(receivedTx, tx);
+    baselineBatches.push(updates);
+  };
+  deps.bulkAppendDomainEvents = async (receivedTx, events) => {
+    assert.equal(receivedTx, tx);
+    eventBatches.push(events);
+  };
+  deps.runInPrismaTransaction = async (work, options) => {
+    transactionOptions.push(options);
+    return work(tx);
+  };
+
+  const emitted = await buildDailyMover(deps)();
+
+  assert.equal(baselineBatches.length, 1);
+  assert.equal(baselineBatches[0].length, participantCount);
+  assert.equal(eventBatches.length, 1);
+  assert.equal(eventBatches[0].length, emitted.length);
+  assert.ok(eventBatches[0].length > 900, "the regression must exercise a large fan-out");
+  assert.equal(markers.length, 1);
+  assert.deepEqual(transactionOptions, [{ timeout: 30_000, maxWait: 10_000 }]);
 });
 
 test("a move of 3 or fewer places resets the baseline but emits nothing", async () => {
