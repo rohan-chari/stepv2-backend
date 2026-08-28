@@ -1,5 +1,28 @@
 # Daily Challenge Cohort Minimum Requirements
 
+## Superseding capped policy — 2026-08-28
+
+The approved permanent policy is now:
+
+- Daily target/minimum: 30; hard maximum: 35.
+- Weekly target/minimum: 75; hard maximum: 100.
+- Cohort count is
+  `max(floor(userCount / target), ceil(userCount / maximum), 1)`, and users are
+  distributed as evenly as possible. The hard maximum wins when both bounds
+  cannot be satisfied; for example, Daily 59 becomes 30/29.
+- Friendship is a best-effort affinity. Transitive components are split at
+  deterministic balanced boundaries and can never override the hard maximum.
+- New races stamp `maxParticipants` to the cadence maximum, leaving bounded
+  headroom for late onboarding. Late users choose the least-full cohort, and
+  private cohorts never use the legacy over-capacity fallback. If every cohort
+  is full, onboarding creates one serialized overflow cohort at the same hard
+  cap; later signups reuse it until it fills.
+- Existing finalized races remain unchanged. The API shape and client
+  capability split remain backward compatible.
+
+This section supersedes the historical minimum-only formula below wherever the
+two conflict.
+
 ## Summary & user story
 
 Daily Challenge private cohorts should avoid small fields. A player joining a

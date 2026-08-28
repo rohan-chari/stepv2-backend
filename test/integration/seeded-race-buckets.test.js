@@ -50,13 +50,13 @@ describe("private seeded race buckets (integration)", () => {
     const card = (await before.json()).races.find((row) => row.seedKind === "DAILY_10K");
     assert.equal(card.raceId, null);
     assert.equal(card.bucketPrivate, true);
-    assert.equal(card.maxParticipants, 30);
+    assert.equal(card.maxParticipants, 35);
     assert.equal(card.myStatus, null);
     const weeklyCard = (await request(baseUrl, "GET", "/races/featured", {
       token,
       headers: FEATURES,
     }).then((response) => response.json())).races.find((row) => row.seedKind === "WEEKLY_50K");
-    assert.equal(weeklyCard.maxParticipants, 50);
+    assert.equal(weeklyCard.maxParticipants, 100);
     const countBefore = await prisma.seededRaceWindowMembership.count();
     assert.equal(countBefore, 0, "GET has no election side effect");
 
@@ -309,7 +309,7 @@ describe("private seeded race buckets (integration)", () => {
       include: { race: true, assignments: true },
     });
     assert.equal(persisted.race.isPublic, false);
-    assert.equal(persisted.race.maxParticipants, 2);
+    assert.equal(persisted.race.maxParticipants, 35);
     assert.equal(persisted.assignments.length, 2);
     assert.equal(persisted.race.prizeCalculationVersion, 2);
     assert.equal(persisted.race.prizeCoinUnit, 10);
@@ -336,7 +336,7 @@ describe("private seeded race buckets (integration)", () => {
     );
   });
 
-  it("persists capacity for a 16-person cohort instead of capping it at 15", async () => {
+  it("gives a 16-person Daily cohort bounded onboarding headroom up to 35", async () => {
     const seed = await prisma.raceSeed.findUnique({ where: { kind: "DAILY_10K" } });
     const beforeBoundary = new Date("2026-08-12T03:58:00.000Z");
     const { windowStart, windowEnd } = upcomingWindowFor(seed, beforeBoundary);
@@ -365,11 +365,59 @@ describe("private seeded race buckets (integration)", () => {
       where: { raceId: buckets[0].raceId },
       include: { race: true, assignments: true },
     });
-    assert.equal(persisted.race.maxParticipants, 16);
+    assert.equal(persisted.race.maxParticipants, 35);
     assert.equal(persisted.assignments.length, 16);
   });
 
-  it("finalizes Daily 61 into 31/30, serves persisted capacity, and keeps finalized membership immutable", async () => {
+  it("splits a 97-person Daily friendship chain into capped balanced cohorts", async () => {
+    const seed = await prisma.raceSeed.findUnique({ where: { kind: "DAILY_10K" } });
+    const { windowStart, windowEnd } = upcomingWindowFor(seed, new Date());
+    const beforeBoundary = new Date(windowStart.getTime() - 2 * 60 * 1000);
+    await prisma.seededRaceWindowModeRecord.upsert({
+      where: { seedId_windowStart: { seedId: seed.id, windowStart } },
+      create: { seedId: seed.id, windowStart, windowEnd, mode: "BUCKET" },
+      update: {},
+    });
+    const users = await Promise.all(Array.from({ length: 97 }, () => createTestUser()));
+    await prisma.seededRaceWindowMembership.createMany({
+      data: users.map(({ user }) => ({
+        seedId: seed.id,
+        windowStart,
+        userId: user.id,
+        stream: "BUCKET",
+      })),
+    });
+    await prisma.friendship.createMany({
+      data: Array.from({ length: 96 }, (_, index) => ({
+        requesterId: users[index].user.id,
+        addresseeId: users[index + 1].user.id,
+        status: "ACCEPTED",
+      })),
+    });
+
+    const matcher = buildSeededRaceBuckets({
+      prisma,
+      now: () => beforeBoundary,
+      appSettings,
+    });
+    const buckets = await matcher.finalise({ seed, windowStart, windowEnd });
+    assert.equal(buckets.length, 3);
+    const persisted = await prisma.seededRaceBucket.findMany({
+      where: { id: { in: buckets.map(({ id }) => id) } },
+      include: { race: true, assignments: true },
+      orderBy: { race: { createdAt: "asc" } },
+    });
+    assert.deepEqual(
+      persisted.map(({ assignments }) => assignments.length),
+      [33, 32, 32],
+    );
+    assert.deepEqual(
+      persisted.map(({ race }) => race.maxParticipants),
+      [35, 35, 35],
+    );
+  });
+
+  it("finalizes Daily 61 into 31/30 assignments with a hard capacity of 35", async () => {
     const seed = await prisma.raceSeed.findUnique({ where: { kind: "DAILY_10K" } });
     const realNow = new Date();
     const { windowStart, windowEnd } = upcomingWindowFor(seed, realNow);
@@ -428,7 +476,7 @@ describe("private seeded race buckets (integration)", () => {
       include: { race: true, assignments: true },
       orderBy: { race: { createdAt: "asc" } },
     });
-    assert.deepEqual(persisted.map(({ race }) => race.maxParticipants), [31, 30]);
+    assert.deepEqual(persisted.map(({ race }) => race.maxParticipants), [35, 35]);
     assert.deepEqual(persisted.map(({ assignments }) => assignments.length), [31, 30]);
 
     await renew();
@@ -479,7 +527,7 @@ describe("private seeded race buckets (integration)", () => {
     });
     assert.equal(featured.status, 200);
     const dailyCard = (await featured.json()).races.find((row) => row.seedKind === "DAILY_10K");
-    assert.equal(dailyCard.maxParticipants, 30);
+    assert.equal(dailyCard.maxParticipants, 35);
     assert.ok(
       buckets.some(({ raceId }) => raceId === dailyCard.upcoming.raceId),
       "featured upcoming card points at one of the viewer's persisted buckets",
@@ -503,7 +551,7 @@ describe("private seeded race buckets (integration)", () => {
     );
   });
 
-  it("uses a 50-person minimum for weekly cohorts", async () => {
+  it("uses a 75-person Weekly target with a hard capacity of 100", async () => {
     const seed = await prisma.raceSeed.findUnique({ where: { kind: "WEEKLY_50K" } });
     const beforeBoundary = new Date("2026-08-10T03:58:00.000Z");
     const { windowStart, windowEnd } = upcomingWindowFor(seed, beforeBoundary);
@@ -512,7 +560,7 @@ describe("private seeded race buckets (integration)", () => {
       create: { seedId: seed.id, windowStart, windowEnd, mode: "BUCKET" },
       update: {},
     });
-    const users = await Promise.all(Array.from({ length: 101 }, () => createTestUser()));
+    const users = await Promise.all(Array.from({ length: 151 }, () => createTestUser()));
     await prisma.seededRaceWindowMembership.createMany({
       data: users.map(({ user }) => ({
         seedId: seed.id,
@@ -542,8 +590,8 @@ describe("private seeded race buckets (integration)", () => {
       include: { race: true, assignments: true },
       orderBy: { race: { createdAt: "asc" } },
     });
-    assert.deepEqual(persisted.map(({ race }) => race.maxParticipants), [51, 50]);
-    assert.deepEqual(persisted.map(({ assignments }) => assignments.length), [51, 50]);
+    assert.deepEqual(persisted.map(({ race }) => race.maxParticipants), [100, 100]);
+    assert.deepEqual(persisted.map(({ assignments }) => assignments.length), [76, 75]);
     await renew();
     assert.equal(
       await prisma.seededRaceBucket.count({ where: { seedId: seed.id, windowStart } }),

@@ -290,6 +290,19 @@ describe("seeded challenge payouts + inactivity pruning", () => {
     await appSettings.setFlag(PRUNE_FLAG, false);
     await appSettings.setFlag(AUTO_OFF_FLAG, false);
     await appSettings.setFlag(FUNDED_FLAG, true);
+    await prisma.race.updateMany({
+      where: { seedId: { in: [dailySeed.id, weeklySeed.id] } },
+      data: { seededBucketId: null },
+    });
+    await prisma.seededRaceBucket.deleteMany({
+      where: { seedId: { in: [dailySeed.id, weeklySeed.id] } },
+    });
+    await prisma.seededRaceWindowMembership.deleteMany({
+      where: { seedId: { in: [dailySeed.id, weeklySeed.id] } },
+    });
+    await prisma.seededRaceWindowModeRecord.deleteMany({
+      where: { seedId: { in: [dailySeed.id, weeklySeed.id] } },
+    });
     await prisma.race.deleteMany({
       where: { seedId: { in: [dailySeed.id, weeklySeed.id] } },
     });
@@ -878,7 +891,7 @@ describe("seeded challenge payouts + inactivity pruning", () => {
     assert.deepEqual(await participantUserIds(bucketActive.id), [fresh.userId]);
   });
 
-  it("13c: signup auto-enroll chooses one race per Daily/Weekly cadence", async () => {
+  it("13c: signup auto-enroll chooses the least-full cohort per cadence", async () => {
     const newerDaily = await prisma.race.create({
       data: {
         seedId: dailySeed.id,
@@ -909,13 +922,289 @@ describe("seeded challenge payouts + inactivity pruning", () => {
         endsAt: new Date(Date.now() + 22 * 60 * 60 * 1000),
       },
     });
+    const existing = await makeUser({ createdAt: new Date() });
+    await prisma.raceParticipant.create({
+      data: {
+        raceId: newerDaily.id,
+        userId: existing.userId,
+        status: "ACCEPTED",
+      },
+    });
     const fresh = await makeUser({ createdAt: new Date() });
     await autoEnrollNewUser({
       user: await prisma.user.findUnique({ where: { id: fresh.userId } }),
     });
 
-    assert.deepEqual(await participantUserIds(newerDaily.id), [fresh.userId]);
-    assert.deepEqual(await participantUserIds(olderDaily.id), []);
+    assert.deepEqual(await participantUserIds(newerDaily.id), [existing.userId]);
+    assert.deepEqual(await participantUserIds(olderDaily.id), [fresh.userId]);
+  });
+
+  it("13d: signup auto-enroll opens a capped overflow cohort when every private cohort is full", async () => {
+    const startedAt = new Date(Date.now() - 30 * 60 * 1000);
+    const endsAt = new Date(Date.now() + 23 * 60 * 60 * 1000);
+    const fullDaily = await prisma.race.create({
+      data: {
+        seedId: dailySeed.id,
+        name: "Full Daily cohort",
+        targetSteps: 0,
+        status: "ACTIVE",
+        isPublic: false,
+        seededBucketId: require("node:crypto").randomUUID(),
+        timeBased: true,
+        maxParticipants: 1,
+        maxDurationDays: 1,
+        startedAt,
+        endsAt,
+      },
+    });
+    await prisma.seededRaceWindowModeRecord.create({
+      data: {
+        seedId: dailySeed.id,
+        windowStart: startedAt,
+        windowEnd: endsAt,
+        mode: "BUCKET",
+      },
+    });
+    const existing = await makeUser({ createdAt: new Date() });
+    await prisma.raceParticipant.create({
+      data: {
+        raceId: fullDaily.id,
+        userId: existing.userId,
+        status: "ACCEPTED",
+      },
+    });
+    const fresh = await makeUser({ createdAt: new Date() });
+
+    await autoEnrollNewUser({
+      user: await prisma.user.findUnique({ where: { id: fresh.userId } }),
+    });
+
+    assert.deepEqual(await participantUserIds(fullDaily.id), [existing.userId]);
+    const overflow = await prisma.race.findFirst({
+      where: {
+        seedId: dailySeed.id,
+        status: "ACTIVE",
+        seededBucketId: { not: null },
+        id: { not: fullDaily.id },
+      },
+      include: { participants: { where: { status: "ACCEPTED" } } },
+    });
+    assert.ok(overflow, "a full window gets one reusable overflow cohort");
+    assert.equal(overflow.maxParticipants, 35);
+    assert.deepEqual(overflow.participants.map((row) => row.userId), [fresh.userId]);
+
+    const nextFresh = await makeUser({ createdAt: new Date() });
+    await autoEnrollNewUser({
+      user: await prisma.user.findUnique({ where: { id: nextFresh.userId } }),
+    });
+    assert.equal(await prisma.race.count({
+      where: {
+        seedId: dailySeed.id,
+        status: "ACTIVE",
+        seededBucketId: { not: null },
+        id: { not: fullDaily.id },
+      },
+    }), 1, "later signups reuse the overflow cohort until its hard cap");
+    assert.deepEqual(
+      await participantUserIds(overflow.id),
+      [fresh.userId, nextFresh.userId].sort(),
+    );
+  });
+
+  it("13e: concurrent last-slot signups retry another cohort without exceeding either cap", async () => {
+    const startedAt = new Date(Date.now() - 30 * 60 * 1000);
+    const endsAt = new Date(Date.now() + 23 * 60 * 60 * 1000);
+    const first = await prisma.race.create({
+      data: {
+        id: "00000000-0000-4000-8000-000000000013",
+        seedId: dailySeed.id,
+        name: "First one-slot Daily cohort",
+        targetSteps: 0,
+        status: "ACTIVE",
+        isPublic: false,
+        seededBucketId: require("node:crypto").randomUUID(),
+        timeBased: true,
+        maxParticipants: 1,
+        maxDurationDays: 1,
+        startedAt,
+        endsAt,
+      },
+    });
+    const second = await prisma.race.create({
+      data: {
+        id: "ffffffff-ffff-4fff-8fff-fffffffff013",
+        seedId: dailySeed.id,
+        name: "Second one-slot Daily cohort",
+        targetSteps: 0,
+        status: "ACTIVE",
+        isPublic: false,
+        seededBucketId: require("node:crypto").randomUUID(),
+        timeBased: true,
+        maxParticipants: 1,
+        maxDurationDays: 1,
+        startedAt,
+        endsAt,
+      },
+    });
+    const [freshA, freshB] = await Promise.all([
+      makeUser({ createdAt: new Date() }),
+      makeUser({ createdAt: new Date() }),
+    ]);
+
+    await Promise.all([
+      prisma.user.findUnique({ where: { id: freshA.userId } }).then((user) =>
+        autoEnrollNewUser({ user })),
+      prisma.user.findUnique({ where: { id: freshB.userId } }).then((user) =>
+        autoEnrollNewUser({ user })),
+    ]);
+
+    assert.equal(await prisma.raceParticipant.count({
+      where: { raceId: first.id, status: "ACCEPTED" },
+    }), 1);
+    assert.equal(await prisma.raceParticipant.count({
+      where: { raceId: second.id, status: "ACCEPTED" },
+    }), 1);
+    assert.equal(await prisma.raceParticipant.count({
+      where: { userId: { in: [freshA.userId, freshB.userId] }, status: "ACCEPTED" },
+    }), 2);
+    assert.equal(await prisma.race.count({
+      where: { seedId: dailySeed.id, status: "ACTIVE", seededBucketId: { not: null } },
+    }), 2, "retrying available capacity must not mint an overflow cohort");
+  });
+
+  it("13f: concurrent all-full signups create and reuse exactly one capped overflow cohort", async () => {
+    const startedAt = new Date(Date.now() - 30 * 60 * 1000);
+    const endsAt = new Date(Date.now() + 23 * 60 * 60 * 1000);
+    const fullDaily = await prisma.race.create({
+      data: {
+        seedId: dailySeed.id,
+        name: "Full concurrent Daily cohort",
+        targetSteps: 0,
+        status: "ACTIVE",
+        isPublic: false,
+        seededBucketId: require("node:crypto").randomUUID(),
+        timeBased: true,
+        maxParticipants: 1,
+        maxDurationDays: 1,
+        startedAt,
+        endsAt,
+      },
+    });
+    await prisma.seededRaceWindowModeRecord.create({
+      data: {
+        seedId: dailySeed.id,
+        windowStart: startedAt,
+        windowEnd: endsAt,
+        mode: "BUCKET",
+      },
+    });
+    const existing = await makeUser({ createdAt: new Date() });
+    await prisma.raceParticipant.create({
+      data: { raceId: fullDaily.id, userId: existing.userId, status: "ACCEPTED" },
+    });
+    const [freshA, freshB] = await Promise.all([
+      makeUser({ createdAt: new Date() }),
+      makeUser({ createdAt: new Date() }),
+    ]);
+
+    await Promise.all([
+      prisma.user.findUnique({ where: { id: freshA.userId } }).then((user) =>
+        autoEnrollNewUser({ user })),
+      prisma.user.findUnique({ where: { id: freshB.userId } }).then((user) =>
+        autoEnrollNewUser({ user })),
+    ]);
+
+    const overflows = await prisma.race.findMany({
+      where: {
+        seedId: dailySeed.id,
+        status: "ACTIVE",
+        seededBucketId: { not: null },
+        id: { not: fullDaily.id },
+      },
+      include: {
+        participants: { where: { status: "ACCEPTED" } },
+        seededBucket: { include: { assignments: true } },
+      },
+    });
+    assert.equal(overflows.length, 1);
+    assert.equal(overflows[0].maxParticipants, 35);
+    assert.equal(overflows[0].participants.length, 2);
+    assert.ok(overflows[0].participants.length <= overflows[0].maxParticipants);
+    assert.equal(overflows[0].seededBucket.assignments.length, 2);
+    assert.equal(await prisma.seededRaceWindowMembership.count({
+      where: {
+        seedId: dailySeed.id,
+        windowStart: startedAt,
+        userId: { in: [freshA.userId, freshB.userId] },
+        stream: "BUCKET",
+        raceId: overflows[0].id,
+      },
+    }), 2);
+  });
+
+  it("13g: a stale active cohort cannot mint overflow after its window ends", async () => {
+    const startedAt = new Date(Date.now() - 25 * 60 * 60 * 1000);
+    const endsAt = new Date(Date.now() - 60 * 60 * 1000);
+    const stale = await prisma.race.create({
+      data: {
+        seedId: dailySeed.id,
+        name: "Stale Daily cohort",
+        targetSteps: 0,
+        status: "ACTIVE",
+        isPublic: false,
+        seededBucketId: require("node:crypto").randomUUID(),
+        timeBased: true,
+        maxParticipants: 1,
+        maxDurationDays: 1,
+        startedAt,
+        endsAt,
+      },
+    });
+    await prisma.seededRaceWindowModeRecord.create({
+      data: {
+        seedId: dailySeed.id,
+        windowStart: startedAt,
+        windowEnd: endsAt,
+        mode: "BUCKET",
+      },
+    });
+    const existing = await makeUser({ createdAt: new Date() });
+    await prisma.raceParticipant.create({
+      data: { raceId: stale.id, userId: existing.userId, status: "ACCEPTED" },
+    });
+    const liveWeekly = await prisma.race.create({
+      data: {
+        seedId: weeklySeed.id,
+        name: "Live Weekly cohort",
+        targetSteps: 0,
+        status: "ACTIVE",
+        isPublic: false,
+        seededBucketId: require("node:crypto").randomUUID(),
+        timeBased: true,
+        maxParticipants: 100,
+        maxDurationDays: 7,
+        startedAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+        endsAt: new Date(Date.now() + 6 * 24 * 60 * 60 * 1000),
+      },
+    });
+    const fresh = await makeUser({ createdAt: new Date() });
+
+    await autoEnrollNewUser({
+      user: await prisma.user.findUnique({ where: { id: fresh.userId } }),
+    });
+
+    assert.equal(await prisma.race.count({
+      where: {
+        seedId: dailySeed.id,
+        status: "ACTIVE",
+        seededBucketId: { not: null },
+        id: { not: stale.id },
+      },
+    }), 0);
+    assert.deepEqual(await participantUserIds(liveWeekly.id), [fresh.userId]);
+    assert.equal(await prisma.raceParticipant.count({
+      where: { userId: fresh.userId, status: "ACCEPTED" },
+    }), 1, "a stale Daily source must not abort valid Weekly enrollment");
   });
 
   it("14: a user whose only activity is a future-dated daily row is never pruned", async () => {

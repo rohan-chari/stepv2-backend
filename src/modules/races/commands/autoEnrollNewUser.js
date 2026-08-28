@@ -1,3 +1,4 @@
+const { randomUUID } = require("node:crypto");
 const { prisma: defaultPrisma } = require("../../../db");
 const { eventBus } = require("../../../shared/events/eventBus");
 const { hashAppleSub } = require("../../users/appleSubHash");
@@ -13,8 +14,16 @@ const {
 } = require("../services/fundedExposure");
 const {
   acquireRaceWriteFence,
+  acquireRaceWriteFences,
   lockCompetitionRows,
 } = require("../services/raceWriteFence");
+const {
+  acquireSeededWindowLock,
+  cohortMaximumForSeed,
+  DAILY_COHORT_MAXIMUM,
+  readWindowMode,
+  WEEKLY_COHORT_MAXIMUM,
+} = require("../services/seededRaceBuckets");
 
 // Signup starter-race enrollment (product decision 2026-07-12): a brand-new
 // account must never land on an empty races list. Called best-effort from the
@@ -45,6 +54,8 @@ function buildAutoEnrollNewUser(dependencies = {}) {
   const hashSub = dependencies.hashAppleSub || hashAppleSub;
   const acquireWriteFence =
     dependencies.acquireRaceWriteFence || acquireRaceWriteFence;
+  const acquireWriteFences =
+    dependencies.acquireRaceWriteFences || acquireRaceWriteFences;
   const lockUsers =
     dependencies.lockFundedExposureUsers || lockFundedExposureUsers;
   const lockCompetitions =
@@ -84,7 +95,14 @@ function buildAutoEnrollNewUser(dependencies = {}) {
       }
       const lockedRace = await tx.race.findUnique({
         where: { id: race.id },
-        select: { status: true, maxParticipants: true },
+        select: {
+          status: true,
+          maxParticipants: true,
+          seededBucketId: true,
+          seededBucket: {
+            select: { id: true, seedId: true, windowStart: true },
+          },
+        },
       });
       if (!lockedRace || !["ACTIVE", "PENDING"].includes(lockedRace.status)) {
         const error = new Error("Race is no longer joinable");
@@ -95,9 +113,9 @@ function buildAutoEnrollNewUser(dependencies = {}) {
         where: { raceId: race.id, status: "ACCEPTED" },
       });
       if (
-        !allowOverCapacity &&
         lockedRace.maxParticipants != null &&
-        acceptedCount >= lockedRace.maxParticipants
+        acceptedCount >= lockedRace.maxParticipants &&
+        (!allowOverCapacity || lockedRace.seededBucketId != null)
       ) {
         const error = new Error("Race is full");
         error.code = "RACE_FULL";
@@ -118,6 +136,28 @@ function buildAutoEnrollNewUser(dependencies = {}) {
             : {}),
         },
       });
+      if (lockedRace.seededBucket) {
+        await tx.seededRaceWindowMembership.create({
+          data: {
+            seedId: lockedRace.seededBucket.seedId,
+            windowStart: lockedRace.seededBucket.windowStart,
+            userId,
+            stream: "BUCKET",
+            raceId: race.id,
+          },
+        });
+        await tx.seededRaceBucketAssignment.create({
+          data: {
+            bucketId: lockedRace.seededBucket.id,
+            userId,
+            seedId: lockedRace.seededBucket.seedId,
+            windowStart: lockedRace.seededBucket.windowStart,
+            raceParticipantId: participant.id,
+            matchSteps: 0,
+            state: "FINAL",
+          },
+        });
+      }
       if (lockedRace.status === "ACTIVE") {
         await enrollIfGlobalEventActive(tx, {
           raceId: race.id,
@@ -129,12 +169,239 @@ function buildAutoEnrollNewUser(dependencies = {}) {
     });
   }
 
+  async function createOverflowParticipant(sourceRace, userId) {
+    const windowStart = sourceRace.scheduledStartAt || sourceRace.startedAt;
+    if (!sourceRace.seedId || !windowStart || !sourceRace.endsAt) {
+      const error = new Error("Seeded overflow source has no window identity");
+      error.code = "OVERFLOW_NOT_AVAILABLE";
+      throw error;
+    }
+    const configuredMaximum = cohortMaximumForSeed(sourceRace.seed);
+    const maximum = Number.isFinite(configuredMaximum)
+      ? configuredMaximum
+      : sourceRace.seed?.cadence === "DAILY"
+        ? DAILY_COHORT_MAXIMUM
+        : sourceRace.seed?.cadence === "WEEKLY"
+          ? WEEKLY_COHORT_MAXIMUM
+          : Infinity;
+    if (!Number.isFinite(maximum)) {
+      const error = new Error("Seeded overflow source has no hard cap");
+      error.code = "OVERFLOW_NOT_AVAILABLE";
+      throw error;
+    }
+
+    return db.$transaction(async (tx) => {
+      const raceId = randomUUID();
+      const bucketId = randomUUID();
+      const race = await tx.race.create({
+        data: {
+          id: raceId,
+          seedId: sourceRace.seedId,
+          name: sourceRace.name,
+          targetSteps: sourceRace.targetSteps,
+          status: "ACTIVE",
+          isPublic: false,
+          maxParticipants: maximum,
+          powerupsEnabled: sourceRace.powerupsEnabled,
+          powerupStepInterval: sourceRace.powerupStepInterval,
+          timeBased: sourceRace.timeBased,
+          timezone: sourceRace.timezone,
+          scheduledStartAt: sourceRace.scheduledStartAt,
+          startedAt: sourceRace.startedAt,
+          endsAt: sourceRace.endsAt,
+          maxDurationDays: sourceRace.maxDurationDays,
+          payoutPreset: sourceRace.payoutPreset,
+          payoutCurve: sourceRace.payoutCurve,
+          fundedPrize: sourceRace.fundedPrize,
+          prizeCalculationVersion: sourceRace.prizeCalculationVersion,
+          prizeCoinUnit: sourceRace.prizeCoinUnit,
+          prizePoolMaxCoins: sourceRace.prizePoolMaxCoins,
+          payoutRoundingVersion: sourceRace.payoutRoundingVersion,
+          exitActionsEnabled: sourceRace.exitActionsEnabled,
+        },
+      });
+
+      // Match the universal enrollment order. The provisional empty race is
+      // invisible until commit; if another signup opened reusable capacity,
+      // the retry signal rolls this row and every reservation back.
+      await acquireWriteFences(tx, [sourceRace.id, raceId]);
+      await acquireGlobalEnrollmentLock(tx);
+      let exposureStamp = null;
+      if (race.fundedPrize === true) {
+        const prizeStamp = resolveRacePrizeStamp(race);
+        exposureStamp = computeRaceExposureStamp({
+          maxDurationDays: race.maxDurationDays,
+          prizeCoinUnit: prizeStamp.prizeCoinUnit,
+          teamPoolMultBps: race.teamPoolMultBps,
+        });
+        await reserveFundedExposure({
+          tx,
+          userId,
+          stamp: exposureStamp,
+          competition: { raceId },
+          enforceLimits: true,
+        });
+      } else {
+        await lockUsers(tx, [userId]);
+        await lockCompetitions(tx, { raceIds: [sourceRace.id, raceId] });
+      }
+      await acquireSeededWindowLock(tx, sourceRace.seedId, windowStart);
+
+      const lockedSource = await tx.race.findUnique({
+        where: { id: sourceRace.id },
+        select: {
+          seedId: true,
+          status: true,
+          seededBucketId: true,
+          scheduledStartAt: true,
+          startedAt: true,
+          endsAt: true,
+        },
+      });
+      const lockedWindowStart =
+        lockedSource?.scheduledStartAt || lockedSource?.startedAt;
+      if (
+        !lockedSource ||
+        lockedSource.seedId !== sourceRace.seedId ||
+        lockedSource.status !== "ACTIVE" ||
+        lockedSource.seededBucketId == null ||
+        !lockedWindowStart ||
+        new Date(lockedWindowStart).getTime() !== new Date(windowStart).getTime() ||
+        !lockedSource.endsAt ||
+        new Date(lockedSource.endsAt).getTime() <= Date.now() ||
+        (await readWindowMode({
+          prisma: tx,
+          seedId: sourceRace.seedId,
+          windowStart,
+        })) !== "BUCKET"
+      ) {
+        const error = new Error("Seeded cohort window is no longer joinable");
+        error.code = "RACE_NOT_JOINABLE";
+        throw error;
+      }
+
+      const currentRaces = await tx.race.findMany({
+        where: {
+          seedId: sourceRace.seedId,
+          status: "ACTIVE",
+          seededBucketId: { not: null },
+          startedAt: sourceRace.startedAt,
+          id: { not: raceId },
+        },
+        select: { id: true, maxParticipants: true },
+      });
+      if (currentRaces.length) {
+        const accepted = await tx.raceParticipant.groupBy({
+          by: ["raceId"],
+          where: {
+            raceId: { in: currentRaces.map((row) => row.id) },
+            status: "ACCEPTED",
+          },
+          _count: { _all: true },
+        });
+        const acceptedByRaceId = new Map(
+          accepted.map((row) => [row.raceId, row._count._all]),
+        );
+        if (currentRaces.some((row) =>
+          row.maxParticipants == null ||
+          (acceptedByRaceId.get(row.id) || 0) < row.maxParticipants
+        )) {
+          const error = new Error("Seeded cohort capacity became available");
+          error.code = "OVERFLOW_RETRY";
+          throw error;
+        }
+      }
+
+      await tx.seededRaceBucket.create({
+        data: {
+          id: bucketId,
+          seedId: sourceRace.seedId,
+          windowStart,
+          windowEnd: sourceRace.endsAt,
+          raceId,
+          status: "ACTIVE",
+        },
+      });
+      await tx.race.update({
+        where: { id: raceId },
+        data: { seededBucketId: bucketId },
+      });
+      const participant = await tx.raceParticipant.create({
+        data: {
+          raceId,
+          userId,
+          status: "ACCEPTED",
+          ...(exposureStamp
+            ? {
+                fundedExposureMillicoins: exposureStamp.exposureMillicoins,
+                fundedExposureRateMillicoinsPerDay:
+                  exposureStamp.exposureRateMillicoinsPerDay,
+              }
+            : {}),
+        },
+      });
+      await tx.seededRaceWindowMembership.create({
+        data: {
+          seedId: sourceRace.seedId,
+          windowStart,
+          userId,
+          stream: "BUCKET",
+          raceId,
+        },
+      });
+      await tx.seededRaceBucketAssignment.create({
+        data: {
+          bucketId,
+          userId,
+          seedId: sourceRace.seedId,
+          windowStart,
+          raceParticipantId: participant.id,
+          matchSteps: 0,
+          state: "FINAL",
+        },
+      });
+      await enrollIfGlobalEventActive(tx, {
+        raceId,
+        userIds: [userId],
+        at: new Date(),
+      });
+      return { race: { ...race, seededBucketId: bucketId }, participant };
+    });
+  }
+
   async function remainingCapacity(race) {
     if (race.maxParticipants == null) return Infinity;
     const accepted = await db.raceParticipant.count({
       where: { raceId: race.id, status: "ACCEPTED" },
     });
     return Math.max(0, race.maxParticipants - accepted);
+  }
+
+  async function remainingCapacities(races) {
+    if (!races.length) return new Map();
+    if (typeof db.raceParticipant.groupBy !== "function") {
+      return new Map(await Promise.all(races.map(async (race) => [
+        race.id,
+        await remainingCapacity(race),
+      ])));
+    }
+    const counts = await db.raceParticipant.groupBy({
+      by: ["raceId"],
+      where: {
+        raceId: { in: races.map((race) => race.id) },
+        status: "ACCEPTED",
+      },
+      _count: { _all: true },
+    });
+    const acceptedByRaceId = new Map(
+      counts.map((row) => [row.raceId, row._count._all]),
+    );
+    return new Map(races.map((race) => [
+      race.id,
+      race.maxParticipants == null
+        ? Infinity
+        : Math.max(0, race.maxParticipants - (acceptedByRaceId.get(race.id) || 0)),
+    ]));
   }
 
   // Mirror of joinRaceCore's maybeGrantOnboardingBoxes, minus the
@@ -221,54 +488,145 @@ function buildAutoEnrollNewUser(dependencies = {}) {
         include: { seed: { select: { kind: true, cadence: true } } },
       });
 
-      // A signup gets exactly one race for each cadence. Prefer the newest
-      // active private cohort; if none exists, use the newest pending race as
-      // the next-window fallback. Never walk every seeded race: that would
-      // enroll one user into multiple Daily or Weekly cohorts.
-      const selectedRaces = [];
-      // Keep dependency-injected callers that return the historical compact
-      // race shape working; real Prisma rows always include `seed` above.
-      if (!races.some((race) => race.seed?.cadence)) selectedRaces.push(...races);
-      for (const cadence of ["DAILY", "WEEKLY"]) {
-        const candidates = races.filter((race) => race.seed?.cadence === cadence);
-        const active = candidates.find(
-          (race) => race.status === "ACTIVE" && race.seededBucketId != null,
-        );
-        const pending = candidates.find(
-          (race) => race.status === "PENDING" && race.seededBucketId == null,
-        );
-        if (active || pending) selectedRaces.push(active || pending);
-      }
-
       let welcomeTarget = null;
       let joinedCount = 0;
-      for (const race of selectedRaces) {
-        const capacity = await remainingCapacity(race);
-        if (capacity <= 0) continue;
-        try {
-          const participant = await createAcceptedParticipant(race, user.id);
-          joinedCount += 1;
-          if (!welcomeTarget && race.status === "ACTIVE") {
-            welcomeTarget = { race, participant };
+
+      // Keep dependency-injected callers that return the historical compact
+      // race shape working; real Prisma rows always include `seed` above.
+      if (!races.some((race) => race.seed?.cadence)) {
+        for (const race of races) {
+          if ((await remainingCapacity(race)) <= 0) continue;
+          try {
+            const participant = await createAcceptedParticipant(race, user.id);
+            joinedCount += 1;
+            if (!welcomeTarget && race.status === "ACTIVE") {
+              welcomeTarget = { race, participant };
+            }
+          } catch (error) {
+            if (error?.code === "FUNDED_EXPOSURE_LIMIT") continue;
+            if (!error || error.code !== "P2002") throw error;
           }
-        } catch (error) {
-          if (error?.code === "FUNDED_EXPOSURE_LIMIT") continue;
-          if (!error || error.code !== "P2002") throw error;
+        }
+      } else {
+        // A signup gets exactly one race for each cadence. Re-read and retry
+        // the least-full ordering because selection is optimistic: another
+        // signup can claim the same last slot before this user's C0 lock.
+        for (const cadence of ["DAILY", "WEEKLY"]) {
+          let cadenceJoined = false;
+          for (let attempt = 0; attempt < 8 && !cadenceJoined; attempt += 1) {
+            const candidates = attempt === 0
+              ? races.filter((race) => race.seed?.cadence === cadence)
+              : await db.race.findMany({
+                  where: {
+                    seedId: { not: null },
+                    seed: { cadence },
+                    OR: [
+                      { status: "ACTIVE", seededBucketId: { not: null } },
+                      { status: "PENDING", seededBucketId: null },
+                    ],
+                  },
+                  orderBy: { startedAt: "desc" },
+                  include: { seed: { select: { kind: true, cadence: true } } },
+                });
+            const activeCandidates = candidates.filter(
+              (race) => race.status === "ACTIVE" && race.seededBucketId != null,
+            );
+            const capacityByRaceId = await remainingCapacities(activeCandidates);
+            const ordered = activeCandidates
+              .map((race) => ({
+                race,
+                capacity: capacityByRaceId.get(race.id) ?? 0,
+              }))
+              .filter((row) => row.capacity > 0)
+              .sort((a, b) =>
+                b.capacity - a.capacity ||
+                new Date(b.race.startedAt || 0) - new Date(a.race.startedAt || 0) ||
+                String(a.race.id).localeCompare(String(b.race.id))
+              );
+
+            for (const { race } of ordered) {
+              try {
+                const participant = await createAcceptedParticipant(race, user.id);
+                joinedCount += 1;
+                cadenceJoined = true;
+                if (!welcomeTarget) welcomeTarget = { race, participant };
+                break;
+              } catch (error) {
+                if (["RACE_FULL", "RACE_NOT_JOINABLE"].includes(error?.code)) {
+                  continue;
+                }
+                if (error?.code === "FUNDED_EXPOSURE_LIMIT") break;
+                if (error?.code === "P2002") {
+                  joinedCount += 1;
+                  cadenceJoined = true;
+                  break;
+                }
+                throw error;
+              }
+            }
+            if (cadenceJoined) break;
+
+            if (activeCandidates.length) {
+              try {
+                const overflow = await createOverflowParticipant(
+                  activeCandidates[0],
+                  user.id,
+                );
+                joinedCount += 1;
+                cadenceJoined = true;
+                if (!welcomeTarget) welcomeTarget = overflow;
+                break;
+              } catch (error) {
+                if (error?.code === "OVERFLOW_RETRY") continue;
+                if (error?.code === "FUNDED_EXPOSURE_LIMIT") break;
+                if (error?.code === "P2002") {
+                  joinedCount += 1;
+                  cadenceJoined = true;
+                  break;
+                }
+                // Renewal can close this cadence between the optimistic list
+                // read and the authoritative overflow check. Exhaust only
+                // this active source so pending fallback and the other
+                // cadence still get a chance.
+                if (error?.code !== "RACE_NOT_JOINABLE") throw error;
+              }
+            }
+
+            const pending = candidates.find(
+              (race) => race.status === "PENDING" && race.seededBucketId == null,
+            );
+            if (pending) {
+              try {
+                await createAcceptedParticipant(pending, user.id);
+                joinedCount += 1;
+                cadenceJoined = true;
+              } catch (error) {
+                if (error?.code === "FUNDED_EXPOSURE_LIMIT") break;
+                if (error?.code === "P2002") {
+                  joinedCount += 1;
+                  cadenceJoined = true;
+                  break;
+                }
+                if (!["RACE_FULL", "RACE_NOT_JOINABLE"].includes(error?.code)) {
+                  throw error;
+                }
+              }
+            }
+            break;
+          }
         }
       }
 
-      // CAPACITY RELAXATION (onboarding revamp §5.6). A full seeded race is a
-      // soft product constraint; a signup that lands in ZERO races is a
-      // dead-on-arrival account that nothing later recovers. So when the loop
-      // above joined nothing, put the user into the most recently started ACTIVE
-      // seeded race anyway, over capacity. `races` is already ordered
-      // startedAt desc, so the first ACTIVE row is that race.
+      // CAPACITY RELAXATION (onboarding revamp §5.6) remains only for legacy
+      // seeded races. A private cohort's maxParticipants is now a hard product
+      // and payout boundary, so onboarding must never push one past its cap.
       //
-      // Deliberately NOT a race-minting fallback: a persistent seed
-      // misconfiguration would then create unbounded races. If there is no
-      // ACTIVE seeded race at all we log and leave the user in nothing.
+      // If there is no ACTIVE seeded race at all, keep the legacy fallback;
+      // private bucket windows use the capped overflow path above.
       if (joinedCount === 0) {
-        const fallback = selectedRaces.find((race) => race.status === "ACTIVE");
+        const fallback = races.find(
+          (race) => race.status === "ACTIVE" && race.seededBucketId == null,
+        );
         if (fallback) {
           try {
             const participant = await createAcceptedParticipant(fallback, user.id, {

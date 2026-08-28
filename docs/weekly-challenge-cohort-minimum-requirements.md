@@ -1,5 +1,22 @@
 # Weekly Challenge Cohort Minimum Requirements
 
+## Superseding capped policy — 2026-08-28
+
+Weekly private cohorts now target at least 75 people and have a hard maximum of
+100. Cohort count is
+`max(floor(userCount / 75), ceil(userCount / 100), 1)`, followed by an even
+distribution. At the 2026-08-28 production snapshot, the 808 elected users for
+the 2026-08-31 window planned as eight cohorts of 81 and two of 80; the exact
+sizes can move as election membership changes before finalization.
+
+Friendship is best-effort and cannot override balance or the cap. New Weekly
+races stamp `maxParticipants = 100`; late onboarding selects the least-full
+cohort and cannot use the legacy over-capacity fallback. Existing finalized
+Weekly races are immutable. If every cohort fills, onboarding creates one
+serialized overflow cohort capped at 100 and reuses it until full. This section
+supersedes the historical 50-person minimum policy below wherever the two
+conflict.
+
 ## Summary & user story
 
 Weekly Challenge private cohorts should avoid small fields just as Daily

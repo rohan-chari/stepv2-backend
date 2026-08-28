@@ -34,7 +34,9 @@ const { invalidateUser: invalidateRaceListUser } = require("./raceListCache");
 const SEED_TIMEZONE = "America/New_York";
 const BUCKET_CAPACITY = 15;
 const DAILY_COHORT_MINIMUM = 30;
-const WEEKLY_COHORT_MINIMUM = 50;
+const DAILY_COHORT_MAXIMUM = 35;
+const WEEKLY_COHORT_MINIMUM = 75;
+const WEEKLY_COHORT_MAXIMUM = 100;
 const BUCKET_FEATURE = "seeded_race_buckets";
 
 function cohortMinimumForSeed(seed) {
@@ -42,9 +44,21 @@ function cohortMinimumForSeed(seed) {
   return seed?.cadence === "WEEKLY" ? WEEKLY_COHORT_MINIMUM : BUCKET_CAPACITY;
 }
 
-function cohortCountForSize(size, minimum = BUCKET_CAPACITY) {
+function cohortMaximumForSeed(seed) {
+  if (seed?.kind === "DAILY_10K") return DAILY_COHORT_MAXIMUM;
+  if (seed?.cadence === "WEEKLY") return WEEKLY_COHORT_MAXIMUM;
+  return Infinity;
+}
+
+function cohortCountForSize(
+  size,
+  minimum = BUCKET_CAPACITY,
+  maximum = Infinity,
+) {
   if (size <= 0) return 0;
-  return size < minimum ? 1 : Math.floor(size / minimum);
+  const targetCount = size < minimum ? 1 : Math.floor(size / minimum);
+  const capCount = Number.isFinite(maximum) ? Math.ceil(size / maximum) : 1;
+  return Math.max(targetCount, capCount);
 }
 
 function splitFundedExposureCandidates(elected, totals, stamp) {
@@ -248,7 +262,12 @@ function skillBand(a, b) {
 // Deterministic, batch-only clustering. It starts with qualifying friendship
 // components, packs them in stable skill order, and merges only an impossible
 // undersized trailing component remainder.
-function planBuckets(candidates, friendships = [], minimum = BUCKET_CAPACITY) {
+function planBuckets(
+  candidates,
+  friendships = [],
+  minimum = BUCKET_CAPACITY,
+  maximum = Infinity,
+) {
   const sorted = [...candidates].sort(
     (a, b) => a.matchSteps - b.matchSteps || String(a.userId).localeCompare(String(b.userId))
   );
@@ -286,9 +305,54 @@ function planBuckets(candidates, friendships = [], minimum = BUCKET_CAPACITY) {
   groups.sort((a, b) =>
     a[0].matchSteps - b[0].matchSteps || String(a[0].userId).localeCompare(String(b[0].userId))
   );
-  const bucketCount = cohortCountForSize(sorted.length, minimum);
+  const bucketCount = cohortCountForSize(sorted.length, minimum, maximum);
   const targetSizes = Array.from({ length: bucketCount }, (_, index) =>
     Math.floor(sorted.length / bucketCount) + (index < sorted.length % bucketCount ? 1 : 0));
+
+  // Cadence policies with a finite maximum are balance-first. Friendship
+  // components remain contiguous where possible. Oversized components use a
+  // deterministic breadth-first graph order before the exact-size cuts, which
+  // retains dense direct-friend neighborhoods instead of shredding them by a
+  // pure skill-order slice. A transitive friendship chain is still an affinity
+  // hint, not authority to create a 97-person Daily or unbounded Weekly field.
+  if (Number.isFinite(maximum)) {
+    const graphOrderedGroups = groups.map((group) => {
+      if (group.length <= 1) return group;
+      const memberIds = new Set(group.map((candidate) => candidate.userId));
+      const remaining = new Set(memberIds);
+      const ordered = [];
+      while (remaining.size) {
+        const start = group.find((candidate) => remaining.has(candidate.userId));
+        const queue = [start.userId];
+        remaining.delete(start.userId);
+        while (queue.length) {
+          const id = queue.shift();
+          ordered.push(byId.get(id));
+          const neighbors = [...adjacent.get(id)]
+            .filter((neighborId) => memberIds.has(neighborId) && remaining.has(neighborId))
+            .sort((left, right) => {
+              const a = byId.get(left);
+              const b = byId.get(right);
+              return a.matchSteps - b.matchSteps || String(a.userId).localeCompare(String(b.userId));
+            });
+          for (const neighborId of neighbors) {
+            remaining.delete(neighborId);
+            queue.push(neighborId);
+          }
+        }
+      }
+      return ordered;
+    });
+    const ordered = graphOrderedGroups.flat();
+    const buckets = [];
+    let offset = 0;
+    for (const targetSize of targetSizes) {
+      buckets.push(ordered.slice(offset, offset + targetSize));
+      offset += targetSize;
+    }
+    return buckets;
+  }
+
   const buckets = [];
   // Pack whole friendship components in skill order. Singleton components
   // therefore remain contiguous skill bands; a component is allowed to make a
@@ -593,6 +657,7 @@ function buildSeededRaceBuckets(dependencies = {}) {
             userBId: row.addresseeId,
           })),
           cohortMinimumForSeed(seed),
+          cohortMaximumForSeed(seed),
         ),
       };
     }
@@ -630,7 +695,7 @@ function buildSeededRaceBuckets(dependencies = {}) {
               targetSteps: seed.targetSteps,
               status: "PENDING",
               isPublic: false,
-              maxParticipants: group.length,
+              maxParticipants: cohortMaximumForSeed(seed),
               powerupsEnabled: seed.powerupsEnabled,
               timeBased: seed.timeBased,
               timezone: SEED_TIMEZONE,
@@ -889,7 +954,7 @@ function buildSeededRaceBuckets(dependencies = {}) {
         name: seed.name,
         endsAt: race?.endsAt ?? current.windowEnd,
         participantCount: mine ? await prisma.raceParticipant.count({ where: { raceId: race.id, status: "ACCEPTED" } }) : 0,
-        maxParticipants: race?.maxParticipants ?? cohortMinimumForSeed(seed),
+        maxParticipants: race?.maxParticipants ?? cohortMaximumForSeed(seed),
         isFull: false,
         myStatus: mine?.status ?? (elected?.stream === "BUCKET" ? "ELECTED" : null),
         bucketPrivate: true,
@@ -898,8 +963,8 @@ function buildSeededRaceBuckets(dependencies = {}) {
           scheduledStartAt: upcoming.windowStart,
           participantCount: 0,
           maxParticipants: upcomingRace?.status === "PENDING"
-            ? (upcomingRace.maxParticipants ?? cohortMinimumForSeed(seed))
-            : cohortMinimumForSeed(seed),
+            ? (upcomingRace.maxParticipants ?? cohortMaximumForSeed(seed))
+            : cohortMaximumForSeed(seed),
           isFull: false,
           myStatus: elected?.stream === "BUCKET" ? "ELECTED" : null,
           bucketPrivate: true,
@@ -968,4 +1033,4 @@ function buildSeededRaceBuckets(dependencies = {}) {
   return { elect, electAutomatic, finalise, featuredCards, reconcileFeatured, reconcileFeaturedUser, selectedBucketSeedKinds, bucketModeWindowKeys };
 }
 
-module.exports = { buildSeededRaceBuckets, SeededBucketError, windowFor, upcomingWindowFor, supportsBuckets, claimLegacyStream, planBuckets, matchStepsForCandidates, BUCKET_CAPACITY, DAILY_COHORT_MINIMUM, WEEKLY_COHORT_MINIMUM, cohortMinimumForSeed, BUCKET_FEATURE, SEED_TIMEZONE, acquireSeededWindowLock, withSeededWindowLock, readWindowMode, stampWindowMode, splitFundedExposureCandidates };
+module.exports = { buildSeededRaceBuckets, SeededBucketError, windowFor, upcomingWindowFor, supportsBuckets, claimLegacyStream, planBuckets, matchStepsForCandidates, BUCKET_CAPACITY, DAILY_COHORT_MINIMUM, DAILY_COHORT_MAXIMUM, WEEKLY_COHORT_MINIMUM, WEEKLY_COHORT_MAXIMUM, cohortMinimumForSeed, cohortMaximumForSeed, BUCKET_FEATURE, SEED_TIMEZONE, acquireSeededWindowLock, withSeededWindowLock, readWindowMode, stampWindowMode, splitFundedExposureCandidates };

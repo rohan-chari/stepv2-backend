@@ -123,7 +123,10 @@ const EXPECTED_PARTICIPANT_MUTATIONS = {
   "src/modules/notifications/dailyMover.js": ["participantModel.update"],
   "src/modules/powerups/commands/openMysteryBox.js": ["participantModel.update"],
   "src/modules/powerups/commands/rollPowerup.js": ["raceParticipant.update", "raceParticipant.update"],
-  "src/modules/races/commands/autoEnrollNewUser.js": ["raceParticipant.create"],
+  "src/modules/races/commands/autoEnrollNewUser.js": [
+    "raceParticipant.create",
+    "raceParticipant.create",
+  ],
   "src/modules/races/commands/autoJoinFeaturedRaces.js": ["raceParticipant.createMany"],
   "src/modules/races/commands/cancelRace.js": ["participantModel.update"],
   "src/modules/races/commands/completeRace.js": ["participantModel.update", "raceParticipant.updateMany", "tournamentParticipant.update", "tournamentParticipant.update"],
