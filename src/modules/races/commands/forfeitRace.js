@@ -26,7 +26,10 @@ const {
   applyHitchhikeCopies,
 } = require("../../powerups/hitchhikeCopies");
 const { computeRaceState } = require("../services/computeRaceState");
-const { impactDescription } = require("../models/raceImpactEvent");
+const {
+  impactDescription,
+  normalizeAttackerDisplayName,
+} = require("../models/raceImpactEvent");
 
 // Mid-race forfeit for TEAM races (TR-601..604).
 //
@@ -96,7 +99,7 @@ function buildForfeitRace(dependencies = {}) {
   const acquireWriteFence = dependencies.acquireRaceWriteFence ||
     (Object.keys(dependencies).length > 0 ? async () => null : acquireRaceWriteFence);
 
-  function buildFrozenImpactWork({ capture, participant, resolvedAt }) {
+  function buildFrozenImpactWork({ capture, participant, resolvedAt, effectById }) {
     const bySource = new Map();
     const add = ({ sourceId, powerupType, deltaSteps }) => {
       if (!sourceId || !powerupType) return;
@@ -118,16 +121,25 @@ function buildForfeitRace(dependencies = {}) {
     // every selected terminal source, including Leech and Hitchhike. The
     // specialized arrays are authoritative total-scoring artifacts, but adding
     // them here as well would count those two source families twice.
-    return [...bySource.values()].map(({ deltaSteps, ...work }) => ({
-      ...work,
-      raceId: participant.raceId,
-      recipientUserId: participant.userId,
-      resolvedAt,
-      deltaSteps,
-      description: impactDescription(work.powerupType, deltaSteps),
-      valueStatus: "SYNCED_SNAPSHOT",
-      calculationVersion: 2,
-    }));
+    return [...bySource.values()].map(({ deltaSteps, ...work }) => {
+      const effect = effectById?.get(work.sourceId);
+      return {
+        ...work,
+        raceId: participant.raceId,
+        recipientUserId: participant.userId,
+        resolvedAt,
+        deltaSteps,
+        description: impactDescription(work.powerupType, deltaSteps),
+        attackerDisplayName:
+          effect?.sourceUserId && effect.sourceUserId !== participant.userId
+            ? normalizeAttackerDisplayName(
+                effect.metadata?.impactBoundaryV1?.attackerDisplayName
+              )
+            : null,
+        valueStatus: "SYNCED_SNAPSHOT",
+        calculationVersion: 2,
+      };
+    });
   }
 
   // The member's live effective total, computed with the shared resolution
@@ -380,8 +392,8 @@ function buildForfeitRace(dependencies = {}) {
       let frozenImpactWork = [];
       let terminalImpactSourceCount = 0;
       if (await activeImpactEnabled(tx)) {
-        const freezeSourceIds = typeof tx.raceActiveEffect?.findMany === "function"
-          ? (await tx.raceActiveEffect.findMany({
+        const freezeSources = typeof tx.raceActiveEffect?.findMany === "function"
+          ? await tx.raceActiveEffect.findMany({
               where: {
                 raceId,
                 status: "ACTIVE",
@@ -395,10 +407,11 @@ function buildForfeitRace(dependencies = {}) {
                   { sourceUserId: lockedParticipant.userId, type: { in: ["LEECH", "HITCHHIKE"] } },
                 ],
               },
-              select: { id: true },
+              select: { id: true, sourceUserId: true, metadata: true },
               orderBy: [{ startsAt: "asc" }, { id: "asc" }],
-            })).map((effect) => effect.id)
+            })
           : [];
+        const freezeSourceIds = freezeSources.map((effect) => effect.id);
         terminalImpactSourceCount = freezeSourceIds.length;
         if (freezeSourceIds.length > 0) {
           const computed = await computeState({
@@ -415,7 +428,26 @@ function buildForfeitRace(dependencies = {}) {
             capture: computed?.result?.activeImpactCapture,
             participant: lockedParticipant,
             resolvedAt: forfeitedAt,
+            effectById: new Map(
+              freezeSources.map((effect) => [effect.id, effect])
+            ),
           });
+          for (const effect of freezeSources) {
+            if (!effect.metadata?.impactBoundaryV1) continue;
+            await tx.raceActiveEffect.update({
+              where: { id: effect.id },
+              data: {
+                metadata: {
+                  ...effect.metadata,
+                  impactBoundaryV1: {
+                    ...effect.metadata.impactBoundaryV1,
+                    endReason: "FORFEIT",
+                    endedAt: forfeitedAt.toISOString(),
+                  },
+                },
+              },
+            });
+          }
         }
       }
 

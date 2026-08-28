@@ -392,6 +392,15 @@ describe("hitchhike / quick rinse — integration", () => {
         Math.abs(remainingAfter - remainingOriginal / 2) < 5000,
         `${row.type} remaining time is halved`
       );
+      assert.equal(
+        row.metadata?.impactBoundaryV1?.endReason,
+        "QUICK_RINSE",
+        `${row.type} records that its edited boundary is not natural expiry`,
+      );
+      assert.ok(
+        Date.parse(row.metadata?.impactBoundaryV1?.originalExpiresAt || ""),
+        `${row.type} preserves its immutable original expiry`,
+      );
     }
     assert.ok(
       new Date(result.nextAvailableAt).getTime() > Date.now(),

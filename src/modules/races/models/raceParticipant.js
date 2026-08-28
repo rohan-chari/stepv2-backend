@@ -104,6 +104,35 @@ const RaceParticipant = {
     });
   },
 
+  async findFavoriteStatesForUser(userId, raceIds) {
+    const ids = [...new Set((raceIds || []).filter(Boolean))];
+    if (!userId || ids.length === 0) return [];
+    return prisma.raceParticipant.findMany({
+      where: { userId, raceId: { in: ids }, status: "ACCEPTED" },
+      select: { raceId: true, favoritedAt: true },
+    });
+  },
+
+  async setFavorite({ raceId, userId, favorite, now = new Date() }) {
+    return prisma.$transaction(async (tx) => {
+      if (favorite) {
+        await tx.raceParticipant.updateMany({
+          where: { raceId, userId, status: "ACCEPTED", favoritedAt: null },
+          data: { favoritedAt: now },
+        });
+      } else {
+        await tx.raceParticipant.updateMany({
+          where: { raceId, userId, status: "ACCEPTED" },
+          data: { favoritedAt: null },
+        });
+      }
+      return tx.raceParticipant.findFirst({
+        where: { raceId, userId, status: "ACCEPTED" },
+        select: { raceId: true, favoritedAt: true },
+      });
+    });
+  },
+
   // `team` (RaceTeam TEAM_A|TEAM_B) is only set on team races; null otherwise.
   async create({
     raceId,
@@ -263,6 +292,32 @@ const RaceParticipant = {
       safeOffset,
       safeLimit,
     );
+  },
+
+  // Bounded rank context for viewer-private paged projections. The window
+  // function ranks the complete accepted roster before filtering to the small
+  // set of Stealth candidates, so later pages do not restart at #1.
+  async findPersistedProgressPlacements(raceId, userIds = []) {
+    const ids = [...new Set((userIds || []).filter((id) => typeof id === "string" && id))];
+    if (!ids.length) return [];
+    return prisma.$queryRaw`
+      WITH ranked AS (
+        SELECT rp.user_id AS "userId", rp.finished_at AS "finishedAt",
+          ROW_NUMBER() OVER (
+            ORDER BY
+              CASE WHEN rp.finished_at IS NOT NULL THEN rp.placement END ASC NULLS LAST,
+              CASE WHEN rp.finished_at IS NULL THEN rp.total_steps END DESC NULLS LAST,
+              rp.finished_at ASC NULLS LAST,
+              rp.user_id ASC
+          )::int AS placement
+        FROM race_participants rp
+        WHERE rp.race_id = ${raceId}
+          AND rp.status = 'accepted'::"RaceParticipantStatus"
+      )
+      SELECT "userId", "finishedAt", placement
+      FROM ranked
+      WHERE "userId" = ANY(${ids}::text[])
+    `;
   },
 
   // Ownership checks must not hydrate the complete race roster or any user

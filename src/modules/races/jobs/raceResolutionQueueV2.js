@@ -69,6 +69,8 @@ const {
 } = require("../../../shared/observability/capacityPhaseMetrics");
 const {
   impactDescription,
+  naturalExpiryImpactDescription,
+  normalizeAttackerDisplayName,
 } = require("../models/raceImpactEvent");
 const {
   prorateSamplesIntoWindow,
@@ -190,20 +192,38 @@ async function persistResolvedImpactEventsV2({ tx, raceId, result }) {
     const key = `${impact.userId}:${impact.effectId}`;
     if (!unique.has(key)) unique.set(key, impact);
   }
+  const effectRows = typeof tx.raceActiveEffect?.findMany === "function"
+    ? await tx.raceActiveEffect.findMany({
+        where: { id: { in: [...new Set([...unique.values()].map((impact) => impact.effectId))] } },
+        select: { id: true, sourceUserId: true, metadata: true },
+      })
+    : [];
+  const effectById = new Map(effectRows.map((effect) => [effect.id, effect]));
   const resultWrite = await tx.raceImpactEvent.createMany({
-    data: [...unique.values()].map((impact) => ({
-      raceId,
-      recipientUserId: impact.userId,
-      sourceKind: "ACTIVE_EFFECT",
-      sourceId: impact.effectId,
-      sourceFeedEventId: impact.sourceFeedEventId || null,
-      powerupType: impact.powerupType,
-      deltaSteps: impact.deltaSteps,
-      description: impactDescription(impact.powerupType, impact.deltaSteps),
-      valueStatus: "SYNCED_SNAPSHOT",
-      calculationVersion: 2,
-      resolvedAt: new Date(impact.resolvedAt || capture.asOf),
-    })),
+    data: [...unique.values()].map((impact) => {
+      const effect = effectById.get(impact.effectId);
+      const boundary = effect?.metadata?.impactBoundaryV1;
+      const attackerDisplayName =
+        effect?.sourceUserId && effect.sourceUserId !== impact.userId
+          ? normalizeAttackerDisplayName(boundary?.attackerDisplayName)
+          : null;
+      return {
+        raceId,
+        recipientUserId: impact.userId,
+        sourceKind: "ACTIVE_EFFECT",
+        sourceId: impact.effectId,
+        sourceFeedEventId: impact.sourceFeedEventId || null,
+        powerupType: impact.powerupType,
+        deltaSteps: impact.deltaSteps,
+        description: impact.naturalExpiry === true
+          ? naturalExpiryImpactDescription(impact.powerupType, impact.deltaSteps)
+          : impactDescription(impact.powerupType, impact.deltaSteps),
+        attackerDisplayName,
+        valueStatus: "SYNCED_SNAPSHOT",
+        calculationVersion: 2,
+        resolvedAt: new Date(impact.resolvedAt || capture.asOf),
+      };
+    }),
     skipDuplicates: true,
   });
   return { sourceCount: unique.size, insertedCount: resultWrite.count };

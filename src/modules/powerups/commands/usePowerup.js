@@ -70,6 +70,7 @@ const { appSettings: defaultAppSettings } = require("../../../shared/config/appS
 const { isStrictFlagEnabled } = require("../../../shared/config/isStrictFlagEnabled");
 const {
   impactDescription,
+  normalizeAttackerDisplayName,
   RaceImpactEvent: defaultRaceImpactEvent,
 } = require("../../races/models/raceImpactEvent");
 const {
@@ -1327,10 +1328,8 @@ function buildUsePowerup(dependencies = {}) {
     //
     // Memoized: several emit sites are per-victim loops (Quicksand, Power
     // Outage), and one indexed lookup per cast is the budget, not one per
-    // victim. Best-effort — a lookup failure resolves FALSE (visible name),
-    // matching the handler's fail-safe default, because accidentally
-    // anonymizing would be a gameplay change while failing to anonymize is the
-    // status quo bug that tests catch.
+    // victim. Privacy fails closed: if the lookup fails, withhold the actor's
+    // identity instead of risking disclosure of a stealthed caster.
     let casterStealthedMemo;
     const casterStealthed = async () => {
       if (casterStealthedMemo === undefined) {
@@ -1343,7 +1342,7 @@ function buildUsePowerup(dependencies = {}) {
             effect && (!effect.expiresAt || new Date(effect.expiresAt) > now())
           );
         } catch {
-          casterStealthedMemo = false;
+          casterStealthedMemo = true;
         }
       }
       return casterStealthedMemo;
@@ -1395,6 +1394,28 @@ function buildUsePowerup(dependencies = {}) {
         (!hasInjectedDeps || dependencies.ActiveRaceImpact) &&
         typeof activeRaceImpact.createDirectSource === "function"
       ) {
+        const actorParticipant = acceptedParticipants.find(
+          (participant) => participant.userId === event.actorUserId,
+        );
+        let attackerDisplayName = null;
+        if (actorParticipant) {
+          let hidden = false;
+          try {
+            const stealth = await effectModel.findActiveByTypeForParticipant?.(
+              actorParticipant.id,
+              "STEALTH_MODE",
+            );
+            hidden = Boolean(
+              stealth && (!stealth.expiresAt || new Date(stealth.expiresAt) > now()),
+            );
+          } catch {
+            hidden = true;
+          }
+          const name = actorParticipant.user?.displayName;
+          attackerDisplayName = hidden
+            ? "???"
+            : (typeof name === "string" && name.trim() ? name.trim().slice(0, 30) : null);
+        }
         const actorDelta = canonicalDeltas.find(
           (entry) => entry.userId === userId && entry.deltaSteps !== 0
         );
@@ -1405,6 +1426,7 @@ function buildUsePowerup(dependencies = {}) {
           receiptRecipientUserId:
             activeImpactCapable && offerActorReceipt && actorDelta ? userId : null,
           resolvedAt: now(),
+          attackerDisplayName,
         });
         if (resolved?.event && typeof eventModel.invalidateCreated === "function") {
           await eventModel.invalidateCreated(resolved.event);
@@ -1431,6 +1453,15 @@ function buildUsePowerup(dependencies = {}) {
       const isEligible = ACTIVE_IMPACT_EXPIRY_TYPE_SET.has(effect.type);
       const metadata = {
         ...(effect.metadata || {}),
+        ...(effect.metadata?.impactBoundaryV1
+          ? {
+              impactBoundaryV1: {
+                ...effect.metadata.impactBoundaryV1,
+                endReason: "EARLY",
+                endedAt: resolvedAt.toISOString(),
+              },
+            }
+          : {}),
       };
       const fields = {
         status: "EXPIRED",
@@ -1467,11 +1498,25 @@ function buildUsePowerup(dependencies = {}) {
         const capturedEffectUpdate = (computed?.writes || []).find((write) =>
           write.kind === "effectUpdate" && write.id === effect.id
         );
+        const capturedMetadata = capturedEffectUpdate?.fields?.metadata;
         const updated = await db.raceActiveEffect.update({
           where: { id: effect.id },
           data: {
             ...fields,
             ...(capturedEffectUpdate?.fields || {}),
+            ...(isEligible
+              ? {
+                  metadata: {
+                    ...metadata,
+                    ...(capturedMetadata && typeof capturedMetadata === "object"
+                      ? capturedMetadata
+                      : {}),
+                    ...(metadata.impactBoundaryV1
+                      ? { impactBoundaryV1: metadata.impactBoundaryV1 }
+                      : {}),
+                  },
+                }
+              : {}),
             status: "EXPIRED",
             expiresAt: resolvedAt,
           },
@@ -1486,6 +1531,12 @@ function buildUsePowerup(dependencies = {}) {
               powerupType: effect.type,
               deltaSteps: impact.deltaSteps,
               description: impactDescription(effect.type, impact.deltaSteps),
+              attackerDisplayName:
+                effect.sourceUserId !== impact.userId
+                  ? normalizeAttackerDisplayName(
+                      effect.metadata?.impactBoundaryV1?.attackerDisplayName,
+                    )
+                  : null,
               valueStatus: "SYNCED_SNAPSHOT",
               calculationVersion: 2,
               resolvedAt,
@@ -1760,6 +1811,20 @@ function buildUsePowerup(dependencies = {}) {
         if (claimed.count !== 1) {
           throw new PowerupUseError("This Quicksand has already been used", 409, "POWERUP_ALREADY_USED");
         }
+        const casterStealth = await tx.raceActiveEffect.findFirst({
+          where: {
+            raceId,
+            targetParticipantId: lockedMe.id,
+            type: "STEALTH_MODE",
+            status: "ACTIVE",
+            OR: [{ expiresAt: null }, { expiresAt: { gt: currentTime } }],
+          },
+          select: { id: true },
+        });
+        const attackerHidden = Boolean(casterStealth);
+        const attackerDisplayName = attackerHidden
+          ? "???"
+          : normalizeAttackerDisplayName(myDisplayName);
         const results = [];
         for (const victim of lockedVictims) {
           const existingFreeze = await tx.raceActiveEffect.findFirst({
@@ -1780,7 +1845,17 @@ function buildUsePowerup(dependencies = {}) {
               raceId, targetParticipantId: victim.id, targetUserId: victim.userId,
               sourceUserId: userId, powerupId, type: "QUICKSAND", status: "ACTIVE",
               startsAt: currentTime, expiresAt,
-              metadata: { stepsAtFreezeStart: victim.totalSteps || 0 },
+              metadata: {
+                stepsAtFreezeStart: victim.totalSteps || 0,
+                impactBoundaryV1: {
+                  version: 1,
+                  responsibleActorUserId: userId,
+                  attackerDisplayName,
+                  attackerHidden,
+                  originalExpiresAt: expiresAt.toISOString(),
+                  endReason: "NATURAL",
+                },
+              },
             } });
             results.push({ targetUserId: victim.userId, outcome: "APPLIED", expiresAt });
           }
@@ -3318,7 +3393,26 @@ function buildUsePowerup(dependencies = {}) {
             currentTime.getTime() +
               Math.floor(remainingMs * QUICK_RINSE_REDUCTION_FRACTION)
           );
-          await effectModel.update(effect.id, { expiresAt: newExpiresAt });
+          const metadata = { ...(effect.metadata || {}) };
+          const impactBoundary = metadata.impactBoundaryV1;
+          await effectModel.update(effect.id, {
+            expiresAt: newExpiresAt,
+            metadata: {
+              ...metadata,
+              impactBoundaryV1: {
+                version: 1,
+                responsibleActorUserId:
+                  impactBoundary?.responsibleActorUserId ||
+                  effect.sourceUserId ||
+                  null,
+                originalExpiresAt:
+                  impactBoundary?.originalExpiresAt ||
+                  new Date(effect.expiresAt).toISOString(),
+                ...impactBoundary,
+                endReason: "QUICK_RINSE",
+              },
+            },
+          });
           affectedEffects.push({
             id: effect.id,
             type: effect.type,

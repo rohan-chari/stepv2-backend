@@ -78,6 +78,7 @@ Object.assign(module.exports, require("./commands/switchRaceTeam"));
 Object.assign(module.exports, require("./commands/setRaceChatMute"));
 Object.assign(module.exports, require("./commands/setRacePlacementMute"));
 Object.assign(module.exports, require("./commands/markRaceResultsSeen"));
+Object.assign(module.exports, require("./commands/setRaceFavorite"));
 Object.assign(module.exports, require("./commands/createRacePayoutDoubleOffer"));
 Object.assign(module.exports, require("./commands/claimRacePayoutDouble"));
 Object.assign(module.exports, require("./commands/acknowledgeActiveRaceImpact"));

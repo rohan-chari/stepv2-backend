@@ -147,7 +147,7 @@ const EXPECTED_PARTICIPANT_MUTATIONS = {
   "src/modules/races/jobs/raceExpiry.js": ["raceParticipant.update", "raceParticipant.update"],
   "src/modules/races/jobs/raceResolutionQueueV2.js": ["raceParticipant.update"],
   "src/modules/races/jobs/seededRaceRenewal.js": ["raceParticipant.deleteMany", "raceParticipant.deleteMany", "raceParticipant.update", "raceParticipant.updateMany", "raceParticipant.updateMany"],
-  "src/modules/races/models/raceParticipant.js": ["raceParticipant.create", "raceParticipant.createMany", "raceParticipant.delete", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.updateMany", "raceParticipant.updateMany"],
+  "src/modules/races/models/raceParticipant.js": ["raceParticipant.create", "raceParticipant.createMany", "raceParticipant.delete", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.update", "raceParticipant.updateMany", "raceParticipant.updateMany", "raceParticipant.updateMany", "raceParticipant.updateMany"],
   "src/modules/races/services/commitRaceStart.js": ["raceParticipant.update"],
   "src/modules/races/services/fundedExposure.js": ["raceParticipant.update", "raceParticipant.updateMany", "tournamentParticipant.update", "tournamentParticipant.updateMany"],
   "src/modules/races/services/highMultiplierAlert.js": ["raceParticipant.updateMany", "raceParticipant.updateMany"],

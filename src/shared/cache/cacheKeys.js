@@ -17,7 +17,7 @@ const { createHash } = require("node:crypto");
 
 const PREFIX = {
   SHOP_CATALOG: "v1:catalog:shop",
-  POWERUP_CATALOG: "v1:catalog:powerups",
+  POWERUP_CATALOG: "powerup-copy-catalog:v2",
   APP_SETTINGS: "v1:settings:app",
   BALANCE: "v1:balance",
   GLOBAL_EVENTS: "v1:events:global",
@@ -81,17 +81,34 @@ function shopCatalogVariants() {
 }
 
 // ── C1: powerup COPY catalog (GET /powerups/catalog — unauthenticated) ──────
-function powerupCatalog({ powerups4, hitchhikeEffectiveSteps }) {
-  return `${PREFIX.POWERUP_CATALOG}:${flag(powerups4)}:${flag(
-    hitchhikeEffectiveSteps
-  )}`;
+function powerupCatalog({
+  signalJammer,
+  powerups2,
+  powerups3,
+  powerups4,
+  powerups5,
+  hitchhikeEffectiveSteps,
+  stackingGuide,
+}) {
+  return `${PREFIX.POWERUP_CATALOG}:${[
+    signalJammer, powerups2, powerups3, powerups4, powerups5,
+    hitchhikeEffectiveSteps, stackingGuide,
+  ].map(flag).join("")}`;
 }
 
 function powerupCatalogVariants() {
   const out = [];
-  for (const powerups4 of BOOLS)
-    for (const hitchhikeEffectiveSteps of BOOLS)
-      out.push(powerupCatalog({ powerups4, hitchhikeEffectiveSteps }));
+  for (const signalJammer of BOOLS)
+    for (const powerups2 of BOOLS)
+      for (const powerups3 of BOOLS)
+        for (const powerups4 of BOOLS)
+          for (const powerups5 of BOOLS)
+            for (const hitchhikeEffectiveSteps of BOOLS)
+              for (const stackingGuide of BOOLS)
+                out.push(powerupCatalog({
+                  signalJammer, powerups2, powerups3, powerups4, powerups5,
+                  hitchhikeEffectiveSteps, stackingGuide,
+                }));
   return out;
 }
 

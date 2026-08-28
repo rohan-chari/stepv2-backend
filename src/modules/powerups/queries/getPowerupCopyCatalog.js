@@ -2,6 +2,12 @@ const { PowerupCopy } = require("../models/powerupCopy");
 const { POWERUP_COPY_TYPES } = require("../constants/powerupCopySeed");
 const derivedCache = require("../../../shared/cache/derivedCache");
 const cacheKeys = require("../../../shared/cache/cacheKeys");
+const { isPowerupVisibleToClient } = require("../constants/powerupGating");
+const {
+  STACKING_VERSION,
+  POWERUP_STACKING_GUIDE,
+  validatePowerupStackingGuide,
+} = require("../constants/powerupStackingGuide");
 
 const CATALOG_TTL_SECONDS = 60;
 
@@ -34,8 +40,9 @@ function compareRows(a, b) {
 // can identify its last-known-good snapshot deterministically.
 function buildGetPowerupCopyCatalog(deps = {}) {
   const powerupCopyModel = deps.PowerupCopy || PowerupCopy;
+  validatePowerupStackingGuide(POWERUP_COPY_TYPES);
 
-  async function assemble(has) {
+  async function assemble(has, { filterByCapabilities }) {
     const rows = (await powerupCopyModel.findAll()) || [];
 
     let newest = null;
@@ -47,8 +54,22 @@ function buildGetPowerupCopyCatalog(deps = {}) {
 
     return {
       version: newest ? newest.toISOString() : null,
+      stackingVersion: STACKING_VERSION,
       powerups: [...rows]
-        .filter((row) => row.powerupType !== "QUICKSAND" || has("powerups4"))
+        .filter((row) => filterByCapabilities
+          ? isPowerupVisibleToClient(
+              row.powerupType,
+              {
+                supportsJammer: has("jammer"),
+                supportsPowerups2: has("powerups2"),
+                supportsPowerups3: has("powerups3"),
+                supportsPowerups4: has("powerups4"),
+                supportsPowerups5: has("powerups5"),
+              },
+            )
+          // Preserve the original direct-call contract used by older internal
+          // consumers: only Quicksand was request-capability filtered.
+          : row.powerupType !== "QUICKSAND" || has("powerups4"))
         .sort(compareRows).map((row) => {
         // NOTE: stealth copy is deliberately NOT capability-versioned anymore.
         // The `stealth_runner_duration` override used to swap in the 2026-07-24
@@ -68,6 +89,7 @@ function buildGetPowerupCopyCatalog(deps = {}) {
         // rather than rendering a blank line or truncating the description.
         shortDescription: row.shortDescription ?? null,
         upgradeTierLabels: Array.isArray(row.upgradeTierLabels) ? row.upgradeTierLabels : [],
+        stacking: POWERUP_STACKING_GUIDE[row.powerupType] || null,
       };
       }),
     };
@@ -78,11 +100,19 @@ function buildGetPowerupCopyCatalog(deps = {}) {
   // it (the endpoint is unauthenticated). Two capability tokens shape the
   // output, so the key carries both; a single shared key would serve QUICKSAND
   // copy to a frozen binary that treats it as an unknown enum.
-  return async function getPowerupCopyCatalog(clientFeatures = new Set()) {
+  return async function getPowerupCopyCatalog(clientFeatures = null) {
+    // Direct legacy consumers historically passed no Set (or a plain options
+    // object) and received the whole copy table. Preserve that internal
+    // contract; real HTTP requests always provide a request-scoped Set and get
+    // guide-specific capability filtering.
     const has = (token) =>
       clientFeatures && typeof clientFeatures.has === "function"
         ? clientFeatures.has(token)
         : Array.isArray(clientFeatures) && clientFeatures.includes(token);
+    // The complete visibility filter belongs to the guide capability. Frozen
+    // catalog consumers retain their historical shape (only Quicksand gated),
+    // while the guide never receives a type the requesting binary cannot draw.
+    const filterByCapabilities = has("powerup_stacking_guide_v1");
 
     let enabled = false;
     try {
@@ -95,13 +125,18 @@ function buildGetPowerupCopyCatalog(deps = {}) {
 
     return derivedCache.cachedRead({
       key: cacheKeys.powerupCatalog({
+        signalJammer: has("jammer"),
+        powerups2: has("powerups2"),
+        powerups3: has("powerups3"),
         powerups4: has("powerups4"),
+        powerups5: has("powerups5"),
         hitchhikeEffectiveSteps: has("hitchhike_effective_steps"),
+        stackingGuide: has("powerup_stacking_guide_v1"),
       }),
       prefix: cacheKeys.PREFIX.POWERUP_CATALOG,
       ttlSeconds: CATALOG_TTL_SECONDS,
       enabled,
-      load: () => assemble(has),
+      load: () => assemble(has, { filterByCapabilities }),
     });
   };
 }

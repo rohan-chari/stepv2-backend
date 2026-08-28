@@ -401,7 +401,8 @@ test("opt-in: stealthed top-3 racer is redacted (??? / no cosmetics / null steps
   const res = await get({ userId: ME_ID, homeActiveRaces: true });
   const race = res.data.races[0];
   // u-a is stealthed -> redacted
-  const alice = race.top3.find((t) => t.rank === 1);
+  const alice = race.top3.find((t) => t.userId === "u-a");
+  assert.equal(alice.rank, null);
   assert.equal(alice.displayName, "???");
   assert.equal(alice.totalSteps, null);
   assert.deepEqual(alice.equippedAccessories, []);

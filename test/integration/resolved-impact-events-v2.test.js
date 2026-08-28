@@ -240,6 +240,7 @@ describe("resolved impact events v2 HTTP contract", () => {
         powerupType: "LEECH",
         deltaSteps: -426,
         description: "Leech drained 426 synced steps.",
+        attackerDisplayName: null,
         sourceFeedEventId: null,
         impactScope: "ACTIVE_SYNCED_SNAPSHOT",
         valueStatus: "SYNCED_SNAPSHOT",
@@ -1333,6 +1334,12 @@ describe("resolved impact events v2 HTTP contract", () => {
         steps: 1000,
       } });
     }
+    await prisma.userScoringInputVersion.createMany({
+      data: participants.map((participant) => ({
+        userId: participant.userId,
+        generation: 1n,
+      })),
+    });
 
     const enqueuer = runnerById.get(participants[0].userId);
     const sync = await request(server.baseUrl, "POST", "/steps/samples", {
@@ -1493,6 +1500,9 @@ describe("resolved impact events v2 HTTP contract", () => {
       periodEnd: new Date(current.getTime() - 150 * 60 * 1000),
       steps: 2000,
     } });
+    await prisma.userScoringInputVersion.create({
+      data: { userId: victim.user.id, generation: 1n },
+    });
     const powerup = await prisma.racePowerup.create({ data: {
       raceId: race.id,
       participantId: victimParticipant.id,
@@ -2183,6 +2193,11 @@ describe("resolved impact events v2 HTTP contract", () => {
     assert.equal(shortened.status, "ACTIVE");
     assert.ok(new Date(shortened.expiresAt) > current);
     assert.ok(new Date(shortened.expiresAt) < originalExpiry);
+    assert.equal(shortened.metadata?.impactBoundaryV1?.endReason, "QUICK_RINSE");
+    assert.equal(
+      shortened.metadata?.impactBoundaryV1?.originalExpiresAt,
+      originalExpiry.toISOString(),
+    );
     assert.equal(await prisma.raceImpactEvent.count({ where: { sourceId: effect.id } }), 0);
 
     const watch = await grantHeldPowerup(race.id, attacker.user.id, "POCKET_WATCH", 97_002);
@@ -2195,6 +2210,36 @@ describe("resolved impact events v2 HTTP contract", () => {
     assert.equal(extended.status, "ACTIVE");
     assert.ok(new Date(extended.expiresAt) > shortenedExpiry);
     assert.equal(await prisma.raceImpactEvent.count({ where: { sourceId: effect.id } }), 0);
+
+    const dueAt = new Date(Date.now() - 1000);
+    await prisma.raceActiveEffect.update({
+      where: { id: effect.id },
+      data: { expiresAt: dueAt },
+    });
+    await prisma.userScoringInputVersion.createMany({
+      data: [attacker, runner].map(({ user }) => ({
+        userId: user.id,
+        generation: 1n,
+      })),
+      skipDuplicates: true,
+    });
+    await scheduleNaturalEffectBoundaries();
+    await drainResolutionWorker();
+    await drainResolutionWorker();
+
+    const expiryEvents = await prisma.racePowerupEvent.findMany({
+      where: {
+        raceId: race.id,
+        eventType: "EFFECT_EXPIRED",
+        powerupType: "LEG_CRAMP",
+      },
+    });
+    assert.equal(expiryEvents.length, 1);
+    assert.equal(expiryEvents[0].description, "Leg Cramp ended early.");
+    assert.equal(
+      await prisma.raceImpactEvent.count({ where: { sourceId: effect.id } }),
+      0,
+    );
   });
 
   it("commits an exact Trail Mine consequence and v2 event in the same C0 generation", async () => {
@@ -2217,6 +2262,9 @@ describe("resolved impact events v2 HTTP contract", () => {
       periodEnd: new Date(current.getTime() - 5 * 60 * 60 * 1000),
       steps: 10_000,
     } });
+    await prisma.userScoringInputVersion.create({
+      data: { userId: owner.user.id, generation: 1n },
+    });
     const powerup = await prisma.racePowerup.create({ data: {
       raceId: race.id,
       participantId: ownerParticipant.id,

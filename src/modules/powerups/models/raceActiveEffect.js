@@ -1,5 +1,58 @@
 const { prisma } = require("../../../db");
 
+async function impactBoundaryMetadata({
+  raceId,
+  targetUserId,
+  sourceUserId,
+  expiresAt,
+  metadata,
+}) {
+  const base = metadata && typeof metadata === "object" && !Array.isArray(metadata)
+    ? { ...metadata }
+    : {};
+  let attackerDisplayName = null;
+  let attackerHidden = false;
+  if (sourceUserId && sourceUserId !== targetUserId) {
+    const source = await prisma.raceParticipant.findUnique({
+      where: { raceId_userId: { raceId, userId: sourceUserId } },
+      select: {
+        id: true,
+        user: { select: { displayName: true } },
+      },
+    });
+    if (source) {
+      const stealth = await prisma.raceActiveEffect.findFirst({
+        where: {
+          raceId,
+          targetParticipantId: source.id,
+          type: "STEALTH_MODE",
+          status: "ACTIVE",
+          OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+        },
+        select: { id: true },
+      });
+      attackerHidden = Boolean(stealth);
+      const name = source.user?.displayName;
+      attackerDisplayName = attackerHidden
+        ? "???"
+        : (typeof name === "string" && name.trim() ? name.trim().slice(0, 30) : null);
+    }
+  }
+  return {
+    ...base,
+    impactBoundaryV1: {
+      version: 1,
+      responsibleActorUserId: sourceUserId || null,
+      attackerDisplayName,
+      attackerHidden,
+      originalExpiresAt: expiresAt instanceof Date
+        ? expiresAt.toISOString()
+        : (expiresAt ? new Date(expiresAt).toISOString() : null),
+      endReason: "NATURAL",
+    },
+  };
+}
+
 function buildActiveImpactDueReader(client = prisma) {
   return {
     async findDueActiveImpactSourcesForRace({ raceId, now, types, limit = 8 }) {
@@ -63,8 +116,15 @@ function buildActiveImpactDueReader(client = prisma) {
 const RaceActiveEffect = {
   ...buildActiveImpactDueReader(),
   async create({ raceId, targetParticipantId, targetUserId, sourceUserId, powerupId, type, startsAt, expiresAt, metadata }) {
+    const durableMetadata = await impactBoundaryMetadata({
+      raceId,
+      targetUserId,
+      sourceUserId,
+      expiresAt,
+      metadata,
+    });
     return prisma.raceActiveEffect.create({
-      data: { raceId, targetParticipantId, targetUserId, sourceUserId, powerupId, type, status: "ACTIVE", startsAt, expiresAt, metadata },
+      data: { raceId, targetParticipantId, targetUserId, sourceUserId, powerupId, type, status: "ACTIVE", startsAt, expiresAt, metadata: durableMetadata },
     });
   },
 

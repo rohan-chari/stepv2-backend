@@ -31,6 +31,9 @@ const {
 const {
   serializeTeamPayoutStamp,
 } = require("../races/services/teamWinnerReward");
+const {
+  buildViewerDisplayPlacementMap,
+} = require("../races/services/viewerDisplayPlacements");
 
 // The effect types the home card must prefetch. LEECH is included (§5): once
 // leech MINTS steps to the attacker, omitting it here made the home-card total
@@ -41,6 +44,51 @@ const HOME_EFFECT_TYPES = [...POWERUP_EFFECT_TYPES, "LEECH"];
 
 // Max number of active races returned in the new ACTIVE_RACES (opt-in) state.
 const MAX_ACTIVE_RACES = 5;
+
+function buildHomePlacementProjection({ ranked, effects, userId }) {
+  const stealthedUserIds = new Set();
+  let viewerIsDetoured = false;
+  for (const effect of effects || []) {
+    if (effect.type === "STEALTH_MODE") stealthedUserIds.add(effect.targetUserId);
+    if (effect.type === "DETOUR_SIGN" && effect.targetUserId === userId) {
+      viewerIsDetoured = true;
+    }
+  }
+  const maskedUserIds = new Set(
+    (ranked || [])
+      .filter(
+        (participant) =>
+          viewerIsDetoured ||
+          (participant.userId !== userId &&
+            participant.finishedAt == null &&
+            stealthedUserIds.has(participant.userId))
+      )
+      .map((participant) => participant.userId)
+  );
+  const displayPlacementByUserId = viewerIsDetoured
+    ? new Map()
+    : buildViewerDisplayPlacementMap(
+        (ranked || []).map((participant, index) => ({
+          userId: participant.userId,
+          placement: participant.placement ?? index + 1,
+        })),
+        maskedUserIds
+      );
+  const presentationOrder = [...(ranked || [])].sort((left, right) => {
+    const leftMasked = maskedUserIds.has(left.userId);
+    const rightMasked = maskedUserIds.has(right.userId);
+    if (leftMasked !== rightMasked) return leftMasked ? -1 : 1;
+    if (leftMasked) return String(left.userId).localeCompare(String(right.userId));
+    return (ranked || []).indexOf(left) - (ranked || []).indexOf(right);
+  });
+  return {
+    displayPlacementByUserId,
+    maskedUserIds,
+    placementPrivacyActive: viewerIsDetoured || maskedUserIds.size > 0,
+    presentationOrder,
+    viewerIsDetoured,
+  };
+}
 
 // The home card's duration label, in hours (spec §5.5).
 //
@@ -201,7 +249,9 @@ async function checkActiveRace(
   supportsCharacters = false,
   supportsTeamRaces = false,
   releaseChannel = "prod",
-  supportsRemoteAssets = false
+  supportsRemoteAssets = false,
+  raceActiveEffectModel = RaceActiveEffect,
+  privacySafeDisplayRanks = false
 ) {
   const myActive = await prisma.raceParticipant.findFirst({
     where: {
@@ -241,9 +291,17 @@ async function checkActiveRace(
   if (race.isTeamRace && !supportsTeamRaces) return null;
 
   const sorted = race.participants;
+  const effects = race.powerupsEnabled === true
+    ? await raceActiveEffectModel.findActiveForRace(race.id)
+    : [];
+  const projection = buildHomePlacementProjection({
+    ranked: sorted,
+    effects,
+    userId,
+  });
   const me = sorted.find((p) => p.userId === userId);
-  const leader = sorted[0];
-  const others = sorted
+  const leader = projection.presentationOrder[0];
+  const others = projection.presentationOrder
     .filter((p) => p.userId !== userId && p.userId !== leader?.userId)
     .slice(0, 2);
 
@@ -260,15 +318,36 @@ async function checkActiveRace(
   }
 
   function buildEntry(p) {
+    const canonicalPlacement = sorted.indexOf(p) + 1;
+    const masked = projection.maskedUserIds.has(p.userId);
     return {
-      rank: sorted.indexOf(p) + 1,
-      totalSteps: Math.max(0, Number(p.totalSteps) || 0),
-      ...serializeUser(
-        p.user,
-        supportsCharacters,
-        releaseChannel,
-        supportsRemoteAssets
-      ),
+      rank:
+        masked || (!privacySafeDisplayRanks && projection.placementPrivacyActive)
+          ? null
+          : canonicalPlacement,
+      ...(privacySafeDisplayRanks
+        ? {
+            displayPlacement: masked
+              ? null
+              : projection.displayPlacementByUserId.get(p.userId) ?? null,
+          }
+        : {}),
+      totalSteps: masked ? null : Math.max(0, Number(p.totalSteps) || 0),
+      ...(masked
+        ? {
+            userId: p.userId,
+            displayName: "???",
+            profilePhotoUrl: null,
+            animal: null,
+            accessories: [],
+          }
+        : serializeUser(
+            p.user,
+            supportsCharacters,
+            releaseChannel,
+            supportsRemoteAssets
+          )),
+      isStealthed: masked,
     };
   }
 
@@ -281,6 +360,9 @@ async function checkActiveRace(
       me: me ? buildEntry(me) : null,
       leader: leader ? buildEntry(leader) : null,
       others: others.map(buildEntry),
+      ...(privacySafeDisplayRanks
+        ? { placementPrivacyActive: projection.placementPrivacyActive }
+        : {}),
       ...homeMoneyView(race, sorted),
       // ── Team races (TR-809) — additive. The Home rail draws a compact
       // rope-knot scoreline ("Swift Capys 12,340 — 11,900 Turbo Beavers") from
@@ -579,6 +661,7 @@ async function checkActiveRacesFromSnapshots(prisma, userId, options = {}) {
     releaseChannel = "prod",
     supportsRemoteAssets = false,
     supportsTeamRaces = false,
+    privacySafeDisplayRanks = false,
     snapshotStore = defaultRaceProgressSnapshot,
     raceResolutionJobModel = defaultRaceResolutionJobV2,
     fallback,
@@ -667,12 +750,34 @@ async function checkActiveRacesFromSnapshots(prisma, userId, options = {}) {
     return fallback();
   }
 
+  const projectionsByRaceId = new Map(
+    myActive.map(({ race, snapshot }) => {
+      const ranked = [...snapshot.participants].sort(
+        (left, right) => Number(left.placement) - Number(right.placement)
+      );
+      return [
+        race.id,
+        buildHomePlacementProjection({
+          ranked,
+          effects: race.powerupsEnabled ? snapshot.activeEffects || [] : [],
+          userId,
+        }),
+      ];
+    })
+  );
   const visibleUserIds = [
     ...new Set(
       myActive.flatMap((row) =>
-        [...row.snapshot.participants]
-          .sort((left, right) => Number(left.placement) - Number(right.placement))
+        projectionsByRaceId
+          .get(row.race.id)
+          .presentationOrder
           .slice(0, 3)
+          .filter(
+            (participant) =>
+              !projectionsByRaceId
+                .get(row.race.id)
+                .maskedUserIds.has(participant.userId)
+          )
           .map((participant) => participant.userId)
       )
     ),
@@ -689,25 +794,24 @@ async function checkActiveRacesFromSnapshots(prisma, userId, options = {}) {
     const ranked = [...snapshot.participants].sort(
       (left, right) => Number(left.placement) - Number(right.placement)
     );
-    const stealthedUserIds = new Set();
-    let viewerIsDetoured = false;
-    if (race.powerupsEnabled) {
-      for (const effect of snapshot.activeEffects || []) {
-        if (effect.type === "STEALTH_MODE") stealthedUserIds.add(effect.targetUserId);
-        if (effect.type === "DETOUR_SIGN" && effect.targetUserId === userId) {
-          viewerIsDetoured = true;
-        }
-      }
-    }
-    const top3 = ranked.slice(0, 3).map((participant, index) => {
-      const isStealthed =
-        viewerIsDetoured ||
-        (stealthedUserIds.has(participant.userId) &&
-          participant.userId !== userId &&
-          !participant.finishedAt);
+    const projection = projectionsByRaceId.get(race.id);
+    const top3 = projection.presentationOrder.slice(0, 3).map((participant) => {
+      const canonicalPlacement = ranked.indexOf(participant) + 1;
+      const isStealthed = projection.maskedUserIds.has(participant.userId);
       const user = userById.get(participant.userId) || null;
       return {
-        rank: index + 1,
+        rank:
+          isStealthed ||
+          (!privacySafeDisplayRanks && projection.placementPrivacyActive)
+            ? null
+            : canonicalPlacement,
+        ...(privacySafeDisplayRanks
+          ? {
+              displayPlacement: isStealthed
+                ? null
+                : projection.displayPlacementByUserId.get(participant.userId) ?? null,
+            }
+          : {}),
         userId: participant.userId,
         displayName: isStealthed ? "???" : (user?.displayName || "Anonymous"),
         ...(isStealthed
@@ -733,8 +837,21 @@ async function checkActiveRacesFromSnapshots(prisma, userId, options = {}) {
       name: race.name,
       endsAt: race.endsAt,
       top3,
-      userPlacement: viewerIsDetoured || myIndex < 0 ? null : myIndex + 1,
-      userPlacementHidden: viewerIsDetoured,
+      userPlacement:
+        projection.viewerIsDetoured ||
+        (!privacySafeDisplayRanks && projection.placementPrivacyActive) ||
+        myIndex < 0
+          ? null
+          : myIndex + 1,
+      userPlacementHidden: projection.viewerIsDetoured,
+      ...(privacySafeDisplayRanks
+        ? {
+            userDisplayPlacement: projection.viewerIsDetoured
+              ? null
+              : projection.displayPlacementByUserId.get(userId) ?? null,
+            placementPrivacyActive: projection.placementPrivacyActive,
+          }
+        : {}),
       participantCount: ranked.length,
       ...homeMoneyView(
         race,
@@ -771,6 +888,7 @@ async function checkActiveRaces(prisma, userId, options = {}) {
     // the new home state a team race rendered as an individual ticket with no
     // scoreline. Token-gated exactly like the legacy path.
     supportsTeamRaces = false,
+    privacySafeDisplayRanks = false,
     // §6.3: when true (new client sent homePersistedTotals=1 after a CURRENT
     // sync-v2), build entries from persisted RaceParticipant.totalSteps instead
     // of recomputing live health windows for every participant. Masking,
@@ -952,27 +1070,14 @@ async function checkActiveRaces(prisma, userId, options = {}) {
     // the LIVE totals.
     const ranked = [...liveParticipants].sort(compareParticipantsForPlacement);
 
-    if (leanLiveEnabled) {
-      const visibleIds = ranked.slice(0, 3).map((participant) => participant.userId);
-      const users = visibleIds.length > 0
-        ? await prisma.user.findMany({
-            where: { id: { in: visibleIds } },
-            select: USER_SELECT,
-          })
-        : [];
-      const userById = new Map(users.map((user) => [user.id, user]));
-      for (const participant of ranked.slice(0, 3)) {
-        participant.user = userById.get(participant.userId) || null;
-      }
-    }
-
     // Determine stealthed user ids for this race (only when powerups enabled).
     const stealthedUserIds = new Set();
     // B-12d: Detour Sign had NO handling here at all, so home kept showing a
     // real placement while the races list and race detail both showed "???".
     let viewerIsDetoured = false;
+    let activeEffects = [];
     if (race.powerupsEnabled) {
-      const activeEffects = await raceEffectModel.findActiveForRace(race.id);
+      activeEffects = await raceEffectModel.findActiveForRace(race.id);
       for (const e of activeEffects) {
         if (e.type === "STEALTH_MODE") stealthedUserIds.add(e.targetUserId);
         if (e.type === "DETOUR_SIGN" && e.targetUserId === userId) {
@@ -981,16 +1086,43 @@ async function checkActiveRaces(prisma, userId, options = {}) {
       }
     }
 
-    const top3 = ranked.slice(0, 3).map((p, idx) => {
-      // Detoured viewers see every rival as "???" with no steps, matching
-      // getRaceProgress' masking exactly.
-      const isStealthed =
-        viewerIsDetoured ||
-        (stealthedUserIds.has(p.userId) &&
-          p.userId !== userId &&
-          !p.finishedAt);
+    const projection = buildHomePlacementProjection({
+      ranked,
+      effects: race.powerupsEnabled ? activeEffects : [],
+      userId,
+    });
+    if (leanLiveEnabled) {
+      const visibleParticipants = projection.presentationOrder
+        .slice(0, 3)
+        .filter((participant) => !projection.maskedUserIds.has(participant.userId));
+      const visibleIds = visibleParticipants.map((participant) => participant.userId);
+      const users = visibleIds.length > 0
+        ? await prisma.user.findMany({
+            where: { id: { in: visibleIds } },
+            select: USER_SELECT,
+          })
+        : [];
+      const userById = new Map(users.map((user) => [user.id, user]));
+      for (const participant of visibleParticipants) {
+        participant.user = userById.get(participant.userId) || null;
+      }
+    }
+    const top3 = projection.presentationOrder.slice(0, 3).map((p) => {
+      const canonicalPlacement = ranked.indexOf(p) + 1;
+      const isStealthed = projection.maskedUserIds.has(p.userId);
       return {
-        rank: idx + 1,
+        rank:
+          isStealthed ||
+          (!privacySafeDisplayRanks && projection.placementPrivacyActive)
+            ? null
+            : canonicalPlacement,
+        ...(privacySafeDisplayRanks
+          ? {
+              displayPlacement: isStealthed
+                ? null
+                : projection.displayPlacementByUserId.get(p.userId) ?? null,
+            }
+          : {}),
         userId: p.userId,
         displayName: isStealthed ? "???" : (p.user?.displayName || "Anonymous"),
         ...(isStealthed
@@ -1011,7 +1143,11 @@ async function checkActiveRaces(prisma, userId, options = {}) {
 
     const myIndex = ranked.findIndex((p) => p.userId === userId);
     const userPlacement =
-      viewerIsDetoured || myIndex < 0 ? null : myIndex + 1;
+      viewerIsDetoured ||
+      (!privacySafeDisplayRanks && projection.placementPrivacyActive) ||
+      myIndex < 0
+        ? null
+        : myIndex + 1;
 
     return {
       raceId: race.id,
@@ -1022,6 +1158,14 @@ async function checkActiveRaces(prisma, userId, options = {}) {
       // Additive, mirrors GET /races' myPlacementHidden so the client reads one
       // rule everywhere. Frozen clients ignore it and just see no chip.
       userPlacementHidden: viewerIsDetoured,
+      ...(privacySafeDisplayRanks
+        ? {
+            userDisplayPlacement: viewerIsDetoured
+              ? null
+              : projection.displayPlacementByUserId.get(userId) ?? null,
+            placementPrivacyActive: projection.placementPrivacyActive,
+          }
+        : {}),
       participantCount: ranked.length,
       ...homeMoneyView(race, liveParticipants),
       // B-12d: the canonical team block, from the LIVE totals this entry
@@ -1255,6 +1399,7 @@ function buildGetHomeRaceCard(dependencies = {}) {
     // TR-702/809: whether the caller declared the `team_races` token. Old
     // clients never see a team race on the Home card.
     supportsTeamRaces = false,
+    privacySafeDisplayRanks = false,
     // Batch 2026-07-26, item 8. Defaults to "prod" — a shipped binary never
     // receives a test-only assetKey it does not bundle.
     releaseChannel = "prod",
@@ -1290,6 +1435,7 @@ function buildGetHomeRaceCard(dependencies = {}) {
         releaseChannel,
         supportsRemoteAssets,
         supportsTeamRaces,
+        privacySafeDisplayRanks,
         usePersistedTotals: homePersistedTotals,
         leanLiveEnabled,
       };
@@ -1309,7 +1455,9 @@ function buildGetHomeRaceCard(dependencies = {}) {
         supportsCharacters,
         supportsTeamRaces,
         releaseChannel,
-        supportsRemoteAssets
+        supportsRemoteAssets,
+        raceActiveEffectModel,
+        privacySafeDisplayRanks
       );
       if (active) return active;
     }

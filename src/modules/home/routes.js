@@ -147,6 +147,8 @@ function createHomeRouter(dependencies = {}) {
           supportsRemoteAssets:
             req.clientFeatures?.has("remote_assets") ?? false,
           supportsTeamRaces: req.clientFeatures?.has("team_races") ?? false,
+          privacySafeDisplayRanks:
+            req.clientFeatures?.has("privacy_safe_display_ranks") === true,
           supportsNextRace: supportsNextRace(req.clientFeatures),
           supportsAds: req.clientFeatures?.has("ads") ?? false,
           supportsImpactSummaries:
@@ -195,6 +197,8 @@ function createHomeRouter(dependencies = {}) {
         releaseChannel: req.releaseChannel,
         // TR-702/809: old clients never get a team race on the Home card.
         supportsTeamRaces: req.clientFeatures?.has("team_races") ?? false,
+        privacySafeDisplayRanks:
+          req.clientFeatures?.has("privacy_safe_display_ranks") === true,
         leanLiveEnabled,
         snapshotReuseEnabled,
       });

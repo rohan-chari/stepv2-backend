@@ -242,6 +242,45 @@ test("an empty table degrades to an empty catalog rather than throwing", async (
   assert.equal(result.version, null);
 });
 
+test("guide-capable catalog rows carry complete bounded two-axis stacking metadata", async () => {
+  const features = new Set([
+    "jammer",
+    "powerups2",
+    "powerups3",
+    "powerups4",
+    "powerups5",
+    "hitchhike_effective_steps",
+    "powerup_stacking_guide_v1",
+  ]);
+  const result = await buildGetPowerupCopyCatalog(makeDeps())(features);
+
+  assert.equal(result.stackingVersion, 1);
+  assert.ok(!result.powerups.some((row) => row.type === "IMPOSTER"));
+  const same = new Set(["NOT_APPLICABLE", "BLOCKED", "EXTENDS", "ALLOWED", "LIMITED"]);
+  const other = new Set(["NOT_APPLICABLE", "ALLOWED", "CONDITIONAL", "CONFLICTS"]);
+  for (const row of result.powerups) {
+    assert.ok(row.stacking, `${row.type} stacking row`);
+    assert.ok(same.has(row.stacking.samePowerup), row.type);
+    assert.ok(other.has(row.stacking.otherEffects), row.type);
+    assert.ok(row.stacking.summary.trim().length > 0, row.type);
+    assert.ok([...row.stacking.summary].length <= 240, row.type);
+  }
+});
+
+test("guide catalog applies the complete request capability visibility rule", async () => {
+  const build = buildGetPowerupCopyCatalog(makeDeps());
+  const legacyCapabilitySet = await build(new Set(["powerup_stacking_guide_v1"]));
+  const types = new Set(legacyCapabilitySet.powerups.map((row) => row.type));
+  for (const hidden of [
+    "IMPOSTER", "DEFENSE_SCAN", "LEECH", "HITCHHIKE", "QUICK_RINSE",
+    "QUICKSAND", "UPRISING", "GHOST_PEPPER", "COIN_FLIP", "MYSTERY_POTION",
+    "DECOY", "POWER_OUTAGE", "UMBRELLA", "RALLY_FLAG", "DRILL_SERGEANT",
+    "PIGGY_BANK", "BOUNTY",
+  ]) {
+    assert.equal(types.has(hidden), false, hidden);
+  }
+});
+
 // ── The shop endpoint now SOURCES its strings from the copy catalog ─────────
 
 test("getPowerupShopCatalog serves copy-catalog strings while keeping its response SHAPE unchanged", async () => {

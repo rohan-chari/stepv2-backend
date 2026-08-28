@@ -1,4 +1,5 @@
 const { prisma: defaultPrisma } = require("../../../db");
+const { POWERUP_NAMES } = require("../../powerups/commands/rollPowerup");
 
 const CALCULATION_VERSION = 2;
 const VALUE_STATUS = "SYNCED_SNAPSHOT";
@@ -32,6 +33,13 @@ function isValidEvent(row) {
   );
 }
 
+function normalizeAttackerDisplayName(value) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (trimmed === "???") return trimmed;
+  return trimmed.length > 0 && [...trimmed].length <= 30 ? trimmed : null;
+}
+
 function popupProjection(row) {
   if (!isValidEvent(row)) return null;
   return {
@@ -39,6 +47,7 @@ function popupProjection(row) {
     powerupType: row.powerupType,
     deltaSteps: row.deltaSteps,
     description: row.description,
+    attackerDisplayName: normalizeAttackerDisplayName(row.attackerDisplayName),
     sourceFeedEventId:
       typeof row.sourceFeedEventId === "string" ? row.sourceFeedEventId : null,
     impactScope: "ACTIVE_SYNCED_SNAPSHOT",
@@ -56,6 +65,7 @@ function activityProjection(row) {
     powerupType: popup.powerupType,
     deltaSteps: popup.deltaSteps,
     description: popup.description,
+    attackerDisplayName: popup.attackerDisplayName,
     sourceFeedEventId: popup.sourceFeedEventId,
     impactScope: popup.impactScope,
     valueStatus: popup.valueStatus,
@@ -64,7 +74,7 @@ function activityProjection(row) {
 }
 
 function impactDescription(powerupType, deltaSteps) {
-  const title = String(powerupType || "Effect")
+  const title = POWERUP_NAMES[powerupType] || String(powerupType || "Effect")
     .toLowerCase()
     .split("_")
     .filter(Boolean)
@@ -76,6 +86,17 @@ function impactDescription(powerupType, deltaSteps) {
     : `You lost ${amount} synced steps to ${title}.`;
 }
 
+function naturalExpiryImpactDescription(powerupType, deltaSteps) {
+  const title = POWERUP_NAMES[powerupType] || String(powerupType || "Effect")
+    .toLowerCase()
+    .split("_")
+    .filter(Boolean)
+    .map((part) => `${part[0].toUpperCase()}${part.slice(1)}`)
+    .join(" ");
+  const amount = Math.abs(deltaSteps).toLocaleString("en-US");
+  return `${title} wore off. You ${deltaSteps > 0 ? "gained" : "lost"} ${amount} steps.`;
+}
+
 function buildRaceImpactEventModel(prisma = defaultPrisma) {
   return {
     async createDirectSource({
@@ -83,6 +104,7 @@ function buildRaceImpactEventModel(prisma = defaultPrisma) {
       powerupType,
       deltas = [],
       receiptRecipientUserId = null,
+      attackerDisplayName = null,
     }) {
       return prisma.$transaction(async (tx) => {
         const source = await tx.racePowerupEvent.create({ data: event });
@@ -102,6 +124,10 @@ function buildRaceImpactEventModel(prisma = defaultPrisma) {
               powerupType,
               deltaSteps: delta.deltaSteps,
               description: impactDescription(powerupType, delta.deltaSteps),
+              attackerDisplayName:
+                delta.userId === event.actorUserId
+                  ? null
+                  : normalizeAttackerDisplayName(attackerDisplayName),
               valueStatus: VALUE_STATUS,
               calculationVersion: CALCULATION_VERSION,
               resolvedAt: source.createdAt,
@@ -228,6 +254,8 @@ module.exports = {
   popupProjection,
   activityProjection,
   impactDescription,
+  naturalExpiryImpactDescription,
+  normalizeAttackerDisplayName,
   buildRaceImpactEventModel,
   RaceImpactEvent,
 };

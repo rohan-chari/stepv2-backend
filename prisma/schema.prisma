@@ -328,6 +328,11 @@ model RaceImpactEvent {
   powerupType         String    @map("powerup_type")
   deltaSteps          Int       @map("delta_steps")
   description         String
+  // Immutable, privacy-filtered actor presentation captured at the committed
+  // impact boundary. Null means self/system/legacy; "???" means the actor was
+  // protected by Stealth at that boundary. This is presentation only, never an
+  // authorization identity.
+  attackerDisplayName String?   @map("attacker_display_name")
   valueStatus         String    @default("SYNCED_SNAPSHOT") @map("value_status")
   calculationVersion  Int       @default(2) @map("calculation_version")
   resolvedAt          DateTime  @map("resolved_at")
@@ -1902,6 +1907,9 @@ model RaceParticipant {
   buyInVersion                       Int                   @default(0) @map("buy_in_version")
   payoutCoins                        Int                   @default(0) @map("payout_coins")
   placement                          Int?
+  // Per-account race-list preference. Null is the durable not-favorite state;
+  // the timestamp is preserved across idempotent favorite=true requests.
+  favoritedAt                        DateTime?             @map("favorited_at")
   // Live placement broadcast (Phase 0): last live rank we pushed to this
   // participant, for idempotent change detection in placementRecompute. NULL =
   // baseline not yet seeded. Additive + nullable; never returned by any API

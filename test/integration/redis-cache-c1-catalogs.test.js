@@ -244,13 +244,13 @@ describe("C1 catalogs/config — §8 test 2 parity (cold cache ≡ flag off)", (
 
     // The parity above is worthless if nothing was actually cached — prove the
     // keys exist so a no-op implementation cannot pass this test.
-    const keys = await probe.keys(`${ENV_PREFIX}v1:*`);
+    const keys = await probe.keys(`${ENV_PREFIX}*`);
     assert.ok(
       keys.some((k) => k.includes("v1:catalog:shop")),
       `expected a shop catalog key, saw: ${keys.join(", ")}`
     );
     assert.ok(
-      keys.some((k) => k.includes("v1:catalog:powerups")),
+      keys.some((k) => k.includes("powerup-copy-catalog:v2")),
       "expected a powerup catalog key"
     );
     assert.ok(

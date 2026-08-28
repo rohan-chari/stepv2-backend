@@ -625,6 +625,18 @@ async function triggerTrailMines({
 
     await raceActiveEffectModel.update(mine.id, {
       status: "EXPIRED",
+      ...(mine.metadata?.impactBoundaryV1
+        ? {
+            metadata: {
+              ...(mine.metadata || {}),
+              impactBoundaryV1: {
+                ...mine.metadata.impactBoundaryV1,
+                endReason: "TRIGGERED",
+                endedAt: resolvedAt.toISOString(),
+              },
+            },
+          }
+        : {}),
     });
     const sourceFeedEvent = await powerupEventModel.create({
       raceId,
@@ -741,7 +753,18 @@ async function judgeDrillSergeantEffects({
     }
     await raceActiveEffectModel.update(effect.id, {
       status: "EXPIRED",
-      metadata,
+      metadata: {
+        ...metadata,
+        ...(metadata.impactBoundaryV1
+          ? {
+              impactBoundaryV1: {
+                ...metadata.impactBoundaryV1,
+                endReason: "JUDGED",
+                endedAt: currentTime.toISOString(),
+              },
+            }
+          : {}),
+      },
     });
     const sourceFeedEvent = await powerupEventModel.create({
       raceId: race.id,
@@ -1683,6 +1706,9 @@ function buildResolveRaceState(dependencies = {}) {
           }
           for (const effect of selectedDueImpactEffects) {
             const metadata = { ...(effect.metadata || {}) };
+            const naturalExpiry =
+              metadata.impactBoundaryV1?.endReason == null ||
+              metadata.impactBoundaryV1.endReason === "NATURAL";
             if (SNAPSHOT_AT_EXPIRY_TYPES.includes(effect.type)) {
               const snapshot = baseAdjustedByParticipantId[effect.targetParticipantId];
               if (snapshot !== undefined) metadata.stepsAtExpiry = snapshot;
@@ -1697,13 +1723,24 @@ function buildResolveRaceState(dependencies = {}) {
             // historical public EFFECT_EXPIRED row atomically with that
             // transition; otherwise those clients see an activation that
             // never wears off even though the private impact ledger resolves.
-            await powerupEventModel.create({
+            const expiryEvent = await powerupEventModel.create({
               raceId: race.id,
               actorUserId: effect.targetUserId,
               eventType: "EFFECT_EXPIRED",
               powerupType: effect.type,
-              description: `${POWERUP_NAMES[effect.type] || effect.type} wore off.`,
+              description: naturalExpiry
+                ? `${POWERUP_NAMES[effect.type] || effect.type} wore off.`
+                : `${POWERUP_NAMES[effect.type] || effect.type} ended early.`,
             });
+            timedImpactResolutions = timedImpactResolutions.map((impact) =>
+              impact.effectId === effect.id
+                ? {
+                    ...impact,
+                    sourceFeedEventId: expiryEvent?.id || null,
+                    naturalExpiry,
+                  }
+                : impact,
+            );
           }
         } catch (error) {
           logger.error("[RACE_RESOLUTION] active impact attribution failed", {

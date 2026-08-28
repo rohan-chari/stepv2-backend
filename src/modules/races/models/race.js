@@ -860,6 +860,7 @@ const Race = {
           // from this select would silently read undefined and always emit null.
           totalsUpdatedAt: true,
           placement: true,
+          favoritedAt: true,
           finishedAt: true,
           joinedAt: true,
           buyInStatus: true,
@@ -1028,6 +1029,18 @@ const Race = {
           COALESCE(SUM(total_steps) FILTER (WHERE team = 'team_a'::"RaceTeam"), 0)::bigint AS team_a_steps,
           COALESCE(SUM(total_steps) FILTER (WHERE team = 'team_b'::"RaceTeam"), 0)::bigint AS team_b_steps,
           MAX(totals_updated_at) AS totals_as_of,
+          COALESCE(
+            JSONB_AGG(
+              JSONB_BUILD_OBJECT(
+                'id', id,
+                'userId', user_id,
+                'finishedAt', finished_at,
+                'placement', persisted_position
+              )
+              ORDER BY persisted_position
+            ),
+            '[]'::jsonb
+          ) AS rank_roster,
           BOOL_OR(finished_at IS NOT NULL AND finish_key_count > 1) AS ambiguous_finisher_order
         FROM accepted
         GROUP BY race_id
@@ -1043,10 +1056,12 @@ const Race = {
         COALESCE(a.team_a_steps, 0)::text AS "teamASteps",
         COALESCE(a.team_b_steps, 0)::text AS "teamBSteps",
         a.totals_as_of AS "totalsAsOf",
+        COALESCE(a.rank_roster, '[]'::jsonb) AS "rankRoster",
         COALESCE(a.ambiguous_finisher_order, FALSE) AS "ambiguousFinisherOrder",
         mine.id AS "viewerParticipantId",
         mine.status::text AS "viewerStatus",
         mine.placement AS "viewerPlacement",
+        mine.favorited_at AS "viewerFavoritedAt",
         mine.buy_in_status::text AS "viewerBuyInStatus",
         mine.payout_coins AS "viewerPayoutCoins",
         mine.results_seen_at AS "viewerResultsSeenAt",
@@ -1083,6 +1098,7 @@ const Race = {
               userId,
               status: String(row.viewerStatus || "").toUpperCase(),
               placement: row.viewerPlacement,
+              favoritedAt: row.viewerFavoritedAt,
               buyInStatus: String(row.viewerBuyInStatus || "NONE").toUpperCase(),
               payoutCoins: row.viewerPayoutCoins,
               resultsSeenAt: row.viewerResultsSeenAt,
@@ -1110,6 +1126,7 @@ const Race = {
           ),
           _listSummary: {
             acceptedCount: Number(row.acceptedCount || 0),
+            rankRoster: Array.isArray(row.rankRoster) ? row.rankRoster : [],
             viewerPosition: row.viewerPosition == null
               ? null
               : Number(row.viewerPosition),

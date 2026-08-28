@@ -43,6 +43,7 @@ const {
 // of them emit an identical shape (TR-401/806/809).
 const { buildTeamsBlock } = require("../teamRaces");
 const { collectRaceIllusions } = require("../services/raceIllusions");
+const { buildViewerDisplayPlacementMap } = require("../services/viewerDisplayPlacements");
 const {
   imposterEnabled: defaultImposterEnabled,
 } = require("../../powerups/constants/powerupGating");
@@ -1080,6 +1081,8 @@ function buildGetRaceProgress(deps = {}) {
     requesterEntry = null,
     projectionPagination = null,
     projectionMetadata = null,
+    projectionRankContextEntries = null,
+    privacySafeDisplayRanks = false,
   }) {
     const snapRace = snapshot.race || {};
     const entries = snapshot.participants || [];
@@ -1089,6 +1092,12 @@ function buildGetRaceProgress(deps = {}) {
       !entries.some((entry) => entry.userId === requesterEntry.userId)
       ? [...entries, requesterEntry]
       : entries;
+    const rankEntries = [...viewerEntries];
+    for (const entry of projectionRankContextEntries || []) {
+      if (entry?.userId && !rankEntries.some((row) => row.userId === entry.userId)) {
+        rankEntries.push(entry);
+      }
+    }
 
     // Redis-disabled progress serves the cheap persisted roster snapshot. The
     // persisted total can lag a just-used powerup (bonusSteps/penalties are
@@ -1179,6 +1188,19 @@ function buildGetRaceProgress(deps = {}) {
       ({ stealthedUserIds, viewerIsDetoured, imposterSwaps } =
         collectRaceIllusions(raceActiveEffects, userId, nowTime.getTime()));
     }
+    const maskedUserIds = new Set(
+      rankEntries
+        .filter((entry) =>
+          stealthedUserIds.has(entry.userId) &&
+          entry.userId !== userId &&
+          !entry.finishedAt
+        )
+        .map((entry) => entry.userId),
+    );
+    const placementPrivacyActive = viewerIsDetoured || maskedUserIds.size > 0;
+    const displayPlacementByUserId = viewerIsDetoured
+      ? new Map()
+      : buildViewerDisplayPlacementMap(rankEntries, maskedUserIds);
 
     // Roll powerups for the requesting user if they crossed a threshold.
     // Spectators (no myParticipant) never earn powerups — skip the whole block.
@@ -1461,6 +1483,7 @@ function buildGetRaceProgress(deps = {}) {
             currentMultiplier: null,
             // Detour Sign masks every total, so it must mask every rank too.
             placement: null,
+            ...(privacySafeDisplayRanks ? { displayPlacement: null } : {}),
             // Team identity is structural (column grouping), never masked.
             team: entry.team ?? null,
             forfeitedAt: entry.forfeitedAt ?? null,
@@ -1487,7 +1510,18 @@ function buildGetRaceProgress(deps = {}) {
           finishedAt: entry.finishedAt,
           stealthed: isStealthed,
           // A stealthed rival's steps are nulled, so their rank must be too.
-          placement: isStealthed ? null : (entry.placement ?? null),
+          placement: isStealthed
+            ? null
+            : (!privacySafeDisplayRanks && placementPrivacyActive
+                ? null
+                : (entry.placement ?? null)),
+          ...(privacySafeDisplayRanks
+            ? {
+                displayPlacement: isStealthed
+                  ? null
+                  : (displayPlacementByUserId.get(entry.userId) ?? null),
+              }
+            : {}),
           currentMultiplier: isStealthed ? null : rawCurrentMultiplier,
           // Team races (TR-656): stealth masks the individual plank only.
           team: entry.team ?? null,
@@ -1498,6 +1532,9 @@ function buildGetRaceProgress(deps = {}) {
         // Stealthed users always appear at the top
         if (a.stealthed && !b.stealthed) return -1;
         if (!a.stealthed && b.stealthed) return 1;
+        if (a.stealthed && b.stealthed) {
+          return String(a.userId).localeCompare(String(b.userId));
+        }
         const aSteps = a.totalSteps ?? 0;
         const bSteps = b.totalSteps ?? 0;
         return bSteps - aSteps;
@@ -1529,15 +1566,24 @@ function buildGetRaceProgress(deps = {}) {
       participants: leaderboard,
       // Items 12/16 — additive, nullable. `myPlacementHidden` mirrors the
       // GET /races semantics exactly so the client reads one rule on both.
-      myPlacement: viewerIsDetoured
-        ? null
-        : (myPlacementEntry ? myPlacementEntry.placement ?? null : null),
-      myPlacementHidden: viewerIsDetoured,
+      myPlacement:
+        viewerIsDetoured || (!privacySafeDisplayRanks && placementPrivacyActive)
+          ? null
+          : (myPlacementEntry ? myPlacementEntry.placement ?? null : null),
+      myPlacementHidden:
+        viewerIsDetoured ||
+        (placementPrivacyActive && !privacySafeDisplayRanks),
       tournamentId: snapRace.tournamentId,
       tournamentRound: snapRace.tournamentRound,
       tournamentRoundLabel: snapRace.tournamentRoundLabel,
       tournamentName: snapRace.tournamentName,
     };
+    if (privacySafeDisplayRanks) {
+      result.myDisplayPlacement = viewerIsDetoured
+        ? null
+        : (displayPlacementByUserId.get(userId) ?? null);
+      result.placementPrivacyActive = placementPrivacyActive;
+    }
 
     if (snapRace.isTeamRace) {
       result.teams = snapshot.teams;
@@ -1760,6 +1806,10 @@ function buildGetRaceProgress(deps = {}) {
       // the operation gate; the lean context is backed by Postgres and does
       // not depend on Redis standings.
       leanScoringContext = false,
+      // Presentation-only rank contract. Canonical placement remains in its
+      // legacy field for settlement/payout consumers; this capability adds a
+      // separate viewer-relative display field.
+      privacySafeDisplayRanks = false,
     } = {}
   ) {
     const cacheOn = hasInjectedDependencies
@@ -1916,6 +1966,7 @@ function buildGetRaceProgress(deps = {}) {
     let projectionRequesterEntry = null;
     let projectionPagination = null;
     let projectionMetadata = null;
+    let projectionRankContextEntries = null;
     if (pageScopedContext) {
       const cachedProjection = cacheOn
         ? await pageProjection.readRaceProgressPageProjection({
@@ -2017,6 +2068,17 @@ function buildGetRaceProgress(deps = {}) {
       const activeEffects = race.powerupsEnabled
         ? await raceActiveEffectModel.findActiveForRace(raceId)
         : [];
+      if (
+        privacySafeDisplayRanks &&
+        typeof participantModel.findPersistedProgressPlacements === "function"
+      ) {
+        projectionRankContextEntries = await participantModel.findPersistedProgressPlacements(
+          raceId,
+          activeEffects
+            .filter((effect) => String(effect?.type || "").toUpperCase() === "STEALTH_MODE")
+            .map((effect) => effect.targetUserId),
+        );
+      }
       snapshot = snapshotStore.buildSnapshot({
         race: projectionRace,
         participants: projectionRows,
@@ -2322,6 +2384,8 @@ function buildGetRaceProgress(deps = {}) {
       requesterEntry: projectionRequesterEntry,
       projectionPagination,
       projectionMetadata,
+      projectionRankContextEntries,
+      privacySafeDisplayRanks,
     });
     return { ...response, ...progressMoney };
   };

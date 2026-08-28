@@ -14,6 +14,7 @@ const {
   isStealthedForViewer,
 } = require("../services/raceIllusions");
 const { getRaceLeaveAction } = require("../services/raceLeaveAction");
+const { buildViewerDisplayPlacementMap } = require("../services/viewerDisplayPlacements");
 const defaultRaceListCache = require("../services/raceListCache");
 const {
   serializeTeamPayoutStamp,
@@ -128,6 +129,8 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
     powerups5: clientFeatures?.has("powerups5") ?? false,
   };
   const supportsRaceLeave = clientFeatures?.has("race_leave") ?? false;
+  const supportsDisplayRanks =
+    clientFeatures?.has("privacy_safe_display_ranks") ?? false;
   // Batch 2026-08-08 item 4: gates the completed-race podium rows' cosmetics,
   // exactly as getRaceDetails gates its participant rows. Both default to the
   // naked-capy presentation, so a client that declares nothing is unaffected.
@@ -238,8 +241,9 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
     myParticipantByRace.set(race.id, mine || null);
     if (race.status === "ACTIVE" && race.powerupsEnabled && mine) {
       viewerParticipantIds.push(mine.id);
-      for (const participant of race.participants) {
-        if (participant.status === "ACCEPTED") {
+      const rankRoster = race._listSummary?.rankRoster || race.participants;
+      for (const participant of rankRoster) {
+        if (participant.status == null || participant.status === "ACCEPTED") {
           effectParticipantIds.push(participant.id);
         }
       }
@@ -388,6 +392,48 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
     const powerupContext =
       race.status === "ACTIVE" && race.powerupsEnabled && myParticipant;
     let myPlacementHidden = false;
+    let placementPrivacyActive = false;
+    let myDisplayPlacement = myPlacement;
+    if (powerupContext) {
+      const illusions = collectRaceIllusions(
+        effectsByRace.get(race.id) || [],
+        userId,
+      );
+      const rankRoster = race._listSummary?.rankRoster || race.participants;
+      const maskedUserIds = new Set(
+        rankRoster
+          .filter((participant) => isStealthedForViewer(participant.userId, {
+            stealthedUserIds: illusions.stealthedUserIds,
+            viewerUserId: userId,
+            finished: participant.finishedAt != null,
+          }))
+          .map((participant) => participant.userId),
+      );
+      placementPrivacyActive = illusions.viewerIsDetoured || maskedUserIds.size > 0;
+      myDisplayPlacement = illusions.viewerIsDetoured
+        ? null
+        : (buildViewerDisplayPlacementMap(
+            rankRoster
+              .filter(
+                (participant) =>
+                  participant.status == null || participant.status === "ACCEPTED"
+              )
+              .sort((left, right) =>
+                race._listSummary
+                  ? Number(left.placement) - Number(right.placement)
+                  : compareParticipantsForPlacement(left, right)
+              )
+              .map((participant, index) => ({
+                ...participant,
+                placement: index + 1,
+              })),
+            maskedUserIds,
+          ).get(userId) ?? null);
+      if (!supportsDisplayRanks && placementPrivacyActive) {
+        myPlacement = null;
+        myPlacementHidden = true;
+      }
+    }
     if (powerupContext && detourParticipantIds.has(myParticipant.id)) {
       // Detour Sign masks the viewer's live placement (bulk-prefetched above).
       myPlacement = null;
@@ -475,6 +521,13 @@ async function getRaces(userId, supportsTeamRaces = false, options = {}) {
       myStatus: myParticipant?.status || null,
       myPlacement,
       myPlacementHidden,
+      ...(supportsDisplayRanks
+        ? { myDisplayPlacement, placementPrivacyActive }
+        : {}),
+      // Caller-specific participant overlay. It is loaded with the existing
+      // membership summary query and never enters the stable race fragment.
+      isFavorite: myParticipant?.favoritedAt instanceof Date,
+      favoritedAt: myParticipant?.favoritedAt ?? null,
       myBuyInStatus: myParticipant?.buyInStatus || "NONE",
       myPayoutCoins: myParticipant?.payoutCoins || 0,
       myResultsSeen: (myParticipant?.resultsSeenAt != null),

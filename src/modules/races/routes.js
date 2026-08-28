@@ -163,6 +163,10 @@ const {
 const {
   markRaceResultsSeen: defaultMarkRaceResultsSeen,
 } = require("./commands/markRaceResultsSeen");
+const {
+  setRaceFavorite: defaultSetRaceFavorite,
+  buildSetRaceFavorite,
+} = require("./commands/setRaceFavorite");
 const { Race: defaultRaceModel } = require("./models/race");
 const { User: defaultUserModel } = require("../users");
 const { RacePowerup: defaultPowerupModel } = require("../powerups");
@@ -399,6 +403,11 @@ function createRacesRouter(dependencies = {}) {
     dependencies.setRacePlacementMute || defaultSetRacePlacementMute;
   const markRaceResultsSeen =
     dependencies.markRaceResultsSeen || defaultMarkRaceResultsSeen;
+  const setRaceFavorite =
+    dependencies.setRaceFavorite ||
+    (dependencies.RaceParticipant || dependencies.invalidateRaceListUser || dependencies.now
+      ? buildSetRaceFavorite(dependencies)
+      : defaultSetRaceFavorite);
   const raceModel = dependencies.Race || defaultRaceModel;
   const getImpactNotices = dependencies.getImpactNotices || defaultGetImpactNotices;
   const acknowledgeImpactNotice = dependencies.acknowledgeImpactNotice || defaultAcknowledgeImpactNotice;
@@ -534,6 +543,8 @@ function createRacesRouter(dependencies = {}) {
         // be denied afterward anyway.
         previewViewer: allowPreview && hasRacePreviewToken(req.clientFeatures),
         leanScoringContext,
+        privacySafeDisplayRanks:
+          req.clientFeatures?.has("privacy_safe_display_ranks") ?? false,
       }
     );
   }
@@ -899,6 +910,15 @@ function createRacesRouter(dependencies = {}) {
       res.status(500).json({ error: "Internal server error" });
     }
   });
+
+  router.put("/:raceId/favorite", asyncHandler(async (req, res) => {
+    const result = await setRaceFavorite({
+      raceId: req.params.raceId,
+      userId: req.user.id,
+      favorite: req.body?.favorite,
+    });
+    res.json(result);
+  }));
 
   // Static payout-double paths MUST precede every /:raceId route. New clients
   // prepare before loading an ad; old clients never call these endpoints.
@@ -1958,6 +1978,8 @@ function createRacesRouter(dependencies = {}) {
           userId: req.user.id,
           raceId: req.params.raceId,
           powerupType: req.query.powerupType,
+          privacySafeDisplayRanks:
+            req.clientFeatures?.has("privacy_safe_display_ranks") === true,
           loadBountyProgress: () => loadRaceProgress(req, null, {
             forceFullParticipants: true,
             allowPreview: false,

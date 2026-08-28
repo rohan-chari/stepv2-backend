@@ -36,9 +36,11 @@ const FIELD_CLASSIFICATION = Object.freeze({
   ]),
   perUser: Object.freeze([
     "myStatus", "myPlacement", "myPlacementHidden", "myBuyInStatus",
+    "myDisplayPlacement", "placementPrivacyActive",
     "myPayoutCoins", "myResultsSeen", "queuedBoxCount", "mysteryBoxCount",
     "slotItems", "myActiveEffects", "isCreator", "myInviteExpiresAt", "myTeam",
     "myForfeited", "leaveAction",
+    "isFavorite", "favoritedAt",
   ]),
   live: Object.freeze([
     "participantCount", "leader", "teams", "teamATotalSteps", "teamBTotalSteps",
