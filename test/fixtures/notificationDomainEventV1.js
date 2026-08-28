@@ -26,6 +26,7 @@ const rows = [
     scheduleRevision: 0, timezone: "America/New_York",
   }, {}, "visible:GLOBAL_EVENT_STARTED:user-1:event-1"],
   ["POWERUP_USED_V1", "POWERUP_USED", { powerupId: "powerup-1", targetUserId: "user-1" }, {}, "visible:POWERUP_USED:user-1:powerup:powerup-1:user-1"],
+  ["DECOY_CONSUMED_V1", "DECOY_CONSUMED", { decoyEffectId: "decoy-effect-1", raceId: "race-1", ownerUserId: "user-1", attackerUserId: "actor-1", attackPowerupType: "LEG_CRAMP", outcome: "REDIRECTED" }, {}, "visible:POWERUP_USED:user-1:decoy-consumed:decoy-effect-1"],
   ["RACE_MESSAGE_SENT_V1", "RACE_MESSAGE_SENT", { messageId: "message-1" }, {}, "visible:race_message:user-1:message-1"],
   ["PLACEMENT_CHANGED_V1", "PLACEMENT_CHANGED", { raceId: "race-1", transitionId: "placement:p1:1:2->3" }, {}, "visible:PLACEMENT_CHANGED:user-1:placement:p1:1:2->3"],
   ["HIGH_MULTIPLIER_ALERT_V1", "HIGH_MULTIPLIER_ALERT", { raceId: "race-1", sourceGeneration: 7, actorUserId: "actor-1", multiplier: 4 }, {}, "visible:HIGH_MULTIPLIER_ALERT:user-1:538aab525f83f10aeafeb0f8370632e0a4cf5dc1e1fed27d305b0f633e22db2f"],
@@ -62,6 +63,7 @@ const COPY = {
   GLOBAL_STEP_EVENT_ACTIVATED_V1: ["2x STEPS EVENT", "Double steps are LIVE for 30 minutes. Every step counts 2x in your races! Go!", "GLOBAL_EVENT_STARTED", "home"],
   GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1: ["2x STEPS EVENT", "Double steps are LIVE for 30 minutes. Every step counts 2x in your races! Go!", "GLOBAL_EVENT_STARTED", "home"],
   POWERUP_USED_V1: ["Powerup Attack!", "Actor used Leg Cramp on you! Your steps are frozen for 1 hour. Race: Fixture race.", "POWERUP_USED", "race_detail"],
+  DECOY_CONSUMED_V1: ["Your Decoy was triggered!", "Your Decoy protected you in Fixture race. Tap to view the race.", "POWERUP_USED", "race_detail"],
   RACE_MESSAGE_SENT_V1: ["Fixture race", "Actor: Fixture message", "race_message", "race_detail"],
   PLACEMENT_CHANGED_V1: ["You're in the lead!", "You took 1st in Fixture race.", "PLACEMENT_CHANGED", "race_detail"],
   HIGH_MULTIPLIER_ALERT_V1: ["🔥 Someone's heating up", "Actor's multiplier is stacked at 4x. Slow them down or catch up!", "HIGH_MULTIPLIER_ALERT", "race_detail"],
@@ -160,6 +162,9 @@ function expectedPayload(eventType, publicType, route) {
   }
   if (eventType === "HIGH_MULTIPLIER_ALERT_V1") {
     Object.assign(payload, { multiplier: 4, collapseId: "himult_race-1_actor-1" });
+  }
+  if (eventType === "DECOY_CONSUMED_V1") {
+    payload.subtype = "DECOY_CONSUMED";
   }
   if (["TOURNAMENT_STARTED_V1", "TOURNAMENT_ROUND_STARTED_V1"].includes(eventType)) {
     payload.params.tournamentId = "tournament-1";

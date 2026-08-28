@@ -162,6 +162,7 @@ async function computeSettlementEffectAttribution({
     return scoreWholeRaceTotals({
       raceId: race.id,
       raceEndsAt: settlementTime,
+      raceTimezone: race.timezone || "UTC",
       racePowerupsEnabled: race.powerupsEnabled,
       participants: acceptedParticipants,
       entries: preLeech.filter((entry) => selectedIds.has(entry.participant.id)),
@@ -496,6 +497,7 @@ async function resolveExpiredRaces() {
             raceActiveEffectModel: RaceActiveEffect,
             stepSampleModel: StepSample,
             now: settlementTime,
+            raceTimezone: race.timezone || "UTC",
             globalEvents,
             eventsByUserId,
           })

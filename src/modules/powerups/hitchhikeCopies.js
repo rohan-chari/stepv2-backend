@@ -29,9 +29,17 @@
 const HOUR_MS = 60 * 60 * 1000;
 const {
   computeEffectModifiers,
+  computeSnapshotEffectiveTotal,
   createIncrementalEffectScoreCapture,
 } = require("../races/services/effectiveStepScoring");
 const { eventsForUser } = require("../steps/services/globalStepEventEntitlement");
+const {
+  HitchhikeAttributionCapture,
+} = require("./models/hitchhikeAttributionCapture");
+const {
+  getTimeZoneParts,
+  zonedDateTimeToUtc,
+} = require("../../shared/time/week");
 
 // Default copy strength when an effect row carries no (or malformed)
 // `metadata.copyRatio`. Mirrors leechRatio: reading it per-effect makes the copy
@@ -49,6 +57,37 @@ function toMsOrNull(value) {
   if (value == null) return null;
   const ms = value instanceof Date ? value.getTime() : new Date(value).getTime();
   return Number.isFinite(ms) ? ms : null;
+}
+
+function localDayStart(instant, timeZone) {
+  try {
+    const parts = getTimeZoneParts(instant, timeZone);
+    return zonedDateTimeToUtc({
+      year: parts.year,
+      month: parts.month,
+      day: parts.day,
+      hour: 0,
+      minute: 0,
+      second: 0,
+    }, timeZone);
+  } catch {
+    const date = new Date(instant);
+    return new Date(Date.UTC(
+      date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(),
+    ));
+  }
+}
+
+function localDayDate(instant, timeZone) {
+  try {
+    const parts = getTimeZoneParts(instant, timeZone);
+    return new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
+  } catch {
+    const date = new Date(instant);
+    return new Date(Date.UTC(
+      date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(),
+    ));
+  }
 }
 
 // copiedSteps for ONE hitchhike = floor(targetWindowSteps * copyRatio).
@@ -72,14 +111,26 @@ async function computeHitchhikeCopiedSteps(
   now,
   { raceEndsAt = null, targetFinishedAt = null, targetForfeitedAt = null,
     targetParticipantId = null, raceId = null, raceActiveEffectModel = null,
-    globalEvents = [] } = {}
+    globalEvents = [], raceTimezone = "UTC",
+    attributionCaptureModel = HitchhikeAttributionCapture } = {}
 ) {
   if (!effect || !effect.targetUserId || !effect.sourceUserId) return 0;
   const nowMs = (now instanceof Date ? now : new Date(now)).getTime();
   const currentHourStart = Math.floor(nowMs / HOUR_MS) * HOUR_MS;
+  const scoringVersion = Number(effect.metadata?.scoringVersion) || 1;
 
   const windowStart = toMsOrNull(effect.startsAt);
   if (windowStart == null) return 0;
+
+  let existingCapture = null;
+  if (scoringVersion === 3 &&
+      typeof attributionCaptureModel?.findFrozen === "function") {
+    const frozen = await attributionCaptureModel.findFrozen(effect.id);
+    if (frozen) return Number(frozen.effectiveContribution) || 0;
+    if (typeof attributionCaptureModel.findByEffect === "function") {
+      existingCapture = await attributionCaptureModel.findByEffect(effect.id);
+    }
+  }
 
   const ends = [
     toMsOrNull(effect.expiresAt) ?? nowMs,
@@ -88,20 +139,43 @@ async function computeHitchhikeCopiedSteps(
     toMsOrNull(targetForfeitedAt),
   ].filter((ms) => ms != null);
   const rawEnd = Math.min(...ends);
-  const windowEnd = Math.min(rawEnd, currentHourStart);
+  // v1/v2 are frozen compatibility contracts: both intentionally wait for the
+  // current hour to close. V3 consumes the target's canonical, timestamped
+  // contribution through the current scoring instant so a sparse open sample
+  // can raise the target and the 1:1 copy together.
+  const sourceBoundary = scoringVersion >= 3 ? nowMs : currentHourStart;
+  const windowEnd = Math.min(rawEnd, sourceBoundary);
   if (!(windowEnd > windowStart)) return 0;
 
-  const steps = await stepSampleModel.sumStepsInWindow(
+  const exactSampleSteps = await stepSampleModel.sumStepsInWindow(
     effect.targetUserId,
     new Date(windowStart),
     new Date(windowEnd)
   );
-  if (!(steps > 0)) return 0;
+  const exactSteps = Math.max(0, Number(exactSampleSteps) || 0);
+  let currentDailySteps = null;
 
-  const scoringVersion = Number(effect.metadata?.scoringVersion) || 1;
+  // V3's fallback is an alternative source, never additive. It is available
+  // only when a cast-time checkpoint already exists; a legacy/imported v3 row
+  // without one cannot safely distinguish pre-cast walking from post-cast
+  // walking and therefore remains sample-only until its first checkpoint.
+  if (scoringVersion === 3 &&
+      typeof attributionCaptureModel?.readDailySteps === "function") {
+    try {
+      currentDailySteps = await attributionCaptureModel.readDailySteps(
+        effect.targetUserId,
+        localDayDate(new Date(windowStart), raceTimezone || "UTC"),
+      );
+    } catch {
+      // Exact timestamped samples remain authoritative when the daily fallback
+      // cannot be read.
+    }
+  }
+  if (!(exactSteps > 0) && scoringVersion < 3) return 0;
+
   if (scoringVersion < 2 || !targetParticipantId || !raceId ||
       typeof raceActiveEffectModel?.findEffectsForRaceByTypes !== "function") {
-    return Math.floor(steps * hitchhikeCopyRatio(effect));
+    return Math.floor(exactSteps * hitchhikeCopyRatio(effect));
   }
 
   // Run the exact shared leaderboard scorer through an adapter that clips
@@ -118,13 +192,92 @@ async function computeHitchhikeCopiedSteps(
     },
   };
   const modifiers = await computeEffectModifiers(
-    targetEffects, steps, effect.targetUserId, clippedSamples, true,
+    targetEffects, exactSteps, effect.targetUserId, clippedSamples, true,
     globalEvents.length ? { globalEvents, now: new Date(windowEnd) } : null,
     new Date(windowEnd)
   );
-  const effective = steps - modifiers.frozenSteps + modifiers.buffedSteps -
+  const effective = exactSteps - modifiers.frozenSteps + modifiers.buffedSteps -
     2 * modifiers.reversedSteps + (modifiers.globalBoostedSteps || 0);
-  return Math.floor(effective * hitchhikeCopyRatio(effect));
+  const exactCopiedSteps = Math.floor(effective * hitchhikeCopyRatio(effect));
+  if (scoringVersion !== 3 ||
+      typeof attributionCaptureModel?.replaceV3 !== "function") {
+    return exactCopiedSteps;
+  }
+
+  const scoringInput =
+    typeof attributionCaptureModel.readScoringInput === "function"
+      ? await attributionCaptureModel.readScoringInput(effect.targetUserId)
+      : { generation: 0n, fingerprint: null };
+  const frozenAt = rawEnd <= nowMs ? new Date(rawEnd) : null;
+  const castDailySteps = existingCapture
+    ? Math.max(0, Number(existingCapture.castDailySteps) || 0)
+    : Math.max(0, Number(currentDailySteps) || 0);
+
+  // Establish the immutable cast checkpoint before reserving any coarse
+  // source. A v3 row first encountered after cast cannot distinguish pre-cast
+  // walking, so that first observation is a baseline only.
+  const checkpointCapture = await attributionCaptureModel.replaceV3({
+    effect,
+    raceTimezone: raceTimezone || "UTC",
+    castDayStart: localDayStart(new Date(windowStart), raceTimezone || "UTC"),
+    scoringInputGeneration: scoringInput.generation,
+    scoringInputFingerprint: scoringInput.fingerprint,
+    castDailySteps,
+    rawSourceKind: "EXACT_SAMPLES",
+    rawSourceHighWater: Math.max(0, Math.floor(exactSteps)),
+    effectiveContribution: exactCopiedSteps,
+    captureThrough: new Date(windowEnd),
+    frozenAt,
+  });
+
+  let coarseRaw = Math.max(
+    0,
+    Number(checkpointCapture?.coarseRawAttributed ??
+      existingCapture?.coarseRawAttributed) || 0,
+  );
+  let coarseEffective = Number(
+    checkpointCapture?.coarseEffectiveContribution ??
+      existingCapture?.coarseEffectiveContribution,
+  ) || 0;
+  const canAdvanceCoarse = existingCapture && rawEnd > nowMs &&
+    currentDailySteps != null &&
+    typeof attributionCaptureModel.claimAndCreditCoarseDelta === "function";
+  if (canAdvanceCoarse) {
+    const claim = await attributionCaptureModel.claimAndCreditCoarseDelta({
+      effect,
+      currentDailySteps,
+      copyRatio: hitchhikeCopyRatio(effect),
+      captureThrough: new Date(windowEnd),
+      effectiveContributionAtRaw: (rawTotal) =>
+        computeSnapshotEffectiveTotal(targetEffects, rawTotal),
+    });
+    const claimedRaw = Math.max(0, Number(claim?.claimedRaw) || 0);
+    if (claimedRaw > 0) {
+      coarseRaw = Math.max(0, Number(claim.row?.coarseRawAttributed) || 0);
+      coarseEffective = Number(claim.row?.coarseEffectiveContribution) || 0;
+    } else if (claim?.row) {
+      coarseRaw = Math.max(0, Number(claim.row.coarseRawAttributed) || 0);
+      coarseEffective = Number(claim.row.coarseEffectiveContribution) || 0;
+    }
+  }
+
+  const useCoarse = coarseRaw > exactSteps;
+  const selectedRaw = useCoarse ? coarseRaw : exactSteps;
+  const selectedEffective = useCoarse ? coarseEffective : exactCopiedSteps;
+  const capture = await attributionCaptureModel.replaceV3({
+    effect,
+    raceTimezone: raceTimezone || "UTC",
+    castDayStart: localDayStart(new Date(windowStart), raceTimezone || "UTC"),
+    scoringInputGeneration: scoringInput.generation,
+    scoringInputFingerprint: scoringInput.fingerprint,
+    castDailySteps,
+    rawSourceKind: useCoarse ? "COARSE_DAILY_DELTA" : "EXACT_SAMPLES",
+    rawSourceHighWater: Math.max(0, Math.floor(selectedRaw)),
+    effectiveContribution: selectedEffective,
+    captureThrough: new Date(windowEnd),
+    frozenAt,
+  });
+  return Number(capture?.effectiveContribution ?? selectedEffective) || 0;
 }
 
 // Instrumented form used by active-boundary attribution. It reads the target's
@@ -145,13 +298,14 @@ async function createIncrementalHitchhikeCopyCapture({
 }) {
   const nowMs = (now instanceof Date ? now : new Date(now)).getTime();
   const currentHourStart = Math.floor(nowMs / HOUR_MS) * HOUR_MS;
+  const scoringVersion = Number(effect?.metadata?.scoringVersion) || 1;
   const windowStart = toMsOrNull(effect?.startsAt);
   const ends = [
     toMsOrNull(effect?.expiresAt) ?? nowMs,
     toMsOrNull(raceEndsAt),
     toMsOrNull(targetFinishedAt),
     toMsOrNull(targetForfeitedAt),
-    currentHourStart,
+    scoringVersion >= 3 ? nowMs : currentHourStart,
   ].filter((ms) => ms != null);
   const windowEnd = ends.length ? Math.min(...ends) : currentHourStart;
   if (!effect?.targetUserId || !effect?.sourceUserId || windowStart == null ||
@@ -168,7 +322,6 @@ async function createIncrementalHitchhikeCopyCapture({
     return { applyEffect() {}, getCopiedSteps() { return 0; } };
   }
   const ratio = hitchhikeCopyRatio(effect);
-  const scoringVersion = Number(effect.metadata?.scoringVersion) || 1;
   if (scoringVersion < 2 || !targetParticipantId || !raceId) {
     const copiedSteps = Math.floor(steps * ratio);
     return { applyEffect() {}, getCopiedSteps() { return copiedSteps; } };
@@ -234,6 +387,8 @@ async function collectRaceHitchhikeCopies({
   now,
   globalEvents = [],
   eventsByUserId = null,
+  raceTimezone = "UTC",
+  attributionCaptureModel = HitchhikeAttributionCapture,
 }) {
   if (
     !raceActiveEffectModel ||
@@ -273,6 +428,8 @@ async function collectRaceHitchhikeCopies({
         raceId,
         raceActiveEffectModel,
         globalEvents,
+        raceTimezone,
+        attributionCaptureModel,
         ...(eventsByUserId
           ? { globalEvents: eventsForUser(eventsByUserId, effect.targetUserId) }
           : {}),

@@ -35,6 +35,7 @@ const {
   newTournamentPrizeStamp,
   reserveFundedExposure,
   lockFundedExposureUsers,
+  reserveActiveCompetitionMembership,
 } = require("../../races/services/fundedExposure");
 
 function normalizeTimeZone(value) {
@@ -175,16 +176,20 @@ function buildCreateTournament(dependencies = {}) {
 
     if (usesDefaultPersistence) {
       await lockFundedExposureUsers(db, [userId, ...uniqueInvitees]);
+      await reserveActiveCompetitionMembership({
+        tx: db,
+        userId,
+        appSettings: settings,
+      });
     }
     if (fundedPrizePools === true && usesDefaultPersistence) {
       await reserveFundedExposure({
         tx: db,
         userId,
         stamp: fundedExposureStamp,
-        // User-created funded tournaments use the permanent membership count
-        // cap, while seeded callers retain their own economic admission policy.
+        // Historical stamps remain; the universal active-membership guard
+        // above owns the product admission ceiling.
         enforceLimits: false,
-        enforceMembershipLimit: true,
       });
     }
 

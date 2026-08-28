@@ -112,6 +112,7 @@ const RaceParticipant = {
     buyInAmount = 0,
     buyInStatus = "NONE",
     team = null,
+    nextBoxAtSteps = 0,
     fundedExposureMillicoins = null,
     fundedExposureRateMillicoinsPerDay = null,
   }) {
@@ -123,6 +124,7 @@ const RaceParticipant = {
         buyInAmount,
         buyInStatus,
         team,
+        nextBoxAtSteps,
         fundedExposureMillicoins,
         fundedExposureRateMillicoinsPerDay,
       },

@@ -566,7 +566,7 @@ const MAX_CLOSURE_VALIDITY_MS = 10 * 60 * 1000;
 // hitchhikeCopies.js: `Number(effect.metadata?.scoringVersion) || 1`. Version 1
 // is the legacy top-of-hour copy; version 2 runs the shared scorer clipped to
 // the window. Anything else is an unknown scoring rule -> FULL (spec rule 6).
-const SUPPORTED_HITCHHIKE_SCORING_VERSIONS = Object.freeze(new Set([1, 2]));
+const SUPPORTED_HITCHHIKE_SCORING_VERSIONS = Object.freeze(new Set([1, 2, 3]));
 const LEGACY_HITCHHIKE_SCORING_VERSION = 1;
 
 // Types whose DUE expiry consumes a closure-computed value for its target

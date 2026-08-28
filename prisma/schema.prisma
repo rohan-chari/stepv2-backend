@@ -2256,9 +2256,10 @@ model RaceActiveEffect {
   createdAt           DateTime           @default(now()) @map("created_at")
   updatedAt           DateTime           @updatedAt @map("updated_at")
 
-  race              Race            @relation(fields: [raceId], references: [id], onDelete: Cascade)
-  targetParticipant RaceParticipant @relation(fields: [targetParticipantId], references: [id], onDelete: Cascade)
-  powerup           RacePowerup     @relation(fields: [powerupId], references: [id], onDelete: Cascade)
+  race                        Race                         @relation(fields: [raceId], references: [id], onDelete: Cascade)
+  targetParticipant           RaceParticipant              @relation(fields: [targetParticipantId], references: [id], onDelete: Cascade)
+  powerup                     RacePowerup                  @relation(fields: [powerupId], references: [id], onDelete: Cascade)
+  hitchhikeAttributionCapture HitchhikeAttributionCapture?
 
   // One effect per (powerup, victim). AoE powerups (Rainstorm) fan one powerup
   // out to N victims, so powerupId alone can't be unique — but the same storm
@@ -2267,6 +2268,40 @@ model RaceActiveEffect {
   @@index([targetParticipantId, status])
   @@index([raceId, status])
   @@map("race_active_effects")
+}
+
+// Immutable-id capture used only by Hitchhike scoringVersion 3. Release A
+// reads and maintains this additive artifact but continues stamping v1/v2
+// effect metadata; a later separately authorized release may stamp v3.
+model HitchhikeAttributionCapture {
+  effectId                String    @id @map("effect_id")
+  raceId                  String    @map("race_id")
+  sourceUserId            String    @map("source_user_id")
+  targetUserId            String    @map("target_user_id")
+  scoringVersion          Int       @map("scoring_version")
+  raceTimezone            String    @map("race_timezone")
+  castDayStart            DateTime  @map("cast_day_start")
+  castDailySteps          Int       @default(0) @map("cast_daily_steps")
+  castSampleBoundaryAt    DateTime  @map("cast_sample_boundary_at")
+  scoringInputGeneration  BigInt    @default(0) @map("scoring_input_generation")
+  scoringInputFingerprint String?   @map("scoring_input_fingerprint") @db.Char(64)
+  rawSourceKind           String    @map("raw_source_kind") @db.VarChar(32)
+  rawSourceHighWater      Int       @default(0) @map("raw_source_high_water")
+  coarseSourceFrom        Int?      @map("coarse_source_from")
+  coarseSourceThrough     Int?      @map("coarse_source_through")
+  coarseRawAttributed     Int       @default(0) @map("coarse_raw_attributed")
+  coarseEffectiveContribution Int   @default(0) @map("coarse_effective_contribution")
+  effectiveContribution   Int       @default(0) @map("effective_contribution")
+  captureThrough          DateTime  @map("capture_through")
+  frozenAt                DateTime? @map("frozen_at")
+  createdAt               DateTime  @default(now()) @map("created_at")
+  updatedAt               DateTime  @updatedAt @map("updated_at")
+
+  effect RaceActiveEffect @relation(fields: [effectId], references: [id], onDelete: Cascade)
+
+  @@index([raceId])
+  @@index([targetUserId, castSampleBoundaryAt, captureThrough])
+  @@map("hitchhike_attribution_captures")
 }
 
 model RacePowerupEvent {

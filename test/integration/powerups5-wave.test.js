@@ -2,6 +2,9 @@ const assert = require("node:assert/strict");
 const { describe, it, before, beforeEach } = require("node:test");
 const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
 const { resolveExpiredRaces } = require("../../src/modules/races/jobs/raceExpiry");
+const {
+  buildRaceResolutionWorkerV2,
+} = require("../../src/modules/races/jobs/raceResolutionQueueV2");
 const { appSettings } = require("../../src/shared/config/appSettings");
 
 let server;
@@ -123,6 +126,13 @@ async function usePU(token, raceId, powerupId, body = {}, headers = P5) {
 async function getProgress(token, raceId, headers = P5) {
   const res = await request(server.baseUrl, "GET", `/races/${raceId}/progress`, { token, headers });
   return (await res.json()).progress;
+}
+async function drainRaceResolutionJobs(maxJobs = 20) {
+  const worker = buildRaceResolutionWorkerV2({ bootAt: 0 });
+  for (let index = 0; index < maxJobs; index += 1) {
+    if (!(await worker.processOne())) return;
+  }
+  assert.fail(`race resolution queue did not drain within ${maxJobs} jobs`);
 }
 async function purchase(token, body, key, headers = P5) {
   return request(server.baseUrl, "POST", "/shop/powerups/purchase", { body, token, headers: { "Idempotency-Key": key, ...headers } });
@@ -497,6 +507,7 @@ describe("powerups5 wave — integration", () => {
       });
       // Lazy expiry via progress.
       await getProgress(a.token, raceId);
+      await drainRaceResolutionJobs();
       const bP = await participant(raceId, b.userId);
       assert.equal(bP.bonusSteps, -1500, "penalty applied at expiry");
       const feed = (await (await request(server.baseUrl, "GET", `/races/${raceId}/feed`, { token: a.token })).json()).events;

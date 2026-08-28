@@ -1,6 +1,10 @@
 const { ConflictError } = require("../../../shared/errors/AppError");
 const { durationPoints } = require("../../../shared/economy/prizePool");
 const { lockCompetitionRows } = require("./raceWriteFence");
+const {
+  appSettings: defaultAppSettings,
+  ACTIVE_COMPETITION_LIMIT_DEFAULT,
+} = require("../../../shared/config/appSettings");
 
 // Keep the abuse guard, but allow twice the previously approved concurrent
 // funded-race exposure. These values are stamped into conflict metadata only;
@@ -167,6 +171,14 @@ function fundedMembershipConflict() {
   );
 }
 
+function activeCompetitionLimitConflict({ limit, current }) {
+  return new ConflictError(
+    `You can have up to ${limit} active competitions at a time.`,
+    "ACTIVE_COMPETITION_LIMIT",
+    { limit, current },
+  );
+}
+
 async function loadUserCreatedFundedMembershipCounts(tx, userIds) {
   const ordered = [...new Set((userIds || []).filter(Boolean))].sort();
   const counts = new Map(ordered.map((userId) => [userId, 0]));
@@ -212,6 +224,111 @@ async function loadUserCreatedFundedMembershipCounts(tx, userIds) {
     counts.set(userId, (counts.get(userId) || 0) + 1);
   }
   return counts;
+}
+
+async function loadUserCreatedActiveMembershipCounts(tx, userIds) {
+  const ordered = [...new Set((userIds || []).filter(Boolean))].sort();
+  const counts = new Map(ordered.map((userId) => [userId, 0]));
+  if (ordered.length === 0) return counts;
+  const [raceRows, tournamentRows] = await Promise.all([
+    tx.raceParticipant.findMany({
+      where: {
+        userId: { in: ordered },
+        status: "ACCEPTED",
+        finishedAt: null,
+        forfeitedAt: null,
+        race: {
+          creatorId: { not: null },
+          seedId: null,
+          tournamentId: null,
+          status: { in: ["PENDING", "ACTIVE"] },
+        },
+      },
+      select: { userId: true, raceId: true },
+    }),
+    tx.tournamentParticipant.findMany({
+      where: {
+        userId: { in: ordered },
+        status: "ACCEPTED",
+        eliminatedInRound: null,
+        tournament: {
+          creatorId: { not: null },
+          seedId: null,
+          status: { in: ["PENDING", "ACTIVE"] },
+        },
+      },
+      select: { userId: true, tournamentId: true },
+    }),
+  ]);
+  const keys = new Set([
+    ...raceRows.map((row) => `${row.userId}\u0000race\u0000${row.raceId}`),
+    ...tournamentRows.map(
+      (row) => `${row.userId}\u0000tournament\u0000${row.tournamentId}`,
+    ),
+  ]);
+  for (const key of keys) {
+    const userId = key.split("\u0000", 1)[0];
+    counts.set(userId, (counts.get(userId) || 0) + 1);
+  }
+  return counts;
+}
+
+async function reserveActiveCompetitionMemberships({
+  tx,
+  reservations,
+  limit = null,
+  appSettings = defaultAppSettings,
+}) {
+  if (!tx || !Array.isArray(reservations)) {
+    throw new TypeError("tx and reservations are required");
+  }
+  const requestedByUser = new Map();
+  for (const entry of reservations) {
+    if (!entry?.userId) continue;
+    const requested = Number.isInteger(entry.count) && entry.count > 0
+      ? entry.count
+      : 1;
+    requestedByUser.set(
+      entry.userId,
+      (requestedByUser.get(entry.userId) || 0) + requested,
+    );
+  }
+  const userIds = [...requestedByUser.keys()].sort();
+  if (userIds.length === 0) return;
+  await lockFundedExposureUsers(tx, userIds);
+  const configured = limit ?? await appSettings.getActiveCompetitionLimit();
+  const resolvedLimit = Number.isInteger(configured) && configured > 0
+    ? configured
+    : ACTIVE_COMPETITION_LIMIT_DEFAULT;
+  const currentByUser = await loadUserCreatedActiveMembershipCounts(tx, userIds);
+  for (const userId of userIds) {
+    const current = currentByUser.get(userId) || 0;
+    if (current + requestedByUser.get(userId) > resolvedLimit) {
+      console.warn(JSON.stringify({
+        event: "active_competition_limit_v1",
+        userId,
+        current,
+        requested: requestedByUser.get(userId),
+        limit: resolvedLimit,
+      }));
+      throw activeCompetitionLimitConflict({ limit: resolvedLimit, current });
+    }
+  }
+}
+
+async function reserveActiveCompetitionMembership({
+  tx,
+  userId,
+  count = 1,
+  limit = null,
+  appSettings = defaultAppSettings,
+}) {
+  return reserveActiveCompetitionMemberships({
+    tx,
+    reservations: [{ userId, count }],
+    limit,
+    appSettings,
+  });
 }
 
 async function lockUserGuard(tx, userId) {
@@ -1025,11 +1142,13 @@ module.exports = {
   RACE_POOL_MAX_V2,
   TOURNAMENT_CHAMPION_MAX_V2,
   auditLiveFundedExposure,
+  activeCompetitionLimitConflict,
   backfillLiveFundedExposure,
   computeRaceExposureStamp,
   computeTournamentExposureStamp,
   fundedExposureConflict,
   fundedMembershipConflict,
+  loadUserCreatedActiveMembershipCounts,
   loadUserCreatedFundedMembershipCounts,
   resolveRacePrizeStamp,
   resolveTournamentPrizeStamp,
@@ -1040,6 +1159,8 @@ module.exports = {
   newTournamentPrizeStamp,
   reserveFundedExposure,
   reserveFundedExposures,
+  reserveActiveCompetitionMembership,
+  reserveActiveCompetitionMemberships,
   resolveRacePrizeStamp,
   resolveTournamentPrizeStamp,
 };

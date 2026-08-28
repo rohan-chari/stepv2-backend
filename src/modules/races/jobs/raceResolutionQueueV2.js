@@ -1322,10 +1322,24 @@ function buildRaceResolutionWorkerV2(dependencies = {}) {
         const candidateParticipantWrites = capture.writes.filter(
           (write) => write.kind === "participantTotal" || write.kind === "participantBonus"
         );
+        const participantsWithBonusWrites = new Set(
+          candidateParticipantWrites
+            .filter((write) => write.kind === "participantBonus")
+            .map((write) => write.participantId),
+        );
+        // A penalty capture may first restore a sample-less legacy snapshot.
+        // Retain every total for that participant so normalization's last-total
+        // rule supplies the penalty's intended base instead of an earlier zero.
         participantWrites = retainTeamAsOfHeartbeat(
           candidateParticipantWrites,
           candidateParticipantWrites.filter((write) =>
-            participantTotalWriteChangesRow(write, participantById.get(write.participantId))
+            participantTotalWriteChangesRow(
+              write,
+              participantById.get(write.participantId),
+            ) || (
+              write.kind === "participantTotal" &&
+              participantsWithBonusWrites.has(write.participantId)
+            )
           ),
           result?.race?.isTeamRace === true
         ).sort((left, right) => sortKey(left).localeCompare(sortKey(right)));

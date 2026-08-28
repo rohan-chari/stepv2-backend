@@ -145,6 +145,7 @@ function buildReconcileUploaderRaces(dependencies = {}) {
             raceActiveEffectModel,
             stepSampleModel,
             now: currentTime,
+            raceTimezone: race.timezone || "UTC",
             globalEvents,
           })
         )

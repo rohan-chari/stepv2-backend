@@ -331,8 +331,8 @@ describe("Decoy redirection and concurrency — integration", () => {
     const bobDecoy = await giveHeldPowerup(raceId, bob.userId, "DECOY", 1000);
     const carolDecoy = await giveHeldPowerup(raceId, carol.userId, "DECOY", 2000);
     const teammateDecoy = await giveHeldPowerup(raceId, erin.userId, "DECOY", 2500);
-    await giveActiveEffect(raceId, bob.userId, "DECOY", bobDecoy.id, new Date(Date.now() + 86400000));
-    await giveActiveEffect(raceId, carol.userId, "DECOY", carolDecoy.id, new Date(Date.now() + 86400000));
+    const bobDecoyEffect = await giveActiveEffect(raceId, bob.userId, "DECOY", bobDecoy.id, new Date(Date.now() + 86400000));
+    const carolDecoyEffect = await giveActiveEffect(raceId, carol.userId, "DECOY", carolDecoy.id, new Date(Date.now() + 86400000));
     const teammateDecoyEffect = await giveActiveEffect(
       raceId,
       erin.userId,
@@ -368,6 +368,22 @@ describe("Decoy redirection and concurrency — integration", () => {
     assert.equal(
       (await prisma.raceActiveEffect.findUnique({ where: { id: teammateDecoyEffect.id } })).status,
       "ACTIVE",
+    );
+    const stormConsumptionEvents = await prisma.domainEventOutbox.findMany({
+      where: {
+        eventKey: {
+          in: [
+            `DECOY_CONSUMED_V1:${bobDecoyEffect.id}`,
+            `DECOY_CONSUMED_V1:${carolDecoyEffect.id}`,
+          ],
+        },
+      },
+      orderBy: { eventKey: "asc" },
+    });
+    assert.equal(stormConsumptionEvents.length, 2);
+    assert.deepEqual(
+      stormConsumptionEvents.map((event) => event.payload.attackPowerupType),
+      ["RAINSTORM", "RAINSTORM"],
     );
 
     const bobOutageDecoy = await giveHeldPowerup(raceId, bob.userId, "DECOY", 4000);

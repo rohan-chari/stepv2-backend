@@ -147,6 +147,7 @@ async function scoreWholeRaceArtifact(payload, includeEvent) {
     raceId: payload.race.id,
     racePowerupsEnabled: payload.race.powerupsEnabled,
     raceEndsAt: new Date(payload.event.endsAt),
+    raceTimezone: payload.race.timezone || "UTC",
     participants: payload.participants || [],
     entries,
     raceActiveEffectModel: effectModel,

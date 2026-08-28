@@ -26,7 +26,7 @@ const INBOX_VISIBLE_TYPES = new Set([
   "TEAM_RACE_SCHEDULED_UNEVEN", "RACE_STARTED", "RACE_ENDING_SOON",
   "STEP_MILESTONE_REMINDER", "RACE_COMPLETED", "TEAM_LEAD_CHANGE",
   "TEAM_FINAL_STRETCH", "TEAM_SLACKER_NUDGE", "REFERRAL_REWARDED",
-  "RACE_CANCELLED", "GLOBAL_EVENT_STARTED", "POWERUP_USED", "race_message",
+  "RACE_CANCELLED", "GLOBAL_EVENT_STARTED", "POWERUP_USED", "DECOY_CONSUMED", "race_message",
   "PLACEMENT_CHANGED", "HIGH_MULTIPLIER_ALERT", "DAILY_MOVER",
   "TOURNAMENT_INVITE_SENT", "TOURNAMENT_STARTED", "TOURNAMENT_ROUND_STARTED",
   "TOURNAMENT_MATCHUP_WON", "TOURNAMENT_ELIMINATED", "TOURNAMENT_CHAMPION",
@@ -1075,6 +1075,37 @@ function registerNotificationHandlers(dependencies = {}) {
       });
     } catch (error) {
       logger.error("POWERUP_USED handler failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // Compatibility handler name for DECOY_CONSUMED_V1. The durable typed
+  // projector owns current delivery; retaining a distinct event-bus name keeps
+  // the one-handler-per-domain-event registry exact without changing the
+  // frozen client's public POWERUP_USED notification type.
+  events.on("DECOY_CONSUMED", async (data) => {
+    try {
+      const { raceId, targetUserId, notificationIntentId } = data;
+      await sendNotificationToUser({
+        eventName: "DECOY_CONSUMED",
+        recipientUserId: targetUserId,
+        actorUserId: null,
+        title: "Your Decoy was triggered!",
+        buildBody: () => data.raceName
+          ? `Your Decoy protected you in ${String(data.raceName).trim().slice(0, 60)}. Tap to view the race.`
+          : "Your Decoy protected you in your race. Tap to view the race.",
+        payload: {
+          type: "POWERUP_USED",
+          subtype: "DECOY_CONSUMED",
+          route: "race_detail",
+          params: { raceId },
+        },
+        logContext: { raceId, targetUserId },
+        sourceId: notificationIntentId,
+      });
+    } catch (error) {
+      logger.error("DECOY_CONSUMED handler failed", {
         error: error instanceof Error ? error.message : String(error),
       });
     }

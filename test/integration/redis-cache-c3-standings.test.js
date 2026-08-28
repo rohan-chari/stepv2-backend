@@ -1363,18 +1363,23 @@ describe("C3 standings — flag off keeps every legacy behaviour", () => {
 /**
  * Make the WORKER mint exactly one mystery box for `user` in `raceId`.
  *
- * FINDING that shapes this helper: the legacy `/steps` + `/steps/samples`
- * commands still call `syncRacePowerupState` INLINE (C0 removed their
- * `resolveRaceState` call, not their box sync), so posting samples already
- * mints the 2,000-step box and ratchets `nextBoxAtSteps` to 4,000. Those mints
- * were never toasted by `/progress` before C3 either, so they are correctly out
- * of scope here. Parking the gate at 2,500 — a threshold no box row exists for,
- * and below the user's raw total — makes the next resolution the provable
- * minter, which is exactly the case the recent-mints key exists to cover.
+ * Step intake is C0-owned. The initial worker mints the aligned 2,000-step box
+ * and ratchets the gate to 4,000. Add one distinct source sample, then park the
+ * gate at that valid 4,000-step boundary so the next worker resolution is the
+ * provable minter. Misaligned thresholds are repair inputs, not award gates.
  */
-async function armBoxAndMint(user, raceId, threshold = 2500) {
+async function armBoxAndMint(user, raceId, threshold = 4000) {
   const before = await prisma.racePowerup.count({
     where: { raceId, userId: user.userId },
+  });
+  const added = sampleAt(5, 2000);
+  await prisma.stepSample.create({
+    data: {
+      userId: user.userId,
+      periodStart: new Date(added.periodStart),
+      periodEnd: new Date(added.periodEnd),
+      steps: added.steps,
+    },
   });
   await prisma.raceParticipant.updateMany({
     where: { raceId, userId: user.userId },
@@ -1402,10 +1407,12 @@ describe("C3 standings — box-mint toast (spec v9 item 2)", () => {
     await postSamples(bob, [sampleAt(6, 900)]);
     await drain();
 
-    // Baseline poll: nothing pending.
+    // The initial step-input worker mint is itself durable toast work now.
     const before = await progress(alice, raceId);
-    assert.deepEqual(before.powerupData.newMysteryBoxes, []);
+    assert.equal(before.powerupData.newMysteryBoxes.length, 1);
     assert.equal(before.powerupData.newQueuedBoxes, 0);
+    const baselineConsumed = await progress(alice, raceId);
+    assert.deepEqual(baselineConsumed.powerupData.newMysteryBoxes, []);
 
     await armBoxAndMint(alice, raceId);
 
@@ -1470,6 +1477,11 @@ describe("C3 standings — box-mint toast (spec v9 item 2)", () => {
     await drain();
     await progress(alice, raceA);
     await progress(alice, raceB);
+    // Those reads enqueue their own C0 generations. Settle them before adding
+    // the next source sample, otherwise race B legitimately observes that
+    // later sample too and mints its own (second) toast during armBoxAndMint's
+    // broad queue drain.
+    await drain();
 
     // Mint in A only.
     await armBoxAndMint(alice, raceA);
@@ -1515,7 +1527,7 @@ describe("C3 standings — box-mint toast (spec v9 item 2)", () => {
     await enableRedis();
   });
 
-  it("(e) flag OFF still reports the mint inline and writes no recent-mints key", async (t) => {
+  it("(e) flag OFF repairs a malformed gate through C0 without a hot-read mint", async (t) => {
     if (skipReason) return t.skip(skipReason);
 
     await enableRedis(); // Redis available; only the flag is off.
@@ -1525,26 +1537,47 @@ describe("C3 standings — box-mint toast (spec v9 item 2)", () => {
     const bob = await createUser("MintOffBob");
     const raceId = await createActiveRace(alice, [bob], "MintFlagOff");
     await postSamples(alice, [sampleAt(6, 2600)]);
-    // Park the gate below the raw total at a threshold with no box row (see
-    // armBoxAndMint) so the POLL itself is what mints — the legacy behaviour.
+    // Park the gate at a malformed boundary below the raw total. The progress
+    // overlay derives the next valid boundary but must not write or mint.
     await prisma.raceParticipant.updateMany({
       where: { raceId, userId: alice.userId },
       data: { nextBoxAtSteps: 2500 },
     });
     await probe.flushdb();
 
-    // The legacy path mints DURING the poll and reports it in the same response.
+    const beforeCount = await prisma.racePowerup.count({
+      where: { raceId, userId: alice.userId },
+    });
     const p = await progress(alice, raceId);
-    assert.equal(p.powerupData.newMysteryBoxes.length, 1);
-    // …and nothing was recorded for later consumption.
+    assert.deepEqual(p.powerupData.newMysteryBoxes, []);
+    assert.equal(p.powerupData.stepsUntilNextPowerup, 1400);
+    assert.equal(
+      (await prisma.raceParticipant.findFirst({
+        where: { raceId, userId: alice.userId },
+      })).nextBoxAtSteps,
+      2500,
+      "the hot read must not repair race_participants inline",
+    );
     assert.deepEqual(await recentBoxMints.peek(alice.userId), []);
     assert.equal(
       (await probe.keys(`${ENV_PREFIX}v1:user:recentmints:*`)).length,
       0
     );
 
-    // Second poll: the delta is empty because the box already exists — the
-    // pre-C3 behaviour, unchanged.
+    await drain();
+    assert.equal(
+      (await prisma.raceParticipant.findFirst({
+        where: { raceId, userId: alice.userId },
+      })).nextBoxAtSteps,
+      4000,
+    );
+    assert.equal(
+      await prisma.racePowerup.count({ where: { raceId, userId: alice.userId } }),
+      beforeCount,
+      "repairing a malformed gate is non-minting",
+    );
+
+    // Second poll remains an empty delta because repair did not award a box.
     const p2 = await progress(alice, raceId);
     assert.deepEqual(p2.powerupData.newMysteryBoxes, []);
   });

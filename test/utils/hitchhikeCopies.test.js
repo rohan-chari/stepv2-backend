@@ -136,6 +136,119 @@ test("missing sample evidence contributes zero (never estimated from a daily tot
   assert.equal(await computeHitchhikeCopiedSteps(hitch(), empty, NOW), 0);
 });
 
+test("v3 includes an exact sparse current-hour sample and CAS-persists its signed capture", async () => {
+  const now = new Date("2026-07-20T12:56:00Z");
+  const effect = hitch({
+    raceId: "race-1",
+    metadata: { copyRatio: 1, scoringVersion: 3 },
+  });
+  let persisted;
+  const copied = await computeHitchhikeCopiedSteps(
+    effect,
+    { async sumStepsInWindow(_userId, start, end) {
+      assert.equal(new Date(start).getTime(), T0.getTime());
+      assert.equal(new Date(end).getTime(), now.getTime());
+      return 4_129;
+    } },
+    now,
+    {
+      raceId: "race-1",
+      targetParticipantId: "rp-target",
+      raceActiveEffectModel: {
+        async findEffectsForRaceByTypes() { return {}; },
+      },
+      attributionCaptureModel: {
+        async findFrozen() { return null; },
+        async findByEffect() { return null; },
+        async readDailySteps() { return 9_000; },
+        async readScoringInput() {
+          return { generation: 7n, fingerprint: "a".repeat(64) };
+        },
+        async replaceV3(input) {
+          persisted = input;
+          return { effectiveContribution: input.effectiveContribution };
+        },
+      },
+    },
+  );
+  assert.equal(copied, 4_129);
+  assert.equal(persisted.rawSourceKind, "EXACT_SAMPLES");
+  assert.equal(persisted.rawSourceHighWater, 4_129);
+  assert.equal(persisted.effectiveContribution, 4_129);
+  assert.equal(persisted.scoringInputGeneration, 7n);
+  assert.equal(persisted.captureThrough.getTime(), now.getTime());
+  assert.equal(persisted.frozenAt, null);
+});
+
+test("v3 uses one checkpointed coarse daily delta as an alternative to absent samples", async () => {
+  const now = new Date("2026-07-20T12:56:00Z");
+  let persisted;
+  const copied = await computeHitchhikeCopiedSteps(
+    hitch({
+      raceId: "race-1",
+      metadata: { copyRatio: 1, scoringVersion: 3 },
+    }),
+    { async sumStepsInWindow() { return 0; } },
+    now,
+    {
+      raceId: "race-1",
+      targetParticipantId: "rp-target",
+      raceActiveEffectModel: {
+        async findEffectsForRaceByTypes() { return {}; },
+      },
+      attributionCaptureModel: {
+        async findFrozen() { return null; },
+        async findByEffect() {
+          return {
+            castDailySteps: 1_000,
+            coarseRawAttributed: 0,
+            coarseEffectiveContribution: 0,
+          };
+        },
+        async readDailySteps() { return 5_129; },
+        async readScoringInput() { return { generation: 8n, fingerprint: null }; },
+        async claimAndCreditCoarseDelta({ effectiveContributionAtRaw }) {
+          return {
+            claimedRaw: 4_129,
+            row: {
+              coarseRawAttributed: 4_129,
+              coarseEffectiveContribution:
+                effectiveContributionAtRaw(5_129) -
+                effectiveContributionAtRaw(1_000),
+            },
+          };
+        },
+        async replaceV3(input) {
+          persisted = input;
+          return { effectiveContribution: input.effectiveContribution };
+        },
+      },
+    },
+  );
+  assert.equal(copied, 4_129);
+  assert.equal(persisted.rawSourceKind, "COARSE_DAILY_DELTA");
+  assert.equal(persisted.rawSourceHighWater, 4_129);
+  assert.equal(persisted.castDailySteps, 1_000);
+});
+
+test("v3 settlement reads a frozen signed capture without reopening source data", async () => {
+  let sampleReads = 0;
+  const copied = await computeHitchhikeCopiedSteps(
+    hitch({ metadata: { copyRatio: 1, scoringVersion: 3 } }),
+    { async sumStepsInWindow() { sampleReads += 1; return 99_999; } },
+    NOW,
+    {
+      attributionCaptureModel: {
+        async findFrozen() {
+          return { effectiveContribution: -750, frozenAt: T1 };
+        },
+      },
+    },
+  );
+  assert.equal(copied, -750);
+  assert.equal(sampleReads, 0);
+});
+
 test("collectRaceHitchhikeCopies bulk-reads the race's links and clamps per target", async () => {
   const effects = [
     hitch({ id: "hh-a", sourceUserId: "c1", targetUserId: "t1", targetParticipantId: "rp-1" }),

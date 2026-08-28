@@ -28,6 +28,7 @@ function chronologicalAttributionRows(rows = []) {
 async function scoreWholeRaceTotals({
   raceId,
   raceEndsAt,
+  raceTimezone = "UTC",
   racePowerupsEnabled,
   participants = [],
   entries = [],
@@ -73,6 +74,7 @@ async function scoreWholeRaceTotals({
         raceActiveEffectModel,
         stepSampleModel,
         now,
+        raceTimezone,
         globalEvents,
         eventsByUserId,
       })

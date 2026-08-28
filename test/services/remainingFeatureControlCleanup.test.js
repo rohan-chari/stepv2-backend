@@ -75,6 +75,7 @@ const NEW_PERMANENT_VALUES = Object.freeze({
 });
 
 const RETAINED_MUTABLE_VALUES = Object.freeze({
+  activeCompetitionLimit: 20,
   capacityPhaseMetricsV1Enabled: false,
   racePreviewEnabled: false,
   raceQueueV2ClaimingDisabled: false,

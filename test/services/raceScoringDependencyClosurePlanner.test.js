@@ -509,7 +509,7 @@ test("a due snapshot-at-expiry effect OUTSIDE the closure forces FULL, inside do
 test("an unknown stored Hitchhike scoring version forces FULL", async () => {
   await assertFullBecause(CLOSURE_FALLBACK_REASONS.UNSUPPORTED_HITCHHIKE_VERSION, {
     participants: [participant("p1"), participant("p2")],
-    effects: [hitchhike("h1", "p1", "u-p2", 3)],
+    effects: [hitchhike("h1", "p1", "u-p2", 4)],
   });
   await assertFullBecause(CLOSURE_FALLBACK_REASONS.UNSUPPORTED_HITCHHIKE_VERSION, {
     participants: [participant("p1"), participant("p2")],

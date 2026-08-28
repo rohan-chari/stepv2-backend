@@ -32,6 +32,7 @@ const {
   newRacePrizeStamp,
   reserveFundedExposure,
   lockFundedExposureUsers,
+  reserveActiveCompetitionMembership,
 } = require("../services/fundedExposure");
 const {
   prisma: defaultPrisma,
@@ -378,16 +379,20 @@ function buildCreateRace(dependencies = {}) {
     });
     if (usesDefaultPersistence) {
       await lockFundedExposureUsers(defaultPrisma, [userId]);
+      await reserveActiveCompetitionMembership({
+        tx: defaultPrisma,
+        userId,
+        appSettings: settings,
+      });
     }
     if (fundedPrizePools === true && usesDefaultPersistence) {
       await reserveFundedExposure({
         tx: defaultPrisma,
         userId,
         stamp: fundedExposureStamp,
-        // Coin/rate limits remain retired. The permanent five-membership cap
-        // is enforced independently across user-created races/tournaments.
+        // Historical exposure stamps remain populated for settlement/audit;
+        // the single active-competition guard above owns admission.
         enforceLimits: false,
-        enforceMembershipLimit: true,
       });
     }
 
@@ -461,6 +466,13 @@ function buildCreateRace(dependencies = {}) {
       status: "ACCEPTED",
       buyInAmount: buyInConfig.buyInAmount,
       buyInStatus: buyInConfig.buyInAmount > 0 ? "HELD" : "NONE",
+      // Arm the creator at the same first interval as every invited joiner.
+      // Legacy rows with a missing gate still use the non-minting C0 repair,
+      // but a brand-new race must not strand its creator at schema default 0.
+      nextBoxAtSteps:
+        powerupsEnabled && normalizedPowerupStepInterval
+          ? normalizedPowerupStepInterval
+          : 0,
       // TR-104: creator's chosen side (TEAM_A default) on team races.
       team: teamConfig ? teamConfig.creatorTeam : null,
       ...(fundedPrizePools === true

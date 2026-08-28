@@ -32,6 +32,7 @@ const ROWS = [
   ["GLOBAL_STEP_EVENT_ACTIVATED_V1", "GLOBAL_EVENT_STARTED", "steps/global-event-boundary", "GLOBAL_STEP_EVENT"],
   ["GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1", null, "steps/global-event-entitlement", "GLOBAL_STEP_EVENT_ENTITLEMENT"],
   ["POWERUP_USED_V1", "POWERUP_USED", "powerups/commands/usePowerup", "POWERUP"],
+  ["DECOY_CONSUMED_V1", "DECOY_CONSUMED", "powerups/commands/usePowerup", "POWERUP"],
   ["RACE_MESSAGE_SENT_V1", "RACE_MESSAGE_SENT", "social/commands/sendRaceMessage", "RACE_MESSAGE"],
   ["PLACEMENT_CHANGED_V1", "PLACEMENT_CHANGED", "races/jobs/racePlacementTransitionWorker", "RACE"],
   ["HIGH_MULTIPLIER_ALERT_V1", "HIGH_MULTIPLIER_ALERT", "races/services/raceResolutionDeliveryIntents", "RACE"],
@@ -95,6 +96,7 @@ function publicTypeAndSource(event, audience) {
     case "GLOBAL_STEP_EVENT_ACTIVATED_V1": return ["GLOBAL_EVENT_STARTED", p.eventId];
     case "GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1": return ["GLOBAL_EVENT_STARTED", p.eventId];
     case "POWERUP_USED_V1": return ["POWERUP_USED", p.notificationIntentId || `powerup:${p.powerupId}${p.targetUserId ? `:${p.targetUserId}` : ""}`];
+    case "DECOY_CONSUMED_V1": return ["POWERUP_USED", `decoy-consumed:${p.decoyEffectId}`];
     case "RACE_MESSAGE_SENT_V1": return ["race_message", p.messageId];
     case "PLACEMENT_CHANGED_V1": return ["PLACEMENT_CHANGED", audience.facts?.payoutDrop === true ? `payout-drop:${p.raceId}:${userId}` : p.transitionId];
     case "HIGH_MULTIPLIER_ALERT_V1": return ["HIGH_MULTIPLIER_ALERT", highMultiplierSource(p, userId)];
@@ -160,6 +162,13 @@ function legacyPayloadForRecipient(event, audience) {
     case "GLOBAL_STEP_EVENT_ACTIVATED_V1": return { ...p, participantUserIds: [recipient] };
     case "GLOBAL_STEP_EVENT_ENTITLEMENT_SCHEDULED_V1": return { ...p, participantUserIds: [recipient] };
     case "POWERUP_USED_V1": return { ...p, userId: p.actorUserId, targetUserId: recipient, notificationIntentId: publicTypeAndSource(event, audience)[1] };
+    case "DECOY_CONSUMED_V1": return {
+      ...p,
+      userId: p.attackerUserId,
+      targetUserId: recipient,
+      powerupType: p.attackPowerupType,
+      notificationIntentId: publicTypeAndSource(event, audience)[1],
+    };
     case "RACE_MESSAGE_SENT_V1": return {
       ...p,
       body: facts.body || p.body,

@@ -3,6 +3,19 @@
   "authoritativeSnapshot": "2026-08-20T04:23:00Z",
   "controls": [
     {
+      "id": "appSetting:activeCompetitionLimit",
+      "name": "activeCompetitionLimit",
+      "kind": "numeric_app_setting",
+      "evidenceTimestamp": "2026-08-20T04:23:00Z",
+      "compatibilityConsumers": [],
+      "adminExposed": false,
+      "disposition": "retained_operational",
+      "permanentValue": null,
+      "polarityDefault": 20,
+      "deployFamily": "database_controls",
+      "rollbackValue": 20
+    },
+    {
       "id": "appSetting:bannerAdsEnabled",
       "name": "bannerAdsEnabled",
       "kind": "boolean_app_setting",

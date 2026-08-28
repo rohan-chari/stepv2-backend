@@ -728,6 +728,7 @@ function createRacesRouter(dependencies = {}) {
       res.status(201).json({ race: serializeMutationRace(race) });
     } catch (error) {
       if (
+        error.code === "ACTIVE_COMPETITION_LIMIT" ||
         error.code === "FUNDED_EXPOSURE_LIMIT" ||
         error.code === "FUNDED_EXPOSURE_RETRY"
       ) {
@@ -1208,6 +1209,7 @@ function createRacesRouter(dependencies = {}) {
       res.status(201).json({ participant });
     } catch (error) {
       if (
+        error.code === "ACTIVE_COMPETITION_LIMIT" ||
         error.code === "FUNDED_EXPOSURE_LIMIT" ||
         error.code === "FUNDED_EXPOSURE_RETRY"
       ) {
@@ -1322,6 +1324,7 @@ function createRacesRouter(dependencies = {}) {
       res.status(201).json({ participant, raceId: participant.raceId });
     } catch (error) {
       if (
+        error.code === "ACTIVE_COMPETITION_LIMIT" ||
         error.code === "FUNDED_EXPOSURE_LIMIT" ||
         error.code === "FUNDED_EXPOSURE_RETRY"
       ) {
@@ -1644,6 +1647,7 @@ function createRacesRouter(dependencies = {}) {
       res.json({ participant });
     } catch (error) {
       if (
+        error.code === "ACTIVE_COMPETITION_LIMIT" ||
         error.code === "FUNDED_EXPOSURE_LIMIT" ||
         error.code === "FUNDED_EXPOSURE_RETRY"
       ) {

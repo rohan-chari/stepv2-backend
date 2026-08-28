@@ -253,7 +253,6 @@ const LEECH_MAX_PER_VICTIM = 2;
 // zero-sum, so concurrent links would compound.
 const HITCHHIKE_DURATION_MS = 60 * 60 * 1000;
 const HITCHHIKE_COPY_RATIO = 1;
-const HITCHHIKE_LEGACY_SCORING_VERSION = 1;
 const HITCHHIKE_EFFECTIVE_SCORING_VERSION = 2;
 const HITCHHIKE_MAX_PER_TARGET = 1;
 // QUICK_RINSE (§8): store-only, SELF-ONLY, instantaneous. Halves the REMAINING
@@ -546,6 +545,8 @@ async function resolveAoEDecoySlots({
   effectModel,
   random,
   now,
+  consumeDecoy,
+  attackPowerupType,
 }) {
   const resolvedAt = now();
   const slots = [];
@@ -563,7 +564,6 @@ async function resolveAoEDecoySlots({
       continue;
     }
 
-    await effectModel.update(decoy.id, { status: "EXPIRED" });
     const redirect = pickDecoyRedirectVictim({
       acceptedParticipants,
       isAliveTarget,
@@ -571,6 +571,12 @@ async function resolveAoEDecoySlots({
       holderParticipant: victim,
       isTeamRace,
       random,
+    });
+    await consumeDecoy({
+      decoy,
+      ownerParticipant: victim,
+      attackPowerupType,
+      outcome: redirect ? "REDIRECTED" : "BLOCKED",
     });
     if (!redirect) {
       decoyBlockedCount += 1;
@@ -604,7 +610,7 @@ async function applyMysteryPotion(ctx) {
     eventModel, createDirectImpactEvent, resolveTimedEffectBoundary,
     events, awardCoins, random, now,
     currentTime, finalize,
-    casterStealthed,
+    casterStealthed, consumeDecoy,
   } = ctx;
 
   const config = (() => {
@@ -744,6 +750,7 @@ async function applyMysteryPotion(ctx) {
         eventModel, createDirectImpactEvent, resolveTimedEffectBoundary,
         events, random, now, currentTime,
         raceId, powerupId, result,
+        consumeDecoy,
       });
       if (!handled) { await applyProteinFallback(rolled); }
       break;
@@ -802,7 +809,7 @@ async function applyPotionEnemyAttack(a) {
     rolled, aliveEnemies, acceptedParticipants, isAliveTarget, isTeamRace,
     userId, myParticipant, myDisplayName, effectModel, participantModel,
     eventModel, createDirectImpactEvent, events, random, now, currentTime,
-    resolveTimedEffectBoundary, raceId, powerupId, result,
+    resolveTimedEffectBoundary, raceId, powerupId, result, consumeDecoy,
   } = a;
   if (aliveEnemies.length === 0) return false;
   let victim = aliveEnemies[Math.floor(random() * aliveEnemies.length)];
@@ -840,10 +847,19 @@ async function applyPotionEnemyAttack(a) {
     { expiresAfter: now() },
   );
     if (decoy) {
-      await effectModel.update(decoy.id, { status: "EXPIRED" });
       const redirect = pickDecoyRedirectVictim({
         acceptedParticipants, isAliveTarget, attackerUserId: userId,
         holderParticipant: victim, isTeamRace, random,
+      });
+      await consumeDecoy({
+        decoy,
+        ownerParticipant: victim,
+        // Preserve the actual attack semantics in the durable event. The
+        // potion is the container; the rolled outcome is what consumed Decoy.
+        attackPowerupType: rolled,
+        outcome: redirect ? "REDIRECTED" : "BLOCKED",
+        attackerUserId: userId,
+        raceId,
       });
       if (!redirect) {
         result.rolled = rolled; result.blocked = true; result.blockedBy = "DECOY"; result.outcome = "BLOCKED";
@@ -1025,6 +1041,34 @@ function buildUsePowerup(dependencies = {}) {
   const deductCoinsAtomic = dependencies.deductCoinsAtomic || defaultDeductCoinsAtomic;
   const immediateEvents = dependencies.eventBus || eventBus;
   const appendDomainEvent = dependencies.appendDomainEvent || defaultAppendDomainEvent;
+  async function consumeDecoy({
+    decoy,
+    ownerParticipant,
+    attackPowerupType,
+    outcome,
+    attackerUserId,
+    raceId,
+  }) {
+    await effectModel.update(decoy.id, { status: "EXPIRED" });
+    const occurredAt = new Date();
+    await appendDomainEvent(db, {
+      eventKey: `DECOY_CONSUMED_V1:${decoy.id}`,
+      eventType: "DECOY_CONSUMED_V1",
+      schemaVersion: 1,
+      aggregateType: "POWERUP",
+      aggregateId: decoy.id,
+      occurredAt,
+      payload: {
+        decoyEffectId: decoy.id,
+        raceId,
+        ownerUserId: ownerParticipant.userId,
+        attackerUserId,
+        attackPowerupType,
+        outcome,
+      },
+      audience: [{ recipientId: ownerParticipant.userId, facts: {} }],
+    });
+  }
   const events = hasInjectedDeps
     ? immediateEvents
     : {
@@ -1993,6 +2037,12 @@ function buildUsePowerup(dependencies = {}) {
         effectModel,
         random,
         now: () => currentTime,
+        consumeDecoy: (input) => consumeDecoy({
+          ...input,
+          attackerUserId: userId,
+          raceId,
+        }),
+        attackPowerupType: type,
       });
       const affected = new Set();
       const processedLandingIds = new Set();
@@ -2103,6 +2153,7 @@ function buildUsePowerup(dependencies = {}) {
         now,
         currentTime: now(),
         finalize: finalizeSelfContainedUse,
+        consumeDecoy,
       });
     }
 
@@ -2827,7 +2878,6 @@ function buildUsePowerup(dependencies = {}) {
         { expiresAfter: now() },
       );
       if (decoy) {
-        await effectModel.update(decoy.id, { status: "EXPIRED" });
         const holder = targetParticipant;
         const redirect = pickDecoyRedirectVictim({
           acceptedParticipants,
@@ -2836,6 +2886,14 @@ function buildUsePowerup(dependencies = {}) {
           holderParticipant: holder,
           isTeamRace,
           random,
+        });
+        await consumeDecoy({
+          decoy,
+          ownerParticipant: holder,
+          attackPowerupType: type,
+          outcome: redirect ? "REDIRECTED" : "BLOCKED",
+          attackerUserId: userId,
+          raceId,
         });
         if (!redirect) {
           // Fizzle as a block: consume the item, create no effect.
@@ -3221,9 +3279,11 @@ function buildUsePowerup(dependencies = {}) {
           expiresAt: new Date(currentTime.getTime() + HITCHHIKE_DURATION_MS),
           metadata: {
             copyRatio: HITCHHIKE_COPY_RATIO,
-            scoringVersion: requestHasFeature(clientFeatures, "hitchhike_effective_steps")
-              ? HITCHHIKE_EFFECTIVE_SCORING_VERSION
-              : HITCHHIKE_LEGACY_SCORING_VERSION,
+            // Release A of Hitchhike v3 is read-compatible only. Every new
+            // cast remains on the already-shipped v2 interpretation regardless
+            // of client age; release B is the separately authorized change
+            // that will begin stamping v3.
+            scoringVersion: HITCHHIKE_EFFECTIVE_SCORING_VERSION,
           },
         });
         result.effect = effect;
@@ -3528,6 +3588,12 @@ function buildUsePowerup(dependencies = {}) {
           effectModel,
           random,
           now: () => currentTime,
+          consumeDecoy: (input) => consumeDecoy({
+            ...input,
+            attackerUserId: userId,
+            raceId,
+          }),
+          attackPowerupType: type,
         });
         const affected = new Set();
         const blockedNames = [];

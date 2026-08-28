@@ -649,6 +649,22 @@ function snapshotPrefixRawTotal(effects, rawTotal, bonusSteps) {
     2 * snap.reversedSteps;
 }
 
+// Canonical no-sample checkpoint used by both participant scoring and coarse
+// Hitchhike attribution. A daily counter cannot be assigned to an arbitrary
+// wall-clock boundary; its only truthful effect attribution is the delta
+// between these same absolute raw-step checkpoints. Sample-less Wrong Turn
+// intentionally has no snapshot term, matching the participant scorer.
+function computeSnapshotEffectiveTotal(effects, rawTotal, bonusSteps = 0) {
+  return Math.max(
+    0,
+    snapshotPrefixRawTotal(
+      (effects || []).filter(Boolean),
+      Number(rawTotal) || 0,
+      Number(bonusSteps) || 0,
+    ),
+  );
+}
+
 // Builds one instrumented canonical modifier pass for a complete prefix. The
 // sample context is loaded once, then every chronological effect updates only
 // the atomic segments in its own window. This emits the exact total after each
@@ -761,6 +777,7 @@ async function createIncrementalEffectScoreCapture({
 
 module.exports = {
   computeEffectModifiers,
+  computeSnapshotEffectiveTotal,
   createIncrementalEffectScoreCapture,
   signedMultiplierForEffects,
   // Exported for raceStateResolution.calculateCurrentTotal (batch 2026-08-10b

@@ -30,6 +30,7 @@ const {
   computeRaceExposureStamp,
   lockFundedExposureUsers,
   reserveFundedExposure,
+  reserveActiveCompetitionMembership,
   resolveRacePrizeStamp,
 } = require("../services/fundedExposure");
 const { acquireRaceWriteFence } = require("../services/raceWriteFence");
@@ -258,19 +259,22 @@ function buildRespondToRaceInvite(dependencies = {}) {
             // race guards, then decide from the locked lifecycle reread.
             await acquireGlobalEnrollmentLock(tx);
             await lockUsers(tx, [userId]);
+            if (
+              race.seedId == null &&
+              race.tournamentId == null &&
+              race.creatorId != null
+            ) {
+              await reserveActiveCompetitionMembership({ tx, userId });
+            }
             if (fundedExposureStamp) {
               await reserveFundedExposure({
                 tx,
                 userId,
                 stamp: fundedExposureStamp,
                 competition: { raceId },
-                // Keep the seeded economic policy; user-made funded invites
-                // use the permanent cross-competition membership count cap.
+                // Keep the seeded economic policy. User-created admission is
+                // owned by the active-competition reservation above.
                 enforceLimits: Boolean(race.seedId),
-                enforceMembershipLimit:
-                  race.seedId == null &&
-                  race.tournamentId == null &&
-                  race.creatorId != null,
               });
             }
             await tx.$queryRaw`

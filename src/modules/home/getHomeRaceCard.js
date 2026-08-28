@@ -471,6 +471,8 @@ async function prefetchScopedModels({
       return (effectsByParticipant[targetParticipantId] || {})[type] || [];
     },
     // Race-level lookups aren't per-participant hot paths; pass through.
+    findRaceEffectsByType: (raceId, type) =>
+      raceActiveEffectModel.findRaceEffectsByType(raceId, type),
     findActiveForRace: (raceId) => raceActiveEffectModel.findActiveForRace(raceId),
   };
 
@@ -902,6 +904,7 @@ async function checkActiveRaces(prisma, userId, options = {}) {
             raceActiveEffectModel: raceEffectModel,
             stepSampleModel: raceStepSampleModel,
             now,
+            raceTimezone: race.timezone || "UTC",
           })
         : [];
 

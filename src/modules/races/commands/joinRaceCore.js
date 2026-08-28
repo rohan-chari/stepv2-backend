@@ -70,6 +70,7 @@ const {
   computeRaceExposureStamp,
   reserveFundedExposure,
   resolveRacePrizeStamp,
+  reserveActiveCompetitionMembership,
 } = require("../services/fundedExposure");
 const {
   recordReferralRaceActivity: defaultRecordReferralRaceActivity,
@@ -306,20 +307,28 @@ function buildJoinRaceCore(dependencies = {}) {
             teamPoolMultBps: race.teamPoolMultBps,
           })
         : null;
-    if (fundedExposureStamp && transactionClient) {
-      await reserveFundedExposure({
+    const userCreatedAdmission =
+      race.seedId == null &&
+      race.tournamentId == null &&
+      race.creatorId != null;
+    if (transactionClient && userCreatedAdmission) {
+      await reserveActiveCompetitionMembership({
         tx: transactionClient,
         userId,
-        stamp: fundedExposureStamp,
-        competition: { raceId },
-        // Direct joins retain the economic guard for seeded races. User-made
-        // funded races instead use the permanent cross-competition count cap.
-        enforceLimits: Boolean(race.seedId),
-        enforceMembershipLimit:
-          race.seedId == null &&
-          race.tournamentId == null &&
-          race.creatorId != null,
       });
+    }
+    if (transactionClient && (fundedExposureStamp || userCreatedAdmission)) {
+      if (fundedExposureStamp) {
+        await reserveFundedExposure({
+          tx: transactionClient,
+          userId,
+          stamp: fundedExposureStamp,
+          competition: { raceId },
+          // Seeded races retain their historical economic guard. User-created
+          // admission is owned by the single active-competition reservation.
+          enforceLimits: Boolean(race.seedId),
+        });
+      }
       // Global exposure guards are locked before the competition row. The
       // surrounding race advisory lock serializes capacity; this row lock
       // closes mixed-writer admission against settlement/release seams.

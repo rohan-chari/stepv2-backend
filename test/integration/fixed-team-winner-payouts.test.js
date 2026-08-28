@@ -650,34 +650,36 @@ describe("fixed team-winner payouts", () => {
     }
   });
 
-  it("atomically rejects a sixth simultaneous user-created funded competition", async () => {
+  it("atomically rejects a twenty-first simultaneous user-created competition", async () => {
     const creator = await makeUser();
-    for (let index = 0; index < 5; index++) {
+    for (let index = 0; index < 20; index++) {
       await createTeamRace({
         token: creator.token,
         durationDays: 1,
-        name: `Funded slot ${index + 1}`,
+        name: `Active slot ${index + 1}`,
       });
     }
 
-    const sixth = await req("POST", "/races", {
+    const twentyFirst = await req("POST", "/races", {
       token: creator.token,
       headers: TEAM_HEADERS,
       body: {
-        name: "Funded slot six",
+        name: "Active slot twenty-one",
         maxDurationDays: 1,
         isTeamRace: true,
         teamSize: 1,
       },
     });
-    assert.equal(sixth.status, 409);
-    assert.deepEqual(await sixth.json(), {
-      error: "Finish or leave another funded competition before joining this one.",
-      code: "FUNDED_EXPOSURE_LIMIT",
+    assert.equal(twentyFirst.status, 409);
+    assert.deepEqual(await twentyFirst.json(), {
+      error: "You can have up to 20 active competitions at a time.",
+      code: "ACTIVE_COMPETITION_LIMIT",
+      limit: 20,
+      current: 20,
     });
     assert.equal(await prisma.raceParticipant.count({
       where: { userId: creator.userId, status: "ACCEPTED" },
-    }), 5);
+    }), 20);
   });
 
   it("repairs an open legacy team race under its write fence and invalidates every cache", async () => {
@@ -932,13 +934,13 @@ describe("fixed team-winner payouts", () => {
     assert.equal((await poolLedger(race.id)).length, 0);
   });
 
-  it("serializes concurrent fifth-vs-sixth race/tournament admission across types", async () => {
+  it("serializes concurrent twentieth-vs-twenty-first race/tournament admission across types", async () => {
     const creator = await makeUser();
     await req("GET", "/races", {
       token: creator.token,
       headers: ALL_COMPETITION_HEADERS,
     });
-    for (let index = 0; index < 4; index++) {
+    for (let index = 0; index < 19; index++) {
       await createTeamRace({
         token: creator.token,
         durationDays: 1,
@@ -951,7 +953,7 @@ describe("fixed team-winner payouts", () => {
         token: creator.token,
         headers: ALL_COMPETITION_HEADERS,
         body: {
-          name: "Concurrent fifth race",
+          name: "Concurrent twentieth race",
           maxDurationDays: 1,
           isTeamRace: true,
           teamSize: 1,
@@ -961,7 +963,7 @@ describe("fixed team-winner payouts", () => {
         token: creator.token,
         headers: ALL_COMPETITION_HEADERS,
         body: {
-          name: "Concurrent fifth cup",
+          name: "Concurrent twentieth cup",
           bracketSize: 4,
           matchupDurationDays: 2,
           buyInAmount: 0,
@@ -976,7 +978,12 @@ describe("fixed team-winner payouts", () => {
     const rejected = raceResponse.status === 409
       ? raceResponse
       : tournamentResponse;
-    assert.equal((await rejected.json()).code, "FUNDED_EXPOSURE_LIMIT");
+    assert.deepEqual(await rejected.json(), {
+      error: "You can have up to 20 active competitions at a time.",
+      code: "ACTIVE_COMPETITION_LIMIT",
+      limit: 20,
+      current: 20,
+    });
     const [raceCount, tournamentCount] = await Promise.all([
       prisma.raceParticipant.count({
         where: {
@@ -989,6 +996,6 @@ describe("fixed team-winner payouts", () => {
         where: { userId: creator.userId, status: "ACCEPTED" },
       }),
     ]);
-    assert.equal(raceCount + tournamentCount, 5);
+    assert.equal(raceCount + tournamentCount, 20);
   });
 });

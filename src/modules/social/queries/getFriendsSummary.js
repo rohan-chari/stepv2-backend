@@ -5,6 +5,8 @@ const summaryUserSelect = {
   id: true,
   displayName: true,
   profilePhotoUrl: true,
+  firstName: true,
+  lastName: true,
   clientFeatures: true,
 };
 
@@ -12,6 +14,8 @@ const pendingUserSelect = {
   id: true,
   displayName: true,
   profilePhotoUrl: true,
+  firstName: true,
+  lastName: true,
 };
 
 function buildGetFriendsSummary(dependencies = {}) {

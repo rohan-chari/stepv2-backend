@@ -1,6 +1,9 @@
 const assert = require("node:assert/strict");
 const { describe, it, before, beforeEach } = require("node:test");
 const { cleanDatabase, prisma, request, getSharedServer } = require("./setup");
+const {
+  buildRaceResolutionWorkerV2,
+} = require("../../src/modules/races/jobs/raceResolutionQueueV2");
 
 let server;
 let nextAppleId = 0;
@@ -94,6 +97,14 @@ async function postSamples(token, steps) {
   assert.equal(response.status, 200);
 }
 
+async function drainRaceResolutionJobs(maxJobs = 20) {
+  const worker = buildRaceResolutionWorkerV2({ bootAt: 0 });
+  for (let index = 0; index < maxJobs; index++) {
+    if (!(await worker.processOne())) return;
+  }
+  assert.fail(`race resolution queue did not drain within ${maxJobs} jobs`);
+}
+
 async function createActiveEffect(raceId, targetUserId, sourceUserId, type) {
   const participant = await prisma.raceParticipant.findFirst({
     where: { raceId, userId: targetUserId },
@@ -136,10 +147,11 @@ describe("race list sync", () => {
     nextEffectStep = 50000;
   });
 
-  it("POST /steps/samples earns queued boxes on write and exposes them in GET /races", async () => {
+  it("POST /steps/samples queues C0 box resolution and GET /races exposes the result", async () => {
     const { alice, raceId } = await createActiveRace();
 
     await postSamples(alice.token, 9000);
+    await drainRaceResolutionJobs();
 
     const powerups = await prisma.racePowerup.findMany({
       where: { raceId, userId: alice.userId },
@@ -161,10 +173,11 @@ describe("race list sync", () => {
     assert.equal(body.active[0].queuedBoxCount, 1);
   });
 
-  it("POST /races/:raceId/powerups/:powerupId/discard promotes queued boxes on write", async () => {
+  it("POST /races/:raceId/powerups/:powerupId/discard promotes C0-minted queued boxes", async () => {
     const { alice, raceId } = await createActiveRace();
 
     await postSamples(alice.token, 9000);
+    await drainRaceResolutionJobs();
 
     const firstBox = await prisma.racePowerup.findFirst({
       where: {
@@ -213,6 +226,7 @@ describe("race list sync", () => {
 
     await postSamples(alice.token, 6000);
     await postSamples(bob.token, 3000);
+    await drainRaceResolutionJobs();
 
     const aliceRacesRes = await request(server.baseUrl, "GET", "/races", {
       token: alice.token,
@@ -254,6 +268,7 @@ describe("race list sync", () => {
     });
     await postSamples(alice.token, 3000);
     await postSamples(bob.token, 6000);
+    await drainRaceResolutionJobs();
 
     const racesRes = await request(server.baseUrl, "GET", "/races", {
       token: alice.token,
@@ -286,6 +301,7 @@ describe("race list sync", () => {
     });
     await postSamples(alice.token, 3000);
     await postSamples(bob.token, 6000);
+    await drainRaceResolutionJobs();
 
     const stealth = await createActiveEffect(
       raceId,

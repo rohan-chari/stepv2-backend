@@ -99,12 +99,10 @@ function buildSyncRacePowerupState(dependencies = {}) {
       }
     }
 
-    // Self-heal an UN-ARMED box gate. startRace and respondToRaceInvite
-    // initialize nextBoxAtSteps at their entry points, but the public/featured
-    // join path (joinPublicRace) historically did not — so every seeded
-    // daily/weekly-challenge joiner was stranded at the schema default (0) and
-    // the gate below (nextBoxAtSteps > 0) could never fire: no in-race mystery
-    // boxes ever rolled for them, no matter how far they walked.
+    // Self-heal an unarmed OR malformed box gate. Historical admission paths
+    // could leave zero/null, while partial/manual repairs could leave a value
+    // that is not aligned to the race interval. Neither is a valid future box
+    // boundary.
     //
     // Arm it lazily here, anchored to the NEXT interval boundary STRICTLY ABOVE
     // the player's current raw box-effective steps. Because the new threshold is
@@ -114,8 +112,11 @@ function buildSyncRacePowerupState(dependencies = {}) {
     // initialized participant. This both fixes new joiners and repairs any
     // already-stranded participant on their next sync — with no retroactive
     // minting (the hazard the box-progress design exists to avoid).
-    if (canRoll && !(participant.nextBoxAtSteps > 0)) {
-      const interval = race.powerupStepInterval; // > 0 (guarded above)
+    const interval = race.powerupStepInterval; // > 0 (guarded above)
+    const gateNeedsRepair =
+      !(participant.nextBoxAtSteps > 0) ||
+      participant.nextBoxAtSteps % interval !== 0;
+    if (canRoll && gateNeedsRepair) {
       const armedThreshold =
         (Math.floor(boxEffectiveSteps / interval) + 1) * interval;
       // Invariant: strictly above current box-effective => 0 immediate mint.

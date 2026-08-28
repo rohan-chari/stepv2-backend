@@ -9,7 +9,8 @@ const {
 } = require("../services/raceJoinRequests");
 
 function normalizeJoinFailure(error) {
-  if (error?.code === "FUNDED_EXPOSURE_LIMIT" ||
+  if (error?.code === "ACTIVE_COMPETITION_LIMIT" ||
+      error?.code === "FUNDED_EXPOSURE_LIMIT" ||
       error?.code === "FUNDED_EXPOSURE_RETRY") {
     return new RaceJoinRequestError(
       error.message,

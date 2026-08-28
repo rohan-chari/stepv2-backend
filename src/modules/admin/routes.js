@@ -34,6 +34,12 @@ const {
   parseLimit,
   beforeCursor,
 } = require("../inbox/services/inbox");
+const {
+  buildGetActiveCompetitionLimit,
+} = require("./queries/getActiveCompetitionLimit");
+const {
+  buildSetActiveCompetitionLimit,
+} = require("./commands/setActiveCompetitionLimit");
 
 // C1 invalidation (spec §5 Phase B). Every shop_items / powerup_shop_items
 // mutation below must drop the derived catalog + manifest copies and broadcast
@@ -243,6 +249,16 @@ function createAdminRouter(dependencies = {}) {
     dependencies.listSuggestions || defaultListSuggestions;
   const listFeedbackThreads =
     dependencies.listFeedbackThreads || defaultListFeedbackThreads;
+  const getActiveCompetitionLimit =
+    dependencies.getActiveCompetitionLimit ||
+    buildGetActiveCompetitionLimit(dependencies);
+  const setActiveCompetitionLimit =
+    dependencies.setActiveCompetitionLimit ||
+    buildSetActiveCompetitionLimit({
+      ...dependencies,
+      getActiveCompetitionLimit,
+      appSettings: settings,
+    });
 
   // Batch 2026-08-08 item 7 — in-app suggestion box, admin read side.
   // Newest first, keyset-paged: ?limit=50&before=<ISO createdAt>. `nextBefore`
@@ -356,6 +372,24 @@ function createAdminRouter(dependencies = {}) {
     } catch (error) {
       console.error("Admin settings read error:", error);
       res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  router.get("/settings/active-competition-limit", async (_req, res) => {
+    res.json(await getActiveCompetitionLimit());
+  });
+
+  router.patch("/settings/active-competition-limit", async (req, res) => {
+    try {
+      res.json(await setActiveCompetitionLimit(req.body));
+    } catch (error) {
+      if (error?.code === "INVALID_ACTIVE_COMPETITION_LIMIT") {
+        return res.status(400).json({
+          error: error.message,
+          code: error.code,
+        });
+      }
+      throw error;
     }
   });
 

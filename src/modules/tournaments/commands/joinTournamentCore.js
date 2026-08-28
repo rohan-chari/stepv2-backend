@@ -18,6 +18,7 @@ const {
 const {
   computeTournamentExposureStamp,
   reserveFundedExposure,
+  reserveActiveCompetitionMembership,
   resolveTournamentPrizeStamp,
 } = require("../../races/services/fundedExposure");
 
@@ -196,19 +197,26 @@ function buildJoinTournamentCore(dependencies = {}) {
                   prizeStamp.tournamentChampionMaxCoins,
               })
             : null;
+        if (tournament.seedId == null && tournament.creatorId != null) {
+          await reserveActiveCompetitionMembership({
+            tx,
+            userId,
+            appSettings: settings,
+          });
+          await tx.$queryRaw`
+            SELECT id FROM tournaments WHERE id = ${resolvedId} FOR UPDATE
+          `;
+        }
         if (fundedExposureStamp) {
           await reserveFundedExposure({
             tx,
             userId,
             stamp: fundedExposureStamp,
             competition: { tournamentId: resolvedId },
-            // This branch only runs for non-seeded user-funded tournaments.
+            // Historical exposure stamps remain; the active reservation above
+            // owns admission for every free/funded user tournament.
             enforceLimits: false,
-            enforceMembershipLimit: tournament.creatorId != null,
           });
-          await tx.$queryRaw`
-            SELECT id FROM tournaments WHERE id = ${resolvedId} FOR UPDATE
-          `;
         }
         const version = existing ? existing.buyInVersion || 0 : 0;
         if (buyIn > 0) {

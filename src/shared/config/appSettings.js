@@ -2,6 +2,10 @@ const { prisma: defaultPrisma } = require("../../db");
 const derivedCache = require("../cache/derivedCache");
 const cacheKeys = require("../cache/cacheKeys");
 const ACTIVE_IMPACT_FLAG_KEY = "apiActiveImpactNoticesV1Enabled";
+const ACTIVE_COMPETITION_LIMIT_KEY = "activeCompetitionLimit";
+const ACTIVE_COMPETITION_LIMIT_DEFAULT = 20;
+const ACTIVE_COMPETITION_LIMIT_MINIMUM = 1;
+const ACTIVE_COMPETITION_LIMIT_MAXIMUM = 20;
 
 // Every C1 key is a 60s safety net; invalidation is the primary mechanism
 // (spec §3 key table).
@@ -17,6 +21,9 @@ const CATALOG_TTL_SECONDS = 60;
 // add a query per request; an admin PATCH busts the cache immediately in the
 // process that served it, and other processes converge within CACHE_TTL_MS.
 const KNOWN_FLAGS = {
+  // Permanent product capacity setting. It is numeric configuration, not a
+  // rollout control, and is exposed only through its dedicated admin resource.
+  activeCompetitionLimit: ACTIVE_COMPETITION_LIMIT_DEFAULT,
   // Local-time daily 2x events. Creation-mode switch only: already stamped
   // parents always drain under their immutable scheduleMode. Default OFF keeps
   // every deployed client and legacy scorer on the existing global path.
@@ -483,6 +490,7 @@ for (const key of Object.keys(PERMANENT_FLAGS)) delete KNOWN_FLAGS[key];
 const ADMIN_HIDDEN_FLAGS = new Set([
   "raceQueueV2ClaimingDisabled",
   "inlineRaceResolutionFallback",
+  ACTIVE_COMPETITION_LIMIT_KEY,
 ]);
 const ADMIN_EXPOSED_FLAGS = Object.freeze(
   Object.keys(KNOWN_FLAGS).filter((key) => !ADMIN_HIDDEN_FLAGS.has(key)),
@@ -787,6 +795,55 @@ function buildAppSettings(dependencies = {}) {
     });
   }
 
+  async function getActiveCompetitionLimit() {
+    const value = await getFlag(ACTIVE_COMPETITION_LIMIT_KEY);
+    return Number.isInteger(value) &&
+      value >= ACTIVE_COMPETITION_LIMIT_MINIMUM &&
+      value <= ACTIVE_COMPETITION_LIMIT_MAXIMUM
+      ? value
+      : ACTIVE_COMPETITION_LIMIT_DEFAULT;
+  }
+
+  async function setActiveCompetitionLimit(value, { logger = console } = {}) {
+    if (
+      !Number.isInteger(value) ||
+      value < ACTIVE_COMPETITION_LIMIT_MINIMUM ||
+      value > ACTIVE_COMPETITION_LIMIT_MAXIMUM
+    ) {
+      const error = new Error(
+        `activeCompetitionLimit must be an integer from ${ACTIVE_COMPETITION_LIMIT_MINIMUM} to ${ACTIVE_COMPETITION_LIMIT_MAXIMUM}`,
+      );
+      error.statusCode = 400;
+      error.code = "INVALID_ACTIVE_COMPETITION_LIMIT";
+      throw error;
+    }
+    await prisma.appSetting.upsert({
+      where: { key: ACTIVE_COMPETITION_LIMIT_KEY },
+      update: { value },
+      create: { key: ACTIVE_COMPETITION_LIMIT_KEY, value },
+    });
+    cache = null;
+    try {
+      const invalidated = await derivedCache.invalidate({
+        keys: [cacheKeys.appSettingsKey],
+        prefix: cacheKeys.PREFIX.APP_SETTINGS,
+      });
+      if (!invalidated) {
+        logger.warn?.(JSON.stringify({
+          event: "active_competition_limit_cache_invalidation_v1",
+          outcome: "retrying",
+        }));
+      }
+    } catch (error) {
+      logger.warn?.(JSON.stringify({
+        event: "active_competition_limit_cache_invalidation_v1",
+        outcome: "failed",
+        error: error?.message || String(error),
+      }));
+    }
+    return value;
+  }
+
   // Settings that form one user-visible contract must never be observed half
   // written. Home's banner is such a pair: an enabled row without a valid
   // message would force every client to guess. Kept separate from setFlag so
@@ -898,6 +955,8 @@ function buildAppSettings(dependencies = {}) {
     getUncachedFlag,
     getAllFlags,
     setFlag,
+    getActiveCompetitionLimit,
+    setActiveCompetitionLimit,
     setFlagsAtomically,
     bustCache,
     subscribeToInvalidation,
@@ -908,6 +967,10 @@ function buildAppSettings(dependencies = {}) {
 const appSettings = buildAppSettings();
 
 module.exports = {
+  ACTIVE_COMPETITION_LIMIT_KEY,
+  ACTIVE_COMPETITION_LIMIT_DEFAULT,
+  ACTIVE_COMPETITION_LIMIT_MINIMUM,
+  ACTIVE_COMPETITION_LIMIT_MAXIMUM,
   buildAppSettings,
   appSettings,
   KNOWN_FLAGS,

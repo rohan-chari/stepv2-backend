@@ -710,6 +710,18 @@ async function judgeDrillSergeantEffects({
             Math.round(Number(target.totalSteps) || 0),
             Math.round(Number(target.participant?.totalSteps) || 0)
           );
+      if (!target.hasSampleData && availableSteps > target.totalSteps) {
+        // The write-capture proxy floors penalties against its latest captured
+        // participant total. Preserve the legacy sample-less snapshot before
+        // recording the penalty, otherwise the earlier fresh-score capture (0
+        // when no retained source rows exist) silently turns a valid 1,500-step
+        // Drill consequence into a zero write at the C0 fence.
+        await participantModel.updateTotalSteps(
+          effect.targetParticipantId,
+          availableSteps,
+        );
+        target.totalSteps = availableSteps;
+      }
       const nominalPenalty = Math.max(
         0,
         Math.min(configuredPenalty, availableSteps)
@@ -1553,6 +1565,7 @@ function buildResolveRaceState(dependencies = {}) {
               raceActiveEffectModel: scoringEffectModel,
               stepSampleModel: scoringStepSampleModel,
               now: currentTime,
+              raceTimezone: race.timezone || "UTC",
               globalEvents,
               eventsByUserId,
             })

@@ -25,9 +25,15 @@ async function enabled(req, settings = appSettings) {
 function failure(res, status, error, code) { return res.status(status).json({ error, code }); }
 
 function serializeAlert(row) {
+  const deliveryPayload = Array.isArray(row.outbox)
+    ? row.outbox.find((entry) => entry?.kind === "PUSH")?.payload?.payload
+    : null;
   const base = {
     id: row.id,
     type: row.type,
+    ...(typeof deliveryPayload?.subtype === "string" && deliveryPayload.subtype
+      ? { subtype: deliveryPayload.subtype }
+      : {}),
     title: row.title,
     body: row.body,
     createdAt: row.createdAt,
@@ -118,7 +124,14 @@ function createInboxRouter(dependencies = {}) {
       const now = new Date();
       const where = { userId: req.user.id, expiresAt: { gt: now }, ...(beforeCursor(cursor) || {}) };
       const [rows, unreadCounts] = await Promise.all([
-        prisma.inboxAlert.findMany({ where, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: limit + 1 }),
+        prisma.inboxAlert.findMany({
+          where,
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          take: limit + 1,
+          // Notification subtype is retained in the durable delivery intent.
+          // Expose it additively while preserving every shipped Inbox field.
+          include: { outbox: { select: { kind: true, payload: true } } },
+        }),
         getInboxUnreadCounts({ userId: req.user.id, now, prisma }),
       ]);
       const more = rows.length > limit;

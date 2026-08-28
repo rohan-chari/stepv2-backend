@@ -26,6 +26,7 @@ const V1_PROJECTOR_HANDLER_NAMES = Object.freeze({
   RACE_CANCELLED_V1: "RACE_CANCELLED",
   GLOBAL_STEP_EVENT_ACTIVATED_V1: "GLOBAL_EVENT_STARTED",
   POWERUP_USED_V1: "POWERUP_USED",
+  DECOY_CONSUMED_V1: "DECOY_CONSUMED",
   RACE_MESSAGE_SENT_V1: "RACE_MESSAGE_SENT",
   PLACEMENT_CHANGED_V1: "PLACEMENT_CHANGED",
   HIGH_MULTIPLIER_ALERT_V1: "HIGH_MULTIPLIER_ALERT",
@@ -274,6 +275,23 @@ const V1_PROJECTOR_HANDLERS = Object.freeze({
     if (raceName) body += ` Race: ${raceName}.`;
     return intent("POWERUP_USED", "Powerup Attack!", body,
       { type: "POWERUP_USED", route: "race_detail", params: { raceId: p.raceId } });
+  },
+  async DECOY_CONSUMED_V1({ p, loadRace }) {
+    const race = await loadRace(p.raceId);
+    const raceName = typeof race?.name === "string"
+      ? race.name.trim().slice(0, 60)
+      : "your race";
+    return intent(
+      "POWERUP_USED",
+      "Your Decoy was triggered!",
+      `Your Decoy protected you in ${raceName}. Tap to view the race.`,
+      {
+        type: "POWERUP_USED",
+        subtype: "DECOY_CONSUMED",
+        route: "race_detail",
+        params: { raceId: p.raceId },
+      },
+    );
   },
   async RACE_MESSAGE_SENT_V1({ p }) {
     const preview = p.body?.length > 120 ? `${p.body.slice(0, 117)}…` : p.body;

@@ -622,6 +622,7 @@ function buildGetRaceProgress(deps = {}) {
           raceActiveEffectModel: scoringEffectModel,
           stepSampleModel: scoringStepSampleModel,
           now: scoringNow,
+          raceTimezone: race.timezone || "UTC",
           globalEvents,
           eventsByUserId,
         })
@@ -1216,6 +1217,15 @@ function buildGetRaceProgress(deps = {}) {
         bonusSteps: myParticipant.bonusSteps || 0,
         maxBonusSteps: myParticipant.maxBonusSteps || 0,
       });
+      const preSyncParticipant =
+        typeof participantModel.findById === "function"
+          ? await participantModel.findById(myParticipant.id)
+          : myParticipant;
+      const persistedGate =
+        preSyncParticipant?.nextBoxAtSteps ?? myParticipant.nextBoxAtSteps ?? 0;
+      const interval = snapRace.powerupStepInterval;
+      const gateNeedsRepair =
+        !(persistedGate > 0) || persistedGate % interval !== 0;
       // Phase D step 8: the box-gate sync WRITES race_participants
       // (nextBoxAtSteps, maxBonusSteps) and mints RacePowerup rows, so with the
       // flag on it belongs to the worker, which runs it for every triggering
@@ -1229,13 +1239,22 @@ function buildGetRaceProgress(deps = {}) {
       // fold them back into the same fields, in the same shape. Only this
       // race's entries are taken — another race's pending toast survives for
       // its own next poll.
-      const syncResult = syncPowerups
+      const syncResult = syncPowerups && !gateNeedsRepair
         ? await syncRacePowerupState({
             raceId,
             userId,
             boxEffectiveSteps: myBoxEffectiveSteps,
           })
         : await recentBoxMintsStore.consume({ userId, raceId });
+      if (gateNeedsRepair) {
+        await enqueueRaceResolutionFn({
+          raceId,
+          userId,
+          timeZone: scoringTimeZone,
+          reason: "POWERUP_GATE_REPAIR",
+          priority: "IMMEDIATE",
+        });
+      }
       // One config read per request; the same snapshot feeds the upgrade
       // ladders below and the dropOdds block further down.
       balanceConfigSnapshot = await balanceConfig.getSnapshot();
@@ -1274,10 +1293,15 @@ function buildGetRaceProgress(deps = {}) {
       }
 
       // Re-read participant to get current powerupSlots (may have changed via Fanny Pack expiry)
-      const freshParticipant = await participantModel.findById(myParticipant.id);
+      const freshParticipant = gateNeedsRepair
+        ? preSyncParticipant
+        : await participantModel.findById(myParticipant.id);
       const mySlots = freshParticipant?.powerupSlots || 3;
-      const nextBoxAtSteps =
+      const storedNextBoxAtSteps =
         freshParticipant?.nextBoxAtSteps ?? myParticipant.nextBoxAtSteps ?? 0;
+      const nextBoxAtSteps = gateNeedsRepair
+        ? (Math.floor(myBoxEffectiveSteps / interval) + 1) * interval
+        : storedNextBoxAtSteps;
 
       powerupData.powerupSlots = mySlots;
       if (nextBoxAtSteps > 0) {

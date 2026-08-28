@@ -878,15 +878,15 @@ describe("race details participants pagination", () => {
         "paging must not add a redundant query plan on top of the progress preload"
     );
 
-    // Cosmetics are still hydrated for the whole field here, and that is
-    // correct: getRaceProgress needs them. Pinned so a future change that makes
-    // progress lean is noticed (at which point detail should stop reusing the
-    // preload and go back to the lean plan on this branch too).
-    assert.equal(
-      countCosmeticUsers(pagedBoot),
-      12,
-      "if this drops below 12, getRaceProgress was made lean — revisit the " +
-        "preload reuse in getRaceDetails"
+    // Progress now supplies a lean page projection, and details deliberately
+    // declines to reuse it as a fat preload. The two page projections may have
+    // different stable orderings, so their union can contain between one and
+    // two requested pages, but it must never hydrate the whole 12-person field.
+    const cosmeticUsers = countCosmeticUsers(pagedBoot);
+    assert.ok(
+      cosmeticUsers >= 3 && cosmeticUsers <= 6,
+      `paged bootstrap hydrated cosmetics for ${cosmeticUsers} users; ` +
+        "expected the union of at most two 3-person page projections"
     );
   });
 

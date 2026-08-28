@@ -206,6 +206,7 @@ function buildForfeitRace(dependencies = {}) {
             raceActiveEffectModel,
             stepSampleModel,
             now: at,
+            raceTimezone: race.timezone || "UTC",
             globalEvents,
             eventsByUserId,
           })
