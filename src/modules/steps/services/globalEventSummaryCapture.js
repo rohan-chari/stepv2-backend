@@ -333,8 +333,8 @@ async function lockEligibleSummaryCaptureDependencies(tx, {
   });
   // This is deliberately all-version and is read before any input/C0 locks.
   // A rolling old worker touches the matching work row through the database
-  // trigger, so the later work-row lock either observes this exact vector or
-  // aborts the repeatable-read sync transaction for its existing retry path.
+  // trigger, so the later work-row lock and vector recheck either observe this
+  // exact vector or raise the narrow capture-closure retry signal.
   const initialVector = await readImpactVector();
   const raceIds = [...new Set(initialVector
     .filter((row) => row.status === "PENDING")
@@ -397,12 +397,20 @@ async function lockEligibleSummaryCaptureDependencies(tx, {
   }
   const workIds = works.map((work) => work.id).sort();
   const lockedWorks = await tx.$queryRawUnsafe(
-    `SELECT id
-       FROM global_event_summary_work
-      WHERE id = ANY($1::text[])
-      ORDER BY id ASC
-      FOR UPDATE`,
+    `SELECT work.id
+       FROM global_event_summary_work work
+       JOIN global_step_events event ON event.id = work.event_id
+      WHERE work.id = ANY($1::text[])
+        AND work.user_id = $2
+        AND work.status = 'WAITING_SYNC'
+        AND work.expires_at > $3::timestamp
+        AND event.summary_attribution_version = 2
+        AND event.ends_at <= $3::timestamp
+      ORDER BY work.id ASC
+      FOR UPDATE OF work`,
     workIds,
+    userId,
+    new Date(at),
   );
   if (lockedWorks.length !== workIds.length) {
     const error = new Error("summary capture work row changed");
@@ -426,11 +434,12 @@ async function lockEligibleSummaryCaptureDependencies(tx, {
     },
     data: { attributionVersion: 2 },
   });
-  return locked;
+  return workIds;
 }
 
 async function claimEligibleSummaryWork(tx, {
   userId,
+  eligibleWorkIds = [],
   captureSyncRequestId,
   captureCompletedAt,
   captureCoverageThrough,
@@ -451,6 +460,7 @@ async function claimEligibleSummaryWork(tx, {
     : null;
   const candidates = await tx.globalEventSummaryWork.findMany({
     where: {
+      id: { in: eligibleWorkIds },
       userId,
       status: "WAITING_SYNC",
       expiresAt: { gt: captureCompletedAt },

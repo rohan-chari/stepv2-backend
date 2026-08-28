@@ -1,6 +1,11 @@
 const {
   notificationIntentService: defaultNotificationIntentService,
 } = require("../services/notificationDelivery");
+const redisCache = require("../../../shared/cache/redisCache");
+
+const FALLBACK_INTERVAL_MS = 5_000;
+const MIN_DUE_RETRY_MS = 1_000;
+const MAX_DUE_TIMER_MS = 60_000;
 
 function buildNotificationScheduleRelease(dependencies = {}) {
   const service = dependencies.notificationIntentService || defaultNotificationIntentService;
@@ -22,26 +27,70 @@ function buildNotificationScheduleRelease(dependencies = {}) {
 }
 
 function scheduleNotificationScheduleRelease(dependencies = {}) {
-  const run = dependencies.run || buildNotificationScheduleRelease(dependencies);
+  const service = dependencies.notificationIntentService || defaultNotificationIntentService;
+  const run = dependencies.run || buildNotificationScheduleRelease({
+    ...dependencies,
+    notificationIntentService: service,
+  });
+  const nextDueAt = dependencies.nextDueAt || service.nextDueAt;
+  const subscribeWakeup = dependencies.subscribeNotificationWakeup ||
+    redisCache.subscribeNotificationWakeup;
   const logger = dependencies.logger || console;
   let stopped = false;
   let running = null;
-  let timer = null;
+  let dueTimer = null;
+  let unsubscribe = null;
+  const armDueTimer = async () => {
+    if (stopped || typeof nextDueAt !== "function") return;
+    const dueAt = await nextDueAt();
+    if (dueTimer) clearTimeout(dueTimer);
+    dueTimer = null;
+    if (!dueAt) return;
+    const untilDue = new Date(dueAt).getTime() - Date.now();
+    const delay = Math.max(
+      dependencies.minDueRetryMs || MIN_DUE_RETRY_MS,
+      Math.min(MAX_DUE_TIMER_MS, untilDue),
+    );
+    dueTimer = setTimeout(tick, delay);
+    dueTimer.unref?.();
+  };
   const tick = () => {
     if (stopped || running) return running;
-    running = run().catch((error) => logger.error?.("[NOTIFICATION] schedule release failed", {
-      errorCode: error?.code || "SCHEDULE_RELEASE_FAILED",
-    })).finally(() => { running = null; });
+    running = Promise.resolve()
+      .then(run)
+      .then(async (result) => {
+        await armDueTimer();
+        return result;
+      })
+      .catch((error) => logger.error?.("[NOTIFICATION] schedule release failed", {
+        errorCode: error?.code || "SCHEDULE_RELEASE_FAILED",
+      }))
+      .finally(() => { running = null; });
     return running;
   };
-  const arm = (delay) => {
-    if (stopped) return;
-    timer = setTimeout(async () => { await tick(); arm(dependencies.intervalMs || 250); }, delay);
-    timer.unref?.();
-  };
   tick();
-  arm(dependencies.intervalMs || 250);
-  return { tick, async stop() { stopped = true; if (timer) clearTimeout(timer); await running; } };
+  const interval = setInterval(tick, dependencies.intervalMs || FALLBACK_INTERVAL_MS);
+  interval.unref?.();
+  Promise.resolve(subscribeWakeup(() => tick()))
+    .then((stop) => { unsubscribe = stop; })
+    .catch((error) => logger.error?.("[NOTIFICATION] schedule wake subscription failed", {
+      errorCode: error?.code || "SCHEDULE_WAKE_SUBSCRIBE_FAILED",
+    }));
+  return {
+    tick,
+    async stop() {
+      if (stopped) return;
+      stopped = true;
+      clearInterval(interval);
+      if (dueTimer) clearTimeout(dueTimer);
+      await unsubscribe?.();
+      await running;
+    },
+  };
 }
 
-module.exports = { buildNotificationScheduleRelease, scheduleNotificationScheduleRelease };
+module.exports = {
+  FALLBACK_INTERVAL_MS,
+  buildNotificationScheduleRelease,
+  scheduleNotificationScheduleRelease,
+};

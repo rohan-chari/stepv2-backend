@@ -32,6 +32,9 @@ const {
 const {
   buildNotificationCompletenessReconciler,
 } = require("../../src/modules/notifications/jobs/notificationCompletenessReconciler");
+const {
+  buildNotificationScheduleRelease,
+} = require("../../src/modules/notifications/jobs/notificationScheduleRelease");
 const { buildInboxDelivery } = require("../../src/modules/inbox/jobs/inboxDelivery");
 const { createInboxAlert } = require("../../src/modules/inbox/services/inbox");
 const { buildDeviceTokenCleanup } = require("../../src/modules/notifications/jobs/deviceTokenCleanup");
@@ -1388,7 +1391,21 @@ describe("global-event reliability v2 contract", () => {
     assert.equal(repaired.overdueOutboxesRearmed, 1);
     assert.equal(repaired.missingSnapshotsRearmed, 1);
     assert.equal(repaired.terminalTargetsRepaired, 1);
-    assert.equal(repaired.released, 2);
+    assert.equal(
+      Object.hasOwn(repaired, "released"),
+      false,
+      "the cold completeness audit must not duplicate the hot schedule-release worker",
+    );
+    assert.equal(
+      await prisma.inboxDeliveryOutbox.count({ where: { alertId: missingOutboxAlert.id } }),
+      0,
+      "repair only rearms durable schedules; the dedicated release worker owns materialization",
+    );
+    const release = buildNotificationScheduleRelease({
+      notificationIntentService,
+      now: () => current,
+    });
+    assert.equal((await release()).released, 2);
     assert.equal(await prisma.inboxDeliveryOutbox.count({ where: { alertId: missingOutboxAlert.id } }), 1);
     assert.equal((await prisma.inboxDeliveryOutbox.findUniqueOrThrow({
       where: { id: overdueOutbox.id },

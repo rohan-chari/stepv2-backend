@@ -1010,6 +1010,112 @@ describe("global event summary expiry v2 HTTP contract", () => {
     assert.equal(generationAfter.generation, generationBefore.generation);
   });
 
+  it("does not claim summary work that appears after the capture dependency closure is locked", async () => {
+    const user = await createTestUser();
+    const sampleStart = new Date(Date.now() - 20 * 60_000);
+    const sampleEnd = new Date(Date.now() - 5 * 60_000);
+    const body = {
+      date: sampleStart.toISOString().slice(0, 10),
+      steps: 300,
+      samples: [{
+        periodStart: sampleStart.toISOString(),
+        periodEnd: sampleEnd.toISOString(),
+        steps: 300,
+        recordingMethod: "automatic",
+      }],
+    };
+    const first = await request(server.baseUrl, "POST", "/steps/sync-v2", {
+      token: user.token,
+      headers: {
+        "Idempotency-Key": randomUUID(),
+        "X-Timezone": "UTC",
+        "X-Client-Features": CAPABILITIES,
+      },
+      body,
+    });
+    assert.equal(first.status, 202);
+
+    const eventEndsAt = new Date(sampleEnd.getTime() - 1_000);
+    const initialEvent = await createEvent({ startsAt: sampleStart, endsAt: eventEndsAt });
+    const lateEvent = await createEvent({ startsAt: sampleStart, endsAt: eventEndsAt });
+    const expiresAt = new Date(Date.now() + 60_000);
+    const initialWork = await prisma.globalEventSummaryWork.create({
+      data: {
+        eventId: initialEvent.id,
+        userId: user.user.id,
+        status: "WAITING_SYNC",
+        expiresAt,
+      },
+    });
+    let signalLocked;
+    const locked = new Promise((resolve) => { signalLocked = resolve; });
+    let releaseInputFence;
+    const released = new Promise((resolve) => { releaseInputFence = resolve; });
+    const blocker = prisma.$transaction(async (tx) => {
+      await tx.$queryRawUnsafe(
+        `SELECT user_id FROM user_scoring_input_versions
+          WHERE user_id = $1 FOR UPDATE`,
+        user.user.id,
+      );
+      signalLocked();
+      await released;
+    }, { timeout: 15_000, maxWait: 15_000 });
+    await locked;
+
+    let second;
+    let secondPromise;
+    try {
+      secondPromise = request(server.baseUrl, "POST", "/steps/sync-v2", {
+        token: user.token,
+        headers: {
+          "Idempotency-Key": randomUUID(),
+          "X-Timezone": "UTC",
+          "X-Client-Features": CAPABILITIES,
+        },
+        body,
+      });
+      const deadline = Date.now() + 5_000;
+      let blocked = false;
+      while (Date.now() < deadline) {
+        const [{ n }] = await prisma.$queryRawUnsafe(
+          `SELECT COUNT(*)::int AS n FROM pg_stat_activity
+            WHERE datname = current_database()
+              AND backend_type = 'client backend'
+              AND wait_event_type = 'Lock'
+              AND query LIKE '%user_scoring_input_versions%'`,
+        );
+        if (n > 0) {
+          blocked = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      assert.equal(blocked, true, "sync never reached the dependency input fence");
+      const lateWork = await prisma.globalEventSummaryWork.create({
+        data: {
+          eventId: lateEvent.id,
+          userId: user.user.id,
+          status: "WAITING_SYNC",
+          expiresAt,
+        },
+      });
+      releaseInputFence();
+      await blocker;
+      second = await secondPromise;
+      assert.equal((await prisma.globalEventSummaryWork.findUniqueOrThrow({
+        where: { id: lateWork.id },
+      })).status, "WAITING_SYNC");
+    } finally {
+      releaseInputFence();
+      await blocker;
+      await secondPromise?.catch(() => {});
+    }
+    assert.equal(second.status, 202);
+    assert.equal((await prisma.globalEventSummaryWork.findUniqueOrThrow({
+      where: { id: initialWork.id },
+    })).status, "QUEUED");
+  });
+
   it("deletes capture artifacts and work before deleting the owning account", async () => {
     const user = await createTestUser();
     const event = await createEvent();

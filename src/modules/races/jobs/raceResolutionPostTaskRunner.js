@@ -24,7 +24,9 @@ const {
 } = require("../../giveaways/jobs/qualificationIntentRecovery");
 
 const POLL_INTERVAL_MS = 250;
-const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
+const CLEANUP_INTERVAL_MS = 10 * 60 * 1000;
+const CLEANUP_BATCH_SIZE = 500;
+const CLEANUP_MAX_BATCHES = 2;
 const ADAPTIVE_DRAIN_SLICE_MS = 100;
 const ADAPTIVE_DRAIN_SLICE_TASKS = 16;
 const ADAPTIVE_DRAIN_ERROR_BACKOFF_MS = 1000;
@@ -61,6 +63,16 @@ function buildRaceResolutionPostTaskRunner(dependencies = {}) {
   const now = dependencies.now || (() => new Date());
   const logger = dependencies.logger || console;
   const env = dependencies.env || process.env;
+  const cleanupBatchSize = Math.max(
+    1,
+    Math.min(CLEANUP_BATCH_SIZE, Number(dependencies.cleanupBatchSize) || CLEANUP_BATCH_SIZE),
+  );
+  const cleanupMaxBatches = Math.max(
+    1,
+    Math.min(CLEANUP_MAX_BATCHES, Number(dependencies.cleanupMaxBatches) || CLEANUP_MAX_BATCHES),
+  );
+  const yieldToEventLoop = dependencies.yieldToEventLoop ||
+    (() => new Promise((resolve) => setImmediate(resolve)));
   const workBudget = dependencies.raceResolutionWorkBudget || defaultWorkBudget;
   const recoverQualificationIntents =
     dependencies.recoverReferralQualificationIntents ||
@@ -216,10 +228,18 @@ function buildRaceResolutionPostTaskRunner(dependencies = {}) {
     },
     async cleanup() {
       if (postTaskCleanupDisabled(env)) return 0;
-      return model.cleanupTerminal({
-        before: new Date(now().getTime() - 7 * 24 * 60 * 60 * 1000),
-        limit: 500,
-      });
+      const before = new Date(now().getTime() - 7 * 24 * 60 * 60 * 1000);
+      let deleted = 0;
+      for (let batch = 0; batch < cleanupMaxBatches; batch += 1) {
+        const pageDeleted = await model.cleanupTerminal({
+          before,
+          limit: cleanupBatchSize,
+        });
+        deleted += pageDeleted;
+        if (pageDeleted < cleanupBatchSize) break;
+        if (batch + 1 < cleanupMaxBatches) await yieldToEventLoop();
+      }
+      return deleted;
     },
   };
 }
@@ -249,6 +269,7 @@ function scheduleRaceResolutionPostTaskRunner(dependencies = {}) {
       ADAPTIVE_DRAIN_ERROR_BACKOFF_MS
   );
   let running = false;
+  let cleanupRunning = null;
   let backoffUntilMs = 0;
   const adaptiveDrainEnabled = () => isStrictFlagEnabled(
     settings,
@@ -307,21 +328,26 @@ function scheduleRaceResolutionPostTaskRunner(dependencies = {}) {
     await runScheduledWork();
   }, dependencies.pollIntervalMs || POLL_INTERVAL_MS);
   interval.unref?.();
-  const cleanup = setInterval(() => {
-    runner.cleanup().catch((error) => {
+  const runCleanup = () => {
+    if (cleanupRunning) return cleanupRunning;
+    cleanupRunning = runner.cleanup().catch((error) => {
       (dependencies.logger || console).error(
         "[RACE_RESOLUTION_POST_TASK] cleanup failed:",
         error
       );
-    });
-  }, dependencies.cleanupIntervalMs || CLEANUP_INTERVAL_MS);
+    }).finally(() => { cleanupRunning = null; });
+    return cleanupRunning;
+  };
+  const cleanup = setInterval(runCleanup, dependencies.cleanupIntervalMs || CLEANUP_INTERVAL_MS);
   cleanup.unref?.();
-  return { interval, cleanup, runner };
+  return { interval, cleanup, runner, runCleanup };
 }
 
 module.exports = {
   POLL_INTERVAL_MS,
   CLEANUP_INTERVAL_MS,
+  CLEANUP_BATCH_SIZE,
+  CLEANUP_MAX_BATCHES,
   postTaskCleanupDisabled,
   postTaskWorkerDisabled,
   buildRaceResolutionPostTaskRunner,

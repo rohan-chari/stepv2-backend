@@ -17,19 +17,10 @@ const DEFAULT_MAX_WAIT_MS = 5000;
 const DEFAULT_POLL_MS = 150;
 const HOME_PULL_COOLDOWN_SECONDS = 30;
 const STEP_INTAKE_SEMANTICS = "CANONICAL_SOURCE_QUEUE_V1";
-const SERIALIZATION_RETRIES = 3;
+const CAPTURE_CLOSURE_RETRIES = 3;
 
-function isSerializationConflict(error) {
-  const codes = [
-    error?.code,
-    error?.meta?.code,
-    error?.meta?.driverAdapterError?.cause?.originalCode,
-    error?.meta?.driverAdapterError?.cause?.code,
-    error?.cause?.originalCode,
-    error?.cause?.code,
-  ];
-  return codes.includes("40001") ||
-    String(error?.message || "").includes("could not serialize access");
+function isSummaryCaptureClosureChanged(error) {
+  return error?.code === "SUMMARY_CAPTURE_CLOSURE_CHANGED";
 }
 
 class StepSyncCooldownError extends Error {
@@ -97,6 +88,24 @@ function buildRecordStepSyncV2(dependencies = {}) {
   const maxWaitMs = dependencies.maxWaitMs ?? DEFAULT_MAX_WAIT_MS;
   const pollMs = dependencies.pollMs ?? DEFAULT_POLL_MS;
 
+  async function runIntakeTransaction(work) {
+    for (let attempt = 0; attempt < CAPTURE_CLOSURE_RETRIES; attempt += 1) {
+      try {
+        // Explicit dependency and race fences inside the transaction provide
+        // the summary-capture consistency boundary. Read Committed lets a
+        // shared race queue row wait for its current writer and then merge the
+        // latest committed generation instead of aborting on a stale snapshot.
+        return await prisma.$transaction(work, { timeout: 15_000, maxWait: 10_000 });
+      } catch (error) {
+        if (!isSummaryCaptureClosureChanged(error) ||
+            attempt === CAPTURE_CLOSURE_RETRIES - 1) {
+          throw error;
+        }
+      }
+    }
+    return null;
+  }
+
   async function queueOptions() {
     const [burstCoalescing, queuedGenerationMerge] = await Promise.all([
       isStrictFlagEnabled(appSettings, "raceResolutionBurstCoalescingV1Enabled"),
@@ -145,7 +154,7 @@ function buildRecordStepSyncV2(dependencies = {}) {
     options,
   }) {
     const requestedAt = now();
-    await require("../services/globalEventSummaryCapture")
+    const eligibleSummaryWorkIds = await require("../services/globalEventSummaryCapture")
       .lockEligibleSummaryCaptureDependencies(tx, {
         userId,
         at: requestedAt,
@@ -163,6 +172,7 @@ function buildRecordStepSyncV2(dependencies = {}) {
     const globalEventSummaryWork = await require("../services/globalEventSummaryCapture")
       .claimEligibleSummaryWork(tx, {
         userId,
+        eligibleWorkIds: eligibleSummaryWorkIds,
         captureSyncRequestId: reservation.id,
         captureCompletedAt: completedAt,
         captureCoverageThrough: intake.canonicalCoverageThrough,
@@ -206,7 +216,7 @@ function buildRecordStepSyncV2(dependencies = {}) {
 
   async function recover({ reservation, userId, timeZone, canonical, cleaned }) {
     const options = await queueOptions();
-    const result = await prisma.$transaction(async (tx) => {
+    const result = await runIntakeTransaction(async (tx) => {
       const claimed = await tx.stepSyncRequest.updateMany({
         where: {
           id: reservation.id,
@@ -225,7 +235,7 @@ function buildRecordStepSyncV2(dependencies = {}) {
         cleaned,
         options,
       });
-    }, { timeout: 15_000, maxWait: 10_000, isolationLevel: "RepeatableRead" });
+    });
     if (!result) return null;
     await afterCommit(result, { userId, canonical });
     return result.response;
@@ -309,52 +319,43 @@ function buildRecordStepSyncV2(dependencies = {}) {
     const options = await queueOptions();
     let result;
     try {
-      for (let attempt = 0; attempt < SERIALIZATION_RETRIES; attempt += 1) {
-        try {
-          result = await prisma.$transaction(async (tx) => {
-            // First transactional write: a same-key loser cannot perform source
-            // work before the reservation's unique constraint turns it away.
-            const reservation = await stepSyncRequestModel.createReservation({
-              userId,
-              idempotencyKey,
-              requestHash: hash,
-              resolutionTimeZone: timeZone,
-              leaseMs: RECONCILE_LEASE_MS,
-              now: now(),
-            }, tx);
+      result = await runIntakeTransaction(async (tx) => {
+        // First transactional write: a same-key loser cannot perform source
+        // work before the reservation's unique constraint turns it away.
+        const reservation = await stepSyncRequestModel.createReservation({
+          userId,
+          idempotencyKey,
+          requestHash: hash,
+          resolutionTimeZone: timeZone,
+          leaseMs: RECONCILE_LEASE_MS,
+          now: now(),
+        }, tx);
 
-            if (homePull) {
-              const stamped = await tx.$queryRaw`
-                UPDATE "users"
-                   SET "last_home_pull_step_sync_at" = CURRENT_TIMESTAMP
-                 WHERE "id" = ${userId}
-                   AND ("last_home_pull_step_sync_at" IS NULL OR
-                        "last_home_pull_step_sync_at" <=
-                          CURRENT_TIMESTAMP - INTERVAL '30 seconds')
-                RETURNING "last_home_pull_step_sync_at" AS "lastHomePullStepSyncAt"
-              `;
-              if (stamped.length !== 1) {
-                const cooldown = await tx.$queryRaw`
-                  SELECT CEIL(EXTRACT(EPOCH FROM (
-                    "last_home_pull_step_sync_at" + INTERVAL '30 seconds' - CURRENT_TIMESTAMP
-                  )))::int AS "retryAfterSeconds"
-                    FROM "users" WHERE "id" = ${userId}
-                `;
-                throw new StepSyncCooldownError(cooldown[0]?.retryAfterSeconds);
-              }
-            }
-
-            return runIntakeInTransaction({
-              tx, reservation, userId, timeZone, canonical, cleaned, options,
-            });
-          }, { timeout: 15_000, maxWait: 10_000, isolationLevel: "RepeatableRead" });
-          break;
-        } catch (error) {
-          if (!isSerializationConflict(error) || attempt === SERIALIZATION_RETRIES - 1) {
-            throw error;
+        if (homePull) {
+          const stamped = await tx.$queryRaw`
+            UPDATE "users"
+               SET "last_home_pull_step_sync_at" = CURRENT_TIMESTAMP
+             WHERE "id" = ${userId}
+               AND ("last_home_pull_step_sync_at" IS NULL OR
+                    "last_home_pull_step_sync_at" <=
+                      CURRENT_TIMESTAMP - INTERVAL '30 seconds')
+            RETURNING "last_home_pull_step_sync_at" AS "lastHomePullStepSyncAt"
+          `;
+          if (stamped.length !== 1) {
+            const cooldown = await tx.$queryRaw`
+              SELECT CEIL(EXTRACT(EPOCH FROM (
+                "last_home_pull_step_sync_at" + INTERVAL '30 seconds' - CURRENT_TIMESTAMP
+              )))::int AS "retryAfterSeconds"
+                FROM "users" WHERE "id" = ${userId}
+            `;
+            throw new StepSyncCooldownError(cooldown[0]?.retryAfterSeconds);
           }
         }
-      }
+
+        return runIntakeInTransaction({
+          tx, reservation, userId, timeZone, canonical, cleaned, options,
+        });
+      });
     } catch (error) {
       if (error?.code !== "P2002") throw error;
       const winner = await stepSyncRequestModel.findByKey(userId, idempotencyKey);

@@ -1,13 +1,11 @@
 const { prisma: defaultPrisma } = require("../../../db");
-const {
-  notificationIntentService: defaultNotificationIntentService,
-} = require("../services/notificationDelivery");
+
+const RECONCILE_INTERVAL_MS = 5 * 60 * 1000;
 
 function buildNotificationCompletenessReconciler(dependencies = {}) {
   const prisma = dependencies.prisma || defaultPrisma;
   const now = dependencies.now || (() => new Date());
   const pageSize = Math.min(500, Math.max(1, Number(dependencies.pageSize) || 500));
-  const notificationService = dependencies.notificationIntentService || defaultNotificationIntentService;
   return async function reconcileNotificationCompleteness() {
     const current = now();
     const unknownReset = await prisma.$executeRawUnsafe(
@@ -168,7 +166,6 @@ function buildNotificationCompletenessReconciler(dependencies = {}) {
          FROM candidates WHERE schedule.id=candidates.id`,
       current, pageSize,
     );
-    const release = await notificationService.releaseDue({ now: current, batchSize: pageSize });
     return {
       unknownEventsReset: Number(unknownReset),
       projectionsRearmed: Number(projectionsRearmed),
@@ -178,7 +175,6 @@ function buildNotificationCompletenessReconciler(dependencies = {}) {
       terminalTargetsRepaired: Number(terminalTargetsRepaired),
       missingSnapshotsRearmed: Number(missingSnapshotsRearmed),
       expired: Number(expired),
-      released: release.released,
       fullPage: Number(unknownReset) === pageSize || Number(projectionsRearmed) === pageSize ||
         Number(linkedDormant) === pageSize || Number(materializationGapsRearmed) === pageSize ||
         Number(overdueOutboxesRearmed) === pageSize || Number(terminalTargetsRepaired) === pageSize ||
@@ -204,16 +200,16 @@ function scheduleNotificationCompletenessReconciler(dependencies = {}) {
     if (stopped) return;
     timer = setTimeout(async () => {
       const result = await tick();
-      arm(result?.fullPage ? 0 : (dependencies.intervalMs || 1_000));
+      arm(result?.fullPage ? 0 : (dependencies.intervalMs || RECONCILE_INTERVAL_MS));
     }, delay);
     timer.unref?.();
   };
-  tick();
-  arm(dependencies.intervalMs || 1_000);
+  arm(0);
   return { tick, async stop() { stopped = true; if (timer) clearTimeout(timer); await running; } };
 }
 
 module.exports = {
+  RECONCILE_INTERVAL_MS,
   buildNotificationCompletenessReconciler,
   scheduleNotificationCompletenessReconciler,
 };

@@ -9,9 +9,71 @@ const {
 const {
   buildRaceResolutionDeliveryIntents,
 } = require("../../src/modules/races/services/raceResolutionDeliveryIntents");
+const {
+  buildRaceResolutionPostTaskRunner,
+} = require("../../src/modules/races/jobs/raceResolutionPostTaskRunner");
 
 describe("race resolution post-task durable storage", () => {
   beforeEach(cleanDatabase);
+
+  it("drains two bounded cleanup pages while retaining fresh terminal work", async () => {
+    const current = new Date("2026-08-28T12:00:00.000Z");
+    const oldCompletedAt = new Date(current.getTime() - 8 * 24 * 60 * 60_000);
+    const creator = await createTestUser({ displayName: "Cleanup Creator" });
+    const race = await prisma.race.create({
+      data: {
+        creatorId: creator.user.id,
+        name: "Cleanup Race",
+        targetSteps: 10_000,
+        status: "ACTIVE",
+        startedAt: new Date("2026-08-01T12:00:00.000Z"),
+        endsAt: new Date("2026-09-01T12:00:00.000Z"),
+      },
+    });
+    await prisma.raceResolutionPostTask.createMany({
+      data: Array.from({ length: 1101 }, (_, index) => ({
+        raceId: race.id,
+        sourceGeneration: index + 1,
+        dedupeKey: `cleanup-old:${index}`,
+        state: "succeeded",
+        requestedAt: oldCompletedAt,
+        notBeforeAt: oldCompletedAt,
+        snapshotState: "succeeded",
+        snapshotCommand: {},
+        payloadBytes: 2,
+        intentCount: 0,
+        completedAt: oldCompletedAt,
+      })),
+    });
+    await prisma.raceResolutionPostTask.create({
+      data: {
+        raceId: race.id,
+        sourceGeneration: 5000,
+        dedupeKey: "cleanup-fresh",
+        state: "succeeded",
+        requestedAt: current,
+        notBeforeAt: current,
+        snapshotState: "succeeded",
+        snapshotCommand: {},
+        payloadBytes: 2,
+        intentCount: 0,
+        completedAt: current,
+      },
+    });
+
+    const runner = buildRaceResolutionPostTaskRunner({
+      env: {},
+      now: () => current,
+      RaceResolutionPostTask,
+    });
+    assert.equal(await runner.cleanup(), 1000);
+    assert.equal(await prisma.raceResolutionPostTask.count({
+      where: { dedupeKey: { startsWith: "cleanup-old:" } },
+    }), 101);
+    assert.equal(await prisma.raceResolutionPostTask.count({
+      where: { dedupeKey: "cleanup-fresh" },
+    }), 1);
+  });
 
   it("dedupes a generation and enforces immutable decided payloads in Postgres", async () => {
     const creator = await createTestUser({ displayName: "Post Task Creator" });

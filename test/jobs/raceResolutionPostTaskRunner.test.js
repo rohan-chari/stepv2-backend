@@ -5,6 +5,7 @@ const {
   buildRaceResolutionPostTaskRunner,
   postTaskCleanupDisabled,
   postTaskWorkerDisabled,
+  scheduleRaceResolutionPostTaskRunner,
 } = require("../../src/modules/races/jobs/raceResolutionPostTaskRunner");
 
 test("runner attempts immutable intents in state/snapshot/nudge order and continues after ambiguity", async () => {
@@ -75,6 +76,57 @@ test("terminal cleanup is bounded, seven-day only, and uses the consolidated bra
     },
   });
   assert.equal(await disabled.cleanup(), 0);
+});
+
+test("terminal cleanup drains at most two 500-row pages and yields between full pages", async () => {
+  const calls = [];
+  let yields = 0;
+  const runner = buildRaceResolutionPostTaskRunner({
+    env: {},
+    now: () => new Date("2026-08-28T12:00:00.000Z"),
+    yieldToEventLoop: async () => { yields += 1; },
+    RaceResolutionPostTask: {
+      async cleanupTerminal(input) {
+        calls.push(input);
+        return 500;
+      },
+    },
+  });
+
+  assert.equal(await runner.cleanup(), 1000);
+  assert.equal(calls.length, 2);
+  assert.equal(yields, 1);
+  assert.ok(calls.every((call) => call.limit === 500));
+});
+
+test("scheduled cleanup does not overlap an in-flight cleanup", async () => {
+  let calls = 0;
+  let finishCleanup;
+  const pending = new Promise((resolve) => { finishCleanup = resolve; });
+  const scheduled = scheduleRaceResolutionPostTaskRunner({
+    env: {},
+    pollIntervalMs: 60_000,
+    cleanupIntervalMs: 60_000,
+    RaceResolutionPostTask: {
+      async cleanupTerminal() {
+        calls += 1;
+        await pending;
+        return 0;
+      },
+    },
+  });
+  try {
+    const first = scheduled.runCleanup();
+    const second = scheduled.runCleanup();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(calls, 1);
+    finishCleanup();
+    await Promise.all([first, second]);
+  } finally {
+    finishCleanup();
+    clearInterval(scheduled.interval);
+    clearInterval(scheduled.cleanup);
+  }
 });
 
 test("readiness requires a recent DB claim probe, bounded lag, and no ambiguous lease", async () => {
