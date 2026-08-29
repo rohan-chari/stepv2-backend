@@ -23,9 +23,6 @@ class RaceKickError extends Error {
   }
 }
 
-const {
-  enqueueRaceResolution: defaultEnqueueRaceResolution,
-} = require("../services/enqueueRaceResolution");
 // C3 (spec §5 Phase D step 9): this write seam is a snapshot DEL hook — the
 // shared standings snapshot must not outlive the change we just committed. The
 // resolution worker is deliberately NOT in this list: it SETs post-commit.
@@ -36,17 +33,6 @@ const { lockFundedExposureUsers } = require("../services/fundedExposure");
 const { acquireRaceWriteFence } = require("../services/raceWriteFence");
 
 function buildKickRaceParticipant(dependencies = {}) {
-  // C0 (spec §5a item 4): after this command's own small writes, mark the race
-  // dirty so the race-keyed worker re-converges its standings. Best-effort and
-  // stubbed out for injected fakes so unit tests stay DB-free.
-  const enqueueRaceResolution = Object.prototype.hasOwnProperty.call(
-    dependencies,
-    "enqueueRaceResolution"
-  )
-    ? dependencies.enqueueRaceResolution
-    : Object.keys(dependencies).length > 0
-      ? async () => null
-      : defaultEnqueueRaceResolution;
   const raceModel = dependencies.Race || Race;
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
   const awardCoinsFn = dependencies.awardCoins || awardCoins;
@@ -84,9 +70,16 @@ function buildKickRaceParticipant(dependencies = {}) {
     if (targetUserId === userId) {
       throw new RaceKickError("You cannot remove yourself", 400);
     }
+    if (race.status === "ACTIVE") {
+      throw new RaceKickError(
+        "Participants can only be removed before the race starts",
+        409,
+        "RACE_ALREADY_STARTED"
+      );
+    }
     assertStatusIn(
       race,
-      ["PENDING", "ACTIVE"],
+      ["PENDING"],
       () => new RaceKickError("Cannot modify a completed or cancelled race", 400)
     );
 
@@ -107,11 +100,21 @@ function buildKickRaceParticipant(dependencies = {}) {
           where: { id: raceId },
           select: { status: true, creatorId: true },
         });
-        if (
-          !lockedRace || lockedRace.creatorId !== userId ||
-          !["PENDING", "ACTIVE"].includes(lockedRace.status)
-        ) {
-          throw new RaceKickError("Cannot modify a completed or cancelled race", 409);
+        if (!lockedRace) {
+          throw new RaceKickError("Race not found", 404);
+        }
+        if (lockedRace.creatorId !== userId) {
+          throw new RaceKickError("Only the race creator can remove participants", 403);
+        }
+        if (lockedRace.status === "ACTIVE") {
+          throw new RaceKickError(
+            "Participants can only be removed before the race starts",
+            409,
+            "RACE_ALREADY_STARTED"
+          );
+        }
+        if (lockedRace.status !== "PENDING") {
+          throw new RaceKickError("Cannot modify a completed or cancelled race", 400);
         }
         currentTarget = await tx.raceParticipant.findUnique({
           where: { raceId_userId: { raceId, userId: targetUserId } },
@@ -155,16 +158,6 @@ function buildKickRaceParticipant(dependencies = {}) {
     });
 
     await invalidateRaceProgress(raceId);
-
-    if (race.status === "ACTIVE") {
-      await enqueueRaceResolution({
-        raceId,
-        userId: targetUserId,
-        reason: "JOIN_LEAVE_KICK",
-        priority: "IMMEDIATE",
-      });
-    }
-
 
     // C2 invalidation (spec §5 Phase C item 6): a membership change alters the
 

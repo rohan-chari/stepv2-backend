@@ -153,7 +153,6 @@ test("production kick deletes through the same C0 transaction", async () => {
     eventBus: { emit() {} },
     prisma: { async $transaction(callback) { calls.push("tx"); return callback(tx); } },
     async acquireRaceWriteFence() { calls.push("c0"); },
-    enqueueRaceResolution: async () => null,
   });
 
   await kick({ userId: race.creatorId, raceId: race.id, targetUserId: target.userId });

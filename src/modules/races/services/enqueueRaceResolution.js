@@ -77,7 +77,7 @@ async function rolloutOptions({
 // and the race-keyed upsert semantics can never drift between call sites.
 //
 // Two flavours:
-//   enqueueRaceResolution      — one known race (powerup use, join/leave/kick,
+//   enqueueRaceResolution      — one known race (powerup use, join/leave,
 //                                forfeit, edit/cancel, progress poll)
 //   enqueueRaceResolutionForUser — every ACTIVE race a user is in (the step-sync
 //                                paths, which know a user and not a race)

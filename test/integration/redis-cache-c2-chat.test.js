@@ -456,9 +456,13 @@ describe("C2 chat — §8 test 3 invalidation", () => {
     await messages(host.token, race.id);
     assert.ok(await probe.get(`${ENV_PREFIX}v1:race:msgs:${race.id}:USER`));
 
-    // Kick rather than leave: `leaveRace` only applies to PENDING team-race
-    // lobbies, while kick is valid on an ACTIVE race. Both run the same
-    // membership invalidation seam.
+    // Move this fixture back to a lobby after establishing the cached chat:
+    // creators may remove participants only before the race starts, and the
+    // kick still exercises the same membership invalidation seam.
+    await prisma.race.update({
+      where: { id: race.id },
+      data: { status: "PENDING", startedAt: null, endsAt: null },
+    });
     const kicked = await authReq(
       "DELETE",
       `/races/${race.id}/participants/${guest.userId}`,

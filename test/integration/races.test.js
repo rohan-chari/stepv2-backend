@@ -556,6 +556,59 @@ describe("races", () => {
       assert.ok(detail.endsAt);
     });
 
+    it("creator cannot remove a participant after the race starts", async () => {
+      const { alice, bob, raceId } = await setupPendingRace();
+      const startRes = await request(server.baseUrl, "POST", `/races/${raceId}/start`, {
+        token: alice.token,
+      });
+      assert.equal(startRes.status, 200);
+
+      const removeRes = await request(
+        server.baseUrl,
+        "DELETE",
+        `/races/${raceId}/participants/${bob.userId}`,
+        { token: alice.token },
+      );
+      assert.equal(removeRes.status, 409);
+      const removeBody = await removeRes.json();
+      assert.equal(removeBody.code, "RACE_ALREADY_STARTED");
+      assert.equal(
+        removeBody.error,
+        "Participants can only be removed before the race starts",
+      );
+
+      const detailRes = await request(server.baseUrl, "GET", `/races/${raceId}`, {
+        token: alice.token,
+      });
+      assert.equal(detailRes.status, 200);
+      const detail = await detailRes.json();
+      assert.ok(
+        detail.participants.some((participant) => participant.userId === bob.userId),
+        "an active-race removal attempt must leave the participant in the roster",
+      );
+    });
+
+    it("creator can still remove a participant before the race starts", async () => {
+      const { alice, bob, raceId } = await setupPendingRace();
+      const removeRes = await request(
+        server.baseUrl,
+        "DELETE",
+        `/races/${raceId}/participants/${bob.userId}`,
+        { token: alice.token },
+      );
+      assert.equal(removeRes.status, 200);
+
+      const detailRes = await request(server.baseUrl, "GET", `/races/${raceId}`, {
+        token: alice.token,
+      });
+      assert.equal(detailRes.status, 200);
+      const detail = await detailRes.json();
+      assert.equal(
+        detail.participants.some((participant) => participant.userId === bob.userId),
+        false,
+      );
+    });
+
     it("non-creator cannot start", async () => {
       const { bob, raceId } = await setupPendingRace();
 
