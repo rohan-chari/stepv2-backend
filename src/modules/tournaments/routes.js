@@ -20,6 +20,9 @@ const { startTournament: defaultStart } = require("./commands/startTournament");
 const { forfeitTournament: defaultForfeit } = require("./commands/forfeitTournament");
 const { cancelTournament: defaultCancel } = require("./commands/cancelTournament");
 const {
+  setTournamentFavorite: defaultSetTournamentFavorite,
+} = require("./commands/setTournamentFavorite");
+const {
   createTournamentShareLink: defaultCreateShareLink,
 } = require("./commands/createTournamentShareLink");
 const { getTournament: defaultGetTournament } = require("./queries/getTournament");
@@ -60,6 +63,8 @@ function createTournamentsRouter(dependencies = {}) {
   const startTournament = dependencies.startTournament || defaultStart;
   const forfeitTournament = dependencies.forfeitTournament || defaultForfeit;
   const cancelTournament = dependencies.cancelTournament || defaultCancel;
+  const setTournamentFavorite =
+    dependencies.setTournamentFavorite || defaultSetTournamentFavorite;
   const createTournamentShareLink =
     dependencies.createTournamentShareLink || defaultCreateShareLink;
   const getTournament = dependencies.getTournament || defaultGetTournament;
@@ -178,6 +183,20 @@ function createTournamentsRouter(dependencies = {}) {
       });
       res.status(201).json({ tournament });
     })
+  );
+
+  // PUT /tournaments/:tournamentId/favorite — caller-specific, accepted-only
+  // preference. Kept additive beside the existing race favorite route.
+  router.put(
+    "/:tournamentId/favorite",
+    asyncHandler(async (req, res) => {
+      const result = await setTournamentFavorite({
+        tournamentId: req.params.tournamentId,
+        userId: req.user.id,
+        favorite: req.body?.favorite,
+      });
+      res.json(result);
+    }),
   );
 
   // GET /tournaments/public — featured + user-created public listings

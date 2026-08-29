@@ -63,6 +63,7 @@ const summaryInclude = {
       seed: true,
       eliminatedInRound: true,
       joinedAt: true,
+      favoritedAt: true,
     },
   },
 };
@@ -105,6 +106,7 @@ const Tournament = {
         championPrizeCoinsSnapshot: true,
         startedAt: true,
         completedAt: true,
+        createdAt: true,
         seed: {
           select: { id: true, kind: true, championPrizeCoins: true },
         },

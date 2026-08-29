@@ -33,6 +33,7 @@ Object.assign(module.exports, require("./commands/kickTournamentParticipant"));
 Object.assign(module.exports, require("./commands/startTournament"));
 Object.assign(module.exports, require("./commands/forfeitTournament"));
 Object.assign(module.exports, require("./commands/cancelTournament"));
+Object.assign(module.exports, require("./commands/setTournamentFavorite"));
 Object.assign(module.exports, require("./commands/createTournamentShareLink"));
 Object.assign(module.exports, require("./commands/advanceTournament"));
 Object.assign(module.exports, require("./jobs/tournamentSeedRenewal"));

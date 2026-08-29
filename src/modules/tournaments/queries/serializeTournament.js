@@ -107,6 +107,7 @@ function summaryFields(t, acceptedCount = null) {
         }).totals.awardCoins
       : null,
     championUserId: t.championUserId ?? null,
+    createdAt: t.createdAt ?? null,
     startedAt: t.startedAt ?? null,
     completedAt: t.completedAt ?? null,
   };
@@ -281,6 +282,10 @@ function serializeTournamentSummary(t, viewerUserId) {
     myStatus: myParticipant?.status ?? null,
     myEliminatedInRound: myParticipant?.eliminatedInRound ?? null,
     acceptedCount,
+    // Additive caller-specific favorite state for GET /races. A missing/null
+    // value remains the safe unpinned state for clients during mixed rollout.
+    isFavorite: myParticipant?.favoritedAt instanceof Date,
+    favoritedAt: myParticipant?.favoritedAt ?? null,
     // myCurrentMatchRaceId is filled by the caller when it has the matchup races.
     myCurrentMatchRaceId: null,
   };

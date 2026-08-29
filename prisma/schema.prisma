@@ -1835,6 +1835,9 @@ model TournamentParticipant {
   inviteVersion                      Int                   @default(0) @map("invite_version")
   // ACCEPT time (updated on re-accept); the D3 exact-tie tiebreak key.
   joinedAt                           DateTime              @default(now()) @map("joined_at")
+  // Per-account tournament-list preference. NULL is the durable not-favorite
+  // state; accepted-only writes preserve the caller-specific contract.
+  favoritedAt                        DateTime?             @map("favorited_at")
   fundedExposureMillicoins           Int?                  @map("funded_exposure_millicoins")
   fundedExposureRateMillicoinsPerDay Int?                  @map("funded_exposure_rate_millicoins_per_day")
   createdAt                          DateTime              @default(now()) @map("created_at")
@@ -1844,6 +1847,7 @@ model TournamentParticipant {
 
   @@unique([tournamentId, userId])
   @@index([userId, status])
+  @@index([userId, favoritedAt])
   @@map("tournament_participants")
 }
 

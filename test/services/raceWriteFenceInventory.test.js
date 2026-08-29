@@ -161,6 +161,7 @@ const EXPECTED_PARTICIPANT_MUTATIONS = {
   "src/modules/tournaments/commands/forfeitTournament.js": ["raceParticipant.update"],
   "src/modules/tournaments/commands/inviteToTournament.js": ["tournamentParticipant.create", "tournamentParticipant.update"],
   "src/modules/tournaments/commands/joinTournamentCore.js": ["tournamentParticipant.create", "tournamentParticipant.update", "tournamentParticipant.update"],
+  "src/modules/tournaments/commands/setTournamentFavorite.js": ["tournamentParticipant.update", "tournamentParticipant.updateMany"],
   "src/modules/tournaments/services/tournamentParticipants.js": ["tournamentParticipant.update"],
   "src/modules/tournaments/services/tournamentRounds.js": ["raceParticipant.create"],
   "src/modules/tournaments/services/tournamentStart.js": ["tournamentParticipant.update", "tournamentParticipant.update"],
@@ -427,6 +428,7 @@ const NON_MEMBERSHIP_PARTICIPANT_WRITERS = new Set([
   "src/modules/races/services/racePowerupStateSync.js",
   "src/modules/races/services/raceResolutionDeliveryIntents.js",
   "src/modules/tournaments/commands/cancelTournament.js",
+  "src/modules/tournaments/commands/setTournamentFavorite.js",
 ]);
 
 test("worker-owned box scalar writes require caller tx after advisory locks and before job success", () => {
