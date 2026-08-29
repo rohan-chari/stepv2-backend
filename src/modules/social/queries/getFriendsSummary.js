@@ -7,6 +7,7 @@ const summaryUserSelect = {
   profilePhotoUrl: true,
   firstName: true,
   lastName: true,
+  nameSetupCompletedAt: true,
   clientFeatures: true,
 };
 
@@ -64,6 +65,10 @@ function buildGetFriendsSummary(dependencies = {}) {
         return {
           id: user.id,
           displayName: user.displayName,
+          discoverableName:
+            user.nameSetupCompletedAt != null
+              ? [user.firstName, user.lastName].filter(Boolean).join(" ") || null
+              : null,
           profilePhotoUrl: user.profilePhotoUrl,
           friendshipId: friendship.id,
           teamRaceEligible:
