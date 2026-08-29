@@ -10,6 +10,11 @@ const {
 const { normalizeSamples, removeOverlaps } = require("./recordStepSamples");
 const { appSettings: defaultAppSettings } = require("../../../shared/config/appSettings");
 const { isStrictFlagEnabled } = require("../../../shared/config/isStrictFlagEnabled");
+const {
+  recordStepTelemetryPhase,
+  measureStepTelemetryPhase,
+  markStepTelemetryTransactionError,
+} = require("../../../shared/observability/stepTelemetryContext");
 
 const COMPAT_STEP_GOAL = 5000;
 const RECONCILE_LEASE_MS = 30 * 1000;
@@ -90,6 +95,7 @@ function buildRecordStepSyncV2(dependencies = {}) {
 
   async function runIntakeTransaction(work) {
     for (let attempt = 0; attempt < CAPTURE_CLOSURE_RETRIES; attempt += 1) {
+      const startedAt = process.hrtime.bigint();
       try {
         // Explicit dependency and race fences inside the transaction provide
         // the summary-capture consistency boundary. Read Committed lets a
@@ -97,10 +103,16 @@ function buildRecordStepSyncV2(dependencies = {}) {
         // latest committed generation instead of aborting on a stale snapshot.
         return await prisma.$transaction(work, { timeout: 15_000, maxWait: 10_000 });
       } catch (error) {
+        markStepTelemetryTransactionError(error);
         if (!isSummaryCaptureClosureChanged(error) ||
             attempt === CAPTURE_CLOSURE_RETRIES - 1) {
           throw error;
         }
+      } finally {
+        recordStepTelemetryPhase(
+          "transaction_total",
+          Number(process.hrtime.bigint() - startedAt) / 1e6,
+        );
       }
     }
     return null;
@@ -154,11 +166,14 @@ function buildRecordStepSyncV2(dependencies = {}) {
     options,
   }) {
     const requestedAt = now();
-    const eligibleSummaryWorkIds = await require("../services/globalEventSummaryCapture")
-      .lockEligibleSummaryCaptureDependencies(tx, {
-        userId,
-        at: requestedAt,
-      });
+    const eligibleSummaryWorkIds = await measureStepTelemetryPhase(
+      "summary_finalization",
+      () => require("../services/globalEventSummaryCapture")
+        .lockEligibleSummaryCaptureDependencies(tx, {
+          userId,
+          at: requestedAt,
+        }),
+    );
     const intake = await stepInputIntake({
       userId,
       daily: { date: canonical.date, steps: canonical.steps },
@@ -169,15 +184,18 @@ function buildRecordStepSyncV2(dependencies = {}) {
       ...options,
     }, tx);
     const completedAt = intake.completedAt || requestedAt;
-    const globalEventSummaryWork = await require("../services/globalEventSummaryCapture")
-      .claimEligibleSummaryWork(tx, {
-        userId,
-        eligibleWorkIds: eligibleSummaryWorkIds,
-        captureSyncRequestId: reservation.id,
-        captureCompletedAt: completedAt,
-        captureCoverageThrough: intake.canonicalCoverageThrough,
-        sourceScoringInputGeneration: intake.generation,
-      });
+    const globalEventSummaryWork = await measureStepTelemetryPhase(
+      "summary_finalization",
+      () => require("../services/globalEventSummaryCapture")
+        .claimEligibleSummaryWork(tx, {
+          userId,
+          eligibleWorkIds: eligibleSummaryWorkIds,
+          captureSyncRequestId: reservation.id,
+          captureCompletedAt: completedAt,
+          captureCoverageThrough: intake.canonicalCoverageThrough,
+          sourceScoringInputGeneration: intake.generation,
+        }),
+    );
     const response = buildResponse({
       record: intake.record,
       sampleCount: cleaned.length,
@@ -185,17 +203,20 @@ function buildRecordStepSyncV2(dependencies = {}) {
       requestedAt,
       globalEventSummaryWork,
     });
-    await stepSyncRequestModel.finalize(
-      {
-        id: reservation.id,
-        responseJson: response,
-        dailyExisted: intake.dailyExisted,
-        completedAt,
-        canonicalCoverageThrough: intake.canonicalCoverageThrough,
-        scoringInputGeneration: intake.generation,
-        now: completedAt,
-      },
-      tx
+    await measureStepTelemetryPhase(
+      "summary_finalization",
+      () => stepSyncRequestModel.finalize(
+        {
+          id: reservation.id,
+          responseJson: response,
+          dailyExisted: intake.dailyExisted,
+          completedAt,
+          canonicalCoverageThrough: intake.canonicalCoverageThrough,
+          scoringInputGeneration: intake.generation,
+          now: completedAt,
+        },
+        tx,
+      ),
     );
     return {
       response,
@@ -205,12 +226,14 @@ function buildRecordStepSyncV2(dependencies = {}) {
   }
 
   async function afterCommit(result, { userId, canonical }) {
-    await stampAfterCommit({ userId, date: canonical.date });
-    await emitEventOnce(result.reservationId, {
-      userId,
-      date: canonical.date,
-      steps: canonical.steps,
-      dailyExisted: result.dailyExisted,
+    await measureStepTelemetryPhase("post_commit", async () => {
+      await stampAfterCommit({ userId, date: canonical.date });
+      await emitEventOnce(result.reservationId, {
+        userId,
+        date: canonical.date,
+        steps: canonical.steps,
+        dailyExisted: result.dailyExisted,
+      });
     });
   }
 

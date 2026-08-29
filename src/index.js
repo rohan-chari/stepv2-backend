@@ -12,6 +12,9 @@ const {
 
 const { createApp } = require("./app");
 const {
+  databasePoolTelemetry: defaultDatabasePoolTelemetry,
+} = require("./db");
+const {
   registerEventHandlers,
   registerNotificationHandlers,
 } = require("./modules/notifications");
@@ -162,6 +165,7 @@ function startServer({
   // path while excluding unrelated whole-base jobs from the measurement.
   capacityGlobalEventOnly = false,
   processRole = process.env.STEPS_PROCESS_ROLE || "all",
+  databasePoolTelemetry = defaultDatabasePoolTelemetry,
 } = {}) {
   const jobStopHandles = [];
   const retainStopHandle = (handle) => {
@@ -180,6 +184,7 @@ function startServer({
     // Every process advertises its per-boot generation outside all cron/PM2
     // ownership guards. Extra overlapping boots intentionally block readiness.
     retainStopHandle(scheduleGenerationHeartbeatJob());
+    retainStopHandle(databasePoolTelemetry?.start?.());
     const startCrons = () => {
       // Production uses separate HTTP, resolution, and cron processes. Keep
       // the historical "all" role for local development and injected startup

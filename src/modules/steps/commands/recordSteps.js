@@ -5,6 +5,9 @@ const { stepSyncPushService } = require("../../../shared/push/stepSyncPush");
 const { appSettings: defaultAppSettings } = require("../../../shared/config/appSettings");
 const { isStrictFlagEnabled } = require("../../../shared/config/isStrictFlagEnabled");
 const { stepInputIntake: defaultStepInputIntake } = require("../services/stepInputIntake");
+const {
+  measureStepTelemetryPhase,
+} = require("../../../shared/observability/stepTelemetryContext");
 
 // Worker-owned, best-effort rival nudge computation. Step intake never calls
 // this helper; the queue worker invokes it only after its fenced commit.
@@ -137,22 +140,24 @@ function buildRecordSteps(dependencies = {}) {
       queuedGenerationMerge,
     });
 
-    // Bookkeeping and projections intentionally remain outside the durability
-    // transaction. Their failure cannot turn committed source+queue into 5xx.
-    try {
-      await userModel.update(userId, { lastStepSyncAt: now() });
-    } catch (error) {
-      console.error("steps lastStepSyncAt update failed:", error);
-    }
-    try {
-      await require("../services/dailyStepsCache").invalidateSafe(userId, date);
-    } catch (error) {
-      console.error("steps daily cache invalidation failed:", error);
-    }
-    events.emit(result.dailyExisted ? "STEPS_UPDATED" : "STEPS_RECORDED", {
-      userId,
-      steps,
-      date,
+    await measureStepTelemetryPhase("post_commit", async () => {
+      // Bookkeeping and projections intentionally remain outside the durability
+      // transaction. Their failure cannot turn committed source+queue into 5xx.
+      try {
+        await userModel.update(userId, { lastStepSyncAt: now() });
+      } catch (error) {
+        console.error("steps lastStepSyncAt update failed:", error);
+      }
+      try {
+        await require("../services/dailyStepsCache").invalidateSafe(userId, date);
+      } catch (error) {
+        console.error("steps daily cache invalidation failed:", error);
+      }
+      events.emit(result.dailyExisted ? "STEPS_UPDATED" : "STEPS_RECORDED", {
+        userId,
+        steps,
+        date,
+      });
     });
     return {
       ...result.record,

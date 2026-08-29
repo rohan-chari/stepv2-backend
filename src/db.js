@@ -125,6 +125,17 @@ function getDbPoolPressure() {
 
 const adapter = new PrismaPg(pool);
 
+const {
+  createDatabasePoolTelemetry,
+} = require("./shared/observability/databasePoolTelemetry");
+const redisCache = require("./shared/cache/redisCache");
+const cacheKeys = require("./shared/cache/cacheKeys");
+const databasePoolTelemetry = createDatabasePoolTelemetry({
+  pool,
+  redisCache,
+  cacheKeys,
+});
+
 const rootPrisma = new PrismaClient({
   adapter,
   // Query events are deliberately opt-in. Integration/benchmark processes may
@@ -210,6 +221,7 @@ async function runAfterCommitTasks(tasks, logger = console) {
 module.exports = {
   prisma,
   getDbPoolPressure,
+  databasePoolTelemetry,
   runInPrismaTransaction,
   deferUntilAfterCommit,
   runAfterCommitTasks,

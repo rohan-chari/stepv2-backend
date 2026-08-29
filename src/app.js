@@ -69,7 +69,11 @@ const {
   normalizeReferralCode,
 } = require("./shared/lib/referralCode");
 const { hmacClientIpHashes } = require("./shared/lib/clientIp");
-const { prisma: defaultPrisma, getDbPoolPressure } = require("./db");
+const {
+  prisma: defaultPrisma,
+  getDbPoolPressure,
+  databasePoolTelemetry,
+} = require("./db");
 const redisCache = require("./shared/cache/redisCache");
 const { errorMiddleware } = require("./shared/http/errorMiddleware");
 const { createApiContractTelemetry } = require("./shared/http/apiContractTelemetry");
@@ -136,7 +140,10 @@ function createApp(dependencies = {}) {
   );
 
   app.use("/auth", createAuthRouter(dependencies));
-  app.use("/steps", createStepsRouter(dependencies));
+  app.use("/steps", createStepsRouter({
+    ...dependencies,
+    stepTelemetry: dependencies.stepTelemetry || databasePoolTelemetry,
+  }));
   app.use("/friends", createFriendsRouter(dependencies));
   app.use("/admin/giveaways", createGiveawayAdminRouter(dependencies));
   app.use("/admin", createAdminRouter(dependencies));

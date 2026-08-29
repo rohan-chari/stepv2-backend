@@ -13,6 +13,11 @@ const {
 const {
   startCapacityPhase,
 } = require("../../../shared/observability/capacityPhaseMetrics");
+const {
+  recordStepTelemetryPhase,
+  measureStepTelemetryPhase,
+  markStepTelemetryTransactionError,
+} = require("../../../shared/observability/stepTelemetryContext");
 
 function generationsEqual(left, right) {
   if (left == null || right == null) return false;
@@ -45,18 +50,18 @@ function buildStepInputIntake(dependencies = {}) {
       throw new TypeError("step input intake requires daily and/or samples");
     }
 
-    const scoringState = await lockScoringInputState(tx, userId);
+    const scoringState = await measureStepTelemetryPhase(
+      "scoring_state",
+      () => lockScoringInputState(tx, userId),
+    );
     const existingDaily = daily
-      ? await tx.step.findUnique({
-          where: {
-            userId_date: { userId, date: new Date(daily.date) },
-          },
-        })
+      ? await measureStepTelemetryPhase("daily", () => tx.step.findUnique({
+          where: { userId_date: { userId, date: new Date(daily.date) } },
+        }))
       : null;
-    const beforeSamples = await readCanonicalSampleInput(
-      tx,
-      userId,
-      scoringState.dbNow
+    const beforeSamples = await measureStepTelemetryPhase(
+      "sample",
+      () => readCanonicalSampleInput(tx, userId, scoringState.dbNow),
     );
 
     let record = existingDaily;
@@ -64,7 +69,7 @@ function buildStepInputIntake(dependencies = {}) {
     if (daily) {
       dailyStorageChanged =
         !existingDaily || Number(existingDaily.steps) !== Number(daily.steps);
-      record = await tx.step.upsert({
+      record = await measureStepTelemetryPhase("daily", () => tx.step.upsert({
         where: {
           userId_date: { userId, date: new Date(daily.date) },
         },
@@ -75,21 +80,27 @@ function buildStepInputIntake(dependencies = {}) {
           stepGoal: null,
         },
         update: { steps: daily.steps },
-      });
+      }));
     }
 
     let samplePersistence = { storageChanged: false, scoringChanged: false };
     if (Array.isArray(samples) && samples.length > 0) {
-      samplePersistence = await stepSampleModel.reconcileBatchOn(
-        tx,
-        userId,
-        samples,
-        new Date(requestTimestamp).getTime(),
-        { noopSuppression: true, manageScoringVersion: false }
+      samplePersistence = await measureStepTelemetryPhase(
+        "sample",
+        () => stepSampleModel.reconcileBatchOn(
+          tx,
+          userId,
+          samples,
+          new Date(requestTimestamp).getTime(),
+          { noopSuppression: true, manageScoringVersion: false },
+        ),
       );
     }
 
-    const afterSamples = await readCanonicalSampleInput(tx, userId);
+    const afterSamples = await measureStepTelemetryPhase(
+      "sample",
+      () => readCanonicalSampleInput(tx, userId),
+    );
     const decisionState = { ...scoringState, dbNow: afterSamples.dbNow };
     const sampleScoringChanged =
       !scoringBoundaryIsSafe(decisionState) ||
@@ -100,12 +111,15 @@ function buildStepInputIntake(dependencies = {}) {
       samplePersistence.storageChanged === true ||
       beforeSamples.storageWatermark !== afterSamples.storageWatermark;
 
-    await persistScoringInputState(
-      tx,
-      userId,
-      scoringState,
-      afterSamples,
-      scoringChanged
+    await measureStepTelemetryPhase(
+      "scoring_generation",
+      () => persistScoringInputState(
+        tx,
+        userId,
+        scoringState,
+        afterSamples,
+        scoringChanged,
+      ),
     );
     const generation = resultingGeneration(scoringState, scoringChanged);
     const repairRequired = !generationsEqual(
@@ -116,7 +130,7 @@ function buildStepInputIntake(dependencies = {}) {
     let jobs = [];
     let activeRaceCount = 0;
     if (scoringChanged || repairRequired) {
-      const races = await tx.race.findMany({
+      const races = await measureStepTelemetryPhase("active_race", () => tx.race.findMany({
         where: {
           status: "ACTIVE",
           participants: { some: { userId, status: "ACCEPTED" } },
@@ -130,7 +144,7 @@ function buildStepInputIntake(dependencies = {}) {
           },
         },
         orderBy: { id: "asc" },
-      });
+      }));
       activeRaceCount = races.length;
       const dirtyEnvelopeByRaceId = new Map();
       for (const race of races) {
@@ -143,20 +157,26 @@ function buildStepInputIntake(dependencies = {}) {
           priority: participant ? "COALESCE" : "IMMEDIATE",
         });
       }
-      jobs = await raceResolutionJobModel.enqueueMany(
-        {
-          raceIds: races.map((race) => race.id),
-          userId,
-          resolutionTimeZone: timeZone,
-          now: new Date(requestTimestamp),
-          dirtyEnvelopeByRaceId,
-          burstCoalescing,
-          queuedGenerationMerge,
-          queuePriority: "MAINTENANCE",
-        },
-        tx
+      jobs = await measureStepTelemetryPhase(
+        "durable_enqueue",
+        () => raceResolutionJobModel.enqueueMany(
+          {
+            raceIds: races.map((race) => race.id),
+            userId,
+            resolutionTimeZone: timeZone,
+            now: new Date(requestTimestamp),
+            dirtyEnvelopeByRaceId,
+            burstCoalescing,
+            queuedGenerationMerge,
+            queuePriority: "MAINTENANCE",
+          },
+          tx,
+        ),
       );
-      await stampSourceQueueSemanticsGeneration(tx, userId, generation);
+      await measureStepTelemetryPhase(
+        "scoring_generation",
+        () => stampSourceQueueSemanticsGeneration(tx, userId, generation),
+      );
     }
 
     return {
@@ -180,10 +200,23 @@ function buildStepInputIntake(dependencies = {}) {
     try {
       const result = tx
         ? await runOn(tx, input)
-        : await prisma.$transaction((client) => runOn(client, input), {
-            timeout: 15_000,
-            maxWait: 10_000,
-          });
+        : await (async () => {
+            const startedAt = process.hrtime.bigint();
+            try {
+              return await prisma.$transaction((client) => runOn(client, input), {
+                timeout: 15_000,
+                maxWait: 10_000,
+              });
+            } catch (error) {
+              markStepTelemetryTransactionError(error);
+              throw error;
+            } finally {
+              recordStepTelemetryPhase(
+                "transaction_total",
+                Number(process.hrtime.bigint() - startedAt) / 1e6,
+              );
+            }
+          })();
       outcome = result.scoringChanged ? "changed" : "scoring_noop";
       capacity.setCounts({
         enqueueRaceCount: result.activeRaceCount,

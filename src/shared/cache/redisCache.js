@@ -24,6 +24,8 @@
 const CHANNEL_SUFFIX = "cache:invalidate";
 const NOTIFICATION_WAKE_CHANNEL_SUFFIX = "notification:wake";
 const ERROR_LOG_INTERVAL_MS = 60_000;
+const TELEMETRY_HISTORY_HASH_CAP_BYTES = 128 * 1024;
+const TELEMETRY_HISTORY_BATCH_CAP_BYTES = 24 * 1024 * 1024;
 
 // Lua: release a lock only if we still hold it (token compare-and-delete), so a
 // slow critical section that outlived its PX cannot delete someone else's lock.
@@ -55,6 +57,16 @@ function logOnce(opClass, error) {
   console.error(
     `[redisCache] ${opClass} failed (further ${opClass} errors suppressed for 60s):`,
     error && error.message ? error.message : error
+  );
+}
+
+function logGenericOnce(opClass) {
+  const now = Date.now();
+  const last = errorLogTimestamps.get(opClass);
+  if (last != null && now - last < ERROR_LOG_INTERVAL_MS) return;
+  errorLogTimestamps.set(opClass, now);
+  console.error(
+    `[redisCache] ${opClass} failed (details suppressed; further ${opClass} errors suppressed for 60s)`,
   );
 }
 
@@ -534,7 +546,7 @@ async function subscribeNotificationWakeup(handler) {
  *                                 per-prefix bypass breaker (§3).
  *   Never throws.
  */
-async function evalLua(script, keys = [], args = []) {
+async function evalLua(script, keys = [], args = [], options = {}) {
   try {
     const client = await readyClient();
     if (!client) return { ok: false, disabled: true, result: null };
@@ -546,8 +558,178 @@ async function evalLua(script, keys = [], args = []) {
     );
     return { ok: true, disabled: false, result };
   } catch (error) {
-    logOnce("evalLua", error);
+    if (options.genericError === true) logGenericOnce(options.opClass || "evalLua");
+    else logOnce("evalLua", error);
     return { ok: false, disabled: false, result: null };
+  }
+}
+
+async function readDatabasePoolTelemetrySnapshots(keys) {
+  if (!Array.isArray(keys) || keys.length !== 4) {
+    return { ok: false, disabled: false, values: [] };
+  }
+  try {
+    const client = await readyClient();
+    if (!client) return { ok: false, disabled: true, values: [] };
+    const raws = await client.mget(...keys.map(prefixed));
+    if (!Array.isArray(raws) || raws.length !== 4) {
+      return { ok: false, disabled: false, values: [] };
+    }
+    return {
+      ok: true,
+      disabled: false,
+      values: raws.map((raw) => {
+        if (raw == null) return null;
+        const {
+          SNAPSHOT_SERIALIZED_CAP_BYTES,
+        } = require("../observability/telemetryRedisContract");
+        if (Buffer.byteLength(raw) > SNAPSHOT_SERIALIZED_CAP_BYTES) return undefined;
+        try { return JSON.parse(raw); } catch { return undefined; }
+      }),
+    };
+  } catch {
+    logGenericOnce("pool-telemetry-snapshot-read");
+    return { ok: false, disabled: false, values: [] };
+  }
+}
+
+async function writeDatabasePoolTelemetrySnapshot(key, value, ttlSeconds = 150) {
+  const {
+    SNAPSHOT_WRITE_LUA,
+    SNAPSHOT_SCHEMA,
+    SNAPSHOT_SERIALIZED_CAP_BYTES,
+  } = require("../observability/telemetryRedisContract");
+  try {
+    const cacheKeys = require("./cacheKeys");
+    if (!value || value.schema !== SNAPSHOT_SCHEMA ||
+        key !== cacheKeys.databasePoolTelemetry(value.role, String(value.instance)) ||
+        !Number.isSafeInteger(ttlSeconds) || ttlSeconds <= 0) {
+      return { ok: false, disabled: false, status: "invalid" };
+    }
+    const payload = JSON.stringify(value);
+    if (Buffer.byteLength(payload) > SNAPSHOT_SERIALIZED_CAP_BYTES) {
+      return { ok: false, disabled: false, status: "oversize" };
+    }
+    const result = await evalLua(
+      SNAPSHOT_WRITE_LUA,
+      [key],
+      [payload, Math.ceil(ttlSeconds)],
+      { genericError: true, opClass: "pool-telemetry-snapshot-write" },
+    );
+    return {
+      ok: result.ok && ["accepted", "older"].includes(result.result),
+      disabled: result.disabled,
+      status: result.result || (result.disabled ? "disabled" : "error"),
+    };
+  } catch {
+    logGenericOnce("pool-telemetry-snapshot");
+    return { ok: false, disabled: false, status: "error" };
+  }
+}
+
+async function writeStepIngestionMinute({
+  hourKey,
+  startKey,
+  emission,
+  collectionStartedMinuteMs,
+  ttlSeconds = 8 * 24 * 60 * 60,
+}) {
+  const {
+    STEP_HISTORY_WRITE_LUA,
+    STEP_HOUR_SCHEMA,
+    STEP_HISTORY_START_SCHEMA,
+    buildStepMinuteEmission,
+    historyFieldNames,
+  } = require("../observability/telemetryRedisContract");
+  try {
+    const cacheKeys = require("./cacheKeys");
+    const normalized = buildStepMinuteEmission(emission);
+    if (hourKey !== cacheKeys.stepIngestionHour(normalized.minuteStartedAtMs) ||
+        startKey !== cacheKeys.stepIngestionHistoryStart() ||
+        !Number.isSafeInteger(collectionStartedMinuteMs) ||
+        collectionStartedMinuteMs < 0 ||
+        !Number.isSafeInteger(ttlSeconds) || ttlSeconds <= 0) {
+      return { ok: false, disabled: false, status: "invalid" };
+    }
+    const fields = historyFieldNames(normalized);
+    const start = {
+      schema: STEP_HISTORY_START_SCHEMA,
+      collectionStartedMinuteMs: Math.floor(Number(collectionStartedMinuteMs) / 60_000) * 60_000,
+    };
+    const result = await evalLua(
+      STEP_HISTORY_WRITE_LUA,
+      [hourKey, startKey],
+      [
+        STEP_HOUR_SCHEMA,
+        fields.emissionField,
+        fields.counterField,
+        fields.overflowField,
+        JSON.stringify(normalized),
+        JSON.stringify(start),
+        Math.ceil(ttlSeconds),
+      ],
+      { genericError: true, opClass: "step-telemetry-history-write" },
+    );
+    const status = result.result || (result.disabled ? "disabled" : "error");
+    if (result.ok && ["schema_error", "overflow"].includes(status)) {
+      logGenericOnce(`step-telemetry-history-${status}`);
+    } else if (result.ok && !["accepted", "duplicate"].includes(status)) {
+      logGenericOnce("step-telemetry-history-invalid-output");
+    }
+    return {
+      ok: result.ok && ["accepted", "duplicate"].includes(status),
+      disabled: result.disabled,
+      status,
+    };
+  } catch {
+    logGenericOnce("step-telemetry-history");
+    return { ok: false, disabled: false, status: "invalid" };
+  }
+}
+
+async function readStepIngestionHistory({ startKey, hourKeys }) {
+  if (!Array.isArray(hourKeys) || hourKeys.length > 169) {
+    return { ok: false, disabled: false, start: null, hours: [], oversizeKeys: [] };
+  }
+  try {
+    const client = await readyClient();
+    if (!client) return { ok: false, disabled: true, start: null, hours: [], oversizeKeys: [] };
+    const pipeline = client.pipeline();
+    pipeline.get(prefixed(startKey));
+    for (const key of hourKeys) pipeline.hgetall(prefixed(key));
+    const replies = await pipeline.exec();
+    if (!Array.isArray(replies) || replies.length !== hourKeys.length + 1 || replies.some(([error]) => error)) {
+      return { ok: false, disabled: false, start: null, hours: [], oversizeKeys: [] };
+    }
+    let batchBytes = 0;
+    let start = null;
+    try {
+      const raw = replies[0][1];
+      batchBytes += raw == null ? 0 : Buffer.byteLength(raw);
+      start = raw == null ? null : JSON.parse(raw);
+    } catch {
+      start = undefined;
+    }
+    const hours = [];
+    const oversizeKeys = [];
+    for (let index = 0; index < hourKeys.length; index += 1) {
+      const fields = replies[index + 1][1] || {};
+      const bytes = Buffer.byteLength(JSON.stringify(fields));
+      batchBytes += bytes;
+      if (bytes > TELEMETRY_HISTORY_HASH_CAP_BYTES) {
+        oversizeKeys.push(hourKeys[index]);
+        hours.push(null);
+      } else {
+        hours.push(fields);
+      }
+    }
+    if (batchBytes > TELEMETRY_HISTORY_BATCH_CAP_BYTES) {
+      return { ok: false, disabled: false, start, hours: [], oversizeKeys: hourKeys.slice() };
+    }
+    return { ok: true, disabled: false, start, hours, oversizeKeys };
+  } catch {
+    logGenericOnce("step-telemetry-history-read");
+    return { ok: false, disabled: false, start: null, hours: [], oversizeKeys: [] };
   }
 }
 
@@ -721,6 +903,10 @@ module.exports = {
   withLock,
   withLockStatus,
   evalLua,
+  readDatabasePoolTelemetrySnapshots,
+  writeDatabasePoolTelemetrySnapshot,
+  writeStepIngestionMinute,
+  readStepIngestionHistory,
   withWatch,
   publishInvalidate,
   publishNotificationWakeup,

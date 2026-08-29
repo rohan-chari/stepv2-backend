@@ -269,6 +269,31 @@ pm2 logs steps-tracker --lines 200 --nostream | grep -iE "error|P2002|unhandled|
 until you flush — this caused a false "prod is down" scare during the 2026-05-25
 deploy.)
 
+### Pool telemetry observation preflight
+
+Before starting a 24-hour or longer pool/failure-rate observation, confirm PM2
+will retain at least 48 hours of logs. Do not infer retention merely from the
+presence of old files: inspect the active `pm2-logrotate` configuration (or the
+host's external log rotation policy) and verify its rotation interval plus
+retained-file count covers 48 hours for all three PM2 apps.
+
+After the telemetry build has been separately authorized and deployed, wait at
+least one full minute, then verify the structured heartbeat is present for all
+four process identities:
+
+```bash
+pm2 logs steps-tracker --lines 500 --nostream | grep '"event":"database_pool_telemetry_v1"'
+pm2 logs steps-tracker-resolution --lines 200 --nostream | grep '"event":"database_pool_telemetry_v1"'
+pm2 logs steps-tracker-cron --lines 200 --nostream | grep '"event":"database_pool_telemetry_v1"'
+```
+
+The observed identity set must be exactly `http:0`, `http:1`, `resolution:0`,
+and `cron:0`. Each line is aggregate-only. If any identity is absent, log
+retention is under 48 hours, or a line contains an unexpected raw field, do not
+start the observation window. The Admin `SYSTEM HEALTH` section may say
+`COLLECTING` during the first 60 minutes and for the longer 24-hour/7-day
+windows; that is expected and must not be reported as complete coverage.
+
 ---
 
 ## 5. Restart staging

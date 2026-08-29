@@ -40,6 +40,10 @@ const {
 const {
   buildSetActiveCompetitionLimit,
 } = require("./commands/setActiveCompetitionLimit");
+const {
+  getSystemHealth: defaultGetSystemHealth,
+} = require("./queries/getSystemHealth");
+const { asyncHandler } = require("../../shared/http/asyncHandler");
 
 // C1 invalidation (spec §5 Phase B). Every shop_items / powerup_shop_items
 // mutation below must drop the derived catalog + manifest copies and broadcast
@@ -259,6 +263,7 @@ function createAdminRouter(dependencies = {}) {
       getActiveCompetitionLimit,
       appSettings: settings,
     });
+  const getSystemHealth = dependencies.getSystemHealth || defaultGetSystemHealth;
 
   // Batch 2026-08-08 item 7 — in-app suggestion box, admin read side.
   // Newest first, keyset-paged: ?limit=50&before=<ISO createdAt>. `nextBefore`
@@ -550,6 +555,10 @@ function createAdminRouter(dependencies = {}) {
       res.status(500).json({ error: "Internal server error" });
     }
   });
+
+  router.get("/system-health", asyncHandler(async (req, res) => {
+    res.json(await getSystemHealth({ window: req.query?.window || "60m" }));
+  }));
 
   router.get("/shop/items", async (req, res) => {
     try {

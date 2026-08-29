@@ -31,6 +31,20 @@ const {
 const {
   raceResolutionIntakeDisabled,
 } = require("../../../shared/config/operationalControls");
+const {
+  isPendingCheckoutTimeout,
+} = require("../../../shared/observability/databasePoolTelemetry");
+const {
+  runWithStepTelemetryContext,
+  recordStepTelemetryPhase,
+  isStepTelemetryTransactionError,
+} = require("../../../shared/observability/stepTelemetryContext");
+
+function classifyCaughtStepServerError(error) {
+  if (isPendingCheckoutTimeout(error)) return "pool_checkout_timeout";
+  if (isStepTelemetryTransactionError(error)) return "transaction_error";
+  return "server_5xx";
+}
 
 // 64 KiB cap on the encoded sync-v2 body (§6.4). The app-wide express.json outer
 // limit is unchanged; this is the tighter v2-specific bound.
@@ -56,8 +70,67 @@ function createStepsRouter(dependencies = {}) {
   const getProfileStats =
     dependencies.getProfileStats || defaultGetProfileStats;
   const settings = dependencies.appSettings || defaultAppSettings;
+  const stepTelemetry = dependencies.stepTelemetry || null;
+
+  const telemetryEndpoint = (req) => {
+    if (req.method !== "POST") return null;
+    if (req.path === "/") return "steps";
+    if (req.path === "/samples") return "samples";
+    if (req.path === "/sync-v2") return "sync-v2";
+    return null;
+  };
+
+  router.use((req, res, next) => {
+    const endpoint = telemetryEndpoint(req);
+    if (!endpoint || typeof stepTelemetry?.recordStepRequest !== "function") return next();
+    const startedAt = process.hrtime.bigint();
+    const telemetryContext = { phases: {}, phaseObservations: {} };
+    res.locals.stepTelemetryStartedAt = startedAt;
+    res.once("finish", () => {
+      const status = res.statusCode;
+      const outcome = res.locals.stepTelemetryOutcome ||
+        (status >= 200 && status < 400 ? "success" :
+          ([401, 403].includes(status) ? "auth_4xx" :
+            (status >= 400 && status < 500 ? "validation_4xx" : "server_5xx")));
+      const durationMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+      try {
+        stepTelemetry.recordStepRequest({
+          endpoint,
+          outcome,
+          durationMs,
+          authenticationDurationMs: res.locals.stepTelemetryAuthDurationMs ?? durationMs,
+          ...(telemetryContext.phases.checkout_wait != null
+            ? {
+                checkoutWaitMs: telemetryContext.phases.checkout_wait,
+                checkoutWaitDurationsMs: telemetryContext.phaseObservations.checkout_wait,
+              }
+            : {}),
+          ...(telemetryContext.phases.transaction_total != null
+            ? {
+                transactionDurationMs: telemetryContext.phases.transaction_total,
+                transactionDurationsMs: telemetryContext.phaseObservations.transaction_total,
+              }
+            : {}),
+        });
+        for (const [phase, observations] of Object.entries(telemetryContext.phaseObservations)) {
+          for (const phaseDurationMs of observations) {
+            stepTelemetry.recordStepPhase?.({ phase, durationMs: phaseDurationMs, samplingRate: 1 });
+          }
+        }
+      } catch {}
+    });
+    runWithStepTelemetryContext(telemetryContext, next);
+  });
 
   router.use(requireAuth);
+  router.use((req, res, next) => {
+    if (res.locals.stepTelemetryStartedAt != null) {
+      const durationMs = Number(process.hrtime.bigint() - res.locals.stepTelemetryStartedAt) / 1e6;
+      res.locals.stepTelemetryAuthDurationMs = durationMs;
+      recordStepTelemetryPhase("authentication", durationMs);
+    }
+    next();
+  });
 
   // POST /steps
   // Body: { steps, date, skipRaceResolution? }
@@ -78,6 +151,7 @@ function createStepsRouter(dependencies = {}) {
       });
       res.json({ record });
     } catch (error) {
+      res.locals.stepTelemetryOutcome = classifyCaughtStepServerError(error);
       console.error("Steps error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
@@ -100,6 +174,7 @@ function createStepsRouter(dependencies = {}) {
         const status = error.statusCode || 400;
         return res.status(status).json({ error: error.message });
       }
+      res.locals.stepTelemetryOutcome = classifyCaughtStepServerError(error);
       console.error("Step samples error:", error);
       res.status(500).json({ error: "Internal server error" });
     }
@@ -163,11 +238,13 @@ function createStepsRouter(dependencies = {}) {
         error.name === "StepSyncValidationError" ||
         error.name === "StepSampleError"
       ) {
+        res.locals.stepTelemetryOutcome = "validation_4xx";
         return res
           .status(400)
           .json({ error: error.message, code: "INVALID_STEP_SYNC" });
       }
       if (error.code === "STEP_SYNC_COOLDOWN" || error.name === "StepSyncCooldownError") {
+        res.locals.stepTelemetryOutcome = "validation_4xx";
         const retryAfterSeconds = Math.max(1, Math.min(30, Number(error.retryAfterSeconds) || 1));
         return res
           .status(429)
@@ -183,11 +260,13 @@ function createStepsRouter(dependencies = {}) {
         error.code === "IDEMPOTENCY_CONFLICT" ||
         error.name === "StepSyncConflictError"
       ) {
+        res.locals.stepTelemetryOutcome = "validation_4xx";
         return res.status(409).json({
           error: "Idempotency key already used",
           code: "IDEMPOTENCY_CONFLICT",
         });
       }
+      res.locals.stepTelemetryOutcome = classifyCaughtStepServerError(error);
       console.error("Step sync v2 error:", error);
       res.status(500).json({ error: "Internal server error" });
     }

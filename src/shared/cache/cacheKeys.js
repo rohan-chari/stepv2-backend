@@ -49,6 +49,9 @@ const PREFIX = {
   HOME_GIVEAWAY_BANNER: "v1:home:giveaway-banner",
   HOME_ACTIVE_GLOBAL_EVENT: "v1:user",
   RACE_LIST: "v1:user:races",
+  DATABASE_POOL_TELEMETRY: "v1:ops:db-pool",
+  STEP_INGESTION_HOUR: "v1:ops:step-ingestion-hour",
+  STEP_INGESTION_HISTORY_START: "v1:ops:step-ingestion-history-start",
 };
 
 // The only two values `resolveReleaseChannel` can ever produce
@@ -202,6 +205,33 @@ function friendSearchRate(userId, utcMinuteEpoch) {
 function homeImpactSummary(userId) { return `${PREFIX.HOME_IMPACT_SUMMARY}:${userId}`; }
 function homeInboxUnread(userId) { return `${PREFIX.HOME_INBOX_UNREAD}:${userId}`; }
 function homeGiveawayBanner() { return `${PREFIX.HOME_GIVEAWAY_BANNER}:active`; }
+
+const DATABASE_POOL_IDENTITIES = new Set([
+  "http:0",
+  "http:1",
+  "resolution:0",
+  "cron:0",
+]);
+
+function databasePoolTelemetry(role, instance) {
+  const identity = `${role}:${instance}`;
+  if (!DATABASE_POOL_IDENTITIES.has(identity)) {
+    throw new TypeError("invalid database pool telemetry identity");
+  }
+  return `${PREFIX.DATABASE_POOL_TELEMETRY}:${identity}`;
+}
+
+function stepIngestionHour(atMs) {
+  const numeric = Number(atMs);
+  if (!Number.isSafeInteger(numeric) || numeric < 0) {
+    throw new TypeError("invalid step ingestion hour timestamp");
+  }
+  return `${PREFIX.STEP_INGESTION_HOUR}:${new Date(numeric).toISOString().slice(0, 13)}`;
+}
+
+function stepIngestionHistoryStart() {
+  return PREFIX.STEP_INGESTION_HISTORY_START;
+}
 
 // `/races` is split into a user-scoped membership snapshot and two bounded
 // status fragments. The generation is deliberately separate from the variant
@@ -419,6 +449,9 @@ module.exports = {
   homeImpactSummary,
   homeInboxUnread,
   homeGiveawayBanner,
+  databasePoolTelemetry,
+  stepIngestionHour,
+  stepIngestionHistoryStart,
   raceListGeneration,
   raceListMembership,
   raceListFragment,
