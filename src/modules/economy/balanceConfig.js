@@ -691,6 +691,23 @@ function buildBalanceConfig(dependencies = {}) {
     return snapshot;
   }
 
+  // Availability must distinguish an authoritative DB read from getSnapshot's
+  // deliberate last-good/default fallback. The guide fails open when this
+  // probe cannot load its source, while gameplay keeps using getSnapshot's
+  // resilient behavior unchanged.
+  async function getAvailabilitySnapshot() {
+    try {
+      const raw = await readActiveRaw();
+      return {
+        authoritative: true,
+        version: raw?.version ?? null,
+        config: raw ? mergeOverDefaults(raw.config) : defaultConfig(),
+      };
+    } catch {
+      return { authoritative: false, version: null, config: null };
+    }
+  }
+
   async function getConfig() {
     return (await getSnapshot()).config;
   }
@@ -831,6 +848,10 @@ function buildBalanceConfig(dependencies = {}) {
         keys: [cacheKeys.balanceKey],
         prefix: cacheKeys.PREFIX.BALANCE,
       });
+      await derivedCache.invalidate({
+        keys: cacheKeys.powerupCatalogVariants(),
+        prefix: cacheKeys.PREFIX.POWERUP_CATALOG,
+      });
     }
   }
 
@@ -880,6 +901,7 @@ function buildBalanceConfig(dependencies = {}) {
     getConfig,
     getConfigSync,
     getSnapshot,
+    getAvailabilitySnapshot,
     getSnapshotSync,
     getActiveRow,
     listVersions,

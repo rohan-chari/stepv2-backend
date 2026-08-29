@@ -19,6 +19,15 @@ const { buildUsePowerup, PowerupUseError } = require("../../src/modules/powerups
 const NOW = new Date("2026-07-17T12:00:00Z");
 const THIRTY_MIN_MS = 30 * 60 * 1000;
 
+function liveLeech(fields) {
+  return {
+    type: "LEECH",
+    status: "ACTIVE",
+    expiresAt: new Date(NOW.getTime() + THIRTY_MIN_MS),
+    ...fields,
+  };
+}
+
 function makeParticipant(id, userId, displayName, overrides = {}) {
   return {
     id,
@@ -202,7 +211,7 @@ test("LEECH is NOT reflected by the victim's Mirror (leech applies, mirror intac
 test("LEECH rejects a second leech from the SAME leecher on the same victim (item kept)", async () => {
   const ctx = makeDeps({
     existingEffects: {
-      "rp-2": [{ id: "leech-a", type: "LEECH", sourceUserId: "user-1", targetUserId: "user-2" }],
+      "rp-2": [liveLeech({ id: "leech-a", sourceUserId: "user-1", targetUserId: "user-2" })],
     },
   });
   const use = buildUsePowerup(ctx.deps);
@@ -215,12 +224,12 @@ test("LEECH rejects a second leech from the SAME leecher on the same victim (ite
   assert.equal(ctx.updatedPowerup, null, "powerup NOT consumed on rejection");
 });
 
-test("LEECH rejects a THIRD concurrent leecher on the same victim (max 2)", async () => {
+test("LEECH rejects another concurrent leecher on the same victim", async () => {
   const ctx = makeDeps({
     existingEffects: {
       "rp-2": [
-        { id: "leech-a", type: "LEECH", sourceUserId: "user-3", targetUserId: "user-2" },
-        { id: "leech-b", type: "LEECH", sourceUserId: "user-9", targetUserId: "user-2" },
+        liveLeech({ id: "leech-a", sourceUserId: "user-3", targetUserId: "user-2" }),
+        liveLeech({ id: "leech-b", sourceUserId: "user-9", targetUserId: "user-2" }),
       ],
     },
   });
@@ -234,10 +243,17 @@ test("LEECH rejects a THIRD concurrent leecher on the same victim (max 2)", asyn
   assert.equal(ctx.updatedPowerup, null, "powerup NOT consumed on rejection");
 });
 
-test("LEECH allows a SECOND distinct leecher on the same victim (only 1 already active)", async () => {
+test("LEECH allows a distinct leecher after the prior effect expired", async () => {
   const ctx = makeDeps({
     existingEffects: {
-      "rp-2": [{ id: "leech-a", type: "LEECH", sourceUserId: "user-3", targetUserId: "user-2" }],
+      "rp-2": [{
+        id: "leech-a",
+        type: "LEECH",
+        status: "ACTIVE",
+        expiresAt: new Date(NOW.getTime() - 1),
+        sourceUserId: "user-3",
+        targetUserId: "user-2",
+      }],
     },
   });
   const use = buildUsePowerup(ctx.deps);

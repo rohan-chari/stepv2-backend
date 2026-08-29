@@ -1,7 +1,7 @@
 // Versioned, code-owned presentation of the mechanics enforced by
 // usePowerup/effectMultiplier. This table is deliberately not admin-editable:
 // a mechanics change and its guide update must land in the same code review.
-const STACKING_VERSION = 1;
+const STACKING_VERSION = 2;
 
 const SAME_POWERUP_RULES = new Set([
   "NOT_APPLICABLE", "BLOCKED", "EXTENDS", "ALLOWED", "LIMITED",
@@ -46,7 +46,7 @@ const POWERUP_STACKING_GUIDE = Object.freeze({
   IMPOSTER: rule("BLOCKED", "NOT_APPLICABLE", "Imposter is retired. Historical effects do not accept another active copy."),
   RAINSTORM: rule("LIMITED", "CONDITIONAL", "One storm per caster may be active. Storms from different casters can overlap, but each victim's penalty clamps at one 0.5x; Umbrella and Compression Socks can prevent it."),
   SIGNAL_JAMMER: rule("BLOCKED", "CONDITIONAL", "Only one Signal Jammer can affect a racer. It can coexist with Power Outage and prevents powerup use, including Cleanse and Quick Rinse."),
-  LEECH: rule("LIMITED", "CONDITIONAL", "One Leech is allowed per attacker-target pair and at most two attackers may leech one victim. Transfers combine with other effective-step modifiers."),
+  LEECH: rule("BLOCKED", "CONDITIONAL", "Only one live Leech may target a racer, regardless of attacker. A later attacker must wait for it to expire or be cleared."),
   DEFENSE_SCAN: instant("X-Ray reveals a defense snapshot immediately, so active stacking does not apply."),
   HITCHHIKE: rule("LIMITED", "CONDITIONAL", "One active link is allowed per caster and one per target. It copies only the target effective-step behavior supported by the current scorer."),
   QUICK_RINSE: rule("NOT_APPLICABLE", "CONDITIONAL", "Quick Rinse resolves immediately, has a once-per-hour race cooldown, and halves remaining time only on eligible opponent effects. Signal Jammer prevents its use."),

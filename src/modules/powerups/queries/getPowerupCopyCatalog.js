@@ -4,6 +4,10 @@ const { POWERUP_COPY_TYPES } = require("../constants/powerupCopySeed");
 const derivedCache = require("../../../shared/cache/derivedCache");
 const cacheKeys = require("../../../shared/cache/cacheKeys");
 const { isPowerupVisibleToClient } = require("../constants/powerupGating");
+const { balanceConfig: defaultBalanceConfig } = require("../../economy/balanceConfig");
+const {
+  canonicalRollAvailabilityForClient: defaultCanonicalRollAvailabilityForClient,
+} = require("../powerupOdds");
 const {
   STACKING_VERSION,
   POWERUP_STACKING_GUIDE,
@@ -42,21 +46,49 @@ function compareRows(a, b) {
 function buildGetPowerupCopyCatalog(deps = {}) {
   const powerupCopyModel = deps.PowerupCopy || PowerupCopy;
   const powerupShopItemModel = deps.PowerupShopItem || PowerupShopItem;
+  const powerupBalanceConfig = deps.powerupBalanceConfig || defaultBalanceConfig;
+  const canonicalRollAvailabilityForClient =
+    deps.canonicalRollAvailabilityForClient ||
+    defaultCanonicalRollAvailabilityForClient;
   validatePowerupStackingGuide(POWERUP_COPY_TYPES);
 
-  async function assemble(has, { filterByCapabilities }) {
+  async function assemble(has, { filterByCapabilities, channel }) {
     const rows = (await powerupCopyModel.findAll()) || [];
     let availabilityKnown = false;
-    let activeShopRows = [];
-    if (filterByCapabilities && (deps.PowerupShopItem || powerupShopItemModel === PowerupShopItem)) {
+    let shopTypes = new Set();
+    let rollTypes = new Set();
+    const clientCapabilities = {
+      supportsJammer: has("jammer"),
+      supportsPowerups2: has("powerups2"),
+      supportsPowerups3: has("powerups3"),
+      supportsPowerups4: has("powerups4"),
+      supportsPowerups5: has("powerups5"),
+    };
+    if (filterByCapabilities) {
       try {
-        activeShopRows = (await powerupShopItemModel.findActive({ channel: "prod" })) || [];
+        const [activeShopRows, balanceSnapshot] = await Promise.all([
+          powerupShopItemModel.findActive({ channel }),
+          powerupBalanceConfig.getAvailabilitySnapshot(),
+        ]);
+        if (
+          balanceSnapshot?.authoritative !== true ||
+          !balanceSnapshot.config ||
+          typeof balanceSnapshot.config !== "object"
+        ) {
+          throw new Error("Powerup balance availability is not authoritative");
+        }
+        shopTypes = new Set(
+          (activeShopRows || []).map((row) => row.powerupType)
+        );
+        rollTypes = canonicalRollAvailabilityForClient({
+          config: balanceSnapshot.config,
+          clientCapabilities,
+        });
         availabilityKnown = true;
       } catch {
-        // Preserve the copy catalog if availability cannot be read.
+        // Fail open: copy remains complete and no availability claim is made.
       }
     }
-    const availableTypes = new Set(activeShopRows.map((row) => row.powerupType));
 
     let newest = null;
     for (const row of rows) {
@@ -68,21 +100,14 @@ function buildGetPowerupCopyCatalog(deps = {}) {
     return {
       version: newest ? newest.toISOString() : null,
       stackingVersion: STACKING_VERSION,
-      availabilityVersion: availabilityKnown ? 1 : undefined,
+      availabilityVersion: availabilityKnown ? 2 : undefined,
       powerups: [...rows]
         .filter((row) => filterByCapabilities
           ? row.powerupType !== "IMPOSTER" &&
-            (!availabilityKnown || availableTypes.has(row.powerupType)) &&
-            isPowerupVisibleToClient(
-              row.powerupType,
-              {
-                supportsJammer: has("jammer"),
-                supportsPowerups2: has("powerups2"),
-                supportsPowerups3: has("powerups3"),
-                supportsPowerups4: has("powerups4"),
-                supportsPowerups5: has("powerups5"),
-              },
-            )
+            isPowerupVisibleToClient(row.powerupType, clientCapabilities) &&
+            (!availabilityKnown ||
+              shopTypes.has(row.powerupType) ||
+              rollTypes.has(row.powerupType))
           // Preserve the original direct-call contract used by older internal
           // consumers: only Quicksand was request-capability filtered.
           : row.powerupType !== "QUICKSAND" || has("powerups4"))
@@ -106,18 +131,28 @@ function buildGetPowerupCopyCatalog(deps = {}) {
         shortDescription: row.shortDescription ?? null,
         upgradeTierLabels: Array.isArray(row.upgradeTierLabels) ? row.upgradeTierLabels : [],
         stacking: POWERUP_STACKING_GUIDE[row.powerupType] || null,
-        ...(availabilityKnown ? { availability: { shop: true, roll: true } } : {}),
+        ...(availabilityKnown
+          ? {
+              availability: {
+                shop: shopTypes.has(row.powerupType),
+                roll: rollTypes.has(row.powerupType),
+              },
+            }
+          : {}),
       };
       }),
     };
   }
 
   // C1 (spec §5 Phase B). The whole assembled payload is cached because it is
-  // fully determined by (rows, capability tokens) — there is nothing per-user in
-  // it (the endpoint is unauthenticated). Two capability tokens shape the
-  // output, so the key carries both; a single shared key would serve QUICKSAND
-  // copy to a frozen binary that treats it as an unknown enum.
-  return async function getPowerupCopyCatalog(clientFeatures = null) {
+  // fully determined by (rows, release channel, capability tokens) — there is
+  // nothing per-user in it (the endpoint is unauthenticated). The key carries
+  // every shaping input so neither TestFlight shop rows nor newer enum copy can
+  // leak to a frozen production binary.
+  return async function getPowerupCopyCatalog(
+    clientFeatures = null,
+    releaseChannel = "prod"
+  ) {
     // Direct legacy consumers historically passed no Set (or a plain options
     // object) and received the whole copy table. Preserve that internal
     // contract; real HTTP requests always provide a request-scoped Set and get
@@ -142,6 +177,7 @@ function buildGetPowerupCopyCatalog(deps = {}) {
 
     return derivedCache.cachedRead({
       key: cacheKeys.powerupCatalog({
+        channel: releaseChannel,
         signalJammer: has("jammer"),
         powerups2: has("powerups2"),
         powerups3: has("powerups3"),
@@ -153,7 +189,10 @@ function buildGetPowerupCopyCatalog(deps = {}) {
       prefix: cacheKeys.PREFIX.POWERUP_CATALOG,
       ttlSeconds: CATALOG_TTL_SECONDS,
       enabled,
-      load: () => assemble(has, { filterByCapabilities }),
+      load: () => assemble(has, {
+        filterByCapabilities,
+        channel: releaseChannel === "testflight" ? "testflight" : "prod",
+      }),
     });
   };
 }

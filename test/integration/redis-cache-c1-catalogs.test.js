@@ -33,7 +33,7 @@ const { balanceConfig } = require("../../src/modules/economy/balanceConfig");
 const ADMIN_EMAIL = process.env.ADMIN_EMAILS.split(",")[0].trim();
 
 const FEAT =
-  "tournaments,characters,powerups2,powerups3,powerups4,powerups5,remote_assets";
+  "tournaments,characters,powerups2,powerups3,powerups4,powerups5,remote_assets,powerup_stacking_guide_v1";
 
 let server;
 let live = null;
@@ -126,6 +126,28 @@ async function seedCatalogRows() {
     where: { powerupType: "TRAIL_MIX" },
     update: { name: "Trail Mix", description: "blocks" },
     create: { powerupType: "TRAIL_MIX", name: "Trail Mix", description: "blocks" },
+  });
+  await prisma.powerupCopy.upsert({
+    where: { powerupType: "LEECH" },
+    update: { name: "Leech", description: "leech" },
+    create: { powerupType: "LEECH", name: "Leech", description: "leech" },
+  });
+  await prisma.powerupShopItem.upsert({
+    where: { sku: "c1-testflight-leech" },
+    update: {
+      active: true,
+      testOnly: true,
+    },
+    create: {
+      sku: "c1-testflight-leech",
+      name: "Leech",
+      description: "leech",
+      priceCoins: 100,
+      powerupType: "LEECH",
+      active: true,
+      testOnly: true,
+      sortOrder: 1,
+    },
   });
 }
 
@@ -250,7 +272,7 @@ describe("C1 catalogs/config — §8 test 2 parity (cold cache ≡ flag off)", (
       `expected a shop catalog key, saw: ${keys.join(", ")}`
     );
     assert.ok(
-      keys.some((k) => k.includes("powerup-copy-catalog:v2")),
+      keys.some((k) => k.includes("powerup-copy-catalog:v3")),
       "expected a powerup catalog key"
     );
     assert.ok(
@@ -269,6 +291,38 @@ describe("C1 catalogs/config — §8 test 2 parity (cold cache ≡ flag off)", (
       keys.some((k) => k.includes("v1:events:global")),
       "expected a global events key"
     );
+  });
+
+  it("powerup catalog v3 isolates release channels and ignores stale v2 keys", async (t) => {
+    if (skipReason) return t.skip(skipReason);
+    await enableRedis();
+    await setFlag(true);
+    await probe.set(
+      `${ENV_PREFIX}powerup-copy-catalog:v2:1111111`,
+      JSON.stringify({ availabilityVersion: 999, powerups: [{ type: "POISON" }] }),
+    );
+
+    const prod = await authReq("GET", "/powerups/catalog");
+    assert.equal(prod.status, 200);
+    const prodBody = await prod.json();
+    assert.equal(prodBody.availabilityVersion, 2);
+    assert.ok(!prodBody.powerups.some((row) => row.type === "POISON"));
+    assert.ok(!prodBody.powerups.some((row) => row.type === "LEECH"));
+
+    const testflight = await authReq("GET", "/powerups/catalog", {
+      headers: { "X-Release-Channel": "testflight" },
+    });
+    assert.equal(testflight.status, 200);
+    const testflightBody = await testflight.json();
+    assert.deepEqual(
+      testflightBody.powerups.find((row) => row.type === "LEECH").availability,
+      { shop: true, roll: false },
+    );
+
+    const keys = await probe.keys(`${ENV_PREFIX}powerup-copy-catalog:v3:*`);
+    assert.equal(keys.length, 2, `expected prod + TestFlight variants, saw ${keys}`);
+    assert.ok(keys.some((key) => key.includes(":prod:")));
+    assert.ok(keys.some((key) => key.includes(":testflight:")));
   });
 
   it("per-user fields are never shared between users through the catalog cache", async (t) => {
@@ -445,6 +499,86 @@ describe("C1 — §8 test 3 invalidation", () => {
       after.items.some((i) => i.sku === "c1-boots"),
       "new item must appear immediately, not after the 60s TTL"
     );
+  });
+
+  it("powerup shop mutation invalidates prod and TestFlight availability variants", async (t) => {
+    if (skipReason) return t.skip(skipReason);
+    const item = await prisma.powerupShopItem.findUnique({
+      where: { sku: "c1-testflight-leech" },
+    });
+    const prodBefore = await authReq("GET", "/powerups/catalog");
+    const testflightBefore = await authReq("GET", "/powerups/catalog", {
+      headers: { "X-Release-Channel": "testflight" },
+    });
+    assert.ok(!(await prodBefore.json()).powerups.some((row) => row.type === "LEECH"));
+    assert.ok((await testflightBefore.json()).powerups.some((row) => row.type === "LEECH"));
+
+    const update = await authReq(
+      "PATCH",
+      `/admin/powerup-shop/items/${item.id}`,
+      { token: adminToken, body: { testOnly: false } },
+    );
+    assert.equal(update.status, 200, await update.text());
+
+    const prodAfter = await authReq("GET", "/powerups/catalog");
+    const testflightAfter = await authReq("GET", "/powerups/catalog", {
+      headers: { "X-Release-Channel": "testflight" },
+    });
+    assert.ok((await prodAfter.json()).powerups.some((row) => row.type === "LEECH"));
+    assert.ok((await testflightAfter.json()).powerups.some((row) => row.type === "LEECH"));
+  });
+
+  it("balance save and rollback invalidate every powerup availability variant", async (t) => {
+    if (skipReason) return t.skip(skipReason);
+
+    const baselineResponse = await authReq("GET", "/admin/balance-config", {
+      token: adminToken,
+    });
+    assert.equal(baselineResponse.status, 200);
+    const baseline = await baselineResponse.json();
+    const saveV1 = await authReq("PUT", "/admin/balance-config", {
+      token: adminToken,
+      body: {
+        expectedVersion: null,
+        config: baseline.config,
+        note: "catalog availability v1",
+      },
+    });
+    assert.equal(saveV1.status, 201, await saveV1.text());
+
+    const warmProd = await authReq("GET", "/powerups/catalog");
+    const warmTestflight = await authReq("GET", "/powerups/catalog", {
+      headers: { "X-Release-Channel": "testflight" },
+    });
+    assert.ok((await warmProd.json()).powerups.some((row) => row.type === "TRAIL_MIX"));
+    assert.ok((await warmTestflight.json()).powerups.some((row) => row.type === "TRAIL_MIX"));
+
+    const changed = structuredClone(baseline.config);
+    for (const rarity of Object.keys(changed.dropPool)) {
+      changed.dropPool[rarity] = changed.dropPool[rarity].filter(
+        (type) => type !== "TRAIL_MIX",
+      );
+    }
+    const saveV2 = await authReq("PUT", "/admin/balance-config", {
+      token: adminToken,
+      body: {
+        expectedVersion: 1,
+        config: changed,
+        note: "remove Trail Mix roll availability",
+      },
+    });
+    assert.equal(saveV2.status, 201, await saveV2.text());
+
+    const afterSave = await authReq("GET", "/powerups/catalog");
+    assert.ok(!(await afterSave.json()).powerups.some((row) => row.type === "TRAIL_MIX"));
+
+    const rollback = await authReq("POST", "/admin/balance-config/rollback", {
+      token: adminToken,
+      body: { version: 1, expectedVersion: 2 },
+    });
+    assert.equal(rollback.status, 200, await rollback.text());
+    const afterRollback = await authReq("GET", "/powerups/catalog");
+    assert.ok((await afterRollback.json()).powerups.some((row) => row.type === "TRAIL_MIX"));
   });
 
   it("an app-settings write busts the settings cache", async (t) => {

@@ -25,6 +25,7 @@
     "balance:drift": "node scripts/balance-drift-report.js",
     "powerups:docs": "node scripts/generate-powerups-md.js",
     "powerups:docs:check": "node scripts/generate-powerups-md.js --check",
+    "powerups:repair-duplicate-leeches": "node scripts/repair-duplicate-live-leeches.js",
     "runtime-controls:generate": "node scripts/generate-runtime-control-disposition.js",
     "runtime-controls:check": "node scripts/generate-runtime-control-disposition.js --check",
     "pm2:topology:check": "node scripts/pm2-topology-guard.js",

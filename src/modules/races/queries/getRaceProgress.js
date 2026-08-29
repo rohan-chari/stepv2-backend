@@ -99,6 +99,9 @@ const {
 const { isStrictFlagEnabled } = require("../../../shared/config/isStrictFlagEnabled");
 const userPresentationCache = require("../../social/services/userPresentationCache");
 const defaultPageProjection = require("../services/raceProgressPageProjection");
+const {
+  uniqueTypesIfTrailMixUsed,
+} = require("../../powerups/services/trailMix");
 
 // The (releaseChannel × supportsCharacters × supportsRemoteAssets) combinations
 // `characterPresentation` can produce. Closed set: `resolveReleaseChannel` only
@@ -1350,6 +1353,24 @@ function buildGetRaceProgress(deps = {}) {
         status: p.status,
       }));
 
+      // Viewer-only advisory preview. Keep it off the shared snapshot and avoid
+      // the history query unless this accepted viewer can actually press Use.
+      if (
+        slotPowerups.some(
+          (powerup) => powerup.status === "HELD" && powerup.type === "TRAIL_MIX",
+        )
+      ) {
+        try {
+          powerupData.trailMix = {
+            uniqueTypesIfUsedNow: uniqueTypesIfTrailMixUsed(
+              await racePowerupModel.findUsedTypesByParticipant(myParticipant.id),
+            ),
+          };
+        } catch {
+          // Advisory only: omission preserves the old progress contract.
+        }
+      }
+
       // Batch 2026-08-10b item 2 — how much of the DAILY DISCARD COIN CAP is
       // left, so the confirm dialog can quote the clamped amount BEFORE the
       // first discard of a screen visit (it previously only learned the cap
@@ -1423,6 +1444,21 @@ function buildGetRaceProgress(deps = {}) {
             targetUserId: e.targetUserId,
             sourceUserId: e.sourceUserId,
           };
+          if (e.type === "GHOST_PEPPER") {
+            const startsAt = new Date(e.startsAt);
+            const boostMs = Number(e.metadata?.boostMs);
+            const burnoutMs = Number(e.metadata?.freezeMs);
+            const durationIsSafe = (value) =>
+              Number.isSafeInteger(value) && value > 0 && value <= 24 * 60 * 60 * 1000;
+            if (
+              Number.isFinite(startsAt.getTime()) &&
+              durationIsSafe(boostMs) &&
+              durationIsSafe(burnoutMs)
+            ) {
+              entry.startsAt = startsAt.toISOString();
+              entry.phaseDurations = { boostMs, burnoutMs };
+            }
+          }
           // Piggy Bank live "banked so far" counter (display-only, owner-only).
           // At most one extra query, for the requester's OWN effect — a viewer
           // overlay read, never cached.

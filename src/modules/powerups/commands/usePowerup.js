@@ -76,6 +76,7 @@ const {
 const {
   ACTIVE_IMPACT_EXPIRY_TYPES,
 } = require("../constants/expiryEffectTypes");
+const { uniqueTypesIfTrailMixUsed } = require("../services/trailMix");
 const ACTIVE_IMPACT_EXPIRY_TYPE_SET = new Set(ACTIVE_IMPACT_EXPIRY_TYPES);
 
 async function applyImmediatePenalty(
@@ -229,8 +230,8 @@ const SIGNAL_JAMMER_DURATION_MS = 60 * 60 * 1000;
 // by the victim's available balance. There is NO per-use cap. The conversion
 // ratio is echoed into the effect metadata (`{ ratio, scoringVersion }`) and the
 // scorer (getRaceProgress) reads `ratio`, defaulting absent metadata to 2 — so a
-// future ratio change is data-only. A victim can be leeched by at most
-// LEECH_MAX_PER_VICTIM sources at once (gang-stall guard).
+// future ratio change is data-only. A victim can have at most one truly live
+// Leech, regardless of source.
 //
 // DURATION IS CAPABILITY-VERSIONED (§7.5). The window is chosen from the
 // REQUEST's client features, never from the user's stored sticky union:
@@ -245,7 +246,7 @@ const LEGACY_LEECH_DURATION_MS = 30 * 60 * 1000;
 const LEECH_DURATION_MS = 60 * 60 * 1000;
 const LEECH_RATIO = 2;
 const LEECH_SCORING_VERSION = 2;
-const LEECH_MAX_PER_VICTIM = 2;
+const LEECH_MAX_PER_VICTIM = 1;
 // HITCHHIKE (§7.1): store-only, non-upgradeable, fixed 60-minute window. The
 // caster COPIES the target's recorded raw steps at `copyRatio` (1:1) — the target
 // loses nothing. Metadata carries `{ copyRatio, scoringVersion }` and the scorer
@@ -2532,24 +2533,24 @@ function buildUsePowerup(dependencies = {}) {
       }
     }
 
-    // LEECH stacking rules (run before coin deduction / mark-USED so a rejected
-    // leecher keeps the powerup HELD):
-    //   * at most ONE active leech per (leecher -> victim) pair, and
-    //   * at most LEECH_MAX_PER_VICTIM concurrent leechers on any one victim
-    //     (gang-stall guard). With the cap removed the worst case is no longer
-    //     -2 * cap: it is the victim's window steps drained to zero, split
-    //     deterministically between at most two leechers (zero-sum).
+    // First live Leech wins across every attacker. This validation runs under
+    // the race lock and before coin deduction / mark-USED, so concurrent HTTP
+    // attempts serialize and the loser keeps/refunds its item.
     if (type === "LEECH" && targetParticipant) {
+      const leechCheckTime = now();
       const activeOnVictim = (
         await effectModel.findActiveForParticipant(targetParticipant.id)
-      ).filter((e) => e.type === "LEECH");
-      if (activeOnVictim.some((e) => e.sourceUserId === userId)) {
-        throw new PowerupUseError("You're already leeching this rival", 400);
-      }
+      ).filter(
+        (effect) =>
+          effect.type === "LEECH" &&
+          isLiveTimedEffect(effect, leechCheckTime),
+      );
       if (activeOnVictim.length >= LEECH_MAX_PER_VICTIM) {
         throw new PowerupUseError(
-          "This rival is already being leeched by two others",
-          400
+          "This rival is already being leeched",
+          409,
+          "LEECH_TARGET_ALREADY_ACTIVE",
+          { retainHeld: true },
         );
       }
     }
@@ -3970,21 +3971,24 @@ function buildUsePowerup(dependencies = {}) {
       }
 
       case "TRAIL_MIX": {
-        const usedTypes = new Set(await powerupModel.findUsedTypesByParticipant(myParticipant.id));
-        usedTypes.add("TRAIL_MIX"); // will be marked USED after switch
+        const uniqueTypes = uniqueTypesIfTrailMixUsed(
+          await powerupModel.findUsedTypesByParticipant(myParticipant.id),
+        );
         const perType = upgradedMagnitude("TRAIL_MIX", upgradeLevel);
-        const bonus = usedTypes.size * perType;
+        const bonus = uniqueTypes * perType;
 
         await participantModel.addBonusSteps(myParticipant.id, bonus);
         result.bonus = bonus;
+        result.uniqueTypes = uniqueTypes;
+        result.perType = perType;
 
         const directImpact = await createDirectImpactEvent({
           raceId,
           actorUserId: userId,
           eventType: "POWERUP_USED",
           powerupType: type,
-          description: `${myDisplayName} used ${levelPrefix(upgradeLevel)}Trail Mix! +${bonus.toLocaleString()} steps (${usedTypes.size} unique powerups).`,
-          metadata: { bonus, uniqueTypes: usedTypes.size, perType },
+          description: `${myDisplayName} used ${levelPrefix(upgradeLevel)}Trail Mix! +${bonus.toLocaleString()} steps (${uniqueTypes} unique powerups).`,
+          metadata: { bonus, uniqueTypes, perType },
         }, { deltas: [{ userId, deltaSteps: bonus }] });
         if (directImpact.activeImpactReceipt) {
           result.activeImpactReceipt = directImpact.activeImpactReceipt;

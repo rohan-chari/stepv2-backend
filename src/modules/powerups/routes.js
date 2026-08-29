@@ -5,6 +5,7 @@ const {
 } = require("./queries/getPowerupInventory");
 const {
   getPowerupCopyCatalog: defaultGetPowerupCopyCatalog,
+  buildGetPowerupCopyCatalog,
 } = require("./queries/getPowerupCopyCatalog");
 const { appSettings: defaultAppSettings } = require("../../shared/config/appSettings");
 const {
@@ -21,7 +22,12 @@ function createPowerupsRouter(dependencies = {}) {
     dependencies.getPowerupInventory || defaultGetPowerupInventory;
 
   const getPowerupCopyCatalog =
-    dependencies.getPowerupCopyCatalog || defaultGetPowerupCopyCatalog;
+    dependencies.getPowerupCopyCatalog ||
+    (dependencies.PowerupCopy ||
+    dependencies.PowerupShopItem ||
+    dependencies.powerupBalanceConfig
+      ? buildGetPowerupCopyCatalog(dependencies)
+      : defaultGetPowerupCopyCatalog);
   const settings = dependencies.appSettings || defaultAppSettings;
 
   // GET /powerups/catalog — the single source of truth for powerup copy (§9.5).
@@ -34,9 +40,17 @@ function createPowerupsRouter(dependencies = {}) {
   // bundled copy, retrying on the next launch/foreground.
   router.get("/catalog", async (req, res) => {
     try {
-      const result = await getPowerupCopyCatalog(req.clientFeatures || new Set());
+      const result = await getPowerupCopyCatalog(
+        req.clientFeatures || new Set(),
+        req.releaseChannel
+      );
       if (await isStrictFlagEnabled(settings, "apiStaticEtagsV1Enabled")) {
-        return sendConditionalJson(req, res, result, "X-Client-Features");
+        return sendConditionalJson(
+          req,
+          res,
+          result,
+          "X-Client-Features, X-Release-Channel"
+        );
       }
       res.json(result);
     } catch (error) {

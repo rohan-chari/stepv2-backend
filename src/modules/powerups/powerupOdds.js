@@ -12,7 +12,10 @@ const { RARITIES } = require("../economy/balanceConfig.defaults");
 // Client-feature gating list. Deliberately NOT balance config: which BINARIES
 // may see a powerup type is a frozen-client compatibility question and must
 // never become admin-editable (see constants/powerupGating.js).
-const { POWERUPS5_GATED_TYPES } = require("./constants/powerupGating");
+const {
+  POWERUPS5_GATED_TYPES,
+  isPowerupVisibleToClient,
+} = require("./constants/powerupGating");
 
 const RARITY_ORDER = RARITIES;
 
@@ -245,6 +248,67 @@ function eligiblePoolFor(rarity, ctx, config, excludeTypes) {
   return { pool, weights };
 }
 
+// Canonical catalog view of the real roller: a type is roll-available when it
+// survives at least one legal rarity/position/mode context with positive
+// effective selection weight for this exact client capability set.
+function canonicalRollAvailabilityForClient({
+  config,
+  clientCapabilities = {},
+} = {}) {
+  const cfg = resolveConfig(config);
+  const contexts = [];
+  for (const isTeamRace of [false, true]) {
+    contexts.push(
+      {
+        normalizedPosition: 0,
+        isStepLeader: true,
+        isStepLast: false,
+        isTeamRace,
+        supportsPowerups5: clientCapabilities.supportsPowerups5 === true,
+      },
+      {
+        normalizedPosition: 0.5,
+        isStepLeader: false,
+        isStepLast: false,
+        isTeamRace,
+        supportsPowerups5: clientCapabilities.supportsPowerups5 === true,
+      },
+      {
+        normalizedPosition: 1,
+        isStepLeader: false,
+        isStepLast: true,
+        isTeamRace,
+        supportsPowerups5: clientCapabilities.supportsPowerups5 === true,
+      },
+    );
+  }
+  // A one-runner/open context is legally both first and last.
+  contexts.push({
+    normalizedPosition: 0.5,
+    isStepLeader: true,
+    isStepLast: true,
+    isTeamRace: false,
+    supportsPowerups5: clientCapabilities.supportsPowerups5 === true,
+  });
+
+  const available = new Set();
+  for (const rarity of RARITY_ORDER) {
+    for (const ctx of contexts) {
+      const { pool, weights } = eligiblePoolFor(rarity, ctx, cfg);
+      pool.forEach((type, index) => {
+        if (
+          Number.isFinite(weights[index]) &&
+          weights[index] > 0 &&
+          isPowerupVisibleToClient(type, clientCapabilities)
+        ) {
+          available.add(type);
+        }
+      });
+    }
+  }
+  return available;
+}
+
 function drawWeighted(pool, weights, rng) {
   if (!pool || pool.length === 0) return null;
   const total = weights.reduce((a, b) => a + b, 0);
@@ -390,6 +454,7 @@ module.exports = {
   pickTypeFromPool,
   pickTypeForRarity,
   eligiblePoolFor,
+  canonicalRollAvailabilityForClient,
   canonicalRarityFor,
   positionMultiplierFor,
   buildRollContext,

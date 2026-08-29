@@ -13,12 +13,17 @@ test("guide catalog marks only active shop/roll powerups as available", async ()
       { powerupType: "DISABLED", name: "Disabled", description: "d", updatedAt: new Date() },
     ] },
     PowerupShopItem: { findActive: async () => [{ powerupType: "ACTIVE" }] },
+    powerupBalanceConfig: {
+      getAvailabilitySnapshot: async () => ({ authoritative: true, config: {} }),
+    },
+    canonicalRollAvailabilityForClient: () => new Set(["ACTIVE"]),
     appSettings: { getFlag: async () => false },
   });
   const result = await getCatalog(new Set(["powerup_stacking_guide_v1"]));
   assert.deepEqual(result.powerups.map((row) => [row.type, row.availability]), [
     ["ACTIVE", { shop: true, roll: true }],
   ]);
+  assert.equal(result.availabilityVersion, 2);
 });
 const {
   buildGetPowerupShopCatalog,
@@ -268,7 +273,7 @@ test("guide-capable catalog rows carry complete bounded two-axis stacking metada
   ]);
   const result = await buildGetPowerupCopyCatalog(makeDeps())(features);
 
-  assert.equal(result.stackingVersion, 1);
+  assert.equal(result.stackingVersion, 2);
   assert.ok(!result.powerups.some((row) => row.type === "IMPOSTER"));
   const same = new Set(["NOT_APPLICABLE", "BLOCKED", "EXTENDS", "ALLOWED", "LIMITED"]);
   const other = new Set(["NOT_APPLICABLE", "ALLOWED", "CONDITIONAL", "CONFLICTS"]);
