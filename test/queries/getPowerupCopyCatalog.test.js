@@ -6,6 +6,20 @@ const path = require("node:path");
 const {
   buildGetPowerupCopyCatalog,
 } = require("../../src/modules/powerups/queries/getPowerupCopyCatalog");
+test("guide catalog marks only active shop/roll powerups as available", async () => {
+  const getCatalog = buildGetPowerupCopyCatalog({
+    PowerupCopy: { findAll: async () => [
+      { powerupType: "ACTIVE", name: "Active", description: "a", updatedAt: new Date() },
+      { powerupType: "DISABLED", name: "Disabled", description: "d", updatedAt: new Date() },
+    ] },
+    PowerupShopItem: { findActive: async () => [{ powerupType: "ACTIVE" }] },
+    appSettings: { getFlag: async () => false },
+  });
+  const result = await getCatalog(new Set(["powerup_stacking_guide_v1"]));
+  assert.deepEqual(result.powerups.map((row) => [row.type, row.availability]), [
+    ["ACTIVE", { shop: true, roll: true }],
+  ]);
+});
 const {
   buildGetPowerupShopCatalog,
 } = require("../../src/modules/powerups/queries/getPowerupShopCatalog");

@@ -1,4 +1,5 @@
 const { PowerupCopy } = require("../models/powerupCopy");
+const { PowerupShopItem } = require("../models/powerupShopItem");
 const { POWERUP_COPY_TYPES } = require("../constants/powerupCopySeed");
 const derivedCache = require("../../../shared/cache/derivedCache");
 const cacheKeys = require("../../../shared/cache/cacheKeys");
@@ -40,10 +41,22 @@ function compareRows(a, b) {
 // can identify its last-known-good snapshot deterministically.
 function buildGetPowerupCopyCatalog(deps = {}) {
   const powerupCopyModel = deps.PowerupCopy || PowerupCopy;
+  const powerupShopItemModel = deps.PowerupShopItem || PowerupShopItem;
   validatePowerupStackingGuide(POWERUP_COPY_TYPES);
 
   async function assemble(has, { filterByCapabilities }) {
     const rows = (await powerupCopyModel.findAll()) || [];
+    let availabilityKnown = false;
+    let activeShopRows = [];
+    if (filterByCapabilities && (deps.PowerupShopItem || powerupShopItemModel === PowerupShopItem)) {
+      try {
+        activeShopRows = (await powerupShopItemModel.findActive({ channel: "prod" })) || [];
+        availabilityKnown = true;
+      } catch {
+        // Preserve the copy catalog if availability cannot be read.
+      }
+    }
+    const availableTypes = new Set(activeShopRows.map((row) => row.powerupType));
 
     let newest = null;
     for (const row of rows) {
@@ -55,9 +68,12 @@ function buildGetPowerupCopyCatalog(deps = {}) {
     return {
       version: newest ? newest.toISOString() : null,
       stackingVersion: STACKING_VERSION,
+      availabilityVersion: availabilityKnown ? 1 : undefined,
       powerups: [...rows]
         .filter((row) => filterByCapabilities
-          ? isPowerupVisibleToClient(
+          ? row.powerupType !== "IMPOSTER" &&
+            (!availabilityKnown || availableTypes.has(row.powerupType)) &&
+            isPowerupVisibleToClient(
               row.powerupType,
               {
                 supportsJammer: has("jammer"),
@@ -90,6 +106,7 @@ function buildGetPowerupCopyCatalog(deps = {}) {
         shortDescription: row.shortDescription ?? null,
         upgradeTierLabels: Array.isArray(row.upgradeTierLabels) ? row.upgradeTierLabels : [],
         stacking: POWERUP_STACKING_GUIDE[row.powerupType] || null,
+        ...(availabilityKnown ? { availability: { shop: true, roll: true } } : {}),
       };
       }),
     };
