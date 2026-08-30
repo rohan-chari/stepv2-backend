@@ -329,7 +329,7 @@ describe("admin system health", () => {
       }
 
       await probe.set(`${prefix}${cacheKeys.databasePoolTelemetry("http", "1")}`, "{malformed");
-      const partialResponse = await request(server.baseUrl, "GET", "/admin/system-health?window=60m", { token: admin.token });
+      const partialResponse = await request(server.baseUrl, "GET", "/admin/system-health?window=60m", { token: realAdmin.token });
       assert.equal(partialResponse.status, 200);
       const partial = await partialResponse.json();
       assert.equal(partial.status, "partial");

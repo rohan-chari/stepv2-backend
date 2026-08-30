@@ -212,13 +212,13 @@ test("production config delegates clustered HTTP memory enforcement to the watch
   assert.equal(cron.node_args, resolution.node_args);
 });
 
-test("deployment A static preflight locks the production legacy 4x20 = 80 budget", () => {
+test("deployment B static preflight locks the production 2x10 + 8 + 4 = 32 budget", () => {
   const config = require("../../ecosystem.config");
   const result = validateStaticPoolBudget(config.apps);
-  assert.deepEqual(result.roleTotals, { http: 40, resolution: 20, cron: 20 });
-  assert.equal(result.aggregate, 80);
-  assert.equal(result.totalBudget, 80);
-  assert.equal(result.stage, "legacy-20");
+  assert.deepEqual(result.roleTotals, { http: 20, resolution: 8, cron: 4 });
+  assert.equal(result.aggregate, 32);
+  assert.equal(result.totalBudget, 32);
+  assert.equal(result.stage, "role-budget");
   assert.equal(result.productionProcesses, 4);
 });
 
@@ -226,7 +226,7 @@ test("static pool preflight rejects missing values, mismatched totals, and extra
   const config = require("../../ecosystem.config");
   const copy = () => structuredClone(config.apps);
   const partial = copy();
-  partial.find(({ name }) => name === "steps-tracker-resolution").env.DATABASE_POOL_MAX_RESOLUTION = "8";
+  delete partial.find(({ name }) => name === "steps-tracker-resolution").env.DATABASE_POOL_MAX_RESOLUTION;
   assert.throws(() => validateStaticPoolBudget(partial), /DATABASE_POOL_MAX_RESOLUTION/);
   const mismatched = candidateApps();
   mismatched.find(({ name }) => name === "steps-tracker").env.DATABASE_POOL_TOTAL_BUDGET = "31";
@@ -242,6 +242,17 @@ test("static pool preflight rejects missing values, mismatched totals, and extra
     env: { STEPS_PROCESS_ROLE: "cron", DATABASE_POOL_MAX_CRON: "4" },
   });
   assert.throws(() => validateStaticPoolBudget(unexpected), /Unexpected production/);
+});
+
+test("static pool preflight rejects an expected app outside the reviewed cwd or script", () => {
+  const config = require("../../ecosystem.config");
+  const wrongCwd = structuredClone(config.apps);
+  wrongCwd.find(({ name }) => name === "steps-tracker").cwd = "/tmp/lookalike-production";
+  assert.throws(() => validateStaticPoolBudget(wrongCwd), /steps-tracker.*cwd/);
+
+  const wrongScript = structuredClone(config.apps);
+  wrongScript.find(({ name }) => name === "steps-tracker-cron").script = "/tmp/lookalike-index.js";
+  assert.throws(() => validateStaticPoolBudget(wrongScript), /steps-tracker-cron.*script/);
 });
 
 test("static and live guards derive reviewed values from environment source of truth", () => {

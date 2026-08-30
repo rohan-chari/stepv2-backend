@@ -168,7 +168,7 @@ pm2 describe steps-tracker | grep -E "instances|exec mode|status"
 
 If only one row is present, stop the deployment. Do not reload, scale, or save
 PM2 directly. Fix the reviewed ecosystem definition if necessary, then rerun
-`npm run pm2:reload:prod`; that serialized wrapper is the only authorized path
+`./scripts/pm2-safe-prod-reload.sh`; that serialized wrapper is the only authorized path
 because it validates topology, captures the live pool baseline, reloads roles
 in order, verifies every target, and saves only after the final checks pass.
 
