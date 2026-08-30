@@ -102,17 +102,8 @@ test("production missing and unknown roles fail before a connection attempt", ()
   assertStartupRejected({ STEPS_PROCESS_ROLE: "unknown" }, "STEPS_PROCESS_ROLE");
 });
 
-test("deployment A production safely starts at legacy 20 when its role value is absent", () => {
-  const result = loadDb({ DATABASE_POOL_MAX_HTTP: null });
-  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
-  assert.deepEqual(JSON.parse(result.stdout), {
-    role: "http",
-    max: 20,
-    source: "compatibility-default",
-  });
-});
-
-test("production malformed role values fail before a connection attempt", () => {
+test("deployment B production missing and malformed role values fail before a connection attempt", () => {
+  assertStartupRejected({ DATABASE_POOL_MAX_HTTP: null }, "DATABASE_POOL_MAX_HTTP");
   assertStartupRejected({ DATABASE_POOL_MAX_HTTP: "" }, "DATABASE_POOL_MAX_HTTP");
   assertStartupRejected({ DATABASE_POOL_MAX_HTTP: "20.0" }, "DATABASE_POOL_MAX_HTTP");
 });

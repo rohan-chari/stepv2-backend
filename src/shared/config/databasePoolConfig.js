@@ -57,7 +57,7 @@ function resolveDatabasePoolConfig(env = process.env, dependencies = {}) {
   const roleVariable = Object.hasOwn(ROLE_VARIABLES, role) ? ROLE_VARIABLES[role] : null;
   if (env.NODE_ENV === "production") {
     if (!Object.hasOwn(env, roleVariable)) {
-      return { role, max: 20, source: "compatibility-default" };
+      throw new Error(`${roleVariable} must be set for STEPS_PROCESS_ROLE=${role} in production`);
     }
     return { role, max: parseDatabasePoolMax(env[roleVariable], roleVariable), source: roleVariable };
   }

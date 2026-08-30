@@ -62,6 +62,8 @@ module.exports = {
     // Prod gets both cores: 2 workers, matching the 2 vCPUs.
     app("steps-tracker", PROD_DIR, 2, {
       STEPS_PROCESS_ROLE: "http",
+      DATABASE_POOL_MAX_HTTP: "10",
+      DATABASE_POOL_TOTAL_BUDGET: "32",
       PORT: 3002,
     }, {
       // PM2 6.0.14 can orphan a clustered worker when automatic reloads
@@ -78,6 +80,8 @@ module.exports = {
     // cross-process serialization with Postgres leases.
     app("steps-tracker-resolution", PROD_DIR, 1, {
       STEPS_PROCESS_ROLE: "resolution",
+      DATABASE_POOL_MAX_RESOLUTION: "8",
+      DATABASE_POOL_TOTAL_BUDGET: "32",
       PORT: 3010,
       HOST: "127.0.0.1",
     }, { exec_mode: "fork", node_args: BACKGROUND_NODE_ARGS }),
@@ -85,6 +89,8 @@ module.exports = {
     // resolution process, so settlement and live work cannot interleave.
     app("steps-tracker-cron", PROD_DIR, 1, {
       STEPS_PROCESS_ROLE: "cron",
+      DATABASE_POOL_MAX_CRON: "4",
+      DATABASE_POOL_TOTAL_BUDGET: "32",
       PORT: 3011,
       HOST: "127.0.0.1",
     }, { exec_mode: "fork", node_args: BACKGROUND_NODE_ARGS }),

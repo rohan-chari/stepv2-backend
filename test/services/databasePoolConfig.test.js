@@ -40,7 +40,7 @@ test("non-production falls through to the generic and compatibility defaults", (
   }), { role: "one-off-tool", max: 20, source: "compatibility-default" });
 });
 
-test("deployment A production requires a known role and safely defaults until role values land", () => {
+test("deployment B production requires a known role and its exact role variable", () => {
   assert.throws(
     () => resolveDatabasePoolConfig({
       NODE_ENV: "production",
@@ -52,11 +52,14 @@ test("deployment A production requires a known role and safely defaults until ro
     () => resolveDatabasePoolConfig({ NODE_ENV: "production", STEPS_PROCESS_ROLE: "worker" }),
     /STEPS_PROCESS_ROLE/,
   );
-  assert.deepEqual(resolveDatabasePoolConfig({
-    NODE_ENV: "production",
-    STEPS_PROCESS_ROLE: "http",
-    DATABASE_POOL_MAX_DEFAULT: "10",
-  }), { role: "http", max: 20, source: "compatibility-default" });
+  assert.throws(
+    () => resolveDatabasePoolConfig({
+      NODE_ENV: "production",
+      STEPS_PROCESS_ROLE: "http",
+      DATABASE_POOL_MAX_DEFAULT: "10",
+    }),
+    /DATABASE_POOL_MAX_HTTP/,
+  );
 });
 
 test("every supplied role/default value uses canonical base-10 parsing from 1 through 50", () => {

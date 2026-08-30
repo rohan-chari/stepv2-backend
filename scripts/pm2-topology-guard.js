@@ -111,6 +111,12 @@ function validateStaticPoolBudget(apps) {
     const matches = production.filter((entry) => entry.name === name);
     if (matches.length !== 1) throw new Error(`${name} must appear exactly once in the ecosystem config`);
     const entry = matches[0];
+    if (entry.cwd !== PROD_DIR) {
+      throw new Error(`${name} must use reviewed cwd ${PROD_DIR}`);
+    }
+    if (entry.script !== PROD_SCRIPT) {
+      throw new Error(`${name} must use reviewed script ${PROD_SCRIPT}`);
+    }
     if (entry.instances !== expectedInstances) {
       throw new Error(`${name} must define exactly ${expectedInstances} instance(s)`);
     }
