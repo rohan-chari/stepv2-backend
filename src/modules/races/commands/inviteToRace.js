@@ -8,7 +8,7 @@ const { prisma: defaultPrisma } = require("../../../db");
 const { acquireRaceWriteFence } = require("../services/raceWriteFence");
 const { lockFundedExposureUsers } = require("../services/fundedExposure");
 
-const INVITE_TTL_HOURS = 24;
+const INVITE_TTL_HOURS = 72;
 
 class RaceInviteError extends Error {
   constructor(message, statusCode, code) {
