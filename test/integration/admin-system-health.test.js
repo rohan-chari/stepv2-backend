@@ -1,4 +1,6 @@
 const assert = require("node:assert/strict");
+const { spawnSync } = require("node:child_process");
+const path = require("node:path");
 const { after, before, beforeEach, describe, it } = require("node:test");
 const IORedis = require("ioredis");
 
@@ -12,6 +14,43 @@ const {
   request,
   startServer,
 } = require("./setup");
+
+const repoRoot = path.resolve(__dirname, "../..");
+
+function emitRealRoleSnapshot({ role, instance, redisUrl, prefix }) {
+  const variable = {
+    http: "DATABASE_POOL_MAX_HTTP",
+    resolution: "DATABASE_POOL_MAX_RESOLUTION",
+    cron: "DATABASE_POOL_MAX_CRON",
+  }[role];
+  const value = { http: "10", resolution: "8", cron: "4" }[role];
+  const source = `
+    (async () => {
+      const db = require('./src/db');
+      const redis = require('./src/shared/cache/redisCache');
+      await db.databasePoolTelemetry.flush(Date.now());
+      await redis.close();
+      await db.prisma.$disconnect();
+    })().catch((error) => { console.error(error.message); process.exitCode = 1; });
+  `;
+  const result = spawnSync(process.execPath, ["-e", source], {
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      NODE_ENV: "production",
+      DOTENV_CONFIG_QUIET: "true",
+      STEPS_PROCESS_ROLE: role,
+      NODE_APP_INSTANCE: instance,
+      REDIS_URL: redisUrl,
+      CACHE_ENV_PREFIX: prefix,
+      [variable]: value,
+      DATABASE_POOL_TOTAL_BUDGET: "32",
+    },
+    encoding: "utf8",
+    timeout: 10_000,
+  });
+  assert.equal(result.status, 0, `${role}:${instance}\n${result.stdout}\n${result.stderr}`);
+}
 
 function histogram(observations = 0, maxMs = null) {
   return {
@@ -99,7 +138,15 @@ function poolSnapshot(role, instance, nowMs) {
     oldestBucketAt: buckets[0].minuteStartedAt,
     newestBucketAt: buckets.at(-1).minuteStartedAt,
     coverageMinutes: 60,
-    pool: { max: 20, total: 4, idle: 2, nonIdle: 2, checkedOut: 2, waiting: 0 },
+    pool: {
+      max: role === "resolution" ? 8 : role === "cron" ? 4 : 10,
+      configSource: `DATABASE_POOL_MAX_${role.toUpperCase()}`,
+      total: 4,
+      idle: 2,
+      nonIdle: 2,
+      checkedOut: 2,
+      waiting: 0,
+    },
     process: { rssBytes: 1024, cpuOneCorePercent: 2, eventLoopP99Ms: 1 },
     buckets,
   };
@@ -178,6 +225,53 @@ describe("admin system health", () => {
 
       const nowMs = Math.floor(Date.now() / 60_000) * 60_000;
       for (const [role, instance] of [["http", "0"], ["http", "1"], ["resolution", "0"], ["cron", "0"]]) {
+        emitRealRoleSnapshot({ role, instance, redisUrl: live.url, prefix });
+      }
+      const realSnapshots = await redisCache.readDatabasePoolTelemetrySnapshots([
+        cacheKeys.databasePoolTelemetry("http", "0"),
+        cacheKeys.databasePoolTelemetry("http", "1"),
+        cacheKeys.databasePoolTelemetry("resolution", "0"),
+        cacheKeys.databasePoolTelemetry("cron", "0"),
+      ]);
+      assert.equal(realSnapshots.ok, true);
+      assert.deepEqual(realSnapshots.values.map((snapshot) => ({
+        role: snapshot.role,
+        max: snapshot.pool.max,
+        configSource: snapshot.pool.configSource,
+      })), [
+        { role: "http", max: 10, configSource: "DATABASE_POOL_MAX_HTTP" },
+        { role: "http", max: 10, configSource: "DATABASE_POOL_MAX_HTTP" },
+        { role: "resolution", max: 8, configSource: "DATABASE_POOL_MAX_RESOLUTION" },
+        { role: "cron", max: 4, configSource: "DATABASE_POOL_MAX_CRON" },
+      ]);
+      const realAdmin = await createTestUser({
+        email: process.env.ADMIN_EMAILS?.split(",")[0]?.trim() || "admin@test.com",
+      });
+      const realResponse = await request(
+        server.baseUrl,
+        "GET",
+        "/admin/system-health?window=60m",
+        { token: realAdmin.token },
+      );
+      assert.equal(realResponse.status, 200);
+      const realBody = await realResponse.json();
+      assert.equal(realBody.freshProcesses, 4, JSON.stringify(realBody));
+      assert.deepEqual(realBody.processes.map(({ role, pool }) => ({
+        role,
+        max: pool.max,
+        configSource: pool.configSource,
+      })), [
+        { role: "http", max: 10, configSource: "DATABASE_POOL_MAX_HTTP" },
+        { role: "http", max: 10, configSource: "DATABASE_POOL_MAX_HTTP" },
+        { role: "resolution", max: 8, configSource: "DATABASE_POOL_MAX_RESOLUTION" },
+        { role: "cron", max: 4, configSource: "DATABASE_POOL_MAX_CRON" },
+      ]);
+      // The remainder of this test needs deterministic 60-minute fixtures.
+      // Remove the real per-boot snapshots after proving their wire contract so
+      // Redis's later-boot protection does not correctly reject older fixtures.
+      await probe.flushdb();
+
+      for (const [role, instance] of [["http", "0"], ["http", "1"], ["resolution", "0"], ["cron", "0"]]) {
         const result = await redisCache.writeDatabasePoolTelemetrySnapshot(
           cacheKeys.databasePoolTelemetry(role, instance),
           poolSnapshot(role, instance, nowMs),
@@ -203,10 +297,7 @@ describe("admin system health", () => {
       assert.equal((await writeHistory("0", { requests: 4, successes: 3, validation4xx: 1, auth4xx: 0, poolCheckoutTimeouts: 0, transactionErrors: 0, server5xx: 0 })).status, "accepted");
       assert.equal((await writeHistory("1", { requests: 6, successes: 5, validation4xx: 0, auth4xx: 0, poolCheckoutTimeouts: 0, transactionErrors: 0, server5xx: 1 })).status, "accepted");
 
-      const admin = await createTestUser({
-        email: process.env.ADMIN_EMAILS?.split(",")[0]?.trim() || "admin@test.com",
-      });
-      const response = await request(server.baseUrl, "GET", "/admin/system-health?window=60m", { token: admin.token });
+      const response = await request(server.baseUrl, "GET", "/admin/system-health?window=60m", { token: realAdmin.token });
       assert.equal(response.status, 200);
       const body = await response.json();
       assert.equal(body.status, "available", JSON.stringify(body));
@@ -216,6 +307,12 @@ describe("admin system health", () => {
       assert.equal(body.freshProcesses, 4);
       assert.deepEqual(body.missingProcesses, []);
       assert.deepEqual(body.processes.map((row) => `${row.role}:${row.instance}`), ["http:0", "http:1", "resolution:0", "cron:0"]);
+      assert.deepEqual(body.processes.map((row) => row.pool.configSource), [
+        "DATABASE_POOL_MAX_HTTP",
+        "DATABASE_POOL_MAX_HTTP",
+        "DATABASE_POOL_MAX_RESOLUTION",
+        "DATABASE_POOL_MAX_CRON",
+      ]);
       assert.deepEqual(body.stepIngestion.endpoints.map((row) => row.endpoint), ["steps", "samples", "sync-v2"]);
       assert.deepEqual(body.failureWindows.map((row) => row.window), ["60m", "24h", "7d"]);
       for (const row of body.failureWindows) {

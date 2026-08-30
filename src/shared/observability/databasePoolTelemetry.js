@@ -196,6 +196,7 @@ function createDatabasePoolTelemetry({
   pool,
   role = process.env.STEPS_PROCESS_ROLE || "all",
   instance = process.env.NODE_APP_INSTANCE == null ? "0" : String(process.env.NODE_APP_INSTANCE),
+  poolConfigSource = null,
   nowMs = Date.now,
   monotonicNowNs = () => process.hrtime.bigint(),
   bootId = randomUUID(),
@@ -373,6 +374,7 @@ function createDatabasePoolTelemetry({
     const idle = Math.max(0, Number(pool.idleCount) || 0);
     return {
       max,
+      ...(poolConfigSource ? { configSource: poolConfigSource } : {}),
       total,
       idle,
       nonIdle: Math.max(0, total - idle),

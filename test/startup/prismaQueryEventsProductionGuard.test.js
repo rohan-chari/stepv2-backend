@@ -16,6 +16,8 @@ function loadDb(overrides = {}, source = "require('./src/db')") {
       PRISMA_QUERY_EVENTS_ENABLED: "true",
       PORT: "3003",
       DATABASE_URL: stagingUrl,
+      STEPS_PROCESS_ROLE: "all",
+      DATABASE_POOL_MAX_ALL: "10",
       ...overrides,
     },
     encoding: "utf8",

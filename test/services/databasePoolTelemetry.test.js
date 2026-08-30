@@ -81,11 +81,21 @@ test("zero heartbeat is complete, bounded, and contains no forbidden request mat
     pool,
     role: "cron",
     instance: "0",
+    poolConfigSource: "DATABASE_POOL_MAX_CRON",
     nowMs: () => 60_000,
   });
   const snapshot = telemetry.captureForTest(60_000);
   assert.equal(snapshot.schema, "database-pool-telemetry-snapshot-v1");
   assert.equal(snapshot.coverageMinutes, 1);
+  assert.deepEqual(snapshot.pool, {
+    max: 20,
+    configSource: "DATABASE_POOL_MAX_CRON",
+    total: 0,
+    idle: 0,
+    nonIdle: 0,
+    checkedOut: 0,
+    waiting: 0,
+  });
   assert.deepEqual(snapshot.buckets[0].interval, {
     acquisitions: 0,
     releases: 0,

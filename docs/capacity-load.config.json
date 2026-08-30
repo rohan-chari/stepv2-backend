@@ -5,6 +5,7 @@
   "directory": "/private/tmp/steptracker-capacity-state",
   "run_id": "load-20260821m",
   "profile": "full-app",
+  "database_pool_profile": "role-budget",
   "target": "capacity-vm",
   "base_url": "http://127.0.0.1:3000",
   "health_url": "http://127.0.0.1:3000/health",

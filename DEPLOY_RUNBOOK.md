@@ -86,11 +86,19 @@ cd /var/www/step-tracker-backend \
   && npx prisma migrate deploy \
   && npx prisma generate \
   && npm run powerups:copy:sync -- --apply \
-  && pm2 startOrReload ecosystem.config.js --only steps-tracker,steps-tracker-resolution,steps-tracker-cron \
-  && pm2 save
+  && ./scripts/pm2-safe-prod-reload.sh
 ```
 
-**`reload`, not `restart`, and by name, not id.** `reload` cycles the cluster
+`powerups:copy:sync`, `balance:drift`, and the required post-reload
+`referral-contest:catch-up` are the exact audited role-less production npm
+commands. Their exact npm lifecycle/script pairs use the bounded `maintenance`
+database pool: 2 connections by default, or a canonical 1–5 from
+`DATABASE_POOL_MAX_MAINTENANCE`. Do not replace an npm command with a direct
+`node scripts/...` call; unaudited role-less production processes intentionally
+fail before constructing a pool.
+
+**Use the wrapper, not a direct `restart`/`reload`, and identify apps by name,
+not id.** `reload` cycles the cluster
 workers one at a time (zero downtime); `restart` kills them all at once and
 caused a ~10s outage with user-visible 502s the one time it was used on prod
 (2026-07-12). See `DEPLOYMENT.md` for the same rule stated at the source.
@@ -100,12 +108,56 @@ caused a ~10s outage with user-visible 502s the one time it was used on prod
 so if the process had drifted to 1 instance the deploy happily preserves the
 drift. Going through the config file re-asserts `instances: 2` on every deploy,
 which is what stops the 2026-08-16 half-capacity incident recurring. `--only`
-scopes it to one app; the trailing `pm2 save` updates the dump a reboot restores.
+scopes it to one app. The wrapper saves only after static, transition, topology,
+memory-sentinel, and final strict pool-budget checks pass.
 
-### 3a. Cluster instances — verify BOTH workers came back
+### 3a. Database pool budget — staged 80 → 32 rollout
 
-Prod and staging each run **2 pm2 cluster instances**, matching the droplet's
-2 vCPUs. **As of 2026-08-16 this is declared in `ecosystem.config.js` at the
+Production pool ceilings are environment-configurable per process role, with
+the reviewed source of truth committed in `ecosystem.config.js`. Deploy the two
+recorded revisions sequentially: Deployment A has no production role variables
+and safely remains at the legacy 80 aggregate; Deployment B adds this table and
+fails closed if its exact role variable is missing:
+
+| Role | Processes | Variable | Per process | Role total |
+|---|---:|---|---:|---:|
+| HTTP | 2 | `DATABASE_POOL_MAX_HTTP` | 10 | 20 |
+| Resolution | 1 | `DATABASE_POOL_MAX_RESOLUTION` | 8 | 8 |
+| Cron | 1 | `DATABASE_POOL_MAX_CRON` | 4 | 4 |
+| **Production** | **4** | `DATABASE_POOL_TOTAL_BUDGET` | — | **32** |
+
+Every supplied maximum must be a canonical integer from 1 through 50.
+Deployment A is the sole compatibility exception. Deployment B production
+requires the exact variable for `STEPS_PROCESS_ROLE`; generic fallbacks are
+local/test-only. The capacity harness keeps its isolated
+`DB_POOL_MAX` contract and production cannot use it as an alias.
+
+Before the reload, verify in the DigitalOcean control plane and record the
+managed-pool mode, pool size, reserve size (if any), and direct database
+maximum. Then run the wrapper, which performs static preflight and transitions
+resolution → cron → both HTTP workers. Before the first reload it captures the
+exact live per-process pool baseline; every untransitioned process must remain
+identical to that snapshot, and every transitioned process must exactly match
+the current ecosystem target. This also applies when reviewed targets change.
+Do not run `pm2 save` manually after a failed wrapper.
+
+Afterward, confirm the startup records and take a read-only SQL census:
+
+```bash
+pm2 logs steps-tracker --lines 100 --nostream | grep '"event":"database_pool_configuration_v1"'
+pm2 logs steps-tracker-resolution --lines 50 --nostream | grep '"event":"database_pool_configuration_v1"'
+pm2 logs steps-tracker-cron --lines 50 --nostream | grep '"event":"database_pool_configuration_v1"'
+psql "$DBU" -c "SELECT application_name, state, count(*) FROM pg_stat_activity WHERE datname = current_database() GROUP BY 1,2 ORDER BY 1,2;"
+```
+
+Expect exactly `http:0=10`, `http:1=10`, `resolution:0=8`, and `cron:0=4`
+in startup/admin telemetry. Lower ceilings are containment, not a throughput
+optimization; continue monitoring endpoint latency and long transactions.
+
+### 3b. Cluster instances — verify BOTH workers came back
+
+Prod runs **2 HTTP pm2 cluster instances**. Staging is one process and remains
+stopped by default. **The topology is declared in `ecosystem.config.js` at the
 repo root** — that file, not the server's memory, is the source of truth. Scaling
 past 1 is safe *only* because `src/index.js:188-201` gates the whole
 `startCrons()` call behind `process.env.NODE_APP_INSTANCE === "0"` — pm2 sets
@@ -118,26 +170,15 @@ rows named `steps-tracker` is correct; one row means prod is running at half
 capacity.
 
 ```bash
-pm2 list                      # expect TWO rows named steps-tracker, TWO named steps-tracker-staging
+pm2 list                      # expect TWO HTTP, ONE resolution, ONE cron; staging stopped
 pm2 describe steps-tracker | grep -E "instances|exec mode|status"
 ```
 
-If only one row is present, the scale was lost (a reboot, or a resurrect from a
-dump that predates the change). Re-assert it **from the config file**, so the
-count comes from the repo rather than being typed from memory:
-
-```bash
-pm2 startOrReload ecosystem.config.js --only steps-tracker
-pm2 save                      # persist so the next resurrect keeps 2
-```
-
-The `--only` is not optional: `ecosystem.config.js` declares BOTH apps, and
-omitting it would have a prod deploy reload staging too.
-
-The manual equivalent (`pm2 scale steps-tracker 2 && pm2 save`) still works, but
-prefer the config file — the whole point is that the number stops living in
-someone's head. **`pm2 save` is still required either way**; the ecosystem file
-governs starts and reloads, while the dump is what a *reboot* resurrects.
+If only one row is present, stop the deployment. Do not reload, scale, or save
+PM2 directly. Fix the reviewed ecosystem definition if necessary, then rerun
+`npm run pm2:reload:prod`; that serialized wrapper is the only authorized path
+because it validates topology, captures the live pool baseline, reloads roles
+in order, verifies every target, and saves only after the final checks pass.
 
 > **Do not use `pm2 scale` on a shared droplet without checking the other apps
 > first.** On 2026-08-16 a `pm2 scale steps-tracker-staging 2` rebuilt pm2's
@@ -156,9 +197,9 @@ pm2 logs steps-tracker --lines 200 --nostream | grep -E "\[CRON\]"
 # fix before walking away; duplicate race resolution and duplicate pushes follow.
 ```
 
-### 3b. Converge referral-contest ledgers after BOTH workers are new
+### 3c. Converge referral-contest ledgers after BOTH workers are new
 
-Run this only after `startOrReload` has completed and section 3a confirms both
+Run this only after `startOrReload` has completed and section 3b confirms both
 `steps-tracker` workers are online on the new release. During a rolling reload,
 an old worker can still accept a race participant or write a point review
 without the new ownership columns; running catch-up earlier would leave a new
@@ -188,7 +229,8 @@ until the final dry-run reports zero for both `raceActivities` and
 > 2026-08-15. Crons were unaffected (the sole worker is `NODE_APP_INSTANCE=0`,
 > so the guard still admits exactly one), but prod was serving at half its
 > intended capacity. If you find one row per app, that is this drift, not a new
-> design — re-scale and `pm2 save`.
+> design. Stop and use the serialized production reload procedure above; never
+> repair or persist this state with an ad-hoc PM2 command.
 
 `prisma/seed.js` no longer runs on a deploy. It is the bootstrap for a *fresh*
 database; against a live one it reasserts rows that other systems own. Its one
@@ -296,13 +338,13 @@ windows; that is expected and must not be reported as complete coverage.
 
 ---
 
-## 5. Restart staging
+## 5. Staging remains stopped by default
 
-```bash
-pm2 start steps-tracker-staging
-curl -s https://staging.steptracker-api.org/health
-pm2 list    # staging back to TWO rows; if one, `pm2 scale steps-tracker-staging 2 && pm2 save` (see 3a)
-```
+Do not start or reload staging as part of an ordinary production deploy. With
+explicit in-the-moment authorization for a staging/capacity test, start its one
+`all` process (`DATABASE_POOL_MAX_ALL=10`), verify its pooler budget separately,
+run the authorized work, then stop staging again. Never scale it to two as a
+substitute for the four-process protected capacity harness.
 
 ---
 
@@ -349,7 +391,14 @@ size. Check usage:
 ```bash
 psql "$DBU" -c "SELECT count(*) FROM pg_stat_activity;"
 psql "$DBU" -c "SHOW max_connections;"
+psql "$DBU" -c "SHOW superuser_reserved_connections;"
+psql "$DBU" -c "SELECT application_name, state, count(*) FROM pg_stat_activity WHERE datname = current_database() GROUP BY 1,2 ORDER BY 1,2;"
 ```
+
+Do not infer the DigitalOcean managed-pool size from these SQL results; verify
+pool mode/size/reserve in the control plane. Restore only reviewed role values
+with `pm2-safe-prod-reload.sh`. A lower application pool prevents one role from
+monopolizing connections but cannot improve a slow transaction's throughput.
 
 ---
 

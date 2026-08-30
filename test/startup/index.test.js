@@ -63,6 +63,11 @@ test("startServer listens on 0.0.0.0 by default", () => {
     scheduleFeedbackEmailAttemptExpiry: track("feedbackEmailAttemptExpiry"),
     scheduleRaceResolutionPostTasks() {},
     scheduleRacePlacementTransitions: track("placementTransitions"),
+    databasePoolConfig: {
+      role: "all",
+      max: 20,
+      source: "compatibility-default",
+    },
     logger: {
       log(message) {
         logs.push(message);
@@ -104,7 +109,16 @@ test("startServer listens on 0.0.0.0 by default", () => {
     feedbackEmailAttemptExpiry: 1,
     placementTransitions: 1,
   });
-  assert.deepEqual(logs, ["Steps Tracker API running on 0.0.0.0:3000"]);
+  assert.deepEqual(logs, [
+    "Steps Tracker API running on 0.0.0.0:3000",
+    JSON.stringify({
+      event: "database_pool_configuration_v1",
+      role: "all",
+      instance: "0",
+      max: 20,
+      configSource: "compatibility-default",
+    }),
+  ]);
 });
 
 test("cronStartDelayMs defers job scheduling past the reload overlap window", async () => {
