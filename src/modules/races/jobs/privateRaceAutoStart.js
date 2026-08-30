@@ -71,8 +71,8 @@ function shouldAutoStartPrivateRace({ race, now = new Date() }) {
   // Team invite races are explicitly rostered: once the invited roster is
   // accepted and the configured capacity is full, start immediately even if
   // the race was created through the public/team discovery surface.
-  const invitedTeamRace = race.isTeamRace === true && race.isPublic !== false;
-  if (!invitedTeamRace && !quickPolicy && race.isPublic !== false) return false;
+  const publicInvitedTeamRace = race.isTeamRace === true && race.isPublic !== false;
+  if (!publicInvitedTeamRace && !quickPolicy && race.isPublic !== false) return false;
   // Seeded challenges renew/start via seededRaceRenewal; tournament matchups
   // are owned by the tournament engine's lifecycle.
   if (race.seedId) return false;
@@ -92,20 +92,23 @@ function shouldAutoStartPrivateRace({ race, now = new Date() }) {
 
   const acceptedCount = participants.filter((p) => p.status === "ACCEPTED").length;
   if (acceptedCount < 2) return false;
-  if (invitedTeamRace) {
-    if (race.maxParticipants == null || acceptedCount < race.maxParticipants) return false;
-    const accepted = participants.filter((p) => p.status === "ACCEPTED");
-    const teamA = accepted.filter((p) => p.team === "TEAM_A").length;
-    const teamB = accepted.filter((p) => p.team === "TEAM_B").length;
-    if (teamA < 1 || teamA !== teamB) return false;
-  }
 
-  // Team races: same evenness rule startRace enforces (TEAMS_UNEVEN), evaluated
-  // with the very same helper. Uneven -> stay PENDING, silently: the accepter
-  // must never see an error for a start that was never their request.
+  // Team auto-start is stricter than manual start: every configured slot must
+  // be accepted, on its configured side. This applies to private and public
+  // team races alike. Otherwise an expired/declined invite in a private 5v5
+  // could make the legacy "all invites resolved" rule start it early at 3v3.
+  // A malformed legacy capacity stays creator-startable rather than guessing.
   if (race.isTeamRace) {
     const counts = acceptedTeamCounts(participants);
-    if (counts.TEAM_A < 1 || counts.TEAM_B < 1 || counts.TEAM_A !== counts.TEAM_B) {
+    const teamSize = race.teamSize;
+    if (
+      !Number.isInteger(teamSize) ||
+      teamSize < 1 ||
+      acceptedCount !== teamSize * 2 ||
+      counts.TEAM_A !== teamSize ||
+      counts.TEAM_B !== teamSize ||
+      (race.maxParticipants != null && race.maxParticipants !== teamSize * 2)
+    ) {
       return false;
     }
   }

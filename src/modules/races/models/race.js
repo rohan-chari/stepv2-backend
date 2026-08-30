@@ -1624,6 +1624,8 @@ const Race = {
         tournamentId: true,
         scheduledStartAt: true,
         isTeamRace: true,
+        teamSize: true,
+        maxParticipants: true,
         participants: {
           select: {
             id: true,

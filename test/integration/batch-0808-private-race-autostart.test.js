@@ -345,6 +345,86 @@ describe("batch 2026-08-08 item 2 — private race auto-start", () => {
     assert.equal(afterCron.status, "PENDING");
   });
 
+  it("keeps a private 5v5 pending at 3v3, then the backstop starts a full 5v5", async () => {
+    const creator = await createUser("FiveCreator");
+    const invitees = [];
+    for (let i = 0; i < 11; i += 1) {
+      const friend = await createUser(`FiveFriend${i}`);
+      await makeFriends(creator, friend);
+      invitees.push(friend);
+    }
+
+    const raceId = await createRace(creator, {
+      name: "Private Five v Five",
+      isTeamRace: true,
+      teamSize: 5,
+      team: "TEAM_A",
+    });
+    await invite(creator, raceId, invitees);
+
+    // Creator + two friends on A, and three friends on B: balanced, but only
+    // six of the configured ten spots are accepted.
+    for (const friend of invitees.slice(0, 2)) {
+      const res = await respond(friend, raceId, true, "TEAM_A");
+      assert.equal(res.status, 200);
+    }
+    for (const friend of invitees.slice(2, 5)) {
+      const res = await respond(friend, raceId, true, "TEAM_B");
+      assert.equal(res.status, 200);
+    }
+
+    await prisma.raceParticipant.updateMany({
+      where: {
+        raceId,
+        userId: { in: invitees.slice(5).map((friend) => friend.userId) },
+      },
+      data: { inviteExpiresAt: new Date(Date.now() - 60 * 60 * 1000) },
+    });
+
+    await runCron();
+
+    const race = await getRace(creator, raceId);
+    assert.equal(race.status, "PENDING", "a configured 5v5 must not start at 3v3");
+    assert.equal(race.startedAt, null);
+    assert.equal(
+      race.participants.filter((participant) => participant.status === "ACCEPTED").length,
+      6
+    );
+
+    // Restore only the four invitations needed to fill the race. The two extra
+    // expired rows keep the participant-row count above the inline threshold,
+    // forcing the real cron projection/predicate path to own the start.
+    await prisma.raceParticipant.updateMany({
+      where: {
+        raceId,
+        userId: { in: invitees.slice(5, 9).map((friend) => friend.userId) },
+      },
+      data: { inviteExpiresAt: new Date(Date.now() + 60 * 60 * 1000) },
+    });
+    for (const friend of invitees.slice(5, 7)) {
+      const res = await respond(friend, raceId, true, "TEAM_A");
+      assert.equal(res.status, 200);
+      assert.equal((await getRace(creator, raceId)).status, "PENDING");
+    }
+    for (const friend of invitees.slice(7, 9)) {
+      const res = await respond(friend, raceId, true, "TEAM_B");
+      assert.equal(res.status, 200);
+    }
+
+    let fullRace = await getRace(creator, raceId);
+    assert.equal(fullRace.status, "PENDING", "large rosters skip the inline start");
+
+    await runCron();
+
+    fullRace = await getRace(creator, raceId);
+    assert.equal(fullRace.status, "ACTIVE", "the backstop starts the full 5v5");
+    assert.ok(fullRace.startedAt);
+    assert.equal(
+      fullRace.participants.filter((participant) => participant.status === "ACCEPTED").length,
+      10
+    );
+  });
+
   it("does NOT auto-start a race scheduled to start in the future", async () => {
     const alice = await createUser("SchedAlice");
     const bob = await createUser("SchedBob");
