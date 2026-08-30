@@ -21,6 +21,8 @@ const {
 } = require("../../../src/modules/loadTesting/globalEventReliabilityProfiles");
 const {
   BACKGROUND_NODE_EXEC_ARGV,
+  capacityPoolLimits,
+  capacityPoolProfile,
   roleChildEnvironment,
 } = require("../../../scripts/capacity-cluster");
 const { capacityRunId, globalEventProfile } = require("../../../scripts/lima-capacity");
@@ -343,17 +345,37 @@ test("executable fixture census accounts for every race membership and installat
 });
 
 test("production-shaped capacity roles advertise the exact four-owner census", () => {
+  const limits = capacityPoolLimits("role-budget");
+  const resolution = roleChildEnvironment({}, "resolution", "3010", limits);
+  const cron = roleChildEnvironment({}, "cron", "3011", limits);
   const owners = [
     logicalOwnerIdForProcess({ STEPS_PROCESS_ROLE: "http", NODE_APP_INSTANCE: "0" }),
     logicalOwnerIdForProcess({ STEPS_PROCESS_ROLE: "http", NODE_APP_INSTANCE: "1" }),
-    logicalOwnerIdForProcess(roleChildEnvironment({}, "resolution", "3010")),
-    logicalOwnerIdForProcess(roleChildEnvironment({}, "cron", "3011")),
+    logicalOwnerIdForProcess(resolution),
+    logicalOwnerIdForProcess(cron),
   ];
   assert.deepEqual(owners, ["http:0", "http:1", "resolution:0", "cron:0"]);
   assert.deepEqual(BACKGROUND_NODE_EXEC_ARGV, [
     "--max-old-space-size=320",
     "--max-semi-space-size=8",
   ]);
+  assert.equal(resolution.DB_POOL_MAX, "8");
+  assert.equal(cron.DB_POOL_MAX, "4");
+  const clusterSource = fs.readFileSync(
+    path.join(__dirname, "../../../scripts/capacity-cluster.js"),
+    "utf8",
+  );
+  assert.match(clusterSource, /capacityPoolLimits\(capacityPoolProfile\(process\.env\)\)/);
+  assert.match(clusterSource, /STEPS_PROCESS_ROLE: "http"[\s\S]*DB_POOL_MAX: limits\.http/);
+});
+
+test("capacity pool profile reproducibly selects legacy baseline or role-budget candidate", () => {
+  assert.equal(capacityPoolProfile({ database_pool_profile: "legacy20" }), "legacy20");
+  assert.equal(capacityPoolProfile({ database_pool_profile: "role-budget" }), "role-budget");
+  assert.throws(() => capacityPoolProfile({}), /database_pool_profile/);
+  assert.throws(() => capacityPoolProfile({ database_pool_profile: "other" }), /legacy20 or role-budget/);
+  assert.deepEqual(capacityPoolLimits("legacy20"), { http: "20", resolution: "20", cron: "20" });
+  assert.deepEqual(capacityPoolLimits("role-budget"), { http: "10", resolution: "8", cron: "4" });
 });
 
 test("the command-line event profile reaches the Lima backend start hook", () => {

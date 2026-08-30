@@ -157,11 +157,26 @@ npm run balance:drift      # reports (never blocks) balance config drift vs git
 ```
 
 The wrapper holds `/run/steps-tracker-pm2.lock`, verifies the OS process tree
-against PM2 before and after the reload, reapplies `ecosystem.config.js` for
-all three production roles, and saves only a healthy topology. It applies and
-verifies the HTTP memory sentinel before touching resolution or cron. Prod runs
-2 cluster instances; reload cycles them one at a time with zero downtime. Do
-not bypass the wrapper with a direct mutating PM2 command.
+against PM2, and runs a static database-pool preflight before changing a PID.
+This rollout has two sequential revisions. Deployment A contains role-aware
+code but deliberately omits production role values, so its reviewed target is
+the compatibility baseline `4 × 20 = 80`. Deployment B adds two HTTP workers
+at 10 each, resolution at 8, and cron at 4: `2 × 10 + 8 + 4 = 32`, and makes a
+missing production role value fatal. The wrapper derives the target from the
+checked-out ecosystem revision, captures the exact live baseline, serializes
+resolution → cron → HTTP, verifies every untransitioned/transitioned process,
+checks the HTTP memory sentinel, and requires the final live aggregate to equal
+that revision's reviewed target before `pm2 save`. Do not skip Deployment A or
+bypass the wrapper with a direct mutating PM2 command.
+
+Before authorizing a pool-budget rollout, record the DigitalOcean managed-pool
+mode, pool size, reserve size (if any), and the direct database maximum from the
+control plane. SQL `SHOW max_connections` and a session count do not reveal the
+managed-pool ceiling. During the serialized rolling replacement, the worst
+configured overlaps are 88 slots for resolution, 72 for cron, and 62 for an
+HTTP replacement. Do not begin the next role until the previous old PID has
+exited; stop without `pm2 save` if actual server connections approach either
+verified ceiling.
 
 The replacement production host has 8 GB RAM and 4 GB persistent swap. The old
 600 MB `max_memory_restart` setting caused 490 HTTP reloads in five days and
@@ -270,6 +285,12 @@ defective 600 MB cluster reload setting and keeps the systemd watchdog target
 present. The checkout remains dirty only for these operational safety files;
 retain them until rolling forward again.
 
+For a pool-budget rollback, restore the last reviewed role values in the
+preserved `ecosystem.config.js` and use the same serialized wrapper. Do not add
+workers, start staging, increase database capacity, or introduce a runtime kill
+switch as an implicit rollback. Lower pool ceilings contain contention; they
+do not make slow transactions faster or increase database throughput.
+
 **Do NOT run `prisma migrate deploy` during rollback.** Migrations are forward-only. If a migration was applied as part of 1.1.5, the schema stays migrated. The reverted code must be compatible with the new schema, OR you need to write a new "down" migration (rare; usually means redesigning the change).
 
 This is why **destructive migrations stay out of 1.1.5 until you're confident**. See "Schema migrations" below.
@@ -338,12 +359,16 @@ CREATE time; settlement reads the column, never the flag. Consequences:
 
 ## Syncing prod data into staging
 
-From your laptop, not the droplet. Requires `STAGING_DATABASE_URL` in your local `.env`.
+From your laptop, not the droplet. Requires `STAGING_DATABASE_URL` in your local
+`.env` and explicit, in-the-moment authorization to use staging. Staging must be
+stopped again when the authorized refresh/verification is complete.
 
 ```bash
 ssh <droplet> 'pm2 stop steps-tracker-staging'
 node scripts/sync-prod-to-local.js --target=staging
 ssh <droplet> 'pm2 start steps-tracker-staging'
+# ...perform the authorized verification...
+ssh <droplet> 'pm2 stop steps-tracker-staging'
 ```
 
 The script:

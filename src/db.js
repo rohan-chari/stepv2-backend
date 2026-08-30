@@ -45,8 +45,14 @@ const {
   capacityDatabasePoolMax,
   capacityDatabaseSslDisabled,
 } = require("./localCapacitySafety");
+const {
+  resolveDatabasePoolConfig,
+} = require("./shared/config/databasePoolConfig");
 const capacitySslDisabled = capacityDatabaseSslDisabled();
-const databasePoolMax = capacityDatabasePoolMax();
+const databasePoolConfig = resolveDatabasePoolConfig(process.env, {
+  capacityDatabasePoolMax,
+});
+const databasePoolMax = databasePoolConfig.max;
 
 // Strip sslmode from URL to prevent pg from overriding our ssl config
 const connectionString = dbUrl.replace(/[?&]sslmode=[^&]*/g, "");
@@ -132,6 +138,7 @@ const redisCache = require("./shared/cache/redisCache");
 const cacheKeys = require("./shared/cache/cacheKeys");
 const databasePoolTelemetry = createDatabasePoolTelemetry({
   pool,
+  poolConfigSource: databasePoolConfig.source,
   redisCache,
   cacheKeys,
 });
@@ -220,6 +227,7 @@ async function runAfterCommitTasks(tasks, logger = console) {
 
 module.exports = {
   prisma,
+  databasePoolConfig,
   getDbPoolPressure,
   databasePoolTelemetry,
   runInPrismaTransaction,

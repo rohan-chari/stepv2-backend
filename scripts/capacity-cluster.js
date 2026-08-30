@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 // Local-capacity equivalent of the production PM2 cluster: two HTTP workers
-// share one listening socket, each owns an independent 20-connection pool;
+// share one listening socket, each owns an independent selected-profile pool;
 // resolution and cron run as separate processes, like production PM2.
 const cluster = require("node:cluster");
 const { fork } = require("node:child_process");
@@ -14,25 +14,41 @@ const BACKGROUND_NODE_EXEC_ARGV = Object.freeze([
   "--max-semi-space-size=8",
 ]);
 
-function roleChildEnvironment(baseEnv, role, port) {
+function capacityPoolProfile(source = {}) {
+  const profile = source.CAPACITY_DATABASE_POOL_PROFILE ?? source.database_pool_profile;
+  if (!profile) throw new Error("database_pool_profile is required");
+  if (!["legacy20", "role-budget"].includes(profile)) {
+    throw new Error("database_pool_profile must be legacy20 or role-budget");
+  }
+  return profile;
+}
+
+function capacityPoolLimits(profile) {
+  if (profile === "legacy20") return { http: "20", resolution: "20", cron: "20" };
+  if (profile === "role-budget") return { http: "10", resolution: "8", cron: "4" };
+  throw new Error("database_pool_profile must be legacy20 or role-budget");
+}
+
+function roleChildEnvironment(baseEnv, role, port, limits) {
   return {
     ...baseEnv,
     NODE_APP_INSTANCE: "0",
     STEPS_PROCESS_ROLE: role,
     PORT: port,
     HOST: "127.0.0.1",
-    DB_POOL_MAX: "20",
+    DB_POOL_MAX: limits[role],
   };
 }
 
 function main() {
+const limits = capacityPoolLimits(capacityPoolProfile(process.env));
 if (cluster.isPrimary) {
   for (let instance = 0; instance < workerCount; instance += 1) {
     cluster.fork({
       NODE_APP_INSTANCE: String(instance),
       STEPS_PROCESS_ROLE: "http",
       PORT: "3000",
-      DB_POOL_MAX: "20",
+      DB_POOL_MAX: limits.http,
     });
   }
 
@@ -40,7 +56,7 @@ if (cluster.isPrimary) {
     ["resolution", "3010"],
     ["cron", "3011"],
   ].map(([role, port]) => fork(backendEntry, [], {
-    env: roleChildEnvironment(process.env, role, port),
+    env: roleChildEnvironment(process.env, role, port, limits),
     execArgv: BACKGROUND_NODE_EXEC_ARGV,
   }));
 
@@ -80,6 +96,8 @@ if (require.main === module) main();
 
 module.exports = {
   BACKGROUND_NODE_EXEC_ARGV,
+  capacityPoolLimits,
+  capacityPoolProfile,
   main,
   roleChildEnvironment,
   workerCount,

@@ -43,14 +43,17 @@ function strictTrue(value) {
 function capacityDatabasePoolMax(env = process.env) {
   const productionDefault = 20;
   if (!strictTrue(env.CAPACITY_MODE)) return productionDefault;
+  // Capacity identity and database isolation must be proven even when a caller
+  // relies on the legacy default. Otherwise a production-shaped process could
+  // reach the database before the capacity boundary is enforced.
+  capacityIdentity(env);
+  assertCapacityDatabase(env.DATABASE_URL, env);
   const raw = String(env.DB_POOL_MAX || "").trim();
   if (!raw) return productionDefault;
   const value = Number(raw);
   if (!Number.isInteger(value) || value < 1 || value > productionDefault) {
     throw new Error(`DB_POOL_MAX must be an integer from 1 through ${productionDefault} in capacity mode`);
   }
-  capacityIdentity(env);
-  assertCapacityDatabase(env.DATABASE_URL, env);
   return value;
 }
 

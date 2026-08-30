@@ -13,6 +13,7 @@ const {
 const { createApp } = require("./app");
 const {
   databasePoolTelemetry: defaultDatabasePoolTelemetry,
+  databasePoolConfig: defaultDatabasePoolConfig,
 } = require("./db");
 const {
   registerEventHandlers,
@@ -166,6 +167,7 @@ function startServer({
   capacityGlobalEventOnly = false,
   processRole = process.env.STEPS_PROCESS_ROLE || "all",
   databasePoolTelemetry = defaultDatabasePoolTelemetry,
+  databasePoolConfig = defaultDatabasePoolConfig,
 } = {}) {
   const jobStopHandles = [];
   const retainStopHandle = (handle) => {
@@ -178,6 +180,13 @@ function startServer({
 
   const server = app.listen(port, host, () => {
     logger.log(`Steps Tracker API running on ${host}:${port}`);
+    logger.log(JSON.stringify({
+      event: "database_pool_configuration_v1",
+      role: databasePoolConfig.role,
+      instance: process.env.NODE_APP_INSTANCE == null ? "0" : String(process.env.NODE_APP_INSTANCE),
+      max: databasePoolConfig.max,
+      configSource: databasePoolConfig.source,
+    }));
     // Keep dependency-injected startup probes byte-for-byte stable; production
     // uses the default console logger and records the dark-switch snapshot.
     if (logger === console) logPerformanceFlags(logger);

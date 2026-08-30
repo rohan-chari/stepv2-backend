@@ -5,6 +5,7 @@ require("dotenv").config();
 const fs = require("node:fs");
 const path = require("node:path");
 const { execFileSync } = require("node:child_process");
+const { capacityPoolProfile } = require("./capacity-cluster");
 
 function parseArgs(argv) {
   const result = {};
@@ -122,6 +123,7 @@ function startBackend(settings) {
   const name = `${limaName(settings)}-backend`;
   const databaseUrl = dbUrl({ ...settings, db_host_port: 5432 }).replace("127.0.0.1:55433", "127.0.0.1:5432");
   const capacityProfile = globalEventProfile(settings);
+  const databasePoolProfile = capacityPoolProfile(settings);
   const runId = capacityRunId(settings);
   const env = [
     `-e DATABASE_URL=${JSON.stringify(databaseUrl)}`,
@@ -134,8 +136,8 @@ function startBackend(settings) {
     `-e REDIS_URL=${JSON.stringify(`redis://:${encodeURIComponent(redisPassword())}@127.0.0.1:6379/0`)}`,
     `-e CACHE_ENV_PREFIX=${JSON.stringify(`capacity:${runId}:`)}`,
     `-e CAPACITY_GLOBAL_EVENT_PROFILE=${JSON.stringify(capacityProfile)}`,
+    `-e CAPACITY_DATABASE_POOL_PROFILE=${JSON.stringify(databasePoolProfile)}`,
     `-e CAPACITY_PROVIDER_ATTEMPT_COUNT=12000`,
-    `-e DB_POOL_MAX=20`,
     `-e CAPACITY_AUTH_SECRET=${JSON.stringify(required(process.env.CAPACITY_AUTH_SECRET, "CAPACITY_AUTH_SECRET"))}`,
     `-e SESSION_TOKEN_SECRET=${JSON.stringify(required(process.env.CAPACITY_AUTH_SECRET, "CAPACITY_AUTH_SECRET"))}`,
     `-e PORT=3000`, `-e NODE_ENV=production`,

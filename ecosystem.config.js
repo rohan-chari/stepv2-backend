@@ -92,12 +92,12 @@ module.exports = {
     // originally required by the former 2 GB host; keeping it at one on the
     // replacement 8 GB host preserves capacity for production and load spikes.
     //
-    // For a load test that needs prod-matching topology, scale it up for the
-    // run and put it back afterwards — do not make 2 the committed default:
-    //   pm2 scale steps-tracker-staging 2   # then `pm2 scale … 1` when done
-    // and watch `free -m` while it runs.
+    // Production-shaped load tests belong in the isolated capacity harness,
+    // which owns its own four-process topology and database. Never scale this
+    // stopped shared-host staging process as a substitute.
     app("steps-tracker-staging", STAGING_DIR, 1, {
       STEPS_PROCESS_ROLE: "all",
+      DATABASE_POOL_MAX_ALL: "10",
     }, { autostart: false }),
   ],
 };

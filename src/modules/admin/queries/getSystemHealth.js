@@ -127,6 +127,8 @@ function validateSnapshot(value, expected, nowMs) {
   if (nowMs - value.capturedAtMs > 150_000) return { valid: false, reason: "stale" };
   const pool = value.pool;
   if (!isObject(pool) || !integer(pool.max, 1, 1_000_000) ||
+      (pool.configSource != null && (typeof pool.configSource !== "string" ||
+        !/^(?:DATABASE_POOL_MAX_(?:HTTP|RESOLUTION|CRON|ALL|DEFAULT)|DB_POOL_MAX|compatibility-default|capacity-default)$/.test(pool.configSource))) ||
       !["total", "idle", "nonIdle", "checkedOut", "waiting"].every((key) => integer(pool[key], 0, 1_000_000)) ||
       pool.idle > pool.total || pool.nonIdle !== pool.total - pool.idle ||
       pool.checkedOut > pool.nonIdle || pool.total > pool.max) return { valid: false, reason: "malformed" };

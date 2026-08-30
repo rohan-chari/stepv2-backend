@@ -158,8 +158,15 @@ const envMetadata = {
   CAPACITY_HEALTH_URL: ["capacity_local_config", null, "private health URL probed after capacity start", "capacity_local", null],
   CAPACITY_GLOBAL_EVENT_INFRASTRUCTURE_PATH: ["capacity_local_config", null, "absolute path to independently measured global-event infrastructure evidence", "capacity_local", null],
   CAPACITY_GLOBAL_EVENT_PROFILE: ["capacity_local_config", null, "names the isolated global-event capacity profile for deterministic local wiring", "capacity_local", null],
+  CAPACITY_DATABASE_POOL_PROFILE: ["capacity_local_config", null, "required isolated capacity pool shape: legacy20 baseline or role-budget candidate", "capacity_local", null],
   CAPACITY_PROVIDER_ATTEMPT_COUNT: ["capacity_local_config", 12000, "exact deterministic provider-attempt census for the approved fixture", "capacity_local", 12000],
   DB_POOL_MAX: ["capacity_local_config", 20, "integer 1..20 overrides the database pool only in validated capacity mode", "capacity_local", 20],
+  DATABASE_POOL_MAX_HTTP: ["deployment_config", null, "canonical integer 1..50; production target 10 per HTTP process", "database_capacity", 10],
+  DATABASE_POOL_MAX_RESOLUTION: ["deployment_config", null, "canonical integer 1..50; production target 8", "database_capacity", 8],
+  DATABASE_POOL_MAX_CRON: ["deployment_config", null, "canonical integer 1..50; production target 4", "database_capacity", 4],
+  DATABASE_POOL_MAX_ALL: ["deployment_config", null, "canonical integer 1..50; stopped staging target 10", "database_capacity", 10],
+  DATABASE_POOL_MAX_DEFAULT: ["deployment_config", null, "canonical integer 1..50; optional non-production fallback before compatibility default 20", "database_capacity", 20],
+  DATABASE_POOL_TOTAL_BUDGET: ["deployment_config", null, "production PM2 topology invariant; reviewed aggregate 32", "database_capacity", 32],
 };
 
 const retiredEnv = {
@@ -484,7 +491,7 @@ function collectRuntimeEnvironmentReads({
 
 function environmentKind(name, metadata) {
   if (
-    /(?:_CONCURRENCY|_MS|_HOURS|_DAYS|_COINS|_CAP|_RATE|_PERCENT|_THRESHOLD|_MAX_OPENS|_EXPECTED_OWNERS|_EXPIRES_SECONDS|_MULT_(?:SHORT|MID|LONG)|_VERSION|^PORT$)$/.test(name)
+    /(?:_CONCURRENCY|_MS|_HOURS|_DAYS|_COINS|_CAP|_RATE|_PERCENT|_THRESHOLD|_MAX_OPENS|_EXPECTED_OWNERS|_EXPIRES_SECONDS|_MULT_(?:SHORT|MID|LONG)|_VERSION|^PORT|^DATABASE_POOL_(?:MAX_(?:HTTP|RESOLUTION|CRON|ALL|DEFAULT)|TOTAL_BUDGET))$/.test(name)
   ) {
     return "numeric_environment";
   }
