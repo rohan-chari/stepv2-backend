@@ -3,10 +3,13 @@ const { buildRequireAuth } = require("../../../middleware/requireAuth");
 const { buildRequireAdmin } = require("../../admin/requireAdmin");
 const { asyncHandler } = require("../../../shared/http/asyncHandler");
 const { buildGiveawayService } = require("../services/giveawayService");
+const { buildAmendStandardRules } = require("../commands/amendStandardRules");
 
 function createGiveawayAdminRouter(dependencies = {}) {
   const router = Router();
   const service = dependencies.giveawayService || buildGiveawayService(dependencies);
+  const amendStandardRules = dependencies.amendStandardRules ||
+    buildAmendStandardRules(dependencies);
   const requireAuth = dependencies.requireAuth || buildRequireAuth(dependencies);
   const requireAdmin = buildRequireAdmin(dependencies);
   router.use((req, res, next) => {
@@ -28,6 +31,15 @@ function createGiveawayAdminRouter(dependencies = {}) {
   }));
   router.get("/:id/candidates", asyncHandler(async (req, res) => res.json(await service.candidates(req.params.id, req.query.cursor, req.query.limit, req.clientFeatures))));
   router.get("/:id", asyncHandler(async (req, res) => res.json(await service.adminDetail(req.params.id, req.clientFeatures))));
+  router.post("/:id/amend-standard-rules", asyncHandler(async (req, res) => {
+    const payload = await amendStandardRules({
+      actorId: req.user.id,
+      contestId: req.params.id,
+      idempotencyKey: req.headers["idempotency-key"],
+      body: req.body,
+    });
+    res.json(payload);
+  }));
 
   const mutations = {
     publish: "publish", cancel: "cancel", reviews: "review", finalize: "finalize",

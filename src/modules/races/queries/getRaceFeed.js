@@ -93,17 +93,18 @@ async function getRaceFeed(userId, raceId, { cursor, limit = 50, supportsPowerup
           : "A freezing attack affected one or more runners.";
       }
 
-      // Replace stealthed actor's name with ???
-      if (stealthedUserIds.has(e.actorUserId)) {
-        const realName = stealthedNames.get(e.actorUserId);
-        if (realName && description.includes(realName)) {
-          description = description.replaceAll(realName, "???");
-        }
-      }
-
-      // Replace stealthed target's name with ???
-      if (e.targetUserId && stealthedUserIds.has(e.targetUserId)) {
-        const realName = stealthedNames.get(e.targetUserId);
+      // Redact every principal named by the durable event, including additive
+      // Decoy metadata whose attacker is neither the top-level actor nor target.
+      const namedPrincipalIds = new Set([
+        e.actorUserId,
+        e.targetUserId,
+        e.metadata?.attackerUserId,
+        e.metadata?.decoyOwnerUserId,
+        e.metadata?.redirectedUserId,
+      ].filter(Boolean));
+      for (const principalId of namedPrincipalIds) {
+        if (!stealthedUserIds.has(principalId)) continue;
+        const realName = stealthedNames.get(principalId);
         if (realName && description.includes(realName)) {
           description = description.replaceAll(realName, "???");
         }

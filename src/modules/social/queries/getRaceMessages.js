@@ -320,14 +320,16 @@ function buildGetRaceMessages(dependencies = {}) {
       .filter((e) => !isHiddenSystemEvent(e))
       .map((e) => {
       let description = e.description;
-      if (stealthedUserIds.has(e.actorUserId)) {
-        const realName = stealthedNames.get(e.actorUserId);
-        if (realName && description.includes(realName)) {
-          description = description.replaceAll(realName, "???");
-        }
-      }
-      if (e.targetUserId && stealthedUserIds.has(e.targetUserId)) {
-        const realName = stealthedNames.get(e.targetUserId);
+      const namedPrincipalIds = new Set([
+        e.actorUserId,
+        e.targetUserId,
+        e.metadata?.attackerUserId,
+        e.metadata?.decoyOwnerUserId,
+        e.metadata?.redirectedUserId,
+      ].filter(Boolean));
+      for (const principalId of namedPrincipalIds) {
+        if (!stealthedUserIds.has(principalId)) continue;
+        const realName = stealthedNames.get(principalId);
         if (realName && description.includes(realName)) {
           description = description.replaceAll(realName, "???");
         }
@@ -340,6 +342,7 @@ function buildGetRaceMessages(dependencies = {}) {
         powerupType: e.powerupType,
         actorUserId: e.actorUserId,
         targetUserId: e.targetUserId,
+        metadata: e.metadata,
         createdAt: e.createdAt,
         _cursorKind: "SYSTEM",
         _cursorId: e.id,

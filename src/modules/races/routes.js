@@ -55,6 +55,7 @@ const {
   generateTeamNamePair: defaultGenerateTeamNamePair,
 } = require("./constants/teamNames");
 const {
+  buildUsePowerup,
   usePowerup: defaultUsePowerup,
 } = require("../powerups");
 const {
@@ -371,7 +372,8 @@ function createRacesRouter(dependencies = {}) {
     (dependencies.Race || dependencies.RacePowerup || dependencies.RaceActiveEffect
       ? buildGetSneakySwapTargets(dependencies)
       : defaultGetSneakySwapTargets);
-  const usePowerup = dependencies.usePowerup || defaultUsePowerup;
+  const usePowerup = dependencies.usePowerup ||
+    (dependencies.now ? buildUsePowerup({ now: dependencies.now }) : defaultUsePowerup);
   const discardPowerup = dependencies.discardPowerup || defaultDiscardPowerup;
   const openMysteryBox = dependencies.openMysteryBox || defaultOpenMysteryBox;
   const openMysteryBoxBatch =

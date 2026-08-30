@@ -42,9 +42,27 @@ function applyCursor(where, cursor) {
 }
 
 const RacePowerupEvent = {
-  async create({ raceId, actorUserId, eventType, powerupType, targetUserId, description, metadata }) {
+  async create({
+    raceId,
+    actorUserId,
+    eventType,
+    powerupType,
+    targetUserId,
+    description,
+    metadata,
+    createdAt,
+  }) {
     const row = await prisma.racePowerupEvent.create({
-      data: { raceId, actorUserId, eventType, powerupType, targetUserId, description, metadata },
+      data: {
+        raceId,
+        actorUserId,
+        eventType,
+        powerupType,
+        targetUserId,
+        description,
+        metadata,
+        ...(createdAt ? { createdAt } : {}),
+      },
     });
     // C2 invalidation (spec §5 Phase C): these rows ARE the SYSTEM feed, so a
     // new one must advance `msgver` and drop the cached SYSTEM list, exactly

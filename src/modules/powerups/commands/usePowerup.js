@@ -369,6 +369,18 @@ function isLiveTimedEffect(effect, nowDate) {
   return new Date(effect.expiresAt).getTime() > nowDate.getTime();
 }
 
+function isLiveHitchhikeAt(effect, checkTime) {
+  if (!effect || effect.type !== "HITCHHIKE") return false;
+  if (effect.status && effect.status !== "ACTIVE") return false;
+  if (!effect.expiresAt) return false;
+  // Persisted rows always carry startsAt, but older test seams and defensive
+  // legacy projections may omit it. Preserve the historical "already live"
+  // interpretation for that shape while enforcing the explicit lower bound
+  // whenever a start timestamp is present.
+  return (!effect.startsAt || new Date(effect.startsAt).getTime() <= checkTime.getTime()) &&
+    new Date(effect.expiresAt).getTime() > checkTime.getTime();
+}
+
 // Cleanse selector: an effect is "opponent-inflicted" (and therefore eligible
 // to be cleared by Cleanse) only when it was applied to THIS user by SOMEONE
 // ELSE — i.e. sourceUserId !== targetUserId. Self-buffs have
@@ -434,6 +446,22 @@ class PowerupUseError extends Error {
     // returns an explicitly inventory-redeemed item to the global stash even
     // when this signal is true.
     if (options && options.retainHeld) this.retainHeld = true;
+  }
+}
+
+function assertHitchhikeAvailableForFinalTarget({
+  liveLinks,
+  targetUserId,
+}) {
+  const onTarget = (liveLinks || []).filter(
+    (effect) => effect.targetUserId === targetUserId,
+  );
+  if (onTarget.length >= HITCHHIKE_MAX_PER_TARGET) {
+    throw new PowerupUseError(
+      "Someone is already hitching a ride on that racer",
+      409,
+      "HITCHHIKE_TARGET_FULL",
+    );
   }
 }
 
@@ -1030,7 +1058,10 @@ async function refundRedeemedOnRejection({
 
 function buildUsePowerup(dependencies = {}) {
   const db = dependencies.prisma || defaultPrisma;
-  const hasInjectedDeps = Object.keys(dependencies).length > 0;
+  // A clock-only injection is an integration-test seam over the full
+  // production transaction/model path, not a mocked command. Any actual
+  // collaborator injection still selects the lightweight unit-test path.
+  const hasInjectedDeps = Object.keys(dependencies).some((key) => key !== "now");
   const powerupModel = dependencies.RacePowerup || RacePowerup;
   const participantModel = dependencies.RaceParticipant || RaceParticipant;
   const effectModel = dependencies.RaceActiveEffect || RaceActiveEffect;
@@ -1350,6 +1381,9 @@ function buildUsePowerup(dependencies = {}) {
     };
 
     const type = powerup.type;
+    const hitchhikeCheckTime = type === "HITCHHIKE" ? now() : null;
+    let liveHitchhikeLinks = null;
+    let hitchhikeDecoyResolution = null;
     const activeImpactEnabled = true;
     const activeImpactCapable = requestHasFeature(
       clientFeatures,
@@ -2555,8 +2589,9 @@ function buildUsePowerup(dependencies = {}) {
       }
     }
 
-    // HITCHHIKE stacking rules (§7.2). Both run BEFORE coin deduction and the
-    // mark-USED step, so a rejected caster keeps the powerup HELD:
+    // HITCHHIKE stacking rules (§7.2). The caster guard runs before defense
+    // resolution. The target guard runs below only after the final landing is
+    // known, still before coin deduction or any item/defense write.
     //   * at most ONE active link per CASTER, and
     //   * at most HITCHHIKE_MAX_PER_TARGET (1) active link ON any one target.
     // The target cap is 1 — not 2 as for Leech — because Hitchhike MINTS steps
@@ -2564,24 +2599,14 @@ function buildUsePowerup(dependencies = {}) {
     // player who cannot see the link coming.
     if (type === "HITCHHIKE" && targetParticipant) {
       const raceEffects = await effectModel.findActiveForRace(raceId);
-      const liveLinks = (raceEffects || []).filter(
-        (e) => e.type === "HITCHHIKE" && isLiveTimedEffect(e, now())
+      liveHitchhikeLinks = (raceEffects || []).filter(
+        (effect) => isLiveHitchhikeAt(effect, hitchhikeCheckTime),
       );
-      if (liveLinks.some((e) => e.sourceUserId === userId)) {
+      if (liveHitchhikeLinks.some((e) => e.sourceUserId === userId)) {
         throw new PowerupUseError(
           "You already have an active Hitchhike. Wait for it to expire",
           409,
           "HITCHHIKE_ALREADY_ACTIVE"
-        );
-      }
-      const onTarget = liveLinks.filter(
-        (e) => e.targetUserId === resolvedTargetUserId
-      );
-      if (onTarget.length >= HITCHHIKE_MAX_PER_TARGET) {
-        throw new PowerupUseError(
-          "Someone is already hitching a ride on that racer",
-          409,
-          "HITCHHIKE_TARGET_FULL"
         );
       }
     }
@@ -2831,6 +2856,45 @@ function buildUsePowerup(dependencies = {}) {
       }
     }
 
+    // Resolve Hitchhike's one-hop Decoy landing without mutating anything.
+    // This intentionally happens before the first write (upgrade coin charge)
+    // so a full redirected target preserves the Decoy, Socks, held/redeemed
+    // item, feed, scoring state, and activation coins as one rejected action.
+    // The race mutation lock keeps this snapshot stable until the later consume.
+    if (type === "HITCHHIKE" && targetParticipant) {
+      const decoy = await effectModel.findActiveByTypeForParticipant(
+        targetParticipant.id,
+        "DECOY",
+        { expiresAfter: hitchhikeCheckTime },
+      );
+      if (decoy) {
+        const redirect = pickDecoyRedirectVictim({
+          acceptedParticipants,
+          isAliveTarget,
+          attackerUserId: userId,
+          holderParticipant: targetParticipant,
+          isTeamRace,
+          random,
+        });
+        hitchhikeDecoyResolution = {
+          decoy,
+          holder: targetParticipant,
+          redirect,
+        };
+        if (redirect) {
+          assertHitchhikeAvailableForFinalTarget({
+            liveLinks: liveHitchhikeLinks,
+            targetUserId: redirect.userId,
+          });
+        }
+      } else {
+        assertHitchhikeAvailableForFinalTarget({
+          liveLinks: liveHitchhikeLinks,
+          targetUserId: resolvedTargetUserId,
+        });
+      }
+    }
+
     // All validation has passed. Deduct coins atomically (first DB write).
     // This must happen AFTER all rejection paths above, so that no coins are
     // lost on validation failure. The deduct is also atomic: concurrent calls
@@ -2867,6 +2931,7 @@ function buildUsePowerup(dependencies = {}) {
     let reflected = false;
     // Set when a Decoy redirected this single-target attack to a new victim.
     let decoyRedirectedToUserId = null;
+    let decoyTerminalEventAt = null;
     if (OFFENSIVE_TYPES.includes(type) && !SHOP_POWERUP_TYPES.includes(type) && targetParticipant) {
       const mirror = await effectModel.findActiveByTypeForParticipant(
         targetParticipant.id,
@@ -2948,21 +3013,27 @@ function buildUsePowerup(dependencies = {}) {
     // Socks is caught by the block below (targetParticipant now points at them),
     // and their Mirror is handled here.
     if (!reflected && OFFENSIVE_TYPES.includes(type) && targetParticipant) {
-      const decoy = await effectModel.findActiveByTypeForParticipant(
-        targetParticipant.id,
-        "DECOY",
-        { expiresAfter: now() },
-      );
+      const decoy = type === "HITCHHIKE"
+        ? hitchhikeDecoyResolution?.decoy || null
+        : await effectModel.findActiveByTypeForParticipant(
+          targetParticipant.id,
+          "DECOY",
+          { expiresAfter: now() },
+        );
       if (decoy) {
-        const holder = targetParticipant;
-        const redirect = pickDecoyRedirectVictim({
-          acceptedParticipants,
-          isAliveTarget,
-          attackerUserId: userId,
-          holderParticipant: holder,
-          isTeamRace,
-          random,
-        });
+        const holder = type === "HITCHHIKE"
+          ? hitchhikeDecoyResolution.holder
+          : targetParticipant;
+        const redirect = type === "HITCHHIKE"
+          ? hitchhikeDecoyResolution.redirect
+          : pickDecoyRedirectVictim({
+            acceptedParticipants,
+            isAliveTarget,
+            attackerUserId: userId,
+            holderParticipant: holder,
+            isTeamRace,
+            random,
+          });
         await consumeDecoy({
           decoy,
           ownerParticipant: holder,
@@ -3011,6 +3082,22 @@ function buildUsePowerup(dependencies = {}) {
         resolvedTargetUserId = redirect.userId;
         targetDisplayName = redirect.user?.displayName || "a runner";
         decoyRedirectedToUserId = redirect.userId;
+        const redirectEventAt = now();
+        decoyTerminalEventAt = new Date(redirectEventAt.getTime() + 1);
+        await eventModel.create({
+          raceId,
+          actorUserId: holder.userId,
+          eventType: "POWERUP_REDIRECTED",
+          powerupType: type,
+          targetUserId: redirect.userId,
+          description: `${holder.user?.displayName || "A runner"}'s Decoy redirected ${myDisplayName}'s ${POWERUP_NAMES[type]} to ${targetDisplayName}.`,
+          metadata: {
+            attackerUserId: userId,
+            decoyOwnerUserId: holder.userId,
+            redirectedUserId: redirect.userId,
+          },
+          createdAt: redirectEventAt,
+        });
 
         // The redirected victim's OWN Mirror still reflects (one redirect max, so
         // no further Decoy is consulted). SHOP_POWERUP_TYPES are never reflected.
@@ -3060,6 +3147,7 @@ function buildUsePowerup(dependencies = {}) {
               powerupType: type,
               targetUserId: originalAttackerUserId,
               description: `${originalTargetName}'s Mirror reflected the redirected ${POWERUP_NAMES[type]} back at ${originalAttackerName}!`,
+              createdAt: decoyTerminalEventAt,
             });
             events.emit("POWERUP_REFLECTED", {
               raceId,
@@ -3108,7 +3196,10 @@ function buildUsePowerup(dependencies = {}) {
           targetUserId: actingUserId,
           description: reflected
             ? `${targetDisplayName}'s Compression Socks blocked the reflected ${levelPrefix(upgradeLevel)}${POWERUP_NAMES[type]}!`
-            : `${targetDisplayName}'s Compression Socks blocked ${myDisplayName}'s ${levelPrefix(upgradeLevel)}${POWERUP_NAMES[type]}!`,
+            : decoyRedirectedToUserId
+              ? `${targetDisplayName}'s Compression Socks blocked the redirected ${levelPrefix(upgradeLevel)}${POWERUP_NAMES[type]}.`
+              : `${targetDisplayName}'s Compression Socks blocked ${myDisplayName}'s ${levelPrefix(upgradeLevel)}${POWERUP_NAMES[type]}!`,
+          createdAt: decoyTerminalEventAt || undefined,
         });
 
         if (upgradeLevel > 0) {
@@ -3257,6 +3348,7 @@ function buildUsePowerup(dependencies = {}) {
           powerupType: type,
           targetUserId: resolvedTargetUserId,
           description: `${myDisplayName} used ${levelPrefix(upgradeLevel)}Leg Cramp on ${targetDisplayName}! Their steps are frozen for ${hoursText("LEG_CRAMP", upgradeLevel)}.`,
+          createdAt: decoyTerminalEventAt || undefined,
         });
         break;
       }
@@ -3285,6 +3377,7 @@ function buildUsePowerup(dependencies = {}) {
           powerupType: type,
           targetUserId: resolvedTargetUserId,
           description: `${myDisplayName} jammed ${targetDisplayName}'s signal! They can't use powerups for 1 hour.`,
+          createdAt: decoyTerminalEventAt || undefined,
         });
         break;
       }
@@ -3329,6 +3422,7 @@ function buildUsePowerup(dependencies = {}) {
           powerupType: type,
           targetUserId: resolvedTargetUserId,
           description: `${myDisplayName} is leeching ${targetDisplayName}! Every 2 steps ${myDisplayName} takes steals 1 from ${targetDisplayName} for ${leechMinutes} minutes.`,
+          createdAt: decoyTerminalEventAt || undefined,
         });
         break;
       }
@@ -3372,6 +3466,7 @@ function buildUsePowerup(dependencies = {}) {
           powerupType: type,
           targetUserId: resolvedTargetUserId,
           description: `${myDisplayName} hitched a ride on ${targetDisplayName}! Every step ${targetDisplayName} takes for the next hour is copied to ${myDisplayName}. ${targetDisplayName} loses nothing.`,
+          createdAt: decoyTerminalEventAt || undefined,
         });
         break;
       }
@@ -3490,6 +3585,7 @@ function buildUsePowerup(dependencies = {}) {
           targetUserId: resolvedTargetUserId,
           description: `${myDisplayName} used Red Card on ${targetDisplayName}! They lost ${penalty.toLocaleString()} steps.`,
           metadata: { penalty },
+          createdAt: decoyTerminalEventAt || undefined,
         }, {
           deltas: [{
             userId: resolvedTargetUserId,
@@ -3526,6 +3622,7 @@ function buildUsePowerup(dependencies = {}) {
           targetUserId: resolvedTargetUserId,
           description: `${myDisplayName} stole ${stolen.toLocaleString()} steps from ${targetDisplayName} with ${levelPrefix(upgradeLevel)}Shortcut!`,
           metadata: { stolen },
+          createdAt: decoyTerminalEventAt || undefined,
         }, {
           deltas: [
             { userId: resolvedTargetUserId, deltaSteps: -stolen },
@@ -3942,6 +4039,7 @@ function buildUsePowerup(dependencies = {}) {
           targetUserId: resolvedTargetUserId,
           description: `${myDisplayName} sent ${targetDisplayName} on a ${levelPrefix(upgradeLevel)}Wrong Turn! Their steps are reversed for ${hoursText("WRONG_TURN", upgradeLevel)}.`,
           metadata: {},
+          createdAt: decoyTerminalEventAt || undefined,
         });
         break;
       }
@@ -4016,6 +4114,7 @@ function buildUsePowerup(dependencies = {}) {
           powerupType: type,
           targetUserId: resolvedTargetUserId,
           description: `${myDisplayName} sent ${targetDisplayName} on a ${levelPrefix(upgradeLevel)}Detour! Their leaderboard is hidden for ${hoursText("DETOUR_SIGN", upgradeLevel)}.`,
+          createdAt: decoyTerminalEventAt || undefined,
         });
         break;
       }
@@ -4225,6 +4324,7 @@ function buildUsePowerup(dependencies = {}) {
           targetUserId: resolvedTargetUserId,
           description: `${myDisplayName} hit ${targetDisplayName} with a ${levelPrefix(upgradeLevel)}Pinecone Toss! They lost ${penalty.toLocaleString()} steps.`,
           metadata: { penalty, direction: targetDirection },
+          createdAt: decoyTerminalEventAt || undefined,
         }, {
           deltas: [{
             userId: resolvedTargetUserId,
@@ -4266,6 +4366,7 @@ function buildUsePowerup(dependencies = {}) {
           metadata: stolen
             ? { stolenPowerupId: stolen.id, stolenType: stolen.type }
             : {},
+          createdAt: decoyTerminalEventAt || undefined,
         });
         break;
       }
@@ -4301,6 +4402,7 @@ function buildUsePowerup(dependencies = {}) {
           powerupType: type,
           targetUserId: resolvedTargetUserId,
           description: `${myDisplayName} dared ${targetDisplayName} with a Drill Sergeant! Hit ${DRILL_SERGEANT_GOAL_STEPS.toLocaleString()} steps in 1 hour or lose ${DRILL_SERGEANT_PENALTY_STEPS.toLocaleString()}.`,
+          createdAt: decoyTerminalEventAt || undefined,
         });
         break;
       }
@@ -4610,6 +4712,8 @@ module.exports = {
   buildUsePowerup,
   usePowerup,
   PowerupUseError,
+  assertHitchhikeAvailableForFinalTarget,
+  isLiveHitchhikeAt,
   luckyMinRarity,
   lockPowerupUseParticipants,
   applyPotionEnemyAttack,

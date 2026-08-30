@@ -255,6 +255,71 @@ describe("C2 chat — §8 test 2 parity (cold cache ≡ flag off), both kinds", 
     assert.deepEqual(keys, [], `non-default shapes must not cache, got ${keys}`);
   });
 
+  it("a Decoy redirect written through the powerup event seam invalidates a warm SYSTEM list", async (t) => {
+    if (skipReason) return t.skip(skipReason);
+    await enableRedis();
+    await setFlag(true);
+
+    const landing = await createUser("LandingPerson");
+    await prisma.raceParticipant.create({
+      data: {
+        raceId: race.id,
+        userId: landing.userId,
+        status: "ACCEPTED",
+      },
+    });
+    const [hostParticipant, guestParticipant] = await Promise.all([
+      prisma.raceParticipant.findFirst({
+        where: { raceId: race.id, userId: host.userId },
+      }),
+      prisma.raceParticipant.findFirst({
+        where: { raceId: race.id, userId: guest.userId },
+      }),
+    ]);
+    const decoy = await prisma.racePowerup.create({
+      data: {
+        raceId: race.id,
+        participantId: guestParticipant.id,
+        userId: guest.userId,
+        type: "DECOY",
+        rarity: "RARE",
+        status: "HELD",
+      },
+    });
+    const hitchhike = await prisma.racePowerup.create({
+      data: {
+        raceId: race.id,
+        participantId: hostParticipant.id,
+        userId: host.userId,
+        type: "HITCHHIKE",
+        rarity: "RARE",
+        status: "HELD",
+      },
+    });
+    await expectStatus(await authReq(
+      "POST",
+      `/races/${race.id}/powerups/${decoy.id}/use`,
+      { token: guest.token, body: {} },
+    ), 200);
+
+    const warm = await messages(host.token, race.id, "?kind=SYSTEM");
+    assert.equal(warm.messages.length, 0);
+    const listKey = `${ENV_PREFIX}v1:race:msgs:${race.id}:SYSTEM`;
+    assert.notEqual(await probe.get(listKey), null, "SYSTEM cache is warm");
+
+    await expectStatus(await authReq(
+      "POST",
+      `/races/${race.id}/powerups/${hitchhike.id}/use`,
+      { token: host.token, body: { targetUserId: guest.userId } },
+    ), 200);
+    const afterUse = await messages(host.token, race.id, "?kind=SYSTEM");
+    assert.deepEqual(
+      afterUse.messages.map((row) => row.eventType),
+      ["POWERUP_USED", "POWERUP_REDIRECTED"],
+    );
+    assert.equal(afterUse.messages[1].metadata.redirectedUserId, landing.userId);
+  });
+
   it("the viewer-specific stealth redaction is applied per request, not cached", async (t) => {
     if (skipReason) return t.skip(skipReason);
     await enableRedis();

@@ -2,7 +2,8 @@ const crypto = require("node:crypto");
 
 const GLOBAL_ELIGIBILITY_MODE = "BARA_ACCOUNT";
 const LEGACY_ELIGIBILITY_MODE = "US_18";
-const STANDARD_TEMPLATE_VERSION = "bara-account-v1";
+const LEGACY_STANDARD_TEMPLATE_VERSION = "bara-account-v1";
+const STANDARD_TEMPLATE_VERSION = "bara-account-v2";
 
 function canonicalJson(value) {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
@@ -16,7 +17,15 @@ function sha256(value) {
   return crypto.createHash("sha256").update(canonicalJson(value)).digest("hex");
 }
 
-function generateStandardRules(contest) {
+function generateStandardRulesForVersion(
+  contest,
+  standardTemplateVersion = STANDARD_TEMPLATE_VERSION,
+) {
+  if (![LEGACY_STANDARD_TEMPLATE_VERSION, STANDARD_TEMPLATE_VERSION].includes(
+    standardTemplateVersion,
+  )) {
+    throw new TypeError("Unsupported standard rules template version");
+  }
   const startsAt = new Date(contest.startsAt).toISOString();
   const endsAt = new Date(contest.endsAt).toISOString();
   const material = {
@@ -26,9 +35,13 @@ function generateStandardRules(contest) {
     endsAt,
     coinPrize: contest.coinPrize,
     eligibilityMode: GLOBAL_ELIGIBILITY_MODE,
-    standardTemplateVersion: STANDARD_TEMPLATE_VERSION,
+    standardTemplateVersion,
   };
-  const version = `${STANDARD_TEMPLATE_VERSION}-${sha256(material).slice(0, 24)}`;
+  // Frozen clients only accept the shipped `bara-account-v1-<hash>` wire
+  // family. Keep that compatible envelope while hashing the INTERNAL template
+  // version into the stamp, so the approved v2 clarification is distinct from
+  // its exact v1 predecessor without disappearing for old binaries.
+  const version = `${LEGACY_STANDARD_TEMPLATE_VERSION}-${sha256(material).slice(0, 24)}`;
   const sections = [
     {
       heading: "Who can join",
@@ -36,7 +49,9 @@ function generateStandardRules(contest) {
     },
     {
       heading: "Contest window",
-      body: `The contest runs from ${startsAt} through ${endsAt} UTC. Referrals count only when they qualify after you join and during the half-open contest window [startsAt, endsAt).`,
+      body: standardTemplateVersion === LEGACY_STANDARD_TEMPLATE_VERSION
+        ? `The contest runs from ${startsAt} through ${endsAt} UTC. Referrals count only when they qualify after you join and during the half-open contest window [startsAt, endsAt).`
+        : `The contest runs from ${startsAt} through ${endsAt}. These server timestamps are stored in UTC. A referral counts only if it qualifies at or after you join, at or after the contest start, and before the contest end.`,
     },
     {
       heading: "How to win",
@@ -59,6 +74,10 @@ function generateStandardRules(contest) {
   return { version, sections, hash: sha256(payload) };
 }
 
+function generateStandardRules(contest) {
+  return generateStandardRulesForVersion(contest, STANDARD_TEMPLATE_VERSION);
+}
+
 function standardRulesAreCurrent(contest) {
   if (contest?.eligibilityMode !== GLOBAL_ELIGIBILITY_MODE) return false;
   try {
@@ -73,10 +92,12 @@ function standardRulesAreCurrent(contest) {
 
 module.exports = {
   GLOBAL_ELIGIBILITY_MODE,
+  LEGACY_STANDARD_TEMPLATE_VERSION,
   LEGACY_ELIGIBILITY_MODE,
   STANDARD_TEMPLATE_VERSION,
   canonicalJson,
   generateStandardRules,
+  generateStandardRulesForVersion,
   sha256,
   standardRulesAreCurrent,
 };

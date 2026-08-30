@@ -1,1 +1,4 @@
-module.exports = require("./contest");
+module.exports = {
+  ...require("./contest"),
+  ...require("./standardRulesAmendment"),
+};

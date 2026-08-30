@@ -860,10 +860,23 @@ describe("hitchhike / quick rinse — integration", () => {
       POWERUP_COPY_SEED,
     } = require("../../src/modules/powerups/constants/powerupCopySeed");
     for (const row of POWERUP_COPY_SEED) {
+      const {
+        powerupType,
+        name,
+        description,
+        shortDescription,
+        upgradeTierLabels,
+      } = row;
+      const canonicalCopy = {
+        name,
+        description,
+        shortDescription,
+        upgradeTierLabels,
+      };
       await prisma.powerupCopy.upsert({
-        where: { powerupType: row.powerupType },
-        update: {},
-        create: row,
+        where: { powerupType },
+        update: canonicalCopy,
+        create: { powerupType, ...canonicalCopy },
       });
     }
 

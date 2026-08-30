@@ -10,6 +10,7 @@ const {
   invalidateActiveContestBannerCache,
   resolveActiveContestBanner,
 } = require("./queries/activeContestBanner");
+const { buildAmendStandardRules } = require("./commands/amendStandardRules");
 
 async function resolveContestBanner({ prisma, slug, now = new Date() }) {
   if (!slug || typeof slug !== "string") return null;
@@ -22,6 +23,7 @@ async function resolveContestBanner({ prisma, slug, now = new Date() }) {
 
 module.exports = {
   buildGiveawayService,
+  buildAmendStandardRules,
   buildGiveawayRetention,
   createGiveawayAdminRouter,
   createGiveawayPublicRouter,
