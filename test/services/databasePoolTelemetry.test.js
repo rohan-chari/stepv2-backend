@@ -134,6 +134,137 @@ test("production timer is unref'd and graceful stop clears it without emitting",
   assert.deepEqual(calls, ["set", "unref", "clear"]);
 });
 
+test("scheduler re-arms early callbacks against one concrete UTC boundary and never drains a duplicate bucket", async () => {
+  const pool = new EventEmitter();
+  Object.assign(pool, { options: { max: 20 }, totalCount: 0, idleCount: 0, waitingCount: 0 });
+  pool.connect = async () => ({ release() {} });
+  let clock = 120_001;
+  const timers = [];
+  const snapshots = [];
+  const lines = [];
+  const telemetry = createDatabasePoolTelemetry({
+    pool,
+    role: "cron",
+    instance: "0",
+    nowMs: () => clock,
+    logger: { log(line) { lines.push(JSON.parse(line)); } },
+    redisCache: {
+      async writeDatabasePoolTelemetrySnapshot(_key, value) {
+        snapshots.push(value);
+        return { ok: true, status: "accepted" };
+      },
+    },
+    cacheKeys: { databasePoolTelemetry: () => "v1:ops:db-pool:cron:0" },
+    setTimer(callback, delay) {
+      const timer = {
+        callback,
+        delay,
+        cleared: false,
+        unrefCalls: 0,
+        unref() { this.unrefCalls += 1; },
+      };
+      timers.push(timer);
+      return timer;
+    },
+    clearTimer(timer) { timer.cleared = true; },
+  });
+
+  const handle = telemetry.start();
+  assert.equal(timers[0].delay, 59_999);
+  assert.equal(timers[0].unrefCalls, 1);
+
+  clock = 179_999;
+  await timers[0].callback();
+  assert.equal(lines.length, 0);
+  assert.equal(snapshots.length, 0);
+  assert.equal(timers[1].delay, 1);
+  assert.equal(timers[1].unrefCalls, 1);
+
+  await timers[1].callback();
+  assert.equal(lines.length, 0);
+  assert.equal(snapshots.length, 0);
+  assert.equal(timers[2].delay, 1);
+
+  clock = 180_000;
+  await timers[2].callback();
+  assert.equal(lines.length, 1);
+  assert.equal(snapshots.length, 1);
+  assert.equal(snapshots[0].coverageMinutes, 1);
+  assert.deepEqual(snapshots[0].buckets.map((bucket) => bucket.minuteStartedAtMs), [120_000]);
+  assert.equal(timers[3].delay, 60_000);
+
+  clock = 240_005;
+  await timers[3].callback();
+  assert.equal(lines.length, 2);
+  assert.equal(snapshots.length, 2);
+  assert.equal(snapshots[1].coverageMinutes, 2);
+  assert.deepEqual(snapshots[1].buckets.map((bucket) => bucket.minuteStartedAtMs), [120_000, 180_000]);
+  assert.equal(new Set(snapshots[1].buckets.map((bucket) => bucket.minuteStartedAtMs)).size, 2);
+  assert.equal(timers[4].delay, 59_995);
+
+  handle.stop();
+  assert.equal(timers[4].cleared, true);
+});
+
+test("scheduler advances monotonically when the wall clock moves backward during an async flush", async () => {
+  const pool = new EventEmitter();
+  Object.assign(pool, { options: { max: 20 }, totalCount: 0, idleCount: 0, waitingCount: 0 });
+  pool.connect = async () => ({ release() {} });
+  let clock = 120_001;
+  let releaseWrite;
+  const deferredWrite = new Promise((resolve) => { releaseWrite = resolve; });
+  const timers = [];
+  const snapshots = [];
+  const telemetry = createDatabasePoolTelemetry({
+    pool,
+    role: "cron",
+    instance: "0",
+    nowMs: () => clock,
+    logger: { log() {} },
+    redisCache: {
+      async writeDatabasePoolTelemetrySnapshot(_key, value) {
+        snapshots.push(value);
+        await deferredWrite;
+        return { ok: true, status: "accepted" };
+      },
+    },
+    cacheKeys: { databasePoolTelemetry: () => "v1:ops:db-pool:cron:0" },
+    setTimer(callback, delay) {
+      const timer = { callback, delay, unref() {} };
+      timers.push(timer);
+      return timer;
+    },
+    clearTimer() {},
+  });
+
+  telemetry.start();
+  assert.equal(timers.length, 1);
+  assert.equal(timers[0].delay, 59_999);
+
+  clock = 180_000;
+  const pendingFlush = timers[0].callback();
+  assert.equal(snapshots.length, 1);
+  assert.deepEqual(snapshots[0].buckets.map((bucket) => bucket.minuteStartedAtMs), [120_000]);
+  assert.equal(timers.length, 1);
+
+  clock = 120_500;
+  releaseWrite();
+  await pendingFlush;
+  assert.equal(timers.length, 2);
+  assert.equal(timers[1].delay, 119_500);
+
+  clock = 240_000;
+  await timers[1].callback();
+  assert.equal(snapshots.length, 2);
+  assert.deepEqual(snapshots[1].buckets.map((bucket) => bucket.minuteStartedAtMs), [120_000, 180_000]);
+  assert.equal(snapshots[1].coverageMinutes, 2);
+  assert.equal(new Set(snapshots[1].buckets.map((bucket) => bucket.minuteStartedAtMs)).size, 2);
+  assert.equal(timers.length, 3);
+  assert.equal(timers[2].delay, 60_000);
+
+  telemetry.stop();
+});
+
 test("pressure warnings emit immediately and then rate-limit independently by reason", async () => {
   const pool = new EventEmitter();
   Object.assign(pool, { options: { max: 20 }, totalCount: 20, idleCount: 0, waitingCount: 1 });

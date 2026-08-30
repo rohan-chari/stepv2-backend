@@ -500,14 +500,34 @@ function createDatabasePoolTelemetry({
     return value;
   }
 
-  function scheduleNext() {
+  function armBoundary(targetBoundaryMs) {
     if (!started || stopped) return;
-    const delay = Math.max(1, 60_000 - (nowMs() % 60_000));
+    const delay = Math.max(1, targetBoundaryMs - nowMs());
     timer = setTimer(async () => {
-      try { await flush(nowMs()); } catch {}
-      scheduleNext();
+      timer = null;
+      if (!started || stopped) return;
+      const observedAtMs = nowMs();
+      if (observedAtMs < targetBoundaryMs) {
+        armBoundary(targetBoundaryMs);
+        return;
+      }
+      try { await flush(observedAtMs); } catch {}
+      if (!started || stopped) return;
+      const afterFlushMs = nowMs();
+      const nextBoundaryMs = Math.max(
+        targetBoundaryMs + 60_000,
+        Math.floor(observedAtMs / 60_000) * 60_000 + 60_000,
+        Math.floor(afterFlushMs / 60_000) * 60_000 + 60_000,
+      );
+      armBoundary(nextBoundaryMs);
     }, delay);
     timer?.unref?.();
+  }
+
+  function scheduleNext() {
+    const observedAtMs = nowMs();
+    const targetBoundaryMs = Math.floor(observedAtMs / 60_000) * 60_000 + 60_000;
+    armBoundary(targetBoundaryMs);
   }
 
   function start() {
