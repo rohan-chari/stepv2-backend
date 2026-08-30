@@ -167,6 +167,7 @@ const envMetadata = {
   DATABASE_POOL_MAX_ALL: ["deployment_config", null, "canonical integer 1..50; stopped staging target 10", "database_capacity", 10],
   DATABASE_POOL_MAX_DEFAULT: ["deployment_config", null, "canonical integer 1..50; optional non-production fallback before compatibility default 20", "database_capacity", 20],
   DATABASE_POOL_TOTAL_BUDGET: ["deployment_config", null, "production PM2 topology invariant; reviewed aggregate 32", "database_capacity", 32],
+  DATABASE_POOL_MAX_MAINTENANCE: ["deployment_config", 2, "audited production CLI commands only; canonical integer 1..5", "database_capacity", 2],
 };
 
 const retiredEnv = {
@@ -491,7 +492,7 @@ function collectRuntimeEnvironmentReads({
 
 function environmentKind(name, metadata) {
   if (
-    /(?:_CONCURRENCY|_MS|_HOURS|_DAYS|_COINS|_CAP|_RATE|_PERCENT|_THRESHOLD|_MAX_OPENS|_EXPECTED_OWNERS|_EXPIRES_SECONDS|_MULT_(?:SHORT|MID|LONG)|_VERSION|^PORT|^DATABASE_POOL_(?:MAX_(?:HTTP|RESOLUTION|CRON|ALL|DEFAULT)|TOTAL_BUDGET))$/.test(name)
+    /(?:_CONCURRENCY|_MS|_HOURS|_DAYS|_COINS|_CAP|_RATE|_PERCENT|_THRESHOLD|_MAX_OPENS|_EXPECTED_OWNERS|_EXPIRES_SECONDS|_MULT_(?:SHORT|MID|LONG)|_VERSION|^PORT|^DATABASE_POOL_(?:MAX_(?:HTTP|RESOLUTION|CRON|ALL|DEFAULT|MAINTENANCE)|TOTAL_BUDGET))$/.test(name)
   ) {
     return "numeric_environment";
   }

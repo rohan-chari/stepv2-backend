@@ -41,6 +41,9 @@ function resolveDatabasePoolConfig(env = process.env, dependencies = {}) {
     };
   }
 
+  const productionCliConfig = dependencies.productionCliDatabasePoolConfig?.(env);
+  if (productionCliConfig) return productionCliConfig;
+
   if (env.NODE_ENV === "production" &&
       (typeof env.STEPS_PROCESS_ROLE !== "string" ||
         !Object.hasOwn(ROLE_VARIABLES, env.STEPS_PROCESS_ROLE))) {

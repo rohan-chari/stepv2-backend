@@ -156,6 +156,15 @@ npm run balance:drift      # reports (never blocks) balance config drift vs git
 ./scripts/pm2-safe-prod-reload.sh
 ```
 
+The two unprefixed npm database commands above, plus the runbook's required
+post-reload `referral-contest:catch-up`, are the complete audited deploy-time
+CLI allowlist. Their exact npm lifecycle name and exact committed script path
+select the `maintenance` pool, which defaults to 2 connections and may be set
+to a canonical 1–5 with `DATABASE_POOL_MAX_MAINTENANCE`. Direct
+`node scripts/...` invocation, a mismatched lifecycle/script pair, and every
+other role-less production process remain fail-closed. This exception does not
+apply to `src/index.js` or any PM2 HTTP/background process.
+
 The wrapper holds `/run/steps-tracker-pm2.lock`, verifies the OS process tree
 against PM2, and runs a static database-pool preflight before changing a PID.
 This rollout has two sequential revisions. Deployment A contains role-aware

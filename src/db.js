@@ -48,9 +48,13 @@ const {
 const {
   resolveDatabasePoolConfig,
 } = require("./shared/config/databasePoolConfig");
+const {
+  resolveProductionCliDatabasePoolConfig,
+} = require("./shared/config/productionCliDatabasePoolConfig");
 const capacitySslDisabled = capacityDatabaseSslDisabled();
 const databasePoolConfig = resolveDatabasePoolConfig(process.env, {
   capacityDatabasePoolMax,
+  productionCliDatabasePoolConfig: resolveProductionCliDatabasePoolConfig,
 });
 const databasePoolMax = databasePoolConfig.max;
 

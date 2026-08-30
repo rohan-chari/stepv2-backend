@@ -6,7 +6,7 @@ const test = require("node:test");
 const repoRoot = path.resolve(__dirname, "../..");
 const secretUrl = "postgresql://secret-user:never-print-this@127.0.0.1:1/pool_config_test";
 
-function loadDb(overrides = {}) {
+function loadDb(overrides = {}, options = {}) {
   const env = {
     ...process.env,
     NODE_ENV: "production",
@@ -19,7 +19,10 @@ function loadDb(overrides = {}) {
   for (const [name, value] of Object.entries(overrides)) {
     if (value === null) delete env[name];
   }
-  return spawnSync(process.execPath, ["-e", "process.stdout.write(JSON.stringify(require('./src/db').databasePoolConfig))"], {
+  const entrySetup = options.entry
+    ? `process.argv[1] = ${JSON.stringify(path.join(repoRoot, options.entry))};`
+    : "";
+  return spawnSync(process.execPath, ["-e", `${entrySetup}process.stdout.write(JSON.stringify(require('./src/db').databasePoolConfig))`], {
     cwd: repoRoot,
     env,
     encoding: "utf8",
@@ -43,6 +46,55 @@ test("production role-specific max reaches the constructed pg pool", () => {
     max: 10,
     source: "DATABASE_POOL_MAX_HTTP",
   });
+});
+
+test("audited unprefixed production deploy commands use a bounded maintenance pool", () => {
+  for (const [command, entry] of [
+    ["powerups:copy:sync", "scripts/powerup-copy-sync.js"],
+    ["balance:drift", "scripts/balance-drift-report.js"],
+    ["referral-contest:catch-up", "scripts/referral-contest-ledger-catch-up.js"],
+  ]) {
+    const result = loadDb({
+      STEPS_PROCESS_ROLE: null,
+      DATABASE_POOL_MAX_HTTP: null,
+      npm_lifecycle_event: command,
+    }, { entry });
+    assert.equal(result.status, 0, `${command}: ${result.stdout}\n${result.stderr}`);
+    assert.deepEqual(JSON.parse(result.stdout), {
+      role: "maintenance",
+      max: 2,
+      source: "maintenance-default",
+      command,
+    });
+  }
+});
+
+test("real npm deploy commands pass pool authorization before reaching the test-only database", () => {
+  for (const command of [
+    "powerups:copy:sync",
+    "balance:drift",
+    "referral-contest:catch-up",
+  ]) {
+    const env = {
+      ...process.env,
+      NODE_ENV: "production",
+      DOTENV_CONFIG_QUIET: "true",
+      DATABASE_URL: secretUrl,
+      DATABASE_POOL_MAX_MAINTENANCE: "1",
+    };
+    delete env.STEPS_PROCESS_ROLE;
+    const result = spawnSync("npm", ["run", command], {
+      cwd: repoRoot,
+      env,
+      encoding: "utf8",
+      timeout: 15_000,
+    });
+    const output = `${result.stdout}\n${result.stderr}`;
+    assert.notEqual(result.error?.code, "ETIMEDOUT", `${command}: ${output}`);
+    assert.doesNotMatch(output, /STEPS_PROCESS_ROLE|DATABASE_POOL_MAX_MAINTENANCE/);
+    assert.match(output, /ECONNREFUSED|connection refused|Can't reach database|could not read balance_config/i);
+    assert.doesNotMatch(output, /never-print-this|secret-user/);
+  }
 });
 
 test("production missing and unknown roles fail before a connection attempt", () => {

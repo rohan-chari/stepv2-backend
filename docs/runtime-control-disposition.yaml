@@ -1082,6 +1082,19 @@
       "rollbackValue": 10
     },
     {
+      "id": "env:DATABASE_POOL_MAX_MAINTENANCE",
+      "name": "DATABASE_POOL_MAX_MAINTENANCE",
+      "kind": "numeric_environment",
+      "evidenceTimestamp": "2026-08-20T04:23:00Z",
+      "compatibilityConsumers": [],
+      "adminExposed": false,
+      "disposition": "deployment_config",
+      "permanentValue": 2,
+      "polarityDefault": "audited production CLI commands only; canonical integer 1..5",
+      "deployFamily": "database_capacity",
+      "rollbackValue": 2
+    },
+    {
       "id": "env:DATABASE_POOL_MAX_RESOLUTION",
       "name": "DATABASE_POOL_MAX_RESOLUTION",
       "kind": "numeric_environment",

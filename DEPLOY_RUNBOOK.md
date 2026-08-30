@@ -89,6 +89,14 @@ cd /var/www/step-tracker-backend \
   && ./scripts/pm2-safe-prod-reload.sh
 ```
 
+`powerups:copy:sync`, `balance:drift`, and the required post-reload
+`referral-contest:catch-up` are the exact audited role-less production npm
+commands. Their exact npm lifecycle/script pairs use the bounded `maintenance`
+database pool: 2 connections by default, or a canonical 1–5 from
+`DATABASE_POOL_MAX_MAINTENANCE`. Do not replace an npm command with a direct
+`node scripts/...` call; unaudited role-less production processes intentionally
+fail before constructing a pool.
+
 **Use the wrapper, not a direct `restart`/`reload`, and identify apps by name,
 not id.** `reload` cycles the cluster
 workers one at a time (zero downtime); `restart` kills them all at once and
