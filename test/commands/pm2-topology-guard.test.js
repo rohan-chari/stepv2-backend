@@ -357,6 +357,18 @@ test("the production reload wrapper serializes and reapplies ecosystem config", 
     wrapper,
     /export CONFIG GUARD MIN_SUPPORTED_APP_VERSION LATEST_APP_VERSION/,
   );
+  const ecosystem = fs.readFileSync(
+    path.join(__dirname, "../../ecosystem.config.js"),
+    "utf8",
+  );
+  assert.match(
+    ecosystem,
+    /MIN_SUPPORTED_APP_VERSION: process\.env\.MIN_SUPPORTED_APP_VERSION/,
+  );
+  assert.match(
+    ecosystem,
+    /LATEST_APP_VERSION: process\.env\.LATEST_APP_VERSION/,
+  );
   assert.match(
     wrapper,
     /pm2 startOrReload "\$CONFIG" --only steps-tracker --update-env/,

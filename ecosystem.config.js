@@ -64,6 +64,10 @@ module.exports = {
       STEPS_PROCESS_ROLE: "http",
       DATABASE_POOL_MAX_HTTP: "10",
       DATABASE_POOL_TOTAL_BUDGET: "32",
+      // The guarded reload validates and exports these from the deployed .env.
+      // Declaring them here makes PM2 replace any stale saved values.
+      MIN_SUPPORTED_APP_VERSION: process.env.MIN_SUPPORTED_APP_VERSION,
+      LATEST_APP_VERSION: process.env.LATEST_APP_VERSION,
       PORT: 3002,
     }, {
       // PM2 6.0.14 can orphan a clustered worker when automatic reloads
