@@ -25,6 +25,9 @@ npm-debug.log*
 dist/
 build/
 
+# Local k6 event-open tuning artifacts (preserved locally, never committed).
+results/eocandidate/
+
 # EXCEPTION: the built marketing site IS committed. The documented rollback
 # procedure (DEPLOYMENT.md) is `git checkout <tag> && npm install && pm2
 # restart` with NO build step, so a build-artifact-only dist would leave
