@@ -6,7 +6,25 @@ CONFIG="$SCRIPT_DIR/../ecosystem.config.js"
 GUARD="$SCRIPT_DIR/pm2-topology-guard.js"
 
 cd /var/www/step-tracker-backend
-export CONFIG GUARD
+MIN_SUPPORTED_APP_VERSION="$(node -e '
+  const fs = require("node:fs");
+  const dotenv = require("dotenv");
+  const { isSafeAppVersion } = require("./src/shared/validation/appVersion");
+  const env = dotenv.parse(fs.readFileSync(".env"));
+  const value = env.MIN_SUPPORTED_APP_VERSION;
+  if (!isSafeAppVersion(value) || value === "unknown") process.exit(1);
+  process.stdout.write(value);
+')"
+LATEST_APP_VERSION="$(node -e '
+  const fs = require("node:fs");
+  const dotenv = require("dotenv");
+  const { isSafeAppVersion } = require("./src/shared/validation/appVersion");
+  const env = dotenv.parse(fs.readFileSync(".env"));
+  const value = env.LATEST_APP_VERSION || env.MIN_SUPPORTED_APP_VERSION;
+  if (!isSafeAppVersion(value) || value === "unknown") process.exit(1);
+  process.stdout.write(value);
+')"
+export CONFIG GUARD MIN_SUPPORTED_APP_VERSION LATEST_APP_VERSION
 exec flock -w 120 /run/steps-tracker-pm2.lock sh -eu -c '
   BASELINE_DIR="$(mktemp -d /run/steps-pool-baseline.XXXXXX)"
   BASELINE_FILE="$BASELINE_DIR/live.json"
@@ -43,7 +61,9 @@ exec flock -w 120 /run/steps-tracker-pm2.lock sh -eu -c '
   node "$GUARD" --remediate --stabilize-ms=30000 --skip-memory
   node "$GUARD" --pool-budget-mode=transition --transitioned-roles=resolution,cron --baseline-file="$BASELINE_FILE"
 
-  pm2 startOrReload "$CONFIG" --only steps-tracker
+  # Refresh inherited runtime values (for example MIN_SUPPORTED_APP_VERSION)
+  # instead of preserving the previously saved PM2 environment across reloads.
+  pm2 startOrReload "$CONFIG" --only steps-tracker --update-env
   node "$GUARD" --remediate --stabilize-ms=30000 --skip-memory --verify-live-config
   node "$GUARD" --pool-budget-mode=transition --transitioned-roles=resolution,cron,http --baseline-file="$BASELINE_FILE"
   node "$GUARD" --pool-budget-mode=final --baseline-file="$BASELINE_FILE"

@@ -352,7 +352,15 @@ test("the production reload wrapper serializes and reapplies ecosystem config", 
   assert.match(wrapper, /--pool-budget-mode=static/);
   assert.match(wrapper, /--pool-budget-mode=baseline/);
   assert.match(wrapper, /--baseline-file=/);
-  assert.match(wrapper, /pm2 startOrReload "\$CONFIG" --only steps-tracker/);
+  assert.match(wrapper, /dotenv\.parse\(fs\.readFileSync\("\.env"\)\)/);
+  assert.match(
+    wrapper,
+    /export CONFIG GUARD MIN_SUPPORTED_APP_VERSION LATEST_APP_VERSION/,
+  );
+  assert.match(
+    wrapper,
+    /pm2 startOrReload "\$CONFIG" --only steps-tracker --update-env/,
+  );
   assert.match(wrapper, /--only steps-tracker-resolution/);
   assert.match(wrapper, /--only steps-tracker-cron/);
   assert.match(wrapper, /OLD_CRON_PID=.*pm2 pid steps-tracker-cron/);
@@ -363,7 +371,9 @@ test("the production reload wrapper serializes and reapplies ecosystem config", 
   assert.doesNotMatch(wrapper, /startOrReload "\$CONFIG" --only steps-tracker-cron/);
   assert.doesNotMatch(wrapper, /pm2 reload steps-tracker/);
   const lines = wrapper.split("\n").map((line) => line.trim());
-  const httpReload = lines.findIndex((line) => line.endsWith("--only steps-tracker"));
+  const httpReload = lines.findIndex((line) =>
+    line.endsWith("--only steps-tracker --update-env"),
+  );
   const sentinelCheck = lines.findIndex((line) => line.includes("--verify-live-config"));
   const resolutionReload = lines.findIndex((line) => line.endsWith("--only steps-tracker-resolution"));
   const cronReload = lines.findIndex((line) => line.endsWith("--only steps-tracker-cron"));
